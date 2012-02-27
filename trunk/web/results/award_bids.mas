@@ -1,0 +1,247 @@
+<%args>
+	$basis
+	@ordered_comps
+	$tourn
+	$event
+	$debug => undef
+</%args>
+<%init> 
+
+	# Clear out old bids
+
+	Tab::Comp->set_sql(clear_bids => "update comp set bid = null where event =".$event->id);
+	Tab::Comp->sql_clear_bids->execute;
+
+	# Make sure no shows don't get bids;
+
+    if ($tourn->method->noshows_never_break == 1) {
+	
+		Tab::Comp->set_sql(
+				clear_noshows => "update comp set noshow = 0 where event =".$event->id);
+		Tab::Comp->sql_clear_noshows->execute;
+
+        Tab::Comp->set_sql( no_shows => "
+            update comp set noshow = 1 where exists (
+                select id from ballot where ballot.comp = comp.id
+                and ballot.noshow = 1) and event =".$event->id);
+        Tab::Comp->sql_no_shows->execute;
+    }
+
+	# Get an array of the full league members
+
+	my %is_member = ();
+
+	foreach my $mem (Tab::School->search_members_by_tourn($tourn->id)) {
+		$is_member{$mem->id}++;
+		&Tab::log("Recognizing full membership for ".$mem->name);
+	}
+
+	# Award bids to kids who deserve them in league events
+	
+	if ($tourn->method->bid_min_cume) {
+
+		my @bid_comps;
+
+		my %cumes = ();	
+
+		my @cumed_comps = Tab::Comp->search_prelim_cume_by_event($event->id);
+
+		foreach my $cumed (@cumed_comps) { 
+			$cumes{$cumed->id} = $cumed->prelim_cume;
+			system "$Tab::logger Kid ".$cumed->code." got a cume of ".$cumed->prelim_cume if $debug > 0;
+		}
+	
+		COMP:	
+		foreach my $oc (@ordered_comps) { 
+
+			push (@bid_comps, $oc) if $oc->noshow;
+			next if $oc->noshow;
+
+			unless ($is_member{$oc->school->id}) { 
+				system "$Tab::logger school ".$oc->school->name." is not a member" if $debug;
+				push (@bid_comps, $oc);
+				next COMP;
+			};
+			
+			$oc->bid(1) if $cumes{$oc->id} <= $tourn->method->bid_min_cume && $is_member{$oc->school->id};
+			$oc->update;
+
+			push (@bid_comps, $oc);
+
+		}		
+
+		@ordered_comps = @bid_comps;
+	}
+
+	if ($tourn->method->bid_min_round && $basis ne "prelim") { 
+
+		my @bid_comps;
+
+		foreach my $oc (@ordered_comps) { 
+			push (@bid_comps, $oc) if $oc->noshow;
+			next if $oc->noshow;
+
+			$oc->bid(1) 
+			if $oc->tb0 >= $tourn->method->bid_min_round && $is_member{$oc->school->id};
+
+			$oc->update;
+
+			push (@bid_comps, $oc);
+		}
+
+		@ordered_comps = @bid_comps;
+
+	}
+
+	if ($tourn->method->bid_min_round_type eq "elim" && $basis ne "prelim") {
+
+		my @bid_comps;
+		my @elims = $tourn->elims;
+		push (@elims, $tourn->finalists);
+		my %gotta_bid = ();
+
+		foreach my $el (@elims) { 
+			$gotta_bid{$el->id}++;
+		}	
+
+		foreach my $oc (@ordered_comps) {
+			$oc->bid(1) if $gotta_bid{$oc->school->id} && $is_member{$oc->school->id};
+			push (@bid_comps, $oc);
+		}
+
+		@ordered_comps = @bid_comps;
+
+
+	}
+
+	if ($tourn->method->bid_min_round_type eq "final" && $basis ne "prelim") { 
+		my @bid_comps;
+		my @finalists = $tourn->finalists;
+		my %gotta_bid = ();
+
+		foreach my $fin (@finalists) { 
+			$gotta_bid{$fin->id}++;
+		}	
+
+		foreach my $oc (@ordered_comps) {
+			$oc->bid(1) if $gotta_bid{$oc->school->id} && $is_member{$oc->school->id};;
+			push (@bid_comps, $oc);
+		}
+
+		@ordered_comps = @bid_comps;
+
+	}
+
+
+	if ($tourn->method->bid_min_number > 0) { 
+		my $cutoff_cume;
+		my @bid_comps;
+		my $count;
+		foreach my $oc (@ordered_comps) {
+			if ($count < $tourn->method->bid_min_number && $is_member{$oc->school->id}) { 
+				$oc->bid(1);
+				$oc->update;
+				$cutoff_cume = $oc->prelim_cume if $cutoff_cume < $oc->prelim_cume;
+			}
+			$count++;
+			push (@bid_comps, $oc);
+		}
+
+		if ($tourn->method->bid_round_to_rank) { 
+
+			foreach my $oc (@ordered_comps) { 
+				next if $oc->bid;
+				next if $oc->noshow;
+				next unless $is_member{$oc->school->id};
+
+				$oc->bid(1) if $oc->prelim_cume <= $cutoff_cume && $is_member{$oc->school->id};
+				$oc->update;
+			}		
+
+		}
+
+		@ordered_comps = @bid_comps;
+
+
+	}
+
+	if ($tourn->method->bid_percent) { 
+
+		my %cume_by_comp = ();
+
+		foreach my $comp (@ordered_comps) { 
+			$cume_by_comp{$comp->id} = $comp->prelim_cume;
+		}
+
+		my @bid_comps;
+
+		my $num_comps = scalar @ordered_comps;
+		my $percent = $tourn->method->bid_percent / 100;
+		my $cutoff = POSIX::ceil($num_comps * $percent); # Round up
+
+		my @finalists = $event->finalists;
+
+		my $highest_final_cume;
+
+		# This is sort of ugly but quite a bit faster than the old way.
+		# You'd be surprised.
+
+		#	This is to be sure that anyone tying a finalist gets a bid no
+		#	matter what.
+		foreach my $finalist (@finalists) { 
+			$highest_final_cume = $cume_by_comp{$finalist->id} 
+					if $cume_by_comp{$finalist->id} > $highest_final_cume;
+		}
+
+		if ($tourn->method->bid_round_to_rank) { 
+			$cutoff--; #because we count from zero!
+			my $cutoff_comp = $ordered_comps[$cutoff];
+			my $cutoff_cume = $cume_by_comp{$cutoff_comp->id};
+			$cutoff_cume = $highest_final_cume if $highest_final_cume > $cutoff_cume;
+
+			$event->qual_cume($cutoff_cume);
+			$event->update();
+
+			OC:
+			foreach my $oc (@ordered_comps) { 
+				push (@bid_comps, $oc) if $oc->noshow; 
+				next OC if $oc->noshow;
+
+			unless ($is_member{$oc->school->id}) {
+					push (@bid_comps, $oc);
+					next OC;
+			};
+
+				$oc->bid(1) if $oc->prelim_cume <= $cutoff_cume && $is_member{$oc->school->id};
+				$oc->update;
+				push (@bid_comps, $oc);
+			}		
+
+		} else {
+
+			my $count; 
+
+			foreach my $oc (@ordered_comps) { 	
+				push (@bid_comps, $oc) if $oc->noshow;
+				next if $oc->noshow;
+				
+				if ($count < $cutoff && $is_member{$oc->school->id} ) {
+						$oc->bid(1);
+						$oc->update;
+				}	
+				push (@bid_comps, $oc);
+				$count++;
+
+			}
+		
+		}
+
+		@ordered_comps = @bid_comps;
+
+	}
+
+	return @ordered_comps;
+
+</%init>
+
+

@@ -1,0 +1,296 @@
+<%args>
+	$league
+	$tourn
+	$event_id
+	$number_of_panels => undef
+	$manual_override => undef
+	$debug => undef
+	$return => undef
+</%args>
+<%init>
+
+#	Speech Paneling Method.  The ideas for this method and credit for showing
+#	and explaining it to me go to David Cutler.
+
+	use POSIX;
+	$number_of_panels = $manual_override if $manual_override;
+	my $event = Tab::Event->retrieve($event_id);
+
+	# Get rid of any existing panels in the event if we're repaneling prelims.
+	# The user has already been warned about this.	
+
+	system "$Tab::logger Deleting existing panels " if $debug;
+
+	my @existing_panels = $event->panels(type => "prelim");
+
+	foreach my $panel (@existing_panels) { 
+		$panel->delete;		
+	}
+
+	system "$Tab::logger Hashing up the school's competitors " if $debug;
+
+	my %comps_by_school = ();
+
+	my @schools = $event->schools;
+
+	foreach my $school (@schools) { 
+
+		my @school_comps = Tab::Comp->search( 
+				school => $school->id, 
+				event => $event->id, 
+				dropped => 0, 
+				waitlist => 0);
+
+		push (@{$comps_by_school{$school->id}}, @school_comps);
+
+	}
+
+	system "$Tab::logger Figuring out numbers of competitors and speakers" if $debug;
+
+	my $number_of_comps = scalar $event->comps( dropped => 0 );
+	
+	my $number_of_speakers = ceil($number_of_comps / $number_of_panels);
+	my $remainder = ($number_of_comps) - ($number_of_panels * ($number_of_speakers - 1) );
+
+	my @comps;
+
+	# Create an array of arrays of speakers, each array representing a
+	# speaker cohort.
+	my @original_cohort;
+
+	system "$Tab::logger Breaking the array into cohorts" if $debug;
+
+	COHORT:
+	foreach my $tick (1 .. $number_of_speakers) { 
+
+		my $room_left = $number_of_panels;
+
+		@schools = sort { (scalar @{$comps_by_school{$b->id}}) <=> (scalar @{$comps_by_school{$a->id}}) }
+			@schools;
+
+		my @cohort;
+	
+		foreach my $school (@schools) { 
+
+			next unless @{$comps_by_school{$school->id}};
+			next COHORT if $room_left < 1;
+
+			my $room_left = $room_left - scalar @cohort;
+
+			if (scalar @{$comps_by_school{$school->id}} > $number_of_panels) {
+
+				while ($room_left > 0) { 
+					push (@cohort, shift @{$comps_by_school{$school->id}});
+					$room_left--;
+				}
+			}
+
+			if (scalar @{$comps_by_school{$school->id}} <= $room_left) {
+		
+				push (@cohort, @{$comps_by_school{$school->id}});
+				$room_left = $room_left - scalar @{$comps_by_school{$school->id}};
+				@{$comps_by_school{$school->id}} = ();
+			}
+
+		}
+
+		push (@original_cohort, \@cohort);
+
+	} #end of foreach my school
+
+	#So now we have an array that will serve just fine for Round 1.
+	#However, for other rounds, we have to do more to juggle things
+	#around.
+
+	#We're going to use these later to smooth out the panels and iterate
+	#through looking for better matches than we can supply at first.
+
+	my %comps_by_panel = ();
+	my %panels_by_round = ();
+
+	#Get all prelim rounds
+
+
+	my @rounds = Tab::Round->search( event => $event->id, type => "prelim");
+
+	#Order the rounds since this ALWAYS breaks.
+
+	my $round_counter;
+
+	foreach my $round 
+	(sort {$a->timeslot->start->epoch <=> $b->timeslot->start->epoch} @rounds) { 
+		
+		system "$Tab::logger Shifting the cohorts for round ".$round->name if $debug;
+
+		my @speaker_cohorts;
+		$round_counter++;
+
+		my $counter;
+
+		foreach my $coref (@original_cohort) { 
+
+			$counter++;
+
+			my @cohort = @{$coref};
+
+			my $shift = ($round_counter - 1) * ($counter - 1);
+			$shift = 1 if $shift == $number_of_panels; 		 #UGLY HACK
+
+			my $buffer = scalar @cohort - $number_of_panels 
+							if scalar @cohort > $number_of_panels;
+
+			if (scalar @cohort == $shift && scalar @cohort > $number_of_panels) { 
+				$shift = ($round_counter - 1);
+			}
+
+			foreach (1 .. $shift) { 
+
+				my $move_it = shift @cohort;	# Take the person in the back.
+				push(@cohort, $move_it); # Move them to the front.
+
+			}	
+
+			push (@speaker_cohorts, \@cohort);
+
+		} #end of foreach coref 
+
+		my $order;
+		my $letter = "A";
+
+		my @panels;
+
+		foreach my $coref (@speaker_cohorts) { 
+
+			my @comps = @{$coref};
+			my $panel;
+
+			$order++;
+
+			foreach my $comp (@comps) { 
+				
+				if ($order > 1) { 
+
+					$panel = shift @panels;  #Take the next panel
+					push (@panels, $panel);  #Put it at the end of the line
+
+				} 
+
+				next unless eval{$comp->id};  #Move forward if this is just a placeholder
+				
+				if ($order <= 1) { 
+
+					# If this is the first time through, we need to create the
+					# panels before we can shove anyone into them, yesno?
+		
+					$panel = Tab::Panel->create({
+            			event       => $event->id,
+            			round       => $round->id,             
+						letter      => $letter,
+            			type        => "prelim",
+	        		});
+
+					$letter++;
+
+					push (@panels, $panel);
+					push (@{$panels_by_round{$round->id}}, $panel);
+
+				}	# end of if order is zero 
+
+
+				push (@{$comps_by_panel{$panel->id}}, $comp);
+
+			}
+
+		}
+
+		$round->preset(0);
+		$round->update;
+
+	} #end of foreach my $round
+
+	my %comp_hits = ();
+	my %comp_school_id = ();
+	my %comp_region_id = ();
+
+	system "$Tab::logger Tagging panels with hit information " if $debug;
+
+	foreach my $panel_id (keys %comps_by_panel) { 
+		
+		foreach my $c1 ( @{$comps_by_panel{$panel_id}} )  { 
+
+			$comp_school_id{$c1->id} = $c1->school->id;
+			$comp_region_id{$c1->id} = $c1->school->region->id if $league->region_based && $c1->school->region;
+
+			#Double reverse loop-fu!
+			foreach my $c2 ( @{$comps_by_panel{$panel_id}} )  { 
+
+				my $key = $c1->id."-".$c2->id;
+				$comp_hits{$key}++;
+
+			}
+		}
+	}
+
+	#In theory that should have worked and found a quasi-optimal solution.
+	#In practice there's not a chance in hell. 
+
+	foreach my $round (@rounds) { 
+
+		system "$Tab::logger Writing out round". $round->name if $debug;
+
+		foreach my $panel (@{$panels_by_round{$round->id}}) { 
+				
+			my $order = 1;
+
+			foreach my $comp (@{$comps_by_panel{$panel->id}}) { 
+		
+				my $ballot = Tab::Ballot->create({
+   					panel => $panel->id,
+   	   				comp => $comp->id,             
+					speakerorder => $order,
+					speechnumber => 1
+  				});
+
+				$order++;
+
+			}
+		
+		}
+
+	}
+
+	system "$Tab::logger First smoothing " if $debug;
+
+	$m->comp("smooth_panels.mas", 
+		event_id => $event->id, 
+		league => $league, 
+		tourn => $tourn, 
+		return_to => "me");
+
+	system "$Tab::logger Second smoothing " if $debug;
+
+	$m->comp("smooth_panels.mas", 
+		event_id => $event->id, 
+		league => $league, 
+		tourn => $tourn, 
+		return_to => "me");
+
+	system "$Tab::logger Rebalancing " if $debug;
+
+	foreach my $round (@rounds) { 
+
+		$m->comp("panel_balance.mhtml", 
+			round_id => $round->id, 
+			league => $league, 
+			tourn => $tourn, 
+			return_to => "Notrack") if $round->unbalanced;
+	}
+
+	system "$Tab::logger Rebalancing is done " if $debug;
+
+	return if $return;
+
+	my $err = $event->name ." has been panelled";
+	$m->redirect("$Tab::url_prefix/panel/schemat_show.mhtml?event_id=".$event->id."&err=$err");
+
+</%init>

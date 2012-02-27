@@ -1,0 +1,283 @@
+<%args>
+	$league
+	$tourn
+	$event_id
+	$number_of_panels => undef
+	$manual_override => undef
+	$return => undef
+</%args>
+<%init>
+
+#  This file will panel small events based on the older scoring system.
+#  It works best for smaller events where multiple hits are common and
+#  school hits are to be avoided. 
+
+	use POSIX;
+
+	$number_of_panels = $manual_override if $manual_override;
+
+    unless ($number_of_panels) {
+		my $err =  "You did not specify how many panels you want.  Please try again";
+		$m->redirect("/panel/panel_size_speech.mhtml?event_id=$event_id&err=$err");
+	}
+
+	my $event = Tab::Event->retrieve($event_id);
+
+	my @existing_panels = $event->panels(type => "prelim");
+
+	foreach my $panel (@existing_panels) { 
+		$panel->delete;		
+	}	
+
+	my @comps;
+	my @schools = $event->schools;
+
+	@schools = sort { $b->event_count($event->id) <=> $a->event_count($event->id) } @schools;
+	
+	foreach my $school (@schools) { 
+
+		my @school_comps = Tab::Comp->search( 
+				school => $school->id, 
+				event => $event->id, 
+				dropped => 0, 
+				waitlist => 0,
+				{order_by => "RAND()"} );
+
+		push (@comps, @school_comps);
+
+	}
+
+	@schools = $event->schools;
+	
+	@comps = Tab::Comp->search(
+		event => $event->id, 
+		waitlist => 0, 
+		dropped => 0, 
+		{order_by => "RAND()"});
+		
+	#Penalties for various kinds of hits
+	my $school_bump = "10";
+	my $second_bump = "1";
+	my $region_bump = "3" if $league->region_based;
+	$region_bump = "10" if $league->diocese_based;
+	my $panel_max_score = "500";
+	
+	#Determine what the highest number of competitors in a panel can be
+	my $num_comps = scalar @comps;
+	my $divided_comps = $num_comps / $number_of_panels if $number_of_panels;
+	my $max_comps = ceil($divided_comps);
+	my $min_comps = floor($divided_comps);
+	
+	# Find Prelims
+	my @rounds = Tab::Round->search( 
+		event => $event->id, 
+		type => "prelim");
+
+	#Initialize arrays and hashes
+	my @ballots; 
+	my %panel_comps = ();
+	my %panel_schools = ();
+	my %panel_regions = ();
+	my %competitor_panels = ();
+
+	#metrics. 
+	my %panel_hit_score = ();
+	my %panel_school_score =();
+	my %panel_region_score = ();
+	
+	foreach my $round (sort {$a->name <=> $b->name} @rounds) {
+
+		my @panels;
+		my $panel_selected_score;
+		#Create the panels for that round in the event
+		my $letter = 'A'; 
+
+		foreach ( 1 .. $number_of_panels) {
+	
+			my $new_panel = Tab::Panel->create({  
+				event		=> $event->id,
+				round		=> $round->id,
+				letter		=> $letter,
+				type 		=> "prelim",
+			});
+
+			push (@panels, $new_panel);
+		
+			$letter++;
+	
+		} #end of foreach panel
+
+		foreach my $comp ( @comps ) {
+
+			my $school = $comp->school;	
+			my $region = $comp->region if ($league->region_based);
+
+			my %panel_score = ();
+			my %loc_hit_score = ();
+			my %loc_school_score = ();
+			my %loc_region_score = ();
+
+			PANEL:   #Loop label to skip any full panels
+			foreach my $panel (@panels)   {
+		
+				# Skip the panel if it's full.
+				my $num_panel_comps = scalar @{$panel_comps{$panel->id}} if $panel_comps{$panel->id};
+				next PANEL if ($num_panel_comps == $max_comps);
+
+				# Screw over any panel that has already reached min_comps so we
+				# don't get all those panels with only four or three competitors in
+				# them.	
+
+				if ($num_panel_comps == $min_comps) {
+					$panel_score{$panel->id} = $panel_score{$panel->id} + $panel_max_score;
+				}
+
+				# Initialize the hash with my panelid; else I won't be considered
+				$panel_score{$panel->id} = 0;
+	
+        	    # This will prioritize zero-score empty panels over zero-score
+				# panels with kids in them.
+				$panel_score{$panel->id} += ($num_panel_comps / 100);
+	
+
+				unless ($league->diocese_based) { 
+
+					# First compare for school hits.  $panel->get('schools') is an
+					# array of school IDs already in the panel, which is created at
+					# the end of this whole mess. 
+
+					foreach my $schoolid (@{$panel_schools{$panel->id}}) {		
+
+						if ($schoolid eq $school->id) { 
+							$panel_score{$panel->id} = $panel_score{$panel->id} + $school_bump;
+							$loc_school_score{$panel->id}++;
+						}	
+					}	
+				}
+
+				if ($league->region_based && $region) {
+
+					# Compare for region hits.
+
+					foreach my $regionid (@{$panel_regions{$panel->id}}) {		
+						if ($regionid eq $region->id) { 
+							$panel_score{$panel->id} = $panel_score{$panel->id} + $region_bump;
+							$loc_region_score{$panel->id}++;
+						}	
+					}	
+				}
+			
+				if ($league->diocese_based && $region) {
+
+					# Compare for diocese hits.  
+
+					foreach my $dioceseid (@{$panel_regions{$panel->id}}) {		
+						if ($dioceseid eq $region->id) { 
+							$panel_score{$panel->id} = $panel_score{$panel->id} + $region_bump;
+							$loc_region_score{$panel->id}++;
+						}	
+					}	
+				}			
+	
+				#Next compare for second time hits against the first competitor
+
+			    foreach my $compareid (@{$panel_comps{$panel->id}}) {
+
+					#compareid is the list of competitors in a given potential panel.
+					my %comp_hit_twice = ();
+
+    				foreach my $comp_panel_id (@{$competitor_panels{$comp->id}}) {	
+	
+					# The comp_panel_id is each panel that the competitor in question has
+					# already been assigned to
+
+  	 		 			foreach my $bump (@{$panel_comps{$comp_panel_id}}) {
+							# $bump is a kid I've hit before. 
+
+   			 				if ($compareid == $bump) {
+   			   		   			$panel_score{$panel->id} = $panel_score{$panel->id} + $second_bump;
+   			   		   			$panel_score{$panel->id} = $panel_score{$panel->id} + $second_bump if
+									$comp_hit_twice{$bump};
+								$loc_hit_score{$panel->id}++;
+
+							}	
+
+							# This will raise the penalty further if I've hit him more than once before.
+							$comp_hit_twice{$bump}++;
+						}	
+					}	
+				}
+			
+			} #end of foreach panel.   my head hurts.  there must be a better way to do this.
+    	
+		    #Now assign the competitor to the lowest scoring panel in the round          
+	   		#Take the panel with the lowest score
+
+	    	my @sorted_keys = sort {$panel_score{$a} <=> $panel_score{$b}} keys %panel_score;
+
+	        #the panel_id that i want is the first item in @sorted_keys
+
+	   		my $best_panel_id = $sorted_keys[0];
+			my $this_panel_score = $panel_score{$best_panel_id};
+			$panel_selected_score = ($panel_selected_score + $panel_score{$best_panel_id});
+
+			$panel_hit_score{$best_panel_id} = $loc_hit_score{$best_panel_id};
+			$panel_school_score{$best_panel_id} = $loc_school_score{$best_panel_id};
+			$panel_region_score{$best_panel_id} = $loc_region_score{$best_panel_id};
+	
+			#hurrah!  The bastard is panelled and I need some vodka. 
+			#make a ballot for the kid
+		
+			my $ballot = Tab::Ballot->create({ 
+				speechnumber => 1,
+				panel => $best_panel_id,
+				comp => $comp->id
+			});
+
+			# Create hashes with scores for the various metrics we panel
+			# accordingly.  This is much faster than hitting the database every
+			# time, though it eats RAM like crazy.
+			
+			push (@{$panel_comps{$best_panel_id}}, $comp->id);
+			push (@{$panel_schools{$best_panel_id}}, $school->id);
+			push (@{$panel_regions{$best_panel_id}}, $region->id) if ($region);
+			push (@{$competitor_panels{$comp->id}}, $best_panel_id); 
+			
+		} #end of foreach competitor
+		
+		$round->score($panel_selected_score);
+		$round->preset(0);
+		$round->update;
+
+		# Smooth out the panels
+
+		my $result = $m->comp("/panel/smooth_panels.mas", 
+			round_id => $round->id, 
+			return_to => "Notrack", 
+			league => $league, 
+			tourn => $tourn);
+
+		$result = $m->comp("/panel/smooth_panels.mas", 
+			round_id => $round->id, 
+			return_to => "Notrack", 
+			league => $league, 
+			tourn => $tourn);
+
+		# Rebalance the panels
+   
+   		$result = $m->comp("/panel/panel_balance.mhtml",
+        	return_to => "Notrack",
+        	league => $league,
+       		round_id => $round->id,
+			tourn => $tourn) if $round->unbalanced;
+
+	} #end of foreach round    
+
+	# Phew.  I'm done.  
+
+	return if $return;
+
+	my $err = $event->name ." has been panelled";
+	$m->redirect("$Tab::url_prefix/panel/schemat_show.mhtml?event_id=".$event->id."&err=$err");
+
+</%init>

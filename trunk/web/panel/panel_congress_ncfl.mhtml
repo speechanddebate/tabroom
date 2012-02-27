@@ -1,0 +1,188 @@
+<%args>
+	$league
+	$tourn
+	$event_id
+	$number_of_panels => undef
+	$manual_override => undef
+	$debug => undef
+	$return => undef
+</%args>
+<%init>
+
+	use POSIX;
+
+	$number_of_panels = $manual_override if $manual_override;
+	my $event = Tab::Event->retrieve($event_id);
+
+	# Get rid of any existing panels in the event if we're repaneling prelims.
+	# The user has already been warned about this.	
+
+	system "$Tab::logger Deleting existing panels " if $debug;
+
+	my @existing_panels = $event->panels(type => "prelim");
+
+	foreach my $panel (@existing_panels) { 
+		$panel->delete;		
+	}
+
+	my @comps = sort {$a->code <=> $b->code} $event->comps( dropped => 0, waitlist => 0);
+
+    my $number_of_comps = scalar $event->comps( dropped => 0 );
+    my $number_of_speakers = ceil($number_of_comps / $number_of_panels);
+
+	# Create an array of arrays of speakers, each array representing a speaker
+	# cohort.
+
+	my @original_cohort;
+
+	system "$Tab::logger Breaking the array into cohorts" if $debug;
+
+	COHORT:
+	foreach my $tick (1 .. $number_of_speakers) { 
+
+		my $room_left = $number_of_panels;
+		my @cohort;
+
+		while ($room_left > 0) { 
+			push (@cohort, shift @comps);
+			$room_left--;
+		}
+
+		push (@original_cohort, \@cohort);
+
+	} 
+
+	#So now we have an array that will serve just fine for the NCFL
+	#through looking for better matches than we can supply at first.
+
+	my %comps_by_panel = ();
+	my %panels_by_round = ();
+
+	#Get all prelim rounds
+	my @rounds = Tab::Round->search( event => $event->id, type => "prelim");
+
+	#Order the rounds since this ALWAYS breaks.
+
+	my $round_counter;
+
+	foreach my $round 
+	(sort {$a->timeslot->start->epoch <=> $b->timeslot->start->epoch} @rounds) { 
+		
+		system "$Tab::logger Shifting the cohorts for round ".$round->name if $debug;
+
+		my @speaker_cohorts;
+		$round_counter = 1;
+
+		my $counter;
+
+		foreach my $coref (@original_cohort) { 
+
+			$counter++;
+
+			my @cohort = @{$coref};
+
+			my $shift = ($round_counter - 1) * ($counter - 1);
+			$shift = 1 if $shift == $number_of_panels; 		 #UGLY HACK
+
+			my $buffer = scalar @cohort - $number_of_panels 
+							if scalar @cohort > $number_of_panels;
+
+			if (scalar @cohort == $shift && scalar @cohort > $number_of_panels) { 
+				$shift = ($round_counter - 1);
+			}
+
+			foreach (1 .. $shift) { 
+
+				my $move_it = shift @cohort;	# Take the person in the back.
+				push(@cohort, $move_it); # Move them to the front.
+
+			}	
+
+			push (@speaker_cohorts, \@cohort);
+
+		} #end of foreach coref 
+
+		my $order;
+		my $letter = "A";
+
+		my @panels;
+
+		foreach my $coref (@speaker_cohorts) { 
+
+			my @comps = @{$coref};
+			my $panel;
+
+			$order++;
+
+			foreach my $comp (@comps) { 
+				
+				if ($order > 1) { 
+
+					$panel = shift @panels;  #Take the next panel
+					push (@panels, $panel);  #Put it at the end of the line
+
+				} 
+
+				next unless eval{$comp->id};  #Move forward if this is just a placeholder
+				
+				if ($order <= 1) { 
+
+					# If this is the first time through, we need to create the
+					# panels before we can shove anyone into them, yesno?
+		
+					$panel = Tab::Panel->create({
+            			event       => $event->id,
+            			round       => $round->id,             
+						letter      => $letter,
+            			type        => "prelim",
+	        		});
+
+					$letter++;
+
+					push (@panels, $panel);
+					push (@{$panels_by_round{$round->id}}, $panel);
+
+				}	# end of if order is zero 
+
+
+				push (@{$comps_by_panel{$panel->id}}, $comp);
+
+			}
+
+		}
+
+		$round->preset(0);
+		$round->update;
+
+	} 
+	
+	foreach my $round (@rounds) { 
+
+		foreach my $panel (@{$panels_by_round{$round->id}}) { 
+				
+			my $order = 1;
+
+			foreach my $comp (@{$comps_by_panel{$panel->id}}) { 
+		
+				my $ballot = Tab::Ballot->create({
+   					panel => $panel->id,
+   	   				comp => $comp->id,             
+					speakerorder => $order,
+					speechnumber => 1
+  				});
+
+				$order++;
+
+			}
+		
+		}
+
+	}
+
+	return if $return;
+
+	my $err = $event->name ." has been panelled";
+
+	$m->redirect("$Tab::url_prefix/panel/schemat_show.mhtml?event_id=".$event->id."&err=$err");
+
+</%init>
