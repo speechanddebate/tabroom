@@ -1,0 +1,243 @@
+<%args>
+	$league
+	$group_id
+	$clear_old => undef
+	$num_judges => 1
+	$timeslot
+	$session
+	$debug => undef
+	$return => undef
+</%args>
+<%init>
+
+	my $group = Tab::JudgeGroup->retrieve($group_id);
+
+	unless ($group && $group->id) { 
+		my $err = "Please select a judge group before trying to panel judges";
+		$m->redirect("judges.mhtml?err=$err");
+	}
+
+	my $tourn = $group->tournament;
+	my $no_same_school++ if $tourn->method->allow_school_panels != 1;
+
+# 	Get an array of the panels with a score that is the number of kids who
+# 	belong to the teams represented in the panel.  This is a rough idea of how
+# 	struck the panel is. 
+
+	system "$Tab::logger  Scoring panels" if $debug;
+
+	Tab::Panel->columns(TEMP => "temp_score");
+
+	if ($timeslot eq "all") { 
+
+		Tab::Panel->set_sql( scored_panels => "
+				select panel.*,count(distinct c2.id) as temp_score
+		        from panel,comp,ballot,comp as c2,event
+			    where comp.tournament = ".$tourn->id."
+			    and comp.id = ballot.comp
+			    and ballot.panel = panel.id
+				and event.id = panel.event
+				and event.judge_group = ".$group_id."	
+			    and c2.school = comp.school
+			    group by panel.id" )
+
+	}
+
+	if ($timeslot eq "prelims") { 
+
+        Tab::Panel->set_sql( scored_panels => "
+                select panel.*,count(distinct c2.id) as temp_score
+                from round,panel,comp,ballot,comp as c2,event
+                where round.type = \"prelim\"
+				and round.id = panel.round
+				and comp.tournament = ".$tourn->id."
+                and comp.id = ballot.comp
+				and event.id = panel.event
+				and event.judge_group = ".$group_id."	
+                and ballot.panel = panel.id
+                and c2.school = comp.school
+                group by panel.id" )
+	}	
+
+	if ($timeslot ne "all" && $timeslot ne "prelims") { 
+
+	        Tab::Panel->set_sql( scored_panels => "
+                select panel.*,count(distinct c2.id) as temp_score
+                from panel,comp,ballot,comp as c2,round,event
+				where panel.round = round.id
+				and round.timeslot = $timeslot
+                and comp.id = ballot.comp
+				and event.id = panel.event
+				and event.judge_group = ".$group_id."	
+                and ballot.panel = panel.id
+                and c2.school = comp.school
+                group by panel.id" )
+	}
+
+	my @panels = Tab::Panel->search_scored_panels;
+
+	my $timeslot_obj = Tab::Timeslot->retrieve($timeslot) if $timeslot ne "all" && $timeslot ne "prelims";
+
+	push (@panels, $timeslot_obj->presets) if $timeslot_obj;
+
+	system "$Tab::logger  Finished scoring panels" if $debug;
+
+	my @empty_panels;
+	my $panel_count = scalar (@panels);
+
+	system "$Tab::logger  Found $panel_count panels" if $debug;
+
+	# We do this periodically to prevent the browser from timing out.  This is
+	# known among most peoples, including ours, as an "ugly hack"
+
+	$m->flush_buffer;
+ 
+	# Clear old judging assignments from them 
+
+	if ($clear_old) { 
+		system "$Tab::logger  Clearing existing judge assignments from panels" if $debug;
+		@panels = $m->comp("panels_rmjudges.mas", panels => \@panels);
+		system "$Tab::logger  Existing assignments cleared" if $debug;
+	}
+
+	# Sort the panels in this array by score
+	@panels = sort {$b->temp_score <=> $a->temp_score} @panels;
+
+	PANEL:
+	foreach my $panel (@panels) { 
+
+		my $panel_needs = $num_judges;
+	
+		system "$Tab::logger  Adding judges to scored ".$panel->temp_score." round " if $debug;
+		system "$Tab::logger  ".$panel->round->name." panel ".$panel->event->abbr." ".$panel->letter if $debug;
+	
+		$m->flush_buffer;  # This will prevent browser timeouts.  UGLY!
+	
+		# Skip if the panel already has enough judges
+	
+		my $already_judges = $panel->judges;
+		next if ($already_judges >= $panel_needs);  
+	
+		system "$Tab::logger  Generating list of clean judges" if $debug;
+	
+		my @clean_judges = $m->comp("/funclib/clean_judges.mas", 
+			panel_id => $panel->id,
+			session => $session);
+	
+		system "$Tab::logger  Done.  Sorting them:" if $debug;
+	
+		push (@empty_panels, $panel) unless @clean_judges;
+		next PANEL unless (@clean_judges);
+	
+		@clean_judges = sort { $b->score <=> $a->score } @clean_judges;
+	
+		if ($panel->type ne "prelim") { 
+	
+			system "$Tab::logger  This is not a prelim.  Sorting by quality." if $debug;
+			@clean_judges = sort { $a->qual cmp $b->qual } @clean_judges;
+		}
+	
+		my %schools_used = ();  #This will become the region (diocese) if we're running NCFLs.
+		my %judges_used = ();  #This will become the region (diocese) if we're running NCFLs.
+	
+		system "$Tab::logger  Done.  Selecting a panel of $panel_needs:" if $debug;
+	
+		$already_judges++;
+	
+		foreach ( $already_judges .. $panel_needs) { 
+	
+			push (@empty_panels, $panel) unless @clean_judges;
+
+			next PANEL unless @clean_judges;
+	
+			my $chosen_judge;
+	
+			JUDGE:
+			foreach my $clean_judge (@clean_judges) { 
+
+				next JUDGE if $judges_used{$clean_judge->id};
+	
+				#Get the school ID to test if we've put one on this panel already.
+				my $chosen_school_id = $clean_judge->school->id;
+	
+				# If we're doing Nationals, need to avoid same region instead.
+				$chosen_school_id = $clean_judge->school->region->id if $league->diocese_based;
+	
+				# If that school or region is on this panel already, move to the next candidate.
+				next JUDGE if $schools_used{$chosen_school_id} && $no_same_school;
+	
+				# Otherwise, we've found our judge.
+				$chosen_judge = $clean_judge;
+				$judges_used{$chosen_judge->id}++;
+				$schools_used{$chosen_school_id}++;
+
+				last JUDGE;
+	
+			}
+	
+			push (@empty_panels, $panel) unless $chosen_judge;
+
+			next PANEL unless $chosen_judge;
+	
+			$m->comp("panel_judgeadd.mas", 
+				judge_id => $chosen_judge->id, 
+				panel_id => $panel->id, 
+				tourn => $tourn, 
+				debug => $debug,
+				shut_up => "uh yeah");
+	
+		}
+	}
+	
+	return if $return;
+	
+	# Even out the judging assignments
+	# $m->comp("judges_unscrew_over.mas", group_id => $group_id);
+	# And then, report on blank panels, if any. 
+	
+</%init>
+
+	<div id="leftbig">
+
+		<h2>Judge paneling complete</h2>
+
+			<p><% $panel_count %> sections</p>
+
+%			if (@empty_panels) { 
+			
+				<table cellpadding="5" cellspacing="1" width="50%">
+
+					<tr>
+
+						<td colspan="2">
+							Panels without a full compliment of judges:
+						</td>
+	
+					</tr>
+
+%					foreach my $empty (@empty_panels) { 
+
+						<tr>
+							<td>
+								<a class="redblock" href="/panel/panel_view.mhtml?panel_id=<% $empty->id  %>">Round <% $empty->round->name %> section <% $empty->letter %> of <% $empty->event->abbr %></a>
+							</td>
+						</tr>
+
+%					}
+
+				</table>
+
+%			} else { 
+
+				<p>
+					Success! All sections have a full compliment of judges
+				</P>
+
+%			}
+
+	</div>
+
+	<div id="rightsmall">
+
+
+	</div>

@@ -1,0 +1,164 @@
+<%args> 
+	$diocese_id
+	$group_id
+	$debug => undef
+</%args>
+<%perl>
+
+	use POSIX;
+
+	my $diocese = Tab::Region->retrieve($diocese_id);
+	my $group = Tab::JudgeGroup->retrieve($group_id);
+
+	my @judges = $diocese->judges($group->tournament);
+
+	my $judge_burden = 0;
+	my $burden_met = 0;
+
+	my @entries = $diocese->group_comps($group);
+	my $num_entries = scalar @entries;
+
+	if ($group->dio_min != 0) { 
+
+		# This is for an overall diocese burden; this is used for the tab room
+		# postings or for situations where you must bring a set of judges no
+		# matter how many kids you bring.
+
+		$judge_burden = $group->dio_min 
+			if (@entries || $group->tab_room);
+
+	} else { 
+
+		# Otherwise the judge burden is the number of entries divided by the
+		# judge burden, rounded up to the nearest 1.
+
+		$judge_burden = POSIX::ceil( $num_entries/$group->judge_per ) 
+			if $group->judge_per;
+	}
+
+	# Reduce by the number of free judges for the group, if any
+	$judge_burden = $judge_burden - $group->free; 
+
+	# Find groups that have alternate judges for me
+	my @my_judges	= $diocese->judges_by_group($group);
+
+	my @alt_judges  = $diocese->judges_by_alt_group($group);
+
+	my @free_alts   = $diocese->free_alts($group);
+
+	# My judges automatically count
+	$burden_met = scalar @my_judges;
+
+	# Alternate judges only count under certain circumstances
+
+	my $alts_counted;
+
+	foreach my $alt (@alt_judges,@free_alts) { 
+		next unless $alt->judge_group->ask_alts;
+		next if $alt->judge_group->alt_max <= $alts_counted;
+
+		$burden_met++;
+		$alts_counted++;
+	}
+
+	# POOLS.  Allow a school to bring only the right number for a pool, or the
+	# right number minus 1 as long as they've met their other committments, so
+	# that odd-quota dioceses don't get mistakenly screwed over.
+
+	my $pool_warning;
+
+	my @pools = Tab::Pool->search( prelim => 1, tournament => $group->tournament->id );
+
+	if (@pools && $group->track_by_pools ) {
+	
+		my %pool_obligation = ();
+		my $under_total;
+		my $total_pool_quota;
+
+		foreach my $pool (@pools) { 
+		
+			my $judges_in_pool;
+
+			foreach my $judge (@judges) { 
+				$judges_in_pool++  if ($judge->prelim_pool && $judge->prelim_pool->id == $pool->id);
+			}
+
+			my @pool_kids = Tab::Comp->search_by_region_and_pool($diocese->id,$pool->id);
+			my $quota = ceil(scalar @pool_kids/$group->judge_per) if $group->judge_per;
+
+			$total_pool_quota += $quota;
+			$quota = $quota - $judges_in_pool;
+
+			if ($quota && $alts_counted) { 
+
+				if ($quota >= $alts_counted) { 
+					$quota -= $alts_counted;
+					$alts_counted = 0;
+				} else { 
+					$alts_counted -= $quota;
+					$quota = 0;
+				}
+
+			}
+
+			$pool_obligation{$pool->id} = $quota if $quota > 0;
+			$under_total = $under_total + $quota if $quota > 0;
+
+		} 
+
+		# For dioceses with uneven obligations, we don't penalize them for half a judge :)
+		unless (
+			($total_pool_quota > $judge_burden) 
+			&& ($under_total == 1 )
+			&& ($judge_burden - $burden_met < 1)) {  
+
+
+			my $first;
+			foreach my $pool (@pools) { 
+				next unless $pool_obligation{$pool->id};
+				if ($first) { $pool_warning .= "<br>"; }
+				$pool_warning .= " ".$pool_obligation{$pool->id}." under in pool ".$pool->name;
+				$first++;
+			}
+
+		}
+	}
+
+	my $elim_warning;
+	my $first;
+
+	my $elim_round_limit = $judge_burden * $group->max_pool_burden if $group->max_pool_burden > 0;
+	my $total_elims;
+
+	foreach my $pool ($group->elim_pools) { 
+
+		my @pool_kids = Tab::Comp->search_by_region_and_pool($diocese->id,$pool->id);
+		my $quota = ceil(scalar @pool_kids/$group->judge_per) if $group->judge_per;
+
+		system "$Tab::logger Pool ".$pool->name." has kids ".scalar @pool_kids if $debug;
+
+		my $pool_burden = POSIX::ceil($quota * $pool->percent * .01);
+		my @pool_judges = $pool->dio_judges($diocese);
+		my $pool_off = $pool_burden - scalar @pool_judges;
+
+		$total_elims += scalar @pool_judges;
+
+		system "$Tab::logger Pool ".$pool->name." has burden $pool_burden" if $debug;
+		system "$Tab::logger Pool ".$pool->name." has ".scalar @pool_judges." judges in it" if $debug;
+		system "$Tab::logger Pool ".$pool->name." is off by $pool_off" if $debug;
+
+		next if ($pool_off < 1);
+
+		if ($first) { $elim_warning .= "<br>"; }
+		$elim_warning .= " ".$pool_off." under in  ".$pool->name;
+		$first++;
+
+	}
+
+	system "$Tab::logger $total_elims Total elims judged.  Max limit is $elim_round_limit" if $debug == 1;
+
+	undef $elim_warning if $elim_round_limit && $total_elims >= $elim_round_limit;
+
+	return ($judge_burden, $burden_met, $pool_warning, $elim_warning);
+
+</%perl>
