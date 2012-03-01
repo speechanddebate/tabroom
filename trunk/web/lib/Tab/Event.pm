@@ -13,7 +13,7 @@ Tab::Event->columns(Others =>  qw/
 				supp
 				cap 
 				school_cap 
-				blurb 
+				text 
 				deadline 
 				fee 
 				ballot 

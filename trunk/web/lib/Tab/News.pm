@@ -2,7 +2,7 @@ package Tab::News;
 use base 'Tab::DBI';
 Tab::News->table('news');
 Tab::News->columns(All => qw/id timestamp title posted league edited_by author pinned
-							blurb file link active main_site sitewide edited_on tournament 
+							text file link active main_site sitewide edited_on tournament 
 							display_order special/);
 
 Tab::News->has_a(author => 'Tab::Account');
