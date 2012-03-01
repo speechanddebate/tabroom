@@ -5,11 +5,7 @@ my $latex_path_prefix="/usr/bin";
 #my $latex_path_prefix="/opt/local/bin";
 
 # FQDN of your server.  Do NOT include http:// 
-#my $hostname = "tabdev";
-my $hostname = "tab.tabroom.com";
-#my $hostname = "www.tabroom.com";
-#my $hostname = "sandbox.tabroom.com";
-#my $hostname = "tabpro";
+my $hostname = "itab.tabroom.com";
 
 #URL Prefix of the server
 $url_prefix = "https://$hostname" if $hostname eq "www.tabroom.com";
@@ -26,13 +22,13 @@ $admin_email = "help\@tabroom.com";
 $smtp_server ="localhost";
 
 #Database name
-$dbname = "tab";
+$dbname = "itab";
 
 #Database host.  "localhost" will use the mysql local socket, not the network
 $dbhost = "localhost";
 
 #Database username
-$dbuser = "tab";
+$dbuser = "itab";
 
 #Database password
 $dbpass = "foo1uKahs7aecu%See2xa0ieX";
