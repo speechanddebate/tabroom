@@ -34,7 +34,7 @@ $dbuser = "itab";
 $dbpass = "foo1uKahs7aecu%See2xa0ieX";
 
 #Component root
-$file_root = '/www/tab';
+$file_root = '/www/itab/web/';
 
 ######  You shouldn't have to change anything below this line  ##########
 
