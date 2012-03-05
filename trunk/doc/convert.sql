@@ -59,6 +59,3 @@ alter table tiebreak drop type;
 alter table tiebreak drop method;
 alter table tiebreak drop covers;
 
-
-
-
