@@ -535,3 +535,55 @@ Tab::Judge->set_sql(housed => "select distinct judge.*
 									where judge.school = ? 
 									and judge.tournament = housing.tournament
 									and judge.id = housing.judge");
+
+sub setting {
+
+	my ($self, $tag, $value, $text) = @_;
+
+	my @existing = Tab::JudgeSetting->search(  
+		judge => $self->id,
+		tag => $tag
+	);
+
+    if ($value &! $value == 0) {
+
+		if (@existing) {
+
+			my $exists = shift @existing;
+			$exists->value($value);
+			$exists->text($text);
+			$exists->update;
+
+			foreach my $other (@existing) { 
+				$other->delete;
+			}
+
+			return;
+
+		} else {
+
+			Tab::JudgeSetting->create({
+				judge => $self->id,
+				tag => $tag,
+				value => $value,
+				text => $text
+			});
+
+		}
+
+	} else {
+
+		return unless @existing;
+
+		my $setting = shift @existing;
+
+		foreach my $other (@existing) { 
+			$other->delete;
+		}
+
+		return $setting->text if $setting->value eq "text";
+		return $setting->value;
+
+	}
+
+}
