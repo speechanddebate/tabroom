@@ -98,266 +98,55 @@ Tab::Tournament->set_sql(results_by_chapter => "
 		order by tournament.end DESC
 	");
 
-sub pools { 
-	my $self = shift;
-	return Tab::Pool->search_by_tournament($self->id);
-}
+sub setting {
 
-sub room_pools { 
-	my $self = shift; 
-	return Tab::RoomPool->search_by_tourn($self->id);
-}
+	my ($self, $tag, $value, $text) = @_;
 
-sub chapters { 
-	my $self = shift;
-	return Tab::Chapter->search_by_tourn($self->id);
-}
+	my @existing = Tab::TournSetting->search(  
+		tourn => $self->id,
+		tag => $tag
+	);
 
-sub begins {
-	my $self = shift;
-	my $ts = $self->start;
-	$ts->set_time_zone($self->league->timezone);
-	return $ts;
-}
+	if ($value &! $value == 0) { 
 
-sub ends {
-	my $self = shift;
-	my $ts = $self->end;
-	$ts->set_time_zone($self->league->timezone);
-	return $ts;
-}
+		if (@existing) {
 
-sub disqualified {
-	my $self = shift;
-	return Tab::Comp->search_disqualified($self->id);
-}
+			my $exists = shift @existing;
+			$exists->value($value);
+			$exists->text($text);
+			$exists->update;
 
-sub sites { 
-	my $self = shift; 
-	my @sites = Tab::Site->search_by_tournament($self->id);
-	return @sites;
-}
+			foreach my $other (@existing) { 
+				$other->delete;
+			}
 
-sub rooms {
-	my $self = shift;
-	return Tab::Room->search_tourn_rooms($self->id);
-}
+			return;
 
-sub tabbers {
-    my $self = shift;
-    my @tabbers;
-    push (@tabbers, $self->director);
-    push (@tabbers, Tab::Account->search_tabbers($self->id));
-	return @tabbers;
-}
+		} else {
 
+			Tab::JudgeGroupSetting->create({
+				judge_group => $self->id,
+				tag => $tag,
+				value => $value,
+				text => $text
+			});
 
-sub finalists { 
-	my $self = shift;
-	return Tab::Comp->search_finals_by_tourn($self->id);
-}
+		}
 
+	} else {
 
-sub elims { 
-	my $self = shift;
-	return Tab::Comp->search_elims_by_tourn($self->id);
-}
+		return unless @existing;
 
-sub elim_panels { 
-	my $self = shift;
-	return Tab::Panel->search_elims_by_tourn($self->id);
-}
+		my $setting = shift @existing;
 
-sub panels_with_judgecount { 
-	my $self = shift;
-	return Tab::Panel->search_judgecount($self->id);
-}
+		foreach my $other (@existing) { 
+			$other->delete;
+		}
 
-sub panels_without_judges { 
-	my $self = shift;
-	return Tab::Panel->search_by_nojudge($self->id);
-}
-
-sub panels_without_rooms { 
-	my $self = shift;
-	return Tab::Panel->search_by_noroom($self->id);
-}
-
-sub panels { 
-	my $self = shift;
-	return Tab::Panel->search_by_tourn($self->id);
-}
-
-sub double_booked_judges { 
-	my $self = shift;
-	return Tab::Judge->search_double_booked($self->id);
-}
-
-sub ballots { 
-	my $self = shift;
-	return Tab::Ballot->search_by_tournament($self->id);
-}
-
-sub regions {
-	my $self = shift;
-	return Tab::Region->search_by_tournament($self->id);
-}
-
-sub rounds { 
-	my $self = shift;
-	return Tab::Round->search_by_tournament($self->id);
-}
-
-sub published_rounds { 
-	my $self = shift;
-	return Tab::Round->search_published_by_tournament($self->id);
-}
-
-sub listed_rounds { 
-	my $self = shift;
-	return Tab::Round->search_listed_by_tournament($self->id);
-}
-
-sub field_reports { 
-	my $self = shift;
-	return Tab::Event->search_reported_by_tournament($self->id);
-}
-
-sub live_updates { 
-	my $self = shift;
-	return Tab::Event->search_liveupdates_by_tournament($self->id);
-}
-
-sub prelims { 
-	my $self = shift;
-	return Tab::Round->search_prelims_by_tournament($self->id);
-}
-
-
-sub min_round { 
-	my $self = shift; 
-		
-	Tab::Tournament->set_sql( min_round_name => "select min(round.name)
-							from round,event
-							where round.event = event.id
-							and event.tournament = ".$self->id);
-
-	return	Tab::Tournament->sql_min_round_name->select_val;
-}
-
-sub max_round { 
-	my $self = shift; 
-		
-	Tab::Tournament->set_sql( max_round_name => "select max(round.name)
-							from round,event
-							where round.event = event.id
-							and event.tournament = ".$self->id);
-
-	return	Tab::Tournament->sql_max_round_name->select_val;
-}
-	
-
-sub max_panel_letter { 
-	my $self = shift; 
-		
-	Tab::Tournament->set_sql( max_panel_letter => "select max(panel.letter)
-							from panel,event 
-							where panel.event = event.id
-							and event.tournament = ".$self->id);
-
-	return	Tab::Tournament->sql_max_panel_letter->select_val;
-}
-	
-sub min_panel_letter { 
-	my $self = shift; 
-		
-	Tab::Tournament->set_sql( min_panel_letter => "select min(panel.letter)
-							from panel,event 
-							where panel.event = event.id
-							and event.tournament = ".$self->id);
-
-	return	Tab::Tournament->sql_min_panel_letter->select_val;
-}
-
-sub contacts { 
-	my $self = shift;
-	return Tab::Account->search_by_tournament( $self->id);
-}
-
-sub students { 
-	my $self = shift;
-	my @students =  Tab::Student->search_by_tournament( $self->id );
-	return @students;
-}
-
-sub comp_with_code {
-	my ($self, $code) = @_;	
-	my @comps = Tab::Comp->search_by_tourn_and_code( $self->id, $code);
-
-	my $comp = shift @comps if @comps;
-	return $comp;
-}
-
-sub days { 
-	
-	my $self = shift;
-    my $league  = $self->league;
-    my $start   = $self->start;
-    my $end     = $self->end;
-
-    $start->set_time_zone($league->timezone);
-    $end->set_time_zone($league->timezone);
-
-    $end->truncate(to   => 'day');
-    $start->truncate(to => 'day');
-
-    my @self_days;
-    unless ($start == $end) {
-        my $holder = $start->clone;
-        until ($holder > $end) {
-            push (@self_days, $holder->clone);
-            $holder->add( days => 1);
-        }
-    } else { 
-
-		push (@self_days, $start);
+		return $setting->text if $setting->value eq "text";
+		return $setting->value;
 
 	}
 
-	return @self_days;
 }
 
-sub unassigned_comps { 
-	my $self = shift;
-	return Tab::Comp->search_unballoted_comps_by_tourn( $self->id );
-}
-
-sub speech_schools { 
-	my $self = shift;
-	return Tab::School->search_speech_schools_by_tourn($self->id);
-}
-
-sub speech_comps { 
-	my $self = shift;
-	return Tab::Comp->search_speech_comps_by_tourn($self->id);
-}
-
-sub speech_ballots { 
-	my $self = shift;
-	return Tab::Ballot->search_speech_ballots_by_tourn($self->id);
-}
-
-sub debate_and_congress_schools { 
-	my $self = shift;
-	return Tab::School->search_debate_congress_schools_by_tourn($self->id);
-}
-
-sub debate_and_congress_comps { 
-	my $self = shift;
-	return Tab::Comp->search_debate_congress_comps_by_tourn($self->id);
-}
-
-sub timeslots_with_panels { 
-	my $self = shift;
-	return Tab::Timeslot->search_with_panels_by_tourn($self->id);
-}

@@ -13,7 +13,7 @@ Tab::Event->columns(Others =>  qw/
 				supp
 				cap 
 				school_cap 
-				text 
+				blurb 
 				deadline 
 				fee 
 				ballot 
@@ -356,3 +356,54 @@ Tab::Event->set_sql(by_reserved => " select distinct event.id from event, room_p
 			and room_pool.event = event.id
 			and room_pool.room = ?  ");
 
+sub setting {
+
+	my ($self, $tag, $value, $text) = @_;
+
+	my @existing = Tab::EventSetting->search(  
+		event => $self->id,
+		tag => $tag
+	);
+
+    if ($value &! $value == 0) {
+
+		if (@existing) {
+
+			my $exists = shift @existing;
+			$exists->value($value);
+			$exists->text($text);
+			$exists->update;
+
+			foreach my $other (@existing) { 
+				$other->delete;
+			}
+
+			return;
+
+		} else {
+
+			Tab::EventSetting->create({
+				event => $self->id,
+				tag => $tag,
+				value => $value,
+				text => $text
+			});
+
+		}
+
+	} else {
+
+		return unless @existing;
+
+		my $setting = shift @existing;
+
+		foreach my $other (@existing) { 
+			$other->delete;
+		}
+
+		return $setting->text if $setting->value eq "text";
+		return $setting->value;
+
+	}
+
+}
