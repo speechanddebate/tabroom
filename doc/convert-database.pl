@@ -1,6 +1,6 @@
 #!/opt/local/bin/perl
 
-use lib ("/www/itab/web/lib");
+use lib "/www/itab/web/lib";
 use lib "/opt/local/lib/perl5";
 use lib "/opt/local/lib/perl5/vendor_perl/5.12.3/darwin-multi-2level";
 
@@ -87,7 +87,7 @@ my @tourns = Tab::Tournament->retrieve_all;
 
 print "Done.  Loading all methods\n";
 
-my @methods = Tab::Tournament->retrieve_all;
+my @methods = Tab::Method->retrieve_all;
 
 print "Done.  Hashing the methods by id\n";
 
@@ -103,6 +103,8 @@ foreach my $tourn (@tourns) {
 
 	print "Converting ".$tourn->id." ".$tourn->name." ".$tourn->start->year."\n";
 
+	last;
+
 	my $method = $methods_by_id{$tourn->method->id} if $tourn->method;
 
 	if ($method) { 
@@ -111,7 +113,6 @@ foreach my $tourn (@tourns) {
 		$tourn->setting("truncate_to_smallest", $method->truncate_to_smallest);
 		$tourn->setting("drop_worst_rank", $method->drop_worst_rank);
 		$tourn->setting("drop_best_rank", $method->drop_best_rank);
-		$tourn->setting("snake_elims", $method->snake_elims);
 		$tourn->setting("honorable_mentions", $method->honorable_mentions);
 		$tourn->setting("mfl_flex_finals", $method->mfl_flex_finals);
 		$tourn->setting("noshows_never_break", $method->noshows_never_break);
@@ -123,10 +124,6 @@ foreach my $tourn (@tourns) {
 		$tourn->setting("double_entry", $method->double_entry);
 		$tourn->setting("judge_event_twice", $method->judge_event_twice);
 		$tourn->setting("judge_quality_system", $method->judge_quality_system);
-		$tourn->setting("school_bump_penalty", $method->school_bump_penalty);
-		$tourn->setting("region_bump_penalty", $method->region_bump_penalty);
-		$tourn->setting("second_bump_penalty", $method->second_bump_penalty);
-		$tourn->setting("full_panel_penalty", $method->full_panel_penalty);
 		$tourn->setting("min_panel_size", $method->min_panel_size);
 		$tourn->setting("default_panel_size", $method->default_panel_size);
 		$tourn->setting("max_panel_size", $method->max_panel_size);
@@ -135,8 +132,7 @@ foreach my $tourn (@tourns) {
 		$tourn->setting("max_chamber_size", $method->max_chamber_size);
 		$tourn->setting("default_qualification", $method->default_qualification);
 		$tourn->setting("sweep_per_event", $method->sweep_per_event);
-		$tourn->setting("large_schools_first", $method->large_schools_first);
-				$tourn->setting("allow_school_panels", $method->allow_school_panels);
+		$tourn->setting("allow_school_panels", $method->allow_school_panels);
 		$tourn->setting("add_fine", $method->add_fine);
 		$tourn->setting("drop_fine", $method->drop_fine);
 		$tourn->setting("sweep_count_elims", $method->sweep_count_elims);
@@ -150,9 +146,8 @@ foreach my $tourn (@tourns) {
 		$tourn->setting("bid_percent", $method->bid_percent);
 		$tourn->setting("bid_round_to_rank", $method->bid_round_to_rank);
 		$tourn->setting("bid_min_round", $method->bid_min_round);
-		$tourn->setting("circuit", $method->circuit);
 		$tourn->setting("housing", $method->housing);
-		$tourn->setting("housing_message", $method->housing_message);
+		$tourn->setting("housing_message", "text", $method->housing_message);
 		$tourn->setting("points_per_finalist", $method->points_per_finalist);
 		$tourn->setting("bid_min_round_type", $method->bid_min_round_type);
 		$tourn->setting("points_per_elim", $method->points_per_elim);
@@ -160,12 +155,12 @@ foreach my $tourn (@tourns) {
 		$tourn->setting("bid_min_number", $method->bid_min_number);
 		$tourn->setting("elim_method", $method->elim_method);
 		$tourn->setting("allow_neutral_judges", $method->allow_neutral_judges);
-		$tourn->setting("ask_qualifying_tourn", $method->ask_qualifying_tourn);
+		$tourn->setting("ask_qualifying_tourn", $method->ask_qualifying_tournament);
 		$tourn->setting("elim_method_basis", $method->elim_method_basis);
 		$tourn->setting("timestamp", $method->timestamp);
 		$tourn->setting("judge_cells", $method->judge_cells);
 		$tourn->setting("track_first_year", $method->track_first_year);
-				$tourn->setting("publish_schools", $method->publish_schools);
+		$tourn->setting("publish_schools", $method->publish_schools);
 		$tourn->setting("incremental_school_codes", $method->incremental_school_codes);
 		$tourn->setting("first_school_code", $method->first_school_code);
 		$tourn->setting("schemat_school_code", $method->schemat_school_code);
@@ -216,6 +211,171 @@ foreach my $tourn (@tourns) {
 	$tourn->setting("vlabel", $tourn->vlabel);
 	$tourn->setting("hlabel", $tourn->hlabel);
 
+}
+
+print "Done.  Retrieving all judges:\n";
+my @judges;
+#my @judges = Tab::Judge->retrieve_all;
+
+print "Done. Converting judges to the new settings\n";
+
+foreach my $judge (@judges) { 
+
+	$judge->setting("special", $judge->special);
+	$judge->setting("notes", $judge->notes);
+	$judge->setting("neutral", $judge->neutral);
+	$judge->setting("cfl_tab_first", $judge->cfl_tab_first);
+	$judge->setting("cfl_tab_second", $judge->cfl_tab_second);
+	$judge->setting("cfl_tab_third", $judge->cfl_tab_third);
+	$judge->setting("alt_group", $judge->alt_group);
+	$judge->setting("spare_pool", $judge->spare_pool);
+	$judge->setting("prelim_pool", $judge->prelim_pool);
+	$judge->setting("first_year", $judge->first_year);
+	$judge->setting("novice", $judge->novice);
 
 }
 
+print "Done.  Retrieving all judge groups:\n";
+my @judge_groups = Tab::JudgeGroup->retrieve_all;
+
+print "Done.  Converting judge groups to the new settings\n";
+
+foreach my $group (@judge_groups) { 
+
+	$group->setting("free", $group->free);
+	$group->setting("alt_max", $group->alt_max);
+	$group->setting("dio_min", $group->dio_min);
+	$group->setting("ask_alts", $group->ask_alts);
+	$group->setting("missing_judge_fee", $group->missing_judge_fee);
+	$group->setting("uncovered_entry_fee", $group->uncovered_entry_fee);
+	$group->setting("fee_missing", $group->fee_missing);
+	$group->setting("tab_room", $group->tab_room);
+	$group->setting("track_judge_hires", $group->track_judge_hires);
+	$group->setting("hired_pool", $group->hired_pool);
+	$group->setting("hired_fee", $group->hired_fee);
+	$group->setting("track_by_pools", $group->track_by_pools);
+	$group->setting("timestamp", $group->timestamp);
+	$group->setting("ask_paradigm", $group->ask_paradigm);
+	$group->setting("elim_special", $group->elim_special);
+	$group->setting("school_strikes", $group->school_strikes);
+	$group->setting("strike_reg_opens", $group->strike_reg_opens);
+	$group->setting("strike_reg_closes", $group->strike_reg_closes);
+	$group->setting("min_burden", $group->min_burden);
+	$group->setting("ratings_need_paradigms", $group->ratings_need_paradigms);
+	$group->setting("strikes_need_paradigms", $group->strikes_need_paradigms);
+	$group->setting("comp_strikes", $group->comp_strikes);
+	$group->setting("coach_ratings", $group->coach_ratings);
+	$group->setting("school_ratings", $group->school_ratings);
+	$group->setting("comp_ratings", $group->comp_ratings);
+	$group->setting("max_burden", $group->max_burden);
+	$group->setting("pub_assigns", $group->pub_assigns);
+	$group->setting("obligation_before_strikes", $group->obligation_before_strikes);
+	$group->setting("conflicts", $group->conflicts);
+	$group->setting("live_updates", $group->live_updates);
+
+}
+
+print "Done.  Retrieving all circuits:\n";
+my @circuits = Tab::League->retrieve_all;
+
+print "Done.  Converting circuits to the new settings\n";
+
+foreach my $circuit (@circuits) { 
+
+	$circuit->setting("url", $circuit->url);
+	$circuit->setting("public_email", $circuit->public_email);
+	$circuit->setting("short_name", $circuit->short_name);
+	$circuit->setting("dues_to", $circuit->dues_to);
+	$circuit->setting("timezone", $circuit->timezone);
+	$circuit->setting("dues_amount", $circuit->dues_amount);
+	$circuit->setting("hosted_site", $circuit->hosted_site);
+	$circuit->setting("apda_seeds", $circuit->apda_seeds);
+	$circuit->setting("logo_file", $circuit->logo_file);
+	$circuit->setting("site_theme", $circuit->site_theme);
+	$circuit->setting("public_results", $circuit->public_results);
+	$circuit->setting("header_file", $circuit->header_file);
+	$circuit->setting("invoice_message", "text", $circuit->invoice_message);
+	$circuit->setting("timestamp", $circuit->timestamp);
+	$circuit->setting("track_bids", $circuit->track_bids);
+	$circuit->setting("last_change", $circuit->last_change);
+	$circuit->setting("approved", $circuit->approved);
+	$circuit->setting("tourn_only", $circuit->tourn_only);
+	$circuit->setting("full_members", $circuit->full_members);
+
+}
+
+
+print "Done.  Retrieving all events:\n";
+my @events = Tab::Event->retrieve_all;
+
+print "Done.  Converting events to the new settings\n";
+
+foreach my $event (@events) { 
+
+	$event->setting("alumni", $event->alumni);
+	$event->setting("allow_judge_own", $event->allow_judge_own);
+	$event->setting("ballot", $event->ballot);
+	$event->setting("omit_sweeps", $event->omit_sweeps);
+	$event->setting("no_judge_burden", $event->no_judge_burden);
+	$event->setting("ballot_type", $event->ballot_type);
+	$event->setting("deadline", $event->deadline);
+	$event->setting("ask_for_titles", $event->ask_for_titles);
+	$event->setting("supp", $event->supp);
+	$event->setting("no_codes", $event->no_codes);
+	$event->setting("initial_code", $event->initial_codes);
+	$event->setting("reg_codes", $event->reg_codes);
+	$event->setting("field_report", $event->field_report);
+	$event->setting("live_updates", $event->live_updates);
+	$event->setting("waitlist_all", $event->waitlist_all);
+	$event->setting("judge_group", $event->judge_group);
+	$event->setting("bids", $event->bids);
+	$event->setting("waitlist", $event->waitlist);
+	$event->setting("cap", $event->cap);
+	$event->setting("rating_subset", $event->qual_subset);
+	$event->setting("school_cap", $event->school_cap);
+	$event->setting("min_entry", $event->min_entry);
+	$event->setting("max_entry", $event->max_entry);
+	$event->setting("description", "text", $event->blurb);
+
+}
+
+print "Retrieving all competitors to remove the stupid partner student mistake:\n";
+my @comps = Tab::Comp->retrieve_all;
+
+print "Converting the tables to a true many to many comp student relation:\n";
+
+foreach my $comp (@comps) { 
+
+	if ($comp->student && $comp->student->id) { 
+
+		Tab::TeamMember->create({
+			student => $comp->student->id,
+			comp => $comp->id
+		});
+
+	}
+
+	if ($comp->partner && $comp->partner->id) { 
+
+		Tab::TeamMember->create({
+			student => $comp->partner->id,
+			comp => $comp->id
+		});
+
+	}
+
+}
+
+print "Retrieving all chapters to update coach credit records:\n";
+
+my @coaches = Tab::Coaches->retrieve_all;
+
+print "Updating coach records into chapter text fields:\n";
+
+foreach my $coach (@coaches) { 
+	my $chapter = $coach->chapter;
+	$chapter->coaches( $coach->chapter->coaches." ".$coach->name );
+	$chapter->update;
+}
+
+print "Finis!\n";
