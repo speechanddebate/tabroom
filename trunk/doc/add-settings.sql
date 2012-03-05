@@ -68,6 +68,24 @@ CREATE TABLE `circuit_setting` (
 
 alter table	chapter add coaches varchar(255);
 
+CREATE TABLE `tourn_circuit` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `tourn` int(11) NOT NULL DEFAULT '0',
+    `circuit` int(11) NOT NULL DEFAULT '0',
+    `key` varchar(15) NOT NULL DEFAULT '',
+    `value` varchar(127) NOT NULL DEFAULT '',
+    `text` text,
+    `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `tourn` (`tourn`),
+    KEY `circuit` (`circuit`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+
+alter table tiebreak add tourn int;
+create index tourn on tiebreak(tourn);
+
+
+
 
 
 
