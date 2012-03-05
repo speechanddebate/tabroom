@@ -1,4 +1,4 @@
-#!/opt/local/bin/perl
+#!/usr/bin/perl
 
 use lib "/www/itab/web/lib";
 use lib "/opt/local/lib/perl5";
@@ -52,6 +52,7 @@ use Tab::PoolGroup;
 use Tab::PoolJudge;
 use Tab::Purchase;
 use Tab::Qual;
+use Tab::Qualifier;
 use Tab::QualSubset;
 use Tab::Rating;
 use Tab::Region;
@@ -74,6 +75,7 @@ use Tab::TiebreakSet;
 use Tab::Timeslot;
 use Tab::Tournament;
 use Tab::TournSite;
+use Tab::TournCircuit;
 use Tab::TournSetting;
 use Tab::EventSetting;
 use Tab::JudgeSetting;
@@ -103,11 +105,35 @@ foreach my $tourn (@tourns) {
 
 	print "Converting ".$tourn->id." ".$tourn->name." ".$tourn->start->year."\n";
 
-	last;
+	Tab::TournCircuit->create({
+		tourn => $tourn->id,
+		circuit => $tourn->league->id
+	});
 
 	my $method = $methods_by_id{$tourn->method->id} if $tourn->method;
 
 	if ($method) { 
+
+		my @tiebreaks = $method->tiebreaks;
+
+		my %sets_by_name = ();
+
+		foreach my $tb (@tiebreaks) { 
+
+			my $set = $sets_by_name{$tb->covers};
+
+			unless ($set) { 
+
+				$set = Tab::TiebreakSet->create({
+					tournament => $tourn->id,
+					name => $tb->covers
+				});
+
+			}
+
+			$tb->tb_set($set->id);
+			$tb->update;
+		}
 
 		$tourn->setting("mfl_time_violation", $method->mfl_time_violation);
 		$tourn->setting("truncate_to_smallest", $method->truncate_to_smallest);
@@ -363,6 +389,24 @@ foreach my $comp (@comps) {
 
 	}
 
+	if ($comp->qualifier) { 
+
+		Tab::Qualifier->create({
+			entry => $comp->id,
+			name => $comp->qualifier,
+			result => $comp->qualexp
+		});
+
+	}
+
+	if ($comp->qual2) {
+		Tab::Qualifier->create({
+			entry => $comp->id,
+			name => $comp->qual2,
+			result => $comp->qual2exp
+		});
+	}
+
 }
 
 print "Retrieving all chapters to update coach credit records:\n";
@@ -377,17 +421,6 @@ foreach my $coach (@coaches) {
 	$chapter->update;
 }
 
+
 print "Finis!\n";
-
-
-print "Converting tiebreaker tiers to tiebreak sets:\n";
-
-my @tiebreaks = Tab::Tiebreaks->retrieve_all;
-
-print "Updating tiebreak tiers into tiebreak sets:\n";
-
-foreach my $tb (@tiebreaks) { 
-
-}
-
 
