@@ -304,7 +304,6 @@ foreach my $circuit (@circuits) {
 
 }
 
-
 print "Done.  Retrieving all events:\n";
 my @events = Tab::Event->retrieve_all;
 
@@ -379,3 +378,16 @@ foreach my $coach (@coaches) {
 }
 
 print "Finis!\n";
+
+
+print "Converting tiebreaker tiers to tiebreak sets:\n";
+
+my @tiebreaks = Tab::Tiebreaks->retrieve_all;
+
+print "Updating tiebreak tiers into tiebreak sets:\n";
+
+foreach my $tb (@tiebreaks) { 
+
+}
+
+
