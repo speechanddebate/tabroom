@@ -24,9 +24,9 @@ Tab::Region->set_sql(by_school_league => "select distinct region.*
 							and chapter_league.region = region.id ");
 
 Tab::Region->set_sql(by_event => "select distinct region.* 
-							from region,school,comp
-							where comp.event = ? 
-							and comp.school = school.id
+							from region,school,entry
+							where entry.event = ? 
+							and entry.school = school.id
 							and region.id = school.region
 							");
 
@@ -59,15 +59,15 @@ sub events {
 	return Tab::Event->search_by_region_and_tourn($self->id, $tourn->id);
 }
 
-sub event_comps {
+sub event_entrys {
 	my ($self, $event) = @_;
-	my @comps = sort {$a->id <=> $b->id} Tab::Comp->search_by_region_and_event($self->id, $event->id);
-	return @comps;
+	my @entrys = sort {$a->id <=> $b->id} Tab::Entry->search_by_region_and_event($self->id, $event->id);
+	return @entrys;
 }
 
-sub active_event_comps {
+sub active_event_entrys {
 	my ($self, $event) = @_;
-	return Tab::Comp->search_active_by_region_and_event($self->id, $event->id);
+	return Tab::Entry->search_active_by_region_and_event($self->id, $event->id);
 }
 
 sub judges {
@@ -119,32 +119,32 @@ sub elim_pool_rounds {
 	return Tab::PoolJudge->search_elim_by_group_and_diocese($group->id, $self->id);
 }
 
-sub comps {
+sub entrys {
     my ($self,$tourn) = @_;
-	return Tab::Comp->search_by_region($self->id, $tourn->id);	
+	return Tab::Entry->search_by_region($self->id, $tourn->id);	
 }
 
-sub active_comps {
+sub active_entrys {
     my ($self,$tourn) = @_;
-	return Tab::Comp->search_active_by_region($self->id, $tourn->id);	
+	return Tab::Entry->search_active_by_region($self->id, $tourn->id);	
 }
 
-sub comp_event_count { 
+sub entry_event_count { 
 	my ($self,$event) = @_;
-	Tab::Comp->set_sql(region_event_count => "select count(distinct comp.id) from comp,school
-										where comp.school = school.id
-										and comp.event = ?
+	Tab::Entry->set_sql(region_event_count => "select count(distinct entry.id) from entry,school
+										where entry.school = school.id
+										and entry.event = ?
 										and school.region = ?");
-	return Tab::Comp->sql_region_event_count->select_val($event->id, $self->id);
+	return Tab::Entry->sql_region_event_count->select_val($event->id, $self->id);
 }
 
-sub comp_count { 
+sub entry_count { 
 	my ($self,$tourn) = @_;
-	Tab::Comp->set_sql(region_count => "select count(distinct comp.id) from comp,school
-										where comp.school = school.id
+	Tab::Entry->set_sql(region_count => "select count(distinct entry.id) from entry,school
+										where entry.school = school.id
 										and school.tourn = ?
 										and school.region = ?");
-	return Tab::Comp->sql_region_count->select_val($tourn->id, $self->id);
+	return Tab::Entry->sql_region_count->select_val($tourn->id, $self->id);
 }
 
 
@@ -167,9 +167,9 @@ sub judge_count {
 }
 
 
-sub group_comps {
+sub group_entrys {
     my ($self,$group) = @_;
-	return Tab::Comp->search_by_region_and_group($self->id, $group->id);	
+	return Tab::Entry->search_by_region_and_group($self->id, $group->id);	
 }
 
 sub chapters {

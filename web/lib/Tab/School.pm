@@ -13,7 +13,7 @@ Tab::School->has_a(region => 'Tab::Region');
 Tab::School->has_a(disclaimed => 'Tab::Account');
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_many(purchases => 'Tab::Purchase', 'school');
-Tab::School->has_many(comps => 'Tab::Comp', 'school');
+Tab::School->has_many(entrys => 'Tab::Entry', 'school');
 Tab::School->has_many(judges => 'Tab::Judge', 'school');
 Tab::School->has_many(fines => 'Tab::Fine', 'school');
 Tab::School->has_many(hires => 'Tab::JudgeHire', 'school');
@@ -28,16 +28,16 @@ Tab::School->set_sql(wipe_prefs => " delete from rating where school = ?");
 
 
 Tab::School->set_sql(schools => "select distinct school.id 
-		from school,comp where comp.event= ? and comp.school = school.id" );
+		from school,entry where entry.event= ? and entry.school = school.id" );
 
 Tab::School->set_sql(speech_schools_by_tourn => "select distinct school.*
 							from school
 							where school.tourn = ?
 							and exists (
-								select comp.id
-								from comp, event
-								where comp.school = school.id
-								and comp.event = event.id
+								select entry.id
+								from entry, event
+								where entry.school = school.id
+								and entry.event = event.id
 								and event.type = \"speech\" 
 								limit 1) ");
 
@@ -45,32 +45,32 @@ Tab::School->set_sql(debate_congress_schools_by_tourn => "select distinct school
 							from school
 							where school.tourn = ?
 							and exists (
-								select comp.id
-								from comp, event
-								where comp.school = school.id
-								and comp.event = event.id
+								select entry.id
+								from entry, event
+								where entry.school = school.id
+								and entry.event = event.id
 								and event.type != \"speech\" 
 								limit 1) ");
 
 Tab::School->set_sql(by_group => "select distinct school.id
-							from school,comp,event,class
+							from school,entry,event,class
 							where class.judge_group = ?
 							and event.class = class.id
-							and comp.event = event.id
-							and comp.school = school.id");
+							and entry.event = event.id
+							and entry.school = school.id");
 
 Tab::School->set_sql(by_event => "select distinct school.id
-							from school,comp
-							where school.id = comp.school
-							and comp.dropped != 1
-							and comp.event = ? ");
+							from school,entry
+							where school.id = entry.school
+							and entry.dropped != 1
+							and entry.event = ? ");
 
 Tab::School->set_sql(by_waitlist_event => "select distinct school.id
-							from school,comp
-							where school.id = comp.school
-							and comp.dropped != 1
-							and comp.waitlist = 1
-							and comp.event = ? ");
+							from school,entry
+							where school.id = entry.school
+							and entry.dropped != 1
+							and entry.waitlist = 1
+							and entry.event = ? ");
 
 Tab::School->set_sql(members_by_tourn => "select distinct school.id
 							from school, chapter, chapter_league,tourn
@@ -254,13 +254,13 @@ sub short_name {
 
 sub event_count{
     my ($self, $event_id) = @_;
-    my @count = Tab::Comp->search( school => $self->id, event => $event_id, waitlist => 0);
+    my @count = Tab::Entry->search( school => $self->id, event => $event_id, waitlist => 0);
     return scalar @count;
 }
 
 sub group_entries { 
     my ($self, $group) = @_;
-    return Tab::Comp->search_by_group_school($self->id, $group->id,);
+    return Tab::Entry->search_by_group_school($self->id, $group->id,);
 }
 
 
@@ -268,7 +268,7 @@ sub finalists{
 	my $self = shift;
 	my $tourn = $self->tourn; 	
 	my @events = $tourn->events;
-	my @finalists = Tab::Comp->search_finals_by_school($self->id);
+	my @finalists = Tab::Entry->search_finals_by_school($self->id);
 	return @finalists;
 }
 

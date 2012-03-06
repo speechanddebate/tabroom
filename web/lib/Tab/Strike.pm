@@ -3,13 +3,13 @@ use base 'Tab::DBI';
 Tab::Strike->table('strike');
 Tab::Strike->columns(Primary => qw/id/);
 Tab::Strike->columns(Essential => qw/tourn judge type start end 
-										event comp school region bin 
+										event entry school region bin 
 										timestamp strike/);
 
 Tab::Strike->has_a(judge => 'Tab::Judge');
 Tab::Strike->has_a(tourn => 'Tab::Tourn');
 Tab::Strike->has_a(event => 'Tab::Event');
-Tab::Strike->has_a(comp => 'Tab::Comp');
+Tab::Strike->has_a(entry => 'Tab::Entry');
 Tab::Strike->has_a(bin => 'Tab::Bin');
 Tab::Strike->has_a(school => 'Tab::School');
 Tab::Strike->has_a(region => 'Tab::Region');
@@ -35,7 +35,7 @@ sub name {
 
 	$name = "No one from ".$self->region->name." (".$self->region->code.")" if $self->type eq "region";
 
-	$name = "Speaker ".$self->comp->code." ".$self->comp->team_name if $self->type eq "comp";
+	$name = "Speaker ".$self->entry->code." ".$self->entry->team_name if $self->type eq "entry";
 
 	$name = "Unavailable between ".  Tab::niceshortdt($self->start->set_time_zone($self->tourn->league->timezone))
 			." and ".  Tab::niceshortdt($self->end->set_time_zone($self->tourn->league->timezone)) if $self->type eq "time";

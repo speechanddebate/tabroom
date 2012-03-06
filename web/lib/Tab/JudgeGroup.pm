@@ -14,7 +14,7 @@ Tab::JudgeGroup->columns(Others => qw/judge_per missing_judge_fee uncovered_entr
 										ratings_need_paradigms ratings_need_entry
 										strikes_need_paradigms strikes_need_entry 
 										obligation_before_strikes coach_ratings school_ratings 
-										comp_ratings comp_strikes /);
+										entry_ratings entry_strikes /);
 
 Tab::JudgeGroup->has_many(classes => "Tab::Class", "judge_group");
 Tab::JudgeGroup->has_many(bins => "Tab::Bin", "judge_group");
@@ -67,9 +67,9 @@ sub all_school_ratings {
 	return Tab::Rating->search_school_ratings_by_group($self->id)
 }
 
-sub all_comp_ratings {
+sub all_entry_ratings {
 	my $self = shift;
-	return Tab::Rating->search_comp_ratings_by_group($self->id)
+	return Tab::Rating->search_entry_ratings_by_group($self->id)
 }
 
 sub count_judges {
@@ -102,7 +102,7 @@ sub hired_number {
 
 sub entries {
 	my $self = shift;
-	return Tab::Comp->search_by_group($self->id);
+	return Tab::Entry->search_by_group($self->id);
 }
 
 sub schools { 

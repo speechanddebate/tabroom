@@ -1,7 +1,7 @@
-package Tab::FollowComp;
+package Tab::FollowEntry;
 use base 'Tab::DBI';
-Tab::FollowComp->table('follow_comp');
-Tab::FollowComp->columns(Primary => qw/id/);
-Tab::FollowComp->columns(Essential => qw/comp cell email domain/);
-Tab::FollowComp->has_a(comp => 'Tab::Comp');
+Tab::FollowEntry->table('follow_entry');
+Tab::FollowEntry->columns(Primary => qw/id/);
+Tab::FollowEntry->columns(Essential => qw/entry cell email domain/);
+Tab::FollowEntry->has_a(entry => 'Tab::Entry');
 
