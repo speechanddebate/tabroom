@@ -173,14 +173,14 @@ sub roomless_panels {
 	return @panels;
 }
 
-sub comps { 
+sub entrys { 
 	my $self = shift;
-	return Tab::Comp->search_by_timeslot($self->id);
+	return Tab::Entry->search_by_timeslot($self->id);
 }
 
-sub comps_by_event { 
+sub entrys_by_event { 
 	my ($self, $event) = @_;
-	return Tab::Comp->search_by_timeslot_and_event($self->id, $event->id);
+	return Tab::Entry->search_by_timeslot_and_event($self->id, $event->id);
 }
 
 

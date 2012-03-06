@@ -26,28 +26,28 @@ Tab::Panel->set_sql(by_site_and_tourn => "select distinct panel.*
 											and event.tourn = ?");
 
 Tab::Panel->set_sql(conflicts => "select distinct panel.id
-							from panel,ballot,comp,round,timeslot as ts1,timeslot as ts2
-							where comp.student = ? 
+							from panel,ballot,entry,round,timeslot as ts1,timeslot as ts2
+							where entry.student = ? 
 							and ts2.id = ? 
-							and comp.id = ballot.comp
+							and entry.id = ballot.entry
 							and ballot.panel = panel.id
 							and panel.round = round.id
 							and round.timeslot = ts1.id
 							and ts1.end > ts2.start
 							and ts1.start < ts2.end
-							and comp.id != ?");
+							and entry.id != ?");
 
 Tab::Panel->set_sql(partner_conflicts => "select distinct panel.id
-							from panel,ballot,comp,round,timeslot as ts1,timeslot as ts2
-							where comp.partner = ? 
+							from panel,ballot,entry,round,timeslot as ts1,timeslot as ts2
+							where entry.partner = ? 
 							and ts2.id = ? 
-							and comp.id = ballot.comp
+							and entry.id = ballot.entry
 							and ballot.panel = panel.id
 							and panel.round = round.id
 							and round.timeslot = ts1.id
 							and ts1.end > ts2.start
 							and ts1.start < ts2.end
-							and comp.id != ?");
+							and entry.id != ?");
 
 Tab::Panel->set_sql(elims_by_tourn => qq{ select distinct panel.id
 								from panel,round,event
@@ -56,26 +56,26 @@ Tab::Panel->set_sql(elims_by_tourn => qq{ select distinct panel.id
 								and round.event = event.id
 								and event.tourn = ? });
 
-Tab::Panel->set_sql(comp_panels => qq{ select distinct panel.id 
+Tab::Panel->set_sql(entry_panels => qq{ select distinct panel.id 
 										from panel,ballot 
-										where ballot.comp= ? 
+										where ballot.entry= ? 
 										and ballot.panel = panel.id});
 
-Tab::Panel->set_sql(comp_prelims => qq{ select distinct panel.id 
+Tab::Panel->set_sql(entry_prelims => qq{ select distinct panel.id 
 										from panel,ballot 
-										where ballot.comp= ? 
+										where ballot.entry= ? 
 										and ballot.panel = panel.id
 										and panel.type = \"prelim\" });
 
-Tab::Panel->set_sql(comp_elims => qq{ select distinct panel.id 
+Tab::Panel->set_sql(entry_elims => qq{ select distinct panel.id 
 										from panel,ballot 
-										where ballot.comp= ? 
+										where ballot.entry= ? 
 										and ballot.panel = panel.id
 										and panel.type != \"prelim\" });
 
-Tab::Panel->set_sql(comp_panels_by_round => qq{ select distinct panel.id 
+Tab::Panel->set_sql(entry_panels_by_round => qq{ select distinct panel.id 
 										from panel,ballot 
-										where ballot.comp= ? 
+										where ballot.entry= ? 
 										and ballot.panel = panel.id
 										and panel.round = ? 
 										});
@@ -93,9 +93,9 @@ Tab::Panel->set_sql(panels_by_tourn => qq{ select panel.*
 										and event.tourn = ? 
 										order by "name"});
 
-Tab::Panel->set_sql(by_comp_in_round => "
+Tab::Panel->set_sql(by_entry_in_round => "
 				select panel.* from panel,ballot
-				where ballot.comp = ? 
+				where ballot.entry = ? 
 				and ballot.panel = panel.id
 				and panel.round = ?");
 
@@ -217,37 +217,37 @@ sub judges {
     return @judges;
 }
 
-sub comps {
+sub entrys {
     my $self = shift;
-    return Tab::Comp->search_by_panel($self->id);
+    return Tab::Entry->search_by_panel($self->id);
 }
 
-sub comps_region{
+sub entrys_region{
     my $self = shift;
-    my @comps = Tab::Comp->search_by_panel_regcode($self->id);
-    return @comps;
+    my @entrys = Tab::Entry->search_by_panel_regcode($self->id);
+    return @entrys;
 }
 
 sub clean_judges{
-	my ($self, $comp) = @_;
+	my ($self, $entry) = @_;
 	foreach my $judge ($self->judges) { 
-		return if $judge->cannot_judge($comp);
+		return if $judge->cannot_judge($entry);
 	}
 	return 1;
 }
 
 Tab::Panel->set_sql( hits_score => "
-   select count(distinct c1b1.comp,c2b1.comp,c1b1.panel) as hits_score
+   select count(distinct c1b1.entry,c2b1.entry,c1b1.panel) as hits_score
         from panel as p2,
-        comp as c1,ballot as c1b1, ballot as c1b2,
-        comp as c2,ballot as c2b1, ballot as c2b2
-        where c2b2.comp = c1.id
-        and c1b2.comp = c2.id
+        entry as c1,ballot as c1b1, ballot as c1b2,
+        entry as c2,ballot as c2b1, ballot as c2b2
+        where c2b2.entry = c1.id
+        and c1b2.entry = c2.id
         and c2b2.panel = c1b2.panel
         and c2b2.panel =  ?
-        and c1b1.comp = c1.id
+        and c1b1.entry = c1.id
         and c1b1.panel = p2.id
-        and c2b1.comp = c2.id
+        and c2b1.entry = c2.id
         and c2b1.panel = p2.id
         and c2b2.panel != p2.id
    		and c1.dropped != 1
@@ -262,16 +262,16 @@ sub hits_score {
 }
 
 Tab::Panel->set_sql( school_score => "
-		select count(distinct b1.panel,b1.comp,b2.comp)
-        from ballot as b1, comp as c1,
-        ballot as b2, comp as c2
+		select count(distinct b1.panel,b1.entry,b2.entry)
+        from ballot as b1, entry as c1,
+        ballot as b2, entry as c2
 
         where c2.school = c1.school
         and b1.panel = ?
         and b1.panel = b2.panel
 
-        and b1.comp = c1.id
-        and b2.comp = c2.id
+        and b1.entry = c1.id
+        and b2.entry = c2.id
 
    		and c1.dropped != 1
 		and c2.dropped != 1
@@ -286,14 +286,14 @@ sub school_score {
 
 Tab::Panel->set_sql( region_score => "
 		select count(distinct b1.id)
-        from ballot as b1, comp as c1, school as s1, 
-        ballot as b2, comp as c2, school as s2
+        from ballot as b1, entry as c1, school as s1, 
+        ballot as b2, entry as c2, school as s2
 
         where c1.school = s1.id
         and c2.school = s2.id
 
-        and b1.comp = c1.id
-        and b2.comp = c2.id
+        and b1.entry = c1.id
+        and b2.entry = c2.id
 
    		and c1.dropped != 1
 		and c2.dropped != 1
@@ -313,38 +313,38 @@ sub region_score {
 
 }
 
-Tab::Panel->set_sql( comp_hits_score => "
+Tab::Panel->set_sql( entry_hits_score => "
    	select count(distinct panel.id) as hits_score
         from panel, ballot as c1b2,
-        comp as c2,ballot as c2b1, ballot as c2b2
+        entry as c2,ballot as c2b1, ballot as c2b2
 
-        where c2b1.comp = c2.id
+        where c2b1.entry = c2.id
         and c2b1.panel = ?
 
 		and c2.dropped != 1
 
-        and c1b2.comp = ?
+        and c1b2.entry = ?
         and c1b2.panel = c2b2.panel
-        and c2b2.comp = c2.id
+        and c2b2.entry = c2.id
 
         and c2b2.panel != c2b1.panel
 		and c2b2.panel = panel.id
-        and c1b2.comp != c2.id
+        and c1b2.entry != c2.id
 ");
 
- Tab::Panel->set_sql( school_comp_hits_score => "
+ Tab::Panel->set_sql( school_entry_hits_score => "
     select count(distinct panel.id) as hits_score
-        from panel, ballot as c1b2,comp as c1,
-        comp as c2,ballot as c2b1, ballot as c2b2
+        from panel, ballot as c1b2,entry as c1,
+        entry as c2,ballot as c2b1, ballot as c2b2
 		
-        where c2b1.comp = c2.id
+        where c2b1.entry = c2.id
         and c2b1.panel = ? 
 
         and c1.id = ? 
 		and c2.dropped != 1
-		and c1b2.comp = c1.id
+		and c1b2.entry = c1.id
         and c1b2.panel = c2b2.panel
-        and c2b2.comp = c2.id
+        and c2b2.entry = c2.id
 
         and c2b2.panel != c2b1.panel
         and c2b2.panel = panel.id
@@ -354,28 +354,28 @@ Tab::Panel->set_sql( comp_hits_score => "
 
     ");
 
-sub comp_hits_score { 
+sub entry_hits_score { 
 
-	my ($self, $comp) = @_;
+	my ($self, $entry) = @_;
 
-	my $score = Tab::Panel->sql_comp_hits_score->select_val($self->id, $comp->id);
+	my $score = Tab::Panel->sql_entry_hits_score->select_val($self->id, $entry->id);
 
 	# Add in another point to penalize teammates hitting each other twice more.
 
-	$score = $score + Tab::Panel->sql_school_comp_hits_score->select_val($self->id, $comp->id);
+	$score = $score + Tab::Panel->sql_school_entry_hits_score->select_val($self->id, $entry->id);
 
 	return $score;
 }
 
-Tab::Panel->set_sql( comp_region_score => "
+Tab::Panel->set_sql( entry_region_score => "
 	select count(distinct c2.id) as region_score
-		from comp as c1, comp as c2,
+		from entry as c1, entry as c2,
 		ballot as b2,
 		school as s1, school as s2
 
 			where b2.panel = ?
 			and c1.id = ?
-			and c2.id = b2.comp
+			and c2.id = b2.entry
 			
 			and c1.dropped != 1
 			and c2.dropped != 1
@@ -388,60 +388,60 @@ Tab::Panel->set_sql( comp_region_score => "
 			and c1.id != c2.id
     ");
 
-sub comp_region_score { 
-	my ($self, $comp) = @_;
-	return Tab::Panel->sql_comp_region_score->select_val($self->id, $comp->id);
+sub entry_region_score { 
+	my ($self, $entry) = @_;
+	return Tab::Panel->sql_entry_region_score->select_val($self->id, $entry->id);
 }
 
-   	Tab::Panel->set_sql( comp_school_score => "
+   	Tab::Panel->set_sql( entry_school_score => "
    	
 		select count(distinct c2.id) as school_score
-		from comp as c1, comp as c2, ballot as b2
+		from entry as c1, entry as c2, ballot as b2
 
 			where b2.panel = ?
 			and c1.id = ?
 			and c1.dropped != 1
 			and c2.dropped != 1
-			and c2.id = b2.comp
+			and c2.id = b2.entry
 			and c1.school = c2.school
 			and c1.id != c2.id
 	
     ");
 
 
-sub comp_school_score { 
+sub entry_school_score { 
 
-	my ($self, $comp) = @_;
+	my ($self, $entry) = @_;
 
-	return Tab::Panel->sql_comp_school_score->select_val($self->id, $comp->id);
+	return Tab::Panel->sql_entry_school_score->select_val($self->id, $entry->id);
 
 }
 
 sub score { 
 
-	my ($self, $comp) = @_;
+	my ($self, $entry) = @_;
 
 	my $value;
 
-	my $method = $comp->tourn->method;
-	my $league = $comp->tourn->league;
+	my $method = $entry->tourn->method;
+	my $league = $entry->tourn->league;
 
-	if	($comp) { 
+	if	($entry) { 
 
 	#School scoring
 
-		$value = $self->comp_school_score($comp) * 10;
+		$value = $self->entry_school_score($entry) * 10;
 
 	#Second hit scoring
 
-		$value = $value + ($self->comp_hits_score($comp) * 2);
+		$value = $value + ($self->entry_hits_score($entry) * 2);
 
 	#Region scoring
 
-		$value = $value + $self->comp_region_score($comp)  * 1
+		$value = $value + $self->entry_region_score($entry)  * 1
 			if ($league->region_based);
 		
-		$value = $value + $self->comp_region_score($comp)  * 10
+		$value = $value + $self->entry_region_score($entry)  * 10
 			if ($league->diocese_based);
 
 		return $value;
@@ -472,26 +472,26 @@ sub score {
 
 sub update_score { 
 
-	my ($self, $comp) = @_;
+	my ($self, $entry) = @_;
 
 	my $value;
 
-	my $method = $comp->tourn->method;
-	my $league = $comp->tourn->league;
+	my $method = $entry->tourn->method;
+	my $league = $entry->tourn->league;
 
-	if	($comp) { 
+	if	($entry) { 
 
 	#School scoring
 
-		$value = $self->comp_school_score($comp) * 10;
+		$value = $self->entry_school_score($entry) * 10;
 
 	#Second hit scoring
 
-		$value = $value + $self->comp_hits_score($comp) * 2;
+		$value = $value + $self->entry_hits_score($entry) * 2;
 
 	#Region scoring
 
-	   $value = $value + $self->comp_region_score($comp) * 1
+	   $value = $value + $self->entry_region_score($entry) * 1
 			if ($league->diocese_based || $league->region_based);
 		
 	} else { 
@@ -516,9 +516,9 @@ sub update_score {
 		return;
 }
 
-sub comps_in_order {
+sub entrys_in_order {
 
 	my $self = shift;
-	return Tab::Comp->search_by_panel_rank($self->id);
+	return Tab::Entry->search_by_panel_rank($self->id);
 
 }

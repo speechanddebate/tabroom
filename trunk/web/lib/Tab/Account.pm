@@ -51,7 +51,7 @@ sub regions {
 sub no_interest {
 	my ($self, $tourn)  = @_;
 	return unless $tourn;
-	my @nis = Tab::NoInterest->search( tourn => $tourn->id, account => $self->id );
+	my @nis = Tab::AccountIgnore->search( tourn => $tourn->id, account => $self->id );
 	return @nis;
 }
 

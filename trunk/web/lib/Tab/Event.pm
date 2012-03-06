@@ -40,7 +40,7 @@ Tab::Event->has_a(tourn => 'Tab::Tourn');
 Tab::Event->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Event->has_a(class => 'Tab::Class');
 Tab::Event->has_a(qual_subset => 'Tab::QualSubset');
-Tab::Event->has_many(comps => 'Tab::Comp', 'event' => { order_by => 'code'} );
+Tab::Event->has_many(entrys => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
 Tab::Event->has_many(results => 'Tab::StudentResult', 'event' );
 Tab::Event->has_many(room_pools => 'Tab::RoomPool', 'event');
@@ -82,16 +82,16 @@ Tab::Event->set_sql(blockable_by_group => "select distinct event.*
 										and event.reg_blockable = 1");
 
 Tab::Event->set_sql(by_region_and_tourn => "
-						select distinct event.* from event,comp,school
-						where event.id = comp.event 
-						and comp.school = school.id
-						and comp.dropped != 1
+						select distinct event.* from event,entry,school
+						where event.id = entry.event 
+						and entry.school = school.id
+						and entry.dropped != 1
 						and school.region = ?
 						and school.tourn = ? ");
 
-Tab::Event->set_sql(by_school => "select distinct event.* from event,comp
-						where event.id = comp.event 
-						and comp.school = ? ");
+Tab::Event->set_sql(by_school => "select distinct event.* from event,entry
+						where event.id = entry.event 
+						and entry.school = ? ");
 
 Tab::Event->set_sql(with_published => "select distinct event.* from event, round
 						where event.tourn = ? 
@@ -107,13 +107,13 @@ Tab::Event->set_sql(ok_to_break => "
 		where p2.round = r2.id
 		and r2.event = event.id )
     and not exists (
-    select ballot.id from ballot,comp,panel,round
+    select ballot.id from ballot,entry,panel,round
         where panel.event = event.id
 		and panel.round = round.id
 		and round.preset != 1 
         and ballot.panel = panel.id
-		and ballot.comp = comp.id
-		and comp.dropped = 0
+		and ballot.entry = entry.id
+		and entry.dropped = 0
         and ballot.audit = 0
 		)
     ");
@@ -133,12 +133,12 @@ sub largest_panel {
 	my $self = shift;
 
 	Tab::Event->set_sql(large_panel => "select max(number) from (
-            select count(distinct comp.id) as number
-            from ballot,panel,comp
+            select count(distinct entry.id) as number
+            from ballot,panel,entry
            	where panel.event = ".$self->id."
             and ballot.panel = panel.id
-            and ballot.comp = comp.id
-            and comp.dropped != 1
+            and ballot.entry = entry.id
+            and entry.dropped != 1
             and panel.type=\"prelim\"
             group by panel.id ) as panel_numbers");
 
@@ -146,29 +146,29 @@ sub largest_panel {
 
 }
 
-sub count_active_comps { 
+sub count_active_entrys { 
 	my $self = shift;
-	return Tab::Comp->sql_count_active_by_event->select_val($self->id);
+	return Tab::Entry->sql_count_active_by_event->select_val($self->id);
 }
 
-sub active_comps { 
+sub active_entrys { 
 	my $self = shift;
-	return Tab::Comp->search_active_by_event($self->id);
+	return Tab::Entry->search_active_by_event($self->id);
 }
 
-sub count_waitlist_comps { 
+sub count_waitlist_entrys { 
 	my $self = shift;
-	return Tab::Comp->sql_count_waitlist_by_event->select_val($self->id);
+	return Tab::Entry->sql_count_waitlist_by_event->select_val($self->id);
 }
 
-sub waitlist_comps { 
+sub waitlist_entrys { 
 	my $self = shift;
-	return Tab::Comp->search_waitlist_by_event($self->id);
+	return Tab::Entry->search_waitlist_by_event($self->id);
 }
 
-sub comps_by_timeslot_and_order { 
+sub entrys_by_timeslot_and_order { 
 	my ($self, $timeslot,$order) = @_;
-	return Tab::Comp->search_by_event_order_and_timeslot($self->id, $order, $timeslot->id);
+	return Tab::Entry->search_by_event_order_and_timeslot($self->id, $order, $timeslot->id);
 }
 
 sub smallest_panel {
@@ -176,12 +176,12 @@ sub smallest_panel {
 	my $self = shift;
 
 	Tab::Event->set_sql(small_panel => "select min(number) from (
-            select count(distinct comp.id) as number
-            from ballot,panel,comp
+            select count(distinct entry.id) as number
+            from ballot,panel,entry
            	where panel.event = ".$self->id."
             and ballot.panel = panel.id
-            and ballot.comp = comp.id
-            and comp.dropped != 1
+            and ballot.entry = entry.id
+            and entry.dropped != 1
             and panel.type=\"prelim\"
             group by panel.id ) as panel_numbers");
 	return Tab::Event->sql_small_panel->select_val;
@@ -189,12 +189,12 @@ sub smallest_panel {
 }
 
 Tab::Event->set_sql(head_count => "
-		select count(distinct comp.id)
-		from comp
-		where comp.event = ?
-		and comp.dropped != 1
-		and comp.waitlist != 1
-		and comp.dq != 1");
+		select count(distinct entry.id)
+		from entry
+		where entry.event = ?
+		and entry.dropped != 1
+		and entry.waitlist != 1
+		and entry.dq != 1");
 
 sub count { 
 	my $self = shift;
@@ -228,10 +228,10 @@ sub prelims {
 sub next_code {
 
     my $self = shift;
-    my @existing_comps = Tab::Comp->search( event => $self->id, {order_by => "code DESC"} );
+    my @existing_entrys = Tab::Entry->search( event => $self->id, {order_by => "code DESC"} );
 	my $code = $self->code; 
 	
-	while (defined $self->tourn->comp_with_code($code)) {
+	while (defined $self->tourn->entry_with_code($code)) {
 		$code++;
 		$code++ if $code == 666;
 		$code++ if $code == 69;
@@ -257,49 +257,49 @@ sub honorable_mentions {
 
 	my $self = shift;
 
-	Tab::Comp->set_sql(hon_mens => "
-		select comp.id,comp.code from comp 
-		where comp.event = ?  	
-		and comp.id not in  	 	
+	Tab::Entry->set_sql(hon_mens => "
+		select entry.id,entry.code from entry 
+		where entry.event = ?  	
+		and entry.id not in  	 	
 		(select cdb.id  		
-			from comp as cdb, ballot as bdb, panel as pdb 		
+			from entry as cdb, ballot as bdb, panel as pdb 		
 			where pdb.type = \"final\" 	    
 			and pdb.id = bdb.panel 	    
-			and bdb.comp = cdb.id 		
+			and bdb.entry = cdb.id 		
 			and cdb.event = ? 		
 		)   	
 		and     	
 		(select sum(bc.rank)  		
 			from ballot as bc,panel as pc 		
-			where bc.comp = comp.id 		
+			where bc.entry = entry.id 		
 			and bc.panel = pc.id 		
 			and pc.type = \"prelim\" 	
 		) = 
 		(select max(cume) from  	  		
 			(select sum(b1.rank) as cume 			
-			from ballot as b1,comp as c1,panel as p1
-			where b1.comp = c1.id 	 			
+			from ballot as b1,entry as c1,panel as p1
+			where b1.entry = c1.id 	 			
 			and b1.panel = p1.id 	 			
 			and c1.event = ? 			
 			and p1.type = \"prelim\" 	 			
 			and c1.id in 
 				(select cb.id  				
-				from comp as cb, ballot as bb, panel as pb 				
+				from entry as cb, ballot as bb, panel as pb 				
 				where pb.type = \"final\" 				
 				and pb.id = bb.panel 				
-				and bb.comp = cb.id ) 			
+				and bb.entry = cb.id ) 			
 			group by c1.id) 
 		as cume_score
 		)
 	");
 
-	return Tab::Comp->search_hon_mens($self->id,$self->id,$self->id);
+	return Tab::Entry->search_hon_mens($self->id,$self->id,$self->id);
 
 }
 
 sub finalists { 
 	my $self = shift;
-	return Tab::Comp->search_finals_by_event($self->id);
+	return Tab::Entry->search_finals_by_event($self->id);
 }
 
 sub ballots { 

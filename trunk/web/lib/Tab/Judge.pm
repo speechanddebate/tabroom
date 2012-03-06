@@ -285,7 +285,7 @@ sub in_pool {
 
 Tab::Judge->set_sql(not_ranked_by_event => "
 		select distinct judge.id from judge,
-		ballot,panel,comp,round
+		ballot,panel,entry,round
         where ballot.judge = judge.id
         and ballot.panel = panel.id
         and panel.round = round.id
@@ -293,26 +293,26 @@ Tab::Judge->set_sql(not_ranked_by_event => "
 		and round.event = ?
         and ballot.real_rank = 0
 		and ballot.noshow = 0
-        and ballot.comp = comp.id
-        and comp.dropped = 0
-        and comp.dq = 0" );
+        and ballot.entry = entry.id
+        and entry.dropped = 0
+        and entry.dq = 0" );
 
 Tab::Judge->set_sql(not_ranked => "
 		select distinct judge.id from judge,
-		ballot,panel,comp,round
+		ballot,panel,entry,round
         where ballot.judge = judge.id
         and ballot.panel = panel.id
         and panel.round = round.id
         and round.timeslot = ?
         and ballot.real_rank = 0
 		and ballot.noshow = 0
-        and ballot.comp = comp.id
-        and comp.dropped = 0
-        and comp.dq = 0" );
+        and ballot.entry = entry.id
+        and entry.dropped = 0
+        and entry.dq = 0" );
 
 Tab::Judge->set_sql(not_audited => "
 		select distinct judge.id from judge,
-		ballot,panel,comp,round
+		ballot,panel,entry,round
         where ballot.judge = judge.id
         and ballot.panel = panel.id
         and panel.round = round.id
@@ -320,13 +320,13 @@ Tab::Judge->set_sql(not_audited => "
         and ballot.audit = 0
 		and ballot.real_rank > 0
 		and ballot.noshow = 0
-        and ballot.comp = comp.id
-        and comp.dropped = 0
-        and comp.dq = 0 ");
+        and ballot.entry = entry.id
+        and entry.dropped = 0
+        and entry.dq = 0 ");
 
 Tab::Judge->set_sql(not_audited_by_event => "
 		select distinct judge.id from judge,
-		ballot,panel,comp,round
+		ballot,panel,entry,round
         where ballot.judge = judge.id
         and ballot.panel = panel.id
         and panel.round = round.id
@@ -335,12 +335,12 @@ Tab::Judge->set_sql(not_audited_by_event => "
         and ballot.audit = 0
 		and ballot.real_rank > 0
 		and ballot.noshow = 0
-        and ballot.comp = comp.id
-        and comp.dropped = 0
-		and comp.dq = 0");
+        and ballot.entry = entry.id
+        and entry.dropped = 0
+		and entry.dq = 0");
 
 Tab::Judge->set_sql(has_seen => "select distinct judge.id from judge,ballot 
-		where ballot.comp = ? and ballot.judge = judge.id");
+		where ballot.entry = ? and ballot.judge = judge.id");
 
 Tab::Judge->set_sql(double_booked => "
    		select distinct judge.id
@@ -379,10 +379,10 @@ sub has_judged_event {
 }
 
 Tab::Ballot->set_sql(has_judged_event => "select distinct ballot.id
-						from ballot,comp 
+						from ballot,entry 
 						where ballot.judge = ? 
-						and ballot.comp = comp.id
-						and comp.event = ? ");
+						and ballot.entry = entry.id
+						and entry.event = ? ");
 
 Tab::Judge->set_sql(by_panel => "select distinct judge.* 
 			from judge,ballot 
@@ -395,12 +395,12 @@ sub panels {
 }
 
 Tab::Judge->set_sql(has_judged => qq{select distinct judge.id 
-		from judge,ballot where ballot.comp= ? 
+		from judge,ballot where ballot.entry= ? 
 		and ballot.judge = judge.id });
 
 sub has_judged {
     my $self = shift;
-    return Tab::Comp->search_has_judged($self->id);
+    return Tab::Entry->search_has_judged($self->id);
 }
 
 sub print_ratings {
@@ -442,50 +442,50 @@ sub all_ratings {
 }
 
 sub cannot_judge {
-	my ($self,$comp) = @_;
+	my ($self,$entry) = @_;
 
-	unless ($comp) {
+	unless ($entry) {
 
-		Tab::Comp->set_sql( cannot_see =>
-			"(	select comp.id from comp,judge 
-			  	where comp.school = judge.school 
+		Tab::Entry->set_sql( cannot_see =>
+			"(	select entry.id from entry,judge 
+			  	where entry.school = judge.school 
 			  	and judge.id = ".$self->id.")
 	   			 		UNION
-	    	 (	select comp.id from comp,ballot 
-			  	where comp.id = ballot.comp 
+	    	 (	select entry.id from entry,ballot 
+			  	where entry.id = ballot.entry 
 			  	and ballot.judge = ".$self->id.")
 	    				UNION
-	    	 (	select comp from strike 
+	    	 (	select entry from strike 
 			  	where judge = ".$self->id.")
 	    				UNION
-	    	 (	select comp.id from comp,strike 
-				where comp.school = strike.school 
+	    	 (	select entry.id from entry,strike 
+				where entry.school = strike.school 
 				and judge = ".$self->id.")
 			");
-		return 	Tab::Comp->search_cannot_see;
+		return 	Tab::Entry->search_cannot_see;
 	
 	} else { 
 		
-		Tab::Comp->set_sql( cannot_judge =>
-		"select distinct 1 from comp where ".$comp->id." in (
+		Tab::Entry->set_sql( cannot_judge =>
+		"select distinct 1 from entry where ".$entry->id." in (
 
-				select comp.id from comp,judge 
-				where comp.school = judge.school 
+				select entry.id from entry,judge 
+				where entry.school = judge.school 
 				and judge.id = ".$self->id."
     		    		UNION
-    			select comp.id from comp,ballot 
-				where comp.id = ballot.comp 
+    			select entry.id from entry,ballot 
+				where entry.id = ballot.entry 
 				and ballot.judge = ".$self->id."
     		   			 UNION
-    			select comp from strike 
+    			select entry from strike 
 				where judge = ".$self->id."
     		    		UNION
-    			select comp.id from comp,strike 
-				where comp.school = strike.school 
+    			select entry.id from entry,strike 
+				where entry.school = strike.school 
 				and judge = ".$self->id."
 			)" );
 
-		return Tab::Comp->sql_cannot_judge->select_val;
+		return Tab::Entry->sql_cannot_judge->select_val;
 
 	}
 

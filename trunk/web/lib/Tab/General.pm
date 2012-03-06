@@ -33,7 +33,7 @@ $dbuser = "itab";
 #Database password
 $dbpass = "foo1uKahs7aecu%See2xa0ieX";
 
-#Component root
+#Entryonent root
 $file_root = '/www/itab/web/';
 
 ######  You shouldn't have to change anything below this line  ##########
@@ -41,10 +41,10 @@ $file_root = '/www/itab/web/';
 #Cookie domain
 $cookie_domain = $hostname;
 
-# Path to gzip for compression
+# Path to gzip for entryression
 $bzip2 = "$latex_path_prefix/bzip2";
 
-# Path to ghostscript for compression
+# Path to ghostscript for entryression
 $gs_path = "$latex_path_prefix/gs";
 
 #Path to latex for printing

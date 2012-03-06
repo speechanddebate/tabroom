@@ -3,10 +3,10 @@ use base 'Tab::DBI';
 Tab::Round->table('round');
 Tab::Round->columns(Primary => qw/id/);
 Tab::Round->columns(Essential => qw/name event timeslot type label site pool preset/);
-Tab::Round->columns(Others => qw/published listed created completed no_first_year score/);
+Tab::Round->columns(Others => qw/published listed created entryleted no_first_year score/);
 
 __PACKAGE__->_register_dates( qw/created/);
-__PACKAGE__->_register_dates( qw/completed/);
+__PACKAGE__->_register_dates( qw/entryleted/);
 
 Tab::Round->has_a(event => 'Tab::Event');
 Tab::Round->has_a(site => 'Tab::Site');
@@ -42,12 +42,12 @@ sub smallest_panel {
 }
 
 Tab::Round->set_sql(small_panel => "select min(number) from (
-			select count(distinct comp.id) as number
-			from ballot,panel,comp
+			select count(distinct entry.id) as number
+			from ballot,panel,entry
 		   	where panel.round = ?
 			and ballot.panel = panel.id
-			and ballot.comp = comp.id
-			and comp.dropped != 1
+			and ballot.entry = entry.id
+			and entry.dropped != 1
 			and panel.type=\"prelim\"
 			group by panel.id ) as panel_numbers");
 
@@ -57,12 +57,12 @@ sub largest_panel {
 }
 
 Tab::Round->set_sql(large_panel => "select max(number) from (
-			select count(distinct comp.id) as number
-			from ballot,panel,comp
+			select count(distinct entry.id) as number
+			from ballot,panel,entry
 			where panel.round = ?
 			and ballot.panel = panel.id
-			and ballot.comp = comp.id
-			and comp.dropped != 1
+			and ballot.entry = entry.id
+			and entry.dropped != 1
             and panel.type=\"prelim\"
             group by panel.id ) as panel_numbers");
 
@@ -115,9 +115,9 @@ sub rooms {
 
 }
 
-sub comps { 
+sub entrys { 
 	my $self = shift;
-	return Tab::Comp->search_by_round($self->id);
+	return Tab::Entry->search_by_round($self->id);
 }
 
 sub judges { 
@@ -145,11 +145,11 @@ Tab::Round->set_sql(by_site_and_tourn => "select distinct round.*
 											and round.event = event.id
 											and event.tourn = ?");
 
-Tab::Round->set_sql(latest_by_comp => "select distinct round.* 
+Tab::Round->set_sql(latest_by_entry => "select distinct round.* 
 											from round,panel,ballot
 											where round.id = panel.round
 											and panel.id = ballot.panel
-											and ballot.comp = ? 
+											and ballot.entry = ? 
 											order by round.name DESC limit 1");
 
 Tab::Round->set_sql(with_judges => "select distinct round.* 
@@ -162,29 +162,29 @@ Tab::Round->set_sql(with_judges => "select distinct round.*
 								and panel.round = round.id)
 								");
 
-Tab::Round->set_sql(with_comps => "select distinct round.* 
+Tab::Round->set_sql(with_entrys => "select distinct round.* 
 								from round
 								where round.event = ? 
-								and exists ( select comp.id 
-								from comp,panel,ballot
-								where comp.id = ballot.comp
+								and exists ( select entry.id 
+								from entry,panel,ballot
+								where entry.id = ballot.entry
 								and ballot.panel = panel.id
 								and panel.round = round.id)
 								");
 
-Tab::Round->set_sql(finals_by_comp => "select distinct round.*
-								from round,ballot,panel,comp
-								where comp.id = ballot.comp
+Tab::Round->set_sql(finals_by_entry => "select distinct round.*
+								from round,ballot,panel,entry
+								where entry.id = ballot.entry
 								and round.id = panel.round
-								and comp.id = ? 
+								and entry.id = ? 
 								and ballot.panel = panel.id
 								and panel.type = \"final\" ");
 
-Tab::Round->set_sql(elims_by_comp => "select distinct round.*
-								from round,ballot,panel,comp
-								where comp.id = ballot.comp
+Tab::Round->set_sql(elims_by_entry => "select distinct round.*
+								from round,ballot,panel,entry
+								where entry.id = ballot.entry
 								and round.id = panel.round
-								and comp.id = ? 
+								and entry.id = ? 
 								and ballot.panel = panel.id
 								and panel.type = \"elim\" ");
 

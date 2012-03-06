@@ -1,88 +1,88 @@
-package Tab::Comp;
+package Tab::Entry;
 use base 'Tab::DBI';
-Tab::Comp->table('comp');
-Tab::Comp->columns(Primary => qw/id/);
-Tab::Comp->columns(Essential => qw/student code dropped 
+Tab::Entry->table('entry');
+Tab::Entry->columns(Primary => qw/id/);
+Tab::Entry->columns(Essential => qw/student code dropped 
 					name school tourn timestamp event wins losses
 					partner dq waitlist dropped_at registered_at/);
 
-Tab::Comp->columns(Others => qw/apda_seed tb0 tb1 tb2 tb3 tb4 tb5 tb6 tb7 tb8 tb9 
+Tab::Entry->columns(Others => qw/apda_seed tb0 tb1 tb2 tb3 tb4 tb5 tb6 tb7 tb8 tb9 
 					sweeps_points results_bar bid noshow doubled title ada trpc_string
 					qualifier qual2 qualexp qual2exp notes timestamp/);
 
-Tab::Comp->columns(TEMP => qw/last_round rank rank_in_round speaks letter etype 
+Tab::Entry->columns(TEMP => qw/last_round rank rank_in_round speaks letter etype 
 					schcode regcode schoolid regionid panelid points ranks recips points/);
 
-Tab::Comp->has_a(student => 'Tab::Student');
-Tab::Comp->has_a(partner => 'Tab::Student');
-Tab::Comp->has_a(school => 'Tab::School');
-Tab::Comp->has_a(tourn => 'Tab::Tourn');
-Tab::Comp->has_a(event => 'Tab::Event');
-Tab::Comp->has_many(ballots => 'Tab::Ballot', 'comp');
-Tab::Comp->has_many(changes => 'Tab::Change', 'comp');
-Tab::Comp->has_many(ratings => 'Tab::Rating', 'comp');
+Tab::Entry->has_a(student => 'Tab::Student');
+Tab::Entry->has_a(partner => 'Tab::Student');
+Tab::Entry->has_a(school => 'Tab::School');
+Tab::Entry->has_a(tourn => 'Tab::Tourn');
+Tab::Entry->has_a(event => 'Tab::Event');
+Tab::Entry->has_many(ballots => 'Tab::Ballot', 'entry');
+Tab::Entry->has_many(changes => 'Tab::Change', 'entry');
+Tab::Entry->has_many(ratings => 'Tab::Rating', 'entry');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 __PACKAGE__->_register_datetimes( qw/dropped_at/);
 __PACKAGE__->_register_datetimes( qw/registered_at/);
 
-Tab::Comp->set_sql(wipe_prefs => " delete from rating where comp = ?");
+Tab::Entry->set_sql(wipe_prefs => " delete from rating where entry = ?");
 
-Tab::Comp->set_sql(prelim_cume_by_event => " 
-					select distinct comp.id as id, comp.code as code,
+Tab::Entry->set_sql(prelim_cume_by_event => " 
+					select distinct entry.id as id, entry.code as code,
 						SUM(ballot.rank) as prelim_cume
-						from comp,ballot,panel       
+						from entry,ballot,panel       
 						where ballot.panel = panel.id   
 						and panel.type = \"prelim\"       
-						and ballot.comp = comp.id
-						and comp.event = ?
-						group by comp");
+						and ballot.entry = entry.id
+						and entry.event = ?
+						group by entry");
 
-Tab::Comp->set_sql(sweep_prelims => " 
-				select distinct comp.id as id,comp.code as code,
+Tab::Entry->set_sql(sweep_prelims => " 
+				select distinct entry.id as id,entry.code as code,
 					sum(IF(ballot.rank < 5,6 - ballot.rank,1)) as points
-                from comp,ballot,panel,event
+                from entry,ballot,panel,event
                 where panel.type = \"prelim\"
                 and panel.id = ballot.panel
-                and ballot.comp = comp.id
-                and comp.dropped != 1
-                and comp.event = event.id
+                and ballot.entry = entry.id
+                and entry.dropped != 1
+                and entry.event = event.id
                 and event.type = \"speech\"
-                and comp.tourn = ?
+                and entry.tourn = ?
                 and ballot.rank != 0
-                group by comp");
+                group by entry");
 
-Tab::Comp->set_sql(sweep_elims => " 
-				select distinct comp.id as id,
+Tab::Entry->set_sql(sweep_elims => " 
+				select distinct entry.id as id,
 					sum(IF(ballot.rank < 5,6 - ballot.rank,1)) as points
-                from comp,ballot,panel,event
+                from entry,ballot,panel,event
                 where panel.type = \"elim\"
                 and panel.id = ballot.panel
 				and panel.nosweep != 1
-                and ballot.comp = comp.id
-                and comp.dropped != 1
-                and comp.event = event.id
+                and ballot.entry = entry.id
+                and entry.dropped != 1
+                and entry.event = event.id
                 and event.type = \"speech\"
-                and comp.tourn = ?
+                and entry.tourn = ?
                 and ballot.rank != 0
-                group by comp");
+                group by entry");
 
-Tab::Comp->set_sql(sweep_finals => " 
-				select distinct comp.id as id,
+Tab::Entry->set_sql(sweep_finals => " 
+				select distinct entry.id as id,
 					sum(IF(ballot.rank < 5,6 - ballot.rank,1)) as points
-                from comp,ballot,panel,event
+                from entry,ballot,panel,event
                 where panel.type = \"final\"
                 and panel.id = ballot.panel
-                and ballot.comp = comp.id
-                and comp.dropped != 1
-                and comp.event = event.id
+                and ballot.entry = entry.id
+                and entry.dropped != 1
+                and entry.event = event.id
                 and event.type = \"speech\"
-                and comp.tourn = ?
+                and entry.tourn = ?
                 and ballot.rank != 0
-                group by comp");
+                group by entry");
 
-Tab::Comp->set_sql(ties => "select distinct c1.id as me, c2.id 
-									from comp as c1, comp as c2
+Tab::Entry->set_sql(ties => "select distinct c1.id as me, c2.id 
+									from entry as c1, entry as c2
 									where c1.id = ? 
 									and c1.event = c2.event
 									and c2.dropped != 1
@@ -100,75 +100,75 @@ Tab::Comp->set_sql(ties => "select distinct c1.id as me, c2.id
 									and c1.tb8 = c2.tb8
 									and c1.tb9 = c2.tb9");
 
-Tab::Comp->set_sql(disqualified => "select distinct comp.* 
-						from comp,event
+Tab::Entry->set_sql(disqualified => "select distinct entry.* 
+						from entry,event
 						where event.tourn = ? 
-						and comp.event = event.id
-						and comp.dq = 1");
+						and entry.event = event.id
+						and entry.dq = 1");
 
-Tab::Comp->set_sql(count_active_by_event => "select count(distinct comp.id)
-                       from comp
-                       where comp.event = ? 
-                       and comp.dropped != 1
-                       and comp.waitlist != 1");
+Tab::Entry->set_sql(count_active_by_event => "select count(distinct entry.id)
+                       from entry
+                       where entry.event = ? 
+                       and entry.dropped != 1
+                       and entry.waitlist != 1");
 
-Tab::Comp->set_sql(count_waitlist_by_event => "select count(distinct comp.id)
-                       from comp
-                       where comp.event = ? 
-                       and comp.dropped != 1
-                       and comp.waitlist = 1");
+Tab::Entry->set_sql(count_waitlist_by_event => "select count(distinct entry.id)
+                       from entry
+                       where entry.event = ? 
+                       and entry.dropped != 1
+                       and entry.waitlist = 1");
 
-Tab::Comp->set_sql(by_event_order_and_timeslot => "
-					select distinct comp.*,panel.letter as letter
-					from comp,ballot,panel,round
-					where comp.event = ? 
-					and comp.id = ballot.comp
+Tab::Entry->set_sql(by_event_order_and_timeslot => "
+					select distinct entry.*,panel.letter as letter
+					from entry,ballot,panel,round
+					where entry.event = ? 
+					and entry.id = ballot.entry
 					and ballot.speakerorder = ? 
 					and ballot.panel = panel.id
 					and panel.round = round.id
 					and round.timeslot = ? 
 					order by panel.letter");
 
-Tab::Comp->set_sql(team_members => qq{ 
-				select distinct comp.id
-				from team_member,comp
+Tab::Entry->set_sql(team_members => qq{ 
+				select distinct entry.id
+				from team_member,entry
 				where team_member.student= ?
-				and team_member.comp = comp.id
-				and comp.tourn = ? 
+				and team_member.entry = entry.id
+				and entry.tourn = ? 
 		});
 
-Tab::Comp->set_sql(order_total => "select sum(ballot.speakerorder) 
+Tab::Entry->set_sql(order_total => "select sum(ballot.speakerorder) 
 		from ballot,panel
 		where ballot.panel = panel.id
 		and panel.type = \"prelim\"
-		and ballot.comp =  ?");
+		and ballot.entry =  ?");
 
 Tab::Ballot->set_sql(noshows_hit => "select count(distinct ballot.id) 
 							from ballot, ballot as b2
 							where ballot.panel = b2.panel
-							and b2.comp = ? 
-							and ballot.comp != b2.comp
+							and b2.entry = ? 
+							and ballot.entry != b2.entry
 							and ballot.speakerorder < b2.speakerorder
 							and ballot.noshow = 1");
 
 Tab::Ballot->set_sql(drops_hit => "select count(distinct ballot.id) 
-							from ballot, ballot as b2, comp
+							from ballot, ballot as b2, entry
 							where ballot.panel = b2.panel
-							and b2.comp = ? 
-							and ballot.comp != b2.comp
-							and ballot.comp = comp.id
-							and comp.dropped = 1
+							and b2.entry = ? 
+							and ballot.entry != b2.entry
+							and ballot.entry = entry.id
+							and entry.dropped = 1
 							and ballot.speakerorder < b2.speakerorder");
 
-Tab::Comp->set_sql(speech_comps_by_tourn => "select distinct comp.*
-							from comp,event
-							where comp.event = event.id
+Tab::Entry->set_sql(speech_entrys_by_tourn => "select distinct entry.*
+							from entry,event
+							where entry.event = event.id
 							and event.tourn = ?
 							and event.type = \"speech\"");
 
-Tab::Comp->set_sql(debate_congress_comps_by_tourn => "select distinct comp.*
-							from comp,event
-							where comp.event = event.id
+Tab::Entry->set_sql(debate_congress_entrys_by_tourn => "select distinct entry.*
+							from entry,event
+							where entry.event = event.id
 							and event.tourn = ?
 							and event.type != \"speech\"");
 
@@ -178,7 +178,7 @@ sub side {
 	
 	Tab::Ballot->set_sql(side_by_round => "select ballot.side from ballot,panel
 							where ballot.panel = panel.id
-							and ballot.comp = ?
+							and ballot.entry = ?
 							and panel.round = ?" );
 
 	return Tab::Ballot->sql_side_by_round->select_val($self->id,$round->id);
@@ -192,7 +192,7 @@ sub strikes {
 	my $tourn =  $self->school->tourn;
 
 	my @strikes = Tab::Strike->search(	
-					comp => $self->id,
+					entry => $self->id,
 					strike => 1 );
 
 	return @strikes;
@@ -236,7 +236,7 @@ sub full_team_name {
 
 sub latest_round {
 	my $self = shift;
-	my @rounds = Tab::Round->search_latest_by_comp($self->id);
+	my @rounds = Tab::Round->search_latest_by_entry($self->id);
 	return shift @rounds;
 }
 
@@ -266,7 +266,7 @@ sub ncfl_speaks_check {
 
 sub order_total {
 	my $self = shift;
-	my $total = Tab::Comp->sql_order_total->select_val($self->id);
+	my $total = Tab::Entry->sql_order_total->select_val($self->id);
 	my $adjust_noshows = Tab::Ballot->sql_noshows_hit->select_val($self->id);
 	my $adjust_drops = Tab::Ballot->sql_drops_hit->select_val($self->id);
 	$total = $total - $adjust_noshows;
@@ -275,176 +275,176 @@ sub order_total {
 	return $total;
 }
 
-Tab::Comp->set_sql(highest_code => "select MAX(code) from comp where event = ?");
+Tab::Entry->set_sql(highest_code => "select MAX(code) from entry where event = ?");
 
-Tab::Comp->set_sql(lowest_code => "select MIN(code) from comp where event = ?");
+Tab::Entry->set_sql(lowest_code => "select MIN(code) from entry where event = ?");
 
-Tab::Comp->set_sql(mult_last_name => "
-					select distinct comp.* from comp,school
-					where comp.name like ?
-					and comp.school = school.id
+Tab::Entry->set_sql(mult_last_name => "
+					select distinct entry.* from entry,school
+					where entry.name like ?
+					and entry.school = school.id
 					and school.tourn = ?");
 
-Tab::Comp->set_sql(part_last_name => "
-					select distinct comp.* from comp,student,school
-						where comp.partner = student.id
+Tab::Entry->set_sql(part_last_name => "
+					select distinct entry.* from entry,student,school
+						where entry.partner = student.id
 						and student.last like ?
-						and comp.school = school.id
+						and entry.school = school.id
 						and school.tourn = ?");
 
-Tab::Comp->set_sql(stud_last_name => "
-					select distinct comp.* from comp,student,school
-						where comp.student = student.id
+Tab::Entry->set_sql(stud_last_name => "
+					select distinct entry.* from entry,student,school
+						where entry.student = student.id
 						and student.last like ?
-						and comp.school = school.id
+						and entry.school = school.id
 						and school.tourn = ?");
 
-Tab::Comp->set_sql(team_last_name => " 
-					select distinct comp.* from comp,student,team_member,school
-						where comp.id = team_member.comp
+Tab::Entry->set_sql(team_last_name => " 
+					select distinct entry.* from entry,student,team_member,school
+						where entry.id = team_member.entry
 						and team_member.student = student.id
 						and student.last like ? 
-						and comp.school = school.id
+						and entry.school = school.id
 						and school.tourn = ?");
 
-Tab::Comp->set_sql(event_last_name => "
-					select distinct comp.* from comp,student
-					where comp.student = student.id
-					and comp.event = ?
+Tab::Entry->set_sql(event_last_name => "
+					select distinct entry.* from entry,student
+					where entry.student = student.id
+					and entry.event = ?
 					and student.last = ?
 					");
 
-Tab::Comp->set_sql(school_event_last_name => "
-					select distinct comp.* from comp,student
-					where comp.student = student.id
-					and comp.school = ?
-					and comp.event = ?
+Tab::Entry->set_sql(school_event_last_name => "
+					select distinct entry.* from entry,student
+					where entry.student = student.id
+					and entry.school = ?
+					and entry.event = ?
 					and student.last = ?
 					");
 
-Tab::Comp->set_sql( not_mine => "
-				select distinct comp.* from comp,panel,ballot
-                   where (select count(distinct b2.comp)
+Tab::Entry->set_sql( not_mine => "
+				select distinct entry.* from entry,panel,ballot
+                   where (select count(distinct b2.entry)
                    from ballot as b2 where b2.panel = panel.id) = ?
-                   and comp.dropped != 1
-                   and comp.dq != 1
-                   and ballot.comp = comp.id
+                   and entry.dropped != 1
+                   and entry.dq != 1
+                   and ballot.entry = entry.id
                    and ballot.panel = panel.id
                    and panel.round = ?
-                     order by comp.code
+                     order by entry.code
                     ");
 
 sub panel_in_round {
 	my ($self,$round) = @_;
-	my @panels = Tab::Panel->search_by_comp_in_round($self->id,$round->id);
+	my @panels = Tab::Panel->search_by_entry_in_round($self->id,$round->id);
 	return shift @panels;
 }
 
-Tab::Comp->set_sql(by_region_and_pool => "
-						select distinct comp.*
-						from comp,school,pool,round
-						where comp.school = school.id
-						and comp.event = round.event
+Tab::Entry->set_sql(by_region_and_pool => "
+						select distinct entry.*
+						from entry,school,pool,round
+						where entry.school = school.id
+						and entry.event = round.event
 						and school.region = ? 
 						and round.pool = ?");
 
-Tab::Comp->set_sql(by_region_and_event => "
-						select distinct comp.id from comp,student,school
+Tab::Entry->set_sql(by_region_and_event => "
+						select distinct entry.id from entry,student,school
 						where school.region = ? 
-						and comp.school = school.id
-                		and comp.event = ?
+						and entry.school = school.id
+                		and entry.event = ?
 				");
 
-Tab::Comp->set_sql(active_by_region_and_event => "
-				select distinct comp.id from comp,school
+Tab::Entry->set_sql(active_by_region_and_event => "
+				select distinct entry.id from entry,school
                 where school.region = ?
 				and school.tourn = ? 
-				and school.id = comp.school
-                and comp.event = ?
-				and comp.dropped != 1
-				and comp.waitlist != 1
+				and school.id = entry.school
+                and entry.event = ?
+				and entry.dropped != 1
+				and entry.waitlist != 1
 				");
 
-Tab::Comp->set_sql(active_by_region => "
-				select distinct comp.id from comp,school
+Tab::Entry->set_sql(active_by_region => "
+				select distinct entry.id from entry,school
                 where school.region = ?
 				and school.tourn = ? 
-				and school.id = comp.school
-				and comp.dropped != 1
-				and comp.waitlist != 1
+				and school.id = entry.school
+				and entry.dropped != 1
+				and entry.waitlist != 1
 				");
 
-Tab::Comp->set_sql(by_region_and_group => "
-				select distinct comp.id from comp,school,event
+Tab::Entry->set_sql(by_region_and_group => "
+				select distinct entry.id from entry,school,event
                 where school.region = ?
-				and school.id = comp.school
-                and comp.event = event.id
+				and school.id = entry.school
+                and entry.event = event.id
 				and event.judge_group = ? 
 				");
 
-Tab::Comp->set_sql(by_group_school=> qq{select distinct comp.* 
-								from comp,event
-								where comp.event = event.id
-								and comp.school = ?
-								and comp.waitlist != 1
-								and comp.dropped != 1
+Tab::Entry->set_sql(by_group_school=> qq{select distinct entry.* 
+								from entry,event
+								where entry.event = event.id
+								and entry.school = ?
+								and entry.waitlist != 1
+								and entry.dropped != 1
 								and event.no_judge_burden = 0
 								and event.judge_group = ?});
 
-Tab::Comp->set_sql(by_group=>  qq{select distinct comp.* 
-								from comp,event
-								where comp.event = event.id
-								and comp.waitlist != 1
-								and comp.dropped != 1
+Tab::Entry->set_sql(by_group=>  qq{select distinct entry.* 
+								from entry,event
+								where entry.event = event.id
+								and entry.waitlist != 1
+								and entry.dropped != 1
 								and event.judge_group = ?});			
 
-Tab::Comp->set_sql(by_round=> qq{select distinct comp.*,panel.id as panelid
-								from comp,panel,ballot
-								where comp.id = ballot.comp
-								and comp.dropped != 1
-								and comp.dq != 1
+Tab::Entry->set_sql(by_round=> qq{select distinct entry.*,panel.id as panelid
+								from entry,panel,ballot
+								where entry.id = ballot.entry
+								and entry.dropped != 1
+								and entry.dq != 1
 								and ballot.panel = panel.id
 								and panel.round = ?
 								order by ballot.speakerorder});
 
 
 
-Tab::Comp->set_sql( by_panel_rank => "select comp.*,sum(ballot.rank) as ranks,
+Tab::Entry->set_sql( by_panel_rank => "select entry.*,sum(ballot.rank) as ranks,
 								sum(1/ballot.rank) as recips,sum(points) as points
-								from comp,ballot
-								where ballot.comp = comp.id 
+								from entry,ballot
+								where ballot.entry = entry.id 
 								and ballot.panel = ?
-								group by comp
+								group by entry
 								order by ranks, recips DESC,points DESC");
 
-Tab::Comp->set_sql(by_panel=> qq{ 
-			select distinct comp.id,comp.code,school.code as schcode,
+Tab::Entry->set_sql(by_panel=> qq{ 
+			select distinct entry.id,entry.code,school.code as schcode,
 			ballot.speakerorder as speaks,
 			school.id as schoolid,school.region as regionid
-			from comp,ballot,school
-			where comp.dropped != 1
-			and comp.dq != 1
+			from entry,ballot,school
+			where entry.dropped != 1
+			and entry.dq != 1
 			and ballot.panel = ? 	
-			and ballot.comp = comp.id 
-			and comp.school = school.id
-			order by ballot.speakerorder,comp.id});
+			and ballot.entry = entry.id 
+			and entry.school = school.id
+			order by ballot.speakerorder,entry.id});
 
-Tab::Comp->set_sql(by_panel_regcode => qq{ 
-				select distinct comp.*,region.code as regcode
-				from comp,ballot,school,region
+Tab::Entry->set_sql(by_panel_regcode => qq{ 
+				select distinct entry.*,region.code as regcode
+				from entry,ballot,school,region
 
-				where comp.dropped = 0 
+				where entry.dropped = 0 
 				and ballot.panel = ? 	
-				and ballot.comp = comp.id 
+				and ballot.entry = entry.id 
 
-				and comp.school = school.id
+				and entry.school = school.id
 				and school.region = region.id
-				order by ballot.speakerorder,comp.id});
+				order by ballot.speakerorder,entry.id});
 
-Tab::Comp->set_sql(has_judged => "  select distinct comp.id 
-									from comp,ballot 
+Tab::Entry->set_sql(has_judged => "  select distinct entry.id 
+									from entry,ballot 
 									where ballot.judge = ? 
-									and ballot.comp = comp.id");
+									and ballot.entry = entry.id");
 
 sub region { 
 	my $self = shift;
@@ -473,7 +473,7 @@ sub is_conflicted  {
     my ($self, $judge) = @_;
 
     my @strikes = Tab::Strike->search(
-                    comp => $self->id,
+                    entry => $self->id,
                     judge => $judge->id,
                     strike => 0 );
 
@@ -492,7 +492,7 @@ sub conflicts {
 	my $tourn = $self->school->tourn;
 	my $group = $self->event->judge_group;
 
-	my @strikes = Tab::Strike->search( comp => $self->id, strike => 0 );
+	my @strikes = Tab::Strike->search( entry => $self->id, strike => 0 );
 
 
 	if ($only) { 
@@ -528,25 +528,25 @@ sub has_judged {
 
 sub finals { 
 	my $self = shift;
-	return Tab::Round->search_finals_by_comp($self->id);
+	return Tab::Round->search_finals_by_entry($self->id);
 }
 
 sub elims { 
 	my $self = shift;
-	return Tab::Round->search_elims_by_comp($self->id);
+	return Tab::Round->search_elims_by_entry($self->id);
 }
 
 
 sub add_member { 
 	my ($self, $student) = @_;
-	my @existing = Tab::TeamMember->search( student => $student->id, comp => $comp->id );
-	Tab::TeamMember->create({ student => $student->id, comp => $comp->id }) unless @existing;
+	my @existing = Tab::TeamMember->search( student => $student->id, entry => $entry->id );
+	Tab::TeamMember->create({ student => $student->id, entry => $entry->id }) unless @existing;
 	return;
 }
 
 sub rm_member { 
 	my ($self, $student) = @_;
-	my @existing = Tab::TeamMember->search( student => $student->id, comp => $comp->id );
+	my @existing = Tab::TeamMember->search( student => $student->id, entry => $entry->id );
 	foreach (@existing) { $_->delete; }
 	return;
 }
@@ -570,17 +570,17 @@ sub has_seen {
 
 sub panels {
     my $self = shift;
-    return Tab::Panel->search_comp_panels($self->id);
+    return Tab::Panel->search_entry_panels($self->id);
 }
 
 sub prelims {
     my $self = shift;
-    return Tab::Panel->search_comp_prelims($self->id);
+    return Tab::Panel->search_entry_prelims($self->id);
 }
 
 sub round_panel {
     my ($self,$round) = @_;
-    my @panels = Tab::Panel->search_comp_panels_by_round($self->id, $round->id);
+    my @panels = Tab::Panel->search_entry_panels_by_round($self->id, $round->id);
 	my $one = shift @panels;
 	return $one;
 }
@@ -608,7 +608,7 @@ sub hits {
 sub seed { 
 	my ($self,$panel) = @_;
 	my @ballots = Tab::Ballot->search( 
-		comp => $self->id, 
+		entry => $self->id, 
 		panel => $panel->id, 
 		{order_by => "seed DESC"});
 	return $ballots[0]->seed if @ballots;
@@ -619,10 +619,10 @@ sub setorder {
 	my ($self, $order, $panel_id) = @_;
 	my $sql_string = "update ballot
 		set ballot.speakerorder = $order 
-		where ballot.comp = ".$self->id."
+		where ballot.entry = ".$self->id."
 		and ballot.panel = $panel_id";
-	Tab::Comp->set_sql(set_custom_order => $sql_string);
-	Tab::Comp->sql_set_custom_order->execute;
+	Tab::Entry->set_sql(set_custom_order => $sql_string);
+	Tab::Entry->sql_set_custom_order->execute;
 }
 
 sub set_question_timeslot {
@@ -640,17 +640,17 @@ sub order_by_round {
 	my ($self, $round) = @_;
 	my $sql_string = "select distinct ballot.speakerorder
 			from ballot,panel,round 
-			where ballot.comp = ".$self->id."
+			where ballot.entry = ".$self->id."
 			and ballot.panel = panel.id
 			and panel.round = ".$round->id;
-	Tab::Comp->set_sql(order_by_round => $sql_string);
-	return Tab::Comp->sql_order_by_round->select_val;
+	Tab::Entry->set_sql(order_by_round => $sql_string);
+	return Tab::Entry->sql_order_by_round->select_val;
 }
 
 sub speakerorder { 
 	my ($self,$panel) = @_;
 	my @ballots = Tab::Ballot->search( 
-		comp => $self->id, 
+		entry => $self->id, 
 		panel => $panel->id, 
 		{order_by => "speakerorder DESC"});
 	return $ballots[0]->speakerorder if @ballots;
@@ -660,19 +660,19 @@ sub speakerorder {
 sub cume { 
 
 	my $self = shift;
-	Tab::Comp->set_sql(overall_cume => "select SUM(ballot.rank) from ballot
-						where ballot.comp = ".$self->id);
+	Tab::Entry->set_sql(overall_cume => "select SUM(ballot.rank) from ballot
+						where ballot.entry = ".$self->id);
 
-	return Tab::Comp->sql_overall_cume->select_val;
+	return Tab::Entry->sql_overall_cume->select_val;
 }
 
-Tab::Comp->set_sql(prelim_cume => "select SUM(ballot.rank) from ballot,panel       
+Tab::Entry->set_sql(prelim_cume => "select SUM(ballot.rank) from ballot,panel       
 								where ballot.panel = panel.id   
 								and panel.type = \"prelim\"       
-								and ballot.comp = ?");
+								and ballot.entry = ?");
 sub prelim_cume { 
 	my $self = shift;
-	return Tab::Comp->sql_prelim_cume->select_val($self->id);
+	return Tab::Entry->sql_prelim_cume->select_val($self->id);
 }
 
 sub prelim_ballots { 
@@ -692,82 +692,82 @@ sub final_ballots {
 
 
 
-Tab::Comp->set_sql(finals_by_school => "select distinct comp.id
-									from comp,ballot,panel
-									where comp.id = ballot.comp
-									and comp.school = ?
+Tab::Entry->set_sql(finals_by_school => "select distinct entry.id
+									from entry,ballot,panel
+									where entry.id = ballot.entry
+									and entry.school = ?
 									and ballot.panel = panel.id
 									and panel.type = \"final\" ");
 
-Tab::Comp->set_sql(elims_by_school => "select distinct comp.id
-									from comp,ballot,panel
-									where comp.id = ballot.comp
-									and comp.school = ?
+Tab::Entry->set_sql(elims_by_school => "select distinct entry.id
+									from entry,ballot,panel
+									where entry.id = ballot.entry
+									and entry.school = ?
 									and ballot.panel = panel.id
 									and panel.type = \"elim\" ");
 
-Tab::Comp->set_sql(finals_by_event => "select distinct comp.id
-									from comp,ballot,panel
-									where comp.id = ballot.comp
-									and comp.event = ?
+Tab::Entry->set_sql(finals_by_event => "select distinct entry.id
+									from entry,ballot,panel
+									where entry.id = ballot.entry
+									and entry.event = ?
 									and ballot.panel = panel.id
 									and panel.type = \"final\" ");
 
-Tab::Comp->set_sql(elims_by_event => "select distinct comp.id
-									from comp,ballot,panel
-									where comp.id = ballot.comp
-									and comp.event = ?
+Tab::Entry->set_sql(elims_by_event => "select distinct entry.id
+									from entry,ballot,panel
+									where entry.id = ballot.entry
+									and entry.event = ?
 									and ballot.panel = panel.id
 									and panel.type = \"elim\" ");
 
-Tab::Comp->set_sql(active_by_event => "select distinct comp.*
-									from comp
-									where comp.event = ?
-									and comp.dropped != 1
-									and comp.waitlist != 1");
+Tab::Entry->set_sql(active_by_event => "select distinct entry.*
+									from entry
+									where entry.event = ?
+									and entry.dropped != 1
+									and entry.waitlist != 1");
 
-Tab::Comp->set_sql(waitlist_by_event => "select distinct comp.*
-									from comp
-									where comp.event = ?
-									and comp.dropped != 1
-									and comp.waitlist = 1");
+Tab::Entry->set_sql(waitlist_by_event => "select distinct entry.*
+									from entry
+									where entry.event = ?
+									and entry.dropped != 1
+									and entry.waitlist = 1");
 
-Tab::Comp->set_sql(finals_by_tourn => "select distinct comp.id
-									from comp,ballot,panel
-									where comp.id = ballot.comp
-									and comp.tourn = ?
+Tab::Entry->set_sql(finals_by_tourn => "select distinct entry.id
+									from entry,ballot,panel
+									where entry.id = ballot.entry
+									and entry.tourn = ?
 									and ballot.panel = panel.id
 									and panel.type = \"final\" ");
 
-Tab::Comp->set_sql(elims_by_tourn => "select distinct comp.id
-									from comp,ballot,panel
-									where comp.id = ballot.comp
-									and comp.tourn = ?
+Tab::Entry->set_sql(elims_by_tourn => "select distinct entry.id
+									from entry,ballot,panel
+									where entry.id = ballot.entry
+									and entry.tourn = ?
 									and ballot.panel = panel.id
 									and panel.type = \"elim\" ");
 
-Tab::Comp->set_sql(by_region => "select distinct comp.id 
-									from comp,school
+Tab::Entry->set_sql(by_region => "select distinct entry.id 
+									from entry,school
 									where school.region = ?  
 									and school.tourn = ? 
-									and school.id = comp.school" );
+									and school.id = entry.school" );
 
-Tab::Comp->set_sql(double_entries => "select distinct c2.id
-        							from comp as c2, comp as c1, event
+Tab::Entry->set_sql(double_entries => "select distinct c2.id
+        							from entry as c2, entry as c1, event
     							    where c2.student = c1.student
     							    and c2.tourn = c1.tourn
    									and c1.event = ?
 									and c2.event != c1.event");
 
-Tab::Comp->set_sql(double_partners => "select distinct c2.id
-        							from comp as c2, comp as c1, event
+Tab::Entry->set_sql(double_partners => "select distinct c2.id
+        							from entry as c2, entry as c1, event
     							    where c2.partner = c1.student
     							    and c2.tourn = c1.tourn
    									and c1.event = ?
 									and c2.event != c1.event");
 
-Tab::Comp->set_sql(double_partners_twice => "select distinct c2.id
-        							from comp as c2, comp as c1, event
+Tab::Entry->set_sql(double_partners_twice => "select distinct c2.id
+        							from entry as c2, entry as c1, event
     							    where c1.partner is not null
 									and c1.partner != 0
 									and c2.partner = c1.partner
@@ -775,43 +775,43 @@ Tab::Comp->set_sql(double_partners_twice => "select distinct c2.id
    									and c1.event = ?
 									and c2.event != c1.event");
 
-Tab::Comp->set_sql(tourn_teams => "select distinct comp.* from comp,team_member
+Tab::Entry->set_sql(tourn_teams => "select distinct entry.* from entry,team_member
                                     where team_member.student = ? and
-                                    team_member.comp = comp.id and
+                                    team_member.entry = entry.id and
                                     tourn = ?");
 
-Tab::Comp->set_sql(by_tourn_and_code => "select distinct comp.* from comp,tourn,event
-									where comp.event = event.id
+Tab::Entry->set_sql(by_tourn_and_code => "select distinct entry.* from entry,tourn,event
+									where entry.event = event.id
 									and event.tourn = ?
-									and comp.code = ?");
+									and entry.code = ?");
 
-Tab::Comp->set_sql(by_timeslot => " select distinct comp.* 
-									from comp,ballot,round,panel
-		    						where comp.id = ballot.comp
+Tab::Entry->set_sql(by_timeslot => " select distinct entry.* 
+									from entry,ballot,round,panel
+		    						where entry.id = ballot.entry
    									and ballot.panel = panel.id
     								and panel.round = round.id
     								and round.timeslot = ? ");
 
-Tab::Comp->set_sql(by_timeslot_and_event => " select distinct comp.* 
-									from comp,ballot,round,panel
-		    						where comp.id = ballot.comp
+Tab::Entry->set_sql(by_timeslot_and_event => " select distinct entry.* 
+									from entry,ballot,round,panel
+		    						where entry.id = ballot.entry
    									and ballot.panel = panel.id
     								and panel.round = round.id
     								and round.timeslot = ?
 									and panel.event = ? ");
 
-Tab::Comp->set_sql(housed => "select distinct comp.*
-									from comp, housing
-									where comp.school = ? 
-									and comp.tourn = housing.tourn
-									and comp.student = housing.student");
+Tab::Entry->set_sql(housed => "select distinct entry.*
+									from entry, housing
+									where entry.school = ? 
+									and entry.tourn = housing.tourn
+									and entry.student = housing.student");
 
-Tab::Comp->set_sql(tied => "select distinct c1.id, c2.id 
-									from comp as c1, comp as c2,
+Tab::Entry->set_sql(tied => "select distinct c1.id, c2.id 
+									from entry as c1, entry as c2,
 									ballot as b1, ballot as b2
 									where c1.id != c2.id
-									and c1.id = b1.comp
-									and c2.id = b2.comp
+									and c1.id = b1.entry
+									and c2.id = b2.entry
 									and b1.panel = ?
 									and b1.panel = b2.panel
 									and c1.tb0 = c2.tb0
@@ -826,15 +826,15 @@ Tab::Comp->set_sql(tied => "select distinct c1.id, c2.id
 									and c1.tb8 = c2.tb8
 									and c1.tb9 = c2.tb9");
 
-Tab::Comp->set_sql(unballoted_comps_by_tourn => "select distinct comp.*
-									from comp,event
-									where comp.tourn = ? 
-									and comp.event = event.id
+Tab::Entry->set_sql(unballoted_entrys_by_tourn => "select distinct entry.*
+									from entry,event
+									where entry.tourn = ? 
+									and entry.event = event.id
 									and event.type != \"debate\"
-									and comp.dropped != 1
-									and comp.waitlist != 1
+									and entry.dropped != 1
+									and entry.waitlist != 1
 									and not exists (
-										select id from ballot where comp = comp.id )
+										select id from ballot where entry = entry.id )
 									");
 
 

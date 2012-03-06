@@ -2,15 +2,18 @@ package Tab::Ballot;
 use base 'Tab::DBI';
 Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
-Tab::Ballot->columns(Essential => qw/judge panel comp rank real_rank countmenot
-									 points real_points speakerorder bye
-									 timestamp speechnumber topic collected
-									 collected_by audit rankinround win side flight/);
-Tab::Ballot->columns(Others => qw/tv noshow seed chair/);
+
+Tab::Ballot->columns(Essential => qw/judge panel entry win rank points side
+									 speakerorder bye audit timestamp/);
+
+Tab::Ballot->columns(Others => qw/countmenot speechnumber topic seed
+								collected collected_by tv noshow chair/);
+
 Tab::Ballot->columns(TEMP => qw/code/);
+
 Tab::Ballot->has_a(judge => 'Tab::Judge');
 Tab::Ballot->has_a(panel => 'Tab::Panel');
-Tab::Ballot->has_a(comp => 'Tab::Comp');
+Tab::Ballot->has_a(entry => 'Tab::Entry');
 Tab::Ballot->has_a(collected_by => 'Tab::Account');
 
 __PACKAGE__->_register_dates( qw/timestamp collected/);
@@ -26,13 +29,6 @@ Tab::Ballot->set_sql(count_unchecked => "select count(distinct ballot.judge)
 											and panel.round = round.id
 											and round.timeslot = ?");
 
-Tab::Ballot->set_sql(speech_ballots_by_tourn => "select distinct ballot.*
-							from ballot,comp,event
-							where comp.event = event.id
-							and event.tourn = ?
-							and event.type = \"speech\"
-							and ballot.comp = comp.id");
-
 Tab::Ballot->set_sql(by_timeslot => "
 						select distinct ballot.*
 						from ballot,panel,round
@@ -43,7 +39,7 @@ Tab::Ballot->set_sql(by_timeslot => "
 Tab::Ballot->set_sql(set_question_by_timeslot => "
 						update ballot,panel,round
 						set ballot.topic = ?
-					    where ballot.comp = ?
+					    where ballot.entry = ?
 						and ballot.panel = panel.id
 						and panel.round = round.id
 						and round.timeslot = ?");
@@ -51,7 +47,7 @@ Tab::Ballot->set_sql(set_question_by_timeslot => "
 Tab::Ballot->set_sql(question_by_timeslot => "
 						select ballot.topic 
 						from ballot,panel,round
-					    where ballot.comp = ?
+					    where ballot.entry = ?
 						and ballot.panel = panel.id
 						and panel.round = round.id
 						and round.timeslot = ? ");
@@ -68,27 +64,27 @@ Tab::Ballot->set_sql(judge_busy_during => "
 				");
 
 Tab::Ballot->set_sql(undone_by_timeslot => "
-		select ballot.id from ballot,comp,panel,round
+		select ballot.id from ballot,entry,panel,round
 			where ballot.panel = panel.id
-	        and ballot.comp = comp.id
+	        and ballot.entry = entry.id
 			and panel.round = round.id
 			and round.timeslot = ? 
-	        and comp.dropped != 1
+	        and entry.dropped != 1
 			and ballot.audit = 0 ");
 
 Tab::Ballot->set_sql(undone_by_panel => "
-		select ballot.* from ballot,comp
+		select ballot.* from ballot,entry
 			where ballot.panel = ?
-	        and ballot.comp = comp.id
-	        and comp.dropped = 0
+	        and ballot.entry = entry.id
+	        and entry.dropped = 0
 			and ballot.audit = 0 ");
 
 Tab::Ballot->set_sql(undone_by_panel_and_judge => "
-		select ballot.* from ballot,comp
+		select ballot.* from ballot,entry
 			where ballot.panel = ?
 			and ballot.judge = ?
-	        and ballot.comp = comp.id
-	        and comp.dropped = 0
+	        and ballot.entry = entry.id
+	        and entry.dropped = 0
 			and ballot.audit = 0
 			"
 			);
@@ -101,14 +97,14 @@ Tab::Ballot->set_sql(by_round => "
 
 Tab::Ballot->set_sql(ordered_by_round => "
 		select ballot.* from ballot,panel,round
-			where ballot.comp = ?
+			where ballot.entry = ?
 			and ballot.panel = panel.id
 			and panel.round = round.id 
 			order by round.name,ballot.judge");
 
 Tab::Ballot->set_sql(elim_by_round => "
 		select ballot.* from ballot,panel,round
-			where ballot.comp = ?
+			where ballot.entry = ?
 			and ballot.panel = panel.id
 			and panel.round = round.id 
 			and panel.type != \"prelim\"
@@ -116,25 +112,25 @@ Tab::Ballot->set_sql(elim_by_round => "
 
 Tab::Ballot->set_sql(prelim_by_round => "
 		select ballot.* from ballot,panel,round
-			where ballot.comp = ?
+			where ballot.entry = ?
 			and ballot.panel = panel.id
 			and panel.round = round.id 
 			and panel.type = \"prelim\"
 			order by round.name,ballot.judge");
 
 Tab::Ballot->set_sql(judge_timeslot => "
-		select distinct ballot.id from ballot,panel,round,timeslot,comp
+		select distinct ballot.id from ballot,panel,round,timeslot,entry
 			where ballot.judge = ?
 			and ballot.panel = panel.id
 			and panel.round = round.id
 			and round.timeslot = ? 
-			and comp.id = ballot.comp
-			and comp.dropped = 0
+			and entry.id = ballot.entry
+			and entry.dropped = 0
 		");
 
 Tab::Ballot->set_sql(round_ballots => "
 			select distinct ballot.id from ballot,round,panel
-				where ballot.comp = ? 
+				where ballot.entry = ? 
 				and ballot.panel = panel.id
 				and panel.round = ? ");
 
@@ -146,38 +142,38 @@ Tab::Ballot->set_sql(by_tourn => "
 
 Tab::Ballot->set_sql(ballots_from_prelims => "
 			select distinct ballot.id from ballot,panel
-			where ballot.comp = ? 
+			where ballot.entry = ? 
 			and ballot.panel = panel.id
 			and panel.type = \"prelim\" ");
 
 Tab::Ballot->set_sql(ballots_from_elims => "
 			select distinct ballot.id from ballot,panel
-			where ballot.comp = ? 
+			where ballot.entry = ? 
 			and ballot.panel = panel.id
 			and panel.type = \"elim\" ");
 
 Tab::Ballot->set_sql(ballots_from_finals => "
 			select distinct ballot.id from ballot,panel
-			where ballot.comp = ? 
+			where ballot.entry = ? 
 			and ballot.panel = panel.id
 			and panel.type = \"final\" ");
 
 Tab::Ballot->set_sql(ballots_by_event => "
-			select distinct ballot.*,comp.code as code
-			from ballot,comp,panel,round
-			where ballot.comp = comp.id
-			and comp.event = ?
-			and comp.dropped = 0
+			select distinct ballot.*,entry.code as code
+			from ballot,entry,panel,round
+			where ballot.entry = entry.id
+			and entry.event = ?
+			and entry.dropped = 0
 			and ballot.panel = panel.id
 			and panel.round = round.id
 			order by round.name,ballot.judge");
 
 Tab::Ballot->set_sql(prelim_ballots_by_event => "
-			select distinct ballot.*,comp.code as code
-			from ballot,comp,panel,round
-			where ballot.comp = comp.id
-			and comp.event = ?
-			and comp.dropped = 0
+			select distinct ballot.*,entry.code as code
+			from ballot,entry,panel,round
+			where ballot.entry = entry.id
+			and entry.event = ?
+			and entry.dropped = 0
 			and ballot.panel = panel.id
 			and panel.round = round.id
 			and round.type = \"prelim\"
@@ -185,11 +181,11 @@ Tab::Ballot->set_sql(prelim_ballots_by_event => "
 
 Tab::Ballot->set_sql(empty_by_round =>"
 			select distinct ballot.id from ballot,panel
-			where ballot.comp is null
+			where ballot.entry is null
 			and ballot.panel = panel.id 
 			and panel.round = ?");
 
 Tab::Ballot->set_sql(empty_by_panel =>"
 			select distinct ballot.id from ballot
-			where ballot.comp is null
+			where ballot.entry is null
 			and ballot.panel = ?");
