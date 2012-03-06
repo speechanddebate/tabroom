@@ -30,6 +30,11 @@ Tab::Region->set_sql(by_event => "select distinct region.*
 							and region.id = school.region
 							");
 
+Tab::Region->set_sql(by_admin => "select distinct region.*
+						from region,region_admin
+						where region_admin.account = ? 
+						and region.admin.region = region.id "); 
+
 sub paid { 
 
 	my ($self, $tourn) = @_;
