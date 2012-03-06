@@ -110,6 +110,16 @@ foreach my $tourn (@tourns) {
 		circuit => $tourn->league->id
 	});
 
+	if ($tourn->director && $tourn->director->id) { 
+	
+		Tab::AccountAccess->create({
+			tournament => $tourn->id,
+			account => $tourn->director->id,
+			contact => 1
+		});
+
+	}
+
 	my $method = $methods_by_id{$tourn->method->id} if $tourn->method;
 
 	if ($method) { 
@@ -421,6 +431,20 @@ foreach my $coach (@coaches) {
 	$chapter->update;
 }
 
+print "Loading all results files\n";
+
+my @results = Tab::ResultFile->retrieve_all;
+
+foreach my $result (@results) { 
+
+	Tab::File->create({
+		tournament => $result->tournament->id,
+		label => $result->name,
+		name => $result->filename,
+		result => 1
+	});
+
+}
 
 print "Finis!\n";
 

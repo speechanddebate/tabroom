@@ -10,7 +10,6 @@ CREATE TABLE `tourn_setting` (
     KEY `tourn` (`tourn`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
-
 CREATE TABLE `judge_setting` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `judge` int(11) NOT NULL DEFAULT '0',
@@ -20,18 +19,6 @@ CREATE TABLE `judge_setting` (
     `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `judge` (`judge`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
-
-CREATE TABLE `chapter_judge` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `account` int(11) DEFAULT NULL,
-  `chapter` int(11) DEFAULT NULL,
-  `notes` varchar(254) DEFAULT NULL,
-  `cell` varchar(31) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `account` (`account`),
-  KEY `chapter` (`chapter`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
 CREATE TABLE `event_setting` (
@@ -68,12 +55,14 @@ CREATE TABLE `circuit_setting` (
 
 alter table	chapter add coaches varchar(255);
 alter table tiebreak add tourn int;
+alter table file add result bool;
 create index tourn on tiebreak(tourn);
 
-CREATE TABLE `ballot_student` (
+CREATE TABLE `ballot_speaks` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `ballot` int(11) DEFAULT NULL,
     `student` int(11) DEFAULT NULL,
+    `entry` int(11) DEFAULT NULL,
     `points` int(11) DEFAULT NULL,
     `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
@@ -82,7 +71,7 @@ CREATE TABLE `ballot_student` (
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
 
-CREATE TABLE `qualifier` (
+CREATE TABLE `entry_qualifier` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     entry int default null,
     name varchar(63) default null,
@@ -94,7 +83,7 @@ CREATE TABLE `qualifier` (
     KEY `tourn` (`tourn`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
-CREATE TABLE `follower` (
+CREATE TABLE `follow_account` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `account` int(11) DEFAULT NULL,
   `follower` int(11) DEFAULT NULL,
@@ -113,4 +102,13 @@ CREATE TABLE `tourn_circuit` (
     KEY `tourn` (`tourn`),
     KEY `circuit` (`circuit`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+
+CREATE TABLE `region_admin` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `region` int(11) NOT NULL DEFAULT '0',
+  `account` int(11) NOT NULL DEFAULT '0',
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+
 
