@@ -1,7 +1,7 @@
-package Tab::NoInterest;
+package Tab::AccountIgnore;
 use base 'Tab::DBI';
-Tab::NoInterest->table('no_interest');
-Tab::NoInterest->columns(Primary => qw/id/);
-Tab::NoInterest->columns(Essential => qw/account tournament/);
-Tab::NoInterest->has_a(account => "Tab::Account");
-Tab::NoInterest->has_a(tournament => "Tab::Tournament");
+Tab::AccountIgnore->table('account_ignore');
+Tab::AccountIgnore->columns(Primary => qw/id/);
+Tab::AccountIgnore->columns(Essential => qw/account tourn/);
+Tab::AccountIgnore->has_a(account => "Tab::Account");
+Tab::AccountIgnore->has_a(tourn => "Tab::Tourn");

@@ -2,11 +2,11 @@ package Tab::Rating;
 use base 'Tab::DBI';
 Tab::Rating->table('rating');
 Tab::Rating->columns(Primary => qw/id/);
-Tab::Rating->columns(Essential => qw/tournament judge type qual subset comp school entered name/);
+Tab::Rating->columns(Essential => qw/tourn judge type qual subset comp school entered name/);
 Tab::Rating->columns(TEMP => qw/qual_val/);
 
 Tab::Rating->has_a(judge => 'Tab::Judge');
-Tab::Rating->has_a(tournament => 'Tab::Tournament');
+Tab::Rating->has_a(tourn => 'Tab::Tourn');
 Tab::Rating->has_a(comp => 'Tab::Comp');
 Tab::Rating->has_a(school => 'Tab::School');
 Tab::Rating->has_a(qual => 'Tab::Qual');

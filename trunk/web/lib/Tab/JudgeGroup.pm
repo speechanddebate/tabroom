@@ -6,7 +6,7 @@ Tab::JudgeGroup->columns(Essential => qw/name abbr/);
 Tab::JudgeGroup->columns(Others => qw/judge_per missing_judge_fee uncovered_entry_fee 
 										timestamp track_by_pools alt_max min_burden max_burden
 										default_alt_reduce ask_paradigm strikes_explain conflicts
-										paradigm_explain fee_missing tournament pub_assigns
+										paradigm_explain fee_missing tourn pub_assigns
 										dio_min ask_alts free collective school_strikes
 										strike_reg_opens strike_reg_closes max_pool_burden
 										track_judge_hires hired_fee hired_pool cumulate_mjp
@@ -24,7 +24,7 @@ Tab::JudgeGroup->has_many(pools => "Tab::Pool", "judge_group");
 Tab::JudgeGroup->has_many(judges => "Tab::Judge", "judge_group");
 Tab::JudgeGroup->has_many(hires => 'Tab::JudgeHire', 'judge_group');
 Tab::JudgeGroup->has_a(default_alt_reduce => 'Tab::JudgeGroup');
-Tab::JudgeGroup->has_a(tournament => "Tab::Tournament");
+Tab::JudgeGroup->has_a(tourn => "Tab::Tourn");
 
 __PACKAGE__->_register_datetimes( qw/strike_reg_opens/);
 __PACKAGE__->_register_datetimes( qw/strike_reg_closes/);
@@ -35,7 +35,7 @@ sub next_code {
     my $self = shift;
 
 	my %judges_by_code = ();
-	foreach my $judge ($self->tournament->judges) { 
+	foreach my $judge ($self->tourn->judges) { 
 		$judges_by_code{$judge->code}++;
 	}
 

@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
 Tab::Judge->columns(Essential => qw/ code school active judge_group
-								tournament first last uber timestamp score
+								tourn first last uber timestamp score
 								special notes prelim_pool neutral tmp gender
 								cell first_year covers cfl_tab_first
 								cfl_tab_second cfl_tab_third alt_group
@@ -15,7 +15,7 @@ Tab::Judge->columns(TEMP => qw/	qual regcode schname regcode panelid
 Tab::Judge->has_a(school => 'Tab::School');
 Tab::Judge->has_a(uber => 'Tab::Uber');
 Tab::Judge->has_a(prelim_pool => 'Tab::Pool');
-Tab::Judge->has_a(tournament => 'Tab::Tournament');
+Tab::Judge->has_a(tourn => 'Tab::Tourn');
 Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(covers => 'Tab::JudgeGroup');
@@ -26,7 +26,7 @@ Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
 Tab::Judge->has_many(elim_assigns => 'Tab::ElimAssign', 'judge');
 
 Tab::Judge->set_sql(last_name => "select distinct judge.* from judge
-									where judge.tournament = ? 
+									where judge.tourn = ? 
 									and judge.last like ?");
 
 Tab::Judge->set_sql(by_debate_round=> qq{select distinct judge.*
@@ -47,14 +47,14 @@ Tab::Judge->set_sql( by_uber_and_tourn => "
 					from judge, school
 					where judge.uber = ?
 					and judge.school = school.id
-					and school.tournament = ? ");
+					and school.tourn = ? ");
 
 Tab::Judge->set_sql( duplicates => " 
 						select distinct judge.id, duplicate.id
 							from judge, judge as duplicate, 
 							judge_group, judge_group as dup_group
-							where judge_group.tournament = ?
-							and dup_group.tournament = judge_group.tournament
+							where judge_group.tourn = ?
+							and dup_group.tourn = judge_group.tourn
 							and judge.judge_group = judge_group.id
 							and duplicate.judge_group = dup_group.id
 							and duplicate.id > judge.id ");
@@ -142,7 +142,7 @@ Tab::Judge->set_sql( by_group_reg => "
 Tab::Judge->set_sql(by_region => "select distinct judge.* 
 									from judge force index(school), school
 									where school.region = ?
-									and school.tournament = ? 
+									and school.tourn = ? 
 									and judge.school = school.id
 								");
 
@@ -169,7 +169,7 @@ Tab::Judge->set_sql(clean_for_pool => "
     	select distinct judge.id,judge.school,judge.first,judge.last
 		from judge,pool,timeslot
 		where judge.active = 1
-		and judge.tournament = pool.tournament
+		and judge.tourn = pool.tourn
 
 		and pool.id = ?
 		and timeslot.id = pool.timeslot
@@ -354,7 +354,7 @@ Tab::Judge->set_sql(double_booked => "
         timeslot as timeslot1,
         timeslot as timeslot2
 
-        where judge.tournament = ?
+        where judge.tourn = ?
         and ballot1.judge = judge.id
         and ballot2.judge = judge.id
 
@@ -533,7 +533,7 @@ Tab::Judge->set_sql( by_strikedness => "
 Tab::Judge->set_sql(housed => "select distinct judge.*
 									from judge, housing
 									where judge.school = ? 
-									and judge.tournament = housing.tournament
+									and judge.tourn = housing.tourn
 									and judge.id = housing.judge");
 
 sub setting {

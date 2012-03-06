@@ -23,7 +23,7 @@ Tab::Panel->set_sql(by_site_and_tourn => "select distinct panel.*
 											where round.site = ? 
 											and panel.round = round.id
 											and round.event = event.id
-											and event.tournament = ?");
+											and event.tourn = ?");
 
 Tab::Panel->set_sql(conflicts => "select distinct panel.id
 							from panel,ballot,comp,round,timeslot as ts1,timeslot as ts2
@@ -54,7 +54,7 @@ Tab::Panel->set_sql(elims_by_tourn => qq{ select distinct panel.id
 								where panel.round = round.id
 								and round.type = \"elim\"
 								and round.event = event.id
-								and event.tournament = ? });
+								and event.tourn = ? });
 
 Tab::Panel->set_sql(comp_panels => qq{ select distinct panel.id 
 										from panel,ballot 
@@ -84,13 +84,13 @@ Tab::Panel->set_sql(prelims_by_tourn => qq{ select panel.*
 										from panel,event
 										where panel.type="prelim" 
 										and event.id = panel.event
-										and event.tournament = ? 
+										and event.tourn = ? 
 										order by "name"});
 
 Tab::Panel->set_sql(panels_by_tourn => qq{ select panel.*
 										from panel,event
 										where event.id = panel.event
-										and event.tournament = ? 
+										and event.tourn = ? 
 										order by "name"});
 
 Tab::Panel->set_sql(by_comp_in_round => "
@@ -119,7 +119,7 @@ Tab::Panel->set_sql(by_nojudge => "select distinct panel.id
 				and panel.event = event.id 
 				and panel.round = round.id
 				and round.preset = 0
-				and event.tournament = ? 
+				and event.tourn = ? 
 				and ballot.judge = 0");
 
 Tab::Panel->set_sql(judgecount => "
@@ -127,18 +127,18 @@ Tab::Panel->set_sql(judgecount => "
 				from panel,event,ballot,judge
 				where panel.event = event.id
 				and panel.type = \"prelim\"
-				and event.tournament = ?
+				and event.tourn = ?
 				and ballot.panel = panel.id 
 				and ballot.judge = judge.id
 				group by panel");
 
 Tab::Panel->set_sql(by_noroom => "select distinct panel.id 
 				from panel,event where event.id = panel.event
-				and event.tournament = ? and panel.room = 0");
+				and event.tourn = ? and panel.room = 0");
 
 Tab::Panel->set_sql(by_tourn => "select distinct panel.id 
 				from panel,event 
-				where event.tournament = ? 
+				where event.tourn = ? 
 				and panel.event = event.id");
 
 Tab::Panel->set_sql(judge_and_timeslot => "select distinct panel.*
@@ -423,8 +423,8 @@ sub score {
 
 	my $value;
 
-	my $method = $comp->tournament->method;
-	my $league = $comp->tournament->league;
+	my $method = $comp->tourn->method;
+	my $league = $comp->tourn->league;
 
 	if	($comp) { 
 
@@ -476,8 +476,8 @@ sub update_score {
 
 	my $value;
 
-	my $method = $comp->tournament->method;
-	my $league = $comp->tournament->league;
+	my $method = $comp->tourn->method;
+	my $league = $comp->tourn->league;
 
 	if	($comp) { 
 

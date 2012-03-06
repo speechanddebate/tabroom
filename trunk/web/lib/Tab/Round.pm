@@ -143,7 +143,7 @@ Tab::Round->set_sql(by_site_and_tourn => "select distinct round.*
 											from round,event
 											where round.site = ? 
 											and round.event = event.id
-											and event.tournament = ?");
+											and event.tourn = ?");
 
 Tab::Round->set_sql(latest_by_comp => "select distinct round.* 
 											from round,panel,ballot
@@ -188,28 +188,28 @@ Tab::Round->set_sql(elims_by_comp => "select distinct round.*
 								and ballot.panel = panel.id
 								and panel.type = \"elim\" ");
 
-Tab::Round->set_sql(by_tournament => "select distinct round.*
+Tab::Round->set_sql(by_tourn => "select distinct round.*
 								from round, event
 								where round.event = event.id
-								and event.tournament = ? ");
+								and event.tourn = ? ");
 
-Tab::Round->set_sql(prelims_by_tournament => "select distinct round.*
+Tab::Round->set_sql(prelims_by_tourn => "select distinct round.*
 								from round, event
 								where round.event = event.id
 								and round.type = \"prelim\"
-								and event.tournament = ? ");
+								and event.tourn = ? ");
 
-Tab::Round->set_sql(published_by_tournament => "select distinct round.*
+Tab::Round->set_sql(published_by_tourn => "select distinct round.*
 								from round, event
 								where round.event = event.id
 								and round.published = \"1\"
-								and event.tournament = ? ");
+								and event.tourn = ? ");
 
-Tab::Round->set_sql(listed_by_tournament => "select distinct round.*
+Tab::Round->set_sql(listed_by_tourn => "select distinct round.*
 								from round, event
 								where round.event = event.id
 								and round.listed = \"1\"
-								and event.tournament = ? ");
+								and event.tourn = ? ");
 
 
 Tab::Round->set_sql(max_round => "select distinct round.id

@@ -9,13 +9,13 @@ Tab::Chapter->has_many(students => 'Tab::Student', 'chapter');
 Tab::Chapter->has_many(ubers => 'Tab::Uber', 'chapter');
 Tab::Chapter->has_many(credits => 'Tab::Coach', 'chapter');
 Tab::Chapter->has_many(schools => 'Tab::School', 'chapter');
-Tab::Chapter->has_many(tournaments => 'Tab::School', 'chapter');
+Tab::Chapter->has_many(tourns => 'Tab::School', 'chapter');
 Tab::Chapter->has_many(league_joins => 'Tab::ChapterLeague', 'chapter');
 
 
 Tab::Chapter->set_sql(by_tourn => "select distinct me.* from chapter me, school
 										where me.id = school.chapter
-										and school.tournament = ?");
+										and school.tourn = ?");
 
 Tab::Chapter->set_sql(leagues => "select distinct me.*
 						from chapter me,chapter_league 
@@ -142,24 +142,24 @@ sub league_membership {
 sub school { 
 	my ($self, $tourn) = @_;
 	my @school = Tab::School->search( 
-			chapter => $self->id, tournament => $tourn->id);
+			chapter => $self->id, tourn => $tourn->id);
 	return $school[0] if @school;
 	return;
 }
 
 sub open_tourns {
 	my $self = shift;
-	return Tab::Tournament->search_open_by_chapter($self->id);
+	return Tab::Tourn->search_open_by_chapter($self->id);
 }
 
 sub entered_tourns {
 	my $self = shift;
-	return Tab::Tournament->search_entered_by_chapter($self->id);
+	return Tab::Tourn->search_entered_by_chapter($self->id);
 }
 
 sub results_tourns {
 	my $self = shift;
-	return Tab::Tournament->search_results_by_chapter($self->id);
+	return Tab::Tourn->search_results_by_chapter($self->id);
 }
 
 sub nongrads {

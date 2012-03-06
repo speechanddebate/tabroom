@@ -9,9 +9,9 @@ Tab::Room->has_many(blocks => 'Tab::RoomBlock', 'room');
 Tab::Room->has_many(panels => 'Tab::Panel', 'room');
 
 Tab::Room->set_sql(tourn_rooms => "select distinct room.id 
-								from room,tournament_site
-								where room.site = tournament_site.site 
-								and tournament_site.tournament = ?");		
+								from room,tourn_site
+								where room.site = tourn_site.site 
+								and tourn_site.tourn = ?");		
 
 Tab::Room->set_sql(by_event_pool => "select distinct room.id
 										from room,room_pool
@@ -19,11 +19,11 @@ Tab::Room->set_sql(by_event_pool => "select distinct room.id
 										and room_pool.event = ?");
 
 Tab::Room->set_sql(clean_rooms_by_round => "
-            select distinct room.* from room,round,tournament,timeslot
+            select distinct room.* from room,round,tourn,timeslot
             where room.site = ?
             and round.id = ?
 			and round.site = room.site
-            and tournament.id = timeslot.tournament
+            and tourn.id = timeslot.tourn
             and round.timeslot = timeslot.id
             and not exists (
                 select p2.id from panel as p2,round as r2,timeslot as t2
@@ -45,10 +45,10 @@ Tab::Room->set_sql(clean_rooms_by_round => "
 			order by room.name ");
 
 Tab::Room->set_sql(clean_rooms_by_timeslot => "
-            select distinct room.* from room,tournament,timeslot
+            select distinct room.* from room,tourn,timeslot
 			where timeslot.id = ? 	
             and room.site = ?
-            and tournament.id = timeslot.tournament
+            and tourn.id = timeslot.tourn
             and not exists (
                 select p2.id from panel as p2,round as r2,timeslot as t2
                 where t2.start < timeslot.end

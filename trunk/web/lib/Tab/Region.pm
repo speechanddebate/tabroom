@@ -3,16 +3,16 @@ use base 'Tab::DBI';
 Tab::Region->table('region');
 Tab::Region->columns(Primary => qw/id/);
 Tab::Region->columns(Essential => qw/name code/);
-Tab::Region->columns(Others => qw/director timestamp tournament diocese 
+Tab::Region->columns(Others => qw/director timestamp tourn diocese 
 								  quota arch league sweeps cooke_pts/);
 Tab::Region->has_a(director => 'Tab::Account');
 Tab::Region->has_a(league => 'Tab::League');
 Tab::Region->has_many(schools => 'Tab::School', 'region');
 Tab::Region->has_many(fines => 'Tab::Fine', 'region');
 
-Tab::Region->set_sql(by_tournament => "select distinct region.*
+Tab::Region->set_sql(by_tourn => "select distinct region.*
 						from region,school
-						where school.tournament = ? 
+						where school.tourn = ? 
 						and school.region = region.id
 						");
 
@@ -142,7 +142,7 @@ sub comp_count {
 	my ($self,$tourn) = @_;
 	Tab::Comp->set_sql(region_count => "select count(distinct comp.id) from comp,school
 										where comp.school = school.id
-										and school.tournament = ?
+										and school.tourn = ?
 										and school.region = ?");
 	return Tab::Comp->sql_region_count->select_val($tourn->id, $self->id);
 }
@@ -161,7 +161,7 @@ sub judge_count {
 	my ($self,$tourn) = @_;
 	Tab::Judge->set_sql(region_count => "select count(distinct judge.id) from judge,school
 										where judge.school = school.id
-										and school.tournament = ?
+										and school.tourn = ?
 										and school.region = ?");
 	return Tab::Judge->sql_region_count->select_val($tourn->id, $self->id);
 }
