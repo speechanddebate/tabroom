@@ -411,7 +411,7 @@ foreach my $comp (@comps) {
 
 print "Retrieving all chapters to update coach credit records:\n";
 
-my @coaches = Tab::Coaches->retrieve_all;
+my @coaches = Tab::Coach->retrieve_all;
 
 print "Updating coach records into chapter text fields:\n";
 
