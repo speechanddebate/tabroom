@@ -304,7 +304,7 @@ sub finalists {
 
 sub ballots { 
 	my $self = shift;
-	return Tab::Ballot->search_ballots_by_event($self->id);
+	return Tab::Ballot->search_by_event($self->id);
 }
 
 sub prelim_ballots { 

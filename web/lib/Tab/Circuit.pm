@@ -1,38 +1,38 @@
-package Tab::League;
+package Tab::Circuit;
 use base 'Tab::DBI';
-Tab::League->table('league');
-Tab::League->columns(Primary => qw/id/);
-Tab::League->columns(Essential => qw/name short_name timezone active state/);
-Tab::League->columns(Others => qw/url public_email hosted_site timestamp
+Tab::Circuit->table('chapter');
+Tab::Circuit->columns(Primary => qw/id/);
+Tab::Circuit->columns(Essential => qw/name short_name timezone active state/);
+Tab::Circuit->columns(Others => qw/url public_email hosted_site timestamp
 						dues_to region_based track_bids last_change approved
 						diocese_based site_theme header_file dues_amount apda_seeds 
 						tourn_only full_members logo_file public_results invoice_message/);
-Tab::League->has_many(tourns => "Tab::Tourn");
-Tab::League->has_many(regions => "Tab::Region");
-Tab::League->has_many(sites => "Tab::Site");
-Tab::League->has_many(links => "Tab::Link");
-Tab::League->has_many(news => "Tab::News");
-Tab::League->has_many(methods => "Tab::Method");
-Tab::League->has_many(memberships => "Tab::Membership");
-Tab::League->has_many(chapter_leagues => "Tab::ChapterLeague");
-Tab::League->has_a(dues_to => "Tab::Account");
-Tab::League->has_a(last_change => "Tab::Account");
+
+Tab::Circuit->has_many(tourns => "Tab::Tourn");
+Tab::Circuit->has_many(regions => "Tab::Region");
+Tab::Circuit->has_many(sites => "Tab::Site");
+Tab::Circuit->has_many(circuit_memberships => "Tab::CircuitMembership");
+Tab::Circuit->has_many(chapter_chapters => "Tab::ChapterCircuit");
+
+Tab::Circuit->has_a(dues_to => "Tab::Account");
+Tab::Circuit->has_a(last_change => "Tab::Account");
+
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-Tab::League->set_sql(by_admin => "
-				select distinct league.*
-					from league,league_admin
-					where league.id = league_admin.league
-					and league_admin.account = ? ");
+Tab::Circuit->set_sql(by_admin => "
+				select distinct chapter.*
+					from chapter,chapter_admin
+					where chapter.id = chapter_admin.chapter
+					and chapter_admin.account = ? ");
 
 sub admins {
     my $self = shift;
-    return sort {$a->last cmp $b->last} Tab::Account->search_by_league_admin($self->id);
+    return sort {$a->last cmp $b->last} Tab::Account->search_by_chapter_admin($self->id);
 }
 
 sub coaches { 
 	my $self = shift;
-    return sort {$a->last cmp $b->last} Tab::Account->search_by_league_coach($self->id);
+    return sort {$a->last cmp $b->last} Tab::Account->search_by_chapter_coach($self->id);
 }
 
 sub accounts {
@@ -46,17 +46,17 @@ sub accounts {
 
 sub chapters {
     my $self = shift;
-    return sort {$a->name cmp $b->name} Tab::Chapter->search_leagues($self->id);
+    return sort {$a->name cmp $b->name} Tab::Chapter->search_chapters($self->id);
 }
 
 sub non_members {
     my $self = shift;
-	return sort {$a->name cmp $b->name} Tab::Chapter->search_league_and_membership($self->id, 0);
+	return sort {$a->name cmp $b->name} Tab::Chapter->search_chapter_and_membership($self->id, 0);
 }
 
 sub members {
     my $self = shift;
-	return sort {$a->name cmp $b->name} Tab::Chapter->search_league_and_membership($self->id, 1);
+	return sort {$a->name cmp $b->name} Tab::Chapter->search_chapter_and_membership($self->id, 1);
 }
 
 sub shorter_name {
@@ -75,9 +75,9 @@ sub shorter_name {
 	return $name;
 }
 
-Tab::League->set_sql(chapters => " select distinct league.id 
-		from league,chapter_league where league.id = chapter_league.league 
-		and chapter_league.chapter = ?");
+Tab::Circuit->set_sql(chapters => " select distinct chapter.id 
+		from chapter,chapter_chapter where chapter.id = chapter_chapter.chapter 
+		and chapter_chapter.chapter = ?");
 
 sub setting {
 

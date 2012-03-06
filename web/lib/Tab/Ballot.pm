@@ -140,25 +140,25 @@ Tab::Ballot->set_sql(by_tourn => "
 				and panel.event = event.id
 				and event.tourn = ? ");
 
-Tab::Ballot->set_sql(ballots_from_prelims => "
+Tab::Ballot->set_sql(from_prelims => "
 			select distinct ballot.id from ballot,panel
 			where ballot.entry = ? 
 			and ballot.panel = panel.id
 			and panel.type = \"prelim\" ");
 
-Tab::Ballot->set_sql(ballots_from_elims => "
+Tab::Ballot->set_sql(from_elims => "
 			select distinct ballot.id from ballot,panel
 			where ballot.entry = ? 
 			and ballot.panel = panel.id
 			and panel.type = \"elim\" ");
 
-Tab::Ballot->set_sql(ballots_from_finals => "
+Tab::Ballot->set_sql(from_finals => "
 			select distinct ballot.id from ballot,panel
 			where ballot.entry = ? 
 			and ballot.panel = panel.id
 			and panel.type = \"final\" ");
 
-Tab::Ballot->set_sql(ballots_by_event => "
+Tab::Ballot->set_sql(by_event => "
 			select distinct ballot.*,entry.code as code
 			from ballot,entry,panel,round
 			where ballot.entry = entry.id

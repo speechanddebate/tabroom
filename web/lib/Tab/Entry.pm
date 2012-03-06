@@ -677,17 +677,17 @@ sub prelim_cume {
 
 sub prelim_ballots { 
 	my $self = shift;
-	return Tab::Ballot->search_ballots_from_prelims($self->id);
+	return Tab::Ballot->search_from_prelims($self->id);
 }
 
 sub elim_ballots { 
 	my $self = shift;
-	return Tab::Ballot->search_ballots_from_elims($self->id);
+	return Tab::Ballot->search_from_elims($self->id);
 }
 
 sub final_ballots { 
 	my $self = shift;
-	return Tab::Ballot->search_ballots_from_finals($self->id);
+	return Tab::Ballot->search_from_finals($self->id);
 }
 
 
