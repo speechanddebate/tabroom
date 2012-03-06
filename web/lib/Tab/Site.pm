@@ -7,11 +7,11 @@ Tab::Site->has_a(host => 'Tab::Account');
 Tab::Site->has_many(rooms => 'Tab::Room', {order_by => "quality"});
 Tab::Site->has_a(league => 'Tab::League');
 
-Tab::Site->set_sql(by_tournament => "
+Tab::Site->set_sql(by_tourn => "
         select distinct site.id
-        from site,tournament_site
-        where site.id = tournament_site.site
-        and tournament_site.tournament = ?" );
+        from site,tourn_site
+        where site.id = tourn_site.site
+        and tourn_site.tourn = ?" );
 
 Tab::Site->set_sql(by_event => "
         select distinct site.id
@@ -20,9 +20,9 @@ Tab::Site->set_sql(by_event => "
 		and round.event = ?");
 
 
-sub tournaments {
+sub tourns {
     my $self = shift;
-    return Tab::Tournament->search_by_site($self->id);
+    return Tab::Tourn->search_by_site($self->id);
 }
 
 sub rounds { 

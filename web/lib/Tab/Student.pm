@@ -22,11 +22,11 @@ Tab::Student->set_sql(team_members => "
 			where team_member.comp= ? 
 			and team_member.student = student.id ");
 
-Tab::Student->set_sql(by_tournament => "
+Tab::Student->set_sql(by_tourn => "
 			select distinct student.* from student,comp,school
 			where (student.id = comp.student or student.id = comp.partner)
 			and comp.school = school.id
-			and school.tournament = ? ");
+			and school.tourn = ? ");
 
 Tab::Student->set_sql(by_school => " 
 					select distinct me.* from student me, comp 
@@ -50,8 +50,8 @@ sub entries {
     my ($self,$tourn) = @_;
 	my @entries; 
 	push (@entries, $self->teams($tourn));
-	push (@entries, $self->comps(tournament => $tourn->id));
-	push (@entries, $self->parts(tournament => $tourn->id));
+	push (@entries, $self->comps(tourn => $tourn->id));
+	push (@entries, $self->parts(tourn => $tourn->id));
 	return @entries;
 }
 
@@ -68,8 +68,8 @@ sub print_events {
 
 sub housing { 
 	my ($self, $tourn, $day) = @_;
-	my @housings = Tab::Housing->search( student => $self->id, tournament => $tourn->id, night => $day->ymd ) if $day;
-	@housings = Tab::Housing->search( student => $self->id, tournament => $tourn->id ) unless $day;
+	my @housings = Tab::Housing->search( student => $self->id, tourn => $tourn->id, night => $day->ymd ) if $day;
+	@housings = Tab::Housing->search( student => $self->id, tourn => $tourn->id ) unless $day;
 	return shift @housings if $day;
 	return @housings;
 }
@@ -79,7 +79,7 @@ Tab::Student->set_sql(sweeps_points => qq{
 		SUM(comp.sweeps_points) as total_sweeps,COUNT(comp.id) as num_entries
     from comp,student
     where (comp.student = student.id or comp.partner = student.id)
-    and comp.tournament = ?
+    and comp.tourn = ?
 	and comp.dropped != 1
     GROUP BY student.id
     ORDER BY student.last });
@@ -102,13 +102,13 @@ Tab::Student->set_sql(housed_by_school => "
 			select distinct student.* from student,comp,housing
 			where student.id = comp.student 
 			and comp.school = ? 
-			and housing.tournament = comp.tournament
+			and housing.tourn = comp.tourn
 			and housing.student = student.id ");
 
 Tab::Student->set_sql(housed_partners_by_school => "
 			select distinct student.* from student,comp,housing
 			where student.id = comp.partner 
 			and comp.school = ? 
-			and housing.tournament = comp.tournament
+			and housing.tourn = comp.tourn
 			and housing.student = student.id ");
 

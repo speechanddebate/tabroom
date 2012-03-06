@@ -1,7 +1,7 @@
 package Tab::School;
 use base 'Tab::DBI';
 Tab::School->table('school');
-Tab::School->columns(Essential => qw/id tournament chapter name region code/);
+Tab::School->columns(Essential => qw/id tourn chapter name region code/);
 
 Tab::School->columns(Others => qw/sweeps_points timestamp score 
 								disclaimed registered paid_amount contact_name
@@ -11,7 +11,7 @@ Tab::School->columns(Others => qw/sweeps_points timestamp score
 Tab::School->has_a(chapter => 'Tab::Chapter');
 Tab::School->has_a(region => 'Tab::Region');
 Tab::School->has_a(disclaimed => 'Tab::Account');
-Tab::School->has_a(tournament => 'Tab::Tournament');
+Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_many(purchases => 'Tab::Purchase', 'school');
 Tab::School->has_many(comps => 'Tab::Comp', 'school');
 Tab::School->has_many(judges => 'Tab::Judge', 'school');
@@ -32,7 +32,7 @@ Tab::School->set_sql(schools => "select distinct school.id
 
 Tab::School->set_sql(speech_schools_by_tourn => "select distinct school.*
 							from school
-							where school.tournament = ?
+							where school.tourn = ?
 							and exists (
 								select comp.id
 								from comp, event
@@ -43,7 +43,7 @@ Tab::School->set_sql(speech_schools_by_tourn => "select distinct school.*
 
 Tab::School->set_sql(debate_congress_schools_by_tourn => "select distinct school.*
 							from school
-							where school.tournament = ?
+							where school.tourn = ?
 							and exists (
 								select comp.id
 								from comp, event
@@ -73,12 +73,12 @@ Tab::School->set_sql(by_waitlist_event => "select distinct school.id
 							and comp.event = ? ");
 
 Tab::School->set_sql(members_by_tourn => "select distinct school.id
-							from school, chapter, chapter_league,tournament
-                        	where tournament.id = ?
-							and school.tournament = tournament.id
+							from school, chapter, chapter_league,tourn
+                        	where tourn.id = ?
+							and school.tourn = tourn.id
 							and school.chapter = chapter.id
 							and chapter.id = chapter_league.chapter 
-                        	and chapter_league.league = tournament.league
+                        	and chapter_league.league = tourn.league
                         	and chapter_league.full_member = 1");
 
 sub free_ubers { 
@@ -109,7 +109,7 @@ sub conflicts {
 
 	my ($self, $group) = @_;
 
-	my $tourn =  $self->tournament;
+	my $tourn =  $self->tourn;
 
 	my @strikes = Tab::Strike->search(	
 					school => $self->id,
@@ -135,7 +135,7 @@ sub strikes {
 
 	my ($self, $group) = @_;
 
-	my $tourn =  $self->tournament;
+	my $tourn =  $self->tourn;
 
 	my @strikes = Tab::Strike->search(	
 					school => $self->id,
@@ -162,7 +162,7 @@ sub chapter_region {
 	my ($self,$region) = @_;
 
 	if ($region) { 
-		my $league = $self->tournament->league;
+		my $league = $self->tourn->league;
 
 		my @league_mems = Tab::ChapterLeague->search( chapter => $self->chapter->id,
 						  								league => $league->id);
@@ -177,7 +177,7 @@ sub chapter_region {
 		return;
 
 	} else { 
-		my $league = $self->tournament->league;
+		my $league = $self->tourn->league;
 		my @regs = Tab::Region->search_by_school_league($self->id, $league->id);
 		my $region = shift @regs;
 		return $region;
@@ -196,7 +196,7 @@ sub requests_by_group {
 }
 
 
-Tab::School->set_sql(highest_code => "select MAX(code) from school where tournament = ?");
+Tab::School->set_sql(highest_code => "select MAX(code) from school where tourn = ?");
 
 sub housing_reqs { 
 	my $self = shift;
@@ -266,7 +266,7 @@ sub group_entries {
 
 sub finalists{ 
 	my $self = shift;
-	my $tourn = $self->tournament; 	
+	my $tourn = $self->tourn; 	
 	my @events = $tourn->events;
 	my @finalists = Tab::Comp->search_finals_by_school($self->id);
 	return @finalists;
@@ -303,7 +303,7 @@ sub item_cost {
 sub concession_total { 
 	
 	my $self = shift; 
-	my $tourn = $self->tournament;
+	my $tourn = $self->tourn;
 	my $total;
 
 	foreach my $item ($tourn->items)  {

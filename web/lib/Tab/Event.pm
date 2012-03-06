@@ -2,7 +2,7 @@ package Tab::Event;
 use base 'Tab::DBI';
 Tab::Event->table('event');
 Tab::Event->columns(Primary => qw/id/);
-Tab::Event->columns(Essential => qw/name abbr tournament team judge_group/);
+Tab::Event->columns(Essential => qw/name abbr tourn team judge_group/);
 Tab::Event->columns(Others =>  qw/
 				class
 				min_entry
@@ -36,7 +36,7 @@ Tab::Event->columns(Others =>  qw/
 __PACKAGE__->_register_datetimes( qw/deadline/);
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-Tab::Event->has_a(tournament => 'Tab::Tournament');
+Tab::Event->has_a(tourn => 'Tab::Tourn');
 Tab::Event->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Event->has_a(class => 'Tab::Class');
 Tab::Event->has_a(qual_subset => 'Tab::QualSubset');
@@ -46,15 +46,15 @@ Tab::Event->has_many(results => 'Tab::StudentResult', 'event' );
 Tab::Event->has_many(room_pools => 'Tab::RoomPool', 'event');
 Tab::Event->has_many(panels => 'Tab::Panel', 'event'  => { order_by => 'letter'} );
 
-Tab::Event->set_sql(reported_by_tournament => " 
+Tab::Event->set_sql(reported_by_tourn => " 
 							select distinct event.* from event
-								where event.tournament = ? 
+								where event.tourn = ? 
 								and event.field_report = 1
 								order by event.name");
 
-Tab::Event->set_sql(liveupdates_by_tournament => " 
+Tab::Event->set_sql(liveupdates_by_tourn => " 
 							select distinct event.* from event
-								where event.tournament = ? 
+								where event.tourn = ? 
 								and event.live_updates = 1
 								order by event.name");
 
@@ -67,7 +67,7 @@ Tab::Event->set_sql(by_site_and_tourn => "select distinct event.*
                                             from round,event
                                             where round.site = ? 
                                             and round.event = event.id
-                                            and event.tournament = ?");
+                                            and event.tourn = ?");
 
 Tab::Event->set_sql(by_room_pool => "select distinct event.* 
 										from event,room_pool
@@ -87,20 +87,20 @@ Tab::Event->set_sql(by_region_and_tourn => "
 						and comp.school = school.id
 						and comp.dropped != 1
 						and school.region = ?
-						and school.tournament = ? ");
+						and school.tourn = ? ");
 
 Tab::Event->set_sql(by_school => "select distinct event.* from event,comp
 						where event.id = comp.event 
 						and comp.school = ? ");
 
 Tab::Event->set_sql(with_published => "select distinct event.* from event, round
-						where event.tournament = ? 
+						where event.tourn = ? 
 						and event.round = round.id
 						and round.published = 1");
 
 Tab::Event->set_sql(ok_to_break => "    
     select distinct event.* from event
-    where event.tournament = ?
+    where event.tourn = ?
 	and event.type = \"speech\"
 	and exists (
 		select p2.id from panel as p2,round as r2
@@ -231,7 +231,7 @@ sub next_code {
     my @existing_comps = Tab::Comp->search( event => $self->id, {order_by => "code DESC"} );
 	my $code = $self->code; 
 	
-	while (defined $self->tournament->comp_with_code($code)) {
+	while (defined $self->tourn->comp_with_code($code)) {
 		$code++;
 		$code++ if $code == 666;
 		$code++ if $code == 69;

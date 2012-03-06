@@ -29,7 +29,7 @@ Tab::Ballot->set_sql(count_unchecked => "select count(distinct ballot.judge)
 Tab::Ballot->set_sql(speech_ballots_by_tourn => "select distinct ballot.*
 							from ballot,comp,event
 							where comp.event = event.id
-							and event.tournament = ?
+							and event.tourn = ?
 							and event.type = \"speech\"
 							and ballot.comp = comp.id");
 
@@ -138,11 +138,11 @@ Tab::Ballot->set_sql(round_ballots => "
 				and ballot.panel = panel.id
 				and panel.round = ? ");
 
-Tab::Ballot->set_sql(by_tournament => "
+Tab::Ballot->set_sql(by_tourn => "
 			select distinct ballot.id from ballot,event,panel
 				where ballot.panel = panel.id
 				and panel.event = event.id
-				and event.tournament = ? ");
+				and event.tourn = ? ");
 
 Tab::Ballot->set_sql(ballots_from_prelims => "
 			select distinct ballot.id from ballot,panel

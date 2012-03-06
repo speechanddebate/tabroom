@@ -2,8 +2,8 @@ package Tab::Timeslot;
 use base 'Tab::DBI';
 Tab::Timeslot->table('timeslot');
 Tab::Timeslot->columns(Primary => qw/id/);
-Tab::Timeslot->columns(Essential => qw/start timestamp end name tournament/);
-Tab::Timeslot->has_a(tournament => 'Tab::Tournament');
+Tab::Timeslot->columns(Essential => qw/start timestamp end name tourn/);
+Tab::Timeslot->has_a(tourn => 'Tab::Tourn');
 Tab::Timeslot->has_many(rounds => 'Tab::Round', 'timeslot');
 Tab::Timeslot->has_many(standby_pools => 'Tab::Pool', 'timeslot');
 
@@ -17,7 +17,7 @@ __PACKAGE__->_register_datetimes( qw/end/);
 Tab::Timeslot->set_sql(with_panels_by_tourn => "
 			select distinct timeslot.* from
 			timeslot,round
-			where timeslot.tournament = ?
+			where timeslot.tourn = ?
 			and timeslot.id = round.timeslot
 			and exists (
 				select panel.id 
@@ -29,7 +29,7 @@ Tab::Timeslot->set_sql(with_panels_by_site_and_tourn => "
 			timeslot,round
 			where round.site = ? 
 			and round.timeslot = timeslot.id
-			and timeslot.tournament = ?
+			and timeslot.tourn = ?
 			and exists (
 				select panel.id 
 				from panel 
@@ -59,7 +59,7 @@ Tab::Timeslot->set_sql(by_prelim_group => "
 Tab::Timeslot->set_sql(prelims => " 
 			select timeslot.* 
 			from timeslot,round,panel
-			where timeslot.tournament = ? 
+			where timeslot.tourn = ? 
 			and panel.type = \"prelim\"
 			and panel.round = round.id
 			and round.timeslot = timeslot.id");
@@ -67,14 +67,14 @@ Tab::Timeslot->set_sql(prelims => "
 sub begins {
 	my $self = shift;
 	my $ts = $self->start;
-	$ts->set_time_zone($self->tournament->league->timezone);
+	$ts->set_time_zone($self->tourn->league->timezone);
 	return $ts;
 }
 
 sub ends {
 	my $self = shift;
 	my $ts = $self->end;
-	$ts->set_time_zone($self->tournament->league->timezone);
+	$ts->set_time_zone($self->tourn->league->timezone);
 	return $ts;
 }
 

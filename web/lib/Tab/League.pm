@@ -7,7 +7,7 @@ Tab::League->columns(Others => qw/url public_email hosted_site timestamp
 						dues_to region_based track_bids last_change approved
 						diocese_based site_theme header_file dues_amount apda_seeds 
 						tourn_only full_members logo_file public_results invoice_message/);
-Tab::League->has_many(tournaments => "Tab::Tournament");
+Tab::League->has_many(tourns => "Tab::Tourn");
 Tab::League->has_many(regions => "Tab::Region");
 Tab::League->has_many(sites => "Tab::Site");
 Tab::League->has_many(links => "Tab::Link");

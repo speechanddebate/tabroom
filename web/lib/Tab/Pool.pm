@@ -23,9 +23,9 @@ Tab::Pool->set_sql(by_standby_judge => "select distinct pool.id
                                         and pool_judge.pool = pool.id
                                         and pool.standby = 1");
 
-Tab::Pool->set_sql(by_tournament => "select distinct pool.* from pool,judge_group
+Tab::Pool->set_sql(by_tourn => "select distinct pool.* from pool,judge_group
 										where pool.judge_group = judge_group.id
-										and judge_group.tournament = ?");
+										and judge_group.tourn = ?");
 
 Tab::Pool->set_sql(judge_and_timeslot => "select distinct pool.*
                                         from pool,pool_judge
