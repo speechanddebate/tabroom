@@ -1,6 +1,6 @@
 package Tab::Tournament;
 use base 'Tab::DBI';
-Tab::Tournament->table('tournament');
+Tab::Tournament->table('tourn');
 Tab::Tournament->columns(Primary => qw/id/);
 Tab::Tournament->columns(Essential => qw/name start end league director approved method/);
 
@@ -46,11 +46,12 @@ __PACKAGE__->_register_datetimes( qw/drop_deadline/);
 __PACKAGE__->_register_datetimes( qw/judge_deadline/);
 __PACKAGE__->_register_datetimes( qw/fine_deadline/);
 
-Tab::Tournament->set_sql(my_tourns => "
-		select distinct tournament.id 
-		from tournament,account_access 
-		where tournament.id = account_access.tournament 
-		and account_access.account = ?");
+Tab::Tournament->set_sql(by_admin => "
+					select distinct tourn.*
+					from tourn,tourn_admin 
+					where tourn.id = tourn_admin.tourn 
+					and tourn_admin.account = ?
+					order by tourn.start");
 
 Tab::Tournament->set_sql(by_site => "
 		select distinct tournament.id 

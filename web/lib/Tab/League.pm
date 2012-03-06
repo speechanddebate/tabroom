@@ -19,11 +19,11 @@ Tab::League->has_a(dues_to => "Tab::Account");
 Tab::League->has_a(last_change => "Tab::Account");
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-Tab::League->set_sql(by_account => "
-		select distinct league.*
-		from league,league_admin
-		where league.id = league_admin.league
-		and league_admin.account = ? ");
+Tab::League->set_sql(by_admin => "
+				select distinct league.*
+					from league,league_admin
+					where league.id = league_admin.league
+					and league_admin.account = ? ");
 
 sub admins {
     my $self = shift;

@@ -44,11 +44,11 @@ Tab::Chapter->set_sql(league_and_code => "select distinct chapter.id
                         and chapter_league.league = ?
                         and chapter_league.code like ? ");
 
-Tab::Chapter->set_sql(accounts => "select distinct chapter.id 
-						from chapter,chapter_access 
-						where chapter.id = chapter_access.chapter 
-						and chapter_access.account = ?");
-
+Tab::Chapter->set_sql(by_admin => "
+						select distinct chapter.*
+						from chapter,chapter_admin
+						where chapter.id = chapter_admin.chapter 
+						and chapter_admin.account = ?");
 
 Tab::Chapter->set_sql(by_no_schools => "select chapter.id
         					from chapter left join school
