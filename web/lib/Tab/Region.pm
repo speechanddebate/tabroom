@@ -8,7 +8,7 @@ Tab::Region->columns(Others => qw/director timestamp tourn diocese
 Tab::Region->has_a(director => 'Tab::Account');
 Tab::Region->has_a(league => 'Tab::League');
 Tab::Region->has_many(schools => 'Tab::School', 'region');
-Tab::Region->has_many(fines => 'Tab::Fine', 'region');
+Tab::Region->has_many(fines => 'Tab::SchoolFine', 'region');
 
 Tab::Region->set_sql(by_tourn => "select distinct region.*
 						from region,school
@@ -46,7 +46,7 @@ sub paid {
 		$paid -= $school->paid_amount;
 	}
 
-	foreach my $fine (Tab::Fine->search( region => $self->id, reason => "Payment" )) { 
+	foreach my $fine (Tab::SchoolFine->search( region => $self->id, reason => "Payment" )) { 
 		$paid += $fine->amount;
 	}
 

@@ -8,7 +8,7 @@ Tab::Entry->columns(Essential => qw/student code dropped
 
 Tab::Entry->columns(Others => qw/apda_seed tb0 tb1 tb2 tb3 tb4 tb5 tb6 tb7 tb8 tb9 
 					sweeps_points results_bar bid noshow doubled title ada trpc_string
-					qualifier qual2 qualexp qual2exp notes timestamp/);
+					qualifier rating_tier2 rating_tierexp rating_tier2exp notes timestamp/);
 
 Tab::Entry->columns(TEMP => qw/last_round rank rank_in_round speaks letter etype 
 					schcode regcode schoolid regionid panelid points ranks recips points/);
@@ -19,7 +19,7 @@ Tab::Entry->has_a(school => 'Tab::School');
 Tab::Entry->has_a(tourn => 'Tab::Tourn');
 Tab::Entry->has_a(event => 'Tab::Event');
 Tab::Entry->has_many(ballots => 'Tab::Ballot', 'entry');
-Tab::Entry->has_many(changes => 'Tab::Change', 'entry');
+Tab::Entry->has_many(changes => 'Tab::TournChange', 'entry');
 Tab::Entry->has_many(ratings => 'Tab::Rating', 'entry');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
@@ -100,7 +100,7 @@ Tab::Entry->set_sql(ties => "select distinct c1.id as me, c2.id
 									and c1.tb8 = c2.tb8
 									and c1.tb9 = c2.tb9");
 
-Tab::Entry->set_sql(disqualified => "select distinct entry.* 
+Tab::Entry->set_sql(disrating_tierified => "select distinct entry.* 
 						from entry,event
 						where event.tourn = ? 
 						and entry.event = event.id

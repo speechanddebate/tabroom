@@ -1,26 +1,26 @@
-package Tab::Uber;
+package Tab::ChapterJudge;
 use base 'Tab::DBI';
-Tab::Uber->table('uber');
-Tab::Uber->columns(Primary => qw/id/);
-Tab::Uber->columns(Essential => qw/chapter retired first last account/);
-Tab::Uber->columns(Other => qw/gender started created last_judged notes cell paradigm/);
+Tab::ChapterJudge->table('chapter_judge');
+Tab::ChapterJudge->columns(Primary => qw/id/);
+Tab::ChapterJudge->columns(Essential => qw/chapter account notes first last/);
+Tab::ChapterJudge->columns(Other => qw/gender started created last_judged notes cell paradigm/);
 
-Tab::Uber->has_a(chapter => 'Tab::Chapter');
-Tab::Uber->has_many(judges => 'Tab::Judge', 'uber');
+Tab::ChapterJudge->has_a(chapter => 'Tab::Chapter');
+Tab::ChapterJudge->has_many(judges => 'Tab::Judge', 'chapter_judge');
 
-Tab::Uber->set_sql(free_by_school => "
-				select distinct uber.* from
-				school,uber
+Tab::ChapterJudge->set_sql(free_by_school => "
+				select distinct chapter_judge.* from
+				school,chapter_judge
 				where school.id = ?
-				and uber.chapter = school.chapter
-				and uber.retired != 1
+				and chapter_judge.chapter = school.chapter
+				and chapter_judge.retired != 1
 				and not exists (
 					select judge.id from judge
-					where judge.uber = uber.id
+					where judge.chapter_judge = chapter_judge.id
 					and judge.school = school.id);");
 
 sub judge {
 	my ($self, $tourn) = @_;
-	my @judges = Tab::Judge->search_by_uber_and_tourn($self->id, $tourn->id);
+	my @judges = Tab::Judge->search_by_chapter_judge_and_tourn($self->id, $tourn->id);
 	return shift @judges;
 }

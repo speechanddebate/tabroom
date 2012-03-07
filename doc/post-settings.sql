@@ -72,8 +72,6 @@ alter table fine rename to school_fine;
 alter table changes rename to tourn_change;
 alter table no_interest rename to account_ignore;
 
-
-
 alter table account drop password;
 alter table account drop active;
 alter table account drop hotel;
@@ -83,6 +81,19 @@ alter table account change change_timestamp password_timestamp datetime;
 alter table account drop is_cell;
 alter table account add provider varchar(63);
 alter table account drop type;
+alter table account add gender char;
+alter table account add started date;
 
+alter table ballot drop rank;
+alter table ballot drop points;
 
+alter table ballot change real_rank rank int;
+alter table ballot change real_points points int;
+alter table ballot drop flight;
+alter table ballot drop rankinround;
+
+alter table judge change uber chapter_judge int;
+alter table event_double add min int;
+alter table double_entry change setting int(3);
+alter table event change class event_double int;
 

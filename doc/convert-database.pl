@@ -251,7 +251,7 @@ foreach my $tourn (@tourns) {
 
 print "Done.  Retrieving all judges:\n";
 my @judges;
-#my @judges = Tab::Judge->retrieve_all;
+my @judges = Tab::Judge->retrieve_all;
 
 print "Done. Converting judges to the new settings\n";
 
@@ -268,6 +268,32 @@ foreach my $judge (@judges) {
 	$judge->setting("prelim_pool", $judge->prelim_pool);
 	$judge->setting("first_year", $judge->first_year);
 	$judge->setting("novice", $judge->novice);
+
+}
+
+print "Done.  Converting Uberjudges to the new settings and creating accounts:\n";
+
+foreach my $judge (Tab::Uber->retrieve_all) {
+
+    print "Converting judge ".$judge->first." ".$judge->last." \n";
+
+    my $started;
+
+    if ($judge->started && $judge->started > 0) {
+        $started = $started."-07-01";
+    }
+
+    my $account = Tab::Account->create({
+        first => $judge->first,
+        last => $judge->last,
+        gender => $judge->gender,
+        started => $started,
+        site_admin => 0,
+        paradigm => $judge->paradigm,
+    });
+
+    $judge->account($account->id);
+    $judge->update;
 
 }
 

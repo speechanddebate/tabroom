@@ -16,10 +16,10 @@ Tab::JudgeGroup->columns(Others => qw/judge_per missing_judge_fee uncovered_entr
 										obligation_before_strikes coach_ratings school_ratings 
 										entry_ratings entry_strikes /);
 
-Tab::JudgeGroup->has_many(classes => "Tab::Class", "judge_group");
-Tab::JudgeGroup->has_many(bins => "Tab::Bin", "judge_group");
-Tab::JudgeGroup->has_many(quals => "Tab::Qual", "judge_group");
-Tab::JudgeGroup->has_many(qual_subsets => "Tab::QualSubset", "judge_group");
+Tab::JudgeGroup->has_many(event_doubles => "Tab::EventDouble", "judge_group");
+Tab::JudgeGroup->has_many(strike_times => "Tab::StrikeTime", "judge_group");
+Tab::JudgeGroup->has_many(rating_tiers => "Tab::RatingTier", "judge_group");
+Tab::JudgeGroup->has_many(rating_subsets => "Tab::RatingSubset", "judge_group");
 Tab::JudgeGroup->has_many(pools => "Tab::Pool", "judge_group");
 Tab::JudgeGroup->has_many(judges => "Tab::Judge", "judge_group");
 Tab::JudgeGroup->has_many(hires => 'Tab::JudgeHire', 'judge_group');

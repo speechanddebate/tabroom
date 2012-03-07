@@ -5,7 +5,7 @@ Tab::Room->columns(Primary => qw/id/);
 Tab::Room->columns(Essential => qw/name inactive quality site/);
 Tab::Room->columns(Others => qw/timestamp capacity notes/);
 Tab::Room->has_a(site => 'Tab::Site');
-Tab::Room->has_many(blocks => 'Tab::RoomBlock', 'room');
+Tab::Room->has_many(blocks => 'Tab::RoomStrike', 'room');
 Tab::Room->has_many(panels => 'Tab::Panel', 'room');
 
 Tab::Room->set_sql(tourn_rooms => "select distinct room.id 

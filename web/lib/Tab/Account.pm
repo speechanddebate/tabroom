@@ -4,7 +4,7 @@ Tab::Account->table('account');
 
 Tab::Account->columns(Primary =>   qw/id/);
 Tab::Account->columns(Essential => qw/email passhash site_admin multiple/);
-Tab::Account->columns(Others =>    qw/first last phone street city state zip provider
+Tab::Account->columns(Others =>    qw/first last phone street city state zip provider paradigm started gender
 								   timestamp noemail change_pass_key password_timestamp tz/);
 
 __PACKAGE__->_register_datetimes( qw/password_timestamp/);
@@ -30,7 +30,7 @@ Tab::Account->has_many(follow_entry => 'Tab::FollowEntry', 'entry');
 
 sub tourns {
     my $self = shift;
-    return Tab::Tourn->search_by_admin($self->id));
+    return Tab::Tourn->search_by_admin($self->id);
 }
 
 sub chapters {
@@ -48,7 +48,7 @@ sub regions {
 	return Tab::Region->search_by_admin($self->id);
 }
 
-sub no_interest {
+sub account_ignore {
 	my ($self, $tourn)  = @_;
 	return unless $tourn;
 	my @nis = Tab::AccountIgnore->search( tourn => $tourn->id, account => $self->id );

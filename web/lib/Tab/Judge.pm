@@ -8,7 +8,7 @@ Tab::Judge->columns(Essential => qw/ code school active judge_group
 								cell first_year covers cfl_tab_first
 								cfl_tab_second cfl_tab_third alt_group
 								spare_pool paradigm novice trpc_string/);
-Tab::Judge->columns(TEMP => qw/	qual regcode schname regcode panelid
+Tab::Judge->columns(TEMP => qw/	rating_tier regcode schname regcode panelid
 								regid schid regname schcode 
 								num_panels num_kids standby/);
 
@@ -23,7 +23,6 @@ Tab::Judge->has_a(covers => 'Tab::JudgeGroup');
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
 
-Tab::Judge->has_many(elim_assigns => 'Tab::ElimAssign', 'judge');
 
 Tab::Judge->set_sql(last_name => "select distinct judge.* from judge
 									where judge.tourn = ? 
@@ -413,7 +412,7 @@ sub print_ratings {
 	my $string;
 
 	foreach my $rating (sort {$a->id cmp $b->id} @ratings) { 
-		$string .= " ".$rating->qual->name if $rating->qual;
+		$string .= " ".$rating->rating_tier->name if $rating->rating_tier;
 	}
 
 	return $string;
@@ -517,13 +516,13 @@ Tab::Judge->set_sql( useless_judges =>"
 				"
 				);
 
-Tab::Judge->set_sql( by_school_and_bin => "
+Tab::Judge->set_sql( by_school_and_strike_time => "
 				select distinct judge.* from judge
 				where judge.school = ?
 				and judge_group = ? 
 				and exists ( select strike.id from strike
 					where strike.judge = judge.id
-					and strike.bin = ? )");
+					and strike.strike_time = ? )");
 
 Tab::Judge->set_sql( by_strikedness => "
 				select distinct judge.* from judge,strike
