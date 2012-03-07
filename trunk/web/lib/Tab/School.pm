@@ -73,13 +73,13 @@ Tab::School->set_sql(by_waitlist_event => "select distinct school.id
 							and entry.event = ? ");
 
 Tab::School->set_sql(members_by_tourn => "select distinct school.id
-							from school, chapter, chapter_league,tourn
+							from school, chapter, chapter_circuit,tourn
                         	where tourn.id = ?
 							and school.tourn = tourn.id
 							and school.chapter = chapter.id
-							and chapter.id = chapter_league.chapter 
-                        	and chapter_league.league = tourn.league
-                        	and chapter_league.full_member = 1");
+							and chapter.id = chapter_circuit.chapter 
+                        	and chapter_circuit.circuit = tourn.circuit
+                        	and chapter_circuit.full_member = 1");
 
 sub free_ubers { 
 	my $self = shift;
@@ -162,23 +162,23 @@ sub chapter_region {
 	my ($self,$region) = @_;
 
 	if ($region) { 
-		my $league = $self->tourn->league;
+		my $circuit = $self->tourn->circuit;
 
-		my @league_mems = Tab::ChapterLeague->search( chapter => $self->chapter->id,
-						  								league => $league->id);
+		my @circuit_mems = Tab::ChapterCircuit->search( chapter => $self->chapter->id,
+						  								circuit => $circuit->id);
 
-		my $league_mem = shift @league_mems if @league_mems;
+		my $circuit_mem = shift @circuit_mems if @circuit_mems;
 
-		if ($league_mem) { 
-			$league_mem->region($region->id);
-			$league_mem->update;
+		if ($circuit_mem) { 
+			$circuit_mem->region($region->id);
+			$circuit_mem->update;
 		}
 
 		return;
 
 	} else { 
-		my $league = $self->tourn->league;
-		my @regs = Tab::Region->search_by_school_league($self->id, $league->id);
+		my $circuit = $self->tourn->circuit;
+		my @regs = Tab::Region->search_by_school_circuit($self->id, $circuit->id);
 		my $region = shift @regs;
 		return $region;
 	}

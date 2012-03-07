@@ -62,16 +62,16 @@ sub members {
 sub shorter_name {
 	my $self = shift;
 	my $name = $self->name;
-	$name =~ s/Catholic Forensic League/CFL/;
-	$name =~ s/Catholic Forensics League/CFL/;
-	$name =~ s/Forensic League/FL/;
-	$name =~ s/Forensics League/FL/;
+	$name =~ s/Catholic Forensic Circuit/CFL/;
+	$name =~ s/Catholic Forensics Circuit/CFL/;
+	$name =~ s/Forensic Circuit/FL/;
+	$name =~ s/Forensics Circuit/FL/;
 	$name =~ s/Forensic Association/FA/;
 	$name =~ s/Forensics Association/FA/;
-	$name =~ s/Urban Debate League/UDL/;
-	$name =~ s/High School Speech League/HSSL/;
-	$name =~ s/High School Debate League/HSDL/;
-	$name =~ s/Debate League/DL/;
+	$name =~ s/Urban Debate Circuit/UDL/;
+	$name =~ s/High School Speech Circuit/HSSL/;
+	$name =~ s/High School Debate Circuit/HSDL/;
+	$name =~ s/Debate Circuit/DL/;
 	return $name;
 }
 

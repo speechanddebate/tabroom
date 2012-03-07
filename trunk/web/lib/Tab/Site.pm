@@ -2,10 +2,10 @@
 package Tab::Site;
 use base 'Tab::DBI';
 Tab::Site->table('site');
-Tab::Site->columns(All => qw/id name host timestamp directions league dropoff/);
+Tab::Site->columns(All => qw/id name host timestamp directions circuit dropoff/);
 Tab::Site->has_a(host => 'Tab::Account');
 Tab::Site->has_many(rooms => 'Tab::Room', {order_by => "quality"});
-Tab::Site->has_a(league => 'Tab::League');
+Tab::Site->has_a(circuit => 'Tab::Circuit');
 
 Tab::Site->set_sql(by_tourn => "
         select distinct site.id

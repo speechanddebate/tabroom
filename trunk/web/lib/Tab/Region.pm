@@ -4,9 +4,9 @@ Tab::Region->table('region');
 Tab::Region->columns(Primary => qw/id/);
 Tab::Region->columns(Essential => qw/name code/);
 Tab::Region->columns(Others => qw/director timestamp tourn diocese 
-								  quota arch league sweeps cooke_pts/);
+								  quota arch circuit sweeps cooke_pts/);
 Tab::Region->has_a(director => 'Tab::Account');
-Tab::Region->has_a(league => 'Tab::League');
+Tab::Region->has_a(circuit => 'Tab::Circuit');
 Tab::Region->has_many(schools => 'Tab::School', 'region');
 Tab::Region->has_many(fines => 'Tab::SchoolFine', 'region');
 
@@ -16,12 +16,12 @@ Tab::Region->set_sql(by_tourn => "select distinct region.*
 						and school.region = region.id
 						");
 
-Tab::Region->set_sql(by_school_league => "select distinct region.* 
-							from region,chapter_league,school
+Tab::Region->set_sql(by_school_circuit => "select distinct region.* 
+							from region,chapter_circuit,school
 							where school.id = ? 
-							and school.chapter = chapter_league.chapter
-							and chapter_league.league = ?
-							and chapter_league.region = region.id ");
+							and school.chapter = chapter_circuit.chapter
+							and chapter_circuit.circuit = ?
+							and chapter_circuit.region = region.id ");
 
 Tab::Region->set_sql(by_event => "select distinct region.* 
 							from region,school,entry
@@ -174,7 +174,7 @@ sub group_entrys {
 
 sub chapters {
     my $self = shift;
-    my @memberships = Tab::ChapterLeague->search( region => $self->id );
+    my @memberships = Tab::ChapterCircuit->search( region => $self->id );
     my @members;
     foreach my $ms (@memberships) {
         push (@members, $ms->chapter);
