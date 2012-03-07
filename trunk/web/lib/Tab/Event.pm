@@ -4,7 +4,6 @@ Tab::Event->table('event');
 Tab::Event->columns(Primary => qw/id/);
 Tab::Event->columns(Essential => qw/name abbr tourn team judge_group/);
 Tab::Event->columns(Others =>  qw/
-				class
 				min_entry
 				max_entry
 				timestamp
@@ -13,6 +12,7 @@ Tab::Event->columns(Others =>  qw/
 				supp
 				cap 
 				school_cap 
+				event_double
 				blurb 
 				deadline 
 				fee 
@@ -27,7 +27,7 @@ Tab::Event->columns(Others =>  qw/
 				reg_codes
 				initial_codes
 				bids
-				qual_subset
+				rating_subset
 				no_judge_burden 
 				live_updates
 				omit_sweeps
@@ -38,11 +38,10 @@ __PACKAGE__->_register_datetimes( qw/timestamp/);
 
 Tab::Event->has_a(tourn => 'Tab::Tourn');
 Tab::Event->has_a(judge_group => 'Tab::JudgeGroup');
-Tab::Event->has_a(class => 'Tab::Class');
-Tab::Event->has_a(qual_subset => 'Tab::QualSubset');
+Tab::Event->has_a(event_double => 'Tab::EventDouble');
+Tab::Event->has_a(rating_subset => 'Tab::RatingSubset');
 Tab::Event->has_many(entrys => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
-Tab::Event->has_many(results => 'Tab::StudentResult', 'event' );
 Tab::Event->has_many(room_pools => 'Tab::RoomPool', 'event');
 Tab::Event->has_many(panels => 'Tab::Panel', 'event'  => { order_by => 'letter'} );
 

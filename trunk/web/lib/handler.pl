@@ -59,7 +59,7 @@ use Tab::Link;
 use Tab::Membership;
 use Tab::Method;
 use Tab::News;
-use Tab::NoInterest;
+use Tab::AccountIgnore;
 use Tab::Panel;
 use Tab::Pool;
 use Tab::PoolGroup;

@@ -12,10 +12,10 @@ Tab::School->has_a(chapter => 'Tab::Chapter');
 Tab::School->has_a(region => 'Tab::Region');
 Tab::School->has_a(disclaimed => 'Tab::Account');
 Tab::School->has_a(tourn => 'Tab::Tourn');
-Tab::School->has_many(purchases => 'Tab::Purchase', 'school');
+Tab::School->has_many(purchases => 'Tab::ConcessionPurchase', 'school');
 Tab::School->has_many(entrys => 'Tab::Entry', 'school');
 Tab::School->has_many(judges => 'Tab::Judge', 'school');
-Tab::School->has_many(fines => 'Tab::Fine', 'school');
+Tab::School->has_many(fines => 'Tab::SchoolFine', 'school');
 Tab::School->has_many(hires => 'Tab::JudgeHire', 'school');
 Tab::School->has_many(files => 'Tab::File', 'school');
 
@@ -277,26 +277,26 @@ sub events {
 	return Tab::Event->search_by_school($self->id);
 }
 
-sub bin_school_search {
-	my ($self,$group,$bin) = @_;
-	return Tab::Judge->search_by_school_and_bin($self->id, $group->id, $bin->id);
+sub strike_time_school_search {
+	my ($self,$group,$strike_time) = @_;
+	return Tab::Judge->search_by_school_and_strike_time($self->id, $group->id, $strike_time->id);
 }
 
 # Relating to concessions
 
 
-sub item_count { 
-	my ($self, $item) = @_;
-	my @purchases = Tab::Purchase->search({ school => $self->id, item => $item->id });
+sub concession_count { 
+	my ($self, $concession) = @_;
+	my @purchases = Tab::ConcessionPurchase->search({ school => $self->id, concession => $concession->id });
 	my $quantity;
 	foreach (@purchases) {  $quantity += $_->quantity; };
 	return $quantity;
 }
 
-sub item_cost { 
-	my ($self, $item) = @_;
-	my $quantity = $self->item_count($item);
-	my $cost = $quantity * $item->price;
+sub concession_cost { 
+	my ($self, $concession) = @_;
+	my $quantity = $self->concession_count($concession);
+	my $cost = $quantity * $concession->price;
 	return $cost;
 }
 
@@ -306,8 +306,8 @@ sub concession_total {
 	my $tourn = $self->tourn;
 	my $total;
 
-	foreach my $item ($tourn->items)  {
-		$total += $self->item_cost($item);
+	foreach my $concession ($tourn->concessions)  {
+		$total += $self->concession_cost($concession);
 	}
 
 	return $total;

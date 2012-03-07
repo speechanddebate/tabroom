@@ -1,7 +1,7 @@
-package Tab::FollowEntry;
+package Tab::FollowAccount;
 use base 'Tab::DBI';
-Tab::FollowEntry->table('follow_entry');
-Tab::FollowEntry->columns(Primary => qw/id/);
-Tab::FollowEntry->columns(Essential => qw/entry cell email domain/);
-Tab::FollowEntry->has_a(entry => 'Tab::Entry');
+Tab::FollowAccount->table('follow_account');
+Tab::FollowAccount->columns(Primary => qw/id/);
+Tab::FollowAccount->columns(Essential => qw/account cell email domain/);
+Tab::FollowAccount->has_a(account => 'Tab::Account');
 

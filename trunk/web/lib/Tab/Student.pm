@@ -8,7 +8,6 @@ Tab::Student->columns(TEMP => qw/num_entries total_sweeps entrycode chname/);
 Tab::Student->has_a(chapter => 'Tab::Chapter');
 Tab::Student->has_many(entrys => 'Tab::Entry', 'student');
 Tab::Student->has_many(parts => 'Tab::Entry', 'partner');
-Tab::Student->has_many(results => 'Tab::StudentResult', 'student');
 
 Tab::Student->set_sql(active_by_chapter => " 
 				select distinct student.* from student

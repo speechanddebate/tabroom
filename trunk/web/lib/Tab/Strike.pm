@@ -3,14 +3,14 @@ use base 'Tab::DBI';
 Tab::Strike->table('strike');
 Tab::Strike->columns(Primary => qw/id/);
 Tab::Strike->columns(Essential => qw/tourn judge type start end 
-										event entry school region bin 
+										event entry school region strike_time
 										timestamp strike/);
 
 Tab::Strike->has_a(judge => 'Tab::Judge');
 Tab::Strike->has_a(tourn => 'Tab::Tourn');
 Tab::Strike->has_a(event => 'Tab::Event');
 Tab::Strike->has_a(entry => 'Tab::Entry');
-Tab::Strike->has_a(bin => 'Tab::Bin');
+Tab::Strike->has_a(strike_time => 'Tab::StrikeTime');
 Tab::Strike->has_a(school => 'Tab::School');
 Tab::Strike->has_a(region => 'Tab::Region');
 __PACKAGE__->_register_datetimes( qw/start/ );
