@@ -481,10 +481,10 @@ CREATE TABLE `housing_student` (
 -- Table structure for table `housing_slots`
 --
 
-DROP TABLE IF EXISTS `housing`;
+DROP TABLE IF EXISTS `housing_slots`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `housing` (
+CREATE TABLE `housing_slots` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `tourn` int(11) DEFAULT NULL,
   `night` date DEFAULT NULL,

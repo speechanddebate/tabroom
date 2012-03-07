@@ -2,8 +2,8 @@ package Tab::ChapterJudge;
 use base 'Tab::DBI';
 Tab::ChapterJudge->table('chapter_judge');
 Tab::ChapterJudge->columns(Primary => qw/id/);
-Tab::ChapterJudge->columns(Essential => qw/chapter account notes first last/);
-Tab::ChapterJudge->columns(Other => qw/gender started created last_judged notes cell paradigm/);
+Tab::ChapterJudge->columns(Essential => qw/chapter account notes/);
+Tab::ChapterJudge->columns(Other => qw/created notes/);
 
 Tab::ChapterJudge->has_a(chapter => 'Tab::Chapter');
 Tab::ChapterJudge->has_many(judges => 'Tab::Judge', 'chapter_judge');
