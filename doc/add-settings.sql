@@ -112,3 +112,5 @@ CREATE TABLE `region_admin` (
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
 
+alter table account add paradigm text;
+alter table account add 

@@ -83,6 +83,7 @@ alter table account add provider varchar(63);
 alter table account drop type;
 alter table account add gender char;
 alter table account add started date;
+alter table account add paradigm text;
 
 alter table ballot drop rank;
 alter table ballot drop points;
@@ -96,4 +97,5 @@ alter table judge change uber chapter_judge int;
 alter table event_double add min int;
 alter table double_entry change setting int(3);
 alter table event change class event_double int;
+
 
