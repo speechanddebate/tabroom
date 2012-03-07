@@ -26,7 +26,7 @@ use Sys::Syslog;
 
 use Tab::General;
 use Tab::Account;
-use Tab::AccountAccess;
+use Tab::ChapterAdmin;
 use Tab::Ballot;
 use Tab::Bill;
 use Tab::Change;
