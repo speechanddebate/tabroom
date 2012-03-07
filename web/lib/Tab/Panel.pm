@@ -424,7 +424,7 @@ sub score {
 	my $value;
 
 	my $method = $entry->tourn->method;
-	my $league = $entry->tourn->league;
+	my $circuit = $entry->tourn->circuit;
 
 	if	($entry) { 
 
@@ -439,10 +439,10 @@ sub score {
 	#Region scoring
 
 		$value = $value + $self->entry_region_score($entry)  * 1
-			if ($league->region_based);
+			if ($circuit->region_based);
 		
 		$value = $value + $self->entry_region_score($entry)  * 10
-			if ($league->diocese_based);
+			if ($circuit->diocese_based);
 
 		return $value;
 
@@ -459,10 +459,10 @@ sub score {
 	#Region score
 		
 		$value = $value + $self->region_score * 1
-			if ($league->region_based);
+			if ($circuit->region_based);
 
 		$value = $value + $self->region_score * 10
-			if ($league->diocese_based);
+			if ($circuit->diocese_based);
 		
 		return $value;
 
@@ -477,7 +477,7 @@ sub update_score {
 	my $value;
 
 	my $method = $entry->tourn->method;
-	my $league = $entry->tourn->league;
+	my $circuit = $entry->tourn->circuit;
 
 	if	($entry) { 
 
@@ -492,7 +492,7 @@ sub update_score {
 	#Region scoring
 
 	   $value = $value + $self->entry_region_score($entry) * 1
-			if ($league->diocese_based || $league->region_based);
+			if ($circuit->diocese_based || $circuit->region_based);
 		
 	} else { 
 
@@ -507,7 +507,7 @@ sub update_score {
 	#Region score
 		
 		$value = $value + $self->region_score * 1
-			if ($league->diocese_based || $league->region_based);
+			if ($circuit->diocese_based || $circuit->region_based);
 		
 	}
 

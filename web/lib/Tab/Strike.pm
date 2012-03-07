@@ -37,8 +37,8 @@ sub name {
 
 	$name = "Speaker ".$self->entry->code." ".$self->entry->team_name if $self->type eq "entry";
 
-	$name = "Unavailable between ".  Tab::niceshortdt($self->start->set_time_zone($self->tourn->league->timezone))
-			." and ".  Tab::niceshortdt($self->end->set_time_zone($self->tourn->league->timezone)) if $self->type eq "time";
+	$name = "Unavailable between ".  Tab::niceshortdt($self->start->set_time_zone($self->tourn->circuit->timezone))
+			." and ".  Tab::niceshortdt($self->end->set_time_zone($self->tourn->circuit->timezone)) if $self->type eq "time";
 
 	return $name;
 

@@ -67,14 +67,14 @@ Tab::Timeslot->set_sql(prelims => "
 sub begins {
 	my $self = shift;
 	my $ts = $self->start;
-	$ts->set_time_zone($self->tourn->league->timezone);
+	$ts->set_time_zone($self->tourn->circuit->timezone);
 	return $ts;
 }
 
 sub ends {
 	my $self = shift;
 	my $ts = $self->end;
-	$ts->set_time_zone($self->tourn->league->timezone);
+	$ts->set_time_zone($self->tourn->circuit->timezone);
 	return $ts;
 }
 
