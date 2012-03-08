@@ -115,7 +115,7 @@ sub rooms {
 
 }
 
-sub entrys { 
+sub entries { 
 	my $self = shift;
 	return Tab::Entry->search_by_round($self->id);
 }
@@ -162,7 +162,7 @@ Tab::Round->set_sql(with_judges => "select distinct round.*
 								and panel.round = round.id)
 								");
 
-Tab::Round->set_sql(with_entrys => "select distinct round.* 
+Tab::Round->set_sql(with_entries => "select distinct round.* 
 								from round
 								where round.event = ? 
 								and exists ( select entry.id 

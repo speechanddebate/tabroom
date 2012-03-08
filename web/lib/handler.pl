@@ -82,7 +82,7 @@ use Tab::Strike;
 use Tab::Sweep;
 use Tab::Student;
 use Tab::StudentResult;
-use Tab::TeamMember;
+use Tab::EntryStudent;
 use Tab::Tiebreak;
 use Tab::TiebreakSet;
 use Tab::Timeslot;

@@ -59,13 +59,13 @@ sub events {
 	return Tab::Event->search_by_region_and_tourn($self->id, $tourn->id);
 }
 
-sub event_entrys {
+sub event_entries {
 	my ($self, $event) = @_;
-	my @entrys = sort {$a->id <=> $b->id} Tab::Entry->search_by_region_and_event($self->id, $event->id);
-	return @entrys;
+	my @entries = sort {$a->id <=> $b->id} Tab::Entry->search_by_region_and_event($self->id, $event->id);
+	return @entries;
 }
 
-sub active_event_entrys {
+sub active_event_entries {
 	my ($self, $event) = @_;
 	return Tab::Entry->search_active_by_region_and_event($self->id, $event->id);
 }
@@ -119,12 +119,12 @@ sub elim_pool_rounds {
 	return Tab::PoolJudge->search_elim_by_group_and_diocese($group->id, $self->id);
 }
 
-sub entrys {
+sub entries {
     my ($self,$tourn) = @_;
 	return Tab::Entry->search_by_region($self->id, $tourn->id);	
 }
 
-sub active_entrys {
+sub active_entries {
     my ($self,$tourn) = @_;
 	return Tab::Entry->search_active_by_region($self->id, $tourn->id);	
 }
@@ -167,7 +167,7 @@ sub judge_count {
 }
 
 
-sub group_entrys {
+sub group_entries {
     my ($self,$group) = @_;
 	return Tab::Entry->search_by_region_and_group($self->id, $group->id);	
 }

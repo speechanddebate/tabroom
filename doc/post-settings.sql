@@ -95,7 +95,50 @@ alter table ballot drop rankinround;
 
 alter table judge change uber chapter_judge int;
 alter table event_double add min int;
-alter table double_entry change setting int(3);
+alter table double_entry change setting tinyint;
 alter table event change class event_double int;
+
+alter table entry change code varchar(63);
+alter table entry change apda_seed seed varchar(15);
+alter table entry change registered_at reg_time datetime;
+alter table entry change dropped_at drop_time datetime;
+
+alter table entry drop tb0;
+alter table entry drop tb1;
+alter table entry drop tb2;
+alter table entry drop tb3;
+alter table entry drop tb4;
+alter table entry drop tb5;
+alter table entry drop tb6;
+alter table entry drop tb7;
+alter table entry drop tb8;
+alter table entry drop tb9;
+alter table entry drop results_bar;
+alter table entry drop student;
+alter table entry drop partner;
+alter table entry drop dq_reason;
+alter table entry drop doubled;
+alter table entry drop housing;
+alter table entry drop partner_housing;
+alter table entry drop sweeps_points;
+alter table entry drop noshow;
+alter table entry drop qualifier;
+alter table entry drop qualexp;
+alter table entry drop qual2exp;
+alter table entry drop qual2;
+alter table entry drop wins;
+alter table entry drop losses;
+alter table entry drop initials;
+alter table entry drop trpc_string;
+alter table entry drop housing_start;
+alter table entry drop housing_end;
+alter table entry drop partner_housing_start;
+alter table entry drop partner_housing_end;
+alter table entry change tournament tourn int;
+
+alter table rating change qual tier int;
+alter table rating change rating_tier tier int;
+
+alter table event_double drop judge_group;
 
 

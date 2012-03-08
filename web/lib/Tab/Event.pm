@@ -40,7 +40,7 @@ Tab::Event->has_a(tourn => 'Tab::Tourn');
 Tab::Event->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Event->has_a(event_double => 'Tab::EventDouble');
 Tab::Event->has_a(rating_subset => 'Tab::RatingSubset');
-Tab::Event->has_many(entrys => 'Tab::Entry', 'event' => { order_by => 'code'} );
+Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
 Tab::Event->has_many(room_pools => 'Tab::RoomPool', 'event');
 Tab::Event->has_many(panels => 'Tab::Panel', 'event'  => { order_by => 'letter'} );
@@ -145,27 +145,27 @@ sub largest_panel {
 
 }
 
-sub count_active_entrys { 
+sub count_active_entries { 
 	my $self = shift;
 	return Tab::Entry->sql_count_active_by_event->select_val($self->id);
 }
 
-sub active_entrys { 
+sub active_entries { 
 	my $self = shift;
 	return Tab::Entry->search_active_by_event($self->id);
 }
 
-sub count_waitlist_entrys { 
+sub count_waitlist_entries { 
 	my $self = shift;
 	return Tab::Entry->sql_count_waitlist_by_event->select_val($self->id);
 }
 
-sub waitlist_entrys { 
+sub waitlist_entries { 
 	my $self = shift;
 	return Tab::Entry->search_waitlist_by_event($self->id);
 }
 
-sub entrys_by_timeslot_and_order { 
+sub entries_by_timeslot_and_order { 
 	my ($self, $timeslot,$order) = @_;
 	return Tab::Entry->search_by_event_order_and_timeslot($self->id, $order, $timeslot->id);
 }
@@ -227,7 +227,7 @@ sub prelims {
 sub next_code {
 
     my $self = shift;
-    my @existing_entrys = Tab::Entry->search( event => $self->id, {order_by => "code DESC"} );
+    my @existing_entries = Tab::Entry->search( event => $self->id, {order_by => "code DESC"} );
 	my $code = $self->code; 
 	
 	while (defined $self->tourn->entry_with_code($code)) {
