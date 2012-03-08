@@ -25,79 +25,32 @@ Tab::Panel->set_sql(by_site_and_tourn => "select distinct panel.*
 											and round.event = event.id
 											and event.tourn = ?");
 
-Tab::Panel->set_sql(conflicts => "select distinct panel.id
-							from panel,ballot,entry,round,timeslot as ts1,timeslot as ts2
-							where entry.student = ? 
-							and ts2.id = ? 
-							and entry.id = ballot.entry
-							and ballot.panel = panel.id
-							and panel.round = round.id
-							and round.timeslot = ts1.id
+Tab::Panel->set_sql(conflicts_by_timeslot => "
+							select distinct panel.id
+							from entry as e1, entry as e2, 
+							timeslot as ts1,timeslot as ts2,
+							panel,ballot,round
+
+							where e1.id = ?
+							and ts1.id = ?
+
+							and e2.id = ballot.entry
+							and panel.id = ballot.panel
+							and round.id = panel.round
+							and ts2.id = round.timeslot
+
+							and e2.id in 
+								(select es2.id 
+									from entry_student as es1, entry_student as es2
+									where es1.student = es2.student
+									and es1.entry = e1.id
+									and es2.entry = e2.id
+								)
+							
+							and e1.id != e2.id
+							and ts1.start < ts2.end 
 							and ts1.end > ts2.start
-							and ts1.start < ts2.end
-							and entry.id != ?");
-
-Tab::Panel->set_sql(partner_conflicts => "select distinct panel.id
-							from panel,ballot,entry,round,timeslot as ts1,timeslot as ts2
-							where entry.partner = ? 
-							and ts2.id = ? 
-							and entry.id = ballot.entry
-							and ballot.panel = panel.id
-							and panel.round = round.id
-							and round.timeslot = ts1.id
-							and ts1.end > ts2.start
-							and ts1.start < ts2.end
-							and entry.id != ?");
-
-Tab::Panel->set_sql(elims_by_tourn => qq{ select distinct panel.id
-								from panel,round,event
-								where panel.round = round.id
-								and round.type = \"elim\"
-								and round.event = event.id
-								and event.tourn = ? });
-
-Tab::Panel->set_sql(entry_panels => qq{ select distinct panel.id 
-										from panel,ballot 
-										where ballot.entry= ? 
-										and ballot.panel = panel.id});
-
-Tab::Panel->set_sql(entry_prelims => qq{ select distinct panel.id 
-										from panel,ballot 
-										where ballot.entry= ? 
-										and ballot.panel = panel.id
-										and panel.type = \"prelim\" });
-
-Tab::Panel->set_sql(entry_elims => qq{ select distinct panel.id 
-										from panel,ballot 
-										where ballot.entry= ? 
-										and ballot.panel = panel.id
-										and panel.type != \"prelim\" });
-
-Tab::Panel->set_sql(entry_panels_by_round => qq{ select distinct panel.id 
-										from panel,ballot 
-										where ballot.entry= ? 
-										and ballot.panel = panel.id
-										and panel.round = ? 
-										});
-
-Tab::Panel->set_sql(prelims_by_tourn => qq{ select panel.*
-										from panel,event
-										where panel.type="prelim" 
-										and event.id = panel.event
-										and event.tourn = ? 
-										order by "name"});
-
-Tab::Panel->set_sql(panels_by_tourn => qq{ select panel.*
-										from panel,event
-										where event.id = panel.event
-										and event.tourn = ? 
-										order by "name"});
-
-Tab::Panel->set_sql(by_entry_in_round => "
-				select panel.* from panel,ballot
-				where ballot.entry = ? 
-				and ballot.panel = panel.id
-				and panel.round = ?");
+						");
 
 Tab::Panel->set_sql(letters => qq{ select distinct letter 
 		from panel where event = ? order by "letter"});
@@ -217,15 +170,15 @@ sub judges {
     return @judges;
 }
 
-sub entrys {
+sub entries {
     my $self = shift;
     return Tab::Entry->search_by_panel($self->id);
 }
 
-sub entrys_region{
+sub entries_region{
     my $self = shift;
-    my @entrys = Tab::Entry->search_by_panel_regcode($self->id);
-    return @entrys;
+    my @entries = Tab::Entry->search_by_panel_regcode($self->id);
+    return @entries;
 }
 
 sub clean_judges{
@@ -516,7 +469,7 @@ sub update_score {
 		return;
 }
 
-sub entrys_in_order {
+sub entries_in_order {
 
 	my $self = shift;
 	return Tab::Entry->search_by_panel_rank($self->id);

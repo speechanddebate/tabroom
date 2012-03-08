@@ -13,7 +13,7 @@ Tab::School->has_a(region => 'Tab::Region');
 Tab::School->has_a(disclaimed => 'Tab::Account');
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_many(purchases => 'Tab::ConcessionPurchase', 'school');
-Tab::School->has_many(entrys => 'Tab::Entry', 'school');
+Tab::School->has_many(entries => 'Tab::Entry', 'school');
 Tab::School->has_many(judges => 'Tab::Judge', 'school');
 Tab::School->has_many(fines => 'Tab::SchoolFine', 'school');
 Tab::School->has_many(hires => 'Tab::JudgeHire', 'school');
@@ -319,7 +319,7 @@ sub students {
 	my @students;
 
 	push (@students, Tab::Student->search_by_school($self->id));
-	push (@students, Tab::Student->search_team_members_by_school($self->id));
+	push (@students, Tab::Student->search_entry_students_by_school($self->id));
 
 	#uniq
 	my %seen = ();

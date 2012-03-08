@@ -1,7 +1,7 @@
-package Tab::TeamMember;
+package Tab::EntryStudent;
 use base 'Tab::DBI';
-Tab::TeamMember->table('team_member');
-Tab::TeamMember->columns(All => qw/id entry timestamp student/);
-Tab::TeamMember->has_a(student => 'Tab::Student');
-Tab::TeamMember->has_a(entry => 'Tab::Entry');
+Tab::EntryStudent->table('entry_student');
+Tab::EntryStudent->columns(All => qw/id entry timestamp student/);
+Tab::EntryStudent->has_a(student => 'Tab::Student');
+Tab::EntryStudent->has_a(entry => 'Tab::Entry');
 

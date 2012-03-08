@@ -6,7 +6,7 @@ Tab::Student->columns(Essential => qw/first last chapter novice grad_year retire
 Tab::Student->columns(Other => qw/timestamp phonetic/);
 Tab::Student->columns(TEMP => qw/num_entries total_sweeps entrycode chname/);
 Tab::Student->has_a(chapter => 'Tab::Chapter');
-Tab::Student->has_many(entrys => 'Tab::Entry', 'student');
+Tab::Student->has_many(entries => 'Tab::Entry', 'student');
 Tab::Student->has_many(parts => 'Tab::Entry', 'partner');
 
 Tab::Student->set_sql(active_by_chapter => " 
@@ -15,11 +15,11 @@ Tab::Student->set_sql(active_by_chapter => "
 				and grad_year >= ? 
 				and retired != 1");
 
-Tab::Student->set_sql(team_members => "
+Tab::Student->set_sql(by_entry => "
 			select distinct student.*
-			from team_member,student
-			where team_member.entry= ? 
-			and team_member.student = student.id ");
+			from entry_student,student
+			where entry_student.entry= ? 
+			and entry_student.student = student.id ");
 
 Tab::Student->set_sql(by_tourn => "
 			select distinct student.* from student,entry,school
@@ -33,23 +33,23 @@ Tab::Student->set_sql(by_school => "
 					and entry.school = ?
 					and entry.dropped != 1");
 	
-Tab::Student->set_sql(team_members_by_school => "
-			select student.* from student,entry,team_member
+Tab::Student->set_sql(entry_students_by_school => "
+			select student.* from student,entry,entry_student
 			where entry.school = ? 
 			and entry.dropped != 1
-			and team_member.entry = entry.id
-			and team_member.student = student.id ");
+			and entry_student.entry = entry.id
+			and entry_student.student = student.id ");
 
 sub teams {
     my ($self,$tourn) = @_;
-    return Tab::Entry->search_team_members($self->id, $tourn->id);
+    return Tab::Entry->search_entry_students($self->id, $tourn->id);
 }
 
 sub entries { 
     my ($self,$tourn) = @_;
 	my @entries; 
 	push (@entries, $self->teams($tourn));
-	push (@entries, $self->entrys(tourn => $tourn->id));
+	push (@entries, $self->entries(tourn => $tourn->id));
 	push (@entries, $self->parts(tourn => $tourn->id));
 	return @entries;
 }
