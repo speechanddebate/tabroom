@@ -2,19 +2,12 @@ package Tab::Entry;
 use base 'Tab::DBI';
 Tab::Entry->table('entry');
 Tab::Entry->columns(Primary => qw/id/);
-Tab::Entry->columns(Essential => qw/student code dropped 
-					name school tourn timestamp event wins losses
-					partner dq waitlist dropped_at registered_at/);
-
-Tab::Entry->columns(Others => qw/apda_seed tb0 tb1 tb2 tb3 tb4 tb5 tb6 tb7 tb8 tb9 
-					sweeps_points results_bar bid noshow doubled title ada trpc_string
-					qualifier rating_tier2 rating_tierexp rating_tier2exp notes timestamp/);
+Tab::Entry->columns(Essential => qw/code dropped name school tourn event/);
+Tab::Entry->columns(Others => qw/seed bid title ada waitlist dq drop_time reg_time timestamp/);
 
 Tab::Entry->columns(TEMP => qw/last_round rank rank_in_round speaks letter etype 
 					schcode regcode schoolid regionid panelid points ranks recips points/);
 
-Tab::Entry->has_a(student => 'Tab::Student');
-Tab::Entry->has_a(partner => 'Tab::Student');
 Tab::Entry->has_a(school => 'Tab::School');
 Tab::Entry->has_a(tourn => 'Tab::Tourn');
 Tab::Entry->has_a(event => 'Tab::Event');
@@ -23,8 +16,8 @@ Tab::Entry->has_many(changes => 'Tab::TournChange', 'entry');
 Tab::Entry->has_many(ratings => 'Tab::Rating', 'entry');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
-__PACKAGE__->_register_datetimes( qw/dropped_at/);
-__PACKAGE__->_register_datetimes( qw/registered_at/);
+__PACKAGE__->_register_datetimes( qw/drop_time/);
+__PACKAGE__->_register_datetimes( qw/reg_time/);
 
 Tab::Entry->set_sql(wipe_prefs => " delete from rating where entry = ?");
 
@@ -204,19 +197,21 @@ sub team_name {
 
 	my $self = shift;
 
-	my $name = $self->student->first." ".$self->student->last if $self->event->team == 1;
+	my @students = $self->students;
 
-	if ($self->event->team == 2) { 
-
-		$name = $self->student->last if $self->student;
-		$name .= "* " if $self->student && $self->student->novice;
-	
-		$name .= " & ".$self->partner->last if $self->partner;
-		$name .= "* " if $self->partner && $self->partner->novice;
-
+	if (scalar @students == 1) { 
+		my $student = shift @students;
+		return $student->first." ".$student->last;
 	}
 
-	$name = $self->name if $self->event->team == 3;
+	my $name;
+	my $not_first;
+
+	foreach my $student (@students) { 
+		$name .= " & " if $not_first;
+		$name .= $student->last;
+		$not_first++:
+	}
 
 	return $name;
 
@@ -226,9 +221,21 @@ sub full_team_name {
 
 	my $self = shift;
 
-	my $name = $self->student->first." ".$self->student->last unless $self->event->team == 3;
-	$name .= " & ".$self->partner->first." ".$self->partner->last if $self->partner && $self->event->team < 3;
-	$name = $self->name if $self->event->team == 3;
+	my @students = $self->students;
+
+	if (scalar @students == 1) { 
+		my $student = shift @students;
+		return $student->first." ".$student->last;
+	}
+
+	my $name;
+	my $not_first;
+
+	foreach my $student (@students) { 
+		$name .= " & " if $not_first;
+		$name .= $student->first." & ".$student->last;
+		$not_first++:
+	}
 
 	return $name;
 

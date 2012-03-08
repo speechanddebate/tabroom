@@ -5,3 +5,4 @@ Tab::CircuitAdmin->columns(All => qw/id circuit timestamp account/);
 Tab::CircuitAdmin->has_a(circuit => "Tab::Circuit");
 Tab::CircuitAdmin->has_a(account => "Tab::Account");
 
+__PACKAGE__->_register_datetimes( qw/timestamp/);
