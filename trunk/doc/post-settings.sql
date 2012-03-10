@@ -140,5 +140,73 @@ alter table rating change qual tier int;
 alter table rating change rating_tier tier int;
 
 alter table event_double drop judge_group;
+alter table housing_student add account int;
+
+alter table judge drop tourn;
+alter table judge drop cfl_tab_first;
+alter table judge drop cfl_tab_second;
+alter table judge drop cfl_tab_third;
+alter table judge drop alt_group;
+alter table judge drop housing;
+alter table judge drop gender;
+alter table judge drop spare_pool;
+alter table judge drop score;
+alter table judge drop tournament;
+alter table judge drop hire; 
+alter table judge drop prelim_pool;
+alter table judge drop cell;
+alter table judge drop first_year;
+alter table judge drop paradigm;
+alter table judge drop novice;
+alter table judge drop trpc_string;
+alter table judge add account int;
+alter table judge change uber chapter_judge int;
+
+alter table judge drop neutral;
+alter table judge drop tmp;
+alter table judge add hired int;
+
+alter table judge_group drop missing_judge_fee;
+alter table judge_group drop reduce_alt_burden;
+alter table judge_group drop uncovered_entry_fee;
+alter table judge_group drop track_by_pools;
+alter table judge_group drop alt_max;
+alter table judge_group drop min_burden;
+alter table judge_group drop max_burden;
+alter table judge_group drop default_alt_reduce;
+alter table judge_group drop ask_paradigm;
+alter table judge_group drop strikes_explain;
+alter table judge_group drop conflicts;
+alter table judge_group drop paradigm_explain;
+alter table judge_group drop fee_missing;
+alter table judge_group drop pub_assigns;
+alter table judge_group drop dio_min;
+alter table judge_group drop ask_alts;
+alter table judge_group drop free;
+alter table judge_group drop collective;
+alter table judge_group drop school_strikes;
+alter table judge_group drop strike_reg_opens;
+alter table judge_group drop strike_reg_closes;
+alter table judge_group drop max_pool_burden;
+alter table judge_group drop track_judge_hires;
+alter table judge_group drop hired_fee;
+alter table judge_group drop hired_pool;
+alter table judge_group drop cumulate_mjp;
+alter table judge_group drop special;
+alter table judge_group drop elim_special;
+alter table judge_group drop tab_room;
+alter table judge_group drop live_updates;
+alter table judge_group drop ratings_need_paradigms;
+alter table judge_group drop ratings_need_entry;
+alter table judge_group drop strikes_need_paradigms;
+alter table judge_group drop strikes_need_entry;
+alter table judge_group drop obligation_before_strikes;
+alter table judge_group drop coach_ratings;
+alter table judge_group drop school_ratings;
+alter table judge_group drop comp_ratings;
+alter table judge_group drop comp_strikes;
+alter table judge_group drop group_max;
+
+alter table judge_group change tournament tourn int;
 
 
