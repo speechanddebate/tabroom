@@ -7,7 +7,6 @@ Tab::Judge->columns(Essential => qw/account chapter_judge school judge_group
 									covers special notes timestamp /);
 
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
-Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(covers => 'Tab::JudgeGroup');
 
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
