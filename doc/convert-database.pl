@@ -56,6 +56,7 @@ use Tab::Qualifier;
 use Tab::QualSubset;
 use Tab::Rating;
 use Tab::Region;
+use Tab::RegionAdmin;
 use Tab::ResultFile;
 use Tab::Room;
 use Tab::RoomBlock;
@@ -470,6 +471,37 @@ foreach my $result (@results) {
 		result => 1
 	});
 
+}
+
+print "Loading all regions and diocese\n";
+
+my @regions = Tab::Region->retrieve_all;
+
+foreach my $region (@regions) { 
+
+    Tab::RegionAdmin->create({
+        region => $region->id,
+        account => $region->director->id
+    });
+
+}
+
+print "Loading all fines\n";
+
+my @fines = Tab::Fine->retrieve_all;
+
+foreach my $fine (@fines) { 
+
+    next unless $fine->tourn;
+
+    Tab::TournFee->create({
+        tourn => $fine->tourn->id,
+        start => $fine->start,
+        reason => $fine->reason,
+        end => $fine->end,
+        amount => $fine->amount,
+    });
+ 
 }
 
 print "Finis!\n";

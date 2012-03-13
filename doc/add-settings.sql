@@ -114,3 +114,30 @@ CREATE TABLE `region_admin` (
 
 alter table account add paradigm text;
 alter table account add 
+
+CREATE TABLE `tourn_fee` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tourn` int(11) NOT NULL DEFAULT '0',
+  `amount` float DEFAULT NULL,
+  `reason` varchar(127) DEFAULT NULL,
+  `start` datetime DEFAULT NULL,
+  `end` datetime DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+
+CREATE TABLE `region_fine` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `region` int(11) DEFAULT NULL,
+  `amount` float DEFAULT NULL,
+  `reason` varchar(63) DEFAULT NULL,
+  `levied_on` datetime DEFAULT NULL,
+  `levied_by` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+update tiebreak,tournament set tiebreak.tourn = tournament.id where tournament.method = tiebreak.method;
+
+
