@@ -7,3 +7,5 @@ Tab::File->has_a(event => 'Tab::Event');
 Tab::File->has_a(tourn => 'Tab::Tourn');
 
 __PACKAGE__->_register_datetimes( qw/uploaded/);
+__PACKAGE__->_register_datetimes( qw/timestamp/);
+

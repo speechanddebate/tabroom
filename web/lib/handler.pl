@@ -62,7 +62,6 @@ use Tab::News;
 use Tab::AccountIgnore;
 use Tab::Panel;
 use Tab::Pool;
-use Tab::PoolGroup;
 use Tab::PoolJudge;
 use Tab::Purchase;
 use Tab::Qual;

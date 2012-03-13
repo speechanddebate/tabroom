@@ -50,7 +50,7 @@ Tab::Entry->set_sql(lowest_code => "select MIN(code) from entry where event = ?"
 
 sub students {
     my $self = shift;
-	return Tab::Student->search_by_entry($self->id));
+	return Tab::Student->search_by_entry($self->id);
     return @students;
 }
 
@@ -88,7 +88,7 @@ sub team_name {
 	foreach my $student (@students) { 
 		$name .= " & " if $not_first;
 		$name .= $student->last;
-		$not_first++:
+		$not_first++;
 	}
 	return $name;
 }
@@ -110,7 +110,7 @@ sub full_team_name {
 	foreach my $student (@students) { 
 		$name .= " & " if $not_first;
 		$name .= $student->first." & ".$student->last;
-		$not_first++:
+		$not_first++;
 	}
 
 	return $name;
