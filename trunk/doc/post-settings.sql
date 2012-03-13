@@ -209,4 +209,103 @@ alter table judge_group drop group_max;
 
 alter table judge_group change tournament tourn int;
 
+alter table event_double drop judge_group;
+
+drop table pool_group;
+alter table rating change name value varchar(15);
+alter table region drop tournament;
+alter table region drop director;
+alter table room_pool drop tourn;
+alter table round drop no_first_year;
+alter table round drop score;
+alter table school change entered entered_on datetime;
+alter table school add contact int;
+
+update school set paid_amount=paid_amount+concession_paid_amount;
+alter table school change paid_amount paid float;
+alter table school drop concession_paid_amount;
+alter table school drop disclaimed;
+alter table school drop sweeps_points;
+alter table school drop score;
+alter table school add contact int;
+alter table school change entered entered_on datetime;
+
+alter table school_fine drop region;
+alter table school_fine drop start;
+alter table school_fine drop end;
+alter table school_fine change levied levied_on datetime;
+alter table school_fine add levied_by int;
+
+alter table event add publish tinyint;
+alter table event drop min_entry;
+alter table event drop max_entry;
+alter table event drop timestamp;
+alter table event drop supp;
+alter table event drop cap ;
+alter table event drop school_cap ;
+alter table event drop blurb ;
+alter table event drop deadline ;
+alter table event drop ballot ;
+alter table event drop alumni ;
+alter table event drop field_report;
+alter table event drop ballot_type ;
+alter table event drop allow_judge_own ;
+alter table event drop waitlist ;
+alter table event drop waitlist_all;
+alter table event drop no_codes;
+alter table event drop reg_codes;
+alter table event drop initial_codes;
+alter table event drop bids;
+alter table event drop no_judge_burden ;
+alter table event drop live_updates;
+alter table event drop omit_sweeps;
+alter table event drop ask_for_titles;
+
+alter table strike change bin strike_time int;
+alter table strike change strike registrant tinyint;
+alter table strike drop timeslot; 
+alter table strike change tournament tourn int;
+
+alter table tiebreaker change tiebreaker name varchar(31);
+alter table tiebreaker drop method;
+alter table tiebreak drop covers; 
+alter table round add tb_set int;
+
+alter table tourn drop results;
+alter table tourn drop judge_deadline;
+alter table tourn drop drop_deadline;
+alter table tourn drop freeze_deadline;
+alter table tourn drop fine_deadline;
+alter table tourn drop judge_policy;
+alter table tourn drop invitename;
+alter table tourn drop inviteurl;
+alter table tourn drop bill_packet;
+alter table tourn drop disclaimer;
+alter table tourn drop invoice_message;
+alter table tourn drop ballot_message;
+alter table tourn drop chair_ballot_message;
+alter table tourn drop web_message;
+alter table tourn drop vlabel;
+alter table tourn drop hlabel;
+alter table tourn drop vcorner;
+alter table tourn drop hcorner;
+alter table tourn change league circuit int;
+alter table tourn drop method;
+alter table tourn drop flighted;
+alter table tourn drop director; 
+
+alter table tourn_setting add value_date datetime;
+alter table event_setting add value_date datetime;
+alter table judge_setting add value_date datetime;
+alter table judge_group_setting add value_date datetime;
+alter table circuit_setting add value_date datetime;
+
+alter table tourn_admin change entry entry_only tinyint;
+
+alter table tourn_change change panel new_panel int;
+alter table tourn_change change moved_from old_panel int;
+alter table tourn_change add account int;
+alter table tourn_change change regline text varchar(255)
+alter table account change started started_judging datetime;
+
 
