@@ -56,7 +56,7 @@ sub panels {
 
 sub setting {
 
-	my ($self, $tag, $value, $text) = @_;
+	my ($self, $tag, $value, $blob) = @_;
 
 	my @existing = Tab::JudgeSetting->search(  
 		judge => $self->id,
@@ -68,9 +68,9 @@ sub setting {
 		if (@existing) {
 
 			my $exists = shift @existing;
+
 			$exists->value($value);
-			$exists->text($text);
-			$exists->update;
+
 
 			foreach my $other (@existing) { 
 				$other->delete;
@@ -84,10 +84,19 @@ sub setting {
 				judge => $self->id,
 				tag => $tag,
 				value => $value,
-				text => $text
 			});
 
 		}
+
+		if ($value eq "text") { 
+			$exists->value_text($blob);
+		}
+
+		if ($value eq "date") { 
+			$exists->value_date($blob);
+		}
+
+		$exists->update;
 
 	} else {
 
@@ -95,11 +104,8 @@ sub setting {
 
 		my $setting = shift @existing;
 
-		foreach my $other (@existing) { 
-			$other->delete;
-		}
-
-		return $setting->text if $setting->value eq "text";
+		return $setting->value_text if $setting->value eq "text";
+		return $setting->value_date if $setting->value eq "date";
 		return $setting->value;
 
 	}

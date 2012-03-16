@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Event->table('event');
 Tab::Event->columns(Primary => qw/id/);
 Tab::Event->columns(Essential => qw/tourn name abbr judge_group type/);
-Tab::Event->columns(Others =>  qw/fee rating_subset double_entry timestamp/);
+Tab::Event->columns(Others =>  qw/fee rating_subset event_double timestamp/);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
@@ -76,7 +76,7 @@ sub students {
 
 sub setting {
 
-	my ($self, $tag, $value, $text) = @_;
+	my ($self, $tag, $value, $blob) = @_;
 
 	my @existing = Tab::EventSetting->search(  
 		event => $self->id,
@@ -88,9 +88,9 @@ sub setting {
 		if (@existing) {
 
 			my $exists = shift @existing;
+
 			$exists->value($value);
-			$exists->text($text);
-			$exists->update;
+
 
 			foreach my $other (@existing) { 
 				$other->delete;
@@ -104,22 +104,27 @@ sub setting {
 				event => $self->id,
 				tag => $tag,
 				value => $value,
-				text => $text
 			});
 
 		}
+
+		if ($value eq "text") { 
+			$exists->value_text($blob);
+		}
+
+		if ($value eq "date") { 
+			$exists->value_date($blob);
+		}
+
+		$exists->update;
 
 	} else {
 
 		return unless @existing;
 
 		my $setting = shift @existing;
-
-		foreach my $other (@existing) { 
-			$other->delete;
-		}
-
-		return $setting->text if $setting->value eq "text";
+		return $setting->value_text if $setting->value eq "text";
+		return $setting->value_date if $setting->value eq "date";
 		return $setting->value;
 
 	}

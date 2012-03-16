@@ -26,12 +26,12 @@ use Sys::Syslog;
 
 use Tab::General;
 use Tab::Account;
-use Tab::ChapterAdmin;
 use Tab::Ballot;
 use Tab::Bill;
 use Tab::Change;
 use Tab::Chapter;
-use Tab::ChapterAccess;
+use Tab::ChapterAdmin;
+use Tab::ChapterJudge;
 use Tab::ChapterCircuit;
 use Tab::Class;
 use Tab::Coach;
@@ -87,7 +87,7 @@ use Tab::TiebreakSet;
 use Tab::Timeslot;
 use Tab::Tournament;
 use Tab::TournSite;
-use Tab::Uber;
+use Tab::WebPage;
 
 my $ah;
 
