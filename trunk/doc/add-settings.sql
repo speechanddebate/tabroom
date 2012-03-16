@@ -4,7 +4,8 @@ CREATE TABLE `tourn_setting` (
     `tourn` int(11) NOT NULL DEFAULT '0',
     `tag` varchar(31) NOT NULL DEFAULT '',
     `value` varchar(127) NOT NULL DEFAULT '',
-    `text` text,
+    `value_text` text,
+    `value_date` datetime,
     `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `tourn` (`tourn`)
@@ -15,7 +16,8 @@ CREATE TABLE `judge_setting` (
     `judge` int(11) NOT NULL DEFAULT '0',
     `tag` varchar(31) NOT NULL DEFAULT '',
     `value` varchar(127) NOT NULL DEFAULT '',
-    `text` text,
+    `value_text` text,
+    `value_date` datetime,
     `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `judge` (`judge`)
@@ -26,7 +28,8 @@ CREATE TABLE `event_setting` (
     `event` int(11) NOT NULL DEFAULT '0',
     `tag` varchar(31) NOT NULL DEFAULT '',
     `value` varchar(127) NOT NULL DEFAULT '',
-    `text` text,
+    `value_text` text,
+    `value_date` datetime,
     PRIMARY KEY (`id`),
     KEY `event` (`event`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
@@ -36,7 +39,8 @@ CREATE TABLE `judge_group_setting` (
     `judge_group` int(11) NOT NULL DEFAULT '0',
     `tag` varchar(31) NOT NULL DEFAULT '',
     `value` varchar(127) NOT NULL DEFAULT '',
-    `text` text,
+    `value_text` text,
+    `value_date` datetime,
     `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `judge_group` (`judge_group`)
@@ -47,7 +51,8 @@ CREATE TABLE `circuit_setting` (
     `circuit` int(11) NOT NULL DEFAULT '0',
     `tag` varchar(31) NOT NULL DEFAULT '',
     `value` varchar(127) NOT NULL DEFAULT '',
-    `text` text,
+    `value_text` text,
+    `value_date` datetime,
     `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `circuit` (`circuit`)
@@ -71,7 +76,7 @@ CREATE TABLE `ballot_speaks` (
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
 
-CREATE TABLE `entry_qualifier` (
+CREATE TABLE `qualifier` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     entry int default null,
     name varchar(63) default null,
@@ -140,4 +145,19 @@ CREATE TABLE `region_fine` (
 
 update tiebreak,tournament set tiebreak.tourn = tournament.id where tournament.method = tiebreak.method;
 
+CREATE TABLE `webpage` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tourn` int(11) DEFAULT NULL,
+  `circuit` int(11) DEFAULT NULL,
+  `order` int(11) DEFAULT NULL,
+  `title` varchar(63) DEFAULT NULL,
+  `content` text,
+  `last_editor` int(11) DEFAULT NULL,
+  `posted_on` datetime DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+update tiebreak,tournament set tiebreak.tourn = tournament.id where tournament.method = tiebreak.method;
 
