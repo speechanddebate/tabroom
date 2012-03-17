@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
-use lib "/www/tab/lib";
 use lib "/www/itab/web/lib";
+use lib "/www/itab/doc/convert";
 use lib "/opt/local/lib/perl5";
 use lib "/opt/local/lib/perl5/vendor_perl/5.12.3/darwin-multi-2level";
 
