@@ -6,7 +6,7 @@
 # password if it hasn't been already installed.  Adjust below if this squicks you
 # out, but hey, it's only for dev copies, so it shouldn't.
 
-# Tabroom must be installed from /www/tab; otherwise many more things other than
+# Tabroom must be installed from /www/itab/web; otherwise many more things other than
 # this script will break.
 
 # -- Palmer, 2/12/08
@@ -33,13 +33,13 @@ echo
 
 /usr/bin/mysqladmin -u root -f drop tab
 /usr/bin/mysqladmin -u root create tab
-/usr/bin/mysql -u root -f tab < /www/tab/doc/grant.sql
+/usr/bin/mysql -u root -f tab < /www/itab/doc/grant.sql
 
 echo
 echo "Loading the database file (sometimes takes a while, too.)..."
 echo
 
-/usr/bin/mysql -u root tab < /www/tab/doc/tabschema.sql
+/usr/bin/mysql -u root tab < /www/itab/doc/tabschema.sql
 
 echo
 echo "Updating the database to the latest version.  Please ignore errors here, there will be some..."
@@ -47,19 +47,19 @@ echo
 
 sleep 2
 
-/usr/bin/mysql -u root -f -s tab < /www/tab/doc/convert.sql
+/usr/bin/mysql -u root -f -s tab < /www/itab/doc/convert.sql
 
-/bin/mkdir -p /www/tab/tmp
-/bin/mkdir -p /www/tab/mason
+/bin/mkdir -p /www/itab/web/tmp
+/bin/mkdir -p /www/itab/web/mason
 
-/bin/chmod 1777 /www/tab/tmp
-/bin/chmod 1777 /www/tab/mason
+/bin/chmod 1777 /www/itab/web/tmp
+/bin/chmod 1777 /www/itab/web/mason
 
 echo
 echo "Configuring the local Apache webserver..."
 echo
 
-cp /www/tab/doc/tabroom.conf /etc/apache2/sites-available
+cp /www/itab/doc/tabroom.conf /etc/apache2/sites-available
 
 echo "ServerName  tab.tabroom.com" >> /etc/apache2/conf.d/hostname
 echo "127.0.1.21 tab tab.tabroom.com" >> /etc/hosts
