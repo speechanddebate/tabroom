@@ -63,12 +63,12 @@ alter table tiebreak add tourn int;
 alter table file add result bool;
 create index tourn on tiebreak(tourn);
 
-CREATE TABLE `ballot_speaks` (
+CREATE TABLE `ballot_value` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `ballot` int(11) DEFAULT NULL,
     `student` int(11) DEFAULT NULL,
-    `entry` int(11) DEFAULT NULL,
-    `points` int(11) DEFAULT NULL,
+    `tiebreak` int(11) DEFAULT NULL,
+    `value` float DEFAULT NULL,
     `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `student` (`student`),
