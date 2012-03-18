@@ -155,9 +155,38 @@ CREATE TABLE `webpage` (
   `last_editor` int(11) DEFAULT NULL,
   `posted_on` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
+   PRIMARY KEY (`id`),
+   KEY `tourn` (`tourn`),
+   KEY `circuit` (`circuit`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+CREATE TABLE `result` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `entry` int(11) DEFAULT NULL,
+  `sweeps` int(11) DEFAULT NULL,
+  `bid` tinyint(1) NOT NULL DEFAULT '0',
+  `label` varchar(63) DEFAULT NULL,
+  `seed` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+   PRIMARY KEY (`id`),
+   KEY `entry` (`entry`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+CREATE TABLE `result_value` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `result` int(11) DEFAULT NULL,
+  `label` varchar(63) DEFAULT NULL,
+  `value` float DEFAULT NULL,
+  `priority` int(7) NOT NULL DEFAULT '0',
+  `sort_desc` tinyint(1) NOT NULL DEFAULT '0',
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+   PRIMARY KEY (`id`),
+   KEY `result` (`result`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
 
 update tiebreak,tournament set tiebreak.tourn = tournament.id where tournament.method = tiebreak.method;
 
