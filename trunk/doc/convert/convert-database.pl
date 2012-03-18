@@ -1,7 +1,6 @@
 #!/usr/bin/perl
 
-use lib "/www/itab/web/lib";
-use lib "/www/itab/doc/convert";
+use lib "/www/itab/doc/convert/lib";
 use lib "/opt/local/lib/perl5";
 use lib "/opt/local/lib/perl5/vendor_perl/5.12.3/darwin-multi-2level";
 
@@ -11,7 +10,10 @@ use Class::DBI::AbstractSearch;
 use DateTime::Span;
 use DateTime::Format::MySQL;
 
+# Old table structures required for conversion to the new.
 use Tab::General;
+use Tab::DBI;
+
 use Tab::Account;
 use Tab::AccountAccess;
 use Tab::Ballot;
@@ -23,7 +25,6 @@ use Tab::ChapterLeague;
 use Tab::Class;
 use Tab::Coach;
 use Tab::Comp;
-use Tab::DBI;
 use Tab::Dues;
 use Tab::ElimAssign;
 use Tab::Email;
@@ -76,15 +77,18 @@ use Tab::Tiebreak;
 use Tab::TiebreakSet;
 use Tab::Timeslot;
 use Tab::Tournament;
-use Tab::TournFee;
 use Tab::TournSite;
+use Tab::Uber;
+
+# New tables
+use Tab::TournFee;
 use Tab::TournCircuit;
 use Tab::TournSetting;
 use Tab::EventSetting;
 use Tab::JudgeSetting;
 use Tab::CircuitSetting;
 use Tab::JudgeGroupSetting;
-use Tab::Uber;
+use Tab::Result;
 
 print "Loading all tournaments\n";
 
@@ -419,6 +423,15 @@ foreach my $comp (@comps) {
 
 	}
 
+	if ($comp->sweeps_points > 0) { 
+
+		Tab::Result->create({
+			entry => $comp->id,
+			sweeps => $comp->sweeps_points,
+			label => "Sweepstakes"
+		})
+	}
+
 	if ($comp->partner && $comp->partner->id) { 
 
 		Tab::TeamMember->create({
@@ -504,6 +517,34 @@ foreach my $fine (@fines) {
         amount => $fine->amount,
     });
  
+}
+
+print "Converting the sweeps table\n";
+
+my @sweeps = Tab::Sweep->retrieve_all;
+
+foreach my $sweep (@sweeps) { 
+
+	if ($sweep->place) { 
+
+		Tab::TournSetting->create({
+			tourn => $sweep->tournament->id,
+			tag => "sweep_place_".$sweep->place,
+			value => $sweep->value
+		});
+
+	}
+
+	if ($sweep->prelim_cume) { 
+
+		Tab::TournSetting->create({
+			tourn => $sweep->tournament->id,
+			tag => "sweep_prelim_cume_".$sweep->prelim_cume,
+			value => $sweep->value
+		});
+
+	}
+
 }
 
 print "Finis!\n";
