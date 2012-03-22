@@ -204,6 +204,7 @@ DROP TABLE IF EXISTS `circuit`;
 CREATE TABLE `circuit` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(127) DEFAULT NULL,
+  `abbr` varchar(15) DEFAULT NULL,
   `active` tinyint(1) DEFAULT NULL,
   `state` char(4) DEFAULT NULL,
   `country` char(4) DEFAULT NULL,

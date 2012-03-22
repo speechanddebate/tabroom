@@ -115,3 +115,60 @@ sub strikes {
 	return Tab::Strike->search_by_group($self->id); 
 }
 
+
+sub setting {
+
+	my ($self, $tag, $value, $blob) = @_;
+
+	my @existing = Tab::JudgeGroupSetting->search(  
+		judge_group => $self->id,
+		tag => $tag
+	);
+
+	if ($value &! $value == 0) { 
+
+		if (@existing) {
+
+			my $exists = shift @existing;
+			$exists->value($value);
+			$exists->value_text($blob) if $value eq "text";
+			$exists->value_date($blob) if $value eq "date";
+			$exists->update;
+
+			foreach my $other (@existing) { 
+				$other->delete;
+			}
+
+			return;
+
+		} else {
+
+			my $setting = Tab::JudgeGroupSetting->create({
+				judge_group => $self->id,
+				tag => $tag,
+				value => $value,
+			});
+
+			$setting->value_text($blob) if $value eq "text";
+			$setting->value_date($blob) if $value eq "date";
+			$setting->update;
+
+		}
+
+	} else {
+
+		return unless @existing;
+
+		my $setting = shift @existing;
+
+		foreach my $other (@existing) { 
+			$other->delete;
+		}
+
+		return $setting->text if $setting->value eq "text";
+		return $setting->datetime if $setting->value eq "date";
+		return $setting->value;
+
+	}
+}
+

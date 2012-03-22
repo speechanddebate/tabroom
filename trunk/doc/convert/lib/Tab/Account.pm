@@ -4,8 +4,8 @@ Tab::Account->table('account');
 
 Tab::Account->columns(Primary => qw/id/);
 Tab::Account->columns(Essential => qw/email passhash site_admin multiple/);
-Tab::Account->columns(Others => qw/password first last phone 
-									street city state zip active is_cell 
+Tab::Account->columns(Others => qw/password first last phone paradigm provider started
+									street city state zip active is_cell gender
 									hotel saw_judgewarn timestamp noemail
 									change_pass_key change_deadline tz/);
 

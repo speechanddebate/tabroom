@@ -116,9 +116,10 @@ CREATE TABLE `region_admin` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
-
 alter table account add paradigm text;
-alter table account add 
+alter table account add started date;
+alter table account add provider text;
+alter table account add gender char;
 
 CREATE TABLE `tourn_fee` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -128,7 +129,8 @@ CREATE TABLE `tourn_fee` (
   `start` datetime DEFAULT NULL,
   `end` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
+   PRIMARY KEY (`id`),
+   KEY `tourn` (`tourn`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
 CREATE TABLE `region_fine` (
@@ -189,4 +191,4 @@ CREATE TABLE `result_value` (
 
 
 update tiebreak,tournament set tiebreak.tourn = tournament.id where tournament.method = tiebreak.method;
-
+alter table file add result int;

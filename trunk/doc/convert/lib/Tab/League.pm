@@ -79,3 +79,58 @@ Tab::League->set_sql(chapters => " select distinct league.id
 		from league,chapter_league where league.id = chapter_league.league 
 		and chapter_league.chapter = ?");
 
+sub setting {
+
+	my ($self, $tag, $value, $blob) = @_;
+
+	my @existing = Tab::CircuitSetting->search(  
+		circuit => $self->id,
+		tag => $tag
+	);
+
+	if ($value &! $value == 0) { 
+
+		if (@existing) {
+
+			my $exists = shift @existing;
+			$exists->value($value);
+			$exists->value_text($blob) if $value eq "text";
+			$exists->value_date($blob) if $value eq "date";
+			$exists->update;
+
+			foreach my $other (@existing) { 
+				$other->delete;
+			}
+
+			return;
+
+		} else {
+
+			my $setting = Tab::CircuitSetting->create({
+				circuit => $self->id,
+				tag => $tag,
+				value => $value,
+			});
+
+			$setting->value_text($blob) if $value eq "text";
+			$setting->value_date($blob) if $value eq "date";
+			$setting->update;
+
+		}
+
+	} else {
+
+		return unless @existing;
+
+		my $setting = shift @existing;
+
+		foreach my $other (@existing) { 
+			$other->delete;
+		}
+
+		return $setting->text if $setting->value eq "text";
+		return $setting->datetime if $setting->value eq "date";
+		return $setting->value;
+
+	}
+}
