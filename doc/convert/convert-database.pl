@@ -3,6 +3,8 @@
 use lib "/www/itab/doc/convert/lib";
 use lib "/opt/local/lib/perl5";
 use lib "/opt/local/lib/perl5/vendor_perl/5.12.3/darwin-multi-2level";
+use lib "/opt/local/lib/perl5/vendor_perl/5.12.3";
+use lib "/opt/local/lib/perl5/site_perl/5.12.3";
 
 use strict;
 use DBI;
@@ -89,6 +91,81 @@ use Tab::JudgeSetting;
 use Tab::CircuitSetting;
 use Tab::JudgeGroupSetting;
 use Tab::Result;
+
+print "Loading all results files\n";
+
+my @results = Tab::ResultFile->retrieve_all;
+
+foreach my $result (@results) { 
+
+	Tab::File->create({
+		tournament => $result->tournament->id,
+		label => $result->name,
+		name => $result->filename,
+		result => 1
+	});
+
+}
+
+print "Loading all regions and diocese\n";
+
+my @regions = Tab::Region->retrieve_all;
+
+foreach my $region (@regions) { 
+
+    Tab::RegionAdmin->create({
+        region => $region->id,
+        account => $region->director->id
+    }) if $region->director;
+
+}
+
+print "Loading all fines\n";
+
+my @fines = Tab::Fine->retrieve_all;
+
+foreach my $fine (@fines) { 
+
+    next unless $fine->tournament;
+
+    Tab::TournFee->create({
+        tourn => $fine->tournament->id,
+        start => $fine->start,
+        reason => $fine->reason,
+        end => $fine->end,
+        amount => $fine->amount,
+    });
+ 
+}
+
+print "Converting the sweeps table\n";
+
+my @sweeps = Tab::Sweep->retrieve_all;
+
+foreach my $sweep (@sweeps) { 
+
+	if ($sweep->place) { 
+
+		Tab::TournSetting->create({
+			tourn => $sweep->tournament->id,
+			tag => "sweep_place_".$sweep->place,
+			value => $sweep->value
+		});
+
+	}
+
+	if ($sweep->prelim_cume) { 
+
+		Tab::TournSetting->create({
+			tourn => $sweep->tournament->id,
+			tag => "sweep_prelim_cume_".$sweep->prelim_cume,
+			value => $sweep->value
+		});
+
+	}
+
+}
+
 
 print "Loading all tournaments\n";
 
@@ -245,10 +322,10 @@ foreach my $tourn (@tourns) {
 	$tourn->setting("ballot_message", "text", $tourn->ballot_message);
 	$tourn->setting("web_message", "text", $tourn->web_message);
 	$tourn->setting("chair_ballot_message", "text", $tourn->chair_ballot_message);
-	$tourn->setting("drop_deadline", $tourn->drop_deadline);
-	$tourn->setting("fine_deadline", $tourn->fine_deadline);
-	$tourn->setting("judge_deadline", $tourn->judge_deadline);
-	$tourn->setting("freeze_deadline", $tourn->freeze_deadline);
+	$tourn->setting("drop_deadline", "date", $tourn->drop_deadline);
+	$tourn->setting("fine_deadline", "date", $tourn->fine_deadline);
+	$tourn->setting("judge_deadline", "date",$tourn->judge_deadline);
+	$tourn->setting("freeze_deadline", "date",$tourn->freeze_deadline);
 	$tourn->setting("vcorner", $tourn->vcorner);
 	$tourn->setting("hcorner", $tourn->hcorner);
 	$tourn->setting("vlabel", $tourn->vlabel);
@@ -386,7 +463,7 @@ foreach my $event (@events) {
 	$event->setting("omit_sweeps", $event->omit_sweeps);
 	$event->setting("no_judge_burden", $event->no_judge_burden);
 	$event->setting("ballot_type", $event->ballot_type);
-	$event->setting("deadline", $event->deadline);
+	$event->setting("deadline", "date",$event->deadline);
 	$event->setting("ask_for_titles", $event->ask_for_titles);
 	$event->setting("supp", $event->supp);
 	$event->setting("no_codes", $event->no_codes);
@@ -471,80 +548,6 @@ foreach my $coach (@coaches) {
 	my $chapter = $coach->chapter;
 	$chapter->coaches( $coach->chapter->coaches." ".$coach->name );
 	$chapter->update;
-}
-
-print "Loading all results files\n";
-
-my @results = Tab::ResultFile->retrieve_all;
-
-foreach my $result (@results) { 
-
-	Tab::File->create({
-		tournament => $result->tournament->id,
-		label => $result->name,
-		name => $result->filename,
-		result => 1
-	});
-
-}
-
-print "Loading all regions and diocese\n";
-
-my @regions = Tab::Region->retrieve_all;
-
-foreach my $region (@regions) { 
-
-    Tab::RegionAdmin->create({
-        region => $region->id,
-        account => $region->director->id
-    });
-
-}
-
-print "Loading all fines\n";
-
-my @fines = Tab::Fine->retrieve_all;
-
-foreach my $fine (@fines) { 
-
-    next unless $fine->tourn;
-
-    Tab::TournFee->create({
-        tourn => $fine->tourn->id,
-        start => $fine->start,
-        reason => $fine->reason,
-        end => $fine->end,
-        amount => $fine->amount,
-    });
- 
-}
-
-print "Converting the sweeps table\n";
-
-my @sweeps = Tab::Sweep->retrieve_all;
-
-foreach my $sweep (@sweeps) { 
-
-	if ($sweep->place) { 
-
-		Tab::TournSetting->create({
-			tourn => $sweep->tournament->id,
-			tag => "sweep_place_".$sweep->place,
-			value => $sweep->value
-		});
-
-	}
-
-	if ($sweep->prelim_cume) { 
-
-		Tab::TournSetting->create({
-			tourn => $sweep->tournament->id,
-			tag => "sweep_prelim_cume_".$sweep->prelim_cume,
-			value => $sweep->value
-		});
-
-	}
-
 }
 
 print "Finis!\n";

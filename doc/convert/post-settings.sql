@@ -399,10 +399,10 @@ alter table event add timestamp timestamp;
 alter table concession drop event;
 alter table circuit_membership change league circuit int;
 alter table circuit add country char(4);
+alter table circuit change short_name abbr varchar(15);
 
   alter table circuit drop url;
   alter table circuit drop public_email;
-  alter table circuit drop short_name;
   alter table circuit drop admin;
   alter table circuit drop dues_to;
   alter table circuit drop dues_amount;
@@ -438,7 +438,7 @@ alter table account change noemail no_email bool;
 alter table account change started started_judging date;
 
 
-alter table account  ENGINE=innodb;
+alter table account ENGINE=innodb;
 alter table ballot ENGINE=innodb;
 alter table ballot_speaks  ENGINE=innodb;
 alter table chapter  ENGINE=innodb;
@@ -487,4 +487,12 @@ alter table round  ENGINE=innodb;
 alter table school ENGINE=innodb;
 alter table school_fine  ENGINE=innodb;
 alter table session  ENGINE=innodb;
+alter table strike  ENGINE=innodb;
+alter table strike_time  ENGINE=innodb;
+alter table student_result  ENGINE=innodb;
 alter table site ENGINE=innodb;
+alter table tourn ENGINE=innodb;
+alter table tourn_admin ENGINE=innodb;
+alter table tourn_change ENGINE=innodb;
+alter table tourn_ignore ENGINE=innodb;
+alter table tourn_site ENGINE=innodb;
