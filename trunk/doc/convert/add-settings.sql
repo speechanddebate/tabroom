@@ -189,6 +189,5 @@ CREATE TABLE `result_value` (
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
-
 update tiebreak,tournament set tiebreak.tourn = tournament.id where tournament.method = tiebreak.method;
 alter table file add result int;
