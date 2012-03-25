@@ -83,7 +83,7 @@ sub setting {
 		tag => $tag
 	);
 
-    if ($value &! $value == 0) {
+    if ($value && $value != 0) {
 
 		if (@existing) {
 

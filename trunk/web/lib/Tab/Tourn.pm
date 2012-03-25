@@ -2,19 +2,18 @@ package Tab::Tourn;
 use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
-Tab::Tourn->columns(Essential => qw/name circuit start end approved
-                                    webname reg_start reg_end hidden timestamp/);
+Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end hidden timestamp/);
 
-Tab::Tourn->has_many(admins => 'Tab::TournAdmin', 'tourn');
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
 Tab::Tourn->has_many(events => 'Tab::Event', 'tourn');
 Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');
 Tab::Tourn->has_many(judges => 'Tab::Judge', 'tourn');
-Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn');
-Tab::Tourn->has_many(ratings => 'Tab::Rating', 'tourn');
 Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
+Tab::Tourn->has_many(ratings => 'Tab::Rating', 'tourn');
 Tab::Tourn->has_many(strikes => 'Tab::Strike', 'tourn');
 Tab::Tourn->has_many(schools => 'Tab::School', 'tourn');
+Tab::Tourn->has_many(admins => 'Tab::TournAdmin', 'tourn');
+Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn');
 Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn');
 Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn');
 Tab::Tourn->has_many(rating_tiers => 'Tab::RatingTier', 'tourn');
@@ -30,6 +29,18 @@ __PACKAGE__->_register_datetimes( qw/end/);
 __PACKAGE__->_register_datetimes( qw/reg_start/);
 __PACKAGE__->_register_datetimes( qw/reg_end/);
 
+
+Tab::Circuit->set_sql( by_tourn => "select distinct circuit.*
+									from circuit, tourn_circuit
+									where circuit.id = tourn_circuit.circuit
+									and tourn_circuit.tourn = ?
+									order by circuit.name");
+
+sub circuits { 
+	my $self = shift;
+	return Tab::Circuit->search_by_tourn($self->id);
+}
+
 sub setting {
 
 	my ($self, $tag, $value, $text) = @_;
@@ -39,7 +50,7 @@ sub setting {
 		tag => $tag
 	);
 
-	if ($value &! $value == 0) { 
+	if ($value && $value != 0) { 
 
 		if (@existing) {
 
