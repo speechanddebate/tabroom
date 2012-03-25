@@ -1,62 +1,52 @@
 package Tab::Circuit;
 use base 'Tab::DBI';
-Tab::Circuit->table('chapter');
+Tab::Circuit->table('circuit');
 Tab::Circuit->columns(Primary => qw/id/);
-Tab::Circuit->columns(Essential => qw/name short_name timezone active state/);
-Tab::Circuit->columns(Others => qw/url public_email hosted_site timestamp
-						dues_to region_based track_bids last_change approved
-						diocese_based site_theme header_file dues_amount apda_seeds 
-						tourn_only full_members logo_file public_results invoice_message/);
+Tab::Circuit->columns(Essential => qw/name abbr region_based diocese_based timezone active state country/);
+Tab::Circuit->columns(Others => qw/timestamp/);
 
-Tab::Circuit->has_many(tourns => "Tab::Tourn");
 Tab::Circuit->has_many(regions => "Tab::Region");
 Tab::Circuit->has_many(sites => "Tab::Site");
-Tab::Circuit->has_many(circuit_memberships => "Tab::CircuitMembership");
-Tab::Circuit->has_many(chapter_chapters => "Tab::ChapterCircuit");
 
-Tab::Circuit->has_a(dues_to => "Tab::Account");
-Tab::Circuit->has_a(last_change => "Tab::Account");
+Tab::Circuit->has_many(circuit_admins => "Tab::CircuitAdmin");
+Tab::Circuit->has_many(circuit_memberships => "Tab::CircuitMembership");
+
+Tab::Circuit->has_many(tourn_circuits => "Tab::TournCircuit");
+Tab::Circuit->has_many(chapter_circuits => "Tab::ChapterCircuit");
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-Tab::Circuit->set_sql(by_admin => "
-				select distinct chapter.*
-					from chapter,chapter_admin
-					where chapter.id = chapter_admin.chapter
-					and chapter_admin.account = ? ");
 
+Tab::Account->set_sql(by_circuit => "select distinct account.* 
+							from account, circuit_admin
+							where account.id = circuit_admin.account
+							and circuit_admin.circuit = ?
+							order by account.last");
 sub admins {
     my $self = shift;
-    return sort {$a->last cmp $b->last} Tab::Account->search_by_chapter_admin($self->id);
+    return sort {$a->last cmp $b->last} Tab::Account->search_by_circuit($self->id);
 }
 
-sub coaches { 
-	my $self = shift;
-    return sort {$a->last cmp $b->last} Tab::Account->search_by_chapter_coach($self->id);
-}
+Tab::Tourn->set_sql(by_circuit => "select distinct tourn.* 
+							from tourn, tourn_circuit
+							where tourn.id = tourn_circuit.tourn
+							and tourn_circuit.circuit = ?
+							order by tourn.start");
 
-sub accounts {
+sub tourns {
     my $self = shift;
-    my @members;
-	push (@members, $self->coaches);
-	push (@members, $self->admins);
-	@members = sort {$a->last cmp $b->last} @members;
-	return @members;
+    return sort {$a->name cmp $b->name} Tab::Tourn->search_by_circuit($self->id);
 }
 
+
+Tab::Chapter->set_sql(by_circuit => "select distinct chapter.*
+							from chapter, chapter_circuit
+							where chapter.id = chapter_circuit.circuit
+							and chapter_circuit.circuit = ?
+							order by chapter.name");
 sub chapters {
     my $self = shift;
-    return sort {$a->name cmp $b->name} Tab::Chapter->search_chapters($self->id);
-}
-
-sub non_members {
-    my $self = shift;
-	return sort {$a->name cmp $b->name} Tab::Chapter->search_chapter_and_membership($self->id, 0);
-}
-
-sub members {
-    my $self = shift;
-	return sort {$a->name cmp $b->name} Tab::Chapter->search_chapter_and_membership($self->id, 1);
+	return sort {$a->name cmp $b->name} Tab::Chapter->search_by_circuit($self->id);
 }
 
 sub shorter_name {
@@ -75,9 +65,6 @@ sub shorter_name {
 	return $name;
 }
 
-Tab::Circuit->set_sql(chapters => " select distinct chapter.id 
-		from chapter,chapter_chapter where chapter.id = chapter_chapter.chapter 
-		and chapter_chapter.chapter = ?");
 
 sub setting {
 
@@ -88,7 +75,7 @@ sub setting {
 		tag => $tag
 	);
 
-    if ($value &! $value == 0) {
+    if ($value && $value != 0) {
 
 		if (@existing) {
 

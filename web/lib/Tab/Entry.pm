@@ -10,7 +10,7 @@ Tab::Entry->has_a(tourn => 'Tab::Tourn');
 Tab::Entry->has_a(event => 'Tab::Event');
 
 Tab::Entry->has_many(ballots => 'Tab::Ballot', 'entry');
-Tab::Entry->has_many(ballot_speaks => 'Tab::BallotSpeaks', 'entry');
+Tab::Entry->has_many(ballot_speaks => 'Tab::BallotValue', 'entry');
 Tab::Entry->has_many(changes => 'Tab::TournChange', 'entry');
 Tab::Entry->has_many(ratings => 'Tab::Rating', 'entry');
 
