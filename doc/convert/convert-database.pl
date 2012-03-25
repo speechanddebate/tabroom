@@ -330,6 +330,8 @@ foreach my $tourn (@tourns) {
 	$tourn->setting("hcorner", $tourn->hcorner);
 	$tourn->setting("vlabel", $tourn->vlabel);
 	$tourn->setting("hlabel", $tourn->hlabel);
+	$tourn->setting("hlabel", $tourn->hlabel);
+	$tourn->setting("results", $tourn->results);
 
 }
 
