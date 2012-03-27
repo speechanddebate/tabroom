@@ -20,6 +20,7 @@ Tab::Tourn->has_many(rating_tiers => 'Tab::RatingTier', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
 Tab::Tourn->has_many(school_fines => 'Tab::SchoolFine', 'tourn');
 Tab::Tourn->has_many(tourn_changes => 'Tab::TournChange', 'tourn');
+Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit', 'tourn');
 Tab::Tourn->has_many(event_doubles => 'Tab::EventDouble', 'tourn');
 Tab::Tourn->has_many(tiebreak_sets => 'Tab::TiebreakSet', 'tourn');
 Tab::Tourn->has_many(housing_students => 'Tab::HousingStudent', 'tourn');
@@ -67,8 +68,8 @@ sub setting {
 
 		} else {
 
-			Tab::JudgeGroupSetting->create({
-				judge_group => $self->id,
+			Tab::TournSetting->create({
+				tourn => $self->id,
 				tag => $tag,
 				value => $value,
 				text => $text
