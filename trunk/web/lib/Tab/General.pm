@@ -7,6 +7,9 @@ my $latex_path_prefix="/usr/bin";
 # FQDN of your server.  Do NOT include http:// 
 my $hostname = "itab.tabroom.com";
 
+# Debugging status.  Set to a non-zero number to increase logging levels
+my $debug;
+
 #URL Prefix of the server
 $url_prefix = "https://$hostname" if $hostname eq "www.tabroom.com";
 $url_prefix = "http://$hostname" unless $url_prefix;
