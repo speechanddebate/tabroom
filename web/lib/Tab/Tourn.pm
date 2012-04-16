@@ -2,7 +2,7 @@ package Tab::Tourn;
 use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
-Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end hidden timestamp/);
+Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end location hidden timestamp/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
 Tab::Tourn->has_many(events => 'Tab::Event', 'tourn');

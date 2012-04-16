@@ -96,6 +96,7 @@ sub eventlog {
 sub texify { 
 
 	my $string = shift; 
+	return unless $string;
 
 	$string =~ s/\\/\\\\/g;
 	$string =~ s/#/\\#/g;
@@ -130,12 +131,14 @@ sub school_year {
 
 sub niceshortdt {
 	my $dt = shift;
+	return unless $dt;
 	my $string = $dt->month."/".$dt->day." at ".$dt->hour_12.":".$dt->strftime('%M')." ".$dt->strftime('%p');
 	return $string;
 }
 
 sub niceshortdayt {
 	my $dt = shift;
+	return unless $dt;
 	my $string = $dt->day_abbr." ".$dt->hour_12.":".$dt->strftime('%M')." ".$dt->strftime('%p');
 	return $string;
 }
@@ -144,6 +147,7 @@ sub niceshortdayt {
 sub nicedt {
 
 	my $dt = shift;
+	return unless $dt;
 	my $string = $dt->day_abbr.", ".$dt->month_abbr." ".$dt->day.", ".$dt->year." at ".$dt->hour_12.":".$dt->strftime('%M')." ".$dt->strftime('%p');
 	return $string;
 
@@ -151,36 +155,42 @@ sub nicedt {
 
 sub nicetime {
 	my $dt = shift;
+	return unless $dt;
 	my $string = $dt->hour_12.":".$dt->strftime('%M')." ".$dt->strftime('%p');
 	return $string;
 }
 
 sub shorttime {
 	my $dt = shift;
+	return unless $dt;
 	my $string = $dt->hour_12.":".$dt->strftime('%M')." ".substr($dt->strftime('%p'),0,1);
 	return $string;
 }
 
 sub nicedate {
 	my $dt = shift;
+	return unless $dt;
 	my $string = $dt->day_abbr.", ".$dt->month_name." ".$dt->day.", ".$dt->year;
 	return $string;
 }
 
 sub niceshortdate {
 	my $dt = shift;
+	return unless $dt;
 	my $string = $dt->month."/".$dt->day;
 	return $string;
 }
 
 sub pickerdate {
 	my $dt = shift;
+	return unless $dt;
 	my $string = $dt->month."/".$dt->day."/".$dt->year;
 	return $string;
 }
 
 sub pickertime { 
 	my $dt = shift;
+	return unless $dt;
 	my $string = $dt->hour_12.":".$dt->strftime('%M');
 	$string .= " PM" if $dt->strftime('%p') eq "PM";
 	$string .= " AM" if $dt->strftime('%p') eq "AM";
@@ -229,6 +239,7 @@ sub dtme {
 sub dateme { 
 
 	my $date = shift;
+	return unless $date;
 	my $month;
 	my $day;
 	my $year;
