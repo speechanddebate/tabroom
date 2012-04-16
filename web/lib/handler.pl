@@ -50,6 +50,7 @@ use Tab::EventDouble;
 use Tab::EventSetting;
 use Tab::File;
 use Tab::FollowAccount;
+use Tab::FollowTourn;
 use Tab::FollowEntry;
 use Tab::FollowJudge;
 use Tab::HousingSlots;

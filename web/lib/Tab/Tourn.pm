@@ -19,6 +19,7 @@ Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn');
 Tab::Tourn->has_many(rating_tiers => 'Tab::RatingTier', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
 Tab::Tourn->has_many(school_fines => 'Tab::SchoolFine', 'tourn');
+Tab::Tourn->has_many(follow_tourns => 'Tab::FollowTourn', 'tourn');
 Tab::Tourn->has_many(tourn_changes => 'Tab::TournChange', 'tourn');
 Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit', 'tourn');
 Tab::Tourn->has_many(event_doubles => 'Tab::EventDouble', 'tourn');
