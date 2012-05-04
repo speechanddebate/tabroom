@@ -1,3 +1,10 @@
+
+/* Place the focus on a selected element */
+
+function placeFocus(){
+    document.forms[0].elements['sp-q'].focus(); 
+} 
+
 /*!
  * jQuery JavaScript Library v1.4.2
  * http://jquery.com/
