@@ -491,7 +491,18 @@ my @comps = Tab::Comp->retrieve_all;
 
 print "Converting the tables to a true many to many comp student relation:\n";
 
+my $count;
+my $total;
+
 foreach my $comp (@comps) { 
+
+	if ($count > 500) { 
+		$total += $count;
+		undef($count);
+		print "$total done\n";
+	}
+
+	$count++;
 
 	if ($comp->student && $comp->student->id) { 
 

@@ -32,13 +32,11 @@ alter table strike change comp entry int;
 alter table student_result change comp entry int;
 alter table entry_student change comp entry int;
 
-
 alter table chapter_circuit change league circuit int;
 alter table due_payment change league circuit int;
 alter table due_payment rename to circuit_dues;
 alter table email change league circuit int;
 alter table circuit_admin change league circuit int;
-alter table circuit_chapter change league circuit int;
 alter table news change league circuit int;
 alter table region change league circuit int;
 alter table site change league circuit int;
@@ -46,9 +44,8 @@ alter table site change league circuit int;
 alter table concession_purchase change item concession int;
 
 alter table rating change qual rating_tier int;
-alter table rating_tier change qual_subset rating_subset int;
+alter table rating_tier add rating_subset int;
 alter table rating add ordinal int;
-
 
 drop table bill;
 drop table sweep;
@@ -79,10 +76,9 @@ alter table account drop saw_judgewarn;
 alter table account drop change_deadline;
 alter table account change change_timestamp password_timestamp datetime;
 alter table account drop is_cell;
-alter table account add provider varchar(63);
 alter table account drop type;
+alter table account add provider varchar(63);
 alter table account add gender char;
-alter table account add started date;
 alter table account add paradigm text;
 
 alter table ballot drop rank;
@@ -93,12 +89,11 @@ alter table ballot change real_points points int;
 alter table ballot drop flight;
 alter table ballot drop rankinround;
 
-alter table judge change uber chapter_judge int;
 alter table event_double add min int;
-alter table double_entry change setting tinyint;
+alter table event_double change double_entry setting tinyint;
 alter table event change class event_double int;
 
-alter table entry change code varchar(63);
+alter table entry change code code varchar(63);
 alter table entry change apda_seed seed varchar(15);
 alter table entry change registered_at reg_time datetime;
 alter table entry change dropped_at drop_time datetime;
@@ -136,13 +131,13 @@ alter table entry drop partner_housing_start;
 alter table entry drop partner_housing_end;
 alter table entry change tournament tourn int;
 
-alter table rating change qual tier int;
 alter table rating change rating_tier tier int;
 
 alter table event_double drop judge_group;
 alter table housing_student add account int;
 
-alter table judge drop tourn;
+alter table judge drop first;
+alter table judge drop last;
 alter table judge drop cfl_tab_first;
 alter table judge drop cfl_tab_second;
 alter table judge drop cfl_tab_third;
@@ -159,8 +154,8 @@ alter table judge drop first_year;
 alter table judge drop paradigm;
 alter table judge drop novice;
 alter table judge drop trpc_string;
-alter table judge add account int;
 alter table judge change uber chapter_judge int;
+alter table judge add account int;
 
 alter table judge drop neutral;
 alter table judge drop tmp;
@@ -210,6 +205,7 @@ alter table judge_group drop group_max;
 alter table judge_group change tournament tourn int;
 
 alter table event_double drop judge_group;
+create index tourn on event_double(tourn);
 
 drop table pool_group;
 alter table rating change name value varchar(15);
@@ -218,8 +214,6 @@ alter table region drop director;
 alter table room_pool drop tourn;
 alter table round drop no_first_year;
 alter table round drop score;
-alter table school change entered entered_on datetime;
-alter table school add contact int;
 
 update school set paid_amount=paid_amount+concession_paid_amount;
 alter table school change paid_amount paid float;
@@ -265,9 +259,6 @@ alter table strike change strike registrant tinyint;
 alter table strike drop timeslot; 
 alter table strike change tournament tourn int;
 
-alter table tiebreaker change tiebreaker name varchar(31);
-alter table tiebreaker drop method;
-alter table tiebreak drop covers; 
 alter table round add tb_set int;
 
 alter table tourn drop results;
@@ -293,19 +284,14 @@ alter table tourn drop method;
 alter table tourn drop flighted;
 alter table tourn drop director; 
 
-alter table tourn_setting add value_date datetime;
-alter table event_setting add value_date datetime;
-alter table judge_setting add value_date datetime;
-alter table judge_group_setting add value_date datetime;
-alter table circuit_setting add value_date datetime;
-
 alter table tourn_admin change entry entry_only tinyint;
 
 alter table tourn_change change panel new_panel int;
+alter table tourn_change change comp entry int;
+create index entry on tourn_change(entry);
 alter table tourn_change change moved_from old_panel int;
 alter table tourn_change add account int;
 alter table tourn_change change regline text varchar(255)
-alter table account change started started_judging datetime;
 
 
 alter table email change tournament tourn int;
@@ -314,8 +300,6 @@ alter table email change blurb content text;
 drop table judge_class;
 alter table account_ignore change tournament tourn int;
 alter table concession change tournament tourn int;
-alter table email change tournament tourn int;
-alter table event change tournament tourn int;
 alter table event_double change tournament tourn int;
 alter table file change tournament tourn int;
 alter table housing_slots change tournament tourn int;
@@ -326,7 +310,6 @@ alter table rating_tier change tournament tourn int;
 alter table room drop tournament;
 alter table room_pool change tournament tourn int;
 alter table room_strike change tournament tourn int;
-alter table strike change tournament tourn int;
 alter table school change tournament tourn int;
 alter table school_fine change tournament tourn int;
 alter table session change tournament tourn int;
@@ -334,12 +317,15 @@ alter table tiebreak_set change tournament tourn int;
 alter table timeslot change tournament tourn int;
 alter table tourn_admin change tournament tourn int;
 alter table tourn_change change tournament tourn int;
+create index tourn on tourn_change(tourn);
 alter table tourn_site change tournament tourn int;
+
 
 alter table round add motion text;
 alter table ballot add position varchar(15);
 
 alter table tiebreak change tiebreaker name varchar(15);
+alter table tiebreak drop covers; 
 alter table tiebreak drop round;
 alter table tiebreak drop event;
 alter table tiebreak drop type;
@@ -383,6 +369,7 @@ alter table follow_account add timestamp timestamp;
 alter table file add timestamp timestamp;
 alter table file add circuit int;
 alter table event_double change setting setting varchar(15);
+alter table event change tournament tourn int;
 alter table event change type type varchar(15);
 
 alter table event drop code; 
@@ -419,14 +406,6 @@ alter table circuit change short_name abbr varchar(15);
   alter table circuit drop tourn_only;
   alter table circuit drop full_members;
 
-alter table judge drop  first;
-alter table judge drop  last;
-alter table judge drop  gender;
-alter table judge drop  paradigm;
-alter table judge drop  started;
-alter table judge drop  retired;
-alter table judge drop  last_judged;
-alter table judge drop  cell;
 
 alter table ballot change rank rank tinyint(4);
 alter table ballot drop seed;
@@ -435,8 +414,7 @@ alter table account_ignore add timestamp timestamp;
 rename table account_ignore to tourn_ignore;
 
 alter table account change noemail no_email bool;
-alter table account change started started_judging date;
-
+alter table account add started_judging date;
 
 alter table account ENGINE=innodb;
 alter table ballot ENGINE=innodb;

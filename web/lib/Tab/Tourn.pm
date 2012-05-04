@@ -2,7 +2,7 @@ package Tab::Tourn;
 use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
-Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end location hidden timestamp/);
+Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end tz location hidden timestamp/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
 Tab::Tourn->has_many(events => 'Tab::Event', 'tourn');
@@ -15,6 +15,7 @@ Tab::Tourn->has_many(schools => 'Tab::School', 'tourn');
 Tab::Tourn->has_many(admins => 'Tab::TournAdmin', 'tourn');
 Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn');
 Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn');
+Tab::Tourn->has_many(settings => 'Tab::TournSetting', 'tourn');
 Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn');
 Tab::Tourn->has_many(rating_tiers => 'Tab::RatingTier', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');

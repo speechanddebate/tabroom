@@ -25,6 +25,13 @@ sub circuits {
     return sort {$a->name cmp $b->name } Tab::Circuit->search_by_chapter($self->id);
 }
 
+Tab::Circuit->set_sql(by_chapter => "	
+					select distinct circuit.* 
+					from circuit,chapter_circuit
+					where circuit.id = chapter_circuit.circuit
+					and chapter_circuit.chapter = ? 
+					order by circuit.name ");
+
 sub dues {
     my ($self, $circuit, $paid) = @_;
 
