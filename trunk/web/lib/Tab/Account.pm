@@ -4,7 +4,7 @@ Tab::Account->table('account');
 
 Tab::Account->columns(Primary =>   qw/id/);
 Tab::Account->columns(Essential => qw/email passhash site_admin multiple/);
-Tab::Account->columns(Others =>    qw/first last phone street city state zip provider paradigm started gender
+Tab::Account->columns(Others =>    qw/first last phone street city state zip provider paradigm started_judging gender
 								   timestamp no_email change_pass_key password_timestamp tz/);
 
 __PACKAGE__->_register_datetimes( qw/password_timestamp/);

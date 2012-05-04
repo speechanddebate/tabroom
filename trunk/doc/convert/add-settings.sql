@@ -60,7 +60,6 @@ CREATE TABLE `circuit_setting` (
 
 alter table	chapter add coaches varchar(255);
 alter table tiebreak add tourn int;
-alter table file add result bool;
 create index tourn on tiebreak(tourn);
 
 CREATE TABLE `ballot_value` (
@@ -143,7 +142,6 @@ CREATE TABLE `region_fine` (
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 update tiebreak,tournament set tiebreak.tourn = tournament.id where tournament.method = tiebreak.method;
 
@@ -161,7 +159,6 @@ CREATE TABLE `webpage` (
    KEY `tourn` (`tourn`),
    KEY `circuit` (`circuit`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 CREATE TABLE `result` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -174,7 +171,6 @@ CREATE TABLE `result` (
    PRIMARY KEY (`id`),
    KEY `entry` (`entry`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 CREATE TABLE `result_value` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -187,7 +183,19 @@ CREATE TABLE `result_value` (
    PRIMARY KEY (`id`),
    KEY `result` (`result`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 update tiebreak,tournament set tiebreak.tourn = tournament.id where tournament.method = tiebreak.method;
+
 alter table file add result int;
+
+alter table tournament add tz varchar(31);
+update tournament,league 
+	set tournament.tz = league.timezone 
+	where tournament.league = league.id;
+
+alter table tournament add location varchar(15);
+
+update tournament,league 
+	set tournament.location = concat("US/",league.state)
+	where tournament.league = league.id;
+
