@@ -4,6 +4,7 @@ create index entry on changes(entry);
 
 alter table bin rename to strike_time;
 
+
 alter table class rename to event_double;
 create index tourn on event_double(tourn);
 
@@ -80,6 +81,9 @@ alter table account drop type;
 alter table account add provider varchar(63);
 alter table account add gender char;
 alter table account add paradigm text;
+
+alter table account add country char(4);
+update account set country="US";
 
 alter table ballot drop rank;
 alter table ballot drop points;
@@ -474,3 +478,4 @@ alter table tourn_admin ENGINE=innodb;
 alter table tourn_change ENGINE=innodb;
 alter table tourn_ignore ENGINE=innodb;
 alter table tourn_site ENGINE=innodb;
+
