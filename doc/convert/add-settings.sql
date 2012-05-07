@@ -97,6 +97,15 @@ CREATE TABLE `follow_account` (
   KEY `follower` (`follower`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
+CREATE TABLE `follow_tourn` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tourn` int(11) DEFAULT NULL,
+  `follower` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `tourn` (`tourn`),
+  KEY `follower` (`follower`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+
 CREATE TABLE `tourn_circuit` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `tourn` int(11) NOT NULL DEFAULT '0',
