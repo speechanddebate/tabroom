@@ -46,20 +46,21 @@ sub circuits {
 
 sub setting {
 
-	my ($self, $tag, $value, $text) = @_;
+	my ($self, $tag, $value, $blob) = @_;
 
 	my @existing = Tab::TournSetting->search(  
 		tourn => $self->id,
 		tag => $tag
 	);
 
-	if ($value && $value != 0) { 
+	if ($value && $value ne 0) { 
 
 		if (@existing) {
 
 			my $exists = shift @existing;
 			$exists->value($value);
-			$exists->text($text);
+			$exists->text($blob) if $value eq "text";
+			$exists->date($blob) if $value eq "date";
 			$exists->update;
 
 			foreach my $other (@existing) { 
@@ -70,27 +71,36 @@ sub setting {
 
 		} else {
 
-			Tab::TournSetting->create({
-				tourn => $self->id,
-				tag => $tag,
-				value => $value,
-				text => $text
-			});
+			if ($value eq "text") { 
+				my $setting = Tab::TournSetting->create({
+					tourn => $self->id,
+					tag => $tag,
+					value => $value,
+					value_text => $blob
+	 			});
+		 	} elsif ($value eq "date") {
+				my $setting = Tab::TournSetting->create({
+					tourn => $self->id,
+					tag => $tag,
+					value => $value,
+					value_date => $blob
+	 			});
+			} else { 
+				my $setting = Tab::TournSetting->create({
+					tourn => $self->id,
+					tag => $tag,
+					value => $value
+				});
+			}
 
 		}
 
 	} else {
 
 		return unless @existing;
-
 		my $setting = shift @existing;
-
-		foreach my $other (@existing) { 
-			$other->delete;
-		}
-
-		return $setting->text if $setting->value eq "text";
-		return $setting->datetime if $setting->value eq "datetime";
+		return $setting->value_text if $setting->value eq "text";
+		return $setting->value_date if $setting->value eq "date";
 		return $setting->value;
 
 	}
