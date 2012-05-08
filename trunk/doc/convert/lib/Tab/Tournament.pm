@@ -366,16 +366,20 @@ sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
 
+
 	my @existing = Tab::TournSetting->search(  
 		tourn => $self->id,
 		tag => $tag
 	);
 
-	if ($value &! $value == 0) { 
+
+	if ($value && $value ne 0) { 
+
 
 		if (@existing) {
 
 			my $exists = shift @existing;
+
 			$exists->value($value);
 			$exists->value_text($blob) if $value eq "text";
 			$exists->value_date($blob) if $value eq "date";
@@ -389,15 +393,31 @@ sub setting {
 
 		} else {
 
-			my $setting = Tab::TournSetting->create({
-				tourn => $self->id,
-				tag => $tag,
-				value => $value,
-			});
+			if ($value eq "text") { 
+				my $setting = Tab::TournSetting->create({
+					tourn => $self->id,
+					tag => $tag,
+					value => $value,
+					value_text => $blob
+				});
 
-			$setting->value_text($blob) if $value eq "text";
-			$setting->value_date($blob) if $value eq "date";
-			$setting->update;
+			} elsif ($value eq "date") { 
+
+				my $setting = Tab::TournSetting->create({
+					tourn => $self->id,
+					tag => $tag,
+					value => $value,
+					value_date => $blob
+				});
+
+			} else { 
+
+				my $setting = Tab::TournSetting->create({
+					tourn => $self->id,
+					tag => $tag,
+					value => $value
+				});
+			}	
 
 		}
 

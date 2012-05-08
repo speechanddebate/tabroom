@@ -74,7 +74,6 @@ CREATE TABLE `ballot_value` (
     KEY `ballot` (`ballot`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
-
 CREATE TABLE `qualifier` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     entry int default null,
@@ -110,6 +109,7 @@ CREATE TABLE `tourn_circuit` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `tourn` int(11) NOT NULL DEFAULT '0',
     `circuit` int(11) NOT NULL DEFAULT '0',
+  	`approved` tinyint(1) NOT NULL DEFAULT '0',
     `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `tourn` (`tourn`),
