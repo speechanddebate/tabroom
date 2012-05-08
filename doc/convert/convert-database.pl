@@ -277,7 +277,6 @@ foreach my $tourn (@tourns) {
 		$tourn->setting("allow_neutral_judges", $method->allow_neutral_judges);
 		$tourn->setting("ask_qualifying_tourn", $method->ask_qualifying_tournament);
 		$tourn->setting("elim_method_basis", $method->elim_method_basis);
-		$tourn->setting("timestamp", $method->timestamp);
 		$tourn->setting("judge_cells", $method->judge_cells);
 		$tourn->setting("track_first_year", $method->track_first_year);
 		$tourn->setting("publish_schools", $method->publish_schools);
@@ -324,8 +323,8 @@ foreach my $tourn (@tourns) {
 	$tourn->setting("chair_ballot_message", "text", $tourn->chair_ballot_message);
 	$tourn->setting("drop_deadline", "date", $tourn->drop_deadline);
 	$tourn->setting("fine_deadline", "date", $tourn->fine_deadline);
-	$tourn->setting("judge_deadline", "date",$tourn->judge_deadline);
-	$tourn->setting("freeze_deadline", "date",$tourn->freeze_deadline);
+	$tourn->setting("judge_deadline", "date", $tourn->judge_deadline);
+	$tourn->setting("freeze_deadline", "date", $tourn->freeze_deadline);
 	$tourn->setting("vcorner", $tourn->vcorner);
 	$tourn->setting("hcorner", $tourn->hcorner);
 	$tourn->setting("vlabel", $tourn->vlabel);
@@ -402,7 +401,6 @@ foreach my $group (@judge_groups) {
 	$group->setting("hired_pool", $group->hired_pool);
 	$group->setting("hired_fee", $group->hired_fee);
 	$group->setting("track_by_pools", $group->track_by_pools);
-	$group->setting("timestamp", $group->timestamp);
 	$group->setting("ask_paradigm", $group->ask_paradigm);
 	$group->setting("elim_special", $group->elim_special);
 	$group->setting("school_strikes", $group->school_strikes);
@@ -443,7 +441,6 @@ foreach my $circuit (@circuits) {
 	$circuit->setting("public_results", $circuit->public_results);
 	$circuit->setting("header_file", $circuit->header_file);
 	$circuit->setting("invoice_message", "text", $circuit->invoice_message);
-	$circuit->setting("timestamp", $circuit->timestamp);
 	$circuit->setting("track_bids", $circuit->track_bids);
 	$circuit->setting("last_change", $circuit->last_change);
 	$circuit->setting("approved", $circuit->approved);

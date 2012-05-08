@@ -1,13 +1,8 @@
-create index tourn on changes(tourn);
-create index panel on changes(panel);
-create index entry on changes(entry);
 
 alter table bin rename to strike_time;
 
 
 alter table class rename to event_double;
-create index tourn on event_double(tourn);
-
 alter table comp rename to entry;
 alter table housing rename to housing_student;
 alter table item rename to concession;
@@ -209,7 +204,7 @@ alter table judge_group drop group_max;
 alter table judge_group change tournament tourn int;
 
 alter table event_double drop judge_group;
-create index tourn on event_double(tourn);
+
 
 drop table pool_group;
 alter table rating change name value varchar(15);
@@ -292,15 +287,14 @@ alter table tourn_admin change entry entry_only tinyint;
 
 alter table tourn_change change panel new_panel int;
 alter table tourn_change change comp entry int;
-create index entry on tourn_change(entry);
 alter table tourn_change change moved_from old_panel int;
 alter table tourn_change add account int;
-alter table tourn_change change regline text varchar(255)
-
+alter table tourn_change change regline text varchar(255);
 
 alter table email change tournament tourn int;
 alter table email change senton sent_on datetime;
 alter table email change blurb content text;
+
 drop table judge_class;
 alter table account_ignore change tournament tourn int;
 alter table concession change tournament tourn int;
@@ -321,7 +315,6 @@ alter table tiebreak_set change tournament tourn int;
 alter table timeslot change tournament tourn int;
 alter table tourn_admin change tournament tourn int;
 alter table tourn_change change tournament tourn int;
-create index tourn on tourn_change(tourn);
 alter table tourn_site change tournament tourn int;
 
 
@@ -422,7 +415,7 @@ alter table account add started_judging date;
 
 alter table account ENGINE=innodb;
 alter table ballot ENGINE=innodb;
-alter table ballot_speaks  ENGINE=innodb;
+alter table ballot_value  ENGINE=innodb;
 alter table chapter  ENGINE=innodb;
 alter table chapter_admin  ENGINE=innodb;
 alter table chapter_circuit  ENGINE=innodb;
@@ -436,7 +429,6 @@ alter table concession ENGINE=innodb;
 alter table concession_purchase  ENGINE=innodb;
 alter table email  ENGINE=innodb;
 alter table entry  ENGINE=innodb;
-alter table entry_qualifier  ENGINE=innodb;
 alter table entry_student  ENGINE=innodb;
 alter table event  ENGINE=innodb;
 alter table event_double ENGINE=innodb;
@@ -479,3 +471,8 @@ alter table tourn_change ENGINE=innodb;
 alter table tourn_ignore ENGINE=innodb;
 alter table tourn_site ENGINE=innodb;
 
+create index tourn on tourn_change(tourn);
+create index new_panel on tourn_change(new_panel);
+create index old_panel on tourn_change(old_panel);
+create index entry on tourn_change(entry);
+create index tourn on event_double(tourn);
