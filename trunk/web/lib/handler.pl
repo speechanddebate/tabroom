@@ -10,7 +10,7 @@ use DBI;
 use POSIX;
 use Class::DBI::AbstractSearch;
 use HTML::Mason::ApacheHandler;
-use Digest::SHA1;
+use Digest::SHA;
 use Data::Dumper;
 use DateTime;
 use Lingua::EN::Numbers::Ordinate;
