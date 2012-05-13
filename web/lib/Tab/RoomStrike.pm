@@ -1,6 +1,6 @@
 package Tab::RoomStrike;
 use base 'Tab::DBI';
-Tab::RoomStrike->table('roomblock');
+Tab::RoomStrike->table('room_strike');
 Tab::RoomStrike->columns(All => qw/id room type event timeslot special tourn start end timestamp/);
 
 Tab::RoomStrike->has_a(event => 'Tab::Event');

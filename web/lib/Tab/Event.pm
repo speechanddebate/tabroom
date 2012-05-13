@@ -12,10 +12,12 @@ Tab::Event->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Event->has_a(event_double => 'Tab::EventDouble');
 Tab::Event->has_a(rating_subset => 'Tab::RatingSubset');
 
+Tab::Event->has_many(room_pools => 'Tab::RoomPool', 'event');
+Tab::Event->has_many(settings => "Tab::EventSetting", "event");
+
 Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
 Tab::Event->has_many(panels => 'Tab::Panel', 'event'  => { order_by => 'letter'} );
-Tab::Event->has_many(room_pools => 'Tab::RoomPool', 'event');
 
 sub sites {
 	my $self = shift;
