@@ -6,12 +6,13 @@ Tab::JudgeGroup->columns(Essential => qw/tourn name abbr judge_per deadline time
 
 Tab::JudgeGroup->has_a(tourn => "Tab::Tourn");
 
-Tab::JudgeGroup->has_many(event_doubles => "Tab::EventDouble", "judge_group");
-Tab::JudgeGroup->has_many(strike_times => "Tab::StrikeTime", "judge_group");
-Tab::JudgeGroup->has_many(rating_tiers => "Tab::RatingTier", "judge_group");
 Tab::JudgeGroup->has_many(pools => "Tab::Pool", "judge_group");
 Tab::JudgeGroup->has_many(judges => "Tab::Judge", "judge_group");
 Tab::JudgeGroup->has_many(hires => 'Tab::JudgeHire', 'judge_group');
+Tab::JudgeGroup->has_many(strike_times => "Tab::StrikeTime", "judge_group");
+Tab::JudgeGroup->has_many(event_doubles => "Tab::EventDouble", "judge_group");
+Tab::JudgeGroup->has_many(settings => "Tab::JudgeGroupSetting", "judge_group");
+Tab::JudgeGroup->has_many(rating_subsets => "Tab::RatingSubset", "judge_group");
 
 __PACKAGE__->_register_datetimes( qw/deadline timestamp/);
 

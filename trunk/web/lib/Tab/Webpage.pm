@@ -2,7 +2,7 @@ package Tab::Webpage;
 use base 'Tab::DBI';
 Tab::Webpage->table('webpage');
 Tab::Webpage->columns(Primary => qw/id/);
-Tab::Webpage->columns(Essential => qw/tourn circuit order title content last_editor posted_on timestamp/);
+Tab::Webpage->columns(Essential => qw/tourn circuit page_order title content last_editor posted_on timestamp/);
 
 Tab::Webpage->has_a(tourn => 'Tab::Tourn');
 Tab::Webpage->has_a(circuit => 'Tab::Circuit');

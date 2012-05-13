@@ -8,6 +8,7 @@ Tab::RatingSubset->has_a(judge_group => 'Tab::JudgeGroup');
 
 Tab::RatingSubset->has_many(events => 'Tab::Event', "rating_subset");
 Tab::RatingSubset->has_many(ratings => 'Tab::Rating', "rating_subset");
+Tab::RatingSubset->has_many(rating_tiers => 'Tab::RatingTier', 'rating_subset');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
