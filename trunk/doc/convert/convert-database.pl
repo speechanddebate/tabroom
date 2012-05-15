@@ -191,7 +191,8 @@ foreach my $tourn (@tourns) {
 
 	Tab::TournCircuit->create({
 		tourn => $tourn->id,
-		circuit => $tourn->league->id
+		circuit => $tourn->league->id,
+		approved => 1
 	});
 
 	if ($tourn->director && $tourn->director->id) { 
