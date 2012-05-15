@@ -327,6 +327,7 @@ alter table tiebreak drop round;
 alter table tiebreak drop event;
 alter table tiebreak drop type;
 alter table tiebreak drop tourn;
+alter table tiebreak drop method;
 alter table tourn drop circuit;
 alter table tourn_admin change nosetup no_setup tinyint;
 alter table tourn_admin add event int;
