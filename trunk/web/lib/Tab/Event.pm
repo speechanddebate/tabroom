@@ -90,9 +90,14 @@ sub setting {
 		if (@existing) {
 
 			my $exists = shift @existing;
-
 			$exists->value($value);
-
+			$exists->value_text($blob) if $value eq "text";
+			$exists->value_date($blob) if $value eq "date";
+			$exists->update;
+		
+			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+				$exists->delete;
+			}
 
 			foreach my $other (@existing) { 
 				$other->delete;
@@ -119,6 +124,7 @@ sub setting {
 		}
 
 		$exists->update;
+
 
 	} else {
 
