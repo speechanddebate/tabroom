@@ -30,6 +30,7 @@ CREATE TABLE `event_setting` (
     `value` varchar(127) NOT NULL DEFAULT '',
     `value_text` text,
     `value_date` datetime,
+    `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `event` (`event`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
