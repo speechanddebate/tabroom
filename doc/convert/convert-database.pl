@@ -476,7 +476,6 @@ foreach my $event (@events) {
 	$event->setting("bids", $event->bids);
 	$event->setting("waitlist", $event->waitlist);
 	$event->setting("cap", $event->cap);
-	$event->setting("rating_subset", $event->qual_subset);
 	$event->setting("school_cap", $event->school_cap);
 	$event->setting("min_entry", $event->min_entry);
 	$event->setting("max_entry", $event->max_entry);

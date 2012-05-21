@@ -377,7 +377,7 @@ alter table event drop double_factor;
 alter table event drop reg_blockable; 
 alter table event drop textpost; 
 alter table event drop bid_cume; 
-alter table event drop qual_subset; 
+alter table event change qual_subset rating_subset int; 
 alter table event drop publish; 
 alter table event add timestamp timestamp;
 
