@@ -197,6 +197,7 @@ CREATE TABLE `result_value` (
 update tiebreak,tournament set tiebreak.tourn = tournament.id where tournament.method = tiebreak.method;
 
 alter table file add result int;
+alter table room_pool add timestamp timestamp;
 
 alter table tournament add tz varchar(31);
 update tournament,league 

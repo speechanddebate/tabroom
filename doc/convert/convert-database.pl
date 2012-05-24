@@ -322,10 +322,10 @@ foreach my $tourn (@tourns) {
 	$tourn->setting("ballot_message", "text", $tourn->ballot_message);
 	$tourn->setting("web_message", "text", $tourn->web_message);
 	$tourn->setting("chair_ballot_message", "text", $tourn->chair_ballot_message);
-	$tourn->setting("drop_deadline", "date", $tourn->drop_deadline);
-	$tourn->setting("fine_deadline", "date", $tourn->fine_deadline);
-	$tourn->setting("judge_deadline", "date", $tourn->judge_deadline);
-	$tourn->setting("freeze_deadline", "date", $tourn->freeze_deadline);
+	$tourn->setting("drop_deadline", "date", $tourn->drop_deadline) if $tourn->drop_deadline;
+	$tourn->setting("fine_deadline", "date", $tourn->fine_deadline) if $tourn->fine_deadline;
+	$tourn->setting("judge_deadline", "date", $tourn->judge_deadline) if $tourn->judge_deadline;
+	$tourn->setting("freeze_deadline", "date", $tourn->freeze_deadline) if $tourn->freeze_deadline;
 	$tourn->setting("vcorner", $tourn->vcorner);
 	$tourn->setting("hcorner", $tourn->hcorner);
 	$tourn->setting("vlabel", $tourn->vlabel);
@@ -419,6 +419,7 @@ foreach my $group (@judge_groups) {
 	$group->setting("obligation_before_strikes", $group->obligation_before_strikes);
 	$group->setting("conflicts", $group->conflicts);
 	$group->setting("live_updates", $group->live_updates);
+	$group->setting("deadline", "date", $group->deadline) if $group->deadline;
 
 }
 
@@ -463,7 +464,7 @@ foreach my $event (@events) {
 	$event->setting("omit_sweeps", $event->omit_sweeps);
 	$event->setting("no_judge_burden", $event->no_judge_burden);
 	$event->setting("ballot_type", $event->ballot_type);
-	$event->setting("deadline", "date",$event->deadline);
+	$event->setting("deadline", "date",$event->deadline) if $event->deadline;
 	$event->setting("ask_for_titles", $event->ask_for_titles);
 	$event->setting("supp", $event->supp);
 	$event->setting("no_codes", $event->no_codes);
@@ -477,8 +478,9 @@ foreach my $event (@events) {
 	$event->setting("waitlist", $event->waitlist);
 	$event->setting("cap", $event->cap);
 	$event->setting("school_cap", $event->school_cap);
-	$event->setting("min_entry", $event->min_entry);
-	$event->setting("max_entry", $event->max_entry);
+	$event->setting("min_entry", $event->team);
+	$event->setting("max_entry", $event->team);
+	$event->setting("max_entry", 8) if $event->team == 3;
 	$event->setting("description", "text", $event->blurb);
 
 }
