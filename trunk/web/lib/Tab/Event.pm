@@ -17,7 +17,6 @@ Tab::Event->has_many(settings => "Tab::EventSetting", "event");
 
 Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
-Tab::Event->has_many(panels => 'Tab::Panel', 'event'  => { order_by => 'letter'} );
 
 sub sites {
 	my $self = shift;
@@ -85,7 +84,7 @@ sub setting {
 		tag => $tag
 	);
 
-    if ($value && $value ne 0) {
+    if (defined $value) {
 
 		if (@existing) {
 
@@ -94,8 +93,8 @@ sub setting {
 			$exists->value_text($blob) if $value eq "text";
 			$exists->value_date($blob) if $value eq "date";
 			$exists->update;
-		
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+
+			if ($value eq "delete" || $value eq "" || $value == 0) { 
 				$exists->delete;
 			}
 
@@ -105,25 +104,25 @@ sub setting {
 
 			return;
 
-		} else {
+		} elsif ($value ne "delete" && $value ne "" && $value != 0) {
 
-			Tab::EventSetting->create({
+			my $exists = Tab::EventSetting->create({
 				event => $self->id,
 				tag => $tag,
 				value => $value,
 			});
 
-		}
+			if ($value eq "text") { 
+				$exists->value_text($blob);
+			}
 
-		if ($value eq "text") { 
-			$exists->value_text($blob);
-		}
+			if ($value eq "date") { 
+				$exists->value_date($blob);
+			}
 
-		if ($value eq "date") { 
-			$exists->value_date($blob);
-		}
+			$exists->update;
 
-		$exists->update;
+		}
 
 
 	} else {

@@ -76,7 +76,7 @@ sub setting {
 		tag => $tag
 	);
 
-    if ($value && $value ne 0) {
+    if (defined $value) { 
 
 		if (@existing) {
 
@@ -96,25 +96,25 @@ sub setting {
 
 			return;
 
-		} else {
+		} elsif ($value ne "delete" && $value ne "" && $value != 0) {
 
-			Tab::CircuitSetting->create({
+			my $exists = Tab::CircuitSetting->create({
 				circuit => $self->id,
 				tag => $tag,
 				value => $value,
 			});
 
-		}
+			if ($value eq "text") { 
+				$exists->value_text($blob);
+			}
 
-		if ($value eq "text") { 
-			$exists->value_text($blob);
-		}
+			if ($value eq "date") { 
+				$exists->value_date($blob);
+			}
 
-		if ($value eq "date") { 
-			$exists->value_date($blob);
-		}
+			$exists->update;
 
-		$exists->update;
+		}
 
 	} else {
 

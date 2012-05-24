@@ -57,7 +57,7 @@ sub setting {
 		tag => $tag
 	);
 
-	if ($value && $value ne 0) { 
+	if (defined $value) { 
 
 		if (@existing) {
 
@@ -77,29 +77,23 @@ sub setting {
 
 			return;
 
-		} else {
+		} elsif ($value ne "delete" && $value ne "" && $value != 0) {
+
+			my $exists = Tab::EventSetting->create({
+				event => $self->id,
+				tag => $tag,
+				value => $value,
+			});
 
 			if ($value eq "text") { 
-				my $setting = Tab::TournSetting->create({
-					tourn => $self->id,
-					tag => $tag,
-					value => $value,
-					value_text => $blob
-	 			});
-		 	} elsif ($value eq "date") {
-				my $setting = Tab::TournSetting->create({
-					tourn => $self->id,
-					tag => $tag,
-					value => $value,
-					value_date => $blob
-	 			});
-			} else { 
-				my $setting = Tab::TournSetting->create({
-					tourn => $self->id,
-					tag => $tag,
-					value => $value
-				});
+				$exists->value_text($blob);
 			}
+
+			if ($value eq "date") { 
+				$exists->value_date($blob);
+			}
+
+			$exists->update;
 
 		}
 
