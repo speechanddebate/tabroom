@@ -211,6 +211,8 @@ alter table rating change name value varchar(15);
 alter table region drop tournament;
 alter table region drop director;
 alter table room_pool drop tourn;
+alter table room_pool change tournament tourn int;
+
 alter table round drop no_first_year;
 alter table round drop score;
 
@@ -306,7 +308,6 @@ alter table judge_hire change tournament tourn int;
 alter table rating change tournament tourn int;
 alter table rating_tier change tournament tourn int;
 alter table room drop tournament;
-alter table room_pool change tournament tourn int;
 alter table room_strike change tournament tourn int;
 alter table school change tournament tourn int;
 alter table school_fine change tournament tourn int;
