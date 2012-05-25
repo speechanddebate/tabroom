@@ -276,7 +276,6 @@ foreach my $tourn (@tourns) {
 		$tourn->setting("bid_min_number", $method->bid_min_number);
 		$tourn->setting("elim_method", $method->elim_method);
 		$tourn->setting("allow_neutral_judges", $method->allow_neutral_judges);
-		$tourn->setting("ask_qualifying_tourn", $method->ask_qualifying_tournament);
 		$tourn->setting("elim_method_basis", $method->elim_method_basis);
 		$tourn->setting("judge_cells", $method->judge_cells);
 		$tourn->setting("track_first_year", $method->track_first_year);
@@ -290,7 +289,8 @@ foreach my $tourn (@tourns) {
 		$tourn->setting("must_pay_dues", $method->must_pay_dues);
 		$tourn->setting("no_back_to_back", $method->no_back_to_back);
 		$tourn->setting("master_printouts", $method->master_printouts);
-		$tourn->setting("ask_two_quals", $method->ask_two_quals);
+		$tourn->setting("ask_quals", "1") if $method->ask_qualifying_tournament;
+		$tourn->setting("ask_quals", "2") if $method->ask_two_quals;
 		$tourn->setting("audit_method", $method->audit_method);
 		$tourn->setting("require_adult_contact", $method->require_adult_contact);
 		$tourn->setting("novices", $method->novices);
@@ -404,6 +404,7 @@ foreach my $group (@judge_groups) {
 	$group->setting("track_by_pools", $group->track_by_pools);
 	$group->setting("ask_paradigm", $group->ask_paradigm);
 	$group->setting("elim_special", $group->elim_special);
+	$group->setting("special", $group->special);
 	$group->setting("school_strikes", $group->school_strikes);
 	$group->setting("strike_reg_opens", $group->strike_reg_opens);
 	$group->setting("strike_reg_closes", $group->strike_reg_closes);
@@ -467,9 +468,11 @@ foreach my $event (@events) {
 	$event->setting("deadline", "date",$event->deadline) if $event->deadline;
 	$event->setting("ask_for_titles", $event->ask_for_titles);
 	$event->setting("supp", $event->supp);
-	$event->setting("no_codes", $event->no_codes);
-	$event->setting("initial_code", $event->initial_codes);
-	$event->setting("reg_codes", $event->reg_codes);
+	$event->setting("code_style", "numbers") if $event->code;
+	$event->setting("code_style", "initials") if $event->initial_codes;
+	$event->setting("code_style", "register") if $event->reg_codes;
+	$event->setting("code_start", $event->code);
+	$event->setting("code_hide", $event->no_code);
 	$event->setting("field_report", $event->field_report);
 	$event->setting("live_updates", $event->live_updates);
 	$event->setting("waitlist_all", $event->waitlist_all);

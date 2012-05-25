@@ -8,6 +8,7 @@ Tab::JudgeGroup->has_a(tourn => "Tab::Tourn");
 
 Tab::JudgeGroup->has_many(pools => "Tab::Pool", "judge_group");
 Tab::JudgeGroup->has_many(judges => "Tab::Judge", "judge_group");
+Tab::JudgeGroup->has_many(events => "Tab::Judge", "judge_group");
 Tab::JudgeGroup->has_many(hires => 'Tab::JudgeHire', 'judge_group');
 Tab::JudgeGroup->has_many(strike_times => "Tab::StrikeTime", "judge_group");
 Tab::JudgeGroup->has_many(event_doubles => "Tab::EventDouble", "judge_group");
@@ -36,10 +37,6 @@ sub next_code {
     return $code;
 }
 
-sub events {
-	my $self = shift;
-	return Tab::Event->search_by_group($self->id);
-}
 
 sub entries {
 	my $self = shift;

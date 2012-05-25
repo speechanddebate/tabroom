@@ -2,9 +2,9 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/account chapter_judge school judge_group 
-									first last code active obligation hired 
-									covers special notes timestamp /);
+Tab::Judge->columns(Essential => qw/school code active special notes judge_group
+									covers chapter_judge obligation elim_group
+									cfl_parl account hired timestamp /);
 
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(covers => 'Tab::JudgeGroup');

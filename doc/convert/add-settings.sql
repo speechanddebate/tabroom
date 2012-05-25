@@ -125,10 +125,10 @@ CREATE TABLE `region_admin` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
-alter table account add paradigm text;
 alter table account add started date;
 alter table account add provider text;
 alter table account add gender char;
+alter table account add paradigm text;
 
 CREATE TABLE `tourn_fee` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -159,7 +159,7 @@ CREATE TABLE `webpage` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `tourn` int(11) DEFAULT NULL,
   `circuit` int(11) DEFAULT NULL,
-  `order` int(11) DEFAULT NULL,
+  `page_order` int(11) DEFAULT NULL,
   `title` varchar(63) DEFAULT NULL,
   `content` text,
   `last_editor` int(11) DEFAULT NULL,

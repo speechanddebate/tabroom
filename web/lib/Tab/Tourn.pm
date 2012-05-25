@@ -57,8 +57,12 @@ sub setting {
 		tag => $tag
 	);
 
-	if (defined $value) { 
+	&Tab::debuglog("Value is $value, tag is $tag") if defined $value;
 
+	if (defined $value) { 
+			
+		&Tab::debuglog("Setting value of $tag to $value ") if $value;
+	
 		if (@existing) {
 
 			my $exists = shift @existing;
@@ -66,6 +70,7 @@ sub setting {
 			$exists->value_text($blob) if $value eq "text";
 			$exists->value_date($blob) if $value eq "date";
 			$exists->update;
+
 
 			if ($value eq "delete" || $value eq "" || $value eq "0") { 
 				$exists->delete;
@@ -79,8 +84,8 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value ne "" && $value != 0) {
 
-			my $exists = Tab::EventSetting->create({
-				event => $self->id,
+			my $exists = Tab::TournSetting->create({
+				tourn => $self->id,
 				tag => $tag,
 				value => $value,
 			});

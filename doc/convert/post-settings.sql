@@ -2,7 +2,6 @@
 alter table bin rename to strike_time;
 
 
-alter table class rename to event_double;
 alter table comp rename to entry;
 alter table housing rename to housing_student;
 alter table item rename to concession;
@@ -20,9 +19,8 @@ alter table roomblock rename to room_strike;
 alter table team_member rename to entry_student;
 
 alter table follow_comp rename to follow_entry;
+alter table follow_entry change comp entry int;
 alter table ballot change comp entry int;
-alter table changes change comp entry int;
-alter table follow_comp change comp entry int;
 alter table rating change comp entry int;
 alter table strike change comp entry int;
 alter table student_result change comp entry int;
@@ -62,7 +60,6 @@ alter table uber rename to chapter_judge;
 alter table tournament rename to tourn;
 alter table tournament_site rename to tourn_site;
 alter table fine rename to school_fine;
-alter table changes rename to tourn_change;
 alter table no_interest rename to account_ignore;
 
 alter table account drop password;
@@ -73,11 +70,9 @@ alter table account drop change_deadline;
 alter table account change change_timestamp password_timestamp datetime;
 alter table account drop is_cell;
 alter table account drop type;
-alter table account add provider varchar(63);
-alter table account add gender char;
-alter table account add paradigm text;
 
 alter table account add country char(4);
+alter table chapter add country char(4);
 update account set country="US";
 
 alter table ballot drop rank;
@@ -88,6 +83,11 @@ alter table ballot change real_points points int;
 alter table ballot drop flight;
 alter table ballot drop rankinround;
 
+alter table class rename to event_double;
+alter table event_double drop judge_group;
+alter table event_double change tournament tourn int;
+create index tourn on event_double(tourn);
+alter table event_double change setting setting varchar(15);
 alter table event_double add min int;
 alter table event_double change double_entry setting tinyint;
 alter table event change class event_double int;
@@ -132,7 +132,6 @@ alter table entry change tournament tourn int;
 
 alter table rating change rating_tier tier int;
 
-alter table event_double drop judge_group;
 alter table housing_student add account int;
 
 alter table judge drop first;
@@ -203,14 +202,12 @@ alter table judge_group drop group_max;
 
 alter table judge_group change tournament tourn int;
 
-alter table event_double drop judge_group;
-
 
 drop table pool_group;
 alter table rating change name value varchar(15);
 alter table region drop tournament;
 alter table region drop director;
-alter table room_pool drop tourn;
+alter table room_pool drop tournament;
 alter table room_pool change tournament tourn int;
 
 alter table round drop no_first_year;
@@ -287,6 +284,7 @@ alter table tourn drop director;
 
 alter table tourn_admin change entry entry_only tinyint;
 
+alter table changes rename to tourn_change;
 alter table tourn_change change panel new_panel int;
 alter table tourn_change change comp entry int;
 alter table tourn_change change moved_from old_panel int;
@@ -300,7 +298,6 @@ alter table email change blurb content text;
 drop table judge_class;
 alter table account_ignore change tournament tourn int;
 alter table concession change tournament tourn int;
-alter table event_double change tournament tourn int;
 alter table file change tournament tourn int;
 alter table housing_slots change tournament tourn int;
 alter table housing_student change tournament tourn int;
@@ -323,6 +320,7 @@ alter table round add motion text;
 alter table ballot add position varchar(15);
 
 alter table tiebreak change tiebreaker name varchar(15);
+alter table tiebreak add highlow int;
 alter table tiebreak drop covers; 
 alter table tiebreak drop round;
 alter table tiebreak drop event;
@@ -367,7 +365,6 @@ alter table follow_entry add timestamp timestamp;
 alter table follow_account add timestamp timestamp;
 alter table file add timestamp timestamp;
 alter table file add circuit int;
-alter table event_double change setting setting varchar(15);
 alter table event change tournament tourn int;
 alter table event change type type varchar(15);
 
@@ -477,4 +474,3 @@ create index tourn on tourn_change(tourn);
 create index new_panel on tourn_change(new_panel);
 create index old_panel on tourn_change(old_panel);
 create index entry on tourn_change(entry);
-create index tourn on event_double(tourn);
