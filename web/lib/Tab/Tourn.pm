@@ -57,12 +57,8 @@ sub setting {
 		tag => $tag
 	);
 
-	&Tab::debuglog("Value is $value, tag is $tag") if defined $value;
-
 	if (defined $value) { 
 			
-		&Tab::debuglog("Setting value of $tag to $value ") if $value;
-	
 		if (@existing) {
 
 			my $exists = shift @existing;
@@ -82,7 +78,7 @@ sub setting {
 
 			return;
 
-		} elsif ($value ne "delete" && $value ne "" && $value != 0) {
+		} elsif ($value ne "delete" && $value && $value ne "0") {
 
 			my $exists = Tab::TournSetting->create({
 				tourn => $self->id,

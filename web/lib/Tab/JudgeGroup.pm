@@ -54,17 +54,18 @@ sub setting {
 
 	my @existing = Tab::JudgeGroupSetting->search(  
 		judge_group => $self->id,
-		tag => $tag
+		tag         => $tag
 	);
 
     if (defined $value) { 
 
 		if (@existing) {
-
+		
 			my $exists = shift @existing;
+
 			$exists->value($value);
-			$exists->text($blob) if $value eq "text";
-			$exists->date($blob) if $value eq "date";
+			$exists->value_text($blob) if $value eq "text";
+			$exists->value_date($blob) if $value eq "date";
 			$exists->update;
 		
 			if ($value eq "delete" || $value eq "" || $value eq "0") { 
@@ -77,7 +78,7 @@ sub setting {
 
 			return;
 
-		} elsif ($value ne "delete" && $value ne "" && $value != 0) {
+		} elsif ($value ne "delete" && $value && $value ne "0") {
 
 			my $exists = Tab::JudgeGroupSetting->create({
 				judge_group => $self->id,
