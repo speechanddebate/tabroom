@@ -96,7 +96,7 @@ sub setting {
 
 			return;
 
-		} elsif ($value ne "delete" && $value ne "" && $value != 0) {
+		} elsif ($value ne "delete" && $value && $value ne "0") {
 
 			my $exists = Tab::CircuitSetting->create({
 				circuit => $self->id,
