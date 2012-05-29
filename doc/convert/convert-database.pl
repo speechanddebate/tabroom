@@ -158,7 +158,7 @@ foreach my $sweep (@sweeps) {
 
 		Tab::TournSetting->create({
 			tourn => $sweep->tournament->id,
-			tag => "sweep_prelim_cume_".$sweep->prelim_cume,
+			tag => "sweep_cume_".$sweep->prelim_cume,
 			value => $sweep->value
 		});
 
