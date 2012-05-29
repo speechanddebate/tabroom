@@ -176,6 +176,7 @@ alter table judge_group drop pub_assigns;
 alter table judge_group drop dio_min;
 alter table judge_group drop ask_alts;
 alter table judge_group drop free;
+alter table judge_group drop deadline;
 alter table judge_group drop collective;
 alter table judge_group drop school_strikes;
 alter table judge_group drop strike_reg_opens;
