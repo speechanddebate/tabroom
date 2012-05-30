@@ -15,6 +15,7 @@ alter table chapter_league rename to chapter_circuit;
 alter table purchase rename to concession_purchase;
 alter table qual rename to rating_tier;
 alter table qual_subset rename to rating_subset;
+alter table rating change subset rating_subset int;
 alter table roomblock rename to room_strike;
 alter table team_member rename to entry_student;
 
@@ -129,8 +130,6 @@ alter table entry drop housing_end;
 alter table entry drop partner_housing_start;
 alter table entry drop partner_housing_end;
 alter table entry change tournament tourn int;
-
-alter table rating change rating_tier tier int;
 
 alter table housing_student add account int;
 
@@ -355,7 +354,6 @@ alter table rating_subset add timestamp timestamp;
 alter table rating add timestamp timestamp;
 alter table rating drop value;
 drop table pool_round;
-alter table pool_judge drop type;
 alter table pool drop timeslot;
 alter table panel drop event;
 alter table panel drop nosweep;
