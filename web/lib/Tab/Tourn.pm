@@ -5,7 +5,6 @@ Tab::Tourn->columns(Primary => qw/id/);
 Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end tz location hidden timestamp/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
-Tab::Tourn->has_many(events => 'Tab::Event', 'tourn');
 Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');
 Tab::Tourn->has_many(judges => 'Tab::Judge', 'tourn');
 Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
