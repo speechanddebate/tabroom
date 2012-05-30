@@ -8,8 +8,9 @@ Tab::JudgeGroup->has_a(tourn => "Tab::Tourn");
 
 Tab::JudgeGroup->has_many(pools => "Tab::Pool", "judge_group");
 Tab::JudgeGroup->has_many(judges => "Tab::Judge", "judge_group");
-Tab::JudgeGroup->has_many(events => "Tab::Judge", "judge_group");
+Tab::JudgeGroup->has_many(events => "Tab::Event", "judge_group");
 Tab::JudgeGroup->has_many(hires => 'Tab::JudgeHire', 'judge_group');
+Tab::JudgeGroup->has_many(rating_tiers => "Tab::RatingTier", "judge_group");
 Tab::JudgeGroup->has_many(strike_times => "Tab::StrikeTime", "judge_group");
 Tab::JudgeGroup->has_many(event_doubles => "Tab::EventDouble", "judge_group");
 Tab::JudgeGroup->has_many(settings => "Tab::JudgeGroupSetting", "judge_group");
@@ -58,6 +59,8 @@ sub setting {
 	);
 
     if (defined $value) { 
+
+		&Tab::debuglog("Tag $tag is defined with $value");
 
 		if (@existing) {
 		
