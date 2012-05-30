@@ -42,11 +42,6 @@ Tab::Circuit->set_sql( by_tourn => "select distinct circuit.*
 									and tourn_circuit.tourn = ?
 									order by circuit.name");
 
-sub circuits { 
-	my $self = shift;
-	return Tab::Circuit->search_by_tourn($self->id);
-}
-
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
