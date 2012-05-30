@@ -336,7 +336,6 @@ alter table session drop ie_annoy;
 alter table session drop director;
 alter table session change entry entry_only bool;
 alter table session change league circuit int;
-alter table round drop type;
 alter table round drop preset;
 alter table round drop number_judges;
 alter table room_strike add entry int;
