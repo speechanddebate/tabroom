@@ -88,7 +88,6 @@ alter table class rename to event_double;
 alter table event_double drop judge_group;
 alter table event_double change tournament tourn int;
 create index tourn on event_double(tourn);
-alter table event_double change setting setting varchar(15);
 alter table event_double add min int;
 alter table event_double change double_entry setting tinyint;
 alter table event change class event_double int;
@@ -133,14 +132,11 @@ alter table entry change tournament tourn int;
 
 alter table housing_student add account int;
 
-alter table judge drop first;
-alter table judge drop last;
 alter table judge drop cfl_tab_first;
 alter table judge drop cfl_tab_second;
 alter table judge drop cfl_tab_third;
 alter table judge drop alt_group;
 alter table judge drop housing;
-alter table judge drop gender;
 alter table judge drop spare_pool;
 alter table judge drop score;
 alter table judge drop tournament;

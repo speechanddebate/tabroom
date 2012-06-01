@@ -411,10 +411,10 @@ foreach my $group (@judge_groups) {
 	$group->setting("min_burden", $group->min_burden);
 	$group->setting("ratings_need_paradigms", $group->ratings_need_paradigms);
 	$group->setting("strikes_need_paradigms", $group->strikes_need_paradigms);
-	$group->setting("comp_strikes", $group->comp_strikes);
+	$group->setting("entry_strikes", $group->comp_strikes);
 	$group->setting("coach_ratings", $group->coach_ratings);
 	$group->setting("school_ratings", $group->school_ratings);
-	$group->setting("comp_ratings", $group->comp_ratings);
+	$group->setting("entry_ratings", $group->comp_ratings);
 	$group->setting("max_burden", $group->max_burden);
 	$group->setting("pub_assigns", $group->pub_assigns);
 	$group->setting("obligation_before_strikes", $group->obligation_before_strikes);
@@ -472,7 +472,7 @@ foreach my $event (@events) {
 	$event->setting("code_style", "initials") if $event->initial_codes;
 	$event->setting("code_style", "register") if $event->reg_codes;
 	$event->setting("code_start", $event->code);
-	$event->setting("code_hide", $event->no_code);
+	$event->setting("code_hide", $event->no_codes);
 	$event->setting("field_report", $event->field_report);
 	$event->setting("live_updates", $event->live_updates);
 	$event->setting("waitlist_all", $event->waitlist_all);
