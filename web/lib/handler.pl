@@ -105,7 +105,7 @@ sub handler {
     
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
-			comp_root => '/www/itab/web',
+			entry_root => '/www/itab/web',
 			data_dir  => '/www/itab/web/mason',
 			error_mode => 'fatal'
 		); 
@@ -114,7 +114,7 @@ sub handler {
 
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
-			comp_root => '/www/itab/web',
+			entry_root => '/www/itab/web',
 			data_dir  => '/www/itab/web/mason',
 		); 
 
