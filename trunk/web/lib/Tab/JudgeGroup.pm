@@ -2,7 +2,7 @@ package Tab::JudgeGroup;
 use base 'Tab::DBI';
 Tab::JudgeGroup->table('judge_group');
 Tab::JudgeGroup->columns(Primary => qw/id/);
-Tab::JudgeGroup->columns(Essential => qw/tourn name abbr judge_per deadline timestamp/);
+Tab::JudgeGroup->columns(Essential => qw/tourn name abbr judge_per timestamp/);
 
 Tab::JudgeGroup->has_a(tourn => "Tab::Tourn");
 
@@ -16,7 +16,7 @@ Tab::JudgeGroup->has_many(event_doubles => "Tab::EventDouble", "judge_group");
 Tab::JudgeGroup->has_many(settings => "Tab::JudgeGroupSetting", "judge_group");
 Tab::JudgeGroup->has_many(rating_subsets => "Tab::RatingSubset", "judge_group");
 
-__PACKAGE__->_register_datetimes( qw/deadline timestamp/);
+__PACKAGE__->_register_datetimes( qw/timestamp/);
 
 sub next_code { 
 	
