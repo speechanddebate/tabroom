@@ -19,6 +19,7 @@ use Tab::DBI;
 use Tab::Account;
 use Tab::AccountAccess;
 use Tab::Ballot;
+use Tab::BallotValue;
 use Tab::Bill;
 use Tab::Change;
 use Tab::Chapter;
@@ -390,6 +391,7 @@ print "Done.  Converting judge groups to the new settings\n";
 
 foreach my $group (@judge_groups) { 
 
+	$group->setting("judge_per", $group->judge_per);
 	$group->setting("free", $group->free);
 	$group->setting("alt_max", $group->alt_max);
 	$group->setting("dio_min", $group->dio_min);
@@ -498,7 +500,7 @@ my $total;
 
 foreach my $comp (@comps) { 
 
-	if ($count > 500) { 
+	if ($count > 1000) { 
 		$total += $count;
 		undef($count);
 		print "$total done\n";
@@ -551,6 +553,21 @@ foreach my $comp (@comps) {
 		});
 	}
 
+}
+
+my @ballots = Tab::Ballot->retrieve_all;
+
+undef $count;
+
+foreach my $ballot (@ballots) { 
+	$ballot->value("rank", $ballot->real_rank);
+	$ballot->value("points", $ballot->real_points);
+
+	if ($count > 1000) { 
+		$total += $count;
+		undef($count);
+		print "$total done\n";
+	}
 }
 
 print "Retrieving all chapters to update coach credit records:\n";
