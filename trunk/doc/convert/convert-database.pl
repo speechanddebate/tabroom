@@ -555,21 +555,6 @@ foreach my $comp (@comps) {
 
 }
 
-my @ballots = Tab::Ballot->retrieve_all;
-
-undef $count;
-
-foreach my $ballot (@ballots) { 
-	$ballot->value("rank", $ballot->real_rank);
-	$ballot->value("points", $ballot->real_points);
-
-	if ($count > 1000) { 
-		$total += $count;
-		undef($count);
-		print "$total done\n";
-	}
-}
-
 print "Retrieving all chapters to update coach credit records:\n";
 
 my @coaches = Tab::Coach->retrieve_all;
