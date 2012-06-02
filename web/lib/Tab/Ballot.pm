@@ -2,8 +2,8 @@ package Tab::Ballot;
 use base 'Tab::DBI';
 Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
-Tab::Ballot->columns(Essential => qw/judge panel entry win rank points side speakerorder bye audit timestamp/);
-Tab::Ballot->columns(Others => qw/countmenot speechnumber topic seed collected collected_by tv noshow chair/);
+Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder tv win side speakerorder bye audit timestamp/);
+Tab::Ballot->columns(Others => qw/noshow chair speechnumber topic countmenot collected collected_by /);
 
 Tab::Ballot->has_a(judge => 'Tab::Judge');
 Tab::Ballot->has_a(panel => 'Tab::Panel');
@@ -12,3 +12,46 @@ Tab::Ballot->has_a(collected_by => 'Tab::Account');
 
 __PACKAGE__->_register_dates( qw/timestamp collected/);
 
+sub value {
+
+	my ($self, $tag, $value) = @_;
+
+	my @existing = Tab::BallotValue->search(  
+		ballot => $self->id,
+		tag => $tag
+	);
+
+    if ($value) { 
+
+		if (@existing) {
+
+			my $exists = shift @existing;
+			$exists->value($value);
+			$exists->update;
+		
+			foreach my $other (@existing) { 
+				$other->delete;
+			}
+
+			return;
+
+		} elsif ($value ne "0") {
+
+			my $exists = Tab::BallotValue->create({
+				ballot => $self->id,
+				tag => $tag,
+				value => $value,
+			});
+
+			$exists->update;
+		}
+
+	} else {
+
+		return unless @existing;
+		my $value = shift @existing;
+		return $value->value;
+
+	}
+
+}

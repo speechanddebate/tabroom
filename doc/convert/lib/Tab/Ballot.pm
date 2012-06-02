@@ -193,3 +193,47 @@ Tab::Ballot->set_sql(empty_by_panel =>"
 			select distinct ballot.id from ballot
 			where ballot.comp is null
 			and ballot.panel = ?");
+
+sub value {
+
+	my ($self, $tag, $value) = @_;
+
+	my @existing = Tab::BallotValue->search(  
+		ballot => $self->id,
+		tag => $tag
+	);
+
+    if ($value) { 
+
+		if (@existing) {
+
+			my $exists = shift @existing;
+			$exists->value($value);
+			$exists->update;
+		
+			foreach my $other (@existing) { 
+				$other->delete;
+			}
+
+			return;
+
+		} elsif ($value ne "0") {
+
+			my $exists = Tab::BallotValue->create({
+				ballot => $self->id,
+				tag => $tag,
+				value => $value,
+			});
+
+			$exists->update;
+		}
+
+	} else {
+
+		return unless @existing;
+		my $value = shift @existing;
+		return $value->value;
+
+	}
+
+}

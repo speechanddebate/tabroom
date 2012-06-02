@@ -65,6 +65,7 @@ create index tourn on tiebreak(tourn);
 
 CREATE TABLE `ballot_value` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
+    `tag` varchar(31) NOT NULL DEFAULT '',
     `ballot` int(11) DEFAULT NULL,
     `student` int(11) DEFAULT NULL,
     `tiebreak` int(11) DEFAULT NULL,

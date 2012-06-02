@@ -21,7 +21,7 @@ alter table team_member rename to entry_student;
 
 alter table follow_comp rename to follow_entry;
 alter table follow_entry change comp entry int;
-alter table ballot change comp entry int;
+alter table account_ignore add timestamp timestamp;
 alter table rating change comp entry int;
 alter table strike change comp entry int;
 alter table student_result change comp entry int;
@@ -76,13 +76,20 @@ alter table account add country char(4);
 alter table chapter add country char(4);
 update account set country="US";
 
+alter table ballot drop win;
 alter table ballot drop rank;
+alter table ballot drop seed;
+alter table ballot drop flight;
 alter table ballot drop points;
+alter table ballot drop position;
+alter table ballot drop real_rank;
+alter table ballot drop real_points;
+alter table ballot drop rankinround;
 
+alter table ballot change comp entry int;
+alter table ballot change rank rank tinyint(4);
 alter table ballot change real_rank rank int;
 alter table ballot change real_points points int;
-alter table ballot drop flight;
-alter table ballot drop rankinround;
 
 alter table class rename to event_double;
 alter table event_double drop judge_group;
@@ -171,6 +178,7 @@ alter table judge_group drop pub_assigns;
 alter table judge_group drop dio_min;
 alter table judge_group drop ask_alts;
 alter table judge_group drop free;
+alter table judge_group drop judge_per;
 alter table judge_group drop deadline;
 alter table judge_group drop collective;
 alter table judge_group drop school_strikes;
@@ -313,7 +321,6 @@ alter table tourn_site change tournament tourn int;
 
 
 alter table round add motion text;
-alter table ballot add position varchar(15);
 
 alter table tiebreak change tiebreaker name varchar(15);
 alter table tiebreak add highlow int;
@@ -397,10 +404,6 @@ alter table circuit change short_name abbr varchar(15);
   alter table circuit drop full_members;
 
 
-alter table ballot change rank rank tinyint(4);
-alter table ballot drop seed;
-alter table ballot drop position;
-alter table account_ignore add timestamp timestamp;
 rename table account_ignore to tourn_ignore;
 
 alter table account change noemail no_email bool;
