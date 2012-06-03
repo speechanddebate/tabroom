@@ -2,7 +2,7 @@ package Tab::JudgeGroup;
 use base 'Tab::DBI';
 Tab::JudgeGroup->table('judge_group');
 Tab::JudgeGroup->columns(Primary => qw/id/);
-Tab::JudgeGroup->columns(Essential => qw/tourn name abbr judge_per timestamp/);
+Tab::JudgeGroup->columns(Essential => qw/tourn name abbr timestamp/);
 
 Tab::JudgeGroup->has_a(tourn => "Tab::Tourn");
 
