@@ -2,7 +2,7 @@ package Tab::Ballot;
 use base 'Tab::DBI';
 Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
-Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder tv win side speakerorder bye audit timestamp/);
+Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder tv side speakerorder bye audit timestamp/);
 Tab::Ballot->columns(Others => qw/noshow chair speechnumber topic countmenot collected collected_by /);
 
 Tab::Ballot->has_a(judge => 'Tab::Judge');
@@ -14,12 +14,18 @@ __PACKAGE__->_register_dates( qw/timestamp collected/);
 
 sub value {
 
-	my ($self, $tag, $value) = @_;
+	my ($self, $tag, $value, $student) = @_;
 
 	my @existing = Tab::BallotValue->search(  
 		ballot => $self->id,
 		tag => $tag
 	);
+
+	@existing = Tab::BallotValue->search(  
+		ballot => $self->id,
+		student => $student->id,
+		tag => $tag
+	) if $student;
 
     if ($value) { 
 
