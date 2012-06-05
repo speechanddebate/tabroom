@@ -2,8 +2,7 @@ package Tab::Event;
 use base 'Tab::DBI';
 Tab::Event->table('event');
 Tab::Event->columns(Primary => qw/id/);
-Tab::Event->columns(Essential => qw/tourn name abbr judge_group type/);
-Tab::Event->columns(Others =>  qw/fee rating_subset event_double timestamp/);
+Tab::Event->columns(Essential => qw/tourn name abbr judge_group type fee rating_subset event_double timestamp/);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
