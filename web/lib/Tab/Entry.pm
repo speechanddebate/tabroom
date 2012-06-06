@@ -17,57 +17,16 @@ __PACKAGE__->_register_datetimes( qw/timestamp/);
 __PACKAGE__->_register_datetimes( qw/drop_time/);
 __PACKAGE__->_register_datetimes( qw/reg_time/);
 
-Tab::Entry->set_sql(by_student => "
-				select distinct entry.id
-				from entry_student,entry
-				where entry_student.student = ?
-				and entry_student.entry = entry.id
-				and entry.tourn = ?  ");
-
-Tab::Entry->set_sql(by_round=> "
-				select distinct entry.*,panel.id as panelid
-				from entry,panel,ballot
-				where entry.id = ballot.entry
-				and entry.dropped != 1
-				and entry.dq != 1
-				and ballot.panel = panel.id
-				and panel.round = ?
-				order by ballot.speakerorder ");
-
-Tab::Entry->set_sql(by_panel=> "
-			select distinct entry.*,ballot.speakerorder as speaks,
-			from entry,ballot,school
-			where entry.dropped != 1
-			and entry.dq != 1
-			and ballot.panel = ? 	
-			and ballot.entry = entry.id 
-			and entry.school = school.id
-			order by ballot.speakerorder,entry.id ");
-
-Tab::Entry->set_sql(highest_code => "select MAX(code) from entry where event = ?");
-Tab::Entry->set_sql(lowest_code => "select MIN(code) from entry where event = ?");
-
-sub students {
-    my $self = shift;
-	return Tab::Student->search_by_entry($self->id);
-    return @students;
-}
-
-sub how_doubled { 
-	my ($self, $panel) = @_;
-	return Tab::Panel->search_conflicts( $self->id, $panel->round->timeslot->id);
-}
-
 sub add_student { 
 	my ($self, $student) = @_;
-	my @existing = Tab::EntryStudent->search( student => $student->id, entry => $entry->id );
-	Tab::EntryStudent->create({ student => $student->id, entry => $entry->id }) unless @existing;
+	my @existing = Tab::EntryStudent->search( student => $student, entry => $self->id );
+	Tab::EntryStudent->create({ student => $student, entry => $self->id }) unless @existing;
 	return;
 }
 
 sub rm_student { 
 	my ($self, $student) = @_;
-	my @existing = Tab::EntryStudent->search( student => $student->id, entry => $entry->id );
+	my @existing = Tab::EntryStudent->search( student => $student, entry => $self->id );
 	foreach (@existing) { $_->delete; }
 	return;
 }
