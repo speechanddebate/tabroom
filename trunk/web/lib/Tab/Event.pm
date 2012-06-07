@@ -86,18 +86,28 @@ sub setting {
     if (defined $value) {
 
 		if (@existing) {
-
+			
 			my $exists = shift @existing;
-			$exists->value($value);
-			$exists->value_text($blob) if $value eq "text";
-			$exists->value_date($blob) if $value eq "date";
-			$exists->update;
 
-			if ($value eq "delete" || $value eq "" || $value == 0) { 
+			if ($value eq "delete" || $value eq "" || $value eq 0) { 
+
 				$exists->delete;
+
+			} else { 
+
+				if ($value eq "text") { 
+					$exists->value_text($blob);
+				} elsif ($value eq "date") { 
+					$exists->value_date($blob);
+				} else { 
+					$exists->value($value);
+				}
+
+				$exists->update;
 			}
 
 			foreach my $other (@existing) { 
+				&Tab::debuglog("Deleting spare value");
 				$other->delete;
 			}
 
