@@ -23,8 +23,8 @@ sub name {
 	return "No one from ".$self->school->short_name if $self->type eq "school";
 	return "No one from ".$self->region->name." (".$self->region->code.")" if $self->type eq "region";
 	return "Speaker ".$self->entry->code." ".$self->entry->name if $self->type eq "entry";
-	return "Unavailable between ".  Tab::niceshortdt($self->start->set_time_zone($self->tourn->circuit->timezone))
-			." and ".  Tab::niceshortdt($self->end->set_time_zone($self->tourn->circuit->timezone)) if $self->type eq "time";
+	return "Unavailable between ".  Tab::niceshortdt($self->start->set_time_zone($self->tourn->tourn->tz))
+			." and ".  Tab::niceshortdt($self->end->set_time_zone($self->tourn->tourn->tz)) if $self->type eq "time";
 }
 
 

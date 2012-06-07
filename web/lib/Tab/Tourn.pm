@@ -13,6 +13,7 @@ Tab::Tourn->has_many(strikes => 'Tab::Strike', 'tourn');
 Tab::Tourn->has_many(schools => 'Tab::School', 'tourn');
 Tab::Tourn->has_many(webpages => 'Tab::Webpage', 'tourn');
 Tab::Tourn->has_many(admins => 'Tab::TournAdmin', 'tourn');
+Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn');
 Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn');
 Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
 Tab::Tourn->has_many(settings => 'Tab::TournSetting', 'tourn');
@@ -45,6 +46,9 @@ Tab::Circuit->set_sql( by_tourn => "select distinct circuit.*
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
+
+	$/ = "";			#Remove all trailing newlines
+	chomp $blob;
 
 	my @existing = Tab::TournSetting->search(  
 		tourn => $self->id,
