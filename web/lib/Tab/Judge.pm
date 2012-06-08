@@ -3,11 +3,13 @@ use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
 Tab::Judge->columns(Essential => qw/school first last code active special notes judge_group
-									covers chapter_judge obligation elim_group
+									covers chapter_judge obligation elim_group alt_group
 									cfl_parl account hired timestamp /);
 
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
+Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(covers => 'Tab::JudgeGroup');
+Tab::Judge->has_a(school => 'Tab::School');
 
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
@@ -27,33 +29,6 @@ Tab::Judge->set_sql( hired_by_group => "
             		from judge 
 				where judge.judge_group = ?
 				and spare_pool = 1");
-
-sub name { 
-	my $self = shift;
-	return $self->first." ".$self->last;
-}
-
-sub region { 
-	my $self = shift;
-	return $self->school->region;
-}
-
-sub housing { 
-	my ($self,$day) = @_;
-	my @housings = Tab::Housing->search( judge => $self->id, night => $day->ymd) if $day;
-	@housings = Tab::Housing->search( judge => $self->id) unless $day;
-	return shift @housings;
-}
-
-sub pools {
-	my $self = shift;
-	return Tab::Pool->search_by_judge($self->id);
-}
-
-sub panels {
-    my $self = shift;
-    return Tab::Panel->search_by_judge($self->id);
-}
 
 sub setting {
 
