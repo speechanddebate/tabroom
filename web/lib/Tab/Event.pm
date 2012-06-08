@@ -17,62 +17,6 @@ Tab::Event->has_many(settings => "Tab::EventSetting", "event");
 Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
 
-sub sites {
-	my $self = shift;
-	return Tab::Site->search_by_event($self->id);
-}
-
-sub active { 
-	my $self = shift;
-	return Tab::Entry->search_active_by_event($self->id);
-}
-
-sub waitlisted { 
-	my $self = shift;
-	return Tab::Entry->search_waitlist_by_event($self->id);
-}
-
-sub judges {
-    my $self = shift;
-    my @judges = Tab::Judge->search_by_event($self->id);
-    return @judges;
-}
-
-sub schools {
-    my $self = shift;
-    return Tab::School->search_by_event($self->id);
-}
-
-sub dioceses {
-	my $self = shift;
-    return Tab::Region->search_by_event($self->id);
-}
-
-sub ballots { 
-	my $self = shift;
-	return Tab::Ballot->search_by_event($self->id);
-}
-
-sub next_code {
-
-    my $self = shift;
-    my @existing_entries = Tab::Entry->search( event => $self->id, {order_by => "code DESC"} );
-	my $code = $self->code; 
-	
-	while (defined $self->tourn->entry_with_code($code)) {
-		$code++;
-		$code++ if $code == 666;
-		$code++ if $code == 69;
-	}
-
-	return $code;
-
-}
-
-sub students { 
-	my $self = shift;
-    return Tab::Student->search_by_event($self->id);
-}
 
 sub setting {
 

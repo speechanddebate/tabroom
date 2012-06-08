@@ -1,6 +1,6 @@
 package Tab::TournChange;
 use base 'Tab::DBI';
-Tab::TournChange->table('changes');
+Tab::TournChange->table('tourn_change');
 Tab::TournChange->columns(Primary => qw/id/);
 Tab::TournChange->columns(Essential => qw/type tourn school account/);
 Tab::TournChange->columns(Others => qw/judge entry event new_panel old_panel fine text timestamp/);
