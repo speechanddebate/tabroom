@@ -92,3 +92,36 @@ sub setting {
 	}
 
 }
+
+sub print_ratings {
+
+	my ($self, $subset) = @_;
+
+	my @ratings = Tab::Rating->search( judge => $self->id, subset => $subset->id, type => "coach" ) if $subset;
+	@ratings = Tab::Rating->search( judge => $self->id, type => "coach") unless $subset;
+
+	my $string;
+
+	foreach my $rating (sort {$a->id cmp $b->id} @ratings) { 
+		$string .= " ".$rating->qual->name if $rating->qual;
+	}
+
+	return $string;
+}
+
+sub rating { 
+
+	my ($self, $subset) = @_;
+
+	if ($subset) { 
+		my @ratings = Tab::Rating->search( judge => $self->id, subset => $subset->id, type => "coach" );
+		return shift @ratings if @ratings;
+		return;
+	} else { 
+		my @ratings = Tab::Rating->search( judge => $self->id, type => "coach");
+		return shift @ratings if @ratings;
+		return;
+	} 
+
+}
+
