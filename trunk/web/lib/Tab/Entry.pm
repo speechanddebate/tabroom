@@ -2,16 +2,21 @@ package Tab::Entry;
 use base 'Tab::DBI';
 Tab::Entry->table('entry');
 Tab::Entry->columns(Primary => qw/id/);
-Tab::Entry->columns(Essential => qw/code dropped name school tourn event seed bid title ada waitlist dq drop_time reg_time timestamp/);
+Tab::Entry->columns(Essential => qw/code dropped name school tourn event seed bid title ada waitlist dq drop_time reg_time timestamp drop_by reg_by/);
 
 Tab::Entry->has_a(school => 'Tab::School');
 Tab::Entry->has_a(tourn => 'Tab::Tourn');
 Tab::Entry->has_a(event => 'Tab::Event');
 
+Tab::Entry->has_a(reg_by => 'Tab::Account');
+Tab::Entry->has_a(drop_by => 'Tab::Account');
+
 Tab::Entry->has_many(ballots => 'Tab::Ballot', 'entry');
 Tab::Entry->has_many(changes => 'Tab::TournChange', 'entry');
 Tab::Entry->has_many(ratings => 'Tab::Rating', 'entry');
 Tab::Entry->has_many(qualifiers => 'Tab::Qualifier', 'entry');
+
+
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 __PACKAGE__->_register_datetimes( qw/drop_time/);
