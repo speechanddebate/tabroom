@@ -197,6 +197,13 @@ sub pickertime {
 	return $string;
 }
 
+sub csvdt { 
+	my $dt = shift;
+	return unless $dt;
+	my $string = $dt->year."-".$dt->month."-".$dt->day." ".$dt->hour.":".$dt->strftime('%M');
+	return $string;
+}
+
 sub dtme { 
 	my ($date, $time) = @_;
 	my $month;

@@ -35,7 +35,9 @@ sub students {
 sub short_name {
 	my ($self, $limit) = @_;
 	my $name = $self->name;
+	$name =~ s/of Math and Science$//g;
 	$name =~ s/Academy$//g;
+	$name =~ s/Regional\ High\ School$//g;
 	$name =~ s/High\ School$//g;
 	$name =~ s/School$//g;
 	$name =~ s/High$//g;
@@ -47,7 +49,8 @@ sub short_name {
 	$name =~ s/^Saint/St./g;
 	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
 	$name =~ s/High\ School/HS/g;
-	$name =~ s/\s+$//;
+	$name =~ s/^\s+//;  #leading spaces
+	$name =~ s/\s+$//;  #trailing spaces
 
     if ($limit) { 
         return substr($name,0,$limit);
