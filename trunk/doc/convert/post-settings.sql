@@ -37,6 +37,7 @@ alter table region change league circuit int;
 alter table site change league circuit int;
 
 alter table concession_purchase change item concession int;
+alter table concession_purchase add placed datetime;
 
 alter table rating change qual rating_tier int;
 alter table rating_tier add rating_subset int;
@@ -75,6 +76,7 @@ alter table account drop type;
 alter table account add country char(4);
 alter table chapter add country char(4);
 update account set country="US";
+update chapter set country="US";
 
 alter table ballot drop win;
 alter table ballot drop rank;
@@ -103,6 +105,9 @@ alter table entry change code code varchar(63);
 alter table entry change apda_seed seed varchar(15);
 alter table entry change registered_at reg_time datetime;
 alter table entry change dropped_at drop_time datetime;
+
+alter table entry add reg_by int;
+alter table entry add drop_by int;
 
 alter table entry drop tb0;
 alter table entry drop tb1;
@@ -142,7 +147,6 @@ alter table housing_student add account int;
 alter table judge drop cfl_tab_first;
 alter table judge drop cfl_tab_second;
 alter table judge drop cfl_tab_third;
-alter table judge drop alt_group;
 alter table judge drop housing;
 alter table judge drop spare_pool;
 alter table judge drop score;
@@ -156,6 +160,10 @@ alter table judge drop novice;
 alter table judge drop trpc_string;
 alter table judge change uber chapter_judge int;
 alter table judge add account int;
+alter table judge add dropped int;
+alter table judge add drop_time datetime;
+alter table judge add reg_time datetime;
+alter table judge add drop_by int;
 
 alter table judge drop neutral;
 alter table judge drop tmp;
