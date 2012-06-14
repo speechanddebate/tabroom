@@ -2,14 +2,15 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first last code active special notes judge_group
-									covers chapter_judge obligation elim_group alt_group
+Tab::Judge->columns(Essential => qw/school first last code dropped active special notes judge_group
+									covers chapter_judge obligation elim_group alt_group drop_time drop_by reg_time
 									cfl_parl account hired timestamp /);
 
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(covers => 'Tab::JudgeGroup');
 Tab::Judge->has_a(school => 'Tab::School');
+Tab::Judge->has_a(dropped_by => 'Tab::Account');
 
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
@@ -17,6 +18,9 @@ Tab::Judge->has_many(settings => "Tab::JudgeSetting", "judge");
 
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where judge_group = ?");
 Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where judge_group = ?");
+
+__PACKAGE__->_register_datetimes( qw/drop_time/);
+__PACKAGE__->_register_datetimes( qw/reg_time/);
 
 Tab::Judge->set_sql( by_group => "
         		select distinct judge.*

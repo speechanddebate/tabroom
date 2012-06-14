@@ -350,7 +350,6 @@ foreach my $judge (@judges) {
 	$judge->setting("cfl_tab_first", $judge->cfl_tab_first);
 	$judge->setting("cfl_tab_second", $judge->cfl_tab_second);
 	$judge->setting("cfl_tab_third", $judge->cfl_tab_third);
-	$judge->setting("alt_group", $judge->alt_group);
 	$judge->setting("spare_pool", $judge->spare_pool);
 	$judge->setting("prelim_pool", $judge->prelim_pool);
 	$judge->setting("first_year", $judge->first_year);
