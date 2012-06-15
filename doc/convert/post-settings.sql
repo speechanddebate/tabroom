@@ -479,3 +479,6 @@ create index tourn on tourn_change(tourn);
 create index new_panel on tourn_change(new_panel);
 create index old_panel on tourn_change(old_panel);
 create index entry on tourn_change(entry);
+
+create index entry on entry_student(entry);
+create index student on entry_student(student);

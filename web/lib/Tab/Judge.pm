@@ -10,7 +10,7 @@ Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(covers => 'Tab::JudgeGroup');
 Tab::Judge->has_a(school => 'Tab::School');
-Tab::Judge->has_a(dropped_by => 'Tab::Account');
+Tab::Judge->has_a(drop_by => 'Tab::Account');
 
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
