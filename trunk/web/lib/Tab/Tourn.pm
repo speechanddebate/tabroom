@@ -12,6 +12,7 @@ Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
 Tab::Tourn->has_many(ratings => 'Tab::Rating', 'tourn');
 Tab::Tourn->has_many(strikes => 'Tab::Strike', 'tourn');
 Tab::Tourn->has_many(schools => 'Tab::School', 'tourn');
+Tab::Tourn->has_many(housings => 'Tab::Housing', 'tourn');
 Tab::Tourn->has_many(webpages => 'Tab::Webpage', 'tourn');
 Tab::Tourn->has_many(admins => 'Tab::TournAdmin', 'tourn');
 Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn');
@@ -29,7 +30,6 @@ Tab::Tourn->has_many(event_doubles => 'Tab::EventDouble', 'tourn');
 Tab::Tourn->has_many(tiebreak_sets => 'Tab::TiebreakSet', 'tourn');
 Tab::Tourn->has_many(housing_slots => 'Tab::HousingSlots', 'tourn');
 Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit', 'tourn');
-Tab::Tourn->has_many(housing_students => 'Tab::HousingStudent', 'tourn');
 
 
 __PACKAGE__->_register_datetimes( qw/start/);
