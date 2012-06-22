@@ -1,8 +1,8 @@
 package Tab;
 
 # Path to your LaTeX binaries
-my $latex_path_prefix="/usr/bin";
-#my $latex_path_prefix="/opt/local/bin";
+#my $latex_path_prefix="/usr/bin";
+my $latex_path_prefix="/opt/local/bin";
 
 # FQDN of your server.  Do NOT include http:// 
 my $hostname = "itab.tabroom.com";
