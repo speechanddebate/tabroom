@@ -37,6 +37,7 @@ alter table site change league circuit int;
 
 alter table concession_purchase change item concession int;
 alter table concession_purchase add placed datetime;
+alter table concession_purchase add fulfilled bool;
 
 alter table rating change qual rating_tier int;
 alter table rating_tier add rating_subset int;
@@ -49,6 +50,7 @@ alter table round add tb_set int;
 alter table round drop preset;
 alter table round drop number_judges;
 alter table round add blasted datetime;
+alter table round add online bool;
 
 drop table bill;
 drop table sweep;
@@ -65,6 +67,8 @@ drop table setting;
 drop table coach;
 
 alter table uber rename to chapter_judge;
+alter table chapter_judge add acct_request int;
+
 
 alter table tournament rename to tourn;
 alter table tournament_site rename to tourn_site;
@@ -94,6 +98,7 @@ alter table ballot drop position;
 alter table ballot drop real_rank;
 alter table ballot drop real_points;
 alter table ballot drop rankinround;
+
 
 alter table ballot change comp entry int;
 alter table ballot change rank rank tinyint(4);
@@ -153,6 +158,8 @@ alter table housing add account int;
 alter table housing change tournament tourn int;
 alter table housing add school int;
 
+alter table judge drop neutral;
+alter table judge drop tmp;
 alter table judge drop cfl_tab_first;
 alter table judge drop cfl_tab_second;
 alter table judge drop cfl_tab_third;
@@ -169,13 +176,11 @@ alter table judge drop novice;
 alter table judge drop trpc_string;
 alter table judge change uber chapter_judge int;
 alter table judge add account int;
+alter table judge add acct_request int;
 alter table judge add dropped int;
 alter table judge add drop_time datetime;
 alter table judge add reg_time datetime;
 alter table judge add drop_by int;
-
-alter table judge drop neutral;
-alter table judge drop tmp;
 alter table judge add hired int;
 
 alter table judge_group drop missing_judge_fee;
@@ -220,7 +225,6 @@ alter table judge_group drop school_ratings;
 alter table judge_group drop comp_ratings;
 alter table judge_group drop comp_strikes;
 alter table judge_group drop group_max;
-
 alter table judge_group change tournament tourn int;
 
 
@@ -333,7 +337,8 @@ alter table tourn_admin change tournament tourn int;
 alter table tourn_change change tournament tourn int;
 alter table tourn_site change tournament tourn int;
 
-
+alter table student add account int;
+alter table student add acct_request int;
 
 alter table tiebreak change tiebreaker name varchar(15);
 alter table tiebreak add highlow int;
@@ -346,7 +351,6 @@ alter table tiebreak drop method;
 alter table tourn drop circuit;
 alter table tourn_admin change nosetup no_setup tinyint;
 alter table tourn_admin add event int;
-alter table student add account int;
 alter table site drop approved;
 alter table session drop ie_annoy;
 alter table session drop director;
@@ -470,6 +474,7 @@ alter table school_fine  ENGINE=innodb;
 alter table session  ENGINE=innodb;
 alter table strike  ENGINE=innodb;
 alter table strike_time  ENGINE=innodb;
+alter table student ENGINE=innodb;
 alter table student_result  ENGINE=innodb;
 alter table site ENGINE=innodb;
 alter table tourn ENGINE=innodb;

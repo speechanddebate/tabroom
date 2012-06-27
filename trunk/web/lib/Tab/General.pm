@@ -197,6 +197,13 @@ sub pickertime {
 	return $string;
 }
 
+sub xmldt { 
+	my $dt = shift;
+	return unless $dt;
+	my $string = $dt->month."/".$dt->day."/".$dt->year." ".$dt->hour.":".$dt->strftime('%M')." ".$dt->strftime('%p');
+	return $string;
+}
+
 sub csvdt { 
 	my $dt = shift;
 	return unless $dt;

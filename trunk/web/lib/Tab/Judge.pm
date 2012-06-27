@@ -4,7 +4,7 @@ Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
 Tab::Judge->columns(Essential => qw/school first last code dropped active special notes judge_group
 									covers chapter_judge obligation elim_group alt_group drop_time drop_by reg_time
-									cfl_parl account hired timestamp tmp score/);
+									cfl_parl account acct_request hired timestamp tmp score/);
 Tab::Judge->columns(TEMP => qw/panel chair/);
 
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
@@ -12,6 +12,8 @@ Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(covers => 'Tab::JudgeGroup');
 Tab::Judge->has_a(school => 'Tab::School');
 Tab::Judge->has_a(drop_by => 'Tab::Account');
+Tab::Judge->has_a(account => 'Tab::Account');
+Tab::Judge->has_a(acct_request => 'Tab::Account');
 
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
