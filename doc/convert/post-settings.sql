@@ -3,7 +3,6 @@ alter table bin rename to strike_time;
 
 
 alter table comp rename to entry;
-alter table housing rename to housing_student;
 alter table item rename to concession;
 alter table league rename to circuit;
 alter table membership rename to circuit_membership;
@@ -42,6 +41,14 @@ alter table concession_purchase add placed datetime;
 alter table rating change qual rating_tier int;
 alter table rating_tier add rating_subset int;
 alter table rating add ordinal int;
+
+alter table round drop no_first_year;
+alter table round drop score;
+alter table round add motion text;
+alter table round add tb_set int;
+alter table round drop preset;
+alter table round drop number_judges;
+alter table round add blasted datetime;
 
 drop table bill;
 drop table sweep;
@@ -142,7 +149,9 @@ alter table entry drop partner_housing_start;
 alter table entry drop partner_housing_end;
 alter table entry change tournament tourn int;
 
-alter table housing_student add account int;
+alter table housing add account int;
+alter table housing change tournament tourn int;
+alter table housing add school int;
 
 alter table judge drop cfl_tab_first;
 alter table judge drop cfl_tab_second;
@@ -222,8 +231,7 @@ alter table region drop director;
 alter table room_pool drop tournament;
 alter table room_pool change tournament tourn int;
 
-alter table round drop no_first_year;
-alter table round drop score;
+
 
 update school set paid_amount=paid_amount+concession_paid_amount;
 alter table school change paid_amount paid float;
@@ -269,7 +277,6 @@ alter table strike change strike registrant tinyint;
 alter table strike drop timeslot; 
 alter table strike change tournament tourn int;
 
-alter table round add tb_set int;
 
 alter table tourn drop results;
 alter table tourn drop judge_deadline;
@@ -312,7 +319,6 @@ alter table account_ignore change tournament tourn int;
 alter table concession change tournament tourn int;
 alter table file change tournament tourn int;
 alter table housing_slots change tournament tourn int;
-alter table housing_student change tournament tourn int;
 alter table judge_hire change tournament tourn int;
 alter table rating change tournament tourn int;
 alter table rating_tier change tournament tourn int;
@@ -328,7 +334,6 @@ alter table tourn_change change tournament tourn int;
 alter table tourn_site change tournament tourn int;
 
 
-alter table round add motion text;
 
 alter table tiebreak change tiebreaker name varchar(15);
 alter table tiebreak add highlow int;
@@ -347,8 +352,7 @@ alter table session drop ie_annoy;
 alter table session drop director;
 alter table session change entry entry_only bool;
 alter table session change league circuit int;
-alter table round drop preset;
-alter table round drop number_judges;
+
 alter table room_strike add entry int;
 alter table room_strike add judge int;
 alter table room_strike add start datetime;
@@ -367,7 +371,6 @@ drop table pool_round;
 alter table pool drop timeslot;
 alter table panel drop event;
 alter table panel drop nosweep;
-alter table housing_student drop account;
 alter table housing_slots add timestamp timestamp;
 alter table follow_judge add timestamp timestamp;
 alter table follow_entry add timestamp timestamp;
@@ -442,7 +445,7 @@ alter table follow_account ENGINE=innodb;
 alter table follow_entry ENGINE=innodb;
 alter table follow_judge ENGINE=innodb;
 alter table housing_slots  ENGINE=innodb;
-alter table housing_student  ENGINE=innodb;
+alter table housing  ENGINE=innodb;
 alter table judge  ENGINE=innodb;
 alter table judge_group  ENGINE=innodb;
 alter table judge_group_setting  ENGINE=innodb;
