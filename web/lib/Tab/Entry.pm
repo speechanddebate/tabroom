@@ -3,6 +3,7 @@ use base 'Tab::DBI';
 Tab::Entry->table('entry');
 Tab::Entry->columns(Primary => qw/id/);
 Tab::Entry->columns(Essential => qw/code dropped name school tourn event seed bid title ada waitlist dq drop_time reg_time timestamp drop_by reg_by/);
+Tab::Entry->columns(TEMP => qw/panel speaks/);
 
 Tab::Entry->has_a(school => 'Tab::School');
 Tab::Entry->has_a(tourn => 'Tab::Tourn');
