@@ -93,6 +93,7 @@ CREATE TABLE `follow_account` (
   `account` int(11) DEFAULT NULL,
   `follower` int(11) DEFAULT NULL,
   `parent` tinyint(1) NOT NULL DEFAULT '0',
+  `request` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   KEY `account` (`account`),
   KEY `follower` (`follower`)
