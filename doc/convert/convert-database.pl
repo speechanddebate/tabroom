@@ -357,32 +357,6 @@ foreach my $judge (@judges) {
 
 }
 
-print "Done.  Converting Uberjudges to the new settings and creating accounts:\n";
-
-foreach my $judge (Tab::Uber->retrieve_all) {
-
-    print "Converting judge ".$judge->first." ".$judge->last." \n";
-
-    my $started;
-
-    if ($judge->started && $judge->started > 0) {
-        $started = $started."-07-01";
-    }
-
-    my $account = Tab::Account->create({
-        first => $judge->first,
-        last => $judge->last,
-        gender => $judge->gender,
-        started => $started,
-        site_admin => 0,
-        paradigm => $judge->paradigm,
-    });
-
-    $judge->account($account->id);
-    $judge->update;
-
-}
-
 print "Done.  Retrieving all judge groups:\n";
 my @judge_groups = Tab::JudgeGroup->retrieve_all;
 

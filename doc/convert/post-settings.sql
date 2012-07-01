@@ -162,7 +162,6 @@ alter table housing change tournament tourn int;
 alter table housing add school int;
 
 alter table judge drop neutral;
-alter table judge drop tmp;
 alter table judge drop cfl_tab_first;
 alter table judge drop cfl_tab_second;
 alter table judge drop cfl_tab_third;
