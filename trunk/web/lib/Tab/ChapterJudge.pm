@@ -2,12 +2,15 @@ package Tab::ChapterJudge;
 use base 'Tab::DBI';
 Tab::ChapterJudge->table('chapter_judge');
 Tab::ChapterJudge->columns(Primary => qw/id/);
-Tab::ChapterJudge->columns(Essential => qw/chapter account notes created timestamp acct_request/);
+Tab::ChapterJudge->columns(Essential => qw/first last gender chapter started retired notes 
+							created cell paradigm account acct_request timestamp/);
 
 Tab::ChapterJudge->has_a(chapter => 'Tab::Chapter');
 Tab::ChapterJudge->has_a(account => 'Tab::Account');
 Tab::ChapterJudge->has_a(acct_request => 'Tab::Account');
 Tab::ChapterJudge->has_many(judges => 'Tab::Judge', 'chapter_judge');
+
+__PACKAGE__->_register_datetimes( qw/timestamp/);
 
 Tab::ChapterJudge->set_sql(free_by_school => "
 				select distinct chapter_judge.* from
