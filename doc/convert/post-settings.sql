@@ -5,7 +5,6 @@ alter table bin rename to strike_time;
 alter table comp rename to entry;
 alter table item rename to concession;
 alter table league rename to circuit;
-alter table membership rename to circuit_membership;
 
 alter table account_access rename to tourn_admin;
 alter table league_admin rename to circuit_admin;
@@ -34,6 +33,9 @@ alter table circuit_admin change league circuit int;
 alter table news change league circuit int;
 alter table region change league circuit int;
 alter table site change league circuit int;
+
+alter table concession drop event;
+alter table concession change tournament tourn int;
 
 alter table concession_purchase change item concession int;
 alter table concession_purchase add placed datetime;
@@ -69,7 +71,6 @@ drop table coach;
 alter table uber rename to chapter_judge;
 alter table chapter_judge add acct_request int;
 
-
 alter table tournament rename to tourn;
 alter table tournament_site rename to tourn_site;
 alter table fine rename to school_fine;
@@ -87,7 +88,9 @@ alter table account drop type;
 alter table account add country char(4);
 alter table chapter add country char(4);
 update account set country="US";
+update account set tz="America/New_York" where tz is null;
 update chapter set country="US";
+
 
 alter table ballot drop win;
 alter table ballot drop rank;
@@ -320,7 +323,6 @@ alter table email change blurb content text;
 
 drop table judge_class;
 alter table account_ignore change tournament tourn int;
-alter table concession change tournament tourn int;
 alter table file change tournament tourn int;
 alter table housing_slots change tournament tourn int;
 alter table judge_hire change tournament tourn int;
@@ -395,10 +397,17 @@ alter table event change qual_subset rating_subset int;
 alter table event drop publish; 
 alter table event add timestamp timestamp;
 
-alter table concession drop event;
+
+alter table membership rename to circuit_membership;
 alter table circuit_membership change league circuit int;
+alter table circuit_membership change blurb text text;
+
 alter table circuit add country char(4);
 alter table circuit change short_name abbr varchar(15);
+update circuit set country="US";
+update circuit set state="" where state="US";
+update circuit set state="VA" where state="Va";
+update circuit set name="US National Circuit" where id=6;
 
   alter table circuit drop url;
   alter table circuit drop public_email;

@@ -8,7 +8,7 @@ Tab::Chapter->columns(TEMP => qw/count/);
 Tab::Chapter->has_many(schools => 'Tab::School', 'chapter');
 Tab::Chapter->has_many(students => 'Tab::Student', 'chapter');
 Tab::Chapter->has_many(chapter_judges => 'Tab::ChapterJudge', 'chapter');
-Tab::Chapter->has_many(chapter_circuit => 'Tab::ChapterCircuit', 'chapter');
+Tab::Chapter->has_many(chapter_circuits => 'Tab::ChapterCircuit', 'chapter');
 
 Tab::Chapter->set_sql(by_tourn => "select distinct chapter.* from chapter, school
 						where chapter.id = school.chapter
