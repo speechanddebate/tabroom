@@ -41,7 +41,7 @@ CREATE TABLE `account` (
   `no_email` tinyint(1) DEFAULT NULL,
   `change_pass_key` varchar(255) DEFAULT NULL,
   `multiple` int(11) DEFAULT NULL,
-  `started_judging` date DEFAULT NULL,
+  `started_judging` int DEFAULT NULL,
   `password_timestamp` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
