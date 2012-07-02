@@ -14,6 +14,7 @@ Tab::Judge->has_a(school => 'Tab::School');
 Tab::Judge->has_a(drop_by => 'Tab::Account');
 Tab::Judge->has_a(account => 'Tab::Account');
 Tab::Judge->has_a(acct_request => 'Tab::Account');
+Tab::Judge->has_a(chapter_judge => 'Tab::ChapterJudge');
 
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
