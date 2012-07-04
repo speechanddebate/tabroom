@@ -4,7 +4,7 @@ Tab::School->table('school');
 Tab::School->columns(Essential => qw/id tourn name chapter region code contact/);
 Tab::School->columns(Others => qw/registered registered_on entered_on 
                                   paid contact_name contact_number 
-                                  noprefs timestamp /);
+                                  noprefs timestamp self_register self_reg_deadline /);
 
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_a(chapter => 'Tab::Chapter');
@@ -18,7 +18,7 @@ Tab::School->has_many(fines => 'Tab::SchoolFine', 'school');
 Tab::School->has_many(hires => 'Tab::JudgeHire', 'school');
 Tab::School->has_many(files => 'Tab::File', 'school');
 
-__PACKAGE__->_register_datetimes( qw/entered_on registered_on/);
+__PACKAGE__->_register_datetimes( qw/entered_on registered_on self_reg_deadline/);
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
 

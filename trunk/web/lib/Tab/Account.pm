@@ -27,6 +27,7 @@ Tab::Account->has_many(judges => 'Tab::Judge', 'account');
 Tab::Account->has_many(follow_judge => 'Tab::FollowJudge', 'account');
 
 Tab::Account->has_many(entries => 'Tab::Entry', 'account');
+Tab::Account->has_many(students => 'Tab::Student');
 Tab::Account->has_many(follow_entry => 'Tab::FollowEntry', 'entry');
 
 sub tourns {

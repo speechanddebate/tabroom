@@ -177,7 +177,8 @@ alter table judge drop paradigm;
 alter table judge drop novice;
 alter table judge drop trpc_string;
 alter table judge change uber chapter_judge int;
-alter table judge add account int;
+alter table judge add account int not null default 0;
+update judge set account = 0 where account is null;
 alter table judge add acct_request int;
 alter table judge add dropped int;
 alter table judge add drop_time datetime;
@@ -247,9 +248,13 @@ alter table school drop sweeps_points;
 alter table school drop score;
 alter table school add contact int;
 alter table school change entered entered_on datetime;
+alter table school add self_register bool;
+alter table school add self_reg_deadline datetime;
 
 alter table school_fine drop region;
 alter table school_fine drop start;
+alter table school add self_register bool;
+alter table school add self_reg_deadline datetime;
 alter table school_fine drop end;
 alter table school_fine change levied levied_on datetime;
 alter table school_fine add levied_by int;
@@ -338,8 +343,10 @@ alter table tourn_admin change tournament tourn int;
 alter table tourn_change change tournament tourn int;
 alter table tourn_site change tournament tourn int;
 
-alter table student add account int;
+alter table student add account int not null default 0;
 alter table student add acct_request int;
+alter table student add created datetime;
+update student set account=0 where account is null;
 
 alter table tiebreak change tiebreaker name varchar(15);
 alter table tiebreak add highlow int;
