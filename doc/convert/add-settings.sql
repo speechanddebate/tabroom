@@ -206,9 +206,9 @@ update tournament,league
 	set tournament.tz = league.timezone 
 	where tournament.league = league.id;
 
-alter table tournament add location varchar(15);
+alter table tournament add state varchar(7);
+alter table tournament add country varchar(7);
 
-update tournament,league 
-	set tournament.location = concat("US/",league.state)
-	where tournament.league = league.id;
+update tournament,league set tournament.location = league.state where tournament.league = league.id;
+update tournament set country = "US";
 

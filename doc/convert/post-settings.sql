@@ -53,6 +53,7 @@ alter table round drop preset;
 alter table round drop number_judges;
 alter table round add blasted datetime;
 alter table round add online bool;
+alter table round add post_results bool;
 
 drop table bill;
 drop table sweep;
@@ -75,6 +76,8 @@ alter table tournament rename to tourn;
 alter table tournament_site rename to tourn_site;
 alter table fine rename to school_fine;
 alter table no_interest rename to account_ignore;
+create index account on account_ignore(account);
+create index tourn on account_ignore(tourn);
 
 alter table account drop password;
 alter table account drop active;
