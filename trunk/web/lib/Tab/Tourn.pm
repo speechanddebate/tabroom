@@ -2,7 +2,7 @@ package Tab::Tourn;
 use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
-Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end tz location hidden timestamp/);
+Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end tz state country hidden timestamp/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
 Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');
@@ -43,6 +43,13 @@ Tab::Circuit->set_sql( by_tourn => "select distinct circuit.*
 									where circuit.id = tourn_circuit.circuit
 									and tourn_circuit.tourn = ?
 									order by circuit.name");
+
+sub location { 
+	my $self = shift;
+	my $location = $self->state."/" if $self->state;
+	$location .= $self->country;
+	return $location;
+}
 
 sub setting {
 
