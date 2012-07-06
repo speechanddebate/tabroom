@@ -381,8 +381,8 @@ foreach my $group (@judge_groups) {
 	$group->setting("elim_special", $group->elim_special);
 	$group->setting("special", $group->special);
 	$group->setting("school_strikes", $group->school_strikes);
-	$group->setting("strike_reg_opens", $group->strike_reg_opens);
-	$group->setting("strike_reg_closes", $group->strike_reg_closes);
+	$group->setting("strike_reg_opens", "date", $group->strike_reg_opens);
+	$group->setting("strike_reg_closes", "date", $group->strike_reg_closes);
 	$group->setting("min_burden", $group->min_burden);
 	$group->setting("ratings_need_paradigms", $group->ratings_need_paradigms);
 	$group->setting("strikes_need_paradigms", $group->strikes_need_paradigms);
