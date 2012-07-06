@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Round->table('round');
 Tab::Round->columns(Primary => qw/id/);
 Tab::Round->columns(Essential => qw/name label event type timeslot site pool online/);
-Tab::Round->columns(Others => qw/published listed created completed blasted timestamp tb_set/);
+Tab::Round->columns(Others => qw/published listed created completed blasted timestamp tb_set motion/);
 
 Tab::Round->has_a(event => 'Tab::Event');
 Tab::Round->has_a(site => 'Tab::Site');

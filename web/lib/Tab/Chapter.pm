@@ -79,35 +79,3 @@ sub circuit_membership {
     return;
 }
 
-sub school { 
-	my ($self, $tourn) = @_;
-	my @school = Tab::School->search( chapter => $self->id, tourn => $tourn->id);
-	return $school[0] if @school;
-	return;
-}
-
-sub open_tourns {
-	my $self = shift;
-	return Tab::Tourn->search_open_by_chapter($self->id);
-}
-
-sub entered_tourns {
-	my $self = shift;
-	return Tab::Tourn->search_entered_by_chapter($self->id);
-}
-
-sub results_tourns {
-	my $self = shift;
-	return Tab::Tourn->search_results_by_chapter($self->id);
-}
-
-sub nongrads {
-    my $self = shift;
-    my $now = DateTime->now;
-    my $minimum_grad_year = $now->year;
-    unless ($now->month < 7) {
-        $minimum_grad_year++;
-    }
-    return Tab::Student->search_active_by_chapter($self->id, $minimum_grad_year);
-}
-

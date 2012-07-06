@@ -53,7 +53,7 @@ sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
 
-	my @existing = Tab::JudgeGroupSetting->search(  
+	my ($existing) = Tab::JudgeGroupSetting->search(  
 		judge_group => $self->id,
 		tag         => $tag
 	);
@@ -62,17 +62,15 @@ sub setting {
 
 		&Tab::debuglog("Tag $tag is defined with $value");
 
-		if (@existing) {
+		if ($existing) {
 		
-			my $exists = shift @existing;
-
-			$exists->value($value);
-			$exists->value_text($blob) if $value eq "text";
-			$exists->value_date($blob) if $value eq "date";
-			$exists->update;
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+			$existing->update;
 		
 			if ($value eq "delete" || $value eq "" || $value eq "0") { 
-				$exists->delete;
+				$existing->delete;
 			}
 
 			foreach my $other (@existing) { 
@@ -83,32 +81,31 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $exists = Tab::JudgeGroupSetting->create({
+			my $existing = Tab::JudgeGroupSetting->create({
 				judge_group => $self->id,
 				tag => $tag,
 				value => $value,
 			});
 
 			if ($value eq "text") { 
-				$exists->value_text($blob);
+				$existing->value_text($blob);
 			}
 
 			if ($value eq "date") { 
-				$exists->value_date($blob);
+				$existing->value_date($blob);
 			}
 
-			$exists->update;
+			$existing->update;
 		}
 
 
 	} else {
 
-		return unless @existing;
+		return unless $existing;
 
-		my $setting = shift @existing;
-		return $setting->value_text if $setting->value eq "text";
-		return $setting->value_date if $setting->value eq "date";
-		return $setting->value;
+		return $existing->value_text if $existing->value eq "text";
+		return $existing->value_date if $existing->value eq "date";
+		return $existing->value;
 
 	}
 
