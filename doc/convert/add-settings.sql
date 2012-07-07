@@ -212,3 +212,12 @@ alter table tournament add country varchar(7);
 update tournament,league set tournament.location = league.state where tournament.league = league.id;
 update tournament set country = "US";
 
+CREATE TABLE `account_ignore` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `account` int(11) DEFAULT NULL,
+  `tourn` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+   PRIMARY KEY (`id`),
+   KEY `account` (`account`),
+   KEY `tourn` (`tourn`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
