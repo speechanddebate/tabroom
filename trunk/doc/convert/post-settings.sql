@@ -19,7 +19,6 @@ alter table team_member rename to entry_student;
 
 alter table follow_comp rename to follow_entry;
 alter table follow_entry change comp entry int;
-alter table account_ignore add timestamp timestamp;
 alter table rating change comp entry int;
 alter table strike change comp entry int;
 alter table student_result change comp entry int;
@@ -76,6 +75,7 @@ alter table tournament rename to tourn;
 alter table tournament_site rename to tourn_site;
 alter table fine rename to school_fine;
 alter table no_interest rename to account_ignore;
+alter table account_ignore add timestamp timestamp;
 create index account on account_ignore(account);
 create index tourn on account_ignore(tourn);
 
@@ -170,7 +170,6 @@ alter table judge drop cfl_tab_second;
 alter table judge drop cfl_tab_third;
 alter table judge drop housing;
 alter table judge drop spare_pool;
-alter table judge drop score;
 alter table judge drop tournament;
 alter table judge drop hire; 
 alter table judge drop prelim_pool;
@@ -188,6 +187,10 @@ alter table judge add drop_time datetime;
 alter table judge add reg_time datetime;
 alter table judge add drop_by int;
 alter table judge add hired int;
+alter table judge drop tmp;
+alter table judge add tmp varchar(63);
+alter table judge drop score;
+alter table judge add score int;
 
 alter table judge_group drop missing_judge_fee;
 alter table judge_group drop reduce_alt_burden;

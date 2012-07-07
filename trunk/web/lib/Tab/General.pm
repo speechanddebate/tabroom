@@ -13,6 +13,7 @@ my $debug;
 #URL Prefix of the server
 $url_prefix = "https://$hostname" if $hostname eq "www.tabroom.com";
 $url_prefix = "http://$hostname" unless $url_prefix;
+$url_domain = "tabroom.com";
 
 #Static cookie-free URL 
 $static_url = "http://static.tabroom.com" if $hostname eq "www.tabroom.com";
@@ -132,7 +133,7 @@ sub school_year {
 sub niceshortdt {
 	my $dt = shift;
 	return unless $dt;
-	my $string = $dt->month."/".$dt->day." at ".$dt->hour_12.":".$dt->strftime('%M')." ".$dt->strftime('%p');
+	my $string = $dt->month."/".$dt->day." ".$dt->hour_12.":".$dt->strftime('%M').substr($dt->strftime('%p'),0,1);
 	return $string;
 }
 
