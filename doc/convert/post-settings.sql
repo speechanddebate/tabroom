@@ -187,10 +187,10 @@ alter table judge add drop_time datetime;
 alter table judge add reg_time datetime;
 alter table judge add drop_by int;
 alter table judge add hired int;
-alter table judge drop tmp;
-alter table judge add tmp varchar(63);
 alter table judge drop score;
 alter table judge add score int;
+alter table judge drop tmp;
+alter table judge add tmp varchar(63);
 
 alter table judge_group drop missing_judge_fee;
 alter table judge_group drop reduce_alt_burden;
