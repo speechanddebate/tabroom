@@ -208,8 +208,6 @@ update tournament,league
 
 alter table tournament add state varchar(7);
 alter table tournament add country varchar(7);
-
-update tournament,league set tournament.location = league.state where tournament.league = league.id;
 update tournament set country = "US";
 
 CREATE TABLE `account_ignore` (
