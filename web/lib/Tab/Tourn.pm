@@ -2,7 +2,8 @@ package Tab::Tourn;
 use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
-Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end tz state country hidden timestamp/);
+Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start reg_end 
+									tz state country hidden timestamp foreign_site foreign_id/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
 Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');

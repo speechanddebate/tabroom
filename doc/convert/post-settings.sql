@@ -294,7 +294,6 @@ alter table strike change strike registrant tinyint;
 alter table strike drop timeslot; 
 alter table strike change tournament tourn int;
 
-
 alter table tourn drop results;
 alter table tourn drop judge_deadline;
 alter table tourn drop drop_deadline;
@@ -317,6 +316,8 @@ alter table tourn change league circuit int;
 alter table tourn drop method;
 alter table tourn drop flighted;
 alter table tourn drop director; 
+alter table tourn add foreign_site varchar(64);
+alter table tourn add foreign_id int;
 
 alter table tourn_admin change entry entry_only tinyint;
 
@@ -511,3 +512,5 @@ create index entry on tourn_change(entry);
 
 create index entry on entry_student(entry);
 create index student on entry_student(student);
+
+
