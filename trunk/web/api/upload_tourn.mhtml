@@ -1,25 +1,28 @@
 <%args>
-	$username
-	$password
-	$xml
+	$username => "palmer"
+	$password => "Yis*meme."
+#	$xml
 </%args>
 <%init>
 
 	use XML::Simple;
 	use Crypt::PasswdMD5;
 
-	my $req = Apache2::Request->new($r);
-	my $xml = $req->upload(xml);
+#	my $req = Apache2::Request->new($r);
+#	my $xml = $req->upload(xml);
 
 	my $xml = new XML::Simple ( ForceArray => [ qw(EVENT EVENT_SETTING TOURN_SETTING SCHOOL REGION) ]); 
-	my $data = $xml->XMLin($xml->tempname);
+#	my $data = $xml->XMLin($xml->tempname);
+	my $data = $xml->XMLin("/tmp/xmlimport.xml");
 
 	my $tourn_id = $data->{TOURN}->{ID};
 	my @tournsets = @{$data->{TOURN_SETTING}};
 
+	my $now = DateTime->now;
+
 	my %tourn_settings = ();
 
-	foreach my $ts (@tourn_settings) { 
+	foreach my $ts (@tournsets) { 
 		$tourn_settings{lc($ts->{TAG})} = lc($ts->{VALUE});
 	}
 
@@ -40,6 +43,7 @@
 
 	my $tourn;
 	my $foreign;
+	my $site;
 
 	#TOURNAMENT
 	if ($tourn_settings{"DownloadSite"} eq "idebate.org") { 
@@ -88,29 +92,99 @@
 				tourn => $tourn->id
 			});
 
-		}
+			my @sites = Tab::Site->search_like( name => $tourn->name."%" );
+			my $site = shift @sites if @sites;
 
+			unless ($site) { 
+
+				$site = Tab::Site->create({
+					name => $tourn->name." Site",
+					host => $account->id
+				});
+			}
+		}
 	}
 
 	#EVENTS
 	my @events = @{$data->{EVENT}};
+	my %event_by_id = ();
+	
+	if ($foreign) { 
+
+		foreach my $xml_event (@events) { 
+
+			my ($event) = Tab::Event->search( tourn => $tourn->id, name => $xml_event->{EVENTNAME} );
+
+			unless ($event) { 
+				$event = Tab::Event->create({
+					tourn => $tourn->id,
+					name => $xml_event->{EVENTNAME},
+					type => $xml_event->{TYPE},
+					abbr => $xml_event->{ABBR}
+
+				});
+			}
+
+			$event_by_id{$xml_event->{ID}} = $event;
+
+		}
+	}
+
 	my @event_settings = @{$data->{EVENT_SETTING}};
+
+	foreach my $xml_setting (@event_settings) { 
+		my $event = Tab::Event->retrieve($xml_setting->{EVENT}) unless $foreign;
+		$event = $event_by_id{$xml_setting->{EVENT}} if $foreign;
+		$event->setting( $xml_setting->{TAG}, $xml_setting->{VALUE} );
+	}
 
 	#TIMESLOTS
 	my @timeslots = @{$data->{TIMESLOT}};
 
 	#ROOMS
 	my @rooms = @{$data->{ROOM}};
+	my %room_by_id = ();
+
+	foreach my $xml_room (@rooms) { 
+
+		my ($room) = Tab::Room->retrieve($xml_room->{ID}) unless $foreign;
+
+		if ($room->name ne $xml_room->{ROOMNAME}) { 
+
+			my ($other_room) = $site->rooms( name => $xml_room->{ROOMNAME} );
+			
+			if ($other_room) { 
+				$room_by_id{$xml_room->{ID}} = $other_room;
+			} else { 
+				$room->name($xml_room->{ROOMNAME});
+				$room->update;
+			}
+		}
+	
+		if ($foreign) { 
+			($room) = $site->rooms( name => $xml_room->{ROOMNAME} );
+
+			unless ($room) { 
+				$room = Tab::Room->create({
+					name => $xml_room->{ROOMNAME},
+					quality => $xml_room->{QUALITY},
+					capacity => $xml_room->{CAPACITY},
+				});
+			}
+
+			$room_by_id{$xml_room->{ID}} = $room;
+		}
+	}
 
 	#STUDENTS
 	my %student_by_id = ();
-	my %students_by_chapter = ();
+	my %students_by_school = ();
 	foreach my $student (@{$data->{ENTRY_STUDENT}}) { 
 		push @{$students_by_school{$student->{SCHOOL}}}, $student;
 		$student_by_id{$student->{ID}} = $student;
 	}
 
-	my %schools_by_id = ();
+	my %school_by_id = ();
 
 	#SCHOOLS
 	foreach my $xml_school (@{$data->{SCHOOL}}) { 
@@ -156,7 +230,7 @@
 
 				unless ($chapter) { 
 
-					$chapter => Tab::Chapter->create(
+					$chapter = Tab::Chapter->create(
 						name => $xml_school->{NAME}
 					);
 
@@ -173,25 +247,99 @@
 	
 		} #end of if school
 
-		$schools_by_id{$xml_school->{ID}} = $school;
+		$school_by_id{$xml_school->{ID}} = $school;
 	}
 
-	foreach my $entry (@{$data->{ENTRY}}) { 
+	my %students_by_entry = ();
 
-		my $entry = Tab::Entry->search($entry->{ID}) unless $foreign;
+	if ($foreign) { 
 
-		if ($foreign) { 
+		foreach my $xml_student (@{$data->{ENTRY_STUDENT}}) { 	
 
-		START HERE DIPSHIT
-			
+			my $chapter_id = $school_by_id{$xml_student->{SCHOOL}}->chapter->id;
+			my ($student) = Tab::Student->search( chapter => $chapter_id, first => $xml_student->{FIRST}, last => $xml_student->{LAST} );
 
+			unless ($student) { 
+				
+				$student = Tab::Student->create({
+					first =>  $xml_student->{FIRST},
+					last => $xml_student->{LAST},
+					chapter => $chapter_id,
+					created => $now
+				});
+			}
+
+			push (@{$students_by_entry{$xml_student->{ENTRY}}}, $student);
 		}
 	}
 
-	my @rounds = @{$data->{ROUND}};
+	my %entry_by_id = ();
 
+	foreach my $xml_entry (@{$data->{ENTRY}}) { 
+
+		my $entry = Tab::Entry->search($xml_entry->{ID}) unless $foreign;
+
+		if ($foreign) { 
+
+			my ($entry) = Tab::Entry->search( 
+				school => $school_by_id{$xml_entry->{SCHOOL}}->id, 
+				code => $xml_entry->{CODE},
+			);
+
+			unless ($entry) { 
+			
+				my $event = $event_by_id{$xml_entry->{EVENT}};
+				my $school = $school_by_id{$xml_entry->{SCHOOL}};
+
+				$entry = Tab::Entry->create({
+					dropped => $xml_entry->{DROPPED},
+					school => $school->id,
+					name => $xml_entry->{FULLNAME},
+					event => $event->id,
+					code => $xml_entry->{CODE},
+					ada => $xml_entry->{TUBDISABILITY},
+					seed => $xml_entry->{RATING}
+				});
+
+				$entry_by_id{$xml_entry->{ID}} = $entry;
+
+			}
+		}
+
+		my %already_students;
+		my @already = ($m->comp("/funclib/entry_students.mas", entry => $entry));
+
+		foreach my $student (@already) { 
+			$already_students{$student->id}++;
+		}
+
+		foreach my $student (@{$students_by_entry{$xml_entry->{ID}}}) { 
+
+			$already_students{$student->id}++ if $already_students{$student->id};
+			next if $already_students{$student->id};
+			Tab::EntryStudent->create({ entry => $entry->id, student => $student->id });
+
+		}
+
+		Tab::EntryStudent->set_sql( delete_es => "
+			delete from entry_student
+			where entry = ?
+			and student = ?
+		");
+
+		foreach my $student (@already) { 
+			next if $already_students{$student->id} > 1;
+			Tab::EntryStudent->sql_delete_es->execute($entry->id, student->id);
+		}
+
+	}
+
+	my @rounds = @{$data->{ROUND}};
 	my @judges = @{$data->{JUDGE}};
 	my @judge_prefs = @{$data->{JUDGEPREF}};
 
-
 </%init>
+
+	<h2>
+		Upload Complete
+	</h2>
