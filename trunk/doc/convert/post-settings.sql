@@ -13,13 +13,30 @@ alter table chapter_league rename to chapter_circuit;
 alter table purchase rename to concession_purchase;
 alter table qual rename to rating_tier;
 alter table qual_subset rename to rating_subset;
+
+alter table rating drop name;
+alter table rating change qual rating_tier int;
+alter table rating add ordinal int;
+alter table rating change comp entry int;
 alter table rating change subset rating_subset int;
+alter table rating modify type enum('school','entry','coach','comp');
+update rating set type="entry" where type="comp";
+alter table rating modify type enum('school','entry','coach');
+alter table rating change tournament tourn int;
+alter table rating add timestamp timestamp;
+
+alter table rating_tier add rating_subset int;
+alter table rating_tier drop tourn;
+alter table rating_tier change type type enum('mpj','qual','coach');
+update rating_tier set type="coach" where type="qual";
+alter table rating_tier change type type enum('mpj','coach');
+alter table rating_subset add timestamp timestamp;
+
 alter table roomblock rename to room_strike;
 alter table team_member rename to entry_student;
 
 alter table follow_comp rename to follow_entry;
 alter table follow_entry change comp entry int;
-alter table rating change comp entry int;
 alter table strike change comp entry int;
 alter table student_result change comp entry int;
 alter table entry_student change comp entry int;
@@ -40,14 +57,12 @@ alter table concession_purchase change item concession int;
 alter table concession_purchase add placed datetime;
 alter table concession_purchase add fulfilled bool;
 
-alter table rating change qual rating_tier int;
-alter table rating_tier add rating_subset int;
-alter table rating add ordinal int;
 
 alter table round drop no_first_year;
 alter table round drop score;
 alter table round add motion text;
 alter table round add tb_set int;
+alter table round add judges int;
 alter table round drop preset;
 alter table round drop number_judges;
 alter table round add blasted datetime;
@@ -238,7 +253,6 @@ alter table judge_group change tournament tourn int;
 
 
 drop table pool_group;
-alter table rating change name value varchar(15);
 alter table region drop tournament;
 alter table region drop director;
 alter table room_pool drop tournament;
@@ -337,7 +351,6 @@ alter table account_ignore change tournament tourn int;
 alter table file change tournament tourn int;
 alter table housing_slots change tournament tourn int;
 alter table judge_hire change tournament tourn int;
-alter table rating change tournament tourn int;
 alter table rating_tier change tournament tourn int;
 alter table room drop tournament;
 alter table room_strike change tournament tourn int;
@@ -377,15 +390,7 @@ alter table room_strike add judge int;
 alter table room_strike add start datetime;
 alter table room_strike add end datetime;
 alter table room add building varchar(64);
-alter table rating_tier drop tourn;
 
-alter table rating_tier change type type enum('mpj','qual','coach');
-update rating_tier set type="coach" where type="qual";
-alter table rating_tier change type type enum('mpj','coach');
-alter table rating_subset add timestamp timestamp;
-
-alter table rating add timestamp timestamp;
-alter table rating drop value;
 drop table pool_round;
 alter table pool drop timeslot;
 alter table panel drop event;
