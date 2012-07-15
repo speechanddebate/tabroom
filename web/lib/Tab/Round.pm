@@ -20,7 +20,7 @@ __PACKAGE__->_register_dates( qw/timestamp/);
 
 sub realname { 
 	my $self = shift;
-	return $self->label if $self->label;
+	return $self->label if $self->label && $self->label ne $self->name;
 	return "Round ".$self->name;
 }
 

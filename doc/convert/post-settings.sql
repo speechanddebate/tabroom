@@ -252,6 +252,16 @@ alter table judge_group drop comp_strikes;
 alter table judge_group drop group_max;
 alter table judge_group change tournament tourn int;
 
+update judge_group_setting set value="community" where tag="school_ratings";
+update judge_group_setting set value="tiered" where tag="entry_ratings";
+update judge_group_setting set value="ordinal" where tag="entry_ordinals";
+update judge_group_setting set value="ordinal" where tag="school_ordinals";
+
+update judge_group_setting set tag="prefs" where tag="school_ratings";
+update judge_group_setting set tag="prefs" where tag="entry_ratings";
+update judge_group_setting set tag="prefs" where tag="entry_ordinals";
+update judge_group_setting set tag="prefs" where tag="school_ordinals";
+
 
 drop table pool_group;
 alter table region drop tournament;
