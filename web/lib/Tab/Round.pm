@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Round->table('round');
 Tab::Round->columns(Primary => qw/id/);
 Tab::Round->columns(Essential => qw/name label event type timeslot site pool online/);
-Tab::Round->columns(Others => qw/published listed created completed blasted timestamp tb_set motion judges/);
+Tab::Round->columns(Others => qw/published listed created completed blasted timestamp tb_set motion judges flighted/);
 
 Tab::Round->has_a(event => 'Tab::Event');
 Tab::Round->has_a(site => 'Tab::Site');
@@ -22,20 +22,5 @@ sub realname {
 	my $self = shift;
 	return $self->label if $self->label;
 	return "Round ".$self->name;
-}
-
-sub entries { 
-	my $self = shift;
-	return Tab::Entry->search_by_round($self->id);
-}
-
-sub judges { 
-	my $self = shift;
-	return Tab::Judge->search_by_round($self->id);
-}
-
-sub ballots { 
-	my $self = shift;
-	return Tab::Ballot->search_by_round($self->id);
 }
 

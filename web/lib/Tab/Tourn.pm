@@ -48,8 +48,7 @@ Tab::Circuit->set_sql( by_tourn => "select distinct circuit.*
 sub location { 
 	my $self = shift;
 	my $location = $self->state."/" if $self->state;
-	$location .= $self->country;
-	return $location;
+	return $location.$self->country;
 }
 
 sub setting {

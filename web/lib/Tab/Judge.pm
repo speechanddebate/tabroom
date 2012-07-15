@@ -2,10 +2,12 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first last code dropped active special notes judge_group
-									covers chapter_judge obligation elim_group alt_group drop_time drop_by reg_time
-									cfl_parl account acct_request hired timestamp tmp score/);
-Tab::Judge->columns(TEMP => qw/panel chair/);
+Tab::Judge->columns(Essential => qw/school first last code active
+									special notes judge_group alt_group gender
+									timestamp covers chapter_judge obligation 
+									account acct_request dropped drop_time 
+									reg_time drop_by hired score tmp/);
+Tab::Judge->columns(TEMP => qw/panelid chair/);
 
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');
