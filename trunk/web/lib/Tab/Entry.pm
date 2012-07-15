@@ -17,8 +17,6 @@ Tab::Entry->has_many(changes => 'Tab::TournChange', 'entry');
 Tab::Entry->has_many(ratings => 'Tab::Rating', 'entry');
 Tab::Entry->has_many(qualifiers => 'Tab::Qualifier', 'entry');
 
-
-
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 __PACKAGE__->_register_datetimes( qw/drop_time/);
 __PACKAGE__->_register_datetimes( qw/reg_time/);
