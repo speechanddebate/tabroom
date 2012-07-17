@@ -30,6 +30,8 @@ Tab::Account->has_many(entries => 'Tab::Entry', 'account');
 Tab::Account->has_many(students => 'Tab::Student');
 Tab::Account->has_many(follow_entry => 'Tab::FollowEntry', 'entry');
 
+Tab::Account->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
+
 sub tourns {
     my $self = shift;
     return Tab::Tourn->search_by_admin($self->id);
@@ -50,10 +52,10 @@ sub regions {
 	return Tab::Region->search_by_admin($self->id);
 }
 
-sub account_ignore {
+sub tourn_ignore {
 	my ($self, $tourn)  = @_;
 	return unless $tourn;
-	my @nis = Tab::AccountIgnore->search( tourn => $tourn->id, account => $self->id );
+	my @nis = Tab::TournIgnore->search( tourn => $tourn->id, account => $self->id );
 	return @nis;
 }
 

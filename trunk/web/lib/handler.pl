@@ -29,7 +29,6 @@ use Sys::Syslog;
 use Tab::General;
 use Tab::DBI;
 use Tab::Account;
-use Tab::AccountIgnore;
 use Tab::Ballot;
 use Tab::BallotValue;
 use Tab::Chapter;
