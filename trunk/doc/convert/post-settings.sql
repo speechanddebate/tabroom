@@ -441,6 +441,7 @@ alter table circuit_membership change blurb text text;
 alter table circuit add country char(4);
 alter table circuit add webname varchar(31);
 alter table circuit change short_name abbr varchar(15);
+alter table circuit change timezone tz varchar(63);
 update circuit set country="US";
 update circuit set state="" where state="US";
 update circuit set state="VA" where state="Va";
@@ -463,6 +464,8 @@ update circuit set name="US National Circuit" where id=6;
   alter table circuit drop approved;
   alter table circuit drop tourn_only;
   alter table circuit drop full_members;
+  alter table circuit drop region_based;
+  alter table circuit drop diocese_based;
 
 
 alter table account change noemail no_email bool;

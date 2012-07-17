@@ -407,21 +407,14 @@ print "Done.  Converting circuits to the new settings\n";
 foreach my $circuit (@circuits) { 
 
 	$circuit->setting("url", $circuit->url);
-	$circuit->setting("public_email", $circuit->public_email);
-	$circuit->setting("short_name", $circuit->short_name);
+	$circuit->setting("ncfl", $circuit->diocese_based);
+	$circuit->setting("regions", $circuit->region_based);
+
 	$circuit->setting("dues_to", $circuit->dues_to);
-	$circuit->setting("timezone", $circuit->timezone);
 	$circuit->setting("dues_amount", $circuit->dues_amount);
-	$circuit->setting("hosted_site", $circuit->hosted_site);
-	$circuit->setting("apda_seeds", $circuit->apda_seeds);
-	$circuit->setting("logo_file", $circuit->logo_file);
-	$circuit->setting("site_theme", $circuit->site_theme);
-	$circuit->setting("public_results", $circuit->public_results);
-	$circuit->setting("header_file", $circuit->header_file);
 	$circuit->setting("invoice_message", "text", $circuit->invoice_message);
+
 	$circuit->setting("track_bids", $circuit->track_bids);
-	$circuit->setting("last_change", $circuit->last_change);
-	$circuit->setting("approved", $circuit->approved);
 	$circuit->setting("tourn_only", $circuit->tourn_only);
 	$circuit->setting("full_members", $circuit->full_members);
 

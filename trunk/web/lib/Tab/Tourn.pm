@@ -8,7 +8,6 @@ Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start re
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
 Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');
 Tab::Tourn->has_many(events => 'Tab::Event', 'tourn');
-Tab::Tourn->has_many(judges => 'Tab::Judge', 'tourn');
 Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
 Tab::Tourn->has_many(ratings => 'Tab::Rating', 'tourn');
 Tab::Tourn->has_many(strikes => 'Tab::Strike', 'tourn');
