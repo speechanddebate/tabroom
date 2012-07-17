@@ -90,10 +90,13 @@ alter table chapter_judge add acct_request int;
 alter table tournament rename to tourn;
 alter table tournament_site rename to tourn_site;
 alter table fine rename to school_fine;
-alter table no_interest rename to account_ignore;
-alter table account_ignore add timestamp timestamp;
-create index account on account_ignore(account);
-create index tourn on account_ignore(tourn);
+
+
+alter table no_interest rename to tourn_ignore;
+alter table tourn_ignore change tournament tourn int;
+alter table tourn_ignore add timestamp timestamp;
+create index account on tourn_ignore(account);
+create index tourn on tourn_ignore(tourn);
 
 alter table account drop password;
 alter table account drop active;
@@ -254,8 +257,8 @@ alter table judge_group change tournament tourn int;
 
 update judge_group_setting set value="community" where tag="school_ratings";
 update judge_group_setting set value="tiered" where tag="entry_ratings";
-update judge_group_setting set value="ordinal" where tag="entry_ordinals";
-update judge_group_setting set value="ordinal" where tag="school_ordinals";
+update judge_group_setting set value="ordinals" where tag="entry_ordinals";
+update judge_group_setting set value="ordinals" where tag="school_ordinals";
 
 update judge_group_setting set tag="prefs" where tag="school_ratings";
 update judge_group_setting set tag="prefs" where tag="entry_ratings";
@@ -360,7 +363,6 @@ alter table email change senton sent_on datetime;
 alter table email change blurb content text;
 
 drop table judge_class;
-alter table account_ignore change tournament tourn int;
 alter table file change tournament tourn int;
 alter table housing_slots change tournament tourn int;
 alter table judge_hire change tournament tourn int;
@@ -369,7 +371,6 @@ alter table room drop tournament;
 alter table room_strike change tournament tourn int;
 alter table school change tournament tourn int;
 alter table school_fine change tournament tourn int;
-alter table session change tournament tourn int;
 alter table tiebreak_set change tournament tourn int;
 alter table timeslot change tournament tourn int;
 alter table tourn_admin change tournament tourn int;
@@ -393,10 +394,14 @@ alter table tourn drop circuit;
 alter table tourn_admin change nosetup no_setup tinyint;
 alter table tourn_admin add event int;
 alter table site drop approved;
+
+alter table session change tournament tourn int;
 alter table session drop ie_annoy;
 alter table session drop director;
 alter table session change entry entry_only bool;
 alter table session change league circuit int;
+alter table session add su int;
+
 
 alter table room_strike add entry int;
 alter table room_strike add judge int;
@@ -434,6 +439,7 @@ alter table circuit_membership change league circuit int;
 alter table circuit_membership change blurb text text;
 
 alter table circuit add country char(4);
+alter table circuit add webname varchar(31);
 alter table circuit change short_name abbr varchar(15);
 update circuit set country="US";
 update circuit set state="" where state="US";
@@ -458,8 +464,6 @@ update circuit set name="US National Circuit" where id=6;
   alter table circuit drop tourn_only;
   alter table circuit drop full_members;
 
-
-rename table account_ignore to tourn_ignore;
 
 alter table account change noemail no_email bool;
 alter table account add started_judging date;
@@ -531,4 +535,5 @@ create index entry on tourn_change(entry);
 create index entry on entry_student(entry);
 create index student on entry_student(student);
 
+ update tourn, tourn_circuit, circuit set tourn.state=circuit.state where tourn.id=tourn_circuit.tourn and circuit.id = tourn_circuit.circuit;
 

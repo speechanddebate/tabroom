@@ -2,21 +2,29 @@ package Tab::Circuit;
 use base 'Tab::DBI';
 Tab::Circuit->table('circuit');
 Tab::Circuit->columns(Primary => qw/id/);
-Tab::Circuit->columns(Essential => qw/name abbr region_based diocese_based timezone active state country/);
+Tab::Circuit->columns(Essential => qw/name abbr region_based diocese_based timezone active state country webname/);
 Tab::Circuit->columns(Others => qw/timestamp/);
 
 Tab::Circuit->has_many(sites => "Tab::Site");
 Tab::Circuit->has_many(regions => "Tab::Region");
 
+Tab::Circuit->has_many(webpages => "Tab::Webpage");
 Tab::Circuit->has_many(tourn_circuits => "Tab::TournCircuit");
 Tab::Circuit->has_many(circuit_admins => "Tab::CircuitAdmin");
 Tab::Circuit->has_many(chapter_circuits => "Tab::ChapterCircuit");
 Tab::Circuit->has_many(settings => "Tab::CircuitSetting", "circuit");
 Tab::Circuit->has_many(circuit_memberships => "Tab::CircuitMembership");
 
+Tab::Circuit->has_many(tourns => [ Tab::TournCircuit => 'tourn' ]);
+
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
+sub location { 
+	my $self = shift;
+	my $location = $self->state."/" if $self->state;
+	return $location.$self->country;
+}
 
 Tab::Account->set_sql(by_circuit => "select distinct account.* 
 							from account, circuit_admin
@@ -26,28 +34,6 @@ Tab::Account->set_sql(by_circuit => "select distinct account.*
 sub admins {
     my $self = shift;
     return sort {$a->last cmp $b->last} Tab::Account->search_by_circuit($self->id);
-}
-
-Tab::Tourn->set_sql(by_circuit => "select distinct tourn.* 
-							from tourn, tourn_circuit
-							where tourn.id = tourn_circuit.tourn
-							and tourn_circuit.circuit = ?
-							order by tourn.start");
-
-sub tourns {
-    my $self = shift;
-    return sort {$a->name cmp $b->name} Tab::Tourn->search_by_circuit($self->id);
-}
-
-
-Tab::Chapter->set_sql(by_circuit => "select distinct chapter.*
-							from chapter, chapter_circuit
-							where chapter.id = chapter_circuit.circuit
-							and chapter_circuit.circuit = ?
-							order by chapter.name");
-sub chapters {
-    my $self = shift;
-	return sort {$a->name cmp $b->name} Tab::Chapter->search_by_circuit($self->id);
 }
 
 sub shorter_name {
