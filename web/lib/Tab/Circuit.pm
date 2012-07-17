@@ -2,7 +2,7 @@ package Tab::Circuit;
 use base 'Tab::DBI';
 Tab::Circuit->table('circuit');
 Tab::Circuit->columns(Primary => qw/id/);
-Tab::Circuit->columns(Essential => qw/name abbr region_based diocese_based timezone active state country webname/);
+Tab::Circuit->columns(Essential => qw/name abbr region_based diocese_based tz active state country webname/);
 Tab::Circuit->columns(Others => qw/timestamp/);
 
 Tab::Circuit->has_many(sites => "Tab::Site");
@@ -14,9 +14,8 @@ Tab::Circuit->has_many(circuit_admins => "Tab::CircuitAdmin");
 Tab::Circuit->has_many(chapter_circuits => "Tab::ChapterCircuit");
 Tab::Circuit->has_many(settings => "Tab::CircuitSetting", "circuit");
 Tab::Circuit->has_many(circuit_memberships => "Tab::CircuitMembership");
-
 Tab::Circuit->has_many(tourns => [ Tab::TournCircuit => 'tourn' ]);
-
+Tab::Circuit->has_many(admins => [ Tab::CircuitAdmin => 'account' ]);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
@@ -31,10 +30,6 @@ Tab::Account->set_sql(by_circuit => "select distinct account.*
 							where account.id = circuit_admin.account
 							and circuit_admin.circuit = ?
 							order by account.last");
-sub admins {
-    my $self = shift;
-    return sort {$a->last cmp $b->last} Tab::Account->search_by_circuit($self->id);
-}
 
 sub shorter_name {
 	my $self = shift;
