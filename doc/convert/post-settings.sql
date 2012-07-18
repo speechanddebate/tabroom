@@ -362,10 +362,13 @@ alter table email change tournament tourn int;
 alter table email change senton sent_on datetime;
 alter table email change blurb content text;
 
+alter table judge_hire change tournament tourn int;
+alter table judge_hire add rounds int;
+
+
 drop table judge_class;
 alter table file change tournament tourn int;
 alter table housing_slots change tournament tourn int;
-alter table judge_hire change tournament tourn int;
 alter table rating_tier change tournament tourn int;
 alter table room drop tournament;
 alter table room_strike change tournament tourn int;

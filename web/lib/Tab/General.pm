@@ -5,7 +5,7 @@ my $latex_path_prefix="/usr/bin";
 #my $latex_path_prefix="/opt/local/bin";
 
 # FQDN of your server.  Do NOT include http:// 
-my $hostname = "itab.tabroom.com";
+$hostname = "itab.tabroom.com";
 
 # Debugging status.  Set to a non-zero number to increase logging levels
 my $debug;
