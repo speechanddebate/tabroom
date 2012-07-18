@@ -35,7 +35,7 @@ $dbhost = "localhost";
 $dbuser = "itab";
 
 #Database password
-$dbpass = "Eichie:sh2achoo9oyoh3peiH"
+$dbpass = "DataBasePassword";
 
 #Entryonent root
 $file_root = '/www/itab/web/';
