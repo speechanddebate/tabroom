@@ -5,7 +5,7 @@ my $latex_path_prefix="/usr/bin";
 #my $latex_path_prefix="/opt/local/bin";
 
 # FQDN of your server.  Do NOT include http:// 
-$hostname = "itab.tabroom.com";
+$hostname = "www.tabroom.com";
 
 # Debugging status.  Set to a non-zero number to increase logging levels
 my $debug;
@@ -35,7 +35,7 @@ $dbhost = "localhost";
 $dbuser = "itab";
 
 #Database password
-$dbpass = "ifoo1uKahs7aecu%See2xa0ieX";
+$dbpass = "Eichie:sh2achoo9oyoh3peiH"
 
 #Entryonent root
 $file_root = '/www/itab/web/';
