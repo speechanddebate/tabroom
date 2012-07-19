@@ -26,7 +26,6 @@ alter table rating change tournament tourn int;
 alter table rating add timestamp timestamp;
 
 alter table rating_tier add rating_subset int;
-alter table rating_tier drop tourn;
 alter table rating_tier change type type enum('mpj','qual','coach');
 update rating_tier set type="coach" where type="qual";
 alter table rating_tier change type type enum('mpj','coach');
@@ -119,16 +118,12 @@ alter table ballot drop rank;
 alter table ballot drop seed;
 alter table ballot drop flight;
 alter table ballot drop points;
-alter table ballot drop position;
 alter table ballot drop real_rank;
 alter table ballot drop real_points;
 alter table ballot drop rankinround;
 
 
 alter table ballot change comp entry int;
-alter table ballot change rank rank tinyint(4);
-alter table ballot change real_rank rank int;
-alter table ballot change real_points points int;
 
 alter table class rename to event_double;
 alter table event_double drop judge_group;
@@ -270,9 +265,6 @@ drop table pool_group;
 alter table region drop tournament;
 alter table region drop director;
 alter table room_pool drop tournament;
-alter table room_pool change tournament tourn int;
-
-
 
 update school set paid_amount=paid_amount+concession_paid_amount;
 alter table school change paid_amount paid float;
@@ -287,8 +279,6 @@ alter table school add self_reg_deadline datetime;
 
 alter table school_fine drop region;
 alter table school_fine drop start;
-alter table school add self_register bool;
-alter table school add self_reg_deadline datetime;
 alter table school_fine drop end;
 alter table school_fine change levied levied_on datetime;
 alter table school_fine add levied_by int;
@@ -434,7 +424,6 @@ alter table event drop textpost;
 alter table event drop bid_cume; 
 alter table event change qual_subset rating_subset int; 
 alter table event drop publish; 
-alter table event add timestamp timestamp;
 
 
 alter table membership rename to circuit_membership;
