@@ -1,8 +1,9 @@
 #!/bin/bash
 
-mysql --silent itab < add-settings.sql
+mysql -f --silent itab < add-settings.sql
 
 ./convert-database.pl
+./convert-ballots.pl
 
-mysql --silent itab < post-settings.sql
+mysql -f --silent itab < post-settings.sql
 
