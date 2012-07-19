@@ -2,7 +2,7 @@ package Tab::Circuit;
 use base 'Tab::DBI';
 Tab::Circuit->table('circuit');
 Tab::Circuit->columns(Primary => qw/id/);
-Tab::Circuit->columns(Essential => qw/name abbr region_based diocese_based tz active state country webname/);
+Tab::Circuit->columns(Essential => qw/name abbr tz active state country webname/);
 Tab::Circuit->columns(Others => qw/timestamp/);
 
 Tab::Circuit->has_many(sites => "Tab::Site");
