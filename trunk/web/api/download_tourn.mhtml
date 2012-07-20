@@ -1,0 +1,330 @@
+<%args>
+	$username => 
+	$password => 
+	$tourn_id => '1491'
+	$event_id => '16840'
+</%args>
+<%init>
+
+	use Crypt::PasswdMD5;
+	use XML::Simple;
+	use Data::Dumper;
+
+	my ($account) = Tab::Account->search( email => lc($username) );
+
+	unless ($account) { 
+		$m->print("<error>No account with the email ".$username." was found.</error>");
+		$m->abort;
+	} 
+
+	$password =~ s/\s+$//g;
+	my $db_password = $account->passhash;
+   	my $verify_password = unix_md5_crypt($password,$db_password);
+   
+   	unless ($verify_password eq $db_password) { 
+		$m->print("<error>Password incorrect for ".$username.".</error>");
+		$m->abort;
+	}
+
+	my $tourn = Tab::Tourn->retrieve($tourn_id);
+
+	unless ($tourn) { 
+		$m->print("NO_SUCH_TOURNAMENT");
+		$m->abort;
+	}
+
+	unless ($account->site_admin || Tab::TournAdmin->search( tourn => $tourn->id, account => $account->id )) { 
+		$m->print("TOURN_ACCESS_DENIED");
+		$m->abort;
+	}
+
+	my (@event_ids) = split (/\,/, $event_id);
+	my @events;
+	my @judge_groups;
+
+	foreach my $eventid (@event_ids) { 
+		my $event = Tab::Event->retrieve($eventid);
+		push (@events, $event) if $event;
+		push (@judge_groups, $event->judge_group) if $event;
+	}
+
+	unless (@events) { 
+		$m->print("NO_EVENT_FOUND");
+		$m->abort;
+	}
+
+	my %seen = (); 
+	@events = grep { ! $seen{$_->id} ++ } @events;
+
+	my %also_seen = (); 
+	@judge_groups = grep { ! $also_seen{$_->id} ++ } @judge_groups;
+
+	unless (scalar @judge_groups == 1) { 
+		$m->print("MORE_THAN_ONE_JUDGE_GROUP");
+		$m->abort;
+	}
+
+	my $judge_group = shift @judge_groups;
+
+	my $xml_tourn = {
+		ID => $tourn->id,
+		TOURNNAME => $tourn->name,
+		STARTDATE => Tab::pickerdate($tourn->start),
+		ENDDATE => Tab::pickerdate($tourn->end),
+		DOWNLOADSITE => "idebate.org"
+	};
+
+	my $tsets = [];
+
+	foreach my $tset ($tourn->settings) { 
+
+		my $value = $tset->value;
+		$value = Tab::pickerdate($tset->value_date) if $value eq "date";
+		$value = $tset->value_text if $value eq "text";
+		
+		my $xml_tset = {
+			TAG => $tset->tag,
+			VALUE => $value
+		};
+
+		push (@{$tsets}, $xml_tset);
+	}
+
+	my @entries;
+	my @rounds;
+	my %pref_type = ();
+
+	my $xml_events = [];
+	my $xml_esets = [];
+
+	foreach my $event (@events) { 
+		
+		$pref_type{$event->id} = $event->judge_group->setting("prefs");
+
+		my $xml_event = {
+			ID => $event->id,
+			NAME => $event->name,
+			ABBR => $event->abbr,
+			TYPE => $event->type
+		};
+
+		push (@{$xml_events}, $xml_event);
+
+		push (@entries, $event->entries( dropped => 0, waitlist => 0 ));
+		push (@rounds, $event->rounds);
+
+		my $debaters = $event->setting("min_entry");
+
+		my $numdebaters_eset = {
+			ID => 1,
+			TAG => "DebatersPerTeam",
+			VALUE => $debaters,
+			EVENT => $event->id
+		};
+
+		push (@{$xml_esets}, $numdebaters_eset);
+
+		foreach my $eset ($event->settings) { 
+
+			next if $eset->tag eq "min_entry" || $eset->tag eq "max_entry";
+
+			my $value = $eset->value;
+			$value = Tab::pickerdate($eset->value_date) if $value eq "date";
+			$value = $eset->value_text if $value eq "text";
+		
+			my $xml_eset = { 
+				ID => $eset->id,
+				TAG => $eset->tag,
+				VALUE => $eset->value,
+				EVENT => $event->id
+			};
+
+			push (@{$xml_esets}, $xml_eset);
+
+		}
+
+	}
+
+	my @schools;
+
+	my $xml_entries = [];
+	my $xml_ratings = [];
+	my $xml_students = [];
+
+	my %rating_by_id = ();
+
+	foreach my $rt ($m->comp("/funclib/tourn_rating_tiers.mas", tourn => $tourn)) {
+		$rating_by_id{$rt->id} = $rt->name;
+	}
+
+	ENTRY:
+	foreach my $entry (@entries) { 
+
+		push (@schools, $entry->school);
+
+		my $xml_entry = {
+			ID => $entry->id,
+			SCHOOL => $entry->school->id,
+			EVENT => $entry->event->id,
+			RATING => $entry->seed,
+			CODE => $entry->code,
+			FULLNAME => $entry->name,
+			DROPPED => $entry->dropped,
+			TUBDISABILITY => $entry->ada
+		};
+
+		push (@{$xml_entries}, $xml_entry);
+
+		foreach my $student ($m->comp("/funclib/entry_students.mas", entry => $entry)) { 
+
+			my $xml_student = {
+				ID => $student->id,
+				DOWNLOADRECORD => $student->id,
+				SCHOOL => $entry->school->id,
+				ENTRY => $entry->id,
+				FIRST => $student->first,
+				LAST => $student->last
+			};
+
+			push (@{$xml_students}, $xml_student);
+
+		}
+
+		foreach my $rating ($entry->ratings) { 
+			
+			my $event = $entry->event;
+			
+			next ENTRY unless $pref_type{$event->id} eq "ordinal" || $pref_type{$event->id} eq "tiered";
+
+			my $pref = $rating->ordinal if $pref_type{$event->id} eq "ordinal";
+			$pref = $rating_by_id{$rating->rating_tier->id} if $pref_type{$event->id} eq "tiered";
+
+			my $xml_rating = {
+				ID => $rating->id,
+				TEAM => $entry->id,
+				JUDGE => $rating->judge->id,
+				RATING => $pref
+			};
+		
+			push (@{$xml_ratings}, $xml_rating);
+
+		}
+
+	}
+
+	my $xml_judges = [];
+
+	foreach my $judge ($judge_group->judges) { 
+
+		my $school_id = $judge->school->id if $judge->school && $judge->school->id;
+		$school_id = 1 unless $school_id;
+		my $obligation = 9 unless $judge->obligation || $judge->hired;
+		my $stop = 1 unless $judge->active == 1;
+		$stop = 1 if $judge->dropped == 1;
+
+
+		my $xml_judge = {
+			ID => $judge->id,
+			DOWNLOADRECORD => $judge->id,
+			SCHOOL => $school_id,
+			FIRST => $judge->first,
+			LAST => $judge->last,
+			OBLIGATION => $obligation,
+			HIRED => $judge->hired,
+			NOTES => $judge->notes,
+			STOPSCHEDULING => $stop
+		};
+
+		push (@{$xml_judges}, $xml_judge);
+
+	}
+	
+	my $xml_schools = [];
+
+	my %schseen = (); 
+	@schools = grep { ! $schseen{$_->id} ++ } @schools;
+
+	foreach my $school (@schools) { 
+		
+		my $xml_school = { 
+			ID => $school->id,
+			DOWNLOADRECORD => $school->id,
+			SCHOOLNAME => $school->short_name,
+			CODE => $school->code
+		};
+
+		push (@{$xml_schools}, $xml_school);
+
+	}
+
+	my $xml_rounds = [];
+	my @timeslots;
+	my @tb_sets;
+
+	foreach my $round (@rounds) { 
+
+		push (@timeslots, $round->timeslot);
+		push (@tb_sets, $round->tb_set);
+
+		my $tb_set = $round->tb_set->id if $round->tb_set;
+		my $ts = $round->timeslot->id if $round->timeslot;
+		my $event = $round->event->id if $round->event;
+
+		my $xml_round = {
+			ID => $round->id,
+			EVENT => $event,
+			TIMESLOT => $ts,
+			TB_SET => $tb_set,
+			RD_NAME => $round->name,
+			LABEL => $round->label,
+			FLIGHTING => $round->flighted,
+			JUDGESPERPANEL => $round->judges,
+			PAIRINGSCHEME => $round->type
+		};
+
+		push (@{$xml_rounds}, $xml_round);
+
+	}
+
+	my %tsseen = (); 
+	@timeslots = grep { ! $tsseen{$_->id} ++ } @timeslots;
+
+	my $xml_timeslots = [];
+	
+	foreach my $ts (@timeslots) { 
+
+		my $xml_ts = {
+			ID => $ts->id,
+			NAME => $ts->name,
+			START => Tab::xmldt($ts->start),
+			END => Tab::xmldt($ts->end)
+		};
+
+		push (@{$xml_timeslots}, $xml_ts);
+
+	}
+
+	my $xml_hash = {
+		TOURN => $xml_tourn,
+		TOURN_SETTING => $tsets,
+		EVENT => $xml_events,
+		EVENT_SETTING => $xml_esets,
+		ENTRY => $xml_entries,
+		JUDGEPREF => $xml_ratings,
+		ENTRY_STUDENT => $xml_students,
+		JUDGE => $xml_judges,
+		SCHOOL => $xml_schools,
+		ROUND => $xml_rounds,
+		TIMESLOT => $xml_timeslots
+	};
+
+	my $filename = "TourneyData-$tourn_id";
+	my $filepath = $Tab::file_root."tmp/".$filename;
+	`rm -f $filepath.*`; 
+
+	my $xs = new XML::Simple();
+	my $xml = $xs->XMLout($xml_hash, RootName => 'TOURNAMENTRESULTS', NoAttr => 1, XMLDecl => 1, OutputFile => "$filepath.xml");
+
+	$m->redirect("$Tab::url_prefix/tmp/$filename.xml");
+	
+</%init>
