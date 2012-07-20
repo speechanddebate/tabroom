@@ -6,9 +6,9 @@ Tab::Account->columns(Primary =>   qw/id/);
 Tab::Account->columns(Essential => qw/email passhash site_admin multiple/);
 Tab::Account->columns(Others =>    qw/first last phone street city state zip country 
 									provider paradigm started_judging gender timestamp 
-									no_email change_pass_key password_timestamp tz/);
+									no_email change_deadline change_pass_key password_timestamp tz/);
 
-__PACKAGE__->_register_datetimes( qw/password_timestamp/);
+__PACKAGE__->_register_datetimes( qw/password_timestamp change_deadline/);
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
 Tab::Account->has_many(sessions => 'Tab::Session', 'account');
