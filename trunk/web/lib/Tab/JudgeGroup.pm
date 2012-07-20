@@ -12,7 +12,6 @@ Tab::JudgeGroup->has_many(events => "Tab::Event", "judge_group");
 Tab::JudgeGroup->has_many(hires => 'Tab::JudgeHire', 'judge_group');
 Tab::JudgeGroup->has_many(rating_tiers => "Tab::RatingTier", "judge_group");
 Tab::JudgeGroup->has_many(strike_times => "Tab::StrikeTime", "judge_group");
-Tab::JudgeGroup->has_many(event_doubles => "Tab::EventDouble", "judge_group");
 Tab::JudgeGroup->has_many(settings => "Tab::JudgeGroupSetting", "judge_group");
 Tab::JudgeGroup->has_many(rating_subsets => "Tab::RatingSubset", "judge_group");
 
