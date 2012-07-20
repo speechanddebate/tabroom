@@ -9,6 +9,8 @@ Tab::Ballot->has_a(judge => 'Tab::Judge');
 Tab::Ballot->has_a(panel => 'Tab::Panel');
 Tab::Ballot->has_a(entry => 'Tab::Entry');
 Tab::Ballot->has_a(collected_by => 'Tab::Account');
+Tab::Ballot->has_many(values => 'Tab::BallotValue');
+Tab::Ballot->has_many(ballot_values => 'Tab::BallotValue');
 
 __PACKAGE__->_register_dates( qw/timestamp collected/);
 
