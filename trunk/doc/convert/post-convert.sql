@@ -12,3 +12,7 @@ alter table ballot modify side tinyint;
 alter table tiebreak_set add type varchar(15);
 update tiebreak_set set type="Team" where type is null;
 
+update strike set type="conflict" where type="comp";
+
+
+
