@@ -10,13 +10,8 @@ Tab::Pool->has_a(judge_group => "Tab::JudgeGroup");
 
 Tab::Pool->has_many(rounds => 'Tab::Round', 'pool');
 Tab::Pool->has_many(pool_judges => 'Tab::PoolJudge', 'pool');
+
 Tab::Pool->has_many(judges => [Tab::PoolJudge => 'judge']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
-
-sub judges {
-    my $self = shift;
-	my @judges = Tab::Judge->search_by_pool($self->id);
-	return @judges;
-}
 
