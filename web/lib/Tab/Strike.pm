@@ -23,6 +23,7 @@ sub name {
 	return "No one from ".$self->school->short_name if $self->type eq "school";
 	return "No one from ".$self->region->name." (".$self->region->code.")" if $self->type eq "region";
 	return $self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "entry";
+	return $self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "conflict";
 
 	return "Out from ".  Tab::niceshortdt($self->start->set_time_zone($self->tourn->tz))
 			." and ".  Tab::niceshortdt($self->end->set_time_zone($self->tourn->tz)) if $self->type eq "time" && $self->start->day != $self->end->day;
