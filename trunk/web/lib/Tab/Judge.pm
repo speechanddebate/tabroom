@@ -23,6 +23,8 @@ Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
 Tab::Judge->has_many(settings => "Tab::JudgeSetting", "judge");
 
+Tab::Judge->has_many(pools => [Tab::PoolJudge => 'pool']);
+
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where judge_group = ?");
 Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where judge_group = ?");
 
