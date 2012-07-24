@@ -14,5 +14,7 @@ update tiebreak_set set type="Team" where type is null;
 
 update strike set type="conflict" where type="comp";
 
+alter table ballot_value add content text;
+
 
 
