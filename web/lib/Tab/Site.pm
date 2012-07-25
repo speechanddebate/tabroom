@@ -7,7 +7,7 @@ Tab::Site->columns(Others => qw/host directions circuit dropoff/);
 
 Tab::Site->has_a(host => 'Tab::Account');
 Tab::Site->has_a(circuit => 'Tab::Circuit');
-
+Tab::Site->has_many(rounds => 'Tab::Round', {order_by => "name"});
 Tab::Site->has_many(rooms => 'Tab::Room', {order_by => "quality"});
 
 sub tourns {
