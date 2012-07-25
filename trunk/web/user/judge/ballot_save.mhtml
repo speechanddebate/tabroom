@@ -1,0 +1,412 @@
+<%args>
+	$account
+	$panel_id
+	$judge_id
+</%args>
+<%init>
+
+
+    unless ($panel_id && $judge_id) { 
+        my $err = "I didn't get both a judge and a ballot record";
+        $m->redirect("/user/home.mhtml?err=$err");
+    }   
+
+    my $panel = Tab::Panel->retrieve($panel_id);
+    my $judge = Tab::Judge->retrieve($judge_id);
+
+    unless ($panel && $judge) { 
+        my $err = "No ballots found for that judge and that panel.";
+        $m->redirect("/user/home.mhtml?err=$err");
+    }   
+
+    unless ($judge->account->id == $account->id) { 
+        my $err = "You are not authorized to enter ballots for that judge.";
+        $m->redirect("/user/home.mhtml?err=$err")
+    }   
+
+    my @ballots = Tab::Ballot->search(  judge => $judge->id, panel => $panel->id );
+
+    unless (@ballots) { 
+        my $err = "That judge does not judge in that room.";
+        $m->redirect("/user/home.mhtml?err=$err");
+	}
+
+    my $type = $panel->round->event->type;
+    my $tiebreaks = $panel->round->tb_set;
+
+    my $wins;
+    my $team_points;
+    my $points;
+    my $ranks;
+    my $team_ranks;
+
+    foreach my $tb ($panel->round->tb_set->tiebreaks) {
+        $ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals") && $type ne "speech";
+        $team_ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals") && $type eq "speech";
+        $wins++ if ($tb->name eq "opp_wins" || $tb->name eq "winloss");
+        $points++ if ($tb->name eq "points" || $tb->name eq "competition" || $tb->name eq "opp_points") && $type ne "speech";
+        $team_points++ if ($tb->name eq "points" || $tb->name eq "competition" || $tb->name eq "opp_points") && $type eq "speech";
+    }
+
+    my $tourn = $judge->judge_group->tourn;
+
+    my @students = $m->comp('/funclib/panel_students.mas', panel => $panel);
+    my $tv++ if $type eq "speech" && $tourn->setting("mfl_time_violation");
+    my $noshow++ if $type eq "speech" && $tourn->setting("noshows_never_break");
+
+    my $max_points = $panel->round->event->setting("max_points");
+    my $min_points = $panel->round->event->setting("min_points");
+    my $point_increments = $panel->round->event->setting("point_increments");
+    my $point_ties = $panel->round->event->setting("point_ties");
+
+	my $errs;
+
+	my %student_values = ();
+	my %entry_values = ();
+
+	if ($type eq "pf" || $panel->round->type eq "elim") { 
+
+		foreach my $ballot (@ballots) { 
+			my $side = $ARGS{$ballot->id."_side"};
+			$errs .= "<p>You must specify a side for both debaters</p>" unless $side;
+			$ballot->side($side);
+			$ballot->update;
+		}
+
+	}
+
+	if ($ranks) { 
+
+		my %rank_taken;
+		foreach my $student (@students) { 
+			my $rank = $ARGS{$student->id."_ranks"};
+
+			$errs .= "<p>Rank missing</p>" unless $rank;
+			next unless $rank;
+			$errs .= "<p>Rank must be a number</p>" unless ($rank eq $rank+0);
+			$errs .= "<p>You have repeated the rank $rank.  All ranks must be unique.</p>" if $rank_taken{$rank};
+			$errs .= "<p>Rank $rank is outside of range.</p>" if $rank < 1 || $rank > scalar @students;
+
+			$rank_taken{$rank}++;
+			$student_values{$student->id."_rank"} = $rank;
+		}
+	}
+
+	if ($team_ranks) { 
+
+		my %rank_taken;
+		foreach my $ballot (@ballots) { 
+			my $rank = $ARGS{$ballot->id."_ranks"};
+
+			$errs .= "<p>Rank Missing</p>" unless $rank;
+			next unless $rank;
+			$errs .= "<p>Rank must be a number</p>" unless ($rank eq $rank+0);
+
+			$errs .= "<p>You have repeated the rank $rank.  All ranks must be unique</p>" if $rank_taken{$rank};
+			$errs .= "<p>Rank $rank is outside of range</p>" if $rank < 1 || $rank > scalar @ballots;
+
+			$rank_taken{$rank}++;
+			$entry_values{$ballot->id."_rank"} = $rank;
+		}
+	}
+
+	my %entry_points = ();
+
+	if ($points) { 
+
+		my %points_taken;
+
+		foreach my $student (@students) { 
+
+			my $points = $ARGS{$student->id."_points"};
+
+			$errs .= "<p>Points missing</p>"  unless $points;
+			next unless $points;
+
+			Tab::debuglog("Points at 1 are $points");
+
+			$errs .= "<p>Points must be a number</p>" unless ($points eq $points+0);
+
+			Tab::debuglog("Points at 2 are $points");
+
+			$points = int($points + 0.5) if $point_increments eq "whole";
+
+			if ($point_increments eq "tenths") { 
+				$points = $points * 10;
+				$points = int($points + 0.5);
+				$points = $points/10;
+			}
+
+			Tab::debuglog("Points at 3 are $points");
+
+			if ($point_increments eq "half") { 
+				my $rounded_points = $points + .5;
+				$rounded_points = $rounded_points - ($points % .5);
+				$points = $rounded_points;
+			}
+
+			Tab::debuglog("Points at 4 are $points");
+
+			$errs .= "<p>You have repeated the points $points </p>"  if $points_taken{$points} && $point_ties < 1;
+			$errs .= "<p>Points $points are outside of range</p>" if $points < $min_points || $points > $max_points;
+
+			$points_taken{$points}++;
+			$student_values{$student->id."_points"} = $points;
+			$entry_points{$student->entry} += $points;
+
+		}
+
+	}
+
+	if ($team_points) { 
+
+		my %points_taken;
+
+		foreach my $ballot (@ballots) { 
+
+			my $points = $ARGS{$ballot->id."_points"};
+
+#			push (@errs, "Points missing") unless $points;
+			next unless $points;
+
+			$points =~ s/\D//g; #Strip non-numerics;
+#			push (@errs, "Points must be a number") unless $points;
+
+			$points = int($points + 0.5) if $point_increments eq "whole";
+			$points = printf("%.1f", $points) if $point_increments eq "tenths";
+
+			if ($point_increments eq "half") { 
+				my $rounded_points = $points + .5;
+				$rounded_points = $rounded_points - ($points % .5);
+				$points = $rounded_points;
+			}
+
+#			push (@errs, "You have repeated the points $points") if $points_taken{$points} && $point_ties < 1;
+#			push (@errs, "Points $points are outside of range") if ($min_points && $points < $min_points) || ($max_points && $points > $max_points);
+
+			$points_taken{$points}++;
+			$entry_values{$ballot->id."_points"} = $points;
+			$entry_points{$ballot->entry->id} += $points;
+		}
+
+	}
+
+	my $winner;
+
+	if ($wins)  {
+
+		my $winning_ballot = $ARGS{"winner"};
+		$winner = Tab::Ballot->retrieve($winning_ballot);
+
+		$errs .= "<p>You didn't choose a winner.  There are no ties in debate.  Live strong.</p>" unless $winner;
+		$errs .= "<p>Your winner and your chosen side did not agree</p>" if $winner && $winner->side != $ARGS{"winner_side"};
+
+		if ($winner) { 
+			my $winner_points = $entry_points{$winner->entry->id};
+
+			foreach my $ballot (@ballots) { 
+	
+				my $bal_points = $entry_points{$ballot->entry->id};
+		
+				$errs .= "<p>Low point wins are not allowed by this tournament</p>" if $winner_points < $bal_points && $panel->round->event->setting("no_lpw");
+				$errs .= "<p>Please mark if the low-point win is intended</p>" if $winner_points < $bal_points && not defined $ARGS{"lpw"};
+		
+			}
+
+		}
+	
+	}
+
+	if ($errs) { 
+
+		my $url_args = "?panel_id=$panel_id&judge_id=$judge_id";
+
+		foreach my $key (keys %ARGS) { 
+			next if $key eq "panel_id";
+			next if $key eq "judge_id";
+			$url_args .= "&$key=$ARGS{$key}";
+		}
+
+		$url_args .= "&errs=$errs";
+
+		$m->redirect("ballot.mhtml".$url_args);
+
+	} else { 
+
+		#Clear the old cruft
+
+		Tab::BallotValue->set_sql( clear_cruft => "
+			delete ballot_value.*
+			from ballot_value, ballot
+			where ballot.panel = ?
+			and ballot.judge = ? 
+			and ballot.id = ballot_value.ballot");
+
+		Tab::BallotValue->sql_clear_cruft->execute($panel->id, $judge->id);
+
+		foreach my $ballot (@ballots) { 
+
+			$ballot->audit("");
+			$ballot->update;
+
+			if ($ARGS{"rfd"}) { 
+
+				Tab::BallotValue->create({
+					tag => "rfd",
+					ballot => $ballot->id,
+					content => $ARGS{"rfd"}
+				});
+
+			}
+
+			if ($wins) { 
+
+				my $tigers_blood = 0;
+				$tigers_blood++ if $winner->id == $ballot->id;
+
+				Tab::BallotValue->create({
+					tag => "ballot",
+					ballot => $ballot->id,
+					value => $tigers_blood,
+					student => 0
+				});
+
+			}
+
+			if ($points) { 
+
+				foreach my $student (@students) { 
+
+					next unless $student->entry == $ballot->entry->id;
+
+					Tab::BallotValue->create({
+						tag => 'points',
+						ballot => $ballot->id,
+						student => $student->id,
+						value => $student_values{$student->id."_points"}
+					});
+
+				}
+
+			}
+
+			if ($ranks) { 
+
+				foreach my $student (@students) { 
+
+					next unless $student->entry == $ballot->entry->id;
+
+					Tab::BallotValue->create({
+						tag => 'ranks',
+						ballot => $ballot->id,
+						student => $student->id,
+						value => $student_values{$student->id."_rank"}
+					});
+
+				}
+
+			}
+
+		}
+
+	}
+
+
+</%init>
+
+	<div class="left huge">
+
+	<h2>Confirm Please!</h2>
+
+%		if ($wins) { 
+
+			<h4>Your winner was</h4>
+			
+			<h5 class="rightalign"><% $winner->entry->code." ".$winner->entry->name %></h5>
+%		}
+
+%		if ($points || $ranks) { 
+
+			<h4>Speakers</h4>
+
+			<table width="100%" cellpadding="4" cellspacing="1">
+
+%			my $switch;
+
+%			foreach my $student (@students) { 
+
+%				my $entry = Tab::Entry->retrieve($student->entry);
+
+				<tr class="<% ($switch++ % 2) ? "oddrow" : "evenrow" %>">
+
+					<th>
+						<%	$entry->code %>
+					</td>
+
+					<td>
+						<%	$student->first." ".$student->last %>
+					</td>
+
+%					if ($points) { 
+
+						<td>
+							Points:
+						</td>
+
+						<td>
+							<% $student_values{$student->id."_points"} %>
+						</td>
+
+%					}
+
+%					if ($ranks) { 
+
+						<td>
+							Rank:
+						</td>
+
+						<td>
+							<% $student_values{$student->id."_rank"} %>
+						</td>
+
+%					}
+
+				</tr>
+
+%			}
+
+			</table>
+
+%		}
+
+		<p style="margin-top: 20px; padding: 10px; font-size: 110%; margin-bottom: 20px;">
+			Once you confirm your ballot, you cannot change it online.  You'll have to contact the tournament staff to make any further changes
+		</p>
+
+		<div class="half centeralign left">
+			<a class="dkred block" style="padding-top: 25px; padding-bottom: 25px; font-size: 125%; text-decoration: none;" href="ballot.mhtml?panel_id=<% $panel_id %>&judge_id=<% $judge_id %>">
+				NO WRONG.  RE-ENTER
+			</a>
+		</div>
+
+		<div class="half centeralign right">
+			<a class="dkgreen block" style="padding-top: 25px; padding-bottom: 25px; font-size: 125%; text-decoration: none;" href="ballot_confirm.mhtml?panel_id=<% $panel_id %>&judge_id=<% $judge_id %>">
+				YES CORRECT! CONFIRM IT
+			</a>
+		</div>
+
+
+	</div>
+
+	<div class="right small">
+
+		<div class="sidenote">
+
+			<h4>RFD</h4>
+
+			<% $ARGS{"rfd"} %>
+
+		</div>
+
+	</div>
+
