@@ -34,8 +34,7 @@ Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit', 'tourn');
 Tab::Tourn->has_many(sites => [Tab::TournSite => 'site']);
 Tab::Tourn->has_many(circuits => [Tab::TournCircuit => 'circuit']);
 
-__PACKAGE__->_register_datetimes( qw/start/);
-__PACKAGE__->_register_datetimes( qw/end/);
+__PACKAGE__->_register_datetimes( qw/start end/);
 __PACKAGE__->_register_datetimes( qw/reg_start/);
 __PACKAGE__->_register_datetimes( qw/reg_end/);
 
