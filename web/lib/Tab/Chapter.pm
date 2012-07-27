@@ -95,7 +95,7 @@ sub short_name {
 	$name =~ s/Public\ Charter//g;
 	$name =~ s/Charter\ Public//g;
 	$name =~ s/^The//g;
-	$name =~ s/^Saint/St./g;
+	$name =~ s/^Saint/St/g;
 	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
 	$name =~ s/High\ School/HS/g;
 	$name =~ s/^\s+//;  #leading spaces
