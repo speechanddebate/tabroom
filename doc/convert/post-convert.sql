@@ -20,4 +20,10 @@ update tourn_setting set value="incremental" where tag="incremental_school_codes
 update tourn_setting set tag="school_codes" where tag="incremental_school_codes";
 
 
+update tourn_setting set value_text=replace(value_text,'\r\n','');
+update tourn_setting set value_text=replace(value_text,'\r','');
+update tourn_setting set value_text=replace(value_text,'\n','');
+update tourn_setting set value_text=replace(value_text,'\t','');
+delete from tourn_setting where value_text="";
+
 
