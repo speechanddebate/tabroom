@@ -16,5 +16,8 @@ update strike set type="conflict" where type="comp";
 
 alter table ballot_value add content text;
 
+update tourn_setting set value="incremental" where tag="incremental_school_codes";
+update tourn_setting set tag="school_codes" where tag="incremental_school_codes";
+
 
 

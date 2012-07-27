@@ -79,3 +79,32 @@ sub circuit_membership {
     return;
 }
 
+sub short_name {
+	my ($self, $limit) = @_;
+	my $name = $self->name;
+	$name =~ s/of Math and Science$//g;
+	$name =~ s/Academy$//g;
+	$name =~ s/Regional\ High\ School$//g;
+	$name =~ s/High\ School$//g;
+	$name =~ s/School$//g;
+	$name =~ s/High$//g;
+	$name =~ s/Preparatory$/Prep/g;
+	$name =~ s/College\ Prep$/CP/g;
+	$name =~ s/HS$//g;
+	$name =~ s/Regional$//g;
+	$name =~ s/Public\ Charter//g;
+	$name =~ s/Charter\ Public//g;
+	$name =~ s/^The//g;
+	$name =~ s/^Saint/St./g;
+	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
+	$name =~ s/High\ School/HS/g;
+	$name =~ s/^\s+//;  #leading spaces
+	$name =~ s/\s+$//;  #trailing spaces
+
+    if ($limit) { 
+        return substr($name,0,$limit);
+    } else { 
+    	return $name;
+    }
+}
+
