@@ -1,63 +1,182 @@
 <%args>
 	$entry_id
-	$school_id
-	$qualifier => undef
-	$qualexp => undef
-	$qual2 => undef
-	$qual2exp => undef
 	$title => undef
+	$code => undef
+	$name => undef
 </%args>
 <%init>
 
 	my $entry = Tab::Entry->retrieve($entry_id);
-
 	my $event = $entry->event;
-	my $tourn = $event->tournament;
+	my $tourn = $event->tourn;
+	my $school = $entry->school;
+	my $code_style = $event->setting("code_style");
 
-	my $school = Tab::School->retrieve($school_id);
+	my $max = $event->setting("max_entry");
+	my $min = $event->setting("min_entry");
 
-	if ($event->ask_for_titles) {
+	my $err;
+
+	if ($event->setting("ask_for_titles")) {
 
 		unless ($title) { 
-			my $err = "You must enter a piece title (and/or ISBN number)";
-			$m->redirect("details.mhtml?entry_id=$entry_id&school_id=$school_id&err=$err");
+			$err = "You must enter a piece title (and/or ISBN number)";
+		}
+
+		$entry->title($title);
+
+	}
+
+	my @quals = $entry->qualifiers;
+	my %used_quals;
+
+	foreach my $step (1 .. $tourn->setting('ask_quals') ) { 
+
+		my $name = $ARGS{"qual_".$step};
+		my $result = $ARGS{"qualpts_".$step};
+
+		$err = "Qualifier $step missing" unless $name;
+
+		my $foundit;
+
+		foreach my $qual (@quals) {
+			if ($qual->name eq $name) { 
+				$used_quals{$qual->id}++ ;
+				$qual->result($result);
+				$qual->update;
+				$foundit++;
+			}
+		}
+
+		unless ($foundit) { 
+
+			Tab::Qualifier->create({
+				entry => $entry->id,
+				name => $name,
+				result => $result
+			});
+
 		}
 
 	}
 
-	if ($tourn->method->ask_qualifying_tournament) {
+	foreach my $qual (@quals) {
+		$qual->delete unless $used_quals{$qual->id};
+	}
 
-		unless ($qualifier) { 
-			my $err = "You must enter qualifying tournament information";
-			$m->redirect("details.mhtml?entry_id=$entry_id&school_id=$school_id&err=$err");
+	if ($code_style eq "register" || $max > 2) { 
+
+		my $other = Tab::Entry->search_where({
+			name => $name, 
+			school => $school->id, 
+			event => $event->id,
+			id => {'!=', $entry->id}	
+		})->first;
+
+		if ($other) { 
+			$err .= "Name $name is already taken.  Choose another";
+		} else { 
+			$entry->name($name);
 		}
 
 	}
 
-	if ($tourn->method->ask_two_quals) {
+	my %used_student = ();
+	my %students_by_id = ();
 
-		unless ($qualifier && $qual2) { 
-			my $err = "You must enter qualifying tournaments";
-			$m->redirect("details.mhtml?entry_id=$entry_id&school_id=$school_id&err=$err");
-		}
+	my @students = $entry->students;
 
-		unless ($qualexp && $qualexp) { 
-			my $err = "You must enter qualifying tournament placements";
-			$m->redirect("details.mhtml?entry_id=$entry_id&school_id=$school_id&err=$err");
-		}
-
+	foreach my $student (@students) {
+		$students_by_id{$student->id} = $student;
 	}
 
-	$entry->title($title);
-	$entry->qualifier($qualifier);
-	$entry->qualexp($qualexp);
-	$entry->qual2($qual2);
-	$entry->qual2exp($qual2exp);
+	foreach my $step (1 .. $max) { 
+
+		my $student_id = $ARGS{"student_".$step};
+		next unless $student_id;
+		next if $used_student{$student_id};
+
+		my $student = Tab::Student->retrieve($student_id);
+		next unless $student;
+
+		if ($students_by_id{$student_id}) { 
+			$used_student{$student_id}++;
+		} else { 
+			Tab::EntryStudent->create({
+				entry => $entry->id,
+				student => $student_id
+			});
+		}
+	}
+
+	foreach my $student (@students) { 
+		next if $used_student{$student->id};
+		my $es = Tab::EntryStudent->search( entry => $entry->id, student => $student->id )->first;
+		$es->delete;
+	}
+
+	my @count = $entry->students;
+
+	$err .= "You don't have the minimum students to fill this entry." if scalar @count < $min;
+
+	unless ($code_style eq "register" || $max > 2) { 
+		$name = $count[0]->first." ".$count[0]->last if scalar @count == 1;
+		$name = $count[0]->last." & ".$count[1]->last if scalar @count == 2;
+		$entry->name($name);
+	}
+
+	if ($code && $code ne $entry->code) { 
+
+		my $other = Tab::Entry->search_where({
+			code => $code, 
+			school => $school->id, 
+			event => $event->id,
+			id => {'!=', $entry->id}	
+		})->first;
+
+		if ($other) { 
+			$err .= "Code $code is already taken.  Choose another";
+		} else { 
+			$entry->code($code);
+		}
+
+	} elsif ($code_style eq "initials") { 
+
+		my $school_code = $school->code;
+		$school_code = $m->comp("/funclib/school_codename.mas", school => $school) unless $code;
+		$school_code = $m->comp("/funclib/school_codename.mas", school => $school) if $tourn->setting('school_codes') eq "incremental";
+		$school_code.= " ";
+
+		my $initials;
+
+		if (scalar @count == 1) { 
+			$initials .= ucfirst substr($count[0]->first, 0, 1). ucfirst substr($count[0]->last, 0, 1);
+		} else {
+			foreach my $student (@count) {
+				$initials .= ucfirst substr ($student->last, 0, 1);
+			}
+		}
+		
+		my $other = Tab::Entry->search_where({ code => $school_code.$initials, school => $school->id, event => $event->id, id => {'!=', $entry->id}	})->first;
+
+		my $counter;
+
+		while ($other) {
+			$counter++;	
+			undef $other;
+			$other = Tab::Entry->search_where({ code => $school_code.$initials.$counter, school => $school->id, event => $event->id, id => {'!=', $entry->id}	})->first;
+		}
+
+		$err .= "Code $initials already existed. You can choose another or keep $school_code$initials$counter as the code" if $counter;
+		$entry->code($school_code.$initials.$counter);
+
+	}
 
 	$entry->update;
 
-	my $msg = "Entry ".$entry->team_name." entered";
+	my $msg = "Entry ".$entry->name." details saved";
 
-	$m->redirect("students.mhtml?school_id=$school_id&event_id=".$event->id."&msg=$msg");
+	$m->redirect("details.mhtml?school_id=".$school->id."&entry_id=".$entry->id."&err=$err") if $err;
+	$m->redirect("students.mhtml?school_id=".$school->id."&event_id=".$event->id."&msg=$msg");
 
 </%init>
