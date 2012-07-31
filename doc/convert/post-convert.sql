@@ -37,3 +37,5 @@ alter table entry add off_waitlist datetime;
 alter table entry add self_reg_by int;
 alter table entry add unconfirmed bool;
 
+alter table concession add cap int;
+
