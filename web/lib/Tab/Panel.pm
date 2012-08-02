@@ -10,7 +10,7 @@ Tab::Panel->has_a(round => 'Tab::Round');
 
 Tab::Panel->has_many(ballots => 'Tab::Ballot', 'panel');
 
-__PACKAGE__->_register_dates( qw/started timestamp/);
+__PACKAGE__->_register_datetimes( qw/started timestamp/);
 
 sub entries {
     my $self = shift;
