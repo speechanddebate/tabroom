@@ -2,11 +2,11 @@
 	$username => undef
 	$password => undef
 	$round_id => undef
+	$tourn_id => undef
 </%args>
 <%init>
 	use Crypt::PasswdMD5;
 	use XML::Simple;
-	use Data::Dumper;
 
 	my ($account) = Tab::Account->search( email => lc($username) );
 
@@ -19,20 +19,12 @@
 	my $db_password = $account->passhash;
    	my $verify_password = unix_md5_crypt($password,$db_password);
    
-   	unless ($verify_password eq $db_password) { 
+  	unless ($verify_password eq $db_password) { 
 		$m->print("<error>Password incorrect for ".$username.".</error>");
 		$m->abort;
 	}
-	
-	my $round = Tab::Round->retrieve($round_id);
 
-	unless ($round) { 
-		$m->print("NO_SUCH_ROUND");
-		$m->abort;
-	}
-
-	my $event = $round->event;
-	my $tourn = $event->tourn;
+	my $tourn = Tab::Tourn->retrieve($tourn_id);
 
 	unless ($tourn) { 
 		$m->print("NO_SUCH_TOURNAMENT");
@@ -44,41 +36,76 @@
 		$m->abort;
 	}
 
-	my $panels = [];
-	my $ballots = [];
-	my $scores = [];
+	my $round = Tab::Round->retrieve($round_id);
+
+	unless ($round) { 
+		$m->print("NO_SUCH_ROUND");
+		$m->abort;
+	}
+	
+	unless ($round->event->tourn->id == $tourn->id) { 
+		$m->print("ROUND_NOT_IN_TOURNAMENT");
+		$m->abort;
+	}
+
+	my $xml_panels = [];
+	my $xml_ballots = [];
+	my $xml_values = [];
 
 	foreach my $panel ($round->panels) { 
 
 		my $room = $panel->room->id if $panel->room;
-		
-		my $xml_panel = {
+
+		my $flight = 1; 
+		$flight = $panel->flight if $panel->flight > 1;
+	
+		my $xml_panel = {	
 			ID => $panel->id,
 			ROUND => $round->id,
 			ROOM => $room,
-			FLIGHT => $panel->flight
+			FLIGHT => $flight	
 		};
 
-		push (@{$panels}, $xml_panel);
+		push (@{$xml_panels}, $xml_panel);
 
-		foreach my $ballot ($panel->ballots) { 
+		foreach my $ballot ($panel->ballots) {
 
-			my $judge = $ballot->judge->id if $ballot->judge;
+			my $xml_ballot;
+				
 			my $entry = $ballot->entry->id if $ballot->entry;
 
-			my $xml_ballot = {
-				ID => $ballot->id,
-				JUDGE => $judge,
-				PANEL => $panel->id,
-				ENTRY => $entry,
-				SIDE => $ballot->side
-			};
+			if ($ballot->bye) { 
 
-			push (@{$ballots}, $xml_ballot);
+				$xml_ballot = {
+					ID => $ballot->id,
+					JUDGE => -1,
+					PANEL => $panel->id,
+					ENTRY => $entry,
+					SIDE => -1
+				}
+
+			} else { 
+
+				my $judge = $ballot->judge->id if $ballot->judge;
+
+				$xml_ballot = {
+					ID => $ballot->id,
+					JUDGE => $judge,
+					PANEL => $panel->id,
+					ENTRY => $entry,
+					SIDE => $ballot->side
+				};
+
+			}
+
+			push (@{$xml_ballots}, $xml_ballot);
 
 			foreach my $score ($ballot->values) { 
 
-				if ($score->tag eq "Ballot") { 
+				next if $score->tag eq "rfd";
+				next if $score->tag eq "comment";
+
+				if ($score->tag eq "ballot") { 
 
 					my $xml_score = {
 						ID => $score->id,
@@ -88,9 +115,9 @@
 						SCORE => $score->value
 					};
 
-					push (@{$scores}, $xml_score);
+					push (@{$xml_values}, $xml_score);
 			
-				} elsif ($score->tag eq "Ranks") { 
+				} elsif ($score->tag eq "rank") { 
 					
 					my $student = $score->student->id if $score->student;
 
@@ -102,12 +129,12 @@
 						SCORE => $score->value
 					};
 			
-					push (@{$scores}, $xml_score);
+					push (@{$xml_values}, $xml_score);
 
-				} elsif ($score->tag eq "Points") { 
-					
+				} elsif ($score->tag eq "points") { 
+						
 					my $student = $score->student->id if $score->student;
-
+	
 					my $xml_score = {
 						ID => $score->id,
 						BALLOT => $ballot->id,
@@ -116,41 +143,131 @@
 						SCORE => $score->value
 					};
 					
-					push (@{$scores}, $xml_score);
+					push (@{$xml_values}, $xml_score);
 			
 				}
-
+	
 			}
 
 		}
 
 	}
 
-	my $xml_round = {
-		ID => $round->id,
-		EVENT => $round->event->id,
-		TIMESLOT => $round->timeslot->id,
-		TB_SET => $round->tb_set->id,
-		RD_NAME => $round->name,
-		LABEL => $round->realname,
-		FLIGHTING => $round->flighted,
-		JUDGESPERPANEL => $round->judges
-	};
+	my $xml_scores = [];
+	my $xml_score_settings = [];
 
+	my $wins;
+	my $points;
+	my $ranks;
+
+	my $tb_set = $round->tb_set;
+
+	foreach my $tiebreak ($tb_set->tiebreaks) { 
+
+		if ($tiebreak->name eq "winloss") { 
+			$wins++;
+		}
+
+		if ($tiebreak->name eq "points") {
+			$points++;
+		}
+
+		if ($tiebreak->name eq "opp_wins") {
+			$wins++;
+		}
+
+		if ($tiebreak->name eq "opp_points") {
+			$points++;
+		}
+
+		if ($tiebreak->name eq "ranks") { 
+			$ranks++;
+		}
+
+		if ($tiebreak->name eq "judgevar" || $tiebreak->name eq "coinflip") { 
+			$points++;
+		}
+
+		if ($tiebreak->name eq "MBA") {
+			$wins++;
+			$points++;
+		}
+
+	}
+	
+
+	if ($wins) { 
+
+		my $xml_wins = {
+			ID => 1,
+			SCORE_NAME => "Ballot",
+			SCOREFOR => "Team",
+			SORTORDER => "DESC"
+		};
+
+		push (@{$xml_scores}, $xml_wins);
+
+	}
+
+	if ($points) { 
+
+		my $xml_points = {
+			ID => 2,
+			SCORE_NAME => "Speaker Points",
+			SCOREFOR => "Speaker",
+			SORTORDER => "DESC"
+		};
+
+		my $xml_team_points = {
+			ID => 4,
+			SCORE_NAME => "Team Points",
+			SCOREFOR => "Team",
+			SORTORDER => "DESC"
+		};
+
+		push (@{$xml_scores}, $xml_points);
+		push (@{$xml_scores}, $xml_team_points);
+
+	}
+
+	if ($ranks) { 
+
+		my $xml_ranks = {
+			ID => 3,
+			SCORE_NAME => "Speaker Rank",
+			SCOREFOR => "Speaker",
+			SORTORDER => "ASC"
+		};
+
+		my $xml_team_ranks = {
+			ID => 5,
+			SCORE_NAME => "Team Ranks",
+			SCOREFOR => "Team",
+			SORTORDER => "ASC"
+		};
+
+		push (@{$xml_scores}, $xml_ranks);
+		push (@{$xml_scores}, $xml_team_ranks);
+
+	}
 
 	my $xml_hash = {
-		ROUND => $xml_round,
-		PANEL => $panels,
-		BALLOT => $ballots,
-		BALLOT_SCORE => $scores
+		PANEL => $xml_panels,
+		BALLOT => $xml_ballots,
+		BALLOT_SCORE => $xml_values,
 	};
 
-	my $filename = "RoundData-$round_id";
+	my $now = DateTime->now;
+
+	my $filename = "RoundData-$round_id-".$now->epoch;
 	my $filepath = $Tab::file_root."tmp/".$filename;
 	`rm -f $filepath.*`; 
 
 	my $xs = new XML::Simple();
 	my $xml = $xs->XMLout($xml_hash, RootName => 'ROUNDRESULTS', NoAttr => 1, XMLDecl => 1, OutputFile => "$filepath.xml");
+
+	undef $xml;
+	undef $xs;
 
 	$m->redirect("$Tab::url_prefix/tmp/$filename.xml");
 	
