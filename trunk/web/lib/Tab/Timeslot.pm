@@ -5,12 +5,9 @@ Tab::Timeslot->columns(Primary => qw/id/);
 Tab::Timeslot->columns(Essential => qw/tourn name start end name timestamp/);
 
 Tab::Timeslot->has_a(tourn => 'Tab::Tourn');
-
 Tab::Timeslot->has_many(rounds => 'Tab::Round', 'timeslot');
 
-__PACKAGE__->_register_datetimes( qw/start/);
-__PACKAGE__->_register_datetimes( qw/end/);
-__PACKAGE__->_register_datetimes( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/start end timestamp/);
 
 sub done { 
 	my $self = shift;
