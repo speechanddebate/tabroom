@@ -3,66 +3,109 @@
 	$password => undef
 	$tourn_id => undef
 	$event_id => undef
+	$session_id => undef
+	$judge_group_id => undef
 </%args>
 <%init>
 	use Crypt::PasswdMD5;
 	use XML::Simple;
 
-	my ($account) = Tab::Account->search( email => lc($username) );
-
-	unless ($account) { 
-		$m->print("<error>No account with the email ".$username." was found.</error>");
-		$m->abort;
-	} 
-
-	$password =~ s/\s+$//g;
-	my $db_password = $account->passhash;
-   	my $verify_password = unix_md5_crypt($password,$db_password);
-   
-   	unless ($verify_password eq $db_password) { 
-		$m->print("<error>Password incorrect for ".$username.".</error>");
-		$m->abort;
-	}
-
-	my $tourn = Tab::Tourn->retrieve($tourn_id);
-
-	unless ($tourn) { 
-		$m->print("NO_SUCH_TOURNAMENT");
-		$m->abort;
-	}
-
-	unless ($account->site_admin || Tab::TournAdmin->search( tourn => $tourn->id, account => $account->id )) { 
-		$m->print("TOURN_ACCESS_DENIED");
-		$m->abort;
-	}
-
-	my (@event_ids) = split (/\,/, $event_id);
+	my $tourn;
+	my $judge_group;
 	my @events;
-	my @judge_groups;
 
-	foreach my $eventid (@event_ids) { 
-		my $event = Tab::Event->retrieve($eventid);
-		push (@events, $event) if $event;
-		push (@judge_groups, $event->judge_group) if $event;
+	if ($session_id) { 
+
+		my ($account, $session) = $m->comp( "/user/login/authenticate.mas");
+
+		$tourn = Tab::Tourn->retrieve($tourn_id);
+
+		unless ($account->site_admin || Tab::TournAdmin->search( account => $account->id, tourn => $tourn->id) ) { 
+			my $err = "You do not have access to that tournament.";
+			$m->redirect("/register/data/export_xml.mhtml?err=$err");
+		} 
+
+		unless ($judge_group_id) { 
+			my $err = "You did not send a judging group.  Try again";
+			$m->redirect("/register/data/export_xml.mhtml?err=$err");
+		} 
+
+		$judge_group = Tab::JudgeGroup->retrieve($judge_group_id);
+
+		unless ($judge_group) { 
+			my $err = "You did not send a valid judging group.  Try again";
+			$m->redirect("/register/data/export_xml.mhtml?err=$err");
+		} 
+
+		foreach my $event ($judge_group->events) { 
+			push (@events, $event) if $ARGS{$event->id};
+		}
+
+		unless (@events) { 
+			my $err = "You did not select any events.  Try again";
+			$m->redirect("/register/data/export_xml.mhtml?err=$err");
+		} 
+
+	} else { 
+
+		my @judge_groups;
+
+		my ($account) = Tab::Account->search( email => lc($username) );
+
+		unless ($account) { 
+			$m->print("<error>No account with the email ".$username." was found.</error>");
+			$m->abort;
+		} 
+
+		$password =~ s/\s+$//g;
+		my $db_password = $account->passhash;
+   		my $verify_password = unix_md5_crypt($password,$db_password);
+   	
+   		unless ($verify_password eq $db_password) { 
+			$m->print("<error>Password incorrect for ".$username.".</error>");
+			$m->abort;
+		}
+
+		$tourn = Tab::Tourn->retrieve($tourn_id);
+
+		unless ($tourn) { 
+			$m->print("NO_SUCH_TOURNAMENT");
+			$m->abort;
+		}
+
+		unless ($account->site_admin || Tab::TournAdmin->search( tourn => $tourn->id, account => $account->id )) { 
+			$m->print("TOURN_ACCESS_DENIED");
+			$m->abort;
+		}
+
+		my (@event_ids) = split (/\,/, $event_id);
+
+		foreach my $eventid (@event_ids) { 
+			my $event = Tab::Event->retrieve($eventid);
+			push (@events, $event) if $event;
+			push (@judge_groups, $event->judge_group) if $event;
+		}
+	
+		my %seen = (); 
+		@events = grep { ! $seen{$_->id} ++ } @events;
+
+		unless (@events) { 
+			$m->print("NO_EVENT_FOUND");
+			$m->abort;
+		}
+
+		my %also_seen = (); 
+		@judge_groups = grep { ! $also_seen{$_->id} ++ } @judge_groups;
+
+		unless (scalar @judge_groups == 1) { 
+			$m->print("MORE_THAN_ONE_JUDGE_GROUP");
+			$m->abort;
+		}
+
+		$judge_group = shift @judge_groups;
+
 	}
 
-	unless (@events) { 
-		$m->print("NO_EVENT_FOUND");
-		$m->abort;
-	}
-
-	my %seen = (); 
-	@events = grep { ! $seen{$_->id} ++ } @events;
-
-	my %also_seen = (); 
-	@judge_groups = grep { ! $also_seen{$_->id} ++ } @judge_groups;
-
-	unless (scalar @judge_groups == 1) { 
-		$m->print("MORE_THAN_ONE_JUDGE_GROUP");
-		$m->abort;
-	}
-
-	my $judge_group = shift @judge_groups;
 
 	my $xml_tourn = {
 		ID => $tourn->id,
@@ -202,6 +245,21 @@
 		$rating_by_id{$rt->id} = $rt->name;
 	}
 
+	Tab::JudgeSetting->set_sql(upload_id => "
+		select distinct judge_setting.*
+		from judge_setting, judge
+		where judge.judge_group = ? 
+		and judge.id = judge_setting.judge
+		and judge_setting.tag = \"upload_id\""
+	);
+
+	my %judge_id_translator = ();
+
+	foreach my $setting (Tab::JudgeSetting->search_upload_id( $judge_group->id )) { 
+		$judge_id_translator{$setting->judge->id} = $setting->value;
+	}
+
+
 	my $prefs;
 
 	ENTRY:
@@ -259,10 +317,13 @@
 
 			$pref = 999 if Tab::Strike->search( judge => $rating->judge, entry => $entry, type => "conflict");
 
+			my $judge_id = $rating->judge->id if $rating->judge->id;
+			$judge_id = $judge_id_translator{$judge_id} if $judge_id_translator{$judge_id};
+
 			my $xml_rating = {
 				ID => $rating->id,
 				TEAM => $entry->id,
-				JUDGE => $rating->judge->id,
+				JUDGE => $judge_id,
 				RATING => $pref
 			};
 		
@@ -287,8 +348,11 @@
 		$stop = "true" unless $judge->active == 1;
 		$stop = "true" if $judge->dropped == 1;
 
+		my $id = $judge->id;
+		$id = $judge_id_translator{$id} if $judge_id_translator{$id};
+
 		my $xml_judge = {
-			ID => $judge->id,
+			ID => $id,
 			DOWNLOADRECORD => $judge->id,
 			SCHOOL => $school_id,
 			FIRST => $judge->first,
@@ -400,11 +464,12 @@
 
 				} else { 
 
-					my $judge = $ballot->judge->id if $ballot->judge;
+					my $judge_id = $ballot->judge->id if $ballot->judge->id;
+					$judge_id = $judge_id_translator{$judge_id} if $judge_id_translator{$judge_id};
 
 					$xml_ballot = {
 						ID => $ballot->id,
-						JUDGE => $judge,
+						JUDGE => $judge_id,
 						PANEL => $panel->id,
 						ENTRY => $entry,
 						SIDE => $ballot->side
