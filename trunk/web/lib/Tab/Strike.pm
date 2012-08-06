@@ -25,10 +25,11 @@ sub name {
 	return $self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "entry";
 	return $self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "conflict";
 
-	return "Out from ".  Tab::niceshortdt($self->start->set_time_zone($self->tourn->tz))
-			." and ".  Tab::niceshortdt($self->end->set_time_zone($self->tourn->tz)) if $self->type eq "time" && $self->start->day != $self->end->day;
+	return "Out ". Tab::niceshortdayt($self->start->set_time_zone($self->tourn->tz))
+			." to ".  Tab::nicetime($self->end->set_time_zone($self->tourn->tz)) if $self->type eq "time" && $self->tourn->start->day != $self->tourn->end->day;
+
 	return "Out from ".  Tab::nicetime($self->start->set_time_zone($self->tourn->tz))
-			." and ".  Tab::nicetime($self->end->set_time_zone($self->tourn->tz)) if $self->type eq "time" && $self->start->day == $self->end->day;
+			." to ".  Tab::nicetime($self->end->set_time_zone($self->tourn->tz)) if $self->type eq "time" && $self->start->day == $self->end->day;
 }
 
 
