@@ -33,33 +33,8 @@ Tab::Account->has_many(follow_entry => 'Tab::FollowEntry', 'entry');
 Tab::Account->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
 Tab::Account->has_many(circuits => [ Tab::CircuitAdmin => 'circuit']);
 Tab::Account->has_many(tourns => [ Tab::TournAdmin => 'tourn']);
-
-sub tourns {
-    my $self = shift;
-    return Tab::Tourn->search_by_admin($self->id);
-}
-
-sub chapters {
-    my $self = shift;
-    return Tab::Chapter->search_by_admin($self->id);
-}
-
-sub circuits {
-    my $self = shift;
-    return Tab::Circuit->search_by_admin($self->id);
-}
-
-sub regions { 
-	my $self = shift;
-	return Tab::Region->search_by_admin($self->id);
-}
-
-sub tourn_ignore {
-	my ($self, $tourn)  = @_;
-	return unless $tourn;
-	my @nis = Tab::TournIgnore->search( tourn => $tourn->id, account => $self->id );
-	return @nis;
-}
+Tab::Account->has_many(chapters => [ Tab::ChapterAdmin => 'chapter']);
+Tab::Account->has_many(regions => [ Tab::RegionAdmin => 'region']);
 
 sub can_alter {
 
@@ -72,25 +47,4 @@ sub can_alter {
 	$m->print("<p class=\"err\">You are not authorized to make changes to that school's entry.  Hit back and try again.</p>");
 	$m->abort();
 }
-
-Tab::Account->set_sql(by_circuit_coach => 
-				"select distinct account.*
-					from account,chapter_admin,chapter,chapter_circuit
-						where account.id = chapter_admin.account
-						and chapter.id = chapter_admin.chapter
-						and chapter.id = chapter_circuit.chapter
-						and chapter_circuit.circuit = ?
-						and chapter_circuit.full_member = 1");
-
-Tab::Account->set_sql(by_circuit_admin =>
-					"select distinct account.*
-						from account,circuit_admin
-						where account.id = circuit_admin.account
-						and circuit_admin.circuit = ?");
-
-Tab::Account->set_sql(by_chapter_admin => 
-					"select distinct account.*
-						from account,chapter_admin 
-						where account.id = chapter_admin.account
-						and chapter_admin.chapter= ?");
 
