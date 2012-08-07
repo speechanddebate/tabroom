@@ -31,6 +31,8 @@ Tab::Account->has_many(students => 'Tab::Student');
 Tab::Account->has_many(follow_entry => 'Tab::FollowEntry', 'entry');
 
 Tab::Account->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
+Tab::Account->has_many(circuits => [ Tab::CircuitAdmin => 'circuit']);
+Tab::Account->has_many(tourns => [ Tab::TournAdmin => 'tourn']);
 
 sub tourns {
     my $self = shift;
