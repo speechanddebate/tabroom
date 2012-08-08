@@ -2,7 +2,7 @@ package Tab::JudgeHire;
 use base 'Tab::DBI';
 Tab::JudgeHire->table('judge_hire');
 Tab::JudgeHire->columns(Primary => qw/id/);
-Tab::JudgeHire->columns(Essential => qw/judge tourn judge_group school rounds covers accepted request_made timestamp /);
+Tab::JudgeHire->columns(Essential => qw/judge tourn judge_group school rounds rounds_accepted covers accepted request_made timestamp /);
 
 Tab::JudgeHire->has_a(tourn => "Tab::Tourn");
 Tab::JudgeHire->has_a(school => "Tab::School");
