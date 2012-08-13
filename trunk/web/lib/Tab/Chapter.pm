@@ -10,6 +10,8 @@ Tab::Chapter->has_many(students => 'Tab::Student', 'chapter');
 Tab::Chapter->has_many(chapter_judges => 'Tab::ChapterJudge', 'chapter');
 Tab::Chapter->has_many(chapter_circuits => 'Tab::ChapterCircuit', 'chapter');
 
+Tab::Chapter->has_many(admins => [ Tab::ChapterAdmin => 'account']);
+
 Tab::Chapter->set_sql(by_tourn => "select distinct chapter.* from chapter, school
 						where chapter.id = school.chapter
 						and school.tourn = ?");
@@ -44,11 +46,6 @@ sub dues {
 	} else { 
 	    return Tab::CircuitDues->search( chapter => $self->id, circuit => $circuit->id );
 	}
-}
-
-sub admins {
-    my $self = shift;
-    return Tab::Account->search_by_chapter_admin($self->id);
 }
 
 sub full_member {
