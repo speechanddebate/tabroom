@@ -2,7 +2,7 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first last code active
+Tab::Judge->columns(Essential => qw/school first last code active ada
 									special notes judge_group alt_group gender
 									timestamp covers chapter_judge obligation 
 									account acct_request dropped drop_time 
