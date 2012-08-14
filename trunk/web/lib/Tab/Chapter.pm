@@ -11,6 +11,7 @@ Tab::Chapter->has_many(chapter_judges => 'Tab::ChapterJudge', 'chapter');
 Tab::Chapter->has_many(chapter_circuits => 'Tab::ChapterCircuit', 'chapter');
 
 Tab::Chapter->has_many(admins => [ Tab::ChapterAdmin => 'account']);
+Tab::Chapter->has_many(circuits => [ Tab::ChapterCircuit => 'circuit']);
 
 Tab::Chapter->set_sql(by_tourn => "select distinct chapter.* from chapter, school
 						where chapter.id = school.chapter
@@ -22,17 +23,11 @@ Tab::Chapter->set_sql(by_admin => "
 						where chapter.id = chapter_admin.chapter 
 						and chapter_admin.account = ?");
 
-sub circuits {
-    my $self = shift;
-    return sort {$a->name cmp $b->name } Tab::Circuit->search_by_chapter($self->id);
+sub location { 
+	my $self = shift;
+	my $location = $self->state."/" if $self->state;
+	return $location.$self->country;
 }
-
-Tab::Circuit->set_sql(by_chapter => "	
-					select distinct circuit.* 
-					from circuit,chapter_circuit
-					where circuit.id = chapter_circuit.circuit
-					and chapter_circuit.chapter = ? 
-					order by circuit.name ");
 
 sub dues {
     my ($self, $circuit, $paid) = @_;
