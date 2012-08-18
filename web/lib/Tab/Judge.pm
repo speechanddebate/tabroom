@@ -6,8 +6,9 @@ Tab::Judge->columns(Essential => qw/school first last code active ada
 									special notes judge_group alt_group gender
 									timestamp covers chapter_judge obligation 
 									account acct_request dropped drop_time 
-									reg_time drop_by hired score tmp/);
-Tab::Judge->columns(TEMP => qw/pref panelid chair/);
+									reg_time drop_by hired score tmp
+									hire_offer hire_approved/);
+Tab::Judge->columns(TEMP => qw/pref panelid chair tourn/);
 
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');
@@ -22,6 +23,7 @@ Tab::Judge->has_many(ratings => 'Tab::Rating', 'judge');
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
 Tab::Judge->has_many(settings => "Tab::JudgeSetting", "judge");
+Tab::Judge->has_many(hires => "Tab::JudgeHire", "judge");
 
 Tab::Judge->has_many(pools => [Tab::PoolJudge => 'pool']);
 
