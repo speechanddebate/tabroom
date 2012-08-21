@@ -51,7 +51,6 @@ sub setting {
 			}
 
 			foreach my $other (@existing) { 
-				&Tab::debuglog("Deleting spare value");
 				$other->delete;
 			}
 
