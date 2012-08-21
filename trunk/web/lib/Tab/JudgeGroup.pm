@@ -59,8 +59,6 @@ sub setting {
 
     if (defined $value) { 
 
-		&Tab::debuglog("Tag $tag is defined with $value");
-
 		if ($existing) {
 		
 			$existing->value($value);
