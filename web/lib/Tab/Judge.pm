@@ -30,8 +30,7 @@ Tab::Judge->has_many(pools => [Tab::PoolJudge => 'pool']);
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where judge_group = ?");
 Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where judge_group = ?");
 
-__PACKAGE__->_register_datetimes( qw/drop_time/);
-__PACKAGE__->_register_datetimes( qw/reg_time/);
+__PACKAGE__->_register_datetimes( qw/drop_time reg_time/);
 
 Tab::Judge->set_sql( by_group => "
         		select distinct judge.*
