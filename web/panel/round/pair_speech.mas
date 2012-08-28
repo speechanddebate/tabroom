@@ -10,22 +10,19 @@
 
 	Tab::debuglog("Num panels is $num_panels");
 
-	#Clear out the old
-	foreach my $existing ($round->panels) { 
-		$existing->delete;
-	}
-
-	my @entries = $event->entries( unconfirmed => 0, waitlist => 0, dropped => 0, dq => 0 );
+	my @all_entries = $event->entries( unconfirmed => 0, waitlist => 0, dropped => 0, dq => 0 );
 	my @schools = $m->comp("/funclib/event_schools.mas", event => $event);
 
 	my %entries_by_school = ();
+	my %school_by_entry = ();
 
-	foreach my $entry (@entries) { 
+	foreach my $entry (@all_entries) { 
 		push (@{$entries_by_school{$entry->school->id}}, $entry);
+		$school_by_entry{$entry->id} = $entry->school->id;
 	}
 
 	@schools = sort { (scalar @{$entries_by_school{$b->id}}) <=> (scalar @{$entries_by_school{$a->id}}) } @schools;
-	my $panel_size = ceil(scalar @entries / $num_panels);
+	my $panel_size = ceil(scalar @all_entries / $num_panels);
 	my %panel_cohorts = ();
 
 	my $count;
@@ -69,16 +66,122 @@
 
 	}
 
-	foreach my $panel (keys %panels) { 
-		my @entries = @{$panels{$panel}};
+	#Now the brute forces
+	my @other_ballots = $m->comp("/funclib/other_ballots.mas", round => $round);
+	Tab::debuglog("I have found ".scalar @other_ballots." other ballots.");
 
-		my $pan_ent;
+	my %panels_by_id = ();
+	my %panels_by_entry = ();
 
-		foreach my $entry (@entries) { 
-			$pan_ent .= " ".$entry->code if $entry;
+	foreach my $ob (@other_ballots) { 
+		push (@{$panels_by_id{$ob->panel->id}}, $ob->entry->id);
+		push (@{$panels_by_entry{$ob->entry->id}}, $ob->panel->id);
+	}
+
+	my %entry_hits = ();
+	my %school_hits = ();
+	my %own_school_hits = ();
+
+	foreach my $entry (@all_entries) { 
+
+		foreach my $panel_id (@{$panels_by_entry{$entry->id}}) {
+
+			foreach my $other_id (@{$panels_by_id{$panel_id}}) { 
+				
+				next if $other_id == $entry->id; #THIS IS MEEEEEE!!!
+				$entry_hits{$entry->id."-".$other_id}++;
+				$school_hits{$entry->id."-".$school_by_entry{$other_id}}++;
+
+				if ($school_by_entry{$other_id} == $entry->school->id) { 
+					$own_school_hits{$entry->id}++;
+				}
+
+			}
+
 		}
 
-		Tab::debuglog("Panel $panel has entries ".$pan_ent);
 	}
+
+	my @judges = $m->comp("/funclib/round_judges.mas", round => $round);
+	my @judge_keys;
+
+	my %judge_panel = ();
+	foreach my $judge (@judges) { 
+		push (@{$judge_panel{$judge->panelid}}, $judge->id);
+		push (@judge_keys, $judge->panelid);
+	}
+
+	my %seen = (); 
+	@judge_keys = grep { ! $seen{$_->id} ++ } @judge_keys;
+
+	my @rooms = $m->comp("/funclib/round_rooms.mas", round => $round);
+
+	#Clear out the old
+
+	Tab::BallotValue->set_sql( delete_round => "
+		delete ballot_value from ballot_value, ballot, panel
+		where panel.round = ?
+		and panel.id = ballot.panel
+		and ballot.id = ballot_value.ballot
+	");
+
+	Tab::Ballot->set_sql( delete_round => "
+		delete ballot from ballot, panel
+		where panel.round = ?
+		and panel.id = ballot.panel
+	");
+
+	Tab::Panel->set_sql( delete_round => "
+		delete from panel where round = ?
+	");
+
+	Tab::BallotValue->sql_delete_round($round->id);
+	Tab::Ballot->sql_delete_round($round->id);
+	Tab::Panel->sql_delete_round($round->id);
+
+	my $letter = 1;
+
+	foreach my $panel_key (keys %panels) { 
+
+		my $room = shift @rooms if @rooms;
+		my $room_id = 0;
+		$room_id = $room->id if $room;
+
+		my $jpanel = shift @judge_keys if @judge_keys;
+		my @judge_ids = @{$judge_panel{$jpanel}} if $jpanel;
+		@judge_ids = ("0") unless @judge_ids;
+
+		my @entries = @{$panels{$panel_key}};
+		my $pan_ent;
+
+		my $panel = Tab::Panel->create({
+			round => $round->id,
+			room => $room_id,
+			letter => $letter,
+		});
+
+		foreach my $judge_id (@judge_ids) { 
+
+			foreach my $entry (@entries) { 
+
+				next unless $entry;
+				$pan_ent .= " ".$entry->code;
+
+				my $ballot = Tab::Ballot->create({
+					panel => $panel->id,
+					judge => $judge_id,
+					entry => $entry->id
+				})
+
+			}
+		
+		}
+
+		Tab::debuglog("Panel $letter has entries ".$pan_ent);
+		$letter++;
+
+	}
+
+	return;
 
 </%perl>
