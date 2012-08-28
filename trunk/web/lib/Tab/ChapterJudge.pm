@@ -10,7 +10,7 @@ Tab::ChapterJudge->has_a(account => 'Tab::Account');
 Tab::ChapterJudge->has_a(acct_request => 'Tab::Account');
 Tab::ChapterJudge->has_many(judges => 'Tab::Judge', 'chapter_judge');
 
-__PACKAGE__->_register_datetimes( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/created timestamp/);
 
 Tab::ChapterJudge->set_sql(free_by_school => "
 				select distinct chapter_judge.* from
