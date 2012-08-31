@@ -6,3 +6,4 @@ alter table ballot_value add cat_id int;
 alter table judge add hire_offer int;
 alter table judge add hire_approved int;
 
+alter table rating add percentile float;
