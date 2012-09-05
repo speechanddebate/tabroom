@@ -1,6 +1,7 @@
 <%args>
 	$round
 	$num_panels
+	$debug => 1
 </%args>
 <%perl>
 
@@ -8,7 +9,7 @@
 
 	my $event = $round->event;
 
-	Tab::debuglog("Num panels is $num_panels");
+	Tab::debuglog("Paneling ".$round->realname." of ".$event->name) if $debug;
 
 	my @all_entries = $event->entries( unconfirmed => 0, waitlist => 0, dropped => 0, dq => 0 );
 	my @schools = $m->comp("/funclib/event_schools.mas", event => $event);
@@ -62,14 +63,16 @@
 
 		foreach my $position (@panel_array) { 
 			my $entry = shift @{$panel_cohorts{$panel_cohort}};
+			next unless $entry && $entry->id;
 			push (@{$panels{$position}}, $entry);
+
 		}
 
 	}
 
 	#Now the brute forces
 	my @other_ballots = $m->comp("/funclib/other_ballots.mas", round => $round);
-	Tab::debuglog("I have found ".scalar @other_ballots." other ballots.");
+	Tab::debuglog("I have found ".scalar @other_ballots." other ballots.") if $debug;
 
 	my %panels_by_id = ();
 	my %panels_by_entry = ();
@@ -79,37 +82,157 @@
 		push (@{$panels_by_entry{$ob->entry->id}}, $ob->panel->id);
 	}
 
-	my %entry_hits = ();
-	my %school_hits = ();
-	my %own_school_hits = ();
+	my %final_score; 
+	my %total_panel_score = ();
 
-	foreach my $entry (@all_entries) { 
+	foreach my $counter (1 .. 2) { 
 
-		foreach my $panel_id (@{$panels_by_entry{$entry->id}}) {
+		Tab::debuglog("Take the $counter pass") if $debug;
 
-			foreach my $other_id (@{$panels_by_id{$panel_id}}) { 
-				
-				next if $other_id == $entry->id; #THIS IS MEEEEEE!!!
-				$entry_hits{$entry->id."-".$other_id}++;
-				$school_hits{$entry->id."-".$school_by_entry{$other_id}}++;
+		my %entry_hits = ();
+		my %school_hits = ();
+		my %own_school_hits = ();
 
-				if ($school_by_entry{$other_id} == $entry->school->id) { 
-					$own_school_hits{$entry->id}++;
+		foreach my $entry (@all_entries) { 
+
+			foreach my $panel_id (@{$panels_by_entry{$entry->id}}) {
+
+				foreach my $other_id (@{$panels_by_id{$panel_id}}) { 
+					
+					next if $other_id == $entry->id; #This is me
+					$entry_hits{$entry->id."-".$other_id}++;
+					$school_hits{$entry->id."-".$school_by_entry{$other_id}}++;
+
+					if ($school_by_entry{$other_id} == $entry->school->id) { 
+						$own_school_hits{$entry->id}++;
+					}
+
+				}
+			}
+		}
+
+
+		foreach my $panel_key (keys %panels) { 
+			$total_panel_score{$panel_key} = 0;
+		}
+
+		my %panel_entry_score = ();
+
+		my @keys = keys %panels;
+
+		foreach my $entry (@all_entries) { 
+
+			my $total;
+
+			foreach my $panel_key (keys %panels) { 
+
+				my @pan_entries = @{$panels{$panel_key}};
+
+				foreach my $pan_entry (@pan_entries) { 
+
+					next unless $pan_entry && $pan_entry->id;
+					next if $entry->id == $pan_entry->id;
+
+					if ($pan_entry->school->id == $entry->school->id) { 
+						$panel_entry_score{$panel_key."-".$entry->id} += 10000;
+						$panel_entry_score{$panel_key."-".$entry->id} += 10000 if $own_school_hits{$entry->id};
+					}
+
+					$panel_entry_score{$panel_key."-".$entry->id} += 100 if $entry_hits{$entry->id."-".$pan_entry->id};
+					$panel_entry_score{$panel_key."-".$entry->id} += 1 if $school_hits{$entry->id."-".$pan_entry->school->id};
+
+					$total += $panel_entry_score{$panel_key."-".$entry->id};
+
+				}
+
+				$total_panel_score{$panel_key} += $panel_entry_score{$panel_key."-".$entry->id};
+			}
+
+		}
+
+		my @panel_keys = sort {$total_panel_score{$b} <=> $total_panel_score{$a}} @keys;
+
+		Tab::debuglog("Total panel score for zero is ".$total_panel_score{$panel_keys[0]}) if $debug;
+
+		unless ($total_panel_score{$panel_keys[0]} == 0) { 
+
+			foreach my $panel_key (@panel_keys) { 
+
+				my @pan_entries = @{$panels{$panel_key}};
+
+				foreach my $pan_entry (@pan_entries) { 
+
+					next unless $panel_entry_score{$panel_key."-".$pan_entry->id};
+					my $my_score = $panel_entry_score{$panel_key."-".$pan_entry->id};
+
+					Tab::debuglog("Testing for ".$pan_entry->code." whose current score is $my_score in $panel_key");
+
+					my $chosen_one;
+					my $alt_panel;
+					my $alt_score = $my_score;  	#This will prevent swaps worse for the swaper.
+					my $chosen_score = $my_score; 	#This will prevent swaps worse for the swapee.
+
+					foreach my $other_panel (@panel_keys) { 
+
+						my $chooseme;
+
+						next if $panel_key == $other_panel;
+						next if $panel_entry_score{$other_panel."-".$pan_entry->id} >= $my_score;
+						next if $panel_entry_score{$other_panel."-".$pan_entry->id} >= $alt_score;
+						next if $panel_entry_score{$other_panel."-".$pan_entry->id} == $alt_score && $chosen_score == 0;
+
+						Tab::debuglog("  Trying $other_panel. Score is ". $panel_entry_score{$other_panel."-".$pan_entry->id}." Alt score is $alt_score.");
+
+						$alt_score = $panel_entry_score{$other_panel."-".$pan_entry->id};
+
+						foreach my $other_entry (@{$panels{$other_panel}}) { 
+							my $other_score = $panel_entry_score{$panel_key."-".$other_entry->id};
+							next if $other_score > $chosen_score;
+							$chosen_one = $other_entry;
+							$chosen_score = $other_score;
+							last if $chosen_score == 0;  #Prevent unnecessary loops if we already have a perfect match
+						}
+
+						Tab::debuglog("  Best swap with ".$chosen_one->code." who scores ".$chosen_score." on $panel_key") if $chosen_one;
+
+						$alt_panel = $other_panel if $chosen_one;
+
+					}
+
+					if ($chosen_one) { 
+
+						Tab::debuglog("FINAL SWAP.  ".$chosen_one->code." to ".$panel_key." while ".$pan_entry->code." goes to ".$alt_panel);
+
+						#Now swap the two entries and update their respective scores
+						my @alt_entries = @{$panels{$alt_panel}};
+						my @new_alt_entries;
+
+						foreach my $alt (@alt_entries) { 
+							next unless $alt && $alt->id;
+							next if $alt->id == $chosen_one->id;
+							push (@new_alt_entries, $alt);
+						}
+
+						my @new_old_entries;
+						foreach my $old (@{$panels{$panel_key}}) { 
+							next unless $old && $old->id;
+							next if $old->id == $pan_entry->id;
+							push (@new_old_entries, $old);
+						}
+
+						push (@new_alt_entries, $pan_entry);
+						push (@new_old_entries, $chosen_one);
+
+						@{$panels{$panel_key}} = @new_old_entries;
+						@{$panels{$alt_panel}} = @new_alt_entries;
+
+					}
+
 				}
 
 			}
 
 		}
-
-	}
-
-	foreach my $panel_key (keys %panels) { 
-		
-		my @entries = @{$panels{$panel_key}};
-
-		
-
-
 
 	}
 
@@ -169,6 +292,7 @@
 			round => $round->id,
 			room => $room_id,
 			letter => $letter,
+			score => $total_panel_score{$panel_key}
 		});
 
 		foreach my $judge_id (@judge_ids) { 
@@ -188,7 +312,6 @@
 		
 		}
 
-		Tab::debuglog("Panel $letter has entries ".$pan_ent);
 		$letter++;
 
 	}
