@@ -18,6 +18,8 @@ __PACKAGE__->_register_datetimes( qw/end/);
 
 sub name { 
 	my $self = shift;
+	my $tz = $self->tourn->tz;
+	$tz = "UTC" unless $tz;
 	return "No rounds in ".$self->event->name if $self->type eq "event";
 	return "No prelims in ".$self->event->name if $self->type eq "elim";
 	return "No one from ".$self->school->short_name if $self->type eq "school";
@@ -25,11 +27,11 @@ sub name {
 	return $self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "entry";
 	return $self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "conflict";
 
-	return "Out ". Tab::niceshortdayt($self->start->set_time_zone($self->tourn->tz))
-			." to ".  Tab::nicetime($self->end->set_time_zone($self->tourn->tz)) if $self->type eq "time" && $self->tourn->start->day != $self->tourn->end->day;
+	return "Out ". Tab::niceshortdayt($self->start->set_time_zone($tz))
+			." to ".  Tab::niceshortdayt($self->end->set_time_zone($tz)) if $self->type eq "time" && $self->start->day != $self->end->day;
 
-	return "Out from ".  Tab::nicetime($self->start->set_time_zone($self->tourn->tz))
-			." to ".  Tab::nicetime($self->end->set_time_zone($self->tourn->tz)) if $self->type eq "time" && $self->start->day == $self->end->day;
+	return "Out ".  Tab::niceshortdayt($self->start->set_time_zone($tz))
+			." to ".  Tab::nicetime($self->end->set_time_zone($tz)) if $self->type eq "time" && $self->start->day == $self->end->day;
 }
 
 
