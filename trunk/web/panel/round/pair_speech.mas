@@ -1,16 +1,14 @@
 <%args>
 	$round
 	$num_panels
-	$debug => 1
+	$debug => 0
 </%args>
 <%perl>
 
 	use POSIX;
-
 	my $event = $round->event;
 
 	Tab::debuglog("Paneling ".$round->realname." of ".$event->name) if $debug;
-
 	my @all_entries = $event->entries( unconfirmed => 0, waitlist => 0, dropped => 0, dq => 0 );
 
 	my $panel_size = ceil(scalar @all_entries / $num_panels);
@@ -21,7 +19,6 @@
 
 	#Prime the panel scorer 
 	my @other_ballots = $m->comp("/funclib/other_ballots.mas", round => $round);
-	Tab::debuglog("I have found ".scalar @other_ballots." other ballots.") if $debug;
 
 	my %panels_by_id = ();
 	my %panels_by_entry = ();
@@ -39,28 +36,28 @@
 	my %school_by_entry = ();
 	my @schools;
 
-	Tab::debuglog("Hashing entries!") if $debug;
-
 	foreach my $entry (@all_entries) { 
 		$school_by_entry{$entry->id} = $entry->school->id;
-		push (@schools, $school_by_entry{$entry});
-		$size_of_school{$school_by_entry{$entry}}++;
+		push (@schools, $school_by_entry{$entry->id});
+		$size_of_school{$school_by_entry{$entry->id}}++;
 	}
 
 	foreach my $entry (@all_entries) { 
 
-		foreach my $panel_id (@{$panels_by_entry{$entry->id}}) {
+		my $entry_id = $entry->id;
+
+		foreach my $panel_id (@{$panels_by_entry{$entry_id}}) {
 
 			foreach my $other_id (@{$panels_by_id{$panel_id}}) { 
 				
-				next if $other_id <= $entry->id; #Avoid myself and double counting
+				next if $other_id <= $entry_id; #Avoid myself and double counting
 
-				$entry_hits{$entry->id."-".$other_id}++;
+				$entry_hits{$entry_id."-".$other_id}++;
 
-				$school_hits{$entry->id."-".$school_by_entry{$other_id}}++;
+				$school_hits{$entry_id."-".$school_by_entry{$other_id}}++;
 	
-				if ($school_by_entry{$other_id} == $school_by_entry{$entry}) { 
-					$own_school_hits{$entry->id}++;
+				if ($school_by_entry{$other_id} == $school_by_entry{$entry_id}) { 
+					$own_school_hits{$entry_id}++;
 				}
 
 			}
@@ -77,16 +74,10 @@
 		$school_rank{$_} = $ranker++;
 	}
 
-	Tab::debuglog("Setting up initial panels") if $debug;
-
-	@all_entries = sort { $school_rank{$school_by_entry{$b}} <=> $school_rank{$school_by_entry{$a->id}} } @all_entries;
-
 	#Set up the initial panels
 	my $max_size = ceil(scalar @all_entries / $num_panels);
 	my $min_size = floor(scalar @all_entries/ $num_panels);
 	my $remainder = (scalar @all_entries - ($num_panels * $min_size));
-
-	Tab::debuglog("Max is $max_size, min is $min_size, remainder is $remainder on ".scalar @all_entries." entries");
 
 	my %panels = ();
 
@@ -112,13 +103,11 @@
 
 			if (@panel) { 
 
-				push (@panel, $entry);
-			
+				push (@panel, $entry->id);
+
 				my $new_score = score_panel(\@panel, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry);
 
 				if ($new_score < $score) { 
-
-
 					$picked_key = $key;
 					$score = $new_score;
 					last KEY if $score == 0;
@@ -134,86 +123,99 @@
 		}
 
 		$remainder-- if $panels{$picked_key} && scalar @{$panels{$picked_key}} == $min_size;
-		push (@{$panels{$picked_key}}, $entry);
+		push (@{$panels{$picked_key}}, $entry->id);
 
 		my $k = shift @keys;
 		push (@keys, $k);
 
 	}
 
-	my $counter;
+	my @panel_keys = sort keys %panels;
+
+	foreach my $panel_key (@panel_keys) { 
+		@{$panels{$panel_key}} = sort {$school_rank{$school_by_entry{$a}} <=> $school_rank{$school_by_entry{$b}} } @{$panels{$panel_key}};
+	}
+
 	my $no_improvement = 1;
 
-	foreach $counter (1 .. 3) { 
+	foreach my $counter (1 .. 4) { 
+
+		my $total;
 
 		next if $no_improvement == 0;
-		Tab::debuglog("Here we go! Count is at ".$counter);
 		$no_improvement = 0;
 
 		my $touched;
 
-		foreach my $panel_key (sort {$a <=> $b} keys %panels) { 
+		foreach my $panel_key (@panel_keys) { 
 		
 			my @panel = @{$panels{$panel_key}};
-
 			my $entry_panel1_score = score_panel(\@panel, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry);
-			next if $entry_panel1_score == 0;
 
-			foreach my $entry (@panel) { 
+			next if $entry_panel1_score < 1;
+
+			Tab::debuglog("  ") if $debug;
+			Tab::debuglog("  NEW PANEL $panel_key ") if $debug;
+			Tab::debuglog("  ") if $debug;
+
+			ENTRY:
+			foreach my $entry_id (@panel) { 
+			
+				Tab::debuglog("  TESTING ENTRY $entry_id  in PANEL $panel_key with score $entry_panel1_score ") if $debug;
+
+				next if $entry_panel1_score < 1;
 
 				my @panel1 = @panel; 							# Remove the candidate for a test array of original panel
 				my $index = 0;
-				$index++ until $panel1[$index]->id == $entry->id;
+				$index++ until $panel1[$index] == $entry_id;
 				splice(@panel1, $index, 1);
 
 				my $swap_panel;
 				my $swap_entry;
-				my $current_swap_score;
+				my $current_diff;
 
 				my @new_entry_panel;
 				my @new_swap_panel;
+
+				my $count;
 	
 				OTHERPANEL:
-				foreach my $other_key (keys %panels) { 
+				foreach my $other_key (@panel_keys) { 
 
-					next if $swap_entry && $current_swap_score == 0;
 					next if $other_key == $panel_key; 				# Can't switch to the same panel
 
 					my @panel2 = @{$panels{$other_key}}; 			# Find the other panel for scoring
 					my $other_panel2_score = score_panel(\@panel2, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry);
 
-					push (@panel2, $entry);							# Put me into this panel for testing
-					my (@scores);
+					push (@panel2, $entry_id);						# Put me into this panel for testing
 
 					OTHERENTRY:
-					foreach my $other_entry (@{$panels{$other_key}}) {
-						
-						next if $swap_entry && $current_swap_score == 0;
+					foreach my $other_entry_id (@{$panels{$other_key}}) {
+					
+						push (@panel1, $other_entry_id);				# Add swap candidate to original panel
 
-						push (@panel1, $other_entry);				# Add swap candidate to original panel
+						$count++;
 						my $other_panel1_score = score_panel(\@panel1, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry);
 
-						my $index = 0;								# Remove swap candidate from the panel
-						$index++ until $panel2[$index]->id == $other_entry->id;
+						my $index = 0;									# Remove swap candidate from the panel
+						$index++ until $panel2[$index] == $other_entry_id;
 						splice(@panel2, $index, 1);
 						my $entry_panel2_score = score_panel(\@panel2, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry);
 
-						my $swap_score = $entry_panel2_score + $other_panel1_score;
 						my $squo_score = $entry_panel1_score + $other_panel2_score;
+						my $swap_score = $entry_panel2_score + $other_panel1_score;
+						my $diff = $squo_score - $swap_score;
 
 						my $replace = pop(@panel1);  #remove me from this panel
 						push (@panel2, $replace);    #put me back from whence I came
 
-						if ( ($current_swap_score && $swap_score < $current_swap_score) || 
-							 ($current_swap_score < 1 && $swap_score < $squo_score) ) {
+						Tab::debuglog("  Current is $current_diff, swap diff is $diff for $other_entry_id") if $debug;
 
-							$current_swap_score = $swap_score;
-							$swap_entry = $other_entry;
+						if ( $diff > 0 && $diff > $current_diff) { 
+							Tab::debuglog("    Swapped!") if $debug;
+							$current_diff = $diff;
+							$swap_entry = $other_entry_id;
 							$swap_panel = $other_key;
-
-							last OTHERENTRY if $swap_score == 0;  # If we're in nirvana, look no further
-							last OTHERPANEL if $swap_score == 0;
-
 						}
 
 					}
@@ -222,21 +224,29 @@
 
 				if ($swap_entry) { 
 
+
 					my @panel2 = @{$panels{$swap_panel}};
 
 					push (@panel1, $swap_entry);
 
 					my $swapdex = 0;
-					$swapdex++ until $panel2[$swapdex]->id == $swap_entry->id;
+					$swapdex++ until $panel2[$swapdex] == $swap_entry;
 					splice(@panel2, $swapdex, 1);
 
-					push (@panel2, $entry);
+					push (@panel2, $entry_id);
 
 					$no_improvement++;  # Fail
 					@{$panels{$panel_key}} = @panel1;
 					@{$panels{$swap_panel}} = @panel2;
 
 					@panel = @panel1;
+
+
+					$entry_panel1_score = score_panel(\@panel1, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry);
+					my $other_score = score_panel(\@panel2, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry);
+
+					Tab::debuglog("  After $count trials, trading with $swap_entry.  New score is $entry_panel1_score.  Other score is $other_score") if $debug;
+
 
 				}
 			}
@@ -282,9 +292,7 @@
 
 	my $letter = 1;
 
-	Tab::debuglog("Writing panels") if $debug;
-
-	foreach my $panel_key (keys %panels) { 
+	foreach my $panel_key (@panel_keys) { 
 
 		my $room = shift @rooms if @rooms;
 		my $room_id = 0;
@@ -295,7 +303,6 @@
 		@judge_ids = ("0") unless @judge_ids;
 
 		my @entries = @{$panels{$panel_key}};
-		my $pan_ent;
 		
 		my $score = score_panel(\@entries, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry, $panel_key);
 
@@ -310,13 +317,11 @@
 
 			foreach my $entry (@entries) { 
 
-				next unless $entry && $entry->id;
-				$pan_ent .= " ".$entry->code;
-
+				next unless $entry;
 				my $ballot = Tab::Ballot->create({
 					panel => $panel->id,
 					judge => $judge_id,
-					entry => $entry->id
+					entry => $entry
 				})
 
 			}
@@ -326,6 +331,7 @@
 		$letter++;
 	}
 
+	Tab::debuglog("Done") if $debug;
 	return;
 
 	sub score_panel {
@@ -333,30 +339,23 @@
 		my ($panref, $entref, $schref, $ownschref, $schent, $pankey) = @_;
 
 		my @pan_entries = @$panref;
-		my %entry_hits = %$entref;
-
-		my %school_hits = %$schref;
-		my %own_school_hits = %$ownschref;
-		my %school_by_entry = %$schent;
 
 		my $score = 0;
 		my $tick;
 
-		@pan_entries = sort {$a <=> $b} @pan_entries;
-
-		while (@pan_entries) { 
-		
-			my $entry = shift @pan_entries;
+		foreach my $entry (@pan_entries) { 
 
 			foreach my $other (@pan_entries) { 
 
-				if ($school_by_entry{$other} == $school_by_entry{$entry}) { 
+				next unless $other > $entry;
+
+				if (${ $schent }{$other} == ${ $schent }{$entry}) { 
 					$score += 10000;
-					$score += 10000 if $own_school_hits{$entry};
+					$score += 10000 if ${ $ownschref }{$entry};
 				}
 
-				$score += 100 if $entry_hits{$entry."-".$other};
-				$score += 1 if $school_hits{$entry."-".$school_by_entry{$other}};
+				$score += 100 if ${ $entref}{$entry."-".$other};
+				$score += 1 if ${ $schref }{$entry."-".${ $schent }{$other}};
 		
 			}
 		}
