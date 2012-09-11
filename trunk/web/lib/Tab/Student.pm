@@ -2,9 +2,9 @@ package Tab::Student;
 use base 'Tab::DBI';
 Tab::Student->table('student');
 Tab::Student->columns(Primary => qw/id/);
-Tab::Student->columns(Essential => qw/account first last chapter novice grad_year retired gender acct_request/);
+Tab::Student->columns(Essential => qw/account first last chapter novice grad_year retired gender acct_request diet/);
 Tab::Student->columns(Other => qw/timestamp phonetic created/);
-Tab::Student->columns(TEMP => qw/code entry/);
+Tab::Student->columns(TEMP => qw/code entry event school/);
 
 Tab::Student->has_a(chapter => 'Tab::Chapter');
 Tab::Student->has_a(account => 'Tab::Account');
