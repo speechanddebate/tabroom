@@ -8,7 +8,7 @@ Tab::School->columns(Others => qw/registered registered_on entered_on
 
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_a(chapter => 'Tab::Chapter');
-Tab::School->has_a(contact => 'Tab::Contact');
+Tab::School->has_a(contact => 'Tab::Account');
 Tab::School->has_a(region => 'Tab::Region');
 
 Tab::School->has_many(purchases => 'Tab::ConcessionPurchase', 'school');
