@@ -6,6 +6,7 @@ Tab::Tourn->columns(Essential => qw/name start end approved webname reg_start re
 									tz state country hidden timestamp foreign_site foreign_id/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
+Tab::Tourn->has_many(pools => 'Tab::Pool', 'tourn');
 Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');
 Tab::Tourn->has_many(events => 'Tab::Event', 'tourn');
 Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
@@ -14,13 +15,13 @@ Tab::Tourn->has_many(strikes => 'Tab::Strike', 'tourn');
 Tab::Tourn->has_many(schools => 'Tab::School', 'tourn');
 Tab::Tourn->has_many(housings => 'Tab::Housing', 'tourn');
 Tab::Tourn->has_many(webpages => 'Tab::Webpage', 'tourn');
-Tab::Tourn->has_many(tourn_admins => 'Tab::TournAdmin', 'tourn');
 Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn');
 Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn');
 Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
 Tab::Tourn->has_many(settings => 'Tab::TournSetting', 'tourn');
 Tab::Tourn->has_many(tourn_sites => 'Tab::TournSite', 'tourn');
 Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn');
+Tab::Tourn->has_many(tourn_admins => 'Tab::TournAdmin', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
 Tab::Tourn->has_many(school_fines => 'Tab::SchoolFine', 'tourn');
 Tab::Tourn->has_many(judge_groups => 'Tab::JudgeGroup', 'tourn');
