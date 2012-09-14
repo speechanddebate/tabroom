@@ -6,7 +6,7 @@ Tab::Judge->columns(Essential => qw/school first last code active ada
 									special notes judge_group alt_group gender
 									timestamp covers chapter_judge obligation 
 									account acct_request dropped drop_time 
-									reg_time drop_by hired score tmp
+									reg_time drop_by hired score tmp standby
 									hire_offer hire_approved/);
 Tab::Judge->columns(TEMP => qw/tier pref panelid chair tourn diet/);
 
