@@ -1,58 +1,57 @@
 <%args>
+	$tourn
 	$session
 	$account
-	$tourn
-	$circuit
 	$judge_id => undef
 	$timeslot_id => undef
-	$err => undef
 	$rank_err => undef
 	$entered => undef
-	$debug => undef
 	$all => undef
 	$display => "code"
+	$judge_code => undef
 </%args>
 <%init>
 
 	my $limit = Tab::Event->retrieve($session->event) if $session->event > 0;
 
 	my @timeslots = sort {$a->start->epoch <=> $b->start->epoch}  $tourn->timeslots;
+	
+	my $judge;
 
-	my $judge = Tab::Judge->retrieve($judge_id);
-	my $judge_code = $judge->code if $judge_id;
-
-	my @canjudges = Tab::Judge->search(
-			        code => $judge_code,
-			        tournament => $tourn->id ) unless $judge;
-
-	$judge = shift @canjudges if @canjudges;
+	if ($judge_id) { 
+		$judge = Tab::Judge->retrieve($judge_id);
+	} elsif ($judge_code) { 
+		my @code_judges = $m->comp("/funclib/tourn_judges.mas", tourn => $tourn, code => $judge_code);
+		$judge = shift @code_judges if @code_judges;
+	}
 
 	my $timeslot = Tab::Timeslot->retrieve($timeslot_id) if @timeslots;
+
+
+	my $mfl_time_violation++ if ($tourn->setting("mfl_time_violation"));
+	my $noshows_never_break++ if ($tourn->setting("noshows_never_break"));
 
 	my @unentered;
 	my @half_entered;
 
-	my %judges_half = ();
 	my %judges_none = ();
+	my %judges_half = ();
 
 	my @arr_timeslots;
 
 	unless ($timeslot) { 
 
 		@arr_timeslots = @timeslots;
-
 		my $number_left = 0;
 		my $number_half = 0;
 
 		while ($number_left < 1 && $number_half < 1) { 
-
 			last unless @arr_timeslots;
 			$timeslot = shift @arr_timeslots if @arr_timeslots;
-			@unentered = Tab::Judge->search_not_ranked($timeslot->id);
-			@half_entered = Tab::Judge->search_not_audited($timeslot->id);
+			@unentered = $m->comp("/funclib/timeslot_judges.mas", timeslot => $timeslot, status => "full");
+			@half_entered = $m->comp("/funclib/timeslot_judges.mas", timeslot => $timeslot, status => "half");
 			$number_left = scalar @unentered;
 			$number_half = scalar @half_entered;
-
 		}
 
 	}
@@ -61,18 +60,16 @@
 
 		if ($limit) {
 
-			@unentered = Tab::Judge->search_not_ranked_by_event($timeslot->id, $limit->id);
-			@half_entered = Tab::Judge->search_not_audited_by_event($timeslot->id, $limit->id);
+			@unentered = $m->comp("/funclib/timeslot_judges.mas", timeslot => $timeslot, status => "full", limit => $limit);
+			@half_entered = $m->comp("/funclib/timeslot_judges.mas", timeslot => $timeslot, status => "half", limit => $limit);
 
 		} else { 
 
-			@unentered = Tab::Judge->search_not_ranked($timeslot->id);
-			@half_entered = Tab::Judge->search_not_audited($timeslot->id);
+			@unentered = $m->comp("/funclib/timeslot_judges.mas", timeslot => $timeslot, status => "full");
+			@half_entered = $m->comp("/funclib/timeslot_judges.mas", timeslot => $timeslot, status => "half");
+
 		}
 	}
-
-	system "$Tab::logger ".scalar @unentered." ballots not entered" if $debug;
-	system "$Tab::logger ".scalar @half_entered." ballots entered but not audited" if $debug;
 
 	foreach my $judge (@unentered) { 
 		$judges_none{$judge->id}++;
@@ -84,49 +81,38 @@
 	my @all_judges = (@unentered, @half_entered);
 	@all_judges = $timeslot->judges if $all;
 
+	my %seen = (); 
+	@all_judges = grep { ! $seen{$_->id} ++ } @all_judges;
 	@all_judges = sort {$a->code <=> $b->code} @all_judges;
 	@all_judges = sort {$a->last <=> $b->last} @all_judges if $display eq "name";
 
-	my $unranked;
-	my $unaudited;
 	my $panel;
-	my @ballots;
-	my %entries_used;
+	my @ballots = $m->comp('/funclib/judge_ballots.mas', judge => $judge, timeslot => $timeslot) if $judge && $timeslot;
 
-	my $points++ if $tourn->method->tiebreaks(tiebreaker => "points");
+	my %ballot_values = ();
 
-	my @raw_ballots = Tab::Ballot->search_judge_timeslot( $judge->id, $timeslot->id ) 
-		if $judge && $timeslot;
-	
-	if (@raw_ballots) { 
+	my $did_it;
 
-		system "$Tab::logger There are ".scalar @raw_ballots." ballots for judge ".$judge->code if $debug;
+	foreach my $ballot (@ballots) { 
 
-		foreach my $ballot (@raw_ballots) { 
-
-			# Prevent duplicate ballots by deleting the second one.  This isn't
-			# as good as treating the source of the issue, but since I can't
-			# find the damned cause, so be it.
-
-			my $bc_id = $ballot->entry->id;
-			my $speechnumber = $ballot->speechnumber;
-
-			my $key = $bc_id."-".$speechnumber;
-
-		   	$ballot->delete if $entries_used{$key};
-			next if $entries_used{$key};
-
-			push(@ballots, $ballot) if ($speechnumber == 1) &! ($entries_used{$key});
-
-			$entries_used{$ballot->entry->id."-".$speechnumber}++ unless $entries_used{$key};
-
-			$unranked++ if $ballot->rank == 0;
-			$unaudited++ if $ballot->audit == 0;
- 		}
+		foreach my $value ($ballot->ballot_values) { 
+			push @{$ballot_values{$ballot->id}}, $value;
+		}
 
  		$panel = $ballots[0]->panel if @ballots;
+	}
 
-	}	
+	my $wins;
+	my $ranks;
+	my $points;
+
+	if ($panel && $panel->round) { 
+		foreach my $tb ($panel->round->tb_set->tiebreaks) { 
+			$ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals");
+			$wins++ if ($tb->name eq "opp_wins" || $tb->name eq "winloss"); 
+			$points++ if ($tb->name eq "points" || $tb->name eq "competition" || $tb->name eq "opp_points");
+		}   
+	}   
 
 </%init>
 
@@ -137,19 +123,22 @@
 			<br/>
 			<br/>
 			<br/>
-			<br/>
 
-			<h1 class="warning">
+			<h2 class="warning centeralign">
+				EEEEK!
+			</h2>
+
+			<h2 class="warning centeralign">
 				STOP RIGHT THERE
-			</h1>
+			</h2>
 
 			<h2 style="text-align: center;">
 				The last ballot had a ranking error:
 			</h2>
 
-			<h3 class="warning">
+			<h4 class="warning centeralign">
 				<% $rank_err %>
-			</h3>
+			</h4>
 
 			<p class="centeralign">
 				Each ballot must be entered the same way twice
@@ -160,24 +149,25 @@
 
 %		} else { 
 
-%		if ($judge_code) { 
+%		if ( ($judge_code || $judge_id) && not defined $judge) { 
+			<h4 class="centeralign" style="margin-bottom: 75pt; margin-top: 50pt;">
+				No judge exists with judge code <% $judge_code %>
+			</h4>
+%		} 
 
-%			unless ($judge) { 
-				<p style="padding-top: 25px;" class="err">
-					No judge exists with judge code <% $judge_code %></p>
-%			}
-
-%			unless (@ballots) { 
-				<p style="padding-top: 25px;" class="err">
-					No ballots found for judge <% $judge_code %> in this round</p>
-%			}
-
-%		} else {
-
-			<h3>Click on a judge code on the right to continue</h3>
+%		if ($judge &! @ballots) { 
+			<h4 class="centeralign" style="margin-bottom: 75pt; margin-top: 50pt;">
+				No ballots found for judge <% $judge_code %> in this round
+			</h4>
 %		}
 
-%		if ($panel && $panel->event->type eq "congress") { 
+%		unless ($judge_code || $judge_id) { 
+			<h4 class="centeralign" style="margin-bottom: 75pt;">
+				Click on a judge code on the right to continue
+			</h4>
+%		}
+
+%		if ($panel && $panel->round->event->type eq "congress") { 
 
 			<& "congress_points.mas", panel => $panel, judge => $judge, ballots => \@ballots &>
 
@@ -185,105 +175,177 @@
 
 %			if ($judge && $panel) { 
 
-				<table cellpadding="3" width="100%" border="0" cellspacing="1">
+%		 		if ($session->limited || $session->entry_only) {
 
-					<tr>
+					<div class="nopad">
+						<span class="inline plain halfpage" style="font-size: 125%; font-weight: bold;">
+							<% ($judge->school && $judge->school->code) ? $judge->school->code : "" %> <% $judge->code %> 
+							<% ($judge) ? $judge->first." ".$judge->last : ""  %>
+						</span>
 
-						<td style="font-size: 14pt; font-weight: bold; padding-left: 10px; text-align: left; line-height: 24px;">
+						<span class="inline plain quarterpage">
+							<% $panel->round->event->name %>
+							<% ($panel->round->label) ? $panel->round->label : "Rnd ".$panel->round->name %>
+						</span>
 
-%		   					if ($session->limited || $session->entry) {
-								<% ($judge->school && $judge->school->code) ? $judge->school->code : "" %> <% $judge_code %> 
-								<br />
+						<span class="inline plain quarterpage">
+							<% "Panel ". $panel->letter ." in ".$panel->room->name %>  
+						</span>
+					</div>
+
+%				} else { 
+
+					<div class="nopad">
+						<span class="inline plain halfpage" style="font-size: 125%; font-weight: bold;">
+							<a class="white block" href="/register/judge_edit.mhtml?from=entry&judge_id=<% $judge->id %>">
+								<% ($judge->school && $judge->school->code) ? $judge->school->code : "" %> <% $judge->code %> 
 								<% ($judge) ? $judge->first." ".$judge->last : ""  %>
-%							} else { 
+							</a>
+						</span>
 
-								<a style="text-decoration: underline;" href="/register/judge_edit.mhtml?from=entry&judge_id=<% $judge->id %>">
-									<% ($judge->school && $judge->school->code) ? $judge->school->code : "" %> <% $judge_code %> 
-									<br />
-									<% ($judge) ? $judge->first." ".$judge->last : ""  %>
-								</a>
-%		   					}	
+						<span class="inline plain quarterpage">
+							<a class="grey block centeralign" href="/panel/schemat_show.mhtml?from=entry&round_id=<% $panel->round->id %>">
+								<% $panel->round->event->name %>
+								<% ($panel->round->label) ? $panel->round->label : "Rnd ".$panel->round->name %>
+							</a>
+						</span>
 
- 						</th>
-
-						<td style="font-size: 12pt; padding-right: 10px; line-height: 24px; text-align: right;">
-
-%		   					if ($session->limited || $session->entry) {
-
-  					 			<% $panel->event->name %>
-								<% ($panel->round->label) ? $panel->round->label : "Rnd ".$panel->round->name %><br />
+						<span class="inline plain quarterpage">
+							<a class="grey block centeralign" href="/panel/panel_view.mhtml?from=entry&judge_id=<% $judge->id %>&panel_id=<% $panel->id %>">
 								<% "Panel ". $panel->letter ." in ".$panel->room->name %>  
+							</a>
+						</span>
+					</div>
 
-%							} else { 
+%	   			}	
 
-								<a style="text-decoration: underline;" href="/panel/schemat_show.mhtml?from=entry&round_id=<% $panel->round->id %>">
-  					 			<% $panel->event->name %>
-								<% ($panel->round->label) ? $panel->round->label : "Rnd ".$panel->round->name %></a><br />
-								<a style="text-decoration: underline;" href="/panel/panel_view.mhtml?from=entry&judge_id=<% $judge->id %>&panel_id=<% $panel->id %>">
-								<% "Panel ". $panel->letter ." in ".$panel->room->name %>  
-								</a>
+%				if ($judge && $panel && $m->comp("/funclib/timeslot_judges.mas", timeslot => $timeslot, status => "done")) {
+					<h4 class="warning">Warning: Ballot has been entered already</h4>
+%				}  else { 
+					<hr />
+%				}
+					
+				<div class="halfpage left" style="width: 500px;">
 
-%		   					}
+					<table width="100%" cellpadding="4" cellspacing="1">
 
-						</td>
+						<tr class="yellowrow">
 
-					</tr>
-
-%					if ($judge && $panel &&  $panel->done_by_judge($judge)) {
-
-						<tr>
-							<td colspan="2">
-								<h4></h4>
-							</td>
-						</tr>
-		
-						<tr class="lirdrow">
-							<td colspan="4">
-								<h3 class="warning">Warning: Ballot has been entered already</h3>
-							</td>
-						</tr>
-
-%					} 
-
-			</table>
-
-			<h4></h4>
-
-			<table width="100%" cellpadding="0" cellspacing="0">
-
-			<tr>
-				<td width="65%" valign="top">
-					<form action="save_ranks.mas" method="post">
-					<input type="hidden" name="judge_id" value="<% $judge->id %>">
-					<input type="hidden" name="all" value="<% $all %>">
-					<input type="hidden" name="panel_id" value="<% $panel->id %>">
-					<input type="hidden" name="timeslot_id" value="<% $timeslot->id %>">
-
-					<table width="100%" cellpadding="3" cellspacing="1">
-
-						<tr height="20px">
-
-							<th style="text-align: center">
-								Code
+							<th class="centeralign">
+								Speaker
 							</th>
 
-							<th style="text-align: center">
+							<th class="centeralign">
+								Code
+								<form action="save_ranks.mas" method="post">
+								<input type="hidden" name="judge_id" value="<% $judge->id %>">
+								<input type="hidden" name="all" value="<% $all %>">
+								<input type="hidden" name="panel_id" value="<% $panel->id %>">
+								<input type="hidden" name="timeslot_id" value="<% $timeslot->id %>">
+							</th>
+
+							<th class="centeralign">
 								Rank
 							</th>
 
-% 							if ($points) { 
-								<th style="text-align: center">
+%	 						if ($points) { 
+								<th class="centeralign">
 									Points
 								</th>
 % 							}
 
-% 							@ballots = sort {$a->entry->id <=> $b->entry->id} @ballots;
-%							my $switch;
+						</tr>
+
+% 						@ballots = sort {$a->entry->id <=> $b->entry->id} @ballots;
+
+%						my $switch;
+%						my $counter;
+
+% 						foreach my $ballot (sort {$a->speakerorder <=> $b->speakerorder} @ballots) {
+
+% 							my $entry = $ballot->entry;
+% 							next if $entry->dropped == 1;
+
+%							if ($entry->dq) { 
+								<tr class="redrow" style="height: 40px;">
+%							} else { 
+								<tr <% ($switch++ % 2) ? "class=\"oddrow\"" : "class=\"evenrow\"" %> style="height: 40px;">
+%							}
+
+								<th>
+									<% $ballot->speakerorder %>
+								</th>
+
+								<th class="centeralign">
+									<% ($tourn->setting("schemat_school_code") == 1) ? $entry->school->code : "" %>
+									<% $entry->code %><% ($entry->dq) ? "-- DQ" : "" %>
+								</th>
+
+								<td class="centeralign">
+									<input type="number" size="5" min="1" max="<% scalar @ballots %>" maxlength="1" tabindex="<% $counter++ %>" 
+										onKeyUp="return autoTab(this, 1, event);" name="rank_<% $ballot->id %>">
+								</td>
+				
+% 								if ($points) {
+
+									<td class="centeralign">
+										<input type="number" size="5" maxlength="3" name="points_<% $ballot->id %>"
+											  onKeyUp="return autoTab(this, 2, event);" tabindex="<% $counter++ %>">
+									</td>
+% 								}
+
+							</tr>
+
+%						}
+
+						<tr class="liblrow">
+
+							<td class="rightalign">
+								Next judge code:
+							</td>
+
+							<td class="centeralign">
+								<input type="text" name="next" size="5" tabindex="<% $counter %>">
+							</td>
+			
+							<td colspan="2" class="rightalign">
+								<input type="submit"  value="   Save Ranks	 ">
+								</form>
+							</td>
+
+						</tr>
+
+					</table>
+
+				</div>
+
+% 				if ($mfl_time_violation || $noshows_never_break) { 
+
+					<div class="right half" style="width: 150px;">
+
+%						undef $switch;
+
+						<table width="100%" cellpadding="4" cellspacing="1">
+
+							<tr class="yellowrow">
+
+% 								if ($mfl_time_violation) {
+									<th class="centeralign smallish">
+										Overtime
+									</th>
+% 								}
+
+% 								if ($noshows_never_break) { 
+									<th class="centeralign smallish">
+										No show?
+									</th>
+% 								}
+
+							</tr>
 
 % 							foreach my $ballot (sort {$a->speakerorder <=> $b->speakerorder} @ballots) {
 
 % 								my $entry = $ballot->entry;
-
 % 								next if $entry->dropped == 1;
 
 %								if ($entry->dq) { 
@@ -292,117 +354,38 @@
 									<tr <% ($switch++ % 2) ? "class=\"oddrow\"" : "class=\"evenrow\"" %> style="height: 40px;">
 %								}
 
-									<th style="text-align: center">
-										<% ($tourn->method->schemat_school_code == 1) ? $entry->school->code : "" %>
-										<% $entry->code %><% ($entry->dq) ? "-- DQ" : "" %>
-									</th>
-
-									<td align="center">
-										<input type="number" size="5" maxlength="1" onKeyUp="return autoTab(this, 1, event);" name="rank_<% $ballot->id %>">
-									</td>
-			
-% 									if ($points) {
-
-										<td align="center">
-											<input type="number" size="5" maxlength="3" onKeyUp="return autoTab(this, 2, event);" name="points_<% $ballot->id %>">
+% 									if ($mfl_time_violation) {
+										<td class="centeralign">
+											<input type="checkbox" value="1" name="tv_<% $ballot->id %>" tabindex="-1">
 										</td>
-% 									}
-
-								</tr>
-
-% 							}
-
-						</table>
-
-					</td>
-
-% 					if ($tourn->method->mfl_time_violation > 0 || $tourn->method->noshows_never_break > 0) {
-
-%						undef $switch;
-
-						<td width="35%" valign="top">
-
-							<table cellpadding="3" cellspacing="1" width="100%">
-
-								<tr height="20px">
-
-% 									if ($tourn->method->mfl_time_violation > 0) {
-										<th style="text-align: center">
-											Overtime
-										</th>
-% 									}
-
-% 									if ($tourn->method->noshows_never_break > 0)  {
-										<th style="text-align: center">
-											No show?
-										</th>
-% 									}
-
-								</tr>
-
-% 								foreach my $ballot (sort {$a->speakerorder <=> $b->speakerorder} @ballots) {
-
-% 									my $entry = $ballot->entry;
-% 									next if $entry->dropped == 1;
-
-%									if ($entry->dq) { 
-										<tr class="redrow" style="height: 40px;">
-%									} else { 
-										<tr <% ($switch++ % 2) ? "class=\"oddrow\"" : "class=\"evenrow\"" %> style="height: 40px;">
 %									}
 
-% 										if ($tourn->method->mfl_time_violation > 0) {
-											<td align="center">
-												<input type="checkbox" value="1" name="tv_<% $ballot->id %>">
-											</td>
-%										}
+% 									if ($noshows_never_break) {
+										<td class="centeralign">
+											<input type="checkbox" value="1" name="noshow_<% $ballot->id %>" tabindex="-1">
+										</td>
+%									}
 
-% 										if ($tourn->method->noshows_never_break > 0) {
-											<td align="center">
-												<input type="checkbox" value="1" name="noshow_<% $ballot->id %>">
-											</td>
-%										}
+								</tr>
 
-									</tr>
-
-%								}
+%							}
 
 						</table>
 
-					</td>
+					</div>
 
-%					}
+%				}
+
+				</form>
 	
-					</tr>
-
-				</table>
-
-				<table cellpadding="6" width="100%" cellspacing="1">
-
-					<tr class="liblrow">
-
-						<td class="rightalign">
-							Next judge code:
-						</td>
-
-						<td class="centeralign">
-							<input type="text" name="next" size="5">
-						</td>
-			
-						<td colspan="2" class="rightalign">
-							<input type="submit"  value="   Save Ranks	 ">
-							</form>
-						</td>
-
-					</tr>
-
-				</table>
-
 %  			}  # End of if the judge and panel exist
 
 %  		}  # End of unless the panel is congress
 
 % 		if ($account->site_admin) { 
+
+			<br style="clear: both;">
+
 			<p style="text-align: center; padding: 10px; background: #dedeff; width: 96%;">
 				Timeslot #: <% ($timeslot) ? $timeslot->id : "" %>, Round #: <% ($panel) ? $panel->round->id : "" %>
 				Panel #: <% ($panel) ? $panel->id : "" %>, Judge #: <% ($judge) ? $judge->id : "" %>
@@ -416,155 +399,29 @@
 
 	<div class="right small">
 
-		<h4>Current Timeslot: <% $timeslot->name %></h4>
+		<div class="sidenote">
 
-		<table cellpadding="5" width="100%" cellspacing="1">
+			<h4>Timeslot</h4>
 
-			<tr class="liblrow">
-
-				<td>
-					<form action="rank.mhtml" method="post">
-					<input type="hidden" name="all" value="<% $all %>">
-					<select name="timeslot_id">
-
-%						foreach my $ts (@timeslots) { 
-							<option value="<% $ts->id %>" <% ($ts->id == $timeslot->id) ? "selected" : "" %>>
-								<% $ts->name %>
-							</option>
-%						}
-	
-					</select>
-
-				</td>
-
-				<td colspan="2" class="rightalign">
-					<input class="grey" type="submit" value=" Choose ">
-					</form>
-				</td>
-
-			</tr>
-
-		</table>
-
-		<hr>
-
-% 		unless ($session->limited || $session->entry) {
-%			if ($panel) { 
-				<a class="red block" href="status.mhtml?timeslot_id=<% $timeslot->id %>">View Status of <% $timeslot->name %></a>
-				<a class="red block" href="/panel/schemat_show?round_id=<% $panel->round->id %>"><% $panel->event->abbr %> <% $panel->round->realname %> schematic</a>
-				<a class="red block" href="/panel/panel_view.mhtml?panel_id=<% $panel->id %>">View Panel/Change Judge</a>
-				<a class="red block" href="/tabbing/panel_card.mhtml?panel_id=<% $panel->id %>">View/Edit Ranks</a>
-
-				<hr>
-%			}
-%		}
-
-% 		if ($session->limited) {
-			<a class="red block" href="unlock_session.mhtml?timeslot_id=<% $timeslot_id%>">Unlock Session (Password required)</a>
-%		}
-
-% 		if ($session->entry) {
-			<a class="red block" href="/user/home.mhtml">Leave Tournament</a>
-%		}
-
-		<table>
-
-			<tr>
-
-				<td width="100%">
-					<h4><% ($limit) ? $limit->abbr : "" %> Ballots:</h4>
-				</td>
-
-				<td>
-
-%					if ($all) { 
-
-						<form action="rank.mhtml" method="post">
-							<input type="hidden" name="all" value="">
-							<input type="hidden" name="judge_id" value="<% $judge_id %>">
-							<input type="hidden" name="panel_id" value="<% ($panel) ? $panel->id : "" %>">
-							<input type="hidden" name="timeslot_id" value="<% $timeslot->id %>">
-							<input type="submit" class="skinny" value="Hide Done">
-						</form>
-
-%					} else { 
-
-						<form action="rank.mhtml" method="post">
-							<input type="hidden" name="all" value="1">
-							<input type="hidden" name="judge_id" value="<% $judge_id %>">
-							<input type="hidden" name="panel_id" value="<% ($panel) ? $panel->id : "" %>">
-							<input type="hidden" name="timeslot_id" value="<% $timeslot->id %>">
-							<input type="submit" class="skinny" value="Show Done">
-						</form>
+			<span class="bluenohover block padless centeralign" style="margin-bottom: 2px;">
+				<form action="rank.mhtml" method="post">
+				<input type="hidden" name="all" value="<% $all %>">
+				<select name="timeslot_id" onchange='this.form.submit()' class="fixedsmall">
+%					foreach my $ts (@timeslots) { 
+						<option value="<% $ts->id %>" <% ($ts->id == $timeslot->id) ? "selected" : "" %>>
+							<% $ts->name %>
+						</option>
 %					}
+				</select>
+				</form>
+			</span>
 
-				</td>
+			<h4>Event</h4>
 
-			</tr>
-
-		</table>
-
-%		my $counter;
-
-		<table cellpadding="3" cellspacing="1" width="100%">
-
-			<tr>
-				<td valign="top" class="ballot">
-
-%					foreach my $judge (@all_judges) { 
-
-%						if ($display eq "name") { 
-
-%							if ($counter >= (@all_judges / 2)) { 
-%								undef $counter;
-								</td>
-								<td valign="top" class="ballot">
-%							}
-
-%						} else { 
-
-%							if ($counter >= (@all_judges / 3)) { 
-%								undef $counter;
-								</td>
-								<td valign="top" class="ballot">
-%							}
-%						}
-
-						<a class="
-%							if ( $judges_none{$judge->id}) { 
-								grey block
-%							} elsif ($judges_half{$judge->id}) {
-								blue block
-%							} else { 
-								red block
-%							}
-							" href="rank.mhtml?all=<% $all %>&timeslot_id=<% $timeslot->id %>&judge_id=<% $judge->id %>"><% ($display eq "name") ? $judge->last : $judge->code %></a>
-
-%						$counter++;
-
-%					}
-
-
-				</td>
-			</tr>
-
-		</table>
-
-		<hr>
-
-		<table cellpadding="4" width="100%">
-
-			<tr class="liblrow">
-				<td>
-					<form action="limit_event.mhtml" method="post">
-					<input type="hidden" name="timeslot_id" value="<% $timeslot_id %>">
-					Limit view to a single event:
-				</td> 
-			</tr>
-				
-			<tr>
-				<td align="right">
- 					<select name="event_id"> 
+			<span class="bluenohover block padless centeralign">
+				<form action="limit_event.mhtml" method="post">
+				<input type="hidden" name="timeslot_id" value="<% $timeslot_id %>">
+					<select name="event_id" onchange='this.form.submit()' class="fixedsmall">  
 						<option value="">See All Events</option>
 %						foreach my $event ($m->comp("/funclib/tourn_events.mas", tourn => $tourn)) { 
 							<option value="<% $event->id %>" <% ($session->event == $event->id) ? "selected" : "" %>>
@@ -572,32 +429,103 @@
 							</option>
 %						}
 					</select>
-				</td>
-			</tr>
+				</form>
+			</span>
 
-			<tr class="liblrow">
-				<td align="right">
-					<input type="submit" value="Limit">
-					</form>
-				</td>
-			</tr>
+%	 		unless ($session->limited || $session->entry_only) {
 
-		</table>
+%				if ($panel) { 
 
-%		my @ready_events = Tab::Event->search_ok_to_break( $tourn->id );
+					<a class="yellow block" href="status.mhtml?timeslot_id=<% $timeslot->id %>">View Status of <% $timeslot->name %></a>
+					<a class="yellow block" href="/panel/schemat_show?round_id=<% $panel->round->id %>"><% $panel->round->event->abbr %> <% $panel->round->realname %> schematic</a>
+					<a class="yellow block" href="/panel/panel_view.mhtml?panel_id=<% $panel->id %>">View Panel/Change Judge</a>
+					<a class="yellow block" href="/tabbing/panel_card.mhtml?panel_id=<% $panel->id %>">View/Edit Ranks</a>
 
-%   	if (@ready_events) {
-	
-			<br />
-
-			<h4>Events all entered:</h4>
-
-%	   		foreach my $re (@ready_events) {
-				<a class="green block" href="<% $Tab::url_prefix %>/tabbing/do_breaks.mhtml?event_id=<% $re->id %>"><% " ".$re->name."" %></a>
+					<hr>
+%				}
 %			}
-%   	}
 
+%	 		if ($session->limited) {
+				<a class="yellow block" href="unlock_session.mhtml?timeslot_id=<% $timeslot_id%>">Unlock Session (Password required)</a>
+%			}
+
+%	 		if ($session->entry_only) {
+				<a class="yellow block" href="/user/home.mhtml">Leave Tournament</a>
+%			}
+
+			<table>
+
+				<tr>
+
+					<td width="100%">
+					</td>
+
+					<td>
+
+					</td>
+
+				</tr>
+
+			</table>
+
+		</div>
+
+%		my $counter;
+
+		<div class="sidenote">
+
+			<span class="schemat">
+				<h4><% ($limit) ? $limit->abbr : "Ballots" %></h4>
+			</span>
+
+			<span class="smallishspan" style="width: 110px; text-align: right; padding-right: 3px; padding-top 3px; padding-bottom: 3px;">
+
+%				if ($all) { 
+
+					<form action="rank.mhtml" method="post">
+						<input type="hidden" name="all" value="">
+						<input type="hidden" name="judge_id" value="<% $judge_id %>">
+						<input type="hidden" name="panel_id" value="<% ($panel) ? $panel->id : "" %>">
+						<input type="hidden" name="timeslot_id" value="<% $timeslot->id %>">
+						<input type="submit" class="skinny" value="Hide Done" style="margin-top: 10px;">
+					</form>
+
+%				} else { 
+
+					<form action="rank.mhtml" method="post">
+						<input type="hidden" name="all" value="1">
+						<input type="hidden" name="judge_id" value="<% $judge_id %>">
+						<input type="hidden" name="panel_id" value="<% ($panel) ? $panel->id : "" %>">
+						<input type="hidden" name="timeslot_id" value="<% $timeslot->id %>">
+						<input type="submit" class="skinny" value="Show Done" style="margin-top: 10px;">
+					</form>
+%				}
+
+			</span>
+
+			<br style="clear: both;" />
+
+%			foreach my $judge (@all_judges) { 
+				<a class="<% $display eq "name" ? "halfblock" : "ballotblock" %> <% $judges_none{$judge->id} ? "grey" : $judges_half{$judge->id} ? "blue" : "yellow" %>"
+					href="rank.mhtml?all=<% $all %>&timeslot_id=<% $timeslot->id %>&judge_id=<% $judge->id %>">
+					<% ($display eq "name") ? $judge->last : $judge->code %>
+				</a>
+%			}
+
+%			my @ready_events = $m->comp('/funclib/event_breakable.mas', tourn => $tourn);
+
+%   		if (@ready_events) {
+	
+				<br />
+
+				<h4>Events all entered:</h4>
+
+%	   			foreach my $re (@ready_events) {
+					<a class="green block" href="<% $Tab::url_prefix %>/tabbing/do_breaks.mhtml?event_id=<% $re->id %>"><% " ".$re->name."" %></a>
+%				}
+%   		}
+
+		</div>
 
 	</div>
 
-	<br style="clear: both;" />
