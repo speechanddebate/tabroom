@@ -2,7 +2,9 @@ package Tab::Entry;
 use base 'Tab::DBI';
 Tab::Entry->table('entry');
 Tab::Entry->columns(Primary => qw/id/);
-Tab::Entry->columns(Essential => qw/code dropped name school tourn event seed bid title ada waitlist dq drop_time reg_time timestamp drop_by reg_by off_waitlist tba self_reg_by unconfirmed/);
+Tab::Entry->columns(Essential => qw/code dropped name school tourn event seed bid title ada waitlist 
+									dq drop_time reg_time timestamp drop_by reg_by off_waitlist tba 
+									self_reg_by unconfirmed sweeps placement/);
 Tab::Entry->columns(TEMP => qw/panelid speaks side ballot/);
 
 Tab::Entry->has_a(school => 'Tab::School');
