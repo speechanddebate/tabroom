@@ -1,8 +1,8 @@
--- MySQL dump 10.13  Distrib 5.1.60, for apple-darwin11.2.0 (i386)
+-- MySQL dump 10.13  Distrib 5.1.62, for apple-darwin11.3.0 (i386)
 --
 -- Host: localhost    Database: itab
 -- ------------------------------------------------------
--- Server version	5.1.60-log
+-- Server version	5.1.62-log
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -25,31 +25,34 @@ DROP TABLE IF EXISTS `account`;
 CREATE TABLE `account` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `email` varchar(127) NOT NULL DEFAULT '',
+  `passhash` varchar(127) NOT NULL DEFAULT '',
   `first` varchar(63) DEFAULT NULL,
   `last` varchar(63) DEFAULT NULL,
   `phone` varchar(27) DEFAULT NULL,
-  `provider` varchar(63) DEFAULT NULL,
   `street` varchar(127) DEFAULT NULL,
   `city` varchar(63) DEFAULT NULL,
   `state` varchar(11) DEFAULT NULL,
   `zip` int(11) DEFAULT NULL,
-  `tz` varchar(63) DEFAULT NULL,
-  `gender` char(1) DEFAULT NULL,
-  `passhash` varchar(127) NOT NULL DEFAULT '',
-  `paradigm` text,
   `site_admin` tinyint(1) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `no_email` tinyint(1) DEFAULT NULL,
   `change_pass_key` varchar(255) DEFAULT NULL,
-  `multiple` int(11) DEFAULT NULL,
-  `started_judging` date DEFAULT NULL,
   `password_timestamp` datetime DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `multiple` int(11) DEFAULT NULL,
+  `tz` varchar(63) DEFAULT NULL,
+  `started` date DEFAULT NULL,
+  `provider` text,
+  `gender` char(1) DEFAULT NULL,
+  `paradigm` text,
+  `country` char(4) DEFAULT NULL,
+  `started_judging` date DEFAULT NULL,
+  `change_deadline` datetime DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=25266 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=7509 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `account_ignore`   THIS IS TO GET RID OF A TOURNAMENT FROM THE HOME SCREEN.
+-- Table structure for table `account_ignore`
 --
 
 DROP TABLE IF EXISTS `account_ignore`;
@@ -57,15 +60,17 @@ DROP TABLE IF EXISTS `account_ignore`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `account_ignore` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) DEFAULT NULL,
   `account` int(11) DEFAULT NULL,
+  `tourn` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1315 DEFAULT CHARSET=latin1;
+  PRIMARY KEY (`id`),
+  KEY `account` (`account`),
+  KEY `tourn` (`tourn`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `ballot`       THIS IS THE RECORD FOR W/L, RESULTS, ETC.  1 FOR EACH JUDGE/ENTRY COMBO
+-- Table structure for table `ballot`
 --
 
 DROP TABLE IF EXISTS `ballot`;
@@ -74,53 +79,56 @@ DROP TABLE IF EXISTS `ballot`;
 CREATE TABLE `ballot` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `judge` int(11) NOT NULL DEFAULT '0',
-  `chair` tinyint(1) NOT NULL DEFAULT '0',
   `panel` int(11) DEFAULT NULL,
   `entry` int(11) DEFAULT NULL,
-  `bye` tinyint(1) DEFAULT NULL,
-  `side` enum('A','N') DEFAULT NULL,
+  `speakerorder` int(11) NOT NULL DEFAULT '0',
   `tv` tinyint(1) DEFAULT NULL,
-  `win` tinyint(1) DEFAULT NULL,
-  `rank` int(11) DEFAULT NULL,
-  `points` int(11) DEFAULT NULL,
   `noshow` tinyint(1) NOT NULL DEFAULT '0',
   `audit` tinyint(1) NOT NULL DEFAULT '0',
-  `topic` int(11) DEFAULT NULL,
-  `speakerorder` int(11) NOT NULL DEFAULT '0',
-  `speechnumber` int(11) DEFAULT NULL,
-  `collected_on` datetime DEFAULT NULL,
-  `collected_by` int(11) NOT NULL DEFAULT '0',
-  `countmenot` tinyint(1) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `chair` tinyint(1) NOT NULL DEFAULT '0',
+  `speechnumber` int(11) DEFAULT NULL,
+  `topic` int(11) DEFAULT NULL,
+  `countmenot` tinyint(1) DEFAULT NULL,
+  `collected` datetime DEFAULT NULL,
+  `collected_by` int(11) NOT NULL DEFAULT '0',
+  `bye` tinyint(1) DEFAULT NULL,
+  `side` tinyint(4) DEFAULT NULL,
+  `cat_id` int(11) DEFAULT NULL,
+  `account` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `comp` (`entry`),
   KEY `panel` (`panel`),
   KEY `judge` (`judge`),
   KEY `id` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1256949 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=1347290 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `ballot_speaks`        THIS IS TO KEEP THE SPEAKER POINTS FOR EACH INDIVIDUAL STUDENT.
+-- Table structure for table `ballot_value`
 --
 
-DROP TABLE IF EXISTS `ballot_speaks`;
+DROP TABLE IF EXISTS `ballot_value`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `ballot_speaks` (
+CREATE TABLE `ballot_value` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tag` varchar(31) NOT NULL DEFAULT '',
   `ballot` int(11) DEFAULT NULL,
   `student` int(11) DEFAULT NULL,
-  `points` int(11) DEFAULT NULL,
+  `tiebreak` int(11) DEFAULT NULL,
+  `value` float DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `content` text,
+  `cat_id` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `student` (`student`),
   KEY `ballot` (`ballot`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=907276 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `chapter`          THE MASTER SCHOOL RECORD. ("school" refers to an entry w/in a tourney)
+-- Table structure for table `chapter`
 --
 
 DROP TABLE IF EXISTS `chapter`;
@@ -129,18 +137,19 @@ DROP TABLE IF EXISTS `chapter`;
 CREATE TABLE `chapter` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(127) NOT NULL DEFAULT '',
-  `state` char(4) DEFAULT NULL,
-  `coaches` varchar(255) DEFAULT NULL,           
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `state` char(4) DEFAULT NULL,
+  `coaches` varchar(255) DEFAULT NULL,
+  `country` char(4) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=5913 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=6610 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `chapter_admin`            ACCOUNT ACCESS to a given CHAPTER.
+-- Table structure for table `chapter_admin`
 --
 
-DROP TABLE IF EXISTS `chapter_admin`;                   
+DROP TABLE IF EXISTS `chapter_admin`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `chapter_admin` (
@@ -149,11 +158,11 @@ CREATE TABLE `chapter_admin` (
   `account` int(11) NOT NULL DEFAULT '0',
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=6789 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=7589 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `chapter_circuit`          CHAPTER joined to a CIRCUIT (League)
+-- Table structure for table `chapter_circuit`
 --
 
 DROP TABLE IF EXISTS `chapter_circuit`;
@@ -172,12 +181,12 @@ CREATE TABLE `chapter_circuit` (
   `membership` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `chapter` (`chapter`),
-  KEY `circuit` (`circuit`)
-) ENGINE=InnoDB AUTO_INCREMENT=9225 DEFAULT CHARSET=latin1;
+  KEY `league` (`circuit`)
+) ENGINE=InnoDB AUTO_INCREMENT=9981 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `chapter_judge`            ACCOUNT/JUDGE record that a CHAPTER pulls from
+-- Table structure for table `chapter_judge`
 --
 
 DROP TABLE IF EXISTS `chapter_judge`;
@@ -185,17 +194,29 @@ DROP TABLE IF EXISTS `chapter_judge`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `chapter_judge` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
+  `first` varchar(128) DEFAULT NULL,
+  `last` varchar(128) DEFAULT NULL,
+  `gender` char(1) DEFAULT NULL,
   `chapter` int(11) DEFAULT NULL,
-  `account` int(11) DEFAULT NULL,
+  `started` int(11) DEFAULT NULL,
+  `retired` tinyint(1) DEFAULT NULL,
   `notes` varchar(254) DEFAULT NULL,
-  `created` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=19340 DEFAULT CHARSET=latin1;
+  `created` datetime DEFAULT NULL,
+  `last_judged` datetime DEFAULT NULL,
+  `cell` varchar(15) DEFAULT NULL,
+  `paradigm` text,
+  `account` int(11) DEFAULT NULL,
+  `acct_request` int(11) DEFAULT NULL,
+  `diet` varchar(31) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `account` (`account`),
+  KEY `chapter` (`chapter`)
+) ENGINE=InnoDB AUTO_INCREMENT=21508 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `circuit`              LEAGUE or GROUPING OF TOURNAMENTS
+-- Table structure for table `circuit`
 --
 
 DROP TABLE IF EXISTS `circuit`;
@@ -204,19 +225,19 @@ DROP TABLE IF EXISTS `circuit`;
 CREATE TABLE `circuit` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(127) DEFAULT NULL,
+  `abbr` varchar(15) DEFAULT NULL,
+  `tz` varchar(63) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `active` tinyint(1) DEFAULT NULL,
   `state` char(4) DEFAULT NULL,
   `country` char(4) DEFAULT NULL,
-  `region_based` int(11) DEFAULT NULL,
-  `diocese_based` tinyint(1) DEFAULT NULL,
-  `timezone` varchar(67) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `webname` varchar(31) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=43 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=47 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `circuit_admin`        ACCOUNT WITH ADMIN POWERS OVER A CIRCUIT
+-- Table structure for table `circuit_admin`
 --
 
 DROP TABLE IF EXISTS `circuit_admin`;
@@ -228,11 +249,11 @@ CREATE TABLE `circuit_admin` (
   `account` int(11) NOT NULL DEFAULT '0',
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=244 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=259 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `circuit_dues`         CIRCUIT/LEAGUES THAT CHARGE MEMBERSHIP DUES; THIS IS PAYMENT
+-- Table structure for table `circuit_dues`
 --
 
 DROP TABLE IF EXISTS `circuit_dues`;
@@ -240,17 +261,17 @@ DROP TABLE IF EXISTS `circuit_dues`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `circuit_dues` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
+  `paid_on` datetime DEFAULT NULL,
   `chapter` int(11) DEFAULT NULL,
   `amount` float DEFAULT NULL,
   `circuit` int(11) DEFAULT NULL,
-  `paid_on` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=617 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=620 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `circuit_membership`      SETTINGS/DUES FOR HOW A CHAPTER SHOULD JOIN A CIRCUIT
+-- Table structure for table `circuit_membership`
 --
 
 DROP TABLE IF EXISTS `circuit_membership`;
@@ -264,13 +285,13 @@ CREATE TABLE `circuit_membership` (
   `dues` float DEFAULT NULL,
   `dues_start` datetime DEFAULT NULL,
   `dues_expire` datetime DEFAULT NULL,
-  `blurb` text,
+  `text` text,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `circuit_setting`         SETTINGS TABLE FOR CIRCUIT GENERAL/EXTENSIBLE SETTINGS
+-- Table structure for table `circuit_setting`
 --
 
 DROP TABLE IF EXISTS `circuit_setting`;
@@ -286,11 +307,11 @@ CREATE TABLE `circuit_setting` (
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `circuit` (`circuit`)
-) ENGINE=InnoDB AUTO_INCREMENT=189 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=163 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `concession`       FOOD, TRAVEL TIX, ETC WITHIN A TOURNEY
+-- Table structure for table `concession`
 --
 
 DROP TABLE IF EXISTS `concession`;
@@ -302,14 +323,15 @@ CREATE TABLE `concession` (
   `price` float DEFAULT NULL,
   `description` text,
   `tourn` int(11) DEFAULT NULL,
-  `deadline` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deadline` datetime DEFAULT NULL,
+  `cap` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=276 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=280 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `concession_purchase`      JOIN A SCHOOL TO A CONCESSION IT WANTS TO BUY
+-- Table structure for table `concession_purchase`
 --
 
 DROP TABLE IF EXISTS `concession_purchase`;
@@ -317,16 +339,18 @@ DROP TABLE IF EXISTS `concession_purchase`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `concession_purchase` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `school` int(11) NOT NULL,
   `concession` int(11) DEFAULT NULL,
   `quantity` int(11) NOT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `school` int(11) NOT NULL,
+  `placed` datetime DEFAULT NULL,
+  `fulfilled` tinyint(1) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=5686 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=5968 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `email`                    RECORD OF EMAILS SENT TO CIRCUIT/TOURNEY MEMBERS
+-- Table structure for table `email`
 --
 
 DROP TABLE IF EXISTS `email`;
@@ -334,20 +358,20 @@ DROP TABLE IF EXISTS `email`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `email` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) DEFAULT NULL,
-  `circuit` int(11) DEFAULT NULL,
   `sender` int(11) DEFAULT NULL,
-  `subject` varchar(127) DEFAULT NULL,
   `content` text,
+  `subject` varchar(127) DEFAULT NULL,
   `sent_on` datetime DEFAULT NULL,
+  `circuit` int(11) DEFAULT NULL,
   `sent_to` varchar(127) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `tourn` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2379 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=2600 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `entry`            AN ENTRY/DEBATER IN THE TOURNAMENT
+-- Table structure for table `entry`
 --
 
 DROP TABLE IF EXISTS `entry`;
@@ -358,51 +382,39 @@ CREATE TABLE `entry` (
   `tourn` int(11) DEFAULT NULL,
   `school` int(11) NOT NULL DEFAULT '0',
   `event` int(11) NOT NULL DEFAULT '0',
-  `code` int(11) DEFAULT NULL,
+  `code` varchar(63) DEFAULT NULL,
+  `dropped` tinyint(1) NOT NULL DEFAULT '0',
   `name` varchar(127) DEFAULT NULL,
   `seed` varchar(15) DEFAULT NULL,
-  `dropped` tinyint(1) NOT NULL DEFAULT '0',
   `waitlist` tinyint(1) NOT NULL DEFAULT '0',
   `dq` tinyint(1) NOT NULL DEFAULT '0',
   `bid` tinyint(1) NOT NULL DEFAULT '0',
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `reg_time` datetime DEFAULT NULL,
   `drop_time` datetime DEFAULT NULL,
   `title` varchar(127) DEFAULT NULL,
   `ada` int(11) DEFAULT NULL,
   `notes` varchar(128) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `reg_by` int(11) DEFAULT NULL,
+  `drop_by` int(11) DEFAULT NULL,
+  `tba` tinyint(1) DEFAULT NULL,
+  `off_waitlist` datetime DEFAULT NULL,
+  `self_reg_by` int(11) DEFAULT NULL,
+  `unconfirmed` tinyint(1) DEFAULT NULL,
+  `sweeps` int(11) DEFAULT NULL,
+  `placement` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `tourn` (`tourn`,`school`),
+  KEY `tournament` (`tourn`,`school`),
   KEY `tournament_2` (`tourn`,`school`,`event`),
   KEY `code` (`code`),
   KEY `school` (`school`),
   KEY `id` (`id`),
   KEY `event` (`event`)
-) ENGINE=InnoDB AUTO_INCREMENT=331371 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=348885 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `entry_qualifier`      SOME OF MY TOURNAMENTS REQUIRE YOU TO ENTER WHERE ENTRIES QUALIFIED
---
-
-DROP TABLE IF EXISTS `entry_qualifier`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `entry_qualifier` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) DEFAULT NULL,
-  `entry` int(11) DEFAULT NULL,
-  `name` varchar(63) DEFAULT NULL,
-  `result` varchar(127) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `entry` (`entry`),
-  KEY `tourn` (`tourn`)
-) ENGINE=InnoDB AUTO_INCREMENT=15009 DEFAULT CHARSET=latin1;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `entry_student`        JOINS A STUDENT TO AN ENTRY (MANY TO MANY)
+-- Table structure for table `entry_student`
 --
 
 DROP TABLE IF EXISTS `entry_student`;
@@ -413,12 +425,14 @@ CREATE TABLE `entry_student` (
   `entry` int(11) DEFAULT NULL,
   `student` int(11) NOT NULL DEFAULT '0',
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=294211 DEFAULT CHARSET=latin1;
+  PRIMARY KEY (`id`),
+  KEY `entry` (`entry`),
+  KEY `student` (`student`)
+) ENGINE=InnoDB AUTO_INCREMENT=315572 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `event`                EVENT/DIVISION OFFERING
+-- Table structure for table `event`
 --
 
 DROP TABLE IF EXISTS `event`;
@@ -426,22 +440,22 @@ DROP TABLE IF EXISTS `event`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `event` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) NOT NULL DEFAULT '0',
+  `tourn` int(11) DEFAULT NULL,
   `name` varchar(127) NOT NULL DEFAULT '',
+  `type` varchar(15) DEFAULT NULL,
   `abbr` varchar(11) DEFAULT NULL,
-  `judge_group` int(11) DEFAULT NULL,
-  `type` varchar(15) NOT NULL DEFAULT 'debate',
-  `fee` float DEFAULT NULL,
-  `rating_subset` int(11) DEFAULT NULL,
   `event_double` int(11) DEFAULT NULL,
+  `fee` float DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `judge_group` int(11) DEFAULT NULL,
+  `rating_subset` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `tourn` (`tourn`)
-) ENGINE=InnoDB AUTO_INCREMENT=16659 DEFAULT CHARSET=latin1;
+  KEY `tournament` (`tourn`)
+) ENGINE=InnoDB AUTO_INCREMENT=17808 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `event_double`     THESE DEFINE LIMITS ON HOW/WHO CAN DOUBLE ENTRY.  PROB NOT USEFUL TO YOU.
+-- Table structure for table `event_double`
 --
 
 DROP TABLE IF EXISTS `event_double`;
@@ -451,16 +465,17 @@ CREATE TABLE `event_double` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(63) NOT NULL DEFAULT '',
   `tourn` int(11) DEFAULT NULL,
-  `setting` varchar(15) DEFAULT NULL,
+  `setting` tinyint(4) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `max` int(11) DEFAULT NULL,
   `min` int(11) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=4696 DEFAULT CHARSET=latin1;
+  PRIMARY KEY (`id`),
+  KEY `tourn` (`tourn`)
+) ENGINE=InnoDB AUTO_INCREMENT=4874 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `event_setting`            SETTINGS TABLE FOR EVENTS
+-- Table structure for table `event_setting`
 --
 
 DROP TABLE IF EXISTS `event_setting`;
@@ -471,16 +486,16 @@ CREATE TABLE `event_setting` (
   `event` int(11) NOT NULL DEFAULT '0',
   `tag` varchar(31) NOT NULL DEFAULT '',
   `value` varchar(127) NOT NULL DEFAULT '',
-  `text` text,
+  `value_text` text,
   `value_date` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `event` (`event`)
-) ENGINE=InnoDB AUTO_INCREMENT=33363 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=96215 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `file`                 FILES THAT HAVE BEEN UPLOADED TO THE WEBSITE.
+-- Table structure for table `file`
 --
 
 DROP TABLE IF EXISTS `file`;
@@ -488,21 +503,22 @@ DROP TABLE IF EXISTS `file`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `file` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) NOT NULL,
+  `tourn` int(11) DEFAULT NULL,
   `label` varchar(127) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
   `name` varchar(127) DEFAULT NULL,
   `uploaded` datetime DEFAULT NULL,
   `posting` tinyint(1) DEFAULT NULL,
-  `result` tinyint(1) DEFAULT NULL,
+  `result` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `circuit` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2263 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=2332 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `follow_account`       SETS UP ABILITY TO ALWAYS FOLLOW A GIVEN ACCOUNT, JUDGE OR STUDENT BOTH
+-- Table structure for table `follow_account`
 --
 
 DROP TABLE IF EXISTS `follow_account`;
@@ -513,6 +529,7 @@ CREATE TABLE `follow_account` (
   `account` int(11) DEFAULT NULL,
   `follower` int(11) DEFAULT NULL,
   `parent` tinyint(1) NOT NULL DEFAULT '0',
+  `request` tinyint(1) NOT NULL DEFAULT '0',
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `account` (`account`),
@@ -521,7 +538,7 @@ CREATE TABLE `follow_account` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `follow_entry`         FOLLOWS A PARTICULAR ENTRY AT A TOURNAMENT
+-- Table structure for table `follow_entry`
 --
 
 DROP TABLE IF EXISTS `follow_entry`;
@@ -529,17 +546,18 @@ DROP TABLE IF EXISTS `follow_entry`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `follow_entry` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `comp` int(11) DEFAULT NULL,
+  `entry` int(11) DEFAULT NULL,
   `cell` varchar(16) DEFAULT NULL,
   `email` varchar(127) DEFAULT NULL,
   `domain` varchar(63) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `follower` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=47 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=430 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `follow_judge`         FOLLOWS A PARTICULAR JUDGE AT A TOURNAMENT
+-- Table structure for table `follow_judge`
 --
 
 DROP TABLE IF EXISTS `follow_judge`;
@@ -552,12 +570,54 @@ CREATE TABLE `follow_judge` (
   `email` varchar(127) DEFAULT NULL,
   `domain` varchar(63) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `follower` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=54 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `housing_slots`        MAKES HOUSING SLOTS AVAILABLE.  PROB NOT USEFUL TO YOU.
+-- Table structure for table `follow_tourn`
+--
+
+DROP TABLE IF EXISTS `follow_tourn`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `follow_tourn` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tourn` int(11) DEFAULT NULL,
+  `follower` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `tourn` (`tourn`),
+  KEY `follower` (`follower`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `housing`
+--
+
+DROP TABLE IF EXISTS `housing`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `housing` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tourn` int(11) DEFAULT NULL,
+  `student` int(11) DEFAULT NULL,
+  `judge` int(11) DEFAULT NULL,
+  `type` varchar(7) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `waitlist` tinyint(1) NOT NULL DEFAULT '0',
+  `night` date DEFAULT NULL,
+  `requested` datetime DEFAULT NULL,
+  `account` int(11) DEFAULT NULL,
+  `school` int(11) DEFAULT NULL,
+  `tba` tinyint(1) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=14548 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `housing_slots`
 --
 
 DROP TABLE IF EXISTS `housing_slots`;
@@ -570,34 +630,12 @@ CREATE TABLE `housing_slots` (
   `slots` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=68 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=81 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `housing_student`      SIGNS A STUDENT UP FOR HOUSING; AGAIN PROB IGNORE.
+-- Table structure for table `judge`
 --
-
-DROP TABLE IF EXISTS `housing_student`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `housing_student` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) DEFAULT NULL,
-  `type` varchar(7) DEFAULT NULL,
-  `student` int(11) DEFAULT NULL,
-  `judge` int(11) DEFAULT NULL,
-  `account` int(11) DEFAULT NULL,
-  `waitlist` tinyint(1) NOT NULL DEFAULT '0',
-  `night` date DEFAULT NULL,
-  `requested` datetime DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=13786 DEFAULT CHARSET=latin1;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `judge`                A JUDGE WITHIN A TOURNAMENT.  MANY JUDGES CAN BE THE SAME PERSON;
---                                                  THIS REFLECTS A PARTICULAR OBLIGATION FULFILLED.  
 
 DROP TABLE IF EXISTS `judge`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -605,28 +643,45 @@ DROP TABLE IF EXISTS `judge`;
 CREATE TABLE `judge` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `school` int(11) NOT NULL DEFAULT '0',
-  `code` int(11) DEFAULT NULL,
-  `account` int(11) DEFAULT NULL,
-  `first` varchar(63) NOT NULL DEFAULT '',              -- SHEER LAZYNESS SO I DON'T HAVE TO KEEP GOING TO ACCOUNT TO GET NAMES
+  `first` varchar(63) NOT NULL DEFAULT '',
   `last` varchar(63) NOT NULL DEFAULT '',
+  `code` int(11) DEFAULT NULL,
   `active` int(11) NOT NULL DEFAULT '0',
+  `special` text,
+  `notes` text,
   `judge_group` int(11) DEFAULT NULL,
-  `covers` int(11) DEFAULT NULL,                        -- THE JUDGE GROUP THE JUDGE COVERS OBLIGATIONS IN, IF DIFFERENT
-  `obligation` int(11) DEFAULT NULL,                    -- HOW MANY ROUNDS THIS JUDGE IS ON THE HOOK FOR
-  `hired` int(11) DEFAULT NULL,                         -- IS THIS JUDGE A TOURNAMENT HIRE?
-  `chapter_judge` int(11) DEFAULT NULL,                 -- MAY NOT HAVE IF A HIRED JUDGE
-  `special` text,                                       -- NOTES THE TOURNAMENT WRITES FOR A SPECIAL ASSIGNMENT (ie TAB).
-  `notes` text,                                         -- NOTES THE COACH WRITES TO US
+  `alt_group` int(11) NOT NULL DEFAULT '0',
+  `gender` char(1) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `covers` int(11) DEFAULT NULL,
+  `chapter_judge` int(11) DEFAULT NULL,
+  `obligation` int(11) DEFAULT NULL,
+  `elim_group` int(11) DEFAULT NULL,
+  `cfl_parl` int(11) DEFAULT NULL,
+  `account` int(11) NOT NULL DEFAULT '0',
+  `acct_request` int(11) DEFAULT NULL,
+  `dropped` int(11) DEFAULT NULL,
+  `drop_time` datetime DEFAULT NULL,
+  `reg_time` datetime DEFAULT NULL,
+  `drop_by` int(11) DEFAULT NULL,
+  `hired` int(11) DEFAULT NULL,
+  `score` int(11) DEFAULT NULL,
+  `tmp` varchar(63) DEFAULT NULL,
+  `ada` tinyint(1) DEFAULT NULL,
+  `hire_offer` int(11) DEFAULT NULL,
+  `hire_approved` int(11) DEFAULT NULL,
+  `standby` char(1) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `id` (`id`),
   KEY `judge_group` (`judge_group`),
-  KEY `school` (`school`)
-) ENGINE=InnoDB AUTO_INCREMENT=102852 DEFAULT CHARSET=latin1;
+  KEY `school` (`school`),
+  KEY `account` (`account`),
+  KEY `chapter_judge` (`chapter_judge`)
+) ENGINE=InnoDB AUTO_INCREMENT=110671 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `judge_group`  -- GROUP OF JUDGES, CAN BE MULTIPLE EVENTS (ie Policy covers both JV & Varsity)
+-- Table structure for table `judge_group`
 --
 
 DROP TABLE IF EXISTS `judge_group`;
@@ -635,13 +690,12 @@ DROP TABLE IF EXISTS `judge_group`;
 CREATE TABLE `judge_group` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(63) DEFAULT NULL,
-  `abbr` varchar(15) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
-  `judge_per` float DEFAULT NULL,           -- JUDGE BURDEN (2 == "1 judge per 2 debaters");
-  `deadline` datetime DEFAULT NULL,
+  `abbr` varchar(15) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=4187 DEFAULT CHARSET=latin1;
+  PRIMARY KEY (`id`),
+  KEY `tourn` (`tourn`)
+) ENGINE=InnoDB AUTO_INCREMENT=4499 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -656,16 +710,16 @@ CREATE TABLE `judge_group_setting` (
   `judge_group` int(11) NOT NULL DEFAULT '0',
   `tag` varchar(31) NOT NULL DEFAULT '',
   `value` varchar(127) NOT NULL DEFAULT '',
-  `value_date` datetime DEFAULT NULL,
   `value_text` text,
+  `value_date` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `judge_group` (`judge_group`)
-) ENGINE=InnoDB AUTO_INCREMENT=23190 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=21410 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `judge_hire`               A SCHOOL REQUEST TO HIRE A JUDGE ON ENTRY.
+-- Table structure for table `judge_hire`
 --
 
 DROP TABLE IF EXISTS `judge_hire`;
@@ -674,15 +728,17 @@ DROP TABLE IF EXISTS `judge_hire`;
 CREATE TABLE `judge_hire` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `judge` int(11) DEFAULT NULL,
-  `tourn` int(11) NOT NULL DEFAULT '0',
+  `tourn` int(11) DEFAULT NULL,
   `school` int(11) NOT NULL DEFAULT '0',
-  `covers` int(11) DEFAULT NULL,                        -- HOW MANY ENTRIES THE REQUEST COVERS
   `judge_group` int(11) NOT NULL DEFAULT '0',
   `accepted` int(11) DEFAULT NULL,
   `request_made` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `covers` int(11) DEFAULT NULL,
+  `rounds` int(11) DEFAULT NULL,
+  `rounds_accepted` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=7006183 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=7006621 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -697,16 +753,16 @@ CREATE TABLE `judge_setting` (
   `judge` int(11) NOT NULL DEFAULT '0',
   `tag` varchar(31) NOT NULL DEFAULT '',
   `value` varchar(127) NOT NULL DEFAULT '',
-  `value_date` datetime DEFAULT NULL,
   `value_text` text,
+  `value_date` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `judge` (`judge`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=39845 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `panel`            -- AN INDIVIDUAL DEBATE WITHIN A ROUND.  PANEL IS A SPEECH TERM. 
+-- Table structure for table `panel`
 --
 
 DROP TABLE IF EXISTS `panel`;
@@ -714,23 +770,25 @@ DROP TABLE IF EXISTS `panel`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `panel` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `round` int(11) DEFAULT NULL,
   `room` int(11) NOT NULL DEFAULT '0',
-  `letter` char(2) NOT NULL DEFAULT '',
+  `letter` varchar(3) DEFAULT NULL,
   `type` varchar(63) NOT NULL DEFAULT '',
+  `round` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `flight` char(1) DEFAULT NULL,
   `bye` tinyint(1) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `started` datetime DEFAULT NULL,
+  `cat_id` int(11) DEFAULT NULL,
+  `score` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `room` (`room`),
-  KEY `event` (`event`),
   KEY `round` (`round`),
   KEY `id` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=129635 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=140122 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `pool`         A SUBGROUP OF JUDGES FOR A GIVEN ROUND. 
+-- Table structure for table `pool`
 --
 
 DROP TABLE IF EXISTS `pool`;
@@ -738,20 +796,23 @@ DROP TABLE IF EXISTS `pool`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `pool` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `judge_group` int(11) DEFAULT NULL,
-  `site` int(11) NOT NULL DEFAULT '0',          -- tie a pool to a given location's rounds.
+  `site` int(11) NOT NULL DEFAULT '0',
   `name` varchar(63) DEFAULT NULL,
-  `standby` tinyint(1) DEFAULT NULL,            -- DON'T USE THEM, they are pre-assigned to be hot spares.
-  `publish` tinyint(1) DEFAULT NULL,            -- PUBLISH THE MEMBERS OF THIS POOL ON THE WEB ("judges called for AM octos")
-  `registrant` tinyint(1) DEFAULT NULL,         --- THE PEOPLE REGISTERING MUST SIGN JUDGES UP FOR THIS POOL
-  `burden` int(11) DEFAULT NULL,                -- when registering online, this %age of overall burden must be signed up.
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `standby` tinyint(1) DEFAULT NULL,
+  `publish` tinyint(1) DEFAULT NULL,
+  `registrant` tinyint(1) DEFAULT NULL,
+  `burden` int(11) DEFAULT NULL,
+  `judge_group` int(11) DEFAULT NULL,
+  `event_based` int(11) DEFAULT NULL,
+  `standby_timeslot` int(11) DEFAULT NULL,
+  `tourn` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1111 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=1137 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `pool_judge`           JUDGES CONNECTED TO POOLS
+-- Table structure for table `pool_judge`
 --
 
 DROP TABLE IF EXISTS `pool_judge`;
@@ -762,14 +823,35 @@ CREATE TABLE `pool_judge` (
   `judge` int(11) NOT NULL DEFAULT '0',
   `pool` int(11) NOT NULL DEFAULT '0',
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `type` varchar(128) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `pool` (`pool`),
   KEY `judge` (`judge`)
-) ENGINE=InnoDB AUTO_INCREMENT=33546 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=39117 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `rating`               FOR PREFS & COACH RATINGS.  
+-- Table structure for table `qualifier`
+--
+
+DROP TABLE IF EXISTS `qualifier`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `qualifier` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `entry` int(11) DEFAULT NULL,
+  `name` varchar(63) DEFAULT NULL,
+  `result` varchar(127) DEFAULT NULL,
+  `tourn` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `entry` (`entry`),
+  KEY `tourn` (`tourn`)
+) ENGINE=InnoDB AUTO_INCREMENT=16391 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `rating`
 --
 
 DROP TABLE IF EXISTS `rating`;
@@ -777,22 +859,23 @@ DROP TABLE IF EXISTS `rating`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `rating` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) NOT NULL,
-  `judge` int(11) DEFAULT NULL,
+  `tourn` int(11) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
-  `entry` int(11) DEFAULT NULL,                 
-  `type` enum('school','entry','coach') DEFAULT NULL,       -- RATING IS BY WHOLE SCHOOL, ENTRY or coach's own rating
-  `tier` int(11) DEFAULT NULL,                  -- WHEN USING 6/9 CATEGORY SYSTEMS
-  `subset` int(11) DEFAULT NULL,                -- IE THING, CAN RATE EACH JUDGE DIFFERENTLY FOR DIFF EVENTS
-  `ordinal` int(11) DEFAULT NULL,               -- WHEN USING ORDINALS
+  `entry` int(11) DEFAULT NULL,
+  `type` enum('school','entry','coach') DEFAULT NULL,
+  `rating_tier` int(11) DEFAULT NULL,
   `entered` datetime DEFAULT NULL,
+  `judge` int(11) DEFAULT NULL,
+  `rating_subset` int(11) DEFAULT NULL,
+  `ordinal` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `percentile` float DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=561350 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=1009811 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `rating_subset`        -- SUBSETS FOR IE ENTRY (DIFFERENT RATINGS DIFFERENT EVENTS)
+-- Table structure for table `rating_subset`
 --
 
 DROP TABLE IF EXISTS `rating_subset`;
@@ -804,11 +887,11 @@ CREATE TABLE `rating_subset` (
   `judge_group` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=20 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `rating_tier`          -- TIERS FOR 6/9 tier systems
+-- Table structure for table `rating_tier`
 --
 
 DROP TABLE IF EXISTS `rating_tier`;
@@ -816,22 +899,24 @@ DROP TABLE IF EXISTS `rating_tier`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `rating_tier` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `judge_group` int(11) DEFAULT NULL,
   `name` varchar(12) DEFAULT NULL,
-  `type` enum('mpj','coach') DEFAULT NULL,
+  `description` text,
+  `tourn` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `strike` tinyint(1) DEFAULT NULL,
+  `type` enum('mpj','coach') DEFAULT NULL,
   `conflict` tinyint(1) DEFAULT NULL,
+  `judge_group` int(11) DEFAULT NULL,
   `min` float DEFAULT NULL,
   `max` float DEFAULT NULL,
-  `description` text,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `rating_subset` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=9501 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=9614 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `region`               -- SOME IE TOURNEYS USE REGIONS AND REGISTER BY THEM.  REGION ADMINS
---                                                  -- HAVE POWERS OVER THEIR REGION MEMBERS.  DUNNO IF THIS IS USEFUL FOR YOU.
+-- Table structure for table `region`
+--
 
 DROP TABLE IF EXISTS `region`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -844,15 +929,15 @@ CREATE TABLE `region` (
   `quota` int(11) DEFAULT NULL,
   `arch` tinyint(1) DEFAULT NULL,
   `circuit` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `cooke_pts` int(11) DEFAULT NULL,
   `sweeps` int(11) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=92 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=96 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `region_admin`         -- DIRECTOR OF A REGION.
+-- Table structure for table `region_admin`
 --
 
 DROP TABLE IF EXISTS `region_admin`;
@@ -864,11 +949,11 @@ CREATE TABLE `region_admin` (
   `account` int(11) NOT NULL DEFAULT '0',
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=149 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=88 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `region_fine`          -- WHEN A REGION IS FINED; USED ONLY BY NCFL NATIONALS.
+-- Table structure for table `region_fine`
 --
 
 DROP TABLE IF EXISTS `region_fine`;
@@ -887,6 +972,46 @@ CREATE TABLE `region_fine` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `result`
+--
+
+DROP TABLE IF EXISTS `result`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `result` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `entry` int(11) DEFAULT NULL,
+  `sweeps` int(11) DEFAULT NULL,
+  `bid` tinyint(1) NOT NULL DEFAULT '0',
+  `label` varchar(63) DEFAULT NULL,
+  `seed` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `entry` (`entry`)
+) ENGINE=InnoDB AUTO_INCREMENT=65094 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `result_value`
+--
+
+DROP TABLE IF EXISTS `result_value`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `result_value` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `result` int(11) DEFAULT NULL,
+  `label` varchar(63) DEFAULT NULL,
+  `value` float DEFAULT NULL,
+  `priority` int(7) NOT NULL DEFAULT '0',
+  `sort_desc` tinyint(1) NOT NULL DEFAULT '0',
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `result` (`result`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `room`
 --
 
@@ -895,21 +1020,21 @@ DROP TABLE IF EXISTS `room`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `room` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `site` int(11) DEFAULT NULL,
-  `building` varchar(127) NOT NULL DEFAULT '',
   `name` varchar(127) NOT NULL DEFAULT '',
   `quality` int(11) DEFAULT NULL,
+  `site` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `capacity` int(11) DEFAULT NULL,
   `inactive` tinyint(1) DEFAULT NULL,
   `notes` varchar(127) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `building` varchar(64) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `site` (`site`)
-) ENGINE=InnoDB AUTO_INCREMENT=17179 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=19922 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `room_pool`            -- CREATE A POOL OF ROOMS TO DRAW FROM FOR A GIVEN EVENT
+-- Table structure for table `room_pool`
 --
 
 DROP TABLE IF EXISTS `room_pool`;
@@ -917,17 +1042,16 @@ DROP TABLE IF EXISTS `room_pool`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `room_pool` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
   `room` int(11) DEFAULT NULL,
-  `reserved` tinyint(1) DEFAULT NULL,               -- USE THIS ROOM EXCLUSIVELY FOR THIS EVENT; OTHERWISE ONLY PREFER IT
+  `reserved` tinyint(1) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=42335 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=46289 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `room_strike`          -- BLOCK A ROOM FROM A GIVEN EVENT OR A TIME PERIOD.
+-- Table structure for table `room_strike`
 --
 
 DROP TABLE IF EXISTS `room_strike`;
@@ -935,22 +1059,24 @@ DROP TABLE IF EXISTS `room_strike`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `room_strike` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) NOT NULL DEFAULT '0',
-  `room` int(11) NOT NULL DEFAULT '0',
-  `type` varchar(67) DEFAULT NULL,                  -- "ENTRY, JUDGE, TIME, EVENT"
+  `type` varchar(67) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
+  `timeslot` int(11) DEFAULT NULL,
+  `room` int(11) NOT NULL DEFAULT '0',
+  `tourn` int(11) DEFAULT NULL,
+  `special` varchar(127) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `entry` int(11) DEFAULT NULL,
   `judge` int(11) DEFAULT NULL,
-  `start` datetime,
-  `end`   datetime,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `start` datetime DEFAULT NULL,
+  `end` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `room` (`room`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1346 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `round`            -- A ROUND IS A WHOLE ROUND, NOT AN INDIVIDUAL DEBATE.
+-- Table structure for table `round`
 --
 
 DROP TABLE IF EXISTS `round`;
@@ -958,27 +1084,36 @@ DROP TABLE IF EXISTS `round`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `round` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` int(11) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
   `timeslot` int(11) DEFAULT NULL,
-  `site` int(11) DEFAULT NULL,
-  `name` int(11) DEFAULT NULL,                  -- NAME IS STRICTLY NUMERICAL; LABEL IS USER-ENTERED ('semis, finals').
+  `type` varchar(63) DEFAULT NULL,
   `label` varchar(15) DEFAULT NULL,
-  `tb_set` int(11) DEFAULT NULL,                -- CAN SET TIEBREAKERS FOR A GIVEN ROUND; OTHERWISE IT ASKS.
-  `pool` int(11) DEFAULT NULL,                  -- USE ONLY JUDGES FROM THIS POOL, OTHERWISE PULLS FROM ALL
-  `published` tinyint(1) DEFAULT NULL,          -- PUBLISH SCHEM OF THIS ROUND ONLINE.
-  `listed` tinyint(1) DEFAULT NULL,             -- PUBLISH ALPHA LIST OF STUDENTS IN THIS ROUND ONLINE
-  `created` datetime DEFAULT NULL,              -- ROUND PANELED
-  `completed` datetime DEFAULT NULL,            -- LAST BALLOT ENTERED
+  `site` int(11) DEFAULT NULL,
+  `pool` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `published` tinyint(1) DEFAULT NULL,
+  `listed` tinyint(1) DEFAULT NULL,
+  `created` datetime DEFAULT NULL,
+  `completed` datetime DEFAULT NULL,
+  `motion` text,
+  `tb_set` int(11) DEFAULT NULL,
+  `judges` int(11) DEFAULT NULL,
+  `flights` smallint(6) DEFAULT NULL,
+  `blasted` datetime DEFAULT NULL,
+  `online` tinyint(1) DEFAULT NULL,
+  `post_results` tinyint(1) DEFAULT NULL,
+  `flighted` smallint(6) DEFAULT NULL,
+  `cat_id` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `timeslot` (`timeslot`),
   KEY `pool` (`pool`),
   KEY `event` (`event`)
-) ENGINE=InnoDB AUTO_INCREMENT=47285 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=50435 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `school`               -- AN ENTRY OF A CHAPTER INTO A TOURNAMENT
+-- Table structure for table `school`
 --
 
 DROP TABLE IF EXISTS `school`;
@@ -986,27 +1121,31 @@ DROP TABLE IF EXISTS `school`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `school` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) NOT NULL DEFAULT '0',
+  `tourn` int(11) DEFAULT NULL,
   `chapter` int(11) DEFAULT NULL,
-  `region` int(11) DEFAULT NULL,
   `name` varchar(127) DEFAULT NULL,
+  `region` int(11) DEFAULT NULL,
   `code` varchar(15) DEFAULT NULL,
-  `paid` float DEFAULT NULL,                        -- HOW MUCH MONEY THEY'VE PAID.
-  `registered` tinyint(1) NOT NULL DEFAULT '0',     -- DENOTES THAT THEY'VE CHECKED IN ONSITE
-  `registered_on` datetime DEFAULT NULL,           
-  `contact` int(11) DEFAULT NULL,                   --- TIES TO AN ACCOUNT WHO THEN GETS UPDATES
-  `contact_number` varchar(63) DEFAULT NULL,        -- IF THE ADULT CONTACT DOES NOT HAVE AN ACCOUNT
+  `paid` float DEFAULT NULL,
+  `registered` tinyint(1) NOT NULL DEFAULT '0',
+  `contact_number` varchar(63) DEFAULT NULL,
   `contact_name` varchar(127) DEFAULT NULL,
-  `entered_on` datetime DEFAULT NULL,               -- ONLINE ENTRY
-  `noprefs` tinyint(1) DEFAULT NULL,                -- THIS SCHOOL HAS LOST THEIR PREFS FOR SOME TRANSGRESSION.  FIENDS!
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `entered_on` datetime DEFAULT NULL,
+  `registered_on` datetime DEFAULT NULL,
+  `noprefs` tinyint(1) DEFAULT NULL,
+  `contact` int(11) DEFAULT NULL,
+  `self_register` tinyint(1) DEFAULT NULL,
+  `self_reg_deadline` datetime DEFAULT NULL,
+  `individuals` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `chapter` (`chapter`)
-) ENGINE=InnoDB AUTO_INCREMENT=31381 DEFAULT CHARSET=latin1;
+  KEY `chapter` (`chapter`),
+  KEY `tourn` (`tourn`)
+) ENGINE=InnoDB AUTO_INCREMENT=34243 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `school_fine`          -- A SEMI-ARBITRARY FINE ADDED TO THEIR INVOICE FOR VARIOUS REASON.
+-- Table structure for table `school_fine`
 --
 
 DROP TABLE IF EXISTS `school_fine`;
@@ -1018,15 +1157,15 @@ CREATE TABLE `school_fine` (
   `amount` float DEFAULT NULL,
   `reason` varchar(63) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `levied_on` datetime DEFAULT NULL,
   `levied_by` int(11) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=5065326 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=5066239 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `session`          -- USED BY THE WEB END TO TRACK WHO IS LOGGED ON.  IGNORE.
+-- Table structure for table `session`
 --
 
 DROP TABLE IF EXISTS `session`;
@@ -1034,23 +1173,24 @@ DROP TABLE IF EXISTS `session`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `session` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
+  `timestamp` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
   `account` int(11) NOT NULL DEFAULT '0',
-  `userkey` varchar(127) DEFAULT NULL,
   `authkey` varchar(63) NOT NULL DEFAULT '',
   `ip` varchar(63) DEFAULT NULL,
   `limited` tinyint(1) DEFAULT NULL,
   `entry_only` tinyint(1) DEFAULT NULL,
-  `event` int(11) DEFAULT NULL,
   `circuit` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
+  `userkey` varchar(127) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
-  `timestamp` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+  `event` int(11) DEFAULT NULL,
+  `su` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=177942 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=191963 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `site`                 LOCATION(S).   CONTAINS THE ROOMS.
+-- Table structure for table `site`
 --
 
 DROP TABLE IF EXISTS `site`;
@@ -1062,14 +1202,14 @@ CREATE TABLE `site` (
   `host` int(11) DEFAULT NULL,
   `directions` text,
   `circuit` int(11) DEFAULT NULL,
-  `dropoff` varchar(127) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `dropoff` varchar(127) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=620 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=720 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `strike`           THIS IS FOR STRIKES WITHOUT PREFS, OR INTERNAL STRIKES/CONFLICTS.
+-- Table structure for table `strike`
 --
 
 DROP TABLE IF EXISTS `strike`;
@@ -1079,24 +1219,24 @@ CREATE TABLE `strike` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `tourn` int(11) DEFAULT NULL,
   `judge` int(11) NOT NULL DEFAULT '0',
-  `type` varchar(63) NOT NULL DEFAULT '',           "event, elims_only, region, school, entry"
+  `type` varchar(63) NOT NULL DEFAULT '',
   `event` int(11) DEFAULT NULL,
   `entry` int(11) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
   `region` int(11) DEFAULT NULL,
-  `start` datetime DEFAULT NULL,                    -- beginning of a time strike
-  `end` datetime DEFAULT NULL,                      -- end of a time strike
-  `strike_time` int(11) DEFAULT NULL,               -- judge cannot judge during the time marked in strike_time (and pays for it)
-  `registrant` tinyint(4) DEFAULT NULL,             -- true if this was entered by the school, not the tourn staff. 
+  `start` datetime DEFAULT NULL,
+  `end` datetime DEFAULT NULL,
+  `strike_time` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `registrant` tinyint(4) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `judge` (`judge`)
-) ENGINE=InnoDB AUTO_INCREMENT=21602 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=24206 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `strike_time`      -- this is for a judge who can't be there the whole time, some tourns get 
---                                                  sat-only and sun-only judges.  this charges them if theyre short either day.
+-- Table structure for table `strike_time`
+--
 
 DROP TABLE IF EXISTS `strike_time`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1104,17 +1244,17 @@ DROP TABLE IF EXISTS `strike_time`;
 CREATE TABLE `strike_time` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `judge_group` int(11) NOT NULL,
-  `name` varchar(63) DEFAULT NULL,
-  `fine` int(11) DEFAULT NULL,                  -- the charge
+  `fine` int(11) DEFAULT NULL,
   `start` datetime DEFAULT NULL,
   `end` datetime DEFAULT NULL,
+  `name` varchar(63) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=388 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=419 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `student`          STUDENT RECORD PARTICULAR TO A CHAPTER.
+-- Table structure for table `student`
 --
 
 DROP TABLE IF EXISTS `student`;
@@ -1122,24 +1262,102 @@ DROP TABLE IF EXISTS `student`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `student` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `account` int(11) DEFAULT NULL,
-  `chapter` int(11) DEFAULT NULL,
-  `first` varchar(63) NOT NULL DEFAULT '',      
+  `first` varchar(63) NOT NULL DEFAULT '',
   `last` varchar(63) NOT NULL DEFAULT '',
-  `grad_year` int(11) NOT NULL DEFAULT '0',     -- PAST GRADUATES AUTOMATICALLY STOP APPEARING ON ROSTER.
-  `novice` tinyint(1) DEFAULT '0',              -- GETS STRIPPED OUT EVERY YEAR ON JULY 1st
-  `retired` tinyint(1) DEFAULT NULL,            -- PREVENTS THEM FROM SHOWING UP ON THE ROSTER
+  `chapter` int(11) DEFAULT NULL,
+  `grad_year` int(11) NOT NULL DEFAULT '0',
+  `novice` tinyint(1) DEFAULT '0',
+  `retired` tinyint(1) DEFAULT NULL,
   `gender` char(1) DEFAULT NULL,
-  `phonetic` varchar(127) DEFAULT NULL,         -- AWARD CEREMONY LIFESAVER.
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `phonetic` varchar(127) DEFAULT NULL,
+  `account` int(11) NOT NULL DEFAULT '0',
+  `acct_request` int(11) DEFAULT NULL,
+  `created` datetime DEFAULT NULL,
+  `diet` varchar(31) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `chapter` (`chapter`)
+  KEY `student` (`id`),
+  KEY `id` (`id`),
+  KEY `student_chapter` (`chapter`),
   KEY `account` (`account`)
-) ENGINE=InnoDB AUTO_INCREMENT=101324 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=109507 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `tiebreak`         -- METHOD USED TO BREAK TIES.
+-- Table structure for table `student_result`
+--
+
+DROP TABLE IF EXISTS `student_result`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `student_result` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `student` int(11) DEFAULT NULL,
+  `event` int(11) DEFAULT NULL,
+  `results_bar` varchar(127) DEFAULT NULL,
+  `bid` tinyint(4) DEFAULT NULL,
+  `rank` int(11) DEFAULT NULL,
+  `tournament` int(11) DEFAULT NULL,
+  `entry` int(11) DEFAULT NULL,
+  `chapter` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `student_result` (`student`)
+) ENGINE=InnoDB AUTO_INCREMENT=173340 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sweep_event`
+--
+
+DROP TABLE IF EXISTS `sweep_event`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `sweep_event` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `sweep_set` int(11) DEFAULT NULL,
+  `event` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `sweep_set` (`sweep_set`),
+  KEY `event` (`event`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sweep_rule`
+--
+
+DROP TABLE IF EXISTS `sweep_rule`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `sweep_rule` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `sweep_set` int(11) DEFAULT NULL,
+  `tag` varchar(31) DEFAULT NULL,
+  `value` varchar(63) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `sweep_set` (`sweep_set`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sweep_set`
+--
+
+DROP TABLE IF EXISTS `sweep_set`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `sweep_set` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tourn` int(11) DEFAULT NULL,
+  `name` varchar(31) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `tourn` (`tourn`)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `tiebreak`
 --
 
 DROP TABLE IF EXISTS `tiebreak`;
@@ -1147,19 +1365,19 @@ DROP TABLE IF EXISTS `tiebreak`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `tiebreak` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tb_set` int(11) DEFAULT NULL,                        -- COLLECTION OF TIEBREAKERS FOR A GIVEN ROUND/DIVISION
-  `name` varchar(15) NOT NULL DEFAULT 'cumulative',     -- TYPE.  We'll have to come up with a complete list sometime.
-  `count` varchar(15) NOT NULL DEFAULT '0',             -- "ALL", "PRELIMS", "ELIMS", "Last Elim"< "Finals".  More for IEs
-  `multiplier` int(11) NOT NULL DEFAULT '1',            -- Multiply this tiebreak by this number if adding together.  for IEs
-  `priority` int(11) NOT NULL DEFAULT '0',              -- Which priority is this tiebreaker.  2 of same priority are added.
+  `name` varchar(15) DEFAULT NULL,
+  `count` varchar(15) NOT NULL DEFAULT '0',
+  `multiplier` int(11) NOT NULL DEFAULT '1',
+  `priority` int(11) NOT NULL DEFAULT '0',
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `tb_set` (`tb_set`)
-) ENGINE=InnoDB AUTO_INCREMENT=6898 DEFAULT CHARSET=latin1;
+  `tb_set` int(11) DEFAULT NULL,
+  `highlow` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=7739 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `tiebreak_set`         -- COLLECTION FOR A GIVEN ROUND/DIVISION.
+-- Table structure for table `tiebreak_set`
 --
 
 DROP TABLE IF EXISTS `tiebreak_set`;
@@ -1170,12 +1388,14 @@ CREATE TABLE `tiebreak_set` (
   `name` varchar(127) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `type` varchar(15) DEFAULT NULL,
+  `elim` tinyint(1) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=4843 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=5291 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `timeslot`             -- BLOCK OF TIME
+-- Table structure for table `timeslot`
 --
 
 DROP TABLE IF EXISTS `timeslot`;
@@ -1183,17 +1403,17 @@ DROP TABLE IF EXISTS `timeslot`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `timeslot` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) NOT NULL DEFAULT '0',
+  `tourn` int(11) DEFAULT NULL,
   `name` varchar(127) DEFAULT NULL,
   `start` datetime DEFAULT NULL,
   `end` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=6788 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=7765 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `tourn`            -- TOURNAMENT
+-- Table structure for table `tourn`
 --
 
 DROP TABLE IF EXISTS `tourn`;
@@ -1204,19 +1424,23 @@ CREATE TABLE `tourn` (
   `name` varchar(63) NOT NULL DEFAULT '',
   `start` datetime DEFAULT NULL,
   `end` datetime DEFAULT NULL,
-  `reg_start` datetime DEFAULT NULL,        -- ONLINE REGISTRATION OPENS
-  `reg_end` datetime DEFAULT NULL,          -- ONLINE REGISTRATION CLOSES
-  `invite` text,                            -- URL OF THE INVITATION (UPLOADED FILE OR WEBSITE)
-  `hidden` tinyint(1) DEFAULT NULL,         -- "HIDDEN" TOURNS won't show up on the web; so people can play/test
-  `approved` tinyint(1) DEFAULT NULL,       -- APPROVED by a circuit administrator
-  `webname` varchar(63) DEFAULT NULL,       -- For the URL/website thing I'm working on
+  `reg_start` datetime DEFAULT NULL,
+  `reg_end` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `hidden` tinyint(1) DEFAULT NULL,
+  `approved` tinyint(1) DEFAULT NULL,
+  `webname` varchar(63) DEFAULT NULL,
+  `tz` varchar(31) DEFAULT NULL,
+  `state` varchar(7) DEFAULT NULL,
+  `country` varchar(7) DEFAULT NULL,
+  `foreign_site` varchar(64) DEFAULT NULL,
+  `foreign_id` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1463 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=1627 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `tourn_admin`      -- I CAN HAZ TOURNAMENT?
+-- Table structure for table `tourn_admin`
 --
 
 DROP TABLE IF EXISTS `tourn_admin`;
@@ -1224,44 +1448,50 @@ DROP TABLE IF EXISTS `tourn_admin`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `tourn_admin` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) NOT NULL DEFAULT '0',
+  `tourn` int(11) DEFAULT NULL,
   `account` int(11) NOT NULL DEFAULT '0',
-  `contact` tinyint(1) NOT NULL DEFAULT '0',        -- LIST AS A PUBLIC CONTACT ON THE WEBSITE
-  `entry_only` tinyint(4) DEFAULT NULL,             -- I CAN ONLY ENTER RESULTS, NOT MUCK AROUND WITH ANYTHING ELSE
-  `no_setup` tinyint(1) DEFAULT NULL,                -- I CAN DO NEARLY EVERYTHING EXCEPT CHANGE SETTINGS
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `contact` tinyint(1) NOT NULL DEFAULT '0',
+  `entry_only` tinyint(4) DEFAULT NULL,
+  `no_setup` tinyint(4) DEFAULT NULL,
+  `event` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=4727 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=5172 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `tourn_change`     -- LOGS OF CHANGES MADE BY IDIOTS TO MY REGISTRATION.  THIS ENABLES
---                                                  AND FUELS WONDERFUL ACTS OF VINDICTIVENESS.
+-- Table structure for table `tourn_change`
+--
 
 DROP TABLE IF EXISTS `tourn_change`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `tourn_change` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) NOT NULL DEFAULT '0',
   `type` varchar(63) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
+  `tourn` int(11) DEFAULT NULL,
+  `new_panel` int(11) DEFAULT NULL,
+  `entry` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `judge` int(11) DEFAULT NULL,
+  `fine` int(11) DEFAULT NULL,
+  `old_panel` int(11) DEFAULT NULL,
+  `text` varchar(255) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
   `account` int(11) DEFAULT NULL,
-  `entry` int(11) DEFAULT NULL,
-  `judge` int(11) DEFAULT NULL,
-  `old_panel` int(11) DEFAULT NULL,
-  `new_panel` int(11) DEFAULT NULL,
-  `fine` int(11) DEFAULT NULL,
-  `text` varchar(255) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `panel` (`new_panel`)
-) ENGINE=InnoDB AUTO_INCREMENT=257537 DEFAULT CHARSET=latin1;
+  KEY `event` (`event`),
+  KEY `tournament` (`tourn`),
+  KEY `tourn` (`tourn`),
+  KEY `new_panel` (`new_panel`),
+  KEY `old_panel` (`old_panel`),
+  KEY `entry` (`entry`)
+) ENGINE=InnoDB AUTO_INCREMENT=276262 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `tourn_circuit`        -- JOIN A TOURNAMENT TO A CIRCUIT.  THIS IS SO IT CAN SHOW IN MULTIPLE.
+-- Table structure for table `tourn_circuit`
 --
 
 DROP TABLE IF EXISTS `tourn_circuit`;
@@ -1271,15 +1501,16 @@ CREATE TABLE `tourn_circuit` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `tourn` int(11) NOT NULL DEFAULT '0',
   `circuit` int(11) NOT NULL DEFAULT '0',
+  `approved` tinyint(1) NOT NULL DEFAULT '0',
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`),
   KEY `circuit` (`circuit`)
-) ENGINE=InnoDB AUTO_INCREMENT=1206 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=1460 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `tourn_fee`        -- STANDING SCHOOL FEE CHARGED TO EVERYONE WHO REGSITERS (OR DURING A WINDOW)
+-- Table structure for table `tourn_fee`
 --
 
 DROP TABLE IF EXISTS `tourn_fee`;
@@ -1289,16 +1520,35 @@ CREATE TABLE `tourn_fee` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `tourn` int(11) NOT NULL DEFAULT '0',
   `amount` float DEFAULT NULL,
-  `start` datetime DEFAULT NULL,            -- DONT CHARGE BEFORE THIS TIME
-  `end` datetime DEFAULT NULL,              -- DONT CHARGE AFTER THIS TIME
-  `reason` varchar(127) DEFAULT NULL,       -- EXPLAIN THE FEE IF YOU DEIGN TO
+  `reason` varchar(127) DEFAULT NULL,
+  `start` datetime DEFAULT NULL,
+  `end` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+  PRIMARY KEY (`id`),
+  KEY `tourn` (`tourn`)
+) ENGINE=InnoDB AUTO_INCREMENT=6306 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `tourn_setting`        
+-- Table structure for table `tourn_ignore`
+--
+
+DROP TABLE IF EXISTS `tourn_ignore`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `tourn_ignore` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tourn` int(11) DEFAULT NULL,
+  `account` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `account` (`account`),
+  KEY `tourn` (`tourn`)
+) ENGINE=InnoDB AUTO_INCREMENT=1650 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `tourn_setting`
 --
 
 DROP TABLE IF EXISTS `tourn_setting`;
@@ -1309,16 +1559,16 @@ CREATE TABLE `tourn_setting` (
   `tourn` int(11) NOT NULL DEFAULT '0',
   `tag` varchar(31) NOT NULL DEFAULT '',
   `value` varchar(127) NOT NULL DEFAULT '',
-  `value_date` datetime DEFAULT NULL,
   `value_text` text,
+  `value_date` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=43281 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `tourn_site`       JOIN A TOURNAMENT TO A SITE/SET OF ROOMS
+-- Table structure for table `tourn_site`
 --
 
 DROP TABLE IF EXISTS `tourn_site`;
@@ -1326,11 +1576,37 @@ DROP TABLE IF EXISTS `tourn_site`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `tourn_site` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tourn` int(11) NOT NULL DEFAULT '0',
+  `tourn` int(11) DEFAULT NULL,
   `site` int(11) NOT NULL DEFAULT '0',
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2125 DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB AUTO_INCREMENT=2325 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `webpage`
+--
+
+DROP TABLE IF EXISTS `webpage`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `webpage` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tourn` int(11) DEFAULT NULL,
+  `circuit` int(11) DEFAULT NULL,
+  `page_order` int(11) DEFAULT NULL,
+  `active` tinyint(1) NOT NULL DEFAULT '0',
+  `sitewide` tinyint(1) NOT NULL DEFAULT '0',
+  `title` varchar(63) DEFAULT NULL,
+  `content` text,
+  `last_editor` int(11) DEFAULT NULL,
+  `posted_on` datetime DEFAULT NULL,
+  `special` varchar(15) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `tourn` (`tourn`),
+  KEY `circuit` (`circuit`)
+) ENGINE=InnoDB AUTO_INCREMENT=40 DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -1342,4 +1618,4 @@ CREATE TABLE `tourn_site` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2012-03-13 13:39:25
+-- Dump completed on 2012-09-21 13:02:05

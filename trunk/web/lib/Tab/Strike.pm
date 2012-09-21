@@ -18,7 +18,7 @@ __PACKAGE__->_register_datetimes( qw/end/);
 
 sub name { 
 	my $self = shift;
-	my $tz = $self->tourn->tz;
+	my $tz = $self->tourn->tz if $self->tourn;
 	$tz = "UTC" unless $tz;
 	return "No rounds in ".$self->event->name if $self->type eq "event";
 	return "No prelims in ".$self->event->name if $self->type eq "elim";
