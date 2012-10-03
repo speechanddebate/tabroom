@@ -53,6 +53,7 @@ use Tab::FollowAccount;
 use Tab::FollowTourn;
 use Tab::FollowEntry;
 use Tab::FollowJudge;
+use Tab::FollowSchool;
 use Tab::Housing;
 use Tab::HousingSlots;
 use Tab::Judge;

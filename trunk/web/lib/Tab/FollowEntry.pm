@@ -6,3 +6,4 @@ Tab::FollowEntry->columns(Essential => qw/entry cell email domain follower times
 Tab::FollowEntry->has_a(entry => 'Tab::Entry');
 Tab::FollowEntry->has_a(follower => 'Tab::Account');
 
+__PACKAGE__->_register_datetimes( qw/timestamp/);

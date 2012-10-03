@@ -37,3 +37,16 @@ create index judge on rating(judge);
 #sweep_max_per_set
 #sweep_wildcards
 
+create table follow_school ( 
+	id int auto_increment primary key,
+	school int,
+	event int,
+	follower int,
+	timestamp timestamp
+);
+
+create index school on follow_school(school);
+create index event on follow_school(event);
+create index follower on follow_school(follower);
+
+alter table chapter_admin add prefs bool;
