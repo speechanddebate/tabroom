@@ -50,3 +50,5 @@ create index event on follow_school(event);
 create index follower on follow_school(follower);
 
 alter table chapter_admin add prefs bool;
+alter table event_double add exclude int;
+
