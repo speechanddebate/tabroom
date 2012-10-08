@@ -13,7 +13,7 @@ sub rule {
 	my ($self, $tag, $value) = @_;
 
 	my @existing = Tab::SweepRule->search(  
-		event => $self->id,
+		sweep_set => $self->id,
 		tag => $tag
 	);
 
@@ -36,7 +36,7 @@ sub rule {
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
 			my $exists = Tab::SweepRule->create({
-				event => $self->id,
+				sweep_set => $self->id,
 				tag => $tag,
 				value => $value,
 			});
