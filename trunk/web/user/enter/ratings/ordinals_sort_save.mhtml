@@ -1,0 +1,103 @@
+<%args>
+	$entry_id => undef
+	$sortorder => undef
+</%args>
+<%init>
+
+	return unless $entry_id && $sortorder;
+
+	my @ordering = split (/&judge\[\]=/, $sortorder);
+
+	my %id_order = ();
+	my $ord = 1;
+
+	foreach my $order (@ordering) { 
+		$id_order{$order} = $ord;
+		$ord++;
+	}
+
+	my $now = DateTime->now();
+	my $err;
+
+	my $entry = Tab::Entry->retrieve($entry_id);
+	my $group = $entry->event->judge_group;
+	my $tourn = $group->tourn;
+
+	Tab::Entry->set_sql(wipe_prefs => "delete from rating where entry = ?");
+	Tab::Entry->sql_wipe_prefs->execute($entry->id);
+
+	my $round_burden++ if $group->setting("rounds_per");
+
+	my @conflicts = $m->comp("/funclib/entry_conflicts.mas", entry => $entry);
+	my %conflicts_by_id = ();
+	foreach (@conflicts) { $conflicts_by_id{$_->judge->id} = $_; }
+
+	my @school_conflicts = $m->comp("/funclib/school_conflicts.mas", 
+			school => $entry->school, group => $group);
+
+	my %school_conflicts_by_id = ();
+
+	foreach (@school_conflicts) { $school_conflicts_by_id{$_->judge->id} = $_; }
+
+	my @all_judges = Tab::Judge->search_where({ active => 1, judge_group => $group->id });
+
+	my %rating_by_judge = ();
+	my %ordinal_by_judge = ();
+	my %judges_at_rating = ();
+
+	my $total_rounds;
+
+	@all_judges = sort {$id_order{$a->id} <=> $id_order{$b->id}} @all_judges;
+
+	my $count = 1;
+
+    foreach my $judge (@all_judges) {
+
+        next if $judge->school->id == $entry->school->id;
+        next if $conflicts_by_id{$judge->id};
+        next if $school_conflicts_by_id{$judge->id};
+
+		$total_rounds += $judge->obligation;
+		$total_rounds += $judge->hired;
+
+		my $rating = Tab::Rating->create({
+			type => "entry",
+			tourn => $tourn->id,
+			judge => $judge->id,
+			entry => $entry->id,
+			ordinal => $count++,
+			entered => $now
+		});
+
+		$rating_by_judge{$judge->id} = $rating;
+		$ordinal_by_judge{$judge->id} = $ARGS{"rating_".$judge->id};
+		push (@{$judges_at_rating{$ARGS{"rating_".$judge->id}}}, $judge );
+
+	}	
+
+	my $rounds_before;
+	$total_rounds = scalar @all_judges unless $round_burden;
+
+	foreach my $ordinal (sort {$a <=> $b} keys %judges_at_rating ) {
+
+		foreach my $judge (@{$judges_at_rating{$ordinal}}) { 
+
+			my $percentile = ( ($rounds_before + 1) / $total_rounds) * 100;
+	
+			$rounds_before += $judge->obligation;
+			$rounds_before += $judge->hired;
+			$rounds_before++ unless $round_burden;
+
+			my $rating = $rating_by_judge{$judge->id};
+			$rating->percentile($percentile);
+			$rating->update;
+
+		}
+
+	}
+
+	my $msg = $entry->code." prefs saved in ".$group->abbr." to $rounds_before rounds";
+	$m->redirect("ordinals_prefs_sortable.mhtml?school_id=".$entry->school->id."&entry_id=".$entry_id."&group_id=".$group->id."&style=entry_ratings&msg=".$msg."&err=".$err);
+
+</%init>
+
