@@ -17,6 +17,7 @@ Tab::Tourn->has_many(housings => 'Tab::Housing', 'tourn');
 Tab::Tourn->has_many(webpages => 'Tab::Webpage', 'tourn');
 Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn');
 Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn');
+Tab::Tourn->has_many(sweep_sets => 'Tab::SweepSet', 'tourn');
 Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
 Tab::Tourn->has_many(settings => 'Tab::TournSetting', 'tourn');
 Tab::Tourn->has_many(tourn_sites => 'Tab::TournSite', 'tourn');
