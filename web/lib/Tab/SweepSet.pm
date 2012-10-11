@@ -1,7 +1,7 @@
 package Tab::SweepSet;
 use base 'Tab::DBI';
 Tab::SweepSet->table('sweep_set');
-Tab::SweepSet->columns(All => qw/id tourn name timestamp/);
+Tab::SweepSet->columns(All => qw/id tourn name timestamp place/);
 Tab::SweepSet->has_a(tourn => 'Tab::Tourn');
 Tab::SweepSet->has_many(rules => 'Tab::SweepRule', 'sweep_set');
 Tab::SweepSet->has_many(sweep_events => 'Tab::SweepEvent', 'sweep_event');
