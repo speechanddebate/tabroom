@@ -48,6 +48,8 @@ sub short_name {
 	$name =~ s/Regional$//g;
 	$name =~ s/Public\ Charter//g;
 	$name =~ s/Charter\ Public//g;
+	$name =~ s/University\ of//g;
+	$name =~ s/University$//g;
 	$name =~ s/^The//g;
 	$name =~ s/^Saint/St./g;
 	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
