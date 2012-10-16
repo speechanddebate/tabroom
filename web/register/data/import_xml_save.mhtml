@@ -1,0 +1,759 @@
+<%args>
+	$account
+	$debug => 1
+	$tourn
+</%args>
+<%init>
+
+	use XML::Simple;
+
+	my $now = DateTime->now;
+	my $tz = $account->tz if $account->tz;
+	$tz = "UTC" unless $tz;
+
+	$m->print("Setting the time zone to your account default: ".$tz) if $debug;
+	$now->set_time_zone($tz);
+
+	#PROCESS THE XML
+	my $req = Apache2::Request->new($r);
+	my $xml_file = $req->upload("xml");
+	my $xml_filename = $xml_file->tempname;
+
+	`/bin/cp $xml_filename /tmp/keeper.xml`;
+	`perl -pi -e s/'&'/'&amp;'/g  $xml_filename`;
+
+	my $xml = new XML::Simple ( SuppressEmpty => 1,  ForceArray => [ qw(RESULT_BALLOT RESULT_SCORE EVENT_SETTING TOURN_SETTING SCHOOL REGION) ]); 
+	my $data = $xml->XMLin($xml_filename);
+
+	my $judge_group = $tourn->judge_groups->first if $tourn->judge_groups;
+
+	unless ($judge_group) { 
+		$judge_group = Tab::JudgeGroup->create({ 
+			name => "Judges",
+			tourn => $tourn->id,
+			abbr => "JD"
+		});
+	}
+
+	#EVENTS
+	my %event_by_id = ();
+	my @events;
+	eval { 
+		@events = @{$data->{EVENT}};
+	};
+
+	push (@events, $data->{EVENT}) unless @events;
+
+	foreach my $xml_event (@events) { 
+
+		my $event;
+
+		if ($ARGS{"event_id_".$xml_event->{ID}}) { 
+
+			$event = Tab::Event->retrieve($ARGS{"event_id_".$xml_event->{ID}});
+			$m->print("Event ".$event->name." has been loaded<br />") if $debug && $event;
+			$event_by_id{$xml_event->{ID}} = $event if $event;
+			$judge_group = $event->judge_group if $event;
+
+		} else { 
+
+			$event = Tab::Event->retrieve($xml_event->{ID});
+
+			if ($event->tourn->id == $tourn->id) { 
+				$m->print("Event ".$event->name." has been loaded<br />") if $debug && $event;
+				$event_by_id{$xml_event->{ID}} = $event if $event;
+				$judge_group = $event->judge_group if $event;
+			}
+
+		} 
+
+		unless ($event) {
+
+			my $event = Tab::Event->create({
+				tourn => $tourn->id,
+				name => $xml_event->{EVENTNAME},
+				type => lc($xml_event->{TYPE}),
+				abbr => $xml_event->{ABBR}
+			});
+
+			$event_by_id{$xml_event->{ID}} = $event;
+			$m->print("Event ".$xml_event->{EVENTNAME}." has been created<br />") if $debug;
+
+			$event->setting("code_style", "initials"); #for debate this is almost always sensible
+			$event->setting("min_points", "0");
+			$event->setting("max_points", "30");
+
+			foreach my $xml_setting (@{$data->{EVENT_SETTING}}) { 
+
+				next unless $xml_setting->{EVENT} == $xml_event->{ID};
+
+				$event->setting("live_updates", 1);
+				$event->setting("online_ballots", 1);
+
+				if ($xml_setting->{TAG} eq "DebatersPerTeam") {
+					$event->setting("min_entry", $xml_setting->{VALUE});
+					$event->setting("max_entry", $xml_setting->{VALUE});
+				} else {
+					$event->setting( $xml_setting->{TAG}, $xml_setting->{VALUE} );
+				}
+			}
+		}
+	}
+
+	$m->print("<h2>Rooms</h2>") if $debug;
+
+	#ROOMS 
+	my $sname = $tourn->name;
+	$sname =~ s/Invitation$//g;
+	$sname =~ s/Invitational$//g;
+	$sname =~ s/Classic$//g;
+	$sname =~ s/Tournament$//g;
+	my $newsite;
+
+	my @sites = $tourn->sites;
+	my $site = shift @sites if @sites;
+	
+	if ($site) { 
+
+		$m->print("Using existing site ".$site->name." for the rooms. <br />") if $debug;
+
+	} else { 
+	
+		$site = Tab::Site->search( name => $sname )->first;
+		$m->print("Using existing site ".$site->name." for the rooms. <br />") if $debug && $site;
+
+		$newsite++;
+		$m->print("Creating site ".$site->name." for the rooms. <br />") if $debug && not defined $site;
+
+		$site = Tab::Site->create({
+			name => $sname,
+			host => $account->id
+		}) unless $site;
+
+		my $tsite = Tab::TournSite->create({
+			site => $site->id,
+			tourn => $tourn->id
+		});
+
+	}
+
+	my @rooms = @{$data->{ROOM}};
+	my %room_by_id = ();
+
+	foreach my $xml_room (@rooms) {
+
+		my $room = Tab::Room->search( site => $site->id, name => $xml_room->{ROOMNAME})->first unless $newsite;
+
+		if ($room) { 
+			$m->print("Room name ".$room->name." found already <br />") if $debug;
+		} else { 
+			$room = Tab::Room->create({
+				name => $xml_room->{ROOMNAME},
+				quality => $xml_room->{QUALITY},
+				capacity => $xml_room->{CAPACITY},
+				site => $site->id
+			});
+		}
+
+		$room_by_id{$xml_room->{ID}} = $room;
+	}
+
+	$m->print("<h2>Schools</h2>") if $debug;
+
+	#SCHOOLS
+	my %students_by_entry = ();
+	my %students_by_school = ();
+
+	foreach my $student (@{$data->{ENTRY_STUDENT}}) {
+		next unless $student->{LAST};
+		next unless $student->{FIRST};
+		my $school = shift @{$student->{SCHOOL}};
+		push @{$students_by_school{$school}}, $student;
+		push @{$students_by_entry{$student->{ENTRY}}}, $student;
+	}
+
+	my %school_by_id = ();
+	my %chapter_by_id = ();
+	my %chapter_new = ();
+
+	my $hired_school;
+
+	SCHOOL:
+	foreach my $xml_school (@{$data->{SCHOOL}}) {
+
+		if ($xml_school->{SCHOOLNAME} eq "Hired") { 
+			$hired_school = $xml_school->{ID};
+			$m->print("Not creating a school for Hired <br /><br />") if $debug;
+			next SCHOOL;
+		}
+
+		unless ($students_by_school{$xml_school->{ID}}) { 
+			$m->print("School $xml_school->{SCHOOLNAME} has no entries; not bothering <br /><br />") if $debug;
+			next SCHOOL;
+		}
+
+		my $school = Tab::School->retrieve($xml_school->{DOWNLOADRECORD}) if $xml_school->{DOWNLOADRECORD};
+
+		if ($school) { 
+			$school_by_id{$xml_school->{ID}} = $school if $school;
+			$chapter_by_id{$xml_school->{ID}} = $school->chapter;
+			next SCHOOL;
+		}
+
+		unless ($school && $school->tourn->id == $tourn->id) { 
+			$school = Tab::School->search_where( 
+				tourn => $tourn->id, 
+				name => { "like", $xml_school->{SCHOOLNAME}."%"}
+			)->first;
+		} else {
+			undef $school;
+		}
+
+		$school_by_id{$xml_school->{ID}} = $school if $school;
+
+		unless ($school) { 
+
+			my @chapters = Tab::Chapter->search( name => $xml_school->{SCHOOLNAME} );
+			my $chapter;
+
+			foreach my $candidate (@chapters) { 
+
+				next if $chapter;
+
+				#Find at least one matching student
+				foreach my $xml_student (@{$students_by_school{$xml_school->{ID}}}) {
+
+					next if $chapter;
+
+					my ($student) = Tab::Student->search( chapter => $candidate->id, first => ucfirst($xml_student->{FIRST}), last => ucfirst($xml_student->{LAST}));
+
+					if ($student) {
+						$m->print("SUCCESS! Chapter match made with chapter ".$candidate->id." student $xml_student->{FIRST} $xml_student->{LAST} <br />") if $debug;
+						$chapter = $candidate;
+					}
+				}
+			}
+
+			unless ($chapter) { 
+
+				$chapter = Tab::Chapter->create({
+					name => $xml_school->{SCHOOLNAME}
+				});
+
+				$chapter_new{$xml_school->{ID}}++;
+				$m->print("No match found.  Creating new chapter ".$chapter->id." for ".$chapter->name." <br />") if $chapter && $debug;
+
+			} 
+					
+			$chapter_by_id{$xml_school->{ID}} = $chapter;
+			
+			my $school = Tab::School->create({
+				chapter => $chapter->id,
+				name => $chapter->name,
+				tourn => $tourn->id,
+				code => $xml_school->{CODE}
+			});
+
+			$school_by_id{$xml_school->{ID}} = $school;
+
+			$m->print("School ".$school->name." created within chapter ".$chapter->name." ".$chapter->id." <br />") if $debug;
+			$m->print("<br />") if $debug;
+
+		}
+
+	}
+
+	$m->print("<h2>Entries</h2>") if $debug;
+
+	#ENTRIES
+	my %entry_by_id = ();
+	my %student_by_id = ();
+
+	ENTRY:
+	foreach my $xml_entry (@{$data->{ENTRY}}) {
+
+		my $event = $event_by_id{$xml_entry->{EVENT}};
+		next unless $event;
+
+		next unless $students_by_entry{$xml_entry->{ID}};
+
+		if ($xml_entry->{DOWNLOADRECORD}) { 
+			my $already = Tab::Entry->retrieve($xml_entry->{DOWNLOADRECORD}) ;
+
+			if ($already && $already->event && $already->event->id == $event->id) { 
+				$entry_by_id{$xml_entry->{ID}} = $already;
+				next ENTRY;
+			}
+		}
+
+		my $already = Tab::Entry->search( event => $event->id, code => $xml_entry->{CODE} )->first;
+
+		if ($already) {
+			$entry_by_id{$xml_entry->{ID}} = $already;
+			next ENTRY;
+		}
+
+		my @students;
+		foreach my $student (@{$students_by_entry{$xml_entry->{ID}}}) { 
+			next unless $student->{LAST};
+			push (@students, $student);
+		}
+
+		my $name;
+		my $notfirst;
+
+		if (scalar @students == 1) { 
+			$name = $students[0]->{FIRST}." ".$students[0]->{LAST};
+		} else { 
+			foreach my $student (@students) { 
+				$name .= " & " if $notfirst;
+				$name .= $student->{LAST};
+				$notfirst++;
+			}
+		}
+
+		$already = Tab::Entry->search( event => $event->id, name => $name )->first;
+
+		if ($already) {
+			$entry_by_id{$xml_entry->{ID}} = $already;
+			$already->code($xml_entry->{CODE});
+			$already->update;
+			next ENTRY;
+		}
+
+		$already = Tab::Entry->search( event => $event->id, name => $xml_entry->{FULLNAME} )->first;
+
+		if ($already) {
+			$entry_by_id{$xml_entry->{ID}} = $already;
+			$already->code($xml_entry->{CODE});
+			$already->update;
+			next ENTRY;
+		}
+
+		my $xml_school = shift @{$xml_entry->{SCHOOL}};
+		
+		my $entry = Tab::Entry->create({
+			tourn => $tourn->id,
+			name => $xml_entry->{FULLNAME},
+			code => $xml_entry->{CODE},
+			dropped => $xml_entry->{DROPPED},
+			ada => $xml_entry->{TUBDISABILITY},
+			seed => $xml_entry->{RATING},
+			reg_time => $now,
+			school => $school_by_id{$xml_school},
+			event => $event->id
+		});
+
+		$m->print("Entry with event $event->id from school $xml_school chapter $chapter_by_id{$xml_school}") if $debug;
+		$entry_by_id{$xml_entry->{ID}} = $entry;
+
+	}
+
+	foreach my $xml_student (@{$data->{ENTRY_STUDENT}}) {
+
+		my $entry = $entry_by_id{$xml_student->{ENTRY}};
+		next unless $entry;
+
+		my $xml_school = shift @{$xml_student->{SCHOOL}};
+
+		my $student;
+
+		if ($chapter_new{$xml_school}) { 
+
+			$m->print("Chapter ".$chapter_by_id{$xml_school}." is new; not searching for students <br />") if $debug;
+			Tab::debuglog("Chapter ".$chapter_by_id{$xml_school}." is new; not bothering to search") if $debug;
+
+		} else { 
+
+			$student = Tab::Student->retrieve($xml_student->{DOWNLOADRECORD}) if $xml_student->{DOWNLOADRECORD};
+
+			$student = Tab::Student->search( 
+				first => $xml_student->{FIRST}, 
+				last => $xml_student->{LAST}, 
+				chapter => $chapter_by_id{$xml_school})->first unless $student;
+
+			Tab::debuglog("Student ".$student->id." found for $xml_student->{FIRST} $xml_student->{LAST}") if $student;
+
+		}
+	
+		unless ($student) { 
+
+			Tab::debuglog("Creating a new student $xml_student->{FIRST} $xml_student->{LAST} as part of entry $entry->code");
+
+			$student = Tab::Student->create({
+				first => ucfirst($xml_student->{FIRST}), 
+				last => ucfirst($xml_student->{LAST}), 
+				chapter => $chapter_by_id{$xml_school}
+			});
+
+		}
+
+		$student_by_id{$xml_student->{ID}} = $student;
+
+		next if Tab::EntryStudent->search( entry => $entry->id, student => $student->id );
+
+		Tab::EntryStudent->create({
+			entry => $entry->id,
+			student => $student->id
+		});
+
+	}
+
+	$m->print("<h2>Judges</h2>") if $debug;
+
+	#JUDGES
+	my %judge_by_id = ();
+
+	JUDGE:
+	foreach my $xml_judge (@{$data->{JUDGE}}) {
+
+		my $judge = Tab::Judge->search_where( 
+			first => {'like', $xml_judge->{FIRST}."%"}, 
+			last => {'like', $xml_judge->{LAST}."%"}, 
+			judge_group => $judge_group->id
+		)->first;
+
+		if ($judge) { 
+			$judge_by_id{$xml_judge->{ID}} = $judge;
+			next JUDGE;
+		}
+
+		my $xml_school = shift @{$xml_judge->{SCHOOL}};
+
+		if ($xml_school == $hired_school || $xml_school == 0 || not defined $school_by_id{$xml_school}) {
+
+			my $active = 1;
+			$active = 0 if ($xml_judge->{STOPSCHEDULING} eq "true");
+
+			$judge = Tab::Judge->create({
+				school        => 0,
+				first         => ucfirst($xml_judge->{FIRST}),
+				last          => ucfirst($xml_judge->{LAST}),
+				judge_group   => $judge_group->id,
+				active        => $active,
+				chapter_judge => 0,
+				reg_time      => $now,
+				obligation    => $xml_judge->{OBLIGATION},
+				hired         => $xml_judge->{HIRED},
+				notes         => $xml_judge->{NOTES}
+			});
+
+		} else { 
+
+			my $chapter_judge = Tab::ChapterJudge->search( first => ucfirst($xml_judge->{FIRST}), last => ucfirst($xml_judge->{LAST}), chapter => $chapter_by_id{$xml_school})->first;
+
+			if ($chapter_judge) { 
+				
+				$m->print("Judge ".$chapter_judge->id." found for $xml_judge->{FIRST} $xml_judge->{LAST} <br />") if $debug;
+
+			} else { 
+
+				$chapter_judge = Tab::ChapterJudge->create({
+					first => ucfirst($xml_judge->{FIRST}),
+					last => ucfirst($xml_judge->{LAST}),
+					chapter => $chapter_by_id{$xml_school},
+					created => $now
+				});
+
+				$m->print("Created chapter Judge ".$chapter_judge->id." found for $xml_judge->{FIRST} $xml_judge->{LAST} <br />") if $debug;
+
+			}
+
+			my $active = 1;
+			$active = 0 if ($xml_judge->{STOPSCHEDULING} eq "true");
+
+			$judge = Tab::Judge->create({
+				school        => $school_by_id{$xml_school},
+				first         => ucfirst($xml_judge->{FIRST}),
+				last          => ucfirst($xml_judge->{LAST}),
+				judge_group   => $judge_group->id,
+				chapter_judge => $chapter_judge->id,
+				reg_time      => $now,
+				active        => $active,
+				obligation    => $xml_judge->{OBLIGATION},
+				hired         => $xml_judge->{HIRED},
+				notes         => $xml_judge->{NOTES}
+			});
+
+			$m->print("Put judge into the tournament as id ".$judge->id." <br /><br />") if $debug;
+
+		}
+
+		$judge_by_id{$xml_judge->{ID}} = $judge;
+
+	}
+
+	#ROUNDS
+	$m->print("<h2>Rounds</h2>") if $debug;
+
+	my @xml_rounds = sort {$a->{ID} <=> $b->{ID}} @{$data->{ROUND}};
+	@xml_rounds = sort {$a->{RD_NAME} <=> $b->{RD_NAME}} @{$data->{ROUND}};
+
+	my %round_by_id = ();
+	my %round_by_name = ();
+	my %round_count = ();
+
+	my @rounds;
+	
+	ROUND:
+	foreach my $xml_round (@xml_rounds) {
+
+		my $event = $event_by_id{$xml_round->{EVENT}};
+		next unless $event;
+
+		$round_count{$event->id}++;
+		my $round_name = $round_count{$event->id};
+		my $round = Tab::Round->search( event => $event->id, name => $round_name)->first;
+
+		if ($round) { 
+			$round_by_id{$xml_round->{ID}} = $round;
+			$round_by_name{$xml_round->{LABEL}} = $round;
+			$round->flighted($xml_round->{FLIGHTING});
+			$round->update;
+			push (@rounds, $round);
+			$m->comp("/funclib/round_dump.mas", round => $round);
+			next ROUND;
+		}
+
+		my @all_rounds = sort {$b->timeslot->start->epoch <=> $a->timeslot->start->epoch} $event->rounds;
+		my $last_round = shift @all_rounds;
+
+		my $start_time = $last_round->timeslot->end->set_time_zone($tz) if $last_round && $last_round->timeslot;
+		$start_time = $tourn->start unless $start_time;
+
+		my $round_end = $start_time->clone;
+		$round_end->add(hours => 2, minutes => 30);
+
+		my $timeslot = Tab::Timeslot->create({
+			name => $event->abbr." ".$round_name,
+			tourn => $tourn->id,
+			start => $start_time,
+			end => $round_end,
+		});
+
+		$m->print("Timeslot ".$timeslot->name." has been created from ".$start_time->hour.":".$start_time->minute." to ".$round_end->hour.":".$round_end->minute." <br />") if $debug;
+
+		my $label = $xml_round->{LABEL};
+		$label =~ s/.*\W(\w)/$1/;
+
+		$round = Tab::Round->create({
+			name     => $round_name,
+			label    => $label,
+			timeslot => $timeslot->id,
+			event    => $event->id,
+			type     => lc($xml_round->{PAIRINGSCHEME}),
+			site     => $site->id,
+			judges   => $xml_round->{JUDGESPERPANEL},
+			flighted => $xml_round->{FLIGHTING}
+		});
+
+		push (@rounds, $round);
+		$round_by_id{$xml_round->{ID}} = $round;
+		$round_by_name{$xml_round->{LABEL}} = $round;
+
+		$m->print("Round ".$round->label." has been created<br />") if $debug;
+	}
+
+	my $did_results;
+	my %panel_by_id = ();
+
+	#ROUND PAIRINGS AND RESULTS
+	$m->print("<h2>Pairings and Results</h2>") if $debug;
+
+	foreach my $xml_result (@{$data->{ROUNDRESULT}}) { 
+
+		my $round = $round_by_id{$xml_result->{RoundId}};	
+		$round = $round_by_name{$xml_result->{RoundName}} unless $round; 	
+
+		PANEL:
+		foreach my $xml_panel (@{$xml_result->{RESULT_BALLOT}}) { 
+
+			$did_results++;
+	
+			my $panel = $panel_by_id{$xml_panel->{Panel}};
+
+			unless ($panel) { 
+
+				my $room = 0;
+				$room = $room_by_id{$xml_panel->{RoomID}} if $room_by_id{$xml_panel->{RoomID}};
+
+				$panel = Tab::Panel->create({
+					letter => $xml_panel->{Panel},
+					room => $room,
+					round => $round,
+					flight => $xml_panel->{Flight},
+				});
+
+				Tab::debuglog("AHOY Created panel ".$panel->id." in room $room for round $round in the results segment") if $round == 50826;
+				$panel_by_id{$xml_panel->{Panel}} = $panel;
+			
+			}
+
+			my $bye;
+			my $judge_id;
+
+			if ($xml_panel->{JudgeID} == -1) { 
+				$bye++;
+			} else { 
+				eval { 
+					$judge_id = $judge_by_id{$xml_panel->{JudgeID}}->id;
+				};
+			}
+
+			$judge_id = 0 unless $judge_id; 
+
+			my @xml_results = @{$xml_panel->{RESULT_SCORE}} if $xml_panel->{RESULT_SCORE};
+
+			my %ballot_by_entry = ();
+			my %ballot_by_student = ();
+
+			$m->print("Importing ".scalar @xml_results." ballots and results: <br />") if $debug;
+
+			BALLOTS:
+			foreach my $xml_ballot (@xml_results) { 
+
+				next unless $xml_ballot->{Score_Name} eq "Ballot";
+				my $entry = $entry_by_id{$xml_ballot->{Recipient}};
+				next unless $entry;
+
+				$bye = 1 if $xml_ballot->{Side} == -1;
+
+				my $ballot = Tab::Ballot->create({
+					entry => $entry->id,
+					panel => $panel->id,
+					side =>  $xml_ballot->{Side},
+					judge => $judge_id,
+					bye => $bye
+				});
+
+				Tab::debuglog("Created ballot ".$ballot->id." for panel ".$panel->id." in the results segment") if $panel->round->id == 50826;
+
+				$ballot_by_entry{$xml_ballot->{Recipient}} = $ballot;
+		
+				foreach my $student (@{$students_by_entry{$xml_ballot->{Recipient}}}) {
+					$ballot_by_student{$student->{ID}} = $ballot;
+				}
+
+			}
+
+			foreach my $xml_value (@xml_results) { 
+
+				my $tag = lc($xml_value->{Score_Name});
+				$tag = "rank" if $tag eq "ranks";
+
+				my $value = $xml_value->{content};
+				my $ballot;
+				my $student;
+
+				eval { 
+					if ($xml_value->{ScoreFor} eq "Speaker") { 
+						$student = $student_by_id{$xml_value->{Recipient}}->id;
+						$ballot = $ballot_by_student{$xml_value->{Recipient}}->id;
+					} else { 
+						$ballot = $ballot_by_entry{$xml_value->{Recipient}}->id;
+					}
+				};
+
+				next unless $ballot;
+
+				my $ballot_value = Tab::BallotValue->create({
+					tag => $tag,
+					value => $value,
+					student => $student,
+					ballot => $ballot
+				});
+
+			}
+
+		}
+
+	}
+
+	#ROUND PAIRINGS AND RESULTS, PART DEUX; the EASIER WAY
+	my $panel_count;
+
+	foreach my $xml_panel (@{$data->{PANEL}}) { 
+
+		my $round = $round_by_id{$xml_panel->{ROUND}};
+		my $room = 0;
+		$room = $room_by_id{$xml_panel->{ROOM}} if $xml_panel->{ROOM};
+		$room = 0 if $xml_panel->{ROOM} == -99;
+
+		my $panel = $panel_by_id{$xml_panel->{ID}};
+		next if $panel;
+
+		$panel = Tab::Panel->create({
+			round => $round,
+			room => $room,
+			letter => $panel_count++,
+			flight => $xml_panel->{FLIGHT}
+		});
+
+		Tab::debuglog("Created panel ".$panel->id." in room $room for round $round in the rounds segment") if $round == 50826;
+		$panel_by_id{$xml_panel->{ID}} = $panel;
+
+	}
+
+	my %ballot_by_id = ();
+
+	foreach my $xml_ballot (@{$data->{BALLOT}}) { 
+
+		my $panel = $panel_by_id{$xml_ballot->{PANEL}};
+
+		Tab::debuglog(" Panel ".$panel->id." in round ".$panel->round->id." in the ballots segment");
+
+		my $judge = $judge_by_id{$xml_ballot->{JUDGE}} if $judge_by_id{$xml_ballot->{JUDGE}};
+		my $entry = $entry_by_id{$xml_ballot->{ENTRY}};
+
+		$judge = 0 if $xml_ballot->{JUDGE} == -99;
+		$entry = 0 if $xml_ballot->{ENTRY} == -99;
+
+		next unless $judge > 0 || $entry > 0;
+
+		$judge = 0 unless $judge;
+		$entry = 0 unless $entry;
+
+		my $ballot = Tab::Ballot->create({
+			panel => $panel,
+			judge => $judge,
+			entry => $entry,
+			side => $xml_ballot->{SIDE}
+		});
+
+		$ballot_by_id{$xml_ballot->{ID}} = $ballot;
+
+	}
+
+	foreach my $xml_score (@{$data->{BALLOT_SCORE}}) { 
+
+		my $type = "ballot" if $xml_score->{SCORE_ID} == 1;
+		$type = "points" if $xml_score->{SCORE_ID} == 2;
+		$type = "rank" if $xml_score->{SCORE_ID} == 3;
+
+		my $student = $student_by_id{$xml_score->{RECIPIENT}} if $type ne "Ballot";
+		my $ballot = $ballot_by_id{$xml_score->{BALLOT}};
+
+		my $score = Tab::BallotValue->create({
+			tag => $type,
+			ballot => $ballot,
+			student => $student,
+			value => $xml_score->{SCORE}
+		}) if $student;
+
+		$score = Tab::BallotValue->create({
+			tag => $type,
+			ballot => $ballot,
+			value => $xml_score->{SCORE}
+		}) unless $student;
+
+	}
+
+	#Auto-audit any entered results
+	foreach my $round (@rounds) {
+		$m->comp("/funclib/round_audit.mas", round => $round);
+	}
+
+	my $msg = "Tournament imported into Tabroom";
+	$m->redirect("import_xml.mhtml?msg=$msg");
+
+</%init>
