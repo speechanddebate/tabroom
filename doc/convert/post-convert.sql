@@ -52,3 +52,5 @@ create index follower on follow_school(follower);
 alter table chapter_admin add prefs bool;
 alter table event_double add exclude int;
 
+alter table judge add tab_rating int;
+
