@@ -42,7 +42,8 @@
 
 	my $tourn 	= $timeslot->tourn;
 	my $pool 	= $round->pool if $round->pool;
-	my $group   = $round->event->judge_group;
+	my $event 	= $round->event;
+	my $group   = $event->judge_group;
 
 	my @clean_judges;
 
@@ -115,7 +116,7 @@
 	my @reasons;
 
 	push (@reasons, "school");
-	push (@reasons, "hire") if $group->setting("track_judge_hires");
+	push (@reasons, "hire");
 	push (@reasons, "neutral") if $tourn->setting("allow_neutral_judges");
 
 	foreach my $reason (@reasons) {
@@ -560,11 +561,16 @@
 
 		# ALLOWING OR DISALLOWING JUDGES TO JUDGE THE SAME EVENT TWICE.
 
-		if ( $tourn->setting("judge_event_twice") || ($m->comp("/funclib/round_entries.mas", round => $round) < 1 && ($last_entryful_round && $last_entryful_round->type eq "prelim"))) { 
+		if ( $event->type eq "speech" && (
+				not defined $tourn->setting("judge_event_twice") 
+				|| ($m->comp("/funclib/round_entries.mas", round => $round) < 1 
+				&& ($last_entryful_round && $last_entryful_round->type eq "prelim")))
+			) { 
 
-		# Do not allow judges to judge an event they've judged before if we're not
-		# allowing that, or if this is a preset round and there are no elims with
-		# kids assigned to them yet.  (so we have to assume anyone can break)
+		# Do not allow judges to judge an event they've judged before if we're
+		# not allowing that, or if this is a preset round and there are no
+		# elims with kids assigned to them yet.  (so we have to assume anyone
+		# can break)
 
 		$sql_from_hell = $sql_from_hell." 
 
@@ -578,12 +584,12 @@
 
 			";
 
-		} else { 
+		} elsif ($event->type eq "speech") { 
 
-			#  	Otherwise, just don't allow a judge to judge the same entry twice.
-
-			#	First, if there are preset rounds in this event, the judge cannot
-			#	judge it if they are set to judge a preset round later
+			# Otherwise, just don't allow a judge to judge the same entry
+			# twice.  First, if there are preset rounds in this event, the
+			# judge cannot judge it if they are set to judge a preset round
+			# later
 
 			$sql_from_hell = $sql_from_hell."
 			and not exists(
@@ -637,6 +643,77 @@
 				and not exists( 
 					select bjc.id from ballot as bjc
 					where bjc.judge = judge.id
+					and bjc.entry in 
+						(select bjc2.entry from ballot as bjc2
+						where bjc2.panel = $panel_id )
+				)
+				";
+			}
+
+		} elsif ($event->type ne "wudc") { 
+
+			# In non BP debate, don't let the judge see the same entry twice in
+			# prelims.  In elims it's fair game.
+
+			$sql_from_hell = $sql_from_hell."
+			and not exists(
+				select bpreset.id from 
+				ballot as bpreset,
+				panel as ppreset,
+				round as rpreset
+				where bpreset.judge = judge.id
+				and bpreset.entry is null
+				and bpreset.panel = ppreset.id
+				and ppreset.round = rpreset.id
+				and rpreset.type != \"elim\"
+				and rpreset.type != \"final\"
+				and rpreset.event = ".$panel->round->event->id."
+					and not exists (
+						select distinct entry
+						from entry
+						where entry.id = bpreset.entry
+					)
+				)";
+
+
+			# Next if this is a preset round, and there are other elims with kids
+			# in them, then the judge cannot have judged any kids in that previous
+			# elim
+
+			if ($last_entryful_round) {
+
+				$sql_from_hell = $sql_from_hell."
+				and not exists(
+					select pbentry.id from entry as pbentry,
+					panel as pbpanel,
+					ballot as pbballot,
+					ballot as pbballot2
+
+					where pbentry.id = pbballot.entry
+					and pbballot.panel = pbpanel.id
+					and pbpanel.round = ".$last_entryful_round->id."
+
+					and pbballot2.entry = pbentry.id
+					and pbballot2.judge = judge.id
+				)";
+			}
+
+			# 	Finally, if the round is not preset (and therefore has kids
+			# 	assigned to it), we just check to see if the kids have been judged
+			# 	by the judge.
+
+			unless ($last_entryful_round) { 
+
+				$sql_from_hell = $sql_from_hell." 
+
+				and not exists( 
+					select bjc.id 
+					from ballot as bjc, panel as pjc, round as rjc
+					where bjc.judge = judge.id
+					and bjc.panel = pjc.id
+					and pjc.round = rjc.id
+					and rjc.type != \"elim\"
+					and rjc.type != \"final\"
 					and bjc.entry in 
 						(select bjc2.entry from ballot as bjc2
 						where bjc2.panel = $panel_id )
@@ -710,7 +787,11 @@
 			}
 		}
 
-		$sql_from_hell = $sql_from_hell." order by judge.standby, judge.score DESC";
+		if ($group->setting("tab_ratings")) { 
+			$sql_from_hell = $sql_from_hell." order by judge.tab_rating DESC, judge.standby, judge.score DESC"
+		} else { 
+			$sql_from_hell = $sql_from_hell." order by judge.standby, judge.score DESC";
+		}
 
 		Tab::Judge->set_sql(clean_judges => $sql_from_hell);
 		push (@clean_judges, Tab::Judge->search_clean_judges($panel->id));
@@ -720,6 +801,7 @@
 	#uniq the judges
     my %seen = ();
 	@clean_judges = grep { ! $seen{$_->id} ++ } @clean_judges;
-	return sort {$b->score <=> $a->score} @clean_judges;
+	return sort {$b->tab_rating <=> $a->tab_rating} @clean_judges if $group->setting("tab_ratings");
+	return sort {$a->score <=> $b->score} @clean_judges unless $group->setting("tab_ratings");
 
 </%init>
