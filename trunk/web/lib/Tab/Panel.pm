@@ -2,8 +2,8 @@ package Tab::Panel;
 use base 'Tab::DBI';
 Tab::Panel->table('panel');
 Tab::Panel->columns(Primary => qw/id/);
-Tab::Panel->columns(Essential => qw/letter round room flight bye started cat_id timestamp score/);
-Tab::Panel->columns(TEMP => qw/bye opp side judge audit eventname judgenum panelsize/);
+Tab::Panel->columns(Essential => qw/letter round room flight bye started cat_id timestamp score bracket/);
+Tab::Panel->columns(TEMP => qw/bye opp side judge audit eventname judgenum panelsize ada/);
 
 Tab::Panel->has_a(room => 'Tab::Room');
 Tab::Panel->has_a(round => 'Tab::Round');
