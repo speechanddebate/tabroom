@@ -1,0 +1,318 @@
+<%args>
+	$account
+	$panel_id => undef
+	$judge_id => undef
+	$skipme => undef
+</%args>
+<%init>
+
+	my %entry_rank = ();
+	my %entry_speaks = ();
+
+    unless ($panel_id && $judge_id) { 
+        my $err = "I didn't get both a judge and a ballot record.  Hit back and refresh and try again.";
+        $m->redirect("/user/home.mhtml?err=$err");
+    }   
+
+    my $panel = Tab::Panel->retrieve($panel_id);
+    my $judge = Tab::Judge->retrieve($judge_id);
+
+    unless ($panel && $judge) { 
+        my $err = "No ballots found for that judge and that panel.";
+        $m->redirect("/user/home.mhtml?err=$err");
+    }   
+
+    unless ($judge->account->id == $account->id) { 
+        my $err = "You are not authorized to enter ballots for that judge.";
+        $m->redirect("/user/home.mhtml?err=$err")
+    }   
+
+    my @ballots = Tab::Ballot->search(  judge => $judge->id, panel => $panel->id );
+
+    unless (@ballots) { 
+        my $err = "That judge does not judge in that room.";
+        $m->redirect("/user/home.mhtml?err=$err");
+	}
+
+    my $type = $panel->round->event->type;
+    my $tiebreaks = $panel->round->tb_set;
+
+    my $wins;
+    my $points;
+    my $ranks;
+    my $team_ranks;
+
+	my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
+	my @entries = $m->comp('/funclib/panel_entries.mas', panel => $panel);
+
+	foreach my $ballot (@ballots) { 
+
+		if ($ARGS{"rfd"}) { 
+
+			Tab::BallotValue->create({
+				tag => "rfd",
+				ballot => $ballot->id,
+				content => $ARGS{"rfd"}
+			});
+		}
+	}
+
+	if ($skipme) { 
+
+		my $url_args = "?panel_id=$panel_id&judge_id=$judge_id";
+
+		foreach my $key (keys %ARGS) { 
+			next if $key eq "panel_id";
+			next if $key eq "judge_id";
+			next if $key eq "rfd";
+			$url_args .= "&$key=$ARGS{$key}";
+		}
+
+		$url_args .= "&msg=RFD Saved";
+		$m->redirect("ballot.mhtml".$url_args);
+
+	} 
+
+    my $tourn = $judge->judge_group->tourn;
+    my @students = $m->comp('/funclib/panel_students.mas', panel => $panel);
+
+    my $max_points = $panel->round->event->setting("max_points");
+    my $min_points = $panel->round->event->setting("min_points");
+    my $point_increments = $panel->round->event->setting("point_increments");
+    my $point_ties = $panel->round->event->setting("point_ties");
+
+	my $errs;
+	my %student_values = ();
+	my %entry_values = ();
+
+	my %entry_points = ();
+	my %points_taken;
+
+	foreach my $student (@students) { 
+
+		my $points = $ARGS{$student->id."_points"};
+
+		$errs .= "<p>Points missing</p>"  unless $points;
+		next unless $points;
+
+		$points = int($points + 0.5) if $point_increments eq "whole";
+
+		if ($point_increments eq "tenths") { 
+			$points = $points * 10;
+			$points = int($points + 0.5);
+			$points = $points/10;
+		}
+
+		if ($point_increments eq "half") { 
+			my $rounded_points = $points + .5;
+			$rounded_points = $rounded_points - ($points % .5);
+			$points = $rounded_points;
+		}
+
+		$errs .= "<p>$points Points must be a number</p>" unless ($points eq $points+0);
+		$errs .= "<p>Points $points are outside of range</p>" if $points < $min_points || $points > $max_points;
+
+		$points_taken{$points}++;
+		$student_values{$student->id."_points"} = $points;
+		$entry_points{$student->entry} += $points;
+
+	}
+
+	my %used_points = ();
+
+	foreach my $entry (@entries) { 
+		$errs .= "<p>You gave two teams points of ".$entry_points{$entry->id}.".  Please correct</p>" if $used_points{$entry_points{$entry->id}};
+		$used_points{$entry_points{$entry->id}}++;
+	}
+
+	if ($errs) { 
+
+		my $url_args = "?panel_id=$panel_id&judge_id=$judge_id";
+
+		foreach my $key (keys %ARGS) { 
+			next if $key eq "panel_id";
+			next if $key eq "judge_id";
+			next if $key eq "rfd";
+			$url_args .= "&$key=$ARGS{$key}";
+		}
+
+		$url_args .= "&errs=$errs";
+
+		$m->redirect("ballot.mhtml".$url_args);
+
+	} else { 
+
+		#Clear the old cruft
+
+		Tab::BallotValue->set_sql( clear_cruft => "
+			delete ballot_value.*
+			from ballot_value, ballot
+			where ballot.panel = ?
+			and ballot.judge = ? 
+			and ballot.id = ballot_value.ballot");
+
+		Tab::BallotValue->sql_clear_cruft->execute($panel->id, $judge->id);
+
+		my @entries = sort {$entry_points{$b->id} <=> $entry_points{$a->id}} @entries;
+
+		my $rank = 1;
+
+		foreach my $entry (@entries) { 
+			$entry_rank{$entry->id} = $rank;
+			$rank++;
+		}
+
+		foreach my $ballot (@ballots) { 
+
+			$entry_speaks{$ballot->entry->id} = $ballot->speakerorder;
+
+			$ballot->audit("");
+			$ballot->update;
+
+			Tab::BallotValue->create({
+				tag => 'rank',
+				ballot => $ballot->id,
+				value => $entry_rank{$ballot->entry->id},
+				student => 0
+			});
+
+			foreach my $student (@students) { 
+
+				next unless $student->entry == $ballot->entry->id;
+
+				Tab::BallotValue->create({
+					tag => 'points',
+					ballot => $ballot->id,
+					student => $student->id,
+					value => $student_values{$student->id."_points"}
+				});
+
+			}
+
+		}
+
+	}
+
+
+</%init>
+
+	<div class="left huge">
+	
+		<h2>Confirm Please!</h2>
+
+		<table cellpadding="4">
+
+			<tr class="yellowrow">
+
+				<th>
+					Rank
+				</th>
+
+				<th>
+					Pts
+				</th>
+
+				<th>
+					Pos
+				</th>
+
+				<th>
+					Team
+				</th>
+
+				<th>
+					Speakers
+				</th>
+
+				<th>
+					Tot. Speaks
+				</th>
+
+			</tr>
+
+%		my $switch;
+%		@entries = sort {$entry_points{$b->id} <=> $entry_points{$a->id}} @entries;
+%		foreach my $entry (@entries) { 
+	
+			<tr class="<% ($switch++ % 2) ? "oddrow" : "evenrow" %>">
+
+				<td>
+					<% Lingua::EN::Numbers::Ordinate::ordinate( $entry_rank{$entry->id}) %>
+				</td>
+
+				<td>
+					<% 4 - $entry_rank{$entry->id} %> points
+				</td>
+
+				<td>
+					<% ($entry_speaks{$entry->id} == 1) ? "1G" : "" %>
+					<% ($entry_speaks{$entry->id} == 2) ? "1O" : "" %>
+					<% ($entry_speaks{$entry->id} == 3) ? "2G" : "" %>
+					<% ($entry_speaks{$entry->id} == 4) ? "2O" : "" %>
+				</td>
+
+				<td>
+					<% $entry->code %>
+				</td>
+
+				<td>
+%					foreach my $student ($entry->students) { 
+
+						<span class="smallerspan">
+							<% $student_values{$student->id."_points"} %>
+						</span>
+						<span class="medbigspan">
+							<% $student->first." ".$student->last %>
+						</span>
+
+						<br />
+%					}
+				</td>
+
+				<td>
+					<% $entry_points{$entry->id} %>
+				</td>
+
+			</tr>
+
+%		}
+
+		</table>
+
+		<br />
+		<br />
+		<br />
+
+		<div class="half centeralign left">
+			<a class="dkred block" style="padding-top: 25px; padding-bottom: 25px; font-size: 125%; text-decoration: none;" href="ballot.mhtml?panel_id=<% $panel_id %>&judge_id=<% $judge_id %>">
+				RE-ENTER BALLOT
+			</a>
+		</div>
+
+		<div class="half centeralign right">
+			<a class="dkgreen block" style="padding-top: 25px; padding-bottom: 25px; font-size: 125%; text-decoration: none;" href="ballot_confirm.mhtml?panel_id=<% $panel_id %>&judge_id=<% $judge_id %>">
+				YES CORRECT! CONFIRM IT
+			</a>
+		</div>
+
+		<br style="clear: both;">
+
+		<p style="margin-top: 20px; padding: 10px; font-size: 110%; margin-bottom: 20px;">
+			Once you confirm your ballot, you cannot change it online.  You'll
+			have to contact the tournament staff to make any further changes.
+		</p>
+
+	</div>
+
+	<div class="right small">
+
+		<div class="sidenote">
+
+			<h4>RFD</h4>
+
+			<% $ARGS{"rfd"} %>
+
+		</div>
+
+	</div>
+
