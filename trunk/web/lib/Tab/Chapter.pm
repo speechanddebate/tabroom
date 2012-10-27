@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Chapter->table('chapter');
 Tab::Chapter->columns(Primary => qw/id/);
 Tab::Chapter->columns(Essential => qw/name country state timestamp coaches/);
-Tab::Chapter->columns(TEMP => qw/count prefs/);
+Tab::Chapter->columns(TEMP => qw/count prefs code/);
 
 Tab::Chapter->has_many(schools => 'Tab::School', 'chapter');
 Tab::Chapter->has_many(students => 'Tab::Student', 'chapter');
@@ -50,9 +50,16 @@ sub full_member {
     return;
 }
 
-sub code {
-    my ($self, $circuit) = @_;
+sub circuit_code {
+    my ($self, $circuit, $code) = @_;
     my @membership = Tab::ChapterCircuit->search( chapter => $self->id, circuit => $circuit->id );
+
+	if ($code) { 
+		$membership[0]->code($code);
+		$membership[0]->update;
+		return;
+	}
+
     return $membership[0]->code if @membership;
     return;
 }
