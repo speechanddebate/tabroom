@@ -4,6 +4,8 @@
 </%args>
 <%init>
 
+	use POSIX;
+
 	my $now = DateTime->now();
 	my $err;
 
@@ -14,6 +16,7 @@
 	Tab::Entry->sql_wipe_prefs->execute($entry->id);
 
     my @rating_tiers = Tab::RatingTier->search(  judge_group => $group->id, type => "mpj" );
+    @rating_tiers = sort {$b->name <=> $a->name} @rating_tiers;
 
 	my @conflicts = $m->comp("/funclib/entry_conflicts.mas", entry => $entry);
 	my %conflicts_by_id = ();
@@ -25,39 +28,74 @@
 
     my @judges;
 	my @all_judges = Tab::Judge->search_where({ active => 1, judge_group => $group->id });
+	my %judges_at_tier = ();
 
     foreach my $judge (@all_judges) {
         next if $judge->school->id == $entry->school->id;
         next if $conflicts_by_id{$judge->id};
         next if $school_conflicts_by_id{$judge->id};
         push (@judges, $judge);
+		$judges_at_tier{$ARGS{$judge->id}}++;
     }
 
 	my $judge_pool = scalar @judges;
 
     my %tier_limit = ();
+	my %tier_name = ();
 
 	foreach my $tier (@rating_tiers) {
         $tier_limit{$tier->id} = ($judge_pool * $tier->max / 100);
+		$tier_name{$tier->id} = $tier->name;
     }
 
-	my %judges_at_tier = ();
+    my $cumulate++ if $group->setting("cumulate_mjp");
+    my %spares_at_tier;
+
+    if ($cumulate) { 
+
+		foreach my $tier (@rating_tiers) {
+            if ($judges_at_tier{$tier->id} < $tier_limit{$tier->id}) {
+                $spares_at_tier{$tier->id} += ceil($tier_limit{$tier->id}) - $judges_at_tier{$tier->id};
+				Tab::debuglog("I have ".$judges_at_tier{$tier->id} ." at tier ".$tier->name." and the limit is ".ceil($tier_limit{$tier->id})." Spares: ".$spares_at_tier{$tier->id});
+            }   
+        }   
+    }
+
+	my $spares_available;
+
+	foreach my $tier (@rating_tiers) { 
+
+		Tab::debuglog("Doing tier ".$tier->name);
+		$spares_available += $spares_at_tier{$tier->id};
+		Tab::debuglog("I have ".$spares_available." spares at tier ".$tier->name);
+
+		my $tier_count;
 
 		JUDGE:
 		foreach my $judge (@judges) { 
 
-			next unless $ARGS{$judge->id};
+			next unless $ARGS{$judge->id} == $tier->id;
+	
+			my $spared;
 
-			if ($judges_at_tier{$ARGS{$judge->id}} >= $tier_limit{$ARGS{$judge->id}}) {
+			if ($tier_count >= $tier_limit{$ARGS{$judge->id}}) {
 
-				my $tier = Tab::RatingTier->retrieve($ARGS{$judge->id});
-				$err = "You had too many judges rated ".$tier->name." <br/>" unless $err;
-				$err .= " - ".$judge->first." ".$judge->last." not rated <br />\n";
-				next JUDGE;
+				if ($spares_available > 0) { 
+					Tab::debuglog("Spares at tier ".$tier->name." available:  ".$spares_at_tier{$tier->id});
+					$spares_available--;
+					$spared++;
+				}
+		
+				unless ($spared) {
+					my $tier = Tab::RatingTier->retrieve($ARGS{$judge->id});
+					$err = "You had too many judges rated ".$tier->name." <br/>" unless $err;
+					$err .= " - ".$judge->first." ".$judge->last." not rated <br />\n";
+					next JUDGE;
+				}
 
 			}
 
-			$judges_at_tier{$ARGS{$judge->id}}++;
+			$tier_count++;
 
 			Tab::Rating->create({
 				type => "entry",
@@ -68,7 +106,8 @@
 				entered => $now
 			});
 
-		}	
+		}
+	}	
 
 	my $msg = $entry->name."'s prefs saved in ".$group->abbr;
 	$msg =~ s/\&/and/g;
