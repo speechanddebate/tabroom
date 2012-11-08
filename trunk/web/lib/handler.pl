@@ -16,6 +16,7 @@ use DateTime;
 use Lingua::EN::Numbers::Ordinate;
 use MIME::Lite;
 use HTML::FromText;
+use HTML::Strip;
 use Email::Valid;
 use DateTime::Span;
 use DateTime::Format::MySQL;
