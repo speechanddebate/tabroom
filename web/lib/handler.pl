@@ -30,6 +30,7 @@ use Sys::Syslog;
 use Tab::General;
 use Tab::DBI;
 use Tab::Account;
+use Tab::AccountConflict;
 use Tab::Ballot;
 use Tab::BallotValue;
 use Tab::Chapter;
