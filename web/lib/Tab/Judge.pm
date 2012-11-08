@@ -8,7 +8,7 @@ Tab::Judge->columns(Essential => qw/school first last code active ada
 									account acct_request dropped drop_time 
 									reg_time drop_by hired score tmp standby
 									hire_offer hire_approved tab_rating/);
-Tab::Judge->columns(TEMP => qw/tier pref panelid chair tourn diet/);
+Tab::Judge->columns(TEMP => qw/tier pref panelid chair tourn diet ballotid/);
 
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
 Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');

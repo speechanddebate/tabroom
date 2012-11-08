@@ -24,3 +24,5 @@ create index conflict on account_conflict(conflict);
 create index added_by on account_conflict(added_by);
 
 
+alter table result add student int;
+

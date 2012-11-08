@@ -10,16 +10,11 @@ Tab::Student->has_a(chapter => 'Tab::Chapter');
 Tab::Student->has_a(account => 'Tab::Account');
 Tab::Student->has_a(acct_request => 'Tab::Account');
 
-
+Tab::Student->has_many(entries => [Tab::EntryStudent => 'entry']);
 Tab::Student->has_many(entry_students => 'Tab::EntryStudent', 'student');
 
 __PACKAGE__->_register_datetimes( qw/timestamp created/);
 
-sub entries { 
-    my ($self,$tourn) = @_;
-    return Tab::Entry->search_by_student_and_tourn($self->id, $tourn->id) if $tourn;
-    return Tab::Entry->search_by_student($self->id);
-}
 
 sub housing { 
 	my ($self, $tourn, $day) = @_;
