@@ -1,0 +1,231 @@
+<%args> 
+	$tourn
+	$event_id => undef
+</%args>
+<%init>
+
+	my $event = Tab::Event->retrieve($event_id);
+
+	$m->abort unless $event;
+	$m->abort unless $event->tourn->id == $tourn->id;
+
+	Tab::School->set_sql(state_count => "
+		select count(distinct chapter.state)
+		from chapter, school, entry
+		where entry.event = ? 
+		and entry.school = school.id
+		and school.chapter = chapter.id
+	");
+
+	my $num_states = Tab::School->sql_state_count->select_val($event_id);
+
+	my $state_mult = 1;
+
+	$state_mult = 1.2 if $num_states > 2;
+	$state_mult = 1.4 if $num_states > 5;
+	$state_mult = 1.6 if $num_states > 8;
+	$state_mult = 1.8 if $num_states > 12;
+	$state_mult = 2.0 if $num_states > 15;
+
+	my @entries = $event->entries( waitlist => 0, dropped => 0, unconfirmed => 0 );
+
+	my $num_entries = scalar @entries;
+	$num_entries = 100 if $num_entries > 100;
+
+	my @rounds = sort {$b->name <=> $a->name} $event->rounds;
+
+	my @elims;
+	my @prelims;
+	my $final;
+
+	foreach my $round (@rounds) { 
+		$final = $round unless $final;
+		push @elims, $round if $round->type eq "elim";
+		push @elims, $round if $round->type eq "final";
+		push @prelims, $round if $round->type ne "final" && $round->type ne "elim";
+	}
+
+	my @values = $m->comp("/funclib/event_values.mas", event => $event); 
+
+	my %prelim_wins;
+	my %in_round = ();
+	my %final_ballots = ();
+
+	foreach my $value (@values) { 
+		next unless $value->tag eq "ballot";
+		$prelim_wins{$value->entryid}++ if $value->roundtype ne "final" && $value->roundtype ne "elim" && $value->value == 1;
+		push @{$in_round{$value->roundid}}, $value->entryid;
+		$final_ballots{$value->entryid}++ if $value->roundid == $final->id && $value->value == 1;
+	}
+
+	my %round_multiplier = ();
+	my %used = ();
+
+	if ($final) { 
+
+		my $what_it_takes;
+
+		foreach my $entry_id (@{$in_round{$final->id}}) {
+			next if $used{$entry_id};
+			$what_it_takes = $final_ballots{$entry_id} if $what_it_takes < $final_ballots{$entry_id};
+		}
+
+		foreach my $entry_id (@{$in_round{$final->id}}) {
+			next if $used{$entry_id};
+			$round_multiplier{$entry_id} = 2.3 if $what_it_takes == $final_ballots{$entry_id};
+			$round_multiplier{$entry_id} = 1.8 if $what_it_takes != $final_ballots{$entry_id};
+			$used{$entry_id}++;
+		}
+
+	}
+
+	my $mult = "1.6";
+	my $left = scalar @elims;
+
+	foreach my $round (@elims) { 
+
+		Tab::debuglog("Scoring elim ".$round->realname." with points $mult and $left elim rounds left");
+
+		$left--;
+		next if $round->id == $final->id;
+
+		foreach my $entry_id (@{$in_round{$round->id}}) {
+			next if $used{$entry_id};
+			$round_multiplier{$entry_id} = $mult;
+			$used{$entry_id}++;
+		}
+
+		$mult = 1.1 if $left < 1;
+		$mult = 1.1 if $mult == 1.2;
+		$mult = 1.2 if $mult == 1.4;
+		$mult = 1.4 if $mult == 1.6;
+
+	}
+
+</%init>
+
+	<div class="right small">
+
+		<div class="sidenote">
+
+			<h4>NDCA point factors</h4>
+
+			<div class="evenrow block">
+				<span class="hundo">
+					Field Size
+				</span>
+				<span class="smallerspan">
+					<% $num_entries %>
+				</span>
+			</div>
+
+			<div class="oddrow block">
+				<span class="hundo">
+					# States
+				</span>
+				<span class="smallerspan">
+					<% $num_states %>
+				</span>
+			</div>
+
+			<div class="evenrow block">
+				<span class="hundo">
+					Geography Score
+				</span>
+				<span class="smallerspan">
+					<% $state_mult %>
+				</span>
+			</div>
+
+			<br />
+
+			<a class="blue block" href="points_csv.mhtml?event_id=<% $event->id %>">
+				Download as CSV
+			</a>
+
+		</div>
+
+	</div>
+
+	<div class="left huge">
+
+		<& /funclib/tablesorter.mas, table => "sortmebaby" &>
+
+		<table cellpadding="3" cellspacing="1" id="sortmebaby">
+
+			<thead>
+
+				<tr class="yellowrow">
+
+					<th class="smallish">
+						Student
+					</th>
+
+					<th class="smallish">
+						School
+					</th>
+
+					<th class="smallish">
+						Wins
+					</th>
+
+					<th class="smallish">
+						%
+					</th>
+
+					<th class="smallish">
+						Elim
+					</th>
+
+					<th class="smallish">
+						Points
+					</th>
+
+				</tr>
+
+			</thead>
+
+			<tbody>
+
+%				foreach my $entry (@entries) { 
+
+%					my $mult = 1;
+%					$mult = $round_multiplier{$entry->id} if $round_multiplier{$entry->id};
+%					my $win_pct = $prelim_wins{$entry->id} / (scalar @prelims);
+
+					<tr>
+
+						<td>
+							<% $entry->name %>
+						</td>
+
+						<td>
+							<% $entry->school->short_name %>
+						</td>
+
+						<td>
+							<% $prelim_wins{$entry->id} %>
+						</td>
+
+						<td>
+							<% (sprintf "%.2f", $win_pct) * 100  %>%
+						</td>
+
+						<td>
+							<% $round_multiplier{$entry->id} %>
+						</td>
+
+						<td>
+							<% POSIX::ceil($state_mult * $mult * $num_entries * (sprintf "%.2f", $win_pct))%>
+						</td>
+
+					</tr>
+
+%				}	
+
+			</tbody>
+
+
+		</table>
+
+	</div>

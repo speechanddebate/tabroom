@@ -1,0 +1,159 @@
+<%args>
+	$event_id => undef
+	$account
+	$session
+</%args>
+<%init>
+
+
+	my $event = Tab::Event->retrieve($event_id);
+	$m->abort unless $event;
+
+	my $tourn = $event->tourn;
+	my $tourn_name = $tourn->name;
+	my $event_name = $event->name;
+	$event_name =~ s/[\W_]//g;
+	$tourn_name =~ s/[\W_]//g;
+
+	my $filename = "NDCA-Points-$event_name-$tourn_name-".$session->id.".csv";
+	my $filepath = $Tab::file_root."tmp/".$filename;
+	my $garbage = `rm -f $filename.*`;
+
+	Tab::School->set_sql(state_count => "
+		select count(distinct chapter.state)
+		from chapter, school, entry
+		where entry.event = ? 
+		and entry.school = school.id
+		and school.chapter = chapter.id
+	");
+
+	my $num_states = Tab::School->sql_state_count->select_val($event_id);
+
+	my $state_mult = 1;
+
+	$state_mult = 1.2 if $num_states > 2;
+	$state_mult = 1.4 if $num_states > 5;
+	$state_mult = 1.6 if $num_states > 8;
+	$state_mult = 1.8 if $num_states > 12;
+	$state_mult = 2.0 if $num_states > 15;
+
+	my @entries = $event->entries( waitlist => 0, dropped => 0, unconfirmed => 0 );
+
+	my $num_entries = scalar @entries;
+	$num_entries = 100 if $num_entries > 100;
+
+	my @rounds = sort {$b->name <=> $a->name} $event->rounds;
+
+	my @elims;
+	my @prelims;
+	my $final;
+
+	foreach my $round (@rounds) { 
+		$final = $round unless $final;
+		push @elims, $round if $round->type eq "elim";
+		push @elims, $round if $round->type eq "final";
+		push @prelims, $round if $round->type ne "final" && $round->type ne "elim";
+	}
+
+	my @values = $m->comp("/funclib/event_values.mas", event => $event); 
+
+	my %prelim_wins;
+	my %in_round = ();
+	my %final_ballots = ();
+
+	foreach my $value (@values) { 
+		next unless $value->tag eq "ballot";
+		$prelim_wins{$value->entryid}++ if $value->roundtype ne "final" && $value->roundtype ne "elim" && $value->value == 1;
+		push @{$in_round{$value->roundid}}, $value->entryid;
+		$final_ballots{$value->entryid}++ if $value->roundid == $final->id && $value->value == 1;
+	}
+
+	my %round_multiplier = ();
+	my %used = ();
+
+	if ($final) { 
+
+		my $what_it_takes;
+
+		foreach my $entry_id (@{$in_round{$final->id}}) {
+			next if $used{$entry_id};
+			$what_it_takes = $final_ballots{$entry_id} if $what_it_takes < $final_ballots{$entry_id};
+		}
+
+		foreach my $entry_id (@{$in_round{$final->id}}) {
+			next if $used{$entry_id};
+			$round_multiplier{$entry_id} = 2.3 if $what_it_takes == $final_ballots{$entry_id};
+			$round_multiplier{$entry_id} = 1.8 if $what_it_takes != $final_ballots{$entry_id};
+			$used{$entry_id}++;
+		}
+
+	}
+
+	my $mult = "1.6";
+	my $left = scalar @elims;
+
+	foreach my $round (@elims) { 
+
+		Tab::debuglog("Scoring elim ".$round->realname." with points $mult and $left elim rounds left");
+
+		$left--;
+		next if $round->id == $final->id;
+
+		foreach my $entry_id (@{$in_round{$round->id}}) {
+			next if $used{$entry_id};
+			$round_multiplier{$entry_id} = $mult;
+			$used{$entry_id}++;
+		}
+
+		$mult = 1.1 if $left < 1;
+		$mult = 1.1 if $mult == 1.2;
+		$mult = 1.2 if $mult == 1.4;
+		$mult = 1.4 if $mult == 1.6;
+
+	}
+
+	open (CSVOUT, ">$filepath.csv");
+		print CSVOUT "School,";
+		print CSVOUT "Debater,";
+		print CSVOUT "State,";
+		print CSVOUT "Tourn,";
+		print CSVOUT "Field,";
+		print CSVOUT "Geo,";
+		print CSVOUT "# Prelims,";
+		print CSVOUT "Wins,";
+		print CSVOUT "Win %,";
+		print CSVOUT "Elim,";
+		print CSVOUT "Points\n";
+
+	my $num_prelims = scalar @prelims;
+	my %total = ();
+
+	foreach my $entry (@entries) { 
+
+		my $win_pct = $prelim_wins{$entry->id} / $num_prelims;
+
+		my $mult = 1;
+		$mult = $round_multiplier{$entry->id} if $round_multiplier{$entry->id};
+		$total{$entry->id} = POSIX::ceil($state_mult * $mult * $num_entries * (sprintf "%.2f", $win_pct));
+	}
+
+	foreach my $entry (sort {$total{$b->id} <=> $total{$a->id}} @entries) { 
+		my $mult = 1;
+		$mult = $round_multiplier{$entry->id} if $round_multiplier{$entry->id};
+		my $win_pct = $prelim_wins{$entry->id} / $num_prelims;
+		print CSVOUT "\"".$entry->school->short_name."\",";
+		print CSVOUT "\"".$entry->name."\",";
+		print CSVOUT "\"".($entry->school->chapter ? $entry->school->chapter->state : "") ."\",";
+		print CSVOUT "\"".$tourn->name."\",";
+		print CSVOUT "\"".$num_entries."\",";
+		print CSVOUT "\"".$state_mult."\",";
+		print CSVOUT "\"".$num_prelims."\",";
+		print CSVOUT "\"".$prelim_wins{$entry->id}."\",";
+		print CSVOUT "\"".(sprintf "%.2f", $win_pct)."\",";
+		print CSVOUT "\"".$mult."\",";
+		print CSVOUT "\"".$total{$entry->id}."\"\n";
+	}
+
+	$m->redirect("$Tab::url_prefix/tmp/$filename");
+
+</%init>
