@@ -1,3 +1,3 @@
-INSERT INTO `account` VALUES (1,'admin@tabroom.com','admin','$1$paYkBo5N$DzMFtxzOonfFBFSx5OKZU1','god','Admin','User','800-555-1234',NULL,NULL,NULL,NULL,NULL,1,NULL,NULL,NULL,NULL,1,1,'0000-00-00 00:00:00');
 
-INSERT INTO `league` VALUES (1,'Default League',NULL,NULL,'DEF',1,1,NULL,NULL,NULL,NULL,'America/New_York',NULL,1,NULL,NULL,NULL,NULL,1,NULL,NULL,1,NULL,NULL,'0000-00-00 00:00:00');
+INSERT INTO `account` VALUES (1,'admin@tabroom.com','$1$vgqiBr7K$eMTj5iUi3/NNMRgdLrCtp.','Admin','User','978 555 1234','1 Nowhere Road','Watertown','MA',2472,1,'0000-00-00 00:00:00',0,NULL,NULL,3,'America/New_York',NULL,NULL,NULL,NULL,'US',NULL,NULL);
+
