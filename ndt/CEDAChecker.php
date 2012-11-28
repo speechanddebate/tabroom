@@ -36,10 +36,13 @@ $schoolname_temp="";
 $teamname[$i]=getfullteamname(mysql_result($entry,$i,"entry_id"), $schoolN1, $schoolN2, $schoolname_temp);
 $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp;
 
-  $query="SELECT *, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name from ballot, ballot_value, panel, round where panel.id=ballot.panel and round.id=panel.round and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
+  $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name from ballot, ballot_value, panel, round where panel.id=ballot.panel and round.id=panel.round and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
+
+      if (mysql_result($entry,$i,"entry_id")==348615) {echo $row['rd_name']." ".$row['ballot_id']." ".$row['ballot_decision']." ".$ebalwin[$i]."<br>";}
+
       if ($row['rd_name'] > 9 AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
         {$erd[$i] += 1;
          if($balfor > $balvs) {$ewin[$i] += 1;}
@@ -187,7 +190,7 @@ To restore national standings click the total points column.<br><br>
 
 <?php
 
-$i=1;
+$i=0;
 while ($i < $topsixctr) {
  echo "<tr>";
  echo "<td>".$topsixpts[$i]."</td>";

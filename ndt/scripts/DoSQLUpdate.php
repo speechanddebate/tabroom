@@ -4,7 +4,7 @@ require 'databaseconnect.php';
 $query=$_POST['querystring'];
 echo $query;
 mysql_query($query);
-echo "done.";
+echo "<br><br>done.";
 
 mysql_close();
 ?>
