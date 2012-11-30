@@ -40,9 +40,6 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
-
-      if (mysql_result($entry,$i,"entry_id")==348615) {echo $row['rd_name']." ".$row['ballot_id']." ".$row['ballot_decision']." ".$ebalwin[$i]."<br>";}
-
       if ($row['rd_name'] > 9 AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
         {$erd[$i] += 1;
          if($balfor > $balvs) {$ewin[$i] += 1;}

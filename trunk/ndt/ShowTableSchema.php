@@ -6,7 +6,7 @@ $database="itab";
 mysql_connect("localhost",$username,$password);
 @mysql_select_db($database) or die( "Unable to select database<br>");
 
-$result = mysql_query("SHOW COLUMNS FROM ballot_value");
+$result = mysql_query("SHOW COLUMNS FROM student");
 if (!$result) {
     echo 'Could not run query: ' . mysql_error();
     exit;
@@ -30,13 +30,13 @@ echo "Field $i name:".mysql_field_name($ballot, $i)."<br>";
 }
 
 $females=0;
-$query="SELECT * from event, judge_group, judge where event.id=16967 and judge_group.id=event.judge_group and judge.judge_group=judge_group.id ORDER BY gender asc";
+$query="SELECT * from student where last='pappas'";
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
 
 for ($i=0; $i <= $entryNum-1; $i++)
 {
-echo mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")." gender:".mysql_result($tourn,$i,"gender")."<br>";
+echo mysql_result($tourn,$i,"id")." ".mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")." chapter:".mysql_result($tourn,$i,"chapter")."<br>";
 if (mysql_result($tourn,$i,"gender")=="F") {$females++;}
 }
 echo "Total judges:".$entryNum." females:".$females."<br>";
