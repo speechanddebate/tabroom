@@ -8,6 +8,7 @@ INSTRUCTIONS: Select the event from the list below and click on the correspondin
 The seasonal totals link will show all teams' cumulative record, and provide links to an NDT bid sheet for any team.  The results received link will show what results have been recieved, which are still missing, and any known anomalies.</br></br>
 <a href='https://www.tabroom.com/jbruschke/SeasonalTotals.php'>Seasonal Totals</a>
 <a href='https://www.tabroom.com/jbruschke/CEDAChecker.php'>CEDA Points</a>
+<a href='https://www.tabroom.com/jbruschke/NDTChecker.php'>NDT Points</a>
 <a href='https://www.tabroom.com/jbruschke/ResultsStatus.php'>Results Received and Missing</a></br></br>
 
 </div>
