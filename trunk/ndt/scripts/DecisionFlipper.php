@@ -21,6 +21,6 @@ $flipquery="";
 
 mysql_close();
 
-header('Location: https://www.tabroom.com/jbruschke/UglyResultDisplay.php?event='.$event);
+header('Location: https://www.tabroom.com/jbruschke/FixerUglyResultDisplay.php?event='.$event);
 
 ?>
