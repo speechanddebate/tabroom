@@ -2,8 +2,8 @@
 require 'scripts/databaseconnect.php';
 
 //INSERT INTO event_setting (tag, event, value) VALUES ('level', 18947,"novice")
-$event=$_GET['event'];
-$query="SELECT * FROM tourn, tourn_circuit, event where tourn_circuit.circuit=43 and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id";
+//$event=$_GET['event'];
+$query="SELECT * FROM tourn, tourn_circuit, event where tourn_circuit.circuit=43 and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and (event.type='policy' or event.type='debate')";
 
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
