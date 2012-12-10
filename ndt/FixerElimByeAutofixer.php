@@ -53,7 +53,7 @@ Run a custom query
 For panels with ZERO ballots:
 <form action="scripts/AddTeamToPanel.php" method="post">
  Panel: <input type="text" size="30" name="panel" />
- Team: <input type="text" size="30" name="judge" />
+ Team: <input type="text" size="30" name="entry" />
  <input type="submit" value="Add Team to Blank Panel and give them a bye"/>
 </form>
 <hr>
@@ -62,6 +62,14 @@ Audit the panel to make sure there are 3 ballots and all have ballot_values asso
   Panel: <input type="text" size="30" name="panel" />
   <input type="submit" value="Audit a panel with a bye"/>
 </form>
+<hr>
+Take a bye that credits only 1 ballot and credit the team with all ballots; must already have 3 ballots for the entry.  Only works if ballot_values don't exist
+<form action="scripts/FillOutWinner.php" method="post">
+  Panel: <input type="text" size="30" name="panel" />
+  Entry: <input type="text" size="30" name="entry" />
+  <input type="submit" value="Set all ballots to win for this team"/>
+</form>
+
 
 
 <?php
