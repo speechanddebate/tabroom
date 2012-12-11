@@ -19,3 +19,7 @@ Enter panel number to view: <input type="text" size="30" name="panel" />
  Run this SQL query: <input type="text" size="50" name="querystring" />
  <input type="submit" value="Run query"/>
 </form>
+<form action="FixerViewRounds.php" method="get">
+ Enter event ID: <input type="text" size="50" name="event" />
+ <input type="submit" value="Show rounds"/>
+</form>
