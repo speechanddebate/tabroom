@@ -74,6 +74,7 @@ use Tab::Region;
 use Tab::RegionAdmin;
 use Tab::RegionFine;
 use Tab::Result;
+use Tab::ResultSet;
 use Tab::ResultValue;
 use Tab::Room;
 use Tab::RoomPool;
