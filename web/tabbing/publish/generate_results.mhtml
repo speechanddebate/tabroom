@@ -9,6 +9,32 @@
 
 	my @events;
 
+	my $novice++ if $tourn->setting("novices");
+	my $honmen++ if $tourn->setting("honorable_mentions");
+
+	Tab::ResultValue->set_sql( rm_label => "
+		delete result_value.*
+		from result, result_value, result_set
+		where result_value.result = result.id
+		and result.result_set = result_set.id
+		and result_set.event = ? 
+		and result_set.label = ? 
+	");
+
+	Tab::Result->set_sql( rm_label => "
+		delete result.* 
+		from result, result_set 
+		where result.result_set = result_set.id
+		and result_set.event = ? 
+		and result_set.label = ? 
+	");
+
+	Tab::ResultSet->set_sql( rm_label => "
+		delete from result_set
+		where event = ? 
+		and label = ? 
+	");
+
 	if ($event_id eq "all") { 
 
 		@events = $tourn->events;
@@ -26,15 +52,213 @@
 
 	}
 
+	my $msg;
 
 	foreach my $event (@events) { 
+	
+		next unless $event->type eq "speech";
 
+		my @rounds = sort {$b->name <=> $a->name} $m->comp("/funclib/event_rounds.mas", event => $event, done => "yes");
+        my $top_novice = $m->comp("/tabbing/results/speech/top_novice.mas", event => $event) if $novice;
 
+		my %used;
+        my $final;
+        my @elims;
+        my $last_prelim;
 
+        foreach my $round (@rounds) { 
+            $final = $round if $round->type eq "final";
+            push (@elims, $round) if $round->type eq "elim";
+            $last_prelim = $round if $round->type ne "elim" && $round->type ne "final" && not defined $last_prelim;
+        }
 
+		if ($result_type eq "prelim_seed") { 
 
+			$label = "Prelim Round Seeding" unless $label;
+
+			Tab::ResultValue->sql_rm_label->execute( $event->id, $label );
+			Tab::Result->sql_rm_label->execute( $event->id, $label );
+			Tab::ResultSet->sql_rm_label->execute( $event->id, $label );
+
+			my @values = $m->comp("/funclib/event_values.mas", event => $event, prelim => 1);
+			my %values_by_entry = (); 
+
+			foreach my $value (@values) { 
+				push @{$values_by_entry{$value->entryid}}, $value;
+			}
+
+			my $set = Tab::ResultSet->create({ 
+				tourn => $tourn->id,
+				event => $event->id,
+				label => $label
+			});
+
+			my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $tier_dir) = $m->comp("/tabbing/results/speech/order_entries.mas", round => $last_prelim);
+	
+			foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+
+				my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
+
+				foreach my $entry (@{${$entries_ref}{$key}}) {
+
+					next if $used{$entry->id};
+					$used{$entry->id}++;
+
+					my $result = Tab::Result->create({
+						entry => $entry->id,
+						result_set => $set->id
+					});
+
+					my $priority;
+
+					my $key_value = $key;
+					$key_value .= "-T" if $tie;
+
+					Tab::ResultValue->create({
+						tag => "seed",
+						result => $result->id,
+						value => $key_value,
+						priority => 0,
+						sort_desc => 0
+					});
+
+					foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+
+						my $tag = ${$desc_ref}{$key};
+						my $sort_desc = 0 if ${$tier_dir}{$key} eq "up";
+						$sort_desc = 1 if ${$tier_dir}{$key} eq "down";
+
+						Tab::ResultValue->create({
+							tag => $tag,
+							result => $result->id,
+							value => ${$tbs_ref}{$entry->id."-".$key},
+							priority => $key,
+							sort_desc => $sort_desc
+						});
+
+					}
+
+					my $salad_bar;
+
+					foreach my $value (@{$values_by_entry{$entry->id}}) {
+						$salad_bar .= " " if $salad_bar;
+						$salad_bar .= $value->value;
+					}
+
+					Tab::ResultValue->create({
+						tag => "Results",
+						result => $result->id,
+						value => $salad_bar,
+						no_sort => 1
+					});
+
+				}
+
+			}
+
+		} elsif ($result_type eq "final") { 
+			
+			$label = "Final Placement" unless $label;
+			
+			Tab::ResultValue->sql_rm_label->execute( $event->id, $label );
+			Tab::Result->sql_rm_label->execute( $event->id, $label );
+			Tab::ResultSet->sql_rm_label->execute( $event->id, $label );
+
+			my @values = $m->comp("/funclib/event_values.mas", event => $event);
+			my %values_by_entry = (); 
+
+			foreach my $value (@values) { 
+				push @{$values_by_entry{$value->entryid}}, $value;
+			}
+
+			my $set = Tab::ResultSet->create({ 
+				tourn => $tourn->id,
+				event => $event->id,
+				label => $label
+			});
+
+			foreach my $round ($final, @elims, $last_prelim) {
+
+	            next unless $round;
+	            my $type = $round->type;
+	            my $label = substr($round->label, 0, 6); 
+
+	            my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $tier_dir) = $m->comp("/tabbing/results/speech/order_entries.mas", round => $round);
+
+				foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+
+					my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
+
+					foreach my $entry (@{${$entries_ref}{$key}}) {
+
+						next if $used{$entry->id};
+						$used{$entry->id}++;
+
+						my $result = Tab::Result->create({
+							entry => $entry->id,
+							result_set => $set->id
+						});
+
+						my $priority;
+
+						my $key_value = Lingua::EN::Numbers::Ordinate::ordinate($key) if $type eq "final";
+						$key_value .= "-T" if $tie && $type eq "final";
+
+						$key_value = $label if $type eq "elim";
+						$key_value = " " if $type eq "prelim";
+
+						Tab::ResultValue->create({
+							tag => "Place",
+							result => $result->id,
+							value => $key_value,
+							priority => 0,
+							sort_desc => 0
+						});
+
+						foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+
+							my $tag = ${$desc_ref}{$key};
+							my $sort_desc = 0 if ${$tier_dir}{$key} eq "up";
+							$sort_desc = 1 if ${$tier_dir}{$key} eq "down";
+
+							Tab::ResultValue->create({
+								tag => $tag,
+								result => $result->id,
+								value => ${$tbs_ref}{$entry->id."-".$key},
+								priority => $key,
+								sort_desc => $sort_desc
+							});
+
+						}
+
+						my $salad_bar;
+
+						foreach my $value (@{$values_by_entry{$entry->id}}) {
+							$salad_bar .= " " if $salad_bar;
+							$salad_bar .= $value->value;
+						}
+
+						Tab::ResultValue->create({
+							tag => "Results",
+							result => $result->id,
+							value => $salad_bar,
+							no_sort => 1
+						});
+
+					}
+
+				}
+
+			}
+
+		}
+
+		$msg .= $event->name." results published " if $publish;
+		$msg .= $event->name." results calculated " unless $publish;
 
 	}
+
+	$m->redirect("index.mhtml?msg=$msg");
 
 
 </%init>

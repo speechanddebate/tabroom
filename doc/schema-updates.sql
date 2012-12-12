@@ -42,7 +42,7 @@ alter table result drop seed;
 alter table result_value drop label;
 alter table result_value add tag varchar(15);
 alter table result_value add no_sort bool not null default 0;
+alter table result_value modify value varchar(127);
 alter table result add school int;
-
 
 
