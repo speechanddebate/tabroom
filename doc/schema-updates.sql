@@ -31,6 +31,7 @@ create table result_set  (
 	tourn int not null,
 	event int not null,
 	label varchar(255),
+	generated datetime,
 	timestamp timestamp
 );
 
