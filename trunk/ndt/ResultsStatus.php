@@ -81,7 +81,7 @@ require 'scripts/tabroomtemplate.html';
          <tr><td>App State</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Davis</td><td>CAT</td></tr>
 
          <tr><td>WNPT</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Hanson</td><td>NA</td></tr>
-         <tr><td>UMKC Regional</td><td>3 divisions</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">No data received</font></td><td>Vega</td><td>NA</td></tr>
+         <tr><td>UMKC Regional</td><td>cancelled</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>Vega</td><td>NA</td></tr>
          <tr><td>Iowa</td><td>3 divisions</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">No data received</font></td><td>?</td><td>NA</td></tr>
          <tr><td>Bay Area Rookie</td><td>Novice</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">No data received</font></td><td>Opsata</td><td>NA</td></tr>
          <tr><td>NE Fall champS</td><td>3 divisions</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">No data received</font></td><td>Binghampton</td><td>NA</td></tr>
