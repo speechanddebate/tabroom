@@ -1,8 +1,5 @@
 <?php
 
-//pull event, then round, then tiebreak_set, then tiebreak
-//this means you need to find the last prelim round
-
 require 'scripts/tabroomtemplate.html';
 require 'scripts/databaseconnect.php';
 
@@ -11,6 +8,7 @@ $event=$_GET['event'];
 //PULL THE TIEBREAKERS
 $query="SELECT * from tiebreak where tiebreak.tb_set=".gettbset($event)." order by priority asc";
 $tb=mysql_query($query);
+$ntb= mysql_num_rows($tb);
 //you've now got all the tiebreakers stored in a mysql_fetch_array
 //while ($row = mysql_fetch_array($tb, MYSQL_BOTH)) 
 // {echo $row['name']." ". $row['tb']."<br>";}
@@ -21,25 +19,28 @@ $spkr=mysql_query($query);
 $nspkrs= mysql_num_rows($spkr);
 //you've now got all the speakers stored in a mysql_fetch_array
 
-$tbtable = array(); //array to hold speakers; $tbtable[0][0] is $tbtable[speaker][tiebreaker score] 0=name, 1=school, 2=entry, 3+ = tiebreaker scores
+$tbtable = array(); //array to hold speakers; $tbtable[tiebreaker][speaker], 0=name, 1=school, 2=entry, 3+ = tbreaks
 
 $i=0;$j=0;
 while ($row = mysql_fetch_array($spkr, MYSQL_BOTH)) 
  {$i++;
-  $tbtable[$i]['name']=$row['last']." ". $row['first'];
-  $tbtable[$i][1]=$row['chapter'];
-  $tbtable[$i][2]=$row['entry'];
+  $tbtable[0][$i]=$row['last'].", ". $row['first'];
+  $tbtable[1][$i]=$row['chapter'];
+  $tbtable[2][$i]=$row['entry'];
   $j=2;
   mysql_data_seek($tb,0);
   while ($row2 = mysql_fetch_array($tb, MYSQL_BOTH)) 
    {$j++;
-    $tbtable[$i][$j]=getscore($row['student'], $row['entry'], $row2['name'], $row2['highlow']);
+    $tbtable[$j][$i]=getscore($row['student'], $row['entry'], $row2['name'], $row2['highlow']);
    }
  }
 
 //sort
-sort_by_key($tbtable, 'name')
-
+// $dummy='$tbtable[3],SORT_DESC, $tbtable[4]';
+ $dummy="";
+ $dummy=makesortstring($tb);
+ $sort="array_multisort(".$dummy.");"; 
+  eval($sort); 
 ?>
 
 <h2>Speakers</h2>
@@ -58,18 +59,18 @@ sort_by_key($tbtable, 'name')
 	<tbody>
 <?php
 
-$i=0;
-while ($i<$nspkrs)
+$i=-1;
+while ($i<$nspkrs-1)
  {
   $i++;
   echo "<tr>";
-  echo "<td>".$tbtable[$i]['name']."</td>";
-  echo "<td>".$tbtable[$i][1]."</td>";
+  echo "<td>".$tbtable[0][$i]."</td>";
+  echo "<td>".getschoolname($tbtable[1][$i])."</td>";
         mysql_data_seek($tb,0);
         $j=2;
         while ($row = mysql_fetch_array($tb, MYSQL_BOTH)) 
          {$j++;
-          echo "<td>".$tbtable[$i][$j]."</td>";
+          echo "<td>".$tbtable[$j][$i]."</td>";
          }
   echo "</tr>";
  }
@@ -82,17 +83,6 @@ while ($i<$nspkrs)
 <?php
 
 mysql_close();
-
-function getlastprelim($event)
-{
-   $lastprelim=0;
-   $query="SELECT *, round.id as round_id from round, timeslot where round.event=".$event." and round.type<>'elim' and timeslot.id=round.timeslot order by timeslot.start";
-   $round=mysql_query($query);
-    while ($row = mysql_fetch_array($round, MYSQL_BOTH)) 
-     {$lastprelim=$row['round_id'];
-     }
-    return $lastprelim;
-}
 
 function gettbset($event)
 {
@@ -109,6 +99,7 @@ function getscore($studententry, $entry, $scoretype, $hilo)
 {
    //echo $studententry." ".$entry." ".$scoretype." ".$hilo."<br>";
    $score=0;
+   if ($scoretype=='ranks') {$scoretype='rank';}
    $query="SELECT * from ballot, ballot_value where ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." and ballot_value.value>0 order by ballot_value.value asc";
    $pts=mysql_query($query);
    $nrows= mysql_num_rows($pts); //echo $nrows." rows returned<br>";
@@ -118,15 +109,35 @@ function getscore($studententry, $entry, $scoretype, $hilo)
       $i++;
       if ($i>$hilo and $i<=($nrows-$hilo)) {$score=$score+$row['value'];}
      }
+   if (empty($score)) {$score=0;}
    return $score;
 }
 
-function sort_by_key ($arr,$key) { 
-    global $key2sort; 
-    $key2sort = $key; 
-    uasort($arr, 'sbk'); 
-    return ($arr); 
-} 
-function sbk ($a, $b) {global $key2sort; return (strcasecmp ($a[$key2sort],$b[$key2sort]));} 
+function makesortstring($tb)
+{
+ $dummy="";
+ mysql_data_seek($tb,0);
+ $i=2;
+ while ($row = mysql_fetch_array($tb, MYSQL_BOTH)) 
+  {
+  $i++;
+  $dummy.='$tbtable['.$i.'],';
+  if ($row['name']=="ranks") {$dummy.="SORT_ASC,";}
+  if ($row['name']=="points") {$dummy.="SORT_DESC,";}
+  }
+$dummy.='$tbtable[0],$tbtable[1],$tbtable[2]';
+return $dummy;
+}
+
+function getschoolname($school)
+{
+   $schoolname="";
+   $query="SELECT * FROM chapter WHERE id=".$school;
+   $school=mysql_query($query);
+   while ($row = mysql_fetch_array($school, MYSQL_BOTH)) 
+     {$schoolname=$row['name'];}
+    return $schoolname;
+}
+
 
 ?>
