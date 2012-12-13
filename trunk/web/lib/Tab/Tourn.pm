@@ -20,6 +20,7 @@ Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn' => { order_by => 'sta
 Tab::Tourn->has_many(sweep_sets => 'Tab::SweepSet', 'tourn');
 Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
 Tab::Tourn->has_many(settings => 'Tab::TournSetting', 'tourn');
+Tab::Tourn->has_many(result_sets => "Tab::ResultSet", 'tourn');
 Tab::Tourn->has_many(tourn_sites => 'Tab::TournSite', 'tourn');
 Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(tourn_admins => 'Tab::TournAdmin', 'tourn');
