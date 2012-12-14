@@ -20,6 +20,8 @@ $nspkrs= mysql_num_rows($spkr);
 //you've now got all the speakers stored in a mysql_fetch_array
 
 $tbtable = array(); //array to hold speakers; $tbtable[tiebreaker][speaker], 0=name, 1=school, 2=entry, 3+ = tbreaks
+$avgjudpts = array(); //holds avg pts for each judge; 0=judge, 1=avg pts
+makeavgpts(&$avgjudpts, $event);
 
 $i=0;$j=0;
 while ($row = mysql_fetch_array($spkr, MYSQL_BOTH)) 
@@ -70,7 +72,7 @@ while ($i<$nspkrs-1)
         $j=2;
         while ($row = mysql_fetch_array($tb, MYSQL_BOTH)) 
          {$j++;
-          echo "<td>".$tbtable[$j][$i]."</td>";
+          echo "<td>".number_format($tbtable[$j][$i], 2, '.', '')."</td>";
          }
   echo "</tr>";
  }
@@ -83,6 +85,28 @@ while ($i<$nspkrs-1)
 <?php
 
 mysql_close();
+
+function makeavgpts(&$avgjudpts, $event)
+{
+ $query="SELECT *, judge.id as judge_id from judge, event where event.id=".$event." and judge.judge_group=event.judge_group";
+ $judge=mysql_query($query);
+ $i=0;
+  while ($row = mysql_fetch_array($judge, MYSQL_BOTH)) 
+     {
+      $i++; 
+      $avgjudpts[$i]['judge']=$row['judge_id'];
+      $query2="SELECT * from ballot, ballot_value where ballot.judge=".$row['judge_id']." and ballot_value.ballot=ballot.id and tag='points' and ballot_value.value>0";
+      $pts=mysql_query($query2); $totpts=0;
+      $nrows= mysql_num_rows($pts);
+      while ($row2 = mysql_fetch_array($pts, MYSQL_BOTH)) 
+        {$totpts=$totpts+$row2['value'];}
+        $avgjudpts[$i]['avg']=0;
+        if ($nrows>0) {$avgjudpts[$i]['avg']=$totpts/$nrows;}
+      //if ($row['judge_id']==117213) {echo $totpts." ".$nrows."<br>";}
+     }
+//$x=0; while ($x<$i) {echo $avgjudpts[$x]['judge']." ".$avgjudpts[$x]['avg']."<br>"; $x++;}
+//var_dump($avgjudpts);  
+}
 
 function gettbset($event)
 {
@@ -98,19 +122,53 @@ function gettbset($event)
 function getscore($studententry, $entry, $scoretype, $hilo)
 {
    //echo $studententry." ".$entry." ".$scoretype." ".$hilo."<br>";
+   $dojudgevar=FALSE;
+   if ($scoretype=="judgevar") {$dojudgevar=TRUE; $scoretype="points";}
    $score=0;
    if ($scoretype=='ranks') {$scoretype='rank';}
-   $query="SELECT * from ballot, ballot_value where ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." and ballot_value.value>0 order by ballot_value.value asc";
+   $query="SELECT * from ballot, ballot_value where ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." order by ballot_value.value asc";
    $pts=mysql_query($query);
    $nrows= mysql_num_rows($pts); //echo $nrows." rows returned<br>";
-   $i=0;
+   $i=0; $scorevalue=0;
     while ($row = mysql_fetch_array($pts, MYSQL_BOTH)) 
      {
       $i++;
-      if ($i>$hilo and $i<=($nrows-$hilo)) {$score=$score+$row['value'];}
+      $scorevalue=$row['value']; 
+      if ($dojudgevar==TRUE) {$scorevalue=getjudvar($row['judge'], $scorevalue);}
+      if ($scorevalue == -1) {$scorevalue=getavg($studententry, $entry, $scoretype);}
+      if ($i>$hilo and $i<=($nrows-$hilo)) {$score=$score+$scorevalue;}
      }
    if (empty($score)) {$score=0;}
    return $score;
+}
+
+function getjudvar($judge, $pts)
+{
+if ($pts==0) {return 0;}
+global $avgjudpts;
+$rows = count($avgjudpts,0);
+$i=0;
+while ($i<$rows)
+ {
+  $i++; 
+  if ($avgjudpts[$i]['judge']==$judge) {return $pts-$avgjudpts[$i]['avg']; echo $avgjudpts[$i]['judge']." ".$pts." ".$avgjudpts[$i]['avg']."<br>";
+                                       }
+ }
+return 0;
+}
+
+function getavg($studententry, $entry, $scoretype)
+{
+   $avg=0;
+   $query="SELECT * from ballot, ballot_value where ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." and ballot_value.value<>-1 order by ballot_value.value asc";
+   $pts=mysql_query($query);
+   $nrows= mysql_num_rows($pts); //echo $nrows." rows returned<br>";
+   $total=0;
+    while ($row = mysql_fetch_array($pts, MYSQL_BOTH)) 
+     {
+      $total=$total+$row['value'];
+     }
+   return $total/$nrows;
 }
 
 function makesortstring($tb)
