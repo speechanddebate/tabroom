@@ -5,10 +5,22 @@ require 'scripts/databaseconnect.php';
 
 $event=$_GET['event'];
 
+//TOURN NAME
+$query="SELECT *, tourn.name as tourn_name, event.name as event_name from tourn, event where event.id=".$event." and tourn.id=event.tourn";
+$tourn=mysql_query($query);
+while ($row = mysql_fetch_array($tourn, MYSQL_BOTH)) 
+ {$tournname=$row['tourn_name']; $eventname=$row['event_name'];}
+
 //PULL THE TIEBREAKERS
 $query="SELECT * from tiebreak where tiebreak.tb_set=".gettbset($event)." order by priority asc";
 $tb=mysql_query($query);
-$ntb= mysql_num_rows($tb);
+$ntb= mysql_num_rows($tb); 
+if ($ntb<1) 
+ {echo "Speaker tiebreakers do not appear to be entered for this tournament.<br><br>"; 
+  echo "<a href='https://www.tabroom.com/jbruschke/SpeakerAwardHelp.php'>Click here for help on missing tiebreakers</a>";
+  die;
+ }
+
 //you've now got all the tiebreakers stored in a mysql_fetch_array
 //while ($row = mysql_fetch_array($tb, MYSQL_BOTH)) 
 // {echo $row['name']." ". $row['tb']."<br>";}
@@ -45,7 +57,15 @@ while ($row = mysql_fetch_array($spkr, MYSQL_BOTH))
   eval($sort); 
 ?>
 
-<h2>Speakers</h2>
+<h2><center>
+<?php echo $tournname." - ".$eventname." - "; ?>
+Speakers in Order</center></h2>
+<a href='https://www.tabroom.com/jbruschke/SpeakerAwardHelp.php'>Click if these don't seem to be correct</a> <a href='https://www.tabroom.com/jbruschke/TeamResults.php'>Return to main results page</a></br></br>
+<?php
+//<span style="font-size:large;"><a href='https://www.tabroom.com/jbruschke/SpeakerAwardHelp.php'>Click if these don't seem to be correct</a>
+//</span>
+?>
+
 	<table id="sortme" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
 	<thead>
 	<tr class="yellowrow">
@@ -85,6 +105,7 @@ while ($i<$nspkrs-1)
 <?php
 
 mysql_close();
+require 'scripts/tabroomfooter.html';
 
 function makeavgpts(&$avgjudpts, $event)
 {
