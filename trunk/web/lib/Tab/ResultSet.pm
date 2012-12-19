@@ -7,5 +7,5 @@ Tab::ResultSet->has_a(tourn => 'Tab::Tourn');
 Tab::ResultSet->has_a(event => 'Tab::Event');
 Tab::ResultSet->has_many(results => 'Tab::Result', 'result_set');
 
-__PACKAGE__->_register_dates( qw/timestamp generated/);
+__PACKAGE__->_register_datetimes( qw/timestamp generated/);
 
