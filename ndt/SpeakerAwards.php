@@ -69,6 +69,7 @@ Speakers in Order</center></h2>
 	<table id="sortme" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
 	<thead>
 	<tr class="yellowrow">
+		<th class="smallish">Place</th>
 		<th class="smallish">Speaker</th>
 		<th class="smallish">School</th>
 <?php
@@ -86,6 +87,7 @@ while ($i<$nspkrs-1)
  {
   $i++;
   echo "<tr>";
+  if ($i<($nspkrs/2)) {echo "<td>".($i+1)."</td>";} else {echo "<td>-</td>";}
   echo "<td>".$tbtable[0][$i]."</td>";
   echo "<td>".getschoolname($tbtable[1][$i])."</td>";
         mysql_data_seek($tb,0);
@@ -147,7 +149,7 @@ function getscore($studententry, $entry, $scoretype, $hilo)
    if ($scoretype=="judgevar") {$dojudgevar=TRUE; $scoretype="points";}
    $score=0;
    if ($scoretype=='ranks') {$scoretype='rank';}
-   $query="SELECT * from ballot, ballot_value where ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." order by ballot_value.value asc";
+   $query="SELECT *, round.name as round_name from ballot, ballot_value, panel, round where round.id=panel.round and panel.id=ballot.panel and ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." and round.name<10 order by ballot_value.value asc";
    $pts=mysql_query($query);
    $nrows= mysql_num_rows($pts); //echo $nrows." rows returned<br>";
    $i=0; $scorevalue=0;
@@ -157,6 +159,7 @@ function getscore($studententry, $entry, $scoretype, $hilo)
       $scorevalue=$row['value']; 
       if ($dojudgevar==TRUE) {$scorevalue=getjudvar($row['judge'], $scorevalue);}
       if ($scorevalue == -1) {$scorevalue=getavg($studententry, $entry, $scoretype);}
+      //if ($studententry == 105520) {echo $studententry." ".$scorevalue." ". $row['round_name']."<br>";}
       if ($i>$hilo and $i<=($nrows-$hilo)) {$score=$score+$scorevalue;}
      }
    if (empty($score)) {$score=0;}
