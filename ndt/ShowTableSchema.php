@@ -6,7 +6,7 @@ $database="itab";
 mysql_connect("localhost",$username,$password);
 @mysql_select_db($database) or die( "Unable to select database<br>");
 
-$result = mysql_query("SHOW COLUMNS FROM event_setting");
+$result = mysql_query("SHOW COLUMNS FROM judge");
 if (!$result) {
     echo 'Could not run query: ' . mysql_error();
     exit;
@@ -20,14 +20,14 @@ if (mysql_num_rows($result) > 0) {
 echo "<br>";
 
 $query="SELECT distinct tag from event_setting order by tag";
-//$query="SELECT * from tiebreak_set where id>5800";
+$query="SELECT * from student where last='Carter'";
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
 
 for ($i=0; $i <= $entryNum-1; $i++)
 {
-echo mysql_result($tourn,$i,"tag")."<br>";
-//echo mysql_result($tourn,$i,"id")." ".mysql_result($tourn,$i,"type")." ".mysql_result($tourn,$i,"tiebreak")."<br>";
+//echo mysql_result($tourn,$i,"tag")."<br>";
+echo mysql_result($tourn,$i,"id")." ".mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")."<br>";
 
 }
 
