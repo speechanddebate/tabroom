@@ -53,7 +53,7 @@ $studentNum++;
 
 <?php
 //load all ballots with team
-$query="SELECT *, ballot.id as ballot_id FROM ballot, panel, round where ballot.entry=".mysql_result($entry,$i,"id")." and panel.id=ballot.panel and round.id=panel.round and published>0 ORDER BY round.name ASC";
+$query="SELECT *, ballot.id as ballot_id FROM ballot, panel, round where ballot.entry=".mysql_result($entry,$i,"id")." and panel.id=ballot.panel and round.id=panel.round and round.post_results>0 ORDER BY round.name ASC";
 
 $ballot=mysql_query($query);
 
@@ -91,7 +91,7 @@ while ($row2 = mysql_fetch_array($BallotScore, MYSQL_BOTH))
    if ($row2['tag']=='ballot' AND $row2['value']=="1") {$Outcome.=" Win";}
    if ($row2['tag']=='ballot' AND $row2['value']=="0") {$Outcome.=" Loss";}
     $i2=0;
-    while ($i2 < $studentNum) {
+    while ($i2 < $studentNum and $row['post_results']==2) {
      if ($row2['student']==$SpkrNum[$i2]) {
       if ($Spkr[$i2]<>"") {$Spkr[$i2].="/";}
       $Spkr[$i2].=$row2['value'];
