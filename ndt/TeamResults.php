@@ -40,7 +40,7 @@ $eventNum = mysql_num_rows($event);
 //loop entries
 $i=0;
 while ($i < $eventNum) {
-echo "<tr><td>".mysql_result($event,$i,"tourn_name")."</td><td>". mysql_result($event,$i,"event_name")."</td><td><a href='https://www.tabroom.com/index/tourn/postings/ranked_list.mhtml?event_id=".mysql_result($event,$i,"event_id")."&tourn_id=". mysql_result($event,$i,"tourn_id")."'>Sorted List</a></td><td><a href='https://www.tabroom.com/jbruschke/TableMaker.php?event=".mysql_result($event,$i,"event_id")."'>Cume sheets</a></td><td><a href='https://www.tabroom.com/jbruschke/ElimBracket.php?event=".mysql_result($event,$i,"event_id")."'>Elim Results</a></td><td><a href='https://www.tabroom.com/jbruschke/SpeakerAwards.php?event=".mysql_result($event,$i,"event_id")."'>Speaker Awards</a></td></tr>";
+echo "<tr><td>".mysql_result($event,$i,"tourn_name")."</td><td>". mysql_result($event,$i,"event_name")."</td><td><a href='https://www.tabroom.com/index/tourn/results/ranked_list.mhtml?event_id=".mysql_result($event,$i,"event_id")."&tourn_id=". mysql_result($event,$i,"tourn_id")."'>Sorted List</a></td><td><a href='https://www.tabroom.com/jbruschke/TableMaker.php?event=".mysql_result($event,$i,"event_id")."'>Cume sheets</a></td><td><a href='https://www.tabroom.com/jbruschke/ElimBracket.php?event=".mysql_result($event,$i,"event_id")."'>Elim Results</a></td><td><a href='https://www.tabroom.com/jbruschke/SpeakerAwards.php?event=".mysql_result($event,$i,"event_id")."'>Speaker Awards</a></td></tr>";
 $i++;
 }
 

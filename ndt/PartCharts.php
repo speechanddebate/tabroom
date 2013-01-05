@@ -18,7 +18,7 @@ while ($row = mysql_fetch_array($student, MYSQL_BOTH)) {countstuff($row['student
 
 ?>
 <h2>Participation by Student</h2>
-       <table id="thing" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+       <table id="sortmealso" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Measure</th>
@@ -84,7 +84,7 @@ while ($row = mysql_fetch_array($school, MYSQL_BOTH))
 
 <br/>
 <h2>Participation by Tournament</h2>
-       <table id="sortme" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+       <table id="sortmetoo" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Tournament</th>
