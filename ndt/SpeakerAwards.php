@@ -149,7 +149,7 @@ function getscore($studententry, $entry, $scoretype, $hilo)
    if ($scoretype=="judgevar") {$dojudgevar=TRUE; $scoretype="points";}
    $score=0;
    if ($scoretype=='ranks') {$scoretype='rank';}
-   $query="SELECT *, round.name as round_name from ballot, ballot_value, panel, round where round.id=panel.round and panel.id=ballot.panel and ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." and round.name<10 order by ballot_value.value asc";
+   $query="SELECT *, round.name as round_name from ballot, ballot_value, panel, round where round.id=panel.round and panel.id=ballot.panel and ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." and round.name<10 and round.post_results>1 order by ballot_value.value asc";
    $pts=mysql_query($query);
    $nrows= mysql_num_rows($pts); //echo $nrows." rows returned<br>";
    $i=0; $scorevalue=0;
