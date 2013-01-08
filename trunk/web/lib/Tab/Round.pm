@@ -15,10 +15,10 @@ Tab::Round->has_a(tb_set => 'Tab::TiebreakSet');
 
 Tab::Round->has_many(panels => 'Tab::Panel', 'round');
 
-__PACKAGE__->_register_dates( qw/blasted/);
-__PACKAGE__->_register_dates( qw/created/);
-__PACKAGE__->_register_dates( qw/completed/);
-__PACKAGE__->_register_dates( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/blasted/);
+__PACKAGE__->_register_datetimes( qw/created/);
+__PACKAGE__->_register_datetimes( qw/completed/);
+__PACKAGE__->_register_datetimes( qw/timestamp/);
 
 sub realname { 
 	my $self = shift;
