@@ -11,7 +11,7 @@ $time_start = microtime(true);
 $eresult = array();  //array to hold round and result; $eresult[0][0] is $eresult[round][panel]
 
 $event=$_GET['event'];
-$query="SELECT *, round.label as round_label, round.name as round_name, panel.id as panel_id FROM tourn, panel, round, event WHERE tourn.id=event.tourn and round.event=event.id and event.id=".$event." and panel.round=round.id and round.name>9";
+$query="SELECT *, round.label as round_label, round.name as round_name, panel.id as panel_id FROM tourn, panel, round, event WHERE tourn.id=event.tourn and round.event=event.id and event.id=".$event." and panel.round=round.id and round.name>9 and round.post_results > 0";
 $panel=mysql_query($query);
 $entryNum = mysql_num_rows($panel);
 
