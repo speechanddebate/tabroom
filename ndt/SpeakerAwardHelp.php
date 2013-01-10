@@ -24,8 +24,8 @@ Director's Page.</br>
 5) If a speaker tiebreaker exists, it will appear in the right-hand column, and you should click on it.  If no set exists, you will be promopted to create a tiebreaker set.  Enter a name (something like "speaker awards") and
 click the green "create" button.</br>
 6) You can now enter the tiebreakers in any order you want, or re-name the tiebreaker set.</br>
-7) Click on Settings->Events, find the setting for "Speaker Award Tiebreakers," and select the tiebreaker you just created from the drop-down list.  Remember to hit the green "Save Event" button on the bottom of the page when you're done.</br></br>
-
+7) Click on Settings->Events, find the setting for "Speaker Award Tiebreakers," and select the tiebreaker you just created from the drop-down list.  Remember to hit the green "Save Event" button on the bottom of the page when you're done.</br>
+8) Finally, make sure you have published the speaker points.  The easiest way to do this is paneling->publish.</br></br>
 
 More detailed descriptions about tiebreakers, and why they exist in sets, can be found by clicking the help button on the CAT tiebreakers
 setup page.</br></br>
