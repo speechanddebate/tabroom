@@ -6,7 +6,7 @@ $database="itab";
 mysql_connect("localhost",$username,$password);
 @mysql_select_db($database) or die( "Unable to select database<br>");
 
-$result = mysql_query("SHOW COLUMNS FROM timeslot");
+$result = mysql_query("SHOW COLUMNS FROM chapter_judge");
 if (!$result) {
     echo 'Could not run query: ' . mysql_error();
     exit;
@@ -43,7 +43,7 @@ echo mysql_result($tourn,$i,"table_name")."<br>";
 
 echo "<br>";
 
-$sql = mysql_query("SELECT * FROM student WHERE last = 'Lurie-Spicer'");
+$sql = mysql_query("SELECT * FROM chapter WHERE id = 6262");
 $assoc = mysql_fetch_assoc($sql);
 var_dump($assoc);
 
