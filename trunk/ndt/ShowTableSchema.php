@@ -6,7 +6,7 @@ $database="itab";
 mysql_connect("localhost",$username,$password);
 @mysql_select_db($database) or die( "Unable to select database<br>");
 
-$result = mysql_query("SHOW COLUMNS FROM chapter_judge");
+$result = mysql_query("SHOW COLUMNS FROM result_set");
 if (!$result) {
     echo 'Could not run query: ' . mysql_error();
     exit;

@@ -128,7 +128,7 @@ require 'scripts/tabroomfooter.html';
 
 function getnentries($tourn_id, $division)
 {
-$query="SELECT * FROM entry, event, event_setting WHERE event.tourn=".$tourn_id." and entry.event=event.id and event.type='policy' and event_setting.event=event.id and event_setting.tag='Level' and event_setting.value='".$division."'";
+$query="SELECT * FROM entry, event, event_setting WHERE event.tourn=".$tourn_id." and entry.event=event.id and event.type='policy' and event_setting.event=event.id and dropped=false and event_setting.tag='Level' and event_setting.value='".$division."'";
 $results=mysql_query($query);
 $nentries = mysql_num_rows($results);
 return $nentries;
