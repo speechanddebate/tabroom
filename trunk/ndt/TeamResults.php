@@ -23,6 +23,7 @@ The seasonal totals link will show all teams' cumulative record, and provide lin
 			<th>Sorted team list</th>
 			<th>Traditional cume sheets</th>
 			<th>Elim results</th>
+			<th>Elim bracket</th>
 			<th>Speaker Awards</th>
 		</tr>
 
@@ -40,7 +41,18 @@ $eventNum = mysql_num_rows($event);
 //loop entries
 $i=0;
 while ($i < $eventNum) {
-echo "<tr><td>".mysql_result($event,$i,"tourn_name")."</td><td>". mysql_result($event,$i,"event_name")."</td><td><a href='https://www.tabroom.com/index/tourn/results/ranked_list.mhtml?event_id=".mysql_result($event,$i,"event_id")."&tourn_id=". mysql_result($event,$i,"tourn_id")."'>Sorted List</a></td><td><a href='https://www.tabroom.com/jbruschke/TableMaker.php?event=".mysql_result($event,$i,"event_id")."'>Cume sheets</a></td><td><a href='https://www.tabroom.com/jbruschke/ElimBracket.php?event=".mysql_result($event,$i,"event_id")."'>Elim Results</a></td><td><a href='https://www.tabroom.com/jbruschke/SpeakerAwards.php?event=".mysql_result($event,$i,"event_id")."'>Speaker Awards</a></td></tr>";
+echo "<tr>";
+echo "<td>".mysql_result($event,$i,"tourn_name")."</td>";
+echo "<td>". mysql_result($event,$i,"event_name")."</td>";
+echo "<td><a href='https://www.tabroom.com/index/tourn/results/ranked_list.mhtml?event_id=".mysql_result($event,$i,"event_id")."&tourn_id=". mysql_result($event,$i,"tourn_id")."'>Sorted List</a></td>";
+echo "<td><a href='https://www.tabroom.com/jbruschke/TableMaker.php?event=".mysql_result($event,$i,"event_id")."'>Cume sheets</a></td>";
+echo "<td><a href='https://www.tabroom.com/jbruschke/ElimBracket.php?event=".mysql_result($event,$i,"event_id")."'>Elim Results</a></td>";
+$resultid=getresultid(mysql_result($event,$i,"event_id"));
+if ($resultid>0)
+{echo "<td><a href='https://www.tabroom.com/index/tourn/results/bracket.mhtml?tourn_id=".mysql_result($event,$i,"tourn_id")."&result_id=".$resultid."'>Elim Bracket</a></td>";}
+else {echo "<td>Not availabile</td>";}
+echo "<td><a href='https://www.tabroom.com/jbruschke/SpeakerAwards.php?event=".mysql_result($event,$i,"event_id")."'>Speaker Awards</a></td>";
+echo "</tr>";
 $i++;
 }
 
@@ -50,3 +62,17 @@ $i++;
 </table>
 </body>
 </html>
+
+<?php
+function getresultid($event)
+{
+$query="SELECT * from result_set where event=".$event." and bracket=1 limit 1";
+$result = mysql_query($query); 
+$resultid=mysql_query($query);
+$N = mysql_num_rows($resultid);
+if ($N==0) {return 0;}
+while ($row = mysql_fetch_array($resultid, MYSQL_BOTH)) 
+ {$id=$row['id'];}
+  return $id;
+}
+?>
