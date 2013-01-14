@@ -116,7 +116,9 @@ for ($x=1; $x < count($team)+1; $x++)                 //scroll through the maste
   if ($teamindex[$i] == $x)                      //now scroll back through entries and if a match pull records
    {
     //echo $teamname[$x]." matched with ".mysql_result($entry,$i,"fullname")."<br>";
-    $query="SELECT *, panel.id as panel_id, tourn.name as tourn_name, round.name as rd_name, round.label as rd_label, ballot_value.value as ballot_decision from tourn, event, round, panel, ballot, ballot_value where tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by tourn asc, round.name asc, panel.id asc";
+    $query="SELECT *, panel.id as panel_id, tourn.name as tourn_name, round.name as rd_name, round.label as rd_label, ballot_value.value as ballot_decision FROM tourn, event, round, panel, ballot, ballot_value WHERE tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by tourn asc, round.name asc, panel.id asc";
+    $query="SELECT *, panel.id as panel_id, tourn.name as tourn_name, round.name as rd_name, round.label as rd_label, ballot_value.value as ballot_decision FROM tourn, event, event_setting, round, panel, ballot, ballot_value WHERE event_setting.event=event.id and event_setting.tag='level' and event_setting.value='".$_GET['division']."' and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by tourn asc, round.name asc, panel.id asc";
+    //echo $query."<br>";
     $ballots=mysql_query($query); 
      while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
@@ -171,11 +173,14 @@ for ($x=1; $x < count($team)+1; $x++)                 //scroll through the maste
  $i++;
 }   //ends the while
 }   //ends the for $x
-
 ?>
-
-<h2>Seasonal Totals</h2>
-Clicking on any team will launch their NDT bid sheet.  Note that columns are sortable.  Results do not differentiate by division.</br></br>
+<h2>Seasonal Totals
+<span style="font-size:24px"><a class="smallish" href='https://www.tabroom.com/jbruschke/SeasonalTotals.php?division=open'> open</a>
+<span style="font-size:24px"><a class="smallish" href='https://www.tabroom.com/jbruschke/SeasonalTotals.php?division=jv'> jv</a>
+<span style="font-size:24px"><a class="smallish" href='https://www.tabroom.com/jbruschke/SeasonalTotals.php?division=novice'>novice</a>
+<span style="font-size:24px"><a class="smallish" href='https://www.tabroom.com/jbruschke/TeamResults.php'>return to results main</a>
+</span></h2>
+Clicking on any team will launch their NDT bid sheet.  Note that columns are sortable.  Use links above to select division.</br></br>
 
 	<table id="sortme" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
 
@@ -200,25 +205,28 @@ Clicking on any team will launch their NDT bid sheet.  Note that columns are sor
 <?php
 for ($x=1; $x<count($team)+1; $x++) 
  {
-// echo "<tr>\n<td class=\"smallish\">".$teamname[$x]."Main Results Dashboard</a></td>";
-// echo "<tr><td><a class=\"smallish\" href='https://www.tabroom.com/jbruschke/TeamBidSheet.php'>".trim($teamname[$x])."</a></td>";
- echo "<tr><td><a href='https://www.tabroom.com/jbruschke/TeamBidSheet.php?id1=".$team[$x][0]."&id2=".$team[$x][1]."'>".trim($teamname[$x])."</a></td>";
- echo "<td>".$pwin[$x]."</td>";
- echo "<td>".$prd[$x]."</td>";
- if ($prd[$x]==0) {$prd[$x]=1;}
- echo "<td>".number_format($pwin[$x]/$prd[$x],2)."</td>";
- echo "<td>".$ewin[$x]."</td>";
- echo "<td>".$erd[$x]."</td>";
- $epct="0";
- $totebal=$ewin[$x]+$erd[$x];
- if ($totebal>0) {$epct=number_format($ewin[$x]/$erd[$x],2);}
- echo "<td>".$epct."</td>";
- echo "<td>".$ebalwin[$x]."</td>";
- echo "<td>".$ebaloss[$x]."</td>";
- $epct="0";
- $totebal=$ebalwin[$x]+$ebaloss[$x];
- if ($totebal>0) {$epct = number_format($ebalwin[$x]/$totebal,2);}
- echo "<td>".$epct."</td></tr>\n";
+  if ($prd[$x]>0) 
+  {
+  // echo "<tr>\n<td class=\"smallish\">".$teamname[$x]."Main Results Dashboard</a></td>";
+  // echo "<tr><td><a class=\"smallish\" href='https://www.tabroom.com/jbruschke/TeamBidSheet.php'>".trim($teamname[$x])."</a></td>";
+  echo "<tr><td><a href='https://www.tabroom.com/jbruschke/TeamBidSheet.php?id1=".$team[$x][0]."&id2=".$team[$x][1]."'>".trim($teamname[$x])."</a></td>";
+  echo "<td>".$pwin[$x]."</td>";
+  echo "<td>".$prd[$x]."</td>";
+  if ($prd[$x]==0) {$prd[$x]=1;}
+  echo "<td>".number_format($pwin[$x]/$prd[$x],2)."</td>";
+  echo "<td>".$ewin[$x]."</td>";
+  echo "<td>".$erd[$x]."</td>";
+  $epct="0";
+  $totebal=$ewin[$x]+$erd[$x];
+  if ($totebal>0) {$epct=number_format($ewin[$x]/$erd[$x],2);}
+  echo "<td>".$epct."</td>";
+  echo "<td>".$ebalwin[$x]."</td>";
+  echo "<td>".$ebaloss[$x]."</td>";
+  $epct="0";
+  $totebal=$ebalwin[$x]+$ebaloss[$x];
+  if ($totebal>0) {$epct = number_format($ebalwin[$x]/$totebal,2);}
+  echo "<td>".$epct."</td></tr>\n";
+  }
  }
 
 mysql_close();
