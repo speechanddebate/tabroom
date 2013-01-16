@@ -26,7 +26,7 @@ if ($ntb<1)
 // {echo $row['name']." ". $row['tb']."<br>";}
 
 //PULL THE SPEAKERS
-$query="SELECT * from entry, entry_student, student where entry.event=".$event." and entry_student.entry=entry.id and student.id=entry_student.student";
+$query="SELECT * from entry, entry_student, student where entry.event=".$event." and entry_student.entry=entry.id and student.id=entry_student.student and entry.dropped=false";
 $spkr=mysql_query($query);
 $nspkrs= mysql_num_rows($spkr);
 //you've now got all the speakers stored in a mysql_fetch_array
@@ -152,16 +152,26 @@ function getscore($studententry, $entry, $scoretype, $hilo)
    $query="SELECT *, round.name as round_name from ballot, ballot_value, panel, round where round.id=panel.round and panel.id=ballot.panel and ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." and round.name<10 and round.post_results>1 order by ballot_value.value asc";
    $pts=mysql_query($query);
    $nrows= mysql_num_rows($pts); //echo $nrows." rows returned<br>";
-   $i=0; $scorevalue=0;
+
+   //build the score array, adding in averaged points
+   $i=0; $scorevalue=0; $scorearray=array();
     while ($row = mysql_fetch_array($pts, MYSQL_BOTH)) 
      {
+      $scorearray[$i]=$row['value'];
+      if ($dojudgevar==TRUE) {$scorearry[$i]=getjudvar($row['judge'], $scorevalue);}
+      if ($scorearray[$i] == -1) {$scorearray[$i]=getavg($studententry, $entry, $scoretype);}
       $i++;
-      $scorevalue=$row['value']; 
-      if ($dojudgevar==TRUE) {$scorevalue=getjudvar($row['judge'], $scorevalue);}
-      if ($scorevalue == -1) {$scorevalue=getavg($studententry, $entry, $scoretype);}
-      //if ($studententry == 105520) {echo $studententry." ".$scorevalue." ". $row['round_name']."<br>";}
-      if ($i>$hilo and $i<=($nrows-$hilo)) {$score=$score+$scorevalue;}
      }
+
+   //get the totals, dropping high and low
+   $i=0;
+   array_multisort($scorearray);
+   while ($i<$nrows)
+   {
+    if ($i>=$hilo and $i<($nrows-$hilo)) {$score=$score+$scorearray[$i];}
+    $i++;
+   }
+
    if (empty($score)) {$score=0;}
    return $score;
 }
@@ -184,7 +194,7 @@ return 0;
 function getavg($studententry, $entry, $scoretype)
 {
    $avg=0;
-   $query="SELECT * from ballot, ballot_value where ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and student=".$studententry." and ballot_value.value<>-1 order by ballot_value.value asc";
+   $query="SELECT * from ballot, ballot_value where ballot.entry=".$entry." and ballot_value.ballot=ballot.id and tag='".$scoretype."' and ballot_value.student=".$studententry." and ballot_value.value<>-1 order by ballot_value.value asc";
    $pts=mysql_query($query);
    $nrows= mysql_num_rows($pts); //echo $nrows." rows returned<br>";
    $total=0;
@@ -192,6 +202,7 @@ function getavg($studententry, $entry, $scoretype)
      {
       $total=$total+$row['value'];
      }
+   if ($nrows==0) {echo "</br>".$query."</br>";}
    return $total/$nrows;
 }
 
