@@ -320,7 +320,9 @@ function getschoolname($school)
 function getcedaregion($schoolname)
 {
    $cedaregion="N/A";
+   $schoolname = mysql_real_escape_string($schoolname);
    $query="SELECT * FROM chapter WHERE name='".$schoolname."'";
+   //echo $schoolname."<br>";
    $chapters=mysql_query($query);
    $numResults = mysql_num_rows($chapters);
    if ($numResults > 0) {

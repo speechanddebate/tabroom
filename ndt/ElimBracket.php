@@ -14,6 +14,12 @@ $event=$_GET['event'];
 $query="SELECT *, round.label as round_label, round.name as round_name, panel.id as panel_id FROM tourn, panel, round, event WHERE tourn.id=event.tourn and round.event=event.id and event.id=".$event." and panel.round=round.id and round.name>9 and round.post_results > 0";
 $panel=mysql_query($query);
 $entryNum = mysql_num_rows($panel);
+if ($entryNum==0) 
+ {
+  echo "No elimination round results have been submitted for this tournament.</br></br>"; 
+  echo "<a href='https://www.tabroom.com/jbruschke/TeamResults.php'>Back to Main Results Page</a></br></br>";
+  die;
+  }
 
 $i=0; $Nround=0; $ctr=0; $lowround=99;
 while ($i < $entryNum)
