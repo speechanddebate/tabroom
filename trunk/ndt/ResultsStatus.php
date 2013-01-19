@@ -50,8 +50,8 @@ require 'scripts/tabroomtemplate.html';
          <tr><td>UNLV</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds</td><td>CAT</td></tr>
          <tr><td>UNLV</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds</td><td>CAT</td></tr>
          <tr><td>UNLV</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds</td><td>CAT</td></tr>
-         <tr><td>DVC</td><td>Open</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">Missing</font></td><td>NA</td><td>TRPC</td></tr>
-         <tr><td>DVC</td><td>Novice</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">Missing</font></td><td>NA</td><td>TRPC</td></tr>
+         <tr><td>DVC</td><td>Open</td><td>includes elims</td><td>ok</td><td>ok</td><td>ok</td><td>Perry</td><td>TRPC</td></tr>
+         <tr><td>DVC</td><td>Novice</td><td>includes elims</td><td>ok</td><td>ok</td><td>ok</td><td>Perry</td><td>TRPC</td></tr>
          <tr><td>Vandy</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Butt</td><td>TRPC</td></tr>
          <tr><td>Vandy</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Butt</td><td>TRPC</td></tr>
          <tr><td>Vandy</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Butt</td><td>TRPC</td></tr>
@@ -79,12 +79,30 @@ require 'scripts/tabroomtemplate.html';
          <tr><td>App State</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Davis</td><td>CAT</td></tr>
          <tr><td>App State</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Davis</td><td>CAT</td></tr>
          <tr><td>App State</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Davis</td><td>CAT</td></tr>
-
          <tr><td>WNPT</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Hanson</td><td>NA</td></tr>
          <tr><td>UMKC Regional</td><td>cancelled</td><td>NA</td><td>NA</td><td>NA</td><td>NA</td><td>Vega</td><td>NA</td></tr>
          <tr><td>Iowa</td><td>3 divisions</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">No data received</font></td><td>?</td><td>NA</td></tr>
          <tr><td>Bay Area Rookie</td><td>Novice</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">No data received</font></td><td>Opsata</td><td>NA</td></tr>
-         <tr><td>NE Fall champS</td><td>3 divisions</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">No data received</font></td><td>Binghampton</td><td>NA</td></tr>
+         <tr><td>NE Fall champs</td><td>3 divisions</td><td>NA</td><td>NA</td><td>NA</td><td><font color="FF0000">No data received</font></td><td>Binghampton</td><td>NA</td></tr>
+         <tr><td>Illinois state</td><td>Open</td><td>missing</td><td>OK</td><td>OK</td><td>None</td><td>Samuels</td><td>CAT</td></tr>
+         <tr><td>Illinois state</td><td>JV</td><td>missing</td><td>OK</td><td>OK</td><td>None</td><td>Samuels</td><td>CAT</td></tr>
+         <tr><td>Illinois state</td><td>Novice</td><td>missing</td><td>OK</td><td>OK</td><td>None</td><td>Samuels</td><td>CAT</td></tr>
+         <tr><td>USC</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds/Rodriguez</td><td>CAT</td></tr>
+         <tr><td>USC</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td><font color="FF0000">Finals closeout not recorded</td></font><td>Symonds/Rodriguez</td><td>CAT</td></tr>
+         <tr><td>UTD</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>UTD</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>none</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>UTD</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>none</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>CSUF</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds/Rodriguez/Perry</td><td>CAT</td></tr>
+         <tr><td>CSUF</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds/Rodriguez/Perry</td><td>CAT</td></tr>
+         <tr><td>CSUF</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds/Rodriguez/Perry</td><td>CAT</td></tr>
+         <tr><td>UNT</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>UNT</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>none</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>UNT</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>none</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>Berkeley</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Rodriguez/Perry</td><td>CAT</td></tr>
+         <tr><td>Berkeley</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Rodriguez/Perry</td><td>CAT</td></tr>
+         <tr><td>Berkeley</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Rodriguez/Perry</td><td>CAT</td></tr>
+
+
 
         </tbody>
        </table>

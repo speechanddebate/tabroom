@@ -7,7 +7,7 @@ require 'scripts/databaseconnect.php';
 $Round = ""; $Judge = ""; $Oppn = ""; $Side = "N/A"; $Outcome = "";
 
 //Load all entries; 16935 and 16986 are UNI
-$query="SELECT * FROM entry where entry.event=".$_GET['event'];
+$query="SELECT * FROM entry where dropped=false and entry.event=".$_GET['event'];
 $entry=mysql_query($query);
 $entryNum = mysql_num_rows($entry);
 
