@@ -1,0 +1,137 @@
+<%args>
+	$school
+	$group_id => undef 
+	$entry_id => undef
+	$account
+	$basis => undef
+</%args>
+<%init>
+
+	my $entry = Tab::Entry->retrieve($entry_id) if $entry_id;
+
+	my $tourn = $school->tourn;
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now->set_time_zone($tz);
+
+	my $group = Tab::JudgeGroup->retrieve($group_id) if $group_id;
+	$group = $entry->event->judge_group unless $group;
+	my $strike_end = $group->setting("strike_end");
+
+	if ($strike_end < $now) { 
+		my $err = "Prefs deadline has passed";
+		$m->redirect("ordinals_prefs.mhtml?school_id=".$school->id."&group_id=$group_id&err=$err");
+	}
+
+	my %ratings_by_judge = ();
+	my %conflicts_by_id = ();
+
+	Tab::Rating->set_sql( wipe_existing => 
+
+	Tab::Judge->set_sql( judge_with_rating_by_account => "
+		select distinct jother.*, rating.percentile as pref
+		from judge, judge jother, rating, entry eother, entry_student es, entry_student esother
+		where judge.account = jother.account
+		and judge.id != jother.id
+		and jother.id = rating.judge
+		and rating.type = \"entry\"
+		and rating.percentile > 0
+		and rating.entry = eother.id
+		and eother.id = esother.entry
+		and esother.student = es.student
+		and es.entry = ? 
+	");
+
+	Tab::Judge->set_sql( judge_with_rating_by_cj => "
+		select distinct jother.*, rating.percentile as pref
+		from judge, judge jother, rating, entry eother, entry_student es, entry_student esother
+		where judge.chapter_judge = jother.chapter_judge
+		and judge.id != jother.id
+		and jother.id = rating.judge
+		and rating.type = \"entry\"
+		and rating.percentile > 0
+		and rating.entry = eother.id
+		and eother.id = esother.entry
+		and esother.student = es.student
+		and es.entry = ? 
+	");
+
+	my %others_by_account = ();
+	my %others_by_cj = ();
+	my %used;
+
+	foreach my $other (Tab::Judge->search_judge_with_rating_by_account($entry->id)) { 
+		push (@{$others_by_account{$other->account->id}}, $other);
+		$used{$other->id}++;
+	}
+
+	foreach my $other (Tab::Judge->search_judge_with_rating_by_cj($entry->id)) { 
+		next if $used{$other->id};
+		push (@{$others_by_cj{$other->chapter_judge->id}}, $other);
+	}
+
+	my @judges = $group->judges;
+	my $total_rounds;
+
+	foreach my $judge (@judges) { 
+
+		my $count;
+		my $total;
+
+		if ($judge->chapter_judge) { 
+			foreach my $other (@{$others_by_cj{$judge->chapter_judge->id}}) { 
+				$count++;
+				$total += $other->pref;
+			}
+		}
+
+		if ($judge->account) { 
+			foreach my $other (@{$others_by_cj{$judge->account->id}}) { 
+				$count++;
+				$total += $other->pref;
+			}
+		}
+
+		my $avg = $total / $count if $count;
+		$judge->avg($avg) if $avg;
+
+		$total_rounds += $judge->obligation;
+		$total_rounds += $judge->hired;
+
+	}
+
+	my $count;
+
+	my $rounds_before;
+
+	foreach my $judge (sort {$a->avg <=> $b->avg} @judges) { 
+
+		next unless $judge->avg;
+	
+		$count++;
+
+		my $percentile = ( ($rounds_before + 1) / $total_rounds) * 100;
+
+		Tab::Rating->create({ 
+			type => "entry",
+			tourn => $tourn->id,
+			judge => $judge->id,
+			entry => $entry_id,
+			ordinal => $count,
+			percentile => $percentile,
+			entered => $now
+
+		});
+
+		$rounds_before += $judge->obligation;
+		$rounds_before += $judge->hired;
+
+	}
+
+	my $msg = "$count judges preffed from previous scores.  Remaining judges unrated.";
+
+	$m->redirect("ordinals_prefs.mhtml?entry_id=".$entry->id."&school_id=".$school->id."&msg=$msg");
+
+</%init>
+
