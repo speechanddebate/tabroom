@@ -25,7 +25,7 @@ echo "<tr><td>Students attending 1+ tournaments</td><td>".counter("Select distin
 echo "<tr><td>Total judge entries marked active</td><td>".counter("Select distinct id from judge where active=true")."</td></tr>";
 echo "<tr><td>Total active judge entries with accounts</td><td>".counter("Select distinct account from judge where active=true")."</td></tr>";
 echo "<tr><td>Total hosted tournaments</td><td>".counter("Select * from tourn")."</td></tr>";
-echo "<tr><td>Total hosted tournaments since 9/1/2012</td><td>".counter("Select * from tourn where start>'2012-09-01'")."</td></tr>";
+echo "<tr><td>Total hosted tournaments since Sept 1, 2012</td><td>".counter("Select * from tourn where start>'2012-09-01'")."</td></tr>";
 
 ?>
 	</tbody>

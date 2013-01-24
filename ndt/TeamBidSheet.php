@@ -76,8 +76,8 @@ $balfor=0; $balvs=0;
 $round= array(); $tourn= array(); $tourndate= array(); $side= array(); $panel=array(); $roundlabel=array();
 $win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array();
 $oppn = array(); $event = array(); $x=0; $panel[0]=-1; $ballotid=-1;
-
-$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, panel.id as panel_id, round.name as rd_name FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2.") and entry.id=entry_student.entry ORDER BY tourn.start asc, tourn.id asc, round.name asc, panel.id asc, ballot.id asc";
+$year=date("Y"); $month=date("M"); if ($month<8) {$year=$year-1;}
+$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, round.name as rd_name FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2.") and entry.id=entry_student.entry and tourn.start>'".$year."-09-01' ORDER BY tourn.start asc, tourn.id asc, round.name asc, panel.id asc, ballot.id asc";
 $ballots=mysql_query($query); 
 
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
@@ -86,7 +86,7 @@ $ballots=mysql_query($query);
       if ($row['ballot_decision'] == 1 and $row['ballot_id']<>$ballotid) {$balfor +=1;}
       if ($row['ballot_decision'] == 0 and $row['ballot_id']<>$ballotid) {$balvs +=1;}
          $round[$x]=""; $tourn[$x]=""; $event[$x]=""; $outcome[$x]=""; $win[$x]=0; $isRR[$x]=0; $isopen[$x]=0;
-         if(stristr($row['event_name'], 'open') == TRUE) {$isopen[$x]=1;}
+         if(DivisionIsOpen($row['event_id']) == TRUE) {$isopen[$x]=1;}
          $round[$x]=$row['rd_name'];
          $roundlabel[$x]=$row['round_label'];
          $event[$x]=$row['event_name'];
@@ -516,6 +516,16 @@ function makeoutcomestring ($balfor, $balvs)
  for ($i=1; $i <= $balfor; $i++) {$outcome.="W";}
  for ($i=1; $i <= $balvs; $i++) {$outcome.="L";}
  return $outcome;
+}
+
+function DivisionIsOpen($event)
+{
+$rtnvalue=FALSE;
+$query="SELECT * FROM event_setting WHERE tag='Level' and event_setting.event=".$event;
+$spkrs=mysql_query($query); 
+   while ($row = mysql_fetch_array($spkrs, MYSQL_BOTH)) 
+   {if ($row['value']=='open') {$rtnvalue=TRUE;}}
+return $rtnvalue;
 }
 
 function getspeakers (&$spkr1, &$spkr2, $entry)
