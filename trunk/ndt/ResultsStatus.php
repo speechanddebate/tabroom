@@ -101,6 +101,19 @@ require 'scripts/tabroomtemplate.html';
          <tr><td>Berkeley</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Rodriguez/Perry</td><td>CAT</td></tr>
          <tr><td>Berkeley</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Rodriguez/Perry</td><td>CAT</td></tr>
          <tr><td>Berkeley</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Rodriguez/Perry</td><td>CAT</td></tr>
+         <tr><td>Navy</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Nick Ryan</td><td>CAT</td></tr>
+         <tr><td>Navy</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td><font color="FF0000">Finals results missing</font></td><td>Nick Ryan</td><td>CAT</td></tr>
+         <tr><td>Navy</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Nick Ryan</td><td>CAT</td></tr>
+         <tr><td>Navy</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Brian DeLong</td><td>CAT</td></tr>
+         <tr><td>Navy</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td><font color="FF0000">Finals closeout not entered</font></td><td>Brian DeLong</td><td>CAT</td></tr>
+         <tr><td>Weber RR</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds</td><td>CAT</td></tr>
+         <tr><td>Pittsburgh RR</td><td>Prowl</td><td>OK</td><td>OK</td><td>OK</td><td>No elims reported</td><td>Hahn?</td><td>CAT?</td></tr>
+         <tr><td>Pittsburgh RR</td><td>Hunt</td><td>OK</td><td>OK</td><td>OK</td><td>No elims reported</td><td>Hahn?</td><td>CAT?</td></tr>
+         <tr><td>Wichita State</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>Wichita State</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>Wichita State</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>Monmouth-Jersey Shore</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Webster Dunn/Berch</td><td>CAT</td></tr>
+         <tr><td>Monmouth-Jersey Shore</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Webster Dunn/Berch</td><td>CAT</td></tr>
 
 
 
