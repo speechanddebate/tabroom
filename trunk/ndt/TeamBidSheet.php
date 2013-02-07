@@ -73,11 +73,11 @@ Round robin and JV results do not count in prelim totals but appear separately. 
 <?php
 
 $balfor=0; $balvs=0; 
-$round= array(); $tourn= array(); $tourndate= array(); $side= array(); $panel=array(); $roundlabel=array();
+$round= array(); $tourn= array(); $tournid=array(); $tourndate= array(); $side= array(); $panel=array(); $roundlabel=array();
 $win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array();
 $oppn = array(); $event = array(); $x=0; $panel[0]=-1; $ballotid=-1;
 $year=date("Y"); $month=date("M"); if ($month<8) {$year=$year-1;}
-$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, round.name as rd_name FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2.") and entry.id=entry_student.entry and tourn.start>'".$year."-09-01' ORDER BY tourn.start asc, tourn.id asc, round.name asc, panel.id asc, ballot.id asc";
+$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, round.name as rd_name, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2.") and entry.id=entry_student.entry and tourn.start>'".$year."-09-01' ORDER BY tourn.start asc, tourn.id asc, round.name asc, panel.id asc, ballot.id asc";
 $ballots=mysql_query($query); 
 
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
@@ -91,6 +91,7 @@ $ballots=mysql_query($query);
          $roundlabel[$x]=$row['round_label'];
          $event[$x]=$row['event_name'];
          $tourn[$x]=$row['tourn_name'];
+         $tournid[$x]=$row['tourn_id'];
          $oppn[$x]=getopponent($row['panel_id'], $row['entry_id']);
          $tourndate[$x]=$row['start'];
          $side[$x]=$row['side'];
@@ -466,14 +467,25 @@ while ($i <= $x)
  if ($match==TRUE)
   {
    if ($tourn[$i] <> $lasttourn) 
-    {echo "<tr><th style='text-align:center' colspan=4><B>".$tourn[$i]."</B></th></tr>";
+    {if ($i>1) {echo "<tr><td>Prelims:</td><td>".$pwin."-".$ploss."</td></tr>";
+     echo "<tr><td>Elims:</td><td>".$ewin."-".$eloss."</td></tr>";
+     echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student2, $tournid[$i-1])."</td></tr>";}
+     echo "<tr><th style='text-align:center' colspan=4><B>".$tourn[$i]."</B></th></tr>";
      echo "<tr><td>Round</td><td>Side</td><td>Outcome</td><td>Opponent</td></tr>";
+     $pwin=0; $ploss=0; $ewin=0; $eloss=0;
     }
    echo "<tr><td>".$roundlabel[$i]."</td><td>".getsidestring($side[$i])."</td><td>".$outcome[$i]."</td><td>".$oppn[$i]."</td></tr>";
+   if ($isprelim[$i]==1 and $win[$i]==1) {$pwin++;}
+   if ($isprelim[$i]==1 and $win[$i]==0) {$ploss++;}
+   if ($isprelim[$i]==0 and $win[$i]==1) {$ewin++;}
+   if ($isprelim[$i]==0 and $win[$i]==0) {$eloss++;}
    $lasttourn=$tourn[$i];
   }
  $i++;
 }           // end of debate loop
+  echo "<tr><td>Prelims:</td><td>".$pwin."-".$ploss."</td></tr>";
+  echo "<tr><td>Elims:</td><td>".$ewin."-".$eloss."</td></tr>";
+  echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student1, $tournid[$i-1]).gethonors($student2, $tournid[$i-1])."</td></tr>";
 
 ?>
 
@@ -501,6 +513,17 @@ function microtime_float()
 {
     list($usec, $sec) = explode(" ", microtime());
     return ((float)$usec + (float)$sec);
+}
+
+function gethonors($studentid, $tournid)
+{
+$query="SELECT * FROM result, round, event, tourn where student=".$studentid." and result.round=round.id and event.id=round.event and event.tourn=tourn.id and tourn.id=".$tournid;
+$rtnvalue="";
+$spkrs=mysql_query($query); 
+   while ($row = mysql_fetch_array($spkrs, MYSQL_BOTH)) 
+   {$rtnvalue.=$row['honor'];}
+if ($rtnvalue<>'') {return "Honors: ".getname($studentid)." ".$rtnvalue.". ";}
+return '';
 }
 
 function getpctstring ($win, $loss)
