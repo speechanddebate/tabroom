@@ -1,0 +1,230 @@
+<%args>
+	$account
+	$session
+	$event_id	
+	$school_id => undef
+	$student_id => undef
+	$partner_id => undef
+	$waitlist => "0"
+	$title => undef
+	$code => undef
+	$seed => undef
+	$hybrid => undef
+</%args>
+<%init>
+
+	my $now = DateTime->now;
+
+	my $event = Tab::Event->retrieve($event_id);
+	my $school = Tab::School->retrieve($school_id);
+	my $tourn = $event->tourn;
+
+	$waitlist = 1 if $event->setting("waitlist_all");
+	my $min = $event->setting("min_entry");
+	my $max = $event->setting("max_entry");
+
+	my @students;
+
+	my $msg;
+	my $err;
+	my $name;
+
+	my $student = Tab::Student->retrieve($student_id) if $student_id;
+	my $partner = Tab::Student->retrieve($partner_id) if $partner_id;
+
+	if ($max > 2) { 
+
+		$name = "Team ".$school->short_name;
+
+	} elsif ($max == 2) { 
+
+		unless ( ($student && $partner) || ($min == 1 && ($student || $partner)) ) { 
+			$err = "You did not enter enough students for that entry.  Try again";
+			$m->redirect("/user/enter/students.mhtml?school_id=$school_id&event_id=$event_id&err=$err");
+		}
+
+	
+		if ($student_id == $partner_id) { 
+			$err = "You have tried to enter the same person twice in a team event.  Try again.";
+    	   	$m->redirect("/user/enter/students.mhtml?err=$err&event_id=$event_id&school_id=$school_id");
+		}
+
+		samecheck($school,$student, $event);
+		samecheck($school,$partner, $event);
+
+		push (@students, $student);
+		push (@students, $partner) if $partner;
+
+		$name = $student->last." & ".$partner->last if $student && $partner;
+		$name = $student->first." & ".$student->last if $student &! $partner;
+		$name = $partner->first." & ".$partner->last if $partner &! $student;
+
+	} else {
+
+		unless ($student) { 
+			$err = "You did not enter a student for that entry.  Try again";
+			$m->redirect("/user/enter/students.mhtml?school_id=$school_id&event_id=$event_id&err=$err");
+		}
+
+		samecheck($school,$student, $event);
+
+		push (@students, $student);
+		
+		$name = $student->first." ".$student->last;
+
+	}
+
+	sub samecheck { 
+
+		my ($school, $student, $event) = @_;
+		my $tourn = $event->tourn;
+
+		my @entries = $m->comp('/funclib/student_entries.mas', student => $student, tourn => $tourn);
+
+		if (grep $event->id == $_->event->id, @entries) {
+			my $err = $student->first." ".$student->last." is already entered";
+			$m->redirect("/user/enter/students.mhtml?school_id=".$school->id."&event_id=".$event->id."&err=$err")
+		}
+	}
+
+	my $other_school;
+
+	if ($hybrid) { 
+
+		$other_school = Tab::School->search( chapter => $partner->chapter->id, tourn => $tourn->id)->first;
+		
+		unless ($other_school) { 
+			$other_school = $m->comp("create.mhtml", 
+					account => $account, session => $session, 
+					chapter_id => $partner->chapter->id, tourn_id => $tourn->id, 
+					return => "yes");
+		}   
+	}
+
+	my $codes = $event->setting("code_style");
+
+	if ($codes eq "numbers") { 
+
+		$code = $m->comp("/funclib/event_code.mas", event => $event);
+
+	} elsif ($codes eq "school_number") { 
+
+		$code = $school->code." ".$m->comp("/funclib/event_code.mas", event => $event);
+		$code = $school->code."/".$other_school->code." ".$m->comp("/funclib/event_code.mas", event => $event) if $hybrid;
+
+	} elsif ($codes eq "initials" || $codes eq "register") { 
+
+		$code = $school->code;
+		$code = $m->comp("/funclib/school_codename.mas", school => $school) unless $code;
+
+		my $other_code;
+
+		if ($hybrid) { 
+			$other_code = $other_school->code;
+			$other_code = $m->comp("/funclib/school_codename.mas", school => $other_school) unless $other_code;
+		}
+
+		$code.= "/".$other_code if $hybrid;
+		$code.= " ";
+
+		my $initials;
+
+		if (scalar @students == 1) { 
+
+			$initials .= ucfirst substr($students[0]->first, 0, 1). ucfirst substr($students[0]->last, 0, 1);
+
+		} else {
+
+			foreach my $student (@students) {
+				$initials .= ucfirst substr ($student->last, 0, 1);
+			}
+
+		}
+		
+		my $other = Tab::Entry->search( code => $code.$initials, school => $school->id, event => $event->id )->first;
+
+		my $counter;
+
+		while ($other) {
+			$counter++;	
+			undef $other;
+			$other = Tab::Entry->search( code => $code.$initials.$counter, school => $school->id, event => $event->id )->first;
+		}
+
+		$err .= "Code $initials already existed. You can choose another or keep $code$initials$counter as the code" if $counter;
+		$err = "Enter a designation for this entry.  Limit of 10 characters for the code." if $codes eq "register";
+		$code .= $initials.$counter;
+
+	} else { 
+		$code = $name;
+	}
+
+	my $entry = Tab::Entry->create({ 
+		tourn => $tourn->id,
+		school => $school_id,
+		waitlist => $waitlist,
+		event => $event_id,
+		code => $code,
+		name => $name,
+		reg_time => $now,
+		dropped => 0,
+		reg_by => $account->id,
+		unconfirmed => 0
+	});
+
+	foreach my $student (@students) { 
+
+		next unless $entry;
+		next unless $student;
+
+		my $es = Tab::EntryStudent->create({
+			entry => $entry->id,
+			student => $student->id
+		});
+
+		$m->comp("/funclib/account_conflict.mas", tourn => $tourn, account => $student->account) if $student->account;
+
+	}
+
+	if ($other_school) { 
+		Tab::Strike->create({
+			entry => $entry->id,
+			type => "hybrid",
+			school => $other_school->id
+		});
+
+	}
+
+	if ($tourn->setting("track_reg_changes")) { 
+
+		my $text = $account->first." ".$account->last." entered ".$event->abbr." entry $code (".$name.")";
+			
+		my $change = Tab::TournChange->create({
+			tourn => $tourn->id,
+			school => $school_id,
+			type => "registration",
+			text => $text
+		});
+
+	}
+		
+	$name =~ s/\&/and/g;
+
+	$msg = $name." has been entered in ". $event->name;
+	$msg = $name." was placed on the waitlist " if $waitlist;
+			
+	if (       $event->setting("ask_for_titles") 
+			|| $tourn->setting("ask_quals")  
+			|| $max > 2 
+			|| $event->setting("apda_seeds") 
+			|| $err
+		) { 
+
+		$m->redirect("edit.mhtml?entry_id=".$entry->id."&school_id=$school_id&err=$err");
+
+	}
+
+	$m->redirect("entries.mhtml?event_id=$event_id&school_id=$school_id&msg=$msg");
+
+</%init>
+
