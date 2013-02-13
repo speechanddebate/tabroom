@@ -9,6 +9,7 @@ Tab::Tourn->columns(TEMP => qw/schoolid/);
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
 Tab::Tourn->has_many(pools => 'Tab::Pool', 'tourn');
 Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');
+Tab::Tourn->has_many(hotels => 'Tab::Hotel', 'tourn');
 Tab::Tourn->has_many(events => 'Tab::Event', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
 Tab::Tourn->has_many(ratings => 'Tab::Rating', 'tourn');
