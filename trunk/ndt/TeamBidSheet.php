@@ -4,6 +4,10 @@ require 'scripts/tabroomtemplate.html';
 require 'scripts/databaseconnect.php';
 $student1=$_GET['id1'];
 $student2=$_GET['id2'];
+$student3=getaltid($student1);
+$student4=getaltid($student2);
+//echo $student3." ".$student4."<br>";
+
 $teamname=""; $schoolname=""; $studentname= array();
 $chapterid=0;
 
@@ -77,7 +81,7 @@ $round= array(); $tourn= array(); $tournid=array(); $tourndate= array(); $side= 
 $win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array();
 $oppn = array(); $event = array(); $x=0; $panel[0]=-1; $ballotid=-1;
 $year=date("Y"); $month=date("M"); if ($month<8) {$year=$year-1;}
-$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, round.name as rd_name, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2.") and entry.id=entry_student.entry and tourn.start>'".$year."-09-01' ORDER BY tourn.start asc, tourn.id asc, round.name asc, panel.id asc, ballot.id asc";
+$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, round.name as rd_name, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start>'".$year."-09-01' ORDER BY tourn.start asc, tourn.id asc, round.name asc, panel.id asc, ballot.id asc";
 $ballots=mysql_query($query); 
 
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
@@ -225,7 +229,7 @@ echo "<tr><td>C. Total Record</td><td>".$totwin."-".$totloss."</td><td>".getpcts
 $i=1; $pwin=0; $ploss=0; $trip=""; $doub=""; $octo=""; $qrtr=""; $semi=""; $finl=""; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0;
 $totpwin=0; $totploss=0; $totewin=0; $toteloss=0; $jvwin=0; $jvloss=0;
 while ($i <= $x) {
-if (onlyone($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE)
+if (onlyone($spkr1[$i], $spkr2[$i], $student2, $student4)==TRUE)
 {
  if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
  if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
@@ -245,8 +249,8 @@ if (onlyone($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE)
   {
   echo "<tr>";
   $colleaguename="N/A";
-  if ($spkr1[$i]<>$student1) {$colleaguename=getname($spkr1[$i]);}
-  if ($spkr2[$i]<>$student1) {$colleaguename=getname($spkr2[$i]);}
+  if ($spkr1[$i]<>$student1 and $spkr1[$i]<>$student3) {$colleaguename=getname($spkr1[$i]);}
+  if ($spkr2[$i]<>$student1 and $spkr2[$i]<>$student3) {$colleaguename=getname($spkr2[$i]);}
   echo "<td>".$colleaguename."</td>";
   echo "<td>".$tourn[$i]."</td>";
   echo "<td>".$event[$i]."</td>";
@@ -300,7 +304,7 @@ $i++;
 $i=1; $pwin=0; $ploss=0; $trip=""; $doub=""; $octo=""; $qrtr=""; $semi=""; $finl=""; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0;
 $totpwin=0; $totploss=0; $totewin=0; $toteloss=0; $jvwin=0; $jvloss=0;
 while ($i <= $x) {
-if (onlyone($spkr1[$i], $spkr2[$i], $student2, $student1)==TRUE)
+if (onlyone($spkr1[$i], $spkr2[$i], $student1, $student3)==TRUE)
 {
  if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
  if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
@@ -320,8 +324,8 @@ if (onlyone($spkr1[$i], $spkr2[$i], $student2, $student1)==TRUE)
   {
   echo "<tr>";
   $colleaguename="N/A";
-  if ($spkr1[$i]<>$student2) {$colleaguename=getname($spkr1[$i]);}
-  if ($spkr2[$i]<>$student2) {$colleaguename=getname($spkr2[$i]);}
+  if ($spkr1[$i]<>$student2 and $spkr1[$i]<>$student4) {$colleaguename=getname($spkr1[$i]);}
+  if ($spkr2[$i]<>$student2 and $spkr2[$i]<>$student4) {$colleaguename=getname($spkr2[$i]);}
   echo "<td>".$colleaguename."</td>";
   echo "<td>".$tourn[$i]."</td>";
   echo "<td>".$event[$i]."</td>";
@@ -349,7 +353,7 @@ $i++;
 	</tbody>
        </table>
 
-<h4>NUMBER OF PRELIMINARY ROUNDS (a debater may participate in no more than 120 prelim rrounds of debate before the NDT)</h4>
+<h4>NUMBER OF PRELIMINARY ROUNDS (a debater may participate in no more than 120 prelim rounds of debate before the NDT)</h4>
 
        <table id="recgrid" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
        <thead>
@@ -462,12 +466,12 @@ while ($i <= $x)
 {
  $match=FALSE;
  if ($loopnum==1 and teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE) {$match=TRUE;}
- if ($loopnum==2 and onlyone($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE) {$match=TRUE;}
- if ($loopnum==3 and onlyone($spkr1[$i], $spkr2[$i], $student2, $student1)==TRUE) {$match=TRUE;}
+ if ($loopnum==2 and onlyone($spkr1[$i], $spkr2[$i], $student2, $student4)==TRUE) {$match=TRUE;}
+ if ($loopnum==3 and onlyone($spkr1[$i], $spkr2[$i], $student1, $student3)==TRUE) {$match=TRUE;}
  if ($match==TRUE)
   {
-   if ($tourn[$i] <> $lasttourn) 
-    {if ($i>1) {echo "<tr><td>Prelims:</td><td>".$pwin."-".$ploss."</td></tr>";
+   if ($tourn[$i] <> $lasttourn ) 
+    {if ($i>1 and ($pwin+$ewin+$ploss+$pwin)>0) {echo "<tr><td>Prelims:</td><td>".$pwin."-".$ploss."</td></tr>";
      echo "<tr><td>Elims:</td><td>".$ewin."-".$eloss."</td></tr>";
      echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student2, $tournid[$i-1])."</td></tr>";}
      echo "<tr><th style='text-align:center' colspan=4><B>".$tourn[$i]."</B></th></tr>";
@@ -483,9 +487,13 @@ while ($i <= $x)
   }
  $i++;
 }           // end of debate loop
+ if (($pwin+$ewin+$ploss+$pwin)>0) 
+  {
   echo "<tr><td>Prelims:</td><td>".$pwin."-".$ploss."</td></tr>";
   echo "<tr><td>Elims:</td><td>".$ewin."-".$eloss."</td></tr>";
   echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student1, $tournid[$i-1]).gethonors($student2, $tournid[$i-1])."</td></tr>";
+  }
+ if (($pwin+$ewin+$ploss+$pwin)==0) {echo "<tr><td>None</td></tr>";}
 
 ?>
 
@@ -513,6 +521,22 @@ function microtime_float()
 {
     list($usec, $sec) = explode(" ", microtime());
     return ((float)$usec + (float)$sec);
+}
+
+function getaltid($studentid)
+{
+$account=-99; $rtnvalue=-99;
+$query="SELECT * FROM student where student.id=".$studentid;
+$spkrs=mysql_query($query); 
+   while ($row = mysql_fetch_array($spkrs, MYSQL_BOTH)) 
+   {$account=$row['account'];}
+if ($account==-99) {return $rtnvalue;}
+
+$query="SELECT * FROM student where student.account=".$account;
+$spkrs=mysql_query($query); 
+   while ($row = mysql_fetch_array($spkrs, MYSQL_BOTH)) 
+   if ($row['id']<>$studentid) {$rtnvalue=$row['id'];}
+return $rtnvalue;
 }
 
 function gethonors($studentid, $tournid)
@@ -574,8 +598,10 @@ function teammatch ($spkr1, $spkr2, $student1, $student2)
 function onlyone ($spkr1, $spkr2, $student1, $student2)
 //tests to see if the team has $student1 but not $student2
 {
- $match=FALSE;
- if ($student2<>$spkr1 and $student2<>$spkr2) {$match=TRUE;}
+ $match=TRUE;
+ // if (($student2<>$spkr1 and $student2<>$spkr2) and $student2<>-99) {$match=TRUE;}
+ if ($student2==$spkr1 or $student2==$spkr2) {$match=FALSE;}
+ if ($student1==$spkr1 or $student1==$spkr2) {$match=FALSE;}
  return $match;
 }
 
