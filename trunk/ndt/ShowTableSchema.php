@@ -6,7 +6,7 @@ $database="itab";
 mysql_connect("localhost",$username,$password);
 @mysql_select_db($database) or die( "Unable to select database<br>");
 
-$result = mysql_query("SHOW COLUMNS FROM student");
+$result = mysql_query("SHOW COLUMNS FROM result");
 if (!$result) {
     echo 'Could not run query: ' . mysql_error();
     exit;
@@ -52,14 +52,16 @@ $tourn=mysql_query($query);
 
 $query="SELECT * FROM ballot_value where (ballot_value.ballot>=1679457 and ballot_value.ballot<=1679568) and ballot_value.tag='rfd'";
 $query="SELECT * FROM student where first='elijah' and last='smith'";
+$query="SELECT * FROM result, student where honor<>'' and student.id=result.student";
+
 
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
 echo $entryNum."<br>";
 for ($i=0; $i <= $entryNum-1; $i++)
 {
-echo "ID=".mysql_result($tourn,$i,"id")."Student=".mysql_result($tourn,$i,"last")."chapter=".mysql_result($tourn,$i,"chapter")."<br>";
-//." ".mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")." Honor=".mysql_result($tourn,$i,"honor")." honor_site=".mysql_result($tourn,$i,"honor_site")." round=".mysql_result($tourn,$i,"round")
+//echo "ID=".mysql_result($tourn,$i,"id")."Student=".mysql_result($tourn,$i,"last")."chapter=".mysql_result($tourn,$i,"chapter")."<br>";
+echo "ID=".mysql_result($tourn,$i,"result.id")." ".mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")." Honor=".mysql_result($tourn,$i,"honor")." honor_site=".mysql_result($tourn,$i,"honor_site")." round=".mysql_result($tourn,$i,"round")."<br>";
 //echo mysql_result($tourn,$i,"panel.id")." ".mysql_result($tourn,$i,"room")." ".mysql_result($tourn,$i,"round")."<br>";
 //$query2="delete from panel where panel.id=".mysql_result($tourn,$i,"panel.id");
 //echo $query2;

@@ -78,10 +78,10 @@ Round robin and JV results do not count in prelim totals but appear separately. 
 
 $balfor=0; $balvs=0; 
 $round= array(); $tourn= array(); $tournid=array(); $tourndate= array(); $side= array(); $panel=array(); $roundlabel=array();
-$win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array();
+$win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array(); $entry=array();
 $oppn = array(); $event = array(); $x=0; $panel[0]=-1; $ballotid=-1;
 $year=date("Y"); $month=date("M"); if ($month<8) {$year=$year-1;}
-$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, round.name as rd_name, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start>'".$year."-09-01' ORDER BY tourn.start asc, tourn.id asc, round.name asc, panel.id asc, ballot.id asc";
+$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, round.name as rd_name, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start>'".$year."-09-01' ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name asc, panel.id asc, ballot.id asc";
 $ballots=mysql_query($query); 
 
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
@@ -96,6 +96,7 @@ $ballots=mysql_query($query);
          $event[$x]=$row['event_name'];
          $tourn[$x]=$row['tourn_name'];
          $tournid[$x]=$row['tourn_id'];
+         $entry[$x]=$row['entry_id'];
          $oppn[$x]=getopponent($row['panel_id'], $row['entry_id']);
          $tourndate[$x]=$row['start'];
          $side[$x]=$row['side'];
@@ -320,7 +321,7 @@ if (onlyone($spkr1[$i], $spkr2[$i], $student1, $student3)==TRUE)
  if ($round[$i]==14) {$qrtr=$outcome[$i];}
  if ($round[$i]==15) {$semi=$outcome[$i];}
  if ($round[$i]==16) {$finl=$outcome[$i];}
- if (($i<$x and $tourn[$i]<>$tourn[$i+1]) OR $i==$x)
+ if (($i<$x and $tourn[$i]<>$tourn[$i+1]) OR $i==$x or ($i<$x and $entry[$i]<>$entry[$i+1]))
   {
   echo "<tr>";
   $colleaguename="N/A";
@@ -369,8 +370,8 @@ $i++;
 $i=1; $trds=0; $s1rds=0; $s2rds=0;
 while ($i <= $x) {
  if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE) {$trds++;}
- if ($spkr1[$i]==$student1 or $spkr2[$i]==$student1) {$s1rds++;}
- if ($spkr1[$i]==$student2 or $spkr2[$i]==$student2) {$s2rds++;}
+ if ($spkr1[$i]==$student1 or $spkr2[$i]==$student1 or $spkr1[$i]==$student3 or $spkr2[$i]==$student3) {$s1rds++;}
+ if ($spkr1[$i]==$student2 or $spkr2[$i]==$student2 or $spkr1[$i]==$student4 or $spkr2[$i]==$student4) {$s2rds++;}
  $i++;
 }
 
@@ -406,8 +407,8 @@ $ewin=0; $eloss=0; $jvwin=0; $jvloss=0;
 while ($i <= $x) 
 {
 $match=FALSE;
-if ($stucount==1 and ($spkr1[$i]==$student1 or $spkr2[$i]==$student1)) {$match=TRUE;}
-if ($stucount==2 and ($spkr1[$i]==$student2 or $spkr2[$i]==$student2)) {$match=TRUE;}
+if ($stucount==1 and ($spkr1[$i]==$student1 or $spkr2[$i]==$student1 or $spkr1[$i]==$student3 or $spkr2[$i]==$student3)) {$match=TRUE;}
+if ($stucount==2 and ($spkr1[$i]==$student2 or $spkr2[$i]==$student2 or $spkr1[$i]==$student4 or $spkr2[$i]==$student4)) {$match=TRUE;}
 if ($match==TRUE)
  {
   if ($win[$i]==1) 
@@ -596,12 +597,11 @@ function teammatch ($spkr1, $spkr2, $student1, $student2)
 }
 
 function onlyone ($spkr1, $spkr2, $student1, $student2)
-//tests to see if the team has $student1 but not $student2
+//tests to see if the team has either $student1 or $student2; looks for records in the set, and returns TRUE if the partner specified isn't on the team
 {
- $match=TRUE;
- // if (($student2<>$spkr1 and $student2<>$spkr2) and $student2<>-99) {$match=TRUE;}
- if ($student2==$spkr1 or $student2==$spkr2) {$match=FALSE;}
+ $match=TRUE; //default is that it IS a team with only 1 of the 2 bid sheet debaters on it; 
  if ($student1==$spkr1 or $student1==$spkr2) {$match=FALSE;}
+ if ($student2==$spkr1 or $student2==$spkr2) {$match=FALSE;}
  return $match;
 }
 
