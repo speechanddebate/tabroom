@@ -34,7 +34,7 @@ The seasonal totals link will show all teams' cumulative record, and provide lin
 
 require 'scripts/databaseconnect.php';
 
-$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id from event, tourn, tourn_circuit where circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and event.type='policy' order by tourn.start, tourn.id, event.type asc";
+$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id from event, tourn, tourn_circuit where circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and (event.type='policy' or event.type='roundrobin') order by tourn.start, tourn.id, event.type asc";
 $event=mysql_query($query);
 $eventNum = mysql_num_rows($event);
 

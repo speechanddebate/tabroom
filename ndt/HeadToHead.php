@@ -283,6 +283,8 @@ function panelmaker($entry, &$panel_id, &$panel_entry_sync, &$panel_entry_orig, 
   $entrylist=array();                                 //list of all entries that have the same entry_student records as the current entry
   findcommonentries($entry, $entrylist);              //populate it
   if (count($entrylist)==0) {return;}
+  $year=date("Y"); $month=date("M"); if ($month<8) {$year=$year-1;}
+  //$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, round.name as rd_name, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start>'".$year."-09-01' ORDER BY tourn.start asc, tourn.id asc, round.name asc, panel.id asc, ballot.id asc";
   $query="SELECT distinct panel.id as panel_id, ballot.entry as entry from panel, ballot where panel.id=ballot.panel and ".entryquerymaker($entrylist);
   $panels=mysql_query($query);
   while ($row = mysql_fetch_array($panels, MYSQL_BOTH)) 
