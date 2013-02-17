@@ -6,7 +6,7 @@ $student1=$_GET['id1'];
 $student2=$_GET['id2'];
 $student3=getaltid($student1);
 $student4=getaltid($student2);
-//echo $student3." ".$student4."<br>";
+//echo "ID3=".$student3." ID4".$student4."<br>";
 
 $teamname=""; $schoolname=""; $studentname= array();
 $chapterid=0;
@@ -101,7 +101,7 @@ $ballots=mysql_query($query);
          $tourndate[$x]=$row['start'];
          $side[$x]=$row['side'];
          getspeakers($spkr1[$x], $spkr2[$x], $row['entry_id']);
-         $outcome[$x]=makeoutcomestring($balfor, $balvs);
+         $outcome[$x]=makeoutcomestring($balfor, $balvs, $row['judge']);
          if($balfor > $balvs) {$win[$x] = 1;}
          $isprelim[$x]=1; if ($row['rd_name'] > 9) {$isprelim[$x]=0;}
          if ($row['event_type']=='roundrobin') {$isRR[$x]=1;}
@@ -246,7 +246,8 @@ if (onlyone($spkr1[$i], $spkr2[$i], $student2, $student4)==TRUE)
  if ($round[$i]==14) {$qrtr=$outcome[$i];}
  if ($round[$i]==15) {$semi=$outcome[$i];}
  if ($round[$i]==16) {$finl=$outcome[$i];}
- if (($i<$x and $tourn[$i]<>$tourn[$i+1]) OR $i==$x)
+ if (($i<$x and $tourn[$i]<>$tourn[$i+1]) OR $i==$x or ($i<$x and $entry[$i]<>$entry[$i+1]))
+
   {
   echo "<tr>";
   $colleaguename="N/A";
@@ -474,7 +475,7 @@ while ($i <= $x)
    if ($tourn[$i] <> $lasttourn ) 
     {if ($i>1 and ($pwin+$ewin+$ploss+$pwin)>0) {echo "<tr><td>Prelims:</td><td>".$pwin."-".$ploss."</td></tr>";
      echo "<tr><td>Elims:</td><td>".$ewin."-".$eloss."</td></tr>";
-     echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student2, $tournid[$i-1])."</td></tr>";}
+     echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student2, $tournid[$i-1])." ".gethonors($student1, $tournid[$i-1])."</td></tr>";}
      echo "<tr><th style='text-align:center' colspan=4><B>".$tourn[$i]."</B></th></tr>";
      echo "<tr><td>Round</td><td>Side</td><td>Outcome</td><td>Opponent</td></tr>";
      $pwin=0; $ploss=0; $ewin=0; $eloss=0;
@@ -558,8 +559,9 @@ function getpctstring ($win, $loss)
  return $winpct;
 }
 
-function makeoutcomestring ($balfor, $balvs)
+function makeoutcomestring ($balfor, $balvs, $judge)
 {
+ if ($judge==-1 or $judge==0) {return "Bye/Fft";}
  $outcome=""; 
  for ($i=1; $i <= $balfor; $i++) {$outcome.="W";}
  for ($i=1; $i <= $balvs; $i++) {$outcome.="L";}
