@@ -63,12 +63,12 @@ while ($row = mysql_fetch_array($ballot, MYSQL_BOTH)) {
 if ($Round <> $row['label'] AND $Round <> "")
  {
    WriteRow($Round, $Judge, $Oppn, $Side, $Outcome, $Spkr, $studentNum);
-   $Round=""; $Judge=""; $Oppn=""; $Outcome="";
+   $Round=""; $Judge=""; $Oppn=""; $Outcome=""; $RoundName="";
    $i2=0; while ($i2 < $studentNum) {$Spkr[$i2]="";$i2++;}
  }
 
 //assign round and judge for current ballots
-$Round=$row['label'];
+$Round=$row['label']; if ($Round=="") {$Round=$row['name'];}
 if ($Judge<>"") {$Judge.=", ";}
 $Judge.=getjudgename($row['judge']);
 if ($row['side']=='1') {$Side="Aff";}
