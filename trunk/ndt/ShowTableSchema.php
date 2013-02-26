@@ -53,7 +53,7 @@ $tourn=mysql_query($query);
 $query="SELECT * FROM ballot_value where (ballot_value.ballot>=1679457 and ballot_value.ballot<=1679568) and ballot_value.tag='rfd'";
 $query="SELECT * FROM panel, ballot, ballot_value where ballot_value.student=106932 and ballot.entry=0 and panel.id=ballot.panel and ballot.id=ballot_value.ballot";
 $query="SELECT * FROM ballot, panel, round where ballot.entry=368836 and panel.id=ballot.panel and round.id=panel.round";
-$query="Select * from student where last='breeding'";
+$query="Select * from tourn, event, round, panel, ballot where tourn.id=1895 and event.tourn=1895 and round.event=event.id and panel.round=round.id and ballot.panel=panel.id";
 //$query="SELECT * FROM result, student where honor<>'' and student.id=result.student";
 
 $tourn=mysql_query($query);
@@ -61,9 +61,10 @@ $entryNum = mysql_num_rows($tourn);
 //echo $entryNum."<br>";
 for ($i=0; $i <= $entryNum-1; $i++)
 {
-echo "ID=".mysql_result($tourn,$i,"id")."Student=".mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")."chapter=".mysql_result($tourn,$i,"chapter")."<br>";
+//echo "ID=".mysql_result($tourn,$i,"id")."Student=".mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")."chapter=".mysql_result($tourn,$i,"chapter")."<br>";
 //echo "ID=".mysql_result($tourn,$i,"result.id")." ".mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")." Honor=".mysql_result($tourn,$i,"honor")." honor_site=".mysql_result($tourn,$i,"honor_site")." round=".mysql_result($tourn,$i,"round")."<br>";
 //echo "ballot.id=".mysql_result($tourn,$i,"ballot.id")." bye=".mysql_result($tourn,$i,"bye")." round=".mysql_result($tourn,$i,"round.id")." ".mysql_result($tourn,$i,"round.name")."<br>";
+echo "panel.id=".mysql_result($tourn,$i,"panel.id")." tourn=".mysql_result($tourn,$i,"tourn.id")." round=".mysql_result($tourn,$i,"round.id")." ".mysql_result($tourn,$i,"round.name")."<br>";
 //$query2="delete from panel where panel.id=".mysql_result($tourn,$i,"panel.id");
 //echo $query2;
 //mysql_query($query2);
