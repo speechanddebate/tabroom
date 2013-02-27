@@ -41,6 +41,7 @@ sub short_name {
 	$name =~ s/Academy$//g;
 	$name =~ s/Regional\ High\ School$//g;
 	$name =~ s/High\ School$//g;
+	$name =~ s/Colleges$//g;
 	$name =~ s/School$//g;
 	$name =~ s/High$//g;
 	$name =~ s/Preparatory$/Prep/g;
@@ -50,9 +51,12 @@ sub short_name {
 	$name =~ s/Public\ Charter//g;
 	$name =~ s/Charter\ Public//g;
 	$name =~ s/University\ of//g;
+	$name =~ s/California State University,/CSU/g;
+	$name =~ s/California State University/CSU/g;
 	$name =~ s/University$//g;
+	$name =~ s/State\ University,/State\ /g;
 	$name =~ s/^The//g;
-	$name =~ s/^Saint/St./g;
+	$name =~ s/^Saint\ /St\ /g;
 	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
 	$name =~ s/High\ School/HS/g;
 	$name =~ s/^\s+//;  #leading spaces
