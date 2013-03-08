@@ -11,4 +11,5 @@ Tab::Region->has_many(schools => 'Tab::School', 'region');
 Tab::Region->has_many(fines => 'Tab::RegionFine', 'region');
 Tab::Region->has_many(region_admins => 'Tab::RegionAdmin', 'region');
 Tab::Region->has_many(admins => [ Tab::RegionAdmin => 'account']);
+Tab::Region->has_many(chapters => [ Tab::ChapterCircuit => 'chapter']);
 
