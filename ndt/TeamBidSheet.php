@@ -11,6 +11,7 @@ $student4=getaltid($student2);
 $teamname=""; $schoolname=""; $studentname= array();
 $chapterid=0;
 
+//Just makes the team name
 $query="SELECT *, chapter.name as chapter_name, chapter.id as chapter_id, student.id as student_id FROM student, chapter where (student.id=".$student1." or student.id=".$student2.") and chapter.id=student.chapter";
 $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
@@ -71,11 +72,12 @@ echo "<tr><td>Director and Coaches</td><td>".$coaches."</td></tr>";
        </table>
 <br>
 <h2>section II: tabular summary</h2>
-Round robin and JV results do not count in prelim totals but appear separately.  Elim rounds are counted as win/loss and not as ballot counts.  Elim byes and close-outs are not counted in elim totals.
+Round robin and JV results do not count in prelim totals but appear separately.  Elim rounds are counted as win/loss and not as ballot counts.  Elim byes and closeouts are not included in elim win totals.
 <h4>RECORD of debaters as a team</h4>
 
 <?php
 
+//pull all ballots involving the 2 debaters
 $balfor=0; $balvs=0; 
 $round= array(); $tourn= array(); $tournid=array(); $tourndate= array(); $side= array(); $panel=array(); $roundlabel=array();
 $win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array(); $entry=array();
@@ -86,6 +88,7 @@ $ballots=mysql_query($query);
 
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      { 
+      //if ($row['tourn_id']==1532) {echo $row['panel_id']."<br>";}
       if ($row['panel_id']<>$panel[$x]) {$x++; $balfor=0; $balvs=0;}
       if ($row['ballot_decision'] == 1 and $row['ballot_id']<>$ballotid) {$balfor +=1;}
       if ($row['ballot_decision'] == 0 and $row['ballot_id']<>$ballotid) {$balvs +=1;}
@@ -128,6 +131,7 @@ $ballots=mysql_query($query);
         <tbody id="myTbodytotals">
 <?php
 
+//count wins and print the tabular summary
 $i=1; $pwin=0; $ploss=0; $trip=""; $doub=""; $octo=""; $qrtr=""; $semi=""; $finl=""; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0;
 $totpwin=0; $totploss=0; $totewin=0; $toteloss=0; $jvwin=0; $jvloss=0;
 while ($i <= $x) {
@@ -135,8 +139,8 @@ if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE)
 {
  if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
  if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
- if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1) {$totewin++;}
- if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1) {$toteloss++;}
+ if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totewin++;}
+ if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$toteloss++;}
  if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
  if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
  if ($win[$i]==1) {$totwin++;}
@@ -451,7 +455,7 @@ One asterisk (*) indicates an opponent who cleared.
 Honors are supplied by applicants and do not draw from the database.
 
 <?php 
-$loopnum=1; $match=FALSE;
+$loopnum=1; $match=FALSE; 
 while ($loopnum <=3)
 {
 if ($loopnum==1) {echo "<h4>INDIVIDUAL TOURNAMENTS AS A TEAM</H4>";}
@@ -463,7 +467,7 @@ if ($loopnum==3) {echo "<h4>INDIVIDUAL TOURNAMENTS FOR ".$studentname[2]."</H4>"
         <tbody id="myTbodytotals">
 <?php
 $i=1; $pwin=0; $ploss=0; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0; $lasttourn=-1;
-$ewin=0; $eloss=0; $jvwin=0; $jvloss=0;
+$ewin=0; $eloss=0; $jvwin=0; $jvloss=0; $lasttournid=0;
 while ($i <= $x) 
 {
  $match=FALSE;
@@ -475,7 +479,14 @@ while ($i <= $x)
    if ($tourn[$i] <> $lasttourn ) 
     {if ($i>1 and ($pwin+$ewin+$ploss+$pwin)>0) {echo "<tr><td>Prelims:</td><td>".$pwin."-".$ploss."</td></tr>";
      echo "<tr><td>Elims:</td><td>".$ewin."-".$eloss."</td></tr>";
-     echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student2, $tournid[$i-1])." ".gethonors($student1, $tournid[$i-1])."</td></tr>";}
+     if ($loopnum==1)
+      {echo "<tr><td>Total:</td><td width=20%>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td width=20%> ".gethonors($student2, $tournid[$i-1])." ".gethonors($student1, $tournid[$i-1])."</td></tr>";}
+     if ($loopnum==2)
+      {echo "<tr><td>Total:</td><td width=20%>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td width=20%>".gethonors($student1, $lasttournid)."</td></tr>";}
+     if ($loopnum==3)
+      {echo "<tr><td>Total:</td><td width=20%>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td width=20%>".gethonors($student2, $lasttournid)."</td></tr>";}
+     }
+
      echo "<tr><th style='text-align:center' colspan=4><B>".$tourn[$i]."</B></th></tr>";
      echo "<tr><td>Round</td><td>Side</td><td>Outcome</td><td>Opponent</td></tr>";
      $pwin=0; $ploss=0; $ewin=0; $eloss=0;
@@ -485,7 +496,7 @@ while ($i <= $x)
    if ($isprelim[$i]==1 and $win[$i]==0) {$ploss++;}
    if ($isprelim[$i]==0 and $win[$i]==1) {$ewin++;}
    if ($isprelim[$i]==0 and $win[$i]==0) {$eloss++;}
-   $lasttourn=$tourn[$i];
+   $lasttourn=$tourn[$i]; $lasttournid=$tournid[$i];
   }
  $i++;
 }           // end of debate loop
@@ -493,7 +504,12 @@ while ($i <= $x)
   {
   echo "<tr><td>Prelims:</td><td>".$pwin."-".$ploss."</td></tr>";
   echo "<tr><td>Elims:</td><td>".$ewin."-".$eloss."</td></tr>";
-  echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student1, $tournid[$i-1]).gethonors($student2, $tournid[$i-1])."</td></tr>";
+  if ($loopnum==1) 
+   {echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student1, $tournid[$i-1])." ".gethonors($student2, $tournid[$i-1])."</td></tr>";}
+  if ($loopnum==2) 
+   {echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student1, $lasttournid)."</td></tr>";}
+  if ($loopnum==3) 
+   {echo "<tr><td>Total:</td><td>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td>".gethonors($student2, $lasttournid)."</td></tr>";}
   }
  if (($pwin+$ewin+$ploss+$pwin)==0) {echo "<tr><td>None</td></tr>";}
 
@@ -547,7 +563,7 @@ $query="SELECT * FROM result, round, event, tourn where student=".$studentid." a
 $rtnvalue="";
 $spkrs=mysql_query($query); 
    while ($row = mysql_fetch_array($spkrs, MYSQL_BOTH)) 
-   {$rtnvalue.=$row['honor'];}
+   {$rtnvalue.=" ".$row['honor'];}
 if ($rtnvalue<>'') {return "Honors: ".getname($studentid)." ".$rtnvalue.". ";}
 return '';
 }
@@ -561,10 +577,11 @@ function getpctstring ($win, $loss)
 
 function makeoutcomestring ($balfor, $balvs, $judge)
 {
- if ($judge==-1 or $judge==0) {return "Bye/Fft";}
+ if (($judge==-1 or $judge==0) and ($balfor==0 and $balvs==0)) {return "Bye/Fft";}
  $outcome=""; 
  for ($i=1; $i <= $balfor; $i++) {$outcome.="W";}
  for ($i=1; $i <= $balvs; $i++) {$outcome.="L";}
+ if ($judge==-1 or $judge==0) {$outcome.=" (bye/fft)";}
  return $outcome;
 }
 
