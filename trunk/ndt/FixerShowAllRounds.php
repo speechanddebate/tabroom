@@ -28,6 +28,7 @@ echo "<td>".mysql_result($tourn,$i,"tourn.name")."</td>";
 echo "<td>".mysql_result($tourn,$i,"event.id")."-".mysql_result($tourn,$i,"event.name")."</td>";
 echo "<td>".mysql_result($tourn,$i,"round.id")."-".mysql_result($tourn,$i,"round.label")."</td>";
 echo "<td>".mysql_result($tourn,$i,"round.name")."</td>";
+echo "<td>".mysql_result($tourn,$i,"round.timestamp")."</td>";
 echo "</tr>";
 }
 

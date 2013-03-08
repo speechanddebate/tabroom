@@ -44,7 +44,6 @@ function getdecision($ballot)
  return $judgename;
 }
 
-
 ?>
 
 <a href="FixerElimByeAutofixer.php">Elim Bye Main Page</a></br>
