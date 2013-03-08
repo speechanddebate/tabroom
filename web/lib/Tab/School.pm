@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::School->table('school');
 Tab::School->columns(Essential => qw/id tourn name chapter region code contact/);
 Tab::School->columns(Others => qw/registered registered_on entered_on hotel 
-                                  paid contact_name contact_number individuals
+                                  paid contact_email contact_name contact_number individuals
                                   noprefs timestamp self_register self_reg_deadline /);
 
 Tab::School->has_a(tourn => 'Tab::Tourn');
