@@ -204,9 +204,8 @@ Clicking on any team will launch their NDT bid sheet.  Note that columns are sor
 
 <?php
 //get the waitlist
-$query="SELECT *, entry.id as entry_id, student_entry.student as student_entry_student from entry, entry_student where entry.event=20418 and entry.waitlist>0 and entry_student.entry=entry.id";
+$query="SELECT *, entry.id as entry_id, entry_student.student as entry_student_student from entry, entry_student where entry.event=20418 and entry.waitlist>0 and entry_student.entry=entry.id";
 $waitlist=mysql_query($query);
-$waitNum = mysql_num_rows($waitlist);
 
 for ($x=1; $x<count($team)+1; $x++) 
  {
@@ -245,11 +244,12 @@ mysql_close();
 function is2drd($team, $n, $waitlist)
 {
 $match=0; $x=0; $curteam=0;
+mysql_data_seek($waitlist,0);
 while ($row = mysql_fetch_array($waitlist, MYSQL_BOTH)) 
  {
  if ($row['entry_id']<>$curteam) {$match=0;}
  $curteam=$row['entry_id'];
- if ($team[$n][0]==$row['entry_student_stduent']) {$match++;}
+ if ($team[$n][0]==$row['entry_student_student']) {$match++;}
  if ($team[$n][1]==$row['entry_student_student']) {$match++;}
  if ($match==2) {return TRUE;}
  }
