@@ -7,7 +7,7 @@ Tab::JudgeGroup->columns(Essential => qw/tourn name abbr timestamp/);
 Tab::JudgeGroup->has_a(tourn => "Tab::Tourn");
 
 Tab::JudgeGroup->has_many(pools => "Tab::Pool", "judge_group");
-Tab::JudgeGroup->has_many(judges => "Tab::Judge", "judge_group");
+Tab::JudgeGroup->has_many(judges => "Tab::Judge", "judge_group" => { order_by => 'code'} );
 Tab::JudgeGroup->has_many(events => "Tab::Event", "judge_group");
 Tab::JudgeGroup->has_many(hires => 'Tab::JudgeHire', 'judge_group');
 Tab::JudgeGroup->has_many(rating_tiers => "Tab::RatingTier", "judge_group");
