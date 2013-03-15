@@ -24,7 +24,6 @@ The seasonal totals link will show all teams' cumulative record, and provide lin
 			<th>Traditional cume sheets</th>
 			<th>Elim results</th>
 			<th>Elim bracket</th>
-			<th>Speaker Awards</th>
 		</tr>
 
 	</thead>
@@ -51,7 +50,7 @@ $resultid=getresultid(mysql_result($event,$i,"event_id"));
 if ($resultid>0)
 {echo "<td><a href='https://www.tabroom.com/index/tourn/results/bracket.mhtml?tourn_id=".mysql_result($event,$i,"tourn_id")."&result_id=".$resultid."'>Elim Bracket</a></td>";}
 else {echo "<td>Not availabile</td>";}
-echo "<td><a href='https://www.tabroom.com/jbruschke/SpeakerAwards.php?event=".mysql_result($event,$i,"event_id")."'>Speaker Awards</a></td>";
+//echo "<td><a href='https://www.tabroom.com/jbruschke/SpeakerAwards.php?event=".mysql_result($event,$i,"event_id")."'>Speaker Awards</a></td>";
 echo "</tr>";
 $i++;
 }

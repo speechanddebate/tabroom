@@ -114,9 +114,38 @@ require 'scripts/tabroomtemplate.html';
          <tr><td>Wichita State</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
          <tr><td>Monmouth-Jersey Shore</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Webster Dunn/Berch</td><td>CAT</td></tr>
          <tr><td>Monmouth-Jersey Shore</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Webster Dunn/Berch</td><td>CAT</td></tr>
-
-
-
+         <tr><td>Wichita</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>Wichita</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>Georgia</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Mosely-Jensen</td><td>CAT?</td></tr>
+         <tr><td>Georgia</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Mosely-Jensen</td><td>CAT?</td></tr>
+         <tr><td>Georgia</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Mosely-Jensen</td><td>CAT?</td></tr>
+         <tr><td>NCFA</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Perry</td><td>CAT</td></tr>
+         <tr><td>NCFA</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>Final round closeout not entered</td><td>Perry</td><td>CAT</td></tr>
+         <tr><td>NCFA</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Perry</td><td>CAT</td></tr>
+         <tr><td>Northwestern</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Larson</td><td>STA</td></tr>
+         <tr><td>Cornell</td><td>Open</td><td>No results</td><td>No results</td><td>No results</td><td>None</td><td>Webster</td><td>CAT</td></tr>
+         <tr><td>Cornell</td><td>Novice</td><td>No results</td><td>No results</td><td>No results</td><td>None</td><td>Webster</td><td>CAT</td></tr>
+         <tr><td>District 5</td><td>Open</td><td>Only ballot counts</td><td>OK</td><td>OK</td><td>None</td><td>Young</td><td>TRPC</td></tr>
+         <tr><td>District 3</td><td>Qualifier</td><td>OK</td><td>OK</td><td>No elims</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>District 3</td><td>Open</td><td>OK</td><td>OK</td><td>No elims</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>District 3</td><td>Novice</td><td>OK</td><td>OK</td><td>No elims</td><td>None</td><td>Jarman</td><td>CAT</td></tr>
+         <tr><td>District 8</td><td>Qualifier</td><td>OK</td><td>OK</td><td>No elims</td><td>None</td><td>???</td><td>TRPC</td></tr>
+         <tr><td>District 1</td><td>Qualifier</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds</td><td>CAT</td></tr>
+         <tr><td>District 1</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds</td><td>CAT</td></tr>
+         <tr><td>District 1</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Symonds</td><td>CAT</td></tr>
+         <tr><td>District 6</td><td>Qualifier</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>???</td><td>CAT</td></tr>
+         <tr><td>District 6</td><td>Open</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>???</td><td>CAT</td></tr>
+         <tr><td>District 6</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>???</td><td>CAT</td></tr>
+         <tr><td>District 7</td><td>JV</td><td>OK</td><td>OK</td><td>Only through quarters</td><td>None</td><td>O'Gorman?</td><td>CAT</td></tr>
+         <tr><td>District 7</td><td>Qualifier</td><td>OK</td><td>OK</td><td>Breakouts counted as prelims</td><td>None</td><td>O'Gorman?</td><td>CAT</td></tr>
+         <tr><td>CEDA East</td><td>Novice</td><td>OK</td><td>OK</td><td>Octos byes missing</td><td>None</td><td>Keenan?</td><td>CAT</td></tr>
+         <tr><td>CEDA East</td><td>JV</td><td>OK</td><td>OK</td><td>Quarters byes missing</td><td>None</td><td>Keenan?</td><td>CAT</td></tr>
+         <tr><td>D2 NW Rockies</td><td>Qualifier</td><td>OK</td><td>OK</td><td>Only 1 breakout round</td><td>None</td><td>Hanson</td><td>STA Plus</td></tr>
+         <tr><td>D4</td><td>Qualifier</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>???</td><td>Excel/hand</td></tr>
+         <tr><td>JV Novi Nats Towson</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Ryan</td><td>CAT</td></tr>
+         <tr><td>JV Novi Nats Towson</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Ryan</td><td>CAT</td></tr>
+         <tr><td>Western Novi Nats</td><td>JV</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Perry</td><td>CAT</td></tr>
+         <tr><td>Western Novi Nats</td><td>Novice</td><td>OK</td><td>OK</td><td>OK</td><td>None</td><td>Perry</td><td>CAT</td><
         </tbody>
        </table>
 
