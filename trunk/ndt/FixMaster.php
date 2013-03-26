@@ -14,6 +14,8 @@
 <br/>
 <a href="FixerChangeStudent.php">Replace false student record with an actual student</a></br>
 <br/>
+<a href="FixerGive30Win.php">Just give a team a 3-0 bye</a></br>
+<br/>
 <form action="FixerViewPanel.php" method="get">
 Enter panel number to view: <input type="text" size="30" name="panel" />
   <input type="submit" value="View panel"/>

@@ -68,6 +68,13 @@ Take a bye that credits only 1 ballot and credit the team with all ballots; must
   Panel: <input type="text" size="30" name="panel" />
   Entry: <input type="text" size="30" name="entry" />
   <input type="submit" value="Set all ballots to win for this team"/>
+<hr>
+Takes a panel and a team, deletes all existing info for that panel and gives the team a 3-0 decision<br>
+<form action="scripts/Give30Win.php" method="post">
+  Panel: <input type="text" size="30" name="panel" /><br>
+  Entry/winner: <input type="text" size="30" name="entry" /><br>
+  Is a bye (0 for judge unknown, -1 for bye): <input type="text" size="30" name="isbye" /><br>
+  <input type="submit" value="Give a 3-0 win"/>
 </form>
 
 
