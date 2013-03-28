@@ -17,14 +17,14 @@ $round=$_GET['RoundID'];
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Room</th>
-		<th class="smallish">Started</th>
 		<th class="smallish">Ballots Out</th>
 		<th class="smallish">Ballots In</th>
+	       <th class="smallish">Started</th>
 	</tr>
 	</thead>
 
 <?php
-$query="SELECT * FROM panel, room, round WHERE round.id=panel.round and room.id=panel.room and panel.round=".$round." ORDER BY Started ASC";
+$query="SELECT * FROM panel, room, round WHERE round.id=panel.round and room.id=panel.room and panel.round=".$round." ORDER BY Confirmed ASC";
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
 $stillout=0; $alreadyin=0;
