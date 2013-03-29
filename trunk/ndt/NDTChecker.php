@@ -36,7 +36,7 @@ $schoolname_temp="";
 $teamname[$i]=getfullteamname(mysql_result($entry,$i,"entry_id"), $schoolN1, $schoolN2, $schoolname_temp);
 $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp;
 
-  $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name from ballot, ballot_value, panel, round where panel.id=ballot.panel and round.id=panel.round and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
+  $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name from ballot, ballot_value, panel, round where round.post_results>0 and panel.id=ballot.panel and round.id=panel.round and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {

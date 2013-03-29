@@ -24,7 +24,7 @@ $round=$_GET['RoundID'];
 	</thead>
 
 <?php
-$query="SELECT * FROM panel, room, round WHERE round.id=panel.round and room.id=panel.room and panel.round=".$round." ORDER BY Confirmed ASC";
+$query="SELECT * FROM panel, room, round WHERE round.id=panel.round and room.id=panel.room and panel.round=".$round." ORDER BY Confirmed ASC, room.name";
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
 $stillout=0; $alreadyin=0;
@@ -34,11 +34,11 @@ echo "<b><center>ROUND:".mysql_result($tourn,0,"round.label")."</b></center>";
 for ($i=0; $i <= $entryNum-1; $i++)
 {
 echo "<tr>";
-echo "<td>".mysql_result($tourn,$i,"room.name")."</td>";
+echo "<td width=20%>".mysql_result($tourn,$i,"room.name")."</td>";
 ballotsout(mysql_result($tourn,$i,"panel.id"), $stillout, $alreadyin);
-echo "<td>".$stillout."</td>";
-echo "<td>".$alreadyin."</td>";
-echo "<td>".mysql_result($tourn,$i,"panel.started")."</td>";
+echo "<td width=10%>".$stillout."</td>";
+echo "<td width=10%>".$alreadyin."</td>";
+echo "<td widht=40%>".mysql_result($tourn,$i,"panel.started")."</td>";
 echo "</tr>";
 }
 

@@ -1,4 +1,5 @@
 <?php
+die;
 require 'scripts/tabroomtemplate.html';
 ?>
 
