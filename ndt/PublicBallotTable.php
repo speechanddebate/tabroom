@@ -24,7 +24,7 @@ $round=$_GET['RoundID'];
 	</thead>
 
 <?php
-$query="SELECT * FROM panel, room, round WHERE round.id=panel.round and room.id=panel.room and panel.round=".$round." ORDER BY Confirmed ASC, room.name";
+$query="SELECT * FROM panel, room, round WHERE round.id=panel.round and room.id=panel.room and panel.round=".$round." ORDER BY room.name";
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
 $stillout=0; $alreadyin=0;
