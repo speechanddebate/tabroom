@@ -45,12 +45,12 @@ echo "<td>".mysql_result($event,$i,"tourn_name")."</td>";
 echo "<td>". mysql_result($event,$i,"event_name")."</td>";
 echo "<td><a href='https://www.tabroom.com/index/tourn/results/ranked_list.mhtml?event_id=".mysql_result($event,$i,"event_id")."&tourn_id=". mysql_result($event,$i,"tourn_id")."'>Sorted List</a></td>";
 echo "<td><a href='https://www.tabroom.com/jbruschke/TableMaker.php?event=".mysql_result($event,$i,"event_id")."'>Cume sheets</a></td>";
-//echo "<td><a href='https://www.tabroom.com/jbruschke/ElimBracket.php?event=".mysql_result($event,$i,"event_id")."'>Elim Results</a></td>";
+echo "<td><a href='https://www.tabroom.com/jbruschke/ElimBracket.php?event=".mysql_result($event,$i,"event_id")."'>Elim Results</a></td>";
 $resultid=getresultid(mysql_result($event,$i,"event_id"));
 if ($resultid>0)
 {echo "<td><a href='https://www.tabroom.com/index/tourn/results/bracket.mhtml?tourn_id=".mysql_result($event,$i,"tourn_id")."&result_id=".$resultid."'>Elim Bracket</a></td>";}
 else {echo "<td>Not availabile</td>";}
-echo "<td><a href='https://www.tabroom.com/jbruschke/SpeakerAwards.php?event=".mysql_result($event,$i,"event_id")."'>Speaker Awards</a></td>";
+//echo "<td><a href='https://www.tabroom.com/jbruschke/SpeakerAwards.php?event=".mysql_result($event,$i,"event_id")."'>Speaker Awards</a></td>";
 echo "</tr>";
 $i++;
 }
