@@ -54,7 +54,7 @@ sub sorted_keys {
 	} elsif ($name eq "TIMESLOT") { 
 		return ('ID', 'TIMESLOTNAME', 'END', 'START');
 	} elsif ($name eq "JUDGEPREF") { 
-		return ('ID', 'TEAM', 'JUDGE', 'RATING');
+		return ('ID', 'TEAM', 'JUDGE', 'RATING', 'ORDPCT');
 	} elsif ($name eq "TOURN_SETTING") { 
 		return ('TAG', 'VALUE');
 	} elsif ($name eq "ROOM") { 
