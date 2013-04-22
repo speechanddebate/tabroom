@@ -9,7 +9,11 @@
 <%perl>
 
 	use POSIX;
+	use List::Util 'shuffle';
+
 	my $event = $round->event;
+
+	my $seeds++ if $event->setting("pair_seeds");
 
 	Tab::BallotValue->set_sql( delete_round => "
 		delete ballot_value from ballot_value, ballot, panel
@@ -27,7 +31,6 @@
 	Tab::Panel->set_sql( delete_round => "
 		delete from panel where round = ?
 	");
-
 
 	if ($round->type eq "prelim") { 
 
@@ -88,26 +91,29 @@
 	my $cohort = 1;
 
 	my %size_of_school = ();
-	my %school_by_entry = ();
+
+	my %school_by_entry = map {$_->id => $_->school->id} @all_entries;
+	my %state_by_entry = map {$_->id => $_->school->chapter->state} @all_entries;
+	my %seed_by_entry = map {$_->id => $_->pair_seed} @all_entries;
+
 	my @schools;
 
 	foreach my $entry (@all_entries) { 
-		my $entry_id = $entry->id;
-		$school_by_entry{$entry_id} = $entry->school->id;
-		push (@schools, $school_by_entry{$entry_id});
-		$size_of_school{$school_by_entry{$entry_id}}++;
+		push @schools, $school_by_entry{$entry->id};
+		$size_of_school{$school_by_entry{$entry->id}}++;
 	}
 
 	my $ranker = 1;
+
 	my %school_rank = ();
 
 	foreach (@schools) { 
 		$school_rank{$_} = $ranker++;
 	}
 
-	use List::Util 'shuffle';
 	@all_entries =  shuffle(@all_entries);
 	@all_entries = sort {$school_rank{$a->school->id} <=> $school_rank{$b->school->id}} @all_entries;
+	@all_entries = sort {$a->pair_seed <=> $b->pair_seed} @all_entries if $seeds;
 
 	#Set up the initial panels
 	my $max_size = ceil(scalar @all_entries / $num_panels);
@@ -116,46 +122,303 @@
 
 	my %panels = ();
 
-	my @keys;
-
-	foreach (1 .. $num_panels) { 
-		push @keys, $_;
-	}
+    use List::Util 'shuffle';
+    my @keys =  shuffle( 1 .. $num_panels);
 
 	my %school_count;
 
-	foreach my $entry (@all_entries) { 
+    foreach my $entry (@all_entries) {
 
-		my $current_score = 3141591024515;   #why yes I am lazy...
-		my $chosen_key;
+        my $score = "3141592653";
+        my $picked_key;
 
-		KEY:
-		foreach my $key (@keys) { 
+        KEY:
+        foreach my $key (@keys) {
 
-			next KEY if $panels{$key} && scalar @{$panels{$key}} >= $max_size;
+            next if $score == 0;
 
-			if ($panels{$key} && scalar @{$panels{$key}} == $min_size) {
-				next KEY unless $remainder > 0;
-			}
+            my @panel = @{$panels{$key}} if $panels{$key};
+            next KEY if (scalar @panel == $max_size);
 
-			if ($school_count{$school_by_entry{$entry->id}."-".$key} < $current_score) { 
-				$chosen_key = $key;
-			}
-			
-		}
+            if (scalar @panel == $min_size) {
+                next KEY unless $remainder > 0;
+            }
 
-		$remainder-- if $panels{$chosen_key} && scalar @{$panels{$chosen_key}} == $min_size;
-		push (@{$panels{$chosen_key}}, $entry->id);
-		$school_count{$school_by_entry{$entry->id}."-".$chosen_key}++;
+            if (@panel) {
 
-		my $k = shift @keys;
-		push (@keys, $k);
+                push (@panel, $entry->id);
 
-	}
+                my $new_score = score_panel(\@panel, \%school_by_entry, \%state_by_entry);
+
+                if ($new_score < $score) {
+                    $picked_key = $key;
+                    $score = $new_score;
+                    last KEY if $score == 0;
+                }
+
+            } else {
+
+                $picked_key = $key;
+                $score = 0;
+                last KEY;
+            }
+
+        }
+
+        $remainder-- if $panels{$picked_key} && scalar @{$panels{$picked_key}} == $min_size;
+        push (@{$panels{$picked_key}}, $entry->id);
+
+        my $k = shift @keys;
+        push (@keys, $k);
+
+    }
 
 	my @panel_keys = sort keys %panels;
 
 	my $no_improvement = 1;
+
+	foreach my $counter (1 .. 5) { 
+
+		my $total;
+
+		next if $no_improvement == 0;
+		$no_improvement = 0;
+
+		my $touched;
+
+		foreach my $panel_key (@panel_keys) { 
+		
+			my @panel = @{$panels{$panel_key}};
+			my $entry_panel1_score = score_panel(\@panel, \%school_by_entry, \%state_by_entry);
+
+			next if $entry_panel1_score < 1;
+
+			Tab::debuglog("  ") if $debug;
+			Tab::debuglog("  NEW PANEL $panel_key ") if $debug;
+			Tab::debuglog("  ") if $debug;
+
+			ENTRY:
+			foreach my $entry_id (@panel) { 
+			
+				Tab::debuglog("  TESTING ENTRY $entry_id  in PANEL $panel_key with score $entry_panel1_score ") if $debug;
+
+				next if $entry_panel1_score < 1;
+
+				my @panel1 = @panel; 							# Remove the candidate for a test array of original panel
+				my $index = 0;
+				$index++ until $panel1[$index] == $entry_id;
+				splice(@panel1, $index, 1);
+
+				my $swap_panel;
+				my $swap_entry;
+				my $current_diff;
+
+				my @new_entry_panel;
+				my @new_swap_panel;
+
+				my $count;
+	
+				OTHERPANEL:
+				foreach my $other_key (@panel_keys) { 
+
+					next if $other_key == $panel_key; 				# Can't switch to the same panel
+
+					my @panel2 = @{$panels{$other_key}}; 			# Find the other panel for scoring
+					my $other_panel2_score = score_panel(\@panel2, \%school_by_entry, \%state_by_entry);
+
+					push (@panel2, $entry_id);						# Put me into this panel for testing
+
+					my $seed_diff;
+
+					OTHERENTRY:
+					foreach my $other_entry_id (@{$panels{$other_key}}) {
+					
+						push (@panel1, $other_entry_id);				# Add swap candidate to original panel
+
+						$count++;
+						my $other_panel1_score = score_panel(\@panel1, \%school_by_entry, \%state_by_entry);
+
+						my $index = 0;									# Remove swap candidate from the panel
+						$index++ until $panel2[$index] == $other_entry_id;
+						splice(@panel2, $index, 1);
+						my $entry_panel2_score = score_panel(\@panel2, \%school_by_entry, \%state_by_entry);
+
+						my $squo_score = $entry_panel1_score + $other_panel2_score;
+						my $swap_score = $entry_panel2_score + $other_panel1_score;
+						my $diff = $squo_score - $swap_score;
+
+						my $replace = pop(@panel1);  #remove me from this panel
+						push (@panel2, $replace);    #put me back from whence I came
+
+						my $my_diff = abs $seed_by_entry{$other_entry_id} - $seed_by_entry{$entry_id};
+
+						Tab::debuglog("  Current is $current_diff, swap diff is $diff for $other_entry_id") if $debug;
+
+						if ( ($diff == $current_diff && $my_diff < $seed_diff) || ($diff > 0 && $diff > $current_diff) ) { 
+							Tab::debuglog("    Swapped!") if $debug;
+							$current_diff = $diff;
+							$swap_entry = $other_entry_id;
+							$swap_panel = $other_key;
+							$seed_diff = $my_diff;
+						}
+
+					}
+
+				}
+
+				if ($swap_entry) { 
+
+					my @panel2 = @{$panels{$swap_panel}};
+
+					push (@panel1, $swap_entry);
+
+					my $swapdex = 0;
+					$swapdex++ until $panel2[$swapdex] == $swap_entry;
+					splice(@panel2, $swapdex, 1);
+
+					push (@panel2, $entry_id);
+
+					$no_improvement++;  # Fail
+					@{$panels{$panel_key}} = @panel1;
+					@{$panels{$swap_panel}} = @panel2;
+
+					@panel = @panel1;
+
+
+					$entry_panel1_score = score_panel(\@panel1, \%school_by_entry, \%state_by_entry);
+					my $other_score = score_panel(\@panel2, \%school_by_entry, \%state_by_entry);
+
+					Tab::debuglog("  After $count trials, trading with $swap_entry.  New score is $entry_panel1_score.  Other score is $other_score") if $debug;
+
+				}
+			}
+		}
+
+		last if $no_improvement < 1;
+
+	}
+
+	# Now attempt to improve the seed distribution as long as the score of the
+	# panels on states/schools stays the same.
+
+	if ($seeds) { 
+
+		foreach my $counter (1 .. 5) { 
+
+			my %panel_seeds = ();
+			
+			foreach my $panel_key (@panel_keys) { 
+				foreach my $entry_id (@{$panels{$panel_key}}) { 
+					$panel_seeds{$panel_key} += $seed_by_entry{$entry_id};
+				}
+			}
+
+
+			foreach my $panel_key (@panel_keys) { 
+
+				my @panel = @{$panels{$panel_key}};
+
+				my $panel_score = score_panel(\@panel, \%school_by_entry, \%state_by_entry);
+				
+
+				OTHER:
+				foreach my $other_key (@panel_keys) { 
+				
+				
+					my @other = @{$panels{$other_key}};
+					my $other_score = score_panel(\@other, \%school_by_entry, \%state_by_entry);
+
+
+					next if $other_key == $panel_key;
+					next if $panel_seeds{$other_key} == $panel_seeds{$panel_key};
+
+					my @can_flip_panel;
+					my @can_flip_other;
+
+					foreach my $entry (@panel) { 
+						push @other, $entry;
+						my $new_other_score = score_panel(\@other, \%school_by_entry, \%state_by_entry);
+						push @can_flip_panel, $entry if $new_other_score == $other_score;
+
+						my $index = 0;
+						$index++ until $other[$index] == $entry;
+						splice(@other, $index, 1);
+					}
+
+					foreach my $entry (@other) { 
+						push @panel, $entry;
+						my $new_panel_score = score_panel(\@panel, \%school_by_entry, \%state_by_entry);
+						push @can_flip_other, $entry if $new_panel_score == $panel_score;
+
+						my $index = 0;
+						$index++ until $panel[$index] == $entry;
+						splice(@panel, $index, 1);
+					}
+					
+
+					next unless @can_flip_panel;
+					next unless @can_flip_other;
+
+					my $flip_panel;
+					my $flip_other;
+
+					if ($panel_seeds{$other_key} > $panel_seeds{$panel_key}) { 
+
+						@can_flip_panel = sort {$seed_by_entry{$a} <=> $seed_by_entry{$b}} @can_flip_panel;
+						@can_flip_other = sort {$seed_by_entry{$b} <=> $seed_by_entry{$a}} @can_flip_other;
+
+						$flip_panel = shift @can_flip_panel;
+						$flip_other = shift @can_flip_other;
+
+						next OTHER unless $seed_by_entry{$flip_panel} < $seed_by_entry{$flip_other};
+
+					} elsif ($panel_seeds{$other_key} < $panel_seeds{$panel_key}) { 
+
+						@can_flip_panel = sort {$seed_by_entry{$b} <=> $seed_by_entry{$a}} @can_flip_panel;
+						@can_flip_other = sort {$seed_by_entry{$a} <=> $seed_by_entry{$b}} @can_flip_other;
+
+						$flip_panel = shift @can_flip_panel;
+						$flip_other = shift @can_flip_other;
+
+						next OTHER unless $seed_by_entry{$flip_panel} > $seed_by_entry{$flip_other};
+
+					}
+
+					if ($flip_panel && $flip_other) { 
+
+
+						my $index = 0;
+						$index++ until $panel[$index] == $flip_panel;
+						splice(@panel, $index, 1);
+
+						$index = 0;
+						$index++ until $other[$index] == $flip_other;
+						splice(@other, $index, 1);
+
+						push @panel, $flip_other;
+						push @other, $flip_panel;
+
+						$panel_seeds{$other_key} -= $seed_by_entry{$flip_other};
+						$panel_seeds{$panel_key} -= $seed_by_entry{$flip_panel};
+
+						$panel_seeds{$other_key} += $seed_by_entry{$flip_panel};
+						$panel_seeds{$panel_key} += $seed_by_entry{$flip_other};
+
+						my $panel_score = score_panel(\@panel, \%school_by_entry, \%state_by_entry);
+					
+						@{$panels{$other_key}} = @other;
+						@{$panels{$panel_key}} = @panel;
+
+					}
+
+				}
+
+			}
+
+		}
+
+	}
+
 
 	my @judges = $m->comp("/funclib/round_judges.mas", round => $round) unless $m->comp("/funclib/round_entries.mas", round => $round);
 	my @judge_keys;
@@ -178,27 +441,6 @@
 	Tab::BallotValue->sql_delete_round->execute($round->id);
 	Tab::Ballot->sql_delete_round->execute($round->id);
 	Tab::Panel->sql_delete_round->execute($round->id);
-
-	my $letter = 1;
-
-	if ($event->setting("pair_seeds")) { 
-
-		my %panel_score = ();
-
-		foreach my $panel_key (@panel_keys) { 
-
-			my @entries = @{$panels{$panel_key}};
-
-			foreach my $entry (@entries) { 
-				$panel_score{$panel_key} += $entry->pair_seed;
-			}
-
-
-		}
-
-
-
-	}
 
 	foreach my $panel_key (@panel_keys) { 
 
@@ -230,16 +472,48 @@
 				my $ballot = Tab::Ballot->create({
 					panel => $panel->id,
 					judge => $judge_id,
-					entry => $entry,
-					speakerorder => $position
+					entry => $entry
 				})
 
 			}
 		
 		}
 
-		$letter++;
 	}
+
+
+    sub score_panel {
+
+        my ($panref, $school_entry, $state_entry) = @_; 
+
+        my @pan_entries = @$panref;
+
+        my $score = 0;
+        my $tick;
+
+        foreach my $entry (@pan_entries) { 
+
+            foreach my $other (@pan_entries) { 
+
+                next unless $other > $entry;
+
+                if (${ $school_entry }{$other} == ${ $school_entry }{$entry}) { 
+                    $score += 10000;
+                }
+
+                if ( (${ $school_entry }{$other} != ${ $school_entry }{$entry}) && 
+					( ${ $state_entry }{$entry} ) && 
+					(${ $state_entry }{$other} eq ${ $state_entry }{$entry}) ) { 
+						$score += 100;
+				}
+    
+            }
+        }
+
+        return $score;
+
+    }   
+	
 
 	return;
 
