@@ -5,7 +5,7 @@ Tab::Round->columns(Primary => qw/id/);
 Tab::Round->columns(Essential => qw/name label event type timeslot site pool online/);
 Tab::Round->columns(Others => qw/post_results published listed created completed 
 									motion_published blasted timestamp tb_set motion 
-									judges cat_id flighted/);
+									judges cat_id flighted start_time/);
 
 Tab::Round->has_a(event => 'Tab::Event');
 Tab::Round->has_a(site => 'Tab::Site');
@@ -19,6 +19,7 @@ __PACKAGE__->_register_datetimes( qw/blasted/);
 __PACKAGE__->_register_datetimes( qw/created/);
 __PACKAGE__->_register_datetimes( qw/completed/);
 __PACKAGE__->_register_datetimes( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/start_time/);
 
 sub realname { 
 	my $self = shift;
