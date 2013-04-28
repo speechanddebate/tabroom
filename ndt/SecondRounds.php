@@ -24,7 +24,7 @@ $teamindex = array();
 
 //Load all entries for all tourneys in the circuit; 43 is the NDT circuit
 //$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit where tourn_circuit.circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and entry.event=event.id and (tourn.id=1507 or tourn.id=1522 or tourn.id=1510) ORDER BY fullname asc";
-$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit where tourn_circuit.circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and entry.event=event.id and event.type='policy' ORDER BY fullname asc";
+$query="SELECT entry.*, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit where tourn_circuit.circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and entry.event=event.id and event.type='policy' ORDER BY fullname asc";
 
 $entry=mysql_query($query);
 $entryNum = mysql_num_rows($entry);

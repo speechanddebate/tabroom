@@ -53,7 +53,7 @@ $entryNum = mysql_num_rows($judge);
 $i=0; $panel=0;
 while ($i < $entryNum) 
 {
-   $query="SELECT *, event.name as event_name, tourn.name as tourn_name, panel.id as panel_id, ballot_value.value as ballot_decision FROM ballot, panel, round, tourn, event, entry, ballot_value WHERE judge=".mysql_result($judge,$i,"id")." and published=1 and panel.id=ballot.panel and round.id=panel.round and event.id=round.event and tourn.id=event.tourn and entry.id=ballot.entry and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and round.post_results>0 ORDER BY panel.id, ballot.id asc";
+   $query="SELECT ballot.*, event.name as event_name, tourn.name as tourn_name, panel.id as panel_id, ballot_value.value as ballot_decision FROM ballot, panel, round, tourn, event, entry, ballot_value WHERE judge=".mysql_result($judge,$i,"id")." and published=1 and panel.id=ballot.panel and round.id=panel.round and event.id=round.event and tourn.id=event.tourn and entry.id=ballot.entry and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and round.post_results>0 ORDER BY panel.id, ballot.id asc";
    $ballot=mysql_query($query);
    while ($row = mysql_fetch_array($ballot, MYSQL_BOTH)) 
     {
