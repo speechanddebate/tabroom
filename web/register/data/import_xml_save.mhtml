@@ -19,8 +19,11 @@
 	my $xml_file = $req->upload("xml");
 	my $xml_filename = $xml_file->tempname;
 
-	`/bin/cp $xml_filename /tmp/keeper.xml`;
-	`perl -pi -e s/'&'/'&amp;'/g  $xml_filename`;
+	system "/bin/mkdir -p ".$Tab::file_root."tmp/".$tourn->id."/$now->epoch";
+	my $xml_path = $Tab::file_root."tmp/".$tourn->id."/$now->epoch";
+
+	`/bin/cp $xml_filename $xml_path`;
+	`perl -pi -e s/'&'/'&amp;'/g  $xml_path/$xml_filename`;
 
 	my $xml = new XML::Simple ( SuppressEmpty => 1,  ForceArray => [ qw(RESULT_BALLOT RESULT_SCORE EVENT_SETTING TOURN_SETTING SCHOOL REGION) ]); 
 	my $data = $xml->XMLin($xml_filename);
@@ -46,6 +49,8 @@
 	};
 
 	push (@xml_events, $data->{EVENT}) unless @xml_events;
+
+	my @used_events;
 
 	foreach my $xml_event (@xml_events) { 
 
@@ -106,6 +111,7 @@
 		}
 
 		push @events, $event;
+		push @used_events, $event;
 
 	}
 
@@ -396,8 +402,6 @@
 				});
 			}
 
-			$student_by_id{$xml_student->{ID}} = $student;
-
 			next if Tab::EntryStudent->search( entry => $entry->id, student => $student->id );
 
 			my $es = Tab::EntryStudent->create({
@@ -406,6 +410,8 @@
 			});
 
 		}
+
+		$student_by_id{$xml_student->{ID}} = $student;
 
 	}
 
@@ -626,8 +632,6 @@
 			my %ballot_by_entry = ();
 			my %ballot_by_student = ();
 
-			$m->print("Importing ".scalar @xml_results." ballots and results: <br />") if $debug;
-
 			BALLOTS:
 			foreach my $xml_ballot (@xml_results) { 
 
@@ -649,7 +653,6 @@
 		
 				foreach my $student (@{$students_by_entry{$xml_ballot->{Recipient}}}) {
 					$ballot_by_student{$student->{ID}} = $ballot;
-					Tab::debuglog("Created student ballot for ".$student->{ID}." which is $ballot");
 				}
 
 			}
@@ -660,19 +663,17 @@
 				$tag = "rank" if $tag eq "ranks";
 
 				my $value = $xml_value->{content};
+
 				my $ballot;
 				my $student;
 
-#				Tab::debuglog("XML value ".$xml_value->{Score_Name}." ".$xml_value->{ScoreFor}." ".$xml_value->{Recipient}." has value $value");
 
-				eval { 
-					if ($xml_value->{ScoreFor} eq "Speaker") { 
-						$student = $student_by_id{$xml_value->{Recipient}}->id;
-						$ballot = $ballot_by_student{$xml_value->{Recipient}}->id;
-					} else { 
-						$ballot = $ballot_by_entry{$xml_value->{Recipient}}->id;
-					}
-				};
+				if ($xml_value->{ScoreFor} eq "Speaker") { 
+					$student = $student_by_id{$xml_value->{Recipient}}->id if $student_by_id{$xml_value->{Recipient}};
+					$ballot = $ballot_by_student{$xml_value->{Recipient}}->id if $ballot_by_student{$xml_value->{Recipient}};
+				} else { 
+					$ballot = $ballot_by_entry{$xml_value->{Recipient}}->id if $ballot_by_entry{$xml_value->{Recipient}};
+				}
 
 				next unless $ballot;
 
@@ -682,6 +683,7 @@
 					student => $student,
 					ballot => $ballot
 				});
+
 
 			}
 
@@ -764,6 +766,111 @@
 		}) unless $student;
 
 	}
+
+	my %result_by_entry = ();
+	my %seed_set_by_event = ();
+
+	foreach my $event (@used_events) { 
+
+		foreach my $result_set ($event->result_sets) { 
+		
+			next unless $result_set->bracket;
+
+			my $notfirst;
+
+			$seed_set_by_event{$event->id} = $result_set;
+
+			foreach my $result ($result_set->results) { 
+				$result_by_entry{$result->entry->id."-".$result->round->id} = $result;
+				$notfirst++;
+			}
+		}
+	}
+
+	my %used_results = ();
+
+	ELIMSEED:
+	foreach my $xml_elimseed (@{$data->{ELIMSEED}}) { 
+
+		my $entry_id = $xml_elimseed->{ENTRY};
+
+		next if $entry_id == "-99";
+
+		my $entry = $entry_by_id{$entry_id};
+
+		next unless $entry;
+
+		my $round_id = $xml_elimseed->{ROUND};
+		my $event_id = $xml_elimseed->{EVENT};
+
+		my $event = $event_by_id{$event_id};
+		my $round = $round_by_id{$round_id};
+
+		next unless $event && $round;
+
+		my $result = $result_by_entry{$entry->id."-".$round->id};
+		my $set = $seed_set_by_event{$event->id};
+
+
+		unless ($set) { 
+
+			$set = Tab::ResultSet->create({
+				tourn => $tourn->id,
+				event => $event->id,
+				bracket => 1,
+				label => "Bracket",
+				generated => $now
+			});
+
+			$seed_set_by_event{$event->id} = $set;
+		}
+
+		Tab::debuglog("Round is $round and event $event. Result set is ".$set." and name is ");
+
+
+		my $seed_done;
+
+		if ($result) { 
+
+			$used_results{$result->id}++;
+
+			foreach my $value ($result->values) { 
+
+				$value->delete unless $value->tag eq "Seed";
+
+				if ($value->tag eq "Seed") { 
+					$value->value($xml_elimseed->{SEED});
+					$value->update;
+					$seed_done++;
+				}
+
+			}
+
+		} else { 
+
+			$result = Tab::Result->create({
+				result_set => $set->id,
+				entry => $entry->id,
+				round => $round->id
+			});
+		}
+
+		my $result_value;
+
+		unless ($seed_done) { 
+
+			$result_value = Tab::ResultValue->create({
+				result => $result->id,
+				value => $xml_elimseed->{SEED},
+				priority => 1,
+				tag => "Seed",
+				sort_desc => 0,
+				no_sort => 0
+			});
+		}
+
+	}
+
 
 	#Auto-audit any entered results
 	foreach my $round (@rounds) {
