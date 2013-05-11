@@ -6,7 +6,7 @@ $database="itab";
 mysql_connect("localhost",$username,$password);
 @mysql_select_db($database) or die( "Unable to select database<br>");
 
-$result = mysql_query("SHOW COLUMNS FROM tourn_setting");
+$result = mysql_query("SHOW COLUMNS FROM tourn");
 if (!$result) {
     echo 'Could not run query: ' . mysql_error();
     exit;
@@ -19,7 +19,7 @@ if (mysql_num_rows($result) > 0) {
 
 echo "<br>";
 
-$query="SELECT distinct tag from ballot_value order by tag";
+$query="SELECT distinct tag from tourn_setting order by tag";
 //$query="SELECT * from panel where panel.round is null and panel.id>=183219";
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
@@ -56,15 +56,15 @@ $query="SELECT * FROM ballot, panel, round where ballot.entry=368836 and panel.i
 $query="Select * from tourn, event, round, panel, ballot where tourn.id=1895 and event.tourn=1895 and round.event=event.id and panel.round=round.id and ballot.panel=panel.id";
 $query="SELECT * FROM judge, school where last='meiches' and judge.school=school.id";
 $query="Select * from result, student where honor<>'' and student.id=result.student";
-$query="SELECT * from tourn where id=1995";
+$query="SELECT * from tourn where reg_start > '09-01-2012' order by start";
 
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
-//echo $entryNum."<br>";
+echo $entryNum."<br>";
 for ($i=0; $i <= $entryNum-1; $i++)
 {
 //echo "ID=".mysql_result($tourn,$i,"entry.id")."name=".mysql_result($tourn,$i,"code")."<br>";
-echo "ID=".mysql_result($tourn,$i,"id")."state=".mysql_result($tourn,$i,"state")." ".mysql_result($tourn,$i,"country")."<br>";
+echo "ID=".mysql_result($tourn,$i,"id")."state=".mysql_result($tourn,$i,"state")." ".mysql_result($tourn,$i,"start")."<br>";
 //echo "ID=".mysql_result($tourn,$i,"result.id")." ".mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")." Honor=".mysql_result($tourn,$i,"honor")." honor_site=".mysql_result($tourn,$i,"honor_site")." round=".mysql_result($tourn,$i,"round")."<br>";
 //echo "ballot.id=".mysql_result($tourn,$i,"ballot.id")." bye=".mysql_result($tourn,$i,"bye")." round=".mysql_result($tourn,$i,"round.id")." ".mysql_result($tourn,$i,"round.name")."<br>";
 //echo "panel.id=".mysql_result($tourn,$i,"panel.id")." tourn=".mysql_result($tourn,$i,"tourn.id")." round=".mysql_result($tourn,$i,"round.id")." ".mysql_result($tourn,$i,"round.name")."<br>";
