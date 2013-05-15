@@ -2,7 +2,8 @@ package Tab::BallotValue;
 use base 'Tab::DBI';
 Tab::BallotValue->table('ballot_value');
 Tab::BallotValue->columns(Primary => qw/id/);
-Tab::BallotValue->columns(Essential => qw/ballot tag student tiebreak value timestamp content cat_id/);
+Tab::BallotValue->columns(Essential => qw/ballot tag student value content cat_id/);
+Tab::BallotValue->columns(Others => qw/timestamp/);
 Tab::BallotValue->columns(TEMP => qw/panelid entryid roundtype roundid studentid judgeid bye/);
 
 Tab::BallotValue->has_a(ballot => 'Tab::Ballot');
