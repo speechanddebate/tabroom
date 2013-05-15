@@ -1,0 +1,203 @@
+<%args>
+	$breakref
+	$into
+	$type
+	$num_panels
+	$debug => undef
+</%args>
+<%init> 
+
+	use POSIX;
+
+	my @breaks = @{$breakref};
+
+	# Snaking involves putting students in panels based on power.  They should
+	# already be in order by seeding.  We further order them by panel letter so
+	# the weird NCFL seeding thing works out
+
+	# Preset panels
+    my @panels = $into->panels;
+
+	my $num_at_level = $num_panels * 2;
+	my $num_levels = ceil ((scalar @breaks) / $num_at_level);
+
+	system "/usr/bin/logger Number at each level is $num_at_level." if $debug == 1;
+	system "/usr/bin/logger Number of levels is $num_levels." if $debug == 1;
+	system "/usr/bin/logger Number of panels is $num_panels." if $debug == 1;
+
+	my %kids_at_level = ();
+
+	my @reordered_breaks;
+
+	foreach my $level (1 .. $num_levels) { 
+
+		foreach (1 .. $num_at_level) { 	
+			push (@{$kids_at_level{$level}}, shift @breaks);
+		}
+
+#		Take the first few kids off of the front of the first sublevel and
+#		put them into the back so that the paneling rules are followed.
+
+		foreach my $shift (2 .. $level) { 
+			my $deorder = shift @{$kids_at_level{$level}};
+			push (@{$kids_at_level{$level}}, $deorder);
+		}
+
+		push (@reordered_breaks, @{$kids_at_level{$level}});
+
+	}
+
+	my $letter = "A";
+	
+	PANEL:
+	foreach my $key (1 .. $num_panels) { 
+
+	    $key--;
+
+       	# If there's already a panel here, use that instead
+
+        if ($panels[$key]) {
+            $letter = $panels[$key]->letter;
+			$letter++;
+            next PANEL;
+        }
+	
+		my $newpanel = Tab::Panel->create({ 
+			letter => $letter,
+			round => $into->id
+		});
+
+		$letter++;
+
+		push (@panels, $newpanel); 
+
+
+	} 
+
+	my @tmp_panels;
+	my $seed;
+
+	my %entry_ballots = ();
+
+	foreach my $break (@reordered_breaks) { 	
+
+		next unless $break;
+		next if $break == 0;
+
+		unless (@tmp_panels) { #if tmp_panels doesn't exist, reload the hopper
+			$seed++;
+			if ($seed == 5 && $num_panels == 2) {  # That funny thing with semis
+				@tmp_panels = reverse @panels;
+			} else { 
+				@tmp_panels =  @panels;
+			}
+		}
+
+		my $panel = shift @tmp_panels;
+
+		my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
+
+		if (@judges) { 
+
+			foreach my $judge (@judges) { 
+
+				my $ballot = Tab::Ballot->create({
+					panel => $panel->id,
+					entry  => $break->id,
+					judge => $judge->id
+				});
+
+				push @{$entry_ballots{$break->id}}, $ballot;
+
+			}
+
+		} else {
+
+			my $ballot = Tab::Ballot->create({
+				panel => $panel->id,
+				entry  => $break->id
+			});
+
+			push @{$entry_ballots{$break->id}}, $ballot;
+
+		}
+
+	} 
+
+	my %positions_by_entry = ();
+	my %total_positions_by_entry = ();
+
+	my @other_ballots = $m->comp("/funclib/other_ballots.mas", round => $into, type => "elim");
+
+	foreach my $ob (@other_ballots) {
+		$positions_by_entry{$ob->entry->id."-".$ob->speakerorder}++;
+		$total_positions_by_entry{$ob->entry->id} += $ob->speakerorder;
+	}
+
+	foreach my $panel (@panels) { 
+
+	    #Set speaker order
+		my @entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
+
+		@entries = shuffle(@entries);
+		@entries = sort {$total_positions_by_entry{$b} <=> $total_positions_by_entry{$a}} @entries;
+
+		my $size_of_panel = scalar @entries;
+
+		my $moved = 1;
+
+		foreach (1 .. 10) {
+
+			next unless $moved;
+			undef $moved;
+			my $position;
+
+			foreach my $entry (@entries) {
+
+				$position++;
+
+				if ($positions_by_entry{$entry."-".$position}) {
+
+					#Remove from place in line
+					my $speakdex = 0;
+					$speakdex++ until $entries[$speakdex] == $entry;
+					splice(@entries, $speakdex, 1); 
+
+					#Find a new home
+					my $place = $position;
+					while ($place == $position) {
+						$place = int(rand($size_of_panel));
+					}
+
+					$place--;
+					$place = 1 if $place < 0;
+					splice(@entries,($place - 1),0,$entry);
+					$moved++;
+				}
+			}
+
+		}
+
+		my $order = 1;
+
+		foreach my $entry (@entries) { 
+
+			foreach my $ballot (@{$entry_ballots{$entry->id}}) { 
+				$ballot->speakerorder($order);
+				$ballot->update;
+			}
+
+			$order++;
+		}
+
+        foreach my $ballot ($panel->ballots( entry => 0)) {
+            $ballot->delete;
+        }
+	}
+
+	my $msg = "Elim round paneled";
+	$m->redirect("/panel/schemat/show.mhtml?round_id=".$into->id."&msg=$msg");
+
+
+
+</%init> 
