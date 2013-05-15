@@ -2,8 +2,8 @@ package Tab::Ballot;
 use base 'Tab::DBI';
 Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
-Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder tv side speakerorder bye audit/);
-Tab::Ballot->columns(Others => qw/noshow chair speechnumber topic countmenot collected collected_by cat_id timestamp account/);
+Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder tv audit bye side/);
+Tab::Ballot->columns(Others => qw/noshow timestamp chair speechnumber topic countmenot collected collected_by cat_id account/);
 Tab::Ballot->columns(TEMP => qw/roundid/);
 
 Tab::Ballot->has_a(judge => 'Tab::Judge');
@@ -11,6 +11,7 @@ Tab::Ballot->has_a(panel => 'Tab::Panel');
 Tab::Ballot->has_a(entry => 'Tab::Entry');
 Tab::Ballot->has_a(account => 'Tab::Account');
 Tab::Ballot->has_a(collected_by => 'Tab::Account');
+
 Tab::Ballot->has_many(values => 'Tab::BallotValue');
 Tab::Ballot->has_many(ballot_values => 'Tab::BallotValue');
 
