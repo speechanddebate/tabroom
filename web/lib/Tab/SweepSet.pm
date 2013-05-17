@@ -6,6 +6,9 @@ Tab::SweepSet->has_a(tourn => 'Tab::Tourn');
 Tab::SweepSet->has_many(rules => 'Tab::SweepRule', 'sweep_set');
 Tab::SweepSet->has_many(sweep_events => 'Tab::SweepEvent', 'sweep_set');
 Tab::SweepSet->has_many(events => [Tab::SweepEvent => 'event']);
+Tab::SweepSet->has_many(children => [Tab::SweepInclude => 'child'], 'parent');
+Tab::SweepSet->has_many(parents => [Tab::SweepInclude => 'parent'], 'child');
+
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
 sub rule {

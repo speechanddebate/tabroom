@@ -88,6 +88,7 @@ use Tab::Site;
 use Tab::Strike;
 use Tab::StrikeTime;
 use Tab::Student;
+use Tab::SweepInclude;
 use Tab::SweepSet;
 use Tab::SweepRule;
 use Tab::SweepEvent;
