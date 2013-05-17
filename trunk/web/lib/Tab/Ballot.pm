@@ -4,7 +4,7 @@ Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
 Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder tv audit bye side/);
 Tab::Ballot->columns(Others => qw/noshow timestamp chair speechnumber topic countmenot collected collected_by cat_id account/);
-Tab::Ballot->columns(TEMP => qw/roundid/);
+Tab::Ballot->columns(TEMP => qw/roundid entryid panelid/);
 
 Tab::Ballot->has_a(judge => 'Tab::Judge');
 Tab::Ballot->has_a(panel => 'Tab::Panel');

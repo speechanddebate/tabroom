@@ -9,3 +9,12 @@ create table hotel (
 
 alter table school add hotel int not null default 0;
 
+create table sweep_include ( 
+	id int auto_increment primary key,
+	parent_set int,
+	child_set int,
+	timestamp timestamp
+);
+
+
+
