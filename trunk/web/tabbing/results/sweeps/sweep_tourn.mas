@@ -1,532 +1,401 @@
 <%args>
 	$tourn
-	$sweep_set_id => undef
+	$sweep_set
 </%args>
 <%init>
 
-	my @sets;
-
-	if ($sweep_set_id) { 
-		my $set = Tab::SweepSet->retrieve($sweep_set_id);
-		push @sets, $set;
-	} else { 
-		@sets = $tourn->sweep_sets;
-	}
-
-	unless (@sets) { 
-		$m->print("No sweepstake set found or selected.  If you are running a combined report, set sweeps up in Settings -> Rules -> Sweepstakes");
-		$m->abort();
-	}
-
 	my $novice_only;
-	foreach my $set (@sets) { 
-		next unless $set && $set->id;
-		foreach my $rule ($set->rules) { 
-			$novice_only++ if $rule->tag eq "novice_only" && $rule->value == 1;
-		}
+
+	foreach my $rule ($sweep_set->rules) { 
+		$novice_only++ if $rule->tag eq "novice_only" && $rule->value == 1;
 	}
 
-	my @schools = $tourn->schools;
+	my @events = $sweep_set->events;
 
-	my @entries = $m->comp('/funclib/tourn_entries.mas', tourn => $tourn);
-	my @ballots = $m->comp('/funclib/tourn_ballots.mas', tourn => $tourn, sweepme => 'yesmaam');
-	my @values = $m->comp('/funclib/tourn_values.mas', tourn => $tourn, sweepme => 'yesmaam');
-	my @panels = $m->comp('/funclib/tourn_panels.mas', tourn => $tourn, sweepme => 'yesmaam');
-	my @rounds = $m->comp('/funclib/tourn_rounds.mas', tourn => $tourn, sweepme => 'yesmaam');
+	my %event_include = map {$_->id => 1} @events;
+	
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select value.id, entry.id, entry.code, round.type, round.id, value.tag, value.value, event.id, panel.id, student.novice, entry.sweeps, entry.school
+		from ballot_value value, ballot, panel, round, event, entry, entry_student, student
+		where value.ballot = ballot.id
+		and ballot.panel = panel.id
+		and panel.round = round.id
+		and round.event = event.id
+		and event.tourn = ".$tourn->id."
+		and ballot.entry = entry.id
+		and entry.dq != 1
+		and entry.dropped != 1
+		and entry.waitlist != 1
+		and entry.unconfirmed != 1
+		and entry.id = entry_student.entry
+		and entry_student.student = student.id
+		group by value.id
+		order by event.id, round.name
+	");
+
+    $sth->execute();
+
+	my %event_scores;
+	my %entry_scores;
+	my %entry_panels;
+	my %entry_round_panel;
+
+	my %score_entry;
+	my %score_type;
+	my %score_tag;
+	my %score_value;
+	my %score_panel;
+	my %score_event;
+	my %score_novice;
+	my %entry_novice;
+
+	my %entry_manual;
+	my %entry_school;
+	my %entry_event;
+	my %entry_code;
+
+	my @scores;
+	my @entries;
+
+    while (my ($id, $entry, $code, $type, $round, $tag, $value, $event, $panel, $novice, $manual, $school)  = $sth->fetchrow_array() ) { 
+
+		next unless $event_include{$event};
+
+		push @scores, $id;
+		push @entries, $entry;
+		push @{$event_scores{$event}}, $id;
+		push @{$entry_scores{$entry}}, $id;
+		push @{$entry_panels{$entry}},$panel;
+
+		$entry_round_panel{$entry."-".$round} = $panel;
+		$entry_manual{$entry} = $manual;
+		$entry_school{$entry} = $school;
+		$entry_event{$entry} = $event;
+		$entry_code{$entry} = $code;
+
+		$score_tag{$id} = $tag;
+		$score_type{$id} = $type;
+
+		$score_entry{$id} = $entry;
+		$score_value{$id} = $value;
+		$score_panel{$id} = $panel;
+		$score_event{$id} = $event;
+		$score_novice{$id} = $novice;
+		$entry_novice{$entry} = $novice;
+    }   
+
+	my %seen = (); 
+	@entries = grep { ! $seen{$_} ++ } @entries;
 
 	my %entry_points;
+	my %entry_placement;
 
-	my %entry_by_id = map {$_->id => $_} @entries;
+	my %places = (); 
+	my $places_done;
+	my $placement_done;
 
-	my %entries_by_event = ();
-
-	foreach my $entry (@entries) { 
-		push @{$entries_by_event{$entry->event->id}}, $entry->id;
+	foreach my $rule ($sweep_set->rules) { 
+		$places{$rule->place} = $rule->value if $rule->place && $rule->tag ne "cume";
 	}
 
-	my %novii_by_event = ();
-	my %novii_by_id = ();
-	my @novii;
+	foreach my $rule ($sweep_set->rules) { 
+			
+		if ($rule->tag eq "points_per_prelim") {
 
-	if ($novice_only) { 
-		@novii = $m->comp('/funclib/tourn_entries.mas', tourn => $tourn, novii => "yepper");
-		foreach my $novice (@novii) { 
-			push @{$novii_by_event{$novice->event->id}}, $novice;
-			$novii_by_id{$novice->id} = $novice;
-		}
-	}
+			my $points = $rule->value;
 
-	my %round_type = ();
-	my %event_rounds = ();
-	foreach my $round (@rounds) { 
-		$round_type{$round->id} = $round->type;
-		push @{$event_rounds{$round->event->id}}, $round;
-	}
+			foreach my $entry (@entries) { 
 
-	my %panel_type = ();
-	my %panel_by_id = ();
-	my %panels_by_round = ();
-	foreach my $panel (@panels) { 
-		$panel_by_id{$panel->id} = $panel;
-		$panel_type{$panel->id} = $round_type{$panel->round->id};
-		push @{$panels_by_round{$panel->round->id}}, $panel;
-	}
+				my @panels;
 
-	my %ballot_type = ();
-	my %ballot_by_id = map {$_->id => $_} @ballots;
-	my %ballot_entry = ();
-	my %ballot_panel = ();
-	my %ballots_by_entry = ();
-	my %ballots_by_panel = ();
+				foreach my $score (@{$entry_scores{$entry}}) { 
+					next if $score_type{$score} eq "elim";
+					next if $score_type{$score} eq "final";
+					next if $novice_only && not defined $score_novice{$score};
+					push @panels, $score_panel{$score};
+				}
 
-	foreach my $ballot (@ballots) { 
-		next unless $ballot->entry;
-		my $ballot_id = $ballot->id;
-		my $entry_id = $ballot->entryid;
-		my $panel_id = $ballot->panelid;
-
-		$ballot_panel{$ballot_id} = $panel_id;
-		$ballot_entry{$ballot_id} = $entry_id;
-		$ballot_type{$ballot_id} = $panel_type{$panel_id};
-
-		push @{$ballots_by_entry{$entry_id}}, $ballot_id;
-		push @{$ballots_by_panel{$panel_id}}, $ballot_id;
-	}
-
-	my %values_by_ballot = ();
-	foreach my $value (@values) { 
-		push @{$values_by_ballot{$value->ballotid}}, $value;
-	}
-
-	my %entry_score;
-	my %school_score;
-
-	foreach my $set (@sets) { 
-
-		next unless $set;
-		my @events = $set->events;
-
-		my $novii_only;
-
-		foreach my $rule ($set->rules) { 
-			$novii_only++ if $rule->tag eq "novice_only" && $rule->value == 1;
+				my %pseen = ();
+				@panels = grep { ! $pseen{$_} ++ } @panels;
+				$entry_points{$entry} += ($points * (scalar @panels));
+			}
 		}
 
-		my %places = ();
+		if ($rule->tag eq "points_per_elim") {
 
-		foreach my $rule ($set->rules) { 
-			$places{$rule->place} = $rule->value if $rule->place && $rule->tag ne "cume";
+			my $points = $rule->value;
+
+			foreach my $entry (@entries) { 
+
+				my @panels;
+
+				foreach my $score (@{$entry_scores{$entry}}) { 
+					next if $score_type{$score} ne "elim";
+					next if $novice_only && not defined $score_novice{$score};
+					push @panels, $score_panel{$score};
+				}
+
+				my %pseen = ();
+				@panels = grep { ! $pseen{$_} ++ } @panels;
+				$entry_points{$entry} += ($points * (scalar @panels));
+			}
 		}
 
-		my $places_done;
+		if ($rule->tag eq "points_per_final" ) {
+
+			my $points = $rule->value;
+
+			foreach my $entry (@entries) { 
+
+				my @panels;
+
+				foreach my $score (@{$entry_scores{$entry}}) { 
+					next if $score_type{$score} ne "final";
+					next if $novice_only && not defined $score_novice{$score};
+					push @panels, $score_panel{$score};
+				}
+
+				my %pseen = ();
+				@panels = grep { ! $pseen{$_} ++ } @panels;
+				$entry_points{$entry} += ($points * (scalar @panels));
+			}
+		}
 
 
-		foreach my $rule ($set->rules) { 
+		if ($rule->tag eq "rev_per_prelim_rank" || $rule->tag eq "rev_per_prelim_rank_sansworst" ) {
 
-			next if $rule->tag eq "novice_only";
+			my $dropworst;
+			$dropworst++ if $rule->tag eq "rev_per_prelim_rank_sansworst";
+
+			my $points = $rule->value;
+			my %entry_worst;
+
+			foreach my $score (@scores) { 
+
+				my $entry = $score_entry{$score};
+
+				next if $score_type{$score} eq "elim";
+				next if $score_type{$score} eq "final";
+				next if $novice_only && not defined $score_novice{$score};
+				next unless $score_tag{$score} eq "rank";
+		
+				my $pts;
+
+				if ($dropworst && $entry_worst{$entry} < $score_value{$score}) {
+
+					if ($entry_worst{$entry}) { 
+						$pts = 6 - $entry_worst{$entry};
+						$pts = 1 if $pts < 1;
+						$entry_worst{$entry} = $score_value{$score};
+					} else { 
+						$pts = 6 - $score_value{$score};
+						$pts = 1 if $pts < 1;
+					}
+
+				} else { 
+					$pts = 6 - $score_value{$score};
+					$pts = 1 if $pts < 1;
+				}
+
+				$entry_points{$entry} += $pts;
+			}
+
+		}
+		
+		if ($rule->tag eq "cume") {
+
+			my $points = $rule->value;
+			my $place = $rule->place;
+
+			my %entry_cume;
+
+			foreach my $score (@scores) { 
+				next if $novice_only && not defined $score_novice{$score};
+				next unless $score_tag{$score} eq "rank";
+				next if $score_type{$score} eq "elim";
+				next if $score_type{$score} eq "final";
+				$entry_cume{$score_entry{$score}} += $score_value{$score};
+			}
+
+			foreach my $entry (@entries) { 
+				$entry_points{$entry} += $points if $entry_cume{$entry} == $place;
+			}
+
+		}
+
+		if ($rule->tag eq "rev_per_elim_rank" ) {
+
+			my $points = $rule->value;
+
+			foreach my $score (@scores) { 
+
+				next if $novice_only && not defined $score_novice{$score};
+				next unless $score_tag{$score} eq "rank";
+				next if $score_type{$score} ne "elim";
+
+				my $pts = 6 - $score_value{$score};
+				$pts = 1 if $pts < 1;
+
+				$entry_points{$score_entry{$score}} += $pts;
+
+			}
+
+		}
+
+		if ($rule->tag eq "rev_per_final_rank" ) {
+
+			my $points = $rule->value;
+
+			foreach my $score (@scores) { 
+
+				next if $novice_only && not defined $score_novice{$score};
+				next unless $score_tag{$score} eq "rank";
+				next if $score_type{$score} ne "final";
+
+				my $pts = 6 - $score_value{$score};
+				$pts = 1 if $pts < 1;
 				
-			if ($rule->tag eq "points_per_prelim") {
+				$entry_points{$score_entry{$score}} += $pts;
 
-				my $points = $rule->value;
-
-				foreach my $event (@events) { 
-
-					my @entries;
-
-					if ($novii_only) { 
-						@entries = @{$novii_by_event{$event->id}} if $novii_by_event{$event->id};
-					} else { 
-						@entries = @{$entries_by_event{$event->id}};
-					}
-
-					foreach my $entry (@entries) { 
-						my @ballots = @{$ballots_by_entry{$entry}};
-						my %panels = ();
-						foreach my $ballot (@ballots) { 
-							next if $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final";
-							$panels{$ballot_panel{$ballot}}++;
-						}
-						$entry_points{$entry} += $points * scalar keys %panels;
-					}
-				}
 			}
 
-			if ($rule->tag eq "points_per_elim") {
+		}
 
-				my $points = $rule->value;
+		if ($rule->tag eq "rev_per_elim_place" || $rule->tag eq "rev_per_final_place" ) {
 
-				foreach my $event (@events) { 
-					
-					my @entries;
+			my $type = "elim" if $rule->tag eq "rev_per_elim_place";
+			$type = "final" if $rule->tag eq "rev_per_final_place";
 
-					if ($novii_only) { 
-						@entries = @{$novii_by_event{$event->id}} if $novii_by_event{$event->id};
-					} else { 
-						@entries = @{$entries_by_event{$event->id}};
-					}
+			foreach my $event (@events) { 
+			
+				foreach my $round ($event->rounds) { 
 
-					foreach my $entry (@entries) { 
+					next unless $round->type eq $type;
+					my %panel_yes = map {$_->id => 1} $round->panels;
 
-						next unless $ballots_by_entry{$entry};
+					my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref) = $m->comp("/tabbing/results/speech/order_entries.mas", round => $round); 
 
-						my @ballots = @{$ballots_by_entry{$entry}};
-						my %panels = ();
-						foreach my $ballot (@ballots) { 
-							next if $ballot_type{$ballot} ne "elim";
-							$panels{$ballot_panel{$ballot}}++;
-						}
-						$entry_points{$entry} += $points * scalar keys %panels;
-					}
-				}
-			}
+					my %panel_place;
 
-			if ($rule->tag eq "points_per_final" ) {
+					foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
 
-				my $points = $rule->value;
-				foreach my $event (@events) { 
-					
-					my @entries;
+						foreach my $entry (@{${$entries_ref}{$key}}) {
 
-					if ($novii_only) { 
-						@entries = @{$novii_by_event{$event->id}} if $novii_by_event{$event->id};
-					} else { 
-						@entries = @{$entries_by_event{$event->id}};
-					}
+							next if $novice_only && not defined $entry_novice{$entry->id};
 
-					foreach my $entry (@entries) { 
-
-						next unless $ballots_by_entry{$entry};
-						my @ballots = @{$ballots_by_entry{$entry}};
-						my %panels = ();
-
-						foreach my $ballot (@ballots) { 
-							next if $ballot_type{$ballot} ne "final";
-							$panels{$ballot_panel{$ballot}}++;
-						}
-						$entry_points{$entry} += $points * scalar keys %panels;
-					}
-				}
-			}
-
-			if ($rule->tag eq "rev_per_prelim_rank" || $rule->tag eq "rev_per_prelim_rank_sansworst" ) {
-
-				my $dropworst;
-				$dropworst++ if $rule->tag eq "rev_per_prelim_rank_sansworst";
-
-				my $points = $rule->value;
-
-				foreach my $event (@events) { 
-					
-					my @entries;
-
-					if ($novii_only) { 
-						@entries = @{$novii_by_event{$event->id}} if $novii_by_event{$event->id};
-					} else { 
-						@entries = @{$entries_by_event{$event->id}} if $entries_by_event{$event->id};
-					}
-
-					foreach my $entry (@entries) { 
-
-						next unless $ballots_by_entry{$entry};
-						my @ballots = @{$ballots_by_entry{$entry}};
-						my $total;
-
-						my $worst;
-
-						foreach my $ballot (@ballots) { 
-
-							next if $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final";
+							my $panel = $entry_round_panel{$entry->id."-".$round->id};
+							$panel_place{$panel}++;
 							
-							VALUE:
-							foreach my $value (@{$values_by_ballot{$ballot}}) { 
+							my $pts = 6 - $panel_place{$panel};
+							$pts = 1 if $pts < 1;
 
-								next unless $value->tag eq "rank";
-								my $pts;
-
-								if ($dropworst && $worst < $value->value) {
-
-									if ($worst) { 
-										$pts = 6 - $worst;
-										$pts = 1 if $pts < 1;
-									}
-
-									$worst = $value->value;
-
-								} else { 
-									$pts = 6 - $value->value;
-									$pts = 1 if $pts < 1;
-								}
-
-								$total += $pts;
-							}
+							$entry_points{$entry->id} += $pts;
 						}
 
-						$entry_points{$entry} += $total;
-
-					}
-				}
-
-			}
-			
-			if ($rule->tag eq "cume") {
-
-				my $points = $rule->value;
-				my $place = $rule->place;
-
-				foreach my $event (@events) { 
-					
-					my @entries;
-
-					if ($novii_only) { 
-						@entries = @{$novii_by_event{$event->id}} if $novii_by_event{$event->id};
-					} else { 
-						@entries = @{$entries_by_event{$event->id}};
-					}
-
-					foreach my $entry (@entries) { 
-
-						next unless $ballots_by_entry{$entry};
-						my @ballots = @{$ballots_by_entry{$entry}};
-						my $total;
-
-						my $cume;
-
-						foreach my $ballot (@ballots) { 
-							next if $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final";
-							foreach my $value (@{$values_by_ballot{$ballot}}) { 
-								next unless $value->tag eq "rank";
-								$cume += $value->value;
-							}
-						}
-
-						next unless $cume == $place;
-						$entry_points{$entry} += $points;
-
-					}
-				}
-			}
-
-			if ($rule->tag eq "rev_per_elim_rank" ) {
-
-				my $points = $rule->value;
-				foreach my $event (@events) { 
-
-					my @entries;
-
-					if ($novii_only) { 
-						@entries = @{$novii_by_event{$event->id}} if $novii_by_event{$event->id};
-					} else { 
-						@entries = @{$entries_by_event{$event->id}};
-					}
-
-					foreach my $entry (@entries) { 
-
-						next unless $ballots_by_entry{$entry};
-						my @ballots = @{$ballots_by_entry{$entry}};
-						my $total;
-
-						foreach my $ballot (@ballots) { 
-							next if $ballot_type{$ballot} ne "elim";
-							foreach my $value (@{$values_by_ballot{$ballot}}) { 
-								next unless $value->tag eq "rank";
-								my $pts = 6 - $value->value;
-								$pts = 1 if $pts < 1;
-								$total += $pts;
-							}
-						}
-
-						$entry_points{$entry} += $total;
-
-					}
-				}
-
-			}
-
-			if ($rule->tag eq "rev_per_final_rank" ) {
-
-				my $points = $rule->value;
-				foreach my $event (@events) { 
-
-					my @entries;
-
-					if ($novii_only) { 
-						@entries = @{$novii_by_event{$event->id}} if $novii_by_event{$event->id};
-					} else { 
-						@entries = @{$entries_by_event{$event->id}};
-					}
-
-					foreach my $entry (@entries) { 
-
-						next unless $ballots_by_entry{$entry};
-						my @ballots = @{$ballots_by_entry{$entry}};
-						my $total;
-
-						foreach my $ballot (@ballots) { 
-							next if $ballot_type{$ballot} ne "final";
-							foreach my $value (@{$values_by_ballot{$ballot}}) { 
-								next unless $value->tag eq "rank";
-								my $pts = 6 - $value->value;
-								$pts = 1 if $pts < 1;
-								$total += $pts;
-							}
-						}
-
-						$entry_points{$entry} += $total;
-
-					}
-				}
-			}
-
-			if ($rule->tag eq "rev_per_elim_place" || $rule->tag eq "rev_per_final_place" ) {
-
-				my $type = "elim" if $rule->tag eq "rev_per_elim_place";
-				$type = "final" if $rule->tag eq "rev_per_final_place";
-
-				foreach my $event (@events) { 
-				
-					foreach my $round (@{$event_rounds{$event->id}}) { 
-
-						next unless $round->type eq $type;
-					
-						foreach my $panel (@{$panels_by_round{$round->id}}) { 
-						
-							my @ballots = @{$ballots_by_panel{$panel->id}};
-
-							my %entry_cume = ();
-							my %entry_recip = ();
-							my @event_entries;
-
-							foreach my $ballot (@ballots) { 
-			
-								foreach my $value (@{$values_by_ballot{$ballot}}) { 
-									next unless $value->tag eq "rank";
-									$entry_cume{$ballot->entry->id} += $value->value;
-									$entry_recip{$ballot->entry->id} += (1 / $value->value) if $value->value;
-								}
-
-								push @event_entries, $entry_by_id{$ballot->entry->id};
-
-							}
-
-							my %seen = (); 
-							@event_entries = grep { ! $seen{$_->id} ++ } @event_entries;
-
-							@event_entries = sort {$entry_recip{$b->id} <=> $entry_recip{$a->id}} @event_entries;
-							@event_entries = sort {$entry_cume{$a->id} <=> $entry_cume{$b->id}} @event_entries;
-
-							my $rank = 1;
-							foreach my $entry (@event_entries) { 
-								my $pts = 6 - $rank;
-								$pts = 1 if $pts < 1;
-
-								if ($novii_only) { 
-									$entry_points{$entry->id} += $pts if $novii_by_id{$entry->id};
-								} else { 
-									$entry_points{$entry->id} += $pts;
-								}
-
-								$rank++;
-							}
-						}
-					}
-				}
-			}
-
-			if ($rule->tag eq "rev_per_overall_place" || $rule->tag eq "place" && keys %places ) {
-
-				next if $places_done;
-
-				my $string;
-				foreach (keys %places) { 
-					$string .= "place $_ rank ".$places{$_}." ";
-				}
-
-				foreach my $event (@events) { 
-
-					foreach my $round (Tab::Round->search( type => "final", event => $event->id)) { 
-				
-						my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref) = $m->comp("/tabbing/results/speech/order_entries.mas", round => $round); 
-
-						my $rank = 1;
-
-						foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
-						
-							foreach my $entry (@{${$entries_ref}{$key}}) {
-
-								next if $novii_only &! $novii_by_id{$entry->id};
-						
-								if ($rule->tag eq "rev_per_overall_place") { 
-									my $pts = 6 - $rank;
-									$pts = 1 if $pts < 1;
-									$entry_points{$entry->id} += $pts;
-								}
-
-								if ($places{$rank}) { 
-									$entry_points{$entry->id} += $places{$rank};
-								}
-
-								$rank++;
-
-							}
-						}
-					}
-				}
-				$places_done++;
-			}
-
-			if ($rule->tag eq "debate_win" ) {
-
-				my $points = $rule->value;
-
-				foreach my $event (@events) { 
-
-					my @entries;
-
-					if ($novii_only) { 
-						@entries = @{$novii_by_event{$event->id}} if $novii_by_event{$event->id};
-					} else { 
-						@entries = @{$entries_by_event{$event->id}};
-					}
-
-					foreach my $entry (@entries) { 
-
-						next unless $ballots_by_entry{$entry};
-						my @ballots = @{$ballots_by_entry{$entry}};
-						my $total;
-
-						foreach my $ballot (@ballots) { 
-
-							next if $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final";
-
-							foreach my $value (@{$values_by_ballot{$ballot}}) { 
-								next unless $value->tag eq "ballot";
-								$entry_points{$entry} += $points if $value->value == 1;
-							}
-						}
-					}
-				}
-			}
-
-			if ($rule->tag eq "manual" ) {
-
-				foreach my $event (@events) { 
-
-					my @entries;
-
-					if ($novii_only) { 
-						@entries = @{$novii_by_event{$event->id}} if $novii_by_event{$event->id};
-					} else { 
-						@entries = @{$entries_by_event{$event->id}} if $entries_by_event{$event->id};
-					}
-
-					foreach my $entry (@entries) { 
-						$entry_points{$entry} += $entry_by_id{$entry}->sweeps if $entry_by_id{$entry};
 					}
 				}
 			}
 		}
+
+		if ($rule->tag eq "rev_per_overall_place" || $rule->tag eq "place") {
+
+			unless ($placement_done) { 
+
+				foreach my $event (@events) { 
+
+					my @rounds = sort {$b->name <=> $a->name} $event->rounds;
+
+					my $final = shift @rounds;
+
+					my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref) = $m->comp("/tabbing/results/speech/order_entries.mas", round => $final); 
+
+					foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+						foreach my $entry (@{${$entries_ref}{$key}}) {
+							next if $novice_only && not defined $entry_novice{$entry};
+							$entry_placement{$entry} = $key;
+						}
+					}
+				}
+
+				$placement_done++;
+			}
+
+			if ($rule->tag eq "rev_per_overall_place") { 
+				foreach my $entry (@entries) { 
+					next unless $entry_placement{$entry};
+					my $pts = 6 - $entry_placement{$entry};
+					$pts = 0 unless $pts;
+					$entry_points{$entry} += $pts;
+				}
+			}
+
+			if ($rule->tag eq "place" && not defined $places_done) { 
+				$places_done++;
+				foreach my $entry (@entries) { 
+					next unless $entry_placement{$entry};
+					$entry_points{$entry} += $places{$entry_placement{$entry}};
+				}
+			}
+
+		}
+
+		if ($rule->tag eq "debate_win" || $rule->tag eq "debate_loss" ) {
+
+			my $winner++ if $rule->tag eq "debate_win";
+			my $points = $rule->value;
+
+			foreach my $score (@scores) { 
+
+				next if $novice_only && not defined $score_novice{$score};
+				next unless $score_tag{$score} eq "ballot";
+
+				if ($winner) { 
+					$entry_points{$score_entry{$score}} += $points if $score_value{$score} == 1;
+				} else { 
+					$entry_points{$score_entry{$score}} += $points if $score_value{$score} == 0;
+				}
+			}
+
+		}
+
+		if ($rule->tag eq "debate_round_win" || $rule->tag eq "debate_round_loss" ) {
+
+			my $winner++ if $rule->tag eq "debate_round_win";
+			my $points = $rule->value;
+
+			my %panel_record;
+
+			foreach my $score (@scores) { 
+				$panel_record{$score_entry{$score}."-".$score_panel{$score}}++ if $score_value{$score} == 1;
+				$panel_record{$score_entry{$score}."-".$score_panel{$score}}-- if $score_value{$score} == 0;
+			}
+
+			foreach my $entry (@entries) { 
+
+				my %panel_done;
+
+				foreach my $panel (@{$entry_panels{$entry}}) { 
+					next if $panel_done{$panel};
+					$panel_done{$panel}++;
+					if ($winner) { 
+						$entry_points{$entry} += $points if ($panel_record{$entry."-".$panel} > 0);
+					} else { 
+						$entry_points{$entry} += $points if ($panel_record{$entry."-".$panel} < 0);
+					}
+				}
+			}
+		}
+
+		if ($rule->tag eq "manual" ) {
+			foreach my $entry (@entries) { 
+				$entry_points{$entry} += $entry_manual{$entry}
+			}
+		}
+
 	}
 
-	return \%entry_points, \@entries;
+	return \%entry_points, \@entries, \%entry_school, \%entry_event, \%entry_code;
 
 </%init>
