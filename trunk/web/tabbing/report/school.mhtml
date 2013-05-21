@@ -40,10 +40,12 @@
 	my %values_by_student = ();
 	my %entry_place = ();
 	my %entry_results = ();
+	my %entry_ballots = ();
 
 	foreach my $event (@events) { 
 
 		my @values = $m->comp("/funclib/event_values.mas", event => $event);
+		my $event_type = $event->type;
 
 		foreach my $value (@values) { 
 			push @{$values_by_entry{$value->entryid}}, $value if $value->entryid;
@@ -64,24 +66,16 @@
 		}
 
 		my %used;
+		my $last_round;
+
+		next unless @print_rounds;
 
 		foreach my $round (@print_rounds) { 
 
 			my $type = $round->type;
 			my $label = substr($round->label, 0, 3);
-			my $event_type = $round->event->type;
 			
-			my $entries_ref;
-			my $students_ref;
-			my $tbs_ref;
-			my $noshow_ref;
-			my $desc_ref;
-
-			if ($event_type eq "speech") { 
-				($entries_ref, $tbs_ref, $desc_ref, $noshow_ref) = $m->comp("/tabbing/results/speech/order_entries.mas", round => $round) 
-			} elsif ($event_type eq "wudc") {
-				($entries_ref, $tbs_ref, $desc_ref) = $m->comp("/tabbing/results/wudc/order_entries.mas", round => $round);
-			}
+			my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $round) ;
 
 			foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
 				
@@ -89,16 +83,117 @@
 
 				foreach my $entry (@{${$entries_ref}{$key}}) {
 
-					next if $used{$entry->id};
-					$used{$entry->id}++;
+					next if $used{$entry}++;
 
-					$entry_place{$entry->id}  = Lingua::EN::Numbers::Ordinate::ordinate($key) if $type eq "final" || $event_type eq "wudc";
-					$entry_place{$entry->id} .= "-T" if $tie && $type eq "final";
-					$entry_place{$entry->id} .= $label if $type eq "elim";
+					$entry_place{$entry}  = Lingua::EN::Numbers::Ordinate::ordinate($key) if $type eq "final" || $event_type eq "wudc";
+					$entry_place{$entry} .= "-T" if $tie && $type eq "final";
+					$entry_place{$entry} .= $label if $type eq "elim";
 
 				}
 
 			}
+
+			$last_round = $round unless $last_round;
+			$last_round = $round if $round->name > $last_round->name;
+
+		}
+
+		my $points;
+		my $ranks;
+		my $wins;
+
+		my %tb_done;
+
+		foreach my $round (@print_rounds) { 
+			foreach my $tb ($round->tb_set->tiebreaks) { 
+				next if $tb_done{$tb->id}++;
+				$ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals");
+				$wins++ if ($tb->name eq "opp_wins" || $tb->name eq "winloss");
+				$points++ if ($tb->name eq "points" || $tb->name eq "competition" || $tb->name eq "opp_points");
+			}
+		}
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $sth = $dbh->prepare("
+			select value.id, value.tag, value.value, ballot.entry, ballot.judge, ballot.bye, ballot.chair, round.name, round.type
+			from ballot_value value, ballot, panel, round
+			where value.ballot = ballot.id
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and round.name <= ".$last_round->name."
+			and round.event = ".$event->id."
+			order by round.name, ballot.entry, ballot.chair, ballot.judge, value.student, CASE value.tag WHEN ".' "ballot" then 1 when "rank" then 2 when "points" then 3 end'."
+		");
+
+		$sth->execute(); 
+
+		my %entry_round;
+
+		my %rounds;
+		my %round_last;
+		my %round_last_type;
+
+		while (my ($id, $tag, $value, $entryid, $judge, $bye, $chair, $roundname, $roundtype) = $sth->fetchrow_array() ) { 
+
+			$rounds{$entryid}++ if $round_last{$entryid} != $roundname && $roundtype ne "elim" && $roundtype ne "final";
+
+			if ( ($event_type eq "policy" && $rounds{$entryid} == 4) || (($event_type eq "pf" || $event_type eq "debate") && $rounds{$entryid} == 5) || ($event_type eq "ld" && $rounds{$entryid} == 7)) { 
+				$entry_ballots{$entryid} .= "\n \\newline \n";
+				undef $rounds{$entryid};
+			}
+
+			if ( ($roundtype eq "elim" || $roundtype eq "final") && ($round_last_type{$entryid} ne "elim" && $round_last_type{$entryid} ne "final") ) { 
+				$entry_ballots{$entryid} .= "\\ \\ ";
+			} elsif ($round_last{$entryid} && $round_last{$entryid} != $roundname) { 
+				$entry_ballots{$entryid} .= "\\ \\ ";
+			}
+
+
+			$round_last_type{$entryid} = $roundtype;
+
+			next if $tag eq "rank" && not defined $ranks;
+			next if $tag eq "points" && not defined $points;
+			next if $tag eq "ballot" && not defined $wins;
+
+			next if $tag eq "points" && $value == "-1";
+
+			$entry_round{$entryid} = $roundname;
+
+			if ($tag eq "ballot") { 
+
+				if ($bye) { 
+					$entry_ballots{$entryid} .= "BYE";
+					$entry_ballots{$entryid} .= "\\ \\ \\ \\ ";
+					$entry_ballots{$entryid} .= "\\ \\ \\ \\ \\ " if $event_type eq "policy" || $event_type eq "pf";
+					$entry_ballots{$entryid} .= "\\ \\ " if $event_type eq "policy";
+				} else { 
+
+					if ($entry_ballots{$entryid} && $round_last{$entryid} != $roundname) { 
+						$entry_ballots{$entryid} .= " ";
+					} 
+
+					$entry_ballots{$entryid} .= "W" if $value > 0;
+					$entry_ballots{$entryid} .= "L" if $value < 1;
+				}
+
+			} else { 
+
+				$entry_ballots{$entryid} .= " ".$value;
+
+				if ($tag eq "points" && $event_type eq "speech" || $event_type eq "congress" || $event_type eq "wudc") { 
+					foreach (length($value) .. 4) { 
+						$entry_ballots{$entryid} .= "\\ ";
+					}
+				} elsif ($tag eq "points") { 
+					foreach (length($value) .. 4) { 
+						$entry_ballots{$entryid} .= "\\ ";
+					}
+				}
+			}
+
+			$round_last{$entryid} = $roundname;
+
 		}
 
 	}
@@ -121,15 +216,16 @@
 
 	foreach my $school (@schools) { 
 
+		print TEXOUT "\\noindent\n";
+		print TEXOUT "{\\LARGE \\bf ". Tab::texify($tourn->name)." \\hfill ".Tab::texify($school->short_name)."'s Results} \\\\ \n" if $school;
 		print TEXOUT "\\medskip\n";
-		print TEXOUT "{\\LARGE ". Tab::texify($tourn->name.": ".$school->short_name)."} \\\\ \n" if $school;
 		print TEXOUT "\\newline\n";
 
-		my $tabular = "\\begin{tabular}{p{.35in}p{2.0in}p{1in}p{2.5in}}\n";
+		my $tabular = "\\begin{tabular}{p{.5in}p{2.0in}p{.5in}p{3.5in}}\n";
 
 		print TEXOUT $tabular;
 		print TEXOUT "\\rowcolor[rgb]{1,.95,.66}\[5.5pt\]\[5.5pt\]\n";
-		print TEXOUT "  & Name & Event & Ballots \\\\ \n";
+		print TEXOUT "{\\bf Place } & {\\bf Name } & {\\bf Event } & {\\bf Ballots }\\\\ \n";
 		print TEXOUT "\\end{tabular}\n";
 		print TEXOUT "\\newline\n";
 
@@ -139,28 +235,11 @@
 			$name =~ s/amp;//g;
 
 			print TEXOUT $tabular;
-			print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if ($switch++ % 2);
+			print TEXOUT "\\rowcolor[rgb]{.84,.89,.94}\[5.5pt\]\[5.5pt\]\n" if ($switch++ % 2);
 			print TEXOUT Tab::texify($entry_place{$entry->id});
 			print TEXOUT " & ". Tab::texify($name)." & ";
 			print TEXOUT " ".Tab::texify($entry->event->abbr)." & ";
-
-			my $last_tag;
-
-			foreach my $value (@{$values_by_entry{$entry->id}}) { 
-
-				if ($value->tag eq "rank") { 
-					print TEXOUT " ";
-				} else { 
-					print TEXOUT "/" if $last_tag eq "ballot";
-					print TEXOUT "/" if $last_tag eq "rank";
-					print TEXOUT " " if $last_tag eq "points";
-				}
-
-				print TEXOUT $value->value;
-				$last_tag = $value->tag;
-
-			}
-
+			print TEXOUT "\\texttt{".$entry_ballots{$entry->id}."}";
 			print TEXOUT "\\\\ \n" ;
 			print TEXOUT "\\end{tabular}\n" ;
 			print TEXOUT "\\newline\n" ;
