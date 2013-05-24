@@ -1,0 +1,286 @@
+<%args>
+	$tourn
+	$round_id
+	$debug => undef
+</%args>
+<%init>
+
+	my $round = Tab::Round->retrieve($round_id);
+	my @all_panels = $round->panels;
+
+	my $ncfl++ if $tourn->setting("ncfl");
+
+
+	my $err;
+
+	system "$Tab::logger Rebalancing out round ".$round->name if $debug;
+
+	my %panel_entries;
+	my %panel_judges;
+	my @all_entries;
+
+	foreach my $panel (@all_panels) { 
+		push @{$panel_entries{$panel->id}}, $m->comp("/funclib/panel_entries.mas", panel => $panel);
+		push @{$panel_judges{$panel->id}}, $m->comp("/funclib/panel_judges.mas", panel => $panel);
+		push @all_entries, @{$panel_entries{$panel->id}};
+	}
+
+	my @large_panels;
+	my @too_small;
+	
+	@all_panels = sort { scalar @{$panel_entries{$a->id}} <=> scalar @{$panel_entries{$b->id}} } @all_panels;
+
+	my $largest = pop @all_panels;
+	push (@large_panels, $largest);
+
+	my $max_size = scalar @{$panel_entries{$largest->id}};
+	my $limit = $max_size - 1;
+
+	foreach my $panel (@all_panels) { 
+		my $size = scalar @{$panel_entries{$panel->id}};
+		push (@large_panels, $panel) if $size == $max_size;
+		next unless $size < $limit;
+		push (@too_small, $panel);
+
+	}
+
+	unless (@too_small) { 
+		my $msg = "That round cannot be balanced any further";
+		$m->redirect("/panel/schemat/show.mhtml?round_id=".$round_id."&msg=$msg");
+	}
+
+    my @other_ballots = $m->comp("/funclib/other_ballots.mas", round => $round);
+
+    my %entries_by_panel = (); 
+    my %panels_by_entry = (); 
+
+    foreach my $ob (@other_ballots) { 
+        my $entry = $ob->entry->id;
+        my $panel = $ob->panel->id;
+        push (@{$entries_by_panel{$panel}}, $entry);
+        push (@{$panels_by_entry{$entry}}, $panel);
+    }   
+
+    my %entry_hits = ();
+    my %school_hits = ();
+    my %own_school_hits = ();
+    my %size_of_school = ();
+
+    my %school_by_entry = ();
+    my @schools;
+
+    if ($ncfl) {
+
+        my %school_region = ();
+
+        foreach my $entry (@all_entries) {
+
+            my $entry_id = $entry->id;
+
+            my $region = $school_region{$entry->school->id};
+
+            unless ($region) {
+                $region = $entry->school->region;
+                $school_region{$entry->school->id} = $region;
+                push (@schools, $region);
+                $size_of_school{$region}++;
+            }
+
+            $school_by_entry{$entry_id} = $region->id;
+
+        }
+
+    } else {
+	
+        foreach my $entry (@all_entries) {
+            my $entry_id = $entry->id;
+            $school_by_entry{$entry_id} = $entry->school->id;
+            push (@schools, $school_by_entry{$entry_id});
+            $size_of_school{$school_by_entry{$entry_id}}++;
+        }
+
+    }
+
+    foreach my $entry (@all_entries) {
+
+        my $entry_id = $entry->id;
+
+        foreach my $panel_id (@{$panels_by_entry{$entry_id}}) {
+
+            foreach my $other_id (@{$entries_by_panel{$panel_id}}) {
+
+                next if $other_id <= $entry_id; #Avoid myself and double counting
+
+                $entry_hits{$entry_id."-".$other_id}++;
+
+                $school_hits{$entry_id."-".$school_by_entry{$other_id}}++;
+
+                if ($school_by_entry{$other_id} == $school_by_entry{$entry_id}) {
+                    $own_school_hits{$entry_id}++;
+                }
+
+            }
+        }
+    }
+
+	my %candidates = ();
+	my %small_scores = ();
+
+	foreach my $panel (@too_small) { 
+	
+		my @small_candidates;
+
+		my @panel = @{$panel_entries{$panel->id}};
+		my @judges = @{$panel_judges{$panel->id}};
+
+		my $size = scalar @panel;
+		my $diff = $max_size - $size;
+
+		my $perfect_can_count;
+
+		my $panel_score = score_panel(\@panel, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry);
+
+		LARGE:
+		foreach my $large (@large_panels) { 
+
+			my @large = @{$panel_entries{$large->id}};
+
+			ENTRY:
+			foreach my $entry (@large) {
+
+				my @copy = @panel;
+		
+				foreach my $judge (@judges) { 
+					my $result = $m->comp("/funclib/clean_to_judge.mas", judge => $judge, entry => $entry);
+					next ENTRY unless $result;
+				}
+
+				push (@copy, $entry);
+
+				my $new_panel_score = score_panel(\@copy, \%entry_hits, \%school_hits, \%own_school_hits, \%school_by_entry);
+				my $panel_diff = $new_panel_score - $panel_score;
+
+				next if $perfect_can_count && $panel_diff > 0;
+
+				push @small_candidates, $entry;
+				$small_scores{$panel->id."-".$entry->id} = $panel_diff;
+
+				Tab::debuglog("Pushed candidate $entry into the candidate list.  New panel score $new_panel_score and old score is $panel_score");
+
+				$perfect_can_count++ if $panel_diff == 0;
+				last ENTRY if $perfect_can_count > 20;
+				last LARGE if $perfect_can_count > 20;
+
+			}
+
+		}
+
+		@small_candidates = sort {$small_scores{$panel->id."-".$a->id} <=> $small_scores{$panel->id."-".$b->id}} @small_candidates;
+
+		@{$candidates{$panel->id}} = @small_candidates;
+
+	}
+
+
+</%init>
+
+	<div class="left huge">
+
+		<h3>Rebalance <% $round->event->abbr %> <% $round->realname %></h3>
+
+		<p>Largest panel is <% $max_size %>
+
+		<table cellpadding="4" cellspacing="1">
+
+			<tr class="yellowrow">
+
+				<th class="smallish">
+					Panel
+				</th>
+
+				<th class="smallish">
+					Size
+				</th>
+
+				<th class="smallish">
+					Candidates for Moving  (click to move into).
+				</th>
+
+			</tr>
+
+%			foreach my $panel (@too_small) { 
+
+				<tr>
+
+					<td>
+						<% $panel->letter %>
+					</td>
+
+					<td>
+						<% scalar @{$panel_entries{$panel->id}} %>
+					</td>
+
+					<td>
+
+%						my $limit;
+%						my $score;
+
+%						foreach my $candidate (@{$candidates{$panel->id}}) { 
+
+%							next if $score;
+%							$score++ if $small_scores{$panel->id."-".$candidate->id};
+
+%							last if $limit++ == 20;
+
+							<span class="medspan">
+								<a class="fullblock white" href="entry_move.mhtml?entry_id=<% $candidate->id %>&panel_id=<% $panel->id %>">
+								<% $small_scores{$panel->id."-".$candidate->id} %> -
+								<% $candidate->school->region->code %>
+								<% $candidate->code %>
+								</a>
+							</span>
+%						}
+					</td>
+
+				</tr>
+
+%			}
+
+		</table>
+
+	</div>
+
+<%perl>
+
+    sub score_panel {
+
+        my ($panref, $entref, $schref, $ownschref, $schent) = @_; 
+
+        my @pan_entries = @$panref;
+
+        my $score = 0;
+        my $tick;
+
+        foreach my $entry (@pan_entries) { 
+
+            foreach my $other (@pan_entries) { 
+
+                next unless $other > $entry;
+
+                if (${ $schent }{$other} == ${ $schent }{$entry}) { 
+                    $score += 10000;
+                    $score += 10000 if ${ $ownschref }{$entry};
+                }
+
+                $score += 100 if ${ $entref}{$entry."-".$other};
+                $score += 1 if ${ $schref }{$entry."-".${ $schent }{$other}};
+    
+            }
+        }
+
+        return $score;
+
+    }   
+
+</%perl>
+
