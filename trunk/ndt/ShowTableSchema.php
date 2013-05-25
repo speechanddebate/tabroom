@@ -6,7 +6,7 @@ $database="itab";
 mysql_connect("localhost",$username,$password);
 @mysql_select_db($database) or die( "Unable to select database<br>");
 
-$result = mysql_query("SHOW COLUMNS FROM tourn");
+$result = mysql_query("SHOW COLUMNS FROM result_value");
 if (!$result) {
     echo 'Could not run query: ' . mysql_error();
     exit;
