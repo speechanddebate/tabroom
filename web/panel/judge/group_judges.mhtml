@@ -40,6 +40,7 @@
         text => $text
     }); 
 
+	$m->print('<p>'.$text.'</p>');
 
 	if ($clear) { 
 
@@ -251,7 +252,6 @@
 
 	Tab::Panel->columns(TEMP => "temp_score");
 
-
 	if ($timeslot_id ne "all" && $round_type ne "all") { 
 
 		Tab::Panel->set_sql( scored_panels => "
@@ -269,6 +269,232 @@
 					group by panel.id
 					order by temp_score desc
 		");
+
+		Tab::Panel->set_sql( empty_panels => "
+			select panel.*
+				from panel, round, event
+				where panel.round = round.id
+				and round.timeslot = ?
+				and round.type = ?
+				and not exists (
+					select entry.* 
+					from entry, ballot
+					where entry.id = ballot.entry
+					and ballot.panel = panel.id
+				)
+				group by panel.id
+		");
+
+		Tab::Ballot->set_sql( judge_ballots => "
+			select ballot.* 
+				from panel, ballot, round, event
+				where panel.round = round.id
+				and round.event = event.id
+				and event.judge_group = ? 
+				and round.timeslot = ?
+				and round.type = ?
+				and ballot.panel = panel.id
+		");
+
+		@panels = Tab::Panel->search_scored_panels($group->id, $timeslot_id, $round_type), Tab::Panel->search_empty_panels($group->id, $timeslot_id, $round_type);
+		@ballots = Tab::Ballot->search_judge_ballots($group->id, $timeslot_id, $round_type);
+
+	} elsif ($timeslot_id ne "all") { 
+
+		Tab::Panel->set_sql( scored_panels => "
+			select panel.*, count(distinct e2.id) as temp_score
+				from panel, ballot, entry, entry as e2, event, round
+					where entry.event = event.id
+					and event.judge_group = ? 
+					and panel.id = ballot.panel
+					and panel.round = round.id
+					and round.timeslot = ?
+					and ballot.entry = entry.id
+					and entry.school = e2.school
+					and entry.id < e2.id
+					group by panel.id
+					order by temp_score desc
+		");
+
+		Tab::Ballot->set_sql( judge_ballots => "
+			select ballot.* 
+				from panel, ballot, round, event
+				where panel.round = round.id
+				and round.event = event.id
+				and event.judge_group = ? 
+				and round.timeslot = ?
+				and ballot.panel = panel.id
+		");
+
+		@panels = Tab::Panel->search_scored_panels($group->id, $timeslot_id);
+		@ballots = Tab::Ballot->search_judge_ballots($group->id, $timeslot_id);
+
+
+	} elsif ($round_type ne "all") { 
+
+		Tab::Panel->set_sql( scored_panels => "
+			select panel.*, count(distinct e2.id) as temp_score
+				from panel, ballot, entry, entry as e2, event, round
+					where entry.event = event.id
+					and event.judge_group = ? 
+					and panel.id = ballot.panel
+					and panel.round = round.id
+					and round.type = ?
+					and ballot.entry = entry.id
+					and entry.school = e2.school
+					and entry.id < e2.id
+					group by panel.id
+					order by temp_score desc
+		");
+
+		Tab::Ballot->set_sql( judge_ballots => "
+			select ballot.* 
+				from panel, ballot, round, event
+				where panel.round = round.id
+				and round.event = event.id
+				and event.judge_group = ? 
+				and round.type = ? 
+				and ballot.panel = panel.id
+		");
+
+		@panels = Tab::Panel->search_scored_panels($group->id, $round_type);
+		@ballots = Tab::Ballot->search_judge_ballots($group->id, $round_type);
+
+	} else { 
+
+		Tab::Panel->set_sql( scored_panels => "
+			select panel.*, count(distinct e2.id) as temp_score
+				from panel, ballot, entry, entry as e2, event
+					where entry.event = event.id
+					and event.judge_group = ? 
+					and panel.id = ballot.panel
+					and ballot.entry = entry.id
+					and entry.school = e2.school
+					and entry.id < e2.id
+					group by panel.id
+					order by temp_score desc
+		");
+
+		Tab::Ballot->set_sql( judge_ballots => "
+			select ballot.* 
+				from panel, ballot, round, event
+				where panel.round = round.id
+				and round.event = event.id
+				and event.judge_group = ? 
+				and ballot.panel = panel.id
+		");
+
+		@panels = Tab::Panel->search_scored_panels($group->id);
+		@ballots = Tab::Ballot->search_judge_ballots($group->id);
+
+	}
+
+	my %ballots_by_panel = ();
+
+	foreach my $ballot (@ballots) {
+		push @{$ballots_by_panel{$ballot->panel->id}}, $ballot;
+	}
+
+	$m->print("...done. <p>Finding clean judges for ".scalar @panels." panels.  This will take a while.</p><p>");
+	$m->flush_buffer;
+
+	my @empty_panels;
+
+	my $count;
+		
+	PANEL:
+	foreach my $panel (@panels) { 
+
+		$count++;
+
+		$m->print($count." panels done...<br \>") unless $count % 50;
+		$m->flush_buffer;
+
+		my $event_id = $panel->round->event->id;
+
+		my $panel_needs = $panel->round->judges;
+		$panel_needs = 1 unless $panel_needs;
+		$panel_needs = $panelsize if $panel_needs < $panelsize;
+	
+		# Skip if the panel already has enough judges
+		my @ballots = @{$ballots_by_panel{$panel->id}};
+		my @already_judging;
+
+		foreach my $ballot (@ballots) { 
+			push @already_judging, $ballot->judge->id if $ballot->judge && $ballot->judge->id;
+		}
+
+		my %jseen = (); 
+		@already_judging = grep { ! $jseen{$_} ++ } @already_judging;
+		my $already = scalar @already_judging;
+
+		next if ($already >= $panel_needs);  
+	
+		my @clean_judges = $m->comp("/funclib/clean_judges.mas", panel => $panel, mass => "yes");
+
+		@clean_judges = sort {$a->standby cmp $b->standby} @clean_judges; #Standbys to the bottom
+
+		if ($panel->round->type ne "prelim") { 
+			@clean_judges = sort {$rating_by_judge_event{$a->id."-".$event_id} cmp $rating_by_judge_event{$b->id."-".$event_id}} @clean_judges;
+		}
+	
+		my %schools_used = ();  # This will become the region (diocese) if we're running NCFLs.
+	
+		$already++;
+
+		NEED:	
+		foreach ( $already .. $panel_needs) { 
+		
+			unless (@clean_judges) { 
+				push (@empty_panels, $panel);
+				next PANEL;
+			}
+
+			my $chosen_judge;
+	
+			JUDGE:
+			while (@clean_judges) { 
+				
+				my $clean_judge = shift @clean_judges;
+	
+				# If that school or region is on this panel already, move to the next candidate.
+				unless ($same_school) { 
+					if ($ncfl) { 
+						next JUDGE if $schools_used{"dio-".$clean_judge->school->region->id};
+					} else { 
+						next JUDGE if $schools_used{"school-".$clean_judge->school->id};
+					}
+				}
+	
+				# Otherwise, we've found our judge.
+				$chosen_judge = $clean_judge;
+				$schools_used{"school-".$clean_judge->school->id}++;
+				$schools_used{"dio-".$clean_judge->school->region->id}++ if $ncfl;
+				$clean_judge->score("-1200");  #I don't know why this is necessary but if I don't do this it caches old scores and screws people.
+
+				last JUDGE;
+
+	
+			}
+	
+			push (@empty_panels, $panel) unless $chosen_judge;
+			next PANEL unless $chosen_judge;
+
+			$m->comp("/funclib/panel_judgeadd.mas",  judge => $chosen_judge, panel => $panel);
+
+		}
+	}
+
+</%init>
+
+	<h4>Judge paneling done</h4>
+
+	<p>There are <% scalar @empty_panels %> that I couldn't find judges for</p>
+
+	<a class="third padmore inline dkgreen" href="/panel/report/disasters.mhtml">
+		Check for Disasters
+	</a>
+
 
 		Tab::Ballot->set_sql( judge_ballots => "
 			select ballot.* 
