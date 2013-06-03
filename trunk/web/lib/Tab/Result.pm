@@ -2,7 +2,8 @@ package Tab::Result;
 use base 'Tab::DBI';
 Tab::Result->table('result');
 Tab::Result->columns(Primary => qw/id/);
-Tab::Result->columns(Essential => qw/result_set entry student school round timestamp honor_site honor/);
+Tab::Result->columns(Essential => qw/result_set entry student school round/);
+Tab::Result->columns(Others => qw/timestamp honor_site honor rank percentile/);
 Tab::Result->columns(TEMP => qw/value/);
 
 Tab::Result->has_a(entry => 'Tab::Entry');
