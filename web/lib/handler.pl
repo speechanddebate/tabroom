@@ -94,6 +94,7 @@ use Tab::SweepRule;
 use Tab::SweepEvent;
 use Tab::Tiebreak;
 use Tab::TiebreakSet;
+use Tab::TiebreakSetting;
 use Tab::Timeslot;
 use Tab::Tourn;
 use Tab::TournAdmin;
