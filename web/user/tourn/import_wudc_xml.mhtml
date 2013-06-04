@@ -5,6 +5,7 @@
 <%init>
 
 	use XML::Simple;
+	use Math::Round;
 
 	my $now = DateTime->now;
 	my $tz = $account->tz if $account->tz;
@@ -28,7 +29,6 @@
 	my $startdate; 
 	my $location; 
 	my $weight;
-	print "first try<br>";
 
 	foreach my $xml_tourn (@{$data->{TOURN}}) {
 		$tournname = $xml_tourn->{TOURNNAME};
@@ -38,19 +38,20 @@
 	}
 
 	print "As variable:".$tournname."<br>";
-	#$tournname="WUDC World Championship";
 	print "Straight from data object=".$data->{TOURN}[0]."<br>";
+	
+	#CREATE THE TOURNEY
 
-	my $tourn_id = SaveTourney($tournname, $startdate, $location, $tz, $webname, $account);
-
-    print "Tourney id=".$tourn_id."<Br>";
-    print "Tourney is saved.<br>";
-
+	my ($tourn_id, $judge_group_id) = SaveTourney($tournname, $startdate, $location, $tz, $webname, $account, $weight);
+	print "Tourney id=".$tourn_id."<Br>";
+	print "Tourney is saved.<br>";
+	print "weight=".$weight."<Br>";
+	
 	#CREATE AN EVENT
 
-	my $event_id = CreateEvent($tourn_id);
+	my $event_id = CreateEvent($tourn_id, $judge_group_id);
 	print "Event ID=".$event_id;
-
+	
 	#DO SCHOOLS
 
 	#Loop each school and put into an array; save to iTab as you go
@@ -104,32 +105,34 @@
 
 	#Tourn, entries, schools, events are now saved in Tabroom
 
-	#Create Result_set
-	my $result_set=CreateResultSet($tourn_id, $event_id);
+	#CREATE RESULT_SET
+	my $result_set=CreateResultSet($tourn_id, $event_id, $tz);
 
 	#Create result field for each entry and populate result_value
 	my $result;
 
   	for ($x = 0; $x <=$#entry; $x++) {
-		$result=CreateResult($entry[$x][5], $entry[$x][$6], $result_set);
-		SaveResultSet($result, $entry[$x][3], 1, 0, "Rank"); 
-		SaveResultSet($result, $entry[$x][4], 2, 1, "WUDC Points");
+		$result=CreateResult($entry[$x][5], $entry[$x][$6], $result_set, $entry[$x][4], $#entry);
+		SaveResultSet($result, $entry[$x][4], 1, 0, "Place", "Final finish at tournament including elims"); 
+		SaveResultSet($result, $entry[$x][3] * $weight, 2, 1, "WUDC Points", "Points for WUDC rankings");
 	}
 
-	#all done; go match up chapters to schools
+	#ALL DONE; GO MATCH UP CHAPTERS TO SCHOOLS
 
-	$m->redirect("/user/circuit/chapter_by_tourn.mhtml?tourn_id=$tourn_id&circuit_id=50");	
+	#$m->redirect("/user/circuit/chapter_by_tourn.mhtml?tourn_id=$tourn_id&circuit_id=50");	
 
 ##NOW ALL THE SUBROUTINES
+
 	sub SaveResultSet {
 
-		my ($result, $value, $priority, $sort_desc, $tag) = @_;
+		my ($result, $value, $priority, $sort_desc, $tag, $long_tag) = @_;
 
 		my $object = Tab::ResultValue->create( {
 			result => $result,
 			value => $value,
 			priority => $priority,
 			sort_desc => $sort_desc,
+			long_tag => $long_tag,
 			tag => $tag
 		});
 
@@ -137,11 +140,15 @@
 
 	sub CreateResult {
 
-		my ($entry_id, $entry_school, $result_set) = @_;
+		my ($entry_id, $entry_school, $result_set, $rank, $nentries) = @_;
 
+		my $pct = round(($rank/$nentries)*1000);
+		
 		my $result = Tab::Result->create( {
 			entry => $entry_id,
 			result_set => $result_set,
+			rank => $rank,
+			percentile => $pct,
 			school => $entry_school
 		});
 
@@ -152,15 +159,18 @@
 	 
 		#creates a standard results set to store the WUDC points
 
-		my ($tourn_id, $event_id) = @_;
+		my ($tourn_id, $event_id, $tz) = @_;
+		
+		my $now = DateTime->now( time_zone => $tz);
 
 		my $RSobject = Tab::ResultSet->create( {
 			tourn => $tourn_id,
 			event => $event_id,
-			label => "WUDC Points",
+			label => "Final Places",
+			generated => $now,
 			bracket => 0
 		});
-
+			
 		return $RSobject->id;
 	}
 
@@ -175,6 +185,7 @@
 			code => $entry_name,
 			name => $entry_name
 		});
+		
 
 		return $entryobject->id;
 
@@ -182,13 +193,35 @@
 
 	sub CreateEvent {
 
-		my $tourn_id = @_;
+		my ($tourn_id, $judge_group_id) = @_;
 
 		my $eventobject = Tab::Event->create( {
 			tourn => $tourn_id,
 			name => "Open Parliamentary Debate",
 			type => "wudc",
+			judge_group => $judge_group_id,
 			abbr => "OPD"
+		});
+
+		#publish the field report
+		Tab::EventSetting->create( {
+			event => $eventobject->id,
+			tag => "field_report",
+			value => 1
+		});
+
+		#set published to true
+		Tab::EventSetting->create( {
+			event => $eventobject->id,
+			tag => "results_published",
+			value => 1
+		});
+		
+		#set max entries to 2 so that competitors can claim spots
+		Tab::EventSetting->create( {
+			event => $eventobject->id,
+			tag => "max_entry",
+			value => 2
 		});
 
 		return $eventobject->id;
@@ -228,7 +261,7 @@
 	sub SaveTourney {
 
 		#you're in strict mode, so must these values must be read in for local variables
-		my ($tournname, $startdate, $location, $tz, $webname, $account) = @_;
+		my ($tournname, $startdate, $location, $tz, $webname, $account, $weight) = @_;
 
 		my $judge          = $startdate;
 		my $drops          = $startdate;
@@ -265,8 +298,29 @@
 			tourn => $tourn->id,
 			circuit => 50
 		});
+		
+		#make a judge group
+		my $judge_group = Tab::JudgeGroup->create( {
+			tourn => $tourn->id,
+			name => "Judges",
+			abbr => "Judges"
+		});
 
-		return $tourn->id;
+		#save the weight
+		Tab::TournSetting->create( {
+			tourn => $tourn->id,
+			tag => "weight",
+			value => $weight
+		});
+
+		#allow students to claim competitor spots
+		Tab::TournSetting->create( {
+			tourn => $tourn->id,
+			tag => "student_claim",
+			value => 1
+		});
+
+		return ($tourn->id, $judge_group->id);
 
 	}
 
