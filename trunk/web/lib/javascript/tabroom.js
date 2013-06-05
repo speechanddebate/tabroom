@@ -9,10 +9,68 @@ function autoTab(input,len,e) {
 
     var keyCode = e.keyCode; 
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
-    
-    if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
 
-        if (input.value != 100) {
+	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
+
+        if (input.value != 30) {
+			var number = input.value;
+			number = number * 1;
+			number = number / 10;
+			number = number + 20;
+			input.value = number;
+		}
+
+        input.form[(getIndex(input)+1) % input.form.length].focus();
+
+	} else if (len == 6 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
+
+		if (/\.$/.test(input.value)) { 
+			var number = input.value;
+			number = number.slice(0,1);
+			number = number * 1;
+			number = number + 20.5;
+			input.value = number;
+		} else if (/5$/.test(input.value)) { 
+			var number = input.value.slice(0,2);
+			number = number * 1;
+			number = number / 10;
+			number = number + 20;
+			input.value = number;
+		} else if (/2$/.test(input.value)) { 
+			var number = input.value.slice(0,2);
+			number = number * 1;
+			number = number / 10;
+			number = number + 20;
+			number += .05;
+			input.value = number;
+		} else { 
+			var number = input.value.slice(0,1);
+			number = number * 1;
+			number = number + 20;
+			input.value = number;
+		}
+
+        input.form[(getIndex(input)+1) % input.form.length].focus();
+
+	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
+
+		if (len == 3) { 
+
+			if (/\.$/.test(input.value)) { 
+				var number = input.value;
+				number = number.slice(0,2);
+				number = number * 1;
+				number += .5;
+				input.value = number;
+			} else if (/5$/.test(input.value)) { 
+				input.value = input.value/10;
+			} else { 
+				input.value = input.value.slice(0,2);
+			}
+
+		}
+
+        if (len == 2 && input.value != 100) {
             input.value = input.value.slice(0, len);
         }
     
