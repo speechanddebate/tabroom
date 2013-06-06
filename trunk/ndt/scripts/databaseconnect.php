@@ -1,6 +1,6 @@
 <?php
-$username="itab";
-$password="DataBasePassword";
+$username="jbruschke";
+$password="Oof9iyeeGh9jeeg";
 $database="itab";
 
 mysql_connect("localhost",$username,$password);
