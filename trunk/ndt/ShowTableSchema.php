@@ -57,6 +57,7 @@ $query="Select * from tourn, event, round, panel, ballot where tourn.id=1895 and
 $query="SELECT * FROM judge, school where last='meiches' and judge.school=school.id";
 $query="Select * from result, student where honor<>'' and student.id=result.student";
 $query="SELECT * from tourn where reg_start > '09-01-2012' order by start";
+$query="Select * from result, entry, result_value, result_set where result_set.tourn=2017 and result.result_set=result_set.id and result.entry=entry.id and result_value.result=result.id and tag='Place' order by abs(value) asc";
 
 $tourn=mysql_query($query);
 $entryNum = mysql_num_rows($tourn);
@@ -64,7 +65,7 @@ echo $entryNum."<br>";
 for ($i=0; $i <= $entryNum-1; $i++)
 {
 //echo "ID=".mysql_result($tourn,$i,"entry.id")."name=".mysql_result($tourn,$i,"code")."<br>";
-echo "ID=".mysql_result($tourn,$i,"id")."state=".mysql_result($tourn,$i,"state")." ".mysql_result($tourn,$i,"start")."<br>";
+echo "ID=".mysql_result($tourn,$i,"id")." tag=".mysql_result($tourn,$i,"tag")." value=".mysql_result($tourn,$i,"value")." result_set=".mysql_result($tourn,$i,"result_set.label")."<br>";
 //echo "ID=".mysql_result($tourn,$i,"result.id")." ".mysql_result($tourn,$i,"first")." ".mysql_result($tourn,$i,"last")." Honor=".mysql_result($tourn,$i,"honor")." honor_site=".mysql_result($tourn,$i,"honor_site")." round=".mysql_result($tourn,$i,"round")."<br>";
 //echo "ballot.id=".mysql_result($tourn,$i,"ballot.id")." bye=".mysql_result($tourn,$i,"bye")." round=".mysql_result($tourn,$i,"round.id")." ".mysql_result($tourn,$i,"round.name")."<br>";
 //echo "panel.id=".mysql_result($tourn,$i,"panel.id")." tourn=".mysql_result($tourn,$i,"tourn.id")." round=".mysql_result($tourn,$i,"round.id")." ".mysql_result($tourn,$i,"round.name")."<br>";
