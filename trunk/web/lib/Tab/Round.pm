@@ -4,8 +4,7 @@ Tab::Round->table('round');
 Tab::Round->columns(Primary => qw/id/);
 Tab::Round->columns(Essential => qw/name label event type timeslot site pool online/);
 Tab::Round->columns(Others => qw/post_results published listed created completed 
-									motion_published blasted timestamp tb_set motion 
-									judges cat_id flighted start_time/);
+									blasted timestamp tb_set motion judges cat_id flighted start_time/);
 Tab::Round->columns(TEMP => qw/speaks/);
 
 Tab::Round->has_a(event => 'Tab::Event');

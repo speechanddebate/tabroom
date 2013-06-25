@@ -26,12 +26,28 @@ sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
 
-	my @existing = Tab::EventSetting->search(  
-		event => $self->id,
-		tag => $tag
-	);
+	my @existing;
 
-    if (defined $value) {
+	if ($tag eq "tab_rating_priority") { 
+
+		@existing = Tab::EventSetting->search(  
+			event => $self->id,
+			tag => $tag,
+			value => $value
+		);
+
+	} else { 
+	
+		@existing = Tab::EventSetting->search(  
+			event => $self->id,
+			tag => $tag
+		);
+
+	}
+
+    if ($value && ($tag ne "tab_rating_priority" || $blob)) {
+
+		Tab::debuglog("I am value $value and tag $tag and blob $blob");
 
 		if (@existing) {
 			
@@ -47,6 +63,9 @@ sub setting {
 					$exists->value_text($blob);
 				} elsif ($value eq "date") { 
 					$exists->value_date($blob);
+				} elsif ($tag eq "tab_rating_priority") { 
+					$exists->value($value);
+					$exists->value_text($blob);
 				} else { 
 					$exists->value($value);
 				}
@@ -68,15 +87,27 @@ sub setting {
 				value => $value,
 			});
 
-			if ($value eq "text") { 
-				$exists->value_text($blob);
-			}
+			if ($blob) { 
 
-			if ($value eq "date") { 
-				$exists->value_date($blob);
-			}
+				if ($value eq "text") { 
+					$exists->value_text($blob);
+					$exists->update;
+				}
 
-			$exists->update;
+				if ($value eq "date") { 
+					$exists->value_date($blob);
+					$exists->update;
+				}
+
+				if ($tag eq "tab_rating_priority") { 
+					$exists->value_text($blob);
+					$exists->update;
+				}
+
+			} else { 
+	
+				$exists->update;
+			}
 
 		}
 
@@ -88,6 +119,7 @@ sub setting {
 		my $setting = shift @existing;
 		return $setting->value_text if $setting->value eq "text";
 		return $setting->value_date if $setting->value eq "date";
+		return $setting->value_text if $setting->tag eq "tab_rating_priority";
 		return $setting->value;
 
 	}
