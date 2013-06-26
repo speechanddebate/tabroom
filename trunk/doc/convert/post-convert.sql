@@ -33,5 +33,9 @@ create index tourn on tourn_setting(tourn);
 alter table result add rank int;
 alter table result add percentile int; 
 
+alter table ballot drop topic;
+alter table ballot drop countmenot;
+alter table ballot add seed int;
+alter table ballot add pullup bool;
 
 
