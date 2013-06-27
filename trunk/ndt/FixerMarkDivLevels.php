@@ -1,4 +1,5 @@
 <?php
+die;
 require 'scripts/databaseconnect.php';
 
 //INSERT INTO event_setting (tag, event, value) VALUES ('level', 18947,"novice")

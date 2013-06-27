@@ -1,4 +1,5 @@
 <?php
+die;
 // 1. Pull all elim panels for circuit 43
 // 2. Find all panels with fewer than 3 judges, (a) make 3 judges (b) create a decision for all new ballots in favor of the team
 

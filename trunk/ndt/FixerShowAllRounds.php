@@ -1,4 +1,5 @@
 <?php
+die;
 require 'scripts/databaseconnect.php';
 
 $query="SELECT * FROM tourn, tourn_circuit, event, round where tourn_circuit.circuit=43 and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and (event.type='policy' or event.type='roundrobin') and round.event=event.id";
