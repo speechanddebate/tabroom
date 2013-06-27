@@ -1,3 +1,4 @@
+<?php die; ?>
 <a href="FixerElimByeAutofixer.php">Elim byes</a>  (Create panel for a bye if there isn't one, make sure there are 3 ballots there for the bye) </br>
 <br/>
 <a href="FixerMakePanel.php">Create a panel and add entries to it</a>  (Create a new panel for a closeout) </br>

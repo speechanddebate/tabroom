@@ -400,7 +400,7 @@ function isvarsity($event)
 function iscc($chapter)
 {
  $bool="False";
- if ($chapter==6298 or $chapter==6347 or $chapter==6111) {$bool="True";}
+ if ($chapter==6298 or $chapter==6347 or $chapter==6111 or $chapter=6299) {$bool="True";}
  return $bool;
 }
 

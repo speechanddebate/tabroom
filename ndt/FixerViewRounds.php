@@ -1,4 +1,5 @@
 <?php
+die;
 require 'scripts/databaseconnect.php';
 $event=$_GET['event'];
 $query="SELECT * FROM round where round.event=".$event;

@@ -1,4 +1,5 @@
 <?php
+die;
 require 'scripts/databaseconnect.php';
 
 $round=$_POST['round'];

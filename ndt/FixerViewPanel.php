@@ -1,4 +1,5 @@
 <?php
+die;
 require 'scripts/databaseconnect.php';
 $panel=$_GET['panel'];
 $query="SELECT * FROM ballot where ballot.panel=".$panel;
