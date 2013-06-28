@@ -1,0 +1,326 @@
+<%args>
+	$tourn
+	$account
+	$from_id     => undef
+	$into_id     => undef
+	$site_id     => undef
+	$timeslot_id => undef
+	$tb_set_id   => undef
+	$label       => undef
+	$start       => undef
+	$end         => undef
+	$novices     => undef
+	$type        => undef
+</%args>
+<%init>
+
+	use List::Util 'shuffle';
+
+	my $from = Tab::Round->retrieve($from_id) if $from_id;
+	my $into = Tab::Round->retrieve($into_id) if $into_id;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+	my $now = DateTime->now(time_zone => $tz);
+
+	my $err;
+
+	if ($into) { 
+
+		$err .= "You must specify the starting seed of whom to break  " unless $start;
+		$err .= "You must specify the ending seed of whom to break  " unless $end;
+		$m->redirect("index.mhtml?from_id=".$from->id."&preset_id=".$into->id."&err=".$err) if $err;
+
+		$into->tb_set($tb_set_id) if $tb_set_id;
+		$into->site($site_id) if $site_id;
+		$into->timeslot($timeslot_id) if $timeslot_id;
+		$into->label($label) unless $label;
+		$into->type($type) unless $type;
+		$into->created($now);
+		$into->update;
+
+	} else { 
+
+		my $err = " Missing timeslot " unless $timeslot_id;
+		$err .= " Missing site " unless $site_id;
+		$err .= " Missing starting entry " unless $start;
+		$err .= " Missing ending entry " unless $end;
+		$err .= " Missing tiebreaker set " unless $tb_set_id;
+		$err .= " Missing round type " unless $type;
+		$err .= " Missing site " unless $site_id;
+
+		$m->redirect("index.mhtml?from_id=".$from->id."&preset_id=".$into->id."&err=".$err) if $err;
+
+		my $judges = 1;
+		$judges = 3 if $type eq "elim";
+		$judges = 3 if $type eq "final";
+
+		$m->redirect("index.mhtml?from_id=".$from->id."&err=".$err) if $err;
+
+		$into = Tab::Round->create({
+			event    => $from->event->id,
+			timeslot => $timeslot_id,
+			tb_set   => $tb_set_id,
+			label    => $label,
+			type     => $type,
+			created  => $now,
+			judges   => $judges
+		});
+
+		$m->comp("/funclib/renumber_rounds.mas", event_id => $from->event->id);
+
+	}
+
+	my $bracket = Tab::ResultSet->search( event => $from->event->id, label => "Bracket")->first;
+
+	unless ($bracket) { 
+
+		$bracket = Tab::ResultSet->create({
+			tourn => $tourn->id,
+			event => $from->event->id,
+			label => "Bracket",
+			generated => $now
+		});
+
+	}
+
+    Tab::ResultValue->set_sql( rm_bracket => "delete result_value.* from result, result_value where result.id = result_value.result and result.round = ? and result.result_set = ? ");
+	Tab::ResultValue->sql_rm_bracket->execute( $round->id, $bracket->id );
+
+    Tab::Result->set_sql( rm_bracket => "delete * from result where round = ? and result_set = ? ");
+	Tab::Result->sql_rm_bracket->execute( $round->id, $bracket->id );
+
+	my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $bah, $mah, $entry_letter_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $from);
+
+	if ($from->type ne "elim") { 
+
+		my @breaks;
+		my $count;
+
+		my %entry_tb = ();
+		my %entry_seed = ();
+		my %entry_school = ();
+
+		my %id_entry = map {$_->id => $_} $from->event->entries;
+
+		foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) { 
+			foreach my $entryid (@{${$entries_ref}{$seed}}) { 
+				$count++;
+				my $entry = $id_entry{$entryid};
+				next if $count > $end;
+				next if $count < $start;
+				push @breaks, $entryid;
+				$entry_seed{$entryid} = $seed;
+				$entry_school{$entryid} = $entry->school->id;
+
+				my $result = Tab::Result->create({
+					result_set => $bracket->id,
+					entry => $entryid,
+					round => $into->id
+				});
+
+				Tab::ResultValue->create({
+					result => $result->id,
+					value => $entry_seed{$entryid},
+					priority => 1,
+					sort_desc => 0,
+					tag => "Seed",
+					no_sort => 0
+				});
+
+			}
+		}
+
+		foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) { 
+			foreach my $entry (@{${$entries_ref}{$seed}}) {
+				my $one;	
+				foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+					next if $one;
+					$entry_tb{$entry} = ${$tbs_ref}{$entry."-".$key};
+					$one++;
+				}
+			}
+		}
+
+		my $step = 4;
+		my $num_breaks = scalar @breaks;
+
+		while ($step < $num_breaks) { 
+			$step = $step * 2;
+		}
+
+		if ($step != $num_breaks) { 
+			my $byes = $step - $num_breaks;
+
+			foreach (1 .. $byes) { 
+				push @breaks, "BYE";
+			}
+
+		}
+
+		my @existing_panels = $into->panels;
+		my @use_panels;	
+		my $num_panels = $step / 4;
+
+		my $letter = 1;
+		$letter = "A" if $from->event->setting("panel_labels") eq "letters";
+
+		foreach my $count (1 .. $num_panels) { 
+
+			my $existing = shift @existing_panels if @existing_panels;
+
+			if ($existing) {
+
+				push @use_panels, $existing;
+
+			} else { 
+
+				my $new = Tab::Panel->create({
+					round => $into->id,
+					letter => $letter,
+				});
+
+				push @use_panels, $new;
+
+			}
+
+			$letter++;
+		}
+
+		foreach my $ep (@existing_panels) { 
+			$ep->delete;   #KILL THE SPARES
+		}
+
+		my @snake_panels = @use_panels;
+
+		my %panel_entries = ();
+
+		$count = 1;
+
+		if (scalar @use_panels == 1) { 
+
+			@{$panel_entries{$use_panels[0]->id}} = @breaks;
+
+		} else { 
+
+			foreach my $entry (@breaks) {
+
+				unless (@snake_panels) { 
+					@snake_panels = reverse (@use_panels) if $count % 2;
+					@snake_panels = @use_panels unless @snake_panels;
+					$count++;
+				}
+
+				my $panel = shift @snake_panels;
+				push @{$panel_entries{$panel->id}}, $entry;
+
+			}
+
+		}	
+
+		foreach my $panel (@use_panels) { 
+
+			my @entries = shuffle(@{$panel_entries{$panel->id}});
+
+			my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
+
+			foreach my $ballot ($panel->ballots) {
+				$ballot->delete;
+			}
+
+			if (@judges) { 
+
+				foreach my $judge (@judges) {
+
+					my $position;
+
+					foreach my $entry (@entries) {
+
+						$position++;
+
+						next unless $entry;
+
+						if ($entry eq "BYE") { 
+
+							$panel->bye(1);
+
+						} else { 
+
+							my $ballot = Tab::Ballot->create({
+								panel => $panel->id,
+								judge => $judge->id,
+								entry => $entry,
+								speakerorder => $position,
+								seed => $entry_seed{$entry}
+							})
+
+							$panel->bracket($entry_seed{$entry}) if $panel->bracket > $entry_seed{$entry};
+							$panel->bracket($entry_seed{$entry}) unless $panel->bracket;
+
+						}
+
+						$panel->update;
+
+					}
+
+				}
+
+			} else { 
+
+				my $position;
+
+				foreach my $entry (@entries) {
+					$position++;
+					next unless $entry;
+
+					if ($entry eq "BYE") { 
+
+						$panel->bye(1);
+						$panel->update;
+
+					} else { 
+
+						my $ballot = Tab::Ballot->create({
+							panel => $panel->id,
+							judge => 0,
+							entry => $entry,
+							speakerorder => $position,
+							seed => $entry_seed{$entry}
+						})
+
+					}
+				}
+			}
+		}
+
+		my $msg = "Elim round paneled";
+		$m->redirect("/panel/schemat/show.mhtml?round_id=".$into->id."&msg=$msg");
+
+	} else { 
+
+		my %panel_seed;
+
+		foreach my $panel ($from->panels) {
+			foreach my $ballot ($panel->ballots) { 
+				$panel_seed{$panel->id} = $ballot->seed if $ballot->seed < $panel_seed{$panel->id};
+				$panel_seed{$panel->id} = $ballot->seed unless $panel_seed{$panel->id};
+			}
+		}
+
+		my %panel_advancers;
+
+		foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) { 
+
+			foreach my $entryid (@{${$entries_ref}{$seed}}) { 
+				my $panel = ${$entry_letter_ref}{$entryid};
+				next if scalar @{$panel_advancers{$panel}} > 1;
+				push @{$panel_advancers{$panel}}, $entryid;
+			}
+		}
+
+		my %seen = (); 
+
+
+	} 
+
+</%init>
