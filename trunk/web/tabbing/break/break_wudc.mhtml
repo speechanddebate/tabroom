@@ -79,16 +79,17 @@
 			tourn => $tourn->id,
 			event => $from->event->id,
 			label => "Bracket",
-			generated => $now
+			generated => $now,
+			bracket => 1
 		});
 
 	}
 
     Tab::ResultValue->set_sql( rm_bracket => "delete result_value.* from result, result_value where result.id = result_value.result and result.round = ? and result.result_set = ? ");
-	Tab::ResultValue->sql_rm_bracket->execute( $round->id, $bracket->id );
+	Tab::ResultValue->sql_rm_bracket->execute( $into->id, $bracket->id );
 
-    Tab::Result->set_sql( rm_bracket => "delete * from result where round = ? and result_set = ? ");
-	Tab::Result->sql_rm_bracket->execute( $round->id, $bracket->id );
+    Tab::Result->set_sql( rm_bracket => "delete from result where round = ? and result_set = ? ");
+	Tab::Result->sql_rm_bracket->execute( $into->id, $bracket->id );
 
 	my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $bah, $mah, $entry_letter_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $from);
 
@@ -191,6 +192,8 @@
 			$ep->delete;   #KILL THE SPARES
 		}
 
+		@use_panels = shuffle(@use_panels);
+
 		my @snake_panels = @use_panels;
 
 		my %panel_entries = ();
@@ -247,23 +250,23 @@
 						} else { 
 
 							my $ballot = Tab::Ballot->create({
-								panel => $panel->id,
-								judge => $judge->id,
-								entry => $entry,
+								panel        => $panel->id,
+								judge        => $judge->id,
+								entry        => $entry,
 								speakerorder => $position,
-								seed => $entry_seed{$entry}
-							})
+								seed         => $entry_seed{$entry}
+							});
 
 							$panel->bracket($entry_seed{$entry}) if $panel->bracket > $entry_seed{$entry};
 							$panel->bracket($entry_seed{$entry}) unless $panel->bracket;
 
 						}
 
-						$panel->update;
-
 					}
 
 				}
+
+				$panel->update;
 
 			} else { 
 
@@ -286,40 +289,154 @@
 							entry => $entry,
 							speakerorder => $position,
 							seed => $entry_seed{$entry}
-						})
+						});
+
+						$panel->bracket($entry_seed{$entry}) if $panel->bracket > $entry_seed{$entry};
+						$panel->bracket($entry_seed{$entry}) unless $panel->bracket;
 
 					}
+
 				}
+
+				$panel->update;
 			}
 		}
 
-		my $msg = "Elim round paneled";
+		$into->created($now);
+		$into->update;
+
+		my $msg = ucfirst($type)." round paneled";
 		$m->redirect("/panel/schemat/show.mhtml?round_id=".$into->id."&msg=$msg");
 
 	} else { 
 
-		my %panel_seed;
-
-		foreach my $panel ($from->panels) {
-			foreach my $ballot ($panel->ballots) { 
-				$panel_seed{$panel->id} = $ballot->seed if $ballot->seed < $panel_seed{$panel->id};
-				$panel_seed{$panel->id} = $ballot->seed unless $panel_seed{$panel->id};
-			}
-		}
-
-		my %panel_advancers;
+		my %order_entry;
+		my %panel_entries;
 
 		foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) { 
-
 			foreach my $entryid (@{${$entries_ref}{$seed}}) { 
-				my $panel = ${$entry_letter_ref}{$entryid};
-				next if scalar @{$panel_advancers{$panel}} > 1;
-				push @{$panel_advancers{$panel}}, $entryid;
+				$order_entry{$entryid} = $seed;
+				push @{$panel_entries{${$entry_letter_ref}{$entryid}}}, $entryid;
 			}
 		}
 
-		my %seen = (); 
+		my @panels = $from->panels;
 
+		my $num_panels;
+
+		foreach my $panel (@panels) { 
+			$num_panels = $panel->bracket if $panel->bracket > $num_panels;
+		}
+
+		my $letter = 1;
+		$letter = "A" if $from->event->setting("panel_labels") eq "letters";
+
+		foreach my $panel (@panels) { 
+
+			my $destination_bracket;
+			my $position;
+
+			if ( $panel->bracket <= ($num_panels / 2) ) { 
+				$destination_bracket = $panel->bracket;
+				$position = 1;
+				Tab::debuglog("Bracket ".$panel->bracket." is direct");
+			} else { 
+				$destination_bracket = ($num_panels + 1 - $panel->bracket);
+				$position = 3;
+				Tab::debuglog("Bracket ".$panel->bracket." is indirect.  Destination $destination_bracket");
+			}
+
+			my $destination = Tab::Panel->search( round => $into->id, bracket => $destination_bracket)->first;
+
+			Tab::debuglog("Destination $destination found for bracket $destination_bracket");
+
+			unless ($destination) { 
+
+				Tab::debuglog("Creating a new destination with letter $letter and bracket $destination_bracket");
+
+				$destination = Tab::Panel->create({
+					round   => $into->id,
+					bracket => $destination_bracket,
+					letter  => $letter
+				});
+
+				if ($letter eq "Z") { 
+					$letter = "AA";
+				} elsif ($letter eq "AZ") { 
+					$letter = "BA";
+				} elsif ($letter eq "BZ") { 
+					$letter = "CA";
+				} else { 
+					$letter++;
+				}
+
+			}
+
+			my @entries = sort {$order_entry{$a} <=> $order_entry{$b}} @{$panel_entries{$panel->letter}} if $panel_entries{$panel->letter};
+
+			my $first = shift @entries;
+			my $second = shift @entries;
+
+			my @judges = $m->comp("/funclib/panel_judges.mas", panel => $destination);
+
+			if (@judges) { 
+
+				foreach my $judge (@judges) { 
+
+					my @dummies = Tab::Ballot->search( judge => $judge->id, panel => $destination->id, entry => 0);
+
+					foreach my $dummy (@dummies) { 
+						$dummy->delete;
+					}
+					
+					Tab::Ballot->create({
+						panel        => $destination->id,
+						judge        => $judge->id,
+						speakerorder => $position,
+						entry        => $first,
+						chair        => $judge->chair,
+						audit        => 0
+					});
+
+					Tab::Ballot->create({
+						panel        => $destination->id,
+						judge        => $judge->id,
+						speakerorder => ($position + 1),
+						entry        => $second,
+						chair        => $judge->chair,
+						audit 		 => 0
+					});
+
+				}
+
+			} else { 
+					
+				Tab::Ballot->create({
+					panel        => $destination->id,
+					judge        => 0,
+					speakerorder => $position,
+					entry        => $first,
+					chair        => 0,
+					audit        => 0
+				});
+
+				Tab::Ballot->create({
+					panel        => $destination->id,
+					judge        => 0,
+					speakerorder => ($position + 1),
+					entry        => $second,
+					chair        => 0,
+					audit 		 => 0
+				});
+
+			}
+		}
+
+		$into->created($now);
+		$into->update;
+
+		my $msg = ucfirst($type)." round paneled";
+		$m->redirect("/panel/schemat/show.mhtml?round_id=".$into->id."&msg=$msg");
 
 	} 
 
