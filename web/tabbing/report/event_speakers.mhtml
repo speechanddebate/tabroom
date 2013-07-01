@@ -1,0 +1,215 @@
+<%args>
+	$tourn
+	$session
+	$event_id => undef
+	$report => undef
+</%args>
+<%init>
+
+	my $event = Tab::Event->retrieve($event_id) if $event_id && $event_id ne "all";
+
+    my $now = DateTime->now;    
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+    $now->set_time_zone($tz);
+
+	my $name = $tourn->name if $event_id eq "all";
+    $name = $event->name if $event && not defined $name;
+    $name =~ s/[\W_]//g;
+
+	my @events;
+	push @events, $event;
+	@events = sort {$a->name cmp $b->name} $tourn->events if $event_id eq "all";
+
+    my $filename = "Speakers-$name-".$session->id;
+    my $filepath = $Tab::file_root."tmp/".$filename;
+    `rm -f $filepath.*`; 
+    
+    $m->comp("/funclib/printout.mas", filename => $filename, head => 1 );
+    open (TEXOUT, ">>$filepath.tex");
+
+
+	my %school_name;
+	foreach my $school ($tourn->schools) { 
+		$school_name{$school->id} = $school->short_name;
+	}
+
+	foreach my $event (@events) { 
+			
+		my $type = $event->type;
+
+		my @rounds = sort {$b->name <=> $a->name} $m->comp("/funclib/event_rounds.mas", event => $event, done => "yes");
+
+		my $round;
+		foreach my $all_round (@rounds) { 
+			next if $all_round->type eq "elim";
+			next if $all_round->type eq "final";
+			$round = $all_round;
+			last if $round;
+		}
+
+		Tab::debuglog("Testing ".scalar @rounds." rounds yielded me round $round");
+
+		next unless $round;
+
+		my $tb_set_id = $event->setting("speaker_tbset");
+		my $tb_set = Tab::TiebreakSet->retrieve($tb_set_id) if $tb_set_id;
+		next unless ($tb_set);
+
+		my $points;
+		my $ranks;
+		my $wins;
+
+		foreach my $tb ($tb_set->tiebreaks) { 
+			$ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals");
+			$wins++ if ($tb->name eq "opp_wins" || $tb->name eq "winloss");
+			$points++ if ($tb->name eq "points" || $tb->name eq "competition" || $tb->name eq "opp_points");
+		}
+
+		print TEXOUT "\\medskip\n";
+		print TEXOUT "\\noindent\n";
+		print TEXOUT "{\\Large \\bf ". Tab::texify($tourn->name)."} \\hfill {\\Large \\bf ".Tab::texify($event->name)." \\hfill Speakers in Order} \\\\ \n";
+		print TEXOUT "\\newline\n";
+
+		my $novice = $event->setting("top_novice") if $event;
+
+		my %student_ballots = ();
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $sth = $dbh->prepare("
+			select value.id, value.tag, value.value, value.student, student.id, ballot.entry, ballot.judge, ballot.bye, ballot.chair, round.name
+			from ballot_value value, ballot, panel, round, entry_student, student
+			where value.ballot = ballot.id
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and round.name <= ".$round->name."
+			and round.event = ".$event->id."
+			and ballot.entry = entry_student.entry
+			and entry_student.student = student.id
+			order by round.name, ballot.entry, ballot.chair, ballot.judge, CASE value.tag WHEN ".' "ballot" then 1 when "rank" then 2 when "points" then 3 end'."
+		");
+
+		$sth->execute(); 
+
+		my %student_round;
+
+		while (my ($id, $tag, $value, $value_student, $student, $entryid, $judge, $bye, $chair, $roundname) = $sth->fetchrow_array() ) { 
+
+			next if $tag eq "rank" && not defined $ranks;
+			next if $tag eq "points" && not defined $points;
+			next if $tag eq "ballot" && not defined $wins;
+			next if $tag eq "points" && $value_student != $student;
+
+			$student_ballots{$student} .= ' ' if $student_ballots{$student} && $tag eq "rank" && ($type eq "speech" || $type eq "wudc" || $type eq "congress");
+			$student_ballots{$student} .= ' ' if $student_ballots{$student} && $tag eq "ballot" && $type ne "speech" && $type ne "wudc" && $type ne "congress";
+
+
+			if ($student_ballots{$student}) { 
+				if ($tag eq "points" && ($type eq "speech" || $type eq "wudc" || $type eq "congress")) { 
+					$student_ballots{$student} .= '/' 
+				} else { 
+					$student_ballots{$student} .= " ";
+				}
+			}
+
+			$student_round{$student} = $roundname;
+
+			if ($tag eq "ballot") { 
+
+				if ($bye) { 
+					$student_ballots{$student} .= "BYE" 
+				} else { 
+					$student_ballots{$student} .= "W" if $value > 0;
+					$student_ballots{$student} .= "L" if $value < 1;
+				}
+
+			} else { 
+				$student_ballots{$student} .= $value;
+			}
+
+		}
+
+		my ($students_ref, $tbs_ref, $desc_ref, $noshow_ref, $meh, $long_desc_ref, $novice_ref, $name_ref, $code_ref, $school_ref) = $m->comp("/tabbing/results/order_speakers.mas", round => $round);
+
+		my $tabular = "\\begin{tabular}{p{.25in}p{1.75in}p{1.5in}";
+
+		my $ballot_space = 3.0;
+
+		foreach my $key (keys %{$desc_ref}) {
+			$tabular .= "p{.28in}";
+			$ballot_space -= .38;
+		}   
+
+		$tabular .= "p{".$ballot_space."in}}\n";
+
+		print TEXOUT $tabular;
+		print TEXOUT "\\rowcolor[rgb]{1,.95,.66}\[5.5pt\]\[5.5pt\]\n";
+		print TEXOUT "\\noindent\n";
+
+		print TEXOUT " & {\\bf Name} & {\\bf Institution } ";
+
+		foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 
+			print TEXOUT " & {\\bf ".${$desc_ref}{$key}." } ";
+		}
+
+		print TEXOUT " & {\\bf Raw Scores} \n";
+
+		print TEXOUT "\\end{tabular}\n";
+		print TEXOUT "\\newline\n";
+
+		my $count = 1;
+		my $switch;
+
+		if ($students_ref) { 
+
+			foreach my $key (sort {$a <=> $b} keys %{$students_ref}) { 
+
+				my $tie++ if scalar @{${$students_ref}{$key}} > 1;
+
+				foreach my $student_id (@{${$students_ref}{$key}}) { 
+
+					print TEXOUT $tabular;
+
+					print TEXOUT "\\rowcolor[rgb]{.84,.89,.94}\[5.5pt\]\[5.5pt\]\n" if ($switch++ % 2);
+
+					print TEXOUT $key;
+					print TEXOUT " -T" if $tie;
+					print TEXOUT " & ";
+
+					print TEXOUT Tab::texify(${$name_ref}{$student_id});
+					print TEXOUT " (N) " if ${$novice_ref}{$student_id} && $novice ne "none";
+					print TEXOUT " & ";
+
+					print TEXOUT "\\truncate{1.5in}{".Tab::texify($school_name{${$school_ref}{$student_id}})."} & ";
+
+					foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 
+
+						my $value = ${$tbs_ref}{$student_id."-".$key};
+						$value = sprintf("%.2f", $value);
+						$value =~ s/\.(?:|.*[^0]\K)0*\z//;
+
+						print TEXOUT Tab::texify($value)." & "
+					}
+
+
+					print TEXOUT "{\\footnotesize ".Tab::texify($student_ballots{$student_id})."} ";
+					
+					print TEXOUT "\\end{tabular}\n";
+					print TEXOUT "\\newline\n";
+
+				} 
+
+			}
+
+		}
+
+		print TEXOUT "\\pagebreak\n";
+
+	}
+
+	close TEXOUT;
+    $m->comp("/funclib/printout.mas", filename => $filename, tail => 1 );
+
+</%init>
+
