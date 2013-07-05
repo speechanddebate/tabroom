@@ -1,0 +1,234 @@
+<%args>
+   $account
+   $session
+   $tourn_id
+   $tourn => undef
+</%args>
+
+<%init>
+
+	my $now = DateTime->now;
+	my $tz = $account->tz if $account->tz;
+	$tz = "UTC" unless $tz;
+	print "Tourn_id is:".$tourn_id."<br>";
+
+	$now->set_time_zone($tz);
+
+#STEP ONE: IMPORT THE FILE
+
+	my $req = Apache2::Request->new($r);
+	my $xml_file = $req->upload("teamtab");
+	my $xml_filename = $xml_file->tempname;
+
+	my $msg="That's the wrong file -- select the correct file name and try again.";
+	if ( substr($xml_file, 0, 8) ne "Teams ov" ) {
+		$m->redirect("/user/tourn/tournaman_upload.mhtml?tourn_id=$tourn_id&msg=$msg");
+	}	
+
+	my $webname=$xml_file->filename;
+	print "webname:".$webname."<br>";
+	print "xml_filename:".$xml_filename."<br>";
+
+	`/bin/cp $xml_filename /tmp/keeper.xml`;
+	`perl -pi -e s/'&'/'&amp;'/g  $xml_filename`;
+
+	open my $fh, '<', $xml_filename or die "error loading";
+	my $data = do { local $/; <$fh> };
+	#print $data;
+	
+#STEP TW0: EXTRACT THE HTML TABLE AND PUT IT IN AN ARRAY
+
+	use HTML::TableExtract;
+
+	my $te = HTML::TableExtract->new( headers => ['Name', 'Institution', 'Speaker 1', 'Speaker 2'] );
+
+	$te->parse($data);
+	#$row->[0] will be Name, [1] will be Institution, [2] will be Speaker 1, [3] will be Speaker 2
+
+#STEP THREE; LOOP EACH ROW, CREATE A HASH OF TABLES AND SAVE SCHOOL IDs AS YOU GO
+
+	my %school; my $x;
+	foreach my $ts ($te->tables) {
+	  #print "Table (", join(',', $ts->coords), "):<br>";
+	  foreach my $row ($ts->rows) {
+	   #print $row->[0]." ". @$row[1]." ". @$row[2]." ". @$row[3]."<br>";
+#	   @$row[0] = $m->comp('/funclib/destupidify.mas', strDummy => @$row[0] );
+	   if (not $school{@$row[1]}) {
+	 	$school{@$row[1]} = SaveSchool(@$row[1], $tourn_id) if @$row[1];
+	   }
+	  }
+	}
+
+#STEP FOUR: GENERATE EVENT and FIND JUDGE GROUP
+	my @judgegroup = Tab::JudgeGroup->search( tourn => $tourn_id );
+	my $event_id = CreateEvent($tourn_id, $judgegroup[0]->id);
+
+#STEP FIVE: ADD THE ENTRIES AND SPEAKERS
+	my $entry; 
+	my $first; 
+	my $last; 
+	my $student;
+	my $schooldummy;
+	
+	print "starting step 5";
+	
+	foreach my $ts ($te->tables) {
+	  foreach my $row ($ts->rows) {
+	
+		$schooldummy = 0;
+		$schooldummy = $school{@$row[1]} if $school{@$row[1]};
+		
+	  	$entry = SaveEntry( $tourn_id, $event_id, $schooldummy, @$row[0] );
+
+		print $entry." ". @$row[0]."<br>";
+		
+		($first, $last) = NameChopper(@$row[2]);
+		$student = SaveStudent( $first, $last, $schooldummy );
+		SaveEntryStudent($entry, $student);
+
+		($first, $last) = NameChopper(@$row[3]);
+		$student = SaveStudent( $first, $last, $schooldummy );
+		SaveEntryStudent($entry, $student);
+
+	  }
+	}
+
+#STEP SIX: YOU'RE DONE; OUTTA HERE
+$tourn=$tourn_id;
+$m->redirect("/user/tourn/tournaman_upload.mhtml?tourn_id=$tourn_id");	
+
+	sub SaveEntryStudent {
+	
+		my ($entry, $student) = @_;
+		
+		Tab::EntryStudent->create( {
+			entry => $entry,
+			student => $student
+		});
+	}
+	
+	sub NameChopper {
+	#takes a string and creates a first and last name based on the first instance of a space
+	
+		my $last;
+		my $first;
+		my $dummy = shift;
+		my $x = index($dummy, " ");
+		my $L = length($dummy);
+		$first = substr($dummy, 0, $x);
+		$last = substr($dummy, $x+1, $L-$x-1);
+		($first, $last);
+		
+	}
+	
+	sub SaveStudent {
+		
+		my ($first, $last, $school) = @_;
+
+		#pull the school to get the chapter ID
+		my $sch = Tab::School->retrieve($school);
+		my $chapter=0;
+		
+		#look for an existing student and return the id if you find one
+		if ($sch) {
+			$chapter = $sch->chapter if $sch;
+			my @student = Tab::Student->search( chapter => $sch->chapter, first => $first, last => $last );
+			if (scalar(@student) == 1) {return $student[0]->id;}
+		}
+			
+		#didn't find one, so create a new one
+		my $entryobject = Tab::Student->create( {
+			first => $first,
+			last => $last,
+			chapter => $chapter
+		});
+		
+		return $entryobject->id;
+		
+	}
+	
+	sub SaveEntry {
+
+		my ($tourn_id, $event_id, $school_id, $entry_name) = @_;
+
+		my $entryobject = Tab::Entry->create( {
+			tourn => $tourn_id,
+			school => $school_id,
+			event => $event_id,
+			code => $entry_name,
+			name => $entry_name
+		});
+		
+
+		return $entryobject->id;
+
+	}
+	
+	sub CreateEvent {
+
+		my ($tourn_id, $judge_group_id) = @_;
+
+		my $eventobject = Tab::Event->create( {
+			tourn => $tourn_id,
+			name => "Open Parliamentary Debate",
+			type => "wudc",
+			judge_group => $judge_group_id,
+			abbr => "OPD"
+		});
+
+		#publish the field report
+		Tab::EventSetting->create( {
+			event => $eventobject->id,
+			tag => "field_report",
+			value => 1
+		});
+
+		#set published to true
+		Tab::EventSetting->create( {
+			event => $eventobject->id,
+			tag => "results_published",
+			value => 1
+		});
+		
+		#set max entries to 2
+		Tab::EventSetting->create( {
+			event => $eventobject->id,
+			tag => "max_entry",
+			value => 2
+		});
+
+		return $eventobject->id;
+
+	}
+
+	sub SaveSchool {
+		#Adds the school to the database and returns new iTab record ID
+		my ($schoolname, $tourn_id) = @_;
+
+		my $newschool = Tab::School->create({
+			chapter => GetChapterID($schoolname),
+			name => $schoolname,
+			tourn => $tourn_id,
+			code => $schoolname
+		});
+	  
+		return $newschool->id;
+	}
+	
+	sub GetChapterID {
+	 
+		my ($schoolname) = @_;
+
+		my @chapters = Tab::Chapter->search( name => $schoolname);
+		
+		my $chapter; $chapter=0;
+		
+		foreach my $candidate (@chapters) {
+			next if $chapter;
+			$chapter=$candidate->id;	
+		}
+
+		return $chapter;
+	}
+
+</%init>
