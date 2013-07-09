@@ -2,6 +2,7 @@
 	$tourn
 	$event_id
 	$result_type
+	$limit => undef
 	$publish => undef
 </%args>
 <%init>
@@ -14,6 +15,7 @@
 
 	my $label = "Prelim Seeds" if ($result_type eq "prelim_seed");
 	$label = "Final Places" if ($result_type eq "final");
+	$label = "Speaker Awards" if ($result_type eq "speakers");
 
 	Tab::ResultValue->set_sql( rm_label => "
 		delete result_value.*
@@ -80,7 +82,6 @@
 
 		my $rank = 1;
 
-
 		Tab::ResultValue->sql_rm_label->execute( $event->id, $label );
 		Tab::Result->sql_rm_label->execute( $event->id, $label );
 		Tab::ResultSet->sql_rm_label->execute( $event->id, $label );
@@ -94,157 +95,307 @@
 
 		my %prelim_seed;
 
-		my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $tier_dir, $panrank_ref, $panletter_ref, $long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $last_prelim);
-		my %entry_ballots = $m->comp("/funclib/round_ballot_string.mas", round => $last_prelim);
+		if ($result_type eq "speakers") { 
 
-		foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+			my %student_ballots = (); 
 
-			my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
+			my $tb_set_id = $event->setting("speaker_tbset");
+			my $tb_set = Tab::TiebreakSet->retrieve($tb_set_id) if $tb_set_id;
+			unless ($tb_set) {   
+				my $err = "Event ".$event->name." does not have a speaker awards tiebreaker set applied to it.  Please pick one and try again";
+				$m->redirect("/setup/event.tabbing.mhtml?event_id=".$event->id."&err=$err");
+			}   
 
-			my $park;
+			my $points;
+			my $ranks;
+			my $wins;
 
-			foreach my $entry (@{${$entries_ref}{$key}}) {
+			foreach my $tb ($tb_set->tiebreaks) { 
+				$ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals");
+				$wins++ if ($tb->name eq "opp_wins" || $tb->name eq "winloss");
+				$points++ if ($tb->name eq "points" || $tb->name eq "competition" || $tb->name eq "opp_points");
+			}   
 
-				$prelim_seed{$entry} = $rank;
-				next unless $result_type eq "prelim_seed"; 
-				next if $used{$entry}++;
+			my $type = $event->type;
 
-				$park++;
+			if ($last_prelim) { 
 
-				my $key_value = $key;
-				$key_value .= "-T" if $tie;
+				my $dbh = Tab::DBI->db_Main();
 
-				my $result = Tab::Result->create({
-					entry => $entry,
-					rank => $rank,
-					result_set => $set->id
-				});
+				my $sth = $dbh->prepare("
+					select value.id, value.tag, value.value, value.student, student.id, ballot.entry, ballot.judge, ballot.bye, ballot.chair, round.name
+					from ballot_value value, ballot, panel, round, entry_student, student
+					where value.ballot = ballot.id
+					and ballot.panel = panel.id
+					and panel.round = round.id
+					and round.name <= ".$last_prelim->name."
+					and round.event = ".$event->id."
+					and ballot.entry = entry_student.entry
+					and entry_student.student = student.id
+					order by round.name, ballot.entry, ballot.chair, ballot.judge, CASE value.tag WHEN ".' "ballot" then 1 when "rank" then 2 when "points" then 3 end'."
+				");
 
-				my $priority;
+				$sth->execute(); 
 
-				Tab::ResultValue->create({
-					tag => "Seed",
-					long_tag => "Ranking Order Overall",
-					result => $result->id,
-					value => $key_value,
-					priority => 0,
-					sort_desc => 0
-				});
+				my %student_round;
 
-				foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+				while (my ($id, $tag, $value, $value_student, $student, $entryid, $judge, $bye, $chair, $roundname) = $sth->fetchrow_array() ) { 
 
-					my $tag = ${$desc_ref}{$key};
-					my $long_tag = ${$long_desc_ref}{$key};
-					my $sort_desc = 0 if ${$tier_dir}{$key} eq "up";
-					$sort_desc = 1 if ${$tier_dir}{$key} eq "down";
+					next if $tag eq "rank" && not defined $ranks;
+					next if $tag eq "points" && not defined $points;
+					next if $tag eq "ballot" && not defined $wins;
+					next if $tag eq "points" && $value_student != $student;
 
-					Tab::ResultValue->create({
-						tag => $tag,
-						long_tag => $long_tag,
-						result => $result->id,
-						value => ${$tbs_ref}{$entry."-".$key},
-						priority => $key,
-						sort_desc => $sort_desc
-					});
+					$student_ballots{$student} .= ' ' if $student_ballots{$student} && $tag eq "rank" && ($type eq "speech" || $type eq "wudc" || $type eq "congress");
+					$student_ballots{$student} .= ' ' if $student_ballots{$student} && $tag eq "ballot" && $type ne "speech" && $type ne "wudc" && $type ne "congress";
 
-				}
+					if ($student_ballots{$student}) {
+						$student_ballots{$student} .= " ";
+						$student_ballots{$student} .= "\n\n" if $roundname != $student_round{$student};
+					}
 
-				Tab::ResultValue->create({
-					tag => "Ballots",
-					long_tag => "Unadjusted Raw Scores",
-					result => $result->id,
-					value => $entry_ballots{$entry},
-					no_sort => 1
-				});
+					$student_round{$student} = $roundname;
 
-			}
+					if ($tag eq "ballot") {
 
-			$rank += $park;
-
-		}
-
-		if ($result_type eq "final") { 
-		
-			undef $rank;
-		
-			foreach my $round ($final, @elims, $last_prelim) {
-
-				next unless $round;
-				my $type = $round->type;
-				my $label = substr($round->label, 0, 8); 
-
-
-				my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $tier_dir, $panrank_ref, $panletter_ref, $long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $round);
-				my %entry_ballots = $m->comp("/funclib/round_ballot_string.mas", round => $round);
-
-				foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) { 
-
-					my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
-
-					@{${$entries_ref}{$key}} = sort {$prelim_seed{$a} <=> $prelim_seed{$b}} @{${$entries_ref}{$key}};
-
-					foreach my $entry (@{${$entries_ref}{$key}}) {
-
-						next if $used{$entry}++;
-						$rank++;
-
-						my $priority;
-
-						my $key_value = Lingua::EN::Numbers::Ordinate::ordinate($key) if $type eq "final";
-						$key_value .= "-T" if $tie && $type eq "final";
-
-						$key_value = $label if $type eq "elim";
-						$key_value = "Prelim" if $type ne "elim" && $type ne "final";
-
-						my $result = Tab::Result->create({
-							entry => $entry,
-							rank => $rank,
-							result_set => $set->id
-						});
-
-						Tab::ResultValue->create({
-							tag => "Place",
-							long_tag => "Overall Final Placement",
-							result => $result->id,
-							value => $key_value,
-							priority => 0,
-							sort_desc => 0
-						});
-
-						foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
-						
-							next if ($type eq "elim" || $type eq "final") && $event_type ne "speech" && $event_type ne "congress";
-
-							my $tag = ${$desc_ref}{$key};
-							my $long_tag = ${$long_desc_ref}{$key};
-							my $sort_desc = 0 if ${$tier_dir}{$key} eq "up";
-							$sort_desc = 1 if ${$tier_dir}{$key} eq "down";
-
-							Tab::ResultValue->create({
-								tag => $tag,
-								long_tag => $long_tag,
-								result => $result->id,
-								value => ${$tbs_ref}{$entry."-".$key},
-								priority => $key,
-								sort_desc => $sort_desc
-							});
-
+						if ($bye) {
+							$student_ballots{$student} .= "BYE"
+						} else {
+							$student_ballots{$student} .= "W" if $value > 0;
+							$student_ballots{$student} .= "L" if $value < 1;
 						}
 
-						Tab::ResultValue->create({
-							tag => "Ballots",
-							long_tag => "Unadjusted Raw Scores",
-							result => $result->id,
-							value => $entry_ballots{$entry},
-							no_sort => 1
-						});
-
+					} else {
+						$student_ballots{$student} .= $value;
 					}
 
 				}
 
 			}
 
+			my ($students_ref, $tbs_ref, $desc_ref, $noshow_ref, $tier_dir, $long_desc_ref, $novice_ref, $name_ref, $code_ref, $school_ref, $entry_ref) = $m->comp("/tabbing/results/order_speakers.mas", round => $last_prelim);
+
+			foreach my $key (sort {$a <=> $b} keys %{$students_ref}) {
+
+				
+				next if $limit && $key > $limit;
+
+				my $tie++ if scalar @{${$students_ref}{$key}} > 1;
+
+				my $park;
+
+				foreach my $student (@{${$students_ref}{$key}}) {
+				
+					$prelim_seed{$student} = $rank;
+
+					$park++;
+
+					my $key_value = $key;
+					$key_value .= "-T" if $tie;
+
+					my $result = Tab::Result->create({
+						student    => $student,
+						entry      => ${$entry_ref}{$student},
+						rank       => $rank,
+						result_set => $set->id
+					});
+
+					my $priority;
+
+					Tab::ResultValue->create({
+						tag       => "Order",
+						long_tag  => "Speaking Order",
+						result    => $result->id,
+						value     => $key_value,
+						priority  => 0,
+						sort_desc => 0
+					});
+
+					foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+
+						my $tag = ${$desc_ref}{$key};
+						my $long_tag = ${$long_desc_ref}{$key};
+						my $sort_desc = 0 if ${$tier_dir}{$key} eq "up";
+						$sort_desc = 1 if ${$tier_dir}{$key} eq "down";
+
+						Tab::ResultValue->create({
+							tag       => $tag,
+							long_tag  => $long_tag,
+							result    => $result->id,
+							value     => ${$tbs_ref}{$student."-".$key},
+							priority  => $key,
+							sort_desc => $sort_desc
+						});
+
+					}
+
+					Tab::ResultValue->create({
+						tag      => "Ballots",
+						long_tag => "Unadjusted Raw Scores",
+						result   => $result->id,
+						value    => $student_ballots{$student},
+						no_sort  => 1
+					});
+
+				}
+
+				$rank += $park;
+
+			}
+
+		} else { 
+
+			my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $tier_dir, $panrank_ref, $panletter_ref, $long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $last_prelim);
+			my %entry_ballots = $m->comp("/funclib/round_ballot_string.mas", round => $last_prelim);
+
+			foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+
+				my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
+
+				my $park;
+
+				foreach my $entry (@{${$entries_ref}{$key}}) {
+
+					$prelim_seed{$entry} = $rank;
+					next unless $result_type eq "prelim_seed"; 
+					next if $used{$entry}++;
+
+					$park++;
+
+					my $key_value = $key;
+					$key_value .= "-T" if $tie;
+
+					my $result = Tab::Result->create({
+						entry => $entry,
+						rank => $rank,
+						result_set => $set->id
+					});
+
+					my $priority;
+
+					Tab::ResultValue->create({
+						tag => "Seed",
+						long_tag => "Ranking Order Overall",
+						result => $result->id,
+						value => $key_value,
+						priority => 0,
+						sort_desc => 0
+					});
+
+					foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+
+						my $tag = ${$desc_ref}{$key};
+						my $long_tag = ${$long_desc_ref}{$key};
+						my $sort_desc = 0 if ${$tier_dir}{$key} eq "up";
+						$sort_desc = 1 if ${$tier_dir}{$key} eq "down";
+
+						Tab::ResultValue->create({
+							tag => $tag,
+							long_tag => $long_tag,
+							result => $result->id,
+							value => ${$tbs_ref}{$entry."-".$key},
+							priority => $key,
+							sort_desc => $sort_desc
+						});
+
+					}
+
+					Tab::ResultValue->create({
+						tag => "Ballots",
+						long_tag => "Unadjusted Raw Scores",
+						result => $result->id,
+						value => $entry_ballots{$entry},
+						no_sort => 1
+					});
+
+				}
+
+				$rank += $park;
+
+			}
+
+			if ($result_type eq "final") { 
+			
+				undef $rank;
+			
+				foreach my $round ($final, @elims, $last_prelim) {
+
+					next unless $round;
+					my $type = $round->type;
+					my $label = substr($round->label, 0, 8); 
+
+
+					my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $tier_dir, $panrank_ref, $panletter_ref, $long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $round);
+					my %entry_ballots = $m->comp("/funclib/round_ballot_string.mas", round => $round);
+
+					foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) { 
+
+						my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
+
+						@{${$entries_ref}{$key}} = sort {$prelim_seed{$a} <=> $prelim_seed{$b}} @{${$entries_ref}{$key}};
+
+						foreach my $entry (@{${$entries_ref}{$key}}) {
+
+							next if $used{$entry}++;
+							$rank++;
+
+							my $priority;
+
+							my $key_value = Lingua::EN::Numbers::Ordinate::ordinate($key) if $type eq "final";
+							$key_value .= "-T" if $tie && $type eq "final";
+
+							$key_value = $label if $type eq "elim";
+							$key_value = "Prelim" if $type ne "elim" && $type ne "final";
+
+							my $result = Tab::Result->create({
+								entry => $entry,
+								rank => $rank,
+								result_set => $set->id
+							});
+
+							Tab::ResultValue->create({
+								tag => "Place",
+								long_tag => "Overall Final Placement",
+								result => $result->id,
+								value => $key_value,
+								priority => 0,
+								sort_desc => 0
+							});
+
+							foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+							
+								next if ($type eq "elim" || $type eq "final") && $event_type ne "speech" && $event_type ne "congress";
+
+								my $tag = ${$desc_ref}{$key};
+								my $long_tag = ${$long_desc_ref}{$key};
+								my $sort_desc = 0 if ${$tier_dir}{$key} eq "up";
+								$sort_desc = 1 if ${$tier_dir}{$key} eq "down";
+
+								Tab::ResultValue->create({
+									tag => $tag,
+									long_tag => $long_tag,
+									result => $result->id,
+									value => ${$tbs_ref}{$entry."-".$key},
+									priority => $key,
+									sort_desc => $sort_desc
+								});
+
+							}
+
+							Tab::ResultValue->create({
+								tag => "Ballots",
+								long_tag => "Unadjusted Raw Scores",
+								result => $result->id,
+								value => $entry_ballots{$entry},
+								no_sort => 1
+							});
+
+						}
+
+					}
+
+				}
+			}
 		}
 
 		Tab::Result->set_sql( update_percentile => "update result set percentile = ( ( (? - rank + 1) / ? ) * 1000) where result_set = ? ");
