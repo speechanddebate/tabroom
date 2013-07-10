@@ -50,11 +50,18 @@ Tab::Circuit->set_sql( by_tourn => "select distinct circuit.*
 									where circuit.id = tourn_circuit.circuit
 									and tourn_circuit.tourn = ?
 									order by circuit.name");
-
 sub location { 
 	my $self = shift;
 	my $location = $self->state."/" if $self->state;
 	return $location.$self->country;
+}
+
+sub location_name { 
+	my $self = shift;
+	my $state = $m->comp("/funclib/state_translate.mas", state => $self->state) if $self->state;
+	my $country = $m->comp("/funclib/country_translate.mas", country => $self->country) if $self->country;
+	$country = $state.", ".$country if $state;
+	return $country;
 }
 
 sub setting {
