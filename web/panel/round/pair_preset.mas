@@ -14,42 +14,30 @@
 
 	my $dbh = Tab::DBI->db_Main();
 
-	my $sth = $dbh->prepare('
-		select distinct entry.id, opponent.id, entry.pair_seed, school.region, school.id, opponent.school, ballot.side
-		from entry, entry as opponent, ballot, panel, round, ballot as opp_ballot, school
+	my $entry_sth = $dbh->prepare('
+		select distinct entry.id, entry.pair_seed, school.region, school.id
+		from entry, school
 		where entry.event = '.$event->id.'
 		and entry.school = school.id
-		and entry.id = ballot.entry
-		and ballot.panel = panel.id
-		and panel.round = round.id
-		and round.name < '.$round->name.'
-		and opp_ballot.panel = ballot.panel
-		and opp_ballot.entry = opponent.id
-		and opponent.id != entry.id
-		and panel.bye != 1
-		and ballot.bye != 1
 		and entry.dq = 0
 		and entry.dropped = 0
 		and entry.waitlist = 0
 		and entry.unconfirmed = 0
 	');
 
-	$sth->execute();
-
 	my @entries;
-	my @seeds;
 
 	my %entry_school;
 	my %entry_region;
-	my %entry_seed;
-	my %entry_hits;
-	my %entry_opp_side;
-	my %entry_school_hit;
-
 	my %school_size;
+
+	my %entry_seed;
+	my @seeds;
 	my $max_seed;
 
-	while( my ($entry_id, $opp_id, $seed, $region, $school, $opp_school, $side) = $sth->fetchrow_array() ) {
+	$entry_sth->execute();
+
+	while( my ($entry_id, $seed, $region, $school) = $entry_sth->fetchrow_array() ) {
 
 		push @entries, $entry_id;
 
@@ -60,23 +48,44 @@
 		$entry_seed{$entry_id} = $seed;
 		$max_seed = $seed if $seed > $max_seed;
 		push @seeds, $seed;
+	}
+
+	my $ballot_sth = $dbh->prepare('
+		select distinct entry.id, opponent.id, opponent.school, ballot.side
+		from entry, entry as opponent, ballot, panel, round, ballot as opp_ballot
+		where entry.event = '.$event->id.'
+		and entry.id = ballot.entry
+		and ballot.panel = panel.id
+		and panel.round = round.id
+		and round.name < '.$round->name.'
+		and opp_ballot.panel = ballot.panel
+		and opp_ballot.entry = opponent.id
+		and opponent.id != entry.id
+		and panel.bye != 1
+		and ballot.bye != 1
+	');
+
+	$ballot_sth->execute();
+
+	my %entry_hits;
+	my %entry_opp_side;
+	my %entry_school_hit;
+
+	while( my ($entry_id, $opp_id, $seed, $region, $school, $opp_school, $side) = $ballot_sth->fetchrow_array() ) {
 
 		$entry_hits{$entry_id."-".$opp_id}++;
 		$entry_opp_side{$entry_id."-".$opp_id."-".$side}++ unless $no_side_constraints;
 		$entry_school_hit{$entry_id."-".$opp_school}++;
-
 	}
 
 	my $sides_sth = $dbh->prepare('
 		select distinct ballot.entry, ballot.side, ballot.bye, panel.bye
-		from ballot, panel, entry
+		from ballot, panel, entry, round
 		where ballot.entry = entry.id
 		and entry.event = '.$event->id.'
 		and ballot.panel = panel.id
-		and entry.dq = 0
-		and entry.dropped = 0
-		and entry.waitlist = 0
-		and entry.unconfirmed = 0
+		and panel.round = round.id
+		and round.name < '.$round->name.'
 	');
 
 	$sides_sth->execute();
@@ -157,14 +166,18 @@
 					}
 
 					$bye = shift @entries; 
-					push @tried, $bye;
-					undef $bye if $entry_byes{$bye} >= $lap;
+
+					if ($entry_byes{$bye} >= $lap) { 
+						push @tried, $bye;
+						undef $bye;
+					}
 
 				}
 
-				@entries = @tried;
-
+				push (@entries, @tried);
 			}
+
+			Tab::debuglog("I have chosen a bye $bye");
 
 			my @due_aff;
 			my @due_neg;
@@ -186,6 +199,8 @@
 				}
 			}
 
+			Tab::debuglog("I have ".scalar @due_aff." due aff, ".scalar @due_neg." due neg and ".scalar @due_whatever." due whatever");
+
 			while (@due_whatever) { 
 				
 				# Randomly sprinkle the whatevers until both sides are even.
@@ -201,8 +216,21 @@
 				} else { 
 					push @due_aff, $pull;
 				}
-
 			}
+
+			while (scalar @due_aff > scalar @due_neg) { 
+				#Shift some poor suckers over
+				push @due_neg, shift @due_aff;
+				Tab::debuglog("Shoved someone over neg because of imbalance.  Oh well");
+			}
+
+			while (scalar @due_aff < scalar @due_neg) { 
+				#Shift some poor suckers over
+				push @due_aff, shift @due_neg;
+				Tab::debuglog("Shoved someone over aff because of imbalance.  Oh well");
+			}
+
+			Tab::debuglog("I have ".scalar @due_aff." due aff, ".scalar @due_neg." due neg and ".scalar @due_whatever." due whatever");
 
 			my $counter = 1;
 
@@ -316,8 +344,6 @@
 
 					if ($swap_panel) { 
 
-						Tab::debuglog("Swapping $panel_key with $swap_panel for a $current_diff improvement in score");
-
 						my @new_1;
 						my @new_2;
 
@@ -383,8 +409,6 @@
 	foreach my $key (@keys) { 
 					
 		my $score = score_panel(\@{$panels{$key}}, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit);
-
-#		Tab::debuglog("Saving panel $letter with score $score");
 
 		my $panel = Tab::Panel->create({
 			round => $round->id,
