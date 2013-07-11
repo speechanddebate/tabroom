@@ -45,9 +45,7 @@ sub setting {
 
 	}
 
-    if ($value && ($tag ne "tab_rating_priority" || $blob)) {
-
-		Tab::debuglog("I am value $value and tag $tag and blob $blob");
+    if (defined $value && ($tag ne "tab_rating_priority" || $blob)) {
 
 		if (@existing) {
 			
