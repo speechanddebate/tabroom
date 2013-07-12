@@ -1,19 +1,22 @@
 <%args>
-	$round
+	$round => undef
+	$round_id => undef
+	$attempt => undef
 </%args>
 <%perl>
 
 	use POSIX;
 	use List::Util 'shuffle';
 
+	$round = Tab::Round->retrieve($round_id) unless $round;
+
 	my $event = $round->event;
-	my $apda++ if $event->setting("apda");
 	my $no_side_constraints++ if $event->setting("no_side_constraints");
 
 	my $dbh = Tab::DBI->db_Main();
 
 	my $entry_sth = $dbh->prepare('
-		select distinct entry.id, entry.pair_seed, school.region, school.id
+		select distinct entry.id, entry.pair_seed, school.region, school.id, entry.code
 		from entry, school
 		where entry.event = '.$event->id.'
 		and entry.school = school.id
@@ -30,12 +33,22 @@
 	my %school_size;
 
 	my %entry_seed;
+	my %entry_code;
+	my %seed_count;
+	my %entry_needs;
+	my %needs_print;
 	my @seeds;
 	my $max_seed;
 
+	Tab::Round->set_sql(reset_prelim => 'update round set type="preset" where type="prelim" and event = ?');
+
+	Tab::Round->sql_reset_prelim->execute($event->id);
+
 	$entry_sth->execute();
 
-	while( my ($entry_id, $seed, $region, $school) = $entry_sth->fetchrow_array() ) {
+	while( my ($entry_id, $seed, $region, $school, $code) = $entry_sth->fetchrow_array() ) {
+
+		next unless $entry_id;
 
 		push @entries, $entry_id;
 
@@ -44,6 +57,8 @@
 		$school_size{$school}++;
 
 		$entry_seed{$entry_id} = $seed;
+		$entry_code{$entry_id} = $code;
+		$seed_count{$seed}++;
 		$max_seed = $seed if $seed > $max_seed;
 		push @seeds, $seed;
 	}
@@ -55,7 +70,8 @@
 		and entry.id = ballot.entry
 		and ballot.panel = panel.id
 		and panel.round = round.id
-		and round.name < '.$round->name.'
+		and round.type = "preset"
+		and round.id != '.$round->id.'
 		and opp_ballot.panel = ballot.panel
 		and opp_ballot.entry = opponent.id
 		and opponent.id != entry.id
@@ -66,6 +82,7 @@
 	$ballot_sth->execute();
 
 	my %entry_hits;
+	my %entry_opps;
 	my %entry_opp_side;
 	my %entry_school_hit;
 
@@ -73,16 +90,17 @@
 		$entry_hits{$entry_id."-".$opp_id}++;
 		$entry_opp_side{$entry_id."-".$opp_id."-".$side}++ unless $no_side_constraints;
 		$entry_school_hit{$entry_id."-".$opp_school}++;
+		push @{$entry_opps{$entry_id}}, $opp_id;
 	}
 
 	my $sides_sth = $dbh->prepare('
-		select distinct ballot.entry, ballot.side, ballot.bye, panel.bye
+		select distinct ballot.entry, ballot.side, ballot.bye, panel.bye, round.name
 		from ballot, panel, entry, round
 		where ballot.entry = entry.id
 		and entry.event = '.$event->id.'
 		and ballot.panel = panel.id
 		and panel.round = round.id
-		and round.name < '.$round->name.'
+		and round.type = "preset"
 	');
 
 	$sides_sth->execute();
@@ -93,9 +111,20 @@
 
 	unless ($no_side_constraints) { 
 
-		while (my ($entry_id, $side, $bye, $panel_bye) = $sides_sth->fetchrow_array() ) { 
+		my $round_care;
+
+		if ($round->name % 2) { 
+			#Odd numbered round.  Care about the round ahead
+			$round_care = $round->name + 1;
+		} else { 
+			$round_care = $round->name - 1;
+		}
+
+		while (my ($entry_id, $side, $bye, $panel_bye, $name) = $sides_sth->fetchrow_array() ) { 
+
 			$entry_byes{$entry_id}++ if $bye || $panel_bye;
 			next if $bye || $panel_bye;
+			next if $name != $round_care;
 			$entry_affs{$entry_id}++ if $side == 1;
 			$entry_negs{$entry_id}++ if $side == 2;
 		}
@@ -111,11 +140,13 @@
 	my %e_seen = (); 
 	@entries = grep { ! $e_seen{$_} ++ } @entries;   #uniq
 
-	my $seed_presets++ if $event->setting("seed_presets");
+	my $seed_presets = $event->setting("seed_presets");
+
 	my $round_robin++ if $event->setting("round_robin");
 	my $region_constraints++ if $event->setting("region_constraints");
 
-	my %panels = ();
+	my %final_panels = ();
+	my $best_score;
 	my $bye;
 
 	if ($round_robin) { 
@@ -140,17 +171,74 @@
 
 	} else { 
 
-		@entries = shuffle(@entries);
+		foreach my $pass (1 .. 5) { 
 
-		if ($seed_presets && not defined $apda) { 
+			Tab::debuglog("Pass is $pass");
+			my %panels;
 
-		} else { 
+			@entries = shuffle(@entries);
+			@entries = sort {$entry_school{$b} <=> $entry_school{$a}} @entries;
+			@entries = sort {$school_size{$entry_school{$b}} <=> $school_size{$entry_school{$a}}} @entries;
 
+			my %bye_seed;
+
+			if ($seed_presets eq "all") {
+				foreach my $entry (@entries) { 
+					SEED:
+					foreach my $seed (@seeds) { 
+						foreach my $opp (@{$entry_opps{$entry}}) { 
+							next SEED if $seed eq $entry_seed{$opp};
+						}
+						$entry_needs{$entry."-".$seed}++;
+						$needs_print{$entry} .= " ".$seed;
+					}
+				}
+
+				my $top_count;
+
+				foreach my $seed (@seeds) { 
+					$top_count = $seed_count{$seed} if $seed_count{$seed} > $top_count;
+				}
+
+				foreach my $seed (@seeds) { 
+					$bye_seed{$seed}++ if $seed_count{$seed} == $top_count;
+				}
+
+			}
+
+			if ($seed_presets eq "inverse") {
+
+				foreach my $entry (@entries) { 
+
+					my @seeds = (2,3) if ($entry_seed{$entry} == 1 || $entry_seed{$entry} == 4);
+					@seeds = (1,4) if ($entry_seed{$entry} == 2 || $entry_seed{$entry} == 3);
+
+					SEED:
+					foreach my $seed (@seeds) { 
+						foreach my $opp (@{$entry_opps{$entry}}) { 
+							next SEED if $seed eq $entry_seed{$opp};
+						}
+						$entry_needs{$entry."-".$seed}++;
+						$needs_print{$entry} .= " ".$seed;
+					}
+				}
+
+				if ( ($seed_count{1} + $seed_count{4}) < ($seed_count{2} + $seed_count{3}) ) {
+					$bye_seed{2}++;
+					$bye_seed{3}++;
+				}
+
+				if ( ($seed_count{1} + $seed_count{4}) > ($seed_count{2} + $seed_count{3}) ) {
+					$bye_seed{1}++;
+					$bye_seed{4}++;
+				}
+
+			}
 
 			if ((scalar @entries) % 2) { 
 
-				# Pull a bye from whatever entry randomly shuffled to the top
-				# from among those who have not had a bye
+				# Pull a bye from whatever entry randomly shuffled to the top from
+				# among those who have not had a bye
 
 				my @tried;
 				my $lap = 1;
@@ -162,18 +250,31 @@
 						@entries = @tried;
 					}
 
-					$bye = shift @entries; 
+					my $test = shift @entries;
 
-					if ($entry_byes{$bye} >= $lap) { 
-						push @tried, $bye;
-						undef $bye;
+					if (@entries) { 
+
+						my $nope;
+
+						if ($entry_byes{$test} >= $lap) { 
+							push @tried, $test;
+							$nope++;
+						}
+
+						if (keys %bye_seed) { 
+							unless ($bye_seed{$entry_seed{$test}}) { 
+								push @tried, $test;
+								$nope++;
+							}
+						}
+
+						$bye = $test unless $nope;
 					}
 
 				}
 
 				push (@entries, @tried);
 			}
-
 
 			my @due_aff;
 			my @due_neg;
@@ -183,12 +284,17 @@
 
 			foreach my $entry (@entries) { 
 
+				next if $entry == $bye;
+
 				if ($entry_negs{$entry} > $entry_affs{$entry}) { 
 					push @due_aff, $entry;
 					$due{$entry} = 1;
 				} elsif ($entry_negs{$entry} < $entry_affs{$entry}) { 
 					push @due_neg, $entry;
 					$due{$entry} = 2;
+				} elsif ($seed_presets eq "inverse" &! $entry_byes{$entry}) { 
+					push @due_neg, $entry if $entry_seed{$entry} == 2 || $entry_seed{$entry} == 3;
+					push @due_aff, $entry if $entry_seed{$entry} == 1 || $entry_seed{$entry} == 4;
 				} else { 
 					push @due_whatever, $entry;
 					$due{$entry} = 0;
@@ -196,7 +302,6 @@
 			}
 
 			while (@due_whatever) { 
-				
 				# Randomly sprinkle the whatevers until both sides are even.
 				# We do this now instead of waiting until the end to prevent
 				# the byes from always hitting one another, since if there are
@@ -204,6 +309,7 @@
 				# screwups who don't deserve that kind of consideration.
 
 				my $pull = shift @due_whatever;
+				next if $pull == $bye;
 
 				if (scalar @due_neg < scalar @due_aff) { 
 					push @due_neg, $pull;
@@ -222,17 +328,73 @@
 				push @due_aff, shift @due_neg;
 			}
 
-			my $counter = 1;
+			my $aff_string;
+			my $neg_string;
 
+			foreach my $aff (@due_aff) { 
+				$aff_string .= " ".$entry_code{$aff};
+			}
+
+			foreach my $neg (@due_neg) { 
+				$neg_string .= " ".$entry_code{$neg};
+			}
+
+			my $counter = 1;
 			my @panel_keys;
 
-			if ($apda) { 
+			if ($seed_presets eq "protect") { 
 				@due_aff = sort {$entry_seed{$a} <=> $entry_seed{$b}} @due_aff;
 				@due_neg = sort {$entry_seed{$b} <=> $entry_seed{$a}} @due_neg;
 			}
 
 			foreach my $aff (@due_aff) { 
-				my $neg = shift @due_neg;
+
+				my $neg;
+				if ($needs_print{$aff}) { 
+
+					# This segment manages seeded presets and matches people based
+					# on ideal seeding needs.  Only invoked for inverse & all
+					# seed_protect settings.
+
+					foreach my $debate_me_maybe (@due_neg) { 
+						next unless $entry_needs{$neg."-".$entry_seed{$aff}};
+						next unless $entry_needs{$aff."-".$entry_seed{$neg}};
+						# If we made it this far, WE NEED ONE ANOTHER.  IT IS DESTINY.
+						$neg = $debate_me_maybe;
+						last $debate_me_maybe;
+					}
+
+					# I found no opponent who is not a perfect fit.  So, I cope as
+					# best I can.  Find someone whose need I fit while not fitting
+					# mine, if such exists.	
+
+					unless ($neg) { 
+						foreach my $debate_me_maybe (@due_neg) { 
+							next unless $entry_needs{$neg."-".$entry_seed{$aff}};
+							$neg = $debate_me_maybe;
+							last $debate_me_maybe;
+						}
+					}
+
+					# All right, try the inverse if that didn't work.
+					unless ($neg) { 
+						foreach my $debate_me_maybe (@due_neg) { 
+							next unless $entry_needs{$aff."-".$entry_seed{$neg}};
+							$neg = $debate_me_maybe;
+							last $debate_me_maybe;
+						}
+					}
+
+					# If we're still doomed the next bit will just pick any old
+					# neg.  If this is just because randomization doomed us, the
+					# swapper later will help.
+
+				}
+				
+				unless ($neg) { 
+					$neg = shift @due_neg;
+				}
+
 				push @{$panels{$counter}}, $aff;
 				push @{$panels{$counter}}, $neg;
 				push @panel_keys, $counter++;
@@ -240,23 +402,20 @@
 
 			my $no_improvement = 1;
 
-			foreach my $counter (1 .. 10) {
-
-				my $total;
+			foreach my $counter (1 .. 5) {
 
 				next if $no_improvement == 0;
 				$no_improvement = 0;
 
-				foreach my $panel_key (@panel_keys) {
+				foreach my $panel_key (shuffle @panel_keys) {
 
 					my @panel = @{$panels{$panel_key}};
 
 					my $current_diff;
-					my $swap_panel;
+					my $swap_key;
 					my $swap_cross;
 
-					my $baseline_panel1_score = score_panel(\@panel, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit);
-					
+					my $baseline_panel1_score = score_panel(\@panel, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
 					next if $baseline_panel1_score < 1;
 
 					my $aff1 = shift @panel;
@@ -268,14 +427,14 @@
 						next if $other_key == $panel_key;
 
 						my @panel2 = @{$panels{$other_key}};
-						my $baseline_panel2_score = score_panel(\@panel2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit);
+						my $baseline_panel2_score = score_panel(\@panel2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
 
 						my $aff2 = shift @panel2;
 						my $neg2 = shift @panel2;
 
 						my $dont;
 
-						if ($apda) { 
+						if ($seed_presets eq "protect") { 
 							if ($entry_seed{$aff1} != $entry_seed{$aff2} && $entry_seed{$neg1} != $entry_seed{$neg2}) { 
 								#Cannot swap due to seeding conflicts
 								@panel2 = ($aff2, $neg2);
@@ -288,20 +447,21 @@
 							my @new_1 = ($aff1, $neg2);
 							my @new_2 = ($aff2, $neg1);
 
-							my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit);
-							my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit); 
+							my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+							my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs); 
 
 							my $new_score = $swap_panel1_score + $swap_panel2_score;
 							my $baseline = $baseline_panel1_score + $baseline_panel2_score;
-
 							my $diff = $baseline - $new_score;
 
-							if ( $diff > 0 && $diff > $current_diff) {
+
+							if ( $diff >= 0 && $diff >= $current_diff) {
 								$current_diff = $diff;
-								$swap_panel = $other_key;
+								$swap_key = $other_key;
 								undef $swap_cross;
 								last OTHERPANEL if $new_score == 0;
 							}
+
 						}
 
 						# Attempt various cross side swaps if that makes things better and they're not side constrained.
@@ -313,7 +473,7 @@
 
 							my $dont;
 						
-							if ($apda) { 
+							if ($seed_presets eq "protect") { 
 								if ($entry_seed{$neg2} != $entry_seed{$aff1}) { 
 									#Cannot swap due to seeding conflicts
 									@panel2 = ($aff2, $neg2);
@@ -323,14 +483,17 @@
 
 							unless ($dont) { 
 
-								my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit);
-								my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit); 
+								my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+								my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs); 
 
-								my $diff = $swap_panel1_score + $swap_panel2_score - $baseline_panel1_score - $baseline_panel2_score;
+								my $new_score = $swap_panel1_score + $swap_panel2_score;
+								my $baseline = $baseline_panel1_score + $baseline_panel2_score;
+								my $diff = $baseline - $new_score;
 
-								if ( $diff > 0 && $diff > $current_diff) {
+
+								if ( $diff >= 0 && $diff >= $current_diff) {
 									$current_diff = $diff;
-									$swap_panel = $other_key;
+									$swap_key = $other_key;
 									$swap_cross = 1;
 								}
 							}
@@ -344,7 +507,7 @@
 
 							my $dont;
 
-							if ($apda) { 
+							if ($seed_presets eq "protect") { 
 								if ($entry_seed{$neg1} != $entry_seed{$aff2}) { 
 									#Cannot swap due to seeding conflicts
 									@panel2 = ($aff2, $neg2);
@@ -354,28 +517,30 @@
 
 							unless ($dont) { 
 
-								my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit);
-								my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit); 
+								my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+								my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs); 
 
-								my $diff = $swap_panel1_score + $swap_panel2_score - $baseline_panel1_score - $baseline_panel2_score;
+								my $new_score = $swap_panel1_score + $swap_panel2_score;
+								my $baseline = $baseline_panel1_score + $baseline_panel2_score;
+								my $diff = $baseline - $new_score;
 
-								if ( $diff > 0 && $diff > $current_diff) {
+
+								if ( $diff >= 0 && $diff >= $current_diff) {
 									$current_diff = $diff;
-									$swap_panel = $other_key;
+									$swap_key = $other_key;
 									$swap_cross = 2;
 								}
 							}
 
 						}
-
 					}
 
-					if ($swap_panel) { 
+					if ($swap_key) { 
 
 						my @new_1;
 						my @new_2;
 
-						my @swap_panel = @{$panels{$swap_panel}};
+						my @swap_panel = @{$panels{$swap_key}};
 
 						my $aff2 = shift @swap_panel;
 						my $neg2 = shift @swap_panel;
@@ -392,16 +557,142 @@
 						}
 
 						@{$panels{$panel_key}} = @new_1;
-						@{$panels{$swap_panel}} = @new_2;
+						@{$panels{$swap_key}} = @new_2;
 
 						$no_improvement++;  # Fail
 
 					}
 
 				}
-				
+
+				foreach my $panel_key (shuffle @panel_keys) {
+
+					#Try some triple swaps;
+					my @panel = @{$panels{$panel_key}};
+
+					my $current_diff;
+
+					my $swap_key_1;
+					my $swap_cross_1;
+
+					my $swap_key_2;
+					my $swap_cross_2;
+
+					my $swap_key_3;
+					my $swap_cross_3;
+
+					my $baseline_panel1_score = score_panel(\@panel, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+					next if $baseline_panel1_score < 1;
+
+					my $aff1 = shift @panel;
+					my $neg1 = shift @panel;
+
+					my $aff2;
+					my $neg2;
+
+					my $baseline_panel2_score;
+					my $swapped_panel2_score;
+
+					OTHERPANEL:
+					foreach my $other_key (@panel_keys) {
+
+						next if $other_key == $panel_key;
+
+						my @panel2 = @{$panels{$other_key}};
+						$baseline_panel2_score = score_panel(\@panel2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+
+						$aff2 = shift @panel2;
+						$neg2 = shift @panel2;
+
+						my @new2 = ($aff1, $neg2);
+						$swapped_panel2_score = score_panel(\@new2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+
+						my $diff = $baseline_panel2_score - $swapped_panel2_score;
+
+						if ($diff >= $current_diff) { 
+							$swap_key_2 = $other_key;
+							$current_diff = $diff;
+						}
+					}
+
+					if ($swap_key_2) { 
+
+						undef $current_diff;
+
+						OTHERPANEL:
+						foreach my $other_key (@panel_keys) {
+
+							next if $other_key == $panel_key;
+							next if $other_key == $swap_key_2;
+
+							my @panel3 = @{$panels{$other_key}};
+							my $baseline_panel3_score = score_panel(\@panel3, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+
+							my $aff3 = shift @panel3;
+							my $neg3 = shift @panel3;
+
+							my @new3 = ($aff2, $neg3);
+							my $swapped_panel3_score = score_panel(\@new3, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+
+							my @new1 = ($aff3, $neg1);
+							my $swapped_panel1_score = score_panel(\@new1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+
+							my $baseline = $baseline_panel1_score + $baseline_panel2_score + $baseline_panel3_score;
+							my $swapped = $swapped_panel1_score + $swapped_panel2_score + $swapped_panel3_score;
+
+							my $diff = $baseline - $swapped;
+
+							if ($diff >= $current_diff) { 
+								$swap_key_3 = $other_key;
+								$current_diff = $diff;
+							}
+						}
+					}
+
+					if ($swap_key_2 && $swap_key_3) { 
+
+
+						my @new_1;
+						my @new_2;
+						my @new_3;
+
+						my @swap_2_panel = @{$panels{$swap_key_2}};
+						my @swap_3_panel = @{$panels{$swap_key_3}};
+
+						my $aff2 = shift @swap_2_panel;
+						my $neg2 = shift @swap_2_panel;
+
+						my $aff3 = shift @swap_3_panel;
+						my $neg3 = shift @swap_3_panel;
+
+						@new_1 = ($aff3, $neg1);
+						@new_2 = ($aff1, $neg2);
+						@new_3 = ($aff2, $neg3);
+
+						@{$panels{$panel_key}} = @new_1;
+						@{$panels{$swap_key_2}} = @new_2;
+						@{$panels{$swap_key_3}} = @new_3;
+
+						$no_improvement++;  # Fail
+
+					}
+
+				}
+
 			}
-       
+
+			my $new_score;
+
+			foreach my $panel_key (shuffle @panel_keys) {
+				$new_score += score_panel(\@{$panels{$panel_key}}, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+			}
+
+			if ($new_score < $best_score || not defined $best_score) { 
+				Tab::debuglog("This attempt had score $new_score which is better than prevailing $best_score.  Swapping");
+				%final_panels  = %panels;
+				$best_score = $new_score;
+			}
+
 		}
 
 	}
@@ -432,11 +723,11 @@
 	my $letter = 1;
 	$letter = "A" if $event->setting("panel_labels") eq "letters";
 
-	my @keys = sort {$a <=> $b} keys %panels;
+	my @keys = sort {$a <=> $b} keys %final_panels;
 
 	foreach my $key (@keys) { 
 					
-		my $score = score_panel(\@{$panels{$key}}, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit);
+		my $score = score_panel(\@{$final_panels{$key}}, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
 
 		my $panel = Tab::Panel->create({
 			round => $round->id,
@@ -460,8 +751,8 @@
 			$letter++;
 		}
 
-		my $aff = shift @{$panels{$key}};
-		my $neg = shift @{$panels{$key}};
+		my $aff = shift @{$final_panels{$key}};
+		my $neg = shift @{$final_panels{$key}};
 
 		my $aff_ballot = Tab::Ballot->create({
 			panel => $panel->id,
@@ -499,11 +790,9 @@
 	$round->created($now);
 	$round->update;
 
-	return;
-
     sub score_panel {
 
-        my ($panref, $schref, $hitref, $hit_side_ref, $hit_school_ref) = @_; 
+        my ($panref, $schref, $hitref, $hit_side_ref, $hit_school_ref, $seed_ref, $need_seed_ref) = @_; 
 
 		return unless @{$panref};
 		my $aff = shift @{$panref};
@@ -515,19 +804,22 @@
 
 		if (${$schref}{$neg} == ${$schref}{$aff}) { 
 			# We are from the same school.  Highest penalty.
-			$score += 1000;   
+			$score += 10000;   
 		}   
 
 		if (${$hitref}{$neg} == ${$hitref}{$aff}) { 
 			# We have debated against each other previously
-			$score += 100 * ${$hitref}{$aff."-".$neg};
-			$score += 100 * ${$hitref}{$neg."-".$aff};
+			$score += 1000 * ${$hitref}{$aff."-".$neg};
+			$score += 1000 * ${$hitref}{$neg."-".$aff};
 		}
 
 		if (${$hit_side_ref}{$aff."-".$neg."-1"}) { 
 			# We have debated against each other on this side.
-			$score += 10;   
+			$score += 100;   
 		}   
+
+		$score += 10 unless ${$need_seed_ref}{$aff."-".${$seed_ref}{$neg}};
+		$score += 10 unless ${$need_seed_ref}{$neg."-".${$seed_ref}{$aff}};
 
 		# We have debated against someone else from that same school.  Lowest
 		# penalty.
