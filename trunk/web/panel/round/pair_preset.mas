@@ -9,8 +9,14 @@
 	use List::Util 'shuffle';
 
 	$round = Tab::Round->retrieve($round_id) unless $round;
-
 	my $event = $round->event;
+
+	Tab::Round->set_sql(reset_prelim => 'update round set type="preset" where type="prelim" and event = ?');
+	Tab::Round->sql_reset_prelim->execute($event->id);
+
+	my $round_type = $round->type;
+	my $round_limit = "and round.name < ".$round->name if $round_type eq "highlow" || $round_type eq "highhigh";
+	$round_limit = 'and round.type = "preset"' if $round_type eq "preset";
 	my $no_side_constraints++ if $event->setting("no_side_constraints");
 
 	my $dbh = Tab::DBI->db_Main();
@@ -36,13 +42,11 @@
 	my %entry_code;
 	my %seed_count;
 	my %entry_needs;
+	my %entry_position;
+	my %entry_position_need;
 	my %needs_print;
 	my @seeds;
 	my $max_seed;
-
-	Tab::Round->set_sql(reset_prelim => 'update round set type="preset" where type="prelim" and event = ?');
-
-	Tab::Round->sql_reset_prelim->execute($event->id);
 
 	$entry_sth->execute();
 
@@ -70,7 +74,7 @@
 		and entry.id = ballot.entry
 		and ballot.panel = panel.id
 		and panel.round = round.id
-		and round.type = "preset"
+		'.$round_limit.'
 		and round.id != '.$round->id.'
 		and opp_ballot.panel = ballot.panel
 		and opp_ballot.entry = opponent.id
@@ -100,7 +104,7 @@
 		and entry.event = '.$event->id.'
 		and ballot.panel = panel.id
 		and panel.round = round.id
-		and round.type = "preset"
+		'.$round_limit.'
 	');
 
 	$sides_sth->execute();
@@ -129,9 +133,6 @@
 		}
 
 	}
-
-	my @presets = Tab::Round->search( event => $event->id, type => "preset");
-	push @presets, Tab::Round->search( event => $event->id, type => "prelim");
 
 	my %s_seen = (); 
 	@seeds = grep { ! $s_seen{$_} ++ } @seeds;   #uniq
@@ -169,7 +170,7 @@
 
 	} else { 
 
-		foreach my $pass (1 .. 5) { 
+		foreach my $pass (1) { 
 
 			Tab::debuglog("Pass is $pass");
 			my %panels;
@@ -181,18 +182,32 @@
 			my %bye_seed;
 			my $seed_aim;
 
-			if ($seed_presets eq "balanced") {
-				
-				my $low_seed;
-				my $high_seed;
+			if ($seed_presets eq "balance") { 
 
+				@entries = sort {$entry_seed{$a} <=> $entry_seed{$b}} @entries;
+
+				my $position = 1;
 				foreach my $entry (@entries) { 
-					$low_seed = $entry_seed{$entry} unless $low_seed;
-					$low_seed = $entry_seed{$entry} if $entry_seed{$entry} < $low_seed;
-					$high_seed = $entry_seed{$entry} if $entry_seed{$entry} > $high_seed;
+					$entry_seed{$entry} = $position++;
 				}
 
-				my $seed_aim = $low_seed + $high_seed;
+				my %opp_position;
+				foreach my $entry (@entries) { 
+					foreach my $opp (@{$entry_opps{$entry}}) { 
+						$opp_position{$entry} += $entry_seed{$opp};
+					}
+					if ($entry_byes{$entry}) { 
+						$opp_position{$entry} += scalar @entries;
+					}
+				}
+
+				@entries = sort {$opp_position{$b} <=> $opp_position{$a}} @entries;
+
+				$position = 1;
+
+				foreach my $entry (@entries) { 
+					$entry_position_need{$entry} = $position++ if $opp_position{$entry} || $entry_byes{$entry};
+				}
 
 			}
 
@@ -249,6 +264,8 @@
 
 			}
 
+			@entries = shuffle @entries;
+
 			if ((scalar @entries) % 2) { 
 
 				# Pull a bye from whatever entry randomly shuffled to the top from
@@ -297,9 +314,7 @@
 			my %due;
 
 			foreach my $entry (@entries) { 
-
 				next if $entry == $bye;
-
 				if ($entry_negs{$entry} > $entry_affs{$entry}) { 
 					push @due_aff, $entry;
 					$due{$entry} = 1;
@@ -315,22 +330,49 @@
 				}
 			}
 
+
+			my %used;
+			my %partner;
+
+			WHATEVER:
 			while (@due_whatever) { 
+
 				# Randomly sprinkle the whatevers until both sides are even.
 				# We do this now instead of waiting until the end to prevent
 				# the byes from always hitting one another, since if there are
 				# multiple byes at this point, they're almost certainly
 				# screwups who don't deserve that kind of consideration.
 
+				@due_whatever = shuffle @due_whatever;
+
+				if ($seed_presets eq "balance") {
+					@due_whatever = sort {$entry_seed{$b} <=> $entry_seed{$a}} @due_whatever;
+				}
+
 				my $pull = shift @due_whatever;
-				next if $pull == $bye;
+				next if $used{$pull}++;
+
+				my $partner = pop @due_whatever if @due_whatever && $seed_presets eq "balance";
+				$used{$partner}++;
+
+				$partner{$pull} = $partner;
+				$partner{$partner} = $pull;
+
+				my $opp1;
+				my $opp2;
 
 				if (scalar @due_neg < scalar @due_aff) { 
 					push @due_neg, $pull;
+					push @due_neg, $partner if $partner;
 				} else { 
 					push @due_aff, $pull;
+					push @due_aff, $partner if $partner;
 				}
+
 			}
+
+			@due_aff = shuffle @due_aff;
+			@due_neg = shuffle @due_neg;
 
 			while (scalar @due_aff > scalar @due_neg) { 
 				#Shift some poor suckers over
@@ -341,6 +383,9 @@
 				#Shift some poor suckers over
 				push @due_aff, shift @due_neg;
 			}
+
+			my %is_due_aff = map {$_ => 1} @due_aff;
+			my %is_due_neg = map {$_ => 1} @due_neg;
 
 			my $aff_string;
 			my $neg_string;
@@ -361,9 +406,21 @@
 				@due_neg = sort {$entry_seed{$b} <=> $entry_seed{$a}} @due_neg;
 			}
 
+			if ($seed_presets eq "balance") { 
+				@due_aff = sort {$entry_seed{$a} <=> $entry_seed{$b}} @due_aff;
+				@due_neg = shuffle @due_neg;
+			}
+
+			my %done;
+			my $negs;
+
+			Tab::debuglog("I have ".scalar @due_aff." due aff and ".scalar @due_neg." due neg");
+			
 			foreach my $aff (@due_aff) { 
 
+				next if $done{$aff}++;
 				my $neg;
+
 				if ($needs_print{$aff}) { 
 
 					# This segment manages seeded presets and matches people based
@@ -404,14 +461,76 @@
 					# swapper later will help.
 
 				}
+
+				if ($seed_presets eq "balance") {
+
+					my $need = $entry_position_need{$aff};
+					my $current_diff;
+					my $current_clash = 83012;
+
+					foreach my $maybe_neg (@due_neg) { 
+
+						next if $done{$maybe_neg};
+
+						my $clash;
+
+						$clash++ if $entry_school{$aff} == $entry_school{$maybe_neg};
+						$clash++ if $entry_school{$aff} == $entry_school{$partner{$maybe_neg}};
+						$clash++ if $entry_school{$maybe_neg} == $entry_school{$partner{$aff}};
+
+						my $diff = abs($entry_position_need{$aff} - $entry_seed{$maybe_neg});
+						$diff += abs($entry_position_need{$maybe_neg} - $entry_seed{$aff});
+
+						if ($clash < $current_clash) { 
+							$neg = $maybe_neg;
+							$current_clash = $clash;
+							$current_diff = $diff;
+						} elsif ($clash == $current_clash && $diff < $current_diff) {
+							$neg = $maybe_neg;
+							$current_diff = $diff;
+						}
+
+						last if $neg && $clash == 0 and $diff == 0;
+
+					}
+
+					Tab::debuglog("Chose diff $current_diff so $entry_code{$neg} and $entry_code{$aff} debate");
+
+				}
 				
 				unless ($neg) { 
-					$neg = shift @due_neg;
+					foreach my $test_neg (@due_neg) { 
+						$neg = $test_neg unless $done{$test_neg};
+						last if $neg;
+					}
 				}
+
+				Tab::debuglog("----Pairing aff $entry_code{$aff} vs neg $entry_code{$neg}-----");
+
+				$done{$neg}++;
+				$negs++;
 
 				push @{$panels{$counter}}, $aff;
 				push @{$panels{$counter}}, $neg;
 				push @panel_keys, $counter++;
+
+				if ($partner{$aff} && $partner{$neg} &! $done{$partner{$aff}} &! $done{$partner{$neg}}) { 
+
+					if ($is_due_aff{$partner{$aff}} && $is_due_neg{$partner{$neg}}) { 
+					
+						if ($entry_school{$partner{$aff}} != $entry_school{$partner{$neg}}) { 
+
+							Tab::debuglog("+ Aff seed partner $entry_code{$partner{$aff}} vs neg sp $entry_code{$partner{$neg}}");
+							
+							push @{$panels{$counter}}, $partner{$aff};
+							push @{$panels{$counter}}, $partner{$neg};
+							push @panel_keys, $counter++;
+							$done{$partner{$aff}}++;
+							$done{$partner{$neg}}++;
+							$negs++;
+						}
+					}
+				}
 			}
 
 			my $no_improvement = 1;
@@ -429,7 +548,7 @@
 					my $swap_key;
 					my $swap_cross;
 
-					my $baseline_panel1_score = score_panel(\@panel, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+					my $baseline_panel1_score = score_panel(\@panel, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 					next if $baseline_panel1_score < 1;
 
 					my $aff1 = shift @panel;
@@ -441,7 +560,7 @@
 						next if $other_key == $panel_key;
 
 						my @panel2 = @{$panels{$other_key}};
-						my $baseline_panel2_score = score_panel(\@panel2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+						my $baseline_panel2_score = score_panel(\@panel2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 
 						my $aff2 = shift @panel2;
 						my $neg2 = shift @panel2;
@@ -461,8 +580,8 @@
 							my @new_1 = ($aff1, $neg2);
 							my @new_2 = ($aff2, $neg1);
 
-							my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
-							my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs); 
+							my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
+							my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need); 
 
 							my $new_score = $swap_panel1_score + $swap_panel2_score;
 							my $baseline = $baseline_panel1_score + $baseline_panel2_score;
@@ -497,8 +616,8 @@
 
 							unless ($dont) { 
 
-								my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
-								my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs); 
+								my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
+								my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need); 
 
 								my $new_score = $swap_panel1_score + $swap_panel2_score;
 								my $baseline = $baseline_panel1_score + $baseline_panel2_score;
@@ -531,8 +650,8 @@
 
 							unless ($dont) { 
 
-								my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
-								my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs); 
+								my $swap_panel1_score = score_panel(\@new_1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
+								my $swap_panel2_score = score_panel(\@new_2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need); 
 
 								my $new_score = $swap_panel1_score + $swap_panel2_score;
 								my $baseline = $baseline_panel1_score + $baseline_panel2_score;
@@ -595,7 +714,7 @@
 					my $swap_key_3;
 					my $swap_cross_3;
 
-					my $baseline_panel1_score = score_panel(\@panel, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+					my $baseline_panel1_score = score_panel(\@panel, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 					next if $baseline_panel1_score < 1;
 
 					my $aff1 = shift @panel;
@@ -613,13 +732,13 @@
 						next if $other_key == $panel_key;
 
 						my @panel2 = @{$panels{$other_key}};
-						$baseline_panel2_score = score_panel(\@panel2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+						$baseline_panel2_score = score_panel(\@panel2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 
 						$aff2 = shift @panel2;
 						$neg2 = shift @panel2;
 
 						my @new2 = ($aff1, $neg2);
-						$swapped_panel2_score = score_panel(\@new2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+						$swapped_panel2_score = score_panel(\@new2, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 
 						my $diff = $baseline_panel2_score - $swapped_panel2_score;
 
@@ -640,16 +759,16 @@
 							next if $other_key == $swap_key_2;
 
 							my @panel3 = @{$panels{$other_key}};
-							my $baseline_panel3_score = score_panel(\@panel3, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+							my $baseline_panel3_score = score_panel(\@panel3, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 
 							my $aff3 = shift @panel3;
 							my $neg3 = shift @panel3;
 
 							my @new3 = ($aff2, $neg3);
-							my $swapped_panel3_score = score_panel(\@new3, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+							my $swapped_panel3_score = score_panel(\@new3, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 
 							my @new1 = ($aff3, $neg1);
-							my $swapped_panel1_score = score_panel(\@new1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+							my $swapped_panel1_score = score_panel(\@new1, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 
 							my $baseline = $baseline_panel1_score + $baseline_panel2_score + $baseline_panel3_score;
 							my $swapped = $swapped_panel1_score + $swapped_panel2_score + $swapped_panel3_score;
@@ -698,7 +817,7 @@
 			my $new_score;
 
 			foreach my $panel_key (shuffle @panel_keys) {
-				$new_score += score_panel(\@{$panels{$panel_key}}, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+				$new_score += score_panel(\@{$panels{$panel_key}}, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 			}
 
 			if ($new_score < $best_score || not defined $best_score) { 
@@ -741,7 +860,7 @@
 
 	foreach my $key (@keys) { 
 					
-		my $score = score_panel(\@{$final_panels{$key}}, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, \%entry_seed, \%entry_needs);
+		my $score = score_panel(\@{$final_panels{$key}}, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
 
 		my $panel = Tab::Panel->create({
 			round => $round->id,
@@ -806,7 +925,7 @@
 
     sub score_panel {
 
-        my ($panref, $schref, $hitref, $hit_side_ref, $hit_school_ref, $seed_ref, $need_seed_ref) = @_; 
+        my ($panref, $schref, $hitref, $hit_side_ref, $hit_school_ref, $seed_presets, $seed_ref, $need_seed_ref, $need_position_ref) = @_; 
 
 		return unless @{$panref};
 		my $aff = shift @{$panref};
@@ -832,8 +951,17 @@
 			$score += 100;   
 		}   
 
-		$score += 10 unless ${$need_seed_ref}{$aff."-".${$seed_ref}{$neg}};
-		$score += 10 unless ${$need_seed_ref}{$neg."-".${$seed_ref}{$aff}};
+		if ($seed_presets eq "all") { 
+			$score += 10 unless ${$need_seed_ref}{$aff."-".${$seed_ref}{$neg}};
+			$score += 10 unless ${$need_seed_ref}{$neg."-".${$seed_ref}{$aff}};
+		}
+
+		if ($seed_presets eq "balance") { 
+			my $aff_diff = abs(${$need_position_ref}{$aff} - ${$seed_ref}{$neg});
+			my $neg_diff = abs(${$need_position_ref}{$neg} - ${$seed_ref}{$aff});
+			$score += 10 * $aff_diff if ${$need_position_ref}{$aff};
+			$score += 10 * $neg_diff if ${$need_position_ref}{$neg};
+		}
 
 		# We have debated against someone else from that same school.  Lowest
 		# penalty.
