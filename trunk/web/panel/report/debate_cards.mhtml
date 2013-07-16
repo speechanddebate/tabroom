@@ -21,69 +21,328 @@
 
 	$m->comp("/funclib/printout.mas", filename => $filename, head => 1 );
 
-	my @prelims;
-	my @elims;
-	my @finals;
-
-	foreach my $round ($event->rounds) { 
-		push @prelims, $round if $round->type ne "final" && $round->type eq "elim";
-		push @elims, $round if $round->type eq "elim";
-		push @finals, $round if $round->type eq "final";
-	}
-
 	open (TEXOUT, ">>$filepath.tex");
 	print TEXOUT "\\smallskip\n";
 
-	foreach my $entry (sort{$a->code <=> $b->code} $event->entries( dropped => 0, waitlist => 0, unconfirmed => 0)) {
+	my @rounds = $event->rounds;
 
-		my @panels = sort {$a->round->timeslot->start->epoch <=> $b->round->timeslot->start->epoch} $m->comp("/funclib/entry_panels.mas", entry => $entry);
+	my $points;
+	my $ranks;
+	my $winloss;
 
-		print TEXOUT "\\begin{tabular}{p{1.5in}p{3.25in}p{1.5in}}\n";
-		print TEXOUT "\\hline\n";
-		print TEXOUT "\\it ".$event->name." & & \\multirow{3}{*}{\\Huge \\bf ".$entry->school->code." ".$entry->code." }\\\\ \n";
+	my %done_tbset;
 
-		print TEXOUT "Name: & ".&Tab::texify($entry->name )." & \\\\ \n";
+	foreach my $round (@rounds) { 
 
-		print TEXOUT "School: & ".&Tab::texify($entry->school->name)." \\\\ \n";
+		my $tb_set = $round->tb_set;
+		next if $done_tbset{$tb_set->id}++;
 
-		print TEXOUT "\\end{tabular}\n";
+		foreach my $tiebreak ($tb_set->tiebreaks) { 
+			$points++ if $tiebreak->name eq "points";
+			$ranks++ if $tiebreak->name eq "ranks";
+			$winloss++ if $tiebreak->name eq "winloss";
+		}
+	}
+
+	my $count_tbs++ if $ranks;
+	$count_tbs++ if $points;
+	$count_tbs++ if $winloss;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my %judge_name;
+	my %student_code;
+	my %student_name;
+
+	my $judge_sth = $dbh->prepare("
+		select distinct judge.id, judge.first, judge.last
+		from judge, ballot, panel, round
+		where round.event = ".$event->id."
+		and round.id = panel.round
+		and panel.id = ballot.panel
+		and ballot.judge = judge.id
+	");
+
+	$judge_sth->execute;
+
+	while (my ($id, $first, $last)  = $judge_sth->fetchrow_array() ) {
+		$judge_name{$id} = $last.", ".$first;
+	}
+
+	my $student_sth = $dbh->prepare("
+		select student.id, student.first, student.last, entry.id, school.name, entry.code, entry.name
+		from student, entry_student, entry, school
+		where entry.event = ".$event->id." 
+		and entry.id = entry_student.entry
+		and entry_student.student = student.id
+		and entry.school = school.id
+		and entry.dropped = 0
+		and entry.waitlist = 0
+		and entry.unconfirmed = 0
+		order by student.id
+	");
+
+	$student_sth->execute;
+
+	my %entry_code;
+	my %entry_name;
+	my %entry_students;
+	my %entry_school_name;
+	my @entries;
+
+	while (my ($id, $first, $last, $entry, $school_name, $entry_code, $entry_name)  = $student_sth->fetchrow_array() ) {
+		$student_code{$id} = substr(uc($first),0,1).substr(uc($last),0,1);
+		$student_name{$id} = $first." ".$last;
+		push @{$entry_students{$entry}}, $id;
+		$entry_code{$entry} = $entry_code;
+		$entry_name{$entry} = $entry_name;
+		$entry_school_name{$entry} = $school_name;
+		push @entries, $entry;
+	}
+
+
+	my %e_seen = (); 
+	@entries = grep { ! $e_seen{$_} ++ } @entries;
+
+	my $rounds_sth = $dbh->prepare("
+		select distinct entry.id, round.id, panel.bye, ballot.bye, ballot.side, ballot.judge
+		from entry, round, panel, ballot
+		where entry.event = ".$event->id." 
+		and entry.id = ballot.entry
+		and ballot.panel = panel.id
+		and panel.round = round.id
+		group by ballot.id
+		order by ballot.judge
+	");
+
+	$rounds_sth->execute;
+
+	my %round_side;
+	my %round_judge;
+
+	while (my ($id, $round, $pbye, $bbye, $side, $judge)  = $rounds_sth->fetchrow_array() ) {
+		$round_side{$id."-".$round} = "A" if $side == 1;
+		$round_side{$id."-".$round} = "N" if $side == 2;
+		$round_side{$id."-".$round} = "BYE" if $pbye || $bbye;
+		$round_judge{$id."-".$round} .= " ".$judge_name{$judge};
+		Tab::debuglog("Round $round side $side judge $judge found!") if $id == 397342;
+	}
+
+	my $results_sth = $dbh->prepare("
+		select distinct entry.id, round.id, ballot_value.tag, ballot_value.value, opp.id, ballot_value.student, ballot.judge
+		from entry, round, panel, ballot, ballot_value, ballot opp_ballot, entry opp
+		where entry.event = ".$event->id." 
+		and entry.id = ballot.entry
+		and panel.round = round.id
+		and ballot.panel = panel.id
+		and ballot.id = ballot_value.ballot
+		and opp_ballot.panel = panel.id
+		and opp_ballot.entry != ballot.entry
+		and opp.id = opp_ballot.entry
+		group by ballot_value.id
+		order by ballot.judge
+	");
+
+	$results_sth->execute;
+
+	my %round_opp;
+	my %round_winloss;
+	my %round_points;
+	my %round_ranks;
+
+	my %round_judges;
+
+	while (my ($id, $round, $tag, $value, $opp, $student, $judge)  = $results_sth->fetchrow_array() ) {
+
+		push @{$round_judges{$id."-".$round}}, $judge;
+		
+		$round_opp{$id."-".$round} = $entry_code{$opp};
+
+		if ($round_side{$id."-".$round} eq "BYE") { 
+
+			if ($tag eq "ballot") { 
+				$round_winloss{$id."-".$round."-".$judge} = "BYE" if $value == 1;
+				$round_winloss{$id."-".$round."-".$judge} = "FFT" unless $value == 1;
+			}
+
+		} else { 
+
+			if ($tag eq "ballot") { 
+				$round_winloss{$id."-".$round."-".$judge} = "W" if $value == 1;
+				$round_winloss{$id."-".$round."-".$judge} = "L" unless $value == 1;
+			}
+
+			if ($tag eq "points") { 
+				$round_points{$id."-".$round."-".$judge."-".$student} .= $value;
+			}
+
+			if ($tag eq "ranks") { 
+				$round_ranks{$id."-".$round."-".$judge."-".$student} .= $value;
+			}
+
+		}
+	}
+
+	my $max_entry = $event->setting('max_entry');
+	
+	$count_tbs += ($max_entry - 1) if $points;
+	$count_tbs += ($max_entry - 1) if $ranks;
+	
+	print TEXOUT "\\renewcommand{\\arraystretch}{1.8}\n";
+	print TEXOUT "\\setlength{\\tabcolsep}{6.2pt}";
+	print TEXOUT "\\setlength{\\doublerulesep}{0pt}";
+
+	foreach my $entry (sort{$entry_code{$a} cmp $entry_code{$b}} @entries) { 
+
+		print TEXOUT "\\noindent\n";
+		print TEXOUT "\\begin{minipage}{7.in}";
+		print TEXOUT "\\begin{minipage}{1.5in}";
+		print TEXOUT "{\\bf \\large ".$event->name."}\n\n";
+		print TEXOUT "{\\normalsize ".&Tab::texify($entry_name{$entry})." }\n";
+		print TEXOUT "\\end{minipage}\n\\hspace{.25in}\n"; 
+
+		print TEXOUT "\\truncate{1.75in}{\\bf \\large ".&Tab::texify($entry_school_name{$entry})." } \n";
+		print TEXOUT "\\hfill\n"; 
+		print TEXOUT "{\\huge \\bf ".$entry_code{$entry}."}\n";
 		print TEXOUT "\\vspace{.03in}\n";
 		print TEXOUT "\\newline\n";
 
-		my @prelims = sort {$a->round->name <=> $b->round->name} @prelims;
-		my @elims = sort {$a->name <=> $b->name} @elims;
-		my @finals = sort {$a->name <=> $b->name} @finals;
-
 		print TEXOUT "\\raggedright\n";
-		print TEXOUT "\\renewcommand{\\arraystretch}{1.6}\n";
 
-		print TEXOUT "\\begin{tabular}{|p{.5in}|p{.75in}|p{1.75in}|p{1.75in}|p{.5in}|p{.75in}|} \n";
+		my @students = @{$entry_students{$entry}} if $entry_students{$entry};
 
-		print TEXOUT "\\rowcolor[rgb]{.84,.89,.94}\n";
+		my $tb_len = 1;
+		$tb_len = (2.2 / $count_tbs) if $count_tbs;
 
-		print TEXOUT "\\hline \n";
-		print TEXOUT "Round & Side & Opponent & Judge & W/L & Points \\\\ \n";
+		my $tabular = "\\begin{tabular}{|p{.5in}|p{.5in}|p{1.25in}|p{1.25in}|";
+		my $index = "Round & Side & Opponent & Judge ";
 
-		foreach my $round (1 .. 7) { 
+		if ($winloss) { 
+			$tabular .= "p{".$tb_len."in}|";
+			$index .= " & W/L ";
+		}
 
-			print TEXOUT "\\hline \n";
-			print TEXOUT "\\rowcolor[rgb]{1,.9,.9}\n" unless ($round % 2);
-			print TEXOUT " $round & & & & & \\\\ \n";
+		if (scalar @students > 1) { 
+
+			if ($points) { 
+				foreach my $student (@students) { 
+					$tabular .= "p{".$tb_len."in}|";
+					$index .= " & ".$student_code{$student}." Pts "
+				}
+			} 
+
+			if ($ranks) { 
+				foreach my $student (@students) { 
+					$tabular .= "p{".$tb_len."in}|";
+					$index .= " & ".$student_code{$student}." Rks "
+				}
+			}
+
+		} else { 
+
+			if ($points) { 
+				$tabular .= "p{".$tb_len."in}|";
+				$index .= " & Points "
+			} 
+
+			if ($ranks) { 
+				$tabular .= "p{".$tb_len."in}|";
+				$index .= " & Ranks "
+			}
+		}
+
+		print TEXOUT $tabular."}\n";
+		print TEXOUT "\\hline \\hline \n\n";
+		print TEXOUT "\\rowcolor[rgb]{.84,.89,.94}\[5.3pt\]\[5.3pt\]\n";
+		print TEXOUT $index." \\\\ \n";
+
+		my $switch;
+
+		foreach my $round (@rounds) { 
+
+			my $round_id = $round->id;
+
+			my @judges = @{$round_judges{$entry."-".$round_id}} if $round_judges{$entry."-".$round_id};
+			my %seen = (); 
+			@judges = grep { ! $seen{$_} ++ } @judges;
+			
+			next if $round->type eq "elim";
+			next if $round->type eq "final";
+
+			print TEXOUT "\\hline \\hline \n\n";
+			print TEXOUT "\\rowcolor[rgb]{1,.95,.66}\[5.3pt\]\[5.3pt\]\n" if $switch++ % 2;
+			print TEXOUT $round->realname." & ";
+			print TEXOUT $round_side{$entry."-".$round_id}." & ";
+			print TEXOUT $round_opp{$entry."-".$round_id}." & ";
+
+			print TEXOUT "\\begin{minipage}{1.25in} ";
+				my $done;
+				foreach my $judge (@judges) { 
+					print TEXOUT "\\\\ " if $done++;
+					print TEXOUT "\\truncate{1.25in}{".Tab::texify($judge_name{$judge})."}";
+				}
+			print TEXOUT " \\end{minipage} ";
+
+			if ($winloss) { 
+				print TEXOUT " & \\begin{minipage}{".$tb_len."in} ";
+				print TEXOUT "\\large ";
+				undef $done;
+				foreach my $judge (@judges) { 
+					print TEXOUT "\\\\" if $done++;
+					print TEXOUT $round_winloss{$entry."-".$round_id."-".$judge};
+				}
+				print TEXOUT "\\end{minipage} ";
+			}
+
+			if ($points) { 
+
+				foreach my $student (@students) { 
+					print TEXOUT " & \\begin{minipage}{".$tb_len."in} ";
+					print TEXOUT "\\large ";
+					undef $done;
+					foreach my $judge (@judges) { 
+						print TEXOUT "\\\\" if $done++;
+						print TEXOUT $round_points{$entry."-".$round_id."-".$judge."-".$student};
+					}
+					print TEXOUT "\\end{minipage} ";
+				}
+			}
+
+			if ($ranks) { 
+
+				foreach my $student (@students) { 
+					print TEXOUT " & \\begin{minipage}{".$tb_len."in} ";
+					print TEXOUT "\\large ";
+					undef $done;
+					foreach my $judge (@judges) { 
+						print TEXOUT "\\\\" if $done++;
+						print TEXOUT $round_ranks{$entry."-".$round_id."-".$judge."-".$student};
+					}
+					print TEXOUT "\\end{minipage} ";
+				}
+			}
+
+			print TEXOUT "\\\\ \n";
 
 		}
 
-		print TEXOUT "\\hline \n";
+		print TEXOUT "\\hline \\hline \n\n";
 
 		print TEXOUT "\\end{tabular}\n";
-		
-		print TEXOUT "\\vspace{.5in}\n";
+		print TEXOUT "\\smallskip\n";
 		print TEXOUT "\\newline\n";
-
-		print TEXOUT "\\renewcommand{\\arraystretch}{1.2}\n";
+		print TEXOUT "\\makebox[1in]{} \\hfill {\\small ";
+		foreach my $student (@students) { 
+			print TEXOUT Tab::texify($student_name{$student})." ";
+		}
+		print TEXOUT "} \n";
+		print TEXOUT "\\newline\n";
+		print TEXOUT "\\vspace{.25in}\n";
+		print TEXOUT "\\end{minipage}";
+		print TEXOUT "\\newline\n";
 
 	}
 
-	print TEXOUT "\\end{center}\n";
 	print TEXOUT "\\end{document}\n";
 	close TEXOUT;
 
