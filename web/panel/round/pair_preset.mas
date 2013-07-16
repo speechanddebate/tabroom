@@ -144,21 +144,34 @@
 	my $round_robin++ if $event->setting("round_robin");
 	my $region_constraints++ if $event->setting("region_constraints");
 
-	my %final_panels = ();
 	my $best_score;
 	my $bye;
 
 	if ($round_robin) { 
 
 		# In a round robin, seeds are pods
-		my @rounds;
+		my @rounds = $event->rounds( type => "preset");
+		push (@rounds, $event->rounds( type => "prelim"));
+
+		Tab::debuglog("I have ".scalar @entries." entries and ".scalar @seeds." pods");
+
+		my $num_rounds = ceil((scalar @entries) / (scalar @seeds)) - 1;
+
+		unless ($num_rounds == scalar @rounds) { 
+			my $err = "You do not have the correct number of preset rounds for ".scalar @entries." debaters.  Please make sure you have $num_rounds presets";
+			$m->redirect("/setup/schedule/event.mhtml?event_id=".$event->id."&err=$err");
+		}
+
+		my %round_panels = ();
+		my %round_panel_one = ();
+		my %round_panel_two = ();
 
 		foreach my $seed (@seeds) { 
 
 			my @pod;
 
 			foreach my $entry (@entries) { 
-				push @pod, $entry;
+				push @pod, $entry if $entry_seed{$entry} == $seed;
 			}
 
 			# Make sure it's an even number.  Fill blanks with byes
@@ -166,13 +179,126 @@
 				push @pod, "BYE";
 			}
 
+			Tab::debuglog("Pod $seed is @pod");
+
+			my %we_have_hit = ();
+
+			foreach my $entry (@pod) {
+
+				foreach my $round (@rounds) { 
+
+					my $chosen;
+					my $biggest_panel;
+
+					foreach my $panel (@{$round_panels{$round->id}}) { 
+						$biggest_panel = $panel if $panel > $biggest_panel;
+						next if $round_panel_two{$round->id."-".$panel};
+						next if $we_have_hit{$entry."-".$round_panel_one{$round->id."-".$panel}};
+						$chosen = $panel;
+						$round_panel_two{$round->id."-".$panel} = $entry;
+						$we_have_hit{$entry."-".$round_panel_one{$round->id."-".$panel}}++;
+						$we_have_hit{$round_panel_one{$round->id."-".$panel}."-".$entry}++;
+						last if $chosen;
+					}
+
+					unless ($chosen) { 
+						my $panel = $biggest_panel + 1;
+						push @{$round_panels{$round->id}}, $panel;
+						$round_panel_one{$round->id."-".$panel} = $entry;
+					}
+				}
+			}
+
+			my %aff_count;
+			my %neg_count;
+
+			foreach my $round (@rounds) { 
+				foreach my $panel (shuffle @{$round_panels{$round->id}}) { 
+					my $aff = $round_panel_one{$round->id."-".$panel};
+					my $neg = $round_panel_two{$round->id."-".$panel};
+					$neg_count{$neg}++;
+					$aff_count{$aff}++;
+				}
+			}
+
+			my $not_ok = 1;
+
+			foreach (1 .. 20) { 
+
+				next unless $not_ok;
+
+				foreach my $round (shuffle @rounds) { 
+
+					foreach my $panel (shuffle @{$round_panels{$round->id}}) { 
+
+						my $aff = $round_panel_one{$round->id."-".$panel};
+						my $neg = $round_panel_two{$round->id."-".$panel};
+
+						next if $aff == "BYE"; #doesn't count
+						next if $neg == "BYE";
+
+						if ($aff_count{$aff} > $neg_count{$aff} || $neg_count{$neg} > $aff_count{$neg}) { 
+							#Sides are out of balance.  Make sure it won't create harm in the other direction:
+							next if $neg_count{$aff} > $aff_count{$aff};
+							next if $aff_count{$neg} > $neg_count{$neg};
+
+							#If it doesn't, swap the two debaters
+							$round_panel_one{$round->id."-".$panel} = $neg;
+							$round_panel_two{$round->id."-".$panel} = $aff;
+
+							$neg_count{$aff}++;
+							$aff_count{$neg}++;
+
+							$neg_count{$neg}--;
+							$aff_count{$aff}--;
+						} 
+					}
+				}
+
+				my $lowest = floor(scalar @rounds / 2);
+				my $highest = ceil(scalar @rounds / 2);
+
+				undef $not_ok;
+
+				foreach my $entry (@entries) { 
+					$not_ok++ if $aff_count{$entry} < $lowest;
+					$not_ok++ if $aff_count{$entry} > $highest;
+				}
+
+			}
+
+			foreach my $round (@rounds) { 
+
+				my %final_panels = ();
+				my $bye;
+
+				foreach my $panel (@{$round_panels{$round->id}}) { 
+					$bye = $round_panel_one{$round->id."-".$panel} if $round_panel_two{$round->id."-".$panel} eq "BYE";
+					$bye = $round_panel_two{$round->id."-".$panel} if $round_panel_one{$round->id."-".$panel} eq "BYE";
+				}
+
+				foreach my $panel (@{$round_panels{$round->id}}) { 
+					next if $bye == $round_panel_one{$round->id."-".$panel};
+					next if $bye == $round_panel_two{$round->id."-".$panel};
+					push @{$final_panels{$panel}}, $round_panel_one{$round->id."-".$panel};
+					push @{$final_panels{$panel}}, $round_panel_two{$round->id."-".$panel};
+				}
+
+
+				Tab::debuglog("Round ".$round->realname." panel:");
+				write_round($round, \%final_panels, 0, $bye);
+
+			}
+
 		}
 
 	} else { 
 
-		foreach my $pass (1) { 
+		my %final_panels = ();
+		my %round_score;
 
-			Tab::debuglog("Pass is $pass");
+		foreach my $pass (1 .. 5) { 
+
 			my %panels;
 
 			@entries = shuffle(@entries);
@@ -414,8 +540,6 @@
 			my %done;
 			my $negs;
 
-			Tab::debuglog("I have ".scalar @due_aff." due aff and ".scalar @due_neg." due neg");
-			
 			foreach my $aff (@due_aff) { 
 
 				next if $done{$aff}++;
@@ -494,8 +618,6 @@
 
 					}
 
-					Tab::debuglog("Chose diff $current_diff so $entry_code{$neg} and $entry_code{$aff} debate");
-
 				}
 				
 				unless ($neg) { 
@@ -504,8 +626,6 @@
 						last if $neg;
 					}
 				}
-
-				Tab::debuglog("----Pairing aff $entry_code{$aff} vs neg $entry_code{$neg}-----");
 
 				$done{$neg}++;
 				$negs++;
@@ -520,8 +640,6 @@
 					
 						if ($entry_school{$partner{$aff}} != $entry_school{$partner{$neg}}) { 
 
-							Tab::debuglog("+ Aff seed partner $entry_code{$partner{$aff}} vs neg sp $entry_code{$partner{$neg}}");
-							
 							push @{$panels{$counter}}, $partner{$aff};
 							push @{$panels{$counter}}, $partner{$neg};
 							push @panel_keys, $counter++;
@@ -823,105 +941,112 @@
 			if ($new_score < $best_score || not defined $best_score) { 
 				Tab::debuglog("This attempt had score $new_score which is better than prevailing $best_score.  Swapping");
 				%final_panels  = %panels;
+				%round_score = $new_score;
 				$best_score = $new_score;
 			}
 
 		}
 
+		write_round($round, \%final_panels, $round_score{$round->id}, $bye);
 	}
 
-	#Out with the old.
+	sub write_round {
 
-	Tab::BallotValue->set_sql( delete_round => "
-		delete ballot_value from ballot_value, ballot, panel
-		where panel.round = ?
-		and panel.id = ballot.panel
-		and ballot.id = ballot_value.ballot
-	");
+		my ($round, $final_panref, $score, $bye) = @_;
 
-	Tab::Ballot->set_sql( delete_round => "
-		delete ballot from ballot, panel
-		where panel.round = ?
-		and panel.id = ballot.panel
-	");
+		Tab::debuglog("Writing round ".$round->realname." with score $score");
 
-	Tab::Panel->set_sql( delete_round => "
-		delete from panel where round = ?
-	");
+		#Out with the old.
 
-	Tab::BallotValue->sql_delete_round->execute($round->id);
-	Tab::Ballot->sql_delete_round->execute($round->id);
-	Tab::Panel->sql_delete_round->execute($round->id);
+		Tab::BallotValue->set_sql( delete_round => "
+			delete ballot_value from ballot_value, ballot, panel
+			where panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.id = ballot_value.ballot
+		");
 
-	my $letter = 1;
-	$letter = "A" if $event->setting("panel_labels") eq "letters";
+		Tab::Ballot->set_sql( delete_round => "
+			delete ballot from ballot, panel
+			where panel.round = ?
+			and panel.id = ballot.panel
+		");
 
-	my @keys = sort {$a <=> $b} keys %final_panels;
+		Tab::Panel->set_sql( delete_round => "
+			delete from panel where round = ?
+		");
 
-	foreach my $key (@keys) { 
+		Tab::BallotValue->sql_delete_round->execute($round->id);
+		Tab::Ballot->sql_delete_round->execute($round->id);
+		Tab::Panel->sql_delete_round->execute($round->id);
+
+		my $letter = 1;
+		$letter = "A" if $round->event->setting("panel_labels") eq "letters";
+
+		my @keys = sort {$a <=> $b} keys %{$final_panref};
+
+		foreach my $key (@keys) { 
 					
-		my $score = score_panel(\@{$final_panels{$key}}, \%entry_school, \%entry_hits, \%entry_opp_side, \%entry_school_hit, $seed_presets, \%entry_seed, \%entry_needs, \%entry_position_need);
+			my $panel = Tab::Panel->create({
+				round => $round->id,
+				letter => $letter,
+				score => $score
+			});
 
-		my $panel = Tab::Panel->create({
-			round => $round->id,
-			letter => $letter,
-			score => $score
-		});
+			if ($letter eq "Z") { 
+				$letter = "AA";
+			} elsif ($letter eq "AZ") { 
+				$letter = "BA";
+			} elsif ($letter eq "BZ") {
+				$letter = "CA";
+			} elsif ($letter eq "CZ") {
+				$letter = "DA";
+			} elsif ($letter eq "DZ") {
+				$letter = "EA";
+			} elsif ($letter eq "EZ") {
+				$letter = "FA";
+			} else { 
+				$letter++;
+			}
 
-		if ($letter eq "Z") { 
-			$letter = "AA";
-		} elsif ($letter eq "AZ") { 
-			$letter = "BA";
-		} elsif ($letter eq "BZ") {
-			$letter = "CA";
-		} elsif ($letter eq "CZ") {
-			$letter = "DA";
-		} elsif ($letter eq "DZ") {
-			$letter = "EA";
-		} elsif ($letter eq "EZ") {
-			$letter = "FA";
-		} else { 
-			$letter++;
+			my $aff = shift @{${$final_panref}{$key}};
+			my $neg = shift @{${$final_panref}{$key}};
+
+			my $aff_ballot = Tab::Ballot->create({
+				panel => $panel->id,
+				judge => 0,
+				entry => $aff,
+				side  => 1
+			});
+
+			my $neg_ballot = Tab::Ballot->create({
+				panel => $panel->id,
+				judge => 0,
+				entry => $neg,
+				side  => 2
+			});
 		}
 
-		my $aff = shift @{$final_panels{$key}};
-		my $neg = shift @{$final_panels{$key}};
+		if ($bye) { 
 
-		my $aff_ballot = Tab::Ballot->create({
-			panel => $panel->id,
-			judge => 0,
-			entry => $aff,
-			side  => 1
-		});
+			my $panel = Tab::Panel->create({
+				round  => $round->id,
+				letter => $letter,
+				bye    => 1
+			});
 
-		my $neg_ballot = Tab::Ballot->create({
-			panel => $panel->id,
-			judge => 0,
-			entry => $neg,
-			side  => 2
-		});
+			my $bye_ballot = Tab::Ballot->create({
+				panel => $panel->id,
+				judge => 0,
+				entry => $bye,
+				side  => 1
+			});
+
+		}
+
+		my $now = DateTime->now;
+		$round->created($now);
+		$round->update;
 	}
-
-	if ($bye) { 
-
-		my $panel = Tab::Panel->create({
-			round  => $round->id,
-			letter => $letter,
-			bye    => 1
-		});
-
-		my $bye_ballot = Tab::Ballot->create({
-			panel => $panel->id,
-			judge => 0,
-			entry => $bye,
-			side  => 1
-		});
-
-	}
-
-	my $now = DateTime->now;
-	$round->created($now);
-	$round->update;
 
     sub score_panel {
 
