@@ -5,6 +5,153 @@ function placeFocus(){
     document.forms[0].elements['sp-q'].focus(); 
 } 
 
+function autoWin(input,e,aff,neg,affid,negid) {
+
+    var keyCode = e.keyCode; 
+    var filter = [0,8,9,16,17,18,37,38,39,40,46];
+
+	if (!containsElement(filter,keyCode)) {
+
+        if (input.value == "A" || input.value == "a" || input.value == 1 || input.value == "p" || input.value == "P" || input.value == "g" || input.value == "G") {
+			input.value = aff;
+			$('.aff').show();
+			$('.neg').hide();
+			var winner = document.getElementById("winner");
+			winner.value = affid;
+        	input.form[(getIndex(input)+1) % input.form.length].focus();
+		}
+
+        if (input.value == "N" || input.value == "n" || input.value == 1 || input.value == "c" || input.value == "C" || input.value == "o" || input.value == "O") {
+			input.value = neg;
+			$('.neg').show();
+			$('.aff').hide();
+			var winner = document.getElementById("winner");
+			winner.value = negid;
+
+        	input.form[(getIndex(input)+1) % input.form.length].focus();
+
+		}
+
+
+	}
+
+    function containsElement(arr, ele) {
+        var found = false, index = 0; 
+        while(!found && index < arr.length)
+        if(arr[index] == ele) 
+        found = true;
+        else
+        index++;
+        return found;
+    }    
+
+    function getIndex(input) {
+        var index = -1, i = 0, found = false;
+        while (i < input.form.length && index == -1)
+        if (input.form[i] == input)index = i; 
+        else i++; 
+        return index;
+    }    
+
+    return true;
+}
+
+function autoPoints(input,len,e,side) {
+
+    var keyCode = e.keyCode; 
+    var filter = [0,8,9,16,17,18,37,38,39,40,46];
+
+
+	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
+
+        if (input.value != 30) {
+			var number = input.value;
+			number = number * 1;
+			number = number / 10;
+			number = number + 20;
+			input.value = number;
+		}
+
+        input.form[(getIndex(input)+1) % input.form.length].focus();
+
+	} else if (len == 6 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
+
+		if (/\.$/.test(input.value)) { 
+			var number = input.value;
+			number = number.slice(0,1);
+			number = number * 1;
+			number = number + 20.5;
+			input.value = number;
+		} else if (/5$/.test(input.value)) { 
+			var number = input.value.slice(0,2);
+			number = number * 1;
+			number = number / 10;
+			number = number + 20;
+			input.value = number;
+		} else if (/2$/.test(input.value)) { 
+			var number = input.value.slice(0,2);
+			number = number * 1;
+			number = number / 10;
+			number = number + 20;
+			number += .05;
+			input.value = number;
+		} else { 
+			var number = input.value.slice(0,1);
+			number = number * 1;
+			number = number + 20;
+			input.value = number;
+		}
+
+        input.form[(getIndex(input)+1) % input.form.length].focus();
+
+	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
+
+		if (len == 3) { 
+
+			if (/\.$/.test(input.value)) { 
+				var number = input.value;
+				number = number.slice(0,2);
+				number = number * 1;
+				number += .5;
+				input.value = number;
+			} else if (/5$/.test(input.value)) { 
+				input.value = input.value/10;
+			} else { 
+				input.value = input.value.slice(0,2);
+			}
+
+		}
+
+        if (len == 2 && input.value != 100) {
+            input.value = input.value.slice(0, len);
+        }
+    
+        input.form[(getIndex(input)+1) % input.form.length].focus();
+    }    
+
+    function containsElement(arr, ele) {
+        var found = false, index = 0; 
+        while(!found && index < arr.length)
+        if(arr[index] == ele) 
+        found = true;
+        else
+        index++;
+        return found;
+    }    
+
+    function getIndex(input) {
+        var index = -1, i = 0, found = false;
+        while (i < input.form.length && index == -1)
+        if (input.form[i] == input)index = i; 
+        else i++; 
+        return index;
+    }    
+
+    return true;
+}
+
+
+
 function autoTab(input,len,e) {
 
     var keyCode = e.keyCode; 
