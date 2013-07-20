@@ -1,0 +1,610 @@
+<%args>
+#	$round
+	$debug => 0
+</%args>
+<%perl>
+
+	#Works off of 4 basic global hash/arrays; this allows the functions to access the information they need
+	#@entries is a global array of all entries in the event; %entries is a hash with record and SOP information in it
+	#%precluded stores which teams can't hit each other; %bracket are the teams in the bracket being paired
+	
+	use POSIX;
+	use List::Util 'shuffle';
+	use Time::HiRes qw( time );
+	
+	our $round = Tab::Round->retrieve(49630); #just to test
+	my $event = $round->event;
+	our @pullup_method = Tab::EventSetting->search( event=>$event, tag=>'pullup_method' );	
+	our $oddround=1;
+	if (int($round->name/2) == $round->name/2) { $oddround= 0 };
+	print "Odd round marker:".$oddround."<br>";
+	#use this round to seed
+	my @round_dummy = Tab::Round->search( name=>$round->name-1, event=>$round->event );	
+	print "This round ID:".$round->id." this round name:".$round->name."<br>";
+	print "round for seeding id:".$round_dummy[0]->id." round for seeding name:".$round_dummy[0]->name."<br>";
+	my $round_for_seeding = Tab::Round->retrieve( $round_dummy[0]->id );
+	my $start = time(); 
+		
+	our @entries = $event->entries( unconfirmed => 0, waitlist => 0, dropped => 0, dq => 0 );
+
+	#create a hash that stores a boolean value indicating whether teams can debate each other, marked false for same school, hit before, etc.
+	our %precluded; 
+			
+#CREATE A 2-DIMENSIONAL HASH WITH ALL THE STUFF YOU NEED TO PAIR
+	
+	#STEP ONE: create hash and put in entry info
+	our %entries;
+	undef %entries;
+	foreach my $entry (@entries) {
+		$entries{$entry->id}{'code'} = $entry->code;
+		$entries{$entry->id}{'school'} = $entry->school;
+	}
+
+	#STEP TWO: now load the number of wins
+	my %winloss;
+	%winloss = $m->comp("/funclib/entry_wins.mas", event => $event, round => $round_for_seeding);
+	foreach my $key ( keys %winloss ) {
+		$entries{$key}{'wins'} = $winloss{$key}; 
+	}
+	
+	#STEP THREE: assign the seeds
+	my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $meh, $panrank_ref, $panletter_ref, $long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", long_names => 1, round => $round_for_seeding);
+
+	my $x;
+	foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) { 
+		$x++;
+		foreach my $entry_id (@{${$entries_ref}{$key}}) { 
+			$entries{$entry_id}{'seed'}=$x;
+		}
+	}
+
+	#STEP FOUR: calculate oppseeds
+	
+	#Start by pulling all the rounds
+	my $rd_name=$round->name;
+	Tab::Ballot->set_sql(pull_ballots => "
+		select ballot.entry, ballot.panel, ballot.side
+		from ballot, panel, round
+		where ballot.panel=panel.id
+		and panel.round=round.id
+		and round.name < $rd_name
+		and round.event = $event
+		order by panel, entry
+	");
+		my @pairings = Tab::Ballot->search_pull_ballots;
+
+	my $end = time();
+	print "load time:  "; printf("%.2f\n", $end - $start); print "<br>";
+	
+	#print the pairings, just for grins	
+#	foreach my $pairing (@pairings) {
+# 	print "Panel: ".$pairing->panel." entry:".$pairing->entry." side=".$pairing->side."<br>";
+#	}
+	
+	#now loop through each team; this ALSO marks opponents as having debated so they don't hit in the future
+	my $totopponents;
+	my $totseeds;
+	foreach my $entry (@entries) {
+		#create an array that holds all the panels the team has been on; also store side due
+		my @panels;
+		foreach my $pairing (@pairings) {
+			if ($pairing->entry == $entry->id) {
+				 push (@panels, $pairing->panel);
+				 if ($pairing->side == 1) { $entries{$pairing->entry}{'sidedue'} = 2; } #this resets every time, but works b/c the last one is the most recent
+ 				 if ($pairing->side == 2) { $entries{$pairing->entry}{'sidedue'} = 1; }
+				 if ( $oddround == 1 ) { $entries{$pairing->entry}{'sidedue'} = 0; }
+			}
+		}
+		$totseeds=0;
+		$totopponents=0;	
+		#now loop thorough all the pairings again, if the panel matches pull the opponent id and grab their seed	
+		foreach my $pairing (@pairings) {
+			foreach my $panel (@panels) {
+				if ($pairing->panel == $panel and $pairing->entry != $entry->id) {
+					$totopponents++;
+					$totseeds += $entries{$pairing->entry}{'seed'};
+					$precluded{$entry->id}{$pairing->entry} = 1; #mark as ineligible to hit b/c they debated before
+				}
+			}
+		}
+		$entries{$entry->id}{'oppseed'} = $totseeds/$totopponents ;
+		$entries{$entry->id}{'SOP'} = $entries{$entry->id}{'oppseed'} + $entries{$entry->id}{'seed'} ;
+	}
+
+#CREATE HASH THAT KNOWS WHO CAN DEBATE WHO; hit before constraint added above; hash declared at the very top, so we only need school conflicts
+
+	for (my $x = 0; $x <= $#entries; $x++) {
+
+		#pull hybrid school conflicts
+		my @strikes = Tab::Strike->search( entry=>$entries[$x]->id, type => 'hybrid' );	
+
+		for (my $y = $x + 1; $y <= $#entries; $y++) {
+
+			#mark school conflicts
+			if ($entries[$x]->school == $entries[$y]->school) { $precluded{$entries[$x]->id}{$entries[$y]->id} = 1; }
+		
+			foreach my $hybridconflict (@strikes) {
+				if ($hybridconflict->school == $entries[$y]->school) { $precluded{$entries[$x]->id}{$entries[$y]->id} = 1; }
+			}
+		
+		}
+	}
+	
+	#problem child test
+	$precluded{345142}{346787} = 1;
+
+	$end = time();
+	print "hash setup time:  "; printf("%.2f\n", $end - $start); print "<br>";
+
+#PAIR IT
+
+	our %bracket; 
+	
+	#Figure out how many brackets to pair
+	my $hibracket=-1;
+	foreach my $key ( keys %entries ) {
+		if ($entries{$key}{'wins'} > $hibracket) { $hibracket = $entries{$key}{'wins'}; }
+	}
+	
+	#Loop through the brackets, set them, then pair them
+	#creates a global hash called %bracket that can be used by both functions
+	$x = $hibracket;
+	print "Highest bracket is:".$hibracket."<br>";
+	while ($x > -1) {
+
+		print "<br><br>Now setting bracket $x<br>";
+		%bracket = setbracket($x);
+		my $nteams = keys %bracket;
+		print $nteams." total teams in the $x win bracket<br>";
+
+		#set SOP
+		foreach my $key ( keys %bracket ) {
+			$bracket{$key}{'SOP'} = $entries{$key}{'SOP'};
+		}
+		
+		#initialize opponent to zero
+		foreach my $key (sort {$entries{$a}->{'SOP'} <=> $entries{$b}->{'SOP'}} keys(%bracket)) {
+			print $entries{$key}{'code'}." wins:".$entries{$key}{'wins'}." SOP: ".$entries{$key}{'SOP'}." side due:".$entries{$key}{'sidedue'}."<br>";
+			$entries{$key}{'opponent'}=0;
+		}
+
+		#do the actual pairing
+		my $outcome = pairbracket;
+		print "Outcome is: ".$outcome."<br>";
+		if ($outcome eq "Fail") { print "Failed."; last; }
+		
+		#pairbracket will return "Fail" if it can't do it
+		#if it fails, 
+		#(1) try the "just pair it" bracket option
+		#(2) see if there's a pullup, and if there is, pull up someone else
+		#(3) if there's not a pullup, pull up 2 more teams and try again
+		#(4) if that doesn't work collapse it with the nearest bracket
+		#(5) if that doesn't work, collapse all bracekts and try the "just pair it" option
+		#(6) all else has failed, so kick it over to Palmer's thing that doesn't honor school and side constraints
+
+		$x--;
+	}
+
+#PAIRINGS ARE DONE, NOW MARK WHICH TEAM IS IN WHICH BRACKET
+
+	my $bracket_value;
+	foreach my $key ( keys %entries ) {
+		$bracket_value = $entries{$key}{'wins'};
+		if ( $entries{$entries{$key}{'opponent'}}{'wins'} > $bracket_value ) { $bracket_value = $entries{$entries{$key}{'opponent'}}{'wins'}; }
+		unless ( $bracket_value ) { $bracket_value = 0; }
+		$entries{$key}{'bracket'} = $bracket_value;
+		$entries{$entries{$key}{'opponent'}}{'bracket'} = $bracket_value;
+	}	
+
+#SET SIDES IF IT'S AN ODD NUMBERED ROUND USING THE SERPENTINE THING
+	my $switch = 0;
+	my $oppside = 1;
+	foreach my $key (sort {$entries{$a}->{'seed'} <=> $entries{$b}->{'seed'}} keys(%entries)) {
+		if ($key > -1 and $entries{$key}{'sidedue'} == 0 and $entries{$key}{'opponent'} != -1 ) {
+			$switch++;
+			if ( $switch > 2 ) { $switch = 1; }
+#			print "Team: ".$key." ".$entries{$key}{'code'}." seed: ".$entries{$key}{'seed'}." side set to: ".$switch."<br>";
+			$entries{$key}{'sidedue'} = $switch;
+			my $opponent = $entries{$key}{'opponent'};
+			$oppside = 1;
+			if ( $switch == 1 ) { $oppside = 2; }
+			$entries{$opponent}{'sidedue'} = $oppside;
+		}
+	}
+
+#ERASE ANY CURRENT ROUND INFO AND SAVE
+erase_current_round;
+saveit;
+	
+	sub setbracket {
+#		print "in setbracket sub<br>";
+		
+		#receives a bracket to fill, returns a hash with teams in that bracket
+		
+		my ($winbracket) = @_;
+		my %team;
+		my $totalentries = keys %entries;	#total teams in the event; necessary to test for the last bracket	
+		
+		#populate the bracket
+		foreach my $key ( keys %entries ) {
+#			print "team: ".$entries{$key}{'code'}." wins:".$entries{$key}{'wins'}." opponent:".$entries{$key}{'opponent'}."<br>";
+			if ($entries{$key}{'wins'} == $winbracket and $entries{$key}{'opponent'} == 0) { 
+			$team{$key}{'side'} = $entries{$key}{'sidedue'}; 
+			$entries{$key}{'opponent'} = -999;
+			}
+		}
+
+		#loop and pull up until the bracket is even
+		my $bracketeven = 0;
+		my $brackettries = 0;
+		while ( $bracketeven == 0 ) {
+	
+			#count the number of tries
+			$brackettries++;
+		
+			#count total, aff, and neg teams	
+			my $nteams = keys %team;
+			my $aff = 0;
+			my $neg = 0;
+								
+			foreach my $key ( keys %team ) {
+				if ($team{$key}{'side'} == 1) { $aff++; }
+				if ($team{$key}{'side'} == 2) { $neg++; }
+			}
+	
+			#need to know how many teams have already been paired so you can see if this is the last bracket			
+			my $paired_already = 0;			
+			foreach my $key ( keys %entries ) {
+				if ($entries{$key}{'opponent'} != 0) { $paired_already++; }
+			}
+			
+			#test for an even bracket in an odd round
+			if ($oddround == 1 and (int($nteams/2) == $nteams/2)) { $bracketeven = 1; }
+			#test for an even bracekt in an even round
+			if ($oddround == 0 and $aff == $neg) { $bracketeven = 1; }
+			#test for this being the last bracket and needing a bye
+#			print "Total entries:".$totalentries." paired already:".$paired_already."<br>";
+			if ($paired_already == $totalentries) { $bracketeven = 1; }
+			
+#			print "oddround:".$oddround." n teams:".$nteams." bracket even marker:".$bracketeven."<br>";
+			
+			#exit if the bracket is even
+			if ( $bracketeven == 1 ) { last; }
+#			print "Need to pull up<br>";
+			
+			#kick into "make it work" mode if can't even the bracket
+			if ( $brackettries > 100 ) { last; }
+		
+			#bracket not even, so pull up
+			my $sidetopull = 0;
+			if ($oddround == 0 and $aff < $neg) {$sidetopull = 1;}
+			if ($oddround == 0 and $aff > $neg) {$sidetopull = 2;}
+			my $pullup = pullup($sidetopull);
+#			print "pulled up ". $pullup." ".$entries{$pullup}{'code'}."<br>";
+			$team{$pullup}{'side'} = $entries{$pullup}{'sidedue'} ;
+			$entries{$pullup}{'opponent'} = -999; #stores a temporary opponent so they won't get pulled up again
+#			print "now this many teams in bracket:".keys %team; print "<br>";
+		}
+
+#		print "exiting setbracket sub<br>";		
+		return %team;
+	}
+
+	sub pullup {
+
+		print "Finding a pullup<br>";
+			
+		#identifies which side you need to pull up; zero means either is OK
+		my ($side) = @_;
+		
+		foreach my $key (sort { $entries{$b}->{'wins'} <=> $entries{$a}->{'wins'} || $entries{$b}->{'oppseed'} <=> $entries{$a}->{'oppseed'} } keys(%entries)) {
+
+			#make sure they are on the right side of the bracket
+			my $sidematch=1;
+			if ( $side>0 and $entries{$key}{'sidedue'} != $side ) { $sidematch = 0; }
+
+			#make sure they can debate at least one team in the bracekt
+			my $allconflicts = 0;
+			foreach my $key2 ( keys %bracket ) {
+				my $oktodebate=1;
+				if ( hasconflict($key, $key2) == 1 ) { $oktodebate = 0; }
+				if ( $side > 0 and $entries{$key}{'sidedue'} == $bracket{$key2}{'side'} ) { $oktodebate = 0;  }
+				if ( $oktodebate == 1 ) { $allconflicts = 0; last; }
+			}
+			
+			#print $entries{$key}{'code'}." Side match: ".$sidematch." opponent:".$entries{$key}{'opponent'}." all conflicted:".$allconflicts."<br>";
+			
+			if ( $entries{$key}{'opponent'} == 0 and $sidematch == 1 and $allconflicts == 0 ) {
+				return $key;
+			}
+			
+		}
+	}
+	
+	sub pairbracket {
+
+		#do a normal bracket pairing
+		
+		hi_lo_bracket_pair;
+			
+		#make sure they're all paired, and if they are, bail
+		
+		if (unpaired == 0) { return "Success"; }
+		
+		#not all teams have been paired, so see if there are an odd number of teams in the bracket
+		#and there is only 1 unpaired team, and if so, assign a bye.  This should work so long as ONLY the last bracket 
+		#has an odd number of teams, but I think the bracketmaker takes care of that
+		
+		my $nteams = keys %bracket;	#figure out how many teams are in the bracket; you'll use this below	
+						
+		if (unpaired == 1) {
+			if ( int($nteams/2) != $nteams/2 ) {
+				assignbye;
+			}
+		}
+
+		if (unpaired == 0) { return "Success"; }
+		
+		print "In problem child<br>";
+						
+		#Now you know it got to the last 2 teams and got stuck, so you have to roll back some existing pairings
+		#Sort the bracket in reverse order, and unpair one debate at a time.  Then pair the problem team, and then
+		#finish the bracket with a normal hi-lo pair.
+
+		my $problemchild;
+		foreach my $key ( sort { $bracket{$a}->{'SOP'} <=> $bracket{$b}->{'SOP'} } keys(%bracket) ) {
+			if ($entries{$key}{'opponent'} == 0) { $problemchild = $key; last; }
+		}
+		print "Problem child is: ".$entries{$problemchild}{'code'}."<br>";
+		
+		my $n_bracket_tries=0;
+		my $n_problemchild_tries;
+		
+		while ( unpaired > 0 ) {
+		
+			$n_bracket_tries++; if ( $n_bracket_tries > $nteams ) { return "Fail"; }
+
+			while ($entries{$problemchild}{'opponent'} == 0) {
+			
+				$n_problemchild_tries++; if ($n_problemchild_tries > $nteams) { return "Fail"; }
+				
+				foreach my $key ( sort { $bracket{$b}->{'SOP'} <=> $bracket{$a}->{'SOP'} } keys(%bracket) ) {
+					if ($key != $problemchild and $entries{$key}{'opponent'} > 0 ) {
+						print "Unpairing ".$entries{$key}{'code'}." vs ".$entries{$entries{$key}{'opponent'}}{'code'}."<br>";
+		 				$entries{$entries{$key}{'opponent'}}{'opponent'} = 0;
+						print $entries{$entries{$key}{'opponent'}}{'code'}." opponent:".$entries{$entries{$key}{'opponent'}}{'opponent'};
+						$entries{$key}{'opponent'} = 0;
+						print " ".$entries{$key}{'code'}. " opponent:".$entries{$key}{'opponent'}."<br>";
+						last;
+					}
+				}
+			
+				hi_lo_single_pair($problemchild);
+			
+			}
+			
+			hi_lo_bracket_pair;
+		}
+		
+		#can only get here if unpaired now == 0
+		return "Success";	
+				
+	}
+	
+	sub hi_lo_bracket_pair {
+	
+		#start from the top of the bracket, and then go backwards up from the bottom of the bracket looking for an opponent who fits
+		#pair if it's a match
+		
+		#major conceptual idea:  WHY do we start at the top of the AFF bracket?  What if the top of the NEG bracket is a lower seed?
+		#In fact, why don't we do the high/low starting with the highest unpaired seed REGARDLESS of whether they are AFF or NEG?
+		#The coding is easier AND its more consistent with the HiLo pair philosophy
+		
+		#for future reference: http://stackoverflow.com/questions/9660284/how-do-i-sort-a-hash-array-by-value-in-perl
+		#lets you sort multiple ways, but you gotta put it in an array; see also Tie::SortHash
+		
+		foreach my $key ( sort { $bracket{$a}->{'SOP'} <=> $bracket{$b}->{'SOP'} } keys(%bracket) ) {
+
+			#if it's an even round, only loop through the aff
+			my $sidemarker = 1;
+			if ($oddround == 0 and $bracket{$key}{'side'} == 2) { $sidemarker = 0; }
+
+			if ( $entries{$key}{'opponent'} == 0 and $sidemarker == 1 ) {
+				foreach my $oppkey (sort { $bracket{$b}->{'SOP'} <=> $bracket{$a}->{'SOP'} } keys(%bracket)) {
+					print "Trying to pair ".$entries{$key}{'code'}." vs ".$entries{$oppkey}{'code'}." ";
+					my $canpair = 1;
+					if ($entries{$oppkey}{'opponent'} != 0) { $canpair = 0; print $oppkey." already paired.<br>";}
+					if (hasconflict($key, $oppkey) == 1) { $canpair = 0; print $oppkey." teams have conflict.<br>";} 
+					if ($key == $oppkey) { $canpair = 0; print " Same team.<br>";} 
+					if ( $oddround == 0 and $bracket{$key}{'side'} == $bracket{$oppkey}{'side'} ) { $canpair = 0; print $entries{$oppkey}{'code'}." sides don't match.<br>";} 
+					if ( $canpair == 1 ) {
+						$entries{$key}{'opponent'} = $oppkey;
+						$entries{$oppkey}{'opponent'} = $key;
+						print "WORKED!  Pairing ".$entries{$key}{'code'}." vs ".$entries{$oppkey}{'code'}."<br>";
+						last;
+					}
+				}
+			}
+		}
+	
+	}
+	
+	sub hi_lo_single_pair {
+	
+		my ($team_to_pair) = @_;	
+		print "Now trying to pair a single team in the bracket; team is ".$entries{$team_to_pair}{'code'}."<br>";
+		
+		foreach my $oppkey (sort { $bracket{$b}->{'SOP'} <=> $bracket{$a}->{'SOP'} } keys(%bracket)) {
+			my $canpair = 1;
+			if ($entries{$oppkey}{'opponent'} != 0) { $canpair = 0; print $entries{$oppkey}{'code'}." NO; already paired.<br>";}
+			if (hasconflict($team_to_pair, $oppkey) == 1) { $canpair = 0; print $entries{$oppkey}{'code'}." NO; teams have conflict.<br>";} 
+			if ($team_to_pair == $oppkey) { $canpair = 0; print $entries{$oppkey}{'code'}." NO; is same team.<br>";} 
+			if ( $oddround == 0 and $entries{$team_to_pair}{'sidedue'} == $entries{$oppkey}{'sidedue'} ) { $canpair = 0; print $entries{$oppkey}{'code'}." NO; sides don't match.<br>";} 
+			if ( $canpair == 1 ) {
+				$entries{$team_to_pair}{'opponent'} = $oppkey;
+				$entries{$oppkey}{'opponent'} = $team_to_pair;
+				print "Pairing ".$team_to_pair." vs ".$oppkey."<br>";
+				last;
+			}
+		}
+	
+		return 0;
+		
+	}
+	
+	
+	sub assignbye {
+	
+		foreach my $key ( keys %bracket ) {
+			if ($entries{$key}{'opponent'} == 0) { $entries{$key}{'opponent'} = -1; }
+		}
+	
+	}
+	
+	sub unpaired {
+	
+		my $returnvalue = 0;
+		
+		foreach my $key ( keys %bracket ) {
+			if ($entries{$key}{'opponent'} == 0) { $returnvalue++; }
+		}
+
+		print "unpaired: ".$returnvalue."<br>";
+		
+		return $returnvalue;
+		
+	}
+
+	sub hasconflict {
+
+		my ($team1, $team2) = @_;	
+		my $returnvalue = 0;
+
+		if ($precluded{$team1}{$team2} == 1) { $returnvalue = 1; }
+
+		if ($precluded{$team2}{$team1} == 1) { $returnvalue = 1; }
+		
+		return $returnvalue;
+
+	}
+	
+	sub erase_current_round {
+
+		#Out with the old.	
+
+		Tab::BallotValue->set_sql( delete_round => "
+			delete ballot_value from ballot_value, ballot, panel
+			where panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.id = ballot_value.ballot
+		");
+
+		Tab::Ballot->set_sql( delete_round => "
+			delete ballot from ballot, panel
+			where panel.round = ?
+			and panel.id = ballot.panel
+		");
+
+		Tab::Panel->set_sql( delete_round => "
+			delete from panel where round = ?
+		");
+
+		Tab::BallotValue->sql_delete_round->execute($round->id);	
+		Tab::Ballot->sql_delete_round->execute($round->id);
+		Tab::Panel->sql_delete_round->execute($round->id);
+
+	}
+	
+	sub saveit {
+		my $letter; my $pullup; my $position; my $bye; my $opponent;
+		foreach my $key ( keys %entries ) {		
+			if ( $key > -1 and ($entries{$key}{'sidedue'} == 1 or $entries{$key}{'opponent'} == -1 ) ) {
+				#create the panel
+				$letter++;
+				$bye = 0; 
+				if ( $entries{$key}{'opponent'} == 1 ) { $bye = 1; }
+				my $panel = Tab::Panel->create({
+					round => $round->id,
+					bye => $bye,
+					letter => $letter,
+					bracket => $entries{$key}{'bracket'}
+				});
+				
+				#save aff ballot
+				$pullup = 0;
+				$opponent = $entries{$key}{'opponent'};
+				if ( $entries{$key}{'wins'} < $entries{$opponent}{'wins'} ) { $pullup = 1; }
+				
+				Tab::Ballot->create({
+					panel        => $panel->id,
+					judge        => 0,
+					entry        => $key,
+					side		 => 1,
+					seed         => $entries{$key}{'seed'},
+					pullup       => $pullup
+				});
+				
+				#save neg ballot
+				if ( $bye == 0 ) {
+					$pullup = 0;
+					if ( $entries{$key}{'wins'} > $entries{$opponent}{'wins'} ) { $pullup = 1; }
+					Tab::Ballot->create({
+						panel        => $panel->id,
+						judge        => 0,
+						entry        => $opponent,
+						side		 => 2,
+						seed         => $entries{$opponent}{'seed'},
+						pullup       => $pullup
+					});
+				}
+			}		
+		}
+	}
+
+	print "<br>";
+		
+	#printing the sorted seeds; just for debugging
+	print "<div class='left huge'>";
+	print "<table cellpadding='3' width='100%' class='tablesorter'>";
+	print "<tr><td>key</td><td>code</td><td>school</td><td>wins</td><td>seed</td><td>oppseed</td><td>SOP</td><td>sideddue</td><td>opponent</td></tr>";
+	foreach my $key (sort {$entries{$a}->{'seed'} <=> $entries{$b}->{'seed'}} keys(%entries)) {
+		if ($key) {
+		print "<tr>";
+		print "<td>".$key."</td>";
+		print "<td>".$entries{$key}{'code'}."</td>";
+		print "<td>".$entries{$key}{'school'}."</td>";
+		print "<td>".$entries{$key}{'wins'}."</td>";
+		print "<td>".$entries{$key}{'seed'}."</td>";
+		print "<td>".sprintf("%.3f", $entries{$key}{'oppseed'})."</td>";
+		print "<td>".sprintf("%.3f", $entries{$key}{'SOP'})."</td>";
+		print "<td>".$entries{$key}{'sidedue'}."</td>";
+		print "<td>".$entries{$key}{'opponent'}." ".$entries{$entries{$key}{'opponent'}}{'code'}."</td>";
+		print "</tr>";
+		}
+	}
+	print "</table>";
+	
+	print "<br>";
+	
+	print "<table cellpadding='3' width='100%' class='tablesorter'>";
+	print "<tr><td>Aff</td><td>W-Sd-SOP</td><td>Neg</td><td>W-Sd-SOP</td></tr>";
+	foreach my $key (sort { $entries{$b}->{'bracket'} <=> $entries{$a}->{'bracket'} || $entries{$b}->{'SOP'} <=> $entries{$a}->{'SOP'} } keys(%entries)) {
+		if ( $key and ($entries{$key}{'sidedue'} == 1 or $entries{$key}{'opponent'} == -1 ) ) {
+		print "<tr>"; 
+		print "<td>".$entries{$key}{'code'}."</td>";
+		print "<td>".$entries{$key}{'wins'}."-".$entries{$key}{'seed'}."-".sprintf("%.3f", $entries{$key}{'SOP'})."</td>";
+		my $key2 = $entries{$key}{'opponent'};
+		print "<td>".$entries{$key2}{'code'}."</td>";
+		print "<td>".$entries{$key2}{'wins'}."-".$entries{$key2}{'seed'}."-".sprintf("%.3f", $entries{$key2}{'SOP'})."</td>";
+		print "</tr>";
+		}
+	}
+	print "</table>";
+
+	print "All done and saved!<br>";
+	$end = time();
+	print "<br>processing time:  "; printf("%.2f\n", $end - $start);
+
+	print "</div>";
+	
+</%perl>
