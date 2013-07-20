@@ -9,6 +9,11 @@ function autoWin(input,e,aff,neg,affid,negid) {
 
     var keyCode = e.keyCode; 
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
+	var acceptable = ["a","A",1,"p","P","g","G",3,"n","N","c","C","o","O"];
+
+	if (!containsElement(acceptable,input.value)) {
+		input.value = null;
+	}
 
 	if (!containsElement(filter,keyCode)) {
 
@@ -18,20 +23,73 @@ function autoWin(input,e,aff,neg,affid,negid) {
 			$('.neg').hide();
 			var winner = document.getElementById("winner");
 			winner.value = affid;
-        	input.form[(getIndex(input)+1) % input.form.length].focus();
+			lowPointWin(1);
+			changeFocus(input);
 		}
 
-        if (input.value == "N" || input.value == "n" || input.value == 1 || input.value == "c" || input.value == "C" || input.value == "o" || input.value == "O") {
+        if (input.value == "N" || input.value == "n" || input.value == 3 || input.value == "c" || input.value == "C" || input.value == "o" || input.value == "O") {
 			input.value = neg;
 			$('.neg').show();
 			$('.aff').hide();
 			var winner = document.getElementById("winner");
 			winner.value = negid;
+			lowPointWin(2);
+			changeFocus(input);
+		}
 
-        	input.form[(getIndex(input)+1) % input.form.length].focus();
+	}
+
+	function lowPointWin(side) { 
+
+		var neg_points = document.getElementById("points_2").value;
+		var neg_ranks = document.getElementById("ranks_2").value;
+
+		var aff_points = document.getElementById("points_1").value;
+		var aff_ranks = document.getElementById("ranks_1").value;
+
+		if (side == 2) { 
+
+			if (aff_points > neg_points) { 
+				$('.lpw').show();
+			}
+
+			if (neg_points > aff_points) { 
+				$('.lpw').hide();
+			}
+
+			if (aff_ranks < neg_ranks) { 
+				$('.lowrank').show();
+				$('.submit').hide();
+			}
+
+			if (aff_ranks > neg_ranks) { 
+				$('.lowrank').hide();
+				$('.submit').show();
+			}
 
 		}
 
+		if (side == 1) { 
+
+			if (neg_points > aff_points) { 
+				$('.lpw').show();
+			}
+
+			if (neg_points < aff_points) { 
+				$('.lpw').hide();
+			}
+
+			if (neg_ranks < aff_ranks) { 
+				$('.lowrank').show();
+				$('.submit').hide();
+			}
+
+			if (aff_ranks < neg_ranks) { 
+				$('.lowrank').hide();
+				$('.submit').show();
+			}
+
+		}
 
 	}
 
@@ -45,10 +103,19 @@ function autoWin(input,e,aff,neg,affid,negid) {
         return found;
     }    
 
+	function changeFocus(input) { 
+		var next_index = getIndex(input) + 1;
+        while(! input.form[next_index].tabIndex) {
+			next_index = next_index + 1;
+			if (next_index > input.form.length) break;
+		}
+       	input.form[next_index].focus();
+	}
+
     function getIndex(input) {
         var index = -1, i = 0, found = false;
         while (i < input.form.length && index == -1)
-        if (input.form[i] == input)index = i; 
+        if (input.form[i] == input) index = i; 
         else i++; 
         return index;
     }    
@@ -61,7 +128,6 @@ function autoPoints(input,len,e,side) {
     var keyCode = e.keyCode; 
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
 
-
 	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
 
         if (input.value != 30) {
@@ -72,7 +138,8 @@ function autoPoints(input,len,e,side) {
 			input.value = number;
 		}
 
-        input.form[(getIndex(input)+1) % input.form.length].focus();
+		changeFocus(input);
+		totalPoints(side);
 
 	} else if (len == 6 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
 
@@ -102,7 +169,8 @@ function autoPoints(input,len,e,side) {
 			input.value = number;
 		}
 
-        input.form[(getIndex(input)+1) % input.form.length].focus();
+		changeFocus(input);
+		totalPoints(side);
 
 	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
 
@@ -125,9 +193,37 @@ function autoPoints(input,len,e,side) {
         if (len == 2 && input.value != 100) {
             input.value = input.value.slice(0, len);
         }
+
+		changeFocus(input);
+		totalPoints(side);
     
-        input.form[(getIndex(input)+1) % input.form.length].focus();
     }    
+
+	function totalPoints(side) { 
+
+		var class_target = "points_" + side;
+		var points_array = document.getElementsByClassName(class_target);
+		var total = 0;
+
+		for(var i=0;i<points_array.length;i++){
+			if(parseFloat(points_array[i].value)) total += parseFloat(points_array[i].value);
+		}
+
+		var points_total = document.getElementById(class_target);
+		points_total.value = total;
+
+		var class_target = "ranks_" + side;
+		var ranks_array = document.getElementsByClassName(class_target);
+		var total = 0;
+
+		for(var i=0;i<ranks_array.length;i++){
+			if(parseFloat(ranks_array[i].value)) total += parseFloat(ranks_array[i].value);
+		}
+
+		var ranks_total = document.getElementById(class_target);
+		ranks_total.value = total;
+		return;
+	}
 
     function containsElement(arr, ele) {
         var found = false, index = 0; 
@@ -138,6 +234,17 @@ function autoPoints(input,len,e,side) {
         index++;
         return found;
     }    
+
+	function changeFocus(input) { 
+
+		var next_index = getIndex(input) + 1;
+
+        while(input.form[next_index].tabIndex == -1) {
+			next_index = next_index + 1;
+			if (next_index > input.form.length) break;
+		}
+       	input.form[next_index].focus();
+	}
 
     function getIndex(input) {
         var index = -1, i = 0, found = false;
@@ -167,7 +274,7 @@ function autoTab(input,len,e) {
 			input.value = number;
 		}
 
-        input.form[(getIndex(input)+1) % input.form.length].focus();
+		changeFocus(input);
 
 	} else if (len == 6 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
 
@@ -197,7 +304,7 @@ function autoTab(input,len,e) {
 			input.value = number;
 		}
 
-        input.form[(getIndex(input)+1) % input.form.length].focus();
+		changeFocus(input);
 
 	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
 
@@ -221,7 +328,7 @@ function autoTab(input,len,e) {
             input.value = input.value.slice(0, len);
         }
     
-        input.form[(getIndex(input)+1) % input.form.length].focus();
+		changeFocus(input);
     }    
 
     function containsElement(arr, ele) {
@@ -233,6 +340,18 @@ function autoTab(input,len,e) {
         index++;
         return found;
     }    
+
+	function changeFocus(input) { 
+
+		var next_index = getIndex(input) + 1;
+
+        while(input.form[next_index].tabIndex == -1) {
+			next_index = next_index + 1;
+			if (next_index > input.form.length) break;
+		}
+       	input.form[next_index].focus();
+	}
+
 
     function getIndex(input) {
         var index = -1, i = 0, found = false;
