@@ -38,4 +38,38 @@ alter table ballot drop countmenot;
 alter table ballot add seed int;
 alter table ballot add pullup bool;
 
+alter table session drop school;
+alter table session drop limited;
+alter table session drop circuit;
+alter table session drop entry_only;
+alter table session add judge_group int;
+
+delete from tourn_setting where tag like "sweep_%";
+delete from tourn_setting where tag like "drop_%";
+delete from tourn_setting where tag="ask_experience";
+delete from tourn_setting where tag="chair_ballot_message";
+delete from tourn_setting where tag="default_qualification";
+delete from tourn_setting where tag="elim_method_basis";
+delete from tourn_setting where tag="judge_quality_system";
+delete from tourn_setting where tag="master_printouts";
+delete from tourn_setting where tag="mfl_flex_finals";
+delete from tourn_setting where tag="num_judges";
+delete from tourn_setting where tag="publish_paradigms";
+delete from tourn_setting where tag like "points_%";
+
+delete from tourn_setting where tag="schemat_display";
+delete from tourn_setting where tag="schemat_school_code";
+delete from tourn_setting where tag="truncate_ranks_to";
+delete from tourn_setting where tag="truncate_to_smallest";
+delete from tourn_setting where tag="mfl_time_violation";
+delete from tourn_setting where tag="noshows_never_break";
+delete from tourn_setting where tag="";
+delete from tourn_setting where tag="";
+delete from tourn_setting where tag="";
+delete from tourn_setting where tag="";
+delete from tourn_setting where tag="";
+delete from tourn_setting where tag="";
+delete from tourn_setting where tag="";
+delete from tourn_setting where tag="";
+delete from tourn_setting where tag="";
 
