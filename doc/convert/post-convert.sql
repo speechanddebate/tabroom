@@ -63,13 +63,5 @@ delete from tourn_setting where tag="truncate_ranks_to";
 delete from tourn_setting where tag="truncate_to_smallest";
 delete from tourn_setting where tag="mfl_time_violation";
 delete from tourn_setting where tag="noshows_never_break";
-delete from tourn_setting where tag="";
-delete from tourn_setting where tag="";
-delete from tourn_setting where tag="";
-delete from tourn_setting where tag="";
-delete from tourn_setting where tag="";
-delete from tourn_setting where tag="";
-delete from tourn_setting where tag="";
-delete from tourn_setting where tag="";
-delete from tourn_setting where tag="";
+delete from tourn_setting where tag="results";
 
