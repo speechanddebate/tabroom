@@ -162,6 +162,13 @@ function autoPoints(input,len,e,side) {
 			number = number + 20;
 			number += .05;
 			input.value = number;
+		} else if (/7$/.test(input.value)) { 
+			var number = input.value.slice(0,2);
+			number = number * 1;
+			number = number / 10;
+			number = number + 20;
+			number += .05;
+			input.value = number;
 		} else { 
 			var number = input.value.slice(0,1);
 			number = number * 1;

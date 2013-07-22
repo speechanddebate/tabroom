@@ -1,197 +1,247 @@
 <%args>
-	$tourn
-	$judge_id
 	$account
-	$all => undef
-	$panel_id
-	$timeslot_id
-	$check => undef
-	$audit => "Rank"
-	$next  => undef
-	$display => undef
+	$panel_id => undef
+	$judge_id => undef
 </%args>
 <%init>
 
-	my $msg;
-	my $err;
-	my $rank_err;
+    my $panel = Tab::Panel->retrieve($panel_id);
+    my $judge = Tab::Judge->retrieve($judge_id);
 
-	my $judge = Tab::Judge->retrieve($judge_id);
-	my $judge_code = $judge->code;
-	$judge_code = $judge->first." ".$judge->first if $display eq "name";
+    unless ($panel && $judge) { 
+        my $err = "No ballots found for that judge and that panel.";
+        $m->redirect("index.mhtml?err=$err");
+    }   
 
-	my $panel = Tab::Panel->retrieve($panel_id);
+    my @ballots = Tab::Ballot->search( judge => $judge->id, panel => $panel->id);
+	my @ballot_values = $m->comp("/funclib/panel_scores.mas", panel => $panel, judge => $judge);
 
-	my $truncate = $panel->round->event->setting("truncate_ranks") if $panel->round->event->setting("truncate_fill");
+    my $type = $panel->round->event->type;
+    my $tiebreaks = $panel->round->tb_set;
 
-	my $no_points++ if $panel->round->event->setting("points_later") && $audit ne "Points";
-	my $no_ranks++ if $panel->round->event->setting("points_later") && $audit eq "Points";
+    my $wins;
+    my $points;
+    my $ranks;
 
-	my @ballots = Tab::Ballot->search( judge => $judge_id, panel => $panel_id);
-	my @ballot_values = $m->comp('/funclib/panel_ballot_values.mas', panel => $panel, judge => $judge);
+	foreach my $ballot (@ballots) { 
 
-	my %values_by_ballot = ();
-
-	foreach my $value (@ballot_values) {
-		push @{$values_by_ballot{$value->ballot->id}}, $value;
+		if ($ARGS{"rfd"}) { 
+			Tab::BallotValue->create({
+				tag => "rfd",
+				ballot => $ballot->id,
+				content => $ARGS{"rfd"}
+			});
+		}
 	}
 
-	my @missing;
-	my @doubled;
-	my %ranks;
+    foreach my $tb ($tiebreaks->tiebreaks) {
+        $ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals" || $tb->name eq "opp_ranks");
+        $wins++ if ($tb->name eq "opp_wins" || $tb->name eq "winloss");
+        $points++ if ($tb->name eq "points" || $tb->name eq "opp_points") && $type ne "speech";
+    }
 
+    my $tourn = $judge->judge_group->tourn;
 
-	my $biggest_rank = scalar @ballots;
-	my @too_large;
+    my $mfl_tv++ if $tiebreaks->setting("mfl_time_violation");
+    my $noshow++ if $tiebreaks->setting("noshows_never_break");
 
-	my $second_entry;
-	my $alert_rank;
-	my $alert_points;
-	my $alert_noshow;
-	my $alert_tv;
+    my $max_points = $panel->round->event->setting("max_points");
+    my $min_points = $panel->round->event->setting("min_points");
+	$min_points = 0 unless $min_points;
 
-	foreach my $ballot (@ballots) {
+    my $point_increments = $panel->round->event->setting("point_increments");
+    my $point_ties = $panel->round->event->setting("point_ties");
 
-		my @values = @{$values_by_ballot{$ballot->id}} if $values_by_ballot{$ballot->id};
+	my $errs;
 
-		next if $ballot->entry->dropped == 1;
-		my $ballot_id = $ballot->id;
+	my %ballot_values = ();
+	my %ballot_tv = ();
+	my %ballot_noshow = ();
 
-		# anytime a rank changes the ballot needs to be error free against
-		# the values already in the database in order to clear;
+	if ($ranks) { 
 
-		$ballot->audit(0);
+		my %rank_taken;
+		my %rank_points;
 
-		my $rank;
-		my $points;
+		foreach my $ballot (@ballots) { 
+			
+			$ballot_noshow{$ballot->id} = $ARGS{"noshow_".$ballot->id};
+			$ballot_tv{$ballot->id} = $ARGS{"tv_".$ballot->id};
 
-		my $rank_value = $ARGS{"rank_$ballot_id"};
-		my $points_value = $ARGS{"points_$ballot_id"};
+			my $rank = $ARGS{$ballot->id."_ranks"};
 
-		$rank_value = $truncate unless $rank_value;
+			$errs .= "<p>Rank missing</p>" unless $rank || $ballot_noshow{$ballot->id};
+			next unless $rank;
 
-		unless ($ballot->account) { 
+			$errs .= "<p>Rank must be a number</p>" unless ($rank eq $rank + 0);
+			$errs .= "<p>You have repeated the rank $rank.  All ranks must be unique.</p>" if $rank_taken{$rank};
+			$errs .= "<p>Rank $rank is outside of range.</p>" if $rank < 1 || $rank > scalar @ballots;
 
-			while (@values) { 
-				my $value = shift @values;
-
-				if ($no_points) { 
-					$value->delete unless $value->tag eq "points";
-				} elsif ($no_ranks) { 
-					$value->delete unless $value->tag eq "rank";
-				} else { 
-					$value->delete;
-				} 
-
+			$rank_taken{$rank}++;
+			$ballot_values{$ballot->id."_rank"} = $rank;
+			
+			if ($points) { 
+				$rank_points{$rank} = $ARGS{$ballot->id."_points"};
 			}
 
 		}
 
-		if ($ballot->account && $ballot->account->id == $account->id && not defined $account->site_admin) { 
-			$err = "You did the first entry. You cannot do the second.  Hand the ballot to someone else.";
-			$m->redirect("index.mhtml?all=$all&timeslot_id=$timeslot_id&judge_code=$judge_code&judge_id=$judge_id&rank_err=$rank_err&err=$err&check=$check&audit=$audit");
+		my $current;
+
+		foreach my $rk (reverse sort keys %rank_points) { 
+			$errs .= "<p>Entry ranked $rk has lower points than a worse-ranked ballot (".$rank_points{$rk}." vs ".$current.")</p>" if $rank_points{$rk} < $current;
+			$current = $rank_points{$rk};
+		}
+
+	}
+
+	my %ballot_points = ();
+
+	if ($points) { 
+
+		my %points_taken;
+
+		foreach my $ballot (@ballots) { 
+
+			my $points = $ARGS{$ballot->id."_points"};
+
+			$errs .= "<p>Points missing</p>" if not defined $points || $ballot_noshow{$ballot->id};
+			next unless $points;
+
+			$points = int($points + 0.5) if $point_increments eq "whole";
+
+			if ($point_increments eq "tenths") { 
+				$points = $points * 10;
+				$points = int($points + 0.5);
+				$points = $points/10;
+			}
+
+			if ($point_increments eq "half") { 
+				my $rounded_points = $points + .5;
+				$rounded_points = $rounded_points - ($points % .5);
+				$points = $rounded_points;
+			}
+
+			$errs .= "<p>$points Points must be a number</p>" unless ($points eq $points + 0);
+
+			$errs .= "<p>Tied points forbidden: you have two speakers with points $points </p>"  if $points_taken{$points} && $point_ties < 1;
+			$errs .= "<p>Points $points are outside of range</p>" if $points < $min_points || $points > $max_points;
+
+			$points_taken{$points}++;
+			$ballot_values{$ballot->id."_points"} = $points;
+		}
+	}
+
+	if ($errs) { 
+
+		$m->redirect("index.mhtml?timeslot_id=".$panel->round->timeslot->id."&judge_id=$judge_id&flight=".$panel->flight."&errs=$errs&err=Trouble in Paradise!");
+
+	} else { 
+
+		my $ballot_err;
+
+		my $audit = 0;
+		$audit = 1 if $panel->round->event->judge_group->setting("audit_method") eq "none";
+
+		if (@ballot_values) { 
+
+			my %ballot_rank;
+			my %ballot_points;
+
+			foreach my $bv (@ballot_values) { 
+				$ballot_rank{$bv->ballot->id} = $bv->value if $bv->tag eq "rank";
+				$ballot_points{$bv->ballot->id} = $bv->value if $bv->tag eq "points";
+			}
+
+			foreach my $ballot (@ballots) { 
+				$ballot_err = "Time violations differed for results" if $ballot->tv != $ballot_tv{$ballot->id};
+				$ballot_err = "No-shows differed for results" if $ballot->noshow != $ballot_noshow{$ballot->id};
+			}
+
+			if ($ranks) { 
+				foreach my $ballot (@ballots) { 
+					next if $ballot_rank{$ballot->id} == $ballot_values{$ballot->id."_rank"};
+					$ballot_err .= "Ranks for ".$ballot->entry->code." differed from first entry ".$ballot_values{$ballot->id."_rank"}." vs ". $ballot_rank{$ballot->id} ."<br />";
+				}
+			}
+
+			if ($points) { 
+				foreach my $ballot (@ballots) {   
+					next if $ballot_points{$ballot->id} == $ballot_values{$ballot->id."_points"};
+					$ballot_err .= "Points for ".$ballot->entry->code." differed from first entry ".$ballot_values{$ballot->id."_points"}." vs ".$ballot_points{$ballot->id}." <br />";
+				}
+			}
+
+			$audit = 2 unless ($ballot_err); 
+
 		} 
 
-		foreach my $value (@values) {
+		unless ($audit == 2) { 
 
-			if ($value->tag eq "rank" && $no_ranks < 1) { 
-				$rank = $value;
-				$second_entry++;
-			}
+			#Clear the old cruft
 
-			if ($value->tag eq "points" && $no_points < 1) { 
-				$points = $value if $value->tag eq "points";
-				$second_entry++;
-			}
+			Tab::BallotValue->set_sql( clear_cruft => "
+				delete ballot_value.*
+				from ballot_value, ballot
+				where ballot.panel = ?
+				and ballot.judge = ? 
+				and ballot_value.tag != \"rfd\"
+				and ballot_value.tag != \"comments\"
+				and ballot.id = ballot_value.ballot");
+
+			Tab::BallotValue->sql_clear_cruft->execute($panel->id, $judge->id);
 
 		}
 
-		if ($rank && $no_ranks < 1) { 
-			$alert_rank++ if $second_entry && $rank->value != $rank_value;
-			$rank->value($rank_value);
-			$rank->update;
-		}
-
-		if ($points && $no_points < 1) { 
-			$alert_points++ if $second_entry && $points->value != $points_value && ($no_points < 1 || $points->value > 1);
-			$points->value($points_value);
-			$points->update;
-		}
-
-		$alert_tv++ if $ballot->tv != $ARGS{"tv_$ballot_id"};
-		$alert_noshow++ if $ballot->noshow != $ARGS{"noshow_$ballot_id"};
-
-		unless ($no_ranks || $rank) { 
-			$rank = Tab::BallotValue->create({
-				ballot => $ballot,
-				tag => "rank",
-				value => $rank_value
-			}) if $rank_value;
-		}
-
-		unless ($no_points || $points) { 
-			$points = Tab::BallotValue->create({
-				ballot => $ballot,
-				tag => "points",
-				value => $points_value
-			}) if $points_value;
-		}
-
-
-		$ballot->noshow($ARGS{"noshow_$ballot_id"});
-		$ballot->tv($ARGS{"tv_$ballot_id"});
-		$ballot->update;
-
-		push (@missing, $ballot->entry) unless ($ballot->noshow || $rank || $no_ranks);
-		push (@doubled, $rank->value) if $rank && $ranks{$rank->value} &! ($truncate > 0 && $rank->value == $truncate);	
-		$ranks{$rank->value}++ if $rank;
-		push (@too_large, $rank->value) if $rank && $rank->value > $biggest_rank;
-
-	}
-
-	if ($alert_rank || $alert_points || $alert_tv || $alert_noshow) {
-		$rank_err .= "The second enterer did not have the same RANKS as the first" if $alert_rank;
-		$rank_err .= "The second enterer did not have the same SPEAKER POINTS as the first" if $alert_points;
-		$rank_err .= "The second enterer did not have the same TIME VIOLATIONS as the first" if $alert_tv;
-		$rank_err .= "The second enterer did not have the same NO SHOWS MARKED as the first" if $alert_noshow;
-	} 
-
-	$rank_err .= " on Judge $judge_code ballot <br />" if $rank_err;
-	
-	if ($second_entry && not defined $rank_err) { 
 		foreach my $ballot (@ballots) { 
-			$ballot->audit(1);
-			$ballot->update;
-		}
-	}
 
-	unless (@too_large || @missing || @doubled ) { 
-		foreach my $ballot (@ballots) { 
+			$ballot->audit(1) if $audit > 0;
 			$ballot->account($account->id);
+
+			$ballot->tv($ballot_tv{$ballot->id});
+			$ballot->noshow($ballot_noshow{$ballot->id});
+
 			$ballot->update;
+	
+			unless ($audit == 2) { 
+
+				if ($points) { 
+
+					Tab::BallotValue->create({
+						ballot => $ballot->id,
+						tag => "points",
+						value => $ballot_values{$ballot->id."_points"}
+					});
+
+				}
+
+				if ($ranks) { 
+
+					Tab::BallotValue->create({
+						ballot => $ballot->id,
+						tag => "rank",
+						value => $ballot_values{$ballot->id."_rank"}
+					});
+
+				}
+			}
 		}
+
+		my $yellowmsg;
+		my $greenmsg;
+		my $err;
+
+		if ($ballot_err) { 
+			$err = "Trouble in paradise!";
+		} else { 
+			$yellowmsg = "Ballot first entry complete.  Ready for a doublecheck" unless $audit > 0;
+			$greenmsg = "Ballot entry complete." if $audit > 0;
+		}
+
+		my $next_code = $ARGS{"next_code"};
+
+		$m->redirect("/tabbing/entry/index.mhtml?timeslot_id=".$panel->round->timeslot->id."&judge_code=$next_code&greenmsg=$greenmsg&yellowmsg=$yellowmsg&err=$err&ballot_err=$ballot_err");
+
 	}
-
-	if (@missing) { 
-		$err = " <br>  Ballot for judge $judge_code was missing ranks for competitor(s): ";
-		foreach my $mc (@missing) { $err = $err." ".$mc->code.". "; }
-	} 
-
-	if (@doubled) { 
-		$err = $err ."<br>You gave more than one student ranks of @doubled from judge $judge_code.";
-	}
-
-	if (@too_large) { 
-		$err = $err . "<br>   You gave ranks over the maximum: @too_large from judge $judge_code";
-	}
-
-	my $yellowmsg = "Entered judge $judge_code.  Pass the ballot to another for the second entry." unless $second_entry || $err;
-	my $greenmsg = "Double checked judge $judge_code.  Ballot complete." if $second_entry && not defined $err;
-
-	$err .= "<br/><br />Please enter the ballot again if this is in error" if $err;
-
-	$m->redirect("index.mhtml?all=$all&timeslot_id=$timeslot_id&judge_id=$judge_id&judge_code=$judge_code&rank_err=$rank_err&err=$err&msg=$msg&check=$check&audit=$audit&greenmsg=$greenmsg&yellowmsg=$yellowmsg") if $err || $rank_err;
-	$m->redirect("index.mhtml?all=$all&timeslot_id=$timeslot_id&judge_code=$next&rank_err=$rank_err&err=$err&msg=$msg&check=$check&audit=$audit&greenmsg=$greenmsg&yellowmsg=$yellowmsg");
 
 </%init>
-
