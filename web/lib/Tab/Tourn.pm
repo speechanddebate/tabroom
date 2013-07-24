@@ -45,11 +45,6 @@ __PACKAGE__->_register_datetimes( qw/reg_start/);
 __PACKAGE__->_register_datetimes( qw/reg_end/);
 
 
-Tab::Circuit->set_sql( by_tourn => "select distinct circuit.*
-									from circuit, tourn_circuit
-									where circuit.id = tourn_circuit.circuit
-									and tourn_circuit.tourn = ?
-									order by circuit.name");
 sub location { 
 	my $self = shift;
 	my $location = $self->state."/" if $self->state;
