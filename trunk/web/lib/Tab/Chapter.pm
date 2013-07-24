@@ -13,16 +13,6 @@ Tab::Chapter->has_many(chapter_circuits => 'Tab::ChapterCircuit', 'chapter');
 Tab::Chapter->has_many(admins => [ Tab::ChapterAdmin => 'account']);
 Tab::Chapter->has_many(circuits => [ Tab::ChapterCircuit => 'circuit']);
 
-Tab::Chapter->set_sql(by_tourn => "select distinct chapter.* from chapter, school
-						where chapter.id = school.chapter
-						and school.tourn = ?");
-
-Tab::Chapter->set_sql(by_admin => "
-						select distinct chapter.*
-						from chapter,chapter_admin
-						where chapter.id = chapter_admin.chapter 
-						and chapter_admin.account = ?");
-
 sub location { 
 	my $self = shift;
 	my $location = $self->state."/" if $self->state;

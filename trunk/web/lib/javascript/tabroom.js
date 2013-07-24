@@ -1,6 +1,15 @@
 
 /* Place the focus on a selected element */
 
+function uploaderName() { 
+	var filename = document.getElementById('upload').value;
+	var lastIndex = filename.lastIndexOf("\\");
+	if (lastIndex >= 0) {
+		filename = filename.substring(lastIndex + 1);
+	}
+	document.getElementById('filename').innerHTML = filename;
+}
+
 function placeFocus(){
     document.forms[0].elements['sp-q'].focus(); 
 } 

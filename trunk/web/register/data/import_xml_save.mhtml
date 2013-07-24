@@ -1,12 +1,13 @@
 <%args>
 	$account
 	$debug => 1
-	$add => undef
+	$add   => undef
 	$tourn
 </%args>
 <%init>
 
 	use XML::Simple;
+	use Data::Dumper;
 
 	my $now = DateTime->now;
 	my $tz = $account->tz if $account->tz;
@@ -15,8 +16,8 @@
 	$now->set_time_zone($tz);
 
 	#PROCESS THE XML
-	my $req = Apache2::Request->new($r);
-	my $xml_file = $req->upload("xml");
+	my $req = Apache2::Request->new($r, DISABLE_UPLOADS => 0);
+	my $xml_file = $req->upload('trpc_xml');
 	my $xml_filename = $xml_file->tempname;
 
 	system "/bin/mkdir -p ".$Tab::file_root."tmp/".$tourn->id."/$now->epoch";
@@ -600,13 +601,13 @@
 				my $room = 0;
 				$room = $room_by_id{$xml_panel->{RoomID}} if $room_by_id{$xml_panel->{RoomID}};
 
-				my $flight = 1 unless $xml_panel->{Flight};
-				$flight = $xml_panel->{Flight};
+				my $flight = $xml_panel->{Flight};
+				$flight = 1 unless $flight && $flight > 0;
 
 				$panel = Tab::Panel->create({
 					letter => $letter++,
-					room => $room,
-					round => $round,
+					room   => $room,
+					round  => $round,
 					flight => $flight
 				});
 				
@@ -614,23 +615,22 @@
 			
 			}
 
-			my $bye;
 			my $judge_id;
 
-			if ($xml_panel->{JudgeID} == -1) { 
-				$bye++;
-			} else { 
+			unless ($xml_panel->{JudgeID} == -1) { 
 				eval { 
 					$judge_id = $judge_by_id{$xml_panel->{JudgeID}}->id;
 				};
 			}
-
 			$judge_id = 0 unless $judge_id; 
 
 			my @xml_results = @{$xml_panel->{RESULT_SCORE}} if $xml_panel->{RESULT_SCORE};
 
 			my %ballot_by_entry = ();
 			my %ballot_by_student = ();
+
+			my $count;
+			my $byes;
 
 			BALLOTS:
 			foreach my $xml_ballot (@xml_results) { 
@@ -639,15 +639,32 @@
 				my $entry = $entry_by_id{$xml_ballot->{Recipient}};
 				next unless $entry;
 
-				$bye = 1 if $xml_ballot->{Side} == -1;
+				$count++;
+
+				my $bye = 0;
+				my $forfeit = 0;
+
+				my $value = $xml_ballot->{content};
+
+				if ($xml_ballot->{Side} == -1) { 
+					$bye = 1 if $value == "1";
+					$forfeit = 1 if $value == "0";
+				}
+
+				$byes += $bye;
+				$byes += $forfeit;
 
 				my $ballot = Tab::Ballot->create({
-					entry => $entry->id,
-					panel => $panel->id,
-					side =>  $xml_ballot->{Side},
-					judge => $judge_id,
-					bye => $bye
+					entry  => $entry->id,
+					panel  => $panel->id,
+					side   => $xml_ballot->{Side},
+					judge  => $judge_id,
+					bye    => $bye,
+					noshow => $forfeit
 				});
+
+				$panel->room(0) if $bye;
+				$panel->room(0) if $forfeit;
 
 				$ballot_by_entry{$xml_ballot->{Recipient}} = $ballot;
 		
@@ -657,16 +674,27 @@
 
 			}
 
+			Tab::debuglog("Entry count for ".$panel->id." is $count ");
+
+			if ($count == 1) { 
+				$panel->bye(1);
+				$panel->room(0);
+			}
+
+			$panel->update;
+
 			foreach my $xml_value (@xml_results) { 
 
 				my $tag = lc($xml_value->{Score_Name});
+
+				next if $byes && $tag ne "ballot";
+
 				$tag = "rank" if $tag eq "ranks";
 
 				my $value = $xml_value->{content};
 
 				my $ballot;
 				my $student;
-
 
 				if ($xml_value->{ScoreFor} eq "Speaker") { 
 					$student = $student_by_id{$xml_value->{Recipient}}->id if $student_by_id{$xml_value->{Recipient}};
@@ -678,12 +706,11 @@
 				next unless $ballot;
 
 				my $ballot_value = Tab::BallotValue->create({
-					tag => $tag,
-					value => $value,
+					tag     => $tag,
+					value   => $value,
 					student => $student,
-					ballot => $ballot
+					ballot  => $ballot
 				});
-
 
 			}
 
@@ -704,11 +731,14 @@
 		my $panel = $panel_by_id{$xml_panel->{ID}};
 		next if $panel;
 
+		my $flight = $xml_panel->{FLIGHT};
+		$flight = 1 if (not defined $flight) || $flight == 0;
+
 		$panel = Tab::Panel->create({
 			round => $round,
 			room => $room,
 			letter => $panel_count++,
-			flight => $xml_panel->{FLIGHT}
+			flight => $flight
 		});
 
 		$panel_by_id{$xml_panel->{ID}} = $panel;
