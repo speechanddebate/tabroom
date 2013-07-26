@@ -1,0 +1,427 @@
+<%args>
+	$round_id
+</%args>
+<%init>
+
+	my $round = Tab::Round->retrieve($round_id);
+
+    my $round_event = $round->event;
+    my $tourn = $round_event->tourn;
+	my $group = $round_event->judge_group;
+
+	my $this_round = $round->id;
+	my $round_type = $round->type;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $round_start = $round->timeslot->start->set_time_zone($tz);
+	my $round_end = $round->timeslot->end->set_time_zone($tz);
+
+	my $pool = $round->pool;
+	my $flights = $round->flighted;
+
+	# Lots of settings
+
+	my $judge_event_twice = $group->setting("judge_event_twice");
+	my $no_back_to_back = $group->setting("no_back_to_back");
+	my $allow_school_panels = $group->setting("allow_school_panels");
+	my $judge_randomize = $group->setting("judge_randomize");
+
+	my $rounds_per = $group->setting("rounds_per");
+
+	my $no_first_years = $round_event->setting("no_first_years");
+	my $allow_judge_own = $round_event->setting("allow_judge_own");
+
+	my $region_constraints = $round_event->setting("region_constraints");
+	my $allow_repeat_judging = $round_event->setting("allow_repeat_judging");
+	my $allow_repeat_elims = $round_event->setting("allow_repeat_elims");
+	my $allow_repeat_prelim_side = $round_event->setting("allow_repeat_prelim_side");
+
+	my $prefs = $group->setting("prefs");
+	my $tab_ratings = $group->setting("tab_ratings");
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $event_ballots_sth = $dbh->prepare("
+		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, entry.school, ballot.side, panel.bracket, panel.id, entry.code
+		from ballot, panel, round, entry
+		where round.event = ".$round_event->id."
+		and round.id = panel.round
+		and panel.id = ballot.panel
+		and ballot.bye = 0
+		and ballot.noshow = 0
+		and panel.bye = 0 
+		and ballot.entry = entry.id
+	");
+
+	$event_ballots_sth->execute();
+
+	my @entries;
+
+	my %entry_side;
+	my %entry_code;
+	my %entry_school;
+	my %school_entries;
+
+	my %judge_ballots;
+	my %entry_ballots;
+
+	my @panels;
+	my %panel_entries;
+	my %panel_bracket;
+
+	my %ballot_type;
+	my %ballot_side;
+	my %ballot_entry;
+	my %ballot_judge;
+
+	my %judge_rounds;
+
+	while (my ($ballot, $entry, $judge, $round, $type, $entry_school, $side, $bracket, $panel, $code) = $event_ballots_sth->fetchrow_array() ) {
+
+		if ($round == $this_round) { 
+
+			push @entries, $entry;
+
+			push @{$school_entries{$entry_school}}, $entry;
+			$entry_school{$entry} = $entry_school;
+
+			$entry_side{$entry} = $side;
+			$entry_code{$entry} = $code;
+
+			push @panels, $panel;
+			$panel_bracket{$panel} = $bracket;
+			push @{$panel_entries{$panel}}, $entry;
+
+		} else { 
+
+			push @{$judge_rounds{$judge}}, $round;
+			push @{$judge_ballots{$judge}}, $ballot;
+			push @{$entry_ballots{$entry}}, $ballot;
+
+			$ballot_type{$ballot} = $type;
+			$ballot_side{$ballot} = $side;
+			$ballot_entry{$ballot} = $entry;
+			$ballot_judge{$ballot} = $judge;
+
+		}
+	}
+
+	my $judge_sth;
+
+	if ($pool > 0) { 
+
+		$judge_sth = $dbh->prepare('
+			select distinct judge.id, concat_ws(" ",judge.last, judge.first) as name, judge.school, judge.tab_rating, sum(judge.obligation+judge.hired) as rounds
+			from judge, pool_judge
+			where judge.active = 1
+			and judge.id = pool_judge.judge
+			and pool_judge.pool = '.$pool->id."
+		");
+
+	} else { 
+
+		$judge_sth = $dbh->prepare('
+			select distinct judge.id, concat_ws(" ",judge.last, judge.first) as name, judge.school, judge.tab_rating, concat(judge.obligation+judge.hired) as rounds
+			from judge, judge_group, event, round
+			where judge.active = 1
+			and judge.judge_group = event.judge_group 
+			and event.id = round.event
+			and round.id = '.$round->id." 
+		");
+
+	}
+
+	$judge_sth->execute();
+
+	my @judges;
+	my %judge_name;
+	my %judge_score;
+	my %judge_school;
+	my %judge_rating;
+
+	my %school_judges;
+	my %judge_clashes;
+	my %judge_obligation;
+
+	while (my ($id, $last, $school, $rating, $rounds) = $judge_sth->fetchrow_array() ) {
+
+		push @judges, $id;
+		$judge_name{$id} = $last;
+		$judge_school{$id} = $school;
+		$judge_rating{$id} = $rating;
+		$judge_obligation{$id} = $rounds;
+
+		push @{$school_judges{$school}}, $id;
+
+		if ($school_entries{$school} && not defined $allow_judge_own) { 
+
+			foreach my $entry (@{$school_entries{$school}}) { 
+				push @{$judge_clashes{$id}}, $entry;
+			}
+		}
+	}
+
+	my %school_region;
+	my @schools;
+
+	if ($region_constraints) { 
+
+		my $region_sth = $dbh->prepare("
+			select distinct school.id, school.region
+			from school where school.tourn = ".$tourn->id);
+
+		$region_sth->execute();
+	
+		while (my ($id, $region) = $region_sth->fetchrow_array() ) {
+			push @schools, $id;
+			$school_region{$id} = $region
+		}
+
+	}
+
+	my $strikes_sth = $dbh->prepare("
+		select distinct strike.id, strike.judge, strike.type, strike.event, strike.entry, strike.school, strike.region, strike.start, strike.end
+		from strike
+		where strike.tourn = ".$tourn->id."
+	");
+
+	$strikes_sth->execute();
+
+	my %judge_out;
+
+	while (my ($id, $judge, $type, $event, $entry, $school, $region, $start, $end) = $strikes_sth->fetchrow_array() ) {
+
+		if ($type eq "conflict" || $type eq "entry") { 
+			push @{$judge_clashes{$judge}}, $entry;
+		} 
+
+		if ($type eq "elim" || $type eq "event") { 
+			next if ($round_type eq "elim" || $round_type eq "final") && $type eq "elim";
+			next unless $event == $round_event->id;
+			$judge_out{$judge}++ 
+		}
+
+		if ($type eq "hybrid") { 
+			foreach my $school_judge (@{$school_judges{$school}}) { 
+				push @{$judge_clashes{$school_judge}}, $entry;
+			}
+		}
+
+		if ($type eq "region") { 
+			foreach my $region_school (@schools) { 
+				next unless $school_region{$region_school} == $region;
+				push @{$judge_clashes{$judge}}, @{$school_entries{$region_school}};
+			}
+		}
+
+		if ($type eq "school") { 
+			push @{$judge_clashes{$judge}}, @{$school_entries{$school}} if $school_entries{$school};
+		}
+
+		if ($type eq "time") { 
+
+			my $start_dt = DateTime::Format::MySQL->parse_datetime($start);
+			my $end_dt = DateTime::Format::MySQL->parse_datetime($end);
+
+			$start_dt->set_time_zone("UTC");
+			$end_dt->set_time_zone("UTC");
+
+			$start_dt->set_time_zone($tz);
+			$end_dt->set_time_zone($tz);
+
+			$judge_out{$judge}++  if ($round_start < $end_dt && $round_end > $start_dt);
+		}
+
+	}
+
+	my %tier_value;
+	my %tier_strike;
+
+	if ($prefs && $prefs ne "ordinals") { 
+		foreach my $tier (sort {$a->name cmp $b->name} $group->rating_tiers(type => "mpj")) {
+			$tier_value{$tier->id} = $tier->name;
+			$tier_strike{$tier->id}++ if $tier->strike || $tier->conflict;
+		}
+	}
+
+	my $ratings_sth = $dbh->prepare("
+		select distinct rating.id, rating.judge, rating.entry, rating.rating_tier, rating.percentile
+		from rating, ballot, panel
+		where panel.round = ".$round->id."
+		and ballot.panel = panel.id
+		and panel.bye = 0
+		and ballot.bye = 0
+		and ballot.entry = rating.entry
+		group by rating.id
+	");
+
+	$ratings_sth->execute();
+
+	my %judge_entry_rating;
+
+	while (my ($id, $judge, $entry, $tier, $percentile) = $ratings_sth->fetchrow_array() ) {
+		$judge_entry_rating{$judge."-".$entry} = $tier_value{$tier} if $tier;
+		$judge_entry_rating{$judge."-".$entry} = $tier_value{$percentile} if $percentile;
+		push @{$judge_clashes{$judge}}, $entry if $tier && $tier_strike{$tier};
+	}
+
+	my %panel_seen = (); 
+	@panels = grep { ! $panel_seen{$_} ++ } @panels;
+	@panels = sort {$panel_bracket{$b} <=> $panel_bracket{$a}} @panels;
+
+	my %judge_deprefer;
+	my %judge_entry_clash;
+
+	foreach my $judge (@judges) {
+
+		my %seen = (); 
+		@{$judge_rounds{$judge}} = grep { ! $seen{$_}++ } @{$judge_rounds{$judge}};
+
+		my $num_rounds = scalar @{$judge_rounds{$judge}};
+		$judge_out{$judge}++ if $num_rounds >= $judge_obligation{$judge} && $rounds_per;
+
+		next if $judge_out{$judge};
+		$judge_score{$judge} += scalar @{$judge_clashes{$judge}} if $judge_clashes{$judge};
+		$judge_score{$judge} += $num_rounds * 2;
+
+		foreach my $ballot ( sort { $entry_code{$ballot_entry{$a}} cmp $entry_code{$ballot_entry{$b}}} @{$judge_ballots{$judge}}) { 
+			my $entry = $ballot_entry{$ballot};
+			push @{$judge_deprefer{$judge}}, $entry;
+			next if $allow_repeat_judging;
+			next if $allow_repeat_elims && ($round_type eq "elim" || $round_type eq "final" || $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final") ;
+			next if $allow_repeat_prelim_side && $ballot_side{$ballot} != $entry_side{$entry};
+			push @{$judge_clashes{$judge}}, $entry;
+		}
+
+		foreach my $clash (@{$judge_clashes{$judge}}) { 
+			$judge_entry_clash{$judge."-".$clash}++;
+		}
+
+	}
+
+	my $switch;
+
+	my %default_settings = $m->comp("/funclib/default_rating_settings.mas", type => $round_event->type);
+
+	my $bracket_order = $round_event->setting("tab_rating_priority", $round->id);
+	$bracket_order = $default_settings{$round->name} unless $bracket_order;
+	$bracket_order =~ s/\s*//g;
+
+	my @orders = split(/\,/, $bracket_order);
+
+	my $panel_done;
+
+	my $order_count;
+
+	@judges = sort {$judge_score{$b} <=> $judge_score{$a}} @judges;
+	@judges = sort {$judge_rating{$b} <=> $judge_rating{$a}} @judges;
+
+	my %panel_flight;
+	my %judge_used;
+
+	my %panel_judges;
+
+	foreach my $order (@orders) { 
+
+		$order_count++;
+
+		PANEL:
+		foreach my $panel (@panels) { 
+
+			next unless $order == $panel_bracket{$panel};
+
+			JUDGE:
+			foreach my $judge (@judges) { 
+
+				next JUDGE if $judge_out{$judge};
+				next JUDGE if $judge_used{$judge} >= $flights;
+
+				foreach my $entry (@{$panel_entries{$panel}}) { 
+					next JUDGE if $judge_entry_clash{$judge."-".$entry};
+				}
+
+				push @{$panel_judges{$panel}}, $judge;
+				$judge_used{$judge}++;
+				$panel_flight{$panel} = $judge_used{$judge};
+				next PANEL;
+
+			}
+
+		}
+
+	}
+
+</%init>
+
+	<h2> Wheee!!  <% $round->realname %></h2>
+
+%		foreach my $panel (@panels) { 
+	
+			<div class="block <% ($switch++ % 2) ? "oddrow" : "evenrow" %>">
+				
+				<span class="smallspan">
+					<% $panel_bracket{$panel} %>
+				</span>
+
+				<span class="smallspan">
+					<% $panel_flight{$panel} %>
+				</span>
+
+%				my $notfirst;
+
+%				foreach my $entry (@{$panel_entries{$panel}}) { 
+					<span class="medspan">
+						<% $notfirst++ ? "vs " : "" %>
+						<% $entry_code{$entry} %>
+					</span>
+%				}
+
+%				foreach my $judge (@{$panel_judges{$panel}}) { 
+					<span class="medspan">
+						<% $judge_name{$judge} %>
+					</span>
+%				}
+
+			</div>
+
+%		}
+
+		<h4>Judges with preclusions</h4>
+
+%		foreach my $judge (@judges) { 
+
+			<div class="block <% ($switch++ % 2) ? "oddrow" : "evenrow" %>">
+
+				<span class="medspan">
+					<% $judge_name{$judge} %>
+				</span>
+
+				<span class="medspan">
+					<% $judge_out{$judge} ? "Out" : "In" %>
+				</span>
+
+				<span class="twofifty wrap smallish top">
+%					if ($judge_clashes{$judge}) { 
+%						foreach my $entry (sort {$entry_code{$a} cmp $entry_code{$b}} @{$judge_clashes{$judge}}) { 
+							<span class="eighty">
+								<% $entry_code{$entry} ? $entry_code{$entry} : $entry %>
+							</span>
+%						}
+%					}
+				</span>
+
+				<span class="twofifty wrap smallish top">
+%					if ($judge_deprefer{$judge}) { 
+%						foreach my $entry (sort {$entry_code{$a} cmp $entry_code{$b}} @{$judge_deprefer{$judge}}) { 
+							<span class="eighty">
+								<% $entry_code{$entry} ? $entry_code{$entry} : $entry %>
+							</span>
+%						}
+%					}
+				</span>
+
+			</div>
+%		}
+		
