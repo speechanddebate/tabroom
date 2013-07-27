@@ -3,6 +3,8 @@
 </%args>
 <%init>
 
+	use List::Util 'shuffle';
+
 	my $round = Tab::Round->retrieve($round_id);
 
     my $round_event = $round->event;
@@ -22,20 +24,17 @@
 	my $flights = $round->flighted;
 
 	# Lots of settings
-
-	my $judge_event_twice = $group->setting("judge_event_twice");
-	my $no_back_to_back = $group->setting("no_back_to_back");
-	my $allow_school_panels = $group->setting("allow_school_panels");
-	my $judge_randomize = $group->setting("judge_randomize");
-
 	my $rounds_per = $group->setting("rounds_per");
+	my $no_back_to_back = $group->setting("no_back_to_back");
+	my $judge_randomize = $group->setting("judge_randomize");
+	my $judge_event_twice = $group->setting("judge_event_twice");
+	my $allow_school_panels = $group->setting("allow_school_panels");
 
 	my $no_first_years = $round_event->setting("no_first_years");
 	my $allow_judge_own = $round_event->setting("allow_judge_own");
-
 	my $region_constraints = $round_event->setting("region_constraints");
-	my $allow_repeat_judging = $round_event->setting("allow_repeat_judging");
 	my $allow_repeat_elims = $round_event->setting("allow_repeat_elims");
+	my $allow_repeat_judging = $round_event->setting("allow_repeat_judging");
 	my $allow_repeat_prelim_side = $round_event->setting("allow_repeat_prelim_side");
 
 	my $prefs = $group->setting("prefs");
@@ -194,7 +193,11 @@
 	while (my ($id, $judge, $type, $event, $entry, $school, $region, $start, $end) = $strikes_sth->fetchrow_array() ) {
 
 		if ($type eq "conflict" || $type eq "entry") { 
-			push @{$judge_clashes{$judge}}, $entry;
+			if ($school) {	 
+				push @{$judge_clashes{$judge}}, @{$school_entries{$school}} if $school_entries{$school};
+			} else {  
+				push @{$judge_clashes{$judge}}, $entry;
+			}
 		} 
 
 		if ($type eq "elim" || $type eq "event") { 
@@ -239,7 +242,12 @@
 	my %tier_value;
 	my %tier_strike;
 
+	my $tiers;
+
 	if ($prefs && $prefs ne "ordinals") { 
+
+		$tiers++;
+
 		foreach my $tier (sort {$a->name cmp $b->name} $group->rating_tiers(type => "mpj")) {
 			$tier_value{$tier->id} = $tier->name;
 			$tier_strike{$tier->id}++ if $tier->strike || $tier->conflict;
@@ -259,11 +267,14 @@
 
 	$ratings_sth->execute();
 
-	my %judge_entry_rating;
+	my %mjp;
 
 	while (my ($id, $judge, $entry, $tier, $percentile) = $ratings_sth->fetchrow_array() ) {
-		$judge_entry_rating{$judge."-".$entry} = $tier_value{$tier} if $tier;
-		$judge_entry_rating{$judge."-".$entry} = $tier_value{$percentile} if $percentile;
+
+		next unless ($tier || $percentile);
+
+		$mjp{$judge."-".$entry} = $tier_value{$tier} if $tier > 0;
+		$mjp{$judge."-".$entry} = $tier_value{$percentile} if $percentile > 0;
 		push @{$judge_clashes{$judge}}, $entry if $tier && $tier_strike{$tier};
 	}
 
@@ -271,7 +282,7 @@
 	@panels = grep { ! $panel_seen{$_} ++ } @panels;
 	@panels = sort {$panel_bracket{$b} <=> $panel_bracket{$a}} @panels;
 
-	my %judge_deprefer;
+	my %judge_avoid;
 	my %judge_entry_clash;
 
 	foreach my $judge (@judges) {
@@ -281,18 +292,21 @@
 
 		my $num_rounds = scalar @{$judge_rounds{$judge}};
 		$judge_out{$judge}++ if $num_rounds >= $judge_obligation{$judge} && $rounds_per;
-
 		next if $judge_out{$judge};
-		$judge_score{$judge} += scalar @{$judge_clashes{$judge}} if $judge_clashes{$judge};
-		$judge_score{$judge} += $num_rounds * 2;
 
-		foreach my $ballot ( sort { $entry_code{$ballot_entry{$a}} cmp $entry_code{$ballot_entry{$b}}} @{$judge_ballots{$judge}}) { 
-			my $entry = $ballot_entry{$ballot};
-			push @{$judge_deprefer{$judge}}, $entry;
-			next if $allow_repeat_judging;
-			next if $allow_repeat_elims && ($round_type eq "elim" || $round_type eq "final" || $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final") ;
-			next if $allow_repeat_prelim_side && $ballot_side{$ballot} != $entry_side{$entry};
-			push @{$judge_clashes{$judge}}, $entry;
+		$judge_score{$judge} += scalar @{$judge_clashes{$judge}} if $judge_clashes{$judge};
+		$judge_score{$judge} -= $num_rounds * 2;
+
+		if ($judge_ballots{$judge}) { 
+
+			foreach my $ballot ( sort { $entry_code{$ballot_entry{$a}} cmp $entry_code{$ballot_entry{$b}}} @{$judge_ballots{$judge}}) { 
+				my $entry = $ballot_entry{$ballot};
+				next if $allow_repeat_elims && ($round_type eq "elim" || $round_type eq "final" || $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final") ;
+				push @{$judge_avoid{$judge}}, $entry;
+				next if $allow_repeat_judging;
+				next if $allow_repeat_prelim_side && $ballot_side{$ballot} != $entry_side{$entry};
+				push @{$judge_clashes{$judge}}, $entry;
+			}
 		}
 
 		foreach my $clash (@{$judge_clashes{$judge}}) { 
@@ -310,45 +324,129 @@
 	$bracket_order =~ s/\s*//g;
 
 	my @orders = split(/\,/, $bracket_order);
+	my %bracket_score;
+	my $order_multiplier;
+
+	my $last_order = 0;
+
+	foreach my $order (reverse @orders) { 
+
+		$order_multiplier *= 2 if $last_order < $order; # This finds the "break point";
+		$order_multiplier++;
+
+		foreach my $panel (@panels) { 
+			next unless $panel_bracket{$panel} == $order;
+			$bracket_score{$order} = $order_multiplier;
+		}
+
+		$last_order = $order;
+	}
+
+	my %judge_panel_score;
+	
+	PANEL:
+	foreach my $panel (@panels) { 
+
+		JUDGE:
+		foreach my $judge (@judges) { 
+
+			my $score;
+
+			next JUDGE if $judge_out{$judge};
+
+			my $diff;
+
+			my $mjp_first;
+
+			foreach my $entry (@{$panel_entries{$panel}}) { 
+
+				$score += 1000 if $judge_entry_clash{$judge."-".$entry};
+				$score += 500 if $judge_avoid{$entry};
+
+				if ($mjp_first) { 
+					$diff = abs($mjp_first - $mjp{$judge."-".$entry}) if $mjp_first && $mjp{$judge."-".$entry};
+				} else { 
+					$mjp_first = $mjp{$judge."-".$entry} unless $mjp_first;
+				}
+
+				$score += $mjp{$judge."-".$entry};
+				$score += 99 unless $mjp{$judge."-".$entry};
+
+				$judge_rating{$judge."-".$panel} .= " - " if $judge_rating{$judge."-".$panel};
+				$judge_rating{$judge."-".$panel} .= $mjp{$judge."-".$entry};
+				$judge_rating{$judge."-".$panel} .= "99" unless $mjp{$judge."-".$entry};
+			}
+
+			$score += $diff * 3;
+
+			if ($tab_ratings) { 
+				$score += $judge_rating{$judge};
+			} 
+
+			$score = $score * $bracket_score{$panel_bracket{$panel}};
+			$judge_panel_score{$judge."-".$panel} = $score;
+
+		}
+
+	}
 
 	my $panel_done;
 
-	my $order_count;
-
 	@judges = sort {$judge_score{$b} <=> $judge_score{$a}} @judges;
-	@judges = sort {$judge_rating{$b} <=> $judge_rating{$a}} @judges;
+
 
 	my %panel_flight;
-	my %judge_used;
-
 	my %panel_judges;
 
-	foreach my $order (@orders) { 
+	my $current_total;
 
-		$order_count++;
+	foreach my $tick (1 .. 10000) { 
 
-		PANEL:
-		foreach my $panel (@panels) { 
+#		Tab::debuglog("Tick is $tick");
 
-			next unless $order == $panel_bracket{$panel};
+		my %test_judges;
+		my %test_flight;
+		my %judge_used;
 
-			JUDGE:
-			foreach my $judge (@judges) { 
+		my $attempt_total;
+		my $order_count;
 
-				next JUDGE if $judge_out{$judge};
-				next JUDGE if $judge_used{$judge} >= $flights;
+		foreach my $order (@orders) { 
 
-				foreach my $entry (@{$panel_entries{$panel}}) { 
-					next JUDGE if $judge_entry_clash{$judge."-".$entry};
+			$order_count++;
+
+			PANEL:
+			foreach my $panel (@panels) { 
+
+				next unless $order == $panel_bracket{$panel};
+				@judges = shuffle(@judges);
+
+				JUDGE:
+				foreach my $judge (sort {$judge_panel_score{$a."-".$panel} <=> $judge_panel_score{$b."-".$panel}} @judges) { 
+
+					next JUDGE if $judge_out{$judge};
+					next JUDGE if $judge_used{$judge} >= $flights;
+
+					foreach my $entry (@{$panel_entries{$panel}}) { 
+						next JUDGE if $judge_entry_clash{$judge."-".$entry};
+					}
+
+					push @{$test_judges{$panel}}, $judge;
+					$judge_used{$judge}++;
+					$test_flight{$panel} = $judge_used{$judge};
+					$attempt_total += $judge_panel_score{$judge."-".$panel};
+					next PANEL;
+
 				}
-
-				push @{$panel_judges{$panel}}, $judge;
-				$judge_used{$judge}++;
-				$panel_flight{$panel} = $judge_used{$judge};
-				next PANEL;
-
 			}
 
+		}
+
+		if ($current_total > $attempt_total || not defined $current_total ) { 
+			Tab::debuglog("Tick is $tick, current is $current_total, attempt is $attempt_total");
+			$current_total = $attempt_total;
+			%panel_judges = %test_judges;
+			%panel_flight = %test_flight;
 		}
 
 	}
@@ -357,12 +455,14 @@
 
 	<h2> Wheee!!  <% $round->realname %></h2>
 
+	<h4>Paneling total score is <% $current_total %></h4>
+
 %		foreach my $panel (@panels) { 
 	
 			<div class="block <% ($switch++ % 2) ? "oddrow" : "evenrow" %>">
 				
 				<span class="smallspan">
-					<% $panel_bracket{$panel} %>
+					<% $panel_bracket{$panel} %> - <% $bracket_score{$panel_bracket{$panel}} %>
 				</span>
 
 				<span class="smallspan">
@@ -379,7 +479,10 @@
 %				}
 
 %				foreach my $judge (@{$panel_judges{$panel}}) { 
-					<span class="medspan">
+					<span class="twofifty">
+						<% $judge_rating{$judge} > 1 ? $judge_rating{$judge} : "" %>
+						<% $judge_rating{$judge."-".$panel} %> - 
+						<% $judge_panel_score{$judge."-".$panel} %> -
 						<% $judge_name{$judge} %>
 					</span>
 %				}
@@ -402,7 +505,7 @@
 					<% $judge_out{$judge} ? "Out" : "In" %>
 				</span>
 
-				<span class="twofifty wrap smallish top">
+				<span class="halfspan wrap smallish top">
 %					if ($judge_clashes{$judge}) { 
 %						foreach my $entry (sort {$entry_code{$a} cmp $entry_code{$b}} @{$judge_clashes{$judge}}) { 
 							<span class="eighty">
@@ -412,9 +515,9 @@
 %					}
 				</span>
 
-				<span class="twofifty wrap smallish top">
-%					if ($judge_deprefer{$judge}) { 
-%						foreach my $entry (sort {$entry_code{$a} cmp $entry_code{$b}} @{$judge_deprefer{$judge}}) { 
+				<span class="halfspan wrap smallish top">
+%					if ($judge_avoid{$judge}) { 
+%						foreach my $entry (sort {$entry_code{$a} cmp $entry_code{$b}} @{$judge_avoid{$judge}}) { 
 							<span class="eighty">
 								<% $entry_code{$entry} ? $entry_code{$entry} : $entry %>
 							</span>
