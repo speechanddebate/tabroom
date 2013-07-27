@@ -1,4 +1,5 @@
 <%args>
+	$account
 	$round_id
 </%args>
 <%init>
@@ -6,6 +7,18 @@
 	use List::Util 'shuffle';
 
 	my $round = Tab::Round->retrieve($round_id);
+
+    my $text = $account->first." ".$account->last." (".$account->email.") has re-assigned the judges out of round ".$round->realname." of ".$round->event->abbr;
+
+    Tab::TournChange->create({ 
+        type => 'tabbing',
+        event => $round->event->id,
+        tourn => $round->event->tourn->id,
+        account => $account->id,
+        text => $text
+    }); 
+
+    $m->comp("/funclib/round_clear_judges.mas", round => $round);
 
     my $round_event = $round->event;
     my $tourn = $round_event->tourn;
@@ -394,18 +407,18 @@
 
 	@judges = sort {$judge_score{$b} <=> $judge_score{$a}} @judges;
 
-
 	my %panel_flight;
 	my %panel_judges;
+	my %judge_panels;
 
 	my $current_total;
 
-	foreach my $tick (1 .. 10000) { 
-
-#		Tab::debuglog("Tick is $tick");
+	foreach my $tick (1 .. 3) { 
 
 		my %test_judges;
 		my %test_flight;
+		my %test_panels;
+
 		my %judge_used;
 
 		my $attempt_total;
@@ -432,6 +445,8 @@
 					}
 
 					push @{$test_judges{$panel}}, $judge;
+					push @{$test_panels{$judge}}, $panel;
+
 					$judge_used{$judge}++;
 					$test_flight{$panel} = $judge_used{$judge};
 					$attempt_total += $judge_panel_score{$judge."-".$panel};
@@ -439,17 +454,145 @@
 
 				}
 			}
+		}
 
+		foreach my $tock (1 .. 15) { 
+
+			PANEL:
+			foreach my $first (@panels) { 
+
+				my %entry_id;
+				foreach (@{$panel_entries{$first}}) {   
+					$entry_id{$_}++;
+				}
+
+				foreach my $first_judge (@{$test_judges{$first}}) { 
+
+					my $current_diff;
+					my $swap_with;
+					my $swap_panel;
+				
+					JUDGE:
+					foreach my $second_judge (@judges) { 
+
+						next if $second_judge == $first_judge;
+
+						foreach my $entry (@{$panel_entries{$first}}) {   
+							foreach my $clash (@{$judge_clashes{$second_judge}}) { 
+								next JUDGE if $clash == $entry;
+							}
+						}
+
+
+						if ($test_panels{$second_judge} && scalar @{$test_panels{$second_judge}} >= $flights) { 
+
+							foreach my $second (@{$test_panels{$second_judge}}) { 
+						
+								my $baseline_score = $judge_panel_score{$first_judge."-".$first};
+								my $second_score += $judge_panel_score{$second_judge."-".$first};
+
+								foreach my $entry (@{$panel_entries{$second}}) {   
+									foreach my $clash (@{$judge_clashes{$first_judge}}) { 
+										next JUDGE if $clash == $entry;
+									}
+								}
+
+								$second_score += $judge_panel_score{$first_judge."-".$second};
+								$baseline_score += $judge_panel_score{$second_judge."-".$second};
+
+								if ( ($baseline_score - $second_score) > $current_diff ) { 
+									$current_diff = $baseline_score - $second_score;
+									$swap_with = $second_judge;
+									$swap_panel = $second;
+								}
+							}
+
+						} else { 
+
+							my $baseline_score = $judge_panel_score{$first_judge."-".$first};
+							my $second_score += $judge_panel_score{$second_judge."-".$first};
+
+							if ( ($baseline_score - $second_score) > $current_diff ) { 
+								$current_diff = $baseline_score - $second_score;
+								$swap_with = $second_judge;
+								undef $swap_panel;
+							}
+						}
+					}
+
+					if ($swap_with) { 
+
+						$attempt_total -= $current_diff;
+						
+						my @new_first;
+						foreach my $judge (@{$test_judges{$first}}) { 
+							push @new_first, $judge unless $judge == $first_judge;
+						}
+						push @new_first, $swap_with;
+						@{$test_judges{$first}} = @new_first;
+
+						my @new_first_panels;
+						foreach my $panel (@{$test_panels{$first_judge}}) { 
+							next if $panel == $first;
+							push @new_first_panels, $first;
+						}
+						@{$test_panels{$first_judge}} = @new_first_panels;
+
+						if ($swap_panel) { 
+
+							my @new_second;
+							foreach my $judge (@{$test_judges{$swap_panel}}) { 
+								push @new_second, $judge unless $judge == $swap_with;
+							}
+							push @new_second, $first_judge;
+							@{$test_judges{$swap_panel}} = @new_second;
+
+							my @new_second_panels;
+							foreach my $panel (@{$test_panels{$swap_with}}) { 
+								next if $panel == $swap_panel;
+								push @new_second_panels, $swap_panel;
+							}
+							@{$test_panels{$swap_with}} = @new_second_panels;
+
+						}
+					}
+				}
+			}
 		}
 
 		if ($current_total > $attempt_total || not defined $current_total ) { 
-			Tab::debuglog("Tick is $tick, current is $current_total, attempt is $attempt_total");
 			$current_total = $attempt_total;
 			%panel_judges = %test_judges;
 			%panel_flight = %test_flight;
+			%judge_panels = %test_panels;
 		}
 
 	}
+
+	foreach my $judge (@judges) { 
+
+		my $flight;
+
+		foreach my $panel (@{$judge_panels{$judge}}) { 
+			$flight++;
+			$panel_flight{$panel} = $flight;
+		}
+		
+	}
+
+	foreach my $panel ($round->panels) { 
+
+		foreach my $judge (@{$panel_judges{$panel->id}}) { 
+			$m->comp("/funclib/panel_judgeadd.mas", panel => $panel, judge_id => $judge);
+		}
+		
+		$panel->flight($panel_flight{$panel->id});
+		$panel->update;
+
+	}
+
+	my $msg = "Judges added";
+	$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&msg=$msg");
 
 </%init>
 
@@ -480,8 +623,8 @@
 
 %				foreach my $judge (@{$panel_judges{$panel}}) { 
 					<span class="twofifty">
-						<% $judge_rating{$judge} > 1 ? $judge_rating{$judge} : "" %>
-						<% $judge_rating{$judge."-".$panel} %> - 
+						<% $judge_rating{$judge} > 0 ? $judge_rating{$judge} : "" %> :
+						<% $prefs && $prefs ne "none" ? $judge_rating{$judge."-".$panel} : "" %> - 
 						<% $judge_panel_score{$judge."-".$panel} %> -
 						<% $judge_name{$judge} %>
 					</span>
@@ -490,41 +633,3 @@
 			</div>
 
 %		}
-
-		<h4>Judges with preclusions</h4>
-
-%		foreach my $judge (@judges) { 
-
-			<div class="block <% ($switch++ % 2) ? "oddrow" : "evenrow" %>">
-
-				<span class="medspan">
-					<% $judge_name{$judge} %>
-				</span>
-
-				<span class="medspan">
-					<% $judge_out{$judge} ? "Out" : "In" %>
-				</span>
-
-				<span class="halfspan wrap smallish top">
-%					if ($judge_clashes{$judge}) { 
-%						foreach my $entry (sort {$entry_code{$a} cmp $entry_code{$b}} @{$judge_clashes{$judge}}) { 
-							<span class="eighty">
-								<% $entry_code{$entry} ? $entry_code{$entry} : $entry %>
-							</span>
-%						}
-%					}
-				</span>
-
-				<span class="halfspan wrap smallish top">
-%					if ($judge_avoid{$judge}) { 
-%						foreach my $entry (sort {$entry_code{$a} cmp $entry_code{$b}} @{$judge_avoid{$judge}}) { 
-							<span class="eighty">
-								<% $entry_code{$entry} ? $entry_code{$entry} : $entry %>
-							</span>
-%						}
-%					}
-				</span>
-
-			</div>
-%		}
-		
