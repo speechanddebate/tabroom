@@ -1,0 +1,287 @@
+<%args>
+	$tourn
+	$account
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+	my $now = DateTime->now(time_zone => $tz);
+
+	# Get the upload and create the file handle.
+	my $req = Apache2::Request->new($r);
+	my @csv_handles = $r->upload; 
+	my $csv_file = $req->upload($csv_handles[0]);
+	my $io = $csv_file->io;
+
+	my @lines = <$io>;
+
+	my @all_lines;
+
+	foreach (@lines) { 
+		$_ =~ s/[\r]+/\n/g;
+		$_ =~ s/[\r\n]+/\n/g;
+		$_ =~ s/[\n]+/\n/g;
+		push @all_lines, split (/\n/, $_);
+	}
+
+	my %event_by_code;
+
+	foreach my $line (@all_lines) { 
+
+		next unless (substr($line, 0, 2) eq '$$');
+
+		my $div_number = $line;
+		my $div_name = $line;
+
+		$div_number =~ s/[\D_]//g;
+		$div_name =~ s/^\$+//g;
+		$div_name =~ s/^[0-9]+//g;
+
+		my $event = Tab::Event->search( name => $div_name, tourn => $tourn->id )->first;
+
+		Tab::debuglog("Division $div_name is number $div_number.  Found ".$event);
+
+		$event_by_code{$div_number} = $event if $event;
+	}
+
+	my %school_by_code;
+
+	foreach my $line (@all_lines) { 
+
+		next unless (substr($line, 0, 1) eq '#');
+
+		my ($school_number, $school_name) = split (/  /, $line);
+
+		$school_number =~ s/[\D_]//g;
+
+		my $school = Tab::School->search( name => $school_name, tourn => $tourn->id)->first;
+
+		my $chapter;
+		$chapter = $school->chapter if $school;
+
+		unless ($school) { 
+
+			foreach my $circuit ($tourn->circuits) { 
+				my @chapters = $m->comp("/funclib/circuit_chapters.mas", circuit => $circuit, name => $school_name);
+				$chapter = shift @chapters;
+				last if $chapter;
+			}
+
+			unless ($chapter) { 
+
+				$chapter = Tab::Chapter->create({
+					name    => $school_name,
+					state   => $tourn->state,
+					country => $tourn->country
+				});
+
+				foreach my $circuit ($tourn->circuits) { 
+					Tab::ChapterCircuit->create({
+						chapter => $chapter->id,
+						circuit => $circuit->id
+					});
+				}
+			}
+
+			my ($school_code, $school_region) = $m->comp("/funclib/chapter_code.mas", tourn => $tourn, chapter => $chapter);
+
+			$school = Tab::School->create({
+				tourn      => $tourn->id,
+				chapter    => $chapter->id,
+				name       => $school_name,
+				code       => $school_code,
+				entered_on => $now
+			});
+		}
+
+		Tab::debuglog("School $school_name is number $school_number.  Found ".$school->id);
+
+		$school_by_code{$school_number} = $school;
+
+	}
+
+	my %entry_by_code;
+
+	my $num_entries;
+
+	foreach my $line (@all_lines) { 
+		
+		next unless (substr($line, 0, 1) eq '$');
+		next if (substr($line, 0, 2) eq '$$');
+
+		my ($divcode, @names) = split(/\;/, $line);
+		my ($divnum, $entry_code) = split(/\*/, $divcode);
+
+		$divnum =~ s/[\D_]//g;
+		$entry_code =~ s/[\D_]//g;
+		
+		my $schoolnum;
+		my @student_names;
+
+		foreach my $name (@names) { 
+			$name =~ s/^\s+//;
+			if ((substr($name, 0, 1) eq "#")) { 
+				$schoolnum = $name;
+				$schoolnum =~ s/[\D_]//g;
+			} else { 
+				push @student_names, $name;
+			}
+		}
+
+		$schoolnum =~ s/[\D_]//g;
+
+
+		my $event = $event_by_code{$divnum};
+		next unless $event;
+
+		Tab::debuglog("Entry found with division $divnum ".$event->name." and code $entry_code and school $schoolnum");
+
+		my $school = $school_by_code{$schoolnum};
+		next unless $school;
+
+		my @students;
+		my $entry_name;
+
+		foreach my $name (@student_names) { 
+
+			my ($first, $last) = split(/\ /, $name);
+
+			my $student = Tab::Student->search(chapter => $school->chapter->id, first => $first, last => $last, retired => 0)->first;
+
+			unless ($student) { 
+				$student = Tab::Student->create({
+					chapter   => $school->chapter->id,
+					first     => $first,
+					last      => $last,
+					grad_year => ($now->year + 1)
+				});
+			}
+
+			push @students, $student;
+
+			if (scalar @student_names > 1) { 
+				$entry_name .= " & " if $entry_name;
+				$entry_name .= $last;
+			} else { 
+				$entry_name = $first." ".$last;
+			}
+
+		}
+
+		next if Tab::Entry->search( event => $event->id, name => $entry_name, school => $school->id);
+
+		$num_entries++;
+
+		my $entry = Tab::Entry->create({
+			school      => $school->id,
+			event       => $event->id,
+			tourn       => $tourn->id,
+			name        => $entry_name,
+			cat_id      => $entry_code,
+			dropped     => 0,
+			dq          => 0,
+			waitlist    => 0,
+			unconfirmed => 0,
+		});
+
+		$entry->code($m->comp("/funclib/entry_code.mas", entry => $entry));
+		$entry->update;
+
+		foreach my $student (@students) { 
+			Tab::EntryStudent->create({
+				entry   => $entry->id,
+				student => $student->id
+			});
+		}
+	}
+
+	my $num_judges;
+	
+	foreach my $line (@all_lines) { 
+		
+		next unless (substr($line, 0, 1) eq '%');
+
+		my ($judgecode, $name, $schoolnum, $division_nums, $all, $obligation, $oblsecond, $notes ) = split(/\;/, $line);
+		$schoolnum =~ s/[\D_]//g;
+
+		my $school = $school_by_code{$schoolnum};
+		my $hire;
+		$hire++ unless $school;
+
+		my @division_codes = split (/\$/, $division_nums);
+
+		my ($first, $last) = split(/\ /, $name);
+		my $chapter_judge;
+
+		if ($school && $school->chapter) { 
+
+			my $chapter_judge = Tab::ChapterJudge->search(chapter => $school->chapter->id, first => $first, last => $last, retired => 0)->first;
+
+			unless ($chapter_judge) { 
+				$chapter_judge = Tab::ChapterJudge->create({
+					chapter   => $school->chapter->id,
+					first     => $first,
+					last      => $last,
+					started => $now->year
+				});
+			}
+		}
+
+		my $div_code  = shift @division_codes;
+
+		$div_code =~ s/[\D_]//g;
+		$obligation =~ s/[\D_]//g;
+
+		my $event = $event_by_code{$div_code};
+		next unless $event;
+
+		
+		my $code;
+		$code = $m->comp("/funclib/group_code.mas", group => $event->judge_group ) unless $event->judge_group->setting("no_codes");
+
+		if ($school) {
+		
+			next if Tab::Judge->search( judge_group   => $event->judge_group->id, first => $first, last => $last,  school => $school->id);
+
+			my $judge = Tab::Judge->create({
+				judge_group   => $event->judge_group->id,
+				school        => $school->id,
+				code          => $code,
+				tourn         => $tourn->id,
+				first         => $first,
+				last          => $last,
+				active        => 1,
+				obligation    => $obligation,
+				notes         => $notes
+			});
+
+			$judge->chapter_judge($chapter_judge->id) if $chapter_judge;
+			$judge->update;
+
+		} else { 
+
+			next if Tab::Judge->search( judge_group   => $event->judge_group->id, first => $first, last => $last,  school => 0);
+			my $judge = Tab::Judge->create({
+				judge_group => $event->judge_group->id,
+				tourn       => $tourn->id,
+				first       => $first,
+				last        => $last,
+				active      => 1,
+				school      => 0
+				code        => $code,
+				obligation  => $obligation,
+				notes       => $notes
+			});
+
+		}
+
+		$num_judges++;
+
+	}	
+
+	my $msg = $num_entries ." entries and $num_judges judges imported.";
+
+	$m->redirect("index.mhtml?msg=$msg");
+
+</%init>
