@@ -1,0 +1,277 @@
+<%args>
+	$round_id
+</%args>
+<%init>
+
+	my $round = Tab::Round->retrieve($round_id);
+	my $event = $round->event;
+
+	my $flights = $round->flighted; 
+
+	Tab::Judge->set_sql( all_judges => "
+		select distinct judge.*
+		from judge, event, round, timeslot
+		where judge.judge_group = event.judge_group
+		and judge.active = 1
+		and event.id = round.event
+		and round.timeslot = timeslot.id
+		and round.id = ? 
+
+		and not exists (
+			select strike.id from strike
+			where strike.type = \"event\"
+			and strike.event = event.id
+			and strike.judge = judge.id
+		)
+
+		and not exists ( 
+			select strike.id from strike
+			where strike.type = \"time\"
+			and strike.judge = judge.id
+			and strike.start < timeslot.end
+			and strike.end > timeslot.start
+		)
+
+		and not exists (
+			select panel.id
+			from panel, ballot, round otherround, timeslot othertimeslot
+			where ballot.judge = judge.id
+			and ballot.panel = panel.id
+			and panel.round = otherround.id
+			and otherround.id != round.id
+			and otherround.timeslot = othertimeslot.id
+			and othertimeslot.start < timeslot.end
+			and othertimeslot.end > timeslot.start
+		)
+		order by judge.last
+	");
+
+	my @all_judges = Tab::Judge->search_all_judges($round->id);
+	my %judge_by_id = map {$_->id => $_} @all_judges;
+
+	my @panels = sort {$a->letter <=> $b->letter} $round->panels;
+	@panels = sort {$b->bracket <=> $a->bracket} @panels;
+
+	my %entry_by_id = map {$_->id => $_} $round->event->entries;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $this_round_sth = $dbh->prepare("
+		select distinct panel.id, ballot.chair, ballot.judge, ballot.entry, ballot.side, ballot.speakerorder, panel.flight
+		from panel, ballot
+		where panel.round = ".$round->id."
+		and panel.id = ballot.panel
+		group by ballot.id
+	");
+
+	my %panel_chair;
+	my %panel_judge;
+	my %panel_entry;
+	my %entry_side;
+	my %entry_order;
+	my %used_judge;
+
+	$this_round_sth->execute;
+
+	while (my ($panel, $chair, $judge, $entry, $side, $order, $flight)  = $this_round_sth->fetchrow_array() ) {
+		push @{$panel_chair{$panel}}, $judge if $chair;
+		push @{$panel_judge{$panel}}, $judge unless $chair;
+		$used_judge{$judge."-".$flight}++;
+		push @{$panel_entry{$panel}}, $entry;
+		$entry_side{$entry} = $side;
+		$entry_order{$entry} = $order;
+	}
+
+	my %judge_constraints = $m->comp("/funclib/judge_cannotsee.mas", group => $round->event->judge_group, round => $round);
+
+</%init>
+
+	<script>
+
+	 	$(function() {
+
+			$( ".droppable" ).droppable({
+				hoverClass  : "yellowrow bordergrey",
+				accept		: ":not(.ui-sortable-helper)",
+				drop		: function( event, ui) {
+					$( this ).find( ".placeholder" ).remove();
+					var draggableId = ui.draggable.attr("id");
+					var droppableId = this.id;
+					$.post("manual_judge_save.mhtml",{ round_id: <% $round_id %>, judge_id: draggableId, panel_id: droppableId });
+				}
+			}).sortable({
+				items: ":not(.placeholder)",
+				sort: function() {
+					// gets added unintentionally by droppable interacting with sortable
+					// using connectWithSortable fixes this, but doesn't allow you to customize active/hoverClass options
+					$( this ).removeClass( "ui-state-default" );
+				}
+			});
+
+
+%			foreach my $judge (@all_judges) { 
+%				foreach my $flight (1 .. $flights) { 
+					$( "#<% $judge."_".$flight %>" ).draggable({
+						drag             : function( event, ui ) { 
+%							foreach my $key (keys %judge_constraints) { 
+%								my ($judgeid, $entry) = split(/\-/, $key);
+%								next unless $judgeid == $judge->id;
+								$('.table').find('.<% $entry %>').addClass('redrow');
+%							}
+						},
+						stop             : function( event, ui ) { 
+%							foreach my $key (keys %judge_constraints) { 
+%								my ($judgeid, $entry) = split(/\-/, $key);
+%								next unless $judgeid == $judge->id;
+								$('.table').find('.<% $entry %>').removeClass('redrow');
+%							}
+						},
+						disableSelection : "true",
+						snap             : "true",
+						snapMode         : "inner"
+					});
+%				}
+%			}
+
+		});	
+
+	</script>
+
+	<div class="left huge">
+
+		<h2><% $round->realname %> Manual Judges</h2>
+
+		<table cellpadding="1" cellspacing="1" class="table">
+
+			<tr class="yellowrow">
+				<th class="smaller">
+					Bkt
+				</th>
+				<th class="smallish">
+					Entries
+				</th>
+				<th class="smallish" style="width: 130px;">
+					Chair Judge
+				</th>
+				<th class="smallish">
+					Other Judges
+				</th>
+				<th class="smallish">
+					Prefs
+				</th>
+			</tr>
+
+%			my $switch;
+
+%			foreach my $panel (@panels) { 
+
+%				my %used;
+
+%				my @entries = sort {$entry_side{$a} <=> $entry_side{$b}} @{$panel_entry{$panel->id}} if $panel_entry{$panel->id};
+%				@entries = sort {$entry_order{$a} <=> $entry_order{$b}} @entries;
+%				my %seen = ();
+%				@entries = grep { ! $seen{$_} ++ } @entries;	
+
+%				my @judges = @{$panel_judge{$panel->id}} if $panel_judge{$panel->id};
+%				my @chairs = @{$panel_chair{$panel->id}} if $panel_chair{$panel->id};
+		
+				<tr class="<% ($switch++ % 2) ? "oddrow" : "evenrow" %>
+%					foreach my $entry (@entries) { $m->print($entry." "); } 
+				">
+
+					<td class="centeralign smallish">
+						<% $panel->bracket %>
+					</td>
+
+					<td style="width: 85px;">
+%						foreach my $entry (@entries) { 
+%							next if $used{$entry}++;
+							<span class="smaller eighty nowrap padno" class="<% $entry %> <% $entry."-".$entry_side{$entry} %>" >
+								<% $entry_side{$entry} == 1 ? "A" : "" %>
+								<% $entry_side{$entry} == 2 ? "N" : "" %>
+								<% $entry_order{$entry} == 1 ? "1G" : "" %>
+								<% $entry_order{$entry} == 2 ? "1O" : "" %>
+								<% $entry_order{$entry} == 3 ? "2G" : "" %>
+								<% $entry_order{$entry} == 4 ? "2O" : "" %>
+								<% $entry_by_id{$entry}->code %>
+							</span>
+%						}
+					</td>
+
+					<td>
+						<div class="ui-droppable droppable" id="chair_<% $panel->id %>">
+%							foreach my $chair (@chairs) { 
+%								next if $used{$chair}++;
+								<span class="draggable nowrap" id="<% $chair %>_<% $panel->flight %>">
+									<% $judge_by_id{$chair}->tab_rating ? $judge_by_id{$chair}->tab_rating  : "" %>
+									<% $judge_by_id{$chair}->last.", ".$judge_by_id{$chair}->first %>
+								</span>
+%							}
+						</div>
+					</td>
+
+					<td>
+						<div class="droppable" id="judge_<% $panel->id %>">
+%							foreach my $judge (@judges) { 
+%								next if $used{$judge}++;
+								<span class="draggable nowrap" id="<% $judge %>_<% $panel->flight %>">
+									<% $judge_by_id{$judge}->tab_rating ? $judge_by_id{$judge}->tab_rating  : "" %>
+									<% $judge_by_id{$judge}->last.", ".$judge_by_id{$judge}->first %>
+								</span>
+%							}
+						</div>
+					</td>
+
+					<td>
+					</td>
+
+				</tr>
+%			}
+
+		</table>
+
+	</div>
+
+
+	<div class="right small">
+
+		<div class="sidenote">
+
+			<h4>Round</h4>
+
+			<a class="blue block" href="/panel/schemat/show.mhtml?round_id=<% $round_id %>">
+				Return to <% $round->realname %>
+			</a>
+
+%			my $warn = "Danger! This will ERASE existing judge assignments and re do the entire round.  Proceed?";
+
+
+			<h4>Unused Judges</h4>
+
+			<div class="bordergrey droppable" id="out" style="min-height: 250px; padding: 10px;">
+
+%				foreach my $judge (@all_judges) { 
+%					foreach my $flight (1 .. $flights) { 
+%						next if $used_judge{$judge->id."-".$flight};
+						<span class="draggable nowrap" id="<% $judge->id."_".$flight %>">
+							<% $judge->tab_rating ? $judge->tab_rating  : "" %>
+							<% $judge->last.", ".$judge->first %>
+						</span>
+%					}
+%				}
+		
+			</div>
+
+% 			if ($event->type eq "speech" || $round->type eq "congress") { 
+				<a class="yellow martop block"  <& "/funclib/confirm.mas", warn => $warn &>  href="/panel/round/judges.mhtml?round_id=<% $round->id %>">
+%			} else { 
+				<a class="yellow martop block"  <& "/funclib/confirm.mas", warn => $warn &>  href="/panel/round/debate_judge_assign.mhtml?round_id=<% $round->id %>">
+%           }   
+				Redo Auto-paired judges
+        	</a>
+
+		</div>
+
+
+	</div>
+
