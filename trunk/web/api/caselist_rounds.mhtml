@@ -1,0 +1,162 @@
+<%args>
+	#Pass in a school code by chapter ID, two debater names and side in the URL parameters
+	$chapter_id => undef
+	$debatername1 => undef
+	$debatername2 => undef
+	$side => undef
+	
+</%args>
+<%init>
+
+	#Retrieve the chapter object by the chapter_id code
+        my $chapter = Tab::Chapter->retrieve($chapter_id);
+        
+	#If chapter wasn't found, print an error and abort
+	unless ($chapter) {
+		$m->print("School not found.");
+		$m->abort;
+ 	}
+
+	#Initiate new XML
+	use XML::Simple;
+	my $xs = new XML::Simple();
+
+	#Print the start of the XML
+	$r->content_type("application/xml");
+	$m->print("<?xml version='1.0' standalone='yes'?>\r\n");
+	$m->print("<ROUNDS>\r\n");
+
+	#Get all students
+	my @students = $m->comp("/api/caselist_chapter_students.mas", chapter => $chapter);
+
+	#Loop through each student and look for a match	
+	my $debater1;
+	my $debater2;
+	foreach my $student (@students) {
+		my $first = $student->first;
+		my $last = $student->last;
+		my $fullname = $first . " " . $last;
+		if ($fullname eq $debatername1){$debater1 = $student}
+		if ($fullname eq $debatername2){$debater2 = $student}
+	}
+
+	#Unless both debaters were found, print error and exit
+	if ($debater1 == "" || $debater2 == "") {
+		$m->print("Debater not found.");
+		$m->abort;
+	}
+
+	#Set SQL for searching entries by student
+	Tab::Entry->set_sql ( by_student => "
+		select distinct entry.*
+		from entry, entry_student, student, event, tourn
+		where student.id = ?
+		and student.id = entry_student.student
+		and entry_student.entry = entry.id
+		and entry.event = event.id
+		and event.tourn = tourn.id
+		order by tourn.start desc
+	");
+
+	#Get the entries for each debater
+	my @entries1 = Tab::Entry->search_by_student($debater1->id);
+	my @entries2 = Tab::Entry->search_by_student($debater2->id);
+
+	#Use hashes to get the intersection of both arrays
+	my %entries1 = map{$_ =>1} @entries1;
+	my %entries2 = map{$_ =>1} @entries2;
+	my @entries = grep( $entries1{$_}, @entries2 );
+
+	my @panels;
+
+	#Get panels (rounds) for each entry and store in array
+	foreach my $entry (@entries) {
+		my $entryid = $entry->id;
+		Tab::Panel->set_sql( by_entry => "
+			select distinct panel.*
+			from panel, ballot
+			where ballot.entry = $entryid
+			and ballot.panel = panel.id
+		");
+		
+		push( @panels, Tab::Panel->search_by_entry() );
+	}
+
+	foreach my $panel (@panels) {
+
+		#Get date of round, split out the time
+		my $startdate = $panel->round->event->tourn->start;
+		my @datearray = split(/T/, $startdate);
+		$startdate = $datearray[0];
+
+		#Get tournament name (use UC webname for ease of reading) and round number
+		my $tourn = ucfirst($panel->round->event->tourn->webname);
+		my $roundname = $panel->round->name;
+		my $roundside;
+		my $oppschool;
+		my $oppname;		
+
+		#Get opposing school, opponent name, and side
+		foreach my $entry ($m->comp("/funclib/panel_entries.mas", panel => $panel)) {
+			my $moi;
+			
+			#Loop through students for each entry - if opponent, save their name
+			foreach my $student ($entry->students) {
+				my $oppfullname = $student->first . " " . $student->last;
+				if ($oppfullname eq $debatername1 || $oppfullname eq $debatername2) {
+					$moi++;
+				} else {
+					if ($oppname eq "") {
+						$oppname = $oppname . $student->last;
+					} else {
+						$oppname = $oppname . "-" . $student->last;
+					}
+				}
+			}
+			#Get side for the round (1 = Aff, 2 = Neg, or include anyway)
+			if ($moi) {
+				$roundside = 1 if $entry->side == 1;
+				$roundside = 2 if $entry->side == 2;
+				if (!$roundside) {$roundside = $side;}
+			
+			#Get opponent school and side
+			} else {
+				$oppschool = $entry->school->short_name;
+				#These are reversed, because this is opponents side
+				$roundside = 2 if $entry->side == 1;
+				$roundside = 1 if $entry->side == 2;
+				if (!$roundside) {$roundside = $side;}
+			}
+		}
+
+		#Get judge
+		my $judgenames;
+
+		foreach my $judge ($m->comp("/funclib/panel_judges.mas", panel => $panel)) {
+			$judgenames .= ", " if $judgenames;
+			$judgenames .= $judge->last;
+		}
+
+		#Only include rounds from this season and on the correct side
+		my $cutoff = "2012-01-10";
+
+		if ($startdate gt $cutoff && $roundside == $side) {
+
+			#Set variables for the XML
+			my $xml_round = {
+				TOURNAMENT => $tourn,
+				ROUND_NUM => $roundname,
+				OPPONENT => $oppschool . " " . $oppname,
+				JUDGE => $judgenames
+			};
+
+			#Print XML
+			$m->print("<ROUND>\n");
+			$m->print($xs->XMLout($xml_round, RootName => "", NoAttr => 1, XMLDecl => 0));
+			$m->print("</ROUND>\n");		
+		}
+	}
+
+	#Close XML
+	$m->print("</ROUNDS>");
+</%init>
