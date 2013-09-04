@@ -85,6 +85,7 @@ use Tab::School;
 use Tab::SchoolFine;
 use Tab::Session;
 use Tab::Site;
+use Tab::Stats;
 use Tab::Strike;
 use Tab::StrikeTime;
 use Tab::Student;
