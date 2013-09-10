@@ -3,12 +3,18 @@
 </%args>
 <%perl>
 
-	# returns a hash with 2 fields; rounds judged so far
-	# and rounds scheduled to judge in future
+	# returns a hash with 6 fields; 
+	# $judge_hash{$judge.id}{'oblig'} -- prelim rounds obligated to hear
+	# $judge_hash{$judge.id}{'judged_already'} -- rounds judged so far
+	# $judge_hash{$judge.id}{'will_judge'} -- rounds scheduled to judge after this one
+	# $judge_hash{$judge.id}{'future_possible'} -- rounds available for this event in future rounds
+	# $judge_hash{$judge.id}{'lost'} -- rounds lost, including current round
+	# $judge_hash{$judge.id}{'in_round'} -- assigned to judge in the current round
 	
 	use POSIX;
 	use Time::HiRes qw( time );
-	
+	my $start = time(); 	
+
 	my $round = Tab::Round->retrieve($round_id);
 	my $event = $round->event;
 	my $judge_group = $event->judge_group;
@@ -22,13 +28,14 @@
 	Tab::Judge->columns(TEMP => qw/judged_already/);		
 	Tab::Judge->columns(TEMP => qw/judge_id/);		
 	Tab::Judge->set_sql(pull_ballots => "
-		select judge.id as judge_id, judge.first, judge.last, ballot.*, count(distinct ballot.panel) as judged_already
+		select judge.id as judge_id, judge.obligation, judge.first, judge.last, ballot.*, count(distinct ballot.panel) as judged_already
 		from ballot, judge, panel, round
 		where judge.judge_group = $judge_group
 		and ballot.judge = judge.id
 		and panel.id=ballot.panel
 		and round.id=panel.round
 		and round.name <= $rd_name 
+		and round.type <> 'elim'
 		group by judge
 	");
 
@@ -37,9 +44,10 @@
 	foreach my $judge (@judges) {
 #		print $judge->first." ".$judge->last." id=".$judge->judge_id." judged already:".$judge->judged_already."<br>";
 		$judge_hash{$judge->judge_id}{'judged_already'} = $judge->judged_already;
+		$judge_hash{$judge->judge_id}{'oblig'} = $judge->obligation;
 	}
 	
-	#count rounds yet to come
+	#count rounds yet to come that they are already scheduled in
 	Tab::Judge->columns(TEMP => qw/will_judge/);		
 	Tab::Judge->columns(TEMP => qw/judge_id/);		
 	Tab::Judge->set_sql(pull_ballots => "
@@ -50,6 +58,7 @@
 		and panel.id=ballot.panel
 		and round.id=panel.round
 		and round.name > $rd_name 
+		and round.type <> 'elim'
 		group by judge
 	");
 
@@ -60,7 +69,63 @@
 #		print $judge->first." ".$judge->last." id=".$judge->judge_id." judged already:".$judge->will_judge."<br>";
 		$judge_hash{$judge->judge_id}{'will_judge'} = $judge->will_judge;
 	}
+
+#	Now account for future rounds the judge could possibly hear
+#	pull them in future rounds where they CAN hear the event but they don't have a time strike
+
+	my @future_rounds = Tab::Round->search ( event => $event );
 	
+	foreach my $fut_rd (@future_rounds) { 
+	
+		if ( $fut_rd->name > $round->name ) {
+	
+		my $temp_rd_id = $fut_rd->id;
+		
+		Tab::Judge->set_sql(pull_ballots => "
+			select judge.id, judge.first, judge.last
+			from judge, round, timeslot
+			where judge.judge_group = $judge_group
+			and round.id = $temp_rd_id
+			and timeslot.id = round.timeslot
+			and round.type <> 'elim'
+			and not exists( 		
+				select strike.id 
+				from strike
+				where strike.judge = judge.id 
+				and strike.type = \"time\"
+				and strike.start < timeslot.end 		
+				and strike.end > timeslot.start )
+			and not exists(
+				select strike.id from strike
+				where strike.judge = judge.id 	
+				and strike.event = round.event
+				and strike.type = \"event\" )
+		");	
+
+			undef @judges;
+			@judges = Tab::Judge->search_pull_ballots;
+			foreach my $judge (@judges) {
+				$judge_hash{$judge->id}{'future_possible'} ++;
+			}
+	
+		}
+	
+	}
+	
+	foreach my $key ( keys %judge_hash) {
+
+		$judge_hash{$key}{'lost'} = $judge_hash{$key}{'oblig'}-$judge_hash{$key}{'judged_already'}-$judge_hash{$key}{'future_possible'};
+		if ( $judge_hash{$key}{'lost'} < 0 ) { $judge_hash{$key}{'lost'} = 0; }
+
+#		print "oblig:".$judge_hash{$key}{'oblig'}." already:".$judge_hash{$key}{'judged_already'}." future:".$judge_hash{$key}{'will_judge'}." future possible:".$judge_hash{$key}{'future_possible'}." lost:".$judge_hash{$key}{'lost'}."<br>";
+
+		
+	}
+
 	return \%judge_hash;
+
+	my $end = time();
+	print "<br>processing time: ";
+	printf("%.2f\n", $end - $start);
 
 </%perl>
