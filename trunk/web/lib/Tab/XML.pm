@@ -38,9 +38,9 @@ sub sorted_keys {
 	} elsif ($name eq "ROUND") { 
 		return ('ID', 'EVENT', 'TIMESLOT', 'TB_SET', 'RD_NAME', 'LABEL', 'FLIGHTING', 'JUDGESPERPANEL', 'JUDGEPLACESCHEME', 'PAIRINGSCHEME', 'TOPIC', 'CREATEDOFFLINE');
 	} elsif ($name eq "PANEL") { 
-		return ('ID', 'ROUND', 'ROOM', 'FLIGHT');
+		return ('ID', 'ROUND', 'ROOM', 'FLIGHT', 'BYE');
 	} elsif ($name eq "BALLOT") { 
-		return ('ID', 'JUDGE', 'PANEL', 'ENTRY', 'SIDE');
+		return ('ID', 'JUDGE', 'PANEL', 'ENTRY', 'SIDE', 'BYE', 'ROOM');
 	} elsif ($name eq "BALLOT_SCORE") { 
 		return ('ID', 'BALLOT', 'RECIPIENT', 'SCORE_ID', 'SCORE');
 	} elsif ($name eq "SCORES") { 
