@@ -1,5 +1,4 @@
 <?php
-die;
 require 'scripts/databaseconnect.php';
 
 $ballot=$_GET['ballot'];
