@@ -1,0 +1,314 @@
+<%args>
+	$account
+	$tourn
+	$round_id
+</%args>
+<%init>
+
+	use XML::Simple;
+	use Data::Dumper;
+
+	my $now = DateTime->now;
+	my $tz = $account->tz if $account->tz;
+	$tz = "UTC" unless $tz;
+
+	$now->set_time_zone($tz);
+
+	my $round = Tab::Round->retrieve($round_id) if $round_id;
+	$m->abort unless $round;
+
+	#PROCESS THE XML
+	my $req = Apache2::Request->new($r, DISABLE_UPLOADS => 0);
+	my $xml_file = $req->upload('round_xml');
+	my $xml_filename = $xml_file->tempname;
+
+	system "/bin/mkdir -p ".$Tab::file_root."tmp/".$round->id."/$now->epoch";
+	my $xml_path = $Tab::file_root."tmp/".$round->id."/$now->epoch";
+
+	`/bin/cp $xml_filename $xml_path`;
+	`perl -pi -e s/'&'/'&amp;'/g  $xml_path/$xml_filename`;
+
+	my $xml = new XML::Simple ( SuppressEmpty => 1 );
+	my $data = $xml->XMLin($xml_filename);
+
+	#ROUNDS
+	$m->print("<h2>Rounds</h2>") if $debug;
+
+	my @xml_rounds = sort {$a->{ID} <=> $b->{ID}} @{$data->{ROUND}};
+	@xml_rounds = sort {$a->{RD_NAME} <=> $b->{RD_NAME}} @{$data->{ROUND}};
+
+	my %round_by_id = ();
+	my %round_by_name = ();
+	my %round_count = ();
+
+	my @rounds;
+	
+	ROUND:
+	foreach my $xml_round (@xml_rounds) {
+
+		my $event = $round->event;
+
+		$round_by_id{$xml_round->{ID}} = $round;
+		$round_by_name{$xml_round->{LABEL}} = $round;
+		$round->flighted($xml_round->{FLIGHTING});
+		$round->judges($xml_round->{JUDGESPERPANEL}) if $xml_round->{JUDGESPERPANEL};
+		$round->type(lc($xml_round->{PAIRINGSCHEME})) if $xml_round->{PAIRINGSCHEME};
+		$round->update;
+
+		$m->comp("/funclib/round_dump.mas", round => $round);
+	}
+
+	my %panel_by_id = ();
+
+	my @students = $m->comp("/funclib/event_students.mas", event => $event);
+	my %student_entries = $m->comp("/funclib/event_students.mas", event => $event, with_entries => 1);
+	my %students_by_id = map {$_->id => $_} @students;
+	my %entries_by_id = map {$_->id => $_} $event->entries;
+
+	#ROUND PAIRINGS AND RESULTS
+	$m->print("<h2>Pairings and Results</h2>") if $debug;
+
+	foreach my $xml_result (@{$data->{ROUNDRESULT}}) { 
+
+		my $letter;
+
+		PANEL:
+		foreach my $xml_panel (@{$xml_result->{RESULT_BALLOT}}) { 
+
+			$letter++;
+	
+			my $panel = $panel_by_id{$xml_panel->{Panel}};
+
+			unless ($panel) { 
+
+				my $room_id = 0;
+				$room_id = $xml_panel->{RoomID} if $xml_panel->{RoomID};
+				$room = 0 if $xml_panel->{RoomID} == -99;
+
+				my $flight = $xml_panel->{Flight};
+				$flight = 1 unless $flight && $flight > 0;
+
+				$panel = Tab::Panel->create({
+					letter => $letter,
+					room   => $room,
+					round  => $round,
+					flight => $flight
+				});
+				
+				$panel_by_id{$xml_panel->{Panel}} = $panel;
+			
+			}
+
+			my $judge_id = 0;
+			$judge_id = $xml_panel->{JudgeID} if $xml_panel->{JudgeID};
+			$judge_id = 0 if $judge_id < 0;
+
+			my @xml_results = @{$xml_panel->{RESULT_SCORE}} if $xml_panel->{RESULT_SCORE};
+
+			my %ballot_by_entry = ();
+			my %ballot_by_student = ();
+
+			my $count;
+			my $byes;
+
+			BALLOTS:
+			foreach my $xml_ballot (@xml_results) { 
+
+				next unless $xml_ballot->{Score_Name} eq "Ballot";
+				my $entry = $entry_by_id{$xml_ballot->{Recipient}};
+				next unless $entry;
+
+				$count++;
+
+				my $bye = 0;
+				my $forfeit = 0;
+
+				my $value = $xml_ballot->{content};
+
+				if ($xml_ballot->{Side} == -1) { 
+					$bye = 1 if $value == "1";
+					$forfeit = 1 if $value == "0";
+				}
+
+				$byes += $bye;
+				$byes += $forfeit;
+
+				my $ballot = Tab::Ballot->create({
+					entry  => $entry->id,
+					panel  => $panel->id,
+					side   => $xml_ballot->{Side},
+					judge  => $judge_id,
+					bye    => $bye,
+					noshow => $forfeit
+				});
+
+				$panel->room(0) if $bye;
+				$panel->room(0) if $forfeit;
+
+				$ballot_by_entry{$xml_ballot->{Recipient}} = $ballot;
+		
+				foreach my $student (@{$students_by_entry{$xml_ballot->{Recipient}}}) {
+					$ballot_by_student{$student->{ID}} = $ballot;
+				}
+
+			}
+
+			if ($count == 1) { 
+				$panel->bye(1);
+				$panel->room(0);
+			}
+
+			$panel->update;
+
+			foreach my $xml_value (@xml_results) { 
+
+				my $tag = lc($xml_value->{Score_Name});
+
+				next if $byes && $tag ne "ballot";
+
+				$tag = "rank" if $tag eq "ranks";
+
+				my $value = $xml_value->{content};
+
+				my $ballot;
+				my $student_id;
+
+				if ($xml_value->{ScoreFor} eq "Speaker") { 
+					$student_id = $xml_value->{Recipient} if $student_by_id{$xml_value->{Recipient}};
+					$ballot = $ballot_by_student{$xml_value->{Recipient}}->id if $ballot_by_student{$xml_value->{Recipient}};
+				} else { 
+					$ballot = $ballot_by_entry{$xml_value->{Recipient}}->id if $ballot_by_entry{$xml_value->{Recipient}};
+				}
+
+				next unless $ballot;
+
+				my $ballot_value = Tab::BallotValue->create({
+					tag     => $tag,
+					value   => $value,
+					student => $student,
+					ballot  => $ballot
+				});
+
+			}
+
+		}
+	}
+
+	#ROUND PAIRINGS AND RESULTS, PART DEUX; the EASIER WAY
+	my $panel_count;
+
+	foreach my $xml_panel (@{$data->{PANEL}}) { 
+
+		next if $round->id != $xml_panel->{ROUND};
+
+		my $room_id = 0;
+		$room_id = $xml_panel->{ROOM} if $xml_panel->{ROOM};
+		$room = 0 if $xml_panel->{ROOM} == -99;
+
+		my $flight = $xml_panel->{FLIGHT};
+		$flight = 1 if (not defined $flight) || $flight == 0;
+
+		$panel = Tab::Panel->create({
+			round  => $round->id,
+			room   => $room_id,
+			letter => $panel_count++,
+			flight => $flight
+		});
+
+		$panel_by_id{$xml_panel->{ID}} = $panel;
+
+	}
+
+	my %ballot_by_id = ();
+
+	foreach my $xml_ballot (@{$data->{BALLOT}}) { 
+
+		my $panel = $panel_by_id{$xml_ballot->{PANEL}};
+		my $judge = $judge_by_id{$xml_ballot->{JUDGE}} if $judge_by_id{$xml_ballot->{JUDGE}};
+		my $entry = $entry_by_id{$xml_ballot->{ENTRY}};
+
+		$judge = 0 if $xml_ballot->{JUDGE} == -99;
+		$entry = 0 if $xml_ballot->{ENTRY} == -99;
+
+		next unless $judge > 0 || $entry > 0;
+
+		$judge = 0 unless $judge;
+		$entry = 0 unless $entry;
+
+		my $ballot = Tab::Ballot->create({
+			panel => $panel,
+			judge => $judge,
+			entry => $entry,
+			side => $xml_ballot->{SIDE}
+		});
+
+		$ballot_by_id{$xml_ballot->{ID}} = $ballot;
+
+	}
+
+	foreach my $xml_score (@{$data->{BALLOT_SCORE}}) { 
+
+		my $type = "ballot" if $xml_score->{SCORE_ID} == 1;
+		$type = "points" if $xml_score->{SCORE_ID} == 2;
+		$type = "rank" if $xml_score->{SCORE_ID} == 3;
+
+		my $student = $student_by_id{$xml_score->{RECIPIENT}} if $type ne "Ballot";
+		my $ballot = $ballot_by_id{$xml_score->{BALLOT}};
+
+		my $score = Tab::BallotValue->create({
+			tag => $type,
+			ballot => $ballot,
+			student => $student,
+			value => $xml_score->{SCORE}
+		}) if $student;
+
+		$score = Tab::BallotValue->create({
+			tag => $type,
+			ballot => $ballot,
+			value => $xml_score->{SCORE}
+		}) unless $student;
+
+	}
+
+	#Auto-audit any entered results
+	foreach my $round (@rounds) {
+		$m->comp("/funclib/round_audit.mas", round => $round);
+	}
+
+	Tab::Round->set_sql(update_flighting => "
+		update round
+    	set flighted = 
+    	    (select max(panel.flight) 
+    	        from panel
+    	        where panel.round = round.id)
+    		where event = ?
+	");
+
+	foreach my $event (@events) { 
+
+		$m->comp("/funclib/event_clean.mas", event => $event);
+		Tab::Round->sql_update_flighting($event->id);
+
+		foreach my $entry ($event->entries) { 
+			my $name;
+			my $last_names;
+			my $notfirst;
+			foreach my $student ($entry->students) { 
+				$name = $student->first." ".$student->last;
+				$last_names .= " & " if $notfirst;
+				$last_names .= $student->last;
+				$notfirst++;
+			}
+			if ($notfirst > 1) { 
+				$entry->name($last_names);
+			} else { 
+				$entry->name($name);
+			}
+			$entry->update;
+		}
+	}
+
+	my $msg = "Round imported into Tabroom";
+	$m->redirect("show.mhtml?round_id=".$round->id);
+
+</%init>
