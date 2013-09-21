@@ -1,4 +1,6 @@
 <?php
+echo "You need to enable this for security reasons";
+die;
 require 'scripts/databaseconnect.php';
 
 $ballot=$_GET['ballot'];
