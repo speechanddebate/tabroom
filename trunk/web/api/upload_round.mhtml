@@ -1,122 +1,340 @@
 <%args>
-	$username => undef
-	$password => undef
-	$round_id => undef
+	$username   => undef
+	$password   => undef
+	$debug      => 0
+	$no_prefs   => undef
+	$account_id => undef
+	$session_id => undef
+	$confirm    => undef
+	$myepoch    => undef
 </%args>
 <%init>
 
-	use Crypt::PasswdMD5;
+	undef $debug if $Tab::hostname eq "www.tabroom.com";
+	
 	use XML::Simple;
+	use Crypt::PasswdMD5;
 	use Data::Dumper;
 
-	my ($account) = Tab::Account->search( email => lc($username) );
+	my $now = DateTime->now;
+	my $epoch = $now->epoch;
 
-	unless ($account) { 
-		$m->print("<error>No account with the email ".$username." was found.</error>");
-		$m->abort;
-	} 
+	my $account;
 
-	$password =~ s/\s+$//g;
-	my $db_password = $account->passhash;
-   	my $verify_password = unix_md5_crypt($password,$db_password);
-   
-   	unless ($verify_password eq $db_password) { 
-		$m->print("<error>Password incorrect for ".$username.".</error>");
-		$m->abort;
+	if ($account_id && $session_id) { 
+
+		$account = Tab::Account->retrieve($account_id);
+		my $session = Tab::Session->retrieve($session_id);
+
+		unless ($session->account->id == $account_id) { 
+			$m->print("ACCOUNT_NOT_AUTHENTICATED");
+			$m->abort;
+		}
 	}
+
+	unless ($debug || $account) { 
+
+		#ACCOUNT
+		($account) = Tab::Account->search( email => lc($username) );
+		unless ($account) { 
+			$m->print("NO_SUCH_ACCOUNT");
+			$m->abort;
+		}
+
+		$password =~ s/\s+$//g;
+		my $db_password = $account->passhash;
+		my $verify_password = unix_md5_crypt($password,$db_password);
+	   
+		unless ($verify_password eq $db_password) { 
+			$m->print("PASSWORD_WRONG");
+			$m->abort;
+		}
+	}
+
+	#PROCESS THE XML
+
+	my $xml = new XML::Simple ( SuppressEmpty => 1 ); 
+	my $data;
+
+	if ($debug) { 
+
+		$data = $xml->XMLin("/tmp/DataTest.xml");
+
+	} elsif ($myepoch) { 
+
+		$data = $xml->XMLin($Tab::file_root."tmp/$myepoch/RoundData.xml");
+
+	} else { 
+
+		my $req = Apache2::Request->new($r);
+		my @xml_handles = $r->upload;
+		my $xml_file = $req->upload($xml_handles[0]);
+		my $xml_filename = $xml_file->tempname;
+		
+		system "/bin/mkdir -p ".$Tab::file_root."tmp/$epoch";
+
+		if ($session_id) { 
+			system "mv $xml_filename ".$Tab::file_root."tmp/$epoch/RoundData.xml";
+		} else { 
+			system "mv $xml_filename ".$Tab::file_root."tmp/$epoch/me.zip";
+			system "cd ".$Tab::file_root."tmp/$epoch/; /usr/bin/unzip ".$Tab::file_root."tmp/$epoch/me.zip";
+		}
+
+		$data = $xml->XMLin($Tab::file_root."tmp/$epoch/RoundData.xml");
+
+	}
+
+	my $msg;
+	my $tourn;
+	my %round_by_id;
+	my @rounds;
+
+	my @xml_rounds;
 	
-    #PROCESS THE XML
-	my $req = Apache2::Request->new($r);
-	my $xml_file = $req->upload("xml");
-	my $xml_filename = $xml_file->tempname;
+	eval { 
+		@xml_rounds = @{$data->{ROUND}} if @{$data->{ROUND}};
+	};
 
-	my $xml = new XML::Simple ( SuppressEmpty => 1,  ForceArray => [ qw(EVENT EVENT_SETTING TOURN_SETTING SCHOOL REGION) ]);
-	my $data = $xml->XMLin($xml_filename);
+	push @xml_rounds, $data->{ROUND} unless @xml_rounds;
 
-	my $round_id = $data->{ID};
-	my $round = Tab::Round->retrieve($round_id);
-
-	unless ($round) { 
-		$m->print("NO_SUCH_ROUND");
-		$m->abort;
+	foreach my $xml_round (@xml_rounds) { 
+		my $round = Tab::Round->retrieve($xml_round->{ID});
+		$round_by_id{$xml_round->{ID}} = $round;
+		next unless $round;
+		push @rounds, $round;
 	}
 
-	my $event = $round->event;
-	my $tourn = $event->tourn;
 
-	unless ($tourn) { 
-		$m->print("NO_SUCH_TOURNAMENT");
-		$m->abort;
-	}
+	if ($confirm) { 
 
-	unless ($account->site_admin || Tab::TournAdmin->search( tourn => $tourn->id, account => $account->id )) { 
-		$m->print("TOURN_ACCESS_DENIED");
-		$m->abort;
-	}
+		foreach my $xml_round (@xml_rounds) { 
 
-	$round->name($data->{RD_NAME});
-	$round->flighted($data->{FLIGHTING});
-	$round->label($data->{LABEL});
-	$round->judges($data->{JUDGESPERPANEL});
-	$round->type(lc $data->{PAIRINGSCHEME});
-	$round->tb_set($data->{TB_SET});
-	$round->update;
+			my $round = $round_by_id{$xml_round->{ID}};
 
-	my $counteri = 1;
+			my $event = $round->event;
+			$tourn = $event->tourn;
 
-	foreach my $xml_panel (@{$data->{PANEL}}) {
+			unless ($debug || $account->site_admin || Tab::TournAdmin->search( tourn => $tourn->id, account => $account->id)) { 
+				$m->print("You do not have access to change that tournament");
+				$m->abort;
+			}
 
-		my $panel = Tab::Panel->retrieve($xml_panel->{ID});
+			my $timeslot_id = $xml_round->{TIMESLOT};
+			my $tb_set_id = $xml_round->{TB_SET};
+			my $label = $xml_round->{LABEL};
+			my $round_type = lc($xml_round->{PAIRINGSCHEME});
+			$round_type = "prelim" if $round_type eq "preset";
 
-		unless ($panel) { 
-			$panel = Tab::Panel->create({
-				room => 0,
-				letter => $counter,
-				type => 0,
-				round => $round->id
+			$round->name($xml_round->{RD_NAME});
+			$round->label($xml_round->{LABEL});
+			$round->event($xml_round->{EVENT});
+			$round->tb_set($xml_round->{TB_SET});
+			$round->timeslot($xml_round->{TIMESLOT});
+			$round->flighted( $xml_round->{FLIGHTING} );
+			$round->judges( $xml_round->{JUDGESPERPANEL} );
+			$round->name( $xml_round->{RD_NAME} );
+			$round->type($round_type);
+			$round->update;
+
+			$msg .= $round->realname." replaced and uploaded.<br />";
+		
+			$m->comp( "/funclib/round_dump.mas", round => $round );
+		
+			foreach my $result ($round->results) { 
+				$result->delete;
+			}
+
+		}
+
+		my %round_letter;
+
+		my %panel_by_id = ();
+
+		PANEL:
+		foreach my $xml_panel (@{$data->{PANEL}}) { 
+
+			my $round = $round_by_id{$xml_panel->{ROUND}};
+			next unless $round && $round->id;
+
+			my $letter = $round_letter{$round->id};
+			$letter++;
+			$round_letter{$round->id} = $letter;
+
+			my $room_id = $xml_panel->{ROOM};
+			$room_id = 0 unless $room_id;
+
+			my $bye = 0;
+			$bye = $xml_panel->{BYE} if $xml_panel->{BYE};
+
+			my $flight = 0;
+			$flight = $xml_panel->{FLIGHT} if $xml_panel->{FLIGHT};
+
+			my $panel = Tab::Panel->create({
+				letter => $letter,
+				round  => $round->id,
+				room   => $room_id,
+				bye    => $bye,
+				flight => $flight
+			});
+
+			$panel_by_id{$xml_panel->{ID}} = $panel;
+
+		}
+
+
+		my %set_by_event_id; 
+
+		ELIMSEED:
+		foreach my $xml_elimseed (@{$data->{ELIMSEED}}) { 
+
+			my $entry_id = $xml_elimseed->{ENTRY};
+			next if $entry_id == "-99";
+
+			my $round_id = $xml_elimseed->{ROUND};
+
+			my $round = $round_by_id{$round_id};
+			next unless $round;
+
+			my $event_id = @{$xml_elimseed->{EVENT}}[0];
+			next unless $event_id == $round->event->id;
+
+			my $set = $set_by_event_id{$event_id};
+
+			unless ($set) { 
+				$set = Tab::ResultSet->create({
+					tourn     => $tourn->id,
+					event     => $event_id,
+					bracket   => 1,
+					label     => "Bracket",
+					generated => $now
+				});
+			}
+
+			my $result = Tab::Result->create({
+				result_set => $set->id,
+				entry      => $entry_id,
+				round      => $round_id
+			});
+
+			Tab::ResultValue->create({
+				result    => $result->id,
+				value     => $xml_elimseed->{SEED},
+				priority  => 1,
+				tag       => "Seed",
+				sort_desc => 0,
+				no_sort   => 0
 			});
 		}
 
-		$panel->room($xml_panel->{ROOM});
-		$panel->flight($xml_panel->{FLIGHT});
-		$panel->update;
-	}
+		my %ballot_by_id = ();
 
-	foreach my $xml_ballot (@{$data->{BALLOT}}) { 
+		foreach my $xml_ballot (@{$data->{BALLOT}}) { 
 
-		my $ballot = Tab::Ballot->retrieve($xml_ballot->{ID});
+			my $ballot_id = $xml_ballot->{ID};
+		
+			next if $xml_ballot->{ENTRY} == -99;
+			next if $xml_ballot->{JUDGE} == 0;
 
-		unless ($ballot) { 
-			$ballot = Tab::Ballot->create({ panel => $xml_ballot->{PANEL} });
+			my $panel = $panel_by_id{$xml_ballot->{PANEL}};
+			next unless $panel;
+			
+			my $bye = 0;
+			$bye++ if $xml_ballot->{JUDGE} == -1;
+			$bye++ if $xml_ballot->{BYE};
+
+			my $fft = 0;
+			$fft++ if $xml_ballot->{NOSHOW};
+
+			my $judge_id = 0;
+
+			unless ($xml_ballot->{JUDGE} == -99 || $bye || $fft) { 
+				$judge_id = $xml_ballot->{JUDGE};
+			}
+
+			my $entry_id =$xml_ballot->{ENTRY};
+
+			next unless ($panel && ($fft > 0 || $bye > 0 || $judge_id > 0 || $entry_id > 0));
+
+			my $ballot = Tab::Ballot->create({
+				judge  => $judge_id,
+				panel  => $panel,
+				entry  => $entry_id,
+				side   => $xml_ballot->{SIDE},
+				bye    => $bye,
+				noshow => $fft,
+				cat_id => $xml_ballot->{ID}
+			});
+
+			$ballot_by_id{$xml_ballot->{ID}} = $ballot;
+
 		}
 
-		$ballot->panel($xml_ballot->{PANEL});
-		$ballot->judge($xml_ballot->{JUDGE});
-		$ballot->entry($xml_ballot->{ENTRY});
-		$ballot->side($xml_ballot->{SIDE});
-		$ballot->update;
+		my %score_by_id = ();
 
-	}
+		SCORE:
+		foreach my $xml_score (@{$data->{BALLOT_SCORE}}) { 
 
-	foreach my $xml_score (@{$data->{BALLOT_SCORE}}) { 
+			my $score_id = $xml_score->{ID};
+			my $ballot = $ballot_by_id{$xml_score->{BALLOT}};
 
-		my $score = Tab::BallotValue->retrieve($xml_score->{ID});
+			next unless $ballot;
 
-		unless ($score) { 
-			$score = Tab::BallotValue->create({ ballot => $xml_score->{BALLOT} });
+			my $type = $xml_score->{SCORE_ID};
+
+			my $tag = "ballot" if $type == 1;
+			$tag = "points" if $type == 2 || $type == 4;
+			$tag = "rank" if $type == 3 || $type == 5;
+
+			my $student = $xml_score->{RECIPIENT} unless $tag eq "ballot";
+
+			my $score = Tab::BallotValue->create({
+				tag     => $tag,
+				ballot  => $ballot->id,
+				student => $student,
+				value   => $xml_score->{SCORE},
+				cat_id  => $xml_score->{ID}
+			});
+
 		}
 
-		$score->ballot($xml_score->{BALLOT});
-		$score->student($xml_score->{RECIPIENT}) if $xml_score->{SCORE_ID} == 2;
-		$score->tag("Ballot") if $xml_score->{SCORE_ID} == 1;
-		$score->tag("Points") if $xml_score->{SCORE_ID} == 2; 
-		$score->tag("Ranks") if $xml_score->{SCORE_ID} == 3; 
-		$score->score($xml_score->{SCORE});
-		$score->update;
+		foreach my $round (@rounds) { 
+			$m->comp("/funclib/round_audit.mas", round => $round);
+		}
+
+		if ($session_id) { 
+			$m->redirect("/register/data/import_native_xml.mhtml?msg=$msg");
+		}
+
+		$m->print("Upload successful");
 
 	}
 
-	$m->print("Round uploaded.  See it at ".$Tab::url_prefix."/web/panel/schemat/show.mhtml?round_id=".$round->id);
-
-	
 </%init>
+
+	<div class="left huge">
+
+		<h2>Are you sure...</h2>
+
+		<p>
+			This process will completely delete and re-post the following
+			rounds.  It will trust the ID numbers for judges and entries you
+			have supplied.  If you have changed names or rooms or judge data,
+			you must instead repost the full XML, or I have no idea what will
+			happen but it probably won't be pretty or remotely correct. 
+		</p>
+
+%		foreach my $round (@rounds) { 
+			<h4><% $round->event->name." ".$round->realname %> will be deleted & replaced</h4>
+%		}
+
+		<div class="oddrow centeralign">
+			<form action="upload_round.mhtml" method="post">
+			<input type="hidden" name="myepoch" value="<% $epoch %>">
+			<input type="hidden" name="session_id" value="<% $session_id %>">
+			<input type="hidden" name="account_id" value="<% $account_id %>">
+			<input type="submit" name="confirm" value="I Want To Do This.  Scout's Honor">
+			</form>
+		</div>
+
+	</div>
+
