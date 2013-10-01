@@ -1,13 +1,17 @@
 
 /* Place the focus on a selected element */
 
-function uploaderName() { 
-	var filename = document.getElementById('upload').value;
+function uploaderName(uploader, filedisplay) { 
+
+	if (uploader == null) { uploader = 'upload'; }
+	if (filedisplay == null) { filedisplay = 'filename'; }
+
+	var filename = document.getElementById(uploader).value;
 	var lastIndex = filename.lastIndexOf("\\");
 	if (lastIndex >= 0) {
 		filename = filename.substring(lastIndex + 1);
 	}
-	document.getElementById('filename').innerHTML = filename;
+	document.getElementById(filedisplay).innerHTML = filename;
 }
 
 function placeFocus(){
