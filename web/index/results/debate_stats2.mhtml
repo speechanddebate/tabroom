@@ -1,0 +1,158 @@
+<%args>
+	$account    => undef
+	$circuit    => undef
+	$circuit_id => undef
+	$year       => undef
+</%args>
+
+<%init>
+	
+	use Time::HiRes qw( time );
+	use Data::Dumper;
+	my $start_page=time();
+	my $end_point;
+
+	if ($circuit_id) { $circuit = Tab::Circuit->retrieve( $circuit_id ); }
+	unless ($circuit) { $circuit = Tab::Circuit->retrieve( 43 ); $circuit_id=43; }
+	
+	unless ($year) { 
+		my $this_year = Tab::school_year;
+		$year = $this_year->year;
+	}
+
+	#for debugging ONLY
+	$year=2012;
+	
+	my $start_string = "07/01/$year";
+	my $end_string = "06/30/".($year + 1);
+
+	my $start_dt = Tab::dtme($start_string);	
+	my $end_dt = Tab::dtme($end_string);	
+	
+	#Load chapter characteristics
+
+	unless ($circuit_id) { $circuit_id=$circuit->id; }
+	
+	$end_point = time(); print "<br>Elapsed time to start of entry pull:"; printf("%.2f\n", $end_point - $start_page); print "<br>";
+
+	Tab::Entry->columns(TEMP => qw/IDstr/);		
+	Tab::Entry->columns(TEMP => qw/student_names/);		
+	Tab::Entry->set_sql(pull_entries => "
+		select entry.*, GROUP_CONCAT(DISTINCT entry_student.student order by entry_student.student) as IDstr, GROUP_CONCAT(DISTINCT student.last order by student.last separator ' & ') as student_names
+		from entry, event, tourn, tourn_circuit, entry_student, student
+		where tourn_circuit.circuit= $circuit_id 
+		and tourn.id=tourn_circuit.tourn 
+		and event.tourn=tourn.id 
+		and entry.event=event.id 
+		and tourn.start >= '$start_dt' 
+		and tourn.end <= '$end_dt' 
+		and entry_student.entry=entry.id
+		and student.id=entry_student.student
+		and entry.dropped=0
+		and event.type != 'congress'
+		and event.type != 'speech'
+		group by entry.id
+		order by IDstr
+	");
+	
+	my @entries = Tab::Entry->search_pull_entries;
+#	print Dumper($entries[42]);
+	
+	$end_point = time(); print "<br>Elapsed time to end of entry pull:"; printf("%.2f\n", $end_point - $start_page); print "<br>";
+	
+	print "Entries:".scalar(@entries)."<br>";
+	my %entry_hash;
+	my %index_hash; #key is entry_id, value is IDstr
+	
+	foreach my $entry (@entries) {
+		$entry_hash{$entry->IDstr}{'name'} = $entry->school->name." ". $entry->student_names;
+		$entry_hash{$entry->IDstr}{'n_tourneys'}++ ;
+		$index_hash{$entry->id}{'master_id'} = $entry->IDstr;
+	}
+
+	$end_point = time(); print "<br>Elapsed time to end of entry loop:"; printf("%.2f\n", $end_point - $start_page); print "<br>";
+	
+	#now pull debate events
+	Tab::Event->set_sql(pull_events => "
+		select event.*
+		from event, tourn, tourn_circuit, round
+		where tourn_circuit.circuit= $circuit_id 
+		and tourn.id=tourn_circuit.tourn 
+		and tourn.start >= '$start_dt' 
+		and tourn.end <= '$end_dt' 
+		and event.tourn=tourn.id 
+		and event.type != 'congress'
+		and event.type != 'speech'
+		and round.event = event.id
+		and round.type != 'elim'
+		and round.type != 'final'
+		and round.type != 'none'		
+		group by event.id
+	");
+
+	my @events = Tab::Event->search_pull_events;
+	print "Total events=".scalar(@events);
+	$end_point = time(); print "<br>Elapsed time to end of event pull:"; printf("%.2f\n", $end_point - $start_page); print "<br>";
+
+	#pulls prelim wins
+	my $n_prelims=0;		
+	foreach my $event (@events) {
+		my @event_rounds= $m->comp("/funclib/event_rounds.mas", event => $event, done=>"yes" );
+		foreach my $rd (@event_rounds) {
+			if ( $rd->type ne "elim" ) {
+				$n_prelims = $rd->name; 
+				last;
+			}
+		}
+		my %win_loss = $m->comp("/funclib/entry_wins.mas", event => $event );
+		foreach my $key ( keys %win_loss ) {
+			$index_hash{$key}{'wins'} += $win_loss{$key};
+			$index_hash{$key}{'losses'} += ($n_prelims - $win_loss{$key});
+		}
+	}
+
+	$end_point = time(); print "<br>Elapsed time to end of event loop:"; printf("%.2f\n", $end_point - $start_page); print "<br>";
+
+	#add wins back to entry_hash using index_hash
+	foreach my $key (keys %index_hash) {
+		$entry_hash{$index_hash{$key}{'master_id'}}{'wins'} += $index_hash{$key}{'wins'} ;
+		$entry_hash{$index_hash{$key}{'master_id'}}{'losses'} += $index_hash{$key}{'losses'} ;
+	}
+
+	print "Now entering output writing.<br>";
+			
+</%init>
+
+	<& menu.mas &>
+
+	<h4>Team Results</h4>
+	<div class="left huge">
+	<& /funclib/tablesorter.mas, table => "WUDC" &>
+
+		<table cellpadding="3" width="100%" id="WUDC" class="tablesorter">
+		<thead>
+			<tr class="dkgreen">
+				<th class="smaller">team</th>
+				<th class="smaller">Tournyes</th>
+				<th class="smaller">Prelim W-L</th>				
+			</tr>
+		</thead>
+%			foreach my $key ( keys %entry_hash ) {
+%			if ( $entry_hash{$key}{'wins'} > 0 and $entry_hash{$key}{'losses'} > 0 and $entry_hash{$key}{'name'} ne '') {
+
+				<tr>
+					<td> <% $entry_hash{$key}{'name'} %> </td>
+					<td> <% $entry_hash{$key}{'n_tourneys'} %> </td>
+					<td> <% $entry_hash{$key}{'wins'} %>-<% $entry_hash{$key}{'losses'} %></td>
+				</tr>
+%			}				
+%			}
+
+		</table>
+		
+% my $end = time();
+% #printf("%.2f\n", $end - $start);
+
+	</div>
+
+% 	$end_point = time(); print "<br>Elapsed time to page end:"; printf("%.2f\n", $end_point - $start_page); print "<br>";
