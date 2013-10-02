@@ -1,0 +1,177 @@
+<%args>
+	$tourn
+	$account
+	$group_id
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now( time_zone => $tz);
+
+	my $group = Tab::JudgeGroup->retrieve($group_id);
+
+	# Get the upload and create the file handle.
+	my $req = Apache2::Request->new($r);
+	my @text_handles = $r->upload; 
+	my $text_file = $req->upload($text_handles[0]);
+	my $io = $text_file->io;
+
+	my @judges;
+
+	# Fix line breaks
+	my @lines = (<$io>);
+
+    foreach (@lines) { 
+        $_ =~ s/[\r]+/\n/g;
+        $_ =~ s/[\r\n]+/\n/g;
+        $_ =~ s/[\n]+/\n/g;
+        push @judges, split (/\n/, $_);
+    }   
+
+	my $skipped;
+
+	my @timeslots = $m->comp("/funclib/group_timeslots.mas", group => $group);
+
+	my $ts1 = shift @timeslots;
+	my $shift_1_start = $ts1->start->set_time_zone($tz);
+	my $ts2 = shift @timeslots;
+	my $shift_1_end = $ts2->end->set_time_zone($tz);
+
+	my $ts3 = shift @timeslots;
+	my $shift_2_start = $ts3->start->set_time_zone($tz);
+	my $ts4 = shift @timeslots;
+	my $shift_2_end = $ts4->end->set_time_zone($tz);
+
+	my $ts5 = shift @timeslots;
+	my $shift_3_start = $ts3->start->set_time_zone($tz);
+	my $shift_3_end = $ts3->end->set_time_zone($tz);
+
+	my @varsities;
+
+	foreach my $event ($group->events) {
+		push @varsities, $event if $event->setting("level") eq "open";
+	}
+
+	GROUP:
+	foreach my $judge (@judges) { 
+
+		my ($last, $first, $school_name, $shift_1, $shift_2, $shift_3, $tab_rating, $division, $email, $phone) = split(/,/,$judge);
+
+		foreach ($school_name, $first, $last, $tab_rating, $email, $phone) { 
+			$_ =~ s/^"//;
+			$_ =~ s/"$//g;
+			$_ =~ s/^'//;
+			$_ =~ s/'$//g;
+		}
+
+		Tab::debuglog("Importing judge $last $first  from $judge");
+
+		next unless $first && $last;
+		next if $school_name eq "School Conflict";
+		next if $last eq "Last Name";
+		$school_name = "Hired" unless $school_name;
+
+		Tab::debuglog("Importing judge $last $first   ");
+
+		my $school;
+		my $chapter_judge;
+
+		unless ($school_name eq "Hired") { 
+
+			$school = Tab::School->search( name => $school_name, tourn => $tourn->id)->first;
+
+			if ($school && $school->chapter) { 
+
+				$chapter_judge = Tab::ChapterJudge->search(chapter => $school->chapter->id, first => $first, last => $last, retired => 0)->first;
+
+				unless ($chapter_judge) { 
+					$chapter_judge = Tab::ChapterJudge->create({
+						chapter => $school->chapter->id,
+						first   => $first,
+						last    => $last,
+						started => $now->year
+					});
+				} 
+
+			} 
+		}
+
+		my $school_id = 0;
+		$school_id = $school->id if $school;
+
+		my $code = $m->comp("/funclib/group_code.mas", group => $group ) unless $group->setting("no_codes");
+		my $chapter_judge_id = $chapter_judge->id if $chapter_judge;
+
+		my $obligation = "6";
+		$tab_rating = "3" unless $tab_rating;
+
+		$judge = Tab::Judge->create({
+			first         => $first,
+			last          => $last,
+			school        => $school_id,
+			chapter_judge => $chapter_judge_id,
+			code          => $code,
+			judge_group   => $group->id,
+			active        => 1,
+			obligation    => $obligation,
+			tab_rating    => $tab_rating
+		});
+
+		if ($email) {
+			$judge->setting("email", $email);
+		}
+
+		if ($phone) {
+			$judge->setting("phone", $phone);
+		}
+
+		unless ($division == 1) { 
+			foreach my $varsity (@varsities) { 
+				Tab::Strike->create({
+					event => $varsity->id,
+					judge => $judge->id,
+					tourn => $tourn->id,
+					type  => "event"
+				});
+			}
+		}
+
+		unless ($shift_1) { 
+			Tab::Strike->create({
+				judge => $judge->id,
+				tourn => $tourn->id,
+				type  => "time",
+				start => $shift_1_start,
+				end   => $shift_1_end
+			});
+		}
+
+		unless ($shift_2) { 
+			Tab::Strike->create({
+				judge => $judge->id,
+				tourn => $tourn->id,
+				type  => "time",
+				start => $shift_2_start,
+				end   => $shift_2_end
+			});
+		}
+
+		unless ($shift_3) { 
+			Tab::Strike->create({
+				judge => $judge->id,
+				tourn => $tourn->id,
+				type  => "time",
+				start => $shift_3_start,
+				end   => $shift_3_end
+			});
+		}
+
+	}	
+
+	my $msg = scalar @judges ." judges imported into ".$group->id;
+
+	$m->redirect("import_csv.mhtml?msg=$msg");
+
+</%init>
