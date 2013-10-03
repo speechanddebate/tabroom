@@ -1,0 +1,167 @@
+<%args>
+	$tourn
+	$session
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+    my $now = DateTime->now(time_zone => $tz);    
+
+	my $name = $tourn->name;
+	$name =~ s/[\W_]//g;
+
+    my $filename = "NAUDL-Results-$name-".$session->id;
+    my $filepath = $Tab::file_root."tmp/".$filename;
+    `rm -f $filepath.*`; 
+    
+    open (CSVOUT, ">>$filepath.csv");
+	print CSVOUT "tournamentid, tournamentname, tournstartdate, tournlocation, sectionid, judgename, round, sectionname, sectionunique, eventname, division, pdiid, speechwireid, speakerpoints, rank, side, winloss\n";
+
+	my $dbh = Tab::DBI->db_Main();
+	my $sth = $dbh->prepare("
+		select value.id, value.tag, value.value, value.student, ballot.entry, ballot.judge, panel.bye, ballot.bye, ballot.noshow, ballot.chair, round.name, ballot.side, panel.id, panel.letter, ballot.id
+		from ballot_value value, ballot, panel, round, event
+		where value.ballot = ballot.id
+		and ballot.panel = panel.id
+		and panel.round = round.id
+		and round.event = event.id
+		and event.tourn = ".$tourn->id."
+		order by round.name, ballot.entry, value.student, ballot.chair, ballot.judge, CASE value.tag WHEN ".' "ballot" then 1 when "rank" then 2 when "points" then 3 end'."
+	");
+
+	my $ballot_sth = $dbh->prepare("
+		select ballot.entry, ballot.judge, panel.bye, ballot.bye, ballot.noshow, ballot.chair, round.name, ballot.side, panel.id, panel.letter, ballot.id
+		from ballot, panel, round, event
+		where ballot.panel = panel.id
+		and panel.round = round.id
+		and round.event = event.id
+		and event.tourn = ".$tourn->id."
+		and not exists (
+			select ballot_value.id
+			from ballot_value
+			where ballot_value.ballot = ballot.id
+		)
+		order by round.name, ballot.entry, ballot.chair, ballot.judge
+	");
+
+	$sth->execute(); 
+	$ballot_sth->execute(); 
+
+	my %entry_round;
+	my %entry_round_decision;
+	my %entry_round_side;
+	my %entry_round_section;
+	my %entry_round_ballot;
+	my %entry_round_section_letter;
+	my %student_round_points;
+	my %student_round_ranks;
+	my %student_round_ballot;
+	my %entry_round_judges;
+
+	my %entry_ballots;
+
+	while (my ($id, $tag, $value, $studentid, $entryid, $judge, $pbye, $bye, $noshow, $chair, $roundname, $side, $panel, $letter, $ballot) = $sth->fetchrow_array() ) { 
+
+		$entry_ballots{$entryid}++;
+
+		if ($pbye) { 
+			$entry_round_decision{$entryid."-".$roundname."-".$judge} = "Bye"
+		} elsif ($bye) { 
+			$entry_round_decision{$entryid."-".$roundname."-".$judge} = "Bye"
+		} elsif ($noshow) { 
+			$entry_round_decision{$entryid."-".$roundname."-".$judge} = "FFT"
+		} elsif ($tag eq "ballot") { 
+			push @{$entry_round_judges{$entryid."-".$roundname}}, $judge;
+			$entry_round_side{$entryid."-".$roundname."-".$judge} = "Aff" if $side == 1;
+			$entry_round_side{$entryid."-".$roundname."-".$judge} = "Neg" if $side == 2;
+			$entry_round_decision{$entryid."-".$roundname."-".$judge} = "-" if $value == 0;
+			$entry_round_decision{$entryid."-".$roundname."-".$judge} = "L" if $value == 0;
+			$entry_round_decision{$entryid."-".$roundname."-".$judge} = "W" if $value == 1;
+			$entry_round_section{$entryid."-".$roundname."-".$judge} = $panel;
+			$entry_round_section_letter{$entryid."-".$roundname."-".$judge} = $letter;
+		} elsif ($tag eq "points") { 
+			$student_round_points{$studentid."-".$roundname."-".$judge} .= ", " if $student_round_points{$studentid."-".$roundname."-".$judge};
+			$student_round_points{$studentid."-".$roundname."-".$judge} .= $value;
+			$student_round_ballot{$studentid."-".$roundname."-".$judge} = $id;
+		} elsif ($tag eq "rank") { 
+			$student_round_ranks{$studentid."-".$roundname."-".$judge} .= $value." ";
+		}
+	}
+
+	while (my ($entryid, $judge, $pbye, $bye, $noshow, $chair, $roundname, $side, $panel, $letter) = $ballot_sth->fetchrow_array() ) { 
+
+		$entry_round_section{$entryid."-".$roundname} = $panel;
+		$entry_round_section_letter{$entryid."-".$roundname} = $letter;
+
+		if ($pbye) { 
+			$entry_round_decision{$entryid."-".$roundname} = "Bye"
+		} elsif ($bye) { 
+			$entry_round_decision{$entryid."-".$roundname} = "Bye"
+		} elsif ($noshow) { 
+			$entry_round_decision{$entryid."-".$roundname} = "FFT"
+		}
+
+	}
+	
+	my $tourn_id = $tourn->id;
+	my $tourn_name = $tourn->name;
+	my $tourn_start = $tourn->start->set_time_zone($tz);
+	my $start_string = $tourn_start->year."-".$tourn_start->month."-".$tourn_start->day."T00:00:00.00Z";
+	my $tourn_place = $tourn->state;
+
+	foreach my $event ($tourn->events) { 
+
+		my @all_rounds = sort {$a->name <=> $b->name} $m->comp("/funclib/event_rounds.mas", event => $event, done => "yes");
+
+		my @rounds;
+		foreach my $round (@all_rounds) { 
+			push @rounds, $round;
+		}
+
+		my @judges = $m->comp("/funclib/event_judges.mas", event => $event);
+		my %judge_name_by_id = map { $_->id => $_->first." ".$_->last } @judges;
+
+		my $event_name = $event->name;
+		my $event_level = $event->setting("level");
+		Tab::debuglog("EVent level is $event_level");
+		my $level = "C" if lc($event_level) eq "open";
+		$level = "J" if lc($event_level) eq "jv";
+		$level = "N" if lc($event_level) eq "novice";
+		$level = "M" if lc($event_level) eq "middle";
+
+		foreach my $student ($m->comp("/funclib/event_students.mas", event => $event)) { 
+
+			my $entry_id = $student->entry;
+			my $studentid = $student->id;
+
+			foreach my $round (@rounds) { 
+
+				my $roundname = $round->name;
+
+				foreach my $judge (@{$entry_round_judges{$entry_id."-".$roundname}}) { 
+	
+					my $side = substr($entry_round_side{$entry_id."-".$roundname."-".$judge},0,1);
+
+					my $rank = $student_round_ranks{$studentid."-".$roundname."-".$judge};
+					my $points = $student_round_points{$studentid."-".$roundname."-".$judge};
+					my $result = $entry_round_decision{$entry_id."-".$roundname."-".$judge};
+					my $section = $entry_round_section{$entry_id."-".$roundname."-".$judge};
+					my $letter = $entry_round_section_letter{$entry_id."-".$roundname."-".$judge};
+					my $ballot = $student_round_ballot{$studentid."-".$roundname."-".$judge};
+
+					next if $result eq "FFT";
+					next unless (($rank && $points) || $result eq "Bye");
+
+					print CSVOUT "$tourn_id,$tourn_name,$start_string,$tourn_place,$section,".$judge_name_by_id{$judge}.",$roundname,$letter,T".$tourn_id."S".$section.",$event_name,$level,$ballot,$studentid,$points,$rank,$side,$result\n";
+
+				}
+			}
+		}
+	}
+
+	close CSVOUT;
+	$m->redirect("$Tab::url_prefix/tmp/$filename.csv");
+
+</%init>
+
