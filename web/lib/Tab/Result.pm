@@ -13,5 +13,5 @@ Tab::Result->has_a(result_set => 'Tab::ResultSet');
 
 Tab::Result->has_many(values => 'Tab::ResultValue', 'result');
 
-__PACKAGE__->_register_dates( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/timestamp/);
 
