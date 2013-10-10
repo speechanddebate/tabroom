@@ -1,14 +1,7 @@
 
-alter table school add registered_by int;
+alter table student add birthdate date;
+alter table student add school_sid varchar(63);
+alter table student add race varchar(63);
+alter table round add note varchar(255);
 
-create table stats( 
-	id int auto_increment primary key,
-	event int not null,
-	tag varchar(63), 
-	value float,
-	taken datetime,
-	timestamp timestamp
-);
-
-create index event on stats(event);
 

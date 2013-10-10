@@ -15,7 +15,7 @@ Tab::Ballot->has_a(collected_by => 'Tab::Account');
 Tab::Ballot->has_many(values => 'Tab::BallotValue');
 Tab::Ballot->has_many(ballot_values => 'Tab::BallotValue');
 
-__PACKAGE__->_register_dates( qw/timestamp collected/);
+__PACKAGE__->_register_datetimes( qw/timestamp collected/);
 
 sub value {
 

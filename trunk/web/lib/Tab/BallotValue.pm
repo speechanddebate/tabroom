@@ -9,5 +9,5 @@ Tab::BallotValue->columns(TEMP => qw/panelid entryid roundtype roundid studentid
 Tab::BallotValue->has_a(ballot => 'Tab::Ballot');
 Tab::BallotValue->has_a(student => 'Tab::Student');
 
-__PACKAGE__->_register_dates( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/timestamp/);
 

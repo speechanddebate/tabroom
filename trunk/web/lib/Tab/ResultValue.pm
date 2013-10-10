@@ -6,5 +6,5 @@ Tab::ResultValue->columns(Essential => qw/result tag value priority sort_desc no
 Tab::ResultValue->columns(Others => qw/long_tag timestamp /);
 Tab::ResultValue->has_a(result => 'Tab::Result');
 
-__PACKAGE__->_register_dates( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/timestamp/);
 
