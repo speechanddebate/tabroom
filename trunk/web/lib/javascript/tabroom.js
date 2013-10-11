@@ -70,16 +70,6 @@ function autoWin(input,e,aff,neg,affid,negid) {
 				$('.lpw').hide();
 			}
 
-			if (aff_ranks < neg_ranks) { 
-				$('.lowrank').show();
-				$('.submit').hide();
-			}
-
-			if (aff_ranks > neg_ranks) { 
-				$('.lowrank').hide();
-				$('.submit').show();
-			}
-
 		}
 
 		if (side == 1) { 
@@ -90,16 +80,6 @@ function autoWin(input,e,aff,neg,affid,negid) {
 
 			if (neg_points < aff_points) { 
 				$('.lpw').hide();
-			}
-
-			if (neg_ranks < aff_ranks) { 
-				$('.lowrank').show();
-				$('.submit').hide();
-			}
-
-			if (aff_ranks < neg_ranks) { 
-				$('.lowrank').hide();
-				$('.submit').show();
 			}
 
 		}
