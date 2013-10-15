@@ -127,14 +127,64 @@
 		push (@timeslots, $m->comp("/funclib/event_timeslots.mas", event => $event));
 	}
 
+	my %tsseen = (); 
+	@timeslots = grep { ! $tsseen{$_->id} ++ } @timeslots;
+
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
+
+	my %starts_by_id;
+	my %ends_by_id;
+
+	my $xml_timeslots = [];
+	foreach my $ts (@timeslots) { 
+		my $xml_ts = {
+			ID           => $ts->id,
+			TIMESLOTNAME => $ts->name,
+			START        => Tab::xmldt($ts->start->set_time_zone($tz)),
+			END          => Tab::xmldt($ts->end->set_time_zone($tz))
+		};
+		push (@{$xml_timeslots}, $xml_ts);
+		$starts_by_id{$ts->id} = $ts->start->set_time_zone($tz);
+		$ends_by_id{$ts->id} = $ts->end->set_time_zone($tz);
+	}
+	
+
 
 	my $xml_rooms = [];
 
 	my %rated_already;
 
 	foreach my $site ($tourn->sites) { 
+	
+		my @room_pools = $m->comp("/funclib/site_room_pools.mas", site => $site, tourn => $tourn);
+
+		my %reserved_room = (); 
+
+		foreach my $pool (@room_pools) { 
+			if ($pool->reserved) { 
+				$reserved_room{$pool->room->id} = $pool->event->id;
+			}
+		}   
+
+		my @room_strikes = $m->comp("/funclib/site_room_strikes.mas", site => $site, tourn => $tourn);
+		my %room_struck;
+
+		foreach my $strike (@room_strikes) { 
+			if ($strike->event) { 
+				$room_struck{"ev-".$strike->event->id}++;
+			} elsif ($strike->timeslot) { 
+				$room_struck{"ts-".$strike->timeslot->id}++;
+			} elsif ($strike->start) { 
+				my $start = $strike->start;
+				my $end = $strike->end;
+				foreach my $timeslot (@timeslots) { 
+					if ($timeslot->start < $end && $timeslot->end > $start) { 
+						$room_struck{"ts-".$timeslot->id}++;
+					}
+				}
+			}
+		}
 
 		foreach my $room ($site->rooms) { 
 
@@ -155,17 +205,26 @@
 			};
 
 			foreach my $event (@events) { 
-				$xml_room->{"EVENT".$event->id} = "true";
+				if ($room_struck{"ev-".$event->id} == $event->id) { 
+					$xml_room->{"EVENT".$event->id} = "false";
+				} elsif ($reserved_room{$room} && $reserved_room{$room} != $event->id) { 
+					$xml_room->{"EVENT".$event->id} = "false";
+				} else { 
+					$xml_room->{"EVENT".$event->id} = "true";
+				}
 			}
 
 			foreach my $timeslot (@timeslots) { 
-				$xml_room->{"TIMESLOT".$timeslot->id} = "true";
+				if ($room_struck{"ts-".$timeslot->id} == $timeslot->id) { 
+					$xml_room->{"TIMESLOT".$timeslot->id} = "false";
+				} else { 
+					$xml_room->{"TIMESLOT".$timeslot->id} = "true";
+				}
 			}
 
 			push (@{$xml_rooms}, $xml_room);
 
 		}
-
 	}
 
 	my $tsets = [];
@@ -537,59 +596,34 @@
 
 				}
 			}
-
 		}
-	}
-
-	my %tsseen = (); 
-	@timeslots = grep { ! $tsseen{$_->id} ++ } @timeslots;
-
-	my $xml_timeslots = [];
-
-	my %starts_by_id;
-	my %ends_by_id;
-	
-	foreach my $ts (@timeslots) { 
-
-		my $xml_ts = {
-			ID           => $ts->id,
-			TIMESLOTNAME => $ts->name,
-			START        => Tab::xmldt($ts->start->set_time_zone($tz)),
-			END          => Tab::xmldt($ts->end->set_time_zone($tz))
-		};
-
-		push (@{$xml_timeslots}, $xml_ts);
-
 	}
 
 	my %judge_strikes = ();
 
 	foreach my $strike ($tourn->strikes) { 
 		$judge_strikes{$strike->judge->id."-ev-".$strike->event->id} = $strike if $strike->judge && $strike->event;
-	}
 
-	foreach my $timeslot (@timeslots) { 
-		
-		my $end = $timeslot->end->set_time_zone($tz);
-		my $start = $timeslot->start->set_time_zone($tz);
+		if ($strike->type eq "time") { 
+			foreach my $timeslot (@timeslots) { 
+				
+				my $start = $starts_by_id{$timeslot->id};
+				my $end = $ends_by_id{$timeslot->id};
 
-		$end->set_time_zone("UTC");
-		$start->set_time_zone("UTC");
+				next if $strike->start->set_time_zone($tz) > $end;
+				next if $strike->end->set_time_zone($tz) < $start;
 
-		my @time_strikes = Tab::Strike->search_where( { 	
-			tourn => $tourn->id,
-			type  => "time",
-			start => { '<', $end },
-			end   => { ' > ', $start }
-		});
+				Tab::debuglog("Striking $strike from $start to $end");
+			
+				$judge_strikes{$strike->judge->id."-ts-".$timeslot->id} = $strike;
 
-		foreach my $strike (@time_strikes) { 
-			$judge_strikes{$strike->judge->id."-ts-".$timeslot->id} = $strike if $strike->judge;
+			}
 		}
-
 	}
-	
+
 	my $xml_judges = [];
+
+	my $judge_per++ unless $judge_group->setting('rounds_per');
 
 	foreach my $judge ($judge_group->judges) { 
 
@@ -601,6 +635,7 @@
 		my $hired = $judge->hired;
 		$hired = 0 unless $hired;
 		$obligation = 9 unless ($hired > 0 || defined $obligation); 
+		$obligation = 9 if $judge_per;
 
 		my $stop = "false";
 		$stop = "true" unless $judge->active == 1;

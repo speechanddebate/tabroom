@@ -19,7 +19,7 @@ sub sorted_keys {
 
 		my $keylog;
 		
-		foreach my $key (@keys) { 
+		foreach my $key (sort @keys) { 
 			push @event_keys, $key if (index($key, "Event") != -1);
 			push @ts_keys, $key if (index($key, "Timeslot") != -1);
 			$keylog .= $key;
@@ -65,7 +65,7 @@ sub sorted_keys {
 
 		my $keylog;
 
-		foreach my $key (@keys) { 
+		foreach my $key (sort @keys) { 
 			push @event_keys, $key if (index($key, "EVENT") != -1);
 			push @ts_keys, $key if (index($key, "TIMESLOT") != -1);
 			$keylog .= $key;
