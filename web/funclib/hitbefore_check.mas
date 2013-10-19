@@ -1,0 +1,156 @@
+<%args>
+	$round_id
+</%args>
+<%perl>
+
+	# checks to see if there are any teams debating a second time in a given round
+	
+	use POSIX;
+	use List::Util 'shuffle';
+	use Time::HiRes qw( time );
+	
+	my $round = Tab::Round->retrieve($round_id);
+	my $event = $round->event;
+
+	my $start = time(); 
+	my @entries = $event->entries( unconfirmed => 0, waitlist => 0, dropped => 0, dq => 0 );
+
+	my $warn;
+	my %preclusion;
+	
+	# CREATE A 2-DIMENSIONAL HASH THAT STORES ALL PRIOR DEBATES
+	
+		my $rd_name=$round->name;
+
+		Tab::Ballot->set_sql(pull_ballots => "
+			select ballot.entry, ballot.panel, ballot.side, ballot.pullup, ballot.bye, panel.bye
+			from ballot, panel, round
+			where ballot.panel=panel.id
+			and panel.round=round.id
+			and round.name < $rd_name
+			order by panel.id, ballot.entry asc
+		");
+
+		my @pairings = Tab::Ballot->search_pull_ballots;
+
+		my $end = time();
+#		print "load time:  "; printf("%.2f\n", $end - $start); print "<br>";
+	
+#		print the pairings, just for debugging	
+#		foreach my $pairing (@pairings) {
+# 		print "Panel: ".$pairing->panel." entry:".$pairing->entry." ".$entries{$pairing->entry}{'code'}." side=".$pairing->side."<br>";
+#		}
+	
+		my $x;
+		foreach my $pairing (@pairings) {
+		
+			$x++;
+			if ( ($panel != $pairing->panel or $x == scalar(@pairings) ) and $panel > 0 ) {
+			
+				if ( $panel->bye != 1 ) {
+			
+					$precluded{$team1}{$team2} = 1; #mark as ineligible to hit b/c they debated before
+			
+				}
+				
+				$team1 = 0; $team2 = 0;	
+					
+			}
+
+			if ($team1 == 0 and $team2 == 0) { 
+				$team1 = $pairing->entry;
+			} elsif ( $team1 > 0 and $team2 == 0 ) {
+				$team2 = $pairing->entry;
+			}
+	
+			$panel = $pairing->panel;
+		}
+
+		#if there's some data detritus for teams paired against dropped opponents it adds them to the %entries hash
+		#so this thing cleans it up
+	
+		foreach my $key ( keys %entries ) {
+			if (not $entries{$key}{'code'} ) { 
+				delete $entries{$key}; 
+			}
+		}
+	
+	}
+	
+	# NOW ADD SCHOOL-BASED PRECLUSIONS
+
+	unless ($event->setting('school_debates_self')) {
+	
+#	print "Doing preclusions<br>";
+	
+	for (my $x = 0; $x <= $#entries; $x++) {
+
+		#pull hybrid school conflicts
+		my @strikes = Tab::Strike->search( entry=>$entries[$x]->id, type => 'hybrid' );	
+					
+		for (my $y = $x + 1; $y <= $#entries; $y++) {
+
+#			print "comparing ".$entries[$x]->code." vs ".$entries[$y]->code."<br>";
+			
+			if ($entries[$x]->school == $entries[$y]->school) { $precluded{$entries[$x]->id}{$entries[$y]->id} = 1; }
+		
+			foreach my $hybridconflict (@strikes) {
+				if ($hybridconflict->school == $entries[$y]->school) { $precluded{$entries[$x]->id}{$entries[$y]->id} = 1; }
+			}
+		
+		}
+	}
+	
+	}
+
+	# LOAD CURRENT PAIRINGS AND STORE THEM IN %ENTRIES
+
+	Tab::Ballot->columns(TEMP => qw/bye/);
+
+	Tab::Ballot->set_sql(current_ballots => "
+		select ballot.id, ballot.entry, ballot.panel, ballot.side, panel.bye as bye
+		from ballot, panel, round
+		where ballot.panel = panel.id
+		and panel.round = round.id
+		and round.id = $round_id
+		order by round.name, panel.id
+	");
+	
+	my @pairings_current = Tab::Ballot->search_current_ballots;
+
+	my $bye;
+
+	my %panel_entries;
+	my %entry_panel;
+	my @current_entries;
+	
+	foreach my $pairing (@pairings_current) {
+
+		my $me = $pairing->entry->id;
+
+		push @current_entries, $me;
+		$entry_panel{$me} = $pairing->panel->id;
+
+		push @{$panel_entries{$pairing->panel->id}}, $me;
+
+		$entries{$me}{'opponent'}= -1 if $pairing->bye; 
+	}
+
+	foreach my $me (@current_entries) {
+		foreach my $other (@{$panel_entries{$entry_panel{$me}}}) { 
+			next if $me == $other;
+			$entries{$me}{'opponent'}= $other;
+		}
+	}
+
+	# NOW LOOK FOR ISSUES
+	
+	foreach my $key ( keys %entries ) {
+		if ( $preclusion{$key}{$entries{$key}{'opponent'}} == 1 or $preclusion{$entries{$key}{'opponent}}{$key} == 1 ) {
+			$warn="Jacked!";
+		}
+	}
+
+	print $warn;	
+
+</%perl>
