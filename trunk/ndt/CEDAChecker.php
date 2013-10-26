@@ -2,6 +2,11 @@
 <?php
 require 'scripts/tabroomtemplate.html';
 require 'scripts/databaseconnect.php';
+
+$year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1; 
+if ($mo_str<=6) { $year_str--; $seas_str=$year_str."-".$year_str+1; }
+$date_str=$year_str."-07-01";
+
 ?>
 
 <body>
@@ -19,7 +24,7 @@ $team = array(); //array to hold speakers and teams; $team[0][0] is $team[team][
 $teamindex = array();
 
 //Load all entries for all tourneys in the circuit; 43 is the NDT circuit
-$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit where tourn_circuit.circuit=43 and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and entry.event=event.id and event.type='policy' ORDER BY tourn.id";
+$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit where tourn_circuit.circuit=43 and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and entry.event=event.id and event.type='policy' and tourn.start > '".$date_str."' ORDER BY tourn.id";
 $entry=mysql_query($query);
 $entryNum = mysql_num_rows($entry);
 
@@ -160,7 +165,7 @@ array_multisort($topsixpts, SORT_DESC, $topsixtb, SORT_DESC, $topsixschool, $reg
 //PRINT TOP 6 
 
 ?>
-<h2>CEDA POINTS</h2>
+<h2>CEDA POINTS <?php echo $seas_str ?></h2>
 Three tables display below; the TOTALS table will show the official points (sum of the top 2 teams at the top 6 tourneys).  The TOURNEY TOTALS table will show 
 points for each school by tourney.  The CHECKER page shows points by team and tourney. 
 By default all tables will display in the order listed above; you can hide or display any table using the links below. For regional standings, click the region column for the TOTALS table.

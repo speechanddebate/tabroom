@@ -1,6 +1,9 @@
 
 <?php
 require 'scripts/tabroomtemplate.html';
+$year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1; 
+if ($mo_str<=6) { $year_str--; $seas_str=$year_str."-".$year_str+1; }
+$date_str=$year_str."-07-01";
 ?>
 
 <body>
@@ -23,8 +26,8 @@ $team = array(); //array to hold speakers and teams; $team[0][0] is $team[team][
 $teamindex = array();
 
 //Load all entries for all tourneys in the circuit; 43 is the NDT circuit
-//$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit where tourn_circuit.circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and entry.event=event.id and (tourn.id=1507 or tourn.id=1522 or tourn.id=1510) ORDER BY fullname asc";
-$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit where tourn_circuit.circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and entry.event=event.id and event.type='policy' ORDER BY fullname asc";
+//$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit where tourn_circuit.circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and entry.event=event.id and (tourn.id=1507 or tourn.id=1522 or tourn.id=1510) and tourn.start > '".$date_str."' ORDER BY fullname asc";
+$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit where tourn_circuit.circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and entry.event=event.id and event.type='policy' and tourn.start > '".$date_str."' ORDER BY fullname asc";
 
 $entry=mysql_query($query);
 $entryNum = mysql_num_rows($entry);
@@ -174,7 +177,7 @@ for ($x=1; $x < count($team)+1; $x++)                 //scroll through the maste
 }   //ends the while
 }   //ends the for $x
 ?>
-<h2>Seasonal Totals
+<h2>Seasonal Totals <?php echo $seas_str ?>
 <span style="font-size:24px"><a class="smallish" href='https://www.tabroom.com/jbruschke/SeasonalTotals.php?division=open'> open</a>
 <span style="font-size:24px"><a class="smallish" href='https://www.tabroom.com/jbruschke/SeasonalTotals.php?division=jv'> jv</a>
 <span style="font-size:24px"><a class="smallish" href='https://www.tabroom.com/jbruschke/SeasonalTotals.php?division=novice'>novice</a>
