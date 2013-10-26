@@ -1,16 +1,22 @@
 <?php
 require 'scripts/tabroomtemplate.html';
+$year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1; 
+if ($mo_str<=6) { $year_str--; $seas_str=$year_str."-".$year_str+1; }
+$date_str=$year_str."-07-01";
 ?>
 
 <div class="liblrow block padmore">
-<strong><center>RESULTS LAUNCH PAGE</CENTER></strong></br>
+<strong><center>RESULTS LAUNCH PAGE for <?php echo $seas_str ?></CENTER></strong></br>
 INSTRUCTIONS: Select the event from the list below and click on the corresponding link for sorted results or traditional cume sheets.  From the sortable results, you can click on any team name for a full listing of their round-by-round results.  
 The seasonal totals link will show all teams' cumulative record, and provide links to an NDT bid sheet for any team.  The results received link will show what results have been recieved, which are still missing, and any known anomalies.</br></br>
 <a href='https://www.tabroom.com/jbruschke/SeasonalTotals.php?division=open'>Seasonal Totals</a>
 <a href='https://www.tabroom.com/jbruschke/CEDAChecker.php'>CEDA Points</a>
 <a href='https://www.tabroom.com/jbruschke/NDTChecker.php'>NDT Points</a>
+<a href='https://www.tabroom.com/index/results/'>Main Results Page</a>
+<!--
 <a href='https://www.tabroom.com/jbruschke/PartCharts.php'>Participation Charts</a>
 <a href='https://www.tabroom.com/jbruschke/ResultsStatus.php'>Results Received and Missing</a></br></br>
+-->
 
 </div>
 
@@ -33,7 +39,7 @@ The seasonal totals link will show all teams' cumulative record, and provide lin
 
 require 'scripts/databaseconnect.php';
 
-$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id from event, tourn, tourn_circuit where circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and (event.type='policy' or event.type='roundrobin') order by tourn.start, tourn.id, event.type asc";
+$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id from event, tourn, tourn_circuit where circuit=43 and tourn_circuit.tourn=tourn.id and event.tourn=tourn.id and (event.type='policy' or event.type='roundrobin') and tourn.start > '".$date_str."' order by tourn.start, tourn.id, event.type asc";
 $event=mysql_query($query);
 $eventNum = mysql_num_rows($event);
 

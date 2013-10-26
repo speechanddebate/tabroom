@@ -8,6 +8,10 @@ $student3=getaltid($student1);
 $student4=getaltid($student2);
 //echo "ID3=".$student3." ID4".$student4."<br>";
 
+$year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1; 
+if ($mo_str<=6) { $year_str--; $seas_str=$year_str."-".$year_str+1; }
+$date_str=$year_str."-07-01";
+
 $teamname=""; $schoolname=""; $studentname= array();
 $chapterid=0;
 
@@ -82,9 +86,29 @@ $balfor=0; $balvs=0;
 $round= array(); $tourn= array(); $tournid=array(); $tourndate= array(); $side= array(); $panel=array(); $roundlabel=array();
 $win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array(); $entry=array();
 $oppn = array(); $event = array(); $x=0; $panel[0]=-1; $ballotid=-1;
-$year=date("Y"); $month=date("m"); if ($month<8) {$year=$year-1;}
-$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, round.name as rd_name, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE entry.dropped=false and round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start>'".$year."-09-01' ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name asc, panel.id asc, ballot.id asc";
+$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, round.type as rd_type, round.id as rd_id, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE entry.dropped=false and round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start > '".$date_str."' ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name asc, panel.id asc, ballot.id asc";
 $ballots=mysql_query($query); 
+
+//re-do rd_name field to set for correct elim level
+$query="SELECT distinct round.id as rd_id, round.name as rd_name, round.label as rd_label, round.type as rd_type, tourn.id as tourn_id, tourn.name as tourn_name FROM entry_student, round, tourn, entry, event WHERE entry.dropped=false and tourn.id=event.tourn and event.id=entry.event and round.event=entry.event and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start > '".$date_str."' and (round.type='elim' or round.type='final') ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name desc";
+$elims=mysql_query($query); 
+  $curr_tourn=-99;
+  $elim_key = array();
+  while ($row = mysql_fetch_array($elims, MYSQL_BOTH)) 
+  { 
+	//echo $row['tourn_name']." ".$row['tourn_id']." ".$row['rd_id']." ".$row['rd_label']." ".$row['rd_name']."<br>"; 
+	if ($row['tourn_id'] <> $curr_tourn) { $ctr=16; }
+	$elim_key[$row['rd_id']] = $ctr;
+	$ctr--;
+	$curr_tourn = $row['tourn_id'];
+	//echo $row['tourn_name']." ".$row['tourn_id']." ".$row['rd_id']." ".$row['rd_label']." ".$row['rd_name']."<br>"; 
+  }	
+
+//  echo "AFTER CORRECTION"."<br>"; 
+//  mysql_data_seek($elims, 0);
+//  while ($row = mysql_fetch_array($elims, MYSQL_BOTH)) 
+//  { echo $row['tourn_name']." ".$row['tourn_id']." ".$row['rd_id']." ".$row['rd_label']." ".$elim_key[$row['rd_id']]."<br>"; 
+//  }	
 
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      { 
@@ -95,6 +119,7 @@ $ballots=mysql_query($query);
          $round[$x]=""; $tourn[$x]=""; $event[$x]=""; $outcome[$x]=""; $win[$x]=0; $isRR[$x]=0; $isopen[$x]=0;
          if(DivisionIsOpen($row['event_id']) == TRUE) {$isopen[$x]=1;}
          $round[$x]=$row['rd_name'];
+         $round_id[$x]=$row['rd_id'];
          $roundlabel[$x]=$row['round_label'];
          $event[$x]=$row['event_name'];
          $tourn[$x]=$row['tourn_name'];
@@ -106,7 +131,7 @@ $ballots=mysql_query($query);
          getspeakers($spkr1[$x], $spkr2[$x], $row['entry_id']);
          $outcome[$x]=makeoutcomestring($balfor, $balvs, $row['judge']);
          if($balfor > $balvs) {$win[$x] = 1;}
-         $isprelim[$x]=1; if ($row['rd_name'] > 9) {$isprelim[$x]=0;}
+         $isprelim[$x]=1; if ($row['rd_type'] == "elim" or $row['rd_type'] == "final") {$isprelim[$x]=0;}
          if ($row['event_type']=='roundrobin') {$isRR[$x]=1;}
          $panel[$x]=$row['panel_id']; 
          $ballotid=$row['ballot_id']; 
@@ -145,12 +170,15 @@ if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE)
  if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
  if ($win[$i]==1) {$totwin++;}
  if ($win[$i]==0) {$totloss++;}
- if ($round[$i]==11) {$trip=$outcome[$i];}
- if ($round[$i]==12) {$doub=$outcome[$i];}
- if ($round[$i]==13) {$octo=$outcome[$i];}
- if ($round[$i]==14) {$qrtr=$outcome[$i];}
- if ($round[$i]==15) {$semi=$outcome[$i];}
- if ($round[$i]==16) {$finl=$outcome[$i];}
+ if ( isset($elim_key[$round_id[$i]]) )
+  {
+   if ($elim_key[$round_id[$i]]==11) {$trip=$outcome[$i];}
+   if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}
+   if ($elim_key[$round_id[$i]]==13) {$octo=$outcome[$i];}
+   if ($elim_key[$round_id[$i]]==14) {$qrtr=$outcome[$i];}
+   if ($elim_key[$round_id[$i]]==15) {$semi=$outcome[$i];}
+   if ($elim_key[$round_id[$i]]==16) {$finl=$outcome[$i];}
+  }
  if (($i<$x and $tourn[$i]<>$tourn[$i+1]) OR $i==$x)
   {
   echo "<tr>";
