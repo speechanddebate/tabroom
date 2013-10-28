@@ -131,7 +131,7 @@
 	if ($pool > 0) { 
 		
 		$judge_sth = $dbh->prepare('
-			select distinct judge.id, concat_ws(" ",judge.last, judge.first) as name, judge.school, judge.tab_rating, concat(judge.obligation+judge.hired) as rounds
+			select distinct judge.id, judge.last, judge.school, judge.tab_rating, concat(judge.obligation+judge.hired) as rounds
 			from judge, pool_judge
 			where judge.active = 1
 			and judge.id = pool_judge.judge
@@ -142,7 +142,7 @@
 	} else { 
 
 		$judge_sth = $dbh->prepare('
-			select distinct judge.id, concat_ws(" ",judge.last, judge.first) as name, judge.school, judge.tab_rating, concat(judge.obligation+judge.hired) as rounds
+			select distinct judge.id, judge.last, judge.school, judge.tab_rating, concat(judge.obligation+judge.hired) as rounds
 			from judge, judge_group, event, round
 			where judge.active = 1
 			and judge.judge_group = event.judge_group 
@@ -156,7 +156,7 @@
 	$judge_sth->execute();
 
 	my @judges;
-	my %judge_name;
+	our %judge_name;
 	my %judge_score;
 	my %judge_school;
 	my %judge_rating;
@@ -477,11 +477,21 @@
 			}
 		}
 
+		foreach my $panel (sort {$test_flight{$a} <=> $test_flight{$b}} @panels) { 
+
+			my $judge_string;
+
+			foreach my $judge (@{$test_judges{$panel}}) { 
+				$judge_string .= $judge_name{$judge}." $judge ";
+			}
+
+		}
+
 		foreach my $tock (1 .. 7) { 
 
 			PANEL:
 			foreach my $first (@panels) { 
-		
+
 				next if $panel_bye{$first};
 
 				my $baseline_score = score_panel( \@{$panel_entries{$first}}, \@{$test_judges{$first}}, \%mjp );
@@ -494,37 +504,40 @@
 				foreach my $first_judge (@{$test_judges{$first}}) { 
 
 					my $current_diff;
-
 					my $swap_with;
 					my $swap_panel;
-
+					my %done;
+				
 					JUDGE:
 					foreach my $second_judge (@judges) { 
 
+						next if $done{$second_judge}++;
 						next if $second_judge == $first_judge;
 						next if $judge_out{$second_judge};
 
 						foreach my $entry (@{$panel_entries{$first}}) {   
-							foreach my $clash (@{$judge_clashes{$second_judge}}) {  
-								next JUDGE if $clash == $entry; 							# Second judge cannot judge first judge's debates.
+							foreach my $clash (@{$judge_clashes{$second_judge}}) { 
+								next JUDGE if $clash == $entry;
 							}
 						}
 
 						if ($test_panels{$second_judge} && scalar @{$test_panels{$second_judge}} >= $flights) { 
 
 							foreach my $second (@{$test_panels{$second_judge}}) { 
+								next JUDGE if $second == $first;
+							}
 
-								next unless $panel_flight{$second} == $panel_flight{$first};
+							foreach my $second (@{$test_panels{$second_judge}}) { 
+								next unless $test_flight{$second} == $test_flight{$first};
 
 								foreach my $entry (@{$panel_entries{$second}}) {   
-									foreach my $clash (@{$judge_clashes{$first_judge}}) {    
-										next JUDGE if $clash == $entry; 					# First judge cannot judge second judge's debates
+									foreach my $clash (@{$judge_clashes{$first_judge}}) { 
+										next JUDGE if $clash == $entry;
 									}
 								}
-						
-								my $baseline_second_score = score_panel(\@{$panel_entries{$second}}, \@{$test_judges{$second}}, \%mjp );
 
-								my @new_judges_first;			#create test panels post-swap to see if they're any better
+								my $baseline_second_score = score_panel(\@{$panel_entries{$second}}, \@{$test_judges{$second}}, \%mjp );
+								my @new_judges_first;		# create test panels post-swap to see if they're any better
 								my @new_judges_second;
 
 								foreach my $nj (@{$test_judges{$first}}) { 
@@ -546,14 +559,20 @@
 
 								if (($baseline_score + $baseline_second_score - $new_first_score - $new_second_score) > $current_diff) { 
 
-									Tab::debuglog("Baseline for swapping $first_judge with $second_judge was ".($baseline_score + $baseline_second_score)." and that's now ".($new_first_score - $new_second_score));
 									$current_diff = $baseline_score + $baseline_second_score - $new_first_score - $new_second_score;
 									$swap_with = $second_judge;
 									$swap_panel = $second;
 								}
+
 							}
 
 						} else { 
+
+							if ($test_panels{$second_judge}) {
+								foreach my $second (@{$test_panels{$second_judge}}) { 
+									next JUDGE if $second == $first;
+								}
+							}
 
 							my @new_judges_first;			#create test panels post-swap to see if they're any better
 
@@ -577,7 +596,7 @@
 					if ($swap_with) { 
 
 						$attempt_total -= $current_diff;
-						
+
 						my @new_first;
 						foreach my $judge (@{$test_judges{$first}}) { 
 							push @new_first, $judge unless $judge == $first_judge;
@@ -648,6 +667,8 @@
 
 	my $msg = "Judges added";
 
+	undef %judge_name;
+
 	$m->redirect("/panel/round/rooms.mhtml?round_id=".$round->id) if $round->type eq "elim" || $round->type eq "final" || $flights == 1;
 	$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&disp=1&msg=$msg");
 
@@ -655,33 +676,51 @@
 
 		my ($entries_ref, $judges_ref, $mjp) = @_;
 
-		my $diff;
 		my $score;
+
+		my $first_score;
+		my %judge_score;
 
 		foreach my $entry (@{$entries_ref}) { 
 
-			my $first_score;
+			my $panel_score;
+			my $panel_diff;
+			my $judge_diff;
 
 			foreach my $judge (@{$judges_ref}) { 
 
-				$score += ${$mjp}{$judge."-".$entry};
-				
-				if ($first_score) { 
-					$diff += abs($first_score - ${$mjp}{$judge."-".$entry});
+				$panel_score += ${$mjp}{$judge."-".$entry};
+
+				if ($judge_score{$judge}) { 
+					$score += abs($judge_score{$judge} - ${$mjp}{$judge."-".$entry});
 				} else { 
-					$first_score = ${$mjp}{$judge."-".$entry}
+					$judge_score{$judge} = ${$mjp}{$judge."-".$entry};
 				}
 			}
 
-			if ($diff) { 
-				$score += $diff * 100;
+			if ($first_score) { 
+				$panel_diff = abs($first_score - $panel_score);
+				if ($panel_diff) { 
+					$score += $panel_diff * 100;
+				}
+			} else { 
+				$first_score = $panel_score;
 			}
 
+			$score += $panel_score;
+		}
+
+		my $judge_string;
+		foreach my $judge (@{$judges_ref}) { 
+			$judge_string .= $judge_name{$judge}.": ";
+			foreach my $entry (@{$entries_ref}) { 
+				$judge_string .= ${$mjp}{$judge."-".$entry}." ";
+			}
 		}
 
 		return $score;
-
 	}
+
 
 </%init>
 
@@ -715,7 +754,6 @@
 						<% $judge_rating{$judge} > 0 ? $judge_rating{$judge} : "" %> :
 						<% $prefs && $prefs ne "none" ? $judge_rating{$judge."-".$panel} : "" %> - 
 						<% $judge_panel_score{$judge."-".$panel} %> -
-						<% $judge_name{$judge} %>
 					</span>
 %				}
 
