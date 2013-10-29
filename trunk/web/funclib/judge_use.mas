@@ -11,142 +11,112 @@
 	# $judge_hash{$judge.id}{'lost'} -- rounds lost, including current round
 	# $judge_hash{$judge.id}{'in_round'} -- assigned to judge in the current round
 	# $judge_hash{$judge.id}{'left'} -- obligated-judged_already-will_judge
-	
-	use POSIX;
-	use Time::HiRes qw( time );
-	my $start = time(); 	
 
 	my $round = Tab::Round->retrieve($round_id);
 	my $event = $round->event;
 	my $judge_group = $event->judge_group;
-	
+
 	my %judge_hash;
-	
-	my $rd_name=$round->name;
 
-	#load obligations
-	
-	Tab::Judge->columns(TEMP => qw/judge_id/);		
-	Tab::Judge->set_sql(pull_ballots => "
-		select judge.id as judge_id, judge.obligation, judge.hired
-		from judge
-		where judge.judge_group = $judge_group
-	");
-
-	my @judges = Tab::Judge->search_pull_ballots;
-	
-	foreach my $judge (@judges) {
-#		print $judge->first." ".$judge->last." id=".$judge->judge_id." judged already:".$judge->judged_already."<br>";
-		$judge_hash{$judge->judge_id}{'oblig'} = $judge->obligation + $judge->hired;
+	foreach my $judge ($judge_group->judges) { 
+		$judge_hash{$judge}{"oblig"} = $judge->obligation + $judge->hired;
 	}
 
-	#count rounds judged already
-	
-	Tab::Judge->columns(TEMP => qw/judged_already/);		
-	Tab::Judge->columns(TEMP => qw/judge_id/);		
-	Tab::Judge->set_sql(pull_ballots => "
-		select judge.id as judge_id, judge.obligation, judge.first, judge.last, ballot.*, count(distinct ballot.panel) as judged_already
-		from ballot, judge, panel, round
-		where judge.judge_group = $judge_group
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select judge.id, round.id, round.name
+		from ballot, panel, round, judge
+		where round.event = ".$event->id."
+		and round.id = panel.round
+		and round.type != \"elim\"
+		and round.type != \"final\"
+		and panel.id = ballot.panel
 		and ballot.judge = judge.id
-		and panel.id=ballot.panel
-		and round.id=panel.round
-		and round.name <= $rd_name 
-		and round.type <> 'elim'
-		group by judge
 	");
 
-	undef @judges;
-	@judges = Tab::Judge->search_pull_ballots;
-	
-	foreach my $judge (@judges) {
-#		print $judge->first." ".$judge->last." id=".$judge->judge_id." judged already:".$judge->judged_already."<br>";
-		$judge_hash{$judge->judge_id}{'judged_already'} = $judge->judged_already;
-	}
-	
-	#count rounds yet to come that they are already scheduled in
-	Tab::Judge->columns(TEMP => qw/will_judge/);		
-	Tab::Judge->columns(TEMP => qw/judge_id/);		
-	Tab::Judge->set_sql(pull_ballots => "
-		select judge.id as judge_id, judge.first, judge.last, ballot.*, count(distinct ballot.panel) as will_judge
-		from ballot, judge, panel, round
-		where judge.judge_group = $judge_group
-		and ballot.judge = judge.id
-		and panel.id=ballot.panel
-		and round.id=panel.round
-		and round.name > $rd_name 
-		and round.type <> 'elim'
-		group by judge
-	");
+	my $current_name = $round->name;
 
-	undef @judges;
-	@judges = Tab::Judge->search_pull_ballots;
-	
-	foreach my $judge (@judges) {
-#		print $judge->first." ".$judge->last." id=".$judge->judge_id." judged already:".$judge->will_judge."<br>";
-		$judge_hash{$judge->judge_id}{'will_judge'} = $judge->will_judge;
+	$sth->execute();
+	my %used;
+
+	while (my ($judge, $round, $roundname)  = $sth->fetchrow_array() ) {
+		next if $used{$judge."-".$round}++;
+		$judge_hash{$judge}{"judged_already"}++ if $roundname < $current_name;
+		$judge_hash{$judge}{"judged_already"}++ if $roundname == $current_name;
+		$judge_hash{$judge}{"will_judge"}++ if $roundname > $current_name;
+		$judge_hash{$judge}{"in_round"}++ if $roundname == $current_name;
 	}
 
-#	Now account for future rounds the judge could possibly hear
-#	pull them in future rounds where they CAN hear the event but they don't have a time strike
+	my $future_count;
+	my @future;
 
-	my @future_rounds = Tab::Round->search ( event => $event );
-	
-	foreach my $fut_rd (@future_rounds) { 
-	
-		if ( $fut_rd->name > $round->name ) {
-	
-		my $temp_rd_id = $fut_rd->id;
-		
-		Tab::Judge->set_sql(pull_ballots => "
-			select judge.id, judge.first, judge.last
-			from judge, round, timeslot
-			where judge.judge_group = $judge_group
-			and round.id = $temp_rd_id
-			and timeslot.id = round.timeslot
-			and round.type <> 'elim'
-			and not exists( 		
-				select strike.id 
-				from strike
-				where strike.judge = judge.id 
-				and strike.type = \"time\"
-				and strike.start < timeslot.end 		
-				and strike.end > timeslot.start )
-			and not exists(
-				select strike.id from strike
-				where strike.judge = judge.id 	
-				and strike.event = round.event
-				and strike.type = \"event\" )
-		");	
+	foreach my $round ($event->rounds) { 
 
-			undef @judges;
-			@judges = Tab::Judge->search_pull_ballots;
-			foreach my $judge (@judges) {
-				$judge_hash{$judge->id}{'future_possible'} ++;
-			}
+		next if $round->type eq "elim";
+		next if $round->type eq "final";
 	
+		next unless $round->name > $current_name;
+
+		$future_count++;
+		push @future, $round;
+	}
+
+	foreach my $judge ($judge_group->judges) { 
+		$judge_hash{$judge}{"future_possible"} = $future_count;
+	}
+
+	foreach my $round (@future) { 
+
+		my $event_strikes_sth = $dbh->prepare("
+			select distinct strike.id, strike.judge
+			from strike, judge
+			where judge.judge_group = ".$judge_group->id."
+			and strike.judge = judge.id
+			and strike.event = ".$event->id."
+			order by judge.id
+		");
+
+		my $future_strikes_sth = $dbh->prepare("
+			select distinct strike.id, strike.judge
+			from strike, judge, timeslot
+			where judge.judge_group = ".$judge_group->id."
+			and timeslot.id = ".$round->timeslot->id."
+			and strike.judge = judge.id
+			and strike.start <= timeslot.end
+			and strike.end >= timeslot.start
+		");
+
+		$future_strikes_sth->execute();
+
+		while (my ($strike, $judge)  = $future_strikes_sth->fetchrow_array() ) {
+			undef $judge_hash{$judge}{'future_possible'};
+		}
+
+		$event_strikes_sth->execute();
+
+		while (my ($strike, $judge)  = $event_strikes_sth->fetchrow_array() ) {
+			undef $judge_hash{$judge}{'future_possible'};
 		}
 	
 	}
 
-#calculate rounds lost
+	#calculate rounds lost
 	
-	foreach my $key ( keys %judge_hash) {
+	foreach my $key (keys %judge_hash) {
 
-		$judge_hash{$key}{'lost'} = $judge_hash{$key}{'oblig'}-$judge_hash{$key}{'judged_already'}-$judge_hash{$key}{'future_possible'};
-		$judge_hash{$key}{'left'} = $judge_hash{$key}{'oblig'}-$judge_hash{$key}{'judged_already'}-$judge_hash{$key}{'will_judge'};
-		if ( $judge_hash{$key}{'left'} > $judge_hash{$key}{'future_possible'} ) { $judge_hash{$key}{'left'} = $judge_hash{$key}{'future_possible'}; }
-		if ( $judge_hash{$key}{'lost'} < 0 ) { $judge_hash{$key}{'lost'} = 0; }
+#		Tab::debuglog("Judge $key oblig is $judge_hash{$key}{'oblig'} already is $judge_hash{$key}{'judged_already'} future is $judge_hash{$key}{'future_possible'}");
 
-#		print "oblig:".$judge_hash{$key}{'oblig'}." already:".$judge_hash{$key}{'judged_already'}." future:".$judge_hash{$key}{'will_judge'}." future possible:".$judge_hash{$key}{'future_possible'}." lost:".$judge_hash{$key}{'lost'}."<br>";
+		$judge_hash{$key}{'lost'} = $judge_hash{$key}{'oblig'} - $judge_hash{$key}{'judged_already'} - $judge_hash{$key}{'future_possible'};
+		$judge_hash{$key}{'left'} = $judge_hash{$key}{'oblig'} - $judge_hash{$key}{'judged_already'} - $judge_hash{$key}{'will_judge'};
 
-		
+		$judge_hash{$key}{'left'} = $judge_hash{$key}{'future_possible'}
+			if $judge_hash{$key}{'left'} > $judge_hash{$key}{'future_possible'};
+
+		$judge_hash{$key}{'lost'} = 0 if $judge_hash{$key}{'lost'} < 0;
+
 	}
 
 	return \%judge_hash;
-
-	my $end = time();
-	print "<br>processing time: ";
-	printf("%.2f\n", $end - $start);
 
 </%perl>
