@@ -5,6 +5,7 @@ Tab::School->columns(Essential => qw/id tourn name chapter region code congress_
 Tab::School->columns(Others => qw/registered registered_on registered_by entered_on hotel 
                                   paid contact_email contact_name contact_number individuals
                                   noprefs timestamp self_register self_reg_deadline /);
+Tab::School->columns(TEMP => qw/entered_by/);
 
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_a(chapter => 'Tab::Chapter');
