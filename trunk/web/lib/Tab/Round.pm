@@ -14,7 +14,7 @@ Tab::Round->has_a(pool => 'Tab::Pool');
 Tab::Round->has_a(timeslot => 'Tab::Timeslot');
 Tab::Round->has_a(tb_set => 'Tab::TiebreakSet');
 
-Tab::Round->has_many(panels => 'Tab::Panel', 'round');
+Tab::Round->has_many(panels => 'Tab::Panel', 'round' => { order_by => 'letter'} );
 Tab::Round->has_many(results => 'Tab::Result', 'round');
 
 __PACKAGE__->_register_datetimes( qw/blasted/);
