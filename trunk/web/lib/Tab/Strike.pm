@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Strike->table('strike');
 Tab::Strike->columns(Primary => qw/id/);
 Tab::Strike->columns(Essential => qw/tourn judge type event entry school region
-                                     start end strike_time registrant timestamp/);
+                                     start end strike_time registrant conflictee timestamp/);
 
 Tab::Strike->has_a(judge => 'Tab::Judge');
 Tab::Strike->has_a(tourn => 'Tab::Tourn');
