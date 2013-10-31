@@ -39,6 +39,7 @@ sub students {
 sub short_name {
 	my ($self, $limit) = @_;
 	my $name = $self->name;
+	$name = "NYU" if $name eq "New York University";
 	$name =~ s/of Math and Science$//g;
 	$name =~ s/Academy$//g;
 	$name =~ s/Regional\ High\ School$//g;
