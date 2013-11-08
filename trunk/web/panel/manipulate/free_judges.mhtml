@@ -1,0 +1,241 @@
+<%args>
+	$round_id
+	$flight => 1
+	$tourn
+</%args>
+<%init>
+
+	my $round = Tab::Round->retrieve($round_id);
+	my $event = $round->event;
+
+	my $flights = $round->flighted; 
+
+	my $group = $event->judge_group;
+
+	my $rounds_per = $group->setting("rounds_per");
+	my $no_codes = $group->setting("no_codes");
+
+	my $mutuality = $group->setting("mutuality");
+	my $preference = $group->setting("preference");
+
+	my $pool_limit = "and pool_judge.judge = judge.id and pool_judge.pool = round.pool" if $round->pool > 0;
+	my $pool_table = "pool_judge," if $pool_limit;
+
+	my %judge_name = map {$_ => $_->last.", ".substr($_->first,0,1)} $group->judges;
+
+	Tab::Judge->set_sql( available_judges => "
+		select distinct judge.id, judge.first, judge.last, judge.tab_rating, judge.obligation, judge.hired
+		from judge, event, round, $pool_table timeslot
+		where judge.judge_group = event.judge_group
+		and judge.active = 1
+		and event.id = round.event
+		and round.timeslot = timeslot.id
+		".$pool_limit."
+		and round.id = ? 
+
+		and not exists (
+			select strike.id from strike
+			where strike.type = \"event\"
+			and strike.event = event.id
+			and strike.judge = judge.id
+		)
+
+		and not exists ( 
+			select strike.id from strike
+			where strike.type = \"time\"
+			and strike.judge = judge.id
+			and strike.start <= timeslot.end
+			and strike.end >= timeslot.start
+		)
+
+		and not exists (
+			select panel.id
+			from panel, ballot, timeslot othertimeslot, round
+			where ballot.judge = judge.id
+			and ballot.panel = panel.id
+			and panel.flight = $flight
+			and panel.round = round.id
+			and round.timeslot = othertimeslot.id
+			and othertimeslot.start <= timeslot.end
+			and othertimeslot.end >= timeslot.start
+		)
+
+		order by judge.tab_rating, judge.last
+	");
+
+	my @all_judges = Tab::Judge->search_available_judges($round->id);
+
+	my @panels = Tab::Panel->search_like( round => $round->id, {order_by => 'bracket'});
+
+	my %entry_by_id = map {$_->id => $_} $round->event->entries;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $this_round_sth = $dbh->prepare("
+		select distinct panel.id, ballot.chair, ballot.judge, ballot.entry, entry.code, ballot.side, ballot.speakerorder, panel.flight
+		from panel, ballot, entry
+		where panel.round = ".$round->id."
+		and panel.id = ballot.panel
+		and panel.flight = $flight
+		and ballot.entry = entry.id
+		group by ballot.id
+		order by ballot.side
+	");
+
+	my %panel_chair;
+	my %panel_judge;
+	my %panel_entry;
+	my %entry_side;
+	my %entry_order;
+	my %entry_code;
+	my %used_judge;
+
+	$this_round_sth->execute;
+
+	while (my ($panel, $chair, $judge, $entry, $code, $side, $order)  = $this_round_sth->fetchrow_array() ) {
+		push @{$panel_chair{$panel}}, $judge if $chair;
+		push @{$panel_judge{$panel}}, $judge unless $chair;
+		$used_judge{$judge}++;
+		push @{$panel_entry{$panel}}, $entry;
+		$entry_side{$entry} = $side;
+		$entry_order{$entry} = $order;
+		$entry_code{$entry} = $code;
+	}
+
+	my %judge_constraints = $m->comp("/funclib/judge_cannotsee.mas", group => $group, round => $round);
+	my %judge_ratings = $m->comp("/funclib/event_judgeprefs.mas", event => $event, style => "individual");
+
+</%init>
+
+	<div class="left huge">
+
+		<h2><% $round->realname %> Unused Judges</h2>
+
+		<& /funclib/tablesorter.mas, table => "sortme" &>
+
+		<table cellpadding="4" cellspacing="1" id="sortme">
+
+			<thead>
+				<tr class="yellowrow">
+
+%					unless ($no_codes) { 
+						<th class="smaller">
+							Code
+						</th>
+%					}
+
+					<th class="smaller">
+						Judge
+					</th>
+
+					<th class="smaller">
+						School
+					</th>
+
+					<th class="smallish">
+						Rounds
+					</th>
+
+					<th class="smallish" style="width: 130px;">
+						Fits
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+%			foreach my $judge (@all_judges) { 
+
+				<tr>
+%					unless ($no_codes) { 
+						<td class=" smallish">
+							<% $judge->code %>
+						</td>
+%					}
+
+					<td class=" smallish">
+						<% $judge_name{$judge} %>
+					</td>
+
+					<td class=" smallish">
+						<% $judge->school ? $judge->school->short_name : "Hired" %>
+					</td>
+
+					<td class="centeralign smallish">
+						<% $rounds_per ? ($judge->obligation + $judge->hired) - $judge->tmp." /" : "" %>
+						<% $judge->tmp %>
+						<% $rounds_per ? "/ ".($judge->obligation + $judge->hired) : "" %>
+					</td>
+
+					<td class="centeralign smallish">
+<%perl>
+							my %entry_string;
+							my %rating_string;
+							my %judge_string;
+							my @judge_panels;
+
+							my %pref_score;
+
+							PANEL:
+							foreach my $panel (@panels) { 
+								my $diff;
+
+								foreach my $entry (@{$panel_entry{$panel}}) { 
+									next PANEL if $judge_constraints{$judge."-".$entry};
+									$entry_string{$panel} .= " vs " if $entry_string{$panel};
+									$entry_string{$panel} .= $entry_code{$entry};
+
+									$rating_string{$panel} .= "-" if $rating_string{$panel};
+									$rating_string{$panel} .= $judge_ratings{$entry."-".$judge};
+									$rating_string{$panel} .= "x" unless $judge_ratings{$entry."-".$judge};
+
+									$pref_score{$panel} += $judge_ratings{$entry."-".$judge};
+									$diff = abs( $judge_ratings{$entry."-".$judge} - $pref_score{$panel} )
+										if $pref_score{$panel} && $judge_ratings{$entry."-".$judge};
+
+								}
+
+								my %done;
+
+								foreach my $judge (@{$panel_judge{$panel}}) { 
+									next if $done{$judge}++;
+									$judge_string{$panel} .= $judge_name{$judge};
+								}
+
+								$pref_score{$panel} = $pref_score{$panel} * $preference;
+								$pref_score{$panel} += $diff * $mutuality;
+								push @judge_panels, $panel;
+
+							}
+
+							@judge_panels = sort {$pref_score{$a} <=> $pref_score{$b}} @judge_panels;
+</%perl>
+						<select name="panel_id" class="fixed larger">
+%							foreach my $panel (@judge_panels) { 
+								<option value="<% $panel->id %>"> <% $rating_string{$panel} %> (<% $judge_string{$panel} ? $judge_string{$panel} : "NONE" %>) <% $entry_string{$panel} %> </option>
+%							}
+						</select>
+					</td>
+
+				</tr>
+%			}
+
+			</tbody>
+
+		</table>
+
+	</div>
+
+	<div class="right small">
+
+		<div class="sidenote">
+
+			<h4>Round</h4>
+
+			<a class="blue block" href="/panel/schemat/show.mhtml?round_id=<% $round_id %>">
+				Return to <% $round->realname %> pairing
+			</a>
+
+		</div>
+
+	</div>
+
