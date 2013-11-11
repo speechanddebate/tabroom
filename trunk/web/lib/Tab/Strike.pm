@@ -20,13 +20,23 @@ sub name {
 	my $self = shift;
 	my $tz = $self->tourn->tz if $self->tourn;
 	$tz = "UTC" unless $tz;
-	return "No rounds in ".$self->event->name if $self->type eq "event";
 	return "No prelims in ".$self->event->name if $self->type eq "elim";
-	return "No one from ".$self->school->short_name if $self->type eq "school";
-	return "No one from ".$self->region->name." (".$self->region->code.")" if $self->type eq "region";
-	return $self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "entry";
-	return $self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->entry && $self->type eq "conflict";
-	return $self->school->short_name if $self->school && $self->type eq "conflict";
+
+	if ($self->registrant) { 
+		return "No Rounds: ".$self->event->name if $self->type eq "event";
+		return "Strike: ".$self->school->short_name if $self->type eq "school";
+		return "Strike: ".$self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "entry";
+		return "Strike: ".$self->region->name." (".$self->region->code.")" if $self->type eq "region";
+		return "Conflict: ".$self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->entry && $self->type eq "conflict";
+		return "Conflict: ".$self->school->short_name if $self->school && $self->type eq "conflict";
+	} else { 
+		return "Tab Strike: ".$self->event->name if $self->type eq "event";
+		return "Tab Strike: ".$self->school->short_name if $self->type eq "school";
+		return "Tab Strike: ".$self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "entry";
+		return "Tab Strike: ".$self->region->name." (".$self->region->code.")" if $self->type eq "region";
+	}
+
+
 
 	return "Out ". Tab::niceshortdayt($self->start->set_time_zone($tz))
 			." to ".  Tab::niceshortdayt($self->end->set_time_zone($tz)) if $self->type eq "time" && $self->start->day != $self->end->day;
