@@ -29,3 +29,10 @@ sub realname {
 	return "Round ".$self->name;
 }
 
+sub shortname { 
+	my $self = shift;
+	return $self->label if $self->label && $self->label ne $self->name;
+	return "Rd ".$self->name;
+}
+
+
