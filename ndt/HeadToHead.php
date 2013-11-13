@@ -1,5 +1,4 @@
 <?php
-die;
 require 'scripts/tabroomtemplate.html';
 ?>
 
@@ -191,7 +190,7 @@ function iswin($decision)
 
 function getopponent($panel_id, $panel_entry_orig, &$oppn, &$judge, &$decision, &$opponent)  //returns opponent, judge, and decision
 {
-  $query="SELECT * from ballot where ballot.panel=".$panel_id." order by judge asc";
+  $query="SELECT ballot.* from ballot, panel, round where ballot.panel=".$panel_id." and panel.id=ballot.panel and round.id=panel.round and round.published>0 order by judge asc";
   $ballots=mysql_query($query);
   $judgenum=-99;
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
@@ -286,7 +285,7 @@ function panelmaker($entry, &$panel_id, &$panel_entry_sync, &$panel_entry_orig, 
   findcommonentries($entry, $entrylist);              //populate it
   if (count($entrylist)==0) {return;}
   $year=date("Y"); $month=date("M"); if ($month<8) {$year=$year-1;}
-  $query="SELECT distinct panel.id as panel_id, ballot.entry as entry from panel, ballot, round, event, tourn WHERE round.id=panel.round and event.id=round.event and tourn.id=event.tourn and tourn.start>'".$year."-09-01' and panel.id=ballot.panel and ".entryquerymaker($entrylist);
+  $query="SELECT distinct panel.id as panel_id, ballot.entry as entry from panel, ballot, round, event, tourn WHERE round.id=panel.round and event.id=round.event and tourn.id=event.tourn and tourn.start>'".$year."-09-01' and panel.id=ballot.panel and round.published>0 and ".entryquerymaker($entrylist);
   $panels=mysql_query($query);
   while ($row = mysql_fetch_array($panels, MYSQL_BOTH)) 
     {
