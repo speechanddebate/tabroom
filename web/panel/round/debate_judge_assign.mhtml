@@ -61,7 +61,7 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $event_ballots_sth = $dbh->prepare("
-		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, entry.school, ballot.side, panel.bracket, panel.id, entry.code, panel.bye
+		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, entry.school, ballot.side, panel.bracket, panel.id, entry.code, panel.bye, entry.flight
 		from ballot, panel, round, entry, event
 		where event.judge_group = ".$round_event->judge_group->id."
 		and round.event = event.id
@@ -89,6 +89,7 @@
 	my %panel_entries;
 	my %panel_bracket;
 	my %panel_bye;
+	my %fix_flight;
 
 	my %ballot_type;
 	my %ballot_side;
@@ -97,7 +98,7 @@
 
 	my %judge_rounds;
 
-	while (my ($ballot, $entry, $judge, $round, $type, $entry_school, $side, $bracket, $panel, $code, $bye) = $event_ballots_sth->fetchrow_array() ) {
+	while (my ($ballot, $entry, $judge, $round, $type, $entry_school, $side, $bracket, $panel, $code, $bye, $flight) = $event_ballots_sth->fetchrow_array() ) {
 
 		if ($round == $this_round) { 
 
@@ -112,6 +113,13 @@
 			push @panels, $panel;
 			$panel_bracket{$panel} = $bracket;
 			$panel_bye{$panel} = $bye;
+
+			if ($flights > 1 ) { 
+	
+				$fix_flight{$panel} = $flight if $flight && $flight <= $flights;
+				$fix_flight{$panel} = $flights / 2 unless $flight;
+			}
+
 			push @{$panel_entries{$panel}}, $entry;
 
 		} else { 
@@ -335,14 +343,17 @@
 	my $round_burn_avoid = $group->setting("round_burn_avoid");
 	my $mutuality = $group->setting("mutuality");
 	my $preference = $group->setting("preference");
+	my $default_mjp = $group->setting("default_mjp");
 
 	$round_burn_avoid = 2 if not defined $round_burn_avoid;
 	$mutuality = 3 if not defined $mutuality;
 	$preference = 1 if not defined $preference;
+	$default_mjp = 1 if not defined $default_mjp;
 
 	$round_burn_avoid = 0 if $round_burn_avoid == -1;
 	$mutuality = 0 if $mutuality == -1;
 	$preference = 0 if $preference == -1;
+	$default_mjp = 0 if $default_mjp == -1;
 
 	my %use_priority;
 
@@ -352,19 +363,31 @@
 		@{$judge_rounds{$judge}} = grep { ! $seen{$_}++ } @{$judge_rounds{$judge}};
 
 		my $num_rounds = scalar @{$judge_rounds{$judge}};
-		$judge_out{$judge}++ if $num_rounds >= $judge_obligation{$judge} && $rounds_per;
-		next if $judge_out{$judge};
 
 		$judge_score{$judge} += scalar @{$judge_clashes{$judge}} if $judge_clashes{$judge};
 
-		my $rounds_left = $judge_obligation{$judge} - $num_rounds;
-		my $round_diff = $round->name - $rounds_left;
+		if ($rounds_per) { 
 
-		$judge_score{$judge} += $round_diff * $round_burn_avoid if $round_diff > 0;
-		$use_priority{$judge} = $round_diff * $round_burn_avoid if $round_diff > 0;
+			$judge_out{$judge}++ if $num_rounds >= $judge_obligation{$judge};
+		
+			my $rounds_left = $judge_obligation{$judge} - $num_rounds;
+			my $round_diff = $round->name - $rounds_left;
+
+			$judge_score{$judge} += $round_diff * $round_burn_avoid if $round_diff > 0;
+			$use_priority{$judge} = $round_diff * $round_burn_avoid if $round_diff > 0;
+
+		} else {
+
+			my $round_factor = $round_burn_avoid - $num_rounds;
+			$round_factor = 0 if $round_factor < 0;
+			$judge_score{$judge} += $round_factor * $round_burn_avoid if $round_factor > 0;
+			$use_priority{$judge} = $round_factor * $round_burn_avoid if $round_factor > 0;
+
+		}
+
+		next  if $judge_out{$judge};
 
 		if ($judge_ballots{$judge}) { 
-
 			foreach my $ballot ( sort { $entry_code{$ballot_entry{$a}} cmp $entry_code{$ballot_entry{$b}}} @{$judge_ballots{$judge}}) { 
 				my $entry = $ballot_entry{$ballot};
 				next if $allow_repeat_elims && ($round_type eq "elim" || $round_type eq "final" || $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final") ;
@@ -425,7 +448,7 @@
 	my %judge_panel_score;
 
 	@panels = shuffle @panels if $shuffle_post;
-	
+
 	PANEL:
 	foreach my $panel (@panels) { 
 
@@ -433,9 +456,13 @@
 
 		my $dont_care++ if $bracket_dont_give_a_shit && $panel_bracket{$panel} <= $bracket_dont_give_a_shit;
 
-
 		JUDGE:
 		foreach my $judge (@judges) { 
+
+			my $debug;
+#			$debug++  if $panel == 369937 && ($judge == 162221 || $judge == 158336);
+
+			Tab::debuglog("Scoring $judge_name{$judge} against debate ") if $debug;
 
 			my $score = 0;
 			next JUDGE if $judge_out{$judge};
@@ -448,32 +475,46 @@
 				$score += 1000 if $judge_entry_clash{$judge."-".$entry};
 				$score += 500 if $judge_avoid{$entry};
 
+				my $mjp_rating = $mjp{$judge."-".$entry};
+				$mjp_rating = $default_mjp unless $mjp_rating;
+
 				if ($mjp_first) { 
-					$diff = abs($mjp_first - $mjp{$judge."-".$entry}) if $mjp_first && $mjp{$judge."-".$entry};
+					$diff = abs($mjp_first - $mjp_rating) if $mjp_first && $mjp_rating;
+					Tab::debuglog("  Diff is $diff") if $debug;
 				} else { 
-					$mjp_first = $mjp{$judge."-".$entry} unless $mjp_first;
+					$mjp_first = $mjp_rating unless $mjp_first;
 				}
 
 				if ($prefs && $prefs ne "none" &! $dont_care) {
-					$score += $mjp{$judge."-".$entry} * $preference;
-					$score += 3 unless $mjp{$judge."-".$entry};
+					Tab::debuglog("  Prefs for $entry_code{$entry} is ".$mjp_rating." multiplied by $preference for weight") if $debug;
+					$score += $mjp_rating * $preference;
+					$score += 2 * $preference unless $mjp_rating;
 				}
 
+
 				$judge_rating{$judge."-".$panel} .= " - " if $judge_rating{$judge."-".$panel};
-				$judge_rating{$judge."-".$panel} .= $mjp{$judge."-".$entry} if $prefs && $prefs ne "none" &! $dont_care;
-				$judge_rating{$judge."-".$panel} .= "3" if not defined $mjp{$judge."-".$entry} && $prefs && $prefs ne "none" &! $dont_care;
+				$judge_rating{$judge."-".$panel} .= $mjp_rating if $prefs && $prefs ne "none" &! $dont_care;
+				$judge_rating{$judge."-".$panel} .= "1" if not defined $mjp_rating && $prefs && $prefs ne "none" &! $dont_care;
+
+				Tab::debuglog("  Judge rating is ".$judge_rating{$judge."-".$panel}) if $debug;
+
 			}
 
+			Tab::debuglog("  Use priority is $use_priority{$judge}") if $debug;
 			$score += $use_priority{$judge};
-
 			$score += $diff * $mutuality if $prefs && $prefs ne "none" &! $dont_care;
+			$score += $diff if $prefs && $prefs ne "none" && $dont_care;
+
+			Tab::debuglog("  Mutuality is ".$diff * $mutuality) if $debug;
 
 			if ($tab_ratings &! $dont_care) { 
 				$score += $judge_rating{$judge} * $preference;
 			} 
 
+			Tab::debuglog("  Bracket score is $bracket_score{$panel}") if $debug;
 			$score = $score * $bracket_score{$panel} if $bracket_score{$panel} && $round_type ne "elim" &! $dont_care;
 
+			Tab::debuglog("  FINAL SCORE IS $score ") if $debug;
 			$judge_panel_score{$judge."-".$panel} = $score;
 
 		}
@@ -511,12 +552,8 @@
 				@judges = sort {$judge_score{$b} <=> $judge_score{$a}} @judges;
 				@judges = sort {$judge_panel_score{$a."-".$panel} <=> $judge_panel_score{$b."-".$panel}} @judges;
 
-				Tab::debuglog("I have ".scalar @judges." judges ") if $panel == 359035;
-
 				JUDGE:
 				foreach my $judge (@judges) { 
-
-					Tab::debuglog("Panel $panel trying judge $judge") if $panel == 359035;
 
 					next JUDGE if $judge_out{$judge};
 					next JUDGE if $judge_used{$judge} >= $flights;
@@ -525,13 +562,12 @@
 						next JUDGE if $judge_entry_clash{$judge."-".$entry};
 					}
 
-					Tab::debuglog("Judge $judge works") if $panel == 359035;
-
 					push @{$test_judges{$panel}}, $judge;
 					push @{$test_panels{$judge}}, $panel;
 
 					$judge_used{$judge}++;
 					$test_flight{$panel} = $judge_used{$judge};
+
 					$attempt_total += $judge_panel_score{$judge."-".$panel};
 					next PANEL;
 
@@ -553,12 +589,14 @@
 
 				foreach my $first_judge (@{$test_judges{$first}}) { 
 
+
 					my $current_diff;
 					my $swap_with;
 					my $swap_panel;
 				
 					JUDGE:
 					foreach my $second_judge (@judges) { 
+
 
 						next if $second_judge == $first_judge;
 						next if $judge_out{$second_judge};
@@ -606,13 +644,16 @@
 					}
 
 					if ($swap_with) { 
+					
 
 						$attempt_total -= $current_diff;
 						
 						my @new_first;
+
 						foreach my $judge (@{$test_judges{$first}}) { 
 							push @new_first, $judge unless $judge == $first_judge;
 						}
+
 						push @new_first, $swap_with;
 						@{$test_judges{$first}} = @new_first;
 
@@ -666,11 +707,14 @@
 
 		my $flight;
 
+		next unless $judge_panels{$judge};
+		@{$judge_panels{$judge}} = sort {$fix_flight{$a} <=> $fix_flight{$b}} @{$judge_panels{$judge}};
+
 		foreach my $panel (@{$judge_panels{$judge}}) { 
 			$flight++;
+			Tab::debuglog("Debate $panel is fixed to flight $fix_flight{$panel}") if $judge == 162080;
 			$panel_flight{$panel} = $flight;
 		}
-		
 	}
 
 	foreach my $panel ($round->panels) { 
@@ -680,7 +724,6 @@
 		$panel->update;
 
 		next if $panel->bye;
-
 
 		foreach my $judge (@{$panel_judges{$panel->id}}) { 
 			$m->comp("/funclib/panel_judgeadd.mas", panel => $panel, judge_id => $judge);
