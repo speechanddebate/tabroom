@@ -1,79 +1,96 @@
 <%args> 
-	$username => undef
-	$password => undef
-	$tourn_id => undef
+	$username   => undef
+	$password   => undef
+	$tourn_id   => undef
+	$session_id => undef
+	$url        => undef
 </%args>
+<%flags>
+	inherit => undef
+</%flags>
 <%init>
-
-	use Crypt::PasswdMD5;
 
 	my $now = DateTime->now;
 
+	my $shauser;
+	my $shakey;
+	my $session;
+	my $account;
+
 	my $log = $now->mdy('/')." ".$now->hms;
-	$log .= " Login attempt by ".$username." from ".$ENV{REMOTE_ADDR}."....";
 
-	$username =~ tr/[A-Z]/[a-z]/;
-	$username =~ s/\s+//g;
-	$password =~ s/\s+$//g;  #only you can prevent trailing whitespace.
+	if ($session_id) { 
 
-	unless ($username) { 
-		my $err = "You must enter an email address as a username.  Please try again.";
-		Tab::log("Failed: no username entered. $log");
-		$m->redirect("$Tab::url_prefix/index/index.mhtml?err=$err");
-	}
+		$session = Tab::Session->retrieve($session_id);
+		$account = $session->account;
+		$shakey = $session->authkey;
+		$shauser = $session->userkey;
 
-	unless ($password) { 
-		my $err = "You must enter a password.  Please try again.";
-		Tab::log("Failed: blank password.  $log");
-		$m->redirect("$Tab::url_prefix/index/index.mhtml?err=$err");
-	}
+		$log .= " Login attempt via IDEA cookie by ".$session->account->email." from ".$ENV{REMOTE_ADDR}."...." if $session->account;
 
-	my @accounts = Tab::Account->search(email => $username);
+	} else { 
 
-	unless (@accounts) { 
-		my $err = "No account with that email address exists on this system.  Please try again.";
-		Tab::log("Failed: no such account. $log");
-		$m->redirect("$Tab::url_prefix/index/index.mhtml?err=$err");
-	}
+		use Crypt::PasswdMD5;
+
+		$log .= " Login attempt by ".$username." from ".$ENV{REMOTE_ADDR}."....";
+
+		$username =~ tr/[A-Z]/[a-z]/;
+		$username =~ s/\s+//g;
+		$password =~ s/\s+$//g;  #only you can prevent trailing whitespace.
+
+		unless ($username) { 
+			my $err = "You must enter an email address as a username.  Please try again.";
+			Tab::log("Failed: no username entered. $log");
+			$m->redirect("$Tab::url_prefix/index/index.mhtml?err=$err");
+		}
+
+		unless ($password) { 
+			my $err = "You must enter a password.  Please try again.";
+			Tab::log("Failed: blank password.  $log");
+			$m->redirect("$Tab::url_prefix/index/index.mhtml?err=$err");
+		}
+
+		my @accounts = Tab::Account->search(email => $username);
+
+		unless (@accounts) { 
+			my $err = "No account with that email address exists on this system.  Please try again.";
+			Tab::log("Failed: no such account. $log");
+			$m->redirect("$Tab::url_prefix/index/index.mhtml?err=$err");
+		}
+			
+		$account = shift @accounts;
 		
-	my $account = shift @accounts;
-	
-	my $db_password = $account->passhash;
-	my $verify_password = unix_md5_crypt($password,$db_password);
+		my $db_password = $account->passhash;
+		my $verify_password = unix_md5_crypt($password,$db_password);
+			
+		unless ($verify_password eq $db_password) { 
 		
-	unless ($verify_password eq $db_password) { 
-	
-		my $err = "Your password was not correct";
-		Tab::log("Failed: wrong password. $log");
-		$m->redirect("$Tab::url_prefix/index/index.mhtml?err=$err");
+			my $err = "Your password was not correct";
+			Tab::log("Failed: wrong password. $log");
+			$m->redirect("$Tab::url_prefix/index/index.mhtml?err=$err");
 
-	}
-	
-	# To maintain state, the sha keys are encoded.  Change the value below to
-	# something unique for your site to maintain a passing fantasy of security.
+		}
+		
+		# To maintain state, the sha keys are encoded.  Change the value below to
+		# something unique for your site to maintain a passing fantasy of security.
 
-	my $key = "$Tab::string";
-	my $auth = $m->comp("/funclib/generate_randomstring.mas", length => 16);
+		my $key = "$Tab::string";
+		my $auth = $m->comp("/funclib/generate_randomstring.mas", length => 16);
 
-	my $shauser = Digest::SHA::sha1_hex($key, $account->id);
-	my $shakey = Digest::SHA::sha1_hex($key, $auth);
+		$shauser = Digest::SHA::sha1_hex($key, $account->id);
+		$shakey = Digest::SHA::sha1_hex($key, $auth);
 
+		$session = Tab::Session->create( { 
+			account => $account->id,
+			authkey => $shakey,
+			userkey => $shauser,
+			ip => $ENV{REMOTE_ADDR},
+			timestamp => $now,
+		});
 
-	my $passwordcookie = Apache2::Cookie->new($r,
-        -name => 'Tab-AuthKey',
-        -value => $shakey,
-        -expires => '+96h',
-        -path => '/' 
-        );
+	}	
 
-	my $tokencookie = Apache2::Cookie->new($r,
-        -name => 'Tab-AuthToken',
-        -value => $shauser,
-        -expires => '+96h',
-        -path => '/'
-        );
-
-#	Remove existing sessions to prevent dual logins
+	#Remove existing sessions to prevent dual logins
 	my $allowed_sessions = $account->multiple;
 	$allowed_sessions = 1 unless $allowed_sessions;
 
@@ -81,14 +98,22 @@
 		$sess->delete unless $allowed_sessions;
 		$allowed_sessions--;
 	}
-        
-    my $session = Tab::Session->create( { 
-    	account => $account->id,
-    	authkey => $shakey,
-		userkey => $shauser,
-		ip => $ENV{REMOTE_ADDR},
-    	timestamp => $now,
-    });
+
+	my $passwordcookie = Apache2::Cookie->new(
+		$r,
+        -name => 'Tab-AuthKey',
+        -value => $shakey,
+        -expires => '+96h',
+        -path => '/' 
+        );
+
+	my $tokencookie = Apache2::Cookie->new(
+		$r,
+        -name => 'Tab-AuthToken',
+        -value => $shauser,
+        -expires => '+96h',
+        -path => '/'
+	);
 
     $tokencookie->bake($r);
     $passwordcookie->bake($r);
@@ -96,8 +121,12 @@
 	$log .= "....Succeeded.";
 	Tab::log("$log");
 
-    $m->redirect("$Tab::url_prefix/index/register.mhtml?tourn_id=$tourn_id") if $tourn_id;
+	unless ($account->email && $account->first && $account->last) { 
+		$m->redirect("$Tab::url_prefix/user/login/profile.mhtml?idebate=1"); 
+	}   
 
+    $m->redirect("http://$url") if $url;
+    $m->redirect("$Tab::url_prefix/index/register.mhtml?tourn_id=$tourn_id") if $tourn_id;
     $m->redirect("$Tab::url_prefix/user/home.mhtml");
 
 </%init>
