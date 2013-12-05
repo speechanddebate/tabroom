@@ -220,7 +220,8 @@
 	}
 
 	my $strikes_sth = $dbh->prepare("
-		select distinct strike.id, strike.judge, strike.type, strike.event, strike.entry, strike.school, strike.region, strike.start, strike.end
+		select distinct strike.id, strike.judge, strike.type, strike.event, strike.entry, 
+			strike.school, strike.region, strike.start, strike.end
 		from strike
 		where strike.tourn = ".$tourn->id."
 	");
@@ -275,6 +276,28 @@
 			$judge_out{$judge}++  if ($round_start <= $end_dt && $round_end >= $start_dt);
 		}
 
+	}
+
+	my $rounds_missed_sth = $dbh->prepare("
+		select distinct judge.id, count(round.id)
+		from judge, round, timeslot, strike, event
+		where judge.id = strike.judge
+		and judge.judge_group = event.judge_group
+		and event.id = ".$round->event->id."
+		and round.event = event.id
+		and strike.type = \"time\"
+		and strike.start < timeslot.end
+		and strike.end > timeslot.start
+		and timeslot.id = round.timeslot
+		group by judge.id
+	");
+
+	my %judge_roundstruck = ();
+
+	$rounds_missed_sth->execute();
+
+	while (my ($judge, $rounds_struck) = $rounds_missed_sth->fetchrow_array() ) {
+		$judge_roundstruck{$judge} = $rounds_struck;
 	}
 
 	my $busy_sth = $dbh->prepare("
@@ -356,6 +379,7 @@
 	$default_mjp = 0 if $default_mjp == -1;
 
 	my %use_priority;
+	my %judge_roundcount;
 
 	foreach my $judge (@judges) {
 
@@ -375,13 +399,18 @@
 
 			$judge_score{$judge} += $round_diff * $round_burn_avoid if $round_diff > 0;
 			$use_priority{$judge} = $round_diff * $round_burn_avoid if $round_diff > 0;
+			$judge_roundcount{$judge} = $num_rounds;
 
 		} else {
 
-			my $round_factor = $round_burn_avoid - $num_rounds;
-			$round_factor = 0 if $round_factor < 0;
-			$judge_score{$judge} += $round_factor * $round_burn_avoid if $round_factor > 0;
-			$use_priority{$judge} = $round_factor * $round_burn_avoid if $round_factor > 0;
+			my $round_factor = $num_rounds;
+			$round_factor -= $judge_roundstruck{$judge};
+
+			$round_factor = $round_factor * $round_burn_avoid;
+
+			$judge_score{$judge} += $round_factor * .1;
+			$use_priority{$judge} = $round_factor * .1;
+			$judge_roundcount{$judge} = $num_rounds;
 
 		}
 
@@ -460,7 +489,7 @@
 		foreach my $judge (@judges) { 
 
 			my $debug;
-#			$debug++  if $panel == 369937 && ($judge == 162221 || $judge == 158336);
+#			$debug++  if $panel == 374043 && $judge == 154376;
 
 			Tab::debuglog("Scoring $judge_name{$judge} against debate ") if $debug;
 
@@ -478,32 +507,38 @@
 				my $mjp_rating = $mjp{$judge."-".$entry};
 				$mjp_rating = $default_mjp unless $mjp_rating;
 
-				if ($mjp_first) { 
-					$diff = abs($mjp_first - $mjp_rating) if $mjp_first && $mjp_rating;
-					Tab::debuglog("  Diff is $diff") if $debug;
-				} else { 
-					$mjp_first = $mjp_rating unless $mjp_first;
+				if ($prefs && $prefs ne "none") { 
+
+					if ($mjp_first) { 
+						$diff = abs($mjp_first - $mjp_rating) if $mjp_first && $mjp_rating;
+						Tab::debuglog("  Diff is $diff") if $debug;
+					} else { 
+						$mjp_first = $mjp_rating unless $mjp_first;
+					}
+
+					unless ($dont_care) {
+						Tab::debuglog("  Prefs for $entry_code{$entry} is ".$mjp_rating." multiplied by $preference for weight") if $debug;
+						$score += $mjp_rating * $preference;
+						$score += 2 * $preference unless $mjp_rating;
+					}
+
+					$judge_rating{$judge."-".$panel} .= " - " if $judge_rating{$judge."-".$panel};
+					$judge_rating{$judge."-".$panel} .= $mjp_rating;
+					$judge_rating{$judge."-".$panel} .= "1" if not defined $mjp_rating &! $dont_care;
+
+					Tab::debuglog("  Judge rating is ".$judge_rating{$judge."-".$panel}) if $debug;
 				}
-
-				if ($prefs && $prefs ne "none" &! $dont_care) {
-					Tab::debuglog("  Prefs for $entry_code{$entry} is ".$mjp_rating." multiplied by $preference for weight") if $debug;
-					$score += $mjp_rating * $preference;
-					$score += 2 * $preference unless $mjp_rating;
-				}
-
-
-				$judge_rating{$judge."-".$panel} .= " - " if $judge_rating{$judge."-".$panel};
-				$judge_rating{$judge."-".$panel} .= $mjp_rating if $prefs && $prefs ne "none" &! $dont_care;
-				$judge_rating{$judge."-".$panel} .= "1" if not defined $mjp_rating && $prefs && $prefs ne "none" &! $dont_care;
-
-				Tab::debuglog("  Judge rating is ".$judge_rating{$judge."-".$panel}) if $debug;
 
 			}
 
 			Tab::debuglog("  Use priority is $use_priority{$judge}") if $debug;
+			Tab::debuglog("  Rounds judged is $judge_roundcount{$judge}") if $debug;
+
 			$score += $use_priority{$judge};
 			$score += $diff * $mutuality if $prefs && $prefs ne "none" &! $dont_care;
 			$score += $diff if $prefs && $prefs ne "none" && $dont_care;
+
+			$score += $judge_roundcount{$judge} * .1;
 
 			Tab::debuglog("  Mutuality is ".$diff * $mutuality) if $debug;
 
