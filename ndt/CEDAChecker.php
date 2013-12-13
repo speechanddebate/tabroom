@@ -39,13 +39,13 @@ $school1[$i]=0;$school2[$i]=0;$pwin1=0; $pwin2=0;
 $tourneyname[$i]=mysql_result($entry,$i,"tourn_name");
 $schoolname_temp="";
 $teamname[$i]=getfullteamname(mysql_result($entry,$i,"entry_id"), $schoolN1, $schoolN2, $schoolname_temp);
-$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp;
+$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp; $lastisprelim=false;
 
-  $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name from ballot, ballot_value, panel, round where panel.id=ballot.panel and round.id=panel.round and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
+  $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name FROM ballot, ballot_value, panel, round where panel.id=ballot.panel and round.id=panel.round and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
-      if ($row['rd_name'] > 9 AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
+      if ($row['type'] == 'elim' AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
         {$erd[$i] += 1;
          if($balfor > $balvs) {$ewin[$i] += 1;}
          $ebalwin[$i] += $balfor; 
@@ -56,9 +56,10 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
         }
 
       if ($row['ballot_decision'] == 1) {$balfor +=1;}
+      if ($row['bye'] == 1) {$balfor +=2; }
       if ($row['ballot_decision'] == 0) {$balvs +=1;}
 
-      if ($row['rd_name'] <= 9 AND $row['panel_id'] <> $panel) 
+      if ($row['type'] <> 'elim' AND $row['panel_id'] <> $panel) 
         {$prd[$i] += 1;
          if($balfor > $balvs) 
           {$pwin[$i] += 1;
