@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::ChapterJudge->table('chapter_judge');
 Tab::ChapterJudge->columns(Primary => qw/id/);
 Tab::ChapterJudge->columns(Essential => qw/first last gender chapter started retired notes diet
-							created cell paradigm account acct_request timestamp/);
+							created cell paradigm account acct_request timestamp identity/);
 
 Tab::ChapterJudge->has_a(chapter => 'Tab::Chapter');
 Tab::ChapterJudge->has_a(account => 'Tab::Account');
