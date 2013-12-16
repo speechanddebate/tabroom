@@ -1,0 +1,192 @@
+<%args>
+	#Pass in an account, password, and whether to retrieve emails
+	$username => undef
+	$password => undef
+	$email => undef
+	
+</%args>
+<%init>
+
+	use Crypt::PasswdMD5;
+
+	my $now = DateTime->now;
+
+	#Check Account
+	my ($account) = Tab::Account->search( email => lc($username) );
+	unless ($account) {
+		$m->print("NO_SUCH_ACCOUNT");
+		$m->abort;
+	}	
+
+	#Check Password
+	#$password =~ s/\s+$//g;
+	#my $db_password = $account->passhash;
+	#my $verify_password = unix_md5_crypt($password,$db_password);
+
+	#unless($verify_password eq $db_password) {
+	#	$m->print("PASSWORD_WRONG");
+	#	$m->abort;
+	#}
+
+	#Initiate new XML
+	use XML::Simple;
+	my $xs = new XML::Simple();
+
+	#Print the start of the XML
+	$r->content_type("application/xml");
+	$m->print("<?xml version='1.0' standalone='yes'?>\r\n");
+	$m->print("<ROUNDS>\r\n");
+
+	#Set SQL for searching entries by student first/last
+	Tab::Entry->set_sql ( by_student => "
+		select distinct entry.*
+		from entry, entry_student, student, event, tourn
+		where student.last = ?
+		and student.first = ?
+		and student.id = entry_student.student
+		and entry_student.entry = entry.id
+		and entry.event = event.id
+		and event.tourn = tourn.id
+		order by tourn.start desc
+	");
+
+	#Get the entries for the debater with first/last from account
+	my @entries = Tab::Entry->search_by_student($account->last, $account->first);
+
+	my @panels;
+
+	#Get panels (rounds) for each entry and store in array
+	foreach my $entry (@entries) {
+		my $entryid = $entry->id;
+		Tab::Panel->set_sql( by_entry => "
+			select distinct panel.*
+			from panel, ballot, round
+			where ballot.entry = $entryid
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and round.published = 1
+			order by round.name desc
+		");
+		
+		push( @panels, Tab::Panel->search_by_entry() );
+	}
+
+	#Initialize panel counter
+	my $panelcount;
+	$panelcount = 0;
+
+	foreach my $panel (@panels) {
+
+		$panelcount++;
+
+		next unless $panel->round;
+		#Get date of round, split out the time
+		my $startdate = $panel->round->event->tourn->start if $panel->round->event;
+		next unless $startdate;
+		my @datearray = split(/"T"/, $startdate);
+		$startdate = $datearray[0];
+
+		#Only include rounds from this season
+		my $cutoff = "2013-09-01";
+		if ($startdate gt $cutoff) {
+
+			#Get tournament name (use UC webname for ease of reading) and round number
+			my $tourn = ucfirst($panel->round->event->tourn->webname);
+			my $roundname = $panel->round->name;
+			my $roundside;
+			my $oppschool;
+			my $oppname;		
+			my $accountschool;
+			my @studentaccts;
+
+			#Get opposing school, opponent name, and side
+			foreach my $entry ($m->comp("/funclib/panel_entries.mas", panel => $panel)) {
+				my $moi;
+		
+				#Find school for passed in account, save emails for first 3 panels if email flag is true
+				foreach my $student ($entry->students) {
+					if ($student->last eq $account->last && $student->first eq $account->first) {
+						$accountschool = $entry->school->short_name;
+						$moi++;
+					} else {
+						if ($email == 1 && $panelcount < 4) {
+							push( @studentaccts,  Tab::Account->search( first => lc($student->first), last => lc($student->last) ) );
+						}
+					}
+				}
+
+				#Loop through students for each entry - set the side, and if opponent, save their name 
+				foreach my $student ($entry->students) {
+					if ($moi) {
+						$roundside = "Aff" if $entry->side == 1;
+						$roundside = "Neg" if $entry->side == 2;
+					} else {
+						$oppschool = $entry->school->short_name;
+						if ($oppname eq "") {
+							$oppname = $oppname . $student->last;
+						} else {
+							$oppname = $oppname . "-" . $student->last;
+						}
+						$roundside = "Neg" if $entry->side == 1;
+						$roundside = "Aff" if $entry->side == 2;
+					}
+				}
+			}
+
+			#Get judges
+			my $judgenames;
+			my @judgeaccts;
+
+			foreach my $judge ($m->comp("/funclib/panel_judges.mas", panel => $panel)) {
+				$judgenames .= ", " if $judgenames;
+				$judgenames .= $judge->last;
+				
+				if ($email == 1 && $panelcount < 4) {
+					push( @judgeaccts, Tab::Account->search ( first => lc($judge->first), last => lc($judge->last) ) );
+				}
+			}
+
+			#Set variables for the XML
+			my $xml_round = {
+				TOURNAMENT => $tourn,
+				ROUND_NUM => $roundname,
+				OPPONENT => $oppschool . " " . $oppname,
+				JUDGE => $judgenames,
+				SIDE => $roundside
+			};
+
+			#Print XML
+			$m->print("<ROUND>\n");
+			$m->print($xs->XMLout($xml_round, RootName => "", NoAttr => 1, XMLDecl => 0));
+
+			foreach my $studentacct (@studentaccts) {
+				$m->print("<STUDENT>\n");
+				my $student_entry = {
+					STUDENT_NAME => $studentacct->first . " " . $studentacct->last,
+					STUDENT_EMAIL => $studentacct->email
+				};
+				$m->print($xs->XMLout($student_entry, RootName => "", NoAttr => 1, XMLDecl => 0));
+				$m->print("</STUDENT>\n");
+			}
+
+			foreach my $judgeacct (@judgeaccts) {
+				$m->print("<JUDGE>\n");
+				my $judge_entry = {
+					JUDGE_NAME => $judgeacct->first . " " . $judgeacct->last,
+					JUDGE_EMAIL => $judgeacct->email
+				};
+				$m->print($xs->XMLout($judge_entry, RootName => "", NoAttr => 1, XMLDecl => 0));
+				$m->print("</JUDGE>\n");
+			}
+
+			#Close Round
+			$m->print("</ROUND>\n");		
+		}
+	
+		#Exit early if only returning emails
+		last if $email == 1 && $panelcount > 2;
+	}
+
+	#Close XML
+	$m->print("</ROUNDS>");
+</%init>
