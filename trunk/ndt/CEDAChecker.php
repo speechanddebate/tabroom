@@ -45,7 +45,7 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
-      if ($row['type'] == 'elim' AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
+	if (($row['type'] == 'elim' or $row['type'] == 'final') AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
         {$erd[$i] += 1;
          if($balfor > $balvs) {$ewin[$i] += 1;}
          $ebalwin[$i] += $balfor; 
@@ -56,8 +56,9 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
         }
 
       if ($row['ballot_decision'] == 1) {$balfor +=1;}
-      if ($row['bye'] == 1) {$balfor +=2; }
+      if ($row['bye'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final') and $row['ballot_decision'] == 1) {$balfor +=2; }
       if ($row['ballot_decision'] == 0) {$balvs +=1;}
+//    if ($row['entry'] == 494669) { echo "rd name=".$row['rd_name']." label=".$row['label']."panel=".$row['panel_id']." ballots=".$balfor."<br>"; }
 
       if ($row['type'] <> 'elim' AND $row['panel_id'] <> $panel) 
         {$prd[$i] += 1;
@@ -73,15 +74,16 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
 
       $panel=$row['panel_id'];
       $elimrd=$row['rd_name'];
-      if ($row['rd_name'] > 9) {$lastisprelim = false;}
-      if ($row['rd_name'] <= 9) {$lastisprelim = true;}
+      if ($row['type'] = "elim" or $row['type'] = "final") {$lastisprelim = false;}
+      if ($row['type'] <> "elim") {$lastisprelim = true;}
 
      }
+
      if ($lastisprelim == false)
       {$erd[$i] += 1;
        if($balfor > $balvs) {$ewin[$i] += 1;}
-       if ($elimrd==16 and $balfor > $balvs) {$tbpts[$i]=5;}
-       if ($elimrd==16 and $balfor < $balvs) {$tbpts[$i]=3;}
+       if ($row['type'] == "final" and $balfor > $balvs) {$tbpts[$i]=5;}
+       if ($row['type'] == "final" and $balfor < $balvs) {$tbpts[$i]=3;}
        if ($elimrd==15 ) {$tbpts[$i]=1;}
        $ebalwin[$i] += $balfor; 
        $ebaloss[$i] += $balvs;
