@@ -6,6 +6,9 @@ use lib "/opt/local/lib/perl5";
 use lib "/opt/local/lib/perl5/vendor_perl/5.12.3/darwin-multi-2level";
 
 use strict;
+no warnings "uninitialized";
+no warnings "redefine";
+
 use DBI;
 use POSIX;
 use Class::DBI::AbstractSearch;
