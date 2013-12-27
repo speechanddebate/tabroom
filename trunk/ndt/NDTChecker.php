@@ -39,18 +39,22 @@ $school1[$i]=0;$school2[$i]=0;
 $tourneyname[$i]=mysql_result($entry,$i,"tourn_name");
 $schoolname_temp="";
 $teamname[$i]=getfullteamname(mysql_result($entry,$i,"entry_id"), $schoolN1, $schoolN2, $schoolname_temp);
-$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp;
+$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp; $lastisprelim=false; $printflag=false;
 
-  $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name from ballot, ballot_value, panel, round where round.post_results>0 and panel.id=ballot.panel and round.id=panel.round and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
+  $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name FROM (ballot LEFT OUTER JOIN ballot_value on ballot.id=ballot_value.ballot), panel, round WHERE round.post_results>0 and panel.id=ballot.panel and round.id=panel.round and (ballot_value.tag='ballot' or ballot_value.tag is null) and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
-      if ($row['rd_name'] > 9 AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
+//    if (mysql_result($entry,$i,'entry_id') == 468525) {$printflag=true; }
+      if ($printflag==true) {echo "Ballot:".$row['ballot_id']."<br>";}
+
+      if (($row['type'] == 'elim' or $row['type'] == 'final') AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
         {
          if($balfor > $balvs and $balvs==0) {$epts[$i] += 6;}
          if($balfor > $balvs and $balvs>0) {$epts[$i] += 5;}
          if($balvs > $balfor and $balfor>0) {$epts[$i] += 4;}
          if($balvs > $balfor and $balfor==0) {$epts[$i] += 3;}
+	  if ($printflag == true) {echo " Ballots for:".$balfor." Ballots vs:".$balvs." Panel:".$row['panel_id']."<br>";}
          $balfor=0; $balvs=0;
          $panel=$row['panel_id'];
          $lastisprelim=false;
@@ -58,8 +62,9 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
 
       if ($row['ballot_decision'] == 1) {$balfor +=1;}
       if ($row['ballot_decision'] == 0) {$balvs +=1;}
+      if ($row['bye'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final')) {$balfor=1; $balvs=0;}
 
-      if ($row['rd_name'] <= 9 AND $row['panel_id'] <> $panel) 
+      if (($row['type'] <> 'elim' and $row['type'] <> 'final') AND $row['panel_id'] <> $panel) 
         {
          if($balfor > $balvs) {$pwin[$i] += 1;}
          if($balfor < $balvs) {$ploss[$i] += 1;}
@@ -69,9 +74,8 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
 
       $panel=$row['panel_id'];
       $elimrd=$row['rd_name'];
-      if ($row['rd_name'] > 9) {$lastisprelim = false;}
-      if ($row['rd_name'] <= 9) {$lastisprelim = true;}
-
+      $lastisprelim = true;
+      if ($row['type'] == 'elim' or $row['type'] == 'final') {$lastisprelim = false;}
      }
 
       if ($lastisprelim == false) 
@@ -80,6 +84,7 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
          if($balfor > $balvs and $balvs>0) {$epts[$i] += 5;}
          if($balvs > $balfor and $balfor>0) {$epts[$i] += 4;}
          if($balvs > $balfor and $balfor==0) {$epts[$i] += 3;}
+	  if ($printflag == true) {echo " Ballots for:".$balfor." Ballots vs:".$balvs." Panel:".$row['panel_id']."<br>";}
         }
 
 $i++;
@@ -97,18 +102,20 @@ while ($i < $entryNum) {
  if ($pwin[$i]==4 and $ploss[$i]==2) {$totpts[$i] += 13;}
  if ($pwin[$i]==4 and $ploss[$i]==3) {$totpts[$i] += 13;}
  if ($pwin[$i]==5 and $ploss[$i]==3) {$totpts[$i] += 13;}
- if ($pwin[$i]==$ploss[$i] and $pwin[$i]>0) {$totpts[$i] += 12;}
+ if ($pwin[$i]==3 and $ploss[$i]==2) {$totpts[$i] += 13;}
+ if ($pwin[$i]==$ploss[$i] and $pwin[$i]>1) {$totpts[$i] += 12;}
  if ($pwin[$i]==3 and $ploss[$i]==5) {$totpts[$i] += 11;}
  if ($pwin[$i]==3 and $ploss[$i]==4) {$totpts[$i] += 11;}
  if ($pwin[$i]==2 and $ploss[$i]==5) {$totpts[$i] += 11;}
  if ($pwin[$i]==2 and $ploss[$i]==4) {$totpts[$i] += 11;}
  if ($pwin[$i]==1 and $ploss[$i]==3) {$totpts[$i] += 10;}
  if ($pwin[$i]==2 and $ploss[$i]==6) {$totpts[$i] += 10;}
- if ($pwin[$i]==1 and $ploss[$i]>=5) {$totpts[$i] += 9;}
+ if ($pwin[$i]==1 and $ploss[$i]<>3) {$totpts[$i] += 9;}
  if ($pwin[$i]==0 and $ploss[$i]>=4) {$totpts[$i] += 8;}
 
  if ($school1[$i]<>$school2[$i] and $school2[$i]>0) {$totpts[$i]=0;} //hybrid adjustment
  if (isvarsity(mysql_result($entry,$i,'event_id'))==TRUE) {$vpts[$i]=$totpts[$i];} //copy to varsity points if appropriate
+ //if ($school1[$i]=6260 and $totpts[$i]>0) {echo " event=".mysql_result($entry,$i,'event_id')." tot:".$totpts[$i]." var:".$vpts[$i]."<br>";}
 
 $i++;
 }
@@ -132,10 +139,32 @@ if ($tourneyname[$i]<>$tottourney[$schoolctr])
   $totvpts[$schoolctr]=0;
   $teamctr=0;
   }
-if ($teamctr<2) {$totschoolpoints[$schoolctr] += $totpts[$i]; $totvpts[$schoolctr] += $vpts[$i];}
+if ($teamctr<2) {$totschoolpoints[$schoolctr] += $totpts[$i];}
 $teamctr++;
 $i++;
 }
+
+//now do again for varsity points
+array_multisort($teamschoolname, $tourneyname, $vpts, SORT_DESC, $pwin, $ploss, $epts, $totpts, $teamname, $school1);
+$currschool=0;
+$i=0;
+while ($i < $entryNum) {
+if ($i==0 OR $tourneyname[$i]<>$tourneyname[$i-1]) 
+  {
+   $x=0;
+   while ($x < $schoolctr) {
+    if ($teamschoolname[$i] == $totschool[$x]) { $currschool = $x; $x = $schoolctr+1; }
+    $x++;
+   }
+   $teamctr=0;
+  }
+
+if ($teamctr<2) { $totvpts[$currschool] += $vpts[$i];}
+$teamctr++;
+$i++;
+}
+
+//now sort school totals
 array_multisort($totschool, $totschoolpoints, SORT_DESC, $totvpts, SORT_DESC, $tottourney, $totschoolnum);
 
 //NOW FIGURE TOP 8
