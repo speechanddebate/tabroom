@@ -74,7 +74,7 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
 
       $panel=$row['panel_id'];
       $elimrd=$row['rd_name'];
-      if ($row['type'] = "elim" or $row['type'] = "final") {$lastisprelim = false;}
+      if ($row['type'] == "elim" or $row['type'] == "final") {$lastisprelim = false;}
       if ($row['type'] <> "elim") {$lastisprelim = true;}
 
      }
