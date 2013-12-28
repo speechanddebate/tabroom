@@ -20,4 +20,8 @@ CREATE TABLE `account_setting` (
   KEY `account` (`account`)
 ) ENGINE=InnoDB AUTO_INCREMENT=166 DEFAULT CHARSET=latin1;
 
+alter table chapter add naudl bool not null default 0;
+alter table chapter add ipeds int not null default 0;
+alter table chapter add nces int not null default 0;
+
 
