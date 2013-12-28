@@ -125,7 +125,7 @@ array_multisort($teamschoolname, $tourneyname, $totpts, SORT_DESC, $pwin, $ploss
 //CREATE THE SCHOOL CHECKER PAGE
 //totschool=string schoolname, tottourney=string tourneyname, totschoolpoints=points for school at tourney
 $totschool = array(); $tottourney = array(); $totschoolpoints = array(); $totvpts=array(); $totschoolnum=array();
-$schoolctr=0; $tournctr=0; $teamctr=0; $totschoolpoints[0]=0;$totschool[0]="";$tottourney[0]=""; $totvpts[0]=0; $totschoolnum[0]=0;
+$schoolctr=0; $tournctr=0; $teamctr=0; $totschoolpoints[0]=0;$totschool[0]="";$tottourney[0]=""; $totvpts[0]=0; $totschoolnum[0]=0; $TotSchoolVarPts[0]=0;
 
 $i=0;
 while ($i < $entryNum) {
@@ -136,10 +136,11 @@ if ($tourneyname[$i]<>$tottourney[$schoolctr])
   $totschoolnum[$schoolctr]=$school1[$i]; 
   $tottourney[$schoolctr]=$tourneyname[$i]; 
   $totschoolpoints[$schoolctr]=0;
-  $totvpts[$schoolctr]=0;
   $teamctr=0;
+  $totvpts[$schoolctr]=0;
+  $TotSchoolVarPts[$schoolctr]=0;
   }
-if ($teamctr<2) {$totschoolpoints[$schoolctr] += $totpts[$i];}
+if ($teamctr<2) {$totschoolpoints[$schoolctr] += $totpts[$i]; }
 $teamctr++;
 $i++;
 }
@@ -159,7 +160,8 @@ if ($i==0 OR $tourneyname[$i]<>$tourneyname[$i-1])
    $teamctr=0;
   }
 
-if ($teamctr<2) { $totvpts[$currschool] += $vpts[$i];}
+//echo $teamschoolname[$i]." is from ".$totschool[$currschool]."<br>";
+if ($teamctr<2) { $totvpts[$currschool] += $vpts[$i]; $TotSchoolVarPts[$currschool] += $vpts[$i]; }
 $teamctr++;
 $i++;
 }
@@ -302,7 +304,7 @@ while ($i < $schoolctr) {
  echo "<td>".$totschool[$i]."</td>";
  echo "<td>".$tottourney[$i]."</td>";
  echo "<td>".$totschoolpoints[$i]."</td>";
- echo "<td>".$totvpts[$i]."</td>";
+ echo "<td>".$TotSchoolVarPts[$i]."</td>";
  echo "</tr>";
 $i++;
 }
