@@ -25,7 +25,7 @@ $team = array(); //array to hold speakers and teams; $team[0][0] is $team[team][
 $teamindex = array();
 
 //Load all entries for all tourneys in the circuit; 43 is the NDT circuit
-$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit WHERE tourn_circuit.circuit=43 and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and entry.event=event.id and event.type='policy' and tourn.start > '".$date_str."' ORDER BY tourn.id";
+$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit WHERE tourn_circuit.circuit=43 and tourn.hidden=false and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and entry.event=event.id and event.type='policy' and tourn.start > '".$date_str."' ORDER BY tourn.id";
 $entry=mysql_query($query);
 $entryNum = mysql_num_rows($entry);
 
@@ -45,7 +45,7 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
-//    if (mysql_result($entry,$i,'entry_id') == 468525) {$printflag=true; }
+      //if (mysql_result($entry,$i,'entry_id') == 479179) {$printflag=true; }
       if ($printflag==true) {echo "Ballot:".$row['ballot_id']."<br>";}
 
       if (($row['type'] == 'elim' or $row['type'] == 'final') AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
@@ -54,7 +54,7 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
          if($balfor > $balvs and $balvs>0) {$epts[$i] += 5;}
          if($balvs > $balfor and $balfor>0) {$epts[$i] += 4;}
          if($balvs > $balfor and $balfor==0) {$epts[$i] += 3;}
-	  if ($printflag == true) {echo " Ballots for:".$balfor." Ballots vs:".$balvs." Panel:".$row['panel_id']."<br>";}
+	  if ($printflag == true) {echo " Ballots for:".$balfor." Ballots vs:".$balvs." Panel:".$row['panel_id']." ".$row['label']."<br>";}
          $balfor=0; $balvs=0;
          $panel=$row['panel_id'];
          $lastisprelim=false;
@@ -62,7 +62,7 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
 
       if ($row['ballot_decision'] == 1) {$balfor +=1;}
       if ($row['ballot_decision'] == 0) {$balvs +=1;}
-      if ($row['bye'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final')) {$balfor=1; $balvs=0;}
+      if ($row['bye'] == 1 and $row['ballot_decision'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final')) {$balfor=1; $balvs=0;}
 
       if (($row['type'] <> 'elim' and $row['type'] <> 'final') AND $row['panel_id'] <> $panel) 
         {
@@ -125,7 +125,7 @@ array_multisort($teamschoolname, $tourneyname, $totpts, SORT_DESC, $pwin, $ploss
 //CREATE THE SCHOOL CHECKER PAGE
 //totschool=string schoolname, tottourney=string tourneyname, totschoolpoints=points for school at tourney
 $totschool = array(); $tottourney = array(); $totschoolpoints = array(); $totvpts=array(); $totschoolnum=array();
-$schoolctr=0; $tournctr=0; $teamctr=0; $totschoolpoints[0]=0;$totschool[0]="";$tottourney[0]=""; $totvpts[0]=0; $totschoolnum[0]=0; $TotSchoolVarPts[0]=0;
+$schoolctr=0; $tournctr=0; $teamctr=0; $totschoolpoints[0]=0;$totschool[0]="";$tottourney[0]=""; $totvpts[0]=0; $totschoolnum[0]=0; 
 
 $i=0;
 while ($i < $entryNum) {
@@ -138,7 +138,6 @@ if ($tourneyname[$i]<>$tottourney[$schoolctr])
   $totschoolpoints[$schoolctr]=0;
   $teamctr=0;
   $totvpts[$schoolctr]=0;
-  $TotSchoolVarPts[$schoolctr]=0;
   }
 if ($teamctr<2) {$totschoolpoints[$schoolctr] += $totpts[$i]; }
 $teamctr++;
@@ -154,14 +153,14 @@ if ($i==0 OR $tourneyname[$i]<>$tourneyname[$i-1])
   {
    $x=0;
    while ($x < $schoolctr) {
-    if ($teamschoolname[$i] == $totschool[$x]) { $currschool = $x; $x = $schoolctr+1; }
+    if ($teamschoolname[$i] == $totschool[$x] and $tourneyname[$i] == $tottourney[$x]) { $currschool = $x; $x = $schoolctr+1; }
     $x++;
    }
    $teamctr=0;
   }
 
 //echo $teamschoolname[$i]." is from ".$totschool[$currschool]."<br>";
-if ($teamctr<2) { $totvpts[$currschool] += $vpts[$i]; $TotSchoolVarPts[$currschool] += $vpts[$i]; }
+if ($teamctr<2) { $totvpts[$currschool] += $vpts[$i]; }
 $teamctr++;
 $i++;
 }
@@ -304,7 +303,7 @@ while ($i < $schoolctr) {
  echo "<td>".$totschool[$i]."</td>";
  echo "<td>".$tottourney[$i]."</td>";
  echo "<td>".$totschoolpoints[$i]."</td>";
- echo "<td>".$TotSchoolVarPts[$i]."</td>";
+ echo "<td>".$totvpts[$i]."</td>";
  echo "</tr>";
 $i++;
 }
