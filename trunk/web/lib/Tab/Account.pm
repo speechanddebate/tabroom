@@ -26,7 +26,7 @@ Tab::Account->has_many(followers => 'Tab::FollowAccount', 'account');
 Tab::Account->has_many(follow_accounts => 'Tab::FollowAccount', 'follower');
 Tab::Account->has_many(chapter_judges => 'Tab::ChapterJudge', 'account');
 
-Tab::Account->has_many(judges => 'Tab::Judge', 'account');
+Tab::Account->has_many(judges => 'Tab::Judge', 'account' => { order_by => 'id DESC'} );
 Tab::Account->has_many(follow_judge => 'Tab::FollowJudge', 'account');
 
 Tab::Account->has_many(entries => 'Tab::Entry', 'account');
