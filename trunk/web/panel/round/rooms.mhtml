@@ -1,7 +1,7 @@
 <%args>
 	$account
 	$round_id
-	$return => undef
+	$return        => undef
 </%args>
 <%init>
 
@@ -11,20 +11,29 @@
 	my $text = $account->first." ".$account->last." (".$account->email.") has repaneled the rooms in ".$round->realname." of ".$round->event->abbr;
 
 	Tab::TournChange->create({ 
-		type => 'tabbing',
-		event => $round->event->id,
-		tourn => $round->event->tourn->id,
+		type    => 'tabbing',
+		event   => $round->event->id,
+		tourn   => $round->event->tourn->id,
 		account => $account->id,
-		text => $text
+		text    => $text
 	});
 
 	my @panels = $m->comp('/funclib/round_panels_ada.mas', round => $round);
 	my @rooms = $m->comp("/funclib/clean_rooms.mas", round => $round);
 
+	my %previous_rooms = ();
+
+	unless ($round->wipe_rooms) { 
+		my $last_round = Tab::Round->search( event => $round->event, name => ($round->name - 1))->first;
+		%previous_rooms = $m->comp("/funclib/round_entry_rooms.mas", round => $last_round) if $last_round;
+	}
+
 	my %judge_already = ();
 	my %judge_reserved = ();
 
 	my %room_count = ();
+	my %room_avail = map {$_->id => $_} @rooms;
+
 	my @undone;
 	my $flights = $round->flighted;
 	my @first_set = @rooms;
@@ -34,6 +43,7 @@
 	my %panel_entries;
 	my %panel_judge_count;
 	my %panel_ada;
+	my %panel_preferred;
 
 	foreach my $panel (@panels) { 
 
@@ -51,13 +61,29 @@
 		}
 
 		foreach my $entry (@{$panel_entries{$panel->id}}){ 
-			$panel_ada{$panel->id}++ if $entry->ada;
+
+			if ($entry->ada) { 
+				$panel_ada{$panel->id}++;
+				undef $panel_preferred{$panel->id} if $panel_preferred{$panel->id};
+				push (@{$panel_preferred{$panel->id}}, $previous_rooms{$entry->id}) if $previous_rooms{$entry->id} && $room_avail{$previous_rooms{$entry->id}};
+			}
+
+			next if $panel_ada{$panel->id};
+			push @{$panel_preferred{$panel->id}}, $previous_rooms{$entry->id} if $previous_rooms{$entry->id} && $room_avail{$previous_rooms{$entry->id}};
+
+
 		}
 
 	}
 
 	@panels = sort {$a->letter <=> $b->letter} @panels;
 	@panels = sort {$panel_judge_count{$b->id} <=> $panel_judge_count{$a->id}} @panels;
+
+	if ($round->event->setting("bracket_rooms")) { 
+		@panels = sort {$b->bracket <=> $a->bracket} @panels;
+		@rooms = sort {$a->quality <=> $b->quality} @rooms;
+	}
+
 	@panels = sort {$panel_ada{$b->id} <=> $panel_ada{$a->id}} @panels;
 
 	my %used;
@@ -73,7 +99,7 @@
 
 		foreach my $judge (@judges) { 
 			if ($judge_reserved{$judge->id}) { 
-				$room = Tab::Room->retrieve($judge_reserved{$judge->id}); 
+				$room = $room_avail{$judge_reserved{$judge->id}}; 
 			} else { 
 				$room = $judge_already{$judge->id} unless $room; 
 			}
@@ -85,13 +111,41 @@
 			push @ada_rooms, $room if $room->ada;
 		}
 
-		$room = shift @ada_rooms if $panel_ada{$panel} && @ada_rooms;
+		if ($panel_ada{$panel}) { 
+			if ($panel_preferred{$panel}) { 
+				foreach my $pref (@{$panel_preferred{$panel->id}}) { 
+					next if $room;
+					next unless $room->ada;
+					next unless $room_avail{$pref};
+					next if $used{$pref};
+					$room = $room_avail{$pref};
+				}
+			}
+
+			$room = shift @ada_rooms if @ada_rooms && not defined $room;
+
+		} elsif ($panel_preferred{$panel}) { 
+
+			foreach my $pref (@{$panel_preferred{$panel->id}}) { 
+				next if $room;
+				next unless $room_avail{$pref};
+				next if $used{$pref};
+				$room = $room_avail{$pref};
+			}
+
+		}
+
 		$used{$room}++ if $room;
 
-		while (@first_set && not defined $room) { 
-			$room = shift @first_set;
-			undef $room if $used{$room};
+		unless ($room) { 
+			while (@first_set) { 
+				$room = shift @first_set;
+				next if $used{$room->id};
+				last if $room;
+			}
+			undef $room if $room && $used{$room->id};
 		}
+
 
 		if ($room && $room->id) { 
 			$panel->room($room->id) if $room;
@@ -144,7 +198,7 @@
 	}
 
 	my $msg = "Rooms have been assigned";
-	my $full_err = "Insufficent rooms were available.  Some rounds do not have rooms!";
+	my $full_err = "Insufficent rooms were available.  Some rounds do not have rooms!" if $oh_crap_ran_out > 0;
 	$m->redirect("/panel/schemat/show.mhtml?round_id=$round_id&disp=1&msg=$msg&fullmsg=$full_err");
 
 </%init>
