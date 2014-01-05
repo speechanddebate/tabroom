@@ -45,8 +45,8 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
-      //if (mysql_result($entry,$i,'entry_id') == 479179) {$printflag=true; }
-      if ($printflag==true) {echo "Ballot:".$row['ballot_id']."<br>";}
+      //if (mysql_result($entry,$i,'entry_id') == 485375) {$printflag=true; }
+      if ($printflag==true) {echo "Ballot:".$row['ballot_id'];}
 
       if (($row['type'] == 'elim' or $row['type'] == 'final') AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
         {
@@ -58,11 +58,12 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
          $balfor=0; $balvs=0;
          $panel=$row['panel_id'];
          $lastisprelim=false;
+	  if ( $printflag == true ) { echo "Elim points are now:".$epts[$i]."<br>"; }
         }
 
       if ($row['ballot_decision'] == 1) {$balfor +=1;}
       if ($row['ballot_decision'] == 0) {$balvs +=1;}
-      if ($row['bye'] == 1 and $row['ballot_decision'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final')) {$balfor=1; $balvs=0;}
+      if ($row['bye'] == 1 and $row['ballot_decision'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final')) {$balfor=3; $balvs=0;}
 
       if (($row['type'] <> 'elim' and $row['type'] <> 'final') AND $row['panel_id'] <> $panel) 
         {
@@ -70,6 +71,7 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
          if($balfor < $balvs) {$ploss[$i] += 1;}
          $balfor=0; $balvs=0;
          $panel=$row['panel_id'];
+         if ($printflag==true) {echo "Prelim record is now: ".$pwin[$i]."-".$ploss[$i]."<br>";}
         }
 
       $panel=$row['panel_id'];
@@ -91,9 +93,11 @@ $i++;
 }    //Array is now built; now need to write total and checker pages
 
 //ASSIGN TOTAL POINTS AND SORT
-$i=0;
+$i=0; 
 while ($i < $entryNum) {
+ //if (mysql_result($entry,$i,'entry_id') == 485375) {$printflag=true; }
  $totpts[$i]=$epts[$i];
+ if ($printflag == true) { echo "Elim points:".$epts[$i]."<br>"; }
  if ($pwin[$i]>=4 and $ploss[$i]==0) {$totpts[$i] += 16;}
  if ($pwin[$i]>=5 and $ploss[$i]==1) {$totpts[$i] += 15;}
  if ($pwin[$i]==6 and $ploss[$i]==2) {$totpts[$i] += 14;}
@@ -116,7 +120,8 @@ while ($i < $entryNum) {
  if ($school1[$i]<>$school2[$i] and $school2[$i]>0) {$totpts[$i]=0;} //hybrid adjustment
  if (isvarsity(mysql_result($entry,$i,'event_id'))==TRUE) {$vpts[$i]=$totpts[$i];} //copy to varsity points if appropriate
  //if ($school1[$i]=6260 and $totpts[$i]>0) {echo " event=".mysql_result($entry,$i,'event_id')." tot:".$totpts[$i]." var:".$vpts[$i]."<br>";}
-
+ if ($printflag == true) { echo "Prelim points:".($totpts[$i]-$epts[$i])."<br>"; }
+ $printflag=false;
 $i++;
 }
 
