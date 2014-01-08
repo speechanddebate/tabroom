@@ -23,11 +23,13 @@ $school2 = array();
 $teamschoolname = array(); 
 $team = array(); //array to hold speakers and teams; $team[0][0] is $team[team][speaker]
 $teamindex = array();
+$ElimStr = array();
+$eventname = array();
 
 //Load all entries for all tourneys in the circuit; 43 is the NDT circuit
 $query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit WHERE tourn_circuit.circuit=43 and tourn.hidden=false and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and entry.event=event.id and event.type='policy' and tourn.start > '".$date_str."' ORDER BY tourn.id";
 $entry=mysql_query($query);
-$entryNum = mysql_num_rows($entry);
+$entryNum = mysql_num_rows($entry); 
 
 $pwin = array(); $epts = array(); $totpts = array(); $vpts=array();
 
@@ -36,10 +38,10 @@ while ($i < $entryNum) {
 $pwin[$i]=0; $ploss[$i]=0; $vpts[$i]=0; $epts[$i]=0; $panel=0; $balfor=0; $balvs=0; $totpts[$i]=0;
 $school1[$i]=0;$school2[$i]=0;
 
-$tourneyname[$i]=mysql_result($entry,$i,"tourn_name");
+$tourneyname[$i]=mysql_result($entry,$i,"tourn_name"); $eventname[$i]=isvarsity(mysql_result($entry,$i,'event_id'));
 $schoolname_temp="";
 $teamname[$i]=getfullteamname(mysql_result($entry,$i,"entry_id"), $schoolN1, $schoolN2, $schoolname_temp);
-$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp; $lastisprelim=false; $printflag=false;
+$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp; $lastisprelim=false; $printflag=false; $ElimStr[$i]="";
 
   $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name FROM (ballot LEFT OUTER JOIN ballot_value on ballot.id=ballot_value.ballot), panel, round WHERE round.post_results>0 and panel.id=ballot.panel and round.id=panel.round and (ballot_value.tag='ballot' or ballot_value.tag is null) and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
   $ballots=mysql_query($query); 
@@ -54,6 +56,7 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
          if($balfor > $balvs and $balvs>0) {$epts[$i] += 5;}
          if($balvs > $balfor and $balfor>0) {$epts[$i] += 4;}
          if($balvs > $balfor and $balfor==0) {$epts[$i] += 3;}
+	  $ElimStr[$i] = $ElimStr[$i].$balfor."-".$balvs." "; 
 	  if ($printflag == true) {echo " Ballots for:".$balfor." Ballots vs:".$balvs." Panel:".$row['panel_id']." ".$row['label']."<br>";}
          $balfor=0; $balvs=0;
          $panel=$row['panel_id'];
@@ -86,6 +89,7 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
          if($balfor > $balvs and $balvs>0) {$epts[$i] += 5;}
          if($balvs > $balfor and $balfor>0) {$epts[$i] += 4;}
          if($balvs > $balfor and $balfor==0) {$epts[$i] += 3;}
+	  $ElimStr[$i] = $ElimStr[$i].$balfor."-".$balvs." "; 
 	  if ($printflag == true) {echo " Ballots for:".$balfor." Ballots vs:".$balvs." Panel:".$row['panel_id']."<br>";}
         }
 
@@ -118,14 +122,14 @@ while ($i < $entryNum) {
  if ($pwin[$i]==0 and $ploss[$i]>=4) {$totpts[$i] += 8;}
 
  if ($school1[$i]<>$school2[$i] and $school2[$i]>0) {$totpts[$i]=0;} //hybrid adjustment
- if (isvarsity(mysql_result($entry,$i,'event_id'))==TRUE) {$vpts[$i]=$totpts[$i];} //copy to varsity points if appropriate
+ if (isvarsity(mysql_result($entry,$i,'event_id'))=="open") {$vpts[$i]=$totpts[$i];} //copy to varsity points if appropriate
  //if ($school1[$i]=6260 and $totpts[$i]>0) {echo " event=".mysql_result($entry,$i,'event_id')." tot:".$totpts[$i]." var:".$vpts[$i]."<br>";}
  if ($printflag == true) { echo "Prelim points:".($totpts[$i]-$epts[$i])."<br>"; }
  $printflag=false;
 $i++;
 }
 
-array_multisort($teamschoolname, $tourneyname, $totpts, SORT_DESC, $pwin, $ploss, $epts, $vpts, $teamname, $school1);
+array_multisort($teamschoolname, $tourneyname, $totpts, SORT_DESC, $pwin, $ploss, $epts, $vpts, $teamname, $school1, $ElimStr, $eventname);
 
 //CREATE THE SCHOOL CHECKER PAGE
 //totschool=string schoolname, tottourney=string tourneyname, totschoolpoints=points for school at tourney
@@ -150,7 +154,7 @@ $i++;
 }
 
 //now do again for varsity points
-array_multisort($teamschoolname, $tourneyname, $vpts, SORT_DESC, $pwin, $ploss, $epts, $totpts, $teamname, $school1);
+array_multisort($teamschoolname, $tourneyname, $vpts, SORT_DESC, $pwin, $ploss, $epts, $totpts, $teamname, $school1, $ElimStr, $eventname);
 $currschool=0;
 $i=0;
 while ($i < $entryNum) {
@@ -324,8 +328,10 @@ $i++;
 	<tr class="yellowrow">
 		<th class="smallish">School</th>
 		<th class="smallish">Team</th>
+		<th class="smallish">Event</th>
 		<th class="smallish">Tournament</th>
 		<th class="smallish">Prelim record</th>
+		<th class="smallish">Elim results</th>
 		<th class="smallish">Elim points</th>
 		<th class="smallish">Total points</th>
 		<th class="smallish">Varsity points</th>
@@ -343,8 +349,11 @@ if (trim($teamname[$i])<>"--")
  echo "<tr>";
  echo "<td>".$teamschoolname[$i]."</td>";
  echo "<td>".$teamname[$i]."</td>";
+ echo "<td>".$eventname[$i]."</td>";
  echo "<td>".$tourneyname[$i]."</td>";
  echo "<td>".$pwin[$i]."-".$ploss[$i]."</td>";
+ $ElimStr[$i] = substr_replace($ElimStr[$i] ,"",-1);
+ echo "<td class='nowrap'>".$ElimStr[$i]."</td>";
  echo "<td>".$epts[$i]."</td>";
  echo "<td>".$totpts[$i]."</td>";
  echo "<td>".$vpts[$i]."</td>";
@@ -432,9 +441,10 @@ function isvarsity($event)
    if ($numResults > 0) 
     {
      while ($row = mysql_fetch_array($settings, MYSQL_BOTH)) 
-     {if ($row['value']=="open") {$bool=TRUE;}}
+     //{if ($row['value']=="open") {$bool=TRUE;}}
+     return $row['value'];
     }
-    return $bool;
+    //return $bool;
 }
 
 function iscc($chapter)
