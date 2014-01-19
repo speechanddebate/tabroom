@@ -41,6 +41,7 @@ $school1[$i]=0;$school2[$i]=0;
 $tourneyname[$i]=mysql_result($entry,$i,"tourn_name"); $eventname[$i]=isvarsity(mysql_result($entry,$i,'event_id'));
 $schoolname_temp="";
 $teamname[$i]=getfullteamname(mysql_result($entry,$i,"entry_id"), $schoolN1, $schoolN2, $schoolname_temp);
+//print $i." entry id=".mysql_result($entry,$i,"entry_id")." ".$tourneyname[$i]." ".$teamname[$i]."<br>";
 $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp; $lastisprelim=false; $printflag=false; $ElimStr[$i]="";
 
   $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name FROM (ballot LEFT OUTER JOIN ballot_value on ballot.id=ballot_value.ballot), panel, round WHERE round.post_results>0 and panel.id=ballot.panel and round.id=panel.round and (ballot_value.tag='ballot' or ballot_value.tag is null) and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
