@@ -402,9 +402,11 @@ $i++;
 
 $i=1; $trds=0; $s1rds=0; $s2rds=0;
 while ($i <= $x) {
- if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE) {$trds++;}
- if ($spkr1[$i]==$student1 or $spkr2[$i]==$student1 or $spkr1[$i]==$student3 or $spkr2[$i]==$student3) {$s1rds++;}
- if ($spkr1[$i]==$student2 or $spkr2[$i]==$student2 or $spkr1[$i]==$student4 or $spkr2[$i]==$student4) {$s2rds++;}
+ if ($isprelim[$i]==1) {
+  if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE) {$trds++;}
+  if ($spkr1[$i]==$student1 or $spkr2[$i]==$student1 or $spkr1[$i]==$student3 or $spkr2[$i]==$student3) {$s1rds++;}
+  if ($spkr1[$i]==$student2 or $spkr2[$i]==$student2 or $spkr1[$i]==$student4 or $spkr2[$i]==$student4) {$s2rds++;}
+ }
  $i++;
 }
 

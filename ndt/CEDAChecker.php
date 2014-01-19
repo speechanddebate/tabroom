@@ -48,6 +48,8 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
 	if (($row['type'] == 'elim' or $row['type'] == 'final') AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
         {$erd[$i] += 1;
          if($balfor > $balvs) {$ewin[$i] += 1;}
+	  if ($balfor > 3) { $balfor=3; }
+         if ($balvs > 0 and $balfor>2) { $balfor=2; }
          $ebalwin[$i] += $balfor; 
          $ebaloss[$i] += $balvs;
          $balfor=0; $balvs=0;
@@ -85,6 +87,9 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
        if ($row['type'] == "final" and $balfor > $balvs) {$tbpts[$i]=5;}
        if ($row['type'] == "final" and $balfor < $balvs) {$tbpts[$i]=3;}
        if ($elimrd==15 ) {$tbpts[$i]=1;}
+       if ($balfor > 3) { $balfor=3; }
+       if ($balvs > 0 and $balfor>2) { $balfor=2; }
+
        $ebalwin[$i] += $balfor; 
        $ebaloss[$i] += $balvs;
       }
