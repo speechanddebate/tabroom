@@ -387,6 +387,8 @@ $i++;
 	</tbody>
        </table>
 
+<!--
+
 <h4>NUMBER OF PRELIMINARY ROUNDS (a debater may participate in no more than 120 prelim rounds of debate before the NDT)</h4>
 
        <table id="recgrid" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
@@ -417,6 +419,7 @@ while ($i <= $x) {
 ?>
 	</tbody>
        </table>
+-->
 
 <BR><h2>section III: Total record of debaters</h2>
 
@@ -689,11 +692,11 @@ $student=mysql_query($query);
 function didclear($entry)
 {
 $returnstring="";
-$query="SELECT *, round.name as round_name FROM ballot, entry, round, panel WHERE ballot.entry=".$entry." and entry.id=ballot.entry and panel.id=ballot.panel and round.id=panel.round";
+$query="SELECT *, round.type as round_type FROM ballot, entry, round, panel WHERE ballot.entry=".$entry." and entry.id=ballot.entry and panel.id=ballot.panel and round.id=panel.round";
 $debates=mysql_query($query); 
    while ($row = mysql_fetch_array($debates, MYSQL_BOTH)) 
    {
-    if ($row['round_name'] >9) {$returnstring="*";}
+    if ($row['round_type'] == "elim" or $row['round_type'] == "final") {$returnstring="*";}
    }
  return $returnstring;
 }
