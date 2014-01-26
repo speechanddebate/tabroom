@@ -47,8 +47,24 @@ $adstaff=mysql_query($query);
 ?>
 
 <body>
+
 <h2>TEAM BID SHEET FOR <?php echo $teamname; ?></h2>
 <br>
+
+	<script type="text/javascript">
+
+        $(document).ready(function() 
+            { 
+                $("#contact").tablesorter({
+					cssAsc    : "sortup",
+					cssDesc   : "sortdown",
+					cssHeader : "sortable",
+					widgets   : ['zebra']
+				}); 
+            } 
+        ); 
+
+	</script>
 <h2>SECTION I: CONTACT INFORMATION</H2>
        <table id="contact" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
        <thead>
@@ -137,6 +153,21 @@ $elims=mysql_query($query);
          $ballotid=$row['ballot_id']; 
      }
 ?>
+
+	<script type="text/javascript">
+
+        $(document).ready(function() 
+            { 
+                $("#recgrid").tablesorter({
+					cssAsc    : "sortup",
+					cssDesc   : "sortdown",
+					cssHeader : "sortable",
+					widgets   : ['zebra']
+				}); 
+            } 
+        ); 
+
+	</script>
        <table id="recgrid" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
        <thead>
 	<tr class="yellowrow">
@@ -144,10 +175,10 @@ $elims=mysql_query($query);
 		<th class="smallish">Division</th>
 		<th class="smallish">Date</th>
 		<th class="smallish">Prelims</th>
-		<th class="smallish">Triples</th>
+		<th class="smallish">Trips</th>
 		<th class="smallish">Doubles</th>
 		<th class="smallish">Octos</th>
-		<th class="smallish">Quarters</th>
+		<th class="smallish">Quars</th>
 		<th class="smallish">Semis</th>
 		<th class="smallish">Finals</th>
 		<th class="smallish">Total</th>
@@ -182,18 +213,18 @@ if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE)
  if (($i<$x and $tourn[$i]<>$tourn[$i+1]) OR $i==$x)
   {
   echo "<tr>";
-  echo "<td>".$tourn[$i]."</td>";
+  echo "<td width=\"20%\">".$tourn[$i]."</td>";
   echo "<td>".$event[$i]."</td>";
   $date = strtotime($tourndate[$i]);
-  echo "<td>".date('d/M/Y', $date)."</td>";
-  echo "<td>".$pwin."-".$ploss."</td>";
+  echo "<td>".date('d-M-Y', $date)."</td>";
+  echo "<td class=\"centeralign\">".$pwin."-".$ploss."</td>";
   echo "<td>".$trip."</td>";
   echo "<td>".$doub."</td>";
   echo "<td>".$octo."</td>";
   echo "<td>".$qrtr."</td>";
   echo "<td>".$semi."</td>";
   echo "<td>".$finl."</td>";
-  echo "<td>".$totwin."-".$totloss."</td>";
+  echo "<td class=\"centeralign\">".$totwin."-".$totloss."</td>";
   echo "</tr>";
   if ($isRR[$i]==1 and $isopen[$i]==1) {$rrwin+=$pwin; $rrloss+=$ploss;}
   if ($isRR[$i]==0 and $isopen[$i]==1) {$totpwin+=$pwin; $totploss+=$ploss;}
@@ -210,6 +241,21 @@ $i++;
 
        <h4>SUMMARY of record as a team</h4>
 
+
+	<script type="text/javascript">
+
+        $(document).ready(function() 
+            { 
+                $("#summrec").tablesorter({
+					cssAsc    : "sortup",
+					cssDesc   : "sortdown",
+					cssHeader : "sortable",
+					widgets   : ['zebra']
+				}); 
+            } 
+        ); 
+
+	</script>
        <table id="summrec" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
        <thead>
 	<tr class="yellowrow">
@@ -238,7 +284,21 @@ echo "<tr><td>C. Total Record</td><td>".$totwin."-".$totloss."</td><td>".getpcts
 <h4>RECORD OF INDIVIDUAL DEBATERS WITH OTHER COLLEAGUES</h4>
 <h4><?php echo $studentname[1] ?> with other colleagues</h4>
 
-       <table id="recgrid" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+	<script type="text/javascript">
+
+        $(document).ready(function() 
+            { 
+                $("#recgrid2").tablesorter({
+					cssAsc    : "sortup",
+					cssDesc   : "sortdown",
+					cssHeader : "sortable",
+					widgets   : ['zebra']
+				}); 
+            } 
+        ); 
+
+	</script>
+       <table id="recgrid2" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Colleague</th>
@@ -314,7 +374,22 @@ $i++;
 
 <h4><?php echo $studentname[2] ?> with other colleagues</h4>
 
-       <table id="recgrid" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+	<script type="text/javascript">
+
+        $(document).ready(function() 
+            { 
+                $("#recgrid3").tablesorter({
+					cssAsc    : "sortup",
+					cssDesc   : "sortdown",
+					cssHeader : "sortable",
+					widgets   : ['zebra']
+				}); 
+            } 
+        ); 
+
+	</script>
+
+       <table id="recgrid3" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Colleague</th>
@@ -423,7 +498,22 @@ while ($i <= $x) {
 
 <BR><h2>section III: Total record of debaters</h2>
 
-       <table id="recgrid" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+	<script type="text/javascript">
+
+        $(document).ready(function() 
+            { 
+                $("#recgrid4").tablesorter({
+					cssAsc    : "sortup",
+					cssDesc   : "sortdown",
+					cssHeader : "sortable",
+					widgets   : ['zebra']
+				}); 
+            } 
+        ); 
+
+	</script>
+
+       <table id="recgrid4" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Participant(s)</th>
@@ -496,7 +586,8 @@ if ($loopnum==2) {echo "<h4>INDIVIDUAL TOURNAMENTS FOR ".$studentname[1]."</H4>"
 if ($loopnum==3) {echo "<h4>INDIVIDUAL TOURNAMENTS FOR ".$studentname[2]."</H4>";}
 
 ?>
-       <table id="recgrid" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+
+       <table id="individual" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
         <tbody id="myTbodytotals">
 <?php
 $i=1; $pwin=0; $ploss=0; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0; $lasttourn=-1;
