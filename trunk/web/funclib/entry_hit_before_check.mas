@@ -26,155 +26,103 @@
 	
 	#STEP ONE: create hash and put in entry info
 
-	my %entries;
-	undef %entries;
+	my %entry_hash = ();
 
 	foreach my $entry (@entries) {
-		$entries{$entry->id}{'code'} = $entry->code;
-		$entries{$entry->id}{'school'} = $entry->school;
+		$entry_hash{$entry->id}{'code'} = $entry->code;
+		$entry_hash{$entry->id}{'school'} = $entry->school;
 	}
 
 	# STEP 2: CREATE A 2-DIMENSIONAL HASH THAT STORES ALL PRIOR DEBATES
 
 	my %hitbefore; 	
-	my $rd_name=$round->name;
-	my $event_id=$event->id;
-	my $panel; my $team1; my $team2;
-				
-	Tab::Ballot->set_sql(pull_ballots => "
-		select ballot.entry, ballot.panel, ballot.side, ballot.pullup, ballot.bye, panel.bye
-		from ballot, panel, round
-		where ballot.panel=panel.id
-		and panel.round=round.id
-		and round.event=$event_id
-		and round.name < $rd_name
-		order by panel.id, ballot.entry asc
-	");
 
-	my @pairings = Tab::Ballot->search_pull_ballots;
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select panel.id, entry.id, hit.id   
+			from entry, entry hit, ballot, ballot hitballot, panel, round   
+			where round.name < ".$round->name."
+				and round.event = ".$event->id."
+				and round.id = panel.round  
+				and panel.bye != 1   
+				and panel.id = ballot.panel         
+				and ballot.bye !=1  
+				and ballot.noshow !=1   
+				and ballot.entry = entry.id         
+				and panel.id = hitballot.panel  
+				and hitballot.bye !=1   
+				and hitballot.noshow !=1        
+				and hitballot.entry = hit.id        
+				and hit.id != entry.id ");
 
 	my $end = time();
-#	print "load time:  "; printf("%.2f\n", $end - $start); print "<br>";
-	
-#	print the pairings, just for debugging	
-#	foreach my $pairing (@pairings) {
-# 		print "Panel: ".$pairing->panel." entry:".$pairing->entry." ".$entries{$pairing->entry}{'code'}." side=".$pairing->side."<br>";
-#	}
-	
-	my $x;
 
-	foreach my $pairing (@pairings) {
-	
-		$x++;
+	$sth->execute();
 
-		if ( ($panel != $pairing->panel or $x == scalar(@pairings) ) and $panel > 0 ) {
-			if ( $panel->bye != 1 ) {
-				$hitbefore{$team1}{$team2} = 1; #mark as ineligible to hit b/c they debated before
-			}
-			$team1 = 0; $team2 = 0;	
-		}
-
-		if ($team1 == 0 and $team2 == 0) { 
-			$team1 = $pairing->entry;
-		} elsif ( $team1 > 0 and $team2 == 0 ) {
-			$team2 = $pairing->entry;
-		}
-
-		$panel = $pairing->panel;
+	while( my ($panel, $entry, $hit) = $sth->fetchrow_array() ) {
+		$hitbefore{$entry}{$hit} = 1; #mark as ineligible to hit b/c they debated before
 	}
 
-	#if there's some data detritus for teams paired against dropped opponents it adds them to the %entries hash
-	#so this thing cleans it up
+	# if there's some data detritus for teams paired against dropped opponents
+	# it adds them to the %entry_hash hash so this thing cleans it up
 
-	foreach my $key ( keys %entries ) {
-		if (not $entries{$key}{'code'} ) { 
-			delete $entries{$key}; 
+	foreach my $key ( keys %entry_hash ) {
+		if (not $entry_hash{$key}{'code'} ) { 
+			delete $entry_hash{$key}; 
 		}
 	}
-
 
 	# STEP 3: NOW ADD SCHOOL-BASED PRECLUSIONS
-
 	my %precluded;
-	unless ($event->setting('school_debates_self')) {
-	
-#		print "Doing preclusions<br>";
-		
-		for (my $x = 0; $x <= $#entries; $x++) {
 
-			#pull hybrid school conflicts
-			my @strikes = Tab::Strike->search( entry=>$entries[$x]->id, type => 'hybrid' );	
-						
-			for (my $y = $x + 1; $y <= $#entries; $y++) {
+	my $school_ok++ if $event->setting('school_debates_self');
 
-#				print "comparing ".$entries[$x]->code." vs ".$entries[$y]->code."<br>";
-				
-				if ($entries[$x]->school == $entries[$y]->school) { 
-					$precluded{$entries[$x]->id}{$entries[$y]->id} = 1; 
-				}
-			
-				foreach my $hybridconflict (@strikes) {
-					if ($hybridconflict->school == $entries[$y]->school) {
-						$precluded{$entries[$x]->id}{$entries[$y]->id} = 1; 
-					}
-				}
-			}
-		}
-	}
+	#pull hybrid school conflicts
+	my @strikes = Tab::Strike->search( tourn => $event->tourn->id, type => 'hybrid' );	
+	my %hybrid_conflict = map {$_->school."-".$_->entry => 1} @strikes;
 
 	# LOAD CURRENT PAIRINGS AND STORE THEM IN %ENTRIES
 
-	Tab::Ballot->columns(TEMP => qw/bye/);
+	my $c_sth = $dbh->prepare("
+		select panel.id, entry.id, hit.id   
+			from entry, entry hit, ballot, ballot hitballot, panel
+			where panel.round  = ".$round->id."
+				and panel.bye != 1   
+				and panel.id = ballot.panel         
+				and ballot.bye !=1  
+				and ballot.noshow !=1   
+				and ballot.entry = entry.id         
+				and panel.id = hitballot.panel  
+				and hitballot.bye !=1   
+				and hitballot.noshow !=1        
+				and hitballot.entry = hit.id        
+				and hit.id != entry.id ");
 
-	Tab::Ballot->set_sql(current_ballots => "
-		select ballot.id, ballot.entry, ballot.panel, ballot.side, panel.bye as bye
-		from ballot, panel, round
-		where ballot.panel = panel.id
-		and panel.round = round.id
-		and round.id = $round_id
-		order by round.name, panel.id
-	");
-	
-	my @pairings_current = Tab::Ballot->search_current_ballots;
+	$c_sth->execute();
 
-	my $bye;
-
-	my %panel_entries;
-	my %entry_panel;
-	my @current_entries;
-	
-	foreach my $pairing (@pairings_current) {
-
-		next unless $pairing && $pairing->entry;
-
-		my $me = $pairing->entry->id;
-
-		push @current_entries, $me;
-		$entry_panel{$me} = $pairing->panel->id;
-
-		push @{$panel_entries{$pairing->panel->id}}, $me;
-
-		$entries{$me}{'opponent'}= -1 if $pairing->bye; 
-	}
-
-	foreach my $me (@current_entries) {
-		foreach my $other (@{$panel_entries{$entry_panel{$me}}}) { 
-			next if $me == $other;
-			$entries{$me}{'opponent'}= $other;
-		}
+	while( my ($panel, $entry, $hit) = $c_sth->fetchrow_array() ) {
+		$entry_hash{$entry}{"opponent"} = $hit;
 	}
 
 	# NOW LOOK FOR ISSUES
 	
-	foreach my $key ( keys %entries ) {
-		my $opp = $entries{$key}{'opponent'};
-		
-		if ( $precluded{$key}{$opp} == 1 ) {
-			$warn .= $entries{$key}{'code'}." and ".$entries{$opp}{'code'}." have a school preclusion. <br /> ";
+	foreach my $key ( keys %entry_hash ) {
+
+		my $opp = $entry_hash{$key}{'opponent'};
+
+		unless ($school_ok) { 
+			if ( $key > $opp && $entry_hash{$key}{"school"} == $entry_hash{$opp}{"school"} ) {
+				$warn .= $entry_hash{$key}{'code'}." and ".$entry_hash{$opp}{'code'}." have a school preclusion. <br /> ";
+			}
+
+			if ($hybrid_conflict{$entry_hash{$opp}{"school"}."-".$key}) {
+				$warn .= $entry_hash{$key}{'code'}." and ".$entry_hash{$opp}{'code'}." have a school preclusion. <br /> ";
+			}
 		}
 		
-		if ( $hitbefore{$key}{$opp} == 1 ) {
-			$warn .= $entries{$key}{'code'}." and ".$entries{$opp}{'code'}." have hit before. <br /> ";
+		if ( $key > $opp && $hitbefore{$key}{$opp} == 1 ) {
+			$warn .= $entry_hash{$key}{'code'}." and ".$entry_hash{$opp}{'code'}." have hit before. <br /> ";
 		}
 	}
 
