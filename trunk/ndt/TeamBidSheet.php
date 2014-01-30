@@ -587,7 +587,7 @@ if ($loopnum==3) {echo "<h4>INDIVIDUAL TOURNAMENTS FOR ".$studentname[2]."</H4>"
 
 ?>
 
-       <table id="individual" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+       <table id="individual" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2" >
         <tbody id="myTbodytotals">
 <?php
 $i=1; $pwin=0; $ploss=0; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0; $lasttourn=-1;
@@ -611,7 +611,7 @@ while ($i <= $x)
       {echo "<tr><td>Total:</td><td width=20%>".($pwin+$ewin)."-".($ploss+$eloss)."</td><td width=20%>".gethonors($student2, $lasttournid)."</td></tr>";}
      }
 
-     echo "<tr><th style='text-align:center' colspan=4><B>".$tourn[$i]."</B></th></tr>";
+     echo "<tr class='yellowrow'><th style='text-align:center' colspan=4><B>".$tourn[$i]."</B></th></tr>";
      echo "<tr><td>Round</td><td>Side</td><td>Outcome</td><td>Opponent</td></tr>";
      $pwin=0; $ploss=0; $ewin=0; $eloss=0;
     }
@@ -683,7 +683,7 @@ return $rtnvalue;
 
 function gethonors($studentid, $tournid)
 {
-$query="SELECT * FROM result, round, event, tourn where student=".$studentid." and result.round=round.id and event.id=round.event and event.tourn=tourn.id and tourn.id=".$tournid;
+$query="SELECT * FROM result, result_set where result.student=".$studentid." and result_set.tourn=".$tournid." and result_set.id=result.result_set and result_set.label='ndt_honors'" ;
 $rtnvalue="";
 $spkrs=mysql_query($query); 
    while ($row = mysql_fetch_array($spkrs, MYSQL_BOTH)) 
