@@ -1,0 +1,187 @@
+<%args>
+	$current_rd_id
+</%args>
+
+<%init>
+
+	unless ($current_rd_id) { return; }
+	my $debug=0;
+	
+	my $current_round = Tab::Round->retrieve($current_rd_id);
+
+	use Time::HiRes qw( time );
+	my $start = time(); 	
+
+	my $judge_group = $current_round->event->judge_group;
+
+	#THIS FIGURES OUT HOW MANY MORE ROUNDS OF JUDGING YOU NEED
+	my $tourn = $current_round->event->tourn;
+
+	#count total number of panels per round for all events in the judge_group and store in $panels_per_rd
+	
+	my @events = Tab::Event->search( judge_group => $judge_group );
+	my %panels_per_rd;
+	foreach my $event (@events) {
+		my @entries = Tab::Entry->search( event => $event->id, unconfirmed => 0, dropped => 0, waitlist => 0 );
+		$panels_per_rd{$event} += int(scalar(@entries)/2);
+	}
+	
+	my $total_panels_to_finish=0;
+	my $judges_needed_to_finish=0;
+	
+	my $assigned_judges_past=0;
+
+	my $paired_panels_current=0;
+	my $assigned_judges_current=0;
+	my $needed_panels_current=0;
+	my $needed_judges_current=0;	
+
+	my $paired_panels_future=0;
+	my $assigned_judges_future=0;
+	my $needed_panels_future=0;
+	my $needed_judges_future=0;	
+
+	my $judges_assigned=0;
+	
+	my %this_round;
+	
+	#pull all rounds for all events using the judge_group
+	Tab::Round->set_sql(pull_rounds => "
+		select round.*
+		from event, round
+		where round.event=event.id
+		and event.judge_group=$judge_group
+		order by round.name
+	");
+
+	my @rounds = Tab::Round->search_pull_rounds;
+
+	#This script was slowing down the pairing by a ton.  Palmer optimized: 
+	#Won't work for current panel counts since it doesn't pull unless judges are assigned
+	#But I've decided that's not a big deal
+	
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select panel.id, judge.id, round.id, round.name
+		from round, panel, judge, ballot, event
+		where round.event = event.id
+		and event.judge_group = ".$judge_group."
+		and round.id = panel.round
+		and round.type != \"elim\"
+		and round.type != \"final\"
+		and panel.id = ballot.panel
+		and ballot.judge = judge.id
+	");
+
+	my $current_name = $current_round->name;
+
+	$sth->execute();
+
+	my %used_panel;
+	my %used_judges;
+	my %round_panels;
+	my %round_judges;
+	my %judging_now;
+
+	while (my ($panel, $judge, $round, $roundname)  = $sth->fetchrow_array() ) {
+
+		$round_judges{$round}++ unless $used_judges{$judge."-".$round}++;
+
+		next if $used_panel{$panel."-".$judge}++;
+
+		if ($roundname < $current_name) { 
+
+			$assigned_judges_past++;
+
+		} elsif ($roundname > $current_name) { 
+
+			$assigned_judges_future++;
+
+			unless ($used_panel{$panel}++) { 
+				$paired_panels_future++;
+				$round_panels{$round}++;
+			}
+
+		} elsif ($roundname == $current_name) { 
+
+			$judging_now{$judge}++;
+			$assigned_judges_current++;
+			
+			unless ($used_panel{$panel}++) { 
+				$paired_panels_current++;
+				$round_panels{$round}++;
+			}
+
+		}
+
+	}
+
+	foreach my $round (@rounds) { 
+		
+		next if $round->type eq "elim";
+		next if $round->type eq "final";
+
+		if ( $round->name > $current_round->name ) {
+			$needed_panels_future += $panels_per_rd{$round->event};
+			$needed_judges_future += $panels_per_rd{$round->event} * $round->judges ;
+		} elsif ( $round->name == $current_round->name ) { 
+			$needed_panels_current += $panels_per_rd{$round->event}; 
+			$needed_judges_current += ($panels_per_rd{$round->event} * $round->judges );
+		}
+
+	}
+	$needed_panels_current -= $paired_panels_current;
+	$needed_judges_current -= $assigned_judges_current;
+	$needed_judges_future -= $assigned_judges_future;
+
+	#THIS FIGURES OUT HOW MANY MORE ROUNDS OF JUDGING ARE STILL AVAILABLE
+
+	my $judge_hash = $m->comp("/funclib/judge_use.mas", round_id => $current_rd_id);			
+	my %used = %{$judge_hash};
+
+	my $group_rds_left = 0; #total rounds of available judging left for future rounds
+	my $fut_avail = 0;
+	my $commit_left = 0;		
+	my $assigned_to_last = 0; #assigned to the last round of commitment
+	my $unassigned_burned_already=0;
+	my $unassigned_one_left=0; #not assigned, and will burn them if they do get assigned
+	my $unassigned_one_plus_left=0; #not assigned, multiple rounds left
+	
+	#Pull judges in group
+
+	my @judges = Tab::Judge->search( judge_group => $judge_group );
+			
+	foreach my $judge (@judges) {
+
+		#get total counts
+		$fut_avail = $used{$judge}{'future_possible'} - $used{$judge}{'will_judge'};
+		$commit_left = $used{$judge}{'oblig'}-$used{$judge}{'judged_already'}-$used{$judge}{'will_judge'};
+		$commit_left = $fut_avail if $commit_left > $fut_avail;
+		$commit_left = 0 if $commit_left < 0;
+		$group_rds_left += $commit_left;
+		
+		#identify judges in different conditions
+		$assigned_to_last++ if $commit_left == 0 && $judging_now{$judge};
+		$unassigned_one_left++ if $commit_left == 1 && not defined $judging_now{$judge};
+		$unassigned_one_plus_left++ if $commit_left > 1 && not defined $judging_now{$judge};
+		$unassigned_burned_already++ if $commit_left == 0 && not defined $judging_now{$judge};
+
+	}
+
+	if ($debug) {
+		print "Left for future rounds:$group_rds_left<br>";
+		print "Assigned to last:$assigned_to_last<br>";
+		print "Unassinged and burned already:$unassigned_burned_already<br>";
+		print "Unassigned and have more left:$unassigned_one_plus_left<br>";
+		print "Unassigned only 1 left:$unassigned_one_left<br>";
+	}
+	
+	my $total_in_group=scalar(@judges);
+	return $assigned_judges_past, $paired_panels_current, $assigned_judges_current, $needed_panels_current, $needed_judges_current, $paired_panels_future, $assigned_judges_future, $needed_panels_future, $needed_judges_future, $group_rds_left, $assigned_to_last, $unassigned_burned_already, $unassigned_one_plus_left, $unassigned_one_left, $total_in_group;
+
+	my $end = time();
+	print "<br>processing time: ";
+	printf("%.2f\n", $end - $start);
+
+</%init>
