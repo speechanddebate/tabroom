@@ -1,0 +1,902 @@
+<%args>
+	$tourn_id       => undef
+	$event_id       => undef
+</%args>
+<%init>
+
+	################################################################
+	#
+	#                  HEY PALMER YOU MORON
+	#
+	#  When you add a field to the XML, you also have to add it to
+	#   the XML.pm definition file in the library.  As you have
+	#        forgotten to do about eight million times.   
+	#
+	################################################################
+
+	use Tab::XML;
+	use Crypt::PasswdMD5;
+
+	my $tourn;
+	my @judge_groups;
+	my @events;
+
+	$tourn = Tab::Tourn->retrieve($tourn_id);
+
+	unless ($tourn) { 
+		$m->print("NO_SUCH_TOURNAMENT");
+		$m->abort;
+	}
+
+	if ($event_id) { 
+
+		my (@event_ids) = split (/\,/, $event_id);
+		foreach my $eventid (@event_ids) { 
+			my $event = Tab::Event->retrieve($eventid);
+			push (@events, $event) if $event && $event->tourn->id == $tourn->id;
+			push (@judge_groups, $event->judge_group) if $event && $event->tourn->id == $tourn->id;
+		}
+
+	} else { 
+
+		@events = $tourn->events;
+
+	}
+	
+	my %seen = (); 
+	@events = grep { ! $seen{$_->id} ++ } @events;
+
+	unless (@events) { 
+		$m->print("NO_DIVISIONS_OR_EVENTS_FOUND");
+		$m->abort;
+	}
+
+	my %also_seen = (); 
+	@judge_groups = grep { ! $also_seen{$_->id} ++ } @judge_groups;
+
+	my $xml_tourn = {
+		ID           => $tourn->id,
+		TOURNNAME    => $tourn->name,
+		STARTDATE    => Tab::pickerdate($tourn->start),
+		ENDDATE      => Tab::pickerdate($tourn->end),
+		DOWNLOADSITE => "tabroom.com"
+	};
+
+	my @timeslots;
+
+	foreach my $event (@events) { 
+		push (@timeslots, $m->comp("/funclib/event_timeslots.mas", event => $event));
+	}
+
+	my %tsseen = (); 
+	@timeslots = grep { ! $tsseen{$_->id} ++ } @timeslots;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my %starts_by_id;
+	my %ends_by_id;
+
+	my $xml_timeslots = [];
+	foreach my $ts (@timeslots) { 
+		my $xml_ts = {
+			ID           => $ts->id,
+			TIMESLOTNAME => $ts->name,
+			START        => Tab::xmldt($ts->start->set_time_zone($tz)),
+			END          => Tab::xmldt($ts->end->set_time_zone($tz))
+		};
+		push (@{$xml_timeslots}, $xml_ts);
+		$starts_by_id{$ts->id} = $ts->start->set_time_zone($tz);
+		$ends_by_id{$ts->id} = $ts->end->set_time_zone($tz);
+	}
+	
+	my $xml_rooms = [];
+
+	my %rated_already;
+
+	my %used_site;
+	my %used_rooms;
+
+	foreach my $site ($tourn->sites) { 
+
+		next if $used_site{$site->id}++;
+
+		foreach my $room ($site->rooms) { 
+
+			next if $used_rooms{$room->id}++;
+
+			my $inactive = "false";
+			$inactive = "true" if $room->inactive;
+
+			my $building = 0;
+			$building = $room->building if $room->building;
+			
+			my $xml_room = {
+				ID       => $room->id,
+				BUILDING => $building,
+				ROOMNAME => $room->name,
+				QUALITY  => $room->quality,
+				CAPACITY => $room->capacity,
+				INACTIVE => $inactive,
+				NOTES    => $room->notes.".",
+			};
+
+			push (@{$xml_rooms}, $xml_room);
+
+		}
+	}
+
+	my @entries;
+	my @rounds;
+	my %pref_type = ();
+
+	my $xml_events = [];
+	my $xml_esets = [];
+
+	my $min_points = 1;
+	my $max_points = 100;
+	my $dupes_ok = "false";
+	my $decimals = 0;
+
+	my @tb_sets;
+	my %speaker_set;
+
+	foreach my $event (@events) { 
+
+		my $speaker_set_id = $event->setting('speaker_tbset');
+		push @tb_sets, Tab::TiebreakSet->retrieve($speaker_set_id) if $speaker_set_id;
+		$speaker_set{$speaker_set_id}++;
+
+		$min_points = $event->setting("min_points");
+		$max_points = $event->setting("max_points");
+
+		$dupes_ok = "true" if $event->setting("point_ties");
+		$decimals = "0.1" if $event->setting("point_increments") eq "tenths";
+		$decimals = "0.25" if $event->setting("point_increments") eq "fourths";
+		$decimals = "0.5" if $event->setting("point_increments") eq "half" ;
+		
+		$pref_type{$event->id} = $event->judge_group->setting("prefs");
+
+		my $xml_event = {
+			ID          => $event->id,
+			EVENTNAME   => $event->name,
+			ABBR        => $event->abbr,
+			TYPE        => $event->type,
+			JUDGE_GROUP => $event->judge_group->id
+		};
+
+		push (@{$xml_events}, $xml_event);
+
+		push (@entries, $event->entries( dropped => 0, waitlist => 0 ));
+		push (@rounds, $event->rounds);
+
+	}
+
+	my %school_by_chapter = ();
+	foreach my $school ($tourn->schools) { 
+		$school_by_chapter{$school->chapter->id} = $school;
+	}
+
+	my @schools;
+
+	my $xml_entries = [];
+	my $xml_students = [];
+
+	my @students = $m->comp("/funclib/tourn_students.mas", tourn => $tourn);
+
+	my %student_by_id = map {$_->id => $_} @students;
+
+	my %entry_students = $m->comp("/funclib/tourn_students.mas", tourn => $tourn, by_entry => 'screwyoudoubleentry');
+
+	my %school_entries = ();
+
+	ENTRY:
+	foreach my $entry (@entries) { 
+
+		my $dropped = "false";
+		$dropped = "true" if $entry->dropped;
+
+		push (@{$school_entries{$entry->school->id}}, $entry);
+
+		my $code = $entry->code;
+		$code =~ s/^\s+//;
+		$code =~ s/\s+$//;
+
+		my $xml_entry = {
+			ID       => $entry->id,
+			SCHOOL   => $entry->school->id,
+			EVENT    => $entry->event->id,
+			CODE     => $entry->code,
+			FULLNAME => $entry->name,
+			DROPPED  => $dropped
+		};
+
+		push (@{$xml_entries}, $xml_entry);
+
+		my %es_seen = (); 
+		@{$entry_students{$entry->id}} = grep { ! $es_seen{$_} ++ } @{$entry_students{$entry->id}};
+
+		foreach my $student_id (@{$entry_students{$entry->id}}) { 
+
+			my $student = $student_by_id{$student_id};
+			
+			push (@schools, $school_by_chapter{$student->chapter->id});
+
+			my $school_id = $school_by_chapter{$student->chapter->id}->id if $school_by_chapter{$student->chapter->id};
+
+			my $xml_student = {
+				ID     => $student->id,
+				SCHOOL => $school_id,
+				ENTRY  => $entry->id,
+				FIRST  => $student->first,
+				LAST   => $student->last
+			};
+
+			push (@{$xml_students}, $xml_student);
+
+		}
+
+	}
+
+	my $xml_judges = [];
+
+	foreach my $judge_group (@judge_groups) { 
+
+		my $judge_per++ unless $judge_group->setting('rounds_per');
+
+		foreach my $judge ($judge_group->judges) { 
+
+			my $school_id = $judge->school->id if $judge->school && $judge->school->id;
+			$school_id = -1 unless $school_id;
+			push @schools, $judge->school if $judge->school && $judge->school->id;
+
+			my $obligation = $judge->obligation;
+			my $hired = $judge->hired;
+			$hired = 0 unless $hired;
+			$obligation = 9 unless ($hired > 0 || defined $obligation); 
+			$obligation = 9 if $judge_per;
+
+			my $stop = "false";
+			$stop = "true" unless $judge->active == 1;
+			$stop = "true" if $judge->dropped == 1;
+
+			my $id = $judge->id;
+
+			my $xml_judge = {
+				ID         => $id,
+				SCHOOL     => $school_id,
+				FIRST      => $judge->first,
+				LAST       => $judge->last,
+				OBLIGATION => $obligation,
+				HIRED      => $hired,
+				NOTES      => $judge->notes."."
+			};
+
+			push (@{$xml_judges}, $xml_judge);
+
+		}
+
+	}
+	
+	my $xml_schools = [];
+
+	my %schseen = (); 
+
+	@schools = grep { ! $schseen{$_} ++ } @schools;
+
+	foreach my $school (@schools) { 
+		
+		next unless $school && $school->id;
+
+		my $chapter = $school->chapter;
+		my $email_string;
+
+		if ($chapter) { 
+			foreach my $admin ($chapter->admins) {
+				$email_string .= "," if $email_string;
+				$email_string .= $admin->email;
+			}
+		}
+		
+		my $xml_school = { 
+			ID             => $school->id,
+			SCHOOLNAME     => $school->short_name,
+			CODE           => $school->code." "
+		};
+
+		push (@{$xml_schools}, $xml_school);
+
+	}
+
+	my $xml_rounds = [];
+	my $xml_panels = [];
+	my $xml_ballots = [];
+	my $xml_values = [];
+		
+	my %panel_ballots;
+	my %ballot_values;
+
+	foreach my $event (@events) { 
+
+		my @ballots = $m->comp("/funclib/event_ballots.mas", event => $event);
+
+		foreach my $ballot (@ballots) { 
+			push @{$panel_ballots{$ballot->panel->id}}, $ballot;
+		}
+
+		my @values = $m->comp("/funclib/event_values.mas", event => $event);
+
+		foreach my $value (@values) { 
+			push @{$ballot_values{$value->ballot->id}}, $value;
+		}
+
+	}
+
+	my %event_presets = ();
+	my %event_prelims = ();
+	my %event_elims = ();
+
+	my %round_ignore = ();
+
+	ROUND:
+	foreach my $round (@rounds) { 
+
+		my $published = $round->published;
+		next unless $published;
+
+		my $post_results = $round->post_results;
+
+
+		my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
+
+		if (scalar @entries == 1) { 
+			$round_ignore{$round->id}++;
+			next ROUND;
+		}
+
+		push (@tb_sets, $round->tb_set) if $round->tb_set;
+
+		my $tb_set = $round->tb_set->id if $round->tb_set;
+		my $ts = $round->timeslot->id if $round->timeslot;
+		my $event = $round->event->id if $round->event;
+		next unless $event;
+
+		my $flighting = 1;
+		$flighting = $round->flighted if $round->flighted;
+
+		my $type = $round->type;
+
+		$type = "Preset" if $type eq "preset" || $type eq "prelim";
+		$type = "HighHigh" if $type eq "highhigh";
+		$type = "HighLow" if $type eq "highlow";
+		$type = "Random" if $type eq "random";
+
+		if ($type eq "elim" || $type eq "final") { 
+			$type = "Elim";
+			$event_elims{$round->event->id}++;
+		} else { 
+			$event_prelims{$round->event->id}++;
+		}
+
+		$event_presets{$round->event->id}++ if $type eq "preset" || $type eq "prelim";
+
+		my $num_judges = $round->judges;
+		$num_judges = 1 if $type ne "elim" && $num_judges < 1;
+		$num_judges = 3 if $type eq "elim" && $num_judges < 1;
+
+		my $topic = $round->motion;
+		$topic = 0 unless $topic;
+
+		my $label = $round->label;
+		$label = $round->realname unless $label;
+
+		my $xml_round = {
+			ID               => $round->id,
+			EVENT            => $event,
+			TIMESLOT         => $ts,
+			TB_SET           => $tb_set,
+			RD_NAME          => $round->name,
+			LABEL            => $label,
+			FLIGHTING        => $flighting,
+			JUDGESPERPANEL   => $num_judges,
+			PAIRINGSCHEME    => $type,
+			TOPIC            => $topic
+		};
+
+		push (@{$xml_rounds}, $xml_round);
+
+		foreach my $panel ($round->panels) { 
+
+			my $room = $panel->room->id if $panel->room;
+
+			my $flight = 1; 
+			$flight = $panel->flight if $panel->flight > 1;
+
+			my $bye = 0; 
+			$bye = $panel->bye if $panel->bye > 0;
+		
+			my $xml_panel = {	
+				ID     => $panel->id,
+				ROUND  => $round->id,
+				ROOM   => $room,
+				BYE    => $bye,
+				FLIGHT => $flight
+			};
+
+			push (@{$xml_panels}, $xml_panel);
+
+			if ($panel_ballots{$panel->id}) {
+
+				BALLOT:
+				foreach my $ballot (@{$panel_ballots{$panel->id}}) {
+
+					my $xml_ballot;
+						
+					my $entry = $ballot->entry->id if $ballot->entry;
+
+					if ($panel->bye > 0) { 
+
+						$xml_ballot = {
+							ID     => $ballot->id,
+							JUDGE  => -1,
+							PANEL  => $panel->id,
+							ENTRY  => $entry,
+							SIDE   => -1,
+							BYE    => 0,
+							NOSHOW => 0
+						}
+
+					} else { 
+
+						my $judge_id = $ballot->judge->id if $ballot->judge->id;
+
+						my $bye = 0;
+						my $noshow = 0;
+
+						$bye = $ballot->bye if $ballot->bye;
+						$noshow = $ballot->noshow if $ballot->noshow;
+
+						if ($published == 2) { 
+
+							$xml_ballot = {
+								ID     => $ballot->id,
+								PANEL  => $panel->id,
+								ENTRY  => $entry,
+								SIDE   => $ballot->side,
+								BYE    => $bye,
+								NOSHOW => $noshow
+							};
+
+						} else { 
+
+							$xml_ballot = {
+								ID     => $ballot->id,
+								JUDGE  => $judge_id,
+								PANEL  => $panel->id,
+								ENTRY  => $entry,
+								SIDE   => $ballot->side,
+								BYE    => $bye,
+								NOSHOW => $noshow
+							};
+						
+						}
+					}
+
+					push (@{$xml_ballots}, $xml_ballot);
+
+					if ($ballot_values{$ballot->id}) { 
+
+						next unless $post_results > 0;
+
+						SCORE:
+						foreach my $score (@{$ballot_values{$ballot->id}}) { 
+
+							next if $score->tag eq "rfd";
+							next if $score->tag eq "comment";
+
+							if ($score->tag eq "ballot") { 
+
+								my $xml_score = {
+									ID        => $score->id,
+									BALLOT    => $ballot->id,
+									RECIPIENT => $entry,
+									SCORE_ID  => "WIN",
+									SCORE     => $score->value
+								};
+			
+								push (@{$xml_values}, $xml_score);
+					
+							} elsif ($round->event->type eq "speech") { 
+							
+								if ($score->tag eq "rank") { 
+								
+									my $xml_score = {
+										ID        => $score->id,
+										BALLOT    => $ballot->id,
+										RECIPIENT => $entry,
+										SCORE_ID  => "RANK",
+										SCORE     => $score->value
+									};
+						
+									push (@{$xml_values}, $xml_score);
+
+								} elsif ($score->tag eq "points") { 
+							
+									next SCORE if $post_results < 2;
+
+									my $xml_score = {
+										ID        => $score->id,
+										BALLOT    => $ballot->id,
+										RECIPIENT => $entry,
+										SCORE_ID  => "POINTS",
+										SCORE     => $score->value
+									};
+								
+									push (@{$xml_values}, $xml_score);
+								
+								} 
+							
+							} elsif ($score->tag eq "rank") { 
+
+								next SCORE if $post_results < 2;
+							
+								my $student = $score->student->id if $score->student;
+
+								my $xml_score = {
+									ID        => $score->id,
+									BALLOT    => $ballot->id,
+									RECIPIENT => $student,
+									SCORE_ID  => "RANK",
+									SCORE     => $score->value
+								};
+					
+								push (@{$xml_values}, $xml_score);
+
+							} elsif ($score->tag eq "points") { 
+								
+								next SCORE if $post_results < 2;
+									
+								my $student = $score->student->id if $score->student;
+			
+								my $xml_score = {
+									ID        => $score->id,
+									BALLOT    => $ballot->id,
+									RECIPIENT => $student,
+									SCORE_ID  => "POINTS",
+									SCORE     => $score->value
+								};
+							
+								push (@{$xml_values}, $xml_score);
+						
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	my $xml_tbs = [];
+	my $xml_tbsets = [];
+
+	my %set_seen = (); 
+	if (scalar @tb_sets > 0) { 
+		@tb_sets = grep { ! $set_seen{$_->id} ++ } @tb_sets;
+	}
+
+	my $sset = 1;
+	
+	my $wins;
+	my $points;
+	my $ranks;
+
+	foreach my $tb_set (@tb_sets) { 
+
+		my $type = "Team";
+		$type = "Speaker" if $speaker_set{$tb_set->id};
+
+		my $xml_tbset =	{
+			ID         => $tb_set->id,
+			TBSET_NAME => $tb_set->name,
+			SCOREFOR   => $type
+		};
+
+		push (@{$xml_tbsets}, $xml_tbset);
+
+		foreach my $tiebreak ($tb_set->tiebreaks) { 
+	
+			my $score = 0;
+			my $name;
+			my $tag = "None";
+
+			my $foropp = "false";
+			my $drops;
+			$drops = $tiebreak->highlow_count;
+			$drops = 0 unless $drops;
+	
+			if ($tiebreak->name eq "winloss") { 
+				$score = 1;
+				$name = "Wins";
+				$tag = "Wins";
+				$wins++;
+			}
+
+			if ($tiebreak->name eq "points") {
+				$score = 2;
+				$points++;
+				$name = "Total Points" if $drops == 0;
+				$name = "High-Low Speaker Points" if $drops == 1;
+				$name = $drops."x High-Low Speaker Points" if $drops > 1;
+			}
+
+			if ($tiebreak->name eq "opp_wins") {
+				$foropp = "true";
+				$name = "Opponent Wins";
+				$tag = "OppWins";
+				$score = 1;
+				$wins++;
+			}
+
+			if ($tiebreak->name eq "opp_seed") {
+				$foropp = "true";
+				$name = "Opponent Seed";
+				$tag = "OppSeed";
+				$score = 1;
+				$wins++;
+			}
+
+			if ($tiebreak->name eq "ballots") {
+				$foropp = "false";
+				$name = "Ballot Count";
+				$tag = "Ballots";
+				$score = 1;
+				$wins++;
+			}
+
+			if ($tiebreak->name eq "opp_ballots") {
+				$foropp = "true";
+				$name = "Opponent Ballot Count";
+				$tag = "OppBallots";
+				$score = 1;
+				$wins++;
+			}
+
+			if ($tiebreak->name eq "opp_points") {
+				$foropp = "true";
+				$name = "Opponent Points";
+				$score = 2;
+				$points++;
+			}
+
+			if ($tiebreak->name eq "ranks") { 
+				$score = 3;
+				$ranks++;
+				$name = "Ranks";
+			}
+
+			if ($tiebreak->name eq "team_ranks") { 
+				$score = 5;
+				$ranks++;
+				$name = "Team Ranks";
+			}
+
+			if ($tiebreak->name eq "judgevar" || $tiebreak->name eq "judgevar2") {
+				$score = 2;
+				$points++;
+				$name = "Judge Variance";
+				$tag = "JudgeVariance";
+			}
+			
+			if ($tiebreak->name eq "coinflip") { 
+				$score = 2;
+				$points++;
+				$name = "Random";
+				$tag = "Random";
+			}
+
+			if ($tiebreak->name eq "") { 
+				$score = 2;
+				$points++;
+				$name = "Random";
+				$tag = "Random";
+			}
+
+			if ($tiebreak->name eq "mba") {
+				$score = 1;
+				$name = "Opp Wins + 2H/L Points";
+				$tag = "MBA";
+				$foropp = "true";
+				$wins++;
+				$points++;
+			}
+
+			my $xml_tb = {
+				ID          => $tiebreak->id,
+				SortOrder   => $tiebreak->priority,
+				LABEL       => $name,
+				TAG         => $tag,
+				DROPS       => $drops,
+				SCOREID     => $score,
+				FOROPPONENT => $foropp,
+				TB_SET      => $tb_set->id
+			};
+
+			push (@{$xml_tbs}, $xml_tb);
+
+		}
+	}
+
+#	Elimination bracket
+	my $xml_brackets = [];
+
+	my @brackets = Tab::ResultSet->search( bracket => 1, tourn => $tourn->id, published => 1 );
+
+	my $elim_id;
+
+	foreach my $bracket (@brackets) { 
+
+		# All right, so I was bored with descriptive sql names.  Sue me.  Props
+		# to Aracelis Biel.
+
+		Tab::Result->set_sql( fluglehorn => "
+			select distinct result.*, result_value.value as value
+			from result, result_value
+			where result.result_set = ?
+			and result.id = result_value.result
+			and result_value.priority = 1");
+
+		my @results = sort {$a->round->name <=> $b->round->name} Tab::Result->search_fluglehorn($bracket->id);
+
+		my @elim_rounds;
+
+		foreach my $result (@results) { 
+			next unless $result->round->published > 0;
+			push (@elim_rounds, $result->round->id);
+		}
+
+		my %seen = (); 
+		@elim_rounds = grep { ! $seen{$_} ++ } @elim_rounds;
+
+		foreach my $round (@elim_rounds) { 
+	
+			next if $round_ignore{$round};
+
+			my $round_count;
+		
+			foreach my $result (@results) { 
+
+				next unless $round == $result->round->id;
+
+				$elim_id++;
+				$round_count++;
+
+				my $event_id = $bracket->event->id if $bracket && $bracket->event;
+				my $round_id = $result->round->id if $result && $result->round; 
+				my $entry_id = $result->entry->id if $result && $result->entry;
+
+				next unless $event_id && $round_id && $entry_id;
+
+				my $xml_elimseed = { 
+					ID    => $elim_id,
+					EVENT => $event_id,
+					ROUND => $round_id,
+					ENTRY => $entry_id,
+					SEED  => $result->value
+				};
+
+				push (@{$xml_brackets}, $xml_elimseed);
+
+			}
+
+			next if $round_count * 2 == (2 << log($round_count) / log(2));
+
+			foreach my $seed ( ($round_count + 1) .. (2 << log($round_count) / log(2))   ) { 
+			
+				$elim_id++;
+
+				my $xml_elimseed = { 
+					ID    => $elim_id,
+					EVENT => $bracket->event->id,
+					ROUND => $round,
+					ENTRY => 0,
+					SEED  => $seed
+				};
+
+				push (@{$xml_brackets}, $xml_elimseed);
+
+			}
+		}
+	}
+
+	my $now = DateTime->now;
+
+	my $name = $tourn->name;
+	$name =~ s/[\W_]//g;
+	$name = "-".$tourn->start->year;
+
+	my $filename = "Public-TourneyData-$name-".$now->epoch;
+	my $filepath = $Tab::file_root."tmp/".$filename;
+	`rm -f $filepath.*`; 
+
+#	use Data::Dumper;
+#	$m->print(Dumper($xml_hash));
+
+	my $xs = new Tab::XML();
+
+	open (XML, ">$filepath.xml");
+
+	print XML "<?xml version='1.0' standalone='yes'?>\n";
+	print XML "<TOURNAMENTRESULTS>\n";
+
+	my $xml_hash = { TOURN => $xml_tourn };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { EVENT => $xml_events };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { ENTRY => $xml_entries };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { ENTRY_STUDENT => $xml_students };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { JUDGE => $xml_judges };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+
+	$xml_hash = { SCHOOL => $xml_schools };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { ROUND => $xml_rounds };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { PANEL => $xml_panels };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { BALLOT => $xml_ballots };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { BALLOT_SCORE => $xml_values };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { ELIMSEED => $xml_brackets };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { TIEBREAK => $xml_tbs };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { TIEBREAK_SET => $xml_tbsets };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { TIMESLOT => $xml_timeslots };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	$xml_hash = { ROOM => $xml_rooms };
+
+	print XML $xs->XMLout($xml_hash, RootName => "", NoAttr => 1, XMLDecl => 0);
+
+	print XML "</TOURNAMENTRESULTS>\n";
+
+	close XML;
+
+	system "perl -pi -e 's/></>0</g' $filepath.xml";
+
+	undef $xs;
+
+	$m->redirect("$Tab::url_prefix/tmp/$filename.xml");
+	
+</%init>
