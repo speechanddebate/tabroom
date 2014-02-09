@@ -2,7 +2,7 @@ package Tab::DBI;
 use base 'Class::DBI';
 use Class::DBI::AbstractSearch;
 
-Tab::DBI->connection("dbi:mysql:$Tab::dbname", $Tab::dbuser, $Tab::dbpass) || die $!;;
+Tab::DBI->connection("dbi:mysql:$Tab::dbname:$Tab::dbhost", $Tab::dbuser, $Tab::dbpass) || die $!;
 
 sub _register_datetimes {
  	my $class = shift;
