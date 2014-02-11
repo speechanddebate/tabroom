@@ -106,7 +106,7 @@ $query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as ev
 $ballots=mysql_query($query); 
 
 //re-do rd_name field to set for correct elim level
-$query="SELECT distinct round.id as rd_id, round.name as rd_name, round.label as rd_label, round.type as rd_type, tourn.id as tourn_id, tourn.name as tourn_name FROM entry_student, round, tourn, entry, event WHERE entry.dropped=false and tourn.id=event.tourn and event.id=entry.event and round.event=entry.event and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start > '".$date_str."' and (round.type='elim' or round.type='final') ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name desc";
+$query="SELECT distinct round.id as rd_id, round.name as rd_name, round.label as rd_label, round.type as rd_type, tourn.id as tourn_id, tourn.name as tourn_name, event.id as event_id FROM entry_student, round, tourn, entry, event WHERE entry.dropped=false and tourn.id=event.tourn and event.id=entry.event and round.event=entry.event and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start > '".$date_str."' and (round.type='elim' or round.type='final') ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name desc";
 $elims=mysql_query($query); 
   $curr_tourn=-99;
   $elim_key = array();
@@ -148,7 +148,7 @@ $elims=mysql_query($query);
          $outcome[$x]=makeoutcomestring($balfor, $balvs, $row['judge']);
          if($balfor > $balvs) {$win[$x] = 1;}
          $isprelim[$x]=1; if ($row['rd_type'] == "elim" or $row['rd_type'] == "final") {$isprelim[$x]=0;}
-         if ($row['event_type']=='roundrobin') {$isRR[$x]=1;}
+         if (isroundrobin($row['event_id']) == 1) {$isRR[$x]=1;}
          $panel[$x]=$row['panel_id']; 
          $ballotid=$row['ballot_id']; 
      }
@@ -799,4 +799,17 @@ function getsidestring($side)
  if ($side==2) {$sidestr="Neg";}
  return $sidestr;
 }
+
+function isroundrobin($eventid)
+{
+$query="SELECT * FROM event_setting where event=".$eventid." and tag='round_robin'" ;
+$rtnvalue=0;
+$spkrs=mysql_query($query); 
+   while ($row = mysql_fetch_array($spkrs, MYSQL_BOTH)) 
+   {
+	if ($row['value']==1) {$rtnvalue=1; }
+   }
+return $rtnvalue;
+}
+
 ?>
