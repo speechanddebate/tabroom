@@ -137,6 +137,7 @@ $elims=mysql_query($query);
          $round[$x]=$row['rd_name'];
          $round_id[$x]=$row['rd_id'];
          $roundlabel[$x]=$row['round_label'];
+   	 if ($roundlabel[$x] == '') {$roundlabel[$x] = $row['rd_name'];}
          $event[$x]=$row['event_name'];
          $tourn[$x]=$row['tourn_name'];
          $tournid[$x]=$row['tourn_id'];
