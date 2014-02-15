@@ -100,7 +100,7 @@ Round robin and JV results do not count in prelim totals but appear separately. 
 //pull all ballots involving the 2 debaters
 $balfor=0; $balvs=0; 
 $round= array(); $tourn= array(); $tournid=array(); $tourndate= array(); $side= array(); $panel=array(); $roundlabel=array();
-$win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array(); $entry=array();
+$win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array(); $entry=array(); $ballot_id=array();
 $oppn = array(); $event = array(); $x=0; $panel[0]=-1; $ballotid=-1;
 $query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, round.type as rd_type, round.id as rd_id, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE entry.dropped=false and round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start > '".$date_str."' ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name asc, panel.id asc, ballot.id asc";
 $ballots=mysql_query($query); 
@@ -152,6 +152,7 @@ $elims=mysql_query($query);
          if (isroundrobin($row['event_id']) == 1) {$isRR[$x]=1;}
          $panel[$x]=$row['panel_id']; 
          $ballotid=$row['ballot_id']; 
+	 $ballot_id[$x]=$ballotid;
      }
 ?>
 
@@ -192,6 +193,7 @@ $elims=mysql_query($query);
 $i=1; $pwin=0; $ploss=0; $trip=""; $doub=""; $octo=""; $qrtr=""; $semi=""; $finl=""; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0;
 $totpwin=0; $totploss=0; $totewin=0; $toteloss=0; $jvwin=0; $jvloss=0;
 while ($i <= $x) {
+echo "round=".$round_id[$i]." ballotid=".$ballot_id[$i];
 if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE)
 {
  if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
@@ -736,7 +738,9 @@ $spkrs=mysql_query($query);
 function teammatch ($spkr1, $spkr2, $student1, $student2)
 {
  $match=FALSE;
+ echo $spkr1." ".$student1."  ".$spkr2." ".$student2."<br>";
  if (($spkr1==$student1 or $spkr1==$student2) AND ($spkr2==$student1 or $spkr2==$student2)) {$match=TRUE;}
+ echo "match=".$match."<br>";
  return $match;
 }
 
