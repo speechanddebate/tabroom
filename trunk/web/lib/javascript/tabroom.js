@@ -257,8 +257,6 @@ function autoPoints(input,len,e,side) {
     return true;
 }
 
-
-
 function autoTab(input,len,e) {
 
     var keyCode = e.keyCode; 
@@ -307,6 +305,7 @@ function autoTab(input,len,e) {
 		changeFocus(input);
 
 	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
+
 
 		if (len == 3) { 
 
