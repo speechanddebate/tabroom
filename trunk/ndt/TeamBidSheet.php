@@ -193,7 +193,7 @@ $elims=mysql_query($query);
 $i=1; $pwin=0; $ploss=0; $trip=""; $doub=""; $octo=""; $qrtr=""; $semi=""; $finl=""; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0;
 $totpwin=0; $totploss=0; $totewin=0; $toteloss=0; $jvwin=0; $jvloss=0;
 while ($i <= $x) {
-echo "round=".$round_id[$i]." ballotid=".$ballot_id[$i];
+
 if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE)
 {
  if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
@@ -740,7 +740,7 @@ function teammatch ($spkr1, $spkr2, $student1, $student2)
  $match=FALSE;
  echo $spkr1." ".$student1."  ".$spkr2." ".$student2."<br>";
  if (($spkr1==$student1 or $spkr1==$student2) AND ($spkr2==$student1 or $spkr2==$student2)) {$match=TRUE;}
- echo "match=".$match."<br>";
+// echo "match=".$match."<br>";
  return $match;
 }
 
