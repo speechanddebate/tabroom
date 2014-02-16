@@ -1,9 +1,8 @@
 <?php
-#	$username="jbruschke";
-#	$password="Oof9iyeeGh9jeeg";
-#	$database="itab";
-#	$host="localhost";
-
+	#	$username="jbruschke";
+	#	$password="Oof9iyeeGh9jeeg";
+	#	$database="itab";
+	#	$host="localhost";
 	$username="tabroom";
 	$password="Ev34yGYLMPGYP3Y4";
 	$database="itab";
