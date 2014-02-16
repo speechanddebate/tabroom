@@ -738,7 +738,7 @@ $spkrs=mysql_query($query);
 function teammatch ($spkr1, $spkr2, $student1, $student2)
 {
  $match=FALSE;
- echo $spkr1." ".$student1."  ".$spkr2." ".$student2."<br>";
+// echo $spkr1." ".$student1."  ".$spkr2." ".$student2."<br>";
  if (($spkr1==$student1 or $spkr1==$student2) AND ($spkr2==$student1 or $spkr2==$student2)) {$match=TRUE;}
 // echo "match=".$match."<br>";
  return $match;
