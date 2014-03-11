@@ -65,7 +65,7 @@ be accurate until all the district qualifiers have entered and all second-round 
      if ($mode=="EW" and $row['waitlist']==0) {$displayOK=FALSE;}
      if ($displayOK==TRUE) 
       {
-       echo "<strong>".$row['name']."</strong>";
+       echo "<strong>".$row['code']." - ".$row['name']."</strong>";
        ?>
          <a onclick="document.getElementById('<?php echo "tbl".$x; ?>').style.display='';">show detail</a>
          <a onclick="document.getElementById('<?php echo "tbl".$x; ?>').style.display='none';">hide detail</a>
@@ -83,7 +83,7 @@ be accurate until all the district qualifiers have entered and all second-round 
       printdebates($row['id'], $panel_id, $panel_entry_sync, $panel_entry_orig, $win, $loss, $mode, $panel_entry_waitlist);
       echo "</table>";
       if ($displayOK==TRUE) {echo " (".$win."-".$loss.")</br>";}
-      $sum_team[$x]=$row['name']; $sum_win[$x]=$win; $sum_loss[$x]=$loss;
+      $sum_team[$x]=$row['code']." - ".$row['name']; $sum_win[$x]=$win; $sum_loss[$x]=$loss;
       } 
       $x++; 
     }
