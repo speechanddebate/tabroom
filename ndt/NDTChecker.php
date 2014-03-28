@@ -6,7 +6,6 @@ require 'scripts/databaseconnect.php';
 $year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1; 
 if ($mo_str<=6) { $year_str--; $seas_str=$year_str."-".$year_str+1; }
 $date_str=$year_str."-07-01";
-
 ?>
 
 <body>
@@ -27,7 +26,7 @@ $ElimStr = array();
 $eventname = array();
 
 //Load all entries for all tourneys in the circuit; 43 is the NDT circuit
-$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit WHERE tourn_circuit.circuit=43 and tourn.hidden=false and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and entry.event=event.id and event.type='policy' and tourn.start > '".$date_str."' ORDER BY tourn.id";
+$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit WHERE tourn_circuit.circuit=43 and tourn.hidden=false and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and entry.event=event.id and event.type='policy' and tourn.start > '".$date_str."' ORDER BY tourn.id, entry.id";
 $entry=mysql_query($query);
 $entryNum = mysql_num_rows($entry); 
 

@@ -39,28 +39,37 @@ $school1[$i]=0;$school2[$i]=0;$pwin1=0; $pwin2=0;
 $tourneyname[$i]=mysql_result($entry,$i,"tourn_name");
 $schoolname_temp="";
 $teamname[$i]=getfullteamname(mysql_result($entry,$i,"entry_id"), $schoolN1, $schoolN2, $schoolname_temp);
-$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp; $lastisprelim=false;
+$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp; $lastisprelim=false; $lasttype="";
 
-  $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name FROM ballot, ballot_value, panel, round where panel.id=ballot.panel and round.id=panel.round and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
+//    $query="SELECT *, ballot.id as ballot_id, panel.bye as panel_bye, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name FROM ballot, panel, round, ballot_value where panel.id=ballot.panel and round.id=panel.round and ballot.id=ballot_value.ballot and ballot_value.tag='ballot' and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
+    $query="SELECT *, ballot.id as ballot_id, panel.bye as panel_bye, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name FROM ballot join panel on ballot.panel=panel.id join round on round.id=panel.round left outer join ballot_value on (ballot.id=ballot_value.ballot and ballot_value.tag='ballot') where ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
+//  echo $query."<br>";
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
+//     if ($i == 3069) { echo "ballot id is=".$row['ballot_id']." ".$row['rd_name']." balfor=".$balfor."<br>"; }
 	if (($row['type'] == 'elim' or $row['type'] == 'final') AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
         {$erd[$i] += 1;
          if($balfor > $balvs) {$ewin[$i] += 1;}
 	  if ($balfor > 3) { $balfor=3; }
          if ($balvs > 0 and $balfor>2) { $balfor=2; }
+//       if ($i == 3069) { echo "about to save ebalwin and balfor=".$balfor."<br>"; }
          $ebalwin[$i] += $balfor; 
          $ebaloss[$i] += $balvs;
          $balfor=0; $balvs=0;
          $panel=$row['panel_id'];
          $lastisprelim=false;
+         $lasttype=$row['round'];
         }
 
-      if ($row['ballot_decision'] == 1) {$balfor +=1;}
-      if ($row['bye'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final') and $row['ballot_decision'] == 1) {$balfor +=2; }
-      if ($row['ballot_decision'] == 0) {$balvs +=1;}
-//    if ($row['entry'] == 494669) { echo "rd name=".$row['rd_name']." label=".$row['label']."panel=".$row['panel_id']." ballots=".$balfor."<br>"; }
+      if ( $row['ballot_decision'] == 1 ) {$balfor +=1;}
+      if ( $row['ballot_decision'] == 0 and $row['panel_bye'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final') ) {$balfor +=3;}
+      if ( $row['bye'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final') and $row['ballot_decision'] == 1) {$balfor +=2; }
+//    if ($row['panel_id'] == 454146) { echo "after third thingy=".$balfor."<br>"; }
+
+      if ($row['ballot_decision'] == 0 and $row['bye'] == 0 and $row['panel_bye'] == 0) {$balvs +=1;}
+//    if ($row['panel_id'] == 454146) { echo "rd name=".$row['rd_name']." label=".$row['label']."panel=".$row['panel_id']." ballots=".$balfor." panel bye=".$row['panel_bye']." bye=".$row['bye']."<br>"; }
+//    if ($row['panel_id'] == 454146) { echo "i is ".$i." for ".$teamname[$i]."<br>"; }
 
       if ($row['type'] <> 'elim' AND $row['panel_id'] <> $panel) 
         {$prd[$i] += 1;
@@ -76,30 +85,32 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
 
       $panel=$row['panel_id'];
       $elimrd=$row['rd_name'];
-      if ($row['type'] == "elim" or $row['type'] == "final") {$lastisprelim = false;}
-      if ($row['type'] <> "elim") {$lastisprelim = true;}
-
+      $lastisprelim = true;
+      if ($row['type'] == "elim" or $row['type'] == "final") {$lastisprelim = false; $lasttype=$row['round'];}
+//    if ($row['panel_id'] == 454146) { echo "End of loop and balfor=".$balfor."<br>"; }
      }
 
-     if ($lastisprelim == false)
-      {$erd[$i] += 1;
-       if($balfor > $balvs) {$ewin[$i] += 1;}
-       if ($row['type'] == "final" and $balfor > $balvs) {$tbpts[$i]=5;}
-       if ($row['type'] == "final" and $balfor < $balvs) {$tbpts[$i]=3;}
-       if ($elimrd==15 ) {$tbpts[$i]=1;}
-       if ($balfor > 3) { $balfor=3; }
-       if ($balvs > 0 and $balfor>2) { $balfor=2; }
+      if ($lastisprelim == false and $lasttype<>"")
+       {$erd[$i] += 1;
+	 //echo $row['type']." ".$balfor."-".$balvs."<Br>";
+        if($balfor > $balvs) {$ewin[$i] += 1;}
+        if ( roundis($lasttype) == "final" and $balfor > $balvs) {$tbpts[$i]=5;}
+        if ( roundis($lasttype) == "final" and $balfor < $balvs) {$tbpts[$i]=3;}
+        if ( roundis($lasttype) == "semi" ) {$tbpts[$i]=1;}
+        if ($balfor > 3) { $balfor=3; }
+        if ($balvs > 0 and $balfor>2) { $balfor=2; }
+        if ($row['panel_id'] == 454146) { echo "about to write in the second thingy and balfor=".$balfor."<br>"; }
+        $ebalwin[$i] += $balfor; 
+        $ebaloss[$i] += $balvs;
+       }
 
-       $ebalwin[$i] += $balfor; 
-       $ebaloss[$i] += $balvs;
-      }
-
-$i++;
+ $i++;
 }    //Array is now built; now need to write total and checker pages
 
 //ASSIGN TOTAL POINTS AND SORT
 $i=0;
 while ($i < $entryNum) {
+//if ( $i == 3069 ) { echo "eballots for 3069 ".$teamname[$i]." is ".$ebalwin[$i]."<br>"; }
  $totpts[$i]=$pwin[$i]+$ebalwin[$i];
  if ($school1[$i]<>$school2[$i] and $school2[$i]>0) {$totpts[$i]=$totpts[$i]/2; $tbpts[$i]=$tbpts[$i]/2;} //hybrid adjustment
 $i++;
@@ -202,12 +213,14 @@ To restore national standings click the total points column.<br><br>
 
 $i=0;
 while ($i < $topsixctr) {
- echo "<tr>";
- echo "<td>".$topsixpts[$i]."</td>";
- echo "<td>".$topsixtb[$i]."</td>";
- echo "<td>".$topsixschool[$i]."</td>";
- echo "<td>".$region[$i]."</td>";
- echo "</tr>";
+ if ($topsixpts[$i]>0) {
+  echo "<tr>";
+  echo "<td>".$topsixpts[$i]."</td>";
+  echo "<td>".$topsixtb[$i]."</td>";
+  echo "<td>".$topsixschool[$i]."</td>";
+  echo "<td>".$region[$i]."</td>";
+  echo "</tr>";
+ }
 $i++;
 }
 //FINISH TOP 6 AND PRINT SCHOOL TOTAL PAGE
@@ -233,12 +246,14 @@ $i++;
 
 $i=1;
 while ($i < $schoolctr) {
- echo "<tr>";
- echo "<td>".$totschool[$i]."</td>";
- echo "<td>".$tottourney[$i]."</td>";
- echo "<td>".$totschoolpoints[$i]."</td>";
- echo "<td>".$tottbpts[$i]."</td>";
- echo "</tr>";
+ if ($totschoolpoints[$i]>0) {
+  echo "<tr>";
+  echo "<td>".$totschool[$i]."</td>";
+  echo "<td>".$tottourney[$i]."</td>";
+  echo "<td>".$totschoolpoints[$i]."</td>";
+  echo "<td>".$tottbpts[$i]."</td>";
+  echo "</tr>";
+ }
 $i++;
 }
 
@@ -328,6 +343,18 @@ function getschoolname($school)
    while ($row = mysql_fetch_array($school, MYSQL_BOTH)) 
      {$schoolname=$row['name'];}
     return $schoolname;
+}
+
+function roundis($round)
+{
+   $roundis="none";
+   $query="SELECT * FROM panel WHERE round=".$round;
+   $round=mysql_query($query);
+   $i=mysql_num_rows($round);
+   if ($i == 1) $roundis="final";
+   if ($i == 2) $roundis="semi";
+   if ($i >= 3) $roundis="qtr+";
+   return $roundis;
 }
 
 function getcedaregion($schoolname)
