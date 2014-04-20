@@ -26,7 +26,7 @@ $ElimStr = array();
 $eventname = array();
 
 //Load all entries for all tourneys in the circuit; 43 is the NDT circuit
-$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit WHERE tourn_circuit.circuit=43 and tourn.hidden=false and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and entry.event=event.id and event.type='policy' and tourn.start > '".$date_str."' ORDER BY tourn.id, entry.id";
+$query="SELECT *, event.name as event_name, tourn.name as tourn_name, tourn.id as tourn_id, event.id as event_id, entry.id as entry_id, entry.name as fullname FROM entry, event, tourn, tourn_circuit WHERE tourn_circuit.circuit=43 and tourn.hidden=false and tourn.id=tourn_circuit.tourn and event.tourn=tourn.id and entry.event=event.id and event.type='policy' and dropped=false and tourn.start > '".$date_str."' ORDER BY tourn.id, entry.id";
 $entry=mysql_query($query);
 $entryNum = mysql_num_rows($entry); 
 
@@ -40,15 +40,15 @@ $school1[$i]=0;$school2[$i]=0;
 $tourneyname[$i]=mysql_result($entry,$i,"tourn_name"); $eventname[$i]=isvarsity(mysql_result($entry,$i,'event_id'));
 $schoolname_temp="";
 $teamname[$i]=getfullteamname(mysql_result($entry,$i,"entry_id"), $schoolN1, $schoolN2, $schoolname_temp);
-//print $i." entry id=".mysql_result($entry,$i,"entry_id")." ".$tourneyname[$i]." ".$teamname[$i]."<br>";
-$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp; $lastisprelim=false; $printflag=false; $ElimStr[$i]="";
+//if ($pringflag==true) { print $i." entry id=".mysql_result($entry,$i,"entry_id")." ".$tourneyname[$i]." ".$teamname[$i]."<br>"; }
+$school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_temp; $lastisprelim=false; $ElimStr[$i]="";
 
   $query="SELECT *, ballot.id as ballot_id, ballot_value.value as ballot_decision, panel.id as panel_id, round.name as rd_name FROM (ballot LEFT OUTER JOIN ballot_value on ballot.id=ballot_value.ballot), panel, round WHERE round.post_results>0 and panel.id=ballot.panel and round.id=panel.round and (ballot_value.tag='ballot' or ballot_value.tag is null) and ballot.entry=".mysql_result($entry,$i,'entry_id')." order by rd_name ASC";
   $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      {
-      //if (mysql_result($entry,$i,'entry_id') == 485375) {$printflag=true; }
-      if ($printflag==true) {echo "Ballot:".$row['ballot_id'];}
+      $printflag=false; //if (mysql_result($entry,$i,'entry_id') == 555691) {$printflag=true; }
+      if ($printflag==true) {echo "Panel=".$row['panel_id']." ballot=".$row['ballot_id']." ".$row['ballot_decision']." panel marker=".$panel;}
 
       if (($row['type'] == 'elim' or $row['type'] == 'final') AND $row['panel_id'] <> $panel AND $lastisprelim == false) 
         {
@@ -57,25 +57,26 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
          if($balvs > $balfor and $balfor>0) {$epts[$i] += 4;}
          if($balvs > $balfor and $balfor==0) {$epts[$i] += 3;}
 	  $ElimStr[$i] = $ElimStr[$i].$balfor."-".$balvs." "; 
-	  if ($printflag == true) {echo " Ballots for:".$balfor." Ballots vs:".$balvs." Panel:".$row['panel_id']." ".$row['label']."<br>";}
+	  if ($printflag == true) {echo " Elim Ballots for:".$balfor." Ballots vs:".$balvs." Panel:".$row['panel_id']." ".$row['label']."<br>";}
          $balfor=0; $balvs=0;
          $panel=$row['panel_id'];
          $lastisprelim=false;
 	  if ( $printflag == true ) { echo "Elim points are now:".$epts[$i]."<br>"; }
         }
 
-      if ($row['ballot_decision'] == 1) {$balfor +=1;}
-      if ($row['ballot_decision'] == 0) {$balvs +=1;}
-      if ($row['bye'] == 1 and $row['ballot_decision'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final')) {$balfor=3; $balvs=0;}
-
-      if (($row['type'] <> 'elim' and $row['type'] <> 'final') AND $row['panel_id'] <> $panel) 
+      if ( (($row['type'] <> 'elim' and $row['type'] <> 'final') or $lastisprelim==true) AND $row['panel_id'] <> $panel and ($balfor+$balvs)>0 ) 
         {
+	  if ($printflag==true) {echo "Ballots for=".$balfor." ballots against=".$balvs;}
          if($balfor > $balvs) {$pwin[$i] += 1;}
          if($balfor < $balvs) {$ploss[$i] += 1;}
          $balfor=0; $balvs=0;
          $panel=$row['panel_id'];
          if ($printflag==true) {echo "Prelim record is now: ".$pwin[$i]."-".$ploss[$i]."<br>";}
         }
+
+      if ($row['ballot_decision'] == 1) {$balfor +=1;}
+      if ($row['ballot_decision'] == 0) {$balvs +=1;}
+      if ($row['bye'] == 1 and $row['ballot_decision'] == 1 and ($row['type'] == 'elim' or $row['type'] == 'final')) {$balfor=3; $balvs=0;}
 
       $panel=$row['panel_id'];
       $elimrd=$row['rd_name'];
@@ -92,6 +93,17 @@ $school1[$i]=$schoolN1; $school2[$i]=$schoolN2; $teamschoolname[$i]=$schoolname_
 	  $ElimStr[$i] = $ElimStr[$i].$balfor."-".$balvs." "; 
 	  if ($printflag == true) {echo " Ballots for:".$balfor." Ballots vs:".$balvs." Panel:".$row['panel_id']."<br>";}
         }
+
+      if ($lastisprelim == true) 
+        {
+	  if ($printflag==true) {echo "Ballots for=".$balfor." ballots against=".$balvs;}
+         if($balfor > $balvs) {$pwin[$i] += 1;}
+         if($balfor < $balvs) {$ploss[$i] += 1;}
+         $balfor=0; $balvs=0;
+         $panel=$row['panel_id'];
+         if ($printflag==true) {echo "Prelim record is now: ".$pwin[$i]."-".$ploss[$i]."<br>";}
+        }
+
 
 $i++;
 }    //Array is now built; now need to write total and checker pages
