@@ -19,6 +19,9 @@
 
     $m->comp("/funclib/round_clear_judges.mas", round => $round, nobye => 1);
 
+	my @schools = $m->comp("/funclib/event_schools.mas", event => $round->event);
+	my %school_region = map {$_->id => $_->region->id} @schools;
+
 	my $prelim_count;
 	foreach my $round ($round->event->rounds) { 
 		next if $round->type eq "elim";
@@ -56,10 +59,14 @@
 
 	my $no_first_years = $round_event->setting("no_first_years");
 	my $allow_judge_own = $round_event->setting("allow_judge_own");
-	my $region_constraints = $round_event->setting("region_constraints");
+	my $region_constrain = $round_event->setting("region_constraints");
+    my $region_avoid++ if $round_event->setting("region_avoid");
+
 	my $allow_repeat_elims = $round_event->setting("allow_repeat_elims");
 	my $allow_repeat_judging = $round_event->setting("allow_repeat_judging");
 	my $allow_repeat_prelim_side = $round_event->setting("allow_repeat_prelim_side");
+
+    $region_constrain++ if $round_event->tourn->setting("ncfl");
 
 	my $prefs = $group->setting("prefs");
 	undef $prefs if $round_event->setting("no_prefs");
@@ -68,8 +75,8 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $event_ballots_sth = $dbh->prepare("
-		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, entry.school, ballot.side, panel.bracket, panel.id, entry.code, panel.bye, entry.flight
-		from ballot, panel, round, entry, event
+		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, entry.school, ballot.side, panel.bracket, panel.id, entry.code, panel.bye, entry.flight, school.region
+		from ballot, panel, round, entry, event, school
 		where event.judge_group = ".$round_event->judge_group->id."
 		and round.event = event.id
 		and round.id = panel.round
@@ -78,6 +85,7 @@
 		and ballot.noshow = 0
 		and panel.bye = 0 
 		and ballot.entry = entry.id
+		and entry.school = school.id
 	");
 
 	$event_ballots_sth->execute();
@@ -87,7 +95,9 @@
 	my %entry_side;
 	my %entry_code;
 	my %entry_school;
+	my %entry_region;
 	my %school_entries;
+	my %region_entries;
 
 	my %judge_ballots;
 	my %entry_ballots;
@@ -113,6 +123,8 @@
 
 			push @{$school_entries{$entry_school}}, $entry;
 			$entry_school{$entry} = $entry_school;
+			$entry_region{$entry} = $school_region{$entry_school};
+			push @{$region_entries{$school_region{$entry_school}}}, $entry;
 
 			$entry_side{$entry} = $side;
 			$entry_code{$entry} = $code;
@@ -175,10 +187,12 @@
 	my %judge_name;
 	my %judge_score;
 	my %judge_school;
+	my %judge_region;
 	my %judge_rating;
 	my %judge_diverse;
 
 	my %school_judges;
+	my %region_judges;
 	my %judge_clashes;
 	my %judge_obligation;
 
@@ -189,6 +203,7 @@
 		push @judges, $id;
 		$judge_name{$id} = $last;
 		$judge_school{$id} = $school;
+		$judge_region{$id} = $school_region{$school};
 		$judge_rating{$id} = $rating;
 		$judge_diverse{$id} = $diverse;
 		$judge_obligation{$id} = $rounds;
@@ -196,9 +211,16 @@
 		push @{$school_judges{$school}}, $id;
 
 		if ($school_entries{$school} && not defined $allow_judge_own) { 
-
 			foreach my $entry (@{$school_entries{$school}}) { 
 				push @{$judge_clashes{$id}}, $entry;
+			}
+		}
+
+		if ($region_constrain) {
+			if ($region_entries{$school_region{$school}} && not defined $allow_judge_own) { 
+				foreach my $entry (@{$region_entries{$school_region{$school}}}) { 
+					push @{$judge_clashes{$id}}, $entry;
+				}
 			}
 		}
 	}
@@ -207,24 +229,6 @@
 		my $err = "No judges were found.  Did you put judges into the pool ".$pool->name."?" if $pool;
 		$err = "No judges were available." unless $pool;
 		$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&disp=1&err=$err");
-	}
-
-	my %school_region;
-	my @schools;
-
-	if ($region_constraints) { 
-
-		my $region_sth = $dbh->prepare("
-			select distinct school.id, school.region
-			from school where school.tourn = ".$tourn->id);
-
-		$region_sth->execute();
-	
-		while (my ($id, $region) = $region_sth->fetchrow_array() ) {
-			push @schools, $id;
-			$school_region{$id} = $region
-		}
-
 	}
 
 	my $strikes_sth = $dbh->prepare("
@@ -243,6 +247,7 @@
 		if ($type eq "conflict" || $type eq "entry") { 
 			if ($school) {	 
 				push @{$judge_clashes{$judge}}, @{$school_entries{$school}} if $school_entries{$school};
+				push @{$judge_clashes{$judge}}, @{$region_entries{$region}} if $region_entries{$school_region{$school}};
 			} else {  
 				push @{$judge_clashes{$judge}}, $entry;
 			}
@@ -531,6 +536,10 @@
 
 				my $mjp_rating = $mjp{$judge."-".$entry};
 				$mjp_rating = $default_mjp unless $mjp_rating;
+
+				if ($region_avoid) { 
+					$score += 100 if $entry_region{$entry} == $judge_region{$judge};
+				}
 
 				if ($prefs && $prefs ne "none") { 
 
