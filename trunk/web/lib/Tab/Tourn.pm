@@ -13,6 +13,7 @@ Tab::Tourn->has_many(hotels => 'Tab::Hotel', 'tourn' => {order_by => 'name'} );
 Tab::Tourn->has_many(events => 'Tab::Event', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
 Tab::Tourn->has_many(ratings => 'Tab::Rating', 'tourn');
+Tab::Tourn->has_many(regions => 'Tab::Region', 'tourn');
 Tab::Tourn->has_many(strikes => 'Tab::Strike', 'tourn');
 Tab::Tourn->has_many(schools => 'Tab::School', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(housings => 'Tab::Housing', 'tourn');
