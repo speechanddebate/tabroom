@@ -1,5 +1,6 @@
 <%args>
 	$event_id    => 24885
+	$sorttype    => undef
 
 </%args>
 
@@ -11,6 +12,7 @@
 	Tab::BallotValue->columns(TEMP => qw/panel_bye/);						
 	Tab::BallotValue->columns(TEMP => qw/ballot_bye/);
 	Tab::BallotValue->columns(TEMP => qw/judge/);	
+	Tab::BallotValue->columns(TEMP => qw/judge_name/);	
 	Tab::BallotValue->columns(TEMP => qw/panel/);	
 	Tab::BallotValue->columns(TEMP => qw/entry/);
 	Tab::BallotValue->columns(TEMP => qw/tag/);
@@ -18,19 +20,20 @@
 	Tab::BallotValue->columns(TEMP => qw/round /);
 	Tab::BallotValue->columns(TEMP => qw/round_label /);
 	Tab::BallotValue->set_sql(pull_entry => "
-		SELECT ballot_value.*, entry.id as entry, ballot.judge as judge, panel.id as panel, round.name as round, round.label as round_label, panel.bye as panel_bye, ballot.bye as ballot_bye
-		FROM ballot, entry, ballot_value, panel, round
+		SELECT ballot_value.*, entry.id as entry, ballot.judge as judge, panel.id as panel, round.name as round, round.label as round_label, panel.bye as panel_bye, ballot.bye as ballot_bye, CONCAT(judge.last, ', ', judge.first) as judge_name
+		FROM ballot, entry, ballot_value, panel, round, judge
 		WHERE entry.event=24885
 		and ballot.entry=entry.id
 		and ballot_value.ballot=ballot.id
 		and ballot_value.tag != 'rfd'
 		and panel.id=ballot.panel
 		and round.id=panel.round
+		and judge.id=ballot.judge
 		order by entry.id asc, round.name asc
 	");
 	@ballots = Tab::BallotValue->search_pull_entry;
 
-	#So it stores all the ballot_values in a hash, one for scores, one for judges
+	#So it stores all the ballot_values in two hashes, one for scores, one for judges
 	#For %team_scores, it goes {entry.id}{round.id}{student}, and note that if it stores a zero for student it's a team score
 	my %team_scores;
 	my %team_judges;
@@ -39,9 +42,62 @@
 		if ( $ballot->panel_bye or $ballot->ballot_bye ) { 
 			$team_scores{$ballot->entry}{$ballot->round}{$ballot->student} .= "bye/fft";
 		}
-		$team_judges{$ballot->entry}{$ballot->round} = $ballot->judge;
+		$team_judges{$ballot->entry}{$ballot->round}{'id'} = $ballot->judge;
+		$team_judges{$ballot->entry}{$ballot->round}{'name'} = $ballot->judge_name;
+		$team_judges{$ballot->entry}{$ballot->round}{'panel'} = $ballot->panel;
 	}
 
+	#pull round info
+	my $n_prelims; my $hi_prelim; 
+	my $event = Tab::Event->retrieve( $event_id );	
+	my @rounds = $m->comp("/funclib/event_rounds.mas", event => $event, done => "yes");
+	foreach my $round ( @rounds ) {
+		if ($round->type ne 'elim' and $round->type ne 'final' ) {
+			$n_prelims++;
+			if ($round->name > $hi_prelim) { $hi_prelim = $round };
+		}
+	}
+
+
+	#create a hash for team info for sorting
+	
+	my %team_entry_info;
+	foreach my $entry_key ( keys %team_scores) {
+		my $entry_names = Tab::Entry->retrieve( $entry_key );				
+		$team_entry_info{$entry_key}{'school'} = $entry_names->school->name;
+		$team_entry_info{$entry_key}{'fullname'} = $entry_names->name;
+	}
+
+	#now load results info
+
+	my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $meh, $panrank_ref, $panletter_ref, $long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", long_names => 1, round => $hi_prelim);
+	my $x;
+
+	#figure out where in the sort order wins and points are	
+	my $win_str; my $pts_str;
+	foreach my $key ( keys %{$desc_ref} ) {
+		if ( ${$desc_ref}{$key} eq 'W' ) { $win_str = $key } ;
+		if ( ${$desc_ref}{$key} eq 'Pts' ) { $pts_str = $key } ;
+	}
+
+	#assign wins and points
+	foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) { 
+		$x++;
+		foreach my $entry_id (@{${$entries_ref}{$key}}) { 
+			$team_entry_info{$entry_id}{'seed'}=$x;
+			$team_entry_info{$entry_id}{'wins'}= ${$tbs_ref}{$entry_id."-".$win_str} ;
+			$team_entry_info{$entry_id}{'points'}= ${$tbs_ref}{$entry_id."-".$pts_str} ;
+		}
+	}
+	
+#	my $sort_str="sort { $team_entry_info{$a}->{'school'} cmp $team_entry_info{$b}->{'school'} }";
+	my @team_entry_order;
+	if ($sorttype eq 'alpha') {
+		@team_entry_order = sort { $team_entry_info{$a}->{'school'} cmp $team_entry_info{$b}->{'school'} } keys %team_entry_info;
+	} else {
+		@team_entry_order = sort { $team_entry_info{$a}->{'seed'} <=> $team_entry_info{$b}->{'seed'} } keys %team_entry_info;
+	} ;
+		
 	my @decision;
 	$decision[0]="Loss";	
 	$decision[1]="Win";	
@@ -49,10 +105,8 @@
 
 	<& menu.mas &>
 
-	<h2> A table </h2>
+	<h2> Debate Cumulative Results sheet for <% $event->name %> </h2>
 
-	<a onclick="showall();" >Show All</a> <a onclick="hideall();" >Hide All</a> 
-	
 	<div class="left huge">
 
 	<script>
@@ -94,7 +148,11 @@
 		}
 		
 	</script>
-	
+
+<!--	
+
+Herein lies the test HTML for the javascript functions, which I am deathly afraid of removing
+
 	<table cellpadding="3" width="100%" id="WUDC" class="tablesorter">
 
 		<tbody id="table_body">
@@ -168,26 +226,35 @@
 
 		</table>
 
+--!>
+
+	<table>
+	<td><a onclick="showall();" >Show All</a></td>
+	<td><a onclick="hideall();" >Hide All</a> </td>
+	<td><a href="debate_cumesheet.mhtml?sorttype=seed"> sort by seed </a></td>
+	<td><a href="debate_cumesheet.mhtml?sorttype=alpha"> sort alphabetically </a></td>
+	</table><br>
+	
+
 		<table>
 			<tbody id="table_body">
 
 
-%			foreach my $entry_key ( keys %team_scores) {
+%#			foreach my $entry_key ( sort { $team_entry_info{$a}->{'school'} cmp $team_entry_info{$b}->{'school'} } keys %team_entry_info) {
+%			foreach my $entry_key ( @team_entry_order ) {
 
-%			my $entry_names = Tab::Entry->retrieve($entry_key);
 %			my @temp_array = Tab::EntryStudent->search( entry=>$entry_key);				
 
-			<tr class="dkgreen" >
-				<td><% $entry_names->school->name %></td>
-				<td><% $entry_names->name %></td>
-				<td></td>
-%				foreach my $entry_student (@temp_array) {
-				<td><% $entry_student->student->first  %> <% $entry_student->student->last %></td>
-%				}
+			<tr class="yellowrow" >
+				<td><% $team_entry_info{$entry_key}{'school'} %></td>
+				<td><% $team_entry_info{$entry_key}{'fullname'} %></td>
+				<td> <% $team_entry_info{$entry_key}{'wins'} %> wins</td>
+				<td> <% $team_entry_info{$entry_key}{'points'} %> points</td>
+				<td> seed <% $team_entry_info{$entry_key}{'seed'} %></td>
 				<td align="right"><a onclick="functiontest2('team<% $entry_key %>');">hide/show</a></td>
 			</tr>
 
-			<tr class="none" style="display:none" name="team<% $entry_key %>" bgcolor="GreenYellow" >
+			<tr class="none" style="display:none" name="team<% $entry_key %>" bgcolor="LightGray" >
 				<td>Round</td>
 				<td>Opponent</td>
 				<td>Judge</td>
@@ -204,8 +271,13 @@
 				<td>
 				<% $round_key %>
 				</td>
-				<td>Those Guys</td>
-				<td><% $team_judges{$entry_key}{$round_key} %></td>
+%				my @opponents = Tab::Ballot->search( panel => $team_judges{$entry_key}{$round_key}{'panel'} );				
+%				my $opp_str;
+%				foreach my $oppon (@opponents) {
+%					if ($oppon->entry->id != $entry_key) { $opp_str.= ' '.$oppon->entry->code };
+%				}
+				<td><% $opp_str %></td>
+				<td><% $team_judges{$entry_key}{$round_key}{'name'} %></td>
 
 				<td>
 %					if ($decision[$team_scores{$entry_key}{$round_key}{0}] eq 'bye/fft') { print "bye/fft" }; 
