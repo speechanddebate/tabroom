@@ -1,3 +1,6 @@
+<?php
+   header( 'Location: http://www.tabroom.com/index/results/debate_stats2.mhtml?circuit_id=43' ) ;
+?>
 
 <?php
 require 'scripts/tabroomtemplate.html';
