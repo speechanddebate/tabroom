@@ -1,4 +1,8 @@
 <?php
+   header( 'Location: http://www.tabroom.com/index/results/circuit_tourney_portal.mhtml?circuit_id=43' ) ;
+?>
+
+<?php
 require 'scripts/tabroomtemplate.html';
 $year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1; 
 if ($mo_str<=6) { $year_str--; $seas_str=$year_str."-".$year_str+1; }
