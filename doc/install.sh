@@ -63,13 +63,13 @@ echo
 echo "Configuring the local Apache webserver..."
 echo
 
-cp /www/itab/doc/tabroom.conf /etc/apache2/sites-available
+cp /www/itab/doc/local.tabroom.com.conf /etc/apache2/sites-available
 cp /www/itab/web/lib/Tab/General.pm.default /www/itab/web/lib/Tab/General.pm
 
 echo "ServerName  local.tabroom.com" >> /etc/apache2/conf.d/hostname
 echo "127.0.1.21 local local.tabroom.com" >> /etc/hosts
 
-ln -s /etc/apache2/sites-available/tabroom.conf /etc/apache2/sites-enabled/0-tabroom.conf
+ln -s /etc/apache2/sites-available/local.tabroom.com.conf /etc/apache2/sites-enabled/0-local.tabroom.conf
 
 /usr/sbin/a2enmod apreq
 
