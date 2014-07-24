@@ -123,16 +123,21 @@ function autoPoints(input,len,e,side) {
 
 	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
 
-        if (input.value != 30) {
+        if (input.value == 't3') {
+			input.value = 23 * 1;
+			changeFocus(input);
+			totalPoints(side);
+		} else if (input.value != input.value * 1) {
+			input.value = "";
+		} else if (input.value != 30) {
 			var number = input.value;
 			number = number * 1;
 			number = number / 10;
 			number = number + 20;
 			input.value = number;
+			changeFocus(input);
+			totalPoints(side);
 		}
-
-		changeFocus(input);
-		totalPoints(side);
 
 	} else if (len == 6 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
 
