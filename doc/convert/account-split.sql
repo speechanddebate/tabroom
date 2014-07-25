@@ -1,8 +1,8 @@
 
 CREATE TABLE `login` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
-    `username` int(11) NOT NULL DEFAULT '0',
-    `password` varchar(63) NOT NULL DEFAULT '',
+    `username` varchar(63) NOT NULL,
+    `password` varchar(63),
     `salt` varchar(63),
 	`name` varchar(63),
 	`person` int(11) NOT NULL,
@@ -39,9 +39,6 @@ CREATE TABLE `person` (
   `multiple` int(11) DEFAULT NULL,
   `tz` varchar(63) DEFAULT NULL,
   `started_judging` date DEFAULT NULL,
-  `hotel` varchar(127) DEFAULT NULL,
-  `paradigm` text,
-  `paradigm_timestamp` datetime DEFAULT NULL,
   `diversity` tinyint(1) DEFAULT NULL,
   `flags` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -49,4 +46,5 @@ CREATE TABLE `person` (
   UNIQUE KEY `person_email` (`email`),
   UNIQUE KEY `person_ualt_id` (`ualt_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
+
 
