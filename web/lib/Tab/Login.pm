@@ -1,14 +1,12 @@
 package Tab::Login;
 use base 'Tab::DBI';
-Tab::Login->table('room');
+Tab::Login->table('login');
 Tab::Login->columns(Primary => qw/id/);
-Tab::Login->columns(Essential => qw/username password salt name/);
-Tab::Login->columns(Others => qw/quality timestamp capacity notes building ada/);
-Tab::Login->columns(TEMP => "score");
+Tab::Login->columns(Essential => qw/username password salt name person/);
+Tab::Login->columns(Others => qw/accesses last_access pass_changekey pass_timestamp pass_change_expires source timestamp/);
 
-Tab::Login->has_a(site => 'Tab::Site');
-Tab::Login->has_many(strikes => 'Tab::RoomStrike', 'room');
+Tab::Login->has_a(person => 'Tab::Account');
 
-__PACKAGE__->_register_datetimes( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/last_access pass_change_expires timestamp/);
 
 

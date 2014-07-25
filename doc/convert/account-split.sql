@@ -1,24 +1,4 @@
 
-CREATE TABLE `login` (
-    `id` int(11) NOT NULL AUTO_INCREMENT,
-    `username` varchar(63) NOT NULL,
-    `password` varchar(63),
-    `salt` varchar(63),
-	`name` varchar(63),
-	`person` int(11) NOT NULL,
-	`accesses` int(11) NOT NULL DEFAULT 0,
-    `last_access` datetime,
-    `pass_changekey` varchar(127),
-    `pass_timestamp` datetime,
-    `pass_change_expires` datetime,
-    `source` char(4),
-    `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    KEY `person` (`person`),
-  	UNIQUE KEY `login_username` (`username`),
-	FOREIGN KEY (`person`) references person(id) on delete cascade on update cascade
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
-
 CREATE TABLE `person` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `email` varchar(127) NOT NULL DEFAULT '',
@@ -47,4 +27,24 @@ CREATE TABLE `person` (
   UNIQUE KEY `person_ualt_id` (`ualt_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 
+
+CREATE TABLE `login` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `username` varchar(63) NOT NULL,
+    `password` varchar(63),
+    `salt` varchar(63),
+	`name` varchar(63),
+	`person` int(11) NOT NULL,
+	`accesses` int(11) NOT NULL DEFAULT 0,
+    `last_access` datetime,
+    `pass_changekey` varchar(127),
+    `pass_timestamp` datetime,
+    `pass_change_expires` datetime,
+    `source` char(4),
+    `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `person` (`person`),
+  	UNIQUE KEY `login_username` (`username`),
+	FOREIGN KEY (`person`) references person(id) on delete cascade on update cascade
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1;
 

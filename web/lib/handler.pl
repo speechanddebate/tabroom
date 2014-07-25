@@ -68,6 +68,7 @@ use Tab::JudgeGroup;
 use Tab::JudgeGroupSetting;
 use Tab::JudgeHire;
 use Tab::JudgeSetting;
+use Tab::Login;
 use Tab::Panel;
 use Tab::Pool;
 use Tab::PoolJudge;
