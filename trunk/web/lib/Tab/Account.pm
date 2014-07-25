@@ -1,16 +1,26 @@
 package Tab::Account;
 use base 'Tab::DBI';
-Tab::Account->table('account');
 
-Tab::Account->columns(Primary =>   qw/id/);
-Tab::Account->columns(Essential => qw/email passhash site_admin multiple/);
-Tab::Account->columns(Others =>    qw/first last phone street city state zip country hotel
-									provider paradigm paradigm_timestamp started_judging gender timestamp
-									no_email change_deadline change_pass_key password_timestamp tz diversity/);
+#Before
+#Tab::Account->table('account');
+#Tab::Account->columns(Primary   => qw/id/);
+#Tab::Account->columns(Essential => qw/email passhash site_admin multiple/);
+#Tab::Account->columns(Others    => qw/first last phone street city state zip country hotel
+#                                      provider paradigm_timestamp started_judging gender timestamp help_admin
+#                                      no_email change_deadline change_pass_key password_timestamp tz diversity/);
+
+#After
+Tab::Account->table('person');
+Tab::Account->columns(Primary   => qw/id/);
+Tab::Account->columns(Essential => qw/email first last phone ualt_id provider site_admin multiple/);
+Tab::Account->columns(Others    => qw/alt_phone street city state zip country
+                                   gender no_email tz started_judging diversity flags timestamp/);
+
 Tab::Account->columns(TEMP => qw/prefs/);
 
-__PACKAGE__->_register_datetimes( qw/paradigm_timestamp password_timestamp change_deadline/);
 __PACKAGE__->_register_datetimes( qw/timestamp/);
+
+Tab::Account->has_many(logins => 'Tab::Login', 'person');
 
 Tab::Account->has_many(sessions => 'Tab::Session', 'account');
 Tab::Account->has_many(sites => 'Tab::Site', 'host');

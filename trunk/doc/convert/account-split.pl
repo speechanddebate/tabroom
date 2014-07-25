@@ -117,6 +117,12 @@ foreach my $account (@accounts) {
 		gender          => $account->gender,
 		no_email        => $account->no_email,
 		tz              => $account->tz,
+		street          => $account->street,
+		city            => $account->city,
+		state           => $account->state,
+		zip             => $account->zip,
+		gender          => $account->gender,
+		country         => $account->country,
 		started_judging => $account->started_judging,
 		diversity       => $account->diversity,
 		timestamp       => $account->timestamp,
@@ -128,7 +134,7 @@ foreach my $account (@accounts) {
 		password => $account->passhash,
 		salt     => "3EZjdkNB9k92a4qG4Q61",
 		name     => $account->first." ".$account->last,
-		source   => "tabroom",
+		source   => "tab",
 		person   => $account->id
 	});
 
