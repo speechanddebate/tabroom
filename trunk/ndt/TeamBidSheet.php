@@ -6,11 +6,15 @@ $student1=$_GET['id1'];
 $student2=$_GET['id2'];
 $student3=getaltid($student1);
 $student4=getaltid($student2);
-//echo "ID3=".$student3." ID4".$student4."<br>";
 
-$year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1; 
-if ($mo_str<=6) { $year_str--; $seas_str=$year_str."-".$year_str+1; }
-$date_str=$year_str."-07-01";
+if ( isset($_GET['yr_str']) ) { $year_str=$_GET['yr_str']; $date_str=($year_str-1)."-07-01"; $end_date_str=$year_str."-07-01"; $seas_str=($year_str-1)."-".$year_str; }
+if ( empty($year_str) ) {
+	$year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1; 
+	if ($mo_str<=6) { $year_str--; $seas_str=$year_str."-".$year_str+1; }
+	$date_str=$year_str."-07-01";
+	$end_date_str=$year_str."-07-01";
+}
+$curr_year_str = date("Y");
 
 $teamname=""; $schoolname=""; $studentname= array();
 $chapterid=0;
@@ -47,8 +51,25 @@ $adstaff=mysql_query($query);
 ?>
 
 <body>
+<div class="right small">
+<div class="sidenote"> 
+<form name="input" action="TeamBidSheet.php" method="get">
+	Select new season:
+	<SELECT NAME="yr_str">
+	<?php
+	for ($i=$curr_year_str+1; $i >= $curr_year_str-3; $i--) {
+		echo "<OPTION VALUE='".$i."'>".($i-1)."-".$i;
+	}
+	?>
+	</SELECT>
+	<input type="text" name="id1" value="<?php echo $student1; ?>" hidden>
+	<input type="text" name="id2" value="<?php echo $student2; ?>" hidden>
+	<input type="submit" value="Submit">
+</form>
+</div>
+</div>
 
-<h2>TEAM BID SHEET FOR <?php echo $teamname; ?></h2>
+<h2>TEAM BID SHEET FOR <?php echo $seas_str." ".$teamname; ?></h2>
 <br>
 
 	<script type="text/javascript">
@@ -102,7 +123,7 @@ $balfor=0; $balvs=0;
 $round= array(); $tourn= array(); $tournid=array(); $tourndate= array(); $side= array(); $panel=array(); $roundlabel=array();
 $win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array(); $entry=array(); $ballot_id=array();
 $oppn = array(); $event = array(); $x=0; $panel[0]=-1; $ballotid=-1;
-$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, round.type as rd_type, round.id as rd_id, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE entry.dropped=false and round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start > '".$date_str."' ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name asc, panel.id asc, ballot.id asc";
+$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, round.type as rd_type, round.id as rd_id, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE entry.dropped=false and round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start > '".$date_str."' and tourn.start < '".$end_date_str."' ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name asc, panel.id asc, ballot.id asc";
 $ballots=mysql_query($query); 
 
 //re-do rd_name field to set for correct elim level
