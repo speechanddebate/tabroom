@@ -5,7 +5,7 @@
 
   echo "<p>Connected to MySQL!</p>";
 
-  mysql_select_db("itab")
+  mysql_select_db("")
     or die("<p>Error selecting the database " . 'TourneyData' . mysql_error() . "</p>");
 
   echo "<p>Connected to MySQL, using database " . 'TourneyData' . ".</p>";
