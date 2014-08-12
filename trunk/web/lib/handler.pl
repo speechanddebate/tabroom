@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 
 package Tab::Mason;
-use lib "/www/itab/web/lib";
+use lib "/www/tabroom/web/lib";
 use lib "/opt/local/lib/perl5";
 use lib "/opt/local/lib/perl5/vendor_perl/5.12.3/darwin-multi-2level";
 
@@ -124,8 +124,8 @@ sub handler {
     
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
-			comp_root  => '/www/itab/web',
-			data_dir    => '/www/itab/web/mason',
+			comp_root  => '/www/tabroom/web',
+			data_dir    => '/www/tabroom/web/mason',
 			error_mode  => 'fatal'
 		); 
 
@@ -133,8 +133,8 @@ sub handler {
 
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
-			comp_root  => '/www/itab/web',
-			data_dir    => '/www/itab/web/mason',
+			comp_root  => '/www/tabroom/web',
+			data_dir    => '/www/tabroom/web/mason',
 		); 
 
  	}
