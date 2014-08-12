@@ -4,9 +4,9 @@
 	#	$database="itab";
 	#	$host="localhost";
 	$username="tabroom";
-	$password="Ev34yGYLMPGYP3Y4";
-	$database="itab";
-	$host="tabroom2.coha3i31zrbw.us-east-1.rds.amazonaws.com";
+	$password="password":
+	$database="tabroom";
+	$host="disabled";
 	mysql_connect($host,$username,$password);
 	@mysql_select_db($database) or die( "Unable to select database<br>");
 ?>
