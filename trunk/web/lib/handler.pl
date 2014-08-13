@@ -37,6 +37,7 @@ use Tab::AccountConflict;
 use Tab::AccountSetting;
 use Tab::Ballot;
 use Tab::BallotValue;
+use Tab::Calendar;
 use Tab::Chapter;
 use Tab::ChapterAdmin;
 use Tab::ChapterCircuit;
