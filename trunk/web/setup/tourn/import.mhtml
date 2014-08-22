@@ -52,50 +52,6 @@
 		push (@circuits, $circuit->circuit);
 	}
 
-	#Tiebreakers and sets
-	my %tb_set_translator = ();
-	foreach my $tb_set ($old_tourn->tiebreak_sets) {
-
-		my $ntb_set = $tb_set->copy;
-		$ntb_set->tourn($tourn->id);
-		$ntb_set->update;
-
-		foreach my $tb ($tb_set->tiebreaks) { 
-			my $ntb = $tb->copy;
-			$ntb->tb_set($ntb_set->id);
-			$ntb->update;
-		}
-
-		$tb_set_translator{$tb_set->id} = $ntb_set->id;
-
-	}
-
-	#Sweepstakes
-	my %sweep_set_translator = ();
-	foreach my $sweep_set ($old_tourn->sweep_sets) {
-
-		my $nsweep_set = $sweep_set->copy;
-
-		$nsweep_set->tourn($tourn->id);
-		$nsweep_set->update;
-
-		foreach my $sweep_event ($sweep_set->sweep_events) { 
-			my $nsweep_event = $sweep_event->copy;
-			$nsweep_event->sweep_set($nsweep_set->id);
-			$nsweep_event->update;
-		}
-
-		foreach my $sweep_rule ($sweep_set->rules) { 
-			my $nsweep_rule = $sweep_rule->copy;
-			$nsweep_rule->sweep_set($nsweep_set->id);
-			$nsweep_rule->update;
-		}
-
-		$sweep_set_translator{$sweep_set->id} = $nsweep_set->id;
-
-	}
-
-	#Housing slots
 	foreach my $housing ($old_tourn->housing_slots) { 
 
 		my $nhousing = $housing->copy;
@@ -270,6 +226,7 @@
 
 	#Events
 	my %event_translator = ();
+	my %round_translator = ();
 
 	foreach my $event ($m->comp("/funclib/tourn_events.mas", tourn => $old_tourn)) { 
 
@@ -281,23 +238,29 @@
 		$nevent->rating_subset($rating_subset_translator{$event->rating_subset->id}) if $event->rating_subset;
 		$nevent->update;
 
-		foreach my $setting ($event->settings) {
+        my @settings = Tab::EventSetting->search( event => $event->id);
 
-			my $nsetting = $setting->copy;
-			$nsetting->event($nevent->id);
+        foreach my $setting (@settings) { 
 
-			if ($nsetting->value eq "date") { 
-				my $new_date = $nsetting->value_date->clone;
-				$new_date->add_duration($diff);
-				$nsetting->value_date($new_date);
-			}
+            my $nsetting = $setting->copy({
+                event => $nevent->id
+            });
 
-			$nsetting->update;
-		}
+            if ($setting->tag eq "speaker_tbset") { 
+                $nsetting->value($tb_set_translator{$setting->value});
+                $nsetting->update;
+            }
+
+            if ($nsetting->value eq "date") { 
+                my $new_date = $nsetting->value_date->clone;
+                $new_date->add_duration($diff);
+                $nsetting->value_date($new_date);
+                $nsetting->update;
+            }
+
+        }
 
 		# Copy the ballots from the old tournament into the new one
-		system "/bin/cp -r $Tab::file_root/files/tourns/".$old_tourn->id."/events/".$event->id." $Tab::file_root/files/tourns/". $tourn->id."/events/".$nevent->id;
-
 		system &Tab::s3_cmd." cp -r $Tab::s3_bucket/tourns/".$old_tourn->id."/events/".$event->id." $Tab::s3_bucket/tourns/".$tourn->id."/events/".$nevent->id
 
 		# Copy the room pool assignments for this event
@@ -308,13 +271,19 @@
 		}
 
 		foreach my $round ($event->rounds) { 
-			my $nround = $round->copy;
+
+			my $nround = $round->copy({
+				event => $nevent->id,
+			});
 			$nround->event($nevent->id);
 			$nround->timeslot($timeslot_translator{$round->timeslot->id}) if $round->timeslot;
 			$nround->pool($pool_translator{$round->pool->id}) if $round->pool;
 			$nround->tb_set($tb_set_translator{$round->tb_set->id}) if $round->tb_set;
 			$nround->motion("");
 			$nround->update;
+
+			$round_translator{$round->id} = $nround->id;
+
 		}
 
 	} # End of events
@@ -359,6 +328,80 @@
 		$nroom_strike->update;
 
 	}
+
+	#Tiebreakers and sets
+	my %tb_set_translator = ();
+	foreach my $tb_set ($old_tourn->tiebreak_sets) {
+
+		my $ntb_set = $tb_set->copy;
+		$ntb_set->tourn($tourn->id);
+		$ntb_set->update;
+
+		foreach my $tb ($tb_set->tiebreaks) { 
+			my $ntb = $tb->copy;
+			$ntb->tb_set($ntb_set->id);
+			$ntb->update;
+		}
+
+		$tb_set_translator{$tb_set->id} = $ntb_set->id;
+
+	}
+
+	#Sweepstakes
+	my %sweep_set_translator = ();
+	foreach my $sweep_set ($old_tourn->sweep_sets) {
+
+		my $nsweep_set = $sweep_set->copy({
+			$tourn => $tourn->id
+		});
+
+		$sweep_set_translator{$sweep_set->id} = $nsweep_set->id;
+
+		foreach my $sweep_event ($sweep_set->events) { 
+
+			my $nsweep_event = $sweep_event->copy({  
+				event     => $event_translator{$sweep_event->id},
+				sweep_set => $nsweep_set->id 
+			});
+		}
+
+		foreach my $sweep_rule ($sweep_set->rules) { 
+
+			if ($sweep_rule->tag eq "ignore_round") { 
+
+				my $nsweep_rule = $sweep_rule->copy({  
+					sweep_set => $nsweep_set->id,
+					value     => $round_translator{$sweep_rule->value}
+				});
+
+			} else { 
+
+				my $nsweep_rule = $sweep_rule->copy({  
+					sweep_set => $nsweep_set->id 
+				});
+
+			}
+
+		}
+
+	}
+
+	foreach my $sweep_set ($old_tourn->sweep_sets) {
+
+		my @links = Tab::SweepInclude->search( parent => $sweep_set );
+
+		foreach my $link (@links) { 
+
+			$nlink = $link->copy({ 
+				parent => $sweep_set_translator{$sweep_set->id},
+				child => $sweep_set_translator{$sweep_set->child->id},
+			});
+
+		}
+
+	}
+
+	#Housing slots
 
 	$m->comp("/funclib/update_calendar.mas", tourn => $tourn);
 
