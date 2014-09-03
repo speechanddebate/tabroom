@@ -1,0 +1,812 @@
+<%args>
+	$account
+	$round_id
+	$bracket            => undef
+	$entries_hash_ref   => undef
+	$precluded_hash_ref => undef
+	$team_to_pair       => undef
+</%args>
+<%init>
+
+	#set to zero to suppress messages, 1 to enable
+	my $debug=0;
+	print "At load bracket is $bracket<br>" if $debug;
+	
+	# Works off of 4 basic global hash/arrays; this allows the functions to
+	# access the information they need @entries is a global array of all
+	# entries in the event; %entries is a hash with record and SOP information
+	# in it %precluded stores which teams can't hit each other; %bracket are
+	# the teams in the bracket being paired
+	
+	use POSIX;
+	use List::Util 'shuffle';
+	use Time::HiRes qw( time );
+
+	my $round = Tab::Round->retrieve($round_id);
+	my $event = $round->event;
+
+	my $round_name = $round->name;
+	$bracket = $round_name - 1 unless defined $bracket;
+	print "After check bracket is $bracket<br>" if $debug;
+	
+	my $bracket_not_set++ if $event->setting("bracket_set_for") != $round_id;
+
+	my $oddround = 1 if int($round->name) % 2;
+	$oddround = 1 if $event->setting("no_side_constraints");
+
+	print "Odd round marker:".$oddround."<br>" if $debug;
+	my $start = time(); 
+	
+#	This ALWAYS fires on page reload, so I'm bagging it for now		
+
+#	unless ($entries_hash_ref) {
+#		print "getting the hash references<br>";
+#		($entries_hash_ref, $precluded_hash_ref) = $m->comp("/funclib/make_pairing_hash.mas", round_id => $round->id);			
+#	}
+
+	($entries_hash_ref, $precluded_hash_ref) = $m->comp("/funclib/make_pairing_hash.mas", round_id => $round->id);			
+
+	my %entries = %{$entries_hash_ref};
+	my %precluded = %{$precluded_hash_ref};
+	
+	my $end = time();
+	if ($debug) {
+		print "hash setup time:  "; printf("%.2f\n", $end - $start); print "<Br>";
+	}
+
+	my $nteams = keys %entries;
+	my $dummy = keys %precluded;
+	if ($debug) {	
+		print "n entries from hash:".$nteams."<br>";
+		print "n preclusions from hash:".$dummy."<br>";
+		$end = time();
+		print "Current round setup time:  "; printf("%.2f\n", $end - $start); print "<br>";
+	}
+
+	$bracket = $round_name - 1 if ($bracket == -1 and $nteams>50);
+		
+	sub hasconflict {
+
+		my ($team1, $team2, %precluded_ref) = @_;	
+		
+		my $returnvalue = 0;
+
+		if ($precluded_ref{$team1}{$team2} == 1) { $returnvalue = 1; }
+
+		if ($precluded_ref{$team2}{$team1} == 1) { $returnvalue = 1; }
+		
+		if ($team1 == $team2) { $returnvalue = 1; }
+		
+		return $returnvalue;
+
+	}
+
+#	Declare the variables to mark the number of teams in the bracket
+
+	my $aff_teams_in_bracket = 0;
+	my $neg_teams_in_bracket = 0;
+
+#	Count paired and unpaired teams in the bracket
+
+	my $paired_teams = 0;
+	my $unpaired_teams = 0;
+
+	foreach my $key (keys %entries) {
+		if ( ($entries{$key}{'placement'} == $bracket or $bracket == -1) and $entries{$key}{'opponent'} > 0 ) { $paired_teams++; }
+		if ( ($entries{$key}{'placement'} == $bracket or $bracket == -1) and $entries{$key}{'opponent'} < 1 ) { $unpaired_teams++; }
+	}
+	
+	sub had_bye_already {
+
+		my ($team) = @_;
+
+		Tab::Ballot->set_sql(  byes => "
+			select distinct ballot.id
+			from ballot
+			where ballot.entry = ? 
+			and ballot.bye = 1
+		");
+
+		Tab::Ballot->set_sql(  panel_byes => "
+			select distinct ballot.id
+			from ballot, panel
+			where ballot.entry = ? 
+			and ballot.panel = panel.id
+			and panel.bye = 1
+		");
+	
+		my @byes = Tab::Ballot->search_byes($team);
+		push @byes, Tab::Ballot->search_panel_byes($team);
+
+		my $warn = "This team has already received a bye.  Proceed?" if @byes;
+		return $warn;
+	}
+	
+	print "bracket is $bracket<br>" if $debug;
+				
+</%init>
+
+	<div class="main" display="table" >
+
+		<div class="block padno">
+			<span class="half inline"> 
+				<h4>Round <% $round->name %> Manual Pairing</h4>
+			</span>
+		
+%			unless ($bracket_not_set) { 
+				<span class="right">
+					<h4><% $bracket ? $bracket : 0 %> win bracket</h4> 
+				</span>
+%			}
+		</div>
+
+%		if ($bracket_not_set) { 
+
+%			my $other_round_id = $event->setting("bracket_set");
+%			my $other_round = Tab::Round->retrieve($other_round_id) if $other_round_id;
+
+%			if ($other_round) { 
+
+				<p>
+					Current brackets are set for <% $other_round->realname %>.
+					Recalculating brackets will mess with that round unless
+					it's already completed.
+				</p>
+
+				<div class="evenrow centeralign block">
+					<a class="inline dkblue" href="reset_bracket.mas?round_id=<% $round_id %>&winsonly=true">
+						Calculate Initial Brackets
+					</a>
+				</div>
+
+%			} else { 
+%				$m->redirect("reset_bracket.mas?round_id=$round_id&winsonly=true");
+%			}
+
+
+%		} else { 
+
+%			if ($team_to_pair > 0) {
+
+				<div class="block padless centeralign">
+					<h5>Finding an opponent for <% $entries{$team_to_pair}{'code'} %></h5>
+				</div>
+
+%			} else {
+
+				<p class="explain centeralign padless">
+					Tap an entry code in the table below to find a match; type an opponent to delete match:
+				</p>
+%			}
+		
+			<& /funclib/tablesorter.mas, table => "affbracket" &> 
+		
+%			unless($oddround) {		
+				<h5>Affirmative <% $bracket %>-win Bracket</h5>
+%			} 		
+
+			<table cellpadding="3" id="affbracket" class="martop">
+		
+				<thead>
+					<tr class="yellowrow">
+						<th class="smaller" title="Entry Designation">Code</th>
+						<th class="smaller" title="Rounds Won">W</th>
+						<th class="smaller" title="Seed" >Seed</th>
+						<th class="smaller" title="Seed + Opponent Average Seed">SOP</th>
+						<th class="smaller" title="2nd Tiebreaker (usually Points)">TB2</th>
+						<th class="smaller" title="Overall Seed Excluding Win/Loss">2Sd</th>
+						<th class="smaller" title="Average Opponents' Wins">OW</th>
+%						unless ($oddround) { 
+							<th class="smaller" title="Side Due">Due</th>
+%						}
+						<th class="smaller" title="Bracket Placement">Brkt</th>
+						<th class="smaller" title="Opponent This Round">Vs</th>
+						<th class="smaller nosort" colspan="3">Action</th>
+					</tr>
+				</thead>
+				
+				<tbody style="font-size: 90%;">
+			
+%				foreach my $key (sort {$entries{$a}->{'SOP'} <=> $entries{$b}->{'SOP'} || $entries{$a}->{'seed'} <=> $entries{$b}->{'seed'} } keys(%entries)) {
+
+%					if ($key and $key > -1 and ($entries{$key}{'placement'} == $bracket or $bracket == -1) and ($entries{$key}{sidedue} == 1 or $oddround == 1) ) {
+
+%						$aff_teams_in_bracket++;
+
+						<tr class="<% $key == $team_to_pair ? "lirdrow" : "" %> rightalign padcell">
+
+							<td class="leftalign">
+%								unless ($key == $team_to_pair) { 
+									<a class="<% hasconflict($team_to_pair, $key, %precluded) ? "dkred" : ($team_to_pair == $key ) ? "blue" : "white" %> block padless white" 
+									href="manual_powermatch.mhtml?round_id=<% $round_id %>&team_to_pair=<% $key %>&bracket=<% $bracket %>">
+%								}
+									<% $entries{$key}{'code'} %>
+								</a>
+							</td>
+
+							<td>
+								<% $entries{$key}{'wins'} %>
+							</td>
+
+							<td>
+								<% $entries{$key}{'seed'} %>
+							</td>
+			
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'SOP'}) %>
+							</td>
+
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'next_tb'}) %>
+							</td>
+								
+							<td>
+								<% $entries{$key}{'seed_nowins'} %>
+							</td>
+
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'opp_wins'}) %>
+							</td>
+			
+%							unless ($oddround) { 
+								<td class="centeralign">
+									<% $entries{$key}{'sidedue'} == 1 ? "A" : "N" %>
+								</td>
+%							}
+			
+							<td>
+								<% $entries{$key}{'placement'} %>
+							</td>
+
+%							if ( $entries{$key}{'opponent'} == -1 ) {
+								<td class="centeralign">
+									BYE
+								</td>		
+%							}				
+			
+%							if ( $entries{$key}{'opponent'} > 0 ) {
+		
+								<td class="leftalign">
+									<a class="white padless" href="dump_panel.mas?round_id=<% $round_id %>&team1=<% $key %>&team2=<% $entries{$key}{'opponent'} %>&bracket=<% $bracket %>">
+										<% $entries{$entries{$key}{'opponent'}}{'code'} %>
+									</a>
+								</td>	
+
+								<td>
+								</td>
+
+%							} else { 
+
+								<td>
+%									if ( $team_to_pair and $team_to_pair != $key ) { 
+%										my $confl_warn=""; if (hasconflict($key, $team_to_pair, %precluded)) { $confl_warn="These teams have a conflict, such as being from the same school or having debated before.  Are you SURE you want to pair them?"; }
+										<a class="dkblue block centeralign" <& "/funclib/confirm.mas", warn => $confl_warn &> href="save_pairing.mas?round_id=<% $round_id %>&team1=<% $key %>&wins1=<% $entries{$key}{'wins'} %>&seed1=<% $entries{$key}{'wins'} %>&team2=<% $team_to_pair %>&wins2=<% $entries{$team_to_pair}{'wins'} %>&seed2=<% $entries{$team_to_pair}{'seed'} %>&bracket_to_return=<% $bracket %>">
+											Choose
+										</a>
+%									}
+								</td>		
+
+%								unless ( $entries{$key}{'opponent'} == -1 ) {
+									<td>
+%										my $warn = had_bye_already($key);												
+										<a class="dkblue block centeralign" <& "/funclib/confirm.mas", warn => $warn &> href="save_pairing.mas?round_id=<% $round_id %>&team1=<% $key %>&wins1=<% $entries{$key}{'wins'} %>&seed1=<% $entries{$key}{'wins'} %>&team2=-1&wins2=0&seed2=0&bracket_to_return=<% $bracket %>">
+											Bye
+										</a>
+									</td>
+%								}
+
+%							}
+
+
+							<td>
+%								unless ( $entries{$key}{'opponent'} > 0 ) {
+									<a class="dkblue centeralign nowrap block" href="pullup.mas?round_id=<% $round_id %>&bracket=<% $bracket %>&team=<% $key %>&todo=DOWN">
+										Pull &darr;
+									</a>
+%								}
+							</td>		
+				
+						</tr>
+%					}			
+
+%				}
+
+			</tbody>
+			</table>
+
+%		unless ($oddround) {
+		
+			<& /funclib/tablesorter.mas, table => "negbracket" &> 
+
+			<table cellpadding="3" id="negbracket" class="martop">
+
+				<h5>Negative <% $bracket %>-win Bracket</h5>
+
+				<thead>
+					<tr class="yellowrow">
+						<th class="smaller" title="Entry Designation">Code</th>
+						<th class="smaller" title="Rounds Won">W</th>
+						<th class="smaller" title="Seed" >Seed</th>
+						<th class="smaller" title="Seed + Opponent Average Seed">SOP</th>
+						<th class="smaller" title="2nd Tiebreaker (usually Hi/Lo Points)">TB2</th>
+						<th class="smaller" title="Seed Without Wins">2Sd</th>
+						<th class="smaller" title="Average Opponents' Wins">OW</th>
+%						unless ($oddround) { 
+							<th class="smaller" title="Side Due">Due</th>
+%						}
+						<th class="smaller" title="Bracket Placement">Brkt</th>
+						<th class="smaller" title="Opponent This Round">Vs</th>
+						<th class="smaller nosort" colspan="3">Action</th>
+					</tr>
+				</thead>
+					
+				<tbody style="font-size: 90%">
+						
+%				foreach my $key (sort {$entries{$a}->{'SOP'} <=> $entries{$b}->{'SOP'}} keys(%entries)) {
+
+%					if ($key and $key > -1 and ($entries{$key}{'placement'} == $bracket or $bracket == -1) and $entries{$key}{sidedue} == 2 ) {
+
+						<tr class="rightalign padcell">
+
+%							$neg_teams_in_bracket++;
+
+							<td>
+								<a class="<% hasconflict($team_to_pair, $key, %precluded) ? "dkred" : ($team_to_pair == $key ) ? "blue" : "white" %> block padless white" 
+									href="manual_powermatch.mhtml?round_id=<% $round_id %>&team_to_pair=<% $key %>&bracket=<% $bracket %>">
+									<% $entries{$key}{'code'} %>
+								</a>
+							</td>
+
+							<td class="centeralign padno">
+								<% $entries{$key}{'wins'} %>
+							</td>
+
+							<td>
+								<% $entries{$key}{'seed'} %>
+							</td>		
+
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'SOP'}) %>
+							</td>
+
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'next_tb'}) %>
+							</td>
+							<td>
+								<% $entries{$key}{'seed_nowins'} %>
+							</td>
+
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'opp_wins'}) %>
+							</td>
+
+%							unless ($oddround) { 
+								<td class="centeralign">
+									<% $entries{$key}{'sidedue'} == 1 ? "A" : "N" %>
+								</td>
+%							}
+
+							<td>
+								<% $entries{$key}{'placement'} %>
+							</td>
+
+%							if ( $entries{$key}{'opponent'} > 0 ) {
+
+								<td>
+									<% $entries{$entries{$key}{'opponent'}}{'code'} %>
+								</td>		
+%							}			
+
+%							if ( $entries{$key}{'opponent'} == -1 ) {
+								<td class="centeralign">
+									BYE
+								</td>		
+%							}				
+
+%							if ( $entries{$key}{'opponent'} == 0 ) {
+
+								<td class="leftalign">
+%									if ( $team_to_pair and $team_to_pair != $key ) { 
+%										my $confl_warn=""; if (hasconflict($key, $team_to_pair, %precluded)) { $confl_warn="These teams have a conflict, such as being from the same school or having debated before.  Are you SURE you want to pair them?"; }
+										<a class="dkblue centeralign block padless" <& "/funclib/confirm.mas", warn => $confl_warn &> href="save_pairing.mas?round_id=<% $round_id %>&team1=<% $team_to_pair %>&wins1=<% $entries{$team_to_pair}{'wins'} %>&seed1=<% $entries{$team_to_pair}{'seed'} %>&team2=<% $key %>&wins2=<% $entries{$key}{'wins'} %>&seed2=<% $entries{$key}{'seed'} %>&bracket_to_return=<% $bracket %>">
+											Choose
+										</a>
+%									}
+								</td>		
+
+								<td>
+%									my $warn = had_bye_already($key);												
+									<a class="dkblue block centeralign" <& "/funclib/confirm.mas", warn => $warn &> href="save_pairing.mas?round_id=<% $round_id %>&team1=<% $key %>&wins1=<% $entries{$key}{'wins'} %>&seed1=<% $entries{$key}{'wins'} %>&team2=-1&wins2=0&seed2=0&bracket_to_return=<% $bracket %>">
+										Bye
+									</a>
+								</td>
+
+%							 }
+
+
+							<td>
+%								unless ( $entries{$key}{'opponent'} > 0 ) {
+									<a class="dkblue nowrap block centeralign" href="pullup.mas?round_id=<% $round_id %>&bracket=<% $bracket %>&team=<% $key %>&todo=DOWN">
+										Pull &darr;
+									</a>
+%								}
+							</td>		
+
+						</tr>
+
+%					}
+
+%				}
+
+				</tbody>
+				</table>
+
+%			} #don't show neg table in an odd round
+		
+%			if ( $bracket > -1 ) {
+
+				<hr style="margin-top: 40px;" />
+
+				<h5 class="martop" style="margin-top: 20px;">
+					Unpaired teams in other brackets
+				</h5> 
+
+				<& /funclib/tablesorter.mas, table => "unpaired" &> 
+
+				<table cellpadding="3" width="100%" id="unpaired" class="tablesorter">
+
+					<thead>
+						<tr class="yellowrow">
+							<th class="smaller" title="Entry Designation">Code</th>
+							<th class="smaller" title="Rounds Won">W</th>
+							<th class="smaller" title="Seed" >Seed</th>
+							<th class="smaller" title="Seed + Opponent Average Seed">SOP</th>
+							<th class="smaller" title="2nd Tiebreaker (usually Points)">TB2</th>
+							<th class="smaller" title="Average Opponents' Wins">OW</th>
+							<th class="smaller" title="Average Opp Seed">OppSeed</th>							
+%							unless ($oddround) { 
+								<th class="smaller" title="Side Due">Due</th>
+%							}
+							<th class="smaller" title="Bracket Placement">Brkt</th>
+							<th class="smaller nosort" colspan="3">Action</th>
+						</tr>
+					</thead>
+
+				<tbody style="font-size: 90%">
+
+%				my $last_wins;
+
+%				foreach my $key (sort {$entries{$a}->{'seed'} <=> $entries{$b}->{'seed'}} keys(%entries)) {
+
+%					if ($key and $key > -1 and $entries{$key}{'opponent'} == 0 and $entries{$key}{'placement'} != $bracket ) {
+
+%						if ($last_wins && $last_wins != $entries{$key}{'wins'}) { 
+				</tbody>
+				</table>
+				<table cellpadding="3" width="100%" id="unpaired" class="tablesorter">
+
+					<thead>
+						<tr class="yellowrow">
+							<th class="smaller" title="Entry Designation">Code</th>
+							<th class="smaller" title="Rounds Won">W</th>
+							<th class="smaller" title="Seed" >Seed</th>
+							<th class="smaller" title="Seed + Opponent Average Seed">SOP</th>
+							<th class="smaller" title="2nd Tiebreaker (usually Points)">TB2</th>
+							<th class="smaller" title="Average Opponents' Wins">OW</th>
+							<th class="smaller" title="Average Opp Seed">OppSeed</th>							
+%							unless ($oddround) { 
+								<th class="smaller" title="Side Due">Due</th>
+%							}
+							<th class="smaller" title="Bracket Placement">Brkt</th>
+							<th class="smaller nosort" colspan="3">Action</th>
+						</tr>
+					</thead>
+
+				<tbody style="font-size: 90%">
+							<tr class="bordertop rightalign padcell">
+%						} else { 
+							<tr class="rightalign padcell">
+%						}
+
+%						$last_wins = $entries{$key}{'wins'};
+
+							<td>
+								<span class="<% hasconflict($team_to_pair, $key, %precluded) ? "dkred" : "" %> block">
+									<% $entries{$key}{'code'} %>
+								</span>
+							</td>
+
+							<td class="centeralign padno">
+								<% $entries{$key}{'wins'} %>
+							</td>
+
+							<td>
+								<% $entries{$key}{'seed'} %>
+							</td>
+				
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'SOP'}) %>
+							</td>
+				
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'next_tb'}) %>
+							</td>
+
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'opp_wins'}) %>
+							</td>
+
+							<td>
+								<% sprintf("%.1f", $entries{$key}{'oppseed'}) %>
+							</td>
+
+%							unless ($oddround) { 
+								<td class="centeralign">
+									<% $entries{$key}{'sidedue'} == 1 ? "A" : "N" %>
+								</td>
+%							}
+				
+							<td>
+								<% $entries{$key}{'placement'} %>
+							</td>
+				
+							<td>
+								<a class="dkblue nowrap block centeralign" href="pullup.mas?round_id=<% $round_id %>&bracket=<% $bracket %>&team=<% $key %>&todo=UP">
+									Pull &uarr;
+								</a>
+							</td>
+
+							<td>
+%								my $warn = had_bye_already($key);												
+								<a class="dkblue block  centeralign" <& "/funclib/confirm.mas", warn => $warn &> href="save_pairing.mas?round_id=<% $round_id %>&team1=<% $key %>&wins1=<% $entries{$key}{'wins'} %>&seed1=<% $entries{$key}{'wins'} %>&team2=-1&wins2=0&seed2=0&bracket_to_return=<% $bracket %>">
+									 Bye
+								</a>
+							</td>		
+
+						</tr>
+%					}
+
+%				}	# end team loop
+
+				</tbody>
+			</table>
+
+%	 }							#end conditional table
+
+		<h4>Current Pairings</h4> 
+		
+		<& /funclib/tablesorter.mas, table => "pairings" &> 
+		
+		<table cellpadding="3" width="100%" id="pairings" class="tablesorter">
+		
+			<thead>
+				<tr class="yellowrow">
+					<th class="smaller">Aff</th>
+					<th class="smaller">Neg</th>
+					<th class="smaller nosort" colspan="3">Action</th>
+				</tr>
+			</thead>
+				
+			<tbody style="font-size: 90%">
+
+<%perl> 
+
+			my @panels = Tab::Panel->search( round=>$round_id );			
+
+			foreach my $panel (@panels) {
+
+				my @ballots = Tab::Ballot->search( panel=>$panel->id );
+
+				my $aff = 0; 
+				my $neg = 0; 
+				my $bye = ""; 
+				my $warning = "";
+
+				foreach my $ballot (@ballots) {
+
+					if ($ballot->side == 1) { 
+						$aff = $ballot->entry; 
+					}
+
+					if ($ballot->side == 2) { 
+						$neg = $ballot->entry; 
+					}
+
+					if ($panel->bye or $ballot->bye) { 
+						$aff = $ballot->entry; 
+						$bye = "BYE"; 
+					}
+
+					if ($ballot->side != 1 and $ballot->side != 2 and $bye eq "" and $aff == 0) {
+
+						$aff = $ballot->entry; 
+						$warning = "SIDE ERROR";
+
+					} elsif ($ballot->side != 1 and $ballot->side != 2 and $bye eq "" and $neg == 0) {
+						
+						$neg = $ballot->entry; 
+						$warning = "SIDE ERROR";
+
+					}
+
+				}
+
+</%perl> 
+
+				<tr>
+					<td>
+						<span class="threequarter nowrap">
+							<% $entries{$aff}{'code'} %>
+						</span>
+						
+						<span class="quarter">
+							<% $entries{$aff}{'wins'} %> wins <% $bye %> <% $warning %> 
+						</span>
+					</td>
+
+					<td>
+%						if ($entries{$neg}) { 
+							<span class="threequarter nowrap">
+								<% $entries{$neg}{'code'} %> 
+							</span>
+							<span class="quarter">
+								<% $entries{$neg}{'wins'} %> wins <% $bye %> <% $warning %> 
+							</span>
+%						} 
+					</td>
+
+					<td>
+						<a class="dkred block centeralign" href="dump_panel.mas?panel_id=<% $panel->id %>&bracket=<% $bracket %>&round_id=<% $round_id %>">
+							Delete
+						</a>
+					</td>
+				</tr>
+
+%			}
+
+			</tbody>
+				
+			</table>
+
+%			if ($account->site_admin) { 
+				<br />
+%				$end = time(); 
+				Total time: <% printf("%.2f\n", $end - $start) %>
+%			}
+
+%		}
+	
+</div>
+
+	<div class="menu">
+	
+		<div class="sidenote">
+
+			<h4>Bracket</h4>
+
+			<div class="evenrow centeralign visible">
+				<form action="manual_powermatch.mhtml?round_id=<% $round_id %>" method="POST">
+					<select name="bracket" onchange='this.form.submit()' class="fixedsmall">
+%						foreach my $allbrack (sort {$b <=> $a} 0 .. ($round->name - 1) ) { 
+							<option value="<% $allbrack %>" <% $allbrack == $bracket ? "selected" : "" %>>
+								<% $allbrack %> win bracket
+							</option>
+%						}
+						<option value="-1" <% $bracket == -1 ? "selected" : "" %> >Show All</option>
+					</select>
+				</form>
+				<noscript>
+					<input class="thin" type="submit" value="Load">
+				</noscript>
+			</div>
+
+%			if ($oddround == 1) {			
+
+				<div class="white padless">
+					<span class="twothird">
+						Teams in bracket
+					</span>
+					<span class="third">
+						<% $aff_teams_in_bracket %>
+					</span>
+				</div>
+
+%			} else {
+				<div class="oddrow block padless">
+					<span class="twothird">
+						Due Aff Teams
+					</span>
+					<span class="third">
+						<% $aff_teams_in_bracket %>
+					</span>
+				</div>
+
+				<div class="white padless">
+					<span class="twothird">
+						Due Neg Teams
+					</span>
+					<span class="third">
+						<% $neg_teams_in_bracket %>
+					</span>
+				</div>
+%			}
+
+			<div class="oddrow block padless">
+				<span class="twothird">
+					Paired Already
+				</span>
+				<span class="third">
+					<% $paired_teams %>
+				</span>
+			</div>
+
+			<div class="white padless">
+				<span class="twothird">
+					Left to Pair
+				</span>
+				<span class="third">
+					<% $unpaired_teams %> 
+				</span>
+			</div>
+
+			<a class="blue block" href="/panel/schemat/show.mhtml?round_id=<% $round_id %>">
+				<% $round->realname %> Schematic
+			</a>
+
+
+		</div>
+
+		<div class="sidenote">
+
+			<h4>Bracket Changes</h4>
+
+
+%			if ($bracket != -1) {	
+
+				<a class="yellow block" href="/panel/round/pair_bracket.mas?round_id=<% $round_id %>&bracket_to_pair=<% $bracket %>">
+					Auto-pair remaining entries
+				</a>
+
+%				if ($bracket + 1 < $round->name) { 
+					<a class="yellow block" href="collapse_bracket.mas?round_id=<% $round %>&bracket=<% $bracket %>&pull_iterator=1">
+						Collapse <% $bracket %>-wins into <% $bracket + 1 %>-win bracket
+					</a>
+%				}			
+
+%				if ($bracket > 0) { 
+					<a class="yellow block" href="collapse_bracket.mas?round_id=<% $round %>&bracket=<% $bracket %>&pull_iterator=-1">
+						Collapse <% $bracket %>-wins into <% $bracket - 1 %>-win bracket
+					</a>
+%				}			
+
+				<a class="martop dkred block" href="dump_bracket.mas?round_id=<% $round_id %>&bracket_to_pair=<% $bracket %>&from_main=true">
+					Dump debates in <% $bracket %>-win bracket
+				</a>
+
+				<a class="martop dkred block" href="/panel/round/pair_bracket.mas?round_id=<% $round_id %>&bracket_to_pair=<% $bracket %>&delete_existing=Seaver">
+					Dump <% $bracket %>-win debates & autopair
+				</a>
+%			}			
+
+		</div>
+
+		<div class="sidenote">
+
+			<h4>Round Changes</h4>
+
+			<a class="yellow block" href="reset_bracket.mas?round_id=<% $round_id %>&winsonly=false">Reset brackets using current pairings</a>
+			<a class="yellow block" href="reset_bracket.mas?round_id=<% $round_id %>&winsonly=true">Reset brackets to win totals</a>
+
+%			if ($oddround) {			
+				<a class="yellow block" href="snake_sides.mas?round_id=<% $round_id %>">Assign debate sides</a>
+%			}			
+
+<!--			<a class="yellow block" href="index.mhtml">Exit and assign rooms (inactive) </a>
+				<a class="yellow block" href="index.mhtml">Exit and assign judges (inactive)</a>
+-->
+
+			<a class="martop dkred block" href="/funclib/round_dump.mas?round_id=<% $round_id %>&from_pairing=Redsox">Dump Whole Round</a>
+
+		</div>
+
+	</div>

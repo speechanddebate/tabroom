@@ -3,7 +3,8 @@ use base 'Tab::DBI';
 Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
 Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder tv audit bye side/);
-Tab::Ballot->columns(Others => qw/noshow timestamp chair speechnumber collected collected_by cat_id account seed pullup/);
+Tab::Ballot->columns(Others => qw/noshow timestamp chair speechnumber collected
+								  collected_by cat_id account seed pullup/);
 Tab::Ballot->columns(TEMP => qw/roundid entryid panelid judgename/);
 
 Tab::Ballot->has_a(judge => 'Tab::Judge');
