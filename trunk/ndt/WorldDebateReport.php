@@ -1,7 +1,7 @@
 <?php
-$username="jbruschke";
-$password="Oof9iyeeGh9jeeg";
-$database="itab";
+$username="dont_store"
+$password="usernames_and_passwords"
+$database="in_subversion";
 
 mysql_connect("localhost",$username,$password);
 @mysql_select_db($database) or die( "Unable to select database<br>");
