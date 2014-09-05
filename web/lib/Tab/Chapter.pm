@@ -2,7 +2,7 @@ package Tab::Chapter;
 use base 'Tab::DBI';
 Tab::Chapter->table('chapter');
 Tab::Chapter->columns(Primary => qw/id/);
-Tab::Chapter->columns(Essential => qw/name country state timestamp coaches self_prefs district_id level naudl ipeds nces/);
+Tab::Chapter->columns(Essential => qw/name country state timestamp coaches self_prefs district_id level naudl ipeds nces nsda/);
 Tab::Chapter->columns(TEMP => qw/count prefs code member/);
 
 Tab::Chapter->has_many(schools => 'Tab::School', 'chapter');
