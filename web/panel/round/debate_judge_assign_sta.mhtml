@@ -16,17 +16,20 @@
 	
 </%args>
 <%init>
-
+	
+	#DOESN'T SUPPORT REGION STRIKES, or can't judge in elims if you voted against before
+	
 	use Data::Dumper;
 	use Time::HiRes qw( time );
 	my $start = time(); 
-	
+	my $debug_time = 0;
+		
 	my $round = Tab::Round->retrieve($round_id);
 	my $event_id = int($round->event); 
 	my $event = Tab::Event->retrieve($event_id);
 	my $default_mjp = $event->judge_group->setting("default_mjp");
 
-	#defaults
+	#DEFAULTS
 	$max_pref_above=50 unless $max_pref_above;
 	$max_mut_above=30 unless $max_mut_above;
 	$max_pref_at=50 unless $max_pref_at;
@@ -40,7 +43,7 @@
 	$break_line=3 unless $break_line;
 	$pref_left=2 unless $pref_left;
 	
-	#assign weights to hash 
+	#ASSIGN WEIGHTS TO HASH
 	my %max_pref; my %max_mut;
 	$max_pref{'above'} = $max_pref_above;
 	$max_mut{'above'} = $max_mut_above;
@@ -49,7 +52,7 @@
 	$max_pref{'below'} = $max_pref_below;
 	$max_mut{'below'} = $max_mut_below;
 
-	#load pairings, judge, and entry ingo
+	#LOAD, PAIRINGS, JUDGE, PREF, AND ENTRY INFO
 	my @panels = Tab::Panel->search( round => $round_id );
 	my %pan_entry;	
 	foreach my $panel (@panels) {
@@ -75,9 +78,8 @@
 	my %entry_code = map {$_->id => $_->code} $round->event->entries;
 	my %pref_record = $m->comp("/funclib/round_ordinals.mas", round => $round);
 	my %all_pref = $m->comp("/funclib/event_judgeprefs.mas", event => $round->event, style => "victorian" );
-	#conflicts
 		
-	#diagnostics
+	#DIAGNOSTICS
 	my ($paired_panels_past, $assigned_judges_past, $needed_panels_past, $needed_judges_past, $paired_panels_current, $assigned_judges_current, $needed_panels_current, $needed_judges_current, $paired_panels_future, $assigned_judges_future, $needed_panels_future, $needed_judges_future, $burned_current, $burned_total, $lost_rounds_current, $lost_rounds_total, $event_rds_left) = $m->comp("/funclib/judge_oblig_count.mas", event_id => $event_id, current_rd_id => $round->id );
 	my ($avg_pref, $avg_mut, $worst_pref, $worst_mut, $deciles) = $m->comp("/funclib/mjp_diagnostics.mas", round => $round );
 	my %deciles = %{$deciles};
@@ -98,6 +100,87 @@
 
 	my @cohort; $cohort[1]="Above"; $cohort[2]="At"; $cohort[3]="Below";
 	
+	#JUDGE CONFLICTS
+	
+	my $allow_judge_own = $round->event->setting("allow_judge_own");
+	my $region_constrain = $round->event->setting("region_constraints");
+
+	# - conflicts pass #1; check for school conflicts
+	my @entry_recs = $m->comp("/funclib/round_entries.mas", round => $round);
+	foreach my $judges (@judge_ref) {
+		foreach my $entry_rec (@entry_recs) {
+			if ($judges->school == $entry_rec->school && not defined $allow_judge_own) { 
+				$all_pref{$entry_rec."-".$judges} = 9999;
+			}
+		}
+	}
+
+	# - conflicts pass #2; judged before or will in the future
+	my $allow_repeat_elims = $round->event->setting("allow_repeat_elims");
+	my $allow_repeat_judging = $round->event->setting("allow_repeat_judging");
+	my $allow_repeat_prelim_side = $round->event->setting("allow_repeat_prelim_side");
+
+	Tab::Ballot->set_sql(pull_ballots => "
+		select ballot.entry, ballot.judge 
+		from ballot, panel, round
+		where panel.id=ballot.panel
+		and round.id=panel.round
+		and round.name != ".$round->name."
+		and round.event = ".$event_id."
+		and ballot.bye = 0
+		and ballot.noshow = 0
+	");
+	my @event_ballots = Tab::Ballot->search_pull_ballots;
+	
+	my $ok_to_strike=1;
+	if ($allow_repeat_judging == 1) { $ok_to_strike = 0; }
+	if ( ($round->type eq "elim" or $round->type eq "final") and $allow_repeat_elims == 1 ) { $ok_to_strike = 0; }
+	foreach my $event_ballot (@event_ballots) {
+		if ($ok_to_strike == 1) {
+			$all_pref{$event_ballot->entry."-".$event_ballot->judge} = 9999;
+		}
+	}
+	
+
+	# - conflicts pass #3; entered conflicts
+	my $dbh = Tab::DBI->db_Main();
+	my $strikes_sth = $dbh->prepare("
+		select distinct strike.id, strike.judge, strike.type, strike.event, strike.entry, 
+			strike.school, strike.region, strike.start, strike.end
+		from strike
+		where strike.tourn = ".$round->event->tourn->id."
+	");
+
+	$strikes_sth->execute();
+
+	while (my ($id, $judge, $type, $event, $entry, $school, $region, $start, $end) = $strikes_sth->fetchrow_array() ) {
+
+		foreach my $entry_rec (@entry_recs) {
+		
+			if ($type eq "conflict" || $type eq "entry") { 
+				if ($school) {
+					if ( $entry_rec->school == $school ) { $all_pref{$entry_rec."-".$judge} = 9999 };
+				} else {  
+					$all_pref{$entry."-".$judge} = 9999 ;
+				}
+			} 
+
+			if ($type eq "hybrid") { 
+				if ( $entry_rec->school == $school ) { $all_pref{$entry_rec."-".$judge} = 9999 };
+			}
+
+			if ($type eq "region") { 
+				if ( $entry_rec->school->region == $region ) { $all_pref{$entry_rec."-".$judge} = 9999 };
+			}
+
+			if ($type eq "school") { 
+				if ( $entry_rec->school == $school ) { $all_pref{$entry_rec."-".$judge} = 9999 };
+			}
+
+		}
+
+	}
+
 	sub prefdata {
 
 		my ($pref_str) = @_;
@@ -121,11 +204,55 @@ border:1px solid black;
 
 	<div class="left huge" >
 
-%				my $end = time(); 
+%				my $end = time(); if ($debug_time) {
 				Total load time: <% printf("%.2f\n", $end - $start) %>
+%				}				
 	
 	<script>
 
+		SavePairing = function(round_id) {
+			
+			var n_judges = parseFloat(document.getElementById("n_judges").value); 
+			
+			//delete existing placements
+			$.post("/funclib/round_clear_judges.mas",{ round_id: round_id, nobye: 1 },function(result){  });  
+			window.alert("Cleared current panels -- click to continue");
+			
+			//save the judgse
+			//$m->comp("/funclib/panel_judgeadd.mas", panel => $panel, judge_id => $judge);
+			var MasterTable = document.getElementById("current_pairing");
+			var TableRows = MasterTable.getElementsByTagName("tr");
+			for (var x = 1; x < TableRows.length ; x++) {
+				for (var j = 1; j <= n_judges; j++) {
+					var panel_id = TableRows[x].cells[0].textContent;
+					var dummy = document.getElementById(panel_id+"Judge"+j+"ID");
+					var judge_id = dummy.textContent;
+					//$.post("/funclib/panel_judgeadd.mas",{ panel_id: panel_id, judge_id: judge_id }); 					
+					$.post("/funclib/panel_judgeadd.mas",{ panel_id: panel_id, judge_id: judge_id, fromjava: true },function(result){  });
+					var stupid = true;
+				}	  
+
+			}
+			
+			//update buttons			
+			var dummy = document.getElementById("save_button");
+			dummy.value = "Placements Saved"
+			dummy.style.backgroundColor = "Green" ;
+			
+			var time_display = document.getElementById("status_box");
+			time_display.textContent = "";
+			//reload
+			window.alert("Judge placements saved -- hit enter to reload page");
+			window.location.reload();
+
+		}
+		
+		DeletePairing = function(round_id) {
+			$.post("/funclib/round_clear_judges.mas",{ round_id: round_id, nobye: 1 }); 
+			window.alert("All judge placements have been deleted; hit OK to reload page");
+			window.location.reload();
+		}
+		
 		sortTest2 = function() {
 			
 			//window.alert("IN sort sub");
@@ -256,12 +383,16 @@ border:1px solid black;
 
 			var dummy = document.getElementById(panel_id+"Judge"+judge_number+"ID");
 			dummy.textContent = judge_row.cells[0].textContent;
-			var dummy = document.getElementById(panel_id+"Judge"+judge_number+"Name");
-			dummy.textContent = judge_row.cells[1].textContent;
-			var dummy = document.getElementById(panel_id+"Judge"+judge_number+"Pref1");
-			dummy.textContent = judge_row.cells[3].textContent;
-			var dummy = document.getElementById(panel_id+"Judge"+judge_number+"Pref2");
-			dummy.textContent = judge_row.cells[4].textContent;
+			var judge_name = document.getElementById(panel_id+"Judge"+judge_number+"Name");
+			
+			var pref1 = document.getElementById(panel_id+"Judge"+judge_number+"Pref1");
+			pref1.textContent = judge_row.cells[3].textContent;
+			
+			var pref2 = document.getElementById(panel_id+"Judge"+judge_number+"Pref2");
+			pref2.textContent = judge_row.cells[4].textContent;
+
+			judge_name.textContent = judge_row.cells[1].textContent + " " + pref1.textContent+"-"+pref2.textContent;
+						
 			var dummy = document.getElementById(panel_id+"Judge"+judge_number+"Mut");
 			dummy.textContent = Math.abs(parseFloat(judge_row.cells[3].textContent) - parseFloat(judge_row.cells[4].textContent) ).toFixed(1);
 			//update panel to show balance and avg
@@ -281,11 +412,11 @@ border:1px solid black;
 			if (panel_row == null ) { return 0; }
 			for (var j = 1; j <= n_judges; j++) {
 				var row_judge = document.getElementById(panel_row.cells[0].textContent+"Judge"+j+"ID").textContent;
-				if ( row_judge != judge_to_add && row_judge != judge_to_remove ) {
+				if ( row_judge != judge_to_add && row_judge != judge_to_remove && parseFloat(row_judge)>0 ) {
 					var dummy = document.getElementById(panel_row.cells[0].textContent+"Judge"+j+"Pref1").textContent;
 					bal = bal + parseFloat(dummy);
 					var dummy = document.getElementById(panel_row.cells[0].textContent+"Judge"+j+"Pref2").textContent;
-					bal = bal + parseFloat(dummy);
+					bal = bal - parseFloat(dummy);
 				}
 			}
 			
@@ -308,22 +439,27 @@ border:1px solid black;
 
 			var judge_1_STA = document.getElementById("STA"+judge1+"-"+panel1);
 			var judge_1_mutpref = parseFloat(judge_1_STA.cells[5].textContent);
-			var bal1 = recalc_panel_balance(panel1, judge2, judge1);			
-
+			var judge_1_rawmut = Math.abs(parseFloat(judge_1_STA.cells[7].textContent));
+			if ( judge_1_mutpref == 9999 ) { return 9999; }
+			if ( n_judges > 1 ) { var bal1 = recalc_panel_balance(panel1, judge2, judge1); } else { var bal1 = judge_1_rawmut; }
+						
 			//bail if you only want the first score
 			if ( judge2 == -999 ) {
 				var score = judge_1_mutpref;
-				if ( isNaN(bal1) ) { score = score + ( bal1 * panel_mut_weight ) };
-				return score;
+				if ( !isNaN(bal1) ) { score = score + ( Math.abs(bal1) * panel_mut_weight ) };
+				return parseFloat(score.toFixed(1));
 			}
 			
 			var judge_2_STA = document.getElementById("STA"+judge2+"-"+panel2);
 			var judge_2_mutpref= parseFloat(judge_2_STA.cells[5].textContent);
-			var bal2 = recalc_panel_balance(panel2, judge1, judge2) ;			
+			var judge_2_rawmut = Math.abs(parseFloat(judge_2_STA.cells[7].textContent));
+			if ( judge_2_mutpref == 9999 ) { return 9999; }
+			if ( n_judges > 1) { var bal2 = recalc_panel_balance(panel2, judge1, judge2) ; } else { var bal2 = judge_2_rawmut; }
+			if ( isNaN(bal2) ) { bal2 =0; }			
 
 			var score = judge_1_mutpref + judge_2_mutpref + (Math.abs(bal1) * panel_mut_weight) + (Math.abs(bal2) * panel_mut_weight);
 			
-			return score;
+			return parseFloat(score.toFixed(1));
 
 		}
 		
@@ -347,10 +483,11 @@ border:1px solid black;
 			return dummy;
 		}
 		
-		double_swap = function() {
-			
+		double_swap = function(just_fix) {
+
+			//just-fix is boolean, and if true, it will fix an over-max panels even if it hurts the overall pairing
+			var start = new Date();
 			var n_judges = parseFloat(document.getElementById("n_judges").value); 
-			var panel_mut_weight = parseFloat(document.getElementById("panel_mut_weight").value);			
 			var made_change = false;
 			
 			var MasterTable = document.getElementById("current_pairing");
@@ -359,75 +496,112 @@ border:1px solid black;
 				for (var y = (x + 1); y < TableRows.length; y++) {
 					for (var j = 1; j <= n_judges; j++) {
 						for (var j2 = 1; j2 <= n_judges; j2++) {
-						
-							var judge_x_id = document.getElementById(TableRows[x].cells[0].textContent+"Judge"+j+"ID").textContent;
-							var judge_y_id = document.getElementById(TableRows[y].cells[0].textContent+"Judge"+j2+"ID").textContent;
+
+							var panel_x = TableRows[x].cells[0].textContent;
+							var panel_y = TableRows[y].cells[0].textContent;
+							var judge_x_id = document.getElementById(panel_x+"Judge"+j+"ID").textContent;
+							var judge_y_id = document.getElementById(panel_y+"Judge"+j2+"ID").textContent;
 							judge_x_id = parseFloat(judge_x_id);
 							judge_y_id = parseFloat(judge_y_id);
+							var dummy = over_max(judge_x_id, panel_y);
 
-							var score_before = get_eval_score(judge_x_id, TableRows[x].cells[0].textContent, judge_y_id, TableRows[y].cells[0].textContent);						
-							var score_after = get_eval_score(judge_x_id, TableRows[y].cells[0].textContent, judge_y_id, TableRows[x].cells[0].textContent);						
+							if (dummy == false) {
+								var dummy = over_max(judge_y_id, panel_x);
 
-							var dummy = over_max(judge_x_id, TableRows[y].cells[0].textContent);
-							var dummy2 = over_max(judge_y_id, TableRows[x].cells[0].textContent);
+								if ( dummy == false ) {
 
-							if ( score_after < score_before && dummy == false && dummy2 == false ) {
-								add_judge_to_panel(judge_y_id, TableRows[x].cells[0].textContent, j);		
-								add_judge_to_panel(judge_x_id, TableRows[y].cells[0].textContent, j2);
-								made_change = true;
+									var score_before = get_eval_score(judge_x_id, panel_x, judge_y_id, panel_y);						
+									var score_after = get_eval_score(judge_x_id, panel_y, judge_y_id, panel_x);						
+									var x_over_max = false;
+									if (just_fix == true) { x_over_max = over_max(judge_x_id, panel_x); }
+
+									if ( score_after < score_before || ( just_fix == true && x_over_max == true) ) {
+										add_judge_to_panel(judge_y_id, panel_x, j);		
+										add_judge_to_panel(judge_x_id, panel_y, j2);
+										made_change = true;
+									}
+								}
 							}
 						}
 					}
 				}
 			}
-			
+			var end = new Date(); var duration_toclear = end - start; 
 			return made_change;
 		}
 
-		triple_swap =function () {
+		triple_swap = function (just_fix) {
+		
+			//just-fix is boolean, and if true, it will fix an over-max panels even if it hurts the overall pairing
 			var made_change = false;
 			var n_judges = parseFloat(document.getElementById("n_judges").value); 
 			var panel_mut_weight = parseFloat(document.getElementById("panel_mut_weight").value);			
 			var MasterTable = document.getElementById("current_pairing");
 			var TableRows = MasterTable.getElementsByTagName("tr");
 			for (var x = 1; x < TableRows.length - 2; x++) {
+				for (var j = 1; j <= n_judges; j++) {
 				var panel_x = TableRows[x].cells[0].textContent;
-				for (var y = (x + 1); y < TableRows.length - 1 ; y++) {
-					var panel_y = TableRows[y].cells[0].textContent;
-					for (var z = (x + 2); y < TableRows.length; y++) {
-						var panel_z = TableRows[z].cells[0].textContent;
-						for (var j = 1; j <= n_judges; j++) {
-							for (var j2 = 1; j2 <= n_judges; j2++) {
-								for (var j3 = 1; j3 <= n_judges; j3++) {
+				var x_over = false; var judge_x_id = document.getElementById(panel_x+"Judge"+j+"ID").textContent;
+				if (just_fix == true) { x_over = over_max(judge_x_id, panel_x); }
+				if ( just_fix == true && x_over == false ) { break; }
 
-									var judge_x_id = document.getElementById(panel_x+"Judge"+j+"ID").textContent;
-									var judge_y_id = document.getElementById(panel_y+"Judge"+j2+"ID").textContent;
+					for (var y = (x + 1); y < TableRows.length - 1 ; y++) {
+						for (var j2 = 1; j2 <= n_judges; j2++) {
+						var panel_y = TableRows[y].cells[0].textContent;
+						var judge_x_id = document.getElementById(panel_x+"Judge"+j+"ID").textContent;
+						var judge_y_id = document.getElementById(panel_y+"Judge"+j2+"ID").textContent;
+							if ( over_max(judge_y_id, panel_x) == false ) {
+								var curr_x_score = get_eval_score(judge_x_id, panel_x, -999, -999);					
+								var y_to_x_panel = get_eval_score(judge_y_id, panel_x, -999, -999);
+								if ( y_to_x_panel > curr_x_score ) { break; }
+
+								for (var z = (x + 2); z < TableRows.length; z++) {
+									var panel_z = TableRows[z].cells[0].textContent;
+									for (var j3 = 1; j3 <= n_judges; j3++) {
 									var judge_z_id = document.getElementById(panel_z+"Judge"+j3+"ID").textContent;
-									
-									var curr_x_score = get_eval_score(judge_x_id, panel_x, -999, -999);
-									var curr_y_score = get_eval_score(judge_y_id, panel_y, -999, -999);
-									var curr_z_score = get_eval_score(judge_z_id, panel_z, -999, -999);
-									
-									var y_to_x_panel = get_eval_score(judge_y_id, panel_x, -999, -999);
-									if ( y_to_x_panel > curr_x_score ) { break; }
-									var z_to_y_panel = get_eval_score(judge_z_id, panel_y, -999, -999);
-									if ( z_to_y_panel > curr_y_score) { break; }
-									var x_to_z_panel = get_eval_score(judge_x_id, panel_z, -999, -999);
-									if ( x_to_z_panel > curr_z_score) { break; }
-									
-									//didn't exit, so the switch works.  Execute it.
-									add_judge_to_panel(judge_y_id, panel_x, j);		
-									add_judge_to_panel(judge_z_id, panel_y, j2);		
-									add_judge_to_panel(judge_x_id, panel_z, j3);		
-									made_change = true;
-
+										if ( over_max(judge_z_id, panel_y) == false ) {
+											if ( over_max(judge_x_id, panel_z) == false ) {
+												if ( just_fix == false ) {
+													var curr_y_score = get_eval_score(judge_y_id, panel_y, -999, -999);
+													var curr_z_score = get_eval_score(judge_z_id, panel_z, -999, -999);
+													var z_to_y_panel = get_eval_score(judge_z_id, panel_y, -999, -999);
+													if ( z_to_y_panel > curr_y_score) { break; }
+													var x_to_z_panel = get_eval_score(judge_x_id, panel_z, -999, -999);
+													if ( x_to_z_panel > curr_z_score) { break; }
+												}
+												//didn't exit, so the switch works.  Execute it.
+												add_judge_to_panel(judge_y_id, panel_x, j);		
+												add_judge_to_panel(judge_z_id, panel_y, j2);		
+												add_judge_to_panel(judge_x_id, panel_z, j3);		
+												made_change = true;
+											}	
+										}
+									}
 								}
-							}
+							}	
 						}
-					}	
-				}
+					}
+				}	
 			}
+			
 			return made_change;
+			
+		}
+		
+		can_place_now = function(judge_id) {
+			var judge_row = document.getElementById("Judge"+judge_id);
+			var is_avail = true;
+			//see if already assigned
+			if ( parseFloat(judge_row.cells[10].textContent) == 1 ) { is_avail = false; }
+			//see if available for current round			
+			if ( parseFloat(judge_row.cells[4].textContent) == 0 ) { is_avail = false; }
+			//see if assigned to another event in the same timeslot
+			if ( parseFloat(judge_row.cells[9].textContent) == 1 ) { is_avail = false; }
+			//check remaining commitment
+			var dummy = parseFloat(judge_row.cells[6].textContent) - parseFloat(judge_row.cells[8].textContent) + parseFloat(judge_row.cells[10].textContent);
+			if (dummy <= 0 ) { is_avail = false; } 
+			return is_avail;
+
 		}
 
 		fix_with_extra = function() {
@@ -449,13 +623,14 @@ border:1px solid black;
 						var JudgeTable = document.getElementById("judge_use");
 						var JudgeRows = JudgeTable.getElementsByTagName("tr");
 						for (var i = 1; i < JudgeRows.length; i++) {
-							if ( parseFloat(JudgeRows[i].cells[10].textContent) != 1 && parseFloat(JudgeRows[i].cells[6].textContent) > 0) {
+							if ( can_place_now(parseFloat(JudgeRows[i].cells[0].textContent)) == true ) {
 								//give a score
 								eval[n] = [];
 								eval[n][0] = parseFloat(JudgeRows[i].cells[0].textContent); //judge id
 								eval[n][1] = get_eval_score(eval[n][0], panel_id, -999, -999);
 								eval[n][1] = eval[n][1] - (2 * parseFloat(JudgeRows[i].cells[2].textContent) * pref_left);
 								if ( isNaN(eval[n][1]) ) { eval[n][1] = 9999; }
+								if ( over_max(eval[n][0], panel_id) == true ) { eval[n][1] = 9999; }
 								n = n + 1;
 							}
 						
@@ -502,7 +677,6 @@ border:1px solid black;
 			var TableRows = MasterTable.getElementsByTagName("tr");
 			for (var x = 1; x < TableRows.length; x++) {
 				var best_judge_steal_score = 9999; var best_replacement_score = 9999;
-				var best_judge_steal_ID = 0; var best_replacement_judge_id = 0;
 				var panel_id = TableRows[x].cells[0].textContent;
 				var judge_to_steal = 0; var replacement_judge_id = 0; var replacement_judge_n = 0;
 				for (var j = 1; j <= n_judges; j++) {
@@ -522,7 +696,9 @@ border:1px solid black;
 									for (var i = 1; i < JudgeRows.length; i++) {
 										if ( JudgeRows[i].cells[10].textContent == 0 && JudgeRows[i].cells[6].textContent > 0 ) {
 											var dummy_2 = get_eval_score(JudgeRows[i].cells[0].textContent, panel_id_2, -999, -999);
-											if ( dummy + dummy_2 < best_replacement_score + best_judge_steal_score && over_max(JudgeRows[i].cells[0].textContent, panel_id_2, -999, -999) == false ) {
+											dummy = parseFloat(dummy); dummy_2 = parseFloat(dummy_2);
+											var new_over_max = over_max(JudgeRows[i].cells[0].textContent, panel_id_2, -999, -999);
+											if ( (dummy + dummy_2) < (best_replacement_score + best_judge_steal_score) &&  new_over_max == false ) {
 												best_replacement_score = dummy_2;
 												best_judge_steal_score = dummy;
 												judge_to_steal = judge_id_2;
@@ -592,6 +768,7 @@ border:1px solid black;
 		PlaceJudges = function() {
 			
 			var n_judges = parseFloat(document.getElementById("n_judges").value); 
+			var pref_left = parseFloat(document.getElementById("pref_left").value);
 			var start = new Date();
 			
 			clear_current_placements();
@@ -644,75 +821,118 @@ border:1px solid black;
 						eval[i][3] = eval[i][2]-(rating * pref_left); //mutpref w/commit left adjustment				
 						eval[i][4] = TableRows[i].cells[1].textContent; //judge name
 						eval[i][5] = IsObligated( TableRows[i].cells[0].textContent ); //obligated to hear round
-						//penalize if exceed cohort max
-						if ( over_max(eval[i][0], eval[i][1]) == true   ) { eval[i][3] = 9999; }
+						//if ( over_max(eval[i][0], eval[i][1]) == true ) { eval[i][3] = 9999; }
 					}
 					eval.sort(function(a, b) { return (a[3] < b[3] ? -1 : (a[3] > b[3] ? 1 : 0)); });
 							
 					//now loop panels and put in the best judge		
-					for (var panel = 1; panel < PairingRows.length; panel++) {
-						var dummy = document.getElementById(PairingRows[panel].cells[0].textContent+"Cohort");
-						if ( dummy.textContent == cohort_str[cohort] ) {
+					for (var j = 0; j < eval.length-1; j++) {
 
-							for (var j = 1; j <= STAData_length; j++) {
-								judrow = document.getElementById("Judge"+eval[j][0]);
-								if (parseFloat(eval[j][1]) == parseFloat(PairingRows[panel].cells[0].textContent) && judrow.cells[10].textContent == 0 && ( non_ob_needed > 0 || eval[j][5] == true ) ) {
-								
-									add_judge_to_panel(eval[j][0], PairingRows[panel].cells[0].textContent, judge);		
+						judrow = document.getElementById("Judge"+eval[j][0]);
+						var in_cohort = false;
+						var dummy = document.getElementById(eval[j][1]+"Cohort");
+						if ( dummy.textContent == cohort_str[cohort] ) { in_cohort = true;}
+						var assigned_already = false;
+						var dummy = document.getElementById(eval[j][1]+"Judge"+judge+"ID");
+						if ( parseFloat(dummy.textContent) > 0 ) { assigned_already = true; }
 
-									//count non obligateds 
-									if ( eval[j][5] == false ) { non_ob_needed = non_ob_needed - 1; }
-									break;
-									
-								}
+						if ( judrow.cells[10].textContent == 0 && in_cohort == true && assigned_already == false ) {
+							var eval_score = eval[j][3];
+							var judge_num = eval[j][0];
+							var is_oblig = eval[j][5];
+							var panel_id_num =eval[j][1];
+							if ( non_ob_needed > 0 || eval[j][5] == true ) {
+								add_judge_to_panel(eval[j][0], eval[j][1], judge);		
+								if ( eval[j][5] == false ) { non_ob_needed = non_ob_needed - 1; }
 							}
 						}
 					}
 				}
 			}
+			
 			var end = new Date(); var duration_first_pass = end - start; 
 
-			var n_tries=0;
-			while (n_tries < 1000) {
-			    var made_change = true;
-				var any_triple = false;
-				do {
-					made_change = double_swap();
-				    n_tries++;
-				} while ( n_tries < 500 && made_change == true );	
-				
-				do {
-					made_change = triple_swap();
-					if (made_change == true) { any_triple = true; }
-				    n_tries++;
+			var made_change = true;
+			var any_triple = false;
 
-				} while ( n_tries < 1000 && made_change == true );
-				
-				if ( any_triple == false ) { break; }
-			}
-			
+			//double and triple swaps
+			var n_tries=0;
+			var n_2x_swaps=0;
+			do {
+				made_change = double_swap(false); if (made_change == true ) { n_2x_swaps = n_2x_swaps +1; }
+				n_tries++;
+			} while ( n_tries < 50 && made_change == true );	
 			var end = new Date(); var duration_doub_swap = end - start; 
-			triple_swap();
+			
+			
+			n_tries=0;
+			do {
+				made_change = triple_swap(false); if (made_change == true ) { n_2x_swaps = n_2x_swaps +1; }
+				n_tries++;
+
+			} while ( n_tries < 10 && made_change == true );
 			var end = new Date(); var duration_trip_swap = end - start; 
+			
 			fix_with_extra();
 			var end = new Date(); var duration_fix_w_extra = end - start; 
 			fix_with_extra_and_doub();
 			var end = new Date(); var duration_fix_w_extra_and_doub = end - start; 
+
+			//repeat double and triple swaps
+			var n_tries=0;
+			do {
+				made_change = double_swap(false); if (made_change == true ) { n_2x_swaps = n_2x_swaps +1; }
+				n_tries++;
+			} while ( n_tries < 50 && made_change == true );	
+			var end = new Date(); var duration_doub_swap_2 = end - start; 
+			
+			n_tries=0;
+			do {
+				made_change = triple_swap(false); if (made_change == true ) { n_2x_swaps = n_2x_swaps +1; }
+				n_tries++;
+
+			} while ( n_tries < 10 && made_change == true );
+			var end = new Date(); var duration_trip_swap_2 = end - start; 
+
 			push_obligated_back_in();
-			var end = new Date(); var duration_push_back_in = end - start; 
-						
-//			time_display.textContent = "Time to clear screen is:" + duration_toclear/1000; 
+			var end = new Date(); var duration_push_back_in = end - start;
+			
+			//just fix double-swaps
+			if (panels_over_target() > 0 ) {
+				var n_tries=0;
+				do {
+					made_change = double_swap(true); if (made_change == true ) { n_2x_swaps = n_2x_swaps +1; }
+					n_tries++;
+				} while ( n_tries < 50 && made_change == true );	
+			}
+			
+			if (panels_over_target() > 0 ) {
+				n_tries=0;
+				do {
+					made_change = triple_swap(true); if (made_change == true ) { n_2x_swaps = n_2x_swaps +1; }
+					n_tries++;
+
+				} while ( n_tries < 10 && made_change == true );
+			}
+
+			time_display.textContent = "Time to clear screen is:" + duration_toclear/1000; 
 //			time_display.textContent=time_display.textContent + " Time to recalc screen is:" + duration_torecalc/1000; 
 //			time_display.textContent=time_display.textContent + " Time for sort is:" + duration_sorttest/1000; 
-//			time_display.textContent=time_display.textContent + " Time to first pass is:" + duration_first_pass/1000; 
+			time_display.textContent=time_display.textContent + " Time to first pass is:" + duration_first_pass/1000; 
 //			time_display.textContent=time_display.textContent + " Time to double swap is:" + duration_doub_swap/1000; 
+			time_display.textContent=time_display.textContent + " " + n_2x_swaps + " total 2x & 3x swaps. " + duration_doub_swap/1000; 
 //			time_display.textContent=time_display.textContent + " Time to triple swap is:" + duration_trip_swap/1000; 
 //			time_display.textContent=time_display.textContent + " Time to fix with extra:" + duration_fix_w_extra/1000; 
 //			time_display.textContent=time_display.textContent + " Time to fix with extra & 2x:" + duration_fix_w_extra_and_doub/1000; 
-//			time_display.textContent=time_display.textContent + "Time to push back oblig judges:" + duration_push_back_in/1000;
-			time_display.textContent= " Time to finish placements:" + duration_push_back_in/1000;
+//			time_display.textContent=time_display.textContent + " Time to push back oblig judges:" + duration_push_back_in/1000;
+//			time_display.textContent=time_display.textContent + " Finish second 2x, 3x swaps:" + duration_trip_swap_2/1000;
+			time_display.textContent=time_display.textContent + " Time to finish placements:" + duration_push_back_in/1000;
 			time_display.textContent=time_display.textContent + " - " + panels_over_target() + " panels over target"; 
 			current_diagnostics();
+			
+			var dummy = document.getElementById("save_button");
+			dummy.value = "Click to Save Placements Below";
+			dummy.style.backgroundColor = "Red" ;
 			
 		}
 		
@@ -858,7 +1078,10 @@ border:1px solid black;
 		<form action="debate_judge_assign_sta.mhtml" method="post">
 		<input type="hidden" value="<% $round_id %>" name="round_id">
 		<input id="n_judges" type="hidden" value="<% $round->judges %>" >
-		<table cellpadding="0" cellspacing="1" >
+
+		<& /funclib/tablesorter.mas, table => "tbl_weights" &> 
+		<table id="tbl_weights" class="smallish" cellpadding="0" cellspacing="1">
+		
 			<caption><h4>Weights</h4></caption>
 			<tr>
 				<td>
@@ -866,30 +1089,25 @@ border:1px solid black;
 					<input id="pref_weight" type="number" step="0.1" class="smaller" min=0 max=99 size=4  name="pref_wt" value="<% $pref_wt %>">
 				</td>
 				<td>
-					Preference per panel
-					<input type="number" step="0.1" class="smaller" min=0 max=99 size=4  name="pref_wt_panel" value="<% $pref_wt_panel %>">
-				</td>
-
-			</tr>
-			<tr>
-				<td>
 					Mutuality per judge
 					<input id="mut_weight" type="number" step="0.1" class="smaller" min=0 max=99 size=4  name="mut_wt" value="<% $mut_wt %>">
 				</td>
-				<td>
+				<td >
+					Remaining Pref
+					<input id="pref_left" type="number" step="0.1" class="smaller" min=0 max=99 size=4  name="pref_left" value="<% $pref_left %>">
+				</td>
+				<td style='display:none;'>
+					Preference per panel
+					<input type="number" step="0.1" class="smaller" min=0 max=99 size=4  name="pref_wt_panel" value="<% $pref_wt_panel %>">
+				</td>
+				<td style='display:none;'>
 					Mutuality per panel
 					<input id="panel_mut_weight" type="number" step="0.1" class="smaller" min=0 max=99 size=4  name="mut_wt_panel" value="<% $mut_wt_panel %>">
 				</td>
 
 			</tr>
-			<tr>
-				<td colspan="2">
-					Remaining Pref
-					<input id="pref_left" type="number" step="0.1" class="smaller" min=0 max=99 size=4  name="pref_left" value="<% $pref_left %>">
-				</td>
-			</tr>
 		</table>
-		<table>	
+		<table class="smallish" cellpadding="0" cellspacing="1">	
 			<caption>
 				<h4>Constraints</h4>
 			</caption>
@@ -947,11 +1165,12 @@ border:1px solid black;
 
 		</table>
 
-		<a onclick="PlaceJudges()" >Run STA pairing with these settings</a>		
-		<textarea id="status_box" cols="50" rows="3"></textarea>
-			
-		<div class="liblrow rightalign">
-					<input type="submit" value="Place judges with these settings">
+		
+		<div class="liblrow leftalign">
+					<input id="place_button" type="button" value="Place judges with these settings" onclick="PlaceJudges()">
+					<input id="save_button" type="button" value="Save Placements Below" onclick="SavePairing(<% $round_id %>)">
+					<input id="delete_button" type="button" value="Delete Placements & Reload" onclick="DeletePairing(<% $round_id %>)">
+					<textarea id="status_box" cols="70" rows="3"></textarea>
 			</form>
 		</div>
 		
@@ -959,7 +1178,7 @@ border:1px solid black;
 			<caption>
 				<h4>Diagnostics</h4>
 			</caption>
-			<tr>
+			<tr class="smallish">
 				<td>Scheme</td>
 				<td colspan="4" align="center">ABOVE break</td>
 				<td colspan="4" align="center">AT break</td>
@@ -967,7 +1186,7 @@ border:1px solid black;
 				<td>Rounds Lost</td>
 				<td>Avg Pref Remaining</td>
 			</tr>
-			<tr>
+			<tr class="smallish">
 				<td></td>
 				<td>Avg Pref</td>
 				<td>Worst Pref</td>
@@ -983,25 +1202,25 @@ border:1px solid black;
 				<td>Worst Mut</td>												
 				<td></td><td></td>
 			</tr>
-			<tr>
+			<tr class="smallish">
 				<td>Saved Pairings</td>
-				<td><% sprintf("%.1f", $avg_pref[1]) %></td>
-				<td><% sprintf("%.1f", $worst_pref[1]) %></td>
-				<td><% sprintf("%.1f", $avg_mut[1]) %></td>
-				<td><% sprintf("%.1f", $worst_mut[1]) %></td>
-				<td><% sprintf("%.1f", $avg_pref[2]) %></td>
-				<td><% sprintf("%.1f", $worst_pref[2]) %></td>
-				<td><% sprintf("%.1f", $avg_mut[2]) %></td>
-				<td><% sprintf("%.1f", $worst_mut[2]) %></td>
-				<td><% sprintf("%.1f", $avg_pref[3]) %></td>
-				<td><% sprintf("%.1f", $worst_pref[3]) %></td>
-				<td><% sprintf("%.1f", $avg_mut[3]) %></td>
-				<td><% sprintf("%.1f", $worst_mut[3]) %></td>
-				<td><% $lost_rounds_current %></td>
-				<td><% sprintf("%.1f", $tot_pref/$tot_rds) %></td>
+				<td id="SavedAvgAbove"><% sprintf("%.1f", $avg_pref[1]) %></td>
+				<td id="SavedWorstAbove"><% sprintf("%.1f", $worst_pref[1]) %></td>
+				<td id="SavedAvgMutAbove"><% sprintf("%.1f", $avg_mut[1]) %></td>
+				<td id="SavedWorstMutAbove"><% sprintf("%.1f", $worst_mut[1]) %></td>
+				<td id="SavedAvgtAt"><% sprintf("%.1f", $avg_pref[2]) %></td>
+				<td id="SavedWorstAt"><% sprintf("%.1f", $worst_pref[2]) %></td>
+				<td id="SavedAvgMutAt"><% sprintf("%.1f", $avg_mut[2]) %></td>
+				<td id="SavedWorstMutAt"><% sprintf("%.1f", $worst_mut[2]) %></td>
+				<td id="SavedAvgBelow"><% sprintf("%.1f", $avg_pref[3]) %></td>
+				<td id="SavedWorstBelow"><% sprintf("%.1f", $worst_pref[3]) %></td>
+				<td id="SavedAvgMutBelow"><% sprintf("%.1f", $avg_mut[3]) %></td>
+				<td id="SavedWorstMutBelow"><% sprintf("%.1f", $worst_mut[3]) %></td>
+				<td id="SavedRdsLost"><% $lost_rounds_current %></td>
+				<td id="SavedPrefLeft"><% sprintf("%.1f", $tot_pref/$tot_rds) %></td>
 
 			</tr>
-			<tr>
+			<tr class="smallish">
 				<td>Pairings Below</td>
 				<td id="AvgAbove"></td>
 				<td id="WorstAbove"></td>
@@ -1023,26 +1242,29 @@ border:1px solid black;
 
 		<table id="current_pairing" >
 			<caption>
-				<h4>Current Pairings</h4> <a onclick='current_diagnostics()' >Run Diagnostics on Pairings Below</a>
+				<h4>Current Pairings</h4> 
+<!--				
+				<a onclick='current_diagnostics()' >Run Diagnostics on Pairings Below</a>
 				<a onclick='judge_test()' >Test Judge Placement</a>
+-->				
 			</caption>
-		<tr>
-		<td>panel</td>
-		<td>aff ID</td>
+		<tr class="yellowrow" >
+		<td style='display:none;'>panel</td>
+		<td style='display:none;'>aff ID</td>
 		<td>aff name</td>
-		<td>neg ID</td>
+		<td style='display:none;'>neg ID</td>
 		<td>neg name</td>
 %		my $n_judges = 1;
 %		for (my $i=1; $i <= $n_judges; $i++) {
- 		  <td>Judge<% $i %> ID</td>
+ 		  <td style='display:none;'>Judge<% $i %> ID</td>
    		  <td>Judge<% $i %> Name</td>
-   		  <td>Judge<% $i %>Pref1</td>
-  		  <td>Judge<% $i %>Pref2</td>
-  		  <td>Judge<% $i %> Mut</td>		  
+   		  <td style='display:none;'>Judge<% $i %>Pref1</td>
+  		  <td style='display:none;'>Judge<% $i %>Pref2</td>
+  		  <td style='display:none;'>Judge<% $i %> Mut</td>		  
 %		}
 		<td>Panel Avg</td>
 		<td>Panel Balance</td>
-		<td>Cohort</td>
+		<td>Break Line (cohort)</td>
 		</tr>
 %		my %live_panels;		
 %		foreach my $panel (@panels) {
@@ -1052,26 +1274,30 @@ border:1px solid black;
 %			@ballots = sort {$a->side cmp $b->side} @ballots; 
 %			if ( $panel->bye == 0 and scalar(@ballots)>1 ) {
 %				$live_panels{$panel->id} = 1;
-				<tr id="pairing_panel<% $panel->id %>">
-				<td><% $panel->id %></td>	
+				<tr id="pairing_panel<% $panel->id %>" class="smaller" >
+				<td style='display:none;'><% $panel->id %></td>	
 %					foreach my $ballot (@ballots) {
 %					if ( $break_line ==  $entry_losses{$ballot->entry} ) { $co = 2; }
 %					if ( $break_line >  $entry_losses{$ballot->entry} and ($co == 0 or $co == 1) ) { $co = 1; }
 %					if ( $break_line <  $entry_losses{$ballot->entry} and ($co == 0 or $co == 3) ) { $co = 3; }
 
-					<td><% $ballot->entry %></td>
+					<td style='display:none;'><% $ballot->entry %></td>
 					<td><% $entry_code{$ballot->entry} %> <% $entry_wins{$ballot->entry} %>-<% $entry_losses{$ballot->entry} %></td>
 %					}			
 %					foreach my $ballot (@ballots) {
 %						if ($ballot->side == 1) {
 %						$ctr++;	
-						<td id="<% $panel %>Judge<% $ ctr %>ID"><% $ballot->judge %></td> <td id=<% $panel %>Judge<% $ctr %>Name><% $judge{$ballot->judge}{'name'} %> <% $pref_record{$ballot->judge."-".$panel->id} %></td>
+						<td style='display:none;' id="<% $panel %>Judge<% $ ctr %>ID"><% $ballot->judge %></td> 
+						<td id=<% $panel %>Judge<% $ctr %>Name>
+							<% $judge{$ballot->judge}{'name'} %> <% $pref_record{$ballot->judge."-".$panel->id} %>
+						</td>
 %						my ($pref1, $pref2) = prefdata( $pref_record{$ballot->judge."-".$panel->id} ) ;
-						<td id="<% $panel %>Judge<% $ ctr %>Pref1"><% $pref1 %></td><td id="<% $panel %>Judge<% $ ctr %>Pref2"><% $pref2 %></td>
+						<td style='display:none;' id="<% $panel %>Judge<% $ ctr %>Pref1"><% $pref1 %></td>
+						<td style='display:none;' id="<% $panel %>Judge<% $ ctr %>Pref2"><% $pref2 %></td>
 %						$pan_tot += $pref1; $pan_tot += $pref2; $pan_ct += 2;
 %						my $mut = abs($pref1 - $pref2); $pan_bal = $pan_bal + ($pref1 - $pref2);
 %						$mut = sprintf("%.1f", $mut);
-						<td id="<% $panel %>Judge<% $ ctr %>Mut"><% $mut %></td>
+						<td style='display:none;' id="<% $panel %>Judge<% $ ctr %>Mut"><% $mut %></td>
 %						}											
 %					}
 					<td id="<% $panel %>Avg">
@@ -1086,7 +1312,7 @@ border:1px solid black;
 %		}
 		</table>
 
-		<table id="judge_use">
+		<table style='display:none;' id="judge_use">
 			<caption>
 			Judge Use Situation <a onclick='judge_diagnostics()' >Run Diagnostics on Judge Data Below</a>
 			</caption>
@@ -1104,6 +1330,7 @@ border:1px solid black;
 				<td>Display: Assigned</td>
 				<td>Display: Oblig Left</td>
 				<td>Display: Lost</td>				
+				<td>Display: Lost Current</td>				
 			</tr>
 %		foreach my $judges (@judge_ref) {
 %				my $key = $judges->id;
@@ -1131,10 +1358,11 @@ border:1px solid black;
 
 		</table>
 
-%		$end = time(); 
+%		$end = time(); if ($debug_time) {
 		Total time before STA Data Table: <% printf("%.2f\n", $end - $start) %>
+%		}		
 
-		<table id="STAData">
+		<table style='display:none;' id="STAData">
 			<caption>
 				STA Data
 			</caption>
@@ -1181,8 +1409,9 @@ border:1px solid black;
 
 		</table>
 		
-%		$end = time(); 
+%		$end = time(); if ($debug_time) {
 		Total time after tables rendered: <% printf("%.2f\n", $end - $start) %>
+%		}		
 
 	</div>
 
