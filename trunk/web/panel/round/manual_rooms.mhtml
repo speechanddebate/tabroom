@@ -1,0 +1,359 @@
+<%args>
+	$round_id
+</%args>
+<%init>
+
+	my $round = Tab::Round->retrieve($round_id);
+	my $event = $round->event;
+
+	my $wudc++ if $event->type eq "wudc";
+
+	my $flights = $round->flighted; 
+
+	my @pools = $m->comp("/funclib/round_room_pools.mas", round => $round);
+
+	my $room_group_limit = "and room_group_room.room = room.id 
+							and room_group_room.room_group = room_group_round.room_group
+							and room_group_round.round = round.id" if @pools; 
+
+	my $room_group_table = "room_group_room, room_group_round," if $room_group_limit;
+
+	Tab::Room->set_sql( available_rooms => "
+		select distinct room.id, room.name, room.quality, room.capacity, room.ada
+		from room, round, $room_group_table timeslot
+		where room.site = round.site
+		and room.inactive != 1
+		and round.timeslot = timeslot.id
+		".$room_group_limit."
+		and round.id = ? 
+
+		and not exists (
+			select room_strike.id from room_strike
+			where room_strike.type = \"event\"
+			and room_strike.event = round.event
+			and room_strike.room = room.id
+		)
+
+		and not exists ( 
+			select room_strike.id from room_strike
+			where room_strike.type = \"time\"
+			and room_strike.room = room.id
+			and room_strike.start < timeslot.end
+			and room_strike.end > timeslot.start
+		)
+
+		and not exists (
+			select panel.id
+			from panel, round otherround, timeslot othertimeslot
+			where panel.room = room.id
+			and panel.round = otherround.id
+			and otherround.id != round.id
+			and otherround.timeslot = othertimeslot.id
+			and othertimeslot.start < timeslot.end
+			and othertimeslot.end > timeslot.start
+		)
+
+		order by room.ada DESC, room.quality, room.capacity DESC, room.name
+	");
+
+	my @available_rooms = Tab::Room->search_available_rooms($round->id);
+	my %room_by_id = map {$_->id => $_} @available_rooms;
+
+	my @round_rooms = $m->comp("/funclib/round_rooms.mas", round => $round);
+
+
+	foreach my $room (@round_rooms) { 
+		next if $room_by_id{$room->id};
+		$room_by_id{$room->id} = $room;
+	}
+
+	my @round_judges = $m->comp("/funclib/round_judges.mas", round => $round);
+	my %judge_by_id = map {$_->id => $_} @round_judges;
+
+
+	my @ada = $m->comp("/funclib/round_panels_ada.mas", round => $round);
+	my %ada_panels = map {$_->id => $_->ada} @ada;
+	undef @ada;
+
+	my @panels = Tab::Panel->search_like( round => $round->id, {order_by => 'bracket'});
+
+	my %entry_by_id = map {$_->id => $_} $round->event->entries;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $this_round_sth = $dbh->prepare("
+		select distinct panel.id, panel.room, ballot.chair, ballot.judge, ballot.entry, ballot.side, ballot.speakerorder, panel.flight
+		from panel, ballot
+		where panel.round = ".$round->id."
+		and panel.id = ballot.panel
+		group by ballot.id
+	");
+
+	my %panel_chair;
+	my %panel_room;
+	my %panel_judge;
+	my %panel_entry;
+	my %entry_side;
+	my %entry_order;
+
+	$this_round_sth->execute;
+
+	while (my ($panel, $room, $chair, $judge, $entry, $side, $order, $flight)  = $this_round_sth->fetchrow_array() ) {
+		push @{$panel_chair{$panel}}, $judge if $chair;
+		push @{$panel_judge{$panel}}, $judge unless $chair;
+		$panel_room{$panel} = $room;
+		push @{$panel_entry{$panel}}, $entry;
+		$entry_side{$entry} = $side;
+		$entry_order{$entry} = $order;
+		$flights = $flight if $flight > $flights;
+	}
+
+	my %used_room;
+	my %used_judge;
+
+</%init>
+
+	<script>
+
+	 	$(function() {
+
+			$( ".droppable" ).droppable({
+				hoverClass  	 : "ltyellow",
+				accept			 : ":not(.ui-sortable-helper)",
+				disableSelection : "true",
+				drop			 : function( event, ui) {
+				 	$.ui.ddmanager.current.cancelHelperRemoval = true;
+					var item = $(ui.item);
+					$( this ).find( ".placeholder" ).remove();
+					var draggableId = ui.draggable.attr("id");
+					var droppableId = this.id;
+					$.post("manual_room_save.mhtml",{ round_id: <% $round_id %>, room_id: draggableId, panel_id: droppableId });
+				}
+			}).sortable({
+				items: ":not(.placeholder)",
+				sort: function() {
+					// gets added unintentionally by droppable interacting with sortable
+					// using connectWithSortable fixes this, but doesn't allow you to customize active/hoverClass options
+					$( this ).removeClass( "ui-state-default" );
+				}
+			});
+
+%			foreach my $room (@available_rooms) { 
+
+%				my $room_id = $room->id;
+
+%				foreach my $flight (1 .. $flights) { 
+
+					$( "#<% $room."_".$flight %>" ).draggable({,
+						start: function(event, ui) {
+							this.style.display="none";
+							$('.<% $room."_".$flight %>').hide();
+						},
+						stop: function(event, ui) {
+							$('.<% $room."_".$flight %>').hide();
+						},
+                        drag: function( event, ui ) { 
+                            $(".<% $room."_".$flight %>").show();
+                        },
+						disableSelection : "true",
+						snap             : "true",
+						snapMode         : "inner",
+						helper			 : "clone",
+						scroll           : false,
+						containment      : "#wrapper",
+						revert 			 : "invalid"
+					});
+%				}
+%			}
+
+		});	
+
+	</script>
+
+	<div class="main yscroll">
+
+		<h2><% $round->realname %> Manual Rooms</h2>
+
+		<& "/funclib/tablesorter.mas", table => "room" &>
+
+		<table id="room">
+
+			<thead>
+
+				<tr class="yellowrow">
+					<th class="smaller">
+						Bk
+					</th>
+%					if ($flights > 1) { 
+						<th class="smaller">
+							Ft
+						</th>
+%					}
+					<th class="smallish">
+						Entries
+					</th>
+					<th class="smallish">
+						Judging
+					</th>
+					<th class="smallish">
+						ADA
+					</th>
+					<th class="smallish">
+						Room
+					</th>
+				</tr>
+
+			</thead>
+
+			<tbody>
+%			my $switch;
+
+%			foreach my $panel (@panels) { 
+
+%				my $id = $panel->id;
+%				my $flight = $panel->flight;
+
+%				my %used;
+
+%				my @entries = sort {$entry_side{$a} <=> $entry_side{$b}} @{$panel_entry{$id}} if $panel_entry{$panel->id};
+%				@entries = sort {$entry_order{$a} <=> $entry_order{$b}} @entries;
+%				my %seen = ();
+%				@entries = grep { ! $seen{$_} ++ } @entries;	
+
+%				my @judges = @{$panel_judge{$id}} if $panel_judge{$id};
+%				my @chairs = @{$panel_chair{$id}} if $panel_chair{$id};
+
+%				my %j_seen = (); 
+%				@chairs = grep { ! $j_seen{$_} ++ } @chairs;
+%				@judges = grep { ! $j_seen{$_} ++ } @judges;
+
+%				my $room = $room_by_id{$panel_room{$id}};
+		
+				<tr class="<% ($switch++ % 2) ? "odd" : "even" %>">
+
+					<td class="centeralign smallish">
+						<% $panel->bye ? "BYE" : $panel->bracket %>
+					</td>
+
+%					if ($flights > 1) { 
+						<td class="centeralign smallish">
+							<% $panel->flight %> 
+						</td>
+%					}
+
+					<td>
+%						foreach my $entry (@entries) { 
+%							next if $used{$entry}++;
+							<span class="limit nospace smaller nowrap" class="<% $entry %> <% $entry."_".$entry_side{$entry} %>" >
+								<% $entry_side{$entry} == 1 ? "A" : "" %>
+								<% $entry_side{$entry} == 2 ? "N" : "" %>
+								<% $wudc && $entry_order{$entry} == 1 ? "1G" : "" %>
+								<% $wudc && $entry_order{$entry} == 2 ? "1O" : "" %>
+								<% $wudc && $entry_order{$entry} == 3 ? "2G" : "" %>
+								<% $wudc && $entry_order{$entry} == 4 ? "2O" : "" %>
+								<% $entry_by_id{$entry} ? $entry_by_id{$entry}->code : "None" %>
+							</span>
+%						}
+					</td>
+
+					<td>
+%						foreach my $chair_id (@chairs) { 
+%							my $chair = $judge_by_id{$chair_id};
+%							next unless $chair;
+							<span class="halflimit smaller nowrap padleft" title="<% $chair->last." ".$chair->first %>">
+								*<% $chair->last.", ".substr($chair->first, 0, 2) %>
+							</span>
+%						}
+%						foreach my $judge_id (@judges) { 
+%							my $judge = $judge_by_id{$judge_id};
+%							next unless $judge;
+							<span class="halflimit smaller nowrap padleft" title="<% $judge->last." ".$judge->first %>">
+								<% $judge->last.", ".substr($judge->first, 0, 2) %>
+							</span>
+%						}
+					</td>
+
+					<th>
+						<% $ada_panels{$id} ? "YES" : "" %>
+					</th>
+
+					<td class="nospace limit3">
+						<div class="centeralign ui-droppable droppable" id="room_<% $id %>">
+%							if ($room) { 
+%								$used_room{$room->id."-".$flight}++;
+								<span class="<% $room->ada ? "adaroom" : "" %> leftalign draggable nowrap" id="<% $room->id %>_<% $flight %>">
+									<span class="fifth nospace">
+										<% $room->quality %>
+									</span>
+									<span class="fourfifth nospace">
+										<% $room->name  %>
+									</span>
+								</span>
+%							}
+						</div>
+					</td>
+
+				</tr>
+%			}
+
+			</tbody>
+
+		</table>
+
+	</div>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<a class="marbottom blue block" href="/panel/schemat/show.mhtml?round_id=<% $round_id %>">
+				Return to <% $round->realname %>
+			</a>
+
+%			if (@pools) { 
+%				foreach my $pool (@pools) { 
+					<a class="blue full" href="/panel/room/pool.mhtml?pool_id=<% $pool->id %>">
+						Pool: <% $pool->name %>
+					</a>
+%				}
+%			}
+
+
+%			my $warn = "Danger! This will ERASE existing room assignments and re do the entire round.  Proceed?";
+% 			if ($event->type eq "speech" || $round->type eq "congress") { 
+				<a class="yellow martop block"  <& "/funclib/confirm.mas", warn => $warn &>  href="/panel/round/rooms.mhtml?round_id=<% $round->id %>">
+%			} else { 
+				<a class="yellow martop block"  <& "/funclib/confirm.mas", warn => $warn &>  href="/panel/round/debate_room_assign.mhtml?round_id=<% $round->id %>">
+%           }   
+				Redo Auto-paired rooms
+        	</a>
+
+		</div>
+
+		<div class="sidenote">
+
+			<h4>Unused Rooms</h4>
+
+			<div class="bordergrey full droppable" id="out">
+
+%				foreach my $room (@available_rooms) { 
+%					foreach my $flight (1 .. $flights) { 
+%						next if $used_room{$room->id."-".$flight};
+						<span class="draggable nowrap" id="<% $room->id."_".$flight %>">
+							<span class="fifth nospace">
+								<% $room->quality %>
+							</span>
+							<span class="fourfifth nospace">
+								<% $room->ada ? "ADA" : "" %> 
+								<% $room->name  %>
+							</span>
+						</span>
+%					}
+%				}
+		
+			</div>
+
+
+
+	</div>
+
