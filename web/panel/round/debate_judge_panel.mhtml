@@ -58,6 +58,7 @@
 	my $allow_repeat_prelim_side = $round_event->setting("allow_repeat_prelim_side");
 
 	my $prefs = $group->setting("prefs");
+	my $max_pref = $round_event->setting("max_pref");
 	my $tab_ratings = $group->setting("tab_ratings");
 
 	my $dbh = Tab::DBI->db_Main();
@@ -134,7 +135,7 @@
 	if ($pool > 0) { 
 		
 		$judge_sth = $dbh->prepare('
-			select distinct judge.id, judge.last, judge.school, judge.tab_rating, concat(judge.obligation+judge.hired) as rounds
+			select distinct judge.id, judge.last, judge.school, judge.tab_rating, concat(judge.obligation+judge.hired) as rounds, judge.diverse
 			from judge, pool_judge
 			where judge.active = 1
 			and judge.id = pool_judge.judge
@@ -145,7 +146,7 @@
 	} else { 
 
 		$judge_sth = $dbh->prepare('
-			select distinct judge.id, judge.last, judge.school, judge.tab_rating, concat(judge.obligation+judge.hired) as rounds
+			select distinct judge.id, judge.last, judge.school, judge.tab_rating, concat(judge.obligation+judge.hired) as rounds, judge.diverse
 			from judge, judge_group, event, round
 			where judge.active = 1
 			and judge.judge_group = event.judge_group 
@@ -163,12 +164,13 @@
 	my %judge_score;
 	my %judge_school;
 	my %judge_rating;
+	my %judge_diverse;
 
 	my %school_judges;
 	my %judge_clashes;
 	my %judge_obligation;
 
-	while (my ($id, $last, $school, $rating, $rounds) = $judge_sth->fetchrow_array() ) {
+	while (my ($id, $last, $school, $rating, $rounds, $diverse) = $judge_sth->fetchrow_array() ) {
 
 		next unless $id;
 
@@ -176,6 +178,7 @@
 		$judge_name{$id} = $last;
 		$judge_school{$id} = $school;
 		$judge_rating{$id} = $rating;
+		$judge_diverse{$id} = $diverse;
 		$judge_obligation{$id} = $rounds;
 
 		push @{$school_judges{$school}}, $id;
@@ -333,17 +336,16 @@
 	my %judge_avoid;
 	my %judge_entry_clash;
 
-	my $round_burn_avoid = $group->setting("round_burn_avoid");
 	my $mutuality = $group->setting("mutuality");
 	my $preference = $group->setting("preference");
+	my $default_mjp = $group->setting("default_mjp");
+	my $diversity = $group->setting("diverse_judge_weight");
 
-	$round_burn_avoid = 15 if not defined $round_burn_avoid;
 	$mutuality = 25 if not defined $mutuality;
 	$preference = 10 if not defined $preference;
+	$default_mjp = 1 if not defined $default_mjp;
+	$diversity = 0 if not defined $diversity;
 
-	$round_burn_avoid = 0 if $round_burn_avoid == -1;
-	$round_burn_avoid = 0 if $round->type eq "final";
-	$round_burn_avoid = 0 if $round->type eq "elim";
 	$mutuality = 0 if $mutuality == -1;
 	$preference = 0 if $preference == -1;
 
@@ -361,15 +363,14 @@
 		next if $judge_out{$judge};
 
 		$judge_score{$judge} += scalar @{$judge_clashes{$judge}} if $judge_clashes{$judge};
-
-		my $round_diff = $round->name - $num_rounds;
-		$judge_score{$judge} += $round_diff * $round_burn_avoid if $round_diff > 0;
+		$judge_score{$judge} += $diversity if $judge_diverse{$judge};
 
 		if ($judge_ballots{$judge}) { 
 
 			foreach my $ballot ( sort { $entry_code{$ballot_entry{$a}} cmp $entry_code{$ballot_entry{$b}}} @{$judge_ballots{$judge}}) { 
 				my $entry = $ballot_entry{$ballot};
-				next if $allow_repeat_elims && ($round_type eq "elim" || $round_type eq "final" || $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final") ;
+				next if $allow_repeat_elims && ($round_type eq "elim" || $round_type eq "final" 
+					|| $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final") ;
 				push @{$judge_avoid{$judge}}, $entry;
 				next if $allow_repeat_judging;
 				next if $allow_repeat_prelim_side && $ballot_side{$ballot} != $entry_side{$entry};
@@ -385,7 +386,6 @@
 
 	my $switch;
 
-	my %default_settings = $m->comp("/funclib/default_rating_settings.mas", type => $round_event->type);
 	my %judge_panel_score;
 
 	@panels = shuffle @panels;
@@ -406,8 +406,9 @@
 
 			foreach my $entry (@{$panel_entries{$panel}}) { 
 
-				$score += 1000 if $judge_entry_clash{$judge."-".$entry};
-				$score += 500 if $judge_avoid{$entry};
+				$score += 1000000 if $judge_entry_clash{$judge."-".$entry};
+				$score += 50000 if $judge_avoid{$entry};
+				$score += 500000 if $max_pref && $mjp{$judge."-".$entry} > $max_pref;
 
 				if ($mjp_first) { 
 					$diff = abs($mjp_first - $mjp{$judge."-".$entry}) if $mjp_first && $mjp{$judge."-".$entry};
@@ -416,8 +417,8 @@
 				}
 
 				if ($prefs && $prefs ne "none") {
-					$score += $mjp{$judge."-".$entry};
-					$score += 99 unless $mjp{$judge."-".$entry};
+					$score += $mjp{$judge."-".$entry} * $preference;
+					$score += $default_mjp * $preference unless $mjp{$judge."-".$entry};
 				}
 
 				$judge_rating{$judge."-".$panel} .= " - " if $judge_rating{$judge."-".$panel};
