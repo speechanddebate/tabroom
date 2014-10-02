@@ -2,7 +2,7 @@ package Tab::Tourn;
 use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
-Tab::Tourn->columns(Essential => qw/name start end webname reg_start reg_end 
+Tab::Tourn->columns(Essential => qw/name start end webname reg_start reg_end created_by
 									tz state country hidden timestamp foreign_site foreign_id/);
 Tab::Tourn->columns(TEMP => qw/schoolid/);
 
