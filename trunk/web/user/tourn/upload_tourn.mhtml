@@ -46,23 +46,23 @@
 		}
 
 		unless ($start) { 
+
 			$start = DateTime->now;
-			$start->subtract( days => 3);
+
+			while ($start->day_of_week != 6) { 
+				$start->subtract( days => 1);
+			}
+
+			$end = $start->clone;
+			$end->add(days => 2);
+
 		}
-
-		unless ($end) { 
-			$end = DateTime->now;
-		}
-
-		$start->set( hour => 9, minute => 0);
-		$end->set( hour => 22, minute => 0);
-
-		my $round_end = $start->clone;
-		$round_end->set( hour => 11, minute => 0);
 
 		$start->set_time_zone($tz);
 		$end->set_time_zone($tz);
-		$round_end->set_time_zone($tz);
+
+		$start->set( hour => 8, minute => 0);
+		$end->set( hour => 22, minute => 0);
 		
 		my $reg_start = $start->clone;
 		$reg_start->subtract( months => 2);
@@ -118,7 +118,7 @@
 		});
 
 		$judge_group->setting("no_codes", 1); #for debate this is almost always sensible
-		$judge_group->setting("prefs", "tiered"); #this is about the only way I can cope with foreign ratings
+		$judge_group->setting("prefs", "tiered"); #this is the most common import style for TRPC
 
 	    #EVENTS
    		my @events = @{$data->{EVENT}};
@@ -126,14 +126,26 @@
 		foreach my $xml_event (@events) { 
 
 			my $type = lc($xml_event->{TYPE});
+
+			$type =~ s/debate$//g;
+
 			$type = "ld" if $type eq "lincoln-douglas";
 			$type = "ld" if $type eq "lincoln douglas";
+			$type = "ld" if $type eq "lincoln-douglass";
+			$type = "ld" if $type eq "lincoln douglass";
+
+			$type = "policy" if $type eq "cx";
+
+			$type = "pf" if $type eq "public forum";
+			$type = "pf" if $type eq "pfd";
+
+			$type = "debate" if ($type ne "pf" && $type ne "ld" && $type ne "policy");
 
 			my $event = Tab::Event->create({
-				tourn => $tourn->id,
-				name => $xml_event->{EVENTNAME},
-				type => $type,
-				abbr => $xml_event->{ABBR},
+				tourn       => $tourn->id,
+				name        => $xml_event->{EVENTNAME},
+				type        => $type,
+				abbr        => $xml_event->{ABBR},
 				judge_group => $judge_group->id
 			});
 
@@ -143,6 +155,7 @@
 			$event->setting("code_style", "initials"); #for debate this is almost always sensible
 			$event->setting("min_points", 1);
 			$event->setting("max_points", 30);
+			$event->setting("point_increments", "tenths");  #this allows us to accept whatever
 
 		} 
 
@@ -157,6 +170,163 @@
 			$tourn->setting($setting->{TAG}, lc($setting->{VALUE}) );
 		}
 	}  
+
+	my %tb_set_by_id = ();
+	my %tb_set_by_cat_id = ();
+
+	my $elim_tb_set;
+	my $speaker_tb_set;
+
+	foreach my $tb_set ($tourn->tiebreak_sets) { 
+		$tb_set_by_id{$tb_set->id} = $tb_set;
+
+		foreach my $tb ($tb_set->tiebreaks) { 
+			$tb->delete;
+		}
+	}
+
+	my @tb_sets = @{$data->{TIEBREAK_SET}};
+	
+	foreach my $xml_tb_set (@tb_sets) { 
+
+		my $id = $xml_tb_set->{ID};
+		next if $tb_set_by_id{$id};
+
+		my $name = $xml_tb_set->{TBSET_NAME};
+		my $type = $xml_tb_set->{SCOREFOR};
+		my $elim = $xml_tb_set->{ELIM};
+
+		$name = "Debate Prelims" if $name eq "2 teams - Team Prelims";
+		$name = "Debate Speakers" if $name eq "2 teams - Speakers";
+
+		my $tb_set = Tab::TiebreakSet->search( name => $name, tourn => $tourn->id)->first;
+
+		$tb_set = Tab::TiebreakSet->create({
+			name  => $name,
+			type  => $type,
+			tourn => $tourn->id,
+			elim  => $elim
+		}) unless $tb_set;
+
+		$elim_tb_set = $tb_set if $elim;
+		$speaker_tb_set = $tb_set if $type eq "Speaker" || $name eq "Debate Speakers" || $name eq "Speakers";
+
+		$tb_set_by_id{$tb_set->id} = $tb_set;
+		$tb_set_by_cat_id{$id} = $tb_set;
+	}
+
+	my @tbs = @{$data->{TIEBREAK}};
+
+	foreach my $xml_tb (@tbs) {
+
+		my $name = $xml_tb->{LABEL};
+
+		my $priority = $xml_tb->{SortOrder};
+		my $tb_set_id = $xml_tb->{TB_SET};
+
+		my $tb_set = $tb_set_by_id{$tb_set_id};
+		$tb_set = $tb_set_by_cat_id{$tb_set_id} unless $tb_set;
+
+		next unless $tb_set;
+
+		my $realname;
+		my $highlow = 0;
+		my $highlow_count = 0;
+
+		if ($name eq "Wins") { 
+
+			$realname = "winloss";
+			$highlow = 0;
+
+		} elsif ($name eq "High-Low Speaker Points") { 
+
+			$realname = "points";
+			$highlow = 1;
+			$highlow_count = 1;
+
+		} elsif ($name eq "Total Points") { 
+
+			$realname = "points";
+			$highlow = 0;
+			$highlow_count = 0;
+
+		} elsif ($name eq "Ranks") { 
+
+			$realname = "ranks";
+			$highlow = 0;
+			$highlow_count = 0;
+
+		} elsif ($name eq "2x High-Low Speaker Points") { 
+
+			$realname = "points";
+			$highlow = 1;
+			$highlow_count = 2;
+
+		} elsif ($name eq "Opponent Wins") { 
+
+			$realname = "opp_wins";
+			$highlow = 0;
+			$highlow_count = 0;
+
+		} elsif ($name eq "Opponent Points") { 
+
+			$realname = "opp_points";
+			$highlow = 0;
+			$highlow_count = 0;
+
+		} elsif ($name eq "Judge Variance") { 
+
+			$realname = "judgevar";
+			$highlow = 0;
+			$highlow_count = 0;
+
+		} elsif ($name eq "Random") { 
+
+			$realname = "coinflip";
+			$highlow = 0;
+			$highlow_count = 0;
+
+		}
+	
+		my $tb = Tab::Tiebreak->create({
+			name          => $realname,
+			tb_set        => $tb_set->id,
+			count         => "prelim",
+			highlow       => $highlow,
+			highlow_count => $highlow_count,
+			multiplier    => 1,
+			priority      => $priority
+		});
+
+	}
+
+	unless ($elim_tb_set) { 
+
+		$elim_tb_set = Tab::TiebreakSet->search({ name => "Debate Elims", tourn => $tourn->id });
+
+		$elim_tb_set = Tab::TiebreakSet->create({
+			name  => "Debate Elims",
+			type  => "Team",
+			tourn => $tourn->id,
+			elim  => 1,
+		}) unless $elim_tb_set;
+
+		my @tiebreaks = $elim_tb_set->tiebreaks;
+
+		unless (@tiebreaks) { 
+
+			my $tiebreak = Tab::Tiebreak->create({
+				name          => "winloss",
+				tb_set        => $elim_tb_set->id,
+				count         => "last elim",
+				highlow       => 0,
+				highlow_count => 0,
+				multiplier    => 1,
+				priority      => 1
+			}); 
+
+		}
+	}
 
 	my %timeslot_by_id = ();
 
@@ -185,6 +355,14 @@
 			unless ($start) { 
 				$start = $stepper->clone;
 				$stepper->add( hours => 2 );
+			}
+
+			if ($start->hour > 20) { 
+				$start->add( days => 1 );
+				$start->set( hour => 8, minute => 0);
+
+				$stepper->set( hour => 10, minute => 0);
+				$stepper->add( days => 1 );
 			}
 
 			unless ($end) { 
@@ -248,10 +426,10 @@
 
 			unless ($school) { 
 				$school = Tab::School->create({
-					name => $xml_school->{SCHOOLNAME},
-					code => $xml_school->{CODE},
+					name    => $xml_school->{SCHOOLNAME},
+					code    => $xml_school->{CODE},
 					chapter => $chapter->id,
-					tourn => $tourn->id,
+					tourn   => $tourn->id,
 				});
 			}
 
@@ -267,7 +445,8 @@
 	}
 
 	my %student_by_id = ();
-	my %student_by_entry = ();
+	my %student_by_cat_id = ();
+	my %students_by_entry = ();
 
 	foreach my $student ($m->comp("/funclib/tourn_students.mas", tourn => $tourn)) { 
 		$student_by_id{$student->id} = $student;
@@ -283,21 +462,22 @@
 		unless ($student) { 
 
 			$student = Tab::Student->search(   
-				first => $xml_student->{FIRST}, 
-				last => $xml_student->{LAST}, 
+				first   => $xml_student->{FIRST},
+				last    => $xml_student->{LAST},
 				chapter => $school->chapter->id )->first;
 
 			unless ($student) { 
 
 				$student = Tab::Student->create({
-					 first => $xml_student->{FIRST}, 
-					 last => $xml_student->{LAST}, 
+					 first   => $xml_student->{FIRST},
+					 last    => $xml_student->{LAST},
 					 chapter => $school->chapter->id
 				});
 			}
 
-			$student_by_id{$xml_student->{ID}} = $student;
-			push @{$student_by_entry{$xml_student->{ENTRY}}}, $student;
+			$student_by_id{$student->id} = $student;
+
+			push @{$students_by_entry{$xml_student->{ENTRY}}}, $student;
 
 		} else { 
 
@@ -305,9 +485,11 @@
 			$student->last( $xml_student->{LAST} );
 			$student->update;
 
-			push @{$student_by_entry{$xml_student->{ENTRY}}}, $student;
+			push @{$students_by_entry{$xml_student->{ENTRY}}}, $student;
 
 		}
+
+		$student_by_cat_id{$xml_student->{ID}} = $student;
 
 	}
 
@@ -317,7 +499,6 @@
 
 	my @rounds;
 	my %round_by_name = ();
-
 	my @used_events;
 
 	foreach my $xml_event (@{$data->{EVENT}}) { 
@@ -325,7 +506,6 @@
 		my $event = $event_by_id{$xml_event->{ID}};
 
 		next unless $event;
-
 		push @used_events, $event;
 
 		if ($event) { 
@@ -349,10 +529,13 @@
 			$event->setting($setting->{TAG}, lc($setting->{VALUE}) );
 		}  
 
+		$event->setting("speaker_tbset", $speaker_tb_set->id) if $speaker_tb_set;
+
 	}
 
 	my %entry_by_id = ();
 	my %used_entries = ();
+	my %entry_students = ();
 
 	foreach my $event (@used_events) { 
 		foreach my $entry ($event->entries( waitlist => 0, unconfirmed => 0, dropped => 0)) {
@@ -378,12 +561,12 @@
 			my $ada = 1 if lc($xml_entry->{ADA}) eq "true";
 			
 			$entry = Tab::Entry->create({
-				 code => $xml_entry->{FULLNAME}, 
+				 code    => $xml_entry->{FULLNAME},
 				 dropped => $dropped,
-				 event => $event->id,
-				 seed => $xml_entry->{RATING},
-				 school => $school->id,
-				 ada => $ada
+				 event   => $event->id,
+				 seed    => $xml_entry->{RATING},
+				 school  => $school->id,
+				 ada     => $ada
 			});
 
 			$used_entries{$xml_entry->{ID}}++;
@@ -410,7 +593,7 @@
 
 		my %es_yup = ();
 
-		my @students = @{$student_by_entry{$xml_entry->{ID}}} if $student_by_entry{$xml_entry->{ID}};
+		my @students = @{$students_by_entry{$xml_entry->{ID}}} if $students_by_entry{$xml_entry->{ID}};
 
 		foreach my $entry_student ($entry->entry_students) { 
 			my $ok;
@@ -440,10 +623,15 @@
 			}
 		}
 
+
 		$entry->name($first." ".$last) if $first;
 		$entry->name($last) unless $last;
 		$entry->update;
 
+	}
+
+	foreach my $id (keys %event_by_id) { 
+		$m->comp("/funclib/event_rename.mas",  event => $event_by_id{$id}, from => "importer");
 	}
 
 	foreach my $entry_id (keys %entry_by_id) { 
@@ -810,10 +998,13 @@
 		my $event = $event_by_id{${$xml_round->{EVENT}}[0]};
 		my $timeslot = $timeslot_by_id{$xml_round->{TIMESLOT}};
 
-		my $tb_set = Tab::TiebreakSet->search( tourn => $tourn->id, id => $xml_round->{TB_SET} )->first;
-		$tb_set = Tab::TiebreakSet->search( tourn => $tourn->id, type => "Team")->first unless $tb_set;
+		my $type = lc($xml_round->{PAIRINGSCHEME});
 
-		my $tb_set_id = $tb_set->id if $tb_set;
+		my $tb_set = $tb_set_by_id{$xml_round->{TB_SET}};
+		$tb_set = $tb_set_by_cat_id{$xml_round->{TB_SET}} unless $tb_set;
+
+		$tb_set = $elim_tb_set if $type eq "elim";
+		$tb_set = $elim_tb_set if $type eq "final";
 
 		next ROUND unless $event && $timeslot;
 			
@@ -823,20 +1014,23 @@
 
 			my $label = $xml_round->{LABEL};
 			$label =~ s/^Open//;
+			$label =~ s/^Opn//;
 			$label =~ s/$e_name//g;
 			$label =~ s/prelim/Rnd/g;
 
+			$type = "final" if $label eq "Final";
+
 			$round = Tab::Round->create({
-				name => $xml_round->{RD_NAME},
+				name     => $xml_round->{RD_NAME},
 				flighted => $xml_round->{FLIGHTING},
-				label => $label,
-				type => lc($xml_round->{PAIRINGSCHEME}),
-				judges => $xml_round->{JUDGESPERPANEL},
-				event => $event->id,
+				label    => $label,
+				type     => lc($xml_round->{PAIRINGSCHEME}),
+				judges   => $xml_round->{JUDGESPERPANEL},
+				event    => $event->id,
 				timeslot => $timeslot->id,
-				tb_set => $tb_set_id,
-				site => $default_site_id,
-				cat_id => $xml_round->{ID}
+				tb_set   => $tb_set->id,
+				site     => $default_site_id,
+				cat_id   => $xml_round->{ID}
 			});
 
 			$round_by_name{$xml_round->{LABEL}} = $round;
@@ -857,7 +1051,7 @@
 			$round->name($xml_round->{RD_NAME});
 			$round->label( $label );
 			$round->event($event->id);
-			$round->tb_set($tb_set_id);
+			$round->tb_set($tb_set->id);
 			$round->timeslot($timeslot->id);
 
 			$round->flighted( $xml_round->{FLIGHTING} );
@@ -913,8 +1107,8 @@
 
 			$panel = Tab::Panel->create({
 				letter => $letter,
-				round => $round->id,
-				room => $room,
+				round  => $round->id,
+				room   => $room,
 				flight => $xml_panel->{FLIGHT},
 				cat_id => $id
 			});
@@ -963,6 +1157,7 @@
 	}
 
 	my %used_ballots = ();
+	my %entry_ballot = ();
 
 	#ROUND PAIRINGS AND RESULTS
 	foreach my $xml_result (@{$data->{ROUNDRESULT}}) { 
@@ -987,8 +1182,8 @@
 
 				$panel = Tab::Panel->create({
 					letter => $id,
-					room => $room,
-					round => $round,
+					room   => $room,
+					round  => $round,
 					flight => $xml_panel->{Flight},
 					cat_id => $xml_panel->{ID}
 				});
@@ -999,22 +1194,19 @@
 			}
 
 			my $judge_id = $judge_by_id{$xml_panel->{JudgeID}};
-
 			my @xml_results = @{$xml_panel->{RESULT_SCORE}};
-
-			my %ballot_by_entry = ();
-			my %ballot_by_student = ();
 
 			BALLOTS:
 			foreach my $xml_ballot (@xml_results) { 
 
 				next unless $xml_ballot->{Score_Name} eq "Ballot";
-				my $entry = $entry_by_id{$xml_ballot->{Recipient}};
 
+				my $recipient_id = $xml_ballot->{Recipient};
+
+				my $entry = $entry_by_id{$recipient_id};
 				next unless $entry;
 
 				my $bye = 0;
-
 				if ($judge_id == -1 || $xml_ballot->{Side} == -1) { 
 					$bye++;
 				}
@@ -1024,40 +1216,57 @@
 				my $ballot = Tab::Ballot->create({
 					entry => $entry->id,
 					panel => $panel->id,
-					side =>  $xml_ballot->{Side},
+					side  => $xml_ballot->{Side},
 					judge => $judge_id,
-					bye => $bye
+					bye   => $bye
 				});
 
-				$ballot_by_entry{$xml_ballot->{Recipient}} = $ballot;
-	
 				$used_ballots{$ballot->id}++;
-		
-				foreach my $student (@{$student_by_entry{$xml_ballot->{Recipient}}}) {
-					$ballot_by_student{$student->{ID}} = $ballot;
+				$entry_ballot{$round."-".$entry} = $ballot;
+
+				my %mah_students = map {$_->id => 1} @{$students_by_entry{$xml_ballot->{Recipient}}};
+
+				RESULT:
+				foreach my $xml_result (@xml_results) { 
+
+					my $tag = lc($xml_result->{Score_Name});
+					$tag = "rank" if $tag eq "ranks";
+
+					my $value = $xml_result->{content};
+					my $score_recipient = $xml_result->{Recipient};
+
+					if ($tag eq "ballot") { 
+
+						next RESULT unless $recipient_id == $score_recipient;
+						next if $used_ballots{$judge_id."-".$recipient_id."-".$panel}++;
+
+						my $ballot_value = Tab::BallotValue->create({
+							tag     => $tag,
+							value   => $value,
+							student => 0,
+							ballot  => $ballot->id
+						});
+
+
+					} elsif ($tag eq "points" || $tag eq "rank") { 
+
+						my $student = $student_by_cat_id{$score_recipient}->id if $student_by_cat_id{$score_recipient};
+						$student = $student_by_id{$score_recipient}->id if $student_by_id{$score_recipient} && not defined $student;
+
+						next RESULT unless $mah_students{$student};
+						next RESULT if $value == -1;
+						next RESULT if $value == 0;
+
+						my $ballot_value = Tab::BallotValue->create({
+							tag     => $tag,
+							value   => $value,
+							student => $student,
+							ballot  => $ballot->id
+						});
+
+					}
+
 				}
-
-			}
-
-			foreach my $xml_ballot (@xml_results) { 
-
-				my $tag = lc($xml_ballot->{Score_Name});
-				$tag = "rank" if $tag eq "ranks";
-				my $value = $xml_ballot->{content};
-
-				my $ballot = $ballot_by_entry{$xml_ballot->{Recipient}}->id 
-					if $xml_ballot->{ScoreFor} eq "Team" && $ballot_by_entry{$xml_ballot->{Recipient}};
-				my $student = $student_by_id{$xml_ballot->{Recipient}}->id 
-					if $xml_ballot->{ScoreFor} eq "Speaker" && $student_by_id{$xml_ballot->{Recipient}};
-				$ballot = $ballot_by_student{$xml_ballot->{Recipient}}->id
-					if $xml_ballot->{ScoreFor} eq "Speaker" && $ballot_by_student{$xml_ballot->{Recipient}};
-
-				my $ballot_value = Tab::BallotValue->create({
-					tag     => $tag,
-					value   => $value,
-					student => $student,
-					ballot  => $ballot
-				});
 
 			}
 
@@ -1088,10 +1297,10 @@
 		unless ($set) { 
 
 			$set = Tab::ResultSet->create({
-				tourn => $tourn->id,
-				event => $event_id,
-				bracket => 1,
-				label => "Bracket",
+				tourn     => $tourn->id,
+				event     => $event_id,
+				bracket   => 1,
+				label     => "Bracket",
 				generated => $now
 			});
 
@@ -1120,20 +1329,20 @@
 
 			$result = Tab::Result->create({
 				result_set => $set->id,
-				entry => $entry_id,
-				round => $round_id
+				entry      => $entry_id,
+				round      => $round_id
 			});
 		}
 
 		unless ($seed_done) { 
 
 			Tab::ResultValue->create({
-				result => $result->id,
-				value => $xml_elimseed->{SEED},
-				priority => 1,
-				tag => "Seed",
+				result    => $result->id,
+				value     => $xml_elimseed->{SEED},
+				priority  => 1,
+				tag       => "Seed",
 				sort_desc => 0,
-				no_sort => 0
+				no_sort   => 0
 			});
 		}
 
@@ -1193,11 +1402,11 @@
 		unless ($ballot && $ballot->panel && $ballot->panel->id == $panel->id) { 
 				
 			$ballot = Tab::Ballot->create({
-				judge => $judge,
-				panel => $panel,
-				entry => $entry_id,
-				side => $xml_ballot->{SIDE}, 
-				bye => $bye,
+				judge  => $judge,
+				panel  => $panel,
+				entry  => $entry_id,
+				side   => $xml_ballot->{SIDE},
+				bye    => $bye,
 				cat_id => $xml_ballot->{ID}
 			});
 
@@ -1273,6 +1482,7 @@
 		}
 
 		my $student = $student_by_id{$xml_score->{RECIPIENT}} if ( $type == 2 || $type == 3 ) && $event_type ne "speech";
+
 		my $entry = $entry_by_id{$xml_score->{RECIPIENT}} if ($type == 1 || $type == 4 || $type == 5 ) || $event_type eq "speech";
 
 		next unless ($ballot && ($student || $entry));
