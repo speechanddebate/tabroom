@@ -30,7 +30,7 @@ sub sorted_keys {
 	} elsif ($name eq "TOURN") { 
 		return ('ID', 'TOURNNAME', 'STARTDATE','ENDDATE','DOWNLOADSITE');
 	} elsif ($name eq "ENTRY") { 
-		return ('ID', 'SCHOOL', 'EVENT', 'RATING', 'CODE', 'FULLNAME', 'DROPPED', 'ADA', 'TUBDISABILITY');
+		return ('ID', 'SCHOOL', 'EVENT', 'RATING', 'CODE', 'FULLNAME', 'DROPPED', 'WAITLIST', 'ADA', 'TUBDISABILITY');
 	} elsif ($name eq "ENTRY_STUDENT") { 
 		return ('ID', 'DOWNLOADRECORD', 'SCHOOL', 'ENTRY', 'FIRST', 'LAST');
 	} elsif ($name eq "SCHOOL") { 
