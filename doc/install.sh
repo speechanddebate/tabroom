@@ -6,7 +6,7 @@
 # password if it hasn't been already installed.  Adjust below if this squicks
 # you out, but hey, it's only for dev copies, so it shouldn't.
 
-# Tabroom must be installed from /www/itab/web; otherwise many more things
+# Tabroom must be installed from /www/tabroom/web; otherwise many more things
 # other than this script will break.
 
 # -- Palmer
@@ -31,19 +31,19 @@ echo "Creating database from schema file.  Uncompressing database file (takes a 
 echo
 
 echo
-echo "Creating the itab database schema and setting permissions..."
+echo "Creating the tab database schema and setting permissions..."
 echo
 
-/usr/bin/mysqladmin -u root -f drop itab
-/usr/bin/mysqladmin -u root create itab
-/usr/bin/mysql -u root -f itab < /www/itab/doc/grant.sql
+/usr/bin/mysqladmin -u root -f drop tabroom
+/usr/bin/mysqladmin -u root create tabroom
+/usr/bin/mysql -u root -f tabroom < /www/tabroom/doc/grant.sql
 
 echo
 echo "Loading the database file (sometimes takes a while, too.)..."
 echo
 
-/usr/bin/mysql -u root itab < /www/itab/doc/itab-schema.sql
-/usr/bin/mysql -u root -f -s itab < /www/itab/doc/account-create.sql
+/usr/bin/mysql -u root tabroom < /www/tabroom/doc/tabroom-schema.sql
+/usr/bin/mysql -u root -f -s tabroom < /www/tabroom/doc/account-create.sql
 
 echo
 echo "Updating the database to the latest version.  Please ignore errors here, there will be some..."
@@ -51,20 +51,20 @@ echo
 
 sleep 2
 
-/usr/bin/mysql -u root -f -s itab < /www/itab/doc/schema-updates.sql
+/usr/bin/mysql -u root -f -s tabroom < /www/tabroom/doc/schema-updates.sql
 
-/bin/mkdir -p /www/itab/web/tmp
-/bin/mkdir -p /www/itab/web/mason
+/bin/mkdir -p /www/tabroom/web/tmp
+/bin/mkdir -p /www/tabroom/web/mason
 
-/bin/chmod 1777 /www/itab/web/tmp
-/bin/chmod 1777 /www/itab/web/mason
+/bin/chmod 1777 /www/tabroom/web/tmp
+/bin/chmod 1777 /www/tabroom/web/mason
 
 echo
 echo "Configuring the local Apache webserver..."
 echo
 
-cp /www/itab/doc/local.tabroom.com.conf /etc/apache2/sites-available
-cp /www/itab/web/lib/Tab/General.pm.default /www/itab/web/lib/Tab/General.pm
+cp /www/tabroom/doc/local.tabroom.com.conf /etc/apache2/sites-available
+cp /www/tabroom/web/lib/Tab/General.pm.default /www/tabroom/web/lib/Tab/General.pm
 
 echo "ServerName  local.tabroom.com" >> /etc/apache2/conf.d/hostname
 echo "127.0.1.21 local local.tabroom.com" >> /etc/hosts
