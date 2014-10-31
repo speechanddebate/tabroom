@@ -1,19 +1,30 @@
 <%args>
 	$tourn
 	$session
-	$event_id => undef
+	$event_id    => undef
+	$timeslot_id => undef
 </%args>
 <%init>
 
-	my $event = Tab::Event->retrieve($event_id) if $event_id;
 	my @events = sort {$a->name cmp $b->name} $tourn->events unless $event_id;
+	push @events, Tab::Event->retrieve($event_id) if $event_id;
+
+	my @timeslots = sort {$a->name cmp $b->name} $tourn->timeslots unless $timeslot_id;
+	push @timeslots, Tab::Timeslot->retrieve($timeslot_id) if $timeslot_id;
 
 	my $ncfl++ if $tourn->setting("ncfl");
 
-	push @events, $event if $event;
+	unless (@events && @timeslots)  { 
+		$m->print('<div class="blankfull padtopmore">You have produced a report without events and/or timeslots.  Bad!  Hit back and try again</div>');
+		$m->abort;
+	}
 
-    my $name = $event->name if $event;
+    my $name = $events[0]->name if $event_id;
 	$name = "AllEvents" unless $name;
+
+    $name .= "-".$timeslots[0]->name if $timeslot_id;
+	$name .= "-AllRounds" unless $timeslot_id;
+
     $name =~ s/[\W_]//g;
 
     my $filename = "Elims-ReadingCopy-$name-".$session->id;
@@ -25,201 +36,194 @@
 	open (TEXOUT, ">>$filepath.tex");
 
 	print TEXOUT "\\noindent\n";
-	print TEXOUT "\\hfill \\huge \\textbf{".Tab::texify($tourn->name)."}\n\n";
+	print TEXOUT "\\hfill \\LARGE \\textbf{".Tab::texify($tourn->name)."}\n\n";
 
 	EVENT:
 	foreach my $event (@events) { 
 
-		if ($event->type eq "speech" || $event->type eq "congress") { 
+		TIMESLOT:
+		foreach my $timeslot (@timeslots) { 
 
-			my $current_round = $m->comp("/funclib/event_current_round.mas",  event => $event);
+			if ($event->type eq "speech" || $event->type eq "congress") { 
 
-			next EVENT unless $current_round;
-			next EVENT unless $current_round->type eq "elim" || $current_round->type eq "final";
+				my @rounds = Tab::Round->search( event => $event->id, timeslot => $timeslot->id, type => "elim");
+				push @rounds, Tab::Round->search( event => $event->id, timeslot => $timeslot->id, type => "final");
 
-			my @rounds = $event->rounds;
-			@rounds = sort {$b->name <=> $a->name} @rounds;
+				foreach my $elim (@rounds) { 
 
-			my @all_elims = ($current_round);
+					my @entries = $m->comp("/funclib/round_entries.mas", round => $elim, by_code => "yesdrillsergeant!");
 
-			foreach my $round (@rounds) { 
-				next if $round->type ne "elim" && $round->type ne "final";
-				next if $round->name >= $current_round->name;
-				push @all_elims, $round;
-			}
+					print TEXOUT "\\vspace{.25in}\n\n";
+					print TEXOUT "\\begin{minipage}{6.5in}\n";
 
-			my %seen = (); 
-			@all_elims = grep { ! $seen{$_->id} ++ } @all_elims;
+					print TEXOUT "\\noindent\n";
+					print TEXOUT "\\LARGE \\textbf{".Tab::texify($event->name)." ".Tab::texify($elim->realname)." round participants}\n";
+					print TEXOUT "\\medskip\n";
+					print TEXOUT "\\normalsize\n";
 
-			my %done;
+					my $tabular = "\\begin{tabular}{p{1.0in}p{2.0in}p{3.0in}}\n";
 
-			foreach my $elim (@all_elims) { 
+					my $switch;
+					my %done;
 
-				my @entries = $m->comp("/funclib/round_entries.mas", round => $elim, by_code => "yesdrillsergeant!");
+					foreach my $entry (@entries) { 
 
-				print TEXOUT "\\vspace{.25in}\n\n";
-				print TEXOUT "\\begin{minipage}{6.5in}\n";
+						next if $done{$entry}++;
+					
+						print TEXOUT "\\newline\n";
 
-				print TEXOUT "\\noindent\n";
-				print TEXOUT "\\LARGE \\textbf{".Tab::texify($event->name)." ".Tab::texify($elim->realname)." round participants}\n";
-				print TEXOUT "\\medskip\n";
-				print TEXOUT "\\normalsize\n";
+						print TEXOUT $tabular;
+						print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2;
+						print TEXOUT Tab::texify($entry->code)." & ";
+						print TEXOUT Tab::texify($entry->name)." & ";
+						print TEXOUT Tab::texify($entry->school->short_name)." ";
+						print TEXOUT Tab::texify("(".$entry->school->region->code.")") if $ncfl;
+						print TEXOUT " \n ";
 
-				my $tabular = "\\begin{tabular}{p{1.0in}p{2.0in}p{3.0in}}\n";
+						print TEXOUT "\\end{tabular}\n";
 
-				my $switch;
+					}
 
-				foreach my $entry (@entries) { 
+					print TEXOUT "\\end{minipage}\n\n";
 
-					next if $done{$entry}++;
-				
+				}
+
+			} else { 
+
+				my @rounds = Tab::Round->search( event => $event->id, timeslot => $timeslot->id, type => "elim");
+				push @rounds, Tab::Round->search( event => $event->id, timeslot => $timeslot->id, type => "final");
+
+				Tab::Ballot->set_sql( i_win => "
+					select distinct ballot.id, concat_ws(\" \",judge.first, judge.last) as judgename
+					from ballot
+					left outer join judge on ballot.judge = judge.id
+					inner join ballot_value on ballot_value.ballot = ballot.id
+					where ballot.panel = ? 
+					and ballot.entry = ? 
+					and ballot.id = ballot_value.ballot
+					and ballot_value.tag = \"ballot\"
+					and ballot_value.value = 1
+				");
+
+				my $affstring = "affirmative";
+				my $negstring = "negative";
+
+				if ($event->type eq "parli") { 
+					$affstring = "government";
+					$negstring = "opposition";
+				}
+
+				if ($event->type eq "pf") { 
+					$affstring = "Pro";
+					$negstring = "Con";
+				}
+
+				foreach my $round (@rounds) { 
+
+					my %ballots_won;
+
+					my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
+
+					my %entries_by_panel;
+
+					foreach my $entry (@entries) { 
+						push @{$entries_by_panel{$entry->panelid}}, $entry;
+					}
+
+					next unless $round->type eq "elim" || $round->type eq "final";
+
+					print TEXOUT "\\noindent\n";
+					print TEXOUT "\\LARGE \\textbf{".Tab::texify($event->name)." ".Tab::texify($round->realname)."}\n";
+					print TEXOUT "\\medskip\n";
 					print TEXOUT "\\newline\n";
+					print TEXOUT "\\large\n";
 
-					print TEXOUT $tabular;
-					print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2;
-					print TEXOUT Tab::texify($entry->code)." & ";
-					print TEXOUT Tab::texify($entry->name)." & ";
-					print TEXOUT Tab::texify($entry->school->short_name)." ";
-					print TEXOUT Tab::texify("(".$entry->school->region->code.")") if $ncfl;
-					print TEXOUT " \n ";
+					foreach my $panel ($round->panels) {
 
-					print TEXOUT "\\end{tabular}\n";
-
-				}
-
-				print TEXOUT "\\end{minipage}\n\n";
-
-			}
-
-		} else { 
-
-			my @rounds = $event->rounds;
-			next EVENT unless @rounds;
-
-			print TEXOUT "\\hfill \\LARGE ".Tab::texify($event->name)."\n";
-			print TEXOUT "\\bigskip\n\n";
-
-			Tab::Ballot->set_sql( i_win => "
-				select distinct ballot.id, concat_ws(\" \",judge.first, judge.last) as judgename
-				from ballot, ballot_value, judge
-				where ballot.panel = ? 
-				and ballot.entry = ? 
-				and ballot.id = ballot_value.ballot
-				and ballot_value.tag = \"ballot\"
-				and ballot_value.value = 1
-				and ballot.judge = judge.id
-			");
-
-
-			my $affstring = "affirmative";
-			my $negstring = "negatve";
-
-			if ($event->type eq "parli") { 
-				$affstring = "government";
-				$negstring = "opposition";
-			}
-
-			if ($event->type eq "pf") { 
-				$affstring = "Pro";
-				$negstring = "Con";
-			}
-
-			foreach my $round (@rounds) { 
-
-				my %ballots_won;
-
-				my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
-
-				my %entries_by_panel;
-
-				foreach my $entry (@entries) { 
-					push @{$entries_by_panel{$entry->panelid}}, $entry;
-				}
-
-				next unless $round->type eq "elim" || $round->type eq "final";
-
-				print TEXOUT "\\noindent\n";
-				print TEXOUT "\\LARGE \\textbf{".Tab::texify($round->realname)." results }\n";
-				print TEXOUT "\\medskip\n";
-				print TEXOUT "\\newline\n";
-				print TEXOUT "\\large\n";
-
-				foreach my $panel ($round->panels) {
-
-					foreach my $entry (@{$entries_by_panel{$panel->id}}) { 
-						@{$ballots_won{$entry->id}} = Tab::Ballot->search_i_win($panel->id, $entry->id);
-					}
-
-					my @entries = sort {scalar (@{$ballots_won{$b->id}}) <=> scalar (@{$ballots_won{$a->id}})} @{$entries_by_panel{$panel->id}};
-
-					my $winner;
-					my $loser; 
-
-					if ($panel->bye) { 
-
-						$winner = shift @entries;
-						$loser = shift @entries;
-						print TEXOUT Tab::texify($winner->code) if $winner;
-						print TEXOUT " advances over ".Tab::texify($loser->code) if $loser;
-						print TEXOUT " (".Tab::texify($loser->name).")\n" if $loser;
-						print TEXOUT "\\medskip\n";
-						print TEXOUT "\\newline\n";
-
-						undef $winner;
-						undef $loser;
-
-					} elsif (@entries) { 
-
-						$winner = shift @entries;
-						$loser = shift @entries if @entries;
-						my $winner_count = scalar @{$ballots_won{$winner->id}} if $winner && $ballots_won{$winner->id};  
-						my $loser_count = scalar @{$ballots_won{$loser->id}} if $loser && $ballots_won{$loser->id};
-
-						my $winner_side;
-						my $loser_side;
-
-						if ($winner && $winner->side == 1) { 
-							$winner_side = $affstring;
-							$loser_side = $negstring;
-						} else { 
-							$winner_side = $negstring;
-							$loser_side = $affstring;
+						foreach my $entry (@{$entries_by_panel{$panel->id}}) { 
+							@{$ballots_won{$entry->id}} = Tab::Ballot->search_i_win($panel->id, $entry->id);
 						}
 
-						print TEXOUT "\\textbf{".Tab::texify($winner->code)."} on the ".Tab::texify($winner_side)." defeated " if $winner;
-						print TEXOUT "\\textbf{".Tab::texify($loser->code)."} " if $loser;
-						print TEXOUT " on a ".$winner_count."--".$loser_count." decision \n\n";
+						my @entries = sort {scalar (@{$ballots_won{$b->id}}) <=> scalar (@{$ballots_won{$a->id}})} @{$entries_by_panel{$panel->id}};
 
-						print TEXOUT Tab::texify($round->realname)." award to ".Tab::texify($loser->school->short_name."'s ").Tab::texify($m->comp("/funclib/entry_name.mas", entry => $loser, full => 1))." \n\n" if $loser;
-						print TEXOUT "Judges: ";
-						my $yup;
-						foreach my $ballot (@{$ballots_won{$winner->id}}) { 
-							print TEXOUT ", " if $yup++;
-							print TEXOUT Tab::texify($ballot->judgename);
-						}
+						my $winner;
+						my $loser; 
 
-						if ($loser) { 
-							foreach my $ballot (@{$ballots_won{$loser->id}}) { 
-								print TEXOUT Tab::texify($ballot->judgename)."\\textbf{*} ";
+						if ($panel->bye) { 
+
+							$winner = shift @entries;
+							$loser = shift @entries;
+
+							print TEXOUT Tab::texify($winner->code) if $winner;
+							print TEXOUT " advances over ".Tab::texify($loser->code) if $loser;
+							print TEXOUT " (".Tab::texify($m->comp("/funclib/entry_name.mas", entry => $loser, full => 1)).")\n" if $loser;
+							print TEXOUT "\\medskip\n";
+							print TEXOUT "\\newline\n";
+
+							undef $winner;
+							undef $loser;
+
+						} elsif (@entries) { 
+
+							$winner = shift @entries;
+							$loser = shift @entries if @entries;
+							my $winner_count = scalar @{$ballots_won{$winner->id}} if $winner && $ballots_won{$winner->id};  
+							my $loser_count = scalar @{$ballots_won{$loser->id}} if $loser && $ballots_won{$loser->id};
+
+							my $winner_side;
+							my $loser_side;
+
+							if ($winner && $winner->side == 1) { 
+								$winner_side = $affstring;
+								$loser_side = $negstring;
+							} else { 
+								$winner_side = $negstring;
+								$loser_side = $affstring;
 							}
+
+							print TEXOUT "\\textbf{".Tab::texify($winner->code)."} on the ".Tab::texify($winner_side)." defeated " if $winner;
+							print TEXOUT "\\textbf{".Tab::texify($loser->code)."} " if $loser;
+							print TEXOUT " on a ".$winner_count."--".$loser_count." decision \n\n";
+
+							print TEXOUT Tab::texify($round->realname)." award to ".Tab::texify($loser->school->short_name."'s ").Tab::texify($m->comp("/funclib/entry_name.mas", entry => $loser, full => 1))." \n\n" if $loser;
+							print TEXOUT "Judges: ";
+
+							my $yup;
+
+							foreach my $ballot (@{$ballots_won{$winner->id}}) { 
+								print TEXOUT ", " if $yup++;
+								print TEXOUT Tab::texify($ballot->judgename);
+							}
+
+							if ($loser) { 
+								foreach my $ballot (@{$ballots_won{$loser->id}}) { 
+									print TEXOUT ", " if $yup++;
+									print TEXOUT Tab::texify($ballot->judgename)."\\textbf{*} ";
+								}
+							}
+
+							print TEXOUT "\n \\medskip\n";
+							print TEXOUT "\\newline\n";
+
+							undef $winner;
+							undef $loser;
+
 						}
-
-						print TEXOUT "\n \\medskip\n";
-						print TEXOUT "\\newline\n";
-
-						undef $winner;
-						undef $loser;
 
 					}
 
+					print TEXOUT "\\vspace{.1in}\n";
+					print TEXOUT "\\newline\n";
 				}
 
-				print TEXOUT "\\vspace{.1in}\n";
-				print TEXOUT "\\newline\n";
 			}
 
 		}
 
+		unless ($timeslot_id || $event_id) { 
+			print TEXOUT "\\vspace{.1in}\n";
+			print TEXOUT "\\newpage\n";
+		}
 	}
 
 	close TEXOUT;
