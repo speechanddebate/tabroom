@@ -87,8 +87,8 @@ sub setting {
 
 			my $exists = Tab::AccountSetting->create({
 				account => $self->id,
-				tag => $tag,
-				value => $value,
+				tag     => $tag,
+				value   => $value,
 			});
 
 			if ($value eq "text") { 
