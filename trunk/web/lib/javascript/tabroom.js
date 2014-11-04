@@ -476,8 +476,8 @@ else{pmItems++;}}
 hourCounter=0;amRows=Math.floor(amItems/hours.length*rows);pmRows=Math.floor(pmItems/hours.length*rows);if(rows!=amRows+pmRows){if(amItems&&(!pmItems||!amRows||(pmRows&&amItems/amRows>=pmItems/pmRows))){amRows++;}else{pmRows++;}}
 amFirstRow=Math.min(amRows,1);pmFirstRow=amRows+1;if(amRows==0){hoursPerRow=Math.ceil(pmItems/pmRows);}else if(pmRows==0){hoursPerRow=Math.ceil(amItems/amRows);}else{hoursPerRow=Math.ceil(Math.max(amItems/amRows,pmItems/pmRows));}}
 html='<table class="ui-timepicker-table ui-widget-content ui-corner-all"><tr>';if(showHours){html+='<td class="ui-timepicker-hours">'+'<div class="ui-timepicker-title ui-widget-header ui-helper-clearfix ui-corner-all">'+
-hourLabel+'</div>'+'<table class="ui-timepicker">';for(row=1;row<=rows;row++){html+='<tr>';if(row==amFirstRow&&showPeriodLabels){html+='<th rowspan="'+amRows.toString()+'" class="periods" scope="row">'+amPmText[0]+'</th>';}
-if(row==pmFirstRow&&showPeriodLabels){html+='<th rowspan="'+pmRows.toString()+'" class="periods" scope="row">'+amPmText[1]+'</th>';}
+hourLabel+'</div>'+'<table class="ui-timepicker">';for(row=1;row<=rows;row++){html+='<tr>';if(row==amFirstRow&&showPeriodLabels){html+='<th rowspan="'+amRows.toString()+'" class="periods period'+amPmText[0]+'" scope="row">'+amPmText[0]+'</th>';}
+if(row==pmFirstRow&&showPeriodLabels){html+='<th rowspan="'+pmRows.toString()+'" class="periods period'+amPmText[1]+'" scope="row">'+amPmText[1]+'</th>';}
 for(col=1;col<=hoursPerRow;col++){if(showPeriodLabels&&row<pmFirstRow&&hours[hourCounter]>=12){html+=this._generateHTMLHourCell(inst,undefined,showPeriod,showLeadingZero);}else{html+=this._generateHTMLHourCell(inst,hours[hourCounter],showPeriod,showLeadingZero);hourCounter++;}}
 html+='</tr>';}
 html+='</table>'+'</td>';}
@@ -505,7 +505,7 @@ if((displayHour==0)&&showPeriod){displayHour=12;}
 if((displayHour<10)&&showLeadingZero){displayHour='0'+displayHour;}
 var html="";var enabled=true;var onHourShow=this._get(inst,'onHourShow');if(hour==undefined){html='<td><span class="ui-state-default ui-state-disabled">&nbsp;</span></td>';return html;}
 if(onHourShow){enabled=onHourShow.apply((inst.input?inst.input[0]:null),[hour]);}
-if(enabled){html='<td class="ui-timepicker-hour-cell" data-timepicker-instance-id="#'+inst.id.replace(/\\\\/g,"\\")+'" data-hour="'+hour.toString()+'">'+'<a class="ui-state-default '+
+if(enabled){html='<td class="ui-timepicker-hour-cell hour'+hour.toString()+'" data-timepicker-instance-id="#'+inst.id.replace(/\\\\/g,"\\")+'" data-hour="'+hour.toString()+'">'+'<a class="ui-state-default '+
 (hour==inst.hours?'ui-state-active':'')+'">'+
 displayHour.toString()+'</a></td>';}
 else{html='<td>'+'<span class="ui-state-default ui-state-disabled '+
