@@ -137,6 +137,9 @@ function autoPoints(input,len,e,side) {
 			input.value = number;
 			changeFocus(input);
 			totalPoints(side);
+		} else if (input.value == 30) {
+			changeFocus(input);
+			totalPoints(side);
 		}
 
 	} else if (len == 6 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
