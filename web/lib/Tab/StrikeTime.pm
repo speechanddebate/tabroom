@@ -9,10 +9,16 @@ __PACKAGE__->_register_datetimes( qw/start/ );
 __PACKAGE__->_register_datetimes( qw/end/);
 
 sub strike {
+
 	my ($self, $judge) = @_;
+
+	return unless $self;
+	return unless $judge; 
+
 	my @cons = Tab::Strike->search(	
-				strike_time => $self->id, 
-				judge => $judge->id );
+				strike_time => $self->id,
+				judge       => $judge->id );
+
     my $con = shift @cons if @cons;
     foreach (@cons) {$_->delete;} #rm spares
 	return $con;
