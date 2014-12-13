@@ -116,7 +116,7 @@ function autoWin(input,e,aff,neg,affid,negid) {
     return true;
 }
 
-function autoPoints(input,len,e,side) {
+function autoPoints(input,len,e,side,ratio) {
 
     var keyCode = e.keyCode; 
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
@@ -126,7 +126,7 @@ function autoPoints(input,len,e,side) {
         if (input.value == 't3') {
 			input.value = 23 * 1;
 			changeFocus(input);
-			totalPoints(side);
+			totalPoints(side,ratio);
 		} else if (input.value != input.value * 1) {
 			input.value = "";
 		} else if (input.value != 30) {
@@ -136,10 +136,10 @@ function autoPoints(input,len,e,side) {
 			number = number + 20;
 			input.value = number;
 			changeFocus(input);
-			totalPoints(side);
+			totalPoints(side,ratio);
 		} else if (input.value == 30) {
 			changeFocus(input);
-			totalPoints(side);
+			totalPoints(side,ratio);
 		}
 
 	} else if (len == 6 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
@@ -178,7 +178,7 @@ function autoPoints(input,len,e,side) {
 		}
 
 		changeFocus(input);
-		totalPoints(side);
+		totalPoints(side,ratio);
 
 	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
 
@@ -203,22 +203,22 @@ function autoPoints(input,len,e,side) {
         }
 
 		changeFocus(input);
-		totalPoints(side);
+		totalPoints(side,ratio);
     
     }    
 
-	function totalPoints(side) { 
+	function totalPoints(side,ratio) { 
 
 		var class_target = "points_" + side;
 		var points_array = document.getElementsByClassName(class_target);
 		var total = 0;
 
-		for(var i=0;i<points_array.length;i++){
-			if(parseFloat(points_array[i].value)) total += parseFloat(points_array[i].value);
+		for(var i=0; i<points_array.length;i++){
+			if (parseFloat(points_array[i].value)) total += parseFloat(points_array[i].value);
 		}
 
 		var points_total = document.getElementById(class_target);
-		points_total.value = total;
+		points_total.value = total * ratio;
 
 		var class_target = "ranks_" + side;
 		var ranks_array = document.getElementsByClassName(class_target);
