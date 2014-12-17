@@ -4,7 +4,7 @@
 </%args>
 <%perl>
 
-	our $debugme; # = 1; #enable to show printed diagnostics
+	our $debugme = 0; #1; #enable to show printed diagnostics
 
 	my $now = DateTime->now(time_zone => "UTC");
 
@@ -159,26 +159,16 @@
 	my $min_possible_opponents = 999;
 	my $school_ct = 0; 
 	my $hi_school; 
+	my %bracket;
+	
 	my %school_entries;
-
 	foreach my $key ( keys %entry_by_id ) {
 		$school_entries{ $entry_by_id{$key}{'school'} } ++;
-		foreach my $key2 ( keys %entry_by_id ) {
-			my $canpair = 1;
-			if (hasconflict($key, $key2, \%precluded) == 1) { $canpair = 0; } 
-			if ($key == $key2) { $canpair = 0; } 
-			if ( $oddround == 0 and $entry_by_id{$key}{'sidedue'} == $entry_by_id{$key2}{'sidedue'} ) { $canpair = 0; } 
-			if ( $canpair == 1 ) { $entry_by_id{$key}{'possible_opponents'}++; }
-		}
-
-		$entry_by_id{$key}{'possible_opponents'} = 0 unless $entry_by_id{$key}{'possible_opponents'};
-
-		if ( $entry_by_id{$key}{'possible_opponents'} < $min_possible_opponents ) { 
-			$min_possible_opponents = $entry_by_id{$key}{'possible_opponents'}; 
-		}
-
+		$bracket{$key}{'side'} = 0;
 	}
-
+	
+	count_possible_opponents(\%entry_by_id, \%precluded, \$oddround, \$min_possible_opponents, \%bracket);
+	
 	#figure n teams from 1 school in bracket
 	foreach my $key (keys %school_entries) {
 		if ( $school_entries{$key} > $school_ct ) { $school_ct = $school_entries{$key}; $hi_school=$key; }
@@ -203,8 +193,6 @@
 
 	# PAIR IT
 
-	my %bracket; 
-	
 	#Figure out how many brackets to pair
 	my $hibracket=-1;
 
@@ -231,8 +219,11 @@
 
 	# (4) if it still can't pair, the setbracket function will automatically
 	# collapse it with the next lower bracket 
+
+	# (5) if its the bottom bracket, it will collapse the teams into the next higher bracket
+	# and re-pair that
 	
-	my $n_tries=0;
+	my $n_tries=0; my $collapse_up = 0;
 	
 	while ($x > -1) {
 
@@ -244,9 +235,9 @@
 		my $dummy = keys %bracket;
 		my $bye_school=0;
 
-		$error_log .= "\nI have $dummy teams in this bracket:\n\n";
+		$error_log .= "\nI have $dummy teams in this bracket:<br>";
 		foreach my $key (keys %bracket) { 
-			$error_log .= $entry_by_id{$key}{'code'}."\n";
+			$error_log .=  $key." ".$entry_by_id{$key}{'code'}." with ".$entry_by_id{$key}{'wins'}."wins<br>";
 		}
 
 		if ( ($school_ct/$entry_count) > .4  ) { $bye_school=$hi_school; }
@@ -256,7 +247,7 @@
 		
 		#pair the bracket, and exit if it works.  if it doesn't, pull up other teams until there's one that works
 		
-		my $i=0; my $pullup_tries=0; my $last_try=0;
+		my $i=0; my $pullup_tries=0; my $last_try=0; 
 
 		do {
 			#infinite loop preventer
@@ -280,9 +271,13 @@
 		
 			# if it fails try the "just pair it" bracket option
 
-			if ($outcome eq "Fail") { 
-				$outcome = justmakeitwork(\%bracket, \%entry_by_id, $oddround, \%precluded);
-				$error_log .= "justmakeitwork returned $outcome\n\n";
+			if ($outcome eq "Fail") {
+				my $try_ctr = 0;
+				do {
+					$try_ctr++;
+					$outcome = justmakeitwork(\%bracket, \%entry_by_id, $oddround, \%precluded);
+					$error_log .= "justmakeitwork returned $outcome on iteration $try_ctr\n\n";					
+				} until ( $outcome ne "Fail" || $try_ctr > 20 );
 				if ($outcome ne "Fail") { $i = scalar(@pullup_array) + 99 ; }
 			} else { 
 				$i = scalar(@pullup_array) + 99 ; 
@@ -336,12 +331,31 @@
 			
 		} until ($i >= scalar(@pullup_array) );
 
-		if ( unpaired(\%entry_by_id, \%bracket) > 0 ) { 
-			$error_log .= "Couldn't pair the bracket; collapsing it with the next bracket down\n\n";  
+		#clean out the detritius
+		for my $key ( keys %entry_by_id ) {
+			if ( $key <=0 ) { delete($entry_by_id{$key}); }
+		}
+		
+		if ( unpaired(\%entry_by_id, \%bracket) > 0 && $x > 0 ) { 
+			$error_log .= "Couldn't pair the bracket; collapsing it with the next bracket down; current bracket is $x \n\n";  
+		}		
+
+		if ( unpaired(\%entry_by_id, \%bracket) > 0 && $x == 0 && $collapse_up < $hibracket ) { 
+			$error_log .= "Couldn't pair the last bracket; collapsing it with the next bracket up\n\n";
+			$x++; #note it will subtract one below, so this will keep it at zero
+			$collapse_up++; #counting how many brackets its rolled back to
+			#unpair the next bracket up
+			foreach my $key ( keys %entry_by_id ) {
+				if ($entry_by_id{$key}{'wins'} <= $collapse_up ) {
+					$entry_by_id{$entry_by_id{$key}{'opponent'}}{'opponent'} = 0;
+					$entry_by_id{$key}{'opponent'} = 0;
+				}
+			}	
+			#When this loops back it should repeat with the collapsed brackets; note how sub setbracket works
 		}		
 
 		if ( unpaired(\%entry_by_id, \%bracket) == 0 ) { 
-			$error_log .= "Successfully paired the bracket\n\n";  
+			$error_log .= "Successfully paired the $x-win bracket<br>";  
 		}		
 
 		$x--;
@@ -395,6 +409,10 @@
 		# $error_log .= " odd round:".$oddround." winbracket=".$winbracket."\n\n" ;
 		my %entry_by_id = %{$entry_by_id_ref};
 
+		foreach my $key ( keys %entry_by_id ) {
+			if ($key <= 0) { delete( $entry_by_id{$key} ); }
+		}
+		
 		$error_log .= "Starting with this many teams in entry_by_id:".(keys %entry_by_id)."\n\n";
 		my %team;
 
@@ -416,6 +434,7 @@
 
 		foreach my $key ( keys %entry_by_id ) {
 
+			if ($key <= 0) { delete( $entry_by_id{$key} ); }	
 			next unless $key;
 			next unless $entry_by_id{$key};
 
@@ -718,6 +737,44 @@
 
 	}
 		
+	sub count_possible_opponents {
+	
+		#variables are passed by ref; this gives them identical local names
+		my ($entry_by_id_ref, $precluded_ref, $oddround_ref, $min_possible_opponents_ref, $bracket_ref) = @_;
+		my %entry_by_id = %{$entry_by_id_ref};
+		my %precluded = %{$precluded_ref};
+		my $oddround = ${$oddround_ref};
+		my $min_possible_opponents = ${$min_possible_opponents_ref};
+		my %bracket = %{$bracket_ref};
+		
+		foreach my $key ( keys %entry_by_id ) {
+			$entry_by_id{$key}{'possible_opponents'} = 0;
+		}
+		
+		foreach my $key ( keys %bracket ) {
+
+			$entry_by_id{$key}{'random'} = int(rand(1000))+1;
+			foreach my $key2 ( keys %bracket ) {
+				my $canpair = 1;
+				if (hasconflict($key, $key2, \%precluded) == 1) { $canpair = 0; } 
+				if ($key == $key2) { $canpair = 0; } 
+				if ( $oddround == 0 and $entry_by_id{$key}{'sidedue'} == $entry_by_id{$key2}{'sidedue'} ) { $canpair = 0; }
+				if ( $entry_by_id{$key2}{'opponent'} > 0 ) { $canpair = 0; }
+				if ( $canpair == 1 ) { $entry_by_id{$key}{'possible_opponents'}++; }
+			}
+		
+			$entry_by_id{$key}{'possible_opponents'} = 0 unless $entry_by_id{$key}{'possible_opponents'};
+		
+			if ( $entry_by_id{$key}{'possible_opponents'} < $min_possible_opponents ) { 
+				$min_possible_opponents = $entry_by_id{$key}{'possible_opponents'}; 
+			}
+
+		}
+
+		${$min_possible_opponents_ref} = $min_possible_opponents;
+		
+	}
+	
 	sub pairbracket {
 
 		my ($oddround, $powermatch_method, $entry_by_id_ref, $bracket_ref, $precluded_ref) = @_;
@@ -962,9 +1019,10 @@
 	sub justmakeitwork {
 
 		my ($bracket_ref, $entry_by_id_ref, $oddround, $precluded_ref) = @_;
-
+		
 		my %bracket = %{$bracket_ref};
 		my %entry_by_id = %{$entry_by_id_ref};
+		my %precluded = %{$precluded_ref};
 	
 		# NOTE: This counts the number of possible opponents and then pairs a
 		# high-high based on that it may be possible to fuse this into another
@@ -974,64 +1032,74 @@
 		# bracket
 
 		$error_log .= "\n\nin the 'just make it work' disaster pairing mode\n\n" ;
+		$error_log .= " Bracket has".scalar(keys %bracket)."teams<br>" ;
 	
-		# clear any current opponents
+		# clear any current opponents & count the number of possible opponents
 		
 		foreach my $key ( keys %bracket ) {
 			$entry_by_id{$key}{'opponent'} = 0;
 		}
-
+		my $min_possible_opponents; my $pair_fail=0;
+		
 		#now pair it
-		foreach my $key ( sort { $entry_by_id{$a}->{'possible_opponents'} <=> $entry_by_id{$b}->{'possible_opponents'} } keys(%bracket) ) {
-			
-			next unless $key;
-			next unless $entry_by_id{$key};
-
-			#if it's an even round, only loop through the aff
-			my $sidemarker = 1;
-			if ($oddround == 0 and $bracket{$key}{'side'} == 2) { $sidemarker = 0; }
-
-			if ( $entry_by_id{$key}{'opponent'} == 0 and $sidemarker == 1 ) {
-
-				$error_log .= $entry_by_id{$key}{'code'}." has this many possible opponents:".$entry_by_id{$key}{'possible_opponents'}."\n\n";
+		do {
+			#re-count number of possible opponents
+			count_possible_opponents(\%entry_by_id, \%precluded, \$oddround, \$min_possible_opponents, \%bracket);
 	
-				foreach my $oppkey (sort { $entry_by_id{$a}->{'possible_opponents'} <=> $entry_by_id{$b}->{'possible_opponents'} } keys(%bracket)) {
-
-					next unless $oppkey;
-					next unless $entry_by_id{$oppkey};
-
-					$error_log .= "Trying to pair ".$entry_by_id{$key}{'code'}." vs ".$entry_by_id{$oppkey}{'code'}." \n\n" ;
-
-					my $canpair = 1;
-
-					if ($entry_by_id{$oppkey}{'opponent'} != 0) { 
-						$canpair = 0; 
-						$error_log .= $entry_by_id{$oppkey}{'code'}." has opponent already.\n\n" ;
+			foreach my $key ( sort { $entry_by_id{$a}->{'possible_opponents'} <=> $entry_by_id{$b}->{'possible_opponents'} || $entry_by_id{$a}->{'random'} <=> $entry_by_id{$b}->{'random'} } keys(%bracket) ) {
+	
+				$error_log .= "Possible opponents for: ".$entry_by_id{$key}{'code'}." is ".$entry_by_id{$key}{'possible_opponents'}."<br>";			
+				next unless $key;
+				next unless $entry_by_id{$key};
+	
+				#if it's an even round, only loop through the aff -- but WHY?  Disabled!  What are you doing, past self!
+				#my $sidemarker = 1;
+				#if ($oddround == 0 and $bracket{$key}{'side'} == 2) { $sidemarker = 0; }
+				#if ( $entry_by_id{$key}{'opponent'} == 0 and $sidemarker == 1 ) {
+	
+				if ( $entry_by_id{$key}{'opponent'} == 0 ) {
+	
+					foreach my $oppkey (sort { $entry_by_id{$a}->{'possible_opponents'} <=> $entry_by_id{$b}->{'possible_opponents'} } keys(%bracket)) {
+	
+						next unless $oppkey;
+						next unless $entry_by_id{$oppkey};
+	
+						$error_log .= "Trying to pair ".$entry_by_id{$key}{'code'}." vs ".$entry_by_id{$oppkey}{'code'}."<br>" ;
+	
+						my $canpair = 1;
+	
+						if ($entry_by_id{$oppkey}{'opponent'} != 0) { 
+							$canpair = 0; 
+							$error_log .= $entry_by_id{$oppkey}{'code'}." has opponent already.<br>" ;
+						}
+	
+						if (hasconflict($key, $oppkey, $precluded_ref) == 1) { 
+							$canpair = 0; 
+							$error_log .= "Teams have conflict.<br>" ;
+						} 
+	
+						if ($key == $oppkey) { $canpair = 0; } 
+	
+						if ( $oddround == 0 and $bracket{$key}{'side'} == $bracket{$oppkey}{'side'} ) { 
+							$canpair = 0; 
+							$error_log .= "Teams on same side<br>" ; 
+						} 
+	
+						if ( $canpair == 1 ) {
+							$entry_by_id{$key}{'opponent'} = $oppkey;
+							$entry_by_id{$oppkey}{'opponent'} = $key;
+							$error_log .= "pairing WORKED!  Pairing ".$entry_by_id{$key}{'code'}." vs ".$entry_by_id{$oppkey}{'code'}."<br>" ;
+							last;
+						}
 					}
-
-					if (hasconflict($key, $oppkey, $precluded_ref) == 1) { 
-						$canpair = 0; 
-						$error_log .= "Teams have conflict.\n\n" ;
-					} 
-
-					if ($key == $oppkey) { $canpair = 0; } 
-
-					if ( $oddround == 0 and $bracket{$key}{'side'} == $bracket{$oppkey}{'side'} ) { 
-						$canpair = 0; 
-						$error_log .= "Teams on same side\n\n" ; 
-					} 
-
-					if ( $canpair == 1 ) {
-						$entry_by_id{$key}{'opponent'} = $oppkey;
-						$entry_by_id{$oppkey}{'opponent'} = $key;
-						$error_log .= "pairing WORKED!  Pairing ".$entry_by_id{$key}{'code'}." vs ".$entry_by_id{$oppkey}{'code'}."\n\n" ;
-						last;
-					}
+					
+					if ($entry_by_id{$key}{'opponent'} == 0 ) { $pair_fail = 1; }
 				}
 			}
-		}
+
+		} until ( unpaired(\%entry_by_id, \%bracket) == 0 || $pair_fail == 1 ); #bail if all paired or couldn't pair last team
 		
-		if (unpaired(\%entry_by_id, \%bracket) == 0) { return "Success"; }
+		if ( unpaired(\%entry_by_id, \%bracket) == 0 ) { return "Success"; }
 		return "Fail";
 	}
 
