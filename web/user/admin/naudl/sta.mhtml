@@ -1,11 +1,11 @@
 <%args>
-	$start_year
-	$start_month
-	$start_day
-	$end_year
-	$end_month
-	$end_day
+	$startdate
+	$enddate
+	$circuit_id
 </%args>
+<%flags>
+	inherit => undef
+</%flags>
 <%init>
 
 	my $start;
@@ -14,8 +14,8 @@
 	my $now = DateTime->now;
 
 	eval{
-		$start = Tab::dateme($start_month."/".$start_day."/".$start_year);
-		$end = Tab::dateme($end_month."/".$end_day."/".$end_year);
+		$start = Tab::dateme($startdate);
+		$end = Tab::dateme($enddate);
 	};
 
 	unless ($start) { 
@@ -24,13 +24,13 @@
 
 	unless ($end) {
 		$end = $start->clone;
-		$end->subtract(days => 14);
+		$end->subtract(days => 7);
 	}
 
 	# Find the chapters in NAUDL who have competed in that time frame.
 
-	Tab::Chapter->set_sql( naudl_competed => "
-		select chapter.* 
+	Tab::School->set_sql( naudl_competed => "
+		select school.*
 		from chapter, school, tourn
 		where chapter.naudl = 1
 		and chapter.id = school.chapter
@@ -39,12 +39,143 @@
 		and tourn.end < ?
 	");
 
-	my @chapters = Tab::Chapter->search_naudl_competed( 
+	my @schools = Tab::School->search_naudl_competed( 
 		DateTime::Format::MySQL->format_datetime($start), 
-		DateTime::Format::MySQL->format_datetime($end) );
+		DateTime::Format::MySQL->format_datetime($end) 
+	);
 
-	foreach my $chapter (@chapters) {
+    my $filename = "NAUDL-STA-$start-$end.csv";
+
+	$r->content_type('application/csv');
+	$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+    
+	my @tourns;
+	my %tourn_events = ();
+	my %event_entries = ();
+
+	my %used;
+
+	foreach my $school (@schools) {
+		push @tourns, $school->tourn;
+		foreach my $entry ($school->entries(dropped => 0, waitlist => 0, unconfirmed => 0)) { 
+			push @{$tourn_events{$school->tourn->id}}, $entry->event;
+			push @{$event_entries{$entry->event->id}}, $entry;
+		}
+	}
+
+	$m->print("recordid,tournid,tournname,tournstartdate,eventid,eventname,eventabbr,divisionid,divisionname,divisionabbr,studentid,pairid,speakerorder,elimplace,prelimseed\n");
+
+	my %seen = (); 
+	@tourns = grep { ! $seen{$_->id} ++ } @tourns;
+
+	foreach my $tourn (@tourns) { 
+
+		my $start = $tourn->start;
+		my $start_string = $start->year."-".$start->month."-".$start->day;
+
+		my %done;
+
+		foreach my $event (@{$tourn_events{$tourn->id}}) { 
+
+			next if $done{$event}++;
+
+			my $event_name = ucfirst($event->type)."-".$event->name;
+			my $division_name = ucfirst($event->setting("level"))."-".$event->name;
+
+			my @rounds = sort {$b->name <=> $a->name} $event->rounds;
+			my @elims;
+
+			my $final = $rounds[0];
+
+			my $last_prelim;
+
+			foreach my $round (@rounds) { 
+
+				unless ($last_prelim) { 
+					$last_prelim = $round if ($round->type ne "final" && $round->type ne "elim");
+				}
+				push @elims, $round if $round->type eq "final";
+				push @elims, $round if $round->type eq "elim";
+			}
+
+			my ($final_entries_ref, @crap) = $m->comp("/tabbing/results/order_entries.mas", round => $final) if $final->tb_set;
+
+			my ($prelim_entries_ref, $prelim_tbs_ref, $prelim_desc_ref, $prelim_noshow_ref, $prelim_meh, $prelim_panrank_ref, $prelim_panletter_ref, $prelim_long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $last_prelim) if $last_prelim->tb_set;
+
+			my ($speakers_students_ref, $speakers_tbs_ref, $speakers_desc_ref, $speakers_noshow_ref, $speakers_meh, $speakers_long_desc_ref, $speakers_novice_ref, $speakers_name_ref, $speakers_code_ref, $speakers_school_ref) = $m->comp("/tabbing/results/order_speakers.mas", round => $last_prelim) if $event->setting("speaker_tbset");
+
+			my %student_speaker_key;
+
+			foreach my $key (sort {$a <=> $b} keys %{$speakers_students_ref}) {
+				foreach my $student_id (@{${$speakers_students_ref}{$key}}) {
+					$student_speaker_key{$student_id} = $key;
+				}
+			}
+
+			my %entry_seed_key;
+
+			foreach my $key (sort {$a <=> $b} keys %{$prelim_entries_ref}) {
+				foreach my $entry_id (@{${$prelim_entries_ref}{$key}}) {
+					$entry_seed_key{$entry_id} = $key;
+				}
+			}
+
+			my %entry_finish;
+
+			if (@elims) { 
+
+				my $finish = "Semifinal";
+
+				foreach my $round (@elims) { 
+
+					my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
+
+					Tab::debuglog("Testing round ".$round->label." with finish marker $finish");
+
+					if (scalar @entries == 2) { 
+
+						$entry_finish{${${$final_entries_ref}{"1"}}[0]} = "First" if ${$final_entries_ref}{"1"} && ${${$final_entries_ref}{"1"}}[0];
+						$entry_finish{${${$final_entries_ref}{"2"}}[0]} = "Second" if ${$final_entries_ref}{"2"} && ${${$final_entries_ref}{"2"}}[0]; 
+					} else {
+
+						foreach my $entry (@entries) { 
+							next if $entry_finish{$entry->id};
+							$entry_finish{$entry->id} = $finish;
+						}
+
+						$finish = "Triple Octafinal" if $finish eq "Double Octafinal";
+						$finish = "Double Octafinal" if $finish eq "Octafinal";
+						$finish = "Octafinal" if $finish eq "Quarterfinal";
+						$finish = "Quarterfinal" if $finish eq "Semifinal";
+
+					}
+				}
+
+			}
+
+			my %used;
+
+			foreach my $entry (@{$event_entries{$event->id}}) { 
+			
+				next if $used{$entry}++;
+
+				my @students = sort {$a->id <=> $b->id} $entry->students;
+				my $first_team = $m->comp("/funclib/first_entry.mas", entry => $entry);
+
+				$first_team = "TR".$first_team if $first_team;
+
+				foreach my $student ($entry->students) { 
+
+					$m->print("TR".$entry.",TR".$tourn.",\"".$tourn->name."\",".$start_string.",".$event.",\"".$event_name."\",\"".$event->abbr."\",0,\"".$division_name."\",0,TR".$student.",".$first_team.",".$student_speaker_key{$student}.",".$entry_finish{$entry}.",".$entry_seed_key{$entry}."\n");
+
+				}
+
+			}
+
+		}
 
 	}
+
+
 
 </%init>
