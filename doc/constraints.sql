@@ -7,7 +7,7 @@ alter table account_conflict add constraint uk_constraint UNIQUE(account,conflic
 alter table account_setting add constraint uk_account_setting UNIQUE(account,tag);
 
 delete b2.* from ballot b1, ballot b2 where b2.panel = b1.panel and b2.judge = b1.judge and b2.entry = b1.entry and b2.id > b1.id;
-alter table ballot add constraint uk_ballots UNIQUE(judge,entry,panel);
+alter table ballot add constraint uk_ballots UNIQUE(judge,entry,panel,speechnumber);
 
 delete bv2.* from ballot_value bv1, ballot_value bv2 where bv2.ballot = bv1.ballot and bv2.tag = bv1.tag and bv2.student = bv1.student and bv2.id > bv1.id;
 alter table ballot_value add constraint uk_bv_scores UNIQUE(ballot,student,tag);
