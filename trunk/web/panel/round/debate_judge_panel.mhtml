@@ -51,6 +51,7 @@
 	my $no_first_years = $round_event->setting("no_first_years");
 	my $allow_judge_own = $round_event->setting("allow_judge_own");
 	my $region_constraints = $round_event->setting("region_constraints");
+	my $region_avoid++ if $round_event->setting("region_avoid");
 	my $allow_repeat_elims = $round_event->setting("allow_repeat_elims");
 	my $allow_repeat_judging = $round_event->setting("allow_repeat_judging");
 	my $allow_repeat_prelim_side = $round_event->setting("allow_repeat_prelim_side");
@@ -195,23 +196,8 @@
 		$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&disp=1&err=$err");
 	}
 
-	my %school_region;
-	my @schools;
-
-	if ($region_constraints) { 
-
-		my $region_sth = $dbh->prepare("
-			select distinct school.id, school.region
-			from school where school.tourn = ".$tourn->id);
-
-		$region_sth->execute();
-	
-		while (my ($id, $region) = $region_sth->fetchrow_array() ) {
-			push @schools, $id;
-			$school_region{$id} = $region
-		}
-
-	}
+    my @schools = $m->comp("/funclib/event_schools.mas", event => $round->event);
+	my %school_region = map {$_->id => $_->region} @schools if $region_constraints || $region_avoid;
 
 	my $strikes_sth = $dbh->prepare("
 		select distinct strike.id, strike.judge, strike.type, strike.event, strike.entry, strike.school, strike.region, strike.start, strike.end
@@ -334,18 +320,31 @@
 	my %judge_avoid;
 	my %judge_entry_clash;
 
-	my $mutuality = $group->setting("mutuality");
-	my $preference = $group->setting("preference");
-	my $default_mjp = $group->setting("default_mjp");
-	my $diversity = $group->setting("diverse_judge_weight");
+    my $round_burn_avoid = $group->setting("round_burn_avoid");
+    my $mutuality = $group->setting("mutuality");
+    my $preference = $group->setting("preference");
+    my $default_mjp = $group->setting("default_mjp");
+    my $diversity = $group->setting("diverse_judge_weight");
+    my $suckage = $group->setting("sucktastic_judge_weight");
+    my $prefer_hireds = $group->setting("mjp_prefer_hireds");
 
-	$mutuality = 25 if not defined $mutuality;
-	$preference = 10 if not defined $preference;
-	$default_mjp = 1 if not defined $default_mjp;
-	$diversity = 0 if not defined $diversity;
+    $diversity = 1 if not defined $diversity;
+    $suckage = 3 if not defined $suckage;
+    $mutuality = 40 if not defined $mutuality;
+    $preference = 15 if not defined $preference;
+    $default_mjp = 1 if not defined $default_mjp;
+    $round_burn_avoid =  5 if not defined $round_burn_avoid;
+    $prefer_hireds = 10 if not defined $prefer_hireds;
 
-	$mutuality = 0 if $mutuality == -1;
-	$preference = 0 if $preference == -1;
+    $mutuality = 0 if $mutuality == -1; 
+    $diversity = 0 if $diversity == -1; 
+    $suckage = 0 if $suckage == -1; 
+    $preference = 0 if $preference == -1; 
+    $default_mjp = 0 if $default_mjp == -1; 
+    $round_burn_avoid = 0 if $round_burn_avoid == -1; 
+    $prefer_hireds = 0 if $prefer_hireds == -1; 
+
+	my %use_priority = ();
 
 	foreach my $judge (@judges) {
 
@@ -378,8 +377,10 @@
 
 		foreach my $clash (@{$judge_clashes{$judge}}) { 
 			$judge_entry_clash{$judge."-".$clash}++;
-		}
+		} 
 
+		$use_priority{$judge} -= $prefer_hireds if $judge_school{$judge} < 1;
+		$use_priority{$judge} -= $judge_diverse{$judge} * $diversity if $diversity;
 	}
 
 	my $switch;
@@ -404,27 +405,38 @@
 
 			foreach my $entry (@{$panel_entries{$panel}}) { 
 
-				$score += 1000000 if $judge_entry_clash{$judge."-".$entry};
-				$score += 50000 if $judge_avoid{$entry};
-				$score += 500000 if $max_pref && $mjp{$judge."-".$entry} > $max_pref;
+				my $mjp_rating = $mjp{$judge."-".$entry};
+				$mjp_rating = $default_mjp unless $mjp_rating;
+
+                $score += 100000000 if $judge_entry_clash{$judge."-".$entry};
+                $score += 50000 if $judge_avoid{$entry};
+                $score += 500000 if $judge_avoid{$entry} && $prefs eq "ordinals";
+				$score += 500000 if $max_pref && $mjp_rating > $max_pref;
 
 				if ($mjp_first) { 
-					$diff = abs($mjp_first - $mjp{$judge."-".$entry}) if $mjp_first && $mjp{$judge."-".$entry};
+					$diff = abs($mjp_first - $mjp_rating) if $mjp_first && $mjp_rating;
 				} else { 
-					$mjp_first = $mjp{$judge."-".$entry} unless $mjp_first;
+					$mjp_first = $mjp_rating unless $mjp_first;
 				}
 
+                if ($region_avoid) {
+                    $score += 100 if $school_region{$entry_school{$entry}} == $school_region{$judge_school{$judge}};
+                }
+
+                if ($region_constraints) {
+                    $score += 10000000 if $school_region{$entry_school{$entry}} == $school_region{$judge_school{$judge}};
+                }
+
 				if ($prefs && $prefs ne "none") {
-					$score += $mjp{$judge."-".$entry} * $preference;
-					$score += $default_mjp * $preference unless $mjp{$judge."-".$entry};
+					$score += $mjp_rating * $preference;
 				}
 
 				$judge_rating{$judge."-".$panel} .= " - " if $judge_rating{$judge."-".$panel};
-				$judge_rating{$judge."-".$panel} .= $mjp{$judge."-".$entry} if $prefs && $prefs ne "none";
-				$judge_rating{$judge."-".$panel} .= "99" unless $mjp{$judge."-".$entry};
+				$judge_rating{$judge."-".$panel} .= $mjp_rating if $prefs && $prefs ne "none";
 				
 			}
-
+			
+            $score += $use_priority{$judge};
 			$score += $diff * $mutuality;
 
 			if ($tab_ratings) { 
