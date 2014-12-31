@@ -20,28 +20,28 @@
 
 	my $oddround=1;
 	$oddround = 0 if int($round->name/2) == $round->name/2; 
-
 	$oddround = 1 if $event->setting("no_side_constraints");
 
 	#use this round to seed
-	my @round_dummy = Tab::Round->search( name => $round->name-1, event => $round->event );	
+	my $round_for_seeding;
+	my $seeding_round_name = $round->name - 1;
+
+	while (not defined $round_for_seeding && $seeding_round_name) { 
+		$round_for_seeding = Tab::Round->search( name => $seeding_round_name, event => $round->event )->first;
+		$seeding_round_name--;
+	}
 
 	# print "This round ID:".$round->id." this round
 	# name:".$round->name."<br>"; print "round for seeding
 	# id:".$round_dummy[0]->id." round for seeding
 	# name:".$round_dummy[0]->name."<br>";
 
-	my $round_for_seeding;
 	my $panel = 0; 
 	my $team1; 
 	my $team2; 
 	my $pullup1; 
 	my $pullup2;
 	my $side;
-
-	if ( scalar(@round_dummy) > 0 ) {
-		$round_for_seeding = Tab::Round->retrieve( $round_dummy[0]->id );
-	}
 
 	my $start = time(); 
 	my $end = time();
@@ -156,107 +156,78 @@
 			print "First 3.5 steps done:  "; printf("%.2f\n", $end - $start); print "<br>";
 		}			
 
-		#STEP FOUR: calculate oppseeds.  Also marks debeted before preclusions and pullups
-	
-		#Start by pulling all the rounds
-		my $rd_name=$round->name;
-		if ($debug) {$m->print( "Seeding through round ".$round_for_seeding->name." and pulling opponents through ".($rd_name-1)."<br>" ) ; }
+		#STEP FOUR: calculate oppseeds.  Also marks debated before preclusions and pullups
 
-		Tab::Ballot->columns(TEMP => qw/panel_bye/);
-				
-		Tab::Ballot->set_sql(pull_ballots => "
-			select ballot.id, ballot.entry, ballot.panel, ballot.side, ballot.pullup, ballot.bye, panel.id as panelid, panel.bye as panel_bye
-			from ballot, panel, round
-			where ballot.panel=panel.id
-			and panel.round=round.id
-			and round.name < $rd_name
-			and round.event = $event
+		# NOTE:  The code that was here was causing a number of bugs due to the
+		# post-loop approach.  The entry getting counted for the bye was the
+		# entry before the bye happened, not the actual bye, so their total
+		# seed was increasing but the count of opponents wasn't, screwing
+		# people over at random.  and the last ballot was being dumped without
+		# a result recording.  
+		
+		# The below is my rewrite, which should also be faster since it does
+		# not use the Class::DBI layer which slows things down.  -- CLP
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $ballots_sth = $dbh->prepare("
+            select ballot.id, ballot.entry, ballot.panel, ballot.side, ballot.pullup, ballot.bye, panel.bye as panel_bye, opponent.entry, opponent.pullup, round.id
+            from round
+            left outer join panel on panel.round = round.id
+            left outer join ballot on ballot.panel = panel.id
+            left outer join ballot opponent on opponent.panel = ballot.panel and opponent.entry != ballot.entry
+            where round.name < ".$round->name."
+            and round.event = ".$event->id."
 			order by round.name, ballot.panel
 		");
 
-		my @pairings = Tab::Ballot->search_pull_ballots;
-		print "Loaded ".scalar(@pairings)." prior debates<br>" if $debug;
+		$ballots_sth->execute();
 
-		if ($debug) {
-			$end = time();
-			print "Loaded ballots before step 4 processing:  "; printf("%.2f\n", $end - $start); print "<br>";
-		}			
+		while (my ($ballot, $entry, $panel, $side, $pullup, $bye, $panel_bye, $opponent, $pulldown, $round)  = $ballots_sth->fetchrow_array() ) {
 
-#		print the pairings, just for debugging	
-#		foreach my $pairing (@pairings) {
-# 		print "Panel: ".$pairing->panel." entry:".$pairing->entry." ".$entries{$pairing->entry}{'code'}." side=".$pairing->side."<br>";
-#		}
-	
-		# now loop through each team; this ALSO marks opponents as having debated so they don't hit in the future, and sets pullups 
-	
-		my $counter; my $was_bye;
-		foreach my $pairing (@pairings) {
-		
-			if ( ( $pairing->panel_bye || $pairing->bye ) && $pairing->entry) {
-				$precluded{$pairing->entry->id}{-1} = 1; #mark as ineligible to hit b/c they debated before
+			next unless $entry;
+
+			if ($bye || $panel_bye || not defined $opponent) { 
+
+				$precluded{$entry}{-1} = 1 if $bye; 			#Precludes them from the bye again
+				$precluded{$entry}{-1} = 1 if $panel_bye;
+
+			} elsif ($opponent) { 
+
+				# mark as ineligible to hit b/c they debated before
+				$precluded{$entry}{$opponent} = 1; 
+
+				# count how many affs for some reason.  Does this ever get consulted again?
+				$entries{$entry}{'n_aff'}++ if $side == 1;
+
+				$entries{$entry}{'n_opp'}++;
+				$entries{$entry}{'tot_opp_seed'} += $entries{$opponent}{'seed'};
+
+				# You've been pulled up
+				$entries{$entry}{'pullup'} += $pullup;
+				$entries{$entry}{'pulled_up'} += $pullup;
+
+				# You've been pulled down, you lucky duck.  Not for long...
+				$entries{$entry}{'pullup'} -= $pulldown; 		
+				$entries{$entry}{'got_pullup'} += $pulldown;
+
 			}
-			
-			if ( $pairing->panel_bye || $pairing->bye ) { $was_bye = 1; } 
-			
-			$counter++;
-			if ($panel && ($panel != $pairing->panelid || $counter == scalar @pairings ) ) { 
-			
 
-		    	# unless ($pairing->panel_bye) { #not sure who coded this, but this loads the prior debate into the hash
-	 			# and this line prevents it if the curret line is a bye...I think line below fixes this	
+			# Record side due if this is the last round before the present one
+			# and we're in a sidelocked situation
 
-				if ($counter == scalar(@pairings) and $team2 == 0) {
-						$team2 = $pairing->entry->id;
-						$pullup2 = $pairing->pullup;
+			if ($round == $round_for_seeding->id) { 
+				if ($oddround) { 
+					$entries{$entry}{'sidedue'} = 0;
+				} else { 
+					$entries{$entry}{'sidedue'} = ($side % 2) + 1; # 2 becomes 1, 1 becomes 2.
 				}
-
-				unless ( $team1 == 0 || $team2 == 0 ) {
-				    
-					$entries{$team1}{'n_opp'}++ unless $was_bye;
-					$entries{$team1}{'tot_opp_seed'} += $entries{$team2}{'seed'};
-					$entries{$team1}{'pullup'} += $pullup1;
-					$entries{$team1}{'pulled_up'} += $pullup1;
-					$entries{$team1}{'pullup'} -= $pullup2; #substract, means you've been pulled down once
-					$entries{$team1}{'got_pullup'} += $pullup2;
-					$entries{$team2}{'n_opp'}++ unless $was_bye;
-					$entries{$team2}{'tot_opp_seed'} += $entries{$team1}{'seed'};
-					$entries{$team2}{'pullup'} += $pullup2;
-					$entries{$team2}{'pullup'} -= $pullup1; 
-					$entries{$team2}{'pulled_up'} += $pullup2;
-					$entries{$team2}{'got_pullup'} += $pullup1; 
-					$precluded{$team1}{$team2} = 1; #mark as ineligible to hit b/c they debated before
-				}
-				
-				$team1 = 0; 
-				$team2 = 0;
-				$was_bye= 0;
-					
 			}
 
-			if ($team1 == 0 and $team2 == 0) { 
-				$team1 = $pairing->entry->id if $pairing->entry;
-				$pullup1 = $pairing->pullup; 
-			} elsif ($team1 > 0 and $team2 == 0 ) {
-				$team2 = $pairing->entry->id if $pairing->entry;
-				$pullup2 = $pairing->pullup; 
-			}
-	
-			$side = 1;
+		};
 
-			if ( $pairing->side == 1 ) { 
-				$side = 2;
-				$entries{$pairing->entry}{'n_aff'}++;
-			}
-
-			$entries{$pairing->entry}{'sidedue'} = $side;
-
-			if ( $oddround == 1 ) { $entries{$pairing->entry}{'sidedue'} = 0; }
-
-			$panel = $pairing->panel;
-		}
-
-		#if there's some data detritus for teams paired against dropped opponents it adds them to the %entries hash
-		#so this thing cleans it up
+		# if there's some data detritus for teams paired against dropped
+		# opponents it adds them to the %entries hash so this thing cleans it up
 	
 		foreach my $key ( keys %entries ) {
 			if (not $entries{$key}{'code'} ) { 
@@ -267,6 +238,9 @@
 		foreach my $key ( keys %entries ) {
 			if ( $entries{$key}{'n_opp'} > 0 ) {
 				$entries{$key}{'oppseed'} = $entries{$key}{'tot_opp_seed'} / $entries{$key}{'n_opp'} ;
+
+				Tab::debuglog("Opp total is $entries{$key}{'tot_opp_seed'} and number of opponents is $entries{$key}{'n_opp'} for Whitefish Bay EZ") if $key == 605898;
+
 				$entries{$key}{'SOP'} = $entries{$key}{'oppseed'} + $entries{$key}{'seed'} ;
 			}
 			if ( $entries{$key}{'n_opp'} == 0 ) {
