@@ -9,12 +9,14 @@ $student4=getaltid($student2);
 
 if ( isset($_GET['yr_str']) ) { $year_str=$_GET['yr_str']; $date_str=($year_str-1)."-07-01"; $end_date_str=$year_str."-07-01"; $seas_str=($year_str-1)."-".$year_str; }
 if ( empty($year_str) ) {
-	$year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1; 
+	$year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1;
 	if ($mo_str<=6) { $year_str--; $seas_str=$year_str."-".$year_str+1; }
 	$date_str=$year_str."-07-01";
-	$end_date_str=$year_str."-07-01";
+	$dummy = $year_str; $dummy = $dummy+1; 
+	$end_date_str=$dummy."-07-01";
 }
-$curr_year_str = date("Y");
+//$curr_year_str = date("Y");
+$curr_year_str = $year_str;
 
 $teamname=""; $schoolname=""; $studentname= array();
 $chapterid=0;
