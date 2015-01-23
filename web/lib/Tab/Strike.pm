@@ -25,7 +25,7 @@ sub name {
 	if ($self->registrant) { 
 		return "No Rounds: ".$self->event->name if $self->type eq "event";
 		return "Strike: ".$self->school->short_name if $self->type eq "school";
-		return "Strike: ".$self->entry->event->abbr." ".$self->entry->school->short_name." ".$self->entry->code if $self->type eq "entry";
+		return "Strike: ".$self->entry->event->abbr." ".$self->entry->code if $self->type eq "entry";
 		return "Strike: ".$self->region->name." (".$self->region->code.")" if $self->type eq "region";
 		return "Conflict: ".$self->entry->event->abbr." ".$self->entry->code." ".$self->entry->school->short_name if $self->entry && $self->type eq "conflict";
 		return "Conflict: ".$self->school->short_name if $self->school && $self->type eq "conflict";
