@@ -1,0 +1,229 @@
+<%args>
+	$tourn
+	$account
+	$session
+</%args>
+<%init>
+	use POSIX;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+    my $now = DateTime->now;    
+    $now->set_time_zone($tz);
+
+    my $name = $tourn->name;
+    $name =~ s/[\W_]//g;
+
+    my $filename = "Finances-$name.csv";
+	$m->clear_buffer;
+    $r->content_type('application/csv');
+    $r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+
+	my $total;
+
+	my $entry_fees;
+	my $hire_fees;
+	my $concession_fees;
+
+	my @students;
+	my $student_fees;
+
+	if ($tourn->setting("per_student_fee")) {
+		@students = $m->comp("/funclib/tourn_students.mas", tourn => $tourn);
+		$student_fees = scalar @students * $tourn->setting("per_student_fee");
+	}
+
+	my $fine_fees;
+
+	foreach my $fine ($m->comp("/funclib/tourn_school_fines.mas", tourn => $tourn)) {
+		$fine_fees += $fine->amount;
+	}
+
+	Tab::School->set_sql( individuals => "
+		select sum(individuals) 
+		from school
+		where tourn = ? 
+	");
+
+	my $body_count = Tab::School->sql_individuals->select_val($tourn->id) if $tourn->setting("per_person_fee");
+	my $bodies = $body_count * $tourn->setting("per_person_fee");
+
+	$m->print("Line,Quantity,Line Cost,Total\n");
+
+	# Concessions or tickets charge
+
+	my @concessions = $tourn->concessions;
+
+	if (@concessions) { 
+
+		my $concession_count;
+
+		foreach my $concession (sort {$a->name cmp $b->name} @concessions) { 
+
+			my @orders = Tab::ConcessionPurchase->search( concession => $concession->id );
+
+			my $concession_total;
+
+			foreach my $order (@orders) { 
+				$concession_total += $order->quantity;
+				$concession_count++;
+			}
+
+			$concession_fees += $concession_total * $concession->price;
+
+			$m->print($concession->name.",");
+			$m->print($concession_total.",");
+			$m->print(sprintf("%.2f", $concession->price * $concession_total).", \n");
+
+		}
+
+		if ($concession_fees) { 
+			my $concession_name = $tourn->setting("concession_name");
+			$concession_name = "Concessions" unless $concession_name;
+			$total += $concession_fees;
+			$m->print($concession_name." Subtotal,,,");
+			$m->print(sprintf("%.2f", $concession_fees)."\n");
+
+		}
+
+	}
+
+	foreach my $group (sort {$a->name cmp $b->name} $tourn->groups) { 
+
+		my @hires = Tab::JudgeHire->search( judge_group => $group->id);
+		next unless @hires;
+
+		my $hire_total;
+
+		my $rounds_hired;
+		my $judges_hired;
+		my $entries_hired;
+
+		foreach my $hire (@hires) { 
+
+			next unless $hire->accepted > 0 || $hire->rounds_accepted > 0;
+
+			if ($group->setting("judge_per")) {
+
+				if ($group->setting("hired_fee")) { 
+					my $covers = ceil($hire->accepted / $group->setting("judge_per"));
+					$hire_total += $covers * $group->setting("hired_fee");
+					$judges_hired += $covers;
+				} 
+
+				if ($group->setting("uncovered_entry_fee")) { 
+					$hire_total += $hire->accepted * $group->setting("uncovered_entry_fee");
+					$entries_hired += $hire->accepted;
+				}
+
+			} elsif ($group->setting("rounds_per")) {
+
+				$hire_total += $hire->rounds_accepted * $group->setting("round_hire_fee");
+				$rounds_hired += $hire->rounds_accepted;
+
+			}
+		}
+
+		$hire_fees += $hire_total;
+
+		my $hire_label = $group->abbr." hired ";
+		$hire_label .= "rounds of judging" if $rounds_hired;
+		$hire_label .= "judges" if $judges_hired; 
+		$hire_label .= "entries of judging" if $entries_hired; 
+
+		$m->print($hire_label.",");
+		$m->print($rounds_hired." ".$judges_hired." ".$entries_hired.",");
+		$m->print(sprintf("%.2f", $hire_total).",\n");
+
+		my @schools  = $m->comp("/funclib/group_schools.mas", group => $group);
+
+		my @stimes = $group->strike_times;
+
+		my %stime_by_id = map {$_->id => $_} @stimes;
+
+		my %total_under = (); 
+
+		foreach my $school (@schools) { 
+
+			my %stimes_under = $m->comp("/funclib/judgemath/judge_strike_times_short.mas", group => $group, school => $school);
+
+			foreach my $key (keys %stimes_under) {
+				$total_under{$key}{"count"} += $stimes_under{$key};
+				$total_under{$key}{"fee"} += $stimes_under{$key} * $stime_by_id{$key}->fine; 
+				$hire_total += $stimes_under{$key} * $stime_by_id{$key}->fine;
+			}
+
+		}   
+
+		foreach my $stime (@stimes) { 
+
+			next unless $total_under{$stime->id}{"count"} > 0;
+
+			$m->print("Judges marked off ".$stime->name.",");
+			$m->print($total_under{$stime->id}{"count"}.",");
+			$m->print(sprintf("%.2f", $total_under{$stime->id}{"fee"}).",\n");
+
+		}
+
+	}
+
+	if ($hire_fees) { 
+
+		$total += $hire_fees;
+
+		$m->print("Judge Hire Subtotal,,,");
+		$m->print(sprintf("%.2f", $hire_fees)."\n");
+
+	}
+
+	if ($bodies) { 
+
+		$entry_fees += $bodies;
+
+		$m->print("Per person fees,");
+		$m->print($body_count.",");
+		$m->print(sprintf("%.2f", $bodies) .",\n");
+
+	}
+
+	foreach my $event (sort {$a->name cmp $b->name} $tourn->events) { 
+
+		my @entries = Tab::Entry->search( event => $event->id, dropped => 0, waitlist => 0, unconfirmed => 0);
+		$entry_fees += ($event->fee * scalar @entries);
+
+		$m->print($event->abbr." entry fees,");
+		$m->print(scalar @entries.",");
+		$m->print(sprintf("%.2f", $event->fee * scalar @entries).",\n");
+
+	}
+
+	if ($student_fees) { 
+
+		$entry_fees += $student_fees;
+
+		$m->print("Per entrant fees,");
+		$m->print(scalar @students.",");
+		$m->print(sprintf("%.2f", $student_fees).",\n");
+
+	}
+
+	$total += $entry_fees;
+
+	$m->print("Entries Subtotal,,,");
+	$m->print(sprintf("%.2f", $entry_fees)."\n");
+
+
+	if ($fine_fees) { 
+
+		$total += $fine_fees;
+		$m->print("Fines & school fees,,,");
+		$m->print(sprintf("%.2f", $fine_fees)."\n");
+
+	}
+
+	$m->print("Grand Total,,,");
+	$m->print(sprintf("%.2f", $total)."\n");
+	$m->abort;
+
+</%init>
