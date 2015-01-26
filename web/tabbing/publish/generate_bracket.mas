@@ -1,0 +1,175 @@
+<%args>
+	$event
+</%args>
+<%init>
+
+	my $tourn = $event->tourn;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now(time_zone => $tz);
+
+	my $bracket_label = "Bracket";
+
+	my $bracket = Tab::ResultSet->search( event => $event->id, label => $bracket_label )->first;
+
+	unless ($bracket) { 
+		$bracket = Tab::ResultSet->create({
+			tourn     => $tourn->id,
+			event     => $event->id,
+			label     => $bracket_label,
+			generated => $now,
+			bracket   => 1
+		});
+	}
+
+    Tab::ResultValue->set_sql( rm_bracket_rv => "delete result_value.* from result, result_value where result.id = result_value.result and result.result_set = ? ");
+	Tab::ResultValue->sql_rm_bracket_rv->execute( $bracket->id );
+
+    Tab::Result->set_sql( rm_bracket_r => "delete from result where result_set = ? ");
+	Tab::Result->sql_rm_bracket_r->execute( $bracket->id );
+
+	my $last_prelim;
+	my @elims;
+	my $final;
+
+	foreach my $round ($event->rounds) {
+
+		Tab::debuglog("Round is $round last prelim is $last_prelim");
+
+		if ($round->type ne "elim" && $round->type ne "final") { 
+			if ($last_prelim) { 
+				$last_prelim = $round if $last_prelim->name < $round->name;
+			} else { 
+				$last_prelim = $round;
+			}
+		}
+
+		$final = $round if $round->type eq "final";
+		push (@elims, $round) if $round->type eq "elim";
+	}
+
+	@elims = sort {$a->name <=> $b->name} @elims;
+
+	my $first_elim = shift @elims;
+
+	my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $bah, $mah, $entry_letter_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $last_prelim);
+
+	my @broke = $m->comp("/funclib/round_entries.mas", round => $first_elim);
+	my %i_broke = map {$_->id => $_} @broke;
+
+	my %last_seed;
+
+	foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) { 
+
+		foreach my $entryid (@{${$entries_ref}{$seed}}) { 
+
+			next unless $i_broke{$entryid};
+
+			my $result = Tab::Result->create({
+				result_set => $bracket->id,
+				entry      => $entryid,
+				round      => $first_elim->id
+			});
+
+			Tab::ResultValue->create({
+				result    => $result->id,
+				value     => $seed,
+				priority  => 1,
+				sort_desc => 0,
+				tag       => "Seed",
+				no_sort   => 0
+			});
+
+			$last_seed{$entryid} = $seed;
+
+		}
+
+	}
+
+	foreach my $elim (@elims, $final) { 
+
+		next unless $elim;
+	
+		my @broke = $m->comp("/funclib/round_entries.mas", round => $elim);
+
+		my $break_numbers = scalar @broke;
+		my $hinge_point = $break_numbers / 2;
+
+		foreach my $broke (@broke) { 
+
+			my $result = Tab::Result->create({
+				result_set => $bracket->id,
+				entry      => $broke->id,
+				round      => $elim->id
+			});
+
+			my $seed = $last_seed{$broke->id};
+
+			# If the worse seed won a debate they become the seed they beat
+			$seed = ($break_numbers * 2 )- $seed + 1 if $seed > $break_numbers;
+
+			Tab::debuglog($elim->realname." bk $break_numbers hp $hinge_point debater ".$broke->code." has seed $seed which was ".$last_seed{$broke->id});
+
+			Tab::ResultValue->create({
+				result    => $result->id,
+				value     => $seed,
+				priority  => 1,
+				sort_desc => 0,
+				tag       => "Seed",
+				no_sort   => 0
+			});
+
+			$last_seed{$broke->id} = $seed;
+
+		}
+
+		$final = $elim if (scalar @broke == 2) && not defined $final; 
+
+	}
+
+	if ($final) { 
+
+		my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $tier_dir, $panrank_ref, $panletter_ref, $long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", round => $final);
+
+		Tab::Result->set_sql( who_da_champ => "
+			select distinct result.* 
+			from result, result_value
+			where result.result_set = ? 
+			and result.id = result_value.result
+			and result_value.tag = \"Champion\"
+		");
+
+		
+		my $winner = @{${$entries_ref}{1}}[0] if $entries_ref && ${$entries_ref}{1};
+
+		my $already_champ = Tab::Result->search_who_da_champ( $bracket->id )->first;
+
+		if ($already_champ) { 
+
+			$already_champ->entry($winner->id);
+			$already_champ->round($final->id);
+			$already_champ->update;
+
+		} else { 
+
+			my $result = Tab::Result->create({
+				entry      => $winner,
+				result_set => $bracket->id,
+				round      => $final->id
+			});
+
+			Tab::ResultValue->create({
+				tag      => "Champion",
+				long_tag => "Tournament Winner",
+				priority => 2,
+				value    => 1,
+				result   => $result->id
+			});
+		}
+	}
+
+	return $bracket;
+
+</%init>
