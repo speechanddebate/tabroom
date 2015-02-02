@@ -22,7 +22,10 @@
 		$round = $rounds[0];
 	} 
 
-	my $novice = $event->setting("top_novice") if $event;
+	my $novice = $event->setting("top_novice");
+	undef $novice if $novice eq "none";
+	my $team_points = $event->setting('team_points');
+
 	my %is_novice = (); 
 
 	if ($novice && $event) { 
@@ -32,6 +35,8 @@
 	}   
 
 	my %entry_ballots = ();
+
+	my %entry_names = $m->comp("/funclib/event_names.mas", event => $event);
 
 	my @roundnames;
 
@@ -52,13 +57,12 @@
 		my $dbh = Tab::DBI->db_Main();
 
 		my $sth = $dbh->prepare("
-			select value.id, value.tag, value.value, ballot.entry, ballot.judge, panel.bye, 
-				ballot.bye, ballot.noshow, ballot.chair, round.name
-			from ballot_value value, ballot, panel, round
-			where value.ballot = ballot.id
-			and ballot.panel = panel.id
-			and panel.round = round.id
-			and round.name <= ".$round->name."
+			select distinct value.id, value.tag, value.value, ballot.entry, ballot.judge, panel.bye, ballot.bye, ballot.noshow, ballot.chair, round.name
+			from round
+			left join panel on panel.round  =round.id
+			left join ballot on ballot.panel = panel.id
+			left join ballot_value value on value.ballot = ballot.id
+			where round.name <= ".$round->name."
 			and round.event = ".$event->id."
 			order by round.name, ballot.entry, ballot.chair, ballot.judge, CASE value.tag 
 				WHEN ".' "ballot" then 1 when "rank" then 2 when "points" then 3 end'."
@@ -67,7 +71,7 @@
 		$sth->execute(); 
 
 		my %entry_round;
-		my %done;
+		my %points_done;
 
 		while (my ($id, $tag, $value, $entryid, $judge, $pbye, $bye, $noshow, $chair, $roundname) = $sth->fetchrow_array() ) { 
 
@@ -79,12 +83,14 @@
 
 			$entry_round{$entryid} = $roundname;
 
-			if ($tag eq "ballot") { 
+			if ($pbye) { 
+				$entry_ballots{$entryid}{$roundname} .= "BYE "; 
+			} elsif ($bye && not defined $tag) { 
+				$entry_ballots{$entryid}{$roundname} .= "BYE "; 
+			} elsif ($tag eq "ballot") { 
 
-				if ($pbye) { 
-					$entry_ballots{$entryid}{$roundname} .= "BYE " 
-				} elsif ($bye) { 
-					$entry_ballots{$entryid}{$roundname} .= "BYE " 
+				if ($bye) { 
+					$entry_ballots{$entryid}{$roundname} .= "BYE ";
 				} elsif ($noshow) { 
 					$entry_ballots{$entryid}{$roundname} .= "FFT " 
 				} else { 
@@ -95,12 +101,19 @@
 			} else { 
 
 				if ($tag eq "points") { 
-					foreach (length($value) .. 5) { 
-						$value .= "&nbsp;";
+
+					unless ($team_points && $points_done{$entryid."-".$roundname}++) { 
+						foreach (length($value) .. 5) { 
+							$value .= "&nbsp;";
+						}
+
+						$entry_ballots{$entryid}{$roundname} .= $value." " if defined $value;
 					}
-				}
+
+				} else { 
 				
-				$entry_ballots{$entryid}{$roundname} .= $value." " if defined $value;
+					$entry_ballots{$entryid}{$roundname} .= $value." " if defined $value;
+				}
 			}
 
 		}
@@ -108,29 +121,6 @@
 		my %seen = (); 
 		@roundnames = grep { ! $seen{$_} ++ } @roundnames;
 		@roundnames = sort @roundnames;
-
-		my $bye_sth = $dbh->prepare("
-			select ballot.entry, panel.id, panel.round, round.name, panel.bye, ballot.bye, ballot.noshow
-			from panel, ballot, round
-			where round.name <= ".$round->name."
-			and round.event = ".$event->id."
-			and panel.round = round.id
-			and ballot.panel = panel.id
-			and ballot.audit = 1
-			and not exists ( 
-				select ballot_value.id
-				from ballot_value
-				where ballot_value.ballot = ballot.id
-			)
-			group by ballot.id
-		");
-
-		$bye_sth->execute();
-
-		while (my ($entry, $panel, $round, $roundname, $pbye, $bbye, $noshow)  = $bye_sth->fetchrow_array() ) {
-			$entry_ballots{$entry}{$roundname} .= "BYE " if $pbye || $bbye;
-			$entry_ballots{$entry}{$roundname} .= "FFT " if $noshow;
-		}    
 
 	}
 
@@ -146,14 +136,14 @@
 		<& /funclib/tablesorter.mas, table => "sortme" &>
 
 		<div class="full nospace">
-			<h2 class="padno marless">
-				<% $event->name %>
-			</h2>
-		</div>
 
-		<div class="full nospace">
+			<span class="third nowrap">
+				<h2 class="padno marless">
+					<% $event->name %>
+				</h2>
+			</span>
 
-			<span class="twothird rightalign nospace top">
+			<span class="third rightalign nospace top">
 				<form action="index.mhtml" method="post">
 				<input type="hidden" name="type" value="Speakers">
 
@@ -198,6 +188,8 @@
 
 		</div>
 
+		<br />
+
 %		if ($round) { 
 
 %			my $equal_elims++ if $round->tb_set->setting("equal_elims") && $round->type eq "elim";
@@ -208,7 +200,7 @@
 %			my %id_entry = map {$_->id => $_ } $event->entries;
 
 
-%			if ($event && $event->type ne 'speech' && $event->type ne 'congress') { 
+%			if ($event && ($event->type ne 'speech' && $event->type ne 'congress') &! ($team_points)) {
 				<ul id="tabnav" class="padno">
 
 					<li class="selected">
@@ -235,9 +227,11 @@
 							Code
 						</th>
 
-						<th class="smaller centeralign">
-							Nov
-						</th>
+%						if ($novice) { 
+							<th class="smaller centeralign">
+								Nov
+							</th>
+%						} 
 
 %						unless ($codes eq "names" || $codes eq "last_names" || $codes eq "names_lastfirst") { 
 							<th class="smallish">
@@ -328,20 +322,15 @@
 										<% $entry->code %>
 									</td>
 
-									<td class="smallish centeralign">
-										<% $is_novice{$entry_id} ? " Nov " : "" %>
-									</td>
+%									if ($novice) {
+										<td class="smallish centeralign">
+											<% $is_novice{$entry_id} ? " Nov " : "" %>
+										</td>
+%									}
 
 %									unless ($codes eq "names" || $codes eq "last_names" || $codes eq "names_lastfirst") { 
 
-%										my $entry_name;
-%										foreach my $student ($entry->students) { 
-%											$entry_name .= "\n" if $entry_name;
-%											$entry_name .= $student->first." ";
-%											$entry_name .= $student->last;
-%										}
-
-										<td class="smallish" title="<% $entry_name %>">
+										<td class="smallish" title="<% $entry_names{$entry->id} %>">
 											<% $entry->name %> 
 										</td>
 %									}
