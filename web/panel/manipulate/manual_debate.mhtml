@@ -6,7 +6,9 @@
 	$room_id     => undef
 	$panel_id    => undef
 	$save        => undef
-	$keep_sides  => undef 
+	$keep_sides  => undef
+	$flight      => 1
+	$mode        => "autosides_constrain"
 </%args>
 <%init>
 
@@ -18,20 +20,26 @@
 	my $round = Tab::Round->retrieve($round_id);
 	my $event = $round->event;
 
+	my $side_mode = "auto" if index($mode, "autosides") != -1;
+	$side_mode = "pick" if index($mode, "picksides") != -1;
+
+	my $constrain_mode = "no" if index($mode, "noconstrain") != -1;
+	$constrain_mode = "yes" if index($mode, "noconstrain") == -1;
+
+	my $flighted = $round->flighted;
+	undef $flighted if $flighted <= 1;
+
 	my $aff_string = $event->setting("aff_label");
 	my $neg_string = $event->setting("neg_label");
 	$aff_string = "Aff" unless $aff_string;
 	$neg_string = "Neg" unless $neg_string;
 
 	my $panel = Tab::Panel->retrieve($panel_id) if $panel_id;
-
 	my $room = Tab::Room->retrieve($room_id) if $room_id;
 	$room_id = 0 unless $room_id;
 	
 	my $bye_me = 0;
 	$bye_me = 1 if $opponent_id eq "bye";
-
-	Tab::debuglog("Bye me is $bye_me and opponent id is $opponent_id");
 
 	if ($save eq "Save Debate" && $entry_id && ($bye_me || $opponent_id)) { 
 
@@ -40,7 +48,7 @@
 		$panel = Tab::Panel->create({
 			round  => $round_id,
 			bye    => $bye_me,
-			flight => 1,
+			flight => $flight,
 			letter => $letter,
 			room   => $room_id
 		});
@@ -58,8 +66,14 @@
 
 		} else { 
 
-			my $rand = rand(1);
-			my $side = ($rand < 0.5 ) ?  1 : 2;
+			my $side;
+
+			if ($side_mode eq "auto") { 
+				my $rand = rand(1);
+				$side = ($rand < 0.5 ) ?  1 : 2;
+			} else { 
+				$side = 1;
+			}
 
 			Tab::Ballot->create({ 
 				panel => $panel->id,
@@ -68,7 +82,6 @@
 				bye   => 0,
 				side  => $side
 			});
-
 
 			$side++;
 			$side = 1 if $side == 3;
@@ -83,7 +96,7 @@
 
 		}
 
-		$m->redirect("manual_debate.mhtml?round_id=$round_id&panel_id=".$panel->id);
+		$m->redirect("manual_debate.mhtml?round_id=$round_id&panel_id=".$panel->id."&mode=$mode&flight=$flight");
 
 	}
 
@@ -110,35 +123,56 @@
 
 	my @opponent_candidates;
 
-	my $school_exclude = "and opp.school != entry.school" unless $event->setting("school_debates_self");
+	if ($entry && ($constrain_mode eq "no")) { 
 
-	Tab::Entry->set_sql( opponents => "
-		select distinct entry.*
-		from entry, entry opp
-		where entry.event = ?
-		and opp.id = ? 
-		and entry.dropped = 0
-		and opp.id != entry.id
-		$school_exclude
-		and not exists (
-			select distinct ballot.id
-			from ballot,panel
-			where panel.round = ? 
-			and panel.id = ballot.panel
-			and ballot.entry = entry.id
-		)
-		and not exists (
-			select distinct ballot.id
-			from ballot, ballot b2
-			where ballot.panel = b2.panel
-			and ballot.id != b2.id
-			and ballot.entry = entry.id
-			and b2.entry = opp.id
-		)
-		order by entry.code
-	");
+		Tab::Entry->set_sql( opponents => "
+			select distinct entry.*
+			from entry
+			where entry.event = ?
+			and entry.dropped = 0
+			and entry.id != ?
+			and not exists (
+				select distinct ballot.id
+				from ballot,panel
+				where panel.round = ? 
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+			)
+			order by entry.code
+		");
 
-	if ($entry) { 
+		@opponent_candidates = Tab::Entry->search_opponents( $event->id, $entry->id, $round->id);
+
+	} elsif ($entry) { 
+
+		my $school_exclude = "and opp.school != entry.school" unless $event->setting("school_debates_self");
+		
+		Tab::Entry->set_sql( opponents => "
+			select distinct entry.*
+			from entry, entry opp
+			where entry.event = ?
+			and opp.id = ? 
+			and entry.dropped = 0
+			and opp.id != entry.id
+			$school_exclude
+			and not exists (
+				select distinct ballot.id
+				from ballot,panel
+				where panel.round = ? 
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+			)
+			and not exists (
+				select distinct ballot.id
+				from ballot, ballot b2
+				where ballot.panel = b2.panel
+				and ballot.id != b2.id
+				and ballot.entry = entry.id
+				and b2.entry = opp.id
+			)
+			order by entry.code
+		");
+
 		@opponent_candidates = Tab::Entry->search_opponents( $event->id, $entry->id, $round->id);
 	}
 
@@ -152,7 +186,9 @@
 
 	if ($entry && $opponent) { 
 
-		my @busy = $m->comp("/funclib/round_judges.mas", round => $round);
+		my @busy = $m->comp("/funclib/round_judges.mas", round => $round, flight => $flight) if $flighted;
+		@busy = $m->comp("/funclib/round_judges.mas", round => $round) unless $flighted;
+
 		my %busy_judges = map {$_->id => 1} @busy;
 
 		my @entry_judges = $m->comp("/funclib/clean_to_see.mas", entry => $entry);
@@ -164,7 +200,8 @@
 			push @clean_judges, $judge if $opponent_clean{$judge->id} && not defined $busy_judges{$judge->id};
 		}
 
-		@clean_rooms = $m->comp("/funclib/clean_rooms.mas", round => $round);
+		@clean_rooms = $m->comp("/funclib/clean_rooms.mas", round => $round, flight => $flight) if $flighted;
+		@clean_rooms = $m->comp("/funclib/clean_rooms.mas", round => $round) unless $flighted;
 	}
 
 	my %pool_judges;
@@ -174,31 +211,54 @@
 		%pool_judges = map {$_->id => 1} @judges;
 	}
 
-	my %timeslot_judges  = map {$_->id => 1} $m->comp("/funclib/timeslot_judges.mas", timeslot => $round->timeslot);
+	my %timeslot_judges  = map {$_->id => 1} $m->comp("/funclib/timeslot_judges.mas", timeslot => $round->timeslot, flight => $flight);
+
+	my $switch;
 
 </%init>
 
 	<div class="main">
 
-		<div class="full nospace">
+		<div class="<% ($switch++ % 2) ? "odd" : "even" %>">
 
 			<span class="half nospace">
-				<h4>Manual Pair <% $round->realname %></h4>
+				<h4>
+					Manual Pair <% $round->realname %> of <% $event->name %>
+				</h4>
 			</span>
 
-			<span class="half nospace rightalign">
-				<h4><% $round->event->name %></h4>
+			<span class="half nospace rightalign padright">
+
+				<span class="nospace fifth centeralign">
+					<h5>Mode:</h5>
+				</span>
+
+				<form action="manual_debate.mhtml" method="post">
+				<input type="hidden" name="round_id" value="<% $round_id %>">
+				<input type="hidden" name="entry_id" value="<% $entry_id %>">
+				<input type="hidden" name="flight" value="<% $flight %>">
+				<select name="mode" onchange='this.form.submit()'>
+					<option value="autosides_constrain" <% $mode eq "autosides_constrain" ? 'selected="selected"' : "" %>>Auto-flip sides, obey constraints</option>
+					<option value="autosides_noconstrain" <% $mode eq "autosides_noconstrain" ? 'selected="selected"' : "" %>>Auto-flip sides, no constraints</option>
+					<option value="picksides_constrain" <% $mode eq "picksides_constrain" ? 'selected="selected"' : "" %>>Choose sides, obey constraints</option>
+					<option value="picksides_noconstrain" <% $mode eq "picksides_noconstrain" ? 'selected="selected"' : "" %>>Choose sides, no constraints</option>
+				</select>
+				<noscript>
+					<input type="submit" value="Go" class="thin">
+				</noscript>
+				</form>
 			</span>
 
 		</div>
 
 		<form action="manual_debate.mhtml" method="post">
 		<input type="hidden" name="round_id" value="<% $round_id %>">
+		<input type="hidden" name="mode" value="<% $mode %>">
 
-		<div class="evenrow">
+		<div class="<% ($switch++ % 2) ? "odd" : "even" %> martopmore">
 
 			<span class="third">
-				First Entry: 
+				<% $side_mode eq "auto" ? "First Entry" : $aff_string %> entry:
 			</span>
 
 			<span class="twothird">
@@ -217,9 +277,9 @@
 
 %		if ($entry) { 
 
-			<div class="oddrow">
+			<div class="<% ($switch++ % 2) ? "odd" : "even" %>">
 				<span class="third">
-					Second Entry: 
+					<% $side_mode eq "auto" ? "Second Entry" : $neg_string %> entry:
 				</span>
 				<span class="twothird">
 					<select name="opponent_id" class="fixed chosen" onchange='this.form.submit()' data-placeholder="Select opponent">
@@ -234,12 +294,36 @@
 			</div>
 %		}
 
+%		if ($opponent && $flighted) { 
+
+			<div class="<% ($switch++ % 2) ? "odd" : "even" %>">
+				<span class="third">
+					Flight:
+				</span>
+
+				<span class="twothird">
+%					foreach my $flights (1 .. $flighted) { 
+						<label for="<% $flights %>">
+							<span class="third hover">
+								<input type="radio" name="flight" <% $flights == $flight ? 'checked="checked"' : "" %> id="<% $flights %>" value="<% $flights %>" onchange='this.form.submit()'>
+									Flight <% $flights %>
+							</span>
+						</label>
+%					}
+				</span>
+
+			</div>
+
+%		} elsif ($flighted) { 
+			<input type="hidden" name="flight" value="<% $flight %>">
+%		}
+
 %		if ($opponent && $entry && $bye_me < 1) { 
 
-			<div class="evenrow">
+			<div class="<% ($switch++ % 2) ? "odd" : "even" %>">
 
 				<span class="third">
-					Judge:
+					<% scalar @clean_judges %> Judges:
 				</span>
 
 				<span class="twothird">
@@ -258,7 +342,7 @@
 				</span>
 			</div>
 
-			<div class="oddrow">
+			<div class="<% ($switch++ % 2) ? "odd" : "even" %>">
 
 				<span class="third">
 					Room:
@@ -307,13 +391,13 @@
 
 %			my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
 
-			<h4 class="martop">
+			<h4 class="martopmore">
 				Last Debate
 			</h4>
 
 %			if ($panel->bye) { 
 
-				<div class="even">
+				<div class="<% ($switch++ % 2) ? "odd" : "even" %>">
 					<span class="sixth">
 						BYE for 
 					</span>
@@ -325,7 +409,7 @@
 
 %			} else { 
 
-				<div class="even">
+				<div class="<% ($switch++ % 2) ? "odd" : "even" %>">
 
 					<span class="sixth bold padmuchmore">
 						<% $aff_string %>
@@ -345,7 +429,7 @@
 
 				</div>
 
-				<div class="odd">
+				<div class="<% ($switch++ % 2) ? "odd" : "even" %>">
 
 					<span class="sixth bold padmuchmore">
 						Room
@@ -370,7 +454,7 @@
 
 %			}
 
-			<div class="evenrow martop">
+			<div class="<% ($switch++ % 2) ? "odd" : "even" %> martop">
 
 				<span class="third">
 					<a target="_blank" class="dkblue full padmuchmore centeralign" href="/panel/report/master_single.mhtml?panel_id=<% $panel->id %>">
@@ -408,7 +492,7 @@
 			<input type="hidden" name="entry_id" value="<% $entry_id %>">
 			<input type="hidden" name="opponent_id" value="<% $opponent_id %>">
 
-			<div class="visible evenrow centeralign">
+			<div class="even centeralign">
 
 				<select name="activate_id" class="fixedmed chosen" onchange='this.form.submit()'>
 					<option value=""></option>
@@ -430,7 +514,7 @@
 			<input type="hidden" name="entry_id" value="<% $entry_id %>">
 			<input type="hidden" name="opponent_id" value="<% $opponent_id %>">
 
-			<div class="visible evenrow centeralign">
+			<div class="even centeralign">
 				<select name="judge_id" class="fixedmed chosen" onchange='this.form.submit()'>
 					<option value=""></option>
 %					foreach my $judge (sort {$a->last cmp $b->last} $round->event->judge_group->judges(active => 0)) { 
