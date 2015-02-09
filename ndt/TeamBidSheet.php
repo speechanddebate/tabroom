@@ -359,12 +359,16 @@ if (onlyone($spkr1[$i], $spkr2[$i], $student2, $student4)==TRUE)
  if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
  if ($win[$i]==1) {$totwin++;}
  if ($win[$i]==0) {$totloss++;}
- if ($elim_key[$round_id[$i]]==11) {$trip=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==13) {$octo=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==14) {$qrtr=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==15) {$semi=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==16) {$finl=$outcome[$i];}
+ if ( isset($elim_key[$round_id[$i]]) )
+   {
+	if ($elim_key[$round_id[$i]]==11) {$trip=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==13) {$octo=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==14) {$qrtr=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==15) {$semi=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==16) {$finl=$outcome[$i];}
+   }
+   
  if (($i<$x and $tourn[$i]<>$tourn[$i+1]) OR $i==$x or ($i<$x and $entry[$i]<>$entry[$i+1]))
 
   {
@@ -450,12 +454,16 @@ if (onlyone($spkr1[$i], $spkr2[$i], $student1, $student3)==TRUE)
  if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
  if ($win[$i]==1) {$totwin++;}
  if ($win[$i]==0) {$totloss++;}
- if ($elim_key[$round_id[$i]]==11) {$trip=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==13) {$octo=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==14) {$qrtr=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==15) {$semi=$outcome[$i];}
- if ($elim_key[$round_id[$i]]==16) {$finl=$outcome[$i];}
+ if ( isset($elim_key[$round_id[$i]]) )
+  {
+	if ($elim_key[$round_id[$i]]==11) {$trip=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==13) {$octo=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==14) {$qrtr=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==15) {$semi=$outcome[$i];}
+	if ($elim_key[$round_id[$i]]==16) {$finl=$outcome[$i];}
+  }
+  
  if (($i<$x and $tourn[$i]<>$tourn[$i+1]) OR $i==$x or ($i<$x and $entry[$i]<>$entry[$i+1]))
   {
   echo "<tr>";
