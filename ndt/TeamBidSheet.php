@@ -226,8 +226,8 @@ if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE)
  if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$toteloss++;}
  if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
  if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
- if ($win[$i]==1) {$totwin++;}
- if ($win[$i]==0) {$totloss++;}
+ if ($win[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totwin++;}
+ if ($win[$i]==0 and strrpos($outcome[$i], 'bye')===FALSE) {$totloss++;}
  if ( isset($elim_key[$round_id[$i]]) )
   {
    if ($elim_key[$round_id[$i]]==11) {$trip=$outcome[$i];}
