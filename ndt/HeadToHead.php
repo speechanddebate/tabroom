@@ -119,7 +119,8 @@ function printdebates($entry, $panel_id, $panel_entry_sync, $panel_entry_orig, &
      echo "<td>".$oppn."</td>";
      echo "<td>".$judge."</td>";
      echo "<td>".$decision."</td>";
-     if (iswin($decision)=="W") {$win++;} else {$loss++;}
+     if (iswin($decision)=="W") {$win++;}
+     if (iswin($decision)=="L") {$loss++;}
      echo "</tr>";
      }
     }
@@ -181,6 +182,7 @@ function getoppwaitlist($panel_entry_orig, $panel_entry_waitlist, $opponent)
 
 function iswin($decision)
 {
+ if ($decision=="Bye/Fft") {return $decision;}
  $balfor=substr_count($decision, "W");
  $balvs=substr_count($decision, "L");
  //echo $decision." ".$balfor." ".$balvs."<br>";
@@ -190,7 +192,7 @@ function iswin($decision)
 
 function getopponent($panel_id, $panel_entry_orig, &$oppn, &$judge, &$decision, &$opponent)  //returns opponent, judge, and decision
 {
-  $query="SELECT ballot.* from ballot, panel, round where ballot.panel=".$panel_id." and panel.id=ballot.panel and round.id=panel.round and round.published>0 order by judge asc";
+  $query="SELECT ballot.*, panel.bye as panel_bye from ballot, panel, round where ballot.panel=".$panel_id." and panel.id=ballot.panel and round.id=panel.round and round.published>0 order by judge asc";
   $ballots=mysql_query($query);
   $judgenum=-99;
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
@@ -198,6 +200,7 @@ function getopponent($panel_id, $panel_entry_orig, &$oppn, &$judge, &$decision, 
      if ($row['entry']<>$panel_entry_orig) {$opponent=$row['entry'];}
      if ($row['judge']<>$judgenum) {addjudgename($judge, $row['judge']);}
      if ($row['entry']==$panel_entry_orig) {decisionmaker($row['id'], $decision);}
+     if ($row['panel_bye']==1) {$decision="Bye/Fft";}
      $judgenum=$row['judge'];
     }
   $oppn=getfullteamname($opponent);
