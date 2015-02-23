@@ -42,9 +42,7 @@ Tab::Tourn->has_many(admins => [ Tab::TournAdmin => 'account']);
 Tab::Tourn->has_many(sites => [Tab::TournSite => 'site']);
 Tab::Tourn->has_many(circuits => [Tab::TournCircuit => 'circuit']);
 
-__PACKAGE__->_register_datetimes( qw/start end/);
-__PACKAGE__->_register_datetimes( qw/reg_start/);
-__PACKAGE__->_register_datetimes( qw/reg_end/);
+__PACKAGE__->_register_datetimes( qw/start end reg_start reg_end timestamp/);
 
 
 sub location { 

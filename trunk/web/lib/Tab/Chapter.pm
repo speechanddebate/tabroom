@@ -7,11 +7,14 @@ Tab::Chapter->columns(TEMP => qw/count prefs code member schoolid/);
 
 Tab::Chapter->has_many(schools => 'Tab::School', 'chapter');
 Tab::Chapter->has_many(students => 'Tab::Student', 'chapter');
+Tab::Chapter->has_many(chapter_admins => 'Tab::ChapterAdmin', 'chapter');
 Tab::Chapter->has_many(chapter_judges => 'Tab::ChapterJudge', 'chapter');
 Tab::Chapter->has_many(chapter_circuits => 'Tab::ChapterCircuit', 'chapter');
 
 Tab::Chapter->has_many(admins => [ Tab::ChapterAdmin => 'account']);
 Tab::Chapter->has_many(circuits => [ Tab::ChapterCircuit => 'circuit']);
+
+__PACKAGE__->_register_datetimes( qw/timestamp/);
 
 sub location { 
 	my $self = shift;
