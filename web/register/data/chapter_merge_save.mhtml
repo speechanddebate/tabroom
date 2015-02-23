@@ -1,0 +1,163 @@
+<%args>
+	$account
+	$tourn
+</%args>
+<%init>
+
+	Tab::Entry->set_sql(school_merge => " update entry set school = ? where school = ? ");
+	Tab::Judge->set_sql(school_merge => " update judge set school = ? where school = ? ");
+	Tab::Strike->set_sql(school_merge => " update strike set school = ? where school = ? ");
+	Tab::SchoolFine->set_sql(school_merge => " update school_fine set school = ? where school = ? ");
+
+	Tab::ChapterJudge->set_sql(name_judge_merge => "
+		update judge,chapter_judge,school 
+		set judge.chapter_judge = chapter_judge.id
+		where judge.chapter_judge is null
+		and judge.school = school.id
+		and school.chapter = ?
+		and school.chapter = chapter_judge.chapter
+		and chapter_judge.first = judge.first
+		and chapter_judge.last = judge.last
+	");
+
+	my $msg;
+
+	foreach my $school ($tourn->schools) { 
+
+		my $prefer_id = $ARGS{"prefer_".$school->id};
+		my $others_ref = $ARGS{$school->id};
+
+		my @merge_me;
+
+		if (ref($others_ref) eq "ARRAY") { 
+			@merge_me = @{$others_ref};
+		} else { 
+			push @merge_me, $others_ref if $others_ref;
+		}
+
+		my $prefer = Tab::Chapter->retrieve($prefer_id) if $prefer_id;
+		$prefer = $school->chapter unless $prefer_id;
+
+		push @merge_me, $school->chapter->id;
+
+		my %seen = (); 
+		@merge_me = grep { ! $seen{$_}++ } @merge_me;
+		@merge_me = grep { $_ ne '' } @merge_me;
+		@merge_me = grep { $_ ne $prefer->id } @merge_me;
+
+		next unless scalar @merge_me > 0;
+
+		my %admins = map {$_->id => $_} $prefer->admins;
+		my %circuits = map {$_->id => $_} $prefer->circuits;
+		my %tourns = map {$_->tourn->id => $_} $prefer->schools;
+
+		foreach my $merge_me_id (@merge_me) { 
+
+			next unless $merge_me_id;
+
+			my $merge_me = Tab::Chapter->retrieve($merge_me_id);
+			next unless $merge_me;
+
+			my $exclude = $ARGS{"exclude_".$merge_me};
+
+			unless ($exclude) {
+				foreach my $ca ($merge_me->chapter_admins) { 
+
+					if ($admins{$ca->account->id}) { 
+						$ca->delete;
+					} else {
+						$ca->chapter($prefer->id);
+						$ca->update;
+					}
+				}
+			}
+
+			foreach my $cc ($merge_me->chapter_circuits) { 
+				if ($circuits{$cc->circuit->id}) { 
+					$cc->delete;
+				} else {
+					eval{ 
+						$cc->chapter($prefer->id);
+						$cc->update;
+					};
+				}
+			}
+
+			my @others = $merge_me->schools;
+
+			foreach my $school ($merge_me->schools) { 
+
+				if ($tourns{$school->tourn->id}) { 
+
+					my $school_dest = $tourns{$school->tourn->id};
+					Tab::Entry->sql_school_merge($school_dest->id, $school->id);
+					Tab::Judge->sql_school_merge($school_dest->id, $school->id);
+					Tab::Strike->sql_school_merge($school_dest->id, $school->id);
+					Tab::SchoolFine->sql_school_merge($school_dest->id, $school->id);
+					$school->delete;
+
+				} else {
+					$school->chapter($prefer->id);
+					$school->update;
+				}
+
+			}
+
+			foreach my $student ($merge_me->students) { 
+				$student->chapter($prefer->id);
+				$student->update;
+			}
+
+			foreach my $chapter_judge ($merge_me->chapter_judges) { 
+				$chapter_judge->chapter($prefer->id);
+				$chapter_judge->update;
+			}
+
+			Tab::ChapterJudge->sql_name_judge_merge->execute($prefer->id);
+			$merge_me->delete;
+
+		}
+
+
+		#Deduplicate the student roster
+		my %students_by_name;
+
+		foreach my $student ($prefer->students) { 
+			push @{$students_by_name{$student->first."-".$student->last}}, $student;
+		}
+
+		foreach my $key (keys %students_by_name) { 
+			next if scalar @{$students_by_name{$key}} < 2;
+			my $destination = shift @{$students_by_name{$key}};
+
+			foreach my $mergee (@{$students_by_name{$key}}) { 
+				$m->comp("/funclib/student_merge.mas", account => $account, mergee => $mergee, destination => $destination, check_grad => 1);
+			}
+		}
+
+		#Deduplicate the judge roster
+		my %judges_by_name;
+
+		foreach my $judge ($prefer->chapter_judges) { 
+			push @{$judges_by_name{$judge->first."-".$judge->last}}, $judge;
+		}
+
+		foreach my $key (keys %judges_by_name) { 
+
+			next if scalar @{$judges_by_name{$key}} < 2;
+			my $destination = shift @{$judges_by_name{$key}};
+
+			foreach my $mergee (@{$judges_by_name{$key}}) { 
+				$m->comp("/funclib/chapter_judge_merge.mas", account => $account, mergee => $mergee, destination => $destination);
+			}
+
+		}
+
+		$msg .= "School ".$school->name." has merged $prefer and others @merge_me <br />";
+
+	}
+
+	$m->redirect("chapter_merge.mhtml?msg=$msg");
+
+
+</%init>

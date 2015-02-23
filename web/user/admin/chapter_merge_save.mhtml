@@ -1,142 +1,167 @@
 <%args>
-	$chapter_id
-	$other_id
 	$account
+	$name
+	$target_id => undef
 </%args>
 <%init>
 
-	if ($other_id == $chapter_id) { 
-		$m->print("<p><b>You're trying to merge a chapter into itself.</b></p>"); 
-		$m->abort();
-	}
+	Tab::Entry->set_sql(school_merge => " update entry set school = ? where school = ? ");
+	Tab::Judge->set_sql(school_merge => " update judge set school = ? where school = ? ");
+	Tab::Strike->set_sql(school_merge => " update strike set school = ? where school = ? ");
+	Tab::SchoolFine->set_sql(school_merge => " update school_fine set school = ? where school = ? ");
 
-	my $chapter = Tab::Chapter->retrieve($chapter_id);
-	my $other = Tab::Chapter->retrieve($other_id);
-
-	my $msg = "Chapter not found";
-
-	$m->redirect("chapter_merge.mhtml?chapter_id=$other_id&msg=$msg") unless $chapter;
-
-	my %other_students_by_name = ();
-
-	foreach my $ms ($other->students) { 
-		my $key = $ms->first."-".$ms->last."-".$ms->grad_year;
-		$other_students_by_name{$key} = $ms->id;
-	}
-
-	my %other_judges_by_name = ();
-
-	foreach my $mu ($other->chapter_judges) { 
-		my $key = $mu->first."-".$mu->last;
-		$other_judges_by_name{$key} = $mu->id;
-	}
-
-	foreach my $student ($chapter->students) { 
-
-		my $stu_key = $student->first."-".$student->last."-".$student->grad_year;
-
-		if ($other_students_by_name{$stu_key}) { 
-
-			# If a student exists in the chapter being merged into who has the
-			# exact same name and graduation year, we're going to take a gamble
-			# and say they're the same kid and merge them too.
-
-			$m->comp("student_merge.mas", 
-						account => $account,
-						student_id => $student->id, 
-			  			other_id => $other_students_by_name{$stu_key});
-
-		} else { 
-			$student->chapter($other_id);
-			$student->update;
-		}
-	}	
-
-	foreach my $chapter_judge ($chapter->chapter_judges) { 
-
-		my $chapter_judge_key = $chapter_judge->first."-".$chapter_judge->last;
-
-		if ($other_judges_by_name{$chapter_judge_key}) { 
-
-			# If a chapter_judge exists in the chapter being merged into who has the
-			# exact same name and graduation year, we're going to take a gamble
-			# and say they're the same kid and merge them too.
-
-			$m->comp("judge_merge.mas", 
-						chapter_judge_id => $chapter_judge->id, 
-			  			other_id => $other_judges_by_name{$chapter_judge_key}
-					);
-
-		} else { 
-			$chapter_judge->chapter($other_id);
-			$chapter_judge->update;
-		}
-	}	
-
-	#student_results
-
-	Tab::School->set_sql( change_chapter => "
-		UPDATE school SET chapter = ?
-		WHERE chapter = ?" );
-
-	Tab::School->sql_change_chapter->execute($other_id, $chapter_id);
-
-	Tab::ChapterCircuit->set_sql( drop_dupes => "
-		delete chapter_circuit
-		from chapter_circuit, chapter_circuit cc2
-		where chapter_circuit.circuit = cc2.circuit
-		and cc2.chapter = ? 
-		and chapter_circuit.chapter = ?
-		");
-
-	Tab::ChapterCircuit->set_sql( change_chapter => "
-		UPDATE chapter_circuit SET chapter = ?
-		WHERE chapter = ? ");
-
-	Tab::ChapterCircuit->sql_drop_dupes->execute($other_id, $chapter_id);
-	Tab::ChapterCircuit->sql_change_chapter->execute($other_id, $chapter_id);
-
-	Tab::ChapterCircuit->set_sql( dedupe_chapter => "
-		delete cc1.*
-		from chapter_circuit cc1, chapter_circuit cc2 
-		where cc1.chapter = ? 
-		and cc1.chapter = cc2.chapter
-		and cc1.circuit = cc2.circuit
-		and cc1.id > cc2.id
+	Tab::ChapterJudge->set_sql(name_judge_merge => "
+		update judge,chapter_judge,school 
+		set judge.chapter_judge = chapter_judge.id
+		where judge.chapter_judge is null
+		and judge.school = school.id
+		and school.chapter = ?
+		and school.chapter = chapter_judge.chapter
+		and chapter_judge.first = judge.first
+		and chapter_judge.last = judge.last
 	");
 
-	Tab::ChapterCircuit->sql_dedupe_chapter->execute($other_id);
+	my @candidates = Tab::Chapter->search_where( name => { "like", "%".$name."%"} );
+	push @candidates, Tab::Chapter->retrieve($target_id) if $target_id;
 
-	# accounts with access
+	my $prefer;
+	my @merge_me;
+	my %merge_ids;
 
-    my %other_access_admins = ();
+	if (ref($ARGS{"merge"}) eq "ARRAY") { 
+		%merge_ids = map { $_ => 1 } @{$ARGS{"merge"}};
+	} else { 
+		$merge_ids{$ARGS{"merge"}}++;
+	}
 
-    foreach my $account ($chapter->admins) {
+	foreach my $candidate (@candidates) { 
+		$prefer = $candidate if $ARGS{"prefer"} == $candidate->id;
+		push @merge_me, $candidate if $merge_ids{$candidate->id};
+	}
 
-			my @already = Tab::ChapterAdmin->search(
-				chapter => $chapter->id,
-				account => $account->id );
+	$prefer = shift @merge_me unless $prefer;
 
-			push (@already, Tab::ChapterAdmin->search(
-				chapter => $other->id,
-				account => $account->id ));
+	my %seen = (); 
+	@merge_me = grep { ! $seen{$_->id}++ } @merge_me;
+	@merge_me = grep { $_ ne '' } @merge_me;
+	@merge_me = grep { $_->id ne $prefer->id } @merge_me;
 
-			foreach my $al (@already)  {
-				$al->delete;
+	my %admins = map {$_->id => $_} $prefer->admins;
+	my %circuits = map {$_->id => $_} $prefer->circuits;
+	my %tourns = map {$_->tourn->id => $_} $prefer->schools;
+		
+	if ($ARGS{"exclude_".$prefer->id}) { 
+		foreach my $ca ($prefer->chapter_admins) { 
+			$ca->delete;
+		}
+	}
+
+	my $merge_string;
+	
+	foreach my $merge_me (@merge_me) { 
+
+		my $exclude = $ARGS{"exclude_".$merge_me->id};
+
+		unless ($exclude) {
+			foreach my $ca ($merge_me->chapter_admins) { 
+				if ($admins{$ca->account->id}) { 
+					$ca->delete;
+				} else {
+					$admins{$ca->account->id}++;
+					$ca->chapter($prefer->id);
+					$ca->update;
+				}
+			}
+		} else { 
+			foreach my $ca ($merge_me->chapter_admins) { 
+				$ca->delete;
+			}
+		}
+
+		foreach my $cc ($merge_me->chapter_circuits) { 
+			if ($circuits{$cc->circuit->id}) { 
+				$cc->delete;
+			} else {
+				eval{ 
+					$cc->chapter($prefer->id);
+					$cc->update;
+				};
+			}
+		}
+
+		my @others = $merge_me->schools;
+
+		foreach my $school ($merge_me->schools) { 
+
+			if ($tourns{$school->tourn->id}) { 
+
+				my $school_dest = $tourns{$school->tourn->id};
+				Tab::Entry->sql_school_merge($school_dest->id, $school->id);
+				Tab::Judge->sql_school_merge($school_dest->id, $school->id);
+				Tab::Strike->sql_school_merge($school_dest->id, $school->id);
+				Tab::SchoolFine->sql_school_merge($school_dest->id, $school->id);
+				$school->delete;
+
+			} else {
+				$school->chapter($prefer->id);
+				$school->update;
 			}
 
-			Tab::ChapterAdmin->create({
-				chapter => $other->id,
-				account => $account->id });
+		}
 
-    }
+		foreach my $student ($merge_me->students) { 
+			$student->chapter($prefer->id);
+			$student->update;
+		}
 
-	$msg = "Chapter ".$chapter->id." was merged into ".$other->id." by ".$account->email;
+		foreach my $chapter_judge ($merge_me->chapter_judges) { 
+			$chapter_judge->chapter($prefer->id);
+			$chapter_judge->update;
+		}
 
-	system "$Tab::logger $msg";
+		$merge_string .= " ID ".$merge_me->id." ".$merge_me->name;
 
-	$chapter->delete;
+		Tab::ChapterJudge->sql_name_judge_merge->execute($prefer->id);
+		$merge_me->delete;
 
-	$m->redirect("chapter_merge.mhtml?chapter_id=$other_id&msg=$msg");
+	}
+
+	#Deduplicate the student roster
+	my %students_by_name;
+
+	foreach my $student ($prefer->students) { 
+		push @{$students_by_name{$student->first."-".$student->last}}, $student;
+	}
+
+	foreach my $key (keys %students_by_name) { 
+		next if scalar @{$students_by_name{$key}} < 2;
+		my $destination = shift @{$students_by_name{$key}};
+
+		foreach my $mergee (@{$students_by_name{$key}}) { 
+			$m->comp("/funclib/student_merge.mas", account => $account, mergee => $mergee, destination => $destination, check_grad => 1);
+		}
+	}
+
+	#Deduplicate the judge roster
+	my %judges_by_name;
+
+	foreach my $judge ($prefer->chapter_judges) { 
+		push @{$judges_by_name{$judge->first."-".$judge->last}}, $judge;
+	}
+
+	foreach my $key (keys %judges_by_name) { 
+
+		next if scalar @{$judges_by_name{$key}} < 2;
+		my $destination = shift @{$judges_by_name{$key}};
+
+		foreach my $mergee (@{$judges_by_name{$key}}) { 
+			$m->comp("/funclib/chapter_judge_merge.mas", account => $account, mergee => $mergee, destination => $destination);
+		}
+
+	}
+
+	my $msg .= "School ".$prefer->name." has merged $merge_string into $prefer ".$prefer->name;
+
+	$m->redirect("chapter_merge.mhtml?target_id=$target_id&name=$name&msg=$msg");
 
 </%init>
