@@ -1,0 +1,149 @@
+<%args>
+    $round_id
+</%args>
+<%init>
+
+    my $round = Tab::Round->retrieve($round_id);
+	
+    my $any_problem;
+    my $double_booked_judges;
+    my $sides_uneven;
+    my $unscheduled_teams;
+    my $double_scheduled_teams;
+    my $same_school_debates;
+    my $judgeless_debates;
+    my $roomless_panels;
+    
+    my $dbh = Tab::DBI->db_Main();
+    
+    #DOUBLE-BOOKED JUDGES
+
+    my $double_judges_sth = $dbh->prepare("
+        select distinct judge.* from judge, panel, panel clonepanel, ballot, ballot cloneballot
+        where panel.round = $round_id
+        and clonepanel.round = panel.round
+        and panel.flight = clonepanel.flight
+        and panel.id != clonepanel.id
+        and panel.id = ballot.panel
+        and ballot.judge = judge.id
+        and clonepanel.id = cloneballot.panel
+        and cloneballot.judge = judge.id
+    ");
+
+    $double_judges_sth->execute();
+
+    while (my ($judge, $panel, $clonepanel, $ballot, $cloneballot)  = $double_judges_sth->fetchrow_array() ) {
+        my $judge_info = Tab::Judge->retrieve($judge);
+        $double_booked_judges .= $judge_info->first." ".$judge_info->last." is double-booked!<br>";
+    }
+    
+    #RIGHT NUMBER OF AFF/NEGS
+    
+    unless ($round->name%2) {
+        #pull last 2 rounds
+        my $event_id = $round->event;
+        my $last_rd = $round->name - 1;
+        my $curr_rd = $round->name;
+        my $sides_sth = $dbh->prepare("
+            select entry, side, panel.bye, round.name
+            from ballot, panel, round
+            where panel.round = round.id
+            and round.event = $event_id
+            and round.name >= $last_rd
+            and round.name <= $curr_rd
+            and ballot.panel=panel.id
+            and round.type != 'prelim'
+            and round.type != 'final'
+            order by entry, round.name
+        ");
+    
+        $sides_sth->execute();
+    
+        my $last_entry; my $aff; my $neg; my $had_bye;
+        
+        while (my ($entry, $side, $bye, $name)  = $sides_sth->fetchrow_array() ) {
+            if ( $side == 1 ) { $aff++; }
+            if ( $side == 2 ) { $neg++; }
+            if ( $bye == 1 ) { $had_bye = 1 }
+            #print "round=$name side=$side entry=$entry had_bye=$had_bye aff=$aff neg=$neg bye=$bye<br>";
+            if ($last_entry == $entry && $entry > 0) {
+                if ($aff != $neg && $had_bye == 0) {
+                    my $entry_rec = Tab::Entry->retrieve($entry);
+                    $sides_uneven .= $entry_rec->code." has $aff affs and $neg negs in the last 2 rounds<br>" if $entry_rec;
+                }
+            }
+            if ($last_entry == $entry || $entry == 0) {
+                $aff=0; $neg=0; $had_bye=0;
+            }
+            $last_entry=$entry;
+        }
+    }
+    #UNSCHEDULED TEAMS
+   
+    my @entries = Tab::Entry->search( event => $round->event, dropped => 0, dq => 0 );
+    my @ballots = $m->comp('/funclib/round_ballots.mas', round => $round);
+    foreach my $entry (@entries) {
+        my $ok=0;
+        foreach my $ballot (@ballots) {
+            $ok=1 if $ballot->entry == $entry;
+        }
+        if ( $ok == 0 ) { $unscheduled_teams.= $entry->code. " is NOT scheduled<br>"; }
+    }
+        
+    #TEAMS SCHEDULED TOO MANY TIMES
+    
+    my $last_entry; my $last_flight;
+    @ballots = sort {$b->entry <=> $a->entry } @ballots;
+    foreach my $ballot (@ballots) {
+        if ( $ballot->entry == $last_entry && $ballot->panel->flight == $last_flight ) {
+            my $entry_rec = Tab::Entry->retrieve($ballot->entry);
+            $double_scheduled_teams.= $entry_rec->code. " is scheduled twice in the same flight<br>";
+        }
+        $last_entry = $ballot->entry;
+        $last_flight = $ballot->panel->flight;
+    }
+    
+    #MEETING OWN SCHOOL & DEBATES WITH NO JUDGES
+    my $last_school; my $last_panel;
+    @ballots = sort {$b->panel <=> $a->panel } @ballots;
+    foreach my $ballot (@ballots) {
+        if ( $ballot->entry->school == $last_school && $ballot->panel == $last_panel ) {
+            my $entry_rec = Tab::Entry->retrieve($ballot->entry) if $ballot->entry;
+            my $entry_rec_2 = Tab::Entry->retrieve($last_entry) if $last_entry;
+            $same_school_debates.= $entry_rec->code." and ".$entry_rec_2->code." are from the same school!<br>";
+        }
+        if ( $ballot->judge == 0 && $ballot->bye == 0 && $ballot->panel->bye == 0 && $ballot->panel ==  $last_panel ) {
+            $judgeless_debates.= $ballot->entry->code." vs. ".$last_entry->code." have no judge!<br>";
+        }
+        $last_entry = $ballot->entry;
+        $last_school = $ballot->entry->school;
+        $last_panel = $ballot->panel;
+    }
+    
+    my @panels = $m->comp('/funclib/round_panels.mas', round => $round);
+    my $dummy=0;
+    foreach my $panel (@panels) {
+        if ( $panel->room == 0 && $panel->bye == 0 ) {
+            $dummy ++;
+        }
+    }
+    $roomless_panels = $dummy." panels without rooms<br>" if $dummy;
+    
+    #TEAMS PREVIOUS MET
+    #JUDGES: HEARING A BLOCKED TEAM/SCHOOL
+    #JUDGES: HEARD TEAM BEFORE
+    #JUDGES: SHOULD HAVE ROUND OFF
+    #JUDGES: HEARING BLOCKED DIVISION
+    #ROOMS: DEBATES WITH NO ROOMS
+    #ROOMS: ROOMS USED TOO MANY TIMES
+    #ROOMS: NOT AVAILABLE
+    
+    #print $double_booked_judges."<br>" if $double_booked_judges;
+    #print $sides_uneven."<br>" if $sides_uneven;
+    $any_problem = "OK";
+    $any_problem = "NEED TO FIX THIS!" if $double_booked_judges || $sides_uneven || $unscheduled_teams || $double_scheduled_teams || $judgeless_debates;
+    
+    return $any_problem, $double_booked_judges, $sides_uneven, $unscheduled_teams, $double_scheduled_teams, $same_school_debates, $judgeless_debates, $roomless_panels;
+        
+</%init>
+
