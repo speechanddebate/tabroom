@@ -1,0 +1,387 @@
+<%args>
+	$account
+	$panel_id => undef
+	$judge_id => undef
+</%args>
+<%init>
+
+    my $panel = Tab::Panel->retrieve($panel_id);
+    my $judge = Tab::Judge->retrieve($judge_id);
+
+	my $now = DateTime->now;
+
+    unless ($panel && $judge) { 
+        my $err = "No ballots found for that judge and that panel.";
+        $m->redirect("../index.mhtml?err=$err");
+    }   
+
+	my $round = $panel->round;
+	my $event = $round->event;
+	my $group = $event->judge_group;
+    my $tourn = $group->tourn;
+
+	my $no_lpw++ if $event->setting("no_lpw");
+    my $max_points = $event->setting("max_points");
+    my $min_points = $event->setting("min_points");
+    my $point_increments = $event->setting("point_increments");
+    my $point_ties = $event->setting("point_ties");
+
+    my $wins;
+    my $points;
+    my $ranks;
+
+    foreach my $tb ($round->tb_set->tiebreaks) {
+        $ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals" || $tb->name eq "opp_ranks");
+        $wins++ if ($tb->name eq "opp_wins" || $tb->name eq "winloss" || $tb->name eq "ballots");
+        $points++ if ($tb->name eq "points" ||  $tb->name eq "opp_points");
+    }
+
+    my @ballots = Tab::Ballot->search( judge => $judge->id, panel => $panel->id);
+	my @ballot_values = $m->comp("/funclib/panel_scores.mas", panel => $panel, judge => $judge);
+
+	my $errs;
+
+	my %student_points;
+	my %student_rank;
+	my %student_position;
+
+	my %team_points;
+	my %team_ranks;
+	my %team_bye;
+	my %team_forfeit;
+
+	my %rank_points;
+	my $winner;
+
+	foreach my $ballot (@ballots) { 
+
+		my $entry = $ballot->entry;
+		my @students = $entry->students;
+		my %students_by_id = map {$_->id => $_} @students;
+
+		$team_bye{$entry->id}++ if $ARGS{"bye_".$ballot->id};
+		$team_forfeit{$entry->id}++ if $ARGS{"noshow_".$ballot->id};
+
+		$errs = "Error type: HYC+EI2.  (Have Your Cake And Eat It Too).<br/>You assigned ".$entry->code." a bye and a forfeit. One or the other, plz." if $team_bye{$entry->id} && $team_forfeit{$entry->id};
+
+		my %used;
+
+		POSITION:
+		foreach my $position (1 .. 4) { 
+
+			my $student_id = $ARGS{"speaker_".$position."_".$ballot->id};
+
+			my $student = $students_by_id{$student_id};
+			$student_position{$student_id} = $position if $position < 4;
+
+			$errs .= "<p>Speaker missing in position $position</p>" unless $student;
+			$errs .= "<p>Speaker ".$student->first." ".$student->last." is listed in two speaker positions</p>" 
+				if $used{"student_".$student->id} && $position < 4;
+
+			$errs .= "<p>Speaker ".$student->first." ".$student->last." on ".$entry->code." is listed in rebuttal but did not otherwise speak</p>" 
+				if ($position > 3) &! $used{"student_".$student->id};
+
+			$used{"student_".$student->id}++;
+
+
+			next unless $student;
+
+			my $ballot_points;
+			my $ballot_rank;
+
+			if ($points) { 
+
+				$ballot_points = $ARGS{"points_".$position."_".$ballot->id};
+
+				if ($ballot_points > 0) { 
+
+					$ballot_points = int($ballot_points + 0.5) if $point_increments eq "whole";
+
+					if ($point_increments eq "tenths") { 
+						$ballot_points = $ballot_points * 10;
+						$ballot_points = int($ballot_points + 0.5);
+						$ballot_points = $ballot_points / 10;
+					}
+
+					if ($point_increments eq "half") { 
+						$ballot_points = $ballot_points * 2;
+						$ballot_points = int($ballot_points + 0.5);
+						$ballot_points = $ballot_points / 2;
+					}
+				}
+						
+				$errs .= "<p>Points missing</p>" if not defined $ballot_points &! $team_bye{$entry->id} &! $team_forfeit{$entry->id};
+
+				if ($ballot_points) { 
+					$errs .= "<p>$ballot_points Points must be a number</p>" unless ($ballot_points == 0 || $ballot_points eq $ballot_points + 0);
+					$errs .= "<p>Points $ballot_points are outside of range</p>" if $ballot_points < $min_points || $ballot_points > $max_points;
+
+					if ($position < 4) { 
+						$errs .= "<p>Points $ballot_points were repeated and ties are not allowed</p>" 
+							if $used{"points_$ballot_points"}++ && not defined $point_ties;
+					}
+				}
+
+			}
+
+			if ($ranks) { 
+
+				$ballot_rank = $ARGS{"ranks_".$position."_".$ballot->id};
+
+				$ballot_rank = int($ballot_rank + 0.5);
+				$errs .= "<p>$ballot_rank Ranks must be a number</p>" unless ($ballot_rank == 0 || $ballot_rank eq $ballot_rank + 0);
+				$errs .= "<p>Points $ballot_points are outside of range</p>" if $ballot_points < $min_points || $ballot_points > $max_points;
+				$errs .= "<p>Ranks missing</p>" if not defined $ballot_rank && not defined $team_bye{$entry->id} && not defined $team_forfeit{$entry->id};
+
+				if ($ballot_rank) { 
+
+					$errs .= "<p>Rank $ballot_rank is outside of range</p>" if $ballot_rank < 1 || $ballot_rank > 6;
+					$errs .= "<p>Rank $ballot_rank is repeated</p>" if $used{"rank_".$ballot_rank}++;
+
+					if ($points) { 
+						
+						#check that ranks agree with points
+						foreach my $rank (keys %rank_points) { 
+
+							if ($rank_points{$rank} > $ballot_points && $rank > $ballot_rank) { 
+								$errs .= "<p>Speaker ranked $rank has better points ($rank_points{$rank}) than rank $ballot_rank ($ballot_points)</p>";
+							}
+
+							if ($rank_points{$rank} < $ballot_points && $rank < $ballot_rank) { 
+								$errs .= "<p>Speaker ranked $ballot_rank has better points ($ballot_points) than rank $rank ($rank_points{$rank})</p>";
+							}
+
+						}
+					}
+
+				}
+
+			} 
+
+			if ($position > 3) { 
+				$student_points{$student->id."_rebuttal"} = $ballot_points;
+			} else {
+				$student_points{$student->id} = $ballot_points;
+				$student_rank{$student->id} = $ballot_rank;
+			}
+
+			$team_points{$entry->id} += $ballot_points;
+			$team_ranks{$entry->id} += $ballot_rank;
+
+		}
+
+		$winner = $ballot if $wins && $ballot->id == $ARGS{"winner"};
+
+		if ($winner && $points && $no_lpw) { 
+
+			my $winner_points = $team_points{$winner->entry->id};
+
+			foreach my $team (keys %team_points) { 
+				next if $team == $winner->entry->id;
+				$errs .= "<p>Low point wins are not allowed by this tournament</p>" if $winner_points < $team_points{$team};
+			}
+		}
+
+	}
+
+	#Remove any duplicate ballots and judges
+	$m->comp("/funclib/panel_dedupe.mas", panel => $panel);
+	my $ballot_err;
+	my $status;
+
+	if ($errs) { 
+		$m->redirect("../index.mhtml?timeslot_id=".$round->timeslot->id."&judge_id=$judge_id&flight=".$panel->flight."&errs=$errs&err=Trouble in Paradise!");
+
+	} else { 
+
+		my $audit_method = $event->judge_group->setting("audit_method");
+		$audit_method = "twice" unless $audit_method;
+
+		$status = 1 if $audit_method eq "none";
+
+		if ($audit_method eq "twice") { 
+
+			#Check existing values to see if they match.
+
+			foreach my $ballot (@ballots) { 
+
+				my @bvs = $ballot->ballot_values;
+
+				$status++ if @bvs;
+
+				foreach my $bv ($ballot->ballot_values) { 
+
+					if ($bv->tag eq "points") { 
+
+						my $student = $bv->student;
+						$ballot_err .= "Points for ".$student->first." ".$student->last." differ 
+							(".$bv->value." vs ".$student_points{$student->id}.") <br />" if $bv->value != $student_points{$student->id};
+
+					} elsif ($bv->tag eq "rank") { 
+
+						my $student = $bv->student;
+						$ballot_err .= "Rank for ".$student->first." ".$student->last." differ 
+							(".$bv->value." vs ".$student_rank{$student->id}.") <br />" if $bv->value != $student_rank{$student->id};
+
+					} elsif ($bv->tag eq "rebuttal_points") { 
+						my $student = $bv->student;
+						$ballot_err .= "Rebuttal Points for ".$student->first." ".$student->last." differ 
+							(".$bv->value." vs ".$student_points{$student->id."_rebuttal"}.") <br />" if $bv->value != $student_points{$student->id."_rebuttal"};
+
+					} elsif ($bv->tag eq "ballot") { 
+
+						if ($bv->value == 1 && $winner->id != $ballot->id) { 
+							$ballot_err .= "Winner was different!";
+						}
+					}
+				}
+
+				if ($ballot->bye) {
+					$ballot_err .= "Bye marked last round was not marked" unless $team_bye{$ballot->entry->id};
+				} 
+
+				if ($ballot->noshow) {
+					$ballot_err .= "Forfeit marked last round was not marked" unless $team_forfeit{$ballot->entry->id};
+				}
+
+			}
+
+			undef $status if $ballot_err;
+
+			foreach my $ballot (@ballots) { 
+				undef $status if $team_forfeit{$ballot->entry->id} &! $ballot->noshow;
+				undef $status if $team_bye{$ballot->entry->id} &! $ballot->bye;
+			}
+
+		}
+
+		if ($status) {
+
+			foreach my $ballot (@ballots) { 
+				$ballot->audit(1);
+				$ballot->update;
+			}
+
+		} else {
+
+			Tab::BallotValue->set_sql( clear_cruft => "
+				delete ballot_value.*
+				from ballot_value, ballot
+				where ballot.panel = ?
+				and ballot.judge = ? 
+				and ballot_value.tag != \"rfd\"
+				and ballot_value.tag != \"title\"
+				and ballot_value.tag != \"comments\"
+				and ballot.id = ballot_value.ballot");
+
+			Tab::BallotValue->sql_clear_cruft->execute($panel->id, $judge->id);
+
+			foreach my $ballot (@ballots) { 
+					
+				my $tigers_blood = 0;
+				$tigers_blood++ if $winner && $winner->id == $ballot->id;
+
+				Tab::BallotValue->create({
+					ballot   => $ballot->id,
+					value    => $tigers_blood,
+					tag      => "ballot",
+					tiebreak => 2,
+					student  => 0
+				});
+
+				foreach my $student ($ballot->entry->students) { 
+
+					if ($student_points{$student->id}) { 
+
+						Tab::BallotValue->create({
+							ballot   => $ballot->id,
+							student  => $student->id,
+							position => $student_position{$student->id},
+							tag      => "points",
+							tiebreak => 3,
+							value    => $student_points{$student->id}
+						});
+
+					}
+
+					if ($student_points{$student->id."_rebuttal"}) { 
+
+						Tab::BallotValue->create({
+							ballot   => $ballot->id,
+							student  => $student->id,
+							position => 4,
+							tag      => "rebuttal_points",
+							tiebreak => 6,
+							value    => $student_points{$student->id."_rebuttal"}
+						});
+
+					}
+
+					if ($student_rank{$student->id}) { 
+
+						Tab::BallotValue->create({
+							ballot   => $ballot->id,
+							student  => $student->id,
+							position => $student_position{$student->id},
+							tag      => "rank",
+							tiebreak => 1,
+							value    => $student_rank{$student->id}
+						});
+
+					}
+
+				}
+
+				$ballot->audit(0);
+				$ballot->bye($team_bye{$ballot->entry->id});
+				$ballot->noshow($team_forfeit{$ballot->entry->id});
+				$ballot->account($account->id);
+
+				$ballot->update;
+
+
+			}
+
+			$panel->started($now) unless $panel->started;
+			$panel->confirmed($now) unless $panel->confirmed;
+			$panel->update;
+
+		}
+
+		foreach my $ballot (@ballots) { 
+
+			foreach my $value ($ballot->values(tag => "")) { 
+
+				# This bug is driving me up the F#%)(*&#%(@*%&! wall.  for now
+				# check for it and fix it on the fly.  NOTE:  This is an
+				# incredibly ugly hack.
+
+				Tab::debuglog("ALERT!  Score ".$value->id." has tag ".$value->tag." which appears to be a problem. Fixing:");
+				$value->tag("rank") if $value->tiebreak == 1;
+				$value->tag("ballot") if $value->tiebreak == 2;
+				$value->tag("points") if $value->tiebreak == 3;
+				$value->tag("rebuttal_points") if $value->tiebreak == 6;
+				$value->update;
+			}
+
+		}
+
+		my $yellowmsg;
+		my $greenmsg;
+		my $err;
+
+		if ($ballot_err) { 
+			$err = "Trouble in paradise!";
+		} elsif ($status) { 
+			$greenmsg = "Ballot entry complete." if $status > 1;
+		} else {
+			$yellowmsg = "Ballot first entry complete.  Pass to someone to enter for a doublecheck.";
+		}
+
+		$m->comp("/funclib/round_done.mas", round => $round);
+
+		$m->redirect("../index.mhtml?timeslot_id=".$round->timeslot->id."&greenmsg=$greenmsg&yellowmsg=$yellowmsg&err=$err&ballot_err=$ballot_err");
+
+	}
+
+</%init>
