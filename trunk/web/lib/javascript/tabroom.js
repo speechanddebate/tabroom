@@ -265,6 +265,27 @@ function autoPoints(input,len,e,side,ratio) {
     return true;
 }
 
+function autoSel(input) { 
+
+	var next_index = getIndex(input) + 1;
+
+	while(input.form[next_index].tabIndex == -1) {
+		next_index = next_index + 1;
+		if (next_index > input.form.length) break;
+	}
+
+	input.form[next_index].focus();
+
+    function getIndex(input) {
+        var index = -1, i = 0, found = false;
+        while (i < input.form.length && index == -1)
+        if (input.form[i] == input)index = i; 
+        else i++; 
+        return index;
+    }    
+
+}
+
 function autoTab(input,len,e) {
 
     var keyCode = e.keyCode; 
