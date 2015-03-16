@@ -1,5 +1,6 @@
 
 <?php
+die;
 require 'scripts/tabroomtemplate.html';
 require 'scripts/databaseconnect.php';
 
