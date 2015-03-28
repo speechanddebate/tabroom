@@ -117,6 +117,8 @@ use Tab::TournSetting;
 use Tab::TournSite;
 use Tab::Webpage;
 
+use Tab::NSDA::PointsDBI;
+
 my $ah;
 
 sub handler {
