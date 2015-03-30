@@ -3,6 +3,11 @@
 </%args>
 <%init>
 
+	if ($tourn->setting("nsda_points_posted")) { 
+		my $err = $tourn->name."'s NSDA points have already been posted";
+		$m->redirect("autopost.mhtml?tourn_id=$tourn_id&err=$err");
+	}
+
 	use Tab::NSDA::EventCategories;
 	use Tab::NSDA::Event;
 	use Tab::NSDA::Instance;
@@ -16,21 +21,94 @@
 
 	my $tourn = Tab::Tourn->retrieve($tourn_id);
 
-	$m->print('<div class="blankfull">');
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
 
+	my $start = $tourn->start->set_time_zone($tz);
+	my $end = $tourn->end->set_time_zone($tz);
+
+	my $site = $tourn->site->first;
+	my $location = $site->name if $site;
+
+
+    my $dbh = Tab::DBI->db_Main(); 
+
+    my $bye_sth = $dbh->prepare('
+		select entry.id, group_concat(student.ualt_id), chapter.nsda
+		from entry, entry_student, student, school, chapter
+		where school.tourn = '.$tourn->id.'
+		and entry.school = school.id
+		and entry.id = entry_student.entry
+		and entry_student.student = student.id
+		and student.chapter = chapter.id
+		and student.ualt_id > 0 
+		group by entry.id
+	')
+
+    $bye_sth->execute();
+
+	my %entry_nsda = ();
+	while( my ($entry_id, $student_ualts, $chapter_id)) { 	
+		$entry_nsda{$entry_id}{"students"} = $student_ualts;
+		$entry_nsda{$entry_id}{"chapter"} = $chapter_id;
+	}
+
+
+	my $instance = Tab::NSDA::Instance->create({
+		status     => "N",
+		tourn_id   => $tourn->id,
+		source     => "TR",
+		start_date => $start->year."-".$start->strftime(%m)."-".$start->strftime(%d),
+		end_date   => $end->year."-".$end->strftime(%m)."-".$end->strftime(%d),
+		tournament => $tourn->name,
+		location   => $location,
+		state      => $tourn->state,
+		type       => 1
+	});
+
+	EVENT:
 	foreach my $event ($tourn->events) { 
 
-		$m->print("<h2>".$event->name." setting ".$ARGS{$event->id}." </h2>");
-
 		next if $ARGS{"exclude_".$event->id};
-		next unless $ARGS{$event->id};
 
-		$event->setting("nsda_event_category", $ARGS{$event->id});
-		my $nsda_event_category = Tab::NSDA::EventCategory->retrieve($ARGS{$event->id});
+		my $nsda_event_category;
+		my $nsda_cat;
+		my $nsda_subcat;
+
+		if ($event->type eq "congress") { 
+
+			next EVENT;  # until we meet again
+			$nsda_cat = 2;
+			$nsda_subcat = 2;
+
+		} else { 
+
+			next EVENT unless $ARGS{$event->id};
+			$nsda_event_category = Tab::NSDA::EventCategories->retrieve($ARGS{$event->id});
+			next EVENT unless $nsda_event_category;
+			$event->setting("nsda_event_category", $ARGS{$event->id});
+	
+			$nsda_cat = 0;
+			$nsda_cat = 1 if $event->type eq "speech";
+			$nsda_subcat = $nsda_event_category->nsda_id;
+
+		} 
+		
+		my $size = $event->setting('max_entry');
+
+		Tab::NSDA::Event->create({
+			instance_id   => $instance_id,
+			event_id      => $event->id,
+			type          => uc($nsda_event_category->type),
+			size          => $size,
+			name          => $event->name,
+			category      => -1,
+			alt_id        => $event->id,
+			nfl_cat_id    => $nsda_cat,
+			nfl_subcat_id => $nsda_subcat
+		});
 
 		foreach my $round ($event->rounds) { 
-
-			$m->print("<h3>".$round->realname."</h3>");
 
 			next if $event->type eq "congress"; 
 
@@ -44,6 +122,7 @@
 			my %entry_result;
 			my %panel_entries;
 			my %entry_points;
+			my %panel_round;
 
 			foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
 				foreach my $entry_id (@{${$entries_ref}{$key}}) {
@@ -65,6 +144,7 @@
 					foreach my $entry (@{$panel_entries{$panel}}) { 
 						if (${$fft_ref}{$entry}) {
 							$entry_result{$entry} = "F";
+							$entry_points{$entry} = 0;
 						} else {
 							unless ($last_order == $entry_order{$entry}) {
 								$last_order = $entry_order{$entry};
@@ -72,6 +152,7 @@
 							}
 							$entry_result{$entry} = $rank;
 							$entry_points{$entry} = $base_points - $rank;
+							$entry_points{$entry} = 1 if $entry_points{$entry} < 1;
 
 						}
 					}
@@ -90,8 +171,10 @@
 
 						if (${$fft_ref}{$entry}) {
 							$entry_result{$entry} = "F";
+							$entry_points{$entry} = 0;
 						} elsif (${$bye_ref}{$entry}) {
 							$entry_result{$entry} = "B";
+							$entry_points{$entry} = 0;
 						} elsif ($win) { 
 							$entry_result{$entry} = "W";
 							$entry_points{$entry} += $win_points;
@@ -102,21 +185,37 @@
 						}
 					}
 				}
-
 			}
 
 			foreach my $panel ( keys %panel_entries ) { 
-				$m->print("Panel $panel <br />");
+
 				foreach my $entry (@{$panel_entries{$panel}}) { 
-					$m->print("Entry ${$code}{$entry} has result $entry_result{$entry} with seed $entry_order{$entry}.  $entry_points{$entry} earned<br />");
+				
+					next unless $entry_nsda{$entry};
+					next unless $entry_nsda{$entry}{"students"};
+					next unless $entry_nsda{$entry}{"chapter"};
+
+					foreach my $student (split (/\,/, $entry_nsda{$entry}{"students"}) {
+
+						Tab::NSDA::Points->create({
+							instance_id      => $instance->id,
+							nfl_school_id    => $entry_nsda{$entry}{"chapter"},
+							nfl_student_id   => $student,
+							round            => $round->name,
+							result           => $entry_result{$entry},
+							event_cat_id     => $nsda_cat,
+							event_sub_cat_id => $nsda_subcat,
+							alt_event_id     => $event->id,
+							points           => $entry_points{$entry},
+							type             => uc($nsda_event_category->type),
+						});
+
+					}
 				}
-				$m->print("<br />");
 			}
-
 		}
-
 	}
 
-	$m->print('</div>');
+	$tourn->setting("nsda_points_posted", 1);
 
 </%init>
