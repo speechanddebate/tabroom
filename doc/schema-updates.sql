@@ -4,6 +4,7 @@ create table nsda_event_categories (
 	type char,
 	name varchar(31),
 	nsda_id int,
+	nat_category bool,
 	timestamp timestamp
 );
 
