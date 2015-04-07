@@ -1,0 +1,246 @@
+<%args>
+	$round_id
+	$session
+	$record    => undef
+	$firstname => undef
+</%args>
+<%init>
+	
+	my $round = Tab::Round->retrieve($round_id);
+
+	my $round_name = $round->name;
+	$round_name--;
+	my $tourn = $round->event->tourn;
+
+	my $ncfl++ if $tourn->setting("ncfl");
+
+	my $event = $round->event;
+	my $round_robin++ if $event->setting("round_robin");
+
+	my $aff_string = $event->setting("aff_label");
+	my $neg_string = $event->setting("neg_label");
+	$aff_string = "Aff" unless $aff_string;
+	$neg_string = "Neg" unless $neg_string;
+
+	Tab::Panel->columns(TEMP => "roomname");
+
+	Tab::Panel->set_sql( schemat => "
+		select panel.*, room.name as roomname
+		from panel, room
+		where panel.round = ? 
+		and panel.room = room.id
+		order by panel.letter");
+
+	Tab::Panel->set_sql( schemat_roomless => "
+		select panel.*, \"Ask Tab\" as roomname
+		from panel
+		where panel.round = ? 
+		and panel.room = 0
+		order by panel.letter");
+
+	my @panels = Tab::Panel->search_schemat($round->id);
+	push (@panels, Tab::Panel->search_schemat_roomless($round->id));
+
+	my %entry_wins = (); 
+
+	my $no_side_constraints++ if $event->setting('no_side_constraints');
+	my $sidelocks++ if ($round->type eq "elim" || $round->type eq "final") && not defined $no_side_constraints;
+
+	if ($record) { 
+		%entry_wins = $m->comp("/funclib/entry_wins.mas", event => $round->event, round => $round);
+	}
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $start = $round->start_time;
+	$start = $round->timeslot->start unless $start;
+	$start->set_time_zone($tz);
+
+	my $flighted++ if $round->flighted > 1;
+	my $flight_offset = $event->setting("flight_offset");
+
+	my $filename = $round->realname."-".$round->event->name."-".$session->id;
+    $filename =~ s/[\W_]//g;
+	$filename = $filename.".csv";
+
+    $m->clear_buffer;
+    $r->content_type('application/csv');
+    $r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+
+	$m->print($round->realname.",");
+	$m->print($event->name.",");
+	$m->print(Tab::nicetime($start));
+
+	foreach my $flight (1 .. $flighted) {
+
+		my $offset_time = $start->clone;
+		my $offset_factor = $flight_offset * ($flight - 1);
+		$offset_time->add( minutes => $offset_factor );
+
+		if ($flighted && $flight_offset) { 
+			$m->print(",Flight $flight begins at ".Tab::nicetime($offset_time));
+		}
+	}
+
+	$m->print("\n");
+
+	if ($sidelocks || $no_side_constraints) { 
+		$m->print("Flight , Entry 1, Entry 2, Room , Judging ") if $flighted;
+		$m->print("Entry 1 & Entry 2 & Room & Judging ") unless $flighted;
+	} else { 
+		$m->print("Flight , ".Tab::texify($aff_string)." , ".Tab::texify($neg_string)." , Room , Judging ") if $flighted;
+		$m->print(Tab::texify($aff_string)." , ".Tab::texify($neg_string)." , Room , Judging ") unless $flighted;
+	}
+
+	$m->print("\n");
+
+	my $codes = $tourn->setting("schemat_display");
+
+	my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
+	my @judges = $m->comp("/funclib/round_judges.mas", round => $round);
+	my @ballots = $m->comp("/funclib/round_ballots.mas", round => $round);
+
+	my %pod_name;
+
+    if ($round_robin) { 
+        foreach my $entry (@entries) { 
+            next if $pod_name{$entry->pair_seed};
+            $pod_name{$entry->pair_seed} = $event->setting("pod_".$entry->pair_seed);
+            $pod_name{$entry->pair_seed} = "Pod ".$entry->pair_seed unless $pod_name{$entry->pair_seed};
+        }   
+    }   
+
+	my %judge_by_id = ();
+	foreach my $judge (@judges) { 
+		$judge_by_id{$judge->id} = $judge;
+	}
+
+	my %entries_by_panel = ();
+
+	foreach my $entry (@entries) { 
+		push (@{$entries_by_panel{$entry->panelid}}, $entry);
+	}
+
+	my %ballots_by_entry = ();
+	my %panel_undone = ();
+	my %judges_by_panel = ();
+
+	foreach my $ballot (@ballots) { 
+		push @{$ballots_by_entry{$ballot->entry->id}}, $ballot if $ballot->entry;
+		$panel_undone{$ballot->panel->id}++ unless $ballot->audit;
+		push @{$judges_by_panel{$ballot->panel->id}}, $judge_by_id{$ballot->judge->id} if  $judge_by_id{$ballot->judge->id};
+	}
+
+	@panels = sort {$a->flight <=> $b->flight} @panels if $flighted;
+	@panels = sort {$a->roomname cmp $b->roomname} @panels;
+	@panels = sort {$a->bye <=> $b->bye} @panels;
+
+	my $switch = 1;
+	my $last_room;
+	my $last_pod;
+	my $last_flight;
+
+	foreach my $panel (@panels) { 
+
+		my $aff;
+		my $neg;
+		my @byes;
+	
+		next unless $entries_by_panel{$panel->id};
+
+		my $locked_aff =  $m->comp("/funclib/round_elim_dueaff.mas", panel => $panel) if $sidelocks;
+
+		foreach my $pc (@{$entries_by_panel{$panel->id}}) { 
+			if ($ballots_by_entry{$pc->id}) { 
+				push @byes, $pc if $panel->bye;
+				$aff = $pc if ${$ballots_by_entry{$pc->id}}[0]->side == "1";
+				$neg = $pc if ${$ballots_by_entry{$pc->id}}[0]->side == "2";
+			}
+		}
+
+		if ($round_robin && ($aff && $last_pod != $aff->pair_seed) || (@byes && $last_pod != $byes[0]->pair_seed)) { 
+			$m->print($pod_name{$aff->pair_seed}.",") if $aff;
+			$m->print($pod_name{$byes[0]->pair_seed}.",") if @byes;
+			$last_pod = $aff->pair_seed if $aff;
+			$last_pod = $byes[0]->pair_seed if @byes;
+		}
+	
+		$m->print($panel->flight.",") if $flighted;
+
+		if ($panel->bye) { 
+
+			foreach my $bye (@byes) {
+				$m->print($entry_wins{$bye->id}." - ".($round_name - $entry_wins{$bye->id})) if $record;
+				$m->print('"'.$bye->code.'",');
+			}
+
+		} elsif ($aff) { 
+			$m->print(" ".$entry_wins{$aff->id}." - ".($round_name - $entry_wins{$aff->id})) if $record;
+			$m->print(' "'.$aff->code.'"');
+			$m->print(" ".$aff_string) if $locked_aff;
+			$m->print(" FLIP ") if $sidelocks && $locked_aff;
+			$m->print(",");  
+		} 
+
+		if ($panel->bye) { 
+
+			if (scalar @byes > 1) { 
+				$m->print(" BYE ");
+			} else { 
+				$m->print(" BYE, ");
+			}
+
+		} elsif ($neg) { 
+
+			$m->print(" ".$entry_wins{$neg->id}." - ".($round_name - $entry_wins{$neg->id})) if $record;
+			$m->print(' "'.$neg->code.'"');
+			$m->print(" ".$neg_string) if $locked_aff;
+			$m->print(" FLIP ") if $sidelocks && $locked_aff;
+			$m->print(",");  
+		}
+
+		$m->print($panel->roomname.", ");
+
+		my %used = ();
+
+		if ($judges_by_panel{$panel->id}) { 
+
+			foreach my $judge (sort {$b->chair <=> $a->chair} @{$judges_by_panel{$panel->id}}) {
+
+				next if $used{$judge->id};
+				$used{$judge->id}++;
+
+				$m->print(" * ") if $judge->chair;
+
+				if ($ncfl) { 
+					if ($record) { 
+						$m->print($judge->tab_rating." ".$judge->code);
+					} else { 
+						$m->print($judge->code);
+					}
+
+				} else {
+
+					if ($record) { 
+						$m->print($judge->tab_rating." ".$judge->last." ".$judge->first);
+					} else { 
+						$m->print($judge->first." ") if ($firstname && $judge->setting("list_first_name"));
+						$m->print($judge->last);
+						$m->print(", ".$judge->first) unless $firstname;
+					}
+				}
+			
+				$m->print(",");
+			} 
+		}
+
+		$m->print("\n");
+
+	} 
+
+	$m->abort;
+
+</%init>
+
+
