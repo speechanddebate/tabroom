@@ -89,7 +89,6 @@ use Tab::Room;
 use Tab::RoomGroup;
 use Tab::RoomGroupRoom;
 use Tab::RoomGroupRound;
-use Tab::RoomPool;
 use Tab::RoomStrike;
 use Tab::Round;
 use Tab::School;
