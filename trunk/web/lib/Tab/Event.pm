@@ -12,7 +12,6 @@ Tab::Event->has_a(event_double => 'Tab::EventDouble');
 Tab::Event->has_a(rating_subset => 'Tab::RatingSubset');
 
 Tab::Event->has_many(files => 'Tab::File', 'event');
-Tab::Event->has_many(room_pools => 'Tab::RoomPool', 'event');
 Tab::Event->has_many(settings => "Tab::EventSetting", "event");
 Tab::Event->has_many(result_sets => "Tab::ResultSet", "event");
 Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
