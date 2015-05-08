@@ -7,6 +7,11 @@ Tab::Login->columns(Others => qw/accesses last_access pass_changekey pass_timest
 
 Tab::Login->has_a(person => 'Tab::Account');
 
+sub account { 
+	my $login = shift; 
+	return $login->person;
+}
+
 __PACKAGE__->_register_datetimes( qw/last_access pass_change_expires timestamp/);
 
 
