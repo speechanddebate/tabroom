@@ -3,9 +3,9 @@
 </%args>
 <%doc>
 
-	Check the bottom for the hash definitions.  Init blocks always are run
-	first.  There's no need to create a separate module file for code that will
-	never be called by something other than this screen. 
+	Check the bottom for simplified display code.  There's no need to create a
+	separate module file for code that will never be called by something other
+	than this screen and it slows down the app considerably.
 
 </%doc>
 <%init>
@@ -13,6 +13,7 @@
 	my $round = Tab::Round->retrieve($round_id);
     my $timeslot = $round->timeslot;
 	my $tourn = $timeslot->tourn;
+	my $event = $round->event;
 
 	my %tags; 
 	my %problems;
@@ -21,11 +22,11 @@
     
     #DOUBLE-BOOKED JUDGES
 
-	$tags{"double_booked_judges"} = "Double-booked judges this round";
+	$tags{"double_booked_judges"} = "Judges double booked this round";
 
     my $double_judges_sth = $dbh->prepare("
         select distinct judge.* from judge, panel, panel clonepanel, ballot, ballot cloneballot
-        where panel.round = $round_id
+        where panel.round = ".$round->id."
         and clonepanel.round = panel.round
         and panel.flight = clonepanel.flight
         and panel.id != clonepanel.id
@@ -39,180 +40,302 @@
 
     while (my ($judge, $panel, $clonepanel, $ballot, $cloneballot)  = $double_judges_sth->fetchrow_array() ) {
         my $judge_info = Tab::Judge->retrieve($judge);
-        $problems{"double_booked_judges"} .= $judge_info->first." ".$judge_info->last." is double-booked!<br>";
+        $problems{"double_booked_judges"} .= '<p class="warning padless marno">'. $judge_info->first." ".$judge_info->last." is double-booked!</p>";
     }
     
     #RIGHT NUMBER OF AFF/NEGS
 
-	$tags{"sides_uneven"} = "Side equalizations";
-    
-    unless ($round->name%2 || $round->type eq "elim" || $round->type eq "final") {
-        #pull last 2 rounds
-        my $event_id = $round->event;
-        my $last_rd = $round->name - 1;
-        my $curr_rd = $round->name;
-        my $sides_sth = $dbh->prepare("
-            select entry, side, panel.bye, round.name
-            from ballot, panel, round
-            where panel.round = round.id
-            and round.event = $event_id
-            and round.name >= $last_rd
-            and round.name <= $curr_rd
-            and ballot.panel=panel.id
-            and round.type != 'prelim'
-            and round.type != 'final'
-            order by entry, round.name
-        ");
-    
-        $sides_sth->execute();
-    
-        my %sides; my $rd1; my $rd2;
-        
-        while (my ($entry, $side, $bye, $name)  = $sides_sth->fetchrow_array() ) {
-            $sides{$entry}{$name} = $side; 
-            if ( $bye == 1 ) { $sides{$entry}{$name} = "bye"; }
-            if ( $rd1 && $name != $rd1 ) { $rd2 = $name; }
-            $rd1 = $name unless $rd1;
+
+    my $side_locked;
+    my $side_lock_against;
+
+    if ($round->sidelock_against) { 
+        if ($round->sidelock_against ne "NONE") { 
+            $side_locked++;
+            $side_lock_against = $round->sidelock_against;
         }
+    } else { 
+        $side_locked++ unless ($round->name % 2);  
+        undef $side_locked if $event->setting("no_side_constraints");
+    }    
+
+	undef $side_locked if $round->type eq "elim" || $round->type eq "final";
+
+	if ($side_locked) { 
+
+		$tags{"sides_uneven"} = "Entries on the wrong side";
+
+		my $round_number = $round->name;
+
+		while (not defined $side_lock_against && $round_number > 0) { 
+			#Find previous round
+			$round_number--;
+			my $sla = Tab::Round->search( event => $event->name, name => $round_number)->first;
+			$side_lock_against = $sla->id;
+		}
+
+		Tab::debuglog("Checking side locks against $side_lock_against");
+
+		if ($side_lock_against) { 
         
-        #print "Round 1 is $rd1 and Round 2 is $rd2<br>";
+			my $sides_sth = $dbh->prepare("
+				select entry.code, b1.side, b2.side 
+				from entry,
+					ballot b1, panel p1,
+					ballot b2, panel p2
+
+					where b1.entry = entry.id
+					and b1.panel = p1.id
+					and p1.bye != 1
+
+					and b2.entry = entry.id
+					and b2.panel = p2.id
+					and p2.bye != 1
+
+					and p1.round = ".$round->id."
+					and p2.round = ".$side_lock_against."
+
+			");
+
+     		$sides_sth->execute();
         
-        foreach my $key (keys %sides ) {
-            if ($sides{$key}{$rd1} == $sides{$key}{$rd2} && $sides{$key}{$rd1} ne "bye" && $sides{$key}{$rd2} ne "bye" ) {
-                my $entry_rec = Tab::Entry->retrieve($key);
-                #print $entry_rec->code." ".$key." ".$sides{$key}{$rd1}." ".$sides{$key}{$rd2}."<br>";
-                $problems{"sides_uneven"} .= $entry_rec->code." should be on the opposite side this round!<br>";
-            }
-        }
+			while (my ($entry, $side1, $side2)  = $sides_sth->fetchrow_array() ) {
+                $problems{"sides_uneven"} .= '<p class="warning padless marno">'. $entry." should be on the opposite side this round!</p>" if $side1 == $side2;
+			}
+
+		}
     }
 
     #UNSCHEDULED ENTRIES
 	$tags{"unscheduled_entries"} = "Entries not on the pairing";
-   
-    my @entries = Tab::Entry->search( event => $round->event, dropped => 0, dq => 0 );
-    my @ballots = $m->comp('/funclib/round_ballots.mas', round => $round);
+
     unless ($round->type eq "elim" || $round->type eq "final") {
-        foreach my $entry (@entries) {
-            my $ok=0;
-            foreach my $ballot (@ballots) {
-                $ok=1 if $ballot->entry == $entry;
-            }
-            if ( $ok == 0 ) { $problems{"unscheduled_entries"}.= $entry->code. " is NOT scheduled<br>"; }
+
+		Tab::Entry->set_sql( not_debating => "
+			select entry.*
+			from entry
+			where entry.event = ? 
+			and not exists (
+				select ballot.id
+				from ballot, panel
+				where panel.round = ? 
+				and ballot.panel = panel.id
+				and ballot.entry = entry.id)" );
+
+        foreach my $entry (Tab::Entry->search_not_debating( $event->id, $round->id )) { 
+			$problems{"unscheduled_entries"}.= '<p class="warning padless marno">'. $entry->code. " is not scheduled</p>";
         }
     }
     
     #ENTRIES SCHEDULED TOO MANY TIMES
 	$tags{"double_scheduled_entries"} = "Entries on the pairing twice";
-    
-    my $last_entry; my $last_flight; my $last_panel;
-    @ballots = sort {$b->entry <=> $a->entry } @ballots;
 
-	my %entry_panel;
-    foreach my $ballot (@ballots) {
-        if ( $ballot->entry->id == $last_entry && $ballot->panel->flight == $last_flight && $ballot->entry->id > 0 && $ballot->panel != $last_panel ) {
-            my $entry_rec = Tab::Entry->retrieve($ballot->entry->id) if $ballot->entry;
-            $problems{"double_scheduled_entries"}.= $entry_rec->code. " is scheduled twice in the same flight<br>";
-        }
-        $last_entry = $ballot->entry->id;
-        $last_flight = $ballot->panel->flight;
-        $last_panel = $ballot->panel;
-    }
-    
-    #MEETING OWN SCHOOL & DEBATES WITH NO JUDGES
-	$tags{"same_school_debates"} = "Entries debating their own program";
-	$tags{"judgeless_debates"} = "Debates without judges";
+	Tab::Entry->set_sql( debating_twice => "
+		select entry.*
+		from entry, ballot b1, panel p1, ballot b2, panel p2
 
-    my $last_school; 
-    @ballots = sort {$b->panel <=> $a->panel } @ballots;
-    foreach my $ballot (@ballots) {
-        if ( $ballot->entry->school == $last_school && $ballot->panel == $last_panel && $ballot->entry != $last_entry ) {
-            my $entry_rec = Tab::Entry->retrieve($ballot->entry->id) if $ballot->entry;
-            my $entry_rec_2 = Tab::Entry->retrieve($last_entry) if $last_entry;
-            $problems{"same_school_debates"}.= $entry_rec->code." and ".$entry_rec_2->code." are from the same school!<br>";
-        }
-        if ( $ballot->judge == 0 && $ballot->bye == 0 && $ballot->panel->bye == 0 && $ballot->panel ==  $last_panel ) {
-            $problems{"judgeless_debates"}.= $ballot->entry->code." vs. ".$last_entry->code." have no judge!<br>";
-        }
-        $last_entry = $ballot->entry->id;
-        $last_school = $ballot->entry->school;
-        $last_panel = $ballot->panel;
-    }
+		where entry.id = b1.entry
+		and b1.panel = p1.id
+		and entry.id = b2.entry
+		and b2.panel = p2.id
+
+		and p1.id > p2.id
+		and p1.round = ? 
+		and p1.round = p2.round 
+	");
+
+	foreach my $entry (Tab::Entry->search_debating_twice($round->id )) { 
+		$problems{"double_scheduled_entries"}.= '<p class="warning padless marno">'. $entry->code. " is scheduled twice in the same round</p>";
+	}
+    
+    #MEETING OWN SCHOOL 
+	$tags{"same_school_sections"} = "Entries debating their own program";
+
+	Tab::Entry->set_sql( same_school_sections => "
+		select entry.*, opp.code as othername
+		from entry, ballot, panel, 
+		entry opp, ballot oballot
+
+			where entry.id = ballot.entry
+			and ballot.panel = oballot.panel
+			and oballot.entry = opp.id
+			and ballot.panel = panel.id
+			and panel.round = ? 
+			and opp.school = entry.school
+			and opp.id < entry.id
+	");
+
+	foreach my $entry (Tab::Entry->search_same_school_sections($round->id )) { 
+		$problems{"same_school_sections"}.= '<p class="warning padless marno">'. $entry->code." and ".$entry->othername." are from the same school!</p>";
+	}
+
+	#DEBATES WITH NO JUDGES
+
+	$tags{"judgeless_sections"} = "Sections without judges";
+
+	Tab::Panel->set_sql( judgeless_sections => "
+
+		select distinct panel.*, e1.code as opp, e2.code as pos
+		from panel, ballot b1, ballot b2, entry e1, entry e2
+		where panel.id = b1.panel
+		and panel.id = b2.panel
+
+		and b1.entry = e1.id
+		and b2.entry = e2.id
+		and panel.round = ? 
+		and panel.bye != 1
+		and b1.bye != 1
+		and b2.bye != 1
+		and b1.noshow != 1
+		and b2.noshow != 1
+
+		and not exists ( 
+			select judge.id 
+			from judge, ballot bj
+			where bj.panel = panel.id
+			and bj.judge = judge.id
+		)
+		group by panel.id
+
+	");
+
+	foreach my $panel (Tab::Panel->search_judgeless_sections($round->id )) { 
+		$problems{"judgeless_sections"}.= '<p class="warning padless marno">'. "Section ".$panel->letter." between ".$panel->opp." and ".$panel->pos." has no judge! </p>";
+		undef $panel;
+	}
 
     #ROOMS: DEBATES WITH NO ROOMS    
-	$tags{"roomless_panels"} = "Debates without rooms";
-    my @panels = $m->comp('/funclib/round_panels.mas', round => $round);
-    my $dummy=0;
-    foreach my $panel (@panels) {
-        if ( $panel->room == 0 && $panel->bye == 0 ) {
-            $dummy ++;
-        }
-    }
-    $problems{"roomless_panels"} = $dummy." panels without rooms<br>" if $dummy;
-    
+	$tags{"roomless_sections"} = "Sections without rooms";
+
+	Tab::Panel->set_sql( roomless_sections => "
+		select distinct panel.*, e1.code as opp, e2.code as pos
+		from panel, ballot b1, ballot b2, entry e1, entry e2
+		where panel.round = ? 
+		and panel.room < 1
+		and panel.bye != 1
+
+		and panel.id = b1.panel
+		and b1.bye !=1
+		and b1.noshow !=1
+		and b1.entry = e1.id
+
+		and panel.id = b2.panel
+		and b2.bye !=2
+		and b2.noshow !=2
+		and b2.entry = e2.id
+
+		group by panel.id
+	");
+
+	foreach my $panel (Tab::Panel->search_roomless_sections($round->id )) { 
+		$problems{"roomless_sections"}.= '<p class="warning padless marno">'. "Section ".$panel->letter." between ".$panel->opp." and ".$panel->pos." has no room! </p>";
+		undef $panel;
+	}
+
     #ENTRIES PREVIOUS MET
-	$tags{"hit_before"} = "Debaters who have debated before";
+	$tags{"hit_before"} = "Entries who have debated before";
 
-    my ($entry_by_id_hash_ref, $precluded_hash_ref) = $m->comp("/funclib/make_pairing_hash.mas", round_id => $round->id);			
+    my $second_hit_sth = $dbh->prepare("
+		select distinct me.code, opp.code othername, otherround.name roundname, me_b1.side side1, me_b2.side side2
 
-    my %entry_by_id = %{$entry_by_id_hash_ref};
-    my %precluded = %{$precluded_hash_ref};
-    foreach my $panel (@panels) {
-        my @entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
-        #print $entries[0]->code." vs ".$entries[1]->code."<br>";
-        if ( $precluded{$entries[0]}{$entries[1]} == 1 || $precluded{$entries[1]}{$entries[0]} == 1 ) {
-            $problems{"hit_before"} .= $entries[0]->code." and ".$entries[1]->code." have hit before<br>";        
-        }
-    }
+		from entry me, entry opp, round otherround,
+
+			ballot me_b1, ballot opp_b1, panel p1, 
+			ballot me_b2, ballot opp_b2, panel p2
+
+			where me_b1.entry = me.id
+			and opp_b1.entry = opp.id
+			and me_b1.panel = opp_b1.panel
+			and me_b1.panel = p1.id
+
+			and p1.round = ? 
+
+			and me_b2.entry = me.id
+			and opp_b2.entry = opp.id
+			and me_b2.panel = opp_b2.panel
+			and me_b2.panel = p2.id
+			and p2.round != p1.round
+			and p2.round = otherround.id
+
+			and me.id > opp.id
+	");
+
+	$second_hit_sth->execute($round->id);
+		
+	while (my ($entry, $opp, $round, $side1, $side2)  = $second_hit_sth->fetchrow_array() ) {
+
+		$problems{"hit_before"}.= '<p class="warning padless marno">'. "Entry $entry debated $opp already in round $round ";
+		$problems{"hit_before"}.= "on the SAME SIDE </p>" if $side1 == $side2;
+		$problems{"hit_before"}.= "on the OPPOSITE SIDE </p>" if $side1 != $side2;
+	}
 
     #JUDGES: HEARING A BLOCKED TEAM/SCHOOL
 	$tags{"judge_preclusion"} = "Judge constraints/preclusions violated";
 
     #check to make sure this honors school preclusions
     my $strikes_sth = $dbh->prepare("
-        select strike.judge, strike.entry, strike.school, entry.school as entry_school, strike.type, strike.start, strike.end
-        from strike
-        left join entry on strike.entry=entry.id
-        where strike.tourn = ".$tourn."
-        order by strike.id
-    ");
+		select judge.first, judge.last, entry.code, panel.id, panel.letter, strike.type
+		from strike, ballot, entry, judge, panel
+		where panel.round = ".$round->id."
+		and panel.id =  ballot.panel
+		and ballot.entry = entry.id
+		and ballot.judge = judge.id
+		and strike.entry = entry.id
+		and strike.judge = judge.id
+	");
 
     $strikes_sth->execute();
         
-    while (my ($judge, $entry, $school, $entry_school, $type, $start, $end)  = $strikes_sth->fetchrow_array() ) {
-        foreach my $ballot (@ballots) {
-            if ($judge == $ballot->judge) {
-                if ( $entry == $ballot->entry || $school == $ballot->entry->school ) {
-                    $problems{"judge_preclusion"}.= $ballot->judge->first." ".$ballot->judge->last." is judging ".$ballot->entry->code." but there is a school or entry preclusion!<br>";
-                }
-            }
-        }
+    while (my ($judge_first, $judge_last, $entry, $panel, $panel_letter, $type)  = $strikes_sth->fetchrow_array() ) {
+		$type = ucfirst($type);
+		$problems{"judge_preclusion"}.= '<p class="warning padless marno">'. "$judge_first $judge_last is judging $entry in section $panel_letter, but has a preclusion of type $type </p>";
+    }
+
+    $strikes_sth = $dbh->prepare("
+		select judge.first, judge.last, entry.code, panel.id, panel.letter, strike.type, school.name
+		from strike, ballot, entry, judge, panel, school
+		where panel.round = ".$round->id."
+		and panel.id =  ballot.panel
+		and ballot.entry = entry.id
+		and ballot.judge = judge.id
+		and school.id = entry.school
+		and strike.school = school.id
+		and strike.judge = judge.id
+	");
+
+    $strikes_sth->execute();
+        
+    while (my ($judge_first, $judge_last, $entry, $panel, $panel_letter, $type, $school)  = $strikes_sth->fetchrow_array() ) {
+		$type = ucfirst($type);
+		$problems{"judge_preclusion"}.= '<p class="warning padless marno">'. "$judge_first $judge_last is judging $entry from $school in section $panel_letter, but has a preclusion of type $type </p>";
     }
 
     #JUDGES NOT AVAILABLE THIS ROUND
-	$tags{"judge_timestrike"} = "Judges not currently available";
+
+	$tags{"judge_timestrike"} = "Judges used but not currently available";
 
     my $time_strikes_sth = $dbh->prepare("
-        select strike.tourn, strike.start, strike.end, strike.type, strike.judge from strike, timeslot
-        where strike.tourn = ".$tourn."
-        and strike.type = 'time'
-        and timeslot.id=".$round->timeslot."
-	and strike.start <= timeslot.end 		
-	and strike.end >= timeslot.start
+		select distinct judge.id, judge.first, judge.last
+		from judge, ballot, panel, round, strike, timeslot
+		where round.id = ? 
+		and round.id = panel.round
+		and panel.id = ballot.panel
+		and ballot.judge = judge.id
+		and strike.judge = judge.id
+        and timeslot.id = round.timeslot
+		and strike.start <= timeslot.end 		
+		and strike.end >= timeslot.start
     ");
 
-    $time_strikes_sth->execute();
+    $time_strikes_sth->execute($round->id);
 
-    while (my ($tourn, $start, $end, $type, $judge)  = $time_strikes_sth->fetchrow_array() ) {
-        foreach my $ballot (@ballots) {
-            if ($judge == $ballot->judge) {
-                $problems{"judge_timestrike"}.= $ballot->judge->first." ".$ballot->judge->last." is unavailable for this round!<br>";
-            }
-        }
+    while (my ($id, $first, $last)  = $time_strikes_sth->fetchrow_array() ) {
+		$problems{"judge_timestrike"}.= '<p class="warning padless marno"> Judge '. $first." ".$last." is unavailable for this round!</p>";
     }
 
 	# MY OWN HIRES
 
-	if ($round->event->judge_group->setting("auto_conflict_hires")) { 
+	if ($event->judge_group->setting("auto_conflict_hires")) { 
 	
 		$tags{"hired_judging_me"} = "Hires judging the program paying them";
 
@@ -228,16 +351,103 @@
 			group by entry.id
 		");
 
-		my @judge_hire_conflict = Tab::JudgeHire->search_hires_judging_me($round_id);
-
-		foreach my $conflict (@judge_hire_conflict) { 
+		foreach my $conflict (Tab::JudgeHire->search_hires_judging_me($round_id)) { 
 			$problems{"hired_judging_me"} = $conflict->judge->first." ".$conflict->judge->last." is judging ".$conflict->school->name." who has hired them.";
 		}
 
 	}
+
+	# ENTRY: HIT SAME SCHOOL TWICE IN PRESETS
+
+	if ($round->type eq "prelim") { 
+
+		$tags{"same_school_twice"} = "Entries debating a program twice in presets";
+
+		Tab::Entry->set_sql( "same_school_twice" => "
+
+			select distinct me.*, otherschool.name othername
+
+			from entry me, school otherschool,
+				entry opp1, ballot b1, panel p1, ballot ob1,
+				entry opp2, ballot b2, panel p2, ballot ob2, round r2
+
+				where me.id = b1.entry
+				and b1.panel = p1.id
+				and ob1.panel = p1.id
+				and opp1.id = ob1.entry
+				and ob1.entry != me.id
+
+				and me.id = b2.entry
+				and b2.panel = p2.id
+				and ob2.panel = p2.id
+				and opp2.id = ob2.entry
+				and ob2.entry != me.id
+			
+				and p1.round != p2.round
+				and p1.round = ?
+				and p2.round = r2.id
+				and r2.type = \"prelim\"
+
+				and opp1.id != opp2.id
+				and opp1.school = opp2.school
+				and opp1.school = otherschool.id
+
+		");
+
+		foreach my $entry (Tab::Entry->search_same_school_twice($round->id)) { 
+			$problems{"same_school_twice"} .= '<p class="warning padless marno">'. $entry->code." debates against entries from  ".$entry->othername." twice in presets. </p>";
+		}
+
+	}
+
+	# ENTRY: HIT SAME REGION TWICE IN PRESETS
+
+	if ($round->type eq "prelim" && ($event->setting("region_avoid") || $event->setting("region_constrain")) ) { 
+
+		$tags{"same_region_twice"} = "Entries debating a region twice in presets";
+
+		Tab::Entry->set_sql( same_region_twice => "
+
+			select distinct me.*, otherregion.name othername
+			from entry me, region otherregion, school,
+				entry opp1, ballot b1, panel p1, ballot ob1, school s1,
+				entry opp2, ballot b2, panel p2, ballot ob2, school s2, round r2
+
+				where me.id = b1.entry
+				and b1.panel = p1.id
+				and ob1.panel = p1.id
+				and opp1.id = ob1.entry
+				and ob1.entry != me.id
+
+				and me.id = b2.entry
+				and b2.panel = p2.id
+				and ob2.panel = p2.id
+				and opp2.id = ob2.entry
+				and ob2.entry != me.id
+			
+				and p1.round != p2.round
+				and p1.round = ?
+				and p2.round = r2.id
+				and r2.type = \"prelim\"
+
+				and opp1.school = s1.id
+				and opp2.school = s2.id
+
+				and s1.region = s2.region
+				and s1.region = otherregion.id
+
+				and opp1.school != opp2.school
+		");
+
+		foreach my $entry (Tab::Entry->search_same_region_twice($round->id)) { 
+			$problems{"same_region_twice"} .= '<p class="warning padless marno">'. $entry->code." debates against entries from  ".$entry->othername." twice in presets. </p>";
+		}
+
+	}
+
+	# ENTRY: HIT SAME REGION TWICE IN PRESETS
     
     # JUDGES: HEARD TEAM BEFORE
-    # JUDGES: SHOULD HAVE ROUND OFF
     # JUDGES: HEARING BLOCKED DIVISION
     # ROOMS: ROOMS USED TOO MANY TIMES
     # ROOMS: NOT AVAILABLE
@@ -250,15 +460,15 @@
 
 %	my $switch;
 
-%	foreach my $tag (keys %tags) { 
+%	foreach my $tag (sort {$tags{$a} cmp $tags{$b}} keys %tags) { 
 
 		<div class="<% ($switch++ % 2) ? "odd" : "even" %> full">
 
-			<span class="half">
+			<span class="twofifth">
 				<% $tags{$tag} %> 
 			</span>
 
-			<span class="half">
+			<span class="threefifths nospace padleft">
 				<% $problems{$tag} ? $problems{$tag} : '<span class="rightalign nospace greentext"> OK! </span>' %>
 			</span>
 		</div>

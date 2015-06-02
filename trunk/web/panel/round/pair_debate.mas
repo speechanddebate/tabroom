@@ -45,11 +45,22 @@
 	#erase any current round
 	erase_current_round($round);
 		
-	my $oddround = 0;
-	$oddround++ if ($round->name % 2); 
-	$oddround = 1 if $event->setting("no_side_constraints");
+	my $side_locked;
+	my $side_lock_against;
 
-	if ($round->type eq "highhigh" and $oddround == 0) {
+	if ($round->sidelock_against) { 
+
+		if ($round->sidelock_against ne "NONE") { 
+			$side_locked++;
+			$side_lock_against = $round->sidelock_against;
+		}
+
+	} else { 
+		$side_locked++ unless ($round->name % 2); 
+		undef $side_locked if $event->setting("no_side_constraints");
+	}
+
+	if ($round->type eq "highhigh" and $side_locked) {
 		#send a message here
 	}
 	
@@ -57,12 +68,43 @@
 
 	my %entry_by_id = %{$entry_by_id_hash_ref};
 	my %precluded = %{$precluded_hash_ref};
-
 	my $entry_count = keys %entry_by_id; 
 
+	my %entry_ballots; 
 
 	#FIGURE OUT IF YOU NEED TO EVEN SIDES UP WITH TEAMS THAT HAD BYES IN THE PAST
-	unless ($oddround) {
+	if ($side_locked) {
+
+		if ($side_lock_against) { 
+
+			Tab::Ballot->set_sql( "round_side_lock" => "
+				select distinct ballot.*
+				from ballot, panel
+				where panel.round = ? 
+				and ballot.panel = panel.id
+				order by ballot.entry
+			");
+
+			foreach my $ballot (Tab::Ballot->search_round_side_lock($side_lock_against)) { 
+				push @{$entry_ballots{$ballot->entry->id}}, $ballot;
+			}
+
+		} else { 
+
+			Tab::Ballot->set_sql( "tourn_side_lock" => "
+				select distinct ballot.*
+				from ballot, panel, round
+				where round.name < ? 
+				and panel.round = round.id
+				and ballot.panel = panel.id
+				order by ballot.entry
+			");
+
+			foreach my $ballot (Tab::Ballot->search_tourn_side_lock($round->name)) { 
+				push @{$entry_ballots{$ballot->entry->id}}, $ballot;
+			}
+
+		}
 
 		my $aff;
 		my $neg;
@@ -82,14 +124,12 @@
 				$error_log .= "bailed at 20 tries\n\n" ; 
 			}
 
-			foreach my $key (keys %entry_by_id ) {
-
-				$aff++ if $entry_by_id{$key}{'sidedue'} == 1;
-				$neg++ if $entry_by_id{$key}{'sidedue'} == 2;
-
+			foreach my $entry_id (keys %entry_by_id ) {
+				$aff++ if $entry_by_id{$entry_id}{'sidedue'} == 1;
+				$neg++ if $entry_by_id{$entry_id}{'sidedue'} == 2;
 			}
 		
-			#exit if things are even, or off by one (odd round with a bye)
+			#exit if things are even, or off by one (non-sidelocked round with a bye)
 			if (abs($aff-$neg) <= 1 ) { 
 				undef $sides_even; 
 				last; 
@@ -100,14 +140,15 @@
 			undef $fixmarker;
 			$side_needed = 2 if ($aff > $neg);
 
-			foreach my $key (keys %entry_by_id ) {
+			foreach my $entry_id (keys %entry_by_id ) {
+
 				if ($fixmarker) { last; }
-				if ($entry_by_id{$key}{'sidedue'} != $side_needed) {
-					my @ballots = Tab::Ballot->search( entry => $key );
-					foreach my $ballot (@ballots) {
+				if ($entry_by_id{$entry_id}{'sidedue'} != $side_needed) {
+
+					foreach my $ballot (@{$entry_ballots{$entry_id}}) { 
 						if ( $ballot->bye == 1 or $ballot->panel->bye == 1) {
-							$entry_by_id{$key}{'sidedue'} = $side_needed;
-							$error_log .= "Switching side due for ".$key." because sides need to be evened and they had a bye\n\n" ;
+							$entry_by_id{$entry_id}{'sidedue'} = $side_needed;
+							$error_log .= "Switching side due for ".$entry_id." because sides need to be evened and they had a bye\n\n" ;
 							$fixmarker=1;
 							last;		
 						}
@@ -145,7 +186,7 @@
 		}
 		$entry_by_id{-1}{'SOP'} = $entry_count*2;
 
-		unless ($oddround) {
+		if ($side_locked) {
 	
 			my $aff;
 			my $neg;
@@ -185,7 +226,7 @@
 		$bracket{$key}{'side'} = 0;
 	}
 	
-	count_possible_opponents(\%entry_by_id, \%precluded, \$oddround, \$min_possible_opponents, \%bracket);
+	count_possible_opponents(\%entry_by_id, \%precluded, \$side_locked, \$min_possible_opponents, \%bracket);
 	
 	#figure n teams from 1 school in bracket
 	foreach my $key (keys %school_entries) {
@@ -248,7 +289,7 @@
 		$error_log .= "<br>Now setting $x-win bracket...<br>";
 
 		$error_log .= " About to power-match; now there now are this many teams including the bye:".(keys %entry_by_id)."<br>";
-		%bracket = setbracket($round->type, $oddround, $x, $pullup_method, $pullup_repeat, $pullup_minimize, \%entry_by_id, \%bracket, \%precluded);
+		%bracket = setbracket($round->type, $side_locked, $x, $pullup_method, $pullup_repeat, $pullup_minimize, \%entry_by_id, \%bracket, \%precluded);
 
 		#if there's an odd number of teams in the bracket it must be the last one, so process the bye here
 		my $dummy = keys %bracket;
@@ -288,7 +329,7 @@
 			}
 
 			#do the actual pairing
-			my $outcome = pairbracket($oddround, $powermatch_method, $pullup_minimize, $round->name, \%entry_by_id, \%bracket, \%precluded);
+			my $outcome = pairbracket($side_locked, $powermatch_method, $pullup_minimize, $round->name, \%entry_by_id, \%bracket, \%precluded);
 		
 			# if it fails try the "just pair it" bracket option
 
@@ -296,7 +337,7 @@
 				my $try_ctr = 0;
 				do {
 					$try_ctr++;
-					$outcome = justmakeitwork(\%bracket, \%entry_by_id, $oddround, \%precluded);
+					$outcome = justmakeitwork(\%bracket, \%entry_by_id, $side_locked, \%precluded);
 					$error_log .= "justmakeitwork returned $outcome on iteration $try_ctr\n\n";					
 				} until ( $outcome ne "Fail" || $try_ctr > 20 );
 				if ($outcome ne "Fail") { $i = scalar(@pullup_array) + 99 ; }
@@ -568,7 +609,7 @@
 	}
 
 	# SET SIDES IF IT'S AN ODD NUMBERED ROUND USING THE SERPENTINE THING (unless APDA/pullup_minimize)
-	if ($oddround == 1 && $pullup_minimize == 0 ) {
+	unless ($side_locked || $pullup_minimize) {
 		$m->comp("/panel/manipulate/snake_sides.mas", round_id => $round->id, from => "autopair");
 	}
 
@@ -577,9 +618,9 @@
 	sub setbracket {
 
 		# receives a bracket to fill, returns a hash with teams in that bracket
-		my ($round_type, $oddround, $winbracket, $pullup_method, $pullup_repeat, $pullup_minimize, $entry_by_id_ref, $bracket_ref, $precluded_ref) = @_;
+		my ($round_type, $side_locked, $winbracket, $pullup_method, $pullup_repeat, $pullup_minimize, $entry_by_id_ref, $bracket_ref, $precluded_ref) = @_;
 
-		$error_log .= " odd round:".$oddround." winbracket=".$winbracket." -- now setting the bracket<br>" ;
+		$error_log .= " side locked:".$side_locked." winbracket=".$winbracket." -- now setting the bracket<br>" ;
 		my %entry_by_id = %{$entry_by_id_ref};
 
 		foreach my $key ( keys %entry_by_id ) {
@@ -662,13 +703,18 @@
 
 			$error_log .= "\n" ;
 								
-			#test for an even bracket in an odd round or if pullup_minimize is set (APDA system)
-			if ( ($oddround == 1 || $pullup_minimize ) and (int($nteams/2) == $nteams/2) ) { 
-				$bracketeven = 1; 
-			}
+			#test for an even bracket in an non-sidelocked round or if pullup_minimize is set (APDA system)
 
-			#test for an even bracket in an even round
-			if ($oddround == 0 and $aff == $neg) { 
+			unless ($nteams % 2) { 
+				if ($pullup_minimize) { 
+					$bracketeven++;
+				} elsif (not defined $side_locked) { 
+					$bracketeven++;
+				}
+			}
+			
+			#test for an even bracket in a sidelocked round
+			if ($side_locked and $aff == $neg) { 
 				$bracketeven = 1; 
 			}
 
@@ -680,7 +726,7 @@
 			
 			my $n_hischool_aff; #number of teams in the largest school entry in the bracket
 			my $hischool_key_aff; #school number of the school with the most teams in the bracket
-			my $fixed_pullup_side; #the side you need to pull from if its an even round
+			my $fixed_pullup_side; #the side you need to pull from if its a sidelocked round
 			
 			#count school with most teams in aff bracket
 			foreach my $key ( keys %affschool ) {
@@ -718,14 +764,7 @@
 				$aff_opp_for_neghischool += $affschool{$key} if $key != $hischool_key_neg;
 			}
 			
-			if ( $oddround ) {
-
-				if ( ($nteams - $n_hischool_aff) < $n_hischool_aff ) { 
-					$error_log .= "\n\nToo many teams from one school; pulling up more:";
-					$bracketeven = 0;
-				}
-
-			} else {
+			if ( $side_locked ) {
 
 				if ( $neg_opp_for_affhischool < $n_hischool_aff ) { 
 					$bracketeven = 0; 
@@ -738,14 +777,22 @@
 					$fixed_pullup_side = 1; 
 					$error_log .= "\n\nI have $aff_opp_for_neghischool opponents on aff for $n_hischool_neg negs from $hischool_key_neg \n\n" ;
 				}
+
+			} else {
+
+				if ( ($nteams - $n_hischool_aff) < $n_hischool_aff ) { 
+					$error_log .= "\n\nToo many teams from one school; pulling up more:";
+					$bracketeven = 0;
+				}
+
 			}
 
-#			$error_log .= "oddround:".$oddround." aff:".$aff." neg:".$neg." bracketeven:".$bracketeven."\n\n" ;
+#			$error_log .= "side locked:".$side_locked." aff:".$aff." neg:".$neg." bracketeven:".$bracketeven."\n\n" ;
 			
 			#test for this being the last bracket and needing a bye
 			$bracketeven = 1 if $paired_already == $totalentries;
 			
-#			Tab::debuglog( "oddround:".$oddround." n teams:".$nteams." bracket even marker:".$bracketeven."");
+#			Tab::debuglog( "side locked:".$side_locked." n teams:".$nteams." bracket even marker:".$bracketeven."");
 			
 			#exit if the bracket is even
 			if ( $bracketeven == 1 ) { last; }
@@ -756,9 +803,9 @@
 			#bracket not even, so pull up
 			my $sidetopull = 0;
 
-			$sidetopull = 1 if ($oddround == 0 && $aff < $neg);
-			$sidetopull = 2 if ($oddround == 0 && $aff > $neg);
-			$sidetopull = $fixed_pullup_side if ($oddround == 0 && $fixed_pullup_side);
+			$sidetopull = 1 if ($side_locked && $aff < $neg);
+			$sidetopull = 2 if ($side_locked && $aff > $neg);
+			$sidetopull = $fixed_pullup_side if ($side_locked && $fixed_pullup_side);
 			
 			$error_log .= "<br>Need to pull up on side $sidetopull<br>" ;
 			my $pullup = pullup($sidetopull, $pullup_method, $pullup_repeat, 0, $entry_by_id_ref, $bracket_ref, $precluded_ref);
@@ -951,10 +998,10 @@
 	sub count_possible_opponents {
 	
 		#variables are passed by ref; this gives them identical local names
-		my ($entry_by_id_ref, $precluded_ref, $oddround_ref, $min_possible_opponents_ref, $bracket_ref) = @_;
+		my ($entry_by_id_ref, $precluded_ref, $side_locked_ref, $min_possible_opponents_ref, $bracket_ref) = @_;
 		my %entry_by_id = %{$entry_by_id_ref};
 		my %precluded = %{$precluded_ref};
-		my $oddround = ${$oddround_ref};
+		my $side_locked = ${$side_locked_ref};
 		my $min_possible_opponents = ${$min_possible_opponents_ref};
 		my %bracket = %{$bracket_ref};
 		
@@ -970,7 +1017,7 @@
 			foreach my $key2 ( keys %bracket ) {
 				next if (hasconflict($key, $key2, \%precluded) == 1);
 				next if ($key == $key2);
-				next if ( $oddround == 0 and $entry_by_id{$key}{'sidedue'} == $entry_by_id{$key2}{'sidedue'} );
+				next if ( $side_locked and $entry_by_id{$key}{'sidedue'} == $entry_by_id{$key2}{'sidedue'} );
 				next if ( $entry_by_id{$key2}{'opponent'} > 0 );
 				$entry_by_id{$key}{'possible_opponents'}++;
 			}
@@ -989,11 +1036,11 @@
 	
 	sub pairbracket {
 
-		my ($oddround, $powermatch_method, $pullup_minimize, $round_name, $entry_by_id_ref, $bracket_ref, $precluded_ref) = @_;
+		my ($side_locked, $powermatch_method, $pullup_minimize, $round_name, $entry_by_id_ref, $bracket_ref, $precluded_ref) = @_;
 
 		my $nteams = keys %{$bracket_ref};	#figure out how many teams are in the bracket; you'll use this below	
 
-		bracket_pair($oddround, $powermatch_method, $pullup_minimize, $round_name, 0, $entry_by_id_ref, $bracket_ref, $precluded_ref);
+		bracket_pair($side_locked, $powermatch_method, $pullup_minimize, $round_name, 0, $entry_by_id_ref, $bracket_ref, $precluded_ref);
 			
 		#make sure they're all paired, and if they are, bail
 		my $unpaired_teams = unpaired($entry_by_id_ref, $bracket_ref);
@@ -1037,11 +1084,11 @@
 				
 				#now pair the problem child
 				$error_log .= " Now pairing the problem child<br>" ;
-				bracket_pair($oddround, $powermatch_method, 0, $round_name, $problemchild, $entry_by_id_ref, $bracket_ref, $precluded_ref);
+				bracket_pair($side_locked, $powermatch_method, 0, $round_name, $problemchild, $entry_by_id_ref, $bracket_ref, $precluded_ref);
 				
 				#now try to finish the bracket
 				$error_log .= " Now pairing the rest of the bracket<br>" ;
-				bracket_pair($oddround, $powermatch_method, 0, $round_name, 0, $entry_by_id_ref, $bracket_ref, $precluded_ref);
+				bracket_pair($side_locked, $powermatch_method, 0, $round_name, 0, $entry_by_id_ref, $bracket_ref, $precluded_ref);
 				
 				#if it worked, bail, and otherwise loop back and undo the next pairing
 				if (unpaired($entry_by_id_ref, $bracket_ref) == 0) {
@@ -1076,8 +1123,8 @@
 	
 	sub bracket_pair {
 	
-		my ($oddround, $powermatch_method, $pullup_minimize, $round_name, $problemchild, $entry_by_id_ref, $bracket_ref, $precluded_ref) = @_;	
-		$oddround = 1 if $pullup_minimize; #pair it like an odd round if pullup_minimize is set
+		my ($side_locked, $powermatch_method, $pullup_minimize, $round_name, $problemchild, $entry_by_id_ref, $bracket_ref, $precluded_ref) = @_;	
+		undef $side_locked if $pullup_minimize; #pair it like an non-sidelocked round if pullup_minimize is set
 		
 		$error_log .= "In bracket pairing sub "; 
 		$error_log .= "Problem child: $problemchild ${$entry_by_id_ref}{$problemchild}{'code'}<br>" if $problemchild;
@@ -1149,9 +1196,9 @@
 
 			my $key = $bracket_member;
 			
-			#if it's an even round, only loop through the aff
+			#if it's an sidelocked round, only loop through the aff
 			my $sidemarker = 1;
-			$sidemarker = 0 if ($oddround == 0 and ${$bracket_ref}{$key}{'side'} == 2);
+			$sidemarker = 0 if ($side_locked and ${$bracket_ref}{$key}{'side'} == 2);
 
 			#if there's a problem child, only find an opponnet for that team
 			if ($problemchild) { 
@@ -1208,7 +1255,7 @@
 						next OPP;
 					} 
 
-					if ( $oddround == 0 and ${$bracket_ref}{$key}{'side'} == ${$bracket_ref}{$oppkey}{'side'} ) {
+					if ( $side_locked and ${$bracket_ref}{$key}{'side'} == ${$bracket_ref}{$oppkey}{'side'} ) {
 						$error_log .= ${$entry_by_id_ref}{$oppkey}{'code'}." sides don't match\n" ;
 						next OPP;
 					} 
@@ -1286,7 +1333,7 @@
 
 	sub justmakeitwork {
 
-		my ($bracket_ref, $entry_by_id_ref, $oddround, $precluded_ref) = @_;
+		my ($bracket_ref, $entry_by_id_ref, $side_locked, $precluded_ref) = @_;
 		
 		my %bracket = %{$bracket_ref};
 		my %entry_by_id = %{$entry_by_id_ref};
@@ -1314,7 +1361,7 @@
 		#now pair it
 		do {
 			#re-count number of possible opponents
-			count_possible_opponents(\%entry_by_id, \%precluded, \$oddround, \$min_possible_opponents, \%bracket);
+			count_possible_opponents(\%entry_by_id, \%precluded, \$side_locked, \$min_possible_opponents, \%bracket);
 	
 			foreach my $key ( sort { $entry_by_id{$a}->{'possible_opponents'} <=> $entry_by_id{$b}->{'possible_opponents'} || $entry_by_id{$a}->{'random'} <=> $entry_by_id{$b}->{'random'} } keys(%bracket) ) {
 	
@@ -1322,9 +1369,9 @@
 				next unless $key;
 				next unless $entry_by_id{$key};
 	
-				#if it's an even round, only loop through the aff -- but WHY?  Disabled!  What are you doing, past self!
+				#if it's an sidelocked round, only loop through the aff -- but WHY?  Disabled!  What are you doing, past self!
 				#my $sidemarker = 1;
-				#if ($oddround == 0 and $bracket{$key}{'side'} == 2) { $sidemarker = 0; }
+				#if ($side_locked and $bracket{$key}{'side'} == 2) { $sidemarker = 0; }
 				#if ( $entry_by_id{$key}{'opponent'} == 0 and $sidemarker == 1 ) { }
 	
 				if ( $entry_by_id{$key}{'opponent'} == 0 ) {
@@ -1349,7 +1396,7 @@
 	
 						next OPP if ($key == $oppkey);
 	
-						if ( $oddround == 0 and $bracket{$key}{'side'} == $bracket{$oppkey}{'side'} ) { 
+						if ( $side_locked and $bracket{$key}{'side'} == $bracket{$oppkey}{'side'} ) { 
 							$error_log .= "Teams on same side\n" ; 
 							next OPP;
 						} 
