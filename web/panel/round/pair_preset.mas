@@ -18,7 +18,9 @@
 	my $round_type = $round->type;
 	my $round_limit = "and round.name < ".$round->name if $round_type eq "highlow" || $round_type eq "highhigh";
 	$round_limit = 'and round.type = "prelim" and round.name != '.$round->name if $round_type eq "prelim";
+
 	my $no_side_constraints++ if $event->setting("no_side_constraints");
+	$no_side_constraints++ if $round->sidelock_against eq "NONE";
 
 	my $dbh = Tab::DBI->db_Main();
 
@@ -104,18 +106,6 @@
 		push @{$entry_opps{$entry_id}}, $opp_id;
 	}
 
-	my $sides_sth = $dbh->prepare('
-		select distinct ballot.entry, ballot.side, ballot.bye, panel.bye, round.name
-		from ballot, panel, entry, round
-		where ballot.entry = entry.id
-		and entry.event = '.$event->id.'
-		and ballot.panel = panel.id
-		and panel.round = round.id
-		'.$round_limit.'
-	');
-
-	$sides_sth->execute();
-
 	my %entry_negs;
 	my %entry_affs;
 	my %entry_byes;
@@ -123,19 +113,50 @@
 
 	unless ($no_side_constraints) { 
 
+		my $round_side;
 		my $round_care;
 
-		if ($round->name % 2) { 
-			#Odd numbered round.  Care about the round ahead
-			$round_care = $round->name + 1;
+		if ($round->sidelock_against) { 
+
+			$round_side = " and round.id = ".$round->sidelock_against;
+			$round_care = $round->sidelock_against;
+
+		} elsif ($round->name % 2 ) { 
+
+			# Odd presets mean I care about the next prelim round in case we're
+			# repaneling for seeding, if it exists 
+
+			my $round_name = $round->name;
+			foreach my $oround (sort {$a->name <=> $b->name} $event->rounds)	{ 
+				$round_care = $oround->id if $oround->name > $round->name && $oround->type eq "prelim";
+				last if $round_care;
+			}
 		} else { 
-			$round_care = $round->name - 1;
+
+			# Even presets sidelock against the last round
+			my $round_name = $round->name;
+			foreach my $oround (sort {$b->name <=> $a->name} $event->rounds)	{ 
+				$round_care = $oround->id if $oround->name < $round->name && $oround->type eq "prelim";
+				last if $round_care;
+			}
 		}
 
-		while (my ($entry_id, $side, $bye, $panel_bye, $name) = $sides_sth->fetchrow_array() ) { 
+		my $sides_sth = $dbh->prepare('
+			select distinct ballot.entry, ballot.side, ballot.bye, panel.bye, round.id
+			from ballot, panel, entry, round
+			where ballot.entry = entry.id
+			and entry.event = '.$event->id.'
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			'.$round_side.'
+		');
+
+		$sides_sth->execute();
+
+		while (my ($entry_id, $side, $bye, $panel_bye, $round) = $sides_sth->fetchrow_array() ) { 
 			$entry_byes{$entry_id}++ if $bye || $panel_bye;
 			next if $bye || $panel_bye;
-			next if $name != $round_care;
+			next if $round != $round_care;
 			$entry_affs{$entry_id}++ if $side == 1;
 			$entry_negs{$entry_id}++ if $side == 2;
 		}
@@ -596,7 +617,8 @@
 				while (not defined $bye) { 
 
 					unless (@candidates) { 
-						$bye = shift shuffle @tried;
+						@tried = shuffle @tried;
+						$bye = shift @tried;
 					}
 
 					my $test = shift @candidates;
@@ -731,6 +753,7 @@
 			my %done;
 			my $negs;
 
+
 			foreach my $aff (@due_aff) { 
 
 				next if $done{$aff}++;
@@ -746,9 +769,15 @@
 						next if $done{"maybe_".$debate_me_maybe};
 						next unless $entry_needs{$debate_me_maybe."-".$entry_seed{$aff}};
 						next unless $entry_needs{$aff."-".$entry_seed{$debate_me_maybe}};
+
 						next if $entry_school{$aff} == $entry_school{$debate_me_maybe};
 						next if $entry_school{$aff} == $entry_school{$partner{$debate_me_maybe}};
 						next if $entry_school{$debate_me_maybe} == $entry_school{$partner{$aff}};
+
+						if ($region_constrain || $region_avoid) { 
+							next if $entry_region{$aff} == $entry_region{$debate_me_maybe};
+						}
+
 						# If we made it this far, WE NEED ONE ANOTHER.  IT IS DESTINY.
 						$neg = $debate_me_maybe;
 						$done{"maybe_".$debate_me_maybe}++;
@@ -1303,8 +1332,10 @@
 		if ($region_avoid) { 
 			if (${$regref}{$neg} == ${$regref}{$aff}) { 
 				# We are from the same region.  Moderate penalty to avoid.
-				$score += 50;   
+				$score += 50;
 			}
+			$score += ${$hit_region_ref}{$aff."-".${$regref}{$neg}} * 5;
+			$score += ${$hit_region_ref}{$neg."-".${$regref}{$aff}} * 5;
 		}
 
 		if ($region_constrain) { 
@@ -1312,6 +1343,8 @@
 				# We are from the same region.  Treating penalties as schools here
 				$score += 10000;
 			}
+			$score += ${$hit_region_ref}{$aff."-".${$regref}{$neg}};
+			$score += ${$hit_region_ref}{$neg."-".${$regref}{$aff}};
 		}
 
 		if ($seed_presets eq "all") { 
