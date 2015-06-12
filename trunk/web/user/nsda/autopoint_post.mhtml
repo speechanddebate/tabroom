@@ -6,6 +6,8 @@
 	my $tourn = Tab::Tourn->retrieve($tourn_id);
 	my $now = DateTime->now();
 
+	my $usa_wsdc++ if $tourn->setting("usa_wsdc");
+
 #	if ($tourn->setting("nsda_points_posted")) { 
 #		my $err = $tourn->name."'s NSDA points have already been posted";
 #		$m->redirect("autopoint.mhtml?tourn_id=$tourn_id&err=$err");
@@ -37,7 +39,7 @@
     my $dbh = Tab::DBI->db_Main(); 
 
     my $sth = $dbh->prepare('
-		select entry.id, student.id, chapter.nsda, student.ualt_id, entry.school, student.first, student.last
+		select entry.id, student.id, chapter.nsda, student.ualt_id, entry.school, student.first, student.last, chapter.state, school.name
 		from entry, entry_student, student, school, chapter
 		where school.tourn = '.$tourn->id.'
 		and student.ualt_id > 1
@@ -54,35 +56,42 @@
 	my %student_nsda = ();
 	my %student_data = ();
 	my %alt_student = ();
-	my %school_by_id = ();
+	my %school_by_chapter = ();
+	my %chapter_state = ();
+	my %chapter_name = ();
 
-	my %school_nsda_chapter = ();
+	my @nsda_chapters; 
 
-	while( my ($entry_id, $student_id, $chapter_id, $student_ualt_id, $school_id, $first, $last) = $sth->fetchrow_array()) { 	
+	while( my ($entry_id, $student_id, $chapter_id, $student_ualt_id, $school_id, $first, $last, $state, $name) = $sth->fetchrow_array()) { 	
 
-		if ($chapter_id) { 
+		unless ($student_nsda{$entry_id}{"chapter"}) { 
 
-			$entry_nsda{$entry_id}{"chapter"} = $chapter_id;
+			if ($chapter_id) { 
 
-		} else { 
+				$entry_nsda{$entry_id}{"chapter"} = $chapter_id;
+				$student_nsda{$student_id}{"chapter"} = $chapter_id;
 
-			my @person_schools = Tab::NSDA::PersonSchool->search( ualt_id => $student_ualt_id);
-			@person_schools = sort {$b->startdate->epoch <=> $a->startdate->epoch} @person_schools;
-			my $person_school = shift @person_schools;  #gets the most recent up to date chapter connection
+			} else { 
 
-			push @nsda_chapters, $person_school->school_id;
-			push @nsda_students, $student_id;
+				my @person_schools = Tab::NSDA::PersonSchool->search( ualt_id => $student_ualt_id);
+				@person_schools = sort {$b->startdate->epoch <=> $a->startdate->epoch} @person_schools;
 
-			$entry_nsda{$entry_id}{"chapter"} = $person_school->school_id->school_id;
-			$school_nsda_chapter{$school_id} = $person_school->school_id->school_id;
-			$student_nsda{$student_id}{"chapter"} = $person_school->school_id->school_id;
+				my $person_school = shift @person_schools;  #gets the most recent up to date chapter connection
+
+				$entry_nsda{$entry_id}{"chapter"} = $person_school->school_id->school_id;
+				$student_nsda{$student_id}{"chapter"} = $person_school->school_id->school_id;
+			}
 
 		}
 
+		$school_by_chapter{$entry_nsda{$entry_id}{"chapter"}} = $school_id;
+		$chapter_state{$entry_nsda{$entry_id}{"chapter"}} = $state;
+		$chapter_name{$entry_nsda{$entry_id}{"chapter"}} = $name;
+
+		push @nsda_chapters, $entry_nsda{$entry_id}{"chapter"};
+
 		$entry_nsda{$entry_id}{"school"} = $school_id;
 		$student_nsda{$student_id}{"school"} = $school_id;
-
-		$school_by_id{$school_id}++;
 
 		push @{$entry_nsda{$entry_id}{"students"}}, $student_id;
 		$student_data{$student_id}{"name"} = $first." ".$last;
@@ -112,10 +121,13 @@
 		}
 	}
 
-	if (keys %school_by_id) { 
+	my %seen = (); 
+	@nsda_chapters = grep { ! $seen{$_} ++ } @nsda_chapters;
+
+	if (@nsda_chapters) { 
 
 		my $instance = Tab::NSDA::Instance->create({
-			status     => "N",
+			status     => "A",
 			tourn_id   => $tourn->id,
 			source     => "TR",
 			start_date => $start->year."-".$start->strftime('%m')."-".$start->strftime('%d'),
@@ -130,25 +142,19 @@
 		# Replace the use marker with the actual school object.  Only for
 		# schools linked.
 
-		foreach my $school ($tourn->schools) { 
+		foreach my $chapter_id (@nsda_chapters) { 
 
-			next unless $school_by_id{$school->id};
-
-			$school_by_id{$school->id} = $school;
-
-			my $state = $school->chapter->state;
-			my $nsda = $school->chapter->nsda;
-
-			$nsda = $school_nsda_chapter{$school->id} if $school_nsda_chapter{$school->id};
-			next unless $nsda;
+			my $state = $chapter_state{$chapter_id};
+			my $name = $chapter_name{$chapter_id};
+			my $school_id = $school_by_chapter{$chapter_id};
 
 			my $nsda_school = Tab::NSDA::School->create({
 				instance_id   => $instance->id,
-				school_id     => $school->id,
-				state         => $school->chapter->state,
-				name          => $school->name,
-				nfl_school_id => $nsda,
-				alt_id        => $school->id
+				school_id     => $school_id,
+				state         => $state,
+				name          => $name,
+				nfl_school_id => $chapter_id,
+				alt_id        => $school_id
 			});
 
 		}
@@ -200,21 +206,21 @@
 				from student, panel, ballot, ballot_value
 				where panel.round = ? 
 				and ballot.panel = panel.id
-				and ballot.id = ballot_value.ballt
+				and ballot.id = ballot_value.ballot
 				and ballot_value.student = student.id
 				and ballot_value.tag = \"points\"
 			");
 
 			foreach my $round ($event->rounds) { 
 
-				my %spoke_in_round;
+				next if $event->type eq "congress"; 
+
+				my %spoke_in_round = ();
 
 				if ($event->type eq 'wsdc') { 
 					my @spoke = Tab::Student->search_spoke_in_round($round->id);
 					%spoke_in_round = map {$_->id => 1} @spoke;
 				}
-
-				next if $event->type eq "congress"; 
 
 				my ($entries_ref, $tb_ref, $z, $f, $q, $p, $letter_ref, $c, $code, $meh) 
 					= $m->comp("/tabbing/results/order_entries.mas", round => $round, nsda => 1);
@@ -269,6 +275,7 @@
 						@{$panel_entries{$panel}} = sort {$entry_order{$a} <=> $entry_order{$b}} @{$panel_entries{$panel}};
 
 						my $win_points = 6 - ($nsda_event_category->nat_category * 2);
+						$win_points = 6 if $usa_wsdc;
 
 						my $win = 1;
 						foreach my $entry (@{$panel_entries{$panel}}) { 
@@ -324,8 +331,9 @@
 				foreach my $panel ( keys %panel_entries ) { 
 
 					foreach my $entry (@{$panel_entries{$panel}}) { 
-					
+
 						next unless $entry_nsda{$entry};
+
 						next unless $entry_nsda{$entry}{"chapter"};
 						next unless $entry_nsda{$entry}{"students"};
 
@@ -337,13 +345,13 @@
 
 							my $ualt = $student_data{$student}{"ualt"};
 							my $name = $student_data{$student}{"name"};
-				
+
 							if ($event->type eq "wsdc") { 
 								$school_id = $student_nsda{$student}{"school"};
 								$nfl_school_id  = $student_nsda{$student}{"chapter"};
 								next STUDENT unless $spoke_in_round{$student};
 							}
-
+						
 							Tab::NSDA::Points->create({
 								id             => $count++,
 								instance_id    => $instance->id,
