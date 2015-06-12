@@ -40,7 +40,7 @@
 		select entry.id, student.id, chapter.nsda, student.ualt_id, entry.school, student.first, student.last
 		from entry, entry_student, student, school, chapter
 		where school.tourn = '.$tourn->id.'
-		and chapter.nsda > 0
+		and student.ualt_id > 1
 		and entry.school = school.id
 		and entry.id = entry_student.entry
 		and entry_student.student = student.id
@@ -51,37 +51,65 @@
     $sth->execute();
 
 	my %entry_nsda = ();
+	my %student_nsda = ();
 	my %student_data = ();
-	my %school_by_id;
-
 	my %alt_student = ();
+	my %school_by_id = ();
+
+	my %school_nsda_chapter = ();
 
 	while( my ($entry_id, $student_id, $chapter_id, $student_ualt_id, $school_id, $first, $last) = $sth->fetchrow_array()) { 	
 
-		$entry_nsda{$entry_id}{"chapter"} = $chapter_id;
+		if ($chapter_id) { 
+
+			$entry_nsda{$entry_id}{"chapter"} = $chapter_id;
+
+		} else { 
+
+			my @person_schools = Tab::NSDA::PersonSchool->search( ualt_id => $student_ualt_id);
+			@person_schools = sort {$b->startdate->epoch <=> $a->startdate->epoch} @person_schools;
+			my $person_school = shift @person_schools;  #gets the most recent up to date chapter connection
+
+			push @nsda_chapters, $person_school->school_id;
+			push @nsda_students, $student_id;
+
+			$entry_nsda{$entry_id}{"chapter"} = $person_school->school_id->school_id;
+			$school_nsda_chapter{$school_id} = $person_school->school_id->school_id;
+			$student_nsda{$student_id}{"chapter"} = $person_school->school_id->school_id;
+
+		}
+
 		$entry_nsda{$entry_id}{"school"} = $school_id;
+		$student_nsda{$student_id}{"school"} = $school_id;
+
 		$school_by_id{$school_id}++;
+
 		push @{$entry_nsda{$entry_id}{"students"}}, $student_id;
 		$student_data{$student_id}{"name"} = $first." ".$last;
 
 		unless ($alt_student{"school_".$school_id}) { 
+
 			my @alts = Tab::NSDA::AltStudent->search( nfl_school_id => $chapter_id );
+
 			foreach my $alt (@alts) { 
 				$alt_student{$alt->alt_id} = $alt->nfl_student_id if $alt->nfl_student_id;
 				$alt_student{$alt->alt_id} = "exists" unless $alt->nfl_student_id;
 			}
+
 			$alt_student{"school_".$school_id}++;
 		}
 
 		if ($student_ualt_id) { 
+
 			$student_data{$student_id}{"ualt"} = $student_ualt_id;
+
 		} elsif ($alt_student{$student_id} && $alt_student{$student_id} ne "exists") { 
+
 			$student_data{$student_id}{"ualt"} = $alt_student{$student_id};
 			my $student = Tab::Student->retrieve($student_id);
 			$student->ualt_id($alt_student{$student_id});
 			$student->update();
 		}
-
 	}
 
 	if (keys %school_by_id) { 
@@ -99,17 +127,20 @@
 			type       => 1
 		});
 
-		#Replace the use marker with the actual school object.  Only for schools linked.
+		# Replace the use marker with the actual school object.  Only for
+		# schools linked.
 
 		foreach my $school ($tourn->schools) { 
 
 			next unless $school_by_id{$school->id};
-			next unless $school->chapter;
 
 			$school_by_id{$school->id} = $school;
 
 			my $state = $school->chapter->state;
 			my $nsda = $school->chapter->nsda;
+
+			$nsda = $school_nsda_chapter{$school->id} if $school_nsda_chapter{$school->id};
+			next unless $nsda;
 
 			my $nsda_school = Tab::NSDA::School->create({
 				instance_id   => $instance->id,
@@ -164,7 +195,24 @@
 				nfl_subcat_id => $nsda_subcat
 			});
 
+			Tab::Student->set_sql( spoke_in_round => "
+				select distinct student.* 
+				from student, panel, ballot, ballot_value
+				where panel.round = ? 
+				and ballot.panel = panel.id
+				and ballot.id = ballot_value.ballt
+				and ballot_value.student = student.id
+				and ballot_value.tag = \"points\"
+			");
+
 			foreach my $round ($event->rounds) { 
+
+				my %spoke_in_round;
+
+				if ($event->type eq 'wsdc') { 
+					my @spoke = Tab::Student->search_spoke_in_round($round->id);
+					%spoke_in_round = map {$_->id => 1} @spoke;
+				}
 
 				next if $event->type eq "congress"; 
 
@@ -214,6 +262,34 @@
 						}
 					}
 
+				} elsif ($event->type eq "wsdc") { 
+
+					foreach my $panel ( keys %panel_entries ) { 
+
+						@{$panel_entries{$panel}} = sort {$entry_order{$a} <=> $entry_order{$b}} @{$panel_entries{$panel}};
+
+						my $win_points = 6 - ($nsda_event_category->nat_category * 2);
+
+						my $win = 1;
+						foreach my $entry (@{$panel_entries{$panel}}) { 
+
+							if (${$fft_ref}{$entry}) {
+								$entry_result{$entry} = "F";
+								$entry_points{$entry} = 0;
+							} elsif (${$bye_ref}{$entry}) {
+								$entry_result{$entry} = "B";
+								$entry_points{$entry} = 0;
+							} elsif ($win) { 
+								$entry_result{$entry} = "W";
+								$entry_points{$entry} += $win_points;
+								undef $win;
+							} else { 
+								$entry_result{$entry} = "L";
+								$entry_points{$entry} += $win_points / 2;
+							}
+						}
+					}
+
 				} else { 
 
 					foreach my $panel ( keys %panel_entries ) { 
@@ -253,10 +329,20 @@
 						next unless $entry_nsda{$entry}{"chapter"};
 						next unless $entry_nsda{$entry}{"students"};
 
+						my $school_id = $entry_nsda{$entry}{"school"};
+						my $nfl_school_id  = $entry_nsda{$entry}{"chapter"};
+
+						STUDENT:
 						foreach my $student (@{$entry_nsda{$entry}{"students"}}) {
 
 							my $ualt = $student_data{$student}{"ualt"};
 							my $name = $student_data{$student}{"name"};
+				
+							if ($event->type eq "wsdc") { 
+								$school_id = $student_nsda{$student}{"school"};
+								$nfl_school_id  = $student_nsda{$student}{"chapter"};
+								next STUDENT unless $spoke_in_round{$student};
+							}
 
 							Tab::NSDA::Points->create({
 								id             => $count++,
@@ -267,11 +353,11 @@
 								event_id       => $event->id,
 								entry_id       => $entry,
 								student_id     => $student,
-								school_id      => $entry_nsda{$entry}{"school"},
+								school_id      => $school_id,
 								name           => $name,
 								alt_entry_id   => $entry,
 								alt_student_id => $student,
-								nfl_school_id  => $entry_nsda{$entry}{"chapter"},
+								nfl_school_id  => $nfl_school_id,
 								nfl_student_id => $ualt
 							});
 
@@ -279,7 +365,7 @@
 
 								Tab::NSDA::APT->create({
 									instance_id      => $instance->id,
-									nfl_school_id    => $entry_nsda{$entry}{"chapter"},
+									nfl_school_id    => $nfl_school_id,
 									nfl_student_id   => $ualt,
 									round            => $round->name,
 									result           => $entry_result{$entry},
@@ -294,7 +380,7 @@
 
 								Tab::NSDA::AltStudent->create({
 									source        => "TR",
-									nfl_school_id => $entry_nsda{$entry}{"chapter"},
+									nfl_school_id => $nfl_school_id,
 									alt_id        => $student,
 									name          => $name
 								});
