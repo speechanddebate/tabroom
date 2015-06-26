@@ -1,0 +1,336 @@
+<%args>
+	$username  => undef
+	$password  => undef
+	$search_string => undef
+        $search_type => undef
+        $search_field => undef
+        $tourn_id => undef
+        $circuit => undef
+        $chapter => undef
+        $school => undef
+</%args>
+<%init>
+
+    #print "username is $username<br>";
+    #print "password is $password<br>";
+    #print "search_field is $search_field<br>";
+    #print "search_type is $search_type<br>";
+    #print "lastname is $lastname<br>";
+    
+    #search_field is either CHAPTER, JUDGE, or COMPETITOR
+    #search_type is either FULL or PARTIAL
+    #school_limit will limit search to the specified school
+    #active_only will only return active records
+    
+    use Crypt::PasswdMD5;
+    use XML::Simple;
+    use Data::Dumper;
+
+    my ($login) = Tab::Login->search( username => lc($username) );
+    my $circuit_str = "";
+    
+    unless ($login) { 
+            $m->print("<error>No login with the username ".$username." was found.</error>");
+            $m->abort;
+    } 
+
+    $password =~ s/\s+$//g;
+    my $db_password = $login->password;
+    my $verify_password = unix_md5_crypt($password,$db_password);
+
+    my $account = $login->person;
+
+    unless ($verify_password eq $db_password) { 
+            $m->print("<error>Password incorrect for ".$username.".</error>");
+            $m->abort;
+    }
+
+    if ($search_field eq "SCHOOL" ) {
+        
+        if ($circuit) { $circuit_str = " and chapter_circuit.circuit=$circuit"};
+        
+        my $where_clause;
+        my @records;
+        my @coaches;
+        
+        if ( $tourn_id ) {
+            $where_clause = "where school.name = '$search_string'";
+            if ( $search_type eq "PARTIAL" ) {
+                $where_clause = "where school.name regexp '$search_string'";
+            }
+            $where_clause .= " and tourn = $tourn_id " unless $search_type eq "PARTIAL";
+        } else {
+            $where_clause = "where chapter.name = '$search_string'";
+            if ( $search_type eq "PARTIAL" ) {
+                $where_clause = "where chapter.name regexp '$search_string'";
+            }
+        }
+
+        #print "Where clause:$where_clause<br>";
+        
+        #if there's a tourn_id pull schools, if not its not in tabroom yet so pull chapters
+        if ( $tourn_id ) {
+            Tab::School->columns(TEMP => qw/student_count/);
+            Tab::School->columns(TEMP => qw/chapter_id/);
+            Tab::School->columns(TEMP => qw/coaches/);
+            Tab::School->columns(TEMP => qw/state/);
+            Tab::School->columns(TEMP => qw/circuit_names/);
+            Tab::School->set_sql(pull_records => "
+                    select school.*, count(distinct student.id) as student_count, chapter.coaches as coaches, chapter.id as chapter_id, chapter.state as state, group_concat(distinct circuit.name) as circuit_names
+                    from school
+                    left join chapter on school.chapter=chapter.id
+                    left join student on chapter.id=student.chapter
+                    left join chapter_circuit on chapter_circuit.chapter=chapter.id
+                    left join circuit on chapter_circuit.circuit=circuit.id
+                    $where_clause
+                    and tourn=$tourn_id
+                    group by school.id
+            ");
+            @records = Tab::School->search_pull_records;
+        } else {
+            Tab::Chapter->columns(TEMP => qw/student_count/);
+            Tab::Chapter->columns(TEMP => qw/circuit_names/);
+            Tab::Chapter->set_sql(pull_records => "
+                    select chapter.*, count(distinct student.id) as student_count, group_concat(distinct circuit.name) as circuit_names
+                    from chapter
+                    left join student on chapter.id=student.chapter
+                    left join chapter_circuit on chapter_circuit.chapter=chapter.id
+                    left join circuit on chapter_circuit.circuit=circuit.id
+                    $where_clause
+                    $circuit_str
+                    group by chapter_circuit.chapter, chapter.id
+            ");
+            @records = Tab::Chapter->search_pull_records;
+        }
+
+        $m->print("<SCHOOLS>");
+        foreach my $record (@records) {
+            
+            Tab::Account->set_sql(pull_records => "
+                    select first, last 
+                    from account, chapter_admin
+                    where chapter_admin.chapter=".$record->id."
+                    and account.id=chapter_admin.account
+            ");
+            @coaches = Tab::Account->search_pull_records;
+            my $coach_str = $record->coaches;
+            foreach my $coach (@coaches){
+                $coach_str .= ", " if $coach_str;
+                $coach_str .= $coach->first." ".$coach->last
+            }
+            
+            $m->print(" <SCHOOL>");
+            $m->print("     <NAME>".$record->name."</NAME>");
+            if ($tourn_id) {
+                $m->print("     <SCHOOL_ID>".$record->id."</SCHOOL_ID>");
+                $m->print("     <CHAPTER_ID>".$record->chapter."</CHAPTER_ID>");
+               } else {
+                $m->print("     <SCHOOL_ID>0</SCHOOL_ID>");
+                $m->print("     <CHAPTER_ID>".$record->id."</CHAPTER_ID>");
+            }
+            $m->print("     <COACHES>".$coach_str."</COACHES>");
+            $m->print("     <CIRCUITS>".$record->circuit_names."</CIRCUITS>");
+            $m->print("     <STUDENTS>".$record->student_count."</STUDENTS>");
+            $m->print("     <STATE>".$record->state."</STATE>");
+            $m->print(" </SCHOOL>");
+        }
+        $m->print("</SCHOOLS>");
+    }
+
+    if ($search_field eq "COMPETITOR" ) {
+        
+        if ($circuit) { $circuit_str = " and chapter_circuit.circuit=$circuit"};
+        
+        my $where_clause;
+        my @records;
+        
+        $where_clause = "where student.last = '$search_string'";
+        if ( $search_type eq "PARTIAL" ) {
+            $where_clause = "where student.last regexp '$search_string'";
+        }
+
+        #print "Where clause:$where_clause<br>";
+        #print "chapter is $chapter<br>";
+        
+        #if there's a tourn_id pull schools, if not its not in tabroom yet so pull chapters
+        Tab::Student->columns(TEMP => qw/chapter_name/);
+        if ( $tourn_id ) {
+            #print "in tourn<br>";
+            Tab::Student->set_sql(pull_records => "
+                    select student.*, chapter.name as chapter_name
+                    from student, entry, entry_student, chapter
+                    $where_clause
+                    and entry_student.student=student.id
+                    and entry_student.entry=entry.id
+                    and entry.tourn=$tourn_id
+                    and chapter.id=student.chapter
+            ");
+        } elsif ($circuit>0 && $chapter == 0) {
+            Tab::Student->set_sql(pull_records => "
+                select student.*, chapter.name as chapter_name
+                from student, chapter_circuit, chapter
+                $where_clause
+                and chapter_circuit.circuit=$circuit
+                and chapter_circuit.chapter=student.chapter
+                and chapter.id=student.chapter
+            ");
+        } elsif ($chapter) {
+            #print "in chapter<br>";
+            Tab::Student->set_sql(pull_records => "
+                select student.*, chapter.name as chapter_name
+                from student, chapter
+                $where_clause
+                and student.chapter=$chapter
+                and chapter.id=student.chapter
+            ");
+        } elsif ($school) {
+            #print "in school<br>";
+            Tab::Student->set_sql(pull_records => "
+                select student.*, chapter.name as chapter_name
+                from student, school, chapter
+                $where_clause
+                and student.chapter=school.chapter
+                and school.id=$school
+                and chapter.id=student.chapter
+            ");
+        } else {
+            #print "in catchall<br>";
+            Tab::Student->set_sql(pull_records => "
+                select student.*, chapter.name as chapter_name
+                from student, chapter
+                $where_clause
+                and chapter.id=student.chapter
+            ");
+        }
+        @records = Tab::Student->search_pull_records;
+
+        $m->print("<STUDENTS>");
+        foreach my $record (@records) {
+            $m->print(" <STUDENT>");
+            $m->print("     <FIRST>".$record->first."</FIRST>");
+            $m->print("     <LAST>".$record->last."</LAST>");
+            $m->print("     <ID>".$record->id."</ID>");
+            $m->print("     <CHAPTER>".$record->chapter."</CHAPTER>");
+            $m->print("     <CHAPTERNAME>".$record->chapter_name."</CHAPTERNAME>");
+            $m->print("     <ACCOUNT>".$record->account."</ACCOUNT>");
+            $m->print(" </STUDENT>");
+        }
+        $m->print("</STUDENTS>");
+    }
+
+if ($search_field eq "JUDGE" ) {
+        
+        if ($circuit) { $circuit_str = " and chapter_circuit.circuit=$circuit"};
+        
+        my $where_clause;
+        my @records;
+        
+        if ($school or $tourn_id) {
+            $where_clause = "where judge.last = '$search_string'";
+            if ( $search_type eq "PARTIAL" ) {
+                $where_clause = "where judge.last regexp '$search_string'";
+            }
+        } else {
+            $where_clause = "where chapter_judge.last = '$search_string'";
+            if ( $search_type eq "PARTIAL" ) {
+                $where_clause = "where chapter_judge.last regexp '$search_string'";
+            }
+        }
+
+        #print "Where clause:$where_clause<br>";
+        #print "chapter is $chapter<br>";
+        
+        #Note that if there's as school or a tourn, it pulls from JUDGE
+        #If there's a circuit, a chapter, or nothing, it pulls from CHAPTER_JUDGE
+        my $id_type;
+        Tab::Judge->columns(TEMP => qw/chapter_name/);
+        Tab::ChapterJudge->columns(TEMP => qw/chapter_name/);
+        Tab::Judge->columns(TEMP => qw/chapter_id/);
+        Tab::ChapterJudge->columns(TEMP => qw/chapter_id/);
+        if ( $tourn_id ) {
+            #print "in tourn_id<br>";
+            Tab::Judge->set_sql(pull_records => "
+                    select judge.*, chapter.name as chapter_name, chapter.id as chapter_id
+                    from judge
+                    join judge_group on judge.judge_group=judge_group.id and judge_group.tourn=$tourn_id
+                    left join chapter_judge on judge.chapter_judge=chapter_judge.id
+                    left join chapter on chapter_judge.chapter=chapter.id
+                    $where_clause
+            ");
+            @records = Tab::Judge->search_pull_records;
+            $id_type="JUDGE_ID";
+        } elsif ($circuit>0 && $chapter == 0) {
+            #print "in circuit no chapter<br>";
+            Tab::ChapterJudge->set_sql(pull_records => "
+                    select chapter_judge.*, CONCAT('(', chapter.state, ') ', chapter.name) as chapter_name, chapter.id as chapter_id
+                    from chapter_judge, chapter, chapter_circuit
+                    $where_clause
+                    and chapter.id=chapter_judge.chapter
+                    and chapter_circuit.chapter=chapter_judge.chapter
+                    and chapter_circuit.circuit=$circuit
+            ");
+            @records = Tab::ChapterJudge->search_pull_records;
+            $id_type="CHAPTER_JUDGE_ID";
+        } elsif ($chapter) {
+            #print "in chapter<br>";
+            Tab::ChapterJudge->set_sql(pull_records => "
+                    select chapter_judge.*, CONCAT('(', chapter.state, ') ', chapter.name) as chapter_name, chapter.id as chapter_id
+                    from chapter_judge, chapter
+                    $where_clause
+                    and chapter_judge.chapter=$chapter
+                    and chapter.id=$chapter
+            ");
+            @records = Tab::ChapterJudge->search_pull_records;
+            $id_type="CHAPTER_JUDGE_ID";
+        } elsif ($school) {
+            #print "in school<br>";
+            Tab::Judge->set_sql(pull_records => "
+                select judge.*, CONCAT('(', chapter.state, ') ', chapter.name) as chapter_name, chapter.id as chapter_id
+                from judge
+                join school on school.id=judge.school and school.id=$school
+                left join chapter on chapter.id=school.chapter
+                $where_clause
+            ");
+            @records = Tab::Judge->search_pull_records;
+            $id_type="JUDGE_ID";
+        } else {
+            #print "in catchall<br>";
+            Tab::ChapterJudge->set_sql(pull_records => "
+                select chapter_judge.*, CONCAT('(', chapter.state, ') ', chapter.name) as chapter_name, chapter.id as chapter_id
+                from chapter_judge, chapter
+                $where_clause
+                and chapter.id=chapter_judge.chapter
+            ");
+            @records = Tab::ChapterJudge->search_pull_records;
+            $id_type="CHAPTER_JUDGE_ID";
+        }
+        ##if no records run catchall
+        if ( scalar(@records) == 0 ) {
+            #print "in last chance<br>";
+            Tab::ChapterJudge->set_sql(pull_records => "
+                select chapter_judge.*, CONCAT('(', chapter.state, ') ', chapter.name) as chapter_name, chapter.id as chapter_id
+                from chapter_judge, chapter
+                $where_clause
+                and chapter.id=chapter_judge.chapter
+            ");
+            @records = Tab::ChapterJudge->search_pull_records;
+            $id_type="CHAPTER_JUDGE_ID";
+        }
+        
+
+        $m->print("<JUDGES>");
+        foreach my $record (@records) {
+            $m->print(" <JUDGE>");
+            $m->print("     <FIRST>".$record->first."</FIRST>");
+            $m->print("     <LAST>".$record->last."</LAST>");
+            $m->print("     <".$id_type.">".$record->id."</".$id_type.">");
+            $m->print("     <CHAPTER>".$record->chapter_id."</CHAPTER>");
+            $m->print("     <CHAPTERNAME>".$record->chapter_name."</CHAPTERNAME>");
+            $m->print("     <ACCOUNT>".$record->account."</ACCOUNT>");
+            $m->print(" </JUDGE>");
+        }
+        $m->print("</JUDGES>");
+    }
+    
+</%init>
+
