@@ -15,6 +15,7 @@ Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
 Tab::Tourn->has_many(ratings => 'Tab::Rating', 'tourn');
 Tab::Tourn->has_many(regions => 'Tab::Region', 'tourn');
 Tab::Tourn->has_many(strikes => 'Tab::Strike', 'tourn');
+Tab::Tourn->has_many(settings => 'Tab::Setting', 'tourn');
 Tab::Tourn->has_many(schools => 'Tab::School', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(housings => 'Tab::Housing', 'tourn');
 Tab::Tourn->has_many(webpages => 'Tab::Webpage', 'tourn');
@@ -22,7 +23,6 @@ Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn' => { order_by => 'name
 Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn' => { order_by => 'start'} );
 Tab::Tourn->has_many(sweep_sets => 'Tab::SweepSet', 'tourn' => {order_by => 'name'} );
 Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
-Tab::Tourn->has_many(settings => 'Tab::TournSetting', 'tourn');
 Tab::Tourn->has_many(result_sets => "Tab::ResultSet", 'tourn');
 Tab::Tourn->has_many(tourn_sites => 'Tab::TournSite', 'tourn');
 Tab::Tourn->has_many(room_groups => 'Tab::RoomGroup', 'tourn');
@@ -66,59 +66,54 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my @existing = Tab::TournSetting->search(  
+	my $existing = Tab::Setting->search(  
 		tourn => $self->id,
-		tag => $tag
-	);
+		tag    => $tag,
+		type   => "tourn"
+	)->first;
 
 	if (defined $value) { 
 			
-		if (@existing) {
+		if ($existing) {
 
-			my $exists = shift @existing;
-			$exists->value($value);
-			$exists->value_text($blob) if $value eq "text";
-			$exists->value_date($blob) if $value eq "date";
-			$exists->update;
-
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+			$existing->update;
 
 			if ($value eq "delete" || $value eq "" || $value eq "0") { 
-				$exists->delete;
-			}
-
-			foreach my $other (@existing) { 
-				$other->delete;
+				$existing->delete;
 			}
 
 			return;
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $exists = Tab::TournSetting->create({
+			my $existing = Tab::Setting->create({
 				tourn => $self->id,
-				tag => $tag,
-				value => $value,
+				tag    => $tag,
+				value  => $value,
+				type   => "tourn"
 			});
 
 			if ($value eq "text") { 
-				$exists->value_text($blob);
+				$existing->value_text($blob);
 			}
 
 			if ($value eq "date") { 
-				$exists->value_date($blob);
+				$existing->value_date($blob);
 			}
 
-			$exists->update;
+			$existing->update;
 
 		}
 
 	} else {
 
-		return unless @existing;
-		my $setting = shift @existing;
-		return $setting->value_text if $setting->value eq "text";
-		return $setting->value_date if $setting->value eq "date";
-		return $setting->value;
+		return unless $existing;
+		return $existing->value_text if $existing->value eq "text";
+		return $existing->value_date if $existing->value eq "date";
+		return $existing->value;
 
 	}
 

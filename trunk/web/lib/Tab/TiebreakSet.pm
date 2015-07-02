@@ -12,48 +12,57 @@ sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
 
-	my @existing = Tab::TiebreakSetting->search(  
+	$/ = "";			#Remove all trailing newlines
+	chomp $blob;
+
+	my $existing = Tab::Setting->search(  
 		tiebreak_set => $self->id,
-		tag => $tag
-	);
+		tag          => $tag,
+		type         => "tiebreak_set"
+	)->first;
 
-    if (defined $value) { 
+	if (defined $value) { 
+			
+		if ($existing) {
 
-		if (@existing) {
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+			$existing->update;
 
-			my $exists = shift @existing;
-			$exists->value($value);
-			$exists->update;
-		
 			if ($value eq "delete" || $value eq "" || $value eq "0") { 
-				$exists->delete;
-			}
-
-			foreach my $other (@existing) { 
-				$other->delete;
+				$existing->delete;
 			}
 
 			return;
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $exists = Tab::TiebreakSetting->create({
+			my $existing = Tab::Setting->create({
 				tiebreak_set => $self->id,
-				tag => $tag,
-				value => $value,
+				tag          => $tag,
+				value        => $value,
+				type         => "tiebreak_set"
 			});
 
-			$exists->update;
+			if ($value eq "text") { 
+				$existing->value_text($blob);
+			}
+
+			if ($value eq "date") { 
+				$existing->value_date($blob);
+			}
+
+			$existing->update;
 
 		}
 
 	} else {
 
-		return unless @existing;
-
-		my $setting = shift @existing;
-
-		return $setting->value;
+		return unless $existing;
+		return $existing->value_text if $existing->value eq "text";
+		return $existing->value_date if $existing->value eq "date";
+		return $existing->value;
 
 	}
 

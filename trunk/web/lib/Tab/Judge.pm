@@ -24,7 +24,7 @@ Tab::Judge->has_a(chapter_judge => 'Tab::ChapterJudge');
 Tab::Judge->has_many(ratings => 'Tab::Rating', 'judge');
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
-Tab::Judge->has_many(settings => "Tab::JudgeSetting", "judge");
+Tab::Judge->has_many(settings => "Tab::Setting", "judge");
 Tab::Judge->has_many(hires => "Tab::JudgeHire", "judge");
 
 Tab::Judge->has_many(pools => [Tab::PoolJudge => 'pool']);
@@ -45,69 +45,6 @@ Tab::Judge->set_sql( hired_by_group => "
             		from judge 
 				where judge.judge_group = ?
 				and spare_pool = 1");
-
-sub setting {
-
-	my ($self, $tag, $value, $blob) = @_;
-
-	my @existing = Tab::JudgeSetting->search(  
-		judge => $self->id,
-		tag => $tag
-	);
-
-    if (defined $value) { 
-
-		if (@existing) {
-
-			my $exists = shift @existing;
-			$exists->value($value);
-			$exists->value_text($blob) if $value eq "text";
-			$exists->value_date($blob) if $value eq "date";
-			$exists->update;
-		
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
-				$exists->delete;
-			}
-
-			foreach my $other (@existing) { 
-				$other->delete;
-			}
-
-			return;
-
-		} elsif ($value ne "delete" && $value && $value ne "0") {
-
-			my $exists = Tab::JudgeSetting->create({
-				judge => $self->id,
-				tag => $tag,
-				value => $value,
-			});
-
-			if ($value eq "text") { 
-				$exists->value_text($blob);
-			}
-
-			if ($value eq "date") { 
-				$exists->value_date($blob);
-			}
-		
-			$exists->update;
-
-		}
-
-	} else {
-
-		return unless @existing;
-
-		my $setting = shift @existing;
-
-		return $setting->value_text if $setting->value eq "text";
-		return $setting->value_date if $setting->value eq "date";
-		return $setting->value;
-
-	}
-
-}
 
 sub print_ratings {
 
@@ -138,6 +75,66 @@ sub rating {
 		return shift @ratings if @ratings;
 		return;
 	} 
+
+}
+
+sub setting {
+
+	my ($self, $tag, $value, $blob) = @_;
+
+	$/ = "";			#Remove all trailing newlines
+	chomp $blob;
+
+	my $existing = Tab::Setting->search(  
+		judge => $self->id,
+		tag    => $tag,
+		type   => "judge"
+	)->first;
+
+	if (defined $value) { 
+			
+		if ($existing) {
+
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+			$existing->update;
+
+			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+				$existing->delete;
+			}
+
+			return;
+
+		} elsif ($value ne "delete" && $value && $value ne "0") {
+
+			my $existing = Tab::Setting->create({
+				judge => $self->id,
+				tag    => $tag,
+				value  => $value,
+				type   => "judge"
+			});
+
+			if ($value eq "text") { 
+				$existing->value_text($blob);
+			}
+
+			if ($value eq "date") { 
+				$existing->value_date($blob);
+			}
+
+			$existing->update;
+
+		}
+
+	} else {
+
+		return unless $existing;
+		return $existing->value_text if $existing->value eq "text";
+		return $existing->value_date if $existing->value eq "date";
+		return $existing->value;
+
+	}
 
 }
 
