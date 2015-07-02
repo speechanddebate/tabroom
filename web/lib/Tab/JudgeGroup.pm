@@ -12,7 +12,7 @@ Tab::JudgeGroup->has_many(events => "Tab::Event", "judge_group");
 Tab::JudgeGroup->has_many(hires => 'Tab::JudgeHire', 'judge_group');
 Tab::JudgeGroup->has_many(rating_tiers => "Tab::RatingTier", "judge_group");
 Tab::JudgeGroup->has_many(strike_times => "Tab::StrikeTime", "judge_group");
-Tab::JudgeGroup->has_many(settings => "Tab::JudgeGroupSetting", "judge_group");
+Tab::JudgeGroup->has_many(settings => "Tab::Setting", "judge_group");
 Tab::JudgeGroup->has_many(rating_subsets => "Tab::RatingSubset", "judge_group");
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
@@ -48,40 +48,42 @@ sub schools {
 	return Tab::School->search_by_group($self->id);
 }
 
+
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
 
-	my ($existing) = Tab::JudgeGroupSetting->search(  
+	$/ = "";			#Remove all trailing newlines
+	chomp $blob;
+
+	my $existing = Tab::Setting->search(  
 		judge_group => $self->id,
-		tag         => $tag
-	);
+		tag         => $tag,
+		type        => "class"
+	)->first;
 
-    if (defined $value) { 
-
+	if (defined $value) { 
+			
 		if ($existing) {
-		
+
 			$existing->value($value);
 			$existing->value_text($blob) if $value eq "text";
 			$existing->value_date($blob) if $value eq "date";
 			$existing->update;
-		
+
 			if ($value eq "delete" || $value eq "" || $value eq "0") { 
 				$existing->delete;
-			}
-
-			foreach my $other (@existing) { 
-				$other->delete;
 			}
 
 			return;
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::JudgeGroupSetting->create({
+			my $existing = Tab::Setting->create({
 				judge_group => $self->id,
-				tag => $tag,
-				value => $value,
+				tag         => $tag,
+				value       => $value,
+				type        => "class"
 			});
 
 			if ($value eq "text") { 
@@ -93,13 +95,12 @@ sub setting {
 			}
 
 			$existing->update;
-		}
 
+		}
 
 	} else {
 
 		return unless $existing;
-
 		return $existing->value_text if $existing->value eq "text";
 		return $existing->value_date if $existing->value eq "date";
 		return $existing->value;
@@ -107,3 +108,4 @@ sub setting {
 	}
 
 }
+

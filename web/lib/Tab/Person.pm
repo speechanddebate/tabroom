@@ -57,59 +57,54 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my @existing = Tab::AccountSetting->search(  
-		account => $self->id,
-		tag => $tag
-	);
+	my $existing = Tab::Setting->search(  
+		person => $self->id,
+		tag    => $tag,
+		type   => "person"
+	)->first;
 
 	if (defined $value) { 
 			
-		if (@existing) {
+		if ($existing) {
 
-			my $exists = shift @existing;
-			$exists->value($value);
-			$exists->value_text($blob) if $value eq "text";
-			$exists->value_date($blob) if $value eq "date";
-			$exists->update;
-
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+			$existing->update;
 
 			if ($value eq "delete" || $value eq "" || $value eq "0") { 
-				$exists->delete;
-			}
-
-			foreach my $other (@existing) { 
-				$other->delete;
+				$existing->delete;
 			}
 
 			return;
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $exists = Tab::AccountSetting->create({
-				account => $self->id,
-				tag     => $tag,
-				value   => $value,
+			my $existing = Tab::Setting->create({
+				person => $self->id,
+				tag    => $tag,
+				value  => $value,
+				type   => "person"
 			});
 
 			if ($value eq "text") { 
-				$exists->value_text($blob);
+				$existing->value_text($blob);
 			}
 
 			if ($value eq "date") { 
-				$exists->value_date($blob);
+				$existing->value_date($blob);
 			}
 
-			$exists->update;
+			$existing->update;
 
 		}
 
 	} else {
 
-		return unless @existing;
-		my $setting = shift @existing;
-		return $setting->value_text if $setting->value eq "text";
-		return $setting->value_date if $setting->value eq "date";
-		return $setting->value;
+		return unless $existing;
+		return $existing->value_text if $existing->value eq "text";
+		return $existing->value_date if $existing->value eq "date";
+		return $existing->value;
 
 	}
 

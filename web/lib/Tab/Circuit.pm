@@ -52,65 +52,59 @@ sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
 
-	my @existing = Tab::CircuitSetting->search(  
+	$/ = "";			#Remove all trailing newlines
+	chomp $blob;
+
+	my $existing = Tab::Setting->search(  
 		circuit => $self->id,
-		tag => $tag
-	);
+		tag    => $tag,
+		type   => "circuit"
+	)->first;
 
-    if (defined $value) { 
+	if (defined $value) { 
+			
+		if ($existing) {
 
-		if (@existing) {
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+			$existing->update;
 
-			my $exists = shift @existing;
-			$exists->value($value);
-			$exists->value_text($blob) if $value eq "text";
-			$exists->value_date($blob) if $value eq "date";
-			$exists->update;
-		
 			if ($value eq "delete" || $value eq "" || $value eq "0") { 
-				$exists->delete;
-			}
-
-			foreach my $other (@existing) { 
-				$other->delete;
+				$existing->delete;
 			}
 
 			return;
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $exists = Tab::CircuitSetting->create({
+			my $existing = Tab::Setting->create({
 				circuit => $self->id,
-				tag => $tag,
-				value => $value,
+				tag    => $tag,
+				type   => "circuit",
+				value  => $value,
 			});
 
 			if ($value eq "text") { 
-				$exists->value_text($blob);
+				$existing->value_text($blob);
 			}
 
 			if ($value eq "date") { 
-				$exists->value_date($blob);
+				$existing->value_date($blob);
 			}
 
-			$exists->update;
+			$existing->update;
 
 		}
 
 	} else {
 
-		return unless @existing;
-
-		my $setting = shift @existing;
-
-		foreach my $other (@existing) { 
-			$other->delete;
-		}
-
-		return $setting->value_text if $setting->value eq "text";
-		return $setting->value_date if $setting->value eq "date";
-		return $setting->value;
+		return unless $existing;
+		return $existing->value_text if $existing->value eq "text";
+		return $existing->value_date if $existing->value eq "date";
+		return $existing->value;
 
 	}
 
 }
+

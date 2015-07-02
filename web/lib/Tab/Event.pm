@@ -12,7 +12,7 @@ Tab::Event->has_a(event_double => 'Tab::EventDouble');
 Tab::Event->has_a(rating_subset => 'Tab::RatingSubset');
 
 Tab::Event->has_many(files => 'Tab::File', 'event');
-Tab::Event->has_many(settings => "Tab::EventSetting", "event");
+Tab::Event->has_many(settings => "Tab::Setting", "event");
 Tab::Event->has_many(result_sets => "Tab::ResultSet", "event");
 Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
@@ -22,100 +22,59 @@ sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
 
-	my @existing;
+	$/ = "";			#Remove all trailing newlines
+	chomp $blob;
 
-	if ($tag eq "tab_rating_priority") { 
+	my $existing = Tab::Setting->search(  
+		event => $self->id,
+		tag    => $tag,
+		type   => "event"
+	)->first;
 
-		@existing = Tab::EventSetting->search(  
-			event => $self->id,
-			tag => $tag,
-			value => $value
-		);
-
-	} else { 
-	
-		@existing = Tab::EventSetting->search(  
-			event => $self->id,
-			tag => $tag
-		);
-
-	}
-
-    if (defined $value && ($tag ne "tab_rating_priority" || $blob)) {
-
-		if (@existing) {
+	if (defined $value) { 
 			
-			my $exists = shift @existing;
+		if ($existing) {
 
-			if ($value eq "delete" || $value eq "" || $value eq 0) { 
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+			$existing->update;
 
-				$exists->delete;
-
-			} else { 
-
-				if ($value eq "text") { 
-					$exists->value_text($blob);
-				} elsif ($value eq "date") { 
-					$exists->value_date($blob);
-				} elsif ($tag eq "tab_rating_priority") { 
-					$exists->value($value);
-					$exists->value_text($blob);
-				} else { 
-					$exists->value($value);
-				}
-
-				$exists->update;
-			}
-
-			foreach my $other (@existing) { 
-				$other->delete;
+			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+				$existing->delete;
 			}
 
 			return;
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $exists = Tab::EventSetting->create({
+			my $existing = Tab::Setting->create({
 				event => $self->id,
-				tag => $tag,
-				value => $value,
+				tag    => $tag,
+				value  => $value,
+				type   => "event"
 			});
 
-			if ($blob) { 
-
-				if ($value eq "text") { 
-					$exists->value_text($blob);
-					$exists->update;
-				}
-
-				if ($value eq "date") { 
-					$exists->value_date($blob);
-					$exists->update;
-				}
-
-				if ($tag eq "tab_rating_priority") { 
-					$exists->value_text($blob);
-					$exists->update;
-				}
-
-			} else { 
-	
-				$exists->update;
+			if ($value eq "text") { 
+				$existing->value_text($blob);
 			}
+
+			if ($value eq "date") { 
+				$existing->value_date($blob);
+			}
+
+			$existing->update;
 
 		}
 
-
 	} else {
 
-		return unless @existing;
-
-		my $setting = shift @existing;
-		return $setting->value_text if $setting->value eq "text";
-		return $setting->value_date if $setting->value eq "date";
-		return $setting->value_text if $setting->tag eq "tab_rating_priority";
-		return $setting->value;
+		return unless $existing;
+		return $existing->value_text if $existing->value eq "text";
+		return $existing->value_date if $existing->value eq "date";
+		return $existing->value;
 
 	}
 
 }
+
