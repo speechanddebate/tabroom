@@ -115,8 +115,17 @@ insert into setting (type, tag, value, value_text, value_date, created_at, tourn
 	select 'tourn', tourn_set.tag, tourn_set.value, tourn_set.value_text, tourn_set.value_date, tourn_set.timestamp, tourn_set.tourn
 	from tourn_setting tourn_set;
 
-insert into setting (type, tag, value, created_at, round)
-	select 'round', 'ignore_results', '1', round.timestamp, round.id
-	from round
-	where round.ignore_results = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'ignore_results', '1', round.timestamp, round.id from round where round.ignore_results = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'include_room_notes', '1', round.timestamp, round.id from round where round.include_room_notes = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'sidelock_against', '1', round.timestamp, round.id from round where round.sidelock_against = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'wipe_rooms', '1', round.timestamp, round.id from round where round.wipe_rooms = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'note', '1', round.timestamp, round.id from round where round.note = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'cat_id', '1', round.timestamp, round.id from round where round.cat_id = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'motion', '1', round.timestamp, round.id from round where round.motion = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'completed', '1', round.timestamp, round.id from round where round.completed = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'blasted', '1', round.timestamp, round.id from round where round.blasted = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'num_judges', '1', round.timestamp, round.id from round where round.judges = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'publish_entry_list', '1', round.timestamp, round.id from round where round.listed = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'ignore_results', '1', round.timestamp, round.id from round where round.ignore_results = 1;
+
 
