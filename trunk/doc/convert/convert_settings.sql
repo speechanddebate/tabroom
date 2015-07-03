@@ -115,3 +115,8 @@ insert into setting (type, tag, value, value_text, value_date, created_at, tourn
 	select 'tourn', tourn_set.tag, tourn_set.value, tourn_set.value_text, tourn_set.value_date, tourn_set.timestamp, tourn_set.tourn
 	from tourn_setting tourn_set;
 
+insert into setting (type, tag, value, created_at, round)
+	select 'round', 'ignore_results', '1', round.timestamp, round.id
+	from round
+	where round.ignore_results = 1;
+
