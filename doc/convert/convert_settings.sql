@@ -18,7 +18,7 @@ CREATE TABLE `setting` (
   `tourn` int(11) DEFAULT NULL,
   `judge_group` int(11) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
-  `pool` int(11) DEFAULT NULL,
+  `jpool` int(11) DEFAULT NULL,
   `judge` int(11) DEFAULT NULL,
   `round` int(11) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
@@ -27,6 +27,26 @@ CREATE TABLE `setting` (
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+create table `jpool_round` ( 
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `jpool` int(11) DEFAULT NULL,
+  `round` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+rename table room_group to rpool;
+rename table room_group_room to rpool_room;
+alter table rpool_room change room_group rpool int(11);
+rename table room_group_round to rpool_round;
+alter table rpool_round change room_group rpool int(11);
+
+rename table pool to jpool;
+rename table pool_judge to jpool_judge;
+alter table jpool_judge change pool jpool int(11);
+
+
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 create index school on setting(school);
@@ -34,7 +54,7 @@ create index tourn on setting(tourn);
 create index person on setting(person);
 create index judge_group on setting(judge_group);
 create index judge on setting(judge);
-create index pool on setting(pool);
+create index jpool on setting(jpool);
 create index round on setting(round);
 create index event on setting(event);
 create index circuit on setting(circuit);
@@ -116,16 +136,49 @@ insert into setting (type, tag, value, value_text, value_date, created_at, tourn
 	from tourn_setting tourn_set;
 
 insert into setting (type, tag, value, created_at, round) select 'round', 'ignore_results', '1', round.timestamp, round.id from round where round.ignore_results = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'reset_room_moves', , round.timestamp, round.id from round where round.wipe_rooms = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'sidelock_against', round.sidelock_against, round.timestamp, round.id from round where round.sidelock_against > 0;
 insert into setting (type, tag, value, created_at, round) select 'round', 'include_room_notes', '1', round.timestamp, round.id from round where round.include_room_notes = 1;
-insert into setting (type, tag, value, created_at, round) select 'round', 'sidelock_against', '1', round.timestamp, round.id from round where round.sidelock_against = 1;
-insert into setting (type, tag, value, created_at, round) select 'round', 'wipe_rooms', '1', round.timestamp, round.id from round where round.wipe_rooms = 1;
-insert into setting (type, tag, value, created_at, round) select 'round', 'note', '1', round.timestamp, round.id from round where round.note = 1;
-insert into setting (type, tag, value, created_at, round) select 'round', 'cat_id', '1', round.timestamp, round.id from round where round.cat_id = 1;
-insert into setting (type, tag, value, created_at, round) select 'round', 'motion', '1', round.timestamp, round.id from round where round.motion = 1;
-insert into setting (type, tag, value, created_at, round) select 'round', 'completed', '1', round.timestamp, round.id from round where round.completed = 1;
-insert into setting (type, tag, value, created_at, round) select 'round', 'blasted', '1', round.timestamp, round.id from round where round.blasted = 1;
-insert into setting (type, tag, value, created_at, round) select 'round', 'num_judges', '1', round.timestamp, round.id from round where round.judges = 1;
 insert into setting (type, tag, value, created_at, round) select 'round', 'publish_entry_list', '1', round.timestamp, round.id from round where round.listed = 1;
-insert into setting (type, tag, value, created_at, round) select 'round', 'ignore_results', '1', round.timestamp, round.id from round where round.ignore_results = 1;
+insert into setting (type, tag, value, created_at, round) select 'round', 'num_judges', round.judges, round.timestamp, round.id from round where round.judges > 0;
+insert into setting (type, tag, value, created_at, round) select 'round', 'cat_id', round.cat_id, round.timestamp, round.id from round where round.cat_id > 0;
+
+insert into setting (type, tag, value, value_text, created_at, round) select 'round', 'motion', 'text', round.motion, round.timestamp, round.id from round where round.motion is not null;
+insert into setting (type, tag, value, value_text, created_at, round) select 'round', 'notes', 'text', round.note, round.timestamp, round.id from round where round.note is not null;
+insert into setting (type, tag, value, value_date, created_at, round) select 'round', 'completed', 'date', round.completed, round.timestamp, round.id from round where round.completed is not null;
+insert into setting (type, tag, value, value_date, created_at, round) select 'round', 'blasted', 'date', round.blasted, round.timestamp, round.id from round where round.blasted is not null;
+
+insert into setting (type, tag, value, created_at, round) 
+	select 'judge', 'special_job', judge.special, judge.timestamp, judge.id from judge where judge.special is not null;
+insert into setting (type, tag, value, created_at, round) 
+	select 'judge', 'gender', judge.gender, judge.timestamp, judge.id from judge where judge.gender is not null;
+
+insert into setting (type, tag, value, created_at, round) 
+	select 'judge', 'hire_offer', judge.hire_offer, judge.timestamp, judge.id from judge where judge.hire_offer is not null;
+insert into setting (type, tag, value, created_at, round) 
+	select 'judge', 'hire_approved', judge.hire_approved, judge.timestamp, judge.id from judge where judge.hire_approved is not null;
+
+insert into setting (type, tag, value, created_at, round) 
+	select 'judge', 'diverse', judge.diverse, judge.timestamp, judge.id from judge where judge.diverse is not null;
 
 
+insert into setting (type, tag, value, created_at, round) 
+	select 'jpool', 'standby', jpool.standby, jpool.timestamp, jpool.id from jpool where jpool.standby is not null;
+
+insert into setting (type, tag, value, created_at, round) 
+	select 'jpool', 'publish', jpool.publish, jpool.timestamp, jpool.id from jpool where jpool.publish is not null;
+
+insert into setting (type, tag, value, created_at, round) 
+	select 'jpool', 'registrant', jpool.registrant, jpool.timestamp, jpool.id from jpool where jpool.registrant is not null;
+
+insert into setting (type, tag, value, created_at, round) 
+	select 'jpool', 'burden', jpool.burden, jpool.timestamp, jpool.id from jpool where jpool.burden is not null;
+
+insert into setting (type, tag, value, created_at, round) 
+	select 'jpool', 'event_based', jpool.event_based, jpool.timestamp, jpool.id from jpool where jpool.event_based is not null;
+
+insert into setting (type, tag, value, created_at, round) 
+	select 'jpool', 'standby_timeslot', jpool.standby_timeslot, jpool.timestamp, jpool.id from jpool where jpool.standby_timeslot is not null;
+
+update table setting set tag="prelim_jpool" where tag="prelim_pool";
+update table setting set tag="prelim_jpool_name" where tag="prelim_pool_name";
