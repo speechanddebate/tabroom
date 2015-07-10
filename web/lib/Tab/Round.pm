@@ -11,9 +11,11 @@ Tab::Round->columns(TEMP => qw/speaks/);
 
 Tab::Round->has_a(event => 'Tab::Event');
 Tab::Round->has_a(site => 'Tab::Site');
-Tab::Round->has_a(pool => 'Tab::Pool');
 Tab::Round->has_a(timeslot => 'Tab::Timeslot');
 Tab::Round->has_a(tb_set => 'Tab::TiebreakSet');
+
+Tab::Round->has_many(jpools => [Tab::JPoolRound => 'jpool']);
+Tab::Round->has_many(rpools => [Tab::RPoolRound => 'rpool']);
 
 Tab::Round->has_many(panels => 'Tab::Panel', 'round' => { order_by => 'letter'} );
 Tab::Round->has_many(results => 'Tab::Result', 'round');

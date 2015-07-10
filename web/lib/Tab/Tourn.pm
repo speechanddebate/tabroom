@@ -7,7 +7,7 @@ Tab::Tourn->columns(Essential => qw/name start end webname reg_start reg_end cre
 Tab::Tourn->columns(TEMP => qw/schoolid/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
-Tab::Tourn->has_many(pools => 'Tab::Pool', 'tourn');
+Tab::Tourn->has_many(rpools => 'Tab::RPool', 'tourn');
 Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');
 Tab::Tourn->has_many(hotels => 'Tab::Hotel', 'tourn' => {order_by => 'name'} );
 Tab::Tourn->has_many(events => 'Tab::Event', 'tourn' => { order_by => 'name'} );
@@ -25,7 +25,6 @@ Tab::Tourn->has_many(sweep_sets => 'Tab::SweepSet', 'tourn' => {order_by => 'nam
 Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
 Tab::Tourn->has_many(result_sets => "Tab::ResultSet", 'tourn');
 Tab::Tourn->has_many(tourn_sites => 'Tab::TournSite', 'tourn');
-Tab::Tourn->has_many(room_groups => 'Tab::RoomGroup', 'tourn');
 Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(tourn_admins => 'Tab::TournAdmin', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
