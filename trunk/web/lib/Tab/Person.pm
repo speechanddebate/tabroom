@@ -49,7 +49,6 @@ sub can_alter {
 	$m->abort();
 }
 
-
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;

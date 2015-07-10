@@ -10,7 +10,7 @@ Tab::Room->has_a(site => 'Tab::Site');
 Tab::Room->has_many(panels => 'Tab::Panel', 'room');
 Tab::Room->has_many(strikes => 'Tab::RoomStrike', 'room');
 Tab::Room->has_many(blocks => 'Tab::RoomStrike', 'room');
-Tab::Room->has_many(pools => [Tab::RoomGroupRoom => 'room_group']);
+Tab::Room->has_many(rpools => [Tab::RPoolRoom => 'rpool']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
