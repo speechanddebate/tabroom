@@ -20,7 +20,7 @@ Tab::School->has_many(judges => 'Tab::Judge', 'school');
 Tab::School->has_many(fines => 'Tab::SchoolFine', 'school');
 Tab::School->has_many(hires => 'Tab::JudgeHire', 'school');
 Tab::School->has_many(files => 'Tab::File', 'school');
-Tab::School->has_many(followers => [Tab::FollowSchool => 'follower']);
+Tab::School->has_many(followers => [Tab::Follower => 'follower']);
 
 __PACKAGE__->_register_datetimes( qw/entered_on registered_on self_reg_deadline/);
 __PACKAGE__->_register_datetimes( qw/timestamp/);
