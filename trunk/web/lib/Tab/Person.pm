@@ -21,15 +21,13 @@ Tab::Person->has_many(chapter_admins => 'Tab::ChapterAdmin', 'account');
 Tab::Person->has_many(circuit_admins => 'Tab::CircuitAdmin', 'account');
 Tab::Person->has_many(region_admins => 'Tab::RegionAdmin', 'account');
 
-Tab::Person->has_many(followers => 'Tab::FollowAccount', 'account');
-Tab::Person->has_many(follow_accounts => 'Tab::FollowAccount', 'follower');
+Tab::Person->has_many(follows => 'Tab::Follower', 'account');
+Tab::Person->has_many(followers => 'Tab::Follower', 'follower');
 Tab::Person->has_many(chapter_judges => 'Tab::ChapterJudge', 'account');
 
 Tab::Person->has_many(judges => 'Tab::Judge', 'account' => { order_by => 'id DESC'} );
-Tab::Person->has_many(follow_judge => 'Tab::FollowJudge', 'account');
 
 Tab::Person->has_many(students => 'Tab::Student');
-Tab::Person->has_many(follow_entry => 'Tab::FollowEntry', 'entry');
 
 Tab::Person->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
 Tab::Person->has_many(circuits => [ Tab::CircuitAdmin => 'circuit']);
