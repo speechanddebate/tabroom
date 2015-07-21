@@ -24,7 +24,7 @@ Tab::Judge->has_a(chapter_judge => 'Tab::ChapterJudge');
 Tab::Judge->has_many(ratings => 'Tab::Rating', 'judge');
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
 Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
-Tab::Judge->has_many(settings => "Tab::Setting", "judge");
+Tab::Judge->has_many(settings => "Tab::JudgeSetting", "judge");
 Tab::Judge->has_many(hires => "Tab::JudgeHire", "judge");
 
 Tab::Judge->has_many(jpools => [Tab::JPoolJudge => 'jpool']);
@@ -85,10 +85,9 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::Setting->search(  
+	my $existing = Tab::JudgeSetting->search(  
 		judge => $self->id,
 		tag    => $tag,
-		type   => "judge"
 	)->first;
 
 	if (defined $value) { 
@@ -108,11 +107,10 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::Setting->create({
+			my $existing = Tab::JudgeSetting->create({
 				judge => $self->id,
 				tag    => $tag,
 				value  => $value,
-				type   => "judge"
 			});
 
 			if ($value eq "text") { 

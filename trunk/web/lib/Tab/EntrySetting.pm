@@ -1,0 +1,9 @@
+package Tab::EntrySetting;
+use base 'Tab::DBI';
+Tab::EntrySetting->table('entry_setting');
+Tab::EntrySetting->columns(All => qw/id entry tag value value_date value_text timestamp/);
+Tab::EntrySetting->has_a(entry => 'Tab::Entry');
+
+__PACKAGE__->_register_datetimes( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/value_date/);
+

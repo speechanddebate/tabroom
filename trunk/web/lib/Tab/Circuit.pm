@@ -55,10 +55,9 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::Setting->search(  
+	my $existing = Tab::CircuitSetting->search(  
 		circuit => $self->id,
 		tag    => $tag,
-		type   => "circuit"
 	)->first;
 
 	if (defined $value) { 
@@ -78,10 +77,9 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::Setting->create({
+			my $existing = Tab::CircuitSetting->create({
 				circuit => $self->id,
 				tag    => $tag,
-				type   => "circuit",
 				value  => $value,
 			});
 

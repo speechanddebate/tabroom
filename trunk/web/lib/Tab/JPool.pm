@@ -11,6 +11,7 @@ Tab::JPool->has_a(site => 'Tab::Site');
 Tab::JPool->has_a(tourn => 'Tab::Tourn');
 Tab::JPool->has_a(judge_group => "Tab::JudgeGroup");
 
+Tab::JPool->has_many(settings => 'Tab::JPoolSetting', 'jpool');
 Tab::JPool->has_many(rounds => 'Tab::Round', 'pool');
 Tab::JPool->has_many(pool_judges => 'Tab::JPoolJudge', 'pool');
 
@@ -25,10 +26,9 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::Setting->search(  
+	my $existing = Tab::JPoolSetting->search(  
 		jpool => $self->id,
 		tag   => $tag,
-		type  => "jpool"
 	)->first;
 
 	if (defined $value) { 
@@ -48,11 +48,10 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::Setting->create({
+			my $existing = Tab::JPoolSetting->create({
 				jpool => $self->id,
 				tag   => $tag,
 				value => $value,
-				type  => "jpool"
 			});
 
 			if ($value eq "text") { 

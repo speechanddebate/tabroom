@@ -12,7 +12,7 @@ Tab::Event->has_a(event_double => 'Tab::EventDouble');
 Tab::Event->has_a(rating_subset => 'Tab::RatingSubset');
 
 Tab::Event->has_many(files => 'Tab::File', 'event');
-Tab::Event->has_many(settings => "Tab::Setting", "event");
+Tab::Event->has_many(settings => "Tab::EventSetting", "event");
 Tab::Event->has_many(result_sets => "Tab::ResultSet", "event");
 Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
@@ -25,10 +25,9 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::Setting->search(  
+	my $existing = Tab::EventSetting->search(  
 		event => $self->id,
 		tag    => $tag,
-		type   => "event"
 	)->first;
 
 	if (defined $value) { 
@@ -48,11 +47,10 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::Setting->create({
+			my $existing = Tab::EventSetting->create({
 				event => $self->id,
 				tag    => $tag,
 				value  => $value,
-				type   => "event"
 			});
 
 			if ($value eq "text") { 

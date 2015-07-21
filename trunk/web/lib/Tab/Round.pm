@@ -46,10 +46,9 @@ sub setting {
 	$/ = ""; # Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::Setting->search(  
+	my $existing = Tab::RoundSetting->search(  
 		round => $self->id,
 		tag   => $tag,
-		type  => "round"
 	)->first;
 
 	if ($value) { 
@@ -69,11 +68,10 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::Setting->create({
+			my $existing = Tab::RoundSetting->create({
 				round => $self->id,
 				tag    => $tag,
 				value  => $value,
-				type   => "round"
 			});
 
 			if ($value eq "text") { 
