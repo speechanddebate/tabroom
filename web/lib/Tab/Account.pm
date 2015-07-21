@@ -67,10 +67,9 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::Setting->search(  
+	my $existing = Tab::AccountSetting->search(  
 		person => $self->id,
 		tag    => $tag,
-		type   => "person"
 	)->first;
 
 	if (defined $value) { 
@@ -94,7 +93,6 @@ sub setting {
 				person => $self->id,
 				tag    => $tag,
 				value  => $value,
-				type   => "person"
 			});
 
 			if ($value eq "text") { 

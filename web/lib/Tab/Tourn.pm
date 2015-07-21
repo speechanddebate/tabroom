@@ -15,7 +15,7 @@ Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
 Tab::Tourn->has_many(ratings => 'Tab::Rating', 'tourn');
 Tab::Tourn->has_many(regions => 'Tab::Region', 'tourn');
 Tab::Tourn->has_many(strikes => 'Tab::Strike', 'tourn');
-Tab::Tourn->has_many(settings => 'Tab::Setting', 'tourn');
+Tab::Tourn->has_many(settings => 'Tab::TournSetting', 'tourn');
 Tab::Tourn->has_many(schools => 'Tab::School', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(housings => 'Tab::Housing', 'tourn');
 Tab::Tourn->has_many(webpages => 'Tab::Webpage', 'tourn');
@@ -65,10 +65,9 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::Setting->search(  
+	my $existing = Tab::TournSetting->search(  
 		tourn => $self->id,
 		tag    => $tag,
-		type   => "tourn"
 	)->first;
 
 	if (defined $value) { 
@@ -88,11 +87,10 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::Setting->create({
+			my $existing = Tab::TournSetting->create({
 				tourn => $self->id,
 				tag    => $tag,
 				value  => $value,
-				type   => "tourn"
 			});
 
 			if ($value eq "text") { 

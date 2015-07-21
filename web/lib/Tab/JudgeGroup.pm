@@ -12,7 +12,7 @@ Tab::JudgeGroup->has_many(events => "Tab::Event", "judge_group");
 Tab::JudgeGroup->has_many(hires => 'Tab::JudgeHire', 'judge_group');
 Tab::JudgeGroup->has_many(rating_tiers => "Tab::RatingTier", "judge_group");
 Tab::JudgeGroup->has_many(strike_times => "Tab::StrikeTime", "judge_group");
-Tab::JudgeGroup->has_many(settings => "Tab::Setting", "judge_group");
+Tab::JudgeGroup->has_many(settings => "Tab::JudgeGroupSetting", "judge_group");
 Tab::JudgeGroup->has_many(rating_subsets => "Tab::RatingSubset", "judge_group");
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
@@ -56,10 +56,9 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::Setting->search(  
+	my $existing = Tab::JudgeGroupSetting->search(  
 		judge_group => $self->id,
 		tag         => $tag,
-		type        => "class"
 	)->first;
 
 	if (defined $value) { 
@@ -79,11 +78,10 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::Setting->create({
+			my $existing = Tab::JudgeGroupSetting->create({
 				judge_group => $self->id,
 				tag         => $tag,
 				value       => $value,
-				type        => "class"
 			});
 
 			if ($value eq "text") { 
