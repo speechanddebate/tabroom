@@ -94,6 +94,7 @@ use Tab::Round;
 use Tab::RoundSetting;
 use Tab::School;
 use Tab::SchoolFine;
+use Tab::SchoolSetting;
 use Tab::Session;
 use Tab::Site;
 use Tab::Stats;

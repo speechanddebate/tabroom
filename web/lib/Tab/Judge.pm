@@ -27,6 +27,7 @@ Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
 Tab::Judge->has_many(settings => "Tab::JudgeSetting", "judge");
 Tab::Judge->has_many(hires => "Tab::JudgeHire", "judge");
 
+Tab::Judge->has_many(groups => [Tab::JudgeGroupJudge => 'judge_group']);
 Tab::Judge->has_many(jpools => [Tab::JPoolJudge => 'jpool']);
 
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where judge_group = ?");
