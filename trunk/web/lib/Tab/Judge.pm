@@ -2,23 +2,21 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first last code active ada
-									special notes judge_group alt_group gender
-									timestamp covers chapter_judge obligation 
-									account acct_request dropped drop_time 
-									reg_time drop_by hired score tmp standby
-									hire_offer hire_approved cat_id diverse/);
+Tab::Judge->columns(Essential => qw/school first last code active ada gender notes 
+									judge_group alt_group covers chapter_judge obligation hired 
+									account acct_request score tmp 
+									reg_time timestamp /);
 
 Tab::Judge->columns(TEMP => qw/tier pref panelid chair tourn avg diet ballotid accountid tab_rating
 							   cjid schoolname schoolcode regname regcode region/);
 
-Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
-Tab::Judge->has_a(alt_group => 'Tab::JudgeGroup');
-Tab::Judge->has_a(covers => 'Tab::JudgeGroup');
-Tab::Judge->has_a(school => 'Tab::School');
-Tab::Judge->has_a(drop_by => 'Tab::Account');
-Tab::Judge->has_a(account => 'Tab::Account');
-Tab::Judge->has_a(acct_request => 'Tab::Account');
+Tab::Judge->has_a(judge_group   => 'Tab::JudgeGroup');
+Tab::Judge->has_a(alt_group     => 'Tab::JudgeGroup');
+Tab::Judge->has_a(covers        => 'Tab::JudgeGroup');
+Tab::Judge->has_a(school        => 'Tab::School');
+Tab::Judge->has_a(drop_by       => 'Tab::Account');
+Tab::Judge->has_a(account       => 'Tab::Account');
+Tab::Judge->has_a(acct_request  => 'Tab::Account');
 Tab::Judge->has_a(chapter_judge => 'Tab::ChapterJudge');
 
 Tab::Judge->has_many(ratings => 'Tab::Rating', 'judge');
@@ -27,24 +25,12 @@ Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
 Tab::Judge->has_many(settings => "Tab::JudgeSetting", "judge");
 Tab::Judge->has_many(hires => "Tab::JudgeHire", "judge");
 
-Tab::Judge->has_many(groups => [Tab::JudgeGroupJudge => 'judge_group']);
-
 Tab::Judge->has_many(jpools => [Tab::JPoolJudge => 'jpool']);
 
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where judge_group = ?");
 Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where judge_group = ?");
 
 __PACKAGE__->_register_datetimes( qw/drop_time reg_time/);
-
-sub judge_group { 
-	my $self = shift;
-	return $self->groups->first;
-}
-
-sub group { 
-	my $self = shift;
-	return $self->groups->first;
-}
 
 sub setting {
 
@@ -55,7 +41,7 @@ sub setting {
 
 	my $existing = Tab::JudgeSetting->search(  
 		judge => $self->id,
-		tag    => $tag,
+		tag   => $tag,
 	)->first;
 
 	if (defined $value) { 
