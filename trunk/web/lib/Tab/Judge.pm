@@ -7,9 +7,9 @@ Tab::Judge->columns(Essential => qw/school first last code active ada
 									timestamp covers chapter_judge obligation 
 									account acct_request dropped drop_time 
 									reg_time drop_by hired score tmp standby
-									hire_offer hire_approved tab_rating cat_id diverse/);
+									hire_offer hire_approved cat_id diverse/);
 
-Tab::Judge->columns(TEMP => qw/tier pref panelid chair tourn avg diet ballotid accountid 
+Tab::Judge->columns(TEMP => qw/tier pref panelid chair tourn avg diet ballotid accountid tab_rating
 							   cjid schoolname schoolcode regname regcode region/);
 
 Tab::Judge->has_a(judge_group => 'Tab::JudgeGroup');
