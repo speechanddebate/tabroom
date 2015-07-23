@@ -28,6 +28,7 @@ Tab::Judge->has_many(settings => "Tab::JudgeSetting", "judge");
 Tab::Judge->has_many(hires => "Tab::JudgeHire", "judge");
 
 Tab::Judge->has_many(groups => [Tab::JudgeGroupJudge => 'judge_group']);
+
 Tab::Judge->has_many(jpools => [Tab::JPoolJudge => 'jpool']);
 
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where judge_group = ?");
@@ -35,48 +36,14 @@ Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where judge_grou
 
 __PACKAGE__->_register_datetimes( qw/drop_time reg_time/);
 
-Tab::Judge->set_sql( by_group => "
-        		select distinct judge.*
-            	from judge
-            	where judge.judge_group = ?
-				and judge.active = 1");
-
-Tab::Judge->set_sql( hired_by_group => "
-        		select distinct judge.*
-            		from judge 
-				where judge.judge_group = ?
-				and spare_pool = 1");
-
-sub print_ratings {
-
-	my ($self, $subset) = @_;
-
-	my @ratings = Tab::Rating->search( judge => $self->id, subset => $subset->id, type => "coach" ) if $subset;
-	@ratings = Tab::Rating->search( judge => $self->id, type => "coach") unless $subset;
-
-	my $string;
-
-	foreach my $rating (sort {$a->id cmp $b->id} @ratings) { 
-		$string .= " ".$rating->rating_tier->name if $rating->rating_tier;
-	}
-
-	return $string;
+sub judge_group { 
+	my $self = shift;
+	return $self->groups->first;
 }
 
-sub rating { 
-
-	my ($self, $subset) = @_;
-
-	if ($subset) { 
-		my @ratings = Tab::Rating->search( judge => $self->id, subset => $subset->id, type => "coach" );
-		return shift @ratings if @ratings;
-		return;
-	} else { 
-		my @ratings = Tab::Rating->search( judge => $self->id, type => "coach");
-		return shift @ratings if @ratings;
-		return;
-	} 
-
+sub group { 
+	my $self = shift;
+	return $self->groups->first;
 }
 
 sub setting {
