@@ -15,6 +15,22 @@ CREATE TABLE `round_setting` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+DROP TABLE IF EXISTS `school_setting`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `school_setting` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `type` varchar(32) NOT NULL,
+  `tag` varchar(32) NOT NULL,
+  `value` varchar(64) DEFAULT NULL,
+  `value_text` text,
+  `value_date` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `school` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
 DROP TABLE IF EXISTS `rpool_setting`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -126,6 +142,7 @@ delete from tourn_setting where value="date" and value_date is null;
 delete from tourn_setting where value="date" and value_date="0";
 
 alter table round_setting add created_at timestamp;
+alter table school_setting add created_at timestamp;
 alter table tourn_setting add created_at timestamp;
 alter table event_setting add created_at timestamp;
 
@@ -159,3 +176,12 @@ insert into jpool_setting (tag, value, created_at, jpool) select 'standby_timesl
 
 update judge_setting set tag="prelim_jpool" where tag="prelim_pool";
 update judge_setting set tag="prelim_jpool_name" where tag="prelim_pool_name";
+
+insert into school_setting (tag, value, created_at, school) select 'paid_amount', school.paid, school.timestamp, school.id from school where school.paid > 0;
+insert into school_setting (tag, value, created_at, school) select 'noprefs', school.paid, school.timestamp, school.id from school where school.paid > 0;
+insert into school_setting (tag, value, created_at, school) select 'congress_code', school.congress_code, school.timestamp, school.id from school where school.congress_code > 0;
+insert into school_setting (tag, value, created_at, school) select 'contact_name', school.contact_name, school.timestamp, school.id from school where school.contact_name > 0;
+insert into school_setting (tag, value, created_at, school) select 'contact_email', school.contact_email, school.timestamp, school.id from school where school.contact_email > 0;
+insert into school_setting (tag, value, created_at, school) select 'contact_number', school.contact_number, school.timestamp, school.id from school where school.contact_number > 0;
+insert into school_setting (tag, value, created_at, school) select 'individuals', school.individuals, school.timestamp, school.id from school where school.individuals > 0;
+
