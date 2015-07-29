@@ -252,19 +252,10 @@ as select
 			'id', 'requested_at', 'entries_requested', 'entries_accepted', 'rounds_requested', 'rounds_accepted', 'created_at', 'timestamp', 'school', 'tourn_id', 'judge_id', 'requestor_id'
 from tabroom.judge_hire ;
 
-alter table school_judge add ada bool;
-alter table school_judge add email varchar(128);
-
-create view school_judge 
-			'id', 'first', 'last', 'gender', 'retired', 'cell', 'email', 'diet', 'ada', 'notes', 'notes_timestamp', 'school_id', 'person_id', 'request_person_id'
-as select
-			'id', 'first', 'last', 'gender', 'retired', 'cell', 'email', 'diet', 'ada', 'notes', 'notes_timestamp', 'chapter', 'account', 'acct_request'
-from tabroom.chapter_judge;
-
 create view treo.judges
-			'id', 'first', 'last', 'code', 'active', 'ada', 'tab_rating', 'obligation_rounds', 'hired_rounds', 'created_at', 'updated_at', 'school_judge_id', 'class_id', 'squad_id', 'person_id', 'alternate_class_id'
+			'id', 'first', 'last', 'code', 'active', 'ada', 'obligation_rounds', 'hired_rounds', 'created_at', 'updated_at', 'school_judge_id', 'class_id', 'squad_id', 'person_id', 'alternate_class_id', 'covers_class_id'
 as select
-			'id', 'first', 'last', 'code', 'active', 'ada', 'tab_rating', 'obligation', 'hired', 'created_at', 'timestamp', 'chapter_judge', 'judge_group', 'school', 'account', 'alt_group'
+			'id', 'first', 'last', 'code', 'active', 'ada', 'obligation', 'hired', 'reg_time', 'timestamp', 'chapter_judge', 'judge_group', 'school', 'account', 'alt_group', 'covers'
 from tabroom.judge;
 
 create view treo.logins
@@ -433,17 +424,21 @@ as select
 			'id', 'created_at', 'timestamp', 'region', 'chapter', 'circuit', 'membership'
 from tabroom.chapter_circuit;
 
-create view treo.school_judges
-			'id', 'first', 'last', 'gender', 'retired', 'cell', 'ada', 'diet', 'notes', 'notes_timestamp', 'created_at', 'updated_at', 'school_id', 'person_id', 'person_request_id'
-as select
-			'id', 'first', 'last', 'gender', 'retired', 'cell', 'ada', 'diet', 'notes', 'notes_timestamp', 'created_at', 'timestamp', 'chapter', 'account', 'acct_request'
-from tabroom.chapter_judge;
-
 create view treo.schools
 			'id', 'name', 'city', 'state', 'country', 'coaches', 'level', 'naudl', 'ipeds', 'nces', 'nsda', 'created_at', 'updated_at'
 as select
 			'id', 'name', 'city', 'state', 'country', 'coaches', 'level', 'naudl', 'ipeds', 'nces', 'nsda', 'created_at', 'timestamp'
 from tabroom.chapter;
+
+alter table school_judge add ada bool;
+alter table school_judge add email varchar(128);
+
+create view treo.school_judges
+			'id', 'first', 'last', 'gender', 'retired', 'cell', 'email', 'diet', 'ada', 'notes', 'notes_timestamp', 'school_id', 'person_id', 'request_person_id'
+as select
+			'id', 'first', 'last', 'gender', 'retired', 'cell', 'email', 'diet', 'ada', 'notes', 'notes_timestamp', 'chapter', 'account', 'acct_request'
+from tabroom.chapter_judge;
+
 
 create view treo.stats
 			'id', 'type', 'tag', 'value', 'created_at', 'updated_at', 'event_id'

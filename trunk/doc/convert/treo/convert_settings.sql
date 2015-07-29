@@ -161,11 +161,26 @@ insert into round_setting (tag, value, value_date, created_at, round) select  'b
 alter table judge_setting add created_at timestamp;
 alter table jpool_setting add created_at timestamp;
 
+update judge set special = NULL where special = "";
+insert into judge_setting (tag, value, created_at, judge) select 'tab_rating', judge.tab_rating, judge.timestamp, judge.id from judge where judge.tab_rating > 0;
 insert into judge_setting (tag, value, created_at, judge) select 'special_job', judge.special, judge.timestamp, judge.id from judge where judge.special is not null;
 insert into judge_setting (tag, value, created_at, judge) select 'gender', judge.gender, judge.timestamp, judge.id from judge where judge.gender is not null;
 insert into judge_setting (tag, value, created_at, judge) select 'hire_offer', judge.hire_offer, judge.timestamp, judge.id from judge where judge.hire_offer is not null;
 insert into judge_setting (tag, value, created_at, judge) select 'hire_approved', judge.hire_approved, judge.timestamp, judge.id from judge where judge.hire_approved is not null;
 insert into judge_setting (tag, value, created_at, judge) select 'diverse', judge.diverse, judge.timestamp, judge.id from judge where judge.diverse is not null;
+
+alter table judge drop tab_rating;
+alter table judge drop special;
+alter table judge drop gender;
+alter table judge drop hire_offer;
+alter table judge drop hire_approved;
+alter table judge drop diverse;
+alter table judge drop dropped;
+alter table judge drop drop_by;
+alter table judge drop drop_time;
+
+update judge_setting set tag="prelim_jpool" where tag="prelim_pool";
+update judge_setting set tag="prelim_jpool_name" where tag="prelim_pool_name";
 
 insert into jpool_setting (tag, value, created_at, jpool) select 'standby', jpool.standby, jpool.timestamp, jpool.id from jpool where jpool.standby is not null;
 insert into jpool_setting (tag, value, created_at, jpool) select 'publish', jpool.publish, jpool.timestamp, jpool.id from jpool where jpool.publish is not null;
@@ -174,14 +189,19 @@ insert into jpool_setting (tag, value, created_at, jpool) select 'burden', jpool
 insert into jpool_setting (tag, value, created_at, jpool) select 'event_based', jpool.event_based, jpool.timestamp, jpool.id from jpool where jpool.event_based is not null;
 insert into jpool_setting (tag, value, created_at, jpool) select 'standby_timeslot', jpool.standby_timeslot, jpool.timestamp, jpool.id from jpool where jpool.standby_timeslot is not null;
 
-update judge_setting set tag="prelim_jpool" where tag="prelim_pool";
-update judge_setting set tag="prelim_jpool_name" where tag="prelim_pool_name";
 
 insert into school_setting (tag, value, created_at, school) select 'paid_amount', school.paid, school.timestamp, school.id from school where school.paid > 0;
 insert into school_setting (tag, value, created_at, school) select 'noprefs', school.paid, school.timestamp, school.id from school where school.paid > 0;
 insert into school_setting (tag, value, created_at, school) select 'congress_code', school.congress_code, school.timestamp, school.id from school where school.congress_code > 0;
-insert into school_setting (tag, value, created_at, school) select 'contact_name', school.contact_name, school.timestamp, school.id from school where school.contact_name > 0;
-insert into school_setting (tag, value, created_at, school) select 'contact_email', school.contact_email, school.timestamp, school.id from school where school.contact_email > 0;
-insert into school_setting (tag, value, created_at, school) select 'contact_number', school.contact_number, school.timestamp, school.id from school where school.contact_number > 0;
+insert into school_setting (tag, value, created_at, school) select 'contact_name', school.contact_name, school.timestamp, school.id from school where school.contact_name is not null;
+insert into school_setting (tag, value, created_at, school) select 'contact_email', school.contact_email, school.timestamp, school.id from school where school.contact_email is not null;
+insert into school_setting (tag, value, created_at, school) select 'contact_number', school.contact_number, school.timestamp, school.id from school where school.contact_number is not null;
 insert into school_setting (tag, value, created_at, school) select 'individuals', school.individuals, school.timestamp, school.id from school where school.individuals > 0;
+
+alter table school_fine add deleted bool; 
+alter table school_fine add deleted_by int; 
+alter table school_fine add deleted_on datetime;
+alter table school_fine add payment bool;
+alter table school_fine add judge int; 
+alter table school_fine add region int; 
 

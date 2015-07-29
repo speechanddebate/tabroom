@@ -2,7 +2,7 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first last code active ada gender notes 
+Tab::Judge->columns(Essential => qw/school first last code active ada notes 
 									judge_group alt_group covers chapter_judge obligation hired 
 									account acct_request score tmp 
 									reg_time timestamp /);
@@ -14,7 +14,6 @@ Tab::Judge->has_a(judge_group   => 'Tab::JudgeGroup');
 Tab::Judge->has_a(alt_group     => 'Tab::JudgeGroup');
 Tab::Judge->has_a(covers        => 'Tab::JudgeGroup');
 Tab::Judge->has_a(school        => 'Tab::School');
-Tab::Judge->has_a(drop_by       => 'Tab::Account');
 Tab::Judge->has_a(account       => 'Tab::Account');
 Tab::Judge->has_a(acct_request  => 'Tab::Account');
 Tab::Judge->has_a(chapter_judge => 'Tab::ChapterJudge');
@@ -30,7 +29,7 @@ Tab::Judge->has_many(jpools => [Tab::JPoolJudge => 'jpool']);
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where judge_group = ?");
 Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where judge_group = ?");
 
-__PACKAGE__->_register_datetimes( qw/drop_time reg_time/);
+__PACKAGE__->_register_datetimes( qw/reg_time/);
 
 sub setting {
 
