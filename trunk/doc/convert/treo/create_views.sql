@@ -91,12 +91,6 @@ as select
 			'id', 'side', 'bye', 'forfeit', 'chair', 'speaker_order', 'speech_number', 'collected_time', 'created_at', 'timestamp', 'entry', 'judge', 'panel', 'collected_by', 'account', 'audited_by'
 from tabroom.ballot;
 
-# treo.calendars
-#			'id', 'name', 'start', 'end', 'reg_start', 'reg_end', 'webname', 'location', 'city', 'state', 'country', 'tz', 'contact', 'url', 'source', 'hidden', 'created_at', 'updated_at', 'tourn_id', 'person_id'
-#as select
-			'id', 'name', 'start', 'end', 'reg_start', 'reg_end', 'webname', 'location', 'city', 'state', 'country', 'tz', 'contact', 'url', 'source', 'hidden', 'created_at', 'updated_at', 'tourn_id', 'person_id'
-# from tabroom. ;
-
 alter table tabroom.tourn_change add webpage int;
 
 create view treo.change_logs
@@ -620,6 +614,7 @@ alter table tabroom.region_admin add created_at datetime;
 alter table tabroom.school_admin add created_at datetime;
 alter table tabroom.tourn_admin add created_at datetime;
 
+#PERMISSIONS
 
 create view treo.circuit_admins
 			'created_at', 'updated_at', 'person_id', 'circuit_id'
@@ -636,13 +631,13 @@ from tabroom.region_admin;
 create view treo.school_admins
 			'created_at', 'updated_at', 'person_id', 'school_id'
 as select
-			'created_at', 'timestamp', 'person', 'school'
-from tabroom. ;
+			'created_at', 'timestamp', 'person', 'chapter'
+from tabroom.chapter_admin;
 
 create view treo.tourn_admins
 			'created_at', 'updated_at', 'person_id', 'tourn_id'
 as select
 			'created_at', 'timestamp', 'person', 'tourn'
-from tabroom. ;
+from tabroom.tourn_admin;
 
 
