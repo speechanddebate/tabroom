@@ -27,7 +27,7 @@ Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
 Tab::Tourn->has_many(result_sets => "Tab::ResultSet", 'tourn');
 Tab::Tourn->has_many(tourn_sites => 'Tab::TournSite', 'tourn');
 Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn' => { order_by => 'name'} );
-Tab::Tourn->has_many(tourn_admins => 'Tab::TournAdmin', 'tourn');
+Tab::Tourn->has_many(permissions => 'Tab::Permission', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
 Tab::Tourn->has_many(school_fines => 'Tab::SchoolFine', 'tourn');
 Tab::Tourn->has_many(judge_groups => 'Tab::JudgeGroup', 'tourn');
@@ -37,7 +37,7 @@ Tab::Tourn->has_many(tiebreak_sets => 'Tab::TiebreakSet', 'tourn');
 Tab::Tourn->has_many(housing_slots => 'Tab::HousingSlots', 'tourn');
 Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit', 'tourn');
 
-Tab::Tourn->has_many(admins => [ Tab::TournAdmin => 'account']);
+Tab::Tourn->has_many(admins => [ Tab::Permission => 'account']);
 Tab::Tourn->has_many(sites => [Tab::TournSite => 'site']);
 Tab::Tourn->has_many(circuits => [Tab::TournCircuit => 'circuit']);
 
