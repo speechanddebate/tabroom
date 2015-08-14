@@ -27,10 +27,6 @@ Tab::Account->has_many(sites => 'Tab::Site', 'host');
 Tab::Account->has_many(conflicts => 'Tab::AccountConflict', 'account');
 Tab::Account->has_many(conflicteds => 'Tab::AccountConflict', 'conflict');
 
-Tab::Account->has_many(tourn_admins => 'Tab::TournAdmin', 'account');
-Tab::Account->has_many(chapter_admins => 'Tab::ChapterAdmin', 'account');
-Tab::Account->has_many(circuit_admins => 'Tab::CircuitAdmin', 'account');
-Tab::Account->has_many(region_admins => 'Tab::RegionAdmin', 'account');
 
 Tab::Account->has_many(followers => 'Tab::Follower', 'account');
 Tab::Account->has_many(follow_accounts => 'Tab::Follower', 'follower');
@@ -40,25 +36,13 @@ Tab::Account->has_many(judges => 'Tab::Judge', 'account' => { order_by => 'id DE
 
 Tab::Account->has_many(entries => 'Tab::Entry', 'account');
 Tab::Account->has_many(students => 'Tab::Student');
-
 Tab::Account->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
-Tab::Account->has_many(circuits => [ Tab::CircuitAdmin => 'circuit']);
-Tab::Account->has_many(tourns => [ Tab::TournAdmin => 'tourn']);
-Tab::Account->has_many(chapters => [ Tab::ChapterAdmin => 'chapter']);
-Tab::Account->has_many(regions => [ Tab::RegionAdmin => 'region']);
 
-sub can_alter {
-
-	my ($self,$school) = @_;
-
-	return if $self->site_admin;
-	return if Tab::ChapterAdmin->search( account => $self->id, chapter => $school->chapter->id );
-	return if Tab::CircuitAdmin->search( account => $self->id, circuit => $school->tourn->circuit->id );
-
-	$m->print("<p class=\"err\">You are not authorized to make changes to that school's entry.  Hit back and try again.</p>");
-	$m->abort();
-}
-
+Tab::Account->has_many(permissions => 'Tab::Permission', 'account');
+Tab::Account->has_many(circuits => [ Tab::Permission => 'circuit']);
+Tab::Account->has_many(tourns => [ Tab::Permission => 'tourn']);
+Tab::Account->has_many(chapters => [ Tab::Permission => 'chapter']);
+Tab::Account->has_many(regions => [ Tab::Permission => 'region']);
 
 sub setting {
 
@@ -89,7 +73,7 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::Setting->create({
+			my $existing = Tab::AccountSetting->create({
 				person => $self->id,
 				tag    => $tag,
 				value  => $value,

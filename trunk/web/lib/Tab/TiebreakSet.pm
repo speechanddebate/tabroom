@@ -15,10 +15,9 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::Setting->search(  
+	my $existing = Tab::TiebreakSetting->search(  
 		tiebreak_set => $self->id,
 		tag          => $tag,
-		type         => "tiebreak_set"
 	)->first;
 
 	if (defined $value) { 
@@ -38,11 +37,10 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::Setting->create({
+			my $existing = Tab::TiebreakSetting->create({
 				tiebreak_set => $self->id,
 				tag          => $tag,
 				value        => $value,
-				type         => "tiebreak_set"
 			});
 
 			if ($value eq "text") { 
