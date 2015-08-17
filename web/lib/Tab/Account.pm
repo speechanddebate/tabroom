@@ -52,7 +52,7 @@ sub setting {
 	chomp $blob;
 
 	my $existing = Tab::AccountSetting->search(  
-		person => $self->id,
+		account => $self->id,
 		tag    => $tag,
 	)->first;
 
@@ -74,7 +74,7 @@ sub setting {
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
 			my $existing = Tab::AccountSetting->create({
-				person => $self->id,
+				account => $self->id,
 				tag    => $tag,
 				value  => $value,
 			});
