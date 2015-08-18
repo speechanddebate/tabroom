@@ -15,6 +15,8 @@ CREATE TABLE `round_setting` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+create index round on round_setting(round);
+
 DROP TABLE IF EXISTS `school_setting`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -31,6 +33,7 @@ CREATE TABLE `school_setting` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+create index school on school_setting(school);
 DROP TABLE IF EXISTS `rpool_setting`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -46,6 +49,7 @@ CREATE TABLE `rpool_setting` (
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+create index rpool on rpool_setting(rpool);
 
 DROP TABLE IF EXISTS `jpool_setting`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -62,6 +66,7 @@ CREATE TABLE `jpool_setting` (
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+create index jpool on jpool_setting(jpool);
 
 DROP TABLE IF EXISTS `entry_setting`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -78,6 +83,7 @@ CREATE TABLE `entry_setting` (
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+create index entry on entry_setting(entry);
 
 create table `jpool_round` ( 
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -86,6 +92,9 @@ create table `jpool_round` (
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+create index round  on jpool_round(round);
+create index jpool  on jpool_round(jpool);
 
 rename table room_group to rpool;
 rename table room_group_room to rpool_room;
