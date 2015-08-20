@@ -49,6 +49,7 @@ CREATE TABLE `rpool_setting` (
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
 create index rpool on rpool_setting(rpool);
 
 DROP TABLE IF EXISTS `jpool_setting`;
@@ -66,6 +67,7 @@ CREATE TABLE `jpool_setting` (
   `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
 create index jpool on jpool_setting(jpool);
 
 DROP TABLE IF EXISTS `entry_setting`;
