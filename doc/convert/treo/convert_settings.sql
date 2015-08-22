@@ -100,6 +100,10 @@ create index jpool  on jpool_round(jpool);
 
 rename table room_group to rpool;
 rename table room_group_room to rpool_room;
+
+alter table rpool_room drop foreign key rpool_room_ibfk_1; 
+alter table rpool_round drop foreign key rpool_round_ibfk_1; 
+
 alter table rpool_room change room_group rpool int(11);
 rename table room_group_round to rpool_round;
 alter table rpool_round change room_group rpool int(11);
@@ -158,7 +162,8 @@ alter table tourn_setting add created_at timestamp;
 alter table event_setting add created_at timestamp;
 
 insert into round_setting (tag, value, created_at, round) select 'ignore_results', '1', round.timestamp, round.id from round where round.ignore_results = 1;
-insert into round_setting (tag, value, created_at, round) select  'reset_room_moves', , round.timestamp, round.id from round where round.wipe_rooms = 1;
+insert into round_setting (tag, value, created_at, round) select  'reset_room_moves', '1', round.timestamp, round.id from round where round.wipe_rooms = 1;
+
 insert into round_setting (tag, value, created_at, round) select  'sidelock_against', round.sidelock_against, round.timestamp, round.id from round where round.sidelock_against > 0;
 insert into round_setting (tag, value, created_at, round) select  'include_room_notes', '1', round.timestamp, round.id from round where round.include_room_notes = 1;
 insert into round_setting (tag, value, created_at, round) select  'publish_entry_list', '1', round.timestamp, round.id from round where round.listed = 1;
