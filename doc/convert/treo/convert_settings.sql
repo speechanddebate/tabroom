@@ -216,7 +216,7 @@ insert into school_setting (tag, value, created_at, school) select 'individuals'
 
 alter table school_fine add deleted bool; 
 alter table school_fine add deleted_by int; 
-alter table school_fine add deleted_on datetime;
+alter table school_fine add deleted_at datetime;
 alter table school_fine add payment bool;
 alter table school_fine add judge int; 
 alter table school_fine add region int; 
