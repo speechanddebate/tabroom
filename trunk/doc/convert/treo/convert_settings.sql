@@ -87,6 +87,8 @@ CREATE TABLE `entry_setting` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 create index entry on entry_setting(entry);
 
+alter table entry modify tba int not null default 0;
+
 create table `jpool_round` ( 
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `jpool` int(11) DEFAULT NULL,
