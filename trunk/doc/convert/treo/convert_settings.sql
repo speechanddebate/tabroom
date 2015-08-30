@@ -186,6 +186,7 @@ insert into judge_setting (tag, value, created_at, judge) select 'gender', judge
 insert into judge_setting (tag, value, created_at, judge) select 'hire_offer', judge.hire_offer, judge.timestamp, judge.id from judge where judge.hire_offer is not null;
 insert into judge_setting (tag, value, created_at, judge) select 'hire_approved', judge.hire_approved, judge.timestamp, judge.id from judge where judge.hire_approved is not null;
 insert into judge_setting (tag, value, created_at, judge) select 'diverse', judge.diverse, judge.timestamp, judge.id from judge where judge.diverse is not null;
+insert into judge_setting (tag, value, created_at, judge) select  'cat_id', judge.cat_id, judge.timestamp, judge.id from judge where judge.cat_id > 0;
 
 alter table judge drop tab_rating;
 alter table judge drop special;
