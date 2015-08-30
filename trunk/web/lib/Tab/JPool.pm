@@ -5,16 +5,14 @@ Tab::JPool->columns(Primary => qw/id/);
 Tab::JPool->columns(Essential => qw/name tourn judge_group standby standby_timeslot timestamp/);
 Tab::JPool->columns(Others => qw/site publish registrant burden event_based/);
 
-Tab::JPool->has_a(standby_timeslot => 'Tab::Timeslot');
-
 Tab::JPool->has_a(site => 'Tab::Site');
 Tab::JPool->has_a(tourn => 'Tab::Tourn');
 Tab::JPool->has_a(judge_group => "Tab::JudgeGroup");
+Tab::JPool->has_a(standby_timeslot => 'Tab::Timeslot');
 
 Tab::JPool->has_many(settings => 'Tab::JPoolSetting', 'jpool');
 Tab::JPool->has_many(rounds => 'Tab::Round', 'pool');
 Tab::JPool->has_many(pool_judges => 'Tab::JPoolJudge', 'pool');
-
 Tab::JPool->has_many(judges => [Tab::JPoolJudge => 'judge']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
