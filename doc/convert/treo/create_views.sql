@@ -1,4 +1,5 @@
 
+
  alter table tabroom.ballot add created_at datetime;
  alter table tabroom.calendar add created_at datetime;
  alter table tabroom.change_log add created_at datetime;
@@ -11,7 +12,7 @@
  alter table tabroom.conflict add created_at datetime;
  alter table tabroom.double_entry_set add created_at datetime;
  alter table tabroom.email add created_at datetime;
- alter table tabroom.entrie add created_at datetime;
+ alter table tabroom.entry add created_at datetime;
  alter table tabroom.entry_student add created_at datetime;
  alter table tabroom.event add created_at datetime;
  alter table tabroom.file add created_at datetime;
@@ -85,8 +86,11 @@
 
 alter table tabroom.ballot add audited_by int;
 
+drop database if exists treo;
+create database treo;
+
 create view treo.ballots 
-			'id', 'side', 'bye', 'forfeit', 'chair', 'speaker_order', 'speech_number', 'collected_time', 'created_at', 'updated_at', 'entry_id', 'judge_id', 'section_id', 'collected_by_id', 'entered_by_id', 'audited_by_id'
+			('id', 'side', 'bye', 'forfeit', 'chair', 'speaker_order', 'speech_number', 'collected_time', 'created_at', 'updated_at', 'entry_id', 'judge_id', 'section_id', 'collected_by_id', 'entered_by_id', 'audited_by_id')
 as select
 			'id', 'side', 'bye', 'forfeit', 'chair', 'speaker_order', 'speech_number', 'collected_time', 'created_at', 'timestamp', 'entry', 'judge', 'panel', 'collected_by', 'account', 'audited_by'
 from tabroom.ballot;
@@ -538,80 +542,80 @@ from tabroom.webpage;
 
 
 create view treo.circuit_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'circuit_id' 
+			'id',  'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'circuit_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'circuit' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'circuit' 
 from tabroom.circuit_setting ;
 
 create view treo.tourn_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'tourn_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'tourn_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'tourn'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'tourn'
 from tabroom.tourn_setting ;
 
 create view treo.class_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'class_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'class_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'judge_group'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'judge_group'
 from tabroom.judge_group_setting ;
 
 create view treo.event_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'event_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'event_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'event'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'event'
 from tabroom.event_setting ;
 
 create view treo.entry_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'entry_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'entry_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'entry'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'entry'
 from tabroom.entry_setting ;
 
 create view treo.jpool_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'jpool_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'jpool_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'jpool'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'jpool'
 from tabroom.jpool_setting ;
 
 create view treo.rpool_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'rpool_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'rpool_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'rpool'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'rpool'
 from tabroom.rpool_setting ;
 
 create view treo.tiebreak_set_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'tiebreak_set_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'tiebreak_set_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'tiebreak_set'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'tiebreak_set'
 from tabroom.tiebreak_set_setting ;
 
 create view treo.judge_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'judge_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'judge_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'judge'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'judge'
 from tabroom.judge_setting ;
 
 create view treo.round_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'round_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'round_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'round'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'round'
 from tabroom.round_setting ;
 
 create view treo.person_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'person_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'person_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'account'
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'account'
 from tabroom.account_setting ;
 
 create view treo.squad_settings 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'squad_id' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'updated_at', 'squad_id' 
 as select 
-			'id', 'type', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'school' 
+			'id', 'tag', 'value', 'value_text', 'value_date', 'created_at', 'timestamp', 'school' 
 from tabroom.school_setting ;
 
 alter table tabroom.circuit_admin add created_at datetime;
 alter table tabroom.region_admin add created_at datetime;
-alter table tabroom.school_admin add created_at datetime;
+alter table tabroom.chapter_admin add created_at datetime;
 alter table tabroom.tourn_admin add created_at datetime;
 
 #PERMISSIONS
@@ -639,5 +643,4 @@ create view treo.tourn_admins
 as select
 			'created_at', 'timestamp', 'person', 'tourn'
 from tabroom.tourn_admin;
-
 

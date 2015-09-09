@@ -176,11 +176,27 @@ insert into round_setting (tag, value, value_text, created_at, round) select  'n
 insert into round_setting (tag, value, value_date, created_at, round) select  'completed', 'date', round.completed, round.timestamp, round.id from round where round.completed is not null;
 insert into round_setting (tag, value, value_date, created_at, round) select  'blasted', 'date', round.blasted, round.timestamp, round.id from round where round.blasted is not null;
 
+alter table round drop ignore_results;
+alter table round drop wipe_rooms;
+alter table round drop sidelock_against;
+alter table round drop include_room_notes;
+alter table round drop listed;
+alter table round drop judges;
+alter table round drop cat_id;
+alter table round drop motion;
+alter table round drop notes;
+alter table round drop completed;
+alter table round drop blasted;
+
 alter table judge_setting add created_at timestamp;
 alter table jpool_setting add created_at timestamp;
 
 update judge set special = NULL where special = "";
+update judge set created_at = reg_time;
+alter table judge drop reg_time;
+
 insert into judge_setting (tag, value, created_at, judge) select 'tab_rating', judge.tab_rating, judge.timestamp, judge.id from judge where judge.tab_rating > 0;
+insert into judge_setting (tag, value, created_at, judge) select 'notes', judge.notes, judge.timestamp, judge.id from judge where judge.notes is not null;
 insert into judge_setting (tag, value, created_at, judge) select 'special_job', judge.special, judge.timestamp, judge.id from judge where judge.special is not null;
 insert into judge_setting (tag, value, created_at, judge) select 'gender', judge.gender, judge.timestamp, judge.id from judge where judge.gender is not null;
 insert into judge_setting (tag, value, created_at, judge) select 'hire_offer', judge.hire_offer, judge.timestamp, judge.id from judge where judge.hire_offer is not null;
@@ -188,8 +204,10 @@ insert into judge_setting (tag, value, created_at, judge) select 'hire_approved'
 insert into judge_setting (tag, value, created_at, judge) select 'diverse', judge.diverse, judge.timestamp, judge.id from judge where judge.diverse is not null;
 insert into judge_setting (tag, value, created_at, judge) select  'cat_id', judge.cat_id, judge.timestamp, judge.id from judge where judge.cat_id > 0;
 
+alter table judge drop cat_id;
 alter table judge drop tab_rating;
 alter table judge drop special;
+alter table judge drop notes;
 alter table judge drop gender;
 alter table judge drop hire_offer;
 alter table judge drop hire_approved;
@@ -197,6 +215,7 @@ alter table judge drop diverse;
 alter table judge drop dropped;
 alter table judge drop drop_by;
 alter table judge drop drop_time;
+alter table judge drop standby;
 
 update judge_setting set tag="prelim_jpool" where tag="prelim_pool";
 update judge_setting set tag="prelim_jpool_name" where tag="prelim_pool_name";
@@ -208,14 +227,34 @@ insert into jpool_setting (tag, value, created_at, jpool) select 'burden', jpool
 insert into jpool_setting (tag, value, created_at, jpool) select 'event_based', jpool.event_based, jpool.timestamp, jpool.id from jpool where jpool.event_based is not null;
 insert into jpool_setting (tag, value, created_at, jpool) select 'standby_timeslot', jpool.standby_timeslot, jpool.timestamp, jpool.id from jpool where jpool.standby_timeslot is not null;
 
+alter table jpool drop standby;
+alter table jpool drop publish;
+alter table jpool drop registrant;
+alter table jpool drop burden;
+alter table jpool drop event_based;
+alter table jpool drop standby_timeslot;
 
-insert into school_setting (tag, value, created_at, school) select 'paid_amount', school.paid, school.timestamp, school.id from school where school.paid > 0;
 insert into school_setting (tag, value, created_at, school) select 'noprefs', school.paid, school.timestamp, school.id from school where school.paid > 0;
 insert into school_setting (tag, value, created_at, school) select 'congress_code', school.congress_code, school.timestamp, school.id from school where school.congress_code > 0;
 insert into school_setting (tag, value, created_at, school) select 'contact_name', school.contact_name, school.timestamp, school.id from school where school.contact_name is not null;
 insert into school_setting (tag, value, created_at, school) select 'contact_email', school.contact_email, school.timestamp, school.id from school where school.contact_email is not null;
 insert into school_setting (tag, value, created_at, school) select 'contact_number', school.contact_number, school.timestamp, school.id from school where school.contact_number is not null;
 insert into school_setting (tag, value, created_at, school) select 'individuals', school.individuals, school.timestamp, school.id from school where school.individuals > 0;
+insert into school_setting (tag, value, created_at, school) select 'hotel', school.hotel, school.timestamp, school.id from school where school.hotel > 0;
+
+alter table school drop hotel;
+alter table school drop noprefs;
+alter table school drop congress_code;
+alter table school drop contact_name;
+alter table school drop contact_email;
+alter table school drop contact_number;
+alter table school drop individuals;
+
+insert into school_fine (school, amount, reason, tourn, payment) select school.id, school.paid, 'Updated payment from Tabroom records', school.tourn, '1' from school where school.paid > 0;
+alter table school drop paid;
+alter table school drop self_register; 
+alter table school drop self_register; 
+
 
 alter table school_fine add deleted bool; 
 alter table school_fine add deleted_by int; 
@@ -223,4 +262,41 @@ alter table school_fine add deleted_at datetime;
 alter table school_fine add payment bool;
 alter table school_fine add judge int; 
 alter table school_fine add region int; 
+
+
+insert into entry_setting(tag, value, created_at, entry) select 'registered_seed', entry.seed, entry.timestamp, entry.id from entry where entry.seed > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'pairing_seed', entry.pair_seed, entry.timestamp, entry.id from entry where entry.pair_seed > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'pod', entry.pair_seed, entry.timestamp, entry.id from entry where entry.pair_seed > 0;
+
+insert into entry_setting(tag, value, created_at, entry) select 'bid', entry.bid, entry.timestamp, entry.id from entry where entry.bid > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'title', entry.title, entry.timestamp, entry.id from entry where entry.title > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'notes', entry.notes, entry.timestamp, entry.id from entry where entry.notes > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'sweeps', entry.sweeps, entry.timestamp, entry.id from entry where entry.sweeps > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'placement', entry.placement, entry.timestamp, entry.id from entry where entry.placement > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'cat_id', entry.cat_id, entry.timestamp, entry.id from entry where entry.cat_id > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'preferred_flight', entry.flight, entry.timestamp, entry.id from entry where entry.flight > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'registered_by', entry.reg_by, entry.timestamp, entry.id from entry where entry.reg_by > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'dropped_by', entry.drop_by, entry.timestamp, entry.id from entry where entry.drop_by > 0;
+insert into entry_setting(tag, value, value_date, created_at, entry) select 'dropped_at', 'date', entry.drop_time, entry.timestamp, entry.id from entry where entry.drop_time > 0;
+insert into entry_setting(tag, value, value_date, created_at, entry) select 'unwaitlisted_at', 'date', entry.off_waitlist, entry.timestamp, entry.id from entry where entry.off_waitlist > 0;
+
+update entry set created_at = reg_time;
+
+alter table entry drop seed;
+alter table entry drop pair_seed;
+alter table entry drop bid;
+alter table entry drop title;
+alter table entry drop notes;
+alter table entry drop unconfirmed;
+alter table entry drop sweeps;
+alter table entry drop placement;
+alter table entry drop cat_id;
+alter table entry drop flight;
+alter table entry drop reg_by;
+alter table entry drop drop_by;
+alter table entry drop reg_time;
+alter table entry drop drop_time;
+alter table entry drop off_waitlist;
+
+insert into jpool_round (jpool, round, timestamp) select pool, id, timestamp from round where pool > 0;
 
