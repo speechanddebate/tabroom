@@ -111,10 +111,10 @@ alter table tabroom.rpool_round add created_at datetime;
 alter table tabroom.rpool add created_at datetime;
 
 alter table rpool_room drop foreign key rpool_room_ibfk_1; 
-alter table rpool_round drop foreign key rpool_round_ibfk_1; 
 
 alter table rpool_room change room_group rpool int(11);
 alter table rpool_round change room_group rpool int(11);
+alter table rpool_round drop foreign key rpool_round_ibfk_1; 
 
 rename table pool to jpool;
 rename table pool_judge to jpool_judge;
@@ -191,7 +191,9 @@ alter table round drop note;
 alter table round drop completed;
 alter table round drop blasted;
 
+
 update judge set special = NULL where special = "";
+alter table judge add created_at datetime;
 update judge set created_at = reg_time;
 alter table judge drop reg_time;
 
@@ -250,26 +252,32 @@ alter table school drop contact_email;
 alter table school drop contact_number;
 alter table school drop individuals;
 
+<<<<<<< .mine
+=======
 alter table school_fine add payment bool;
 insert into school_fine (school, amount, reason, tourn, payment) select school.id, school.paid, 'Updated payment from Tabroom records', school.tourn, '1' from school where school.paid > 0;
 
 alter table school drop paid;
 alter table school drop self_register; 
 
+>>>>>>> .r3407
 alter table school_fine add deleted bool; 
 alter table school_fine add deleted_by int; 
 alter table school_fine add deleted_at datetime;
 alter table school_fine add judge int; 
 alter table school_fine add region int; 
 
+insert into school_fine (school, amount, reason, tourn, payment) select school.id, school.paid, 'Updated payment from Tabroom records', school.tourn, '1' from school where school.paid > 0;
+alter table school drop paid;
+alter table school drop self_register; 
+alter table school drop self_reg_deadline; 
+
 
 insert into entry_setting(tag, value, created_at, entry) select 'registered_seed', entry.seed, entry.timestamp, entry.id from entry where entry.seed > 0;
 insert into entry_setting(tag, value, created_at, entry) select 'pairing_seed', entry.pair_seed, entry.timestamp, entry.id from entry where entry.pair_seed > 0;
 insert into entry_setting(tag, value, created_at, entry) select 'pod', entry.pair_seed, entry.timestamp, entry.id from entry where entry.pair_seed > 0;
-
 insert into entry_setting(tag, value, created_at, entry) select 'bid', entry.bid, entry.timestamp, entry.id from entry where entry.bid > 0;
 insert into entry_setting(tag, value, created_at, entry) select 'title', entry.title, entry.timestamp, entry.id from entry where entry.title > 0;
-insert into entry_setting(tag, value, created_at, entry) select 'notes', entry.notes, entry.timestamp, entry.id from entry where entry.notes > 0;
 insert into entry_setting(tag, value, created_at, entry) select 'sweeps', entry.sweeps, entry.timestamp, entry.id from entry where entry.sweeps > 0;
 insert into entry_setting(tag, value, created_at, entry) select 'placement', entry.placement, entry.timestamp, entry.id from entry where entry.placement > 0;
 insert into entry_setting(tag, value, created_at, entry) select 'cat_id', entry.cat_id, entry.timestamp, entry.id from entry where entry.cat_id > 0;
@@ -279,6 +287,7 @@ insert into entry_setting(tag, value, created_at, entry) select 'dropped_by', en
 insert into entry_setting(tag, value, value_date, created_at, entry) select 'dropped_at', 'date', entry.drop_time, entry.timestamp, entry.id from entry where entry.drop_time > 0;
 insert into entry_setting(tag, value, value_date, created_at, entry) select 'unwaitlisted_at', 'date', entry.off_waitlist, entry.timestamp, entry.id from entry where entry.off_waitlist > 0;
 
+alter table entry add created_at datetime;
 update entry set created_at = reg_time;
 
 alter table entry drop seed;
