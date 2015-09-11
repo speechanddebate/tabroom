@@ -4,8 +4,7 @@ Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
 Tab::Judge->columns(Essential => qw/school first last code active ada notes 
 									judge_group alt_group covers chapter_judge obligation hired 
-									account acct_request score tmp 
-									reg_time timestamp /);
+									account acct_request score tmp created_at timestamp /);
 
 Tab::Judge->columns(TEMP => qw/tier pref panelid chair tourn avg diet ballotid accountid tab_rating
 							   cjid schoolname schoolcode regname regcode region standby/);
@@ -29,7 +28,7 @@ Tab::Judge->has_many(jpools => [Tab::JPoolJudge => 'jpool']);
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where judge_group = ?");
 Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where judge_group = ?");
 
-__PACKAGE__->_register_datetimes( qw/reg_time/);
+__PACKAGE__->_register_datetimes( qw/created_at/);
 
 sub setting {
 
