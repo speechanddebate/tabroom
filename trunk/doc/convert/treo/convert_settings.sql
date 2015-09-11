@@ -97,17 +97,18 @@ create table `jpool_round` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+
 create index round  on jpool_round(round);
 create index jpool  on jpool_round(jpool);
 
 rename table room_group to rpool;
 rename table room_group_room to rpool_room;
 
+rename table room_group_round to rpool_round;
 alter table rpool_room drop foreign key rpool_room_ibfk_1; 
 alter table rpool_round drop foreign key rpool_round_ibfk_1; 
 
 alter table rpool_room change room_group rpool int(11);
-rename table room_group_round to rpool_round;
 alter table rpool_round change room_group rpool int(11);
 
 rename table pool to jpool;
@@ -250,16 +251,15 @@ alter table school drop contact_email;
 alter table school drop contact_number;
 alter table school drop individuals;
 
+alter table school_fine add payment bool;
 insert into school_fine (school, amount, reason, tourn, payment) select school.id, school.paid, 'Updated payment from Tabroom records', school.tourn, '1' from school where school.paid > 0;
+
 alter table school drop paid;
 alter table school drop self_register; 
-alter table school drop self_register; 
-
 
 alter table school_fine add deleted bool; 
 alter table school_fine add deleted_by int; 
 alter table school_fine add deleted_at datetime;
-alter table school_fine add payment bool;
 alter table school_fine add judge int; 
 alter table school_fine add region int; 
 

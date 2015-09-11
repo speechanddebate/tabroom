@@ -46,3 +46,8 @@ insert into follower (account, follower, timestamp, type)
 	select account, follower, timestamp, "school"
 	from follow_account;
 
+
+drop table follow_account;
+drop table follow_entry;
+drop table follow_school;
+drop table follow_judge;
