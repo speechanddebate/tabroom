@@ -2,9 +2,8 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first last code active ada notes 
-									judge_group alt_group covers chapter_judge obligation hired 
-									account acct_request score tmp created_at timestamp /);
+Tab::Judge->columns(Essential => qw/school first last code active ada judge_group account chapter_judge/);
+Tab::Judge->columns(Others => qw / alt_group covers obligation hired acct_request score tmp created_at timestamp /);
 
 Tab::Judge->columns(TEMP => qw/tier pref panelid chair tourn avg diet ballotid accountid tab_rating
 							   cjid schoolname schoolcode regname regcode region standby/);

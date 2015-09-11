@@ -34,3 +34,62 @@ sub rm_student {
 	return;
 }
 
+
+sub setting {
+
+	my ($self, $tag, $value, $blob) = @_;
+
+	$/ = "";			#Remove all trailing newlines
+	chomp $blob;
+
+	my $existing = Tab::EntrySetting->search(  
+		entry => $self->id,
+		tag    => $tag,
+	)->first;
+
+	if (defined $value) { 
+			
+		if ($existing) {
+
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+			$existing->update;
+
+			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+				$existing->delete;
+			}
+
+			return;
+
+		} elsif ($value ne "delete" && $value && $value ne "0") {
+
+			my $existing = Tab::EntrySetting->create({
+				entry => $self->id,
+				tag    => $tag,
+				value  => $value,
+			});
+
+			if ($value eq "text") { 
+				$existing->value_text($blob);
+			}
+
+			if ($value eq "date") { 
+				$existing->value_date($blob);
+			}
+
+			$existing->update;
+
+		}
+
+	} else {
+
+		return unless $existing;
+		return $existing->value_text if $existing->value eq "text";
+		return $existing->value_date if $existing->value eq "date";
+		return $existing->value;
+
+	}
+
+}
+
