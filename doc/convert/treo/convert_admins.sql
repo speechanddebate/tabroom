@@ -65,3 +65,7 @@ insert into permission (tag, region, account, timestamp)
 	from region_admin;
 
 
+drop table chapter_admin;
+drop table circuit_admin;
+drop table tourn_admin;
+drop table region_admin;
