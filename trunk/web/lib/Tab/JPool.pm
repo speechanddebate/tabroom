@@ -2,13 +2,11 @@ package Tab::JPool;
 use base 'Tab::DBI';
 Tab::JPool->table('jpool');
 Tab::JPool->columns(Primary => qw/id/);
-Tab::JPool->columns(Essential => qw/name tourn judge_group standby standby_timeslot timestamp/);
-Tab::JPool->columns(Others => qw/site publish registrant burden event_based/);
+Tab::JPool->columns(Essential => qw/name tourn judge_group timestamp site/);
 
 Tab::JPool->has_a(site => 'Tab::Site');
 Tab::JPool->has_a(tourn => 'Tab::Tourn');
 Tab::JPool->has_a(judge_group => "Tab::JudgeGroup");
-Tab::JPool->has_a(standby_timeslot => 'Tab::Timeslot');
 
 Tab::JPool->has_many(settings => 'Tab::JPoolSetting', 'jpool');
 Tab::JPool->has_many(rounds => 'Tab::Round', 'pool');
