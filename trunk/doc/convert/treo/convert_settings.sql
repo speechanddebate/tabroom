@@ -191,9 +191,7 @@ alter table round drop note;
 alter table round drop completed;
 alter table round drop blasted;
 
-
 update judge set special = NULL where special = "";
-alter table judge add created_at datetime;
 update judge set created_at = reg_time;
 alter table judge drop reg_time;
 
@@ -259,6 +257,7 @@ alter table school drop individuals;
 
 alter table school_fine add payment bool;
 insert into school_fine (school, amount, reason, tourn, payment) select school.id, school.paid, 'Updated payment from Tabroom records', school.tourn, '1' from school where school.paid > 0;
+
 alter table school drop paid;
 alter table school drop self_register; 
 alter table school drop self_reg_deadline; 
@@ -269,27 +268,25 @@ alter table school_fine add deleted_at datetime;
 alter table school_fine add judge int; 
 alter table school_fine add region int; 
 
-insert into school_fine (school, amount, reason, tourn, payment) select school.id, school.paid, 'Updated payment from Tabroom records', school.tourn, '1' from school where school.paid > 0;
 
+insert into entry_setting(tag, value, created_at, entry) select 'at_large', 1, entry.timestamp, entry.id from entry where entry.seed = "atlarge";
+insert into entry_setting(tag, value, created_at, entry) select 'registered_seed', entry.seed, entry.timestamp, entry.id from entry where entry.seed is not null;
 
-insert into entry_setting (tag, value, created_at, entry) select 'registered_seed', entry.seed, entry.timestamp, entry.id from entry where entry.seed > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'pairing_seed', entry.pair_seed, entry.timestamp, entry.id from entry where entry.pair_seed > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'pod', entry.pair_seed, entry.timestamp, entry.id from entry where entry.pair_seed > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'bid', entry.bid, entry.timestamp, entry.id from entry where entry.bid > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'title', entry.title, entry.timestamp, entry.id from entry where entry.title > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'sweeps', entry.sweeps, entry.timestamp, entry.id from entry where entry.sweeps > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'placement', entry.placement, entry.timestamp, entry.id from entry where entry.placement > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'cat_id', entry.cat_id, entry.timestamp, entry.id from entry where entry.cat_id > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'preferred_flight', entry.flight, entry.timestamp, entry.id from entry where entry.flight > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'registered_by', entry.reg_by, entry.timestamp, entry.id from entry where entry.reg_by > 0;
-insert into entry_setting (tag, value, created_at, entry) select 'dropped_by', entry.drop_by, entry.timestamp, entry.id from entry where entry.drop_by > 0;
-insert into entry_setting (tag, value, value_date, created_at, entry) select 'dropped_at', 'date', entry.drop_time, entry.timestamp, entry.id from entry where entry.drop_time > 0;
-insert into entry_setting (tag, value, value_date, created_at, entry) select 'unwaitlisted_at', 'date', entry.off_waitlist, entry.timestamp, entry.id from entry where entry.off_waitlist > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'pairing_seed', entry.pair_seed, entry.timestamp, entry.id from entry where entry.pair_seed > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'pod', entry.pair_seed, entry.timestamp, entry.id from entry where entry.pair_seed > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'bid', entry.bid, entry.timestamp, entry.id from entry where entry.bid > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'title', entry.title, entry.timestamp, entry.id from entry where entry.title > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'sweeps', entry.sweeps, entry.timestamp, entry.id from entry where entry.sweeps > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'placement', entry.placement, entry.timestamp, entry.id from entry where entry.placement > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'cat_id', entry.cat_id, entry.timestamp, entry.id from entry where entry.cat_id > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'preferred_flight', entry.flight, entry.timestamp, entry.id from entry where entry.flight > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'registered_by', entry.reg_by, entry.timestamp, entry.id from entry where entry.reg_by > 0;
+insert into entry_setting(tag, value, created_at, entry) select 'dropped_by', entry.drop_by, entry.timestamp, entry.id from entry where entry.drop_by > 0;
+insert into entry_setting(tag, value, value_date, created_at, entry) select 'dropped_at', 'date', entry.drop_time, entry.timestamp, entry.id from entry where entry.drop_time > 0;
+insert into entry_setting(tag, value, value_date, created_at, entry) select 'unwaitlisted_at', 'date', entry.off_waitlist, entry.timestamp, entry.id from entry where entry.off_waitlist > 0;
 
-alter table entry add created_at datetime;
 update entry set created_at = reg_time;
 
-alter table entry drop seed;
 alter table entry drop pair_seed;
 alter table entry drop bid;
 alter table entry drop title;
@@ -306,4 +303,3 @@ alter table entry drop drop_time;
 alter table entry drop off_waitlist;
 
 insert into jpool_round (jpool, round, timestamp) select pool, id, timestamp from round where pool > 0;
-
