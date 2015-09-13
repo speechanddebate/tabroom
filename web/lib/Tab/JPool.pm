@@ -9,9 +9,9 @@ Tab::JPool->has_a(tourn => 'Tab::Tourn');
 Tab::JPool->has_a(judge_group => "Tab::JudgeGroup");
 
 Tab::JPool->has_many(settings => 'Tab::JPoolSetting', 'jpool');
-Tab::JPool->has_many(rounds => 'Tab::Round', 'pool');
 Tab::JPool->has_many(pool_judges => 'Tab::JPoolJudge', 'pool');
 Tab::JPool->has_many(judges => [Tab::JPoolJudge => 'judge']);
+Tab::JPool->has_many(rounds => [Tab::JPoolRound => 'round']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 

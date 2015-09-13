@@ -2,17 +2,11 @@ package Tab::School;
 use base 'Tab::DBI';
 Tab::School->table('school');
 Tab::School->columns(Essential => qw/id tourn name chapter region code contact/);
-Tab::School->columns(Others => qw/registered registered_on registered_by entered_on hotel 
-                                  paid contact_email contact_name contact_number individuals
-                                  noprefs timestamp self_register self_reg_deadline /);
-Tab::School->columns(TEMP => qw/entered_by/);
+Tab::School->columns(Others => qw/registered timestamp/);
 
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_a(chapter => 'Tab::Chapter');
-Tab::School->has_a(contact => 'Tab::Account');
-Tab::School->has_a(registered_by => 'Tab::Account');
 Tab::School->has_a(region => 'Tab::Region');
-Tab::School->has_a(hotel => 'Tab::Hotel');
 
 Tab::School->has_many(purchases => 'Tab::ConcessionPurchase', 'school');
 Tab::School->has_many(entries => 'Tab::Entry', 'school');
@@ -22,7 +16,6 @@ Tab::School->has_many(hires => 'Tab::JudgeHire', 'school');
 Tab::School->has_many(files => 'Tab::File', 'school');
 Tab::School->has_many(followers => [Tab::Follower => 'follower']);
 
-__PACKAGE__->_register_datetimes( qw/entered_on registered_on self_reg_deadline/);
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
 
