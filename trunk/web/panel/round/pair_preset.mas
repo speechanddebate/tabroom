@@ -5,11 +5,10 @@
 </%args>
 <%perl>
 
-
 	use POSIX;
 	use List::Util 'shuffle';
 
-	$round = Tab::Round->retrieve($round_id) unless $round;
+	$round = Tab::Round->retrieve($round_id) unless $round > 0;
 	my $event = $round->event;
 
 	Tab::Round->set_sql(reset_prelim => 'update round set type="prelim" where type="preset" and event = ?');
@@ -77,7 +76,7 @@
 		$entry_seed{$entry} = 0 unless $entry_seed{$entry};
 		$seed_count{$entry_seed{$entry}}++;
 		$max_seed = $entry_seed{$entry} if $entry_seed{$entry} > $max_seed;
-		push @seeds, $entry_seed{$entry}
+		push @seeds, $entry_seed{$entry};
 		push @pods, $entry_pod{$entry};
 	}
 
@@ -92,7 +91,7 @@
 		and ballot.panel = panel.id
 		and panel.round = round.id
 		'.$round_limit.'
-		and round.id != '.$round->id.'
+		and round.id != ? 
 		and opp_ballot.panel = ballot.panel
 		and opp_ballot.entry = opponent.id
 		and opponent.school = opp_school.id
@@ -101,7 +100,7 @@
 		and ballot.bye != 1
 	');
 
-	$ballot_sth->execute();
+	$ballot_sth->execute($round->id);
 
 	my %entry_hits;
 	my %entry_opps;
@@ -495,13 +494,16 @@
 				my $opps_taken;
 
 				foreach my $entry (@entries) { 
+
 					foreach my $opp (@{$entry_opps{$entry}}) { 
 						$opp_position{$entry} += $entry_seed{$opp};
 						$opps_taken++;
 					}
+
 					if ($entry_byes{$entry}) { 
 						$opp_position{$entry} += scalar @entries;
 					}
+
 				}
 
 				@entries = sort {$opp_position{$b} <=> $opp_position{$a}} @entries if $opps_taken;
@@ -625,6 +627,13 @@
 				@candidates = @due_neg if scalar @due_aff < scalar @due_neg;
 				@candidates = @entries if scalar @due_aff == scalar @due_neg;
 
+				if ($seed_presets eq "balance") {
+					my $average = (scalar @entries) / 2;
+					@candidates = sort { abs($entry_seed{$a} - $average) <=> abs($entry_seed{$b} - $average) } @candidates;
+					#this sorts the candidates so that the bye is more likely to come from the middle
+					@candidates = sort {$entry_position_need{$b} <=> $entry_position_need{$a}} @candidates if $entry_position_need{$entries[0]};
+				}
+
 				while (not defined $bye) { 
 
 					unless (@candidates) { 
@@ -638,6 +647,8 @@
 
 						my $nope;
 
+						$nope++ if $entry_byes{$test};
+
 						if (keys %bye_seed) { 
 							unless ($bye_seed{$entry_seed{$test}}) { 
 								push @tried, $test;
@@ -646,12 +657,10 @@
 						}
 
 						if ($seed_presets eq "inverse" ) { 
-
 							unless ($entry_needs{$test."-".$seed_byes_as} > 0) { 
 								push @tried, $test;
 								$nope++;
 							}
-
 						}
 
 						$bye = $test unless $nope;
@@ -680,8 +689,17 @@
 
 			}
 
+			my %seen = (); 
+			@due_whatever = grep { ! $seen{$_} ++ } @due_whatever;
+			@due_aff = grep { ! $seen{$_} ++ } @due_aff;
+			@due_neg = grep { ! $seen{$_} ++ } @due_neg;
 
 			my %partner;
+			my $average = (scalar @entries) / 2;
+
+			if ($seed_presets eq "balance") {
+				@due_whatever = sort { abs($entry_seed{$a} - $average) <=> abs($entry_seed{$b} - $average) } @due_whatever;
+			}
 
 			WHATEVER:
 			while (@due_whatever) { 
@@ -692,11 +710,7 @@
 				# multiple byes at this point, they're almost certainly
 				# screwups who don't deserve that kind of consideration.
 
-				@due_whatever = shuffle @due_whatever;
-
-				if ($seed_presets eq "balance") {
-					@due_whatever = sort {$entry_seed{$b} <=> $entry_seed{$a}} @due_whatever;
-				}
+				@due_whatever = shuffle @due_whatever unless $seed_presets eq "balance";
 
 				my $pull = shift @due_whatever;
 				next if $used{$pull}++;
@@ -712,10 +726,10 @@
 
 				if (scalar @due_neg < scalar @due_aff) { 
 					push @due_neg, $pull;
-					push @due_neg, $partner if $partner;
+					push @due_aff, $partner if $partner;
 				} else { 
 					push @due_aff, $pull;
-					push @due_aff, $partner if $partner;
+					push @due_neg, $partner if $partner;
 				}
 
 			}
@@ -747,7 +761,6 @@
 				$neg_string .= " ".$entry_code{$neg};
 			}
 
-
 			my $counter = 1;
 			my @panel_keys;
 
@@ -757,13 +770,12 @@
 			}
 
 			if ($seed_presets eq "balance") { 
-				@due_aff = sort {$entry_seed{$a} <=> $entry_seed{$b}} @due_aff;
-				@due_neg = shuffle @due_neg;
+				@due_aff = sort { abs($entry_seed{$a} - $average) <=> abs($entry_seed{$b} - $average) } @due_aff;
+				@due_neg = sort { abs($entry_seed{$b} - $average) <=> abs($entry_seed{$a} - $average) } @due_neg;
 			}
 
 			my %done;
 			my $negs;
-
 
 			foreach my $aff (@due_aff) { 
 
@@ -776,7 +788,9 @@
 					# on ideal seeding needs.  Only invoked for inverse & all
 					# seed_protect settings.
 
-					foreach my $debate_me_maybe (shuffle @due_neg) { 
+					@due_neg = shuffle @due_neg unless $seed_presets eq "balance";
+
+					foreach my $debate_me_maybe (@due_neg) { 
 						next if $done{"maybe_".$debate_me_maybe};
 						next unless $entry_needs{$debate_me_maybe."-".$entry_seed{$aff}};
 						next unless $entry_needs{$aff."-".$entry_seed{$debate_me_maybe}};
@@ -823,6 +837,8 @@
 					# swapper later will help.
 
 				}
+
+				Tab::debuglog("$aff seed $entry_seed{$aff} first hits $neg seed $entry_seed{$neg}");
 
 				if ($seed_presets eq "balance") {
 
@@ -880,6 +896,8 @@
 
 				push @{$panels{$counter}}, $aff;
 				push @{$panels{$counter}}, $neg;
+
+				Tab::debuglog("$aff seed $entry_seed{$aff} now hits $neg seed $entry_seed{$neg}");
 
 				push @panel_keys, $counter++;
 
@@ -1195,7 +1213,6 @@
 			}
 
 		}
-
 
 		my @byes;
 		push @byes, $bye;
