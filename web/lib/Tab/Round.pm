@@ -14,6 +14,7 @@ Tab::Round->has_a(timeslot => 'Tab::Timeslot');
 
 Tab::Round->has_many(jpools => [Tab::JPoolRound => 'jpool']);
 Tab::Round->has_many(rpools => [Tab::RPoolRound => 'rpool']);
+Tab::Round->has_many(settings => 'Tab::RoundSetting', 'round');
 
 Tab::Round->has_many(panels => 'Tab::Panel', 'round' => { order_by => 'letter'} );
 Tab::Round->has_many(results => 'Tab::Result', 'round');
