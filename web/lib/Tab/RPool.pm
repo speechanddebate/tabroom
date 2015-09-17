@@ -6,8 +6,8 @@ Tab::RPool->has_many(rpools => 'Tab::RPoolRoom','rpool');
 Tab::RPool->has_many(round_links => 'Tab::RPoolRound','rpool');
 Tab::RPool->has_many(room_links => 'Tab::RPoolRoom','rpool');
 
-Tab::RPool->has_many(rounds => [ Tab::RPoolRound => 'round'], 'round');
-Tab::RPool->has_many(rooms => [ Tab::RPoolRoom => 'room'], 'room');
+Tab::RPool->has_many(rounds => [Tab::RPoolRound => 'round']);
+Tab::RPool->has_many(rooms => [Tab::RPoolRoom => 'room']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
