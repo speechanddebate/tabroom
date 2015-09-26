@@ -14,6 +14,7 @@ from tabroom.ballot;
 
 alter table tabroom.tourn_change add webpage int;
 alter table tabroom.tourn_change add judge_group int;
+alter table tabroom.tourn_change add strike int;
 
 create view treo.change_logs
 	(id, type, description, created_at, updated_at, tourn_id, class_id, event_id, webpage_id, squad_id, entry_id, judge_id, strike_id, round_id, section_id, new_section_id)
@@ -460,75 +461,75 @@ as select
 from tabroom.webpage;
 
 create view treo.circuit_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, circuit_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, circuit_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, circuit 
+	id, tag, value, value_text, value_date, created_at, timestamp, circuit 
 from tabroom.circuit_setting ;
 
 create view treo.tourn_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, tourn_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, tourn_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, tourn
+	id, tag, value, value_text, value_date, created_at, timestamp, tourn
 from tabroom.tourn_setting ;
 
 create view treo.class_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, class_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, class_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, judge_group
+	id, tag, value, value_text, value_date, created_at, timestamp, judge_group
 from tabroom.judge_group_setting ;
 
 create view treo.event_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, event_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, event_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, event
+	id, tag, value, value_text, value_date, created_at, timestamp, event
 from tabroom.event_setting ;
 
 create view treo.entry_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, entry_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, entry_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, entry
+	id, tag, value, value_text, value_date, created_at, timestamp, entry
 from tabroom.entry_setting;
 
 create view treo.jpool_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, jpool_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, jpool_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, jpool
+	id, tag, value, value_text, value_date, created_at, timestamp, jpool
 from tabroom.jpool_setting ;
 
 create view treo.rpool_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, rpool_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, rpool_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, rpool
+	id, tag, value, value_text, value_date, created_at, timestamp, rpool
 from tabroom.rpool_setting ;
 
 create view treo.tiebreak_set_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, tiebreak_set_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, tiebreak_set_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, tiebreak_set
-from tabroom.tiebreak_set_setting ;
+	id, tag, value, value_text, value_date, created_at, timestamp, tiebreak_set
+from tabroom.tiebreak_setting ;
 
 create view treo.judge_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, judge_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, judge_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, judge
+	id, tag, value, value_text, value_date, created_at, timestamp, judge
 from tabroom.judge_setting ;
 
 create view treo.round_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, round_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, round_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, round
+	id, tag, value, value_text, value_date, created_at, timestamp, round
 from tabroom.round_setting ;
 
 create view treo.person_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, person_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, person_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, account
+	id, tag, value, value_text, value_date, created_at, timestamp, account
 from tabroom.account_setting ;
 
 create view treo.squad_settings 
-	(id, type, tag, value, value_text, value_date, created_at, updated_at, squad_id )
+	(id, tag, value, value_text, value_date, created_at, updated_at, squad_id )
 as select 
-	id, type, tag, value, value_text, value_date, created_at, timestamp, school 
+	id, tag, value, value_text, value_date, created_at, timestamp, school 
 from tabroom.school_setting ;
 
 #PERMISSIONS
