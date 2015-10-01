@@ -93,8 +93,9 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $event_ballots_sth = $dbh->prepare("
-		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, entry.school, ballot.side, panel.bracket, panel.id, entry.code, panel.bye
-		from ballot, panel, round, entry, event, school
+		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, entry.school, seed.value, ballot.side, panel.bracket, panel.id, entry.code, panel.bye
+		from (ballot, panel, round, entry, event, school)
+		left join entry_setting seed on seed.entry = entry.id and seed.tag = 'pairing_seed'
 		where event.judge_group = ".$round_event->judge_group->id."
 		and round.event = event.id
 		and round.id = panel.round
@@ -110,19 +111,17 @@
 
 	my @entries;
 
-	my %entry_side;
-	my %entry_code;
-	my %entry_school;
-	my %entry_region;
+	my %entry_hash;
+
 	my %school_entries;
 	my %region_entries;
 
 	my %judge_ballots;
-	my %entry_ballots;
 
 	my @panels;
 	my %panel_entries;
 	my %panel_bracket;
+	my %panel_seed;
 	my %panel_bye;
 
 	my %ballot_type;
@@ -132,24 +131,28 @@
 
 	my %judge_rounds;
 
-	while (my ($ballot, $entry, $judge, $round, $type, $entry_school, $side, $bracket, $panel, $code, $bye) = $event_ballots_sth->fetchrow_array() ) {
+	while (my ($ballot, $entry, $judge, $round, $type, $entry_school, $entry_seed, $side, $bracket, $panel, $code, $bye) = $event_ballots_sth->fetchrow_array() ) {
 
 		if ($round == $this_round) { 
 
 			push @entries, $entry;
 
+			$entry_hash{$entry}{"seed"} = $entry_seed;
+
+			$entry_hash{$entry}{"side"} = $side;
+			$entry_hash{$entry}{"code"} = $code;
+			$entry_hash{$entry}{"school"} = $entry_school;
+			$entry_hash{$entry}{"region"} = $school_region{$entry_school};
+
 			push @{$school_entries{$entry_school}}, $entry;
-			$entry_school{$entry} = $entry_school;
-			$entry_region{$entry} = $school_region{$entry_school};
 			push @{$region_entries{$school_region{$entry_school}}}, $entry if $school_region{$entry_school};
 
-			$entry_side{$entry} = $side;
-			$entry_code{$entry} = $code;
-
 			push @panels, $panel;
-			$panel_bracket{$panel} = $bracket;
 			$panel_bye{$panel} = $bye;
 
+			$panel_seed{$panel} = $entry_seed unless $panel_seed{$panel};
+			$panel_seed{$panel} = $entry_seed unless $panel_seed{$panel};
+			$panel_bracket{$panel} = $bracket;
 
 			push @{$panel_entries{$panel}}, $entry;
 
@@ -157,7 +160,7 @@
 
 			push @{$judge_rounds{$judge}}, $round if $round;
 			push @{$judge_ballots{$judge}}, $ballot;
-			push @{$entry_ballots{$entry}}, $ballot;
+			push @{$entry_hash{$entry}{"ballots"}}, $ballot;
 
 			$ballot_type{$ballot} = $type;
 			$ballot_side{$ballot} = $side;
@@ -499,12 +502,12 @@
 		next  if $judge_out{$judge};
 
 		if ($judge_ballots{$judge}) { 
-			foreach my $ballot ( sort { $entry_code{$ballot_entry{$a}} cmp $entry_code{$ballot_entry{$b}}} @{$judge_ballots{$judge}}) { 
+			foreach my $ballot ( sort { $entry_hash{$ballot_entry{$a}}{"code"} cmp $entry_hash{$ballot_entry{$b}}{"code"}} @{$judge_ballots{$judge}}) { 
 				my $entry = $ballot_entry{$ballot};
 				next if $allow_repeat_elims && ($round_type eq "elim" || $round_type eq "final" || $ballot_type{$ballot} eq "elim" || $ballot_type{$ballot} eq "final") ;
 				push @{$judge_avoid{$judge}}, $entry;
 				next if $allow_repeat_judging;
-				next if $allow_repeat_prelim_side && $ballot_side{$ballot} != $entry_side{$entry};
+				next if $allow_repeat_prelim_side && $ballot_side{$ballot} != $entry_hash{$entry}{"side"};
 				push @{$judge_clashes{$judge}}, $entry;
 			}
 		}
@@ -519,9 +522,8 @@
 
 	my %default_settings = $m->comp("/funclib/default_rating_settings.mas", type => $round_event->type);
 
-	my $bracket_order = $round_event->setting("tab_rating_priority", $round->id);
+	my $bracket_order = $round->setting("tab_rating_priority");
 	$bracket_order = $default_settings{$round->name} unless $bracket_order;
-
 	$bracket_order =~ s/\s*//g;
 	my @orders = split(/\,/, $bracket_order) unless $round_type eq "elim" || $round_type eq "final";
 
@@ -541,7 +543,6 @@
 		}
 
 	} else { 
-
 
 
 	}
@@ -565,6 +566,32 @@
 		$last_order = $order;
 	}
 
+	my $seed_order = $round->setting("tab_seed_priority");
+	$seed_order =~ s/\s*//g;
+	my @seed_orders = split(/\,/, $seed_order) if $round_type eq "prelim";
+	my %seed_score;
+
+	undef $order_multiplier;
+
+	foreach my $order (reverse @seed_orders) { 
+
+		$order_multiplier++;
+
+		foreach my $panel (@panels) { 
+			$panel_seed{$panel} = 0 unless $panel_seed{$panel};
+			next unless $panel_seed{$panel} == $order;
+			$seed_score{$panel} = $order_multiplier;
+		}
+
+		$last_order = $order; 
+
+	}
+
+	$last_order++;
+	foreach my $panel (@panels) { 
+		next if $seed_score{$panel};
+		$seed_score{$panel} = $last_order;
+	}
 
 	my %fix_flight;
 	my @flight_settings = $m->comp("/funclib/event_entry_settings.mas", event => $round->event, tag => "preferred_flight");
@@ -613,7 +640,7 @@
 				}
 
 				if ($region_avoid) { 
-					$score += 100 if $entry_region{$entry} == $judge_region{$judge};
+					$score += 100 if $entry_hash{$entry}{"region"} == $judge_region{$judge};
 				}
 
 				if ($prefs && $prefs ne "none") { 
@@ -648,6 +675,7 @@
 			} 
 
 			$score = $score * $bracket_score{$panel} if $bracket_score{$panel} && $round_type ne "elim" &! $dont_care;
+			$score = $score * $seed_score{$panel} if $seed_score{$panel} && $round_type eq "prelim" &! $dont_care;
 
 			$judge_panel_score{$judge."-".$panel} = $score;
 
@@ -950,7 +978,7 @@
 %				foreach my $entry (@{$panel_entries{$panel}}) { 
 					<span class="medspan">
 						<% $notfirst++ ? "vs " : "" %>
-						<% $entry_code{$entry} %>
+						<% $entry_hash{$entry}{"code"} %>
 					</span>
 %				}
 

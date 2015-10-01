@@ -42,10 +42,7 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::EntrySetting->search(  
-		entry => $self->id,
-		tag    => $tag,
-	)->first;
+	my $existing = Tab::EntrySetting->search(entry => $self->id, tag => $tag)->first;
 
 	if (defined $value) { 
 			

@@ -32,6 +32,12 @@ sub students {
 sub short_name {
 	my ($self, $limit) = @_;
 	my $name = $self->name;
+
+	#screw these people.
+	$name = "Thomas Jefferson HSST" if $name eq "Thomas Jefferson High School of Science and Technology";
+	$name = "Thomas Jefferson HSST" if $name eq "Thomas Jefferson High School of Science & Technology";
+	$name = "Bronx Science" if $name eq "The Bronx High School of Science";
+
 	$name = "NYU" if $name eq "New York University";
 	$name =~ s/of Math and Science$//g;
 	$name =~ s/Academy$//g;
@@ -49,6 +55,7 @@ sub short_name {
 	$name =~ s/University\ of//g;
 	$name =~ s/California State University,/CSU/g;
 	$name =~ s/California State University/CSU/g;
+	$name =~ s/California,/UC/g;
 	$name =~ s/University$//g;
 	$name =~ s/State\ University,/State\ /g;
 	$name =~ s/^The//g;
