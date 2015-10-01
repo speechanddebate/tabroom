@@ -9,8 +9,6 @@
 	$round = Tab::Round->retrieve($round_id) if $round_id && not defined $round;
 	$m->abort unless $round;
 
-	Tab::debuglog("I have lost the powermatcher battle.  Calling the weighted one");
-
 	my $event = $round->event;
 	my $tourn = $event->tourn;
 
@@ -30,9 +28,11 @@
 	my $pullup_penalty =     1000000;
 
 	if ($event->setting("pullup_minimize")) { 
-		my $pullup_penalty =     10000000;
-		my $wrong_side_penalty = 1000000;
+		$pullup_penalty     = 100000000000000;
+		$wrong_side_penalty = 10000000000;
 	}
+
+	my $hit_pullup_again_penalty = 100000000000 if $event->setting("prevent_hitting_pullup_twice");
 
 	# Erase any current round already in place
 	$m->comp("/funclib/round_dump.mas", round => $round);
@@ -88,6 +88,7 @@
 
 	# Rework the entries array to just be an array of IDs.  This will increase
 	# speed a lot.
+
 	@entries = keys %entry_by_id;
 
 	# Sort out the seed order of each entry and also the remaining tiebreakers
@@ -128,6 +129,7 @@
 
 	my %opp_wins = ();
 	my %pullup_count = ();
+	my %hit_pullup_count = ();
 
 	while (my ( $entry, $opp, $side, $round_id, $round_type, $round_name) = $opponents_sth->fetchrow_array() ) {
 
@@ -140,6 +142,9 @@
 		unless ($round_type eq "prelim") { 
 			if ($entry_round_record{$round_id}{$entry} < $entry_round_record{$round_id}{$opp}) { 
 				$pullup_count{$entry}++;
+			}
+			if ($entry_round_record{$round_id}{$entry} > $entry_round_record{$round_id}{$opp}) { 
+				$hit_pullup_count{$entry}++;
 			}
 		}
 
@@ -177,18 +182,15 @@
 	# Sort the debaters in the bracket without winloss as a factor to determine
 	# pullup positions
 
-	foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+	foreach my $key (sort {$b <=> $a} keys %{$desc_ref}) {
 
 		next if ${$desc_ref}{$key} eq "W";
 
-		@entries = sort { int(100 * ${$tbs_ref}{$a."-".$key}) <=> int(100 * ${$tbs_ref}{$b."-".$key})  } @entries 
-			if ${$tier_dir}{$key} eq "up"; 
-
-		@entries = sort { int(100 * ${$tbs_ref}{$b."-".$key}) <=> int(100 * ${$tbs_ref}{$a."-".$key})  } @entries 
-			if ${$tier_dir}{$key} eq "down";
+		@entries = sort { int(100 * ${$tbs_ref}{$a."-".$key}) <=> int(100 * ${$tbs_ref}{$b."-".$key})  } @entries if ${$tier_dir}{$key} eq "up"; 
+		@entries = sort { int(100 * ${$tbs_ref}{$b."-".$key}) <=> int(100 * ${$tbs_ref}{$a."-".$key})  } @entries if ${$tier_dir}{$key} eq "down";
 	}
 
-	my %entry_hilo = map { $_ => $entries[$_] } 0..$#entries;
+	my %entry_hilo = map { $entries[$_] => $_ } 0 .. $#entries;
 
 	my %entry_position = %entry_hilo if $powermatch_method eq "seed";
 	%entry_position = %entry_sop if $powermatch_method ne "seed";
@@ -213,19 +215,24 @@
 
 			# This is the method used by APDA infidels.  Higher scores to the
 			# people who shouldn't be pulled up.
+
 			$pullup_score{$entry} += ($num_entries * 2) - $entry_seed{$entry};  
 			$pullup_entities{$entry}{"num_entries"} = $num_entries;
 			$pullup_entities{$entry}{"seed"} = $entry_seed{$entry};
 
 		} else { 
 
-			# Default is to use SOP.  Higher scores to the people who shouldn't be pulled up as often. 
+			# Default is to use SOP.  Higher scores to the people who shouldn't
+			# be pulled up as often. 
+
 			$pullup_score{$entry} += ($num_entries * 2) - $opp_seed{$entry};
 			$pullup_entities{$entry}{"num_entries"} = $num_entries;
 			$pullup_entities{$entry}{"sop"} = $entry_sop{$entry};
 		}
 
-		#Prevent someone from getting pulled up twice unless there's no other choice in this bracket (doubled).
+		# Prevent someone from getting pulled up twice unless there's no other
+		# choice in this bracket (doubled).
+
 		if ($pullup_count{$entry} && not defined $pullup_repeat) {
 			$pullup_score{$entry} += $pullup_score{$entry};
 		}
@@ -332,27 +339,42 @@
 
 				next if $opponent == $be;
 
-				# Bracket pullups get a penalty proportional to how many times they'd be pulled up and their pullup
-				# score (based on whether they've been pulled up before and their oppwin or seed position.
+				# Bracket pullups get a penalty proportional to how many times
+				# they'd be pulled up and their pullup score (based on whether
+				# they've been pulled up before and their oppwin or seed
+				# position.
 
-				# You are only penalized for getting pulled up, not for debating the pullup.
-
+				# Ordinarily you are only penalized for getting pulled up, not
+				# for debating the pullup.
 
 				if ($entry_record{$opponent} > $entry_record{$be}) { 
+
+					#The extra ten thousand in this one prevents double pullups unless it must be so. 
 					$opponent_score{$be}{$opponent} += (abs($entry_record{$opponent} - $tier) ** 2) * 10000 * $pullup_penalty;
+
 					$opponent_score{$be}{$opponent} += $pullup_penalty * $pullup_score{$be}; 
 					$score_elements{$be."-".$opponent}{"pullup"} = abs($entry_record{$opponent} - $tier) * $pullup_penalty * $pullup_score{$be}; 
 					$score_elements{$be."-".$opponent}{"pullup_record_diff"} = abs($entry_record{$opponent} - $tier)." in tier $tier";
 					$score_elements{$be."-".$opponent}{"pullup_base_score"} = $pullup_score{$be};
 				}
-		
-				# And they get a score based on where in the bracket they are.  This is multiplied by the rank within
-				# the bracket of the entry so that the top entry will get the most desirable opponent (lowest seed)
-				# possible within the bounds of the other constraints.   Squared to make differences between ranks in low
-				# brackets more pronounced.
 
-				$opponent_score{$be}{$opponent} += ($worst_position - $entry_position{$opponent}) * ( ($num_entries - $rank) ** 2) * .01;
-				$score_elements{$be."-".$opponent}{"position"} = ($worst_position - $entry_position{$opponent}) * (($num_entries - $rank) ** 2) * .01;
+				# Unless you're APDA and therefore insane
+
+				if ($entry_record{$opponent} < $entry_record{$be}) { 
+					$opponent_score{$be}{$opponent} += (abs($tier - $entry_record{$opponent}) ** 2) * $hit_pullup_again_penalty * $hit_pullup_count{$be};
+				}
+		
+				# And they get a score based on where in the bracket they are.
+				# This is multiplied by the rank within the bracket of the
+				# entry so that the top entry will get the most desirable
+				# opponent (lowest seed) possible within the bounds of the
+				# other constraints.   Squared to make differences between
+				# ranks in low brackets more pronounced.
+
+				$opponent_score{$be}{$opponent} += ($worst_position - $entry_position{$opponent}) * ( ($num_entries - $rank) ** 3) * .01;
+
+				$score_elements{$be."-".$opponent}{"position"} = ($worst_position - $entry_position{$opponent}) * (($num_entries - $rank) ** 3) * .01;
+
 				$score_elements{$be."-".$opponent}{"worst_position"} = $worst_position;
 				$score_elements{$be."-".$opponent}{"entry_position"} = $entry_position{$opponent};
 				$score_elements{$be."-".$opponent}{"rank"} = $rank;
