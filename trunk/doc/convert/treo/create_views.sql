@@ -16,10 +16,13 @@ alter table tabroom.tourn_change add webpage int;
 alter table tabroom.tourn_change add judge_group int;
 alter table tabroom.tourn_change add strike int;
 
+select "Mark One";
+
+alter table tabroom.tourn_change add round int;
 create view treo.change_logs
 	(id, type, description, created_at, updated_at, tourn_id, class_id, event_id, webpage_id, squad_id, entry_id, judge_id, strike_id, round_id, section_id, new_section_id)
 as select
-	id, type, text, created_at, timestamp, tourn, judge_group, event, webpage, school, entry, judge, strike, round, panel, new_panel
+	id, type, text, created_at, timestamp, tourn, judge_group, event, webpage, school, entry, judge, strike, round, old_panel, new_panel
 from tabroom.tourn_change;
 
 create view treo.circuit_dues
@@ -81,9 +84,9 @@ as select
 from tabroom.email;
 
 create view treo.entries
-	(id, code, name, dropped, waitlisted, dq, register_seed, pairing_seed, ada, registered_by, tba, created_at, updated_at, event_id, squad_id, tourn_id)
+	(id, code, name, dropped, waitlisted, dq, ada, tba, created_at, updated_at, event_id, squad_id, tourn_id)
 as select
-	id, code, name, dropped, waitlist, dq, seed, pair_seed, ada, reg_by, tba, created_at, timestamp, event, school, tourn
+	id, code, name, dropped, waitlist, dq, ada, tba, created_at, timestamp, event, school, tourn
 from tabroom.entry;
 
 create view treo.entry_students
@@ -97,6 +100,8 @@ create view treo.events
 as select
 	id, name, type, abbr, fee, created_at, timestamp, tourn, judge_group, event_double
 from tabroom.event;
+
+select "Mark Two";
 
 alter table tabroom.file add public bool;
 alter table tabroom.file add webpage int;
@@ -142,6 +147,8 @@ as select
 	id, night, slots, created_at, timestamp, tourn
 from tabroom.housing_slots;
 
+select "Mark Three";
+
 create view treo.jpool_judges
 	(created_at, updated_at, jpool_id, judge_id)
 as select
@@ -160,31 +167,37 @@ as select
 	id, name, created_at, timestamp, judge_group, site
 from tabroom.jpool;
 
+alter table tabroom.judge_hire add requestor int;
+
 create view treo.judge_hires
-	(id, requested_at, entries_requested, entries_accepted, rounds_requested, rounds_accepted, created_at, updated_at, squad_id, tourn_id, judge_id, requestor_id)
+	(id, requested_at, entries_requested, rounds_requested, rounds_accepted, created_at, updated_at, squad_id, tourn_id, judge_id, requestor_id)
 as select
-	id, request_made, entries_requested, entries_accepted, rounds_requested, rounds_accepted, created_at, timestamp, school, tourn_id, judge_id, requestor_id
+	id, request_made, covers, rounds, rounds_accepted, created_at, timestamp, school, tourn, judge, requestor
 from tabroom.judge_hire ;
 
 create view treo.judges
-	(id, first, last, code, active, ada, obligation_rounds, hired_rounds, created_at, updated_at, school_judge_id, class_id, squad_id, person_id, alternate_class_id, covers_class_id)
+	(id, first, last, code, active, ada, obligation_rounds, hired_rounds, created_at, updated_at, school_judge_id, class_id, squad_id, 
+		person_id, alternate_class_id, covers_class_id)
 as select
-	id, first, last, code, active, ada, obligation, hired, reg_time, timestamp, chapter_judge, judge_group, school, account, alt_group, covers
+	id, first, last, code, active, ada, obligation, hired, created_at, timestamp, chapter_judge, judge_group, school, account, alt_group, covers
 from tabroom.judge;
 
-alter table login add sha512 char(128);
+alter table tabroom.login add sha512 char(128);
+
 create view treo.logins
 	(id, username, password, sha512, name, accesses, last_access, pass_changekey, pass_timestamp, pass_change_expires, source, ualt_id, created_at, updated_at, person_id)
 as select
-	id, username, password, sha512, name, accesses, last_access, pass_changekey, pass_timestamp, pass_change_expires, source, ualt_id, created_at, timestamp, person_id
+	id, username, password, sha512, name, accesses, last_access, pass_changekey, pass_timestamp, pass_change_expires, source, ualt_id, created_at, timestamp, person
 from tabroom.login;
 
-alter table person add middle varchar(63);
+alter table tabroom.person add middle varchar(63);
 create view treo.people
 	(id, email, first, middle, last, phone, alt_phone, provider, street, city, state, zip, country, gender, ualt_id, site_admin, no_email, multiple, tz, diversity, flags, created_at, updated_at)
 as select
 	id, email, first, middle, last, phone, alt_phone, provider, street, city, state, zip, country, gender, ualt_id, site_admin, no_email, multiple, tz, diversity, flags, created_at, timestamp
 from tabroom.person;
+
+select "Mark Four";
 
 create view treo.jpool_judges
 	(created_at, updated_at, judge_id, jpool_id)
@@ -220,7 +233,7 @@ as select
 	id, ordinal, percentile, type, created_at, timestamp, school, entry, judge, rating_tier, rating_subset, draft, sheet
 from tabroom.rating;
 
-alter table region add active bool;
+alter table tabroom.region add active bool;
 
 create view treo.regions
 	(id, name, code, active, ncfl_quota, ncfl_archdiocese, ncfl_cooke, ncfl_sweeps, created_at, updated_at, circuit_id, tourn_id)
@@ -241,7 +254,7 @@ as select
 from tabroom.result_value;
 
 create view treo.results
-	(id, rank, percentile, honor, honor_site, created_at, updated_at, student_id, entry_id, squad_id, result_set_id)
+	(id, rank, percentile, honor, honor_site, created_at, updated_at, student_id, entry_id, squad_id, round_id, result_set_id)
 as select
 	id, rank, percentile, honor, honor_site, created_at, timestamp, student, entry, school, round, result_set
 from tabroom.result;
@@ -261,7 +274,7 @@ from tabroom.room;
 create view treo.rounds
 	(id, number, name, type, published, post_results, flighted, start_time, created_at, updated_at, site_id, timeslot_id, event_id, tiebreak_set_id)
 as select
-	id, name, label, type, published, post_results, flighted, start_time, created_at, timestamp, site, timeslot, event, tiebreak_set
+	id, name, label, type, published, post_results, flighted, start_time, created_at, timestamp, site, timeslot, event, tb_set
 from tabroom.round;
 
 create view treo.rpool_rooms
@@ -282,6 +295,7 @@ as select
 	id, name, created_at, timestamp, tourn
 from tabroom.rpool;
 
+use tabroom;
 DROP TABLE IF EXISTS `school_contact`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -304,14 +318,17 @@ from tabroom.school_contact;
 alter table tabroom.school add onsite_by int;
 
 create view treo.squads
-	(id, name, code, paid, onsite, onsite_at, onsite_by_id, registered_by_id, created_at, updated_at, school_id, tourn_id)
+	(id, name, code, onsite, onsite_at, onsite_by_id, registered_by_id, created_at, updated_at, school_id, tourn_id)
 as select
-	id, name, code, paid, registered, registered_on, onsite_by, registered_by, entered_on, timestamp, chapter, tourn
+	id, name, code, registered, registered_on, onsite_by, registered_by, entered_on, timestamp, chapter, tourn
 from tabroom.school;
 
 alter table tabroom.ballot_value add speech smallint;
-update tabroom.ballot_value, tabroom.ballot set tabroom.ballot_value.speech = tabroom.ballot.speechnumber 
-	where tabroom.ballot.id = tabroom.ballot_value.tabroom.ballot and tabroom.ballot.speechnumber > 0;
+
+update tabroom.ballot_value, tabroom.ballot 
+	set tabroom.ballot_value.speech = tabroom.ballot.speechnumber 
+	where tabroom.ballot.id = tabroom.ballot_value.ballot 
+	and tabroom.ballot.speechnumber > 0;
 
 create view treo.scores
 	(id, tag, value, content, position, speech, created_at, updated_at, student_id, ballot_id)
@@ -365,17 +382,19 @@ as select
 from tabroom.strike_time;
 
 alter table tabroom.strike add hidden bool;
+alter table tabroom.strike add timeslot int;
+alter table tabroom.strike add entered_by int;
 
 create view treo.strikes
 	(id, type, start, end, hidden, created_at, updated_at, region_id, timeslot_id, squad_id, entry_id, judge_id, entered_by_id, strike_timeslot_id)
 as select
-	id, type, start, end, hidden, created_at, timestamp, region, timeslot, school, entry, judge, entered_by, strike_timeslot
+	id, type, start, end, hidden, created_at, timestamp, region, timeslot, school, entry, judge, entered_by, strike_time
 from tabroom.strike;
 
 create view treo.students
 	(id, first, last, grad_year, novice, retired, gender, phonetic, ualt_id, created_at, updated_at, school_id, person_id)
 as select
-	id, first, last, grad_year, novice, retired, gender, phonetic, ualt_id, created_at, timestamp, chapter, person
+	id, first, last, grad_year, novice, retired, gender, phonetic, ualt_id, created_at, timestamp, chapter, account
 from tabroom.student;
 
 create view treo.sweep_events
@@ -502,6 +521,9 @@ as select
 	id, tag, value, value_text, value_date, created_at, timestamp, rpool
 from tabroom.rpool_setting ;
 
+alter table tabroom.tiebreak_setting add value_date datetime;
+alter table tabroom.tiebreak_setting add value_text text;
+
 create view treo.tiebreak_set_settings 
 	(id, tag, value, value_text, value_date, created_at, updated_at, tiebreak_set_id )
 as select 
@@ -534,10 +556,10 @@ from tabroom.school_setting ;
 
 #PERMISSIONS
 
+alter table tabroom.permission add created_at datetime;
 create view treo.permission
-	(created_at, updated_at, person_id, circuit_id, school_id, tourn_id
+	(person_id, tourn_id, region_id, school_id, circuit_id, class_id, tag, created_at, updated_at)
 	as select 
-			created_at, timestamp, person, circuit
-from tabroom.circuit_admin;
-
+	account, tourn, region, chapter, circuit, judge_group, tag, created_at, timestamp
+from tabroom.permission;
 
