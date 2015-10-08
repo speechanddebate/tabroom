@@ -57,6 +57,7 @@ sub short_name {
 	$name =~ s/California State University/CSU/g;
 	$name =~ s/California,/UC/g;
 	$name =~ s/University$//g;
+	$name =~ s/College$//g;
 	$name =~ s/State\ University,/State\ /g;
 	$name =~ s/^The//g;
 	$name =~ s/^Saint\ /St\ /g;
