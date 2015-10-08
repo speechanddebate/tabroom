@@ -12,9 +12,11 @@
 
 	my $event = $round->event;
 	my $round_type = $round->type;
-	my $anonymize if $event->setting("anonymize");
+
+	my $anonymize if $round->setting("anonymize");
 	my $round_robin++ if $event->setting("round_robin");
 	my $tab_ratings = $event->judge_group->setting("tab_ratings");
+	my $coach_ratings = $event->judge_group->setting("coach_ratings");
 	my $diversity = $event->judge_group->setting("track_diversity");
 	my $use_commitment = $event->judge_group->setting("rounds_per"); #is the burden method rds per entry? >0 => yes
 
@@ -34,18 +36,6 @@
 	my $last_round_name = $round->name - 1;
 	my $last_round = Tab::Round->search( event => $round->event->id, name => $last_round_name)->first;
 
-	my $show_records;
-
-	foreach my $other_round ($event->rounds) { 
-		next unless $other_round->name < $round->name;
-		next if $other_round->setting("ignore_results");
-		$show_records++;
-	}
-
-	undef $show_records if $round->type eq "elim";
-	undef $show_records if $round->type eq "final";
-	undef $show_records if $round_robin;
-
 	my %entry_byes = $m->comp("/funclib/entry_byes.mas", event => $round->event, round => $last_round) if $showbye;
 	my %entry_wins = $m->comp("/funclib/entry_wins.mas", event => $round->event, round => $last_round);
 	my %entry_losses = $m->comp("/funclib/entry_losses.mas", event => $round->event, round => $last_round);
@@ -59,41 +49,95 @@
 
 	Tab::Panel->columns(TEMP => "roomname");
 
-	Tab::Panel->set_sql( schemat => "
-		select panel.*, room.name as roomname
-		from panel
-		left join room on room.id = panel.room
-		where panel.round = ? 
-		order by panel.started, panel.letter");
+	my $dbh = Tab::DBI->db_Main();
 
-	my @panels = Tab::Panel->search_schemat($round->id);
+	my $sth = $dbh->prepare("
+        select panel.id, panel.bracket, room.name, school.name, entry.id, entry.code, seed.value, ballot.side, 
+            judge.id, judge.first, judge.last, rating.value, ROUND(prefs.percentile), prefs_tier.name, coach_tier.name, panel.bye, panel.started, 
+            pod.value, ballot.audit, ballot.bye, ballot.noshow, winner.value, panel.flight, diverse.value, region.code
+        from (panel, ballot)
+        left join entry on ballot.entry = entry.id
+        left join entry_setting seed on seed.entry = entry.id and seed.tag = 'pairing_seed'
+        left join school on entry.school = school.id
+        left join judge on ballot.judge = judge.id
+        left join judge_setting rating on rating.judge = judge.id and rating.tag = 'tab_rating'
+        left join room on panel.room = room.id
+        left join rating prefs on prefs.judge = judge.id and prefs.entry = entry.id
+        left join rating_tier prefs_tier on prefs.rating_tier = prefs_tier.id
+        left join rating coach on coach.judge = judge.id and coach.type = 'coach'
+        left join rating_tier coach_tier on coach.rating_tier = coach_tier.id
+        left join entry_setting pod on pod.entry = entry.id and pod.tag = 'pod'
+        left join ballot_value winner on winner.ballot = ballot.id and winner.tag = 'ballot'
+        left join judge_setting diverse on diverse.judge = judge.id and diverse.tag = 'diverse'
+        left join school judge_school on judge.school = judge_school.id
+        left join region on judge_school.region = region.id
+        where panel.round = ?
+        and panel.id = ballot.panel
+        order by panel.bracket DESC, panel.letter
+	");
 
-	my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
+	$sth->execute($round->id);
 
-	my @judges = $m->comp("/funclib/round_judges.mas", round => $round);
+	my %panels = ();
+	my %entries = ();
+	my %judges = ();
+	my @pods;
 
-	my @ballots = $m->comp("/funclib/round_ballots.mas", round => $round);
+	while (my ($id, $bracket, $room, $school_name, $entry_id, $entry_code, $entry_seed, $side, $judge_id, $judge_first, $judge_last, $tab_rating, $percentile, $tier, $coach, $bye, $started, $pod, $done, $bbye, $fft, $winner, $flight ) = $sth->fetchrow_array() ) {
 
-	my %entry_code = map {$_->id => $_->code} $round->event->entries;
+		$panels{$id}{"started"}  = $started;
+		$panels{$id}{"bracket"}  = $bracket;
+		$panels{$id}{"bracket"}  = 0 unless $bracket;
+		$panels{$id}{"room"}  = $room;
+		$panels{$id}{"room"}  = "NONE" unless $room;
 
-	my @seeds = $m->comp("/funclib/event_entry_settings.mas", event => $event, tag => "pairing_seed");
-	my %entry_seed = map {$_->entry->id => $_->value} @seeds;
+		$panels{$id}{"bye"}  = $bye;
 
-	my %pod_name;
-	my %entry_pod;
+		$panels{$id}{"winner"}++ if $winner;
 
-	if ($round_robin) { 
-		foreach my $entry (@entries) { 
-			$entry_pod{$entry} = $entry->setting("pod");
-			next if $pod_name{$entry_pod{$entry}};
-			$pod_name{$entry_pod{$entry}} = $event->setting("pod_".$entry_pod{$entry});
-			$pod_name{$entry_pod{$entry}} = "Pod ".$entry_pod{$entry} unless $pod_name{$entry_pod{$entry}};
-		}
+
+		$panels{$id}{"flight"}  = $flight;
+		$panels{$id}{"pod"}  = $pod;
+		push @pods, $pod;
+
+		push @{$panels{$id}{"entries"}}, $entry_id if $entry_id;
+
+		$entries{$entry_id}{"side"} = $side;
+		$entries{$entry_id}{"code"} = $entry_code;
+		$entries{$entry_id}{"seed"} = $entry_seed;
+		$entries{$entry_id}{"school"} = $school_name;
+
+		$entries{$entry_id}{$judge_id}{"won"} = 1 if $winner;
+		$entries{$entry_id}{$judge_id}{"done"} = 1 if $done;
+		$panels{$id}{"done"} = 1 if $done;
+
+		$entries{$entry_id}{"forfeit"} = $fft;
+		$entries{$entry_id}{"bye"} = $bbye;
+
+		$percentile = int($percentile) if $percentile;
+
+		$entries{$entry_id}{"percentiles"} += $percentile if $percentile;
+		$entries{$entry_id}{"tiers"} += $tier if $tier;
+
+		$panels{$id}{"preftotal"}  += $percentile if $percentile; 
+		$panels{$id}{"preftotal"}  += $tier if $tier; 
+		
+		push @{$panels{$id}{"judges"}}, $judge_id if $judge_id;
+		$judges{$judge_id}{$entry_id}{"percentile"} = $percentile;
+		$judges{$judge_id}{$entry_id}{"tier"} = $tier;
+		$judges{$judge_id}{"coach"} = $coach;
+		$judges{$judge_id}{"first"} = $judge_first;
+		$judges{$judge_id}{"last"} = $judge_last;
+		$judges{$judge_id}{"tab"} = $tab_rating;
 	}
 
-	my %judge_by_id = map {$_->id => $_} @judges;
+	my %pods;
 
-	my %pref_record = ();
+	if ($round_robin) { 
+		foreach my $pod (@pods) { 
+			$pods{$pod}{"name"} = $event->setting("pod_".$pod);
+		}
+	}
 
 	my $prefs = $event->judge_group->setting("prefs");
 
@@ -103,71 +147,6 @@
 		$prefs = "tiers" if $round->type eq "elim";
 		$prefs = "ordinals" if $round->name == 9;
 	}
-
-	if ($prefs eq "ordinals") {
-		%pref_record = $m->comp("/funclib/round_ordinals.mas", round => $round);
-	} elsif ($prefs && $prefs ne "none") { 
-		%pref_record = $m->comp("/funclib/round_mjp.mas", round => $round);
-	}
-
-	my %entries_by_panel = ();
-
-	foreach my $entry (@entries) { 
-		push (@{$entries_by_panel{$entry->panelid}}, $entry);
-	}
-
-	my %panel_done = ();
-	my %panel_scored = ();
-	my %ballots_by_entry = ();
-	my %ballots_by_judge = ();
-	my %judges_by_panel = ();
-	
-	my %panel_count = ();
-
-	my @values = $m->comp("/funclib/round_values.mas", round => $round);
-	my %ballot_has_values = map {$_->ballot => 1} @values;
-
-	foreach my $ballot (@ballots) { 
-
-		push (@{$ballots_by_entry{$ballot->entry->id}}, $ballot) if $ballot->entry;
-		push (@{$ballots_by_judge{$ballot->judge->id}}, $ballot) if $ballot->judge;
-
-		$panel_scored{$ballot->panel->id}++ if $ballot_has_values{$ballot};
-		$panel_done{$ballot->panel->id}++ if $ballot->audit;
-		$panel_count{$ballot->panel->id}++;
-
-		push (@{$judges_by_panel{$ballot->panel->id}}, $judge_by_id{$ballot->judge->id}) if $judge_by_id{$ballot->judge->id};
-
-	}
-
-	foreach my $ballot (@ballots) { 
-		my %seen = (); 
-		@{$judges_by_panel{$ballot->panel->id}} = grep { ! $seen{$_} ++ } @{$judges_by_panel{$ballot->panel->id}};
-	}
-
-	my %panel_started = map {$_->id => $_->started} @panels;
-
-	@panels = sort {$a->flight cmp $b->flight} @panels;
-	@panels = sort {$a->roomname cmp $b->roomname} @panels;
-
-	@panels = sort {$b->bracket <=> $a->bracket } @panels;
-	@panels = sort {$a->bracket <=> $b->bracket } @panels if $round->type eq "elim";
-
-	@panels = sort {$panel_started{$a} cmp $panel_started{$b} } @panels;
-	@panels = sort {$panel_scored{$a->id} <=> $panel_scored{$b->id}} @panels;
-	@panels = sort {$panel_done{$a->id} <=> $panel_done{$b->id}} @panels;
-
-	Tab::Entry->set_sql( duplicated =>  "
-		select distinct entry.id
-		from entry, ballot, panel, ballot b2, panel p2
-		where entry.id = ballot.entry
-		and entry.id = b2.entry
-		and ballot.panel = panel.id
-		and b2.id = p2.id
-		and p2.round = ?
-		and p2.round = panel.round
-		and panel.id != p2.id
-	" );
 
 	Tab::Entry->set_sql( missing =>  " 
 		select distinct entry.id
@@ -185,16 +164,11 @@
 		)
 	" );
 
-	my @duplicated = Tab::Entry->search_duplicated( $round->id ) unless ($round->type eq "elim" || $round->type eq "final");
 	my @missing = Tab::Entry->search_missing( $event->id, $round->id ) unless ($round->type eq "elim" || $round->type eq "final");
-
 	my $sides_not_set++ if $event->setting("sides_not_set") == $round->id;
 	undef $sides_not_set if $round->type eq "elim" || $round->type eq "final";
 	undef $sides_not_set if $round->published;
-
-	my $hit_warn = $m->comp("/funclib/entry_hit_before_check.mas", round_id => $round->id) 
-		unless $round->type eq "elim" || $round->type eq "final";  
-
+	my $hit_warn = $m->comp("/funclib/entry_hit_before_check.mas", round_id => $round->id) unless $round->type eq "elim" || $round->type eq "final";  
 	my $judge_warn = $m->comp("/funclib/judge_twice_check.mas", round_id => $round->id); 
 
 </%init>
@@ -214,7 +188,7 @@
 					<h5><% scalar @missing %> entries left off pairing.</h5>
 
 %					foreach my $miss (@missing) { 
-						<a class="dkred nowrap padmuchmore third" title="<% $entry_code{$miss} %>" href="/panel/manipulate/debate_round_edit.mhtml?entry_id=<%$miss%>&round_id=<% $round->id %>">Schedule <% $entry_code{$miss} %></a>
+						<a class="dkred nowrap padmuchmore third" title="<% $entries{$miss}{'code'} %>" href="/panel/manipulate/debate_round_edit.mhtml?entry_id=<%$miss%>&round_id=<% $round->id %>">Schedule <% $entries{$miss}{'code'} %></a>
 %					}
 
 %				}
@@ -239,59 +213,90 @@
 		</div>
 %	}
 
-%	if (@duplicated) { 
-		<div class="dkred block centeralign">
-			<% scalar @duplicated %> entries scheduled in more than one debate.  
-%			foreach my $miss (@duplicated) { 
-				<% $entry_code{$miss} %> <% $miss %>
-%			}
-			How'd you pull that off?  Please re-pair round.
-		</div>
-%	}
-
 	<table class="narrow" id="sortme"> 
 
 		<thead>
 		
-			<tr class="yellowrow smallish">
+			<tr class="yellowrow smaller">
 
 %				if ($round->type eq "highlow" || $round->type eq "highhigh" || $round->type eq "elim") { 
-					<th class="smaller centeralign" title="Bracket">
+
+					<th class="bracket centeralign" title="Bracket">
 						B
 					</th>
+
 %				}  elsif ($round_robin) { 
-					<th>
+
+					<th class="pod">
 						<% $round_robin ? "Pod" : ""%>
-					</td>
+					</th>
 %				}
 
 %				if ($round->flighted > 1) { 
-					<th class="smaller centeralign" title="Flight">
+					<th class="flight centeralign" title="Flight">
 						F
 					</th>
 %				}
 				
-				<th class="centeralign">
+				<th class="centeralign rooms">
 					Room
 				</th>
 
-				<th class="centeralign">
-					<% $sidelocks ? "" : $no_side_constraints ? "Flip" :  $aff_string %>
+				<th class="centeralign seeds <% $seeds ? "" : "hidden" %>">
+					<% substr($aff_string,0,1) %> Sd
 				</th>
 
-				<th class="centeralign">
+				<th class="centeralign byes <% $showbye ? "" : "hidden" %>">
+					<% substr($aff_string,0,1) %> #Bye
+				</th>
+
+				<th class="centeralign record">
+					<% substr($aff_string,0,1) %> W/L
+				</th>
+
+				<th class="centeralign schools hidden">
+					<% $aff_string %> School
+				</th>
+
+				<th class="centeralign entries">
+					<% $sidelocks ? "" : $no_side_constraints ? "Flip" : $aff_string %>
+				</th>
+
+				<th class="centeralign seeds <% $seeds ? "" : "hidden" %>">
+					<% substr($neg_string,0,1) %> Sd
+				</th>
+
+				<th class="centeralign byes <% $showbye ? "" : "hidden" %>">
+					<% substr($neg_string,0,1) %> #Bye
+				</th>
+
+				<th class="centeralign record">
+					<% substr($neg_string,0,1) %> W/L
+				</th>
+
+				<th class="centeralign schools hidden">
+					<% $neg_string %> School
+				</th>
+
+				<th class="centeralign entries">
 					<% $sidelocks ? "" : $no_side_constraints ? "Flip" : $neg_string %>
 				</th>
 
 %				unless ($round_type eq "elim" || $round_type eq "final") { 
-					<th class="centeralign smaller" title="Numbers preceding name are obligation in the left/used/owed format.  Numbers following name are ratings.">
+					<th class="centeralign judgeuse" title="Numbers preceding name are obligation in the left/used/owed format.  Numbers following name are ratings.">
 						Use
 					</th>
 %				}
 
-				<th class="centeralign">
+				<th class="centeralign judges">
 					Judge<% $round->setting("num_judges") > 1 ? "s" : "" %>
 				</th>
+
+%				if ($prefs || $tab_ratings || $coach_ratings) { 
+					<th class="centeralign prefs">
+						Rtng	
+					</th>
+%				}
 
 				<th>
 				</th>
@@ -301,389 +306,268 @@
 
 		<tbody>
 
-<%perl>
+%		my @keys = keys %panels;
+%		@keys = sort {$panels{$b}{"room"} <=> $panels{$a}{"room"}} @keys;
+%		@keys = sort {$panels{$b}{"bracket"} <=> $panels{$a}{"bracket"}} @keys;
+%		@keys = sort {$panels{$a}{"done"} <=> $panels{$b}{"done"}} @keys;
+%		@keys = sort {$panels{$a}{"started"} <=> $panels{$b}{"started"}} @keys;
 
-		my $switch = 1;
+%		foreach my $key (@keys) { 
 
-		foreach my $panel (@panels) { 
+%			my $locked_aff =  $m->comp("/funclib/round_elim_dueaff.mas", panel_id => $key) if $sidelocks;
 
-			my $locked_aff =  $m->comp("/funclib/round_elim_dueaff.mas", panel => $panel) if $sidelocks;
-
-			my $panel_byed;
-
-			next unless $entries_by_panel{$panel->id} && @{$entries_by_panel{$panel->id}};
-
-			my $aff;
-			my $neg;
-
-			foreach my $entry (@{$entries_by_panel{$panel->id}}) { 
-				
-				if ($ballots_by_entry{$entry->id}) {
-					$aff = $entry if ${$ballots_by_entry{$entry->id}}[0]->side == "1";
-					$neg = $entry if ${$ballots_by_entry{$entry->id}}[0]->side == "2";
-				}
-			}
-
-			foreach my $entry (@{$entries_by_panel{$panel->id}}) { 
-				if ($ballots_by_entry{$entry->id}) { 
-
-					unless ($aff) {
-						$aff = $entry unless $neg && $entry->id == $neg->id;
-					} else { 
-						$neg = $entry unless $aff && $entry->id == $aff->id;
-					}
-				}
-			}
-
-			my $result_string; 
-			my %used_judge;
-
-			my $winners_string;
-			my $winners_win;
-
-			my $no_judges++;
-
-			if ($judges_by_panel{$panel->id}) { 
-
-				foreach my $judge (sort {$a->last cmp $b->last} @{$judges_by_panel{$panel->id}}) {
-
-					undef $no_judges;
-					
-					my $winner;
-					my $class;
-					my $title;
-
-					next if $used_judge{$judge}++;
-
-					foreach my $ballot (@{$ballots_by_judge{$judge->id}}) {
-
-						next unless $ballot->panel->id == $panel->id;
-
-						next if $used_judge{"B-".$ballot->id};
-
-						if ($ballot->bye > 0 || $ballot->noshow > 0) { 
-							$class = "greentext";
-							$winner .= 'A' if $ballot->side == 1;
-							$winner .= 'N' if $ballot->side == 2;
-							$winner .= 'B ' if $ballot->bye;
-							$winner .= 'F ' if $ballot->noshow;
-						} else { 
-
-							$used_judge{"B-".$ballot->id}++;
-
-						}
-
-						my $win = $ballot->values( tag => 'ballot', value => 1 )->first;
-
-						$class = "greentext" if $win;
-						$winner = 'A' if $win && $aff && $ballot->entry->id == $aff->id;
-						$winner = 'N' if $win && $ballot->entry && $neg && $ballot->entry->id == $neg->id;
-						if ($win && $ballot->audit < 1) { 
-							$class = "dkred";
-							$winner = '&frac12;';
-							$title = "\n This ballot has been entered but not confirmed  \n\n    Click the room and then View/Edit Results\n              right to confirm the ballot\n\n";
-						}
-
-					}
-
-					if ($winner) { 
-						$winners_string .= ' <div style="padding-top: 1.25px !important;" class="schemheight centeralign '.$class.'"  title="'.$title.'">';
-						$winners_string .= $winner." ";
-						$winners_string .= ' </div> ';
-						$winners_win++;
-					} else {
-						$winners_string .= ' <div class="schemheight centeralign '.$class.'"  title="'.$title.'">';
-						$winners_string .= "&nbsp;";
-						$winners_string .= ' </div> ';
-					}
-
-				}
-
-				$result_string .= $winners_string if $winners_win;
-			}
-
-			if ($panel->bye || $no_judges) { 
-
-				my $winners_string = ' <div style="padding-top: 1px !important;" class="schemheight centeralign greentext"> ';
-
-				foreach my $entry (@{$entries_by_panel{$panel->id}}) { 
-
-					foreach my $ballot (@{$ballots_by_entry{$entry}}) { 
-
-						my $win = $ballot->values( tag => 'ballot', value => 1 )->first;
-
-						if ($ballot->side ==1) { 
-							$winners_string .= "AB " if $win || $ballot->bye;
-							$winners_string .= "AF " if $ballot->noshow;
-						} else { 
-							$winners_string .= "NB " if $win || $ballot->bye;
-							$winners_string .= "NF " if $ballot->noshow;
-						}
-
-						$panel_byed++ if $ballot->noshow || $ballot->bye;
-					}
-
-				}
-
-				$winners_string .= "BYE" if $panel->bye;
-
-				$winners_string .= ' </div> ';
-
-				$result_string .= $winners_string;
-
-			}
-
-			if (not defined $result_string || ($panel->started && not defined $winners_win)) {
-				my $result_string if not defined $result_string;
-				$result_string .= Tab::shortertime($panel->started->set_time_zone($tz)) if $panel->started;
-			}
-</%perl>
-
-			<tr>
+			<tr class="smallish">
 
 %				if ($round->type eq "highlow" || $round->type eq "highhigh" || $round->type eq "elim") { 
-					<td class="smaller <% $round_robin ? "" : "smallcell" %> centeralign padno">
-						<% $panel->bracket ? $panel->bracket : "0" %>
+
+					<td class="<% $round_robin ? "" : "smallcell" %> centeralign padno bracket">
+						<% $panels{$key}{"bracket"} %> 
 					</td>
-%				}  elsif ($round_robin && $aff) { 
-					<td class="smaller centeralign padless">
-						<% $pod_name{$entry_pod{$aff}} %>
+
+%				}  elsif ($round_robin) { 
+					<td class="centeralign padless pod">
+						<% $pods{$panels{$key}{"pod"}}{"name"} %>
 					</td>
 %				}
 			
 %				if ($round->flighted > 1) { 
-					<td class="centeralign smaller padno">
-						<% $panel->flight %>
+					<td class="centeralign padno flight">
+						<% $panels{$key}{"flight"} %> 
 					</td>	
 %				}
 
-				<td class="smaller">
-					<span class="hidden"><% $panel->roomname %><% $panel->flight %></span>
-					<a class="white <% $panel->roomname ? "" : "bold redtext" %>" title="<% $panel->roomname ? $panel->roomname : "None" %>" href="panel_view.mhtml?panel_id=<% $panel->id %>">
-						<% ($panel->bye) || $panel_byed ? "BYE" :  $panel->roomname ? $panel->roomname : "None" %>
+				<td class="nowrap nospace rooms <% $panels{$key}{"room"} eq "NONE" ? "centeralign" : "" %>" title="<% $panels{$key}{"room"} %>">
+
+					<span class="hidden"><% $panels{$key}{"room"} %><% $panels{$key}{"flight"} %></span>
+
+					<a class="padvertical white <% $panels{$key}{"room"} eq "NONE" ? "redtext" : "" %>" href="panel_view.mhtml?panel_id=<% $key %>">
+						<% $panels{$key}{"bye"} ? "BYE" : $panels{$key}{"room"} %>
 					</a>
 
 				</td>
 
-%				if ($panel->bye) { 
+%				@{$panels{$key}{"entries"}} = sort {$entries{$a}{"side"} <=> $entries{$b}{"side"}} @{$panels{$key}{"entries"}};
 
-%					my @byes = @{$entries_by_panel{$panel->id}};
+%				my %seen = ();
+%				@{$panels{$key}{"judges"}} = grep { ! $seen{$_} ++ } @{$panels{$key}{"judges"}};
 
-					<td class="padless" colspan="2">
+%				undef(%seen);
+%				@{$panels{$key}{"entries"}} = grep { ! $seen{$_} ++ } @{$panels{$key}{"entries"}};
 
-%						foreach my $bye (@byes) { 
+%				my $counter;
 
-							<span class="half">
+%				foreach my $entry (@{$panels{$key}{"entries"}}) {
 
-%							unless ($entered) { 
+%					$counter++;
 
-%								my $warn = "This round is published and you are about to move an entry.   This seems suspicious.  Are you sure?" if $published;
-								<a class="nospace smaller white padless" <& "/funclib/confirm.mas", warn => $warn &> href="/panel/manipulate/entry_edit.mhtml?round_id=<% $round->id %>&entry_id=<% $bye->id %>">
+					<td class="seeds centeralign nowrap nospace <% $seeds ? "" : "hidden" %>">
+						<% $entries{$entry}{"seed"} %> 
+					</td>
 
-%							} else { 
-								<a class="nospace smaller white padlesss" href="panel_view.mhtml?panel_id=<% $panel->id %>">
-%							}
-%								if ($show_records) { 
-									<span class="sixth nowrap padright nospace">
-										<% $entry_wins{$bye->id} ? $entry_wins{$bye->id} : 0 %>-<% $entry_losses{$bye->id} ? $entry_losses{$bye->id} : 0 %>
-									</span>
-									<span class="nospace fivesixths" title="<% ($anonymize) ? $bye->id : $bye->code %>">
-										<% $seeds ? $entry_seed{$aff}." - " : "" %>
-										<% $showbye && $entry_byes{$bye->id} ? $entry_byes{$bye->id}."B- " : "" %>
-										<% ($anonymize) ? $bye->id : $bye->code %>
-									</span>
-%								} else {
-									<% $seeds ? $entry_seed{$aff}." - " : "" %>
-									<% $showbye && $entry_byes{$bye->id} ? $entry_byes{$bye->id}."B- " : "" %>
-									<% ($anonymize) ? $bye->id : $bye->code %>
-%								}
-							</a>
+					<td class="byes centeralign nowrap nospace <% $showbye ? "" : "hidden"%>">
+						<% $entry_byes{$entry} ? "B-".$entry_byes{$entry} : "" %> 
+					</td>
 
-						</span>
-%					} 
+					<td class="record centeralign nowrap nospace">
+						<% $entry_wins{$entry} ? $entry_wins{$entry} : 0 %>-<% $entry_losses{$entry} ? $entry_losses{$entry} : 0 %>
+					</td>
+
+					<td class="schools nospace padleft hidden">
+						<% $entries{$entry}{"school"} %>
+					</td>
+
+					<td class="entries <% ($round_type ne "elim" && $round_type ne "final") && ($entry_wins{$entry} < $panels{$key}{"bracket"}) ? "libl" : "" %>" title="<% $entries{$entry}{"name"} %>">
+
+%						unless ($entered) { 
+%							my $warn = "This round is published and you are about to move an entry.   This seems suspicious.  Are you sure?" if $published;
+							<a class="nospace white" <& "/funclib/confirm.mas", warn => $warn &> href="/panel/manipulate/entry_edit.mhtml?round_id=<% $round->id %>&entry_id=<% $entry %>">
+
+%						} else { 
+							<a class="nospace white" href="panel_view.mhtml?panel_id=<% $key %>">
+%						}
+
+							<div class="identities">
+								<% $entries{$entry}{"code"} %>
+							</div>
+
+							<div class="anonymize hidden centeralign">
+								<% $entry %>
+							</div>
+						</a>
 
 					</td>
 
-%				} else { 
+%				} 
 
-					<td class="smaller padless <% $aff && $aff->pullup ? "liblrow" : "" %> ">
-%						if ($aff) { 
-
-%							unless ($entered) { 
-%								my $warn = "This round is published and you are about to move an entry.   This seems suspicious.  Are you sure?" if $published;
-								<a class="nospace smaller white padless" <& "/funclib/confirm.mas", warn => $warn &> href="/panel/manipulate/entry_edit.mhtml?round_id=<% $round->id %>&entry_id=<% $aff->id %>">
-%							} else { 
-								<a class="nospace smaller white padless" href="panel_view.mhtml?panel_id=<% $panel->id %>">
-%							}
-
-%								if ($show_records) { 
-									<span class="sixth nowrap padright">
-										<% $entry_wins{$aff->id} ? $entry_wins{$aff->id} : 0 %>-<% $entry_losses{$aff->id} ? $entry_losses{$aff->id} : 0 %>
-									</span>
-
-									<span class="fivesixths" title="<% ($anonymize) ? $aff->id : $aff->name %> <% $aff->pullup ? " (Pullup) " : "" %>">
-%								} else { 
-									<span class="full" title="<% ($anonymize) ? $aff->id : $aff->name %> <% $aff->pullup ? " (Pullup) " : "" %>">
-%								} 
-
-									<% $show_regions ? '<span class="fifth nospace">'.$aff->school->region->code."</span>" : "" %>
-									<% $seeds ? $entry_seed{$aff}." - " : "" %>
-									<% $showbye && $entry_byes{$aff->id} ? $entry_byes{$aff->id}."B- " : "" %>
-									<% ($anonymize) ? $aff->id : $aff->code %>
-								</span>
-							</a>
-%						} 
-					</td>
-
-%					if ($neg) { 
-						<td class="smaller padless <% $neg && $neg->pullup ? "liblrow" : "" %> ">
-							
-
-%							unless ($entered) { 
-%								my $warn = "This round is published and you are about to move an entry.   This seems suspicious.  Are you sure?" if $published;
-								<a class="nospace smaller white padless" <& "/funclib/confirm.mas", warn => $warn &> href="/panel/manipulate/entry_edit.mhtml?round_id=<% $round->id %>&entry_id=<% $neg->id %>">
-%							} else { 
-								<a class="nospace smaller white padless" href="panel_view.mhtml?panel_id=<% $panel->id %>">
-%							}
-
-%								if ($show_records) { 
-									<span class="sixth nowrap padright">
-										<% $entry_wins{$neg->id} ? $entry_wins{$neg->id} : 0 %>-<% $entry_losses{$neg->id} ? $entry_losses{$neg->id} : 0 %>
-									</span>
-									<span class="fivesixth" title="<% ($anonymize) ? $neg->id : $neg->name %> <% $neg->pullup ? " (Pullup) " : "" %>">
-%								} else { 
-									<span class="full" title="<% ($anonymize) ? $neg->id : $neg->name %> <% $neg->pullup ? " (Pullup) " : "" %>">
-%								} 
-									<% $show_regions ? '<span class="fifth nospace">'.$neg->school->region->code."</span>" : "" %>
-									<% $seeds ? $entry_seed{$neg}."-" : "" %>
-									<% $showbye && $entry_byes{$neg->id} ? $entry_byes{$neg->id}."B- " : "" %>
-									<% ($anonymize) ? $neg->id : $neg->code %>
-								</span>
-							</a>
-						</td>
-
-%					} else { 
-
-						<td>
-						</td>
-%					}
-
+%				foreach ($counter .. 1)  { 
+					<td></td>
 %				}
 
-%				my $notfirst;
-%				my %used;
-%				my $judge_paneled++ if (scalar @{$judges_by_panel{$panel->id}} > 1);
-
 %				unless ($round_type eq "elim" || $round_type eq "final") { 
-					<td class="smaller centeralign nospace padtopless <% $judge_paneled ? "top" : "" %>">
 
-%						if ($judges_by_panel{$panel->id}) { 
+					<td class="judgeuse nospace centeralign"> 
 
-%							foreach my $judge (sort {$a->last cmp $b->last} @{$judges_by_panel{$panel->id}}) {
+%						if ($panels{$key}{"judges"}) { 
 
-%								next unless $judge;
-%								next if $used{$judge->id}++;
+%							foreach my $judge (sort {$judges{$a}{"last"} cmp $judges{$b}{"last"}} @{$panels{$key}{"judges"}}) { 
 
-								<a class="full white nowrap schemheight">
+								<span class="full padvertical">
 %									if ($rounds_per) { 
-										<% $judge_use{$judge->id}{'left'} %>/<%($judge_use{$judge->id}{'judged_already'} + $judge_use{$judge->id}{'will_judge'}) %>/<%$judge_use{$judge->id}{'oblig'}%>
+										<% $judge_use{$judge}{'left'} %>/<%($judge_use{$judge}{'judged_already'} + $judge_use{$judge}{'will_judge'}) %>/<%$judge_use{$judge}{'oblig'}%>
 %									} else { 
-										<%($judge_use{$judge->id}{'judged_already'} + $judge_use{$judge->id}{'will_judge'}) %>
+										<%($judge_use{$judge}{'judged_already'} + $judge_use{$judge}{'will_judge'}) %>
 %									}
-								</a>
+								</span>
 %							}
 %						}
 
 					</td>
 %				}
 
-				<td class="smaller nospace padright padtopless">
-%					undef $notfirst;
-%					undef %used;
+%				if ($panels{$key}{"judges"} && scalar @{$panels{$key}{"judges"}} > 0) {
 
-%					unless ( ($judges_by_panel{$panel->id} && @{$judges_by_panel{$panel->id}}) || ($panel->bye) || ($panel_byed)) { 
-						<a class="dkred button padless marno nowrap" href="panel_view.mhtml?panel_id=<% $panel->id %>">
-							NO JUDGE 
-						</a>
-%					}
+					<td class="judges nospace padleft padrightless nowrap"> 
 
-%					if ($judges_by_panel{$panel->id}) { 
-%						foreach my $judge (sort {$a->last cmp $b->last} @{$judges_by_panel{$panel->id}}) {
+%						foreach my $judge (sort {$judges{$a}{"last"} cmp $judges{$b}{"last"}} @{$panels{$key}{"judges"}}) { 
 
-%							next unless $judge;
-%							next if $used{$judge->id}++;
+							<span class="hidden">
+								<% $judges{$judge}{"last"}.", ".$judges{$judge}{"first"} %>
+							</span>
+					
+							<a class="hover full white padvertical"  href="flight_judge_swap.mhtml?round_id=<% $round->id."&judge_id=".$judge %>"
+								title="<% $judges{$judge}{"last"}.", ".$judges{$judge}{"first"} %>">
 
-							<a class="hover full white schemheight"  href="<% $flighted > 0 ? "flight_judge_swap.mhtml?round_id=".$round->id."&judge_id=".$judge->id : "panel_view.mhtml?panel_id=".$panel->id %>">
-
-								<span class="hidden">
-									<% $judge->last.", ".$judge->first %>
+								<span class="<% $diversity ? "" : "hidden" %> diversity eighth">
+									<% $judges{$judge}{"diverse"} ? "D" : ""  %>
 								</span>
 
-								<span class="<% $prefs eq "ordinals" ? "threefifth" : "threequarters"%> padleft nospace nowrap">
-									<% $diversity && $judge->setting("diverse") ? "D" : ""  %>
-									<% ($judge->chair) ? "*" : "" %><% $judge->last.", ".$judge->first %>
+								<span class="anonymize hidden threequarters centeralign nospace">
+									<% $judge %>
+								</span>
+
+								<span class="identities">
+									<% $judges{$judge}{"last"}.", ".$judges{$judge}{"first"} %>
 								</span>
 								
-								<span class="<% $prefs eq "ordinals" ? "twofifth" : "quarter"%> nospace tiny rightalign right">
-									<% $pref_record{$judge->id."-".$panel->id}{"display"} %>
-									<% $tab_ratings ? $judge->tab_rating : "" %>
+								<span class="<% $show_regions ? "sixth" : "hidden" %>">
 									<% $show_regions && $judge->school && $judge->school->region ? $judge->school->region->code : "" %>
 								</span>
 							</a>
 % 						}
 
-%						if ($prefs && scalar @{$judges_by_panel{$panel->id}} > 1) { 
+					</td>
 
-							<span class="<% $prefs eq "ordinals" ? "threefifth" : "threequarter"%> padleft nospace nowrap">
-								Diff: <% $pref_record{$panel->id}{"diff"} %>
-							</span>
+% 				} elsif ($panels{$key}{"bye"}) { 
 
-							<span class="<% $prefs eq "ordinals" ? "twofifth" : "quarter"%> nospace tiny right">
-								<span class="half nospace rightalign">
-									<% $aff ? $pref_record{$panel->id}{$aff->id} : "" %>
-								</span>
-								<span class="twofifth nospace rightalign right">
-									<% $panel && $neg ? $pref_record{$panel->id}{$neg->id} : "" %>
-								</span>
-							</span>
-%	 					}
+					<td class="judges nospace centeralign"> 
+					</td>
 
-% 					}
+%				} else { 
 
+					<td class="judges nospace centeralign"> 
 
-				</td>
+						<a class="dkred button nowrap padvertical" href="panel_view.mhtml?panel_id=<% $key %>">
+							NO JUDGE 
+						</a>
 
-			
-				<th class="smaller centeralign nospace <% $judge_paneled || $round_type eq "final" || $round_type eq "elim" ? "top" :"" %> padtopless">
+					</td>
+% 				}
 
-%					if ($panel->bye || $panel_byed || $panel_done{$panel->id} == $panel_count{$panel->id}) { 
+%				if ($prefs || $tab_ratings || $coach_ratings) { 
+
+					<td class="prefs nospace centeralign smaller"> 
+						<div class="hidden"><% $panels{$key}{"preftotal"} %></div>
+%						foreach my $judge (sort {$judges{$a}{"last"} cmp $judges{$b}{"last"}} @{$panels{$key}{"judges"}}) { 
+							<div class="full padvertical"> 
+%								if ($prefs) { 
+%									my $notfirst;
+%									foreach my $entry (@{$panels{$key}{"entries"}}) { 
+										<span class="twofifth centeralign nospace">
+											<% $prefs eq "ordinals" ?  $judges{$judge}{$entry}{"percentile"} : $judges{$judge}{$entry}{"tier"} %>
+										</span>
+%									}
+%								} else { 
+									<% $tab_ratings ? $judges{$judge}{"tab"} : "" %>
+									<% $judges{$judge}{"coach"} %>
+%								}
+							</div>
+%						}
+
+					</td>
+%				}
+
+				<th class="centeralign nospace smaller"> 
+
+%					if ($panels{$key}{"bye"}) { 
+						<span class="hidden">4</span>
+						BYE
+
+%					} elsif ($panels{$key}{"done"}) { 
 
 						<span class="hidden">3</span>
-						<% $result_string %> 
 
-%					} elsif ($panel_scored{$panel->id} && $result_string) { 
+%						foreach my $entry (@{$panels{$key}{"entries"}}) {
+
+							<% $entries{$entry}{"bye"} ?  $entries{$entry}{"side"} == 1 ? substr($aff_string,0,1)." BYE <br />" : substr($neg_string,0,1)." BYE" : "" %>
+							<% $entries{$entry}{"forfeit"} ?  $entries{$entry}{"side"} == 1 ? substr($aff_string,0,1)." FFT <br />" : substr($neg_string,0,1)." FFT" : "" %>
+%							foreach my $judge (@{$panels{$key}{"judges"}}) {
+%								if ($entries{$entry}{$judge}{"done"} && $entries{$entry}{$judge}{"won"}) { 
+									<span class="full greentext padvertical decisions hidden">
+										<% $entries{$entry}{"side"} == 1 ? substr($aff_string,0,1) : substr($neg_string,0,1)  %>
+									</span>
+%								} elsif ($entries{$entry}{$judge}{"winner"}) { 
+									<span class="dkred">&frac12;</span>
+%								}
+%							}
+%						}
+
+%					} elsif ($panels{$key}{"started"}) { 
 
 						<span class="hidden">2</span>
-						<% $result_string %> 
-
-%					} elsif ($panel->started) { 
-
-						<span class="hidden">1</span>
 
 %						if ($sidelocks) { 
 							<span class="tightline block z">
 								<% $sidelocks ? $locked_aff ? 'Side Lock' : 'Flip' : "" %>
 							</span>
 %						}
-						<% Tab::shortertime($panel->started->set_time_zone($tz)) %>
+
+%						my $starttime = DateTime::Format::MySQL->parse_datetime($panels{$key}{"started"});
+
+						<span class="tightline block z" title="Round Start Time">
+							<% $starttime ? Tab::shortertime($starttime->set_time_zone($tz)) : "" %>
+						</span>
 
 %					} else { 
+						<span class="hidden">1</span>
 
-						<span class="tightline block a">
-							<% $prefs eq "ordinals" ? $pref_record{$panel->id}{"diff"} : "" %>
-							<% $prefs ne "ordinals" && $sidelocks ? $locked_aff ? 'Side Lock' : 'Flip' : "" %>
+%						if ($prefs) { 
+							
+							<span class="prefs tightline block a" title="Preferences Differential">
+<%perl>
+
+							my $diff; 
+
+							foreach my $entry (@{$panels{$key}{"entries"}}) { 
+								if ($diff) { 
+									$diff = abs($diff - $entries{$entry}{"percentiles"}) if $prefs eq "ordinals";
+									$diff = abs($diff - $entries{$entry}{"tiers"}) unless $prefs eq "ordinals";
+								} else { 
+									$diff = $entries{$entry}{"percentiles"} if $prefs eq "ordinals";
+									$diff = $entries{$entry}{"tiers"} unless $prefs eq "ordinals";
+								}
+							}
+
+							$m->print("$diff");
+</%perl>
+
+%						} else { 
+							<span class="tightline block a" title="Side Lock">
+							<% 	$sidelocks ? $locked_aff ? 'Side Lock' : 'Flip' : "" %>
+%						}  
+
 						</span>
 %					}  
+
 				</th>
 			
 			</tr>
@@ -693,6 +577,4 @@
 		</tbody>
 
 	</table>
-
-%	undef %entries_by_panel;
 
