@@ -7,9 +7,7 @@
 	my $debug;
 
 	use List::Util 'shuffle';
-
 	my $round = Tab::Round->retrieve($round_id);
-
     my $text = $account->first." ".$account->last." (".$account->email.") has re-assigned the judges out of round ".$round->realname." of ".$round->event->abbr;
 
     Tab::TournChange->create({ 
@@ -21,7 +19,6 @@
     }); 
 
     $m->comp("/funclib/round_clear_judges.mas", round => $round, nobye => 1);
-
 	my @schools = $m->comp("/funclib/event_schools.mas", event => $round->event);
 	my %school_region = map {$_->id => $_->region} @schools;
 
@@ -51,6 +48,22 @@
 
 	$flights = 1 unless $flights;
 	$flights = 1 if $round->event->setting("flight_rooms_only");
+
+	my %entry_seed_position = ();
+	my $best_judges_highest_seed = $round_event->setting("best_judges_highest_seed");
+
+	if ($best_judges_highest_seed) { 
+
+		my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $meh, $panrank_ref, $panletter_ref, $long_desc_ref) 
+			= $m->comp("/tabbing/results/order_entries.mas", long_names => 1, round => $round);
+
+		foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+
+			foreach my $entry_id (@{${$entries_ref}{$key}}) {
+				$entry_seed_position{$entry_id} = $key;
+			}
+		}
+	}
 
 	my $num_judges = $round->setting("num_judges");
 	$num_judges = 1 unless $num_judges;
@@ -93,7 +106,8 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $event_ballots_sth = $dbh->prepare("
-		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, entry.school, seed.value, ballot.side, panel.bracket, panel.id, entry.code, panel.bye
+		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, 
+			entry.school, seed.value, ballot.side, panel.bracket, panel.id, entry.code, panel.bye
 		from (ballot, panel, round, entry, event, school)
 		left join entry_setting seed on seed.entry = entry.id and seed.tag = 'pairing_seed'
 		where event.judge_group = ".$round_event->judge_group->id."
@@ -121,6 +135,7 @@
 	my @panels;
 	my %panel_entries;
 	my %panel_bracket;
+	my %panel_bracket_rank;
 	my %panel_seed;
 	my %panel_bye;
 
@@ -138,7 +153,6 @@
 			push @entries, $entry;
 
 			$entry_hash{$entry}{"seed"} = $entry_seed;
-
 			$entry_hash{$entry}{"side"} = $side;
 			$entry_hash{$entry}{"code"} = $code;
 			$entry_hash{$entry}{"school"} = $entry_school;
@@ -152,7 +166,13 @@
 
 			$panel_seed{$panel} = $entry_seed unless $panel_seed{$panel};
 			$panel_seed{$panel} = $entry_seed if $entry_seed && $entry_seed < $panel_seed{$panel};
+
 			$panel_bracket{$panel} = $bracket;
+
+			if ($best_judges_highest_seed) { 
+				$panel_bracket_rank{$panel} = $entry_seed_position{$entry} unless $panel_bracket_rank{$panel};
+				$panel_bracket_rank{$panel} = $entry_seed_position{$entry} if $entry_seed_position{$entry} < $panel_bracket_rank{$panel};
+			}
 
 			push @{$panel_entries{$panel}}, $entry;
 
@@ -269,7 +289,8 @@
 
 			if ($school) {	 
 				push @{$judge_clashes{$judge}}, @{$school_entries{$school}} if $school_entries{$school};
-				push @{$judge_clashes{$judge}}, @{$region_entries{$school_region{$school}}} if $school_region{$school} && $region_entries{$school_region{$school}};
+				push @{$judge_clashes{$judge}}, @{$region_entries{$school_region{$school}}} 
+					if $school_region{$school} && $region_entries{$school_region{$school}};
 			} else {  
 				push @{$judge_clashes{$judge}}, $entry;
 			}
@@ -458,7 +479,6 @@
 	
 	my %judge_prefs = $m->comp("/funclib/judges_by_pref.mas", group => $group);
 
-
 	foreach my $judge (@judges) {
 
 		my %seen = (); 
@@ -525,6 +545,7 @@
 	my $bracket_order = $round->setting("tab_rating_priority");
 	$bracket_order = $default_settings{$round->name} unless $bracket_order;
 	$bracket_order =~ s/\s*//g;
+
 	my @orders = split(/\,/, $bracket_order) unless $round_type eq "elim" || $round_type eq "final";
 
 	my %bracket_score;
@@ -536,16 +557,11 @@
 	undef @orders if $round->type eq "prelim";
 
 	unless (@orders) { 
-
 		foreach (1 .. $num_judges) { 
 			push @orders, 0;
 			$shuffle_post++;
 		}
-
-	} else { 
-
-
-	}
+	} 
 
 	my $loss_threshold = $round_event->setting("break_point") if $round_event->setting("break_point"); 
 
@@ -560,8 +576,15 @@
 		$order_multiplier++;
 
 		foreach my $panel (@panels) { 
+
 			next unless $panel_bracket{$panel} == $order;
-			$bracket_score{$panel} = $order_multiplier;
+
+			if ($best_judges_highest_seed) { 
+				$bracket_score{$panel} = ($order_multiplier * 1000) - $panel_bracket_rank{$panel};
+			} else { 
+				$bracket_score{$panel} = $order_multiplier;
+			}
+
 		}
 
 		$last_order = $order;
@@ -569,13 +592,16 @@
 
 	my $seed_order = $round->setting("tab_seed_priority");
 	$seed_order =~ s/\s*//g;
+
 	my @seed_orders = split(/\,/, $seed_order) if $round_type eq "prelim";
 	my %seed_score;
+
 
 	undef $order_multiplier;
 
 	foreach my $order (reverse @seed_orders) { 
 
+		$order_multiplier++;
 		$order_multiplier++;
 
 		foreach my $panel (@panels) { 
@@ -594,9 +620,6 @@
 		$seed_score{$panel} = $last_order;
 	}
 
-	foreach my $panel (@panels) { 
-		Tab::debuglog("Panel $panel with seed $panel_seed{$panel} has score $seed_score{$panel} ");
-	}
 
 	my %fix_flight;
 	my @flight_settings = $m->comp("/funclib/event_entry_settings.mas", event => $round->event, tag => "preferred_flight");
