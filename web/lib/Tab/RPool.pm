@@ -2,6 +2,8 @@ package Tab::RPool;
 use base 'Tab::DBI';
 Tab::RPool->table('rpool');
 Tab::RPool->columns(All => qw/id name tourn timestamp/);
+
+Tab::RPool->has_a(tourn => 'Tab::Tourn');
 Tab::RPool->has_many(rpools => 'Tab::RPoolRoom','rpool');
 Tab::RPool->has_many(round_links => 'Tab::RPoolRound','rpool');
 Tab::RPool->has_many(room_links => 'Tab::RPoolRoom','rpool');
