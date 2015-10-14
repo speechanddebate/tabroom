@@ -20,7 +20,7 @@ select "Mark One";
 
 alter table tabroom.tourn_change add round int;
 create view treo.change_logs
-	(id, type, description, created_at, updated_at, tourn_id, class_id, event_id, webpage_id, squad_id, entry_id, judge_id, strike_id, round_id, section_id, new_section_id)
+	(id, type, description, created_at, updated_at, tourn_id, class_id, event_id, webpage_id, squad_id, entry_id, judge_id, strike_id, round_id, old_section_id, new_section_id)
 as select
 	id, type, text, created_at, timestamp, tourn, judge_group, event, webpage, school, entry, judge, strike, round, old_panel, new_panel
 from tabroom.tourn_change;
@@ -39,10 +39,12 @@ as select
 	id, name, approval, region_required, dues, dues, dues_start, text, created_at, timestamp, circuit
 from tabroom.circuit_membership;
 
+alter table tabroom.circuit add url varchar(255);
+
 create view treo.circuits
-	(id, name, abbr, active, state, country, tz, webname, created_at, updated_at)
+	(id, name, abbr, active, state, country, tz, url, webname, created_at, updated_at)
 as select
-	id, name, abbr, active, state, country, tz, webname, created_at, timestamp
+	id, name, abbr, active, state, country, tz, url, webname, created_at, timestamp
 from tabroom.circuit;
 
 create view treo.classes
@@ -65,10 +67,14 @@ as select
 	id, name, price, description, cap, school_cap, deadline, created_at, timestamp, tourn
 from tabroom.concession;
 
+alter table tabroom.account_conflict add type varchar(15);
+update tabroom.account_conflict set type = "school" where chapter > 0;
+update tabroom.account_conflict set type = "individual" where conflict > 0;
+
 create view treo.conflicts
-	(id, created_at, updated_at, person_id, target_person_id, creator_id, target_school_id)
+	(id, type, created_at, updated_at, person_id, target_person_id, creator_id, target_school_id)
 as select
-	id, created_at, timestamp, account, conflict, added_by, chapter
+	id, type, created_at, timestamp, account, conflict, added_by, chapter
 from tabroom.account_conflict;
 
 create view treo.double_entry_sets
@@ -77,10 +83,12 @@ as select
 	id, name, setting, max, created_at, timestamp, exclude
 from tabroom.event_double;
 
+alter table tabroom.email add region int; 
+
 create view treo.emails
-	(id, subject, content, recipients, created_at, updated_at, sender_id, tourn_id, circuit_id)
+	(id, subject, content, recipients, created_at, updated_at, sender_id, tourn_id, region_id, circuit_id)
 as select
-	id, subject, content, sent_to, created_at, timestamp, sender, tourn, circuit
+	id, subject, content, sent_to, created_at, timestamp, sender, tourn, region, circuit
 from tabroom.email;
 
 create view treo.entries
@@ -117,9 +125,9 @@ alter table tabroom.school_fine add judge int;
 alter table tabroom.school_fine add region int;
 
 create view treo.fines
-	(id, amount, reason, created_at, updated_at, region_id, tourn_id, squad_id, judge_id, levied_by_id)
+	(id, amount, reason, payment, deleted, deleted_at, deleted_by_id, created_at, updated_at, region_id, tourn_id, squad_id, judge_id, levied_by_id)
 as select
-	id, amount, reason, levied_on, timestamp, region, tourn, school, judge, levied_by
+	id, amount, reason, payment, deleted, deleted_at, deleted_by, levied_on, timestamp, region, tourn, school, judge, levied_by
 from tabroom.school_fine;
 
 create view treo.followers
@@ -170,9 +178,9 @@ from tabroom.jpool;
 alter table tabroom.judge_hire add requestor int;
 
 create view treo.judge_hires
-	(id, requested_at, entries_requested, rounds_requested, rounds_accepted, created_at, updated_at, squad_id, tourn_id, judge_id, requestor_id)
+	(id, requested_at, entries_requested, entries_accepted, rounds_requested, rounds_accepted, created_at, updated_at, squad_id, tourn_id, judge_id, requestor_id)
 as select
-	id, request_made, covers, rounds, rounds_accepted, created_at, timestamp, school, tourn, judge, requestor
+	id, request_made, covers, accepted, rounds, rounds_accepted, created_at, timestamp, school, tourn, judge, requestor
 from tabroom.judge_hire ;
 
 create view treo.judges
@@ -228,9 +236,9 @@ from tabroom.rating_tier;
 alter table tabroom.rating add draft bool;
 
 create view treo.ratings
-	(id, ordinal, percentile, type, created_at, updated_at, squad_id, entry_id, judge_id, rating_tier_id, rating_subset_id, draft, sheet)
+	(id, ordinal, percentile, type, draft, sheet, created_at, updated_at, squad_id, entry_id, judge_id, rating_tier_id, rating_subset_id)
 as select
-	id, ordinal, percentile, type, created_at, timestamp, school, entry, judge, rating_tier, rating_subset, draft, sheet
+	id, ordinal, percentile, type, draft, sheet, created_at, timestamp, school, entry, judge, rating_tier, rating_subset
 from tabroom.rating;
 
 alter table tabroom.region add active bool;
@@ -369,10 +377,12 @@ as select
 	id, first, last, gender, retired, cell, email, diet, ada, notes, notes_timestamp, chapter, account, acct_request
 from tabroom.chapter_judge;
 
+alter table tabroom.stats add type varchar(15);
+
 create view treo.stats
-	(id, tag, value, created_at, updated_at, event_id)
+	(id, type, tag, value, created_at, updated_at, event_id)
 as select
-	id, tag, value, created_at, timestamp, event
+	id, type, tag, value, taken, timestamp, event
 from tabroom.stats;
 
 create view treo.strike_timeslots
@@ -391,10 +401,12 @@ as select
 	id, type, start, end, hidden, created_at, timestamp, region, timeslot, school, entry, judge, entered_by, strike_time
 from tabroom.strike;
 
+alter table tabroom.student add middle varchar(128);
+
 create view treo.students
-	(id, first, last, grad_year, novice, retired, gender, phonetic, ualt_id, created_at, updated_at, school_id, person_id)
+	(id, first, middle, last, grad_year, novice, retired, gender, phonetic, ualt_id, created_at, updated_at, school_id, person_id)
 as select
-	id, first, last, grad_year, novice, retired, gender, phonetic, ualt_id, created_at, timestamp, chapter, account
+	id, first, middle, last, grad_year, novice, retired, gender, phonetic, ualt_id, created_at, timestamp, chapter, account
 from tabroom.student;
 
 create view treo.sweep_events
@@ -410,9 +422,9 @@ as select
 from tabroom.sweep_include;
 
 create view treo.sweep_rules
-	(id, tag, value, place, created_at, updated_at)
+	(id, tag, value, place, created_at, updated_at, sweep_set_id)
 as select
-	id, tag, value, place, created_at, timestamp
+	id, tag, value, place, created_at, timestamp, sweep_set
 from tabroom.sweep_rule;
 
 create view treo.sweep_sets
