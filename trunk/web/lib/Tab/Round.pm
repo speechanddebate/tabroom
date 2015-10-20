@@ -46,7 +46,7 @@ sub setting {
 		tag   => $tag,
 	)->first;
 
-	if ($value) { 
+	if (defined $value) { 
 			
 		if ($existing) {
 
