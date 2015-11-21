@@ -14,9 +14,9 @@ Tab::Account->table('person');
 Tab::Account->columns(Primary   => qw/id/);
 Tab::Account->columns(Essential => qw/email first last phone ualt_id provider site_admin multiple/);
 Tab::Account->columns(Others    => qw/alt_phone street city state zip country
-                                   gender no_email tz started_judging diversity flags timestamp/);
+                                   gender no_email tz started_judging diversity flags timestamp googleplus/);
 
-Tab::Account->columns(TEMP => qw/prefs/);
+Tab::Account->columns(TEMP => qw/prefs student_id judge_id/);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
