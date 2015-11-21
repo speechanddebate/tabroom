@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
 Tab::Tourn->columns(Essential => qw/name start end webname reg_start reg_end created_by
-									tz state country hidden timestamp foreign_site foreign_id/);
+									tz state country hidden timestamp foreign_site foreign_id googleplus/);
 Tab::Tourn->columns(TEMP => qw/schoolid/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');

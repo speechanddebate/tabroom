@@ -58,6 +58,7 @@ use Tab::EventSetting;
 use Tab::EventDouble;
 use Tab::File;
 use Tab::Follower;
+use Tab::GoogleCalendar;
 use Tab::Hotel;
 use Tab::Housing;
 use Tab::HousingSlots;

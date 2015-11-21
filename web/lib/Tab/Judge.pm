@@ -5,7 +5,7 @@ Tab::Judge->columns(Primary => qw/id/);
 Tab::Judge->columns(Essential => qw/school first last code active ada judge_group account chapter_judge/);
 Tab::Judge->columns(Others => qw / alt_group covers obligation hired acct_request score tmp created_at timestamp /);
 
-Tab::Judge->columns(TEMP => qw/tier pref panelid chair tourn avg diet ballotid accountid tab_rating
+Tab::Judge->columns(TEMP => qw/tier pref panelid chair hangout_admin tourn avg diet ballotid accountid tab_rating
 							   cjid schoolname schoolcode regname regcode region standby/);
 
 Tab::Judge->has_a(judge_group   => 'Tab::JudgeGroup');
