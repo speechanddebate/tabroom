@@ -15,8 +15,8 @@ Once permissioned, just create a hangout and on the left sidebar choose "add app
 "Hangout Timer". Other people can join the hangout and they don't need to add the extension or be a developer on the project.
 
 The extension can be run with two differnt roles:
-* [Administrator](https://plus.google.com/hangouts/_/?gid=223741802818&gd=admin:true)
-* [Participant](https://plus.google.com/hangouts/_/?gid=1059259466031)
+* [Administrator](https://plus.google.com/hangouts/_/?gid=813898675135&gd=admin:true)
+* [Participant](https://plus.google.com/hangouts/_/?gid=813898675135)
 
 You can provide data to the extension by adding a `gd` parameter with the following format: `gd=key1:value1;key2:value2` and so
 they will be available under a variable called `params`, which is a hash.
