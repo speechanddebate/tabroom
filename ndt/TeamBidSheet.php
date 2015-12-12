@@ -7,6 +7,7 @@ $student2=$_GET['id2'];
 $student3=getaltid($student1);
 $student4=getaltid($student2);
 
+//sets date
 if ( isset($_GET['yr_str']) ) { $year_str=$_GET['yr_str']; $date_str=($year_str-1)."-07-01"; $end_date_str=$year_str."-07-01"; $seas_str=($year_str-1)."-".$year_str; }
 if ( empty($year_str) ) {
 	$year_str = date("Y"); $mo_str = date("m"); $seas_str=$year_str."-"; $seas_str .= $year_str+1;
@@ -22,6 +23,7 @@ $teamname=""; $schoolname=""; $studentname= array();
 $chapterid=0;
 
 //Just makes the team name
+//pull the chapter id based on student records
 $query="SELECT *, chapter.name as chapter_name, chapter.id as chapter_id, student.id as student_id FROM student, chapter where (student.id=".$student1." or student.id=".$student2.") and chapter.id=student.chapter";
 $ballots=mysql_query($query); 
    while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
@@ -36,7 +38,7 @@ $ballots=mysql_query($query);
 $teamname=$schoolname." -- ".$teamname;
 
 $coaches=""; $coachemail=""; $coachphone=""; $address="N/A";
-$query="SELECT * FROM chapter_admin, account where chapter_admin.chapter=".$chapterid." and account.id=chapter_admin.account";
+$query="SELECT * FROM permission, account where permission.chapter=".$chapterid." and account.id=permission.account";
 $adstaff=mysql_query($query); 
    while ($row = mysql_fetch_array($adstaff, MYSQL_BOTH)) 
    {
@@ -135,9 +137,12 @@ $elims=mysql_query($query);
   $elim_key = array();
   while ($row = mysql_fetch_array($elims, MYSQL_BOTH)) 
   { 
-	//echo $row['tourn_name']." ".$row['tourn_id']." ".$row['rd_id']." ".$row['rd_label']." ".$row['rd_name']; 
+	//echo $row['tourn_name']." ".$row['tourn_id']." ".$row['rd_id']." ".$row['rd_label']." ".$row['rd_name']."<br>"; 
 	if ($row['tourn_id'] <> $curr_tourn) { $ctr=16; }
 	$elim_key[$row['rd_id']] = $ctr;
+	//fix for 2015 Ky breakouts
+	if ($row['rd_id'] == 127062) { $elim_key[$row['rd_id']]=13; }
+	if ($row['rd_id'] == 127061) { $elim_key[$row['rd_id']]=12; }
 	//echo " elim key is ".$elim_key[$row['rd_id']]." for ".$row['rd_id']."<br>";
 	$ctr--;
 	$curr_tourn = $row['tourn_id'];
