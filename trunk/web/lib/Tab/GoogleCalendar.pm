@@ -3,6 +3,7 @@ use LWP::UserAgent;
 use HTTP::Request::Common;
 use JSON;
 use JSON::WebToken;
+use Data::Dumper;
 
 # Authenticate with Google Calendar API
 sub auth {
@@ -30,6 +31,7 @@ sub auth {
 		}
 	);
 	my $json_response = JSON->new->utf8->decode($jwt_response->decoded_content);
+Tab::debuglog(Dumper($json_response));
 
 	return $json_response->{'access_token'};
 }
@@ -67,6 +69,7 @@ sub createEvent {
 	my $ua = LWP::UserAgent->new;
 	my $response = $ua->request($req);
 	$json_response = JSON->new->utf8->decode($response->decoded_content);
+Tab::debuglog(Dumper($json_response));
 
 	return undef unless $json_response->{'id'};
 	return {
