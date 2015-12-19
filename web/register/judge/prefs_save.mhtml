@@ -1,0 +1,88 @@
+<%args> 
+	$tourn
+	$judge_id => undef
+	$style    => undef
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+	my $now = DateTime->now( time_zone => $tz );
+
+	my $judge = Tab::Judge->retrieve($judge_id);
+	
+	$m->abort unless $judge;
+
+	my $event = $judge->event;
+	my $group = $event->entry_group;
+
+	my $prefs = $group->setting("prefs");
+	$prefs = "ordinals" if $prefs eq "ndt" && $style ne "elims";
+
+	if ($prefs eq "ordinals") { 
+		$m->print("You cannot adjust ordinal prefs on a per-judge basis.  Please use the team pages.  Otherwise percentiles cannot be calculated");
+		$m->abort;
+	}
+	
+	$prefs = "caps" if $prefs eq "ndt" && $style eq "elims";
+
+	my %tier_by_name = ();
+
+	if ($prefs eq "tiered" || $prefs eq "tiered_round" || $prefs eq "caps") { 
+		foreach my $tier ($group->rating_tiers) { 
+			$tier_by_name{$tier->name} = $tier->id;
+		}
+	}
+
+	Tab::Judge->set_sql(wipe_prefs => "delete from rating where judge = ? and rating_tier > 0");
+	Tab::Judge->sql_wipe_prefs->execute($judge->id);
+
+	my @conflicts = Tab::Strike->search( judge => $judge->id, type => "conflict" );
+	push @conflicts, Tab::Strike->search( judge => $judge->id, type => "strike" );
+	my %conflicts_by_id = map {$_->entry->id => $_} @conflicts;
+
+	my @school_conflicts = Tab::Strike->search( judge => $judge->id, type => "school" );
+	my %school_conflicts_by_id = map {$_->school->id => $_} @school_conflicts;
+
+	my $school_id = $judge->school->id if $judge->school;
+	my @all_entries = $m->comp("/funclib/group_entries.mas", group => $judge->judge_group);
+
+	my %rating_by_entry = ();
+	my %entries_at_rating = ();
+
+	my $total_rounds;
+	
+	JUDGE:
+    foreach my $entry (@all_entries) {
+
+        next if $school_conflicts_by_id{$entry->school->id};
+		next if $entry->school->id == $school_id;
+        next if $conflicts_by_id{$entry->id};
+
+		next unless $ARGS{$entry->id};
+
+		unless ($ARGS{$entry->id} == 999) { 
+			$total_rounds += $entry->obligation;
+			$total_rounds += $entry->hired;
+		}
+
+		next JUDGE unless $tier_by_name{$ARGS{$entry->id}};
+
+		Tab::Rating->create({
+			type        => "judge",
+			tourn       => $tourn->id,
+			entry       => $entry->id,
+			judge       => $judge->id,
+			rating_tier => $tier_by_name{$ARGS{$entry->id}},
+			entered     => $now
+		});
+	}	
+
+	my $rounds_before;
+
+	my $msg = $judge->code." prefs saved in ".$group->abbr." to $rounds_before rounds";
+
+	$m->redirect("prefs.mhtml?school_id=".$judge->school->id."&judge_id=".$judge_id."&group_id=".$group->id."&style=$style&msg=".$msg);
+
+</%init>
+
