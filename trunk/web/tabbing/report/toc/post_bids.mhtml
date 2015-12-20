@@ -1,22 +1,26 @@
 <%args>
 	$tourn
-	$session
-	$account
+	$session  => undef
+	$account  => undef
 	$event_id => undef
 	$view     => undef
+	$nopost   => undef
+	$mailbids => undef
+	$generate => undef
+	$publish  => undef
 </%args>
 <%init>
 
 	my $event = Tab::Event->retrieve($event_id) if $event_id;
-	my @events = sort { $a->name cmp $b->name } $tourn->events unless $event_id;
-
+	my @events;
+	@events = sort { $a->name cmp $b->name } $tourn->events unless $event_id;
 	push @events, $event if $event;
 
 	my $name = $event->name if $event;
 	$name = "AllEvents" unless $name;
 	$name =~ s/[\W_]//g;
 
-	my $filename = "TOC-Bids-$name-".$session->id;
+	my $filename = "TOC-Bids-$name-".$session;
 	my $filepath = $Tab::file_root."tmp/".$filename;
 	`rm -f $filepath.*`;
 
@@ -41,7 +45,6 @@
 	print TEXOUT "\\newline\n";
 	print TEXOUT "\\noindent\n";
 
-
 	foreach my $contact (@contacts) {
 		print TEXOUT "\\truncate{3.24in}{Director Name: \\dotfill ".Tab::texify($contact->first)." ".Tab::texify($contact->last)."}\\newline\n";
 		print TEXOUT "Email: \\dotfill ".Tab::texify($contact->email)."\\newline\n" if $contact->email;
@@ -60,9 +63,10 @@
 	print TEXOUT "\\newline\n";
 	print TEXOUT "\\noindent\n";
 
-
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now();
 
 	my $start = $tourn->start->set_time_zone($tz);
 	my $end = $tourn->end->set_time_zone($tz);
@@ -82,8 +86,9 @@
 	foreach my $event (@events) {
 
 		my $bid = $event->setting("bid_round");
-
 		next EVENT unless $bid;
+		next EVENT if $event->tourn->start > $now;
+		next EVENT if $event->tourn->hidden;
 
 		push @bid_events, $event;
 
@@ -95,6 +100,19 @@
 		print TEXOUT "\\noindent\n";
 
 		my $bid_round = Tab::Round->retrieve($bid);
+
+		unless ($bid_round) { 
+			return if $generate;
+			$m->abort;
+		}
+		
+		if ($bid_round && $bid_round->event->id != $event->id) { 
+			$m->print($event->name." at ".$event->tourn->name." ".$event->tourn->start->year." bid round is set to a different tournament.  Please try again");
+			return if $generate;
+			$m->abort;
+		}
+
+
 		my @entries = $m->comp("/funclib/round_entries.mas", round => $bid_round);
 
 		my %already_bid = map {$_->id => 1} @entries;
@@ -113,11 +131,95 @@
 		print TEXOUT "Bid Round: \\dotfill ".Tab::texify($bid_round->label)."\n\n";
 		print TEXOUT "Total Entries: \\dotfill ".Tab::texify(scalar Tab::Entry->search(dropped => 0, waitlist => 0, event => $event))."\n\n";
 		print TEXOUT "Qualifying Entries: \\dotfill ".((scalar @entries) + (scalar @ghost_bids))."\n\n";
-
 		print TEXOUT "}\n";
+
+		unless ($nopost) {
+
+			my $label = "TOC Qualifying Bids";
+			my $set = Tab::ResultSet->search( event => $event->id, label => $label)->first;		
+
+			$set = Tab::ResultSet->create({ 
+				tourn     => $tourn->id,
+				event     => $event->id,
+				label     => $label,
+				generated => $now,
+				published => $publish
+			}) unless $set;
+
+			Tab::ResultValue->set_sql( clear_set => "
+				delete result_value.*
+				from result, result_value
+				where result_value.result = result.id
+				and result.result_set = ? 
+			");
+
+			Tab::Result->set_sql( clear_set => "
+				delete result.* from result where result_set = ?
+			");
+
+			Tab::ResultValue->sql_clear_set->execute($set->id);
+			Tab::Result->sql_clear_set->execute($set->id);
+
+			foreach my $entry (@entries) { 
+
+				my $result = Tab::Result->create({  
+					result_set => $set->id,
+					entry      => $entry->id
+				});
+
+				Tab::ResultValue->create({
+					tag       => "Bid",
+					long_tag  => "Bid Earned",
+					result    => $result->id,
+					value     => "Full",
+					priority  => 1,
+					sort_desc => 1
+				});
+
+				Tab::ResultValue->create({
+					tag       => "State",
+					long_tag  => "State",
+					result    => $result->id,
+					value     => $entry->school->chapter->state,
+					priority  => 2,
+					sort_desc => 1
+				});
+
+			}
+
+			foreach my $entry (@ghost_bids) { 
+
+				my $result = Tab::Result->create({  
+					result_set => $set->id,
+					entry      => $entry->id
+				});
+
+				Tab::ResultValue->create({
+					tag       => "Bid",
+					long_tag  => "Bid Earned",
+					result    => $result->id,
+					value     => "Ghost Bid",
+					priority  => 1,
+					sort_desc => 1
+				});
+
+				Tab::ResultValue->create({
+					tag       => "State",
+					long_tag  => "State",
+					result    => $result->id,
+					value     => $entry->school->chapter->state,
+					priority  => 2,
+					sort_desc => 1
+				});
+
+			}
+		}
 
 		print TEXOUT "\\hspace{.25in}\n";
 
+		print TEXOUT "\\parbox[l][][c]{6in}{";
+		print TEXOUT "\\parbox[l][][c]{6in}{";
+		print TEXOUT "\\parbox[l][][c]{6in}{";
 		print TEXOUT "\\parbox[l][][c]{6in}{";
 		print TEXOUT "\\vspace{1mm}\n";
 
@@ -171,13 +273,15 @@
 EOF
 
 	close TEXOUT;
-	foreach my $event (@bid_events) {
-		unless ($event->type eq "speech" || $event->type eq "congress") {
-			$m->comp("/tabbing/report/packet.mhtml", tourn => $tourn, session => $session, event_id => $event->id, file_dump => "$filename");
+	if ($view eq "Mail" || $mailbids || not defined $generate) { 
+		foreach my $event (@bid_events) {
+			unless ($event->type eq "speech" || $event->type eq "congress") {
+				$m->comp("/tabbing/report/packet.mhtml", tourn => $tourn, session => $session, event_id => $event->id, file_dump => "$filename");
+			}
 		}
 	}
 
-	if ($view eq "Mail") {
+	if ($view eq "Mail" || $mailbids) { 
 		
 		$m->comp("/funclib/printout.mas", tourn => $tourn, filename => $filename, tail => 1, no_redirect => 1);
 
@@ -185,7 +289,7 @@ EOF
 
 		my $cc;
 
-		$cc = $account->email;
+		$cc = $account->email if $account;
 
 		foreach my $contact (Tab::Permission->search( tourn => $tourn->id, tag => "contact")) { 
 			$cc .= ",".$contact->account->email;
@@ -212,9 +316,28 @@ EOF
 			attachment_path => "$filepath.pdf",
 			no_footer       => 1);
 
-		$m->redirect("index.mhtml?msg=bid report sent the TOC and copied to $cc");
+		if ($generate) { 
 
-	} else {
+			my $name;
+			foreach my $event (@bid_events) {
+				$name .= $event->name." ";
+			}
+			return "Bids posted and report mailed to the TOC in Kentucky for $name <br />";
+
+		} else { 
+			$m->redirect("index.mhtml?msg=bid report sent the TOC and copied to $cc");
+		}
+
+	} elsif ($generate) {
+
+		my $name;
+		foreach my $event (@bid_events) {
+			$name .= $event->name." ";
+		}
+
+		return "Bids posted and report mailed to the TOC in Kentucky for $name";
+
+	} else { 
 
 		$m->comp("/funclib/printout.mas", tourn => $tourn, filename => $filename, tail => 1 );
 
