@@ -1,0 +1,449 @@
+<%args>
+	$account    => undef
+	$circuit    => undef
+	$circuit_id => undef
+	$year       => undef
+	$level      => undef
+	$min_rds    => undef
+	$event_type => undef
+	$show_top   => undef
+	$event_id   => undef
+</%args>
+<%init>
+
+	my $end_point;
+	my $debug=0;
+	
+	use Time::HiRes qw( time );
+	my $start = time(); 
+		
+	#if ($circuit_id) { $circuit = Tab::Circuit->retrieve( $circuit_id ); }
+	$circuit = Tab::Circuit->retrieve( 103 ); $circuit_id=103; 
+	unless ($show_top) { $show_top = 50; }
+	unless ($min_rds) { $min_rds = 5; }
+	my $event = Tab::Event->retrieve( $event_id ) if $event_id;
+	my $event_str;
+	$event_str = " and showing only entries in ".$event->name." for ".$event->tourn->name if $event_id;
+	
+	$show_top = 300 if $event_id;
+	$min_rds = 1 if $event_id;
+	
+	$event_type = "debate" unless $event_type;
+
+	unless ($year) { 
+		my $this_year = Tab::school_year;
+		$year = $this_year->year;
+	}
+
+	my $start_string = "07/01/$year";
+	my $end_string = "06/30/".($year + 1);
+
+	my $start_dt = Tab::dtme($start_string);	
+	my $end_dt = Tab::dtme($end_string);	
+	
+	my $level_str = "( event_setting.tag='level' and event_setting.value != 'Jabberwocky')";
+	if ($level eq "Open") { $level_str = "( event_setting.tag='level' and event_setting.value='Open')"; }
+	if ($level eq "Novice") { $level_str = "( event_setting.tag='level' and event_setting.value='Novice')"; }
+	if ($level eq "JV") { $level_str = "( event_setting.tag='level' and event_setting.value='JV')"; }
+	my $level_display = $level;
+	unless ($level_display) { $level_display="all levels of competition."; }
+
+	my $end = time();
+	if ($debug) {
+		print "Time before first sql pull:  "; printf("%.2f\n", $end - $start); print "<br>";
+	}
+	
+	#Load chapter characteristics
+
+	Tab::Entry->columns(TEMP => qw/IDstr/);		
+	Tab::Entry->columns(TEMP => qw/student_names/);
+	Tab::Entry->columns(TEMP => qw/school_name/);		
+	Tab::Entry->set_sql(pull_entries => "
+		select entry.id, GROUP_CONCAT(DISTINCT entry_student.student order by entry_student.student) as IDstr, GROUP_CONCAT(DISTINCT student.last order by student.last separator ' & ') as student_names, school.name as school_name
+		from entry, event, tourn, tourn_circuit, entry_student, student, event_setting, school
+		where tourn_circuit.circuit= ?
+		and tourn.id=tourn_circuit.tourn
+		and event.tourn=tourn.id
+		and entry.event=event.id
+		and tourn.start >= '$start_dt' 
+		and tourn.end <= '$end_dt' 
+		and entry_student.entry=entry.id
+		and student.id=entry_student.student
+		and school.id=entry.school
+		and entry.dropped=0
+		and event.type != 'congress'
+		and event.type != 'speech'
+		and event_setting.event=event.id
+		and $level_str		
+		group by entry.id
+		order by IDstr
+	");
+	
+	my @entries = Tab::Entry->search_pull_entries($circuit->id);
+	
+	if ($debug) {
+		$end = time();
+		print "Pulled entries but not processed them:  "; printf("%.2f\n", $end - $start); print "<br>";
+	}
+
+	print "Entries:".scalar(@entries)."<br>" if $debug;
+	my %entry_hash;
+	my %index_hash; #key is entry_id, value is IDstr
+	
+	foreach my $entry (@entries) {
+		$entry_hash{$entry->IDstr}{'name'} = $entry->school_name." <br />". $entry->student_names;
+		$index_hash{$entry->id}{'master_id'} = $entry->IDstr; 
+
+		if ($event_id && $entry->event == $event_id) {
+			$entry_hash{$entry->IDstr}{'object'} = $entry;
+		}
+
+		my ($spkr1, $spkr2) = get_speakers( $entry->IDstr );
+		$entry_hash{$entry->IDstr}{'spkr1'} = $spkr1;
+		$entry_hash{$entry->IDstr}{'spkr2'} = $spkr2;
+
+	}
+
+	if ($debug) {
+		$end = time();
+		print "Processed entries; about to start second SQL pull:  "; printf("%.2f\n", $end - $start); print "<br>";
+	}
+	
+	#now pull debate events
+	Tab::Event->set_sql(pull_events => "
+		select event.*
+		from event, tourn, tourn_circuit, round
+		where tourn_circuit.circuit= ? 
+		and tourn.id=tourn_circuit.tourn 
+		and tourn.start >= '$start_dt' 
+		and tourn.end <= '$end_dt' 
+		and event.tourn=tourn.id 
+		and event.type != 'congress'
+		and event.type != 'speech'
+		and round.event = event.id
+		and round.type != 'elim'
+		and round.type != 'final'
+		and round.type != 'none'		
+		group by event.id
+	");
+
+	my @events = Tab::Event->search_pull_events($circuit->id);
+	if ($debug) {
+		print "Total events=".scalar(@events);
+		$end = time();
+		print "Event pull done; about to start 3rd SQL pull "; printf("%.2f\n", $end - $start); print "<br>";
+	}
+	
+	my $event_sql;
+	foreach my $event (@events) {
+		$event_sql = $event_sql." or " if $event_sql;
+		$event_sql = $event_sql." round.event=".$event->id;
+	}
+	$event_sql= "(".$event_sql.")";
+	#print "event string is $event_sql<br>";
+	
+	#load every ballot and store in a hash that holds panels
+	
+	my %all_panels;
+	
+	#pull all the ballots in the event
+	Tab::Ballot->columns(TEMP => qw/round_type/);
+	Tab::Ballot->columns(TEMP => qw/round_id/);
+	Tab::Ballot->columns(TEMP => qw/win_ballot/);
+	Tab::Ballot->set_sql(pull_ballots => "
+		select ballot.panel, ballot.entry, ballot.side, round.type as round_type, ballot_value.value as win_ballot, round.id as round_id
+		from ballot_value, ballot, panel, round
+		where ballot_value.ballot=ballot.id
+		and ballot_value.tag = 'ballot'
+		and ballot.panel=panel.id
+		and panel.round=round.id
+		and $event_sql
+	");
+	my @all_ballots = Tab::Ballot->search_pull_ballots();
+	
+	if ($debug) {
+		$end = time();
+		print "Ballots pull done; about to sort ballots into panels  "; printf("%.2f\n", $end - $start); 
+		print "Total ballots pulled=".scalar(@all_ballots)."<br>";
+	}
+	
+	#loop and store all ballot info in a panel hash
+	foreach my $ballot (@all_ballots) {
+		$all_panels{$ballot->panel}{'round_type'} = $ballot->round_type;
+		$all_panels{$ballot->panel}{'round_id'} = $ballot->round_id;
+		if ($ballot->side == 1 ) {
+			$all_panels{$ballot->panel}{'team1'} = $ballot->entry;
+			$all_panels{$ballot->panel}{'ballot1'} += $ballot->win_ballot;
+		}
+		if ($ballot->side == 2 ) {
+			$all_panels{$ballot->panel}{'team2'} = $ballot->entry;
+			$all_panels{$ballot->panel}{'ballot2'} += $ballot->win_ballot;
+		}
+	}
+
+	if ($debug) {
+		$end = time();
+		print "Panels made, now storing panel results for each team:  "; printf("%.2f\n", $end - $start); print "<br>";
+	}
+	
+	#start with zero
+	foreach my $key (keys %entry_hash) {
+		$entry_hash{$key}{'all_wins'} = 0;
+		$entry_hash{$key}{'all_losss'} = 0;
+		$entry_hash{$key}{'p_wins'} = 0;
+		$entry_hash{$key}{'p_losses'} = 0;
+		$entry_hash{$key}{'elim_wins'} = 0;
+		$entry_hash{$key}{'elim_losses'} = 0;
+		$entry_hash{$key}{'elim_ballots'} = 0;		
+		$entry_hash{$key}{'opp_win'} = 0;
+		$entry_hash{$key}{'opp_loss'} = 0;
+		$entry_hash{$key}{'ewin_pts'} = 0;
+		$entry_hash{$key}{'raw_pts'} = 0;
+		$entry_hash{$key}{'raw_rank'} = 0;
+		$entry_hash{$key}{'top5_win'} = 0;
+		$entry_hash{$key}{'top10_win'} = 0;
+		$entry_hash{$key}{'bad_losses'} = 0;
+		$entry_hash{$key}{'total_points'} = 0;
+	}
+	
+	#now sum for each team across all panels
+	my $winner_master_id; my $loser_master_id;
+	my $is_elim;
+	my %panels_in_round; #stores number of panels in a round to figure out what elim level it is
+
+	#gotta store how many panels there were in each round to find semis, finals, etc.
+	foreach my $key ( keys %all_panels ) {
+		$panels_in_round{$all_panels{$key}{'round_id'}} +=1;
+	}
+
+	foreach my $key ( keys %all_panels ) {
+		$is_elim=1;
+		if ( $all_panels{$key}{'round_type'} ne "elim" && $all_panels{$key}{'round_type'} ne "final" ) { $is_elim=0; }
+		
+		#print "processing panel $key<br>";
+		if ( $all_panels{$key}{'ballot1'} > $all_panels{$key}{'ballot2'} ) {
+			$winner_master_id = $index_hash{$all_panels{$key}{'team1'}}{'master_id'};
+			$loser_master_id = $index_hash{$all_panels{$key}{'team2'}}{'master_id'};
+			$entry_hash{$winner_master_id}{'elim_ballots'} += $all_panels{$key}{'ballot1'} if $is_elim == 1;
+			$entry_hash{$loser_master_id}{'elim_ballots'} += $all_panels{$key}{'ballot2'} if $is_elim == 1;
+		} else {
+			$winner_master_id = $index_hash{$all_panels{$key}{'team2'}}{'master_id'};
+			$loser_master_id = $index_hash{$all_panels{$key}{'team1'}}{'master_id'};
+			$entry_hash{$winner_master_id}{'elim_ballots'} += $all_panels{$key}{'ballot2'} if $is_elim == 1;
+			$entry_hash{$loser_master_id}{'elim_ballots'} += $all_panels{$key}{'ballot1'} if $is_elim == 1;
+		}
+		$entry_hash{$winner_master_id}{'p_wins'} +=1 if $is_elim ==0;
+		$entry_hash{$winner_master_id}{'all_wins'} +=1;
+		$entry_hash{$loser_master_id}{'p_losses'} +=1 if $is_elim ==0;
+		$entry_hash{$loser_master_id}{'all_losses'} +=1;
+		#assign elim points
+		if ($is_elim == 1) {
+			if ($panels_in_round{$all_panels{$key}{'round_id'}} == 1) { $entry_hash{$winner_master_id}{'elim_pts'} += 1.25; }
+			if ($panels_in_round{$all_panels{$key}{'round_id'}} == 2) { $entry_hash{$winner_master_id}{'elim_pts'} += 1; }
+			if ($panels_in_round{$all_panels{$key}{'round_id'}} == 4) { $entry_hash{$winner_master_id}{'elim_pts'} += .75; }
+			if ($panels_in_round{$all_panels{$key}{'round_id'}} == 8) { $entry_hash{$winner_master_id}{'elim_pts'} += .5; }
+			if ($panels_in_round{$all_panels{$key}{'round_id'}} == 16) { $entry_hash{$winner_master_id}{'elim_pts'} += .25; }
+		}
+	}
+
+	if ($debug) {
+		$end = time();
+		print "Panel summation done:  "; printf("%.2f\n", $end - $start); print "<br>";
+	}
+
+	#opp win pass
+	
+	my $team1_master; my $team2_master;
+	
+	foreach my $key ( keys %all_panels ) {
+
+		$team1_master = $index_hash{$all_panels{$key}{'team1'}}{'master_id'};
+		$team2_master = $index_hash{$all_panels{$key}{'team2'}}{'master_id'};
+		$entry_hash{$team1_master}{'opp_win'} += $entry_hash{$team2_master}{'all_wins'};
+		$entry_hash{$team1_master}{'opp_loss'} += $entry_hash{$team2_master}{'all_losses'};
+		$entry_hash{$team2_master}{'opp_win'} += $entry_hash{$team1_master}{'all_wins'};
+		$entry_hash{$team2_master}{'opp_loss'} += $entry_hash{$team1_master}{'all_losses'};
+
+	}
+
+	if ($debug) {
+		$end = time();
+		print "Opp wins calculated  "; printf("%.2f\n", $end - $start); print "<br>";
+	}
+	
+	#derive calculated columns
+	foreach my $key (keys %entry_hash) {
+		$entry_hash{$key}{'elim_wins'} = $entry_hash{$key}{'all_wins'}-$entry_hash{$key}{'p_wins'} ;			
+		$entry_hash{$key}{'elim_losses'} = $entry_hash{$key}{'all_losses'}-$entry_hash{$key}{'p_losses'} ;
+		$entry_hash{$key}{'rounds'} = $entry_hash{$key}{'all_wins'}+$entry_hash{$key}{'all_losses'} ;
+		if ( $entry_hash{$key}{'all_wins'} + $entry_hash{$key}{'all_losses'} > 0 ) {
+			$entry_hash{$key}{'all_percent'} = sprintf("%.1f", ($entry_hash{$key}{'all_wins'} / ($entry_hash{$key}{'all_wins'}+$entry_hash{$key}{'all_losses'}) * 100)) ;
+		}
+		if ( $entry_hash{$key}{'opp_win'} + $entry_hash{$key}{'opp_loss'} > 0 ) {
+			$entry_hash{$key}{'raw_pts'} = $entry_hash{$key}{'all_wins'} * ($entry_hash{$key}{'opp_win'}/$entry_hash{$key}{'opp_loss'}) ;
+		}
+		$entry_hash{$key}{'raw_pts'} += $entry_hash{$key}{'elim_ballots'} * .2;
+		$entry_hash{$key}{'raw_pts'} += $entry_hash{$key}{'elim_pts'} ;
+		$entry_hash{$key}{'raw_pts'} = sprintf("%.1f", $entry_hash{$key}{'raw_pts'});
+	}
+
+	#find the percentile and good and bad wins
+	my $ctr;
+	foreach my $key (sort {$entry_hash{$b}->{'raw_pts'} <=> $entry_hash{$a}->{'raw_pts'}} keys(%entry_hash)) {
+		next unless ( 	$entry_hash{$key}{'name'} ne '' and 
+						$entry_hash{$key}{'rounds'} > $min_rds );
+		$ctr++ ;				
+		$entry_hash{$key}{'raw_rank'} = $ctr;
+		$entry_hash{$key}{'total_pts'} = $entry_hash{$key}{'raw_pts'};
+	}
+	
+	print "$ctr teams with min rds<br>" if $debug;
+	foreach my $key (sort {$entry_hash{$b}->{'raw_pts'} <=> $entry_hash{$a}->{'raw_pts'}} keys(%entry_hash)) {
+		next unless ( 	$entry_hash{$key}{'name'} ne '' and 
+						$entry_hash{$key}{'rounds'} > $min_rds );
+		$entry_hash{$key}{'raw_pct'} = sprintf("%.1f", ($entry_hash{$key}{'raw_rank'}/$ctr) * 100);
+	}
+	
+	foreach my $key ( keys %all_panels ) {
+		
+		#print "processing panel $key<br>";
+		if ( $all_panels{$key}{'ballot1'} > $all_panels{$key}{'ballot2'} ) {
+			$winner_master_id = $index_hash{$all_panels{$key}{'team1'}}{'master_id'};
+			$loser_master_id = $index_hash{$all_panels{$key}{'team2'}}{'master_id'};
+		} else {
+			$winner_master_id = $index_hash{$all_panels{$key}{'team2'}}{'master_id'};
+			$loser_master_id = $index_hash{$all_panels{$key}{'team1'}}{'master_id'};
+		}
+		if ( $entry_hash{$loser_master_id}{'raw_pct'} <= 5 ) {
+			$entry_hash{$winner_master_id}{'top5_win'} +=1 ;
+			$entry_hash{$winner_master_id}{'total_pts'} += .3 ;
+		}
+		if ( $entry_hash{$loser_master_id}{'raw_pct'} <= 10 ) {
+			$entry_hash{$winner_master_id}{'top10_win'} +=1 ;
+			$entry_hash{$winner_master_id}{'total_pts'} += .1 ;
+		}
+		if ( $entry_hash{$loser_master_id}{'raw_pct'} >= 50 ) {
+			$entry_hash{$winner_master_id}{'bad_losses'} +=1 ;
+			$entry_hash{$winner_master_id}{'total_pts'} -= .25 ;
+		}
+	}
+
+#	print "Now entering output writing.<br>";
+
+	sub get_speakers {
+
+		my ($dummy) = @_;
+		my $x; my $st=0;
+		my $spkr1=""; my $spkr2="";
+				
+		for ($x=0; $x <= length($dummy); $x++) {
+		
+			if ( substr($dummy, $x, 1) eq "," ) {
+				if ( $spkr1 eq "" ) {
+					$spkr1=substr($dummy, $st, $x-$st);
+					$st=$x+1;
+				} else {
+					$spkr2=substr($dummy, $st, $x-$st-1);
+				}
+				if ( $spkr2 ne "" ) { last; }
+			}
+		}
+
+		if ($spkr2 eq "" ) { $spkr2=substr($dummy, $st, length($dummy)-$st); }
+		
+		return $spkr1, $spkr2;
+		
+	}
+
+	$ctr=0 ;
+				
+</%init>
+
+	<& menu.mas, circuit_id => $circuit_id, whoami => "team_success", year => $year, event_type => $event_type, level => $level, min_rds => $min_rds &>
+
+	<div class="main">
+
+	<h2> <% $circuit->name %> front royal results for <% $year %>-<% $year+1 %></h2>
+
+	<p class="explain">
+		Minimum <% $min_rds %> rounds for <% $level_display %> <% $event_str %>.  Click any team name to see a complete record.
+	</p>
+
+	<& /funclib/tablesorter.mas, table => "WUDC" &>
+
+		<table cellpadding="3" width="100%" id="WUDC" class="tablesorter">
+		<thead>
+			<tr class="yellowrow">
+				<th class="smaller">Entry</th>
+				<th class="smaller">Rds</th>				
+				<th class="smaller">All W-L </th>								
+				<th class="smaller">Prelim W-L</th>												
+				<th class="smaller">Elim W-L</th>				
+				<th class="smaller">Opp Win</th>												
+				<th class="smaller">Elim Ballots</th>								
+				<th class="smaller">Raw Pts/Rank</th>												
+				<th class="smaller">Good Wins</th>
+				<th class="smaller">Bad Losses</th>
+				<th class="smaller">Total</th>
+			</tr>
+		</thead>
+
+		<tbody>
+
+% 			foreach my $key (sort {$entry_hash{$b}->{'total_pts'} <=> $entry_hash{$a}->{'total_pts'}} keys(%entry_hash)) {
+%				next unless ( 	$entry_hash{$key}{'name'} ne '' and 
+%								$entry_hash{$key}{'rounds'} > $min_rds );
+
+%				last if $ctr++ >= $show_top;
+
+				<tr class="smallish centeralign">
+
+						<td class="leftalign"> 
+							<a class="white" href="team_lifetime_record.mhtml?id1=<% $entry_hash{$key}{'spkr1'} %>&id2=<% $entry_hash{$key}{'spkr2'} %>">
+								<% $entry_hash{$key}{'name'} %> 
+							</a>
+						</td>
+
+						<td> <% $entry_hash{$key}{'rounds'} %> </td>					
+
+						<td> <% $entry_hash{$key}{'all_wins'} %>-<% $entry_hash{$key}{'all_losses'} %> (<% $entry_hash{$key}{'all_percent'} %>%)</td>
+
+%						my $dummy = $entry_hash{$key}{'p_wins'} / ($entry_hash{$key}{'p_wins'}+$entry_hash{$key}{'p_losses'});		
+						<td> <% $entry_hash{$key}{'p_wins'} %>-<% $entry_hash{$key}{'p_losses'} %><br> (<% sprintf("%.1f\n", $dummy*100) %>%)</td>
+
+%						if ( $entry_hash{$key}{'elim_wins'}+$entry_hash{$key}{'elim_losses'} > 0 ) {					
+%							$dummy = $entry_hash{$key}{'elim_wins'} / ($entry_hash{$key}{'elim_wins'}+$entry_hash{$key}{'elim_losses'});		
+%						}
+						<td> <% $entry_hash{$key}{'elim_wins'} %>-<% $entry_hash{$key}{'elim_losses'} %><br> (<% sprintf("%.1f\n", $dummy*100) %>%)</td>					
+
+%						$dummy = $entry_hash{$key}{'opp_win'} / ($entry_hash{$key}{'opp_win'}+$entry_hash{$key}{'opp_loss'});								
+						<td>
+							<% $entry_hash{$key}{'opp_win'} %>-<% $entry_hash{$key}{'opp_loss'} %><br> (<% sprintf("%.1f\n", $dummy*100) %>%)
+						</td>
+						<td>
+							<% $entry_hash{$key}{'elim_ballots'} %>
+						</td>
+
+						<td>
+							<% $entry_hash{$key}{'raw_rank'} %> - <% $entry_hash{$key}{'raw_pts'} %> <br>(<% $entry_hash{$key}{'raw_pct'} %>%)
+						</td>
+
+						<td>
+							<% $entry_hash{$key}{'top5_win'} %> - <% $entry_hash{$key}{'top10_win'} %>
+						</td>
+						<td>
+							<% $entry_hash{$key}{'bad_losses'} %>
+						</td>
+						<td>
+							<% sprintf("%.1f\n", $entry_hash{$key}{'total_pts'}) %>
+						</td>						
+				</tr>
+%			}
+
+			</body>
+
+		</table>
+		
+
+	</div>
+
