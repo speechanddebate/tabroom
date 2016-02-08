@@ -38,7 +38,7 @@ $ballots=mysql_query($query);
 $teamname=$schoolname." -- ".$teamname;
 
 $coaches=""; $coachemail=""; $coachphone=""; $address="N/A";
-$query="SELECT * FROM permission, account where permission.chapter=".$chapterid." and account.id=permission.account";
+$query="SELECT * FROM permission, person where permission.chapter=".$chapterid." and person.id=permission.account";
 $adstaff=mysql_query($query); 
    while ($row = mysql_fetch_array($adstaff, MYSQL_BOTH)) 
    {
@@ -176,12 +176,12 @@ $elims=mysql_query($query);
          $side[$x]=$row['side'];
          getspeakers($spkr1[$x], $spkr2[$x], $row['entry_id']);
          $outcome[$x]=makeoutcomestring($balfor, $balvs, $row['judge']);
-         if($balfor > $balvs) {$win[$x] = 1;}
+     if($balfor > $balvs) {$win[$x] = 1;}
          $isprelim[$x]=1; if ($row['rd_type'] == "elim" or $row['rd_type'] == "final") {$isprelim[$x]=0;}
          if (isroundrobin($row['event_id']) == 1) {$isRR[$x]=1;}
          $panel[$x]=$row['panel_id']; 
          $ballotid=$row['ballot_id']; 
-	 $ballot_id[$x]=$ballotid;
+		 $ballot_id[$x]=$ballotid;
      }
 ?>
 
@@ -223,7 +223,7 @@ $i=1; $pwin=0; $ploss=0; $trip=""; $doub=""; $octo=""; $qrtr=""; $semi=""; $finl
 $totpwin=0; $totploss=0; $totewin=0; $toteloss=0; $jvwin=0; $jvloss=0;
 while ($i <= $x) {
 
-if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE)
+if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE OR teammatch($spkr1[$i], $spkr2[$i], $student3, $student4)==TRUE)
 {
  if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
  if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
@@ -635,7 +635,7 @@ $ewin=0; $eloss=0; $jvwin=0; $jvloss=0; $lasttournid=0;
 while ($i <= $x) 
 {
  $match=FALSE;
- if ($loopnum==1 and teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE) {$match=TRUE;}
+ if ($loopnum==1 and (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE OR teammatch($spkr1[$i], $spkr2[$i], $student3, $student4)==TRUE) ) {$match=TRUE;}
  if ($loopnum==2 and onlyone($spkr1[$i], $spkr2[$i], $student2, $student4)==TRUE) {$match=TRUE;}
  if ($loopnum==3 and onlyone($spkr1[$i], $spkr2[$i], $student1, $student3)==TRUE) {$match=TRUE;}
  if ($match==TRUE)
