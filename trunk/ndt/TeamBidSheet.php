@@ -143,6 +143,11 @@ $elims=mysql_query($query);
 	//fix for 2015 Ky breakouts
 	if ($row['rd_id'] == 127062) { $elim_key[$row['rd_id']]=13; }
 	if ($row['rd_id'] == 127061) { $elim_key[$row['rd_id']]=12; }
+	//random fix
+	if ( strtoupper($row['rd_label']) == 'FINALS' ) { $elim_key[$row['rd_id']]=16; }
+	if ( strtoupper($row['rd_label']) == 'SEMIS' ) { $elim_key[$row['rd_id']]=15; }
+	if ( strtoupper($row['rd_label']) == 'QUARTERS' ) { $elim_key[$row['rd_id']]=14; }
+	if ( strtoupper($row['rd_label']) == 'OCTOS' ) { $elim_key[$row['rd_id']]=13; }
 	//echo " elim key is ".$elim_key[$row['rd_id']]." for ".$row['rd_id']."<br>";
 	$ctr--;
 	$curr_tourn = $row['tourn_id'];
