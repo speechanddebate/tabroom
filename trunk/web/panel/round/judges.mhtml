@@ -20,9 +20,9 @@
 	my $num_judges = $round->setting("num_judges");
 	$num_judges = 1 unless $num_judges;
 
-	my $flights = $round->flighted;
-	$flights = 1 unless $flights;
-	$flights = 1 if $round->event->setting("flight_rooms_only");
+	my $num_flights = $round->flighted;
+	$num_flights = 1 unless $num_flights;
+	$num_flights = 1 if $round->event->setting("flight_rooms_only");
 
 	$m->comp("/funclib/round_clear_judges.mas", round => $round);
 
@@ -138,49 +138,66 @@
 		}
 
 	} else { 
-
-		my $ncfl++ if $tourn->setting("ncfl");
 		
 		my %rating_by_judge_event = ();
 
 		if ($group->setting("coach_ratings") && $round->type ne "prelim") {
 		
-			my @tiers = $group->rating_tiers;
-			my %tier_names = (); 
-			foreach my $tier (@tiers) { 
-				$tier_names{$tier->id} = $tier->name;
-			}
+			my %tier_names = map {$_->id => $_->name} $group->rating_tiers;
 
 			foreach my $event ($group->events) { 
 				my $event_id = $event->id;
 				my @ratings = $m->comp("/funclib/group_ratings.mas", event => $event);
 				foreach my $rating (@ratings) { 
-					$rating_by_judge_event{$rating->judge->id."-".$event_id} = $tier_names{$rating->rating_tier->id} if $rating && $rating->rating_tier;
+					$rating_by_judge_event{$rating->judge->id."-".$event_id} = $tier_names{$rating->rating_tier->id} 
+						if $rating && $rating->rating_tier;
 				}
 			}
-		}   
+		}
 
-		my %flights_already = ();
+		my %can_judge = ();
+		my %panel_judges = ();
 
 		foreach my $panel (@panels) { 
 
 			next if $panel->bye;
-			
 			my @judges = $m->comp("/funclib/clean_judges.mas", panel => $panel, mass => "yes");
 
-			@judges = shuffle(@judges);
+			@{$panel_judges{$panel->id}} = @judges;
+
+			foreach my $judge (@judges) { 
+				push @{$can_judge{$judge->id}}, $panel;
+			}
+
+		}
+
+		my %done = ();
+
+		foreach my $panel (@panels) { 
+
+			next if $done{$panel->id};
+
+			my @judges = shuffle(@{$panel_judges{$panel->id}});
 
 			if ($panel->round->type ne "prelim") {
-				@judges = sort {$rating_by_judge_event{$a->id."-".$round->event->id} cmp $rating_by_judge_event{$b->id."-".$round->event->id}} @judges;
-				@judges = sort {length($rating_by_judge_event{$b->id."-".$round->event->id}) <=> length($rating_by_judge_event{$a->id."-".$round->event->id})} @judges;
+				@judges = sort {$rating_by_judge_event{$a->id."-".$round->event->id} 
+					cmp $rating_by_judge_event{$b->id."-".$round->event->id}} @judges;
+
+				@judges = sort {length($rating_by_judge_event{$b->id."-".$round->event->id}) 
+					<=> length($rating_by_judge_event{$a->id."-".$round->event->id})} @judges;
 			}
 
 			my %school_already;
 			my %region_already if $ncfl;
 
+			my @judge_panel;
+
 			foreach (1 .. $num_judges) { 
+
 				my $judge = shift @judges if @judges;
+
 				next unless $judge;
+				next if $done{"J-".$judge->id};
 
 				while (@judges && $judge->school && $school_already{$judge->school}) { 
 					$judge = shift @judges;
@@ -195,11 +212,60 @@
 				$school_already{$judge->school->id}++ if $judge->school;
 				$region_already{$judge->school->region->id}++ if $ncfl &&  $judge->school->region;
 
-				$m->comp("/funclib/panel_judgeadd.mas", panel => $panel, judge => $judge) if $judge;
+				push @judge_panel, $judge if $judge;
+
 			}
 
-		}
+			my @flights;
 
+			foreach my $flight_number (1 .. $num_flights) { 
+
+				if ($flight_number == 1) { 
+
+					$panel->flight($flight_number);
+					$panel->update;
+					push @flights, $panel if $panel;
+
+				} else { 
+
+					my %ok_panels = {};
+					my $other_flight;
+
+					JUDGE:
+					foreach my $judge (@judge_panel) { 
+
+						next if $other_flight;
+
+						foreach my $other_panel (@{$can_judge{$judge->id}}) { 
+							next if $done{$other_panel->id};
+							next if $other_panel->id == $panel->id;
+
+							$ok_panels{$other_panel->id}++;
+
+							if ($ok_panels{$other_panel->id} == scalar (@judge_panel)) { 
+								$other_flight = $other_panel;
+								$other_flight->flight($flight_number);
+								$other_flight->update;
+							}
+
+						}
+
+					}
+
+					push @flights, $other_flight if $other_flight;
+				}
+			}
+
+			Tab::debuglog("Judge panel @judge_panel is judging flights @flights");
+
+			foreach my $flight (@flights) { 
+				$done{$flight->id}++;
+				foreach my $judge (@judge_panel) { 
+					$m->comp("/funclib/panel_judgeadd.mas", panel => $flight, judge => $judge) if $judge;
+					$done{"J-".$judge->id}++;
+				}
+			}
+		}
 	}
 
 	my $msg = "Judges have been assigned";
