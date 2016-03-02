@@ -127,7 +127,7 @@ $balfor=0; $balvs=0;
 $round= array(); $tourn= array(); $tournid=array(); $tourndate= array(); $side= array(); $panel=array(); $roundlabel=array();
 $win = array(); $outcome = array(); $isprelim= array(); $spkr1 = array(); $spkr2 = array(); $isRR=array(); $isopen=array(); $entry=array(); $ballot_id=array();
 $oppn = array(); $event = array(); $x=0; $panel[0]=-1; $ballotid=-1;
-$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, round.type as rd_type, round.id as rd_id, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE entry.dropped=false and round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start > '".$date_str."' and tourn.start < '".$end_date_str."' ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name asc, event.id desc, panel.id asc, ballot.id asc";
+$query="SELECT *, ballot.id as ballot_id, entry.id as entry_id, event.type as event_type, round.label as round_label, round.name as rd_name, round.type as rd_type, round.id as rd_id, ballot_value.value as ballot_decision, tourn.name as tourn_name, event.name as event_name, event.id as event_id, panel.id as panel_id, panel.bye as panel_bye, tourn.id as tourn_id FROM ballot_value, ballot, entry_student, panel, round, event, tourn, entry WHERE entry.dropped=false and round.post_results>0 and ballot_value.tag='ballot' and ballot_value.ballot=ballot.id and tourn.id=event.tourn and event.id=round.event and round.id=panel.round and panel.id=ballot.panel and ballot.entry=entry_student.entry and (entry_student.student=".$student1." or entry_student.student=".$student2." or entry_student.student=".$student3." or entry_student.student=".$student4.") and entry.id=entry_student.entry and tourn.start > '".$date_str."' and tourn.start < '".$end_date_str."' ORDER BY tourn.start asc, tourn.id asc, entry.id asc, round.name asc, event.id desc, panel.id asc, ballot.id asc";
 $ballots=mysql_query($query); 
 
 //re-do rd_name field to set for correct elim level
@@ -163,7 +163,8 @@ $elims=mysql_query($query);
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
      { 
       //if ($row['tourn_id']==1532) {echo $row['panel_id']."<br>";}
-      if ($row['panel_id']<>$panel[$x]) {$x++; $balfor=0; $balvs=0;}
+      if ($row['panel_id']<>$panel[$x]) {$x++; $balfor=0; $balvs=0; }
+	  if ($row['panel_id']==839130) {echo "Found 839130<br>"; }
       if ($row['ballot_decision'] == 1 and $row['ballot_id']<>$ballotid) {$balfor +=1;}
       if ($row['ballot_decision'] == 0 and $row['ballot_id']<>$ballotid) {$balvs +=1;}
          $round[$x]=""; $tourn[$x]=""; $event[$x]=""; $outcome[$x]=""; $win[$x]=0; $isRR[$x]=0; $isopen[$x]=0;
@@ -171,7 +172,7 @@ $elims=mysql_query($query);
          $round[$x]=$row['rd_name'];
          $round_id[$x]=$row['rd_id'];
          $roundlabel[$x]=$row['round_label'];
-   	 if ($roundlabel[$x] == '') {$roundlabel[$x] = $row['rd_name'];}
+		 if ($roundlabel[$x] == '') {$roundlabel[$x] = $row['rd_name'];}
          $event[$x]=$row['event_name'];
          $tourn[$x]=$row['tourn_name'];
          $tournid[$x]=$row['tourn_id'];
@@ -181,7 +182,9 @@ $elims=mysql_query($query);
          $side[$x]=$row['side'];
          getspeakers($spkr1[$x], $spkr2[$x], $row['entry_id']);
          $outcome[$x]=makeoutcomestring($balfor, $balvs, $row['judge']);
-     if($balfor > $balvs) {$win[$x] = 1;}
+		 if ($row['panel_bye'] == 1) { $outcome[$x] = "Bye/Fft"; }
+		 if($balfor > $balvs) {$win[$x] = 1;}
+		 if($balfor == $balvs) {$win[$x] = .5;}
          $isprelim[$x]=1; if ($row['rd_type'] == "elim" or $row['rd_type'] == "final") {$isprelim[$x]=0;}
          if (isroundrobin($row['event_id']) == 1) {$isRR[$x]=1;}
          $panel[$x]=$row['panel_id']; 
@@ -232,12 +235,20 @@ if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE OR teammatch($
 {
  if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
  if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
+ 
+ if ($win[$i]==.5 and $isprelim[$i]==1) {$pwin = $pwin + .5;}
+ if ($win[$i]==.5 and $isprelim[$i]==1) {$ploss = $ploss + .5;}
+ 
  if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totewin++;}
  if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$toteloss++;}
  if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
  if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
  if ($win[$i]==1 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totwin++;}
  if ($win[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totloss++;}
+ 
+ if ($win[$i]==.5 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totwin = $totwin + .5;}
+ if ($win[$i]==.5 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totloss = $totloss + .5;}
+ 
  if ( isset($elim_key[$round_id[$i]]) )
   {
    if ($elim_key[$round_id[$i]]==11) {$trip=$outcome[$i];}
