@@ -22,6 +22,8 @@
 	my $round_robin++ if $event->setting("round_robin");
 	undef $round_robin if $round->type eq "elim" || $round->type eq "final";
 
+	my $show_averages++ if $event->setting("show_averages");
+
 	#Deduplicate Ballots
 	$m->comp("/funclib/event_dedupe.mas", event => $event);
 
@@ -100,8 +102,6 @@
 	my $last_elim_wins;
 
 	if ($all) { 
-
-		Tab::debuglog("all");
 
 		my $sth = $dbh->prepare("
 
@@ -190,7 +190,6 @@
 
 				$last_elim_wins++;
 
-				Tab::debuglog("last_elim");
 				my $sth = $dbh->prepare("
 					select value.id, student.id, value.student, student.first, student.last, student.novice, 
 						entry.id, entry.code, entry.dq, round.type, round.name, round.id, 
@@ -268,7 +267,6 @@
 
 			} else {
 
-				Tab::debuglog("used tier");
 
 				my $sth = $dbh->prepare("
 					select value.id, student.id, value.student, student.first, student.last, student.novice, 
@@ -352,7 +350,6 @@
 
 	unless ($speaker_max_scores) { 
 
-		Tab::debuglog("max_scores");
 		my $bye_sth = $dbh->prepare("
 			select entry_student.student, ballot.entry, panel.id, panel.round, panel.bye, ballot.bye, ballot.noshow
 			from panel, ballot, round, entry_student
@@ -630,14 +627,26 @@
 			$tier_desc .= "+" if $tier_desc;
 			$tier_long_desc .= "+" if $tier_long_desc;
 
-			$tier_desc .= "Rnk" if $tb_name eq "ranks";
-			$tier_long_desc .= "Ranks" if $tb_name eq "ranks";
+			if ($show_averages) { 
+				$tier_desc .= "AvRnk" if $tb_name eq "ranks";
+				$tier_long_desc .= "Average Rank" if $tb_name eq "ranks";
 
-			$tier_desc .= "Pts" if $tb_name eq "points";
-			$tier_long_desc .= "Speaker Points" if $tb_name eq "points";
+				$tier_desc .= "AvPts" if $tb_name eq "points";
+				$tier_long_desc .= "Average Speaker Points" if $tb_name eq "points";
 
-			$tier_desc .= "Rcp" if $tb_name eq "reciprocals";
-			$tier_long_desc .= "Reciprocals" if $tb_name eq "reciprocals";
+				$tier_desc .= "AvRcp" if $tb_name eq "reciprocals";
+				$tier_long_desc .= "Average Reciprocals" if $tb_name eq "reciprocals";
+
+			} else { 
+				$tier_desc .= "Rnk" if $tb_name eq "ranks";
+				$tier_long_desc .= "Ranks" if $tb_name eq "ranks";
+
+				$tier_desc .= "Pts" if $tb_name eq "points";
+				$tier_long_desc .= "Speaker Points" if $tb_name eq "points";
+
+				$tier_desc .= "Rcp" if $tb_name eq "reciprocals";
+				$tier_long_desc .= "Reciprocals" if $tb_name eq "reciprocals";
+			}
 
 			$tier_desc .= "JP" if $tb_name eq "judgepref";
 			$tier_long_desc .= "Judge Preferences" if $tb_name eq "judgepref";
@@ -754,13 +763,11 @@
 
 					$total += 100 * $entry_wins{$entry};
 
+				# RANKS RECIPS RECIPROCALS
 				} elsif ($name eq "ranks" || $name eq "reciprocals" || $name eq "chair_ranks") { 
 
-					my @drop_best;
-					my @drop_worst;
-
-					my $count;
-					my $bye; 
+					my %round_count;
+					my @rank_scores;
 
 					foreach my $this_round (@rounds) { 
 
@@ -770,9 +777,10 @@
 
 							if ($score_tag{$score} eq "rank") { 
 							
-								$done++;
-
 								next if $name eq "chair_ranks" && $score_chair{$score} < 1;
+
+								$done++;
+								$round_count{$this_round}++;
 							
 								my $rank = $score_value{$score};
 
@@ -780,15 +788,18 @@
 									$rank-- if $dq_panel_threshold{$score_panel{$score}."-".$score_judge{$score}} < $rank;
 								}
 
-								# Bump the rank up if it's a time violation.  Truncation below will correct if this 
-								# makes it bigger (ie if the TV was last place);
+								# Bump the rank up if it's a time violation.
+								# Truncation below will correct if this makes
+								# it bigger (ie if the TV was last place);
 								
 								$rank++ if $score_tv{$score} && $mfl_time_violation;
 
 								# Promote anyone over the hard cap for truncation
+
 								$rank = $truncate if $truncate && $rank > $truncate && $round_type{$this_round} eq "prelim";
 
 								# Promote anyone over the per-round floating cap for truncation
+
 								$rank = $round_truncate{$this_round} if $truncate_to_smallest 
 									&& $rank > $round_truncate{$this_round} && $round_type{$this_round} eq "prelim";
 
@@ -800,134 +811,149 @@
 										if $rank > scalar @{$panel_entries{$score_panel{$score}}};
 								}
 
-								$total += 100 * $rank if $name eq "ranks" || $name eq "chair_ranks";
-								$total += sprintf("%d", (1 / $rank) * 100) if $rank && $name eq "reciprocals";
-								$count++ if $name eq "ranks";
+								push @rank_scores, $rank if $name eq "ranks" || $name eq "chair_ranks";
+								push @rank_scores, (1 / $rank) if $rank && $name eq "reciprocals";
 
-								if ($tb_highlow) {  
+							}
+						}
+					}
 
-									#drop the best
+					@rank_scores = sort {$a <=> $b} @rank_scores;
 
-									if ($tb_highlow == 1 || $tb_highlow == 2 || $tb_highlow == 3) {
+					if ($speaker_max_scores) { 
+						while (scalar @rank_scores > $speaker_max_scores) { 
+							pop @rank_scores if $name eq "ranks" || $name eq "chair_ranks";
+							shift @rank_scores if $name eq "reciprocals";
+						}
+					}
 
-										if (scalar @drop_best < $tb_highlow_count) {
-											push @drop_best, $rank;
-										} else {
-											my $least_best = pop @drop_best;
-											push @drop_best, $least_best if $least_best <= $rank;
-											push @drop_best, $rank if $least_best > $rank;
-										}
+					if ($tb_highlow == 1 || $tb_highlow == 3) {
+						# Drop the best (lowest for ranks, highest for recips)
+						foreach (1 .. $tb_highlow_count) { 
+							shift @rank_scores if $name eq "ranks" || $name eq "chair_ranks";
+							pop @rank_scores if $name eq "reciprocals";
+						}
+					}
 
-										@drop_best = sort {$a <=> $b} @drop_best;
-									}
+					if ($tb_highlow == 1 || $tb_highlow == 4) { 
+						# Drop the worst (highest)
+						foreach (1 .. $tb_highlow_count) { 
+							pop @rank_scores if $name eq "ranks" || $name eq "chair_ranks";
+							shift @rank_scores if $name eq "reciprocals";
+						}
+					}
 
-									#drop the worst
+					my $average_total; 
 
-									if ($tb_highlow == 1 || $tb_highlow == 2 || $tb_highlow == 4) {
+					foreach my $score (@rank_scores) { 
+						$average_total += $score; 
+					}
 
-										if (scalar @drop_worst < $tb_highlow_count) {
-											push @drop_worst, $rank;
-										} else {
-											my $least_worst = pop @drop_worst;
-											push @drop_worst, $least_worst if $least_worst >= $rank;
-											push @drop_worst, $rank if $least_worst < $rank;
-										}
+					my $average = $average_total / (scalar @rank_scores) if @rank_scores; 
 
-										@drop_worst = sort {$b <=> $a} @drop_worst;
-									}
+					if ($show_averages) { 
+
+						# Round to two digits.  Otherwise sorting is all kablooey.
+						$total += sprintf "%d", (100 * $average);  
+
+					} else { 
+
+						unless ($event_type eq "wsdc") { 
+							foreach my $this_round (@rounds) { 
+								my $diff = $max_scores{$this_round}{"ranks"} - $round_count{$this_round};
+
+								while ($diff > 0) { 
+									push @rank_scores, $average;
+									$diff--;
 								}
 							}
 						}
 
-						unless ($done) { 
-							if ($student_round_bye{$student."-".$this_round}) { 
-								$bye++ 
-							} elsif ($student_round_noshow{$student."-".$this_round}) { 
-								$bye++ 
-							}
+                    	foreach my $score (@rank_scores) { 
+							# Round to two digits.  Otherwise sorting is all kablooey.
+							$total += sprintf "%d", (100 * $score);  
 						}
+
 					}
 
-					$bye = $bye - $bye_min if $round_robin;
+					$entry_ranks{$entry} += sprintf("%.2f", ($total / scalar @rank_scores)) if @rank_scores; 
 
-					if ($bye) { 
-						my $average = sprintf("%d", 100 * ($total / $count)) if $count;
-						$total += $average * $bye;
-					}
-
-                    foreach my $rank (@drop_best, @drop_worst) {
-                        $total -= 100 * $rank if $name eq "ranks" || $name eq "chair_ranks";
-                        $total -= sprintf("%d", 100 * (1 / $rank)) if $name eq "reciprocals";
-						$count-- if $name eq "ranks";
-                    }
-
-					$entry_ranks{$entry} = sprintf("%d", ($total / $count)) if $count;
+				# POINTS SPEAKS SPEAKER POINT
 
 				} elsif ($name eq "points") { 
 
-					my @scores; 
+					my @point_scores; 
 					my %round_count;
 
 					ROUND:
 					foreach my $this_round (@rounds) { 
-
 						foreach my $score (@{$student_round_scores{$student."-".$this_round}}) { 
 							next unless $score_tag{$score} eq "points";
 							$round_count{$this_round}++;
-							push @scores, $score_value{$score};
+							push @point_scores, $score_value{$score};
 						}
-
 					}
 
-					my $average; 
-
-					foreach my $score (@scores) { 
-						$average += $score; 
-					}
-
-					$average = $average / (scalar @scores) if @scores; 
-
-					foreach my $this_round (@rounds) { 
-
-						my $diff = $max_scores{$this_round}{"points"} - $round_count{$this_round};
-
-						while ($diff > 0) { 
-							push @scores, $average;
-							$diff--;
-						}
-
-					}
-
-					@scores = sort {$a <=> $b} @scores;
+					@point_scores = sort {$a <=> $b} @point_scores;
 
 					if ($speaker_max_scores) { 
-						while (scalar @scores > $speaker_max_scores) { 
-							shift @scores; 
+						while (scalar @point_scores > $speaker_max_scores) { 
+							shift @point_scores; 
 						}
 					}
 
 					if ($tb_highlow == 1 || $tb_highlow == 3) {
 						# Drop the best
 						foreach (1 .. $tb_highlow_count) { 
-							pop @scores;
+							pop @point_scores;
 						}
 					}
 
 					if ($tb_highlow == 1 || $tb_highlow == 4) { 
 						# Drop the worst
 						foreach (1 .. $tb_highlow_count) { 
-							shift @scores;
+							shift @point_scores;
 						}
 					}
 
-					my $count;
+					my $average_total; 
 
-                    foreach my $score (@scores) { 
-                        $total += sprintf "%d", (100 * $score);  #Round to two digits.  Otherwise sorting is all kablooey.
-                    }
+					foreach my $score (@point_scores) { 
+						$average_total += $score; 
+					}
 
-					$entry_points{$entry} += sprintf("%.2f", ($total / scalar @scores)) if @scores; 
+					my $average = $average_total / (scalar @point_scores) if @point_scores; 
 
+					if ($show_averages) { 
+
+						# Round to two digits, and multiply by 100.  Otherwise sorting is all kablooey.
+						$total += sprintf "%d", (100 * $average);  
+
+					} else { 
+
+						unless ($event_type eq "wsdc") { 
+
+							foreach my $this_round (@rounds) { 
+
+								my $diff = $max_scores{$this_round}{"points"} - $round_count{$this_round};
+
+								while ($diff > 0) { 
+									push @point_scores, $average;
+									$diff--;
+								}
+							}
+						}
+
+                    	foreach my $score (@point_scores) { 
+							# Round to two digits.  Otherwise sorting is all kablooey.
+							$total += sprintf "%d", (100 * $score);  
+						}
+
+					}
+
+					$entry_points{$entry} += sprintf("%.2f", ($total / scalar @point_scores)) if @point_scores; 
+
+				# BALLOT BALLOTS
 				} elsif ( $name eq "ballots") { 
 
 					foreach my $this_round (@rounds) { 
@@ -937,7 +963,8 @@
 							}
 						}
 					}
-						
+				
+				# RANDOM COINFLIP
 				} elsif ( $name eq "coinflip") { 
 
 					# This is only semi random; product of the date epoch and
