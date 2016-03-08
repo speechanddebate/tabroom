@@ -116,9 +116,16 @@ function autoWin(input,e,aff,neg,affid,negid) {
     return true;
 }
 
-function autoPoints(input,len,e,side,ratio) {
+function autoPoints(input,len,e,side,ratio,nototal) {
+
+	if (nototal) { 
+		totalPoints = function() { 
+			return;
+		}
+	}
 
     var keyCode = e.keyCode; 
+
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
 
 	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
@@ -198,14 +205,26 @@ function autoPoints(input,len,e,side,ratio) {
 
 		}
 
-        if (len == 2 && input.value != 100) {
-            input.value = input.value.slice(0, len);
-        }
+		if (len == 2) { 
+
+			if (/\.$/.test(input.value)) { 
+				var number = input.value;
+				number = number.slice(0,1);
+				number = number * 1;
+				number += .5;
+				input.value = number;
+			} else if (/5$/.test(input.value)) { 
+				input.value = input.value/10;
+			} else { 
+				input.value = input.value.slice(0,1);
+			}
+
+		}
 
 		changeFocus(input);
 		totalPoints(side,ratio);
     
-    }    
+    } 
 
 	function totalPoints(side,ratio) { 
 
@@ -244,6 +263,10 @@ function autoPoints(input,len,e,side,ratio) {
     }    
 
 	function changeFocus(input) { 
+
+		if (input.value === "") { 
+			return;
+		}
 
 		var next_index = getIndex(input) + 1;
 
