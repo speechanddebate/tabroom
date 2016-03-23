@@ -38,6 +38,9 @@ sub short_name {
 	$name = "Thomas Jefferson HSST" if $name eq "Thomas Jefferson High School of Science & Technology";
 	$name = "Bronx Science" if $name eq "The Bronx High School of Science";
 
+	$name = "BC" if $name eq "Boston College";
+	$name = "BU" if $name eq "Boston University";
+
 	$name = "NYU" if $name eq "New York University";
 	$name =~ s/of Math and Science$//g;
 	$name =~ s/Academy$//g;
@@ -63,6 +66,8 @@ sub short_name {
 	$name =~ s/^Saint\ /St\ /g;
 	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
 	$name =~ s/High\ School/HS/g;
+	$name = "Boston College" if $name eq "BC";
+	$name = "Boston Univ" if $name eq "BU";
 	$name =~ s/^\s+//;  #leading spaces
 	$name =~ s/\s+$//;  #trailing spaces
 
