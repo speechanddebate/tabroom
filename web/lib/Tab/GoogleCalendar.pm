@@ -11,12 +11,12 @@ sub auth {
 	# Get an API access token from Google
 	my $jwt = JSON::WebToken::encode_jwt(
 		{
-			iss => $Tab::google_client_email,
+			iss   => $Tab::google_client_email,
 			scope => 'https://www.googleapis.com/auth/calendar',
-			aud => 'https://accounts.google.com/o/oauth2/token',
-			exp => time() + 10,
-			iat => time(),
-			prn => $Tab::google_user_email
+			aud   => 'https://accounts.google.com/o/oauth2/token',
+			exp   => time() + 10,
+			iat   => time(),
+			prn   => $Tab::google_user_email
 		},
 		$Tab::google_client_key,
 		'RS256',
@@ -31,8 +31,6 @@ sub auth {
 		}
 	);
 	my $json_response = JSON->new->utf8->decode($jwt_response->decoded_content);
-Tab::debuglog(Dumper($json_response));
-
 	return $json_response->{'access_token'};
 }
 
@@ -46,21 +44,22 @@ sub createEvent {
 
 	my $json = JSON->new;
 	$json->allow_blessed();
-	my $json_text = $json->utf8->encode(
+
+	my $arguments = 
 		{
-			summary => $args->{'title'},
-			description => $args->{'description'},
-			start => { dateTime => $args->{'start'} },
-			end => { dateTime => $args->{'end'} },
-			status => 'confirmed',
-			anyoneCanAddSelf => 'false',
-			guestsCanInviteOthers => 'false',
+			summary                 => $args->{'title'},
+			description             => $args->{'description'},
+			start                   => { dateTime => $args->{'start'} },
+			end                     => { dateTime => $args->{'end'} },
+			status                  => 'confirmed',
+			anyoneCanAddSelf        => 'false',
+			guestsCanInviteOthers   => 'false',
 			guestsCanSeeOtherGuests => 'false',
-			attendees => $args->{'attendees'}
-		},
-		'',
-		'none'
-	);
+			attendees               => $args->{'attendees'}
+		};
+
+	my $json_text = $json->utf8->encode($arguments);
+
 	my $url = 'https://www.googleapis.com/calendar/v3/calendars/'.$Tab::google_calendar_id.'/events';
 	my $req = HTTP::Request->new(POST => $url);
 	$req->content_type('application/json');
@@ -69,7 +68,6 @@ sub createEvent {
 	my $ua = LWP::UserAgent->new;
 	my $response = $ua->request($req);
 	$json_response = JSON->new->utf8->decode($response->decoded_content);
-Tab::debuglog(Dumper($json_response));
 
 	return undef unless $json_response->{'id'};
 	return {
