@@ -11,7 +11,7 @@ chomp $date;
 print "Dumping databases to file:";
 
 my $garbage;
-my $backup_dir = "/home/palmer/backups/sqlfiles";
+my $backup_dir = "/var/backups/sqlfiles";
 
 `rm $backup_dir/*.bz2`;
 
