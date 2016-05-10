@@ -6,7 +6,7 @@ my $dt = DateTime->now;
 my $hour = $dt->hour;
 
 my $db = "tabroom";
-my $backup_dir = "/home/palmer/backups/sqlfiles";
+my $backup_dir = "/var/backups/sqlfiles";
 
 my $sql_file = "$backup_dir/$db.sql";
 
