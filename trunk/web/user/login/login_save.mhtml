@@ -11,7 +11,6 @@
 <%init>
 
 	use Tab::NSDA::Login;
-	use Crypt::PasswdMD5;
 	use Digest::MD5 qw(md5_hex);
 
 	my $now = DateTime->now;
@@ -35,7 +34,6 @@
 
 	} else { 
 
-
 		$log .= " Login attempt by ".$username." from ".$ENV{REMOTE_ADDR}."....";
 
 		$username =~ tr/[A-Z]/[a-z]/;
@@ -57,88 +55,115 @@
 		$login = Tab::Login->search(username => $username)->first;
 
 		unless ($login) { 
-			my $err = "No login with that email or username exists.  Please try again.";
+			my $err = "Your login and/or password was not correct.  Please try again, or use the Forgot Password link to refresh your password";
 			Tab::log("Failed: no such login. $log");
 			$m->redirect("/index/index.mhtml?err=$err");
 		}
 			
-		my $db_password = $login->password;
-		my $verify_password = unix_md5_crypt($password,$db_password);
+		my $db_sha_crypt = $login->sha512;
+		my $sha_crypt = crypt($password, $db_sha_crypt) if $db_sha_crypt;
 
-		unless ($verify_password eq $db_password) { 
+		my $login_ok;
 
-			# Check if the login password exists in the NSDA database and has
-			# changed.
+		if ($sha_crypt && ($sha_crypt eq $db_sha_crypt)) { 
 
-			if ($login->source eq "nsda") { 
+			$login_ok++;
 
-				my $nsda_login = Tab::NSDA::Login->search( username => $username )->first;
-				my $nsda_db_password = $nsda_login->password;
-				my $nsda_hash = md5_hex($password.$username.$Tab::points_salt);
+		} else { 
 
-				if ($nsda_db_password eq $nsda_hash) { 
+			# Try the legacy MD5 encryption.  If it succeeds, convert it to SHA512
 
-					# The point system password has changed.  Rehash and cache
-					# for a local copy for speed.
+			my $db_md5_crypt = $login->password;
+			my $md5_crypt = crypt($password, $db_md5_crypt);
 
-					my $salt = $m->comp("/funclib/generate_randomstring.mas");
-					my $new_hash = Crypt::PasswdMD5::unix_md5_crypt($password,$salt);
-					$login->password($new_hash);
-					$login->update;
+			if ($md5_crypt && $md5_crypt eq $db_md5_crypt) { 
 
-				} else { 
+				my $salt = $m->comp("/funclib/generate_randomstring.mas");
+				my $sha_crypt = crypt($password, '$6$' . $salt);
 
-					my $err = "Your password was not correct";
-					Tab::log("Failed: wrong password. $log");
-					$m->redirect("/index/index.mhtml?err=$err");
+				$login->sha512($sha_crypt);
+				$login->password("");
+				$login->update;
+
+				$login_ok++;
+
+			} else {  
+
+				# Check if the login password exists in the NSDA database and
+				# has changed.  If so and is correct, re-sync them. 
+
+				if ($login->source eq "nsda") { 
+
+					my $nsda_login = Tab::NSDA::Login->search( username => $username )->first;
+					my $nsda_db_password = $nsda_login->password;
+					my $nsda_hash = md5_hex($password.$username.$Tab::points_salt);
+
+					if ($nsda_db_password eq $nsda_hash) { 
+
+						# The point system password has changed.  Rehash and
+						# cache for a local copy for speed.
+
+						my $salt = $m->comp("/funclib/generate_randomstring.mas");
+						my $sha_crypt = crypt($password, '$6$' . $salt);
+						$login->sha512($sha_crypt);
+						$login->password("");
+						$login->update;
+
+						$login_ok++;
+
+					}
+
 				}
 
-			} else { 
-
-				my $err = "Your password was not correct";
-				Tab::log("Failed: wrong password. $log");
-				$m->redirect("/index/index.mhtml?err=$err");
-
 			}
+
 		}
+					
+		if ($login_ok) { 
 
-		$person = $login->person;
-		
-		# To maintain state, the sha keys are encoded.  Change the value below
-		# to something unique for your site to maintain a passing fantasy of
-		# security.
+			$person = $login->person;
+			
+			# To maintain state, the cookie sha keys are encoded using a random
+			# string set by the site.
 
-		my $key = "$Tab::string";
-		my $auth = $m->comp("/funclib/generate_randomstring.mas", length => 16);
+			my $key = "$Tab::string";
+			my $auth = $m->comp("/funclib/generate_randomstring.mas", length => 16);
 
-		$shauser = Digest::SHA::sha1_hex($key, $person->id);
-		$shakey = Digest::SHA::sha1_hex($key, $auth);
+			$shauser = Digest::SHA::sha1_hex($key, $person->id);
+			$shakey = Digest::SHA::sha1_hex($key, $auth);
 
-		$session = Tab::Session->create( { 
-			account   => $person->id,
-			authkey   => $shakey,
-			userkey   => $shauser,
-			ip        => $ENV{REMOTE_ADDR},
-			timestamp => $now,
-		});
+			$session = Tab::Session->create( { 
+				account   => $person->id,
+				authkey   => $shakey,
+				userkey   => $shauser,
+				ip        => $ENV{REMOTE_ADDR},
+				timestamp => $now,
+			});
 
-		if ($person->site_admin) { 
+		} else { 
 
-			# Trigger an LDAP change to be sure the login servers are kept up
-			# to date
+			my $err = "Your login and/or password was not correct.  Please try
+			again, or use the Forgot Password link to refresh your password";
 
-			$m->comp("/funclib/ldap_account.mas", login => $login, ad_password => $password);
+			Tab::log("Failed: wrong password. $log");
+			$m->redirect("/index/index.mhtml?err=$err");
 
 		}
 
 	}	
 
 	# Remove existing sessions to prevent mass logins from one account. 
-
 	my $allowed_sessions = $person->multiple;
-	$allowed_sessions = 3 unless $allowed_sessions;  
-	
+
 	# let ppl use their computer & phone, but not share with the world...
+	$allowed_sessions = 3 unless $allowed_sessions;  
+
+	# Admins need more:
+	$allowed_sessions = 6 if $person->site_admin;
+
+	# Being Palmer hath its privileges.  If you know enough to change this code
+	# go ahead and add yourself.
+	$allowed_sessions = 10 if $person->id == 1; 
 
 	foreach my $sess ( sort {$b->id <=> $a->id} $person->sessions) {
 		$sess->delete unless $allowed_sessions;
