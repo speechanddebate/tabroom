@@ -441,8 +441,26 @@ jQuery.fn.iphoneSwitch = function(start_state, switched_on_callback, switched_of
 var state = start_state == 'on' ? start_state : 'off'; var settings = { mouse_over: 'pointer', mouse_out:  'default', switch_on_container_path: '/lib/images/iphone_switch_container_off.png', switch_off_container_path: '/lib/images/iphone_switch_container_off.png', switch_path: '/lib/images/iphone_switch.png', switch_height: 18, switch_width: 63 };
 if(options) { jQuery.extend(settings, options); }
 return this.each(function() { var container; var image; container = jQuery('<div class="iphone_switch_container" style="height:'+settings.switch_height+'px; width:'+settings.switch_width+'px; position: relative; overflow: hidden"></div>'); image = jQuery('<img class="iphone_switch" style="height:'+settings.switch_height+'px; width:'+settings.switch_width+'px; background-image:url('+settings.switch_path+'); background-repeat:none; background-position:'+(state == 'on' ? 0 : -35)+'px" src="'+(state == 'on' ? settings.switch_on_container_path : settings.switch_off_container_path)+'" /></div>'); jQuery(this).html(jQuery(container).html(jQuery(image))); jQuery(this).mouseover(function(){ jQuery(this).css("cursor", settings.mouse_over); }); jQuery(this).mouseout(function(){ jQuery(this).css("background", settings.mouse_out); }); jQuery(this).click(function() { if(state == 'on') { jQuery(this).find('.iphone_switch').animate({backgroundPosition: -35}, "slow", function() { jQuery(this).attr('src', settings.switch_off_container_path); switched_off_callback(); }); state = 'off'; } else { jQuery(this).find('.iphone_switch').animate({backgroundPosition: 0}, "slow", function() { switched_on_callback(); }); jQuery(this).find('.iphone_switch').attr('src', settings.switch_on_container_path); state = 'on'; } });		}); };
-$(document).ready(function() { $('a.login-window').click(function() { var loginBox = $(this).attr('href'); $(loginBox).fadeIn(300); var popMargTop = ($(loginBox).height() + 24) / 2; var popMargLeft = ($(loginBox).width() + 24) / 2; $(loginBox).css({ 'margin-top' : -popMargTop, 'margin-left' : -popMargLeft }); $('body').append('<div id="mask"></div>'); $('#mask').fadeIn(300); return false; }); $('a.close, #mask').live('click', function() { $('#mask , .login-popup').fadeOut(300 , function() { $('#mask').remove();  }); return false; }); });
 
+/* Login Box */
+
+$(document).ready(function() { $('a.login-window').click(function() { var loginBox = $(this).attr('href'); $(loginBox).slideDown(300); var popMargTop = ($(loginBox).height() + 24) / 2; var popMargLeft = ($(loginBox).width() + 24) / 2; $(loginBox).css({ 'margin-top' : -popMargTop, 'margin-left' : -popMargLeft }); $('body').append('<div id="mask"></div>'); $('#mask').fadeIn(300); return false; }); $('a.close, #mask').live('click', function() { $('#mask').fadeOut(300 , function() { $('#mask').remove();  }); $('.login-popup').slideUp(300); return false; }); });
+
+$(document).ready(function() { $('.hide-menu').click(function() { 
+	$('.menu').slideUp(300); 
+	$('.content').addClass('nomenu');
+	$('.hide-menu').addClass('hidden');
+	$('.show-menu').removeClass('hidden');
+});
+
+$(document).ready(function() { $('.show-menu').click(function() { 
+	$('.menu').slideDown(300); 
+	$('.content').removeClass('nomenu');
+	$('.show-menu').addClass('hidden');
+	$('.hide-menu').removeClass('hidden');
+});
+
+	var popMargTop = ($(loginBox).height() + 24) / 2; var popMargLeft = ($(loginBox).width() + 24) / 2; $(loginBox).css({ 'margin-top' : -popMargTop, 'margin-left' : -popMargLeft }); $('body').append('<div id="mask"></div>'); $('#mask').fadeIn(300); return false; }); $('a.close, #mask').live('click', function() { $('#mask').fadeOut(300 , function() { $('#mask').remove();  }); $('.login-popup').slideUp(300); return false; }); });
 
 /*! jQuery UI - v1.11.1 - 2014-09-07
 * http://jqueryui.com
