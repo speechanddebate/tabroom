@@ -37,7 +37,7 @@ foreach my $db (@databases) {
 
 	print "\nCopying to S3:....";
 	`/usr/bin/s3cmd put $sql_file.bz2 s3://tabroom-db/$date/$db.sql.bz2`;
-	`/usr/bin/s3cmd put $sql_file.bz2 s3://tabroom-db/latest/$db.sql.bz2`;
+	`/usr/bin/s3cmd cp s3://tabroom-db/$date/$db.sql.bz2 s3://tabroom-db/latest/$db.sql.bz2`;
 	print "...done.\n";
 
 }
