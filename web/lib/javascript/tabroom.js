@@ -444,23 +444,39 @@ return this.each(function() { var container; var image; container = jQuery('<div
 
 /* Login Box */
 
-$(document).ready(function() { $('a.login-window').click(function() { var loginBox = $(this).attr('href'); $(loginBox).slideDown(300); var popMargTop = ($(loginBox).height() + 24) / 2; var popMargLeft = ($(loginBox).width() + 24) / 2; $(loginBox).css({ 'margin-top' : -popMargTop, 'margin-left' : -popMargLeft }); $('body').append('<div id="mask"></div>'); $('#mask').fadeIn(300); return false; }); $('a.close, #mask').live('click', function() { $('#mask').fadeOut(300 , function() { $('#mask').remove();  }); $('.login-popup').slideUp(300); return false; }); });
+$(document).ready(function() { $('a.login-window').click(function() { 
+	var loginBox = $(this).attr('href'); 
+	$(loginBox).slideDown(300); 
+	var popMargTop = ($(loginBox).height() + 24) / 2; 
+	var popMargLeft = ($(loginBox).width() + 24) / 2;
+	$(loginBox).css({ 'margin-top' : -popMargTop, 'margin-left' : -popMargLeft }); 
+	$('body').append('<div id="mask"></div>'); 
+	$('#mask').fadeIn(300); return false; }); 
+	
+	$('a.close, #mask').live('click', function() { 
+		$('#mask').fadeOut(300 , function() { $('#mask').remove();  }); 
+		$('.login-popup').slideUp(300); 
+		return false; 
+	}); 
+
+});
 
 $(document).ready(function() { $('.hide-menu').click(function() { 
-	$('.menu').slideUp(300); 
-	$('.content').addClass('nomenu');
-	$('.hide-menu').addClass('hidden');
-	$('.show-menu').removeClass('hidden');
+		$('.menu').slideUp(300); 
+		$('.content').addClass('nomenu');
+		$('.hide-menu').addClass('hidden');
+		$('.show-menu').removeClass('hidden');
+	});
 });
 
 $(document).ready(function() { $('.show-menu').click(function() { 
-	$('.menu').slideDown(300); 
-	$('.content').removeClass('nomenu');
-	$('.show-menu').addClass('hidden');
-	$('.hide-menu').removeClass('hidden');
+		$('.menu').slideDown(300); 
+		$('.content').removeClass('nomenu');
+		$('.show-menu').addClass('hidden');
+		$('.hide-menu').removeClass('hidden');
+	});
 });
 
-	var popMargTop = ($(loginBox).height() + 24) / 2; var popMargLeft = ($(loginBox).width() + 24) / 2; $(loginBox).css({ 'margin-top' : -popMargTop, 'margin-left' : -popMargLeft }); $('body').append('<div id="mask"></div>'); $('#mask').fadeIn(300); return false; }); $('a.close, #mask').live('click', function() { $('#mask').fadeOut(300 , function() { $('#mask').remove();  }); $('.login-popup').slideUp(300); return false; }); });
 
 /*! jQuery UI - v1.11.1 - 2014-09-07
 * http://jqueryui.com
