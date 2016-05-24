@@ -8,31 +8,36 @@
 
 	use List::Util 'shuffle';
 	my $round = Tab::Round->retrieve($round_id);
-    my $text = $account->first." ".$account->last." (".$account->email.") has re-assigned the judges out of round ".$round->realname." of ".$round->event->abbr;
+	my $event = $round->event;
+    my $text = $account->first." ".$account->last." (".$account->email.") has re-assigned the judges out of round ".$round->realname." of ".$event->abbr;
 
     Tab::TournChange->create({ 
         type    => 'tabbing',
-        event   => $round->event->id,
-        tourn   => $round->event->tourn->id,
+        event   => $event->id,
+        tourn   => $event->tourn->id,
         account => $account->id,
         text    => $text
     }); 
 
     $m->comp("/funclib/round_clear_judges.mas", round => $round, nobye => 1);
-	my @schools = $m->comp("/funclib/event_schools.mas", event => $round->event);
-	my %school_region = map {$_->id => $_->region} @schools;
+	my @schools = $m->comp("/funclib/event_schools.mas", event => $event );
+
+	my %school_region = map {$_->id => $_->region->id} $event->tourn->schools;
+
+	foreach my $school (@schools) { 
+		Tab::debuglog("School $school is in region ".$school_region{$school});
+	}
 
 	my $prelim_count;
-	foreach my $round ($round->event->rounds) { 
+	foreach my $round ($event->rounds) { 
 		next if $round->type eq "elim";
 		next if $round->type eq "final";
 		$prelim_count++;
 	}
 
-    my $round_event = $round->event;
-	my $event_type = $round_event->type;
-    my $tourn = $round_event->tourn;
-	my $group = $round_event->judge_group;
+	my $event_type = $event->type;
+    my $tourn = $event->tourn;
+	my $group = $event->judge_group;
 
 	my $this_round = $round->id;
 	my $round_type = $round->type;
@@ -46,10 +51,10 @@
 	my @jpool = $round->jpools;
 	my $flights = $round->flighted;
 	$flights = 1 unless $flights;
-	$flights = 1 if $round->event->setting("flight_rooms_only");
+	$flights = 1 if $event->setting("flight_rooms_only");
 
 	my %entry_seed_position = ();
-	my $best_judges_highest_seed = $round_event->setting("best_judges_highest_seed");
+	my $best_judges_highest_seed = $event->setting("best_judges_highest_seed");
 
 	if ($best_judges_highest_seed) { 
 
@@ -77,22 +82,22 @@
 	my $allow_region_panels = $group->setting("allow_region_panels");
 	my $conflict_region_judges = $group->setting("conflict_region_judges");
 
-	my $no_first_years = $round_event->setting("no_first_years");
-	my $allow_judge_own = $round_event->setting("allow_judge_own");
-	my $region_constrain = $round_event->setting("region_constraints");
-    my $region_avoid++ if $round_event->setting("region_avoid");
+	my $no_first_years = $event->setting("no_first_years");
+	my $allow_judge_own = $event->setting("allow_judge_own");
+	my $region_constrain = $event->setting("region_constraints");
+    my $region_avoid++ if $event->setting("region_avoid");
 
-	my $allow_repeat_elims = $round_event->setting("allow_repeat_elims");
-	my $allow_repeat_judging = $round_event->setting("allow_repeat_judging");
-	my $allow_repeat_prelim_side = $round_event->setting("allow_repeat_prelim_side");
-	my $disallow_repeat_drop = $round_event->setting("disallow_repeat_drop");
+	my $allow_repeat_elims = $event->setting("allow_repeat_elims");
+	my $allow_repeat_judging = $event->setting("allow_repeat_judging");
+	my $allow_repeat_prelim_side = $event->setting("allow_repeat_prelim_side");
+	my $disallow_repeat_drop = $event->setting("disallow_repeat_drop");
 
     my $ncfl = $tourn->setting('ncfl');
 
     my %dio_region;
     if ($ncfl) { 
         foreach my $diocese ($m->comp("/funclib/tourn_regions.mas", tourn => $tourn)) { 
-            $dio_region{$diocese->id} = $diocese->setting('region');
+            $dio_region{$diocese->id} = $diocese->setting('region-'.$event->id);
         }
     }   
 
@@ -108,7 +113,7 @@
 		}
 	}
 
-	undef $prefs if $round_event->setting("no_prefs");
+	undef $prefs if $event->setting("no_prefs");
 	undef $prefs if $prefs eq "none";
 
 	my $tab_ratings = $group->setting("tab_ratings");
@@ -121,7 +126,7 @@
 		from (ballot, panel, round, entry, event, school)
 		left join entry_setting seed on seed.entry = entry.id and seed.tag = 'pairing_seed'
 		left join ballot_value winner on winner.ballot = ballot.id and winner.tag = 'ballot'
-		where event.judge_group = ".$round_event->judge_group->id."
+		where event.judge_group = ".$event->judge_group->id."
 		and round.event = event.id
 		and round.id = panel.round
 		and panel.id = ballot.panel
@@ -172,6 +177,8 @@
 			$entry_hash{$entry}{"school"} = $entry_school;
 			$entry_hash{$entry}{"region"} = $school_region{$entry_school};
 			$entry_hash{$entry}{"dioregion"} = $dio_region{$school_region{$entry_school}} if $school_region{$entry_school};
+
+			Tab::debuglog("Entry $entry is from dioregion ".$entry_hash{$entry}{"dioregion"});
 
 			push @{$school_entries{$entry_school}}, $entry;
 
@@ -320,7 +327,7 @@
 
 	my %judge_out;
 
-	while (my ($id, $judge, $type, $event, $entry, $school, $region, $dioregion, $start, $end) = $strikes_sth->fetchrow_array() ) {
+	while (my ($id, $judge, $type, $strike_event, $entry, $school, $region, $dioregion, $start, $end) = $strikes_sth->fetchrow_array() ) {
 
 		if ($type eq "conflict" || $type eq "entry") { 
 
@@ -335,7 +342,7 @@
 
 		if ($type eq "elim" || $type eq "event") { 
 			next if ($round_type eq "elim" || $round_type eq "final") && $type eq "elim";
-			next unless $event == $round_event->id;
+			next unless $strike_event == $event->id;
 			$judge_out{$judge}++;
 		}
 
@@ -391,7 +398,7 @@
 		from judge, round, timeslot, strike, event
 		where judge.id = strike.judge
 		and judge.judge_group = event.judge_group
-		and event.id = ".$round->event->id."
+		and event.id = ".$event->id."
 		and round.event = event.id
 		and strike.type = \"time\"
 		and strike.start < timeslot.end
@@ -445,7 +452,7 @@
 			and round.id = panel.round
 			and panel.id = ballot.panel
 			and ballot.judge = judge.id
-			and judge.judge_group = ".$round_event->judge_group->id."
+			and judge.judge_group = ".$event->judge_group->id."
 		");
 
 		$busy_sth->execute();
@@ -620,7 +627,7 @@
 
 	my $switch;
 
-	my %default_settings = $m->comp("/funclib/default_rating_settings.mas", type => $round_event->type);
+	my %default_settings = $m->comp("/funclib/default_rating_settings.mas", type => $event->type);
 
 	my $bracket_order = $round->setting("tab_rating_priority");
 	$bracket_order = $default_settings{$round->name} unless $bracket_order;
@@ -643,10 +650,10 @@
 		}
 	} 
 
-	my $loss_threshold = $round_event->setting("break_point") if $round_event->setting("break_point"); 
+	my $loss_threshold = $event->setting("break_point") if $event->setting("break_point"); 
 
-	my $max_pref = $round_event->setting("max_pref") if $round_event->setting("max_pref"); 
-	my $max_nobreak_pref = $round_event->setting("max_nobreak_pref") if $round_event->setting("max_nobreak_pref"); 
+	my $max_pref = $event->setting("max_pref") if $event->setting("max_pref"); 
+	my $max_nobreak_pref = $event->setting("max_nobreak_pref") if $event->setting("max_nobreak_pref"); 
 
 	my $bracket_dont_give_a_shit = $round->name - $loss_threshold - 1 if $loss_threshold > 0;
 
@@ -700,7 +707,7 @@
 	}
 
 	my %fix_flight;
-	my @flight_settings = $m->comp("/funclib/event_entry_settings.mas", event => $round->event, tag => "preferred_flight");
+	my @flight_settings = $m->comp("/funclib/event_entry_settings.mas", event => $event, tag => "preferred_flight");
 	my %preferred_flight = map {$_->entry->id => $_->value} @flight_settings;
 
 	my %judge_panel_score;

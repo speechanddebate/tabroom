@@ -51,10 +51,6 @@ sub setting {
 				value  => $value,
 			});
 
-			if ($value eq "region") { 
-				$existing->event($blob);
-			}
-
 			if ($value eq "text") { 
 				$existing->value_text($blob);
 			}
