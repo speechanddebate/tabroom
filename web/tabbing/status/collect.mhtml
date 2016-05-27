@@ -6,6 +6,7 @@
 	$group_id    => undef
 	$entry_only  => undef
 	$only_group  => undef
+	$order       => "rooms"
 </%args>
 <%init>
 
@@ -33,6 +34,71 @@
         $session->update;
     }   
 
+	if ($only_group) { 
+		$session_group = $only_group;
+        $session->judge_group($only_group);
+        $session->update;
+	}
+
+	my $order_by;
+
+	if ($order eq "flight") { 
+		$order_by = " order by panel.flight, judge.code, judge.last ";
+	} elsif ($order eq "judgename") { 
+		$order_by = " order by judge.last, panel.flight";
+	} elsif ($order eq "judgecode") { 
+		$order_by = " order by judge.code, panel.flight";
+	} elsif ($order eq "rooms") { 
+		$order_by = "order by room.name, panel.flight, judge.code"
+	}
+
+	my $ncfl = $tourn->setting("ncfl");
+
+	my $group_limit = " and event.judge_group = ".$session_group->id if $session_group;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $uncollected_sth = $dbh->prepare("
+		select judge.id, judge.last, judge.first, judge.code, room.name, panel.flight, panel.id, panel.letter, event.abbr, panel.started
+			from (round, event, panel, ballot, judge)
+			left join room on room.id = panel.room 
+
+			where round.timeslot = ? 
+			and round.event = event.id
+			$group_limit
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and ballot.judge = judge.id
+			and panel.bye != 1
+			and ballot.audit != 1
+			and ballot.collected_by != 1
+			group by ballot.id
+			$order_by
+	");
+
+	my $collected_sth = $dbh->prepare("
+		select judge.id, judge.last, judge.first, judge.code, room.name, panel.flight, panel.id, panel.letter, event.abbr, ballot.collected
+			from (round, event, panel, ballot, judge)
+			left join room on room.id = panel.room 
+
+			where round.timeslot = ? 
+			and round.event = event.id
+			$group_limit
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and ballot.judge = judge.id
+			and ( 
+				panel.bye = 1 or
+				ballot.audit = 1 or
+			 	ballot.collected_by = 1
+			)
+			group by ballot.id
+			$order_by
+	");
+				
+	my %uncollected; 
+	my %collected; 
+
 </%init>
 
 	<div class="menu">
@@ -46,12 +112,16 @@
 
 %			unless ($only_group) { 
 
-			<span class="bluenohover full centeralign" style="margin-bottom: 2px;">
+			<span class="bluenohover full" style="margin-bottom: 2px;">
 
 				<form action="collect.mhtml" method="post">
 				<input type="hidden" name="timeslot" value="<% $timeslot_id %>">
 
-				<select name="group_id" onchange='this.form.submit()' class="chosen fixedmed notfirst">
+				<h5 class="marno padless">Judge group:</h5>
+
+				<div class="centeralign">
+
+				<select name="group_id" onchange='this.form.submit()' class="fixedmed notfirst">
 
 					<option value="">Choose judge group:</option>
 
@@ -60,7 +130,26 @@
 							<% $other_group->name %>
 						</option>
 %					}
+
 				</select>
+
+				</div>
+
+				<h5 class="marno padless">Sort by:</h5>
+
+				<div class="centeralign">
+
+				<select name="order" onchange='this.form.submit()' class="fixedmed notfirst">
+
+%					foreach my $all_orders ( ("flight", "judgename", "judgecode", "rooms") ) { 
+						<option value="<% $all_orders %>" <% ($all_orders eq $order) ? "selected" : "" %>>
+							<% ucfirst($all_orders) %>
+						</option>
+%					}
+				</select>
+
+				</div>
+
 				</form>
 			</span>
 %			}
@@ -71,22 +160,64 @@
 
 %               foreach my $ts (@timeslots) { 
 
-%					my @uncollected = $m->comp('/funclib/timeslot_judges.mas', timeslot => $ts, status => "uncollected");
-%					$timeslot = $ts if @uncollected && not defined $timeslot;
-%					$timeslot_id = $timeslot->id if $timeslot;
+<%perl> 
+					$uncollected_sth->execute($ts->id);
 
-					<a href="collect.mhtml?timeslot_id=<% $ts->id %>" class="<% $ts->id == $timeslot_id ? "dk" : ""%><% (@uncollected) ? "yellow" : "green" %> smallish full martop">
+					while (my ($judge, $last, $first, $code, $room, $flight, $panel, $letter, $event, $started) = $uncollected_sth->fetchrow_array() ) {
 
-						<span class="half">
+						next if $uncollected{$ts}{$judge."-".$panel}{"judge"};
+
+						#This preserves the order of the sort later ony
+						push @{$uncollected{$ts}{"keys"}}, $judge."-".$panel; 
+
+						$uncollected{$ts}{$judge."-".$panel}{"judge"} = $judge;
+						$uncollected{$ts}{$judge."-".$panel}{"panel"} = $panel;
+						$uncollected{$ts}{$judge."-".$panel}{"code"} = $code;
+						$uncollected{$ts}{$judge."-".$panel}{"last"} = $last;
+						$uncollected{$ts}{$judge."-".$panel}{"first"} = $first;
+						$uncollected{$ts}{$judge."-".$panel}{"room"} = $room;
+						$uncollected{$ts}{$judge."-".$panel}{"started"} = $started;
+						$uncollected{$ts}{$judge."-".$panel}{"event"} = $event;
+						$uncollected{$ts}{$judge."-".$panel}{"event"} = $event;
+						$uncollected{$ts}{$judge."-".$panel}{"flight"} = $flight;
+					}
+
+					$timeslot = $ts if keys %{$uncollected{$ts}} && not defined $timeslot;
+					$timeslot_id = $timeslot->id if $timeslot;
+
+					$collected_sth->execute($ts->id);
+
+					while (my ($judge, $last, $first, $code, $room, $flight, $panel, $letter, $event, $collected) = $collected_sth->fetchrow_array() ) {
+
+						next if $collected{$ts}{$judge."-".$panel}{"judge"};
+
+						#This preserves the order of the sort later ony
+						push @{$collected{$ts}{"keys"}}, $judge."-".$panel; 
+
+						$collected{$ts}{$judge."-".$panel}{"judge"} = $judge;
+						$collected{$ts}{$judge."-".$panel}{"panel"} = $panel;
+						$collected{$ts}{$judge."-".$panel}{"code"} = $code;
+						$collected{$ts}{$judge."-".$panel}{"last"} = $last;
+						$collected{$ts}{$judge."-".$panel}{"first"} = $first;
+						$collected{$ts}{$judge."-".$panel}{"room"} = $room;
+						$collected{$ts}{$judge."-".$panel}{"event"} = $event;
+						$collected{$ts}{$judge."-".$panel}{"collected"} = $collected;
+						$collected{$ts}{$judge."-".$panel}{"event"} = $event;
+						$collected{$ts}{$judge."-".$panel}{"flight"} = $flight;
+					}
+
+</%perl>
+
+					<a href="collect.mhtml?timeslot_id=<% $ts->id %>&order=<% $order %>" class="<% $ts->id == $timeslot_id ? "dk" : ""%><% (scalar %{$uncollected{$ts}}) ? "yellow" : "green" %> smallish full martop">
+
+						<span class="threefifths">
 							<% $ts->name %>
 						</span>
 
-						<span class="quarter rightalign">
-							<% scalar @uncollected %>
-						</span>
-
-						<span class="quarter">
-							left
+						<span class="twofifths rightalign">
+							<% scalar keys %{$collected{$ts}} %> of
+							<% scalar keys %{$uncollected{$ts}} %>
+							in
 						</span>
 
 					</a>
@@ -100,7 +231,6 @@
 
 	</div>
 
-
 	<div class="main">
 
 		<h2><% $tourn->name %></h2>
@@ -109,42 +239,45 @@
 
 %		if ($timeslot) { 
 			
-			<h4 class="centeralign">Ballot collection: <% $timeslot->name %></h4>
-
-%			my @panels = $m->comp("/funclib/timeslot_panels.mas", timeslot => $timeslot);
-%			my %panels_by_id = map {$_->id => $_} @panels;
-
-%			my @collected = $m->comp('/funclib/timeslot_judges.mas', timeslot => $timeslot, status => "collected");
-%			my @uncollected = $m->comp('/funclib/timeslot_judges.mas', timeslot => $timeslot, status => "uncollected");
+			<h4 class="centeralign">Ballot collection: <% $timeslot->name %> (Ordered by <% ucfirst($order) %>)</h4>
 
 			<div class="half">
 
-				<h5><% scalar @uncollected %> Not Collected:</h5>
+				<h5><% scalar keys %{$uncollected{$timeslot}} %> Not Collected:</h5>
 
-%				foreach my $judge (@uncollected) { 
+%				foreach my $key (@{$uncollected{$timeslot}{"keys"}}) { 
 
-%					my $panel = $panels_by_id{$judge->panelid};
-%					next unless $panel;
+%					my $judge = $uncollected{$timeslot}{$key}{"judge"};
+%					my $panel = $uncollected{$timeslot}{$key}{"panel"};
+%					my $code = $uncollected{$timeslot}{$key}{"code"};
+%					my $last = $uncollected{$timeslot}{$key}{"last"};
+%					my $first = $uncollected{$timeslot}{$key}{"first"};
+%					my $room = $uncollected{$timeslot}{$key}{"room"};
+%					my $started = $uncollected{$timeslot}{$key}{"started"};
+%					my $event = $uncollected{$timeslot}{$key}{"event"};
+%					my $flight = $uncollected{$timeslot}{$key}{"flight"};
+
+%					my $start = DateTime::Format::MySQL->parse_datetime($started) if $started;
+%					$start->set_time_zone($tz) if $start;
 
                     <div class="nospace">
 
-						<a class="smallish full padmuchmore yellow" href="collect_switch.mhtml?judge_id=<% $judge->id %>&panel_id=<% $panel->id %>">
+						<a class="smallish full padmuchmore yellow" href="collect_switch.mhtml?judge_id=<% $judge %>&panel_id=<% $panel %>&order=<% $order %>">
 
-							<span class="third nowrap marno">
-								<% $judge->last %>, <% $judge->first %>
+							<span class="twofifth nowrap marno padright">
+								<% substr("$code $last, $first", 0, 18) %>
 							</span>
 
-							<span class="third nowrap marno">
-								<% $panel->room ?  $panel->room->name : "" %>
+							<span class="twofifth nowrap marno">
+								<% $room %> 
 							</span>
 
-							<span class="third padleft nowrap marno">
-%								if ($panel->started) { 
-									Start: <% Tab::nicetime($panel->started->set_time_zone($tz)) %>
-%								} else { 
-									<% $panel->flight > 1 ? "Flt ".$panel->flight : ""  %>
-									<% $panel->eventname %>
-%								}
+							<span class="fifth padleft nowrap marno">
+%								if ($start) { 
+									Start: <% Tab::nicetime($start) %>
+%								} 
+								<% $event %>
+								<% $flight > 1 ? "Flt ".$flight : ""  %>
 							</span>
 						</a>
 					</div>
@@ -154,34 +287,44 @@
 
 			<div class="half top">
 
-				<h5><% scalar @collected %> Collected:</h5>
+				<h5><% scalar keys %{$collected{$timeslot}} %> Collected:</h5>
 
-%				foreach my $judge (@collected) { 
+%				foreach my $key (@{$collected{$timeslot}{"keys"}}) { 
 
-%					my $panel = $panels_by_id{$judge->panelid};
-%					next unless $panel;
+%					my $judge = $collected{$timeslot}{$key}{"judge"};
+%					my $panel = $collected{$timeslot}{$key}{"panel"};
+%					my $code = $collected{$timeslot}{$key}{"code"};
+%					my $last = $collected{$timeslot}{$key}{"last"};
+%					my $first = $collected{$timeslot}{$key}{"first"};
+%					my $room = $collected{$timeslot}{$key}{"room"};
+%					my $collected = $collected{$timeslot}{$key}{"collected"};
+%					my $event = $collected{$timeslot}{$key}{"event"};
+%					my $flight = $collected{$timeslot}{$key}{"flight"};
 
-%					my $collected = DateTime::Format::MySQL->parse_datetime($judge->avg) if $judge->avg;
-%					$collected->set_time_zone("UTC");
+%					my $collect = DateTime::Format::MySQL->parse_datetime($collected) if $collected;
+%					$collect->set_time_zone($tz) if $collect;
 
                     <div class="nospace">
-						<a class="smallish full padmuchmore green" href="collect_switch.mhtml?judge_id=<% $judge->id %>&panel_id=<% $panel->id %>">
+
+						<a class="smallish full padmuchmore yellow" href="collect_switch.mhtml?judge_id=<% $judge %>&panel_id=<% $panel %>&order=<% $order %>">
 
 							<span class="third nowrap marno">
-									<% $judge->last %>, <% $judge->first %>
+								<% $last %>, <% $first %>
 							</span>
 
 							<span class="third nowrap marno">
-								<% $panel->room ? $panel->room->name  : "" %>
+								<% $room %> 
 							</span>
 
-							<span class="third nowrap marno">
-								<% $collected ? Tab::nicetime($collected->set_time_zone($tz)) : "" %>
+							<span class="third padleft nowrap marno">
+								<% $event %>
+								<% $flight > 1 ? "Flt ".$flight : ""  %>
+								<% Tab::nicetime($collect) %>
 							</span>
 						</a>
 					</div>
-
 %				}
+
 
 			</div>
 
