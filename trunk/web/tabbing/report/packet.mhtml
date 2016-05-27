@@ -24,11 +24,14 @@
 		$name = $events[0]->name if @events;
 	}
 
+
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
     my $now = DateTime->now(time_zone => $tz);
 
 	$m->abort unless @events;
+
+	my $ncfl = $tourn->setting("ncfl");
 
     $name =~ s/[\W_]//g;
 
@@ -116,15 +119,19 @@
 		my $dbh = Tab::DBI->db_Main();
 
 		my $sth = $dbh->prepare("
-			select value.id, value.tag, value.value, value.student, ballot.entry, entry.code, ballot.judge, panel.bye, ballot.bye, ballot.noshow, ballot.chair, round.name, ballot.side, panel.id, value.position
-			from ballot_value value, ballot, panel, round, entry
+			select value.id, value.tag, value.value, value.student, ballot.entry, entry.code, ballot.judge, 
+				panel.bye, ballot.bye, ballot.noshow, ballot.chair, round.name, ballot.side, panel.id, value.position, region.code
+			from (ballot_value value, ballot, panel, round, entry, school)
+			left join region on school.region = region.id
 			where value.ballot = ballot.id
 			and ballot.panel = panel.id
 			and panel.round = round.id
 			and round.name <= ".$last_round_name."
 			and round.event = ".$event->id."
 			and ballot.entry = entry.id
-			order by round.name, ballot.entry, value.student, ballot.chair, ballot.judge, CASE value.tag WHEN ".' "ballot" then 1 when "rank" then 2 when "points" then 3 when "rebuttal_points" then 4 end'."
+			and entry.school = school.id
+			order by round.name, ballot.entry, value.student, ballot.chair, ballot.judge, 
+				CASE value.tag WHEN ".' "ballot" then 1 when "rank" then 2 when "points" then 3 when "rebuttal_points" then 4 end'."
 		");
 
 		my $ballot_sth = $dbh->prepare("
@@ -146,6 +153,7 @@
 		$ballot_sth->execute();
 
 		my %entry_code;
+		my %entry_region;
 		my %entry_round;
 		my %entry_ballots;
 
@@ -165,7 +173,7 @@
 
 		my %panel_entries;
 
-		while (my ($id, $tag, $value, $studentid, $entryid, $code, $judge, $pbye, $bye, $noshow, $chair, $roundname, $side, $panel, $position) = $sth->fetchrow_array() ) {
+		while (my ($id, $tag, $value, $studentid, $entryid, $code, $judge, $pbye, $bye, $noshow, $chair, $roundname, $side, $panel, $position, $region) = $sth->fetchrow_array() ) {
 
 			$entry_ballots{$entryid}++;
 
@@ -173,6 +181,8 @@
 			$entry_round_panel{$entryid."-".$roundname} = $panel;
 			push @{$panel_entries{$panel}}, $entryid;
 			$entry_code{$entryid} = $code;
+
+			$entry_region{$entryid} = $region;
 
 			if ($pbye) {
 				$entry_round_decision{$entryid."-".$roundname} = "Bye"
@@ -196,7 +206,7 @@
 				$entry_round_decision{$entryid."-".$roundname."-".$judge} = "W" if $value == 1;
 
 			} elsif ($tag eq "points") {
-				$student_round_position{$studentid."-".$roundname."-".$judge} .= $position." ";
+				$student_round_position{$studentid."-".$roundname."-".$judge} .= $position." " if $event->type eq "wsdc" && $position;
 				$student_round_points{$studentid."-".$roundname."-".$judge} .= $value;
 			} elsif ($tag eq "rank") { 
 				$student_round_ranks{$studentid."-".$roundname."-".$judge} .= $value." ";
@@ -216,11 +226,31 @@
 			}
 		}
 
-		my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $meh, $panrank_ref, $panletter_ref, $long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", long_names => 1, round => $last_round);
-		my ($students_ref, $student_tbs_ref, $student_desc_ref) = $m->comp("/tabbing/results/order_speakers.mas", round => $last_round);
+		my ($entries_ref, $tbs_ref, $desc_ref, $noshow_ref, $meh, $panrank_ref, $panletter_ref, $long_desc_ref) 
+			= $m->comp("/tabbing/results/order_entries.mas", long_names => 1, round => $last_round);
+
+		my ($students_ref, $student_tbs_ref, $student_desc_ref) = $m->comp("/tabbing/results/order_speakers.mas", round => $last_round) 
+			if $event->setting("speaker_tbset");
 
 		my %entry_wins = $m->comp("/funclib/entry_wins.mas", event => $event, round => $last_round);
 		my %entry_losses = $m->comp("/funclib/entry_losses.mas", event => $event, round => $last_round);
+
+		my %entry_seed;
+
+		foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+			my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
+			foreach my $entry_id (@{${$entries_ref}{$key}}) {
+
+				$entry_seed{$entry_id}{"seed"} = $key;
+
+				if ($tie) { 
+					$entry_seed{$entry_id}{"print"} = "T-".$key;
+				} else { 
+					$entry_seed{$entry_id}{"print"} = $key;
+				}
+			}
+		}
+
 
 		foreach my $entry ($event->entries(waitlist => 0)) {
 
@@ -246,25 +276,25 @@
 
 			print TEXOUT " \\parbox{1.25in}{";
 			print TEXOUT "\\smallskip\n";
-			print TEXOUT "{\\bf \\truncate{1.2in}{".Tab::texify($entry->code)."}}\n";
+			print TEXOUT "{\\large \\bf \\truncate{1.2in}{".Tab::texify($entry->code)."}}\n" unless $ncfl;
+			print TEXOUT "{\\large \\bf \\truncate{1.2in}{".Tab::texify($entry->code)." -- ".Tab::texify($entry->school->region->code)."}}\n" if $ncfl;
+			print TEXOUT "\\vspace{1mm}\n";
 			print TEXOUT "\\newline\n";
-			print TEXOUT "\\indent\n";
-			print TEXOUT "\\truncate{1.2in}{ \\hspace{2ex}".Tab::texify($entry->school->short_name)."}\n";
-			print TEXOUT "\\vspace{3mm}\n" if $entry_max_judges{$entry->id} == 1;
-			print TEXOUT "\\vspace{8mm}\n" if $entry_max_judges{$entry->id} > 1;
+			print TEXOUT "\\noindent\n";
+			print TEXOUT "\\truncate{1.2in}{\\hspace{.75ex} ".Tab::texify($entry->name)."}\n" if $ncfl;
+			print TEXOUT "\\vspace{1mm}\n";
 			print TEXOUT "\\newline\n";
-
-			my $factor = 2.5 * $entry_max_judges{$entry->id};
+			print TEXOUT "\\noindent\n";
+			print TEXOUT "\\truncate{1.2in}{\\hspace{1ex}".Tab::texify($entry->school->short_name)."}\n";
+			print TEXOUT "\\vspace{1mm}\n" if $entry_max_judges{$entry->id} == 1;
+			print TEXOUT "\\vspace{3mm}\n" if $entry_max_judges{$entry->id} > 1;
+			print TEXOUT "\\newline\n";
 
 			my $notfirst;
 			foreach my $student (@students) {
 				print TEXOUT "\\newline\n" if $notfirst++;
 				print TEXOUT "\\footnotesize\n";
 				print TEXOUT "\\truncate{1.2in}{ \\hspace{2ex}".Tab::texify($student->first." ".$student->last)."}\n";
-
-				if ($entry_max_judges{$entry} > 1) { 
-					print TEXOUT "\\vspace{".$factor."mm}\n";
-				}
 			}
 
 			print TEXOUT " } \\rule{0mm}{.1mm} & ";
@@ -311,7 +341,8 @@
 				foreach my $opponent (@{$panel_entries{$entry_round_panel{$entry->id."-".$round->name}}}) {
 					next if $opponent  == $entry->id;
 					next if $used{$opponent}++;
-					print TEXOUT "\\truncate{".$size."in}{ ".Tab::texify($entry_code{$opponent})."}\n\n";
+					print TEXOUT "\\truncate{".$size."in}{ ".Tab::texify($entry_code{$opponent})."}\n\n" unless $ncfl;
+					print TEXOUT "\\truncate{".$size."in}{ ".Tab::texify($entry_code{$opponent}." -- ".$entry_region{$opponent})."}\n\n" if $ncfl;
 				}
 
 				print TEXOUT "\\vspace{1mm}\n\n";
@@ -327,23 +358,32 @@
 				my $notfirst;
 
 				foreach my $student (@students) {
+
+					print TEXOUT "\\newline\n" if $notfirst;
+
+					print TEXOUT "{\\tt ";
+
 					foreach my $judgeid (@{$entry_round_judges{$entry->id."-".$round->name}}) {
-						print TEXOUT "\\newline\n" if $notfirst++;
-						print TEXOUT "\\truncate{".$size."in}{ ";
+
+						$notfirst++;
 
 						if ($student_round_entry{$student->id."-".$round->name} == $entry->id) {
 
-							print TEXOUT $student_round_ranks{$student->id."-".$round->name."-".$judgeid}." \\hspace{1ex} " 
+
+							print TEXOUT $student_round_ranks{$student->id."-".$round->name."-".$judgeid}." "
 								if $student_round_ranks{$student->id."-".$round->name."-".$judgeid};
 
-							print TEXOUT $student_round_position{$student->id."-".$round->name."-".$judgeid}.". " 
+							print TEXOUT $student_round_position{$student->id."-".$round->name."-".$judgeid}." "
 								if $student_round_position{$student->id."-".$round->name."-".$judgeid};
 
-							print TEXOUT $student_round_points{$student->id."-".$round->name."-".$judgeid} 
+							print TEXOUT $student_round_points{$student->id."-".$round->name."-".$judgeid}." "
 								if $student_round_points{$student->id."-".$round->name."-".$judgeid};
+
 						}
-						print TEXOUT "}\n";
 					}
+
+					print TEXOUT "}";
+
 				}
 
 				print TEXOUT " } \n & ";
@@ -351,62 +391,82 @@
 
 			print TEXOUT " \\parbox{1in}{";
 
-			print TEXOUT "\\vspace{2mm}\n";
+			print TEXOUT "\\vspace{2mm}\n" unless $ncfl;
 
-			print TEXOUT "{\\Large \\bf ".$entry_wins{$entry}."--".$entry_losses{$entry}."}\n";
-			print TEXOUT " \\hspace{4mm} ";
-			print TEXOUT "\\footnotesize\n";
+			print TEXOUT "{\\LARGE \\bf ".$entry_wins{$entry}."--".$entry_losses{$entry}."}\n";
+
+			if ($ncfl) { 
+				print TEXOUT " \\hspace{2mm}\n";
+				print TEXOUT " \\newline \n";
+			} else { 
+
+				print TEXOUT " \\hspace{4mm} ";
+				print TEXOUT "\\footnotesize\n";
+				print TEXOUT " \\parbox{.4in}{";
+			}
 
 			my $limit;
 
-			print TEXOUT " \\parbox{.4in}{";
-
 			foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
-				next if ${$desc_ref}{$key} eq "W";
-				next if $limit++ > 1;
+				next if ${$desc_ref}{$key} eq "Win";
+				next if ($limit++ > 3) && not defined $ncfl;
+				next if ($limit > 4) && $ncfl;
 				my $value = ${$tbs_ref}{$entry->id."-".$key};
 				$value = sprintf("%.1f", $value);
 				$value =~ s/\.(?:|.*[^0]\K)0*\z//;
+				print TEXOUT "\\parbox{5mm}{ ".Tab::texify(${$desc_ref}{$key})." } " unless $ncfl;
+				print TEXOUT "\\parbox{.5in}{ ".Tab::texify(${$desc_ref}{$key})." } " if $ncfl;
 				print TEXOUT Tab::texify($value);
 				print TEXOUT "\n\n";
 			}
 
-			print TEXOUT " } ";
-
-			if ($entry_max_judges{$entry->id} > 1) {
-				my $factor = 2.5 * $entry_max_judges{$entry->id};
-				print TEXOUT "\\vspace{".$factor."mm}\n";
-			} else {
-				print TEXOUT "\\vspace{3mm}\n";
+			if ($entry_seed{$entry->id}{"seed"} < 33) { 
+				print TEXOUT "\\parbox{.5in}{\\bf Seed } ".$entry_seed{$entry->id}{"print"}." \n\n";
 			}
 
-			print TEXOUT "\\newline\n";
+			print TEXOUT " } \n "  unless $ncfl;
 
-			foreach my $student (@students) {
-
-				undef $limit;
-
-				foreach my $key (sort {$a <=> $b} keys %{$student_desc_ref}) {
-
-					next if ${$student_desc_ref}{$key} eq "W";
-					next if $limit++ > 2;
-
-					print TEXOUT "\\parbox{.31in}{ ";
-					print TEXOUT "\\truncate{.31in}{ ";
-					my $value = ${$student_tbs_ref}{$student->id."-".$key};
-					$value = sprintf("%.1f", $value);
-					$value =~ s/\.(?:|.*[^0]\K)0*\z//;
-					print TEXOUT Tab::texify($value);
-					print TEXOUT "} } ";
-				}
+			unless ($ncfl) { 
 
 				if ($entry_max_judges{$entry->id} > 1) {
-					my $factor = 1.3 * $entry_max_judges{$entry->id};
-					print TEXOUT "\\vspace{".$factor."mm}";
+
+					my $factor = 2.5 * $entry_max_judges{$entry->id};
+					print TEXOUT "\\vspace{".$factor."mm}\n";
+
+				} else {
+					print TEXOUT "\\vspace{3mm}\n";
 				}
+
+				print TEXOUT "\\newline\n";
+
+				foreach my $student (@students) {
+
+					undef $limit;
+
+					foreach my $key (sort {$a <=> $b} keys %{$student_desc_ref}) {
+
+						next if ${$student_desc_ref}{$key} eq "Win";
+						next if $limit++ > 2;
+
+						print TEXOUT "\\parbox{.31in}{ ";
+						print TEXOUT "\\truncate{.31in}{ ";
+						my $value = ${$student_tbs_ref}{$student->id."-".$key};
+						$value = sprintf("%.1f", $value);
+						$value =~ s/\.(?:|.*[^0]\K)0*\z//;
+						print TEXOUT Tab::texify($value);
+						print TEXOUT "} } ";
+					}
+
+					if ($entry_max_judges{$entry->id} > 1) {
+						my $factor = 1.3 * $entry_max_judges{$entry->id};
+						print TEXOUT "\\vspace{".$factor."mm}";
+					}
+				}
+
+				print TEXOUT " } ";
 			}
 
-			print TEXOUT " } ";
+			print TEXOUT " } \n ";
 
 			print TEXOUT "\\\\ \n";
 
