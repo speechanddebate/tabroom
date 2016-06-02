@@ -96,6 +96,8 @@ use Tab::School;
 use Tab::SchoolFine;
 use Tab::SchoolSetting;
 use Tab::Session;
+use Tab::Setting;
+use Tab::SettingLabel;
 use Tab::Site;
 use Tab::Stats;
 use Tab::Strike;
