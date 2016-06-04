@@ -1859,7 +1859,7 @@ $.fn.cycle.commonReset = function(curr,next,opts,w,h,rev) {
 	$(opts.elements).not(curr).hide();
 	if (typeof opts.cssBefore.opacity == 'undefined')
 		opts.cssBefore.opacity = 1;
-	opts.cssBefore.display = 'block';
+	opts.cssBefore.display = 'inline-block';
 	if (opts.slideResize && w !== false && next.cycleW > 0)
 		opts.cssBefore.width = next.cycleW;
 	if (opts.slideResize && h !== false && next.cycleH > 0)
