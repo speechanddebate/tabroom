@@ -2,7 +2,7 @@ package Tab::Student;
 use base 'Tab::DBI';
 Tab::Student->table('student');
 Tab::Student->columns(Primary => qw/id/);
-Tab::Student->columns(Essential => qw/account first last chapter novice grad_year retired gender acct_request diet/);
+Tab::Student->columns(Essential => qw/account first middle last chapter novice grad_year retired gender acct_request diet/);
 Tab::Student->columns(Other => qw/timestamp phonetic created race birthdate school_sid ualt_id/);
 Tab::Student->columns(TEMP => qw/code entry event school region/);
 
