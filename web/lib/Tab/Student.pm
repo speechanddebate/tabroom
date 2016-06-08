@@ -25,3 +25,8 @@ sub housing {
 	return @housings;
 }
 
+sub fullname { 
+	my $self = shift;
+	return $self->first." ".$self->middle." ".$self->last if $self->middle;
+	return $self->first." ".$self->last;
+}

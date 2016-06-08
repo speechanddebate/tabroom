@@ -95,6 +95,7 @@ function autoWin(input,e,aff,neg,affid,negid) {
     }    
 
 	function changeFocus(input) { 
+
 		var next_index = getIndex(input) + 1;
         while(! input.form[next_index].tabIndex) {
 			next_index = next_index + 1;
@@ -264,13 +265,10 @@ function autoPoints(input,len,e,side,ratio,nototal) {
     }    
 
 	function changeFocus(input) { 
-
 		if (input.value === "") { 
 			return;
 		}
-
 		var next_index = getIndex(input) + 1;
-
         while(input.form[next_index].tabIndex == -1) {
 			next_index = next_index + 1;
 			if (next_index > input.form.length) break;
