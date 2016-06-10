@@ -22,7 +22,7 @@ __PACKAGE__->_register_datetimes( qw/timestamp/);
 
 Tab::Account->has_many(logins => 'Tab::Login', 'person');
 
-Tab::Account->has_many(sessions => 'Tab::Session', 'account');
+Tab::Account->has_many(sessions => 'Tab::Session', 'person');
 Tab::Account->has_many(sites => 'Tab::Site', 'host');
 Tab::Account->has_many(conflicts => 'Tab::AccountConflict', 'account');
 Tab::Account->has_many(conflicteds => 'Tab::AccountConflict', 'conflict');
