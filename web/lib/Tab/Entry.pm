@@ -12,7 +12,7 @@ Tab::Entry->has_a(event => 'Tab::Event');
 
 Tab::Entry->has_many(strikes => 'Tab::Strike', 'entry');
 Tab::Entry->has_many(ballots => 'Tab::Ballot', 'entry');
-Tab::Entry->has_many(changes => 'Tab::TournChange', 'entry');
+Tab::Entry->has_many(changes => 'Tab::ChangeLog', 'entry');
 Tab::Entry->has_many(ratings => 'Tab::Rating', 'entry');
 Tab::Entry->has_many(qualifiers => 'Tab::Qualifier', 'entry');
 Tab::Entry->has_many(entry_students => 'Tab::EntryStudent', 'entry');

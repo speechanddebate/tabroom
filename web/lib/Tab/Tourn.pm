@@ -32,13 +32,13 @@ Tab::Tourn->has_many(permissions => 'Tab::Permission', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
 Tab::Tourn->has_many(school_fines => 'Tab::SchoolFine', 'tourn');
 Tab::Tourn->has_many(judge_groups => 'Tab::JudgeGroup', 'tourn');
-Tab::Tourn->has_many(tourn_changes => 'Tab::TournChange', 'tourn');
+Tab::Tourn->has_many(change_logs => 'Tab::ChangeLog', 'tourn');
 Tab::Tourn->has_many(event_doubles => 'Tab::EventDouble', 'tourn');
 Tab::Tourn->has_many(tiebreak_sets => 'Tab::TiebreakSet', 'tourn');
 Tab::Tourn->has_many(housing_slots => 'Tab::HousingSlots', 'tourn');
 Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit', 'tourn');
 
-Tab::Tourn->has_many(admins => [ Tab::Permission => 'account']);
+Tab::Tourn->has_many(admins => [ Tab::Permission => 'person']);
 Tab::Tourn->has_many(sites => [Tab::TournSite => 'site']);
 Tab::Tourn->has_many(circuits => [Tab::TournCircuit => 'circuit']);
 

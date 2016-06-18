@@ -6,7 +6,7 @@ Tab::Webpage->columns(Essential => qw/tourn circuit page_order title content las
 
 Tab::Webpage->has_a(tourn => 'Tab::Tourn');
 Tab::Webpage->has_a(circuit => 'Tab::Circuit');
-Tab::Webpage->has_a(last_editor => 'Tab::Account');
+Tab::Webpage->has_a(last_editor => 'Tab::Person');
 Tab::Webpage->has_a(parent => 'Tab::Webpage');
 
 __PACKAGE__->_register_datetimes( qw/posted_on/);

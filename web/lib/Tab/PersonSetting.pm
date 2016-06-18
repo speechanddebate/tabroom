@@ -1,8 +1,8 @@
-package Tab::AccountSetting;
+package Tab::PersonSetting;
 use base 'Tab::DBI';
-Tab::AccountSetting->table('account_setting');
-Tab::AccountSetting->columns(All => qw/id account tag value value_date value_text setting timestamp/);
-Tab::AccountSetting->has_a(account => 'Tab::Account');
+Tab::PersonSetting->table('person_setting');
+Tab::PersonSetting->columns(All => qw/id person tag value value_date value_text setting timestamp/);
+Tab::PersonSetting->has_a(person => 'Tab::Person');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 __PACKAGE__->_register_datetimes( qw/value_date/);

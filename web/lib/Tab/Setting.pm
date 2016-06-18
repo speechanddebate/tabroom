@@ -7,7 +7,7 @@ Tab::Setting->columns(Others => qw/timestamp/);
 
 Tab::Setting->has_many( setting_labels => 'Tab::SettingLabel', 'setting');
 
-Tab::Setting->has_many( account_settings => 'Tab::AccountSetting', 'setting');
+Tab::Setting->has_many( person_settings => 'Tab::PersonSetting', 'setting');
 Tab::Setting->has_many( circuit_settings => 'Tab::CircuitSetting', 'setting');
 Tab::Setting->has_many( entry_settings => 'Tab::EntrySetting', 'setting');
 Tab::Setting->has_many( event_settings => 'Tab::EventSetting', 'setting');

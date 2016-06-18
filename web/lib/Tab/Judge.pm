@@ -2,19 +2,19 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first last code active ada judge_group account chapter_judge/);
-Tab::Judge->columns(Others => qw / alt_group covers obligation hired acct_request score tmp created_at timestamp /);
+Tab::Judge->columns(Essential => qw/school first last code active ada judge_group person chapter_judge/);
+Tab::Judge->columns(Others => qw / alt_group covers obligation hired person_request score tmp created_at timestamp /);
 
-Tab::Judge->columns(TEMP => qw/tier pref panelid chair hangout_admin tourn avg diet ballotid accountid tab_rating
+Tab::Judge->columns(TEMP => qw/tier pref panelid chair hangout_admin tourn avg diet ballotid personid tab_rating
 							   cjid schoolname schoolcode regname regcode region standby/);
 
-Tab::Judge->has_a(judge_group   => 'Tab::JudgeGroup');
-Tab::Judge->has_a(alt_group     => 'Tab::JudgeGroup');
-Tab::Judge->has_a(covers        => 'Tab::JudgeGroup');
-Tab::Judge->has_a(school        => 'Tab::School');
-Tab::Judge->has_a(account       => 'Tab::Account');
-Tab::Judge->has_a(acct_request  => 'Tab::Account');
-Tab::Judge->has_a(chapter_judge => 'Tab::ChapterJudge');
+Tab::Judge->has_a(judge_group    => 'Tab::JudgeGroup');
+Tab::Judge->has_a(alt_group      => 'Tab::JudgeGroup');
+Tab::Judge->has_a(covers         => 'Tab::JudgeGroup');
+Tab::Judge->has_a(school         => 'Tab::School');
+Tab::Judge->has_a(person         => 'Tab::Person');
+Tab::Judge->has_a(person_request => 'Tab::Person');
+Tab::Judge->has_a(chapter_judge  => 'Tab::ChapterJudge');
 
 Tab::Judge->has_many(ratings => 'Tab::Rating', 'judge');
 Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
