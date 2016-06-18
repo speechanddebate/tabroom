@@ -18,6 +18,7 @@ alter table person_setting change account person int;
 rename table account_conflict to conflict; 
 rename table person_conflict to conflict; 
 alter table conflict change account person int;
+alter table conflict change conflict conflicted int;
 
 alter table change_log change text description text; 
 alter table change_log change account person int;
@@ -64,4 +65,53 @@ create INDEX person on judge(person);
 
 ALTER TABLE tourn_ignore DROP INDEX account;
 create INDEX person on tourn_ignore(person);
+
+rename table judge_group to category; 
+rename table judge_group_setting to category_setting; 
+
+alter table judge change judge_group category int;
+alter table event change judge_group category int;
+alter table change_log change judge_group category int;
+alter table jpool change judge_group category int;
+alter table category change judge_group category int;
+alter table judge_hire change judge_group category int;
+alter table permission change judge_group category int;
+alter table rating_subset change judge_group category int;
+alter table rating_tier change judge_group category int;
+alter table session change judge_group category int;
+alter table strike_time change judge_group category int;
+alter table event change judge_group category int;
+alter table judge change alt_group alt_category int;
+
+alter table category_setting change judge_group category int;
+
+ALTER TABLE judge DROP INDEX judge_group;
+create INDEX category on judge(category);
+
+ALTER TABLE permission DROP INDEX judge_group;
+create INDEX category on permission(category);
+
+ALTER TABLE category_setting DROP INDEX judge_group;
+create INDEX category on category_setting(category);
+
+ALTER TABLE event DROP INDEX judge_group;
+create INDEX category on event(category);
+
+ALTER TABLE jpool DROP INDEX judge_group;
+create INDEX category on jpool(category);
+
+ALTER TABLE permission DROP INDEX judge_group;
+create INDEX category on permission(category);
+
+alter table circuit_membership change approval approval_required bool;
+alter table circuit_membership change region region_required bool;
+alter table circuit_membership drop created_at;
+
+alter table chapter_circuit drop active; 
+alter table chapter_circuit drop paid; 
+alter table chapter_circuit drop created_at; 
+alter table chapter_circuit change membership circuit_membership int; 
+
+alter table chapter_judge drop paradigm;
+alter table chapter_judge drop identity;
 

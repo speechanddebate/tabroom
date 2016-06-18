@@ -18,17 +18,6 @@ Tab::School->has_many(followers => [Tab::Follower => 'follower']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-
-sub events { 
-	my $self = shift;
-	return Tab::Event->search_by_school($self->id);
-}
-
-sub students { 
-	my $self = shift;
-	return Tab::Student->search_by_school($self->id);
-}
-
 sub short_name {
 	my ($self, $limit) = @_;
 	my $name = $self->name;

@@ -24,20 +24,6 @@ sub location {
 	return $location.$self->country;
 }
 
-sub dues {
-    my ($self, $circuit, $paid) = @_;
-
-	if ($paid) { 
-		my $school_year = &Tab::school_year;
-	    my @dues = Tab::CircuitDues->search_where( chapter => $self->id, circuit => $circuit->id, paid_on => {">=", $school_year});
-		my $total = 0;
-		foreach (@dues) { $total += $_->amount; }
-		return $total; 
-	} else { 
-	    return Tab::CircuitDues->search( chapter => $self->id, circuit => $circuit->id );
-	}
-}
-
 sub full_member {
     my ($self, $circuit) = @_;
 	my @membership = Tab::ChapterCircuit->search( chapter => $self->id, circuit => $circuit->id );

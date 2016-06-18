@@ -2,11 +2,11 @@ package Tab::JPool;
 use base 'Tab::DBI';
 Tab::JPool->table('jpool');
 Tab::JPool->columns(Primary => qw/id/);
-Tab::JPool->columns(Essential => qw/name tourn judge_group timestamp site/);
+Tab::JPool->columns(Essential => qw/name tourn category timestamp site/);
 
 Tab::JPool->has_a(site => 'Tab::Site');
 Tab::JPool->has_a(tourn => 'Tab::Tourn');
-Tab::JPool->has_a(judge_group => "Tab::JudgeGroup");
+Tab::JPool->has_a(category => "Tab::Category");
 
 Tab::JPool->has_many(settings => 'Tab::JPoolSetting', 'jpool');
 Tab::JPool->has_many(pool_judges => 'Tab::JPoolJudge', 'jpool');
