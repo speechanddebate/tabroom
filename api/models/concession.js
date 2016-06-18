@@ -19,7 +19,7 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.INTEGER(11),
 			allowNull: true
 		},
-		squad_cap: { 
+		school_cap: { 
 			type: DataTypes.INTEGER(11),
 			allowNull: true
 		},

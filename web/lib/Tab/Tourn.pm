@@ -21,7 +21,7 @@ Tab::Tourn->has_many(schools => 'Tab::School', 'tourn' => { order_by => 'name'} 
 Tab::Tourn->has_many(housings => 'Tab::Housing', 'tourn');
 Tab::Tourn->has_many(webpages => 'Tab::Webpage', 'tourn');
 Tab::Tourn->has_many(followers => 'Tab::Follower', 'tourn');
-Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn' => { order_by => 'name'} );
+Tab::Tourn->has_many(groups => 'Tab::Category', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn' => { order_by => 'start'} );
 Tab::Tourn->has_many(sweep_sets => 'Tab::SweepSet', 'tourn' => {order_by => 'name'} );
 Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
@@ -31,7 +31,7 @@ Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn' => { order_by => 
 Tab::Tourn->has_many(permissions => 'Tab::Permission', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
 Tab::Tourn->has_many(school_fines => 'Tab::SchoolFine', 'tourn');
-Tab::Tourn->has_many(judge_groups => 'Tab::JudgeGroup', 'tourn');
+Tab::Tourn->has_many(categories => 'Tab::Category', 'tourn');
 Tab::Tourn->has_many(change_logs => 'Tab::ChangeLog', 'tourn');
 Tab::Tourn->has_many(event_doubles => 'Tab::EventDouble', 'tourn');
 Tab::Tourn->has_many(tiebreak_sets => 'Tab::TiebreakSet', 'tourn');

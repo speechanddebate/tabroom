@@ -11,6 +11,10 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.BOOLEAN,
 			allowNull: true
 		}
+		placed: { 
+			type: DataTypes.DATE,
+			allowNull: true
+		}
 	});
 };
 
