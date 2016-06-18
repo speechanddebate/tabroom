@@ -21,16 +21,48 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
-		speaker_order: {
+		tv: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
+		audit: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
+		speakerorder: {
 			type: DataTypes.INTEGER(11),
 			allowNull: false,
 			defaultValue: '0'
 		},
-		speech_number: {
+		speechnumber: {
 			type: DataTypes.INTEGER(11),
 			allowNull: true
 		},
-		collected_at: {
+		pullup: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
+		seed: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
+		judge_started: { 
+			type: DataTypes.DATE,
+			allowNull: true
+		},
+		collected: {
+			type: DataTypes.DATE,
+			allowNull: true
+		},
+		entered: {
+			type: DataTypes.DATE,
+			allowNull: true
+		},
+		audited: {
 			type: DataTypes.DATE,
 			allowNull: true
 		}

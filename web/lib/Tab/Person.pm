@@ -1,48 +1,48 @@
-package Tab::Account;
+package Tab::Person;
 use base 'Tab::DBI';
 
 #Before
-#Tab::Account->table('account');
-#Tab::Account->columns(Primary   => qw/id/);
-#Tab::Account->columns(Essential => qw/email passhash site_admin multiple/);
-#Tab::Account->columns(Others    => qw/first last phone street city state zip country hotel
+#Tab::Person->table('account');
+#Tab::Person->columns(Primary   => qw/id/);
+#Tab::Person->columns(Essential => qw/email passhash site_admin multiple/);
+#Tab::Person->columns(Others    => qw/first last phone street city state zip country hotel
 #                                      provider paradigm_timestamp started_judging gender timestamp help_admin
 #                                      no_email change_deadline change_pass_key password_timestamp tz diversity/);
 
 #After
-Tab::Account->table('person');
-Tab::Account->columns(Primary   => qw/id/);
-Tab::Account->columns(Essential => qw/email first last phone ualt_id provider site_admin multiple/);
-Tab::Account->columns(Others    => qw/alt_phone street city state zip country
+Tab::Person->table('person');
+Tab::Person->columns(Primary   => qw/id/);
+Tab::Person->columns(Essential => qw/email first last phone ualt_id provider site_admin multiple/);
+Tab::Person->columns(Others    => qw/alt_phone street city state zip country
                                    gender pronoun no_email tz started_judging diversity flags timestamp googleplus/);
 
-Tab::Account->columns(TEMP => qw/prefs student_id judge_id/);
+Tab::Person->columns(TEMP => qw/prefs student_id judge_id/);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-Tab::Account->has_many(logins => 'Tab::Login', 'person');
+Tab::Person->has_many(logins => 'Tab::Login', 'person');
 
-Tab::Account->has_many(sessions => 'Tab::Session', 'person');
-Tab::Account->has_many(sites => 'Tab::Site', 'host');
-Tab::Account->has_many(conflicts => 'Tab::AccountConflict', 'account');
-Tab::Account->has_many(conflicteds => 'Tab::AccountConflict', 'conflict');
+Tab::Person->has_many(sessions => 'Tab::Session', 'person');
+Tab::Person->has_many(sites => 'Tab::Site', 'host');
+Tab::Person->has_many(conflicts => 'Tab::Conflict', 'person');
+Tab::Person->has_many(conflicteds => 'Tab::Conflict', 'conflict');
 
 
-Tab::Account->has_many(followers => 'Tab::Follower', 'account');
-Tab::Account->has_many(follow_accounts => 'Tab::Follower', 'follower');
-Tab::Account->has_many(chapter_judges => 'Tab::ChapterJudge', 'account');
+Tab::Person->has_many(followers => 'Tab::Follower', 'person');
+Tab::Person->has_many(follow_persons => 'Tab::Follower', 'follower');
+Tab::Person->has_many(chapter_judges => 'Tab::ChapterJudge', 'person');
 
-Tab::Account->has_many(judges => 'Tab::Judge', 'account' => { order_by => 'id DESC'} );
+Tab::Person->has_many(judges => 'Tab::Judge', 'person' => { order_by => 'id DESC'} );
 
-Tab::Account->has_many(entries => 'Tab::Entry', 'account');
-Tab::Account->has_many(students => 'Tab::Student');
-Tab::Account->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
+Tab::Person->has_many(entries => 'Tab::Entry', 'person');
+Tab::Person->has_many(students => 'Tab::Student');
+Tab::Person->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
 
-Tab::Account->has_many(permissions => 'Tab::Permission', 'account');
-Tab::Account->has_many(circuits => [ Tab::Permission => 'circuit']);
-Tab::Account->has_many(tourns => [ Tab::Permission => 'tourn']);
-Tab::Account->has_many(chapters => [ Tab::Permission => 'chapter']);
-Tab::Account->has_many(regions => [ Tab::Permission => 'region']);
+Tab::Person->has_many(permissions => 'Tab::Permission', 'person');
+Tab::Person->has_many(circuits => [ Tab::Permission => 'circuit']);
+Tab::Person->has_many(tourns => [ Tab::Permission => 'tourn']);
+Tab::Person->has_many(chapters => [ Tab::Permission => 'chapter']);
+Tab::Person->has_many(regions => [ Tab::Permission => 'region']);
 
 sub setting {
 
@@ -51,8 +51,8 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::AccountSetting->search(  
-		account => $self->id,
+	my $existing = Tab::PersonSetting->search(  
+		person => $self->id,
 		tag    => $tag,
 	)->first;
 
@@ -73,8 +73,8 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::AccountSetting->create({
-				account => $self->id,
+			my $existing = Tab::PersonSetting->create({
+				person => $self->id,
 				tag    => $tag,
 				value  => $value,
 			});

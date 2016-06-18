@@ -5,7 +5,7 @@ Tab::Site->columns(Primary => qw/id/);
 Tab::Site->columns(Essential => qw/name circuit timestamp/);
 Tab::Site->columns(Others => qw/host directions circuit dropoff/);
 
-Tab::Site->has_a(host => 'Tab::Account');
+Tab::Site->has_a(host => 'Tab::Person');
 Tab::Site->has_a(circuit => 'Tab::Circuit');
 Tab::Site->has_many(rounds => 'Tab::Round', {order_by => "name"});
 Tab::Site->has_many(rooms => 'Tab::Room', {order_by => "name"});

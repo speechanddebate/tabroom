@@ -7,7 +7,7 @@ Tab::SchoolFine->has_a(school => 'Tab::School');
 Tab::SchoolFine->has_a(region => 'Tab::Region');
 Tab::SchoolFine->has_a(judge => 'Tab::Judge');
 Tab::SchoolFine->has_a(tourn => 'Tab::Tourn');
-Tab::SchoolFine->has_a(levied_by => 'Tab::Account');
-Tab::SchoolFine->has_a(deleted_by => 'Tab::Account');
+Tab::SchoolFine->has_a(levied_by => 'Tab::Person');
+Tab::SchoolFine->has_a(deleted_by => 'Tab::Person');
 
 __PACKAGE__->_register_datetimes( qw/levied_on deleted_at timestamp/);
