@@ -28,11 +28,8 @@ Object.keys(db).forEach(function(modelName) {
 	}
 });
 
-// Public facing functions
 db.calendar.belongsTo(db.tourn, {foreignKey: "tourn"});
 db.calendar.belongsTo(db.person, {foreignKey: "person"});
-
-// Stable, circuit wide associations
 
 db.change_log.belongsTo(db.event, {foreignKey: "event"});
 db.change_log.belongsTo(db.tourn, {foreignKey: "tourn"});
@@ -203,18 +200,18 @@ db.rpool_setting.belongsTo(db.rpool);
 db.tiebreak_set_setting.belongsTo(db.tiebreak_set, {foreignKey: "tiebreak_set"});
 db.school_setting.belongsTo(db.school, {foreignKey: "school"});
 
-db.tourn_setting.belongsTo(db.setting);
-db.category_setting.belongsTo(db.setting);
-db.judge_setting.belongsTo(db.setting);
-db.event_setting.belongsTo(db.setting);
-db.entry_setting.belongsTo(db.setting);
-db.round_setting.belongsTo(db.setting);
-db.circuit_setting.belongsTo(db.setting);
-db.person_setting.belongsTo(db.setting);
-db.jpool_setting.belongsTo(db.setting);
-db.rpool_setting.belongsTo(db.setting);
-db.tiebreak_set_setting.belongsTo(db.setting);
-db.school_setting.belongsTo(db.setting);
+db.tourn_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.category_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.judge_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.event_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.entry_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.round_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.circuit_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.person_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.jpool_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.rpool_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.tiebreak_set_setting.belongsTo(db.setting, {foreignKey: "setting"});
+db.school_setting.belongsTo(db.setting, {foreignKey: "setting"});
 
 db.setting.hasMany(db.tourn_setting);
 db.setting.hasMany(db.category_setting);
