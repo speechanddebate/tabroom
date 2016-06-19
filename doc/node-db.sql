@@ -5,7 +5,6 @@ alter table ballot change noshow forfeit bool;
 update tiebreak_setting set tag="forfeits_never_break" where tag="noshows_never_break";
 
 alter table ballot add judge_started datetime; 
-
 alter table ballot change account entered_by int;
 
 rename table ballot_value to score;
@@ -115,3 +114,4 @@ alter table chapter_circuit change membership circuit_membership int;
 alter table chapter_judge drop paradigm;
 alter table chapter_judge drop identity;
 
+alter table concession add school_cap int;
