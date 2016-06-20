@@ -3,8 +3,8 @@ use base 'Tab::DBI';
 Tab::TiebreakSet->table('tiebreak_set');
 Tab::TiebreakSet->columns(All => qw/id tourn name timestamp type elim/);
 Tab::TiebreakSet->has_a(tourn => 'Tab::Tourn');
-Tab::TiebreakSet->has_many(tiebreaks => 'Tab::Tiebreak', 'tb_set');
-Tab::TiebreakSet->has_many(rounds => 'Tab::Tiebreak', 'tb_set');
+Tab::TiebreakSet->has_many(tiebreaks => 'Tab::Tiebreak', 'tiebreak_set');
+Tab::TiebreakSet->has_many(rounds => 'Tab::Tiebreak', 'tiebreak_set');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
@@ -15,7 +15,7 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::TiebreakSetting->search(  
+	my $existing = Tab::TiebreakSetSetting->search(  
 		tiebreak_set => $self->id,
 		tag          => $tag,
 	)->first;
@@ -37,7 +37,7 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::TiebreakSetting->create({
+			my $existing = Tab::TiebreakSetSetting->create({
 				tiebreak_set => $self->id,
 				tag          => $tag,
 				value        => $value,

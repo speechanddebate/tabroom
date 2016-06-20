@@ -19,7 +19,6 @@ alter table ballot change audited_by audited_by int after entered_by;
 alter table ballot change cat_id cat_id int after hangout_admin; 
 alter table ballot change timestamp timestamp timestamp after hangout_admin; 
 
-
 alter table change_log change timestamp timestamp timestamp after round; 
 alter table change_log change description description text after type; 
 alter table change_log change new_panel new_panel int after fine; 
@@ -255,5 +254,307 @@ alter table result_value change no_sort no_sort bool after long_tag;
 alter table result_value change sort_desc sort_desc bool after no_sort;
 alter table result_value change result result int after sort_desc;
 alter table result_value drop created_at; 
+
+alter table result drop created_at;
+
+alter table result change rank rank int after id;
+alter table result change percentile percentile int after rank;
+alter table result change honor honor varchar(255) after percentile;
+alter table result change honor_site honor_site varchar(63) after honor; 
+alter table result change result_set result_set int after honor_site;
+alter table result change timestamp timestamp timestamp after round;
+
+alter table room_strike drop created_at;
+alter table room_strike change start start datetime after type;
+alter table room_strike change end end datetime after start;
+alter table room_strike change room room datetime after end;
+alter table room_strike change timestamp timestamp timestamp after judge;
+
+
+alter table room change capacity capacity int after quality;
+alter table room change inactive inactive bool after capacity;
+alter table room change ada ada bool after inactive;
+alter table room change notes notes text after ada; 
+alter table room change building building varchar(64) after notes;
+alter table room change timestamp timestamp timestamp after site;
+
+alter table room drop created_at; 
+
+alter table round drop created_at;
+alter table round drop pool;
+alter table round drop online;
+
+alter table round change type type varchar(15) after id;
+alter table round change label label varchar(15) after name;
+alter table round change flighted flighted tinyint after label;
+alter table round change created created datetime after flighted;
+alter table round change start_time start_time datetime after created;
+alter table round change published published tinyint after flighted;
+alter table round change post_results post_results tinyint after published;
+alter table round change timestamp timestamp timestamp after tb_set;
+alter table round change tb_set tiebreak_set int after site; 
+
+alter table rpool_room drop created_at; 
+alter table rpool_round drop created_at; 
+alter table rpool drop created_at; 
+
+alter table school drop contact; 
+alter table school drop registered_on; 
+alter table school drop registered_by; 
+alter table school drop entered_on; 
+alter table school drop onsite_by; 
+
+alter table school change name name varchar(127) after id; 
+alter table school change code code varchar(15) after name; 
+alter table school change registered onsite bool after code;
+alter table school change timestamp timestamp timestamp after region;
+
+alter table score change value value float after tag;
+alter table score drop created_at;
+alter table score change content content text after value;
+alter table score change speech speech int after content; 
+alter table score change position position int after speech; 
+alter table score change tiebreak tiebreak int after timestamp;
+
+alter table chapter drop address;
+alter table chapter drop zip;
+alter table chapter drop postal;
+
+alter table chapter add address varchar(255) after name;
+alter table chapter change city city varchar(63) after address;
+alter table chapter change state state char(4) after city;
+alter table chapter add zip smallint after state;
+alter table chapter add postal varchar(15) after zip;
+alter table chapter change country country char(4) after postal;
+alter table chapter change coaches coaches varchar(255) after country;
+alter table chapter change self_prefs self_prefs bool after coaches;
+alter table chapter change level level varchar(15) after self_prefs;
+alter table chapter change nsda nsda int after level;
+alter table chapter change naudl naudl bool after nsda;
+alter table chapter change ipeds ipeds varchar(15) after naudl;
+alter table chapter change nces nces varchar(15) after ipeds;
+alter table chapter change ceeb ceeb varchar(15) after nces;
+
+alter table chapter drop created_at;
+alter table chapter drop district_id;
+
+alter table chapter_circuit change code code varchar(15) after id;
+alter table chapter_circuit change full_member full_member bool after code;
+alter table chapter_circuit change timestamp timestamp timestamp after circuit_membership;
+
+alter table chapter_judge add middle varchar(63) after first;
+alter table chapter_judge drop started;
+alter table chapter_judge drop created;
+alter table chapter_judge drop last_judged;
+alter table chapter_judge drop created_at;
+alter table chapter_judge drop updated_at; 
+alter table chapter_judge change ada ada bool after last;
+alter table chapter_judge change retired retired bool after ada;
+alter table chapter_judge change cell phone varchar(31) after retired;
+alter table chapter_judge change email email varchar(127) after phone;
+alter table chapter_judge change diet diet varchar(31) after email;
+alter table chapter_judge change notes notes varchar(255) after diet;
+alter table chapter_judge change notes_timestamp notes_timestamp datetime after notes;
+alter table chapter_judge change timestamp timestamp timestamp after person_request;
+
+
+alter table panel drop created_at;
+alter table panel drop type;
+
+alter table panel change letter letter varchar(3) after id;
+alter table panel change flight flight varchar(3) after letter;
+alter table panel change bye bye bool after flight;
+alter table panel change started started datetime after bye;
+alter table panel change confirmed confirmed datetime after started;
+alter table panel change bracket bracket smallint after confirmed;
+alter table panel change room room int after bracket;
+alter table panel change round round int after room;
+
+alter table panel change g_event g_event varchar(255) after round;
+alter table panel change room_ext_id room_ext_id varchar(255) after g_event;
+alter table panel change invites_sent invites_sent bool not null default 0 after room_ext_id;
+alter table panel change timestamp timestamp timestamp after invites_sent;
+alter table panel change cat_id cat_id int after timestamp;
+alter table panel change score score int not null default 0 after timestamp;
+
+alter table site change dropoff dropoff varchar(255) after directions;
+alter table site change host host int after dropoff;
+alter table site drop created_at;
+
+alter table stats drop type;
+
+alter table stats add type varchar(15) after id;
+alter table stats change tag tag varchar(63) after type;
+alter table stats change value value float after tag;
+alter table stats drop taken;
+alter table stats drop created_at;
+
+rename table strike_time to strike_timeslot;
+alter table strike_timeslot change name name varchar(31) after id;
+alter table strike_timeslot change fine fine smallint after name;
+alter table strike_timeslot change start start datetime after fine;
+alter table strike_timeslot change end end datetime after start;
+alter table strike_timeslot drop created_at;
+
+
+alter table strike drop created_at; 
+alter table strike drop dioregion; 
+alter table strike drop hidden; 
+alter table strike drop timeslot; 
+alter table strike drop entered_by; 
+
+alter table strike change type type varchar(31) after id;
+alter table strike change start start datetime after type;
+alter table strike change end end datetime after start;
+
+alter table strike change registrant registrant bool not null default 0 after end;
+alter table strike change conflictee conflictee bool not null default 0 after registrant;
+
+alter table student add middle varchar(63) after first;
+alter table student change middle middle varchar(63) after first;
+
+alter table student drop created_at;
+alter table student drop created;
+alter table student change phonetic phonetic varchar(127) after last;
+
+alter table student change grad_year grad_year smallint after phonetic;
+alter table student change novice novice bool not null default 0 after grad_year;
+alter table student change retired retired bool not null default 0 after novice;
+alter table student change gender gender char after retired;
+alter table student change diet diet varchar(31) after gender;
+alter table student change birthdate birthdate date after diet; 
+alter table student change school_sid school_sid varchar(63) after birthdate;
+alter table student change race race varchar(31) after school_sid;
+alter table student change ualt_id ualt_id int after race;
+alter table student change timestamp timestamp timestamp after person_request;
+
+alter table sweep_event drop created_at; 
+alter table sweep_include drop created_at; 
+alter table sweep_rule drop created_at; 
+
+alter table sweep_rule change tag tag varchar(31) after id;
+alter table sweep_rule change value value varchar(63) after tag;
+alter table sweep_rule change place place smallint after value;
+alter table sweep_rule change count count varchar(15) after place;
+
+alter table sweep_set drop created_at;
+alter table sweep_set drop place;
+alter table sweep_set change name name varchar(31) after id;
+
+alter table tiebreak_set drop created_at;
+alter table tiebreak_set drop type;
+alter table tiebreak_set drop elim;
+
+alter table tiebreak drop created_at;
+alter table tiebreak change highlow highlow tinyint after priority;
+alter table tiebreak change highlow_count highlow_count tinyint after highlow;
+alter table tiebreak change tb_set tiebreak_set int after highlow_count;
+
+alter table timeslot drop created_at; 
+alter table timeslot change tourn tourn int after end;
+
+alter table tourn_circuit drop created_at;
+alter table tourn_circuit change approved approved bool after id;
+
+alter table tourn_fee drop created_at;
+alter table tourn_fee change tourn tourn int after end;
+
+alter table tourn_ignore drop created_at;
+alter table tourn_site drop created_at;
+
+
+
+alter table tourn drop approved;
+alter table tourn drop googleplus;
+alter table tourn drop foreign_site;
+alter table tourn drop foreign_id;
+alter table tourn drop created_at;
+alter table tourn drop created_by;
+
+alter table tourn add city varchar(31) after name;
+alter table tourn change state state char(4) after city;
+alter table tourn change country country char(4) after state;
+alter table tourn change tz tz varchar(31) after country;
+alter table tourn change webname webname varchar(64) after tz;
+
+alter table tourn change hidden hidden bool not null default 0 after webname;
+
+delete from webpage where help = 1;
+
+alter table webpage drop created_at;
+alter table webpage drop posted_on;
+alter table webpage drop circuit;
+alter table webpage drop creator;
+alter table webpage drop help;
+alter table webpage change title title varchar(63) after id;
+alter table webpage change content content text after title;
+alter table webpage change active published bool not null default 0 after content;
+alter table webpage change sitewide sitewide bool not null default 0 after published;
+alter table webpage change special special varchar(15) after sitewide;
+alter table webpage change page_order page_order int after special;
+
+alter table tabroom.tourn_setting add setting int; 
+alter table tabroom.category_setting add setting int; 
+alter table tabroom.judge_setting add setting int; 
+alter table tabroom.event_setting add setting int; 
+alter table tabroom.entry_setting add setting int; 
+alter table tabroom.round_setting add setting int; 
+alter table tabroom.circuit_setting add setting int; 
+alter table tabroom.person_setting add setting int; 
+alter table tabroom.jpool_setting add setting int; 
+alter table tabroom.rpool_setting add setting int; 
+alter table tabroom.tiebreak_setting add setting int; 
+alter table tabroom.school_setting add setting int; 
+
+alter table tabroom.tourn_setting drop created_at; 
+alter table tabroom.category_setting drop created_at; 
+alter table tabroom.judge_setting drop created_at; 
+alter table tabroom.event_setting drop created_at; 
+alter table tabroom.entry_setting drop created_at; 
+alter table tabroom.round_setting drop created_at; 
+alter table tabroom.circuit_setting drop created_at; 
+alter table tabroom.person_setting drop created_at; 
+alter table tabroom.jpool_setting drop created_at; 
+alter table tabroom.rpool_setting drop created_at; 
+alter table tabroom.tiebreak_setting drop created_at; 
+alter table tabroom.school_setting drop created_at; 
+
+alter table tabroom.tourn_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.category_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.judge_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.event_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.entry_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.round_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.circuit_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.person_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.jpool_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.rpool_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.tiebreak_setting change timestamp timestamp timestamp after setting; 
+alter table tabroom.school_setting change timestamp timestamp timestamp after setting; 
+
+alter table tabroom.tiebreak_setting add value_date datetime after value;
+alter table tabroom.tiebreak_setting add value_text text after value_date;
+
+
+drop table settings;
+drop table setting_labels;
+drop table nsda_categories;
+drop table nsda_event_categories;
+drop table nsda_honors;
+drop table nsda_points;
+drop table room_pool;
+drop table follow_tourn;
+drop table chapter_contact;
+
+delete from session where timestamp < "2016-05-01 00:00:00";
+
+alter table tabroom.session drop created_at;
+alter table tabroom.session drop authkey;
+
+alter table tabroom.session change userkey userkey varchar(127) after id;
+alter table tabroom.session change ip ip varchar(63) after userkey;
+alter table tabroom.session change person person int after ip;
+alter table tabroom.session change su su int after ip;
+alter table tabroom.session change timestamp timestamp timestamp after category;
 
 

@@ -2,8 +2,7 @@ package Tab::Tourn;
 use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
-Tab::Tourn->columns(Essential => qw/name start end webname reg_start reg_end created_by
-									tz city state country hidden timestamp foreign_site foreign_id googleplus/);
+Tab::Tourn->columns(Essential => qw/name city state country webname start end reg_start reg_end tz hidden timestamp /);
 Tab::Tourn->columns(TEMP => qw/schoolid/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
@@ -43,7 +42,6 @@ Tab::Tourn->has_many(sites => [Tab::TournSite => 'site']);
 Tab::Tourn->has_many(circuits => [Tab::TournCircuit => 'circuit']);
 
 __PACKAGE__->_register_datetimes( qw/start end reg_start reg_end timestamp/);
-
 
 sub location { 
 	my $self = shift;

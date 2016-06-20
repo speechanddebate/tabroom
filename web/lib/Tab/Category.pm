@@ -11,7 +11,7 @@ Tab::Category->has_many(judges => "Tab::Judge", "category" => { order_by => 'cod
 Tab::Category->has_many(events => "Tab::Event", "category");
 Tab::Category->has_many(hires => 'Tab::JudgeHire', 'category');
 Tab::Category->has_many(rating_tiers => "Tab::RatingTier", "category");
-Tab::Category->has_many(strike_times => "Tab::StrikeTime", "category");
+Tab::Category->has_many(strike_timeslots => "Tab::StrikeTimeslot", "category");
 Tab::Category->has_many(settings => "Tab::CategorySetting", "category");
 Tab::Category->has_many(rating_subsets => "Tab::RatingSubset", "category");
 
