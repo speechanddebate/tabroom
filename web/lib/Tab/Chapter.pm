@@ -2,7 +2,8 @@ package Tab::Chapter;
 use base 'Tab::DBI';
 Tab::Chapter->table('chapter');
 Tab::Chapter->columns(Primary => qw/id/);
-Tab::Chapter->columns(Essential => qw/name country state city timestamp coaches self_prefs district_id level naudl ipeds nces ceeb nsda/);
+Tab::Chapter->columns(Essential => qw/name address city state zip postal country/);
+Tab::Chapter->columns(Others => qw/coaches self_prefs level naudl ipeds nces ceeb nsda timestamp/);
 Tab::Chapter->columns(TEMP => qw/count prefs code member schoolid/);
 
 Tab::Chapter->has_many(schools => 'Tab::School', 'chapter');
@@ -12,9 +13,8 @@ Tab::Chapter->has_many(chapter_circuits => 'Tab::ChapterCircuit', 'chapter');
 
 Tab::Chapter->has_many(admins => [ Tab::Permission => 'person']);
 Tab::Chapter->has_many(persons => [ Tab::Permission => 'person']);
-Tab::Chapter->has_many(permissions => 'Tab::Permission', 'chapter');
-
 Tab::Chapter->has_many(circuits => [ Tab::ChapterCircuit => 'circuit']);
+Tab::Chapter->has_many(permissions => 'Tab::Permission', 'chapter');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 

@@ -5,629 +5,510 @@ use tabroom_api;
 
 create view tabroom_api.ballot
 	(id, side, bye, forfeit, chair, speakerorder, speechnumber, seed, pullup, tv, audit, collected, judge_started,
-		entry_id, judge_id, panel_id, collected_by_id, entered_by_id, hangout_admin )
+		entry_id, judge_id, panel_id, collected_by_id, entered_by_id, hangout_admin, timestamp)
 as select
 	id, side, bye, forfeit, chair, speakerorder, speechnumber, seed, pullup, tv, audit, collected, judge_started,
-		entry, judge, panel, collected_by, entered_by, hangout_admin
+		entry, judge, panel, collected_by, entered_by, hangout_admin, timestamp
 from tabroom.ballot;
 
 create view tabroom_api.change_log
 	(id, type, description, 
 		person_id, tourn_id, category_id, event_id, webpage_id, school_id, entry_id, judge_id, 
-		strike_id, round_id, old_panel_id, new_panel_id, fine_id)
+		strike_id, round_id, old_panel_id, new_panel_id, fine_id, timestamp)
 as select
 	id, type, description, 
 		person, tourn, category, event, webpage, school, entry, judge, 
-		strike, round, old_panel, new_panel, fine
+		strike, round, old_panel, new_panel, fine, timestamp
 from tabroom.change_log;
 
 create view tabroom_api.circuit_membership
-	(id, name, circuit_id)
+	(id, name, circuit_id, timestamp)
 as select
-	id, name, circuit
+	id, name, circuit, timestamp
 from tabroom.circuit_membership;
 
 create view tabroom_api.circuit
-	(id, name, abbr, active, state, country, tz, webname)
+	(id, name, abbr, active, state, country, tz, webname, timestamp)
 as select
-	id, name, abbr, active, state, country, tz, webname
+	id, name, abbr, active, state, country, tz, webname, timestamp
 from tabroom.circuit;
 
 create view tabroom_api.category
-	(id, name, abbr, tourn_id)
+	(id, name, abbr, tourn_id, timestamp)
 as select
-	id, name, abbr, tourn
+	id, name, abbr, tourn, timestamp
 from tabroom.category;
 
-create view tabroom_api.concession_purchase
-	(id, quantity, placed, fulfilled, concession_id, school_id)
+create view tabroom_api.chapter
+	(id, name, address, city, state, zip, postal, country, coaches, self_prefs, level, nsda, naudl, ipeds, nces, ceeb, timestamp)
 as select
-	id, quantity, placed, fulfilled, concession, school
+	id, name, address, city, state, zip, postal, country, coaches, self_prefs, level, nsda, naudl, ipeds, nces, ceeb, timestamp
+from tabroom.chapter;
+
+create view tabroom_api.chapter_circuit
+	(id, code, full_member, circuit_id, chapter_id, region_id, circuit_membership_id, timestamp)
+as select
+	id, code, full_member, circuit, chapter, region, circuit_membership, timestamp
+from tabroom.chapter_circuit;
+
+create view tabroom_api.chapter_judge
+	(id, first, middle, last, ada, retired, phone, email, diet, notes, notes_timestamp, gender, chapter_id, person_id, person_request_id, timestamp)
+as select
+	id, first, middle, last, ada, retired, phone, email, diet, notes, notes_timestamp, gender, chapter, person, person_request, timestamp
+from tabroom.chapter_judge;
+
+create view tabroom_api.concession_purchase
+	(id, quantity, placed, fulfilled, concession_id, school_id, timestamp)
+as select
+	id, quantity, placed, fulfilled, concession, school, timestamp
 from tabroom.concession_purchase;
 
 create view tabroom_api.concession
-	(id, name, price, description, cap, school_cap, deadline, tourn_id)
+	(id, name, price, description, cap, school_cap, deadline, tourn_id, timestamp)
 as select
-	id, name, price, description, cap, school_cap, deadline, tourn
+	id, name, price, description, cap, school_cap, deadline, tourn, timestamp
 from tabroom.concession;
 
 create view tabroom_api.conflict
-	(id, type, person_id, conflicted_id, chapter_id, added_by_id) 
+	(id, type, person_id, conflicted_id, chapter_id, added_by_id, timestamp) 
 as select
-	id, type, person, conflicted, chapter, added_by
+	id, type, person, conflicted, chapter, added_by, timestamp
 from tabroom.conflict;
 
 create view tabroom_api.event_double
-	(id, name, type, max, exclude_id)
+	(id, name, type, max, exclude_id, timestamp)
 as select
-	id, name, type, max, exclude
+	id, name, type, max, exclude, timestamp
 from tabroom.event_double;
 
 create view tabroom_api.email
-	(id, subject, content, sent_to, sent_at, sender_id, tourn_id, circuit_id)
+	(id, subject, content, sent_to, sent_at, sender_id, tourn_id, circuit_id, timestamp)
 as select
-	id, subject, content, sent_to, sent_at, sender, tourn, circuit
+	id, subject, content, sent_to, sent_at, sender, tourn, circuit, timestamp
 from tabroom.email;
 
 create view tabroom_api.entry
-	(id, code, name, dropped, waitlisted, dq, unconfirmed, ada, tba, seed, event_id, school_id, tourn_id, registered_by_id)
+	(id, code, name, dropped, waitlisted, dq, unconfirmed, ada, tba, seed, event_id, school_id, tourn_id, registered_by_id, timestamp)
 as select
-	id, code, name, dropped, waitlist, dq, unconfirmed, ada, tba, seed,  event, school, tourn, registered_by
+	id, code, name, dropped, waitlist, dq, unconfirmed, ada, tba, seed,  event, school, tourn, registered_by, timestamp
 from tabroom.entry;
 
 create view tabroom_api.entry_student
-	(entry_id, student_id)
+	(entry_id, student_id, timestamp)
 as select
-	entry, student
+	entry, student, timestamp
 from tabroom.entry_student;
 
 create view tabroom_api.event
-	(id, name, type, abbr, fee, tourn_id, category_id, event_double_id, rating_subset_id)
+	(id, name, type, abbr, fee, tourn_id, category_id, event_double_id, rating_subset_id, timestamp)
 as select
-	id, name, type, abbr, fee, tourn, category, event_double, rating_subset
+	id, name, type, abbr, fee, tourn, category, event_double, rating_subset, timestamp
 from tabroom.event;
 
 create view tabroom_api.file
-	(id, label, filename, published, uploaded_at, circuit_id, tourn_id, event_id, webpage_id, school_id, result_set_id)
+	(id, label, filename, published, uploaded_at, circuit_id, tourn_id, event_id, webpage_id, school_id, result_set_id, timestamp)
 as select
-	id, label, filename, published, uploaded, circuit, tourn, event, webpage, school, result
+	id, label, filename, published, uploaded, circuit, tourn, event, webpage, school, result, timestamp
 from tabroom.file;
 
 create view tabroom_api.school_fine
-	(id, reason, amount, payment, school_id, deleted, deleted_at, deleted_by_id, levied_at, levied_by_id)
+	(id, reason, amount, payment, school_id, deleted, deleted_at, deleted_by_id, levied_at, levied_by_id, timestamp)
 as select
-	id, reason, amount, payment, school, deleted, deleted_at, deleted_by, levied_at, levied_by
+	id, reason, amount, payment, school, deleted, deleted_at, deleted_by, levied_at, levied_by, timestamp
 from tabroom.school_fine;
 
 create view tabroom_api.follower
-	(id, type, cell, domain, email, follower_id, tourn_id, judge_id, entry_id, school_id, person_id)
+	(id, type, cell, domain, email, follower_id, tourn_id, judge_id, entry_id, school_id, person_id, timestamp)
 as select
-	id, type, cell, domain, email, follower, tourn, judge, entry, school, person
+	id, type, cell, domain, email, follower, tourn, judge, entry, school, person, timestamp
 from tabroom.follower;
 
 create view tabroom_api.hotel
-	(id, name, fee_multiplier, tourn_id)
+	(id, name, fee_multiplier, tourn_id, timestamp)
 as select
-	id, name, multiple, tourn
+	id, name, multiple, tourn, timestamp
 from tabroom.hotel;
 
 create view tabroom_api.housing
-	(id, type, night, tba, waitlist, requested, requestor_id, tourn_id, student_id, judge_id, school_id) 
+	(id, type, night, tba, waitlist, requested, requestor_id, tourn_id, student_id, judge_id, school_id, timestamp) 
 as select
-	id, type, night, tba, waitlist, requested, requestor, tourn, student, judge, school
+	id, type, night, tba, waitlist, requested, requestor, tourn, student, judge, school, timestamp
 from tabroom.housing;
 
 create view tabroom_api.housing_slots
-	(id, night, slots, tourn_id)
+	(id, night, slots, tourn_id, timestamp)
 as select
-	id, night, slots, tourn
+	id, night, slots, tourn, timestamp
 from tabroom.housing_slots;
 
 create view tabroom_api.jpool_judge
-	(jpool_id, judge_id)
+	(jpool_id, judge_id, timestamp)
 as select
-	jpool, judge
+	jpool, judge, timestamp
 from tabroom.jpool_judge;
 
 create view tabroom_api.jpool_round
-			(round_id, jpool_id)
+			(round_id, jpool_id, timestamp)
 as select
-			round, jpool
+			round, jpool, timestamp
 from tabroom.jpool_round;
 
 create view tabroom_api.jpool
-	(id, name, category_id, site_id)
+	(id, name, category_id, site_id, timestamp)
 as select
-	id, name, category, site
+	id, name, category, site, timestamp
 from tabroom.jpool;
 
 create view tabroom_api.judge_hire
 	(id, entries_requested, entries_accepted, rounds_requested, rounds_accepted, requested_at, 
-		requestor_id, tourn_id, school_id, judge_id, category_id)
+		requestor_id, tourn_id, school_id, judge_id, category_id, timestamp)
 as select
 	id, entries_requested, entries_accepted, rounds_requested, rounds_accepted, requested_at, 
-		requestor, tourn, school, judge, category
-from tabroom.judge_hire ;
+		requestor, tourn, school, judge, category, timestamp
+from tabroom.judge_hire;
 
 create view tabroom_api.judge
 	(id, code, first, middle, last, active, ada, obligation, hired, 
-		school_id, category_id, alt_category_id, covers_id, chapter_judge_id, person_id, person_request_id)
+		school_id, category_id, alt_category_id, covers_id, chapter_judge_id, person_id, person_request_id, timestamp)
 as select
 	id, code, first, middle, last, active, ada, obligation, hired, 
-		school, category, alt_category, covers, chapter_judge, person, person_request
+		school, category, alt_category, covers, chapter_judge, person, person_request, timestamp
 from tabroom.judge;
 
 create view tabroom_api.login
 	(id, username, accesses, last_access, password, sha512, spinhash, pass_timestamp, pass_changekey, pass_change_expires, source, 
-	person_id, nsda_login_id, ualt_id)
+	person_id, nsda_login_id, ualt_id, timestamp)
 as select
 	id, username, accesses, last_access, password, sha512, spinhash, pass_timestamp, pass_changekey, pass_change_expires, source,
-	person, nsda_login_id, ualt_id
+	person, nsda_login_id, ualt_id, timestamp
 from tabroom.login;
 
 create view tabroom_api.person
-	(id, email, first, middle, last, gender, pronoun, no_email, street, city, state, zip, postal, country, tz, phone, provider, site_admin, diversity, googleplus, ualt_id)
+	(id, email, first, middle, last, gender, pronoun, no_email, street, city, state, zip, postal, country, tz, phone, provider, site_admin, diversity, googleplus, ualt_id, timestamp)
 as select
-	id, email, first, middle, last, gender, pronoun, no_email, street, city, state, zip, postal, country, tz, phone, provider, site_admin, diversity, googleplus, ualt_id
+	id, email, first, middle, last, gender, pronoun, no_email, street, city, state, zip, postal, country, tz, phone, provider, site_admin, diversity, googleplus, ualt_id, timestamp
 from tabroom.person;
 
 create view tabroom_api.qualifier
-	(id, name, result, entry_id, tourn_id, qualified_at_id)
+	(id, name, result, entry_id, tourn_id, qualified_at_id, timestamp)
 as select
-	id, name, result, entry, tourn, qualified_at
+	id, name, result, entry, tourn, qualified_at, timestamp
 from tabroom.qualifier;
 
 create view tabroom_api.rating_subset
-	(id, name, category_id)
+	(id, name, category_id, timestamp)
 as select
-	id, name, category
+	id, name, category, timestamp
 from tabroom.rating_subset;
 
 create view tabroom_api.rating_tier
-	(id, type, name, description, strike, conflict, min, max, default_tier, rating_subset_id, category_id)
+	(id, type, name, description, strike, conflict, min, max, default_tier, rating_subset_id, category_id, timestamp)
 as select
-	id, type, name, description, strike, conflict, min, max, start, rating_subset, category
+	id, type, name, description, strike, conflict, min, max, start, rating_subset, category, timestamp
 from tabroom.rating_tier;
 
 create view tabroom_api.rating
-	(id, type, draft, entered, ordinal, percentile, tourn_id, school_id, entry_id, rating_tier_id, judge_id, rating_subset_id, sheet_id)
+	(id, type, draft, entered, ordinal, percentile, tourn_id, school_id, entry_id, rating_tier_id, judge_id, rating_subset_id, sheet_id, timestamp)
 as select
-	id, type, draft, entered, ordinal, percentile, tourn, school, entry, rating_tier, judge, rating_subset, sheet
+	id, type, draft, entered, ordinal, percentile, tourn, school, entry, rating_tier, judge, rating_subset, sheet, timestamp
 from tabroom.rating;
 
 create view tabroom_api.region
-	(id, name, code, diocese, quota, archdiocese, cooke_points, sweeps, circuit_id, tourn_id)
+	(id, name, code, diocese, quota, archdiocese, cooke_points, sweeps, circuit_id, tourn_id, timestamp)
 as select
-	id, name, code, diocese, quota, arch, cooke_pts, sweeps, circuit, tourn
+	id, name, code, diocese, quota, arch, cooke_pts, sweeps, circuit, tourn, timestamp
 from tabroom.region;
 
-create view tabroom_api.result_set
-	(id, label, bracket, published, generated, tourn_id, event_id)
+create view tabroom_api.region_fine
+	(id, reason, amount, levied_at, levied_by_id, region_id, tourn_id, timestamp)
 as select
-	id, label, bracket, published, generated, tourn, event
+	id, reason, amount, levied_on, levied_by, region, tourn, timestamp
+from tabroom.region_fine;
+
+create view tabroom_api.result_set
+	(id, label, bracket, published, generated, tourn_id, event_id, timestamp)
+as select
+	id, label, bracket, published, generated, tourn, event, timestamp
 from tabroom.result_set;
 
 create view tabroom_api.result_value
-	(id, tag, value, priority, long_tag, no_sort, sort_descending, description, result_id)
+	(id, tag, value, priority, long_tag, no_sort, sort_descending, description, result_id, timestamp)
 as select
-	id, tag, value, priority, long_tag, no_sort, sort_desc, long_tag, result
+	id, tag, value, priority, long_tag, no_sort, sort_desc, long_tag, result, timestamp
 from tabroom.result_value;
 
-
-
-
---///BREAK POINT
-
 create view tabroom_api.result
-	(id, rank, percentile, honor, honor_site, student_id, entry_id, school_id, round_id, result_set_id)
+	(id, rank, percentile, honor, honor_site, result_set_id, entry_id, student_id, school_id, round_id, timestamp)
 as select
-	id, rank, percentile, honor, honor_site, student, entry, school, round, result_set
+	id, rank, percentile, honor, honor_site, result_set, entry, student, school, round, timestamp
 from tabroom.result;
 
 create view tabroom_api.room_strike
-	(id, type, start, end, room_id, event_id, tourn_id, judge_id, entry_id)
+	(id, type, start, end, room_id, event_id, tourn_id, entry_id, judge_id, timestamp)
 as select
-	id, type, start, end, room, event, tourn, judge, entry
+	id, type, start, end, room, event, tourn, entry, judge, timestamp
 from tabroom.room_strike;
 
 create view tabroom_api.room
-	(id, name, building, quality, capacity, inactive, ada, site_id)
+	(id, name, quality, capacity, inactive, ada, notes, building, site_id, timestamp)
 as select
-	id, name, building, quality, capacity, inactive, ada, site
+	id, name, quality, capacity, inactive, ada, notes, building, site, timestamp
 from tabroom.room;
 
 create view tabroom_api.round
-	(id, number, name, type, published, post_results, flighted, start_time, site_id, timeslot_id, event_id, tiebreak_set_id)
+	(id, type, number, label, flighted, published, post_results, start_time, event_id, timeslot_id, site_id, tiebreak_set_id, timestamp)
 as select
-	id, name, label, type, published, post_results, flighted, start_time, site, timeslot, event, tb_set
+	id, type, name, label, flighted, published, post_results, start_time, event, timeslot, site, tiebreak_set, timestamp
 from tabroom.round;
 
 create view tabroom_api.rpool_room
-	(rpool_id, room_id)
+	(rpool_id, room_id, timestamp)
 as select
-	rpool, room
+	rpool, room, timestamp
 from tabroom.rpool_room;
 
 create view tabroom_api.rpool_round
-	(round_id, rpool_id)
+	(round_id, rpool_id, timestamp)
 as select
-			round, rpool
+	round, rpool, timestamp
 from tabroom.rpool_round;
 
 create view tabroom_api.rpool
-	(id, name, tourn_id)
+	(id, name, tourn_id, timestamp)
 as select
-	id, name, tourn
+	id, name, tourn, timestamp
 from tabroom.rpool;
 
-use tabroom;
-DROP TABLE IF EXISTS `chapter_contact`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `chapter_contact` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `chapter` int(11) DEFAULT NULL,
-  `account` int(11) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
 create view tabroom_api.school
-	(id, name, code, onsite, onsite_at, onsite_by_id, registered_by_id, chapter_id, tourn_id)
+	(id, name, code, onsite, tourn_id, chapter_id, region_id, timestamp)
 as select
-	id, name, code, registered, registered_on, onsite_by, registered_by, entered_on, chapter, tourn
-from tabroom.chapter;
-
-alter table tabroom.score add speech smallint;
-
-update tabroom.score, tabroom.ballot 
-	set tabroom.score.speech = tabroom.ballot.speechnumber 
-	where tabroom.ballot.id = tabroom.score.ballot 
-	and tabroom.ballot.speechnumber > 0;
+	id, name, code, onsite, tourn, chapter, region, timestamp
+from tabroom.school;
 
 create view tabroom_api.score
-	(id, tag, value, content, position, speech, student_id, ballot_id)
+	(id, tag, value, content, speech, position, ballot_id, student_id, timestamp)
 as select
-	id, tag, value, content, position, speech, student, ballot
+	id, tag, value, content, speech, position, ballot, student, timestamp
 from tabroom.score;
 
 create view tabroom_api.panel
-	(id, letter, flight, bye, started, confirmed, bracket, room_id, round_id)
+	(id, letter, flight, bye, started, confirmed, bracket, room_id, round_id, timestamp)
 as select
-	id, letter, flight, bye, started, confirmed, bracket, room, round
+	id, letter, flight, bye, started, confirmed, bracket, room, round, timestamp
 from tabroom.panel;
 
 create view tabroom_api.site
-	(id, name, directions, host_id, circuit_id)
+	(id, name, directions, dropoff, host_id, circuit_id, timestamp)
 as select
-	id, name, directions, host, circuit
+	id, name, directions, dropoff, host, circuit, timestamp
 from tabroom.site;
 
-create view tabroom_api.chapter_circuit
-	(id, region_id, chapter_id, circuit_id, circuit_membership_id)
-as select
-	id, region, chapter, circuit, membership
-from tabroom.chapter_circuit;
-
-alter table tabroom.chapter add address varchar(255);
-alter table tabroom.chapter add zip int;
-alter table tabroom.chapter add postal varchar(16);
-
-create view tabroom_api.chapter
-	(id, name, address, city, state, zip, postal, country, coaches, level, naudl, ipeds, nces, nsda, ceeb)
-as select
-	id, name, address, city, state, zip, postal, country, coaches, level, naudl, ipeds, nces, nsda, ceeb, timestamp
-from tabroom.chapter;
-
-alter table tabroom.chapter_judge add ada bool;
-alter table tabroom.chapter_judge add email varchar(128);
-
-create view tabroom_api.chapter_judge
-	(id, first, middle, last, gender, retired, cell, email, diet, ada, notes, notes_chapter_id, person_id, request_person_id)
-as select
-	id, first, middle, last, gender, retired, cell, email, diet, ada, notes, notes_chapter, account, acct_request, 
-from tabroom.chapter_judge;
-
-alter table tabroom.stats add type varchar(15);
-
 create view tabroom_api.stats
-	(id, type, tag, value, event_id)
+	(id, type, tag, value, event_id, timestamp)
 as select
-	id, type, tag, value, taken, event
+	id, type, tag, value, event, timestamp
 from tabroom.stats;
 
-create view tabroom_api.strike_timeslots
-	(id, name, start, end, fine, category_id)
+create view tabroom_api.strike_timeslot
+	(id, name, fine, start, end, category_id, timestamp)
 as select
-	id, name, start, end, fine, category
-from tabroom.strike_time;
+	id, fine, name, start, end, category, timestamp
+from tabroom.strike_timeslot;
 
-alter table tabroom.strike add hidden bool;
-alter table tabroom.strike add timeslot int;
-alter table tabroom.strike add entered_by int;
-
-create view tabroom_api.strikes
-	(id, type, start, end, hidden, region_id, timeslot_id, school_id, entry_id, judge_id, entered_by_id, strike_timeslot_id)
+create view tabroom_api.strike
+	(id, type, start, end, registrant, conflictee, tourn_id, judge_id, event_id, entry_id, school_id, region_id, strike_time_id, timestamp)
 as select
-	id, type, start, end, hidden, region, timeslot, chapter, entry, judge, entered_by, strike_time
+	id, type, start, end, registrant, conflictee, tourn, judge, event, entry, school, region, strike_time, timestamp
 from tabroom.strike;
 
-alter table tabroom.student add middle varchar(128);
-
-create view tabroom_api.students
-	(id, first, middle, last, grad_year, novice, retired, gender, phonetic, ualt_id, chapter_id, person_id)
+create view tabroom_api.student
+	(id, first, middle, last, phonetic, grad_year, novice, retired, gender, diet, birthdate, school_sid, race, 
+		ualt_id, chapter_id, person_id, person_request_id, timestamp)
 as select
-	id, first, middle, last, grad_year, novice, retired, gender, phonetic, ualt_id, chapter, account
+	id, first, middle, last, phonetic, grad_year, novice, retired, gender, diet, birthdate, school_sid, race, 
+		ualt_id, chapter, person, person_request, timestamp
 from tabroom.student;
 
-create view tabroom_api.sweep_events
-	(sweep_set_id, event_id)
+create view tabroom_api.sweep_event
+	(sweep_set_id, event_id, timestamp)
 as select
-	sweep_set, event
+	sweep_set, event, timestamp
 from tabroom.sweep_event;
 
 create view tabroom_api.sweep_include
-	(id, child_id, parent_id)
+	(id, child_id, parent_id, timestamp)
 as select
-	id, child, parent
+	id, child, parent, timestamp
 from tabroom.sweep_include;
 
-create view tabroom_api.sweep_rules
-	(id, tag, value, place, count, sweep_set_id)
+create view tabroom_api.sweep_rule
+	(id, tag, value, place, count, sweep_set_id, timestamp)
 as select
-	id, tag, value, place, count, sweep_set
+	id, tag, value, place, count, sweep_set, timestamp
 from tabroom.sweep_rule;
 
-create view tabroom_api.sweep_sets
-	(id, name)
+create view tabroom_api.sweep_set
+	(id, name, tourn_id, timestamp)
 as select
-	id, name, timestamp
+	id, name, tourn, timestamp
 from tabroom.sweep_set;
 
-create view tabroom_api.tiebreak_sets
-	(id, name, tourn_id)
+create view tabroom_api.tiebreak_set
+	(id, name, tourn_id, timestamp)
 as select
-	id, name, tourn
+	id, name, tourn, timestamp
 from tabroom.tiebreak_set;
 
-create view tabroom_api.tiebreaks
-	(id, name, count, multiplier, priority, highlow, highlow_count, tiebreak_set_id)
+create view tabroom_api.tiebreak
+	(id, name, count, multiplier, priority, highlow, highlow_count, tiebreak_set_id, timestamp)
 as select
-	id, name, count, multiplier, priority, highlow, highlow_count, tb_set
+	id, name, count, multiplier, priority, highlow, highlow_count, tiebreak_set, timestamp
 from tabroom.tiebreak;
 
-create view tabroom_api.timeslots
-	(id, name, start, end, tourn_id)
+create view tabroom_api.timeslot
+	(id, name, start, end, tourn_id, timestamp)
 as select
-	id, name, start, end, tourn
+	id, name, start, end, tourn, timestamp
 from tabroom.timeslot;
 
-create view tabroom_api.tourn_circuits
-	(tourn_id, circuit_id)
+create view tabroom_api.tourn_circuit
+	(id, approved, tourn_id, circuit_id, timestamp)
 as select
-			tourn, circuit
+	id, approved, tourn, circuit, timestamp
 from tabroom.tourn_circuit;
 
-create view tabroom_api.tourn_fees
-	(id, amount, reason, start, end, tourn_id)
+create view tabroom_api.tourn_fee
+	(id, amount, reason, start, end, tourn_id, timestamp)
 as select
-	id, amount, reason, start, end, tourn
+	id, amount, reason, start, end, tourn, timestamp
 from tabroom.tourn_fee;
 
 create view tabroom_api.tourn_ignore
-	(person_id, tourn_id)
+	(person_id, tourn_id, timestamp)
 as select
-			account, tourn
+	person, tourn, timestamp
 from tabroom.tourn_ignore;
 
-create view tabroom_api.tourn_sites
-	(tourn_id, site_id)
+create view tabroom_api.tourn_site
+	(tourn_id, site_id, timestamp)
 as select
-			tourn, site
+	tourn, site, timestamp
 from tabroom.tourn_site;
 
-alter table tabroom.tourn add city varchar(128);
-
-create view tabroom_api.tourns
-	(id, name, start, end, reg_start, reg_end, hidden, webname, tz, city, state, country)
+create view tabroom_api.tourn
+	(id, name, city, state, country, tz, webname, hidden, start, end, reg_start, reg_end, timestamp)
 as select
 	id, name, start, end, reg_start, reg_end, hidden, webname, tz, city, state, country, timestamp
 from tabroom.tourn;
 
-alter table tabroom.webpage add creator int;
-
-create view tabroom_api.webpages
-	(id, title, content, published, sitewide, page_order, creator_id, editor_id, tourn_id, circuit_id)
+create view tabroom_api.webpage
+	(id, title, content, published, sitewide, special, page_order, tourn_id, last_editor_id, parent_id, timestamp)
 as select
-	id, title, content, active, sitewide, page_order, creator, last_editor, tourn, circuit
+	id, title, content, published, sitewide, special, page_order, tourn, last_editor, parent, timestamp
 from tabroom.webpage;
 
-alter table tabroom.tourn_setting add setting int; 
-alter table tabroom.category_setting add setting int; 
-alter table tabroom.judge_setting add setting int; 
-alter table tabroom.event_setting add setting int; 
-alter table tabroom.entry_setting add setting int; 
-alter table tabroom.round_setting add setting int; 
-alter table tabroom.circuit_setting add setting int; 
-alter table tabroom.account_setting add setting int; 
-alter table tabroom.jpool_setting add setting int; 
-alter table tabroom.rpool_setting add setting int; 
-alter table tabroom.tiebreak_setting add setting int; 
-alter table tabroom.chapter_setting add setting int; 
-
-create view tabroom_api.circuit_settings 
-	(id, tag, value, value_text, value_date, circuit_id, setting_id )
+create view tabroom_api.setting
+	(id, tag, type, subtype, value_type, conditions, timestamp)
 as select 
-	id, tag, value, value_text, value_date, circuit, setting
-from tabroom.circuit_setting ;
+	id, tag, type, subtype, value_type, conditions, timestamp
+from tabroom.setting;
 
-create view tabroom_api.tourn_settings 
-	(id, tag, value, value_text, value_date, tourn_id, setting_id )
+create view tabroom_api.setting_label 
+	(id, lang, label, guide, options, setting, timestamp)
 as select 
-	id, tag, value, value_text, value_date, tourn, setting
-from tabroom.tourn_setting ;
+	id, lang, label, guide, options, setting, timestamp
+from tabroom.setting_label;
 
-create view tabroom_api.category_settings 
-	(id, tag, value, value_text, value_date, category_id, setting_id )
+create view tabroom_api.circuit_setting
+	(id, tag, value, value_text, value_date, circuit_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, category, setting
-from tabroom.category_setting ;
+	id, tag, value, value_text, value_date, circuit, setting, timestamp
+from tabroom.circuit_setting;
 
-create view tabroom_api.event_settings 
-	(id, tag, value, value_text, value_date, event_id, setting_id )
+create view tabroom_api.tourn_setting 
+	(id, tag, value, value_text, value_date, tourn_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, event, setting
-from tabroom.event_setting ;
+	id, tag, value, value_text, value_date, tourn, setting, timestamp
+from tabroom.tourn_setting;
 
-create view tabroom_api.entry_settings 
-	(id, tag, value, value_text, value_date, entry_id, setting_id )
+create view tabroom_api.category_setting 
+	(id, tag, value, value_text, value_date, category_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, entry, setting
+	id, tag, value, value_text, value_date, category, setting, timestamp
+from tabroom.category_setting;
+
+create view tabroom_api.event_setting 
+	(id, tag, value, value_text, value_date, event_id, setting_id, timestamp)
+as select 
+	id, tag, value, value_text, value_date, event, setting, timestamp
+from tabroom.event_setting;
+
+create view tabroom_api.entry_setting 
+	(id, tag, value, value_text, value_date, entry_id, setting_id, timestamp)
+as select 
+	id, tag, value, value_text, value_date, entry, setting, timestamp
 from tabroom.entry_setting;
 
-create view tabroom_api.jpool_settings 
-	(id, tag, value, value_text, value_date, jpool_id, setting_id )
+create view tabroom_api.jpool_setting 
+	(id, tag, value, value_text, value_date, jpool_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, jpool, setting
-from tabroom.jpool_setting ;
+	id, tag, value, value_text, value_date, jpool, setting, timestamp
+from tabroom.jpool_setting;
 
-create view tabroom_api.rpool_settings 
-	(id, tag, value, value_text, value_date, rpool_id, setting_id)
+create view tabroom_api.rpool_setting 
+	(id, tag, value, value_text, value_date, rpool_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, rpool, setting
-from tabroom.rpool_setting ;
+	id, tag, value, value_text, value_date, rpool, setting, timestamp
+from tabroom.rpool_setting;
 
-alter table tabroom.tiebreak_setting add value_date datetime;
-alter table tabroom.tiebreak_setting add value_text text;
-
-create view tabroom_api.tiebreak_set_settings 
-	(id, tag, value, value_text, value_date, tiebreak_set_id, setting_id)
+create view tabroom_api.tiebreak_set_setting 
+	(id, tag, value, value_text, value_date, tiebreak_set_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, tiebreak_set, setting
-from tabroom.tiebreak_setting ;
+	id, tag, value, value_text, value_date, tiebreak_set, setting, timestamp
+from tabroom.tiebreak_setting;
 
-create view tabroom_api.judge_settings 
-	(id, tag, value, value_text, value_date, judge_id, setting_id)
+create view tabroom_api.judge_setting 
+	(id, tag, value, value_text, value_date, judge_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, judge, setting
-from tabroom.judge_setting ;
+	id, tag, value, value_text, value_date, judge, setting, timestamp
+from tabroom.judge_setting;
 
-create view tabroom_api.round_settings 
-	(id, tag, value, value_text, value_date, round_id, setting_id)
+create view tabroom_api.round_setting 
+	(id, tag, value, value_text, value_date, round_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, round, setting
-from tabroom.round_setting ;
+	id, tag, value, value_text, value_date, round, setting, timestamp
+from tabroom.round_setting;
 
-create view tabroom_api.person_settings 
-	(id, tag, value, value_text, value_date, person_id, setting_id)
+create view tabroom_api.person_setting 
+	(id, tag, value, value_text, value_date, person_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, account, setting
-from tabroom.account_setting ;
+	id, tag, value, value_text, value_date, person, setting, timestamp
+from tabroom.person_setting;
 
-create view tabroom_api.school_settings 
-	(id, tag, value, value_text, value_date, school_id, setting_id)
+create view tabroom_api.school_setting 
+	(id, tag, value, value_text, value_date, school_id, setting_id, timestamp)
 as select 
-	id, tag, value, value_text, value_date, chapter, setting
-from tabroom.chapter_setting ;
+	id, tag, value, value_text, value_date, school, setting, timestamp
+from tabroom.school_setting;
+
+create view tabroom_api.region_setting 
+	(id, tag, value, value_text, value_date, region_id, setting_id, timestamp)
+as select 
+	id, tag, value, value_text, value_date, region, setting, timestamp
+from tabroom.region_setting;
 
 #PERMISSIONS
 
-alter table tabroom.permission add created_at datetime;
-create view tabroom_api.permissions
-	(id, person_id, tourn_id, region_id, chapter_id, circuit_id, category_id, tag)
+create view tabroom_api.permission
+	(id, person_id, tourn_id, region_id, chapter_id, circuit_id, category_id, tag, timestamp)
 	as select 
-	id, account, tourn, region, chapter, circuit, category, tag, timestamp
+	id, person, tourn, region, chapter, circuit, category, tag, timestamp
 from tabroom.permission;
 
-create table `nsda_points` (
-	id int NOT NULL AUTO_INCREMENT,
-	points int NOT NULL DEFAULT 0,
-	venue  varchar(127),
-	event_name varchar(63),
-	level enum("hs", "college", "middle", "elem"),
-	source enum("T", "J", "M", "O"),
-	results text,
+create view tabroom_api.session
+	(id, userkey, ip, su_id, person_id, tourn_id, event_id, category_id, timestamp)
+as select 
+	id, userkey, ip, su, person, tourn, event, category, timestamp
+from tabroom.session;
 
-	person_id int NOT NULL,
-
-	coach_id int NULL,
-	tourn_id int NULL,
-	event_id int NULL,
-	chapter_id int NULL,
-	student_id int NULL,
-	recorder_id int NULL,
-	nsda_category_id int NULL, 
-
-	PRIMARY KEY (`id`),
-	KEY `person_id` (`person_id`),
-	KEY `coach_id` (`coach_id`),
-	KEY `student_id` (`student_id`),
-	KEY `chapter_id` (`chapter_id`),
-	KEY `recorder_id` (`recorder_id`),
-	KEY `tourn_id` (`tourn_id`),
-	KEY `event_id` (`event_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-create table `nsda_honors` ( 
-	id int NOT NULL AUTO_INCREMENT,
-
-	tag varchar(63) NOT NULL,
-	value int NOT NULL DEFAULT 0,
-	venue  varchar(127),
-	event_name varchar(63),
-	level enum("hs", "college", "middle", "elem"),
-	source enum("T", "J", "M", "O"),
-	results text,
-
-	tourn_id int NULL,
-	event_id int NULL,
-	coach_id int NULL,
-	person_id int NULL,
-	chapter_id int NULL,
-	student_id int NULL,
-	recorder_id int NULL,
-
-	PRIMARY KEY (`id`),
-	KEY `person_id` (`person_id`),
-	KEY `coach_id` (`coach_id`),
-	KEY `student_id` (`student_id`),
-	KEY `recorder_id` (`recorder_id`),
-	KEY `tourn_id` (`tourn_id`),
-	KEY `event_id` (`event_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-create table `nsda_categories` ( 
-	id int NOT NULL AUTO_INCREMENT,
-	label varchar(127),
-	type enum("speech", "debate", "congress"),
-	national bool,
-	PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-create table `settings` ( 
-	id int NOT NULL AUTO_INCREMENT,
-
-	type varchar(31) NOT NULL,
-	tag varchar(31) NOT NULL,
-	category varchar(31) NOT NULL,
-	value_type enum("text", "string", "bool", "integer", "float", "datetime", "enum"),
-	conditions text,
-
-	description text,
-	full_description text,
-
-	PRIMARY KEY (`id`),
-	KEY `tag` (`tag`),
-	KEY `category` (`category`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-create table `setting_labels` ( 
-	id int NOT NULL AUTO_INCREMENT,
-	lang char(2),
-	label varchar(127),
-	guide text,
-	options text,
-	setting_id int NOT NULL,
-	PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 

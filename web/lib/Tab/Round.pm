@@ -2,14 +2,13 @@ package Tab::Round;
 use base 'Tab::DBI';
 Tab::Round->table('round');
 Tab::Round->columns(Primary => qw/id/);
-Tab::Round->columns(Essential => qw/name label event type timeslot site pool/);
-Tab::Round->columns(Others => qw/post_results published created timestamp tb_set
-								flighted start_time/);
+Tab::Round->columns(Essential => qw/name label event type timeslot published post_results/);
+Tab::Round->columns(Others => qw/created tiebreak_set flighted start_time timestamp/);
 Tab::Round->columns(TEMP => qw/speaks/);
 
 Tab::Round->has_a(site => 'Tab::Site');
 Tab::Round->has_a(event => 'Tab::Event');
-Tab::Round->has_a(tb_set => 'Tab::TiebreakSet');
+Tab::Round->has_a(tiebreak_set => 'Tab::TiebreakSet');
 Tab::Round->has_a(timeslot => 'Tab::Timeslot');
 
 Tab::Round->has_many(jpools => [Tab::JPoolRound => 'jpool']);
