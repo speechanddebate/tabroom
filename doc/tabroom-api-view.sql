@@ -99,12 +99,10 @@ as select
 	id, reason, amount, payment, school, deleted, deleted_at, deleted_by, levied_at, levied_by
 from tabroom.school_fine;
 
-/// BREAK POINT HERE
-
 create view tabroom_api.follower
-	(id, cell, email, domain, tourn_id, judge_id, entry_id, school_id, person_id)
+	(id, type, cell, domain, email, follower_id, tourn_id, judge_id, entry_id, school_id, person_id)
 as select
-	id, cell, email, domain, tourn, judge, entry, school, account
+	id, type, cell, domain, email, follower, tourn, judge, entry, school, person
 from tabroom.follower;
 
 create view tabroom_api.hotel
@@ -113,10 +111,10 @@ as select
 	id, name, multiple, tourn
 from tabroom.hotel;
 
-create view tabroom_api.housing_request
-	(id, night, type, tba, waitlist, student_id, judge_id, school_id, requestor_id)
+create view tabroom_api.housing
+	(id, type, night, tba, waitlist, requested, requestor_id, tourn_id, student_id, judge_id, school_id) 
 as select
-	id, night, type, tba, waitlist, student, judge, school, account
+	id, type, night, tba, waitlist, requested, requestor, tourn, student, judge, school
 from tabroom.housing;
 
 create view tabroom_api.housing_slots
@@ -143,49 +141,38 @@ as select
 	id, name, category, site
 from tabroom.jpool;
 
-alter table tabroom.judge_hire add requestor int;
-
 create view tabroom_api.judge_hire
-	(id, requested_at, entries_requested, entries_accepted, rounds_requested, rounds_accepted, school_id, tourn_id, judge_id, requestor_id)
+	(id, entries_requested, entries_accepted, rounds_requested, rounds_accepted, requested_at, 
+		requestor_id, tourn_id, school_id, judge_id, category_id)
 as select
-	id, request_made, covers, accepted, rounds, rounds_accepted, school, tourn, judge, requestor
+	id, entries_requested, entries_accepted, rounds_requested, rounds_accepted, requested_at, 
+		requestor, tourn, school, judge, category
 from tabroom.judge_hire ;
 
 create view tabroom_api.judge
-	(id, first, last, code, active, ada, obligation_rounds, hired_rounds, chapter_judge_id, category_id, school_id, person_id, alt_category_id, covers_category_id)
+	(id, code, first, middle, last, active, ada, obligation, hired, 
+		school_id, category_id, alt_category_id, covers_id, chapter_judge_id, person_id, person_request_id)
 as select
-	id, first, last, code, active, ada, obligation, hired, chapter_judge, category, school, account, alt_category, covers
+	id, code, first, middle, last, active, ada, obligation, hired, 
+		school, category, alt_category, covers, chapter_judge, person, person_request
 from tabroom.judge;
 
-alter table tabroom.login add sha512 char(128);
-alter table tabroom.login add spinhash char(64);
-
 create view tabroom_api.login
-	(id, username, password, sha512, spinhash, name, accesses, last_access, pass_changekey, pass_pass_change_expires, source, ualt_id, person_id)
+	(id, username, accesses, last_access, password, sha512, spinhash, pass_timestamp, pass_changekey, pass_change_expires, source, 
+	person_id, nsda_login_id, ualt_id)
 as select
-	id, username, password, sha512, spinhash, name, accesses, last_access, pass_changekey, pass_pass_change_expires, source, ualt_id, person
+	id, username, accesses, last_access, password, sha512, spinhash, pass_timestamp, pass_changekey, pass_change_expires, source,
+	person, nsda_login_id, ualt_id
 from tabroom.login;
 
-alter table tabroom.person add middle varchar(63);
-alter table tabroom.person add pronoun varchar(63);
-alter table tabroom.person add postal varchar(15);
-
 create view tabroom_api.person
-	(id, email, first, middle, last, phone, alt_phone, provider, street, city, state, zip, postal, country, gender, pronouns, ualt_id, site_admin, no_email, multiple, tz, diversity, flags)
+	(id, email, first, middle, last, gender, pronoun, no_email, street, city, state, zip, postal, country, tz, phone, provider, site_admin, diversity, googleplus, ualt_id)
 as select
-	id, email, first, middle, last, phone, alt_phone, provider, street, city, state, zip, postal, country, gender, pronoun, ualt_id, site_admin, no_email, multiple, tz, diversity, flags, timestamp
+	id, email, first, middle, last, gender, pronoun, no_email, street, city, state, zip, postal, country, tz, phone, provider, site_admin, diversity, googleplus, ualt_id
 from tabroom.person;
 
-create view tabroom_api.jpool_judge
-	(judge_id, jpool_id)
-as select
-			judge, jpool
-from tabroom.jpool_judge;
-
-alter table tabroom.qualifier add qualified_at int;
-
 create view tabroom_api.qualifier
-	(id, tag, value, entry_id, tourn_id, qualified_at_id)
+	(id, name, result, entry_id, tourn_id, qualified_at_id)
 as select
 	id, name, result, entry, tourn, qualified_at
 from tabroom.qualifier;
@@ -197,38 +184,39 @@ as select
 from tabroom.rating_subset;
 
 create view tabroom_api.rating_tier
-	(id, name, type, description, strike, conflict, min, max, default_tier, rating_subset_id, category_id)
+	(id, type, name, description, strike, conflict, min, max, default_tier, rating_subset_id, category_id)
 as select
-	id, name, type, description, strike, conflict, min, max, start, rating_subset, category
+	id, type, name, description, strike, conflict, min, max, start, rating_subset, category
 from tabroom.rating_tier;
 
-alter table tabroom.rating add draft bool;
-
 create view tabroom_api.rating
-	(id, ordinal, percentile, type, draft, sheet, school_id, entry_id, judge_id, rating_tier_id, rating_subset_id)
+	(id, type, draft, entered, ordinal, percentile, tourn_id, school_id, entry_id, rating_tier_id, judge_id, rating_subset_id, sheet_id)
 as select
-	id, ordinal, percentile, type, draft, sheet, school, entry, judge, rating_tier, rating_subset
+	id, type, draft, entered, ordinal, percentile, tourn, school, entry, rating_tier, judge, rating_subset, sheet
 from tabroom.rating;
 
-alter table tabroom.region add active bool;
-
 create view tabroom_api.region
-	(id, name, code, active, ncfl_quota, ncfl_archdiocese, ncfl_cooke, ncfl_sweeps, circuit_id, tourn_id)
+	(id, name, code, diocese, quota, archdiocese, cooke_points, sweeps, circuit_id, tourn_id)
 as select
-	id, name, code, active, quota, arch, cooke_pts, sweeps, circuit, tourn
+	id, name, code, diocese, quota, arch, cooke_pts, sweeps, circuit, tourn
 from tabroom.region;
 
 create view tabroom_api.result_set
-	(id, label, bracket, published, tourn_id, event_id)
+	(id, label, bracket, published, generated, tourn_id, event_id)
 as select
-	id, label, bracket, published, tourn, event
+	id, label, bracket, published, generated, tourn, event
 from tabroom.result_set;
 
 create view tabroom_api.result_value
-	(id, tag, value, priority, no_sort, sort_descending, description, result_id)
+	(id, tag, value, priority, long_tag, no_sort, sort_descending, description, result_id)
 as select
-	id, tag, value, priority, no_sort, sort_desc, long_tag, result
+	id, tag, value, priority, long_tag, no_sort, sort_desc, long_tag, result
 from tabroom.result_value;
+
+
+
+
+--///BREAK POINT
 
 create view tabroom_api.result
 	(id, rank, percentile, honor, honor_site, student_id, entry_id, school_id, round_id, result_set_id)
@@ -335,9 +323,9 @@ alter table tabroom.chapter_judge add ada bool;
 alter table tabroom.chapter_judge add email varchar(128);
 
 create view tabroom_api.chapter_judge
-	(id, first, last, gender, retired, cell, email, diet, ada, notes, notes_chapter_id, person_id, request_person_id)
+	(id, first, middle, last, gender, retired, cell, email, diet, ada, notes, notes_chapter_id, person_id, request_person_id)
 as select
-	id, first, last, gender, retired, cell, email, diet, ada, notes, notes_chapter, account, acct_request, 
+	id, first, middle, last, gender, retired, cell, email, diet, ada, notes, notes_chapter, account, acct_request, 
 from tabroom.chapter_judge;
 
 alter table tabroom.stats add type varchar(15);

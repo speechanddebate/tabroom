@@ -2,7 +2,7 @@ package Tab::ChapterJudge;
 use base 'Tab::DBI';
 Tab::ChapterJudge->table('chapter_judge');
 Tab::ChapterJudge->columns(Primary => qw/id/);
-Tab::ChapterJudge->columns(Essential => qw/first last gender chapter started retired notes diet
+Tab::ChapterJudge->columns(Essential => qw/first middle last gender chapter started retired notes diet
 							cell email person person_request notes_timestamp timestamp/);
 
 Tab::ChapterJudge->has_a(chapter => 'Tab::Chapter');

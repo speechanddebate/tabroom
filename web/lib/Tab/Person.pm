@@ -6,15 +6,15 @@ use base 'Tab::DBI';
 #Tab::Person->columns(Primary   => qw/id/);
 #Tab::Person->columns(Essential => qw/email passhash site_admin multiple/);
 #Tab::Person->columns(Others    => qw/first last phone street city state zip country hotel
-#                                      provider paradigm_timestamp started_judging gender timestamp help_admin
+#                                      provider paradigm_timestamp gender timestamp help_admin
 #                                      no_email change_deadline change_pass_key password_timestamp tz diversity/);
 
 #After
 Tab::Person->table('person');
 Tab::Person->columns(Primary   => qw/id/);
-Tab::Person->columns(Essential => qw/email first last phone ualt_id provider site_admin multiple/);
-Tab::Person->columns(Others    => qw/alt_phone street city state zip country
-                                   gender pronoun no_email tz started_judging diversity flags timestamp googleplus/);
+Tab::Person->columns(Essential => qw/email first middle last phone ualt_id provider site_admin /);
+Tab::Person->columns(Others    => qw/street city state zip country postal
+                                   gender pronoun no_email tz diversity flags timestamp googleplus/);
 
 Tab::Person->columns(TEMP => qw/prefs student_id judge_id/);
 
