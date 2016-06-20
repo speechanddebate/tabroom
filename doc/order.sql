@@ -41,7 +41,10 @@ alter table concession_purchase change school school int after fulfilled;
 alter table concession_purchase change concession concession int after school;
 alter table concession_purchase change timestamp timestamp timestamp after concession;
 
-alter table conflict change type type varchar(15) after id;
+alter table conflict add type varchar(15) after id;
+update tabroom.conflict set type = "chapter" where chapter > 0;
+update tabroom.conflict set type = "individual" where conflict > 0;
+
 alter table conflict drop judge; 
 alter table conflict drop created_at; 
 
@@ -115,3 +118,142 @@ alter table school_fine change levied_by levied_by int after levied_at;
 
 alter table school_fine change timestamp timestamp timestamp after levied_by;
 alter table school_fine drop created_at;
+
+alter table follower drop created_at;
+alter table follower drop updated_at;
+alter table follower change type type varchar(8) after id;
+alter table follower change follower follower int after email;
+
+alter table hotel change tourn tourn int after multiple;
+alter table hotel drop created_at;
+alter table hotel drop updated_at;
+
+alter table housing change type type varchar(7) after id;
+alter table housing change night night date after type;
+alter table housing change waitlist waitlist bool after night;
+alter table housing change tba tba bool after waitlist;
+alter table housing change requested requested datetime after tba;
+alter table housing change person requestor int after requested;
+alter table housing change timestamp timestamp timestamp after school;
+alter table housing drop created_at;
+
+alter table housing_slots change tourn tourn int after slots;
+alter table housing_slots drop created_at; 
+
+alter table jpool_judge drop created_at; 
+alter table jpool_judge drop type;
+
+alter table jpool_round drop created_at; 
+
+alter table jpool change name name varchar(63) after id;
+alter table jpool change category category int after name;
+alter table jpool drop tourn;
+alter table jpool drop created_at; 
+
+alter table judge_hire change covers entries_requested int after id; 
+alter table judge_hire change accepted entries_accepted int after entries_requested; 
+alter table judge_hire change rounds rounds_requested int after entries_accepted; 
+alter table judge_hire change rounds_accepted rounds_accepted int after rounds_requested; 
+alter table judge_hire drop created_at; 
+alter table judge_hire change request_made requested_at datetime after rounds_accepted;
+alter table judge_hire change requestor requestor int after requested_at;
+
+alter table judge change code code int after id; 
+alter table judge change first first varchar(63) after code;
+alter table judge add middle varchar(63) after first;
+alter table judge change last last varchar(63) after middle;
+alter table judge change active active bool after last; 
+alter table judge change ada ada bool after active;
+alter table judge change obligation obligation smallint after ada; 
+alter table judge change hired hired smallint after obligation; 
+alter table judge drop created_at;
+
+alter table judge change timestamp timestamp timestamp after person_request;
+
+alter table login drop name;
+alter table login drop salt;
+alter table login drop created_at;
+
+alter table login change password password varchar(63) after last_access;
+alter table login change sha512 sha512 char(128) after password;
+alter table login change spinhash spinhash char(128) after sha512;
+alter table login change pass_timestamp pass_timestamp datetime after spinhash;
+alter table login change person person int after source;
+
+alter table login change timestamp timestamp timestamp after ualt_id;
+
+update person set state="MA" where state="Mass";
+update person set state="MA" where state="Massachuset";
+update person set state="NY" where state="New York";
+update person set state="WA" where state="Washington";
+update person set state="UT" where state="ut";
+update person set state="Ohio" where state="OH";
+
+alter table person change middle middle varchar(63) after first; 
+alter table person drop alt_phone; 
+alter table person drop multiple;
+alter table person drop flags;
+alter table person drop created_at;
+alter table person drop started_judging;
+alter table person change state state char(4) after city;
+alter table person change postal postal varchar(15) after zip; 
+alter table person change tz tz varchar(63) after country;
+alter table person change phone phone varchar(31) after tz;
+alter table person change provider provider varchar(63) after phone;
+
+alter table person change gender gender char after last;
+alter table person change pronoun pronoun varchar(63) after gender;
+alter table person change no_email no_email bool after pronoun;
+alter table person change ualt_id ualt_id int after googleplus;
+alter table person change timestamp timestamp timestamp after ualt_id;
+
+alter table qualifier change name name varchar(63) after id;
+alter table qualifier change result result varchar(127) after name;
+alter table qualifier change qualified_at qualified_at int after tourn;
+alter table qualifier drop created_at; 
+
+alter table rating_subset drop created_at;
+
+alter table rating_tier change type type enum('coach', 'mpj') after id;
+alter table rating_tier change strike strike bool after description;
+alter table rating_tier change conflict conflict bool after strike;
+alter table rating_tier change min min float after conflict;
+alter table rating_tier change max max float after min;
+alter table rating_tier change start start bool after max;
+alter table rating_tier drop created_at;
+alter table rating_tier drop tourn;
+alter table rating_tier change timestamp timestamp timestamp after rating_subset;
+
+delete from rating where timestamp < "2015-07-01 00:00:00";
+
+alter table rating change type type enum('school', 'entry', 'coach') after id;
+alter table rating add draft bool;
+alter table rating change draft draft bool after type;
+alter table rating change entered entered datetime after draft;
+alter table rating change ordinal ordinal int after entered;
+alter table rating change percentile percentile float after ordinal;
+alter table rating drop created_at; 
+
+alter table region change circuit circuit int after sweeps;
+alter table region change timestamp timestamp timestamp after tourn;
+
+alter table region drop active;
+alter table region drop created_at;
+
+alter table result_set drop created_at; 
+
+alter table result_set change label label varchar(255) after id;
+alter table result_set change bracket bracket bool after label;
+alter table result_set change published published bool after bracket;
+alter table result_set change generated generated datetime after published;
+
+alter table result_value change tag tag varchar(15) after id;
+alter table result_value change value value varchar(255) after tag;
+alter table result_value change priority priority smallint after value;
+alter table result_value change long_tag long_tag varchar(63) after priority;
+alter table result_value change no_sort no_sort bool after long_tag;
+alter table result_value change sort_desc sort_desc bool after no_sort;
+alter table result_value change result result int after sort_desc;
+alter table result_value drop created_at; 
+
+
