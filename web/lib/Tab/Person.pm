@@ -14,7 +14,7 @@ Tab::Person->table('person');
 Tab::Person->columns(Primary   => qw/id/);
 Tab::Person->columns(Essential => qw/email first middle last phone ualt_id provider site_admin /);
 Tab::Person->columns(Others    => qw/street city state zip country postal
-                                   gender pronoun no_email tz diversity flags timestamp googleplus/);
+                                   gender pronoun no_email tz diversity timestamp googleplus/);
 
 Tab::Person->columns(TEMP => qw/prefs student_id judge_id/);
 
@@ -25,7 +25,7 @@ Tab::Person->has_many(logins => 'Tab::Login', 'person');
 Tab::Person->has_many(sessions => 'Tab::Session', 'person');
 Tab::Person->has_many(sites => 'Tab::Site', 'host');
 Tab::Person->has_many(conflicts => 'Tab::Conflict', 'person');
-Tab::Person->has_many(conflicteds => 'Tab::Conflict', 'conflict');
+Tab::Person->has_many(conflicteds => 'Tab::Conflict', 'conflicted');
 
 
 Tab::Person->has_many(followers => 'Tab::Follower', 'person');
