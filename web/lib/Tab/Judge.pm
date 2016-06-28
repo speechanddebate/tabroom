@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
 Tab::Judge->columns(Essential => qw/school first middle last code active ada category person chapter_judge/);
-Tab::Judge->columns(Others => qw / alt_category covers obligation hired person_request score tmp created_at timestamp /);
+Tab::Judge->columns(Others => qw / alt_category covers obligation hired person_request score tmp timestamp /);
 
 Tab::Judge->columns(TEMP => qw/tier pref panelid chair hangout_admin tourn avg diet ballotid personid tab_rating
 							   cjid schoolname schoolcode regname regcode region standby/);
@@ -27,7 +27,7 @@ Tab::Judge->has_many(jpools => [Tab::JPoolJudge => 'jpool']);
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where category = ?");
 Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where category = ?");
 
-__PACKAGE__->_register_datetimes( qw/created_at/);
+__PACKAGE__->_register_datetimes( qw/timestamp /);
 
 sub setting {
 

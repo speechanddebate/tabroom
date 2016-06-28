@@ -2,13 +2,15 @@ package Tab::Entry;
 use base 'Tab::DBI';
 Tab::Entry->table('entry');
 Tab::Entry->columns(Primary => qw/id/);
-Tab::Entry->columns(Essential => qw/code dropped name school tourn event waitlist dq/);
-Tab::Entry->columns(Others => qw/ada created_at timestamp tba/);
+Tab::Entry->columns(Essential => qw/code name dropped waitlist unconfirmed dq tourn school event/);
+Tab::Entry->columns(Others => qw/registered_by ada tba seed created_at timestamp/);
 Tab::Entry->columns(TEMP => qw/panelid speaks side ballot othername schname regname regcode region pullup bracketseed won lost/);
 
 Tab::Entry->has_a(school => 'Tab::School');
 Tab::Entry->has_a(tourn => 'Tab::Tourn');
 Tab::Entry->has_a(event => 'Tab::Event');
+
+Tab::Entry->has_a(registered_by => 'Tab::Person');
 
 Tab::Entry->has_many(strikes => 'Tab::Strike', 'entry');
 Tab::Entry->has_many(ballots => 'Tab::Ballot', 'entry');
@@ -18,7 +20,7 @@ Tab::Entry->has_many(qualifiers => 'Tab::Qualifier', 'entry');
 Tab::Entry->has_many(entry_students => 'Tab::EntryStudent', 'entry');
 Tab::Entry->has_many(students => [Tab::EntryStudent => 'student']);
 
-__PACKAGE__->_register_datetimes( qw/created_at timestamp/);
+__PACKAGE__->_register_datetimes( qw/timestamp created_at/);
 
 sub add_student { 
 	my ($self, $student) = @_;

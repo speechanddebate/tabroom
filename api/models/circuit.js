@@ -3,36 +3,33 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('circuit', { 
 		name: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
 		},
 		abbr: {
-			type: DataTypes.STRING(8),
+			type: DataTypes.STRING(15),
 			allowNull: true
 		},
 		active: { 
 			type: DataTypes.BOOLEAN,
-			allowNull: true
+			allowNull: false,
+			defaultValue: 0
 		},
 		state: { 
-			type: DataTypes.STRING(8),
+			type: DataTypes.CHAR(4),
 			allowNull: true
 		},
 		country: {
-			type: DataTypes.STRING(8),
+			type: DataTypes.CHAR(4),
 			allowNull: true
 		},
 		tz: { 
-			type: DataTypes.STRING(32),
-			allowNull: true
-		},
-		url: { 
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(63),
 			allowNull: true
 		},
 		webname: { 
-			type: DataTypes.STRING(32),
+			type: DataTypes.STRING(31),
 			allowNull: true
 		}
 	});

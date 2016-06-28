@@ -56,7 +56,7 @@ use Tab::EntrySetting;
 use Tab::EntryStudent;
 use Tab::Event;
 use Tab::EventSetting;
-use Tab::EventDouble;
+use Tab::Pattern;
 use Tab::File;
 use Tab::Follower;
 use Tab::GoogleCalendar;

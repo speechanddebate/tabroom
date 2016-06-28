@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
 Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder tv audit bye forfeit side/);
-Tab::Ballot->columns(Others => qw/chair speechnumber entered entered_by audited audited_by collected collected_by 
+Tab::Ballot->columns(Others => qw/chair speechnumber entered_by audited_by collected collected_by 
 								  cat_id seed pullup hangout_admin judge_started timestamp/);
 Tab::Ballot->columns(TEMP => qw/roundid entryid panelid judgename/);
 
@@ -20,7 +20,7 @@ Tab::Ballot->has_a(hangout_admin => 'Tab::Person');
 Tab::Ballot->has_many(values => 'Tab::Score');
 Tab::Ballot->has_many(scores => 'Tab::Score');
 
-__PACKAGE__->_register_datetimes( qw/timestamp collected audited entered/);
+__PACKAGE__->_register_datetimes( qw/timestamp collected/);
 
 sub account { 
 	my $self = shift;

@@ -3,38 +3,40 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('chapter_judge', { 
 		first: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(127),
+			allowNull: false,
+			defaultValue: ''
+		},
+		middle: {
+			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
 		},
 		last: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(127),
 			allowNull: false,
 			defaultValue: ''
 		},
-		gender: {
-			type: DataTypes.CHAR(4),
-			allowNull: true
+		ada: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: 0
 		},
 		retired: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: 0
 		},
-		cell: { 
-			type: DataTypes.STRING(16),
+		phone: { 
+			type: DataTypes.STRING(31),
 			allowNull: true
 		},
-		email: {
-			type: DataTypes.STRING(64),
+		email: { 
+			type: DataTypes.STRING(127),
 			allowNull: true
 		},
 		diet: {
-			type: DataTypes.STRING(64),
-			allowNull: true
-		},
-		ada: {
-			type: DataTypes.BOOLEAN,
+			type: DataTypes.STRING,
 			allowNull: true
 		},
 		notes: { 
@@ -43,6 +45,10 @@ module.exports = function(sequelize, DataTypes) {
 		},
 		notes_timestamp: {
 			type: DataTypes.DATE,
+			allowNull: true
+		},
+		gender: {
+			type: DataTypes.CHAR(4),
 			allowNull: true
 		}
 	});

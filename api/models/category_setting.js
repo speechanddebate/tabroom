@@ -4,7 +4,7 @@
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('class_setting', { 
+	return sequelize.define('category_setting', { 
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false

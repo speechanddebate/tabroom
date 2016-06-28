@@ -35,7 +35,7 @@ Tab::Person->has_many(chapter_judges => 'Tab::ChapterJudge', 'person');
 Tab::Person->has_many(judges => 'Tab::Judge', 'person' => { order_by => 'id DESC'} );
 
 Tab::Person->has_many(entries => 'Tab::Entry', 'person');
-Tab::Person->has_many(students => 'Tab::Student');
+Tab::Person->has_many(students => 'Tab::Student', 'person');
 Tab::Person->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
 
 Tab::Person->has_many(permissions => 'Tab::Permission', 'person');

@@ -5,20 +5,20 @@ use tabroom_api;
 
 create view tabroom_api.ballot
 	(id, side, bye, forfeit, chair, speakerorder, speechnumber, seed, pullup, tv, audit, collected, judge_started,
-		entry_id, judge_id, panel_id, collected_by_id, entered_by_id, hangout_admin, timestamp)
+		entry_id, judge_id, panel_id, collected_by_id, entered_by_id, audited_by_id, hangout_admin_id, timestamp)
 as select
 	id, side, bye, forfeit, chair, speakerorder, speechnumber, seed, pullup, tv, audit, collected, judge_started,
-		entry, judge, panel, collected_by, entered_by, hangout_admin, timestamp
+		entry, judge, panel, collected_by, entered_by, audited_by, hangout_admin, timestamp
 from tabroom.ballot;
 
 create view tabroom_api.change_log
 	(id, type, description, 
-		person_id, tourn_id, category_id, event_id, webpage_id, school_id, entry_id, judge_id, 
-		strike_id, round_id, old_panel_id, new_panel_id, fine_id, timestamp)
+		person_id, tourn_id, event_id, school_id, entry_id, judge_id, 
+		old_panel_id, new_panel_id, fine_id, timestamp)
 as select
 	id, type, description, 
-		person, tourn, category, event, webpage, school, entry, judge, 
-		strike, round, old_panel, new_panel, fine, timestamp
+		person, tourn, event, school, entry, judge, 
+		old_panel, new_panel, fine, timestamp
 from tabroom.change_log;
 
 create view tabroom_api.circuit_membership
@@ -75,11 +75,11 @@ as select
 	id, type, person, conflicted, chapter, added_by, timestamp
 from tabroom.conflict;
 
-create view tabroom_api.event_double
+create view tabroom_api.pattern
 	(id, name, type, max, exclude_id, timestamp)
 as select
 	id, name, type, max, exclude, timestamp
-from tabroom.event_double;
+from tabroom.pattern;
 
 create view tabroom_api.email
 	(id, subject, content, sent_to, sent_at, sender_id, tourn_id, circuit_id, timestamp)
@@ -88,9 +88,13 @@ as select
 from tabroom.email;
 
 create view tabroom_api.entry
-	(id, code, name, dropped, waitlisted, dq, unconfirmed, ada, tba, seed, event_id, school_id, tourn_id, registered_by_id, timestamp)
+	(id, code, name, active, ada, tba, seed, 
+		dropped, waitlisted, dq, unconfirmed, 
+		event_id, school_id, tourn_id, registered_by_id, timestamp)
 as select
-	id, code, name, dropped, waitlist, dq, unconfirmed, ada, tba, seed,  event, school, tourn, registered_by, timestamp
+	id, code, name, active, ada, tba, seed, 
+		dropped, waitlist, dq, unconfirmed, 
+		event, school, tourn, registered_by, timestamp
 from tabroom.entry;
 
 create view tabroom_api.entry_student
@@ -100,9 +104,9 @@ as select
 from tabroom.entry_student;
 
 create view tabroom_api.event
-	(id, name, type, abbr, fee, tourn_id, category_id, event_double_id, rating_subset_id, timestamp)
+	(id, name, type, abbr, fee, tourn_id, category_id, pattern_id, rating_subset_id, timestamp)
 as select
-	id, name, type, abbr, fee, tourn, category, event_double, rating_subset, timestamp
+	id, name, type, abbr, fee, tourn, category, pattern, rating_subset, timestamp
 from tabroom.event;
 
 create view tabroom_api.file
@@ -161,10 +165,9 @@ from tabroom.jpool;
 
 create view tabroom_api.judge_hire
 	(id, entries_requested, entries_accepted, rounds_requested, rounds_accepted, requested_at, 
-		requestor_id, tourn_id, school_id, judge_id, category_id, timestamp)
+		tourn_id, school_id, judge_id, category_id, timestamp)
 as select
-	id, entries_requested, entries_accepted, rounds_requested, rounds_accepted, requested_at, 
-		requestor, tourn, school, judge, category, timestamp
+	id, entries_requested, entries_accepted, rounds_requested, rounds_accepted, requested_at, tourn, school, judge, category, timestamp
 from tabroom.judge_hire;
 
 create view tabroom_api.judge
@@ -190,9 +193,9 @@ as select
 from tabroom.person;
 
 create view tabroom_api.qualifier
-	(id, name, result, entry_id, tourn_id, qualified_at_id, timestamp)
+	(id, name, result, entry_id, tourn_id, qualified_tourn_id, timestamp)
 as select
-	id, name, result, entry, tourn, qualified_at, timestamp
+	id, name, result, entry, tourn, qualifier_tourn, timestamp
 from tabroom.qualifier;
 
 create view tabroom_api.rating_subset
@@ -316,9 +319,9 @@ as select
 from tabroom.strike_timeslot;
 
 create view tabroom_api.strike
-	(id, type, start, end, registrant, conflictee, tourn_id, judge_id, event_id, entry_id, school_id, region_id, strike_time_id, timestamp)
+	(id, type, start, end, registrant, conflictee, tourn_id, judge_id, event_id, entry_id, school_id, region_id, strike_timeslot_id, timestamp)
 as select
-	id, type, start, end, registrant, conflictee, tourn, judge, event, entry, school, region, strike_time, timestamp
+	id, type, start, end, registrant, conflictee, tourn, judge, event, entry, school, region, strike_timeslot, timestamp
 from tabroom.strike;
 
 create view tabroom_api.student
@@ -465,7 +468,7 @@ create view tabroom_api.tiebreak_set_setting
 	(id, tag, value, value_text, value_date, tiebreak_set_id, setting_id, timestamp)
 as select 
 	id, tag, value, value_text, value_date, tiebreak_set, setting, timestamp
-from tabroom.tiebreak_setting;
+from tabroom.tiebreak_set_setting;
 
 create view tabroom_api.judge_setting 
 	(id, tag, value, value_text, value_date, judge_id, setting_id, timestamp)

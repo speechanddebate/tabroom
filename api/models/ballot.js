@@ -21,6 +21,25 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
+		speakerorder: {
+			type: DataTypes.INTEGER(11),
+			allowNull: false,
+			defaultValue: '0'
+		},
+		speechnumber: {
+			type: DataTypes.INTEGER(11),
+			allowNull: true
+		},
+		seed: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
+		pullup: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
 		tv: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
@@ -31,38 +50,11 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
-		speakerorder: {
-			type: DataTypes.INTEGER(11),
-			allowNull: false,
-			defaultValue: '0'
-		},
-		speechnumber: {
-			type: DataTypes.INTEGER(11),
-			allowNull: true
-		},
-		pullup: {
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0'
-		},
-		seed: {
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0'
-		},
-		judge_started: { 
-			type: DataTypes.DATE,
-			allowNull: true
-		},
 		collected: {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
-		entered: {
-			type: DataTypes.DATE,
-			allowNull: true
-		},
-		audited: {
+		judge_started: { 
 			type: DataTypes.DATE,
 			allowNull: true
 		}
