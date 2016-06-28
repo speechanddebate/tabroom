@@ -2,8 +2,8 @@ package Tab::ChangeLog;
 use base 'Tab::DBI';
 Tab::ChangeLog->table('change_log');
 Tab::ChangeLog->columns(Primary => qw/id/);
-Tab::ChangeLog->columns(Essential => qw/type tourn school person/);
-Tab::ChangeLog->columns(Others => qw/judge entry event new_panel old_panel fine text timestamp/);
+Tab::ChangeLog->columns(Essential => qw/type tourn school person description/);
+Tab::ChangeLog->columns(Others => qw/judge entry event new_panel old_panel fine  timestamp/);
 
 Tab::ChangeLog->has_a(person => "Tab::Person");
 Tab::ChangeLog->has_a(tourn => "Tab::Tourn");

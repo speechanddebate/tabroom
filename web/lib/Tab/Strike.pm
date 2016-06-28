@@ -2,7 +2,9 @@ package Tab::Strike;
 use base 'Tab::DBI';
 Tab::Strike->table('strike');
 Tab::Strike->columns(Primary => qw/id/); 
-Tab::Strike->columns(Essential => qw/type start end tourn judge event entry school region strike_timeslot registrant conflictee timestamp/);
+Tab::Strike->columns(Essential => qw/type start end registrant conflictee 
+							tourn judge event entry school region strike_timeslot 
+							timestamp/);
 
 Tab::Strike->has_a(judge => 'Tab::Judge');
 Tab::Strike->has_a(tourn => 'Tab::Tourn');
