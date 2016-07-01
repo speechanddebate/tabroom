@@ -10,7 +10,11 @@ module.exports = function(sequelize, DataTypes) {
 		directions: {
 			type: DataTypes.TEXT,
 			allowNull: true
-		}
+		},
+		dropoff: {
+			type: DataTypes.STRING,
+			allowNull: true
+		},
 	});
 };
 

@@ -3,11 +3,11 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('tourn_fee', { 
 		amount: { 
-			type: DataTypes.FLOAT,
+			type: DataTypes.DECIMAL(8,2),
 			allowNull: true
 		},
 		reason: { 
-			type: DataTypes.STRING,
+			type: DataTypes.STRING(63),
 			allowNull: true
 		},
 		start: { 

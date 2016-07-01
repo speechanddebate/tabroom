@@ -3,11 +3,11 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('hotel', { 
 		name: {
-			type: DataTypes.STRING(128),
+			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
 		},
-		fee_multiplier: { 
+		multiple: { 
 			type: DataTypes.FLOAT,
 			allowNull: true
 		}

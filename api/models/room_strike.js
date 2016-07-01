@@ -3,9 +3,9 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('room_strike', { 
 		type: {
-			type: DataTypes.STRING(8),
+			type: DataTypes.STRING(15),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: 'time'
 		},
 		start: {
 			type: DataTypes.DATE,

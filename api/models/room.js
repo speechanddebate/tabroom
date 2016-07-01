@@ -2,32 +2,36 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('room', { 
+		building: {
+			type: DataTypes.STRING(64),
+			allowNull: true
+		},
 		name: {
 			type: DataTypes.STRING(64),
 			allowNull: false,
 			defaultValue: ''
 		},
-		building: { 
-			type: DataTypes.STRING(32),
-			allowNull: true
-		},
 		quality: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.SMALLINT,
 			allowNull: true
 		},
 		capacity: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.SMALLINT,
 			allowNull: true
 		},
 		inactive: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '1'
+			defaultValue: '0'
 		},
 		ada: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
+		},
+		notes: { 
+			type: DataTypes.STRING(63),
+			allowNull: true
 		}
 	});
 };

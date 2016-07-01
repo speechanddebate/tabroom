@@ -3,17 +3,21 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('sweep_rule', { 
 		tag: {
-			type: DataTypes.STRING(32),
+			type: DataTypes.STRING(31),
 			allowNull: false,
 			defaultValue: ''
 		},
 		value: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(63),
 			allowNull: true
 		},
 		place: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.SMALLINT,
 			allowNull: true
-		}
+		},
+		count: {
+			type: DataTypes.STRING(15),
+			allowNull: true
+		},
 	});
 };

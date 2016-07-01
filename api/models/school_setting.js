@@ -4,7 +4,7 @@
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('squad_setting', { 
+	return sequelize.define('school_setting', { 
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false,

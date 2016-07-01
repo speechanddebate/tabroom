@@ -2,6 +2,14 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('result', { 
+		rank: {
+			type: DataTypes.INTEGER(11),
+			allowNull: true
+		},
+		percentile: { 
+			type: DataTypes.FLOAT,
+			allowNull: true
+		},
 		honor: {
 			type: DataTypes.STRING,
 			allowNull: true
@@ -10,14 +18,6 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING,
 			allowNull: true
 		},
-		rank: {
-			type: DataTypes.INTEGER(11),
-			allowNull: true
-		},
-		percentile: { 
-			type: DataTypes.FLOAT,
-			allowNull: true
-		}
 	});
 };
 
