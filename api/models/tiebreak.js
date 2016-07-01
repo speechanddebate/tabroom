@@ -3,30 +3,30 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('tiebreak', { 
 		name: {
-			type: DataTypes.STRING,
+			type: DataTypes.STRING(15),
 			allowNull: true
 		},
 		count: {
-			type: DataTypes.STRING,
+			type: DataTypes.STRING(15),
 			allowNull: false,
 			defaultValue: '0'
 		},
 		multiplier: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.SMALLINT,
 			allowNull: false,
 			defaultValue: '1'
 		},
 		priority: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.SMALLINT,
 			allowNull: false,
 			defaultValue: '0'
 		},
 		highlow: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.TINYINT,
 			allowNull: true
 		},
 		highlow_count: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.TINYINT,
 			allowNull: false,
 			defaultValue: '0'
 		}

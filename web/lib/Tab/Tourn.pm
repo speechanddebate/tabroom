@@ -29,7 +29,7 @@ Tab::Tourn->has_many(tourn_sites => 'Tab::TournSite', 'tourn');
 Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(permissions => 'Tab::Permission', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
-Tab::Tourn->has_many(school_fines => 'Tab::SchoolFine', 'tourn');
+Tab::Tourn->has_many(fines => 'Tab::Fine', 'tourn');
 Tab::Tourn->has_many(categories => 'Tab::Category', 'tourn');
 Tab::Tourn->has_many(change_logs => 'Tab::ChangeLog', 'tourn');
 Tab::Tourn->has_many(patterns => 'Tab::Pattern', 'tourn');

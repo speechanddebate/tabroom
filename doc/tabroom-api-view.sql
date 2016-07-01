@@ -115,11 +115,12 @@ as select
 	id, label, filename, published, uploaded, circuit, tourn, event, webpage, school, result, timestamp
 from tabroom.file;
 
-create view tabroom_api.school_fine
-	(id, reason, amount, payment, school_id, deleted, deleted_at, deleted_by_id, levied_at, levied_by_id, timestamp)
+create view tabroom_api.fine
+	(id, reason, amount, payment, deleted, deleted_at, deleted_by_id, levied_at, levied_by_id, 
+		tourn_id, school_id, region_id, judge_id, timestamp)
 as select
-	id, reason, amount, payment, school, deleted, deleted_at, deleted_by, levied_at, levied_by, timestamp
-from tabroom.school_fine;
+	id, reason, amount, payment, deleted, deleted_at, deleted_by, levied_at, levied_by, tourn, school, region, judge, timestamp
+from tabroom.fine;
 
 create view tabroom_api.follower
 	(id, type, cell, domain, email, follower_id, tourn_id, judge_id, entry_id, school_id, person_id, timestamp)
@@ -217,10 +218,22 @@ as select
 from tabroom.rating;
 
 create view tabroom_api.region
-	(id, name, code, diocese, quota, archdiocese, cooke_points, sweeps, circuit_id, tourn_id, timestamp)
+	(id, name, code, quota, archdiocese, cooke_points, sweeps, circuit_id, tourn_id, timestamp)
 as select
-	id, name, code, diocese, quota, arch, cooke_pts, sweeps, circuit, tourn, timestamp
+	id, name, code, quota, arch, cooke_pts, sweeps, circuit, tourn, timestamp
 from tabroom.region;
+
+create view tabroom_api.diocese
+	(id, name, code, state, quota, active, archdiocese, cooke_award_points, timestamp)
+as select
+	id, name, code, state, quota, active, archdiocese, cooke_award_points, timestamp
+from tabroom.diocese;
+
+create view tabroom_api.district
+	(id, name, code, location, chair, timestamp)
+as select
+	id, name, code, location, chair, timestamp
+from tabroom.district;
 
 create view tabroom_api.region_fine
 	(id, reason, amount, levied_at, levied_by_id, region_id, tourn_id, timestamp)
@@ -253,9 +266,9 @@ as select
 from tabroom.room_strike;
 
 create view tabroom_api.room
-	(id, name, quality, capacity, inactive, ada, notes, building, site_id, timestamp)
+	(id, building, name, quality, capacity, inactive, ada, notes, site_id, timestamp)
 as select
-	id, name, quality, capacity, inactive, ada, notes, building, site, timestamp
+	id, building, name, quality, capacity, inactive, ada, notes, site, timestamp
 from tabroom.room;
 
 create view tabroom_api.round
@@ -411,9 +424,9 @@ as select
 from tabroom.webpage;
 
 create view tabroom_api.setting
-	(id, tag, type, subtype, value_type, conditions, timestamp)
+	(id, type, subtype, tag, value_type, conditions, timestamp)
 as select 
-	id, tag, type, subtype, value_type, conditions, timestamp
+	id, type, subtype, tag, value_type, conditions, timestamp
 from tabroom.setting;
 
 create view tabroom_api.setting_label 
@@ -513,5 +526,6 @@ create view tabroom_api.session
 as select 
 	id, userkey, ip, su, person, tourn, event, category, timestamp
 from tabroom.session;
+
 
 

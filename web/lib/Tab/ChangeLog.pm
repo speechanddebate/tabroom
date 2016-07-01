@@ -11,7 +11,7 @@ Tab::ChangeLog->has_a(event => "Tab::Event");
 Tab::ChangeLog->has_a(entry => "Tab::Entry");
 Tab::ChangeLog->has_a(school => "Tab::School");
 Tab::ChangeLog->has_a(judge => "Tab::Judge");
-Tab::ChangeLog->has_a(fine => "Tab::SchoolFine");
+Tab::ChangeLog->has_a(fine => "Tab::Fine");
 
 Tab::ChangeLog->has_a(new_panel => "Tab::Panel");
 Tab::ChangeLog->has_a(old_panel => "Tab::Panel");

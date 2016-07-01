@@ -2,19 +2,19 @@
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('stat', { 
+	return sequelize.define('stats', { 
 		type: { 
-			type: DataTypes.STRING(16),
+			type: DataTypes.STRING(15),
 			allowNull: false,
 			defaultValue: ''
 		},
 		tag: {
-			type: DataTypes.STRING(32),
+			type: DataTypes.STRING(31),
 			allowNull: false,
 			defaultValue: ''
 		},
 		value: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.DECIMAL(8,2), 
 			allowNull: true
 		}
 	});

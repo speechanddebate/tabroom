@@ -89,10 +89,13 @@ db.chapter_judge.hasMany(db.judge);
 db.circuit.belongsToMany(db.chapter, {through: 'chapter_circuits'});
 db.chapter.belongsToMany(db.circuit, {through: 'chapter_circuits'});
 
+db.district.belongsTo(db.person, {as: "chair"});
+
 db.student.belongsTo(db.chapter);
 db.student.belongsTo(db.person);
-db.student.hasMany(db.score);
+db.student.belongsTo(db.person, {as: "person_request"});
 db.student.belongsToMany(db.entry, {through: 'entry_students'});
+db.student.hasMany(db.score);
 
 db.region.belongsTo(db.circuit);
 db.region.belongsTo(db.tourn);
@@ -147,8 +150,10 @@ db.category.hasMany(db.change_log);
 db.event.belongsTo(db.tourn);
 db.event.belongsTo(db.category);
 db.event.belongsTo(db.pattern);
+db.event.belongsTo(db.rating_subset);
+
 db.event.hasMany(db.file);
-db.event.hasMany(db.stat);
+db.event.hasMany(db.stats);
 db.event.hasMany(db.entry);
 db.event.hasMany(db.round);
 db.event.hasMany(db.qualifier);
@@ -157,18 +162,20 @@ db.event.hasMany(db.change_log);
 db.event.belongsToMany(db.sweep_set, {through: 'sweep_events'});
 
 db.pattern.belongsTo(db.pattern, {as: 'exclude'});
+db.pattern.belongsTo(db.tourn);
 
 db.tiebreak.belongsTo(db.tiebreak_set);
 
 db.tiebreak_set.belongsTo(db.tourn);
 db.tiebreak_set.hasMany(db.tiebreak);
 
-db.webpage.belongsTo(db.person, {as: 'creator'});
-db.webpage.belongsTo(db.person, {as: 'editor'});
+db.webpage.belongsTo(db.person, {as: 'last_editor'});
+db.webpage.belongsTo(db.webpage, {as: 'parent'});
 db.webpage.belongsTo(db.tourn);
-db.webpage.belongsTo(db.circuit);
+
 db.webpage.hasMany(db.change_log);
 db.webpage.hasMany(db.file);
+db.webpage.hasMany(db.webpage, {as: 'child', foreignKey: 'parent_id'} );
 
 db.jpool.belongsTo(db.category);
 db.jpool.belongsTo(db.site);
@@ -222,6 +229,7 @@ db.setting.hasMany(db.rpool_setting);
 db.setting.hasMany(db.tiebreak_set_setting);
 db.setting.hasMany(db.school_setting);
 
+db.setting_label.belongsTo(db.setting);
 
 // Registration data
 db.school.hasMany(db.entry);
@@ -239,12 +247,12 @@ db.school.belongsTo(db.person, {as: "onsite_by"});
 
 db.school.belongsToMany(db.person, {through: 'school_contacts'});
 
+db.fine.belongsTo(db.person, {as: 'levied_by'});
+db.fine.belongsTo(db.person, {as: 'deleted_by'});
+db.fine.belongsTo(db.tourn);
 db.fine.belongsTo(db.school);
 db.fine.belongsTo(db.region);
 db.fine.belongsTo(db.judge);
-db.fine.belongsTo(db.tourn);
-db.fine.belongsTo(db.person, {as: 'levied_by'});
-db.fine.belongsTo(db.person, {as: 'deleted_by'});
 db.fine.hasMany(db.change_log);
 
 db.entry.hasMany(db.ballot);
@@ -270,19 +278,22 @@ db.judge.hasMany(db.strike);
 db.judge.hasMany(db.judge_setting);
 db.judge.hasMany(db.change_log);
 
+db.judge.belongsTo(db.school);
+db.judge.belongsTo(db.category);
+db.judge.belongsTo(db.category, {as: 'alt_category'});
+db.judge.belongsTo(db.category, {as: 'covers'});
 
 db.judge.belongsTo(db.chapter_judge);
-db.judge.belongsTo(db.category);
-db.judge.belongsTo(db.school);
 db.judge.belongsTo(db.person);
-db.judge.belongsTo(db.category, {as: 'covers'});
-db.judge.belongsTo(db.category, {as: 'alt_category'});
+db.judge.belongsTo(db.person, {as: 'person_request'});
+
 db.judge.belongsToMany(db.jpool, {through: 'jpool_judges'});
 
-db.judge_hire.belongsTo(db.school);
-db.judge_hire.belongsTo(db.tourn);
-db.judge_hire.belongsTo(db.judge);
 db.judge_hire.belongsTo(db.person, {as: 'requestor'});
+db.judge_hire.belongsTo(db.judge);
+db.judge_hire.belongsTo(db.tourn);
+db.judge_hire.belongsTo(db.school);
+db.judge_hire.belongsTo(db.category);
 
 // Specialty registration data later
 
@@ -299,41 +310,45 @@ db.email.belongsTo(db.circuit);
 db.file.belongsTo(db.tourn);
 db.file.belongsTo(db.school);
 db.file.belongsTo(db.event);
-db.file.belongsTo(db.webpage);
 db.file.belongsTo(db.circuit);
-db.file.belongsTo(db.result_set);
+db.file.belongsTo(db.webpage);
 
 db.hotel.belongsTo(db.tourn);
 
 db.housing_slots.belongsTo(db.tourn);
 
-db.housing_request.belongsTo(db.student);
-db.housing_request.belongsTo(db.judge);
-db.housing_request.belongsTo(db.school);
-db.housing_request.belongsTo(db.person, {as: 'requestor'});
+db.housing.belongsTo(db.person, {as: 'requestor'});
+db.housing.belongsTo(db.tourn);
+db.housing.belongsTo(db.student);
+db.housing.belongsTo(db.judge);
+db.housing.belongsTo(db.school);
 
-db.stat.belongsTo(db.event);
+db.stats.belongsTo(db.event);
 
 // Pref Sheets
+db.rating.belongsTo(db.tourn);
 db.rating.belongsTo(db.school);
 db.rating.belongsTo(db.entry);
-db.rating.belongsTo(db.judge);
 db.rating.belongsTo(db.rating_tier);
+db.rating.belongsTo(db.judge);
 db.rating.belongsTo(db.rating_subset);
 
 db.rating_tier.hasMany(db.rating);
-db.rating_tier.belongsTo(db.rating_subset);
 db.rating_tier.belongsTo(db.category);
+db.rating_tier.belongsTo(db.rating_subset);
 
+db.rating_subset.hasMany(db.event);
 db.rating_subset.hasMany(db.rating);
 db.rating_subset.hasMany(db.rating_tier);
 db.rating_subset.belongsTo(db.category);
 
-db.strike.belongsTo(db.entry);
+db.strike.belongsTo(db.tourn);
 db.strike.belongsTo(db.judge);
+db.strike.belongsTo(db.event);
+db.strike.belongsTo(db.entry);
 db.strike.belongsTo(db.school);
-db.strike.belongsTo(db.timeslot);
 db.strike.belongsTo(db.region);
+db.strike.belongsTo(db.timeslot);
 db.strike.belongsTo(db.person, {as: 'entered_by'});
 db.strike.belongsTo(db.strike_timeslot);
 db.strike.hasMany(db.change_log);
@@ -373,10 +388,10 @@ db.score.belongsTo(db.student);
 
 // Published Results
 
-db.result.belongsTo(db.student);
-db.result.belongsTo(db.entry);
-db.result.belongsTo(db.school);
 db.result.belongsTo(db.result_set);
+db.result.belongsTo(db.entry);
+db.result.belongsTo(db.student);
+db.result.belongsTo(db.school);
 db.result.belongsTo(db.round);
 
 db.result_set.hasMany(db.result);
@@ -427,11 +442,14 @@ db.circuit.hasMany(db.permission);
 db.sweep_set.belongsToMany(db.sweep_set, {through: 'sweep_include', as: 'parents'});
 db.sweep_set.belongsToMany(db.sweep_set, {through: 'sweep_include', as: 'children'});
 db.sweep_set.belongsToMany(db.event, {through: 'sweep_events'});
+
+db.sweep_set.belongsTo(db.tourn);
 db.sweep_set.hasMany(db.sweep_rule);
 db.sweep_rule.belongsTo(db.sweep_set);
 
 // Live Updates functions
 
+db.follower.belongsTo(db.person, {as: 'follower'});
 db.follower.belongsTo(db.judge);
 db.follower.belongsTo(db.entry);
 db.follower.belongsTo(db.school);

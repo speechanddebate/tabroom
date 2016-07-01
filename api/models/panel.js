@@ -1,13 +1,13 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('section', { 
+	return sequelize.define('panel', { 
 		letter: {
 		  type: DataTypes.STRING,
 		  allowNull: true
 		},
 		flight: {
-		  type: 'CHAR(1)',
+		  type: DataTypes.STRING(3),
 		  allowNull: true
 		},
 		bye: {
@@ -24,7 +24,7 @@ module.exports = function(sequelize, DataTypes) {
 		  allowNull: true
 		},
 		bracket: {
-		  type: DataTypes.INTEGER(11),
+		  type: DataTypes.SMALLINT,
 		  allowNull: false,
 		  defaultValue: '0'
 		}

@@ -3,7 +3,7 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('webpage', { 
 		title: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
 		},
@@ -13,14 +13,16 @@ module.exports = function(sequelize, DataTypes) {
 		},
 		published: {
 			type: DataTypes.BOOLEAN,
-			allowNull: true
+			allowNull: false,
+			defaultValue: '0'
 		},
 		sitewide: {
 			type: DataTypes.BOOLEAN,
-			allowNull: true
+			allowNull: false,
+			defaultValue: '0'
 		},
 		page_order: { 
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.SMALLINT,
 			allowNull: true
 		}
 	});
