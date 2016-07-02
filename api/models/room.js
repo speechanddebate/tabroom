@@ -12,11 +12,11 @@ module.exports = function(sequelize, DataTypes) {
 			defaultValue: ''
 		},
 		quality: {
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
 		capacity: {
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
 		inactive: {

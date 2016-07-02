@@ -22,7 +22,7 @@ module.exports = function(sequelize, DataTypes) {
 			defaultValue: '0'
 		},
 		page_order: { 
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		}
 	});

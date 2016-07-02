@@ -7,26 +7,26 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: true
 		},
 		name: {
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
-		label: 
+		label: {
 			type: DataTypes.STRING(31),
 			allowNull: true
 		},
 		flighted: {
-			type: DataTypes.TINYINT,
+			type: DataTypes.INTEGER(4),
 			allowNull: true
 		},
 		published: {
-			type: DataTypes.TINYINT,
+			type: DataTypes.INTEGER(4),
 			allowNull: false,
 			defaultValue: '0'
 		},
-		post_results: {
-			type: DataTypes.TINYINT,
-			allowNull: false,
-			defaultValue: '0'
+		post_results     : {
+			type         : DataTypes.INTEGER(4),
+			allowNull    : false,
+			defaultValue : '0'
 		},
 		created: {
 			type: DataTypes.DATE,

@@ -17,7 +17,7 @@ module.exports = function(sequelize, DataTypes) {
 		honor_site: {
 			type: DataTypes.STRING,
 			allowNull: true
-		},
+		}
 	});
 };
 

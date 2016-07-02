@@ -3,14 +3,17 @@
 var fs        = require("fs");
 var path      = require("path");
 var Sequelize = require("sequelize");
+
+var basename = path.basename(module.filename);
+var env      = process.env.NODE_ENV || "development";
+var config   = require(__dirname + '/../config/config.json')[env];
+
 var sequelize = new Sequelize(config.database, config.username, config.password, config);
 
-var basename  = path.basename(module.filename);
-var env       = process.env.NODE_ENV || "development";
-var config    = require(__dirname + '/../config/config.json')[env];
-var db        = {};
+var db       = {};
 
-// Database wide options
+// This will read in all the model definitions in the /model directory and hook
+// them in as sequelize objects populated into the db object
 
 fs
 	.readdirSync(__dirname)
@@ -45,12 +48,8 @@ db.circuit.belongsToMany(db.tourn, {through: 'tourn_circuits'});
 db.circuit.belongsToMany(db.person, {through: 'permissions'});
 
 db.circuit.hasMany(db.circuit_membership);
-db.circuit.hasMany(db.circuit_dues);
 db.circuit.hasMany(db.circuit_setting);
 db.circuit.hasMany(db.file);
-
-db.circuit_dues.belongsTo(db.chapter);
-db.circuit_dues.belongsTo(db.circuit);
 
 db.circuit_membership.belongsTo(db.circuit);
 
@@ -70,10 +69,9 @@ db.room_strike.belongsTo(db.tourn);
 db.room_strike.belongsTo(db.entry);
 db.room_strike.belongsTo(db.judge);
 
-db.chapter.hasMany(db.student, {as: "Students"});
-db.chapter.hasMany(db.chapter_judge, {as : "chapterJudges"});
+db.chapter.hasMany(db.student);
+db.chapter.hasMany(db.chapter_judge);
 db.chapter.hasMany(db.school);
-db.chapter.hasMany(db.circuit_dues);
 db.chapter.belongsToMany(db.person, {through: 'permissions'});
 
 db.chapter_circuit.belongsTo(db.circuit);
@@ -455,6 +453,13 @@ db.follower.belongsTo(db.entry);
 db.follower.belongsTo(db.school);
 db.follower.belongsTo(db.tourn);
 db.follower.belongsTo(db.person);
+
+// Sessions
+db.session.belongsTo(db.person, {as: 'su'});
+db.session.belongsTo(db.person);
+db.session.belongsTo(db.tourn);
+db.session.belongsTo(db.event);
+db.session.belongsTo(db.category);
 
 // Initialize the data objects.
 

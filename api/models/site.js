@@ -14,9 +14,7 @@ module.exports = function(sequelize, DataTypes) {
 		dropoff: {
 			type: DataTypes.STRING,
 			allowNull: true
-		},
+		}
 	});
 };
-
-
 

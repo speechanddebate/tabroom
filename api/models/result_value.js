@@ -10,13 +10,13 @@ module.exports = function(sequelize, DataTypes) {
 		description: { 
 			type: DataTypes.STRING,
 			allowNull: true
-		}
+		},
 		value: {
 			type: DataTypes.STRING,
 			allowNull: true
 		},
 		priority: {
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
 		no_sort: {

@@ -16,7 +16,7 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: true
 		},
 		quota: { 
-			type: DataTypes.TINYINT,
+			type: DataTypes.INTEGER(4),
 			allowNull: true
 		},
 		active: { 
@@ -32,7 +32,7 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: true
 		},
 		sweeps: { 
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		}
 	});

@@ -24,7 +24,7 @@ module.exports = function(sequelize, DataTypes) {
 		  allowNull: true
 		},
 		bracket: {
-		  type: DataTypes.SMALLINT,
+		  type: DataTypes.INTEGER(6),
 		  allowNull: false,
 		  defaultValue: '0'
 		}
