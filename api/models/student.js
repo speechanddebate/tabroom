@@ -22,7 +22,7 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: true
 		},
 		grad_year: {
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: false,
 			defaultValue: '2010'
 		},

@@ -12,21 +12,21 @@ module.exports = function(sequelize, DataTypes) {
 			defaultValue: '0'
 		},
 		multiplier: {
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: false,
 			defaultValue: '1'
 		},
 		priority: {
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: false,
 			defaultValue: '0'
 		},
 		highlow: {
-			type: DataTypes.TINYINT,
+			type: DataTypes.INTEGER(4),
 			allowNull: true
 		},
 		highlow_count: {
-			type: DataTypes.TINYINT,
+			type: DataTypes.INTEGER(4),
 			allowNull: false,
 			defaultValue: '0'
 		}

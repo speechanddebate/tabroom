@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('school', { 
+	return sequelize.define('chapter', { 
 		name: {
 			type: DataTypes.STRING(127),
 			allowNull: false,
@@ -47,7 +47,7 @@ module.exports = function(sequelize, DataTypes) {
 		nsda: {
 			type: DataTypes.INTEGER(11),
 			allowNull: true
-		}
+		},
 		naudl: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
@@ -67,7 +67,7 @@ module.exports = function(sequelize, DataTypes) {
 			type         : DataTypes.STRING(15),
 			allowNull    : false,
 			defaultValue : '0'
-		},
+		}
 	});
 };
 

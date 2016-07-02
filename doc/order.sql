@@ -674,7 +674,8 @@ drop table room_pool;
 drop table follow_tourn;
 drop table circuit_dues;
 
-delete from session where timestamp < "2016-05-01 00:00:00";
+delete from session where timestamp < "2016-06-01 00:00:00";
+create index userkey on session(userkey);
 
 alter table tabroom.session drop authkey;
 

@@ -16,11 +16,11 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: true
 		},
 		speech: {
-			type: DataTypes.TINYINT,
+			type: DataTypes.INTEGER(4),
 			allowNull: true
 		},
 		position: {
-			type: DataTypes.TINYINT,
+			type: DataTypes.INTEGER(4),
 			allowNull: true
 		}
 	});

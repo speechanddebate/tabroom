@@ -12,12 +12,12 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: true
 		},
 		place: {
-			type: DataTypes.SMALLINT,
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
 		count: {
 			type: DataTypes.STRING(15),
 			allowNull: true
-		},
+		}
 	});
 };

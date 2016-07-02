@@ -10,7 +10,7 @@ module.exports = function(sequelize, DataTypes) {
 		fulfilled: { 
 			type: DataTypes.BOOLEAN,
 			allowNull: true
-		}
+		},
 		placed: { 
 			type: DataTypes.DATE,
 			allowNull: true
