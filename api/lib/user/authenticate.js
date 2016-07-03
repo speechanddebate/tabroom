@@ -15,77 +15,61 @@ var db = require('../../models');
 var crypt = require('crypt3');
 var BluePromise = require('bluebird');
 
+	var authenticate = function(req, res, next) { 
 
-	var authenticate = function (username, password) { 
+		db.session.findAll(
+			{ 
+				where: { userkey: req.cookies[config.cookieName] },
+				include: [
+					{ model: db.person, required: true },
+					{ model: db.person, as: "su", required: false}
+				]
+			}
 
-		return new BluePromise ( function(resolve, reject) { 
+		).then(function(Sessions) { 
 
-			var localSession = {};
+			if (Sessions) { 
 
-			db.session.findAll(
-				{ 
-					where: { userkey: req.cookies[config.cookieName] },
-					include: [
-						{ model: db.person, required: true },
-						{ model: db.person, as: "su", required: false}
-					]
-				}
-			).then(function(Sessions, error) { 
+				var Session = Sessions[0];
+				var cryptString = Session.id.toString()+config.sessionSalt;
+				var cryptHash = req.cookies[config.cookieName];
 
-				if (error) { 
-					reject(error);
-				}
+				if (Session) { 
 
-				if (Sessions) { 
+					if (crypt(cryptString, cryptHash) === cryptHash) {
 
-					var Session = Sessions[0];
-					var cryptString = Session.id.toString()+config.sessionSalt;
-					var cryptHash = req.cookies[config.cookieName];
+						res.locals.session = Session.id;
 
-					if (Session) { 
-
-						if (crypt(cryptString, cryptHash) === cryptHash) {
-
-							localSession.id = Session.id;
-
-							if (Session.su_id) { 
-
-								localSession.user = Session.person.id;
-								localSession.username = Session.person.email;
-								localSession.realname = Session.person.first;
-								if (Session.person.middle) { 
-									localSession.realname += " "+Session.person.middle;
-								}
-								localSession.realname += " "+Session.person.last;
-								localSession.site_admin = Session.person.site_admin;
-
-							} else { 
-
-								localSession.user = Session.person.id;
-								localSession.username = Session.person.email;
-								localSession.realname = Session.person.first;
-								if (Session.person.middle) { 
-									localSession.realname += " "+Session.person.middle;
-								}
-								localSession.realname += " "+Session.person.last;
-								localSession.site_admin = Session.person.site_admin;
-							}
-
-							resolve(localSession);
-
+						if (Session.su) { 
+							res.locals.su = Session.su.id;
+							req.app.su = Session.su.id;
 						}
+
+						res.locals.user = Session.person.id;
+						res.locals.username = Session.person.email;
+						res.locals.realname = Session.person.first;
+						if (Session.person.middle) { 
+							res.locals.realname += " "+Session.person.middle;
+						}
+						res.locals.realname += " "+Session.person.last;
+						res.locals.site_admin = Session.person.site_admin;
+
+						req.session = { 
+							user       : res.locals.user,
+							site_admin : res.locals.site_admin,
+							event      : Session.event_id,
+							category   : Session.category_id,
+						};
+
 					}
 				}
+			}
+						
+			next();
 
-				reject("No valid session found");
-
-			});
-
-			reject("No session found");
-			//END OF PROMISE
-	
 		});
+
 	};
 
-
 	module.exports = authenticate;
+
