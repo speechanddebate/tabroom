@@ -1,7 +1,7 @@
 
 // This library will create a function whereby a user ID is returned with a
 // tree of active permissions for the user.  Future tournaments, judges, and
-// current student records and school records are all covered and returned as a
+// current student records and chapter records are all covered and returned as a
 // json object to the caller.
 
 // Because I'm learning node LIKE A BOSS, I'm going to return a promise instead
@@ -15,55 +15,58 @@ var BluePromise = require('bluebird');
 		sjQuery = "", 
 		studentsQuery = "";
 
-	kingdomsKeys = "select permissions.id, permissions.tag, "+
-		"circuits.id circuitID, circuits.name circuitName, " +
-		"regions.id regionID, regions.name regionName, "+
-		"regions.circuit_id as regionCircuit, regions.ncfl_archdiocese regionArch, " + 
-		"schools.id as schoolID, schools.name schoolName, " + 
-		"tourns.id as tournID, tourns.name tournName, tourns.start, tourns.end " + 
-		"from permissions "+
-		"left join schools on schools.id = permissions.school_id " + 
-		"left join circuits on circuits.id = permissions.circuit_id " +
-		"left join regions on regions.id = permissions.region_id " +
-		"left join tourns on tourns.id = permissions.tourn_id and tourns.start > utc_timestamp() "+
-		"where permissions.person_id = ";
+	kingdomsKeys = "select permission.id, permission.tag, "+
+		"circuit.id circuitID, circuit.name circuitName, " +
+		"region.id regionID, region.name regionName, "+
+		"region.circuit_id as regionCircuit, region.archdiocese regionArch, " + 
+		"chapter.id as chapterID, chapter.name chapterName, " + 
+		"tourn.id as tournID, tourn.name tournName, tourn.start, tourn.end " + 
+		"from permission "+
+		"left join chapter on chapter.id = permission.chapter_id " + 
+		"left join circuit on circuit.id = permission.circuit_id " +
+		"left join region on region.id = permission.region_id " +
+		"left join tourn on tourn.id = permission.tourn_id "+
+			" and tourn.start > utc_timestamp() "+
+		"where permission.person_id = ";
 
 	judgesQuery = "select judge.id, judge.first, judge.last, " +
-		"class.name className, "+
+		"category.name categoryName, "+
 		"tourn.name tournName, tourn.start tournStart "+
-		"from judges judge, classes class, tourns tourn "+
+		"from judge, category, tourn "+
 		"where tourn.end > utc_timestamp() "+
-		"and tourn.id = class.tourn_id "+
-		"and class.id = judge.class_id "+
+		"and tourn.id = category.tourn_id "+
+		"and category.id = judge.category_id "+
 		"and judge.person_id = ";
 
-	sjQuery = "select school_judge.id, school_judge.first, school_judge.last, "+
-		"school.name schoolName "+
-		"from school_judges school_judge, schools school "+
-		"where school.id = school_judge.school_id "+
-		"and school_judge.person_id = ";
+	sjQuery = "select chapter_judge.id, chapter_judge.first, chapter_judge.last, "+
+		"chapter.name chapterName "+
+		"from chapter_judge, chapter "+
+		"where chapter.id = chapter_judge.chapter_id "+
+		"and chapter_judge.person_id = ";
 
 	studentsQuery = "select student.id, student.first, student.last, "+
-		"school.name schoolName "+
-		"from students student, schools school "+
-		"where school.id = student.school_id "+
+		"chapter.name chapterName "+
+		"from student, chapter "+
+		"where chapter.id = student.chapter_id "+
 		"and student.person_id = ";
 
-
-	module.exports = function (userID) { 
+	module.exports = function(userID, locals) { 
 
 		return new BluePromise ( function(resolve, reject) { 
-	
-			db.sequelize.query(kingdomsKeys + userID).spread(function(permissionRows, metadata) { 
+
+			console.log(locals);
+
+			db.sequelize.query(kingdomsKeys + userID).spread(
+				function(permissionRows, metadata) { 
 
 				var perms = {
-					circuit      : {},
-					region       : {},
-					school       : {},
-					tourn        : {},
-					judge        : {},
-					schoolJudge  : {},
-					student      : {}
+					circuit       : {},
+					region        : {},
+					chapter       : {},
+					tourn         : {},
+					judge         : {},
+					chapter_judge : {},
+					student       : {}
 				},
 
 				taken = [];
@@ -79,13 +82,13 @@ var BluePromise = require('bluebird');
 							perms.region[row.regionID] = row;
 							break;
 						case "chapter":
-							perms.school[row.schoolID] = row;
+							perms.chapter[row.chapterID] = row;
 							break;
 						case "chapter_prefs":
-							perms.school[row.schoolID] = row;
+							perms.chapter[row.chapterID] = row;
 							break;
 						case "prefs":
-							perms.school[row.schoolID] = row;
+							perms.chapter[row.chapterID] = row;
 							break;
 						default: 
 							if (row.tournName) { 
@@ -97,15 +100,18 @@ var BluePromise = require('bluebird');
 					}
 				});
 				
-				db.sequelize.query(judgesQuery + userID).spread(function(judgeRows, metadata) { 
+				db.sequelize.query(judgesQuery + userID).spread(
+					function(judgeRows, metadata) { 
 
 					perms.judges = judgeRows;
 
-					db.sequelize.query(sjQuery + userID).spread(function(sjRows, metadata) { 
+					db.sequelize.query(sjQuery + userID).spread(
+						function(sjRows, metadata) { 
 
-						perms.schoolJudges = sjRows;
+						perms.chapterJudges = sjRows;
 
-						db.sequelize.query(studentsQuery + userID).spread(function(studentRows, metadata) { 
+						db.sequelize.query(studentsQuery + userID).spread(
+							function(studentRows, metadata) { 
 
 							perms.students = studentRows;
 							resolve(perms);
