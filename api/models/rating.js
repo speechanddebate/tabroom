@@ -2,16 +2,8 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('rating', { 
-		ordinal: {
-			type: DataTypes.INTEGER(11),
-			allowNull: true
-		},
-		percentile: { 
-			type: DataTypes.FLOAT,
-			allowNull: true
-		},
 		type : {
-			type: DataTypes.ENUM('squad', 'entry', 'coach'),
+			type: DataTypes.ENUM('school', 'entry', 'coach'),
 			allowNull: true
 		},
 		draft : { 
@@ -19,8 +11,16 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: 0
 		},
-		sheet : {
-			type: DataTypes.INTEGER(11),
+		entered : { 
+			type: DataTypes.DATE,
+			allowNull: true
+		},
+		ordinal: {
+			type: DataTypes.INTEGER(6),
+			allowNull: true
+		},
+		percentile: { 
+			type: DataTypes.DECIMAL(8,2),
 			allowNull: true
 		}
 	});

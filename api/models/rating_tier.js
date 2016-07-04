@@ -2,37 +2,40 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('rating_tier', { 
-		name: {
-		  type: DataTypes.STRING(32),
-		  allowNull: true
-		},
 		type : {
 			type: DataTypes.ENUM('mpj', 'coach'),
 			allowNull: true
 		},
+		name: {
+			type: DataTypes.STRING(15),
+			allowNull: true
+		},
 		description: {
-		  type: DataTypes.STRING,
-		  allowNull: true
+			type: DataTypes.STRING,
+			allowNull: true
 		},
 		strike: { 
-		  type: DataTypes.BOOLEAN,
-		  allowNull: true
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
 		},
 		conflict: { 
-		  type: DataTypes.BOOLEAN,
-		  allowNull: true
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
 		},
 		min: { 
-		  type: DataTypes.INTEGER(4),
-		  allowNull: true
+			type: DataTypes.DECIMAL(8,2),
+			allowNull: true
 		},
 		max: { 
-		  type: DataTypes.INTEGER(4),
-		  allowNull: true
+			type: DataTypes.DECIMAL(8,2),
+			allowNull: true
 		},
-		default_tier: { 
-		  type: DataTypes.BOOLEAN,
-		  allowNull: true
+		start: { 
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
 		}
 	});
 };

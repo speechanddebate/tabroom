@@ -2,8 +2,7 @@ package Tab::Tourn;
 use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
-Tab::Tourn->columns(Essential => qw/name start end webname reg_start reg_end created_by
-									tz city state country hidden timestamp foreign_site foreign_id googleplus/);
+Tab::Tourn->columns(Essential => qw/name city state country webname start end reg_start reg_end tz hidden timestamp /);
 Tab::Tourn->columns(TEMP => qw/schoolid/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
@@ -21,7 +20,7 @@ Tab::Tourn->has_many(schools => 'Tab::School', 'tourn' => { order_by => 'name'} 
 Tab::Tourn->has_many(housings => 'Tab::Housing', 'tourn');
 Tab::Tourn->has_many(webpages => 'Tab::Webpage', 'tourn');
 Tab::Tourn->has_many(followers => 'Tab::Follower', 'tourn');
-Tab::Tourn->has_many(groups => 'Tab::JudgeGroup', 'tourn' => { order_by => 'name'} );
+Tab::Tourn->has_many(groups => 'Tab::Category', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn' => { order_by => 'start'} );
 Tab::Tourn->has_many(sweep_sets => 'Tab::SweepSet', 'tourn' => {order_by => 'name'} );
 Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
@@ -30,20 +29,19 @@ Tab::Tourn->has_many(tourn_sites => 'Tab::TournSite', 'tourn');
 Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn' => { order_by => 'name'} );
 Tab::Tourn->has_many(permissions => 'Tab::Permission', 'tourn');
 Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
-Tab::Tourn->has_many(school_fines => 'Tab::SchoolFine', 'tourn');
-Tab::Tourn->has_many(judge_groups => 'Tab::JudgeGroup', 'tourn');
-Tab::Tourn->has_many(tourn_changes => 'Tab::TournChange', 'tourn');
-Tab::Tourn->has_many(event_doubles => 'Tab::EventDouble', 'tourn');
+Tab::Tourn->has_many(fines => 'Tab::Fine', 'tourn');
+Tab::Tourn->has_many(categories => 'Tab::Category', 'tourn');
+Tab::Tourn->has_many(change_logs => 'Tab::ChangeLog', 'tourn');
+Tab::Tourn->has_many(patterns => 'Tab::Pattern', 'tourn');
 Tab::Tourn->has_many(tiebreak_sets => 'Tab::TiebreakSet', 'tourn');
 Tab::Tourn->has_many(housing_slots => 'Tab::HousingSlots', 'tourn');
 Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit', 'tourn');
 
-Tab::Tourn->has_many(admins => [ Tab::Permission => 'account']);
+Tab::Tourn->has_many(admins => [ Tab::Permission => 'person']);
 Tab::Tourn->has_many(sites => [Tab::TournSite => 'site']);
 Tab::Tourn->has_many(circuits => [Tab::TournCircuit => 'circuit']);
 
 __PACKAGE__->_register_datetimes( qw/start end reg_start reg_end timestamp/);
-
 
 sub location { 
 	my $self = shift;

@@ -19,10 +19,6 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING(64),
 			allowNull: true
 		},
-		name: {
-			type: DataTypes.STRING(64),
-			allowNull: true
-		},
 		accesses: {
 			type: DataTypes.INTEGER(11),
 			allowNull: false,
@@ -32,12 +28,12 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
-		pass_changekey: {
-			type: DataTypes.STRING(128),
-			allowNull: true
-		},
 		pass_timestamp: {
 			type: DataTypes.DATE,
+			allowNull: true
+		},
+		pass_changekey: {
+			type: DataTypes.STRING(127),
 			allowNull: true
 		},
 		pass_change_expires: {

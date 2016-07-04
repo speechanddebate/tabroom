@@ -2,10 +2,10 @@ package Tab::Login;
 use base 'Tab::DBI';
 Tab::Login->table('login');
 Tab::Login->columns(Primary => qw/id/);
-Tab::Login->columns(Essential => qw/username password sha512 name person/);
-Tab::Login->columns(Others => qw/accesses last_access pass_changekey pass_timestamp pass_change_expires source timestamp ualt_id nsda_login_id/);
+Tab::Login->columns(Essential => qw/username password sha512 person accesses last_access/);
+Tab::Login->columns(Others => qw/pass_changekey pass_timestamp pass_change_expires source timestamp ualt_id nsda_login_id/);
 
-Tab::Login->has_a(person => 'Tab::Account');
+Tab::Login->has_a(person => 'Tab::Person');
 
 sub account { 
 	my $login = shift; 

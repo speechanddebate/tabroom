@@ -3,24 +3,28 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('student', { 
 		first: {
-			type: DataTypes.STRING,
+			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
 		},
 		middle: { 
-			type: DataTypes.STRING,
+			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
 		},
 		last: {
-			type: DataTypes.STRING,
+			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
 		},
+		phonetic: {
+			type: DataTypes.STRING(63),
+			allowNull: true
+		},
 		grad_year: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.INTEGER(6),
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '2010'
 		},
 		novice: {
 			type: DataTypes.BOOLEAN,
@@ -33,11 +37,23 @@ module.exports = function(sequelize, DataTypes) {
 			defaultValue: '0'
 		},
 		gender: {
-			type: 'CHAR(1)',
+			type: DataTypes.CHAR(1),
 			allowNull: true
 		},
-		phonetic: {
-			type: DataTypes.STRING,
+		diet: {
+			type: DataTypes.STRING(31),
+			allowNull: true
+		},
+		birthdate: { 
+			type: DataTypes.DATE,
+			allowNull: true
+		},
+		school_sid: {
+			type: DataTypes.STRING(63),
+			allowNull: true
+		},
+		race: {
+			type: DataTypes.STRING(31),
 			allowNull: true
 		},
 		ualt_id: {
@@ -46,6 +62,5 @@ module.exports = function(sequelize, DataTypes) {
 		}
 	});
 };
-
 
 

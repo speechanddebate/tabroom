@@ -11,10 +11,14 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.TEXT,
 			allowNull: false
 		},
-		recipients: { 
+		sent_to: { 
 			type: DataTypes.STRING(128),
 			allowNull: false,
 			defaultValue: ''
+		},
+		sent_at: { 
+			type: DataTypes.DATE,
+			allowNull: true
 		}
 	});
 };

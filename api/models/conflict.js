@@ -3,7 +3,7 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('conflict', { 
 		type: {
-			type: DataTypes.STRING(8),
+			type: DataTypes.STRING(15),
 			allowNull: false,
 			defaultValue: ''
 		}

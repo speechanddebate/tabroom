@@ -2,7 +2,7 @@ package Tab::Concession;
 use base 'Tab::DBI';
 Tab::Concession->table('concession');
 Tab::Concession->columns(Primary => qw/id/);
-Tab::Concession->columns(Essential => qw/name price tourn deadline description timestamp cap/);
+Tab::Concession->columns(Essential => qw/name price tourn deadline description timestamp cap school_cap/);
 
 Tab::Concession->has_a(tourn => 'Tab::Tourn');
 Tab::Concession->has_many(purchases => 'Tab::ConcessionPurchase', 'concession');

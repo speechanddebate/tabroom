@@ -2,15 +2,19 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('follower', { 
-		cell: {
-			type: DataTypes.STRING(32),
+		type: {
+			type: DataTypes.STRING(8),
 			allowNull: false
 		},
-		email: {
+		cell: {
+			type: DataTypes.INTEGER(20),
+			allowNull: false
+		},
+		domain: {
 			type: DataTypes.STRING(64),
 			allowNull: true
 		},
-		domain: {
+		email: {
 			type: DataTypes.STRING(64),
 			allowNull: true
 		}
