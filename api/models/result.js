@@ -3,11 +3,11 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('result', { 
 		rank: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
 		percentile: { 
-			type: DataTypes.FLOAT,
+			type: DataTypes.DECIMAL(6,2),
 			allowNull: true
 		},
 		honor: {

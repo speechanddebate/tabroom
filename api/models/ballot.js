@@ -3,7 +3,15 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('ballot', { 
 		side: {
-			type: DataTypes.INTEGER(4),
+			type: DataTypes.INTEGER(1),
+			allowNull: true
+		},
+		speakerorder: {
+			type: DataTypes.INTEGER(6),
+			allowNull: true
+		},
+		speechnumber: {
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
 		bye: {
@@ -20,15 +28,6 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
-		},
-		speakerorder: {
-			type: DataTypes.INTEGER(11),
-			allowNull: false,
-			defaultValue: '0'
-		},
-		speechnumber: {
-			type: DataTypes.INTEGER(11),
-			allowNull: true
 		},
 		seed: {
 			type: DataTypes.BOOLEAN,
