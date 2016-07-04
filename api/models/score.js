@@ -15,12 +15,12 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.TEXT,
 			allowNull: true
 		},
-		position: {
-			type: DataTypes.INTEGER(11),
+		speech: {
+			type: DataTypes.INTEGER(4),
 			allowNull: true
 		},
-		speech: {
-			type: DataTypes.INTEGER(11),
+		position: {
+			type: DataTypes.INTEGER(4),
 			allowNull: true
 		}
 	});

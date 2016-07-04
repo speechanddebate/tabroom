@@ -25,10 +25,11 @@ module.exports = function(sequelize, DataTypes) {
 		},
 		hidden: {
 			type: DataTypes.BOOLEAN,
-			allowNull: true
+			allowNull: false,
+			defaultValue: '0'
 		},
 		webname: {
-			type: DataTypes.STRING(32),
+			type: DataTypes.STRING(63),
 			allowNull: true
 		},
 		tz: {

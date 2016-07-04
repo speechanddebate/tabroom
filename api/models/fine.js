@@ -2,12 +2,12 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('fine', { 
-		amount: { 
-			type: DataTypes.FLOAT,
+		reason: { 
+			type: DataTypes.STRING(63),
 			allowNull: true
 		},
-		reason: { 
-			type: DataTypes.STRING,
+		amount: { 
+			type: DataTypes.FLOAT,
 			allowNull: true
 		},
 		payment: { 
@@ -23,9 +23,12 @@ module.exports = function(sequelize, DataTypes) {
 		deleted_at: { 
 			type: DataTypes.DATE,
 			allowNull: true
+		},
+		levied_at: { 
+			type: DataTypes.DATE,
+			allowNull: true
 		}
 	});
 };
-
 
 

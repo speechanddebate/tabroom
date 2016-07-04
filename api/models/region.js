@@ -11,24 +11,20 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING(8),
 			allowNull: true
 		},
-		active: { 
+		quota: { 
+			type: DataTypes.INTEGER(4),
+			allowNull: true
+		},
+		archdiocese: { 
 			type: DataTypes.BOOLEAN,
 			allowNull: true
 		},
-		ncfl_quota: { 
-			type: DataTypes.INTEGER(11),
+		cooke_points: { 
+			type: DataTypes.INTEGER,
 			allowNull: true
 		},
-		ncfl_archdiocese: { 
-			type: DataTypes.BOOLEAN,
-			allowNull: true
-		},
-		ncfl_cooke: { 
-			type: DataTypes.BOOLEAN,
-			allowNull: true
-		},
-		ncfl_sweeps: { 
-			type: DataTypes.BOOLEAN,
+		sweeps: { 
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		}
 	});

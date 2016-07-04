@@ -18,7 +18,7 @@ Tab::Circuit->has_many(circuit_memberships => "Tab::CircuitMembership");
 
 Tab::Circuit->has_many(tourns => [ Tab::TournCircuit => 'tourn' ]);
 Tab::Circuit->has_many(chapters => [ Tab::ChapterCircuit => 'chapter' ]);
-Tab::Circuit->has_many(admins => [ Tab::Permission => 'account' ]);
+Tab::Circuit->has_many(admins => [ Tab::Permission => 'person' ]);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 

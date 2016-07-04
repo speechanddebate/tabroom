@@ -12,7 +12,8 @@ Tab::Region->has_a(tourn => 'Tab::Tourn');
 Tab::Region->has_many(schools => 'Tab::School', 'region');
 Tab::Region->has_many(fines => 'Tab::RegionFine', 'region');
 Tab::Region->has_many(permissions => 'Tab::Permission', 'region');
-Tab::Region->has_many(admins => [ Tab::Permission => 'account']);
+Tab::Region->has_many(admins => [ Tab::Permission => 'person']);
+Tab::Region->has_many(persons => [ Tab::Permission => 'person']);
 Tab::Region->has_many(chapters => [ Tab::ChapterCircuit => 'chapter']);
 
 

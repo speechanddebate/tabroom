@@ -10,6 +10,25 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING(128),
 			allowNull: true
 		},
+		active: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
+		ada: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
+		tba: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
+		seed: {
+			type: DataTypes.STRING(15),
+			allowNull: true
+		},
 		dropped: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
@@ -25,13 +44,10 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
-		ada: {
+		unconfirmed: {
 			type: DataTypes.BOOLEAN,
-			allowNull: true
-		},
-		tba: {
-			type: DataTypes.BOOLEAN,
-			allowNull: true
+			allowNull: false,
+			defaultValue: '0'
 		}
 	});
 };

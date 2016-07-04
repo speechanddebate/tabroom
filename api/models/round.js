@@ -2,29 +2,34 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('round', { 
-		number: {
-			type: DataTypes.INTEGER(11),
+		type: {
+			type: DataTypes.STRING(15),
 			allowNull: true
 		},
 		name: {
-			type: DataTypes.STRING,
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
-		type: {
-			type: DataTypes.STRING,
+		label: {
+			type: DataTypes.STRING(31),
+			allowNull: true
+		},
+		flighted: {
+			type: DataTypes.INTEGER(4),
 			allowNull: true
 		},
 		published: {
-			type: DataTypes.BOOLEAN,
-			allowNull: true
-		},
-		post_results: {
-			type: DataTypes.INTEGER(11),
+			type: DataTypes.INTEGER(4),
 			allowNull: false,
 			defaultValue: '0'
 		},
-		flighted: {
-			type: DataTypes.INTEGER(6),
+		post_results     : {
+			type         : DataTypes.INTEGER(4),
+			allowNull    : false,
+			defaultValue : '0'
+		},
+		created: {
+			type: DataTypes.DATE,
 			allowNull: true
 		},
 		start_time: {

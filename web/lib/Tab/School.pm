@@ -1,8 +1,7 @@
 package Tab::School;
 use base 'Tab::DBI';
 Tab::School->table('school');
-Tab::School->columns(Essential => qw/id tourn name chapter region code contact/);
-Tab::School->columns(Others => qw/registered timestamp/);
+Tab::School->columns(Essential => qw/id name code onsite tourn chapter region timestamp/);
 
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_a(chapter => 'Tab::Chapter');
@@ -11,23 +10,12 @@ Tab::School->has_a(region => 'Tab::Region');
 Tab::School->has_many(purchases => 'Tab::ConcessionPurchase', 'school');
 Tab::School->has_many(entries => 'Tab::Entry', 'school');
 Tab::School->has_many(judges => 'Tab::Judge', 'school');
-Tab::School->has_many(fines => 'Tab::SchoolFine', 'school');
+Tab::School->has_many(fines => 'Tab::Fine', 'school');
 Tab::School->has_many(hires => 'Tab::JudgeHire', 'school');
 Tab::School->has_many(files => 'Tab::File', 'school');
 Tab::School->has_many(followers => [Tab::Follower => 'follower']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
-
-
-sub events { 
-	my $self = shift;
-	return Tab::Event->search_by_school($self->id);
-}
-
-sub students { 
-	my $self = shift;
-	return Tab::Student->search_by_school($self->id);
-}
 
 sub short_name {
 	my ($self, $limit) = @_;

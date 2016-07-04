@@ -2,18 +2,18 @@ package Tab::Student;
 use base 'Tab::DBI';
 Tab::Student->table('student');
 Tab::Student->columns(Primary => qw/id/);
-Tab::Student->columns(Essential => qw/account first middle last chapter novice grad_year retired gender acct_request diet/);
-Tab::Student->columns(Other => qw/timestamp phonetic created race birthdate school_sid ualt_id/);
+Tab::Student->columns(Essential => qw/person first middle last chapter novice grad_year retired gender person_request diet/);
+Tab::Student->columns(Other => qw/timestamp phonetic race birthdate school_sid ualt_id/);
 Tab::Student->columns(TEMP => qw/code entry event school region/);
 
 Tab::Student->has_a(chapter => 'Tab::Chapter');
-Tab::Student->has_a(account => 'Tab::Account');
-Tab::Student->has_a(acct_request => 'Tab::Account');
+Tab::Student->has_a(person => 'Tab::Person');
+Tab::Student->has_a(person_request => 'Tab::Person');
 
 Tab::Student->has_many(entries => [Tab::EntryStudent => 'entry']);
 Tab::Student->has_many(entry_students => 'Tab::EntryStudent', 'student');
 
-__PACKAGE__->_register_datetimes( qw/timestamp created/);
+__PACKAGE__->_register_datetimes( qw/timestamp/);
 __PACKAGE__->_register_dates( qw/birthdate/);
 
 

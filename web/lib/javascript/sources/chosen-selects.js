@@ -21,18 +21,18 @@
 
     SelectParser.prototype.add_node = function(child) {
       if (child.nodeName.toUpperCase() === "OPTGROUP") {
-        return this.add_group(child);
+        return this.add_category(child);
       } else {
         return this.add_option(child);
       }
     };
 
-    SelectParser.prototype.add_group = function(group) {
-      var group_position, option, _i, _len, _ref, _results;
+    SelectParser.prototype.add_category = function(group) {
+      var category_position, option, _i, _len, _ref, _results;
 
-      group_position = this.parsed.length;
+      category_position = this.parsed.length;
       this.parsed.push({
-        array_index: group_position,
+        array_index: category_position,
         group: true,
         label: this.escapeExpression(group.label),
         children: 0,
@@ -42,16 +42,16 @@
       _results = [];
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         option = _ref[_i];
-        _results.push(this.add_option(option, group_position, group.disabled));
+        _results.push(this.add_option(option, category_position, group.disabled));
       }
       return _results;
     };
 
-    SelectParser.prototype.add_option = function(option, group_position, group_disabled) {
+    SelectParser.prototype.add_option = function(option, category_position, category_disabled) {
       if (option.nodeName.toUpperCase() === "OPTION") {
         if (option.text !== "") {
-          if (group_position != null) {
-            this.parsed[group_position].children += 1;
+          if (category_position != null) {
+            this.parsed[category_position].children += 1;
           }
           this.parsed.push({
             array_index: this.parsed.length,
@@ -60,8 +60,8 @@
             text: option.text,
             html: option.innerHTML,
             selected: option.selected,
-            disabled: group_disabled === true ? group_disabled : option.disabled,
-            group_array_index: group_position,
+            disabled: category_disabled === true ? category_disabled : option.disabled,
+            category_array_index: category_position,
             classes: option.className,
             style: option.style.cssText
           });
@@ -147,7 +147,7 @@
       this.disable_search_threshold = this.options.disable_search_threshold || 0;
       this.disable_search = this.options.disable_search || false;
       this.enable_split_word_search = this.options.enable_split_word_search != null ? this.options.enable_split_word_search : true;
-      this.group_search = this.options.group_search != null ? this.options.group_search : true;
+      this.category_search = this.options.category_search != null ? this.options.category_search : true;
       this.search_contains = this.options.search_contains || false;
       this.single_backstroke_delete = this.options.single_backstroke_delete != null ? this.options.single_backstroke_delete : true;
       this.max_selected_options = this.options.max_selected_options || Infinity;
@@ -210,7 +210,7 @@
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         data = _ref[_i];
         if (data.group) {
-          content += this.result_add_group(data);
+          content += this.result_add_category(data);
         } else {
           content += this.result_add_option(data);
         }
@@ -244,7 +244,7 @@
       if (option.selected) {
         classes.push("result-selected");
       }
-      if (option.group_array_index != null) {
+      if (option.category_array_index != null) {
         classes.push("group-option");
       }
       if (option.classes !== "") {
@@ -254,8 +254,8 @@
       return "<li class=\"" + (classes.join(' ')) + "\"" + style + " data-option-array-index=\"" + option.array_index + "\">" + option.search_text + "</li>";
     };
 
-    AbstractChosen.prototype.result_add_group = function(group) {
-      if (!(group.search_match || group.group_match)) {
+    AbstractChosen.prototype.result_add_category = function(group) {
+      if (!(group.search_match || group.category_match)) {
         return '';
       }
       if (!(group.active_options > 0)) {
@@ -294,7 +294,7 @@
     };
 
     AbstractChosen.prototype.winnow_results = function() {
-      var escapedSearchText, option, regex, regexAnchor, results, results_group, searchText, startpos, text, zregex, _i, _len, _ref;
+      var escapedSearchText, option, regex, regexAnchor, results, results_category, searchText, startpos, text, zregex, _i, _len, _ref;
 
       this.no_results_clear();
       results = 0;
@@ -307,20 +307,20 @@
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         option = _ref[_i];
         option.search_match = false;
-        results_group = null;
+        results_category = null;
         if (this.include_option_in_results(option)) {
           if (option.group) {
-            option.group_match = false;
+            option.category_match = false;
             option.active_options = 0;
           }
-          if ((option.group_array_index != null) && this.results_data[option.group_array_index]) {
-            results_group = this.results_data[option.group_array_index];
-            if (results_group.active_options === 0 && results_group.search_match) {
+          if ((option.category_array_index != null) && this.results_data[option.category_array_index]) {
+            results_category = this.results_data[option.category_array_index];
+            if (results_category.active_options === 0 && results_category.search_match) {
               results += 1;
             }
-            results_group.active_options += 1;
+            results_category.active_options += 1;
           }
-          if (!(option.group && !this.group_search)) {
+          if (!(option.group && !this.category_search)) {
             option.search_text = option.group ? option.label : option.html;
             option.search_match = this.search_string_match(option.search_text, regex);
             if (option.search_match && !option.group) {
@@ -332,10 +332,10 @@
                 text = option.search_text.substr(0, startpos + searchText.length) + '</em>' + option.search_text.substr(startpos + searchText.length);
                 option.search_text = text.substr(0, startpos) + '<em>' + text.substr(startpos);
               }
-              if (results_group != null) {
-                results_group.group_match = true;
+              if (results_category != null) {
+                results_category.category_match = true;
               }
-            } else if ((option.group_array_index != null) && this.results_data[option.group_array_index].search_match) {
+            } else if ((option.category_array_index != null) && this.results_data[option.category_array_index].search_match) {
               option.search_match = true;
             }
           }
