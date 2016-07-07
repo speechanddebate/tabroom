@@ -15,9 +15,15 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
-		hidden: { 
+		registrant: { 
 			type: DataTypes.BOOLEAN,
-			allowNull: true
+			allowNull: false,
+			defaultValue: '0'
+		},
+		conflictee: { 
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
 		}
 	});
 };

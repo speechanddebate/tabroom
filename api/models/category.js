@@ -8,7 +8,7 @@ module.exports = function(sequelize, DataTypes) {
 			defaultValue: ''
 		},
 		abbr: {
-			type: DataTypes.STRING(8),
+			type: DataTypes.STRING(15),
 			allowNull: true
 		}
 	});

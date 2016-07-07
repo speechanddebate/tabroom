@@ -10,11 +10,11 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.INTEGER(20),
 			allowNull: false
 		},
-		email: {
+		domain: {
 			type: DataTypes.STRING(64),
 			allowNull: true
 		},
-		domain: {
+		email: {
 			type: DataTypes.STRING(64),
 			allowNull: true
 		}
