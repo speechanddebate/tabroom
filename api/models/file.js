@@ -12,10 +12,24 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: ''
 		},
+		posting: { 
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: 0
+		},
+		result: { 
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: 0
+		},
 		published: { 
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: 0
+		},
+		uploaded: { 
+			type: DataTypes.DATE,
+			allowNull: true
 		}
 	});
 };

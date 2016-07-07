@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('housing_request', { 
+	return sequelize.define('housing', { 
 		type: { 
 			type: DataTypes.ENUM('judge', 'student'),
 			allowNull: false,
@@ -12,13 +12,13 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0000-00-00'
 		},
-		tba: { 
-			type: DataTypes.INTEGER(4),
+		waitlist: { 
+			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: 0
 		},
-		waitlist: { 
-			type: DataTypes.BOOLEAN,
+		tba: { 
+			type: DataTypes.INTEGER(4),
 			allowNull: false,
 			defaultValue: 0
 		},

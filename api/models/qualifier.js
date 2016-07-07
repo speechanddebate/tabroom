@@ -2,12 +2,12 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('qualifier', { 
-		tag: {
-			type: DataTypes.STRING(32),
+		name: {
+			type: DataTypes.STRING(63),
 			allowNull: false
 		},
-		value: {
-			type: DataTypes.STRING(64),
+		result: {
+			type: DataTypes.STRING(127),
 			allowNull: true
 		}
 	});

@@ -3,7 +3,7 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('pattern', { 
 		name: {
-			type: DataTypes.STRING(32),
+			type: DataTypes.STRING(31),
 			allowNull: false,
 			defaultValue: ''
 		},

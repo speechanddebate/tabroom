@@ -17,11 +17,13 @@ module.exports = function(sequelize, DataTypes) {
 		},
 		ada: {
 			type: DataTypes.BOOLEAN,
-			allowNull: true
+			allowNull: false,
+			defaultValue: '0'
 		},
 		tba: {
 			type: DataTypes.BOOLEAN,
-			allowNull: true
+			allowNull: false,
+			defaultValue: '0'
 		},
 		seed: {
 			type: DataTypes.STRING(15),

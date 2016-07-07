@@ -8,7 +8,7 @@ module.exports = function(sequelize, DataTypes) {
 			defaultValue: '0000-00-00'
 		},
 		slots: { 
-			type: DataTypes.INTEGER(8),
+			type: DataTypes.INTEGER(6),
 			allowNull: true
 		}
 	});

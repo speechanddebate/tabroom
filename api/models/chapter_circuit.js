@@ -7,9 +7,9 @@
  */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('school_circuit', { 
+	return sequelize.define('chapter_circuit', { 
 		code: {
-			type: DataTypes.STRING(12),
+			type: DataTypes.STRING(15),
 			allowNull: false,
 			defaultValue: ''
 		},
@@ -17,7 +17,7 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
-		},
+		}
 	});
 };
 
