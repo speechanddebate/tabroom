@@ -1,0 +1,257 @@
+<%args>
+	$person
+	$round_id
+	$tourn
+	$return => undef
+</%args>
+<%init>
+
+	my $round = Tab::Round->retrieve($round_id);
+	my $round_type = $round->type;
+
+	# As this is a multisite tournament then the debaters in a given site
+	# should not move between sites during a tournament day.
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz; 
+
+	my $round_time = $round->timeslot->start;
+	my $today_start_string = $round_time->year."-".$round_time->month."-".$round_time->day." 00:00:00";
+	my $today_end_string = $round_time->year."-".$round_time->month."-".$round_time->day." 23:59:59";
+
+	Tab::Round->set_sql( today => " 
+		select round.* 
+		from round, timeslot
+		where round.timeslot = timeslot.id
+		and timeslot.start > ?
+		and timeslot.start < ? 
+		and round.event = ? 
+	");
+
+	my @todays_rounds = Tab::Round->search_today( $today_start_string, $today_end_string, $round->event->id);
+
+	foreach my $today (@todays_rounds) { 
+		$m->comp("/funclib/clean_empty_rounds.mas", round => $round);
+	}
+
+	my @rooms = $m->comp("/funclib/clean_multisite_rooms.mas", round => $round);
+
+	my %room_strikes = $m->comp("/funclib/room_strikes.mas", round => $round, tourn => $tourn);
+
+	my %previous_rooms = ();
+
+	my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
+
+	my %panels_by_entry;
+	my %panel_entries;
+
+	my %entry_already_site;
+	my %entry_opponents;
+
+	foreach my $today (@todays_rounds) {
+
+		foreach my $panel ($today->panels) { 
+
+			my @entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
+
+			push @{$panel_entries{$panel->id}}, @entries;
+
+			foreach my $entry (@entries) { 
+
+				$panels_by_entry{$entry->id}{$panel->round->id} = $panel;
+				
+				if ($panel->room->id) { 
+					$entry_already_site{$entry->id} = $panel->room->site->id;
+				}
+			
+				foreach my $other (@entries) { 
+					next if $other == $entry;
+					push @{$entry_opponents{$entry->id}}, $other; 
+				}
+			}
+
+		}
+	}
+
+	my $counter = 1; 
+	my %cohort_by_entry;
+	my %cohorts;
+
+	foreach my $entry (@entries) { 
+
+		next if $cohort_by_entry{$entry->id};
+
+		foreach my $opp (@{$entry_opponents{$entry->id}}) { 
+
+			if ($cohort_by_entry{$opp->id}) { 
+
+				$cohort_by_entry{$entry->id} = $cohort_by_entry{$opp->id};
+
+			} else { 
+
+				foreach my $their_opp (@{$entry_opponents{$opp->id}}) { 
+					$cohort_by_entry{$entry->id} = $cohort_by_entry{$their_opp->id};
+				}
+
+			}
+
+		}
+
+		unless ($cohort_by_entry{$entry->id}) { 
+			$cohort_by_entry{$entry->id} = $counter++;
+		}
+
+		foreach my $opp (@{$entry_opponents{$entry->id}}) { 
+			$cohort_by_entry{$opp->id} = $cohort_by_entry{$entry->id};
+		}
+
+		push @{$cohorts{$cohort_by_entry{$entry->id}}{"entry"}}, $entry;
+
+		$cohorts{$cohort_by_entry{$entry->id}}{"site"} = $entry_already_site{$entry->id} 
+			if $entry_already_site{$entry->id} > 0;
+
+		foreach my $today (@todays_rounds) { 
+
+			unless ($panels_by_entry{$entry}{$today->id} && $panels_by_entry{$entry}{$today->id}->room > 0) { 
+				push @{$cohorts{$cohort_by_entry{$entry->id}}{"panel"}}, $panels_by_entry{$entry}{$today->id};
+			}
+		}
+
+		$cohorts{$cohort_by_entry{$entry->id}}{"ada"} = 0 unless $cohorts{$cohort_by_entry{$entry->id}}{"ada"};
+		$cohorts{$cohort_by_entry{$entry->id}}{"ada"}++ if $entry->ada;
+
+	}
+
+	my @all_cohorts = keys %cohorts;
+
+	my %seen = (); 
+	@all_cohorts = grep { ! $seen{$_} ++ } @all_cohorts;
+
+	# Randomize cohorts so they don't always come out the same way.
+
+	use List::Util 'shuffle';
+	@all_cohorts = shuffle(@all_cohorts); 
+
+	# But then sort any cohorts that have ADA entries up to the top priority
+
+	@all_cohorts = sort {$cohorts{$b}{"ada"} <=> $cohorts{$a}{"ada"}} @all_cohorts;
+
+	# Now put the rooms available together by site.  Use the largest sites first. 
+
+	my %site_rooms;
+
+	foreach my $room (@rooms) { 
+		push @{$site_rooms{$room->site->id}{"rooms"}}, $room;
+		$site_rooms{$room->site->id}{"ada"} = 0 unless $site_rooms{$room->site->id}{"ada"};
+		$site_rooms{$room->site->id}{"ada"}++ if $room->ada;
+	}
+
+	my @sites = keys %site_rooms;
+	@sites = sort { scalar @{$site_rooms{$b}{"rooms"}} <=> scalar @{$site_rooms{$a}{"rooms"}} } @sites;
+	@sites = sort { $site_rooms{$b}{"ada"} <=> scalar $site_rooms{$a}{"ada"} } @sites;
+
+	my %taken;
+
+	foreach my $cohort (@all_cohorts) {
+
+		next unless $cohorts{$cohort}{"panel"};
+		
+		my @panels = @{$cohorts{$cohort}{"panel"}};
+
+		my %panels_by_round;
+
+		my $max_panels;
+
+		my %pseen = (); 
+		@panels = grep { ! $pseen{$_->id} ++ } @panels;
+
+		foreach my $panel (@panels) {
+
+			push @{$panels_by_round{$panel->round->id}}, $panel;
+
+			$max_panels = scalar @{$panels_by_round{$panel->round->id}} 
+				if (scalar @{$panels_by_round{$panel->round->id}}) > $max_panels;
+		}
+
+		my $first_site = $cohorts{$cohort}{"site"};
+
+		# Try the existing site we're in first;
+		unshift @sites, $first_site if $first_site;
+
+		foreach my $site_id (@sites) { 
+
+			my @available_rooms;
+
+			foreach my $room (@{$site_rooms{$site_id}{"rooms"}}) { 
+				next if $taken{"room_".$room->id};
+				push @available_rooms, $room;
+			}
+
+			next if (scalar @available_rooms) < $max_panels;
+
+			foreach my $round_id (keys %panels_by_round) {
+
+				# Do any ADA rooms first.  There's probably a more elegant
+				# solution than running through the whole thing twice but for a
+				# 60ish team tournament fuck it, this is fast enough and then
+				# some. 
+
+				PANEL:
+				foreach my $panel (@{$panels_by_round{$round_id}}) { 
+
+					next if $taken{"panel_".$panel->id};
+
+					foreach my $entry (@{$panel_entries{$panel->id}}) {
+						next PANEL unless $entry->ada;
+					}
+
+					foreach my $room (@available_rooms) { 
+						next unless $room->ada;
+						next if $taken{"room_".$room->id."_".$round_id};
+						$taken{"room_".$room->id}++;
+						$taken{"room_".$room->id."_".$round_id}++;
+						$taken{"panel_".$panel->id}++;
+						$panel->room($room->id);
+						$panel->update;
+
+						next PANEL;
+					}
+
+				}
+
+				PANEL:
+				foreach my $panel (@{$panels_by_round{$round_id}}) { 
+					
+					next if $taken{"panel_".$panel->id};
+
+					foreach my $room (@available_rooms) { 
+
+						next if $taken{"room_".$room->id."_".$round_id};
+
+						$taken{"room_".$room->id}++;
+						$taken{"room_".$room->id."_".$round_id}++;
+						$taken{"panel_".$panel->id}++;
+
+						$panel->room($room->id);
+						$panel->update;
+
+						next PANEL;
+					}
+
+				}
+
+			}
+
+		}
+
+	}
+
+	my $msg = "Rooms have been assigned to ";
+
+	foreach my $today (@todays_rounds) {
+		$msg .= " ".$today->realname;
+	}
+
+	$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&msg=$msg");
+
+</%init>
