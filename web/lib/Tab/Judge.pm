@@ -29,6 +29,18 @@ Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where category =
 
 __PACKAGE__->_register_datetimes( qw/timestamp /);
 
+sub schoolname { 
+
+	my $self = shift;
+
+	if ($self->school) { 
+		return $self->school->short_name;
+	} else { 
+		return "Hired";
+	}
+
+}
+
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
