@@ -13,11 +13,12 @@
 	$m->comp("/funclib/round_clear_judges.mas", round => $round, nobye => 1);
 
 	my %priorities = (
-		same_school => 1000000000,
-		conflict    => 100000000,
-		rank        => 100000,
-		repeated    => 10000,
-		site_move   => 1000,
+		same_school => 1000000000000,
+		conflict    => 100000000000,
+		rating      => 1000000,
+		repeated    => 100000000,
+		site_move   => 10000000,
+		schoolmate  => 1000,
 		regionmate  => 100,
 		same_region => 100,
 		gender      => 10,
@@ -49,6 +50,8 @@
 
 	my %judges;
 	my %entries;
+	my %panels;
+	my %rounds; 
 
 	# Try to keep the judge in the same location
 	foreach my $today (@todays_rounds) { 
@@ -56,13 +59,50 @@
 		my @round_judges = $m->comp("/funclib/round_judges.mas", round => $today);
 
 		foreach my $round_judge (@round_judges) { 
+
 			$judges{$round_judge->id}{"site"} = $round_judge->site;
+
+			# Must undef it or otherwise this judge object will collide with
+			# the ones below:
 			undef $round_judge;
 		}
 
 	}
 
+	my @clear_judges;
 	my @all_judges =  $m->comp("/funclib/category_judges.mas", category => $category, active => 1);
+
+	my %strikes = $m->comp("/funclib/category_strikes.mas", category => $category);
+
+	foreach my $all_judge (@all_judges) { 
+
+		#Eliminate judges who are time strike, event struck or non-elim struck;
+		next if $strikes{$all_judge->id}{"rounds"}{$round->id};
+
+		my $site = $judges{$all_judge->id}{"site"};
+
+		$judges{$all_judge->id} = $all_judge;
+		$judges{$all_judge->id}{"rating"} = $all_judge->tab_rating;
+		$judges{$all_judge->id}{"neutral"} = $all_judge->neutral;
+		$judges{$all_judge->id}{"diversity"} = $all_judge->diversity;
+
+		$judges{$all_judge->id}{"site"} = $site;
+
+
+		push @clear_judges, $all_judge;
+
+	}
+
+	my @round_entries = $m->comp("/funclib/round_entries.mas", round => $round);
+
+	foreach my $entry (@round_entries) { 
+
+		push @{$panels{$entry->panelid}{"entries"}}, $entry;
+
+		$entries{$entry->id}{"school"} = $entry->schname;
+		$entries{$entry->id}{"region"} = $entry->regname;
+
+	}
 
 	my $dbh = Tab::DBI->db_Main();
 
@@ -86,9 +126,6 @@
 
 	$sth->execute($category->id);
 
-	my %panels;
-	my %rounds; 
-
 	while( my ($ballot_id, $panel_id, $round_id, $round_name, $round_type, 
 				$judge_id, $judge_school, $judge_region, 
 				$entry_id, $entry_school, $entry_region ) 
@@ -99,8 +136,6 @@
 
 		$judges{$judge_id}{$entry_id}++;
 
-		$entries{$entry_id}{"school"} = $entry_school;
-		$entries{$entry_id}{"region"} = $entry_region;
 
 		$rounds{$round_id}{"number"} = $round_name;
 		$rounds{$round_id}{"type"} = $round_type;
@@ -126,29 +161,7 @@
 		
 	}
 
-	my %strikes = $m->comp("/funclib/category_strikes.mas", category => $category);
-
-	my @clear_judges;
-
-	foreach my $all_judge (@all_judges) { 
-
-		#Eliminate judges who are time strike, event struck or non-elim struck;
-		next if $strikes{$all_judge->id}{"rounds"}{$round->id};
-
-		$judges{$all_judge->id} = $all_judge;
-		$judges{$all_judge->id}{"rating"} = $all_judge->tab_rating;
-		$judges{$all_judge->id}{"neutral"} = $all_judge->neutral;
-		$judges{$all_judge->id}{"diversity"} = $all_judge->diversity;
-
-		push @clear_judges, $all_judge;
-
-	}
-
 	my @this_round_panels = shuffle($round->panels);
-
-	foreach my $panel (@this_round_panels) { 
-		push @{$panels{$panel->id}{"entries"}}, $m->comp("/funclib/panel_entries.mas", panel => $panel);
-	}
 
 	my $num_judges = $round->setting("num_judges");
 
@@ -181,23 +194,106 @@
 				push @{$panels{$panel->id}{"judges"}}, $judge;
 
 				my $score = multisite_score_panel($panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
-		
-				Tab::debuglog("For debate ".$panel->id." judge $judge scores $score");
 
 				my $nope = pop @{$panels{$panel->id}{"judges"}};
 
-				if (not defined $best_score || ($score < $best_score)) {
+				$best_score = $score if not defined $best_score; 
+				$candidate_judge = $judge if not defined $candidate_judge;
+
+				if ($score < $best_score) {
 					$best_score = $score; 
 					$candidate_judge = $judge;
-
-					Tab::debuglog("and is now the candidate!");
 				}
+
 			}
 
-
 			if ($candidate_judge) { 
+			
 				push @{$panels{$panel->id}{"judges"}}, $candidate_judge;
 				$used{$candidate_judge->id}++;
+				$panels{$panel->id}{"score"} += $best_score;
+			}
+
+		}
+
+	}
+
+	#Now we do the shuffle shuffle. 
+
+	foreach my $pass (1 .. 3) { 
+
+		Tab::debuglog("Doing swap pass $pass");
+
+		foreach my $panel (shuffle(@this_round_panels)) {
+
+			foreach my $judge (@{$panels{$panel->id}{"judges"}}) { 
+
+				my $swap_panel;
+				my $swap_judge; 
+
+				my $current_improvement; 
+
+				my $own_baseline = multisite_score_panel($panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
+
+				@{$panels{$panel->id}{"judges"}} =  
+					grep { $_ != $judge } @{$panels{$panel->id}{"judges"}};
+
+				foreach my $other_panel (@this_round_panels) { 
+
+					foreach my $candidate (@{$panels{$other_panel->id}{"judges"}}) { 
+
+						my $other_baseline = multisite_score_panel(
+							$other_panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
+
+						@{$panels{$other_panel->id}{"judges"}} = 
+							grep { $_ != $candidate } @{$panels{$other_panel->id}{"judges"}};
+
+						#Do the swap and score it
+						push @{$panels{$other_panel->id}{"judges"}}, $judge;
+						push @{$panels{$panel->id}{"judges"}}, $candidate;
+
+						my $other_new = multisite_score_panel(
+							$other_panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
+
+						my $own_new = multisite_score_panel(
+							$panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
+
+						#Undo the damage	
+						@{$panels{$panel->id}{"judges"}} =  
+							grep { $_ != $candidate } @{$panels{$panel->id}{"judges"}};
+
+						@{$panels{$other_panel->id}{"judges"}} =  
+							grep { $_ != $judge } @{$panels{$other_panel->id}{"judges"}};
+
+						push @{$panels{$other_panel->id}{"judges"}}, $candidate;
+
+						#If the swap is better than what came before, then register the swap
+						my $improvement = $own_baseline + $other_baseline - $own_new - $own_baseline;
+						if ($improvement > $current_improvement) { 
+							$swap_panel = $other_panel;
+							$swap_judge = $candidate;
+						}
+
+					}
+				}
+
+				if ($swap_panel && $swap_judge) { 
+
+					@{$panels{$swap_panel->id}{"judges"}} =  
+						grep { $_ != $swap_judge } @{$panels{$swap_panel->id}{"judges"}};
+
+					push @{$panels{$swap_panel->id}{"judges"}}, $judge;
+					push @{$panels{$panel->id}{"judges"}}, $swap_judge;
+
+				} else { 
+
+					# Leave the judge where they came from if no improving swap
+					# exists. 
+
+					push @{$panels{$panel->id}{"judges"}}, $judge;
+
+				}
+
 			}
 
 		}
@@ -205,9 +301,13 @@
 	}
 
 	foreach my $panel (@this_round_panels) {
+
 		foreach my $judge (@{$panels{$panel->id}{"judges"}}) { 
 			$m->comp("/funclib/panel_judgeadd.mas", panel => $panel, judge_id => $judge);
 		}
+
+		Tab::debuglog("Panel ".$panel->id." scored ".$panels{$panel->id}{"score"});
+
 	}
 
 	$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id);
@@ -216,7 +316,7 @@
 		
 		my ($panel, $judges_ref, $panels_ref, $priorities_ref, $strikes_ref, $entries_ref) = @_;
 
-		my $score; 
+		my $score = 0;
 
 		my @judges =  @{${$panels_ref}{$panel->id}{"judges"}};
 		my @entries = @{${$panels_ref}{$panel->id}{"entries"}} if ${$panels_ref}{$panel->id}{"entries"};
@@ -224,27 +324,32 @@
 		#Same nation, conflicts, same_region
 
 		foreach my $entry (@entries) { 
-
+		
 			foreach my $judge (@judges) { 
 
-				$score += ${$priorities_ref}{"repeated"} * ${$judges_ref}{$judge}{$entry->id};
+				my $judge_entry_score;
 
-				$score += ${$priorities_ref}{"conflict"} 
+				$judge_entry_score += ${$priorities_ref}{"repeated"} * ${$judges_ref}{$judge}{$entry->id};
+		
+				$judge_entry_score += ${$priorities_ref}{"conflict"} 
 					if ${$strikes_ref}{$judge}{"school"}{${$entries_ref}{$entry}{"school"}};
 
-				$score += ${$priorities_ref}{"conflict"} 
+				$judge_entry_score += ${$priorities_ref}{"conflict"} 
 					if ${$strikes_ref}{$judge}{"entry"}{$entry};
 
 				next if ${$judges_ref}{$judge}{"neutral"};
 
-				$score += ${$priorities_ref}{"same_school"} 
-					if ${$judges_ref}{$judge}{"school"} == ${$entries_ref}{$entry}{"school"} ;
+				$judge_entry_score += ${$priorities_ref}{"same_school"} 
+					if ${$judges_ref}{$judge}{"school"} > 0
+					&& ${$judges_ref}{$judge}{"school"} == ${$entries_ref}{$entry}{"school"} ;
 
-				$score += ${$priorities_ref}{"same_region"} 
+				$judge_entry_score += ${$priorities_ref}{"same_region"} 
 					if ${$judges_ref}{$judge}{"region"} == ${$entries_ref}{$entry}{"region"} ;
 
-				$score += ${$priorities_ref}{"same_region"} 
+				$judge_entry_score += ${$priorities_ref}{"same_region"} 
 					if ${$strikes_ref}{$judge}{"region"}{${$entries_ref}{$entry}{"region"}};
+
+				$score += $judge_entry_score;
 
 			}
 
@@ -254,30 +359,45 @@
 
 		foreach my $judge (@judges) { 
 
-			$score += ${$priorities_ref}{"rank"} * ${$judges_ref}{$judge}{"rank"};
+			my $judge_score; 
+
+			$judge_score += ${$priorities_ref}{"rating"} * ${$judges_ref}{$judge}{"rating"};
 
 			if ($panel->room->id) { 
-
-				$score += ${$priorities_ref}{"site_move"} 
+				$judge_score += ${$priorities_ref}{"site_move"} 
 					if ${$judges_ref}{$judge}{"site"} 
 					&& ${$judges_ref}{$judge}{"site"} != $panel->room->site->id;
-
 			}
 
 			my $diverse_diff = 1;
 
 			foreach my $other (@judges) { 
 
+				next unless $other > 0;
+				next unless $judge > 0;
+
 				next if $other->id == $judge->id;
 
-				$score += ${$priorities_ref}{"regionmate"} 
-					if ${$judges_ref}{$judge}{"region"} == ${$judges_ref}{$other}{"region"};
+				$judge_score += ${$priorities_ref}{"regionmate"} 
+					if ${$judges_ref}{$judge}{"region"}
+					&& ${$judges_ref}{$judge}{"region"} == ${$judges_ref}{$other}{"region"};
+			
+				$judge_score += ${$priorities_ref}{"regionmate"} 
+					if ${$judges_ref}{$judge}{"region"}
+					&& ${$judges_ref}{$judge}{"region"} == ${$strikes_ref}{$other}{"region"};
 
-				undef $diverse_diff if ${$judges_ref}{$judge}{"diversity"} != ${$judges_ref}{$other}{"diversity"};
+				$judge_score += ${$priorities_ref}{"schoolmate"} 
+					if ${$judges_ref}{$judge}{"school"} == ${$judges_ref}{$other}{"school"};
+
+				undef $diverse_diff if ${$judges_ref}{$judge}{"diversity"} > 0;
 				
-				$score += ${$priorities_ref}{"panelmate"} * ${$judges_ref}{$judge}{"panelmate"}{$other};
-
+				$judge_score += ${$priorities_ref}{"panelmate"} * ${$judges_ref}{$judge}{"panelmate"}{$other};
+				
 			}
+
+			$judge_score += ${$priorities_ref}{"diversity"} * $diverse_diff;
+				
+			$score += $judge_score; 
 
 		}
 
@@ -285,7 +405,6 @@
 
 	}
 
-	use Data::Dumper; 
 
 	$m->print('<div class="main">');
 
