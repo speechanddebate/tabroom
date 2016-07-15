@@ -248,9 +248,9 @@ as select
 from tabroom.result_set;
 
 create view tabapi.result_value
-	(id, tag, value, priority, long_tag, no_sort, sort_descending, description, result_id, timestamp)
+	(id, tag, value, priority, description, no_sort, sort_descending, result_id, timestamp)
 as select
-	id, tag, value, priority, long_tag, no_sort, sort_desc, long_tag, result, timestamp
+	id, tag, value, priority, description, no_sort, sort_desc, result, timestamp
 from tabroom.result_value;
 
 create view tabapi.result
