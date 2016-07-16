@@ -1,8 +1,8 @@
 #!/usr/bin/perl -d
 
 package Tab::Mason;
-#use lib "/www/profiler.tabroom.com/web/lib";
 use lib "/www/tabroom/web/lib";
+#use lib "/www/testing.tabroom.com/web/lib";
 
 use strict;
 no warnings "uninitialized";
@@ -127,8 +127,8 @@ sub handler {
     
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
-			comp_root  => $Tab::file_root,
-			data_dir    => $Tab::file_root.'mason',
+			comp_root  => '/www/tabroom/web',
+			data_dir    => '/www/tabroom/web/mason',
 			error_mode  => 'fatal'
 		); 
 
@@ -136,8 +136,8 @@ sub handler {
 
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
-			comp_root  => $Tab::file_root,
-			data_dir    => $Tab::file_root.'mason'
+			comp_root  => '/www/testing.tabroom.com/web',
+			data_dir    => '/www/testing.tabroom.com/web/mason',
 		); 
 
  	}
