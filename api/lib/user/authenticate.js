@@ -1,4 +1,3 @@
-
 // This library will create a function whereby a user ID is returned with a
 // tree of active permissions for the user.  Future tournaments, judges, and
 // current student records and school records are all covered and returned as a
