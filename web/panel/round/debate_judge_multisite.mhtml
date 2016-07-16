@@ -62,14 +62,16 @@
 
 			$judges{$round_judge->id}{"site"} = $round_judge->site;
 
-			# Must undef it or otherwise this judge object will collide with
-			# the ones below:
+			# Must undef the judge object or otherwise this judge object will
+			# collide with the ones below:
+
 			undef $round_judge;
 		}
 
 	}
 
 	my @clear_judges;
+
 	my @all_judges =  $m->comp("/funclib/category_judges.mas", category => $category, active => 1);
 
 	my %strikes = $m->comp("/funclib/category_strikes.mas", category => $category);
@@ -79,17 +81,11 @@
 		#Eliminate judges who are time strike, event struck or non-elim struck;
 		next if $strikes{$all_judge->id}{"rounds"}{$round->id};
 
-		my $site = $judges{$all_judge->id}{"site"};
-
-		$judges{$all_judge->id} = $all_judge;
 		$judges{$all_judge->id}{"rating"} = $all_judge->tab_rating;
 		$judges{$all_judge->id}{"neutral"} = $all_judge->neutral;
 		$judges{$all_judge->id}{"diversity"} = $all_judge->diversity;
 
-		$judges{$all_judge->id}{"site"} = $site;
-
-
-		push @clear_judges, $all_judge;
+		push @clear_judges, $all_judge->id;
 
 	}
 
@@ -97,7 +93,7 @@
 
 	foreach my $entry (@round_entries) { 
 
-		push @{$panels{$entry->panelid}{"entries"}}, $entry;
+		push @{$panels{$entry->panelid}{"entries"}}, $entry->id;
 
 		$entries{$entry->id}{"school"} = $entry->schname;
 		$entries{$entry->id}{"region"} = $entry->regname;
@@ -110,12 +106,14 @@
 
 		select ballot.id, panel.id, round.id, round.name, round.type, 
 			judge.id, judge.school, school.region,
-			entry.id, entry.school, entry_school.region
+			entry.id, entry.school, entry_school.region,
+			room.id, room.site
 
 			from (ballot, panel, round, judge, entry)
 
 			left join school on judge.school = school.id
 			left join school entry_school on entry.school = entry_school.id
+			left join room on panel.room = room.id
 
 			where judge.category = ? 
 			and judge.id = ballot.judge
@@ -128,14 +126,14 @@
 
 	while( my ($ballot_id, $panel_id, $round_id, $round_name, $round_type, 
 				$judge_id, $judge_school, $judge_region, 
-				$entry_id, $entry_school, $entry_region ) 
+				$entry_id, $entry_school, $entry_region,
+				$room_id,  $site_id ) 
 				= $sth->fetchrow_array() ) {
 
 		$judges{$judge_id}{"school"} = $judge_school;
 		$judges{$judge_id}{"region"} = $judge_region;
 
 		$judges{$judge_id}{$entry_id}++;
-
 
 		$rounds{$round_id}{"number"} = $round_name;
 		$rounds{$round_id}{"type"} = $round_type;
@@ -144,6 +142,9 @@
 		$panels{$panel_id}{"round"} = $round_id;
 		push @{$panels{$panel_id}{"entries"}}, $entry_id;
 		push @{$panels{$panel_id}{"judges"}}, $judge_id;
+
+		$panels{$panel_id}{"room"} = $room_id;
+		$panels{$panel_id}{"site"} = $site_id;
 
 	}
 
@@ -156,12 +157,19 @@
 				$judges{$judge_id}{"panelmate"}{$other_id}++;
 
 			}
-
 		}
-		
 	}
 
 	my @this_round_panels = shuffle($round->panels);
+
+	foreach my $panel (@this_round_panels) { 
+
+		$panels{$panel->id}{"room"} = $panel->room->id 
+			if $panel->room;
+
+		$panels{$panel->id}{"site"} = $panel->room->site->id 
+			if $panel->room && $panel->room->site;
+	}
 
 	my $num_judges = $round->setting("num_judges");
 
@@ -181,37 +189,42 @@
 
 		foreach my $panel (@this_round_panels) {
 
-			my @judges = @{$panels{$panel->id}{"judges"}} if $panels{$panel->id}{"judges"};
+			my $panel_id = $panel->id;
+
+			my @judges = @{$panels{$panel_id}{"judges"}} 
+				if $panels{$panel_id}{"judges"};
+
 			next if (scalar @judges) >= $num_judges;
 
-			my $candidate_judge;
+			my $candidate_judge_id;
 			my $best_score; 
 
-			foreach my $judge (@clear_judges) { 
+			foreach my $judge_id (@clear_judges) { 
 
-				next if $used{$judge->id};
+				next if $used{$judge_id};
 
-				push @{$panels{$panel->id}{"judges"}}, $judge;
+				push @{$panels{$panel_id}{"judges"}}, $judge_id;
 
-				my $score = multisite_score_panel($panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
+				my $score = multisite_score_panel(
+					$panel_id, \%judges, \%panels, \%priorities, \%strikes, \%entries);
 
-				my $nope = pop @{$panels{$panel->id}{"judges"}};
+				my $nope = pop @{$panels{$panel_id}{"judges"}};
 
 				$best_score = $score if not defined $best_score; 
-				$candidate_judge = $judge if not defined $candidate_judge;
+				$candidate_judge_id = $judge_id if not defined $candidate_judge_id;
 
 				if ($score < $best_score) {
 					$best_score = $score; 
-					$candidate_judge = $judge;
+					$candidate_judge_id = $judge_id;
 				}
 
 			}
 
-			if ($candidate_judge) { 
+			if ($candidate_judge_id) { 
 			
-				push @{$panels{$panel->id}{"judges"}}, $candidate_judge;
-				$used{$candidate_judge->id}++;
-				$panels{$panel->id}{"score"} += $best_score;
+				push @{$panels{$panel_id}{"judges"}}, $candidate_judge_id;
+				$used{$candidate_judge_id}++;
+				$panels{$panel_id}{"score"} += $best_score;
 			}
 
 		}
@@ -233,7 +246,8 @@
 
 				my $current_improvement; 
 
-				my $own_baseline = multisite_score_panel($panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
+				my $own_baseline = multisite_score_panel(
+					$panel->id, \%judges, \%panels, \%priorities, \%strikes, \%entries);
 
 				@{$panels{$panel->id}{"judges"}} =  
 					grep { $_ != $judge } @{$panels{$panel->id}{"judges"}};
@@ -243,7 +257,7 @@
 					foreach my $candidate (@{$panels{$other_panel->id}{"judges"}}) { 
 
 						my $other_baseline = multisite_score_panel(
-							$other_panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
+							$other_panel->id, \%judges, \%panels, \%priorities, \%strikes, \%entries);
 
 						@{$panels{$other_panel->id}{"judges"}} = 
 							grep { $_ != $candidate } @{$panels{$other_panel->id}{"judges"}};
@@ -253,10 +267,10 @@
 						push @{$panels{$panel->id}{"judges"}}, $candidate;
 
 						my $other_new = multisite_score_panel(
-							$other_panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
+							$other_panel->id, \%judges, \%panels, \%priorities, \%strikes, \%entries);
 
 						my $own_new = multisite_score_panel(
-							$panel, \%judges, \%panels, \%priorities, \%strikes, \%entries);
+							$panel->id, \%judges, \%panels, \%priorities, \%strikes, \%entries);
 
 						#Undo the damage	
 						@{$panels{$panel->id}{"judges"}} =  
@@ -306,50 +320,50 @@
 			$m->comp("/funclib/panel_judgeadd.mas", panel => $panel, judge_id => $judge);
 		}
 
-		Tab::debuglog("Panel ".$panel->id." scored ".$panels{$panel->id}{"score"});
-
 	}
 
 	$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id);
 
 	sub multisite_score_panel { 
 		
-		my ($panel, $judges_ref, $panels_ref, $priorities_ref, $strikes_ref, $entries_ref) = @_;
+		my ($panel_id, $judges_ref, $panels_ref, $priorities_ref, $strikes_ref, $entries_ref) = @_;
 
 		my $score = 0;
 
-		my @judges =  @{${$panels_ref}{$panel->id}{"judges"}};
-		my @entries = @{${$panels_ref}{$panel->id}{"entries"}} if ${$panels_ref}{$panel->id}{"entries"};
 
 		#Same nation, conflicts, same_region
 
-		foreach my $entry (@entries) { 
-		
-			foreach my $judge (@judges) { 
+		if (${$panels_ref}{$panel_id}{"entries"}) { 
 
-				my $judge_entry_score;
+			foreach my $entry (@{${$panels_ref}{$panel_id}{"entries"}}) { 
+			
+				foreach my $judge (@{${$panels_ref}{$panel_id}{"judges"}}) { 
 
-				$judge_entry_score += ${$priorities_ref}{"repeated"} * ${$judges_ref}{$judge}{$entry->id};
-		
-				$judge_entry_score += ${$priorities_ref}{"conflict"} 
-					if ${$strikes_ref}{$judge}{"school"}{${$entries_ref}{$entry}{"school"}};
+					my $judge_entry_score;
 
-				$judge_entry_score += ${$priorities_ref}{"conflict"} 
-					if ${$strikes_ref}{$judge}{"entry"}{$entry};
+					$judge_entry_score += ${$priorities_ref}{"repeated"} * ${$judges_ref}{$judge}{$entry};
+			
+					$judge_entry_score += ${$priorities_ref}{"conflict"} 
+						if ${$strikes_ref}{$judge}{"school"}{${$entries_ref}{$entry}{"school"}};
 
-				next if ${$judges_ref}{$judge}{"neutral"};
+					$judge_entry_score += ${$priorities_ref}{"conflict"} 
+						if ${$strikes_ref}{$judge}{"entry"}{$entry};
 
-				$judge_entry_score += ${$priorities_ref}{"same_school"} 
-					if ${$judges_ref}{$judge}{"school"} > 0
-					&& ${$judges_ref}{$judge}{"school"} == ${$entries_ref}{$entry}{"school"} ;
+					next if ${$judges_ref}{$judge}{"neutral"};
 
-				$judge_entry_score += ${$priorities_ref}{"same_region"} 
-					if ${$judges_ref}{$judge}{"region"} == ${$entries_ref}{$entry}{"region"} ;
+					$judge_entry_score += ${$priorities_ref}{"same_school"} 
+						if ${$judges_ref}{$judge}{"school"} > 0
+						&& ${$judges_ref}{$judge}{"school"} == ${$entries_ref}{$entry}{"school"} ;
 
-				$judge_entry_score += ${$priorities_ref}{"same_region"} 
-					if ${$strikes_ref}{$judge}{"region"}{${$entries_ref}{$entry}{"region"}};
+					$judge_entry_score += ${$priorities_ref}{"same_region"} 
+						if ${$judges_ref}{$judge}{"region"} == ${$entries_ref}{$entry}{"region"} ;
 
-				$score += $judge_entry_score;
+					$judge_entry_score += ${$priorities_ref}{"same_region"} 
+						if ${$strikes_ref}{$judge}{"region"}{${$entries_ref}{$entry}{"region"}};
+
+					$score += $judge_entry_score;
+
+				}
 
 			}
 
@@ -357,26 +371,27 @@
 
 		# Judge specific stuff
 
-		foreach my $judge (@judges) { 
+		foreach my $judge (@{${$panels_ref}{$panel_id}{"judges"}}) { 
 
 			my $judge_score; 
 
 			$judge_score += ${$priorities_ref}{"rating"} * ${$judges_ref}{$judge}{"rating"};
 
-			if ($panel->room->id) { 
+			if (${$panels_ref}{$panel_id}{"room"}) { 
+
 				$judge_score += ${$priorities_ref}{"site_move"} 
 					if ${$judges_ref}{$judge}{"site"} 
-					&& ${$judges_ref}{$judge}{"site"} != $panel->room->site->id;
+					&& ${$judges_ref}{$judge}{"site"} != ${$panels_ref}{$panel_id}{"site"};
 			}
 
 			my $diverse_diff = 1;
 
-			foreach my $other (@judges) { 
+			foreach my $other (@{${$panels_ref}{$panel_id}{"judges"}}) { 
 
 				next unless $other > 0;
 				next unless $judge > 0;
 
-				next if $other->id == $judge->id;
+				next if $other == $judge;
 
 				$judge_score += ${$priorities_ref}{"regionmate"} 
 					if ${$judges_ref}{$judge}{"region"}
