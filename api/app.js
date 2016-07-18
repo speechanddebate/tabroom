@@ -27,10 +27,10 @@ var app = express();
 	app.use(express.static(path.join(__dirname, 'public')));
 
 	// Check for a valid session and populate to the req.session
-	var Authenticate = require('./lib/user/authenticate');
+	var authenticate = require('./lib/user/authenticate');
 
 	app.use(function(req, res, next) { 
-		Authenticate(req,res,next);
+		authenticate(req,res,next);
 	});
 
 	// If there is an active login, load the permissions feed into
