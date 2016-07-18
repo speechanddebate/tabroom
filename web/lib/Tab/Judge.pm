@@ -2,9 +2,9 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first middle last code active ada category person chapter_judge/);
+Tab::Judge->columns(Essential => qw/school first middle last code active ada category person chapter_judge score tmp/);
 
-Tab::Judge->columns(Others => qw / alt_category covers obligation hired person_request score tmp timestamp /);
+Tab::Judge->columns(Others => qw / alt_category covers obligation hired person_request timestamp /);
 
 # Wow, that's a lot. 
 Tab::Judge->columns(TEMP => qw/tier pref panelid chair hangout_admin tourn avg 
@@ -31,18 +31,6 @@ Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where category 
 Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where category = ?");
 
 __PACKAGE__->_register_datetimes( qw/timestamp /);
-
-sub schoolname { 
-
-	my $self = shift;
-
-	if ($self->school) { 
-		return $self->school->short_name;
-	} else { 
-		return "Hired";
-	}
-
-}
 
 sub setting {
 
