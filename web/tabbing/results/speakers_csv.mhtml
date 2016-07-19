@@ -1,0 +1,259 @@
+
+<%args>
+	$tourn
+	$type     => undef
+	$event_id => undef
+	$round_id => undef
+</%args>
+<%init>
+
+	use POSIX;
+
+	my $event = Tab::Event->retrieve($event_id) if $event_id;
+	my $round = Tab::Round->retrieve($round_id) if $round_id;
+
+	undef $round if ($round && ($round->type eq "elim" || $round->type eq "final"));
+
+	my @all_rounds = $m->comp("/funclib/event_rounds.mas", event => $event, done => "yes")  if $event;
+
+	my @rounds;
+
+	unless ($event) { 
+		$event = $tourn->events->first;
+	}
+
+	foreach my $round (@all_rounds) { 
+		push @rounds, $round if $round->type ne "elim" && $round->type ne "final";
+	}
+
+	if ($event && not defined $round) { 
+		$round = shift @rounds;
+		push @rounds, $round;
+	} 
+
+	if ($round && not defined $event) {
+		$event = $round->event;
+	}
+
+	my $novice = $event->setting("top_novice") if $event;
+	my $speaker_min_speeches = $event->setting("speaker_min_speeches");
+
+	my %student_ballots = ();
+
+	my $tiebreak_set_id = $event->setting("speaker_tbset");
+
+	my $tiebreak_set = Tab::TiebreakSet->retrieve($tiebreak_set_id) if $tiebreak_set_id;
+    unless ($tiebreak_set) {   
+        my $err = "Event ".$event->name." does not have a speaker awards tiebreaker set applied to it.  Please pick one and try again";
+        $m->redirect("/setup/events/tabbing.mhtml?event_id=".$event->id."&err=$err");
+    }   
+
+	my $points;
+	my $ranks;
+	my $wins;
+
+	foreach my $tb ($tiebreak_set->tiebreaks) { 
+		$ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals");
+		$wins++ if ($tb->name eq "opp_wins" || $tb->name eq "winloss" || $tb->name eq "ballots");
+		$points++ if ($tb->name eq "points" || $tb->name eq "competition" || $tb->name eq "opp_points");
+	}
+
+	my @students;
+
+	if ($round) { 
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $sth = $dbh->prepare("
+
+            select 
+                entry.id, entry_student.student, round.name, ballot.judge,
+                win.value, points.value, ranks.value, rebuttal_points.value,
+                panel.bye pbye, ballot.bye bbye, ballot.forfeit, ballot.chair
+
+            from (ballot, entry, entry_student, round, panel)
+
+            left join score win on win.ballot = ballot.id and win.tag = 'ballot'
+
+            left join score points on points.ballot = ballot.id 
+                and points.tag = 'points' 
+                and points.student = entry_student.student
+
+            left join score ranks on ranks.ballot = ballot.id 
+                and ranks.tag = 'ranks' 
+                and ranks.student = entry_student.student
+
+            left join score rebuttal_points on rebuttal_points.ballot = ballot.id 
+                and rebuttal_points.tag = 'rebuttal_points' 
+                and rebuttal_points.student= entry_student.student
+
+            where entry.event = ?
+
+            and entry.id = entry_student.entry
+
+            and round.event = entry.event
+            and round.name <= ?
+            and round.id = panel.round
+            and panel.id = ballot.panel 
+
+            and ballot.entry = entry_student.entry
+
+            and not exists ( 
+                select round_setting.id from round_setting where  
+                round_setting.tag = 'ignore_results' 
+                and round_setting.round = round.id
+            )
+
+            group by round.id, entry.id, entry_student.student, ballot.judge
+            order by round.name, ballot.panel, win.value DESC, ballot.entry, ballot.chair, ballot.judge
+
+		");
+
+		$sth->execute($event->id, $round->name);
+
+		my %student_round;
+
+		my $count;
+
+		while (my ( $entry, $student, $roundname, $judge, 
+			$win, $point, $rank, $reply, 
+			$pbye, $bbye, $forfeit, $chair) = $sth->fetchrow_array() ) { 
+
+			push @students, $student;
+
+			$rank =~ s/^0+ | 0+$//xg;
+			$point =~ s/^0+ | 0+$//xg;
+			$reply =~ s/^0+ | 0+$//xg;
+
+			$rank =~ s/^\.+ | \.+$//xg;
+			$point =~ s/^\.+ | \.+$//xg;
+			$reply =~ s/^\.+ | \.+$//xg;
+
+			$student_ballots{$student} .= "," if $student_ballots{$student};
+
+			$student_ballots{$student} .= "Rd $roundname,";
+
+			$student_ballots{$student} .= "BYE" if $bbye;
+			$student_ballots{$student} .= "BYE" if $pbye; 
+			$student_ballots{$student} .= "FFT" if $forfeit; 
+
+			$student_ballots{$student} .= "W" if $wins && $win > 0;
+			$student_ballots{$student} .= "L" if $wins && $win < 1;
+			$student_ballots{$student} .= ",";
+
+			$student_ballots{$student} .= $rank if $rank && $ranks;
+			$student_ballots{$student} .= "," if $ranks;
+			$student_ballots{$student} .= $point if $point && $points;
+			$student_ballots{$student} .= " No Speech " unless $point || $rank || $bbye || $pbye || $forfeit;
+			$student_ballots{$student} .= "," if $points;
+			$student_ballots{$student} .= $reply." " if $reply;
+
+		}
+
+	}
+
+	my %seen = (); 
+	@students = grep { ! $seen{$_} ++ } @students;
+
+	my %school_name;
+
+	foreach my $school ($tourn->schools) { 
+		$school_name{$school->id} = $school->short_name;
+	}
+
+	$m->abort unless $round_id || $round;
+	$round_id = $round->id unless $round_id;
+
+	my $codes = $event->setting("code_style") if $event;
+
+	my $no_school++ if (
+		$codes eq "school_number" || 
+		$codes eq "school_names" || 
+		$codes eq "initials" || 
+		$codes eq "school_name_only" || 
+		$codes eq "schoolname_code" || 
+		$codes eq "full_initials");
+
+
+	my $filename = $tourn->name."-".$event->name."-Speakers";
+	$filename =~ s/[\W_]//g;
+	$filename = $filename.".csv";	
+
+	$m->clear_buffer;
+	$r->content_type('application/csv');
+	$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+
+	my (
+		$students_ref, 
+		$tbs_ref, 
+		$desc_ref, 
+		$forfeit_ref, 
+		$meh, 
+		$long_desc_ref, 
+		$novice_ref, 
+		$name_ref, 
+		$code_ref, 
+		$school_ref,
+		$entry_ref,
+		$speeches_ref
+	) = $m->comp("order_speakers.mas", round => $round);
+
+	$m->print("# Speeches,Missed Minimum,") if $speaker_min_speeches;
+	$m->print("Order,Name,Novice,Code,School");
+
+	foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 
+		$m->print(",".${$long_desc_ref}{$key});
+	}
+
+	$m->print("\n");
+
+	my $count = 1;
+
+	if ($students_ref) { 
+
+		foreach my $key (sort {$a <=> $b} keys %{$students_ref}) { 
+
+			my $tie++ if scalar @{${$students_ref}{$key}} > 1;
+
+			foreach my $student_id (@{${$students_ref}{$key}}) { 
+
+				if ($speaker_min_speeches) { 
+					$m->print(${$speeches_ref}{$student_id}{"speeches"}.","); 
+					$m->print(${$speeches_ref}{$student_id}{"missed"}.","); 
+				}
+
+				$m->print("T-") if $tie; 
+				$m->print($key);
+				$m->print(",\"".${$name_ref}{$student_id});
+				$m->print("\",");
+				$m->print("Novice") if ${$novice_ref}{$student_id};
+
+				$m->print(",\"".${$code_ref}{$student_id});
+				$m->print("\",\"".$school_name{${$school_ref}{$student_id}});
+
+				foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 
+
+					my $value = ${$tbs_ref}{$student_id."-".$key};
+					$value = sprintf("%.2f", $value);
+					$value =~ s/\.(?:|.*[^0]\K)0*\z//;
+
+					$m->print("\",\"".$value);
+				}
+
+				$m->print("\",");
+
+				$m->print($student_ballots{$student_id});
+
+				$m->print("\n");
+
+			}
+		}
+
+	}
+
+
+
+	$m->flush_buffer;
+	$m->abort;
+
+</%init>
