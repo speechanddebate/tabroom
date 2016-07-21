@@ -118,7 +118,6 @@
 		        .append($('<div/>').addClass('header').html(o.header))
 		        .append($('<div/>').addClass('message').html(message))
 		        .data("jGrowl", o).addClass(o.theme).children('div.close').bind("click.jGrowl", function() {
-					alert("Magic time and fun size");
 		        	$(this).parent().trigger('jGrowl.beforeClose');		        
 		        })
 		        .parent();

@@ -223,6 +223,10 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 
 			} else if (input.value < 0) { 
 
+			} else if (input.value === -5) { 
+				input.value = -0.5;
+			} else if (input.value === "-.") { 
+				input.value = -0.5;
 			} else { 
 				input.value = input.value.slice(0,1);
 			}
