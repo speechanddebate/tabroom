@@ -210,13 +210,19 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 		if (len == 2) { 
 
 			if (/\.$/.test(input.value)) { 
+
 				var number = input.value;
 				number = number.slice(0,1);
 				number = number * 1;
 				number += .5;
 				input.value = number;
+
 			} else if (/5$/.test(input.value)) { 
+
 				input.value = input.value/10;
+
+			} else if (input.value < 0) { 
+
 			} else { 
 				input.value = input.value.slice(0,1);
 			}
