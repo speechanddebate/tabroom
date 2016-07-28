@@ -217,6 +217,14 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 				number += .5;
 				input.value = number;
 
+			} else if (/.65$/.test(input.value)) { 
+
+				input.value = 6.5;
+
+			} else if (/.75$/.test(input.value)) { 
+
+				input.value = 7.5;
+
 			} else if (/5$/.test(input.value)) { 
 
 				input.value = input.value/10;
@@ -224,11 +232,17 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 			} else if (input.value < 0) { 
 
 			} else if (input.value === -5) { 
+
 				input.value = -0.5;
+
 			} else if (input.value === "-.") { 
+
 				input.value = -0.5;
+
 			} else { 
+
 				input.value = input.value.slice(0,1);
+
 			}
 
 		}
