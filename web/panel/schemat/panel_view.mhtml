@@ -2,8 +2,8 @@
 	$tourn
 	$person
 	$panel_id
-	$from     => undef
 	$judge_id => undef
+	$from     => undef
 	$perms    => undef
 </%args>
 <%init>
@@ -34,14 +34,52 @@
 
 	$settings{"flighted"} = $round->flighted;
 
-	my @values = $m->comp("/funclib/panel_scores.mas", panel => $panel);
-	my $timeslot = $panel->round->timeslot;
+	my @scores = $m->comp("/funclib/panel_scores.mas", panel => $panel);
+	my $timeslot = $round->timeslot;
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 	my $start = $timeslot->start->set_time_zone($tz);
 
-	my $event = $panel->round->event;
+	my $event = $round->event;
+
+	my %judge_sites = ();
+
+	if ($event->setting('wsdc_multiple_sites')) { 
+
+		my @round_sites = $m->comp("/funclib/round_sites.mas", round => $round);
+
+		my %site_name = map {$_->id => $_->name} @round_sites;
+
+		my $round_time = $round->timeslot->start;
+		my $today_start_string = $round_time->year."-".$round_time->month."-".$round_time->day." 00:00:00";
+		my $today_end_string = $round_time->year."-".$round_time->month."-".$round_time->day." 23:59:59";
+
+		Tab::Round->set_sql( today => " 
+			select round.* 
+			from round, timeslot
+			where round.timeslot = timeslot.id
+			and timeslot.start > ?
+			and timeslot.start < ? 
+			and round.event = ? 
+		");
+
+		my @todays_rounds = Tab::Round->search_today( $today_start_string, $today_end_string, $round->event->id);
+
+		foreach my $today (@todays_rounds) { 
+
+			next if $today->id == $round->id;
+
+			my @judges = $m->comp("/funclib/round_judges.mas", round => $today);
+
+			%judge_sites = map {$_->id => $site_name{$_->site}} @judges;
+
+			undef @judges;
+		}   
+
+		$settings{"judge_sites"} = \%judge_sites;
+		
+	}
 
 	$settings{"region"}++ if $event->setting("region_avoid");
 	$settings{"region"}++ if $event->setting("region_constrain");
@@ -95,6 +133,13 @@
 	$settings{"no_school_codes"}++ if $tourn->setting("school_codes") eq "none";
 	$settings{"diversity"}++ if $category->setting("track_diversity");
 
+	my %judge_tab_ratings  = ();
+
+	if ($settings{"tab_ratings"}) { 
+		my @all_tab_ratings = $m->comp("/funclib/category_judge_settings.mas", category => $category, tag => "tab_rating");
+		%judge_tab_ratings = map {$_->judge->id, $_->value} @all_tab_ratings;
+	}
+
 	my %rating_by_judge = ();
 
 	if ($settings{"coach_ratings"}) { 
@@ -129,8 +174,7 @@
 		$last_round  = $other_round unless $other_round->name >= $round->name;
 	}
 
-#	my $judge_use_ref = $m->comp("/funclib/judge_use.mas", round_id => $last_round->id, limit_past => 1) if $last_round;; 
-	my $judge_use_ref = $m->comp("/funclib/judge_use.mas", round_id => $round->id, limit_past => 1); #  unless $last_round;
+	my $judge_use_ref = $m->comp("/funclib/judge_use.mas", round_id => $round->id, limit_past => 1); 
 
 	$settings{"judge_use_ref"} = $judge_use_ref;
 
@@ -141,23 +185,36 @@
 
 	my $judge_indicator;
 
+	# Judges who are not judging this round
+
 	my @good_judges = $m->comp("/funclib/clean_judges.mas", panel => $panel);
 
-	@good_judges = sort {$a->code cmp $b->code} @good_judges;	
-	@good_judges = sort {$b->score <=> $a->score} @good_judges;	
-	@good_judges = sort {$rating_by_judge{$a->id} cmp $rating_by_judge{$b->id}} @good_judges if $settings{"coach_ratings"};	
-	@good_judges = sort {length($rating_by_judge{$b->id}) <=> length($rating_by_judge{$a->id})} @good_judges if $settings{"coach_ratings"};	
-	@good_judges = sort {$a->tab_rating <=> $b->tab_rating} @good_judges if $settings{"tab_ratings"};
-#	@good_judges = sort {$b->standby cmp $a->standby} @good_judges;
+		@good_judges = sort {$a->code cmp $b->code} @good_judges;	
+		@good_judges = sort {$b->score <=> $a->score} @good_judges;	
+
+		@good_judges = sort {$rating_by_judge{$a->id} cmp $rating_by_judge{$b->id}} @good_judges 
+			if $settings{"coach_ratings"};	
+
+		@good_judges = sort {length($rating_by_judge{$b->id}) <=> length($rating_by_judge{$a->id})} @good_judges 
+			if $settings{"coach_ratings"};	
+
+		@good_judges = sort {$judge_tab_ratings{$a->id} <=> $judge_tab_ratings{$b->id}} @good_judges if $settings{"tab_ratings"};
+
+	# These are judges who are already judging in this round but could be
+	# stolen to judge this one. Useful for preffed divisions
 
 	my @busy_judges = $m->comp("/funclib/clean_judges.mas", panel => $panel, stealable => "daveroberts");
 
-	@busy_judges = sort {$a->code cmp $b->code} @busy_judges;	
-	@busy_judges = sort {$a->score <=> $b->score} @busy_judges;	
-	@busy_judges = sort {$rating_by_judge{$a->id} cmp $rating_by_judge{$b->id}} @busy_judges if $settings{"coach_ratings"};	
-	@busy_judges = sort {length($rating_by_judge{$b->id}) <=> length($rating_by_judge{$a->id})} @busy_judges if $settings{"coach_ratings"};	
-	@busy_judges = sort {$b->tab_rating <=> $a->tab_rating} @busy_judges if $settings{"tab_ratings"};
-#	@busy_judges = sort {$b->standby cmp $a->standby} @busy_judges;
+		@busy_judges = sort {$a->code cmp $b->code} @busy_judges;	
+		@busy_judges = sort {$a->score <=> $b->score} @busy_judges;	
+
+		@busy_judges = sort {$rating_by_judge{$a->id} cmp $rating_by_judge{$b->id}} @busy_judges 
+			if $settings{"coach_ratings"};	
+
+		@busy_judges = sort {length($rating_by_judge{$b->id}) <=> length($rating_by_judge{$a->id})} @busy_judges 
+			if $settings{"coach_ratings"};	
+
+		@busy_judges = sort {$judge_tab_ratings{$a->id} <=> $judge_tab_ratings{$b->id}} @busy_judges if $settings{"tab_ratings"};
 
 	my $affref;
 	my $negref;
@@ -258,6 +315,7 @@
 %		}
 
 %		if ($panel_room == -1 && !$panel->invites_sent) {
+
 			<div class="warn smallish">
 				This round is set up as a Google Hangout. Once all entries and
 				judges are finalized remember to "Send Invites". This will
@@ -430,7 +488,7 @@
 
 % 					if ($settings{"tab_ratings"}) { 
 						<td class="smallish" align="center">
-							<% $judge->tab_rating %>
+							<% $judge_tab_ratings{$judge->id} %>
 						</td>
 % 					}
 
@@ -449,7 +507,7 @@
 						<% ($judge->school) ? $judge->school->short_name : "HIRE" %>
 					</td>
 
-%					if (@values) { 
+%					if (@scores) { 
 
 %						my $warn = "These ballots have scores entered.  If you remove the judge you will also delete those scores.  Continue?";
 
@@ -711,7 +769,7 @@
 
 %				} else { 
 
-%					if ( ($round_type eq "elim" || $round_type eq "final" || $round_type eq "flip") && scalar @values < 1 && not defined $aff) { 
+%					if ( ($round_type eq "elim" || $round_type eq "final" || $round_type eq "flip") && scalar @scores < 1 && not defined $aff) { 
 						<td class="smallish centeralign">
 							Flip
 						</td>
@@ -735,13 +793,17 @@
 %				}
 						<% ($entry->dq) ? "DQ -" : "" %>
 						<% ($entry->dropped) ? "DROP -" : "" %>
+
 %						if ($event->setting("code_style") eq "names" || $event->setting("code_style") eq "names_lastfirst") {
 							<% $entry->name %>
+
 %						} else {
-							<span class="half marno">
+
+							<span class="third marno">
 								<% $entry->code %>
 							</span>
-							<span class="half marno marleft">
+
+							<span class="twothirds marno marleft">
 								<% $entry->name %>
 							</span>
 %						}
@@ -754,17 +816,13 @@
 					</td>
 %				}
 					
-
 				<td class="smallish">
-					<% ($entry->school->code) ? "<span class=\"nospace eighth\">".$entry->school->code."</span>" : "" %>
-					<span class="threequarter nospace">
-						<% $entry->school->short_name %> 
-					</span>
-					<% ($entry->school->code) ? "<span class=\"nospace eighth\">".$entry->school->code."</span>" : "" %>
+					<% (not defined $settings{"no_school_codes"}) && ($entry->school->code) ? $entry->school->code  : "" %>
+					<% $entry->school->short_name %> 
 				</td>
 
-
 %				if ($settings{"region"} || $settings{"ncfl"} ) { 
+
 					<td class="smallish centeralign">
 						<% ($entry->school->region) ? $entry->school->region->code : "" %>
 					</td>
@@ -848,14 +906,6 @@
 				Print Master Ballots
 			</a>
 
-%#			Commented out because 1) this causes it to fire every time you see
-%#			this screen making things slow and 2) this file is not in the repo causing
-%#			this to trip an error.   I don't mean to be bitchy but every fiber of my 
-%#			experience screams that putting this check here and relying on it is going to
-%#			cause us horrific problems.
-
-%# 			my $warn2 = $m->comp("/funclib/double_booked_judges_catch.mas", tourn => $tourn);
-     
 			<a class="blue <% $round_type eq "elim" ? "half" : "full" %>" href="/panel/report/postings.mhtml?panel_id=<% $panel->id %>">
 				Print Posting
 			</a>
@@ -1037,12 +1087,15 @@
 			<form action="judge_add.mhtml" method="post">
 			<input type="hidden" name="panel_id" value="<% $panel->id %>">
       			<input type="hidden" name="bypass_check" value="true">
+
 			<div class="even visible centeralign">
+
 				<select name="judge_id" class="chosen fixedmed">
 %					foreach my $judge ($m->comp("/funclib/tourn_judges.mas", tourn => $tourn)) { 
 						<option value="<% $judge->id %>"> <% $judge->code %> <% $judge->last %>, <% $judge->first %> </option>
 %					}
 				</select>
+
 			</div>
 			<div class="liblrow centeralign padless">
 				<input type="submit" class="thin" value="Add Judge & Tempt Fate">
@@ -1050,23 +1103,29 @@
 			</form>
 
 			<p class="padno bold">Change to literally any room:</p>
-			<form action="panel_room_save.mhtml" method="post">
-			<input type="hidden" name="panel_id" value="<% $panel->id %>">
-			<div class="even visible centeralign">
-				<select name="room_id" class="chosen fixedmed">
-%					foreach my $room ($m->comp("/funclib/tourn_rooms.mas", tourn => $tourn)) { 
-						<option value="<% $panel_room %>"> <% $room->name %> </option>
-%					}
-				</select>
-			</div>
 
-			<div class="liblrow centeralign padless">
-				<input type="submit" class="thin" value="Change Room & Tempt Fate">
-			</div>
+			<form action="panel_room_save.mhtml" method="post">
+
+				<input type="hidden" name="panel_id" value="<% $panel->id %>">
+
+				<div class="even visible centeralign">
+					<select name="room_id" class="chosen fixedmed">
+%						foreach my $room ($m->comp("/funclib/tourn_rooms.mas", tourn => $tourn)) { 
+							<option value="<% $room->id %>"> <% $room->name %> </option>
+%						}
+					</select>
+				</div>
+
+				<div class="liblrow centeralign padless">
+					<input type="submit" class="thin" value="Change Room & Tempt Fate">
+				</div>
+
 			</form>
 
 %			my $warn = "This will delete this section, together with all results and records.  Are you sure?";
+
 			<a class="dkred full martop" <& "/funclib/confirm.mas", warn => $warn &>  href="/panel/manipulate/panel_rm.mhtml?panel_id=<% $panel->id %>&from=schemat">
+
 				Delete This 
 					<% $event->type eq "speech" ? "Section" : "" %>
 					<% $event->type eq "congress" ? "Chamber" : "" %>
