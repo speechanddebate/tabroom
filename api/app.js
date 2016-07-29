@@ -38,6 +38,7 @@ var app = express();
 	// Set the URL routes
 	app.use('/', require('./routes'));
 	app.use('/user', require('./routes/user'));
+	app.use('/nsdatab', require('./routes/nsdatab'));
 
 	// Catch 404s and forward to error handler
 	app.use(function(req, res, next) {
