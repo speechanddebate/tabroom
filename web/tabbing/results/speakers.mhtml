@@ -9,6 +9,7 @@
 	use POSIX;
 
 	my $event = Tab::Event->retrieve($event_id) if $event_id;
+
 	my $round = Tab::Round->retrieve($round_id) if $round_id;
 
 	undef $round if ($round && ($round->type eq "elim" || $round->type eq "final"));
@@ -34,14 +35,25 @@
 		$event = $round->event;
 	}
 
+	my %efl_students = %{JSON::decode_json($event->setting('efl_students'))} 
+		if $event->setting('efl_students');
+
+	my %esl_students = %{JSON::decode_json($event->setting('esl_students'))} 
+		if $event->setting('esl_students');
+
+	my $speaker_min_speeches = $event->setting("speaker_min_speeches");
 	my $novice = $event->setting("top_novice") if $event;
 	my %student_ballots = ();
 
 	my $tiebreak_set_id = $event->setting("speaker_tbset");
 
 	my $tiebreak_set = Tab::TiebreakSet->retrieve($tiebreak_set_id) if $tiebreak_set_id;
+
     unless ($tiebreak_set) {   
-        my $err = "Event ".$event->name." does not have a speaker awards tiebreaker set applied to it.  Please pick one and try again";
+
+		my $err = "Event ".$event->name." does not have a speaker awards
+		tiebreaker set applied to it.  Please pick one and try again";
+
         $m->redirect("/setup/events/tabbing.mhtml?event_id=".$event->id."&err=$err");
     }   
 
@@ -56,115 +68,100 @@
 	}
 
 	my @students;
-	my @roundnames;
 
 	if ($round) { 
 
 		my $dbh = Tab::DBI->db_Main();
 
 		my $sth = $dbh->prepare("
-			select distinct value.id, value.tag, value.value, v2.student, value.student, ballot.entry, ballot.judge, 
-				panel.bye, ballot.bye, ballot.forfeit, ballot.chair, round.name
-			from score value, ballot, panel, round, score v2
-			where value.ballot = ballot.id
-			and ballot.panel = panel.id
-			and panel.round = round.id
-			and panel.bye != 1
-			and not exists ( select round_setting.id from round_setting where  round_setting.tag = 'ignore_results' and round_setting.round = round.id)
-			and round.name <= ".$round->name."
-			and round.event = ".$event->id."
-			and ballot.id = v2.ballot
-			group by value.id, v2.id
-			order by round.name, ballot.entry, ballot.chair, ballot.judge, CASE value.tag WHEN ".' "ballot" then 1 when "rank" then 2 when "points" then 3 when "rebuttal_points" then 4 end, value.id'."
+
+            select 
+                entry.id, entry_student.student, round.name, ballot.judge,
+                win.value, 
+				points.value, points.student, 
+				ranks.value, ranks.student, 
+				rebuttal_points.value, rebuttal_points.student,
+                panel.bye pbye, ballot.bye bbye, ballot.forfeit, ballot.chair
+
+            from (ballot, entry, entry_student, round, panel)
+
+            left join score win on win.ballot = ballot.id and win.tag = 'ballot'
+
+            left join score points on points.ballot = ballot.id 
+                and points.tag = 'points' 
+                and points.student = entry_student.student
+
+            left join score ranks on ranks.ballot = ballot.id 
+                and ranks.tag = 'ranks' 
+                and ranks.student = entry_student.student
+
+            left join score rebuttal_points on rebuttal_points.ballot = ballot.id 
+                and rebuttal_points.tag = 'rebuttal_points' 
+                and rebuttal_points.student= entry_student.student
+
+            where entry.event = ?
+
+            and entry.id = entry_student.entry
+
+            and round.event = entry.event
+            and round.name <= ?
+            and round.id = panel.round
+            and panel.id = ballot.panel 
+
+            and ballot.entry = entry_student.entry
+
+            and not exists ( 
+                select round_setting.id from round_setting where  
+                round_setting.tag = 'ignore_results' 
+                and round_setting.round = round.id
+            )
+
+            group by round.id, entry.id, entry_student.student, ballot.judge
+            order by round.name, ballot.panel, win.value DESC, ballot.entry, ballot.chair, ballot.judge
+
 		");
 
-		$sth->execute(); 
+		$sth->execute($event->id, $round->name);
 
 		my %student_round;
 
-		while (my ($id, $tag, $value, $student, $value_student, $entryid, $judge, $pbye, $bye, $fft, $chair, $roundname) = $sth->fetchrow_array() ) { 
+		my $count;
 
-			next if $tag eq "rfd";
-			next if $tag eq "comment";
-			next if $tag eq "rebuttal_points";
+		while (my ( $entry, $student, $roundname, $judge, 
+			$win, $point, $point_student, $rank, $rank_student, $reply, $reply_student,
+			$pbye, $bbye, $forfeit, $chair) = $sth->fetchrow_array() ) { 
 
-			next if $tag eq "rank" && not defined $ranks;
-			next if $tag eq "points" && not defined $points;
-			next if $tag eq "ballot" && not defined $wins;
-			next if $value_student > 0 && $value_student != $student;
-			 
 			push @students, $student;
-			push @roundnames, $roundname;
 
-			unless ($student_ballots{$student."-".$roundname}) { 
 
-				$student_ballots{$student."-".$roundname} .= "\nRd $roundname: ";
+			$student_ballots{$student} .= "\n" if $student_ballots{$student};
 
-			} else { 
-				$student_ballots{$student."-".$roundname} .= ' ' if $tag eq "rank" && ($type eq "speech" || $type eq "wudc" || $type eq "congress");
-				$student_ballots{$student."-".$roundname} .= ' ' if $tag eq "ballot" && $type ne "speech" && $type ne "wudc" && $type ne "congress";
+			$student_ballots{$student} .= " Rd $roundname ";
+
+			$student_ballots{$student} .= " BYE " if $bbye;
+			$student_ballots{$student} .= " BYE " if $pbye; 
+			$student_ballots{$student} .= " FFT " if $forfeit; 
+
+			$student_ballots{$student} .= " W " if $wins && $win > 0;
+			$student_ballots{$student} .= " L " if $wins && $win < 1;
+
+			$student_ballots{$student} .= $rank." " if $rank && $ranks && $rank_student == $student;
+			$student_ballots{$student} .= $point." " if $point && $points && $point_student == $student;
+
+			foreach (length($point) .. 4) { 
+				$student_ballots{$student} .= " ";
 			}
 
-			$student_round{$student} = $roundname;
+			$student_ballots{$student} .= " R-".$reply." " if $reply && $reply_student == $student;
 
-			if ($tag eq "ballot") { 
-
-				if ($pbye) { 
-					$student_ballots{$student."-".$roundname} .= "BYE";
-				} elsif ($bye) { 
-					$student_ballots{$student."-".$roundname} .= "BYE";
-				} else { 
-					$student_ballots{$student."-".$roundname} .= "W" if $value > 0;
-					$student_ballots{$student."-".$roundname} .= "L" if $value < 1;
-				}
-
-			} else { 
-				$student_ballots{$student."-".$roundname} .= $value;
-			}
+			$student_ballots{$student} .= " No Speech " unless $point || $rank || $bbye || $pbye || $forfeit;
 
 		}
-
-        my $bye_sth = $dbh->prepare("
-            select entry_student.student, ballot.entry, panel.id, panel.round, round.name
-            from panel, ballot, round, entry_student
-            where round.name <= ".$round->name."
-			and round.event = ".$event->id."
-            and panel.round = round.id
-            and ballot.panel = panel.id
-			and entry_student.entry = ballot.entry
-            and panel.bye = 1
-            and not exists ( 
-                select score.id
-                from score
-                where score.ballot = ballot.id
-				and score.student = entry_student.student
-            )
-            group by entry_student.student
-        ");
-
-        $bye_sth->execute();
-
-        while (my ($student, $entry, $panel, $round, $roundname)  = $bye_sth->fetchrow_array() ) { 
-			
-			push @students, $student;
-			push @roundnames, $roundname;
-
-			$student_round{$student} = $roundname;
-            $student_ballots{$student."-".$roundname} .= "\nRd $roundname: BYE" 
-        }    
 
 	}
 
 	my %seen = (); 
 	@students = grep { ! $seen{$_} ++ } @students;
-	@roundnames = grep { ! $seen{$_} ++ } @roundnames;
-	@roundnames = sort {$a <=> $b} @roundnames;
-
-	foreach my $student (@students) { 
-		foreach my $roundname (@roundnames) { 
-			$student_ballots{$student} .= $student_ballots{$student."-".$roundname};
-		}
-	}
 
 	my %school_name;
 
@@ -186,13 +183,11 @@
 
 			<div class="full nospace">
 
-				<span class="third">
-					<h2 class="padmore">
-						<% $event->name %>
-					</h2>
+				<span class="fifth">
+					<h4 class="padno marless"> <% $event->abbr %> </h4>
 				</span>
 
-				<span class="third centeralign">
+				<span class="third marno centeralign">
 
 					<h5 class="inline marright">
 						Event:
@@ -205,15 +200,13 @@
 %						my @events = sort {$a->name cmp $b->name} $tourn->events;
 %						foreach my $oevent (sort {$a->type cmp $b->type} @events) { 
 %							next unless $oevent->setting("speaker_tbset");
-							<option value="<% $oevent->id %>" <% $oevent->id == $event_id ? 'selected="selected"' : "" %> >
-								<% $oevent->name %>
-							</option>
+							<option value="<% $oevent->id %>" <% $oevent->id == $event_id ? 'selected="selected"' : "" %> > <% $oevent->name %> </option>
 %						}
 					</select>
 					</form>
 				</span>
 
-				<span class="third centeralign">
+				<span class="third marno centeralign">
 
 %					if (@rounds) { 
 
@@ -233,9 +226,7 @@
 %								next unless $oround && $oround->id;
 %								next if $oround->type eq "elim";
 %								next if $oround->type eq "final";
-								<option value="<% $oround->id %>" <% $round && $oround->id == $round_id ? "selected" : "" %>>
-									<% $oround->realname %>
-								</option>
+								<option value="<% $oround->id %>" <% $round && $oround->id == $round_id ? "selected" : "" %>> <% $oround->realname %> </option>
 %							}
 
 						</select>
@@ -243,12 +234,28 @@
 %					}
 				</span>
 
-			</div>
+				<span class="tenth rightalign nospace">
+%					if ($round) { 
+						<a class="dkblue button" href="speakers_csv.mhtml?round_id=<% $round_id %>&event_id=<% $event->id %>" >
+							Spreadsheet
+						</a>
+%					}
+				</span>
 
+			</div>
 
 %		if ($round) { 
 
-%			my ($students_ref, $tbs_ref, $desc_ref, $forfeit_ref, $meh, $long_desc_ref, $novice_ref, $name_ref, $code_ref, $school_ref) = $m->comp("order_speakers.mas", round => $round);
+<%perl> 
+			my ($students_ref, $tbs_ref, $desc_ref, 
+				$forfeit_ref, $meh, $long_desc_ref, 
+				$novice_ref, $name_ref, $code_ref, 
+				$school_ref, $entry_ref, $speeches_ref) 
+				= $m->comp("order_speakers.mas", round => $round);
+
+			my $i_can_haz_novice++ if scalar keys %{$novice_ref} > 0;
+
+</%perl> 
 
             <ul id="tabnav" class="padno">
 
@@ -262,9 +269,10 @@
 
 			</ul>
 
-			<table cellpadding="4" cellspacing="1" id="sortme">
+			<table id="sortme">
 
 				<thead>
+
 					<tr class="yellowrow">
 
 						<th class="smallish">
@@ -274,9 +282,23 @@
 							Name
 						</th>
 
-						<th class="smaller">
-							Nov
-						</th>
+%						if ($i_can_haz_novice) { 
+							<th class="smaller">
+								Nov
+							</th>
+%						}
+
+%						if (%esl_students) { 
+							<th class="smaller">
+								ESL
+							</th>
+%						}
+
+%						if (%efl_students) { 
+							<th class="smaller">
+								EFL
+							</th>
+%						}
 
 						<th class="smallish centeralign">
 							Code
@@ -286,6 +308,18 @@
 							<th class="smallish centeralign">
 								School
 							</th>
+%						}
+
+%						if ($speaker_min_speeches) { 
+
+							<th title="Number of Speeches Given" class="smallish centeralign">
+								#S
+							</th>
+
+							<th title="Missed Minimum Cutoff" class="smallish centeralign">
+								NoMin
+							</th>
+
 %						}
 
 %						foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 
@@ -328,14 +362,40 @@
 										<% ${$novice_ref}{$student_id} ? "Nov" : "" %>
 									</td>
 
+%									if (%efl_students) { 
+										<td class="smallish nospace centeralign">
+											<% $efl_students{$student_id} ? "EFL" : "" %>
+										</td>
+%									}
+
+%									if (%esl_students) { 
+										<td class="smallish nospace centeralign">
+											<% $esl_students{$student_id} ? "ESL" : "" %>
+										</td>
+%									}
+
 									<td class="smallish" title="<% $student_ballots{$student_id} %> <% ${$forfeit_ref}{$student_id} ? "\n(No Show)" : "" %>">
 										<% ${$code_ref}{$student_id} %>
 									</td>
 
 %									unless ($no_school) { 
+
 										<td class="smallish">
 											<% $school_name{${$school_ref}{$student_id}} %>
 										</td>
+
+%									} 
+
+%									if ($speaker_min_speeches) { 
+
+										<td class="smallish nowrap rightalign">
+											<% ${$speeches_ref}{$student_id}{"speeches"} %>
+										</td>
+
+										<td class="smallish nowrap rightalign">
+											<% ${$speeches_ref}{$student_id}{"missed"} %>
+										</td>
+
 %									} 
 
 %									foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 

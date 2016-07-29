@@ -28,7 +28,7 @@
     
     #DOUBLE-BOOKED JUDGES
 
-    $tags{"double_booked_judges"} = "Judges double booked this round";
+    $tags{"double_booked_judges"} = "Judges double booked within this round";
 
     my $double_judges_sth = $dbh->prepare("
         select distinct judge.* from judge, panel, panel clonepanel, ballot, ballot cloneballot
@@ -51,7 +51,7 @@
     
     #TIMESLOT (CROSS-EVENT) DOUBLE-SCHEDULING
     
-	$tags{"timeslot_double_booked_judges"} = "Judges booked in the same timeslot in another event";
+	$tags{"timeslot_double_booked_judges"} = "Judges being used elsewhere this timeslot";
 
     my $timeslot_double_judges_sth = $dbh->prepare("
         select distinct judge.id, judge.first, judge.last, round.id, count(distinct round.id) as rd_ct from judge, round, panel, ballot
@@ -262,7 +262,7 @@
 	if ($event->setting("wsdc_multiple_sites")) { 
 
 		# JUDGES MOVING SITES
-		$tags{"moving_sites"} = "Judges moving between locations";
+		$tags{"moving_sites"} = "Judges moving between locations today";
 
 	    my $round_time = $round->timeslot->start;
 	    my $today_start_string = $round_time->year."-".$round_time->month."-".$round_time->day." 00:00:00";
@@ -340,84 +340,53 @@
 
 	}
 
-	#DEBATES WITH NO JUDGES
-
-        
-	$tags{"judgeless_sections"} = "Sections without judges";
-
-	Tab::Panel->set_sql( judgeless_sections => "
-
-		select distinct panel.*, e1.code as opp, e2.code as pos
-		from panel, ballot b1, ballot b2, entry e1, entry e2
-		where panel.id = b1.panel
-		and panel.id = b2.panel
-
-		and b1.entry = e1.id
-		and b2.entry = e2.id
-		and panel.round = ? 
-		and panel.bye != 1
-		and b1.bye != 1
-		and b2.bye != 1
-		and b1.forfeit != 1
-		and b2.forfeit != 1
-
-		and not exists ( 
-			select judge.id 
-			from judge, ballot bj
-			where bj.panel = panel.id
-			and bj.judge = judge.id
-		)
-		group by panel.id
-
-	");
-
-	foreach my $panel (Tab::Panel->search_judgeless_sections($round->id )) { 
-		$problems{"judgeless_sections"}.= '<p class="warning padless marno">'. "Section ".$panel->letter." between ".$panel->opp." and ".$panel->pos." has no judge! </p>";
-		undef $panel;
-	}
-
 	# DEBATES SHORT ON FULL PANELS
 
-    $tags{"judge_short_sections"} = "Sections with incomplete panels of judging";
+	my $num_judges = $round->setting('num_judges');
+    $tags{"judge_short_sections"} = "Judge panels that do not have ".$num_judges." judges";
+    $tags{"judge_short_sections"} = "Judge sections that do not have a judge" if $num_judges == 1;
 
     my $short_panel_sth = $dbh->prepare("
-		select panel.letter, count(distinct ballot.judge), room.name
+		select panel.letter, count(distinct judge.id), room.name
 		from (panel, ballot)
 		left join room on room.id = panel.room
+		left join judge on ballot.judge = judge.id
 		where panel.round = ? 
 		and panel.id = ballot.panel
-		and ballot.judge > 0
 		and panel.bye != 1
 		group by panel.id
+		order by room.name, panel.id
 	");
 
 	$short_panel_sth->execute($round->id);
 
 	my %panel_judgecount = ();
-	my $max_judges; 
-		
+	my %panel_judgeroom = ();
+
 	while (my ($panel, $count, $room)  = $short_panel_sth->fetchrow_array() ) {
-		$max_judges = $count if $count > $max_judges; 
-		$panel_judgecount{$panel}{"count"} = $count;
-		$panel_judgecount{$panel}{"room"} = $room;
+
+		next if $count >= $num_judges;
+
+		$panel_judgecount{$panel} = $count;
+		$panel_judgecount{$panel} = 0 unless $count;
+		$panel_judgeroom{$panel} = $room;
+
+		$problems{"judge_short_sections"} .= '<p class="warning padless marno">'. "Room ".$panel_judgeroom{$panel}." has ". $panel_judgecount{$panel} ." judges.";
 
 	}
 
-	foreach my $panel (keys %panel_judgecount) { 
+	foreach my $panel ($round->panels) { 
 
-		next if $panel_judgecount{$panel}{"count"} == $max_judges;
+		next if $num_judges <= $panel_judgecount{$panel};
 
-		$problems{"judge_short_sections"} .= '<p class="warning padless marno">'. "Section ".$panel." in room ".$panel_judgecount{$panel}{"room"} ." has only ". $panel_judgecount{$panel}{"count"} ." judges on its panel";
-		undef $panel;
 	}
-
 
 	undef %panel_judgecount;
-	undef $max_judges;
+	undef $num_judges;
 
     #ROOMS: DEBATES WITH NO ROOMS
         
-	$tags{"roomless_sections"} = "Sections without rooms";
+	$tags{"roomless_sections"} = "Rooms missing from debates";
 
 	Tab::Panel->set_sql( roomless_sections => "
 		select distinct panel.*, e1.code as opp, e2.code as pos
@@ -708,14 +677,13 @@
 
     # JUDGES: SAME SCHOOL AND/OR REGION
     
+	if ($event->setting("region_avoid") || $event->setting("region_constrain") || $tourn->setting("regions")) { 
 
-	$tags{"judged_own"} = "Judges judging their own entries";
+		my $region_judged_sth;
+	
+		$tags{"judged_region"} = "Judges judging their own region";
 
-	my $own_judged_sth;
-
-	if ($event->setting("region_avoid") || $event->setting("region_constrain")) { 
-
-		$own_judged_sth = $dbh->prepare("
+		$region_judged_sth = $dbh->prepare("
 			select distinct entry.code, judge.first, judge.last, region.name
 				from entry, judge, panel, ballot, school judgeschool, school entryschool, region
 				where panel.round = ? 
@@ -728,7 +696,20 @@
 				and entryschool.region = region.id
 		");
 
-	} else { 
+		$region_judged_sth->execute($round->id);
+
+		while (my ($entry, $first, $last, $name)  = $region_judged_sth->fetchrow_array() ) {
+			$problems{"judged_region"}.= '<p class="warning padless marno">'. "Judge $first $last is judging $entry when both are from $name ";
+		}
+
+
+	} 
+
+	unless ($event->setting("region_avoid") || $event->setting("region_constrain")) { 
+
+		my $own_judged_sth;
+
+		$tags{"judged_own"} = "Judges judging their own program";
 
 		$own_judged_sth = $dbh->prepare("
 			select distinct entry.code, judge.first, judge.last, school.name
@@ -741,13 +722,14 @@
 				and judge.school = school.id
 		");
 
-	}
+		$own_judged_sth->execute($round->id);
 
-	$own_judged_sth->execute($round->id);
-		
-	while (my ($entry, $first, $last, $name)  = $own_judged_sth->fetchrow_array() ) {
-		$problems{"judged_own"}.= '<p class="warning padless marno">'. "Judge $first $last is judging $entry when both are from $name ";
+		while (my ($entry, $first, $last, $name)  = $own_judged_sth->fetchrow_array() ) {
+			$problems{"judged_own"}.= '<p class="warning padless marno">'. "Judge $first $last is judging $entry when both are from $name ";
+		}
+
 	}
+		
 
     # JUDGES: HEARING BLOCKED DIVISION
     # ROOMS: ROOMS USED TOO MANY TIMES
@@ -759,16 +741,19 @@
 
 	<h2><% $round->realname %> disaster checks</h2>
 
-%	foreach my $tag (sort {$tags{$a} cmp $tags{$b}} keys %tags) { 
+%	my @tags = sort {$tags{$a} cmp $tags{$b}} keys %tags;
+%	@tags = sort {length $problems{$b} <=> length $problems{$a}} @tags;
+
+%	foreach my $tag (@tags) {
 
 		<div class="row full">
 
-			<span class="twofifth">
+			<span class="half">
 				<% $tags{$tag} %> 
 			</span>
 
-			<span class="threefifths nospace padleft">
-				<% $problems{$tag} ? $problems{$tag} : '<span class="rightalign nospace strong greentext"> OK! </span>' %>
+			<span class="half nospace padleft">
+				<% $problems{$tag} ? $problems{$tag} : '<span class="centeralign nospace full strong greentext"> OK! </span>' %>
 			</span>
 		</div>
 
