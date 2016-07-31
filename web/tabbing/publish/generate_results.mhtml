@@ -21,6 +21,7 @@
 
 	my $now = DateTime->now( time_zone => $tz);
 
+
 	if ($event_id eq "all") { 
 
 		@events = $tourn->events;
@@ -39,6 +40,44 @@
 		push @events, Tab::Event->retrieve($event_id);
 
 	}
+
+	my $breakout;
+
+	my %limit_entries = ();
+	my %limit_students = ();
+
+	foreach my $event (@events) { 
+
+		foreach my $key (1 .. $event->setting("breakouts")) { 
+
+			next unless $ARGS{"breakout_".$event->id."-".$key};
+
+			next if $event->setting("breakout_".$key."_delete");
+
+			my $label =  $event->setting("breakout_".$key."_label");
+
+			$breakout .= " and " if $breakout;
+			$breakout = " (" unless $breakout;
+			$breakout .= $label;
+
+			my $flagged_students = JSON::decode_json($event->setting('breakout_'.$key.'_students'))
+				if $event->setting('breakout_'.$key."_students");
+
+			my @entries = $m->comp("/funclib/event_entries.mas", event => $event, breakout => $key);
+
+			foreach my $entry (@entries) { 
+				$limit_entries{$entry->id}++;
+			}
+
+			foreach my $student_id (keys %{$flagged_students}) { 
+				$limit_students{$student_id}++;
+			}
+
+		}
+
+	}
+
+	$breakout .= ") " if $breakout;
 
 	if ($result_type eq "ndca") { 
 
@@ -86,6 +125,8 @@
 		$label = "Final Places" if ($result_type eq "final");
 		$label = "Speaker Awards" if ($result_type eq "speakers");
 		$label = "Cume Sheet" if ($result_type eq "cumesheet");
+
+		$label .= $breakout if $breakout;
 
 		Tab::ResultValue->set_sql( rm_label => "
 			delete result_value.*
@@ -166,14 +207,13 @@
 				my $tiebreak_set = Tab::TiebreakSet->retrieve($tiebreak_set_id) 
 					if $tiebreak_set_id;
 
-
 				unless ($tiebreak_set) {   
 
 					my $err = "Event ".$event->name." does not have a speaker ";
 					$err .= "awards tiebreaker set applied to it.  Please pick one ";
 					$err .= "and try again";
 
-					$m->redirect("/setup/event/tabbing.mhtml?event_id=".$event->id."&err=$err");
+					$m->redirect("/setup/events/tabbing.mhtml?event_id=".$event->id."&err=$err");
 
 				}   
 
@@ -207,16 +247,16 @@
 
 					my $sth = $dbh->prepare("
 
-						select value.id, value.tag, value.value, value.student, 
+						select score.id, score.tag, score.value, score.student, 
 							student.id, ballot.entry, ballot.judge, 
 							panel.bye, ballot.bye, ballot.forfeit, ballot.chair, 
 							round.name
 
 						from (ballot, panel, round, entry_student, student)
 
-						left join score value on value.ballot = ballot.id
+						left join score on score.ballot = ballot.id
 							and (
-									score.tag = \"ballot\" 
+									score.tag    = \"ballot\"
 									or score.tag = \"rank\"
 									or score.tag = \"points\"
 								)
@@ -236,7 +276,7 @@
 							)
 
 						order by round.name, ballot.entry, ballot.chair, ballot.judge, 
-							CASE value.tag WHEN ".' "ballot" 
+							CASE score.tag WHEN ".' "ballot" 
 								then 1 when "rank" 
 								then 2 when "points" 
 								then 3 when "rebuttal_points" 
@@ -262,6 +302,8 @@
 						next if $tag eq "rank" && $value_student != $student;
 						next if $tag eq "points" && $value_student != $student;
 						next if $tag eq "rebuttal_points" && $value_student != $student;
+
+						next if $breakout && not defined $limit_students{$student};
 
 						if ($student_round{$student} 
 							&& $student_ballots{$student} 
@@ -308,15 +350,20 @@
 
 				= $m->comp("/tabbing/results/order_speakers.mas", round => $last_prelim);
 
+				my $counter = 1;
+
 				foreach my $key (sort {$a <=> $b} keys %{$students_ref}) {
 
-					next if $limit && $key > $limit;
+					next if $limit && $counter > $limit;
 
 					my $tie++ if scalar @{${$students_ref}{$key}} > 1;
 
 					my $park;
 
 					foreach my $student (@{${$students_ref}{$key}}) {
+						
+						next if $breakout && not defined $limit_students{$student};
+						$counter++;
 					
 						$prelim_seed{$student} = $rank;
 
@@ -389,15 +436,21 @@
 					"/funclib/round_ballot_string.mas", 
 					round => $last_prelim);
 
+				my $counter = 1; 
+
 				foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
 
-					next if $limit && $key > $limit;
+					next if $limit && $counter > $limit;
 
 					my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
 
 					my $park;
 
 					foreach my $entry (@{${$entries_ref}{$key}}) {
+
+						next if $breakout && not defined $limit_entries{$entry};
+
+						$counter++;
 
 						$prelim_seed{$entry} = $rank;
 						next unless $result_type eq "prelim_seed"; 
@@ -478,8 +531,6 @@
 							round => $round);
 
 						foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) { 
-					
-							next if $limit && $key > $limit;
 
 							my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
 
@@ -488,6 +539,7 @@
 
 							foreach my $entry (@{${$entries_ref}{$key}}) {
 
+								next if $breakout && not defined $limit_entries{$entry};
 								next if $used{$entry}++;
 								$rank++;
 
