@@ -49,6 +49,14 @@ sub location {
 	return $location.$self->country;
 }
 
+sub full_location { 
+	my $self = shift;
+	my $location;
+	$location = $self->city.", " if $self->city;
+	$location .= $self->state."/" if $self->state;
+	return $location.$self->country;
+}
+
 sub location_name { 
 	my $self = shift;
 	my $state = $m->comp("/funclib/state_translate.mas", state => $self->state) if $self->state;
