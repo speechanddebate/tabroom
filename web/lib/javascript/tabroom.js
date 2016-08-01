@@ -217,14 +217,6 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 				number += .5;
 				input.value = number;
 
-			} else if (/.65$/.test(input.value)) { 
-
-				input.value = 6.5;
-
-			} else if (/.75$/.test(input.value)) { 
-
-				input.value = 7.5;
-
 			} else if (/5$/.test(input.value)) { 
 
 				input.value = input.value/10;
@@ -247,8 +239,9 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 
 		}
 
-		changeFocus(input);
 		totalPoints(side,ratio);
+		changeFocus(input);
+		return;
     
     } 
 
