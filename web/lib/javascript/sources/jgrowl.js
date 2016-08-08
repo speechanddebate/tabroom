@@ -126,6 +126,8 @@
 			/** Notification Actions **/
 			$(notification).bind("mouseover.jGrowl", function() {
 				$('div.jGrowl-notification', self.element).data("jGrowl.pause", true);
+			}).bind("click.jGrowl", function() { 
+				$(this).trigger('jGrowl.beforeClose');
 			}).bind("mouseout.jGrowl", function() {
 				$('div.jGrowl-notification', self.element).data("jGrowl.pause", false);
 			}).bind('jGrowl.beforeOpen', function() {

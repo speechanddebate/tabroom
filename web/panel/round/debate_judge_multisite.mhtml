@@ -10,9 +10,13 @@
 	my $round = Tab::Round->retrieve($round_id);
 	my $round_type = $round->type;
 
-	$m->comp("/funclib/round_clear_judges.mas", round => $round, nobye => 1);
+	$m->comp("/funclib/round_clear_judges.mas", 
+		round => $round,
+		nobye => 1
+	);
 
-	my $cap_repel = "10" if $round->event->setting("wsdc_cap_repel");
+	my $cap_repel = "10" 
+		if $round->event->setting("wsdc_cap_repel");
 
 	my %priorities = (
 		same_school => 1000000000000,
@@ -29,6 +33,14 @@
 		gender      => 10,
 		panelmate   => 1
 	);
+
+	my $allow_repeat_judging = $round->event->setting("allow_repeat_judging");
+	$priorities{"repeated"} = .1 if $allow_repeat_judging;
+
+	my $allow_repeat_elims = $round->event->setting("allow_repeat_elims");
+	$priorities{"repeated"} = 100 if $allow_repeat_elims;
+
+	my $disallow_repeat_drop = $round->event->setting("disallow_repeat_drop");
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz; 
@@ -82,30 +94,24 @@
 
 	my %strikes = $m->comp("/funclib/category_strikes.mas", category => $category);
 
-	my $total_ratings;
-	my $count_ratings; 
-
 	foreach my $all_judge (@all_judges) { 
 
-#		$all_judge->last(  ucfirst(lc($all_judge->last)) );
-#		$all_judge->update;
-	
-		# Eliminate judges who are time strike, event struck or non-elim struck
+		# Eliminate judges who are time struck, event struck or non-elim struck
 
 		next if $strikes{$all_judge->id}{"rounds"}{$round->id};
 
 		$judges{$all_judge->id}{"rating"} = $all_judge->tab_rating;
-
-		$total_ratings += $judges{$all_judge->id}{"rating"};
-		$count_ratings++;
 
 		$judges{$all_judge->id}{"neutral"} = $all_judge->neutral;
 		$judges{$all_judge->id}{"diversity"} = $all_judge->diversity;
 		$judges{$all_judge->id}{"cap"} = $all_judge->cap;
 
 		if ($all_judge->school) { 
+
 			$judges{$all_judge->id}{"school"} = $all_judge->school->id;
-			$judges{$all_judge->id}{"region"} = $all_judge->school->region->id if $all_judge->school->region
+
+			$judges{$all_judge->id}{"region"} = $all_judge->school->region->id 
+				if $all_judge->school->region
 		}
 
 		push @clear_judges, $all_judge->id;
@@ -113,8 +119,6 @@
 	}
 
 	my $num_judges = $round->setting("num_judges");
-
-	$judges{"all"}{"average_rating"} = sprintf("%d", ($total_ratings * $num_judges/ $count_ratings) - 1);
 
 	my @round_entries = $m->comp("/funclib/round_entries.mas", round => $round);
 
@@ -134,13 +138,14 @@
 		select ballot.id, panel.id, round.id, round.name, round.type, 
 			judge.id, judge.school, school.region,
 			entry.id, entry.school, entry_school.region,
-			room.id, room.site
+			room.id, room.site, score.value
 
 			from (ballot, panel, round, judge, entry)
 
 			left join school on judge.school = school.id
 			left join school entry_school on entry.school = entry_school.id
 			left join room on panel.room = room.id
+			left join score on score.ballot = ballot.id and score.tag = "ballot" and score.value = 1
 
 			where judge.category = ? 
 			and judge.id = ballot.judge
@@ -151,14 +156,29 @@
 
 	$sth->execute($category->id);
 
-	while( my ($ballot_id, $panel_id, $round_id, $round_name, $round_type, 
+	while( my 
+		
+			($ballot_id, $panel_id, $round_id, $round_name, $round_type, 
 				$judge_id, $judge_school, $judge_region, 
 				$entry_id, $entry_school, $entry_region,
-				$room_id,  $site_id ) 
-				= $sth->fetchrow_array() ) {
+				$room_id,  $site_id, $winner ) 
 
+		= $sth->fetchrow_array() ) {
 
-		$judges{$judge_id}{$entry_id}++;
+		if ($allow_repeat_elims) { 
+
+			if ($round_type eq "elim") { 
+
+				if ($disallow_repeat_drop) { 
+					$judges{$judge_id}{$entry_id} += 100000 unless $winner;
+				} else { 
+					$judges{$judge_id}{$entry_id} ++;
+				}
+			}
+
+		} else { 
+			$judges{$judge_id}{$entry_id}++;
+		}
 
 		$rounds{$round_id}{"number"} = $round_name;
 		$rounds{$round_id}{"type"} = $round_type;
@@ -199,7 +219,26 @@
 			if $panel->room && $panel->room->site;
 
 		push @this_round_panels, $panel->id;
+
 	}
+
+	my $total_ratings;
+	my $count_ratings; 
+	my $total_needed = (scalar @this_round_panels) * $num_judges;
+
+	@all_judges = sort {$judges{$a}{"rating"} <=> $judges{$b}{"rating"}} @all_judges; 
+
+	foreach my $all_judge (@all_judges) { 
+
+		next if $strikes{$all_judge->id}{"rounds"}{$round->id};
+
+		$total_ratings += $judges{$all_judge->id}{"rating"};
+		$count_ratings++;
+
+		last if $count_ratings >= $total_needed;
+	}
+
+	$judges{"all"}{"average_rating"} = sprintf("%.1f", ($total_ratings / $count_ratings));
 
 	my %used; 
 
@@ -361,10 +400,18 @@
 
 	foreach my $panel_id (@this_round_panels) {
 
+		@{$panels{$panel_id}{"judges"}} = sort {$judges{$a}{"rating"} <=> $judges{$b}{"rating"}} @{$panels{$panel_id}{"judges"}};
+
+		my $chair = 1;
+
 		foreach my $judge (@{$panels{$panel_id}{"judges"}}) { 
+
 			$m->comp("/funclib/panel_judgeadd.mas", 
 						panel_id => $panel_id, 
+						chair => $chair,
 						judge_id => $judge);
+
+			undef $chair;
 		}
 		
 		my $final_score = multisite_score_panel(
@@ -431,9 +478,11 @@
 			foreach my $other_panel_id (keys %{$panels_ref}) { 
 
 				next if $other_panel_id == $panel_id;
+
 				next if ${$panels_ref}{$other_panel_id}{"site"} != ${$panels_ref}{$panel_id}{"site"};
 
 				foreach my $other_judge (@{${$panels_ref}{$other_panel_id}{"judges"}}) { 
+
 					next unless ${$judges_ref}{$other_judge}{"cap"} > 0;
 
 					$score += ${$priorities_ref}{"cap_repel"} * $has_cap;
@@ -445,6 +494,7 @@
 		}
 
 		# Judge specific stuff
+
 		my $number_of_ones;
 		my $total_rating;
 
@@ -453,6 +503,7 @@
 			my $judge_score; 
 
 			$total_rating += ${$judges_ref}{$judge}{"rating"};
+			
 			$number_of_ones++ if ${$judges_ref}{$judge}{"rating"} < 4;
 
 			if (${$panels_ref}{$panel_id}{"room"}) { 
@@ -495,23 +546,25 @@
 		}
 
 		$score += ${$priorities_ref}{"no_ones"} unless $number_of_ones;
-		$score += ${$priorities_ref}{"avg_rating"} * abs($total_rating - ${$judges_ref}{"all"}{"average_rating"});
+
+		$score += ${$priorities_ref}{"avg_rating"} * 
+			abs($total_rating - ${$judges_ref}{"all"}{"average_rating"});
+
 		$score += ${$priorities_ref}{"rating"} * $total_rating;
 
 		return $score; 
 
 	}
 
-
-	$m->print('<div class="main">');
+#	$m->print('<div class="main">');
 
 #	$m->print("<pre>".Dumper(%panels)."</pre>");
 
 #	$m->print("<pre>".Dumper(%rounds)."</pre>");
 
-	$m->print("<pre>".Dumper(%strikes)."</pre>");
+#	$m->print("<pre>".Dumper(%strikes)."</pre>");
 
-	$m->print('</div>');
+#	$m->print('</div>');
 
 
 </%init>
