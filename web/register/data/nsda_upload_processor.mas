@@ -1,0 +1,778 @@
+<%args>
+	$tourn
+	$person
+	$session
+</%args>
+<%init>
+
+#### Check Tournament field 4 for start date!!! And validate it before file creation and upload!!!!!!!!!!!!!!1
+
+use strict;
+use warnings;
+use Data::Dumper; 
+binmode STDOUT, ":utf8";
+use utf8;
+use DateTime;
+use Time::HiRes qw( time );
+my $start = time(); 
+
+## hard coding tourn id as 5611 for testing
+#my $tourn_id = 5611;
+#my $tourn = Tab::Tourn->retrieve($tourn_id);
+
+my $tourn_id = $tourn->id;
+
+my $tz = $tourn->tz if $tourn->tz;
+$tz = "UTC" unless $tz;
+	
+my $dbh = Tab::DBI->db_Main();
+use JSON;
+
+#upload sequence
+my $now = DateTime->now;
+$now->set_time_zone($tz);
+my $req = Apache2::Request->new($r, DISABLE_UPLOADS => 0);
+my $json_file = $req->upload('DataAsJSON.txt');
+unless ($json_file) { print $r." Couldn't find file<br>"; $m->abort };
+my $json_filename = $json_file->tempname;
+my $filename = $json_filename;
+#system "/bin/mkdir -p ".$Tab::file_root."tmp/".$tourn->id."/$now->epoch";
+#my $xml_path = $Tab::file_root."tmp/".$tourn->id."/$now->epoch";
+
+#########################################################
+#read local JSON file into a hash
+#########################################################
+
+my $json;
+#my $filename = '/www/tabroom/web/register/data/NSDA.json';
+
+{
+  local $/; #Enable 'slurp' mode
+  open my $fh, "<", $filename;
+  $json = <$fh>;
+  close $fh;
+}
+my $data = decode_json($json);
+#print Dumper($data)."<br><br>";
+#print ref($data) . "<br><br>";
+
+#my @buildings = @{ $data->{'Building'} };
+#foreach my $obj ( @buildings ) {
+#  print $obj->{"building_ID"}." ".$obj->{"building_Name"} . "<br>";
+#}
+#print "<br><br>";
+
+#my @judges = @{ $data->{'Judge'} };
+#foreach my $obj ( @judges) {
+#  print $obj->{"judge_ID"}." ".$obj->{"judge_FirstName"}." ".$obj->{"judge_LastName"}. "<br>";
+#}
+
+my $skip_me = 1;
+my $sth = $dbh->prepare("");
+
+
+#########################################################
+#iterate over schools and save them; 
+#########################################################
+	
+	#for each school, check to see if the alt_id matches the school->nsda number.  If so, mark that as the chapter.
+	#if not, create a new chapter.
+	#Then store name and chapter to the TR school table.  Store school_ID & school_DistrictID as settings.
+	
+	$sth = $dbh->prepare("delete ss from school_setting ss join school sch on ss.school=sch.id and sch.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased school settings<br><br>";
+	#erase existing school records
+	$sth = $dbh->prepare("delete from school where tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased schools for tourn".$tourn_id."<br>";
+	my %school_index; #{nsda_number} = tabroom number
+	my @schools = @{ $data->{'School'} };
+	foreach my $obj ( @schools ) {
+		
+		my $tabroom_chpt = 0;
+		#print $obj->{"school_ID"}." ".$obj->{"school_Name"} ;
+		
+		if (defined $obj->{"school_alt_id"} ) {
+			my @tr_chpt = Tab::Chapter->search(  nsda => $obj->{"school_alt_id"} );
+			foreach my $chpt (@tr_chpt) {
+				#print " and the tabroom chapter is ".$chpt->id." ".$chpt->name;
+				$tabroom_chpt = $chpt->id
+			}
+		}
+		
+		unless ($tabroom_chpt) {
+		 my $chapter = Tab::Chapter->create( {
+				name => $obj->{"school_Name"} ,
+				state => $obj->{"school_State"}
+			});
+		 $tabroom_chpt = $chapter->id;
+		 #print " no existing tabroom chapter so created one at $tabroom_chpt";
+		}
+	
+	#print "<br>";
+		 my $school = Tab::School->create( {
+				tourn => $tourn_id,
+				name => $obj->{"school_Name"} ,
+				chapter => $tabroom_chpt
+			});
+	
+			$school->setting("nsda_school_ID", $obj->{"school_ID"});
+			$school->setting("nsda_school_DistrictID", $obj->{"school_DistrictID"});
+			$school_index{$obj->{"school_ID"}}{'id'} = $school->id;
+			$school_index{$obj->{"school_ID"}}{'chapter'} = $school->chapter;
+			$school_index{$obj->{"school_ID"}}{'name'} = $school->name;
+	}
+	print "totally loaded all schools<br>";
+	
+	#	my $sth = $dbh->prepare("
+	#	 	   select count(tourn.id) 
+	#	 	   from tourn 
+	#	 	   where tourn.start < $end_string
+	#	 	   and tourn.end > $start_string
+	#	");
+	#	$sth->execute();
+
+#########################################################
+#iterate over timeslots and save them; 
+#########################################################
+
+	#erase existing timeslots
+	$sth = $dbh->prepare("delete from timeslot where tourn=".$tourn_id);
+	$sth->execute();
+	
+	#set up a hash to store the records in; you'll need this when you get to events and need to know the tineslot ID
+	my %ts_id_index; my $x=0;
+	
+		my @timeBlocks = @{ $data->{'TimeBlock'} };
+		foreach my $obj ( @timeBlocks) {
+			$x++;
+			my $space_pt = rindex($obj->{"timeBlock_StartTime"}, " ");
+			my $str_len= length($obj->{"timeBlock_StartTime"});
+			my $start_time = substr($obj->{"timeBlock_StartTime"} , 0, $space_pt);
+			my $week_day = substr($obj->{"timeBlock_StartTime"} , $space_pt+1, $str_len-$space_pt); 
+			my $colon_pt = index($obj->{"timeBlock_StartTime"}, ":");
+			my $hour_start = substr($obj->{"timeBlock_StartTime"} , 0, $colon_pt);
+			my $min_start = substr($obj->{"timeBlock_StartTime"} , $colon_pt+1, 2);
+			my $pm = 0; if (index($obj->{"timeBlock_StartTime"}, "p.m.") > 0 )  { $pm = 1; }
+			if ($pm == 1 && $hour_start < 12) { $hour_start += 12; }
+			#hard coding for now because it's nowhere in the JSON object
+			my $day_start = 13;
+			my $ts_start;
+			#print $week_day." ".length($week_day)."<br>";
+			if ($week_day eq "Monday" ) { $ts_start =  DateTime->new( year => 2016, month => 6, day => $day_start, hour => $hour_start, minute => $min_start, time_zone => $tz ) ; }
+			if ($week_day eq "Tuesday" ) {$ts_start =  DateTime->new( year => 2016, month => 6, day => $day_start+1, hour => $hour_start, minute => $min_start, time_zone => $tz) ; }
+			if ($week_day eq "Wednesday" ) { $ts_start =  DateTime->new( year => 2016, month => 6, day => $day_start+2, hour => $hour_start, minute => $min_start, time_zone => $tz) ; }
+			if ($week_day eq "Thursday" ) { $ts_start =  DateTime->new( year => 2016, month => 6, day => $day_start+3, hour => $hour_start, minute => $min_start, time_zone => $tz) ; }
+			if ($week_day eq "Friday" ) { $ts_start =  DateTime->new( year => 2016, month => 6, day => $day_start+4, hour => $hour_start, minute => $min_start, time_zone => $tz) ; }
+			my $ts_end = $ts_start->clone(); $ts_end->add(hours => 2); 
+			#print "string starts: ".$obj->{"timeBlock_StartTime"}." and becomes as ".$ts_start." with an end time of".$ts_end."<br>";
+			#print "string is: ".$obj->{"timeBlock_StartTime"}." - "; print "Start time is:".$start_time; print "hour is:".$hour_start; print "minute is:".$min_start; print " pm is:".$pm; print " week day is ".$week_day."<br>";
+			
+			my $timeslot = Tab::Timeslot->create( {
+					name => $obj->{"timeBlock_Description"} ,
+					start => $ts_start, 
+					end => $ts_end,
+					tourn => $tourn_id
+			});
+			$ts_id_index{$x}{'id'} = $timeslot->id;
+			$ts_id_index{$x}{'start'} = $ts_start;
+			$ts_id_index{$x}{'end'} = $ts_end;
+		}
+	 print "Totally created timeslots<br>";
+
+#########################################################
+#manually create tiebreakers...you'll need them to save rounds which come within the events table
+#########################################################
+
+	#$sth = $dbh->prepare("delete ss from school_setting ss join school sch on ss.school=sch.id and sch.tourn=".$tourn_id);	
+	$sth = $dbh->prepare("delete tb from tiebreak tb join tiebreak_set tbs on tb.tiebreak_set=tbs.id and tbs.tourn=".$tourn_id);
+	$sth->execute();
+	$sth = $dbh->prepare("delete from tiebreak_set where tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased tiebreaks for tourn ".$tourn_id."<br>";
+	
+	my $debate_seeding = Tab::TiebreakSet->create( {
+		name => 'nsda_debate_seeding' ,
+		tourn => $tourn_id
+	});
+	
+	Tab::Tiebreak->create( {
+		name => 'winloss' ,
+		priority => 1 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_seeding->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'points' ,
+		priority => 2 ,
+		count => 'prelim',
+		highlow => 1, 
+		highlow_count => 1, 
+		tiebreak_set => $debate_seeding->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'points' ,
+		priority => 3 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_seeding->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'ranks' ,
+		priority => 4 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_seeding->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'opp_wins' ,
+		priority => 5 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_seeding->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'opp_points' ,
+		priority => 6 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_seeding->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'judgevar' ,
+		priority => 7 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_seeding->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'coinflip' ,
+		priority => 8 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_seeding->id
+	});
+	
+	my $debate_speakers = Tab::TiebreakSet->create( {
+		name => 'nsda_debate_speakers' ,
+		tourn => $tourn_id
+	});
+	
+	Tab::Tiebreak->create( {
+		name => 'points' ,
+		priority => 1 ,
+		count => 'prelim',
+		highlow => 1, 
+		highlow_count => 1, 
+		tiebreak_set => $debate_speakers->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'points' ,
+		priority => 2 ,
+		count => 'prelim',
+		highlow => 0, 
+		tiebreak_set => $debate_speakers->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'points' ,
+		priority => 3 ,
+		count => 'prelim',
+		highlow => 1, 
+		highlow_count => 2, 
+		tiebreak_set => $debate_speakers->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'ranks' ,
+		priority => 4 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_speakers->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'opp_wins' ,
+		priority => 5 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_speakers->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'opp_points' ,
+		priority => 6 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_speakers->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'judgevar' ,
+		priority => 7 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_speakers->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'coinflip' ,
+		priority => 8 ,
+		count => 'prelim' ,  
+		tiebreak_set => $debate_speakers->id
+	});
+	
+	
+	my $ie_prelim = Tab::TiebreakSet->create( {
+		name => 'nsda_ie_prelim' ,
+		tourn => $tourn_id
+	});
+	
+	Tab::Tiebreak->create( {
+		name => 'ranks' ,
+		priority => 1 ,
+		count => 'prelim' ,  
+		tiebreak_set => $ie_prelim->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'points' ,
+		priority => 2 ,
+		count => 'prelim',
+		tiebreak_set => $ie_prelim->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'points' ,
+		priority => 3 ,
+		count => 'prelim' ,  
+		tiebreak_set => $ie_prelim->id
+	});
+	
+	my $ie_elim =Tab::TiebreakSet->create( {
+		name => 'nsda_ie_elim' ,
+		tourn => $tourn_id
+	});
+	
+	Tab::Tiebreak->create( {
+		name => 'ranks' ,
+		priority => 1 ,
+		count => 'prelim' ,  
+		tiebreak_set => $ie_elim->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'points' ,
+		priority => 2 ,
+		count => 'prelim',
+		tiebreak_set => $ie_elim->id
+	});
+	Tab::Tiebreak->create( {
+		name => 'judgepref' ,
+		priority => 3 ,
+		count => 'prelim' ,  
+		tiebreak_set => $ie_elim->id
+	});
+	
+	print "totally created tiebreaks for tourn ".$tourn_id."<br>";
+
+#########################################################
+#manually create judge categories
+#########################################################
+
+	$sth = $dbh->prepare("DELETE jpool_judge FROM judge, category, jpool_judge WHERE jpool_judge.judge=judge.id and judge.category=category.id and category.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased existing judge pool assignments<br>";
+	$sth = $dbh->prepare("DELETE jpool FROM category, jpool WHERE jpool.category=category.id and category.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased existing judge pools<br>";
+	$sth = $dbh->prepare("DELETE strike FROM judge, category, strike WHERE strike.judge=judge.id and judge.category=category.id and category.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased existing judge strikes<br>";
+	$sth = $dbh->prepare("DELETE judge_setting FROM judge, category, judge_setting WHERE judge_setting.judge=judge.id and judge.category=category.id and category.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased existing judge settings<br>";
+	$sth = $dbh->prepare("DELETE judge FROM judge, category WHERE category.id=judge.category and category.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased existing judge records <br>";
+	$sth = $dbh->prepare("DELETE FROM category WHERE category.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased existing judge categories<br>";
+	
+	#create the 5 categories
+	my $cat_policy = Tab::Category->create( {
+		name => 'Policy' ,
+		abbr => 'Policy' ,
+		tourn => $tourn_id
+	});
+	Tab::CategorySetting->create( {
+		tag => 'rounds_per' ,
+		value => 4 ,
+		category => $cat_policy->id
+	});
+	my $cat_ld = Tab::Category->create( {
+		name => 'Lincoln-Douglas' ,
+		abbr => 'LD' ,
+		tourn => $tourn_id
+	});
+	Tab::CategorySetting->create( {
+		tag => 'rounds_per' ,
+		value => 4 ,
+		category => $cat_ld->id
+	});
+	my $cat_pf = Tab::Category->create( {
+		name => 'Public Forum' ,
+		abbr => 'PF' ,
+		tourn => $tourn_id
+	});
+	Tab::CategorySetting->create( {
+		tag => 'rounds_per' ,
+		value => 4 ,
+		category => $cat_pf->id
+	});
+	my $cat_speech = Tab::Category->create( {
+		name => 'Speech' ,
+		abbr => 'Spch' ,
+		tourn => $tourn_id
+	});
+	my $cat_congress = Tab::Category->create( {
+		name => 'Congress' ,
+		abbr => 'Cong' ,
+		tourn => $tourn_id
+	});
+	my $cat_worlds = Tab::Category->create( {
+		name => 'Worlds' ,
+		abbr => 'Worlds' ,
+		tourn => $tourn_id
+	});
+	Tab::CategorySetting->create( {
+		tag => 'rounds_per' ,
+		value => 4 ,
+		category => $cat_worlds->id
+	});
+	my $cat_tab_no_use = Tab::Category->create( {
+		name => 'Tab or no-use' ,
+		abbr => 'TabNoUse' ,
+		tourn => $tourn_id
+	});
+	
+	print "totally created new judge categories<br>";
+	
+#########################################################
+#iterate over events; save rounds & jpool at the same time b/c rounds and events are embedded in each other in the nsda dataset
+#########################################################
+	 
+	$sth = $dbh->prepare("DELETE round_setting FROM round_setting, round, event WHERE round_setting.round=round.id and round.event=event.id and event.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased round settings<br>";
+	$sth = $dbh->prepare("delete round from round, event where round.event=event.id and event.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased rounds  for tourn ".$tourn_id."<br>";
+	$sth = $dbh->prepare("delete es from event_setting es join event ev on es.event=ev.id and ev.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased event settings<br>";
+	$sth = $dbh->prepare("delete from event where tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased events for tourn".$tourn_id."<br>";
+	
+	my %judge_pool; # {event_Code}{timeslot}
+	my %event_index; 
+	my @events = @{ $data->{'Event'} };
+
+		foreach my $obj ( @events) {
+			  
+				#convert TRPC event codes into tabroom event=>type
+				my $event_type; #print "event code is ".$obj->{"event_Code"}."X ";
+				my $event_cat; 
+				if ($obj->{"event_Code"} eq "X" ) { $event_type='policy';  $event_cat = $cat_policy->id; }
+				if ($obj->{"event_Code"} eq "L" ) { $event_type='ld'; $event_cat = $cat_ld->id; }
+				if ($obj->{"event_Code"} eq "R" || $obj->{"event_Code"} eq "Q" || $obj->{"event_Code"} eq "S" || $obj->{"event_Code"} eq "V") { $event_type='congress' ; $event_cat = $cat_congress->id; }
+				if ($obj->{"event_Code"} eq "N" || $obj->{"event_Code"} eq "J" ) { $event_type='pf' ; $event_cat = $cat_pf->id; }
+				if ($obj->{"event_Code"} eq "W" ) { $event_type='wudc' ;  $event_cat = $cat_worlds->id; }
+				unless ($event_type) { $event_type='speech' ;  $event_cat = $cat_speech->id; }
+				#print "event type is $event_type<br>";
+				
+				#save the event stuff
+				my $event = Tab::Event->create( {
+					name => $obj->{"event_Name"} ,
+					abbr => $obj->{"event_Code"} ,
+					type => $event_type ,
+					category => $event_cat ,
+					tourn => $tourn_id
+				});
+				
+				#save event_setting
+				$event->setting("nsda_event_ID", $obj->{"event_ID"});
+				$event->setting("nsda_event_Type", $obj->{"event_Type"});
+				$event->setting("max_points", $obj->{"event_PointsMaximum"});
+				$event->setting("sponsor", $obj->{"event_Sponsor"});
+				$event->setting("min_entry", $obj->{"event_Duo"});
+				$event->setting("max_entry", $obj->{"event_Duo"});
+				
+				$event_index{ $obj->{"event_Code"} } = $event->id;
+				
+				#save round stuff
+					
+				my %event_rds;
+				#print "<br>Rounds for ".$obj->{"event_Name"}."<br>";
+				for my $i ( 0 .. length($obj->{"event_TimeBlock"}) ) {
+					if ( ($i % 2) != 0 ) {
+						$event_rds{int( ($i/2)+.5 )} = substr($obj->{"event_TimeBlock"}, $i-1, 2);
+						#print "timeslot=". int(($i/2) +.5) ." round is ".substr($obj->{"event_TimeBlock"}, $i-1, 2)."<br>";
+					}
+				}
+				
+				#parse elim info string
+				my $nprelims = substr($obj->{"event_ElimInfo"}, 0, 2);
+				my $first_elim = substr($obj->{"event_ElimInfo"}, 2, 2); #archaic; not in use and already deined by nprlims
+				my $n_elim_judges = substr($obj->{"event_ElimInfo"}, 4, 2);
+				my $n_semi_judges = substr($obj->{"event_ElimInfo"}, 6, 2);
+				my $n_final_judges = substr($obj->{"event_ElimInfo"}, 8, 2);
+				
+			
+				my $final_flag=0; my $rd_type; my $num_judges;
+				my $semi_flag=0; 
+				foreach my $key (sort{$b <=> $a} keys %event_rds) {
+					
+					if ( $event_rds{$key} > 0 ) {
+ 				
+						#set round type and number of judges in the rounds, set the lable, and save the round
+						my $rd_label="";
+						$rd_type = 'elim'; $num_judges=$n_elim_judges; $rd_label=$event->name." elim rd"." ".$event_rds{$key}  ;
+						if ($final_flag == 1 && $semi_flag == 0) {$rd_type='elim'; $semi_flag=1; $num_judges = $n_semi_judges; $rd_label=$event->name." semis"; }
+						if ($final_flag == 0) {$rd_type='final'; $final_flag=1; $num_judges = $n_final_judges; $rd_label=$event->name." finals"; }
+						if ( $event_rds{$key} <= $nprelims ) {$rd_type='prelim'; $num_judges = $obj->{"event_JudgePrelims"}; $rd_label=""; }
+						
+						#find the tiebreak set
+						my $tiebreak_set = $debate_seeding->id; 
+						if ( ( $event_type eq 'speech' || $event_type eq 'congress' )  && $rd_type eq 'prelim' ) { $tiebreak_set = $ie_prelim->id; }
+						if ( ( $event_type eq 'speech' || $event_type eq 'congress' )  && $rd_type ne 'prelim' ) { $tiebreak_set = $ie_elim->id; }
+						
+						my $round = Tab::Round->create( {
+							type => $rd_type ,
+							name => $event_rds{$key} ,
+							label => $rd_label ,
+							flighted => $obj->{"event_Flighted"} ,
+							event => $event->id ,
+							tiebreak_set => $tiebreak_set, 
+							timeslot => $ts_id_index{$key}{'id'}
+						});
+					
+						#now make a judge pool and link it to the round
+						my $jpool = Tab::JPool->create( {
+							name => $obj->{"event_Name"}." rd ".$event_rds{$key} ,
+							category => $event_cat
+						});
+						Tab::JPoolRound->create( {
+							jpool => $jpool->id ,
+							round => $round->id
+						});
+						#save it in an index hash to access later for judges
+						#print "creating a judge pool index for event".$obj->{"event_Code"}." and timeslot ".$key."<br>";
+						$judge_pool{$obj->{"event_Code"}}{ $key } = $jpool->id;
+						
+						#find the judge pool room and then save the round_settings
+						my $judge_pool_room = $obj->{"event_Pool1"};
+						if ( $event_rds{$key} >= $obj->{"event_Trigger"} ) { $judge_pool_room = $obj->{"event_Pool2"}; }
+						$round->setting("num_judges", $num_judges);
+						$round->setting("judge_pool_room", $judge_pool_room);
+
+						#print "Timeslot:".$key.",round:".$event_rds{$key}." type=$rd_type, label=$rd_label, flighted=".$obj->{"event_Flighted"}.", event=".$event->name."<br>";
+							
+					}
+					
+				}
+
+			print "Totally created rounds, judge pools, and events for event=".$event->name."<br>";
+					
+		}		
+
+#########################################################
+#Now the entries....
+#########################################################
+	 
+	$sth = $dbh->prepare("DELETE entry_setting FROM entry_setting, entry, event WHERE entry_setting.entry=entry.id and entry.event=event.id and event.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased entry settings<br>";
+	$sth = $dbh->prepare("delete entry_student from entry_student, entry, event where entry_student.entry=entry.id and entry.event=event.id and event.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased entry_students  for tourn ".$tourn_id."<br>";
+	$sth = $dbh->prepare("delete entry from entry, event where entry.event=event.id and event.tourn=".$tourn_id);
+	$sth->execute();
+	print "totally erased entries for tourn".$tourn_id."<br>";
+	
+	my @entries = @{ $data->{'Entry'} };
+	foreach my $obj ( @entries) {
+
+		my $dropped = 0;
+		$dropped = $obj->{"entry_StopScheduling"} if $obj->{"entry_StopScheduling"};
+		my $ada = 0;
+		$ada = $obj->{"entry_RoomPreference"} if $obj->{"entry_RoomPreference"};
+		my $seed = 0;
+		$seed = $obj->{"entry_Rating"} if $obj->{"entry_Rating"};
+		my $entry_name = $school_index{$obj->{"entry_SchoolID"}}{'name'}."-".$obj->{"entry_LastName1"};
+		if ( $obj->{"entry_LastName2"} ) { $entry_name = $entry_name." and ".$obj->{"entry_LastName2"}; }
+		if ( $obj->{"entry_LastName3"} ) { $entry_name = $entry_name." and ".$obj->{"entry_LastName3"}; }
+		if ( $obj->{"entry_LastName4"} ) { $entry_name = $entry_name." and ".$obj->{"entry_LastName4"}; }
+		if ( $obj->{"entry_LastName5"} ) { $entry_name = $entry_name." and ".$obj->{"entry_LastName5"}; }
+		
+		#save the new record
+		my $entry = Tab::Entry->create({
+			code => $obj->{"entry_Code"} ,
+			ada => $ada ,
+			dropped => $dropped ,
+			seed => $seed ,
+			name => $entry_name ,
+			school => $school_index{$obj->{"entry_SchoolID"}}{'id'} ,
+			event => $event_index{$obj->{"entry_Event"}}
+		});
+
+		#Save the settings
+		$entry->setting("nsda_entry_id", $obj->{"entry_ID"});
+		$entry->setting("nsda_entry_fourentrymatch", $obj->{"entry_FourEntryMatch"});
+		$entry->setting("nsda_entry_lockflight", $obj->{"entry_LockFlight"});
+		$entry->setting("nsda_entry_lockfourperson", $obj->{"entry_LockFourPerson"});
+		$entry->setting("nsda_entry_FullertonMaster", $obj->{"entry_FullertomMaster"});
+		$entry->setting("nsda_entry_notes", $obj->{"entry_Notes"});
+		$entry->setting("nsda_entry_nflok", $obj->{"entry_nflOK"});
+		$entry->setting("nsda_entry_coach", $obj->{"entry_Coach"});
+		$entry->setting("nsda_entry_alt_id", $obj->{"entry_alt_id"});
+		
+		#save entry_student
+		for my $i ( 1 .. 5 ) {
+			if ( $obj->{"entry_LastName".$i} ) {
+				print "Finding an entry_student record for ".$obj->{"entry_LastName".$i}."<br>";
+				#if theres' a student record, use that.  Otherwise, create a new student record.
+				my $student_tr;
+				my @tr_students = Tab::Student->search(  first => $obj->{"entry_FirstName".$i}, last => $obj->{"entry_LastName".$i}, chapter => $school_index{$obj->{"entry_SchoolID"}}{'chapter'}, retired => 0 );
+				foreach my $std (@tr_students) {
+					print "FOUND record for ".$obj->{"entry_FirstName".$i}." ".$obj->{"entry_LastName".$i}." chpt= ".$school_index{$obj->{"entry_SchoolID"}}{'chapter'}." and retired=0<br>";
+					$student_tr = $std->id;
+				}
+				unless ($student_tr) {
+					print "No record for ".$obj->{"entry_FirstName".$i}." ".$obj->{"entry_LastName".$i}." chpt= ".$school_index{$obj->{"entry_SchoolID"}}{'chapter'}." and retired=0<br>";
+					my $student_firstname="X";
+					if ( $obj->{"entry_FirstName".$i} )  { $student_firstname = $obj->{"entry_FirstName".$i} ; }
+					my $student_lastname="X";
+					if ( $obj->{"entry_LastName".$i} )  { $student_lastname = $obj->{"entry_LastName".$i} ; }
+					my $student = Tab::Student->create({
+						first => $student_firstname ,
+						last => $student_lastname , 
+						chapter => $school_index{$obj->{"entry_SchoolID"}}{'chapter'}
+					});
+					$student_tr = $student->id;
+					print "created a new record for ".$obj->{"entry_LastName".$i}." at ".$student->id." because couldn't find an existing one<br>";
+				}
+
+				Tab::EntryStudent->create({
+					entry => $entry->id , 
+					student => $student_tr
+				});
+
+			}
+		}
+	}
+
+
+#########################################################
+#judges
+#########################################################
+
+	my @judges = @{ $data->{'Judge'} };
+	foreach my $obj ( @judges) {
+		
+		#find the right judge category
+		my $judge_category = $cat_pf->id; #throwing everyone into PF if not otherwise marked
+		my $alt_category;
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'A' ) { $judge_category = $cat_policy->id; }
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'B ') { $judge_category = $cat_ld->id; }
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'C' ) { $judge_category = $cat_pf->id; }
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'D' ) { $judge_category = $cat_speech->id; }
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'E' ) { $judge_category = $cat_policy->id; $alt_category = $cat_speech->id; } #or anything, really
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'F' ) { $judge_category = $cat_policy->id; $alt_category = $cat_ld->id; }
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'G' ) { $judge_category = $cat_ld->id;  $alt_category = $cat_pf->id; }
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'H' ) { $judge_category = $cat_congress->id; }
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'I' ) { $judge_category = $cat_ld->id; $alt_category = $cat_pf->id; }
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'J' ) { $judge_category = $cat_pf->id; $alt_category = $cat_pf->id; }
+		if ( substr($obj->{"judge_Type"}, 2, 1) eq 'Y' ) { $judge_category = $cat_congress->id; } #if you pref congress, you're in congress
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'W' ) { $judge_category = $cat_worlds->id; }			#pretty sure but this is a guess
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'T' ) { $judge_category = $cat_tab_no_use->id; } #pretty sure but this is a guess
+		if ( substr($obj->{"judge_Type"}, 0, 1) eq 'N' ) { $judge_category = $cat_tab_no_use->id; } #pretty sure but this is a guess
+		#....and fix it if they're reall judging somewhere else
+		# you're not doing this for congress mostly because you're lazy, but that's its own thing so I think you're OK
+		for my $i ( 0 .. length($obj->{"judge_EventTargets"})-1 ) {
+			if ( int(($i+1)/3) == ($i+1)/3 ) {
+				if ( substr($obj->{"judge_EventTargets"}, $i-2, 1) eq 'X' && $judge_category != $cat_policy->id ) {
+					$judge_category = $cat_policy->id;
+				}
+				if ( substr($obj->{"judge_EventTargets"}, $i-2, 1) eq 'L' && $judge_category != $cat_ld->id ) {
+					$judge_category = $cat_ld->id;
+				}
+				if ( substr($obj->{"judge_EventTargets"}, $i-2, 1) eq 'N' && $judge_category != $cat_pf->id ) {
+					$judge_category = $cat_pf->id;
+				}
+				if ( substr($obj->{"judge_EventTargets"}, $i-2, 1) eq 'W' && $judge_category != $cat_worlds->id ) {
+					$judge_category = $cat_worlds->id;
+				}
+			}
+		}	
+		
+		#Set whether judge is active
+		my $judge_active=1;
+		if ( $obj->{"judge_StopScheduling"} > 0 ) { $judge_active=0; }
+		my $judge_ada = 0; $judge_ada = $obj->{"judge_RoomPreference"} if $obj->{"judge_RoomPreference"};
+		my $judge_school = 0; $judge_school = $school_index{ $obj->{"judge_SchoolID"} }{'id'} if $obj->{"judge_SchoolID"} > 0;
+		#save new judge record		
+		my $judge = Tab::Judge->create({
+			first => $obj->{"judge_FirstName"} ,
+			last => $obj->{"judge_LastName"} ,
+			active => $judge_active ,
+			school => $judge_school,
+			ada => $judge_ada ,
+			obligation => $obj->{"judge_RdsComm"} ,
+			hired => $obj->{"judge_RdsHired"} ,
+			category => $judge_category ,
+			alt_category => $alt_category 
+		});
+
+		#judge settings
+		$judge->setting("nsda_title", $obj->{"judge_Title"});
+		$judge->setting("nsda_column", $obj->{"judge_Column"});
+		$judge->setting("notes", $obj->{"judge_Notes"});
+		$judge->setting("nsda_rating", $obj->{"judge_Rating"}); #If we seriously use this, should probably make this a rating tier
+		$judge->setting("nsda_fullerton_master", $obj->{"judge_FullertonMaster"});
+		$judge->setting("nsda_column", $obj->{"judge_Column"});
+		$judge->setting("nsda_other_state", $obj->{"judge_OtherState"});
+		$judge->setting("nsda_ccoach", $obj->{"judge_Coach"});
+		$judge->setting("nsda_diamonds", $obj->{"judge_Diamonds"});
+		$judge->setting("nsda_pf_ldok", $obj->{"judge_pf_ldok"});
+		$judge->setting("nsda_atl_id", $obj->{"judge_alt_id"});
+		$judge->setting("nsda_cx_rounds", $obj->{"judge_CX_Rounds"});
+		$judge->setting("nsda_cx_years", $obj->{"judge_CX_Years"});
+		$judge->setting("nsda_ld_rounds", $obj->{"judge_LD_Rounds"});
+		$judge->setting("nsda_ld_years", $obj->{"judge_LD_Years"});
+		
+		#stick 'em in all the judge pools they are assigned to
+		my $ts_ctr=0;
+		for my $i ( 0 .. length($obj->{"judge_EventTargets"})-1 ) {
+			if ( int(($i+1)/3) == ($i+1)/3 ) {
+				$ts_ctr++;
+				if ( substr($obj->{"judge_EventTargets"}, $i-2, 1) ne ' ' ) {
+					if ($judge_pool{ substr($obj->{"judge_EventTargets"}, $i-2, 1) }{ $ts_ctr } ) {
+						Tab::JPoolJudge->create({
+							judge => $judge->id ,
+							jpool => $judge_pool{ substr($obj->{"judge_EventTargets"}, $i-2, 1) }{ $ts_ctr }
+						});
+					} else {
+						print "Bonked for event ".substr($obj->{"judge_EventTargets"}, $i-2, 1);
+						print " and timeslot ".($ts_ctr)." with judge ".$judge->id." ".$judge->last."<br>"				
+					}
+				}
+			}
+		}
+		
+		#save the timesrikes
+		for my $i ( 0 .. length($obj->{"judge_TimeBlocks"}) ) {
+			if ( substr($obj->{"judge_TimeBlocks"}, $i, 1) eq 'X' ) {
+				Tab::Strike->create({
+					type => 'time' ,
+					judge => $judge->id ,
+					start => $ts_id_index{$i+1} {'start'},
+					end => $ts_id_index{$i+1} {'end'},
+					strike_timeslot => $ts_id_index{$i+1}{'id'}
+				});
+			}
+		}
+	
+	}
+
+	print "Totally created judges<br>";
+
+
+my $end = time(); 
+print "Total run time:"; printf("%.2f\n", $end - $start) ; print "<br>";
+$m->redirect("/setup/tourn/main.mhtml?err=Upload complete");
+
+</%init>
