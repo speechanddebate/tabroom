@@ -5,17 +5,26 @@
 
 	return unless $round;
 
+	use POSIX;
+
 	my $event = $round->event;
 	my $tourn = $event->tourn;
 	my $seed = $tourn->start->epoch;
 
 	my $speaker_max_scores = $event->setting("speaker_max_scores");
+	my $speaker_min_speeches = $event->setting("speaker_min_speeches");
+	my $include_wsdc_reply = $event->setting("include_wsdc_reply");
 
 	my $tiebreak_set_id = $event->setting("speaker_tbset");
 	my $tiebreak_set = Tab::TiebreakSet->retrieve($tiebreak_set_id) if $tiebreak_set_id;
 
 	unless ($tiebreak_set) {  
-		my $err = "Event ".$event->name." does not have a speaker awards tiebreaker set applied to it.  Please pick one and try again";
+
+		my $err;
+
+		$err .= "Event ".$event->name." does not have a speaker awards tiebreaker set applied to it. ";
+		$err .= "Please pick one and try again";
+
 		$m->redirect("/setup/events/tabbing.mhtml?event_id=".$event->id."&err=$err");
 	}
 
@@ -27,13 +36,16 @@
 	#Deduplicate Ballots
 	$m->comp("/funclib/event_dedupe.mas", event => $event);
 
-	my %student_name = map {$_->id => $_->first." ".$_->last} $m->comp("/funclib/event_students.mas",  event => $event);
+	my %student_name = map {$_->id => $_->first." ".$_->last} 
+		$m->comp("/funclib/event_students.mas",  event => $event);
 
 	#Settings
+
 	my $mfl_time_violation = $tiebreak_set->setting("mfl_time_violation");
 	my $truncate = $tiebreak_set->setting("truncate_ranks_to") if $tiebreak_set->setting("truncate_ranks_to");
 	my $truncate_to_smallest = $tiebreak_set->setting("truncate_to_smallest");
 	my $forfeits_never_break = $tiebreak_set->setting("forfeits_never_break");
+
 	undef $forfeits_never_break if $speaker_max_scores;
 
 	my %used_tier = (); 
@@ -52,6 +64,7 @@
 	}   
 
 	# Get the data you'll need for Teh Sortingz.
+
 	my $dbh = Tab::DBI->db_Main();
 
     my %entry_wins;
@@ -69,6 +82,7 @@
 
     my %student_round_forfeit;
 	my %student_round_bye;
+	my %student_did_not_speak;
 	my %student_bye;
 
 	my %student_entry;
@@ -105,37 +119,55 @@
 
 		my $sth = $dbh->prepare("
 
-			select value.id, student.id, value.student, student.first, student.last, student.novice, 
+			select score.id, student.id, score.student, student.first, student.last, student.novice, 
 				entry.id, entry.code, entry.dq, 
 				round.type, round.name, round.id, 
-				value.tag, value.value, event.id, panel.id, 
-			ballot.judge, ballot.forfeit, ballot.tv, panel.letter, entry.school, ballot.chair, ballot.bye, panel.bye
-			from score value, ballot, panel, round, event, entry, entry_student, student
-			where value.ballot = ballot.id
+				score.tag, score.value, event.id, panel.id, 
+				ballot.judge, ballot.forfeit, ballot.tv, panel.letter, 
+				entry.school, ballot.chair, ballot.bye, panel.bye
+
+			from score, ballot, panel, round, event, entry, entry_student, student
+
+			where score.ballot = ballot.id
 			and ballot.panel = panel.id
 			and panel.round = round.id
-			and not exists ( select round_setting.id from round_setting where  round_setting.tag = 'ignore_results' and round_setting.round = round.id)
+
+			and not exists ( 
+				select round_setting.id from round_setting where
+				round_setting.tag = 'ignore_results' 
+				and round_setting.round = round.id )
+
 			and round.event = event.id
-			and event.id = ".$event->id."
+			and event.id = ?
 			and ballot.entry = entry.id
 			and entry.dropped != 1
 			and entry.waitlist != 1
 			
 			and entry.id = entry_student.entry
 			and entry_student.student = student.id
-			group by value.id
+			group by score.id
 			order by event.id, round.name
 		");
 
-		$sth->execute();
+		$sth->execute($event->id);
 
-		while (my ($id, $student, $value_student, $first, $last, $novice, $entry, $code, $dq, $type, $roundname, $round, $tag, $value, $event, $panel, $judge, $forfeit, $tv, $letter,  $school, $chair, $bye, $pbye)  = $sth->fetchrow_array() ) {
+		while (my ($id, $student, $value_student, $first, $last, $novice, 
+			$entry, $code, $dq, $type, $roundname, $round, $tag, $value, 
+			$event, $panel, $judge, $forfeit, $tv, $letter,  
+			$school, $chair, $bye, $pbye)  = $sth->fetchrow_array() ) {
 
 			$student = $value_student if $value_student;
 
 			push @rounds, $round;
 			$round_type{$round} = $type;
-			$round_type{$round} = "prelim" if $type eq "preset" || $type eq "highhigh" || $type eq "highlow" || $type eq "random" || $type eq "power";
+
+			$round_type{$round} = "prelim" 
+				if $type eq "preset" 
+				|| $type eq "highhigh" 
+				|| $type eq "highlow" 
+				|| $type eq "random" 
+				|| $type eq "power";
+
 			$round_name{$round} = $roundname;
 			push @{$round_panels{$round}}, $panel;
 
@@ -156,7 +188,6 @@
 			$student_round_forfeit{$student."-".$round}++ if $forfeit;
 
 			$student_round_bye{$student."-".$round}++ if $bye;
-
 			$student_round_bye{$student."-".$round}++ if $pbye;
 
 			$student_bye{$student}++ if $bye;
@@ -200,7 +231,13 @@
 					where value.ballot = ballot.id
 					and ballot.panel = panel.id
 					and panel.round = round.id
-					and not exists ( select round_setting.id from round_setting where  round_setting.tag = 'ignore_results' and round_setting.round = round.id)
+
+					and not exists ( 
+						select round_setting.id from round_setting where  
+						round_setting.tag = 'ignore_results' 
+						and round_setting.round = round.id
+					)
+
 					and round.event = event.id
 					and round.id = ".$round->id."
 					and ballot.entry = entry.id
@@ -223,7 +260,14 @@
 
 					push @rounds, $round;
 					$round_type{$round} = $type;
-					$round_type{$round} = "prelim" if $type eq "preset" || $type eq "highhigh" || $type eq "highlow" || $type eq "random" || $type eq "power";
+
+					$round_type{$round} = "prelim" 
+						if $type eq "preset" 
+						|| $type eq "highhigh" 
+						|| $type eq "highlow" 
+						|| $type eq "random" 
+						|| $type eq "power";
+
 					$round_name{$round} = $roundname;
 					push @{$round_panels{$round}}, $panel;
 
@@ -278,10 +322,15 @@
 					where value.ballot = ballot.id
 					and ballot.panel = panel.id
 					and panel.round = round.id
-					and not exists ( select round_setting.id from round_setting where  round_setting.tag = 'ignore_results' and round_setting.round = round.id)
+					and not exists ( 
+						select round_setting.id from round_setting where  
+						round_setting.tag = 'ignore_results' 
+						and round_setting.round = round.id
+					)
+
 					and round.event = event.id
-					and event.id = ".$event->id."
-					and round.name <= ".$round->name."
+					and event.id = ? 
+					and round.name <= ?
 					and ballot.entry = entry.id
 					and entry.dropped != 1
 					and entry.waitlist != 1
@@ -293,15 +342,24 @@
 					order by event.id, round.name
 				");
 
-				$sth->execute();
+				$sth->execute($event->id, $round->name);
 
-				while (my ($id, $student, $value_student, $first, $last, $novice, $entry, $code, $dq, $type, $roundname, 
+				while (my ($id, $student, $value_student, $first, $last, $novice, 
+						$entry, $code, $dq, $type, $roundname, 
 						$round, $tag, $value, $event, $panel, $judge, $forfeit, 
 						$tv, $letter,  $school, $chair, $bye, $pbye, $esid)  = $sth->fetchrow_array() ) {
 
 					push @rounds, $round;
+
 					$round_type{$round} = $type;
-					$round_type{$round} = "prelim" if $type eq "preset" || $type eq "highhigh" || $type eq "highlow" || $type eq "random" || $type eq "power";
+
+					$round_type{$round} = "prelim" 
+						if $type eq "preset" 
+						|| $type eq "highhigh" 
+						|| $type eq "highlow" 
+						|| $type eq "random" 
+						|| $type eq "power";
+
 					$round_name{$round} = $roundname;
 					push @{$round_panels{$round}}, $panel;
 
@@ -326,7 +384,6 @@
 					$student_bye{$student}++ if $bye;
 					$student_bye{$student}++ if $pbye;
 
-
 					$student_entry{$student} = $entry;
 
 					push @scores, $id;
@@ -348,38 +405,52 @@
 		}
 	}
 
-	unless ($speaker_max_scores) { 
+	my $bye_sth = $dbh->prepare("
 
-		my $bye_sth = $dbh->prepare("
-			select entry_student.student, ballot.entry, panel.id, panel.round, panel.bye, ballot.bye, ballot.forfeit
-			from panel, ballot, round, entry_student
-			where round.event = ".$event->id."
-			and panel.round = round.id
-			and not exists ( select round_setting.id from round_setting where  round_setting.tag = 'ignore_results' and round_setting.round = round.id)
-			and round.name <= ".$round->name."
-			and ballot.panel = panel.id
-			and entry_student.entry = ballot.entry
-			and not exists ( 
-				select score.id
-				from score
-				where score.ballot = ballot.id
-				and score.student = entry_student.student
-			)
-			group by entry_student.student
-		");
+		select entry_student.student, ballot.entry, 
+			panel.id, panel.round, panel.bye pbye,
+			ballot.bye bbye, ballot.forfeit
 
-		$bye_sth->execute();
-		while (my ($student, $entry, $panel, $round, $pbye, $bbye, $forfeit)  = $bye_sth->fetchrow_array() ) {
+		from panel, ballot, round, entry_student
+		where round.event = ? 
+		and panel.round = round.id
 
-			if ($bbye) { 
-				$student_round_bye{$student."-".$round}++;
-				$student_bye{$student}++;
-			} elsif ($forfeit) { 
-				$student_round_forfeit{$student."-".$round}++;
-			} else { 
+		and not exists ( 
+			select round_setting.id from round_setting 
+			where round_setting.tag = 'ignore_results' 
+			and round_setting.round = round.id )
+
+		and round.name <= ? 
+		and ballot.panel = panel.id
+		and entry_student.entry = ballot.entry
+
+		and not exists ( 
+			select score.id
+			from score
+			where score.ballot = ballot.id
+			and score.student = entry_student.student
+		)
+	");
+
+	$bye_sth->execute($event->id, $round->name);
+
+	my %used;
+
+	while (my ($student, $entry, $panel, $round, $pbye, $bbye, $forfeit)  = $bye_sth->fetchrow_array() ) {
+
+		next if $used{$round}{$student}++;
+
+		if ($bbye) { 
+			$student_round_bye{$student."-".$round}++;
+			$student_bye{$student}++;
+		} elsif ($forfeit) { 
+			$student_round_forfeit{$student."-".$round}++;
+		} else { 
+			unless ($speaker_max_scores) { 
 				$student_round_bye{$student."-".$round}++;
 				$student_bye{$student}++;
 			}
+			$student_did_not_speak{$student}++;
 		}
 	}
 
@@ -396,11 +467,13 @@
 		next if $round_name{$all_round} > $round_name;  # Do not measure the future
 		push @all_rounds, $all_round;
 
-		#Uniq the panels so there's no double counting
+		# Uniq the panels so there's no double counting
+
 		my %pseen = (); 
 		@{$round_panels{$all_round}} = grep { ! $pseen{$_}++ } @{$round_panels{$all_round}};
 
-		#Uniq the panel entries so there's no double counting;
+		# Uniq the panel entries so there's no double counting;
+
 		foreach my $panel (@{$round_panels{$all_round}}) {   
 			my %eseen = (); 
 			@{$panel_entries{$panel}} = grep { ! $eseen{$_} ++ } @{$panel_entries{$panel}};
@@ -470,7 +543,8 @@
 
 	if ($round && ($round->type eq "elim" || $round->type eq "final")) { 
 
-		#Eliminate everyone who has not advanced to the elim round in question.
+		# Eliminate everyone who has not advanced to the elim round in
+		# question.
 
 		my @counted;
 		my %last_round;
@@ -481,7 +555,9 @@
 			next if $done{$student}++;
 
 			foreach my $panel (@{$student_panels{$student}}) { 
-				$last_round{$student} = $panel_roundname{$panel} if $last_round{$student} < $panel_roundname{$panel};
+
+				$last_round{$student} = $panel_roundname{$panel} 
+					if $last_round{$student} < $panel_roundname{$panel};
 			}
 
 			next if $last_round{$student} < $round_name;
@@ -526,9 +602,21 @@
 		}
 	}
 
-	%entry_wins = $m->comp("/funclib/entry_wins.mas", event => $event, round => $round) if $win_loss && not defined $last_elim_wins;
+	%entry_wins = $m->comp("/funclib/entry_wins.mas", 
+		event => $event, 
+		round => $round) 
+		if $win_loss && not defined $last_elim_wins;
 
-	my ($judge_avg_ref, $judge_ballot_count_ref, $judge_total_ref, $judge_stddev_ref, $total_avg, $total_std, $judge_z2_avg_ref, $judge_z2_ballot_count_ref, $judge_z2_total_ref, $judge_z2_stddev_ref) = $m->comp("/funclib/judge_points_average.mas", round => $round, event => $event) if $judge_var || $judge_var2;
+	my ($judge_avg_ref, $judge_ballot_count_ref, 
+		$judge_total_ref, $judge_stddev_ref, 
+		$total_avg, $total_std, 
+		$judge_z2_avg_ref, $judge_z2_ballot_count_ref, 
+		$judge_z2_total_ref, $judge_z2_stddev_ref) 
+
+		= $m->comp("/funclib/judge_points_average.mas", 
+			round => $round, 
+			event => $event) 
+		if $judge_var || $judge_var2;
 
 	my %entry_rankinround = ();
 
@@ -570,7 +658,7 @@
 	foreach my $student (@students) { 
 
 		foreach my $this_round (@rounds) { 
-		
+			
 			my $point_count;
 			my $rank_count;
 
@@ -579,7 +667,8 @@
 
 			my %erseen = ();  
 
-			@{$student_round_scores{$student."-".$this_round}} = grep { ! $erseen{$_}++ } @{$student_round_scores{$student."-".$this_round}};
+			@{$student_round_scores{$student."-".$this_round}} = 
+				grep { ! $erseen{$_}++ } @{$student_round_scores{$student."-".$this_round}};
 
 			unless (@{$student_round_scores{$student."-".$this_round}}) { 	
 				$student_forfeit{$student}++;
@@ -734,11 +823,14 @@
 			foreach my $oround (@all_rounds) { 
 				push (@{$tb_rounds{$tb->id}}, $oround) if $round_type{$oround} eq $tb->count;
 				push (@{$tb_rounds{$tb->id}}, $oround) if $tb->count eq "all";
-				push (@{$tb_rounds{$tb->id}}, $oround) if ($round_type{$oround} eq "elim" || $round_type{$oround} eq "final") && ($tb->count eq "last elim" || $tb->count eq "last_elim");
+				push (@{$tb_rounds{$tb->id}}, $oround) 
+					if ($round_type{$oround} eq "elim" || $round_type{$oround} eq "final") 
+					&& ($tb->count eq "last elim" || $tb->count eq "last_elim");
 			}
 
 		}
 
+		STUDENT:
 		foreach my $student (@students) { 
 
 			my $entry = $student_entry{$student};
@@ -764,6 +856,7 @@
 					$total += 100 * $entry_wins{$entry};
 
 				# RANKS RECIPS RECIPROCALS
+
 				} elsif ($name eq "ranks" || $name eq "reciprocals" || $name eq "chair_ranks") { 
 
 					my %round_count;
@@ -828,7 +921,9 @@
 					}
 
 					if ($tb_highlow == 1 || $tb_highlow == 3) {
+
 						# Drop the best (lowest for ranks, highest for recips)
+
 						foreach (1 .. $tb_highlow_count) { 
 							shift @rank_scores if $name eq "ranks" || $name eq "chair_ranks";
 							pop @rank_scores if $name eq "reciprocals";
@@ -836,7 +931,9 @@
 					}
 
 					if ($tb_highlow == 1 || $tb_highlow == 4) { 
+
 						# Drop the worst (highest)
+
 						foreach (1 .. $tb_highlow_count) { 
 							pop @rank_scores if $name eq "ranks" || $name eq "chair_ranks";
 							shift @rank_scores if $name eq "reciprocals";
@@ -887,16 +984,30 @@
 
 					ROUND:
 					foreach my $this_round (@rounds) { 
+
+						SCORE:
 						foreach my $score (@{$student_round_scores{$student."-".$this_round}}) { 
-							next unless $score_tag{$score} eq "points";
-							$round_count{$this_round}++;
-							push @point_scores, $score_value{$score};
+
+							if ($score_tag{$score} eq "rebuttal_points") { 
+
+								next SCORE unless $include_wsdc_reply;
+								$score_value{$score} = $score_value{$score} * 2;
+								$round_count{$this_round}++;
+								push @point_scores, $score_value{$score};
+
+							} else { 
+								next SCORE unless $score_tag{$score} eq "points";
+								$round_count{$this_round}++;
+								push @point_scores, $score_value{$score};
+							}
+
 						}
 					}
 
 					@point_scores = sort {$a <=> $b} @point_scores;
 
 					if ($speaker_max_scores) { 
+
 						while (scalar @point_scores > $speaker_max_scores) { 
 							shift @point_scores; 
 						}
@@ -926,7 +1037,10 @@
 
 					if ($show_averages) { 
 
-						# Round to two digits, and multiply by 100.  Otherwise sorting is all kablooey.
+						# Round to two digits, and multiply by 100 to make it
+						# an integer.  Otherwise sorting is all kablooey.  The
+						# later steps will automatically divide by 100 again. 
+
 						$total += sprintf "%d", (100 * $average);  
 
 					} else { 
@@ -1117,7 +1231,7 @@
 
 						foreach my $score (@{$student_round_scores{$student."-".$this_round}}) { 
 
-							next unless $score_tag{$score} eq "points";
+							next unless $score_tag{$score} eq "points" || ($score_tag{$score} eq "rebuttal_points" && $include_wsdc_reply);
 
 							my $judge_avg  = ${$judge_avg_ref}{$score_judge{$score}};
 							my $judge_stddev  = ${$judge_stddev_ref}{$score_judge{$score}};
@@ -1152,7 +1266,7 @@
 
 						foreach my $score (@{$student_round_scores{$student."-".$this_round}}) { 
 
-							next unless $score_tag{$score} eq "points";
+							next unless $score_tag{$score} eq "points" || ($score_tag{$score} eq "rebuttal_points" && $include_wsdc_reply);
 
 							my $judge_avg  = ${$judge_avg_ref}{$score_judge{$score}};
 							my $judge_stddev  = ${$judge_stddev_ref}{$score_judge{$score}};
@@ -1191,6 +1305,7 @@
 	}
 
 	if ($opp_points || $opp_ranks) { 
+
 		my $err;
 
 		$err .= "Danger Will Robinson!<br />You have defined Opp Points as a tiebreaker without first defining Points as one.  That cannot work both technically and philosophically.  Fix please! <br /><br />" if $opp_points;
@@ -1201,21 +1316,47 @@
 	}
 
 	foreach my $key (reverse sort keys %tb_tiers) { 
-		@students = sort {$student_tbs{$a."-".$key} <=> $student_tbs{$b."-".$key} } @students if $tier_dir{$key} eq "up";
-		@students = sort {$student_tbs{$b."-".$key} <=> $student_tbs{$a."-".$key} } @students if $tier_dir{$key} eq "down";
-	}
 
-	@students = sort { $student_forfeit{$a} <=> $student_forfeit{$b} } @students if $forfeits_never_break;
+		@students = sort {$student_tbs{$a."-".$key} <=> $student_tbs{$b."-".$key} } @students 
+			if $tier_dir{$key} eq "up";
+
+		@students = sort {$student_tbs{$b."-".$key} <=> $student_tbs{$a."-".$key} } @students 
+			if $tier_dir{$key} eq "down";
+	}
 
 	my $count;
 
 	my %student_by_place = ();
+	my %student_speeches = ();
 	
 	my $last_string;
 	my $delayed_count;
 
+	my $max_misses = scalar @all_rounds - $speaker_min_speeches;
+
 	foreach my $student (@students) { 
+
+		if ($speaker_min_speeches) { 
+
+			$student_speeches{$student}{"missed"}++ 
+				if $student_did_not_speak{$student}  > $max_misses; 
+
+			$student_speeches{$student}{"speeches"} = 
+				(scalar @all_rounds) - $student_did_not_speak{$student};
+
+		}
+	}
+
+	if ($speaker_min_speeches) { 
+		@students = sort { $student_speeches{$a}{"missed"} <=> $student_speeches{$b}{"missed"} } @students;
+		undef %student_forfeit;
+	}
+
+	undef %student_forfeit if $speaker_max_scores;
+	@students = sort { $student_forfeit{$a} <=> $student_forfeit{$b} } @students if $forfeits_never_break;
 	
+	foreach my $student (@students) { 
+
 		foreach my $key (reverse sort keys %tb_tiers) { 
 			$student_tbs{$student."-".$key} = $student_tbs{$student."-".$key} / 100;
 		}
@@ -1241,8 +1382,20 @@
 		push (@{$student_by_place{$count}}, $student);
 	}
 
-	undef %student_forfeit if $speaker_max_scores;
 
-	return (\%student_by_place, \%student_tbs, \%tier_descs, \%student_forfeit, \%tier_dir, \%tier_long_descs, \%student_novice, \%student_name, \%student_code, \%student_school, \%student_entry);
+	return (
+		\%student_by_place, 
+		\%student_tbs, 
+		\%tier_descs, 
+		\%student_forfeit, 
+		\%tier_dir, 
+		\%tier_long_descs, 
+		\%student_novice, 
+		\%student_name, 
+		\%student_code, 
+		\%student_school, 
+		\%student_entry, 
+		\%student_speeches
+	);
 
 </%init>

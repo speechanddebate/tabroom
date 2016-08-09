@@ -53,8 +53,3 @@ sub new_hangout() {
     }
 }
 
-sub entries {
-    my $self = shift;
-    return Tab::Entry->search_by_panel($self->id);
-}
-
