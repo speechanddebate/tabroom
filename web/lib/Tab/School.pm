@@ -52,10 +52,10 @@ sub short_name {
 	$name =~ s/State\ University,/State\ /g;
 	$name =~ s/^The//g;
 	$name =~ s/^Saint\ /St\ /g;
-	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
 	$name =~ s/High\ School/HS/g;
+	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
 	$name = "Boston College" if $name eq "BC";
-	$name = "Boston Univ" if $name eq "BU";
+	$name = "Boston Uni" if $name eq "BU";
 	$name =~ s/^\s+//;  #leading spaces
 	$name =~ s/\s+$//;  #trailing spaces
 

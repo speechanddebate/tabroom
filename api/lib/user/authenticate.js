@@ -1,4 +1,3 @@
-
 // This library will create a function whereby a user ID is returned with a
 // tree of active permissions for the user.  Future tournaments, judges, and
 // current student records and school records are all covered and returned as a
@@ -16,6 +15,8 @@ var crypt = require('crypt3');
 var BluePromise = require('bluebird');
 
 	var authenticate = function(req, res, next) { 
+						
+		req.session = { };
 
 		db.session.findAll(
 			{ 
@@ -28,9 +29,10 @@ var BluePromise = require('bluebird');
 
 		).then(function(Sessions) { 
 
-			if (Sessions) { 
+			if (Sessions[0]) { 
 
 				var Session = Sessions[0];
+
 				var cryptString = Session.id.toString()+config.sessionSalt;
 				var cryptHash = req.cookies[config.cookieName];
 

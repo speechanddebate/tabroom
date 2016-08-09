@@ -7,7 +7,6 @@ Tab::Tourn->columns(TEMP => qw/schoolid/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
 Tab::Tourn->has_many(rpools => 'Tab::RPool', 'tourn');
-Tab::Tourn->has_many(jpools => 'Tab::JPool', 'tourn');
 Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');
 Tab::Tourn->has_many(hotels => 'Tab::Hotel', 'tourn' => {order_by => 'name'} );
 Tab::Tourn->has_many(events => 'Tab::Event', 'tourn' => { order_by => 'name'} );
@@ -46,6 +45,14 @@ __PACKAGE__->_register_datetimes( qw/start end reg_start reg_end timestamp/);
 sub location { 
 	my $self = shift;
 	my $location = $self->state."/" if $self->state;
+	return $location.$self->country;
+}
+
+sub full_location { 
+	my $self = shift;
+	my $location;
+	$location = $self->city.", " if $self->city;
+	$location .= $self->state."/" if $self->state;
 	return $location.$self->country;
 }
 
