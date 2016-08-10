@@ -10,126 +10,141 @@
 	use Tab::NSDA::MemberSchool;
 
 	use Digest::MD5 qw(md5_hex);
+	use Email::Valid;
 
 	my $now = DateTime->now;
 
 	chomp $username;
 	chomp $password; 
 
-	# STEP ONE:  Find the user's login 
+	$m->print("<div class='blankfull'>");
 
+	# STEP ONE:  Find the user's login and person record
 	my $nsda_login = Tab::NSDA::Login->search( username => $username )->first;
 
-	my @nsda_persons; 
+	unless ($nsda_login) { 
 
-	if ($nsda_login) { 
-
-		push @nsda_persons, Tab::NSDA::Person->search( 
-			user_id => $nsda_login->person_id,
-			utype   => "Coach" 
-		);
-
-		push @nsda_persons, Tab::NSDA::Person->search( 
-			user_id => $nsda_login->person_id,
-			utype   => "PKDCoach"
-		);
-
-	} else { 
-
-		push @nsda_persons, Tab::NSDA::Person->search( 
+		my @tmp_persons = Tab::NSDA::Person->search( 
 			uemail => $username,
-			utype  => "Coach" 
+			utype => "PKDCoach"
+		)->first;
+
+		push @tmp_persons, Tab::NSDA::Person->search(
+			uemail => $username,
+			utype => "Coach"
 		);
 
-		push @nsda_persons, Tab::NSDA::Person->search( 
-			uemail => $username,
-			utype  => "PKDCoach" 
-		);
+		foreach my $tmp (@tmp_persons) { 
+			$nsda_login = Tab::NSDA::Login->search( person_id => $tmp->user_id )->first;
+		}
 
 	}
 
-	unless (@nsda_persons) { 
+	my $nsda_person = Tab::NSDA::Person->search( user_id => $nsda_login->person_id )->first;
 
-		$err .= " No NSDA or PKD coach records found with username $username .";
+	unless ($nsda_person) { 
+
+		my $err .= " No NSDA or PKD coach records found with username $username .";
 		$err .= " Be sure to use your email address or username on record with ";
 		$err .= " the NSDA/PKD Points system";
 
 		$m->redirect("/user/login/new_user.mhtml?err=$err");
 	}
 
-	my $email;
+	# Check to be sure the authentication is correct before continuing
+
 	my $success; 
-	my $err; 
-	my @nsda_logins;
 
-	foreach my $nsda_person (@nsda_persons) { 
+	my $sha512 = $nsda_login->sha512;
+	my $trial = crypt($password, $sha512) if $sha512;
 
-		push @nsda_logins, Tab::NSDA::Login->search( 
-			person_id => $nsda_person->user_id 
-		);
+	$success++ if $trial eq $sha512;
 
+	unless ($success) { 
+		my $md5 = md5_hex($password.$username.$Tab::points_salt);
+		$success++ if $md5 eq $nsda_login->password; 
+		undef $sha512;
 	}
 
-	LOGIN:
-	foreach my $trial_nsda_login (@nsda_logins) { 
-
-		my $nsda_hash = md5_hex($password.$username.$Tab::points_salt);
-
-		$success++ if $nsda_hash eq $nsda_login->password; 
-
-		if ($success) { 
-
-			$nsda_login = $trial_nsda_login;
-
-			my $nsda_login_person = Tab::NSDA::Person->retrieve($
-
-			last LOGIN;
-		}
-	}
-
-	unless ($success && $nsda_login) { 
-
-		$err .= " Your NSDA or PKD login was not successful.  Make sure you're ";
+	unless ($success) { 
+		my $err .= " Your NSDA or PKD login was not successful.  Make sure you're ";
 		$err .= " using the correct password and try again. ";
-
 		$m->redirect("/user/login/new_user.mhtml?err=$err");
-
 	}
 
-	my @nsda_schools; 
+	unless ($sha512) { 
+		my $salt = $m->comp("/funclib/generate_randomstring.mas");
+		my $sha512 = crypt($password, '$6$' . $salt);
 
-	foreach my $nsda_person (@nsda_persons) { 
-
-		Tab::NSDA::PersonSchool->set_sql( my_schools => "
-			select distinct person_school
-			from NEW_USERS_TO_SCHOOLS person_school
-			where person_school.ualt_id = ? 
-			and person_school.hasaccess = 1
-			and person_school.isadmin = 1
-			and (
-				person_school.enddate != "0000-00-00 00:00:00" 
-				or and person_school.enddate > ?
-			)
-		");
-
-		my @person_schools = Tab::NSDA::PersonSchool->search_my_schools( 
-								$nsda_person->ualt_id, 
-								DateTime::Format::MySQL->format_datetime($now)
-						); 
-
-		foreach my $person_school (@person_schools) { 
-
-			push @nsda_schools, Tab::NSDA::School->retrieve($person_school->school_id);
-
-		}
-								
+		$nsda_login->sha512($sha512);
+		$nsda_login->update;
 	}
+
+	# If the username is not an email address, use the email address instead:
+
+	unless (Email::Valid->address( -address => $username, -mxcheck => 0 )) { 
+
+		$m->print("<p>Note: Tabroom.com usernames must be email addresses.  ");
+		$m->print(" There are various good reasons for that.  Your Tabroom.com ");
+		$m->print(" username will therefore be your email address, ".$nsda_person->uemail);
+		$m->print(", not your Points username $username</p>");
+
+		$username = $nsda_person->uemail;
+	}
+
+	my ($person, $login, $msg) = find_login($username, $nsda_person, $nsda_login);
+
+	# Establish a login session for the new (ish?) user
+
+	my $session = Tab::Session->create( {
+		person  => $person->id,
+		ip      => $ENV{REMOTE_ADDR}
+	});
+
+	my $salt = $m->comp("/funclib/generate_randomstring.mas");
+	my $sha_user = crypt($session->id.$Tab::string, '$6$'.$salt);
+
+	$session->userkey($sha_user);
+	$session->update;
+
+    my $tokencookie = Apache2::Cookie->new(
+        $r,
+        -name    => 'TabroomToken',
+        -value   => $sha_user,
+        -expires => '+96h',
+        -path    => '/'
+    );
+
+    $tokencookie->bake($r);
+
+	$m->print('<p>'.$msg.'</p>');
+
+	$login->sha512($sha512);
+	$login->update;
+
+	Tab::NSDA::MemberSchool->set_sql( my_schools => "
+		select distinct school.*
+		from NEW_USERS_TO_SCHOOLS person_school, NEW_SCHOOLS school
+		where person_school.ualt_id = ? 
+		and person_school.hasaccess = 1
+		and person_school.isadmin = 1
+		and (
+			person_school.enddate = '0000-00-00 00:00:00'
+			or person_school.enddate > ?
+		)
+		and person_school.school_id = school.school_id
+	");
+
+	my @nsda_schools = Tab::NSDA::MemberSchool->search_my_schools( 
+		$nsda_person->ualt_id, 
+		DateTime::Format::MySQL->format_datetime($now)
+	); 
 
 	unless (@nsda_schools) { 
 
-		$err .= " I found your NSDA or PKD account, but found no institutions you ";
+		my $err .= " I found your NSDA or PKD account, but found no institutions you ";
 		$err .= " have admin access to.  Please have the coach of record create your";
-		$err .= " account";
+		$err .= " account. ";
 
 		$m->redirect("/user/login/new_user.mhtml?err=$err");
 
@@ -137,79 +152,273 @@
 
 	# STEP TWO: CREATE SCHOOLS, ADMINS and STUDENTS unless they already exist
 
+	my %used_school = ();
+
+	my %not_found = ();
+
+	SCHOOL:
 	foreach my $nsda_school (@nsda_schools) { 
 
-		$m->print("<div class='blankfull'>");
+		next if $used_school{$nsda_school}++;
 
 		# Create my login 
 
-		# Search for already existing ones
+		$m->print("<h2>NSDA/PKD Team Found</h2>");
 
-		my @already_logins; 
-
-		push @already_logins, Tab::Login->search( username => $nsda_login->username )->first;
-		push @already_logins, Tab::Login->search( username => $username )->first;
-
-		my @already_people; 
-
-		if (@already_logins) { 
-
-			$m->print("<h5>Found the following existing logins</h5>");
-
-			my %used = ();
-
-			foreach my $already (@already_people) { 
-				next if $used{$already}++;
-				$m->print('<p class="padleft">'.$already->id." ".$already->email."</p>");
-			}
-		}
-
-		push @already_people, Tab::Person->search( email => $username )->first;
-
-		if (@already_people) { 
-
-			$m->print("<h5>Found the following existing people</h5>");
-
-			my %used = ();
-
-			foreach my $already (@already_people) { 
-				next if $used{$already}++;
-				$m->print("<p>".$already->id." ".$already->username."</p>");
-			}
-
-		}
-
-		# Create the chapter
+		$m->print("<p>".$nsda_school->school_id." ".$nsda_school->school_name."</p>");
 
 		my @already_chapters; 
 
-		foreach my $nsda_chapter (@person_schools) { 
-
-			push @already_chapters, Tab::Chapter->search(nsda => $nsda_chapter->school_id ); 
-
-		}
-
-		# my $chapter = Tab::Chapter->search( nsda => $nsda_school->school_id ); 
+		push @already_chapters, 
+			Tab::Chapter->search(
+				nsda => $nsda_school->school_id 
+			); 
 
 		if (@already_chapters) { 
 
-			$m->print("<h5>Found the following existing chapters</h5>");
+			foreach my $chapter (@already_chapters) { 
 
-			my %used = ();
+				$m->print("<h5>Oops! ".$nsda_school->school_name." already exists in Tabroom</h5>");
+				$m->print("<p>Tabroom school name: ".$chapter->name."</p>");
+				$m->print("<p>Coaches with access:</p>");
 
-			foreach my $already (@already_chapters) { 
+				foreach my $admin ($chapter->permissions) { 
 
-				next if $used{$already}++;
-				$m->print("<p>".$already->id." ".$already->name."</p>");
+					next if $admin->tag eq "prefs";
+					my $coach = $admin->person;
 
+					$m->print('<p class="marleft padleftmore">'.$coach->first." ".$coach->last." &lt;".$coach->email."&gt;</p>");
+
+				}
+
+				$m->print("<p>I am not going to import a duplicate school.  If you need access, please contact one of them or help\@tabroom.com</p>");
+
+				next SCHOOL;
 			}
 
 		}
 
-		# Create all the admins
+		# Create the school 
 
-		# Create the students
+			$m->print("<h6>Creating a Tabroom school for ".$nsda_school->school_name."</h6>");
+
+			my $level = "highschool" if $nsda_school->realm eq "NFL";
+			$level = "university" if $nsda_school->realm eq "PKD";
+			$level = "middle" if $nsda_school->realm eq "MID";
+
+			my $chapter =  Tab::Chapter->create({
+				name   => $nsda_school->school_name,
+				street => $nsda_school->school_addr,
+				city   => $nsda_school->school_city,
+				zip    => $nsda_school->school_zip,
+				state  => $nsda_school->school_state,
+				nsda   => $nsda_school->school_id,
+				level  => $level
+			});
+
+			$m->print("<p>Created school successfully in Tabroom</p>");
+
+		# Create all the admins. 
+
+			# First me
+
+			Tab::Permission->create({
+				tag     => "chapter",
+				person  => $person->id,
+				chapter => $chapter->id
+			});
+
+			$m->print("<p>Granted administrator access to ".$person->email."</p>");
+
+			Tab::NSDA::Person->set_sql( my_admins => "
+				select distinct person.* 
+				from NEW_USERS_TO_SCHOOLS person_school, NEW_USERS person
+				where person_school.school_id = ? 
+				and person_school.hasaccess = 1
+				and person_school.isadmin = 1
+				and (
+					person_school.enddate = '0000-00-00 00:00:00'
+					or person_school.enddate > ?
+				)
+				and person_school.ualt_id = person.ualt_id
+			");
+
+			my @admins = Tab::NSDA::Person->search_my_admins( 
+				$nsda_school->school_id, 
+				DateTime::Format::MySQL->format_datetime($now)
+			); 
+
+			foreach my $admin (@admins) { 
+
+				next if $admin->ualt_id == $login->ualt_id;
+
+				my $admin_login = Tab::NSDA::Login->search( 
+					person_id => $admin->user_id 
+				);
+
+				my $admin_username = $admin->uemail;
+
+				my ($other_person, $other_login, $msg) = 
+					find_login($admin_username, $admin, $admin_login);
+
+				if ($other_person && $other_login) { 
+
+					Tab::Permission->create({
+						tag     => "chapter",
+						person  => $other_person->id,
+						chapter => $chapter->id
+					});
+			
+					$m->print("<p>Granted administrator access to ".$other_person->email."</p>");
+
+				}
+			}
+
+			# Create all the students
+
+			Tab::NSDA::Person->set_sql( my_students => "
+				select distinct person.* 
+				from NEW_USERS_TO_SCHOOLS person_school, NEW_USERS person
+				where person_school.school_id = ? 
+
+				and (
+					person_school.enddate = '0000-00-00 00:00:00'
+					or person_school.enddate > ?
+				)
+
+				and person_school.ualt_id = person.ualt_id
+				and person.utype like '%Student'
+			");
+
+			my @students = Tab::NSDA::Person->search_my_students( 
+				$nsda_school->school_id, 
+				DateTime::Format::MySQL->format_datetime($now)
+			); 
+
+			my $counter;
+
+			foreach my $student (@students) { 
+
+				my $graduated = 0;
+
+				$graduated++ if $student->graduated;
+
+				my $chapter_student = Tab::Student->create({
+					first     => $student->ufname,
+					middle    => $student->umname,
+					last      => $student->ulname,
+					grad_year => $student->grad_yr,
+					novice    => 0,
+					retired   => $graduated,
+					ualt_id   => $student->ualt_id,
+					chapter   => $chapter->id
+
+				});
+
+				$counter++ if $chapter_student;
+
+				my $student_login = Tab::Login->search( ualt_id => $student->ualt_id );
+
+				if ($student_login) { 
+					$chapter_student->person($student_login->person->id);
+					$chapter_student->update;
+
+				}
+
+
+			}
+
+			$m->print("<p>Imported ".$counter." students off your roster");
+			$m->print("</p>");
 
 	}
+
+	$m->print("<h2>Process complete!</h2>");
+	$m->print('<a href="/user/home.mhtml" class="button dkblue">Access Tabroom Home Screen</a>');
+
+	$m->print("</div>");
+
+
+	sub find_login { 
+
+		my ($username, $nsda_person, $nsda_login) = @_;
+
+		# Check if a login already exists with that username:
+
+		my $existing_login = Tab::Login->search(username => $username)->first;
+		my $existing_person;
+
+		my $msg;
+
+		if ($existing_login) { 
+
+			$msg = "A Tabroom.com account already exists for ".$username.".  Using it.";
+			$existing_person = $existing_login->person;
+
+		} else { 
+
+			$existing_person = Tab::Person->search( email => $username)->first;
+
+			if ($existing_person) { 
+				$msg = "A Tabroom.com account already exists for ".$username.".  Using it";
+			}
+
+		}
+
+		# Check if there is an existing login out there with the same ualt_id
+
+		# For the curious, this is the point in the process I started really
+		# swearing loudly about how totally insane the points database is. 
+
+		unless ($existing_login && $existing_login->ualt_id == $nsda_person->ualt_id) { 
+
+			my $ualt_id_login = Tab::Login->search( ualt_id => $nsda_person->ualt_id )->first;
+
+			if ($ualt_id_login) { 
+
+				$msg = " A Tabroom account is already linked with ".$nsda_person->uemail."'s NSDA ID.  ";
+				$msg .= " I'm connecting that account, ".$ualt_id_login->person->email." to your school ";
+				$msg .= " instead of creating a new one.";
+
+				$existing_login = $ualt_id_login;
+				$existing_person = $existing_login->person;
+			}
+
+		}
+
+		unless ($existing_person) { 
+
+			$msg = " No user found for $username.  Creating: ";
+
+			$existing_person = Tab::Person->create({
+				first   => $nsda_person->ufname,
+				middle  => $nsda_person->umname,
+				last    => $nsda_person->ulname,
+				email   => $username,
+				phone   => $nsda_person->cell,
+				ualt_id => $nsda_person->ualt_id
+			});
+
+		}
+
+		unless ($existing_login) { 
+			
+			$msg .= " No account found for $username.  Creating with your NSDA Password: ";
+
+			$existing_login = Tab::Login->create({ 
+				username      => $username,
+				person        => $existing_person->id,
+				accesses      => 1,
+				source        => "points",
+				ualt_id       => $nsda_person->ualt_id,
+				nsda_login_id => $nsda_login->login_id
+			});
+
+		}
+
+		return ($existing_person, $existing_login, $msg); 
+
+	}
+
 
 </%init>
