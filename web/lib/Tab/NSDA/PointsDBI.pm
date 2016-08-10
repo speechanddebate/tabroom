@@ -4,11 +4,11 @@ use Class::DBI::AbstractSearch;
 
 Tab::NSDA::PointsDBI->connection("dbi:mysql:$Tab::points_dbname:$Tab::points_dbhost", $Tab::points_dbuser, $Tab::points_dbpass) || die $!;;
 
-
-
 sub _register_datetimes {
+
  	my $class = shift;
  	$class = ref $class if ref $class;
+
  	foreach my $column (@_) {
 		$class->has_a(
 			$column => 'DateTime',
