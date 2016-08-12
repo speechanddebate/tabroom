@@ -40,9 +40,9 @@ as select
 from tabroom.category;
 
 create view tabapi.chapter
-	(id, name, address, city, state, zip, postal, country, coaches, self_prefs, level, nsda, naudl, ipeds, nces, ceeb, timestamp)
+	(id, name, street, city, state, zip, postal, country, coaches, self_prefs, level, nsda, naudl, ipeds, nces, ceeb, timestamp)
 as select
-	id, name, address, city, state, zip, postal, country, coaches, self_prefs, level, nsda, naudl, ipeds, nces, ceeb, timestamp
+	id, name, street, city, state, zip, postal, country, coaches, self_prefs, level, nsda, naudl, ipeds, nces, ceeb, timestamp
 from tabroom.chapter;
 
 create view tabapi.chapter_circuit
