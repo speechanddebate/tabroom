@@ -1,385 +1,555 @@
 <%args>
 	$tourn_id
-	$event_id    => undef
-	$sort_type    => undef
+	$event_id  => undef
+	$sort_type => undef
 </%args>
 <%init>
 
 	# Do not disable this.  it is critical to maintain a cache for server load. 
-	my $key = $event_id;
-	return if $m->cache_self( key => $key, expires_in => '2m' );
-
-	use Data::Dumper;
-	use Time::HiRes qw( time );
-	my $start = time(); 
+	my $key = $event_id."-".$sort_type;
+	return if $m->cache_self( key => $key, expires_in => '10m' );
 	
-	#some initial variables we'll need later
-	unless ( $event_id ) {
-		$m->print("No event identifier has been received; hit the back button on your browser and try again.<br>");
-		$m->abort;
-	}
-
-	my $event = Tab::Event->retrieve( $event_id );	
+	my $event = Tab::Event->retrieve( $event_id ) if $event_id;	
 
 	unless ( $event) {
-		$m->print("No valid event identifier has been received; hit the back button on your browser and try again.<br>");
+		$m->print('<div class="blankfull">');
+		$m->print("No valid event identifier has been received; ");
+		$m->print("hit the back button on your browser and try again.<br>");
 		$m->abort;
 	}
 
-	my $cumesheet_published;
-	foreach my $result_set ($event->result_sets) {
-		if ($result_set->label eq "Cume Sheet" and $result_set->published == 1) { $cumesheet_published = 1 };
-	}
-	unless ( $cumesheet_published ) {
-		$m->print( "The tournament director has not yet authorized the release of prelim seeds; use the back button on your browser.<br>" ) ;
+	unless ($event->result_sets( label => "Cume Sheet", published => 1)) { 
+		$m->print('<div class="blankfull">');
+		$m->print("The tournament director has not yet authorized the release");
+		$m->print(" of prelim seeds.<br>" ) ;
+		$m->print("</div>");
 		$m->abort;
 	}
 
-	my $temp = Tab::TournCircuit->search( tourn=> $event->tourn )->first;
-	my $circuit_id=$temp->circuit if $temp; 
+	my $circuit = $event->tourn->circuits->first;
+	my $circuit_id = $circuit->id;
 
 	my $year = Tab::school_year->year;
 	
-	my @ballots;
-	Tab::Score->columns(TEMP => qw/panel_bye/);						
-	Tab::Score->columns(TEMP => qw/ballot_bye/);
-	Tab::Score->columns(TEMP => qw/judge/);	
-	Tab::Score->columns(TEMP => qw/judge_name/);	
-	Tab::Score->columns(TEMP => qw/panel/);	
-	Tab::Score->columns(TEMP => qw/entry/);
-	Tab::Score->columns(TEMP => qw/tag/);
-	Tab::Score->columns(TEMP => qw/score /);
-	Tab::Score->columns(TEMP => qw/ballot_id /);
-	Tab::Score->columns(TEMP => qw/round /);
-	Tab::Score->columns(TEMP => qw/round_label /);
-	Tab::Score->columns(TEMP => qw/post_results/);
-	Tab::Score->set_sql(pull_entry => "
-		SELECT score.*, entry.id as entry, ballot.judge as judge, panel.id as panel, round.name as round, CAST(round AS DECIMAL(10,2)), round.label as round_label, panel.bye as panel_bye, ballot.bye as ballot_bye, CONCAT(judge.last, ', ', judge.first) as judge_name, ballot.id as ballot_id, round.post_results as post_results
-		FROM ballot, entry, score, panel, round, judge
-		WHERE entry.event= ? 
-		and ballot.entry=entry.id
-		and score.ballot=ballot.id
-		and (score.tag = \"rank\" or score.tag = \"points\" or score.tag = \"ballot\") 
-		and panel.id=ballot.panel
-		and round.id=panel.round
-		and judge.id=ballot.judge
-		and round.post_results > 0
-		order by entry.id asc, round asc, ballot.id asc, score.tag asc
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+
+		SELECT 
+			score.id, score.tag, score.student, score.value, 
+			panel.id, panel.bye,
+			round.id, round.name, round.label, round.post_results, round.type,
+			judge.id, judge.first, judge.last,
+			ballot.id, ballot.entry, ballot.bye, ballot.forfeit,
+			opponent.code,
+			entry.id, entry.code, entry.name,
+			school.name,
+			student.first, student.last
+
+		FROM (ballot, score, panel, round, judge, entry, school, ballot otherballot, entry opponent)
+		left join student on score.student = student.id
+
+		WHERE round.event= ? 
+
+			and score.ballot=ballot.id
+			and (
+				score.tag = \"rank\" 
+				or score.tag = \"points\" 
+				or score.tag = \"rebuttal_points\" 
+				or score.tag = \"ballot\") 
+			and panel.id=ballot.panel
+			and round.id=panel.round
+			and judge.id=ballot.judge
+			and round.post_results > 0
+
+			and ballot.entry = entry.id
+			and entry.school = school.id
+
+			and otherballot.panel = panel.id
+			and otherballot.id != ballot.id
+			and otherballot.entry = opponent.id
+
+		order by ballot.entry, round, ballot.id, score.tag
 	");
-	@ballots = Tab::Score->search_pull_entry($event->id);
 
-	#So it stores all the scores in two hashes, one for scores, one for judges
-	#For %team_scores, it goes {entry.id}{round.id}{student}, and note that if it stores a zero for student it's a team score
-	my %team_scores;
-	my %team_judges;
-	foreach my $ballot (@ballots) {
+	my %scores;
+	my %entry_info;
 
-		next unless $ballot->post_results > 0;
-		next if $ballot->post_results == 1 and $ballot->tag eq "rank";
-		next if $ballot->post_results == 1 and $ballot->tag eq "points";
+	my %rounds;
 
-		if ($team_scores{$ballot->entry}{$ballot->round}{$ballot->ballot_id}{$ballot->student}) {
-			$team_scores{$ballot->entry}{$ballot->round}{$ballot->ballot_id}{$ballot->student} .= ' - '.$ballot->value;
-		} else {
-			$team_scores{$ballot->entry}{$ballot->round}{$ballot->ballot_id}{$ballot->student} = $ballot->value;
+	my $n_prelims; 
+
+	my $last_prelim_id; 
+	my $last_prelim_name; 
+
+	$sth->execute($event->id);
+
+	while (my (
+			$score_id, $score_tag, $score_student, $score_value, 
+			$panel_id, $panel_bye,
+			$round_id, $round_name, $round_label, $round_post_results, $round_type,
+			$judge_id, $judge_first, $judge_last,
+			$ballot_id, $ballot_entry, $ballot_bye, $ballot_forfeit,
+			$opponent_code,
+			$entry_id, $entry_code, $entry_name, 
+			$school_name,
+			$student_first, $student_last
+		) = $sth->fetchrow_array() ) {	
+
+		next unless $round_post_results > 0;
+
+		next if $round_post_results == 1 and $score_tag eq "rank";
+		next if $round_post_results == 1 and $score_tag eq "points";
+
+		unless ($rounds{$round_id}{"name"}) {
+
+			$rounds{$round_id}{"label"} = $round_label;
+			$rounds{$round_id}{"label"} = $round_name unless $round_label;
+
+			$rounds{$round_id}{"name"} = $round_name;
+			$rounds{$round_id}{"type"} = $round_type;
+
+			if ($round_type ne "elim" && $round_type ne "final") {
+				
+				$n_prelims++ ;
+
+				if ($round_name > $last_prelim_name) { 
+					$last_prelim_name = $round_name;
+					$last_prelim_id = $round_id;
+				}
+
+			}
+
 		}
-		if ( $ballot->tag eq "ballot" ) {
-			$team_scores{$ballot->entry}{$ballot->round}{$ballot->ballot_id}{0} .= ' '.$ballot->value;
+
+		unless ($entry_info{$entry_id}{"code"}) { 
+			$entry_info{$entry_id}{'school'} = $school_name;
+			$entry_info{$entry_id}{'code'} = $entry_code;
+			$entry_info{$entry_id}{'name'} = $entry_name;
 		}
-		if ( $ballot->panel_bye or $ballot->ballot_bye ) { 
-			$team_scores{$ballot->entry}{$ballot->round}{$ballot->ballot_id}{$ballot->student} = 2;
-		}
-		$team_judges{$ballot->entry}{$ballot->round}{$ballot->ballot_id}{'id'} = $ballot->judge;
-		$team_judges{$ballot->entry}{$ballot->round}{$ballot->ballot_id}{'name'} = $ballot->judge_name;
-		$team_judges{$ballot->entry}{$ballot->round}{'panel'} = $ballot->panel;
-		$team_judges{$ballot->entry}{$ballot->round}{'round_label'} = $ballot->round_label;
-	}
-	
-	#set opponent
-	foreach my $entry_key ( keys %team_scores) {
-		foreach my $round_key ( keys %{$team_scores{$entry_key}} ) {			
-			my @opponents = Tab::Ballot->search( panel => $team_judges{$entry_key}{$round_key}{'panel'} );				
-			foreach my $oppon (@opponents) {
-				next unless $oppon->entry;
-				if ($oppon->entry->id != $entry_key) { $team_judges{$entry_key}{$round_key}{'oppn'} = $oppon->entry->code };
+
+		if ($score_student) { 
+			unless ($entry_info{$entry_id}{$score_student}) { 
+				push @{$entry_info{$entry_id}{"students"}}, $score_student;
+				$entry_info{$entry_id}{$score_student} = $student_first." ".$student_last;
 			}
 		}
-	}
 
-	#pull round info
-	my $n_prelims; my $hi_prelim; 
-	my @rounds = $m->comp("/funclib/event_rounds.mas", event => $event, done => "yes");
-	foreach my $round ( @rounds ) {
-		if ($round->type ne 'elim' and $round->type ne 'final' ) {
-			$n_prelims++;
-			if ($round->name > $hi_prelim) { $hi_prelim = $round };
+		push @{$scores{$entry_id}{$round_id}{"ballots"}}, $ballot_id;
+
+		if ($score_student) { 
+			$scores{$ballot_id}{$score_student} .= " - " if $scores{$ballot_id}{$score_student};
+			$scores{$ballot_id}{$score_student} .= $score_value;
 		}
-	}
 
-	#create a hash for team info for sorting
-	
-	my %team_entry_info;
-	foreach my $entry_key ( keys %team_scores) {
-		my $entry_names = Tab::Entry->retrieve( $entry_key );				
-		$team_entry_info{$entry_key}{'school'} = $entry_names->school->name;
-		$team_entry_info{$entry_key}{'fullname'} = $entry_names->name;
-		$team_entry_info{$entry_key}{'seed'} = 999;
+		if ($score_tag eq "ballot" ) {
+			$scores{$ballot_id}{"ballot"} = "L";
+			$scores{$ballot_id}{"ballot"} = "W" if $score_value == 1;
+		}
+
+		$scores{$entry_id}{$round_id}{'opponent'} = $opponent_code;
+		$scores{$ballot_id}{"judge"} = $judge_id;
+		$scores{$ballot_id}{"judge_name"} = $judge_first." ".$judge_last;
+
 	}
+	
+	#pull round info
+
+	my $last_prelim = Tab::Round->retrieve($last_prelim_id);
 
 	#Add byes in
-	my @panels;
-	Tab::Panel->columns(TEMP => qw/entry /);	
-	Tab::Panel->columns(TEMP => qw/round_id /);	
-	Tab::Panel->columns(TEMP => qw/ballot_id /);	
-	Tab::Panel->set_sql(pull_panels => "
-		SELECT ballot.bye, panel.bye, panel.id, ballot.entry as entry, round.name as round_id, ballot.id as ballot_id
+	my $bye_sth = $dbh->prepare("
+		SELECT 
+			panel.id, panel.bye, 
+			ballot.id, ballot.bye, ballot.forfeit, ballot.entry,
+			round.id
 		FROM ballot, panel, round
 		WHERE round.event= ? 
-		and panel.round=round.id
-		and ballot.panel=panel.id
-		and (ballot.bye=1 or panel.bye=1)
+		and panel.round = round.id
+		and ballot.panel = panel.id
+		and (
+			ballot.bye = 1 
+			or panel.bye = 1 
+			or ballot.forfeit = 1
+		)
 	");
-	@panels = Tab::Panel->search_pull_panels($event->id);
-	foreach my $panel (@panels) {
-		if ( $team_entry_info{$panel->entry} ) {
-			$team_scores{$panel->entry}{$panel->round_id}{$panel->ballot_id}{0} = 2;
+
+	$bye_sth->execute($event->id);
+
+	while (my (
+			$panel_id, $panel_bye, 
+			$ballot_id, $ballot_bye, $ballot_forfeit, $ballot_entry,
+			$round_id
+		) = $bye_sth->fetchrow_array() ) {	
+
+		if ( $entry_info{$ballot_entry} ) {
+			$scores{$ballot_id}{"ballot"} = "BYE" if $panel_bye;
+			$scores{$ballot_id}{"ballot"} = "BYE" if $ballot_bye;
+			$scores{$ballot_id}{"ballot"} = "FFT" if $ballot_forfeit;
 		}
 	}
-
 
 	#now load results info
 
-	my ($entries_ref, $tbs_ref, $desc_ref, $forfeit_ref, $meh, $panrank_ref, $panletter_ref, $long_desc_ref) = $m->comp("/tabbing/results/order_entries.mas", long_names => 1, round => $hi_prelim);
-	my $x;
+	my ($entries_ref, $tbs_ref, $desc_ref, $forfeit_ref, 
+		$meh, $panrank_ref, $panletter_ref, $long_desc_ref) 
+		= $m->comp("/tabbing/results/order_entries.mas", round => $last_prelim);
 
-	#figure out where in the sort order wins and points are	
-	my $win_str; my $pts_str;
-	foreach my $key ( keys %{$desc_ref} ) {
-		if ( ${$desc_ref}{$key} eq 'W' || ${$desc_ref}{$key} eq 'Win' ) { $win_str = $key } ;
-		if ( ${$desc_ref}{$key} eq 'Pts' ) { $pts_str = $key } ;
-	}
-	
-	#assign wins and points
-	foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) { 
-		$x++;
-		foreach my $entry_id (@{${$entries_ref}{$key}}) { 
-			$team_entry_info{$entry_id}{'seed'}=$x;
-			$team_entry_info{$entry_id}{'wins'}= ${$tbs_ref}{$entry_id."-".$win_str} ;
-			$team_entry_info{$entry_id}{'points'}= ${$tbs_ref}{$entry_id."-".$pts_str} ;
+
+	foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+
+		my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
+
+		foreach my $entry_id (@{${$entries_ref}{$key}}) {
+
+			$entry_info{$entry_id}{"seed"} = "T-" if $tie; 
+			$entry_info{$entry_id}{"seed"} = Lingua::EN::Numbers::Ordinate::ordinate($key);
+
+			foreach my $desc_key (sort {$a <=> $b} keys %{$desc_ref}) {
+				$entry_info{$entry_id}{$desc_key} = ${$tbs_ref}{$entry_id."-".$desc_key};
+			}
+
 		}
 	}
-	
-#	my $sort_str="sort { $team_entry_info{$a}->{'school'} cmp $team_entry_info{$b}->{'school'} }";
-	my @team_entry_order;
+
+
+	my ($students_ref, $speaker_tbs_ref, $speaker_desc_ref, 
+			$feh, $bleh, $speaker_long_desc_ref, @crap) 
+		= $m->comp("/tabbing/results/order_speakers.mas", round => $last_prelim);
+
+	my %speaker = ();
+
+	my $cutoff = scalar(keys %{$students_ref});
+	$cutoff = $cutoff / 3;
+
+	foreach my $key (sort {$a <=> $b} keys %{$students_ref}) {
+
+		my $tie++ if scalar @{${$students_ref}{$key}} > 1;
+
+		foreach my $student_id (@{${$students_ref}{$key}}) {
+
+			if ($key <= $cutoff) { 
+				$speaker{$student_id}{"place"} = "T-" if $tie; 
+				$speaker{$student_id}{"place"} = Lingua::EN::Numbers::Ordinate::ordinate($key);
+			}
+
+			foreach my $desc_key (sort {$a <=> $b} keys %{$speaker_desc_ref}) {
+				$speaker{$student_id}{$desc_key} = ${$speaker_tbs_ref}{$student_id."-".$desc_key};
+			}
+
+		}
+	}
+
+	my @all_rounds = sort { $rounds{$a}{"name"} <=> $rounds{$b}{"name"} } keys %rounds;
+
+	my @entry_order;
+
 	if ($sort_type eq 'alpha') {
-		@team_entry_order = sort { $team_entry_info{$a}->{'school'} cmp $team_entry_info{$b}->{'school'} } keys %team_entry_info;
+		@entry_order = 
+			sort { $entry_info{$a}->{'school'} cmp $entry_info{$b}->{'school'} } 
+			keys %entry_info;
+
 	} else {
-		@team_entry_order = sort { $team_entry_info{$a}->{'seed'} <=> $team_entry_info{$b}->{'seed'} } keys %team_entry_info;
-	} ;
+		@entry_order = 
+			sort { $entry_info{$a}->{'seed'} <=> $entry_info{$b}->{'seed'} } 
+			keys %entry_info;
+	}
 		
-	my @decision;
-	$decision[0]="Loss";	
-	$decision[1]="Win";	
-	$decision[2]="bye/fft";	
 </%init>
 
 	<& menu.mas, tourn_id => $tourn_id, event_id => $event->id, whoami => "cumesheet" &>
 
 	<div class="main">
 
+		<& /index/tourn/title.mas, tourn => $event->tourn &>
+        <& /index/tourn/tabbar.mas, tourn => $event->tourn &>
+
 		<div class="full nospace"> 
-			<span class="twothirds">
-				<h4> <% $event->tourn->name %></h4>
-			</span>
-
-			<span class="third rightalign">
-				<h5><% $event->name %> Cumulative Results</h5>
-			</span>
+			<h4>
+				Cumulative Results: <% $event->abbr %>
+			</h4>
 		</div>
-
 
 	<script>
 		
-		functiontest = function() {
-			var MasterTable = document.getElementById("table_body");
-			var TableRows = MasterTable.getElementsByTagName("tr");
-			for (var i = 0; i < TableRows.length; i++) {
-				TableRows[i].style.display = (TableRows[i].style.display === "none") ? "table-row" : "none" ;
-			}
-			
-		}
-
 		showall = function() {
-			var MasterTable = document.getElementsByTagName("tr");
-			for (var i = 0; i < MasterTable.length; i++) {
-				MasterTable[i].style.display = "table-row";
-			}
-			
+
+			$(".rows").removeClass("hidden");
+
+			$(".headerrow").addClass("yellowrow");
+
+			$("#showall").addClass("hidden");
+			$("#hideall").removeClass("hidden");
+
+			$(".rowtoggle").removeClass("fa-eye-slash");
+			$(".rowtoggle").removeClass("redtext");
+			$(".rowtoggle").addClass("greentext");
+			$(".rowtoggle").addClass("fa-eye");
 		}
 
 		hideall = function() {
-			var MasterTable = document.getElementsByClassName("none");
-			for (var i = 0; i < MasterTable.length; i++) {
-				MasterTable[i].style.display = "none";
-			}
-			var MasterTable = document.getElementsByClassName("even");
-			for (var i = 0; i < MasterTable.length; i++) {
-				MasterTable[i].style.display = "none";
-			}
+
+			$(".rows").addClass("hidden");
+			$(".headerrow").removeClass("yellowrow");
+
+			$("#showall").removeClass("hidden");
+			$("#hideall").addClass("hidden");
+
+			$(".rowtoggle").addClass("fa-eye-slash");
+			$(".rowtoggle").addClass("redtext");
+			$(".rowtoggle").removeClass("greentext");
+			$(".rowtoggle").removeClass("fa-eye");
 		}
 
-		var row_name ="team1";
-		functiontest2 = function(row_name) {
-//			var TableRows = document.getElementsByName("team1");
-//			window.alert("Received variable is:" + row_name);
-			var TableRows = document.getElementsByName(row_name);
-			for (var i = 0; i < TableRows.length; i++) {
-				TableRows[i].style.display = (TableRows[i].style.display === "none") ? "table-row" : "none" ;
-			}
-			
+		showRow = function(row_name) {
+
+			$("#"+row_name).toggleClass("fa-eye-slash");
+			$("#"+row_name).toggleClass("redtext");
+			$("#"+row_name).toggleClass("greentext");
+			$("#"+row_name).toggleClass("fa-eye");
+
+			$("#header_"+row_name).toggleClass("yellowrow");
+
+			$("#row_"+row_name).toggleClass("hidden");
+			$(".rows_"+row_name).toggleClass("hidden");
+
 		}
 		
 	</script>
 
-	<div class="centeralign">
-		<a class="dkblue fifth" onclick="showall();" >Show full detail</a>
-		<a class="dkblue fifth" onclick="hideall();" >Hide full detail</a>
-		<a class="dkblue fifth" href="debate_cumesheet.mhtml?event_id=<% $event->id %>&sort_type=seed&tourn_id=<% $tourn_id %>"> Sort by seed</a>
-		<a class="dkblue fifth" href="debate_cumesheet.mhtml?event_id=<% $event->id %>&sort_type=alpha&tourn_id=<% $tourn_id %>">Sort alphabetically</a>
+	<div class="centeralign marbottommore">
+
+		<span class="half nospace leftalign">
+			<a 
+				class="dkblue button hidden" 
+				id="showall" 
+				onclick="showall();" 
+			>Show full detail</a>
+
+			<a 	
+				class="dkblue button" 
+				id="hideall" 
+				onclick="hideall();" 
+			>Hide full detail</a>
+
+		</span>
+
+		<span class="half nospace rightalign">
+
+%		if ($sort_type eq "alpha") { 
+			<a 
+				class="dkblue button" 
+				href="debate_cumesheet.mhtml?event_id=<% $event->id %>&sort_type=seed&tourn_id=<% $tourn_id %>" >
+				Sort by seed
+			</a>
+
+%		} else { 
+
+			<a 
+				class="dkblue button" 
+				href="debate_cumesheet.mhtml?event_id=<% $event->id %>&sort_type=alpha&tourn_id=<% $tourn_id %>"
+			>Sort alphabetically</a>
+
+%		}
+
+		</span>
+
 	</div>
 
-	<br />
 	
 	<table>
 		
 		<tbody id="table_body" class="smallish">
 
-%#			foreach my $entry_key ( sort { $team_entry_info{$a}->{'school'} cmp $team_entry_info{$b}->{'school'} } keys %team_entry_info) {
-%			foreach my $entry_key ( @team_entry_order ) {
+%			my $switch;
 
-%			my @temp_array = Tab::EntryStudent->search( entry=>$entry_key);				
+%			foreach my $entry_id ( @entry_order ) {
 
-			<tr class="yellowrow" >
-
-				<td>
-					<a class="dkblue centeralign" onclick="functiontest2('team<% $entry_key %>');">Hide/Show</a>
-				</td>
-
-				<td>
-					<% $team_entry_info{$entry_key}{'school'} %>
-				</td>
-
-				<td>
-%				#Add a hyperlink to the bid sheets if its a 2-person team				
-%					if ( scalar(@temp_array) == 2) {				
-						<a class="white" href="/index/results/team_lifetime_record.mhtml?id1=<% $temp_array[0]->student %>&id2=<% $temp_array[1]->student %>">
-%					}				
-					<% $team_entry_info{$entry_key}{'fullname'} %>
-				</td>
-
-%				my $n_panels = scalar keys %{$team_scores{$entry_key}};				
-%				if ($n_panels > $n_prelims) { $n_panels = $n_prelims };
-
-				<td class="nowrap centeralign">
-					<% $team_entry_info{$entry_key}{'wins'} %>-<% $n_panels-$team_entry_info{$entry_key}{'wins'} %>
-				</td>
-
-				<td class="nowrap centeralign">
-					<% $team_entry_info{$entry_key}{'points'} %> pts
-				</td>
-
-				<td class="nowrap centeralign">
-					Seed <% $team_entry_info{$entry_key}{'seed'} %>
-				</td>
-
-			</tr>
-
-			<tr name="team<% $entry_key %>" class="even">
-
-				<th class="smallish">
-					Round
-				</td>
-
-				<th class="smallish">
-					Opponent
-				</td>
-
-				<th class="smallish">
-					Judge
-				</td>
-
-				<th class="smallish">
-					Decision
-				</td>				
-
-%				foreach my $entry_student (@temp_array) {
-					<th class="smallish">
-						<a class="white" href="/index/results/speaker_detail.mhtml?spkr_id=<% $entry_student->student %>&year=<% $year %>&event_type=debate&circuit_id=<% $circuit_id %>">
-							<% $entry_student->student->first  %> <% $entry_student->student->last %>
-						</a> 
-					</th>
-%				}
-
-				<td></td>
-
-			</tr>
-
-%			my $ctr=0; my $bg_color="";
-
-%			foreach my $round_key ( sort { $a <=> $b} keys %{$team_scores{$entry_key}} ) {			
-
-%			$ctr++;
-%			$bg_color=""; if ($ctr % 2 == 0) { $bg_color="Gainsboro" };
-
-			<tr class="none" name="team<% $entry_key %>" bgcolor="<% $bg_color %>">
+%				my @students = @{$entry_info{$entry_id}{"students"}} if $entry_info{$entry_id}{"students"};
 		
-				<td>
-%				if ( $team_judges{$entry_key}{$round_key}{'round_label'} ) { print $team_judges{$entry_key}{$round_key}{'round_label'} }
-%				else { print $round_key.' '.$team_judges{$entry_key}{$round_key}{'round_label'}  } ;				
-%#					<% $round_key %>
-				</td>
-				<td>
-					<% $team_judges{$entry_key}{$round_key}{'oppn'} %>
-				</td>
 
-				<td class="nospace">
-%				foreach my $ballot_key ( sort keys %{$team_scores{$entry_key}{$round_key}} ) {			
-					<div class="full padleft padless nowrap">
-						<% $team_judges{$entry_key}{$round_key}{$ballot_key}{'name'} %>
-					</div>
-%				}
-				</td>
+				<tr 
+					class="<% $switch++ % 2 ? "even" : "odd" %> yellowrow headerrow" 
+					id="header_<% $entry_id %>">
 
-				<td class="nowrap nospace">
-%				foreach my $ballot_key ( sort keys %{$team_scores{$entry_key}{$round_key}} ) {							
-					<div class="full padleft padless nowrap">
-%					if ($decision[$team_scores{$entry_key}{$round_key}{$ballot_key}{0}] eq 'Bye/FFT') { print "Bye/FFT" }; 
-%					if ($decision[$team_scores{$entry_key}{$round_key}{$ballot_key}{0}] ne 'Bye/FFT') { print $decision[$team_scores{$entry_key}{$round_key}{$ballot_key}{0}] };
-					</div>
-%				}									
-				</td>
-
-%				foreach my $entry_student (@temp_array) {
-					<td class="nowrap nospace">
-%						foreach my $ballot_key ( sort keys %{$team_scores{$entry_key}{$round_key}} ) {
-							<div class="full nowrap padleft">
-								<% $team_scores{$entry_key}{$round_key}{$ballot_key}{$entry_student->student} %>
-							</div>
-%						}					
+					<td 
+						class="centeralign hover"
+						onclick="showRow('<% $entry_id %>');"
+					>
+						<a 
+							class="greentext centeralign fa fa-lg fa-eye rowtoggle" 
+							id="<% $entry_id %>">
+						</a>
 					</td>
+
+					<td colspan="2">
+%						#Add a hyperlink to the bid sheets if its a 2-person team				
+
+%						if ( scalar(@students) == 2) {				
+
+							<a class="white" 
+								href="/index/results/team_lifetime_record.mhtml?id1=<% $students[0] %>&id2=<% $students[1] %>">
+%						}				
+							<% $entry_info{$entry_id}{'name'} %>,
+
+							<% $entry_info{$entry_id}{'school'} %>
+						</a>
+
+					</td>
+
+					<td class="nowrap" colspan="<% 1 + (scalar @students) %>">
+
+					<span class="quarter centeralign">
+						<% $entry_info{$entry_id}{'seed'} %> Seed 
+					</span>
+
+					<span class="threequarters centeralign">
+
+%						foreach my $desc_key (sort {$a <=> $b} keys %{$desc_ref}) {
+							<span class="quarter rightalign marno padright"
+								title="<% ${$long_desc_ref}{$desc_key} %>">
+									<% $entry_info{$entry_id}{$desc_key} %>
+									<% ${$desc_ref}{$desc_key} eq "Win" ? "- ".($n_prelims - $entry_info{$entry_id}{$desc_key}) : "" %> 
+							</span>
+%						}
+
+					</span>
+
+
+				</tr>
+
+%				foreach my $student (@students) { 
+
+					<tr class="none rows rows_<% $entry_id %> row">
+
+						<td></td>
+
+						<td colspan="1" class="rightalign">
+							<% $entry_info{$entry_id}{$student} %>;
+						</td>
+
+						<td class="nospace" colspan="<% 2 + (scalar @students) %>">
+
+							<span class="threequarters nospace">
+
+%								foreach my $desc_key (sort {$a <=> $b} keys %{$speaker_desc_ref}) {
+
+									<span 
+										class="quarter rightalign marno hover padtop padbottom padright" 
+										title="<% ${$speaker_long_desc_ref}{$desc_key} %>">
+											<% $speaker{$student}{$desc_key} %>
+									</span>
+
+%								}
+
+							</span>
+
+							<span class="quarter rightalign">
+								<% $speaker{$student}{"place"} ?  $speaker{$student}{"place"}." speaker" : "" %>
+							</span>
+
+						</td>
+
+					</tr>
 %				}
 
-				<td></td>
+				<tr id="row_<% $entry_id %>" class="rows centeralign explain strong redtext">
 
+					<th class="smallish">
+						Round
+					</td>
 
-			</tr>
-%			}
+					<th class="smallish">
+						Opponent
+					</td>
+
+					<th class="smallish">
+						Judge
+					</td>
+
+					<th class="smallish">
+						Decision
+					</td>				
+
+%					foreach my $student (@students) {
+
+						<th class="smallish">
+							<a 	
+								class="redtext centeralign padmore" 
+								href="/index/results/speaker_detail.mhtml?spkr_id=<% $student %>&year=<% $year %>&event_type=debate&circuit_id=<% $circuit_id %>">
+
+								<% $entry_info{$entry_id}{$student} %> 
+							</a> 
+						</th>
+%					}
+
+				</tr>
+
+%				foreach my $round_id ( @all_rounds )  { 
+		
+%					my @ballots = @{$scores{$entry_id}{$round_id}{"ballots"}}
+%						if $scores{$entry_id}{$round_id}{"ballots"};
+
+%					next unless @ballots;
+
+%					my %seen;
+%					@ballots = grep { ! $seen{$_} ++ } @ballots;
+
+					<tr class="none rows rows_<% $entry_id %> row">
+			
+						<td>
+							<% $rounds{$round_id}{"label"} %>
+						</td>
+
+						<td>
+							<% $scores{$entry_id}{$round_id}{'opponent'} %>
+						</td>
+
+						<td class="nospace">
+
+%						foreach my $ballot_id (@ballots) { 
+							<div class="full padleft padless nowrap">
+								<% $scores{$ballot_id}{"judge_name"} %>
+							</div>
+%						}
+
+						</td>
+
+						<td class="nowrap nospace">
+
+%						my @keys = sort keys %{$scores{$entry_id}{$round_id}};
+
+%						foreach my $ballot_id (@ballots) { 
+							<div class="full padleft padless nowrap centeralign">
+								<% $scores{$ballot_id}{"ballot"} %>
+							</div>
+%						}
+
+						</td>
+
+%						foreach my $student (@students) {
+
+							<td class="nowrap nospace">
+%								foreach my $ballot_id (@ballots) { 
+									<div class="half rightalign padright nospace">
+										<% $scores{$ballot_id}{$student} %>
+									</div>
+%								}					
+							</td>
+%						}
+
+					</tr>
+%				}
+
+				<tr class="none rows rows_<% $entry_id %> row">
+					<td colspan="29" class="dkgreen padless marno">
+					</td>
+				</tr>
 
 %			}	
-			</tbody>
-		</table>	
 
-% my $end = time(); print "<br>Load time ";
-% printf("%.2f\n", $end - $start);
+			</tbody>
+
+		</table>	
 
 	</div>
