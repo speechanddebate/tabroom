@@ -2,7 +2,6 @@
 	$event
 	$school  => undef
 	$chapter => undef
-	$debug   => undef
 	$drops   => undef
 	$retired => undef
 </%args>
@@ -14,6 +13,7 @@
 
 	my $double_entry = $tourn->setting("double_entry");
 	my $double_max = $tourn->setting("double_max");
+	my $enter_me_twice = $event->setting("enter_me_twice");
 
 	if (defined $double_max && $double_max == 0) { 
 		undef $double_entry;
@@ -22,8 +22,44 @@
 
 	my $alumni = $event->setting("alumni");
 	my $supp = $event->setting("supp");
+
+    my @patterns = $tourn->patterns;
+    my %pattern_by_id = map {$_->id => $_} @patterns;
+
 	my $pattern = $event->pattern;
-	my $ed_exclude = $event->pattern->exclude if $event->pattern;
+
+	my %excludeds = (); 
+
+	foreach my $other (@patterns) { 
+
+		my $exclude = $other->exclude;
+
+		if ($exclude && ($pattern_by_id{$exclude})) { 
+
+			$excludeds{$other->id}{$exclude}++;
+			$other->exclude(JSON::encode_json($excludeds{$other->id}));
+			$other->update;
+
+		} elsif ($exclude) { 
+
+			$excludeds{$other->id} = JSON::decode_json($other->exclude);
+
+			foreach my $only_one (keys %{$excludeds{$other->id}}) { 
+
+				if ($excludeds{$other->id}{$only_one} eq "same_pattern_only") { 
+
+					$excludeds{$other->id."_sameonly"} .= "," if $excludeds{$other->id."_sameonly"};
+					$excludeds{$other->id."_sameonly"} .= $only_one;
+
+					delete($excludeds{$other->id}{$only_one});
+				}
+
+			}
+
+
+		}
+
+	}
 	
 	my @clean_students;
 	my @students;
@@ -42,14 +78,17 @@
 		@students = sort {ucfirst $a->last cmp ucfirst $b->last} $chapter->students;
 	}
 
-	#Check the students to be sure that they're not entered in an event restricted against this one.
+	# Check the students to be sure that they're not entered in an event
+	# restricted against this one.
 
 	my $now = DateTime->now;
 	my $year = $now->year;
 	$year++ if $now->month > 6;
 
 	my %entry_by_id = ();
+
 	my @entries = $school->entries if $school;
+
 	foreach my $entry (@entries) { 
 		$entry_by_id{$entry->id} = $entry;
 	}
@@ -58,8 +97,7 @@
 		select distinct entry_student.*
 		from entry_student, entry, student, event
 		where entry.id = entry_student.entry
-		and entry_student.student = student.id
-		and student.chapter = ?
+		and entry_student.student = student.id and student.chapter = ?
 		and entry.event = event.id
 		and event.tourn = ? 
 		");
@@ -67,38 +105,51 @@
 	my %entries_by_student = ();
 
 	unless ($wsdc) { 
-		foreach my $entry_student (Tab::EntryStudent->search_by_chapter($chapter->id, $tourn->id)) { 
-			push (@{$entries_by_student{$entry_student->student->id}}, $entry_by_id{$entry_student->entry->id});
+
+		foreach my $entry_student (
+				Tab::EntryStudent->search_by_chapter($chapter->id, $tourn->id)
+			) { 
+
+			push (@{$entries_by_student{$entry_student->student->id}}, 
+				$entry_by_id{$entry_student->entry->id});
 		}
 	}
 
-	my %double_by_event = ();
+	my %pattern_by_event = map {$_->id => $_->pattern} $tourn->events;
 
-	foreach my $event ($m->comp("/funclib/tourn_events.mas", tourn => $tourn)) { 
-		$double_by_event{$event->id} = $event->pattern;
-	}
+	my %done;
 
 	STUDENT:
 	foreach my $student (@students) { 
 
-		#Students who aren't students anymore.
+		next if $done{$student->id}++;
+
+		# Students who aren't students anymore.
+
 		unless ($retired) { 
+
 			next STUDENT if $student->retired;
-			next STUDENT unless $student->first && $student->last;
-			next STUDENT if $student->grad_year && $student->grad_year < $year && not defined $alumni;
+
+			next STUDENT unless $student->first 
+				&& $student->last;
+
+			next STUDENT if $student->grad_year 
+				&& $student->grad_year < $year 
+				&& not defined $alumni;
 		}
 
-		#Class specific double entry restrictions 
-		my @entries = @{$entries_by_student{$student->id}} if $entries_by_student{$student->id};
+		# Class specific double entry restrictions 
+		my @entries = @{$entries_by_student{$student->id}} 
+			if $entries_by_student{$student->id};
 
-		#Supplementals are only open to students entered in the tournament
+		# Supplementals are only open to students entered in the tournament
 		next STUDENT if $supp &! @entries;
 
 		my %pattern_scoreboard = ();
 
 		foreach my $entry (@entries) { 
 			next unless $entry && $entry->id;
-			$pattern_scoreboard{$double_by_event{$entry->event->id}}++;
+			$pattern_scoreboard{$pattern_by_event{$entry->event->id}}++;
 		}
 
 		my $entered;
@@ -106,53 +157,133 @@
 		foreach my $entry (@entries) { 
 
 			next unless $entry && $entry->id;
-			my $event_id = $entry->event->id;
+
+			my $this_event_id = $entry->event->id;
+			my $this_event = $entry->event;
 
 			unless ($entry->dropped || $entry->waitlist) { 
 
 				# Am I already entered in this event?
-				next STUDENT if $event_id == $event->id && not defined $event->setting("enter_me_twice");
 
-				# Am I already entered in the tournament and in off the waitlist? 
+				next STUDENT if $this_event_id == $event->id && not defined $enter_me_twice;
+
+				# Am I already entered in the tournament and in off the
+				# waitlist? 
+
 				$entered++;
 
-				# No double entry permitted if you're entered in this pattern and that's not ok
+				# No double entry permitted if you're entered in this pattern
+				# and that's not ok
+
 				next STUDENT if $pattern && $pattern->type == 2 && $entered;  
 
+				# No double entry with a mutually-excluded group
 
-				#No double entry with a mutually-excluded group
-				next STUDENT if $ed_exclude &&  $entry->event->pattern && $entry->event->pattern->id == $ed_exclude->id;
+				next STUDENT if $excludeds{$pattern->id}
+					&& $this_event->pattern 
+					&& $excludeds{$pattern->id}{$this_event->pattern->id};
 
 
-				if ($double_by_event{$event_id}) { 
+				if ($excludeds{$pattern->id."_sameonly"}) { 
 
-					# No double entry permitted if you're already entered and the new pattern forbids double entry
-					next STUDENT if $double_by_event{$event_id}->type == 2;
+					my $search_pattern = $excludeds{$pattern->id."_sameonly"}.",".$pattern->id;
 
-					#No double entry within the pattern
-					next STUDENT if $double_by_event{$event_id}->type == 1 && 
-							($pattern && $double_by_event{$event_id}->id == $pattern->id);  
+					# This implements the nonsense around the only_one exclusions I have to
+					# Pull a Bruschke on this one and define this one hard coded instead of
+					# using the proper calls because the SQL injection guards won't let me auto
+					# define a self expanding array. 
 
-					#No double entry beyond a limit within the pattern
-					next STUDENT if ($double_by_event{$event_id}->type == 3) && 
-						($pattern && $double_by_event{$event_id}->id == $pattern->id 
-							&& $pattern_scoreboard{$pattern->id} >= $pattern->max); 
+					# I hate computers. 
 
-					#No double entry if the other pattern excludes mine
-					next STUDENT if ( $double_by_event{$event_id}->exclude && $pattern && ($double_by_event{$event_id}->exclude->id == $pattern->id)   );
+					Tab::Student->set_sql("clash_on_only_one" => "
+
+						select student.*
+
+						from student, student as me,  
+							entry_student, entry_student as my_es, entry_student as other_es,
+							entry, entry as my_entry, entry as other_entry,
+							event as my_event, event as other_event
+
+						where entry.event = ?
+
+							and me.id = ? 
+							and my_es.student = me.id
+							and my_es.entry = my_entry.id
+							and my_es.entry != entry.id
+							and my_entry.event = my_event.id
+							and my_event.pattern in (".$search_pattern.")
+
+						and student.id != me.id
+
+							and student.id = entry_student.student
+							and entry_student.entry = entry.id
+							and student.id = other_es.student
+							and other_es.entry = other_entry.id
+							and other_entry.id != entry.id
+							and other_entry.event = other_event.id
+							and my_event.pattern in (".$search_pattern.")
+					");
+
+
+					my $other_student = Tab::Student->search_clash_on_only_one(
+						$event->id, 
+						$student->id, 
+					)->first;
+
+					next STUDENT if $other_student;
+
+				}
+
+				if ($pattern_by_event{$this_event_id}) { 
+
+					# No double entry permitted if you're already entered and
+					# the new pattern forbids double entry
+
+					next STUDENT if $pattern_by_event{$this_event_id}->type == 2;
+
+					# No double entry within the pattern
+
+					next STUDENT if 
+						$pattern_by_event{$this_event_id}->type == 1 
+						&& (
+							$pattern 
+							&& $pattern_by_event{$this_event_id}->id == $pattern->id
+						);  
+
+					# No double entry beyond a limit within the pattern
+
+					next STUDENT if 
+						$pattern_by_event{$this_event_id}->type == 3
+						&& (
+							$pattern 
+							&& $pattern_by_event{$this_event_id}->id == $pattern->id 
+							&& $pattern_scoreboard{$pattern->id} >= $pattern->max
+						); 
+
+					# No double entry if the other pattern excludes mine
+
+					next STUDENT if ( 
+						$excludeds{$pattern_by_event{$this_event_id}}
+						&& $excludeds{$pattern_by_event{$this_event_id}}{$pattern->id} == 1
+					);
 
 				}
 			}
 		}
 
-		#Unlimited double entry
-		push (@clean_students, $student) if $double_entry eq "unlimited";
-		next STUDENT if $double_entry eq "unlimited";
+		# Unlimited double entry
 
-		#No double entry
+		if ($double_entry eq "unlimited") { 
+			push (@clean_students, $student);
+			next STUDENT;
+		}
+
+		# No double entry
+
 		next STUDENT if ($entered > 0 && $double_entry eq "none"); 
 
-		#One event double entry
+		# One event double entry
+
 		next STUDENT if ($double_entry eq "max_events" && $entered >= $double_max);
 	
 		push (@clean_students, $student);
