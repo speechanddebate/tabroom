@@ -34,9 +34,9 @@ as select
 from tabroom.circuit;
 
 create view tabapi.category
-	(id, name, abbr, tourn_id, timestamp)
+	(id, name, abbr, tourn_id, pattern_id, timestamp)
 as select
-	id, name, abbr, tourn, timestamp
+	id, name, abbr, tourn, pattern, timestamp
 from tabroom.category;
 
 create view tabapi.chapter
