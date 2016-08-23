@@ -528,29 +528,3 @@ as select
 from tabroom.session;
 
 
-# NEW SURVEY MODULE
-
-create view tabapi.survey
-	(id, name, type, condition, start, end, tourn_id, category_id, event_id, circuit_id, timestamp)
-as select
-	id, name, type, condition, start, end, tourn, category, event, circuit, timestamp
-from tabroom.survey;
-
-create view tabapi.survey_question
-	(id, order, question, explanation, answer_format, survey_id, event_id, category_id, tourn_id, timestamp)
-as select
-	id, order, question, explanation, answer_format, survey, event, category, tourn, timestamp
-from tabroom.survey_question;
-
-create view tabapi.survey_response
-	( id, start, survey_id, person_id, tourn_id, judge_id, entry_id, school_id, timestamp)
-as select
-	id, start, survey, person, tourn, judge, entry, school, timestamp
-from tabroom.survey_response;
-
-create view tabapi.survey_answer
-	(id, value, survey_response_id, survey_question_id, timestamp)
-as select
-	id, value, survey_response, survey_question, timestamp
-from tabroom.survey_answer;
-	
