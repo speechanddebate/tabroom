@@ -1,0 +1,370 @@
+<%args>
+	$school  => undef
+	$student => undef
+</%args>
+<%init>
+
+	use Data::Dumper;
+
+	$school = Tab::School->retrieve(114511) unless $school;
+	$student = Tab::Student->retrieve(203812) unless $student;
+
+	return unless $school && $student; 
+
+	my $tourn = $school->tourn;
+
+	my $now = DateTime->now;
+	my $year = $now->year;
+	$year++ if $now->month > 6;
+
+	my %ok_events = (); 
+
+	$m->redirect('/user/home.mhtml') unless $tourn;
+
+	# Eliminate events excluded by tournament wide double entry limits,
+	# supplemental restrictions, and patterns that forbid cross entry, or have
+	# internal limits on how many events can be entered within the pattern.
+
+	# Pattern based mutual exclusions are stored as JSON objects because I'm a
+	# lazy asshat, which means I have to deal with those programmatically after
+	# this query.  
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+
+        select event.id, event.name, event.pattern
+
+        from event, student
+
+        where event.tourn = ?
+        and student.id = ?
+		and student.grad_year >= ? 
+		and student.retired != 1
+
+        and not exists ( 
+            select nosame_entry.id
+            from entry nosame_entry, entry_student nosame_es
+            where nosame_es.student = student.id
+            and nosame_es.entry = nosame_entry.id
+            and nosame_entry.event = event.id
+            and not exists ( 
+                select enter_me_twice.id
+                from event_setting enter_me_twice
+                where enter_me_twice.tag = 'enter_me_twice'
+                and enter_me_twice.value > 0
+                and enter_me_twice.event = nosame_entry.event
+            )
+        )
+
+		and not exists ( 
+			select tourn_double_nope.id
+
+			from tourn_setting tourn_double_nope, 
+				entry double_nope_entry, entry_student double_nope_es, event double_nope_event
+
+			where tourn_double_nope.tourn = event.tourn
+			and tourn_double_nope.tag = 'double_entry'
+			and tourn_double_nope.value = 'none'
+
+			and double_nope_event.tourn = event.tourn
+			and double_nope_entry.event = double_nope_event.id
+			and double_nope_es.entry = double_nope_entry.id
+			and double_nope_es.student = student.id
+
+		)
+
+		and not exists (
+
+			select tourn_max_events.id
+			from tourn_setting tourn_max_events
+			where tourn_max_events.tag = 'double_entry'
+			and tourn_max_events.value = 'max_events'
+			and tourn_max_events.tourn = event.tourn
+
+			and (
+				select count(tourndupe_entry.id)
+				from entry tourndupe_entry, entry_student tourndupe_es, event tourndupe_event
+				where tourndupe_es.student = student.id
+				and tourndupe_es.entry = tourndupe_entry.id
+				and tourndupe_entry.event = tourndupe_event.id 
+				and tourndupe_event.tourn = event.tourn
+
+			)  >=  (
+				select tourn_double_max.value
+				from tourn_setting tourn_double_max
+				where tourn_double_max.tourn = event.tourn
+				and tourn_double_max.tag = 'double_max'
+			)
+
+		)
+
+		and not exists ( 
+
+			select supp_setting.id
+			from event_setting supp_setting
+			where supp_setting.event = event.id
+			and supp_setting.tag = 'supp'
+			and supp_setting.value = '1'
+
+			and not exists (
+
+				select supp_other_entry.id
+
+				from entry supp_other_entry, 
+					entry_student supp_other_es,
+					event supp_other_event
+				where supp_other_es.student = student.id
+				and supp_other_es.entry = supp_other_entry.id
+				and supp_other_entry.event = supp_other_event.id
+				and supp_other_event.tourn = event.tourn
+			)
+
+		)
+
+        and not exists (
+
+            select pattern_cross_entry.id
+
+            from entry pattern_cross_entry,
+            event pattern_cross_event,
+            entry_student pattern_cross_es,
+            pattern pattern_cross
+
+            where pattern_cross_es.student = student.id
+            and pattern_cross_es.entry = pattern_cross_entry.id
+            and pattern_cross_entry.event = pattern_cross_event.id
+            and pattern_cross_entry.tourn = event.tourn
+            and pattern_cross.id = pattern_cross_event.pattern
+            and pattern_cross.type = 2 
+
+        )
+
+        and not exists ( 
+
+
+            select pattern_limit.id
+
+            from pattern pattern_limit
+
+            where pattern_limit.type = 3 
+            and pattern_limit.tourn = event.tourn
+
+            and  (   
+                select count(distinct pattern_limit_entry.id)
+                from entry pattern_limit_entry, 
+                    event pattern_limit_event,
+                    entry_student pattern_limit_es
+                where pattern_limit_es.student = student.id
+                    and pattern_limit_es.entry = pattern_limit_entry.id
+                    and pattern_limit_entry.event = pattern_limit_event.id
+                    and pattern_limit_event.pattern = pattern_limit.id
+
+            ) >= ( 
+                pattern_limit.max
+            )
+
+        )
+
+	");
+
+	$sth->execute($tourn->id, $student->id, $year);
+
+	while( 
+		my ($ok_event_id, $ok_event_name, $ok_event_pattern) 
+			= $sth->fetchrow_array() ) {
+
+		$ok_events{$ok_event_id}{"name"} = $ok_event_name;
+		$ok_events{$ok_event_id}{"pattern"} = $ok_event_pattern;
+	}
+
+	# Now we have to check for events forbidden through mutual exclusions. 
+
+	my @alreadies = $m->comp("/funclib/student_entries.mas", 
+		student => $student,
+		tourn   => $tourn
+	);
+
+    my @patterns = $tourn->patterns;
+	our %pattern_by_id = map {$_->id => $_} @patterns;
+
+	my $must_deal_with_sameonly_bullshit;
+
+	# Check if my events' pattern exclusions forbid any other events' patterns
+
+	foreach my $already (@alreadies) { 
+
+		my $aevent = $already->event;
+		my $pattern = $aevent->pattern;
+		next unless $pattern && $pattern->id;
+
+		my $exclude = $pattern->exclude;
+
+		my %exclusion = parse_excludes($pattern->exclude);
+
+		# Is the event forbidden by my exclusions? 
+
+		foreach my $event_id (keys %ok_events) { 
+	
+			$must_deal_with_sameonly_bullshit++ if $exclusion{$ok_events{$event_id}{"pattern"}} eq "same_pattern_only";
+
+			next unless $exclusion{$ok_events{$event_id}{"pattern"}} == 1;
+			delete $ok_events{$event_id};
+		}
+
+		# Check the converse: am I forbidden by this event's exclusions? 
+
+		foreach my $event_id (keys %ok_events) { 
+
+			my $other_pattern = $pattern_by_id{$ok_events{$event_id}{"pattern"}};
+
+			next unless $other_pattern;
+
+			my %other_exclusion = parse_excludes($other_pattern->exclude);
+
+			$must_deal_with_sameonly_bullshit++ 
+				if $other_exclusion{$pattern->id} eq "same_pattern_only";
+
+			next unless $other_exclusion{$pattern->id} == 1;
+			delete $ok_events{$event_id};
+		}
+
+	}
+
+	# This is a convoluted way of making sure that anyone who enteres in
+	# pattern A can either in either pattern B or pattern C, but not both. 
+
+	# I want to apologize to anyone who reads the following code, and I haven't
+	# event written it when I wrote this comment.  It's bound to be bad.  
+
+	# But if you want to see worse go and check to Bruschke's powermatcher.
+	# That shit's whacked.   -- CLP 
+
+	if ($must_deal_with_sameonly_bullshit) { 
+
+		my %in_patterns;
+
+		foreach my $already (@alreadies) { 
+
+			foreach my $student ($m->comp("/funclib/entry_students.mas", entry => $already)) { 
+
+				foreach my $entry ($m->comp("/funclib/student_entries.mas", student => $student, tourn => $tourn)) { 
+					next unless $entry->event->pattern && $entry->event->pattern->id;
+					$in_patterns{$entry->event->pattern->id}++;
+				}
+
+			}
+		}
+
+		foreach my $event_id ( keys %ok_events ) { 
+
+			my $same_pattern = $pattern_by_id{$ok_events{$event_id}{"pattern"}};
+
+			next unless $same_pattern && $same_pattern->exclude; 
+
+			my %exclusion = parse_excludes($same_pattern->exclude);
+
+			my $one_is_ok;
+
+			foreach my $already (@alreadies) { 
+
+				my $aevent = $already->event;
+
+				my $already_pattern = $aevent->pattern; 
+				next unless $already_pattern; 
+
+				if ($exclusion{$already_pattern->id} eq "same_pattern_only") { 
+
+					if ($one_is_ok) { 
+						delete $ok_events{$event_id} if $one_is_ok ne $already_pattern->id; 
+					} else { 
+						$one_is_ok = $already_pattern->id; 
+					}
+
+				}
+			}
+
+		}
+
+		# And the converse
+
+		foreach my $already (@alreadies) { 
+
+			my $same_already_pattern = $already->event->pattern;
+			next unless $same_already_pattern;
+
+			my %exclusion = parse_excludes($same_already_pattern->exclude);
+
+			# Find the mutually exclusive pattern that I'm already in.
+
+			# You can tell I'm starting to get real lazy with variable names. 
+
+			my $this_one_is_good_ok;
+
+			foreach my $other (@alreadies) { 
+
+				next if $other->id == $already->id;
+
+				my $other_already_pattern = $other->event->pattern;
+				next unless $other_already_pattern;
+
+				if ($exclusion{$other_already_pattern->id} eq "same_pattern_only") { 
+					$this_one_is_good_ok = $other_already_pattern->id;
+				}
+			}
+
+			# Now mark all the mutually excluded events not in that pattern
+			# out. 
+
+			if ($this_one_is_good_ok) { 
+
+				foreach my $bad_pattern (keys %exclusion) { 
+
+					next if $bad_pattern == $this_one_is_good_ok;
+
+					foreach my $event_id (keys %ok_events) { 
+
+						if ($ok_events{$event_id}{"pattern"} == $bad_pattern) { 
+							delete $ok_events{$event_id};
+						}
+
+					}
+
+				}
+
+			}
+
+		}
+
+	}
+
+	undef %pattern_by_id;
+
+	sub parse_excludes { 
+
+		# This is to fix legacy setups where only one excluded pattern was
+		# possible.   Convert any integer to a JSON object and save. 
+
+		my $exclude = shift; 
+
+		my %exclusion = ();
+
+		if ($exclude > 0 && $pattern_by_id{$exclude}) { 
+
+			my $pattern = $pattern_by_id{$exclude};
+
+			$exclusion{$exclude}++;
+			$pattern->exclude(JSON::encode_json(%exclusion));
+			$pattern->update;
+
+		} elsif ($exclude) { 
+
+			eval{ %exclusion = %{JSON::decode_json($exclude)}; };
+
+		}
+
+		return %exclusion; 
+
+	}
+	
+</%init>
