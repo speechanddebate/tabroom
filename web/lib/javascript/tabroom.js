@@ -1,4 +1,49 @@
 
+/* zebra stripe the rows */ 
+
+	function zebraRows() {
+
+		$(".main").find(".row:even").addClass("even");
+		$(".main").find(".row:odd").addClass("odd");
+
+		$(".menu").find(".row:even").addClass("even");
+		$(".menu").find(".row:odd").addClass("odd");
+
+		$(".sidenote").find(".row:even").addClass("even");
+		$(".sidenote").find(".row:odd").addClass("odd");
+
+		$("table").find(".row:even").removeClass("odd");
+		$("table").find(".row:even").addClass("even");
+		$("table").find(".row:odd").removeClass("even");
+		$("table").find(".row:odd").addClass("odd");
+
+		$(".pagehalf").find(".row:even").addClass("even");
+		$(".pagehalf").find(".row:even").removeClass("odd");
+		$(".pagehalf").find(".row:odd").addClass("odd");
+		$(".pagehalf").find(".row:odd").removeClass("even");
+
+
+		$(".main").find(".lightrow:even").addClass("lighteven");
+		$(".main").find(".lightrow:odd").addClass("lightodd");
+
+		$(".menu").find(".lightrow:even").addClass("lighteven");
+		$(".menu").find(".lightrow:odd").addClass("lightodd");
+
+		$(".sidenote").find(".lightrow:even").addClass("lighteven");
+		$(".sidenote").find(".lightrow:odd").addClass("lightodd");
+
+		$("table").find(".lightrow:even").removeClass("lightodd");
+		$("table").find(".lightrow:even").addClass("lighteven");
+		$("table").find(".lightrow:odd").removeClass("lighteven");
+		$("table").find(".lightrow:odd").addClass("lightodd");
+
+		$(".pagehalf").find(".lightrow:even").addClass("lighteven");
+		$(".pagehalf").find(".lightrow:even").removeClass("lightodd");
+		$(".pagehalf").find(".lightrow:odd").addClass("lightodd");
+		$(".pagehalf").find(".lightrow:odd").removeClass("lighteven");
+	};
+
+
 /* Change the file uploader div to show the name of the uploaded file */
 
 function uploaderName(uploader, filedisplay) { 
