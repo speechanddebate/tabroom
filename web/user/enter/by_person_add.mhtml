@@ -1,0 +1,292 @@
+<%args> 
+	$school
+	$student_id => undef
+	$event_id   => undef
+	$attempt    => undef
+</%args>
+<%init>
+
+	my $tourn = $school->tourn;
+
+	my $student = Tab::Student->retrieve($student_id);
+	my $event = Tab::Event->retrieve($event_id);
+
+	$m->abort unless $student;
+	$m->abort unless $event;
+	$m->abort unless $event->tourn->id == $tourn->id; 
+
+	my %ok_events = $m->comp("/funclib/student_clear_events.mas", 
+		student => $student,
+		school  => $school
+	);
+
+	unless ($ok_events{$event->id}) { 
+
+		my $msg = $student->first." ".$student->last." is not eligible to enter in ".$event->name;
+		$m->redirect("by_person_edit.mhtml?student_id=".$student->id."&school_id=".$school->id."&msg=$msg");
+
+	}
+
+	my $edit_needed; 
+
+	my %students;
+
+	foreach my $tick (1 .. $event->setting('min_entry')) { 
+
+		if ($tick == 1 && $student) { 
+			$students{$student->id}++;
+		} elsif ($ARGS{"student_".$tick}) { 
+			$students{$ARGS{"student_".$tick}}++;
+		} else { 
+			$edit_needed .= "Insufficent number of competitors entered <br />";
+		}
+
+	}
+
+	# This takes care of additional extra team members
+
+	foreach my $tick (1 .. $event->setting('max_entry')) { 
+		if ($ARGS{"students_".$tick}) { 
+			$students{$ARGS{"students_".$tick}}++;
+		}
+	}
+
+	if ($event->setting("code_style") eq "register") { 
+		$edit_needed .= "Please supply an entry code <br />" unless $ARGS{"entry_code"};
+	}
+
+	my %quals; 
+
+	my $atlarge++ if $ARGS{"atlarge"};
+
+	my $at_large_allowed++ if $event->setting('at_larges');
+
+	foreach my $tick ($event->setting('ask_quals')) { 
+
+		if ($ARGS{"qual_name_".$tick}) { 
+
+			$quals{$tick}{"name"} = $ARGS{"qual_name_".$tick};
+			$quals{$tick}{"result"} = $ARGS{"qual_result_".$tick};
+
+		} elsif ($at_large_allowed) { 
+
+			$edit_needed .= "Please supply the required number of qualifiers, ";
+			$edit_needed .= "or mark the entry as at-large. <br />";
+
+		} else { 
+			$edit_needed .= "Please supply the required number of qualifiers <br/>";
+		}
+	}
+
+	if ($event->setting("more_quals")) { 
+
+		my $baseline = $event->setting('ask_quals');
+		my $limit = $baseline + 5;
+
+		foreach my $tick ($baseline .. $limit) { 
+
+			next unless $ARGS{"qual_name_".$tick};
+
+			$quals{$tick}{"name"} = $ARGS{"qual_name_".$tick};
+			$quals{$tick}{"result"} = $ARGS{"qual_result_".$tick};
+		}
+	}
+
+	if ($event->setting("ask_for_titles")) { 
+
+		$edit_needed .= "Piece title/ISBN is required. <br />" unless $ARGS{"title"};
+	}
+
+	if ($event->setting("apda")) { 
+		$edit_needed .= "APDA Registration seeding not provided <br />" unless $ARGS{"registered_seed"};
+	}
+
+	my $waitlist = $m->comp("/funclib/waitlist_status.mas", 
+		event  => $event,
+		school => $school
+	);
+
+	my @existing_tbas = Tab::Entry->search(
+		school      => $school->id,
+		dropped     => 0,
+		unconfirmed => 0,
+		tba         => 1
+	);
+
+	$edit_needed .= "Please let us know whether to use TBA slots or not" if @existing_tbas && (not defined $ARGS{"use_tba"}); 
+
+	unless ($edit_needed) { 
+
+		# I appear to have all the required information so save away!
+
+		my $entry;
+
+		if (@existing_tbas && ($ARGS{"use_tba"} eq "yes") ) { 
+
+			$entry = shift @existing_tbas;
+			$entry->tba(0);
+
+		} else { 
+
+			$entry = Tab::Entry->create({
+				code   => "PENDING!",
+				name   => "PENDING!",
+				event  => $event->id,
+				school => $school->id,
+			});
+
+		}
+
+		$entry->waitlist(1) if defined $waitlist;
+
+		# Students
+
+		foreach my $student_id (keys %students) { 
+
+			Tab::EntryStudent->create({
+				entry   => $entry->id,
+				student => $student_id
+			});
+
+		}
+
+		# Code and name
+
+		if ($ARGS{"entry_code"}) { 
+
+			$entry->code($ARGS{"entry_code"});
+
+		} else { 
+			$entry->code($m->comp("/funclib/entry_code.mas", entry => $entry));
+		}
+
+		$entry->name($m->comp("/funclib/entry_name.mas", entry => $entry));
+
+		$entry->setting('atlarge', $ARGS{"atlarge"});
+		$entry->setting('title', $ARGS{"title"});
+		$entry->setting('author', $ARGS{"author"});
+
+		$entry->setting('registered_seed', $ARGS{"registered_seed"});
+
+		my $seed = $ARGS{"registered_seed"};
+
+		if ($seed eq "full") { 
+			$entry->setting("pairing_seed", 1); 
+		} elsif ($seed eq "half") { 
+			$entry->setting("pairing_seed", 2); 
+		} elsif ($seed eq "free") { 
+			$entry->setting("pairing_seed", 3); 
+		} elsif ($event->setting("apda")) { 
+			$entry->setting("pairing_seed", 4); 
+		}
+
+		foreach my $tick (keys %quals) { 
+
+			Tab::Qualifier->create({
+				entry  => $entry->id,
+				name   => $quals{$tick}{"name"},
+				result => $quals{$tick}{"result"}
+			});
+		}
+
+		$entry->update;
+
+		my $msg = "Entry ".$entry->name." has been registered in ".$event->abbr;
+
+		$m->redirect("by_person_edit.mhtml?student_id=".$student->id."&school_id=".$school->id."&msg=$msg");
+
+	} 
+
+	# If we're this far, I HAVE NEEDS
+
+</%init>
+
+	<div class="main">
+
+		<h2><% $tourn->name %></h2>
+		
+		<& menu.mas, school => $school, whoami => "by_person" &>
+
+		<div class="full nospace">
+
+			<span>
+				<a 
+					title="Return to full roster"
+					href="by_person.mhtml?school_id=<% $school->id %>" 
+					class="fa fa-arrow-left fa-2x bluetext"
+				></a>
+
+			</span>
+
+			<span class="half">
+				<h4><% $student->first." ".$student->last %></h4>
+			</span>
+
+
+			<span class="third rightalign">
+				<h4>
+					Adding to <% $event->abbr %>
+				</h4>
+			</span>
+
+		</div>
+
+%		if ($edit_needed) {
+
+			<div class="warnbox">
+
+				<h5>I'm afraid I'm gonna have to insist:</h5>
+
+				<p class="redtext bigger">
+					<% $edit_needed %>
+				</p>
+			</div>
+%		}
+
+		<form action="by_person_add.mhtml" method="post">
+		<input type="hidden" name="student_id" value="<% $student->id %>">
+		<input type="hidden" name="school_id" value="<% $school->id %>">
+		<input type="hidden" name="event_id" value="<% $event->id %>">
+		<input type="hidden" name="attempt" value="1">
+
+		<hr >
+
+		<h5>Additional info required:</h5>
+
+%		if (@existing_tbas) { 
+
+			<label for="use_tba">
+
+				<div class="lightrow hover">
+
+					<span class="twofifths rightalign">
+						Assign to one of your <% scalar @existing_tbas %> TBA slots:
+					</span>
+
+					<span class="sixth centeralign">
+						<input 
+							type  = "checkbox"
+							name  = "use_tba"
+							id    = "use_tba"
+							value = "1"
+
+							<% $ARGS{"use_tba"} ? 'checked="checked"' : "" %>
+						>
+					</span>
+				</div>
+
+			</label>
+
+%		}
+
+		<& entry_edit.mas, school => $school, student => $student, event => $event, add => 1 &>
+
+		<div class="liblrow full rightalign">
+
+			<input type="submit" value="Save Entry">
+
+		</div>
+
+		</form>
+
+	</div>
