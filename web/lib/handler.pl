@@ -1,7 +1,7 @@
 #!/usr/bin/perl -d
 
 package Tab::Mason;
-use lib "/www/tabroom/web/lib";
+use lib "/www/testing.tabroom.com/web/lib";
 
 use strict;
 no warnings "uninitialized";
@@ -99,6 +99,10 @@ use Tab::Stats;
 use Tab::Strike;
 use Tab::StrikeTimeslot;
 use Tab::Student;
+use Tab::Survey;
+use Tab::SurveyQuestion;
+use Tab::SurveyResponse;
+use Tab::SurveyAnswer;
 use Tab::SweepInclude;
 use Tab::SweepSet;
 use Tab::SweepRule;
