@@ -110,9 +110,9 @@ as select
 from tabroom.event;
 
 create view tabapi.file
-	(id, label, filename, published, uploaded_at, circuit_id, tourn_id, event_id, webpage_id, school_id, result_set_id, timestamp)
+	(id, label, type, filename, published, uploaded_at, circuit_id, tourn_id, event_id, webpage_id, school_id, result_set_id, timestamp)
 as select
-	id, label, filename, published, uploaded, circuit, tourn, event, webpage, school, result, timestamp
+	id, label, type, filename, published, uploaded, circuit, tourn, event, webpage, school, result, timestamp
 from tabroom.file;
 
 create view tabapi.fine
