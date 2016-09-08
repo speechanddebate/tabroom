@@ -1,7 +1,7 @@
 package Tab::File;
 use base 'Tab::DBI';
 Tab::File->table('file');
-Tab::File->columns(All => qw/id label filename posting published uploaded tourn school event result circuit webpage/);
+Tab::File->columns(All => qw/id label filename type posting published uploaded tourn school event result circuit webpage/);
 Tab::File->has_a(school => 'Tab::School');
 Tab::File->has_a(event => 'Tab::Event');
 Tab::File->has_a(tourn => 'Tab::Tourn');
