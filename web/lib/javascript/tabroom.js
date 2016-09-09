@@ -24,12 +24,16 @@
 
 
 		$(".main").find(".lightrow:even").addClass("lighteven");
+		$(".main").find(".lightrow:even").removeClass("lightodd");
 		$(".main").find(".lightrow:odd").addClass("lightodd");
+		$(".main").find(".lightrow:odd").removeClass("lighteven");
 
 		$(".menu").find(".lightrow:even").addClass("lighteven");
 		$(".menu").find(".lightrow:odd").addClass("lightodd");
 
+		$(".sidenote").find(".lightrow:even").removeClass("lightodd");
 		$(".sidenote").find(".lightrow:even").addClass("lighteven");
+		$(".sidenote").find(".lightrow:odd").removeClass("lighteven");
 		$(".sidenote").find(".lightrow:odd").addClass("lightodd");
 
 		$("table").find(".lightrow:even").removeClass("lightodd");
@@ -39,6 +43,7 @@
 
 		$(".pagehalf").find(".lightrow:even").addClass("lighteven");
 		$(".pagehalf").find(".lightrow:even").removeClass("lightodd");
+
 		$(".pagehalf").find(".lightrow:odd").addClass("lightodd");
 		$(".pagehalf").find(".lightrow:odd").removeClass("lighteven");
 	};
