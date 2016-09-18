@@ -178,7 +178,14 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 
     var keyCode = e.keyCode; 
 
-    var filter = [0,8,9,16,17,18,37,38,39,40,46];
+	if (keyCode === 9) { 
+		console.log("Keycode is "+keyCode+" and length is "+len);
+		console.log(input.value);
+		console.log("Length is");
+		console.log(input.value.length);
+	}
+
+    var filter = [0,8,16,17,18,37,38,39,40,46];
 
 	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
 
@@ -239,10 +246,10 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 		changeFocus(input);
 		totalPoints(side,ratio);
 
-	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
+	} else if( 
+		( input.value.length >= len || keyCode === 9)  && !containsElement(filter,keyCode) && input.value != 10) {
 
 		if (len == 3) { 
-
 			if (/\.$/.test(input.value)) { 
 				var number = input.value;
 				number = number.slice(0,2);
@@ -356,7 +363,15 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 
 /* Autoselect which kids are valid speakers for WSDC style debate ballot entry */
 
-function autoSel(input) { 
+function autoSel(input, event) { 
+
+    var keyCode = event.keyCode; 
+
+	console.log("Event is "+keyCode);
+
+	if (keyCode === 9) {
+		return;
+	}
 
 	var next_index = getIndex(input) + 1;
 
