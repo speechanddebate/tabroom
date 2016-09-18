@@ -178,13 +178,6 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 
     var keyCode = e.keyCode; 
 
-	if (keyCode === 9) { 
-		console.log("Keycode is "+keyCode+" and length is "+len);
-		console.log(input.value);
-		console.log("Length is");
-		console.log(input.value.length);
-	}
-
     var filter = [0,8,16,17,18,37,38,39,40,46];
 
 	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
@@ -366,8 +359,6 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 function autoSel(input, event) { 
 
     var keyCode = event.keyCode; 
-
-	console.log("Event is "+keyCode);
 
 	if (keyCode === 9) {
 		return;
