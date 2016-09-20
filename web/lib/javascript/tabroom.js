@@ -78,7 +78,18 @@ function autoWin(input,e,aff,neg,affid,negid) {
 
 	if (!containsElement(filter,keyCode)) {
 
-        if (input.value == "A" || input.value == "a" || input.value == 1 || input.value == "p" || input.value == "P" || input.value == "g" || input.value == "G") {
+		// All the various ways of designating one or the other winner. 
+
+        if (
+			input.value == "A" 
+			|| input.value == "a" 
+			|| input.value == 1 
+			|| input.value == "p" 
+			|| input.value == "P" 
+			|| input.value == "g" 
+			|| input.value == "G"
+		){
+
 			input.value = aff;
 			$('.aff').show();
 			$('.neg').hide();
@@ -88,7 +99,15 @@ function autoWin(input,e,aff,neg,affid,negid) {
 			changeFocus(input);
 		}
 
-        if (input.value == "N" || input.value == "n" || input.value == 3 || input.value == "c" || input.value == "C" || input.value == "o" || input.value == "O") {
+        if (
+			input.value == "N" 
+			|| input.value == "n" 
+			|| input.value == 3 
+			|| input.value == "c" 
+			|| input.value == "C" 
+			|| input.value == "o" 
+			|| input.value == "O"
+		) {
 			input.value = neg;
 			$('.neg').show();
 			$('.aff').hide();
