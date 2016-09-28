@@ -78,7 +78,18 @@ function autoWin(input,e,aff,neg,affid,negid) {
 
 	if (!containsElement(filter,keyCode)) {
 
-        if (input.value == "A" || input.value == "a" || input.value == 1 || input.value == "p" || input.value == "P" || input.value == "g" || input.value == "G") {
+		// All the various ways of designating one or the other winner. 
+
+        if (
+			input.value == "A" 
+			|| input.value == "a" 
+			|| input.value == 1 
+			|| input.value == "p" 
+			|| input.value == "P" 
+			|| input.value == "g" 
+			|| input.value == "G"
+		){
+
 			input.value = aff;
 			$('.aff').show();
 			$('.neg').hide();
@@ -88,7 +99,15 @@ function autoWin(input,e,aff,neg,affid,negid) {
 			changeFocus(input);
 		}
 
-        if (input.value == "N" || input.value == "n" || input.value == 3 || input.value == "c" || input.value == "C" || input.value == "o" || input.value == "O") {
+        if (
+			input.value == "N" 
+			|| input.value == "n" 
+			|| input.value == 3 
+			|| input.value == "c" 
+			|| input.value == "C" 
+			|| input.value == "o" 
+			|| input.value == "O"
+		) {
 			input.value = neg;
 			$('.neg').show();
 			$('.aff').hide();
@@ -178,7 +197,7 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 
     var keyCode = e.keyCode; 
 
-    var filter = [0,8,9,16,17,18,37,38,39,40,46];
+    var filter = [0,8,16,17,18,37,38,39,40,46];
 
 	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
 
@@ -239,10 +258,10 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 		changeFocus(input);
 		totalPoints(side,ratio);
 
-	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
+	} else if( 
+		( input.value.length >= len || keyCode === 9)  && !containsElement(filter,keyCode) && input.value != 10) {
 
 		if (len == 3) { 
-
 			if (/\.$/.test(input.value)) { 
 				var number = input.value;
 				number = number.slice(0,2);
@@ -356,7 +375,13 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 
 /* Autoselect which kids are valid speakers for WSDC style debate ballot entry */
 
-function autoSel(input) { 
+function autoSel(input, event) { 
+
+    var keyCode = event.keyCode; 
+
+	if (keyCode === 9) {
+		return;
+	}
 
 	var next_index = getIndex(input) + 1;
 
