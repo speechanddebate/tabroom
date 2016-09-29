@@ -13,7 +13,7 @@ print "Dumping databases to file:";
 my $garbage;
 my $backup_dir = "/var/backups/sqlfiles";
 
-`rm $backup_dir/*.bz2`;
+`rm $backup_dir/*.*`;
 
 foreach my $db (@databases) { 
 
