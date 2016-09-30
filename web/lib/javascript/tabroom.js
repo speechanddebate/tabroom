@@ -187,7 +187,7 @@ function autoWin(input,e,aff,neg,affid,negid) {
 /* Does the various shortcuts to register speaker point entry, like 285 = 28.5,
  * etc */
 
-function autoPoints(input,len,e,side,ratio,nototal) {
+function autoPoints(input,len,e,side,ratio,nototal,step) {
 
 	if (nototal) { 
 		totalPoints = function() { 
@@ -278,32 +278,37 @@ function autoPoints(input,len,e,side,ratio,nototal) {
 
 		if (len == 2) { 
 
-			if (/\.$/.test(input.value)) { 
-
-				var number = input.value;
-				number = number.slice(0,1);
-				number = number * 1;
-				number += .5;
-				input.value = number;
-
-			} else if (/5$/.test(input.value)) { 
-
-				input.value = input.value/10;
-
-			} else if (input.value < 0) { 
-
-			} else if (input.value === -5) { 
-
-				input.value = -0.5;
-
-			} else if (input.value === "-.") { 
-
-				input.value = -0.5;
-
+			if (step == 1) {
+			
 			} else { 
 
-				input.value = input.value.slice(0,1);
+				if (/\.$/.test(input.value)) { 
 
+					var number = input.value;
+					number = number.slice(0,1);
+					number = number * 1;
+					number += .5;
+					input.value = number;
+
+				} else if (/5$/.test(input.value)) { 
+
+					input.value = input.value/10;
+
+				} else if (input.value < 0) { 
+
+				} else if (input.value === -5) { 
+
+					input.value = -0.5;
+
+				} else if (input.value === "-.") { 
+
+					input.value = -0.5;
+
+				} else { 
+
+					input.value = input.value.slice(0,1);
+
+				}
 			}
 
 		}
