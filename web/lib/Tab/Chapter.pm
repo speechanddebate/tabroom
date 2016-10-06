@@ -80,7 +80,7 @@ sub short_name {
 	$name =~ s/California State University/CSU/g;
 	$name =~ s/University$//g;
 	$name =~ s/State\ University,/State\ /g;
-	$name =~ s/^The//g;
+	$name =~ s/^The //g;
 	$name =~ s/^Saint\ /St\ /g;
 	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
 	$name =~ s/High\ School/HS/g;
