@@ -22,9 +22,13 @@ sub short_name {
 	my $name = $self->name;
 
 	#screw these people.
-	$name = "Thomas Jefferson HSST" if $name eq "Thomas Jefferson High School of Science and Technology";
-	$name = "Thomas Jefferson HSST" if $name eq "Thomas Jefferson High School of Science & Technology";
+	$name = "Thomas Jefferson" if $name eq "Thomas Jefferson High School of Science and Technology";
+	$name = "Thomas Jefferson" if $name eq "Thomas Jefferson High School of Science & Technology";
 	$name = "Bronx Science" if $name eq "The Bronx High School of Science";
+
+	$name =~ s/College Prep H.S.//g;
+	$name =~ s/College Prep HS//g;
+	$name =~ s/College Prep High School//g;
 
 	$name = "BC" if $name eq "Boston College";
 	$name = "BU" if $name eq "Boston University";
@@ -39,6 +43,8 @@ sub short_name {
 	$name =~ s/High$//g;
 	$name =~ s/Preparatory$/Prep/g;
 	$name =~ s/College\ Prep$/CP/g;
+	$name =~ s/H.S.$//g;
+	$name =~ s/HS.$//g;
 	$name =~ s/HS$//g;
 	$name =~ s/Regional$//g;
 	$name =~ s/Public\ Charter//g;
@@ -50,10 +56,11 @@ sub short_name {
 	$name =~ s/University$//g;
 	$name =~ s/College$//g;
 	$name =~ s/State\ University,/State\ /g;
-	$name =~ s/^The//g;
+	$name =~ s/^The //g;
 	$name =~ s/^Saint\ /St\ /g;
 	$name =~ s/High\ School/HS/g;
 	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
+	$name =~ s/ CP//g;
 	$name = "Boston College" if $name eq "BC";
 	$name = "Boston Uni" if $name eq "BU";
 	$name =~ s/^\s+//;  #leading spaces
