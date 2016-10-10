@@ -1,0 +1,203 @@
+<%args>
+	$person
+	$search_name  => undef
+	$search_email => undef
+	$target_id    => undef
+</%args>
+<%init>
+
+	Tab::Login->set_sql(person_merge => " update login set person = ? where person = ? ");
+
+	Tab::Student->set_sql(person_merge => " update student set person = ? where person = ? ");
+	Tab::Student->set_sql(person_request_merge => " update student set person_request = ? where person_request = ? ");
+
+	Tab::Judge->set_sql(person_merge => " update judge set person = ? where person = ? ");
+	Tab::Judge->set_sql(person_request_merge => " update judge set person_request = ? where person_request = ? ");
+
+	Tab::ChapterJudge->set_sql(person_merge => " update chapter_judge set person = ? where person = ? ");
+	Tab::ChapterJudge->set_sql(person_request_merge => " update chapter_judge set person_request = ? where person_request = ? ");
+
+	Tab::Permission->set_sql(person_merge => " update strike set person = ? where person = ? ");
+	Tab::Conflict->set_sql(person_merge => " update conflict set person = ? where person = ? ");
+	Tab::Conflict->set_sql(conflicted_merge => " update conflict set conflicted = ? where conflicted = ? ");
+	Tab::Conflict->set_sql(added_by_merge => " update conflict set added_by = ? where added_by = ? ");
+
+	Tab::Follower->set_sql(person_merge => " update follower set person = ? where person = ? ");
+
+	Tab::Entry->set_sql(person_merge => " update entry set registered_by = ? where registered_by = ? ");
+
+	Tab::Fine->set_sql(deleted_by_merge => " update fine set deleted_by = ? where deleted_by = ? ");
+	Tab::Fine->set_sql(levied_by_merge => " update fine set levied_by = ? where levied_by = ? ");
+
+	Tab::TournIgnore->set_sql(person_merge => " update tourn_ignore set person = ? where person = ? ");
+
+	Tab::ChangeLog->set_sql(person_merge => " update change_log set person = ? where person = ? ");
+	Tab::Strike->set_sql(entered_by_merge => " update strike set entered_by = ? where entered_by = ? ");
+
+	Tab::Ballot->set_sql(entered_by_merge => " update ballot set entered_by = ? where entered_by = ? ");
+	Tab::Ballot->set_sql(audited_by_merge => " update ballot set audited_by = ? where audited_by = ? ");
+	Tab::Ballot->set_sql(collected_by_merge => " update ballot set collected_by = ? where collected_by = ? ");
+
+
+	Sessoin -> delete
+
+	PersonSettings -> smart merge
+
+
+
+
+	Tab::ChapterJudge->set_sql(name_judge_merge => "
+		update judge,chapter_judge,school 
+		set judge.chapter_judge = chapter_judge.id
+		where judge.chapter_judge is null
+		and judge.school = school.id
+		and school.chapter = ?
+		and school.chapter = chapter_judge.chapter
+		and chapter_judge.first = judge.first
+		and chapter_judge.last = judge.last
+	");
+
+	my @candidates = Tab::Chapter->search_where( name => { "like", "%".$name."%"} );
+	push @candidates, Tab::Chapter->retrieve($target_id) if $target_id;
+
+	my $prefer;
+	my @merge_me;
+	my %merge_ids;
+
+	if (ref($ARGS{"merge"}) eq "ARRAY") { 
+		%merge_ids = map { $_ => 1 } @{$ARGS{"merge"}};
+	} else { 
+		$merge_ids{$ARGS{"merge"}}++;
+	}
+
+	foreach my $candidate (@candidates) { 
+		$prefer = $candidate if $ARGS{"prefer"} == $candidate;
+		push @merge_me, $candidate if $merge_ids{$candidate};
+	}
+
+	$prefer = shift @merge_me unless $prefer;
+
+	my %seen = (); 
+	@merge_me = grep { ! $seen{$_->id}++ } @merge_me;
+	@merge_me = grep { $_ ne '' } @merge_me;
+	@merge_me = grep { $_->id ne $prefer->id } @merge_me;
+
+	my %admins = map {$_->id => $_} $prefer->admins;
+	my %circuits = map {$_->id => $_} $prefer->circuits;
+	my %tourns = map {$_->tourn->id => $_} $prefer->schools;
+		
+	if ($ARGS{"exclude_".$prefer->id}) { 
+		foreach my $ca ($prefer->permissions) { 
+			$ca->delete;
+		}
+	}
+
+	my $merge_string;
+	
+	foreach my $merge_me (@merge_me) { 
+
+		my $exclude = $ARGS{"exclude_".$merge_me->id};
+
+		unless ($exclude) {
+			foreach my $ca ($merge_me->permissions) { 
+				if ($admins{$ca->person->id}) { 
+					$ca->delete;
+				} else {
+					$admins{$ca->person->id}++;
+					$ca->chapter($prefer->id);
+					$ca->update;
+				}
+			}
+		} else { 
+			foreach my $ca ($merge_me->permissions) { 
+				$ca->delete;
+			}
+		}
+
+		foreach my $cc ($merge_me->chapter_circuits) { 
+			if ($circuits{$cc->circuit->id}) { 
+				$cc->delete;
+			} else {
+				eval{ 
+					$cc->chapter($prefer->id);
+					$cc->update;
+				};
+			}
+		}
+
+		my @others = $merge_me->schools;
+
+		foreach my $school ($merge_me->schools) { 
+
+			if ($tourns{$school->tourn->id}) { 
+
+				my $school_dest = $tourns{$school->tourn->id};
+				Tab::Entry->sql_school_merge($school_dest->id, $school->id);
+				Tab::Judge->sql_school_merge($school_dest->id, $school->id);
+				Tab::Strike->sql_school_merge($school_dest->id, $school->id);
+				Tab::Fine->sql_school_merge($school_dest->id, $school->id);
+				$school->delete;
+
+			} else {
+				$school->chapter($prefer->id);
+				$school->update;
+			}
+
+		}
+
+		foreach my $student ($merge_me->students) { 
+			$student->chapter($prefer->id);
+			$student->update;
+		}
+
+		foreach my $chapter_judge ($merge_me->chapter_judges) { 
+			$chapter_judge->chapter($prefer->id);
+			$chapter_judge->update;
+		}
+
+		$merge_string .= " ID ".$merge_me->id." ".$merge_me->name;
+
+		Tab::ChapterJudge->sql_name_judge_merge->execute($prefer->id);
+		$merge_me->delete;
+
+	}
+
+	#Deduplicate the student roster
+	my %students_by_name;
+
+	foreach my $student ($prefer->students) { 
+		push @{$students_by_name{$student->first."-".$student->last}}, $student;
+	}
+
+	foreach my $key (keys %students_by_name) { 
+		next if scalar @{$students_by_name{$key}} < 2;
+		my $destination = shift @{$students_by_name{$key}};
+
+		foreach my $mergee (@{$students_by_name{$key}}) { 
+			$m->comp("/funclib/student_merge.mas", person => $person, mergee => $mergee, destination => $destination, check_grad => 1);
+		}
+	}
+
+	#Deduplicate the judge roster
+	my %judges_by_name;
+
+	foreach my $judge ($prefer->chapter_judges) { 
+		push @{$judges_by_name{$judge->first."-".$judge->last}}, $judge;
+	}
+
+	foreach my $key (keys %judges_by_name) { 
+
+		next if scalar @{$judges_by_name{$key}} < 2;
+		my $destination = shift @{$judges_by_name{$key}};
+
+		foreach my $mergee (@{$judges_by_name{$key}}) { 
+			$m->comp("/funclib/chapter_judge_merge.mas", person => $person, mergee => $mergee, destination => $destination);
+		}
+
+	}
+
+	my $msg .= "School ".$prefer->name." has merged $merge_string into $prefer ".$prefer->name;
+
+	$m->redirect("chapter_merge.mhtml?target_id=$target_id&name=$name&msg=$msg");
+
+</%init>
