@@ -55,10 +55,12 @@ $adstaff=mysql_query($query);
 ?>
 
 <body>
+
+<div class="blankfull">
 <div class="right small">
 <div class="sidenote"> 
 <form name="input" action="TeamBidSheet.php" method="get">
-	Select new season:
+	SEASON:
 	<SELECT NAME="yr_str">
 	<?php
 	for ($i=$curr_year_str+1; $i >= $curr_year_str-3; $i--) {
@@ -68,12 +70,14 @@ $adstaff=mysql_query($query);
 	</SELECT>
 	<input type="text" name="id1" value="<?php echo $student1; ?>" hidden>
 	<input type="text" name="id2" value="<?php echo $student2; ?>" hidden>
-	<input type="submit" value="Submit">
+	<input type="submit" value="Submit" class="thin">
 </form>
 </div>
 </div>
 
-<h2>TEAM BID SHEET FOR <?php echo $seas_str." ".$teamname; ?></h2>
+<h2><?php echo $seas_str ?> TEAM BID SHEET </h2>
+<h4><?php echo $teamname; ?></h4>
+
 <br>
 
 	<script type="text/javascript">
@@ -90,16 +94,19 @@ $adstaff=mysql_query($query);
         ); 
 
 	</script>
-<h2>SECTION I: CONTACT INFORMATION</H2>
-       <table id="contact" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
-       <thead>
-	<tr class="yellowrow">
-		<th class="smallish">Item</th>
-		<th class="smallish">Data</th>
-	</tr>
-	</thead>
 
-    <tbody id="myTbodytourneytot">
+	<h3>SECTION I: CONTACT INFORMATION</H2>
+
+       <table id="contact">
+
+       <thead>
+			<tr class="yellowrow">
+				<th class="smallish">Item</th>
+				<th class="smallish">Data</th>
+			</tr>
+		</thead>
+
+		<tbody id="myTbodytourneytot">
 
 <?php
 
@@ -116,8 +123,12 @@ echo "<tr><td>Director and Coaches</td><td>".$coaches."</td></tr>";
 	</tbody>
        </table>
 <br>
-<h2>section II: tabular summary</h2>
-Round robin and JV results do not count in prelim totals but appear separately.  Elim rounds are counted as win/loss and not as ballot counts.  Elim byes and closeouts are not included in elim win totals.
+<h3>section II: tabular summary</h3>
+
+Round robin and JV results do not count in prelim totals but appear separately.
+Elim rounds are counted as win/loss and not as ballot counts.  Elim byes and
+closeouts are not included in elim win totals.
+
 <h4>RECORD of debaters as a team</h4>
 
 <?php
@@ -207,80 +218,101 @@ $elims=mysql_query($query);
         ); 
 
 	</script>
-       <table id="recgrid" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
-       <thead>
-	<tr class="yellowrow">
-		<th class="smallish">Tourney</th>
-		<th class="smallish">Division</th>
-		<th class="smallish">Date</th>
-		<th class="smallish">Prelims</th>
-		<th class="smallish">Trips</th>
-		<th class="smallish">Doubles</th>
-		<th class="smallish">Octos</th>
-		<th class="smallish">Quars</th>
-		<th class="smallish">Semis</th>
-		<th class="smallish">Finals</th>
-		<th class="smallish">Total</th>
-	</tr>
-	</thead>
+
+       <table id="recgrid">
+	   <thead>
+			<tr class="yellowrow">
+				<th class="smallish">Tourney</th>
+				<th class="smallish">Division</th>
+				<th class="smallish">Date</th>
+				<th class="smallish">Prelims</th>
+				<th class="smallish">Trips</th>
+				<th class="smallish">Doubles</th>
+				<th class="smallish">Octos</th>
+				<th class="smallish">Quars</th>
+				<th class="smallish">Semis</th>
+				<th class="smallish">Finals</th>
+				<th class="smallish">Total</th>
+			</tr>
+		</thead>
+
         <tbody id="myTbodytotals">
 <?php
 
 //count wins and print the tabular summary
-$i=1; $pwin=0; $ploss=0; $trip=""; $doub=""; $octo=""; $qrtr=""; $semi=""; $finl=""; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0;
-$totpwin=0; $totploss=0; $totewin=0; $toteloss=0; $jvwin=0; $jvloss=0;
+$i=1;
+ $pwin=0;
+ $ploss=0;
+ $trip="";
+ $doub="";
+ $octo="";
+ $qrtr="";
+ $semi="";
+ $finl="";
+ $totwin=0;
+ $totloss=0;
+ $rrwin=0;
+ $rrloss=0;
+
+$totpwin=0;
+ $totploss=0;
+ $totewin=0;
+ $toteloss=0;
+ $jvwin=0;
+ $jvloss=0;
+
 while ($i <= $x) {
 
-if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE OR teammatch($spkr1[$i], $spkr2[$i], $student3, $student4)==TRUE)
-{
- if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
- if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
- 
- if ($win[$i]==.5 and $isprelim[$i]==1) {$pwin = $pwin + .5;}
- if ($win[$i]==.5 and $isprelim[$i]==1) {$ploss = $ploss + .5;}
- 
- if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totewin++;}
- if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$toteloss++;}
- if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
- if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
- if ($win[$i]==1 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totwin++;}
- if ($win[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totloss++;}
- 
- if ($win[$i]==.5 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totwin = $totwin + .5;}
- if ($win[$i]==.5 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totloss = $totloss + .5;}
- 
- if ( isset($elim_key[$round_id[$i]]) )
-  {
-   if ($elim_key[$round_id[$i]]==11) {$trip=$outcome[$i];}
-   if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}
-   if ($elim_key[$round_id[$i]]==13) {$octo=$outcome[$i];}
-   if ($elim_key[$round_id[$i]]==14) {$qrtr=$outcome[$i];}
-   if ($elim_key[$round_id[$i]]==15) {$semi=$outcome[$i];}
-   if ($elim_key[$round_id[$i]]==16) {$finl=$outcome[$i];}
-  }
- if (($i<$x and ($tourn[$i]<>$tourn[$i+1] OR $event[$i]<>$event[$i+1]) ) OR $i==$x)
-  {
-  echo "<tr>";
-  echo "<td width=\"20%\">".$tourn[$i]."</td>";
-  echo "<td>".$event[$i]."</td>";
-  $date = strtotime($tourndate[$i]);
-  echo "<td>".date('d-M-Y', $date)."</td>";
-  echo "<td class=\"centeralign\">".$pwin."-".$ploss."</td>";
-  echo "<td>".$trip."</td>";
-  echo "<td>".$doub."</td>";
-  echo "<td>".$octo."</td>";
-  echo "<td>".$qrtr."</td>";
-  echo "<td>".$semi."</td>";
-  echo "<td>".$finl."</td>";
-  echo "<td class=\"centeralign\">".$totwin."-".$totloss."</td>";
-  echo "</tr>";
-  if ($isRR[$i]==1 and $isopen[$i]==1) {$rrwin+=$pwin; $rrloss+=$ploss;}
-  if ($isRR[$i]==0 and $isopen[$i]==1) {$totpwin+=$pwin; $totploss+=$ploss;}
-  if ($isopen[$i]==0) {$jvwin+=$pwin; $jvloss+=$ploss;}
-  $pwin=0; $ploss=0; $trip=""; $doub=""; $octo=""; $qrtr=""; $semi=""; $finl=""; $totwin=0; $totloss=0;
-  }
-}             // end of big if, only process for exact matches
-$i++;
+	if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE OR teammatch($spkr1[$i], $spkr2[$i], $student3, $student4)==TRUE)
+	{
+	 if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
+	 if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
+	 
+	 if ($win[$i]==.5 and $isprelim[$i]==1) {$pwin = $pwin + .5;}
+	 if ($win[$i]==.5 and $isprelim[$i]==1) {$ploss = $ploss + .5;}
+	 
+	 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totewin++;}
+	 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$toteloss++;}
+	 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
+	 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
+	 if ($win[$i]==1 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totwin++;}
+	 if ($win[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totloss++;}
+	 
+	 if ($win[$i]==.5 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totwin = $totwin + .5;}
+	 if ($win[$i]==.5 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totloss = $totloss + .5;}
+	 
+	 if ( isset($elim_key[$round_id[$i]]) )
+	  {
+	   if ($elim_key[$round_id[$i]]==11) {$trip=$outcome[$i];}
+	   if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}
+	   if ($elim_key[$round_id[$i]]==13) {$octo=$outcome[$i];}
+	   if ($elim_key[$round_id[$i]]==14) {$qrtr=$outcome[$i];}
+	   if ($elim_key[$round_id[$i]]==15) {$semi=$outcome[$i];}
+	   if ($elim_key[$round_id[$i]]==16) {$finl=$outcome[$i];}
+	  }
+	 if (($i<$x and ($tourn[$i]<>$tourn[$i+1] OR $event[$i]<>$event[$i+1]) ) OR $i==$x)
+	  {
+	  echo "<tr>";
+	  echo "<td width=\"20%\">".$tourn[$i]."</td>";
+	  echo "<td>".$event[$i]."</td>";
+	  $date = strtotime($tourndate[$i]);
+	  echo "<td>".date('d-M-Y', $date)."</td>";
+	  echo "<td class=\"centeralign\">".$pwin."-".$ploss."</td>";
+	  echo "<td>".$trip."</td>";
+	  echo "<td>".$doub."</td>";
+	  echo "<td>".$octo."</td>";
+	  echo "<td>".$qrtr."</td>";
+	  echo "<td>".$semi."</td>";
+	  echo "<td>".$finl."</td>";
+	  echo "<td class=\"centeralign\">".$totwin."-".$totloss."</td>";
+	  echo "</tr>";
+	  if ($isRR[$i]==1 and $isopen[$i]==1) {$rrwin+=$pwin; $rrloss+=$ploss;}
+	  if ($isRR[$i]==0 and $isopen[$i]==1) {$totpwin+=$pwin; $totploss+=$ploss;}
+	  if ($isopen[$i]==0) {$jvwin+=$pwin; $jvloss+=$ploss;}
+	  $pwin=0; $ploss=0; $trip=""; $doub=""; $octo=""; $qrtr=""; $semi=""; $finl=""; $totwin=0; $totloss=0;
+	  }
+	}             // end of big if, only process for exact matches
+	$i++;
 }
 
 ?>
@@ -304,7 +336,7 @@ $i++;
         ); 
 
 	</script>
-       <table id="summrec" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+       <table id="summrec" class="hovertable sortable">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Item</th>
@@ -346,7 +378,7 @@ echo "<tr><td>C. Total Record</td><td>".$totwin."-".$totloss."</td><td>".getpcts
         ); 
 
 	</script>
-       <table id="recgrid2" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+       <table id="recgrid2" class="hovertable sortable">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Colleague</th>
@@ -441,7 +473,7 @@ $i++;
 
 	</script>
 
-       <table id="recgrid3" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+       <table id="recgrid3" class="hovertable sortable">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Colleague</th>
@@ -522,7 +554,7 @@ $i++;
 
 <h4>NUMBER OF PRELIMINARY ROUNDS (a debater may participate in no more than 120 prelim rounds of debate before the NDT)</h4>
 
-       <table id="recgrid" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+       <table id="recgrid" class="hovertable sortable">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Participant(s)</th>
@@ -552,7 +584,7 @@ while ($i <= $x) {
        </table>
 -->
 
-<BR><h2>section III: Total record of debaters</h2>
+<BR><h3>section III: Total record of debaters</h2>
 
 	<script type="text/javascript">
 
@@ -569,7 +601,7 @@ while ($i <= $x) {
 
 	</script>
 
-       <table id="recgrid4" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2">
+       <table id="recgrid4" class="hovertable sortable">
        <thead>
 	<tr class="yellowrow">
 		<th class="smallish">Participant(s)</th>
@@ -643,7 +675,7 @@ if ($loopnum==3) {echo "<h4>INDIVIDUAL TOURNAMENTS FOR ".$studentname[2]."</H4>"
 
 ?>
 
-       <table id="individual" class="hovertable sortable" border="2" cellspacing="2" cellpadding="2" >
+       <table id="individual" class="hovertable sortable" >
         <tbody id="myTbodytotals">
 <?php
 $i=1; $pwin=0; $ploss=0; $totwin=0; $totloss=0; $rrwin=0; $rrloss=0; $lasttourn=-1; $lastevent=-1;
@@ -710,7 +742,6 @@ $time_end = microtime(true);
 $time = $time_end - $time_start;
 ?><hr/><?php
 
-echo "Total load time is $time seconds\n";
 
 mysql_close();
 require 'scripts/tabroomfooter.html';
@@ -871,3 +902,5 @@ return $rtnvalue;
 }
 
 ?>
+
+</div>
