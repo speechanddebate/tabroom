@@ -2,7 +2,10 @@ package Tab::NSDA::PointsDBI;
 use base 'Class::DBI';
 use Class::DBI::AbstractSearch;
 
-Tab::NSDA::PointsDBI->connection("dbi:mysql:$Tab::points_dbname:$Tab::points_dbhost", $Tab::points_dbuser, $Tab::points_dbpass) || die $!;;
+Tab::NSDA::PointsDBI->connection("dbi:mysql:$Tab::points_dbname:$Tab::points_dbhost", 
+	$Tab::points_dbuser,
+	$Tab::points_dbpass
+) || die $!;;
 
 sub _register_datetimes {
 
