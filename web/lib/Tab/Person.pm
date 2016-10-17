@@ -11,10 +11,15 @@ use base 'Tab::DBI';
 
 #After
 Tab::Person->table('person');
+
 Tab::Person->columns(Primary   => qw/id/);
-Tab::Person->columns(Essential => qw/email first middle last phone ualt_id provider site_admin /);
+
+Tab::Person->columns(Essential => qw/email first middle last phone ualt_id 
+									 provider site_admin /);
+
 Tab::Person->columns(Others    => qw/street city state zip country postal
-                                   gender pronoun no_email tz diversity timestamp googleplus/);
+                                   gender pronoun no_email tz diversity 
+								   timestamp googleplus/);
 
 Tab::Person->columns(TEMP => qw/prefs student_id judge_id/);
 
@@ -30,16 +35,14 @@ Tab::Person->has_many(conflicteds => 'Tab::Conflict', 'conflicted');
 
 Tab::Person->has_many(followers => 'Tab::Follower', 'person');
 Tab::Person->has_many(follow_persons => 'Tab::Follower', 'follower');
-Tab::Person->has_many(chapter_judges => 'Tab::ChapterJudge', 'person');
 
+Tab::Person->has_many(chapter_judges => 'Tab::ChapterJudge', 'person');
 Tab::Person->has_many(judges => 'Tab::Judge', 'person' => { order_by => 'id DESC'} );
 
-Tab::Person->has_many(entries => 'Tab::Entry', 'person');
 Tab::Person->has_many(students => 'Tab::Student', 'person');
 Tab::Person->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
 
 Tab::Person->has_many(permissions => 'Tab::Permission', 'person');
-
 Tab::Person->has_many(circuits => [ Tab::Permission => 'circuit']);
 Tab::Person->has_many(tourns => [ Tab::Permission => 'tourn']);
 Tab::Person->has_many(chapters => [ Tab::Permission => 'chapter']);
