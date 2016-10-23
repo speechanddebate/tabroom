@@ -47,6 +47,7 @@ use Tab::CategorySetting;
 use Tab::Chapter;
 use Tab::ChapterCircuit;
 use Tab::ChapterJudge;
+use Tab::ChapterSetting;
 use Tab::Circuit;
 use Tab::CircuitSetting;
 use Tab::CircuitMembership;

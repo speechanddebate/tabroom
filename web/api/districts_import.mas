@@ -12,12 +12,45 @@
 
 	my @nsda_districts = Tab::NSDA::District->retrieve_all;
 
+	my %tabroom_districts = map {$_->id => $_} Tab::District->retrieve_all;
+
+	my %tabroom_permissions = 
+		map {$_->district->id."-".$_->person->id => $_} 
+		Tab::Permission->search_where(
+			district => {' > ', 0}
+		);
+
 	foreach my $district (@nsda_districts) {
-		$m->print("Found district ".$district->dist_id." number ".$district->dist_num);
-		$m->print(" named ".$district->dist_name." <br />");
-		$m->print("Chair ". $district->dist_chair);
-		$m->print(" Realm ".$district->dist_realm." Level ".$district->dist_level);
-		$m->print(" <br />");
+
+		next if $district->dist_id == 0;
+
+		my ($district_name, $district_location) = split (/\(/, $district->dist_name);
+
+		$district_location =~ s/\)//g;
+
+		if ($tabroom_districts{$district->dist_id}) { 
+
+			$tabroom_districts{$district->dist_id}->name($district_name);
+			$tabroom_districts{$district->dist_id}->location($district_location);
+			$tabroom_districts{$district->dist_id}->code($district->dist_num);
+			$tabroom_districts{$district->dist_id}->level($district->dist_level);
+			$tabroom_districts{$district->dist_id}->realm($district->realm);
+
+			$tabroom_districts{$district->dist_id}->update();
+
+		} else { 
+
+			$tabroom_districts{$district->dist_id} = 
+				Tab::District->create({
+					id       => $district->dist_id,
+					code     => $district->dist_num,
+					name     => $district_name,
+					location => $district_location,
+					realm    => $district->realm
+				});
+
+		}
+
 	}
 
 	my $dbh = Tab::NSDA::PointsDBI->db_Main();
@@ -34,6 +67,7 @@
 			left join nsda.persons person on person.person_id = dl.user_id
 			left join nsda.logins login on login.person_id = person.person_id
 		where dl.year = ?
+		group by dl.district_id, dl.user_id
 	");
 
 	$sth->execute($year);
@@ -45,14 +79,136 @@
 		$person_street, $person_city, $person_state, $person_zip, $person_country,
 		$person_tz, $person_phone, $person_provider, $person_ualt_id,
 		$login_login_id, $login_username, $login_password, $login_sha512) = $sth->fetchrow_array() 
-		) {
+	) {
 
-		$m->print("Chair $person_email found for district $dl_district_id") if $dl_position eq "C";
-		$m->print("Member $person_email found for district $dl_district_id") if $dl_position eq "M";
-		$m->print("Alternate $person_email found for district $dl_district_id") if $dl_position eq "A";
+		$m->print("<br />Chair $person_email found for district $dl_district_id.  Year $dl_year") 
+			if $dl_position eq "C";
+
+		$m->print("Member $person_email found for district $dl_district_id Year $dl_year") 
+			if $dl_position eq "M";
+
+		$m->print("Alternate $person_email found for district $dl_district_id Year $dl_year") 
+			if $dl_position eq "A";
+
+		$m->print("<br />");
+
+		my $person = Tab::Person->search(
+			ualt_id => $person_ualt_id
+		)->first;
+
+		unless ($person) { 
+			$person = Tab::Person->search( 
+				email => $person_email 
+			)->first;
+		}
+
+		unless ($person) { 
+			my $login = Tab::Login->search( 
+				username => $person_email
+			)->first; 
+			$person = $login->person if $login;
+		}
+
+		unless ($person) { 
+
+			$person = Tab::Person->search (
+				first  => $person_first,
+				middle => $person_middle,
+				last   => $person_last,
+				city   => $person_city,
+				state  => $person_state,
+			)->first;
+
+		}
+
+		if ($person) { 
+
+			unless ($person->ualt_id) { 
+				$person->ualt_id($person_ualt_id);
+				$person->update;
+			}
+
+		} else { 
+
+			$person = Tab::Person->create({
+				email    => $person_email,
+				first    => $person_first,
+				middle   => $person_middle,
+				last     => $person_last,
+				gender   => $person_gender,
+				no_email => $person_no_email,
+				street   => $person_street,
+				city     => $person_city,
+				state    => $person_state,
+				zip      => $person_zip,
+				country  => $person_country,
+				tz       => $person_tz,
+				phone    => $person_phone,
+				provider => $person_provider,
+				ualt_id  => $person_ualt_id,
+			});
+
+
+			my $login = Tab::Login->create({
+				username => $person_email,
+				source   => "nsda",
+				password => $login_password,
+				sha512   => $login_sha512,
+				person   => $person->id
+			});
+
+		}
+
+		if ($dl_position eq "C") { 
+			$dl_position = "chair";
+		} elsif ($dl_position eq "M") {
+			$dl_position = "member";
+		} else {
+			$dl_position = "alternate";
+		}
+
+		if ($person) { 
+
+			my $existing = $tabroom_permissions{$dl_district_id."-".$person->id};
+
+			if ($existing) { 
+
+				if ($dl_position ne $existing->tag) { 
+					$existing->tag($dl_position);
+					$existing->update;
+				}
+
+			} else { 
+
+				Tab::Permission->create({
+					person   => $person->id,
+					district => $dl_district_id,
+					tag      => $dl_position
+				});
+
+			}
+
+			undef $tabroom_permissions{$dl_district_id."-".$person->id};
+
+		} 
+
+		foreach my $key (keys %tabroom_permissions) {
+			eval { 
+				$tabroom_permissions{$key}->delete if $tabroom_permissions{$key};
+			};
+		}
 
 	}
 
+	Tab::Chapter->set_sql(link_districts => "
+		update tabroom.chapter chapter, 
+			points.NEW_SCHOOLS_TO_DISTRICTS chapter_district
+
+		set chapter.district = chapter_district.district
+		where chapter.nsda = chapter_district.school_id
+		and chapter.nsda > 0
+	");
+
+
+
 </%init>
-
-
