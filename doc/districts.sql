@@ -21,3 +21,18 @@ create table chapter_setting (
 create index chapter on chapter_setting(chapter);
 
 
+create table student_setting (
+	id int auto_increment primary key,
+	student int,
+	tag varchar(32),
+	value varchar(127),
+	value_text text,
+	value_date datetime,
+	timestamp timestamp,
+	created_at datetime,
+	setting int
+);
+
+create index student on student_setting(student);
+
+

@@ -105,6 +105,7 @@ use Tab::Stats;
 use Tab::Strike;
 use Tab::StrikeTimeslot;
 use Tab::Student;
+use Tab::StudentSetting;
 use Tab::SweepInclude;
 use Tab::SweepSet;
 use Tab::SweepRule;
