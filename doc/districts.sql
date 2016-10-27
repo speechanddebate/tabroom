@@ -34,5 +34,6 @@ create table student_setting (
 );
 
 create index student on student_setting(student);
-
+create index site on tourn_site(site);
+create index tourn on tourn_site(tourn);
 
