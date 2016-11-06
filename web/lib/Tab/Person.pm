@@ -1,17 +1,7 @@
 package Tab::Person;
 use base 'Tab::DBI';
 
-#Before
-#Tab::Person->table('account');
-#Tab::Person->columns(Primary   => qw/id/);
-#Tab::Person->columns(Essential => qw/email passhash site_admin multiple/);
-#Tab::Person->columns(Others    => qw/first last phone street city state zip country hotel
-#                                      provider paradigm_timestamp gender timestamp help_admin
-#                                      no_email change_deadline change_pass_key password_timestamp tz diversity/);
-
-#After
 Tab::Person->table('person');
-
 Tab::Person->columns(Primary   => qw/id/);
 
 Tab::Person->columns(Essential => qw/email first middle last phone ualt_id 
@@ -23,15 +13,14 @@ Tab::Person->columns(Others    => qw/street city state zip country postal
 
 Tab::Person->columns(TEMP => qw/prefs student_id judge_id/);
 
-__PACKAGE__->_register_datetimes( qw/timestamp/);
-
 Tab::Person->has_many(logins => 'Tab::Login', 'person');
 
+Tab::Person->has_many(settings => 'Tab::PersonSetting', 'person');
 Tab::Person->has_many(sessions => 'Tab::Session', 'person');
+
 Tab::Person->has_many(sites => 'Tab::Site', 'host');
 Tab::Person->has_many(conflicts => 'Tab::Conflict', 'person');
 Tab::Person->has_many(conflicteds => 'Tab::Conflict', 'conflicted');
-
 
 Tab::Person->has_many(followers => 'Tab::Follower', 'person');
 Tab::Person->has_many(follow_persons => 'Tab::Follower', 'follower');
@@ -47,6 +36,8 @@ Tab::Person->has_many(circuits => [ Tab::Permission => 'circuit']);
 Tab::Person->has_many(tourns => [ Tab::Permission => 'tourn']);
 Tab::Person->has_many(chapters => [ Tab::Permission => 'chapter']);
 Tab::Person->has_many(regions => [ Tab::Permission => 'region']);
+
+__PACKAGE__->_register_datetimes( qw/timestamp/);
 
 sub setting {
 
@@ -103,6 +94,24 @@ sub setting {
 		return $existing->value;
 
 	}
+
+}
+
+sub all_settings { 
+
+	my $self = shift;
+
+	my @settings = $self->settings;
+
+	my %all_settings;
+
+	foreach my $setting (@settings) { 
+		$all_settings{$setting->tag} = $setting->value;
+		$all_settings{$setting->tag} = $setting->value_text if $all_settings{$setting->tag} eq "text";
+		$all_settings{$setting->tag} = $setting->value_date if $all_settings{$setting->tag} eq "date";
+	}
+
+	return %all_settings;
 
 }
 
