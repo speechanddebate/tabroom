@@ -1,6 +1,5 @@
 
 alter table permission add district int after region;
-
 alter table district add level int after chair;
 alter table district add realm varchar(7) after level;
 
@@ -36,4 +35,6 @@ create table student_setting (
 create index student on student_setting(student);
 create index site on tourn_site(site);
 create index tourn on tourn_site(tourn);
+
+alter table tiebreak add child int after name;
 
