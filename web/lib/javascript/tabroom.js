@@ -259,7 +259,9 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 		totalPoints(side,ratio);
 
 	} else if( 
-		( input.value.length >= len || keyCode === 9)  && !containsElement(filter,keyCode) && input.value != 10) {
+		( input.value.length >= len || keyCode === 9)  
+			&& !containsElement(filter,keyCode) 
+			&& input.value != 10) {
 
 		if (len == 3) { 
 			if (/\.$/.test(input.value)) { 
@@ -458,8 +460,9 @@ function autoTab(input,len,e) {
 
 	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
 
-
 		if (len == 3) { 
+
+			console.log("length is len");
 
 			if (/\.$/.test(input.value)) { 
 				var number = input.value;

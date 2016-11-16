@@ -9,11 +9,12 @@
 		panel.id, panel.room,
 		ballot.id, ballot.side, ballot.bye, ballot.forfeit,
 		judge.id, judge.first, chapter_judge.gender,
+		judge.person, chapter_judge.id,
 		winner.value,
 		points.value,
 		rank.value
 
-	into outfile '/tmp/hymson-query.txt'
+	into outfile '/tmp/results-query.txt'
 
 		from 
 			(student, chapter, entry_student, entry,
