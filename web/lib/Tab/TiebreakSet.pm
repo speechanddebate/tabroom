@@ -5,8 +5,9 @@ Tab::TiebreakSet->columns(All => qw/id name tourn timestamp/);
 
 Tab::TiebreakSet->has_a(tourn => 'Tab::Tourn');
 
-Tab::TiebreakSet->has_many(tiebreaks => 'Tab::Tiebreak', 'tiebreak_set');
-Tab::TiebreakSet->has_many(rounds => 'Tab::Tiebreak', 'tiebreak_set');
+Tab::TiebreakSet->has_many(tiebreaks => 'Tab::Tiebreak'           , 'tiebreak_set');
+Tab::TiebreakSet->has_many(rounds    => 'Tab::Round'              , 'tiebreak_set');
+Tab::TiebreakSet->has_many(settings  => 'Tab::TiebreakSetSetting' , 'tiebreak_set');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
@@ -65,6 +66,25 @@ sub setting {
 		return $existing->value;
 
 	}
+
+}
+
+
+sub all_settings { 
+
+	my $self = shift;
+
+	my @settings = $self->settings;
+
+	my %all_settings;
+
+	foreach my $setting (@settings) { 
+		$all_settings{$setting->tag} = $setting->value;
+		$all_settings{$setting->tag} = $setting->value_text if $all_settings{$setting->tag} eq "text";
+		$all_settings{$setting->tag} = $setting->value_date if $all_settings{$setting->tag} eq "date";
+	}
+
+	return %all_settings;
 
 }
 
