@@ -38,3 +38,19 @@ create index tourn on tourn_site(tourn);
 
 alter table tiebreak add child int after name;
 
+update tiebreak set name="opp_ranks" where name="competition";
+update tiebreak set name="judgevar" where name="judge_var";
+update tiebreak set count="previous" where count="last elim";
+
+update event set type="debate" where type="other";
+update event set type="debate" where type="roundrobin";
+update event set type="debate" where type="lincoln-douglas";
+
+update event set type="congress" where type="" and name like "%ongress%";
+update event set type="debate" where type="" and name like "%LD%";
+update event set type="debate" where type="" and name like "%olicy%";
+update event set type="pf" where type="" and name like "%orum%";
+update event set type="policy" where type="" and name like "%CX%";
+update event set type="speech" where type="";
+
+update round set type="prelim" where type="preset";
