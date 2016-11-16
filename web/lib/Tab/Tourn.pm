@@ -57,9 +57,19 @@ sub full_location {
 }
 
 sub location_name { 
+
 	my $self = shift;
-	my $state = $m->comp("/funclib/state_translate.mas", state => $self->state) if $self->state;
-	my $country = $m->comp("/funclib/country_translate.mas", country => $self->country) if $self->country;
+
+	my $state = $m->comp(
+		"/funclib/state_translate.mas", 
+		state => $self->state
+	) if $self->state;
+
+	my $country = $m->comp(
+		"/funclib/country_translate.mas", 
+		country => $self->country
+	) if $self->country;
+
 	$country = $state.", ".$country if $state;
 	return $country;
 }
@@ -119,6 +129,24 @@ sub setting {
 		return $existing->value;
 
 	}
+
+}
+
+sub all_settings { 
+
+	my $self = shift;
+
+	my @settings = $self->settings;
+
+	my %all_settings;
+
+	foreach my $setting (@settings) { 
+		$all_settings{$setting->tag} = $setting->value;
+		$all_settings{$setting->tag} = $setting->value_text if $all_settings{$setting->tag} eq "text";
+		$all_settings{$setting->tag} = $setting->value_date if $all_settings{$setting->tag} eq "date";
+	}
+
+	return %all_settings;
 
 }
 
