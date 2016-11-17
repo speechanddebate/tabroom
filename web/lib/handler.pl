@@ -24,6 +24,7 @@ use Lingua::EN::Numbers::Ordinate;
 use MIME::Lite;
 use HTML::FromText;
 use HTML::Strip;
+use HTML::Scrubber;
 use Email::Valid;
 use DateTime::Span;
 use DateTime::Format::MySQL;
