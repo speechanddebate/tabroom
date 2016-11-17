@@ -22,7 +22,6 @@ create table chapter_setting (
 
 create index chapter on chapter_setting(chapter);
 
-
 create table student_setting (
 	id int auto_increment primary key,
 	student int,
