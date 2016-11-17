@@ -1,4 +1,7 @@
 
+delete from tiebreak where tiebreak_set is null;
+delete from score where tag="comment";
+
 alter table permission add district int after region;
 alter table district add level int after chair;
 alter table district add realm varchar(7) after level;
