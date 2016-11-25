@@ -21,8 +21,6 @@ sub short_name {
 	my ($self, $limit) = @_;
 	my $name = $self->name;
 
-	$name = chomp $name;
-
 	#screw these people.
 	$name = "Thomas Jefferson" if $name eq "Thomas Jefferson High School of Science and Technology";
 	$name = "Thomas Jefferson" if $name eq "Thomas Jefferson High School of Science & Technology";
@@ -36,6 +34,7 @@ sub short_name {
 
 	$name = "BC" if $name eq "Boston College";
 	$name = "BU" if $name eq "Boston University";
+
 
 	$name = "NYU" if $name eq "New York University";
 	$name =~ s/of Math and Science$//g;
@@ -59,13 +58,13 @@ sub short_name {
 	$name =~ s/College\ Prep$/CP/g;
 	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
 	$name =~ s/ CP //g;
+	$name =~ s/ CP$//g;
 	$name =~ s/University$//g;
 	$name =~ s/College$//g;
 	$name =~ s/State\ University,/State\ /g;
 	$name =~ s/^The //g;
 	$name =~ s/^Saint\ /St\ /g;
 	$name =~ s/High\ School/HS/g;
-	$name =~ s/ CP//g;
 	$name = "Boston College" if $name eq "BC";
 	$name = "Boston Uni" if $name eq "BU";
 	$name =~ s/^\s+//;  #leading spaces
@@ -73,9 +72,9 @@ sub short_name {
 
     if ($limit) { 
         return substr($name,0,$limit);
-    } else { 
-    	return $name;
-    }
+    } 
+
+    return $name;
 }
 
 sub setting {
