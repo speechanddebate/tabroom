@@ -19,7 +19,10 @@
 		from 
 			(student, chapter, entry_student, entry,
 			event, tourn, round, 
-			panel, ballot, judge, chapter_judge)
+			panel, ballot, judge)
+
+			left join chapter_judge
+				on judge.chapter_judge = chapter_judge.id
 
 			left join score winner 
 				on winner.tag = "ballot" 
