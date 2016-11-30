@@ -1,6 +1,6 @@
 	select
 
-		student.id, student.first, student.gender,
+		student.id, student.first, student.gender, student.grad_year,
 		chapter.name, chapter.zip, chapter.state, chapter.level,
 		entry.id,
 		tourn.id, tourn.name, tourn.start, tourn.state,
@@ -9,7 +9,7 @@
 		panel.id, panel.room,
 		ballot.id, ballot.side, ballot.bye, ballot.forfeit,
 		judge.id, judge.first, chapter_judge.gender,
-		judge.person, chapter_judge.id,
+		judge.person, chapter_judge.id, chapter_judge.chapter,
 		winner.value,
 		points.value,
 		rank.value
@@ -19,7 +19,10 @@
 		from 
 			(student, chapter, entry_student, entry,
 			event, tourn, round, 
-			panel, ballot, judge, chapter_judge)
+			panel, ballot, judge)
+
+			left join chapter_judge
+				on judge.chapter_judge = chapter_judge.id
 
 			left join score winner 
 				on winner.tag = "ballot" 
