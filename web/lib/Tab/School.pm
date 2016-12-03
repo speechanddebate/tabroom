@@ -7,6 +7,7 @@ Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_a(chapter => 'Tab::Chapter');
 Tab::School->has_a(region => 'Tab::Region');
 
+Tab::School->has_many(settings => 'Tab::SchoolSetting', 'school');
 Tab::School->has_many(purchases => 'Tab::ConcessionPurchase', 'school');
 Tab::School->has_many(entries => 'Tab::Entry', 'school');
 Tab::School->has_many(judges => 'Tab::Judge', 'school');
@@ -19,51 +20,7 @@ __PACKAGE__->_register_datetimes( qw/timestamp/);
 
 sub short_name {
 	my ($self, $limit) = @_;
-	my $name = $self->name;
-
-	#screw these people.
-	$name = "Thomas Jefferson HSST" if $name eq "Thomas Jefferson High School of Science and Technology";
-	$name = "Thomas Jefferson HSST" if $name eq "Thomas Jefferson High School of Science & Technology";
-	$name = "Bronx Science" if $name eq "The Bronx High School of Science";
-
-	$name = "BC" if $name eq "Boston College";
-	$name = "BU" if $name eq "Boston University";
-
-	$name = "NYU" if $name eq "New York University";
-	$name =~ s/of Math and Science$//g;
-	$name =~ s/Academy$//g;
-	$name =~ s/Regional\ High\ School$//g;
-	$name =~ s/High\ School$//g;
-	$name =~ s/Colleges$//g;
-	$name =~ s/School$//g;
-	$name =~ s/High$//g;
-	$name =~ s/Preparatory$/Prep/g;
-	$name =~ s/College\ Prep$/CP/g;
-	$name =~ s/HS$//g;
-	$name =~ s/Regional$//g;
-	$name =~ s/Public\ Charter//g;
-	$name =~ s/Charter\ Public//g;
-	$name =~ s/University\ of//g;
-	$name =~ s/California State University,/CSU/g;
-	$name =~ s/California State University/CSU/g;
-	$name =~ s/California,/UC/g;
-	$name =~ s/University$//g;
-	$name =~ s/College$//g;
-	$name =~ s/State\ University,/State\ /g;
-	$name =~ s/^The//g;
-	$name =~ s/^Saint\ /St\ /g;
-	$name =~ s/High\ School/HS/g;
-	$name = "College Prep" if $name eq "CP";  #Sometimes it's the whole school name.  Oops.
-	$name = "Boston College" if $name eq "BC";
-	$name = "Boston Uni" if $name eq "BU";
-	$name =~ s/^\s+//;  #leading spaces
-	$name =~ s/\s+$//;  #trailing spaces
-
-    if ($limit) { 
-        return substr($name,0,$limit);
-    } else { 
-    	return $name;
-    }
+	return &Tab::short_name($self, $limit);
 }
 
 sub setting {
@@ -121,6 +78,24 @@ sub setting {
 		return $existing->value;
 
 	}
+
+}
+
+sub all_settings { 
+
+	my $self = shift;
+
+	my @settings = $self->settings;
+
+	my %all_settings;
+
+	foreach my $setting (@settings) { 
+		$all_settings{$setting->tag} = $setting->value;
+		$all_settings{$setting->tag} = $setting->value_text if $all_settings{$setting->tag} eq "text";
+		$all_settings{$setting->tag} = $setting->value_date if $all_settings{$setting->tag} eq "date";
+	}
+
+	return %all_settings;
 
 }
 

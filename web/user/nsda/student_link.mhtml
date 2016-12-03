@@ -15,27 +15,58 @@
 	my $grad_year_limit = $now->year;
 	$grad_year_limit++ if $now->month > 8;
 
-    my @students = Tab::Student->search_where( chapter => $chapter->id, retired => 0, grad_year => { ">=", $grad_year_limit} );
+    my @students = Tab::Student->search_where( 
+		chapter   => $chapter->id,
+		retired   => 0,
+		grad_year => { ">=", $grad_year_limit}
+	);
+
     @students = sort {$a->last cmp $b->last} @students;
 
-	Tab::NSDA::Person->set_sql( students => "
-		select distinct NEW_USERS.* 
-		from NEW_USERS, NEW_USERS_TO_SCHOOLS
+	#These students are already linked
+	my %used_students = map {$_->ualt_id => 1} @students;
+
+	my $dbh = Tab::NSDA::PointsDBI->db_Main();
+
+	my $sth = $dbh->prepare("
+
+		select distinct NEW_USERS.user_id, NEW_USERS.ualt_id, NEW_USERS.grad_yr, 
+			NEW_USERS.total_pts, NEW_USERS.paid_status, DEMOGRAPHICS.student_email
+		from (NEW_USERS, NEW_USERS_TO_SCHOOLS)
+		left join DEMOGRAPHICS on DEMOGRAPHICS.person_id = NEW_USERS.user_id
 		where NEW_USERS_TO_SCHOOLS.school_id = ? 
 		and NEW_USERS_TO_SCHOOLS.ualt_id = NEW_USERS.ualt_id
-		and NEW_USERS.utype = \"Student\"
-		and NEW_USERS_TO_SCHOOLS.enddate = \"0000-00-00 00:00:00\"
+		and NEW_USERS.utype = 'Student'
+		and NEW_USERS_TO_SCHOOLS.enddate = '0000-00-00 00:00:00'
 		and NEW_USERS.grad_yr >= ? 
 		order by NEW_USERS.ulname, NEW_USERS.ufname
 	");
 
-	my @nsda_students = Tab::NSDA::Person->search_students( $chapter->nsda, $grad_year_limit );
-	my %student_by_ualt_id = map {$_->ualt_id => $_} @nsda_students;
+	$sth->execute($chapter->nsda, $grad_year_limit);
 
-	my %used_students = map {$_->ualt_id => 1} @students;
+	my %nsda_students = ();
+
+	while ( my ($user_id, $ualt_id, $grad_year, $nsda_points, $nsda_paid, $student_email) 
+		= $sth->fetchrow_array() ) 
+	{
+
+		$nsda_students{$ualt_id}{"user_id"} = $user_id;
+		$nsda_students{$ualt_id}{"ualt_id"} = $ualt_id;
+		$nsda_students{$ualt_id}{"grad_year"} = $grad_year;
+		$nsda_students{$ualt_id}{"nsda_points"} = $nsda_points;
+		$nsda_students{$ualt_id}{"nsda_paid"} = $nsda_paid;
+		$nsda_students{$ualt_id}{"student_email"} = $student_email;
+	}
 
 	my $linked;
 	my $unlinked;
+
+	Tab::Student->set_sql( update_email => "
+		update points.DEMOGRAPHICS demo, points.NEW_USERS person
+		set demo.student_email = ? 
+		where demo.person_id = person.user_id
+		and person.ualt_id = ? 
+	");
 
 	STUDENT:
 	foreach my $student (@students) {
@@ -46,23 +77,90 @@
 				$student->ualt_id("");
 				$student->update;
 				$unlinked++;
+
+				$student->setting('student_email', 0);
+				$student->setting('nsda_paid', 0);
+				$student->setting('nsda_points', 0);
 			}
 
 		} else { 
 
 			if ($ARGS{"confirm_".$student->id}) {
 
-				my $nsda_student_id = $ARGS{"student_".$student->id};
-				next STUDENT if $used_students{$nsda_student_id};
-				my $nsda_student = $student_by_ualt_id{$nsda_student_id};
+				my $chosen_ualt_id = $ARGS{"student_".$student->id};
 
-				if ($nsda_student) { 
+				next STUDENT if $used_students{$chosen_ualt_id};
+
+				my $chosen_user_id = $nsda_students{$chosen_ualt_id}{"user_id"};
+
+				if ($chosen_user_id) { 
 
 					# The NSDA's records on this are way better than mine
-					$student->grad_year($nsda_student->grad_yr);  
-					$student->ualt_id($nsda_student->ualt_id);
+					$student->grad_year($nsda_students{$chosen_ualt_id}{"grad_year"});  
+					$student->ualt_id($chosen_ualt_id);
 					$student->update;
+
+					my $student_email = "X";
+					$student_email = $nsda_students{$chosen_ualt_id}{"student_email"} 
+						if $nsda_students{$chosen_ualt_id}{"student_email"};
+
+					if ($student_email ne "X") { 
+						$student_email = "N" unless (index($student_email, '@') != -1);
+					}
+
+					my $nsda_paid = "X";
+					$nsda_paid = $nsda_students{$chosen_ualt_id}{"nsda_paid"} 
+						if $nsda_students{$chosen_ualt_id}{"nsda_paid"};
+
+					my $nsda_points = "X";
+					$nsda_points = $nsda_students{$chosen_ualt_id}{"nsda_points"} 
+						if $nsda_students{$chosen_ualt_id}{"nsda_points"};
+
+					$student->setting('student_email', $student_email);
+					$student->setting('nsda_paid', $nsda_paid);
+					$student->setting('nsda_points', $nsda_points);
+
 					$linked++;
+
+					if ($student->person->id) { 
+
+						if ($student_email eq "X" || $student_email eq "N") { 
+
+							Tab::Student->sql_update_email->execute(
+								$student->person->email,
+								$chosen_ualt_id
+							);
+						}
+
+					} else { 
+
+						my $person = Tab::Person->search( 
+							email => $student_email
+						)->first;
+
+						unless ($person) { 
+
+							my $login = Tab::Login->search( 
+								username => $student_email
+							)->first;
+
+							$person = $login->person if $login;
+						}
+
+						if ($person) { 
+							$student->person($person->id);
+							$student->update;
+						}
+
+					}
+
+				}
+
+				if ($student->person &! ($student->person->ualt_id > 0) ) { 
+
+					my $student_person = $student->person;
+					$student_person->ualt_id($chosen_ualt_id);
+					$student_person->update;
 				}
 
 			}
@@ -71,10 +169,12 @@
 
 	}
 
-	my $msg = "$linked students linked to NSDA autopointing!  YAY! " if $linked;
+	my $msg = "$linked students linked to NSDA autopointing!  YAY! " 
+		if $linked;
 
-	$msg .= "<br /><br />$unlinked students de-linked to NSDA autopointing.  I hope you know what you are doing..." if $unlinked;
+	my $err .= "$unlinked students de-linked to NSDA autopointing.  I hope you know what you are doing..." 
+		if $unlinked;
 
-	$m->redirect("student_roster.mhtml?chapter_id=$chapter_id&msg=$msg");
+	$m->redirect("student_roster.mhtml?chapter_id=$chapter_id&msg=$msg&err=$err");
 	
 </%init>

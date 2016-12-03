@@ -1,4 +1,5 @@
 <%args>
+	$tourn_id   => undef
 	$username   => undef
 	$password   => undef
 	$debug      => undef
@@ -53,7 +54,9 @@
 
 	#PROCESS THE XML
 
-	my $xml = new XML::Simple ( SuppressEmpty => 1,  ForceArray => [ qw(EVENT EVENT_SETTING TOURN_SETTING SCHOOL REGION) ]); 
+	my $xml = new XML::Simple ( 
+		SuppressEmpty => 1,  
+		ForceArray => [ qw(EVENT EVENT_SETTING TOURN_SETTING SCHOOL REGION) ]); 
 	my $data;
 
 
@@ -93,18 +96,31 @@
 	}
 
 
-	my $tourn = Tab::Tourn->retrieve($data->{TOURN}->{ID});
+	my $tourn;
+
+	$tourn = Tab::Tourn->retrieve($tourn_id) if $tourn_id;
+	$tourn = Tab::Tourn->retrieve($data->{TOURN}->{ID}) unless $tourn;
+
+	unless ($tourn) { 
+		$m->print("No tournament ID found.  Please try again");
+		$m->abort;
+	}
 
 	my %perms;
 
 	if ($person->site_admin) { 
 		$perms{"owner"}++;
 	} else {
-		my @tourn_access = Tab::Permission->search( person => $person->id, tourn => $tourn->id ) if $tourn && $person;
+		my @tourn_access = 
+			Tab::Permission->search( 
+			person => $person->id,
+			tourn  => $tourn->id )
+		if $tourn && $person;
+
 		%perms = map {$_->tag => $_} @tourn_access;
 	}
 
-	unless ($perms{"owner"} || $perms{"full_admin"} || $perms{"tabbing"} || $perms{"category_tabbing"}) { 
+	unless ($perms{"owner"} || $perms{"full_admin"} || $perms{"tabbing"} || $perms{"category_tab"}) { 
 		$m->print("You do not have access to change that tournament");
 		$m->abort;
 	}
@@ -116,8 +132,13 @@
 
 	foreach my $setting (@tourn_settings) { 
 
-		if ($setting->{TAG} eq "DownloadSite" || $setting->{TAG} eq "Online" || $setting->{TAG} eq "TourneyType" ||
-			$setting->{TAG} eq "SuppressNavMessages" || $setting->{TAG} eq "UseActualTime" || $setting->{TAG} eq "CrossEventEntry") { 
+		if ($setting->{TAG} eq "DownloadSite" 
+			|| $setting->{TAG} eq "Online" 
+			|| $setting->{TAG} eq "TourneyType" 
+			|| $setting->{TAG} eq "SuppressNavMessages" 
+			|| $setting->{TAG} eq "UseActualTime" 
+			|| $setting->{TAG} eq "CrossEventEntry"
+		) { 
 			$tourn->setting($setting->{TAG}, lc($setting->{VALUE}) );
 		}
 	}  
@@ -266,9 +287,11 @@
 					 last    => $xml_student->{LAST},
 					 chapter => $school->chapter->id
 				});
+			
 			}
 
 			$student_by_id{$xml_student->{ID}} = $student;
+			
 			push @{$student_by_entry{$xml_student->{ENTRY}}}, $student;
 
 		} else { 
@@ -303,8 +326,8 @@
 
 			my $category_id = $xml_event->{JUDGE_GROUP};
 
-			next EVENT if $perms{"category_tabbing"} 
-				&& $perms{"category_tabbing"}->category->id != $category_id;
+			next EVENT if $perms{"category_tab"} 
+				&& $perms{"category_tab"}->category->id != $category_id;
 
 			$category = Tab::Category->retrieve($category_id);
 	
@@ -417,24 +440,32 @@
 
 		my %es_yup = ();
 
-		my @students = @{$student_by_entry{$xml_entry->{ID}}} if $student_by_entry{$xml_entry->{ID}};
+		my @students = @{$student_by_entry{$xml_entry->{ID}}} 
+			if $student_by_entry{$xml_entry->{ID}};
+
 
 		foreach my $entry_student ($entry->entry_students) { 
+
 			my $ok;
+
 			foreach my $student (@students) { 
 				$ok++ if $student->id == $entry_student->student->id;
 			}
+
 			$entry_student->delete unless $ok;
 		}
 
+		my %ok_students = map {$_->id => 1} $entry->students;
+
 		foreach my $student (@students) { 
-			my $ok;
-			foreach my $entry_student ($entry->entry_students) { 
-				$ok++ if $student->id == $entry_student->student->id;
-			}
-			unless ($ok) {
-				Tab::EntryStudent->create({ entry => $entry, student => $student});
-			}
+
+			next if $ok_students{$student->id};
+
+			Tab::EntryStudent->create({ 
+				entry   => $entry,
+				student => $student
+			});
+
 		}
 	}
 
@@ -442,7 +473,6 @@
 		next if $used_entries{$entry_id};
 		$entry_by_id{$entry_id}->delete;
 	}
-
 
 	my %judge_by_id = ();
 
@@ -453,6 +483,9 @@
 		}
 
 	} else { 
+
+		$m->print("JUDGE CATEGORY NOT FOUND.  NAMES MUST MATCH?");
+		$m->abort;
 
 	}
 
@@ -476,139 +509,143 @@
 		}   
 	}
 
-	foreach my $xml_judge (@{$data->{JUDGE}}) { 
+	if ($data->{JUDGE}) { 
 
-		my $judge = $judge_by_id{$xml_judge->{ID}};
+		foreach my $xml_judge (@{$data->{JUDGE}}) { 
 
-		if ($judge_id_translator{$xml_judge->{ID}}) { 
-			my $judge_me_maybe = Tab::Judge->retrieve($xml_judge->{ID});
-			$judge = $judge_me_maybe if $judge_me_maybe;
-		}
+			my $judge = $judge_by_id{$xml_judge->{ID}};
 
-		my $school = $school_by_id{@{$xml_judge->{SCHOOL}}[0]};
-		$school = 0 unless $school;
-		my $dropped = 1 if $xml_judge->{STOPSCHEDULING} eq "true";
+			if ($judge_id_translator{$xml_judge->{ID}}) { 
+				my $judge_me_maybe = Tab::Judge->retrieve($xml_judge->{ID});
+				$judge = $judge_me_maybe if $judge_me_maybe;
+			}
 
-		my $first = $xml_judge->{FIRST};
-		my $last = $xml_judge->{LAST};
-		$first = " " unless $first;
-		$last = " " unless $last;
+			my $school = $school_by_id{@{$xml_judge->{SCHOOL}}[0]};
+			$school = 0 unless $school;
+			my $dropped = 1 if $xml_judge->{STOPSCHEDULING} eq "true";
 
-		my $diverse = 0;
-		$diverse = 1 if $xml_judge->{DIVERSE} && lc($xml_judge->{DIVERSE}) eq "true";
+			my $first = $xml_judge->{FIRST};
+			my $last = $xml_judge->{LAST};
+			$first = " " unless $first;
+			$last = " " unless $last;
 
-		my $ada = 0;
-		$ada = 1 if $xml_judge->{ADA} && lc($xml_judge->{ADA}) eq "true";
+			my $diverse = 0;
+			$diverse = 1 if $xml_judge->{DIVERSE} && lc($xml_judge->{DIVERSE}) eq "true";
 
-		my $active = 0;
-		$active = 1 if lc($xml_judge->{ACTIVE}) eq "true";
+			my $ada = 0;
+			$ada = 1 if $xml_judge->{ADA} && lc($xml_judge->{ADA}) eq "true";
 
-		unless ($judge && $category && $judge->category->id == $category->id) {
-		
-			$judge = Tab::Judge->create({
-				first      => $first,
-				last       => $last,
-				school     => $school,
-				category   => $category->id,
-				obligation => $xml_judge->{OBLIGATION},
-				hired      => $xml_judge->{HIRED},
-				ada        => $ada,
-				active     => $active,
-			});
+			my $active = 0;
+			$active = 1 if lc($xml_judge->{ACTIVE}) eq "true";
 
-			$judge->setting("upload_id", $xml_judge->{ID});
-			$judge->setting("notes", $xml_judge->{NOTES});
-
-			$judge_by_id{$xml_judge->{ID}} = $judge;
-			$used_judge{$xml_judge->{ID}}++;
-
-		} else { 
-
-			$rating_type = $judge->category->setting("prefs") unless $rating_type;
-
-			$judge->first($xml_judge->{FIRST});
-			$judge->last($xml_judge->{LAST});
-			$judge->school($school);
-			$judge->obligation($xml_judge->{OBLIGATION});
-			$judge->hired($xml_judge->{HIRED});
-			$judge->setting("notes", $xml_judge->{NOTES});
-			$judge->ada($ada);
-			$judge->active($active);
-			$judge->update;
-
-			$used_judge{$judge->id}++;
-
-		}
-
-		$judge->setting("diverse", $diverse);
-	    my @time_strikes =  $tourn->strikes( judge => $judge->id, type => "time"); 
-		my %used_strikes;
-
-		foreach my $id (keys %timeslot_by_id) { 
-		
-			next unless $used_timeslots{$id};
+			unless ($judge && $category && $judge->category->id == $category->id) {
 			
-			my $timeslot = $timeslot_by_id{$id};
-			next unless $timeslot;
-			next unless $timeslot->id;
-			my $key = "TIMESLOT".$timeslot->id;
+				$judge = Tab::Judge->create({
+					first      => $first,
+					last       => $last,
+					school     => $school,
+					category   => $category->id,
+					obligation => $xml_judge->{OBLIGATION},
+					hired      => $xml_judge->{HIRED},
+					ada        => $ada,
+					active     => $active,
+				});
 
-			if ($xml_judge->{$key} && lc($xml_judge->{$key}) eq "false") {
+				$judge->setting("upload_id", $xml_judge->{ID});
+				$judge->setting("notes", $xml_judge->{NOTES});
 
-				my $already;
+				$judge_by_id{$xml_judge->{ID}} = $judge;
+				$used_judge{$xml_judge->{ID}}++;
 
-				foreach my $ts (@time_strikes) {
-					$already++ if ($ts->start < $timeslot->end && $ts->end > $timeslot->start);
-					$used_strikes{$ts->id}++ if $already;
-					last if $already;
-				}
+			} else { 
 
-				unless ($already) { 
+				$rating_type = $judge->category->setting("prefs") unless $rating_type;
 
-					Tab::Strike->create({
-						judge => $judge->id,
-						type  => "time",
-						tourn => $tourn->id,
-						start => $timeslot->start->set_time_zone($tourn->tz),
-						end   => $timeslot->end->set_time_zone($tourn->tz)
-					});
+				$judge->first($xml_judge->{FIRST});
+				$judge->last($xml_judge->{LAST});
+				$judge->school($school);
+				$judge->obligation($xml_judge->{OBLIGATION});
+				$judge->hired($xml_judge->{HIRED});
+				$judge->setting("notes", $xml_judge->{NOTES});
+				$judge->ada($ada);
+				$judge->active($active);
+				$judge->update;
+
+				$used_judge{$judge->id}++;
+
+			}
+
+			$judge->setting("diverse", $diverse);
+			my @time_strikes =  $tourn->strikes( judge => $judge->id, type => "time"); 
+			my %used_strikes;
+
+			foreach my $id (keys %timeslot_by_id) { 
+			
+				next unless $used_timeslots{$id};
+				
+				my $timeslot = $timeslot_by_id{$id};
+				next unless $timeslot;
+				next unless $timeslot->id;
+				my $key = "TIMESLOT".$timeslot->id;
+
+				if ($xml_judge->{$key} && lc($xml_judge->{$key}) eq "false") {
+
+					my $already;
+
+					foreach my $ts (@time_strikes) {
+						$already++ if ($ts->start < $timeslot->end && $ts->end > $timeslot->start);
+						$used_strikes{$ts->id}++ if $already;
+						last if $already;
+					}
+
+					unless ($already) { 
+
+						Tab::Strike->create({
+							judge => $judge->id,
+							type  => "time",
+							tourn => $tourn->id,
+							start => $timeslot->start->set_time_zone($tourn->tz),
+							end   => $timeslot->end->set_time_zone($tourn->tz)
+						});
+
+					}
 
 				}
 
 			}
 
-		}
+			foreach my $ts (@time_strikes) { 
+				$ts->delete unless $used_strikes{$ts->id};
+			}
 
-		foreach my $ts (@time_strikes) { 
-			$ts->delete unless $used_strikes{$ts->id};
-		}
+			my %event_strikes = ();
 
-		my %event_strikes = ();
+			foreach my $es (Tab::Strike->search( judge => $judge->id, type => "event" )) { 
+				$event_strikes{$es->id} = $es;
+			}
 
-		foreach my $es (Tab::Strike->search( judge => $judge->id, type => "event" )) { 
-			$event_strikes{$es->id} = $es;
-		}
+			EVENT:
+			foreach my $event ($tourn->events) { 
+				
+				my $key = "EVENT".$event->id;
+				my $already = $event_strikes{$event->id};
 
-		EVENT:
-		foreach my $event ($tourn->events) { 
-			
-			my $key = "EVENT".$event->id;
-			my $already = $event_strikes{$event->id};
+				if ($xml_judge->{$key} && lc($xml_judge->{$key}) eq "false") {
 
-			if ($xml_judge->{$key} && lc($xml_judge->{$key}) eq "false") {
+					next EVENT if $already;
 
-				next EVENT if $already;
+					Tab::Strike->create({
+						event => $event->id,
+						judge => $judge->id,
+						type  => "event",
+						tourn => $tourn->id
+					});
 
-				Tab::Strike->create({
-					event => $event->id,
-					judge => $judge->id,
-					type  => "event",
-					tourn => $tourn->id
-				});
+				} else { 
 
-			} else { 
+					$already->delete if $already;
 
-				$already->delete if $already;
+				}
 
 			}
 
@@ -638,88 +675,91 @@
 			$tier_by_name{$tier->name} = $tier;
 		}
 
-		foreach my $xml_rating (@{$data->{JUDGEPREF}}) { 
+		if ($data->{JUDGEPREF}) { 
 
-			my $rating = $rating_by_id{$xml_rating->{ID}};
-			undef $rating if $rating && $rating_type eq "ndt" && $rating->rating_tier;
+			foreach my $xml_rating (@{$data->{JUDGEPREF}}) { 
 
-			unless ($rating && $rating->judge->category->tourn->id == $tourn->id) { 
+				my $rating = $rating_by_id{$xml_rating->{ID}};
+				undef $rating if $rating && $rating_type eq "ndt" && $rating->rating_tier;
 
-				next if $xml_rating->{RATING} == 333;
-				my $conflict++ if $xml_rating->{RATING} == 999;
+				unless ($rating && $rating->judge->category->tourn->id == $tourn->id) { 
 
-				my $ordinal = $xml_rating->{RATING} if $rating_type eq "ordinals" || $rating_type eq "ndt";
-				my $percentile = $xml_rating->{ORDPCT} if $rating_type eq "ordinals" || $rating_type eq "ndt";
+					next if $xml_rating->{RATING} == 333;
+					my $conflict++ if $xml_rating->{RATING} == 999;
 
-				my $tier = $tier_by_name{$xml_rating->{RATING}} if $rating_type eq "tiered";
-				$tier = 0 unless $tier;
+					my $ordinal = $xml_rating->{RATING} if $rating_type eq "ordinals" || $rating_type eq "ndt";
+					my $percentile = $xml_rating->{ORDPCT} if $rating_type eq "ordinals" || $rating_type eq "ndt";
 
-				my $entry = $entry_by_id{$xml_rating->{TEAM}}->id if $entry_by_id{$xml_rating->{TEAM}};
-				my $judge = $judge_by_id{$xml_rating->{JUDGE}}->id if $judge_by_id{$xml_rating->{JUDGE}};
+					my $tier = $tier_by_name{$xml_rating->{RATING}} if $rating_type eq "tiered";
+					$tier = 0 unless $tier;
 
-				next unless $entry && $judge;
+					my $entry = $entry_by_id{$xml_rating->{TEAM}}->id if $entry_by_id{$xml_rating->{TEAM}};
+					my $judge = $judge_by_id{$xml_rating->{JUDGE}}->id if $judge_by_id{$xml_rating->{JUDGE}};
 
-				if ($conflict) { 
-	
-					unless (Tab::Strike->search( judge => $judge, entry => $entry, type => "conflict")) { 
+					next unless $entry && $judge;
 
-						Tab::Strike->create({
-							tourn => $tourn->id,
-							judge => $judge,
-							entry => $entry,
-							type  => "conflict",
+					if ($conflict) { 
+		
+						unless (Tab::Strike->search( judge => $judge, entry => $entry, type => "conflict")) { 
+
+							Tab::Strike->create({
+								tourn => $tourn->id,
+								judge => $judge,
+								entry => $entry,
+								type  => "conflict",
+							});
+
+						}
+
+					} else {
+				
+						$rating = Tab::Rating->create({
+							tourn       => $tourn->id,
+							entry       => $entry,
+							rating_tier => $tier,
+							ordinal     => $ordinal,
+							percentile  => $percentile,
+							judge       => $judge
 						});
 
 					}
 
-				} else {
-			
-					$rating = Tab::Rating->create({
-						tourn       => $tourn->id,
-						entry       => $entry,
-						rating_tier => $tier,
-						ordinal     => $ordinal,
-						percentile  => $percentile,
-						judge       => $judge
-					});
+					$rating_by_id{$xml_rating->{ID}} = $rating;
+					$used_rating{$xml_rating->{ID}}++;
 
-				}
-
-				$rating_by_id{$xml_rating->{ID}} = $rating;
-				$used_rating{$xml_rating->{ID}}++;
-
-			} else { 
-
-				if ($xml_rating->{RATING} == 333) { 
-					$rating->delete;
 				} else { 
 
-					my $ordinal = $xml_rating->{RATING} if $rating_type eq "ordinals" || $rating_type eq "ndt";
-					my $percentile = $xml_rating->{ORDPCT} if $rating_type eq "ordinals" || $rating_type eq "ndt";
-					my $tier = $tier_by_name{$xml_rating->{RATING}}->id if ($rating_type eq "tiered");
-					my $entry = $entry_by_id{$xml_rating->{TEAM}}->id if $entry_by_id{$xml_rating->{TEAM}};
-					my $judge = $judge_by_id{$xml_rating->{JUDGE}}->id if $judge_by_id{$xml_rating->{JUDGE}};
-
-					unless ($entry && $judge) { 
-
+					if ($xml_rating->{RATING} == 333) { 
 						$rating->delete;
-	
-					} else {
+					} else { 
 
-						$rating->entry($entry);
-						$rating->judge($judge);
-						$rating->rating_tier($tier);
-						$rating->ordinal($ordinal);
-						$rating->percentile($percentile);
-						$rating->update;
+						my $ordinal = $xml_rating->{RATING} if $rating_type eq "ordinals" || $rating_type eq "ndt";
+						my $percentile = $xml_rating->{ORDPCT} if $rating_type eq "ordinals" || $rating_type eq "ndt";
+						my $tier = $tier_by_name{$xml_rating->{RATING}}->id if ($rating_type eq "tiered");
+						my $entry = $entry_by_id{$xml_rating->{TEAM}}->id if $entry_by_id{$xml_rating->{TEAM}};
+						my $judge = $judge_by_id{$xml_rating->{JUDGE}}->id if $judge_by_id{$xml_rating->{JUDGE}};
+
+						unless ($entry && $judge) { 
+
+							$rating->delete;
+		
+						} else {
+
+							$rating->entry($entry);
+							$rating->judge($judge);
+							$rating->rating_tier($tier);
+							$rating->ordinal($ordinal);
+							$rating->percentile($percentile);
+							$rating->update;
+						}
+
 					}
+
+					$used_rating{$xml_rating->{ID}}++;
 
 				}
 
-				$used_rating{$xml_rating->{ID}}++;
-
 			}
-
 		}
 
 		foreach my $rating_id (keys %rating_by_id) { 
@@ -802,14 +842,23 @@
 		$round = $round_by_cat_id{$xml_round->{ID}} unless $round;
 
 		my $event = $event_by_id{${$xml_round->{EVENT}}[0]};
+
 		my $timeslot = $timeslot_by_id{$xml_round->{TIMESLOT}};
 
-		my $tiebreak_set = Tab::TiebreakSet->search( tourn => $tourn->id, id => $xml_round->{TB_SET} )->first;
-		$tiebreak_set = Tab::TiebreakSet->search( tourn => $tourn->id, type => "Team")->first unless $tiebreak_set;
+		my $tiebreak_set = Tab::TiebreakSet->search( 
+			tourn => $tourn->
+			id, id => $xml_round->{TB_SET} 
+		)->first;
+
+		$tiebreak_set = Tab::TiebreakSet->search( 
+			tourn => $tourn->id, 
+		)->first unless $tiebreak_set;
 
 		my $tiebreak_set_id = $tiebreak_set->id if $tiebreak_set;
 
 		next ROUND unless $event && $timeslot;
+
+		$round = Tab::Round->search( name => $xml_round->{RD_NAME}, event => $event->id)->first unless $round;
 			
 		unless ($round && $round->event == $event->id && $round->event->tourn->id == $tourn->id) { 
 
@@ -820,15 +869,16 @@
 			$round_type = "prelim" if $round_type eq "preset";
 
 			$round = Tab::Round->create({
-				name     => $xml_round->{RD_NAME},
-				flighted => $xml_round->{FLIGHTING},
-				label    => $label,
-				type     => $round_type,
-				event    => $event->id,
-				timeslot => $timeslot->id,
-				tiebreak_set   => $tiebreak_set_id,
-				site     => $default_site_id,
-				created  => $now
+				name         => $xml_round->{RD_NAME},
+				flighted     => $xml_round->{FLIGHTING},
+				label        => $label,
+				type         => $round_type,
+				event        => $event->id,
+				timeslot     => $timeslot->id,
+				round_start  => $timeslot->start,
+				tiebreak_set => $tiebreak_set_id,
+				site         => $default_site_id,
+				created      => $now
 			});
 
 			$round->setting('cat_id', $xml_round->{ID});
@@ -955,6 +1005,10 @@
 			$seed_set_by_event{$event->id} = $result_set;
 
 			foreach my $result ($result_set->results) { 
+
+				next unless $result->entry;
+				next unless $result->round;
+
 				$result_by_entry{$result->entry->id."-".$result->round->id} = $result;
 				$notfirst++;
 			}
@@ -1183,28 +1237,35 @@
 			next SCORE if $xml_score->{SCORE} == 0;
 		}
 
-		my $student = $student_by_id{$xml_score->{RECIPIENT}} if ( $type == 2 || $type == 3 ) && $event_type ne "speech";
-		my $entry = $entry_by_id{$xml_score->{RECIPIENT}} if ($type == 1 || $type == 4 || $type == 5 ) || $event_type eq "speech";
+		my $student = $student_by_id{$xml_score->{RECIPIENT}} 
+			if ( $type == 2 || $type == 3 ) && $event_type ne "speech";
+
+		my $entry = $entry_by_id{$xml_score->{RECIPIENT}} 
+			if ($type == 1 || $type == 4 || $type == 5 ) || $event_type eq "speech";
 
 		next unless ($ballot && $ballot->id && ($student || $entry));
+
 		next SCORE if $ballot->panel->bye && $tag eq "ballot";
 
 		$scored_ballot{$ballot->id}++;
 
 		unless ($score && $score->ballot && $score->ballot->id == $ballot->id) { 
 		
+			my $value   = $xml_score->{SCORE};
+			$value = 0 unless $value;
+
 			$score = Tab::Score->create({
 				tag     => $tag,
 				ballot  => $ballot->id,
 				student => $student,
-				value   => $xml_score->{SCORE},
+				value   => $value,
 				cat_id  => $xml_score->{ID}
 			}) if $student;
 
 			$score = Tab::Score->create({
 				tag    => $tag,
 				ballot => $ballot->id,
-				value  => $xml_score->{SCORE},
+				value  => $value,
 				cat_id => $xml_score->{ID}
 			}) unless $student;
 
