@@ -6,6 +6,8 @@
 
 	use List::Util 'shuffle';
 
+	my $debugme; 
+
 	my $round = Tab::Round->retrieve($round_id);
 
     my $description = "Reassigned the judges out of round ".$round->realname." of ".$round->event->abbr;
@@ -215,7 +217,7 @@
 	$judge_sth->execute($round->id);
 
 	my @judges;
-	our %judge_name;
+	my %judge_name;
 	my %judge_score;
 	my %judge_school;
 	my %judge_region;
@@ -297,6 +299,7 @@
 		if ($type eq "region") { 
 			foreach my $region_school (@schools) { 
 				next unless $school_region{$region_school} == $region;
+				next unless $school_entries{$region_school};
 				push @{$judge_clashes{$judge}}, @{$school_entries{$region_school}};
 			}
 		}
@@ -389,6 +392,7 @@
 	my %mjp;
 
 	while (my ($id, $judge, $entry, $tier, $percentile) = $ratings_sth->fetchrow_array() ) {
+
 		next unless ($tier || $percentile);
 		$mjp{$judge."-".$entry} = $tier_value{$tier} if $tier > 0;
 		push @{$judge_clashes{$judge}}, $entry if $tier && $tier_strike{$tier};
@@ -407,6 +411,7 @@
 
     my $round_burn_avoid = $category->setting("round_burn_avoid");
     my $mutuality = $category->setting("mutuality");
+    my $panel_mutuality = $category->setting("panel_mutuality");
     my $preference = $category->setting("preference");
     my $default_mjp = $category->setting("default_mjp");
     my $diversity = $category->setting("diverse_judge_weight");
@@ -416,18 +421,34 @@
     $diversity = 1 if not defined $diversity;
     $suckage = 3 if not defined $suckage;
     $mutuality = 40 if not defined $mutuality;
+    $panel_mutuality = 100 if not defined $panel_mutuality;
     $preference = 15 if not defined $preference;
     $default_mjp = 1 if not defined $default_mjp;
     $round_burn_avoid =  5 if not defined $round_burn_avoid;
     $prefer_hireds = 10 if not defined $prefer_hireds;
 
     $mutuality = 0 if $mutuality == -1; 
+    $panel_mutuality = 0 if $panel_mutuality == -1; 
     $diversity = 0 if $diversity == -1; 
     $suckage = 0 if $suckage == -1; 
     $preference = 0 if $preference == -1; 
     $default_mjp = 0 if $default_mjp == -1; 
     $round_burn_avoid = 0 if $round_burn_avoid == -1; 
     $prefer_hireds = 0 if $prefer_hireds == -1; 
+
+	$mutuality = $mutuality * 100 if $prefs ne "ordinals";
+
+	my %settings = (
+		mutuality        => $mutuality,
+		panel_mutuality  => $panel_mutuality,
+		diversity        => $diversity,
+		suckage          => $suckage,
+		preference       => $preference,
+		default_mjp      => $default_mjp,
+		round_burn_avoid => $round_burn_avoid,
+		prefer_hireds    => $prefer_hireds,
+		max_pref         => $max_pref
+	);
 
 	my %use_priority = ();
 
@@ -494,7 +515,10 @@
                 $score += 100000000000 if $judge_entry_clash{$judge."-".$entry};
                 $score += 50000 if $judge_avoid{$entry};
                 $score += 500000 if $judge_avoid{$entry} && $prefs eq "ordinals";
-				$score += 5000000000 if $max_pref && $mjp_rating > $max_pref;
+
+				if ($max_pref && $mjp_rating > $max_pref) {
+					$score += 5000000000 if $max_pref && $mjp_rating > $max_pref;
+				}
 
 				if ($mjp_first) { 
 					$diff = abs($mjp_first - $mjp_rating) if $mjp_first && $mjp_rating;
@@ -524,13 +548,18 @@
 			}
 			
             $score += $use_priority{$judge};
-			$score += $diff * $mutuality;
+
+			if ($prefs ne "ordinals") { 
+				$score += ($diff ** 4) * ($mutuality);
+			} else {
+				$score += $diff * $mutuality;
+			}
 
 			if ($tab_ratings) { 
 				$score += $judge_rating{$judge} * $preference;
 			} 
 
-			$judge_panel_score{$judge."-".$panel} = $score;
+			$judge_panel_score{$judge}{$panel} = $score;
 
 		}
 	}
@@ -575,7 +604,7 @@
 				next if $round_type ne "final" && $round_type ne "elim";
 
 				@judges = sort {$judge_score{$b} <=> $judge_score{$a}} @judges;
-				@judges = sort {$judge_panel_score{$a."-".$panel} <=> $judge_panel_score{$b."-".$panel}} @judges;
+				@judges = sort {$judge_panel_score{$a}{$panel} <=> $judge_panel_score{$b}{$panel}} @judges;
 
 				JUDGE:
 				foreach my $judge (@judges) { 
@@ -591,14 +620,14 @@
 					push @{$test_panels{$judge}}, $panel;
 
 					$judge_used{$judge."-".$test_flight{$panel}}++;
-					$attempt_total += $judge_panel_score{$judge."-".$panel};
+					$attempt_total += $judge_panel_score{$judge}{$panel};
 					next PANEL;
 
 				}
 			}
 		}
 
-		foreach my $tock (1 .. 7) { 
+		foreach my $tock (1 .. 10) { 
 
 			next unless $prefs;
 			next if $prefs eq "none";
@@ -608,7 +637,7 @@
 
 				next if $panel_bye{$first};
 
-				my $baseline_score = score_elim_panel( \@{$panel_entries{$first}}, \@{$test_judges{$first}}, \%mjp );
+				my $baseline_score = score_elim_panel($first,  \@{$panel_entries{$first}}, \@{$test_judges{$first}}, \%mjp, \%judge_panel_score, \%settings);
 
 				my %entry_id;
 				my %entry_score;
@@ -665,7 +694,13 @@
 									}
 								}
 
-								my $baseline_second_score = score_elim_panel(\@{$panel_entries{$second}}, \@{$test_judges{$second}}, \%mjp );
+								my $baseline_second_score = score_elim_panel($second, 
+										\@{$panel_entries{$second}},
+										\@{$test_judges{$second}}, 
+										\%mjp, 
+										\%judge_panel_score,
+										\%settings);
+
 								my @new_judges_first;		# create test panels post-swap to see if they're any better
 								my @new_judges_second;
 
@@ -683,8 +718,8 @@
 
 								push @new_judges_second, $first_judge;
 
-								my $new_first_score = score_elim_panel(\@{$panel_entries{$first}}, \@new_judges_first, \%mjp );
-								my $new_second_score = score_elim_panel(\@{$panel_entries{$second}}, \@new_judges_second, \%mjp );
+								my $new_first_score = score_elim_panel($first, \@{$panel_entries{$first}}, \@new_judges_first, \%mjp, \%judge_panel_score, \%settings);
+								my $new_second_score = score_elim_panel($second, \@{$panel_entries{$second}}, \@new_judges_second, \%mjp, \%judge_panel_score, \%settings);
 
 								if (($baseline_score + $baseline_second_score - $new_first_score - $new_second_score) > $current_diff) { 
 
@@ -712,7 +747,7 @@
 
 							push @new_judges_first, $second_judge;
 
-							my $new_first_score = score_elim_panel(\@{$panel_entries{$first}}, \@new_judges_first, \%mjp );
+							my $new_first_score = score_elim_panel($first, \@{$panel_entries{$first}}, \@new_judges_first, \%mjp, \%judge_panel_score, \%settings);
 
 							if ( ($baseline_score - $new_first_score) > $current_diff ) { 
 								$current_diff = $baseline_score - $new_first_score;
@@ -795,89 +830,115 @@
 
 	my $msg = "Judges added";
 
-	undef %judge_name;
+	unless ($debugme) { 
 
-	$m->redirect("/panel/round/rooms.mhtml?round_id=".$round->id) 
-		if $round->type eq "elim" || $round->type eq "final" || $flights == 1;
-	$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&disp=1&msg=$msg");
+		$m->redirect("/panel/round/rooms.mhtml?round_id=".$round->id) 
+			if $round->type eq "elim" 
+			|| $round->type eq "final" 
+			|| $flights == 1;
+
+		$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&disp=1&msg=$msg");
+
+	}
 
 	sub score_elim_panel {
 
-		my ($entries_ref, $judges_ref, $mjp) = @_;
+		my ($panel_id, $entries_ref, $judges_ref, $mjp, $judge_panel_score, $settings) = @_;
 
-		my $score;
+		my $total_score;
 
-		my $first_score;
-		my %judge_score;
+		my $notfirst;
+		my %pref_total;
+
+		my $entry_one;
+		my $entry_two;
 
 		foreach my $entry (@{$entries_ref}) { 
 
-			my $panel_score;
-			my $panel_diff;
-			my $judge_diff;
-
 			foreach my $judge (@{$judges_ref}) { 
-
-				$panel_score += ${$mjp}{$judge."-".$entry};
-
-				if ($judge_score{$judge}) { 
-					$score += abs($judge_score{$judge} - ${$mjp}{$judge."-".$entry});
-				} else { 
-					$judge_score{$judge} = ${$mjp}{$judge."-".$entry};
-				}
+				$total_score += ${$judge_panel_score}{$judge}{$panel_id};
+				$pref_total{$entry} += ${$mjp}{$judge."-".$entry};
 			}
 
-			if ($first_score) { 
-				$panel_diff = abs($first_score - $panel_score);
-				if ($panel_diff) { 
-					$score += $panel_diff * 100;
-				}
-			} else { 
-				$first_score = $panel_score;
-			}
-
-			$score += $panel_score;
+			$entry_two = $entry if $entry_one;
+			$entry_one = $entry unless $entry_one;
 		}
 
-		return $score;
+		my $panel_diff = abs($pref_total{$entry_one} - $pref_total{$entry_two});
+
+		if ($panel_diff) { 
+			$total_score += $panel_diff * ${$settings}{"mutuality"} * ${$settings}{"panel_mutuality"};
+		}
+
+		return $total_score;
 	}
 
 
 </%init>
 
+	<div class="main">
+
 	<h2> Wheee!!  <% $round->realname %></h2>
 
 	<h4>Paneling total score is <% $current_total %></h4>
 
-%		foreach my $panel (@panels) { 
-	
-			<div class="row">
-				
-				<span class="smallspan">
-					<% $panel_bracket{$panel} %>
-				</span>
+%		foreach my $panel (sort {$a <=> $b} @panels) { 
 
-				<span class="smallspan">
-					<% $panel_flight{$panel} %>
+%			my $final_score = score_elim_panel($panel,  \@{$panel_entries{$panel}}, \@{$panel_judges{$panel}}, \%mjp, \%judge_panel_score, \%settings);
+	
+			<div class="full row">
+				
+			 	<span class="tenth nospace marleft">
+
+					<span class="third">
+						<% $panel_bracket{$panel} %>
+					</span>
+
+					<span class="third">
+						<% $panel_flight{$panel} %>
+					</span>
+
+					<div class="full padless">
+						<% sprintf("%.2f", $final_score) %>
+					</div>
+
 				</span>
 
 %				my $notfirst;
 
 %				foreach my $entry (@{$panel_entries{$panel}}) { 
-					<span class="medspan">
+					<span class="sixth">
 						<% $notfirst++ ? "vs " : "" %>
 						<% $entry_code{$entry} %>
 					</span>
 %				}
 
-%				foreach my $judge (@{$panel_judges{$panel}}) { 
-					<span class="twofifty">
-						<% $judge_rating{$judge} > 0 ? $judge_rating{$judge} : "" %> :
-						<% $prefs && $prefs ne "none" ? $judge_rating{$judge."-".$panel} : "" %> - 
-						<% $judge_panel_score{$judge."-".$panel} %> -
-					</span>
-%				}
+				<span class="half">
+
+%					foreach my $judge (@{$panel_judges{$panel}}) { 
+
+						<div class="full nospace">
+
+							<span class="third nospace">
+								<% $judge_name{$judge} %>
+							</span>
+
+							<span class="third nospace">
+								<% $judge_rating{$judge} > 0 ? $judge_rating{$judge} : "" %> 
+								<% $prefs && $prefs ne "none" ? $judge_rating{$judge."-".$panel} : "" %>
+							</span>
+
+							<span class="third">
+								<% $judge_panel_score{$judge}{$panel} %>
+							</span>
+						</div>
+
+%					}
+
+				</span>
 
 			</div>
 
 %		}
+	
+	</div>

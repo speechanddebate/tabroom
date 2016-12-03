@@ -1,0 +1,407 @@
+<%args>
+
+</%args>
+<%init>
+	
+	use Tab::NSDA::District;
+
+	my $now = DateTime->now;
+
+	my $year = $now->year;
+	$year-- if $now->month < 8;
+
+	my @nsda_districts = Tab::NSDA::District->retrieve_all;
+
+	my %tabroom_districts = map {$_->id => $_} Tab::District->retrieve_all;
+
+	my %tabroom_permissions = 
+		map {$_->district->id."-".$_->person->id => $_} 
+		Tab::Permission->search_where(
+			district => {' > ', 0}
+		);
+
+	foreach my $district (@nsda_districts) {
+
+		next if $district->dist_id == 0;
+
+		my ($district_name, $district_location) = split (/\(/, $district->dist_name);
+
+		$district_location =~ s/\)//g;
+
+		if ($tabroom_districts{$district->dist_id}) { 
+
+			$tabroom_districts{$district->dist_id}->name($district_name);
+			$tabroom_districts{$district->dist_id}->location($district_location);
+			$tabroom_districts{$district->dist_id}->code($district->dist_num);
+			$tabroom_districts{$district->dist_id}->level($district->dist_level);
+			$tabroom_districts{$district->dist_id}->realm($district->realm);
+
+			$tabroom_districts{$district->dist_id}->update();
+
+		} else { 
+
+			$tabroom_districts{$district->dist_id} = 
+				Tab::District->create({
+					id       => $district->dist_id,
+					code     => $district->dist_num,
+					name     => $district_name,
+					location => $district_location,
+					realm    => $district->realm
+				});
+
+		}
+
+	}
+
+	my $dbh = Tab::NSDA::PointsDBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select dl.district_id, dl.year, dl.slot, dl.user_id, dl.position,
+			person.person_id, person.email, person.first, person.middle, person.last, 
+			person.gender, person.no_email,
+			person.street, person.city, person.state, person.zip, person.country,
+			person.tz, person.phone, person.provider, person.ualt_id,
+			login.login_id, login.username, login.password, login.sha512
+
+		from nfl.DISTRICT_LEADERSHIP dl
+			left join nsda.persons person on person.person_id = dl.user_id
+			left join nsda.logins login on login.person_id = person.person_id
+		where dl.year = ?
+		and dl.position in ('C', 'M')
+		group by dl.district_id, dl.user_id
+		order by dl.district_id, dl.position
+	");
+
+	$sth->execute($year);
+
+	while (my (
+		$dl_district_id, $dl_year, $dl_slot, $dl_user_id, $dl_position,
+		$person_id, $person_email, $person_first, $person_middle, $person_last, 
+		$person_gender, $person_no_email,
+		$person_street, $person_city, $person_state, $person_zip, $person_country,
+		$person_tz, $person_phone, $person_provider, $person_ualt_id,
+		$login_login_id, $login_username, $login_password, $login_sha512) = $sth->fetchrow_array() 
+	) {
+
+		$m->print("<br />Chair $person_email found for district $dl_district_id.  Year $dl_year") 
+			if $dl_position eq "C";
+
+		$m->print("Member $person_email found for district $dl_district_id Year $dl_year") 
+			if $dl_position eq "M";
+
+		$m->print("<br />");
+
+		my $person = Tab::Person->search(
+			ualt_id => $person_ualt_id
+		)->first;
+
+		unless ($person) { 
+			$person = Tab::Person->search( 
+				email => $person_email 
+			)->first;
+		}
+
+		unless ($person) { 
+			my $login = Tab::Login->search( 
+				username => $person_email
+			)->first; 
+			$person = $login->person if $login;
+		}
+
+		unless ($person) { 
+
+			$person = Tab::Person->search (
+				first  => $person_first,
+				middle => $person_middle,
+				last   => $person_last,
+				city   => $person_city,
+				state  => $person_state,
+			)->first;
+
+		}
+
+		if ($person) { 
+
+			unless ($person->ualt_id) { 
+				$person->ualt_id($person_ualt_id);
+				$person->update;
+			}
+
+		} else { 
+
+			$person = Tab::Person->create({
+				email    => $person_email,
+				first    => $person_first,
+				middle   => $person_middle,
+				last     => $person_last,
+				gender   => $person_gender,
+				no_email => $person_no_email,
+				street   => $person_street,
+				city     => $person_city,
+				state    => $person_state,
+				zip      => $person_zip,
+				country  => $person_country,
+				tz       => $person_tz,
+				phone    => $person_phone,
+				provider => $person_provider,
+				ualt_id  => $person_ualt_id,
+			});
+
+
+			my $login = Tab::Login->create({
+				username => $person_email,
+				source   => "nsda",
+				password => $login_password,
+				sha512   => $login_sha512,
+				person   => $person->id
+			});
+
+		}
+
+		if ($dl_position eq "C") { 
+			$dl_position = "chair";
+		} elsif ($dl_position eq "M") {
+			$dl_position = "member";
+		} else {
+			$dl_position = "alternate";
+		}
+
+		if ($person) { 
+
+			my $existing = $tabroom_permissions{$dl_district_id."-".$person->id};
+
+			if ($existing && $existing->id) { 
+
+				if ($dl_position ne $existing->tag) { 
+					$existing->tag($dl_position);
+					$existing->update;
+				}
+
+			} else { 
+
+				Tab::Permission->create({
+					person   => $person->id,
+					district => $dl_district_id,
+					tag      => $dl_position
+				});
+
+			}
+
+			delete $tabroom_permissions{$dl_district_id."-".$person->id};
+
+		} 
+
+		foreach my $key (keys %tabroom_permissions) {
+			eval { 
+				$tabroom_permissions{$key}->delete if $tabroom_permissions{$key};
+				delete $tabroom_permissions{$key};
+			};
+		}
+
+	}
+
+	Tab::Chapter->set_sql(link_districts => "
+		update tabroom.chapter chapter, 
+			points.NEW_SCHOOLS_TO_DISTRICTS chapter_district
+
+		set chapter.district = chapter_district.district_id
+		where chapter.nsda = chapter_district.school_id
+		and chapter_district.enddate = '0000-00-00 00:00:00'
+		and chapter.nsda > 0
+	");
+
+	Tab::Chapter->sql_link_districts->execute;
+
+	Tab::Chapter->set_sql(update_degrees => "
+		update tabroom.chapter_setting cs,
+			tabroom.chapter chapter,
+			points.NEW_SCHOOLS school
+			set cs.value = school.school_total_deg
+
+			where cs.chapter = chapter.id
+			and cs.tag = 'nsda_degrees'
+			and chapter.nsda = school.school_id
+			and chapter.nsda > 0
+	");
+
+	Tab::Chapter->sql_update_degrees->execute;
+
+	Tab::Chapter->set_sql(update_paid => "
+		update tabroom.chapter_setting cs,
+			tabroom.chapter chapter,
+			points.NEW_SCHOOLS school
+			set cs.value = school.school_paid_status
+
+			where cs.chapter = chapter.id
+			and cs.tag = 'nsda_paid'
+			and chapter.nsda = school.school_id
+			and chapter.nsda > 0
+	");
+
+	Tab::Chapter->sql_update_paid->execute;
+
+	Tab::Chapter->set_sql(update_charter => "
+		update tabroom.chapter_setting cs,
+			tabroom.chapter chapter,
+			points.NEW_SCHOOLS school
+			set cs.value = school.school_charter_status
+
+			where cs.chapter = chapter.id
+			and cs.tag = 'nsda_charter'
+			and chapter.nsda = school.school_id
+			and chapter.nsda > 0
+	");
+
+	Tab::Chapter->sql_update_charter->execute;
+
+
+	Tab::Chapter->set_sql(update_degrees => "
+		update tabroom.chapter_setting cs,
+			tabroom.chapter chapter,
+			points.NEW_SCHOOLS school
+			set cs.value = school.school_total_deg
+
+			where cs.chapter = chapter.id
+			and cs.tag = 'nsda_degrees'
+			and chapter.nsda = school.school_id
+			and chapter.nsda > 0
+	");
+
+	Tab::Chapter->sql_update_degrees->execute();
+
+	Tab::Chapter->set_sql(update_paid => "
+		update tabroom.chapter_setting cs,
+			tabroom.chapter chapter,
+			points.NEW_SCHOOLS school
+			set cs.value = school.school_paid_status
+
+			where cs.chapter = chapter.id
+			and cs.tag = 'nsda_paid'
+			and chapter.nsda = school.school_id
+			and chapter.nsda > 0
+	");
+
+	Tab::Chapter->sql_update_paid->execute();
+
+	Tab::Chapter->set_sql(update_charter => "
+		update tabroom.chapter_setting cs,
+			tabroom.chapter chapter,
+			points.NEW_SCHOOLS school
+			set cs.value = school.school_charter_status
+
+			where cs.chapter = chapter.id
+			and cs.tag = 'nsda_charter'
+			and chapter.nsda = school.school_id
+			and chapter.nsda > 0
+	");
+
+	Tab::Chapter->sql_update_charter->execute();
+
+	Tab::Student->set_sql(update_email=> "
+
+		update tabroom.student_setting ss,
+			tabroom.student student,
+			tabroom.chapter chapter, 
+			points.NEW_USERS person,
+			points.DEMOGRAPHICS demo
+
+			set ss.value = demo.student_email
+
+			where ss.student = student.id
+			and student.ualt_id = person.ualt_id
+			and person.user_id = demo.person_id
+			and ss.tag = 'student_email'
+
+			and student.chapter = chapter.id 
+			and chapter.nsda > 0
+	");
+
+	Tab::Student->sql_update_email->execute();
+
+	Tab::Student->set_sql(update_email=> "
+
+		update tabroom.student_setting ss,
+			tabroom.student student,
+			tabroom.chapter chapter, 
+			points.NEW_USERS person,
+			points.DEMOGRAPHICS demo
+
+			set ss.value = demo.student_email
+
+			where ss.student = student.id
+			and student.ualt_id = person.ualt_id
+			and person.user_id = demo.person_id
+			and ss.tag = 'student_email'
+
+			and student.chapter = chapter.id 
+			and chapter.nsda > 0
+	");
+
+	Tab::Student->sql_update_email->execute();
+
+	Tab::Student->set_sql(update_link => "
+
+		update tabroom.student student,
+			tabroom.chapter chapter, 
+			tabroom.person person,
+			points.NEW_USERS user,
+			points.DEMOGRAPHICS demo
+
+			set student.person = person.id
+
+			where (student.person is null or student.person = 0)
+			and student.ualt_id = user.ualt_id
+			and user.user_id = demo.person_id
+			and demo.student_email = person.email
+
+			and student.chapter = chapter.id 
+			and chapter.nsda > 0
+	");
+
+	Tab::Student->sql_update_email->execute();
+
+	Tab::Student->set_sql(update_paid => "
+
+		update tabroom.student_setting ss,
+			tabroom.student student,
+			tabroom.chapter chapter, 
+			points.NEW_USERS person
+
+			set ss.value = person.paid_status
+
+			where ss.student = student.id
+			and student.ualt_id = person.ualt_id
+			and person.paid_status = 1
+			and person.user_id = demo.person_id
+			and ss.tag = 'nsda_paid'
+
+			and student.chapter = chapter.id 
+			and chapter.nsda > 0
+	");
+
+	Tab::Student->sql_update_email->execute();
+
+	Tab::Student->set_sql(update_points => "
+
+		update tabroom.student_setting ss,
+			tabroom.student student,
+			tabroom.chapter chapter, 
+			points.NEW_USERS person
+
+			set ss.value = person.total_pts
+
+			where ss.student = student.id
+			and student.ualt_id = person.ualt_id
+			and person.total_pts = 1
+			and person.user_id = demo.person_id
+			and ss.tag = 'nsda_paid'
+
+			and student.chapter = chapter.id 
+			and chapter.nsda > 0
+	");
+
+	Tab::Student->sql_update_email->execute();
+
+	return "Yup, did it";
+
+</%init>
