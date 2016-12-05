@@ -3,6 +3,8 @@
 	$num_panels
 	$nsda        => undef
 	$entries_ref => undef
+	$limit_to    => undef
+	$seed_basis  => undef
 </%args>
 <%perl>
 	
@@ -30,7 +32,7 @@
 	#Prime the section scorer 
 	my @other_ballots = $m->comp(
 		"/funclib/other_ballots.mas", 
-		round => $round
+			round => $round
 	);
 
 	my %entries_by_section = ();
@@ -169,6 +171,87 @@
 
 	}
 
+	if ($limit_to) { 
+
+		# Removes anyone who hasn't made it to this round; mostly for the
+		# NSDA double-drop system.
+
+		my $previous_round = Tab::Round->search( 
+			event => $event->id,
+			name  => ($round->name - 1)
+		)->first;
+
+		my @results = $m->comp(
+			"/tabbing/results/order_entries.mas",
+				round => $previous_round,
+		) if $previous_round; 
+		
+		$entries_ref = pop @results if @results;
+
+		my $counter;
+
+		if (${$entries_ref}{"by_place"}) { 
+			foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) {
+				foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) {
+					next unless $counter++ > $limit;
+					delete($entries{$entry_id});
+				}
+			}
+		}
+
+	}
+
+	if ($seed_basis) { 
+
+		my %pairing_seeds = ();
+
+		if ($seed_basis eq "prelims") { 
+
+			%pairing_seeds = 
+
+				map {$_->entry->id => $_->value} 
+			
+				$m->comp("/funclib/event_entry_settings.mas",
+					event => $event->id,
+					tag   => "pairing_seed"
+				);
+
+		} else { 
+
+			$seeding_tiebreak_set = Tab::TiebreakSet->retrieve($seed_basis);
+
+			my $entries_ref;
+
+			if ($seeding_tiebreak_set) { 
+
+				my @seed_results = $m->comp(
+					"/tabbing/results/order_entries.mas",
+					round        => $previous_round,
+					tiebreak_set => $seeding_tiebreak_set
+				);
+
+				$entries_ref = pop @seed_results if @seed_results;
+			}
+
+			foreach my $entry_id (keys %entries) { 
+				$entries{$entry_id}{"seed"} = ${$entries_ref}{"tiebreak"}{1}{$entry_id};
+			}
+
+		}
+
+		my $total_seeds;
+		my $seed_count;
+
+		foreach my $entry (keys %entries) {
+			next unless $entries{$entry_id}{"seed"};
+			$total_seeds += $entries{$entry_id}{"seed"};
+			$seed_count++;
+		}
+
+		$hits{"seed_average"} = $total_seeds / $seed_count if $seed_count;
+
+	}
+
 	my $dbh = Tab::DBI->db_Main();
 
 	my $second_round_id = $round_settings{"flight_b_round"};
@@ -271,7 +354,8 @@
 		}
 
 		@all_entries = 
-			sort { $size_of_school{$entries{$b}{"school"}} <=> $size_of_school{$entries{$a}{"school"}} } 
+			sort { $size_of_school{$entries{$b}{"school"}} 
+				<=> $size_of_school{$entries{$a}{"school"}} } 
 			@all_entries;
 
 	}
@@ -320,7 +404,9 @@
 
 		}
 
-		$remainder-- if $sections{$picked_key} && scalar @{$sections{$picked_key}} == $min_size;
+		$remainder-- if $sections{$picked_key} 
+			&& scalar @{$sections{$picked_key}} == $min_size;
+
 		push (@{$sections{$picked_key}}, $entry->id);
 
 		my $k = shift @keys;
@@ -332,8 +418,9 @@
 
 	foreach my $section_key (@section_keys) { 
 		@{$sections{$section_key}} = 
-			sort {$school_rank{$entries{$a}{"school"}} <=> $school_rank{$entries{$b}{"school"}} } 
-			@{$sections{$section_key}};
+			sort {$school_rank{$entries{$a}{"school"}} 
+				<=> $school_rank{$entries{$b}{"school"}} } 
+				@{$sections{$section_key}};
 	}
 
 	my $no_improvement = 1;
@@ -364,6 +451,7 @@
 				# Remove the candidate for a test array of original section
 				my @section1 = @section; 	
 				my $index = 0;
+
 				$index++ until $section1[$index] == $entry_id;
 				splice(@section1, $index, 1);
 
@@ -386,6 +474,7 @@
 
 					# Find the other section for scoring
 					my @section2 = @{$sections{$other_key}}; 			
+
 					my $other_section2_score = score_section(
 						\@section2, 
 						\%hits, 
@@ -481,16 +570,13 @@
 	my @judges = $m->comp(
 		"/funclib/round_judges.mas", 
 		round => $round
-	) unless $m->comp(
-			"/funclib/round_entries.mas",
-			round => $round
-		);
+	);
 
 	my @judge_keys;
 
 	my %judge_section = ();
-	foreach my $judge (@judges) { 
 
+	foreach my $judge (@judges) { 
 		push (@{$judge_section{$judge->panelid}}, $judge->id);
 		push (@judge_keys, $judge->panelid);
 	}
@@ -640,61 +726,65 @@
 		@{$sections{$section_key}} = @entries;
 	}
 
-	foreach my $section_key (@section_keys) { 
+	unless ($num_panels == 1) { 
 
-		my $room = shift @rooms if @rooms;
-		my $room_id = 0;
-		$room_id = $room->id if $room;
+		foreach my $section_key (@section_keys) { 
 
-		my $jsection = shift @judge_keys if @judge_keys;
-		my @judge_ids = @{$judge_section{$jsection}} if $jsection;
-		@judge_ids = ("0") unless @judge_ids;
+			my $room = shift @rooms if @rooms;
+			my $room_id = 0;
+			$room_id = $room->id if $room;
 
-		my @section = @{$sections{$section_key}};
-		
-		my $score = score_section(
-			\@section,
-			\%hits, 
-			\%entries
-		);
+			my $jsection = shift @judge_keys if @judge_keys;
+			my @judge_ids = @{$judge_section{$jsection}} if $jsection;
+			@judge_ids = ("0") unless @judge_ids;
 
-		my $this_round = $round;
-		$this_round = $second_round if $section_second{$section_key};
+			my @section = @{$sections{$section_key}};
+			
+			my $score = score_section(
+				\@section,
+				\%hits, 
+				\%entries
+			);
 
-		my $section = Tab::Panel->create({
-			round  => $this_round->id,
-			room   => $room_id,
-			letter => $letter,
-			score  => $score,
-			flight => 1
-		});
+			my $this_round = $round;
+			$this_round = $second_round if $section_second{$section_key};
+
+			my $section = Tab::Panel->create({
+				round  => $this_round->id,
+				room   => $room_id,
+				letter => $letter,
+				score  => $score,
+				flight => 1
+			});
 
 
-		foreach my $judge_id (@judge_ids) { 
+			foreach my $judge_id (@judge_ids) { 
 
-			my $position;
+				my $position;
 
-			foreach my $entry (@section) { 
+				foreach my $entry (@section) { 
 
-				$position++;
+					$position++;
 
-				next unless $entry;
+					next unless $entry;
 
-				my $ballot = Tab::Ballot->create({
-					panel        => $section->id,
-					judge        => $judge_id,
-					entry        => $entry,
-					speakerorder => $position
-				});
+					my $ballot = Tab::Ballot->create({
+						panel        => $section->id,
+						judge        => $judge_id,
+						entry        => $entry,
+						speakerorder => $position
+					});
 
+				}
+			
 			}
-		
-		}
 
-		if ($letter eq "Z") { 
-			$letter = "AA";
-		} else { 
-			$letter++;
+			if ($letter eq "Z") { 
+				$letter = "AA";
+			} else { 
+				$letter++;
+			}
+
 		}
 
 	}
@@ -722,7 +812,14 @@
 
 		my $titlescore = 100000 if ${$hitsref}{"nsda"};
 
+		my $seed_average = ${$hitsref}{"seed_average"};
+		my $average_score = 100 if $seed_average;
+
+		my $panel_total;
+
 		foreach my $entry (@pan_entries) { 
+
+			$panel_total += ${$entrref}{$entry}{"seed"};
 
 			foreach my $other (@pan_entries) { 
 
@@ -758,6 +855,9 @@
 			}
 
 		}
+
+		my $average = ($panel_total / (scalar @pan_entries)) if $panel_total;
+		$score += $average * $average_score;
 
 		return $score;
 
