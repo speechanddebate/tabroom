@@ -16,7 +16,7 @@
 /*!50003 SET collation_connection  = utf8_general_ci */ ;
 /*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
 /*!50003 SET sql_mode              = '' */ ;
-/*!40101 DROP TRIGGER IF EXISTS `tabroom.insert_entry_active` */;
+/*!40101 DROP TRIGGER IF EXISTS `insert_entry_active` */;
 DELIMITER ;;
 /*!40101 CREATE*/ /*!50017 DEFINER=`tabroom`@`localhost`*/ /*!40101 trigger `insert_entry_active`
 	before insert on `entry`
@@ -50,7 +50,7 @@ DELIMITER ;
 /*!50003 SET collation_connection  = utf8_general_ci */ ;
 /*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
 /*!50003 SET sql_mode              = '' */ ;
-/*!40101 DROP TRIGGER IF EXISTS `tabroom.update_entry_active` */ ;
+/*!40101 DROP TRIGGER IF EXISTS `update_entry_active` */ ;
 DELIMITER ;;
 /*!40101 CREATE*/ /*!50017 DEFINER=`tabroom`@`localhost`*/ /*!40101 trigger `update_entry_active`
 	before update on `entry`
