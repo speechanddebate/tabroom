@@ -1,0 +1,292 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$session
+	$event_id => undef
+	$format   => undef
+</%args>
+<%init>
+
+	my $event = Tab::Event->retrieve($event_id);
+
+	unless ($event) { 
+		my @all_events = $tourn->events;
+		$event = shift (@all_events);
+	}
+
+	$m->abort unless $event;
+
+	my $final = Tab::Round->search( 
+		type  => "final",
+		event => $event->id
+	)->first;
+
+	my $semi = Tab::Round->search(
+		name  => ($final->name - 1),
+		event => $event->id
+	)->first if $final;
+
+	my ($num_qualifiers, $num_alternates) = $m->comp(
+		"/funclib/nsda_qualifier_count.mas", 
+		event => $event
+	);
+
+	my @final_results = $m->comp(
+		"/tabbing/results/order_entries.mas",
+		round => $final
+	) if $final;
+
+    my %entry_ballots = $m->comp(
+        "/funclib/round_ballot_strings.mas",
+        round => $final
+   ) if $final;
+
+	my @schools = $m->comp(
+		"/funclib/round_schools.mas",
+		round => $semi
+	) if $semi;
+
+	my %school_name = map {$_->id => &Tab::short_name($_->name)} @schools if @schools;
+
+	my $final_entries_ref = pop @final_results if @final_results;
+
+	my %qualifiers = ();
+	my %alternates = ();
+	my %in_finals = ();
+
+	my $alt = 1;
+
+	if (${$final_entries_ref}{"by_place"}) { 
+
+		foreach my $key (sort {$a <=> $b} keys %{${$final_entries_ref}{"by_place"}}) { 
+		
+			my $tie++ if scalar @{${${$final_entries_ref}{"by_place"}}{$key}} > 1; 
+		
+			foreach my $entry_id (@{${${$final_entries_ref}{"by_place"}}{$key}}) { 
+
+				$in_finals{$entry_id}++;
+
+				next if $qualifiers{$entry_id}{"place"};
+				next if $alternates{$entry_id}{"place"};
+
+				if ($num_qualifiers > 0) { 
+
+					$qualifiers{$entry_id}{"tie"}++ if $tie;
+					$qualifiers{$entry_id}{"place"} = $key;
+					$num_qualifiers--;
+
+				} elsif ($num_alternates > 0) { 
+
+					$alternates{$entry_id}{"tie"}++ if $tie;
+					$alternates{$entry_id}{"place"} = $alt++;
+					$num_alternates--;
+				}
+			}
+		}
+	}
+
+	if ($num_alternates || $num_qualifiers) { 
+
+		my @semi_results = $m->comp(
+			"/tabbing/results/order_entries.mas",
+			round        => $semi,
+			tiebreak_set => $final->tiebreak_set
+		);
+
+		my $semi_entries_ref = pop @semi_results if @semi_results;
+
+		if (${$semi_entries_ref}{"by_place"}) { 
+
+			foreach my $key (sort {$a <=> $b} keys %{${$semi_entries_ref}{"by_place"}}) { 
+			
+				my $tie++ if scalar @{${${$semi_entries_ref}{"by_place"}}{$key}} > 1; 
+			
+				foreach my $entry_id (@{${${$semi_entries_ref}{"by_place"}}{$key}}) { 
+
+					next if $qualifiers{$entry_id}{"place"};
+					next if $alternates{$entry_id}{"place"};
+
+					if ($num_qualifiers > 0) { 
+
+						$qualifiers{$entry_id}{"tie"}++ if $tie;
+						$qualifiers{$entry_id}{"place"} = $key;
+						$num_qualifiers--;
+
+					} elsif ($num_alternates > 0) { 
+
+						$alternates{$entry_id}{"tie"}++ if $tie;
+						$alternates{$entry_id}{"place"} = $alt++;
+						$num_alternates--;
+
+					}
+				}
+			}
+		}
+	}
+
+	if ($format eq "csv") {
+
+	} elsif ($format eq "pdf") { 
+
+		my $name = $event->name;
+		$name =~ s/[\W_]//g;
+
+		my $filename = "NSDA-Qualifiers-$name-".$session->id;
+
+		$m->comp("/funclib/printout.mas", 
+			tourn    => $tourn,
+			filename => $filename,
+			head     => 1 
+		);
+
+		my $filepath = $Tab::file_root."tmp/".$filename;
+		open (TEXOUT, ">>$filepath.tex");
+
+		my $logo_file = $tourn_settings->{"logo"};
+
+		if ($logo_file) {
+
+			unless (-e "$Tab::file_root/tmp/".$logo_file) { 
+				system("cd $Tab::file_root/tmp; 
+				$Tab::latex_path_prefix/wget ".$Tab::s3_url."/".$tourn->id."/".$logo_file);
+			}
+		}
+
+		if ($logo_file && -e "$Tab::file_root/tmp/".$logo_file) { 
+
+			print TEXOUT "\\hspace{-4mm}\n";
+			print TEXOUT "\\begin{minipage}[c]{4.0in}\n";
+			print TEXOUT "\\includegraphics[width=1.2in]{".$logo_file."}\n";
+			print TEXOUT "\\end{minipage}\n";
+
+		} else { 
+
+			print TEXOUT "\\hspace{-4mm}\n";
+			print TEXOUT "\\vspace{-4mm}\n";
+			print TEXOUT "\\begin{minipage}[c]{4.0in}\n";
+			print TEXOUT "{\\bf \\LARGE \\color{black!64} ".&Tab::texify($tourn->name)." }\n";
+			print TEXOUT "\\end{minipage}\n";
+
+		}
+
+		print TEXOUT "\\begin{minipage}[c]{2.75in}\n";
+		print TEXOUT "\\strut \\hfill {\\LARGE\\bf ".uc(&Tab::texify($event->name))." } \n";
+		print TEXOUT "\\medskip\n";
+		print TEXOUT "\\newline\n";
+
+		print TEXOUT "\\noindent\n";
+		print TEXOUT "\\strut \\hfill {\\Large \\color{black!64} QUALIFIERS }";
+		print TEXOUT "\\end{minipage}\n";
+		print TEXOUT "\\vspace{5mm}\n";
+		print TEXOUT "\\newline\n";
+	
+		close TEXOUT;
+
+		$m->comp("/tabbing/report/results_table_print.mas", 
+			round          => $final,
+			filename       => $filename,
+			nsda_districts => 1,
+			qualifiers     => \%qualifiers,
+			alternates     => \%alternates,
+		);
+
+		$m->comp("/tabbing/report/results_table_print.mas", 
+			round          => $semi,
+			filename       => $filename,
+			tiebreak_set   => $final->tiebreak_set,
+			nsda_districts => 1,
+			qualifiers     => \%qualifiers,
+			alternates     => \%alternates,
+			exclude        => \%in_finals
+		);
+		
+		$m->comp("/funclib/printout.mas", 
+			tourn    => $tourn,
+			filename => $filename,
+			tail     => 1 
+		);
+
+	}
+
+</%init>
+
+	<div class="blankfull">
+
+		<div class="full nospace borderbottom">
+
+			<span class="half">
+				<h3>Qualifiers in <% $event->name %></h3>
+			</span>
+
+
+			<span class="quarter">
+
+				<form 
+					action = "nsda_qualifiers.mhtml"
+					method = "post"
+				>
+
+				<select
+					name     = "event_id"
+					class    = "fixedmed"
+					onChange = "this.form.submit();"
+				>
+%					foreach my $oevent ($tourn->events) { 
+						<option 
+							value="<% $oevent->id %>"
+							<% $oevent == $event ? 'selected="true"' : "" %>
+						><% $oevent->name %></option>
+%					}
+
+				</select>
+
+				</form>
+			</span>
+
+			<span class="quarter rightalign">
+
+				<a 
+					title = "PDF Printout Report"
+					class = "buttonwhite fa fa-lg fa-file-pdf-o redtext"
+					href="nsda_qualifiers.mhtml?event_id=<% $event->id %>&format=pdf"
+
+				></a>
+
+				<a 
+					title = "Excel/CSV Download"
+					class = "buttonwhite fa fa-lg fa-file-excel-o greentext"
+					href="/tabbing/report/nsda/qualifiers_csv.mhtml?event_id=<% $event->id %>"
+				></a>
+
+			</span>
+
+		</div>
+
+		<h4>Finalists:</h4>
+
+		<& 
+			"results_table.mas", 
+				round          => $final,
+				nsda_districts => 1,
+				qualifiers     => \%qualifiers,
+				alternates     => \%alternates,
+		&>
+
+		<h4>Semi-finalists:</h4>
+
+%		if ($final) { 
+
+			<& 
+				"results_table.mas", 
+					round          => $semi,
+					tiebreak_set   => $final->tiebreak_set,
+					nsda_districts => 1,
+					qualifiers     => \%qualifiers,
+					alternates     => \%alternates,
+					exclude        => \%in_finals
+			&>
+%		}
+
+	</div>
+
