@@ -1,0 +1,284 @@
+<%args>
+	$round
+</%args>
+<%perl>
+	
+	return unless $round > 0;
+	my %round_settings = $round->all_settings;
+
+	my $event = $round->event;
+	my $tourn = $event->tourn;
+
+	my $previous_round = Tab::Round->search( 
+		event => $event->id, 
+		name => ($round->name - 1)
+	)->first;
+
+	my %tourn_settings = $tourn->all_settings;
+	my %event_settings = $event->all_settings;
+
+	my %entries;
+	my %sections;
+
+	my @panels = $round->panels;
+
+	foreach my $section (@panels) { 
+
+		foreach my $entry (
+			$m->comp(
+				"/funclib/panel_entries.mas", 
+				panel => $section
+			)
+		) { 
+
+			$entries{$entry->id} = $entry;
+			push @{$sections{$section->id}}, $entry;
+		}
+
+	}
+
+	#Prime the section scorer 
+	my @other_ballots = $m->comp(
+		"/funclib/other_ballots.mas", 
+			round => $round
+	);
+
+	foreach my $ob (@other_ballots) { 
+
+		next unless $ob && $ob->id;
+		next unless $ob->entry && $ob->panel;
+
+		my $entry   = $ob->entry->id;
+		next unless $entries{$entry};
+
+		my $section = $ob->panel->id;
+
+		$entries{$entry}{"order_count"}{$ob->speakerorder}++;
+		$entries{$entry}{"order_total"} += $ob->speakerorder;
+		$entries{$entry}{"last_order"} = $ob->speakerorder 
+			if $previous_round && $ob->roundid == $previous_round->id;
+
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+
+    my $double_entry_sth = $dbh->prepare("
+
+        select distinct thisentry.id, 
+			thatballot.entry, 
+			thatballot.speakerorder, 
+			thatsetting.value
+
+        from (entry thisentry, entry_student thises, 
+			round thisround, round thatround, 
+			panel thatpanel, 
+			ballot thatballot, 
+			entry_student thates)
+
+		left join event_setting thatsetting 
+			on thatsetting.event = thatround.event
+			and thatsetting.tag = 'speaker_priority_first'
+
+        where thisround.id = ?
+        and thisround.event = thisentry.event
+        and thisentry.id = thises.entry
+        and thises.student = thates.student
+        and thises.entry != thates.entry
+        and thates.entry = thatballot.entry
+        and thatballot.panel = thatpanel.id
+        and thatpanel.round = thatround.id
+        and thatround.timeslot = thisround.timeslot
+	");
+
+	$double_entry_sth->execute($round->id);
+
+	while ( my ($this_entry, $that_entry, $that_order, $speaklate) 
+		= $double_entry_sth->fetchrow_array() 
+	) { 
+
+		$entries{$this_entry}{"dbl_order"} = $that_order;
+		$entries{$this_entry}{"dbl_late"} = $speaklate;
+	}
+
+	# this is that weird split round flight thing
+
+	my $second_round_id = $round_settings{"flight_b_round"};
+
+	my $second_round = 
+		Tab::Round->retrieve($second_round_id) 
+		if $second_round_id;
+
+	undef $second_round 
+		unless $second_round 
+		&& $second_round->event->id == $round->event->id;
+
+	if ($second_round) { 
+
+		$double_entry_sth->execute($second_round);
+
+		while ( my ($this_entry, $that_entry, $that_order, $speaklate) 
+			= $double_entry_sth->fetchrow_array() 
+		) { 
+			$entries{$this_entry}{"dbl_order"} = $that_order;
+			$entries{$this_entry}{"dbl_late"} = $speaklate;
+		}
+
+	}
+
+	#Set speaker order
+
+	foreach my $section_id (keys %sections) { 
+
+		my @entries = @{$sections{$section_id}};
+
+		@entries = shuffle(@entries);
+
+		next if ($tourn_settings{"nsda_speech_method"} eq "california_2" 
+					&& $round->type eq "elim");
+
+		next if ($tourn_settings{"nsda_speech_method"} eq "california_3" 
+					&& $round->type eq "elim");
+
+		@entries = sort { 
+			$entries{$b}{"order_total"} 
+				<=> 
+			$entries{$a}{"order_total"}
+		} @entries;
+
+		my $size_of_section = scalar @entries;
+
+		my $moved = 1;
+
+		my $this_round = $round;
+
+		foreach (1 .. 10) { 
+			
+			next unless $moved;
+
+			undef $moved;
+			my $position;
+
+			foreach my $entry (@entries) { 
+
+				$position++;
+
+				# If I've already spoken in this position move me please
+
+				if ($entries{$entry}{"order_count"}{$position}) { 
+
+					# Remove from place in line
+
+					my $place;
+
+					# Find a new home
+
+					$place = $position;
+
+					while ($place == $position) { 
+						$place = int(rand($size_of_section));
+					}
+	
+					$place--;
+					$place = 1 if $place < 0;
+					splice(@entries,($place - 1),0,$entry);
+					$moved++;
+				}
+			}
+
+			foreach my $entry (@entries) { 
+
+				$position++;
+
+				# If I spoke in this position in the last round, definitely move me
+
+				if ($entries{$entry}{"last_order"} == $position) { 
+
+					#Remove from place in line
+
+					my $place;
+
+					#Find a new home
+
+					$place = $position;
+
+					while ($place == $position) { 
+						$place = int(rand($size_of_section));
+					}
+	
+					$place--;
+					$place = 1 if $place < 0;
+					splice(@entries,($place - 1),0,$entry);
+					$moved++;
+				}
+			}
+			
+			my %seen;
+			@entries = grep { ! $seen{$_} ++ } @entries;
+
+			foreach my $entry (@entries) { 
+
+				if (
+					$entries{$entry}{"dbl_order"}
+					|| $entries{$entry}{"dbl_late"} 
+				) { 
+
+					my $speakdex = 0;
+					$speakdex++ until $entries[$speakdex] == $entry;
+
+					splice(@entries, $speakdex, 1);
+
+					my $place;
+
+					if (
+						$event_settings{"speaker_priority_first"} 
+						&& $entries{$entry}{"dbl_order"}
+					) { 
+						$place = 1;
+					} elsif ($entries{$entry}{"dbl_late"}) { 
+						$place = 7;
+					} elsif ($entries{$entry}{"order"} > 3) { 
+						$place = 1;
+					} else { 
+						$place = 7;
+					}
+
+					$place = 1 if $place < 0;
+
+					splice(@entries,($place - 1),0,$entry);
+
+				}
+
+			}
+
+		}
+
+		@{$sections{$section_id}} = @entries;
+
+	}
+
+	foreach my $section (@panels) { 
+	
+		my %ballots_by_entry;
+
+		foreach my $ballot ($section->ballots) { 
+			push @{$ballots_by_entry{$ballot->entry}}, $ballot;
+		}
+
+		my $order;
+
+		foreach my $entry (@{$sections{$section->id}}) {
+			$order++;
+
+			foreach my $ballot (@{$ballots_by_entry{$entry}})  {
+				next if $ballot->speakerorder == $order;
+				$ballot->speakerorder($order);
+				$ballot->update;
+			}
+
+		}
+	}
+
+	return;
+
+</%perl>
