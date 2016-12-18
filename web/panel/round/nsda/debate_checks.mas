@@ -1,329 +1,521 @@
 <%args>
+	$tourn
+	$person
 	$round
+	$seeds    => undef
+	$strength => undef
+	$whoami   => undef
 </%args>
-<%doc>
-
-	Check the bottom for simplified display code.  There's no need to create a
-	separate module file for code that will never be called by something other
-	than this screen and it slows down the app considerably.
-
-</%doc>
 <%init>
 
-	return unless $round;
+	$m->abort unless $round;
+	my $event = $round->event;
 
-    my $timeslot = $round->timeslot;
-    my $tourn = $timeslot->tourn;
-    my $event = $round->event;
+	$m->abort unless $event->tourn == $tourn->id;
 
-	my $aff_string = $event->setting("aff_string");
-	$aff_string = "Aff" unless $aff_string;
+	my %event_settings = $event->all_settings;
 
-	my $neg_string = $event->setting("neg_string");
-	$neg_string = "Neg" unless $neg_string;
+	my $sidelocks++;
+	undef $sidelocks if $event_settings{"no_side_constraints"};
 
-    my %tags; 
-    my %problems;
-    my $dbh = Tab::DBI->db_Main();
-    
-    # RIGHT NUMBER OF AFF/NEGS
+	my @panels = sort $round->panels;
 
-    my $side_locked;
-    my $side_lock_against = $round->setting("sidelock_against");
+    my %panel_entries = ();
+	my %school_codes = ();
 
-    if ($side_lock_against) { 
+	foreach my $panel (@panels) { 
 
-        if ($side_lock_against ne "NONE") { 
-            $side_locked++;
-        }
+		my @entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
 
-    } else { 
-        $side_locked++ unless ($round->name % 2);  
-        undef $side_locked if $event->setting("no_side_constraints");
-    }    
+		foreach my $entry (@entries) { 
 
-	undef $side_locked if $round->type eq "elim" || $round->type eq "final";
-                
-	if ($side_locked) { 
+	        push @{$panel_entries{$panel->id}{$entry->side}}, $entry;
 
-		$tags{"sides_uneven"} = "Entries on the wrong side";
-
-		my $round_number = $round->name;
-
-		while ( (not defined $side_lock_against) && ($round_number > 0)) { 
-			#Find previous round
-			$round_number--;
-			my $sla = Tab::Round->search( event => $event->id, name => $round_number)->first;
-			$side_lock_against = $sla->id if $sla;
-		}
-
-		if ($side_lock_against) { 
-        
-			my $sides_sth = $dbh->prepare("
-				select entry.code, b1.side, b2.side 
-				from entry,
-					ballot b1, panel p1,
-					ballot b2, panel p2
-
-					where b1.entry = entry.id
-					and b1.panel = p1.id
-					and p1.bye != 1
-
-					and b2.entry = entry.id
-					and b2.panel = p2.id
-					and p2.bye != 1
-
-					and p1.round = ".$round->id."
-					and p2.round = ".$side_lock_against."
-
-			");
-			
-			$sides_sth->execute(); 
-			
-			while (my ($entry, $side1, $side2)  = $sides_sth->fetchrow_array() ) {
-				$problems{"sides_uneven"} .= '<p class="warning padless marno">'. $entry." should be on the opposite side this round!</p>" if $side1 == $side2;
+			unless ($school_codes{$entry->school->id}) {
+				$school_codes{$entry->school->id} = $entry->school->code;
 			}
-
 		}
-
     }
 
-	if ($event->setting("round_robin")) { 
+	my %cross_entries = $m->comp(
+		"/funclib/event_doubled.mas", 
+		round => $round 
+	);
 
-		#SIDES WORK OUT IN A ROUND ROBIN
-		$tags{"round_robin_side_count"} = "Round Robin: Inequal numbers of ".$aff_string."s/".$neg_string."s";
-		$tags{"round_robin_side_order"} = "Round Robin: Too many of the same side in a row";
+	my %hit_before = $m->comp(
+		"/funclib/event_entry_hits.mas",
+		round => $round
+	);
 
-		my $sth = $dbh->prepare("
-			select distinct round.name, ballot.side as side, ballot.bye as bye, panel.bye as pbye
-			from round, ballot, panel
-			where ballot.entry = ?
-			and ballot.panel = panel.id
-			and panel.round = round.id
-			group by round.name
-			order by round.name
-		");
+	my $show_strength++ if $round->name > 2;
+	undef $show_strength if $round->type eq "final";
 
-		foreach my $entry ($m->comp("/funclib/round_entries.mas", round => $round)) { 
-
-			$sth->execute($entry->id);
-
-			my $aff_count;
-			my $neg_count;
-
-			my $in_a_row;
-			my $current_side;
-
-			while (my ($name, $side, $bye, $pbye) = $sth->fetchrow_array() ) { 
-
-				next if $bye;
-				next if $pbye;
-
-				if ($side == $current_side) { 
-					$in_a_row++;
-				} else { 
-					$in_a_row = 1;
-					$current_side = $side;
-				}
-
-				if ($in_a_row > 2) { 
-					my $sidename = $aff_string;
-					$sidename = $neg_string if $side == 2;
-					$problems{"round_robin_side_order"} .= '<p class="warning padless marno">'. $entry->code." debates on $sidename $in_a_row times in a row</p>";
-				}
-
-				$aff_count++ if $side == 1;
-				$neg_count++ if $side == 2;
-
-			}
-
-			next if $aff_count == $neg_count;
-			next if ($aff_count + 1) == $neg_count;
-			next if ($neg_count + 1) == $aff_count;
-			
-			$problems{"round_robin_side_count"} .= '<p class="warning padless marno">'. $entry->code." has a side imbalance.  $aff_count on $aff_string, $neg_count on $neg_string</p>";
-
-		}
-
-	}
-    
-    # UNSCHEDULED ENTRIES
-    
-    $tags{"unscheduled_entries"} = "Entries not on the pairing";
-
-    unless ($round->type eq "elim" || $round->type eq "final") {
-
-		Tab::Entry->set_sql( not_debating => "
-			select entry.*
-			from entry
-			where entry.event = ?
-                        and dropped = 0
-			and entry.dropped = 0
-			and entry.dq = 0
-			and entry.waitlist = 0
-			and not exists (
-				select ballot.id
-				from ballot, panel
-				where panel.round = ? 
-				and ballot.panel = panel.id
-				and ballot.entry = entry.id)" );
-
-        foreach my $entry (Tab::Entry->search_not_debating( $event->id, $round->id )) { 
-			$problems{"unscheduled_entries"}.= '<p class="warning padless marno">'. $entry->code. " is not scheduled</p>";
-        }
-    }
-
-	# ENTRIES SCHEDULED TOO MANY TIMES
-	$tags{"double_scheduled_entries"} = "Entries on the pairing twice";
-
-	Tab::Entry->set_sql( debating_twice => "
-		select entry.*
-		from entry, ballot b1, panel p1, ballot b2, panel p2
-
-		where entry.id = b1.entry
-		and b1.panel = p1.id
-		and entry.id = b2.entry
-		and b2.panel = p2.id
-
-		and p1.id > p2.id
-		and p1.round = ? 
-		and p1.round = p2.round 
-	");
-
-	foreach my $entry (Tab::Entry->search_debating_twice($round->id )) { 
-		$problems{"double_scheduled_entries"}.= '<p class="warning padless marno">'. $entry->code. " is scheduled twice in the same round</p>";
-	}
-    
-    #MEETING OWN SCHOOL
-	$tags{"same_school_sections"} = "Entries debating their own school";
-
-	Tab::Entry->set_sql( same_school_sections => "
-		select entry.*, opp.code as othername
-		from entry, ballot, panel, 
-		entry opp, ballot oballot
-
-			where entry.id = ballot.entry
-			and ballot.panel = oballot.panel
-			and oballot.entry = opp.id
-			and ballot.panel = panel.id
-			and panel.round = ? 
-			and opp.school = entry.school
-			and opp.id < entry.id
-	");
-
-	foreach my $entry (Tab::Entry->search_same_school_sections($round->id )) { 
-		$problems{"same_school_sections"}.= '<p class="warning padless marno">'. $entry->code." and ".$entry->othername." are from the same school!</p>";
-	}
-
-
-    #ENTRIES PREVIOUS MET
-    
-    $tags{"hit_before"} = "Entries who have debated before";
-
-    my $second_hit_sth = $dbh->prepare("
-		select distinct me.code, opp.code othername, otherround.name roundname, me_b1.side side1, me_b2.side side2, otherround.type
-
-		from entry me, entry opp, round otherround,
-
-			ballot me_b1, ballot opp_b1, panel p1, 
-			ballot me_b2, ballot opp_b2, panel p2
-
-			where me_b1.entry = me.id
-			and opp_b1.entry = opp.id
-			and me_b1.panel = opp_b1.panel
-			and me_b1.panel = p1.id
-
-			and p1.round = ? 
-
-			and me_b2.entry = me.id
-			and opp_b2.entry = opp.id
-			and me_b2.panel = opp_b2.panel
-			and me_b2.panel = p2.id
-			and p2.round != p1.round
-			and p2.round = otherround.id
-
-			and me.id > opp.id
-	");
-
-	$second_hit_sth->execute($round->id);
-		
-	while (my ($entry, $opp, $round, $side1, $side2, $type)  = $second_hit_sth->fetchrow_array() ) {
-
-		$problems{"hit_before"}.= '<p class="warning padless marno">'. "Entry $entry debated $opp already in round $round ";
-		$problems{"hit_before"}.= "on the SAME SIDE </p>" if $side1 == $side2;
-		$problems{"hit_before"}.= "on the OPPOSITE SIDE </p>" if $side1 != $side2;
-	}
-
-	#
-
-    # ENTRY: HIT SAME SCHOOL TWICE IN PRESETS
-    
-	if ($round->type eq "prelim") { 
-
-		$tags{"same_school_twice"} = "Entries debating a school twice in presets";
-
-		Tab::Entry->set_sql( "same_school_twice" => "
-
-			select distinct me.*, otherschool.name othername
-
-			from entry me, school otherschool,
-				entry opp1, ballot b1, panel p1, ballot ob1,
-				entry opp2, ballot b2, panel p2, ballot ob2, round r2
-
-				where me.id = b1.entry
-				and b1.panel = p1.id
-				and ob1.panel = p1.id
-				and opp1.id = ob1.entry
-				and ob1.entry != me.id
-
-				and me.id = b2.entry
-				and b2.panel = p2.id
-				and ob2.panel = p2.id
-				and opp2.id = ob2.entry
-				and ob2.entry != me.id
-			
-				and p1.round != p2.round
-				and p1.round = ?
-				and p2.round = r2.id
-				and r2.type = \"prelim\"
-
-				and opp1.id != opp2.id
-				and opp1.school = opp2.school
-				and opp1.school = otherschool.id
-
-		");
-
-		foreach my $entry (Tab::Entry->search_same_school_twice($round->id)) { 
-			$problems{"same_school_twice"} .= '<p class="warning padless marno">'. $entry->code." debates against entries from  ".$entry->othername." twice in presets. </p>";
-		}
-
-	}
-
-  
 </%init>
 
-	<h4><% $round->realname %> disaster checks</h4>
+	<script>
 
-%	my @tags = sort {$tags{$a} cmp $tags{$b}} keys %tags;
+		$(document).ready( function(){
 
-%	@tags = sort {length $problems{$b} <=> length $problems{$a}} @tags;
+%			foreach my $panel (@panels) { 
+				averageStrength('<% $panel->id %>');
+%			}
 
-%	foreach my $tag (@tags) {
+		});
 
-		<div class="row full">
+		function averageStrength(panelID) { 
 
-			<span class="half">
-				<% $tags{$tag} %> 
+			var total = 0, counter = 0, average = 0, already = {};
+
+			$("#panel_"+panelID).find(".strength").each(function(index) { 
+
+				var strengthScore = parseInt(this.id);
+
+				var entryID = $(this).attr("entry");
+
+				if (!(entryID in already)) { 
+					total = total + strengthScore;
+					counter++;
+					already[entryID]++;
+				}
+
+			});
+
+			if (counter) { 
+				average = (total / counter);
+			}
+
+			$("#average_"+panelID).html(average.toFixed(2));
+
+		}
+
+		function toggleShow(elementType) { 
+
+			$("#"+elementType).toggleClass("invert");
+			$("."+elementType).toggleClass("hidden");
+		}
+
+		function hideColor (colorToggle) { 
+			$(".entries").removeClass(colorToggle);
+			$(".schooltoggle").removeClass('invert');
+			$(".key_"+colorToggle).addClass('hidden');
+		}
+
+		function toggleColor (keyID, panelID, clashKey, clashType, colorToggle) { 
+
+			$(".entries").not("."+clashType+"_"+clashKey).removeClass(colorToggle);
+			$(".schooltoggle").not("#"+keyID).removeClass('invert');
+
+			$("."+clashType+"_"+clashKey).toggleClass(colorToggle);
+			$("#"+keyID).toggleClass('invert');
+
+			if (clashType === "hits") { 
+				$("."+clashType).toggleClass("hidden");
+				$("."+clashType).toggleClass(colorToggle);
+			}
+
+			$("."+clashType+"_"+clashKey).children("."+clashType+"s").toggleClass("hidden");
+
+		};
+
+        $(function() {
+
+            $( ".droppable" ).droppable({
+
+                hoverClass       : "ltyellow",
+                accept           : ":not(.ui-sortable-helper)",
+                disableSelection : "true",
+
+                drop             : function( event, ui) {
+
+                    var droppableId = this.id;
+
+                    $.post("move_debate.mhtml",{ 
+                        entry_id     : ui.draggable.attr("id"),
+                        panel_marker : this.id
+                    }).done(function(data) { 
+                        $.jGrowl(data, { 
+                            header   : 'Result',
+                            life     : 5000,
+                            position : 'top-center'
+                        });
+					});
+
+                    // remove the original element from its origin to this
+                    // location, and make it visible again while destroying the
+                    // clone.  this is necessary because the default jquery
+                    // draggable behavior does not play well with scrollable
+                    // windows.
+
+                    ui.draggable.show();
+                    $(this).prepend(ui.draggable);
+                    $( this ).find( ".placeholder" ).remove();
+
+					var panelID = $("#"+this.id).attr("panel");
+					averageStrength(panelID);
+
+					$("#"+this.id).removeClass("strength_"+panelID);
+					
+
+                }
+
+            }).sortable({
+
+                items: ":not(.placeholder)",
+
+                sort: function() {
+
+					// gets added unintentionally by droppable interacting with
+					// sortable using connectWithSortable fixes this, but
+					// doesn't allow you to customize active/hoverClass options
+
+                    $( this ).removeClass( "ui-state-default" );
+                }
+            });
+
+			$( ".draggable" ).draggable({
+
+				drag: function(event, ui) {
+					$("."+this.id).show();
+				},
+
+				stop: function(event, ui) { 
+					$("."+this.id).hide();
+
+					var schoolID = $("#"+this.id).attr("school");
+					var titleName = $("#"+this.id).attr("title");
+
+					$(".school_"+schoolID).removeClass("dkred");
+					$(".title_"+titleName).removeClass("dkblue");
+					$(".hitcounter").addClass('hidden');
+
+				},
+
+				start: function(event, ui) { 
+			
+					$(".entries").removeClass("dkred");
+					$(".entries").removeClass("dkorange");
+					$(".entries").removeClass("dkblue");
+					$(".entries").removeClass("dkgreen");
+					$(".entries").removeClass("dkgrey");
+
+					var schoolID = $("#"+this.id).attr("school");
+					var titleName = $("#"+this.id).attr("title");
+
+					$(".school_"+schoolID).addClass("dkred");
+
+					if (titleName) { 
+						$(".title_"+titleName).addClass("dkblue");
+					}
+
+					$("#"+this.id).hide();
+					$("#"+this.id).removeClass("dkred");
+					$("#"+this.id).removeClass("dkblue");
+
+					$(".hit_"+this.id).removeClass("hidden");
+
+				},
+
+				disableSelection : "true",
+				revert           : "invalid",
+				containment      : '#wrapper',
+				snap             : "true",
+				snapMode         : "inner",
+				helper           : "clone"
+			});
+
+		});
+
+	</script>
+
+		<div class="full nospace">
+
+			<span class="twofifths">
+				<h4><% $round->realname %> Double Checks</h4>
 			</span>
 
-			<span class="half nospace padleft">
-				<% 
-					$problems{$tag} 
-					?  $problems{$tag} 
-					: '<span class="centeralign nospace full strong greentext"> OK! </span>' 
-				%>
+			<span class="threefifths rightalign">
+
+				<span class="strong">
+					Show:
+				</span>
+
+				<span 
+					id      = "schools"
+					class   = "buttonwhite redtext padless"
+					onClick = "toggleShow(this.id)";
+				>
+					Schools
+				</span>
+
+				<span 
+					id      = "hits"
+					class   = "buttonwhite orangetext padless"
+					onClick = "toggleShow(this.id)";
+				>
+					Hits
+				</span>
+
+				<span 
+					id      = "sides"
+					class   = "buttonwhite greentext padless"
+					onClick = "toggleShow(this.id)";
+				>
+					Sides
+				</span>
+
+				<span 
+					id      = "crosses"
+					class   = "buttonwhite graytext padless"
+					onClick = "toggleShow(this.id)";
+				>
+					Cross
+				</span>
+
+%				if ($show_strength) { 
+					<span 
+						id      = "bracket"
+						class   = "buttonwhite purpletext padless"
+						onClick = "toggleShow(this.id)";
+					>
+						Bracket
+					</span>
+
+					<span 
+						id      = "seeds"
+						class   = "buttonwhite orangetext padless"
+						onClick = "toggleShow(this.id)";
+					>
+						Seeds
+					</span>
+
+%				}
+
 			</span>
+
 		</div>
 
-% 	}
+<%perl>
+
+		foreach my $panel (@panels) { 
+
+			my %schools;
+			my %titles;
+			my $side_count;
+			my $last_side_count;
+			my $hit_total;
+
+</%perl>
+
+			<div 
+				class="row"
+				id = "panel_<% $panel->id %>"
+			>
+
+				<span class="eighth">
+					Debate <% $panel->letter %>
+				</span>
+
+%				if ($round->flighted > 1) { 
+					<span class="eighth">
+						Flight <% $panel->flight %>
+					</span>
+%				}
+
+%				foreach my $side ( 1 .. 2) { 
+
+					<span class="third">
+
+						<span class="sixth padless marno centeralign">
+							<% $sidelocks ? $side == 1 ? "Aff" : "Neg" : $side %>
+						</span>
+
+						<span 
+							id      = "<% $panel->id %>_<% $side %>"
+							panel   = "<% $panel->id %>"
+							class   = "marno fivesixths centeralign bordergrey droppable side_<% $side %>"
+						>
+
+<%perl>
+						foreach my $entry (@{$panel_entries{$panel->id}{$side}}) { 
+
+							my $school_id = $entry->school->id;
+
+							$schools{$school_id}++;
+
+							my $last_side;
+
+</%perl>
+
+							<span 
+								class="
+									fivesixths
+									marno
+									entries
+									draggable
+									<% $last_side == $side ? "side_last" : "" %>
+									school_<% $school_id %> 
+								"
+								id        = "<% $entry->id %>"
+								school    = "<% $school_id %>"
+								last_side = "<% $last_side %>"
+							>
+
+								<span 
+									class="nospace third borderright centeralign codes"
+								>
+									<% $entry->code %>	
+								</span>
+
+								<span 
+									class="nospace quarter rightalign schools hidden"
+								>
+									<% $school_codes{$school_id} %>
+								</span>
+
+								<span class="nospace threefifths rightalign 
+									hits hits_<% $panel->id %> hidden"
+								>
+
+%									foreach my $hit (sort keys %{$hit_before{$entry->id}}) {
+
+%										$hit_total++;
+
+										<span class="full nospace strong">
+											<% $hit_before{$entry->id}{$hit}{"code"} %>
+											<% $hit_before{$entry->id}{$hit}{"count"} %>x
+										</span>
+%									}
+
+								</span>
+
+%								foreach my $hit (sort keys %{$hit_before{$entry->id}}) {
+									<span class="
+										rightalign orangetext half nospace 
+										strong hitcounter hit_<% $hit %> hidden
+									">
+										<% $hit_before{$entry->id}{$hit}{"count"} %>x
+									</span>
+%								}
+
+%								if ($show_strength) { 
+
+									<span class="nospace padleft rightalign quarter wrap seeds hidden"
+										entry = "<% $entry->id %>"
+										id    = "<% $seeds ? ${$seeds}{$entry->id} : ""  %>"
+									>
+										<% $seeds ? ${$seeds}{$entry->id} : ""  %>
+									</span>
+
+
+									<span class="nospace padleft rightalign quarter wrap strength hidden"
+										entry = "<% $entry->id %>"
+										id    = "<% $strength ? ${$strength}{$entry->id} : ""  %>"
+									>
+										<% $strength ? ${$strength}{$entry->id} : ""  %>
+									</span>
+
+%								}
+
+								<span class="nospace threefifths rightalign sides code_<% $panel->id %> hidden">
+									<span class="half marno">
+									</span>
+								</span>
+
+								<span class="nospace threefifths rightalign crosses code_<% $panel->id %> hidden">
+
+%									foreach my $other (keys %{$cross_entries{$entry->id}}) { 
+
+										<span class="full nospace">
+
+											<% $cross_entries{$entry->id}{$other}{"event"} %>-<% 	
+												Lingua::EN::Numbers::Ordinate::ordinate(
+													$cross_entries{$entry->id}{$other}{"side"} 
+												) 
+										%>
+
+										</span>
+%									}
+								</span>
+								</span>
+	
+%							}
+
+						</span>
+
+					</span>
+%				}
+
+				<span class="fifth rightalign">
+
+					<span class="third smallish strong">
+						Status:
+					</span>
+
+					<span class="twothirds">
+%					my $blah;
+
+%					foreach my $key (keys %schools) { 
+
+%						next unless $schools{$key} > 1;
+%						$blah++;
+
+						<span 
+							id      = "<% $key %>_<% $panel->id %>"
+							class	= "schooltoggle buttonwhite marbottom redtext padless smallish full"
+							onClick = "toggleColor( this.id, <% $panel->id %>, <% $key %>, 'school', 'dkred');"
+						>
+							<% $schools{$key} %> from School <% $school_codes{$key} %>
+
+						</span>
+
+%					}
+
+%					if ($last_side_count) { 
+%						$blah++;
+
+						<span 
+							id      = "last_side_<% $panel->id %>"
+							class	= "last_sidetoggle buttonwhite marbottom greentext padless smallish full"
+							onClick = "toggleColor( this.id, <% $panel->id %>, 'last', 'side', 'dkgreen');"
+						>
+							<% $last_side_count %> same side R<% $round->name - 1 %>
+						</span>
+%					}
+
+%					if ($hit_total) { 
+
+%						$blah++;
+
+						<span 
+							id      = "hit_<% $panel->id %>"
+							class	= "hittoggle buttonwhite marbottom orangetext padless smallish full"
+							onClick = "toggleColor( this.id, <% $panel->id %>, 'hits', 'hits', 'orangetext');"
+						>
+							<% $hit_total %> repeat hits
+						</span>
+%					}
+
+%					unless ($blah) { 
+		
+						<span class="buttonwhite greentext padless">
+
+							<span class="fa fa-check fa-lg greentext">
+							</span>
+
+							OK!
+
+						</span>
+
+%					}
+
+				</div>
+
+			</span>
+%		}
+
+
+		<& debate_errors.mas, 
+			round => $round 
+		&>
+
 
