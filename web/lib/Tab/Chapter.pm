@@ -78,7 +78,7 @@ sub circuit_membership {
 
 sub short_name {
 	my ($self, $limit) = @_;
-	return &Tab::short_name($self, $limit);
+	return &Tab::short_name($self->name, $limit);
 }
 
 sub setting {
