@@ -10,6 +10,8 @@
 	my $event = $round->event;
 	my %event_settings = $event->all_settings;
 
+	my $tourn = $event->tourn;
+
 	my $previous_round = Tab::Round->search( 
 		event => $event->id, 
 		name => ($round->name - 1)
@@ -25,6 +27,10 @@
 
 	my %entries = %{$ref};
 
+	# Get the number of qualifiers for the little dance at the end
+	my ($total_quals, $alternates, $total_entries) = 
+		$m->comp("/funclib/nsda_qualifier_count.mas", event => $event);
+
 	# Acquire the relevant opponent data
 
 	my $dbh = Tab::DBI->db_Main();
@@ -39,11 +45,18 @@
 	$entries{"scores"} = $scores;
 	$entries{"scores"}{"side"} = 0 if $event_settings{"no_side_constraints"};
 
+	my @outs; 
+
+	KEY:
 	foreach my $key (sort {$a <=> $b} keys %{$entries{"by_place"}}) {
 
 		foreach my $entry_id (@{${$entries{"by_place"}}{$key}}) {
 
-			next if (scalar (keys %{$entries{"unpaired"}}) >= $limit_to );
+			if (scalar (keys %{$entries{"unpaired"}}) >= $limit_to ) { 
+				push @outs, $entry_id;
+				last KEY;
+				next KEY;
+			}
 
 			$entries{"unpaired"}{$entry_id}++;
 
@@ -60,7 +73,6 @@
 
     my $school_debates_self++ 
 		if $event_settings{"school_debates_self"};
-
 
 	my $ballot_sth = $dbh->prepare('
 		select distinct 
@@ -116,421 +128,603 @@
 	our $round_log;
 	our $step_counter;
 
-	# STEP ONE: DRAW THE BYE
-	my $num_entries = scalar (keys %{$entries{"unpaired"}});
+	# PAIR THE DEBATES
 
 	my %panels;
 
 	my $selected_bye;
 
-	if ($num_entries % 2) {
+	# CHECK FOR CONDITIONS INDICATING DONE-NESS
+	my $num_entries = scalar (keys %{$entries{"unpaired"}});
 
-		if ($num_entries > 3) { 
+	my $bye_to_undefeated;
+	my $draw_two_byes;
 
-			logMe("Drawing a bye; $num_entries is odd:");
+	my $done_pairing;
 
-			my @bye_eligible;
+	if ($total_quals < 3 && $num_entries == 3) { 
+		$bye_to_undefeated++;
+	}
 
-			# First, one-loss teams who lost to an undefeated and have not
-			# drawn a bye.
+	if (
+		($num_entries == 4 && $total_quals == 3) 
+		|| ($num_entries == 5 && $total_quals == 4) 
+	) { 
 
-			ENTRY:
-			foreach my $entry_id (@{$entries{"brackets"}{1}}) { 
+		my $elim_tiebreak_set = Tab::TiebreakSet->search(
+			tourn => $tourn->id,
+			name => "Debate Elim"
+		)->first;
 
-				next if $entries{$entry_id}{"byes"} > 0;
+		$round->tiebreak_set($elim_tiebreak_set->id);
+		$round->type("elim");
+		$round->update();
+		$bye_to_undefeated++;
 
-				my $undefeated_loss;
+	}
 
-				foreach my $opponent (@{$entries{$entry_id}{"opponents"}}) { 
-					$undefeated_loss++ unless $entries{$opponent}{"losses"} > 0;
-					last if $undefeated_loss;
-				}
+	if (
+		($num_entries == 2 && $total_quals == 3)
+		|| ($num_entries == 3 && $total_quals == 4)
+	) { 
 
-				next unless $undefeated_loss;
-				push @bye_eligible, $entry_id;
-				
+		# Runoff among the losers of the previous round; everyone else byes to
+		# nationals
+
+		my $final_tiebreak_set = Tab::TiebreakSet->search(
+			tourn => $tourn->id,
+			name => "Debate Final"
+		)->first;
+
+		$round->tiebreak_set($final_tiebreak_set->id);
+		$round->type("final");
+		$round->update();
+
+		foreach my $bye_id (keys %{$entries{"unpaired"}} ) {
+			$panels{$bye_id}{"opponent"} = "BYE";
+		}
+
+		@outs = shuffle(@outs);
+
+		my $one = shift @outs if @outs;
+		my $two = shift @outs if @outs;
+
+		unless ($event_settings{"no_side_constraints"}) { 
+
+			my $one_diff = $entries{$one}{"side_count"}{1} - $entries{$one}{"side_count"}{2};
+			my $two_diff = $entries{$two}{"side_count"}{1} - $entries{$two}{"side_count"}{2};
+
+			if ($two_diff < $one_diff) { 
+				my $stop = $two;
+				$two = $one;
+				$one = $stop;
 			}
 
-			unless (@bye_eligible) { 
+		}
 
-				my $message = " No entries without a bye have lost to an undefeated entry.";
-				$message .= "Drawing from all entries without a bye";
+		$panels{$one}{"opponent"} = $two;
+		$panels{$one}{"side"} = 1;
+		$panels{$one}{"bracket"} = 1;
 
-				logMe($message);
+		$panels{$two}{"opponent"} = $one;
+		$panels{$two}{"side"} = 1;
+		$panels{$two}{"bracket"} = 1;
+
+		$done_pairing++;
+
+	}
+
+	if (
+		($total_quals == 3 && $num_entries == 5)
+		|| ($total_quals == 4 && $num_entries == 7)
+		|| ($total_quals == 4 && $num_entries == 6)
+	) { 
+
+		$bye_to_undefeated++;
+		$draw_two_byes++ if $num_entries == 6;
+
+		my $final_tiebreak_set = Tab::TiebreakSet->search(
+			tourn => $tourn->id,
+			name => "Debate Final"
+		)->first;
+
+		$round->tiebreak_set($final_tiebreak_set->id);
+		$round->type("final");
+		$round->update();
+
+	}
+
+	# STEP ONE: DRAW THE BYE
+
+	unless ($done_pairing) { 
+
+		if ($num_entries % 2 || $draw_two_byes) {
+
+			my @selected_byes; 
+
+			if ($bye_to_undefeated) { 
+
+				my $byes = 1;
+				$byes++ if $draw_two_byes;
+				logMe("Drawing $byes bye; $num_entries triggers late round rules: bye first to undefeateds");
+
+				my @bye_eligible;
+				my @selected_byes;
+
+				# First, undefeated entries that have not drawn a bye
+
+				foreach my $entry_id (@{$entries{"brackets"}{0}}) { 
+					next if $entries{$entry_id}{"byes"} > 0;
+					push @bye_eligible, $entry_id;
+				}
+
+				# Next, all undefeateds if that wasn't enough 
+
+				if ( (scalar @bye_eligible) < $byes) { 
+
+					# Undefeateds without byes automatically get byes if they
+					# exist. 
+
+					push @selected_byes, @bye_eligible if @bye_eligible;
+
+					foreach my $entry_id (@{$entries{"brackets"}{0}}) { 
+						push @bye_eligible, $entry_id;
+					}
+
+				}
+
+				# If there are insufficient undefeateds, draw from everyone not
+				# debating a bye.
+
+				if ( (scalar @bye_eligible) < $byes ) { 
+
+					# Undefeateds automatically get byes if they exist. 
+					push @selected_byes, @bye_eligible if @bye_eligible;
+
+					foreach my $entry_id (@{$entries{"brackets"}{1}}) { 
+						next if $entries{$entry_id}{"byes"} > 0;
+						push @bye_eligible, $entry_id;
+					}
+				}
+
+				# If there are still insufficient byes, everyone is eligible
+
+				if ( (scalar @bye_eligible) < $byes) { 
+
+					# Those without byes automatically get byes if they exist. 
+					push @selected_byes, @bye_eligible if @bye_eligible;
+
+					foreach my $entry_id (@{$entries{"brackets"}{1}}) { 
+						push @bye_eligible, $entry_id;
+					}
+
+				}
+
+				# Pick as many byes as you need from the leftovers. 
+
+				@bye_eligible = shuffle(@bye_eligible);
+
+				my %already = map {$_ => 1} @selected_byes;
+
+				while ( 
+					   ( (scalar @selected_byes) < $byes)
+					&& ( (scalar @bye_eligible) > 0 )
+				) { 
+
+					my $candidate = shift @bye_eligible;
+					next if $already{$candidate};
+					push @selected_byes, $candidate;
+				}
+
+			} else { 
+
+				logMe("Drawing a bye; $num_entries is odd:");
+
+				my @bye_eligible;
+
+				# First, one-loss entries who lost to an undefeated and have not
+				# drawn a bye.
 
 				ENTRY:
 				foreach my $entry_id (@{$entries{"brackets"}{1}}) { 
 
-					next if $entries{$entry_id}{"byes"};
+					next if $entries{$entry_id}{"byes"} > 0;
+
+					my $undefeated_loss;
+
+					foreach my $opponent (@{$entries{$entry_id}{"opponents"}}) { 
+						$undefeated_loss++ unless $entries{$opponent}{"losses"} > 0;
+						last if $undefeated_loss;
+					}
+
+					next unless $undefeated_loss;
 					push @bye_eligible, $entry_id;
-				
+					
 				}
+
+				unless (@bye_eligible) { 
+
+					my $message = " No entries without a bye have lost to an undefeated entry.";
+					$message .= "Drawing from all entries without a bye";
+
+					logMe($message);
+
+					ENTRY:
+					foreach my $entry_id (@{$entries{"brackets"}{1}}) { 
+
+						next if $entries{$entry_id}{"byes"};
+						push @bye_eligible, $entry_id;
+					
+					}
+				}
+
+				my $eligibles;
+
+				foreach my $entry_id (@bye_eligible) {
+					$eligibles .= ", " if $eligibles;
+					$eligibles .= $entries{"code"}{$entry_id};
+				}
+
+				logMe("Entries eligible for byes: $eligibles");
+
+				@bye_eligible = shuffle(@bye_eligible);
+				push @selected_byes, shift @bye_eligible;
+
 			}
 
-			my $eligibles;
+			foreach my $selected_bye (@selected_byes) { 
 
-			foreach my $entry_id (@bye_eligible) {
-				$eligibles .= ", " if $eligibles;
-				$eligibles .= $entries{"code"}{$entry_id};
+				logMe("Selected ".$entries{"code"}{$selected_bye}." as a BYE");
+
+				$panels{$selected_bye}{"opponent"} = "BYE"; 
+				$panels{$selected_bye}{"bracket"} = "1";
 			}
 
-			logMe("Entries eligible for byes: $eligibles");
+			# Remove bye from the brackets;
 
-			@bye_eligible = shuffle(@bye_eligible);
-			$selected_bye = shift @bye_eligible;
+			delete($entries{"unpaired"}{$selected_bye});
 
-			logMe("Randomly selected ".$entries{"code"}{$selected_bye}." as the BYE");
+			my $index;  
 
-			$panels{$selected_bye}{"opponent"} = "BYE"; 
-			$panels{$selected_bye}{"bracket"} = "1";
+			my $bye_bracket = $entries{$selected_bye}{"losses"};
+
+			$index++ until (
+				(${$entries{"brackets"}{$bye_bracket}}[$index] == $selected_bye)
+				|| ($index > scalar @{$entries{"brackets"}{$bye_bracket}})
+			);
+
+			splice(@{$entries{"brackets"}{$bye_bracket}}, $index, 1); 
+
+			foreach my $bracket (0 .. 1) { 
+
+				my $bracket_string;
+
+				foreach my $id (@{$entries{"brackets"}{$bracket}}) { 
+					$bracket_string .= ", " if $bracket_string;
+					$bracket_string .= $entries{"code"}{$id};
+				}
+
+				$bracket_string = " $bracket loss bracket is now: ".$bracket_string;
+				logMe($bracket_string);
+			}
+
+		} else { 
+
+			logMe("No bye need be drawn; $num_entries entries");
 
 		}
 
-		# Remove bye from the brackets;
+		# STEP TWO: PAIR THE BRACKETS!
 
-		delete($entries{"unpaired"}{$selected_bye});
-
-		my $index;  
-
-		my $bye_bracket = $entries{$selected_bye}{"losses"};
-
-		$index++ until (
-			(${$entries{"brackets"}{$bye_bracket}}[$index] == $selected_bye)
-			|| ($index > scalar @{$entries{"brackets"}{$bye_bracket}})
-		);
-
-		splice(@{$entries{"brackets"}{$bye_bracket}}, $index, 1); 
+		# Score every entry against every opponent:
 
 		foreach my $bracket (0 .. 1) { 
 
-			my $bracket_string;
+			foreach my $entry (@{$entries{"brackets"}{$bracket}}) {
 
-			foreach my $id (@{$entries{"brackets"}{$bracket}}) { 
-				$bracket_string .= ", " if $bracket_string;
-				$bracket_string .= $entries{"code"}{$id};
+				my $notfirst;
 
-			}
+				foreach my $opponent (keys %{$entries{"unpaired"}}) { 
 
-			$bracket_string = " $bracket loss bracket is now: ".$bracket_string;
-			logMe($bracket_string);
+					# Me on the aff
+					unless ($entries{"scores"}{$entry}{$opponent})  { 
+						$entries{"scores"}{$entry}{$opponent} 
+							= scoreDebate($entry, $opponent, \%entries);
+					}
 
-		}
+					# Me on the neg
+					unless ($entries{"scores"}{$opponent}{$entry})  { 
+						$entries{"scores"}{$opponent}{$entry} 
+							= scoreDebate($opponent, $entry, \%entries);
+					}
+					
+					unless ($notfirst++) { 
 
-	} else { 
+						Tab::debuglog($entries{"code"}{$entry}
+							." side differential is ".
+							( $entries{"scores"}{$entry}{$opponent} 
+								- $entries{"scores"}{$opponent}{$entry}
+							)
+						);
 
-		logMe("No bye need be drawn; $num_entries entries");
 
-	}
-
-	# STEP TWO: PAIR THE BRACKETS!
-
-	# Score every entry against every opponent:
-
-	foreach my $bracket (0 .. 1) { 
-
-		foreach my $entry (@{$entries{"brackets"}{$bracket}}) {
-
-			my $notfirst;
-
-			foreach my $opponent (keys %{$entries{"unpaired"}}) { 
-
-				# Me on the aff
-				unless ($entries{"scores"}{$entry}{$opponent})  { 
-					$entries{"scores"}{$entry}{$opponent} 
-						= scoreDebate($entry, $opponent, \%entries);
-				}
-
-				# Me on the neg
-				unless ($entries{"scores"}{$opponent}{$entry})  { 
-					$entries{"scores"}{$opponent}{$entry} 
-						= scoreDebate($opponent, $entry, \%entries);
-				}
-				
-				unless ($notfirst++) { 
-
-					Tab::debuglog($entries{"code"}{$entry}
-						." side differential is ".
-						( $entries{"scores"}{$entry}{$opponent} 
-							- $entries{"scores"}{$opponent}{$entry}
-						)
-					);
-
+					}
 
 				}
 
-			}
+			} 
 
 		} 
 
-	} 
+		foreach my $bracket (0 .. 1) { 
 
-	foreach my $bracket (0 .. 1) { 
+			logMe(" Pairing $bracket loss bracket into debates ");
 
-		logMe(" Pairing $bracket loss bracket into debates ");
+			# Assign initial opponents
 
-		# Assign initial opponents
+			foreach my $entry (shuffle (@{$entries{"brackets"}{$bracket}}) ) { 
 
-		foreach my $entry (shuffle (@{$entries{"brackets"}{$bracket}}) ) { 
+				next if $panels{$entry}{"opponent"};
 
-			next if $panels{$entry}{"opponent"};
+				my $chosen;
+				my $entry_side;
 
-			my $chosen;
-			my $entry_side;
-
-			# First, find the best possible matchup left on the aff. 
-
-			my @opponents = 
-				sort { 
-					$entries{"scores"}{$entry}{$a} 
-						<=> 
-					$entries{"scores"}{$entry}{$b} 
-				} keys (%{$entries{"unpaired"}});
-
-			my $aff_opponent;
-
-			foreach my $opp (@opponents) { 
-				next if $opp == $entry;
-				next if $panels{$opp}{"opponent"};
-				$aff_opponent = $opp;
-				last;
-			}
-
-			if ($event_settings{"no_side_constraints"}) { 
-
-				$chosen = $aff_opponent;
-				$entry_side = 1;
-
-			} else { 
-
-				# Now try the other side
+				# First, find the best possible matchup left on the aff. 
 
 				my @opponents = 
 					sort { 
-						$entries{"scores"}{$a}{$entry} 
+						$entries{"scores"}{$entry}{$a} 
 							<=> 
-						$entries{"scores"}{$b}{$entry}
+						$entries{"scores"}{$entry}{$b} 
 					} keys (%{$entries{"unpaired"}});
 
-				my $neg_opponent;
+				my $aff_opponent;
 
 				foreach my $opp (@opponents) { 
 					next if $opp == $entry;
 					next if $panels{$opp}{"opponent"};
-					$neg_opponent = $opp;
+					$aff_opponent = $opp;
 					last;
 				}
 
-				$chosen = $aff_opponent unless $neg_opponent;
-				$chosen = $neg_opponent unless $aff_opponent;
-
-				unless ($chosen) { 
+				if ($event_settings{"no_side_constraints"}) { 
 
 					$chosen = $aff_opponent;
+					$entry_side = 1;
 
-					if ($entries{"scores"}{$entry}{$aff_opponent} 
-						< $entries{"scores"}{$neg_opponent}{$entry}
-					) { 
+				} else { 
+
+					# Now try the other side
+
+					my @opponents = 
+						sort { 
+							$entries{"scores"}{$a}{$entry} 
+								<=> 
+							$entries{"scores"}{$b}{$entry}
+						} keys (%{$entries{"unpaired"}});
+
+					my $neg_opponent;
+
+					foreach my $opp (@opponents) { 
+						next if $opp == $entry;
+						next if $panels{$opp}{"opponent"};
+						$neg_opponent = $opp;
+						last;
+					}
+
+					$chosen = $aff_opponent unless $neg_opponent;
+					$chosen = $neg_opponent unless $aff_opponent;
+
+					unless ($chosen) { 
 
 						$chosen = $aff_opponent;
-						$entry_side = 1;
 
-					} elsif ($entries{"scores"}{$entry}{$aff_opponent} 
-						> $entries{"scores"}{$neg_opponent}{$entry}
-					) { 
-
-						$chosen = $neg_opponent;
-						$entry_side = 2;
-
-					} else { 
-
-						# Flip the proverbial coin, all else being equal
-
-						if (int(rand(100)) > 50) { 
+						if ($entries{"scores"}{$entry}{$aff_opponent} 
+							< $entries{"scores"}{$neg_opponent}{$entry}
+						) { 
 
 							$chosen = $aff_opponent;
 							$entry_side = 1;
 
-						} else { 
+						} elsif ($entries{"scores"}{$entry}{$aff_opponent} 
+							> $entries{"scores"}{$neg_opponent}{$entry}
+						) { 
 
 							$chosen = $neg_opponent;
 							$entry_side = 2;
 
+						} else { 
+
+							# Flip the proverbial coin, all else being equal
+
+							if (int(rand(100)) > 50) { 
+
+								$chosen = $aff_opponent;
+								$entry_side = 1;
+
+							} else { 
+
+								$chosen = $neg_opponent;
+								$entry_side = 2;
+
+							}
 						}
 					}
-				}
 
-				unless ($chosen) { 
+					unless ($chosen) { 
 
-					logMe("Something has gone wrong: no opponent found for ".$entries{"code"}{$entry});
+						logMe("Something has gone wrong: no opponent found for ".$entries{"code"}{$entry});
 
-				} else { 
+					} else { 
 
-					$panels{$entry}{"side"} = $entry_side;
-					$panels{$entry}{"opponent"} = $chosen;
-					$panels{$entry}{"bracket"} = $bracket;
+						$panels{$entry}{"side"} = $entry_side;
+						$panels{$entry}{"opponent"} = $chosen;
+						$panels{$entry}{"bracket"} = $bracket;
 
-					my $chosen_side = $entry_side - 1;
-					$chosen_side = 2 if $chosen_side < 1;
+						my $chosen_side = $entry_side - 1;
+						$chosen_side = 2 if $chosen_side < 1;
 
-					$panels{$chosen}{"side"} = $chosen_side;
-					$panels{$chosen}{"opponent"} = $entry;
-					$panels{$chosen}{"bracket"} = $bracket;
+						$panels{$chosen}{"side"} = $chosen_side;
+						$panels{$chosen}{"opponent"} = $entry;
+						$panels{$chosen}{"bracket"} = $bracket;
 
+
+					}
 
 				}
 
 			}
-
-		}
-
-		foreach my $entry (shuffle (@{$entries{"brackets"}{$bracket}}) ) { 
-
-			my $opp = $panels{$entry}{"opponent"};
-			my $entry_side = $panels{$entry}{"side"};
-
-			my $score = $entries{"scores"}{$entry}{$opp} if $entry_side == 1;
-			$score = $entries{"scores"}{$opp}{$entry} if $entry_side == 2;
-
-			logMe($entries{"code"}{$entry}." debates ".$entries{"code"}{$opp}." on ".$entry_side." with score $score");
-
-		}
-
-		logMe("Trying double shuffles to see if any improvements can be made");
-
-		# Do swapping to ensure the best overall scoring of pairings 
-
-		foreach my $pass ( 1 .. 20) { 
-		
-			my $swap_counter; 
 
 			foreach my $entry (shuffle (@{$entries{"brackets"}{$bracket}}) ) { 
 
+				my $opp = $panels{$entry}{"opponent"};
 				my $entry_side = $panels{$entry}{"side"};
-				my $entry_opponent = $panels{$entry}{"opponent"};
 
-				# This shouldn't happen but what the hell, let's check. 
-				next if $entry_opponent eq "BYE";
+				my $score = $entries{"scores"}{$entry}{$opp} if $entry_side == 1;
+				$score = $entries{"scores"}{$opp}{$entry} if $entry_side == 2;
 
-				my $entry_opponent_side = $panels{$entry_opponent}{"side"};
+				logMe($entries{"code"}{$entry}." debates ".$entries{"code"}{$opp}." on ".$entry_side." with score $score");
 
-				my $entry_baseline = $entries{"scores"}{$entry}{$entry_opponent} if $entry_side == 1;
-				$entry_baseline = $entries{"scores"}{$entry_opponent}{$entry} if $entry_side == 2;
-
-				# Do this because the 0 loss bracket can pull up different debaters
-				# to solve conflicts; but the 1 loss bracket cannot solve conflicts
-				# from the 0 loss bracket. 
-
-				my $swap_candidate; 
-				my $current_diff;
-
-				my $entry_bracket = $entries{$entry}{"losses"};
-
-				foreach my $other (shuffle (@{$entries{"brackets"}{$entry_bracket}}) ) { 
-
-					next if $other == $entry;
-					next if $other == $entry_opponent;
-
-					my $other_opponent = $panels{$other}{"opponent"};
-					next if $other_opponent eq "BYE";
-
-					# This is the point of comparison for any swapping
-
-					# How does the candidate score if they go into my spot?
-
-					my $other_swap;
-					$other_swap = $entries{"scores"}{$other}{$entry_opponent} if $entry_side == 1;
-					$other_swap = $entries{"scores"}{$entry_opponent}{$other} if $entry_side == 2;
-
-					my $entry_swap;
-					my $other_baseline;
-
-					# If the swapee already has an opponent, test the converse too
-
-					if ($other_opponent) { 
-					
-						my $other_side = $panels{$other}{"side"};
-
-						$other_baseline = $entries{"scores"}{$other}{$other_opponent} if $other_side == 1;
-						$other_baseline = $entries{"scores"}{$other_opponent}{$other} if $other_side == 2;
-
-						$entry_swap = $entries{"scores"}{$entry}{$other_opponent} if $entry_side == 1;
-						$entry_swap = $entries{"scores"}{$other_opponent}{$entry} if $entry_side == 2;
-
-					} 
-
-					my $swap_total = $entry_swap + $other_swap;
-					my $baseline_total = $entry_baseline + $other_baseline;
-
-					my $swap_diff = $baseline_total - $swap_total;
-
-					# Only track swaps that improve scores because
-					# there's no reason to keep going if we're only doing
-					# zero-score swaps. 
-
-					if ($swap_diff > $current_diff) { 
-						$swap_counter++;
-					}
-
-					# If the swapped scores are equal better than the current
-					# baseline, nominate the entry for a swap. 
-
-					# The swapping if the scores are equal is order to set up
-					# some random rematching for future swap attempts 
-
-					if ($swap_diff >= $current_diff) { 
-					
-						$swap_candidate = $other; 
-						$current_diff = $swap_diff;
-					}
-
-				}
-
-				# An entry was found which improves the overall score, so swap
-				# them. 
-
-				if ($swap_candidate) { 
-				
-					my $swap_opponent = $panels{$swap_candidate}{"opponent"};
-					my $swap_side = $panels{$swap_candidate}{"side"};
-					my $swap_bracket = $panels{$swap_candidate}{"bracket"};
-					my $entry_bracket = $panels{$entry}{"bracket"};
-
-					if ($swap_opponent) { 
-
-						$panels{$entry}{"opponent"} = $swap_opponent;
-						$panels{$entry}{"bracket"} = $swap_bracket;
-						$panels{$entry}{"side"} = $swap_side;
-						$panels{$swap_opponent}{"opponent"}  = $entry;
-
-					} else { 
-						undef $panels{$entry}{"opponent"};
-						undef $panels{$entry}{"bracket"};
-						undef $panels{$entry}{"side"};
-					}
-
-					if ($entry_opponent) { 
-
-						$panels{$swap_candidate}{"opponent"} = $entry_opponent;
-						$panels{$swap_candidate}{"bracket"} = $entry_bracket;
-						$panels{$swap_candidate}{"side"} = $entry_side;
-						$panels{$entry_opponent}{"opponent"}  = $swap_candidate;
-
-					} else { 
-
-						undef $panels{$swap_candidate}{"opponent"};
-						undef $panels{$swap_candidate}{"bracket"};
-						undef $panels{$swap_candidate}{"side"};
-
-					}
-
-				}
 			}
 
-			last unless $swap_counter > 0;
+			logMe("Trying double shuffles to see if any improvements can be made");
 
+			# Do swapping to ensure the best overall scoring of pairings 
+
+			foreach my $pass ( 1 .. 20) { 
+			
+				my $swap_counter; 
+
+				foreach my $entry (shuffle (@{$entries{"brackets"}{$bracket}}) ) { 
+
+					my $entry_side = $panels{$entry}{"side"};
+					my $entry_opponent = $panels{$entry}{"opponent"};
+
+					# This shouldn't happen but what the hell, let's check. 
+					next if $entry_opponent eq "BYE";
+
+					my $entry_opponent_side = $panels{$entry_opponent}{"side"};
+
+					my $entry_baseline = $entries{"scores"}{$entry}{$entry_opponent} if $entry_side == 1;
+					$entry_baseline = $entries{"scores"}{$entry_opponent}{$entry} if $entry_side == 2;
+
+					# Do this because the 0 loss bracket can pull up different debaters
+					# to solve conflicts; but the 1 loss bracket cannot solve conflicts
+					# from the 0 loss bracket. 
+
+					my $swap_candidate; 
+					my $current_diff;
+
+					my $entry_bracket = $entries{$entry}{"losses"};
+
+					foreach my $other (shuffle (@{$entries{"brackets"}{$entry_bracket}}) ) { 
+
+						next if $other == $entry;
+						next if $other == $entry_opponent;
+
+						my $other_opponent = $panels{$other}{"opponent"};
+						next if $other_opponent eq "BYE";
+
+						# This is the point of comparison for any swapping
+
+						# How does the candidate score if they go into my spot?
+
+						my $other_swap;
+						$other_swap = $entries{"scores"}{$other}{$entry_opponent} if $entry_side == 1;
+						$other_swap = $entries{"scores"}{$entry_opponent}{$other} if $entry_side == 2;
+
+						my $entry_swap;
+						my $other_baseline;
+
+						# If the swapee already has an opponent, test the converse too
+
+						if ($other_opponent) { 
+						
+							my $other_side = $panels{$other}{"side"};
+
+							$other_baseline = $entries{"scores"}{$other}{$other_opponent} if $other_side == 1;
+							$other_baseline = $entries{"scores"}{$other_opponent}{$other} if $other_side == 2;
+
+							$entry_swap = $entries{"scores"}{$entry}{$other_opponent} if $entry_side == 1;
+							$entry_swap = $entries{"scores"}{$other_opponent}{$entry} if $entry_side == 2;
+
+						} 
+
+						my $swap_total = $entry_swap + $other_swap;
+						my $baseline_total = $entry_baseline + $other_baseline;
+
+						my $swap_diff = $baseline_total - $swap_total;
+
+						# Only track swaps that improve scores because
+						# there's no reason to keep going if we're only doing
+						# zero-score swaps. 
+
+						if ($swap_diff > $current_diff) { 
+							$swap_counter++;
+						}
+
+						# If the swapped scores are equal better than the current
+						# baseline, nominate the entry for a swap. 
+
+						# The swapping if the scores are equal is order to set up
+						# some random rematching for future swap attempts 
+
+						if ($swap_diff >= $current_diff) { 
+						
+							$swap_candidate = $other; 
+							$current_diff = $swap_diff;
+						}
+
+					}
+
+					# An entry was found which improves the overall score, so swap
+					# them. 
+
+					if ($swap_candidate) { 
+					
+						my $swap_opponent = $panels{$swap_candidate}{"opponent"};
+						my $swap_side = $panels{$swap_candidate}{"side"};
+						my $swap_bracket = $panels{$swap_candidate}{"bracket"};
+						my $entry_bracket = $panels{$entry}{"bracket"};
+
+						if ($swap_opponent) { 
+
+							$panels{$entry}{"opponent"} = $swap_opponent;
+							$panels{$entry}{"bracket"} = $swap_bracket;
+							$panels{$entry}{"side"} = $swap_side;
+							$panels{$swap_opponent}{"opponent"}  = $entry;
+
+						} else { 
+
+							undef $panels{$entry}{"opponent"};
+							undef $panels{$entry}{"bracket"};
+							undef $panels{$entry}{"side"};
+						}
+
+						if ($entry_opponent) { 
+
+							$panels{$swap_candidate}{"opponent"} = $entry_opponent;
+							$panels{$swap_candidate}{"bracket"} = $entry_bracket;
+							$panels{$swap_candidate}{"side"} = $entry_side;
+							$panels{$entry_opponent}{"opponent"}  = $swap_candidate;
+
+						} else { 
+
+							undef $panels{$swap_candidate}{"opponent"};
+							undef $panels{$swap_candidate}{"bracket"};
+							undef $panels{$swap_candidate}{"side"};
+
+						}
+
+					}
+				}
+
+				last unless $swap_counter > 0;
+
+			}
 		}
+
 	}
-	
 	
 	# Write out the resulting debates
 
@@ -669,7 +863,7 @@
 		$round_log .= '</span> ';
 		$round_log .= "</div>\n";
 
-		return 
+		return;
 	}
 
 </%init>
