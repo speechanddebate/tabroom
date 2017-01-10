@@ -1,0 +1,2241 @@
+<%args>
+	$round
+	$tourn
+	$tourn_settings
+	$person
+	$bracket            => undef
+	$entries_hash_ref   => undef
+	$precluded_hash_ref => undef
+	$entry_to_pair      => undef
+</%args>
+<%init>
+
+	#set to zero to suppress messages, 1 to enable
+	my $debug = 0;
+
+	return unless $round;
+	
+	# Works off of 4 basic global hash/arrays; this allows the functions to
+	# access the information they need @entries is a global array of all
+	# entries in the event; 
+	
+	# %entries is a hash with record and SOP information in it 
+	
+	# %precluded stores which entries can't hit each other; 
+	
+	# %bracket are the entries in the bracket being paired for top 3 tables, 
+	
+	# 0=code, 1=W, 2=seed, 3=SOP, 4=TB2, 5=seed w/o wins, 
+	# 6=oppW, 7=side due, 8=pullups, 9=oppon, 10=bye button, 
+	# 11=pull button, 12=entry id, 13=bracket
+
+	# The bracket an entry is in gets stored in a field called "placements" For
+	# the normal powermatcher, this is saved in an entry field, but for this it
+	# gets updated at load and matched to loss total.  If a entry gets pulled
+	# up, that gets stored as a round_setting called entry_pulled_up and that
+	# is the only adjustment necessary.  This is necessary to make the bracket
+	# persist across rounds.
+	
+	use Time::HiRes qw( time );
+
+	my $event = $round->event;
+	my %event_setting = $event->all_settings;
+	
+	my $aff_string = $event_setting{"aff_label"};
+	my $neg_string = $event_setting{"neg_label"};
+
+	$aff_string = "Aff" unless $aff_string;
+	$neg_string = "Neg" unless $neg_string;
+
+	my $start = time(); 
+	
+	#load the pairing hash	
+	($entries_hash_ref, $precluded_hash_ref) 
+		= $m->comp("/funclib/make_pairing_hash.mas", 
+		round_id => $round->id
+	);			
+
+	my %entries = %{$entries_hash_ref};
+	my %precluded = %{$precluded_hash_ref};
+
+	#count losses
+	my %winloss = $m->comp(
+		"/funclib/entry_losses.mas", 
+			event    => $event,
+			elimstoo => 42,
+			round    => $round
+		);
+
+	foreach my $key ( keys %entries ) {
+		$entries{$key}{'losses'} = $winloss{$key}; 
+		$entries{$key}{'losses'} = 0 if not defined $winloss{$key}; 
+	}
+
+	# calculate entries and bids; entries is everyone still in plus everyone
+	# who has at least 2 losses seems like this should be somewhere but I can't
+	# find it; counts number of entries with a ballot that's not a bye or
+	# forfeit
+
+	# strip entries with 2 losses and add zeros to side field, and mark as
+	# drops
+
+	foreach my $key (keys(%entries)) {
+
+		$entries{$key}{'aff_count'} = 0 unless $entries{$key}{'aff_count'};
+		$entries{$key}{'neg_count'} = 0 unless $entries{$key}{'neg_count'};
+
+		if ( $entries{$key}{'losses'} >=2 ) {
+
+			delete $entries{$key};
+
+			my $temp_entry = Tab::Entry->retrieve($key);
+			$temp_entry->dropped(1);
+			$temp_entry->update;
+
+		}
+	}
+	
+	# This call top reset_bracket.mas isn't working....so this is dead code for
+	# now
+
+	# print "round ID=".$round_id." bracket set for=".$event_setting{"bracket_set_for"}."<br>";
+	# print "placements = $bracket_set<br>";
+	# set the brackets if they're not set already
+	# if ( $bracket_set == 0 ) {
+	#	$m->comp("/funclib/reset_bracket.mas", 
+	#		round_id => $round->id, 
+	#		winsonly => "showlosses", 
+	#		fromjava => "fromnsda");
+	#	print "just fired the bracket resetter<br>";
+	# }
+	
+	# So this fixes the above according to the regime described on lines 27-29;
+	# placements are set to losses and if there's a entry pulled up they get
+	# reset
+
+	foreach my $key (keys(%entries)) {
+		$entries{$key}{'placement'} = $entries{$key}{'losses'};
+	}
+
+	if ( $round->setting("entry_pulled_up") ) {
+		$entries{ $round->setting("entry_pulled_up") }{'placement'} = 0;
+	}
+	
+	foreach my $key (sort {$entries{$a}->{'seed'} <=> $entries{$b}->{'seed'}} keys(%entries)) {
+		next unless $entries{$key}{'opponent'} == 0;
+		next unless $key > 0;
+	}
+
+	$bracket = 0;
+	
+	my $end = time();
+
+	if ($debug) {
+		print "hash setup time:  "; 
+		printf("%.2f\n", $end - $start); print "<Br>";
+	}
+
+	my $nentries = keys %entries;
+	my $status = keys %precluded;
+	if ($debug) {	
+		print "n entries from hash:".$nentries."<br>";
+		print "n preclusions from hash:".$status."<br>";
+		$end = time();
+		print "Current round setup time:  "; 
+		printf("%.2f\n", $end - $start); 
+		print "<br>";
+	}
+		
+#	Declare the variables to mark the number of entries in the bracket
+
+	my $aff_entries_in_bracket = 0;
+	my $neg_entries_in_bracket = 0;
+
+#	Count paired and unpaired entries in the bracket
+
+	my $paired_entries = 0;
+	my $unpaired_entries = 0;
+
+	foreach my $key (keys %entries) {
+
+		if ( 
+			(	$entries{$key}{'placement'} == $bracket 
+				or $bracket == -1
+			) 
+			and $entries{$key}{'opponent'} > 0 
+		) {
+			$paired_entries++;
+		}
+
+		if ( 
+			(
+				$entries{$key}{'placement'} == $bracket 
+				or $bracket == -1
+			) 
+			and $entries{$key}{'opponent'} < 1 
+		) { 
+			$unpaired_entries++; 
+		}
+
+
+	}
+	
+	sub had_bye_already {
+
+		my ($entry) = @_;
+
+		Tab::Ballot->set_sql(  byes => "
+			select distinct ballot.id
+			from ballot
+			where ballot.entry = ? 
+			and ballot.bye = 1
+		");
+
+		Tab::Ballot->set_sql(  panel_byes => "
+			select distinct ballot.id
+			from ballot, panel
+			where ballot.entry = ? 
+			and ballot.panel = panel.id
+			and panel.bye = 1
+		");
+	
+		my @byes = Tab::Ballot->search_byes($entry);
+		push @byes, Tab::Ballot->search_panel_byes($entry);
+		my $warn = "Already received a bye." if @byes;
+		return $warn;
+	}
+	
+	print "bracket is $bracket<br>" if $debug;
+
+	my $display_flag;
+				
+</%init>
+	
+	<script>
+
+		//update everything when the page loads, also enable the info box toggling on and off
+		$( document ).ready(function() {
+			countPaired();
+			$(".flip").click(function(){
+				$("#info_box").fadeToggle(500);
+			});
+		});
+		
+		function countPaired() {
+		
+			//counts the entries who are and aren't paired and updates the status of the pairing tasks
+			var undef_total   = 0,
+			undef_unpaired    = 0,
+			down_one_total    = 0,
+			down_one_unpaired = 0,
+			unpaired          = false,
+			pairing_status    = "",
+			bye_assigned      = false;
+			
+			//this will scroll through the table but not the header row
+			$('#bracket_table > tbody > tr').each(function (i, row) {
+
+				//window.alert( $(row).attr('class') );
+
+				unpaired = false;
+
+				if ( $(row).find("span.curr_oppn").text().trim() == "" ) {
+					unpaired = true;
+				}
+
+				if ( $(row).find("span.curr_oppn").text().trim() == "BYE" ) {
+					bye_assigned = true;
+				}
+
+				if ( $(row).hasClass('bracket0') == true ) {
+					undef_total++;
+					if (unpaired == true) {
+						undef_unpaired++;
+					}
+				} else {
+					down_one_total++;
+					if (unpaired == true) {
+						down_one_unpaired++;
+					}
+				}
+				
+			});
+
+			//update undefeated display
+			$("#0L_n_in_bracket").text( undef_total );
+			$("#0L_paired_already").text( undef_total - undef_unpaired );
+			$("#0L_left_to_pair").text( undef_unpaired );
+			
+			//update down_one display
+			$("#1L_n_in_bracket").text( down_one_total );
+			$("#1L_paired_already").text( down_one_total - down_one_unpaired );
+			$("#1L_left_to_pair").text( down_one_unpaired );
+			
+			//update totals display
+			$("#n_in_bracket").text( undef_total + down_one_total );
+			$("#paired_already").text( undef_total + down_one_total - undef_unpaired - down_one_unpaired );
+			$("#left_to_pair").text( undef_unpaired + down_one_unpaired );
+
+			// update the bye status -- do you need to assign a bye?
+
+			if ( parseInt( undef_total + down_one_total ) % 2 == 0 || bye_assigned == true ) {
+
+				$("#bye_status_mark").addClass("fa-check-circle"); 
+				$("#bye_status_mark").addClass("greentext"); 
+				$("#bye_button").addClass("greentext"); 
+
+				$("#bye_button").removeClass("redtext"); 
+				$("#bye_status_mark").removeClass("redtext"); 
+
+			} else { 
+
+				$("#bye_status_mark").removeClass("fa-check-circle"); 
+				$("#bye_status_mark").removeClass("greentext"); 
+				$("#bye_button").removeClass("greentext"); 
+
+				$("#bye_button").addClass("redtext"); 
+				$("#bye_status_mark").addClass("redtext"); 
+			}
+
+
+			// update pullup status -- do you still need to do a pullup or are
+			// you OK?
+
+			if ( parseInt( $("#0L_n_in_bracket").text() ) % 2 == 0 
+				|| ( down_one_total == 2 && undef_total ==1 ) 
+			) {
+
+				$("#pullup_status_mark").addClass("fa-check-circle"); 
+				$("#pullup_status_mark").addClass("greentext"); 
+				$("#pullup_button").addClass("greentext"); 
+
+				$("#pullup_button").removeClass("redtext"); 
+				$("#pullup_status_mark").removeClass("redtext"); 
+
+			} else { 
+
+				$("#pullup_status_mark").removeClass("fa-check-circle"); 
+				$("#pullup_status_mark").removeClass("greentext"); 
+				$("#pullup_button").removeClass("greentext"); 
+
+				$("#pullup_button").addClass("redtext"); 
+				$("#pullup_status_mark").addClass("redtext"); 
+
+			}
+			
+			//updated how you are on the pairings
+
+			pairing_status = undef_unpaired + " undefeated un-paired.<br>";
+			pairing_status += down_one_unpaired + " down-one unpaired.<br>";
+
+			if ( undef_unpaired == 0 && down_one_unpaired == 0 ) {
+
+				$("#pairing_status_mark").addClass("fa-check-circle"); 
+				$("#pairing_status_mark").addClass("greentext"); 
+				$("#pairing_button").addClass("greentext"); 
+
+				$("#pairing_button").removeClass("redtext"); 
+				$("#pairing_status_mark").removeClass("redtext"); 
+
+				$("#pairings_ok").addClass("hidden");
+
+				// Change this to a redirect to the check screens:
+				// $("#overall_status").text("g to place rooms and judges.");
+				// $("#overall_status").attr("class", "full green" );
+
+			} else {
+
+				$("#pairing_status_mark").removeClass("fa-check-circle"); 
+				$("#pairing_status_mark").removeClass("greentext"); 
+				$("#pairing_button").removeClass("greentext"); 
+
+				$("#pairing_button").addClass("redtext"); 
+				$("#pairing_status_mark").addClass("redtext"); 
+
+				pairing_status += "Must finish!";
+				$("#pairings_ok").attr("class", "half red" );
+			}
+
+			$("#pairings_ok").html(pairing_status);
+			
+		}
+
+		function autoPair() {
+
+			//find the bracket and bail if no bracket is selected		
+			var bracket    = currentBracket(),
+			counter        = -1,
+			entries        = [],
+			paired_already = false;
+			
+
+			if ( bracket == 2 ) {
+				window.alert("You have selected all entries! Use the INFO AND DISPLAY box to pick one bracket.");
+				return;
+			}
+			
+			//set it to auto so it will log correctly
+			$("#manual_override").prop('checked', false);
+			
+			//grab the entries in it and sort by most to least conflicts
+			$('#bracket_table tr').each(function (i, row) {
+
+				var entry = {};
+
+				entry.id  = $(row).attr("id"),
+				entry.bracket = $(row).attr("bracket");
+
+				if (bracket === entry.bracket) { 
+
+					if ( $(row).find("span.curr_oppn").text().trim().length > 3 ) { 
+						paired_already = true;
+					}
+
+					entry.code = $(row).attr("entry_code");
+					entry.side = $(row).attr("side_due");
+
+					side_due      = $(row).find("span.side_due").text().trim(),
+					n_conflicts   = $("#entry" + entry.id + "confl_oppn").text().trim(),
+					wins          = $("#entry" + entry.id + "losses").text().trim(),
+					seed          = $("#entry" + entry.id + "seed").text().trim();
+
+					counter = counter + 1;
+					entries[counter] = [];
+
+					//the ID number
+					entries[counter][0] = entry.id;										
+
+					//readable entry code
+					entries[counter][1] = entrycode.trim();								
+
+					//side due
+					entries[counter][2] = side_due.trim();								
+
+					//number of conflicts within the bracket
+					entries[counter][3] = n_conflicts.trim();							
+
+					//are they paired yet (for use below)
+					entries[counter][4] = -99;											
+
+					entries[counter][5] = wins;											
+					entries[counter][6] = seed;											
+
+					if ( $(row).find("span.curr_oppn").text().trim() == "BYE" ) { 
+						entries[counter][4]  = 999;
+					}
+				}
+			});
+
+			//bail if entries are already paired
+			if (paired_already == true ) {
+
+				window.alert("Teams in this bracket have been paired already; delete the matches below and try again.");
+				return;
+			}
+			
+			entries.sort(function(a, b) { return (a[3] > b[3] ? -1 : (a[3] < b[3] ? 1 : 0)); });
+			
+			for (var i=0, len=entries.length; i<len; i++) {
+				console.log( i + " " + entries[i][1] + " " + entries[i][3] );
+			}
+			
+			//loop through and pair
+
+			var message = "Starting to pair " + bracket + "-loss bracket\n";
+
+			for (var pass=1; pass<3; pass++) {
+
+				console.log( "Doing pass number " + pass + " and sides only checked on first pass." );
+
+				if (pass == 2) { 
+					message += " Second pass: will pair any unpaired";
+					message +=  " entries and ignore side constraints. \n";
+				}
+
+				for (var i1=0, len=entries.length; i1<len; i1++) {
+
+					if ( entries[i1][4] == 999 ) { 
+						message +=  entries[i1][1] + " has the bye \n"; 
+					}
+
+					for (var i2=i1+1, len=entries.length; i2<len; i2++) {
+
+						if ( entries[i1][4] == -99 && entries[i2][4] == -99 ) {
+
+							var ok_to_pair = true,
+
+							conflict = hasConflict( entries[i1][0], entries[i2][0] );
+
+							message +=  " Trying to pair " + i1;
+							message +=  entries[i1][1] + " vs ";
+							message +=  i2 + " " + entries[i2][1];
+
+							if ( conflict != "OK" ) { 
+								message +=  " but " + conflict + ". "; 
+								ok_to_pair = false;
+							}
+
+							if ( entries[i1][2] == entries[i2][2] && entries[i1][2] != "--" && pass == 1 ) {
+								message=message + " Teams are due on the same side. ";
+								ok_to_pair = false;
+							}
+
+							if ( ok_to_pair == true ) {
+
+								entries[i1][4] = i2;
+								entries[i2][4] = i1;
+
+								message=message + " Successfully paired ";
+								message=message + entries[i1][1] + " vs " + entries[i2][1] +"\n";
+								break;
+							}
+						}
+					}
+				}
+			}
+			
+			//check that they're all paired
+			all_paired=true;
+
+			for (var i=0, len=entries.length; i<len; i++) {
+
+				if ( entries[i][4] == -99 ) { 
+					all_paired = false; 
+					window.alert("Autopair failed -- you'll need to complete this manually");
+				}
+
+			}
+			if ( all_paired == true ) {
+
+				message=message + " Paired all entries in the bracket!  Review the work.\n";
+
+				//save 'em
+
+				for (var i=0, len=entries.length; i<len; i++) {
+
+					if ( entries[i][4] != -99 & entries[i][4] != 999 ) {
+
+						//simulate clicking on a entry
+						showOpponents(entries[i][0], entries[i][1], entries[i][5], entries[i][6] );
+
+						//do the physical save
+						var oppn = entries[i][4];
+
+						savePairing( entries[oppn][0], entries[oppn][5], entries[oppn][6] );
+						entries[oppn][4] = -99;
+					}
+				}
+
+			} else {
+
+				message=message + " AUTO-PAIR FAILED.  You will need to complete this by hand.\n";
+
+			}
+			
+			displayMessage(message);
+
+			logChanges('');
+
+			//set it back to manual so it will log changes as made by user
+			$("#manual_override").prop('checked', true);
+
+			window.alert("Computer-attempted autopair of the bracket is done; review information in the window.");
+		}
+
+		function pullMeUp(entry) { 
+
+			var round_id= <% $round->id %>;
+			
+			//Try to discourage a pull down
+			if ($("#entry"+entry+"bracket").text() == 0) {
+
+				var mess_str=" You are pulling a entry down! ";
+				mess_str += " This should ONLY be done if you have";
+				mess_str += " pulled the wrong entry up and are correcting a mistake. ";
+				mess_str += " Confirm?";
+
+				if (window.confirm(mess_str) === false) {
+					return; 
+				}
+
+				//save it
+				$.post("manual_pullup.mas",
+					{
+						round_id: round_id, 
+						entry_id: 0 
+					}
+				);
+
+				//Record it in the change_log
+				$("#info_box_text").text('');
+
+				logChanges("Pulled down entry " + entry + " " + $("#entry"+entry+"name").text().trim() );
+			}
+			
+			// figure out what the new bracket will be
+
+			// remember that <tr> class shows the number of losses, but
+			// database and entryXbracket element saves number of wins
+
+			var new_bracket= "bracket0";
+			var n_wins_bracket = 0;
+
+			if ( $("#entry"+entry+"bracket").text() == 0 ) { 
+				new_bracket  = "bracket1";
+				n_wins_bracket=1;
+			}
+			
+			//see if they've been pulled up before and confirm if yes; otherwise, just save
+			if ( $("#entry"+entry+"bracket").text() == 1 ) {
+				
+				var pullups = $("#entry"+entry+"pullup").text();
+				var x = pullups.length;
+
+				var n_pulls = parseFloat(pullups.slice(x-2, x));
+
+				if ( n_pulls > 0 ) {
+					var c = window.confirm(
+						"This entry has been pulled up " + n_pulls + " times(s) before.  Pull them up anyway?"
+					);
+					if ( c == false ) { return; }
+				}
+			
+				//save it
+				$.post("manual_pullup.mas",{ round_id: round_id, entry_id: entry });
+
+				//Record it in the change_log
+				var log_message = $("#entry"+entry+"name").text().trim();
+
+				logChanges("Pulled up entry " + entry + " " + log_message);
+
+			}
+			
+			//update the fields
+			$("#entry"+entry).attr("class", "rightalign " + new_bracket );
+			$("#entry"+entry+"bracket").text( n_wins_bracket);
+			
+			//update the button
+			$("#pullbutton"+entry).text( "Pull \u2193" );
+			if ( new_bracket == "bracket1" ) {
+				$("#pullbutton"+entry).text( "Pull \u2191" ); 
+			}
+			
+			//refresh the screen
+			changeBracketDisplay(0);
+			
+			window.alert("Bracekt changes completed, saved, and logged.");
+
+		}
+
+		function logChanges(log_message) {
+		
+			// this will show whether there's a manual over-ride and print
+			// what's in the message box it will also save any custom message
+			// passed to the fn.
+			
+			var desc = $("#info_box_text").text();
+
+			desc = desc.replace('Click this message to make it go away.', '');
+			desc = desc + log_message;
+
+			var round_id= <% $round->id %>;
+
+			if ( $("#manual_override").prop('checked') == true ) {
+				desc = desc + " MANUAL OVER-RIDE was used.";
+			} else {
+				desc = desc + " Computer auto-save was used.";
+			}
+
+			$.post("change_log_save.mas",{
+				round_id    : round_id,
+				description : desc
+			});
+		}
+		
+		function updateScreenBye(panel_id, entry) {
+
+			$("#entry"+entry+"bye_button").addClass("hidden");
+			$(".bye_button").addClass("hidden");
+			$("#entry"+entry+"pullup_button").addClass("hidden");
+			$("#entry"+entry+"choose_button").addClass("hidden");
+			$("#entry"+entry+"oppn").removeClass("hidden");
+
+			$("#entry"+entry+"curr_oppn").html( 
+				"<a class='white block' onclick='deletePanel( " + panel_id + ", " + entry + ", -1) '>BYE</a>"
+			);
+
+			$(".curr_oppn").removeClass("hidden");
+			
+			//add it to the pairings table
+			var my_table = document.getElementById("pairings"),
+
+			my_row = my_table.insertRow(),
+
+			cell1 = my_row.insertCell(0),
+			cell2 = my_row.insertCell(1),
+			cell3 = my_row.insertCell(2);
+
+			my_row.id = "pair"+panel_id;
+
+			cell1.innerHTML = "<span class='twothird nowrap'>" 
+				+ $("#entry"+entry+"name").text() 
+				+ "</span><span class='third'>" 
+				+ $("#entry"+entry+"loss").text() 
+				+ "losses</span>";
+
+			cell2.innerHTML = "<span class='twothird nowrap'> BYE </span>";
+			cell3.innerHTML = "<a class='dkred button' onclick='deletePanel( " + panel_id + ", " + entry + ", -1 );'>Delete</a>";
+			
+		}
+		
+		function giveBye(entry, hadbye) {
+
+			//Give user abort option if had bye before
+			if (hadbye.length > 5) {
+				var doit = window.confirm(hadbye);
+				if ( doit == false ) { return; }
+			}
+
+			//store the bye and call screen update
+			var round_id = <% $round->id %>,
+			bracket   = <% $bracket %>,
+			panel_id; 
+
+			$.post("/panel/manipulate/save_pairing.mas", { 
+				round_id          : round_id,
+				entry1            : entry,
+				wins1             : bracket,
+				seed1             : bracket,
+				entry2            : -1,
+				wins2             : 0,
+				seed2             : 0,
+				bracket_to_return : -42
+
+			}, function(status){ 
+
+				panel_id = parseFloat(status);
+				updateScreenBye(panel_id, entry);
+				countPaired();
+
+			});
+			
+			//Record it in the change_log
+			logChanges( "Bye given to entry " + entry + " " + $("#entry"+entry+"name").text().trim() );
+
+		}
+		
+		function deletePanel(panel_id, aff, neg) {
+
+			//process in database
+			$.post("/panel/manipulate/dump_panel.mas", {panel_id: panel_id}); 
+			
+			//delete the row from the pairings
+			$("#pair"+panel_id).remove();
+			
+			//update the rows of the entries involved
+			
+			//$("#entry"+aff+"choose_button").removeClass("hidden");
+			$("#entry"+aff+"curr_oppn").addClass("hidden");
+			$("#entry"+aff+"curr_oppn").text("");
+			
+			//update the neg row, but not if it's a bye
+			if ( neg > 0 ) {
+				$("#entry"+neg+"choose_button").removeClass("hidden");
+				$("#entry"+neg+"curr_oppn").addClass("hidden");
+				$("#entry"+neg+"curr_oppn").text("");
+			}
+			
+			countPaired();
+			
+			//save to change log
+			$("#info_box_text").text("");
+
+			logChanges("User deleted debate between aff " + $("#entry"+aff+"name").text().trim() + " and neg " + $("#entry"+neg+"name").text().trim() );
+			
+		}
+
+		function showOpponents(entry, entry_name, wins, seed) {
+
+			//update header
+
+			$("#instruction_header").html( 
+				"<h5 class=\"nospace\">Finding an opponent for " + entry_name + " </h5>" 
+			);
+
+			$("#entry_to_pair_entry").html( entry );
+			$("#entry_to_pair_wins").html( wins );
+			$("#entry_to_pair_preset_seed").html( seed );
+			
+			//reset anchor styles -- also resets the conflict info columns
+			resetAnchorStyles();
+
+			//make the conflics columns visible
+			$(".oppn_info").removeClass("hidden");
+			$(".conflict_info").removeClass("hidden");
+			
+			//make the selected entry blue and indent			
+			$('#'+entry).addClass('dkblue limit3 nowrap marno padleft');
+
+			//show any conflicts as red and indented
+			$('#preclusion_data tr').each(function (i, row) {
+
+				if ( $(row).find(".entry1").html().trim() == entry ) {
+
+					var oppn = $(row).find(".entry2").html().trim();
+					$('#'+oppn).removeClass('white');
+					$('#'+oppn).addClass('dkred limit3 nowrap marno padleft');
+					$("#entry"+oppn+"conflict_info").text( $(row).find(".reason").html().trim() );
+
+				}
+			});
+
+		}
+
+		function resetAnchorStyles() {
+			
+			$(".entry_anchor").removeClass('dkred');
+			$(".entry_anchor").removeClass('dkblue');
+			$(".entry_anchor").addClass("white limit3 padleft nowrap");
+			$(".conflict_info").text("n/a");
+			$("#conflict_info").text("Conflict Info");
+
+			return;
+		}
+
+		function updateScreen(panel_id, aff, neg, bracket) {
+
+			// update aff row for the onscreen display, plus suppress the
+			// action buttons
+
+			$("#entry"+aff+"curr_oppn").html( 
+				"<a class='white full' onclick='deletePanel( " + panel_id + ", " + aff + ", " + neg + ") '>" + $("#entry"+neg+"name").text().trim() + "</a>" 
+			);
+
+			$("#entry"+aff+"choose_button").addClass("hidden");
+
+			$("#entry"+aff+"curr_oppn").removeClass("hidden");
+
+			//update neg row for the onscreen display and suppress action buttons
+			$("#entry"+neg+"curr_oppn").html( 
+				"<a class='white full' onclick='deletePanel( " + panel_id + ", " + aff + ", " + neg + ") '>" + $("#entry"+aff+"name").text().trim() + "</a>"
+			);
+
+			$("#entry"+neg+"choose_button").addClass("hidden");
+			$("#entry"+neg+"curr_oppn").removeClass("hidden");
+
+			//add it to the pairings table
+			var my_table = document.getElementById("pairings"),
+			my_row       = my_table.insertRow(),
+			cell1        = my_row.insertCell(0),
+			cell2        = my_row.insertCell(1),
+			cell3        = my_row.insertCell(2);
+
+			my_row.id = "pair"+panel_id;
+
+			cell1.innerHTML = "<span class='twothird nowrap'>" + $("#entry"+aff+"name").text().trim() + "</span><span class='third'>" + $("#entry"+aff+"loss").text().trim() + " losses </span>";
+
+			cell2.innerHTML = "<span class='twothird nowrap'>" + $("#entry"+neg+"name").text().trim() + "</span><span class='third'>" + $("#entry"+neg+"loss").text().trim() + " losses </span>";
+
+			cell3.innerHTML = "<a class='dkred button' onclick='deletePanel( " + panel_id + ", " + aff + ", " + neg + ");'>Delete</a>";
+
+
+			//update header
+			$("#instruction_header").html = "Tap an entry code to find a match";
+
+			//update the display of the number of paired
+			resetAnchorStyles();
+
+			changeBracketDisplay( bracket );
+
+			return;
+
+		}
+
+		function changeBracketDisplay(bracket) {
+
+			$(".bracketbutton").removeClass('invert');
+			$("#bracket_"+bracket).addClass('invert');
+
+			$(".bracketinfo").addClass("hidden");
+			$("#info_"+bracket).removeClass("hidden");
+			
+			//make visible only the entries in the bracket
+			if (bracket == 0) {
+				$(".bracket1").addClass("hidden");
+				$(".bracket0").removeClass("hidden");
+				$("#bracketlabel").text("Undefeated");
+
+			} else if (bracket == 1) {
+				$(".bracket0").addClass("hidden");
+				$(".bracket1").removeClass("hidden");
+				$("#bracketlabel").text("One loss");
+			} else {
+				$("tr").removeClass("hidden");
+				$("#bracketlabel").text("All");
+			}
+			
+			countPaired();
+			countCleanOpponents( bracket );
+
+            $("#bracket_table").trigger("update");
+            $("#bracket_table").trigger("appendCache");
+
+			// update number of entries in bracket
+			// $("#n_in_bracket").text( $('tr:visible').length-2 );
+
+			return;
+			
+		}
+		
+		function displayMessage(message) {
+
+			$.jGrowl(message, { 
+				header   : 'Result:',
+				life     : 5000,
+				position : 'top-center',
+				closer   : false 
+			});
+
+			return;
+		}
+		
+		function toggleHelp() {
+			$("#help").toggleClass("hidden");
+			$("#helpswitch").toggleClass("dkblue");
+		}
+		
+		function hasConflict(entry1, entry2) {
+		
+			var response = "OK";
+
+			$('#preclusion_data tr').each(function (i, row) {
+				if ( $(row).find(".entry1").html().trim() === entry1 
+					&& $(row).find(".entry2").html().trim() === entry2 
+				) {
+					response = $(row).find(".reason").html().trim() ;
+				}
+			});
+
+			return status;
+
+		}
+
+		function countCleanOpponents(bracket) {
+		
+		// this shows the number conflicts against opponents in the selected bracket only
+		// Can't be done at load time b/c the undefeated brackets might not be set yet. 
+				
+			//reset conflicts to zero	
+			$('.oppn_confl').text(0);
+			
+			//make the column visible
+			//$(".oppn_confl").removeClass("hidden");
+			
+			$('#preclusion_data tr').each(function (i, row) {
+
+				var entrycode = $(row).find(".entry1").html().trim();
+				var oppn = $(row).find(".entry2").html().trim();
+
+				if ( $("#entry"+oppn+"bracket").text().trim() == bracket 
+					&& $("#entry"+oppn+"loss").text().trim() != "" 
+				) {
+					var n_conflicts = $("#entry" + entrycode + "confl_oppn").text().trim() ;
+					n_conflicts++;
+					$("#entry"+entrycode+"confl_oppn").text(n_conflicts);
+				}
+			});
+
+		}
+		
+		function firePullup() {
+			
+			//show the pullup buttons; hide the other action buttons
+			$(".bye_button").addClass("hidden");
+			$(".bye_info").addClass("hidden");
+			$(".pull_button").removeClass("hidden");
+			$(".pair_button").addClass("hidden");
+			$(".pullup_info").addClass("hidden");
+			$(".side_info").removeClass("hidden");
+			$(".oppn_info").addClass("hidden");
+			$(".conflict_info").addClass("hidden");
+			
+			//test: Do you need a pullup?
+
+			if ($("#0L_n_in_bracket").text() % 2 == 0 ) {
+
+				message = "There are " + $("#0L_n_in_bracket").text();
+				message += " entries in the undefeated bracket,";
+				message += " and that's an even number, so you ";
+				message += " don't need a pullup.  Move to the next step.\n";
+
+				displayMessage(message);
+				return;
+			}
+	
+			//set it to auto so it will log correctly
+			$("#manual_override").prop('checked', false);
+
+			//count the side to pull up
+			var due_aff    = 0,
+			due_neg        = 0,
+			candidates     = [],
+			candidates_num = [],
+			counter        = 0,
+			pull_from      = "";
+
+			$('#bracket_table tr').each(function (i, row) {
+
+				var losses = $(row).find("span.losses").html();
+
+				if ( losses == 0 ) {
+
+					var side_due = $(row).attr('side_due');
+
+					if ( side_due == "A" ) { 
+						due_aff++;
+					}
+
+					if ( side_due == "N" ) { 
+						due_neg++;
+					}
+				}
+			});
+
+			message = "In the undefeated bracket there are ";
+			message +=  due_aff;
+			message +=  " entries due aff and ";
+			message +=  due_neg + " entries due neg.\n";
+
+			if ( due_aff > due_neg ) {
+				message += "You should pull up a entry due <% $neg_string %>.\n" ;
+				pull_from = "N";
+			}
+			if ( due_aff < due_neg ) {
+				message += "You should pull up a entry due <% $aff_string %>.\n" ;
+				pull_from = "A";
+			}
+			if ( due_aff == due_neg ) {
+				message += "Can pull up a entry due either side.\n" ;
+				pull_from = "X";
+			}
+
+			message += "Candidates for a pull up are: ";
+			$('#bracket_table tr').each(function (i, row) {
+
+				var entrycode = $(row).find("span.entrycode").html(),
+				losses        = $(row).find("span.losses").html(),
+				side_due      = $(row).attr("side_due");
+				has_bye       = false;
+
+				if ( $(row).find("span.curr_oppn").text().trim() == "BYE" ) { 
+					has_bye = true;
+				}
+
+				if ( losses == 1 
+					&& ( 
+						side_due === pull_from 
+						|| pull_from === "X" 
+						|| side_due === "--" 
+					) 
+					&& has_bye == false 
+				) {
+
+					counter = counter + 1;
+					message +=  " (" + counter + ") " + entrycode.trim();
+					candidates[counter] = entrycode.trim();
+					candidates_num[counter] = $(row).attr("id");
+				}
+			});
+		
+			changeBracketDisplay(1);
+			countCleanOpponents( 0 );
+
+			var random_pick = Math.floor((Math.random() * counter) + 1); 
+
+			message +=  "\nThe computer randomly selects (" + random_pick + ") ";
+			message +=  candidates[random_pick] + " to be pulled up; ";
+
+			//save it				
+			displayMessage(message);
+			pullMeUp( candidates_num[random_pick] ); //this saves to change log so you don't have to do it here
+				
+			//set it back to manual so it will log correctly
+			$("#manual_override").prop('checked', true);
+	
+		}
+
+		currentBracket = function () {
+			
+			var bracket = 2;
+			if ( $("#bracketlabel").text() == "Undefeateds" ) { bracket = 0; }
+			if ( $("#bracketlabel").text() == "One Loss" ) { bracket = 1; }
+			return bracket; 
+		
+		}
+		
+		function pairEntries() {
+
+			//hide the bye and pullup info
+			$(".bye_info").addClass("hidden");
+			$(".bye_button").addClass("hidden");
+			$(".pull_button").addClass("hidden");
+			$(".pullup_info").addClass("hidden");
+			
+			countCleanOpponents( currentBracket() );
+			$(".conflict_info").removeClass("hidden");
+			$(".oppn_info").removeClass("hidden");
+			$(".side_info").removeClass("hidden");
+			$(".side_due").removeClass("hidden");
+			$(".pair_button").removeClass("hidden");
+			$("#autopair_link").removeClass("hidden");
+
+			//show either current opponent or the choose button
+			$(".curr_oppn").addClass("hidden");
+			$(".choose_button").addClass("hidden");
+			$('#bracket_table > tbody > tr').each(function (i, row) {
+				if ( $(row).find("span.curr_oppn").text().trim() == "" ) {
+					$(row).find("span.choose_button").removeClass("hidden");
+				} else {
+					$(row).find("span.curr_oppn").removeClass("hidden");
+				}
+
+			});
+
+		}
+		
+		function drawBye() {
+
+			//show the bye; hide the other action buttons
+			$(".bye_info").removeClass("hidden");
+			$(".bye_button").removeClass("hidden");
+			$(".pull_button").addClass("hidden");
+			$(".pair_button").addClass("hidden");
+			$(".pullup_info").addClass("hidden");
+			$(".conflict_info").addClass("hidden");
+			$(".oppn_info").removeClass("hidden");
+			$(".oppn_confl").removeClass("hidden");
+
+			//if there are an even number of entries you don't need a bye, so bail...
+			var message = "",
+			preamble    = "";
+
+			n_entries = $("#bracket_table tr").size() - 1;
+
+			if (n_entries % 2 == 0 ) {
+				message = "Even number, no bye required.\n";
+				displayMessage(message);
+				return;
+			}
+
+			// If there's already a bye, bail
+
+			var is_bye = false;
+
+			$('#bracket_table tr').each(function (i, row) {
+				if ( $(row).find("span.curr_oppn").text().trim() == "BYE" ) { 
+					is_bye = true;
+				}
+			});
+
+			if ( is_bye == true ) {
+
+				window.alert("There is already a bye!  You should NOT change the bye once it is assigned.  If you really, really must, delete the bye and try again.");
+				return;
+			}
+
+			//set it to auto so it will log correctly
+			$("#manual_override").prop('checked', false);
+		
+			// OK, you're pulling a bye, so set up a counter variable so the
+			// computer can skip stuff once it finds one
+			var counter = 0;
+			
+			// First, check to see if there are 3 left and only 1 is
+			// undefeated.  If so, you're done, and just mark the counter
+			// variable to show that someone is being pulled up
+
+			if ( n_entries == 3 && parseInt( $("#0L_n_in_bracket").text() ) == 1 ) {
+
+				// make the down-1 bracket the one that gets displayed
+
+				changeBracketDisplay( 0 );
+
+				// this is kinda academic, but no reason to leave it hanging
+
+				countCleanOpponents( 1 );
+
+				// do this last so if it bonks you won't think things are OK
+
+				displayMessage("There are 3 entries left, 1 undefeated: bye to the undefeated.\n");
+
+				// bail from the function
+
+				return;
+			}
+
+			//It's not that easy, so you need an array to store pullup candidates
+			var candidates = [],
+			candidates_num = [];
+			
+			//you need a bye, so first look for entries with 1 loss, never had a bye, and HAVE hit an undefeated
+
+			preamble="These entries have 1 loss, have not had a bye and have lost to an undefeated entry:\n";
+
+			$('#bracket_table tr').each(function (i, row) {
+
+				var entrycode = $(row).find("span.entrycode").html(),
+				losses = $(row).find("span.losses").html(),
+				hit_undefeated = $(row).find("span.hit_undefeated").html(),
+				had_bye_already = $(row).find("span.had_bye_already").html();
+
+				if ( losses == 1 && hit_undefeated != 0 && had_bye_already == 0 ) {
+					counter++;
+					message +=  " (" + counter + ") " + entrycode.trim();
+					candidates[counter] = entrycode.trim();
+					candidates_num[counter] = $(row).attr("id");
+				}
+			});
+			
+			// 	If there are no entries, drop the "hit an undefeated"
+			// 	requirement
+
+			if (counter == 0 ) {
+
+				preamble = "There were no entries with 1 loss, no bye, and a loss to an to an undefeated entry; drawing from 1-loss entries with no bye:\n";
+
+				$('#bracket_table tr').each(function (i, row) {
+
+					var entrycode = $(row).find("span.entrycode").html();
+					var losses = $(row).find("span.losses").html();
+					var had_bye_already = $(row).find("span.had_bye_already").html();
+
+					if ( losses == 1 && had_bye_already == 0 ) {
+						counter = counter + 1;
+						message +=  " (" + counter + ") " + entrycode.trim();
+						candidates[counter] = entrycode.trim();
+						candidates_num[counter] = $(row).attr("id");
+					}
+				});
+			}
+
+			// If there are still no entries, drop the 1-loss requirement -- my
+			// read is that this is implied in the NSDA rules but not
+			// explicitly stated
+
+			if (counter == 0 ) {
+
+				preamble = preamble + "There were no entries with 1 loss and no bye; drawing from all entries who have not yet had a bye:\n";
+
+				$('#bracket_table tr').each(function (i, row) {
+					var entrycode = $(row).find("span.entrycode").html();
+					var had_bye_already = $(row).find("span.had_bye_already").html();
+					if ( had_bye_already == 0 ) {
+						counter = counter + 1;
+						message +=  " (" + counter + ") " + entrycode.trim();
+						candidates[counter] = entrycode.trim();
+						candidates_num[counter] = $(row).attr("id");
+					}
+				});
+			}
+			
+			var random_pick = 0;
+			message = preamble + message;
+
+			if (counter > 1) {			
+
+				random_pick = Math.floor((Math.random() * counter) + 1); 
+				message +=  "\nThe computer randomly selects (" + random_pick + ") ";
+				message +=  candidates[random_pick] + " to receive the bye; ";
+
+			} else if (counter == 1) {
+
+				random_pick = 1;
+				message +=  "\nBye must go to " +  candidates[1];
+
+			}
+
+			if ( $("#manual_override").prop('checked') == true ) {
+				message +=  " Manually assign the bye:";
+			} else {
+				message +=  " e bye.";
+			}
+
+			displayMessage(message);
+				
+			changeBracketDisplay( 1 );
+
+			countCleanOpponents( 0 );
+
+			//save it; this will display as auto-saved				
+
+			//giveBye also saves to the change log, so you don't have to do it here
+			giveBye(candidates_num[random_pick], ''); 
+
+			window.alert("Bye has been assigned and saved; review the information on the screen.");
+
+			//set it to manual so it will log correctly
+			$("#manual_override").prop('checked', true);
+			
+		}
+		
+		function savePairing(entry, wins, seed ) {
+
+			// let the user bail if there's a conflict
+
+			if ( $("#entry"+entry+"conflict_info").text().trim() != "n/a" ) {
+
+				var conflict = $("#entry"+entry+"conflict_info").text().trim(),
+				message = "WARNING: These entries have a conflict: "+conflict;
+
+				if ( window.confirm(message) === false) { 
+					return;
+				}
+			}
+			
+			//load entry_to_pair values
+
+			var targetEntry = {},
+			opponentEntry = {};
+
+			targetEntry.id          = $("#entry_to_pair_entry").html();
+			targetEntry.wins        = $("#entry_to_pair_wins").html();
+			targetEntry.preset_seed = $("#entry_to_pair_preset_seed").html();
+			targetEntry.side        = $("#"+targetEntry.id).attr("side_due");
+			targetEntry.opponent    = $("#"+targetEntry.id).attr("opponent");
+			targetEntry.oppCode     = $("#"+targetEntry.id).attr("opponent_code");
+			targetEntry.code        = $("#"+targetEntry.id).attr("entry_code");
+			targetEntry.wins        = $("#"+targetEntry.id).attr("entry_wins");
+			targetEntry.seed        = $("#"+targetEntry.id).attr("entry_seed");
+			targetEntry.bracket     = $("#"+targetEntry.id).attr("bracket");
+
+			opponentEntry.id       = entry;
+			opponentEntry.side     = $("#"+opponentEntry.id).attr("side_due");
+			opponentEntry.opponent = $("#"+opponentEntry.id).attr("opponent");
+			opponentEntry.oppCode  = $("#"+opponentEntry.id).attr("opponent_code");
+			opponentEntry.code     = $("#"+opponentEntry.id).attr("entry_code");
+			opponentEntry.wins     = $("#"+opponentEntry.id).attr("entry_wins");
+			opponentEntry.seed     = $("#"+opponentEntry.id).attr("entry_seed");
+
+			// make sure there's a entry selected
+
+			if (targetEntry.id.length == 0) {	 
+				alert("You must choose a entry to pair first from the left hand column");
+				return;
+			}
+
+			// warn of side conflict
+
+			if (targetEntry.side === opponentEntry.side && targetEntry.side != "--") { 
+
+				var confirmation = window.confirm("Warning: these entries are due to be on the same side.");
+
+				if ( confirmation === false ) { 
+					return;
+				}
+			}
+			
+			//let the user know if the entry is paired already
+			if ( targetEntry.opponent ) { 
+				var warning = targetEntry.code + "already has an opponent.";
+				warning += "Delete existing debate or select other target entry";
+				window.alert(warning);
+				return;
+			}
+
+			if ( opponentEntry.opponent ) { 
+				var warning = opponentEntry.code + "already has an opponent.";
+				warning += " Delete existing debate or select other target entry";
+				window.alert(warning);
+				return;
+			}
+			
+			//set sides correctly
+			var entry1,
+			wins1,
+			seed1,
+			entry2,
+			wins2,
+			seed2;
+
+			if ( targetEntry.side === "N" || opponentEntry.side === "A") { 
+
+				entry1 = opponentEntry.id;
+				wins1  = opponentEntry.wins;
+				seed1  = opponentEntry.seed;
+
+				entry2 = targetEntry.id;
+				wins2  = targetEntry.wins;
+				seed2  = targetEntry.seed;
+
+			} else {
+
+				entry2 = opponentEntry.id;
+				wins2  = opponentEntry.wins;
+				seed2  = opponentEntry.seed;
+
+				entry1 = targetEntry.id;
+				wins1  = targetEntry.wins;
+				seed1  = targetEntry.seed;
+
+			}
+
+			//get round and bracket
+			var curr_rd = <% $round->id %>;
+			
+			//save it
+			$.post("/panel/manipulate/save_pairing.mas",{ 
+				round_id          : curr_rd,
+				entry1            : entry1,
+				wins1             : wins1,
+				seed1             : seed1,
+				entry2            : entry2,
+				wins2             : wins2,
+				seed2             : seed2,
+				bracket_to_return : -42
+
+			}, function(status){ 
+
+				panel_id = parseFloat(status);
+				updateScreen(panel_id, entry1, entry2, targetEntry.bracket);
+
+			}); 
+
+			//log it if this is a manual change; if it's auto, that will save at the end
+
+			if ( $("#manual_override").prop('checked') == true ) {
+
+				$("#info_box_text").text('');
+				logChanges("Manual pair of " + targetEntry.code + " vs " + opponentEntry.code);
+
+			}
+		}
+
+	</script>
+
+		<div class="nospace">
+
+			<span class="quarter nospace"> 
+				<h4><% $event->abbr %> <% $round->realname %> </h4>
+			</span>
+
+			<span class="half nospace centeralign"> 
+				<a 
+					id      = "bracket_all"
+					class   = "buttonwhite graytext bracketbutton invert"
+					onclick = 'changeBracketDisplay("all");'
+				>
+					All
+				</a>
+
+				<a 
+					id      = "bracket_0"
+					class   = "buttonwhite bluetext bracketbutton"
+					onclick = 'changeBracketDisplay(0);'
+				>
+					Undefeated
+				</a>
+
+				<a 
+					id      = "bracket_1"
+					class   = "buttonwhite redtext bracketbutton"
+					onclick = 'changeBracketDisplay(1)'
+				>
+					One-loss
+				</a>
+
+			</span>
+
+			<span class="quarter rightalign nospace">
+				<h4 id="bracketlabel">All</h4> 
+			</span>
+
+		</div>
+
+		<div 
+			id="info_all"
+			class="full bracketinfo lighteven"
+		>
+			<span class="quarter centeralign strong">
+				All Entries
+			</span>
+			<span class="quarter nospace">
+				<span class="twofifths">
+					Total
+				</span>
+				<span id="n_in_bracket">
+					<% $aff_entries_in_bracket %>
+				</span>
+			</span>
+			<span class="quarter nospace">
+				<span class="twofifths">
+					Paired
+				</span>
+				<span id="paired_already">
+					<% $paired_entries %>
+				</span>
+			</span>
+			<span class="quarter nospace">
+				<span class="twofifths">
+					Unpaired
+				</span>
+				<span id="left_to_pair">
+					<% $unpaired_entries %> 
+				</span>
+			</span>
+		</div>
+
+		<div 
+			class="full bracketinfo lighteven hidden"
+			id    = "info_0"
+		>
+			<span class="quarter centeralign strong">
+				Undefeateds:
+			</span>
+			
+			<span class="quarter nospace">
+				<span class="twofifths">
+					Total
+				</span>
+				<span id="0L_n_in_bracket">
+					<% $aff_entries_in_bracket %>
+				</span>
+			</span>
+				
+			<span class="quarter nospace">
+				<span class="twofifths">
+					Paired
+				</span>
+				<span id="0L_paired_already">
+					<% $paired_entries %>
+				</span>
+			</span>
+
+			<span class="quarter nospace">
+				<span class="twofifths">
+					Unpaired
+				</span>
+				<span id="0L_left_to_pair">
+					<% $unpaired_entries %> 
+				</span>
+			</span>
+
+		</div>
+
+		<div 
+			class="full bracketinfo lighteven hidden"
+			id = "info_1"
+		>
+			<span class="quarter centeralign strong">
+				One-loss:
+			</span>
+			
+			<span class="quarter nospace">
+				<span class="twofifths">
+					Total
+				</span>
+				<span id="1L_n_in_bracket">
+					<% $aff_entries_in_bracket %>
+				</span>
+			</span>
+
+			<span class="quarter nospace">
+				<span class="twofifths">
+					Paired
+				</span>
+				<span id="1L_paired_already">
+					<% $paired_entries %>
+				</span>
+			</span>
+
+			<span class="quarter nospace">
+				<span class="twofifths">
+					Unpaired
+				</span>
+				<span id="1L_left_to_pair">
+					<% $unpaired_entries %> 
+				</span>
+			</span>
+
+		</div>
+
+		<div class="lightodd full">
+
+			<span class="third centeralign">
+
+				<span class="threequarters">
+					<a 
+						id      = "bye_button"
+						class   = "buttonwhite redtext full hover"
+						onclick = 'drawBye()'
+					>
+						1. Draw Bye
+
+						<span 
+							id    = "bye_status_mark"
+							class = "eighth fa fa-lg"
+						></span>
+
+					</a>
+
+				</span>
+
+			</span>
+
+			<span class="third centeralign">
+
+				<span class="threequarters">
+					<a 
+						id      = "pullup_button"
+						class   = "buttonwhite redtext full hover"
+						onclick = 'firePullup()'
+					>
+						1. Pull Up
+
+						<span 
+							id    = "pullup_status_mark"
+							class = "eighth fa fa-lg"
+						></span>
+					</a>
+				</span>
+
+			</span>
+
+			<span class="third">
+
+				<span class="threequarters centeralign">
+
+					<a  
+						id      = "pair_button"
+						class   = "buttonwhite redtext full hover"
+						onclick = 'pairEntries();'
+					>
+						3. Pair
+					</a>
+
+					<span 
+						id    = "pair_status_mark"
+						class = "eighth fa fa-lg"
+					></span>
+
+				</span>
+
+			</span>
+
+
+		</div>
+
+		<div class="full hidden lightrow">
+			<input 
+				type    = "checkbox"
+				id      = "manual_override"
+				checked = "true"
+			> (Manual over-ride)
+
+		</div>
+
+		<div id="help" class="full hidden">
+
+			<h4>Quick Help:</h4>
+
+			<p>
+				Use the 'display' box to the right (just below help) to select
+				the bracket to show.
+			</p>
+
+			<p>
+				The 'bracket status' box will show you how many entries have
+				been paired and how many still need to be paired.
+			</p>
+
+			<p>
+				The buttons in the 'Bracket Actions' box will let you pair the entries.
+			</p>
+
+			<p>
+				Start with assigning the bye, then even the brackets, then pair
+				the entries against each other.
+			</p>
+
+		</div>
+
+		<div id="info_box" class="panel" style="display:none" >
+			<hr>
+			<center>
+			<textarea 
+				rows  = "4"
+				cols  = "80"
+				id    = "info_box_text"
+				class = "flip centeralign redtext strong"
+			>Nobody clears; they can all go home.  Click this text to suppress it...
+			</textarea>
+			</center>
+		</div>
+
+		<div class="nospace">
+
+			<span class="twothird nospace right martop">
+
+				<div 
+					id    = "instruction_header"
+					class = "nospace rightalign"
+				>
+					<h5 class="nospace">Tap an entry code to find a match</h5>
+				</div>	
+
+				<a 
+					class   = "right pair_button"
+					id      = "autopair_link"
+					style   = "display:none"
+					onclick = "autoPair()"
+				>
+					Autopair bracket
+				</a>
+			</span>
+		</div>
+
+		<& /funclib/tablesorter.mas, table => "bracket_table" &>
+		
+		<table id="bracket_table" class="martop">
+	
+			<thead>
+				<tr class="yellowrow">
+
+					<th 
+						class = "smaller"
+						title = "Entry Designation"
+					>Code</th>	
+					<!-- #0 -->
+
+					<th 
+						class = "smaller"
+						title = "Entry ID"
+						style = 'display:none'
+					>ID</th>	
+					<!-- #0 -->					
+
+					<th 
+						class = "smaller"
+						title = "Seed"
+					>Seed</th>				
+					<!-- #1 -->
+
+					<th 
+						class = "smaller"
+						title = "Losses"
+					>Losses</th>			
+					<!-- #2 -->
+
+					<th 
+						class = "smaller side_info"
+						title = "Sides"
+						style = 'display:none'
+					>Side</th>			
+					<!-- #3 -->
+
+					<th 
+						class = "smaller side_info"
+						title = "Side Due"
+						style = 'display:none'
+					>Due</th>			
+					<!-- #3 -->
+
+					<th 
+						class = "smaller bye_info"
+						title = "HadBye"
+						style = 'display:none'
+					>Byes</th>			
+					<!-- #4 -->
+
+					<th 
+						class = "smaller conflict_info"
+						id    = "conflict_info"
+						title = "Info about conflicts with opponents"
+						style = 'display:none'
+					>Details</th>			
+					<!-- #4 -->
+
+					<th 
+						class = "smaller oppn_info"
+						id    = "oppn_info_hdr"
+						title = "number of conflicts with other entries in the bracket"
+						style = 'display:none'
+					>Conflicts</th>	
+					<!-- #5 -->					
+
+					<th 
+						class = "smaller pullup_info"
+						title = "Times pulled up/pulled down"
+						style = 'display:none'
+					>Pulled Up</th>	
+					<!-- #5 -->
+
+					<th 
+						class = "smaller"
+						title = "Action" colspan = "3"
+					>Action</th>	
+					<!-- #6 -->
+				</tr>
+			</thead>
+			
+			<tbody class="smallish">
+
+<%perl>
+
+				my @entry_ids = 
+					sort {$entries{$a}->{'seed'} <=> $entries{$b}->{'seed'}} 
+					keys %entries;
+
+
+				foreach my $entry_id (@entry_ids) { 
+		
+
+					my $bracket = $entries{$entry_id}{"placement"};
+					my $side_due = "--";
+
+					my $opponent_id = $entries{$entry_id}{'opponent'};
+					my $bye_round;
+					my $opponent_code;
+
+					# this use of -1 HAS TO STOP, JON.
+					if ($opponent_id == -1) { 
+						$bye_round++;
+						undef $opponent_id;
+					}
+
+					$opponent_code = $entries{$opponent_id}{'code'} if $opponent_id;
+
+					if ( $entries{$entry_id}{'aff_count'} > $entries{$entry_id}{'neg_count'} ) { 
+						$side_due = "N";
+					} elsif ( $entries{$entry_id}{'neg_count'} > $entries{$entry_id}{'aff_count'} ) { 
+						$side_due = "A";
+					}
+
+</%perl>
+
+					<tr 
+						class         = "rightalign bracket<% $bracket %>"
+						id            = "<% $entry_id %>"
+						bracket       = "<% $bracket %>"
+						entry_code    = "<% $entries{$entry_id}{'code'} %>"
+						opponent      = "<% $opponent_id %>"
+						opponent_code = "<% $opponent_code %>"
+						bye_round     = <% $bye_round ? "true" : "false" %>
+						wins          = "<% $entries{$entry_id}{'wins'} %>"
+						seed          = "<% $entries{$entry_id}{'seed'} %>"
+					>
+
+						<!-- Col 0, entry -->
+						<td 
+							class = "nospace centeralign"
+							id    = "entry<% $entry_id %>name"
+						>
+
+%							unless ($entry_id == $entry_to_pair) { 
+
+								<a 
+									class   = "padleft nowrap plain entry_anchor centeralign full hover"
+									id      = "<% $entry_id %>"
+									title   = "<% $entries{$entry_id}{'code'} %>"
+									onclick = "showOpponents( <% $entry_id %>, 
+											'<% $entries{$entry_id}{'code'} %>',
+											<% $entries{$entry_id}{'wins'} %>,
+											<% $entries{$entry_id}{'seed'} %> 
+										);"
+								>
+%							}
+
+								<!-- Throughout the table, the span lets you
+								access the <td> info when you iterate -->
+
+								<span class="entrycode">
+									<% $entries{$entry_id}{'code'} %>
+								</span>
+
+							</a>
+						</td>
+
+						<!-- Col 1, seed -->
+						<td 
+							class = "centeralign"
+							id    = "entry<% $entry_id %>seed"
+						>
+							<span class = "seed">
+								<% $entries{$entry_id}{'seed'} %>
+							</span>
+						</td>
+
+						<!-- Col 2, losses -->
+						<td 
+							class = "centeralign"
+							id    = "entry<% $entry_id %>loss"
+						>
+							<span class = "losses">
+								<% $entries{$entry_id}{'losses'} %>
+							</span>
+						</td>
+		
+						<!-- Col 3, sides -->
+						<td 
+							class = "centeralign side_info"
+							style = 'display:none'
+							id    = "entry<% $entry_id %>side"
+						>
+							<% $entries{$entry_id}{'aff_count'} %> <% $aff_string %>, 
+							<% $entries{$entry_id}{'neg_count'} %> <% $neg_string %>
+						</td>
+
+						<!-- Col X, side due; was using had_bye_already($entry_id)
+						to find sides due, but I don't think that's in the
+						rules -->
+
+<%perl>
+
+
+</%perl>
+						<td 
+							class = "centeralign side_info"
+							id    = "entry<% $entry_id %>side_due"
+							style = 'display:none'
+						>
+							<span class = "side_due">
+								<% $side_due %>
+							</span>
+						</td>
+
+						<!-- Col 4, bye -->
+%						my $warn = had_bye_already($entry_id);
+
+						<td class="centeralign bye_info" id="entry<% $entry_id %>bye" style='display:none'>
+							<span class = "had_bye_already">
+								<% $warn %>
+							</span>
+						</td>
+
+						<!-- Col 4, bye -->
+						<td 
+							class = "centeralign conflict_info"
+							id    = "entry<% $entry_id %>conflict_info"
+							style = 'display:none'
+						>
+							<span class = "conflict_info">
+								n/a
+							</span>
+						</td>
+
+						<!-- Col X, number of conflicts with possible undefeated oppon -->
+						<td 
+							class = "centeralign oppn_info oppn_confl"
+							id    = "entry<% $entry_id %>confl_oppn"
+							style = 'display:none'
+						>
+							0
+						</td>
+
+						<!-- Col 5, pullup status -->			
+						<td 
+							class = "centeralign pullup_info"
+							style = 'display:none'
+							id    = "entry<% $entry_id %>pullup"
+						>
+							<% $entries{$entry_id}{'pulled_up'} %> / <% $entries{$entry_id}{'got_pullup'} %>
+						</td>
+
+						<!-- Col 6, oppn -->
+%						#set display flag for columns 10 and 11							
+
+%						undef $display_flag;
+%						$display_flag="style='display:none'" ;
+
+						<td 
+							class = "leftalign padleft nospace pair_button"
+							id    = "entry<% $entry_id %>oppn"
+						>
+
+<%perl>
+							if ( $entries{$entry_id}{'opponent'} > 0 
+								|| $entries{$entry_id}{'opponent'} == -1
+							) { 
+								$display_flag="style='display:table-cell'" ;
+							}
+
+</%perl>
+
+							<span 
+								id    = "entry<% $entry_id %>curr_oppn"
+								class = "curr_oppn" <% $display_flag %>
+							>
+
+								<a 	
+									class="white full" 
+									onclick="deletePanel( 
+										<% $entries{$entry_id}{'panel'} %>, 
+										<% $entry_id %>, 
+										<% $entries{$entry_id}{'opponent'} %> 
+									)"
+								>
+
+									<% $entries{$entries{$entry_id}{'opponent'}}{'code'} %>
+%									if ( $entries{$entry_id}{'opponent'} == -1 ) {
+										BYE
+%									}
+								</a>
+							</span>
+
+							<span 
+								class = "choose_button"
+								id    = "entry<% $entry_id %>choose_button"
+								style = 'display:none'
+							>
+
+								<a 
+									class="centeralign dkblue button" 
+									onclick="savePairing( 
+										<% $entry_id %>, 
+										<% $entries{$entry_id}{'wins'} %>, 
+										<% $entries{$entry_id}{'seed'} %> 
+									)">
+									Choose							
+								</a>
+							</span>
+						</td>	
+
+%						#	Col x, the pullup button; hidden by default
+%						#   activated when by button clicked
+
+						<td  
+							class = "nospace pull_button"
+							id    = "entry<% $entry_id %>pullup_button"
+							style = 'display:none'
+						>
+
+							<a 
+								id      = "pullbutton<% $entry_id %>"
+								class   = "dkblue centeralign button narrow nowrap"
+								onclick = "pullMeUp(<% $entry_id %>);"
+							>
+								Pull <% $entries{$entry_id}{"placement"} == 0 ? "&darr;" : "&uarr;" %>
+							</a>
+
+						</td>		
+
+
+%						# Col x, the bye button; hidden by default and
+%						# activated when clicking on the bye -->							
+
+						<td 
+							class = "nospace bye_button"
+							id    = "entry<% $entry_id %>bye_button"
+							style = 'display:none'
+						>
+
+%							$warn = had_bye_already($entry_id);
+
+							<a 
+								id      = "byebutton<% $entry_id %>"
+								class   = "dkblue centeralign button narrow"
+								onclick = "giveBye(<% $entry_id %>, '<% $warn %>' );"
+							>
+								Bye
+							</a>
+						</td>
+
+						<td id="entry<% $entry_id %>bracket" style='display:none'>
+							<% $entries{$entry_id}{'placement'} %>
+						</td>		
+
+<%doc>
+
+							For byes, you need to know if they have hit an
+							undefeated entry before; this marks whether they
+							have but doesn't display it	
+
+</%doc>
+
+<%perl>
+						
+						my $hit_undefeated=0;
+
+						foreach my $entry_id1 (keys %precluded) {
+							if ($precluded{$entry_id}{$entry_id1} == 1 
+								&& ($round->name - $entries{$entry_id1}{'wins'} - 1 ) == 0 
+								&& $entries{$entry_id}{'school'} !=  $entries{$entry_id1}{'school'}
+							) { 
+								$hit_undefeated = $entries{$entry_id1}{'code'};
+							}
+						}
+
+</%perl>
+%						# Col x, have you hit an undefeated entry
+
+						<td 
+							id    = "entry<% $entry_id %>hit_undefeated"
+							style = "display:none"
+						>
+
+							<span class = "hit_undefeated">
+								<% $hit_undefeated %>
+							</span>
+						</td>		
+
+					</tr>
+
+%				}			
+
+			</tbody>
+
+		</table>
+
+		<h4>Current Pairings</h4> 
+		
+		<table id="pairings">
+		
+			<thead>
+				<tr class="yellowrow">
+					<th class="smaller"><% $aff_string %></th>
+					<th class="smaller"><% $neg_string %></th>
+					<th class="smaller nosort" colspan="3">Action</th>
+				</tr>
+			</thead>
+				
+			<tbody class="smallish">
+
+<%perl> 
+
+			my @panels = Tab::Panel->search( round=>$round->id );			
+
+			foreach my $panel (@panels) {
+
+				my @ballots = Tab::Ballot->search( panel=>$panel->id );
+
+				my $aff = 0; 
+				my $neg = 0; 
+				my $bye = ""; 
+				my $warning = "";
+
+				foreach my $ballot (@ballots) {
+
+					if ($ballot->side == 1) { 
+						$aff = $ballot->entry; 
+					}
+
+					if ($ballot->side == 2) { 
+						$neg = $ballot->entry; 
+					}
+
+					if ($panel->bye or $ballot->bye) { 
+						$aff = $ballot->entry; 
+						$bye = "BYE"; 
+					}
+
+					if ($ballot->side != 1 and $ballot->side != 2 and $bye eq "" and $aff == 0) {
+
+						$aff = $ballot->entry; 
+						$warning = "SIDE ERROR";
+
+					} elsif ($ballot->side != 1 and $ballot->side != 2 and $bye eq "" and $neg == 0) {
+						
+						$neg = $ballot->entry; 
+						$warning = "SIDE ERROR";
+
+					}
+
+				}
+
+</%perl> 
+
+				<tr id="pair<% $panel->id %>">
+
+					<td>
+						<span class="twothird nowrap">
+							<% $entries{$aff}{'code'} %>
+						</span>
+						
+						<span class="third">
+							<% $round->name - $entries{$aff}{'wins'} - 1 %> losses  <% $warning %> 
+						</span>
+					</td>
+
+					<td>
+%						if ($entries{$neg}) { 
+
+							<span class="twothird nowrap">
+								<% $entries{$neg}{'code'} %> 
+							</span>
+
+							<span class="third">
+								<% $round->name - $entries{$neg}{'wins'} - 1 %> losses <% $warning %> 
+							</span>
+
+%						}
+
+%						if ($bye) {
+							BYE
+%						}
+
+					</td>
+
+					<td>
+						<a 
+							class   = "dkred button"
+							onclick = "deletePanel( <% $panel->id %>, <% $aff %>, <% $ neg %> );"
+						>
+							Delete
+						</a>
+					</td>
+				</tr>
+
+%			}
+
+			</tbody>
+				
+			</table>
+
+%			if ($person->site_admin) { 
+				<br />
+%				$end = time(); 
+				Total time: <% printf("%.2f\n", $end - $start) %>
+%			}
+
+<%doc>
+
+		OK, the preclusions are only marked if they've hit before or if they
+		are from the same school.  I'm marking if they are from the same
+		school, so if not, they've hit before.  I'm also removing previous byes
+		as a conflict, since you can get 2 byes at the NSDA.
+
+</%doc>
+	
+		<table 
+			id    = "preclusion_data"
+			style = "display:none;"
+		>
+
+%		foreach my $entry_id (keys %precluded) {
+
+%			foreach my $other_id (keys %{$precluded{$entry_id}}) {
+
+%				my $reason = "Hit before";
+
+%				if ( $entries{$entry_id}{'school'} == $entries{$other_id}{'school'} ) { 
+%					$reason = "Same school"; 
+%				}
+
+%				if ($entry_id != -1 && $other_id != -1 && $entry_id != $other_id ) {
+
+					<tr>
+						<td class="entry1" > <% $entry_id %> </td>
+						<td class="entry2" > <% $other_id %> </td>
+						<td class="reason" > <% $reason %> </td>						
+					</tr>
+%				}
+%			}	
+%		}
+
+		</table>
+	
+		<p id="entry_to_pair_entry" style="display:none;"></p>
+		<p id="entry_to_pair_wins" style="display:none;"></p>
+		<p id="entry_to_pair_preset_seed" style="display:none;"></p>				
+
+
+
