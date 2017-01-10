@@ -2,7 +2,8 @@ package Tab::Entry;
 use base 'Tab::DBI';
 Tab::Entry->table('entry');
 Tab::Entry->columns(Primary => qw/id/);
-Tab::Entry->columns(Essential => qw/code name active dropped waitlist unconfirmed dq tourn school event/);
+Tab::Entry->columns(Essential => qw/code name active dropped waitlist 
+									unconfirmed dq tourn school event/);
 
 Tab::Entry->columns(Others => qw/registered_by ada tba seed created_at timestamp/);
 
@@ -42,8 +43,14 @@ sub add_student {
 }
 
 sub rm_student { 
+
 	my ($self, $student) = @_;
-	my @existing = Tab::EntryStudent->search( student => $student, entry => $self->id );
+
+	my @existing = Tab::EntryStudent->search( 
+		student => $student,
+		entry   => $self->id 
+	);
+
 	foreach (@existing) { $_->delete; }
 	return;
 }
@@ -56,7 +63,10 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::EntrySetting->search(entry => $self->id, tag => $tag)->first;
+	my $existing = Tab::EntrySetting->search(
+		entry => $self->id,
+		tag   => $tag
+	)->first;
 
 	if (defined $value) {
 			

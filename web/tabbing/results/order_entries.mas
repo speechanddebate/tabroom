@@ -6,6 +6,9 @@
 	$breakout      => undef
 	$opp_wins_only => undef
 	$composite_set => undef
+	$tiebreak_set  => undef
+	$section_rank  => undef
+	$all_entries   => undef
 </%args>
 <%init>
 
@@ -26,38 +29,38 @@
 		|| $event_type eq "wudc";
 
 	my $tourn = $event->tourn;
+
 	my $seed = $tourn->start->epoch;
 
 	my $this_round_name = $round->name;
 
-	my $tiebreak_set;
-
 	if ($composite_set) {
-
-		$tiebreak_set = Tab::TiebreakSet->retrieve($composite_set);
 
 		# Check against composites of composites
 
-		foreach my $tiebreak ($tiebreak_set->tiebreaks) { 
+		foreach my $tiebreak ($composite_set->tiebreaks) { 
 
 			if ($tiebreak->child > 0) { 
 
 				$m->print('<div class="main">');
 
 				$m->print("<h3>No, not gonna do it</h3>");
-
 				$m->print('<p class="strong redtext">You have a composite rank based on other composite ranks. </p>');
-
 				$m->print('<p>That can lead to excessively long computation times and bring down the Tabroom server.</p>');
-
 				$m->print('<p>Thus, they are not permitted.  Please reconfigure your tiebreakers</p>');
+
+				$m->abort();
 
 			}
 
 		}
 
-	} else { 
+		$tiebreak_set = $composite_set;
+
+	} elsif (not defined $tiebreak_set) { 
+
 		$tiebreak_set = $round->tiebreak_set;
+
 	}
 
 	unless ($tiebreak_set) {  
@@ -109,7 +112,7 @@
 
 	my $wsdc_byes = $event_settings{"wsdc_bye_win_average"};
 
-	my $equal_elims++ if $tb_settings{"equal_elims"};
+	$section_rank++ if $tb_settings{"equal_elims"};
 
 	my $districts++ if $tourn_settings{"nsda_district"};
 
@@ -142,6 +145,7 @@
 		push @{$tb_tiers{$tb->priority}}, $tb;
 		push @{$tbid_tiers{$tb->priority}}, $tb->id;
 	}   
+
 
 	# Get the data you'll need for Teh Sortingz.
 	my $dbh = Tab::DBI->db_Main();
@@ -180,7 +184,7 @@
 			entry.id, entry.code, entry.name, entry.dq, entry.school,
 			round.type, round.name, round.id,
 			score.id, score.tag, score.value, 
-			ballot.judge, ballot.forfeit, ballot.bye, ballot.tv, ballot.chair,
+			ballot.id, ballot.judge, ballot.forfeit, ballot.bye, ballot.tv, ballot.chair,
 			panel.id, panel.bye, panel.letter
 
 		from (ballot, panel, round, entry)
@@ -205,19 +209,34 @@
 
 	$sth->execute($event->id);
 
+	my %already = ();
+
 	while (my (
 		$entry_id, $entry_code, $entry_name, $entry_dq, $entry_school_id,
 		$round_type, $round_name, $round_id,
 		$score_id, $score_tag, $score_value,
-		$ballot_judge, $ballot_forfeit, $ballot_bye, $ballot_tv, $ballot_chair,
+		$ballot_id, $ballot_judge, $ballot_forfeit, $ballot_bye, $ballot_tv, $ballot_chair,
 		$panel_id, $panel_bye, $panel_letter
 		)  = $sth->fetchrow_array()
 	) {
 
 		push @{$rounds{"panels"}{$round_id}}, $panel_id;
-		push @entries, $entry_id;
+
+		if ($all_entries) { 
+
+			push @entries, $entry_id unless $already{$entry_id}++;
+			$entries{"rounds"}{$entry_id}{$round_id}++;
+
+		} else { 
+			push @entries, $entry_id if $round_id == $round->id;
+		}
+
 		push @{$entries{"panels"}{$entry_id}}, $panel_id;
-		$entries{"round_panel"}{$round_id} = $panel_id;
+
+		unless ($entries{"round_panel"}{$entry_id}{$round_id}) { 
+			$entries{"round_panel"}{$entry_id}{$round_id} = $panel_id;
+			push @{$panels{"entries"}{$panel_id}}, $entry_id;
+		}
 
 		$entries{"code"}{$entry_id} = $entry_code;
 		$entries{"name"}{$entry_id} = $entry_name;
@@ -254,7 +273,6 @@
 
 		$panels{"section"}{$panel_id} = $panel_letter;
 		$panels{"roundname"}{$panel_id} = $round_name;
-		push @{$panels{"entries"}{$panel_id}}, $entry_id;
 	}
 
 	my %eligible = ();
@@ -457,7 +475,6 @@
 				if ($tb->count eq "previous") { 
 
 					%{$entries{"tb_wins"}{$tb->id}} = 
-
 						$m->comp("/funclib/entry_wins.mas", 
 							event => $event,
 							round => $round,
@@ -476,6 +493,38 @@
 
 					%{$entries{"tb_wins"}{$tb->id}} 
 						= $m->comp("/funclib/entry_wins.mas", 
+							event => $event,
+							round => $round,
+							type  => $tb->count
+						);
+
+				}
+
+			}
+
+			if ($tb->name eq "losses") { 
+
+				if ($tb->count eq "previous") { 
+
+					%{$entries{"tb_losses"}{$tb->id}} = 
+						$m->comp("/funclib/entry_losses.mas", 
+							event => $event,
+							round => $round,
+							last  => 1
+						);
+
+				} elsif ($tb->count eq "all") { 
+
+					%{$entries{"tb_losses"}{$tb->id}} 
+						= $m->comp("/funclib/entry_losses.mas", 
+							event => $event,
+							round => $round
+						);
+
+				} else { 
+
+					%{$entries{"tb_losses"}{$tb->id}} 
+						= $m->comp("/funclib/entry_losses.mas", 
 							event => $event,
 							round => $round,
 							type  => $tb->count
@@ -508,6 +557,7 @@
 			#Avoid recursion
 			next if $tb->child && $tb->child == $tiebreak_set;
 
+
 			my %comp_seen = (); 
 
 			my @comp_rounds =  @{$composite_rounds{$tb->id}} if $composite_rounds{$tb->id};
@@ -521,23 +571,25 @@
 				my ($entries_ref, @others) = $m->comp(
 					"/tabbing/results/order_entries.mas", 
 					round         => $rank_round,
-					composite_set => $tb->child->id
+					tiebreak_set  => $tb->child
 				);
 
 				my $full_entries_ref = pop @others;
 
 				my %absolute_rank;
 
-				foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
-					foreach my $entry (@{${$entries_ref}{$key}}) {
+				foreach my $key (sort {$a <=> $b} keys %{$full_entries_ref->{'by_place'}}) {
+
+					foreach my $entry (@{${$full_entries_ref->{"by_place"}}{$key}}) {
 						$absolute_rank{$entry} = $key;
 					}
 				}
 
 				foreach my $panel (@{$rounds{"panels"}{$rank_round}}) { 
 
-					my @entries = sort {$absolute_rank{$a} <=> $absolute_rank{$b}} @{$panels{"entries"}{$panel}};
-
+					my @entries = 
+						sort {$absolute_rank{$a} <=> $absolute_rank{$b}} 
+						@{$panels{"entries"}{$panel}};
 
 					my $rank;
 					my $last_rank;
@@ -567,6 +619,7 @@
 				}
 
 			}
+
 		}
 
 	}
@@ -700,6 +753,7 @@
 				|| $tb_name eq "reciprocals" 
 				|| $tb_name eq "points" 
 				|| $tb_name eq "ballots" 
+				|| $tb_name eq "rounds" 
 				|| $tb_name eq "judgepref" 
 				|| $tb_name eq "headtohead" 
 				|| $tb_name eq "opp_points" 
@@ -719,10 +773,12 @@
 				|| $tb_name eq "chair_ranks" 
 				|| $tb_name eq "rankinround" 
 				|| $tb_name eq "downs" 
+				|| $tb_name eq "losses" 
 				|| $tb_name eq "coinflip"
 			);
 
 			$tier_desc .= "+" if $tier_desc;
+
 			$tier_long_desc .= "+" if $tier_long_desc;
 
 			switch ($tb_name) { 
@@ -778,6 +834,12 @@
 					$tier_long_desc .= "Wins";
 				}
 
+				case "losses" {
+					$tier_desc .= "Prev " if $tb->count eq "previous";
+					$tier_desc .= "Loss";
+					$tier_long_desc .= "Losses";
+				}
+
 				case "downs" {
 					$tier_desc .= "Dwn";
 					$tier_long_desc .= "Ranked Down (Bottom Half of Room)";
@@ -819,6 +881,11 @@
 				case "ballots" {
 					$tier_desc .= "Bal";
 					$tier_long_desc .= "Ballot Total";
+				}
+
+				case "rounds" {
+					$tier_desc .= "Rnds";
+					$tier_long_desc .= "Rounds Debated In";
 				}
 			}
 
@@ -887,11 +954,11 @@
 			$tb_info{$tb->id}{"name"}          = $tb->name;
 			$tb_info{$tb->id}{"child"}         = $tb->child->id if $tb->child;
 			$tb_info{$tb->id}{"highlow"}       = $tb->highlow;
+			$tb_info{$tb->id}{"truncate"}      = $tb->truncate;
 			$tb_info{$tb->id}{"multiplier"}    = $tb->multiplier;
 			$tb_info{$tb->id}{"highlow_count"} = $tb->highlow_count;
 
 			foreach my $oround (@all_rounds) { 
-
 
 				if ($rounds{"type"}{$oround} eq $tb->count) { 
 					push (@{$tb_info{$tb->id}{"rounds"}}, $oround);
@@ -928,6 +995,7 @@
 
 				my $tb_highlow_count = $tb_info{$tb}{"highlow_count"};
 
+
 				if ($opp_wins_only) { 
 					$name = "opp_wins";
 					$opp_wins_done++;
@@ -943,9 +1011,17 @@
 
 				my $total; 
 
+				# WINS WINLOSS 
+
 				if ($name eq "winloss") { 
 
 					$total += sprintf("%d", 100 * $entries{"tb_wins"}{$tb}{$entry}) unless $skip_wins;
+
+				# LOSSES 
+
+				} elsif ($name eq "losses") { 
+
+					$total += sprintf("%d", 100 * $entries{"tb_losses"}{$tb}{$entry}) unless $skip_wins;
 
 				# RANKS RANKINGS RECIPS RECIPROCALS ONES TWOS
 
@@ -960,6 +1036,8 @@
 
 					my $count;
 					my $bye;
+
+					my $local_truncate = $tb_info{$tb}{"truncate"};
 
 					foreach my $this_round (@rounds) { 
 
@@ -1038,12 +1116,16 @@
 									
 									}
 
+									if ($local_truncate) { 
+										#Tiebreaker specific truncation limit
+										$rank = $local_truncate if $rank > $local_truncate;
+									}
+
 									#Rank cannot be greater than the size of the round
+									my $panel_id = $entries{"round_panel"}{$entry}{$this_round};
 
-									$rank = scalar @{$panels{"entries"}{$scores{"panel"}{$score}}} 
-
-										if $rank > scalar @{$panels{"entries"}{$scores{"panel"}{$score}}} 
-
+									$rank = scalar @{$panels{"entries"}{$panel_id}} 
+										if $rank > scalar @{$panels{"entries"}{$panel_id}}
 										&& $event_type ne "debate";
 
 								}
@@ -1122,6 +1204,7 @@
 
 						$total += sprintf("%d", $round_score) if $name eq "ranks" || $name eq "chair_ranks";
 
+
 					}
 
 					$bye = $bye - ($bye_min * $max_score_count{"rank"}) if $round_robin;
@@ -1148,15 +1231,16 @@
 
 					$entries{"ranks"}{$entry} = $total / $count if $count;
 	
-				# DOWNS DOUBLEDOWN
+				# DOWNS DOUBLEDOWN DROPS DOUBLEDROPS
 
 				} elsif ($name eq "downs") { 
 
 					foreach my $this_round (@rounds) { 
 
-						my $panel_id = $entries{"round_panel"}{$this_round};
+						my $panel_id = $entries{"round_panel"}{$entry}{$this_round};
 
 						my $rank = $entries{"composite_rank"}{$entry}{$this_round};
+
 						my $rank_count = $entries{"composite_rank_count"}{$panel_id}{$rank};
 
 						my $size_of_panel = 
@@ -1198,7 +1282,7 @@
 
 						}
 
-						my $rank_position = $rank + $rank_count - 1;
+						my $rank_position = $rank + ($rank_count - 1);
 
 						if ($rank_count > 1) { 
 
@@ -1430,9 +1514,20 @@
 					}
 
 					$total += sprintf("%d", 100 * $ballot_score);
+
+				# ROUNDS DEBATED IN
+
+				} elsif ( $name eq "rounds") { 					
+
+					my $num_rounds;
+
+					foreach my $this_round (@rounds) { 
+						$num_rounds++ if $entries{"rounds"}{$entry}{$this_round};
+					}
+
+					$total += sprintf("%d", 100 * $num_rounds);
 					
 				# COINFLIP RANDOM
-
 				} elsif ( $name eq "coinflip") { 
 
 					# This is only semi random; product of the date epoch and
@@ -1750,6 +1845,7 @@
 			}
 
 			$entries{"tbs"}{$entry."-".$key} = $tier_total;
+			$entries{"tiebreak"}{$key}{$entry} = $tier_total;
 
 		}
 
@@ -1788,7 +1884,7 @@
 
 	}
 
-	if ($equal_elims) { 
+	if ($section_rank) { 
 
 		foreach my $panel (@{$rounds{"panels"}{$round->id}}) { 
 
@@ -1835,8 +1931,10 @@
 
 			}
 
-			if ($tourn_settings{"nsda_speech_method"} eq "california" ||
-				$tourn_settings{"nsda_speech_method"} eq "california_twojudges") { 
+			if ($tourn_settings{"nsda_speech_method"} eq "california_2" ||
+				$tourn_settings{"nsda_speech_method"} eq "california_3") { 
+
+				Tab::debuglog("I am here!");
 
 				# At NSDA districts, California plan, three way ties should get
 				# the MIDDLE ranking.
@@ -1858,7 +1956,7 @@
 
 				foreach my $place (keys %{$entries{"panel_order"}{$panel}}) { 
 
-					foreach my $panel_entry (@{$entries{"panel_order"}{$panel}{$place}} == 3) { 
+					foreach my $panel_entry (@{$entries{"panel_order"}{$panel}{$place}}) { 
 						$entries{"panel_rank"}{$panel_entry} = $place;
 					}
 
@@ -1943,6 +2041,8 @@
 
 		push (@{$entries{"by_place"}{$count}}, $entry);
 
+		$entries{"seed"}{$entry} = $count;
+
 		@{$entries{"by_place"}{$count}} = sort @{$entries{"by_place"}{$count}};
 
 		#Normalize the 100x back to actual values
@@ -1954,12 +2054,17 @@
 			$entries{"tbs"}{$entry."-".$key} 
 				= nearest(.01, $entries{"tbs"}{$entry."-".$key});
 
-		}
+			$entries{"tiebreak"}{$key}{$entry} 
+				= $entries{"tiebreak"}{$key}{$entry} / 100;
 
+			$entries{"tiebreak"}{$key}{$entry}
+				= nearest(.01, $entries{"tiebreak"}{$key}{$entry});
+
+		}
 	}
 
-	if ($tourn_settings{"nsda_speech_method"} eq "california" ||
-		$tourn_settings{"nsda_speech_method"} eq "california_twojudges") { 
+	if ($tourn_settings{"nsda_speech_method"} eq "california_3" ||
+		$tourn_settings{"nsda_speech_method"} eq "california_2") { 
 
 		# At NSDA districts, three way ties should get the MIDDLE ranking.
 
