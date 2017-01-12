@@ -217,7 +217,6 @@ echo "<tr><td>Director and Coaches</td><td>".$coaches."</td></tr>";
 	$entry     = array();
 	$ballot_id = array();
 	$is_bye    = array();
-	
 	$oppn     = array();
 	$event    = array();
 	$x        = 0;
@@ -398,18 +397,16 @@ $query="
 				}
 			}
 
-		 	if ($row['ballot_bye'] == 1) {
+		 	if ($row['ballot_bye'] == 1) { 
 				$outcome[$x] = "Bye";
-				$is_bye[$x] = 1;
 			}
 
 		 	if ($row['ballot_forfeit'] == 1) { 
 				$outcome[$x] = "Fft";
-				$is_bye[$x] = 1;
 			}
 
 			if($balfor > $balvs) {$win[$x] = 1;}
-			if($balfor == $balvs && $is_bye[$x]==0 ) {$win[$x] = .5;}
+			if($balfor == $balvs) {$win[$x] = .5;}
 		 	$ballot_id[$x]=$ballotid;
 
          	$isprelim[$x]=1; 
@@ -482,7 +479,7 @@ $query="
 	$toteloss = 0;
 	$jvwin    = 0;
 	$jvloss   = 0;
-	
+
 	while ($i <= $x) {
 
 		if (
@@ -490,23 +487,24 @@ $query="
 			OR teammatch($spkr1[$i], $spkr2[$i], $student3, $student4)==TRUE
 		) {
 
-		 if ($win[$i]==1 and $isprelim[$i]==1 and $is_bye[$i]==0) {$pwin++;}
-		 if ($win[$i]==0 and $isprelim[$i]==1 and $is_bye[$i]==0) {$ploss++;}
+		 if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
+		 if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
 		 
 		 // if ($win[$i]==.5 and $isprelim[$i]==1) {$pwin = $pwin + .5;}
 		 // if ($win[$i]==.5 and $isprelim[$i]==1) {$ploss = $ploss + .5;}
 		 
-		 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1 and $is_bye[$i]==0) {$totewin++;}
-		 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1 and $is_bye[$i]==0) {$toteloss++;}
+		 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totewin++;}
+
+		 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$toteloss++;}
 
 		 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
 		 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
 
-		 if ($win[$i]==1 and $isopen[$i]==1 and $is_bye[$i]==0) {$totwin++;}
-		 if ($win[$i]==0 and $isopen[$i]==1 and $is_bye[$i]==0) {$totloss++;}
+		 if ($win[$i]==1 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totwin++;}
+		 if ($win[$i]==0 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totloss++;}
 		 
-		 if ($win[$i]==.5 and $isopen[$i]==1 and $is_bye[$i]==0) {$totwin = $totwin + .5;}
-		 if ($win[$i]==.5 and $isopen[$i]==1 and $is_bye[$i]==0) {$totloss = $totloss + .5;}
+		 if ($win[$i]==.5 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totwin = $totwin + .5;}
+		 if ($win[$i]==.5 and $isopen[$i]==1 and strrpos($outcome[$i], 'bye')===FALSE) {$totloss = $totloss + .5;}
 		 
 		 if ( isset($elim_key[$round_id[$i]]) ) {
 		   if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}

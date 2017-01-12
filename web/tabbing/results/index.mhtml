@@ -5,6 +5,7 @@
 	$round_id      => undef
 	$only_category => undef
 	$nsda          => undef
+	$composite_id  => undef
 </%args>
 <%init>
 
@@ -12,6 +13,7 @@
 
 	my $event = Tab::Event->retrieve($event_id) if $event_id;
 	my $round = Tab::Round->retrieve($round_id) if $round_id;
+	$event = $round->event if $round;
 
 	my @events = $only_category->events if $only_category;
 	@events = $tourn->events unless $only_category;
@@ -25,168 +27,36 @@
 
 	$m->abort unless $event;
 
-	my @rounds = $m->comp("/funclib/event_rounds.mas", 
-						event => $event, 
-						done => "yes");
+	my @rounds = $m->comp(
+		"/funclib/event_rounds.mas", 
+			event => $event, 
+			done => "yes"
+	);
 
-	$round = $m->comp("/funclib/event_current_round.mas", 
-						event => $event, 
-						done => "done") unless $round;
+	$round = $m->comp(
+		"/funclib/event_current_round.mas", 
+			event => $event, 
+			done => "done"
+	) unless $round;
 
 	$round = $rounds[0] unless $round;
 
-	my $novice = $event->setting("top_novice");
-
-	undef $novice if $novice eq "none";
-	my $team_points = $event->setting('team_points');
-
-	my %is_novice = (); 
-
-	if ($novice && $event) { 
-
-		foreach my $novice ($m->comp("/funclib/event_novii.mas", event => $event)) { 
-			$is_novice{$novice->id}++;
-		}   
-	}   
-
-	my %breakouts = ();
-
-	if ($event->setting("breakouts")) { 
-
-		foreach my $breakout (1 .. $event->setting("breakouts")) { 
-			$breakouts{$breakout}{"name"} = $event->setting("breakout_".$breakout."_label");
-
-			my @settings = $m->comp("/funclib/event_entry_settings.mas", 
-				event => $event,
-				tag   => "breakout_".$breakout);
-
-			foreach my $setting (@settings) { 
-				$breakouts{$breakout}{$setting->entry->id}++;
-			}
-		}
-	}
-
-	my %entry_ballots = ();
-
-	my %entry_names = $m->comp("/funclib/event_names.mas", event => $event);
-
-	my %rounds;
-
+	my @composites;
+	
 	if ($round) { 
 
-		my $points;
-		my $ranks;
-		my $wins;
-
-		next unless $round->tiebreak_set;
-
-		foreach my $tb ($round->tiebreak_set->tiebreaks) { 
-			$ranks++ if ($tb->name eq "ranks" 
-							|| $tb->name eq "reciprocals");
-
-			$wins++ if ($tb->name eq "opp_wins" 
-						|| $tb->name eq "winloss" 
-						|| $tb->name eq "ballots");
-
-			$points++ if ($tb->name eq "points" 
-						|| $tb->name eq "competition" 
-						|| $tb->name eq "opp_points");
-		}
-
-		my $dbh = Tab::DBI->db_Main();
-
-		my $sth = $dbh->prepare("
-			select distinct value.id, value.tag, value.value, 
-				ballot.entry, ballot.judge, 
-				panel.bye, 
-				ballot.bye, ballot.forfeit, ballot.chair, 
-				round.id, round.name, round_setting.value 
-			from round
-			left join panel on panel.round  =round.id
-			left join ballot on ballot.panel = panel.id
-			left join score value on value.ballot = ballot.id
-			left join round_setting on round_setting.round = round.id 
-				and round_setting.tag = 'ignore_results'
-
-			where round.name <= ? 
-			and round.event = ? 
-			order by round.name, ballot.entry, ballot.chair, ballot.judge, 
-				CASE value.tag 
-					WHEN ".' "ballot" 
-						then 1 when "rank" 
-						then 2 when "points" 
-						then 3 when "rebuttal_points" 
-						then 4 end'."
-		");
-
-		$sth->execute($round->name, $event->id); 
-
-		my %entry_round;
-		my %points_done;
-
-		while (my (
-			$id, $tag, $value, 
-			$entryid, $judge, 
-			$pbye, 
-			$bye, $forfeit, $chair,
-			$round_id, $roundname, $ignore_results) = $sth->fetchrow_array() ) { 
-
-			$rounds{$round_id}{"name"} = $roundname;
-
-			next if $tag eq "rank" && not defined $ranks;
-			next if $tag eq "points" && not defined $points;
-			next if $tag eq "ballot" && not defined $wins;
-
-			$entry_round{$entryid} = $roundname;
-
-			if ($ignore_results &! $entry_ballots{$entryid}{$roundname}) { 
-				$entry_ballots{$entryid}{$roundname} .= " Not Counted:  ";
+		if ($round->tiebreak_set) { 
+			foreach my $tiebreak ($round->tiebreak_set->tiebreaks) { 
+				push @composites, $tiebreak->child if $tiebreak->child > 0;
 			}
-
-			if ($tag eq "ballot") { 
-
-				if ($bye) { 
-					$entry_ballots{$entryid}{$roundname} .= "BYE ";
-				} elsif ($forfeit) { 
-					$entry_ballots{$entryid}{$roundname} .= "FFT " 
-				} else { 
-					$entry_ballots{$entryid}{$roundname} .= "W  " if $value > 0;
-					$entry_ballots{$entryid}{$roundname} .= "L  " if $value < 1;
-				}
-			
-			} elsif ($tag eq "points") { 
-
-				unless ($team_points && $points_done{$entryid."-".$judge."-".$roundname}++) { 
-					foreach (length($value) .. 5) { 
-						$value .= "&nbsp;";
-					}
-					$entry_ballots{$entryid}{$roundname} .= $value." " if defined $value;
-				}
-
-			} elsif ($tag eq "rank") { 
-
-				$entry_ballots{$entryid}{$roundname} .= $value." " if defined $value;
-			} elsif ($pbye) { 
-				$entry_ballots{$entryid}{$roundname} .= "BYE "; 
-			} elsif ($bye) { 
-				$entry_ballots{$entryid}{$roundname} .= "BYE "; 
-			}
-
 		}
 
 	}
 
-	$round_id = $round->id if $round;
+	my %seen;
+	@composites = grep { ! $seen{$_->id} ++ } @composites;
 
-	my $codes = $event->setting("code_style") if $event;
-
-	my $no_school++ if ($codes eq "school_number" 
-		|| $codes eq "school_names" 
-		|| $codes eq "initials" 
-		|| $codes eq "school_name_only" 
-		|| $codes eq "schoolname_code" 
-		|| $codes eq "full_initials");
-
+	my $composite_set = Tab::TiebreakSet->retrieve($composite_id) if $composite_id;
 
 </%init>
 
@@ -233,13 +103,34 @@
 					</h5>
 
 					<form action="index.mhtml" method="post">	
-					<input type="hidden" name="event_id" value="<% $event->id %>">
 
-					<select name="round_id" onchange='this.form.submit()' class="fixedmed chosen">
+					<input 
+						type  = "hidden"
+						name  = "event_id"
+						value = "<% $event->id %>"
+					>
+
+					<input 
+						type  = "hidden"
+						name  = "composite_id"
+						value = "<% $composite_id %>"
+					>
+
+					<select 
+						name     = "round_id"
+						onchange = 'this.form.submit();'
+						class    = "fixedmed chosen"
+					>
+
 %						foreach my $oround (sort {$b->name <=> $a->name} @rounds) {
+
 %							next unless $oround && $oround->id;
 %							next unless $round && $round->id;
-							<option value="<% $oround->id %>" <% $round && $oround->id == $round->id ? "selected" : "" %>> <% $oround->realname %> </option>
+
+							<option 
+								value="<% $oround->id %>" 
+								<% $round && $oround->id == $round->id ? "selected" : "" %>
+							> <% $oround->realname %> </option>
 %						}
 
 					</select>
@@ -247,294 +138,55 @@
 %				}
 			</span>
 
-			<span class="tenth rightalign nospace">
+			<span class="eighth rightalign nospace">
+
 %				if ($round) { 
-					<a class="dkblue button" href="csv.mhtml?round_id=<% $round_id %>&event_id=<% $event->id %>" >
-						Spreadsheet
+					<a 
+						class="dkblue buttonwhite greentext fa fa-lg fa-file-excel-o"
+						href="csv.mhtml?round_id=<% $round->id %>" >
+					</a>
+
+					<a 
+						class="dkblue buttonwhite redtext fa fa-lg fa-file-pdf-o"
+						href="/tabbing/report/prelims_order.mhtml?round_id=<% $round->id %>" >
 					</a>
 %				}
+
 			</span>
 
 		</div>
 
-		<br />
+%         if ($round) { 
 
-%		if ($round) { 
+%				if (@composites || $event->setting("speaker_tbset")) { 
 
-<%perl>
+					<ul id="tabnav" class="padno">
 
-			my $equal_elims++ 
-				if $round->tiebreak_set->setting("equal_elims") 
-				&& $round->type eq "elim";
+						<li class="<% $composite_id ? "" : "selected" %>">
+							<a href="index.mhtml?event_id=<% $event->id %>&round_id=<% $round->id %>">Entries in Order</a>
+						</li>
 
-			my $round_robin++ 
-				if $event->setting("round_robin") 
-				&& $round->type ne "elim" 
-				&& $round->type ne "final";
+%						foreach my $composite (@composites) { 
 
-			my (	$entries_by_rank_ref,
-					$tbs_ref,
-					$desc_ref, 
-					$forfeit_ref,
-					$meh,
-					$panrank_ref,
-					$panletter_ref, 
-					$long_desc_ref,
-					$uh,
-					$no,
-					$thanks,
-					$entries_ref
-				) 
-					
-					= $m->comp("order_entries.mas", 
-						long_names => 1,
-						round      => $round,
-						nsda       => $nsda
-					);
-
-			my %id_entry = map {$_->id => $_ } $event->entries;
-
-</%perl>
-
-%			if ($event && ($event->type ne 'speech' && $event->type ne 'congress') &! ($team_points)) {
-				<ul id="tabnav" class="padno">
-
-					<li class="selected">
-						<a href="index.mhtml?event_id=<% $event->id %>&round_id=<% $round->id %>">Entries in Order</a>
-					</li>
-
-					<li>
-						<a href="speakers.mhtml?event_id=<% $event->id %>&round_id=<% $round->id %>">Speakers in Order</a>
-					</li>
-
-				</ul>
-%			}
-
-			<table id="sortme">
-
-				<thead>
-					<tr class="yellowrow"> 
-
-						<th class="smallish">
-						</th>
-
-						<th class="smallish">
-							Code
-						</th>
-
-%						if ($novice) { 
-							<th class="smaller centeralign">
-								Nov
-							</th>
-%						} 
-
-%						foreach my $break (keys %breakouts) { 
-							<th class="smallish centeralign">
-								<% $breakouts{$break}{"name"} %>
-							</th>
+							<li class="<% $composite_id == $composite->id ? "selected": "" %>">
+								<a href="index.mhtml?composite_id=<% $composite->id %>&event_id=<% $event->id %>&round_id=<% $round->id %>">
+									<% $composite->name %>
+								</a>
+							</li>
 %						}
 
-%						unless ($codes eq "names" || $codes eq "last_names" || $codes eq "names_lastfirst") { 
-							<th class="smallish">
-								Name
-							</th>
-%						} 
-
-%						unless ($no_school) { 
-							<th class="smallish">
-								School
-							</th>
-%						} 
-
-%						if ($equal_elims) { 
-
-							<th class="smallish">
-								<span title="Rank within Section or Chamber">
-									ScRk
-								</span>
-							</th>
-							<th class="smallish">
-								<span class="Section or Chamber">
-									Sec
-								</span>
-							</th>
-
-%						} elsif ($round_robin) { 
-
-							<th class="smallish">
-								<span title="Rank within Pod">
-									PdRk
-								</span>
-							</th>
-							<th class="smallish">
-								<span class="Pod">
-									Pod
-								</span>
-							</th>
+%						if ($event->setting("speaker_tbset")) { 
+							<li>
+								<a href="speakers.mhtml?event_id=<% $event->id %>&round_id=<% $round->id %>">Speakers in Order</a>
+							</li>
 %						}
 
-%						foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 
-							<th class="smallish">
-								<span title="<% ${$long_desc_ref}{$key} %>">
-									<% ${$desc_ref}{$key} %>
-								</span>
-							</th>
-%						}
+					</ul>
+%           	}
 
-					</tr>
+%          	}
 
-				</thead>
-
-				<tbody>
-
-<%perl>
-
-					my $count = 1;
-
-					if ($entries_by_rank_ref) { 
-
-						my $last_tied;
-
-						foreach my $key (sort {$a <=> $b} keys %{$entries_by_rank_ref}) { 
-
-							my $tie++ if scalar @{${$entries_by_rank_ref}{$key}} > 1;
-
-							undef $tie 
-								if $round->type eq "elim" 
-								&& $event->type ne "speech" 
-								&& $event->type ne "congress";
-
-							foreach my $entry_id (@{${$entries_by_rank_ref}{$key}}) { 
-
-								my $entry = $id_entry{$entry_id};
-
-								next unless $entry;
-
-</%perl>
-								<tr
-									class="<% $tie ? "lirdrow " : "" %> 
-									<% $tie && $last_tied ? "libordertop" : "" %>"
-								>
-
-%									undef $last_tied;
-
-									<td class="centeralign smallish nowrap nospace">
-										<% $key %>
-									</td>
-
-<%perl>
-
-									$m->print('<td class="smallish nospace padleft hover" title="Ballots:'."\n");
-
-										foreach my $round_id (
-											sort {$rounds{$a}{"name"} <=> $rounds{$b}{"name"}} keys %rounds 
-										) { 
-
-											my $roundname = $rounds{$round_id}{"name"};
-
-											$m->print($roundname.": ");
-
-											$m->print("\n") unless $entry_ballots{$entry_id}{$roundname};
-
-											next unless $entry_ballots{$entry_id}{$roundname};
-
-											$m->print($entry_ballots{$entry_id}{$roundname});
-
-											if ($entries_ref->{"composite_rank"}{$entry_id}{$round_id}) { 
-												$m->print("(".$entries_ref->{"composite_rank"}{$entry_id}{$round_id}.")");
-											}
-
-											$m->print("\n");
-										}
-
-										$m->print(" (Noshowed) ") if ${$forfeit_ref}{$entry_id};
-
-										$m->print('">');
-
-</%perl>
-										<% $entry->code %>
-									</td>
-
-%									if ($novice) {
-										<td class="smallish centeralign">
-											<% $is_novice{$entry_id} ? " Nov " : "" %>
-										</td>
-%									}
-
-%									foreach my $break (keys %breakouts) { 
-										<td class="smallish centeralign">
-											<% $breakouts{$break}{$entry->id} ? $breakouts{$break}{"name"} : "" %>
-										</td>
-%									}
-
-<%perl>
-
-									unless ($codes eq "names" 
-										|| $codes eq "last_names" 
-										|| $codes eq "names_lastfirst"
-									) { 
-</%perl>
-
-										<td class="smallish" title="<% $entry_names{$entry->id} %>">
-											<% $entry->name %> 
-										</td>
-%									}
-
-%									unless ($no_school) { 
-										<td class="smallish">
-											<% $entry->school->short_name %>
-										</td>
-%									}
-
-%									if ($equal_elims || $round_robin) { 
-
-										<td class="smallish">
-											<% ${$panrank_ref}{$entry_id} %> 
-										</td>
-
-										<td class="smallish">
-											<% $entries_ref->{"section"}{$entry_id} %>
-										</td>
-%									}
-
-%									foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 
-
-<%perl>
-
-										my $value = ${$tbs_ref}{$entry_id."-".$key};
-										$value =~ s/\.(?:|.*[^0]\K)0*\z//;
-										$value = sprintf("%.2f", $value) 
-											unless ${$desc_ref}{$key} eq "Rk" 
-											|| ${$desc_ref}{$key} eq "W" 
-											|| ${$desc_ref}{$key} eq "H2H" 
-											|| ${$desc_ref}{$key} eq "Bal";
-
-</%perl>
-
-										<td class="smallish nowrap rightalign">
-											<% $value %>
-										</td>
-%									}
-
-								</tr>
-
-%							}
-
-%							$last_tied++ if $tie;
-
-%						} 
-
-%					}
-
-				</tbody>
-
-			</table>
-
-%			if ($novice) { 
-				<p class="explain">(N) desginates all-novice teams</p>
-%			} 
-
-%		}
+		<& "results_table.mas", round => $round, tiebreak_set => $composite_set, section_rank => $composite_set &>
 	
 	</div>
 
