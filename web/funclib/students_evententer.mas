@@ -8,13 +8,23 @@
 <%init>
 
 	my $tourn = $event->tourn;
-
 	$m->redirect('/user/home.mhtml') unless $tourn;
+	
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
 
-	my $double_entry = $tourn->setting("double_entry");
-	my $double_max = $tourn->setting("double_max");
-
+	my %tourn_settings = $tourn->all_settings;
 	my %event_settings = $event->all_settings;
+
+	my $double_entry = $tourn_settings{"double_entry"};
+	my $double_max = $tourn_settings{"double_max"};
+
+	my $nsda_district_id = $tourn_settings{"nsda_district"};
+	my $nsda_district;
+
+	$nsda_district = 
+		Tab::District->retrieve($nsda_district_id) 
+		if $nsda_district_id;
 
 	my $enter_me_twice = $event_settings{"enter_me_twice"};
 
@@ -67,7 +77,7 @@
 	my @clean_students;
 	my @students;
 
-	my $wsdc = $tourn->setting("usa_wsdc");
+	my $wsdc = $tourn_settings{"usa_wsdc"};
 
 	if ($wsdc && not defined $school->chapter) { 
 
@@ -78,7 +88,11 @@
 	} else { 
 
 		$chapter = $school->chapter if $school;
-		@students = sort {ucfirst $a->last cmp ucfirst $b->last} $chapter->students if $chapter;
+
+		@students = 
+			sort {ucfirst $a->last cmp ucfirst $b->last} 
+			$chapter->students 
+			if $chapter;
 	}
 
 	unless ($chapter) { 
@@ -90,8 +104,14 @@
 	# restricted against this one.
 
 	my $now = DateTime->now;
+	$now->set_time_zone($tz);
+
 	my $year = $now->year;
 	$year++ if $now->month > 6;
+
+	my $nsda_deadline = $tourn->start;
+	$nsda_deadline->set_time_zone($tz);
+	$nsda_deadline->subtract( days => 7 );
 
 	my %entry_by_id = ();
 
@@ -105,10 +125,11 @@
 		select distinct entry_student.*
 		from entry_student, entry, student, event
 		where entry.id = entry_student.entry
-		and entry_student.student = student.id and student.chapter = ?
+		and entry_student.student = student.id 
+		and student.chapter = ?
 		and entry.event = event.id
 		and event.tourn = ? 
-		");
+	");
 
 	my %entries_by_student = ();
 
@@ -126,13 +147,52 @@
 	my %pattern_by_event = map {$_->id => $_->pattern} $tourn->events;
 
 	my %done;
+	my %district_entry;
 
-	my $count;
+	if ($nsda_district) { 
+
+		%district_entry = $m->comp(
+			"/funclib/district_entry.mas", 
+			chapter => $chapter
+		);
+
+	}
 
 	STUDENT:
 	foreach my $student (@students) { 
 
-		next if $done{$student->id}++;
+		my $student_id = $student->id;
+
+		next if $done{$student_id}++;
+
+		# If this is districts, students who are not NSDA members in good
+		# standing and with linked email addresses
+
+		if ($nsda_district) { 
+
+			my %student_settings = $student->all_settings;
+
+			next STUDENT unless $student_settings{"nsda_paid"};
+			next STUDENT unless $student_settings{"nsda_points"} > 24;
+			next STUDENT unless $student_settings{"nsda_joined"} < $nsda_deadline;
+			next STUDENT unless $student_settings{"student_email"};
+
+			if ($event->type eq "congress") { 
+
+				next STUDENT if $district_entry{"in_event"}{$student_id}{"HOU"};
+				next STUDENT if $district_entry{"in_event"}{$student_id}{"SEN"};
+
+			} else { 
+
+				if ($event->abbr eq "PF" || $event->abbr eq "CX") { 
+					next STUDENT if $district_entry{"in_event"}{$student_id}{"CX"};
+					next STUDENT if $district_entry{"in_event"}{$student_id}{"PF"};
+				}
+
+				next STUDENT if $district_entry{"student_count"}{$student_id} > 1;
+			}
+
+		}
 
 		# Students who aren't students anymore.
 
@@ -149,8 +209,8 @@
 		}
 
 		# Class specific double entry restrictions 
-		my @entries = @{$entries_by_student{$student->id}} 
-			if $entries_by_student{$student->id};
+		my @entries = @{$entries_by_student{$student_id}} 
+			if $entries_by_student{$student_id};
 
 		# Supplementals are only open to students entered in the tournament
 		next STUDENT if $supp &! @entries;
@@ -175,7 +235,8 @@
 
 				# Am I already entered in this event?
 
-				next STUDENT if $this_event_id == $event->id && not defined $enter_me_twice;
+				next STUDENT if $this_event_id == $event->id 
+					&& not defined $enter_me_twice;
 
 				# Am I already entered in the tournament and in off the
 				# waitlist? 
@@ -238,7 +299,7 @@
 
 					my $other_student = Tab::Student->search_clash_on_only_one(
 						$event->id, 
-						$student->id, 
+						$student_id, 
 					)->first;
 
 					next STUDENT if $other_student;
