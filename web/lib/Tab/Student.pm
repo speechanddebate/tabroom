@@ -11,7 +11,8 @@ Tab::Student->has_a(chapter => 'Tab::Chapter');
 Tab::Student->has_a(person => 'Tab::Person');
 Tab::Student->has_a(person_request => 'Tab::Person');
 
-Tab::Student->has_many(entries => [Tab::EntryStudent => 'entry']);
+Tab::Student->has_many(settings => 'Tab::StudentSetting', 'student');
+Tab::Student->has_many(entries => [ Tab::EntryStudent => 'entry']);
 Tab::Student->has_many(entry_students => 'Tab::EntryStudent', 'student');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
@@ -90,4 +91,23 @@ sub setting {
 	}
 
 }
+
+sub all_settings { 
+
+	my $self = shift;
+
+	my @settings = $self->settings;
+
+	my %all_settings;
+
+	foreach my $setting (@settings) { 
+		$all_settings{$setting->tag} = $setting->value;
+		$all_settings{$setting->tag} = $setting->value_text if $all_settings{$setting->tag} eq "text";
+		$all_settings{$setting->tag} = $setting->value_date if $all_settings{$setting->tag} eq "date";
+	}
+
+	return %all_settings;
+
+}
+
 
