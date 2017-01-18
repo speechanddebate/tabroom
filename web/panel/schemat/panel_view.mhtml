@@ -1,0 +1,1273 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$panel_id
+	$judge_id => undef
+	$from     => undef
+	$perms    => undef
+</%args>
+<%init>
+
+	use Math::Round;
+	use POSIX;
+
+	my $panel = Tab::Panel->retrieve($panel_id);
+
+	$m->redirect("/setup/tourn/main.mhtml?err=Could%20not%20retrieve%20requested%20panel.") 
+		unless $panel;
+
+	my %settings;
+
+	$m->comp("/funclib/panel_dedupe.mas", panel => $panel);
+
+	$settings{"ncfl"}++ if $tourn_settings->{"ncfl"};
+	$settings{"region"}++ if $tourn_settings->{"regions"};
+	$settings{"online_debates"}++ if $tourn_settings->{"googleplus"};
+
+	my $entry_only++ if ${$perms}{"entry_only"};
+	$entry_only++ if ${$perms}{"limited"} &! ${$perms}{"registration"};
+
+	unless ($panel) { 
+		$m->print("You did not select an existing panel.  Hit back and try again");
+		$m->abort;
+	}
+
+	my $round = $panel->round;
+
+	$settings{"flighted"} = $round->flighted;
+
+	my @scores = $m->comp(
+		"/funclib/panel_scores.mas",
+		panel => $panel
+	);
+
+	my $timeslot = $round->timeslot;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+	my $start = $timeslot->start->set_time_zone($tz);
+
+	my $event = $round->event;
+
+	my %judge_sites = ();
+
+	if ($event->setting('wsdc_multiple_sites')) { 
+
+		my @round_sites = $m->comp("/funclib/round_sites.mas", round => $round);
+
+		my %site_name = map {$_->id => $_->name} @round_sites;
+
+		my $round_time = $round->timeslot->start;
+
+		my $today_start_string = $round_time->year."-".$round_time->month."-".$round_time->day." 00:00:00";
+
+		my $today_end_string = $round_time->year."-".$round_time->month."-".$round_time->day." 23:59:59";
+
+		Tab::Round->set_sql( today => " 
+			select round.* 
+			from round, timeslot
+			where round.timeslot = timeslot.id
+			and timeslot.start > ?
+			and timeslot.start < ? 
+			and round.event = ? 
+		");
+
+		my @todays_rounds = Tab::Round->search_today( 
+			$today_start_string, 
+			$today_end_string, 
+			$round->event->id
+		);
+
+		foreach my $today (@todays_rounds) { 
+
+			next if $today->id == $round->id;
+
+			my @judges = $m->comp("/funclib/round_judges.mas", round => $today);
+
+			%judge_sites = map {$_->id => $site_name{$_->site}} @judges;
+
+			undef @judges;
+		}   
+
+		$settings{"judge_sites"} = \%judge_sites;
+		
+	}
+
+	$settings{"region"}++ if $event->setting("region_avoid");
+	$settings{"region"}++ if $event->setting("region_constrain");
+
+	my $category = $event->category;
+
+	if ($category->setting("conflict_region_judges")) { 
+
+		$settings{"dio_regions"}++;
+
+        foreach my $diocese ($m->comp("/funclib/tourn_regions.mas", tourn => $tourn)) { 
+			$settings{"dio_region"}{$diocese->code} = $diocese->setting("region-".$event->id);
+		}
+	}
+	
+	my $aff_string = $event->setting("aff_label");
+	my $neg_string = $event->setting("neg_label");
+	$aff_string = "Aff" unless $aff_string;
+	$neg_string = "Neg" unless $neg_string;
+
+	$start->add(minutes => $event->setting("flight_offset") * ($panel->flight - 1));
+
+	my $live_updates++ if $event->setting('live_updates');
+
+	my @judges = $m->comp(
+		"/funclib/panel_judges.mas", 
+		panel => $panel);
+
+	my %entry_wins = $m->comp(
+		"/funclib/entry_wins.mas", 
+			event => $round->event,
+			round => $round
+		);
+
+	my %entry_losses = $m->comp(
+		"/funclib/entry_losses.mas", 
+		event => $round->event,
+		round => $round
+	);
+
+	my @reserved_rooms;
+
+	foreach my $judge (@judges) {
+		my $r_id = $judge->setting('room_reserved');
+		my $r2 = Tab::Room->retrieve($r_id) if $r_id;
+		push @reserved_rooms, $r2 if $r2;
+	}
+
+	my @entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
+
+	$settings{"coach_ratings"}++ if $category->setting("coach_ratings");
+	$settings{"tab_ratings"}++ if $category->setting("tab_ratings");
+	$settings{"prefs"} = $category->setting("prefs");
+
+	if ($settings{"prefs"} eq "ndt") { 
+		$settings{"prefs"} = "ordinals";
+		$settings{"prefs"} = "tiered" if $round->type eq "elim";
+		$settings{"prefs"} = "tiered" if $round->type eq "final";
+		$settings{"prefs"} = "ordinals" if $round->name == 9;
+	}
+
+	undef $settings{"prefs"} if $settings{"prefs"} eq "none";
+
+	$settings{"no_judge_codes"}++ if $category->setting("no_codes");
+	$settings{"no_school_codes"}++ if $tourn_settings->{"school_codes"} eq "none";
+	$settings{"diversity"}++ if $category->setting("track_diversity");
+
+	my %judge_tab_ratings  = ();
+
+	if ($settings{"tab_ratings"}) { 
+
+		my @all_tab_ratings = $m->comp(
+			"/funclib/category_judge_settings.mas", 
+			category => $category,
+			tag      => "tab_rating"
+		);
+
+		%judge_tab_ratings = map {$_->judge->id, $_->value} @all_tab_ratings;
+	}
+
+	my %rating_by_judge = ();
+
+	if ($settings{"coach_ratings"}) { 
+
+		my @ratings = $m->comp(
+			"/funclib/category_ratings.mas", 
+			event => $event,
+			type  => "coach"
+		);
+
+		my @tiers = $category->rating_tiers;
+		my %tier_names = ();
+
+		foreach my $tier (@tiers) { 
+			$tier_names{$tier->id} = $tier->name;
+		}
+
+		foreach my $rating (@ratings) { 
+			$rating_by_judge{$rating->judge->id} = $tier_names{$rating->rating_tier->id} 
+				if $rating && $rating->rating_tier;
+		}
+
+	}
+
+	$settings{"rating_by_judge_ref"} = \%rating_by_judge;
+	$settings{"rounds_per"} = $category->setting("rounds_per");
+
+	my $section = "Debate";
+	$section = "Section" if $event->type eq "speech";
+	$section = "Chamber" if $event->type eq "congress";
+
+	my $room = $panel->room if $panel->room;
+	my $panel_room = $room->id if $room;
+
+	my $last_round;
+	foreach my $other_round (sort {$a->name <=> $b->name} $event->rounds) { 
+		$last_round  = $other_round unless $other_round->name >= $round->name;
+	}
+
+	my $judge_use_ref = $m->comp(
+		"/funclib/judge_use.mas", 
+			round_id   => $round->id,
+			limit_past => 1
+		); 
+
+	$settings{"judge_use_ref"} = $judge_use_ref;
+
+	my %judge_use = %{$judge_use_ref};
+
+	my $round_type = $round->type;
+	$round_type = "flip" if $event->setting("no_side_constraints");
+
+	my $judge_indicator;
+
+	# Judges who are not judging this round
+
+	my @good_judges = $m->comp("/funclib/clean_judges.mas", panel => $panel);
+
+		@good_judges = sort {$a->code cmp $b->code} @good_judges;	
+		@good_judges = sort {$b->score <=> $a->score} @good_judges;	
+
+		@good_judges = sort {$rating_by_judge{$a->id} cmp $rating_by_judge{$b->id}} @good_judges 
+			if $settings{"coach_ratings"};	
+
+		@good_judges = sort {length($rating_by_judge{$b->id}) <=> length($rating_by_judge{$a->id})} @good_judges 
+			if $settings{"coach_ratings"};	
+
+		@good_judges = sort {$judge_tab_ratings{$a->id} <=> $judge_tab_ratings{$b->id}} @good_judges 
+			if $settings{"tab_ratings"};
+
+	# These are judges who are already judging in this round but could be
+	# stolen to judge this one. Useful for preffed divisions
+
+	my @busy_judges = $m->comp(
+		"/funclib/clean_judges.mas", 
+		panel     => $panel,
+		stealable => "daveroberts"
+	);
+
+		@busy_judges = sort {$a->code cmp $b->code} @busy_judges;	
+		@busy_judges = sort {$a->score <=> $b->score} @busy_judges;	
+
+		@busy_judges = sort {$rating_by_judge{$a->id} cmp $rating_by_judge{$b->id}} @busy_judges 
+			if $settings{"coach_ratings"};	
+
+		@busy_judges = sort {length($rating_by_judge{$b->id}) <=> length($rating_by_judge{$a->id})} @busy_judges 
+			if $settings{"coach_ratings"};	
+
+		@busy_judges = sort {$judge_tab_ratings{$a->id} <=> $judge_tab_ratings{$b->id}} @busy_judges 
+			if $settings{"tab_ratings"};
+
+	my $affref;
+	my $negref;
+	my $diffref;
+
+	my %others = $m->comp(
+		"/funclib/round_judge_panels.mas", 
+		round  => $round,
+		flight => $panel->flight
+	);
+
+	$settings{"others_ref"} = \%others;
+
+	if ($settings{"prefs"}) { 
+
+		my $mutuality = $category->setting("mutuality");
+		my $preference = $category->setting("preference");
+		$mutuality = 40 unless $mutuality;
+		$preference = 20 unless $preference;
+
+		($affref, $negref, $diffref) = $m->comp(
+			"/funclib/panel_ratings.mas", 
+			panel => $panel,
+			type  => $settings{"prefs"}
+		);
+
+		$settings{'affref'} = $affref;
+		$settings{'negref'} = $negref;
+
+		my %sort_score;
+
+		foreach my $gj (@good_judges) { 
+			${$diffref}{$gj->id} = 110 unless defined ${$diffref}{$gj->id};
+			$sort_score{$gj->id} = ${$diffref}{$gj->id} * $mutuality 
+				+ (${$affref}{$gj->id} + ${$negref}{$gj->id}) * $preference;
+		}
+
+		foreach my $bj (@busy_judges) { 
+			${$diffref}{$bj->id} = 110 unless defined ${$diffref}{$bj->id};
+			$sort_score{$bj->id} = ${$diffref}{$bj->id} * $mutuality 
+				+ (${$affref}{$bj->id} + ${$negref}{$bj->id}) * $preference;
+		}
+
+		@good_judges = sort {$sort_score{$a->id} <=> $sort_score{$b->id}} @good_judges;
+
+		@busy_judges = sort {$sort_score{$a->id} <=> $sort_score{$b->id}} @busy_judges;
+	}
+
+	my %burned;
+
+	if ($settings{"rounds_per"} && $round_type ne "elim" && $round_type ne "final") { 
+		foreach my $gj (@good_judges) { 
+			$burned{$gj}++ if $judge_use{$gj->id}{'left'} < 1;
+		}
+		@good_judges = sort {$burned{$a} <=> $burned{$b}} @good_judges;
+	}
+
+	my $aff = $m->comp("/funclib/round_elim_dueaff.mas", panel => $panel);
+	undef $aff if $round_type eq "flip";
+
+	my %judge_strings; 
+	my %judge_headers; 
+
+	my $active;
+
+	my %good_fields = $m->comp(
+		"/funclib/judge_swaplabels.mas", 
+		judge_array_ref => \@good_judges,
+		settings_ref    => \%settings
+	);
+
+	my %busy_fields = $m->comp(
+		"/funclib/judge_swaplabels.mas", 
+		judge_array_ref => \@busy_judges,
+		settings_ref    => \%settings,
+		busy            => 1
+	);
+
+</%init>
+
+
+	<div class="main">
+
+		<h3><% $round->realname %> <% $section %> <% $panel->letter %> of <% $event->abbr %></h3>
+
+%		if ($panel_room == -2) {
+
+			<div class="warn smallish">
+
+				NOTE: Hangouts On Air require multiple steps to properly set up
+				and send out invitations. 
+				
+				<a 
+					href    = "#"
+					onClick = "$('#dialog').dialog({modal: true}); return false;"
+					>Information 
+					
+					<img 
+						src   = "/lib/images/info.png"
+						alt   = "Info"
+						style = "vertical-align:middle"
+					></a>
+
+			</div>
+
+			<div 
+				id    = "dialog"
+				title = "Hangout On Air Setup Information"
+				style = "display:none"
+			>
+
+				<p>
+					A Hangout On Air needs to be created by a user that will be
+					available during the scheduled debate time to Start and Run
+					the Hangout On Air, and that is not the Hangout Chair.
+				</p>
+
+				<p>
+					This person will be responsible for starting and managing
+					the broadcast of the event, and for providing the Invite
+					URL that will be sent to participants through Tabroom.
+				</p>
+
+				<p>
+					If this is your first Hangout On Air debate read the 
+					<a href="https://www.tabroom.com/docs/wiki/Hangouts_Integration" target="_blank">
+						support documentation here
+					</a>.
+				</p>
+
+			</div>
+%		}
+
+%		if ($panel_room == -1 && !$panel->invites_sent) {
+
+			<div class="warn smallish">
+				This round is set up as a Google Hangout. Once all entries and
+				judges are finalized remember to "Send Invites". This will
+				create the Hangout event and send out invite links to all
+				participants.
+			</div>
+%		}
+
+		<h4>Judges</h4>
+
+		<& /funclib/tablesorter.mas, table => 'sortmebaby' &>
+		
+		<table id="sortmebaby">
+
+%			if (@judges) { 
+
+				<thead>
+
+				<tr class="yellowrow">
+
+					<th class="smaller">
+%						if ($event->type eq "congress") { 
+							Parli
+%						} else { 
+							Chair
+%						} 
+					</th>
+
+					<th class="smaller">
+						Judge
+					</th>
+
+%	 				if ($live_updates) { 
+						<th class="smaller">
+							Foll
+						</th>
+%					}
+
+%					if ($settings{"rounds_per"}) { 
+						<th class="smaller">
+							Use
+						</th>
+%					}
+
+%	 				if ($settings{"coach_ratings"} || $settings{"tab_ratings"}) { 
+						<th class="smaller">
+							Rate
+						</th>
+%					}
+
+%	 				if ($settings{"diversity"}) { 
+						<th class="smaller" title="Diverse">
+							Div.
+						</th>
+%					}
+
+
+%	 				if ($settings{"prefs"}) { 
+						<th class="smaller">
+							Prefs
+						</th>
+						<th class="smaller">
+							Avg
+						</th>
+%					}
+
+%					if ($settings{"ncfl"}) { 
+
+						<th class="smaller">
+							Dio
+						</th>
+
+%						if ($settings{"dio_regions"}) { 
+							<th class="smaller">
+								Reg
+							</th>
+%						}
+
+%					} elsif ($settings{"region"}) { 
+						<th class="smaller">
+							Region
+						</th>
+%					}
+
+					<th class="smaller">
+						School
+					</th>
+
+					<th class="nosort smaller" colspan="2">
+						Remove
+					</th>
+
+%					if ($panel_room < 0) {
+						<th class="smaller">
+							Hangout Chair
+						</th>
+%					}
+
+				</tr>
+
+				</thead>
+
+%			}
+
+			<tbody>
+
+% 			foreach my $judge (@judges) { 
+
+%				my $rating_name = $rating_by_judge{$judge->id};
+
+				<tr>
+
+					<td class="smaller centeralign nospace">
+
+						<a 
+							class="buttonwhite <% $judge->chair ? "greentext" : "redtext" %> strong bigger padless"
+							href="chair_switch.mhtml?judge_id=<% $judge->id %>&panel_id=<% $panel->id %>"i
+						><% $judge->chair ? "Y" : "N" %></a>
+					</td>
+
+					<td class="smallish" align="left">
+%						unless ($entry_only) { 
+							<a class="white" href="/register/judge/edit.mhtml?judge_id=<% $judge->id %>"> 
+%						}
+							<% ($settings{"no_judge_codes"}) ? "" : $judge->code  %>
+							<% $judge->first." ".$judge->last %>
+						</a>
+					</td>
+
+% 					if ($live_updates) { 
+						<td class="smallish centeralign">
+							<% scalar $m->comp("/funclib/judge_follower.mas", judge => $judge) %>
+						</td>
+% 					}
+
+%					if ($settings{"rounds_per"}) { 
+						<td class="smallish centeralign">
+							<% $judge_use{$judge->id}{'left'} %>/<%($judge_use{$judge->id}{'judged_already'} + $judge_use{$judge->id}{'will_judge'}) %>/<%$judge_use{$judge->id}{'oblig'}%>
+						</td>
+%					}
+
+% 					if ($settings{"coach_ratings"}) { 
+						<td class="smallish" align="center">
+							<% $rating_name %>
+						</td>
+% 					}
+
+% 					if ($settings{"diversity"}) { 
+						<td class="smallish" align="center">
+							<% $judge->setting("diverse") ? "Y" : "N" %> 
+						</td>
+% 					}
+
+
+% 					if ($settings{"prefs"}) { 
+
+						<td class="smallish centeralign">
+
+							<span class="twofifth nospace rightalign">
+								<% ${$affref}{$judge->id} ? ${$affref}{$judge->id} : "&ndash;" %>
+%								${$affref}{"total"} += ${$affref}{$judge->id};
+							</span>
+
+							<span class="half nospace rightalign">
+								<% ${$negref}{$judge->id} ? ${$negref}{$judge->id} : "&ndash;" %>
+%								${$negref}{"total"} += ${$negref}{$judge->id};
+							</span>
+
+						</td>
+
+						<td class="smallish centeralign">
+%							my $avg = $m->comp("/funclib/judge_avg_rating.mas", judge => $judge);
+							<% $avg %>
+						</td>
+% 					}
+
+% 					if ($settings{"tab_ratings"}) { 
+
+						<td class="smallish centeralign">
+							<% $judge_tab_ratings{$judge->id} %>
+						</td>
+
+% 					}
+
+%					if ($settings{"ncfl"} || $settings{"region"}) { 
+
+						<td class = "smallish centeralign" >
+							<% $judge->school  && $judge->school->region ? $judge->school->region->code : ""%>
+						</td>
+
+%						if ($settings{"dio_regions"}) { 
+
+							<td class="smallish centeralign">
+
+								<% $judge->school  && $judge->school->region ? $settings{"dio_region"}{$judge->school->region->code} : "" %>
+							</td>
+%						}
+%					}
+
+					<td class="smallish">
+						<% ($judge->school) ? $judge->school->short_name : "HIRE" %>
+					</td>
+
+%					if (@scores) { 
+
+%						my $warn = "These ballots have scores entered.  If you remove the judge you will also delete those scores.  Continue?";
+
+						<td class="centeralign nospace">
+							<a 
+								class = "buttonwhite redtext"
+								alt   = "Remove"
+								title = "Remove"
+								<& "/funclib/confirm.mas", warn => $warn &>
+								href="judge_rm.mhtml?from=<% $from %>&judge_id=<%$judge->id %>&panel_id=<% $panel->id %>">
+								<span class="fa fa-lg fa-trash"></span>
+							</a>
+						</td>
+					
+						<td class="centeralign nospace">
+							<a 
+								class = "buttonwhite redtext hover"
+								alt   = "Remove & Fine"
+								title = "Remove & Fine"
+								href  = "judge_rm.mhtml?from=<% $from %>&judge_id=<% $judge->id %>&panel_id=<% $panel->id %>&fine=yes"
+
+								<& "/funclib/confirm.mas", warn => $warn &>
+							>
+								<span class="fa fa-lg fa-trash"></span>
+								&amp;
+								<% $tourn_settings->{"currency"} %>
+							</a>
+						</td>
+
+%					} else { 
+
+						<td class="centeralign nospace">
+							<a 
+								class = "buttonwhite redtext"
+								alt   = "Remove"
+								title = "Remove"
+								href="judge_rm.mhtml?from=<% $from %>&judge_id=<% $judge->id %>&panel_id=<% $panel->id %>">
+								<span class="fa fa-lg fa-trash"></span>
+							</a>
+						</td>
+					
+						<td class="centeralign nospace">
+							<a 
+								class = "buttonwhite redtext"
+								alt   = "Remove & Fine"
+								title = "Remove & Fine"
+								href="judge_rm.mhtml?from=<% $from %>&judge_id=<% $judge->id %>&panel_id=<% $panel->id %>&fine=yes">
+								<span class="fa fa-lg fa-trash"></span>
+								<span class="bigger">
+									&amp;
+									<% $tourn_settings->{"currency"} %>
+								</span>
+							</a>
+						</td>
+
+%					} 
+
+%					if ($panel_room < 0) {
+						<td class="centeralign smaller">
+%						if ($judge->hangout_admin) { 
+				
+							Yes&nbsp;&nbsp;<a class="button dkgreen" href="admin_unset.mhtml?judge_id=<% $judge->id %>&panel_id=<% $panel->id %>">&nbsp; Unset &nbsp;</a>
+%						} else {
+							No&nbsp;&nbsp;<a class="button dkgreen" href="admin_set.mhtml?judge_id=<% $judge->id %>&panel_id=<% $panel->id %>">&nbsp; Set &nbsp;</a>
+%						}
+%					}
+						</td>
+
+				</tr>
+% 			}
+
+			</tbody>
+
+% 			if ($settings{"prefs"}) { 
+
+				<tr class="row">
+
+
+% 					if ($live_updates) { 
+						<td class="smallish centeralign">
+						</td>
+% 					}
+
+% 					if ($settings{"coach_ratings"}) { 
+						<td class="smallish" align="center">
+						</td>
+% 					}
+
+% 					if ($settings{"diversity"}) { 
+						<td class="smallish" align="center">
+						</td>
+% 					}
+					
+					<td colspan="3" class="smallish rightalign">
+						Pref Totals:
+					</td>
+
+					<td class="smallish centeralign">
+						<span class="twofifth nospace padright rightalign">
+							<% sprintf("%.1f", ${$affref}{"total"}) %>
+						</span>
+						<span class="twofifth nospace rightalign">
+							<% sprintf("%.1f", ${$negref}{"total"}) %> 
+						</span>
+					</td>
+
+					<td class="smallish" align="center">
+						<% sprintf("%.1f", abs(${$affref}{"total"} - ${$negref}{"total"})) %>
+					</td>
+
+					<td colspan="8" class="smallish">
+						Differential
+					</td>
+
+				</tr>
+%			}
+
+		</table>
+
+		<form action="judge_add.mhtml" method="post">
+		<input type="hidden" name="panel_id" value="<% $panel_id %>">
+		<input type="hidden" name="from" value="<% $from %>">
+
+		<div class="row smallish martop">
+
+			<span class="sixth nospace bold padleft centeralign">
+				Available
+			</span>
+
+			<span class="threequarter padno centeralign"> 
+
+				<select name="judge_id" class="fixedbigger chosen" data-placeholder="Clean judges without assignments...">
+
+%					my %used;
+%					my $in_standby;
+%					my $not_in_standby;
+%					my $wilderson;
+
+					<option value=""></option>
+					<optgroup class="key" label="<% $good_fields{"label"} %>">
+
+%					foreach my $judge (@good_judges) { 
+
+%						next if $used{$judge->id}++;
+
+%						if ($burned{$judge->id} && not defined $wilderson) {
+							<option value="x" "disabled" class="key">Judges past commitment</option>
+% 							$wilderson++;
+%						}
+
+%						if ($judge->standby && not defined $in_standby) { 
+							<option value="x" "disabled" class="key">Judges in standby pool:</option>
+%							 $in_standby++;
+%						}
+
+%						if ($in_standby &! $not_in_standby &! $judge->standby) { 
+							<option value="x" "disabled" class="key">Judges not in standby pool:</option>
+%							$not_in_standby++ unless $judge->standby;
+%						} 
+
+						<option value="<%$judge->id %>"><% $good_fields{$judge->id} %></option>
+
+% 					} 
+
+
+					</optgroup>
+
+				</select> 
+
+			</span>
+
+			<span class="tenth centeralign">
+				<input  type="submit" value="Add" class="thin">
+				</form>
+			</span>
+
+		</div>
+
+		<form action="judge_add.mhtml" method="post">
+		<input type="hidden" name="panel_id" value="<% $panel_id %>">
+		<input type="hidden" name="from" value="<% $from %>">
+
+			<div class="row smallish">
+
+				<span class="sixth nospace bold padleft centeralign">
+					Judging 
+				</span>
+					
+				<span class="threequarter padno centeralign"> 
+
+					<input type="hidden" name="steal" value="yes">
+
+					<select name="judge_id" class="fixedbigger chosen" data-placeholder="Clean judges who are judging already...">
+
+					<option value=""></option>
+					<optgroup class="key" label="<% $busy_fields{"label"} %>">
+
+%					foreach my $judge (@busy_judges) { 
+%						next if $used{$judge->id}++;
+						<option value="<%$judge->id %>"><% $busy_fields{$judge->id} %></option>
+% 					} 
+
+					</optgroup>
+
+				</select> 
+
+			</span>
+
+			<span class="tenth centeralign">
+				<input  type="submit" value="Add" class="thin">
+				</form>
+			</span>
+
+		</div>
+
+		<h4><% scalar @entries %> Entries</h4>
+
+		<table cellspacing="1" cellpadding="4" width="100%">
+
+			<tr class="yellowrow">
+
+%				if ($event->type eq "speech") { 
+					<th class="smaller">
+						Spks
+					</th>
+%				} elsif ($event->type eq "wudc") { 
+					<th class="smaller">
+						Pos
+					</th>
+%				} elsif ($event->type eq "congress") { 
+
+%				} else { 
+					<th class="smaller">
+						Side
+					</th>
+					<th class="smaller">
+						Record
+					</th>
+%				} 
+
+				<th class="smaller">
+					Entry
+				</th>
+
+% 				if ($live_updates) { 
+					<th class="smaller">
+						Followers
+					</th>
+%				} 
+
+				<th class="smaller">
+					School
+				</th>
+
+%				if ($settings{"ncfl"} || $settings{"region"}) { 
+
+					<th class="smaller">
+						<% $settings{"ncfl"} ? "Dio" : "Region" %>
+					</th>
+
+%					if ($settings{"dio_regions"}) { 
+						<th class="smaller">
+							Reg
+						</th>
+%					}
+
+%				}
+
+				<th colspan="3">
+				</th>
+
+
+			</tr>
+
+% 		foreach my $entry (@entries) { 
+
+			<tr class="<% $entry->dropped ? "lirdrow" : "row" %>">
+
+%				if ($event->type eq "speech") { 
+					<td class="smallish">
+						<% $entry->speaks ? Lingua::EN::Numbers::Ordinate::ordinate($entry->speaks) : "" %>
+					</td>
+%				} elsif ($event->type eq "wudc") { 
+					<td class="smallish">
+						<% $entry->speaks == 1 ? "OG" : "" %>
+						<% $entry->speaks == 2 ? "OO" : "" %>
+						<% $entry->speaks == 3 ? "CG" : "" %>
+						<% $entry->speaks == 4 ? "CO" : "" %>
+					</td>
+%				} elsif ($event->type eq "congress" ) { 
+
+%				} else { 
+
+%					if ( ($round_type eq "elim" || $round_type eq "final" || $round_type eq "flip") && scalar @scores < 1 && not defined $aff) { 
+						<td class="smallish centeralign">
+							Flip
+						</td>
+
+%					} else { 
+
+						<td class="smallish centeralign">
+							<% $aff ? "Locked" : "" %>
+							<% $entry->side == 1 ? $aff_string : ""%>
+							<% $entry->side == 2 ? $neg_string : ""%>
+						</td>
+%					}
+					<td class="smallish centeralign">
+						<% $entry_wins{$entry->id} ? $entry_wins{$entry->id} : 0 %>-<% $entry_losses{$entry->id} ? $entry_losses{$entry->id} : 0 %>
+					</td>
+%				} 
+
+				<td class="smallish nospace">
+%				unless ($entry_only) { 
+					<a class="white button leftalign" href="/register/entry/edit.mhtml?entry_id=<% $entry->id %>">
+%				}
+						<% ($entry->dq) ? "DQ -" : "" %>
+						<% ($entry->dropped) ? "DROP -" : "" %>
+
+%						if ($event->setting("code_style") eq "names" || $event->setting("code_style") eq "names_lastfirst") {
+							<% $entry->name %>
+
+%						} else {
+
+							<span class="third marno">
+								<% $entry->code %>
+							</span>
+
+							<span class="twothirds marno marleft">
+								<% $entry->name %>
+							</span>
+%						}
+					</a>
+				</td>
+
+% 				if ($live_updates) { 
+					<td class="smallish centeralign">
+						<% scalar $m->comp("/funclib/entry_follower.mas", entry => $entry) %>
+					</td>
+%				}
+					
+				<td class="smallish">
+					<% (not defined $settings{"no_school_codes"}) && ($entry->school->code) ? $entry->school->code  : "" %>
+					<% $entry->school->short_name %> 
+				</td>
+
+%				if ($settings{"region"} || $settings{"ncfl"} ) { 
+
+					<td class="smallish centeralign">
+						<% ($entry->school->region) ? $entry->school->region->code : "" %>
+					</td>
+
+%					if ($settings{"dio_regions"}) { 
+						<td class="smallish centeralign">
+							<% ($entry->school->region) ? $settings{"dio_region"}{$entry->school->region->code} : "" %>
+						</td>
+%					}
+%				}
+
+%				unless ($entry_only) { 
+					<td class="smallish centeralign nospace">
+						<a class="button dkblue" href="/panel/manipulate/entry_edit.mhtml?entry_id=<%$entry->id%>&round_id=<% $round->id %>">Move</a>
+					</td>
+%				}
+
+			</tr>
+
+% 		}
+
+		</table>
+
+		<br />
+
+%		my $timestamp;
+
+%		foreach my $ballot ($panel->ballots) { 
+%			$timestamp = $ballot->timestamp if $ballot->audit > 0 && $ballot->timestamp > $timestamp;
+%			$timestamp = $ballot->timestamp if $ballot->audit > 0 && not defined $timestamp;
+%		}
+
+		<div class="even bold full centeralign smallish">
+
+			<span class="third">
+				<% $panel->started ?  "Started: ".Tab::niceshortdayt($panel->started->set_time_zone($tz)) : "" %>
+			</span>
+
+			<span class="third">
+				<% $panel->confirmed ?  "Confirmed: ".Tab::niceshortdayt($panel->confirmed->set_time_zone($tz)) : "" %>
+			</span>
+
+			<span class="third">
+				<% $timestamp ?  "Entered: ".Tab::niceshortdayt($timestamp->set_time_zone($tz)) : "" %>
+			</span>
+
+		</div>
+
+%		if ($person->site_admin) { 
+			<p style="text-align: center;" >
+				<% $round->realname %> <% $section %> <% $panel->id %> Event <% $event->id %> <% $aff ? $aff." aff lock" : "" %>
+			</p>
+%		}
+
+	</div>
+
+	<div class="menu">
+
+%		if ($entry_only) { 
+
+	        <div class="sidenote">
+
+				<h4>Return</h4>
+
+				<a class="blue full" href="/tabbing/entry/index.mhtml">
+					Return to Ballot Entry
+				</a>
+			</div>
+
+%		} else { 
+
+		<div class="sidenote">
+
+			<h4>Pairings/Printouts</h4>
+
+			<a class="blue full" href="show.mhtml?round_id=<% $round->id %>">
+				<% $event->abbr %> <% $round->realname %> Pairing
+			</a>
+
+			<a class="blue full" href="/panel/report/master_single.mhtml?panel_id=<% $panel->id %>">
+				Print Master Ballots
+			</a>
+
+			<a class="blue <% $round_type eq "elim" ? "half" : "full" %>" href="/panel/report/postings.mhtml?panel_id=<% $panel->id %>">
+				Print Posting
+			</a>
+
+%			if ($round_type eq "elim" || $round_type eq "final") { 
+				<a class="blue half" href="/panel/report/strike_cards.mhtml?panel_id=<% $panel->id %>">
+					Print Strike Cards
+				</a>
+%			}
+
+			<a class="blue full" href="/panel/schemat/panel_blast.mhtml?panel_id=<% $panel->id %>">
+				Text/email blast this section
+			</a>
+
+		</div>
+
+		<div class="sidenote">
+
+			<div class="odd full nospace"> 
+
+				<span class="twofifth padleft smallish bold padtop padbottom">
+					Round Start
+				</span>
+
+				<span class="threefifth">
+					<% $start->day_name %> at <% &Tab::nicetime($start) %> 
+				</span>
+
+			</div>
+
+%			if ($settings{"flighted"} > 1) { 
+
+				<div class="even full nospace">
+
+					<span class="quarter padleft bold">
+						Flight
+					</span>
+
+					<span class="twothird">
+						<form action="panel_flight_save.mhtml" method="post">
+						<input type="hidden" name="panel_id" value="<% $panel_id %>">
+						<select name="flight" class="fixedsmall" onchange='this.form.submit()' >  
+							<option value="">None</option>
+%							foreach my $flight ( 1 .. $settings{"flighted"} ) { 	
+								<option value="<% $flight %>" <% $flight == $panel->flight ? "selected" : "" %>> <% $flight %> </option>
+%							}
+						</select>
+						</form>
+					</span>
+
+				</div>
+
+%			}
+
+			<div class="even full nospace">
+
+				<span class="quarter padleft smallish bold">
+					Room
+				</span>
+
+				<span class="twothird">
+
+					<form action="panel_room_save.mhtml" method="post">
+					<input type="hidden" name="panel_id" value="<% $panel_id %>">
+
+					<select
+						name="room_id" 
+						onchange='this.form.submit()' 
+						class="fixedsmall chosen" 
+						data-placeholder="Select room:"
+					>  
+
+%						if ($room) { 
+							<option value="<% $panel_room %>" "selected"><% $room->name %></option>
+%						}
+
+						<option value="">--NONE--</option>
+
+%						if ($settings{"online_debates"}) { 
+							<option value="-1">Google Hangout</option>
+							<option value="-2">Hangout On Air</option>
+%						}
+
+%						foreach my $room (@reserved_rooms) { 
+							<option value="<% $room->id %>"><% $room->name %></option>
+%						}
+
+%						if ($event->setting("wsdc_multiple_sites")) { 
+%							foreach my $room ($m->comp("/funclib/clean_multisite_rooms.mas", panel => $panel)) { 
+								<option value="<% $room->id %>"><% $room->name %></option>
+%							}
+%						} else { 
+%							foreach my $room ($m->comp("/funclib/clean_rooms.mas", panel => $panel)) { 
+								<option value="<% $room->id %>"><% $room->name %></option>
+%							}
+%						}
+
+					</select>
+					</form>
+				</span>
+			</div>
+
+%			if ($panel_room == -2) {
+
+				<form action="panel_hoa_save.mhtml" method="post">
+				<input type="hidden" name="panel_id" value="<% $panel_id %>">
+
+				<div class="odd centeralign">
+					<input type="text" name="room_ext_id" value="<% $panel->room_ext_id %>" 
+						style="width:186px;margin: 5px 0">
+				</div>
+
+			<a href="#" onClick="$('#dialog').dialog({modal: true});return false" style="float:right;margin:0 0 10px 5px"><img src="/lib/images/info_lrg.png" alt="Info"></a>
+
+			Paste in the Google Hangout On Air event URL. Note users still need
+			to be invited at the time of the event.
+
+				<div class="liblrow centeralign padless">
+					<input type="submit" class="thin" value="Save">
+				</div>
+			</form>
+
+%			} elsif ($panel_room == -1) {
+
+%				if ($panel->invites_sent) {
+					Re-Send invites to all participants.
+%				} else {
+					Once all entries in the round are finalized, hit
+					"Send Invites" to create the Google Hangout and 
+					invite all participants.
+%				}
+%			}
+
+%			if ($panel_room == -1 || ($panel_room == -2 && $panel->room_ext_id)) {
+				<form action="panel_send_gplus_invites.mhtml" method="post">
+					<input type="hidden" name="panel_id" value="<% $panel_id %>">
+					<div class="liblrow centeralign padless">
+						<input type="submit" class="thin" value="<% ($panel->invites_sent)? 'Re-' : '' %>Send Invites">
+					</div>
+				</form>
+%			}
+
+%			foreach my $jpool ($round->jpools) { 
+
+				<h4>Judge Pool</h4>
+
+				<a class="blue full" href="/panel/judge/jpool.mhtml?pool_id=<% $jpool->id %>">
+					<% $jpool->name %>
+				</a>
+%			}
+
+		</div>
+
+		<div class="sidenote">
+
+			<h4>Make Changes</h4>
+%			if ($event->type eq "speech" || $event->type eq "congress") { 
+				<a href="speaker_order.mhtml?panel_id=<% $panel->id %>" class="yellow full">
+					Change Speaker Order
+				</a>
+%			} elsif ($event->type eq "wudc") { 
+				<a href="wudc_sides.mhtml?panel_id=<% $panel->id %>" class="yellow full">
+					Change Team Positions
+				</a>
+%			} else { 
+				<a href="debate_sides_swap.mhtml?panel_id=<% $panel->id %>" class="yellow full">
+					Change Sides
+				</a>
+%			} 
+
+			<a href="/tabbing/entry/panel.mhtml?panel_id=<% $panel->id %>" class="yellow full">
+				View/Edit Results
+			</a>
+
+%			if ($settings{"prefs"}) { 
+				<a href="prefs_report.mhtml?panel_id=<% $panel->id %>" class="yellow full">
+					Judge Pref Report
+				</a>
+%			}
+
+% 			unless (@judges || @entries) { 
+				<a href="/panel/manipulate/panel_rm.mhtml?panel_id=<% $panel_id %>" class="dkred full">Delete <% $section %></a>
+% 			}
+
+			<p class="padno bold">Add literally any judge:</p>
+			<form action="judge_add.mhtml" method="post">
+			<input type="hidden" name="panel_id" value="<% $panel->id %>">
+      			<input type="hidden" name="bypass_check" value="true">
+
+			<div class="even visible centeralign">
+
+				<select name="judge_id" class="chosen fixedmed">
+%					foreach my $judge ($m->comp("/funclib/tourn_judges.mas", tourn => $tourn)) { 
+						<option value="<% $judge->id %>"> <% $judge->code %> <% $judge->last %>, <% $judge->first %> </option>
+%					}
+				</select>
+
+			</div>
+			<div class="liblrow centeralign padless">
+				<input type="submit" class="thin" value="Add Judge & Tempt Fate">
+			</div>
+			</form>
+
+			<p class="padno bold">Change to literally any room:</p>
+
+			<form action="panel_room_save.mhtml" method="post">
+
+				<input type="hidden" name="panel_id" value="<% $panel->id %>">
+
+				<div class="even visible centeralign">
+					<select name="room_id" class="chosen fixedmed">
+%						foreach my $room ($m->comp("/funclib/tourn_rooms.mas", tourn => $tourn)) { 
+							<option value="<% $room->id %>"> <% $room->name %> </option>
+%						}
+					</select>
+				</div>
+
+				<div class="liblrow centeralign padless">
+					<input type="submit" class="thin" value="Change Room & Tempt Fate">
+				</div>
+
+			</form>
+
+%			my $warn = "This will delete this section, together with all results and records.  Are you sure?";
+
+			<a class="dkred full martop" <& "/funclib/confirm.mas", warn => $warn &>  href="/panel/manipulate/panel_rm.mhtml?panel_id=<% $panel->id %>&from=schemat">
+
+				Delete This 
+					<% $event->type eq "speech" ? "Section" : "" %>
+					<% $event->type eq "congress" ? "Chamber" : "" %>
+					<% $event->type ne "speech" && $event->type ne "congress" ? "Debate" : "" %>
+			</a>
+	
+		</div>
+
+%		}
+
+	</div>
+
