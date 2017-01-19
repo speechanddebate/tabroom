@@ -7,8 +7,14 @@
 		var propertyName  = $("#"+checkObject.id).attr("property_name");
 		var propertyValue = checkObject.value;
 
-		if ($("#"+checkObject.id).prop("checked") === false) { 
-			propertyValue = 0;
+		if (propertyValue === undefined) { 
+			propertyValue = $("#"+checkObject.id).attr("value");
+		}
+
+		if (checkObject.type === "checkbox") { 
+			if ($("#"+checkObject.id).prop("checked") === false) { 
+				propertyValue = 0;
+			}
 		}
 
 		$.ajax({ 
