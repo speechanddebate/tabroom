@@ -10,7 +10,7 @@ Tab::Chapter->columns(TEMP => qw/count prefs code member schoolid/);
 Tab::Chapter->has_a(district => 'Tab::District');
 
 Tab::Chapter->has_many(schools => 'Tab::School', 'chapter');
-Tab::Chapter->has_many(students => 'Tab::Student', 'chapter');
+Tab::Chapter->has_many(students => 'Tab::Student', 'chapter' => { order_by => 'last'});
 Tab::Chapter->has_many(chapter_judges => 'Tab::ChapterJudge', 'chapter');
 Tab::Chapter->has_many(chapter_circuits => 'Tab::ChapterCircuit', 'chapter');
 Tab::Chapter->has_many(chapter_settings => 'Tab::ChapterSetting', 'chapter');
