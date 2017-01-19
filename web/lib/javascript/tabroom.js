@@ -1,4 +1,53 @@
 
+/* Respond to switch calls */
+
+	function postSwitch(checkObject, replyUrl) { 
+
+		var targetId      = $("#"+checkObject.id).attr("target_id");
+		var propertyName  = $("#"+checkObject.id).attr("property_name");
+		var propertyValue = checkObject.value;
+
+		if ($("#"+checkObject.id).prop("checked") === false) { 
+			propertyValue = 0;
+		}
+
+		$.ajax({ 
+
+			type    : 'POST',
+			url     : replyUrl,
+			data    : { 
+				target_id      : targetId,
+				property_name  : propertyName,
+				property_value : propertyValue
+			},
+			success : function(data) {
+
+				if (data.error) { 
+
+					$.jGrowl(data.message, { 
+						header   : 'Oops!',
+						life     : 4000,
+						position : 'top-center',
+						theme    : "warning"
+					});
+
+				} else { 
+
+					$.jGrowl(data.message, { 
+						header   : 'Result',
+						life     : 1000,
+						position : 'top-center'
+					});
+				}
+
+			}
+		});
+
+
+	}
+
+
+
 /* zebra stripe the rows */ 
 
 	function zebraRows() {
@@ -461,8 +510,6 @@ function autoTab(input,len,e) {
 	} else if(input.value.length >= len && !containsElement(filter,keyCode) && input.value != 10) {
 
 		if (len == 3) { 
-
-			console.log("length is len");
 
 			if (/\.$/.test(input.value)) { 
 				var number = input.value;

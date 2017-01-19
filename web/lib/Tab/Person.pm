@@ -115,3 +115,65 @@ sub all_settings {
 
 }
 
+sub all_permissions {
+
+	my $self = shift;
+	my $tourn = shift;
+
+	my %perms;
+
+	if ($tourn) { 
+
+		Tab::Permission->set_sql( tourn_perms => "
+			select permission.*
+			from permission
+			where permission.person = ? 
+			and permission.tourn = ? 
+		");
+
+		my @tourn_perms =  Tab::Permission->search_tourn_perms( $self->id, $tourn->id);
+
+		foreach my $perm (@tourn_perms) { 
+			$perms{"tourn"}{$perm->tourn->id} = $perm->tag;
+			$perms{$perm->tag} = $perm;
+		}
+
+	}
+
+	Tab::Permission->set_sql( other_perms => "
+		select permission.*
+		from permission
+		where permission.person = ? 
+		and permission.tourn is null
+	");
+
+	my @other_perms =  Tab::Permission->search_other_perms( $self->id );
+
+	foreach my $perm (@tourn_perms) { 
+
+		if ($perm->tag eq "chair" || $perm->tag eq "member") { 
+
+			$perms{"district"}{$perm->district->id} = $perm->tag;
+
+		} elsif ($perm->tag eq "region") {
+
+			$perms{"region"}{$perm->region->id} = $perm->tag;
+
+		} elsif ($perm->tag eq "circuit") {
+
+			$perms{"circuit"}{$perm->circuit->id} = $perm->tag;
+
+		} elsif ($perm->tag eq "chapter" || $perm->tag eq "prefs") { 
+
+			$perms{"chapter"}{$perm->chapter->id} = $perm->tag;
+
+		}
+
+	}
+
+	$perms{"owner"}++ if $self->site_admin;
+
+	return %perms;
+
+}
+
