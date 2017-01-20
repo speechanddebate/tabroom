@@ -149,7 +149,8 @@ sub all_permissions {
 
 	my @other_perms =  Tab::Permission->search_other_perms( $self->id );
 
-	foreach my $perm (@tourn_perms) { 
+
+	foreach my $perm (@other_perms) { 
 
 		if ($perm->tag eq "chair" || $perm->tag eq "member") { 
 
