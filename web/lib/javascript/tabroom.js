@@ -28,6 +28,8 @@
 			},
 			success : function(data) {
 
+				$('table').trigger('applyWidgets');
+
 				if (data.error) { 
 
 					$.jGrowl(data.message, { 
