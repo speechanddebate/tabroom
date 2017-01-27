@@ -7,7 +7,7 @@ Tab::Judge->columns(Essential => qw/school first middle last code active ada cat
 Tab::Judge->columns(Others => qw / alt_category covers obligation hired person_request timestamp /);
 
 # Wow, that's a lot. 
-Tab::Judge->columns(TEMP => qw/tier pref panelid chair hangout_admin tourn avg 
+Tab::Judge->columns(TEMP => qw/tier pref panelid chair hangout_admin tourn avg eventtype eventid
 							   diet ballotid personid tab_rating cjid schoolname 
 							   schoolcode regname regcode region standby site neutral diversity/);
 
