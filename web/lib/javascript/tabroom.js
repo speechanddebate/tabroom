@@ -63,6 +63,9 @@
 		$(".main").find(".row:even").addClass("even");
 		$(".main").find(".row:odd").addClass("odd");
 
+		$(".blankfull").find(".row:even").addClass("even");
+		$(".blankfull").find(".row:odd").addClass("odd");
+
 		$(".menu").find(".row:even").addClass("even");
 		$(".menu").find(".row:odd").addClass("odd");
 
@@ -84,6 +87,11 @@
 		$(".main").find(".lightrow:even").removeClass("lightodd");
 		$(".main").find(".lightrow:odd").addClass("lightodd");
 		$(".main").find(".lightrow:odd").removeClass("lighteven");
+
+		$(".blankfull").find(".lightrow:even").addClass("lighteven");
+		$(".blankfull").find(".lightrow:even").removeClass("lightodd");
+		$(".blankfull").find(".lightrow:odd").addClass("lightodd");
+		$(".blankfull").find(".lightrow:odd").removeClass("lighteven");
 
 		$(".menu").find(".lightrow:even").addClass("lighteven");
 		$(".menu").find(".lightrow:odd").addClass("lightodd");
