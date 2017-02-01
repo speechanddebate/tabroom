@@ -5,6 +5,7 @@
 
 		var targetId      = $("#"+checkObject.id).attr("target_id");
 		var propertyName  = $("#"+checkObject.id).attr("property_name");
+		var settingName  = $("#"+checkObject.id).attr("setting_name");
 		var propertyValue = checkObject.value;
 
 		if (propertyValue === undefined) { 
@@ -18,12 +19,12 @@
 		}
 
 		$.ajax({ 
-
 			type    : 'POST',
 			url     : replyUrl,
 			data    : { 
 				target_id      : targetId,
 				property_name  : propertyName,
+				setting_name   : settingName,
 				property_value : propertyValue
 			},
 			success : function(data) {
