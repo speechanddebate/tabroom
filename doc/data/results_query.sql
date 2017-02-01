@@ -10,6 +10,7 @@
 		ballot.id, ballot.side, ballot.bye, ballot.forfeit,
 		judge.id, judge.first, chapter_judge.gender,
 		judge.person, chapter_judge.id, chapter_judge.chapter,
+		rating_tier.name, rating.percentile,
 		winner.value,
 		points.value,
 		rank.value
@@ -37,6 +38,13 @@
 				on rank.tag = "rank" 
 				and rank.ballot = ballot.id
 				and rank.student = student.id
+
+			left join rating
+				on rating.judge = judge.id
+				and rating.entry = entry.id
+
+			left join rating_tier
+				on rating_tier.id = rating.rating_tier
 
 			where 
 
