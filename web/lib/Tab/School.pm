@@ -73,8 +73,13 @@ sub setting {
 	} else {
 
 		return unless $existing;
-		return $existing->value_text if $existing->value eq "text";
-		return $existing->value_date if $existing->value eq "date";
+
+		return $existing->value_text 
+			if $existing->value eq "text";
+
+		return $existing->value_date 
+			if $existing->value eq "date";
+
 		return $existing->value;
 
 	}
@@ -90,9 +95,14 @@ sub all_settings {
 	my %all_settings;
 
 	foreach my $setting (@settings) { 
+
 		$all_settings{$setting->tag} = $setting->value;
-		$all_settings{$setting->tag} = $setting->value_text if $all_settings{$setting->tag} eq "text";
-		$all_settings{$setting->tag} = $setting->value_date if $all_settings{$setting->tag} eq "date";
+
+		$all_settings{$setting->tag} = $setting->value_text 
+			if $all_settings{$setting->tag} eq "text";
+
+		$all_settings{$setting->tag} = $setting->value_date 
+			if $all_settings{$setting->tag} eq "date";
 	}
 
 	return %all_settings;
