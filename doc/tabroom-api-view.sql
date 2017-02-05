@@ -4,8 +4,7 @@ create database tabapi;
 use tabapi;
 
 create view tabapi.ballot
-	(id, side, bye, forfeit, chair, speakerorder, speechnumber, seed, pullup, tv, audit, collected, judge_started,
-		entry_id, judge_id, panel_id, collected_by_id, entered_by_id, audited_by_id, hangout_admin_id, timestamp)
+	(id, side, bye, forfeit, chair, speakerorder, speechnumber, seed, pullup, tv, audit, collected, judge_started, entry_id, judge_id, panel_id, collected_by_id, entered_by_id, audited_by_id, hangout_admin_id, timestamp)
 as select
 	id, side, bye, forfeit, chair, speakerorder, speechnumber, seed, pullup, tv, audit, collected, judge_started,
 		entry, judge, panel, collected_by, entered_by, audited_by, hangout_admin, timestamp
