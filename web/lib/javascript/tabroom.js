@@ -3,9 +3,10 @@
 
 	function postSwitch(checkObject, replyUrl) { 
 
-		var targetId      = $("#"+checkObject.id).attr("target_id");
-		var propertyName  = $("#"+checkObject.id).attr("property_name");
+		var targetId     = $("#"+checkObject.id).attr("target_id");
+		var propertyName = $("#"+checkObject.id).attr("property_name");
 		var settingName  = $("#"+checkObject.id).attr("setting_name");
+
 		var propertyValue = checkObject.value;
 
 		if (propertyValue === undefined) { 
@@ -157,10 +158,16 @@ function autoWin(input,e,aff,neg,affid,negid) {
 		){
 
 			input.value = aff;
+
 			$('.aff').show();
+			$('.aff_entry').addClass("winner_row");
+
 			$('.neg').hide();
+			$('.neg_entry').removeClass("winner_row");
+
 			var winner = document.getElementById("winner");
 			winner.value = affid;
+
 			lowPointWin(1);
 			changeFocus(input);
 		}
@@ -175,8 +182,13 @@ function autoWin(input,e,aff,neg,affid,negid) {
 			|| input.value == "O"
 		) {
 			input.value = neg;
+
 			$('.neg').show();
+			$('.neg_entry').addClass("winner_row");
+
 			$('.aff').hide();
+			$('.aff_entry').removeClass("winner_row");
+
 			var winner = document.getElementById("winner");
 			winner.value = negid;
 			lowPointWin(2);
@@ -255,6 +267,14 @@ function autoWin(input,e,aff,neg,affid,negid) {
 
 function autoPoints(input,len,e,side,ratio,nototal,step) {
 
+	var minPoints = $(input).attr("min");
+	var maxPoints = $(input).attr("max");
+	var pointStep = $(input).attr("step");
+
+	console.log("Min points are "+minPoints);
+	console.log("Max points are "+maxPoints);
+	console.log("Point step is "+pointStep);
+
 	if (nototal) { 
 		totalPoints = function() { 
 			return;
@@ -265,7 +285,12 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 
     var filter = [0,8,16,17,18,37,38,39,40,46];
 
-	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
+	if (pointStep === ".1" 
+		&& minPoints >= 20
+		&& maxPoints == 30
+		&& input.value.length >= 2 
+		&& !containsElement(filter,keyCode)
+	) {
 
         if (input.value == 't3') {
 			input.value = 23 * 1;
@@ -285,6 +310,21 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 			changeFocus(input);
 			totalPoints(side,ratio);
 		}
+
+	} else if (pointStep === ".1" 
+		&& minPoints < 20
+		&& maxPoints == 30
+		&& input.value.length >= 3
+		&& !containsElement(filter,keyCode)
+	) {
+
+		var number = input.value;
+		number = number * 1;
+		number = number / 10;
+
+		input.value = number;
+		changeFocus(input);
+		totalPoints(side,ratio);
 
 	} else if (len == 6 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
 
