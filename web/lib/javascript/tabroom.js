@@ -326,7 +326,11 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 		changeFocus(input);
 		totalPoints(side,ratio);
 
-	} else if (len == 6 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
+	} else if (
+		pointStep === ".25"
+		&& input.value.length >= 2 
+		&& !containsElement(filter,keyCode)
+	) {
 
 		if (/\.$/.test(input.value)) { 
 			var number = input.value;
@@ -365,6 +369,7 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 		totalPoints(side,ratio);
 
 	} else if( 
+
 		( input.value.length >= len || keyCode === 9)  
 			&& !containsElement(filter,keyCode) 
 			&& input.value != 10) {
