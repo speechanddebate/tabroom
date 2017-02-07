@@ -28,7 +28,10 @@
 		$m->print("<p>Hit Back and try again</p></h4></div>");
 	}
 
-	my $ignore_schools = $from->event->setting("school_debates_self") if $from && $from->event;
+	my $event = $from->event;
+	my %event_settings = $event->all_settings;
+
+	my $ignore_schools = $event_settings{"school_debates_self"} if $from && $event;
 
 	my $err;
 
@@ -68,7 +71,7 @@
 		my $timeslot = Tab::Timeslot->retrieve($timeslot_id);
 
 		$into = Tab::Round->create({
-			event        => $from->event->id,
+			event        => $event->id,
 			timeslot     => $timeslot_id,
 			start_time   => $timeslot->start,
 			tiebreak_set => $tiebreak_set_id,
@@ -80,7 +83,7 @@
 		$into->setting('num_judges', $judges);
 		$into->setting("use_for_breakout", $breakout); 
 
-		$m->comp("/funclib/renumber_rounds.mas", event_id => $from->event->id);
+		$m->comp("/funclib/renumber_rounds.mas", event_id => $event->id);
 
 	}
 
@@ -98,13 +101,13 @@
 		$bracket_label = $into->event->setting("breakout_".$breakout."_label")." Bracket";
 	}
 
-	my $bracket = Tab::ResultSet->search( event => $from->event->id, label => $bracket_label )->first;
+	my $bracket = Tab::ResultSet->search( event => $event->id, label => $bracket_label )->first;
 
 	unless ($bracket) { 
 
 		$bracket = Tab::ResultSet->create({
 			tourn     => $tourn->id,
-			event     => $from->event->id,
+			event     => $event->id,
 			label     => $bracket_label,
 			generated => $now,
 			bracket   => 1
@@ -112,19 +115,26 @@
 
 	}
 
-    Tab::ResultValue->set_sql( rm_bracket => "delete result_value.* from result, result_value 
-			where result.id = result_value.result and result.round = ? and result.result_set = ? ");
+    Tab::ResultValue->set_sql( rm_bracket => "
+		delete result_value.* 
+			from result, result_value 
+			where result.id = result_value.result 
+			and result.round = ? 
+			and result.result_set = ? 
+		");
 
 	Tab::ResultValue->sql_rm_bracket->execute( $into->id, $bracket->id );
 
     Tab::Result->set_sql( rm_bracket => "delete from result where round = ? and result_set = ? ");
+
 	Tab::Result->sql_rm_bracket->execute( $into->id, $bracket->id );
 
 	my ($entries_ref, $tbs_ref, $desc_ref, $forfeit_ref, $bah, $mah, $entry_letter_ref) 
-		= $m->comp("/tabbing/results/order_entries.mas", 
-		round    => $from,
-		breakout => $breakout
-	);
+		= $m->comp(
+		"/tabbing/results/order_entries.mas", 
+			round    => $from,
+			breakout => $breakout
+		);
 
 
 	if ($from->type ne "elim") { 
@@ -136,31 +146,47 @@
 		my %entry_seed = ();
 		my %entry_school = ();
 
-		my %id_entry = map {$_->id => $_} $from->event->entries;
+		my %id_entry = 
+			map {$_->id => $_} 
+			$event->entries;
+
+		my @ineligibles = $m->comp(
+			"/funclib/event_entry_settings.mas",
+				event => $event,
+				tag   => "no_elims"
+			);
+
+		my %ineligible = map {$_->entry->id => $_->value} @ineligibles;
+		my $skip_count;
 
 		foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) { 
 
-			foreach my $entryid (@{${$entries_ref}{$seed}}) { 
+			foreach my $entry_id (@{${$entries_ref}{$seed}}) { 
+
+				if ($ineligible{$entry_id}) { 
+					$skip_count++;
+				 	next;
+				}
 
 				$count++;
 				next if $count > $end;
 				next if $count < $start;
 
-				my $entry = $id_entry{$entryid};
+				my $entry = $id_entry{$entry_id};
 
-				push @breaks, $entryid;
-				$entry_seed{$entryid} = $seed;
-				$entry_school{$entryid} = $entry->school->id;
+				push @breaks, $entry_id;
+				$entry_seed{$entry_id} = $seed - $skip_count;
+				$entry_school{$entry_id} = $entry->school->id;
 
 				my $result = Tab::Result->create({
 					result_set => $bracket->id,
-					entry      => $entryid,
+					entry      => $entry_id,
 					round      => $into->id
 				});
 
 				Tab::ResultValue->create({
 					result    => $result->id,
-					value     => $entry_seed{$entryid},
+					value     => $entry_seed{$entry_id},
 					priority  => 1,
 					sort_desc => 0,
 					tag       => "Seed",
@@ -203,7 +229,7 @@
 		my $num_panels = $step / 2;
 
 		my $letter = 1;
-		$letter = "A" if $from->event->setting("panel_labels") eq "letters";
+		$letter = "A" if $event_settings{"panel_labels"} eq "letters";
 
 		foreach my $count (1 .. $num_panels) { 
 
@@ -260,7 +286,11 @@
 		foreach my $panel (@use_panels) { 
 
 			my @entries = @{$panel_entries{$panel->id}};
-			my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
+
+			my @judges = $m->comp(
+				"/funclib/panel_judges.mas", 
+				panel => $panel
+			);
 
 			my $school_id;
 			my $closeout;
@@ -282,7 +312,10 @@
 				foreach my $judge (@judges) {
 
 					my $side = 1;
-					my $due_aff = $m->comp("/funclib/round_elim_dueaff.mas", panel => $panel);
+					my $due_aff = $m->comp(
+						"/funclib/round_elim_dueaff.mas", 
+						panel => $panel
+					);
 
 					foreach my $entry (@entries) {
 
@@ -388,8 +421,8 @@
 		$into->created($now);
 		$into->update;
 
-		if ($from->event->setting("autopublish_results")) { 
-			$from->post_results($from->event->setting("autopublish_results"));
+		if ($event_settings{"autopublish_results"}) { 
+			$from->post_results($event_settings{"autopublish_results"});
 			$from->update;
 		}
 
@@ -437,12 +470,12 @@
 
 		foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) { 
 
-			foreach my $entryid (@{${$entries_ref}{$seed}}) { 
+			foreach my $entry_id (@{${$entries_ref}{$seed}}) { 
 
 				
-				$entry_seed{$entryid} = $seed;
-				$entry_school{$entryid} = $id_entry{$entryid}->school->id
-					if $id_entry{$entryid}->school;
+				$entry_seed{$entry_id} = $seed;
+				$entry_school{$entry_id} = $id_entry{$entry_id}->school->id
+					if $id_entry{$entry_id}->school;
 			}
 		}
 
@@ -473,7 +506,7 @@
 		}
 
 		my $letter = 1;
-		$letter = "A" if $from->event->setting("panel_labels") eq "letters";
+		$letter = "A" if $event_settings{"panel_labels"} eq "letters";
 
 		my %destiny_count;
 
@@ -489,7 +522,10 @@
 				$destination_bracket = ($num_panels + 1 - $panel->bracket);
 			}
 		
-			my $destination = Tab::Panel->search( round => $into->id, bracket => $destination_bracket)->first;
+			my $destination = Tab::Panel->search( 
+				round   => $into->id,
+				bracket => $destination_bracket
+			)->first;
 
 			my $side = 2;
 			my $opponent;
@@ -608,9 +644,9 @@
 		$into->created($now);
 		$into->update;
 
-		if ($from->event->setting("autopublish_results")) { 
+		if ($event_settings{"autopublish_results"}) { 
 
-			$from->post_results($from->event->setting("autopublish_results"));
+			$from->post_results($event_settings{"autopublish_results"});
 			$from->update;
 		}
 

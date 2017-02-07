@@ -27,7 +27,6 @@ DELIMITER ;;
 			IF 
 				NEW.dropped = 1 
 				OR NEW.waitlist = 1 
-				OR NEW.dq = 1 
 				OR NEW.unconfirmed = 1
 			THEN
 				set NEW.active = 0;
@@ -61,7 +60,6 @@ DELIMITER ;;
 			IF 
 				NEW.dropped = 1 
 				OR NEW.waitlist = 1 
-				OR NEW.dq = 1 
 				OR NEW.unconfirmed = 1
 			THEN
 				set NEW.active = 0;
