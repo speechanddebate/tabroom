@@ -210,7 +210,7 @@ echo "<tr><td>Director and Coaches</td><td>".$coaches."</td></tr>";
 
 	$win       = array();
 	$outcome   = array();
-	$isprelim  = array();
+	$is_prelim  = array();
 	$spkr1     = array();
 	$spkr2     = array();
 	$isRR      = array();
@@ -231,7 +231,8 @@ $query="
 	score.value as ballot_decision, 
 	tourn.name as tourn_name, 
 	event.name as event_name, event.id as event_id, 
-	panel.id as panel_id, panel.bye as panel_bye, ballot.bye as ballot_bye, ballot.forfeit as ballot_forfeit,
+	panel.id as panel_id, panel.bye as panel_bye, 
+	ballot.bye as ballot_bye, ballot.forfeit as ballot_forfeit,
 	tourn.id as tourn_id 
 	
 	FROM (ballot, entry_student, panel, round, event, tourn, entry)
@@ -387,14 +388,30 @@ $query="
 
          getspeakers($spkr1[$x], $spkr2[$x], $row['entry_id']);
 
-		$outcome[$x] = makeoutcomestring($balfor, $balvs, $row['judge']);
+			$outcome[$x] = makeoutcomestring($balfor, $balvs, $row['judge']);
+
+         	$is_prelim[$x] = 1; 
+		 
+			if ($row['rd_type'] == "elim" or $row['rd_type'] == "final") {
+				$is_prelim[$x]=0;
+			}
 
 		 	if ($row['panel_bye'] == 1 ) {
+
 				$is_bye[$x] = 1;
-				if ($row['ballot_decision'] == 1) { 
-					$outcome[$x] = "Walk Over"; 
+
+				if ($is_prelim[$x] == 1) { 
+
+					$outcome[$x] = "Bye";
+
 				} else { 
-					$outcome[$x] = "Walked Over"; 
+
+					if ($row['ballot_decision'] == 1) { 
+						$outcome[$x] = "Walk Over"; 
+					} else { 
+						$outcome[$x] = "Walked Over ";
+					}
+
 				}
 			}
 
@@ -411,12 +428,6 @@ $query="
 			if($balfor > $balvs && $is_bye[$x]==0) {$win[$x] = 1;}
 			if($balfor == $balvs && $is_bye[$x]==0) {$win[$x] = .5;}
 		 	$ballot_id[$x]=$ballotid;
-
-         	$isprelim[$x]=1; 
-		 
-			if ($row['rd_type'] == "elim" or $row['rd_type'] == "final") {
-				$isprelim[$x]=0;
-			}
 
          	if (isroundrobin($row['event_id']) == 1) {
 				$isRR[$x]=1;
@@ -465,6 +476,7 @@ $query="
 
 	$i       = 1;
 	$pwin    = 0;
+	$pbye    = 0;
 	$ploss   = 0;
 	$doub    = "";
 	$octo    = "";
@@ -490,17 +502,18 @@ $query="
 			OR teammatch($spkr1[$i], $spkr2[$i], $student3, $student4)==TRUE
 		) {
 
-		 if ($win[$i]==1 and $isprelim[$i]==1 and $is_bye[$i]==0) {$pwin++;}
-		 if ($win[$i]==0 and $isprelim[$i]==1 and $is_bye[$i]==0) {$ploss++;}
+		 if ($win[$i]==1 and $is_prelim[$i]==1 and $is_bye[$i]==0) {$pwin++;}
+		 if ($win[$i]==0 and $is_prelim[$i]==1 and $is_bye[$i]==0) {$ploss++;}
+		 if ($is_prelim[$i] == 1 and $is_bye[$i]==1) {$pbye++;}
 		 
-		 // if ($win[$i]==.5 and $isprelim[$i]==1) {$pwin = $pwin + .5;}
-		 // if ($win[$i]==.5 and $isprelim[$i]==1) {$ploss = $ploss + .5;}
+		 // if ($win[$i]==.5 and $is_prelim[$i]==1) {$pwin = $pwin + .5;}
+		 // if ($win[$i]==.5 and $is_prelim[$i]==1) {$ploss = $ploss + .5;}
 		 
-		 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1 and $is_bye[$i]==0) {$totewin++;}
-		 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1 and $is_bye[$i]==0) {$toteloss++; }
+		 if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==1 and $is_bye[$i]==0) {$totewin++;}
+		 if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==1 and $is_bye[$i]==0) {$toteloss++; }
 
-		 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==0 and $is_bye[$i]==0) {$jvwin++;}
-		 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0 and $is_bye[$i]==0) {$jvloss++;}
+		 if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==0 and $is_bye[$i]==0) {$jvwin++;}
+		 if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==0 and $is_bye[$i]==0) {$jvloss++;}
 
 		 if ($win[$i]==1 and $isopen[$i]==1 and $is_bye[$i]==0 and $is_bye[$i]==0) {$totwin++;}
 		 if ($win[$i]==0 and $isopen[$i]==1 and $is_bye[$i]==0 and $is_bye[$i]==0) {$totloss++;}
@@ -523,7 +536,13 @@ $query="
 		  echo "<td>".$event[$i]."</td>";
 		  $date = strtotime($tourndate[$i]);
 		  echo "<td>".date('d-M-Y', $date)."</td>";
-		  echo "<td class=\"centeralign\">".$pwin."-".$ploss."</td>";
+		  echo "<td class=\"centeralign\">".$pwin."-".$ploss;
+
+			if ($pbye > 0)  {
+				echo " <br />(".$pbye." bye)";
+			}
+
+		  echo "</td>";
 		  echo "<td>".$doub."</td>";
 		  echo "<td>".$octo."</td>";
 		  echo "<td>".$qrtr."</td>";
@@ -548,6 +567,7 @@ $query="
 			}
 
 			$pwin    = 0;
+			$pbye    = 0;
 			$ploss   = 0;
 			$doub    = "";
 			$octo    = "";
@@ -677,12 +697,12 @@ echo "<tr><td>C. Total Record</td><td>".$totwin."-".$totloss."</td><td>".getpcts
 
 		if (onlyone($spkr1[$i], $spkr2[$i], $student2, $student4)==TRUE) {
 
-			 if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
-			 if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
-			 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1) {$totewin++;}
-			 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1) {$toteloss++;}
-			 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
-			 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
+			 if ($win[$i]==1 and $is_prelim[$i]==1) {$pwin++;}
+			 if ($win[$i]==0 and $is_prelim[$i]==1) {$ploss++;}
+			 if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==1) {$totewin++;}
+			 if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==1) {$toteloss++;}
+			 if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
+			 if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
 			 if ($win[$i]==1) {$totwin++;}
 			 if ($win[$i]==0) {$totloss++;}
 
@@ -796,12 +816,12 @@ $i++;
 	while ($i <= $x) {
 		if (onlyone($spkr1[$i], $spkr2[$i], $student1, $student3)==TRUE) {
 
-	 if ($win[$i]==1 and $isprelim[$i]==1) {$pwin++;}
-	 if ($win[$i]==0 and $isprelim[$i]==1) {$ploss++;}
-	 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==1) {$totewin++;}
-	 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==1) {$toteloss++;}
-	 if ($win[$i]==1 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
-	 if ($win[$i]==0 and $isprelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
+	 if ($win[$i]==1 and $is_prelim[$i]==1) {$pwin++;}
+	 if ($win[$i]==0 and $is_prelim[$i]==1) {$ploss++;}
+	 if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==1) {$totewin++;}
+	 if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==1) {$toteloss++;}
+	 if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
+	 if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
 	 if ($win[$i]==1) {$totwin++;}
 	 if ($win[$i]==0) {$totloss++;}
 	 if ( isset($elim_key[$round_id[$i]]) )
@@ -873,7 +893,7 @@ $i++;
 
 $i=1; $trds=0; $s1rds=0; $s2rds=0;
 while ($i <= $x) {
- if ($isprelim[$i]==1) {
+ if ($is_prelim[$i]==1) {
   if (teammatch($spkr1[$i], $spkr2[$i], $student1, $student2)==TRUE) {$trds++;}
   if ($spkr1[$i]==$student1 or $spkr2[$i]==$student1 or $spkr1[$i]==$student3 or $spkr2[$i]==$student3) {$s1rds++;}
   if ($spkr1[$i]==$student2 or $spkr2[$i]==$student2 or $spkr1[$i]==$student4 or $spkr2[$i]==$student4) {$s2rds++;}
@@ -935,16 +955,16 @@ if ($match==TRUE)
  {
   if ($win[$i]==1) 
    {
-    if ($isprelim[$i]==1 and $isopen[$i]==1 and $isRR[$i]==0) {$pwin++;}
-    if ($isprelim[$i]==0 and $isopen[$i]==1 and $isRR[$i]==0) {$ewin++;}
+    if ($is_prelim[$i]==1 and $isopen[$i]==1 and $isRR[$i]==0) {$pwin++;}
+    if ($is_prelim[$i]==0 and $isopen[$i]==1 and $isRR[$i]==0) {$ewin++;}
     if ($isopen[$i]==0) {$jvwin++;}
     if ($isRR[$i]==1 and $isopen[$i]==1) {$rrwin++;}
     $totwin++;
    }
   if ($win[$i]==0) 
    {
-    if ($isprelim[$i]==1 and $isopen[$i]==1 and $isRR[$i]==0) {$ploss++;}
-    if ($isprelim[$i]==0 and $isopen[$i]==1 and $isRR[$i]==0) {$eloss++;}
+    if ($is_prelim[$i]==1 and $isopen[$i]==1 and $isRR[$i]==0) {$ploss++;}
+    if ($is_prelim[$i]==0 and $isopen[$i]==1 and $isRR[$i]==0) {$eloss++;}
     if ($isopen[$i]==0) {$jvloss++;}
     if ($isRR[$i]==1 and $isopen[$i]==1) {$rrloss++;}
     $totloss++;
@@ -1014,10 +1034,10 @@ while ($i <= $x)
     }
    echo "<tr class='cssrow'><td>".$roundlabel[$i]."</td><td>".getsidestring($side[$i])."</td><td>".$outcome[$i]."</td><td>".$oppn[$i]."</td></tr>";
 
-   if ($isprelim[$i]==1 and $win[$i]==1) {$pwin++;}
-   if ($isprelim[$i]==1 and $win[$i]==0) {$ploss++;}
-   if ($isprelim[$i]==0 and $win[$i]==1) {$ewin++;}
-   if ($isprelim[$i]==0 and $win[$i]==0) {$eloss++;}
+   if ($is_prelim[$i]==1 and $win[$i]==1) {$pwin++;}
+   if ($is_prelim[$i]==1 and $win[$i]==0) {$ploss++;}
+   if ($is_prelim[$i]==0 and $win[$i]==1) {$ewin++;}
+   if ($is_prelim[$i]==0 and $win[$i]==0) {$eloss++;}
 
 	   $lasttourn=$tourn[$i]; 
 	   $lasttournid=$tournid[$i]; 
@@ -1172,32 +1192,51 @@ $ctr=0;
 $teamname="";$schoolname="";$entryID=0;
 $query="SELECT *, chapter.name as chapter_name, entry.id as entry_id FROM entry, ballot, entry_student, student, chapter WHERE chapter.id=student.chapter and student.id=entry_student.student and entry_student.entry=entry.id and ballot.panel=".$panel." and ballot.entry<>".$entry." and entry.id=ballot.entry";
 $student=mysql_query($query); 
-   while ($row = mysql_fetch_array($student, MYSQL_BOTH)) 
-   {
-    $ctr++;
-    if ($ctr<=2)
-     {
-      $schoolname=$row['chapter_name'];
-      if ($teamname <> "") {$teamname .= " and ";}
-      $teamname .= $row['first']." ".$row['last'];
-      $entryID=$row['entry_id'];
-     }
-   }
- if ($schoolname=="") {return "Bye or closeout";}
- return $schoolname." -- ".$teamname.didclear($entryID);
+
+
+	while ($row = mysql_fetch_array($student, MYSQL_BOTH)) { 
+	
+		$ctr++;
+
+		if ($ctr<=2) {
+		
+			$schoolname=$row['chapter_name'];
+
+			if ($teamname <> "") {
+				$teamname .= " and ";
+			}
+
+			$teamname .= $row['first']." ".$row['last'];
+			$entryID=$row['entry_id'];
+			
+		}
+	 
+	}
+
+	if ($schoolname=="") {
+		return "Bye or closeout";
+	}
+
+ 	return $schoolname." -- ".$teamname.didclear($entryID);
  
 }
 
-function didclear($entry)
-{
-$returnstring="";
-$query="SELECT *, round.type as round_type FROM ballot, entry, round, panel WHERE ballot.entry=".$entry." and entry.id=ballot.entry and panel.id=ballot.panel and round.id=panel.round";
-$debates=mysql_query($query); 
-   while ($row = mysql_fetch_array($debates, MYSQL_BOTH)) 
-   {
-    if ($row['round_type'] == "elim" or $row['round_type'] == "final") {$returnstring="*";}
-   }
- return $returnstring;
+function didclear($entry) {
+
+	$returnstring="";
+
+	$query="SELECT *, round.type as round_type FROM ballot, entry, round, panel WHERE ballot.entry=".$entry." and entry.id=ballot.entry and panel.id=ballot.panel and round.id=panel.round";
+
+	$debates=mysql_query($query); 
+
+	while ($row = mysql_fetch_array($debates, MYSQL_BOTH)) { 
+	
+		if ($row['round_type'] == "elim" or $row['round_type'] == "final") {
+			$returnstring="*";
+		}
+	}
+
+	 return $returnstring;
 }
 
 function getsidestring($side)
