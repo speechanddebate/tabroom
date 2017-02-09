@@ -695,24 +695,25 @@ echo "<tr><td>C. Total Record</td><td>".$totwin."-".$totloss."</td><td>".getpcts
 
 	while ($i <= $x) {
 
-		if (onlyone($spkr1[$i], $spkr2[$i], $student2, $student4)==TRUE) {
+		if (onlyone($spkr1[$i], $spkr2[$i], $student2, $student4)==TRUE && $is_bye[$i] != 1 ) {
 
-			 if ($win[$i]==1 and $is_prelim[$i]==1) {$pwin++;}
-			 if ($win[$i]==0 and $is_prelim[$i]==1) {$ploss++;}
-			 if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==1) {$totewin++;}
-			 if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==1) {$toteloss++;}
-			 if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
-			 if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
-			 if ($win[$i]==1) {$totwin++;}
-			 if ($win[$i]==0) {$totloss++;}
+				if ($win[$i]==1 and $is_prelim[$i]==1) {$pwin++;}
+				if ($win[$i]==0 and $is_prelim[$i]==1) {$ploss++;}
+				if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==1) {$totewin++;}
+				if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==1) {$toteloss++;}
+				if ($win[$i]==1 and $is_prelim[$i]==0 and $isopen[$i]==0) {$jvwin++;}
+				if ($win[$i]==0 and $is_prelim[$i]==0 and $isopen[$i]==0) {$jvloss++;}
+				if ($win[$i]==1) {$totwin++;}
+				if ($win[$i]==0) {$totloss++;}
+   
+				if ( isset($elim_key[$round_id[$i]]) ) {
+				   if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}
+				   if ($elim_key[$round_id[$i]]==13) {$octo=$outcome[$i];}
+				   if ($elim_key[$round_id[$i]]==14) {$qrtr=$outcome[$i];}
+				   if ($elim_key[$round_id[$i]]==15) {$semi=$outcome[$i];}
+				   if ($elim_key[$round_id[$i]]==16) {$finl=$outcome[$i];}
+				}
 
-			 if ( isset($elim_key[$round_id[$i]]) ) {
-				if ($elim_key[$round_id[$i]]==12) {$doub=$outcome[$i];}
-				if ($elim_key[$round_id[$i]]==13) {$octo=$outcome[$i];}
-				if ($elim_key[$round_id[$i]]==14) {$qrtr=$outcome[$i];}
-				if ($elim_key[$round_id[$i]]==15) {$semi=$outcome[$i];}
-				if ($elim_key[$round_id[$i]]==16) {$finl=$outcome[$i];}
-			 }
  if (($i<$x and $tourn[$i]<>$tourn[$i+1]) OR $i==$x or ($i<$x and $entry[$i]<>$entry[$i+1]))
 
   {
@@ -951,7 +952,7 @@ while ($i <= $x)
 $match=FALSE;
 if ($stucount==1 and ($spkr1[$i]==$student1 or $spkr2[$i]==$student1 or $spkr1[$i]==$student3 or $spkr2[$i]==$student3)) {$match=TRUE;}
 if ($stucount==2 and ($spkr1[$i]==$student2 or $spkr2[$i]==$student2 or $spkr1[$i]==$student4 or $spkr2[$i]==$student4)) {$match=TRUE;}
-if ($match==TRUE)
+if ($match==TRUE && $is_bye[$i] !== 1 )
  {
   if ($win[$i]==1) 
    {
