@@ -10,6 +10,7 @@ $time_start = microtime(true);
 require 'scripts/databaseconnect.php';
 
 $tournid=$_GET['tourn'];
+$eventid=$_GET['event'];
 $panel_id = array();
 $panel_entry_sync = array();  //new number for all entries with those 2 debaters
 $panel_entry_orig = array();  //original entry number on panel
@@ -17,14 +18,17 @@ $panel_entry_waitlist = array();  //whether entry is on the waitlist
 $sum_team=array(); $sum_win=array(); $sum_loss=array();
 
 //pull all entries
-$query="SELECT * from entry where entry.tourn=".$tournid;
+$query="SELECT * from entry where entry.event=".$eventid." and dropped=0";
 $entries=mysql_query($query);
 $entryNum = mysql_num_rows($entries);
 
 //scroll entries to make local panels table
 
    while ($row = mysql_fetch_array($entries, MYSQL_BOTH)) 
-    {panelmaker($row['id'], $panel_id, $panel_entry_sync, $panel_entry_orig, $panel_entry_waitlist, $row['waitlist']);}
+    {
+      //echo $row['id']."<br>";
+      panelmaker($row['id'], $panel_id, $panel_entry_sync, $panel_entry_orig, $panel_entry_waitlist, $row['waitlist']);
+    }
  //array_multisort($panel_entry_sync, $panel_entry_orig, $panel_entry_waitlist, $panel_id);
  
 //set up stuff at the top
@@ -208,7 +212,7 @@ function getopponent($panel_id, $panel_entry_orig, &$oppn, &$judge, &$decision, 
 
 function decisionmaker($ballot_id, &$decision)
 {
-  $query="SELECT ballot_value.value as ballot_decision from ballot_value where ballot_value.ballot=".$ballot_id." and ballot_value.tag='ballot'";
+  $query="SELECT score.value as ballot_decision from score where score.ballot=".$ballot_id." and score.tag='ballot'";
   //echo $query."<br>";
   $ballots=mysql_query($query);
   while ($row = mysql_fetch_array($ballots, MYSQL_BOTH)) 
