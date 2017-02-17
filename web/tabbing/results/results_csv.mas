@@ -1,0 +1,370 @@
+<%args>
+	$round
+	$filename        => undef
+	$tiebreak_set    => undef
+	$threshold       => undef
+	$qualifiers      => undef
+	$vacated         => undef
+	$alternates      => undef
+	$others          => undef
+	$nsda_districts  => undef
+	$nsda            => undef
+	$exclude         => undef
+	$none_above      => undef
+	$section_rank    => undef
+	$start_placement => undef
+	$noheader        => undef
+	$nofinish        => undef
+</%args>
+<%init>
+
+	return unless $round;
+
+	$tiebreak_set = $round->tiebreak_set unless $tiebreak_set;
+
+	$section_rank++ 
+		if $tiebreak_set->setting("equal_elims")
+		&& ($round->type eq "elim" || $round->type eq "prelim");
+
+	my $event = $round->event;
+
+	my $debate_all++ if $nsda_districts && $event->type eq "debate";
+
+	my (@results) = $m->comp(
+		"order_entries.mas", 
+			long_names   => 1,
+			nsda         => $nsda,
+			round        => $round,
+			tiebreak_set => $tiebreak_set,
+			all_entries  => $debate_all,
+			section_rank => $section_rank
+	);
+
+	my $entries_ref = pop @results if @results;
+
+	my %entry_by_id = 
+		map {$_->id => $_} $event->entries 
+		if $nsda_districts;
+
+	return unless $entries_ref;
+
+	my %event_settings = $event->all_settings;
+
+	my $round_robin++ 
+		if $event_settings{"round_robin"} 
+		&& $round->type ne "elim" 
+		&& $round->type ne "final";
+
+    my $novice = $event_settings{"top_novice"};
+
+	foreach my $key (keys %{$none_above}) {
+
+		if ($none_above->{$key} > $round->name) { 
+			$exclude->{$key}++;
+			$start_placement++;
+		} 
+
+	}
+
+	# How does this even happen anyway?
+	undef $novice if $novice eq "none"; 
+
+	if ($novice) { 
+		my @novii = $m->comp(
+			"/funclib/event_novii.mas", 
+			event => $event
+		);
+		my %novices = map {$_->id => 1} @novii;
+		${$entries_ref}{"novice"} = \%novices;
+	}
+
+    my %breakouts = ();
+
+    if ($event_settings{"breakouts"}) {
+
+        foreach my $breakout (1 .. $event_settings{"breakouts"}) {
+
+            $breakouts{$breakout}{"name"} = $event_settings{"breakout_".$breakout."_label"};
+
+            my @settings = $m->comp(
+				"/funclib/event_entry_settings.mas",
+                event => $event,
+                tag   => "breakout_".$breakout
+            );
+
+            foreach my $setting (@settings) {
+                $breakouts{$breakout}{$setting->entry->id}++;
+            }
+
+        }
+
+    }
+
+    my $codes = $event_settings{"code_style"} if $event;
+
+	my @schools = $m->comp(
+		"/funclib/event_schools.mas", 
+		event => $event
+	);
+
+	my %school_by_id = map {$_->id => $_} @schools;
+
+    my %entry_ballots = $m->comp(
+		"/funclib/round_ballot_strings.mas", 
+		round     => $round,
+		delimiter => '-'
+	);  
+
+	my %cutoff;
+
+	my @tiebreak_keys = 
+		sort {$a <=> $b} 
+		keys %{$entries_ref->{"tier_description"}};
+
+	my $cutoff_key = $tiebreak_keys[0] 
+		if @tiebreak_keys && $threshold; 
+
+	my $mark_ties++ 
+		if scalar @tiebreak_keys > 1;
+
+	my @ineligibles = $m->comp(
+		"/funclib/event_entry_settings.mas",
+		event => $event,
+		tag   => "no_elims"
+	);
+
+	my %ineligible = map {$_->entry->id => $_->value} @ineligibles;
+
+
+	unless ($noheader) { 
+	
+		Tab::debuglog("clearing buffer");
+		$m->clear_buffer;
+		$r->content_type('application/csv');
+		$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+
+		$m->print($nsda_districts ? "Qual" : "Count"); 
+
+		$m->print(",Place,Event,Code");
+
+		$m->print(",Single Entry Priority") if $nsda_districts;
+
+		$m->print(",Novice") if $novice;
+
+		foreach my $break (keys %breakouts) { 
+			$m->print(",".$breakouts{$break}{"name"}) 
+		}
+
+		if ($nsda_districts) { 
+
+			$m->print(",First, Last, Merit ID");
+
+			#Have to do it twice even in single events otherwise the all-events report goes crazy
+			$m->print(",First, Last, Merit ID");
+
+			$m->print(",School,School ID");
+
+		} else { 
+			$m->print(",Name,School");
+		}
+
+		$m->print(",Last Round") if $nsda_districts;
+		$m->print(",Section Rank,Section Number") if $section_rank;
+		$m->print(",Pod Rank,Pod") if $round_robin;
+
+		foreach my $key (@tiebreak_keys) { 
+			$m->print(",".${$entries_ref}{"tier_description"}{$key});
+		}
+
+		$m->print(",Raw Scores");
+		$m->print("\n");
+
+	}
+
+	my $count = 1;
+
+	if (${$entries_ref}{"by_place"}) { 
+
+		my $last_tied;
+
+		foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) { 
+
+			my $tie++ if scalar @{${${$entries_ref}{"by_place"}}{$key}} > 1;
+
+			my $place = $start_placement if $start_placement;
+
+			undef $tie 
+				if $round->type eq "elim" 
+				&& $event->type ne "speech" 
+				&& $event->type ne "congress";
+
+			my $did;
+
+			ENTRY:
+			foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) { 
+
+				next if $exclude && $exclude->{$entry_id};
+
+				$did++;
+
+				undef $last_tied;
+
+				$m->print('"');
+
+				if ($nsda_districts) { 
+
+					if ($qualifiers && $qualifiers->{$entry_id}{"place"}) { 
+
+						$m->print("QUALIFIED");
+
+					} elsif ($vacated && $vacated->{$entry_id}{"place"}) { 
+
+						$m->print("Vacated");
+
+   					} elsif ($alternates && $alternates->{$entry_id}{"place"}) { 
+						
+						$m->print(Lingua::EN::Numbers::Ordinate::ordinate($alternates->{$entry_id}{"place"}));
+						$m->print(" Alt");
+					}
+
+					
+				} else { 
+
+					$m->print($count);
+
+				}
+
+				$m->print('","'); 
+				$m->print("T-") if $tie;
+				$m->print($place) if $place;
+				$m->print($key) if $key;
+				$m->print(" (No Elims") if $ineligible{$entry_id};
+
+				$m->print('","'); 
+				$m->print($event->abbr);
+				$m->print('","'); 
+				$m->print($entries_ref->{"code"}{$entry_id});
+
+				if ($nsda_districts) { 
+					$m->print('","'); 
+					$m->print($entry_by_id{$entry_id}->setting("nsda_priority"));
+				}
+
+				if ($novice) { 
+					$m->print('","');  
+					$m->print("Novice") if ${$entries_ref}{"novice"}{$entry_id};
+				}
+
+				foreach my $break (keys %breakouts) { 
+					$m->print('","');  
+					$m->print($breakouts{$break}{"name"}) 
+						if $breakouts{$break}{$entry_id};
+				}
+
+				if ($nsda_districts) { 
+
+					foreach my $student ($entry_by_id{$entry_id}->students) { 
+
+						$m->print('","');
+						$m->print($student->first);
+						$m->print('","');
+						$m->print($student->last);
+						$m->print('","');
+						$m->print($student->ualt_id);
+					}
+
+					if ($nsda_districts && $event_settings{"max_entry"} == 1) { 
+						$m->print('","');
+						$m->print('","');
+						$m->print('","');
+					}
+
+					$m->print('","');
+					$m->print($school_by_id{${$entries_ref}{"school_id"}{$entry_id}}->name);
+
+					$m->print('","');
+					$m->print($school_by_id{${$entries_ref}{"school_id"}{$entry_id}}->chapter->nsda);
+
+
+				} else { 
+			
+					$m->print('","');
+					$m->print(${$entries_ref}{"name"}{$entry_id});
+
+					$m->print('","');
+					$m->print($school_by_id{${$entries_ref}{"school_id"}{$entry_id}}->name);
+
+				}
+
+
+				if ($nsda_districts) { 
+
+					if ($none_above && $none_above->{$entry_id}) { 
+						$m->print('","');
+						$m->print($none_above->{$entry_id});
+					} else { 
+						$m->print('","');
+						$m->print($round->name);
+					}
+
+				}
+
+				if ($section_rank || $round_robin) { 
+
+					$m->print('","');
+					$m->print(${$entries_ref}{"section_rank"}{$entry_id});
+
+					$m->print('","');
+					$m->print(${$entries_ref}{"section"}{$entry_id});
+
+				}
+
+				foreach my $key (@tiebreak_keys) { 
+
+					my $value = ${$entries_ref}{"tiebreak"}{$key}{$entry_id};
+
+					if ($key == $cutoff_key) {
+						$cutoff{$entry_id}++ if $value >= $threshold;
+					}
+
+					$value =~ s/\.(?:|.*[^0]\K)0*\z//;
+					$value = sprintf("%.2f", $value) 
+						unless ${$entries_ref}{"tier_description"}{$key} eq "Rk" 
+						|| ${$entries_ref}{"tier_description"}{$key} eq "Win" 
+						|| ${$entries_ref}{"tier_description"}{$key} eq "Prev Win" 
+						|| ${$entries_ref}{"tier_description"}{$key} eq "Rnds" 
+						|| ${$entries_ref}{"tier_description"}{$key} eq "Loss" 
+						|| ${$entries_ref}{"tier_description"}{$key} eq "Dwn" 
+						|| ${$entries_ref}{"tier_description"}{$key} eq "CDwn" 
+						|| ${$entries_ref}{"tier_description"}{$key} eq "H2H" 
+						|| ${$entries_ref}{"tier_description"}{$key} eq "Bal";
+					
+					
+					$m->print('","');
+					$m->print($value);
+
+				}
+
+				$m->print('","');
+				$m->print($entry_ballots{$entry_id});
+				$m->print('"');
+				$m->print("\n");
+
+  			} 
+
+   			$start_placement += $did if $start_placement;
+   			$last_tied++ if $tie;
+
+   		}
+
+   	}
+
+	$m->flush_buffer;
+
+	unless ($nofinish) { 
+		$m->abort;
+	} else { 
+		return;
+	}
+
+</%init>
