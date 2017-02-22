@@ -1,0 +1,755 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now(time_zone => $tz);
+
+	# I can't believe this shit is necessary
+
+	my %days = (
+		0 => "Mon",
+		1 => "Tue",
+		2 => "Wed",
+		3 => "Thu",
+		4 => "Fri",
+		5 => "Sat",
+		6 => "Sun"
+	);
+
+	# Get the upload and create the file handle.
+	my $req = Apache2::Request->new($r);
+	my @csv_handles = $r->upload; 
+
+	my $csv_file = $req->upload($csv_handles[0]);
+	my $io = $csv_file->io;
+
+	my @lines = <$io>;
+
+	my @all_lines;
+
+	foreach (@lines) { 
+		$_ =~ s/[\r]+/\n/g;
+		$_ =~ s/[\r\n]+/\n/g;
+		$_ =~ s/[\n]+/\n/g;
+		push @all_lines, split (/\n/, $_);
+	}
+
+	my %schools;
+	my %entries;
+	my %students;
+	my %judges;
+	my %events; 
+
+	#Schools
+	my $marker;
+
+	$m->print('<div class="blankfull">');
+	$m->print('<h4>Yo!</h4>');
+
+	my $grad_standard = $now->year + 2;
+	
+	LINE:
+	foreach my $line (@lines) { 
+
+		chomp $line;
+
+		if ($line eq "[webevents.csv]") { 
+			$marker++;
+			next LINE;
+		}
+
+		if ($marker) { 
+
+			if ($line eq "[webschools.csv]") { 
+
+				undef $marker;
+				last LINE;
+				next;
+
+			} else { 
+
+				$line =~ s/"//g;
+
+				my ($id, $name, $abbr, @stuffs) = 
+						split(/\,/, $line);
+
+				next LINE if (not defined $id);
+				next LINE if $id eq 'ID';
+
+				if ($tourn_settings->{"nsda_district"}) { 
+					$name = "Informative" if $name eq "Informative Speaking";
+					$name = "Lincoln Douglas" if $name eq "Lincoln Douglas Debate";
+					$name = "Policy" if $name eq "Policy Debate";
+					$name = "Program Oral Interp" if $name eq "Programmed Oral Interp";
+					$name = "Public Forum" if $name eq "Public Forum Debate";
+					$name = "US Extemp" if $name eq "United States Extemp";
+					$abbr = "USX" if $abbr eq "DX";
+				}
+
+				my $event = $tourn->events(name => $name)->first;
+
+				$event = $tourn->events(abbr => $abbr)->first
+					unless $event;
+
+				$event = $tourn->events(name => $abbr)->first
+					unless $event;
+
+
+				my $pattern = $stuffs[9];
+
+				if ($event) { 
+
+					$events{"category"}{$pattern} = $event->category;
+					$events{$id} = $event;
+
+				} else { 
+
+					$m->print("<p class='redtext strong'>No event found called $name/$abbr</p>");
+
+				}
+
+			}
+
+		}
+
+	}
+
+	my %already = ();
+
+	LINE:
+	foreach my $line (@lines) { 
+
+		chomp $line;
+
+		if ($line eq "[webschools.csv]") { 
+			$marker++;
+			next LINE;
+
+		}
+
+		if ($marker) { 
+
+			if ($line eq "[webjudges.csv]") { 
+
+				undef $marker;
+				last LINE;
+				next;
+
+			} else { 
+		
+				$line =~ s/"//g;
+
+				my ($id, $name, $contact, $junk, $city, $state, $b, $phone, $c, $d, $email, @meh) =
+						split(/\,/, $line);
+
+				next LINE if (not defined $id);
+				next LINE if $id eq 'ID';
+
+				my $short_name = $name;
+				$short_name =~ s/^The //g;
+				$short_name =~ s/ HS$//g;
+				$short_name =~ s/ High School$//g;
+
+				my $chapter;
+
+				my $chapter_setting = Tab::ChapterSetting->search(
+					tag   => "jot_id",
+					value => $id
+				);
+
+				$chapter = $chapter_setting->chapter if $chapter;
+
+				my $coach_person = Tab::Person->search(
+					email => $email 
+				)->first;
+
+				$m->print("Finding school $name:....");
+
+				if ($coach_person) { 
+					$m->print("Found Tabroom account for owner: ".$coach_person->id." ".$coach_person->email);
+					$m->print("<br />");
+				}
+
+				unless ($chapter) { 
+
+					if ($coach_person) { 
+
+						my @candidates = $m->comp(
+							"/funclib/person_chapters.mas", 
+							person => $coach_person
+						);
+
+						my %candidate_by_id = map {$_->id => $_} @candidates;
+
+						$chapter = shift @candidates if (scalar @candidates) == 1;
+
+						unless ($chapter) { 
+
+							my @possibles = Tab::Chapter->search_where({
+								name  => { "like" => $short_name."%" },
+								state => $state
+							})->first;
+
+							foreach my $possible (@possibles) { 
+								next if $already{$possible->id};
+								$chapter = $possible if $candidate_by_id{$possible->id};
+								last if $chapter;
+							}
+
+						}
+
+					} else { 
+
+						my @exacts = Tab::Chapter->search_where({
+							name  => $name,
+							state => $state
+						})->first;
+
+						my @possibles = Tab::Chapter->search_where({
+							name  => { "like" => $short_name."%" },
+							state => $state
+						})->first;
+
+						foreach my $exact (@exacts) {
+							next if $already{$exact->id};
+							$chapter = $exact;
+						}
+
+						unless ($chapter) { 
+							foreach my $possible (@possibles) {
+								next if $already{$possible->id};
+								$chapter = $possible;
+							}
+						}
+
+					}
+
+				}
+
+				if ($chapter) {
+
+					$already{$chapter->id}++;
+					$m->print("TABROOM CHAPTER FOUND: ".$chapter->id." ".$chapter->name);
+					$m->print(" ".$chapter->city.", ".$chapter->state." <br />");
+
+				} else { 
+
+					$chapter = Tab::Chapter->create({ 
+						level => "highschool",
+						name  => $name,
+						city  => $city,
+						state => $state,
+					});
+
+					Tab::Permission->create({
+						person  => $coach_person,
+						tag     => "chapter",
+						chapter => $chapter->id
+					}) if $coach_person;
+
+					unless ($coach_person) { 
+						$m->print("<p class='strong redtex'>Cannot grant permission to coach $email: no Tabroom account exists</p>");
+					}
+
+				}
+
+				$chapter->setting('jot_id', $id) if $chapter;
+
+				$schools{$id}{"chapter"} = $chapter; 
+				$schools{$id}{"name"}    = $name;
+				$schools{$id}{"contact"} = $contact;
+				$schools{$id}{"city"}    = $city;
+				$schools{$id}{"state"}   = $state;
+				$schools{$id}{"phone"}   = $phone;
+				$schools{$id}{"email"}   = $email;
+
+				$m->print("<br />");
+
+			}
+
+		}
+
+	}
+	
+	LINE:
+	foreach my $line (@lines) { 
+
+		chomp $line;
+
+		if ($line eq "[webstudents.csv]") { 
+			$marker++;
+			next LINE;
+		}
+
+		if ($marker) { 
+
+			if ($line eq "[webentrys.csv]") { 
+
+				undef $marker;
+				last LINE;
+				next;
+
+			} else { 
+		
+				$line =~ s/"//g;
+
+				my ($student_id, $school_id, $name) = split(/\,/, $line);
+
+				next LINE if (not defined $student_id);
+				next LINE if $student_id eq 'student_id';
+
+				my @names = split(/\ /, $name);
+
+				my $first = fixname(shift @names);
+				my $last = fixname(pop @names);
+				my $middle = fixname(join (' ', @names));
+
+				my $chapter = $schools{$school_id}{"chapter"};
+
+				my $student = Tab::Student->search( 
+					retired => 0,
+					first   => $first,
+					last    => $last,
+					chapter => $chapter->id
+				)->first;
+
+				unless ($student) {
+
+					$student = Tab::Student->create({ 
+						chapter   => $chapter->id,
+						first     => fixname($first),
+						last      => fixname($last),
+						middle    => fixname($middle),
+						grad_year => $grad_standard
+					});
+
+					$m->print("No match for student $first $last: created ".$student->id." <br />");
+
+				}
+
+				$students{$student_id}{"object"} = $student;
+				$students{$student_id}{"school"} = $school_id;
+
+			}
+
+		}
+
+	}
+
+	LINE:
+	foreach my $line (@lines) { 
+
+		chomp $line;
+
+		if ($line eq "[webentrys.csv]") { 
+			$marker++;
+			next LINE;
+		}
+
+		if ($marker) { 
+
+			if ($line eq "[webteams.csv]") { 
+
+				undef $marker;
+				last LINE;
+				next;
+
+			} else { 
+
+				$line =~ s/"//g;
+
+				my ($entry_id, $tourn_id, $student_id, $event_id, $code) =
+						split(/\,/, $line);
+
+				next LINE if (not defined $entry_id);
+				next LINE unless $events{$event_id};
+
+				my $student = $students{$student_id}{"object"};
+
+				$entries{$entry_id}{'student'} = $student;
+				$entries{$entry_id}{'event'}   = $events{$event_id};
+				$entries{$entry_id}{'code'}    = $code;
+
+				# The School of Unnecessary Joins
+				my $school_id = $students{$student_id}{"school"};
+				$entries{$entry_id}{'school'}  = $school_id;
+
+				$schools{$school_id}{"activate"}++;
+				push @{$schools{$school_id}{"entries"}}, $entry_id;
+
+				# Because this is smart or something
+				$entries{"by_student"}{$student_id} = $entry_id; 
+
+			}
+
+		}
+
+	}
+	
+	LINE:
+	foreach my $line (@lines) { 
+
+		chomp $line;
+
+		if ($line eq "[webteams.csv]") { 
+			$marker++;
+			next LINE;
+		}
+
+		if ($marker) { 
+
+			if ($line eq "[webgroups.csv]") { 
+
+				undef $marker;
+				last LINE;
+				next;
+
+			} else { 
+
+				$line =~ s/"//g;
+
+				my ($tourn_id, $school_id, $event_id, $entry_id, $student_id, $partner_id, @dumbshit) = 
+						split(/\,/, $line);
+
+				next LINE if (not defined $tourn_id);
+				next LINE if $tourn_id eq 'tourn_id';
+
+				next unless $entries{$entry_id}{"event"}
+					&& $entries{$entry_id}{"event"}->id == $event_id;
+
+				$entries{$entry_id}{"partner"} = $students{$partner_id}{"object"}
+					unless $entries{$entry_id}{"student"} = $partner_id;
+
+				$entries{$entry_id}{"partner"} = $students{$student_id}{"object"}
+					unless $entries{$entry_id}{"student"} = $student_id;
+
+			}
+
+		}
+
+	}
+
+	LINE:
+	foreach my $line (@lines) { 
+
+		chomp $line;
+
+		if ($line eq "[webtitles.csv]") { 
+			$marker++;
+			next LINE;
+		}
+
+		if ($marker) { 
+
+			if ($line eq "[eblocks.csv]") { 
+
+				undef $marker;
+				last LINE;
+				next;
+
+			} else { 
+
+				$line =~ s/"//g;
+
+				my ($event_id, $school_id, $random_student_id, $title, $author) = 
+						split(/\,/, $line);
+
+				next LINE if (not defined $event_id);
+				next LINE if $event_id eq 'event_id';
+
+				# Because using entry_id like a sane human would be just too easy. 
+				my $entry_id = $entries{"by_student"}{$random_student_id};
+
+				$entries{$entry_id}{"title"} = $title;
+				$entries{$entry_id}{"author"} = $author;
+
+			}
+
+		}
+
+	}
+
+
+	foreach my $school_id (keys %schools) { 
+
+		my $entry_counter;
+
+		next unless $schools{$school_id}{"activate"}++;
+
+		my $chapter = $schools{$school_id}{"chapter"};
+
+		my $school = Tab::School->search(
+			tourn   => $tourn->id,
+			chapter => $chapter->id
+		)->first;
+
+		unless ($school) { 
+
+			$school = Tab::School->create({
+				tourn   => $tourn->id,
+				chapter => $chapter->id,
+				name    => $chapter->name,
+				code    => $schools{$school_id}{"code"},
+			});
+
+			$school->setting("contact_name", $schools{$school_id}{"contact"});
+			$school->setting("contact_email", $schools{$school_id}{"email"});
+			$school->setting("contact_phone", $schools{$school_id}{"phone"});
+		}
+
+		$schools{$school_id}{"object"} = $school;
+
+		my @existing = $school->entries;
+		my %exists_by_name = map {$_->name."-".$_->event->id => $_} @existing;
+		my %exists_by_students = ();
+				
+		my $counter = 100;
+
+		foreach my $entry_id (@{$schools{$school_id}{"entries"}}) { 
+
+			my $entry_setting = Tab::ChapterSetting->search(
+				tag   => "jot_id",
+				value => $entry_id
+			);
+
+			next if $entry_setting && $entry_setting->entry;
+
+			my $student = $entries{$entry_id}{"student"};
+			my $partner = $entries{$entry_id}{"partner"};
+			my $event   = $entries{$entry_id}{"event"};
+
+			next if $exists_by_students{$event}{$student}{$partner}++;
+
+			my $school_id  = $entries{$entry_id}{"school"};
+			my $school = $schools{$school_id}{"object"};
+
+			my $code = $entries{$entry_id}{"code"};
+			$code    = $counter unless $code;
+
+			my $name;
+
+			if ($partner) { 
+				$name = $student->last." & ".$partner->last;
+			} else { 
+				$name = $student->first." ".$student->last;
+			}
+
+			next if ($exists_by_name{$name."-".$event->id});
+
+			my $entry = Tab::Entry->create({
+				name   => $name,
+				code   => $code,
+				event  => $event->id,
+				active => 1,
+				tourn  => $tourn->id,
+				school => $school->id,
+			}) if $school;
+
+			if ($entry) { 
+
+				$entry->setting("title", $entries{$entry_id}{"title"});
+				$entry->setting("author", $entries{$entry_id}{"author"});
+				$entry->setting("jot_id", $entry_id);
+
+				Tab::EntryStudent->create({
+					entry   => $entry->id,
+					student => $student->id
+				});
+
+				Tab::EntryStudent->create({
+					entry   => $entry->id,
+					student => $partner->id
+				}) if $partner;
+			
+				$entry_counter++;
+
+				if ($code == $counter) { 
+
+					my $new_code = $m->comp("/funclib/entry_code.mas", entry => $entry);
+					$entry->code($new_code);
+					$entry->update;
+				}
+
+			}
+
+			$counter++;
+
+		}
+
+		$m->print("<p> $entry_counter entries imported for ".$school->name."</p>");
+
+	}
+
+	LINE:
+	foreach my $line (@lines) { 
+
+		chomp $line;
+
+		if ($line eq "[webjudges.csv]") { 
+			$marker++;
+			next LINE;
+		}
+
+		if ($marker) { 
+
+			if ($line eq "[webjudpat.csv]") { 
+
+				undef $marker;
+				last LINE;
+				next;
+
+			} else { 
+
+				$line =~ s/,,/, ,/g;
+				$line =~ s/"//g;
+
+				my ($judge_id, $name, $school_id, $rating, $notes, @dumbcrap) = 
+						split(/\,/, $line);
+
+				next LINE if (not defined $judge_id);
+				next LINE if $judge_id eq 'ID';
+
+				# I'll take "things that should not be necessary" for $400, Alex. 
+				my $chapter = $schools{$school_id}{"chapter"};
+
+				my @names = split(/\ /, $name);
+
+				my $first = fixname(shift @names);
+				my $last = fixname(pop @names);
+				my $middle = fixname(join (' ', @names));
+
+				my $email = $dumbcrap[14] if $dumbcrap[14];
+				my $phone = $dumbcrap[13] if $dumbcrap[13];
+				$phone =~ s/[\D_]//g;
+
+				my $category_pattern;
+
+				my $field_counter;
+				my $sequence_counter;
+
+				FIELD:
+				foreach my $field (@dumbcrap) { 
+
+					if ($field_counter++ < 7) { 
+
+						$notes .= "Avail: ";
+						$notes .= " ".$days{$field_counter} if $field eq "X";
+
+					} else { 
+
+						$sequence_counter++;
+
+						if ($field eq "X") { 
+
+							$category_pattern = $sequence_counter;
+
+							last FIELD;
+							next FIELD;
+						}
+
+					}
+				}
+
+				my $category = $events{"category"}{$category_pattern};
+
+				unless ($category) { 
+
+					$m->print("<p class='strong redtext'>Judge category not found for pattern $category_pattern.  Cannot import judge $first $last</p>");
+					next LINE;
+				}
+
+				my $judge_person = Tab::Person->search(
+					email => $email
+				)->first;
+
+				my $chapter_judge;
+
+				if ($chapter) { 
+				
+					$chapter_judge = Tab::ChapterJudge->search(
+						chapter => $chapter->id,
+						person => $judge_person->id
+					)->first
+						if $judge_person;
+
+					$chapter_judge = Tab::ChapterJudge->search(
+						chapter => $chapter->id,
+						first   => $first,
+						last    => $last,
+					)->first
+						unless $chapter_judge;
+
+				}
+
+				unless ($chapter_judge) { 
+
+					if ($chapter) { 
+
+						$chapter_judge = Tab::ChapterJudge->create({
+							chapter => $chapter->id,
+							first   => $first,
+							last    => $last,
+							middle  => $middle,
+							phone   => $phone, 
+							email   => $email
+						});
+
+						if ($judge_person) { 
+							$chapter_judge->person($judge_person->id);
+							$chapter_judge->update();
+						}
+
+					}
+
+				}
+
+				my $judge = Tab::Judge->create({
+					category   => $category->id,
+					first      => $first,
+					last       => $last,
+					middle     => $middle,
+					active     => 1,
+					obligation => 9
+				});
+
+				my $school = $schools{$school_id}{"object"};
+
+				$judge->school($school->id) if $school;
+
+				$judge->chapter_judge($chapter_judge->id) if $chapter_judge;
+				$judge->person($judge_person->id) if $judge_person;
+				$judge->update();
+
+				$judge->setting("phone", $phone);
+				$judge->setting("email", $email);
+
+			}
+
+		}
+
+	}
+
+
+	sub fixname {
+
+		my $string = shift;
+
+		$string = ucfirst(lc($string)) if $string eq uc($string);
+		$string = ucfirst(lc($string)) if $string eq lc($string);
+
+		return $string;
+	}
+
+
+</%init>
+
+	<h4>Import Complete</h4>
+
+
+	</div>
