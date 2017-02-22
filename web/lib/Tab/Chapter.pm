@@ -14,6 +14,7 @@ Tab::Chapter->has_many(students => 'Tab::Student', 'chapter' => { order_by => 'l
 Tab::Chapter->has_many(chapter_judges => 'Tab::ChapterJudge', 'chapter' => { order_by => 'last'});
 Tab::Chapter->has_many(chapter_circuits => 'Tab::ChapterCircuit', 'chapter');
 Tab::Chapter->has_many(chapter_settings => 'Tab::ChapterSetting', 'chapter');
+Tab::Chapter->has_many(settings => 'Tab::ChapterSetting', 'chapter');
 
 Tab::Chapter->has_many(admins => [ Tab::Permission => 'person']);
 Tab::Chapter->has_many(persons => [ Tab::Permission => 'person']);
