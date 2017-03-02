@@ -21,12 +21,12 @@
 	push @events, $event;
 	@events = sort {$a->name cmp $b->name} $tourn->events if $event_id eq "all";
 
-    my $filename = "Speakers-$name-".$session->id.".csv";
-    my $filepath = $Tab::file_root."tmp/".$filename;
-    `rm -f $filepath.*`; 
-    
-    open (CSVOUT, ">$filepath");
+    my $filename = "Speakers-$name-.csv";
 
+    $m->clear_buffer;
+    $r->content_type('application/csv');
+    $r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+    
 	my %school_name;
 	foreach my $school ($tourn->schools) { 
 		$school_name{$school->id} = $school->short_name;
@@ -36,9 +36,14 @@
 			
 		my $type = $event->type;
 
-		my @rounds = sort {$b->name <=> $a->name} $m->comp("/funclib/event_rounds.mas", event => $event, done => "yes");
+		my @rounds = sort {$b->name <=> $a->name} $m->comp(
+			"/funclib/event_rounds.mas", 
+			event => $event,
+			done  => "yes"
+		);
 
 		my $round;
+
 		foreach my $all_round (@rounds) { 
 			next if $all_round->type eq "elim";
 			next if $all_round->type eq "final";
@@ -57,12 +62,22 @@
 		my $wins;
 
 		foreach my $tb ($tiebreak_set->tiebreaks) { 
-			$ranks++ if ($tb->name eq "ranks" || $tb->name eq "reciprocals");
-			$wins++ if ($tb->name eq "opp_wins" || $tb->name eq "winloss" || $tb->name eq "ballots");
-			$points++ if ($tb->name eq "points" || $tb->name eq "competition" || $tb->name eq "opp_points");
+
+			$ranks++ if ($tb->name eq "ranks" 
+				|| $tb->name eq "reciprocals");
+
+			$wins++ if ($tb->name eq "opp_wins" 
+				|| $tb->name eq "winloss" 
+				|| $tb->name eq "losses" 
+				|| $tb->name eq "ballots"
+			);
+			$points++ if ($tb->name eq "points" 	
+				|| $tb->name eq "competition" 
+				|| $tb->name eq "opp_points"
+			);
 		}
 
-		print CSVOUT "Tournament:,".$tourn->name.",".$event->name.",Speakers in Order\n";
+		$m->print("Tournament:,".$tourn->name.",".$event->name.",Speakers in Order\n");
 
 		my $novice = $event->setting("top_novice") if $event;
 
@@ -71,71 +86,84 @@
 		my $dbh = Tab::DBI->db_Main();
 
 		my $sth = $dbh->prepare("
-			select value.id, value.tag, value.value, value.student, student.id, ballot.entry, ballot.judge, ballot.bye, ballot.chair, round.name
-			from score value, ballot, panel, round, entry_student, student
-			where value.ballot = ballot.id
+
+			select score.id, score.tag, score.value, score.student, 
+				student.id, 
+				ballot.entry, ballot.judge, ballot.bye, ballot.chair, 
+				round.name
+
+			from score, ballot, panel, round, entry_student, student
+			where score.ballot = ballot.id
 			and ballot.panel = panel.id
 			and panel.round = round.id
-			and round.name <= ".$round->name."
-			and round.event = ".$event->id."
+			and round.name <= ?
+			and round.event = ?
 			and ballot.entry = entry_student.entry
 			and entry_student.student = student.id
-			order by round.name, ballot.entry, ballot.chair, ballot.judge, CASE value.tag WHEN ".' "ballot" then 1 when "rank" then 2 when "points" then 3 when "rebuttal_points" then 4 end'."
+			order by round.name, ballot.entry, ballot.chair, ballot.judge, score.student,
+				CASE score.tag WHEN ".' "ballot" then 1 
+					when "rank" then 2 
+					when "points" then 3 
+					when "rebuttal_points" 
+					then 4 end'."
 		");
 
-		$sth->execute(); 
+		$sth->execute($round->name, $event->id); 
 
 		my %student_round;
 
-		while (my ($id, $tag, $value, $value_student, $student, $entryid, $judge, $bye, $chair, $roundname) = $sth->fetchrow_array() ) { 
+		while (
+			my ($id, $tag, $score, $score_student, $student, $entryid, $judge, $bye, $chair, $roundname) 
+			= $sth->fetchrow_array() 
+		) { 
+
+			unless ($student_round{$student} == $roundname) { 
+				$student_ballots{$student} .= ','.$roundname.',';
+				$student_round{$student} = $roundname;
+			}
+
+			next if $tag ne "points"
+				&& $tag ne "rank"
+				&& $tag ne "ballot"
+				&& $tag ne "rebuttal_points";
 
 			next if $tag eq "rank" && not defined $ranks;
 			next if $tag eq "points" && not defined $points;
 			next if $tag eq "ballot" && not defined $wins;
-			next if $tag eq "points" && $value_student != $student;
-			next if $tag eq "rebuttal_points" && $value_student != $student;
+			next if $tag eq "points" && $score_student != $student;
+			next if $tag eq "rebuttal_points" && $score_student != $student;
 
-			$student_ballots{$student} .= ' ' if $student_ballots{$student} && $tag eq "rank" && ($type eq "speech" || $type eq "wudc" || $type eq "congress");
-			$student_ballots{$student} .= ' ' if $student_ballots{$student} && $tag eq "ballot" && $type ne "speech" && $type ne "wudc" && $type ne "congress";
-
-
-			if ($student_ballots{$student}) { 
-				if ($tag eq "points" && ($type eq "speech" || $type eq "wudc" || $type eq "congress")) { 
-					$student_ballots{$student} .= '/' 
-				} else { 
-					$student_ballots{$student} .= " ";
-				}
-			}
-
-			$student_round{$student} = $roundname;
 
 			if ($tag eq "ballot") { 
 
 				if ($bye) { 
 					$student_ballots{$student} .= "BYE" 
 				} else { 
-					$student_ballots{$student} .= "W" if $value > 0;
-					$student_ballots{$student} .= "L" if $value < 1;
-			
-			}
+					$student_ballots{$student} .= "W" if $score > 0;
+					$student_ballots{$student} .= "L" if $score < 1;
+				}
+
 			} elsif ($tag eq "rebuttal_points") { 
-				$student_ballots{$student} .= "(".$value.")";
+
+				$student_ballots{$student} .= "(R ".$score.")";
 
 			} else { 
-				$student_ballots{$student} .= $value;
+				$student_ballots{$student} .= $score;
 			}
 
 		}
 
-		my ($students_ref, $tbs_ref, $desc_ref, $forfeit_ref, $meh, $long_desc_ref, $novice_ref, $name_ref, $code_ref, $school_ref) = $m->comp("/tabbing/results/order_speakers.mas", round => $round);
+		my ($students_ref, $tbs_ref, $desc_ref, $forfeit_ref, $meh, $long_desc_ref, $novice_ref, $name_ref, $code_ref, $school_ref) 
+			= $m->comp(
+				"/tabbing/results/order_speakers.mas", round => $round);
 
-		print CSVOUT "Order, Debater,, ";
+		$m->print("Order,Debater,Institution, ");
 
 		foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 
-			print CSVOUT ${$desc_ref}{$key}.", ";
+			$m->print(${$desc_ref}{$key}.",");
 		}
 
-		print CSVOUT " Raw Scores \n";
+		$m->print("Raw Scores \n");
 
 		if ($students_ref) { 
 
@@ -145,24 +173,24 @@
 
 				foreach my $student_id (@{${$students_ref}{$key}}) { 
 
-					print CSVOUT $key;
-					print CSVOUT " -T" if $tie;
-					print CSVOUT " , ";
+					$m->print($key);
+					$m->print("-T") if $tie;
+					$m->print(",");
 
-					print CSVOUT ${$name_ref}{$student_id}.", ";
-					print CSVOUT " Novice " if ${$novice_ref}{$student_id} && $novice ne "none";
-					print CSVOUT $school_name{${$school_ref}{$student_id}}.", ";
+					$m->print(${$name_ref}{$student_id}.",");
+					$m->print("Novice") if ${$novice_ref}{$student_id} && $novice ne "none";
+					$m->print($school_name{${$school_ref}{$student_id}}.",");
 
 					foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) { 
 
-						my $value = ${$tbs_ref}{$student_id."-".$key};
-						$value = sprintf("%.2f", $value);
-						$value =~ s/\.(?:|.*[^0]\K)0*\z//;
-						print CSVOUT Tab::texify($value).", "
+						my $score = ${$tbs_ref}{$student_id."-".$key};
+						$score = sprintf("%.2f", $score);
+						$score =~ s/\.(?:|.*[^0]\K)0*\z//;
+						$m->print(Tab::texify($score).",");
 					}
 
 
-					print CSVOUT $student_ballots{$student_id}."\n";
+					$m->print($student_ballots{$student_id}."\n");
 				} 
 
 			}
@@ -171,8 +199,8 @@
 
 	}
 
-	close CSVOUT;
-	$m->redirect("/tmp/$filename");
+	$m->flush_buffer;
+	$m->abort;
 
 </%init>
 
