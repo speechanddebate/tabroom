@@ -300,7 +300,7 @@ function panelmaker($entry, &$panel_id, &$panel_entry_sync, &$panel_entry_orig, 
      $panel_id[$i]=$row['panel_id'];
      $panel_entry_sync[$i]=$entry;
      $panel_entry_orig[$i]=$row['entry'];
-     $panel_entry_waitlist[$i]=$waitlist;
+     $panel_entry_waitlist[$i]=$waitlist; 
     }
 }
 
