@@ -314,9 +314,17 @@ $query="
 	//random fix
 	if ( strtoupper($row['rd_label']) == 'FINALS' ) { $elim_key[$row['rd_id']]=16; }
 	if ( strtoupper($row['rd_label']) == 'SEMIS' ) { $elim_key[$row['rd_id']]=15; }
+	if ( strtoupper($row['rd_label']) == 'SEM' ) { $elim_key[$row['rd_id']]=15; }
+	if ( strtoupper($row['rd_label']) == 'SEMS' ) { $elim_key[$row['rd_id']]=15; }
 	if ( strtoupper($row['rd_label']) == 'QUARTERS' ) { $elim_key[$row['rd_id']]=14; }
+	if ( strtoupper($row['rd_label']) == 'QTR' ) { $elim_key[$row['rd_id']]=14; }
+	if ( strtoupper($row['rd_label']) == 'QTRS' ) { $elim_key[$row['rd_id']]=14; }
+	if ( strtoupper($row['rd_label']) == 'OCT' ) { $elim_key[$row['rd_id']]=13; }
 	if ( strtoupper($row['rd_label']) == 'OCTOS' ) { $elim_key[$row['rd_id']]=13; }
+	if ( strtoupper($row['rd_label']) == '2X' ) { $elim_key[$row['rd_id']]=12; }
+	if ( strtoupper($row['rd_label']) == 'DOUBLES' ) { $elim_key[$row['rd_id']]=12; }
 
+	
 	// echo " elim key is ".$elim_key[$row['rd_id']]." for ".$row['rd_id']."<br>";
 
 	$ctr--;
@@ -782,7 +790,6 @@ $i++;
 		<th class="smallish">Division</th>
 		<th class="smallish">Date</th>
 		<th class="smallish">Prelims</th>
-		<th class="smallish">Triples</th>
 		<th class="smallish">Doubles</th>
 		<th class="smallish">Octos</th>
 		<th class="smallish">Quarters</th>
@@ -815,7 +822,7 @@ $i++;
 	$jvloss   = 0;
 
 	while ($i <= $x) {
-		if (onlyone($spkr1[$i], $spkr2[$i], $student1, $student3)==TRUE) {
+		if (onlyone($spkr1[$i], $spkr2[$i], $student1, $student3)==TRUE && $is_bye[$i] != 1) {
 
 	 if ($win[$i]==1 and $is_prelim[$i]==1) {$pwin++;}
 	 if ($win[$i]==0 and $is_prelim[$i]==1) {$ploss++;}

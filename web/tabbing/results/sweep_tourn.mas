@@ -17,9 +17,17 @@
 		$skip_round{$rule->value}++;
 	}
 
-	my @events = $sweep_set->events;
+	my @all_events = $sweep_set->events;
+	return unless @all_events;
 
-	return unless @events;
+	my @events;
+	my %used;
+
+	foreach my $event (@all_events) {
+		next unless $event && $event->id;
+		next if $used{$event}++;
+		push @events, $event;
+	}
 
 	my %event_include = map {$_->id => $_} @events;
 
@@ -36,12 +44,6 @@
 		from entry, event
 		where entry.event = event.id
 		and event.tourn  = ?
-		and exists ( 
-			select score.id
-			from ballot, score
-			where ballot.entry = entry.id
-			and ballot.id = score.ballot
-		)
 		order by entry.code
 	");
 
@@ -430,20 +432,99 @@
 					my @rounds = sort {$b->name <=> $a->name} $event->rounds;
 
 					my $final = shift @rounds;
+
+					next unless $final;
+
+					my $final_tiebreaks = $final->tiebreak_set;
+
+					if ($event->type eq "debate") { 
+
+						$final_tiebreaks = Tab::TiebreakSet->search(
+							tourn => $tourn->id,
+							name => "Debate Final"
+						)->first;
+
+					}
+
+					my $limit = 7;
 			
 					my ($entries_ref, $tbs_ref, $desc_ref, $forfeit_ref) 
 						= $m->comp(
 							"/tabbing/results/order_entries.mas", 
-							round => $final
-						); 
+							round        => $final,
+							tiebreak_set => $final_tiebreaks,
+							all_entries  => 1
+					); 
+
+					my $max_key;
+					my %done;
 
 					foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
 
 						foreach my $entry (@{${$entries_ref}{$key}}) {
+							next if $limit < 1;
 							next if $novice_only && not defined $entry_novice{$entry};
 							$entry_placement{$entry} = $key;
+
+							Tab::debuglog("Entry $entry has placement ".$entry_placement{$entry}) 
+								if $event->id == 60658;
+							$max_key++;
+							$limit--;
+							$done{$entry}++;
 						}
+
 					}
+
+					if ($rule->tag eq "nsda_place" && $limit > 0) { 
+
+						my $round_count = $final->name;
+
+						while ($limit > 0 && $round_count > 0) { 
+
+							$round_count--;
+
+							my $next_round = Tab::Round->search(
+								name  => $round_count,
+								event => $event->id
+							)->first;
+
+							if ($next_round) { 
+
+								my ($entries_ref, $tbs_ref, $desc_ref, $forfeit_ref) 
+									= $m->comp(
+										"/tabbing/results/order_entries.mas", 
+										round        => $next_round,
+										tiebreak_set => $final_tiebreaks,
+										all_entries  => 1
+								); 
+
+
+								foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+
+									foreach my $entry (@{${$entries_ref}{$key}}) {
+
+										next if $limit < 1;
+										next if $done{$entry}++;
+
+										next if $novice_only && not defined $entry_novice{$entry};
+
+										$entry_placement{$entry} = $key;
+
+										$limit--;
+									}
+
+								}
+
+							} else { 
+
+								$limit--;
+
+							}
+
+						}
+						
+					}
+
 				}
 
 				$placement_done++;
@@ -474,7 +555,11 @@
 			
 				foreach my $entry (@entries) { 
 					
+					Tab::debuglog("COUNTING Entry $entry has placement ".$entry_placement{$entry}) 
+						if $entry_event{$entry} == 60658;
+
 					next unless $entry_placement{$entry};
+					next unless $entry_placement{$entry} < 7;
 
 					my $event = $event_include{$entry_event{$entry}};
 
@@ -494,7 +579,6 @@
 						$baseline_score-- if $field_size < 58;
 						$baseline_score-- if $field_size < 38;
 					}
-
 
 					my $pts = 0;
 					
