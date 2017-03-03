@@ -52,9 +52,9 @@ NDT RANKING: the waitlist vs. waitlist comparison will allow you to view the hea
 The waitlist vs. entered comparison will show the records of second-round applicants against teams entered in the NDT.  
 Note that the first-round displays will not be acurate until all teams have applied and are on the waitlist, and the second-round comparison will not 
 be accurate until all the district qualifiers have entered and all second-round applicants have been added to the waitlist.<br><r>
-<a href='https://www.tabroom.com/jbruschke/HeadToHead.php?tourn=<?php echo $tournid; ?>&mode=WW'>Waitlist vs. waitlist</a>
-<a href='https://www.tabroom.com/jbruschke/HeadToHead.php?tourn=<?php echo $tournid; ?>&mode=EE'> Entered vs. Entered</a>
-<a href='https://www.tabroom.com/jbruschke/HeadToHead.php?tourn=<?php echo $tournid; ?>&mode=EW'> Waitlist vs. Entered</a>
+<a href='https://www.tabroom.com/jbruschke/HeadToHead.php?tourn=<?php echo $tournid; ?>&mode=WW&event=<?php echo $eventid; ?>'>Waitlist vs. waitlist</a>
+<a href='https://www.tabroom.com/jbruschke/HeadToHead.php?tourn=<?php echo $tournid; ?>&mode=EE&event=<?php echo $eventid; ?>'> Entered vs. Entered</a>
+<a href='https://www.tabroom.com/jbruschke/HeadToHead.php?tourn=<?php echo $tournid; ?>&mode=EW&event=<?php echo $eventid; ?>'> Waitlist vs. Entered</a>
 <a href="#ResultTable"> Jump to summary table</a></br></br>
 
 <?php
