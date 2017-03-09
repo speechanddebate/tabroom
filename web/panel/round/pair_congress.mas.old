@@ -1,0 +1,682 @@
+<%args>
+	$round
+	$num_panels
+	$entries_ref => undef
+	$first       => undef
+	$wipe        => undef
+</%args>
+<%perl>
+
+	use POSIX;
+	use List::Util 'shuffle';
+
+	my $event = $round->event;
+
+	my $tourn = $event->tourn;
+
+	my $ncfl++ if $tourn->setting("ncfl");
+
+	my $use_seeds++ if $event->setting("seed_presets");
+
+	Tab::Score->set_sql( delete_round => "
+		delete score from score, ballot, panel
+		where panel.round = ?
+		and panel.id = ballot.panel
+		and ballot.id = score.ballot
+	");
+
+	Tab::Ballot->set_sql( delete_round => "
+		delete ballot from ballot, panel
+		where panel.round = ?
+		and panel.id = ballot.panel
+	");
+
+	Tab::Panel->set_sql( delete_round => "
+		delete from panel where round = ?
+	");
+
+	if ($wipe) { 
+
+		my @rounds = Tab::Round->search( 
+			event => $round->event->id,
+			type  => "prelim"
+		);
+
+		foreach my $round (@rounds) { 
+			Tab::Score->sql_delete_round->execute($round->id);
+			Tab::Ballot->sql_delete_round->execute($round->id);
+			Tab::Panel->sql_delete_round->execute($round->id);
+		}
+
+	} elsif ($round->type eq "prelim") { 
+
+		my @rounds = Tab::Round->search( 
+			event => $round->event->id, 
+			type => "prelim"
+		);
+
+		my $exists;
+
+		foreach my $other (@rounds) { 
+
+			next if $other->id == $round->id;
+
+			my @entries = $m->comp(
+				'/funclib/round_entries.mas', 
+				round => $other
+			);
+
+			next unless @entries;
+
+			Tab::Score->sql_delete_round->execute($round->id);
+
+			Tab::Ballot->sql_delete_round->execute($round->id);
+
+			Tab::Panel->sql_delete_round->execute($round->id);
+
+			foreach my $panel ($other->panels) { 
+
+				my $new_panel = $panel->copy({
+					round  => $round->id
+				});
+
+				foreach my $entry (
+					$m->comp("/funclib/panel_entries.mas", panel => $panel)
+				) { 
+
+					my $ballot = Tab::Ballot->create({
+						panel => $new_panel->id,
+						entry => $entry->id
+					})
+				}
+
+				$exists++;
+			}
+		}
+
+		if ($exists) { 
+
+			my $now = DateTime->now;
+			$round->created($now);
+			$round->update;
+
+			return;
+		}
+
+	}
+
+	my @all_entries;
+
+	@all_entries = ${$entries_ref} if $entries_ref;
+	@all_entries = $event->entries( active => 1 ) unless @all_entries;
+
+
+	$num_panels = 1 unless $num_panels;
+
+	my %panel_cohorts = ();
+
+	my $count;
+	my $cohort = 1;
+
+	my %size_of_school  = ();
+	my %entries = ();
+
+	my @seeds = $m->comp(
+		"/funclib/event_entry_settings.mas", 
+		tag   => "pairing_seed",
+		event => $event
+	);
+
+	%{$entries{"seed"}} = map {$_->entry->id => $_->value} @seeds;
+
+	my @schools;
+
+	if ($ncfl) { 
+
+		%{$entries{"school"}}  = map {$_->id => $_->school->region->id} @all_entries;
+
+		foreach my $entry (@all_entries) { 
+			push @schools, $entries{"school"}{$entry->id};
+			$size_of_school{$entries{"school"}{$entry->id}}++;
+		}
+
+	} else {
+
+		%{$entries{"school"}} = map {$_->id => $_->school->id} @all_entries;
+
+		%{$entries{"state"}}  = map {$_->id => $_->school->chapter->state} @all_entries;
+
+		if ($event->setting("region_avoid")) { 
+			eval { 
+				%{$entries{"region"}}  = map {$_->id => $_->school->region} @all_entries;
+			};
+		}
+
+		foreach my $entry (@all_entries) { 
+			push @schools, $entries{"school"}{$entry->id};
+			$size_of_school{$entries{"school"}{$entry->id}}++;
+		}
+
+	}
+
+	if ($tourn->setting("nsda_district") && $event->name eq "HOU") { 
+
+		my @house_settings = $m->comp(
+			"/funclib/event_entry_settings.mas", 
+			event => $event,
+			tag   => "nsda_house_bloc"
+		);
+
+		%{$entries{"bloc"}}= 
+			map {$_->entry->id => $_->value} 
+			@house_settings;
+
+	}
+
+	my @entry_students = $m->comp(
+		"/funclib/event_entry_students.mas",
+		event => $event
+	);
+
+	%{$entries{"name"}}= 
+		map {$_->entry->id => $_->student->last}
+		@entry_students;
+
+	my $ranker = 1;
+
+	my %school_rank = ();
+
+	foreach (@schools) { 
+		$school_rank{$_} = $ranker++;
+	}
+
+	if ($ncfl) { 
+
+		@all_entries = sort {$a->code <=> $b->code} @all_entries;
+
+	} else {
+
+		@all_entries = 
+			shuffle(@all_entries);
+
+		@all_entries = 
+			sort {$school_rank{$a->school->id} <=> $school_rank{$b->school->id}} 
+			@all_entries;
+
+		@all_entries = 
+			sort {$entries{"seed"}{$a} <=> $entries{"seed"}{$b}} 
+			@all_entries if $use_seeds;
+
+	} 
+
+	#Set up the initial panels
+	my $max_size = ceil(scalar @all_entries / $num_panels);
+
+	my $min_size = floor(scalar @all_entries/ $num_panels);
+
+	my $remainder = (scalar @all_entries - ($num_panels * $min_size));
+
+	my %panels = ();
+
+    use List::Util 'shuffle';
+    my @keys =  shuffle(1 .. $num_panels);
+
+	my %school_count;
+
+    foreach my $entry (@all_entries) {
+
+        my $score = "3141592653";
+        my $picked_key;
+
+        KEY:
+        foreach my $key (@keys) {
+
+            next if $score == 0;
+
+            my @panel = @{$panels{$key}} if $panels{$key};
+            next KEY if (scalar @panel == $max_size);
+
+            if (scalar @panel == $min_size) {
+                next KEY unless $remainder > 0;
+            }
+
+            if (@panel) {
+
+                push (@panel, $entry->id);
+
+                my $new_score = score_chamber(\@panel, \%entries);
+
+                if ($new_score < $score) {
+                    $picked_key = $key;
+                    $score = $new_score;
+                    last KEY if $score == 0;
+                }
+
+            } else {
+
+                $picked_key = $key;
+                $score = 0;
+                last KEY;
+            }
+
+        }
+
+        $remainder-- 
+			if $panels{$picked_key} 
+			&& scalar @{$panels{$picked_key}} == $min_size;
+
+        push (@{$panels{$picked_key}}, $entry->id);
+
+        my $k = shift @keys;
+        push (@keys, $k);
+
+    }
+
+
+	my @panel_keys = shuffle(keys %panels);
+
+	my $no_improvement = 1;
+
+	foreach my $counter (1 .. 5) { 
+
+		Tab::debuglog("Tick $counter");
+
+		@panel_keys = shuffle(@panel_keys);
+
+		my $total;
+
+		next if $no_improvement == 0;
+		$no_improvement = 0;
+
+		my $touched;
+
+		foreach my $panel_key (@panel_keys) { 
+		
+			my @panel = @{$panels{$panel_key}};
+
+			my $entry_panel1_score = score_chamber(\@panel, \%entries);
+
+			next if $entry_panel1_score < 1;
+
+			ENTRY:
+			foreach my $entry_id (@panel) { 
+
+				Tab::debuglog("Testing panel $panel_key entry $entry_id with score $entry_panel1_score");
+
+				next if $entry_panel1_score < 1;
+
+				# Remove the candidate for a test array of original panel
+				my @panel1 = @panel; 							
+
+				my $index = 0;
+				$index++ until $panel1[$index] == $entry_id;
+				splice(@panel1, $index, 1);
+
+				my $swap_panel;
+				my $swap_entry;
+				my $current_diff;
+
+				my @new_entry_panel;
+				my @new_swap_panel;
+
+				my $count;
+	
+				OTHERPANEL:
+				foreach my $other_key (@panel_keys) { 
+				
+					Tab::debuglog("Testing against panel $other_key");
+
+					# Can't switch to the same panel
+					next OTHERPANEL if $other_key == $panel_key;
+
+					# Find the other panel for scoring
+					my @panel2 = @{$panels{$other_key}}; 			
+
+					my $other_panel2_score = score_chamber(\@panel2, \%entries);
+
+
+					# Put me into this panel for testing
+					push (@panel2, $entry_id);						
+
+					my $seed_diff;
+
+					OTHERENTRY:
+					foreach my $other_entry_id (@{$panels{$other_key}}) {
+
+						# Add swap candidate to original panel
+						push (@panel1, $other_entry_id);				
+
+						$count++;
+						my $other_panel1_score = score_chamber(\@panel1, \%entries);
+
+						# Remove swap candidate from the panel
+						my $index = 0;
+						$index++ until $panel2[$index] == $other_entry_id;
+						splice(@panel2, $index, 1);
+
+						my $entry_panel2_score = score_chamber(\@panel2, \%entries);
+
+						my $squo_score = $entry_panel1_score + $other_panel2_score;
+						my $swap_score = $entry_panel2_score + $other_panel1_score;
+						my $diff = $squo_score - $swap_score;
+
+						#remove me from this panel
+						my $replace = pop(@panel1);  
+
+						#put me back from whence I came
+						push (@panel2, $replace);    
+
+						my $my_diff = abs $entries{"seed"}{$other_entry_id} - $entries{"seed"}{$entry_id};
+
+						Tab::debuglog("  Testing against $other_entry_id from $other_key. ");
+						Tab::debuglog("  Squo is $squo_score and swap is $swap_score ");
+						Tab::debuglog("  Diff is $my_diff versus current diff of $current_diff");
+
+						if ( 
+							($diff == $current_diff && $my_diff < $seed_diff) 
+							|| ($diff > 0 && $diff > $current_diff) 
+						) { 
+							$current_diff = $diff;
+							$swap_entry = $other_entry_id;
+							$swap_panel = $other_key;
+							$seed_diff = $my_diff;
+						}
+
+					}
+
+				}
+
+				if ($swap_entry) { 
+						
+					Tab::debuglog("  SWAPPING WITH $swap_entry");
+
+					my @panel2 = @{$panels{$swap_panel}};
+
+					push (@panel1, $swap_entry);
+
+					my $swapdex = 0;
+					$swapdex++ until $panel2[$swapdex] == $swap_entry;
+					splice(@panel2, $swapdex, 1);
+
+					push (@panel2, $entry_id);
+
+					$no_improvement++;  # Fail
+					@{$panels{$panel_key}} = @panel1;
+					@{$panels{$swap_panel}} = @panel2;
+
+					@panel = @panel1;
+
+					$entry_panel1_score = score_chamber(\@panel1, \%entries);
+					my $other_score = score_chamber(\@panel2, \%entries);
+
+				}
+			}
+		}
+
+		last if $no_improvement < 1;
+
+	}
+
+	# Now attempt to improve the seed distribution as long as the score of the
+	# panels on states/schools stays the same.
+
+	if ($use_seeds) { 
+
+		foreach my $counter (1 .. 5) { 
+
+			my %panel_seeds = ();
+			
+			foreach my $panel_key (@panel_keys) { 
+				foreach my $entry_id (@{$panels{$panel_key}}) { 
+					$panel_seeds{$panel_key} += $entries{"seed"}{$entry_id};
+				}
+			}
+
+
+
+			foreach my $panel_key (@panel_keys) { 
+
+				my @panel = @{$panels{$panel_key}};
+
+				my $panel_score = score_chamber(\@panel, \%entries);
+
+				OTHER:
+				foreach my $other_key (@panel_keys) { 
+				
+					my @other = @{$panels{$other_key}};
+					my $other_score = score_chamber(\@other, \%entries);
+
+					next if $other_key == $panel_key;
+					next if $panel_seeds{$other_key} == $panel_seeds{$panel_key};
+
+					my @can_flip_panel;
+					my @can_flip_other;
+
+					foreach my $entry (@panel) { 
+						push @other, $entry;
+						my $new_other_score = score_chamber(\@other, \%entries);
+						push @can_flip_panel, $entry if $new_other_score == $other_score;
+
+						my $index = 0;
+						$index++ until $other[$index] == $entry;
+						splice(@other, $index, 1);
+					}
+
+					foreach my $entry (@other) { 
+						push @panel, $entry;
+						my $new_panel_score = score_chamber(\@panel, \%entries);
+						push @can_flip_other, $entry if $new_panel_score == $panel_score;
+
+						my $index = 0;
+						$index++ until $panel[$index] == $entry;
+						splice(@panel, $index, 1);
+					}
+					
+
+					next unless @can_flip_panel;
+					next unless @can_flip_other;
+
+					my $flip_panel;
+					my $flip_other;
+
+					if ($panel_seeds{$other_key} > $panel_seeds{$panel_key}) { 
+
+						@can_flip_panel = sort {$entries{"seed"}{$a} <=> $entries{"seed"}{$b}} @can_flip_panel;
+						@can_flip_other = sort {$entries{"seed"}{$b} <=> $entries{"seed"}{$a}} @can_flip_other;
+
+						$flip_panel = shift @can_flip_panel;
+						$flip_other = shift @can_flip_other;
+
+						next OTHER unless $entries{"seed"}{$flip_panel} < $entries{"seed"}{$flip_other};
+
+					} elsif ($panel_seeds{$other_key} < $panel_seeds{$panel_key}) { 
+
+						@can_flip_panel = sort {$entries{"seed"}{$b} <=> $entries{"seed"}{$a}} @can_flip_panel;
+
+						@can_flip_other = sort {$entries{"seed"}{$a} <=> $entries{"seed"}{$b}} @can_flip_other;
+
+						$flip_panel = shift @can_flip_panel;
+						$flip_other = shift @can_flip_other;
+
+						next OTHER unless $entries{"seed"}{$flip_panel} > $entries{"seed"}{$flip_other};
+
+					}
+
+					if ($flip_panel && $flip_other) { 
+
+						my $index = 0;
+						$index++ until $panel[$index] == $flip_panel;
+						splice(@panel, $index, 1);
+
+						$index = 0;
+						$index++ until $other[$index] == $flip_other;
+						splice(@other, $index, 1);
+
+						push @panel, $flip_other;
+						push @other, $flip_panel;
+
+						$panel_seeds{$other_key} -= $entries{"seed"}{$flip_other};
+						$panel_seeds{$panel_key} -= $entries{"seed"}{$flip_panel};
+
+						$panel_seeds{$other_key} += $entries{"seed"}{$flip_panel};
+						$panel_seeds{$panel_key} += $entries{"seed"}{$flip_other};
+
+						my $panel_score = score_chamber(\@panel, \%entries);
+					
+						@{$panels{$other_key}} = @other;
+						@{$panels{$panel_key}} = @panel;
+
+					}
+
+				}
+
+			}
+
+		}
+
+	}
+
+	my @judges = $m->comp("/funclib/round_judges.mas", round => $round) 
+		unless $m->comp("/funclib/round_entries.mas", round => $round);
+
+	my @judge_keys;
+
+	my %judge_panel = ();
+	foreach my $judge (@judges) { 
+		push (@{$judge_panel{$judge->panelid}}, $judge->id);
+		push (@judge_keys, $judge->panelid);
+	}
+
+	my %jseen = (); 
+	@judge_keys = grep { ! $jseen{$_} ++ } @judge_keys;
+
+	my @rooms = $m->comp(
+		"/funclib/round_rooms.mas", 
+		round => $round
+	);
+
+	my @clean_rooms = $m->comp(
+		"/funclib/clean_rooms.mas", 
+		round => $round
+	);
+
+	#Clear out the old
+
+	Tab::Score->sql_delete_round->execute($round->id);
+
+	Tab::Ballot->sql_delete_round->execute($round->id);
+
+	Tab::Panel->sql_delete_round->execute($round->id);
+
+	my $letter = 1;
+	$letter = "A" if $event->setting("panel_lables") eq "letters";
+
+	foreach my $panel_key (@panel_keys) { 
+
+		my $room = shift @rooms if @rooms;
+		my $room_id = 0;
+		$room_id = $room->id if $room;
+
+		my $jpanel = shift @judge_keys if @judge_keys;
+		my @judge_ids = @{$judge_panel{$jpanel}} if $jpanel;
+		@judge_ids = ("0") unless @judge_ids;
+
+		my @entries = @{$panels{$panel_key}};
+
+		my $panel = Tab::Panel->create({
+			round  => $round->id,
+			room   => $room_id,
+			flight => 1,
+			letter => $letter
+		});
+
+		if ($letter eq "Z") { 
+			$letter = "AA";
+		} else { 
+			$letter++;
+		}
+
+		foreach my $judge_id (@judge_ids) { 
+
+			my $position;
+
+			foreach my $entry (@entries) { 
+
+				$position++;
+
+				next unless $entry;
+				my $ballot = Tab::Ballot->create({
+					panel => $panel->id,
+					judge => $judge_id,
+					entry => $entry
+				})
+
+			}
+		
+		}
+
+	}
+
+	my $now = DateTime->now;
+	$round->created($now);
+	$round->update;
+
+	return;
+
+    sub score_chamber {
+
+        my ($panref, $entries) = @_;
+
+        my @pan_entries = @$panref;
+
+        my $score = 0;
+        my $tick;
+
+        foreach my $entry (@pan_entries) { 
+
+            foreach my $other (@pan_entries) { 
+
+                next unless $other > $entry;
+
+                if (${$entries}{"school"}{$other} == ${$entries}{"school"}{$entry}) { 
+
+                	if (${$entries}{"bloc"}{$other} == ${$entries}{"bloc"}{$entry}) { 
+
+                    	$score -= 100;
+
+					} else { 
+
+                    	$score += 1000000;
+					}
+                }
+
+                if ( 
+					(${$entries}{"school"}{$other} != ${$entries}{"school"}{$entry}) 
+					&& (${$entries}{"region"}{$entry} )
+					&& (${$entries}{"region"}{$other} eq ${$entries}{"region"}{$entry}) 
+				) { 
+					$score += 10000;
+				}
+
+                if ( 
+					(${$entries}{"school"}{$other} != ${$entries}{"school"}{$entry}) 
+					&& (${$entries}{"state"}{$entry} )
+					&& (${$entries}{"state"}{$other} eq ${$entries}{"state"}{$entry}) 
+				) { 
+					$score += 100;
+				}
+
+
+               	if (${$entries}{"name"}{$other} == ${$entries}{"nam"}{$entry}) { 
+                   	$score += 10;
+				}
+    
+            }
+
+        }
+
+        return $score;
+
+    }
+	
+</%perl>
