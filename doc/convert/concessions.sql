@@ -1,4 +1,6 @@
 
+alter table tiebreak add truncate smallint;
+
 create table `concession_type` ( 
 	id int NOT NULL AUTO_INCREMENT,
 
