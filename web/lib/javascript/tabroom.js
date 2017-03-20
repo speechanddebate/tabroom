@@ -71,11 +71,14 @@
 		$(".menu").find(".row:even").addClass("even");
 		$(".menu").find(".row:odd").addClass("odd");
 
+		$(".sidenote").find(".row:even").removeClass("odd");
+		$(".sidenote").find(".row:odd").removeClass("even");
 		$(".sidenote").find(".row:even").addClass("even");
 		$(".sidenote").find(".row:odd").addClass("odd");
 
 		$("table").find(".row:even").removeClass("odd");
 		$("table").find(".row:even").addClass("even");
+
 		$("table").find(".row:odd").removeClass("even");
 		$("table").find(".row:odd").addClass("odd");
 
