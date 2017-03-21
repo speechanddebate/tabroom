@@ -32,6 +32,10 @@
 
 				$('table').trigger('applyWidgets');
 
+				if (data.reply) { 
+					$(".replybucket").text(data.reply);
+				}
+
 				if (data.error) { 
 
 					$.jGrowl(data.message, { 
@@ -273,10 +277,6 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 	var minPoints = $(input).attr("min");
 	var maxPoints = $(input).attr("max");
 	var pointStep = $(input).attr("step");
-
-	console.log("Min points are "+minPoints);
-	console.log("Max points are "+maxPoints);
-	console.log("Point step is "+pointStep);
 
 	if (nototal) { 
 		totalPoints = function() { 
