@@ -217,7 +217,21 @@
 
 				next EVENT;  # until we meet again
 				$nsda_cat = 2;
+				$nsda_cat = 3 if $tourn_settings{"nsda_district"};
 				$nsda_subcat = 2;
+
+				Tab::NSDA::Event->create({
+					instance_id   => $instance->id,
+					event_id      => $event->id,
+					type          => uc($nsda_event_category->type),
+					size          => $size,
+					name          => $event->name,
+					category      => -1,
+					alt_id        => $event->id,
+					nfl_cat_id    => $nsda_cat,
+					nfl_subcat_id => $nsda_subcat
+				});
+
 
 			} else { 
 
@@ -234,267 +248,264 @@
 
 				$nsda_cat = 3 if $tourn_settings{"nsda_district"};
 
-			} 
-			
-			my $size = $event->setting('max_entry');
-			$size = 1 unless $size;
+				my $size = $event->setting('max_entry');
+				$size = 1 unless $size;
 
-			Tab::NSDA::Event->create({
-				instance_id   => $instance->id,
-				event_id      => $event->id,
-				type          => uc($nsda_event_category->type),
-				size          => $size,
-				name          => $event->name,
-				category      => -1,
-				alt_id        => $event->id,
-				nfl_cat_id    => $nsda_cat,
-				nfl_subcat_id => $nsda_subcat
-			});
+				Tab::NSDA::Event->create({
+					instance_id   => $instance->id,
+					event_id      => $event->id,
+					type          => uc($nsda_event_category->type),
+					size          => $size,
+					name          => $event->name,
+					category      => -1,
+					alt_id        => $event->id,
+					nfl_cat_id    => $nsda_cat,
+					nfl_subcat_id => $nsda_subcat
+				});
 
-			Tab::Student->set_sql( spoke_in_round => "
-				select distinct student.* 
-				from student, panel, ballot, score
-				where panel.round = ? 
-				and ballot.panel = panel.id
-				and ballot.id = score.ballot
-				and score.student = student.id
-				and score.tag = 'points'
-			");
+				Tab::Student->set_sql( spoke_in_round => "
+					select distinct student.* 
+					from student, panel, ballot, score
+					where panel.round = ? 
+					and ballot.panel = panel.id
+					and ballot.id = score.ballot
+					and score.student = student.id
+					and score.tag = 'points'
+				");
 
-			foreach my $round ($event->rounds) { 
+				foreach my $round ($event->rounds) { 
 
-				next if $event->type eq "congress"; 
+					my %spoke_in_round = ();
 
-				my %spoke_in_round = ();
+					if ($event->type eq 'wsdc') { 
+						my @spoke = Tab::Student->search_spoke_in_round($round->id);
+						%spoke_in_round = map {$_->id => 1} @spoke;
+					}
 
-				if ($event->type eq 'wsdc') { 
-					my @spoke = Tab::Student->search_spoke_in_round($round->id);
-					%spoke_in_round = map {$_->id => 1} @spoke;
-				}
-
-				my (@results) = $m->comp("/tabbing/results/order_entries.mas", 
-					round => $round,
-					nsda  => 1
-				);
-
-				my $entries_ref = pop @results;
-
-				my ($bye_ref, $fft_ref) 
-					= $m->comp("/funclib/entry_byes.mas", 
-						event    => $event,
-						round    => $round,
-						last     => 1,
-						forfeits => 1
+					my (@results) = $m->comp("/tabbing/results/order_entries.mas", 
+						round => $round,
+						nsda  => 1
 					);
 
-				my %entry_order;
-				my %entry_result;
-				my %panel_entries;
-				my %entry_points;
-				my %panel_round;
+					my $entries_ref = pop @results;
 
-				foreach my $key (sort {$a <=> $b} keys %{$entries_ref->{"by_place"}}) {
+					my ($bye_ref, $fft_ref) 
+						= $m->comp("/funclib/entry_byes.mas", 
+							event    => $event,
+							round    => $round,
+							last     => 1,
+							forfeits => 1
+						);
 
-					foreach my $entry_id (@{$entries_ref->{"by_place"}{$key}}) {
+					my %entry_order;
+					my %entry_result;
+					my %panel_entries;
+					my %entry_points;
+					my %panel_round;
 
-						$entry_order{$entry_id} = $key;
+					foreach my $key (sort {$a <=> $b} keys %{$entries_ref->{"by_place"}}) {
 
-						my $section = $entries_ref->{"section"}{$entry_id};
+						foreach my $entry_id (@{$entries_ref->{"by_place"}{$key}}) {
 
-						push @{$panel_entries{$section}}, $entry_id; 
+							$entry_order{$entry_id} = $key;
+
+							my $section = $entries_ref->{"section"}{$entry_id};
+
+							push @{$panel_entries{$section}}, $entry_id; 
+
+						}
 
 					}
 
-				}
+					if ($event->type eq "speech") { 
 
-				if ($event->type eq "speech") { 
+						foreach my $panel ( keys %panel_entries ) { 
 
-					foreach my $panel ( keys %panel_entries ) { 
+							@{$panel_entries{$panel}} = 
+								sort {$entry_order{$a} <=> $entry_order{$b}} 
+								@{$panel_entries{$panel}};
 
-						@{$panel_entries{$panel}} = 
-							sort {$entry_order{$a} <=> $entry_order{$b}} 
-							@{$panel_entries{$panel}};
+							my $rank;
+							my $last_order;
 
-						my $rank;
-						my $last_order;
-
-						my $base_points = 7 - $nsda_event_category->national;
-						my $min_points = 1;
-						
-						if ($tourn_settings{"nsda_district"}) { 
-							$base_points = 9;
-							$min_points = 4;
-						}
-
-						foreach my $entry (@{$panel_entries{$panel}}) { 
-
-							if (${$fft_ref}{$entry}) {
-
-								$entry_result{$entry} = "F";
-								$entry_points{$entry} = 0;
-
-							} else {
-
-								unless ($last_order == $entry_order{$entry}) {
-									$last_order = $entry_order{$entry};
-									$rank++;
-								}
-
-
-								$entry_result{$entry} = $rank;
-								$entry_points{$entry} = $base_points - $rank;
-
-								$entry_points{$entry} = $min_points 
-									if $entry_points{$entry} < $min_points;
-
+							my $base_points = 7 - $nsda_event_category->national;
+							my $min_points = 1;
+							
+							if ($tourn_settings{"nsda_district"}) { 
+								$base_points = 9;
+								$min_points = 4;
 							}
-						}
-					}
 
-				} elsif ($event->type eq "wsdc") { 
+							foreach my $entry (@{$panel_entries{$panel}}) { 
 
-					foreach my $panel ( keys %panel_entries ) { 
+								if (${$fft_ref}{$entry}) {
 
-						@{$panel_entries{$panel}} = 
-							sort {$entry_order{$a} <=> $entry_order{$b}} 
-							@{$panel_entries{$panel}};
+									$entry_result{$entry} = "F";
+									$entry_points{$entry} = 0;
 
-						my $win_points = 6 - ($nsda_event_category->national * 2);
-						$win_points = 6 if $tourn_settings{"usa_wsdc"};
+								} else {
 
-						my $win = 1;
-
-						foreach my $entry (@{$panel_entries{$panel}}) { 
-						
-							if (${$fft_ref}{$entry}) {
-								$entry_result{$entry} = "F";
-								$entry_points{$entry} = 0;
-							} elsif (${$bye_ref}{$entry}) {
-								$entry_result{$entry} = "B";
-								$entry_points{$entry} = 0;
-							} elsif ($win) { 
-								$entry_result{$entry} = "W";
-								$entry_points{$entry} += $win_points;
-								undef $win;
-							} else { 
-								$entry_result{$entry} = "L";
-								$entry_points{$entry} += $win_points / 2;
-							}
-						}
-					}
-
-				} else { 
-
-					foreach my $panel ( keys %panel_entries ) { 
-
-						@{$panel_entries{$panel}} = 
-							sort {$entry_order{$a} <=> $entry_order{$b}} 
-							@{$panel_entries{$panel}};
+									unless ($last_order == $entry_order{$entry}) {
+										$last_order = $entry_order{$entry};
+										$rank++;
+									}
 
 
-						my $win_points = 6 - ($nsda_event_category->national * 2);
-						my $loss_points = $win_points / 2;
+									$entry_result{$entry} = $rank;
+									$entry_points{$entry} = $base_points - $rank;
 
-						if ($tourn_settings{"nsda_district"}) { 
-							$win_points = 8;
-							$loss_points = 5;
-						}
+									$entry_points{$entry} = $min_points 
+										if $entry_points{$entry} < $min_points;
 
-						my $win = 1;
-
-						foreach my $entry (@{$panel_entries{$panel}}) { 
-
-							if (${$fft_ref}{$entry}) {
-								$entry_result{$entry} = "F";
-								$entry_points{$entry} = 0;
-							} elsif (${$bye_ref}{$entry}) {
-								$entry_result{$entry} = "B";
-								$entry_points{$entry} = 0;
-							} elsif ($win) { 
-								$entry_result{$entry} = "W";
-								$entry_points{$entry} += $win_points;
-								undef $win;
-							} else { 
-								$entry_result{$entry} = "L";
-								$entry_points{$entry} += $loss_points;
-							}
-						}
-					}
-				}
-
-				my $count;
-
-				foreach my $panel ( keys %panel_entries ) { 
-
-					foreach my $entry (@{$panel_entries{$panel}}) { 
-
-						next unless $entry_nsda{$entry};
-
-						next unless $entry_nsda{$entry}{"chapter"};
-						next unless $entry_nsda{$entry}{"students"};
-						next unless $entry_result{$entry};
-
-						my $school_id = $entry_nsda{$entry}{"school"};
-						my $nfl_school_id  = $entry_nsda{$entry}{"chapter"};
-
-						STUDENT:
-						foreach my $student (@{$entry_nsda{$entry}{"students"}}) {
-
-							my $ualt = $student_data{$student}{"ualt"};
-							my $name = $student_data{$student}{"name"};
-
-							if ($event->type eq "wsdc") { 
-								$school_id = $student_nsda{$student}{"school"};
-								$nfl_school_id  = $student_nsda{$student}{"chapter"};
-								
-								unless ($round->type eq "elim" || $round->type eq "final") { 
-									next STUDENT unless $spoke_in_round{$student};
 								}
 							}
+						}
 
-							Tab::NSDA::Points->create({
-								id             => $count++,
-								instance_id    => $instance->id,
-								type           => uc($nsda_event_category->type),
-								round          => $round->name,
-								result         => $entry_result{$entry},
-								event_id       => $event->id,
-								entry_id       => $entry,
-								student_id     => $student,
-								school_id      => $school_id,
-								name           => $name,
-								alt_entry_id   => $entry,
-								alt_student_id => $student,
-								nfl_school_id  => $nfl_school_id,
-								nfl_student_id => $ualt
-							});
+					} elsif ($event->type eq "wsdc") { 
 
-							if ($ualt) { 
+						foreach my $panel ( keys %panel_entries ) { 
 
-								Tab::NSDA::APT->create({
-									instance_id      => $instance->id,
-									nfl_school_id    => $nfl_school_id,
-									nfl_student_id   => $ualt,
-									round            => $round->name,
-									result           => $entry_result{$entry},
-									event_cat_id     => $nsda_cat,
-									event_sub_cat_id => $nsda_subcat,
-									alt_event_id     => $event->id,
-									points           => $entry_points{$entry},
-									type             => uc($nsda_event_category->type),
-								}); 
+							@{$panel_entries{$panel}} = 
+								sort {$entry_order{$a} <=> $entry_order{$b}} 
+								@{$panel_entries{$panel}};
 
-							} elsif (not defined $alt_student{$student}) { 
+							my $win_points = 6 - ($nsda_event_category->national * 2);
+							$win_points = 6 if $tourn_settings{"usa_wsdc"};
 
-								Tab::NSDA::AltStudent->create({
-									source        => "TR",
-									nfl_school_id => $nfl_school_id,
-									alt_id        => $student,
-									name          => $name
+							my $win = 1;
+
+							foreach my $entry (@{$panel_entries{$panel}}) { 
+							
+								if (${$fft_ref}{$entry}) {
+									$entry_result{$entry} = "F";
+									$entry_points{$entry} = 0;
+								} elsif (${$bye_ref}{$entry}) {
+									$entry_result{$entry} = "B";
+									$entry_points{$entry} = 0;
+								} elsif ($win) { 
+									$entry_result{$entry} = "W";
+									$entry_points{$entry} += $win_points;
+									undef $win;
+								} else { 
+									$entry_result{$entry} = "L";
+									$entry_points{$entry} += $win_points / 2;
+								}
+							}
+						}
+
+					} else { 
+
+						foreach my $panel ( keys %panel_entries ) { 
+
+							@{$panel_entries{$panel}} = 
+								sort {$entry_order{$a} <=> $entry_order{$b}} 
+								@{$panel_entries{$panel}};
+
+
+							my $win_points = 6 - ($nsda_event_category->national * 2);
+							my $loss_points = $win_points / 2;
+
+							if ($tourn_settings{"nsda_district"}) { 
+								$win_points = 8;
+								$loss_points = 5;
+							}
+
+							my $win = 1;
+
+							foreach my $entry (@{$panel_entries{$panel}}) { 
+
+								if (${$fft_ref}{$entry}) {
+									$entry_result{$entry} = "F";
+									$entry_points{$entry} = 0;
+								} elsif (${$bye_ref}{$entry}) {
+									$entry_result{$entry} = "B";
+									$entry_points{$entry} = 0;
+								} elsif ($win) { 
+									$entry_result{$entry} = "W";
+									$entry_points{$entry} += $win_points;
+									undef $win;
+								} else { 
+									$entry_result{$entry} = "L";
+									$entry_points{$entry} += $loss_points;
+								}
+							}
+						}
+					}
+
+					my $count;
+
+					foreach my $panel ( keys %panel_entries ) { 
+
+						foreach my $entry (@{$panel_entries{$panel}}) { 
+
+							next unless $entry_nsda{$entry};
+
+							next unless $entry_nsda{$entry}{"chapter"};
+							next unless $entry_nsda{$entry}{"students"};
+							next unless $entry_result{$entry};
+
+							my $school_id = $entry_nsda{$entry}{"school"};
+							my $nfl_school_id  = $entry_nsda{$entry}{"chapter"};
+
+							STUDENT:
+							foreach my $student (@{$entry_nsda{$entry}{"students"}}) {
+
+								my $ualt = $student_data{$student}{"ualt"};
+								my $name = $student_data{$student}{"name"};
+
+								if ($event->type eq "wsdc") { 
+									$school_id = $student_nsda{$student}{"school"};
+									$nfl_school_id  = $student_nsda{$student}{"chapter"};
+									
+									unless ($round->type eq "elim" || $round->type eq "final") { 
+										next STUDENT unless $spoke_in_round{$student};
+									}
+								}
+
+								Tab::NSDA::Points->create({
+									id             => $count++,
+									instance_id    => $instance->id,
+									type           => uc($nsda_event_category->type),
+									round          => $round->name,
+									result         => $entry_result{$entry},
+									event_id       => $event->id,
+									entry_id       => $entry,
+									student_id     => $student,
+									school_id      => $school_id,
+									name           => $name,
+									alt_entry_id   => $entry,
+									alt_student_id => $student,
+									nfl_school_id  => $nfl_school_id,
+									nfl_student_id => $ualt
 								});
 
-								$alt_student{$student}++;
+								if ($ualt) { 
 
+									Tab::NSDA::APT->create({
+										instance_id      => $instance->id,
+										nfl_school_id    => $nfl_school_id,
+										nfl_student_id   => $ualt,
+										round            => $round->name,
+										result           => $entry_result{$entry},
+										event_cat_id     => $nsda_cat,
+										event_sub_cat_id => $nsda_subcat,
+										alt_event_id     => $event->id,
+										points           => $entry_points{$entry},
+										type             => uc($nsda_event_category->type),
+									}); 
+
+								} elsif (not defined $alt_student{$student}) { 
+
+									Tab::NSDA::AltStudent->create({
+										source        => "TR",
+										nfl_school_id => $nfl_school_id,
+										alt_id        => $student,
+										name          => $name
+									});
+
+									$alt_student{$student}++;
+
+								}
 							}
 						}
 					}
