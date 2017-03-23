@@ -1,3 +1,26 @@
+/* confirmation dialog */
+
+	function confirmAction(link, message) { 
+
+		alertify.confirm(
+			"Are you sure?",
+			message,
+			function(event) { 
+				if (event) { 
+					window.location.href = link.href;
+				}
+			},
+			function(event) { 
+				if (event) { 
+					alertify.error("Canceled");
+				}
+			}
+		);
+
+		return false;
+
+	}
+
 
 /* Respond to switch calls */
 
@@ -38,20 +61,12 @@
 
 				if (data.error) { 
 
-					$.jGrowl(data.message, { 
-						header   : 'Oops!',
-						life     : 4000,
-						position : 'top-center',
-						theme    : "warning"
-					});
-
+					alertify.error(data.message);
+					
 				} else { 
 
-					$.jGrowl(data.message, { 
-						header   : 'Result',
-						life     : 1000,
-						position : 'top-center'
-					});
+					alertify.notify(data.message, "custom");
+
 				}
 
 			}
