@@ -9,12 +9,16 @@
 
 	return unless $sweep_set && $sweep_set->id;
 
-	foreach my $rule ($sweep_set->rules) { 
+	my @rules = $sweep_set->rules;
+
+	foreach my $rule (@rules) { 
+
 		$novice_only++ 
 			if $rule->tag eq "novice_only" 
 			&& $rule->value == 1;
 
-		$skip_round{$rule->value}++;
+		$skip_round{$rule->value}++
+			if $rule->tag eq "ignore_round";
 	}
 
 	my @all_events = $sweep_set->events;
@@ -216,12 +220,12 @@
 	my $places_done;
 	my $placement_done;
 
-	foreach my $rule ($sweep_set->rules) { 
+	foreach my $rule (@rules) { 
 		$places{$rule->place} = $rule->value 
 			if $rule->place && $rule->tag ne "cume";
 	}
 
-	foreach my $rule ($sweep_set->rules) { 
+	foreach my $rule (@rules) { 
 
 		if ($rule->tag eq "points_per") {
 
@@ -396,12 +400,14 @@
 			
 				foreach my $round ($event->rounds) { 
 
+					next if $skip_round{$round->id};
 					next unless $round->type eq $type;
 
-					my %panel_yes = map {$_->id => 1} $round->panels;
 
 					my ($entries_ref, $tbs_ref, $desc_ref, $forfeit_ref) 
-						= $m->comp("/tabbing/results/order_entries.mas", round => $round); 
+						= $m->comp("/tabbing/results/order_entries.mas", 
+						round => $round
+					); 
 
 					my %panel_place;
 
@@ -425,6 +431,157 @@
 			}
 		}
 
+		if ($rule->tag eq "rev_composite" && $rule->tiebreak_set) { 
+
+			my $type = $rule->count;
+			my $tiebreak_set = $rule->tiebreak_set;
+
+			foreach my $event (@events) { 
+
+				next unless $event && $event->id;
+			
+				foreach my $round ($event->rounds) { 
+					
+					next if $skip_round{$round->id};
+
+					next unless ($round->type eq $type) 
+						|| $type eq "all";
+
+					my @results = $m->comp(
+						"/tabbing/results/order_entries.mas", 
+							round        => $round,
+							tiebreak_set => $tiebreak_set,
+							section_rank => 1
+					); 
+
+					my $entries_ref = pop @results;
+
+					my %panel_place;
+
+					foreach my $entry_id (sort {$a <=> $b} keys %{$entries_ref->{"section_rank"}}) {
+
+						my $rank = $entries_ref->{"section_rank"}{$entry_id};
+
+						next unless $rank;
+
+						my $pts = 6 - $rank;
+						$pts = 1 if $pts < 1;
+
+						$entry_points{$entry_id}  += $pts;
+
+					}
+				}
+			}
+		}
+
+		if ($rule->tag eq "percentage" && $rule->tiebreak_set) { 
+
+			my $type = $rule->count;
+
+			my $tiebreak_set = $rule->tiebreak_set;
+
+			my $points = $rule->value;
+
+			foreach my $event (@events) { 
+
+				next unless $event && $event->id;
+
+				my @rounds;
+
+				if ($type eq "all") { 
+
+					foreach my $round ($event->rounds) { 
+						next if $skip_round{$round->id};
+						push @rounds, $round;
+					}
+
+				} elsif ($type eq "prelim") { 
+
+					foreach my $round ($event->rounds) { 
+						next if $skip_round{$round->id};
+						push @rounds, $round if (
+							$round->type ne "elim" 
+							&& $round->type ne "final"
+						);
+					}
+
+				} elsif ($type eq "elim") { 
+
+					foreach my $round ($event->rounds) { 
+						next if $skip_round{$round->id};
+
+						push @rounds, $round 
+							if $round->type eq "elim";
+					}
+
+				} elsif ($type eq "final") { 
+
+					foreach my $round ($event->rounds) { 
+						next if $skip_round{$round->id};
+						push @rounds, $round 
+							if $round->type eq "final";
+					}
+
+				} elsif ($type eq "last_prelim") { 
+
+					my $last_prelim;
+
+					foreach my $round ($event->rounds) { 
+
+						next if $skip_round{$round->id};
+						next if $round->type eq "elim";
+						next if $round->type eq "final";
+
+						$last_prelim = $round 
+							if (not defined $last_prelim);
+
+						$last_prelim = $round 
+							if $last_prelim 
+							&& $last_prelim->name < $round->name;
+					}
+
+					push @rounds, $last_prelim;
+
+				}
+
+				foreach my $round (@rounds) { 
+
+					my @results = $m->comp(
+						"/tabbing/results/order_entries.mas", 
+							round        => $round,
+							tiebreak_set => $tiebreak_set
+					); 
+
+					my $entries_ref = pop @results;
+
+					my $entries_count = scalar( keys %{$entries_ref->{"by_place"}} );
+
+					my $threshold = ceil($rule->place * .01 * $entries_count);
+
+					foreach my $place (
+						sort {$a <=> $b} keys %{$entries_ref->{"by_place"}}
+					) { 
+
+						next if $place > $threshold;
+
+						if ($entries_ref->{"by_place"}{$place}) { 
+
+							foreach my $entry_id (@{$entries_ref->{"by_place"}{$place}}) {
+
+								$entry_points{$entry_id}  += $points;
+							}
+
+						}
+
+					}
+
+				}
+
+			}
+
+		}
+
+
 		if (
 			$rule->tag eq "rev_per_overall_place" 
 			|| $rule->tag eq "place"
@@ -439,7 +596,12 @@
 
 					my @rounds = sort {$b->name <=> $a->name} $event->rounds;
 
-					my $final = shift @rounds;
+					my $final;
+
+					while (@rounds && (not defined $final)) { 
+						$final = shift @rounds;
+						undef $final if $skip_round{$final->id};
+					}
 
 					next unless $final;
 
