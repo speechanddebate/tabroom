@@ -18,11 +18,9 @@ use JavaScript::Minifier qw(minify);
 		'iphone_switch.js',
 		'jquery.tablesorter.js',
 		'jquery.tablesorter.widgets.js',
-		'bootstrap.js',
 		'uniform.min.js',
 		'cycle.js',
 		'alertify.js',
-		'jgrowl.js',
 		'mousetrap.js',
 		'timepicker.js' );
 
