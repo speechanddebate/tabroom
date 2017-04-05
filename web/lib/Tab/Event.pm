@@ -2,7 +2,9 @@ package Tab::Event;
 use base 'Tab::DBI';
 Tab::Event->table('event');
 Tab::Event->columns(Primary => qw/id/);
-Tab::Event->columns(Essential => qw/tourn name abbr category type fee rating_subset pattern timestamp/);
+Tab::Event->columns(Essential => qw/tourn name abbr category 
+									type fee rating_subset pattern 
+									timestamp/);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
@@ -14,8 +16,12 @@ Tab::Event->has_a(rating_subset => 'Tab::RatingSubset');
 Tab::Event->has_many(files => 'Tab::File', 'event');
 Tab::Event->has_many(settings => "Tab::EventSetting", "event");
 Tab::Event->has_many(result_sets => "Tab::ResultSet", "event");
-Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
-Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
+
+Tab::Event->has_many(entries => 'Tab::Entry', 
+						'event' => { order_by => 'code'} );
+
+Tab::Event->has_many(rounds => 'Tab::Round',
+						'event' => { order_by => 'name'}  );
 
 
 sub setting {
