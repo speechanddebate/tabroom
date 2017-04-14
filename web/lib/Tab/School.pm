@@ -1,11 +1,12 @@
 package Tab::School;
 use base 'Tab::DBI';
 Tab::School->table('school');
-Tab::School->columns(Essential => qw/id name code onsite tourn chapter region timestamp/);
+Tab::School->columns(Essential => qw/ id name code onsite tourn chapter region district timestamp /);
 
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_a(chapter => 'Tab::Chapter');
 Tab::School->has_a(region => 'Tab::Region');
+Tab::School->has_a(district => 'Tab::District');
 
 Tab::School->has_many(settings => 'Tab::SchoolSetting', 'school');
 Tab::School->has_many(purchases => 'Tab::ConcessionPurchase', 'school');

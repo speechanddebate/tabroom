@@ -2,7 +2,8 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first middle last code active ada category person chapter_judge score tmp/);
+Tab::Judge->columns(Essential => qw/school first middle last code active 
+								ada category person chapter_judge score tmp/);
 
 Tab::Judge->columns(Others => qw / alt_category covers obligation hired person_request timestamp /);
 
@@ -59,23 +60,29 @@ sub setting {
 
 			return;
 
-		} elsif ($value ne "delete" && $value && $value ne "0") {
+		} elsif ($value ne "delete" && (defined $value) && $value ne "0") {
 
-			my $existing = Tab::JudgeSetting->create({
-				judge => $self->id,
-				tag    => $tag,
-				value  => $value,
-			});
+			eval { 
+				$existing = Tab::JudgeSetting->create({
+					judge => $self->id,
+					tag   => $tag,
+					value => $value,
+				});
+			};
 
-			if ($value eq "text") { 
-				$existing->value_text($blob);
+			if ($existing) { 
+
+				if ($value eq "text") { 
+					$existing->value_text($blob);
+				}
+
+				if ($value eq "date") { 
+					$existing->value_date($blob);
+				}
+
+				$existing->update;
+
 			}
-
-			if ($value eq "date") { 
-				$existing->value_date($blob);
-			}
-
-			$existing->update;
 
 		}
 
