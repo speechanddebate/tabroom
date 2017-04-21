@@ -2,6 +2,7 @@
 	$tourn
 	$tourn_settings
 	$person
+	$person_settings
 	$session
 	$event_id => undef
 	$format   => undef
@@ -11,6 +12,12 @@
 
 	my @events; 
 	my $one_event = Tab::Event->retrieve($event_id) if $event_id;
+
+	use Tab::NSDA::NationalsInstance;
+	use Tab::NSDA::NationalsEvent;
+	use Tab::NSDA::NationalsEntry;
+	use Tab::NSDA::NationalsStanding;
+	use Tab::NSDA::NationalsUpEvent;
 
 	if ($one_event) { 
 		push @events, $one_event;
@@ -22,6 +29,11 @@
 			@events = ($one);
 		}
 	}
+
+	my $year = &Tab::school_year();
+	my $school_year = $year->year + 1;
+
+	my $district = Tab::District->retrieve($tourn_settings->{"nsda_district"});
 
 	# Per request by Lisa V, the Weird Sorting Matrix:
 
@@ -50,11 +62,13 @@
 	$name =~ s/[\W_]//g;
 	my $filename = "NSDA-Qualifiers-$name-".$session->id;
 
-	if ($format eq 'csv') { 
+	if ($format eq 'csv' || $format eq 'simplecsv') { 
 
 		$filename = $filename.".csv"; 
 		$m->clear_buffer;
+
 		$r->content_type('application/csv');
+
 		$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
 
 	} elsif ($format eq "pdf") { 
@@ -67,9 +81,21 @@
 		);
 	}
 
+	my $headers_print;
+
 	foreach my $event (@events) { 
 
-		my @rounds = sort {$b->name <=> $a->name} $event->rounds;
+		next unless $event;
+
+		my $hidden = "hidden"  unless $event->setting("nsda_audited");
+		undef $hidden if $person->site_admin;
+		undef $hidden if $person_settings->{"nsda_admin"};
+
+		my @rounds = sort {$b->name <=> $a->name} 
+			$m->comp("/funclib/event_rounds.mas", 
+				event      => $event,
+				had_rounds => 1
+			);
 
 		my $final;
 		my $semi;
@@ -99,13 +125,34 @@
 			}
 		}
 
+		my $separate_sections;
+
+		if ($event->abbr eq "HOU" || $event->abbr eq "SEN") { 
+
+			unless ($semi || $final) { 
+
+				$final = $last_nonelim;
+				undef @prelims;
+
+				if ($event->abbr eq "HOU") { 
+
+					# In the House if there are no elims, we must report each
+					# prelim session as a separate qualifier
+
+					$separate_sections++;
+				}
+
+			}
+
+		}
+
 		my $final_tiebreaks = $final->tiebreak_set if $final;
 
 		if ($event->type eq "debate") { 
 
 			$final_tiebreaks = Tab::TiebreakSet->search(
 				tourn => $tourn->id,
-				name => "Debate Final"
+				name  => "Debate Final"
 			)->first;
 
 		}
@@ -168,8 +215,10 @@
 			
 				foreach my $entry_id (@{${${$final_entries_ref}{"by_place"}}{$key}}) { 
 
-					$in_finals{$entry_id}++;
-					$in_elims{$entry_id}++;
+					next if $in_elims{$entry_id};
+
+					$in_finals{$entry_id} = $key;
+					$in_elims{$entry_id} = $key;
 
 					next if $qualifiers{$entry_id}{"place"};
 					next if $alternates{$entry_id}{"place"};
@@ -213,7 +262,8 @@
 				all_entries  => 1
 			);
 
-			my $semi_entries_ref = pop @semi_results if @semi_results;
+			my $semi_entries_ref = pop @semi_results 
+				if @semi_results;
 
 			if (${$semi_entries_ref}{"by_place"}) { 
 
@@ -224,8 +274,9 @@
 					my $delayed_alt;
 				
 					foreach my $entry_id (@{${${$semi_entries_ref}{"by_place"}}{$key}}) { 
-					
-						$in_elims{$entry_id}++;
+
+						next if $in_elims{$entry_id};
+						$in_elims{$entry_id} = $key;
 
 						next if $qualifiers{$entry_id}{"place"};
 						next if $alternates{$entry_id}{"place"};
@@ -262,116 +313,174 @@
 			}
 		}
 
-		if ($final && @prelims) { 
+		unless ($event->abbr eq "HOU" || $event->abbr eq "SEN") { 
 
-			foreach my $prelim (@prelims) { 
+			if ($final && @prelims) { 
 
-				my @previous_results = $m->comp(
-					"/tabbing/results/order_entries.mas",
-					round        => $prelim,
-					tiebreak_set => $final_tiebreaks,
-					all_entries  => 1
-				);
+				foreach my $prelim (@prelims) { 
 
-				my $previous_entries_ref = pop @previous_results if @previous_results;
+					my @previous_results = $m->comp(
+						"/tabbing/results/order_entries.mas",
+						round        => $prelim,
+						tiebreak_set => $final_tiebreaks,
+						all_entries  => 1
+					);
 
-				if (${$previous_entries_ref}{"by_place"}) { 
+					my $previous_entries_ref = 
+						pop @previous_results 
+						if @previous_results;
 
-					foreach my $key (sort {$a <=> $b} keys %{${$previous_entries_ref}{"by_place"}}) { 
-					
-						my $tie++ if scalar @{${${$previous_entries_ref}{"by_place"}}{$key}} > 1; 
-						my $delayed_alt;
-					
-						foreach my $entry_id (@{${${$previous_entries_ref}{"by_place"}}{$key}}) { 
+					if (${$previous_entries_ref}{"by_place"}) { 
 
-							next if $qualifiers{$entry_id}{"place"};
-							next if $alternates{$entry_id}{"place"};
-							next if $others{$entry_id}{"place"};
-							next if $vacated{$entry_id}{"place"};
+						foreach my $key (
+							sort {$a <=> $b} 
+							(keys %{${$previous_entries_ref}{"by_place"}})
+						) { 
+						
+							my $tie++ 
+								if scalar @{${${$previous_entries_ref}{"by_place"}}{$key}} > 1; 
 
-							$last_prelim{$entry_id} = $prelim->name;
+							my $delayed_alt;
+						
+							foreach my $entry_id (@{${${$previous_entries_ref}{"by_place"}}{$key}}) { 
 
-							if ($vacate_slot{$entry_id}) { 
+								next if $qualifiers{$entry_id}{"place"};
+								next if $alternates{$entry_id}{"place"};
+								next if $others{$entry_id}{"place"};
+								next if $vacated{$entry_id}{"place"};
 
-								$vacated{$entry_id}{"tie"}++ if $tie;
-								$vacated{$entry_id}{"place"} = $key;
+								$last_prelim{$entry_id} = $prelim->name;
 
-							} elsif ($count_quals > 0) { 
+								if ($vacate_slot{$entry_id}) { 
 
-								$qualifiers{$entry_id}{"tie"}++ if $tie;
-								$qualifiers{$entry_id}{"place"} = $key;
-								$count_quals--;
+									$vacated{$entry_id}{"tie"}++ if $tie;
+									$vacated{$entry_id}{"place"} = $key;
 
-							} elsif ($count_alts > 0) { 
+								} elsif ($count_quals > 0) { 
 
-								$alternates{$entry_id}{"tie"}++ if $tie;
-								$alternates{$entry_id}{"place"} = $alt;
-								$delayed_alt++;
-								$count_alts--;
+									$qualifiers{$entry_id}{"tie"}++ if $tie;
+									$qualifiers{$entry_id}{"place"} = $key;
+									$count_quals--;
 
-							} else { 
-								$others{$entry_id}{"tie"}++ if $tie;
-								$others{$entry_id}{"place"} = $key;
+								} elsif ($count_alts > 0) { 
+
+									$alternates{$entry_id}{"tie"}++ if $tie;
+									$alternates{$entry_id}{"place"} = $alt;
+									$delayed_alt++;
+									$count_alts--;
+
+								} else { 
+									$others{$entry_id}{"tie"}++ if $tie;
+									$others{$entry_id}{"place"} = $key;
+								}
 							}
-						}
 
-						$alt += $delayed_alt;
+							$alt += $delayed_alt;
+						}
 					}
 				}
 			}
+
 		}
 
-		if ($format eq "csv") {
+		if ($format eq "csv" || $format eq "simplecsv") {
 
+			$m->print("\n");
+			$m->print('"'.$district->name.'"');
 			$m->print("\n");
 			$m->print('"'.$event->name.'"');
 			$m->print("\n");
+
+			my $simplecsv++ if $format eq "simplecsv";
+
+			if ($simplecsv) { 
+
+				Tab::Entry->set_sql(event_spoke => "
+					select distinct entry.id
+					from entry, ballot, score
+					where entry.event = ? 
+					and entry.id = ballot.entry
+					and ballot.id = score.ballot
+				");
+
+				my @total_entries = Tab::Entry->search_event_spoke($event->id);
+			
+				$m->print('"Entries: '.scalar @total_entries.'"');
+				$m->print("\n");
+
+			}
+
 			$m->flush_buffer();
 
-			$m->comp("results_csv.mas", 
-				round          => $final,
-				filename       => $filename,
-				nsda_districts => 1,
-				qualifiers     => \%qualifiers,
-				vacated        => \%vacated,
-				alternates     => \%alternates,
-				others         => \%others,
-				nofinish       => "Yes"
-			);
+			if ($separate_sections) { 
 
-			$m->comp("results_csv.mas", 
-				round          => $semi,
-				filename       => $filename,
-				tiebreak_set   => $final_tiebreaks,
-				nsda_districts => 1,
-				qualifiers     => \%qualifiers,
-				vacated        => \%vacated,
-				alternates     => \%alternates,
-				others         => \%others,
-				exclude        => \%in_finals,
-				noheader       => "Yes",
-				nofinish       => "Yes"
-			);
+				foreach my $section ($final->panels) { 
 
-			my $placement = scalar( keys %in_elims) + 1;
+					$m->comp("results_csv.mas", 
+						round          => $final,
+						nsda_districts => 1,
+						num_qualifiers => 1,
+						vacated        => \%vacated,
+						vacate_option  => 1,
+						filename       => $filename,
+						section        => $section,
+						nofinish       => "yes",
+						simple         => $simplecsv
+					);
 
-			foreach my $prelim (@prelims) { 
+				}
+
+			} else { 
 
 				$m->comp("results_csv.mas", 
-					round           => $prelim,
-					filename        => $filename,
-					tiebreak_set    => $final_tiebreaks,
-					nsda_districts  => 1,
-					qualifiers      => \%qualifiers,
-					vacated         => \%vacated,
-					alternates      => \%alternates,
-					others          => \%others,
-					exclude         => \%in_elims,
-					none_above      => \%last_prelim,
-					start_placement => $placement,
-					noheader        => "Yes",
-					nofinish        => "Yes"
+					round          => $final,
+					filename       => $filename,
+					nsda_districts => 1,
+					qualifiers     => \%qualifiers,
+					vacated        => \%vacated,
+					alternates     => \%alternates,
+					others         => \%others,
+					nofinish       => "Yes",
+					simple         => $simplecsv
 				);
+
+				$m->comp("results_csv.mas", 
+					round          => $semi,
+					filename       => $filename,
+					tiebreak_set   => $final_tiebreaks,
+					nsda_districts => 1,
+					qualifiers     => \%qualifiers,
+					vacated        => \%vacated,
+					alternates     => \%alternates,
+					others         => \%others,
+					exclude        => \%in_finals,
+					noheader       => "Yes",
+					nofinish       => "Yes",
+					simple         => $simplecsv
+				);
+
+				my $placement = scalar( keys %in_elims) + 1;
+
+				foreach my $prelim (@prelims) { 
+
+					$m->comp("results_csv.mas", 
+						round           => $prelim,
+						filename        => $filename,
+						tiebreak_set    => $final_tiebreaks,
+						nsda_districts  => 1,
+						qualifiers      => \%qualifiers,
+						vacated         => \%vacated,
+						alternates      => \%alternates,
+						others          => \%others,
+						exclude         => \%in_elims,
+						none_above      => \%last_prelim,
+						start_placement => $placement,
+						noheader        => "Yes",
+						nofinish        => "Yes",
+						simple          => $simplecsv
+					);
+
+				}
 
 			}
 
@@ -380,6 +489,7 @@
 		} elsif ($format eq "pdf") { 
 
 			my $filepath = $Tab::file_root."tmp/".$filename;
+
 			open (TEXOUT, ">>$filepath.tex");
 
 			my $logo_file = $tourn_settings->{"logo"};
@@ -415,48 +525,45 @@
 			print TEXOUT "\\newline\n";
 
 			print TEXOUT "\\noindent\n";
-			print TEXOUT "\\strut \\hfill {\\Large \\color{black!64} QUALIFIERS }";
+			print TEXOUT "\\strut \\hfill {\\Large \\color{black!64} QUALIFIERS }\n";
 			print TEXOUT "\\end{minipage}\n";
 			print TEXOUT "\\vspace{5mm}\n";
 			print TEXOUT "\\newline\n";
 		
 			close TEXOUT;
 
-			$m->comp("/tabbing/report/results_table_print.mas", 
-				round          => $final,
-				filename       => $filename,
-				nsda_districts => 1,
-				qualifiers     => \%qualifiers,
-				vacated        => \%vacated,
-				alternates     => \%alternates,
-				others         => \%others,
-			);
+			if ($separate_sections) { 
 
-			my $placement = scalar( keys %in_finals) + 1;
+				foreach my $section ($final->panels) { 
 
-			$m->comp("/tabbing/report/results_table_print.mas", 
-				round           => $semi,
-				filename        => $filename,
-				tiebreak_set    => $final_tiebreaks,
-				nsda_districts  => 1,
-				qualifiers      => \%qualifiers,
-				vacated         => \%vacated,
-				alternates      => \%alternates,
-				others          => \%others,
-				exclude         => \%in_finals,
-				start_placement => $placement,
-				nofinish        => "Yes"
-			);
+					$m->comp("/tabbing/report/results_table_print.mas", 
+						round          => $final,
+						nsda_districts => 1,
+						num_qualifiers => 1,
+						vacated        => \%vacated,
+						vacate_option  => 1,
+						filename       => $filename,
+						section        => $section
+					);
 
-			my $noheaders;
-			$noheaders++ unless (scalar (keys %in_elims)) == scalar (keys (%in_finals));
+				}
 
-			$placement = scalar( keys %in_elims) + 1;
-
-			foreach my $prelim (@prelims) { 
+			} else { 
 
 				$m->comp("/tabbing/report/results_table_print.mas", 
-					round           => $prelim,
+					round          => $final,
+					filename       => $filename,
+					nsda_districts => 1,
+					qualifiers     => \%qualifiers,
+					vacated        => \%vacated,
+					alternates     => \%alternates,
+					others         => \%others
+				);
+
+				my $placement = scalar( keys %in_finals) + 1;
+
+				$m->comp("/tabbing/report/results_table_print.mas", 
+					round           => $semi,
 					filename        => $filename,
 					tiebreak_set    => $final_tiebreaks,
 					nsda_districts  => 1,
@@ -464,32 +571,554 @@
 					vacated         => \%vacated,
 					alternates      => \%alternates,
 					others          => \%others,
-					exclude         => \%in_elims,
-					none_above      => \%last_prelim,
+					exclude         => \%in_finals,
 					start_placement => $placement,
-					noheader        => $noheaders++,
-					nofinish        => 1
+					nofinish        => "Yes"
 				);
 
-			}
+				my $noheaders;
+				$noheaders++ unless (scalar (keys %in_elims)) == scalar (keys (%in_finals));
+
+				$placement = scalar( keys %in_elims) + 1;
+
+				foreach my $prelim (@prelims) { 
+
+					$m->comp("/tabbing/report/results_table_print.mas", 
+						round           => $prelim,
+						filename        => $filename,
+						tiebreak_set    => $final_tiebreaks,
+						nsda_districts  => 1,
+						qualifiers      => \%qualifiers,
+						vacated         => \%vacated,
+						alternates      => \%alternates,
+						others          => \%others,
+						exclude         => \%in_elims,
+						none_above      => \%last_prelim,
+						start_placement => $placement,
+						noheader        => $noheaders++,
+						nofinish        => 1
+					);
+
+				}
 				
+			}
+
 			open (TEXOUT, ">>$filepath.tex");
 			print TEXOUT "\\newpage\n";
 			close TEXOUT;
 
+
+		} elsif ($format eq "registration") {
+
+			my $event_abbr = $event->abbr;
+			$event_abbr = "DX" if $event_abbr eq "USX";
+
+			my $nationals_event = 
+				Tab::NSDA::NationalsEvent->search(
+					tourn_id => $school_year,
+					abbr2    => $event_abbr
+				)->first;
+
+			if ($nationals_event) { 
+
+				$m->print(
+					"
+						<span class='fourtenths nospace'>
+							<h3>".$event->name."</h3>
+						</span>
+
+						<span class='half rightalign nospace'>
+							<h5>
+								(Nationals event ".$nationals_event->event_id." ".$nationals_event->name.")
+							</h5>
+						</span>
+
+						<span class='nospace rightalign padleftmore'>
+							<a 
+								title='Return to Qualifiers Listing'
+								class='buttonwhite bluetext fa fa-lg fa-undo'
+								href='nsda_qualifiers.mhtml?event_id=".$event_id.">'
+							></a>
+						</span>
+					"
+				);
+
+				$m->print("<span class='half nospace'><h4>Uploading final standings:</h4></span>");
+
+				my $instance = Tab::NSDA::NationalsInstance->search(
+					tourn_id      => $tourn->id,
+					district_name => $district->name
+				)->first;
+
+				unless ($instance) { 
+
+					my $caliplan = 0;
+					$caliplan = 1 
+						if $tourn_settings->{"nsda_speech_method"} eq "california_3"
+						|| $tourn_settings->{"nsda_speech_method"} eq "california_2";
+
+					$instance = Tab::NSDA::NationalsInstance->create({
+						status        => "N",
+						tourn_id      => $tourn->id,
+						prefix        => $tourn->webname,
+						sdate         => $tourn->start,
+						edate         => $tourn->end,
+						tournament    => $tourn->name,
+						district_name => $district->name,
+						location      => $tourn->location." ".$tourn->city." ".$tourn->state,
+						level         => $district->level,
+						caliplan      => $caliplan,
+						bonus         => 0,
+						nBonus        => 0,
+						accel         => 0
+					});
+
+				}
+
+				$m->print("
+					<span class='half rightalign nospace'>
+						<h6>Nationals instance ".$instance->instance_id." for district ".$district->id."</h6>
+					</span>
+				");
+
+				if ($separate_sections) { 
+
+					# The House is treated differently in all kinds of
+					# horrifying ways. 
+
+					foreach my $section ($final->panels) { 
+
+						my $code = "H".$section->letter;
+
+						my $up_event = Tab::NSDA::NationalsUpEvent->search(
+							web_event_id => $event->id,
+							instance_id  => $instance->id,
+							abbr         => $code
+						)->first;
+
+						my (@results) = $m->comp(
+							"order_entries.mas", 
+								long_names   => 1,
+								round        => $final,
+								tiebreak_set => $final_tiebreaks,
+								section      => $section
+						);  
+
+						my $entries_ref = pop @results if @results;
+
+						unless ($up_event) { 
+
+							my $entry_count = 0;
+							$entry_count += scalar(keys %{$entries_ref->{"code"}});
+
+							$up_event = Tab::NSDA::NationalsUpEvent->create({
+								web_event_id => $event->id,
+								instance_id  => $instance->id,
+								event_id     => "100".$section->letter,
+								abbr         => $code,
+								name         => $event->name,
+								isdebate     => 0,
+								iscongress   => 1,
+								nRounds      => (scalar @rounds),
+								nEntries     => $entry_count,
+								nAdvancing   => 1
+							});
+
+						}
+
+						Tab::NSDA::NationalsStanding->set_sql(
+							delete_standings => "
+								delete from final_standings 
+									where district_id = ?
+									and instance_event_id = ? 
+							");
+
+						Tab::NSDA::NationalsStanding->sql_delete_standings->execute(
+							$district->id,
+							$up_event->event_id
+						);
+
+						my $qualled;
+
+						if (${$entries_ref}{"by_place"}) {
+
+							foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) { 
+
+								foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) {
+
+									my $entry = Tab::Entry->retrieve($entry_id);
+									my $student = $entry->students->first;
+
+									next unless $student;
+
+									my $student_ualt = $student->ualt_id;
+
+									unless ($student_ualt) {
+
+									$m->print('<div class="full marno row redtext strong centeralign padtopmore padbottommore">
+											Entry '.$entry->code." student $student is NOT REGISTERED AS AN NSDA MEMBER.  
+											Position: $key not recorded
+										</div>");
+
+									} else {
+
+										my $chapter_nsda = $student->chapter->nsda;
+
+										my $seli = 0;
+										$seli++ if $vacated{$entry_id}{"place"};
+
+										Tab::NSDA::NationalsStanding->create({
+											district_id       => $district->id,
+											src_instance_id   => $instance->id,
+											abbr              => $code,
+											place             => $key,
+											seli              => $seli,
+											school_id         => $chapter_nsda,
+											ualt_id           => $student_ualt,
+											instance_event_id => $up_event->event_id,
+											skip              => 0
+										});
+
+										unless ($qualled || $seli) { 
+											
+											$qualled++;
+											my $string = "<span class='threequarters padmore'>";
+
+											$string .= "Entry ".$entry->code." from ".$entry->school->name." qualified: ";
+											$string .= $student->first." ".$student->last." Merit ID: ".$student->ualt_id." ";
+
+											my %creation = (
+												tourn_id    => $school_year,
+												event_id    => $nationals_event->event_id,
+												district_id => $tourn_settings->{"nsda_district"},
+												school_id   => $entry->school->chapter->nsda,
+												student_id  => $student_ualt
+											);
+
+											my $eligible;
+											my $err;
+
+											my @already;
+
+											push @already, Tab::NSDA::NationalsEntry->search(
+												tourn_id   => $school_year,
+												event_id   => $nationals_event->event_id,
+												student_id => $student->ualt_id
+											);
+
+											push @already, Tab::NSDA::NationalsEntry->search(
+												tourn_id   => $school_year,
+												event_id   => $nationals_event->event_id,
+												partner_id => $student->ualt_id
+											);
+
+											if (@already) { 
+												foreach my $yo (@already) { 
+													$err .= "<br />" if $err;
+													$err .= $student->first." ".$student->last;
+													$err .= " is already registered in ".$event->abbr;
+													$err .= " as entry ID ".$yo->eligible_id;
+												}
+											}
+
+											unless ($err) { 
+												$err = eval { 
+													$eligible = Tab::NSDA::NationalsEntry->create(\%creation);
+												};
+											}
+
+											$string .= "</span>";
+
+											if ($eligible && ( (not defined $err) || $err eq int($err))  ) { 
+
+												$string .= "<span class='quarter rightalign greentext strong'>Succeeded!</span>";
+											} else { 
+
+												$string .= "<p><span class='third rightalign redtext strong'>Alert!</span>";
+												$string .= "</span><span class='redtext twothirds'>".$err."</span>";
+
+											}
+
+											$m->print("<div class='full marno row'>".$string."</div>");
+
+							
+										}
+
+									}
+
+								}
+
+							}
+
+						}
+
+					}
+
+				} else { 
+
+					my $up_event = Tab::NSDA::NationalsUpEvent->search(
+						web_event_id => $event->id,
+						instance_id  => $instance->id,
+					)->first;
+
+					unless ($up_event) { 
+
+						# THIS SO OFFENDS ME.  WHY NOT A UNIQUE ID LIKE EVERY DB ON
+						# EARTH WHY WHY WHY WHYYYYYY....
+
+						my $debate = 0;
+						my $congress = 0;
+						my $seli = 0;
+						
+						$debate++ if $event->type eq "debate";
+						$congress++ if $event->type eq "congress";
+
+						my %used;
+						my $entry_count = 0;
+
+						foreach my $key (
+							keys %qualifiers, 
+							keys %vacated, 
+							keys %alternates, 
+							keys %others
+						) { 
+							$entry_count++ unless $used{$key}++;
+						}
+						
+						my $qual_count = scalar(keys %qualifiers);
+
+
+						$up_event = Tab::NSDA::NationalsUpEvent->create({
+							web_event_id => $event->id,
+							instance_id  => $instance->id,
+							event_id     => $nationals_event->event_id,
+							abbr         => $event_abbr,
+							name         => $event->name,
+							isdebate     => $debate,
+							iscongress   => $congress,
+							nRounds      => (scalar @rounds),
+							nEntries     => $entry_count,
+							nAdvancing   => $qual_count
+						});
+
+					}
+
+					my $starting_place = scalar(keys(%in_elims));
+
+					foreach my $prelim (sort {$b->name <=> $a->name} @prelims) { 
+
+						my $debate_all++ 
+							if $event->type eq "debate";
+
+						my $section_rank++ 
+							if $final_tiebreaks->setting("equal_elims");
+
+						my (@results) = $m->comp(
+							"order_entries.mas", 
+								long_names   => 1,
+								round        => $prelim,
+								tiebreak_set => $final_tiebreaks,
+								all_entries  => $debate_all,
+								section_rank => $section_rank
+						);  
+
+						my $entries_ref = pop @results if @results;
+
+						if (${$entries_ref}{"by_place"}) {
+
+							foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) { 
+
+								my $key_count;
+
+								foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) {
+									next if $in_elims{$entry_id};
+									$in_elims{$entry_id} = $key + $starting_place;
+								}
+
+								$starting_place += $key_count;
+
+							}
+
+						}
+
+					}
+
+					my $counter;
+
+					Tab::NSDA::NationalsStanding->set_sql( 
+						delete_standings => "
+							delete from final_standings 
+								where district_id = ?
+								and instance_event_id = ? 
+						");
+
+					Tab::NSDA::NationalsStanding->sql_delete_standings->execute(
+						$district->id,
+						$up_event->event_id
+					);
+
+					foreach my $entry_id (
+						sort {$in_elims{$a} <=> $in_elims{$b}} (keys %in_elims)
+					) { 
+
+						my $entry = Tab::Entry->retrieve($entry_id);
+						my @students = $entry->students;
+
+						next unless @students;
+
+						my $student = shift @students;
+						my $partner = shift @students if @students;
+
+						my $student_ualt = $student->ualt_id;
+						my $partner_ualt = $partner->ualt_id if $partner;
+
+						my $place = $in_elims{$entry_id};
+
+						unless ($student_ualt) { 
+
+							$m->print('<div class="full marno row redtext strong centeralign padtop padbottom">
+								Entry '.$entry->code." student $student is NOT REGISTERED AS AN NSDA MEMBER.  
+								Position: $place  not recorded
+							</div>");
+
+						} else { 
+
+							my $chapter_nsda = $student->chapter->nsda;
+
+							my $seli = 0;
+							$seli++ if $vacated{$entry_id}{"place"};
+
+							Tab::NSDA::NationalsStanding->create({
+								district_id       => $district->id,
+								src_instance_id   => $instance->id,
+								abbr              => $event_abbr,
+								place             => $place,
+								seli              => $seli,
+								school_id         => $chapter_nsda,
+								ualt_id           => $student_ualt,
+								partner_ualt_id   => $partner_ualt,
+								instance_event_id => $up_event->event_id,
+								skip              => 0
+							});
+						}
+
+						$counter++;
+
+						if ($qualifiers{$entry_id}) { 
+
+							next unless $qualifiers{$entry_id}{"place"};
+
+							my $string = "<span class='threequarters padmore'>";
+							$string .= "Entry ".$entry->code." from ".$entry->school->name." qualified: ";
+
+							foreach my $schmoe ($student, $partner) { 
+								next unless $schmoe;
+								$string .= $schmoe->first." ".$schmoe->last." Merit ID: ".$schmoe->ualt_id." ";
+							}
+
+							my %creation = (
+								tourn_id    => $school_year,
+								event_id    => $nationals_event->event_id,
+								district_id => $tourn_settings->{"nsda_district"},
+								school_id   => $entry->school->chapter->nsda,
+								student_id  => $student_ualt,
+								partner_id  => $partner_ualt
+							);
+
+							$creation{"partner_id"} = $partner->ualt_id if $partner;
+
+							my $eligible;
+							my $err;
+
+							foreach my $schmoe ($student, $partner) { 
+
+								next unless $schmoe;
+
+								my @already;
+
+								push @already, Tab::NSDA::NationalsEntry->search(
+									tourn_id   => $school_year,
+									event_id   => $nationals_event->event_id,
+									student_id => $schmoe->ualt_id
+								);
+
+								push @already, Tab::NSDA::NationalsEntry->search(
+									tourn_id   => $school_year,
+									event_id   => $nationals_event->event_id,
+									partner_id => $schmoe->ualt_id
+								);
+
+								if (@already) { 
+									foreach my $yo (@already) { 
+										$err .= "<br />" if $err;
+										$err .= $schmoe->first." ".$schmoe->last;
+										$err .= " is already registered in ".$event->abbr;
+										$err .= " as entry ID ".$yo->eligible_id;
+									}
+								}
+
+							} 
+							
+							unless ($err) { 
+								$err = eval { 
+									$eligible = Tab::NSDA::NationalsEntry->create(\%creation);
+								};
+
+							}
+
+							$string .= "</span>";
+
+							if ($eligible && ( (not defined $err) || $err eq int($err))  ) { 
+
+								$string .= "<span class='quarter rightalign greentext strong'>Succeeded!</span>";
+
+							} else { 
+
+								$string .= "<p><span class='third rightalign redtext strong'>Alert!</span>";
+								$string .= "</span><span class='redtext twothirds'>".$err."</span>";
+
+							}
+
+							$m->print("<div class='full marno row'>".$string."</div>");
+		
+						}
+					
+
+					}
+
+					$m->print('<p class="bluetext">Uploaded '.$counter.' entry standings</p>');
+				}
+
+			} else { 
+
+				$m->print("<h5 class='redtext'>No nationals event found corresponding to ".$event->abbr."</h5>");
+			}
+
+			$m->flush_buffer();
+		
 		} else {
+
 
 </%init>
 
+			<script>
+				function confirmAudit(event_id) { 
+					$("."+event_id).removeClass('hidden');
+					$("#"+event_id).addClass('hidden');
+					$('table').trigger('applyWidgets');
+				}
+			</script>
 
-			<div class="full nospace borderbottom">
 
-				<span class="half">
-					<h3>Qualifiers in <% $event->name %></h3>
+			<div
+				class="full nospace borderbottom"
+			>
+
+				<span class="fourtenths nospace">
+					<h4>Qualifiers in <% $event->name %></h4>
 				</span>
 
-
-				<span class="quarter">
+				<span class="fifth">
 
 					<form 
 						action = "nsda_qualifiers.mhtml"
@@ -513,7 +1142,7 @@
 					</form>
 				</span>
 
-				<span class="quarter rightalign">
+				<span class="twofifths rightalign <% $hidden %> <% $event->id %>">
 
 					<% $event->abbr %>:
 
@@ -526,10 +1155,20 @@
 					></a>
 
 					<a 
-						title = "Excel/CSV Download"
+						title = "Full Excel Report"
 						class = "buttonwhite fa fa-lg fa-file-excel-o greentext hover"
 						href  = "nsda_qualifiers.mhtml?event_id=<% $event->id %>&format=csv"
 					></a>
+
+%					if ($person_settings->{"nsda_admin"} || $person->site_admin) { 
+
+						<a 
+							title = "Post Results to Nationals Dashboard"
+							class = "buttonwhite fa fa-lg fa-arrow-up orangetext hover"
+							href  = "nsda_qualifiers.mhtml?format=registration&event_id=<% $event->id %>"
+						></a>
+
+%					}
 
 					ALL:
 
@@ -542,42 +1181,170 @@
 					></a>
 
 					<a 
-						title = "Excel/CSV Download"
+						title = "Full Excel Report"
 						class = "buttonwhite fa fa-lg fa-file-excel-o greentext hover"
 						href  = "nsda_qualifiers.mhtml?format=csv&all=1"
 					></a>
+
+					<a 
+						title = "Excel Download for NSDA"
+						class = "buttonwhite fa fa-lg fa-file-excel-o purpletext hover"
+						href  = "nsda_qualifiers.mhtml?format=simplecsv&all=1"
+					></a>
+
+%					if ($person_settings->{"nsda_admin"} || $person->site_admin) { 
+
+						<a 
+							title = "Post Results to Nationals Dashboard"
+							class = "buttonwhite fa fa-lg fa-arrow-up orangetext hover"
+							href  = "nsda_qualifiers.mhtml?format=registration&all=1"
+						></a>
+
+%					}
 
 				</span>
 
 			</div>
 
-			<h4>Finalists:</h4>
+%			my $confirmer;
 
-			<& 
-				"results_table.mas", 
-					round          => $final,
-					nsda_districts => 1,
-					qualifiers     => \%qualifiers,
-					vacated        => \%vacated,
-					alternates     => \%alternates,
-					others         => \%others,
-			&>
-		
-	<%perl>
+%			unless ($person->site_admin 
+%				|| $person_settings->{"nsda_admin"} 
+%				|| $event->setting("nsda_audited")
+%			) { 
+
+				<div 
+					id    = "<% $event->id %>"
+					class = "cover centeralign padtopmore"
+				>
+
+					<div class="padmuchmore full padtopmore padbottommore marbottommore">
+					</div>
+
+
+					<h3 class="centeralign nospace">
+						Confirm Audit &amp; Doublecheck
+					</h3>
+
+					<p class="strong bluetext padtopmore martopmore">
+						To see qualifiers for <% $event->name %>, please first confirm the following:
+					</p>
+
+					<p>
+						1.  All ballot entry has been double checked, and ballots
+						have been made available to attending coaches for
+						confirmation.
+					</p>
+
+					<p> 
+						2.  You pledge to check the system's results and calculations
+						before announcing or reporting qualifiers.
+					</p>
+
+					<div class="padmuchmore centeralign martopmore">
+
+						<a 
+							id             = "event_<% $event->id %>"
+							class          = "buttonwhite redtext invert padmuchmore"
+							target_id      = "<% $event->id %>"
+							setting_name   = "nsda_audited"
+							property_value = "1"
+							value          = "1"
+							onClick        = "postSwitch(this, 'event_switch.mhtml'); 
+								confirmAudit(<% $event->id %>);"
+						>
+							Mark As Confirmed by <% $person->first." ".$person->last %>
+						</a>
+
+					</div>
+
+				</div>
+
+<%perl>
+
+				$hidden = "hidden";
+
+			} else { 
+
+				$confirmer = Tab::Person->retrieve($event->setting("nsda_audited"))
+					if $event->setting("nsda_audited");
+
+				$hidden = "hidden" unless $confirmer;
+
+			}
+
+			undef $hidden if $person->site_admin;
+			undef $hidden if $person_settings->{"nsda_admin"};
+
+
+</%perl>
+			<div 
+				class = "mask <% $hidden %> <% $event->id %>"
+			>
+
+				<div class="full centeralign explain nospace martop">
+%					if ($confirmer) { 
+						Audit confirmed by 
+						<span class="inline replybucket confirmed"> 
+							<% $confirmer ? $confirmer->first." ".$confirmer->last : "" %>
+						</span>
+%					} else { 
+						Audit not yet confirmed
+%					} 
+				</div>
+
+<%perl>
+
+				if ($separate_sections && $final)  { 
+
+					foreach my $section ($final->panels) { 
+
+						$m->comp("results_table.mas", 
+							round          => $final,
+							nsda_districts => 1,
+							num_qualifiers => 1,
+							vacated        => \%vacated,
+							vacate_option  => 1,
+							section        => $section
+						);
+
+					}
+
+				} else { 
+</%perl>
+
+					<h4 class="padno padleft marno">Finalists:</h4>
+
+
+					<& 
+						"results_table.mas", 
+							round          => $final,
+							nsda_districts => 1,
+							qualifiers     => \%qualifiers,
+							vacated        => \%vacated,
+							alternates     => \%alternates,
+							others         => \%others,
+							vacate_option  => 1
+					&>
+<%perl>
+
+				}
 
 			my $placement = scalar( keys %in_finals) + 1;
 
 			my $finals_left = ($num_alternates + $num_qualifiers) - (scalar (keys %in_finals));
+
 			my $semis_left = ($num_alternates + $num_qualifiers) - (scalar (keys %in_elims));
 
 			my $both = 1 if $semi && $last_nonelim;
 
-			if ($final) { 
 
-					undef $both unless $semis_left > 0;
+			if ($final && ($semi || @prelims)) { 
+
+				undef $both unless $semis_left > 0;
 			
-	</%perl>
-					<h4>Others</h4>
+</%perl>
+					<h4 class="padno padleft marno">Others</h4>
 
 					<& 
 						"results_table.mas", 
@@ -590,6 +1357,7 @@
 							others          => \%others,
 							exclude         => \%in_finals,
 							start_placement => $placement,
+							vacate_option   => 1,
 							nofinish        => "Yes"
 					&>
 
@@ -604,40 +1372,67 @@
 
 					foreach my $prelim (@prelims) { 
 
+						if ($separate_sections) { 
+
+							foreach my $section ($prelim->panels) { 
+
+								$m->comp("results_table.mas", 
+									round           => $prelim,
+									tiebreak_set    => $final_tiebreaks,
+									nsda_districts  => 1,
+									qualifiers      => \%qualifiers,
+									vacated         => \%vacated,
+									alternates      => \%alternates,
+									others          => \%others,
+									exclude         => \%in_elims,
+									start_placement => $placement,
+									none_above      => \%last_prelim,
+									noheader        => $noheaders++,
+									vacate_option   => 1,
+									nofinish        => "Yes",
+									section         => $section
+								);
+
+							}
+
+						} else { 
+
+							$m->comp("results_table.mas", 
+									round           => $prelim,
+									tiebreak_set    => $final_tiebreaks,
+									nsda_districts  => 1,
+									qualifiers      => \%qualifiers,
+									vacated         => \%vacated,
+									alternates      => \%alternates,
+									others          => \%others,
+									exclude         => \%in_elims,
+									start_placement => $placement,
+									none_above      => \%last_prelim,
+									noheader        => $noheaders++,
+									vacate_option   => 1,
+									nofinish        => "Yes"
+							);
+
+						}
+					}
+
 </%perl>
-
-
-						<& 
-							"results_table.mas", 
-								round           => $prelim,
-								tiebreak_set    => $final_tiebreaks,
-								nsda_districts  => 1,
-								qualifiers      => \%qualifiers,
-								vacated         => \%vacated,
-								alternates      => \%alternates,
-								others          => \%others,
-								exclude         => \%in_elims,
-								start_placement => $placement,
-								none_above      => \%last_prelim,
-								noheader        => $noheaders++,
-								nofinish        => "Yes"
-						&>
-
-%					}
 
 					</tbody>
 
 				</table>
 
-%			}
-
-%		}
-
-%	}
+				</div>
 
 <%perl>
 
-	if ($format eq "csv") { 
+			}
+
+		}
+
+	}
+
+	if ($format eq "csv" || $format eq "simplecsv") { 
 
 		$m->flush_buffer();
 		$m->abort();

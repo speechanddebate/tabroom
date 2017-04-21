@@ -1080,6 +1080,7 @@ create view tabapi.school
 		tourn_id,
 		chapter_id,
 		region_id,
+		district_id,
 		timestamp)
 as select
 	id,
@@ -1089,6 +1090,7 @@ as select
 		tourn,
 		chapter,
 		region,
+		district,
 		timestamp
 from tabroom.school;
 

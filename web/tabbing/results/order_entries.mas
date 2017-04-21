@@ -1,14 +1,17 @@
 <%args>
 	$round
-	$nsda          => undef
-	$seed_skip     => undef
-	$skip_wins     => undef
-	$breakout      => undef
-	$opp_wins_only => undef
-	$composite_set => undef
-	$tiebreak_set  => undef
-	$section_rank  => undef
-	$all_entries   => undef
+	$section        => undef
+	$nsda           => undef
+	$seed_skip      => undef
+	$skip_wins      => undef
+	$breakout       => undef
+	$opp_wins_only  => undef
+	$composite_set  => undef
+	$parent_set     => undef
+	$tiebreak_set   => undef
+	$section_rank   => undef
+	$all_entries    => undef
+	$never_redirect => undef
 </%args>
 <%init>
 
@@ -19,6 +22,8 @@
 
 	my $event = $round->event;
 	my $event_type = $event->type;
+
+	my $byes_on_team_basis++ if $event_type eq "wsdc";
 
 	$event_type = "debate" 
 		if $event_type eq "pf"
@@ -45,6 +50,7 @@
 				$m->print('<div class="main">');
 
 				$m->print("<h3>No, not gonna do it</h3>");
+
 				$m->print('<p class="strong redtext">You have a composite rank based on other composite ranks. </p>');
 				$m->print('<p>That can lead to excessively long computation times and bring down the Tabroom server.</p>');
 				$m->print('<p>Thus, they are not permitted.  Please reconfigure your tiebreakers</p>');
@@ -66,6 +72,8 @@
 	unless ($tiebreak_set) {  
 
 		return if $nsda;
+
+		$m->abort if $never_redirect;
 
 		my $err = "Round ".$round->realname." does not have a tiebreaker set applied to it.";
 		$err .= "Please pick one and try again";
@@ -103,12 +111,9 @@
 		if $tb_settings{"truncate_ranks_to"};
 
 	my $truncate_to_smallest = $tb_settings{"truncate_to_smallest"};
-
-	my $truncate_prelims = $tb_settings{"truncate_prelims"};
-
-	my $truncate_elims = $tb_settings{"truncate_elims"};
-
-	my $truncate_finals = $tb_settings{"truncate_finals"};
+	my $truncate_prelims     = $tb_settings{"truncate_prelims"};
+	my $truncate_elims       = $tb_settings{"truncate_elims"};
+	my $truncate_finals      = $tb_settings{"truncate_finals"};
 
 	# This is for the purpose of determining NSDA points for posting
 
@@ -125,15 +130,16 @@
 	my $wsdc_byes = $event_settings{"wsdc_bye_win_average"};
 
 	$section_rank++ if $tb_settings{"equal_elims"};
-
-
 	my $round_robin++ if $event_settings{"round_robin"};
 	my $team_points++ if $event_settings{"team_points"};
 
-	undef $team_points if $event_type eq "congress"; # Redundant and harmful
-	undef $team_points if $event_type eq "speech"; # Redundant and harmful
+	# Redundant and harmful
+	undef $team_points if $event_type eq "congress"; 
+	undef $team_points if $event_type eq "speech"; 
 
-	undef $round_robin if $round->type eq "elim" || $round->type eq "final";
+	undef $round_robin 
+		if $round->type eq "elim" 
+		|| $round->type eq "final";
 
 	my %tb_tiers = ();
 	my %tb_count = ();
@@ -190,13 +196,15 @@
 	my $dropped_limit = " and entry.active = 1 ";
 	undef $dropped_limit if $nsda;
 
+	my $section_limit = "and panel.id = ".$section->id if $section;
+
 	my $round_limit;
 
 	my $sth = $dbh->prepare("
 		select 
-			entry.id, entry.code, entry.name, entry.dq, entry.school,
+			entry.id, entry.code, entry.name, entry.dropped, entry.dq, entry.school,
 			round.type, round.name, round.id,
-			score.id, score.tag, score.value, 
+			score.id, score.tag, score.value, score.student,
 			ballot.id, ballot.judge, ballot.forfeit, ballot.bye, ballot.tv, ballot.chair,
 			panel.id, panel.bye, panel.letter
 
@@ -204,6 +212,7 @@
 		left join score on score.ballot = ballot.id
 		where ballot.panel = panel.id
 		and panel.round = round.id
+		$section_limit
 
 		and not exists ( 
 			select round_setting.id 
@@ -226,9 +235,9 @@
 	my %already = ();
 
 	while (my (
-		$entry_id, $entry_code, $entry_name, $entry_dq, $entry_school_id,
+		$entry_id, $entry_code, $entry_name, $entry_dropped, $entry_dq, $entry_school_id,
 		$round_type, $round_name, $round_id,
-		$score_id, $score_tag, $score_value,
+		$score_id, $score_tag, $score_value, $score_student,
 		$ballot_id, $ballot_judge, $ballot_forfeit, $ballot_bye, $ballot_tv, $ballot_chair,
 		$panel_id, $panel_bye, $panel_letter
 		)  = $sth->fetchrow_array()
@@ -257,6 +266,7 @@
 		$entries{"school_id"}{$entry_id} = $entry_school_id;
 
 		$entries{"dq"}{$entry_id} = $entry_dq if $entry_dq;
+		$entries{"dropped"}{$entry_id} = $entry_dropped if $entry_dropped;
 
 		$entries{"letter"}{$entry_id} = $panel_letter;
 
@@ -283,6 +293,7 @@
 			$scores{"chair"}{$score_id}++ if $ballot_chair;
 			$scores{"tv"}{$score_id} = $ballot_tv;
 
+			$scores{"student"}{$score_id} = $score_student;
 
 		}
 
@@ -322,7 +333,8 @@
 
 	foreach my $all_round (@event_rounds) { 
 
-		next if $rounds{"name"}{$all_round} > $this_round_name;  # Do not measure the future
+		# Do not measure the future.  the Doctor will get angry at us.
+		next if $rounds{"name"}{$all_round} > $this_round_name;  
 
 		push @all_rounds, $all_round->id;
 
@@ -343,6 +355,7 @@
 				grep { ! $eseen{$_} ++ } 
 				@{$panels{"entries"}{$panel}};
 		}
+
 	}
 
 	my %dq_panel_threshold = ();
@@ -366,17 +379,31 @@
 
 		foreach my $round (@all_rounds) { 
 
-			next if $rounds{"type"}{$round} eq "elim" && not defined $truncate_elims;
-			next if $rounds{"type"}{$round} eq "final" && not defined $truncate_finals;
-			next if $rounds{"type"}{$round} eq "prelim" && not defined $truncate_prelims;
+			next if $rounds{"type"}{$round} eq "elim" 
+				&& not defined $truncate_elims;
 
-			$rounds{"truncate"}{$round} = $truncate if $truncate > 0; # Upper limit is the hard cap, if any
+			next if $rounds{"type"}{$round} eq "final" 
+				&& not defined $truncate_finals;
+
+			next if $rounds{"type"}{$round} eq "prelim" 
+				&& not defined $truncate_prelims;
+
+			# Upper limit is the hard cap, if any
+			$rounds{"truncate"}{$round} = $truncate 
+				if $truncate > 0; 
 
 			foreach my $panel (@{$rounds{"panels"}{$round}}) { 
-				my $size = scalar @{$panels{"entries"}{$panel}} if $panels{"entries"}{$panel};
+
+				my $size = scalar @{$panels{"entries"}{$panel}} 
+					if $panels{"entries"}{$panel};
+
 				next unless $size > 0;
-				$rounds{"truncate"}{$round} = $size unless $rounds{"truncate"}{$round};
-				$rounds{"truncate"}{$round} = $size if $rounds{"truncate"}{$round} > $size;
+
+				$rounds{"truncate"}{$round} = $size 
+					unless $rounds{"truncate"}{$round};
+
+				$rounds{"truncate"}{$round} = $size 
+					if $rounds{"truncate"}{$round} > $size;
 			}
 
 		}
@@ -585,12 +612,21 @@
 
 	# The factors that going into calculating jvar and jvar2 (aka z scores)
 
-	my ($judge_avg_ref, $judge_ballot_count_ref, $judge_total_ref, $judge_stddev_ref, 
-		$total_avg, $total_std, 
-		$judge_z2_avg_ref, $judge_z2_ballot_count_ref, $judge_z2_total_ref, $judge_z2_stddev_ref) 
-
-		= $m->comp("/funclib/judge_points_average.mas", event => $event) if $judge_var;
-
+	my ($judge_avg_ref,
+		$judge_ballot_count_ref,
+		$judge_total_ref,
+		$judge_stddev_ref,
+		$total_avg,
+		$total_std, 
+		$judge_z2_avg_ref,
+		$judge_z2_ballot_count_ref,
+		$judge_z2_total_ref,
+		$judge_z2_stddev_ref
+	) 
+		= $m->comp(
+			"/funclib/judge_points_average.mas", 
+				event => $event
+		) if $judge_var;
 
 	# Calculate the composite ranks if that's a thing:
 
@@ -613,9 +649,10 @@
 
 				my @results = $m->comp(
 					"/tabbing/results/order_entries.mas", 
-					round        => $rank_round,
-					tiebreak_set => $tb->child,
-					section_rank => 1
+					round         => $rank_round,
+					composite_set => $tb->child,
+					parent_set    => $tiebreak_set,
+					section_rank  => 1,
 				);
 
 				my $full_entries_ref = pop @results;
@@ -627,7 +664,9 @@
 						my $rank = $full_entries_ref->{"section_rank"}{$entry};
 
 						$entries{"composite_rank"}{$entry}{$rank_round} = $rank;
+
 						$entries{"composite_rank_count"}{$panel}{$rank}++;
+
 					} 
 
 				}
@@ -1093,6 +1132,12 @@
 								if ($tb_info{$tb}{"child"}) { 
 
 									$rank = $entries{"composite_rank"}{$entry}{$this_round};
+
+									if ($local_truncate) { 
+										#Tiebreaker specific truncation limit
+										$rank = $local_truncate if $rank > $local_truncate;
+									}
+
 									$round_done{$entry}{$this_round}++;
 
 								} else {
@@ -1105,9 +1150,12 @@
 									$round_count++;
 								
 									$rank = $scores{"value"}{$score};
+									my $this_panel = $scores{"panel"}{$score};
+									my $this_judge = $scores{"judge"}{$score};
 							
-									if ($dq_panel_threshold{$scores{"panel"}{$score}."-".$scores{"judge"}{$score}}) { 
-										$rank-- if $dq_panel_threshold{$scores{"panel"}{$score}."-".$scores{"judge"}{$score}} < $rank;
+									if ($dq_panel_threshold{$this_panel."-".$this_judge}) { 
+										$rank-- 
+											if $dq_panel_threshold{$this_panel."-".$this_judge} < $rank;
 									}
 
 									# Bump the rank up if it's a time
@@ -1325,8 +1373,8 @@
 
 					$total = $total * 100;
 
-
 				# SPEAKS SPEAKER POINTS
+
 				} elsif ($name eq "points") { 
 
 					my $bye;
@@ -1340,83 +1388,215 @@
 
 					my $max_score;
 
+					my %student_scores = ();
+
+					foreach my $this_round (@rounds) { 
+
+						foreach my $score (@{$entries{"round_scores"}{$entry}{$this_round}}) { 
+
+							if ($scores{"tag"}{$score} eq "points") { 
+								my $points = sprintf("%d", 100 * $scores{"value"}{$score});
+								push @{$student_scores{$scores{'student'}{$score}}{"scores"}}, $points;
+							}
+						}
+					}
+
+					foreach my $student_id (keys %student_scores) { 
+
+						my $total;
+						my $counter;
+
+						if ($student_scores{$student_id}{"scores"}) { 
+							foreach my $value (@{$student_scores{$student_id}{"scores"}}) { 
+								$total += $value;
+								$counter++;
+							}
+						}
+
+						my $average = sprintf("%d", ($total / $counter) ) 
+							if $counter > 0;
+
+						$student_scores{$student_id}{"average"} = $average;
+						$student_scores{$student_id}{"total"} = $total;
+						$student_scores{$student_id}{"count"} = $counter;
+
+					}
+
 					foreach my $this_round (@rounds) { 
 
 						$num_rounds++;
 
 						$max_score = $max_score_count{"points"}{$this_round};
+	
+						if ($byes_on_team_basis) { 
 
-						$bye += $max_score_count{"points"}{$this_round}  
-							if $entries{"round_panel_bye"}{$this_round}{$entry};
+							$bye++ if $entries{"round_panel_bye"}{$this_round}{$entry};
+
+						} else { 
+
+							$bye += $max_score_count{"points"}{$this_round}  
+								if $entries{"round_panel_bye"}{$this_round}{$entry};
+
+						}
 						
 						next if $entries{"round_panel_bye"}{$this_round}{$entry};
 
 						my $round_count;
 						my $round_score;
-						my %judge_points;
+
+						my %judge_points = ();
+
+						my %done_students = ();
 
 						foreach my $score (@{$entries{"round_scores"}{$entry}{$this_round}}) { 
 
-							if ($scores{"tag"}{$score} eq "points" 
+							if (
+								$scores{"tag"}{$score} eq "points" 
 								|| $scores{"tag"}{$score} eq "rebuttal_points"
 							) { 
 
 								my $points = sprintf("%d", 100 * $scores{"value"}{$score});
 
-								$count++;
+								$count++ unless $byes_on_team_basis;
+
 								$round_count++;
 
 								$judge_points{$this_round."-".$scores{"judge"}{$score}} 
 									+= sprintf("%d", 100 *$scores{"value"}{$score});
 
 								$round_score += $points;
+
+								$done_students{$scores{"student"}{$score}}++;
+
 							}
 
 						}
+
+						$count++ if $round_score && $byes_on_team_basis;
 
 						my $average_round_count;
 
 						unless ($team_points) {
-
+									
 							if ($maverick_method eq "double") { 
 
-								if ($round_count && $round_count < $max_score_count{"points"}{$this_round}) {
-									$count +=  ($max_score_count{"points"}{$this_round} / $round_count) - 1;
-									$round_score = $round_score * $max_score_count{"points"}{$this_round} / $round_count;
+								if ($round_count 
+									&& $round_count < $max_score_count{"points"}{$this_round}
+								) {
+
+									$count +=  
+										($max_score_count{"points"}{$this_round} / $round_count) 
+										- 1;
+
+									$round_score = $round_score 
+										* ($max_score_count{"points"}{$this_round} / $round_count);
 								}
 
 							} elsif ($maverick_method eq "average") { 
 
-								if ($round_count && $round_count < $max_score_count{"points"}{$this_round}) {
+								if ($round_count 
+									&& $round_count < $max_score_count{"points"}{$this_round}
+								) {
+
+									foreach my $student_id (keys %student_scores) { 
+
+										next if $done_students{$student_id};
+
+										my $missing = $max_score_count{"points"}{$this_round} - $round_count;
+										foreach (1 .. $missing) { 
+
+											$round_score += $student_scores{$student_id}{"average"};
+											$round_count++;
+											$count++;
+						
+											foreach my $judgekey (keys %judge_points) { 
+												$judge_points{$judgekey} += $student_scores{$student_id}{"average"};
+											}
+									
+										}
+
+									} 
+
+								} 
+
+								if ($round_count 
+									&& $round_count < $max_score_count{"points"}{$this_round}
+								) {
+
 									$average_round_count++;
-									$count +=  ($max_score_count{"points"}{$this_round} / $round_count) - 1;
-									$averages += ($max_score_count{"points"}{$this_round} / $round_count) - 1;
+
+									$count +=  
+										($max_score_count{"points"}{$this_round} / $round_count) 
+										- 1;
+
+									$averages += 
+										($max_score_count{"points"}{$this_round} / $round_count) 
+										- 1;
+
 								}
 							}
 						}
 
+
 						if ($round_count) { 
 
 							unless ($round_score) { 
-								$bye += $round_count if $entries{"round_bye"}{$this_round}{$entry};
-								$bye += $round_count if $entries{"round_forfeit"}{$this_round}{$entry};
+
+								if (
+									$entries{"round_bye"}{$this_round}{$entry}
+									|| $entries{"round_forfeit"}{$this_round}{$entry} 
+								) { 
+
+									$bye += $round_count;
+
+								}
 							}
 
 						} elsif ($event_type eq "debate") { 
 
 							unless (defined $round_score) { 
 
-								$bye += $max_score_count{"points"}{$this_round} 
-									if $entries{"round_bye"}{$this_round}{$entry};
+								if ($byes_on_team_basis) { 
 
-								$bye += $max_score_count{"points"}{$this_round} 
-									if $entries{"round_forfeit"}{$this_round}{$entry};
+									if (
+										$entries{"round_bye"}{$this_round}{$entry}
+										|| $entries{"round_forfeit"}{$this_round}{$entry} 
+									) { 
+
+										$bye++;
+
+									}
+
+								} else { 
+
+									$bye += $max_score_count{"points"}{$this_round} 
+										if $entries{"round_bye"}{$this_round}{$entry};
+
+									$bye += $max_score_count{"points"}{$this_round} 
+										if $entries{"round_forfeit"}{$this_round}{$entry};
+
+								}
+									
 							}
 
 							unless ($bye) { 
-								$average_round_count += $max_score_count{"points"}{$this_round};
-								$count += $max_score_count{"points"}{$this_round};
-								$averages += $max_score_count{"points"}{$this_round};
+
+								if ($byes_on_team_basis) { 
+
+									$average_round_count++;
+									$count++;
+									$averages++;
+
+								} else {
+						
+									$average_round_count += $max_score_count{"points"}{$this_round};
+
+									$count += $max_score_count{"points"}{$this_round};
+
+									$averages += $max_score_count{"points"}{$this_round};
+
+								}
+
 							}
 
 						}
@@ -1429,14 +1609,26 @@
 
 							if ($tb_highlow) { 			
 
-								if ($tb_highlow == 1 || $tb_highlow == 2 || $tb_highlow == 3) {
+								if (
+									$tb_highlow == 1 
+									|| $tb_highlow == 2 
+									|| $tb_highlow == 3
+								) {
 
 									if (scalar @drop_best < $tb_highlow_count) {
+
 										push @drop_best, $points;
+
 									} else {
+
 										my $least_best = shift @drop_best;
-										push @drop_best, $least_best if $least_best >= $points;
-										push @drop_best, $points if $least_best < $points;
+
+										push @drop_best, $least_best 
+											if $least_best >= $points;
+
+										push @drop_best, $points 
+											if $least_best < $points;
+
 									}
 
 									@drop_best = sort {$a <=> $b} @drop_best;
@@ -1444,36 +1636,54 @@
 
 								#drop the worst
 
-								if ($tb_highlow == 1 || $tb_highlow == 2 || $tb_highlow == 4) {
+								if (
+									$tb_highlow == 1 
+									|| $tb_highlow == 2 
+									|| $tb_highlow == 4
+								) {
 
 									if (scalar @drop_worst < $tb_highlow_count) {
 										push @drop_worst, $points;
+
 									} else {
+
 										my $least_worst = shift @drop_worst;
-										push @drop_worst, $least_worst if $least_worst <= $points;
-										push @drop_worst, $points if $least_worst > $points;
+
+										push @drop_worst, $least_worst 
+											if $least_worst <= $points;
+
+										push @drop_worst, $points 
+											if $least_worst > $points;
+
 									}
 
 									@drop_worst = sort {$b <=> $a} @drop_worst;
 								}
+
 							}
+
 						}
 
 						$total += $round_score;
+
 						next if $bye && not defined $round_score;
+
 						$points_have_bye{$round_score} = $average_round_count;
 
-					
 					}
 
 					$bye = $bye - ($bye_min * $max_score) if $round_robin;
 
 					my $average;
 
+
 					if ($bye) { 
+
 						$average = $total / $count if $count;
+
 						$total += sprintf("%d", $average * $bye);
 						$count += $bye;
+
 					}
 
 					if ($averages) { 
@@ -1483,6 +1693,7 @@
 
 						$total += sprintf("%d", $average * $averages);
 						$count += $averages;
+
 					}
 
 					my $how_many  = $count / (scalar @rounds) if scalar @rounds;
@@ -1921,6 +2132,7 @@
 			$err .= " technically and philosophically.  Fix please!";
 		}
 
+		$m->abort if $never_redirect;
 		$m->redirect("/setup/rules/tiebreaks.mhtml?tiebreak_set_id=".$tiebreak_set->id."&err=$err") if $err;
 
 	}
@@ -1928,15 +2140,18 @@
 
 	foreach my $key (reverse sort {$a <=> $b} keys %tb_tiers) { 
 
-		@entries = sort { $entries{"tbs"}{$a."-".$key} <=> $entries{"tbs"}{$b."-".$key} } @entries 
+		@entries = sort { 
+			$entries{"tbs"}{$a."-".$key} <=> $entries{"tbs"}{$b."-".$key} 
+		} @entries 
+		if $tier_dir{$key} eq "up";
 
-			if $tier_dir{$key} eq "up";
-
-		@entries = sort { $entries{"tbs"}{$b."-".$key} <=> $entries{"tbs"}{$a."-".$key} } @entries 
-			if $tier_dir{$key} eq "down";
+		@entries = 
+			sort { 
+				$entries{"tbs"}{$b."-".$key} <=> $entries{"tbs"}{$a."-".$key} 
+		} @entries 
+		if $tier_dir{$key} eq "down";
 
 	}
-
 
 	if ($section_rank) { 
 
@@ -1946,11 +2161,15 @@
 
 			foreach my $key (reverse sort keys %tb_tiers) { 
 
-				@pan_entries = sort { $entries{"tbs"}{$a."-".$key} <=> $entries{"tbs"}{$b."-".$key}  } 
-					@pan_entries if $tier_dir{$key} eq "up";
+				@pan_entries = 
+					sort { $entries{"tbs"}{$a."-".$key} <=> $entries{"tbs"}{$b."-".$key}  } 
+					@pan_entries 
+					if $tier_dir{$key} eq "up";
 
-				@pan_entries = sort { $entries{"tbs"}{$b."-".$key} <=> $entries{"tbs"}{$a."-".$key} } 
-					@pan_entries if $tier_dir{$key} eq "down";
+				@pan_entries = 
+					sort { $entries{"tbs"}{$b."-".$key} <=> $entries{"tbs"}{$a."-".$key} } 
+					@pan_entries 
+					if $tier_dir{$key} eq "down";
 			}
 
 			my %already; 
@@ -1987,15 +2206,22 @@
 
 			}
 
-			if ($tourn_settings{"nsda_speech_method"} eq "california_2" ||
-				$tourn_settings{"nsda_speech_method"} eq "california_3") { 
+			if ($tourn_settings{"nsda_speech_method"} eq "california_2" 
+				|| $tourn_settings{"nsda_speech_method"} eq "california_3"
+				|| ($tiebreak_set->setting("tie_middle_rank"))
+				|| ($parent_set && $parent_set->setting("tie_middle_rank"))
+			) { 
+
 
 				# At NSDA districts, California plan, three way ties should get
 				# the MIDDLE ranking.
 
 				foreach my $place (sort keys %{$entries{"panel_order"}{$panel}}) { 
 
-					if (scalar @{$entries{"panel_order"}{$panel}{$place}} == 3) { 
+					if (
+						(scalar @{$entries{"panel_order"}{$panel}{$place}} == 3) 
+						|| (scalar @{$entries{"panel_order"}{$panel}{$place}} == 4) 
+					) {
 
 						@{$entries{"panel_order"}{$panel}{($place + 1)}} 
 							= @{$entries{"panel_order"}{$panel}{$place}};
@@ -2029,9 +2255,9 @@
 
 	} elsif ($round_robin) { 
 
-		foreach my $seed (keys %pods) { 
+		foreach my $pod (keys %pods) { 
 
-			my @pod_entries = @{$pods{$seed}};
+			my @pod_entries = @{$pods{$pod}};
 
 			foreach my $key (reverse sort {$a <=> $b} keys %tb_tiers) { 
 				@pod_entries = sort { $entries{"tbs"}{$a."-".$key} <=> $entries{"tbs"}{$b."-".$key}  } 
@@ -2049,13 +2275,20 @@
 				next if $already{$pe};
 				next if $entries{"dq"}{$pe};
 				$already{$pe}++;
-				$entries{"section_rank"}{$pe} = $count++;
-				$entries{"section"}{$pe} = $seed;
-				$entries{"panel"}{$pe} = $seed;
+				$entries{"pod_rank"}{$pe} = $count++;
+				$entries{"pod"}{$pe} = $pod;
 			}
+
 		}
 	
 		@entries = sort { $entries{"section_rank"}{$a} <=> $entries{"section_rank"}{$b} } @entries;
+
+		foreach my $panel (@{$rounds{"panels"}{$round->id}}) { 
+			foreach my $entry (@{$panels{"entries"}{$panel}}) { 
+				$entries{"section"}{$entry} = $panel;
+				$entries{"panel"}{$entry} = $panel;
+			}
+		}
 
 	} else { 
 
@@ -2080,6 +2313,8 @@
 	foreach my $entry (@entries) { 
 
 		next if $entries{"dq"}{$entry};
+		next unless $entries{"scores"}{$entry} && @{$entries{"scores"}{$entry}};
+
 		next if $breakout && not defined $eligible{$entry};
 
 		my $tier_string = tier_string($entry, \%tb_tiers, \%entries);
