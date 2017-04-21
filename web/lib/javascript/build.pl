@@ -20,7 +20,7 @@ use JavaScript::Minifier qw(minify);
 		'jquery.tablesorter.widgets.js',
 		'uniform.min.js',
 		'cycle.js',
-		'jgrowl.js',
+		'alertify.js',
 		'mousetrap.js',
 		'timepicker.js' );
 

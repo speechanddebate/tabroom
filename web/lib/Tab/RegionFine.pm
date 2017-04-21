@@ -6,5 +6,4 @@ Tab::RegionFine->columns(All => qw/id region tourn amount reason levied_at levie
 Tab::RegionFine->has_a(region => 'Tab::Region');
 Tab::RegionFine->has_a(levied_by => 'Tab::Person');
 
-__PACKAGE__->_register_datetimes( qw/levied_at/);
-__PACKAGE__->_register_datetimes( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/levied_at timestamp/);

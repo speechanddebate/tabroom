@@ -56,3 +56,5 @@ update event set type="policy" where type="" and name like "%CX%";
 update event set type="speech" where type="";
 
 update round set type="prelim" where type="preset";
+
+alter table sweep_rule add tiebreak_set int after sweep_set;

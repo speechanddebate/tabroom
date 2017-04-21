@@ -81,35 +81,15 @@
 	
 	my @clean_students;
 
-	my @students;
+	my @chapters;
 
-	my $wsdc = $tourn_settings{"usa_wsdc"};
+	push @chapters, $school->chapter if $school && $school->chapter;
 
-	if ($wsdc && not defined $school->chapter) { 
-
-		foreach my $entry ($school->entries) { 
-			push @students, $entry->students;
+	if ($tourn_settings{"usa_wsdc"}) { 
+		if ($school->district) { 
+			push @chapters, sort {$a->name cmp $b->name} $school->district->chapters;
 		}
-
-	} else { 
-
-		$chapter = $school->chapter if $school;
-
-		@students = 
-			sort {ucfirst $a->last cmp ucfirst $b->last} 
-			$chapter->students 
-			if $chapter;
 	}
-
-	unless ($chapter) { 
-		$m->print("No valid institution/team was found.  Please try again");
-		$m->abort();
-	}
-
-	my %student_settings = $m->comp("/funclib/chapter_student_settings.mas", chapter => $chapter);
-
-	# Check the students to be sure that they're not entered in an event
-	# restricted against this one.
 
 	my $now = DateTime->now;
 	$now->set_time_zone($tz);
@@ -123,25 +103,40 @@
 
 	my %entry_by_id = ();
 
-	my @entries = $school->entries if $school;
+	foreach my $chapter (@chapters) { 
 
-	foreach my $entry (@entries) { 
-		$entry_by_id{$entry->id} = $entry;
-	}
+		next unless $chapter;
 
-	Tab::EntryStudent->set_sql(by_chapter => "
-		select distinct entry_student.*
-		from entry_student, entry, student, event
-		where entry.id = entry_student.entry
-		and entry_student.student = student.id 
-		and student.chapter = ?
-		and entry.event = event.id
-		and event.tourn = ? 
-	");
+		my @students = 
+			sort {ucfirst $a->last cmp ucfirst $b->last} 
+			$chapter->students(retired => 0) 
+		;
 
-	my %entries_by_student = ();
+		my %student_settings = $m->comp(
+			"/funclib/chapter_student_settings.mas", 
+			chapter => $chapter
+		);
 
-	unless ($wsdc) { 
+		# Check the students to be sure that they're not entered in an event
+		# restricted against this one.
+
+		my @entries = $school->entries if $school;
+
+		foreach my $entry (@entries) { 
+			$entry_by_id{$entry->id} = $entry;
+		}
+
+		Tab::EntryStudent->set_sql(by_chapter => "
+			select distinct entry_student.*
+			from entry_student, entry, student, event
+			where entry.id = entry_student.entry
+			and entry_student.student = student.id 
+			and student.chapter = ?
+			and entry.event = event.id
+			and event.tourn = ? 
+		");
+
+		my %entries_by_student = ();
 
 		foreach my $entry_student (
 			Tab::EntryStudent->search_by_chapter($chapter->id, $tourn->id)
@@ -150,243 +145,249 @@
 			push (@{$entries_by_student{$entry_student->student->id}}, 
 				$entry_by_id{$entry_student->entry->id});
 		}
-	}
 
-	my %pattern_by_event = map {$_->id => $_->pattern} $tourn->events;
+		my %pattern_by_event = map {$_->id => $_->pattern} $tourn->events;
 
-	my %done;
-	my %district_entry;
-
-	if ($nsda_district) { 
-
-		%district_entry = $m->comp(
-			"/funclib/district_entry.mas", 
-			chapter => $chapter
-		);
-
-	}
-
-	my $count;
-
-	STUDENT:
-	foreach my $student (@students) { 
-
-		my $student_id = $student->id;
-		my $entered;
-
-		next if $done{$student_id}++;
-
-		# If this is districts, students who are not NSDA members in good
-		# standing and with linked email addresses
+		my %done;
+		my %district_entry;
 
 		if ($nsda_district) { 
 
-			next STUDENT unless $student_settings{$student_id}{"nsda_paid"};
-			next STUDENT unless $student_settings{$student_id}{"nsda_points"} > 24;
+			%district_entry = $m->comp(
+				"/funclib/district_entry.mas", 
+				chapter => $chapter
+			);
 
-			next STUDENT unless ($student_settings{$student_id}{"nsda_joined"} ne "X")
-								&& ($nsda_deadline)
-								&& ($nsda_deadline > $student_settings{$student_id}{"nsda_joined"});
+		}
 
-			next STUDENT unless $student_settings{$student_id}{"student_email"};
+		my $count;
 
-			if ($event->type eq "congress") { 
+		STUDENT:
+		foreach my $student (@students) { 
 
-				# Congress does not count against double entry caps at NSDA
-				# Districts, therefore: 
+			my $student_id = $student->id;
+			my $entered;
 
-				$entered--;  
+			next if $done{$student_id}++;
 
-				next STUDENT if $district_entry{"in_event"}{$student_id}{"HOU"};
-				next STUDENT if $district_entry{"in_event"}{$student_id}{"SEN"};
+			# If this is districts, students who are not NSDA members in good
+			# standing and with linked email addresses
 
-			} else { 
+			if ($nsda_district) { 
 
-				if ($event->abbr eq "PF" || $event->abbr eq "CX") { 
-					next STUDENT if $district_entry{"in_event"}{$student_id}{"CX"};
-					next STUDENT if $district_entry{"in_event"}{$student_id}{"PF"};
+				# Follow our own ______ rules
+				# next STUDENT unless $student_settings{$student_id}{"nsda_paid"};
+
+				next STUDENT 
+					unless $student_settings{$student_id}{"nsda_points"} > 24;
+
+				next STUDENT 
+					unless ($student_settings{$student_id}{"nsda_joined"} ne "X")
+						&& ($nsda_deadline)
+						&& ($nsda_deadline > $student_settings{$student_id}{"nsda_joined"});
+
+				next STUDENT 
+					unless $student_settings{$student_id}{"student_email"};
+
+				if ($event->type eq "congress") { 
+
+					# Congress does not count against double entry caps at NSDA
+					# Districts, therefore: 
+
+					$entered--;  
+
+					next STUDENT if $district_entry{"in_event"}{$student_id}{"HOU"};
+					next STUDENT if $district_entry{"in_event"}{$student_id}{"SEN"};
+
+				} else { 
+
+					if ($event->abbr eq "PF" || $event->abbr eq "CX") { 
+						next STUDENT if $district_entry{"in_event"}{$student_id}{"CX"};
+						next STUDENT if $district_entry{"in_event"}{$student_id}{"PF"};
+					}
+
+					next STUDENT if $district_entry{"student_count"}{$student_id} > 1;
 				}
 
-				next STUDENT if $district_entry{"student_count"}{$student_id} > 1;
 			}
 
-		}
+			if ($tourn_settings{"nsda_members_only"} && (not defined $skip_district) ) { 
 
-		if ($tourn_settings{"nsda_members_only"} && (not defined $skip_district) ) { 
-			my %student_settings = $student->all_settings;
-			next STUDENT unless $student_settings{$student_id}{"nsda_paid"};
-			next STUDENT unless $student_settings{$student_id}{"nsda_joined"};
-		}
+				next STUDENT unless $student_settings{$student_id}{"nsda_paid"};
+				next STUDENT unless $student_settings{$student_id}{"nsda_joined"};
+			}
 
-		# Students who aren't students anymore.
+			# Students who aren't students anymore.
 
-		unless ($retired) { 
+			unless ($retired) { 
 
-			next STUDENT if $student->retired;
+				next STUDENT if $student->retired;
 
-			next STUDENT unless $student->first 
-				&& $student->last;
+				next STUDENT unless $student->first 
+					&& $student->last;
 
-			next STUDENT if ($student->grad_year)
-				&& ($student->grad_year < $year)
-				&& (not defined $alumni);
-		}
+				next STUDENT if ($student->grad_year)
+					&& ($student->grad_year < $year)
+					&& (not defined $alumni);
+			}
 
-		# Class specific double entry restrictions 
-		my @entries = @{$entries_by_student{$student_id}} 
-			if $entries_by_student{$student_id};
+			# Class specific double entry restrictions 
+			my @entries = @{$entries_by_student{$student_id}} 
+				if $entries_by_student{$student_id};
 
-		# Supplementals are only open to students entered in the tournament
-		next STUDENT if $supp &! @entries;
+			# Supplementals are only open to students entered in the tournament
+			next STUDENT if $supp &! @entries;
 
-		my %pattern_scoreboard = ();
+			my %pattern_scoreboard = ();
 
-		foreach my $entry (@entries) { 
-			next unless $entry && $entry->id;
-			$pattern_scoreboard{$pattern_by_event{$entry->event->id}}++;
-		}
+			foreach my $entry (@entries) { 
+				next unless $entry && $entry->id;
+				$pattern_scoreboard{$pattern_by_event{$entry->event->id}}++;
+			}
 
-		foreach my $entry (@entries) { 
+			foreach my $entry (@entries) { 
 
-			next unless $entry && $entry->id;
+				next unless $entry && $entry->id;
 
-			my $this_event_id = $entry->event->id;
-			my $this_event = $entry->event;
+				my $this_event_id = $entry->event->id;
+				my $this_event = $entry->event;
 
-			if ($entry->active) { 
+				if ($entry->active) { 
 
-				# Am I already entered in this event?
+					# Am I already entered in this event?
 
-				next STUDENT if $this_event_id == $event->id 
-					&& not defined $enter_me_twice;
+					next STUDENT if $this_event_id == $event->id 
+						&& not defined $enter_me_twice;
 
-				# Am I already entered in the tournament and in off the
-				# waitlist? 
+					# Am I already entered in the tournament and in off the
+					# waitlist? 
 
-				$entered++;
+					$entered++;
 
-				# No double entry permitted if you're entered in this pattern
-				# and that's not ok
+					# No double entry permitted if you're entered in this pattern
+					# and that's not ok
 
-				next STUDENT if $pattern && $pattern->type == 2 && $entered > 0;  
+					next STUDENT if $pattern && $pattern->type == 2 && $entered > 0;  
 
-				# No double entry with a mutually-excluded group
+					# No double entry with a mutually-excluded group
 
-				next STUDENT if $pattern 
-					&& $excludeds{$pattern->id}
-					&& $this_event->pattern 
-					&& $excludeds{$pattern->id}{$this_event->pattern->id};
+					next STUDENT if $pattern 
+						&& $excludeds{$pattern->id}
+						&& $this_event->pattern 
+						&& $excludeds{$pattern->id}{$this_event->pattern->id};
 
 
-				if ($pattern && $excludeds{$pattern->id."_sameonly"}) { 
+					if ($pattern && $excludeds{$pattern->id."_sameonly"}) { 
 
-					my $search_pattern = $excludeds{$pattern->id."_sameonly"}.",".$pattern->id;
+						my $search_pattern = $excludeds{$pattern->id."_sameonly"}.",".$pattern->id;
 
-					# This implements the nonsense around the only_one exclusions I have to
-					# Pull a Bruschke on this one and define this one hard coded instead of
-					# using the proper calls because the SQL injection guards won't let me auto
-					# define a self expanding array. 
+						# This implements the nonsense around the only_one exclusions I have to
+						# Pull a Bruschke on this one and define this one hard coded instead of
+						# using the proper calls because the SQL injection guards won't let me auto
+						# define a self expanding array. 
 
-					# I hate computers. 
+						# I hate computers. 
 
-					Tab::Student->set_sql("clash_on_only_one" => "
+						Tab::Student->set_sql("clash_on_only_one" => "
 
-						select student.*
+							select student.*
 
-						from student, student as me,  
-							entry_student, entry_student as my_es, entry_student as other_es,
-							entry, entry as my_entry, entry as other_entry,
-							event as my_event, event as other_event
+							from student, student as me,  
+								entry_student, entry_student as my_es, entry_student as other_es,
+								entry, entry as my_entry, entry as other_entry,
+								event as my_event, event as other_event
 
-						where entry.event = ?
+							where entry.event = ?
 
-							and me.id = ? 
-							and my_es.student = me.id
-							and my_es.entry = my_entry.id
-							and my_es.entry != entry.id
-							and my_entry.event = my_event.id
-							and my_event.pattern in (".$search_pattern.")
+								and me.id = ? 
+								and my_es.student = me.id
+								and my_es.entry = my_entry.id
+								and my_es.entry != entry.id
+								and my_entry.event = my_event.id
+								and my_event.pattern in (".$search_pattern.")
 
-						and student.id != me.id
+							and student.id != me.id
 
-							and student.id = entry_student.student
-							and entry_student.entry = entry.id
-							and student.id = other_es.student
-							and other_es.entry = other_entry.id
-							and other_entry.id != entry.id
-							and other_entry.event = other_event.id
-							and my_event.pattern in (".$search_pattern.")
-					");
+								and student.id = entry_student.student
+								and entry_student.entry = entry.id
+								and student.id = other_es.student
+								and other_es.entry = other_entry.id
+								and other_entry.id != entry.id
+								and other_entry.event = other_event.id
+								and my_event.pattern in (".$search_pattern.")
+						");
 
 
-					my $other_student = Tab::Student->search_clash_on_only_one(
-						$event->id, 
-						$student_id, 
-					)->first;
+						my $other_student = Tab::Student->search_clash_on_only_one(
+							$event->id, 
+							$student_id, 
+						)->first;
 
-					next STUDENT if $other_student;
+						next STUDENT if $other_student;
 
-				}
+					}
 
-				if ($pattern_by_event{$this_event_id}) { 
+					if ($pattern_by_event{$this_event_id}) { 
 
-					# No double entry permitted if you're already entered and
-					# the new pattern forbids double entry
+						# No double entry permitted if you're already entered and
+						# the new pattern forbids double entry
 
-					next STUDENT if $pattern_by_event{$this_event_id}->type == 2;
+						next STUDENT if $pattern_by_event{$this_event_id}->type == 2;
 
-					# No double entry within the pattern
+						# No double entry within the pattern
 
-					next STUDENT if 
-						$pattern_by_event{$this_event_id}->type == 1 
-						&& (
+						next STUDENT if 
+							$pattern_by_event{$this_event_id}->type == 1 
+							&& (
+								$pattern 
+								&& $pattern_by_event{$this_event_id}->id == $pattern->id
+							);  
+
+						# No double entry beyond a limit within the pattern
+
+						next STUDENT if 
+							$pattern_by_event{$this_event_id}->type == 3
+							&& (
+								$pattern 
+								&& $pattern_by_event{$this_event_id}->id == $pattern->id 
+								&& $pattern_scoreboard{$pattern->id} >= $pattern->max
+							); 
+
+						# No double entry if the other pattern excludes mine
+
+						next STUDENT if ( 
 							$pattern 
-							&& $pattern_by_event{$this_event_id}->id == $pattern->id
-						);  
+							&& $excludeds{$pattern_by_event{$this_event_id}}
+							&& $excludeds{$pattern_by_event{$this_event_id}}{$pattern->id} == 1
+						);
 
-					# No double entry beyond a limit within the pattern
-
-					next STUDENT if 
-						$pattern_by_event{$this_event_id}->type == 3
-						&& (
-							$pattern 
-							&& $pattern_by_event{$this_event_id}->id == $pattern->id 
-							&& $pattern_scoreboard{$pattern->id} >= $pattern->max
-						); 
-
-					# No double entry if the other pattern excludes mine
-
-					next STUDENT if ( 
-						$pattern 
-						&& $excludeds{$pattern_by_event{$this_event_id}}
-						&& $excludeds{$pattern_by_event{$this_event_id}}{$pattern->id} == 1
-					);
-
+					}
 				}
 			}
-		}
 
-		# Unlimited double entry
+			# Unlimited double entry
 
-		if ($double_entry eq "unlimited") { 
-			push (@clean_students, $student);
-			next STUDENT;
-		}
+			if ($double_entry eq "unlimited") { 
+				push (@clean_students, $student);
+				next STUDENT;
+			}
 
-		# No double entry
-		next STUDENT if ($entered > 0 && $double_entry eq "none"); 
+			# No double entry
+			next STUDENT if ($entered > 0 && $double_entry eq "none"); 
 
-		# One event double entry
-		if (
-			(not defined $nsda_district) 
-			|| ( $nsda_district && $event->type ne "congress")
-		) { 
+			# One event double entry
+			if (
+				(not defined $nsda_district) 
+				|| ( $nsda_district && $event->type ne "congress")
+			) { 
+			
+				next STUDENT if ($double_entry eq "max_events" && $entered >= $double_max);
+
+			}
 		
-			next STUDENT if ($double_entry eq "max_events" && $entered >= $double_max);
+			push (@clean_students, $student);
+		}	
 
-		}
-	
-		push (@clean_students, $student);
 	}	
 
 	return @clean_students;

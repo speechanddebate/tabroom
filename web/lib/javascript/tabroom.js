@@ -1,3 +1,26 @@
+/* confirmation dialog */
+
+	function confirmAction(link, message) { 
+
+		alertify.confirm(
+			"Are you sure?",
+			message,
+			function(event) { 
+				if (event) { 
+					window.location.href = link.href;
+				}
+			},
+			function(event) { 
+				if (event) { 
+					alertify.error("Canceled");
+				}
+			}
+		);
+
+		return false;
+
+	}
+
 
 /* Respond to switch calls */
 
@@ -32,22 +55,18 @@
 
 				$('table').trigger('applyWidgets');
 
+				if (data.reply) { 
+					$(".replybucket").text(data.reply);
+				}
+
 				if (data.error) { 
 
-					$.jGrowl(data.message, { 
-						header   : 'Oops!',
-						life     : 4000,
-						position : 'top-center',
-						theme    : "warning"
-					});
-
+					alertify.error(data.message);
+					
 				} else { 
 
-					$.jGrowl(data.message, { 
-						header   : 'Result',
-						life     : 1000,
-						position : 'top-center'
-					});
+					alertify.notify(data.message, "custom");
+
 				}
 
 			}
@@ -71,11 +90,14 @@
 		$(".menu").find(".row:even").addClass("even");
 		$(".menu").find(".row:odd").addClass("odd");
 
+		$(".sidenote").find(".row:even").removeClass("odd");
+		$(".sidenote").find(".row:odd").removeClass("even");
 		$(".sidenote").find(".row:even").addClass("even");
 		$(".sidenote").find(".row:odd").addClass("odd");
 
 		$("table").find(".row:even").removeClass("odd");
 		$("table").find(".row:even").addClass("even");
+
 		$("table").find(".row:odd").removeClass("even");
 		$("table").find(".row:odd").addClass("odd");
 
@@ -270,10 +292,6 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 	var minPoints = $(input).attr("min");
 	var maxPoints = $(input).attr("max");
 	var pointStep = $(input).attr("step");
-
-	console.log("Min points are "+minPoints);
-	console.log("Max points are "+maxPoints);
-	console.log("Point step is "+pointStep);
 
 	if (nototal) { 
 		totalPoints = function() { 

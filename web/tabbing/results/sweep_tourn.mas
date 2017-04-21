@@ -6,15 +6,23 @@
 
 	my $novice_only;
 	my %skip_round;
+	my $prelim_seeds;
 
 	return unless $sweep_set && $sweep_set->id;
 
-	foreach my $rule ($sweep_set->rules) { 
+	my @rules = $sweep_set->rules;
+
+	foreach my $rule (@rules) { 
+
 		$novice_only++ 
 			if $rule->tag eq "novice_only" 
 			&& $rule->value == 1;
 
-		$skip_round{$rule->value}++;
+		$skip_round{$rule->value}++
+			if $rule->tag eq "ignore_round";
+
+		$prelim_seeds++ if $rule->tag eq "prelim_seed";
+
 	}
 
 	my @all_events = $sweep_set->events;
@@ -72,8 +80,8 @@
 
 		my @manual_sweeps = $m->comp(
 			"/funclib/event_entry_settings.mas", 
-				event => $event, 
-				tag => "sweeps"
+				event => $event,
+				tag   => "sweeps"
 			);
 
 		foreach my $manual (@manual_sweeps) { 
@@ -83,14 +91,14 @@
 
 
 	my $sth = $dbh->prepare("
-		select value.id, entry.id, event.id, 
+		select score.id, entry.id, event.id, 
 			round.type, round.id, 
-			value.tag, value.value, 
+			score.tag, score.value, 
 			panel.id, 
 			student.novice
 
-		from score value, ballot, panel, round, event, entry, entry_student, student
-		where value.ballot = ballot.id
+		from score, ballot, panel, round, event, entry, entry_student, student
+		where score.ballot = ballot.id
 		and ballot.panel = panel.id
 		and panel.round = round.id
 		and round.event = event.id
@@ -98,10 +106,18 @@
 		and ballot.entry = entry.id
 		and entry.active = 1
 		and entry.dq != 1
+
+		and not exists (
+			select entry_setting.id
+			from entry_setting
+			where entry_setting.entry = entry.id
+			and entry_setting.tag = 'exclude_from_sweeps'
+			and entry_setting.value > 0
+		)
 		
 		and entry.id = entry_student.entry
 		and entry_student.student = student.id
-		group by value.id
+		group by score.id
 		order by event.id, round.name
 	");
 
@@ -132,6 +148,9 @@
 		next unless $event_include{$event};
 		next if $skip_round{$round};
 
+		$entry_novice{$entry} = $novice;
+		next if $novice_only && $novice < 1;
+
 		push @scores, $id;
 		push @{$event_scores{$event}}, $id;
 		push @{$entry_scores{$entry}}, $id;
@@ -154,7 +173,7 @@
 		$score_round{$id} = $round;
 		$score_event{$id} = $event;
 		$score_novice{$id} = $novice;
-		$entry_novice{$entry} = $novice;
+
 	}
 
 
@@ -168,6 +187,14 @@
 		and ballot.entry = entry.id
 		and entry.active = 1
 		and entry.dq != 1
+
+		and not exists (
+			select entry_setting.id
+			from entry_setting
+			where entry_setting.entry = entry.id
+			and entry_setting.tag = 'exclude_from_sweeps'
+			and entry_setting.value > 0
+		)
 		
 		group by ballot.id
 		order by event.id, round.name
@@ -186,6 +213,8 @@
 		next if $skip_round{$round};
 		next unless $event_include{$event};
 		next unless $panel_bye || $ballot_bye;
+
+		next if $novice_only && $entry_novice{$entry};
 
 		$entry_byes{$entry}++;
 
@@ -211,12 +240,39 @@
 	my $places_done;
 	my $placement_done;
 
-	foreach my $rule ($sweep_set->rules) { 
+	foreach my $rule (@rules) { 
 		$places{$rule->place} = $rule->value 
 			if $rule->place && $rule->tag ne "cume";
 	}
 
-	foreach my $rule ($sweep_set->rules) { 
+	my %prelim_seeding = ();
+
+	if ($prelim_seeds) { 
+
+		my $last_prelim;
+
+		foreach my $event (@events) { 
+
+			foreach my $round ($event->rounds) { 
+				next if $round->type eq "elim";
+				next if $round->type eq "final";
+				$last_prelim = $round if (not defined $last_prelim);
+				$last_prelim = $round if $round->name > $last_prelim->name;
+			}
+
+			my (@results) = $m->comp(
+				"/tabbing/results/order_entries.mas", 
+				round => $last_prelim
+			); 
+
+			my $fullref = pop @results if @results;
+
+			$prelim_seeding{$event->id} = $fullref->{"by_place"}
+
+		}
+	}
+
+	foreach my $rule (@rules) { 
 
 		if ($rule->tag eq "points_per") {
 
@@ -231,9 +287,11 @@
 				foreach my $score (@{$entry_scores{$entry}}) { 
 					
 					unless ( (not defined $count) || $count eq "all") { 
+
 						next if $score_type{$score} eq "prelim" && $count ne "prelim";
 						next if $score_type{$score} eq "elim" && $count ne "elim";
 						next if $score_type{$score} eq "final" && $count ne "final";
+
 					}
 
 					next if $novice_only && not defined $score_novice{$score};
@@ -283,6 +341,7 @@
 				my @panels;
 
 				foreach my $score (@{$entry_scores{$entry}}) { 
+
 					next if $score_type{$score} ne "elim";
 					next if $novice_only && not defined $score_novice{$score};
 					push @panels, $score_panel{$score};
@@ -334,25 +393,25 @@
 				next if $novice_only && not defined $score_novice{$score};
 				next unless $score_tag{$score} eq "rank";
 		
-				my $pts;
+				my $points;
 
 				if ($dropworst && $entry_worst{$entry} < $score_value{$score}) {
 
 					if ($entry_worst{$entry}) { 
-						$pts = 6 - $entry_worst{$entry};
-						$pts = 1 if $pts < 1;
+						$points = 6 - $entry_worst{$entry};
+						$points = 1 if $points < 1;
 						$entry_worst{$entry} = $score_value{$score};
 					} else { 
-						$pts = 6 - $score_value{$score};
-						$pts = 1 if $pts < 1;
+						$points = 6 - $score_value{$score};
+						$points = 1 if $points < 1;
 					}
 
 				} else { 
-					$pts = 6 - $score_value{$score};
-					$pts = 1 if $pts < 1;
+					$points = 6 - $score_value{$score};
+					$points = 1 if $points < 1;
 				}
 
-				$entry_points{$entry} += $pts;
+				$entry_points{$entry} += $points;
 			}
 		}
 		
@@ -378,6 +437,36 @@
 
 		}
 
+		if ($rule->tag eq "prelim_seed") { 
+
+			my $limit = $rule->place;
+			my $points = $rule->value;
+			my %done;
+			
+			foreach my $event (@events) { 
+
+				next unless $event && $event->id;
+
+				foreach my $place (
+					sort {$a <=> $b} 
+					keys %{$prelim_seeding{$event->id} }
+				)  {
+
+					next if $place > $limit;
+
+					foreach my $entry_id (@{$prelim_seeding{$event->id}{$place}}) { 
+
+						next if $done{$entry_id}++;
+							
+						$entry_points{$entry_id} += $points;
+
+					}
+
+				}
+			}
+
+		}
+
 		if ($rule->tag eq "rev_per_place") { 
 
 			my $type = $rule->count;
@@ -388,12 +477,14 @@
 			
 				foreach my $round ($event->rounds) { 
 
+					next if $skip_round{$round->id};
 					next unless $round->type eq $type;
 
-					my %panel_yes = map {$_->id => 1} $round->panels;
 
 					my ($entries_ref, $tbs_ref, $desc_ref, $forfeit_ref) 
-						= $m->comp("/tabbing/results/order_entries.mas", round => $round); 
+						= $m->comp("/tabbing/results/order_entries.mas", 
+						round => $round
+					); 
 
 					my %panel_place;
 
@@ -406,16 +497,167 @@
 							my $panel = $entry_round_panel{$entry."-".$round->id};
 							$panel_place{$panel}++;
 							
-							my $pts = 6 - $panel_place{$panel};
-							$pts = 1 if $pts < 1;
+							my $points = 6 - $panel_place{$panel};
+							$points = 1 if $points < 1;
 
-							$entry_points{$entry} += $pts;
+							$entry_points{$entry} += $points;
 						}
 
 					}
 				}
 			}
 		}
+
+		if ($rule->tag eq "rev_composite" && $rule->tiebreak_set) { 
+
+			my $type = $rule->count;
+			my $tiebreak_set = $rule->tiebreak_set;
+
+			foreach my $event (@events) { 
+
+				next unless $event && $event->id;
+			
+				foreach my $round ($event->rounds) { 
+					
+					next if $skip_round{$round->id};
+
+					next unless ($round->type eq $type) 
+						|| $type eq "all";
+
+					my @results = $m->comp(
+						"/tabbing/results/order_entries.mas", 
+							round        => $round,
+							tiebreak_set => $tiebreak_set,
+							section_rank => 1
+					); 
+
+					my $entries_ref = pop @results;
+
+					my %panel_place;
+
+					foreach my $entry_id (sort {$a <=> $b} keys %{$entries_ref->{"section_rank"}}) {
+
+						my $rank = $entries_ref->{"section_rank"}{$entry_id};
+
+						next unless $rank;
+
+						my $points = 6 - $rank;
+						$points = 1 if $points < 1;
+
+						$entry_points{$entry_id}  += $points;
+
+					}
+				}
+			}
+		}
+
+		if ($rule->tag eq "percentage" && $rule->tiebreak_set) { 
+
+			my $type = $rule->count;
+
+			my $tiebreak_set = $rule->tiebreak_set;
+
+			my $points = $rule->value;
+
+			foreach my $event (@events) { 
+
+				next unless $event && $event->id;
+
+				my @rounds;
+
+				if ($type eq "all") { 
+
+					foreach my $round ($event->rounds) { 
+						next if $skip_round{$round->id};
+						push @rounds, $round;
+					}
+
+				} elsif ($type eq "prelim") { 
+
+					foreach my $round ($event->rounds) { 
+						next if $skip_round{$round->id};
+						push @rounds, $round if (
+							$round->type ne "elim" 
+							&& $round->type ne "final"
+						);
+					}
+
+				} elsif ($type eq "elim") { 
+
+					foreach my $round ($event->rounds) { 
+						next if $skip_round{$round->id};
+
+						push @rounds, $round 
+							if $round->type eq "elim";
+					}
+
+				} elsif ($type eq "final") { 
+
+					foreach my $round ($event->rounds) { 
+						next if $skip_round{$round->id};
+						push @rounds, $round 
+							if $round->type eq "final";
+					}
+
+				} elsif ($type eq "last_prelim") { 
+
+					my $last_prelim;
+
+					foreach my $round ($event->rounds) { 
+
+						next if $skip_round{$round->id};
+						next if $round->type eq "elim";
+						next if $round->type eq "final";
+
+						$last_prelim = $round 
+							if (not defined $last_prelim);
+
+						$last_prelim = $round 
+							if $last_prelim 
+							&& $last_prelim->name < $round->name;
+					}
+
+					push @rounds, $last_prelim;
+
+				}
+
+				foreach my $round (@rounds) { 
+
+					my @results = $m->comp(
+						"/tabbing/results/order_entries.mas", 
+							round        => $round,
+							tiebreak_set => $tiebreak_set
+					); 
+
+					my $entries_ref = pop @results;
+
+					my $entries_count = scalar( keys %{$entries_ref->{"by_place"}} );
+
+					my $threshold = ceil($rule->place * .01 * $entries_count);
+
+					foreach my $place (
+						sort {$a <=> $b} keys %{$entries_ref->{"by_place"}}
+					) { 
+
+						next if $place > $threshold;
+
+						if ($entries_ref->{"by_place"}{$place}) { 
+
+							foreach my $entry_id (@{$entries_ref->{"by_place"}{$place}}) {
+
+								$entry_points{$entry_id}  += $points;
+							}
+
+						}
+
+					}
+
+				}
+
+			}
+
+		}
+
 
 		if (
 			$rule->tag eq "rev_per_overall_place" 
@@ -431,7 +673,12 @@
 
 					my @rounds = sort {$b->name <=> $a->name} $event->rounds;
 
-					my $final = shift @rounds;
+					my $final;
+
+					while (@rounds && (not defined $final)) { 
+						$final = shift @rounds;
+						undef $final if $skip_round{$final->id};
+					}
 
 					next unless $final;
 
@@ -466,8 +713,6 @@
 							next if $novice_only && not defined $entry_novice{$entry};
 							$entry_placement{$entry} = $key;
 
-							Tab::debuglog("Entry $entry has placement ".$entry_placement{$entry}) 
-								if $event->id == 60658;
 							$max_key++;
 							$limit--;
 							$done{$entry}++;
@@ -534,9 +779,9 @@
 
 				foreach my $entry (@entries) { 
 					next unless $entry_placement{$entry};
-					my $pts = 6 - $entry_placement{$entry};
-					$pts = 0 unless $pts;
-					$entry_points{$entry} += $pts;
+					my $points = 6 - $entry_placement{$entry};
+					$points = 0 unless $points;
+					$entry_points{$entry} += $points;
 				}
 
 			}
@@ -554,9 +799,6 @@
 			if ($rule->tag eq "nsda_place") { 
 			
 				foreach my $entry (@entries) { 
-					
-					Tab::debuglog("COUNTING Entry $entry has placement ".$entry_placement{$entry}) 
-						if $entry_event{$entry} == 60658;
 
 					next unless $entry_placement{$entry};
 					next unless $entry_placement{$entry} < 7;
@@ -580,17 +822,17 @@
 						$baseline_score-- if $field_size < 38;
 					}
 
-					my $pts = 0;
+					my $points = 0;
 					
 					if (
 						($entry_placement{$entry} < 7)
 						&& ($entry_placement{$entry} > 0)
 					) { 
 					
-						$pts = $baseline_score - $entry_placement{$entry};
+						$points = $baseline_score - $entry_placement{$entry};
 					}
 
-					$entry_points{$entry} += $pts;
+					$entry_points{$entry} += $points;
 				}
 
 			}
