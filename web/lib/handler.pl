@@ -4,8 +4,8 @@ package Tab::Mason;
 use lib "/www/tabroom/web/lib";
 
 #Alternative locations
-use lib "/www/testing.tabroom.com/web/lib";
-#use lib "/www/backup.tabroom.com/web/lib";
+#use lib "/www/testing.tabroom.com/web/lib";
+use lib "/www/backup.tabroom.com/web/lib";
 use lib "/www/staging.tabroom.com/web/lib";
 
 use strict;
@@ -53,10 +53,7 @@ use Tab::Circuit;
 use Tab::CircuitSetting;
 use Tab::CircuitMembership;
 use Tab::Concession;
-use Tab::ConcessionType;
-use Tab::ConcessionOption;
 use Tab::ConcessionPurchase;
-use Tab::ConcessionPurchaseOption;
 use Tab::Email;
 use Tab::Entry;
 use Tab::EntrySetting;
