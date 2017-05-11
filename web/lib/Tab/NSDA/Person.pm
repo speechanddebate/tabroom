@@ -6,6 +6,6 @@ Tab::NSDA::Person->columns(Essential => qw/
 				uemail cell grad_yr graduated paid_status ustatus 
 				uapproved total_pts/);
 
-Tab::NSDA::Person->columns(TEMP => qw/middle_joined high_joined/);
+Tab::NSDA::Person->columns(TEMP => qw/middle_joined high_joined school_id/);
 
 

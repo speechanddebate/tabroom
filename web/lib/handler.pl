@@ -1,8 +1,7 @@
 #!/usr/bin/perl -d
-
 package Tab::Mason;
-use lib "/www/tabroom/web/lib";
 
+use lib "/www/tabroom/web/lib";
 #Alternative locations
 #use lib "/www/testing.tabroom.com/web/lib";
 use lib "/www/backup.tabroom.com/web/lib";
