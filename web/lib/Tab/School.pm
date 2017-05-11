@@ -1,7 +1,7 @@
 package Tab::School;
 use base 'Tab::DBI';
 Tab::School->table('school');
-Tab::School->columns(Essential => qw/ id name code onsite tourn chapter region district timestamp /);
+Tab::School->columns(Essential => qw/ id name code onsite tourn chapter state region district timestamp /);
 
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_a(chapter => 'Tab::Chapter');

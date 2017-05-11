@@ -2,8 +2,9 @@
 	$tourn
 	$tourn_settings
 	$person
-	$event_id  => undef
-	$chosen_id => undef
+	$event_id    => undef
+	$chosen_id   => undef
+	$category_id => undef
 </%args>
 <%init>
 
@@ -12,6 +13,7 @@
 	use Tab::NSDA::EventCategory;
 	use Tab::NSDA::NationalsDBI;
 	use Tab::NSDA::MemberSchool;
+	use Tab::NSDA::Person;
 
 	my $nats_tourn_id = $tourn_settings->{"nsda_tourn_id"};
 
@@ -27,7 +29,7 @@
 		select event_id, tourn_id, abbr2, abbr, 
 				name, type, cat_id, sub_cat_id,
 				fee, isSupp, isCons
-			from nats_events
+			from nationals.nats_events
 			where nats_events.tourn_id = ?
 			order by abbr2
 	');
@@ -77,7 +79,9 @@
 
 			$events{$event_id}{"type"} = "congress";
 
-		} elsif ($type == 7) {  # THIS OFFENDS ME SO MUCH
+		} elsif ($type == 7) {  
+		
+			# THIS OFFENDS ME SO MUCH
 
 			$events{$event_id}{"type"} = "speech";
 			$events{$event_id}{"min_entry"} = "2";
@@ -85,7 +89,6 @@
 
 		}
 	
-
 	}   
 
 	my %entries;
@@ -124,6 +127,7 @@
 	}
 
 	# The need for this offends me
+
 	my $wsdc_entry_sth = $dbh->prepare('
 		select ws.team, 
 		entry.entry_id, entry.event_id, entry.school_id, entry.student_id, entry.status,
@@ -157,33 +161,127 @@
 		}
 
 		$entries{$team_key}{"student_school"}{$student_id} = $school_id;
+		$entries{$team_key}{"code"} = $team_id;
 
 		push @{$entries{$team_key}{"students"}}, $student_id if $student_id;
 
 	}
 
+	my %categories; 
+
+	my $category_sth = $dbh->prepare('
+		select code, descr, is_hidden
+			from nationals.judgetypes
+			order by descr
+	');
+
+    $category_sth->execute();
+
+	while( my ( $code, $descr, $hidden) = $category_sth->fetchrow_array() ) { 
+
+		# I cannot FUCKING believe that a letter code is used as a primary key
+		# here.
+
+		$categories{$code}{"code"} = $code;
+
+		$categories{$code}{"name"} = $descr;
+	}   
+
+	my %judges;
+
+	my $judges_sth = $dbh->prepare('
+		select                 
+			judge.judge_id, judge.school_id, judge.ualt_id,                      
+			judge.rounds, judge.cd_pref, judge.parli_ok, judge.conflicts,                     
+			judge.nfl_type, judge.name,
+			person.ufname, person.umname, person.ulname, person.uemail,
+			ifnull((SELECT max(diamonds) FROM nfl.NEW_USERS_TO_DEGREES nd                      
+				inner join nfl.degree_levels dl                          
+					ON nd.degree_id  = dl.degree_id                      
+					WHERE ualt_id = judge.ualt_id ),0) as diamonds                     
+				from judges judge                     
+				left join nfl.NEW_USERS person on person.ualt_id = judge.ualt_id                     
+				and judge.tourn_id = ?
+	');
+
+	$judges_sth->execute($nats_tourn_id);
+
+	while ( 
+		my ( 
+			$judge_id, $school_id, $ualt_id,                      
+			$rounds, $congress_plz, $parli, $conflicts,                     
+			$nfl_type, $name,
+			$first, $middle, $last, $email,
+			$diamonds
+		) 
+		= $judges_sth->fetchrow_array() 
+	) { 
+
+		$judges{$judge_id}{"school"} = $school_id;
+		$judges{$judge_id}{"type"} = $nfl_type;
+
+		$judges{$judge_id}{"diamonds"} = $diamonds;
+
+		unless ($first) { 
+			my @names = split (/\ /, $name);
+			$first = shift @names;
+			$last = pop @names;
+			$middle = join (' ', @names);
+		}
+
+		$judges{$judge_id}{"email"} = $email;
+		$judges{$judge_id}{"first"} = $first;
+		$judges{$judge_id}{"middle"} = $middle;
+		$judges{$judge_id}{"last"} = $last;
+		$judges{$judge_id}{"ualt_id"} = $ualt_id;
+
+		$judges{$judge_id}{"rounds"} = $rounds;
+
+		$judges{$judge_id}{"notes"} = $conflicts;
+		$judges{$judge_id}{"preferred"} = $congress_plz;
+
+		$judges{$judge_id}{"parli"} = $parli;
+
+		push @{$judges{"school"}{$school_id}}, $judge_id;
+
+		push @{$categories{$nfl_type}{"judges"}}, $judge_id;
+
+		$categories{$nfl_type}{"count"}++;
+
+	}
+
+	# This coach1 coach2 etc is not my fucking fault
+
 	my $coaches_sth = $dbh->prepare('
         select 
-            entry_slots.entry_id, ac.student_id, ac.coach1_id, ac.coach2_id, ac.coach3_id
-		from award_coaches ac, entry_slots
-		where entry_slots.event_id = ? 
-		and (
-			entry_slots.student_id = ac.student_id
-				or 
-			entry_slots.partner_id = ac.student_id
-		)
+            es.entry_id, ac.student_id, 
+				ac.coach1_id, coach1.ufname, coach1.umname, coach1.ulname,
+				ac.coach2_id, coach2.ufname, coach2.umname, coach2.ulname,
+				ac.coach3_id, coach3.ufname, coach3.umname, coach3.ulname
+		from entry_slots es
+		inner join award_coaches ac on (ac.student_id = es.student_id or es.partner_id = ac.student_id)
+		left join points.NEW_USERS as coach1 on coach1.ualt_id = ac.coach1_id
+		left join points.NEW_USERS as coach2 on coach2.ualt_id = ac.coach2_id
+		left join points.NEW_USERS as coach3 on coach3.ualt_id = ac.coach3_id
+
+		where es.event_id = ? 
 	');
 
 	my %school_settings = $m->comp(
 		"/funclib/school_settings.mas", 
-		tourn => $tourn
+		tourn => $tourn,
+		value => 1
 	);
 
-	my %school_nsda_id = map {$school_settings{$_->id}{"nsda_id"}->value => $_} $tourn->schools;
+	my %school_nsda_id = map {$school_settings{$_->id}{"nsda_id"} => $_} $tourn->schools;
 
 	if ($event_id && $chosen_id) { 
 
 		my $event = Tab::Event->retrieve($event_id);
+
+		$m->print("Importing entries into ".$event->name." from ".$events{$chosen_id}{"name"}."</br>");
+
+		$m->flush_buffer();
 
 		$event->setting("level", "open");
 		$event->setting("code_style", "nsda_nats");
@@ -228,15 +326,14 @@
 			$event->setting("nsda_event_category", $category->id) if $category;
 		}
 
-		my %already = map {$_->id => $_} $event->entries;
-
 		my %settings = $m->comp(
 			"/funclib/event_entry_settings.mas", 
 				event => $event,
-				all   => 1
+				all   => 1,
+				value => 1
 		);
 
-		my %already_nsda_id = map {$settings{$_->id}{"nsda_id"}->value => $_} $event->entries;
+		my %already_nsda_id = map {$settings{$_->id}{"nsda_id"} => $_} $event->entries;
 
 		$coaches_sth->execute($chosen_id);
 
@@ -244,7 +341,10 @@
 
 		while ( 
 			my ( 
-				$entry_id, $student_id, $coach1_id, $coach2_id, $coach3_id
+				$entry_id, $student_id, 
+					$coach1_id, $coach1_first, $coach1_middle, $coach1_last,
+					$coach2_id, $coach2_first, $coach2_middle, $coach2_last,
+					$coach3_id, $coach3_first, $coach3_middle, $coach3_last,
 			) 
 			= $coaches_sth->fetchrow_array() 
 		) { 
@@ -253,21 +353,51 @@
 
 			$entries{$entry_id}{"points_coach"} = $coach1_id if $coach1_id;
 
-			push @{$coaches{$entry_id}}, $coach1_id if $coach1_id;
-			push @{$coaches{$entry_id}}, $coach2_id if $coach2_id;
-			push @{$coaches{$entry_id}}, $coach3_id if $coach3_id;
+			push @{$entries{$entry_id}{"coaches"}}, $coach1_id if $coach1_id;
+			push @{$entries{$entry_id}{"coaches"}}, $coach2_id if $coach2_id;
+			push @{$entries{$entry_id}{"coaches"}}, $coach3_id if $coach3_id;
+
+			$coaches{"for"}{$student_id} = $coach1_id;
+
+			$coaches{$coach1_id}{"name"} = $coach1_first." ".$coach1_middle." ".$coach1_last if $coach1_id;
+			$coaches{$coach1_id}{"name"} =~ s/  / /g;
+
+			$coaches{$coach2_id}{"name"} = $coach2_first." ".$coach2_middle." ".$coach2_last if $coach2_id;
+			$coaches{$coach2_id}{"name"} =~ s/  / /g;
+
+			$coaches{$coach3_id}{"name"} = $coach3_first." ".$coach3_middle." ".$coach3_last if $coach3_id;
+			$coaches{$coach3_id}{"name"} =~ s/  / /g;
+
 		}
 
 		if ($event->type ne "wsdc") { 
 
 			foreach my $nsda_entry (@{$events{$chosen_id}{"entries"}}) { 
+		
+				$m->print("Importing entry $nsda_entry");
+				$m->flush_buffer();
 
 				if ($already_nsda_id{$nsda_entry}) { 
 
 					my $already = $already_nsda_id{$nsda_entry};
-					my $coaches = join(",", @{$coaches{$nsda_entry}}) if $coaches{$nsda_entry};
 
-					$already->setting("nsda_awards_coaches", $coaches);
+					my $coach_ids;
+					my $coach_names;
+
+					foreach my $coach_id (@{$entries{$nsda_entry}{"coaches"}}) { 
+
+						$coach_ids .= "," if $coach_ids;
+						$coach_names .= ", " if $coach_names;
+
+						$coach_ids .= $coach_id;
+						$coach_names .= $coaches{$coach_id}{"name"};
+
+					}
+
+					$already->setting("nsda_awards_coaches", $coach_ids);
+
+					$already->setting("nsda_awards_coach_names", 'text', $coach_names);
+
 					$already->setting("nsda_points_coach", $entries{$nsda_entry}{"points_coach"});
 		
 					my %shoulds = map {$_ => 1} @{$entries{$nsda_entry}{"students"}};
@@ -348,7 +478,6 @@
 
 					my $school = $school_nsda_id{$nsda_school_id};
 
-
 					my $chapter;
 
 					$chapter = $school->chapter if $school;
@@ -373,15 +502,25 @@
 
 						}
 
+						my $district_id = $chapter->district->id 
+							if $chapter->district;
+
+						unless ($district_id) { 
+							$chapter->district($nsda_district_id);
+							$chapter->update;
+							$district_id = $nsda_district_id;
+						}
+
 						if ($chapter) { 
 
-							my $district_id = $chapter->district->id if $chapter->district;
+							$school = Tab::School->search(
+								chapter => $chapter->id,
+								tourn   => $tourn->id
+							)->first;
 
-							unless ($district_id) { 
-								$chapter->district($nsda_district_id);
-								$chapter->update;
-								$district_id = $nsda_district_id;
-							}
+						}
+
+						unless ($school) { 
 
 							$school = Tab::School->create({
 								tourn    => $tourn->id,
@@ -390,14 +529,15 @@
 								district => $district_id
 							});
 
-							$school->setting("nsda_id", $nsda_school_id);
-							$school_nsda_id{$nsda_school_id} = $school;
+						} 
 
-						}
 
 					}
 
 					if ($school) { 
+
+						$school->setting("nsda_id", $nsda_school_id);
+						$school_nsda_id{$nsda_school_id} = $school;
 
 						my @students = @{$entries{$nsda_entry}{"students"}};
 
@@ -437,7 +577,18 @@
 
 						if (@real_students) { 
 						
-							my $coaches = join(",", @{$coaches{$nsda_entry}}) if $coaches{$nsda_entry};
+							my $coach_ids;
+							my $coach_names;
+
+							foreach my $coach_id (@{$entries{$nsda_entry}{"coaches"}}) { 
+
+								$coach_ids .= "," if $coach_ids;
+								$coach_names .= ", " if $coach_names;
+
+								$coach_ids .= $coach_id;
+								$coach_names .= $coaches{$coach_id}{"name"};
+
+							}
 
 							my $entry = Tab::Entry->create({
 								tourn       => $tourn->id,
@@ -450,9 +601,9 @@
 								created_at  => $now,
 							});
 
-							
 							$entry->setting("nsda_id", $nsda_entry);
-							$entry->setting("nsda_awards_coaches", $coaches);
+							$entry->setting("nsda_awards_coaches", $coach_ids);
+							$entry->setting("nsda_awards_coach_names", "text", $coach_names);
 							$entry->setting("nsda_points_coach", $entries{$nsda_entry}{"points_coach"});
 
 							$already_nsda_id{$nsda_entry} = $entry;
@@ -482,9 +633,184 @@
 
 			# Worlds Schools is, of course, different, because fuck you, that's why
 
+			TEAM:
+			foreach my $team_key (@{$events{$chosen_id}{"entries"}}) { 
+
+				my $district_id = $entries{$team_key}{"district"};
+
+				my $district = Tab::District->retrieve($district_id);
+
+				unless ($district && $district->id) { 
+					push @errors, "District id $district_id not found.";
+					next TEAM;
+				}
+
+				my @students = @{$entries{$team_key}{"students"}};
+
+				my $school = Tab::School->search(
+					district => $district->id,
+					chapter  => 0
+				)->first;
+
+				unless ($school) { 
+
+					$school = Tab::School->create({
+						name     => $district->name,
+						code     => $district->code,
+						tourn    => $tourn->id,
+						state    => substr($district->location, 0, 2),
+						district => $district->id
+					});
+
+				}
+
+				if ($school) { 
+
+					my @entries = Tab::Entry->search(
+						school => $school->id,
+						event  => $chosen_id,
+					);
+
+					my $entry;
+
+					foreach my $candidate (@entries) { 
+						$entry = $candidate if $candidate->setting("nsda_id") == $team_key;
+					}
+
+					unless ($entry) { 
+
+						$entry = Tab::Entry->create({
+							name        => $district->name." ".$entries{$team_key}{"code"},
+							code        => $district->name." ".$entries{$team_key}{"code"},
+							event       => $event->id,
+							tourn       => $tourn->id,
+							school      => $school->id,
+							dropped     => 0,
+							waitlist    => 0,
+							unconfirmed => 0,
+							dq          => 0,
+							created_at  => $now,
+						});
+
+					}
+
+					if ($entry) { 
+
+						my @students = $entry->students;
+					
+						my %shoulds = map {$_ => 1} @{$entries{$team_key}{"students"}};
+
+						my %done = ();
+
+						foreach my $student (@students) { 
+
+							unless ($shoulds{$student->ualt_id}) { 
+
+								my $es = Tab::EntryStudent->search({
+									student => $student->id,
+									entry => $entry->id
+								})->first;
+
+								$es->delete();
+
+							} else { 
+
+								$done{$student->ualt_id} = $student;
+								$student->setting('nsda_coach', $coaches{"for"}{$student->ualt_id});
+							}
+
+						}
+
+						foreach my $should (keys %shoulds) { 
+
+							next if $done{$should};
+
+							my $student = Tab::Student->search(
+								ualt_id => $should
+							)->first;
+
+							unless ($student) { 
+
+								my $nsda_student = $m->comp(
+									"/funclib/nsda_student.mas",
+									ualt_id => $should
+								);
+
+								my $nsda_school_id = $nsda_student->school_id;
+
+								my $chapter = Tab::Chapter->search(
+									nsda => $nsda_school_id
+								)->first;
+
+								unless ($chapter) { 
+
+									my $nsda_school = 
+										Tab::NSDA::MemberSchool->retrieve($nsda_school_id);
+
+									$chapter = $m->comp(
+										"/funclib/chapter_import.mas",
+											nsda_school => $nsda_school,
+											person      => $person,
+											nome        => 1
+									);
+
+								}
+
+								if ($chapter) { 
+
+									# The chapter import should have pulled in the
+									# whole student roster, so try this again
+
+									$student = Tab::Student->search(
+										ualt_id => $should
+									)->first;
+
+									# But dreams are often broken
+
+									unless ($student) {
+
+										$student = $m->comp(
+											"/funclib/student_import.mas",
+											nsda_student => $nsda_student,
+											chapter      => $chapter
+										);
+
+									}
+
+								} else {
+
+									push @errors, "Could not import chapter with NSDA ID ".$nsda_school_id;
+
+								}
+
+							}
+
+							if ($student) { 
+
+								Tab::EntryStudent->create({
+									student => $student,
+									entry   => $entry
+								});
+								
+								$student->setting('nsda_coach', $coaches{"for"}{$student->ualt_id});
+
+							}
+
+						}
+
+					}
+
+				} else { 
+
+					push @errors, "District ".$district_id." team could not be found or created?!";
+
+				}
+
+			}
+
 		}
 
-		if ($event) { 
+		if ($event && $event->type ne "wsdc") { 
 
 			$m->comp("entry_rename.mhtml",
 				from   => "return",
@@ -502,6 +828,301 @@
 
 	}
 
+	if ($category_id && $chosen_id) { 
+
+		my $category = Tab::Category->retrieve($category_id);
+
+		$m->print("Importing judges into ".$category->name." from ".$categories{$chosen_id}{"name"}." <br />");
+
+		$m->flush_buffer();
+
+		my %judge_settings = $m->comp(
+			"/funclib/judge_settings.mas", 
+				category => $category,
+				value    => 1
+		);
+
+		my %already_judge = 
+			map { $judge_settings{$_->id}{"nsda_id"} => $_} 
+			$category->judges;
+
+		foreach my $judge_id (@{$categories{$chosen_id}{"judges"}}) {
+
+			$m->print("Judge $judge_id being imported");
+			$m->flush_buffer();
+
+			my $nsda_school_id = $judges{$judge_id}{"school"};
+
+			my $nsda_school = Tab::NSDA::MemberSchool->retrieve($nsda_school_id);
+
+			my $district = $m->comp(
+				"/funclib/nsda_school_district.mas",
+					nsda_school => $nsda_school
+			);
+
+			my $school = $school_nsda_id{$nsda_school_id};
+			my $ualt_id = $judges{$judge_id}{"ualt_id"};
+			my $email = $judges{$judge_id}{"email"};
+			my $first = $judges{$judge_id}{"first"};
+			my $last = $judges{$judge_id}{"last"};
+
+			my $person;
+
+			if ($email) { 
+
+				$person = Tab::Person->search( 
+					email => $email 
+				)->first;
+
+				unless ($person) { 
+
+					my $login = Tab::Login->search( 
+						username => $email
+					)->first;
+
+					$person = $login->person if $login;
+				}
+
+			}
+
+			my $chapter = $school->chapter if $school;
+
+			unless ($chapter) { 
+
+				$chapter = Tab::Chapter->search(
+					nsda => $nsda_school_id
+				)->first;
+			}
+
+			unless ($chapter) { 
+
+				if ($nsda_school_id) { 
+
+					my $nsda_school = 
+						Tab::NSDA::MemberSchool->retrieve($nsda_school_id);
+
+					$chapter = $m->comp(
+						"/funclib/chapter_import.mas",
+						nsda_school => $nsda_school,
+						person      => $person,
+						nome        => 1
+					) if $nsda_school;
+
+				}
+
+			} 
+
+			if ($chapter &! $chapter->district) { 
+				$chapter->district($district->id);
+				$chapter->update;
+			}
+
+			my $chapter_judge;
+
+			if ($chapter) { 
+
+				$chapter_judge = Tab::ChapterJudge->search( 
+					person => $person->id 
+				)->first if $person;
+
+				$chapter_judge = Tab::ChapterJudge->search( 
+					first => $first,
+					last => $last,
+				)->first unless $chapter_judge;
+
+				$chapter_judge = Tab::ChapterJudge->create({
+					first   => $first,
+					middle  => $judges{$judge_id}{"middle"},
+					last    => $last,
+					person  => $person,
+					email   => $judges{$judge_id}{"email"},
+					chapter => $chapter->id
+				});
+
+			}
+
+			if ($chosen_id eq "W") { 
+
+				if ($district) { 
+
+					my $district_school = Tab::School->search(
+						district => $district->id,
+						chapter  => 0
+					)->first;
+
+					unless ($district_school) { 
+
+						$district_school = Tab::School->create({
+							name     => $district->name,
+							code     => $district->code,
+							tourn    => $tourn->id,
+							state    => substr($district->location, 0, 2),
+							district => $district->id
+						});
+
+					}
+
+					if ($district_school) { 
+
+						$school = $district_school;
+
+					} else { 
+
+						push @errors, "District school for ".$district->name." could not be created";
+
+					}
+
+
+				} else { 
+
+					push @errors, "No District found for judge $judge_id from $nsda_school_id.  Not imported";
+
+				}
+
+			} else { 
+
+				unless ($school) { 
+
+					if ($chapter) {
+
+						$school = Tab::School->create({
+							tourn    => $tourn->id,
+							chapter  => $chapter->id,
+							name     => $chapter->name,
+							district => $district->id
+						});
+
+						$school->setting("nsda_id", $nsda_school_id);
+						$school_nsda_id{$nsda_school_id} = $school;
+
+					} else { 
+
+						push @errors, "No school found for NSDA ID $nsda_school_id.  Judge $judge_id not imported";
+
+					}
+	
+				}
+
+			}
+
+			my $judge;
+
+			$judge = $already_judge{$judge_id};
+
+			if ($judge) { 
+
+				if ($school) { 
+
+					if ($chapter_judge) { 
+
+						$judge->category($category->id);
+						$judge->covers($category->id);
+						$judge->school($school->id);
+						$judge->first($chapter_judge->first);
+						$judge->middle($chapter_judge->middle);
+						$judge->last($chapter_judge->last);
+						$judge->chapter_judge($chapter_judge->id);
+						$judge->active(1);
+						$judge->person($person) if $chapter_judge->person;
+
+						$judge->update();
+
+					} else { 
+
+						$judge->category($category->id);
+						$judge->covers($category->id);
+						$judge->school($school->id);
+						$judge->first($judges{$judge_id}{"first"});
+						$judge->middle($judges{$judge_id}{"middle"});
+						$judge->last($judges{$judge_id}{"last"});
+						$judge->chapter_judge("");
+						$judge->active(1);
+						$judge->update();
+
+					}
+
+				}
+
+			} else { 
+
+				if ($school) { 
+
+					if ($chapter_judge) { 
+
+						$judge = Tab::Judge->create({
+							category      => $category->id,
+							covers        => $category->id,
+							school        => $school->id,
+							first         => $chapter_judge->first,
+							middle        => $chapter_judge->middle,
+							last          => $chapter_judge->last,
+							chapter_judge => $chapter_judge->id,
+							active        => 1
+						});
+
+						$judge->person($person) if $chapter_judge->person;
+						$judge->update();
+
+					} else { 
+
+						$judge = Tab::Judge->create({
+							category      => $category->id,
+							covers        => $category->id,
+							school        => $school->id,
+							first         => $judges{$judge_id}{"first"},
+							middle        => $judges{$judge_id}{"middle"},
+							last          => $judges{$judge_id}{"last"},
+							active        => 1
+						});
+
+					}
+
+				}
+
+			}
+
+			if ($judge) { 
+
+				$judge->setting("nsda_id", $judge_id);
+				$judge->setting("ualt_id", $ualt_id);
+
+				# Fucking hell we could do a real judge pooling system for
+				# some reason?
+
+				my $notes = $judges{$judge_id}{"notes"};
+
+				$notes .= "Prefers Congress ".$notes 
+					if $judges{$judge_id}{"congress_plz"};
+
+				$judge->setting("notes", "text", $notes) if $notes;
+
+				$judge->setting("parli", $judges{$judge_id}{"parli"});
+
+				$judge->setting("diamonds", $judges{$judge_id}{"diamonds"});
+
+				$judge->setting("real_school", $nsda_school->school_name);
+
+				my $rounds = $judges{$judge_id}{"rounds"};
+				$rounds = 8 if (not defined $rounds);
+
+				$judge->obligation($rounds);
+
+				if ($person && (not defined $judge->person)) { 
+					$judge->person($person);
+				}
+
+				$judge->update();
+
+			} else { 
+
+				push @errors, "Judge $judge_id could not be created or imported for some reason.  Ugh.";
+
+			}
+
+		}
+
+	}
+
 </%init>
 
 	<& "menu.mas", 
@@ -511,6 +1132,18 @@
 	&>
 
 	<div class="main">
+
+%		if (@errors) { 
+
+			<h4>Import errors:</h4>
+
+%			foreach my $error (@errors) { 
+				<div class="full row">
+					<% $error %>
+				</div>
+%			}
+
+%		}
 
 		<h4>Import entries into Nationals</h4>
 
@@ -527,7 +1160,7 @@
 				value = "<% $event->id %>"
 			>
 
-			<div class="row full">
+			<div class="row full marno">
 
 				<span class="quarter">
 					<% $event->name %>:
@@ -548,6 +1181,67 @@
 %						foreach my $nsda_event_id (keys %events) { 
 							<option value="<% $nsda_event_id %>" 
 								><% $events{$nsda_event_id}{"name"}." (".$events{$nsda_event_id}{"count"}.")" %></option>
+%						}
+
+					</select>
+				</span>
+
+				<span class="nospace tenth centeralign">
+					<input 
+						type  = "submit"
+						value = "Sync"
+						class = "thin"
+					>
+				</span>
+
+			</div>
+
+			</form>
+
+%		}
+
+		<h4>Import judges into Nationals</h4>
+
+%		foreach my $category ($tourn->categories) { 
+
+			<form 
+				action = "import_nationals.mhtml"
+				method = "post"
+			>
+
+			<input 
+				name  = "category_id"
+				type  = "hidden"
+				value = "<% $category->id %>"
+			>
+
+			<div class="row full marno">
+
+				<span class="quarter">
+					<% $category->name %>:
+				</span>
+
+				<span class="fifth">
+					<% scalar $category->judges %> in Tabroom
+				</span>
+
+				<span class="fourtenths">
+
+					<select 
+						name  = "chosen_id"
+						class = "fixedbig"
+					>
+						<option value=""></option>
+
+%						foreach my $nsda_category_code (
+%							sort {$categories{$a}{"name"} cmp $categories{$b}{"name"}} 
+%							keys %categories
+%						) { 
+							<option value="<% $nsda_category_code %>" 
+								><%
+									$categories{$nsda_category_code}{"name"}." (".
+									$categories{$nsda_category_code}{"count"}.")" 
+								%></option>
 %						}
 
 					</select>
