@@ -3,6 +3,7 @@
 	$tourn_settings
 	$person
 	$round_id
+	$parlis => undef
 </%args>
 <%init>
 
@@ -16,25 +17,30 @@
 
 	my %round_settings = $round->all_settings;
 
+	my $event = $round->event;
+	my %event_settings = $event->all_settings();
+
+	my $category = $event->category;
+	my %category_settings = $category->all_settings();
+
 	my @panels = sort {$a->letter <=> $b->letter} $round->panels;
 	@panels = sort {$b->bracket <=> $a->bracket} @panels;
 
-	my $event = $round->event;
-	my $category = $event->category;
-
-	my $ncfl++ if $tourn_settings->{"ncfl"};
-	$ncfl++ if $event->setting("region_judge_forbid");
-
-	my $same_school++ if $category->setting("allow_school_panels");
-
 	my $num_judges = $round_settings{"num_judges"};
 	$num_judges = 1 unless $num_judges;
+	$num_judges = 1 if $parlis == 1;
+
+	$num_judges-- if $num_judges > 1 && $parlis == 2;
 
 	my $num_flights = $round->flighted;
 	$num_flights = 1 unless $num_flights;
-	$num_flights = 1 if $event->setting("flight_rooms_only");
+	$num_flights = 1 if $event_settings{"flight_rooms_only"};
 
-	$m->comp("/funclib/round_clear_judges.mas", round => $round);
+	$m->comp( 
+		"/funclib/round_clear_judges.mas", 
+		round        => $round,
+		erase_chairs => $parlis,
+	);
 
 	my $description = "Reassigned the judges in round ".$round->realname." of ".$event->abbr;
 
@@ -46,6 +52,13 @@
 		description => $description
 	});
 
+	my %judge_settings = $m->comp(
+		"/funclib/category_judge_settings.mas",
+		category => $category,
+		value    => 1,
+		all      => 1
+	);
+
 	if ($event->type eq "wudc" || $event->type eq "parli") { 
 
 		my %panel_judges;
@@ -53,6 +66,7 @@
 		my %used_judges;
 
 		foreach my $panel (@panels) { 
+
 			next if $panel->bye;
 
 			@{$panel_judges{$panel->id}} = $m->comp(
@@ -96,14 +110,24 @@
 
 						undef $judge if $used_judges{$judge->id};
 
-						unless ($same_school) { 
-							undef $judge if $judge && $judge->school && $used_schools{$panel->id."-".$judge->school->id};
+						unless ($category_settings{"allow_school_panels"}) { 
+							undef $judge 
+								if $judge 
+								&& $judge->school 
+								&& $used_schools{$panel->id}{$judge->school->id};
 						}
 					}
 
-					$m->comp("/funclib/panel_judgeadd.mas", panel => $panel, judge => $judge) if $judge;
-					$used_judges{$judge->id}++ if $judge;
-					$used_schools{$panel->id."-".$judge->school->id}++ if $judge && $judge->school;
+					$m->comp("/funclib/panel_judgeadd.mas", 
+						panel => $panel, 
+						judge => $judge
+					) if $judge;
+
+					$used_judges{$judge->id}++ 
+						if $judge;
+
+					$used_schools{$panel->id}{$judge->school->id}++ 
+						if $judge && $judge->school;
 
 				}
 
@@ -138,15 +162,21 @@
 
 						undef $judge if $used_judges{$judge->id};
 
-						unless ($same_school) { 
-							undef $judge if $judge && $judge->school && $used_schools{$panel->id."-".$judge->school->id};
+						unless ($category_settings{"allow_school_panels"}) { 
+							undef $judge 
+								if $judge 
+								&& $judge->school 
+								&& $used_schools{$panel->id}{$judge->school->id};
 						}
 
 					}
 
-					$m->comp("/funclib/panel_judgeadd.mas", panel => $panel, judge => $judge) if $judge;
+					$m->comp("/funclib/panel_judgeadd.mas",
+						panel => $panel, judge => $judge) if $judge;
+
 					$used_judges{$judge->id}++ if $judge;
-					$used_schools{$panel->id."-".$judge->school->id}++ if $judge && $judge->school;
+
+					$used_schools{$panel->id}{$judge->school->id}++ if $judge && $judge->school;
 
 				}
 
@@ -160,7 +190,7 @@
 		
 		my %rating_by_judge_event = ();
 
-		if ($category->setting("coach_ratings") && $round->type ne "prelim") {
+		if ($category_settings{"coach_ratings"} && $round->type ne "prelim") {
 		
 			my %tier_names = map {$_->id => $_->name} $category->rating_tiers;
 
@@ -172,7 +202,8 @@
 
 				foreach my $rating (@ratings) { 
 
-					$rating_by_judge_event{$rating->judge->id."-".$event_id} = $tier_names{$rating->rating_tier->id} 
+					$rating_by_judge_event{$rating->judge->id}{$event_id} 
+						= $tier_names{$rating->rating_tier->id} 
 						if $rating && $rating->rating_tier;
 				}
 			}
@@ -181,8 +212,15 @@
 		my %panel_judges = ();
 
 		foreach my $panel (@panels) { 
+
 			next if $panel->bye;
-			my @judges = $m->comp("/funclib/clean_judges.mas", panel => $panel, mass => "yes");
+
+			my @judges = $m->comp(
+				"/funclib/clean_judges.mas", 
+					panel => $panel,
+					mass  => "yes"
+			);
+
 			@{$panel_judges{$panel->id}} = @judges;
 		}
 
@@ -190,21 +228,20 @@
 
 		foreach my $panel (@panels) { 
 
-			next if $done{$panel->id};
-
 			my @flights;
 			push @flights, $panel;
+
 			my %flighted;
 			$flighted{$panel->id}++;
 
 			my @judges = shuffle(@{$panel_judges{$panel->id}});
 
 			if ($panel->round->type ne "prelim") {
-				@judges = sort {$rating_by_judge_event{$a->id."-".$event->id} 
-					cmp $rating_by_judge_event{$b->id."-".$event->id}} @judges;
+				@judges = sort {$rating_by_judge_event{$a->id}{$event->id} 
+					cmp $rating_by_judge_event{$b->id}{$event->id}} @judges;
 
-				@judges = sort {length($rating_by_judge_event{$b->id."-".$event->id}) 
-					<=> length($rating_by_judge_event{$a->id."-".$event->id})} @judges;
+				@judges = sort {length($rating_by_judge_event{$b->id}{$event->id}) 
+					<=> length($rating_by_judge_event{$a->id}{$event->id})} @judges;
 			}
 
 			FLIGHT:
@@ -234,54 +271,87 @@
 
 			}
 
-
-			my %school_already;
-			my %region_already if $ncfl;
+			my %already = ();
 
 			my @judge_panel;
 
+			# This sorts the parlis to the bottom; the steps that require them
+			# will go and get them, but then scorers will be drawn first from
+			# non-parlis so as not to absorb them all where not needed.
+
+			@judges = sort {$judge_settings{$a}{"parli"} <=> $judge_settings{$b}{"parli"}} @judges;
+
 			foreach my $judge (@judges) { 
 
-			
 				next if $done{"J-".$judge->id};
 
-
 				next if 
-					(not defined $same_school) 
-					&& ($judge->school 
-					&& $judge->school->id 
-					&& $school_already{$judge->school->id});
+					(not defined $category_settings{"allow_school_panels"}) 
+					&& (
+						$judge->school > 0
+						&& $judge->school->id 
+						&& $already{"school"}{$judge->school->id}
+					);
 
-				next if $ncfl 
+				next if ($tourn_settings->{"ncfl"} 
+						|| $event_settings{"region_judge_forbid"} )
 					&& $judge->school 
 					&& $judge->school->region 
-					&& $region_already{$judge->school->region->id};
+					&& $already{"region"}{$judge->school->region->id};
 
-				$school_already{$judge->school->id}++ if $judge->school;
 
-				$region_already{$judge->school->region->id}++ if $ncfl 
+				next if $parlis == 1 
+					&& (not defined $judge_settings{$judge->id}{"parli"});
+
+				$done{$panel->id}{"parli"}++ if $judge_settings{$judge->id}{"parli"};
+
+				next if $parlis == 3 && (not defined $done{$panel->id}{"parli"});
+
+				$already{"school"}{$judge->school->id}++ if $judge->school;
+
+				$already{"region"}{$judge->school->region->id}++ 
+					if ( $tourn_settings->{"ncfl"} 
+						|| $event_settings{"region_judge_forbid"} )
 					&& $judge->school 
 					&& $judge->school->region;
 
 				push @judge_panel, $judge;
+
 				last if scalar @judge_panel >= $num_judges;
 			}
 
 			my $flight_number = 1;
 
-
 			foreach my $flight (@flights) { 
+
 				$flight->flight($flight_number);
 				$flight->update;
 				$flight_number++;
-				$done{$flight->id}++;
+
+				$done{"flight"}{$flight->id}++;
 
 				foreach my $judge (@judge_panel) { 
+
+					my $chair;
+
+					if ($parlis == 1) { 
+						$chair++;
+					} 
+
+					if ($parlis == 3) { 
+
+						$chair++ 
+							if $judge_settings{$judge->id}{"parli"}
+							&& (not defined $done{$panel->id}{"parli_done"});
+					}
+
+					$done{$panel->id}{"parli_done"}++;
 
 					$m->comp(
 						"/funclib/panel_judgeadd.mas", 
 						panel => $flight,
-						judge => $judge
+						judge => $judge,
+						chair => $chair
 					) if $judge;
 
 					$done{"J-".$judge->id}++;
@@ -291,7 +361,9 @@
 		}
 	}
 
+
 	my $msg = "Judges have been assigned";
+	$msg = "Parliamentarians have been assigned" if $parlis == 1;
 
 	$m->redirect("/panel/schemat/show.mhtml?round_id=$round_id&disp=1&msg=$msg");
 
