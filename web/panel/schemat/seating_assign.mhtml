@@ -1,0 +1,256 @@
+<%args>
+	$person
+	$method   => "random"
+	$panel_id => undef
+	$round_id => undef
+</%args>
+<%init>
+
+	use List::Util 'shuffle';
+
+	my $round;
+	my @panels;
+
+	my $name;
+
+	if ($round_id) { 
+		$round = Tab::Round->retrieve($round_id);
+		push @panels, $round->panels if $round;
+		$name .= $round->realname;
+		$name =~ s/[\W_]//g;
+	}
+
+	if ($panel_id) {
+		my $panel = Tab::Panel->retrieve($panel_id);
+		push @panels, $panel;
+		$round = $panel->round;
+		$name .= $round->realname;
+		$name =~ s/[\W_]//g;
+		$name .= "-Chamber".$panel->letter;
+	}
+
+	unless (@panels && $round) { 
+		$m->comp("/funclib/abort.mas", 
+			warning => "No valid chambers or round found"
+		);
+	}
+
+    my $dbh = Tab::DBI->db_Main(); 
+	
+	my $sth = $dbh->prepare("
+		select ballot.id, ballot.entry, ballot.seat
+		from ballot, panel, round, panel moi, round moiround
+		where ballot.panel = panel.id
+		and panel.round = round.id
+		and round.event = moiround.event
+		and moiround.id = moi.round
+		and moi.id != panel.id
+		and moi.id = ? 
+		and ballot.entry in
+			( select b2.entry
+				from ballot b2
+				where b2.panel = moi.id );
+	");
+
+	my $err;
+
+	foreach my $panel (@panels) { 
+
+		my $room = $panel->room;
+		next unless $room;
+
+		my @entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
+
+		@entries = shuffle @entries;
+
+		$sth->execute($panel->id);
+
+		my %entry_place;
+		my $row_total;
+		my $row_count;
+
+		my $seat_total;
+		my $seat_count;
+
+		while(
+			my ($ballot_id, $entry, $place) 
+			= $sth->fetchrow_array()
+		) { 
+
+			my ($row, $seat) = split (/\-/, $place);
+
+			$row_total += $row;
+			$row_count++;
+
+			$seat_total += $seat;
+			$seat_count++;
+
+			push @{$entry_place{$entry}{"places"}}, $place;
+			$entry_place{$entry}{$place}++;
+
+			push @{$entry_place{$entry}{"rows"}}, $row;
+			push @{$entry_place{$entry}{"seats"}}, $seat;
+
+			$entry_place{$entry}{"row_total"} += $row;
+			$entry_place{$entry}{"seat_total"} += $seat;
+
+		}
+		
+		if ($method eq "schools") { 
+
+			foreach (1 .. 100) { 
+				
+				my $last_school;
+
+				my @new_entries;
+
+				foreach my $entry (@entries) { 
+
+					if ($last_school == $entry->school->id) { 
+						unshift @new_entries, $entry;
+					} else { 
+						push @new_entries, $entry;
+						$last_school = $entry->school->id;
+					}
+
+				}
+
+				@entries = @new_entries;
+
+			}
+
+		} elsif ($method eq "invert") { 
+
+			if ($round->name % 2) { 
+
+				@entries = sort {
+					$entry_place{$b}{"seat_total"} <=> 
+					$entry_place{$a}{"seat_total"}
+				} @entries;
+
+				@entries = sort {
+					$entry_place{$b}{"row_total"} <=> 
+					$entry_place{$a}{"row_total"}
+				} @entries;
+
+			} else { 
+
+				my $avg_row = $row_total / $row_count;
+
+				my $avg_seat = $seat_total / $seat_count;
+
+				foreach my $entry (@entries) {
+
+					my $entry_avg_row = (
+						$entry_place{$entry}{"row_total"} / $row_count
+					);
+
+					my $entry_avg_seat = (
+						$entry_place{$entry}{"seat_total"} / $seat_count
+					);
+
+					$entry_place{$entry->id}{"row_dist"} = 
+						int(abs($avg_row - $entry_avg_row));
+
+					$entry_place{$entry->id}{"seat_dist"} = 
+						int(abs($avg_seat - $entry_avg_seat));
+
+					$entry_place{$entry->id}{"center_distance"} = 
+						int(abs($avg_row - $entry_avg_row) +
+						abs($avg_seat - $entry_avg_seat));
+
+				}
+
+				@entries = sort {
+					$entry_place{$a}{"seat_dist"} <=> 
+					$entry_place{$b}{"seat_dist"}
+				} @entries;
+
+				my @new_entries;
+				my $switch;
+
+				while (@entries) { 
+
+					my $entry = shift @entries;
+
+					if ($switch++ % 2) { 
+						push @new_entries, $entry;
+					} else { 
+						unshift @new_entries, $entry;
+					}
+				}
+
+				@entries = @new_entries;
+				undef @new_entries;
+				undef $switch;
+
+				@entries = sort {
+					$entry_place{$a}{"row_dist"} <=> 
+					$entry_place{$b}{"row_dist"}
+				} @entries;
+
+				while (@entries) { 
+
+					my $entry = shift @entries;
+
+					if ($switch++ % 2) { 
+						push @new_entries, $entry;
+					} else { 
+						unshift @new_entries, $entry;
+					}
+				}
+
+				@entries = @new_entries;
+
+			}
+
+		}
+
+		my @rows = (1 .. $room->rows);
+		my @seats = (1 .. $room->seats);
+
+		my $row = 1;
+		my $seat = 1;
+
+		my $total = scalar @entries;
+		my $room_err;
+
+		ENTRY:
+		foreach my $entry (@entries) { 
+
+			if ($seat > $room->seats) { 
+				$row++;
+				$seat = 1;
+
+				#move the last row towards the center
+				if ($total < $room->seats) {
+					my $fudge = POSIX::ceil(($room->seats - $total) / 2);
+					Tab::debuglog("$total entries left for ".$room->seats." seats. Fudge factor: $fudge");
+					$seat += $fudge;
+				}
+
+			}
+
+			if ($row > $room->rows) {
+				$room_err = $room->name." error: You have too many entries for the size of the room.  Please adjust room layout.";
+				next ENTRY;
+			} else { 
+				$entry_place{$entry}{"final"} = $row."-".$seat;
+				$total--;
+				$seat++;
+			}
+		}
+
+		foreach my $ballot ($panel->ballots) { 
+			$ballot->seat($entry_place{$ballot->entry}{"final"});
+			$ballot->update();
+		}
+
+		$err .= $room_err."<br />" if $room_err;
+
+	}
+
+	$m->redirect("seating_view.mhtml?panel_id=$panel_id&err=$err") if $panel_id;
+	$m->redirect("seating_chart.mhtml?round_id=$round_id&err=$err") if $round_id;
+
+</%init>
