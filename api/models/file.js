@@ -3,6 +3,11 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('file', { 
 		label: {
+			type: DataTypes.STRING(16),
+			allowNull: false,
+			defaultValue: ''
+		},
+		label: {
 			type: DataTypes.STRING(128),
 			allowNull: false,
 			defaultValue: ''
@@ -12,17 +17,12 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: ''
 		},
-		posting: { 
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: 0
-		},
-		result: { 
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: 0
-		},
 		published: { 
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: 0
+		},
+		coach: { 
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: 0

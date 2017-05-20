@@ -48,7 +48,6 @@ db.circuit.belongsToMany(db.tourn, {through: 'tourn_circuits'});
 db.circuit.belongsToMany(db.person, {through: 'permissions'});
 
 db.circuit.hasMany(db.circuit_membership);
-db.circuit.hasMany(db.circuit_setting);
 db.circuit.hasMany(db.file);
 
 db.circuit_membership.belongsTo(db.circuit);
@@ -70,9 +69,11 @@ db.room_strike.belongsTo(db.entry);
 db.room_strike.belongsTo(db.judge);
 
 db.chapter.hasMany(db.student);
-db.chapter.hasMany(db.chapter_judge);
 db.chapter.hasMany(db.school);
+db.chapter.hasMany(db.chapter_judge);
+
 db.chapter.belongsToMany(db.person, {through: 'permissions'});
+db.chapter.belongsTo(db.district);
 
 db.chapter_circuit.belongsTo(db.circuit);
 db.chapter_circuit.belongsTo(db.chapter);
@@ -82,12 +83,15 @@ db.chapter_circuit.belongsTo(db.circuit_membership);
 db.chapter_judge.belongsTo(db.chapter);
 db.chapter_judge.belongsTo(db.person);
 db.chapter_judge.belongsTo(db.person, {as: "person_request"});
+
 db.chapter_judge.hasMany(db.judge);
 
 db.circuit.belongsToMany(db.chapter, {through: 'chapter_circuits'});
 db.chapter.belongsToMany(db.circuit, {through: 'chapter_circuits'});
 
 db.district.belongsTo(db.person, {as: "chair"});
+db.district.hasMany(db.chapter);
+db.district.hasMany(db.permission);
 
 db.student.belongsTo(db.chapter);
 db.student.belongsTo(db.person);
@@ -109,13 +113,12 @@ db.chapter.belongsToMany(db.region, {through: 'chapter_circuits'});
 
 db.tourn.hasOne(db.calendar);
 
-db.tourn.hasMany(db.tourn_setting);
-
 db.tourn.hasMany(db.change_log);
 db.tourn.hasMany(db.category);
 db.tourn.hasMany(db.concession);
 db.tourn.hasMany(db.email);
 db.tourn.hasMany(db.event);
+db.tourn.hasMany(db.entry);
 db.tourn.hasMany(db.file);
 db.tourn.hasMany(db.fine);
 db.tourn.hasMany(db.follower);
@@ -140,9 +143,10 @@ db.timeslot.hasMany(db.round);
 db.timeslot.hasMany(db.strike);
 
 db.category.belongsTo(db.tourn);
+db.category.belongsTo(db.pattern);
 db.category.hasMany(db.event);
 db.category.hasMany(db.judge);
-db.category.hasMany(db.category_setting);
+
 db.category.hasMany(db.change_log);
 
 db.event.belongsTo(db.tourn);
@@ -155,14 +159,16 @@ db.event.hasMany(db.stats);
 db.event.hasMany(db.entry);
 db.event.hasMany(db.round);
 db.event.hasMany(db.qualifier);
-db.event.hasMany(db.event_setting);
 db.event.hasMany(db.change_log);
 db.event.belongsToMany(db.sweep_set, {through: 'sweep_events'});
 
 db.pattern.belongsTo(db.pattern, {as: 'exclude'});
 db.pattern.belongsTo(db.tourn);
+db.pattern.hasMany(db.event);
+db.pattern.hasMany(db.category);
 
 db.tiebreak.belongsTo(db.tiebreak_set);
+db.tiebreak.belongsTo(db.tiebreak_set, {as: "child"});
 
 db.tiebreak_set.belongsTo(db.tourn);
 db.tiebreak_set.hasMany(db.tiebreak);
@@ -179,62 +185,83 @@ db.jpool.belongsTo(db.category);
 db.jpool.belongsTo(db.site);
 db.jpool.belongsToMany(db.judge, {through: 'jpool_judges'});
 db.jpool.belongsToMany(db.round, {through: 'jpool_rounds'});
-db.jpool.hasMany(db.jpool_setting);
 
 db.rpool.belongsTo(db.tourn);
 db.rpool.belongsToMany(db.room, {through: 'rpool_rooms'});
 db.rpool.belongsToMany(db.round, {through: 'rpool_rounds'});
-db.rpool.hasMany(db.rpool_setting);
 
 // Settings
 
 db.tourn_setting.belongsTo(db.tourn);
-db.category_setting.belongsTo(db.category);
-db.judge_setting.belongsTo(db.judge);
-db.event_setting.belongsTo(db.event);
-db.entry_setting.belongsTo(db.entry);
-db.round_setting.belongsTo(db.round);
-db.circuit_setting.belongsTo(db.circuit);
-db.person_setting.belongsTo(db.person);
-db.jpool_setting.belongsTo(db.jpool);
-db.rpool_setting.belongsTo(db.rpool);
-db.tiebreak_set_setting.belongsTo(db.tiebreak_set);
-db.school_setting.belongsTo(db.school);
-
+db.tourn.hasMany(db.tourn_setting);
 db.tourn_setting.belongsTo(db.setting);
-db.category_setting.belongsTo(db.setting);
-db.judge_setting.belongsTo(db.setting);
-db.event_setting.belongsTo(db.setting);
-db.entry_setting.belongsTo(db.setting);
-db.round_setting.belongsTo(db.setting);
-db.circuit_setting.belongsTo(db.setting);
-db.person_setting.belongsTo(db.setting);
-db.jpool_setting.belongsTo(db.setting);
-db.rpool_setting.belongsTo(db.setting);
-db.tiebreak_set_setting.belongsTo(db.setting);
-db.school_setting.belongsTo(db.setting);
-
 db.setting.hasMany(db.tourn_setting);
-db.setting.hasMany(db.category_setting);
-db.setting.hasMany(db.judge_setting);
-db.setting.hasMany(db.event_setting);
-db.setting.hasMany(db.entry_setting);
-db.setting.hasMany(db.round_setting);
-db.setting.hasMany(db.circuit_setting);
-db.setting.hasMany(db.person_setting);
-db.setting.hasMany(db.jpool_setting);
-db.setting.hasMany(db.rpool_setting);
-db.setting.hasMany(db.tiebreak_set_setting);
-db.setting.hasMany(db.school_setting);
 
-db.setting_label.belongsTo(db.setting);
+db.category_setting.belongsTo(db.category);
+db.category.hasMany(db.category_setting);
+db.category_setting.belongsTo(db.setting);
+db.setting.hasMany(db.category_setting);
+
+db.circuit_setting.belongsTo(db.circuit);
+db.circuit.hasMany(db.circuit_setting);
+db.circuit_setting.belongsTo(db.setting);
+db.setting.hasMany(db.circuit_setting);
+
+db.chapter_setting.belongsTo(db.chapter);
+db.chapter.hasMany(db.chapter_setting);
+db.chapter_setting.belongsTo(db.setting);
+db.setting.hasMany(db.chapter_setting);
+
+db.judge_setting.belongsTo(db.judge);
+db.judge.hasMany(db.judge_setting);
+db.judge_setting.belongsTo(db.setting);
+db.setting.hasMany(db.judge_setting);
+
+db.event_setting.belongsTo(db.event);
+db.event.hasMany(db.event_setting);
+db.event_setting.belongsTo(db.setting);
+db.setting.hasMany(db.event_setting);
+
+db.entry_setting.belongsTo(db.entry);
+db.entry.hasMany(db.entry_setting);
+db.entry_setting.belongsTo(db.setting);
+db.setting.hasMany(db.entry_setting);
+
+db.round_setting.belongsTo(db.round);
+db.round.hasMany(db.round_setting);
+db.round_setting.belongsTo(db.setting);
+db.setting.hasMany(db.round_setting);
+
+db.person_setting.belongsTo(db.person);
+db.person.hasMany(db.person_setting);
+db.person_setting.belongsTo(db.setting);
+db.setting.hasMany(db.person_setting);
+
+db.jpool_setting.belongsTo(db.jpool);
+db.jpool.hasMany(db.jpool_setting);
+db.jpool_setting.belongsTo(db.setting);
+db.setting.hasMany(db.jpool_setting);
+
+db.rpool_setting.belongsTo(db.rpool);
+db.rpool.hasMany(db.rpool_setting);
+db.rpool_setting.belongsTo(db.setting);
+db.setting.hasMany(db.rpool_setting);
+
+db.tiebreak_set_setting.belongsTo(db.tiebreak_set);
+db.tiebreak_set.hasMany(db.tiebreak_set_setting);
+db.tiebreak_set_setting.belongsTo(db.setting);
+db.setting.hasMany(db.tiebreak_set_setting);
+
+db.school_setting.belongsTo(db.school);
+db.school.hasMany(db.school_setting);
+db.school_setting.belongsTo(db.setting);
+db.setting.hasMany(db.school_setting);
 
 // Registration data
 db.school.hasMany(db.entry);
 db.school.hasMany(db.rating);
 db.school.hasMany(db.fine);
 db.school.hasMany(db.strike);
-db.school.hasMany(db.school_setting);
 db.school.hasMany(db.change_log);
 db.school.hasMany(db.file);
 
@@ -259,9 +286,9 @@ db.entry.hasMany(db.rating);
 db.entry.hasMany(db.strike);
 db.entry.hasMany(db.change_log);
 
-db.entry.belongsTo(db.event);
-db.entry.belongsTo(db.school);
 db.entry.belongsTo(db.tourn);
+db.entry.belongsTo(db.school);
+db.entry.belongsTo(db.event);
 db.entry.belongsTo(db.person, {as: "registered_by"});
 db.entry.belongsToMany(db.student, {through: 'entry_students'});
 
@@ -273,7 +300,6 @@ db.judge.hasMany(db.fine);
 db.judge.hasMany(db.ballot);
 db.judge.hasMany(db.rating);
 db.judge.hasMany(db.strike);
-db.judge.hasMany(db.judge_setting);
 db.judge.hasMany(db.change_log);
 
 db.judge.belongsTo(db.school);
@@ -297,9 +323,25 @@ db.judge_hire.belongsTo(db.category);
 
 db.concession.belongsTo(db.tourn);
 db.concession.hasMany(db.concession_purchase);
+db.concession.hasMany(db.concession_type);
+
+db.concession_option.belongsTo(db.concession_type);
+
+db.concession_option.belongsToMany(
+	db.concession_purchase, 
+	{through: 'concession_purchase_option'}
+);
+
+db.concession_purchase.belongsToMany(
+	db.concession_option, 
+	{through: 'concession_purchase_option'}
+);
 
 db.concession_purchase.belongsTo(db.concession);
 db.concession_purchase.belongsTo(db.school);
+
+db.concession_type.hasMany(db.concession_option);
+db.concession_type.belongsTo(db.concession);
 
 db.email.belongsTo(db.person, {as: 'sender'});
 db.email.belongsTo(db.tourn);
@@ -362,8 +404,11 @@ db.round.belongsTo(db.site);
 db.round.belongsTo(db.tiebreak_set);
 
 db.round.hasMany(db.change_log);
-db.round.hasMany(db.round_setting);
-db.round.belongsToMany(db.rpool, {through: 'rpool_rounds'});
+
+db.round.belongsToMany(
+	db.rpool, 
+	{through: 'rpool_rounds'}
+);
 
 db.panel.belongsTo(db.room);
 db.panel.belongsTo(db.round);
@@ -393,7 +438,6 @@ db.result.belongsTo(db.school);
 db.result.belongsTo(db.round);
 
 db.result_set.hasMany(db.result);
-db.result_set.hasMany(db.file);
 db.result_set.belongsTo(db.tourn);
 db.result_set.belongsTo(db.event);
 
@@ -405,7 +449,6 @@ db.person.hasMany(db.login);
 db.person.hasMany(db.student);
 db.person.hasMany(db.judge);
 db.person.hasMany(db.conflict);
-db.person.hasMany(db.person_setting);
 db.person.hasMany(db.change_log);
 
 db.person.belongsToMany(db.tourn, {through: 'permission'});
@@ -423,6 +466,7 @@ db.login.belongsTo(db.person);
 
 //Permissions
 db.permission.belongsTo(db.person);
+db.permission.belongsTo(db.district);
 db.permission.belongsTo(db.tourn);
 db.permission.belongsTo(db.region);
 db.permission.belongsTo(db.chapter);
