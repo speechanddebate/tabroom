@@ -42,4 +42,5 @@ alter table tiebreak modify child smallint after highlow_count;
 
 alter table webpage modify parent int after tourn;
 
-
+alter table judge_hire add region int after school;
+alter table fine modify deleted bool not null default 0;
