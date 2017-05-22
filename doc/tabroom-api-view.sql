@@ -624,6 +624,7 @@ create view tabapi.judge_hire
 		requestor_id,
 		tourn_id,
 		school_id,
+		region_id,
 		judge_id,
 		category_id,
 		timestamp)
@@ -637,6 +638,7 @@ as select
 		requestor,
 		tourn,
 		school,
+		region,
 		judge,
 		category,
 		timestamp

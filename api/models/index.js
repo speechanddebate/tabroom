@@ -103,6 +103,7 @@ db.region.belongsTo(db.circuit);
 db.region.belongsTo(db.tourn);
 
 db.region.hasMany(db.strike);
+db.region.hasMany(db.judge_hire);
 db.region.hasMany(db.fine);
 db.region.belongsToMany(db.person, {through: 'permissions'});
 
@@ -264,6 +265,7 @@ db.school.hasMany(db.fine);
 db.school.hasMany(db.strike);
 db.school.hasMany(db.change_log);
 db.school.hasMany(db.file);
+db.school.hasMany(db.judge_hire);
 
 db.school.belongsTo(db.tourn);
 db.school.belongsTo(db.chapter);
@@ -317,6 +319,7 @@ db.judge_hire.belongsTo(db.person, {as: 'requestor'});
 db.judge_hire.belongsTo(db.judge);
 db.judge_hire.belongsTo(db.tourn);
 db.judge_hire.belongsTo(db.school);
+db.judge_hire.belongsTo(db.region);
 db.judge_hire.belongsTo(db.category);
 
 // Specialty registration data later
