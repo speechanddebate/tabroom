@@ -1,13 +1,17 @@
 /* confirmation dialog */
 
-	function confirmAction(link, message) { 
+	function confirmAction(link, message, dest, payload) { 
 
 		alertify.confirm(
 			"Are you sure?",
 			message,
-			function(event) { 
+			function(event) {
 				if (event) { 
-					window.location.href = link.href;
+                    if (typeof(link)==='function' && typeof(dest)!='undef' && typeof(payload)!='undef'){
+                        link(dest,payload);
+                    }else{
+					    window.location.href = link.href;
+                    }
 				}
 			},
 			function(event) { 
