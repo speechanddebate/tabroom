@@ -11,6 +11,11 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
+		truncate: {
+			type: DataTypes.INTEGER(6),
+			allowNull: false,
+			defaultValue: '1'
+		},
 		multiplier: {
 			type: DataTypes.INTEGER(6),
 			allowNull: false,

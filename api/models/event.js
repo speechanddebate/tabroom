@@ -7,11 +7,11 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: ''
 		},
-		type: {
+		abbr: {
 			type: DataTypes.STRING(15),
 			allowNull: true
 		},
-		abbr: {
+		type: {
 			type: DataTypes.STRING(15),
 			allowNull: true
 		},

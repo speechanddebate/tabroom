@@ -1,30 +1,45 @@
 <%args>
 	$tourn
+	$tourn_settings
 	$person
-	$end         => undef
-	$type        => undef
-	$label       => undef
-	$panels      => undef
-	$from_id     => undef
-	$into_id     => undef
-	$site_id     => undef
-	$tiebreak_set_id   => undef
-	$timeslot_id => undef
+	$end             => undef
+	$type            => undef
+	$label           => undef
+	$panels          => undef
+	$from_id         => undef
+	$into_id         => undef
+	$site_id         => undef
+	$tiebreak_set_id => undef
+	$timeslot_id     => undef
 </%args>
 <%init>
 
 	use List::Util 'shuffle';
+
 	my $from = Tab::Round->retrieve($from_id) if $from_id;
+
 	my $into = Tab::Round->retrieve($into_id) if $into_id;
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 	my $now = DateTime->now(time_zone => $tz);
 
+	our %penalties = (
+		school => "100000",
+		prelim => "10"
+	);
+
+	if ($tourn_settings->{"nsda_nats"}) {
+		$penalties{"district"} = "10000";
+		$penalties{"state"} = "100";
+	}
+
 	if ($into) { 
 
 		my $err = "You must specify the number of sections to be used  " unless $panels;
+
 		$err .= "You must specify the ending position of whom to break  " unless $end;
+
 		$m->redirect("index.mhtml?from_id=".$from->id."&preset_id=".$into->id."&err=".$err) if $err;
 
 		$into->tiebreak_set($tiebreak_set_id) if $tiebreak_set_id;
@@ -90,21 +105,15 @@
 	my @breaks;
 	my $count;
 
-	my %entry_tb = ();
-	my %entry_seed = ();
-	my %entry_panel = ();
-	my %entry_school = ();
+	my %entry_data = ();
 
 	my @from_panels = $from->panels;
 
-	my %entry_by_id = ();
-	my %panel_letter = ();
-
 	foreach my $panel (@from_panels) { 
 		foreach my $entry ($m->comp("/funclib/panel_entries.mas", panel => $panel)) { 
-			$entry_panel{$entry->id} = $panel->id;
-			$panel_letter{$panel->id} = $panel->letter;
-			$entry_by_id{$entry->id} = $entry;
+			$entry_data{$entry->id}{"panel"} = $panel->id;
+			$entry_data{$entry->id}{"prelim"} = $panel->letter;
+			$entry_data{$entry->id}{"entry"} = $entry;
 		}
 	}
 
@@ -112,8 +121,8 @@
 
 	foreach my $panel ($into->panels) { 
 		foreach my $entry ($m->comp("/funclib/panel_entries.mas", panel => $panel)) { 
-			$already_broke{$entry->id} = $panel;
-			$entry_by_id{$entry->id} = $entry;
+			$entry_data{$entry->id}{"broke"} = $panel;
+			$entry_data{$entry->id}{"entry"} = $entry;
 		}
 	}
 
@@ -127,37 +136,54 @@
 		foreach my $entry (@{${$entries_ref}{$rank}}) { 
 
 			next unless $entry;
+
 			next if $ineligible{$entry};
 
-			next if $already_broke{$entry};
+			next if $entry_data{$entry}{"broke"};
 
-			my $panel = $entry_panel{$entry};
+			my $panel = $entry_data{$entry}{"panel"};
 
 			next if $panel_count{$panel} >= $end; 
 		
 			$panel_count{$panel}++;
+
 			my $seed = $panel_count{$panel}; 
 
 			push @breaks, $entry;
 
-			$entry_seed{$entry} = $seed;
+			$entry_data{$entry}{"seed"} = $seed;
 
-			$entry_school{$entry} = $entry_by_id{$entry}->school->id 
-				if $entry_by_id{$entry} 
-				&& $entry_by_id{$entry}->school;
+			$entry_data{$entry}{"school"} = $entry_data{$entry}{"entry"}->school->id 
+				if $entry_data{$entry}{"entry"} 
+				&& $entry_data{$entry}{"entry"}->school;
+
+			if ($tourn_settings->{"nsda_nats"}) {
+
+				$entry_data{$entry}{"district"} = $entry_data{$entry}{"entry"}->school->district->id 
+					if $entry_data{$entry}{"entry"} 
+					&& $entry_data{$entry}{"entry"}->school
+					&& $entry_data{$entry}{"entry"}->school->district;
+
+				$entry_data{$entry}{"state"} = $entry_data{$entry}{"entry"}->school->chapter->state
+					if $entry_data{$entry}{"entry"} 
+					&& $entry_data{$entry}{"entry"}->school
+					&& $entry_data{$entry}{"entry"}->school->chapter;
+			}
+
 		}
+
 	}
 
 	#Sort them in seed order by the panel so the snaker is fine. 
-	@breaks = sort {$entry_panel{$a} <=> $entry_panel{$b}} @breaks;
-	@breaks = sort {$entry_seed{$a} <=> $entry_seed{$b}} @breaks;
+	@breaks = sort {$entry_data{$a}{"panel"} <=> $entry_data{$b}{"panel"}} @breaks;
+	@breaks = sort {$entry_data{$a}{"seed"} <=> $entry_data{$b}{"seed"}} @breaks;
 
 	foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) { 
 		foreach my $entry (@{${$entries_ref}{$seed}}) {
 			my $one;	
 			foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
 				next if $one;
-				$entry_tb{$entry} = ${$tbs_ref}{$entry."-".$key};
+				$entry_data{$entry}{"tb"} = ${$tbs_ref}{$entry."-".$key};
 				$one++;
 			}
 		}
@@ -211,7 +237,7 @@
 
 			unless (@snake_panels) { 
 
-				unless ($current_seed == $entry_seed{$entry}) { 
+				unless ($current_seed == $entry_data{$entry}{"seed"}) { 
 
 					# this operation keeps competitors from the same chamber
 					# from hitting each other as much as can be done. 
@@ -222,7 +248,7 @@
 					}  
 
 					@snake_panels = @use_panels;
-					$current_seed = $entry_seed{$entry};
+					$current_seed = $entry_data{$entry}{"seed"};
 
 				} else { 
 
@@ -238,136 +264,171 @@
 
 		}
 
-		foreach my $key (keys %already_broke) { 
-			my $entry = Tab::Entry->retrieve($key);
-			push @{$panel_entries{$already_broke{$key}->id}},  $entry 
-				if $already_broke{$key} 
-				&& $panel_entries{$already_broke{$key}}
-				&& $panel_entries{$already_broke{$key}->id};
+		foreach my $entry_id (keys %entry_data) { 
+
+			my $panel = $entry_data{$entry_id}{"broke"};
+			next unless $panel;
+
+			push @{$panel_entries{$panel->id}}, $entry_data{$entry_id}{"entry"};
+
 		}
 
 		if ($method eq "snake_school" 
+			|| $method eq "snake_school_tight" 
 			|| $method eq "snake_school_rank" 
 			|| $method eq "snake_school_force" 
-			|| $method eq "ky_semis_snake"
 		) { 
+
+			foreach (1 .. 7) { 
 		
-			foreach my $panel (@use_panels) { 
+				foreach my $panel (@use_panels) { 
 
-				my $initial_score = score_panel(\@{$panel_entries{$panel->id}}, \%entry_school);
+					my $initial_score = score_elim_chamber(\@{$panel_entries{$panel->id}}, \%entry_data);
 
-				next unless $initial_score > 0;
+					next unless $initial_score > 0;
 
-				foreach my $entry (@{$panel_entries{$panel->id}}) { 
-		
-					next if $already_broke{$entry};
+					foreach my $entry (@{$panel_entries{$panel->id}}) { 
 
-					my @test = @{$panel_entries{$panel->id}};
+						next if $entry_data{$entry}{"broke"};
 
-					my $index = 0;
-					$index++ until $test[$index] == $entry; 
-					splice(@test, $index, 1);
+						my @test = @{$panel_entries{$panel->id}};
 
-					my $test_score = score_panel(\@test, \%entry_school);
+						my $index = 0;
+						$index++ until $test[$index] == $entry; 
+						splice(@test, $index, 1);
 
-					my $entry_obj = Tab::Entry->retrieve($entry);
+						my $test_score = score_elim_chamber(\@test, \%entry_data);
 
-					if ($test_score < $initial_score) { 
-					
-						my $swap_seed_dist = 99;
-						my $swap_tb_dist = 99;
-						my $swap_entry;
-						my $swap_panel;
-						my $swap_score = -99;
+						my $entry_obj = Tab::Entry->retrieve($entry);
 
-						foreach my $other (@use_panels) { 
-					
-							next if $other->id == $panel->id;			   			# Can't switch to the same panel
-							next if $already_broke{$other->id};
+						if ($test_score < $initial_score) { 
+						
+							my $swap_seed_dist = 99;
+							my $swap_tb_dist = 99;
+							my $swap_entry;
+							my $swap_panel;
+							my $swap_score = -99;
 
-							my @other_panel = @{$panel_entries{$other->id}};		# Find the other panel for scoring
-							my $other_score = score_panel(\@other_panel, \%entry_school);
+							foreach my $other (@use_panels) { 
 
-							push (@other_panel, $entry);					  		# Put me into this panel for testing
-	
-							foreach my $other_entry (@{$panel_entries{$other->id}}) { 
+								# Can't switch to the same panel
+								next if $other->id == $panel->id;			   			
+								next if $entry_data{$other->id}{"broke"};
 
-								my $seed_dist = abs($entry_seed{$other_entry} - $entry_seed{$entry});
-								my $tb_dist = abs($entry_tb{$other_entry} - $entry_tb{$entry});
+								# Find the other panel for scoring
+								my @other_panel = @{$panel_entries{$other->id}};		
 
-								next if ($seed_dist > 2 && $method eq "snake_school");
-								next if ($tb_dist > 0 && $method eq "snake_school_rank"); 
-								
-								$index = 0;								  		# Remove swap candidate from the panel
-								$index++ until $other_panel[$index] == $other_entry;
-								splice(@other_panel, $index, 1);
+								# Put me into this panel for testing
+								my $other_score = score_elim_chamber(\@other_panel, \%entry_data);
 
-								push (@test, $other_entry);
-								my $new_initial_score = score_panel(\@test, \%entry_school);
-								my $new_other_score = score_panel(\@other_panel, \%entry_school);
+								foreach my $other_entry (@{$panel_entries{$other->id}}) { 
 
-								my $diff = ($other_score + $initial_score) - ( $new_other_score + $new_initial_score);
+									my $seed_dist = abs(
+										$entry_data{$other_entry}{"seed"} 
+										- $entry_data{$entry}{"seed"}
+									);
 
-								if ( $diff > 0 && $diff > $swap_score) { 
-									$swap_entry = $other_entry;
-									$swap_score = $diff;
-									$swap_seed_dist = $seed_dist;
-									$swap_tb_dist = $tb_dist;
-									$swap_panel = $other->id;
-								}
+									my $tb_dist = abs(
+										$entry_data{$other_entry}{"tb"} 
+										- $entry_data{$entry}{"tb"}
+									);
 
-								if ( ($diff > 0 && $diff == $swap_score && $seed_dist < $swap_seed_dist && ($method eq "snake_school" || $method eq "ky_semis_snake")) 
-								|| 	 ($diff > 0 && $diff == $swap_score && $tb_dist < $swap_tb_dist && $method eq "snake_school_rank") ) { 
 
-									$swap_entry = $other_entry;
-									$swap_score = $new_other_score;
-									$swap_seed_dist = $seed_dist;
-									$swap_tb_dist = $tb_dist;
-									$swap_panel = $other->id;
-								}
+									next if ($seed_dist > 2 && $method eq "snake_school");
+									next if ($seed_dist > 0 && $method eq "snake_school_tight");
 
-								# Reset the table
-
-								if ( grep( /^$other_entry/, @test ) ) { 
-									$index = 0;								  	
-									$index++ until $test[$index] == $other_entry;
-									splice(@test, $index, 1);
-								}
-
-								push (@other_panel, $other_entry);
-
-							}
-
-							if ( grep( /^$entry/, @other_panel ) ) { 
-								$index = 0;								  
-								$index++ until $other_panel[$index] == $entry;
-								splice(@other_panel, $index, 1);
-							}
-
-						}
-
-						if ($swap_entry) {
+									next if ($tb_dist > 0 && $method eq "snake_school_rank"); 
 									
-							my @panel2 = @{$panel_entries{$swap_panel}};
-							my @panel1 = @{$panel_entries{$panel->id}};
+									# Remove swap candidate from the panel
+									$index = 0;								  		
+									$index++ until $other_panel[$index] == $other_entry;
+									splice(@other_panel, $index, 1);
 
-							push (@panel1, $swap_entry);
+									push (@test, $other_entry);
 
-							my $swapdex = 0;
-							$swapdex++ until $panel1[$swapdex] == $entry;
-							splice(@panel1, $swapdex, 1);
+									my $new_initial_score = score_elim_chamber(\@test, \%entry_data);
+									my $new_other_score = score_elim_chamber(\@other_panel, \%entry_data);
 
-							$swapdex = 0;
-							$swapdex++ until $panel2[$swapdex] == $swap_entry;
-							splice(@panel2, $swapdex, 1);
+									my $diff = 
+										$other_score 
+										+ $initial_score
+										- $new_other_score 
+										- $new_initial_score;
 
-							push (@panel2, $entry);
+									if ( $diff > 0 && $diff > $swap_score) { 
+										$swap_entry = $other_entry;
+										$swap_score = $diff;
+										$swap_seed_dist = $seed_dist;
+										$swap_tb_dist = $tb_dist;
+										$swap_panel = $other->id;
+									}
 
-							@{$panel_entries{$panel->id}} = @panel1;
-							@{$panel_entries{$swap_panel}} = @panel2;
+									if (
+										($diff > 0 
+											&& $diff == $swap_score 
+											&& $seed_dist < $swap_seed_dist 
+											&& ($method eq "snake_school"
+											   ||$method eq "snake_school_tight")
+										) 
 
-							$initial_score = score_panel(\@panel1, \%entry_school);
+									|| 	
+										($diff > 0 
+											&& $diff == $swap_score 
+											&& $tb_dist < $swap_tb_dist 
+											&& $method eq "snake_school_rank"
+										)
+									) { 
 
+										$swap_entry = $other_entry;
+										$swap_score = $new_other_score;
+										$swap_seed_dist = $seed_dist;
+										$swap_tb_dist = $tb_dist;
+										$swap_panel = $other->id;
+									}
+
+									# Reset the table
+
+									if ( grep( /^$other_entry/, @test ) ) { 
+										$index = 0;								  	
+										$index++ until $test[$index] == $other_entry;
+										splice(@test, $index, 1);
+									}
+
+									push (@other_panel, $other_entry);
+
+								}
+
+								if ( grep( /^$entry/, @other_panel ) ) { 
+									$index = 0;								  
+									$index++ until $other_panel[$index] == $entry;
+									splice(@other_panel, $index, 1);
+								}
+
+							}
+
+							if ($swap_entry) {
+
+								my @panel2 = @{$panel_entries{$swap_panel}};
+								my @panel1 = @{$panel_entries{$panel->id}};
+
+								push (@panel1, $swap_entry);
+
+								my $swapdex = 0;
+								$swapdex++ until $panel1[$swapdex] == $entry;
+								splice(@panel1, $swapdex, 1);
+
+								$swapdex = 0;
+								$swapdex++ until $panel2[$swapdex] == $swap_entry;
+								splice(@panel2, $swapdex, 1);
+
+								push (@panel2, $entry);
+
+								@{$panel_entries{$panel->id}} = @panel1;
+								@{$panel_entries{$swap_panel}} = @panel2;
+
+								$initial_score = score_elim_chamber(\@panel1, \%entry_data);
+
+							}
 						}
 					}
 				}
@@ -492,20 +553,44 @@
 
 	my $msg = "Elim round paneled";
 
-	$m->redirect("/panel/schemat/round_confirm.mhtml?round_id=".$into->id."&msg=$msg");
+	undef %penalties;
 
-	$m->redirect("/panel/schemat/show.mhtml?round_id=".$into->id."&msg=$msg");
+	$m->redirect("/panel/schemat/show_snake.mhtml?round_id=".$into->id."&msg=$msg");
 
-	sub score_panel {
-		my ($panref, $schref) = @_;
+	sub score_elim_chamber {
+
+		my ($panref, $entref, $loud) = @_;
+
 		my $score = 0;
+
 		foreach my $entry (@$panref) { 
+
 			foreach my $other (@$panref) { 
+
 				next unless $other > $entry;
-				$score++  if ${ $schref }{$entry} == ${ $schref }{$other};
+
+				if ($entref->{$entry}{"school"} == $entref->{$other}{"school"}) { 
+					$score += $penalties{"school"};
+				}
+
+				if ($entref->{$entry}{"district"} == $entref->{$other}{"district"}) { 
+					$score += $penalties{"district"};
+				}
+
+				if ($entref->{$entry}{"state"} eq $entref->{$other}{"state"}) { 
+					$score += $penalties{"state"};
+				}
+
+				if ($entref->{$entry}{"prelim"} eq $entref->{$other}{"prelim"}) {
+					$score += $penalties{"prelim"};
+				}
+
 			}
+
 		}
+
 		return $score;
+
 	}
 
 </%init>

@@ -15,6 +15,10 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.TEXT,
 			allowNull: true
 		},
+		topic: {
+			type: DataTypes.STRING(127),
+			allowNull: true
+		},
 		speech: {
 			type: DataTypes.INTEGER(4),
 			allowNull: true

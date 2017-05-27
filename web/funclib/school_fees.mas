@@ -1,11 +1,14 @@
 <%args>
-	$school_id
-	$all          => undef
-	$names        => undef
-	$entry_fees   => undef
-	$concessions  => undef
-	$payments     => undef
-	$show_deleted => undef
+	$school
+	$ignore_judging => undef
+	$tourn          => undef
+	$tourn_settings => undef
+	$all            => undef
+	$names          => undef
+	$entry_fees     => undef
+	$concessions    => undef
+	$payments       => undef
+	$show_deleted   => undef
 </%args>
 <%init>
 
@@ -14,13 +17,13 @@
 	my $total;
 	my @felines;
 
-	my $school = Tab::School->retrieve($school_id);
-	$m->print ("School does not exist") unless $school;
-	$m->abort unless $school;
-	my $tourn =  $school->tourn if $school;
-	my %tourn_settings = $tourn->all_settings;
+	unless ($tourn) { 
+		$tourn = $school->tourn;
+		my %ts = $tourn->all_settings();
+		$tourn_settings = \%ts;
+	}
 
-	my $symbol = $tourn_settings{"currency"};
+	my $symbol = $tourn_settings->{"currency"};
 	my $individuals = $school->setting('individuals');
 
 	$entry_fees++ if $all;
@@ -31,21 +34,24 @@
 	my $total_concessions;
 	my $total_payments;
 
-	my $alterna_state = $tourn_settings{"fees_alternate_state"};
+	my $alterna_state = $tourn_settings->{"fees_alternate_state"};
 
 	undef $alterna_state 
 		unless $school->chapter 
 		&& $school->chapter->state eq $alterna_state;
 
-	if ($entry_fees && $tourn_settings{"per_person_fee"}) { 
+	if ($entry_fees && $tourn_settings->{"per_person_fee"}) { 
 
 		my %person_line = ();
 
-		$person_line{"name"} = $individuals.' people at x '.$tourn_settings{"per_person_fee"};
-		$person_line{"fee"} = $individuals * $tourn_settings{"per_person_fee"};
+		$person_line{"name"} = $individuals.' people at x '.$tourn_settings->{"per_person_fee"};
+
+		$person_line{"fee"} = $individuals * $tourn_settings->{"per_person_fee"};
 
 		$person_line{"quantity"} = $individuals;
-		$person_line{"per_unit"} = $tourn_settings{"per_person_fee"};
+
+		$person_line{"per_unit"} = $tourn_settings->{"per_person_fee"};
+
 		$person_line{"short_name"} = "Individuals in Attendance";
 
 		$total += $person_line{"fee"};
@@ -54,8 +60,7 @@
 
 	}
 
-
-	if ($entry_fees && $tourn_settings{"per_student_fee"}) { 
+	if ($entry_fees && $tourn_settings->{"per_student_fee"}) { 
 
 		my @students = $m->comp(
 			"/funclib/school_students.mas", 
@@ -64,11 +69,11 @@
 
 		my %student_line = ();
 
-		$student_line{"name"} = scalar @students.' individual students at x '.$tourn_settings{"per_student_fee"};
-		$student_line{"fee"} = scalar @students * $tourn_settings{"per_student_fee"};
+		$student_line{"name"} = scalar @students.' individual students at x '.$tourn_settings->{"per_student_fee"};
+		$student_line{"fee"} = scalar @students * $tourn_settings->{"per_student_fee"};
 
 		$student_line{"quantity"} = scalar @students;
-		$student_line{"per_unit"} = $tourn_settings{"per_student_fee"};
+		$student_line{"per_unit"} = $tourn_settings->{"per_student_fee"};
 		$student_line{"short_name"} = "Students in Attendance";
 
 		$total += $student_line{"fee"};
@@ -79,12 +84,32 @@
 
 	if ($entry_fees) { 
 
+		my $hotel;
+		my $hotel_multiplier; 
+
+		if ($school->setting("hotel")) { 
+			$hotel = Tab::Hotel->retrieve($school->setting("hotel"));
+			$hotel_multiplier = $hotel->multiple;
+		}
+
+		if ($hotel && $hotel_multiplier > 1) { 
+
+			my %hotel_warning = ();
+
+			$hotel_warning{"name"} = "You are marked as staying at ".$hotel->name.".  Your entry fees are therefore increased by ".$hotel->multiple."x";
+
+			$hotel_warning{"message"}++;
+			push @felines, \%hotel_warning;
+
+		}
+
+
 		EVENT:
 		foreach my $event ($m->comp("/funclib/school_events.mas", school => $school)) { 
 
 			my @entries;
 
-			if ($tourn_settings{"invoice_waitlist"}) { 
+			if ($tourn_settings->{"invoice_waitlist"}) { 
 				@entries = Tab::Entry->search( 
 					school => $school->id,
 					event  => $event->id
@@ -98,20 +123,25 @@
 			}
 
 			my $fee_per = $event->fee;
+
 			$fee_per = $event->setting("alt_state_fee") if $alterna_state;
 
 			my $fee_total = $fee_per * scalar @entries;
+			$fee_total = $fee_total * $hotel_multiplier if $hotel_multiplier > 1;
 
 			next EVENT unless $fee_per;
 
 			my $name = scalar @entries. " entries in ".$event->abbr.' x '.$fee_per;
+
+			$fee_per = $fee_per * $hotel_multiplier if $hotel_multiplier > 1;
+
+			$fee_per = sprintf("%.2f", $fee_per);
 
 			my %line_hash= ();
 
 			$line_hash{"quantity"} = scalar @entries;
 			$line_hash{"per_unit"} = $fee_per;
 			$line_hash{"short_name"} = "Entries in ".$event->name;
-
 			$line_hash{"name"} = $name;
 			$line_hash{"fee"} = $fee_total;
 
@@ -121,222 +151,235 @@
 			$total += $fee_total;
 		}
 
-		GROUP:
-		foreach my $category (sort {$a->name cmp $b->name} $tourn->categories) { 
-		
-			my $rounds_per = $category->setting("rounds_per");
-			my $judge_per = $category->setting("judge_per");
-			my $attending_judge_fee = $category->setting("attending_judge_fee"); 
 
-			my ($uncovered, $extra ) = $m->comp(
-				"/funclib/judgemath/uncovered_burden_by_category.mas", 
-				category => $category,
-				school   => $school
-			);
+		unless ($ignore_judging) { 
 
-			if ($attending_judge_fee) { 
-
-				my %judge_fee_hash;
-
-				my @judges = Tab::Judge->search( 
-					school   => $school->id,
-					category => $category->id 
-				);
-
-				$judge_fee_hash{"name"} = scalar @judges.' individual judges at x '.$attending_judge_fee if @judges;
-				$judge_fee_hash{"fee"} = scalar @judges * $attending_judge_fee if @judges;
-
-				$judge_fee_hash{"quantity"} = scalar @judges;
-				$judge_fee_hash{"per_unit"} = $attending_judge_fee;
-				$judge_fee_hash{"short_name"} = "Judges in Attendance";
-
-				$total += $judge_fee_hash{"fee"};
-				$total_entry_fees += $judge_fee_hash{"fee"};
-				push (@felines, {%judge_fee_hash});
-
-			} elsif ($category->setting("track_judge_hires")) {
-
-				my ($requests, $accepted) = $m->comp(
-					'/funclib/school_hires.mas', 
-					school   => $school,
-					category => $category
-				);
-
-				my %hired_fee = ();
-
-				if ($category->setting("round_hire_fee")) { 
-
-					if ($accepted ) { 
-
-						$hired_fee{"name"} = $accepted." rounds of judging in ";
-						$hired_fee{"name"} .= $category->name.' at '.$category->setting("round_hire_fee")." each";
-
-						$hired_fee{"fee"} = $accepted * $category->setting("round_hire_fee");
-
-						$hired_fee{"quantity"} = $accepted;
-						$hired_fee{"per_unit"} = $category->setting("round_hire_fee");
-						$hired_fee{"short_name"} = "Rounds of ".$category->abbr." hired judging";
-
-						$total += $accepted * $category->setting("round_hire_fee");
-						$total_entry_fees += $accepted * $category->setting("round_hire_fee");
-						push (@felines, {%hired_fee});
-					}
-
-				} elsif ($category->setting("hired_fee")) { 
-
-					$accepted = ceil($accepted / $judge_per) if $judge_per;
-		
-					if ($accepted ) { 
-
-						$hired_fee{"name"} = $accepted." hired judges for ".$category->name.' at '.$category->setting("hired_fee")." each";
-						$hired_fee{"fee"} = $accepted * $category->setting("hired_fee");
-
-						$hired_fee{"quantity"} = $accepted;
-						$hired_fee{"per_unit"} = $category->setting("hired_fee");
-						$hired_fee{"short_name"} = $category->abbr." hired judges";
-
-						$total += $accepted * $category->setting("hired_fee");
-						$total_entry_fees += $accepted * $category->setting("hired_fee");
-						push (@felines, {%hired_fee});
-					}
-		
-				} elsif ($category->setting("uncovered_entry_fee")) { 
+			GROUP:
+			foreach my $category (sort {$a->name cmp $b->name} $tourn->categories) { 
 				
-					if ($accepted ) { 
-						my $entry = "entries";
-						$entry = "entry" if $accepted == 1;
-						$hired_fee{"name"} = "$accepted $entry covered by hires in ".$category->name.' at '.$category->setting("uncovered_entry_fee")." each";
-						$hired_fee{"fee"} = $accepted * $category->setting("uncovered_entry_fee");
+				my %category_settings = $category->all_settings();
+			
+				my $rounds_per = $category_settings{"rounds_per"};
+				my $judge_per = $category_settings{"judge_per"};
+				my $attending_judge_fee = $category_settings{"attending_judge_fee"}; 
 
-						$hired_fee{"quantity"} = $accepted;
-						$hired_fee{"per_unit"} = $category->setting("uncovered_entry_fee");
-						$hired_fee{"short_name"} = $category->abbr." entries covered by hired judging";
+				my ($uncovered, $extra ) = $m->comp(
+					"/funclib/judgemath/uncovered_burden_by_category.mas", 
+					category          => $category,
+					category_settings => \%category_settings,
+					school            => $school
+				);
 
-						$total += $accepted * $category->setting("uncovered_entry_fee");
-						$total_entry_fees += $accepted * $category->setting("uncovered_entry_fee");
-						push (@felines, {%hired_fee});
+				if ($attending_judge_fee) { 
+
+					my %judge_fee_hash;
+
+					my @judges = Tab::Judge->search( 
+						school   => $school->id,
+						category => $category->id 
+					);
+
+ 					if (@judges) { 
+						$judge_fee_hash{"name"} = scalar @judges.' individual judges at x ';
+						$judge_fee_hash{"name"} .= $attending_judge_fee;
 					}
-				}
 
-				# If there are still missing judges despite the hires, warn the
-				# user and invalidate the invoice if that's not OK
+					$judge_fee_hash{"fee"} = scalar @judges * $attending_judge_fee if @judges;
 
-				if ($uncovered > 0) {
+					$judge_fee_hash{"quantity"} = scalar @judges;
+					$judge_fee_hash{"per_unit"} = $attending_judge_fee;
+					$judge_fee_hash{"short_name"} = "Judges in Attendance";
+
+					$total += $judge_fee_hash{"fee"};
+					$total_entry_fees += $judge_fee_hash{"fee"};
+					push (@felines, {%judge_fee_hash});
+
+				} elsif ($category_settings{"track_judge_hires"}) {
+
+					my ($requests, $accepted) = $m->comp(
+						'/funclib/school_hires.mas', 
+						school   => $school,
+						category => $category
+					);
+
+					my %hired_fee = ();
+
+					if ($category_settings{"round_hire_fee"}) { 
+
+						if ($accepted ) { 
+
+							$hired_fee{"name"} = $accepted." rounds of judging in ";
+							$hired_fee{"name"} .= $category->name.' at '.$category_settings{"round_hire_fee"}." each";
+
+							$hired_fee{"fee"} = $accepted * $category_settings{"round_hire_fee"};
+
+							$hired_fee{"quantity"} = $accepted;
+							$hired_fee{"per_unit"} = $category_settings{"round_hire_fee"};
+							$hired_fee{"short_name"} = "Rounds of ".$category->abbr." hired judging";
+
+							$total += $accepted * $category_settings{"round_hire_fee"};
+							$total_entry_fees += $accepted * $category_settings{"round_hire_fee"};
+							push (@felines, {%hired_fee});
+						}
+
+					} elsif ($category_settings{"hired_fee"}) { 
+
+						$accepted = ceil($accepted / $judge_per) if $judge_per;
+			
+						if ($accepted ) { 
+
+							$hired_fee{"name"} = $accepted." hired judges for ".$category->name.' at '.$category_settings{"hired_fee"}." each";
+							$hired_fee{"fee"} = $accepted * $category_settings{"hired_fee"};
+
+							$hired_fee{"quantity"} = $accepted;
+							$hired_fee{"per_unit"} = $category_settings{"hired_fee"};
+							$hired_fee{"short_name"} = $category->abbr." hired judges";
+
+							$total += $accepted * $category_settings{"hired_fee"};
+							$total_entry_fees += $accepted * $category_settings{"hired_fee"};
+							push (@felines, {%hired_fee});
+						}
+			
+					} elsif ($category_settings{"uncovered_entry_fee"}) { 
+					
+						if ($accepted ) { 
+							my $entry = "entries";
+							$entry = "entry" if $accepted == 1;
+							$hired_fee{"name"} = "$accepted $entry covered by hires in ".$category->name.' at '.$category_settings{"uncovered_entry_fee"}." each";
+							$hired_fee{"fee"} = $accepted * $category_settings{"uncovered_entry_fee"};
+
+							$hired_fee{"quantity"} = $accepted;
+							$hired_fee{"per_unit"} = $category_settings{"uncovered_entry_fee"};
+							$hired_fee{"short_name"} = $category->abbr." entries covered by hired judging";
+
+							$total += $accepted * $category_settings{"uncovered_entry_fee"};
+							$total_entry_fees += $accepted * $category_settings{"uncovered_entry_fee"};
+							push (@felines, {%hired_fee});
+						}
+					}
+
+					# If there are still missing judges despite the hires, warn the
+					# user and invalidate the invoice if that's not OK
+
+					if ($uncovered > 0) {
+
+						my %judge_fee_hash = ();
+
+						$uncovered = ceil($uncovered / $judge_per) if $judge_per;
+
+						if ($category_settings{"missing_judge_fee"}) { 
+
+							if ($rounds_per) { 
+
+								my $round = "round";
+								$round .= "s" if $uncovered != 1;
+
+								$judge_fee_hash{"name"} = "Missing $uncovered $round in ".$category->name;
+								$judge_fee_hash{"fee"} = $uncovered * $category_settings{"missing_judge_fee"};
+
+								$judge_fee_hash{"quantity"} = $uncovered;
+								$judge_fee_hash{"per_unit"} = $category_settings{"missing_judge_fee"};
+								$judge_fee_hash{"short_name"} = $category->abbr." uncovered rounds of judging";
+
+								$total += $judge_fee_hash{"fee"};
+								$total_entry_fees += $judge_fee_hash{"fee"};
+
+							} elsif ($judge_per) { 
+						
+								my $judge = "judge";
+								$judge .= "s" if $uncovered != 1;
+								$judge_fee_hash{"name"} = "Missing $uncovered $judge in ".$category->name;
+								$judge_fee_hash{"fee"} = $uncovered * $category_settings{"missing_judge_fee"};
+
+								$judge_fee_hash{"quantity"} = $uncovered;
+								$judge_fee_hash{"per_unit"} = $category_settings{"missing_judge_fee"};
+								$judge_fee_hash{"short_name"} = $category->abbr." judges under obligation";
+
+								$total += $judge_fee_hash{"fee"};
+								$total_entry_fees += $judge_fee_hash{"fee"};
+							}
+
+						} else { 
+
+							$judge_fee_hash{"name"} = "WARNING: You are short $uncovered judges in ".$category->name.". Hire or register more judges to cover your obligation by the deadline, or the tournament may reject your entry." if $judge_per;
+
+							$judge_fee_hash{"name"} = "WARNING: You are short $uncovered rounds in ".$category->name.". Hire or register more judges to cover your obligation by the deadline, or the tournament may reject your entry." if $rounds_per;
+
+							$judge_fee_hash{"warn"}++;
+						}
+
+						push (@felines, {%judge_fee_hash});
+				
+					}
+
+				} elsif ($uncovered > 0) {
 
 					my %judge_fee_hash = ();
 
 					$uncovered = ceil($uncovered / $judge_per) if $judge_per;
 
-					if ($category->setting("missing_judge_fee")) { 
+					$judge_fee_hash{"name"} = "WARNING: You are missing $uncovered judge(s) in ".$category->name.".  This tournament does not provide hired judging; register judges or reduce your entry." if $judge_per;
 
-						if ($rounds_per) { 
+					$judge_fee_hash{"name"} = "WARNING: You are missing $uncovered round(s) in ".$category->name.".  This tournament does not provide hired judging; register judges or reduce your entry." if $rounds_per;
 
-							my $round = "round";
-							$round .= "s" if $uncovered != 1;
-
-							$judge_fee_hash{"name"} = "Missing $uncovered $round in ".$category->name;
-							$judge_fee_hash{"fee"} = $uncovered * $category->setting("missing_judge_fee");
-
-							$judge_fee_hash{"quantity"} = $uncovered;
-							$judge_fee_hash{"per_unit"} = $category->setting("missing_judge_fee");
-							$judge_fee_hash{"short_name"} = $category->abbr." uncovered rounds of judging";
-
-							$total += $judge_fee_hash{"fee"};
-							$total_entry_fees += $judge_fee_hash{"fee"};
-
-						} elsif ($judge_per) { 
-					
-							my $judge = "judge";
-							$judge .= "s" if $uncovered != 1;
-							$judge_fee_hash{"name"} = "Missing $uncovered $judge in ".$category->name;
-							$judge_fee_hash{"fee"} = $uncovered * $category->setting("missing_judge_fee");
-
-							$judge_fee_hash{"quantity"} = $uncovered;
-							$judge_fee_hash{"per_unit"} = $category->setting("missing_judge_fee");
-							$judge_fee_hash{"short_name"} = $category->abbr." judges under obligation";
-
-							$total += $judge_fee_hash{"fee"};
-							$total_entry_fees += $judge_fee_hash{"fee"};
-						}
-
-					} else { 
-
-						$judge_fee_hash{"name"} = "WARNING: You are short $uncovered judges in ".$category->name.". Hire or register more judges to cover your obligation by the deadline, or the tournament may reject your entry." if $judge_per;
-
-						$judge_fee_hash{"name"} = "WARNING: You are short $uncovered rounds in ".$category->name.". Hire or register more judges to cover your obligation by the deadline, or the tournament may reject your entry." if $rounds_per;
-
-						$judge_fee_hash{"warn"}++;
-					}
-
-					push (@felines, {%judge_fee_hash});
-			
-				}
-
-			} elsif ($uncovered > 0) {
-
-				my %judge_fee_hash = ();
-
-				$uncovered = ceil($uncovered / $judge_per) if $judge_per;
-
-				$judge_fee_hash{"name"} = "WARNING: You are missing $uncovered judge(s) in ".$category->name.".  This tournament does not provide hired judging; register judges or reduce your entry." if $judge_per;
-
-				$judge_fee_hash{"name"} = "WARNING: You are missing $uncovered round(s) in ".$category->name.".  This tournament does not provide hired judging; register judges or reduce your entry." if $rounds_per;
-
-				$judge_fee_hash{"fee"} = $uncovered * $category->setting('missing_judge_fee');
-
-				$judge_fee_hash{"warn"} = 1;
-
-				push (@felines, {%judge_fee_hash});
-
-				$total += $judge_fee_hash{"fee"};
-				$total_entry_fees += $judge_fee_hash{"fee"};
-			}
-
-			my %stimes_under = $m->comp(
-				"/funclib/judgemath/judge_partials_short.mas", 
-				category => $category,
-				school   => $school
-			);
-
-			foreach my $key (keys %stimes_under) {
-
-				my $stime = Tab::StrikeTimeslot->retrieve($key);
-
-				next unless $stimes_under{$stime->id} > 0;
-
-				if ($stime->no_hires) { 
-
-					my %judge_fee_hash = ();
-					$judge_fee_hash{"name"} .= "WARNING: You are under judge obligation by ";
-					$judge_fee_hash{"name"} .= $stimes_under{$stime->id}." judge(s) in ";
-					$judge_fee_hash{"name"} .= $category->name." ".$stime->name;
+					$judge_fee_hash{"fee"} = $uncovered * $category_settings{'missing_judge_fee'};
 
 					$judge_fee_hash{"warn"} = 1;
+
 					push (@felines, {%judge_fee_hash});
 
-				} 
-				
-				if ($stime->fine) { 
-				
-					my %stime_fine = ();
+					$total += $judge_fee_hash{"fee"};
+					$total_entry_fees += $judge_fee_hash{"fee"};
+				}
 
-					$stime_fine{"name"} = $stimes_under{$stime->id}." ".$category->name;
-					$stime_fine{"name"} .= "judges under in ".$stime->name." at ".$stime->fine." each";
-					$stime_fine{"fee"}  =  $stime->fine * $stimes_under{$stime->id};
+				my %stimes_under = $m->comp(
+					"/funclib/judgemath/judge_partials_short.mas", 
+					category          => $category,
+					category_settings => \%category_settings,
+					school            => $school
+				);
 
-					$stime_fine{"quantity"} = $stimes_under{$stime->id};
-					$stime_fine{"per_unit"} = $stime->fine;
-					$stime_fine{"short_name"} = "Judges under obligation in ".$stime->name;
+				foreach my $key (keys %stimes_under) {
 
-					$total += $stime->fine * $stimes_under{$stime->id};
-					$total_entry_fees += $stime->fine * $stimes_under{$stime->id};
-							
-					push (@felines, {%stime_fine});
-				} 
+					my $stime = Tab::StrikeTimeslot->retrieve($key);
 
-			}	
+					next unless $stimes_under{$stime->id} > 0;
 
-		} #end of foreach group
+					if ($stime->no_hires) { 
+
+						my %judge_fee_hash = ();
+						$judge_fee_hash{"name"} .= "WARNING: You are under judge obligation by ";
+						$judge_fee_hash{"name"} .= $stimes_under{$stime->id}." judge(s) in ";
+						$judge_fee_hash{"name"} .= $category->name." ".$stime->name;
+
+						$judge_fee_hash{"warn"} = 1;
+						push (@felines, {%judge_fee_hash});
+
+					} 
+					
+					if ($stime->fine) { 
+					
+						my %stime_fine = ();
+
+						$stime_fine{"name"} = $stimes_under{$stime->id}." ".$category->name;
+						$stime_fine{"name"} .= "judges under in ".$stime->name." at ".$stime->fine." each";
+						$stime_fine{"fee"}  =  $stime->fine * $stimes_under{$stime->id};
+
+						$stime_fine{"quantity"} = $stimes_under{$stime->id};
+						$stime_fine{"per_unit"} = $stime->fine;
+						$stime_fine{"short_name"} = "Judges under obligation in ".$stime->name;
+
+						$total += $stime->fine * $stimes_under{$stime->id};
+						$total_entry_fees += $stime->fine * $stimes_under{$stime->id};
+								
+						push (@felines, {%stime_fine});
+					} 
+
+				}	
+
+			} #end of foreach group
+
+		} 
 
 	} 
 
@@ -365,6 +408,7 @@
 			$line{"quantity"} = $quantity;
 			$line{"per_unit"} = $concession->price;
 			$line{"short_name"} = $concession->name;
+
 
 			$total += $quantity * $concession->price;;
 			$total_concessions += $quantity * $concession->price;;
