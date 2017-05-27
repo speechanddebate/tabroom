@@ -1,0 +1,216 @@
+<%args>
+	$tourn_id
+	$person_id
+	$session_id
+	$restore_mode		#valid values are school_reg, round, event, tourn
+	$event_id => undef
+	$round_id => undef
+	$school_id => undef
+</%args>
+
+<%init>
+
+########################################################################################
+#		read local JSON file into a hash
+#		When this is done there's a hash that goes { table }{ record }{ field }
+#		HERE'S THE DEAL: When it's downloaded, each record is listed by the original tabroom ID, and
+#		every record ALSO has a redundant sub-field that stores the same information.
+#		So I'm gonna write one chunk of code to sync up the tabroom ID numbers in the
+#		redundant field, and then a second chunk of code to write that back to the database
+#########################################################################################
+
+		#### This finds the file 
+
+Tab::debuglog("Holy shit it's all on fire!!!!");
+
+use strict;
+use warnings;
+use Data::Dumper; 
+binmode STDOUT, ":utf8";
+use utf8;
+use DateTime;
+use Time::HiRes qw( time );
+my $start = time(); 
+
+my $tourn = Tab::Tourn->retrieve($tourn_id);
+my $person = Tab::Person->retrieve($person_id);
+my $session = Tab::Session->retrieve($session_id);
+
+my $tz = $tourn->tz if $tourn->tz;
+$tz = "UTC" unless $tz;
+	
+my $dbh = Tab::DBI->db_Main();
+use JSON;
+use Encode qw(encode_utf8);
+
+#upload sequence
+my $now = DateTime->now;
+$now->set_time_zone($tz);
+my $req = Apache2::Request->new($r, DISABLE_UPLOADS => 0);
+my $json_file = $req->upload('json_data');
+unless ($json_file) { print $r." Couldn't find file<br>"; $m->abort };
+my $json_filename = $json_file->tempname;
+my $filename = $json_filename;
+
+		#### This reads the file and converts the JSON to a hash called %data ###
+		
+my $json;
+#my $filename = '/www/tabroom/web/register/data/NSDA.json';
+
+{
+  local $/; #Enable 'slurp' mode
+  open my $fh, "<", $filename;
+  $json = <$fh>;
+  close $fh;
+}
+
+
+my $HashReferenceDecoded = decode_json($json);
+my %data = %$HashReferenceDecoded;
+#print Dumper(%data);
+
+my $end = time(); 
+print "Time to load JSON file into a hash:"; printf("%.2f\n", $end - $start) ; print "<br>";
+
+		#### Now looking at the permanent tables...update any records that exist in the database
+		#### and otherwise create them
+		
+		#### Now delete all tourney records that are relevant to the restore
+		
+if ( $restore_mode eq 'tourn' ) {
+	$m->comp("/register/data/reset_panels.mas", fire_as_function => 42, tourn => $tourn, person => $person, certain => "I am certain");
+	$m->comp("/register/data/reset_everything.mas", fire_as_function => 42, tourn => $tourn, person => $person, certain => "I am certain");
+	$m->comp("/register/data/reset_registration.mas",  fire_as_function => 42, tourn => $tourn, person => $person, certain => "I am certain");
+	my $sth = $dbh->prepare( "DELETE from tourn_circuit where tourn=".$tourn->id );
+	$sth->execute();
+	$sth = $dbh->prepare( "DELETE from tourn_site where tourn=".$tourn->id );
+	$sth->execute();
+	$sth = $dbh->prepare( "DELETE from tourn_ignore where tourn=".$tourn->id );
+	$sth->execute();
+	$sth = $dbh->prepare( "DELETE from tourn_fee where tourn=".$tourn->id );
+	$sth->execute();
+	foreach my $category ($tourn->categories) {
+		my $sth = $dbh->prepare( "DELETE from category_setting where category=".$category->id );
+		$sth->execute();
+	}
+}
+if ( $restore_mode eq 'event' ) {
+	$m->comp("/setup/event/event_rm.mhtml", event_id => $event_id, fire_as_function => 42, tourn => $tourn, person => $person);
+}
+if ( $restore_mode eq 'round' ) {
+	$m->comp("/funclib/round_dump.mas", round_id => $round_id, fire_as_function => 42, person => $person);
+}
+if ( $restore_mode eq 'school_reg' ) {
+	$m->comp("/register/school/drop.mhtml", school_id => $school_id, fire_as_function => 42, tourn => $tourn, person => $person, certain => "I am certain");
+}
+
+
+$end = time(); 
+print "Time to complete deletion:"; printf("%.2f\n", $end - $start) ; print "<br>";
+
+		#### Now scroll through the hash, add the records to the local tables, and store the new
+		#### id numbers in $data{$table}{$rec}{'id'}
+
+my $field_name;
+my $field_str;
+my $ctr = 0;
+my $sql;
+foreach my $table (sort keys %data) {
+	if ( use_table($table, $restore_mode) == 1 ) {
+		foreach my $rec (sort keys %{ $data{$table} }) {
+			$ctr=0;
+			my @field_values;
+			foreach my $field (sort keys %{ $data{$table}{$rec} }) {
+			
+				
+				if ($field ne 'id') {
+					if ( $ctr == 0 ) {
+						$field_name = $field ;
+						$field_str = "?" ;
+					} else {
+						$field_name = $field_name.", ".$field;
+						$field_str = $field_str.", ?" ;
+					}
+					$field_values[$ctr] = $data{$table}{$rec}{$field};
+					$field_values[$ctr] = $tourn_id if $field eq 'tourn' ;
+					$ctr++;
+				}
+
+			}
+			
+			$sql = 'INSERT INTO '.$table.' ('.$field_name.') VALUES ('.$field_str.')' ;
+			my $sth = $dbh->prepare( $sql );
+			$sth->execute(@field_values);
+			#Now grab the current id and store it in the hash
+			$data{$table}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+			#print $sql."<br>"  if $table eq "ballot" ;
+			#print "For table $table new tabroom ID for $rec is ".$data{$table}{$rec}{'id'}."<br>";
+		}
+	}
+}
+
+$end = time(); 
+print "Time to create records:"; printf("%.2f\n", $end - $start) ; print "<br>";
+
+#now update the downstream tables withe the new TR numbers
+
+my $not_this_table=0;
+foreach my $table (sort keys %data) {
+	#print "Working on table ".$table."<br>";
+	if ( use_table($table, $restore_mode) == 1 ) {
+		#scroll through all the records in all the tables, and update every field that references a higher-ordered table
+		foreach my $table2 (sort keys %data) {
+			$not_this_table = 0;
+			foreach my $rec2 (sort keys %{ $data{$table2} }) {
+				last if $not_this_table == 1;
+				if ( not exists $data{$table2}{$rec2}{$table} ) {
+					#print "no $table found in $table2; value=".$data{$table2}{$rec2}{$table}." for $table2 $rec2<br>";
+					$not_this_table = 1;
+					last;
+				}
+				if ( $data{$table2}{$rec2}{$table} ) { 				#don't do anything for blank records
+					#print "Changing $table in $table2 record=$rec2 field=$table from ".$data{$table2}{$rec2}{$table}." to ".$data{$table}{ $data{$table2}{$rec2}{$table} }{'id'}."<br>" ;
+					my $orig_id = $data{$table2}{$rec2}{$table};
+					#$data{$table2}{$rec2}{$table} = $data{$table}{ $data{$table2}{$rec2}{$table} }{'id'} ;
+					#print "original ballot id is ".$orig_id." and new is ";
+					#print $data{$table}{ $orig_id }{'id'}."<br>";
+					$sql = 'UPDATE '.$table2.' SET '.$table.' ='.$data{$table}{ $orig_id }{'id'}.' WHERE id='.$data{$table2}{$rec2}{'id'} ; 
+					my $sth = $dbh->prepare( $sql ) ;
+					$sth->execute() if $data{$table}{ $orig_id }{'id'};
+					#print "$sql<br>" if $table2 eq 'score' ;
+				}
+			}
+		}
+	}
+}
+$end = time(); 
+print "Time to update records with new id numbers:"; printf("%.2f\n", $end - $start) ; print "<br>";
+
+sub use_table{
+
+	my $table = shift @_;
+	my $restore_mode = shift;
+
+	#these are permanent tables that don't have anything to do with the tournament; don't mess with them
+	if ($table eq "tourn") { return 0; }
+	if ($table eq "nsda_event_category") { return 0; } 
+	if ($table eq "person") { return 0; } 
+	if ($table eq "person_setting") { return 0; } 
+	if ($table eq "circuit") { return 0; } 
+	if ($table eq "chapter") { return 0; }
+	if ($table eq "room") { return 0; } 	
+	if ($table eq "site") { return 0; } 
+	if ($table eq "student") { return 0; } 
+	if ($table eq "student_setting") { return 0; } 
+	
+	my $dummy=0;
+	
+	#if you're restoring the entire tournament, use all the tables
+	if ($restore_mode eq "tourn") {
+		$dummy = 1;
+		return($dummy);
+	}
+
+}
+
+</%init>
