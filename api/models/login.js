@@ -11,14 +11,6 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING(128),
 			allowNull: true
 		},
-		sha512: {
-			type: DataTypes.STRING(128),
-			allowNull: true
-		},
-		spinhash: {
-			type: DataTypes.STRING(64),
-			allowNull: true
-		},
 		accesses: {
 			type: DataTypes.INTEGER(11),
 			allowNull: false,
@@ -38,14 +30,6 @@ module.exports = function(sequelize, DataTypes) {
 		},
 		pass_change_expires: {
 			type: DataTypes.DATE,
-			allowNull: true
-		},
-		source: {
-			type: 'CHAR(4)',
-			allowNull: true
-		},
-		ualt_id: {
-			type: DataTypes.INTEGER(11),
 			allowNull: true
 		}
 	});

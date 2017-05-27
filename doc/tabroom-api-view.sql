@@ -7,12 +7,11 @@ create view tabapi.ballot
 	(id,
 		side,
 		speakerorder,
-		speechnumber,
+		seat,
 		chair,
 		bye,
 		forfeit,
 		seed,
-		pullup,
 		tv,
 		audit,
 		judge_started,
@@ -29,12 +28,11 @@ as select
 	id,
 		side,
 		speakerorder,
-		speechnumber,
+		seat,
 		chair,
 		bye,
 		forfeit,
 		seed,
-		pullup,
 		tv,
 		audit,
 		judge_started,
@@ -73,13 +71,12 @@ create view tabapi.change_log
 		person_id,
 		tourn_id,
 		event_id,
-		school_id,
 		entry_id,
 		judge_id,
-		
-		old_panel_id,
-		new_panel_id,
 		fine_id,
+		new_panel_id,
+		old_panel_id,
+		school_id,
 		timestamp)
 as select
 	id,
@@ -89,24 +86,28 @@ as select
 		person,
 		tourn,
 		event,
-		school,
 		entry,
 		judge,
-		
-		old_panel,
-		new_panel,
 		fine,
+		
+		new_panel,
+		old_panel,
+		school,
 		timestamp
 from tabroom.change_log;
 
 create view tabapi.circuit_membership
 	(id,
 		name,
+		approval,
+		description,
 		circuit_id,
 		timestamp)
 as select
 	id,
 		name,
+		approval,
+		description,
 		circuit,
 		timestamp
 from tabroom.circuit_membership;
@@ -142,10 +143,9 @@ create view tabapi.chapter
 		zip,
 		postal,
 		country,
-		coaches,
-		self_prefs,
 		level,
 		nsda,
+		naudl,
 		district_id,
 		timestamp)
 as select
@@ -157,10 +157,9 @@ as select
 		zip,
 		postal,
 		country,
-		coaches,
-		self_prefs,
 		level,
 		nsda,
+		naudl,
 		district,
 		timestamp
 from tabroom.chapter;
@@ -221,32 +220,61 @@ as select
 		timestamp
 from tabroom.chapter_judge;
 
+create view tabapi.concession_option
+	(id,
+		name,
+		description,
+		disabled,
+		concession_type,
+		timestamp
+	)
+as select
+	id,
+		name,
+		description,
+		disabled,
+		concession_type,
+		timestamp
+from tabroom.concession_option;
+
 create view tabapi.concession_purchase
 	(id,
 		quantity,
 		placed,
 		fulfilled,
-		concession_id,
 		school_id,
+		concession_id,
 		timestamp)
 as select
 	id,
 		quantity,
 		placed,
 		fulfilled,
-		concession,
 		school,
+		concession,
 		timestamp
 from tabroom.concession_purchase;
+
+create view tabapi.concession_purchase_option
+	(
+		concession_purchase_id,
+		concession_option_id,
+		timestamp
+	)
+as select
+	concession_purchase,
+	concession_option,
+	timestamp
+from tabroom.concession_purchase_option;
 
 create view tabapi.concession
 	(id,
 		name,
 		price,
 		description,
+		deadline,
 		cap,
 		school_cap,
-		deadline,
 		tourn_id,
 		timestamp)
 as select
@@ -254,12 +282,27 @@ as select
 		name,
 		price,
 		description,
+		deadline,
 		cap,
 		school_cap,
-		deadline,
 		tourn,
 		timestamp
 from tabroom.concession;
+
+create view tabapi.concession_type
+	(id,
+		name,
+		description,
+		concession_id,
+		timestamp
+	)
+as select
+	id,
+		name,
+		description,
+		concession,
+		timestamp
+from tabroom.concession_type;
 
 create view tabapi.conflict
 	(id,
@@ -285,6 +328,7 @@ create view tabapi.pattern
 		type,
 		max,
 		exclude_id,
+		tourn_id,
 		timestamp)
 as select
 	id,
@@ -292,6 +336,7 @@ as select
 		type,
 		max,
 		exclude,
+		tourn,
 		timestamp
 from tabroom.pattern;
 
@@ -321,35 +366,33 @@ create view tabapi.entry
 	(id,
 		code,
 		name,
-		active,
 		ada,
+
+		active,
 		tba,
-		seed,
-		
 		dropped,
 		waitlisted,
-		dq,
 		unconfirmed,
+		dq,
 		
 		event_id,
 		school_id,
 		tourn_id,
 		registered_by_id,
+		created_at,
 		timestamp)
 as select
 	id,
 		code,
 		name,
-		active,
 		ada,
+		active,
 		tba,
-		seed,
-		
 		dropped,
 		waitlist,
-		dq,
 		unconfirmed,
-		
+		dq,
+		created_at,
 		event,
 		school,
 		tourn,
@@ -393,31 +436,31 @@ from tabroom.event;
 
 create view tabapi.file
 	(id,
-		label,
 		type,
+		label,
 		filename,
 		published,
-		uploaded_at,
-		circuit_id,
+		coach,
+		uploaded,
 		tourn_id,
-		event_id,
-		webpage_id,
 		school_id,
-		result_set_id,
+		event_id,
+		circuit_id,
+		webpage_id,
 		timestamp)
 as select
 	id,
-		label,
 		type,
+		label,
 		filename,
 		published,
+		coach,
 		uploaded,
-		circuit,
 		tourn,
-		event,
-		webpage,
 		school,
-		result,
+		event,
+		circuit,
+		webpage,
 		timestamp
 from tabroom.file;
 
@@ -426,12 +469,11 @@ create view tabapi.fine
 		reason,
 		amount,
 		payment,
+		levied_at,
+		levied_by_id,
 		deleted,
 		deleted_at,
 		deleted_by_id,
-		levied_at,
-		levied_by_id,
-		
 		tourn_id,
 		school_id,
 		region_id,
@@ -442,11 +484,11 @@ as select
 		reason,
 		amount,
 		payment,
+		levied_at,
+		levied_by,
 		deleted,
 		deleted_at,
 		deleted_by,
-		levied_at,
-		levied_by,
 		tourn,
 		school,
 		region,
@@ -500,8 +542,8 @@ create view tabapi.housing
 	(id,
 		type,
 		night,
-		tba,
 		waitlist,
+		tba,
 		requested,
 		requestor_id,
 		tourn_id,
@@ -513,8 +555,8 @@ as select
 	id,
 		type,
 		night,
-		tba,
 		waitlist,
+		tba,
 		requested,
 		requestor,
 		tourn,
@@ -579,9 +621,10 @@ create view tabapi.judge_hire
 		rounds_requested,
 		rounds_accepted,
 		requested_at,
-		
+		requestor_id,
 		tourn_id,
 		school_id,
+		region_id,
 		judge_id,
 		category_id,
 		timestamp)
@@ -592,8 +635,10 @@ as select
 		rounds_requested,
 		rounds_accepted,
 		requested_at,
+		requestor,
 		tourn,
 		school,
+		region,
 		judge,
 		category,
 		timestamp
@@ -642,35 +687,24 @@ from tabroom.judge;
 create view tabapi.login
 	(id,
 		username,
+		password,
 		accesses,
 		last_access,
-		password,
-		sha512,
-		spinhash,
 		pass_timestamp,
 		pass_changekey,
 		pass_change_expires,
-		source,
-		
-	person_id,
-		nsda_login_id,
-		ualt_id,
+		person_id,
 		timestamp)
 as select
 	id,
 		username,
+		sha512,
 		accesses,
 		last_access,
-		password,
-		sha512,
-		spinhash,
 		pass_timestamp,
 		pass_changekey,
 		pass_change_expires,
-		source,
-	person,
-		nsda_login_id,
-		ualt_id,
+		person,
 		timestamp
 from tabroom.login;
 
@@ -680,21 +714,10 @@ create view tabapi.person
 		first,
 		middle,
 		last,
-		gender,
-		pronoun,
-		no_email,
-		street,
-		city,
-		state,
-		zip,
-		postal,
-		country,
 		tz,
 		phone,
 		provider,
 		site_admin,
-		diversity,
-		googleplus,
 		ualt_id,
 		timestamp)
 as select
@@ -703,21 +726,10 @@ as select
 		first,
 		middle,
 		last,
-		gender,
-		pronoun,
-		no_email,
-		street,
-		city,
-		state,
-		zip,
-		postal,
-		country,
 		tz,
 		phone,
 		provider,
 		site_admin,
-		diversity,
-		googleplus,
 		ualt_id,
 		timestamp
 from tabroom.person;
@@ -762,8 +774,8 @@ create view tabapi.rating_tier
 		min,
 		max,
 		default_tier,
-		rating_subset_id,
 		category_id,
+		rating_subset_id,
 		timestamp)
 as select
 	id,
@@ -775,8 +787,8 @@ as select
 		min,
 		max,
 		start,
-		rating_subset,
 		category,
+		rating_subset,
 		timestamp
 from tabroom.rating_tier;
 
@@ -836,63 +848,23 @@ as select
 		timestamp
 from tabroom.region;
 
-create view tabapi.diocese
-	(id,
-		name,
-		code,
-		state,
-		quota,
-		active,
-		archdiocese,
-		cooke_award_points,
-		timestamp)
-as select
-	id,
-		name,
-		code,
-		state,
-		quota,
-		active,
-		archdiocese,
-		cooke_award_points,
-		timestamp
-from tabroom.diocese;
-
 create view tabapi.district
 	(id,
 		name,
 		code,
 		location,
-		chair,
+		level,
+		realm,
 		timestamp)
 as select
 	id,
 		name,
 		code,
 		location,
-		chair,
+		level,
+		realm,
 		timestamp
 from tabroom.district;
-
-create view tabapi.region_fine
-	(id,
-		reason,
-		amount,
-		levied_at,
-		levied_by_id,
-		region_id,
-		tourn_id,
-		timestamp)
-as select
-	id,
-		reason,
-		amount,
-		levied_on,
-		levied_by,
-		region,
-		tourn,
-		timestamp
-from tabroom.region_fine;
 
 create view tabapi.result_set
 	(id,
@@ -988,10 +960,11 @@ from tabroom.room_strike;
 
 create view tabapi.room
 	(id,
-		building,
 		name,
 		quality,
 		capacity,
+		rows,
+		seats,
 		inactive,
 		ada,
 		notes,
@@ -999,10 +972,11 @@ create view tabapi.room
 		timestamp)
 as select
 	id,
-		building,
 		name,
 		quality,
 		capacity,
+		rows,
+		seats,
 		inactive,
 		ada,
 		notes,
@@ -1015,10 +989,8 @@ create view tabapi.round
 		type,
 		number,
 		label,
-		flighted,
 		published,
 		post_results,
-		start_time,
 		event_id,
 		timeslot_id,
 		site_id,
@@ -1029,10 +1001,8 @@ as select
 		type,
 		name,
 		label,
-		flighted,
 		published,
 		post_results,
-		start_time,
 		event,
 		timeslot,
 		site,
@@ -1099,6 +1069,7 @@ create view tabapi.score
 		tag,
 		value,
 		content,
+		topic,
 		speech,
 		position,
 		ballot_id,
@@ -1109,6 +1080,7 @@ as select
 		tag,
 		value,
 		content,
+		topic,
 		speech,
 		position,
 		ballot,
@@ -1118,11 +1090,9 @@ from tabroom.score;
 
 create view tabapi.panel
 	(id,
-		letter,
+		marker,
 		flight,
 		bye,
-		started,
-		confirmed,
 		bracket,
 		room_id,
 		round_id,
@@ -1132,8 +1102,6 @@ as select
 		letter,
 		flight,
 		bye,
-		started,
-		confirmed,
 		bracket,
 		room,
 		round,
@@ -1206,6 +1174,7 @@ create view tabapi.strike
 		school_id,
 		region_id,
 		strike_timeslot_id,
+		dioregion_id,
 		timestamp)
 as select
 	id,
@@ -1221,6 +1190,7 @@ as select
 		school,
 		region,
 		strike_timeslot,
+		dioregion,
 		timestamp
 from tabroom.strike;
 
@@ -1238,7 +1208,6 @@ create view tabapi.student
 		birthdate,
 		school_sid,
 		race,
-		
 		ualt_id,
 		chapter_id,
 		person_id,
@@ -1258,7 +1227,6 @@ as select
 		birthdate,
 		school_sid,
 		race,
-		
 		ualt_id,
 		chapter,
 		person,
@@ -1334,20 +1302,24 @@ create view tabapi.tiebreak
 	(id,
 		name,
 		count,
+		truncate,
 		multiplier,
 		priority,
 		highlow,
 		highlow_count,
+		child_id,
 		tiebreak_set_id,
 		timestamp)
 as select
 	id,
 		name,
 		count,
+		truncate,
 		multiplier,
 		priority,
 		highlow,
 		highlow_count,
+		child,
 		tiebreak_set,
 		timestamp
 from tabroom.tiebreak;
@@ -1796,23 +1768,25 @@ from tabroom.region_setting;
 
 create view tabapi.permission
 	(id,
+		tag,
 		person_id,
 		tourn_id,
 		region_id,
+		district_id,
 		chapter_id,
 		circuit_id,
 		category_id,
-		tag,
 		timestamp)
 	as select 
 	id,
+		tag,
 		person,
 		tourn,
 		region,
+		district,
 		chapter,
 		circuit,
 		category,
-		tag,
 		timestamp
 from tabroom.permission;
 

@@ -15,16 +15,16 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING,
 			allowNull: true
 		},
+		deadline: { 
+			type: DataTypes.DATE,
+			allowNull: true
+		},
 		cap: { 
 			type: DataTypes.INTEGER(11),
 			allowNull: true
 		},
 		school_cap: { 
 			type: DataTypes.INTEGER(11),
-			allowNull: true
-		},
-		deadline: { 
-			type: DataTypes.DATE,
 			allowNull: true
 		}
 	});

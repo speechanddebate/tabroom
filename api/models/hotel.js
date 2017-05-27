@@ -7,7 +7,7 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: ''
 		},
-		multiple: { 
+		fee_multiplier: { 
 			type: DataTypes.FLOAT,
 			allowNull: true
 		}

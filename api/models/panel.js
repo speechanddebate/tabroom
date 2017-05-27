@@ -15,14 +15,6 @@ module.exports = function(sequelize, DataTypes) {
 		  allowNull: false,
 		  defaultValue: '0'
 		},
-		started: {
-		  type: DataTypes.DATE,
-		  allowNull: true
-		},
-		confirmed: {
-		  type: DataTypes.DATE,
-		  allowNull: true
-		},
 		bracket: {
 		  type: DataTypes.INTEGER(6),
 		  allowNull: false,

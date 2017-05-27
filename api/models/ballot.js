@@ -10,7 +10,7 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
-		speechnumber: {
+		seat: {
 			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
@@ -30,11 +30,6 @@ module.exports = function(sequelize, DataTypes) {
 			defaultValue: '0'
 		},
 		seed: {
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0'
-		},
-		pullup: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'

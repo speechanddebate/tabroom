@@ -24,6 +24,11 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
+		deleted: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
 		ada: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,

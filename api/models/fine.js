@@ -15,6 +15,10 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
+		levied_at: { 
+			type: DataTypes.DATE,
+			allowNull: true
+		}
 		deleted: { 
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
@@ -24,10 +28,6 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
-		levied_at: { 
-			type: DataTypes.DATE,
-			allowNull: true
-		}
 	});
 };
 

@@ -26,18 +26,21 @@
 
 	function postSwitch(checkObject, replyUrl) { 
 
-		var targetId     = $("#"+checkObject.id).attr("target_id");
-		var propertyName = $("#"+checkObject.id).attr("property_name");
-		var settingName  = $("#"+checkObject.id).attr("setting_name");
+		var targetId     = $(checkObject).attr("target_id");
+		var propertyName = $(checkObject).attr("property_name");
+		var settingName  = $(checkObject).attr("setting_name");
+		var successAction = $(checkObject).attr("on_success");
+
+		console.log("Target "+targetId+" and property "+propertyName);
 
 		var propertyValue = checkObject.value;
 
 		if (propertyValue === undefined) { 
-			propertyValue = $("#"+checkObject.id).attr("value");
+			propertyValue = $(checkObject).attr("value");
 		}
 
 		if (checkObject.type === "checkbox") { 
-			if ($("#"+checkObject.id).prop("checked") === false) { 
+			if ($(checkObject).prop("checked") === false) { 
 				propertyValue = 0;
 			}
 		}
@@ -52,6 +55,11 @@
 				property_value : propertyValue
 			},
 			success : function(data) {
+
+
+				if (successAction === "destroy") { 
+					$("#"+targetId).remove();
+				}
 
 				$('table').trigger('applyWidgets');
 
