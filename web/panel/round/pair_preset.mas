@@ -9,10 +9,13 @@
 
 	$round = Tab::Round->retrieve($round_id) unless $round > 0;
 	my $event = $round->event;
-
 	my %event_settings = $event->all_settings;
 
-	our $ncfl = $event->tourn->setting("ncfl");
+	my $tourn = $event->tourn;
+
+	$event_settings{"ncfl"} = $tourn->setting("ncfl");
+	$event_settings{"region_avoid"}++ if $event_settings{"ncfl"};
+	$event_settings{"nsda_nats"} = $tourn->setting("nsda_nats");
 
 	my $dio_regions = $event->category->setting("conflict_region_judges");
 
@@ -43,12 +46,15 @@
 	my $entry_sth = $dbh->prepare('
 		select distinct entry.id, 
 			school.region, school.id, 
-			entry.code, dioregion.value
+			entry.code, dioregion.value, 
+			chapter.state
 		from (entry, school)
 
 		left join region_setting dioregion 
 			on dioregion.region = school.region 
 			and dioregion.tag = "region-'.$event->id.'"
+
+		left join chapter on school.chapter = chapter.id
 
 		where entry.event = ? 
 		and entry.school = school.id
@@ -58,15 +64,13 @@
 	my @entries;
 
 	my %entry_info;
-
-	my %school_size;
-
+	my %school_info;
 	my %seed_count;
 
 	$entry_sth->execute($event->id);
 
 	while (
-		my ($entry_id, $region, $school, $code, $dioregion) 
+		my ($entry_id, $region, $school, $code, $dioregion, $state) 
 		= $entry_sth->fetchrow_array() 
 	) {
 
@@ -74,17 +78,24 @@
 
 		push @entries, $entry_id;
 
-		if ($ncfl) { 
+		if ($event_settings{"nsda_nats"}) { 
+
+			$entry_info{$entry_id}{"school"} = $region;
+			$entry_info{$entry_id}{"state"} = $state;
+
+			$school_info{"size"}{$region}++;
+
+		} elsif ($event_settings{"ncfl"}) { 
 
 			$entry_info{$entry_id}{"school"} = $region;
 			$entry_info{$entry_id}{"region"} = $dioregion;
-			$school_size{$region}++;
+			$school_info{"size"}{$region}++;
 
 		} else {
 
 			$entry_info{$entry_id}{"region"} = $region;
 			$entry_info{$entry_id}{"school"} = $school;
-			$school_size{$school}++;
+			$school_info{"size"}{$school}++;
 
 		}
 
@@ -140,7 +151,7 @@
 
         #pull hybrid school conflicts
         my @strikes = Tab::Strike->search( 
-			tourn => $event->tourn,
+			tourn => $tourn,
 			type  => 'hybrid' 
 		);
 
@@ -153,9 +164,19 @@
 	@pods = grep { ! $seen{$_} ++ } @pods;
 
 	my $ballot_sth = $dbh->prepare('
-		select distinct entry.id, opponent.id, opp_school.id, opp_school.region, ballot.side
-			from entry, entry as opponent, ballot, panel, round, ballot as opp_ballot, school as opp_school
-		where entry.event = '.$event->id.'
+
+		select distinct 
+			entry.id, 
+			opponent.id, opp_school.id, opp_school.region, chapter.state,
+			ballot.side
+
+		from (entry, entry as opponent, 
+			ballot, panel, round, 
+			ballot as opp_ballot, school as opp_school)
+
+		left join chapter on opp_school.chapter = chapter.id
+
+		where entry.event = ? 
 		and entry.id = ballot.entry
 		and ballot.panel = panel.id
 		and panel.round = round.id
@@ -169,18 +190,20 @@
 		and ballot.bye != 1
 	');
 
-	$ballot_sth->execute($round->id);
+	$ballot_sth->execute($event->id, $round->id);
 
 	my %dio_region;
 
-	if ($ncfl && $dio_regions) { 
-		foreach my $diocese ($m->comp("/funclib/tourn_regions.mas", tourn => $event->tourn)) { 
+	if ($event_settings{"ncfl"} && $dio_regions) { 
+		foreach my $diocese (
+			$m->comp("/funclib/tourn_regions.mas", tourn => $tourn)
+		) { 
 			$dio_region{$diocese->id} = $diocese->setting("region");
 		}   
 	}
 
 	while( 
-		my ($entry_id, $opp_id, $opp_school, $opp_region, $side) 
+		my ($entry_id, $opp_id, $opp_school, $opp_region, $opp_state, $side) 
 		= $ballot_sth->fetchrow_array() 
 	) {
 
@@ -191,6 +214,7 @@
 
 		$entry_info{$entry_id}{"school_hit-".$opp_school}++;
 		$entry_info{$entry_id}{"region_hit-".$opp_region}++;
+		$entry_info{$entry_id}{"state_hit-".$opp_state}++;
 
 		$entry_info{$entry_id}{"dioregion_hit-".$dio_region{$opp_region}}++ 
 			if $dio_regions;
@@ -200,10 +224,10 @@
 
 	my $seed_byes_as;
 
-	unless ($no_side_constraints) { 
+	my $round_side;
+	my $round_care;
 
-		my $round_side;
-		my $round_care;
+	unless ($no_side_constraints) { 
 
 		if ($sidelock_against) { 
 
@@ -225,9 +249,11 @@
 
 				last if $round_care;
 			}
+
 		} else { 
 
 			# Even presets sidelock against the last round
+
 			my $round_name = $round->name;
 
 			foreach my $oround (sort {$b->name <=> $a->name} $event->rounds)	{ 
@@ -239,54 +265,55 @@
 				last if $round_care;
 			}
 		}
-
-		my $sides_sth = $dbh->prepare('
-			select distinct ballot.entry, ballot.side, ballot.bye, panel.bye, round.id
-			from ballot, panel, entry, round
-			where ballot.entry = entry.id
-			and round.id != ? 
-			and entry.event = '.$event->id.'
-			and ballot.panel = panel.id
-			and panel.round = round.id
-			'.$round_side.'
-		');
-
-		$sides_sth->execute($round->id);
-
-		while (
-			my ($entry_id, $side, $bye, $panel_bye, $round) 
-			= $sides_sth->fetchrow_array() 
-		) { 
-			$entry_info{$entry_id}{"byes"}++ if $bye || $panel_bye;
-			next if $bye || $panel_bye;
-			next if $round != $round_care;
-			$entry_info{$entry_id}{"affs"}++ if $side == 1;
-			$entry_info{$entry_id}{"negs"}++ if $side == 2;
-		}
-
 	}
 
+	# Still need to do this to assure the same team/school doesn't get a bye
+	# 2x even if it's not sidelocked. 
+
+	my $sides_sth = $dbh->prepare('
+		select distinct ballot.entry, ballot.side, ballot.bye, panel.bye, round.id
+		from ballot, panel, entry, round
+		where ballot.entry = entry.id
+		and round.id != ? 
+		and entry.event = ?
+		and ballot.panel = panel.id
+		and panel.round = round.id
+		'.$round_side.'
+	');
+
+	$sides_sth->execute($round->id, $event->id);
+
+	while (
+		my ($entry_id, $side, $bye, $panel_bye, $round) 
+		= $sides_sth->fetchrow_array() 
+	) { 
+
+		$entry_info{$entry_id}{"byes"}++ 
+			if $bye || $panel_bye;
+
+		$school_info{$entry_info{$entry_id}{"school"}}{"byes"}++ 
+			if $bye || $panel_bye;
+	
+		next if $no_side_constraints;
+		next if $bye || $panel_bye;
+		next if $round != $round_care;
+
+		$entry_info{$entry_id}{"affs"}++ if $side == 1;
+		$entry_info{$entry_id}{"negs"}++ if $side == 2;
+	}
+
+	#uniq
 	my %s_seen = (); 
-	@seeds = grep { ! $s_seen{$_} ++ } @seeds;   #uniq
+	@seeds = grep { ! $s_seen{$_} ++ } @seeds; 
 
 	my %e_seen = (); 
-	@entries = grep { ! $e_seen{$_} ++ } @entries;   #uniq
+	@entries = grep { ! $e_seen{$_} ++ } @entries;
 
-	our $seed_presets = $event_settings{"seed_presets"};
-	my $round_robin++ if $event_settings{"round_robin"};
-
-	our $region_constrain++ if $event_settings{"region_constrain"};
-
-	our $region_avoid++ if $event_settings{"region_avoid"};
-
-	# When pairing as the NCFL, the diocese is slotted into the school field
-	# and the diocese region is slotted into the region field. 
-	$region_avoid++ if $ncfl;
 
 	my $best_score;
 	my $bye;
 
-	if ($round_robin) { 
+	if ($event_settings{"round_robin"}) { 
 
 		my @rounds = $event->rounds( type => "prelim");
 
@@ -404,13 +431,19 @@
 
 					next if $aff eq "BYE" || $neg eq "BYE"; # not a round, doesn't count
 
-					if ( ($aff_count{$aff} < $neg_count{$aff}) || ($neg_count{$neg} < $aff_count{$neg}) ) {
+					if (
+						($aff_count{$aff} < $neg_count{$aff}) 
+						|| ($neg_count{$neg} < $aff_count{$neg})
+					) {
 						$aff_count{$aff}++;
 						$neg_count{$neg}++;
 						next PANEL;
 					}
 
-					if (($aff_count{$aff} == $neg_count{$aff}) && ($neg_count{$neg} == $aff_count{$neg})) { 
+					if (
+						($aff_count{$aff} == $neg_count{$aff})
+						&& ($neg_count{$neg} == $aff_count{$neg})
+					) { 
 
 						# Flip a coin so the random trials are actually not
 						# always seeded the same way. 
@@ -544,15 +577,22 @@
 			my @byes;
 
 			foreach my $panel (@{$round_panels{$round->id}}) { 
-				push @byes, $panel_entries{$panel}{"aff"} if $panel_entries{$panel}{"neg"} eq "BYE";
-				push @byes, $panel_entries{$panel}{"neg"} if $panel_entries{$panel}{"aff"} eq "BYE";
+
+				push @byes, $panel_entries{$panel}{"aff"} 
+					if $panel_entries{$panel}{"neg"} eq "BYE";
+
+				push @byes, $panel_entries{$panel}{"neg"} 
+					if $panel_entries{$panel}{"aff"} eq "BYE";
+
 			}
 
 			foreach my $panel (@{$round_panels{$round->id}}) { 
+
 				next if $panel_entries{$panel}{"aff"} eq "BYE";
 				next if $panel_entries{$panel}{"neg"} eq "BYE";
 				push @{$final_panels{$panel}}, $panel_entries{$panel}{"aff"};
 				push @{$final_panels{$panel}}, $panel_entries{$panel}{"neg"};
+
 			}
 
 			write_round($round, \%final_panels, 0, \@byes);
@@ -562,6 +602,7 @@
 	} else { 
 
 		my %final_panels = ();
+
 		my %round_score;
 
 		foreach my $pass (1 .. 1) { 
@@ -578,16 +619,16 @@
 
 			@entries = 
 				sort {
-					$school_size{$entry_info{$b}{"school"}} 
+					$school_info{"size"}{$entry_info{$b}{"school"}} 
 						<=> 
-					$school_size{$entry_info{$a}{"school"}}
+					$school_info{"size"}{$entry_info{$a}{"school"}}
 				}
 			@entries;
 
 			my %bye_seed;
 			my $seed_aim;
 
-			if ($seed_presets eq "balance") { 
+			if ($event_settings{"seed_presets"} eq "balance") { 
 
 				@entries = sort {$entry_info{$a}{'seed'} <=> $entry_info{$b}{'seed'}}  @entries;
 
@@ -622,7 +663,7 @@
 						if $opp_position{$entry} || $entry_info{$entry}{"byes"};
 				}
 
-			} elsif ($seed_presets eq "all") {
+			} elsif ($event_settings{"seed_presets"} eq "all") {
 
 				foreach my $entry (@entries) { 
 					SEED:
@@ -652,7 +693,7 @@
 
 				$seed_byes_as = scalar @entries + 1;
 
-			} elsif ($seed_presets eq "inverse") {
+			} elsif ($event_settings{"seed_presets"} eq "inverse") {
 
 				my $got_bye;
 				$seed_byes_as = 4;
@@ -709,7 +750,7 @@
 				<=> 
 				$entry_info{$b}{"seed"}
 			} @entries 
-				if $seed_presets eq "balance";
+				if $event_settings{"seed_presets"} eq "balance";
 
 			ENTRY:
 			foreach my $entry (@entries) { 
@@ -726,7 +767,10 @@
 					push @due_neg, $entry;
 					$due{$entry} = 2;
 
-				} elsif ($seed_presets eq "inverse" &! $entry_info{$entry}{"byes"}) { 
+				} elsif (
+					$event_settings{"seed_presets"} eq "inverse" 
+					&! $entry_info{$entry}{"byes"}
+				) { 
 
 					if ($flip == 1) { 
 
@@ -749,7 +793,10 @@
 							|| $entry_info{$entry}{'seed'} == 4;
 					}
 
-				} elsif ($seed_presets eq "balance" &! $entry_info{$entry}{"byes"}) { 
+				} elsif (
+					$event_settings{"seed_presets"} eq "balance" 
+					&! $entry_info{$entry}{"byes"}
+				) { 
 					
 					if (
 						$entry_info{$entry}{'seed'} <= $quarter 
@@ -780,10 +827,6 @@
 
 			my %used;
 
-			Tab::debuglog("Due aff is ".@due_aff);
-			Tab::debuglog("Due neg is ".@due_neg);
-			Tab::debuglog("Due whatev is ".@due_whatever);
-
 			if ((scalar @entries) % 2) { 
 
 				# Pull a bye from whatever entry randomly shuffled to the top
@@ -797,16 +840,16 @@
 				@candidates = @due_neg if scalar @due_aff < scalar @due_neg;
 				@candidates = @entries if scalar @due_aff == scalar @due_neg;
 
-				if ($seed_presets eq "balance") {
+				if ($event_settings{"seed_presets"} eq "balance") {
 
 					my $average = (scalar @entries) / 2;
 
 					@candidates = 
 						sort { 
-								abs($entry_info{$a}{'seed'} - $average) 
+							abs($entry_info{$a}{'seed'} - $average) 
 								<=> 
-							 	abs($entry_info{$b}{'seed'} - $average)
-							} @candidates;
+						 	abs($entry_info{$b}{'seed'} - $average)
+						} @candidates;
 
 					# this sorts the candidates so that the bye is more likely
 					# to come from the middle
@@ -817,8 +860,7 @@
 								<=> 
 							$entry_info{$a}{"need_position"}
 						} @candidates 
-
-						if $entry_info{$entries[0]}{"need_position"};
+					if $entry_info{$entries[0]}{"need_position"};
 				}
 
 				while (not defined $bye) { 
@@ -835,6 +877,7 @@
 						my $nope;
 
 						$nope++ if $entry_info{$test}{"byes"};
+						$nope++ if $school_info{$entry_info{$test}{"school"}}{"byes"};
 
 						if (keys %bye_seed) { 
 							unless ($bye_seed{ $entry_info{$test}{'seed'} }) { 
@@ -843,7 +886,7 @@
 							}
 						}
 
-						if ($seed_presets eq "inverse" ) { 
+						if ($event_settings{"seed_presets"} eq "inverse" ) { 
 
 							unless ($entry_info{$test}{"need_seed"}{$seed_byes_as} > 0) { 
 								push @tried, $test;
@@ -886,7 +929,7 @@
 			my %partner;
 			my $average = (scalar @entries) / 2;
 
-			if ($seed_presets eq "balance") {
+			if ($event_settings{"seed_presets"} eq "balance") {
 				@due_whatever = sort { 
 					abs($entry_info{$a}{'seed'} - $average) 
 					<=> 
@@ -903,12 +946,12 @@
 				# multiple byes at this point, they're almost certainly
 				# screwups who don't deserve that kind of consideration.
 
-				@due_whatever = shuffle @due_whatever unless $seed_presets eq "balance";
+				@due_whatever = shuffle @due_whatever unless $event_settings{"seed_presets"} eq "balance";
 
 				my $pull = shift @due_whatever;
 				next if $used{$pull}++;
 
-				my $partner = pop @due_whatever if @due_whatever && $seed_presets eq "balance";
+				my $partner = pop @due_whatever if @due_whatever && $event_settings{"seed_presets"} eq "balance";
 				$used{$partner}++;
 
 				$partner{$pull} = $partner;
@@ -930,7 +973,7 @@
 			@due_aff = shuffle @due_aff;
 			@due_neg = shuffle @due_neg;
 
-			if ($seed_presets eq "balance") { 
+			if ($event_settings{"seed_presets"} eq "balance") { 
 
 				@due_aff = sort { 
 					abs($entry_info{$a}{'seed'} - $average) 
@@ -961,12 +1004,12 @@
 			my $counter = 1;
 			my @panel_keys;
 
-			if ($seed_presets eq "protect") { 
+			if ($event_settings{"seed_presets"} eq "protect") { 
 				@due_aff = sort {$entry_info{$a}{'seed'} <=> $entry_info{$b}{'seed'}} @due_aff;
 				@due_neg = sort {$entry_info{$b}{'seed'} <=> $entry_info{$a}{'seed'}} @due_neg;
 			}
 
-			if ($seed_presets eq "balance") { 
+			if ($event_settings{"seed_presets"} eq "balance") { 
 
 				@due_aff = sort { 
 					abs($entry_info{$b}{'seed'} - $average) 
@@ -997,9 +1040,9 @@
 					# based on ideal seeding needs.  Only invoked for inverse &
 					# all seed_protect settings.
 
-					@due_neg = shuffle @due_neg unless $seed_presets eq "balance";
+					@due_neg = shuffle @due_neg unless $event_settings{"seed_presets"} eq "balance";
 
-					if ($seed_presets eq "inverse") { 
+					if ($event_settings{"seed_presets"} eq "inverse") { 
 						if ($shifter++ % 2) { 
 							@due_neg = sort {$entry_info{$a}{'seed'} <=> $entry_info{$b}{"seed"}} @due_neg;
 						} else { 
@@ -1016,9 +1059,15 @@
 
 						next if $entry_info{$aff}{"school"} == $entry_info{$debate_me_maybe}{"school"};
 
-						if ($region_constrain || $region_avoid) { 
+						if ($event_settings{"region_constrain"} || $event_settings{"region_avoid"}) { 
 							next if $entry_info{$aff}{"region"} 
-								&& $entry_info{$aff}{"region"} == $entry_info{$debate_me_maybe}{"region"};
+								&& $entry_info{$aff}{"region"} 
+									== $entry_info{$debate_me_maybe}{"region"};
+						}
+
+						if ($event_settings{"nsda_nats"}) { 
+							next if $entry_info{$aff}{"state"} 
+								&& $entry_info{$aff}{"state"} eq $entry_info{$debate_me_maybe}{"state"};
 						}
 
 						# If we made it this far, WE NEED ONE ANOTHER.  IT IS DESTINY.
@@ -1028,9 +1077,9 @@
 						last if $neg;
 					}
 
-					# I found no opponent who is not a perfect fit.  So, I cope as
-					# best I can.  Find someone whose need I fit while not fitting
-					# mine, if such exists.	
+					# I found no opponent who is not a perfect fit.  So, I cope
+					# as best I can.  Find someone whose need I fit while not
+					# fitting mine, if such exists.	
 
 					unless ($neg) { 
 
@@ -1058,7 +1107,7 @@
 					# neg.  If this is just because randomization doomed us, the
 					# swapper later will help.
 
-				} elsif ($seed_presets eq "balance") {
+				} elsif ($event_settings{"seed_presets"} eq "balance") {
 
 					my $current_diff;
 					my $current_clash = 8301239291;
@@ -1069,29 +1118,45 @@
 
 						my $clash;
 
-						$clash++ if $entry_info{$aff}{"school"} == $entry_info{$maybe_neg}{"school"};
+						$clash++ if $entry_info{$aff}{"school"} 
+									== $entry_info{$maybe_neg}{"school"};
 
 						$clash++ 
 							if $entry_info{$aff}{"school"} 
-							== $entry_info{$partner{$maybe_neg}}{"school"};
+								== $entry_info{$partner{$maybe_neg}}{"school"};
 
 						$clash++ 
 							if $entry_info{$maybe_neg}{"school"} 
-							== $entry_info{$partner{$aff}}{"school"};
+								== $entry_info{$partner{$aff}}{"school"};
 
-						if ($region_avoid || $region_constrain) { 
-
-							$clash++ 
-								if $entry_info{$aff}{"region"} 
-								== $entry_info{$maybe_neg}{"region"};
+						if ($event_settings{"region_avoid"} || $event_settings{"region_constrain"}) { 
 
 							$clash++ 
 								if $entry_info{$aff}{"region"} 
-								== $entry_info{$partner{$maybe_neg}}{"region"};
+									== $entry_info{$maybe_neg}{"region"};
+
+							$clash++ 
+								if $entry_info{$aff}{"region"} 
+									== $entry_info{$partner{$maybe_neg}}{"region"};
 
 							$clash++ 
 								if $entry_info{$maybe_neg}{"region"} 
-								== $entry_info{$partner{$aff}}{"region"};
+									== $entry_info{$partner{$aff}}{"region"};
+						}
+
+						if ($event_settings{"nsda_nats"}) { 
+
+							$clash++ 
+								if $entry_info{$aff}{"state"} 
+								eq $entry_info{$maybe_neg}{"state"};
+
+							$clash++ 
+								if $entry_info{$aff}{"state"} 
+								eq $entry_info{$partner{$maybe_neg}}{"state"};
+
+							$clash++ 
+								if $entry_info{$maybe_neg}{"state"} 
+								eq $entry_info{$partner{$aff}}{"state"};
 						}
 
 						my $diff; 
@@ -1111,7 +1176,10 @@
 							$neg = $maybe_neg;
 							$current_clash = $clash;
 							$current_diff = $diff;
-						} elsif (($clash == $current_clash) && ($diff < $current_diff)) {
+						} elsif (
+							($clash == $current_clash) 
+							&& ($diff < $current_diff)
+						) {
 							$neg = $maybe_neg;
 							$current_diff = $diff;
 						}
@@ -1147,18 +1215,33 @@
 					
 						if ($entry_info{$partner{$aff}}{"school"} 
 							!= $entry_info{$partner{$neg}}{"school"} 
-							&& ($region_constrain 
-									&& $entry_info{$partner{$aff}}{"region"} 
-									!= $entry_info{$partner{$neg}}{"region"}
-								)
 						) { 
 
-							push @{$panels{$counter}}, $partner{$aff};
-							push @{$panels{$counter}}, $partner{$neg};
-							push @panel_keys, $counter++;
-							$done{$partner{$aff}}++;
-							$done{$partner{$neg}}++;
-							$negs++;
+							if (
+								(not defined $event_settings{"region_constrain"})
+								|| ( 
+									$entry_info{$partner{$aff}}{"region"} 
+									!= $entry_info{$partner{$neg}}{"region"}
+								)
+							) { 
+
+								if (
+									(not defined $event_settings{"nsda_nats"})
+									|| ( 
+										$entry_info{$partner{$aff}}{"state"} 
+										ne $entry_info{$partner{$neg}}{"state"}
+									)
+								) { 
+
+
+									push @{$panels{$counter}}, $partner{$aff};
+									push @{$panels{$counter}}, $partner{$neg};
+									push @panel_keys, $counter++;
+									$done{$partner{$aff}}++;
+									$done{$partner{$neg}}++;
+									$negs++;
+								}
+							}
 						}
 					}
 				}
@@ -1180,7 +1263,12 @@
 					my $swap_key;
 					my $swap_cross;
 
-					my $baseline_panel1_score = score_preset(\@panel, \%entry_info, 1);
+					my $baseline_panel1_score = score_preset(
+						\@panel,
+						\%entry_info,
+						1,
+						\%event_settings
+					);
 
 					next if $baseline_panel1_score < 1;
 
@@ -1194,12 +1282,21 @@
 						next if $other_key == $panel_key;
 
 						my @panel2 = @{$panels{$other_key}};
-						my $baseline_panel2_score = score_preset(\@panel2, \%entry_info);
+						my $baseline_panel2_score = score_preset(
+							\@panel2,
+							\%entry_info,
+							"", 
+							\%event_settings
+						);
 
 						my $aff2 = shift @panel2;
 						my $neg2 = shift @panel2;
 
-						if ($seed_presets eq "protect" || $seed_presets eq "inverse") { 
+						if (
+							$event_settings{"seed_presets"} eq "protect" 
+							|| $event_settings{"seed_presets"} eq "inverse"
+						) { 
+
 							if (
 									($entry_info{$aff1}{'seed'} != $entry_info{$aff2}{'seed'}) 
 								|| 	($entry_info{$neg1}{'seed'} != $entry_info{$neg2}{'seed'})
@@ -1214,14 +1311,24 @@
 						my @new_1 = ($aff1, $neg2);
 						my @new_2 = ($aff2, $neg1);
 
-						my $swap_panel1_score = score_preset(\@new_1, \%entry_info);
-						my $swap_panel2_score = score_preset(\@new_2, \%entry_info); 
+						my $swap_panel1_score = score_preset(
+							\@new_1,
+							\%entry_info,
+							"",
+							\%event_settings
+						);
 
+						my $swap_panel2_score = score_preset(
+							\@new_2,
+							\%entry_info,
+							"",
+							\%event_settings
+						); 
 
 						my $new_score = $swap_panel1_score + $swap_panel2_score;
 						my $baseline = $baseline_panel1_score + $baseline_panel2_score;
-						my $diff = $baseline - $new_score;
 
+						my $diff = $baseline - $new_score;
 
 						if ( $diff >= 0 && $diff >= $current_diff) {
 							$current_diff = $diff;
@@ -1229,7 +1336,6 @@
 							undef $swap_cross;
 							last OTHERPANEL if $new_score == 0;
 						}
-
 
 						# Attempt various cross side swaps if that makes things
 						# better and they're not side constrained.
@@ -1241,7 +1347,7 @@
 
 							my $dont;
 
-							if ($seed_presets eq "protect") { 
+							if ($event_settings{"seed_presets"} eq "protect") { 
 								if ($entry_info{$neg2}{'seed'} != $entry_info{$aff1}{'seed'}) { 
 									#Cannot swap due to seeding conflicts
 									@panel2 = ($aff2, $neg2);
@@ -1251,8 +1357,19 @@
 
 							unless ($dont) { 
 
-								my $swap_panel1_score = score_preset(\@new_1, \%entry_info);
-								my $swap_panel2_score = score_preset(\@new_2, \%entry_info); 
+								my $swap_panel1_score = score_preset(
+									\@new_1,
+									\%entry_info,
+									"",
+									\%event_settings
+								);
+
+								my $swap_panel2_score = score_preset(
+									\@new_2,
+									\%entry_info,
+									"",
+									\%event_settings
+								); 
 
 								my $new_score = $swap_panel1_score + $swap_panel2_score;
 								my $baseline = $baseline_panel1_score + $baseline_panel2_score;
@@ -1275,7 +1392,7 @@
 
 							my $dont;
 
-							if ($seed_presets eq "protect") { 
+							if ($event_settings{"seed_presets"} eq "protect") { 
 								if ($entry_info{$neg1}{'seed'} != $entry_info{$aff2}{'seed'}) { 
 									#Cannot swap due to seeding conflicts
 									@panel2 = ($aff2, $neg2);
@@ -1285,8 +1402,19 @@
 
 							unless ($dont) { 
 
-								my $swap_panel1_score = score_preset(\@new_1, \%entry_info);
-								my $swap_panel2_score = score_preset(\@new_2, \%entry_info); 
+								my $swap_panel1_score = score_preset(
+									\@new_1,
+									\%entry_info,
+									"",
+									\%event_settings
+								);
+
+								my $swap_panel2_score = score_preset(
+									\@new_2,
+									\%entry_info,
+									"",
+									\%event_settings
+								);
 
 								my $new_score = $swap_panel1_score + $swap_panel2_score;
 								my $baseline = $baseline_panel1_score + $baseline_panel2_score;
@@ -1352,7 +1480,13 @@
 					my $swap_key_3;
 					my $swap_cross_3;
 
-					my $baseline_panel1_score = score_preset(\@panel, \%entry_info);
+					my $baseline_panel1_score = score_preset(
+						\@panel,
+						\%entry_info,
+						"",
+						\%event_settings
+					);
+
 					next if $baseline_panel1_score < 1;
 
 					my $aff1 = shift @panel;
@@ -1370,13 +1504,25 @@
 						next if $other_key == $panel_key;
 
 						my @panel2 = @{$panels{$other_key}};
-						$baseline_panel2_score = score_preset(\@panel2, \%entry_info);
+
+						$baseline_panel2_score = score_preset(
+							\@panel2,
+							\%entry_info,
+							"",
+							\%event_settings
+						);
 
 						$aff2 = shift @panel2;
 						$neg2 = shift @panel2;
 
 						my @new2 = ($aff1, $neg2);
-						$swapped_panel2_score = score_preset(\@new2, \%entry_info);
+
+						$swapped_panel2_score = score_preset(
+							\@new2,
+							\%entry_info,
+							"",
+							\%event_settings
+						);
 
 						my $diff = $baseline_panel2_score - $swapped_panel2_score;
 
@@ -1397,19 +1543,42 @@
 							next if $other_key == $swap_key_2;
 
 							my @panel3 = @{$panels{$other_key}};
-							my $baseline_panel3_score = score_preset(\@panel3, \%entry_info);
+
+							my $baseline_panel3_score = score_preset(
+								\@panel3,
+								\%entry_info,
+								"",
+								\%event_settings
+							);
 
 							my $aff3 = shift @panel3;
 							my $neg3 = shift @panel3;
 
 							my @new3 = ($aff2, $neg3);
-							my $swapped_panel3_score = score_preset(\@new3, \%entry_info);
+
+							my $swapped_panel3_score = score_preset(
+								\@new3,
+								\%entry_info,
+								"",
+								\%event_settings
+							);
 
 							my @new1 = ($aff3, $neg1);
-							my $swapped_panel1_score = score_preset(\@new1, \%entry_info);
 
-							my $baseline = $baseline_panel1_score + $baseline_panel2_score + $baseline_panel3_score;
-							my $swapped = $swapped_panel1_score + $swapped_panel2_score + $swapped_panel3_score;
+							my $swapped_panel1_score = score_preset(
+								\@new1,
+								\%entry_info,
+								"",
+								\%event_settings
+							);
+
+							my $baseline = $baseline_panel1_score 
+								+ $baseline_panel2_score 
+								+ $baseline_panel3_score;
+
+							my $swapped = $swapped_panel1_score 
+								+ $swapped_panel2_score 
+								+ $swapped_panel3_score;
 
 							my $diff = $baseline - $swapped;
 
@@ -1455,7 +1624,12 @@
 			my $new_score;
 
 			foreach my $panel_key (shuffle @panel_keys) {
-				$new_score += score_preset(\@{$panels{$panel_key}}, \%entry_info);
+				$new_score += score_preset(
+					\@{$panels{$panel_key}},
+					\%entry_info,
+					"",
+					\%event_settings
+				);
 			}
 
 			if ($new_score < $best_score || not defined $best_score) { 
@@ -1471,14 +1645,6 @@
 
 		write_round($round, \%final_panels, $round_score{$round->id}, \@byes);
 	}
-
-	# this is REQUIRED of all global variables or else the value stays in
-	# memory in Apache. 
-	
-	undef $seed_presets;
-	undef $region_constrain;
-	undef $region_avoid;
-	undef $ncfl;
 
 	sub write_round {
 
@@ -1592,7 +1758,7 @@
 
     sub score_preset {
 
-        my ($panref, $entry_info, $baseline) = @_;
+        my ($panref, $entry_info, $baseline, $event_settings) = @_;
 
 		return unless @{$panref};
 		my $aff = shift @{$panref};
@@ -1616,11 +1782,11 @@
 		# We have debated against each other on this side.
 		$score += 1000 * ${$entry_info}{$aff}{"oppside-".$neg."-1"};
 
-		if ($region_avoid) { 
+		if ($event_settings->{"region_avoid"}) { 
 			if (${$entry_info}{$neg}{"region"}) { 
 				
+				# If are from the same region.  Moderate penalty to avoid.
 				if (${$entry_info}{$neg}{"region"} == ${$entry_info}{$aff}{"region"}) { 
-					# We are from the same region.  Moderate penalty to avoid.
 					$score += 50;
 				}
 
@@ -1630,22 +1796,36 @@
 			}
 		}
 
-		if ($region_constrain) { 
+		if ($event_settings->{"region_constrain"}) { 
+
+			# If we are from the same region, treat penalty the same as schools
 
 			if (${$entry_info}{$neg}{"region"} == ${$entry_info}{$aff}{"region"}) { 
-				# We are from the same region.  Treating penalties as schools here
 				$score += 10000;
 			}
+
 			$score += ${$entry_info}{$aff}{"region_hit-".${$entry_info}{$neg}{"region"}} * 5;
 			$score += ${$entry_info}{$neg}{"region_hit-".${$entry_info}{$aff}{"region"}} * 5;
+
 		}
 
-		if ($seed_presets eq "all") { 
+		if ($event_settings->{"nsda_nats"}) { 
+				
+			# If we are from the same state, treat penalty the same as schools
+			if (${$entry_info}{$neg}{"state"} eq ${$entry_info}{$aff}{"state"}) { 
+				$score += 10000;
+			}
+
+			$score += ${$entry_info}{$aff}{"state_hit-".${$entry_info}{$neg}{"state"}} * 5;
+			$score += ${$entry_info}{$neg}{"state_hit-".${$entry_info}{$aff}{"state"}} * 5;
+		}
+
+		if ($event_settings->{"seed_presets"} eq "all") { 
 			$score += 10 unless ${$entry_info}{"need_seed"}{$aff}{${$entry_info}{$neg}{"seed"}};
 			$score += 10 unless ${$entry_info}{"need_seed"}{$neg}{${$entry_info}{$aff}{"seed"}};
 		}
 
-		if ($seed_presets eq "inverse") { 
+		if ($event_settings->{"seed_presets"} eq "inverse") { 
 
 			if ($baseline) { 
 
@@ -1673,7 +1853,7 @@
 			$score += 100 unless ($neg_need);
 		}
 
-		if ($seed_presets eq "balance") { 
+		if ($event_settings->{"seed_presets"} eq "balance") { 
 
 			my $aff_diff = abs(${$entry_info}{$aff}{"need_position"} - ${$entry_info}{$neg}{"seed"});
 			my $neg_diff = abs(${$entry_info}{$neg}{"need_position"} - ${$entry_info}{$aff}{"seed"});
@@ -1690,6 +1870,7 @@
 
 		$score += ${$entry_info}{$aff}{"school_hit-".${$entry_info}{$neg}{"school"}} * 2;
 		$score += ${$entry_info}{$neg}{"region_hit-".${$entry_info}{$aff}{"region"}};
+		$score += ${$entry_info}{$neg}{"state_hit-".${$entry_info}{$aff}{"state"}};
 
 		@{$panref} = ($aff, $neg);
 
