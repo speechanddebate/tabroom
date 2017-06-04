@@ -6,10 +6,14 @@
 	$event_id => undef
 	$event_id_restore => undef			#This is the event ID from the restore file
 	$round_id => undef
+	$round_id_import => undef			#ID for the round in the import file
+	$round_data_only => undef			#checked = only update round results, not ROUND or ROUND_SETTING tables
 	$school_id => undef
 </%args>
 
 <%init>
+
+## add errors here -- bounce if not values for both round_id & round_import_id
 
 ########################################################################################
 #		read local JSON file into a hash that goes { table }{ record }{ field }
@@ -104,6 +108,12 @@ if ( $restore_mode eq 'tourn' ) {
 	$sth->execute();
 	$sth = $dbh->prepare( "DELETE from tourn_fee where tourn=".$tourn->id );
 	$sth->execute();
+	$sth = $dbh->prepare( "DELETE tiebreak.* from tiebreak, tiebreak_set where tiebreak.tiebreak_set=tiebreak_set.id and tiebreak_set.tourn=".$tourn->id );
+	$sth->execute();
+	$sth = $dbh->prepare( "DELETE tiebreak_set_setting.* from tiebreak_set_setting, tiebreak_set where tiebreak_set_setting.tiebreak_set=tiebreak_set.id and tiebreak_set.tourn=".$tourn->id );
+	$sth->execute();
+	$sth = $dbh->prepare( "DELETE from tiebreak_set where tourn=".$tourn->id );
+	$sth->execute();
 	foreach my $category ($tourn->categories) {
 		my $sth = $dbh->prepare( "DELETE from category_setting where category=".$category->id );
 		$sth->execute();
@@ -120,9 +130,17 @@ if ( $restore_mode eq 'event' ) {
 	}	
 }
 if ( $restore_mode eq 'round' ) {
-	$m->comp("/funclib/round_dump.mas", round_id => $round_id, fire_as_function => 42, person => $person);
+	#$m->comp("/funclib/round_dump.mas", round_id => $round_id, fire_as_function => 42, person => $person);
+	unless ($round_data_only eq 'on' ) {
+		my $sth = $dbh->prepare( "DELETE from round_setting where round=".$round_id );
+		$sth->execute();
+		print "Just ran DELETE from round_setting where round=".$round_id."<br>";
+		$sth = $dbh->prepare( "DELETE from round where id=".$round_id );
+		$sth->execute();
+	}
+	$round_id_import = $round_id unless $round_id_import;
 	foreach my $rec (sort keys %{ $data{'round'} } ) {
-		delete $data{'event'}{$rec} unless $rec == $round_id;
+		delete $data{'round'}{$rec} unless $rec == $round_id_import;
 	}	
 }
 if ( $restore_mode eq 'school_reg' ) {
@@ -175,7 +193,6 @@ print "Time to delete associated records from hash from the hash:"; printf("%.2f
 		#### Note that a foreign restore won't have the permanent tables so you don't have to worry about them.
 		#### For a local restore they should already be there, but there's a separate routine to audit permanent records for a tourney.
 		
-
 #define the upstream tables
 my %upstream_table;
 foreach my $table (sort keys %data) {
@@ -210,13 +227,8 @@ foreach my $table (sort keys %data) {
 		$sql = "SELECT strike_timeslot.* FROM strike_timeslot, category WHERE strike_timeslot.category=category.id AND category.tourn=$tourn_id" if $table eq 'strike_timeslot';
 		$sql = "SELECT tiebreak.* FROM tiebreak, tiebreak_set WHERE tiebreak.tiebreak_set=tiebreak_set.id AND tiebreak_set.tourn=$tourn_id" if $table eq 'tiebreak';
 		$sql = "SELECT * FROM tiebreak_set where tourn=$tourn_id" if $table eq 'tiebreak_set';
+		$sql = "SELECT tiebreak_set_setting.* FROM tiebreak_set_setting, tiebreak_set WHERE tiebreak_set_setting.tiebreak_set=tiebreak_set.id AND tiebreak_set.tourn=$tourn_id" if $table eq 'tiebreak_set_setting';
 		$sql = "SELECT * FROM timeslot where tourn=$tourn_id" if $table eq 'timeslot';
-		
-		#$sql = "SELECT category_setting.* FROM category, category_setting WHERE category_setting.category=category.id AND category.tourn=$tourn_id" if $table eq 'category_setting';
-		#$sql = "SELECT * FROM judge_hire where tourn=$tourn_id" if $table eq 'judge_hire';
-		#$sql = "SELECT judge_setting.* FROM judge_setting, judge, category WHERE judge_setting.judge=judge.id and judge.category=category.id AND category.tourn=$tourn_id" if $table eq 'judge_setting';
-		#$sql = "SELECT result.* FROM result, result_set WHERE result.result_set = result_set.id AND result_set.tourn=$tourn_id" if $table eq 'result';
-		#$sql = "SELECT * FROM result_set WHERE result_set.tourn=$tourn_id" if $table eq 'result_set';
 		
 		unless ( $sql ) {
 			print "Didn't match $table because there was no sql for it <br>";
@@ -354,8 +366,12 @@ print "Time to check that all the upstream records exist:"; printf("%.2f\n", tim
 my $field_name;
 my $field_str;
 foreach my $table (sort keys %data) {
-	if ( use_table($table, $restore_mode) eq 'use_me' ) {
-		print "Now inserting records for table $table<br>";
+	my $insert_table = 1;
+	if ($round_data_only eq 'on' && $restore_mode eq 'round' && ($table eq 'round' || $table eq 'round_setting') ) {
+		$insert_table= 0 ;
+	}
+	if ( use_table($table, $restore_mode) eq 'use_me' && $insert_table == 1 ) {
+		#print "Now inserting records for table $table<br>";
 		foreach my $rec (sort keys %{ $data{$table} }) {
 			$ctr=0;
 			my @field_values;
@@ -382,7 +398,7 @@ foreach my $table (sort keys %data) {
 			$sth->execute(@field_values);
 			#Now grab the current id and store it in the hash
 			$data{$table}{$rec}{'id'} = $dbh->{'mysql_insertid'};
-			#print $sql."<br>"  if $table eq "ballot" ;
+			#print $sql."<br>"  if $table eq 'tiebreak' ;
 			#print "For table $table new tabroom ID for $rec is ".$data{$table}{$rec}{'id'}."<br>";
 		}
 	}
@@ -397,26 +413,34 @@ print "Time to create records:"; printf("%.2f\n", time() - $start) ; print "<br>
 my $not_this_table=0;
 foreach my $table (sort keys %data) {
 	if ( use_table($table, $restore_mode) eq 'use_me' ) {
-		#scroll through all the records in all the tables, and update every field that references a higher-ordered table
 		foreach my $table2 (sort keys %data) {
 			$not_this_table = 0;
 			foreach my $rec2 (sort keys %{ $data{$table2} }) {
+				print $table2." has a record of 1<br>" if $rec2 == 1;
+				if ($table2 eq 'score' && $table eq 'tiebreak' ) {
+					$not_this_table = 1;
+					print "Skipping the tiebreak in the score table<br>";
+				}
 				last if $not_this_table == 1;
 				if ( not exists $data{$table2}{$rec2}{$table} ) {
-					#print "no $table found in $table2; value=".$data{$table2}{$rec2}{$table}." for $table2 $rec2<br>";
+					#print "no $table found in $table2; value=".$data{$table2}{$rec2}{$table}." for $table2 record=$rec2 so skipping to next table<br>" if $table2 eq 'tiebreak' ;
 					$not_this_table = 1;
 					last;
 				}
 				if ( $data{$table2}{$rec2}{$table} ) { 				#don't do anything for blank records
-					#print "Changing $table in $table2 record=$rec2 field=$table from ".$data{$table2}{$rec2}{$table}." to ".$data{$table}{ $data{$table2}{$rec2}{$table} }{'id'}."<br>" ;
+					#print "Changing $table in $table2 record=$rec2 field=$table from ".$data{$table2}{$rec2}{$table}." to ".$data{$table}{ $data{$table2}{$rec2}{$table} }{'id'}."<br>" if $table2 eq 'tiebreak';
 					my $orig_id = $data{$table2}{$rec2}{$table};
-					#$data{$table2}{$rec2}{$table} = $data{$table}{ $data{$table2}{$rec2}{$table} }{'id'} ;
-					#print "original ballot id is ".$orig_id." and new is ";
-					#print $data{$table}{ $orig_id }{'id'}."<br>";
 					$sql = 'UPDATE '.$table2.' SET '.$table.' ='.$data{$table}{ $orig_id }{'id'}.' WHERE id='.$data{$table2}{$rec2}{'id'} ; 
 					my $sth = $dbh->prepare( $sql ) ;
 					$sth->execute() if $data{$table}{ $orig_id }{'id'};
-					#print "$sql<br>" if $table2 eq 'score' ;
+					#print "$sql<br>" if ( $table2 eq 'tiebreak' || $table eq 'tiebreak' ) ;
+					#yeah, coding exceptions!  If the event_setting points to the speaker tiebreak set, update that too!
+					if ( $table2 eq 'event_setting' & $data{$table2}{$rec2}{'tag'} eq 'speaker_tbset' ) {
+						my $orig_id = $data{$table2}{$rec2}{'value'};
+						$sql = 'UPDATE event_setting SET value ='.$data{'tiebreak_set'}{ $orig_id }{'id'}.' WHERE id='.$data{$table2}{$rec2}{'id'} ; 
+						my $sth = $dbh->prepare( $sql ) ;
+						$sth->execute();
+					}
 				}
 			}
 		}
@@ -446,11 +470,11 @@ sub use_table{
 	if ($table eq "student_setting") { return "perm"; } 
 
 	#these are tables you use depending on whether you are restoring an event, round, or school_reg
-	if ($table eq 'event' && ( $restore_mode eq 'event' || $restore_mode eq 'round') ) { return "use_me"; }
-	if ($table eq 'event_setting' && ( $restore_mode eq 'event' || $restore_mode eq 'round') ) { return "use_me"; }
-	if ($table eq 'entry') { return "use_me"; }
-	if ($table eq 'entry_setting') { return "use_me"; }
-	if ($table eq 'entry_student') { return "use_me"; }
+	if ($table eq 'event' && $restore_mode eq 'event' ) { return "use_me"; }
+	if ($table eq 'event_setting' && $restore_mode eq 'event' ) { return "use_me"; }
+	if ($table eq 'entry' && $restore_mode eq 'event' ) { return "use_me"; }
+	if ($table eq 'entry_setting' && $restore_mode eq 'event') { return "use_me"; }
+	if ($table eq 'entry_student' && $restore_mode eq 'event') { return "use_me"; }
 	if ($table eq 'judge' && $restore_mode eq 'school_reg' ) { return "use_me"; }
 	if ($table eq 'judge_setting' &&  $restore_mode eq 'school_reg' ) { return "use_me"; }
 	if ($table eq 'judge_hire' && $restore_mode eq 'school_reg' ) { return "use_me"; }
@@ -463,6 +487,8 @@ sub use_table{
 	if ($table eq 'ballot' && ( $restore_mode eq 'event' || $restore_mode eq 'round') ) { return "use_me"; }
 	if ($table eq 'strike' && ( $restore_mode eq 'event' || $restore_mode eq 'school_reg') ) { return "use_me"; }
 	if ($table eq 'sweep_event' && $restore_mode eq 'event' ) { return "use_me"; }
+	if ($table eq 'result' && ( $restore_mode eq 'event' || $restore_mode eq 'round') ) { return "use_me"; }
+	if ($table eq 'result_value' && ( $restore_mode eq 'event' || $restore_mode eq 'round') ) { return "use_me"; }
 	
 	#if you are restoring a whole tournament, use everything but tourn, which is already excluded above
 	if ( $restore_mode eq 'tourn' ) { return "use_me"; }
