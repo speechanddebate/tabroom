@@ -56,7 +56,6 @@
 			},
 			success : function(data) {
 
-
 				if (successAction === "destroy") { 
 					$("#"+targetId).remove();
 				}
