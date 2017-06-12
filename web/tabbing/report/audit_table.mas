@@ -1,0 +1,445 @@
+<%args>
+	$round
+	$nsda_districts  => undef
+	$nsda_nats       => undef
+	$num_qualifiers  => undef
+	$tiebreak_set    => undef
+	$threshold       => undef
+	$qualifiers      => undef
+	$vacated         => undef
+	$alternates      => undef
+	$others          => undef
+	$nsda            => undef
+	$exclude         => undef
+	$section_rank    => undef
+	$start_placement => undef
+	$vacate_option   => undef
+</%args>
+<%init>
+
+	return unless $round;
+
+	$tiebreak_set = $round->tiebreak_set 
+		unless $tiebreak_set;
+
+	$m->abort unless $tiebreak_set;
+
+	$section_rank++ 
+		if $tiebreak_set->setting("equal_elims")
+		&& ($round->type eq "elim" 
+			|| $round->type eq "prelim");
+
+	my $event = $round->event;
+
+	my $debate_all++ if $nsda_districts && $event->type eq "debate";
+
+	my (@results) = $m->comp(
+		"/tabbing/results/order_entries.mas", 
+			long_names   => 1,
+			nsda         => $nsda,
+			round        => $round,
+			tiebreak_set => $tiebreak_set,
+			all_entries  => $debate_all,
+			section_rank => $section_rank
+	);
+
+	my $entries_ref = pop @results if @results;
+
+	my %entry_by_id = 
+		map {$_->id => $_} $event->entries 
+		if $nsda_districts;
+
+	return unless $entries_ref;
+
+	my %event_settings = $event->all_settings;
+
+	my $round_robin++ 
+		if $event_settings{"round_robin"} 
+		&& $round->type ne "elim" 
+		&& $round->type ne "final";
+
+    my %breakouts = ();
+
+    if ($event_settings{"breakouts"}) {
+
+        foreach my $breakout (1 .. $event_settings{"breakouts"}) {
+
+            $breakouts{$breakout}{"name"} = $event_settings{"breakout_".$breakout."_label"};
+
+            my @settings = $m->comp(
+				"/funclib/event_entry_settings.mas",
+                event => $event,
+                tag   => "breakout_".$breakout
+            );
+
+            foreach my $setting (@settings) {
+                $breakouts{$breakout}{$setting->entry->id}++;
+            }
+
+        }
+
+    }
+
+    my $codes = $event_settings{"code_style"} if $event;
+
+    my $no_school++ if ($codes eq "school_number"
+        || $codes eq "school_names"
+        || $codes eq "initials"
+        || $codes eq "school_name_only"
+        || $codes eq "schoolname_code"
+        || $codes eq "full_initials");
+
+	undef $no_school if $nsda_districts;
+
+	my @schools = $m->comp(
+		"/funclib/event_schools.mas", 
+		event => $event
+	);
+
+	my %school_name = 
+		map {$_->id => &Tab::short_name($_->name)} 
+		@schools;
+
+    my %entry_ballots = $m->comp(
+		"/funclib/round_ballot_strings.mas", 
+		round => $round
+	);  
+
+	my %cutoff;
+
+	my @tiebreak_keys = 
+		sort {$a <=> $b} 
+		keys %{$entries_ref->{"tier_description"}};
+
+	my $cutoff_key = $tiebreak_keys[0] 
+		if @tiebreak_keys && $threshold; 
+
+	my $mark_ties++ 
+		if scalar @tiebreak_keys > 1;
+
+	my @ineligibles = $m->comp(
+		"/funclib/event_entry_settings.mas",
+		event => $event,
+		tag   => "no_elims"
+	);
+
+	my %ineligible = map {$_->entry->id => $_->value} @ineligibles;
+
+	my %sections;
+
+
+	if ($round_robin) { 
+
+		foreach my $entry_id (keys %{${$entries_ref}{"pod"}}) { 
+			$sections{${$entries_ref}{"pod"}{$entry_id}}++;
+		};
+
+	} else { 
+
+		foreach my $entry_id (keys %{${$entries_ref}{"section"}}) { 
+			$sections{${$entries_ref}{"section"}{$entry_id}}++;
+		};
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			panel.letter, panel.id,
+			ballot.id, ballot.entry, ballot.judge, ballot.chair,
+			score.id, score.tag, score.value,
+			round.id, round.name,
+			judge.first, judge.last, judge.code
+
+			from round, panel, ballot, score, judge
+
+			where round.event = ? 
+			and round.name <= ? 
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and ballot.id = score.ballot
+			and ballot.judge = judge.id
+			and score.tag = 'rank'
+	");
+
+	$sth->execute($event->id, $round->name);
+
+	my %ranks = ();
+
+	while(
+		my ( $section_letter, $section_id,
+			$ballot_id, $ballot_entry, $ballot_judge, $ballot_chair,
+			$score_id, $score_tag, $score_value,
+			$round_id, $round_name,
+			$judge_first, $judge_last, $judge_code
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($ranks{$section_letter}{$round_name}{"done"}++) { 
+			push @{$ranks{$section_letter}{"rounds"}}, $round_name;
+		}
+
+		unless ($ranks{$section_letter}{$round_name}{$ballot_judge}{"done"}++) { 
+			push @{$ranks{$section_letter}{$round_name}{"judges"}}, $ballot_judge;
+		}
+
+		$ranks{$ballot_entry}{$round_name}{$ballot_judge} = $score_value;
+
+
+		$ranks{"judge"}{$ballot_judge}{"code"}  = $judge_code;
+		$ranks{"judge"}{$ballot_judge}{"first"} = $judge_first;
+		$ranks{"judge"}{$ballot_judge}{"last"}  = $judge_last;
+
+	}
+
+</%init>
+
+	<script>
+
+		$(document).ready(function(){
+			$("#"+<% $round->id %>).trigger("applyWidgets");
+		});
+
+	</script>
+
+%		foreach my $section (sort {$a <=> $b} keys %sections) { 
+
+%			my $table_key = $round->id."-".$section;
+
+			<div class="full nospace martopmore">
+
+				<span class="twothirds nospace">
+
+				<h4 class="marno padless">
+%					if ($round_robin) { 
+						Pod
+%					} else { 
+						<% $event->type eq "congress" ? "Chamber" : "" %>
+						<% $event->type eq "speech" ? "Section" : "" %>
+%					}
+					<% $section %>
+				</h4>
+
+				</span>
+
+				<span 
+					id    = "<% $table_key %>_buttonarea"
+					class = "third nospace rightalign"
+				>
+				</span>
+
+			</div>
+
+			<& "/funclib/tablesorter.mas", table => $table_key &>
+
+			<table id="<% $table_key %>">
+
+				<thead>
+
+					<tr class="yellowrow"> 
+
+						<th class="smallish">
+							Rank
+						</th>
+
+						<th class="smallish">
+							Code
+						</th>
+
+%						foreach my $break (keys %breakouts) { 
+							<th class="smallish centeralign">
+								<% $breakouts{$break}{"name"} %>
+							</th>
+%						}
+
+						<th class="smallish">
+							Name
+						</th>
+
+<%perl>
+						foreach my $round (@{$ranks{$section}{"rounds"}}) { 
+
+							foreach my $judge_id (@{$ranks{$section}{$round}{"judges"}}) { 
+
+								my $judge_code .= $ranks{"judge"}{$judge_id}{"code"};
+
+								my $judge_name .= $ranks{"judge"}{$judge_id}{"first"};
+								$judge_name .= " ".$ranks{"judge"}{$judge_id}{"last"};
+
+								unless ($judge_code) { 
+									$judge_code = substr($ranks{"judge"}{$judge_id}{"first"}, 0, 1);
+									$judge_code .= substr($ranks{"judge"}{$judge_id}{"last"}, 0, 1);
+								}
+</%perl>
+
+								<th
+									class="smallish"
+									title="Round <% $round %> Judge <% $judge_name %>"
+								>
+									R<% $round %> <% $judge_code %>
+								</th>
+
+%							}
+
+%						}
+
+%						foreach my $key (@tiebreak_keys) { 
+							<th class="smallish">
+								<span title="<% ${$entries_ref}{"tier_long_description"}{$key} %>">
+									<% ${$entries_ref}{"tier_description"}{$key} %>
+								</span>
+							</th>
+%						}
+
+					</tr>
+
+				</thead>
+
+				<tbody>
+
+<%perl>
+					my $count = $start_placement;
+					$count = 1 unless $count;
+					my $alt_count = 1;
+
+					if (${$entries_ref}{"by_place"}) { 
+
+						my $last_tied;
+
+						foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) { 
+
+							my $tie++ if (scalar @{${${$entries_ref}{"by_place"}}{$key}}) > 1;
+
+							undef $tie 
+								if $round->type eq "elim" 
+								&& $event->type ne "speech" 
+								&& $event->type ne "congress";
+
+							my $did;
+
+							ENTRY:
+							foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) { 
+
+								next if $exclude && $exclude->{$entry_id}++;
+
+								if ($round_robin) { 
+									next unless ${$entries_ref}{"pod"}{$entry_id} == $section;
+								} else { 
+									next unless ${$entries_ref}{"section"}{$entry_id} == $section;
+								}
+
+								$did++;
+</%perl>
+
+								<tr
+									class="<% $tie && $mark_ties ? "lirdrow " : "" %> 
+									<% $tie && $last_tied && $mark_ties ? "libordertop" : "" %>"
+								>
+
+%									undef $last_tied;
+
+%									if ($round_robin) { 
+										<td class="centeralign smallish nowrap nospace">
+											<% ${$entries_ref}{"pod_rank"}{$entry_id} %> 
+										</td>
+%									} else { 
+										<td class="centeralign smallish nowrap nospace">
+											<% ${$entries_ref}{"section_rank"}{$entry_id} %> 
+										</td>
+%									}
+
+									<td 
+										class="smallish nospace padleft hover" 
+										title="Scores:<% $entry_ballots{$entry_id} %>"
+									>
+										<% $entries_ref->{"code"}{$entry_id} %>
+									</td>
+
+%									foreach my $break (keys %breakouts) { 
+										<td class="smallish centeralign">
+											<% $breakouts{$break}{$entry_id} 
+												? $breakouts{$break}{"name"} 
+												: ""
+											%>
+										</td>
+
+%									}
+
+									<td 
+										class="smallish nospace padleft" 
+										title="<% ${$entries_ref}{"name"}{$entry_id} %>"
+									>
+										<% ${$entries_ref}{"name"}{$entry_id} %>
+									</td>
+
+<%perl>
+									foreach my $round (@{$ranks{$section}{"rounds"}}) { 
+	
+										foreach my $judge_id (@{$ranks{$section}{$round}{"judges"}}) { 
+</%perl>
+											<td class="smallish rightalign" >
+												<% $ranks{$entry_id}{$round}{$judge_id} %>
+											</th>
+
+<%perl>
+										}
+									}
+
+									foreach my $key (@tiebreak_keys) { 
+
+										my $value = ${$entries_ref}{"tiebreak"}{$key}{$entry_id};
+
+										if ($key == $cutoff_key) {
+
+											if ($ARGS{"threshold_direction"} eq "desc") { 
+
+												$cutoff{$entry_id}++ if $value < $threshold;
+
+											} else { 
+
+												$cutoff{$entry_id}++ if $value >= $threshold;
+
+											}
+										}
+
+										$value =~ s/\.(?:|.*[^0]\K)0*\z//;
+										$value = sprintf("%.2f", $value) 
+											unless ${$entries_ref}{"tier_description"}{$key} eq "Rk" 
+											|| ${$entries_ref}{"tier_description"}{$key} eq "Win" 
+											|| ${$entries_ref}{"tier_description"}{$key} eq "Prev Win" 
+											|| ${$entries_ref}{"tier_description"}{$key} eq "Rnds" 
+											|| ${$entries_ref}{"tier_description"}{$key} eq "Loss" 
+											|| ${$entries_ref}{"tier_description"}{$key} eq "Dwn" 
+											|| ${$entries_ref}{"tier_description"}{$key} eq "CDwn" 
+											|| ${$entries_ref}{"tier_description"}{$key} eq "H2H" 
+											|| ${$entries_ref}{"tier_description"}{$key} eq "JP"
+											|| ${$entries_ref}{"tier_description"}{$key} eq "Bal";
+
+</%perl>
+
+										<td 
+											class="smallish nowrap rightalign 
+												<% $cutoff{$entry_id} ? "strong redtext" : "" %>"
+										>
+											<% $value %>
+										</td>
+%									}
+
+								</tr>
+
+<%perl>
+
+							}
+
+							$last_tied++ if $tie;
+
+						} 
+					}
+</%perl>
+
+				</tbody>
+			</table>
+
+%		}
+%		return %cutoff if $threshold;
+
