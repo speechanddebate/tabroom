@@ -18,6 +18,8 @@ use JavaScript::Minifier qw(minify);
 		'iphone_switch.js',
 		'jquery.tablesorter.combined.js',
 		'widget-columnSelector.js',
+		'widget-print.js',
+		'widget-output.js',
 		'uniform.min.js',
 		'cycle.js',
 		'alertify.js',
