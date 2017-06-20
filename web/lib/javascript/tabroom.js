@@ -22,6 +22,20 @@
 	}
 
 
+/* master toggle for checkboxes */
+
+	function confirmAll(master, targetClass) { 
+
+		console.log("Confirming value for "+master.id);
+
+		if ($(master).prop("checked") === false) { 
+			$("."+targetClass).prop("checked", false);
+		} else { 
+			$("."+targetClass).prop("checked", true);
+		}
+	}
+
+
 /* Respond to switch calls */
 
 	function postSwitch(checkObject, replyUrl) { 
@@ -55,7 +69,6 @@
 				property_value : propertyValue
 			},
 			success : function(data) {
-
 
 				if (successAction === "destroy") { 
 					$("#"+targetId).remove();

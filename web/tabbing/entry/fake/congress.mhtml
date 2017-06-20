@@ -1,73 +1,135 @@
 <%args>
-	$round_id
+	$round_id => undef
+	$event_id => undef
 </%args>
 <%init>
 
-	my $round = Tab::Round->retrieve($round_id);
+	my @rounds;
+	my $event;
 
-	foreach my $existing (
-		$m->comp(
-			"/funclib/round_scores.mas", 
-			round => $round
-		)
-	) { 
-		$existing->delete;
+	if ($round_id) { 
+
+		push @rounds, Tab::Round->retrieve($round_id);
+		$event = $rounds[0]->event if @rounds;
+	
+	} elsif ($event_id) { 
+
+		$event = Tab::Event->retrieve($event_id);
+		push @rounds, $event->rounds;
+
 	}
 
-	use List::Util 'shuffle';
+	unless (@rounds) { 
 
-	foreach my $panel ($round->panels) { 
+		$m->comp(
+			"/funclib/abort.mas", 
+			warning => "No valid rounds found for faking results"
+		);
 
-		foreach my $judge ($m->comp(
-			"/funclib/panel_judges.mas", 
-				panel => $panel
+	}
+
+	my $truncate_fill = $event->setting("truncate_fill");
+	my $max_points = $event->setting("max_points");
+	my $min_points = $event->setting("min_points");
+	my $points_diff = $max_points - $min_points;
+
+	my $last_prelim;
+
+	if ($event->type eq "congress") {
+
+		foreach my $round ($event->rounds(type => "prelim")) { 
+			$last_prelim = $round unless $last_prelim;
+			$last_prelim = $round if $last_prelim->name < $round->name;
+		}
+
+	}
+
+
+	foreach my $round (@rounds) { 
+
+		foreach my $existing (
+			$m->comp(
+				"/funclib/round_scores.mas", 
+				round => $round
 			)
 		) { 
+			$existing->delete;
+		}
 
-			my @ballots = shuffle(
-				Tab::Ballot->search( 
-					panel => $panel->id, 
-					judge => $judge->id 
+		use List::Util 'shuffle';
+
+		foreach my $panel ($round->panels) { 
+
+			foreach my $judge ($m->comp(
+				"/funclib/panel_judges.mas", 
+					panel => $panel
 				)
-			); 
+			) { 
 
-			my $rank;
+				next if $judge->chair 
+					&& $last_prelim 
+					&& $last_prelim->id != $round->id;
 
-			foreach my $ballot (@ballots) { 
+				my @ballots = shuffle(
+					Tab::Ballot->search( 
+						panel => $panel->id, 
+						judge => $judge->id 
+					)
+				); 
 
-				$rank++;	
+				my $rank;
 
-				foreach my $student ($ballot->entry->students) { 
+				foreach my $ballot (@ballots) { 
 
-					my $points = int(rand(100));
+					$rank++;	
 
+					if (
+						$truncate_fill 
+						&& $rank > $truncate_fill
+						&& ( (not defined $judge->chair)
+							 || $event->type eq "congress"
+						   )
+					) { 
+						$rank = $truncate_fill; 
+					}
+
+					foreach my $student ($ballot->entry->students) { 
+
+						my $points = int(rand(100)) / 100;
+						$points = ($points * $points_diff);
+						$points += $min_points;
+
+						$points = int($points);
+
+						Tab::Score->create({
+							ballot  => $ballot->id,
+							tag     => "points",
+							student => $student->id,
+							value   => $points
+						});
+
+					} 
+				
 					Tab::Score->create({
-						ballot  => $ballot->id,
-						tag     => "points",
-						student => $student->id,
-						value   => $points
+						ballot => $ballot->id,
+						tag    => "rank",
+						value  => $rank
 					});
 
-				} 
-			
-				Tab::Score->create({
-					ballot => $ballot->id,
-					tag    => "rank",
-					value  => $rank
-				});
+				}
 
-			}
+				foreach my $ballot (@ballots) { 
+					$ballot->audit(1);
+					$ballot->update;
+				}
 
-			foreach my $ballot (@ballots) { 
-				$ballot->audit(1);
-				$ballot->update;
 			}
 
 		}
 
 	}
 
-	my $msg = "Ranks faked for round";
+	my $msg = "Ranks faked";
 	$m->redirect("/panel/schemat/show.mhtml?round_id=$round_id");
 
 </%init>
