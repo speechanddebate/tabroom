@@ -1,4 +1,6 @@
 <%args>
+	$tourn
+	$tourn_settings
 	$person
 	$round_id
 	$min_bracket => undef
@@ -13,7 +15,6 @@
 	my $round = Tab::Round->retrieve($round_id);
 
 	my $event = $round->event;
-    my $tourn = $event->tourn;
 
     my $description = $person->first." ".$person->last." (".$person->email.") 
 		has re-assigned the judges for round ".$round->realname." of ".$event->abbr;
@@ -41,10 +42,6 @@
 		"/funclib/event_schools.mas", 
 		event => $event 
 	);
-
-	my %school_region = 
-		map {$_->id => $_->region} 
-		$tourn->schools;
 
 	my $prelim_count;
 
@@ -108,31 +105,12 @@
 	my $num_judges = $round->setting("num_judges");
 	$num_judges = 1 unless $num_judges;
 
-	# Lots of settings
-	my $rounds_per = $category_settings{"rounds_per"};
-	my $no_back_to_back = $category_settings{"no_back_to_back"};
-	my $judge_randomize = $category_settings{"judge_randomize"};
-	my $judge_event_twice = $category_settings{"judge_event_twice"};
-
-	my $allow_school_panels = $category_settings{"allow_school_panels"};
-	my $allow_region_panels = $category_settings{"allow_region_panels"};
-	my $conflict_region_judges = $category_settings{"conflict_region_judges"};
-
-	my $no_first_years = $event_settings{"no_first_years"};
-	my $allow_judge_own = $event_settings{"allow_judge_own"};
-	my $region_constrain = $event_settings{"region_constraints"};
-    my $region_avoid++ if $event_settings{"region_avoid"};
-
-	my $allow_repeat_elims = $event_settings{"allow_repeat_elims"};
-	my $allow_repeat_judging = $event_settings{"allow_repeat_judging"};
-	my $allow_repeat_prelim_side = $event_settings{"allow_repeat_prelim_side"};
-	my $disallow_repeat_drop = $event_settings{"disallow_repeat_drop"};
-
-    my $ncfl = $tourn->setting('ncfl');
-
     my %dio_region;
-    if ($ncfl) { 
-        foreach my $diocese ($m->comp("/funclib/tourn_regions.mas", tourn => $tourn)) { 
+
+    if ($tourn_settings->{"ncfl"}) { 
+        foreach my $diocese (
+			$m->comp("/funclib/tourn_regions.mas", tourn => $tourn)
+		) { 
             $dio_region{$diocese->id} = $diocese->setting('region-'.$event->id);
         }
     }   
@@ -158,41 +136,42 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $event_ballots_sth = $dbh->prepare("
-		select distinct ballot.id, ballot.entry, ballot.judge, round.id, round.type, 
-			entry.school, seed.value, ballot.side, panel.bracket, panel.id, entry.code, 
-			panel.bye, winner.value
+		select distinct 
+			ballot.id, ballot.judge, ballot.bye,
+			round.id, round.type, 
+			entry.id, entry.code, entry.school, region.id, chapter.state, state_setting.value,
+			seed.value, ballot.side, 
+			panel.bracket, panel.id, panel.bye, 
+			winner.value
 		from (ballot, panel, round, entry, event, school)
 		left join entry_setting seed on seed.entry = entry.id and seed.tag = 'pairing_seed'
 		left join score winner on winner.ballot = ballot.id and winner.tag = 'ballot'
+		left join region on school.region = region.id
+		left join chapter on school.chapter = chapter.id
+
+		left join school_setting state_setting 
+			on school.id  = state_setting.school
+			and state_setting.tag = 'state'
+
 		where event.category = ?
 		and round.event = event.id
 		and round.id = panel.round
 		and panel.id = ballot.panel
-		and ballot.bye = 0
-		and ballot.forfeit = 0
-		and panel.bye = 0 
 		and ballot.entry = entry.id
 		and entry.school = school.id
 	");
 
 	$event_ballots_sth->execute($category->id);
 
-	my @entries;
-
-	my %entry_hash;
+	my %entries;
+	my %judges;
 
 	my %school_entries;
+	my %state_entries;
 	my %region_entries;
 	my %dioregion_entries;
 
-	my %judge_ballots;
-
-	my @panels;
-	my %panel_entries;
-	my %panel_bracket;
-	my %panel_bracket_rank;
-	my %panel_seed;
-	my %panel_bye;
+	my %panels;
 
 	my %ballot_type;
 	my %ballot_side;
@@ -200,12 +179,13 @@
 	my %ballot_judge;
 	my %ballot_winner;
 
-	my %judge_rounds;
-
 	while (my (
-		$ballot, $entry, $judge, $round, $type, 
-		$entry_school, $entry_seed, 
-		$side, $bracket, $panel, $code, $bye, $winner
+		$ballot, $judge, $bbye,
+		$round, $type,
+		$entry, $code, $entry_school, $entry_region, $entry_state, $entry_state_dos,
+		$entry_seed, $side,
+		$bracket, $panel, $pbye,
+		$winner
 	) = $event_ballots_sth->fetchrow_array() ) {
 
 		if ($round == $this_round) { 
@@ -213,55 +193,70 @@
 			next if defined($min_bracket) && $bracket <= $min_bracket;
 			next if defined($max_bracket) && $bracket > $max_bracket;
 
-			push @entries, $entry;
+			$entries{$entry}{"seed"} = $entry_seed;
+			$entries{$entry}{"side"} = $side;
+			$entries{$entry}{"code"} = $code;
 
-			$entry_hash{$entry}{"seed"} = $entry_seed;
-			$entry_hash{$entry}{"side"} = $side;
-			$entry_hash{$entry}{"code"} = $code;
+			$entries{$entry}{"school"} = $entry_school;
+			$entries{$entry}{"region"} = $entry_region;
+			$entries{$entry}{"state"} = $entry_state;
+			$entries{$entry}{"state"} = $entry_state_dos if $entry_state_dos;
 
-			$entry_hash{$entry}{"school"} = $entry_school;
-			$entry_hash{$entry}{"region"} = $school_region{$entry_school};
-
-			$entry_hash{$entry}{"dioregion"} = $dio_region{$school_region{$entry_school}} 
-				if $school_region{$entry_school};
+			if ($tourn_settings->{"ncfl"}) { 
+				$entries{$entry}{"dioregion"} 
+					= $dio_region{$entry_region}
+					if $entry_region;
+			}
 
 			push @{$school_entries{$entry_school}}, $entry;
 
-			push @{$region_entries{$school_region{$entry_school}}}, $entry 
-					if $school_region{$entry_school};
+			push @{$state_entries{$entry_state}}, $entry 
+				if $entry_state;
 
-			push @{$dioregion_entries{$dio_region{$school_region{$entry_school}}}}, $entry 
-					if $school_region{$entry_school} 
-					&& $dio_region{$school_region{$entry_school}};
+			push @{$region_entries{$entry_region}}, $entry 
+					if $entry_region;
 
-			push @panels, $panel;
-			$panel_bye{$panel} = $bye;
+			if ($tourn_settings->{"ncfl"}) { 
+				push @{$dioregion_entries{$dio_region{$entry_region}}}, $entry 
+					if $entry_region 
+					&& $dio_region{$entry_region};
+			}
 
-			$panel_seed{$panel} = $entry_seed unless $panel_seed{$panel};
+			if ($tourn_settings->{"nsda_nats"}) { 
+				push @{$state_entries{$entry_state}}, $entry 
+					if $entry_state;
+			}
 
-			$panel_seed{$panel} = $entry_seed 
+			push @{$panels{"all"}}, $panel;
+
+			$panels{"bye"}{$panel} = $pbye;
+
+			$panels{"seed"}{$panel} = $entry_seed 
+				unless $panels{"seed"}{$panel};
+
+			$panels{"seed"}{$panel} = $entry_seed 
 				if $entry_seed 
-				&& $entry_seed < $panel_seed{$panel};
+				&& $entry_seed < $panels{"seed"}{$panel};
 
-			$panel_bracket{$panel} = $bracket;
+			$panels{"bracket"}{$panel} = $bracket;
 
 			if ($best_judges_highest_seed) { 
 
-				$panel_bracket_rank{$panel} = $entry_seed_position{$entry} 
-					unless $panel_bracket_rank{$panel};
+				$panels{"bracketrank"}{$panel} = $entry_seed_position{$entry} 
+					unless $panels{"bracketrank"}{$panel};
 
-				$panel_bracket_rank{$panel} = $entry_seed_position{$entry} 
-					if $entry_seed_position{$entry} < $panel_bracket_rank{$panel};
+				$panels{"bracketrank"}{$panel} = $entry_seed_position{$entry} 
+					if $entry_seed_position{$entry} < $panels{"bracketrank"}{$panel};
 
 			}
 
-			push @{$panel_entries{$panel}}, $entry;
+			push @{$panels{"entries"}{$panel}}, $entry;
 
 		} else { 
 
-			push @{$judge_rounds{$judge}}, $round if $round;
-			push @{$judge_ballots{$judge}}, $ballot;
-			push @{$entry_hash{$entry}{"ballots"}}, $ballot;
+			push @{$judges{"rounds"}{$judge}}, $round if $round;
+			push @{$judges{"ballots"}{$judge}}, $ballot;
+			push @{$entries{$entry}{"ballots"}}, $ballot;
 
 			$ballot_type{$ballot} = $type;
 			$ballot_side{$ballot} = $side;
@@ -283,7 +278,9 @@
 				tab_rating.value, 
 				rating_tier.name, 
 				diverse.value, 
-				concat(judge.obligation+judge.hired) as rounds
+				judge.obligation, judge.hired,
+				chapter.state,
+				state.value
 
 			from (judge, jpool_judge, jpool_round)
 
@@ -300,6 +297,10 @@
 			left join rating_tier on 
 				coach_rating.rating_tier = rating_tier.id
 
+			left join school on judge.school = school.id 
+			left join chapter on school.chapter = chapter.id
+			left join school_setting state on state.school = school.id and state.tag = 'state'
+
 			where judge.active = 1
 			and judge.id = jpool_judge.judge
 			and jpool_round.jpool = jpool_judge.jpool
@@ -311,10 +312,14 @@
 
 		$judge_sth = $dbh->prepare("
 
-			select distinct judge.id, concat_ws(' ',judge.last, judge.first) as name, judge.school, 
-				tab_rating.value, rating_tier.name, diverse.value, 
-				concat(judge.obligation+judge.hired) as rounds
+			select distinct judge.id, concat_ws(' ',judge.last, judge.first) as name, 
+				judge.school, region.id, chapter.state, state.value,
+				tab_rating.value, 
+				rating_tier.name,
+				diverse.value, 
+				judge.obligation, judge.hired
 			from (judge, category, event, round)
+
 			left join judge_setting as tab_rating 
 				on tab_rating.judge = judge.id 
 				and tab_rating.tag = 'tab_rating'
@@ -329,6 +334,12 @@
 
 			left join rating_tier on coach_rating.rating_tier = rating_tier.id
 
+			left join school on judge.school = school.id
+			left join region on school.region = region.id
+			left join chapter on school.chapter = chapter.id
+
+			left join school_setting state on state.school = school.id and state.tag = 'state'
+
 			where judge.active = 1
 			and judge.category = event.category 
 			and event.id = round.event
@@ -340,74 +351,88 @@
 
 	$judge_sth->execute($round->id);
 
-	my @judges;
-	my %judge_name;
-	my %judge_score;
-	my %judge_school;
-	my %judge_region;
-	my %judge_dioregion;
-	my %judge_rating;
-	my %judge_diverse;
-
 	my %school_judges;
 	my %region_judges;
-	my %judge_clashes;
-	my %judge_obligation;
 
 	while (
-		my ($id, $last, $school, $tab_rating, $coach_rating, $diverse, $rounds) 
-		= $judge_sth->fetchrow_array()
+		my ($id, $last, 
+			$school, $region, $state, $state2,
+			$tab_rating,
+			$coach_rating,
+			$diverse,
+			$obligation,
+			$hired
+		) = $judge_sth->fetchrow_array()
 	) {
 
 		next unless $id;
 
-		push @judges, $id;
-		$judge_name{$id} = $last;
-		$judge_school{$id} = $school;
-		$judge_region{$id} = $school_region{$school} if $school;
-		$judge_dioregion{$id} = $dio_region{$judge_region{$id}} if $judge_region{$id};
+		push @{$judges{"all"}}, $id;
 
-		$judge_rating{$id} = $tab_rating if $tab_ratings;
-		$judge_rating{$id} = $coach_rating if $coach_ratings;
+		$judges{"name"}{$id} = $last;
+		$judges{"school"}{$id} = $school;
 
-		$judge_diverse{$id} = $diverse;
-		$judge_obligation{$id} = $rounds;
+		$judges{"region"}{$id} = $region;
+		$judges{"state"}{$id} = $state;
+		$judges{"state"}{$id} = $state2 if $state2;
+
+		if ($tourn_settings->{"ncfl"}) { 
+			$judges{"dioregion"}{$id} = $dio_region{$region} 
+				if $region;
+		}	
+
+		$judges{"rating"}{$id} = $tab_rating 
+			if $tab_ratings;
+
+		$judges{"rating"}{$id} = $coach_rating 
+			if $coach_ratings;
+
+		$judges{"diverse"}{$id} = $diverse;
+
+		$judges{"obligation"}{$id} = $obligation + $hired; 
 
 		push @{$school_judges{$school}}, $id;
+			
+		unless ($event_settings{"allow_judge_own"}) { 
 
-		if ($school_entries{$school} && not defined $allow_judge_own) { 
-			foreach my $entry (@{$school_entries{$school}}) { 
-				push @{$judge_clashes{$id}}, $entry;
+			push @{$judges{"conflicts"}{$id}}, @{$school_entries{$school}}
+				if $school_entries{$school} ;
+
+			if ( $event_settings{"region_constraints"} || $tourn_settings->{"ncfl"}) { 
+
+				push @{$judges{"conflicts"}{$id}}, @{$region_entries{$region}}
+					if $region_entries{$region};
 			}
+
 		}
 
-		if ($region_constrain || $ncfl) {
-			if ($region_entries{$school_region{$school}} 
-				&& not defined $allow_judge_own
-			) { 
-				foreach my $entry (@{$region_entries{$school_region{$school}}}) { 
-					push @{$judge_clashes{$id}}, $entry;
-				}
-			}
+		if ($tourn_settings->{"ncfl"} && $category_settings{"conflict_region_judges"}) { 
+
+			push @{$judges{"conflicts"}{$id}}, @{$dioregion_entries{$dio_region{$region}}}
+				if $region
+				&& $dioregion_entries{$dio_region{$region}}
 		}
 
-		if ($ncfl && $conflict_region_judges) { 
-
-			if ($school_region{$school} && $dio_region{$school_region{$school}} 
-				&& $dioregion_entries{$dio_region{$school_region{$school}}}
-			) { 
-
-				foreach my $entry (@{$dioregion_entries{$dio_region{$school_region{$school}}}}) { 
-					push @{$judge_clashes{$id}}, $entry;
-				}
-			}
+		if ($category_settings{"conflict_state_judges"}) { 
+				
+			push @{$judges{"conflicts"}{$id}}, @{$state_entries{$state}}
+				if $state_entries{$state};
 		}
+
 	}
 
-	unless (@judges) { 
-		#$err = "No judges were available."; #does the next line replace this?
-		my $err = "No judges were found.  Did you put judges into the judge pools?" if @jpool;
+	unless ($judges{"all"} && @{$judges{"all"}}) { 
+
+		# does the next line replace this? JB 
+		# No, because the next is only triggered if there are pools - CLP
+
+		my $err = "No judges were available."; 
+
+		$err = "No judges were found.  Did you put judges into the judge pools?" 
+			if @jpool;
+
 		$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&disp=1&err=$err");
+
 	}
 
 	my $strikes_sth = $dbh->prepare("
@@ -419,21 +444,21 @@
 
 	$strikes_sth->execute();
 
-	my %judge_out;
-
 	while (
-		my ($id, $judge, $type, $strike_event, $entry, $school, $region, $dioregion, $start, $end) 
-		= $strikes_sth->fetchrow_array() 
+		my ($id, $judge, $type, 
+			$strike_event, $entry, $school, $region, $dioregion, $start, $end
+		) = $strikes_sth->fetchrow_array() 
 	) {
 
 		if ($type eq "conflict" || $type eq "entry") { 
 
 			if ($school) {	 
-				push @{$judge_clashes{$judge}}, @{$school_entries{$school}} if $school_entries{$school};
-				push @{$judge_clashes{$judge}}, @{$region_entries{$school_region{$school}}} 
-					if $school_region{$school} > 0 && $region_entries{$school_region{$school}};
+
+				push @{$judges{"conflicts"}{$judge}}, @{$school_entries{$school}} 
+					if $school_entries{$school};
+
 			} else {  
-				push @{$judge_clashes{$judge}}, $entry;
+				push @{$judges{"conflicts"}{$judge}}, $entry;
 			}
 		} 
 
@@ -444,30 +469,29 @@
 				&& $type eq "elim";
 
 			next unless $strike_event == $event->id;
-			$judge_out{$judge}++;
+			$judges{"out"}{$judge}++;
 		}
 
 		if ($type eq "hybrid") { 
 			foreach my $school_judge (@{$school_judges{$school}}) { 
-				push @{$judge_clashes{$school_judge}}, $entry;
+				push @{$judges{"conflicts"}{$school_judge}}, $entry;
 			}
 		}
 
 		if ($type eq "region") { 
-			foreach my $region_school (@schools) { 
-				next unless $school_region{$region_school} == $region;
-				next unless $school_entries{$region_school};
-				push @{$judge_clashes{$judge}}, @{$school_entries{$region_school}};
+			push @{$judges{"conflicts"}{$judge}}, @{$region_entries{$region}}
+				if $region_entries{$region};
+		}
+
+		if ($tourn_settings->{"ncfl"}) { 
+			if ($type eq "dioregion") { 
+				push @{$judges{"conflicts"}{$judge}}, @{$dioregion_entries{$dioregion}} 
+					if $dioregion_entries{$dioregion};
 			}
 		}
 
-		if ($type eq "dioregion") { 
-			push @{$judge_clashes{$judge}}, @{$dioregion_entries{$dioregion}} 
-				if $dioregion_entries{$dioregion};
-		}
-
 		if ($type eq "school") { 
-			push @{$judge_clashes{$judge}}, @{$school_entries{$school}} 
+			push @{$judges{"conflicts"}{$judge}}, @{$school_entries{$school}} 
 				if $school_entries{$school};
 		}
 
@@ -489,7 +513,7 @@
 				$start_dt->set_time_zone($tz);
 				$end_dt->set_time_zone($tz);
 
-				$judge_out{$judge}++  
+				$judges{"out"}{$judge}++  
 					if ($round_start <= $end_dt 
 						&& $round_end >= $start_dt);
 
@@ -504,24 +528,22 @@
 		from judge, round, timeslot, strike, event
 		where judge.id = strike.judge
 		and judge.category = event.category
-		and event.id = ".$event->id."
+		and event.id = ? 
 		and round.event = event.id
-		and strike.type = \"time\"
+		and strike.type = 'time'
 		and strike.start < timeslot.end
 		and strike.end > timeslot.start
 		and timeslot.id = round.timeslot
 		group by judge.id
 	");
 
-	my %judge_roundstruck = ();
-
-	$rounds_missed_sth->execute();
+	$rounds_missed_sth->execute($event->id);
 
 	while (
 		my ($judge, $rounds_struck) 
 		= $rounds_missed_sth->fetchrow_array() 
 	) {
-		$judge_roundstruck{$judge} = $rounds_struck;
+		$judges{"roundstruck"}{$judge} = $rounds_struck;
 	}
 
 	if (@jpool) { 
@@ -546,7 +568,7 @@
 		$busy_sth->execute($round->id);
 
 		while (my ($judge) = $busy_sth->fetchrow_array() ) {
-			$judge_out{$judge}++;
+			$judges{"out"}{$judge}++;
 		}
 
 	} else { 
@@ -568,7 +590,8 @@
 		$busy_sth->execute($round->id, $category->id);
 
 		while (my ($judge) = $busy_sth->fetchrow_array() ) {
-			$judge_out{$judge}++;
+
+			$judges{"out"}{$judge}++;
 		}
 
 	}
@@ -583,10 +606,12 @@
 		$tiers++;
 
 		foreach my $tier (
-			sort {$a->name cmp $b->name} $category->rating_tiers(type => "mpj")
+			sort {$a->name cmp $b->name} 
+			$category->rating_tiers(type => "mpj")
 		) {
 			$tier_value{$tier->id} = $tier->name;
-			$tier_strike{$tier->id}++ if $tier->strike || $tier->conflict;
+			$tier_strike{$tier->id}++ 
+				if $tier->strike || $tier->conflict;
 		}
 	}
 
@@ -617,25 +642,34 @@
 		my ($id, $judge, $entry, $tier, $percentile) 
 		= $ratings_sth->fetchrow_array() 
 	) {
+
 		next unless ($tier || $percentile);
-		$mjp{$judge."-".$entry} = $tier_value{$tier} if $tier > 0;
-		$mjp{$judge."-".$entry} = $percentile if $percentile > 0;
-		push @{$judge_clashes{$judge}}, $entry if $tier && $tier_strike{$tier};
+
+		$mjp{$judge."-".$entry} = $tier_value{$tier} 
+			if $tier > 0;
+
+		$mjp{$judge."-".$entry} = $percentile 
+			if $percentile > 0;
+
+		push @{$judges{"conflicts"}{$judge}}, $entry 
+			if $tier && $tier_strike{$tier};
 	}
 
 	my %panel_seen = (); 
 
-	@panels = grep { ! $panel_seen{$_} ++ } @panels;
-	@panels = sort {$panel_bracket{$b} <=> $panel_bracket{$a}} @panels;
+	#Deduplicate
+	@{$panels{"all"}} = 
+		grep { ! $panel_seen{$_} ++ } 
+		@{$panels{"all"}};
 
-	my %judge_avoid;
-	my %judge_entry_clash;
+	@{$panels{"all"}} = 
+		sort {$panels{"bracket"}{$b} <=> $panels{"bracket"}{$a}} 
+		@{$panels{"all"}};
 
-    my $judge_use_ref = $m->comp(
+	$judges{"use"} = $m->comp(
 		"/funclib/judge_use.mas", 
 		round_id => $round->id
 	);    
-    my %judge_use = %{$judge_use_ref};
 
 	my $round_burn_avoid = $category_settings{"round_burn_avoid"};
 	my $mutuality = $category_settings{"mutuality"};
@@ -663,88 +697,121 @@
 	$round_burn_avoid = 0 if $round_burn_avoid < 0;
 	$prefer_hireds    = 0 if $prefer_hireds < 0;
 
+
 	unless ($prefs) { 
 		$mutuality = 0;
 		$suckage = 0;
 		$default_mjp = 0;
 	}
 
-	$round_burn_avoid = 0 unless $rounds_per;
+	$round_burn_avoid = 0 unless $category_settings{"rounds_per"};
 
 	my %use_priority;
-	my %judge_roundcount;
+
 	my %judge_prefs = $m->comp("/funclib/judges_by_pref.mas", category => $category);
 
-	foreach my $judge (@judges) {
+	foreach my $judge (@{$judges{"all"}}) {
 
 		my %seen = (); 
-		@{$judge_rounds{$judge}} = grep { ! $seen{$_}++ } @{$judge_rounds{$judge}};
 
-		my $num_rounds = scalar @{$judge_rounds{$judge}};
+		@{$judges{"rounds"}{$judge}} = 
+			grep { ! $seen{$_}++ } 
+			@{$judges{"rounds"}{$judge}};
 
-		$judge_score{$judge} += scalar @{$judge_clashes{$judge}} if $judge_clashes{$judge};
+		my $num_rounds = scalar @{$judges{"rounds"}{$judge}};
 
-		if ($rounds_per && $round_type ne "elim" && $round_type ne "final") { 
+		$judges{"score"}{$judge} += 
+			scalar @{$judges{"conflicts"}{$judge}} 
+			if $judges{"conflicts"}{$judge};
 
-			$judge_out{$judge}++ 
-				if $num_rounds >= $judge_obligation{$judge};
+		if (
+			$category_settings{"rounds_per"} 
+			&& (
+				($round_type ne "elim" && $round_type ne "final")
+				|| ($tourn_settings->{"nsda_nats"} && (not defined $event_settings{"not_nats"}))
+			)
+		) { 
+
+			$judges{"out"}{$judge}++ 
+				if $num_rounds >= $judges{"obligation"}{$judge};
 	
 			my $remaining_prelims = $prelim_count + 1 - $round->name;
 
-			my $rounds_left = $judge_use{$judge}{"percentage"} * .01 * $judge_use{$judge}{'left'};
+			my $rounds_left = $judges{"use"}{$judge}{"percentage"} * .01 * $judges{"use"}{$judge}{'left'};
+
+			my $rounds_judged = $judges{"use"}{$judge}{"judged_already"};
 
 			my $round_diff = $remaining_prelims - $rounds_left;
 
 			if ($round_diff > 0) { 
-				$judge_score{$judge} += $round_diff ** $round_burn_avoid;
+				$judges{"score"}{$judge} += $round_diff ** $round_burn_avoid;
 				$use_priority{$judge} += $round_diff ** $round_burn_avoid;
 			}
+
+			$use_priority{$judge} += $rounds_judged; #All else equal use the newbies;
 
 			$use_priority{$judge."-dontcare"} += 1000000000 * ($round_diff ** $round_burn_avoid ** 2) 
 				if $round_diff > 0 && $prefs eq "ordinals";
 
-			$judge_roundcount{$judge} = $num_rounds;
+			$judges{"roundcount"}{$judge} = $num_rounds;
 
 		} else {
 
 			my $round_factor = $num_rounds;
-			$round_factor -= $judge_roundstruck{$judge};
+			$round_factor -= $judges{"roundstruck"}{$judge};
 
 			$round_factor = $round_factor * $round_burn_avoid;
 
-			$judge_score{$judge} += $round_factor * .1;
+			$judges{"score"}{$judge} += $round_factor * .1;
 			$use_priority{$judge} += $round_factor * .1;
-			$judge_roundcount{$judge} = $num_rounds;
+			$judges{"roundcount"}{$judge} = $num_rounds;
 	
-			if ($ncfl && ($round_type eq "elim" || $round_type eq "final")) { 
-				$judge_score{$judge} += 50000 if $judge_rating{$judge} eq "A";
-				$judge_score{$judge} += 2500 if $judge_rating{$judge} eq "B";
+			if (
+				$tourn_settings->{"ncfl"} 
+				&& (
+					$round_type eq "elim" 
+					|| $round_type eq "final"
+				)
+			) { 
+				$judges{"score"}{$judge} += 50000 
+					if $judges{"rating"}{$judge} eq "A";
 
-				$use_priority{$judge} -= 50000 if $judge_rating{$judge} eq "A";
-				$use_priority{$judge} -= 2500 if $judge_rating{$judge} eq "B";
+				$judges{"score"}{$judge} += 2500 
+					if $judges{"rating"}{$judge} eq "B";
+
+				$use_priority{$judge} -= 50000 
+					if $judges{"rating"}{$judge} eq "A";
+
+				$use_priority{$judge} -= 2500 
+					if $judges{"rating"}{$judge} eq "B";
 			}
 
 		}
 
-		$use_priority{$judge} -= $prefer_hireds if $judge_school{$judge} < 1;
-		$use_priority{$judge} -= $judge_diverse{$judge} * $diversity if $diversity;
-		$use_priority{$judge} -= ($judge_prefs{$judge}{"avg"} - ($judge_prefs{$judge}{"stdv"}/3)) * $suckage 
+		$use_priority{$judge} -= $prefer_hireds 
+			if $judges{"school"}{$judge} < 1;
+
+		$use_priority{$judge} -= $judges{"diverse"}{$judge} * $diversity 
+			if $diversity;
+
+		$use_priority{$judge} -= 
+			($judge_prefs{$judge}{"avg"} - ($judge_prefs{$judge}{"stdv"}/3)) * $suckage 
 			if $suckage;
 
-		next if $judge_out{$judge};
+		next if $judges{"out"}{$judge};
 
-		if ($judge_ballots{$judge}) { 
+		if ($judges{"ballots"}{$judge}) { 
 
 			BALLOT:
 
 			foreach my $ballot ( 
-				sort { $entry_hash{$ballot_entry{$a}}{"code"} 
-				cmp $entry_hash{$ballot_entry{$b}}{"code"}} @{$judge_ballots{$judge}}
+				sort { $entries{$ballot_entry{$a}}{"code"} 
+				cmp $entries{$ballot_entry{$b}}{"code"}} @{$judges{"ballots"}{$judge}}
 			) { 
 
 				my $entry = $ballot_entry{$ballot};
 
-				if ($allow_repeat_elims && 
+				if ($event_settings{"allow_repeat_elims"} && 
 						($round_type eq "elim" 
 						|| $round_type eq "final" 
 						|| $ballot_type{$ballot} eq "elim" 
@@ -752,34 +819,43 @@
 						)
 					) { 
 
-					if ($disallow_repeat_drop) { 
+					if ($event_settings{"disallow_repeat_drop"}) { 
 						next BALLOT if $ballot_winner{$ballot};
 					} else { 
 						next BALLOT;
 					}
 				}
 
-				push @{$judge_avoid{$judge}}, $entry;
-				next if $allow_repeat_judging;
-				next if $allow_repeat_prelim_side && $ballot_side{$ballot} != $entry_hash{$entry}{"side"};
-				push @{$judge_clashes{$judge}}, $entry;
+				push @{$judges{"avoid"}{$judge}}, $entry;
+
+				next if $event_settings{"allow_repeat_judging"};
+
+				next if $event_settings{"allow_repeat_prelim_side"} 
+					&& $ballot_side{$ballot} != $entries{$entry}{"side"};
+
+				push @{$judges{"conflicts"}{$judge}}, $entry;
 			}
 
 		}
 
-		foreach my $clash (@{$judge_clashes{$judge}}) { 
-			$judge_entry_clash{$judge."-".$clash}++;
+		foreach my $clash (@{$judges{"conflicts"}{$judge}}) { 
+			$judges{"entry_strike"}{$judge."-".$clash}++;
 		}
 
 	}
 
-	my %default_settings = $m->comp("/funclib/default_rating_settings.mas", type => $event->type);
+	my %default_settings = $m->comp(
+		"/funclib/default_rating_settings.mas", 
+		type => $event->type
+	);
 
 	my $bracket_order = $round->setting("tab_rating_priority");
 	$bracket_order = $default_settings{$round->name} unless $bracket_order;
 	$bracket_order =~ s/\s*//g;
 
-	my @orders = split(/\,/, $bracket_order) unless $round_type eq "elim" || $round_type eq "final";
+	my @orders = split(/\,/, $bracket_order) 
+		unless $round_type eq "elim" 
+		|| $round_type eq "final";
 
 	my %bracket_score;
 	my $order_multiplier;
@@ -824,26 +900,28 @@
 	my $max_nobreak_pref = $event_settings{"max_nobreak_pref"} 
 		if $event_settings{"max_nobreak_pref"}; 
 
-	my $bracket_dont_give_a_shit = $round->name - $loss_threshold - 1 if $loss_threshold > 0;
+	my $bracket_dont_give_a_shit = $round->name - $loss_threshold - 1 
+		if $loss_threshold > 0;
 
 	my $max_panel_bracket_rank;
 
-	foreach my $panel (keys %panel_bracket_rank) { 
+	foreach my $panel (keys %{$panels{"bracketrank"}} ) { 
 
-		$max_panel_bracket_rank = $panel_bracket_rank{$panel} if	
-			$max_panel_bracket_rank < $panel_bracket_rank{$panel};
+		$max_panel_bracket_rank = $panels{"bracketrank"}{$panel} 
+			if $max_panel_bracket_rank < $panels{"bracketrank"}{$panel};
 	}
 
 	$max_panel_bracket_rank++;
 
 	foreach my $order (reverse @orders) { 
 
-		foreach my $panel (@panels) { 
+		foreach my $panel (@{$panels{"all"}}) { 
 
-			next unless $panel_bracket{$panel} == $order;
+			next unless $panels{"bracket"}{$panel} == $order;
 
 			if ($best_judges_highest_seed) { 
-				$bracket_score{$panel} = ($max_panel_bracket_rank - $panel_bracket_rank{$panel}) ** $order;
+				$bracket_score{$panel} = 
+					($max_panel_bracket_rank - $panels{"bracketrank"}{$panel}) ** $order;
 			} else { 
 				$bracket_score{$panel} = $order * 2;
 			}
@@ -866,9 +944,9 @@
 		$order_multiplier++;
 		$order_multiplier++;
 
-		foreach my $panel (@panels) { 
-			$panel_seed{$panel} = 0 unless $panel_seed{$panel};
-			next unless $panel_seed{$panel} == $order;
+		foreach my $panel (@{$panels{"all"}}) { 
+			$panels{"seed"}{$panel} = 0 unless $panels{"seed"}{$panel};
+			next unless $panels{"seed"}{$panel} == $order;
 			$seed_score{$panel} = $order_multiplier;
 		}
 
@@ -877,7 +955,7 @@
 	}
 
 	$last_order++;
-	foreach my $panel (@panels) { 
+	foreach my $panel (@{$panels{"all"}}) { 
 		next if $seed_score{$panel};
 		$seed_score{$panel} = $last_order;
 	}
@@ -885,7 +963,8 @@
 	my %fix_flight;
 
 	my @flight_settings = 
-		$m->comp("/funclib/event_entry_settings.mas", 
+		$m->comp(
+			"/funclib/event_entry_settings.mas", 
 			event => $event,
 			tag   => "preferred_flight"
 		);
@@ -894,37 +973,37 @@
 
 	my %judge_panel_score;
 
-	@panels = shuffle @panels if $shuffle_post;
+	@{$panels{"all"}} = shuffle @{$panels{"all"}} if $shuffle_post;
 
 	PANEL:
-	foreach my $panel (@panels) { 
+	foreach my $panel (@{$panels{"all"}}) { 
 
-		next if $panel_bye{$panel};
+		next if $panels{"bye"}{$panel};
 
 		my $dont_care++ if $bracket_dont_give_a_shit 
-			&& $panel_bracket{$panel} <= $bracket_dont_give_a_shit;
+			&& $panels{"bracket"}{$panel} <= $bracket_dont_give_a_shit;
 
 		undef $dont_care if $round->name == 1;
 
 		JUDGE:
-		foreach my $judge (@judges) { 
+		foreach my $judge (@{$judges{"all"}}) { 
 
 			my $score = 0;
-			next JUDGE if $judge_out{$judge};
+			next JUDGE if $judges{"out"}{$judge};
 
 			my $diff;
 			my $mjp_first;
 
-			foreach my $entry (@{$panel_entries{$panel}}) { 
+			foreach my $entry (@{$panels{"entries"}{$panel}}) { 
 	
 				if ($flights > 1 ) { 
 					$fix_flight{$panel} = $preferred_flight{$entry};
 					$fix_flight{$panel} = ($flights + 1) / 2 unless $preferred_flight{$entry};
 				}
 
-				$score += 50000 if $judge_avoid{$entry};
-				$score += 500000 if $judge_avoid{$entry} && $prefs eq "ordinals";
-				$score += 100000000 if $judge_entry_clash{$judge."-".$entry};
+				$score += 50000 if $judges{"avoid"}{$entry};
+				$score += 500000 if $judges{"avoid"}{$entry} && $prefs eq "ordinals";
+				$score += 100000000 if $judges{"entry_strike"}{$judge."-".$entry};
 
 				my $mjp_rating = $mjp{$judge."-".$entry};
 				$mjp_rating = $default_mjp unless $mjp_rating;
@@ -935,32 +1014,53 @@
 					$score += 500000 if $mjp_rating > $max_pref;
 				}
 
-				if ($region_avoid) { 
-					$score += 100 if $entry_hash{$entry}{"region"} == $judge_region{$judge};
+				if ($event_settings{"region_avoid"}) { 
+					$score += 100 if $entries{$entry}{"region"} == $judges{"region"}{$judge};
 				}
 
-				if ($ncfl) { 
-					$score += 5000000 if $entry_hash{$entry}{"dioregion"} == $judge_dioregion{$judge};
+				if ($tourn_settings->{"nsda_nats"}) { 
+
+					$score += 5000000 if $entries{$entry}{"state"} 
+						eq $judges{"state"}{$judge};
+				}
+
+				if ($tourn_settings->{"ncfl"}) { 
+					$score += 5000000 if $entries{$entry}{"dioregion"} 
+						== $judges{"dioregion"}{$judge};
 				}
 
 				if ($prefs && $prefs ne "none") { 
 
 					if ($mjp_first) { 
-						$diff = abs($mjp_first - $mjp_rating) if $mjp_first && $mjp_rating;
+
+						$diff = abs($mjp_first - $mjp_rating) 
+							if $mjp_first && $mjp_rating;
+
 					} else { 
-						$mjp_first = $mjp_rating unless $mjp_first;
+
+						$mjp_first = $mjp_rating 
+							unless $mjp_first;
 					}
 
 					if ($dont_care) {
+
 						$score += $mjp_rating * .1;
+
 					} else { 
+
 						$score += $mjp_rating * $preference;
-						$score += $default_mjp * $preference unless $mjp_rating;
+
+						$score += $default_mjp * $preference 
+							unless $mjp_rating;
 					}
 
-					$judge_rating{$judge."-".$panel} .= " - " if $judge_rating{$judge."-".$panel};
-					$judge_rating{$judge."-".$panel} .= $mjp_rating;
-					$judge_rating{$judge."-".$panel} .= "1" if not defined $mjp_rating &! $dont_care;
+					$judges{"rating"}{$judge."-".$panel} .= " - " 
+						if $judges{"rating"}{$judge."-".$panel};
+
+					$judges{"rating"}{$judge."-".$panel} .= $mjp_rating;
+
+					$judges{"rating"}{$judge."-".$panel} .= "1" 
+						if not defined $mjp_rating &! $dont_care;
 
 				}
 
@@ -969,28 +1069,32 @@
 			my $caring_quota = 1;
 			$caring_quota = .01 if $dont_care;
 
-			$score += $diff * $mutuality * $caring_quota if $prefs && $prefs ne "none";
-			$score += $judge_roundcount{$judge} * .1;
+			$score += $diff * $mutuality * $caring_quota 
+				if $prefs 
+				&& $prefs ne "none";
+
+			$score += $judges{"roundcount"}{$judge} * .1;
+
 
 			$score += $use_priority{$judge};
-			$score += $use_priority{$judge."-dontcare"} if $dont_care;
-			$score += $use_priority{$judge} if $dont_care;  # usage priority takes precedent 
+
+			$score += $use_priority{$judge."-dontcare"} 
+				if $dont_care;
 
 			if ($tab_ratings &! $dont_care) { 
-				$score = $judge_rating{$judge} * $preference;
+				$score += $judges{"rating"}{$judge} * $preference;
 			} 
 
-			$score = $score * $bracket_score{$panel} 
+
+			$score += $score * $bracket_score{$panel} 
 				if $bracket_score{$panel} 
 				&& $round_type ne "elim" 
 				&! $dont_care;
 
-			$score = $score * $seed_score{$panel} 
+			$score += $score * $seed_score{$panel} 
 				if $seed_score{$panel} 
 				&& $round_type eq "prelim" 
 				&! $dont_care;
-
-
 
 			$judge_panel_score{$judge."-".$panel} = $score;
 
@@ -998,10 +1102,6 @@
 	}
 
 	my $panel_done;
-
-	my %panel_flight;
-	my %panel_judges;
-	my %judge_panels;
 
 	my $current_total;
 	my $linked;
@@ -1018,26 +1118,26 @@
 
 			$linked++;
 
-			if ($ncfl) { 
+			if ($tourn_settings->{"ncfl"}) { 
 
 				my %matches_with = ();
 			
-				foreach my $panel (shuffle @panels) {
+				foreach my $panel (shuffle @{$panels{"all"}}) {
 			
 					@{$matches_with{$panel}} = ();
 
 					MATCH:
-					foreach my $potential_match (shuffle @panels) {
+					foreach my $potential_match (shuffle @{$panels{"all"}}) {
 
 						next if $panel == $potential_match;
-						next if $panel_bye{$panel};
+						next if $panels{"bye"}{$panel};
 
-						foreach my $first (@{$panel_entries{$potential_match}}) { 
+						foreach my $first (@{$panels{"entries"}{$potential_match}}) { 
 
-							foreach my $second (@{$panel_entries{$panel}}) { 
+							foreach my $second (@{$panels{"entries"}{$panel}}) { 
 								next MATCH 
-									if $entry_hash{$first}{"dioregion"} 
-									== $entry_hash{$second}{"dioregion"};
+									if $entries{$first}{"dioregion"} 
+									== $entries{$second}{"dioregion"};
 							}
 						}
 
@@ -1045,14 +1145,16 @@
 					}
 				}
 
-				@panels = sort { scalar @{$matches_with{$a}} <=> scalar @{$matches_with{$b}} } @panels;
+				@{$panels{"all"}} = 
+					sort { scalar @{$matches_with{$a}} <=> scalar @{$matches_with{$b}} } 
+					@{$panels{"all"}};
 
 				my %taken = ();
 
 				PANEL:
-				foreach my $panel (@panels) { 
+				foreach my $panel (@{$panels{"all"}}) { 
 
-					next if $panel_bye{$panel};
+					next if $panels{"bye"}{$panel};
 					next if $taken{$panel}++;
 
 					my $current_flight = 1;
@@ -1075,10 +1177,13 @@
 						}
 					}
 
-					unless ($panel_link{$panel} && (scalar @{$panel_link{$panel}} == ($flights - 1))) { 
+					unless (
+						$panel_link{$panel} 
+						&& (scalar @{$panel_link{$panel}} == ($flights - 1))
+					) { 
 
 						MATCH:
-						foreach my $match (shuffle @panels) { 
+						foreach my $match (shuffle @{$panels{"all"}}) { 
 						
 							next if $taken{$match}++;
 
@@ -1101,9 +1206,9 @@
 				my $current_flight = 1;
 				my $last_panel;
 
-				foreach my $panel (shuffle @panels) {
+				foreach my $panel (shuffle @{$panels{"all"}}) {
 
-					next if $panel_bye{$panel};
+					next if $panels{"bye"}{$panel};
 
 					$test_flight{$panel} = $current_flight;
 					push @{$panel_link{$panel}}, $last_panel;
@@ -1121,7 +1226,9 @@
 
 			}
 
-			@panels = sort {$test_flight{$b} <=> $test_flight{$a}} @panels;
+			@{$panels{"all"}} = 
+				sort {$test_flight{$b} <=> $test_flight{$a}} 
+				@{$panels{"all"}};
 		}
 
 		my %judge_used;
@@ -1133,65 +1240,82 @@
 		foreach my $order (@orders) { 
 
 			$order_count++;
-			@panels = reverse @panels unless $_ % 2;
+			@{$panels{"all"}} = reverse @{$panels{"all"}} unless $_ % 2;
 
 			my %used;
 
 			PANEL:
-			foreach my $panel (@panels) { 
+			foreach my $panel (@{$panels{"all"}}) { 
 
 
-				next if $panel_bye{$panel};
+				next if $panels{"bye"}{$panel};
 				next if $am_other{$panel};
 				next if $used{$panel};
 
 				next if $round_type ne "final" 
 					&& $round_type ne "elim" 
-					&& defined $panel_bracket{$panel} 
-					&& $order != $panel_bracket{$panel};
+					&& defined $panels{"bracket"}{$panel} 
+					&& $order != $panels{"bracket"}{$panel};
 
 				my @others = @{$panel_link{$panel}} if $panel_link{$panel};
 
-				@judges = sort {$judge_score{$b} <=> $judge_score{$a}} @judges;
+				@{$judges{"all"}} = 
+					sort {$judges{"score"}{$b} <=> $judges{"score"}{$a}} 
+					@{$judges{"all"}};
 
-				@judges = sort {$judge_panel_score{$a."-".$panel} <=> $judge_panel_score{$b."-".$panel}} @judges;
+				@{$judges{"all"}} = 
+					sort {$judge_panel_score{$a."-".$panel} <=> $judge_panel_score{$b."-".$panel}} 
+					@{$judges{"all"}};
+
 
 				JUDGE:
-				foreach my $judge (@judges) { 
+				foreach my $judge (@{$judges{"all"}}) { 
 
-					next JUDGE if $judge_out{$judge};
+
+					next JUDGE if $judges{"out"}{$judge};
 					next JUDGE if $judge_used{$judge} >= $flights;
 					next JUDGE if $judge_used{$judge} && $linked;
 
-					foreach my $entry (@{$panel_entries{$panel}}) { 
-						next JUDGE if $judge_entry_clash{$judge."-".$entry};
+					foreach my $entry (@{$panels{"entries"}{$panel}}) { 
+						next JUDGE if $judges{"entry_strike"}{$judge."-".$entry};
 					}
 
-					unless ($allow_school_panels) { 
+					unless ($category_settings{"allow_school_panels"}) { 
 						next JUDGE 
-							if $already{$panel}{"school"}{$judge_school{$judge}} 
-							&& $judge_school{$judge};
+							if $already{$panel}{"school"}{$judges{"school"}{$judge}} 
+							&& $judges{"school"}{$judge};
 					}
 
-					if ($ncfl) { 
-
-						unless ($allow_school_panels) { 
+					if ($tourn_settings->{"nsda_nats"}) { 
+						unless ($category_settings{"allow_region_panels"}) { 
 							next JUDGE 
-								if $already{$panel}{"region"}{$judge_region{$judge}} 
-								&& $judge_region{$judge};
+								if $already{$panel}{"state"}{$judges{"state"}{$judge}} 
+								&& $judges{"state"}{$judge};
 						}
 
-						unless ($allow_region_panels) { 
+					}
+
+					if ($tourn_settings->{"ncfl"}) { 
+
+						unless ($category_settings{"allow_school_panels"}) { 
 							next JUDGE 
-								if $already{$panel}{"dioregion"}{$judge_dioregion{$judge}} 
-								&& $judge_dioregion{$judge};
+								if $already{$panel}{"region"}{$judges{"region"}{$judge}} 
+								&& $judges{"region"}{$judge};
+						}
+
+						unless ($category_settings{"allow_region_panels"}) { 
+							next JUDGE 
+								if $already{$panel}{"dioregion"}{$judges{"dioregion"}{$judge}} 
+								&& $judges{"dioregion"}{$judge};
 						}
 					}
+
+
 
 					foreach my $other (@others) { 
 
-						foreach my $entry (@{$panel_entries{$other}}) { 
-							next JUDGE if $judge_entry_clash{$judge."-".$entry};
+						foreach my $entry (@{$panels{"entries"}{$other}}) { 
+							next JUDGE if $judges{"entry_strike"}{$judge."-".$entry};
 						}
 
 						push @{$test_judges{$other}}, $judge;
@@ -1207,9 +1331,16 @@
 
 					$judge_used{$judge}++;
 
-					$already{$panel}{"school"}{$judge_school{$judge}}++;
-					$already{$panel}{"region"}{$judge_region{$judge}}++ if $judge_region{$judge};
-					$already{$panel}{"dioregion"}{$judge_dioregion{$judge}}++ if $judge_dioregion{$judge};
+					$already{$panel}{"school"}{$judges{"school"}{$judge}}++;
+
+					$already{$panel}{"region"}{$judges{"region"}{$judge}}++ 
+						if $judges{"region"}{$judge};
+
+					$already{$panel}{"state"}{$judges{"state"}{$judge}}++ 
+						if $judges{"state"}{$judge};
+
+					$already{$panel}{"dioregion"}{$judges{"dioregion"}{$judge}}++ 
+						if $judges{"dioregion"}{$judge};
 
 					$used{$panel}++; 
 
@@ -1229,13 +1360,13 @@
 			next if $linked;
 
 			PANEL:
-			foreach my $first (@panels) { 
+			foreach my $first (@{$panels{"all"}}) { 
 		
-				next if $panel_bye{$first};
+				next if $panels{"bye"}{$first};
 
 				my %entry_id;
 
-				foreach (@{$panel_entries{$first}}) {   
+				foreach (@{$panels{"entries"}{$first}}) {   
 					$entry_id{$_}++;
 				}
 
@@ -1246,66 +1377,81 @@
 					my $swap_panel;
 				
 					JUDGE:
-					foreach my $second_judge (@judges) { 
+					foreach my $second_judge (@{$judges{"all"}}) { 
 
 						my $second = $test_panels{$second_judge};
 
 						next if $second_judge == $first_judge;
-						next if $judge_out{$second_judge};
+						next if $judges{"out"}{$second_judge};
 
-						foreach my $entry (@{$panel_entries{$first}}) {   
-							foreach my $clash (@{$judge_clashes{$second_judge}}) { 
+						foreach my $entry (@{$panels{"entries"}{$first}}) {   
+							foreach my $clash (@{$judges{"conflicts"}{$second_judge}}) { 
 								next JUDGE if $clash == $entry;
 							}
 						}
 
-						foreach my $judge (@{$panel_judges{$first}}) {   
+						foreach my $judge (@{$panels{"judges"}{$first}}) {   
 
-							unless ($allow_school_panels) { 
-								next JUDGE if $judge_school{$second_judge} == $judge_school{$judge};
+							unless ($category_settings{"allow_school_panels"}) { 
+								next JUDGE 
+									if $judges{"school"}{$second_judge} 
+									== $judges{"school"}{$judge};
 							}
 
-							if ($ncfl) { 
+							if ($tourn_settings->{"ncfl"}) { 
 
-								unless ($allow_school_panels) { 
-									next JUDGE if $judge_region{$second_judge} == $judge_region{$judge};
+								unless ($category_settings{"allow_school_panels"}) { 
+									next JUDGE 
+										if $judges{"region"}{$second_judge} 
+										== $judges{"region"}{$judge};
 								}
 						
-								unless ($allow_region_panels) { 
-									next JUDGE if $judge_dioregion{$second_judge} == $judge_dioregion{$judge};
+								unless ($category_settings{"allow_region_panels"}) { 
+									next JUDGE 
+										if $judges{"dioregion"}{$second_judge} 
+										== $judges{"dioregion"}{$judge};
 								}
 
 							}
 						}
 
-						foreach my $judge (@{$panel_judges{$second}}) {   
+						foreach my $judge (@{$panels{"judges"}{$second}}) {   
 
-							unless ($allow_school_panels) { 
-								next JUDGE if $judge_school{$first_judge} == $judge_school{$judge};
+							unless ($category_settings{"allow_school_panels"}) { 
+								next JUDGE 
+									if $judges{"school"}{$first_judge} 
+									== $judges{"school"}{$judge};
 							}
 
-							if ($ncfl) { 
+							if ($tourn_settings->{"ncfl"}) { 
 
-								unless ($allow_school_panels) { 
-									next JUDGE if $judge_region{$first_judge} == $judge_region{$judge};
+								unless ($category_settings{"allow_school_panels"}) { 
+									next JUDGE 
+										if $judges{"region"}{$first_judge} 
+										== $judges{"region"}{$judge};
 								}
 						
-								unless ($allow_region_panels) { 
-									next JUDGE if $judge_dioregion{$first_judge} == $judge_dioregion{$judge};
+								unless ($category_settings{"allow_region_panels"}) { 
+									next JUDGE 
+										if $judges{"dioregion"}{$first_judge} 
+										== $judges{"dioregion"}{$judge};
 								}
 
 							}
 						}
 
-						if ($test_panels{$second_judge} && scalar @{$test_panels{$second_judge}} >= $flights) { 
+						if (
+							$test_panels{$second_judge} 
+							&& scalar @{$test_panels{$second_judge}} >= $flights
+						) { 
 
 							foreach my $second (@{$test_panels{$second_judge}}) { 
 						
 								my $baseline_score = $judge_panel_score{$first_judge."-".$first};
 								my $second_score += $judge_panel_score{$second_judge."-".$first};
 
-								foreach my $entry (@{$panel_entries{$second}}) {   
-									foreach my $clash (@{$judge_clashes{$first_judge}}) { 
+								foreach my $entry (@{$panels{"entries"}{$second}}) {   
+									foreach my $clash (@{$judges{"conflicts"}{$first_judge}}) { 
 										next JUDGE if $clash == $entry;
 									}
 								}
@@ -1387,36 +1533,45 @@
 
 		if ($current_total > $attempt_total || not defined $current_total ) { 
 			$current_total = $attempt_total;
-			%panel_judges = %test_judges;
-			%panel_flight = %test_flight;
-			%judge_panels = %test_panels;
+			$panels{"judges"} = \%test_judges;
+			$panels{"flight"} = \%test_flight;
+			$judges{"panels"} = \%test_panels;
 		}
 
 	}
 
-	foreach my $judge (@judges) { 
+	foreach my $judge (@{$judges{"all"}}) { 
 
 		my $flight;
 
-		next unless $judge_panels{$judge};
-		@{$judge_panels{$judge}} = sort {$fix_flight{$a} <=> $fix_flight{$b}} @{$judge_panels{$judge}};
+		next unless $judges{"panels"}{$judge};
 
-		foreach my $panel (@{$judge_panels{$judge}}) { 
+		@{$judges{"panels"}{$judge}} = 
+			sort {$fix_flight{$a} <=> $fix_flight{$b}} 
+			@{$judges{"panels"}{$judge}};
+
+		foreach my $panel (@{$judges{"panels"}{$judge}}) { 
 			$flight++;
-			$panel_flight{$panel} = $flight;
+			$panels{"flight"}{$panel} = $flight;
 		}
 	}
 
 	foreach my $panel ($round->panels) { 
 
-		$panel->flight($panel_flight{$panel->id});
-		$panel->flight(1) unless $panel_flight{$panel->id};
+		$panel->flight($panels{"flight"}{$panel->id});
+		$panel->flight(1) unless $panels{"flight"}{$panel->id};
 		$panel->update;
 
 		next if $panel->bye;
 
-		foreach my $judge (@{$panel_judges{$panel->id}}) { 
-			$m->comp("/funclib/panel_judgeadd.mas", panel => $panel, judge_id => $judge);
+		foreach my $judge (@{$panels{"judges"}{$panel->id}}) { 
+
+			$m->comp(
+				"/funclib/panel_judgeadd.mas", 
+				panel    => $panel,
+				judge_id => $judge
+			);
+
 		}
 		
 	}
@@ -1424,7 +1579,10 @@
 	my $msg = "Judges added";
 
 	unless ($debug) {
-		$m->redirect("/panel/round/rooms.mhtml?round_id=".$round->id) if $flights == 1 || $linked;
+
+		$m->redirect("/panel/round/rooms.mhtml?round_id=".$round->id) 
+			if $flights == 1 || $linked;
+
 		$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&disp=1&msg=$msg");
 	}
 
@@ -1434,33 +1592,33 @@
 
 	<h4>Paneling total score is <% $current_total %></h4>
 
-%		foreach my $panel (@panels) { 
+%		foreach my $panel (@{$panels{"all"}}) { 
 	
 			<div class="row">
 				
 				<span class="smallspan">
-					<% $panel_bracket{$panel} %> - <% $bracket_score{$panel_bracket{$panel}} %>
+					<% $panels{"bracket"}{$panel} %> - <% $bracket_score{$panels{"bracket"}{$panel}} %>
 				</span>
 
 				<span class="smallspan">
-					<% $panel_flight{$panel} %>
+					<% $panels{"flight"}{$panel} %>
 				</span>
 
 %				my $notfirst;
 
-%				foreach my $entry (@{$panel_entries{$panel}}) { 
+%				foreach my $entry (@{$panels{"entries"}{$panel}}) { 
 					<span class="medspan">
 						<% $notfirst++ ? "vs " : "" %>
-						<% $entry_hash{$entry}{"code"} %>
+						<% $entries{$entry}{"code"} %>
 					</span>
 %				}
 
-%				foreach my $judge (@{$panel_judges{$panel}}) { 
+%				foreach my $judge (@{$panels{"judges"}{$panel}}) { 
 					<span class="twofifty">
-						<% $judge_rating{$judge} > 0 ? $judge_rating{$judge} : "" %> :
-						<% $prefs && $prefs ne "none" ? $judge_rating{$judge."-".$panel} : "" %> - 
+						<% $judges{"rating"}{$judge} > 0 ? $judges{"rating"}{$judge} : "" %> :
+						<% $prefs && $prefs ne "none" ? $judges{"rating"}{$judge."-".$panel} : "" %> - 
 						<% $judge_panel_score{$judge."-".$panel} %> -
-						<% $judge_name{$judge} %>
+						<% $judges{"name"}{$judge} %>
 					</span>
 %				}
 

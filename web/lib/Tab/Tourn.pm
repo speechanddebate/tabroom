@@ -6,6 +6,7 @@ Tab::Tourn->columns(Essential => qw/name city state country webname
 						start end reg_start reg_end tz 
 						hidden timestamp 
 					/);
+
 Tab::Tourn->columns(TEMP => qw/schoolid/);
 
 Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
