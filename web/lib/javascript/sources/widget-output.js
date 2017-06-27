@@ -30,6 +30,7 @@
 		regexHIDESPAN : /<span.*?class=.*?hidden.*?>.*?<\/span>/g,
 		regexHIDEDIV  : /<div.*?class=.*?hidden.*?>.*?<\/div>/g,
 		regexHTML     : /<[^<]+>/g, // replace
+		regexAMP      : /amp;/g, // replace
 
 		replaceCR  : '\x0d\x0a',
 		replaceTab : '\x09',
@@ -281,6 +282,9 @@
 			} else {
 				result = result.replace(output.regexBR, '');
 			}
+
+			result = result.replace(output.regexAMP, '');
+
 			// extract img alt text
 			txt = result.match(output.regexIMG);
 			if (!wo.output_includeHTML && txt !== null) {
