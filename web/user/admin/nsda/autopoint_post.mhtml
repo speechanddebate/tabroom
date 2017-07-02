@@ -36,6 +36,7 @@
 	use Tab::NSDA::Person;
 	use Tab::NSDA::PersonSchool;
 	use Tab::NSDA::Points;
+	use Tab::NSDA::PostedPoints;
 	use Tab::NSDA::APT;
 	use Tab::NSDA::AltStudent;
 	use Tab::NSDA::School;
@@ -56,11 +57,20 @@
         select 
 			entry.id, entry.code, entry.school, 
 			student.id, student.ualt_id, student.first, student.last, 
-			chapter.nsda, chapter.state, school.name
+			chapter.nsda, chapter.state, school.name,
+			student_coach.value, entry_coach.value
         from (entry, school)
         left join entry_student on entry_student.entry = entry.id
         left join student on student.id = entry_student.student
 		left join chapter on student.chapter = chapter.id
+		left join student_setting student_coach
+			on student_coach.student = student.id
+			and student_coach.tag = "nsda_coach"
+
+		left join entry_setting entry_coach
+			on entry_coach.entry = entry.id
+			and entry_coach.tag = "nsda_points_coach"
+
         where school.tourn = ?
         and entry.school = school.id
         and entry.id = entry_student.entry
@@ -85,7 +95,8 @@
 		my (
 			$entry_id, $entry_code, $entry_school,
 			$student_id, $student_ualt_id, $student_first, $student_last,
-			$chapter_nsda, $chapter_state, $school_name
+			$chapter_nsda, $chapter_state, $school_name,
+			$student_coach, $entry_coach
 		) = $sth->fetchrow_array()
 	) { 	
 
@@ -142,6 +153,9 @@
 		push @{$entry_nsda{$entry_id}{"students"}}, $student_id;
 
 		$student_data{$student_id}{"name"} = $student_first." ".$student_last;
+
+		$entry_nsda{$entry_id}{"coach"} = $entry_coach;
+		$student_data{$student_id}{"coach"} = $student_coach;
 
 		unless ($alt_student{"school_".$entry_school}) { 
 
@@ -227,17 +241,22 @@
 			my $nsda_event_category;
 			my $nsda_cat;
 			my $nsda_subcat;
+			my $nsda_event;
+
+			my %student_apts;
+			my %student_entry;
 
 			if ($event->type eq "congress") { 
 
 				$nsda_cat    = 2;
 				$nsda_cat    = 3 if $tourn_settings{"nsda_district"};
+				$nsda_cat    = 4 if $tourn_settings{"nsda_nats"};
 				$nsda_subcat = 2;
 
 				my $points_cap = 24;
-				$points_cap = 40 if $tourn_settings{"nsda_district"};
+				$points_cap = 314159 if $tourn_settings{"nsda_nats"};
 
-				Tab::NSDA::Event->create({
+				$nsda_event = Tab::NSDA::Event->create({
 					instance_id   => $instance->id,
 					event_id      => $event->id,
 					type          => "C",
@@ -330,7 +349,6 @@
 					$end_day->add(hours => 24);
 
 					my $day_start = DateTime::Format::MySQL->format_datetime($day);
-
 					my $day_end = DateTime::Format::MySQL->format_datetime($end_day);
 
 					$day_start =~ s/[\D_]//g;
@@ -413,7 +431,7 @@
 								nfl_student_id => $ualt
 							});
 
-							Tab::NSDA::APT->create({
+							my $APT = Tab::NSDA::APT->create({
 								instance_id      => $instance->id,
 								nfl_school_id    => $nfl_school_id,
 								nfl_student_id   => $ualt,
@@ -425,6 +443,9 @@
 								points           => $day_total,
 								type             => "C"
 							}); 
+
+							push @{$student_apts{$student_id}}, $APT;
+							$student_entry{$student_id} = $entry_id;
 							
 							if (not defined $alt_student{$student_id}) { 
 
@@ -460,11 +481,12 @@
 				$nsda_subcat = $nsda_event_category->code;
 
 				$nsda_cat = 3 if $tourn_settings{"nsda_district"};
+				$nsda_cat = 4 if $tourn_settings{"nsda_nats"};
 
 				my $size = $event->setting('max_entry');
 				$size = 1 unless $size;
 
-				Tab::NSDA::Event->create({
+				$nsda_event = Tab::NSDA::Event->create({
 					instance_id   => $instance->id,
 					event_id      => $event->id,
 					type          => uc($nsda_event_category->type),
@@ -487,6 +509,7 @@
 					and ballot.id     = score.ballot
 					and ballot.entry  = entry_student.entry
 					and entry_student.student = student.id
+					and score.student = entry_student.student
 
 					and (
 						score.tag    = 'points'
@@ -502,10 +525,16 @@
 
 					my %spoke_in_round = map {$_->id => 1} @spoke;
 
+					my $nsda_tiebreak_set = Tab::TiebreakSet->search(
+						name => "NSDA Debate Points Elim",
+						tourn => $tourn->id
+					)->first if $tourn_settings{"nsda_nats"};
+
 					my (@results) = $m->comp(
 						"/tabbing/results/order_entries.mas", 
-							round => $round,
-							nsda  => 1
+							round        => $round,
+							nsda         => 1,
+							tiebreak_set => $nsda_tiebreak_set
 						);
 
 					my $entries_ref = pop @results;
@@ -622,13 +651,17 @@
 								sort {$entry_order{$a} <=> $entry_order{$b}} 
 								@{$panel_entries{$panel}};
 
-
 							my $win_points = 6 - ($nsda_event_category->national * 2);
 							my $loss_points = $win_points / 2;
 
 							if ($tourn_settings{"nsda_district"}) { 
 								$win_points = 8;
 								$loss_points = 5;
+							}
+
+							if ($tourn_settings{"nsda_nats"}) { 
+								$win_points = 8 - ($nsda_event_category->national * 2);
+								$loss_points = $win_points / 2;
 							}
 
 							my $win = 1;
@@ -673,8 +706,6 @@
 							STUDENT:
 							foreach my $student (@{$entry_nsda{$entry}{"students"}}) {
 
-								next STUDENT unless $spoke_in_round{$student};
-
 								my $ualt = $student_data{$student}{"ualt"};
 								my $name = $student_data{$student}{"name"};
 
@@ -707,7 +738,7 @@
 
 								if ($ualt) { 
 
-									Tab::NSDA::APT->create({
+									my $APT = Tab::NSDA::APT->create({
 										instance_id      => $instance->id,
 										nfl_school_id    => $nfl_school_id,
 										nfl_student_id   => $ualt,
@@ -719,6 +750,9 @@
 										points           => $entry_points{$entry},
 										type             => uc($nsda_event_category->type),
 									}); 
+
+									$student_entry{$student} = $entry;
+									push @{$student_apts{$student}}, $APT;
 
 								} elsif (not defined $alt_student{$student}) { 
 
@@ -735,6 +769,81 @@
 							}
 						}
 					}
+				}
+			}
+
+
+			if ($tourn_settings{"nsda_nats"}) { 
+
+				my $tourn_info = $instance->tournament."|".$instance->state;
+
+				$tourn_info .= "|".DateTime::Format::MySQL->format_datetime($tourn->start);
+				$tourn_info .= "|".DateTime::Format::MySQL->format_datetime($tourn->end);
+
+				my $event_name = $nsda_event->name;
+
+				Tab::NSDA::Points->set_sql( update_apt => "
+					update points.AUTO_POINT_TRANSFER
+						set point_id = ? 
+						where nfl_student_id = ? 
+						and alt_event_id = ? 
+				");
+
+				foreach my $student_id (keys %student_apts) { 
+
+					my $entry_id = $student_entry{$student_id};
+					my $ualt_id = $student_data{$student_id}{"ualt"};
+						
+					my $coach_id = $entry_nsda{$entry_id}{"coach"};
+					$coach_id = $student_data{$student_id}{"coach"} unless $coach_id;
+					next unless $coach_id;
+
+					my $wins         = 0;
+					my $losses       = 0;
+					my $nds          = 0;
+					my $ranks        = 0;
+					my $total_points = 0;
+
+					foreach my $apt (sort {$a->round <=> $b->round} @{$student_apts{$student_id}}) { 
+
+						$wins++ if $apt->result eq "W";
+						$losses++ if $apt->result eq "L";
+						$nds++ if $apt->result eq "B";
+						$nds++ if $apt->result eq "F";
+
+						if ($apt->type eq "S") { 
+							$ranks .= "," if $ranks;
+							$ranks .= $apt->result;
+						}
+
+						$total_points += $apt->points;
+
+					}
+
+					next unless $total_points > 0;
+
+					Tab::debuglog("Posting $total_points for $student_id and coach $coach_id in $event_name");
+
+					my $posted_point = Tab::NSDA::PostedPoints->create({
+						student_id       => $ualt_id,
+						coach_id         => $coach_id,
+						event_cat_id     => $nsda_cat,
+						event_sub_cat_id => $nsda_subcat,
+						wins             => $wins,
+						losses           => $losses,
+						nodecisions      => $nds,
+						ranks            => $ranks,
+						event_info       => $tourn_info,
+						startdate        => $tourn->start,
+						enddate          => $tourn->end,
+						event_details    => $event_name,
+						description      => $event_name,
+						points           => $total_points,
+						isAutoPost       => 1
+					});
+
+					Tab::NSDA::Points->sql_update_apt->execute($posted_point->point_id, $ualt_id, $event->id);
+
 				}
 			}
 		}
