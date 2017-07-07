@@ -29,37 +29,93 @@ sub name {
 	$tz = "UTC" unless $tz;
 	return "No prelims in ".$self->event->name if $self->type eq "elim";
 
+	my $type = $self->type;
+
+	my $frame = '<span class="threetenths semibold">';
+
 	if ($self->registrant) { 
-		return "No Rounds: ".$self->event->name if $self->type eq "event";
-		return "Strike: ".$self->school->short_name if $self->type eq "school";
-		return "Strike: ".$self->entry->event->abbr." ".$self->entry->code if $self->type eq "entry";
-		return "Strike: ".$self->region->name." (".$self->region->code.")" if $self->type eq "region";
 
-		return "Conflict: ".$self->entry->event->abbr." ".$self->entry->code." ".$self->entry->school->short_name 
-			if $self->entry && $self->type eq "conflict";
+		if ($type eq "event") { 
 
-		return "Conflict: ".$self->school->short_name 
-			if $self->school && $self->type eq "conflict";
+			return $frame . "No Rounds</span> "
+				.$self->event->name;
+
+		} elsif ($type eq "school") { 
+
+			return $frame . "Strike</span> "
+				.$self->school->short_name;
+
+		} elsif ($type eq "entry") { 
+
+			return $frame . "Strike</span> "
+				.$self->entry->event->abbr." "
+				.$self->entry->code." "
+				.$self->entry->name;
+
+		} elsif ($type eq "region") {
+
+			return $frame . "Strike</span> "
+				.$self->region->name." (".$self->region->code.")";
+
+		} elsif ($self->entry && $type eq "conflict") { 
+
+			return $frame . "Conflict</span> "
+				.$self->entry->event->abbr." "
+				.$self->entry->code." "
+				.$self->entry->school->short_name ;
+
+		} elsif ($self->school && $type eq "conflict") { 
+
+			return $frame . "Conflict</span> "
+				.$self->school->short_name;
+		}
 
 	} else { 
-		return "Tab Strike: ".$self->event->name if $self->type eq "event";
 
-		return "Tab Strike: ".$self->school->short_name if $self->type eq "school";
+		if ($type eq "event") {
 
-		return "Tab Strike: ".$self->entry->event->abbr." ".$self->entry->code." ".$self->entry->school->short_name 
-			if $self->type eq "entry";
+			return $frame . "Tab Strike</span> "
+				.$self->event->name;
 
-		return "Tab Strike: ".$self->region->name." (".$self->region->code.")" if $self->type eq "region";
-		return "Tab Strike: ".$self->district->name." (".$self->district->code.")" if $self->type eq "district";
+		} elsif ($type eq "school") {
+
+			return $frame . "Tab Strike</span> "
+				.$self->school->short_name;
+
+		} elsif ($type eq "entry") {
+
+			return $frame . "Tab Strike</span> "
+				.$self->entry->event->abbr
+				." ".$self->entry->code
+				." ".$self->entry->school->short_name;
+
+		} elsif ($type eq "region") {
+
+			return $frame . "Tab Strike</span> "
+				.$self->region->name
+				." (".$self->region->code.")";
+
+		} elsif ($type eq "district") { 
+
+			return $frame . "Tab Strike</span> "
+				.$self->district->name
+				." (".$self->district->code.")";
+		}
 	}
 
 
+	if ($type eq "time" && $self->start->day != $self->end->day) { 
+		return $frame." Timeblock</span>"
+			. Tab::niceshortdayt($self->start->set_time_zone($tz))
+			." until ".  Tab::niceshortdayt($self->end->set_time_zone($tz));
+	};
 
-	return "Out ". Tab::niceshortdayt($self->start->set_time_zone($tz))
-			." to ".  Tab::niceshortdayt($self->end->set_time_zone($tz)) if $self->type eq "time" && $self->start->day != $self->end->day;
-
-	return "Out ".  Tab::niceshortdayt($self->start->set_time_zone($tz))
-			." to ".  Tab::nicetime($self->end->set_time_zone($tz)) if $self->type eq "time" && $self->start->day == $self->end->day;
+	if ($self->type eq "time" && $self->start->day == $self->end->day) { 
+		return $frame." Timeblock</span>"
+			. Tab::niceshortdayt($self->start->set_time_zone($tz))
+			.Tab::niceshortdayt($self->start->set_time_zone($tz))
+			." until ".  Tab::nicetime($self->end->set_time_zone($tz));
+	}
 }
 
 
