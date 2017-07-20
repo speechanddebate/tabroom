@@ -11,9 +11,12 @@ Tab::Student->has_a(chapter => 'Tab::Chapter');
 Tab::Student->has_a(person => 'Tab::Person');
 Tab::Student->has_a(person_request => 'Tab::Person');
 
+Tab::Student->has_many(followers => 'Tab::Follower', 'student');
+
 Tab::Student->has_many(settings => 'Tab::StudentSetting', 'student');
 Tab::Student->has_many(entries => [ Tab::EntryStudent => 'entry']);
 Tab::Student->has_many(entry_students => 'Tab::EntryStudent', 'student');
+
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 __PACKAGE__->_register_dates( qw/birthdate/);
