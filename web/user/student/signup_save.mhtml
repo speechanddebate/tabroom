@@ -1,0 +1,335 @@
+<%args> 
+	$person 
+	$entry_id   => undef
+	$event_id   => undef
+	$school_id  => undef
+	$student_id => undef
+</%args>
+<%init>
+
+	my $now = DateTime->now();
+
+	my ($school, $student, $school_settings) = 
+		$m->comp(
+			"signup_check.mas",
+			person     => $person,
+			school_id  => $school_id,
+			student_id => $student_id
+	);
+
+	my $return_string = "?student_id=$student_id&school_id=$school_id&event_id=$event_id";
+
+	my $tourn = $school->tourn;
+	my %tourn_settings = $tourn->all_settings();
+
+	my $event = Tab::Event->retrieve($event_id);
+	my %event_settings = $event->all_settings();
+
+	my $entry = Tab::Entry->retrieve($entry_id) if $entry_id;
+	my %entry_settings = $entry->all_settings() if $entry;
+
+	#
+	# INDIVIDUALS PART OF THE ENTRY:
+	#
+	
+	my %clear_student = 
+		map {$_->id => $_} $m->comp(
+			"/funclib/students_evententer.mas", 
+				event       => $event,
+				school      => $school,
+				unconfirmed => 1
+		);  
+
+
+	my @students = ($student_id);
+
+	my $err;
+
+	unless ($clear_student{$student_id}) { 
+
+		my $bad = Tab::Student->retrieve($student_id);
+
+		$err .= $bad->first." ".$bad->last." is not eligile to enter ".$event->name;
+	}
+
+	foreach my $count (2 .. $event_settings{"max_entry"}) { 
+
+		next unless $ARGS{"student_".$count};
+
+		unless ($clear_student{$ARGS{"student_".$count}}) { 
+
+			my $bad = Tab::Student->retrieve($student_id);
+
+			$err .= $bad->first." ".$bad->last." is not eligile to enter ".$event->name;
+		}
+
+		push @students, $ARGS{"student_".$count};
+
+	}
+
+	if (scalar @students > $event_settings{"min_entry"}) { 
+
+		$err .= "You must have a minimum of ".$event_settings{"min_entry"}." competitors per entry.";
+	}
+
+	#
+	# POSSIBLY REQUIRED DATA:
+	#
+
+	my %settings;
+	
+	my $seed = $ARGS{"seed"};
+
+    unless ($seed eq $entry_settings{"registered_seed"}) { 
+		$settings{"registered_seed"} = $seed;
+    }   
+
+    if ($seed eq "full") { 
+		$settings{"pairing_seed"} = 1;
+    } elsif ($seed eq "half") { 
+		$settings{"pairing_seed"} = 2;
+    } elsif ($seed eq "free") { 
+		$settings{"pairing_seed"} = 3;
+    } elsif ($event->setting("apda")) { 
+		$settings{"pairing_seed"} = 4;
+    }   
+
+	if ($event_settings{"ask_for_titles"}) { 
+		$settings{"title"} = $ARGS{"title"};
+		$err .= "No piece title supplied" unless $ARGS{"title"};
+	}
+
+	if ($event_settings{"ask_for_authors"}) { 
+
+		$settings{"author"} = $ARGS{"author"};
+		$err .= "No piece author supplied" unless $ARGS{"author"};
+
+		if ($tourn_settings{"nsda_nats"} || $tourn_settings{"nsda_ms_nats"}) {
+
+			$settings{"publisher"} = $ARGS{"publisher"};
+			$settings{"publish_date"} = $ARGS{"publish_date"};
+			$settings{"publish_isbn"} = $ARGS{"publish_isbn"};
+
+			$settings{"publish_print_date"} = $ARGS{"publish_print_date"}; 
+			$settings{"publish_url"} = $ARGS{"publish_url"};
+
+			unless (
+					( 	$settings{"publisher"} 
+						&& $settings{"publish_date"} 
+						&& $settings{"publish_isbn"}
+					)
+				||
+					( 
+						$settings{"publish_print_date"} 
+						&& $settings{"publish_url"}
+					)
+			) { 
+
+				$err .= "Complete publication details missing.  Either the print ";
+				$err .= "or the online section must be filled out completely";
+
+			}
+
+		}
+	}
+
+	my %quals;
+
+    my $atlarge++ if $ARGS{"atlarge"};
+    my $at_large_allowed++ if $event_settings{'at_larges'};
+
+	my $required = $event_settings{"ask_quals"};
+	my $ask = $required;
+	$ask = 15 if $event_settings{"more_quals"};
+
+    foreach my $tick (1 .. $ask) { 
+
+        if ($ARGS{"qual_name_".$tick}) {
+
+			$required--;
+            $quals{$tick}{"name"} = $ARGS{"qual_".$tick};
+            $quals{$tick}{"result"} = $ARGS{"qualpts_".$tick};
+
+        } elsif ($required > 0 && (not defined $atlarge)) { 
+
+            $err .= "Please supply the required number of qualifiers ";
+            $err .= "or mark the entry as at-large." if $at_large_allowed;
+
+        }
+
+    }
+
+	$m->redirect("signup_edit.mhtml".$return_string."&err=$err") if $err;
+
+    my $waitlist = $m->comp(
+        "/funclib/waitlist_status.mas",
+            event  => $event,
+            school => $school
+	);
+
+	my $entry = Tab::Entry->create({
+		event       => $event->id,
+		school      => $school->id,
+		tourn       => $tourn->id,
+		unconfirmed => 1,
+		waitlist    => $waitlist,
+		ada         => $ARGS{"ada"},
+		created_at  => $now
+	});
+
+	foreach my $student_id (@students) { 
+		Tab::EntryStudent->create({
+			student => $student_id,
+			entry   => $entry->id
+		});
+	}
+
+	# Name and code!
+
+	$entry->name(
+		$m->comp(
+			"/funclib/entry_name.mas", 
+			entry => $entry
+		)
+	);
+
+	my $code = $ARGS{"code"} 
+		if $event_settings{"code_style"} eq "register";
+
+	$code = $m->comp(
+		"/funclib/entry_code.mas", 
+		entry => $entry
+	) unless $code;
+
+	$entry->code($code);
+
+	# Settings!
+
+	foreach my $tag (keys %settings) { 
+		$entry->setting($tag, $settings{$tag});
+	}
+
+	# Quals!
+	foreach my $tick (keys %quals) { 
+		Tab::Qualifier->create({
+			entry  => $entry->id,
+			name   => $quals{$tick}{"name"},
+			result => $quals{$tick}{"result"}
+		});
+	}
+
+	# Notifications!
+
+
+	my $subject = $student->first." ".$student->last." tournament signup";
+
+	my $body = "\n$student->first." ".$student->last has signed up for ".$tourn->name."\n";
+
+	my $tz = $tourn->tz;
+	$tz = $person->tz unless $tz;
+	$tz = "UTC" unless $tz;
+	my $start = $tourn->start->set_time_zone($tz);
+	my $end = $tourn->end->set_time_zone($tz);
+
+	$body .= "\tEvent: ".$event->name."\n";
+	$body .= "\tTournament Dates: ".Tab::nicefulldate($start);
+	$body .= " to ".Tab::nicefulldate($end) if $end->day != $start->day;
+	$body .= "\n";
+
+	$body .= "\nLocation: ".$tourn->city;
+	$body .= ", " if $tourn->city;
+	$body .= $tourn->state if $tourn->state;
+	$body .= $tourn->country unless $tourn->country;
+	$body .= "\n";
+
+	if ($school_settings->{"signup_show_fees"}) { 
+
+		my $currency = $tourn->setting("currency");
+		$currency = '$' unless $currency;
+
+		$body .= "Entry fee: ".$entry->fee if $entry->fee;
+
+		$body .= "Per-competitor fee: ".$tourn->setting("per_student_fee") 
+			if $tourn->setting("per_student_fee");
+
+		$body .= "Per-person fee: ".$tourn->setting("per_person_fee") 
+			if $tourn->setting("per_person_fee");
+	
+		$body .= "\n\n";
+
+	}
+
+	my $counter;
+
+	foreach my $student_id (@students) { 
+
+		$counter++;
+
+		$body .= "Competitor ".$counter.": \t";
+		$body .= $clear_student{$student_id}->first." ";
+		$body .= $clear_student{$student_id}->middle." ";
+		$body .= $clear_student{$student_id}->last."\n";
+
+	}
+
+	my $signup_memo = $school->files( type => "signup")->first;
+
+	if ($signup_memo) { 
+		$body .= "Info document:\t ".$Tab::s3_url."/".$tourn->id."/signups/".$school->id."/".$signup_memo->filename;
+		$body .= "\n\n";
+	}
+
+	if ($school_settings->{"signup_notice"}) { 
+
+		my $hs = HTML::Strip->new();
+		my $clean_text = $hs->parse($school_settings->{"signup_notice"});
+
+		$body .= "\n";
+		$body .= $school->name." specific information:";
+		$body .= "\n";
+		$body .= $clean_text;
+		$body .= "\n";
+
+	}
+
+	$body .= "\nIf this is a problem or mistake, please delete the entry on Tabroom.com or contact your coach or team administrator.\n";
+	$body .= "\n";
+
+	my $raw;
+	my @sendtos;
+
+	foreach my $student (@students) { 
+
+		push @sendtos, $student->person if $student->person;
+
+	 	if ($school_settings->{"signup_inform_parents"}) { 
+
+			foreach my $follower ($student->followers) { 
+
+				if ($follower->person) { 
+					push @sendtos, $follower->person;
+				} elsif ($follower->email) { 
+					$raw .= "," if $raw;
+					$raw .= $follower->email;
+				}
+			}
+		}
+	}
+
+	$m->comp("/funclib/send_email.mas", 
+		from    => $person,
+		real    => 1,
+		array   => \@sendtos,
+		raw     => $raw,
+		subject => $subject,
+		body    => $body
+	);
+
+	my $msg = "Signed up for ".$tourn->name." in ".$event->name."!";  
+	$msg .= scalar @sendtos." people were notified.";
+
+	$m->redirect("signup.mhtml?student_id=$student_id&school_id=$school_id");
+
+</%init>
+
+
