@@ -26,8 +26,6 @@
 
 	function confirmAll(master, targetClass) { 
 
-		console.log("Confirming value for "+master.id);
-
 		if ($(master).prop("checked") === false) { 
 			$("."+targetClass).prop("checked", false);
 		} else { 
@@ -38,6 +36,22 @@
 
 /* Respond to switch calls */
 
+	function postConfirm(alertMessage, checkObject, replyUrl) { 
+
+		alertify.confirm(alertMessage, function(e) { 
+	
+			if (e) { 
+				postSwitch(checkObject, replyUrl);
+				return;
+			} else {
+				return;
+			}
+
+		});
+
+		return;
+	}
+
 	function postSwitch(checkObject, replyUrl) { 
 
 		var targetId     = $(checkObject).attr("target_id");
@@ -45,7 +59,6 @@
 		var settingName  = $(checkObject).attr("setting_name");
 		var successAction = $(checkObject).attr("on_success");
 
-		console.log("Target "+targetId+" and property "+propertyName);
 
 		var propertyValue = checkObject.value;
 

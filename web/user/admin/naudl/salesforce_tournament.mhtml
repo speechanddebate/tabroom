@@ -1,0 +1,325 @@
+<%args>
+	$tourn
+</%args>
+<%init>
+
+	use JSON;
+	use Tab::NSDA::EventCategory;
+
+
+	my $now = DateTime->now();
+
+	Tab::School->columns(TEMP => "regioncode");
+
+	Tab::School->set_sql( naudl => "
+		select distinct school.*, region.code
+		from school, chapter_circuit, region, circuit_setting
+		where school.tourn = ? 
+		and school.chapter = chapter_circuit.chapter
+		and chapter_circuit.region = region.id
+		and chapter_circuit.circuit = circuit_setting.circuit
+		and circuit_setting.tag = 'naudl'
+	");
+
+	my @schools = Tab::School->search_naudl($tourn->id);
+
+	my %school_by_id = map {$_->id => $_} @schools;
+
+	my %event_by_id = map {$_->id => $_} $tourn->events;
+
+	my %entries_by_event;
+
+	foreach my $school (@schools) { 
+
+		foreach my $entry (
+			$school->entries(
+				waitlist	=> 0,
+				unconfirmed => 0
+			)
+		) { 
+			push @{$entries_by_event{$entry->event->id}}, $entry;
+		}
+	}
+
+	my %sta_array = ();
+	my %new_students_array = ();
+	my %updated_students_array = ();
+
+	foreach my $event_id (keys %entries_by_event) { 
+
+		my $event = $event_by_id{$event_id};
+
+		my $round_robin = $event->setting('round_robin');
+
+		my $nsda_category = Tab::NSDA::EventCategory->retrieve(
+			$event->setting("nsda_event_category")
+		) if $event->setting("nsda_event_category");
+
+		my $type = $nsda_category->name if $nsda_category;
+		$type = $event->type unless $type;
+		$type = "Debate" unless $type; 
+
+		my $last_prelim;
+		my @elims;
+		my $final;
+
+		foreach my $round (sort {$b->name cmp $a->name} $event->rounds) { 
+
+			$final = $round 
+				if $round->type eq "final";
+
+			$final = $round 
+				if $round->type eq "elim" 
+				&& not defined $final;
+
+			push @elims, $round if $round->type eq "final";
+
+			push @elims, $round if $round->type eq "elim";
+
+			unless ($last_prelim) { 
+				$last_prelim = $round if (
+					$round->type ne "final" 
+					&& $round->type ne "elim"
+				);
+			}
+
+		}
+
+		my (@final_results) = $m->comp(
+			"/tabbing/results/order_entries.mas", 
+			round => $final
+		) if $final && $final->tiebreak_set;
+
+		my (@last_prelim_results) = $m->comp(
+			"/tabbing/results/order_entries.mas", 
+			round => $last_prelim
+		) if $last_prelim && $last_prelim->tiebreak_set;
+
+		my (@speaker_results) = $m->comp(
+			"/tabbing/results/order_speakers.mas", 
+			round => $last_prelim
+		) if $event->setting("speaker_tbset");
+
+		my $final_ref = pop @final_results;
+		my $prelim_ref = pop @last_prelim_results;
+		my $speaker_ref = pop @speaker_results;
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $sth = $dbh->prepare("
+            select
+                entry.id entry, student.id student, panel.bye bye, 
+                    ballot.side, ballot.bye ballotbye, ballot.forfeit forfeit, ballot.judge judge,
+                    winloss.value win, points.value points, 
+                    round.name round, round.type type,
+					naudl_updated.value_date, student.timestamp
+            from (entry, ballot, panel, round)
+                left join score points 
+					on points.ballot = ballot.id 
+					and points.tag = 'points'
+                left join score winloss 
+					on winloss.ballot = ballot.id 
+					and winloss.tag = 'ballot'
+                left join student 
+					on points.student = student.id
+
+				left join student_setting naudl_updated
+					on naudl_updated.student = student.id
+					and naudl_updated.tag = 'naudl_updated'
+
+            where round.event = ?
+                and round.id = panel.round 
+                and panel.id = ballot.panel
+                and ballot.entry = entry.id
+		");
+
+		$sth->execute($event->id);
+
+		my %student_data = ();
+
+		while(
+			my(
+				$entry_id, $student_id, $panel_bye,
+				$ballot_side, $ballot_bye, $ballot_forfeit, $ballot_judge,
+				$win, $points,
+				$round_name, $round_type,
+				$naudl_updated, $timestamp
+			) = $sth->fetchrow_array()
+		) { 
+
+			next if $ballot_forfeit;
+
+			$student_data{"s".$student_id}{"naudl_updated"} = $naudl_updated;
+			$student_data{"s".$student_id}{"timestamp"} = $timestamp;
+
+			push @{$student_data{"e".$entry_id}{"students"}}, $student_id;
+
+			$student_data{"s".$student_id}{"total_points"} += $points;
+
+
+			push @{$student_data{"e".$entry_id}{"rounds"}}, $round_name;
+
+			$student_data{$entry_id}{$round_name}{"side"} = $ballot_side;
+
+			$student_data{$entry_id}{$round_name}{"bye"}++ if $panel_bye;
+			$student_data{$entry_id}{$round_name}{"bye"}++ if $ballot_bye;
+
+
+			if ($win > 0) { 
+				$student_data{$entry_id}{$round_name}{"wins"}{$ballot_judge}++ 
+			} else {
+				$student_data{$entry_id}{$round_name}{"losses"}{$ballot_judge}++ 
+			}
+
+			$round_type = "prelim" if $round_type ne "elim" && $round_type ne "final";
+
+			$student_data{"r".$round_name}{"type"} = $round_type;
+
+		}
+
+		foreach my $entry (@{$entries_by_event{$event_id}}) { 
+
+			my $entry_id = $entry->id;
+
+			next unless $student_data{"e".$entry_id}{"rounds"};
+
+			my @students = 
+				@{$student_data{"e".$entry_id}{"students"}}
+				if $student_data{"e".$entry_id}{"students"};
+
+			@students = $entry->students unless @students;
+
+			my %done;
+
+			my %entry_data;
+
+			foreach my $round_name (@{$student_data{"e".$entry_id}{"rounds"}}) { 
+
+				next if $done{"r".$round_name}++;
+			
+				my $side = "Affirmative" if $student_data{$entry_id}{$round_name}{"side"} == 1;
+				$side = "Negative" if $student_data{$entry_id}{$round_name}{"side"} == 2;
+
+				if ($student_data{$entry_id}{$round_name}{"bye"}) { 
+
+					$entry_data{"Byes"}++
+
+				} else { 
+
+					$entry_data{"Tournament_Rounds"}++;
+
+					my $wins = scalar(keys %{$student_data{$entry_id}{$round_name}{"wins"}});
+
+					my $losses = scalar(keys %{$student_data{$entry_id}{$round_name}{"losses"}});
+
+					if ($student_data{"r".$round_name}{"type"} eq "prelim") { 
+
+						if ($round_robin) { 
+
+							$entry_data{"Wins"} += $wins;
+							$entry_data{$side."_Wins"} += $wins;
+							$entry_data{"Losses"} += $losses;
+							$entry_data{$side."_Losses"} += $losses;
+
+						} else { 
+
+							if ($wins > $losses) { 
+
+								$entry_data{"Wins"}++;
+								$entry_data{$side."_Wins"}++;
+
+							} else { 
+
+								$entry_data{"Losses"}++;
+								$entry_data{$side."_Losses"}++;
+							}
+
+						}
+				
+					} else { 
+
+						if ($wins > $losses) { 
+
+							$entry_data{"Elimination_Wins"}++;
+							$entry_data{$side."_Wins"}++;
+
+						} else { 
+
+							$entry_data{"Elimination_Losses"}++;
+							$entry_data{$side."_Losses"}++;
+
+						}
+
+					}
+
+				}
+
+			}
+
+			foreach my $student_id (@students) { 
+
+				next unless $student_id;
+				next if $done{$student_id}++;
+
+				unless ($student_data{"s".$student_id}{"naudl_updated"}) { 
+
+					push @{$new_students_array{"students_from_tabroom"}},
+						$m->comp("salesforce_student.mas", student_id => $student_id);
+
+				} elsif (
+					$student_data{"s".$student_id}{"naudl_updated"} 
+					< $student_data{"s".$student_id}{"timestamp"}
+				) { 
+
+					push @{$updated_students_array{"students_from_tabroom"}},
+						$m->comp("salesforce_student.mas", 
+							student_id => $student_id
+						);
+				}
+
+				my %student_info = ();
+
+				$student_info{"tabroomid"} = "TR".$student_id;
+				$student_info{"tournid"} = "TR".$tourn->id;
+				$student_info{"Division"} = $event->name;
+				$student_info{"Event"} = $type;
+				$student_info{"Location"} = $tourn->city." ".$tourn->state;
+
+				$student_info{"Speaker_Award"} = $speaker_ref->{$student_id}
+					if $speaker_ref->{$student_id};
+
+				$student_info{"Prelim_Rank"} = $prelim_ref->{"seed"}{$entry->id};
+
+				$student_info{"STA_Speaker_Points"} = $student_data{"s".$student_id}{"total_points"};
+
+				foreach my $key (keys %entry_data) { 
+					$student_info{$key} = $entry_data{$key};
+				}
+
+				push @{$sta_array{"stas_from_tabroom"}}, \%student_info;
+
+			}
+
+		}
+
+	}
+
+	my $new_students;
+	my $updated_students;
+	my $stas;
+
+	$new_students = \%new_students_array 
+		if $new_students_array{"students_from_tabroom"} 
+		&& (scalar @{$new_students_array{"students_from_tabroom"}} > 0);
+
+	$updated_students = \%updated_students_array 
+		if $updated_students_array{"students_from_tabroom"}
+		&& (scalar @{$updated_students_array{"students_from_tabroom"}} > 0);
+
+	$stas = \%sta_array 
+		if $sta_array{"stas_from_tabroom"}
+		&& (scalar @{$sta_array{"stas_from_tabroom"}});
+
+	return ($new_students, $updated_students, $stas);
+
+</%init>
