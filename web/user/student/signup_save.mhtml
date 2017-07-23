@@ -17,7 +17,7 @@
 			student_id => $student_id
 	);
 
-	my $return_string = "?student_id=$student_id&school_id=$school_id&event_id=$event_id";
+	my $return_string = "?student_id=$student_id&school_id=$school_id&event_id=$event_id&entry_id=$entry_id";
 
 	my $tourn = $school->tourn;
 	my %tourn_settings = $tourn->all_settings();
@@ -39,7 +39,6 @@
 				school      => $school,
 				unconfirmed => 1
 		);  
-
 
 	my @students = ($student_id);
 
@@ -72,11 +71,15 @@
 		$err .= "You must have a minimum of ".$event_settings{"min_entry"}." competitors per entry.";
 	}
 
+	undef $err if $entry;
+
 	#
 	# POSSIBLY REQUIRED DATA:
 	#
 
 	my %settings;
+
+	$settings{"signup_by"} = $person->id;
 	
 	my $seed = $ARGS{"seed"};
 
@@ -135,25 +138,30 @@
 
 	my %quals;
 
-    my $atlarge++ if $ARGS{"atlarge"};
+	$settings{"atlarge"} = $ARGS{"atlarge"};
+	$settings{"atlarge"} = 0 unless $ARGS{"atlarge"};
+
     my $at_large_allowed++ if $event_settings{'at_larges'};
 
 	my $required = $event_settings{"ask_quals"};
 	my $ask = $required;
 	$ask = 15 if $event_settings{"more_quals"};
 
+	TICK:
     foreach my $tick (1 .. $ask) { 
 
-        if ($ARGS{"qual_name_".$tick}) {
+        if ($ARGS{"qual_".$tick}) {
 
 			$required--;
             $quals{$tick}{"name"} = $ARGS{"qual_".$tick};
             $quals{$tick}{"result"} = $ARGS{"qualpts_".$tick};
 
-        } elsif ($required > 0 && (not defined $atlarge)) { 
+        } elsif ($required > 0 && (not defined $ARGS{"atlarge"})) { 
 
-            $err .= "Please supply the required number of qualifiers ";
+            $err .= " Please supply the required number of qualifiers ";
             $err .= "or mark the entry as at-large." if $at_large_allowed;
+
+			last TICK;
 
         }
 
@@ -166,6 +174,8 @@
             event  => $event,
             school => $school
 	);
+
+	my $existed;
 
 	unless ($entry) { 
 
@@ -180,15 +190,27 @@
 		});
 
 	} else { 
-		$entry->ada($ada);
+
+		$entry->ada($ARGS{"ada"});
 		$entry->created_at($now);
+		$existed++;
+
 	}
 
 	foreach my $student_id (@students) { 
-		Tab::EntryStudent->create({
-			student => $student_id,
-			entry   => $entry->id
-		});
+
+		unless (
+			Tab::EntryStudent->search(
+				student => $student_id,
+				entry   => $entry->id
+			)->first
+		) { 
+
+			Tab::EntryStudent->create({
+				student => $student_id,
+				entry   => $entry->id
+			});
+		}
 	}
 
 	# Name and code!
@@ -217,8 +239,12 @@
 		$entry->setting($tag, $settings{$tag});
 	}
 
+	foreach my $existing ($entry->qualifiers) { 
+		$existing->delete();
+	}
+
 	# Quals!
-	foreach my $tick (keys %quals) { 
+	foreach my $tick (sort keys %quals) { 
 		Tab::Qualifier->create({
 			entry  => $entry->id,
 			name   => $quals{$tick}{"name"},
@@ -228,113 +254,124 @@
 
 	# Notifications!
 
+	my $msg;
 
-	my $subject = $student->first." ".$student->last." tournament signup";
+	unless ($existed) { 
 
-	my $body = "\n$student->first." ".$student->last has signed up for ".$tourn->name."\n";
+		my $subject = $student->first." ".$student->last." tournament signup";
 
-	my $tz = $tourn->tz;
-	$tz = $person->tz unless $tz;
-	$tz = "UTC" unless $tz;
-	my $start = $tourn->start->set_time_zone($tz);
-	my $end = $tourn->end->set_time_zone($tz);
+		my $body = "\n".$student->first." ".$student->last." has signed up for ".$tourn->name."\n";
 
-	$body .= "\tEvent: ".$event->name."\n";
-	$body .= "\tTournament Dates: ".Tab::nicefulldate($start);
-	$body .= " to ".Tab::nicefulldate($end) if $end->day != $start->day;
-	$body .= "\n";
+		my $tz = $tourn->tz;
+		$tz = $person->tz unless $tz;
+		$tz = "UTC" unless $tz;
+		my $start = $tourn->start->set_time_zone($tz);
+		my $end = $tourn->end->set_time_zone($tz);
 
-	$body .= "\nLocation: ".$tourn->city;
-	$body .= ", " if $tourn->city;
-	$body .= $tourn->state if $tourn->state;
-	$body .= $tourn->country unless $tourn->country;
-	$body .= "\n";
-
-	if ($school_settings->{"signup_show_fees"}) { 
-
-		my $currency = $tourn->setting("currency");
-		$currency = '$' unless $currency;
-
-		$body .= "Entry fee: ".$entry->fee if $entry->fee;
-
-		$body .= "Per-competitor fee: ".$tourn->setting("per_student_fee") 
-			if $tourn->setting("per_student_fee");
-
-		$body .= "Per-person fee: ".$tourn->setting("per_person_fee") 
-			if $tourn->setting("per_person_fee");
-	
-		$body .= "\n\n";
-
-	}
-
-	my $counter;
-
-	foreach my $student_id (@students) { 
-
-		$counter++;
-
-		$body .= "Competitor ".$counter.": \t";
-		$body .= $clear_student{$student_id}->first." ";
-		$body .= $clear_student{$student_id}->middle." ";
-		$body .= $clear_student{$student_id}->last."\n";
-
-	}
-
-	my $signup_memo = $school->files( type => "signup")->first;
-
-	if ($signup_memo) { 
-		$body .= "Info document:\t ".$Tab::s3_url."/".$tourn->id."/signups/".$school->id."/".$signup_memo->filename;
-		$body .= "\n\n";
-	}
-
-	if ($school_settings->{"signup_notice"}) { 
-
-		my $hs = HTML::Strip->new();
-		my $clean_text = $hs->parse($school_settings->{"signup_notice"});
-
-		$body .= "\n";
-		$body .= $school->name." specific information:";
-		$body .= "\n";
-		$body .= $clean_text;
+		$body .= "\tEvent: ".$event->name."\n";
+		$body .= "\tTournament Dates: ".Tab::nicefulldate($start);
+		$body .= " to ".Tab::nicefulldate($end) if $end->day != $start->day;
 		$body .= "\n";
 
-	}
+		$body .= "\nLocation: ".$tourn->city;
+		$body .= ", " if $tourn->city;
+		$body .= $tourn->state if $tourn->state;
+		$body .= $tourn->country unless $tourn->country;
+		$body .= "\n";
 
-	$body .= "\nIf this is a problem or mistake, please delete the entry on Tabroom.com or contact your coach or team administrator.\n";
-	$body .= "\n";
+		if ($school_settings->{"signup_show_fees"}) { 
 
-	my $raw;
-	my @sendtos;
+			my $currency = $tourn->setting("currency");
+			$currency = '$' unless $currency;
 
-	foreach my $student (@students) { 
+			$body .= "Entry fee: ".$event->fee if $event->fee;
 
-		push @sendtos, $student->person if $student->person;
+			$body .= "Per-competitor fee: ".$tourn->setting("per_student_fee") 
+				if $tourn->setting("per_student_fee");
 
-	 	if ($school_settings->{"signup_inform_parents"}) { 
+			$body .= "Per-person fee: ".$tourn->setting("per_person_fee") 
+				if $tourn->setting("per_person_fee");
+		
+			$body .= "\n\n";
 
-			foreach my $follower ($student->followers) { 
+		}
 
-				if ($follower->person) { 
-					push @sendtos, $follower->person;
-				} elsif ($follower->email) { 
-					$raw .= "," if $raw;
-					$raw .= $follower->email;
+		my $counter;
+
+		foreach my $student_id (@students) { 
+
+			$counter++;
+
+			$body .= "Competitor ".$counter.": \t";
+			$body .= $clear_student{$student_id}->first." ";
+			$body .= $clear_student{$student_id}->middle." ";
+			$body .= $clear_student{$student_id}->last."\n";
+
+		}
+
+		my $signup_memo = $school->files( type => "signup")->first;
+
+		if ($signup_memo) { 
+			$body .= "Info document:\t ".$Tab::s3_url."/".$tourn->id."/signups/".$school->id."/".$signup_memo->filename;
+			$body .= "\n\n";
+		}
+
+		if ($school_settings->{"signup_notice"}) { 
+
+			my $hs = HTML::Strip->new();
+			my $clean_text = $hs->parse($school_settings->{"signup_notice"});
+
+			$body .= "\n";
+			$body .= $school->name." specific information:";
+			$body .= "\n";
+			$body .= $clean_text;
+			$body .= "\n";
+
+		}
+
+		$body .= "\nIf this is a problem or mistake, please delete the entry on Tabroom.com or contact your coach or team administrator.\n";
+		$body .= "\n";
+
+		my $raw;
+		my @sendtos;
+
+		foreach my $student_id (@students) { 
+
+			my $student = $clear_student{$student_id};
+
+			push @sendtos, $student->person if $student->person;
+
+			if ($school_settings->{"signup_inform_parents"}) { 
+
+				foreach my $follower ($student->followers) { 
+
+					if ($follower->follower) { 
+						push @sendtos, $follower->follower;
+					} elsif ($follower->email) { 
+						$raw .= "," if $raw;
+						$raw .= $follower->email;
+					}
 				}
 			}
 		}
+
+		$m->comp("/funclib/send_email.mas", 
+			from    => $person,
+			real    => 1,
+			array   => \@sendtos,
+			raw     => $raw,
+			subject => $subject,
+			body    => $body
+		);
+	
+		$msg = "Signed up for ".$tourn->name." in ".$event->name."!";  
+		$msg .= scalar @sendtos." people were notified.";
+
+	} else {
+
+		$msg = " Entry details changed "; 
+
 	}
-
-	$m->comp("/funclib/send_email.mas", 
-		from    => $person,
-		real    => 1,
-		array   => \@sendtos,
-		raw     => $raw,
-		subject => $subject,
-		body    => $body
-	);
-
-	my $msg = "Signed up for ".$tourn->name." in ".$event->name."!";  
-	$msg .= scalar @sendtos." people were notified.";
 
 	$m->redirect("signup.mhtml?student_id=$student_id&school_id=$school_id");
 
