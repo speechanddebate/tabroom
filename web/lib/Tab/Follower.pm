@@ -3,8 +3,8 @@ use base 'Tab::DBI';
 Tab::Follower->table('follower');
 Tab::Follower->columns(Primary => qw/id/);
 Tab::Follower->columns(Essential => qw/type cell email domain follower 
-									   tourn judge entry school person student
-									   timestamp/);
+									   tourn judge entry school person student/);
+Tab::Follower->columns(Others => qw/timestamp/);
 Tab::Follower->has_a(follower => 'Tab::Person');
 Tab::Follower->has_a(tourn => 'Tab::Tourn');
 Tab::Follower->has_a(judge => 'Tab::Judge');

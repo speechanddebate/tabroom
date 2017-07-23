@@ -36,6 +36,17 @@
 
 /* Respond to switch calls */
 
+	function postEnter(e, checkObject, replyUrl) { 
+
+		if (e.keyCode == 13) { 
+			postSwitch(checkObject, replyUrl);
+			return false;
+		}
+
+		return true;
+
+	}
+
 	function postConfirm(alertMessage, checkObject, replyUrl) { 
 
 		alertify.confirm(alertMessage, function(e) { 
@@ -54,13 +65,22 @@
 
 	function postSwitch(checkObject, replyUrl) { 
 
-		var targetId     = $(checkObject).attr("target_id");
-		var propertyName = $(checkObject).attr("property_name");
-		var settingName  = $(checkObject).attr("setting_name");
+		var targetId      = $(checkObject).attr("target_id");
+		var propertyName  = $(checkObject).attr("property_name");
+		var settingName   = $(checkObject).attr("setting_name");
 		var successAction = $(checkObject).attr("on_success");
-
-
+		var replyTarget   = $(checkObject).attr("reply_target");
+		var replyAppend   = $(checkObject).attr("reply_append");
 		var propertyValue = checkObject.value;
+
+		var otherObject = $(checkObject).attr("other_value");
+
+		var otherValue;
+
+		if (otherObject) { 
+			otherValue = $("#"+otherObject).val();
+			$("#"+otherObject).val("");
+		}
 
 		if (propertyValue === undefined) { 
 			propertyValue = $(checkObject).attr("value");
@@ -79,18 +99,25 @@
 				target_id      : targetId,
 				property_name  : propertyName,
 				setting_name   : settingName,
-				property_value : propertyValue
+				property_value : propertyValue,
+				other_value    : otherValue
 			},
 			success : function(data) {
-
-				if (successAction === "destroy") { 
-					$("#"+targetId).remove();
-				}
 
 				$('table').trigger('applyWidgets');
 
 				if (data.reply) { 
+					
+					if (replyTarget) { 
+						$("#"+replyTarget).text(data.reply);
+					}
+
+					if (replyAppend) { 
+						$("#"+replyAppend).append(data.reply);
+					}
+
 					$(".replybucket").text(data.reply);
+					$(".replyappend").append(data.reply);
 				}
 
 				if (data.error) { 
@@ -100,6 +127,15 @@
 				} else { 
 
 					alertify.notify(data.message, "custom");
+
+					if (successAction === "destroy") { 
+						$("#"+targetId).remove();
+					}
+
+					if (successAction === "refresh" || successAction === "reload") { 
+						window.location.reload();
+					}
+
 
 				}
 
