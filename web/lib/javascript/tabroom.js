@@ -26,18 +26,66 @@
 	}
 
 
+/* master toggle for checkboxes */
+
+	function confirmAll(master, targetClass) { 
+
+		if ($(master).prop("checked") === false) { 
+			$("."+targetClass).prop("checked", false);
+		} else { 
+			$("."+targetClass).prop("checked", true);
+		}
+	}
+
+
 /* Respond to switch calls */
+
+	function postEnter(e, checkObject, replyUrl) { 
+
+		if (e.keyCode == 13) { 
+			postSwitch(checkObject, replyUrl);
+			return false;
+		}
+
+		return true;
+
+	}
+
+	function postConfirm(alertMessage, checkObject, replyUrl) { 
+
+		alertify.confirm(alertMessage, function(e) { 
+	
+			if (e) { 
+				postSwitch(checkObject, replyUrl);
+				return;
+			} else {
+				return;
+			}
+
+		});
+
+		return;
+	}
 
 	function postSwitch(checkObject, replyUrl) { 
 
-		var targetId     = $(checkObject).attr("target_id");
-		var propertyName = $(checkObject).attr("property_name");
-		var settingName  = $(checkObject).attr("setting_name");
+		var targetId      = $(checkObject).attr("target_id");
+		var propertyName  = $(checkObject).attr("property_name");
+		var settingName   = $(checkObject).attr("setting_name");
 		var successAction = $(checkObject).attr("on_success");
-
-		console.log("Target "+targetId+" and property "+propertyName);
-
+		var replyTarget   = $(checkObject).attr("reply_target");
+		var replyAppend   = $(checkObject).attr("reply_append");
+		var newParent     = $(checkObject).attr("new_parent");
 		var propertyValue = checkObject.value;
+
+		var otherObject = $(checkObject).attr("other_value");
+
+		var otherValue;
+
+		if (otherObject) { 
+			otherValue = $("#"+otherObject).val();
+			$("#"+otherObject).val("");
+		}
 
 		if (propertyValue === undefined) { 
 			propertyValue = $(checkObject).attr("value");
@@ -56,28 +104,69 @@
 				target_id      : targetId,
 				property_name  : propertyName,
 				setting_name   : settingName,
-				property_value : propertyValue
+				property_value : propertyValue,
+				other_value    : otherValue
 			},
 			success : function(data) {
-
-
-				if (successAction === "destroy") { 
-					$("#"+targetId).remove();
-				}
 
 				$('table').trigger('applyWidgets');
 
 				if (data.reply) { 
+					
+					if (replyTarget) { 
+						$("#"+replyTarget).text(data.reply);
+					}
+
+					if (replyAppend) { 
+						$("#"+replyAppend).append(data.reply);
+					}
+
 					$(".replybucket").text(data.reply);
+					$(".replyappend").append(data.reply);
 				}
+
 
 				if (data.error) { 
 
 					alertify.error(data.message);
 					
-				} else { 
+				} else if (data.message) { 
 
 					alertify.notify(data.message, "custom");
+
+					if (successAction === "destroy") { 
+						$("#"+targetId).remove();
+					}
+
+					if (successAction === "refresh" || successAction === "reload") { 
+						window.location.reload();
+					}
+
+					if (newParent) { 
+						$("#"+targetId).prependTo("#"+newParent);
+						$('table').trigger('applyWidgets');
+					}
+
+					if (data.replace) { 
+
+						data.replace.forEach( function(item) { 
+
+							if (item.destroy) { 
+								$("#"+item.id).remove();
+								$('table').trigger('applyWidgets');
+							} else if (item.content) { 
+								$("#"+item.id).html(item.content);
+							}
+						});
+
+					}
+					
+
+				} else { 
+
+					console.log(data);
+
+					alertify.warning("An error condition was tripped.");
 
 				}
 

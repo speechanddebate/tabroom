@@ -2,6 +2,7 @@
 	$tourn
 	$tourn_settings
 	$person
+	$check       => undef
 	$event_id    => undef
 	$chosen_id   => undef
 	$category_id => undef
@@ -34,6 +35,7 @@
 	my $dbh = Tab::NSDA::NationalsDBI->db_Main();
 
 	my @errors;
+	my %mismatches = ();
 
 	# abbr2.  Fuck me. 
 
@@ -107,10 +109,15 @@
 
 	my $entry_sth = $dbh->prepare('
 		select es.entry_id, es.event_id, es.school_id, es.student_id, es.partner_id,
-			ee.district_id
-		from entry_slots es, eligible_entries ee
+			ee.district_id, ee.auto_qual, em.entry_Code
+
+		from (entry_slots es, eligible_entries ee)
+
+		left join entry_mdb em 
+			on em.entry_alt_id = es.entry_id 
 		where es.tourn_id = ? 
 		and es.entry_id = ee.eligible_id
+		group by es.entry_id
 		order by event_id, entry_id
 	');
 
@@ -118,7 +125,9 @@
 
 	while( 
 		my (
-			$entry_id, $event_id, $school_id, $student_id, $partner_id, $district_id
+			$entry_id, $event_id, $school_id, 
+				$student_id, $partner_id, $district_id, 
+				$auto_qual, $entry_code
 		) 
 		= $entry_sth->fetchrow_array() 
 	) { 
@@ -129,11 +138,13 @@
 
 		$entries{$entry_id}{"school"} = $school_id;
 		$entries{$entry_id}{"district"} = $district_id;
+		$entries{$entry_id}{"auto_qual"} = $auto_qual;
+
+		$entries{$entry_id}{"code"} = $entry_code;
 
 		# This is dumb too
 		push @{$entries{$entry_id}{"students"}}, $student_id if $student_id;
 		push @{$entries{$entry_id}{"students"}}, $partner_id if $partner_id;
-
 		push @{$events{$event_id}{"entries"}}, $entry_id;
 
 	}
@@ -206,14 +217,17 @@
 			judge.judge_id, judge.school_id, judge.ualt_id,                      
 			judge.rounds, judge.cd_pref, judge.parli_ok, judge.conflicts,                     
 			judge.nfl_type, judge.name,
+			jm.judge_Title,
 			person.ufname, person.umname, person.ulname, person.uemail,
 			ifnull((SELECT max(diamonds) FROM nfl.NEW_USERS_TO_DEGREES nd                      
-				inner join nfl.degree_levels dl                          
-					ON nd.degree_id  = dl.degree_id                      
-					WHERE ualt_id = judge.ualt_id ),0) as diamonds                     
-				from judges judge                     
-				left join nfl.NEW_USERS person on person.ualt_id = judge.ualt_id                     
-				and judge.tourn_id = ?
+
+			inner join nfl.degree_levels dl                          
+				ON nd.degree_id  = dl.degree_id                      
+				WHERE ualt_id = judge.ualt_id ),0) as diamonds                     
+			from judges judge                     
+			left join nfl.NEW_USERS person on person.ualt_id = judge.ualt_id                     
+			left join judge_mdb jm on jm.judge_alt_ID = judge.judge_id 
+			and judge.tourn_id = ?
 	');
 
 	$judges_sth->execute($nats_tourn_id);
@@ -223,6 +237,7 @@
 			$judge_id, $school_id, $ualt_id,                      
 			$rounds, $congress_plz, $parli, $conflicts,                     
 			$nfl_type, $name,
+			$code,
 			$first, $middle, $last, $email,
 			$diamonds
 		) 
@@ -241,6 +256,7 @@
 			$middle = join (' ', @names);
 		}
 
+		$judges{$judge_id}{"code"} = $code;
 		$judges{$judge_id}{"email"} = $email;
 		$judges{$judge_id}{"first"} = $first;
 		$judges{$judge_id}{"middle"} = $middle;
@@ -258,6 +274,8 @@
 
 		push @{$categories{$nfl_type}{"judges"}}, $judge_id;
 
+		$judges{$judge_id}{"nfl_type"} = $nfl_type;
+
 		$categories{$nfl_type}{"count"}++;
 
 	}
@@ -271,7 +289,8 @@
 				ac.coach2_id, coach2.ufname, coach2.umname, coach2.ulname,
 				ac.coach3_id, coach3.ufname, coach3.umname, coach3.ulname
 		from entry_slots es
-		inner join award_coaches ac on (ac.student_id = es.student_id or es.partner_id = ac.student_id)
+		inner join award_coaches ac 
+			on (ac.student_id = es.student_id or es.partner_id = ac.student_id)
 		left join points.NEW_USERS as coach1 on coach1.ualt_id = ac.coach1_id
 		left join points.NEW_USERS as coach2 on coach2.ualt_id = ac.coach2_id
 		left join points.NEW_USERS as coach3 on coach3.ualt_id = ac.coach3_id
@@ -317,12 +336,12 @@
 
 			my $points_code = $events{$chosen_id}{"nsda_points_code"};
 
-			my $category = Tab::NSDA::EventCategory->search(
+			my $event_category = Tab::NSDA::EventCategory->search(
 				type => "s",
 				code => $points_code
 			)->first;
 
-			$event->setting("nsda_event_category", $category->id) if $category;
+			$event->setting("nsda_event_category", $event_category->id) if $event_category;
 
 		} elsif ($event->type eq "congress") { 
 
@@ -332,12 +351,12 @@
 			
 			my $points_code = $events{$chosen_id}{"nsda_points_code"};
 
-			my $category = Tab::NSDA::EventCategory->search(
+			my $event_category = Tab::NSDA::EventCategory->search(
 				type => "d",
 				code => $points_code
 			)->first;
 
-			$event->setting("nsda_event_category", $category->id) if $category;
+			$event->setting("nsda_event_category", $event_category->id) if $event_category;
 		}
 
 		my %settings = $m->comp(
@@ -347,7 +366,7 @@
 				value => 1
 		);
 
-		my %already_nsda_id = map {$settings{$_->id}{"nsda_id"} => $_} $event->entries;
+		my %already_nsda_id = map {$settings{$_->id}{"nsda_id"} => $_} $event->entries( unconfirmed => 0);
 
 		$coaches_sth->execute($chosen_id);
 
@@ -365,21 +384,35 @@
 
 			next unless $student_id && $entry_id;
 
-			$entries{$entry_id}{"points_coach"} = $coach1_id if $coach1_id;
+			$entries{$entry_id}{"points_coach"} = $coach1_id 
+				if $coach1_id;
 
-			push @{$entries{$entry_id}{"coaches"}}, $coach1_id if $coach1_id;
-			push @{$entries{$entry_id}{"coaches"}}, $coach2_id if $coach2_id;
-			push @{$entries{$entry_id}{"coaches"}}, $coach3_id if $coach3_id;
+			push @{$entries{$entry_id}{"coaches"}}, $coach1_id 
+				if $coach1_id;
+
+			push @{$entries{$entry_id}{"coaches"}}, $coach2_id 
+				if $coach2_id;
+
+			push @{$entries{$entry_id}{"coaches"}}, $coach3_id 
+				if $coach3_id;
 
 			$coaches{"for"}{$student_id} = $coach1_id;
 
-			$coaches{$coach1_id}{"name"} = $coach1_first." ".$coach1_middle." ".$coach1_last if $coach1_id;
+			# This is yet another merry hell of bullshit. 
+
+			$coaches{$coach1_id}{"name"} = $coach1_first." ".$coach1_middle." ".$coach1_last 
+				if $coach1_id;
+
 			$coaches{$coach1_id}{"name"} =~ s/  / /g;
 
-			$coaches{$coach2_id}{"name"} = $coach2_first." ".$coach2_middle." ".$coach2_last if $coach2_id;
+			$coaches{$coach2_id}{"name"} = $coach2_first." ".$coach2_middle." ".$coach2_last 
+				if $coach2_id;
+
 			$coaches{$coach2_id}{"name"} =~ s/  / /g;
 
-			$coaches{$coach3_id}{"name"} = $coach3_first." ".$coach3_middle." ".$coach3_last if $coach3_id;
+			$coaches{$coach3_id}{"name"} = $coach3_first." ".$coach3_middle." ".$coach3_last 
+				if $coach3_id;
+
 			$coaches{$coach3_id}{"name"} =~ s/  / /g;
 
 		}
@@ -391,18 +424,32 @@
 			my $counter;
 
 			foreach my $nsda_entry (@{$events{$chosen_id}{"entries"}}) { 
+					
+				my $code = $entries{$nsda_entry}{"code"};
 
 				$counter++;
+
+				my $entry;
+
+				my %students = ();
 		
 				if ($already_nsda_id{$nsda_entry}) { 
 
-					$m->print("<span class='third'>".$counter.". Entry $nsda_entry exists.  Updating.</span>");
+					$m->print("<span class='third'>");
+
+					$m->print($counter.". $nsda_entry ($code) exists.  Syncing.</span>");
+
 					$m->flush_buffer();
 
 					my $already = $already_nsda_id{$nsda_entry};
 
-					$already->dropped(0);
-					$already->update();
+					unless ($already->dropped) { 
+
+						$already->dropped(0);
+						$already->setting("dropped_at", "date", $now);
+						$already->update();
+
+					}
 
 					$dont_drop_plz{$nsda_entry}++;
 
@@ -418,6 +465,9 @@
 						$coach_names .= $coaches{$coach_id}{"name"};
 
 					}
+
+					$already->setting("auto_qual", 1) 
+						if $entries{$nsda_entry}{"auto_qual"};
 
 					$already->setting("nsda_awards_coaches", $coach_ids);
 
@@ -447,10 +497,10 @@
 
 						my $student = $ares{$del};
 
-						my $es = Tab::EntryStudent->create({
+						my $es = Tab::EntryStudent->search(
 							entry   => $already->id,
 							student => $student->id
-						});
+						)->first;
 
 						$es->delete() if $es;
 
@@ -465,20 +515,22 @@
 
 						unless ($student) { 
 
-							my $nsda_student = $m->comp("/funclib/nsda_student.mas", 
-								ualt_id => $add
+							my $nsda_student = $m->comp(
+								"/funclib/nsda_student.mas", 
+									ualt_id => $add
 							);
 
 							if ($nsda_student) { 
 
-								$student = $m->comp("/funclib/student_import.mas",
+								$student = $m->comp(
+									"/funclib/student_import.mas",
 									nsda_student => $nsda_student,
 									chapter      => $already->school->chapter->id
 								);
 
 							}
 
-						}
+						} 
 
 						if ($student) { 
 
@@ -495,9 +547,12 @@
 
 					}
 
+					$entry = $already;
+
 				} else { 
 					
-					$m->print("<span class='third'>".$counter.". Importing new entry $nsda_entry.</span>");
+					$m->print("<span class='third'>");
+					$m->print($counter.". Importing new entry $nsda_entry.</span>");
 					$m->flush_buffer();
 
 					my $nsda_school_id = $entries{$nsda_entry}{"school"};
@@ -580,12 +635,14 @@
 
 							unless ($student) { 
 
-								my $nsda_student = $m->comp("/funclib/nsda_student.mas", 
+								my $nsda_student = $m->comp(
+									"/funclib/nsda_student.mas", 
 									ualt_id => $ualt_id
 								);
 
 								if ($nsda_student) { 
-									$student = $m->comp("/funclib/student_import.mas",
+									$student = $m->comp(
+										"/funclib/student_import.mas",
 										nsda_student => $nsda_student,
 										chapter      => $chapter
 									);
@@ -618,7 +675,7 @@
 
 							}
 
-							my $entry = Tab::Entry->create({
+							$entry = Tab::Entry->create({
 								tourn       => $tourn->id,
 								event       => $event->id,
 								school      => $school->id,
@@ -630,6 +687,7 @@
 							});
 
 							$entry->setting("nsda_id", $nsda_entry);
+							$entry->setting("auto_qual", 1) if $entries{$nsda_entry}{"auto_qual"};
 							$entry->setting("nsda_awards_coaches", $coach_ids);
 							$entry->setting("nsda_awards_coach_names", "text", $coach_names);
 							$entry->setting("nsda_points_coach", $entries{$nsda_entry}{"points_coach"});
@@ -656,6 +714,51 @@
 
 				}
 
+				if ($code
+					&& ($code ne $entry->code)
+				) { 
+
+					my $past_codes = $entry->setting('past_codes');
+					$past_codes .= ",".$entry->code;
+					$entry->setting('past_codes', $past_codes);
+
+					$entry->code($code);
+					$entry->update();
+
+				}
+
+
+				if ($check && $entry) { 
+
+					foreach my $student ($entry->students) {
+
+						my $ualt_id = $student->ualt_id;
+
+						my $nsda_student = $m->comp(
+							"/funclib/nsda_student.mas", 
+								ualt_id => $ualt_id
+						);
+
+						if (
+							$student->first ne $nsda_student->ufname
+							|| $student->last ne $nsda_student->ulname
+						) { 
+
+							$mismatches{$ualt_id} = '<span class="quarter">';
+							$mismatches{$ualt_id} .= " Tabroom: ".$student->first." ".$student->last;
+							$mismatches{$ualt_id} .= '</span>';
+							$mismatches{$ualt_id} .= '<span class="eighth">';
+							$mismatches{$ualt_id} .= " vs ";
+							$mismatches{$ualt_id} .= '</span>';
+							$mismatches{$ualt_id} .= '<span class="quarter">';
+							$mismatches{$ualt_id} .= $nsda_student->ufname." ".$nsda_student->ulname;
+							$mismatches{$ualt_id} .= '</span>';
+						}
+
+					}
+
+				}
+
 			}
 
 		} else { 
@@ -665,6 +768,8 @@
 			TEAM:
 			foreach my $team_key (@{$events{$chosen_id}{"entries"}}) { 
 
+				my $entry;
+
 				my $district_id = $entries{$team_key}{"district"};
 
 				my $district = Tab::District->retrieve($district_id);
@@ -673,6 +778,14 @@
 					push @errors, "District id $district_id not found.";
 					next TEAM;
 				}
+
+				Tab::School->set_sql(district_state => "
+					select dist_state 
+						from points.NEW_DISTRICTS
+						where NEW_DISTRICTS.dist_id = ? 
+				");
+
+				my $state = Tab::School->sql_district_state->select_val($district->id);
 
 				my @students = @{$entries{$team_key}{"students"}};
 
@@ -688,29 +801,36 @@
 						code     => $district->code,
 						tourn    => $tourn->id,
 						chapter  => 0,
-						state    => substr($district->location, 0, 2),
 						district => $district->id
 					});
-
 				}
 
 				if ($school) { 
 
-					my @entries = Tab::Entry->search(
-						school => $school->id,
-						event  => $chosen_id,
-					);
+					$school->setting('state', $state);
+	
+					$entry = $already_nsda_id{$team_key};
 
-					my $entry;
+					undef $entry if $entry &&  $entry->school->id != $school->id;
 
-					foreach my $candidate (@entries) { 
-						$entry = $candidate if $candidate->setting("nsda_id") == $team_key;
+					unless ($entry) { 
+
+						my @entries = Tab::Entry->search(
+							school => $school->id,
+							event  => $event->id
+						);
+
+						foreach my $candidate (@entries) { 
+							$entry = $candidate if $candidate->setting("nsda_id") eq $team_key;
+						}
+
 					}
 
 					if ($entry) { 
+
 						$dont_drop_plz{$team_key}++;
 					
-						$m->print("<span class='third'>$team_key exists. Updating.</span>");
+						$m->print("<span class='third'>$team_key exists as ".$entry->code.". Updating.");
 						$m->flush_buffer();
 
 						$entry->dropped(0);
@@ -719,7 +839,8 @@
 
 					unless ($entry) { 
 
-						$m->print("<span class='third'>Entry $team_key is new.  Importing.</span>");
+						$m->print("<span class='third'>Entry $team_key is new.  Importing.");
+
 						$m->flush_buffer();
 
 						$entry = Tab::Entry->create({
@@ -737,29 +858,40 @@
 
 					}
 
+					my $count;
+					my $count_did;
+
 					if ($entry) { 
 
+						$entry->setting("nsda_id", $team_key);
+
 						my @students = $entry->students;
-					
+
 						my %shoulds = map {$_ => 1} @{$entries{$team_key}{"students"}};
+
+						$count = scalar (keys %shoulds);
 
 						my %done = ();
 
 						foreach my $student (@students) { 
 
-							unless ($shoulds{$student->ualt_id}) { 
+							if (
+								$shoulds{$student->ualt_id}
+								&& $student->chapter->nsda == $entries{$team_key}{"student_school"}{$student->ualt_id}
+							) { 
+
+								$done{$student->ualt_id} = $student;
+								$student->setting('nsda_coach', $coaches{"for"}{$student->ualt_id});
+
+							} else { 
 
 								my $es = Tab::EntryStudent->search({
 									student => $student->id,
-									entry => $entry->id
+									entry   => $entry->id
 								})->first;
 
 								$es->delete();
 
-							} else { 
-
-								$done{$student->ualt_id} = $student;
-								$student->setting('nsda_coach', $coaches{"for"}{$student->ualt_id});
 							}
 
 						}
@@ -768,9 +900,18 @@
 
 							next if $done{$should};
 
-							my $student = Tab::Student->search(
-								ualt_id => $should
-							)->first;
+							my @students = Tab::Student->search(
+								ualt_id => $should,
+							);
+
+							my $student;
+
+							foreach my $other (@students) { 
+								next 
+									unless $other->chapter->nsda == $entries{$team_key}{"student_school"}{$should};
+								$student = $other;
+								last if $student;
+							}
 
 							unless ($student) { 
 
@@ -778,6 +919,7 @@
 									"/funclib/nsda_student.mas",
 									ualt_id => $should
 								);
+
 
 								my $nsda_school_id = $nsda_student->school_id;
 
@@ -805,7 +947,8 @@
 									# whole student roster, so try this again
 
 									$student = Tab::Student->search(
-										ualt_id => $should
+										ualt_id => $should,
+										chapter => $chapter->id
 									)->first;
 
 									# But dreams are often broken
@@ -826,7 +969,7 @@
 
 								}
 
-							}
+							} 
 
 							if ($student) { 
 
@@ -841,7 +984,35 @@
 
 						}
 
+						if ($check && $entry) { 
+
+							foreach my $student ($entry->students) {
+
+								my $ualt_id = $student->ualt_id;
+
+								my $nsda_student = $m->comp(
+									"/funclib/nsda_student.mas", 
+										ualt_id => $ualt_id
+								);
+
+								if (
+									$student->first ne $nsda_student->ufname
+									|| $student->last ne $nsda_student->ulname
+								) { 
+
+									$mismatches{$ualt_id} = " Tabroom: ".$student->first." ".$student->last;
+									$mismatches{$ualt_id} .= "vs NSDA: ";
+									$mismatches{$ualt_id} .= $nsda_student->ufname." ".$nsda_student->ulname;
+								}
+
+							}
+
+						}
+
+
 					}
+
+					$m->print($count." students wanted, ".scalar $entry->students." in </span>");
 
 				} else { 
 
@@ -858,6 +1029,8 @@
 			next if $dont_drop_plz{$nsda_key};
 
 			my $entry = $already_nsda_id{$nsda_key};
+
+			next unless $entry->active;
 
 			push @errors, "Team $nsda_key (".$entry->code." ".$entry->name.") is no longer registered.  Dropping!";
 
@@ -889,11 +1062,6 @@
 				person => $person
 			);
 
-			$m->comp("entry_recode_save.mhtml",
-				event_id => $event->id,
-				return   => 1
-			);
-
 		}
 
 	}
@@ -902,7 +1070,15 @@
 
 		my $category = Tab::Category->retrieve($category_id);
 
-		$m->print("<h5>Importing judges into ".$category->name." from ".$categories{$chosen_id}{"name"}." </h5>");
+		if ($chosen_id eq "NotA" && $ARGS{"pref_congress"}) { 
+
+			$m->print("<h5>Importing entries who preferred congress into ".$category->name."</h5>");
+
+		} else { 
+
+			$m->print("<h5>Importing judges into ".$category->name." from ".$categories{$chosen_id}{"name"}." </h5>");
+
+		}
 
 		$m->flush_buffer();
 
@@ -914,11 +1090,25 @@
 
 		my %already_judge = 
 			map { $judge_settings{$_->id}{"nsda_id"} => $_} 
-			$category->judges( tmp => $chosen_id );
+			$category->judges;
 
 		my %dont_drop_plz = ();
+		my $counter;
 
-		foreach my $judge_id (@{$categories{$chosen_id}{"judges"}}) {
+		my @candidate_judges = @{$categories{$chosen_id}{"judges"}}
+			if $categories{$chosen_id}{"judges"};
+
+		@candidate_judges = keys %judges
+			if $chosen_id eq "NotA" 
+			&& $ARGS{"pref_congress"};
+
+		foreach my $judge_id (@candidate_judges) { 
+					
+			next if $ARGS{"pref_congress"} && $judges{$judge_id}{"preferred"} ne "Y";
+
+			if ($chosen_id eq "NotA") { 
+				next if $judges{$judge_id}{"nfl_type"} eq "A";
+			}
 
 			my $nsda_school_id = $judges{$judge_id}{"school"};
 
@@ -1078,10 +1268,11 @@
 			my $judge;
 
 			$judge = $already_judge{$judge_id};
+			$counter++;
 
 			if ($judge) { 
 				
-				$m->print("<span class='third'>Judge $judge_id exists.  Updating.</span>");
+				$m->print("<span class='third'>$counter. Judge $judge_id exists in ".$judges{$judge_id}{"nfl_type"}.".  Updating.</span>");
 				$m->flush_buffer();
 
 				$dont_drop_plz{$judge_id}++;
@@ -1120,7 +1311,7 @@
 
 			} else { 
 			
-				$m->print("<span class='third'>Importing judge $judge_id</span>");
+				$m->print("<span class='third'>$counter. Importing judge $judge_id</span>");
 				$m->flush_buffer();
 
 				if ($school) { 
@@ -1135,7 +1326,7 @@
 							middle        => $chapter_judge->middle,
 							last          => $chapter_judge->last,
 							chapter_judge => $chapter_judge->id,
-							tmp           => $chosen_id,
+							tmp           => $judges{$judge_id}{"nfl_type"},
 							active        => 1
 						});
 
@@ -1151,7 +1342,7 @@
 							first    => $judges{$judge_id}{"first"},
 							middle   => $judges{$judge_id}{"middle"},
 							last     => $judges{$judge_id}{"last"},
-							tmp      => $chosen_id,
+							tmp      => $judges{$judge_id}{"nfl_type"},
 							active   => 1
 						});
 
@@ -1169,15 +1360,32 @@
 				# Fucking hell we could do a real judge pooling system for
 				# some reason?
 
-				#Y/N booleans is an atrocity.  Fuck everything
+				# Y/N booleans is an atrocity.  Fuck everything
 
-				if ($judges{$judge_id}{"preferred"} eq "Y") { 
-					$judge->setting("prefers_congress", 1);
-				} else { 
-					$judge->setting("prefers_congress", 0);
+				if ($category->setting('ask_parli')) { 
+					if ($judges{$judge_id}{"preferred"} eq "Y") { 
+						$judge->setting("prefers_congress", 1);
+					} else { 
+						$judge->setting("prefers_congress", 0);
+						$judge->active(0);
+					}
+				}
+
+				if ($ARGS{"pref_congress"}) { 
+					if ($judges{$judge_id}{"preferred"} ne "Y") { 
+						$judge->active(0);
+					}
+				}
+
+				if ($chosen_id eq "NotA") { 
+
+					if ($judges{$judge_id}{"nfl_type"} eq "A") { 
+						$judge->active(0);
+					}
 				}
 
 				my $notes = $judges{$judge_id}{"notes"};
+
 				$judge->setting("notes", "text", $notes) if $notes;
 
 				if ($judges{$judge_id}{"parli"} eq "Y") { 
@@ -1186,8 +1394,11 @@
 					$judge->setting("parli", 0);
 				}
 
-				$judge->setting("diamonds", $judges{$judge_id}{"diamonds"});
+				if ($email && (not defined $person)) { 
+					$judge->setting("email", $email);
+				}
 
+				$judge->setting("diamonds", $judges{$judge_id}{"diamonds"});
 				$judge->setting("real_school", $nsda_school->school_name);
 
 				my $rounds = $judges{$judge_id}{"rounds"};
@@ -1199,7 +1410,10 @@
 					$judge->person($person);
 				}
 
-				$judge->tmp($chosen_id);
+				$judge->tmp($judges{$judge_id}{"nfl_type"});
+
+				$judge->code($judges{$judge_id}{"code"})
+					if $judges{$judge_id}{"code"};
 
 				$judge->update();
 
@@ -1214,7 +1428,12 @@
 		foreach my $judge_id (keys %already_judge) { 
 
 			next if $dont_drop_plz{$judge_id};
+
 			my $judge = $already_judge{$judge_id};
+
+			if ($chosen_id ne "NotA") { 
+				next unless $judge->tmp eq $chosen_id;
+			}
 
 			push @errors, "Judge $judge_id ".$judge->first." ".$judge->last. " is no longer registered.  Marking inactive!";
 			
@@ -1223,7 +1442,7 @@
 				$judge->active(0);
 				$judge->update();
 
-				my $mark = "Judge removed from Nats database.  Dropped ".Tab::xmldt($now)." by ".$person->email;
+				my $mark = "Judge removed from Nats database.  Marked inactive".Tab::xmldt($now)." by ".$person->email;
 				$judge->setting("special_job", "text", $mark);
 
 				my $change = Tab::ChangeLog->create({
@@ -1254,6 +1473,25 @@
 
 %		}
 
+%		if ($check) { 
+
+			<h4>Name mismatches</h4>
+
+%			foreach my $ualt_id (sort keys %mismatches) { 
+				
+				<div class="full row marverno">
+					<span class="quarter nospace">
+						<% $ualt_id %>
+					</span>
+
+					<% $mismatches{$ualt_id} %>
+
+				</div>
+%			}
+
+
+%		}
+
 		<h4>Import entries into Nationals</h4>
 
 %		foreach my $event ($tourn->events) { 
@@ -1269,27 +1507,38 @@
 				value = "<% $event->id %>"
 			>
 
+			<input 
+				name  = "check"
+				type  = "hidden"
+				value = "<% $check %>"
+			>
+
 			<div class="row full marno">
 
-				<span class="quarter">
-					<% $event->name %>:
+				<span class="third">
+					<% $event->name %>
 				</span>
 
 				<span class="fifth">
 					<% scalar $event->entries(active => 1) %> active
 				</span>
 
-				<span class="fourtenths">
+				<span class="third">
 
 					<select 
 						name  = "chosen_id"
-						class = "fixedbig"
+						class = "fixedmed"
 					>
 						<option value=""></option>
 
-%						my @event_keys = sort {$events{$a}{"name"} cmp $events{$b}{"name"}} keys %events;
+<%perl>
 
-%						foreach my $nsda_event_id (@event_keys) { 
+						my @event_keys = 
+							sort {$events{$a}{"name"} cmp $events{$b}{"name"}} 
+							keys %events;
+
+						foreach my $nsda_event_id (@event_keys) { 
+</%perl>
 							<option value="<% $nsda_event_id %>" 
 								><% $events{$nsda_event_id}{"name"}." (".$events{$nsda_event_id}{"count"}.")" %></option>
 %						}
@@ -1329,18 +1578,29 @@
 			<div class="row full marno">
 
 				<span class="quarter">
-					<% $category->name %>:
+					<% $category->name %>
 				</span>
 
-				<span class="fifth">
+				<span class="sixth">
 					<% scalar $category->judges(active => 1) %> in Tabroom
 				</span>
 
-				<span class="fourtenths">
+				<label for="pref_congress_<% $category->id %>">
+					<span class="nospace fifth centeralign hover">
+						Pref Congress?
+						<input 
+							type  = "checkbox"
+							value = "1"
+							name  = "pref_congress"
+							id    = "pref_congress_<% $category->id %>"
+						>
+					</span>
+				</label>
 
+				<span class="threetenths">
 					<select 
 						name  = "chosen_id"
-						class = "fixedbig"
+						class = "fixedmed"
 					>
 						<option value=""></option>
 
@@ -1354,6 +1614,8 @@
 									$categories{$nsda_category_code}{"count"}.")" 
 								%></option>
 %						}
+
+						<option value="NotA">Any except Policy</option>
 
 					</select>
 				</span>

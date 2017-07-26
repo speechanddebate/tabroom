@@ -1,0 +1,305 @@
+<%args>
+	$tourn_id
+	$person_id
+	$session_id
+	$include_rooms => undef	
+</%args>
+
+<%init>
+
+unless ($tourn_id && $person_id && $session_id) {
+	my $err = "Tournament restore aborted because essential information is missing";
+	$m->redirect("/setup/tourn/main.mhtml?msg=$err");
+}
+
+########################################################################################
+#		read local JSON file into a hash that goes { table }{ record }{ field }
+#		HERE'S THE DEAL: When it's downloaded, each record is listed by the original tabroom ID, and
+#		every record ALSO has a redundant sub-field that stores the same information.
+#		So I'm gonna write one chunk of code to sync up the tabroom ID numbers in the
+#		redundant field, and then a second chunk of code to write that back to the database
+#########################################################################################
+
+		#### STEP ONE: Load in the file
+		#### This finds the file 
+
+use strict;
+use warnings;
+use Data::Dumper; 
+binmode STDOUT, ":utf8";
+use utf8;
+use DateTime;
+use Time::HiRes qw( time );
+my $start = time(); 
+
+my $tourn = Tab::Tourn->retrieve($tourn_id);
+my $person = Tab::Person->retrieve($person_id);
+my $session = Tab::Session->retrieve($session_id);
+
+my $tz = $tourn->tz if $tourn->tz;
+$tz = "UTC" unless $tz;
+	
+my $dbh = Tab::DBI->db_Main();
+use JSON;
+use Encode qw(encode_utf8);
+
+#upload sequence
+my $now = DateTime->now;
+$now->set_time_zone($tz);
+my $req = Apache2::Request->new($r, DISABLE_UPLOADS => 0);
+my $json_file = $req->upload('json_data');
+unless ($json_file) { print $r." Couldn't find file<br>"; $m->abort };
+my $json_filename = $json_file->tempname;
+my $filename = $json_filename;
+
+		#### This reads the file and converts the JSON to a hash called %data ###
+		
+my $json;
+#my $filename = '/www/tabroom/web/register/data/NSDA.json';
+
+{
+  local $/; #Enable 'slurp' mode
+  open my $fh, "<", $filename;
+  $json = <$fh>;
+  close $fh;
+}
+
+my $HashReferenceDecoded = decode_json($json);
+my %data = %$HashReferenceDecoded;
+
+print "Time to load JSON file into a hash:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+#set up some global utility variables
+my $sql;
+my $ctr = 0;
+my $matched;
+my $new_rec;
+my $comparisons;
+my $skip_for_now;
+my %table_updated;
+my $sth = $dbh;
+
+		### erase SCORE field from panel and judge in the $data hash -- they are just temporary things and don't need to be restored
+		### This is just random cleanup
+
+foreach my $rec (sort keys %{ $data{'judge'} } ) {
+	delete $data{'judge'}{$rec}{'score'};
+}
+foreach my $rec (sort keys %{ $data{'panel'} } ) {
+	delete $data{'panel'}{$rec}{'score'};
+}
+
+		#### STEP TWO: Delete the whole tourney
+
+$m->comp("delete_tourn.mas", session => $session, include_rooms => $include_rooms, tourn => $tourn, person => $person);
+print "Time to complete deletion:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+	#### STEP THREE: match schools to existing chapters and students to existing students, schools/chapters first		
+
+#match schools to chapters
+foreach my $rec (sort keys %{ $data{'school'}}) {
+	$sql = "Select id, name from chapter WHERE name='".$data{'school'}{$rec}{'name'}."'" ;
+	$sql = $sql . " AND district=".$data{'school'}{$rec}{'district'} if $data{'school'}{$rec}{'district'} ;
+	my $sth = $dbh->prepare( $sql );
+	$sth->execute();
+	$matched=0;
+	while (my ($chapter_id, $chapter_name)  = $sth->fetchrow_array() ) {
+		#print "matched school ".$data{'school'}{$rec}{'name'}." with chapter $chapter_name<br>";
+		$matched = $chapter_id;
+	}
+	#print "NO match for ".$data{'school'}{$rec}{'name'}."<br>" if $matched==0;
+	$sql = 'INSERT INTO school (name, chapter, district, tourn) VALUES ( ?, ?, ?, ? )' ;
+	$sth = $dbh->prepare( $sql );
+	$sth->execute( $data{'school'}{$rec}{'name'}, $matched, $data{'school'}{$rec}{'district'}, $tourn_id );
+	#Now grab the current id and store it in the hash
+	$data{'school'}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+	$data{'school'}{$rec}{'chapter'} = $matched;
+	#print $rec." updated to ".$data{'school'}{$rec}{'id'}."<br>";
+}
+print "Time to match schools:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+#print "<br>STUDENTS<BR><BR>";
+
+#match students in local hash to students in master database
+my $school_dummy;
+my $chpt_dummy;
+my $entry_dummy;
+foreach my $rec (sort keys %{ $data{'student'}}) {
+	#This is to find the chapter; loop through entry_student until you find the student
+	$entry_dummy = 0;
+	$chpt_dummy = 0;
+	foreach my $rec2 (sort keys %{ $data{'entry_student'}} ) {
+		if ( $data{'entry_student'}{$rec2}{'student'} == $rec ) {
+			$entry_dummy = $data{'entry_student'}{$rec2}{'entry'};
+			last;
+		}
+	}
+	my $school_dummy = $data{'entry'}{$entry_dummy}{'school'};
+	my $chpt_dummy = $data{'school'}{$school_dummy}{'chapter'};
+	
+	$sql = "Select id from student WHERE first=? and last=?";
+	$sql = $sql . " AND chapter=".$chpt_dummy if $chpt_dummy ;
+	my $sth = $dbh->prepare( $sql );
+	$sth->execute($data{'student'}{$rec}{'first'}, $data{'student'}{$rec}{'last'});
+	$matched=0;
+	while (my ($id)  = $sth->fetchrow_array() ) {
+		#print "matched student ".$data{'student'}{$rec}{'last'}." with student $id and chapter=$chpt_dummy<br>";
+		$matched = $id ;
+	}
+
+	$data{'student'}{$rec}{'id'} = $matched if $matched ;
+	unless ( $matched ) {
+		$sql = 'INSERT INTO student (first, last, chapter) VALUES ( ?, ?, ? )' ;
+		$sth = $dbh->prepare( $sql );
+		$sth->execute( $data{'student'}{$rec}{'first'}, $data{'student'}{$rec}{'last'}, $chpt_dummy );
+		$data{'student'}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+		#print $rec." ".$data{'student'}{$rec}{'last'}." updated to ".$data{'student'}{$rec}{'id'}." with an INSERT<br>";
+	}
+}
+print "Time to match students:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+		#### STEP FOUR: Insert the records you want to restore in to the database
+		#### Now scroll through the hash, add the records to the database, and store the new
+		#### id numbers in $data{$table}{$rec}{'id'}
+
+my $field_name;
+my $field_str;
+my $counter_counts;
+my $all_updated;
+
+#these are already matched so no new insert
+$table_updated{'student'} = 1;
+$table_updated{'school'} = 1;
+$table_updated{'district'} = 1; #not matched, just don't update it
+$table_updated{'room'} = 1 unless $include_rooms; 
+
+delete $data{'region'};
+delete $data{'region_fine'};
+delete $data{'circuit'};
+delete $data{'site'};
+delete $data{'chapter'};
+delete $data{'district'};
+delete $data{'person'};
+delete $data{'student'};
+delete $data{'tourn'};
+delete $data{'room'} unless $include_rooms;
+
+while ( $counter_counts < 5 ) {
+	
+	$counter_counts++;
+	print "<br><br>PASS NUMBER $counter_counts<br><br>";
+	my $all_updated=1;
+	foreach my $table (sort keys %data) {
+		if ( $table_updated{$table} == 0 ) {
+			$all_updated=0;
+		}
+	}
+	print "All updated!" if $all_updated;
+	last if $all_updated;
+	
+	foreach my $table (sort keys %data) {
+	
+		next if $table_updated{$table};
+			
+		foreach my $rec (sort keys %{ $data{$table} }) {
+
+				#don't do the insert if this depend on another table that needs inserting first
+				$skip_for_now = 0;
+				foreach my $field (sort keys %{ $data{$table}{$rec} }) {
+					if ( $data{$field} && $table_updated{$field} == 0 ) {
+						print $table." depends on another table called ".$field." that has not yet been updated<br>";
+						$skip_for_now = 1;
+					}
+				}
+				last if $skip_for_now;
+	
+				$ctr=0;
+				my @field_values;
+				foreach my $field (sort keys %{ $data{$table}{$rec} }) {
+					if ($field ne 'id') {
+						if ( $ctr == 0 ) {
+							$field_name = $field ;
+							$field_str = "?" ;
+						} else {
+							$field_name = $field_name.", ".$field;
+							$field_str = $field_str.", ?" ;
+						}
+						$field_values[$ctr] = $data{$table}{$rec}{$field};
+						unless ( $table eq 'score' && $field eq 'tiebreak' ) {
+							$field_values[$ctr] = $data{$field}{ $data{$table}{$rec}{$field} }{'id'} if $data{$field} && $data{$table}{$rec}{$field} ;
+							if ( $table eq 'score' && $field eq 'tiebreak' ) { print "Why the hell are you here?<br>"; }
+						}
+						if ($table eq 'strike' && $field eq 'strike_timeslot' ) {
+							$field_values[$ctr] = $data{'timeslot'}{ $data{$table}{$rec}{$field} }{'id'};
+						}
+						#I have no idea why I have to do this but it catches null values
+						if ($table eq 'rating_tier' && $field eq 'strike') { 
+							$field_values[$ctr] = 0 unless $field_values[$ctr];
+						}
+						$field_values[$ctr] = $tourn_id if $field eq 'tourn' ;
+						$ctr++;
+					}
+				}
+				
+				$sql = 'INSERT INTO '.$table.' ('.$field_name.') VALUES ('.$field_str.')' ;
+				my $sth = $dbh->prepare( $sql );
+				$sth->execute(@field_values);
+				#Now grab the current id and store it in the hash
+				$data{$table}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+				if ( $table eq 'flying_unicorns' ) {
+					print $sql;
+					foreach my $fld_val (@field_values) {
+						print " ".$fld_val;
+					}
+					print "<br>";
+				}
+				$table_updated{$table} = 1;
+		}
+		print "$table updated=".$table_updated{$table}."<br>";
+	}
+}
+
+print "Time to create records:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+#clean up the speaker tiebreak settings
+foreach my $rec (sort keys %{ $data{'event_setting'} }) {
+	if ( $data{'event_setting'}{$rec}{'tag'} eq 'speaker_tbset' ) {
+		$sql = 'UPDATE event_setting SET value ='.$data{'tiebreak_set'}{ $data{'event_setting'}{$rec}{'value'} }{'id'}.' WHERE id='.$data{'event_setting'}{$rec}{'id'} ; 
+		my $sth = $dbh->prepare( $sql ) ;
+		$sth->execute();
+		print $sql."<br>";
+	}
+}
+print "Time to update speaker tiebreak sets:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+#clean up times on timeslot strikes
+foreach my $rec (sort keys %{ $data{'strike'} }) {
+	if ( $data{'strike'}{$rec}{'strike_timeslot'}  ) {
+		$sql = "UPDATE strike SET type ='time' WHERE id=".$data{'strike'}{$rec}{'id'} ;
+		my $sth = $dbh->prepare( $sql ) ;
+		$sth->execute();
+		$sql = "UPDATE strike SET start ='".$data{'timeslot'}{ $data{'strike'}{$rec}{'strike_timeslot'} }{'start'}."' WHERE id=".$data{'strike'}{$rec}{'id'} ;
+		$sth = $dbh->prepare( $sql ) ;
+		$sth->execute();
+		$sql = "UPDATE strike SET end ='".$data{'timeslot'}{ $data{'strike'}{$rec}{'strike_timeslot'} }{'end'}."' WHERE id=".$data{'strike'}{$rec}{'id'} ; 
+		$sth = $dbh->prepare( $sql ) ;
+		$sth->execute();
+	}
+}
+print "Time to update times in timeslot_strikes:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+print "And now we're done!";
+
+my $err = "tourn ". $tourn->name ." has been completely deleted and from a backup (restored using the non-native backup function) by ".$person->first." ".$person->last;
+
+my $change = Tab::ChangeLog->create({
+    tourn       => $tourn->id,
+    person      => $person->id,
+    type        => "tabbing",
+    description => $err
+
+}); 
+
+$m->redirect("/setup/tourn/main.mhtml?msg=Data restored");
+
+</%init>
