@@ -507,6 +507,7 @@ create view tabapi.follower
 		judge_id,
 		entry_id,
 		school_id,
+		student_id,
 		person_id,
 		timestamp)
 as select
@@ -520,6 +521,7 @@ as select
 		judge,
 		entry,
 		school,
+		student,
 		person,
 		timestamp
 from tabroom.follower;

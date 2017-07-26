@@ -4,6 +4,7 @@
 	$person
 	$round_id
 	$parlis => undef
+	$return => undef
 </%args>
 <%init>
 
@@ -12,25 +13,26 @@
 	my $round = Tab::Round->retrieve($round_id);
 
 	unless ($round) { 
-		$m->comp("/funclib/abort.mas", err => "No such round found");
+		$m->comp(
+			"/funclib/abort.mas", 
+			err => "No round found for ID $round_id"
+		);
 	}
 
-	my %round_settings = $round->all_settings;
-
 	my $event = $round->event;
-	my %event_settings = $event->all_settings();
-
 	my $category = $event->category;
+
+	my %round_settings = $round->all_settings;
+	my %event_settings = $event->all_settings();
 	my %category_settings = $category->all_settings();
 
 	my @panels = sort {$a->letter <=> $b->letter} $round->panels;
+
 	@panels = sort {$b->bracket <=> $a->bracket} @panels;
 
 	my $num_judges = $round_settings{"num_judges"};
 	$num_judges = 1 unless $num_judges;
 	$num_judges = 1 if $parlis == 1;
-
-	$num_judges-- if $num_judges > 1 && $parlis == 2;
 
 	my $num_flights = $round->flighted;
 	$num_flights = 1 unless $num_flights;
@@ -41,6 +43,45 @@
 		round        => $round,
 		erase_chairs => $parlis,
 	);
+
+	my %panels_by_letter = ();
+
+	my $last_round;
+
+	if (
+		$parlis == 1 
+		&& ($round->type eq "prelim"
+			|| ($tourn_settings->{"nsda_nats"}
+			   && $round->type eq "elim"
+				)
+			)
+	) { 
+
+		foreach my $oround ($event->rounds(type => $round->type)) {
+
+			my $didit;
+
+			foreach my $panel ($oround->panels) {
+				push @{$panels_by_letter{$panel->letter}}, $panel;
+				$didit++;
+			}
+
+			if ($didit) { 
+				$m->comp( 
+					"/funclib/round_clear_judges.mas", 
+					round        => $oround,
+					erase_chairs => $parlis,
+				);
+			}
+
+			$last_round = $oround 
+				unless $last_round;
+
+			$last_round = $oround 
+				if $oround->name > $last_round->name;
+
+		}
+	}
 
 	my $description = "Reassigned the judges in round ".$round->realname." of ".$event->abbr;
 
@@ -71,8 +112,10 @@
 
 			@{$panel_judges{$panel->id}} = $m->comp(
 				"/funclib/clean_judges.mas", 
-				panel => $panel,
-				wudc  => "true"
+				panel             => $panel,
+				wudc              => "true",
+				event_settings    => \%event_settings,
+				category_settings => \%category_settings,
 			);
 
 			@{$panel_already_judges{$panel->id}} = $m->comp(
@@ -217,8 +260,11 @@
 
 			my @judges = $m->comp(
 				"/funclib/clean_judges.mas", 
-					panel => $panel,
-					mass  => "yes"
+					panel             => $panel,
+					mass              => "yes",
+					event_settings    => \%event_settings,
+					category_settings => \%category_settings,
+					parlis            => $parlis
 			);
 
 			@{$panel_judges{$panel->id}} = @judges;
@@ -279,8 +325,6 @@
 			# will go and get them, but then scorers will be drawn first from
 			# non-parlis so as not to absorb them all where not needed.
 
-			@judges = sort {$judge_settings{$a}{"parli"} <=> $judge_settings{$b}{"parli"}} @judges;
-
 			foreach my $judge (@judges) { 
 
 				next if $done{"J-".$judge->id};
@@ -322,13 +366,13 @@
 
 			my $flight_number = 1;
 
-			foreach my $flight (@flights) { 
+			foreach my $chamber (@flights) { 
 
-				$flight->flight($flight_number);
-				$flight->update;
+				$chamber->flight($flight_number);
+				$chamber->update;
 				$flight_number++;
 
-				$done{"flight"}{$flight->id}++;
+				$done{"flight"}{$chamber->id}++;
 
 				foreach my $judge (@judge_panel) { 
 
@@ -347,12 +391,31 @@
 
 					$done{$panel->id}{"parli_done"}++;
 
-					$m->comp(
-						"/funclib/panel_judgeadd.mas", 
-						panel => $flight,
-						judge => $judge,
-						chair => $chair
-					) if $judge;
+					if ($parlis && $chair) { 
+
+						foreach my $ochamber (@{$panels_by_letter{$chamber->letter}}) { 
+
+							my $audited++ if $ochamber->round->id != $last_round->id;
+
+							$m->comp(
+								"/funclib/panel_judgeadd.mas", 
+								panel => $ochamber,
+								judge => $judge,
+								chair => $chair,
+								done  => $audited
+							) if $judge;
+						} 
+
+					} else { 
+						
+						$m->comp(
+							"/funclib/panel_judgeadd.mas", 
+							panel => $chamber,
+							judge => $judge,
+							chair => $chair
+						) if $judge;
+
+					}
 
 					$done{"J-".$judge->id}++;
 				}
@@ -363,7 +426,9 @@
 
 
 	my $msg = "Judges have been assigned";
-	$msg = "Parliamentarians have been assigned" if $parlis == 1;
+	$msg = "Parliamentarians have been assigned in all rounds" if $parlis == 1;
+
+	return $msg if $return;
 
 	$m->redirect("/panel/schemat/show.mhtml?round_id=$round_id&disp=1&msg=$msg");
 

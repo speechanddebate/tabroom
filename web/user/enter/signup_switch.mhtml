@@ -1,0 +1,222 @@
+<%args>
+	$person
+	$target_id     => undef
+	$property_name => undef
+	$other_value   => undef
+</%args>
+<%init>
+
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	unless ($target_id) { 
+		$m->print('{ 
+			"error": true, 
+			"message": "No entry ID sent"
+		}');
+		$m->abort();
+	}
+
+	my $entry = Tab::Entry->retrieve($target_id);
+
+	my $msg = "No action specified so none performed";
+
+	unless ($entry) { 
+		$m->print('{ 
+			"error": true, 
+			"message": "No entry found for ID '.$target_id.'"
+		}');
+		$m->abort();
+	}
+
+	# Check if the students are eligible without double entry constraints
+
+	my $student_err; 
+
+	foreach my $student ($entry->students) { 
+
+		my %ok_events = $m->comp(
+			"/funclib/student_clear_events.mas", 
+				student => $student,
+				school  => $entry->school
+		);
+
+		unless ($ok_events{$entry->event->id}) { 
+
+			$student_err .=  $student->first." ".$student->last." is not eligible ";
+			$student_err .= "to enter in ".$entry->event->name." due to double ";
+			$student_err .= "entry restrictions ";
+			
+		}
+
+	}
+
+	if ($student_err) { 
+
+		$m->print('{ 
+			"error": true, 
+			"message": "'.$student_err.'"
+		}');
+
+		$m->abort();
+	}
+
+	my $created_at = DateTime->now();
+	my $transfer_id;
+
+	my @replace;
+
+	if ($property_name eq "transfer") { 
+
+		my $transfer_target = Tab::Entry->retrieve($other_value);
+		$transfer_id = $other_value if $transfer_target;
+
+		unless ($transfer_target) { 
+			$m->print('{ 
+				"error"   : true,
+				"message" : "No entry found for transfer ID '.$other_value.'"
+			}');
+			$m->abort();
+		}
+
+		unless ($transfer_target->event == $entry->event) { 
+			$m->print('{ 
+				"error"   : true,
+				"message" : "Transfer target is in a different event"}'
+			);
+			$m->abort();
+
+		}
+
+		$entry->unconfirmed(0);
+		$entry->waitlist($transfer_target->waitlist);
+		$entry->created_at($transfer_target->created_at);
+		$created_at = $transfer_target->created_at;
+		$entry->update();
+
+		$entry->setting("registered_by", $person->id);
+		$msg = $entry->code." given ".$transfer_target->code." slot";
+
+		$transfer_target->delete();
+
+
+	}  elsif ($property_name eq "register") { 
+
+		# Check if the event is in waitlist land
+		my $waitlist_status = $m->comp(
+			"/funclib/waitlist_status.mas",
+				event  => $entry->event,
+				school => $entry->school
+		);
+
+		$entry->unconfirmed(0);
+		if ($waitlist_status) { 
+			$entry->waitlist(1);
+		} else { 
+			$entry->waitlist(0);
+		}
+
+
+		$entry->created_at($created_at);
+		$entry->setting("registered_by", $person->id);
+
+		$entry->update();
+
+		$msg = $entry->code." registered into this tournament";
+
+	} elsif ($property_name eq "reject") { 
+
+		$entry->unconfirmed(2);
+		$entry->setting("registered_by", $person->id);
+		$entry->update();
+
+		$msg = $entry->code."'s entry rejected";
+
+	} elsif ($property_name eq "unreject") { 
+
+		$entry->unconfirmed(1);
+		$entry->setting("registered_by", 0);
+		$entry->update();
+
+		$msg = $entry->code."'s entry unrejected";
+
+	}
+
+
+	my $status = "<span class='full centeralign inline semibold greentext'>REGISTERED</span>";
+
+	$status = "<span class='full centeralign inline semibold orangetext'>WAITLIST</span>"
+		if $entry->waitlist;
+
+	@replace = ( 
+		{ 
+			id      => $entry->id."_signup_at",
+			content => $created_at->month."/".$created_at->day." ".Tab::nicetime($created_at)
+		}
+	);
+	
+	if ($property_name eq "reject") { 
+
+		my $undo_button = "
+			<a
+				class         = 'orangetext buttonwhite fa fa-sm fa-arrow-up'
+				value         = '1'
+				id            = '".$entry->id."' 
+				target_id     = '".$entry->id."' 
+				setting_name  = 'signup_active'
+				property_name = 'unreject'
+				on_success    = 'refresh'
+				onClick       = 'postSwitch( this, \"signup_switch.mhtml\");'
+			></a>
+		";
+
+		$undo_button =~ s/\R/ /g;
+		$undo_button =~ s/\t/ /g;
+
+		push @replace, (
+			{ 
+				id      => $entry->id."_status",
+				content => $person->first." ".$person->last
+			}, { 
+				id      => $entry->id."_checkbox",
+				content => $undo_button
+			}, { 
+				id      => $entry->id."_rejectbox",
+				destroy => 1
+			}
+		);
+
+	} else { 
+	
+		push @replace, (
+			{ 
+				id      => $entry->id."_signup_by",
+				content => $person->first." ".$person->last
+			}, { 
+				id      => $entry->id."_checkbox",
+				destroy => 1
+			}, { 
+				id      => $entry->id."_status",
+				content => $status
+			}, { 
+				id      => $entry->id."_rejectbox",
+				destroy => 1
+			}, { 
+				id      => $transfer_id,
+				destroy => 1
+			}
+		);
+
+	}
+
+	my %response = ( 
+		error   => 0,
+		message => $msg,
+		replace => \@replace
+	);
+
+	$m->print(JSON::encode_json(\%response));
+
+	$m->abort();
+
+</%init>

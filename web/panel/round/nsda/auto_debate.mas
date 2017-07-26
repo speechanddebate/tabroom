@@ -1,4 +1,6 @@
 <%args>
+	$tourn
+	$tourn_settings
 	$round
 	$person
 	$limit_to
@@ -9,8 +11,6 @@
 
 	my $event = $round->event;
 	my %event_settings = $event->all_settings;
-
-	my $tourn = $event->tourn;
 
 	logMe("Round paired by ".$person->email.": ".$person->first." ".$person->last);
 
@@ -26,39 +26,64 @@
 
 	my $ref = pop @results if @results;
 
-	my %entries = %{$ref};
+	my %entries = %{$ref} if $ref;
+
+	my $no_brackets;
+
+	if ($tourn_settings->{"nsda_nats"}) { 
+		$no_brackets++ if $previous_round->type eq "prelim";
+	}
 
 	# Get the number of qualifiers for the little dance at the end
+
 	my ($total_quals, $alternates, $total_entries) = 
 		$m->comp("/funclib/nsda_qualifier_count.mas", event => $event);
+
+	$total_quals = 2 if $tourn_settings->{"nsda_nats"};
 
 	# Acquire the relevant opponent data
 
 	my $dbh = Tab::DBI->db_Main();
 
-	my $scores = ({
-		bracket => "1000000000000",
-		school  => "1000000000",
-		repeat  => "1000000",
-		side    => "1000"
-	});
+	my %scores = (
+		bracket  => "1000000000000000",
+		school   => "1000000000000",
+		repeat   => "1000000000",
+		state    => "1000000",
+		side     => "1000",
+		district => "10"
+	);
 
-	$entries{"scores"} = $scores;
-	$entries{"scores"}{"side"} = 0 if $event_settings{"no_side_constraints"};
+	undef $scores{"state"} 
+		if $round->name >= $event_settings{"state_constraint_threshold"};
+
+	$entries{"scores"}{"side"} = 0 
+		if $event_settings{"no_side_constraints"};
+
+	$entries{"scores"} = \%scores;
 
 	my %entry_losses = $m->comp(
 		"/funclib/entry_losses.mas", 
-		event => $event, 
+		event => $event,
 		round => $previous_round
 	);
 
 	my @outs; 
 
+	my %round_schools =
+		map {$_->id => $_} 
+		$m->comp( "/funclib/round_schools.mas", round => $previous_round)
+		if $tourn_settings->{"nsda_nats"};
+
 	KEY:
-	foreach my $key (sort {$a <=> $b} keys %{$entries{"by_place"}}) {
+	foreach my $key (
+		sort {$a <=> $b} keys %{$entries{"by_place"}}
+	) {
 
 		ENTRY:
 		foreach my $entry_id (@{${$entries{"by_place"}}{$key}}) {
+
+			my $school_id = $entries{"school_id"}{$entry_id};
 				
 			if (scalar (keys %{$entries{"unpaired"}}) >= $limit_to ) { 
 
@@ -68,12 +93,25 @@
 
 			$entries{"unpaired"}{$entry_id}++;
 
-			$entries{"school_size"}{$entries{"school_id"}{$entry_id}}++;
+			$entries{"school_size"}{$school_id}++;
 			
 			my $losses = $entries{"tiebreak"}{1}{$entry_id};
 
+			$losses = 0 if $no_brackets;
+
 			push @{$entries{"brackets"}{$losses}}, $entry_id;
+
 			$entries{$entry_id}{"losses"} = $losses;
+		
+			if ($tourn_settings->{"nsda_nats"} && $school_id) { 
+			
+				$entries{"district"}{$entry_id} = 
+					$round_schools{$school_id}->districtcode;
+
+				$entries{"state"}{$entry_id} = 
+					$round_schools{$school_id}->state;
+
+			}
 
 		}
 
@@ -419,6 +457,15 @@
 						push @bye_eligible, $entry_id;
 					
 					}
+
+					unless (@bye_eligible) { 
+						foreach my $entry_id (@{$entries{"brackets"}{0}}) { 
+
+							next if $entries{$entry_id}{"byes"};
+							push @bye_eligible, $entry_id;
+						
+						}
+					}
 				}
 
 				my $eligibles;
@@ -488,6 +535,8 @@
 				my $notfirst;
 
 				foreach my $opponent (keys %{$entries{"unpaired"}}) { 
+
+					next if $opponent == $entry;
 
 					# Me on the aff
 					unless ($entries{"scores"}{$entry}{$opponent})  { 
@@ -634,7 +683,8 @@
 				my $score = $entries{"scores"}{$entry}{$opp} if $entry_side == 1;
 				$score = $entries{"scores"}{$opp}{$entry} if $entry_side == 2;
 
-				logMe($entries{"code"}{$entry}." debates ".$entries{"code"}{$opp}." on ".$entry_side." with score $score");
+				logMe($entries{"code"}{$entry}." debates ".$entries{"code"}{$opp}.
+					" on ".$entry_side." with score $score");
 
 			}
 
@@ -642,7 +692,7 @@
 
 			# Do swapping to ensure the best overall scoring of pairings 
 
-			foreach my $pass ( 1 .. 100) { 
+			foreach my $pass ( 1 .. 200) { 
 			
 				my $swap_counter; 
 
@@ -659,8 +709,11 @@
 
 					my $entry_opponent_side = $panels{$entry_opponent}{"side"};
 
-					my $entry_baseline = $entries{"scores"}{$entry}{$entry_opponent} if $entry_side == 1;
-					$entry_baseline = $entries{"scores"}{$entry_opponent}{$entry} if $entry_side == 2;
+					my $entry_baseline = $entries{"scores"}{$entry}{$entry_opponent} 
+						if $entry_side == 1;
+
+					$entry_baseline = $entries{"scores"}{$entry_opponent}{$entry} 
+						if $entry_side == 2;
 
 					# Do this because the 0 loss bracket can pull up different debaters
 					# to solve conflicts; but the 1 loss bracket cannot solve conflicts
@@ -685,8 +738,12 @@
 						# How does the candidate score if they go into my spot?
 
 						my $other_swap;
-						$other_swap = $entries{"scores"}{$other}{$entry_opponent} if $entry_side == 1;
-						$other_swap = $entries{"scores"}{$entry_opponent}{$other} if $entry_side == 2;
+
+						$other_swap = $entries{"scores"}{$other}{$entry_opponent} 
+							if $entry_side == 1;
+
+						$other_swap = $entries{"scores"}{$entry_opponent}{$other} 
+							if $entry_side == 2;
 
 						my $entry_swap;
 						my $other_baseline;
@@ -697,11 +754,17 @@
 						
 							my $other_side = $panels{$other}{"side"};
 
-							$other_baseline = $entries{"scores"}{$other}{$other_opponent} if $other_side == 1;
-							$other_baseline = $entries{"scores"}{$other_opponent}{$other} if $other_side == 2;
+							$other_baseline = $entries{"scores"}{$other}{$other_opponent} 
+								if $other_side == 1;
 
-							$entry_swap = $entries{"scores"}{$entry}{$other_opponent} if $entry_side == 1;
-							$entry_swap = $entries{"scores"}{$other_opponent}{$entry} if $entry_side == 2;
+							$other_baseline = $entries{"scores"}{$other_opponent}{$other} 
+								if $other_side == 2;
+
+							$entry_swap = $entries{"scores"}{$entry}{$other_opponent} 
+								if $entry_side == 1;
+
+							$entry_swap = $entries{"scores"}{$other_opponent}{$entry} 
+								if $entry_side == 2;
 
 						} 
 
@@ -795,6 +858,8 @@
 		keys %panels
 	) { 
 
+		next unless $entry;
+
 		next if $done{$entry}++;
 
 	 	next if (
@@ -809,13 +874,15 @@
 
 			my $score = $entries{"scores"}{$entry}{$opp};
 
-			logMe($entries{"code"}{$opp}." aff vs ".$entries{"code"}{$entry}." on neg scores $score");
+			logMe($entries{"code"}{$opp}." aff vs ".$entries{"code"}{$entry}.
+				" on neg scores $score");
 
 		} else { 
 
 			my $score = $entries{"scores"}{$opp}{$entry};
 
-			logMe($entries{"code"}{$entry}." aff vs ".$entries{"code"}{$opp}." on neg scores $score");
+			logMe($entries{"code"}{$entry}." aff vs ".$entries{"code"}{$opp}.
+				" on neg scores $score");
 
 		}
 
@@ -888,15 +955,41 @@
 
 		# Check and penalize school hits
 
-		if ($entries_ref->{"school_id"}{$aff} == $entries_ref->{"school_id"}{$neg}) { 
+		if (
+			$entries_ref->{"school_id"}{$aff} 
+			== $entries_ref->{"school_id"}{$neg}
+		) { 
 
 			$score += $entries_ref->{"scores"}{"school"};
 		}
 
-		$score +=  $entries_ref->{"scores"}{"repeat"} * $entries_ref->{$aff}{"hits"}{$neg};
+		if (
+			$entries_ref->{"district"}{$aff} 
+			== $entries_ref->{"district"}{$neg}
+		) { 
 
-		my $aff_side_diff = $entries_ref->{$aff}{"side_count"}{1} - $entries_ref->{$aff}{"side_count"}{2};
-		my $neg_side_diff = $entries_ref->{$neg}{"side_count"}{2} - $entries_ref->{$neg}{"side_count"}{1};
+			$score += $entries_ref->{"scores"}{"district"};
+		}
+
+		if (
+			$entries_ref->{"state"}{$aff} 
+			eq $entries_ref->{"state"}{$neg}
+		) { 
+
+			$score += $entries_ref->{"scores"}{"state"};
+		}
+
+		$score +=  
+			$entries_ref->{"scores"}{"repeat"} 
+			* $entries_ref->{$aff}{"hits"}{$neg};
+
+		my $aff_side_diff = 
+			$entries_ref->{$aff}{"side_count"}{1}
+			- $entries_ref->{$aff}{"side_count"}{2};
+
+		my $neg_side_diff 
+			= $entries_ref->{$neg}{"side_count"}{2} 
+			- $entries_ref->{$neg}{"side_count"}{1};
 
 		if ($aff_side_diff > 0) { 
 			$score += $entries_ref->{"scores"}{"side"} * $aff_side_diff;
