@@ -98,6 +98,7 @@ db.student.belongsTo(db.person);
 db.student.belongsTo(db.person, {as: "person_request"});
 db.student.belongsToMany(db.entry, {through: 'entry_students'});
 db.student.hasMany(db.score);
+db.student.hasMany(db.follower);
 
 db.region.belongsTo(db.circuit);
 db.region.belongsTo(db.tourn);
@@ -498,6 +499,7 @@ db.follower.belongsTo(db.person, {as: 'follower'});
 db.follower.belongsTo(db.judge);
 db.follower.belongsTo(db.entry);
 db.follower.belongsTo(db.school);
+db.follower.belongsTo(db.student);
 db.follower.belongsTo(db.tourn);
 db.follower.belongsTo(db.person);
 
