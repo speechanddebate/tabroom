@@ -71,6 +71,7 @@
 		var successAction = $(checkObject).attr("on_success");
 		var replyTarget   = $(checkObject).attr("reply_target");
 		var replyAppend   = $(checkObject).attr("reply_append");
+		var newParent     = $(checkObject).attr("new_parent");
 		var propertyValue = checkObject.value;
 
 		var otherObject = $(checkObject).attr("other_value");
@@ -120,11 +121,12 @@
 					$(".replyappend").append(data.reply);
 				}
 
+
 				if (data.error) { 
 
 					alertify.error(data.message);
 					
-				} else { 
+				} else if (data.message) { 
 
 					alertify.notify(data.message, "custom");
 
@@ -136,6 +138,31 @@
 						window.location.reload();
 					}
 
+					if (newParent) { 
+						$("#"+targetId).prependTo("#"+newParent);
+						$('table').trigger('applyWidgets');
+					}
+
+					if (data.replace) { 
+
+						data.replace.forEach( function(item) { 
+
+							if (item.destroy) { 
+								$("#"+item.id).remove();
+								$('table').trigger('applyWidgets');
+							} else if (item.content) { 
+								$("#"+item.id).html(item.content);
+							}
+						});
+
+					}
+					
+
+				} else { 
+
+					console.log(data);
+
+					alertify.warning("An error condition was tripped.");
 
 				}
 
