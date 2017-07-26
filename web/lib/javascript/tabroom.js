@@ -1,13 +1,17 @@
 /* confirmation dialog */
 
-	function confirmAction(link, message) { 
+	function confirmAction(link, message, dest, payload) { 
 
 		alertify.confirm(
 			"Are you sure?",
 			message,
-			function(event) { 
+			function(event) {
 				if (event) { 
-					window.location.href = link.href;
+                    if (typeof(link)==='function' && typeof(dest)!='undef' && typeof(payload)!='undef'){
+                        link(dest,payload);
+                    }else{
+					    window.location.href = link.href;
+                    }
 				}
 			},
 			function(event) { 
@@ -253,7 +257,7 @@ function uploaderName(uploader, filedisplay) {
 /* Registers the ballot entry shortcuts for win/loss */
 
 function autoWin(input,e,aff,neg,affid,negid) {
-
+    if (!(document.getElementById('toggleKeybaordShortcuts') || {}).checked) { return; }
     var keyCode = e.keyCode; 
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
 	var acceptable = ["a","A",1,"p","P","g","G",3,"n","N","c","C","o","O"];
@@ -385,7 +389,7 @@ function autoWin(input,e,aff,neg,affid,negid) {
  * etc */
 
 function autoPoints(input,len,e,side,ratio,nototal,step) {
-
+    if (!(document.getElementById('toggleKeybaordShortcuts') || {}).checked) { return; }
 	var minPoints = $(input).attr("min");
 	var maxPoints = $(input).attr("max");
 	var pointStep = $(input).attr("step");
@@ -609,7 +613,7 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 /* Autoselect which kids are valid speakers for WSDC style debate ballot entry */
 
 function autoSel(input, event) { 
-
+    if (!(document.getElementById('toggleKeybaordShortcuts') || {}).checked) { return; }
     var keyCode = event.keyCode; 
 
 	if (keyCode === 9) {
@@ -638,7 +642,7 @@ function autoSel(input, event) {
 /* Auto advance to next input when entering ballots */
 
 function autoTab(input,len,e) {
-
+    if (!(document.getElementById('toggleKeybaordShortcuts') || {}).checked) { return; }
     var keyCode = e.keyCode; 
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
 
