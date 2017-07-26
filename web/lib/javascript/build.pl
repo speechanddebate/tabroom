@@ -16,13 +16,16 @@ use JavaScript::Minifier qw(minify);
 		'jquery.ui.touch-punch.min.js',
 		'chosen-selects.js',
 		'iphone_switch.js',
-		'jquery.tablesorter.js',
-		'jquery.tablesorter.widgets.js',
+		'jquery.tablesorter.combined.js',
+		'widget-columnSelector.js',
+		'widget-print.js',
+		'widget-output.js',
 		'uniform.min.js',
 		'cycle.js',
 		'alertify.js',
 		'mousetrap.js',
-		'timepicker.js' );
+		'timepicker.js'
+	);
 
 	my $custom_file = "tabroom.js";
 	my $output_file = "tabroom.min.js";

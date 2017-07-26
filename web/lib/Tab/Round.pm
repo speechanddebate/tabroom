@@ -23,12 +23,14 @@ __PACKAGE__->_register_datetimes( qw/created start_time timestamp/);
 sub realname { 
 	my $self = shift;
 	return $self->label if $self->label && $self->label ne $self->name;
+	return "Session ".$self->name if $self->event->type eq "congress";
 	return "Round ".$self->name;
 }
 
 sub shortname { 
 	my $self = shift;
 	return $self->label if $self->label && $self->label ne $self->name;
+	return "Sess ".$self->name if $self->event->type eq "congress";
 	return "Rd ".$self->name;
 }
 

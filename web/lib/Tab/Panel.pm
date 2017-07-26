@@ -4,7 +4,10 @@ Tab::Panel->table('panel');
 Tab::Panel->columns(Primary => qw/id/);
 Tab::Panel->columns(Essential => qw/letter round room flight bye bracket started/);
 Tab::Panel->columns(Others => qw/timestamp confirmed cat_id score room_ext_id g_event invites_sent/);
-Tab::Panel->columns(TEMP => qw/opp pos side entryid judge audit timeslotid roomname eventname judgenum panelsize ada speakerorder/);
+Tab::Panel->columns(TEMP => qw/opp pos side entryid judge audit 
+	timeslotid roomname eventname judgenum 
+	panelsize ada speakerorder
+/);
 
 Tab::Panel->has_a(room => 'Tab::Room');
 Tab::Panel->has_a(round => 'Tab::Round');
