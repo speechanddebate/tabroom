@@ -31,8 +31,8 @@ Object.keys(db).forEach(function(modelName) {
 	}
 });
 
-db.calendar.belongsTo(db.tourn);
-db.calendar.belongsTo(db.person);
+//db.calendar.belongsTo(db.tourn);
+//db.calendar.belongsTo(db.person);
 
 db.change_log.belongsTo(db.person);
 db.change_log.belongsTo(db.tourn);
@@ -113,7 +113,7 @@ db.chapter.belongsToMany(db.region, {through: 'chapter_circuits'});
 
 // Tournament wide relations
 
-db.tourn.hasOne(db.calendar);
+//db.tourn.hasOne(db.calendar);
 
 db.tourn.hasMany(db.change_log);
 db.tourn.hasMany(db.category);
