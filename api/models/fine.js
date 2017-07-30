@@ -18,7 +18,7 @@ module.exports = function(sequelize, DataTypes) {
 		levied_at: { 
 			type: DataTypes.DATE,
 			allowNull: true
-		}
+		},
 		deleted: { 
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
