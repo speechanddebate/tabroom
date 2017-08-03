@@ -389,7 +389,9 @@ function autoWin(input,e,aff,neg,affid,negid) {
  * etc */
 
 function autoPoints(input,len,e,side,ratio,nototal,step) {
+
     if (!(document.getElementById('toggleKeybaordShortcuts') || {}).checked) { return; }
+
 	var minPoints = $(input).attr("min");
 	var maxPoints = $(input).attr("max");
 	var pointStep = $(input).attr("step");
@@ -404,7 +406,17 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 
     var filter = [0,8,16,17,18,37,38,39,40,46];
 
-	if (pointStep === ".1" 
+	if (pointStep === ".5" 
+		&& minPoints > -5 
+		&& maxPoints < 5
+		&& input.value == 5
+	) { 
+
+		input.value = .5;
+		changeFocus(input);
+		totalPoints(side,ratio);
+
+	} else if (pointStep === ".1" 
 		&& minPoints >= 20
 		&& maxPoints == 30
 		&& input.value.length >= 2 
@@ -488,10 +500,10 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 		totalPoints(side,ratio);
 
 	} else if( 
-
 		( input.value.length >= len || keyCode === 9)  
-			&& !containsElement(filter,keyCode) 
-			&& input.value != 10) {
+		&& !containsElement(filter,keyCode) 
+		&& input.value != 10
+	) {
 
 		if (len == 3) { 
 			if (/\.$/.test(input.value)) { 
