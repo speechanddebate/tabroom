@@ -1,32 +1,11 @@
 <%args>
 	$tourn_id
 	$person
+	$disable_previous => undef
 </%args>
 <%init>
 
 	use Math::Round;
-
-	my $tourn = Tab::Tourn->retrieve($tourn_id);
-	my %tourn_settings = $tourn->all_settings;
-
-	my $now = DateTime->now();
-
-	# This should be A for actually posting, N for testing, and X for expired.
-	# I didn't come up with the letter codes, don't blame me. 
-
-	my $status = "A"; 
-
-	if ($person->id != 1 && $tourn_settings{"nsda_points_posted"}) { 
-
-		my $err = $tourn->name."'s NSDA points have already been posted";
-
-		$m->redirect("autopoint.mhtml?tourn_id=$tourn_id&err=$err");
-
-	} elsif ($person->id == 1 && $tourn_settings{"nsda_points_posted"}) { 
-
-		$status = "N";
-	}
-
 	use Tab::NSDA::APT;
 	use Tab::NSDA::EventCategory;
 	use Tab::NSDA::Event;
@@ -41,6 +20,31 @@
 	use Tab::NSDA::AltStudent;
 	use Tab::NSDA::School;
 	use Tab::NSDA::SpeechCategories;
+
+	my $tourn = Tab::Tourn->retrieve($tourn_id);
+	my %tourn_settings = $tourn->all_settings;
+
+	my $now = DateTime->now();
+
+	# This should be A for actually posting, N for testing, and X for expired.
+	# I didn't come up with the letter codes, don't blame me. 
+
+	my $status = "A"; 
+
+	if ($ARGS{"attach"}) { 
+
+		#IGNORE!
+
+	} elsif ($person->id != 1 && $tourn_settings{"nsda_points_posted"}) { 
+
+		my $err = $tourn->name."'s NSDA points have already been posted";
+
+		$m->redirect("autopoint.mhtml?tourn_id=$tourn_id&err=$err");
+
+	} elsif ($person->id == 1 && $tourn_settings{"nsda_points_posted"}) { 
+
+		$status = "N";
+	}
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
@@ -78,10 +82,9 @@
 
     $sth->execute($tourn->id);
 
-	my %entry_nsda = ();
+	my %entry_nsda   = ();
 	my %student_nsda = ();
 	my %student_data = ();
-
 	my %alt_student = ();
 
 	my %chapter_nsda = ();
@@ -195,22 +198,39 @@
 	}
 
 	my %seen = (); 
+
 	@nsda_chapters = grep { ! $seen{$_} ++ } @nsda_chapters;
 
 	if (@nsda_chapters) { 
 
-		my $instance = Tab::NSDA::Instance->create({
-			status     => $status,
-			tourn_id   => $tourn->id,
-			source     => "TR",
-			start_date => $start->year."-".$start->strftime('%m')."-".$start->strftime('%d'),
-			end_date   => $end->year."-".$end->strftime('%m')."-".$end->strftime('%d'),
-			tournament => $tourn->name,
-			location   => $location,
-			state      => $tourn->state,
-			tstamp     => $now,
-			type       => 1
-		});
+		my $instance;
+
+		if ($ARGS{"attach"}) { 
+
+			$instance = Tab::NSDA::Instance->search(
+				tourn_id => $tourn->id,
+				source   => "TR",
+				status   => "A"
+			)->first;
+
+			Tab::debuglog("Existing instance $instance found");
+
+		} else { 
+
+			$instance = Tab::NSDA::Instance->create({
+				status     => $status,
+				tourn_id   => $tourn->id,
+				source     => "TR",
+				start_date => $start->year."-".$start->strftime('%m')."-".$start->strftime('%d'),
+				end_date   => $end->year."-".$end->strftime('%m')."-".$end->strftime('%d'),
+				tournament => $tourn->name,
+				location   => $location,
+				state      => $tourn->state,
+				tstamp     => $now,
+				type       => 1
+			});
+
+		}
 
 		# Replace the use marker with the actual school object.  Only for
 		# schools linked.
@@ -219,20 +239,36 @@
 
 			next unless $chapter_id;
 
-			my $state = $chapter_state{$chapter_id};
-			my $name = $chapter_name{$chapter_id};
+			my $state     = $chapter_state{$chapter_id};
+			my $name      = $chapter_name{$chapter_id};
 			my $school_id = $school_by_chapter{$chapter_id};
 
 			$state = " " unless $state;
 
-			my $nsda_school = Tab::NSDA::School->create({
-				instance_id   => $instance->id,
-				school_id     => $school_id,
-				state         => $state,
-				name          => $name,
-				nfl_school_id => $chapter_id,
-				alt_id        => $school_id
-			});
+			my $nsda_school;
+
+			if ($ARGS{"attach"}) { 
+
+				$nsda_school = Tab::NSDA::School->search( 
+					instance_id   => $instance->id,
+					school_id     => $school_id,
+					nfl_school_id => $chapter_id,
+				)->first;
+
+			}
+
+			unless ($nsda_school) { 
+
+				$nsda_school = Tab::NSDA::School->create({
+					instance_id   => $instance->id,
+					school_id     => $school_id,
+					state         => $state,
+					name          => $name,
+					nfl_school_id => $chapter_id,
+					alt_id        => $school_id
+				});
+
+			}
 
 		}
 
@@ -249,6 +285,15 @@
 			my %student_apts;
 			my %student_entry;
 
+			if ($ARGS{"attach"}) { 
+
+				$nsda_event = Tab::NSDA::Event->search(
+					instance_id   => $instance->id,
+					event_id      => $event->id,
+				)->first;
+
+			}
+
 			if ($event->type eq "congress") { 
 
 				$nsda_cat    = 2;
@@ -260,17 +305,21 @@
 				$points_cap = 30 if $tourn_settings{"nsda_ms_nats"};
 				$points_cap = 314159 if $tourn_settings{"nsda_nats"};
 
-				$nsda_event = Tab::NSDA::Event->create({
-					instance_id   => $instance->id,
-					event_id      => $event->id,
-					type          => "C",
-					size          => 1,
-					name          => $event->name,
-					category      => -1,
-					alt_id        => $event->id,
-					nfl_cat_id    => $nsda_cat,
-					nfl_subcat_id => $nsda_subcat
-				});
+				unless ($nsda_event) { 
+
+					$nsda_event = Tab::NSDA::Event->create({
+						instance_id   => $instance->id,
+						event_id      => $event->id,
+						type          => "C",
+						size          => 1,
+						name          => $event->name,
+						category      => -1,
+						alt_id        => $event->id,
+						nfl_cat_id    => $nsda_cat,
+						nfl_subcat_id => $nsda_subcat
+					});
+
+				}
 
    				my $congress_sth = $dbh->prepare("
 					select distinct student.id, student.ualt_id, 
@@ -281,7 +330,8 @@
 						ballot.id, 
 						round.name,
 						timeslot.start
-					from student, panel, ballot, score, round, timeslot, entry, entry_student, chapter
+					from student, panel, ballot, score, round, 
+						timeslot, entry, entry_student, chapter
 					where round.event = ?
 					and panel.round = round.id  
 					and round.timeslot = timeslot.id
@@ -500,7 +550,7 @@
 					alt_id        => $event->id,
 					nfl_cat_id    => $nsda_cat,
 					nfl_subcat_id => $nsda_subcat
-				});
+				}) unless $nsda_event;
 
 				Tab::Student->set_sql( spoke_in_round => "
 
@@ -671,6 +721,7 @@
 
 							if ($tourn_settings{"nsda_nats"}) { 
 								$win_points = 8 - ($nsda_event_category->national * 2);
+								$win_points = 6 if $event->setting("not_nats");
 								$loss_points = $win_points / 2;
 							}
 
@@ -782,7 +833,6 @@
 				}
 			}
 
-
 			if ($tourn_settings{"nsda_nats"}) { 
 
 				my $tourn_info = $instance->tournament."|".$instance->state;
@@ -814,7 +864,10 @@
 					my $ranks        = 0;
 					my $total_points = 0;
 
-					foreach my $apt (sort {$a->round <=> $b->round} @{$student_apts{$student_id}}) { 
+					foreach my $apt (
+						sort {$a->round <=> $b->round} 
+						@{$student_apts{$student_id}}
+					) { 
 
 						$wins++ if $apt->result eq "W";
 						$losses++ if $apt->result eq "L";
@@ -850,7 +903,11 @@
 						isAutoPost       => 1
 					});
 
-					Tab::NSDA::Points->sql_update_apt->execute($posted_point->point_id, $ualt_id, $event->id);
+					Tab::NSDA::Points->sql_update_apt->execute(
+						$posted_point->point_id,
+						$ualt_id, 
+						$event->id
+					);
 
 				}
 			}
