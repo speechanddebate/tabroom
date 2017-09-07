@@ -5,15 +5,15 @@ Tab::Category->columns(Primary => qw/id/);
 Tab::Category->columns(Essential => qw/tourn name abbr timestamp/);
 
 Tab::Category->has_a(tourn => "Tab::Tourn");
-
-Tab::Category->has_many(jpools => "Tab::JPool", "category");
 Tab::Category->has_many(judges => "Tab::Judge", "category" => { order_by => 'code'} );
-Tab::Category->has_many(events => "Tab::Event", "category");
-Tab::Category->has_many(hires => 'Tab::JudgeHire', 'category');
-Tab::Category->has_many(rating_tiers => "Tab::RatingTier", "category");
-Tab::Category->has_many(strike_timeslots => "Tab::StrikeTimeslot", "category");
-Tab::Category->has_many(settings => "Tab::CategorySetting", "category");
-Tab::Category->has_many(rating_subsets => "Tab::RatingSubset", "category");
+
+Tab::Category->has_many(jpools         => "Tab::JPool"           , "category");
+Tab::Category->has_many(events         => "Tab::Event"           , "category");
+Tab::Category->has_many(hires          => 'Tab::JudgeHire'       , 'category');
+Tab::Category->has_many(rating_tiers   => "Tab::RatingTier"      , "category");
+Tab::Category->has_many(shifts         => "Tab::JudgeShift"      , "category");
+Tab::Category->has_many(settings       => "Tab::CategorySetting" , "category");
+Tab::Category->has_many(rating_subsets => "Tab::RatingSubset"    , "category");
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
