@@ -25,7 +25,6 @@
 
 	}
 
-
 /* master toggle for checkboxes */
 
 	function confirmAll(master, targetClass) { 
@@ -257,7 +256,11 @@ function uploaderName(uploader, filedisplay) {
 /* Registers the ballot entry shortcuts for win/loss */
 
 function autoWin(input,e,aff,neg,affid,negid) {
-    if (!(document.getElementById('toggleKeybaordShortcuts') || {}).checked) { return; }
+
+	if ($("#toggleKeyboardShortcuts").prop("checked") !== false) { 
+		return;
+	}
+
     var keyCode = e.keyCode; 
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
 	var acceptable = ["a","A",1,"p","P","g","G",3,"n","N","c","C","o","O"];
@@ -390,7 +393,10 @@ function autoWin(input,e,aff,neg,affid,negid) {
 
 function autoPoints(input,len,e,side,ratio,nototal,step) {
 
-    if (!(document.getElementById('toggleKeybaordShortcuts') || {}).checked) { return; }
+	if ($("#toggleKeyboardShortcuts").prop("checked") !== false) { 
+		console.log("It's stuck!");
+		return;
+	}
 
 	var minPoints = $(input).attr("min");
 	var maxPoints = $(input).attr("max");
@@ -399,6 +405,7 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 	if (nototal) { 
 		totalPoints = function() { 
 			return;
+			console.log("Yes?");
 		}
 	}
 
@@ -625,7 +632,11 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 /* Autoselect which kids are valid speakers for WSDC style debate ballot entry */
 
 function autoSel(input, event) { 
-    if (!(document.getElementById('toggleKeybaordShortcuts') || {}).checked) { return; }
+
+	if ($("#toggleKeyboardShortcuts").prop("checked") !== false) { 
+		return;
+	}
+
     var keyCode = event.keyCode; 
 
 	if (keyCode === 9) {
@@ -654,8 +665,15 @@ function autoSel(input, event) {
 /* Auto advance to next input when entering ballots */
 
 function autoTab(input,len,e) {
-    if (!(document.getElementById('toggleKeybaordShortcuts') || {}).checked) { return; }
+
+	if ($("#toggleKeyboardShortcuts").prop("checked") === false) { 
+		console.log("Yes?!");
+		console.log($("#toggleKeyboardShortcuts").prop("checked"));
+		return;
+	}
+
     var keyCode = e.keyCode; 
+
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
 
 	if (len == 9 && input.value.length >= 2 && !containsElement(filter,keyCode)) {
@@ -721,7 +739,7 @@ function autoTab(input,len,e) {
         if (len == 2 && input.value != 100) {
             input.value = input.value.slice(0, len);
         }
-    
+
 		changeFocus(input);
     }    
 
