@@ -257,7 +257,7 @@ function uploaderName(uploader, filedisplay) {
 
 function autoWin(input,e,aff,neg,affid,negid) {
 
-	if ($("#toggleKeyboardShortcuts").prop("checked") !== false) { 
+	if ($("#toggleKeyboardShortcuts").prop("checked") === false) { 
 		return;
 	}
 
@@ -393,8 +393,7 @@ function autoWin(input,e,aff,neg,affid,negid) {
 
 function autoPoints(input,len,e,side,ratio,nototal,step) {
 
-	if ($("#toggleKeyboardShortcuts").prop("checked") !== false) { 
-		console.log("It's stuck!");
+	if ($("#toggleKeyboardShortcuts").prop("checked") === false) { 
 		return;
 	}
 
@@ -633,7 +632,7 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 
 function autoSel(input, event) { 
 
-	if ($("#toggleKeyboardShortcuts").prop("checked") !== false) { 
+	if ($("#toggleKeyboardShortcuts").prop("checked") === false) { 
 		return;
 	}
 
@@ -667,8 +666,6 @@ function autoSel(input, event) {
 function autoTab(input,len,e) {
 
 	if ($("#toggleKeyboardShortcuts").prop("checked") === false) { 
-		console.log("Yes?!");
-		console.log($("#toggleKeyboardShortcuts").prop("checked"));
 		return;
 	}
 
