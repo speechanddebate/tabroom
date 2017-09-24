@@ -116,6 +116,7 @@ use Tab::TiebreakSet;
 use Tab::Timeslot;
 use Tab::Tourn;
 use Tab::TournSetting;
+use Tab::TournWeekend;
 use Tab::ChangeLog;
 use Tab::TournCircuit;
 use Tab::TournIgnore;
