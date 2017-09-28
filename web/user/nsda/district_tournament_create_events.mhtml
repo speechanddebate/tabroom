@@ -1,0 +1,697 @@
+<%args>
+	$person
+	$person_settings
+	$district_id => undef
+</%args>
+<%init>
+
+	my $district = Tab::District->retrieve($district_id) if $district_id;
+	$m->abort unless $district;
+
+	my $permission = Tab::Permission->search( 
+		district => $district->id,
+		person   => $person->id 
+	)->first;
+
+	$permission++ if $person->site_admin;
+	$permission++ if $person_settings->{"nsda_admin"};
+
+	unless ($permission) { 
+		$m->print('<div class="main"><h4 class="warning">');
+		$m->print("You do not have access to that district");
+		$m->print('</h4></div>');
+		$m->abort();
+	}
+
+	Tab::Site->set_sql( by_admin => "
+		select site.*
+		from site, tourn_site, permission
+		where site.id = tourn_site.site
+		and tourn_site.tourn = permission.tourn
+		and permission.person = ? 
+	");
+
+	Tab::Site->set_sql( by_membership => "
+		select site.*
+		from site, circuit, chapter_circuit, chapter
+		where site.circuit = circuit.id
+		and circuit.id = chapter_circuit.circuit
+		and chapter_circuit.chapter = chapter.id
+		and chapter.district = ?
+	");
+
+	my @sites = Tab::Site->search_by_admin($person->id);
+
+	push @sites, Tab::Site->search_by_membership($district->id);
+
+	my %seen;
+	@sites = grep { ! $seen{$_->id} ++ } @sites;
+	@sites = sort {$a->name cmp $b->name} @sites;
+
+	my @existing = $m->comp("/funclib/district_tourns.mas", 
+		district => $district
+	);
+
+	my @event_keys = (
+		"HOU",
+		"SEN",
+		"CX",
+		"LD",
+		"PF",
+		"BQ",
+		"DI",
+		"DUO",
+		"HI",
+		"INF",
+		"IX",
+		"OO",
+		"POI",
+		"USX"
+	);
+
+	my $event_ref = {
+
+		"HOU" => { name => "House"  , code => "HOU" , type => "congress" } ,
+		"SEN" => { name => "Senate" , code => "SEN" , type => "congress" } ,
+
+		"CX"  => { name => "Policy"          , code => "CX" , type  => "debate" } ,
+		"LD"  => { name => "Lincoln Douglas" , code => "LD" , type  => "debate" } ,
+		"PF"  => { name => "Public Forum"    , code => "PF" , type  => "debate" } ,
+		"BQ"  => { name => "Big Questions"   , code => "BQ" , type  => "debate" } ,
+
+		"DI"  => { name => "Dramatic Interp"        , code => "DI"  , type => "speech" } ,
+		"DUO" => { name => "Duo Interp"             , code => "DUO" , type => "speech" } ,
+		"HI"  => { name => "Humorous Interp"        , code => "HI"  , type => "speech" } ,
+		"INF" => { name => "Informative Speaking"   , code => "INF" , type => "speech" } ,
+		"IX"  => { name => "International Extemp"   , code => "IX"  , type => "speech" } ,
+		"OO"  => { name => "Original Oratory"       , code => "OO"  , type => "speech" } ,
+		"POI" => { name => "Programmed Oral Interp" , code => "POI" , type => "speech" } ,
+		"USX" => { name => "US Extemp"              , code => "USX" , type => "speech" } 
+	};
+
+	my %events = %{$event_ref};
+
+	my @types = ("congress", "debate", "speech");
+
+	my $tourn_name = $district->name." District Tournament";
+	my $webname = $district->name;
+	$webname =~ s/\([^)]*\)//;
+	$webname =~ s/[\W_]//g;
+
+	my $tz = $ARGS{"tz"};
+	$tz = "America/Chicago" unless $tz;
+
+	my @weekend_hashes;
+
+	my $earliest_start;
+	my $latest_end;
+
+	foreach my $tick (1 .. 4) { 
+
+		my $start_dt;
+		my $end_dt;
+
+		my $start_time = "08:00:00";
+		my $end_time   = "18:00:00";
+
+		eval { 
+			$start_dt = Tab::dtme($ARGS{"start_date_".$tick}, $start_time, $tz);
+			$end_dt = Tab::dtme($ARGS{"end_date_".$tick}, $end_time, $tz);
+		};
+
+
+		if ($ARGS{"name_".$tick} && $start_dt && $end_dt) { 
+
+			my %weekend = ( 
+				name  => $ARGS{"name_".$tick},
+				start => $start_dt,
+				end   => $end_dt
+			);
+
+			push @weekend_hashes, \%weekend;
+
+			$earliest_start = $start_dt->clone() unless $earliest_start;
+			$latest_end = $end_dt->clone() unless $latest_end;
+
+			$earliest_start = $start_dt->clone() if $start_dt < $earliest_start;
+			$latest_end = $end_dt->clone() if $end_dt > $latest_end;
+
+		}
+
+	}
+
+	my $tourn;
+	$tourn = shift @existing if @existing;
+
+	my @weekends;
+	my %event_weekend;
+
+	if ($tourn) { 
+
+		@weekends = $tourn->weekends();
+
+		foreach my $event ($tourn->events) { 
+			$event_weekend{$event->abbr} = $event->setting('weekend');
+		}
+
+	} elsif ($earliest_start && $latest_end) { 
+
+		my $reg_start = $earliest_start->clone();
+		$reg_start->subtract(months => 1);
+
+		my $reg_end = $earliest_start->clone();
+		$reg_end->subtract(days => 7);
+
+		my $state = substr($district->location, 0, 2);
+
+		$tourn = Tab::Tourn->create({
+			name      => $tourn_name,
+			tz        => $tz,
+			start     => $earliest_start,
+			end       => $latest_end,
+			reg_start => $reg_start,
+			reg_end   => $reg_end,
+			webname   => $webname,
+			hidden    => 0,
+			country   => "US",
+			state     => $state
+		});
+
+		$tourn->setting("nsda_district", $district->id);
+
+		$tourn->setting("nsda_speech_method", $ARGS{"nsda_speech_method"});
+		$tourn->setting("nsda_tabbing_software", $ARGS{"nsda_tabbing_software"});
+
+		$tourn->setting("nsda_extemp_topics", $ARGS{"nsda_extemp_topics"});
+		$tourn->setting("nsda_volunteer_trophy", $ARGS{"nsda_volunteer_trophy"});
+		$tourn->setting("nsda_student_trophy", $ARGS{"nsda_student_trophy"});
+		$tourn->setting("nsda_communicator_trophy", $ARGS{"nsda_communicator_trophy"});
+
+		foreach my $weekend (@weekend_hashes) { 
+
+			my $start = $weekend->{'start'};
+			my $end = $weekend->{'end'};
+
+			my $reg_start = $start->clone();
+			$reg_start->subtract(months => 1);
+
+			my $reg_end = $start->clone();
+			$reg_end->subtract(days => 7);
+
+			my $weekend_obj = Tab::TournWeekend->create({
+				name            => $weekend->{"name"},
+				tourn           => $tourn->id,
+				start           => $start,
+				end             => $end,
+				reg_start       => $reg_start,
+				reg_end         => $reg_end,
+				freeze_deadline => $reg_end,
+				drop_deadline   => $reg_end,
+				judge_deadline  => $reg_end,
+				fine_deadline   => $reg_end,
+			});
+
+			push @weekends, $weekend_obj;
+
+		}
+
+	}
+
+</%init>
+
+	<div class="menu">
+	
+	</div>
+
+	<div class="main">
+
+		<h2>Dates &amp; Events</h2>
+
+		<form 
+			action = "district_tournament_save.mhtml"
+			method = "post"
+		>
+
+		<input 
+			type  = "hidden"
+			name  = "district_id"
+			value = "<% $district->id %>"
+		>
+
+<%perl>
+
+		foreach my $weekend (@weekends) { 
+
+			my $start = $weekend->start->set_time_zone($tz);
+			my $end = $weekend->end->set_time_zone($tz);
+			my $reg_start = $weekend->reg_start->set_time_zone($tz);
+			my $reg_end = $weekend->reg_end->set_time_zone($tz);
+			my $freeze_deadline = $weekend->freeze_deadline->set_time_zone($tz);
+			my $drop_deadline = $weekend->drop_deadline->set_time_zone($tz);
+			my $judge_deadline = $weekend->judge_deadline->set_time_zone($tz);
+			my $fine_deadline = $weekend->fine_deadline->set_time_zone($tz);
+
+</%perl>
+
+			
+			<h5 class="bluetext"><% $weekend->name %></h5>
+
+				<div class="nospace full marleft padleft borderbottom padbottommore">
+
+				<div class="row marleft marright">
+					<span class="quarter">
+						Date Set label/name:
+					</span>
+
+					<span class="threequarters rightalign">
+						<input
+							type  = "text"
+							name  = "name_<% $weekend->id %>"
+							size  = "64"
+							value = "<% $weekend ? $weekend->name : ""%>"
+						>
+					</span>
+
+				</div>
+
+%				if ($tourn->setting("nsda_tabbing_software") eq "tabroom") { 
+
+					<div class="row marleft marright">
+
+						<span class="tenth">
+							Host Site
+						</span>
+
+						<span class="fourtenths rightalign">
+							<select 
+								name  = "site_<% $weekend->id %>"
+								class = "fixedmed"
+							>
+								<option id=""></option>
+%								foreach my $site (@sites) { 
+									<option value="<% $site->id %>"><% $site->name %></option>
+%								}
+							</select>
+						</span>
+
+						<span class="sixth">
+							Or, New Site:
+						</span>
+
+						<span class="threetenths rightalign">
+							<input 
+								type = "text"
+								name = "site_name_<% $weekend->id %>"
+								size = "24"
+							>
+						</span>
+
+					</div>
+%				}
+
+				<div class="row marleft marright">
+
+					<span class="sixth marleft">
+						City/Location
+					</span>
+
+					<span class="third">
+						<input
+						type  = "text"
+							name  = "city_<% $weekend->id %>"
+							size  = "32"
+							value = "<% $weekend ? $weekend->city : ""%>"
+						>
+					</span>
+
+					<span class="sixth marleftmore padleftmore">
+						State
+					</span>
+
+%					my $weekend_state = $weekend->state if $weekend;
+
+					<span class="quarter rightalign">
+
+						<select 
+							name  = "state_<% $weekend->id %>"
+							class = "fixedsmall"
+						>
+
+							<& 
+								"/funclib/state_select.mas", 
+								state => $weekend_state
+							&>
+
+						</select>
+
+					</span>
+
+				</div>
+
+				<h6>Dates &amp; deadlines</h6>
+
+				<span class="pagehalf">
+
+				<& "/funclib/datepicker.mas", id => "start_$weekend->id" &>
+
+					<div class="row">
+
+						<span class="half">
+							Tournament start
+						</span>
+
+						<span class="half">
+							<input 
+								type  = "text"
+								name  = "start"
+								id    = "start_<% $weekend->id %>"
+								size  = "8"
+								value = "<% Tab::pickerdate($start) %>"
+							>
+								at
+							<& "/funclib/timepicker.mas",
+								id   => "starttime_".$weekend->id,
+								name => "starttime",
+								size => 6,
+								time => $start
+							&>
+						</span>
+
+					</div>
+
+					<& "/funclib/datepicker.mas", id => "end_$weekend->id" &>
+
+					<div class="row">
+
+						<span class="half">
+							Tournament end
+						</span>
+
+						<span class="half">
+							<input 
+								type  = "text"
+								name  = "end"
+								id    = "end_<% $weekend->id %>"
+								size  = "8"
+								value = "<% Tab::pickerdate($end) %>"
+							>
+								at
+							<& "/funclib/timepicker.mas", 
+								id   => "endtime_".$weekend,
+								name => "endtime",
+								size => 6,
+								time => $end
+							&>
+						</span>
+
+					</div>
+
+					<& 
+						"/funclib/datepicker.mas", 
+						id  => "reg_start_$weekend",
+						max => $start 
+					&>
+
+					<div class="row">
+
+						<span class="half">
+							Registration opens
+						</span>
+
+						<span class="half">
+							<input 
+								type  = "text"
+								name  = "reg_start"
+								id    = "reg_start_<% $weekend->id %>"
+								size  = "8"
+								value = "<% Tab::pickerdate($reg_start) %>"
+							>
+								at
+
+							<& "/funclib/timepicker.mas",
+								id   => "reg_starttime_".$weekend,
+								name => "reg_starttime", 
+								size => 6, 
+								time => $reg_start
+							&>
+						</span>
+
+					</div>
+
+					<& "/funclib/datepicker.mas",
+						id  => "reg_end_$weekend",
+						max => $start
+					&>
+
+					<div class="row">
+
+						<span class="half">
+							New entries due
+						</span>
+
+						<span class="half">
+							<input 
+								type  = "text"
+								name  = "reg_end"
+								id    = "reg_end_<% $weekend->id %>"
+								size  = "8"
+								value = "<% Tab::pickerdate($reg_end) %>"
+							>
+								at
+							<& "/funclib/timepicker.mas",
+								id   => "reg_endtime_".$weekend,
+								name => "reg_endtime",
+								size => 6,
+								time => $reg_end 
+							&>
+						</span>
+
+					</div>
+
+				</span>
+
+				<span class="pagehalf">
+
+					<& "/funclib/datepicker.mas",
+						id  => "freeze_deadline_$weekend",
+						max => $start
+					&>
+					
+					<div class="row">
+
+						<span class="half">
+							Fees &amp; Obligations freeze
+						</span>
+
+						<span class="half">
+							<input 
+								type  = "text"
+								name  = "freeze_deadline"
+								id    = "freeze_deadline_<% $weekend->id %>"
+								size  = "8"
+								value = "<% Tab::pickerdate($freeze_deadline) %>"
+							>
+								at
+							<& "/funclib/timepicker.mas",
+								id   => "freeze_deadlinetime_".$weekend,
+								name => "freeze_deadlinetime",
+								size => 6,
+								time => $freeze_deadline
+							&>
+						</span>
+
+					</div>
+
+					<& "/funclib/datepicker.mas",
+						id  => "judge_deadline_$weekend",
+						max => $start
+					&> 
+
+					<div class="row">
+
+						<span class="half">
+							Judge entries due
+						</span>
+
+						<span class="half">
+							<input 
+								type  = "text"
+								name  = "judge_deadline"
+								id    = "judge_deadline_<% $weekend->id %>"
+								size  = "8"
+								value = "<% Tab::pickerdate($judge_deadline) %>"
+							>
+								at
+							<& "/funclib/timepicker.mas", 
+								id   => "judge_deadlinetime_".$weekend,
+								name => "judge_deadlinetime",
+								size => 6,
+								time => $judge_deadline &>
+						</span>
+
+					</div>
+
+					<& "/funclib/datepicker.mas",
+						id  => "drop_deadline_$weekend",
+						max => $start
+					&> 
+
+					<div class="row">
+
+						<span class="half">
+							Online drops &amp; name changes until
+						</span>
+
+						<span class="half">
+							<input 
+								type  = "text"
+								name  = "drop_deadline"
+								id    = "drop_deadline_<% $weekend->id %>"
+								size  = "8"
+								value = "<% Tab::pickerdate($drop_deadline) %>"
+							>
+								at
+							<& "/funclib/timepicker.mas", 
+								id   => "drop_deadlinetime_".$weekend,
+								name => "drop_deadlinetime", 
+								size => 6, 
+								time => $drop_deadline &>
+						</span>
+
+					</div>
+
+					<& "/funclib/datepicker.mas",
+						id  => "fine_deadline_$weekend",
+						max => $start
+					&>
+
+					<div class="row">
+
+						<span class="half">
+							Nuisance fines apply after
+						</span>
+
+						<span class="half">
+							<input 
+								type  = "text"
+								name  = "fine_deadline"
+								id    = "fine_deadline_<% $weekend->id %>"
+								size  = "8"
+								value = "<% Tab::pickerdate($fine_deadline) %>"
+							>
+								at 
+
+							<& 
+								"/funclib/timepicker.mas", 
+								name => "fine_deadlinetime",
+								size => 6,
+								time => $fine_deadline 
+							&>
+						</span>
+
+					</div>
+
+				</span>
+
+			</div>
+
+%		}
+
+		<h4>Events Schedule</h4>
+
+			<div class="row semibold ltyellow">
+
+				<span class="eighth">
+					Event
+				</span>
+
+				<span class="half">
+%					foreach my $weekend (@weekends) { 
+						<span class="fifth centeralign">
+							<% $weekend->start->month."/".$weekend->start->day %>
+						</span>
+%					}
+
+					<span class="fifth centeralign">
+						None
+					</span>
+				</span>
+
+				<span class="threeeighths">
+					Order ballots from the NSDA
+				</span>
+
+			</div>
+
+%		foreach my $event (@event_keys) { 
+
+			<div class="row">
+
+				<span class="eighth">
+					<% $event %>
+				</span>
+
+				<span class="half">
+
+%					foreach my $weekend (@weekends) { 
+						<label for="<% $weekend->id %>_<% $event %>" >
+							<span 
+								class = "fifth hover centeralign"
+								title = "<% $weekend->name %>"
+							>
+								<input 
+									type     = "radio"
+									name     = "<% $event %>"
+									value    = "<% $weekend->id %>"
+									id       = "<% $weekend->id %>_<% $event %>"
+									tabindex = "-1"
+								>
+							</span>
+						</label>
+%					} 
+
+					<label for="nope_<% $event %>">
+						<span 
+							class = "fifth hover centeralign"
+							title = "No Qualifier Held in <% $event %>"
+						>
+							<input 
+								type     = "radio"
+								name     = "<% $event %>"
+								value    = "0"
+								id       = "nope_<% $event %>"
+								checked  = "true"
+							>
+						</span>
+					</label>
+
+				</span>
+
+				<span class="threeeighths">
+					Order
+					<input 
+						type = "number"
+						name = "<% $event %>_ballots"
+						min  = "0"
+						max  = "9999"
+						value= "0"
+					>
+					<% $event %> ballots
+				</span>
+
+			</div>
+
+%		}
+	
+
+		<div class="liblrow rightalign">
+			<input 
+				type  = "submit"
+				value = "Go to Final Step"
+			>
+
+			</form>
+		</div>
+
+	</div>
+
