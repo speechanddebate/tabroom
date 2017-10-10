@@ -143,7 +143,6 @@
 
 					if (newParent) { 
 						$("#"+targetId).prependTo("#"+newParent);
-						$('table').trigger('applyWidgets');
 					}
 
 					if (data.replace) { 
@@ -152,7 +151,6 @@
 
 							if (item.destroy) { 
 								$("#"+item.id).remove();
-								$('table').trigger('applyWidgets');
 							} else if (item.content) { 
 								$("#"+item.id).html(item.content);
 							}
@@ -160,6 +158,7 @@
 
 					}
 					
+					$('table').trigger('applyWidgets');
 
 				} else { 
 
@@ -404,7 +403,6 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 	if (nototal) { 
 		totalPoints = function() { 
 			return;
-			console.log("Yes?");
 		}
 	}
 
