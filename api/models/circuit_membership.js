@@ -16,9 +16,7 @@ module.exports = function(sequelize, DataTypes) {
 			type         : DataTypes.STRING(128),
 			allowNull    : true,
 			defaultValue : '0'
-		},
+		}
 	});
 };
-
-
 

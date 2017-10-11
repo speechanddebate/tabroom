@@ -1144,9 +1144,10 @@ as select
 		timestamp
 from tabroom.stats;
 
-create view tabapi.strike_timeslot
+create view tabapi.shift
 	(id,
 		name,
+		type,
 		fine,
 		start,
 		end,
@@ -1154,13 +1155,14 @@ create view tabapi.strike_timeslot
 		timestamp)
 as select
 	id,
-		fine,
 		name,
+		type,
+		fine,
 		start,
 		end,
 		category,
 		timestamp
-from tabroom.strike_timeslot;
+from tabroom.shift;
 
 create view tabapi.strike
 	(id,
@@ -1175,7 +1177,7 @@ create view tabapi.strike
 		entry_id,
 		school_id,
 		region_id,
-		strike_timeslot_id,
+		shift_id,
 		dioregion_id,
 		timestamp)
 as select
@@ -1191,7 +1193,7 @@ as select
 		entry,
 		school,
 		region,
-		strike_timeslot,
+		shift,
 		dioregion,
 		timestamp
 from tabroom.strike;

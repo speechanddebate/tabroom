@@ -27,7 +27,7 @@ module.exports = function(sequelize, DataTypes) {
 		deleted_at: { 
 			type: DataTypes.DATE,
 			allowNull: true
-		},
+		}
 	});
 };
 

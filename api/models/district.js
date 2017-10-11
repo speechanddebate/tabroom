@@ -22,7 +22,7 @@ module.exports = function(sequelize, DataTypes) {
 		realm: { 
 			type: DataTypes.STRING(8),
 			allowNull: true
-		},
+		}
 	});
 };
 

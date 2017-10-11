@@ -394,11 +394,11 @@ db.strike.belongsTo(db.school);
 db.strike.belongsTo(db.region);
 db.strike.belongsTo(db.timeslot);
 db.strike.belongsTo(db.person, {as: 'entered_by'});
-db.strike.belongsTo(db.strike_timeslot);
+db.strike.belongsTo(db.shift);
 db.strike.hasMany(db.change_log);
 
-db.strike_timeslot.hasMany(db.strike);
-db.strike_timeslot.belongsTo(db.category);
+db.shift.hasMany(db.strike);
+db.shift.belongsTo(db.category);
 
 // Rounds & results
 
