@@ -20,7 +20,7 @@ Tab::Ballot->has_a(hangout_admin => 'Tab::Person');
 Tab::Ballot->has_many(values => 'Tab::Score');
 Tab::Ballot->has_many(scores => 'Tab::Score');
 
-__PACKAGE__->_register_datetimes( qw/timestamp collected/);
+__PACKAGE__->_register_datetimes( qw/timestamp collected judge_started/);
 
 sub account { 
 	my $self = shift;
