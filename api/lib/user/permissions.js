@@ -1,8 +1,8 @@
 
 // This library will create a function whereby a user ID is returned with a
 // tree of active permissions for the user.  Future tournaments, judges, and
-// current student records and chapter records are all covered and returned as a
-// json object to the caller.
+// current student records and chapter records are all covered and returned as
+// a json object to the caller.
 
 // Because I'm learning node LIKE A BOSS, I'm going to return a promise instead
 // of dealing with callback hell.  Or die trying.  
@@ -20,7 +20,7 @@ var BluePromise = require('bluebird');
 		"region.id regionID, region.name regionName, "+
 		"region.circuit_id as regionCircuit, region.archdiocese regionArch, " + 
 		"chapter.id as chapterID, chapter.name chapterName, " + 
-		"tourn.id as tournID, tourn.name tournName, tourn.start, tourn.end " + 
+		"tourn.id as tournId, tourn.name tournName, tourn.start, tourn.end " + 
 		"from permission "+
 		"left join chapter on chapter.id = permission.chapter_id " + 
 		"left join circuit on circuit.id = permission.circuit_id " +
@@ -50,74 +50,102 @@ var BluePromise = require('bluebird');
 		"where chapter.id = student.chapter_id "+
 		"and student.person_id = ";
 
-	module.exports = function(userID, locals) { 
+	module.exports = function(userId, locals, tournId) { 
 
-		return new BluePromise ( function(resolve, reject) { 
+		// Check if the inputs are valid and sane 
 
-			console.log(locals);
+		if (tournId) { 
 
-			db.sequelize.query(kingdomsKeys + userID).spread(
-				function(permissionRows, metadata) { 
+			return new BluePromise ( function(resolve, reject) { 
 
-				var perms = {
-					circuit       : {},
-					region        : {},
-					chapter       : {},
-					tourn         : {},
-					judge         : {},
-					chapter_judge : {},
-					student       : {}
-				},
+				tournQuery = " select permission.id, permission.tag, "+
+				" permission.category_id from permission "+
+				" where permission.tourn_id = "+tournId +
+				" and permission.person_id = "+userId;
 
-				taken = [];
+				db.sequelize.query(tournQuery).spread(
+					function (permissionRows, metadata) { 
+						
+						var tournPerms;
+					
+						permissionRows.forEach( function(row) { 
+							tournPerms[row.tag] = row;
+						});
 
-				permissionRows.forEach( function(row) { 
-
-					switch (row.tag) { 
-
-						case "circuit":
-							perms.circuit[row.circuitID] = row;
-							break;
-						case "region":
-							perms.region[row.regionID] = row;
-							break;
-						case "chapter":
-							perms.chapter[row.chapterID] = row;
-							break;
-						case "chapter_prefs":
-							perms.chapter[row.chapterID] = row;
-							break;
-						case "prefs":
-							perms.chapter[row.chapterID] = row;
-							break;
-						default: 
-							if (row.tournName) { 
-								if (taken[row.tournID] === undefined) {
-									taken[row.tournID] = true;
-								}
-							}
-						break;
+						resolve(tournPerms);
 					}
-				});
+				);
+
+			});
 				
-				db.sequelize.query(judgesQuery + userID).spread(
-					function(judgeRows, metadata) { 
 
-					perms.judges = judgeRows;
+		} else { 
+		
+			return new BluePromise ( function(resolve, reject) { 
 
-					db.sequelize.query(sjQuery + userID).spread(
-						function(sjRows, metadata) { 
+				db.sequelize.query(kingdomsKeys + userId).spread(
+					function(permissionRows, metadata) { 
 
-						perms.chapterJudges = sjRows;
+					var perms = {
+						circuit       : {},
+						region        : {},
+						chapter       : {},
+						tourn         : {},
+						judge         : {},
+						chapter_judge : {},
+						student       : {}
+					},
 
-						db.sequelize.query(studentsQuery + userID).spread(
-							function(studentRows, metadata) { 
+					taken = [];
 
-							perms.students = studentRows;
-							resolve(perms);
+					permissionRows.forEach( function(row) { 
+
+						switch (row.tag) { 
+
+							case "circuit":
+								perms.circuit[row.circuitID] = row;
+								break;
+							case "region":
+								perms.region[row.regionID] = row;
+								break;
+							case "chapter":
+								perms.chapter[row.chapterID] = row;
+								break;
+							case "chapter_prefs":
+								perms.chapter[row.chapterID] = row;
+								break;
+							case "prefs":
+								perms.chapter[row.chapterID] = row;
+								break;
+							default: 
+								if (row.tournName) { 
+									if (taken[row.tournId] === undefined) {
+										taken[row.tournId] = true;
+									}
+								}
+							break;
+						}
+					});
+					
+					db.sequelize.query(judgesQuery + userId).spread(
+						function(judgeRows, metadata) { 
+
+						perms.judges = judgeRows;
+
+						db.sequelize.query(sjQuery + userId).spread(
+							function(sjRows, metadata) { 
+
+							perms.chapterJudges = sjRows;
+
+							db.sequelize.query(studentsQuery + userId).spread(
+								function(studentRows, metadata) { 
+
+								perms.students = studentRows;
+								resolve(perms);
+							});
 						});
 					});
 				});
 			});
-		});
+		}
 	};

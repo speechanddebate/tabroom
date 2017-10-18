@@ -23,7 +23,7 @@ router.get('/:userid', function(req, res, next) {
 router.get('/perms/:userid', function(req, res, next) { 
 
 	if (req.session.user === req.params.userid || req.session.site_admin) { 
-		Permissions(req.params.id, router.locals).then(function(Perms) {
+		Permissions(req.params.userid, router.locals).then(function(Perms) {
 			res.json(Perms);
 		});
 	} else { 
