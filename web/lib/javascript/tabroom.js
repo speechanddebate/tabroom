@@ -256,9 +256,9 @@ function uploaderName(uploader, filedisplay) {
 
 function autoWin(input,e,aff,neg,affid,negid) {
 
-	if ($("#toggleKeyboardShortcuts").prop("checked") === false) { 
-		return;
-	}
+	// if ($("#toggleKeyboardShortcuts").prop("checked") === false) { 
+	// 	return;
+	// }
 
     var keyCode = e.keyCode; 
     var filter = [0,8,9,16,17,18,37,38,39,40,46];
@@ -390,7 +390,7 @@ function autoWin(input,e,aff,neg,affid,negid) {
 /* Does the various shortcuts to register speaker point entry, like 285 = 28.5,
  * etc */
 
-function autoPoints(input,len,e,side,ratio,nototal,step) {
+ function autoPoints(input,len,e,side,ratio,nototal,step) {
 
 	if ($("#toggleKeyboardShortcuts").prop("checked") === false) { 
 		return;
@@ -527,11 +527,11 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 		if (len == 2) { 
 
 			if (step == 1) {
-			
+
 			} else { 
 
 				if (/\.$/.test(input.value)) { 
-
+	
 					var number = input.value;
 					number = number.slice(0,1);
 					number = number * 1;
@@ -539,22 +539,22 @@ function autoPoints(input,len,e,side,ratio,nototal,step) {
 					input.value = number;
 
 				} else if (/5$/.test(input.value)) { 
-
+					
 					input.value = input.value/10;
 
 				} else if (input.value < 0) { 
-
+					
 				} else if (input.value === -5) { 
-
+					
 					input.value = -0.5;
 
 				} else if (input.value === "-.") { 
-
+					
 					input.value = -0.5;
 
 				} else { 
 
-					input.value = input.value.slice(0,1);
+					// input.value = input.value.slice(0,1);
 
 				}
 			}
