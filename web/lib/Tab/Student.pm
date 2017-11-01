@@ -95,22 +95,47 @@ sub setting {
 
 }
 
+
 sub all_settings { 
 
 	my $self = shift;
 
-	my @settings = $self->settings;
-
 	my %all_settings;
 
-	foreach my $setting (@settings) { 
-		$all_settings{$setting->tag} = $setting->value;
-		$all_settings{$setting->tag} = $setting->value_text if $all_settings{$setting->tag} eq "text";
-		$all_settings{$setting->tag} = $setting->value_date if $all_settings{$setting->tag} eq "date";
+	my $dbh = Tab::DBI->db_Main();
+
+    my $sth = $dbh->prepare("
+		select setting.tag, setting.value, setting.value_date, setting.value_text
+		from student_setting setting
+		where setting.student = ? 
+        order by setting.tag
+    ");
+    
+    $sth->execute($self->id);
+    
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
+
+		if ($value_date) { 
+
+			my $dt = eval { 
+				return DateTime::Format::MySQL->parse_datetime($value_date); 
+			};
+
+			$all_settings{$tag} = $dt if $dt;
+
+		} elsif ($value_text) { 
+
+			$all_settings{$tag} = $value_text;
+
+		} else { 
+
+			$all_settings{$tag} = $value;
+
+		}
+
 	}
 
 	return %all_settings;
 
 }
-
 

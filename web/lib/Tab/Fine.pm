@@ -5,6 +5,8 @@ Tab::Fine->columns(All => qw/id reason amount payment
 								deleted deleted_at deleted_by levied_at levied_by 
 								tourn school region judge timestamp/);
 
+Tab::Fine->columns(TEMP => qw/schoolid regionid judgeid/);
+
 Tab::Fine->has_a(judge => 'Tab::Judge');
 Tab::Fine->has_a(tourn => 'Tab::Tourn');
 Tab::Fine->has_a(school => 'Tab::School');
