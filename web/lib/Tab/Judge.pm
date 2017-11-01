@@ -8,7 +8,7 @@ Tab::Judge->columns(Essential => qw/school first middle last code active
 Tab::Judge->columns(Others => qw / alt_category covers obligation hired person_request timestamp /);
 
 # Wow, that's a lot. 
-Tab::Judge->columns(TEMP => qw/tier pref panelid chair hangout_admin tourn avg eventtype eventid
+Tab::Judge->columns(TEMP => qw/categoryid schoolid tier pref panelid chair hangout_admin tourn avg eventtype eventid
 							   diet ballotid personid tab_rating cjid schoolname 
 							   schoolcode state regname regcode region standby site neutral diversity/);
 
@@ -97,18 +97,44 @@ sub setting {
 
 }
 
+
 sub all_settings { 
 
 	my $self = shift;
 
-	my @settings = $self->settings;
-
 	my %all_settings;
 
-	foreach my $setting (@settings) { 
-		$all_settings{$setting->tag} = $setting->value;
-		$all_settings{$setting->tag} = $setting->value_text if $all_settings{$setting->tag} eq "text";
-		$all_settings{$setting->tag} = $setting->value_date if $all_settings{$setting->tag} eq "date";
+	my $dbh = Tab::DBI->db_Main();
+
+    my $sth = $dbh->prepare("
+		select setting.tag, setting.value, setting.value_date, setting.value_text
+		from judge_setting setting
+		where setting.judge = ? 
+        order by setting.tag
+    ");
+    
+    $sth->execute($self->id);
+    
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
+
+		if ($value_date) { 
+
+			my $dt = eval { 
+				return DateTime::Format::MySQL->parse_datetime($value_date); 
+			};
+
+			$all_settings{$tag} = $dt if $dt;
+
+		} elsif ($value_text) { 
+
+			$all_settings{$tag} = $value_text;
+
+		} else { 
+
+			$all_settings{$tag} = $value;
+
+		}
+
 	}
 
 	return %all_settings;

@@ -7,6 +7,8 @@ Tab::JudgeHire->columns(Essential => qw/entries_requested entries_accepted
 										requested_at judge tourn category 
 										school region requestor timestamp/);
 
+Tab::JudgeHire->columns(TEMP => qw/schoolid categoryid/);
+
 Tab::JudgeHire->has_a(tourn => "Tab::Tourn");
 Tab::JudgeHire->has_a(judge => "Tab::Judge");
 Tab::JudgeHire->has_a(school => "Tab::School");
