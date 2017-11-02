@@ -178,15 +178,15 @@ sub all_settings {
     
     while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
 
-		if ($value_date) { 
+		if ($value eq "date") { 
 
 			my $dt = eval { 
-				return DateTime::Format::MySQL->parse_datetime($value_date); 
+				return DateTime::Format::MySQL->parse_datetime($value eq "date"); 
 			};
 
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value_text) { 
+		} elsif ($value eq "text") { 
 
 			$all_settings{$tag} = $value_text;
 
