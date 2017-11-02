@@ -118,7 +118,7 @@ sub all_settings {
 		if ($value eq "date") { 
 
 			my $dt = eval { 
-				return DateTime::Format::MySQL->parse_datetime($value eq "date"); 
+				return DateTime::Format::MySQL->parse_datetime($value_date); 
 			};
 
 			$all_settings{$tag} = $dt if $dt;
