@@ -116,10 +116,7 @@ sub all_settings {
 
 		if ($value eq "date") { 
 
-			my $dt = eval { 
-				return DateTime::Format::MySQL->parse_datetime($value_date); 
-			};
-
+			my $dt = Tab::DBI::dateparse($value_date); 
 			$all_settings{$tag} = $dt if $dt;
 
 		} elsif ($value eq "text") { 

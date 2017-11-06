@@ -26,6 +26,14 @@ sub date_inflate {
    return $dt;
 }
 
+sub dateparse {
+   my $value = shift;
+   my $dt = eval { return DateTime::Format::MySQL->parse_datetime($value); };
+   return unless $dt;
+   $dt->set_time_zone('UTC');
+   return $dt;
+}
+
 sub date_deflate {
     my $dt = shift;
 	return unless $dt;
