@@ -1,44 +1,91 @@
 <%args>
 	$school
+	$category
 </%args>
 
 <%init>
 
-	Tab::ChapterJudge->set_sql(free_by_school => "
-		select distinct chapter_judge.* from
-		school,chapter_judge
-		where school.id = ?
-		and school.chapter = chapter_judge.chapter
-		and chapter_judge.retired != 1
-	");
+    my $dbh = Tab::DBI->db_Main();
 
-	my @judges = Tab::ChapterJudge->search_free_by_school($school->id);
+    my $sth = $dbh->prepare("
+		select judge.id, judge.person, judge.category, judge.chapter_judge, 
+			weekend.value, double_entry.value
 
-	my %taken_persons;
-	my %taken_cjs;
+		from (judge, category)
 
-	foreach my $category ($school->tourn->categories) { 
+		left join chapter_judge on chapter_judge.id = judge.chapter_judge
 
-		next if $category->setting("double_entry");
+		left join category_setting weekend 
+			on weekend.tag = 'weekend'
+			and weekend.category = category.id
 
-		foreach my $judge ($category->judges) { 
+		left join category_setting double_entry 
+			on double_entry.tag = 'double_entry'
+			and double_entry.category = category.id
 
-			$taken_cjs{$judge->chapter_judge->id}++ if $judge->chapter_judge;
-			$taken_persons{$judge->person->id}++ if $judge->person;
+		where category.tourn = ? 
+		and category.id = judge.category
+		group by judge.id
+    ");
 
+    $sth->execute($category->tourn->id);
+
+	my %taken_cjs = ();
+	my %taken_persons = ();
+	my $only_weekend = $category->setting("weekend");
+
+    while ( 
+		my ($judge, $person_id, $category_id, $chapter_judge, $weekend, $doubled) 
+		= $sth->fetchrow_array()
+	) { 
+		
+		# This unless check forbids double entering into the same category even
+		# if double entry is allowed because that's just stupid. 
+
+		Tab::debuglog("Palmer's doubled is $doubled") if $person_id == 1;
+
+		unless ($category_id == $category->id) { 
+
+			next if $doubled;
+
+			next if $weekend 
+				&& $only_weekend 
+				&& $only_weekend != $weekend;
 		}
 
+		$taken_cjs{$chapter_judge}++ if $chapter_judge;
+
+		$taken_persons{$person_id}++ if $person_id;
 	}
+
+	Tab::ChapterJudge->columns(TEMP => "personid");
+
+	Tab::ChapterJudge->set_sql(active_by_school => "
+		select distinct chapter_judge.*, person.id as personid
+			from (school, chapter_judge)
+
+		left join person on chapter_judge.person = person.id
+
+		where school.id = ?
+			and school.chapter = chapter_judge.chapter
+			and chapter_judge.retired != 1
+
+		order by chapter_judge.last
+	");
 
 	my @good;
 
-	foreach my $judge (@judges) {
+	foreach my $judge (
+		Tab::ChapterJudge->search_active_by_school($school->id)
+	) { 
 
-		push @good, $judge unless ($taken_cjs{$judge->id} && ($judge->person && $taken_persons{$judge->person->id}) );
+		next if $taken_cjs{$judge->id};
+		next if $taken_persons{$judge->personid};
+
+		push @good, $judge;
 
 	}
 
-	return sort {$a->last cmp $b->last} @good;
-
+	return @good;
 
 </%init>
