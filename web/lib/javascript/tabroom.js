@@ -124,7 +124,6 @@
 					$(".replyappend").append(data.reply);
 				}
 
-
 				if (data.error) { 
 
 					alertify.error(data.message);
@@ -137,7 +136,10 @@
 						$("#"+targetId).remove();
 					}
 
-					if (successAction === "refresh" || successAction === "reload") { 
+					if (
+						successAction === "refresh" 
+						|| successAction === "reload"
+					) { 
 						window.location.reload();
 					}
 
@@ -163,9 +165,7 @@
 				} else { 
 
 					console.log(data);
-
 					alertify.warning("An error condition was tripped.");
-
 				}
 
 			}
