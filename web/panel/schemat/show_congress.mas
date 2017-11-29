@@ -1,429 +1,716 @@
-<%args>
-	$round
+<%args> 
 	$person
-	$tourn_settings => undef
-	$sort_by        => "letter"
-	$show           => undef
-	$entry_only     => undef
+	$round
+	$round_settings
+	$tourn
+	$tourn_settings
+	$event
+	$event_settings
+	$category
+	$category_settings
+	$entered => undef
+	$nowarn  => undef
 </%args>
 <%init>
 
-	my $event = $round->event;
-	my $tourn = $event->tourn;
+	use Math::Round qw(round);
 
-	my %event_settings = $event->all_settings();
+	my $round_type = $round->type;
 
-	my $category = $event->category;
-	my %category_settings = $category->all_settings();
+	my $online_ballots++ if $event_settings->{'online_ballots'};
+
+	my $tab_ratings    = $category_settings->{"tab_ratings"};
+	my $coach_ratings  = $category_settings->{"coach_ratings"};
+	my $diversity      = $category_settings->{"track_diversity"};
+	my $no_codes       = $category_settings->{"no_codes"};
+
+	my $published = $round->published;
+	my $blind_mode++ if $event_settings->{"blind_mode"} && $published < 1;
+
+	my $district = $tourn_settings->{"nsda_district"};
+
+	my %anonymize = $m->comp(
+		"/funclib/blind_mode.mas", 
+		round => $round
+	) if $blind_mode;
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my @panels = 
-		sort {$a->letter cmp $b->letter} 
-		$round->panels;
+	my $dbh = Tab::DBI->db_Main();
 
-	@panels = 
-		sort {length($a->letter) <=> length($b->letter)} 
-		@panels;
+	my $sth = $dbh->prepare("
 
-	@panels = 
-		sort {$a->room->name cmp $b->room->name} 
-		@panels 
-		if $sort_by eq "room";
+        select 
+			panel.id, panel.letter, room.name, 
+			school.name, school.code,
+			congress_code.value,
+			entry.id, entry.name, entry.code, entry.active,
+			seed.value,
+            judge.id, judge.code, judge.first, judge.last, judge_school.name, 
+				judge_school.code, judge_congress_code.value,
+			rating.value, 
+			coach_tier.name, panel.started, 
+			ballot.audit, ballot.chair, ballot.judge_started,
+			diverse.value, 
+			region.code, region.name,
+			person.id, 
+			district.code, district.name, chapter.state,
+			entry_region.code, entry_region.name,
+			entry_district.code, entry_district.name, entry_chapter.state, state.value
 
-	my @entries = $m->comp(
-		'/funclib/round_entries.mas', 
-		round => $round
-	);
+        from (panel, ballot)
 
-	my %entries_by_panel = ();
+        left join entry on ballot.entry = entry.id
 
-	foreach my $entry (@entries) { 
-		next if $entry->dropped;
-		next if $entry->dq;
-		push (@{$entries_by_panel{$entry->panelid}}, $entry);
-	}
+        left join entry_setting seed 
+			on seed.entry = entry.id 
+			and seed.tag = 'pairing_seed'
 
-	my @judges = $m->comp(
-		'/funclib/round_judges.mas', 
-			round => $round
-		);
+        left join school 
+			on entry.school = school.id
 
-	my %judges_by_panel = ();
+        left join judge 
+			on ballot.judge = judge.id
 
-	foreach my $judge (@judges) { 
-		push (@{$judges_by_panel{$judge->panelid}}, $judge);
-	}
+        left join judge_setting rating 
+			on rating.judge = judge.id 
+			and rating.tag = 'tab_rating'
 
-	my @rooms = $m->comp(
-		'/funclib/round_rooms.mas', 
-		round => $round
-	);
+        left join room on panel.room = room.id
 
-	my %room_by_id = ();
+        left join rating coach 
+			on coach.judge = judge.id 
+			and coach.type = 'coach'
 
-	foreach my $room (@rooms) { 
-		$room_by_id{$room->id} = $room;
-	}
+        left join rating_tier coach_tier 
+			on coach.rating_tier = coach_tier.id
 
-	my $no_judge_codes++ if $category->setting('no_codes');
+        left join school_setting state 
+			on state.school = school.id 
+			and state.tag = 'state'
 
-	my $code_style = $event->setting("code_style");
+        left join school_setting congress_code 
+			on congress_code.school = school.id 
+			and congress_code.tag = 'congress_code'
 
-	my $big_codes++ 
-		if $code_style eq "names"
-		|| $code_style eq "last_names"
-		|| $code_style eq "names_lastfirst";
+        left join judge_setting diverse 
+			on diverse.judge = judge.id 
+			and diverse.tag = 'diverse'
 
-	my $huge_codes ++ 
-		if $code_style eq "school_names"
-		|| $code_style eq "school_first_names"
-		|| $code_style eq "school_last_names"
-		|| $code_style eq "code_name";
+        left join school judge_school 
+			on judge.school = judge_school.id
 
-	my %panel_undone = 
-		map {$_->id => 1} 
-		$m->comp("/funclib/round_panels.mas", 
-			round  => $round,
-			not_in => 1
-		);
+        left join school_setting judge_congress_code 
+			on judge_congress_code.school = judge_school.id 
+			and judge_congress_code.tag = 'congress_code'
 
-	my %district_regions;
+        left join region 
+			on judge_school.region = region.id
 
-	if ($tourn_settings->{'district_regions'}) { 
+        left join district 
+			on judge_school.district = district.id
 
-		my %district_region_ids = %{JSON::decode_json $tourn_settings->{'district_regions'}};
+        left join chapter 
+			on judge_school.chapter = chapter.id
 
-		my %regions_by_id = map {$_->id => $_} $tourn->regions;
+		left join region entry_region
+			on school.region = entry_region.id
 
-		foreach my $district (keys %district_region_ids) { 
-			$district_regions{$district} 
-				= $regions_by_id{
-					$district_region_ids{$district}
-				};
+		left join district entry_district
+			on school.district = entry_district.id
+
+		left join chapter entry_chapter
+			on school.chapter = entry_chapter.id
+
+		left join person 
+			on judge.person = person.id
+
+        where panel.round = ?
+        and panel.id = ballot.panel
+        order by panel.letter DESC, panel.letter
+	");
+
+	$sth->execute($round->id);
+
+	my %panels = ();
+	my %entries = ();
+	my %judges = ();
+	my @pods;
+
+	while (my (
+	
+		$id, $letter, $room_name,
+		$school_name, $school_code,
+		$congress_code,
+		$entry_id, $entry_name, $entry_code, $entry_active,
+			$seed_value,
+		$judge_id, $judge_code, $judge_first, $judge_last, $judge_school_name,
+			$judge_school_code, $judge_school_congress_code,
+		$rating_value,
+		$coach_tier_name, $started,
+		$ballot_audit, $ballot_chair, $ballot_judge_started,
+		$diverse_value,
+		$judge_region_code, $judge_region_name,
+		$person_id,
+		$judge_district_code, $judge_district_name, $judge_state,
+		$entry_region_code, $entry_region_name,
+		$entry_district_code, $entry_district_name, $entry_chapter_state, $state_value
+
+	) = $sth->fetchrow_array() ) {
+
+		$panels{$id}{"started"}  = $started;
+		$panels{$id}{$judge_id}{"started"} = $ballot_judge_started;
+
+		$panels{$id}{"letter"}  = $letter;
+		$panels{$id}{"room"}  = $room_name;
+		$panels{$id}{"room"}  = "NO ROOM" unless $room_name;
+
+		push @{$panels{$id}{"entries"}}, $entry_id if $entry_id;
+
+		$entries{$entry_id}{"seed"} = $seed_value;
+
+		if ($blind_mode) { 
+
+			$entries{$entry_id}{"code"} = $anonymize{"entry"}{$entry_id};
+			$entries{$entry_id}{"name"} = $anonymize{"entry"}{$entry_id};
+
+		} else { 
+
+			$entries{$entry_id}{"code"} = $entry_code;
+			$entries{$entry_id}{"name"} = $entry_name;
+			$entries{$entry_id}{"school"} = $school_name;
+			$entries{$entry_id}{"school_code"} = $school_code;
+			$entries{$entry_id}{"school_code"} = $congress_code if $congress_code;
+
+			$entries{$entry_id}{"state"} = $state_value;
+			$entries{$entry_id}{"state"} = $entry_chapter_state if $entry_chapter_state;
+
+			$entries{$entry_id}{"district"}      = $entry_district_code;
+			$entries{$entry_id}{"district_name"} = $entry_district_name;
+			$entries{$entry_id}{"region"}        = $entry_region_code;
+			$entries{$entry_id}{"region_name"}   = $entry_region_name;
+
 		}
 
+		unless ($ballot_audit || $entry_active != 1) { 
+
+			$panels{$id}{"undone"}++;
+			$panels{$id}{$judge_id}{"undone"}++;
+		}
+
+		push @{$panels{$id}{"judges"}}, $judge_id if $judge_id;
+
+		$judges{$judge_id}{"coach"} = $coach_tier_name;
+
+		if ($blind_mode) { 
+
+			$judges{$judge_id}{"code"} = $anonymize{"judge"}{$judge_id};
+			$judges{$judge_id}{"name"} = $anonymize{"judge"}{$judge_id};
+
+		} else { 
+
+			$judges{$judge_id}{"code"}   = $judge_code unless $no_codes;
+			$judges{$judge_id}{"first"}  = $judge_first;
+			$judges{$judge_id}{"last"}   = $judge_last;
+			$judges{$judge_id}{"school"} = $judge_school_name;
+			$judges{$judge_id}{"school_code"} = $judge_school_code;
+			$judges{$judge_id}{"school_code"} = $judge_school_congress_code 
+				if $judge_school_congress_code;
+		}
+
+		$judges{$judge_id}{"tab"}    = $rating_value;
+		$judges{$judge_id}{"person"} = $person_id;
+
+		$judges{$judge_id}{"state"}         = $judge_state;
+		$judges{$judge_id}{"district"}      = $judge_district_code;
+		$judges{$judge_id}{"district_name"} = $judge_district_name;
+		$judges{$judge_id}{"region"}        = $judge_region_code;
+		$judges{$judge_id}{"region_name"}   = $judge_region_name;
+
+		Tab::debuglog("My Judge region: $judge_region_code $judge_region_name diverse $diverse_value") 
+			if $judge_id == 656222;
+
+		$judges{$judge_id}{"diverse"}       = $diverse_value;
+		$judges{$judge_id}{"chair"}++ if $ballot_chair;
+
 	}
+
+	Tab::Entry->set_sql( missing =>  " 
+		select distinct entry.id
+		from entry
+		where entry.active = 1
+		and entry.event = ? 
+		and not exists ( 
+			select distinct ballot.id
+			from ballot, panel
+			where ballot.panel = panel.id
+			and ballot.entry = entry.id
+			and panel.round = ?
+		)
+	" );
+
+	my @missing = Tab::Entry->search_missing( $event->id, $round->id ) 
+		unless ($round->type eq "elim" 
+			|| $round->type eq "final" 
+			|| $round->setting("dontcare_aboutmissing")
+	);
 
 </%init>
 
-	<& "/funclib/tablesorter.mas", 
-		table     => "congresspairing",
+	<& 
+		"/funclib/tablesorter.mas", 
+		table     => "session_schematic",
 		nobuttons => 1
 	&>
 
-	<table id="congresspairing">
+% 	unless ($entered || $nowarn) { 
+
+%		if ( @missing ) {
+
+			<div class="row centeralign padmore marbottommore martopmore">
+
+				<h2 class="redtext">Drat!</h2>
+
+%				if (@missing) { 
+
+					<h5><% scalar @missing %> entries left off pairing.</h5>
+
+%					foreach my $miss (@missing) { 
+						<a 
+							class = "buttonwhite third nowrap redtext hover"
+							title = "<% $miss->name %>" 
+							href  = "/panel/manipulate/congress_round_edit.mhtml?entry_id=<% $miss %>&round_id=<% $round->id %>"
+						>Schedule <% $miss->code %></a>
+%					}
+%				}
+
+			</div>
+%		}
+%	}
+
+	<table id="session_schematic"> 
 
 		<thead>
 		
-		<tr class="yellowrow">
+			<tr class="yellowrow smaller">
 
-			<th class="smaller padmore">
-				Ch#
-			</td>
-			
-			<th class="smaller padmore">
-				Room
-			</td>
-			
-			<th class="smaller padmore">
-				Judges
-			</td>
-
-			<th class="smaller padmore">
-				Entries
-			</td>
-
-%			if ($person->site_admin && $round->type ne "final") { 
-
-				<th class="smaller">
-					Sc
+				<th class="chamber centeralign">
+					Ch
 				</th>
 
-%			} else { 
-
-				<th class="smaller">
+				<th class="centeralign rooms">
+					Room
 				</th>
 
-%			} 
+				<th class="centeralign entries">
+					Entries
+				</th>
 
-		</tr>
+				<th class="centeralign judges">
+					Judge(s)
+				</th>
+
+				<th>
+				</th>
+
+			</tr>
 
 		</thead>
 
 		<tbody>
-		
-% 		foreach my $panel (@panels) { 
 
-			<tr class="row">
+<%perl>
 
-				<td class="smaller centeralign">
-					<% $panel->letter %>
+		my @keys = keys %panels;
+
+		@keys = 
+			sort {$panels{$a}{"room"} <=> $panels{$b}{"room"}} 
+			@keys;
+
+		@keys = 
+			sort {$panels{$a}{"letter"} <=> $panels{$b}{"letter"}} 
+			@keys;
+
+		@keys = 
+			sort {$panels{$b}{"undone"} <=> $panels{$a}{"undone"}} 
+			@keys;
+
+		@keys = 
+			sort {$panels{$b}{"started"} <=> $panels{$a}{"started"}} 
+			@keys;
+
+		foreach my $key (@keys) { 
+
+</%perl>
+			<tr class="smallish">
+
+				<td class="centeralign padno chamber">
+					<% $panels{$key}{"letter"} %> 
 				</td>
 
-				<td class="smaller centeralign">
+				<td 
+					class = "nospace rooms 
+						<% $panels{$key}{"room"} eq "NO ROOM" ? "centeralign" : "" %>
+						<% $panels{$key}{"bye"} ? "centeralign" : "" %>
+					"
+					title = "<% $panels{$key}{"room"} %>"
+				>
 
-%					unless ($entry_only) { 
+					<span class="hidden">
+						<% $panels{$key}{"room"} %>
+					</span>
 
-%						if ($panel->room > 0) { 
-							<a 
-								class="white" 
-								href="panel_view.mhtml?panel_id=<% $panel->id %>"
-							>
-								<% $room_by_id{$panel->room->id}->name %>
-							</a>
+					<a 
+						href  = "panel_view.mhtml?panel_id=<% $key %>" 
+						class = "padvertical 
+
+%						if ($panels{$key}{"room"} eq "NO ROOM") { 
+							dkred centeralign padleftbit padrightbit
 %						} else { 
-							<a 
-								class="dkred" 
-								href="panel_view.mhtml?panel_id=<% $panel->id %>"
-							>
-								NONE
-							</a>
+							white 
 %						}
+						"
+					>
+						<% $panels{$key}{"room"} %>
+					</a>
 
-%					}
-
-
-				</td>	
-
-<%perl>
-
-				my @panel_judges = @{$judges_by_panel{$panel->id}} 
-					if $judges_by_panel{$panel->id};
-
-				@panel_judges = sort {$b->chair <=> $a->chair} @panel_judges;
-</%perl>
-				
-				<td class="smallish">
-
-<%perl>
-
-					foreach my $judge (
-						sort {$b->chair <=> $a->chair} 
-						@panel_judges
-					) { 
-
-						unless ($entry_only) { 
-
-</%perl>
-							<a 
-								class = "white button leftalign nowrap marno <% $judge->chair ? "semibold" : "" %>" 
-								href  = "panel_view.mhtml?panel_id=<% $panel->id %>" 
-								title = "<% $judge->code %> <% $judge->last %>"
-							>
-
-							<span class="third nospace hidden schoolcodes greentext">
-								<% $judge->schoolcode %>
-							</span>
-
-							<span class="full marless padno hidden schoolnames greentext ">
-								<% $judge->schoolname %>
-							</span>
-
-							<span class="third nospace hidden regioncodes bluegreentext">
-								<% $judge->regioncode %>
-							</span>
-
-							<span class="full marless padno hidden regionnames bluegreentext ">
-								<% $judge->regionname %>
-							</span>
-
-							<span class="third nospace hidden districtcodes orangetext">
-								<% $judge->districtcode %>
-							</span>
-
-							<span class="full marless padno hidden districtnames orangetext ">
-								<% $judge->districtname %>
-							</span>
-
-							<span class="third nospace hidden state purpletext">
-								<% $judge->state %>
-							</span>
-
-%						}
-
-							<%	
-								$judge->chair ? "*" : ""
-							%><% 
-								$no_judge_codes 
-								? $judge->first  
-								: $judge->school->code." ".$judge->code
-							%> <% 
-								$judge->last
-							%>
-
-						</a>
-
-% 					} 
-%					unless (@panel_judges) { 
-						<a 
-							class="dkred" 
-							href="panel_view.mhtml?panel_id=<% $panel->id %>"
-						>
-							NONE
-						</a>
-% 					} 
 				</td>
 
 <%perl>
 
-				my @panel_entries = 
-					sort {$a->code <=> $b->code} @{$entries_by_panel{$panel->id}} 
-					if $entries_by_panel{$panel->id};
+				#Dedupe some stuff:
+				my %seen = ();
 
-				my @seeds = $m->comp(
-					"/funclib/event_entry_settings.mas", 
-						event => $event,
-						tag   => "pairing_seed"
-					);
+				@{$panels{$key}{"judges"}} = 
+					grep { ! $seen{$_} ++ } 
+					@{$panels{$key}{"judges"}};
 
-				my %seed_by_entry = map {$_->entry->id => $_->value} @seeds;
+				undef(%seen);
 
-				my @blocs = $m->comp(
-					"/funclib/event_entry_settings.mas", 
-						event => $event,
-						tag   => "nsda_house_bloc"
-					) if $tourn_settings->{"nsda_district"} 
-						&& $event->abbr eq "HOU";
+				@{$panels{$key}{"entries"}} = 
+					grep { ! $seen{$_} ++ } 
+					@{$panels{$key}{"entries"}};
 
-				my %bloc_by_entry = map {$_->entry->id => $_->value} @blocs;
+				#Sort by names & chair status
 
-				@panel_entries = 
-					sort {$seed_by_entry{$a} <=> $seed_by_entry{$b}} 
-						@{$entries_by_panel{$panel->id}} 
+				@{$panels{$key}{"entries"}} = 
+					sort {$entries{$a}{"code"} cmp $entries{$b}{"code"}} 
+					@{$panels{$key}{"entries"}}; 
 
-					if $entries_by_panel{$panel->id} 
-					&& @seeds;
+				@{$panels{$key}{"judges"}} = 
+					sort {$judges{$a}{"last"} cmp $judges{$b}{"last"}} 
+					@{$panels{$key}{"judges"}}; 
+
+				@{$panels{$key}{"judges"}} = 
+					sort {$judges{$b}{"chair"} <=> $judges{$a}{"chair"}} 
+					@{$panels{$key}{"judges"}}; 
 
 </%perl>
-				<td class="smallish nospace">
-			
-%					unless (@panel_entries) { 
 
-%						my $warn = "You are about to delete this chamber.  Granted, it has no entries, but are you sure?";
-						<a class="smallish centeralign dkred block" 
-							<& "/funclib/confirm.mas", warn => $warn &>  
-							href="rm_panel.mhtml?panel_id=<% $panel->id %>"
-						>
-							Delete Empty Panel
-						</a>
-%					}
+				<td class="entries leftalign nospace">
 
-% 					foreach my $entry (@panel_entries) { 
+%					foreach my $entry (@{$panels{$key}{"entries"}}) {
 
-%						my $school_id = $entry->school->id;
+						<span class="nowrap third marno">
 
-						<span class="designators nospace
-							<% $huge_codes ? " third" : "" %>
-							<% $big_codes ? " quarter" : "" %>
-							<% $show ? "quarter" : ""  %>
-							<% $show || $big_codes || $huge_codes ? "" : "eighth" %>">
+<%perl>	
+							my $warn;
 
-%						if ($entry_only) { 
+							if ($published && (not defined $entered)) { 
+								$warn = "This round is published and you are about
+								to move an entry.   This seems suspicious.  Are you
+								sure?";
+							}
 
-%						} elsif ($round->published > 0) { 
+</%perl>
 
 							<a 
-								class="white padvertical marno"
-								href="panel_view.mhtml?panel_id=<% $panel->id %>" 
+								class="leftalign button white identities identitylink"
+								href="/panel/manipulate/congress_round_edit.mhtml?round_id=<% $round->id %>&entry_id=<% $entry %>"
+								<& "/funclib/confirm.mas", warn => $warn &> 
 							>
 
-%						} else { 
-
-							<a 
-								class="white padvertical marno"
-								href="/panel/manipulate/entry_edit.mhtml?round_id=<% $round->id %>&entry_id=<%$entry->id%>">
-%			 			}
-
-%							if ($school_id) { 
-
-								<span class="third nospace hidden schoolcodes greentext">
-									<% $entry->schoolcode %>
+								<span class="entrycodes full nospace">
+									<% $entries{$entry}{"code"} %>
 								</span>
 
-								<span class="full marless padno hidden schoolnames greentext ">
-									<% $entry->schoolname %>
+								<span class="entrynames full nospace hidden">
+									<% $entries{$entry}{"name"} %>
+								</span>
+
+							</a>
+
+							<a 
+								class="leftalign button white anonymize hidden" 
+								href="/panel/manipulate/congress_round_edit.mhtml?round_id=<% $round->id %>&entry_id=<% $entry %>"
+								<& "/funclib/confirm.mas", warn => $warn &> 
+							>
+								<% $entry %>
+							</a>
+
+							<span class="hidden seeds centeralign nowrap nospace quarter">
+								<% $entries{$entry}{"seed"} 
+									? $entries{$entry}{"seed"} 
+									: "-"
+								%> 
+							</span>
+
+							<span class="schoolnames nospace padleft hidden full smallish">
+								<% $entries{$entry}{"school"} %>
+							</span>
+
+							<span class="schoolcodes nospace padleft hidden full smallish">
+								<% $entries{$entry}{"school_code"} %>
+							</span>
+
+%							if ($tourn_settings->{"nsda_nats"}) { 
+
+								<span class="states nospace padleft quarter hidden centeralign">
+									<% $entries{$entry}{"state"} %>
+								</span>
+
+								<span class="districtcodes nospace padleft quarter hidden centeralign">
+									<% $entries{$entry}{"district"} %>
+								</span>
+
+								<span class="districtnames nospace padleft quarter hidden">
+									<% $entries{$entry}{"district_name"} %>
+								</span>
+
+%							} elsif ($tourn_settings->{"ncfl"} || $tourn_settings->{"regions"} )  { 
+
+								<span class="regionnames nospace padleft quarter hidden">
+									<% $entries{$entry}{"region_name"} %>
+								</span>
+
+								<span class="regioncodes nospace padleft quarter hidden centeralign">
+									<% $entries{$entry}{"region"} %>
 								</span>
 
 %							}
 
-%							if ($tourn_settings->{"nsda_nats"}) { 
-
-								<span class="full marless padno hidden districtnames orangetext">
-									<% $entry->districtname %>
-								</span>
-
-								<span class="third nospace hidden districtcodes orangetext">
-									<% $entry->districtcode %>
-								</span>
-
-								<span class="third nospace states purpletext hidden">
-									<% $entry->state %>
-								</span>
-
-%							} 
-
-							<span class="third nospace hidden regioncodes bluegreentext">
-								<% $entry->regioncode %>
-								<% $district_regions{$entry->districtid} 
-									? $district_regions{$entry->districtid}->code
-									: ""
-								%>
-							</span>
-
-							<span class="full marless padno hidden regionnames bluegreentext ">
-								<% $entry->regionname %>
-								<% $district_regions{$entry->districtid} 
-									? $district_regions{$entry->districtid}->name
-									: ""
-								%>
-							</span>
-
-							<span class="third nospace hidden seeds redtext">
-								<% $seed_by_entry{$entry->id} %>
-							</span> 
-
-							<span class="third nospace hidden blocs orangetext">
-								<% $bloc_by_entry{$entry->id} %>
-							</span> 
-
-							<span class="entrycodes nospace full">
-								<% $entry->code %>
-							</span>
-
-							<span class="hidden entrynames full marless padno">
-								<% $entry->name %>
-							</span>
-
-							<span class="centeralign sixth anonymize hidden bluetext">
-								<% $entry->id %>
-							</span>
-
-						</a>
-
 						</span>
-
-%					} # end of foreach entry
-
+%					} 
 				</td>
 
-				<th 
-					class="smaller centeralign" 
-					style="padding-left: 5px; padding-right: 5px;"
-				>
-%					unless ($panel_undone{$panel->id}) { 
-						IN
-%					} elsif ($panel->started) { 
-						<% Tab::shorttime($panel->started->set_time_zone($tz)) %>
-%					} elsif ($person->id == 1) { 
-						<% $panel->score %>
-%					}
+%				if ($panels{$key}{"judges"} && scalar @{$panels{$key}{"judges"}} > 0) {
+
+					<td class="judges nospace padleft padrightless nowrap">
+
+<%perl>
+						foreach my $judge (
+							@{$panels{$key}{"judges"}}
+						) { 
+
+</%perl>
+							<span class="hidden">
+								<% $judges{$judge}{"code"} ? $judges{$judge}{"code"} : "" %>
+								<% $judges{$judge}{"last"}.", ".$judges{$judge}{"first"} %>
+							</span>
+					
+							<a class=" <% $judges{$judge}{"chair"} 
+									? "semibold" 
+									: "" %> hover full white padvertical" 
+								title="<% $online_ballots ? 
+										$judges{$judge}{"person"} 
+										? "" 
+										: "LUDDITE ALERT: Judge is not linked for online ballots" 
+										: ""
+								%> <% $judges{$judge}{"last"}.", ".$judges{$judge}{"first"} %>"
+								href  = "panel_view.mhtml?panel_id=<% $key %>" 
+							>
+
+%								if ($diversity) { 
+									<span 
+										class = "diversity eighth nospace semibold greentext"
+										title = "Judge tagged as diversity-enhancing"
+									>
+										<% $judges{$judge}{"diverse"} ? "D" : ""  %>
+									</span>
+%								}
+
+%								if ($online_ballots) { 
+									<span class="eighth redtext nospace semibold">
+										<% $judges{$judge}{"person"} > 0 
+											? "" 
+											: "L"
+										%>
+									</span>
+%								}
+
+%								if ($judges{$judge}{"chair"}) { 
+									<span class="eighth fa fa-sm fa-gavel inline bluetext"></span>
+%								}
+
+								<span class="anonymize hidden centeralign nospace seventenths">
+									<% $judge %>
+								</span>
+
+								<span class="identities judgecodes marno
+									<% $no_codes ? "hidden" : "threetenths" %>" 
+								>
+									<% $judges{$judge}{"code"} 
+										?  $judges{$judge}{"code"}
+										: ""
+									%>
+								</span>
+
+								<span class="identities judgenames  marno
+									<% $no_codes ? "seventenths" : "twofifths" %>
+								">
+									<% $judges{$judge}{"last"}.", ".$judges{$judge}{"first"} %>
+								</span>
+
+							</a>
+
+								<span class="schoolnames hidden full marno nowrap">
+									<% $judges{$judge}{"school"} %>
+								</span>
+								<span class="schoolcodes hidden full marno nowrap">
+									<% $judges{$judge}{"school_code"} %>
+								</span>
+
+
+%								if ($tourn_settings->{"nsda_nats"}) { 
+
+									<span class="districtcodes hidden eighth nospace ">
+										<% $judges{$judge}{"district"} %>
+									</span>
+
+									<span class="districtnames hidden half nospace nowrap">
+										<% $judges{$judge}{"district_name"} %>
+									</span>
+
+									<span class="states hidden eighth nospace ">
+										<% $judges{$judge}{"state"} %>
+									</span>
+
+%								}
+
+%								if ($tourn_settings->{"ncfl"} || $tourn_settings->{"regions"} )  { 
+									<span class="regions hidden eighth nospace ">
+										<% $judges{$judge}{"region"} %>
+									</span>
+
+									<span class="regioncodes hidden fifth nospace ">
+										<% $judges{$judge}{"region"} %>
+									</span>
+
+									<span class="regionnames hidden half nospace nowrap">
+										<% $judges{$judge}{"region_name"} %>
+									</span>
+
+%								}
+
+% 						}
+
+						<span class="hidden">0</span>
+
+					</td>
+
+%				} else { 
+
+					<td class="judges nospace centeralign"> 
+
+						<a 
+							class="dkred button nowrap padvertical" 
+							href="panel_view.mhtml?panel_id=<% $key %>"
+						>
+							NO JUDGE 
+						</a>
+
+					</td>
+% 				}
+
+%				if ($tab_ratings || $coach_ratings) { 
+
+					<td class="prefs nospace centeralign smaller lessheight"> 
+
+<%perl>
+						foreach my $judge (
+							@{$panels{$key}{"judges"}}
+						) { 
+
+</%perl>
+							<span class="full padvertical marno"> 
+								<% $tab_ratings ? $judges{$judge}{"tab"} : "" %>
+								<% $judges{$judge}{"coach"} %>
+							</span>
+%						}
+
+					</td>
+%				}
+
+				<th class="centeralign nospace smaller graytext"> 
+
+%					if (not defined $panels{$key}{"undone"}) { 
+
+						<span class="hidden">3</span>
+
+%						my %done = ();
+
+						<span 
+							class = "full greentext padvertical decisions marno"
+							title = "Judge has voted and confirmed."
+						> IN </span>
+
+%					} elsif ($panels{$key}{"started"}) { 
+
+						<span class="hidden">2</span>
+
+<%perl>
+						foreach my $judge (
+							@{$panels{$key}{"judges"}}
+						) { 
+
+							if ($panels{$key}{$judge}{"undone"}) { 
+
+								my $starttime;
+								
+								eval { 
+
+									$starttime = DateTime::Format::MySQL->parse_datetime(
+										$panels{$key}{$judge}{"started"}
+									);
+
+									$starttime->set_time_zone("UTC");
+									$starttime->set_time_zone($tz);
+
+								};
+</%perl>
+
+								<span 
+									class = "tightline block z"
+									title = "Round Start Time"
+								>
+									<% $starttime ? Tab::shortertime($starttime) : "&ndash;" %>
+								</span>
+
+%							} else { 
+
+								<span 
+									class="full greentext padvertical decisions marno" 
+									title="Judge has voted and confirmed."
+								> IN </span>
+
+%							}	
+%						}	
+
+%					} else { 
+
+						<span class="hidden">1</span>
+							&ndash;
+						</span>
+%					}  
+
 				</th>
-
-
+			
 			</tr>
 
-%		} # end of foreach panel  
+%		}
+
+		</tbody>
 
 	</table>
+
