@@ -66,18 +66,26 @@
 		return;
 	}
 
-	function postSwitch(checkObject, replyUrl) { 
+	function postSwitch(checkObject, replyUrl, callback) { 
 
 		var targetId      = $(checkObject).attr("target_id");
 		var propertyName  = $(checkObject).attr("property_name");
 		var settingName   = $(checkObject).attr("setting_name");
+
 		var successAction = $(checkObject).attr("on_success");
 		var replyTarget   = $(checkObject).attr("reply_target");
 		var replyAppend   = $(checkObject).attr("reply_append");
 		var newParent     = $(checkObject).attr("new_parent");
-		var propertyValue = checkObject.value;
 
+		var propertyValue = checkObject.value;
 		var otherObject = $(checkObject).attr("other_value");
+
+		var parentObject = $(checkObject).parent();
+		var parentObjectId = 0;
+
+		if (parentObject) { 
+			parentObjectId = parentObject.attr('id');
+		}
 
 		var otherValue;
 
@@ -104,11 +112,13 @@
 				property_name  : propertyName,
 				setting_name   : settingName,
 				property_value : propertyValue,
-				other_value    : otherValue
+				other_value    : otherValue,
+				parent_id      : parentObjectId
 			},
 			success : function(data) {
 
 				$('table').trigger('applyWidgets');
+				$('table').trigger('update', [true])
 
 				if (data.reply) { 
 					
@@ -147,10 +157,13 @@
 						$("#"+targetId).prependTo("#"+newParent);
 					}
 
+					if (data.newParent) { 
+						$("#"+targetId).prependTo("#"+data.newParent);
+					}
+
 					if (data.replace) { 
 
 						data.replace.forEach( function(item) { 
-
 							if (item.destroy) { 
 								$("#"+item.id).remove();
 							} else if (item.content) { 
@@ -161,11 +174,16 @@
 					}
 					
 					$('table').trigger('applyWidgets');
+					$('table').trigger('update', [true])
 
 				} else { 
 
 					console.log(data);
 					alertify.warning("An error condition was tripped.");
+				}
+
+				if (callback) { 
+					callback(data);
 				}
 
 			}
