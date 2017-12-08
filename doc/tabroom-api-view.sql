@@ -1413,16 +1413,16 @@ create view tabapi.tourn
 as select
 	id,
 		name,
+		city,
+		state,
+		country,
+		tz,
+		webname,
+		hidden,
 		start,
 		end,
 		reg_start,
 		reg_end,
-		hidden,
-		webname,
-		tz,
-		city,
-		state,
-		country,
 		timestamp
 from tabroom.tourn;
 
