@@ -3,8 +3,8 @@ package Tab::Mason;
 
 use lib "/www/tabroom/web/lib";
 #Alternative locations
-use lib "/www/testing.tabroom.com/web/lib";
-#use lib "/www/backup.tabroom.com/web/lib";
+#use lib "/www/testing.tabroom.com/web/lib";
+use lib "/www/backup.tabroom.com/web/lib";
 use lib "/www/staging.tabroom.com/web/lib";
 
 use strict;
@@ -69,8 +69,8 @@ use Tab::Housing;
 use Tab::HousingSlots;
 use Tab::Judge;
 use Tab::JudgeSetting;
-use Tab::JudgeHire;
 use Tab::JudgeShift;
+use Tab::JudgeHire;
 use Tab::Login;
 use Tab::Panel;
 use Tab::Permission;
@@ -116,8 +116,6 @@ use Tab::TiebreakSet;
 use Tab::Timeslot;
 use Tab::Tourn;
 use Tab::TournSetting;
-use Tab::Weekend;
-use Tab::WeekendSetting;
 use Tab::ChangeLog;
 use Tab::TournCircuit;
 use Tab::TournIgnore;
