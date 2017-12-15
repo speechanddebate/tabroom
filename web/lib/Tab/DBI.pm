@@ -20,7 +20,11 @@ sub _register_datetimes {
 sub date_inflate {
 
 	my $value = shift;
-	my $dt = eval { return DateTime::Format::MySQL->parse_datetime($value); };
+
+	my $dt = eval { 
+		return DateTime::Format::MySQL->parse_datetime($value); 
+	};
+
 	$dt = DateTime->now unless $dt;
 
 	$dt->set_time_zone('UTC');
