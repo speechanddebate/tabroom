@@ -223,7 +223,6 @@
 		$(".pagehalf").find(".row:odd").addClass("odd");
 		$(".pagehalf").find(".row:odd").removeClass("even");
 
-
 		$(".main").find(".lightrow:even").addClass("lighteven");
 		$(".main").find(".lightrow:even").removeClass("lightodd");
 		$(".main").find(".lightrow:odd").addClass("lightodd");
