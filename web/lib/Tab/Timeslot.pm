@@ -2,7 +2,7 @@ package Tab::Timeslot;
 use base 'Tab::DBI';
 Tab::Timeslot->table('timeslot');
 Tab::Timeslot->columns(Primary => qw/id/);
-Tab::Timeslot->columns(Essential => qw/tourn name start end name timestamp/);
+Tab::Timeslot->columns(Essential => qw/tourn name start end timestamp/);
 Tab::Timeslot->columns(TEMP => qw/judgeid/);
 
 Tab::Timeslot->has_a(tourn => 'Tab::Tourn');
