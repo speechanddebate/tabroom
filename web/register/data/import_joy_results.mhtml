@@ -1,6 +1,8 @@
 <%args>
 	$tourn
 	$tourn_settings
+	$person
+	$person_settings
 </%args>
 <%init>
 
@@ -86,6 +88,34 @@
 		$ignore_me{"TRN"}++;
 	}
 
+	Tab::TournSite->set_sql( delete_blanks => "
+		delete from tourn_site
+		where tourn = ? 
+		and site = 0
+	");
+
+	Tab::TournSite->sql_delete_blanks->execute($tourn->id);
+
+	my @sites = $tourn->sites;
+
+	$m->print("<p>I have sites:  @sites </p>");
+
+	my $default_site = shift @sites if @sites;
+	my $default_weekend_site;
+
+	unless ($default_site) { 
+
+		$default_site = Tab::Site->create({ 
+			name => $tourn->name." site",
+			host => $person->id
+		});
+
+		Tab::TournSite->create({
+			tourn => $tourn->id,
+			site  => $default_site->id
+		});
+	}
+
 	undef $segments{"actions"};
 	undef $segments{"bag"};
 	undef $segments{"fees"};
@@ -93,11 +123,24 @@
 
 	my %judge_pools;
 
+	#JUDGE CATEGORIES OR POOLS OR SOMESUCH.
 	foreach my $line (@{$segments{"judprefs"}}) { 
-		chomp $line;
-		my ($judge, $event) = split(",", $line);
-		$judge_pools{$judge}{$event}++;
+
+		next unless $csv->parse($line);
+
+		my (
+			$judge_id, $category
+		) = $csv->fields();
+
+		next if $judge_id eq "Judge ID";
+		$judge_id = int($judge_id);
+		$category = int($category);
+
+		$judge_pools{$judge_id}{$category}++;
+
 	}
+
+	$ignore_me{"judprefs"}++;
 
 	my $counter = 0;
 	my %event_categories;
@@ -152,6 +195,11 @@
 
 	$m->print("<h6 class='redtext semibold'>Importing events</h6>");
 
+	my %weekends;
+	my %event_site;
+	my %sites; 
+
+	#EVENTS CATEGORIES
 	LINE:
 	foreach my $line (@{$segments{"events"}}) { 
 
@@ -181,7 +229,8 @@
 		if ($events{$event_id}) { 
 
 			$found++;
-			$m->print("<p class='greentext semibold marleft'>Yay! Found existing Tabroom event ".$events{$event_id}->abbr." with JOT ID $event_id</p>");
+			$m->print("<p class='greentext semibold marleft'>");
+			$m->print("Yay! Found existing Tabroom event ".$events{$event_id}->abbr." with JOT ID $event_id</p>");
 
 			if ($events{$event_id}->abbr eq "HOU") { 
 				$house = $event_id;
@@ -192,7 +241,7 @@
 
 		my $event;
 
-		$m->print("<p class='marleft'>Searching for event by name and abbreviation</p>");
+		$m->print("<p class='marleft'>Searching for existing event $event_name by name and abbreviation:</p>");
 
 		if ($tourn_settings{"NFL"} == 1) { 
 
@@ -235,7 +284,8 @@
 
 		unless ($event) { 
 		
-			$m->print("<p class='marleft'>Creating an event where none was found</p>");
+			$m->print("<p class='semibold orangetext marleft'>No event found for $event_name. ");
+			$m->print("Creating an new event in Tabroom</p>");
 
 			my $category_code = $event_categories{$internal_event_id};
 			$category = $categories{$category_code};
@@ -244,12 +294,11 @@
 				
 				$category = Tab::Category->create({
 					tourn => $tourn->id,
-					name => "Judges ".$category_code,
-					abbr => "J".$category_code,
+					name  => "Judges ".$category_code,
+					abbr  => "J".$category_code,
 				});
 
 				$category->setting('jot_import', $category_code);
-
 			}
 
 			my ($team, $type) = split(",", $attributes);
@@ -286,15 +335,52 @@
 		}
 
 		if ($event) { 
-			$m->print("<p> Event $event ".$event->abbr." marked as JOT ID $event_id.</p>");
+
+			$m->print("<p class='semibold bluetext'>Tabroom Event $event ".$event->abbr." designated for");
+			$m->print("JOT Event ID $event_id $event_name.</p>");
+
 			$event->setting("jot_id", $event_id);
-			push @results, "Event ".$event->abbr." in category ".$event->category->abbr." found for ".$entry_blank;
+			$events{$event_id} = $event;
+
+			if ($event->setting('weekend')) { 
+
+				my $weekend = Tab::Weekend->retrieve($event->setting("weekend"));
+
+				if ($weekend) { 
+
+					$weekends{$weekend->id} = $weekend;
+
+					my $site = $weekend->site;
+
+					if ($site) { 
+
+						unless ($default_weekend_site) { 
+							$default_site = $site;
+							$default_weekend_site++;
+						}
+
+						$event_site{$event_id} = $site;
+						$sites{$site->id} = $site;
+					} 
+				}
+
+			}
+
+
 		} else { 
-			$m->print("<p class='semibold redtext'> I was not able to find or create $entry_blank: $event_name</p>");
+			$m->print("<p class='semibold redtext'> I was not able to find ");
+			$m->print("or create $entry_blank: $event_name in Tabroom.</p>");
 		}
 
 	}
 
+	# Fill in any un-sited events
+	foreach my $event_id (keys %events) { 
+		unless ($event_site{$event_id}) { 
+			$event_site{$event_id} = $default_site;
+			$sites{$default_site->id} = $default_site;
+		}
+	}
 
 	undef @{$segments{"events"}};
 	undef $segments{"events"};
@@ -327,7 +413,8 @@
 		$found++ if $schools{$web_school_id};
 		next LINE if $schools{$web_school_id};
 
-		$m->print("<p class='semibold padleft martop'>Importing school $name $web_school_id into this tournament:</p>");
+		$m->print("<p class='semibold padleft martop'>Importing school ");
+		$m->print("$name $web_school_id into this tournament:</p>");
 
 		if ($district) { 
 
@@ -552,14 +639,6 @@
 
 	$m->print("<h6 class='redtext semibold'>Importing rounds and timeblocks</h6>");
 
-	foreach my $key (keys %event_web_ids) { 
-		$m->print("<p class='bluetext marleft'>Event internal key $key gives event ID $event_web_ids{$key}</p>");
-	}
-
-	foreach my $key (keys %events) { 
-		$m->print("<p class='bluetext marleft'>Event key $key gives event $events{$key}</p>");
-	}
-
 	my %rounds;
 
 	# ROUNDS TIMEBLOCKS:
@@ -584,6 +663,11 @@
 		my $event_id = $event_web_ids{$internal_event_id};
 		my $event = $events{$event_id};
 
+		unless ($event) { 
+			$m->print("<p>Event $event_id is not found</p>");
+			$m->abort();
+		}
+
 		foreach ($date, $time, $draw) { 
 			$_ =~ s/^\s+//;
 			$_ =~ s/\s+$//;
@@ -603,14 +687,11 @@
 		my $ampm = substr($minutes, -2);
 		$minutes = substr($minutes, 0, -2);
 
-		$hour += 12 if $ampm eq "pm" && $hour < 12;
-		$hour = 0 if $hour == 12 && $ampm eq "am";
-
 		my $start_time = eval { 
-			return Tab::dtme($date, "$hour:$minutes:00", $tz);
+			return Tab::dtme($date, "$hour:$minutes".uc($ampm), $tz);
 		};
 
-		$m->print("<p>Start time recorded for $event_id Round $round_name is $start_time </p>");
+		$m->print("<p>Start time recorded for ".$event->abbr." Round $round_name is $start_time </p>");
 
 		unless ($timeslots{$start_time->epoch}) { 
 
@@ -634,8 +715,6 @@
 			$m->print("<p class='redtext semibold'>No event found for $event_id.  House is $house</p>");
 			$m->abort();
 		}
-
-		$m->print("<p class='semibold greentext'>Event found for $event_id is $event ".$event->abbr."</p>");
 
 		my $round_type; 
 
@@ -666,8 +745,6 @@
 			$round_type = "elim" if $round_id > 6;
 		}
 
-		Tab::debuglog("Event id is $event_id and round name is $round_name");
-
 		if ($rounds{$event_id}{$round_name}) { 
 
 			my $round = $rounds{$event_id}{$round_name};
@@ -678,6 +755,7 @@
 			}
 
 			$round->type($round_type);
+			$round->site($event_site{$event_id});
 			$round->update();
 
 		} else { 
@@ -693,12 +771,134 @@
 				start_time   => $start_time,
 				event        => $event->id,
 				timeslot     => $timeslots{$start_time->epoch}->id,
+				site         => $event_site{$event_id}
 			});
 
-			$m->print("<p>Created round ".$round->name." as a ".$round_type." round in ".$event->abbr."</p>");
+			$m->print("<p>Created round ".$round->name." as a ");
+			$m->print($round_type." round in ".$event->abbr."</p>");
+
+			$rounds{$event_id}{$round_name} = $round;
 
 		}
 	}
+
+	next if $ignore_me{"evrd"};
+	undef $counter;
+
+	foreach my $key (sort keys %timeslots) { 
+		$counter++;
+		$timeslots{$key}->name("Timeslot ".$counter);
+		$timeslots{$key}->update();
+	}
+
+	my %rooms;
+	my %site_rooms;
+
+	$m->print("<h6 class='redtext semibold'>Importing rooms and sites </h6>");
+	$m->print("<p class='bluetext bigger semibold'>The default site for new rooms ");
+	$m->print("is ".$default_site." ".$default_site->name."</p>");
+
+	# ROOMS
+	foreach my $line (@{$segments{"rooms"}}) { 
+
+		next unless $csv->parse($line);
+
+		my (
+			$room_id, $room_name, $hall, $notes, $flags, $other_flags
+		) = $csv->fields();
+
+		next if $room_id eq "Room ID";
+
+		$room_id = int($room_id);
+
+		# Hunt for an existing room named this:
+		foreach my $key (keys %sites) { 
+
+			last if $rooms{$room_id};
+
+			my $site = $sites{$key};
+
+			unless ($site_rooms{$key}) { 
+				@{$site_rooms{$key}} = $site->rooms();
+			}
+
+			foreach my $room (@{$site_rooms{$key}}) { 
+
+				if (
+					$room->notes == $room_id
+				 	|| $room_name eq $room->name
+				) { 
+					$rooms{$room_id} = $room;
+					last;
+				}
+			}
+		}
+
+		#If it isn't found create one:
+		unless ($rooms{$room_id}) { 
+
+			$m->print("<p class='semibold orangetext'>No room $room_name found.");
+			$m->print(" Creating in Tabroom site ".$default_site->name."</p>");
+
+			my $room = Tab::Room->create({
+				name     => $room_name,
+				site     => $default_site->id,
+				notes    => $room_id,
+				capacity => 0,
+				quality  => 10,
+				inactive => 0,
+				deleted  => 0
+			});
+
+			$rooms{$room_id} = $room;
+
+		}
+	}
+
+	foreach my $key (keys %rooms) { 
+		my $room = $rooms{$key};
+		$m->print("<p> Room JOT ID $key: ".$room->name." ".$room->id);
+		$m->print(" found in site ".$room->site->name."</p>");
+	}
+
+	$ignore_me{"rooms"}++;
+
+	$m->print("<h6 class='redtext semibold'>Importing judges</h6>");
+
+	my @all_judges = $m->comp("/funclib/tourn_judges.mas", tourn => $tourn);
+
+	my %judges;
+	my %judges_by_name;
+	my %judges_by_name_school;
+
+	foreach my $judge (@all_judges) { 
+
+		my $jot_id = $judge->setting("jot_id");
+		$judges{$jot_id} = $judge if $jot_id;
+
+		$judges_by_name{$judge->first}{$judge->last} = $judge;
+
+		if ($judge->school) { 
+			$judges_by_name_school{$judge->first}{$judge->last}{$judge->school->name} = $judge;
+			$judges_by_name_school{$judge->first}{$judge->last}{$judge->school->id} = $judge;
+		} else { 
+			$judges_by_name_school{$judge->first}{$judge->last}{"Hired"} = $judge;
+		}
+	}
+
+	foreach my $line (@{$segments{"rooms"}}) { 
+
+		next unless $csv->parse($line);
+
+		my (
+			$judge_id, $school_id, $name, $message, $options, $round_limit, 
+			$flags, $private_note, $phone1, $phone2, $email, $region, $district, 
+			$obligation, $base_priority, $rating, $user_flags, $cell_phone, 
+			$pager, $code, $web_judge_id, @bullshit
+		) = $csv->fields();
+
+		next if $judge_id eq "Judge ID";
+
 
 	foreach my $label (sort {$a cmp $b} keys %segments) { 
 
