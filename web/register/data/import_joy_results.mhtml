@@ -1,0 +1,1741 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$person_settings
+</%args>
+<%init>
+
+	use Text::CSV;
+
+    use Tab::NSDA::Login;
+    use Tab::NSDA::Person;
+    use Tab::NSDA::PersonSchool;
+    use Tab::NSDA::MemberSchool;
+
+	my %ignore_me = map {$_ => 1} ( 
+		"fees",
+		"judcommit",
+		"outcomes",
+		"pairopts",
+		"restrictions",
+		"roomavails",
+		"rsvps",
+		"seeds",
+		"seqstrs",
+		"sweeps",
+		"team4s",
+		"todos",
+		"actions",
+		"bag"
+	);
+
+	my $csv = Text::CSV->new({ sep_char => ',' });
+
+    # Get the upload and create the file handle.
+    my $req = Apache2::Request->new($r);
+    my @csv_handles = $r->upload; 
+
+    my $csv_file = $req->upload($csv_handles[0]);
+    my $io = $csv_file->io;
+
+    my @lines = <$io>;
+    my @all_lines;
+
+	my $now = DateTime->now();
+	my $this_year = $now->year;
+	$this_year++ if $now->month > 7;
+
+    foreach (@lines) { 
+        $_ =~ s/[\r]+/\n/g;
+        $_ =~ s/[\r\n]+/\n/g;
+        $_ =~ s/[\n]+/\n/g;
+        push @all_lines, split (/\n/, $_);
+    }
+
+	my @results;
+	my @changes;
+
+	my %segments;
+
+	my $next_header;
+	my $segment_key;
+	my $segment_label;
+
+	my $district_id = $tourn_settings->{"nsda_district"};
+	my $district = Tab::District->retrieve($district_id);
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	foreach my $line (@lines) { 
+		chomp $line;
+		if ($line eq '!#:----------:#!') { 
+			$next_header++;
+		} elsif ($next_header) { 
+			($segment_label, $segment_label) = split(':', $line);
+			undef $next_header;
+		} elsif ($ignore_me{$segment_label}) { 
+			# DO NOTHING I TELL YOU.  NOTHING.
+		} else { 
+			push @{$segments{$segment_label}}, $line;
+		}
+	}
+
+	my %tourn_settings;
+
+	foreach my $line (@{$segments{"TRN"}}) { 
+		chomp $line;
+		my ($key, $value) = split("=", $line);
+		next unless $value;
+		$tourn_settings{$key} = $value;
+		$ignore_me{"TRN"}++;
+	}
+
+	Tab::TournSite->set_sql( delete_blanks => "
+		delete from tourn_site
+		where tourn = ? 
+		and site = 0
+	");
+
+	Tab::TournSite->sql_delete_blanks->execute($tourn->id);
+
+	my @sites = $tourn->sites;
+
+	my $default_site;
+	$default_site = shift @sites if @sites;
+
+	my $default_weekend_site;
+
+	unless ($default_site > 0) { 
+
+		$default_site = Tab::Site->create({ 
+			name => $tourn->name." site",
+			host => $person->id
+		});
+
+		Tab::TournSite->create({
+			tourn => $tourn->id,
+			site  => $default_site->id
+		});
+
+	}
+
+	undef $segments{"actions"};
+	undef $segments{"bag"};
+	undef $segments{"fees"};
+	undef $segments{"TRN"};
+
+	my %judge_pools;
+
+	#JUDGE CATEGORIES OR POOLS OR SOMESUCH.
+	foreach my $line (@{$segments{"judprefs"}}) { 
+
+		next unless $csv->parse($line);
+
+		my (
+			$judge_id, $category
+		) = $csv->fields();
+
+		next if $judge_id eq "Judge ID";
+		$judge_id = int($judge_id);
+		$category = int($category);
+
+		$judge_pools{$judge_id}{$category}++;
+
+	}
+
+	$ignore_me{"judprefs"}++;
+
+	my $counter = 0;
+	my %event_categories;
+
+	$m->print('<div class="main">');
+
+	$m->print("<h5>Importing for district ".$district->code." ".$district->name." </h5>") if $district;
+
+	foreach my $judge (keys %judge_pools) { 
+
+		my $standing_category;
+
+		foreach my $event (sort keys %{$judge_pools{$judge}}) { 
+
+			next if $event eq "Event ID";
+
+			unless ($event_categories{$event}) { 
+
+				unless ($standing_category) { 
+					$counter++;
+					$standing_category = $counter;
+				}
+
+				$event_categories{$event} = $standing_category;
+			} 
+		}
+	}
+
+	foreach my $category (1 .. $counter) { 
+
+		my @events;
+
+		foreach my $key (keys %event_categories) { 
+			push @events, $event_categories{$key};
+		}
+	}
+
+	my @all_events = $tourn->events;
+
+	my %events;
+
+	foreach my $test (@all_events) { 
+		my $jot_id = int($test->setting('jot_id'));
+		$events{$jot_id} = $test;
+	}
+
+	my $found = 0;
+	my $created = 0;
+	my %categories;
+	my %event_web_ids;
+	my $house;
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold'>Importing events</h6>");
+
+	my %weekends;
+	my %event_site;
+	my %sites; 
+
+	#EVENTS CATEGORIES
+	LINE:
+	foreach my $line (@{$segments{"events"}}) { 
+
+		next unless $csv->parse($line);
+
+		my (
+			$internal_event_id, $event_name, $attributes, $entry_fee, $pattern, 
+			$duration, $copies, $complete, $method, $drop_fee, $team_count,
+			$entry_blank, $drop_fee2, $drop_fee3, $drop_fee4, $speaker_goal,
+			$flags, $min_points, $max_points, $nfl, $tab_method, $rows, 
+			$columns, $event_id, $performance, $web_type, $ballot_style, 
+			$type, $prelim_method
+		) = $csv->fields();
+
+		next LINE if $internal_event_id eq "Event ID";
+
+		$internal_event_id = int($internal_event_id);
+
+		if ($event_id < 0) { 
+			$event_web_ids{$internal_event_id} = $house;
+		} else { 
+			$event_web_ids{$internal_event_id} = $event_id;
+		}
+
+		next if $event_id < 0;
+
+		if ($events{$event_id}) { 
+
+			$found++;
+			$m->print("<p class='greentext semibold marleft'>");
+			$m->print("Yay! Found existing Tabroom event ".$events{$event_id}->abbr." with JOT ID $event_id</p>");
+
+			if ($events{$event_id}->abbr eq "HOU") { 
+				$house = $event_id;
+			}
+
+			my $category_code = $event_categories{$internal_event_id};
+			$categories{$category_code} = $events{$event_id}->category;
+			$categories{$category_code}->setting("jot_id", $category_code);
+
+			next LINE;
+		}
+
+		my $event;
+
+		$m->print("<p class='marleft'>Searching for existing event $event_name by name and abbreviation:</p>");
+
+		if ($tourn_settings{"NFL"} == 1) { 
+
+			if (substr($event_name, 0, 5) eq "House") { 
+
+				$event = Tab::Event->search(
+					tourn => $tourn->id,
+					abbr  => "HOU"
+				)->first;
+
+				$house = $event_id;
+
+			} else { 
+
+				$event = Tab::Event->search(
+					tourn => $tourn->id,
+					abbr  => $entry_blank
+				)->first;
+			}
+
+		} else {
+
+			$event = Tab::Event->search(
+				tourn => $tourn->id,
+				name  => $event_name
+			)->first;
+
+			unless ($event) { 
+				$event = Tab::Event->search(
+					tourn => $tourn->id,
+					abbr => $entry_blank
+				)->first;
+			}
+			
+		}
+
+		$found++ if $event;
+
+		my $category;
+
+		unless ($event) { 
+		
+			$m->print("<p class='semibold orangetext marleft'>No event found for $event_name. ");
+			$m->print("Creating an new event in Tabroom</p>");
+
+			my $category_code = $event_categories{$internal_event_id};
+			$category = $categories{$category_code};
+
+			unless ($category) { 
+				
+				$category = Tab::Category->create({
+					tourn => $tourn->id,
+					name  => "Judges ".$category_code,
+					abbr  => "J".$category_code,
+				});
+
+				$category->setting('jot_id', $category_code);
+				$categories{$category_code} = $category;
+			}
+
+			my ($team, $type) = split(",", $attributes);
+
+			if ($type eq "CONGRESS") { 
+				$type = "congress";
+			} elsif ($type eq "PAIR") { 
+				$type = "debate";
+			} elsif ($type eq "SECTION") { 
+				$type = "speech";
+			}
+
+			$entry_fee = $entry_fee / 100;
+
+			$event = Tab::Event->create({
+				name     => $event_name,
+				abbr     => $entry_blank,
+				tourn    => $tourn->id,
+				category => $category->id,
+				type     => $type,
+				fee      => $entry_fee
+			});
+
+			if ($team eq "TEAM") { 
+				$event->setting("min_entry", 2);
+				$event->setting("max_entry", 2);
+			} else {
+				$event->setting("min_entry", 1);
+				$event->setting("max_entry", 1);
+			}
+
+			$created++;
+
+
+		}
+
+		if ($event) { 
+
+			$m->print("<p class='semibold bluetext'>Tabroom Event $event ".$event->abbr." designated for ");
+			$m->print("JOT Event ID $event_id $event_name.</p>");
+
+			my $category = $event->category;
+
+			my $category_code = $event_categories{$internal_event_id};
+			$categories{$category_code} = $category;
+			$category->setting("jot_id", $category_code);
+
+			$event->setting("jot_id", $event_id);
+			$events{$event_id} = $event;
+
+			if ($event->setting('weekend')) { 
+
+				my $weekend = Tab::Weekend->retrieve($event->setting("weekend"));
+
+				if ($weekend) { 
+
+					$weekends{$weekend->id} = $weekend;
+
+					my $site = $weekend->site;
+
+					if ($site && $site > 0) { 
+
+						unless ($default_weekend_site) { 
+							$default_site = $site;
+							$default_weekend_site++;
+						}
+
+						$event_site{$event_id} = $site;
+						$sites{$site->id} = $site;
+					} 
+				}
+
+			}
+
+		} else { 
+			$m->print("<p class='semibold redtext'> I was not able to find ");
+			$m->print("or create $entry_blank: $event_name in Tabroom.</p>");
+		}
+
+	}
+
+	my $unpooled = $tourn->categories(
+		abbr => "XX",
+		name => "Unpooled Judges"
+	)->first;
+
+	unless ($unpooled) { 
+		$unpooled = Tab::Category->create({
+			tourn => $tourn->id,
+			abbr  => "XX",
+			name  => "Unpooled Judges"
+		});
+	}
+
+	# Fill in any un-sited events
+	foreach my $event_id (keys %events) { 
+		unless ($event_site{$event_id}) { 
+			$event_site{$event_id} = $default_site;
+			$sites{$default_site->id} = $default_site;
+		}
+	}
+
+	undef @{$segments{"events"}};
+	undef $segments{"events"};
+	$ignore_me{"events"}++;
+
+	$m->print("<p class='semibold'>$found events found, $created events created</p>");
+
+	$m->flush_buffer();
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold'>Importing schools</h6>");
+
+	my %schools = map{ $_->setting("jot_id") => $_} $tourn->schools;
+	my %school_web_ids;
+
+	$found = 0;
+	$created = 0;
+
+	LINE:
+	foreach my $line (@{$segments{"schools"}}) { 
+
+		next unless $csv->parse($line);
+
+		my (
+			$school_id, $code, $name, $coach, $squad_count, 
+			$arrived, $division, $city, $phone, $fax, $coach_phone, 
+			$notes, $status, $addr1, $addr2, $state, $zip, $email, 
+			$flags, $district_code, $region, $other_coaches, $trophy_points, 
+			$web_school_id, $cell_phone, $alt_email
+		) = $csv->fields();
+
+		next LINE if $school_id eq "School ID";
+
+		$web_school_id = int($web_school_id);
+		$found++ if $schools{$web_school_id};
+
+		$school_id = int($school_id);
+		$school_web_ids{$school_id} = $web_school_id;
+
+		$m->print("<p class='semibold padleft martop'>Importing school ");
+		$m->print("$name $web_school_id into this tournament.  Tagged to $school_id.</p>");
+
+		next LINE if $schools{$web_school_id};
+
+		if ($district) { 
+
+			my $school = Tab::School->search(
+				name     => $name,
+				tourn    => $tourn->id,
+				district => $district->id
+			)->first;
+
+			if ($school) { 
+				$m->print("<p>School ".$school->name." found in tournament for $name $web_school_id</p>");
+			}
+
+			unless ($school) { 
+
+				# Chapter with the same name in the same district? 
+				my $chapter;
+				
+				$chapter = Tab::Chapter->search(
+					name     => $name,
+					district => $district->id
+				)->first;
+
+				unless ($chapter) { 
+
+					my $cs = Tab::ChapterSetting->search(
+						tag   => "jot_id",
+						value => $web_school_id
+					)->first;
+
+					$chapter = $cs->chapter if $cs;
+				}
+
+				my $tabroom_account;
+
+				if ($chapter) {
+
+					$m->print("<p class='greentext'>Found Tabroom school $chapter ".$chapter->name);
+					$m->print(" from a previous import</p>");
+
+				} else {
+
+					$tabroom_account = Tab::Person->search( 
+						email => $email
+					)->first;
+
+					unless ($tabroom_account) { 
+
+						my $tabroom_login = Tab::Login->search(
+							username => $email
+						)->first;
+
+						$tabroom_account = $tabroom_login->person 
+							if $tabroom_login;
+					}
+
+
+					if ($tabroom_account) { 
+					
+						my @permissions = $tabroom_account->permissions( tag => "chapter" );
+
+						my $short_name = Tab::short_name($name);
+
+						foreach my $perm (@permissions) { 
+							$chapter = $perm->chapter
+								if $short_name eq $perm->chapter->short_name;
+						}
+
+					}
+					
+					if ($chapter && $tabroom_account) { 
+						$m->print("<p class='greentext'>Found Tabroom school $chapter ".$chapter->name." belonging");
+						$m->print(" to the Tabroom account $email </p>");
+					}
+
+					if ($chapter && ($chapter->nsda < 1)) { 
+
+						my $nsda_school = $m->comp(
+							"/funclib/nsda_school.mas", 
+							name        => $name,
+							district_id => $district->id
+						);
+
+						$chapter->nsda($nsda_school->school_id) 
+							if $nsda_school;
+
+						$chapter->district($district->id);
+						$chapter->update();
+
+						push @changes, $chapter->id." linked to this district and NSDA school ".$chapter->nsda;
+
+					}
+
+				}
+
+				unless ($chapter) { 
+
+					my $nsda_school = $m->comp(
+						"/funclib/nsda_school.mas", 
+						name        => $name,
+						district_id => $district->id
+					);
+
+					if ($nsda_school) { 
+
+						$chapter = Tab::Chapter->search(
+							nsda => $nsda_school->school_id
+						)->first;
+
+						unless ($chapter) { 
+
+							my $nome;
+							$nome++ unless $tabroom_account;
+
+							$chapter = $m->comp(
+								"/funclib/chapter_import.mas",
+								nsda_school => $nsda_school,
+								person      => $tabroom_account,
+								nome        => $nome
+							);
+
+							my $change_result = $district->name." imported NSDA chapter $chapter ".$chapter->name;
+							$change_result   .= " for NSDA School ID ".$chapter->nsda;
+
+							if ($tabroom_account) { 
+								$change_result .= " with person $tabroom_account (".$tabroom_account->email.") ";
+								$change_result .= " with access" 
+							} else { 
+								$change_result .= " <br />No tabroom account found for $coach:  $email";
+								$change_result .= " so no coach access granted.";
+							}
+
+							$m->print("<p class='semibold bluetext'>".$change_result."</p>");
+							push @changes, $change_result;
+
+						}
+					}
+				}
+
+				unless ($chapter) { 
+
+					$chapter = Tab::Chapter->create({
+						name     => $name,
+						street   => $addr1,
+						city     => $city,
+						state    => $state,
+						zip      => $zip,
+						country  => "US",
+						coaches  => $coach,
+						district => $district_id
+					});
+
+					if ($tabroom_account) { 
+						Tab::Permission->create({
+							person  => $tabroom_account->id,
+							tag     => "chapter",
+							chapter => $chapter->id
+						});
+					}
+
+					$m->print("<p class='semibold redtext'>No school found in Tabroom or the NSDA.");
+					$m->print(" Created new Tabroom school ID $chapter for $name $web_school_id");
+					$m->print(" and granted admin access to $tabroom_account $email") if $tabroom_account;
+					$m->print("</p>");
+
+				}
+
+				if ($chapter) { 
+
+					$school = $chapter->schools( 
+						tourn   => $tourn->id,
+						chapter => $chapter->id
+					)->first;
+
+					unless ($school) { 
+						$school = Tab::School->create({
+							name     => $name,
+							code     => $code,
+							onsite   => $arrived,
+							chapter  => $chapter->id,
+							tourn    => $tourn->id,
+							state    => $state,
+							district => $district->id
+						});
+
+						$created++;
+					}	
+						
+					$chapter->setting("jot_id", $web_school_id);
+
+					$school->setting("state", $state);
+					$school->setting("contact_name", $coach);
+					$school->setting("contact_phone", $coach);
+					$school->setting("contact_email", $email)
+
+				}
+
+			}
+
+			if ($school) { 
+				$school->setting("jot_id", $web_school_id);
+				$schools{$web_school_id} = $school;
+			} else { 
+				$m->print("<p class='redtext semibold'>Failed utterly with $name $web_school_id</p>");
+			}
+		}
+	}
+
+	undef @{$segments{"schools"}};
+	undef $segments{"schools"};
+	$ignore_me{"schools"}++;
+
+	my %tiebreak_sets = 
+		map {$_->name => $_}
+		$tourn->tiebreak_sets();
+
+	$m->print("<p class='semibold'>$found schools found, $created created</p>");
+
+	my %timeslots = 
+		map {$_->start->epoch => $_} 
+		$tourn->timeslots();
+
+	undef $counter;
+	$counter = scalar(keys %timeslots);
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold'>Importing rounds and timeblocks</h6>");
+
+	my %rounds;
+	my %rounds_by_name;
+
+	# ROUNDS TIMEBLOCKS:
+	foreach my $line (@{$segments{"evrd"}}) { 
+
+		next unless $csv->parse($line);
+
+		my (
+			$internal_event_id, $round_id, $no, $idea, $round_name, 
+			$date, $time, $draw, 
+			$flip, $panel, $flight, $panel_size, 
+			$auto_flight, $attr, $user_flags
+		) = $csv->fields();
+
+		next if $internal_event_id eq "Event ID";
+
+		$internal_event_id = int($internal_event_id);
+		$round_name = int($round_name);
+		$round_id = int($round_id);
+		$flight = int($flight);
+
+		my $event_id = $event_web_ids{$internal_event_id};
+		my $event = $events{$event_id};
+
+		unless ($event) { 
+			$m->print("<p>Event $event_id is not found</p>");
+			$m->abort();
+		}
+
+		foreach ($date, $time, $draw) { 
+			$_ =~ s/^\s+//;
+			$_ =~ s/\s+$//;
+		}
+
+		$date =~ s/-/\//g;
+		my ($hour, $minutes) = split(":", $time);
+
+		unless ($rounds_by_name{$event_id}) { 
+			%{$rounds_by_name{$event_id}} = 
+				map {$_->name => $_} 
+				$event->rounds();
+		}
+
+		unless ($rounds{$event_id}) { 
+			%{$rounds{$event_id}} = 
+				map {$_->setting("jot_id") => $_} 
+				$event->rounds();
+		}
+
+		# Motherfucker
+		my $ampm = substr($minutes, -2);
+		$minutes = substr($minutes, 0, -2);
+
+		my $start_time = eval { 
+			return Tab::dtme($date, "$hour:$minutes".uc($ampm), $tz);
+		};
+
+		$m->print("<p class='marleftmore'>".$event->abbr);
+		$m->print(" Round $round_name started at $start_time: ");
+
+		unless ($timeslots{$start_time->epoch}) { 
+
+			my $end_time = $start_time->clone();
+			$end_time->add( hours => 1);
+
+			$counter++;
+
+			my $timeslot = Tab::Timeslot->create({ 
+				tourn => $tourn,
+				name  => "Timeslot $counter",
+				start => $start_time,
+				end   => $end_time
+			});
+
+			$timeslots{$start_time->epoch} = $timeslot;
+
+		}
+
+		unless ($event) { 
+			$m->print("<p class='redtext semibold'>No event found for $event_id.  House is $house</p>");
+			$m->abort();
+		}
+
+		my $round_type; 
+
+		if ($district) { 
+			if ($event->type eq "speech") { 
+				if ($tourn_settings->{"nsda_speech_method"} eq "doubledown") { 
+					$round_type = "prelim";
+					$round_type = "elim" if $round_name > 2;
+					$round_type = "final" if $round_id == 8;
+				} else { 
+					$round_type = "prelim";
+					$round_type = "final" if $round_id == 8;
+					$round_type = "elim" if $round_id == 7;
+				}
+			} elsif ($event->type eq "debate") { 
+				$round_type = "prelim";
+				$round_type = "final" if $round_id != 8;
+				$round_type = "elim" if $round_id > 12;
+			} else { 
+				$round_type = "prelim";
+				$round_type = "final" if $round_id == 8;
+				$round_type = "elim" if $round_id > 6;
+			}
+
+		} else { 
+			$round_type = "prelim";
+			$round_type = "final" if $round_id == 8;
+			$round_type = "elim" if $round_id > 6;
+		}
+
+		my $round;
+
+		if ($rounds_by_name{$event_id}{$round_name}
+			|| $rounds{$event_id}{$round_id}
+		) { 
+
+			$round = $rounds{$event_id}{$round_id};
+
+			unless ($round) { 
+				$round = $rounds_by_name{$event_id}{$round_name};
+				$round->setting("jot_id", $round_id);
+			}
+
+			my $timeslot = $timeslots{$start_time->epoch};
+
+			unless ($round->timeslot->id == $timeslot->id) { 
+				$round->timeslot($timeslot->id);
+			}
+
+			$round->type($round_type);
+			$round->site($event_site{$event_id});
+			$round->update();
+
+			$m->print(" Round already exists with ID ".$round->id."</p>");
+
+		} else { 
+
+			my $tiebreak_set;
+
+			$round = Tab::Round->create({
+				name         => $round_name,
+				type         => $round_type,
+				flighted     => $flight,
+				published    => 0,
+				post_results => 0,
+				start_time   => $start_time,
+				event        => $event->id,
+				timeslot     => $timeslots{$start_time->epoch}->id,
+				site         => $event_site{$event_id}
+			});
+
+			$m->print(" Created round ".$round->name." as a ");
+			$m->print($round_type." round in ".$event->abbr."</p>");
+
+			$round->setting("jot_id", $round_id);
+			$rounds{$event_id}{$round_id} = $round;
+			$rounds_by_name{$event_id}{$round_name} = $round;
+
+		}
+
+		# Dump the round's current sections and results if any
+
+		$m->comp("/funclib/round_dump.mas", 
+			person => $person,
+			round  => $round
+		);
+	}
+
+	undef @{$segments{"evrd"}};
+	undef $segments{"evrd"};
+	$ignore_me{"evrd"}++;
+
+	undef $counter;
+
+	foreach my $key (sort keys %timeslots) { 
+		$counter++;
+		$timeslots{$key}->name("Timeslot ".$counter);
+		$timeslots{$key}->update();
+	}
+
+	my %rooms;
+	my %site_rooms;
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold'>Importing rooms and sites </h6>");
+	$m->print("<p class='bluetext bigger semibold'>The default site for new rooms ");
+	$m->print("is ".$default_site." ".$default_site->name."</p>");
+
+	# ROOMS
+	foreach my $line (@{$segments{"rooms"}}) { 
+
+		next unless $csv->parse($line);
+
+		my (
+			$room_id, $room_name, $hall, $notes, $flags, $other_flags
+		) = $csv->fields();
+
+		next if $room_id eq "Room ID";
+
+		$room_id = int($room_id);
+
+		# Hunt for an existing room named this:
+		foreach my $key (keys %sites) { 
+
+			last if $rooms{$room_id};
+
+			my $site = $sites{$key};
+
+			unless ($site_rooms{$key}) { 
+				@{$site_rooms{$key}} = $site->rooms();
+			}
+
+			foreach my $room (@{$site_rooms{$key}}) { 
+
+				if (
+					$room->notes == $room_id
+				 	|| $room_name eq $room->name
+				) { 
+					$rooms{$room_id} = $room;
+					last;
+				}
+			}
+		}
+
+		#If it isn't found create one:
+
+		if ($rooms{$room_id}) { 
+
+			if ($rooms{$room_id}->deleted) { 
+				$rooms{$room_id}->deleted(0);
+				$rooms{$room_id}->update();
+			}
+
+			$m->print("<p> Room JOT ID $room_id: ".$rooms{$room_id}->name." ".$rooms{$room_id}->id);
+			$m->print(" found in site ".$rooms{$room_id}->site->name."</p>");
+
+		} else { 
+
+			$rooms{$room_id} = eval {
+				return Tab::Room->create({
+					name     => $room_name,
+					site     => $default_site->id,
+					notes    => $room_id,
+					capacity => 0,
+					quality  => 10,
+					inactive => 0,
+					deleted  => 0
+				});
+			};
+
+			if ($rooms{$room_id}) { 
+				$m->print("<p class='greentext'>No room $room_name found.");
+				$m->print(" Created one in Tabroom site ".$default_site->name."</p>");
+			} else { 
+				$m->print("<p class='redttext'>No room $room_name found and I was unable to create one</p>");
+			}
+		}
+	}
+
+	undef @{$segments{"rooms"}};
+	undef $segments{"rooms"};
+	$ignore_me{"rooms"}++;
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold'>Importing judges</h6>");
+
+	my @all_judges = $m->comp("/funclib/tourn_judges.mas", tourn => $tourn);
+
+	my %judges;
+	my %judge_category;
+	my %judge_web_ids;
+
+	foreach my $judge (@all_judges) { 
+		my $jot_id = $judge->setting("jot_id");
+		push @{$judges{$jot_id}}, $judge if $jot_id;
+	}
+
+	foreach my $line (@{$segments{"judges"}}) { 
+
+		next unless $csv->parse($line);
+
+		my (
+			$internal_judge_id, $internal_school_id, $name, $message, $options, $round_limit, 
+			$flags, $private_note, $phone1, $phone2, $email, $region, $district, 
+			$obligation, $base_priority, $rating, $user_flags, $cell_phone, 
+			$pager, $code, $judge_id, @bullshit
+		) = $csv->fields();
+
+		next if $internal_judge_id eq "Judge ID";
+
+		$judge_id = int($judge_id);
+		$internal_judge_id = int($internal_judge_id);
+		$internal_school_id = int($internal_school_id);
+
+		$judge_id = $tourn->id."-".$internal_judge_id if $judge_id == -1;
+
+		my @already;
+		@already = @{$judges{$judge_id}} if $judges{$judge_id};
+
+		my $chapter_judge;
+		my $hired;
+		my $school_id;
+		my $school;
+
+		if ($internal_school_id == -1) { 
+			$hired++;
+			$school_id = 0;
+		} else { 
+			$school_id = $school_web_ids{$internal_school_id};
+			$school = $schools{$school_id};
+		}
+
+		my $person;
+
+		if ($email) { 
+
+			$person = Tab::Person->search( 
+				email => $email
+			)->first;
+
+			unless ($person) { 
+				my $login = Tab::Login->search( 
+					username => $email
+				)->first;
+				$person = $login->person if $login;
+			}
+		}
+
+		# So someone who stores middle names and salutations in the database
+		# munges them all into one field in the application.  Sigh. 
+
+		# I'm going to only use first and last for searching because otherwise
+		# this will reach a higher level of ridiculous than it already has. 
+
+		my @names = split(/\ /, $name);
+		my $first;
+		my $last;
+		my $middle;
+
+		$first = shift @names if @names;
+		$last = pop @names if @names;
+		$middle = join(" ", @names);
+
+		if ($school) { 
+
+			if (@already) { 
+
+				$chapter_judge = $already[0]->chapter_judge;
+
+			} else { 
+
+				my $chapter = $school->chapter;
+
+				$chapter_judge = $chapter->chapter_judges(
+					person => $person->id
+				)->first if $person;
+
+				$chapter_judge = $chapter->chapter_judges(
+					first => $first,
+					last  => $last
+				)->first unless $chapter_judge;
+
+				unless ($chapter_judge) { 
+
+					$chapter_judge = Tab::ChapterJudge->create({
+						first   => $first,
+						middle  => $middle,
+						last    => $last,
+						retired => 0,
+						phone   => $cell_phone,
+						email   => $email,
+						person  => $person,
+						chapter => $chapter
+					});
+
+				}
+
+			}
+
+			if ($chapter_judge && $person) { 
+
+				unless ($chapter_judge->person) { 
+					$chapter_judge->person($person->id);
+					$chapter_judge->update();
+				}
+
+			}
+
+		} else { 
+			$school = 0;
+			$chapter_judge = 0;
+		}
+
+		my %already;
+		my $judge;
+
+		foreach my $internal_event_id (keys %{$judge_pools{$internal_judge_id}}) { 
+
+			my $category_code = $event_categories{$internal_event_id};
+			my $category = $categories{$category_code};
+
+			unless ($already{$category}++) { 
+
+				$m->print("<p class='greentext'>Judge $judge_id $first $last entered into judge category ".$category->abbr."</p>");
+
+				$judge = Tab::Judge->search(
+					person => $person->id
+				)->first if $person;
+
+				$judge = Tab::Judge->search(
+					school        => $school,
+					category      => $category,
+					chapter_judge => $chapter_judge,
+					first         => $first,
+					middle        => $middle,
+					last          => $last,
+				)->first unless $judge;
+
+				if ($judge) { 
+
+					if ($person && $person != $judge->person) { 
+						$judge->person($person->id);
+						$judge->update();
+					}
+					
+
+				} else { 
+
+					$judge = Tab::Judge->create({
+						first         => $first,
+						middle        => $middle,
+						last          => $last,
+						active        => 1,
+						obligation    => 9,
+						hired         => 0,
+						school        => $school,
+						category      => $category,
+						chapter_judge => $chapter_judge
+					});
+
+				}
+
+				$judge->setting("jot_id", $judge_id);
+				push @{$judges{$judge_id}}, $judge;
+				$judge_category{$judge_id}{$category->id} = $judge;
+
+			}
+
+		}
+
+		unless (keys %{$judge_pools{$internal_judge_id}}) { 
+
+			$judge = Tab::Judge->search(
+				person => $person->id
+			)->first if $person;
+
+			$judge = Tab::Judge->search(
+				school        => $school,
+				category      => $unpooled,
+				chapter_judge => $chapter_judge,
+				first         => $first,
+				middle        => $middle,
+				last          => $last,
+			)->first unless $judge;
+
+			$judge = Tab::Judge->create({
+				first         => $first,
+				middle        => $middle,
+				last          => $last,
+				active        => 1,
+				obligation    => 9,
+				hired         => 0,
+				school        => $school,
+				category      => $unpooled,
+				chapter_judge => $chapter_judge
+			}) unless $judge;
+
+			$judge->setting("jot_id", $judge_id);
+
+			push @{$judges{$judge_id}}, $judge;
+			$judge_category{$judge_id}{$unpooled->id} = $judge;
+			
+			$m->print("<p class='semibold bluetext'>Judge $judge_id $first $last ");
+			$m->print("had no event pools; entered into the ".$unpooled->name." category</p>");
+
+		}
+
+		unless ($judge) { 
+			$m->print("<p class='semibold redtext'>Unable to import Judge ".$first." ".$last."</p>");
+		}
+	}
+
+	undef @{$segments{"judges"}};
+	undef $segments{"judges"};
+	$ignore_me{"judges"}++;
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold'>Importing competitors</h6>");
+
+	my @all_students = $m->comp(
+		"/funclib/tourn_students.mas", 
+		tourn => $tourn
+	);
+
+	my %students; 
+	my %student_web_ids;
+	my %student_tags;
+
+	foreach my $student (@all_students) { 
+
+		my $jot_id = $student->setting("jot_id");
+
+		if ($jot_id) { 
+			$students{$jot_id} = $student;
+		}
+
+		$student_tags{$student->chapter->id}{$student->first}{$student->last} = $student;
+		
+	}
+
+	my %name_codes;
+
+	foreach my $line (@{$segments{"names"}}) { 
+
+		next unless $csv->parse($line);
+
+		my (
+			$internal_student_id, $internal_school_id, $name, $code, $student_id
+		) = $csv->fields();
+
+		next if $internal_student_id eq "Name ID";
+		$name_codes{int($internal_student_id)} = $code;
+
+		# This function filters out some nonsense about pairs/teams:
+		next if (index($name, ' - ') != -1);
+
+		$student_id = int($student_id);
+		$internal_student_id = int($internal_student_id);
+		$student_web_ids{$internal_student_id} = $student_id;
+		next if $students{$student_id};
+
+		$internal_school_id = int($internal_school_id);
+		my $school_id = $school_web_ids{$internal_school_id};
+		my $school = $schools{$school_id};
+
+		my @names = split(/\ /, $name);
+		my $first;
+		my $last;
+		my $middle;
+
+		$first = shift @names if @names;
+		$last = pop @names if @names;
+		$middle = join(" ", @names);
+
+		$m->print("<p>Seeking competitor $name in school $school_id ".$school->name.": ");
+
+		if ($student_tags{$school_id}{$first}{$last}) { 
+
+			my $student = $student_tags{$school_id}{$first}{$last};
+			$m->print("Found ".$student->id." already in the tournament.</p>");
+
+			$student->setting("jot_id", $student_id);
+			$students{$student_id} = $student;
+
+		} else { 
+
+			my $candidate;
+
+			my $chapter = $school->chapter;
+
+			my @students = $chapter->students(
+				first => $first,
+				last  => $last
+			);
+
+			foreach my $student (@students) { 
+
+				next if $student->retired;
+
+				next if $student->grad_year > 1900
+					&& $student->grad_year < $this_year; 
+
+				if ($student->ualt_id
+					&& $candidate && (not defined $candidate->ualt_id)
+				) { 
+					$candidate = $student;
+				} 
+
+				$candidate = $student unless $candidate;
+			}
+
+			my $search_nsda; 
+
+			unless ($candidate) { 
+
+				$m->print("<p class='orangetext'>No competitor found with name $first $last.");
+				$m->print(" Creating in Tabroom</p>");
+
+				$candidate = Tab::Student->create({
+					first   => $first,
+					middle  => $middle,
+					last    => $last,
+					chapter => $chapter,
+					novice  => 0,
+					retired => 0
+				});
+
+				$search_nsda++;
+				
+				$m->print("<p class='marleft'> &ndash; Attempting to link new competitor to NSDA membership: ");
+			}
+
+			unless ($candidate->ualt_id) { 
+				$m->print("<p class='marleft'> &ndash; Existing competitor does not have NSDA membership linked. Searching: ");
+				$search_nsda++;
+			}
+
+			if ($search_nsda) { 
+
+				my $nsda = $m->comp(
+					"/funclib/nsda_student_search.mas", 
+					chapter => $chapter,
+					first   => $first,
+					last    => $last
+				);
+
+				if ($nsda) { 
+
+					$m->print("<span class='inline greentext semibold'>Found NSDA ");
+					$m->print("member ".$nsda->ualt_id." and linking.</p>");
+
+					$candidate->grad_year($nsda->grad_yr);
+					$candidate->ualt_id($nsda->ualt_id);
+					$candidate->update();
+
+					if ($nsda->paid_status) { 
+						$candidate->setting("nsda_paid", 1);
+					} else { 
+						$candidate->setting("nsda_paid", "X");
+					}
+
+					if ($nsda->total_pts) { 
+						$candidate->setting("nsda_points", $nsda->total_pts);
+					} else { 
+						$candidate->setting("nsda_points", "X");
+					}
+
+					my $joined = eval{
+						return DateTime::Format::MySQL->parse_datetime($nsda->high_joined);
+					};
+
+					if ($joined) { 
+						$candidate->setting("nsda_joined", "date", $joined);
+					} else { 
+						$candidate->setting("nsda_joined", "X");
+					}
+
+					my $test_person;
+
+					if ($candidate->person) { 
+
+						$candidate->setting("student_email", $candidate->person->email);
+					
+					} elsif ($nsda->demo) { 
+
+						$candidate->setting("student_email", $nsda->demo);
+						$test_person = $nsda->demo;
+					
+					} elsif ($nsda->login) { 
+
+						$test_person = $nsda->login;
+						$candidate->setting("student_email", $nsda->login);
+
+					} else { 
+						$candidate->setting("student_email", "X");
+					}
+
+					if ($test_person) { 
+						my $person = Tab::Person->search( 
+							email => $test_person
+						)->first;
+
+						unless ($person) { 
+							my $login = Tab::Login->search( 
+								username => $test_person
+							)->first;
+						}
+					}
+
+				} elsif ($district) { 
+
+					$m->print("<span class='inline redtext semibold'>No matching NSDA member ");
+					$m->print("found.  Reconciliation will be required for Districts.</p>");
+				}
+			}
+
+			$candidate->setting("jot_id", $student_id);
+			$students{$student_id} = $candidate;
+
+		}
+	}
+
+	undef @{$segments{"names"}};
+	undef $segments{"names"};
+	$ignore_me{"names"}++;
+
+	my %teams = ();
+
+	foreach my $line (@{$segments{"teams"}}) { 
+
+		next unless $csv->parse($line);
+
+		my ( 
+			$internal_entry_id, $internal_student_id 
+		) = $csv->fields();
+
+		next if $internal_entry_id eq "Entry ID";
+
+		my $student_id = $student_web_ids{int($internal_student_id)};
+		push @{$teams{int($internal_entry_id)}}, $student_id;
+	}
+
+	undef @{$segments{"teams"}};
+	undef $segments{"teams"};
+	$ignore_me{"teams"}++;
+
+	my %entry_web_ids;
+	my %entries;
+	my %entry_tags;
+
+	my @all_entries = $m->comp(
+		"/funclib/tourn_entries.mas", 
+		tourn => $tourn
+	);
+
+	foreach my $entry (@all_entries) { 
+		my $jot_id = $entry->setting("jot_id");
+		$entries{$jot_id} = $entry if $jot_id;
+		push @{$entry_tags{$entry->school->id}{$entry->event->id}}, $entry;
+	}
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold'>Importing entries</h6>");
+
+	# Can't spell entries apparently. 
+	ENTRY:
+	foreach my $line (@{$segments{"entrys"}}) { 
+
+		next unless $csv->parse($line);
+
+		my ( 
+			$internal_entry_id, $internal_school_id, $internal_event_id, $squad_seq, 
+			$internal_student_id, $flags, $apparently_not_a_code, $user_flags, 
+			$entry_id, $seed
+		) = $csv->fields();
+
+		next if $internal_entry_id eq "Entry ID";
+
+		my $event_id = $event_web_ids{int($internal_event_id)};
+		my $school_id = $school_web_ids{int($internal_school_id)};
+		my $student_id = $student_web_ids{int($internal_student_id)};
+
+		$entry_web_ids{int($internal_entry_id)} = $entry_id;
+
+		my $entry = $entries{$entry_id};
+		my $code = $name_codes{int($internal_student_id)};
+
+		unless ($entry) { 
+
+			my $event = $events{$event_id};
+			my $school = $schools{$school_id};
+
+			my %entry_students;
+
+			if ($teams{int($internal_entry_id)}) { 
+
+				foreach my $student_id (@{$teams{int($internal_entry_id)}}) { 
+					$entry_students{$students{$student_id}->id} = $students{$student_id};
+				}
+			} else { 
+
+				my $student = $students{$student_id};
+				$entry_students{$students{$student_id}->id} = $students{$student_id};
+			}
+	
+			EXISTS:
+			foreach my $existing (@{$entry_tags{$school->id}{$event->id}}) { 
+
+				my %existing_students = map {$_->id => 1} $existing->students;
+
+				foreach my $key (keys %existing_students) { 
+					next EXISTS unless $entry_students{$key};
+				}
+				foreach my $key (keys %entry_students) { 
+					next EXISTS unless $existing_students{$key};
+				}
+
+				$entry = $existing;
+				last EXISTS if $entry;
+			}
+
+			if ($entry) { 
+				$m->print("<p>Entry $code already exists! ");
+			} else { 
+
+				$m->print("<p>Entry $code does not exist.  Importing to Tabroom: ");
+
+				$entry = Tab::Entry->create({
+					code          => $code,
+					tba           => 0,
+					dropped       => 0,
+					waitlist      => 0,
+					unconfirmed   => 0,
+					dq            => 0,
+					created_at    => $now,
+					tourn         => $tourn->id,
+					event         => $event->id,
+					school        => $school->id,
+					registered_by => $person->id,
+				});
+
+				foreach my $key (keys %entry_students) { 
+					Tab::EntryStudent->create({
+						entry   => $entry->id,
+						student => $entry_students{$key}->id
+					});
+				}
+
+				$entry->name($m->comp("/funclib/entry_name.mas", entry => $entry));
+
+			}
+
+			if ($entry) { 
+
+				$entry->code($code);
+				$entry->update();
+				$entries{$entry_id} = $entry;
+
+				$m->print("<span class='inline semibold greentext marleft'>Succeeded!</p>");
+
+			} else { 
+
+				$m->print(" <span class='inline semibold redtext'>Import failed!</p>");
+			}
+
+		}
+		
+	}
+
+	undef @{$segments{"entrys"}};
+	undef $segments{"entrys"};
+	$ignore_me{"entrys"}++;
+
+	my %sections;
+	my %sections_by_tag;
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold marbottom'>Importing sections/debates/chambers</h6>");
+
+	my %event_counter;
+	my $overall;
+
+	# I hate that this is necessary.  It looks unnecessary.  But wait until you
+	# see the judge nightmare below. 
+	my %section_translator;
+
+	SECTION:
+	foreach my $line (@{$segments{"sections"}}) { 
+
+		next unless $csv->parse($line);
+
+		my ( 
+			$section_id, $internal_event_id, $round_id, $room_id, 
+				$letter, $num_judges, $dunno, $noclue
+		) = $csv->fields();
+
+		next if $section_id eq "Section ID";
+
+		my $bye++ if $round_id < 0;
+		$bye = 0 unless $bye;
+
+		$section_id = int($section_id);
+		$round_id = abs(int($round_id));
+		$room_id = int($room_id);
+		$letter =~ s/\s+//g;
+
+		my $event_id = $event_web_ids{int($internal_event_id)};
+
+		my $room = $rooms{$room_id};
+		my $event = $events{$event_id};
+		my $round = $rounds{$event_id}{$round_id};
+
+		if ($event->type eq "congress" && $room_id == -1) { 
+			# What fresh hell is this?
+			$sections{$section_id} = $sections_by_tag{$event_id}{$round_id}{"object"};
+			$section_translator{$section_id} = $sections_by_tag{$event_id}{$round_id}{"id"};
+			next SECTION;
+		}
+
+		my $section = Tab::Panel->create({
+			round  => $round->id,
+			letter => $letter,
+			bye    => $bye,
+			room   => $room
+		});
+
+		$event_counter{$event->abbr}++;
+		$sections{$section_id} = $section;
+		$sections_by_tag{$event_id}{$round_id}{"object"} = $section;
+		$sections_by_tag{$event_id}{$round_id}{"id"} = $section_id;
+
+	}
+
+	undef @{$segments{"sections"}};
+	undef $segments{"sections"};
+	$ignore_me{"sections"}++;
+
+	foreach my $abbr (keys %event_counter) { 
+		$m->print("<p class='semibold bluetext'>Created $event_counter{$abbr} sections of $abbr</p>");
+	}
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold marbottom'>Assigning judges and entries to sections</h6>");
+
+	my %section_judges;
+	my %yaf_judge_id;
+
+	# Sure let's needlessly renumber all the judges for NO APPARENT REASON
+
+	SECTION:
+	foreach my $line (@{$segments{"judsects"}}) { 
+
+		next unless $csv->parse($line);
+
+		my ( 
+			$internal_judge_id, $section_id, $yet_another_fucking_judge_id
+		) = $csv->fields();
+
+		next if $section_id eq "Judge ID";
+
+		my $section = $sections{$section_id};
+
+		my $judge_id = $judge_web_ids{int($internal_judge_id)};
+		my $judge = $judges{$judge_id};
+
+		if ($judge) { 
+
+			$section_judges{$section_id}{$yet_another_fucking_judge_id} = $judge;
+
+		} else { 
+
+			# This dumbass Congress hack makes my eyes bleed
+
+			my $actual_section_id = $section_translator{$section_id};
+			$judge = $section_judges{$actual_section_id}{$internal_judge_id};
+			$section_judges{$section_id}{$yet_another_fucking_judge_id} = $judge;
+
+		}
+	}
+
+	$ignore_me{"judsects"}++;
+
+	my %section_entries;
+
+	SECTION:
+	foreach my $line (@{$segments{"sectents"}}) { 
+
+		next unless $csv->parse($line);
+
+		my ( 
+			$section_id, $internal_entry_id, $speaker_order, $speaker_actual,$id
+		) = $csv->fields();
+
+		next if $section_id eq "Section ID";
+
+		my $entry_id = $entry_web_ids{int($internal_entry_id)};
+		my $entry = $entries{$entry_id};
+
+		Tab::debuglog("Order $speaker_order section $section_id is entry $entry from id $entry_id internal $internal_entry_id");
+		$section_entries{$section_id}{$speaker_order} = $entry;
+	}
+
+	$ignore_me{"sectents"}++;
+
+	foreach my $section_id (keys %section_entries) { 
+
+		my $section = $sections{$section_id};
+
+		$m->print("<p class='semibold'>Section ".$section->letter." of ");
+		$m->print($section->round->event->abbr." ".$section->round->name.":</p>");
+
+		$m->print("<p class='marleft bluetext semibold'>Entries:");
+	
+		foreach my $order (keys %{$section_entries{$section_id}}) { 
+			my $entry = $section_entries{$section_id}{$order};
+			$m->print("<span class='inline padleft'> $order.".$entry->code."</span>") if $entry;
+		}
+
+		$m->print("</p> <p class='marleft bluetext semibold'>Judges:");
+	
+		foreach my $order (keys %{$section_judges{$section_id}}) { 
+			my $judge = $section_judges{$section_id}{$order};
+			$m->print("<span class='inline padleft'> $order.".$judge->last."</span>") if $judge;
+		}
+
+		$m->print("</p>");
+
+	}
+
+
+	foreach my $label (sort {$a cmp $b} keys %segments) { 
+
+		next if $ignore_me{$label};
+
+		$m->print("<h5>".$label."</h5>");
+
+		foreach my $line (@{$segments{$label}}) { 
+			$m->print("<pre>".$line."</pre>");
+		}
+
+	}
+
+</%init>
+
+	</div>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<h5>Results</h5>
+
+%			foreach my $result (@results) { 
+				<div class="row padless">
+					<% $result %>
+				</div>
+%			}
+
+		</div>
+
+		<div class="sidenote">
+
+			<h5>Changes</h5>
+
+%			foreach my $change (@changes) { 
+
+				<div class="row padless">
+					<% $change %>
+				</div>
+%			}
+
+		</div>
+
+	</div>
