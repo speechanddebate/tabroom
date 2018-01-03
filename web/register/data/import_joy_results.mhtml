@@ -119,9 +119,6 @@
 			site  => $default_site->id
 		});
 
-		$m->print("<p class='orangetext semibold'>No default site found for the tournament, so I created a dummy site called ".$default_site->name."</p>");
-
-	} else { 
 	}
 
 	undef $segments{"actions"};
@@ -201,6 +198,7 @@
 	my %event_web_ids;
 	my $house;
 
+	$m->flush_buffer();
 	$m->print("<h6 class='redtext semibold'>Importing events</h6>");
 
 	my %weekends;
@@ -372,7 +370,7 @@
 
 					my $site = $weekend->site;
 
-					if ($site) { 
+					if ($site && $site > 0) { 
 
 						unless ($default_weekend_site) { 
 							$default_site = $site;
@@ -406,7 +404,6 @@
 		});
 	}
 
-
 	# Fill in any un-sited events
 	foreach my $event_id (keys %events) { 
 		unless ($event_site{$event_id}) { 
@@ -421,6 +418,9 @@
 
 	$m->print("<p class='semibold'>$found events found, $created events created</p>");
 
+	$m->flush_buffer();
+
+	$m->flush_buffer();
 	$m->print("<h6 class='redtext semibold'>Importing schools</h6>");
 
 	my %schools = map{ $_->setting("jot_id") => $_} $tourn->schools;
@@ -679,9 +679,11 @@
 	undef $counter;
 	$counter = scalar(keys %timeslots);
 
+	$m->flush_buffer();
 	$m->print("<h6 class='redtext semibold'>Importing rounds and timeblocks</h6>");
 
 	my %rounds;
+	my %rounds_by_name;
 
 	# ROUNDS TIMEBLOCKS:
 	foreach my $line (@{$segments{"evrd"}}) { 
@@ -716,12 +718,17 @@
 		}
 
 		$date =~ s/-/\//g;
-
 		my ($hour, $minutes) = split(":", $time);
+
+		unless ($rounds_by_name{$event_id}) { 
+			%{$rounds_by_name{$event_id}} = 
+				map {$_->name => $_} 
+				$event->rounds();
+		}
 
 		unless ($rounds{$event_id}) { 
 			%{$rounds{$event_id}} = 
-				map {$_->name => $_} 
+				map {$_->setting("jot_id") => $_} 
 				$event->rounds();
 		}
 
@@ -788,9 +795,19 @@
 			$round_type = "elim" if $round_id > 6;
 		}
 
-		if ($rounds{$event_id}{$round_name}) { 
+		my $round;
 
-			my $round = $rounds{$event_id}{$round_name};
+		if ($rounds_by_name{$event_id}{$round_name}
+			|| $rounds{$event_id}{$round_id}
+		) { 
+
+			$round = $rounds{$event_id}{$round_id};
+
+			unless ($round) { 
+				$round = $rounds_by_name{$event_id}{$round_name};
+				$round->setting("jot_id", $round_id);
+			}
+
 			my $timeslot = $timeslots{$start_time->epoch};
 
 			unless ($round->timeslot->id == $timeslot->id) { 
@@ -807,7 +824,7 @@
 
 			my $tiebreak_set;
 
-			my $round = Tab::Round->create({
+			$round = Tab::Round->create({
 				name         => $round_name,
 				type         => $round_type,
 				flighted     => $flight,
@@ -822,9 +839,18 @@
 			$m->print(" Created round ".$round->name." as a ");
 			$m->print($round_type." round in ".$event->abbr."</p>");
 
-			$rounds{$event_id}{$round_name} = $round;
+			$round->setting("jot_id", $round_id);
+			$rounds{$event_id}{$round_id} = $round;
+			$rounds_by_name{$event_id}{$round_name} = $round;
 
 		}
+
+		# Dump the round's current sections and results if any
+
+		$m->comp("/funclib/round_dump.mas", 
+			person => $person,
+			round  => $round
+		);
 	}
 
 	undef @{$segments{"evrd"}};
@@ -842,6 +868,7 @@
 	my %rooms;
 	my %site_rooms;
 
+	$m->flush_buffer();
 	$m->print("<h6 class='redtext semibold'>Importing rooms and sites </h6>");
 	$m->print("<p class='bluetext bigger semibold'>The default site for new rooms ");
 	$m->print("is ".$default_site." ".$default_site->name."</p>");
@@ -883,42 +910,52 @@
 		}
 
 		#If it isn't found create one:
-		unless ($rooms{$room_id}) { 
 
-			$m->print("<p class='semibold orangetext'>No room $room_name found.");
-			$m->print(" Creating in Tabroom site ".$default_site->name."</p>");
+		if ($rooms{$room_id}) { 
 
-			my $room = Tab::Room->create({
-				name     => $room_name,
-				site     => $default_site->id,
-				notes    => $room_id,
-				capacity => 0,
-				quality  => 10,
-				inactive => 0,
-				deleted  => 0
-			});
-
-			$rooms{$room_id} = $room;
-
-		} else { 
+			if ($rooms{$room_id}->deleted) { 
+				$rooms{$room_id}->deleted(0);
+				$rooms{$room_id}->update();
+			}
 
 			$m->print("<p> Room JOT ID $room_id: ".$rooms{$room_id}->name." ".$rooms{$room_id}->id);
 			$m->print(" found in site ".$rooms{$room_id}->site->name."</p>");
 
+		} else { 
+
+			$rooms{$room_id} = eval {
+				return Tab::Room->create({
+					name     => $room_name,
+					site     => $default_site->id,
+					notes    => $room_id,
+					capacity => 0,
+					quality  => 10,
+					inactive => 0,
+					deleted  => 0
+				});
+			};
+
+			if ($rooms{$room_id}) { 
+				$m->print("<p class='greentext'>No room $room_name found.");
+				$m->print(" Created one in Tabroom site ".$default_site->name."</p>");
+			} else { 
+				$m->print("<p class='redttext'>No room $room_name found and I was unable to create one</p>");
+			}
 		}
 	}
 
-	foreach my $key (keys %rooms) { 
-		my $room = $rooms{$key};
-	}
-
+	undef @{$segments{"rooms"}};
+	undef $segments{"rooms"};
 	$ignore_me{"rooms"}++;
 
+	$m->flush_buffer();
 	$m->print("<h6 class='redtext semibold'>Importing judges</h6>");
 
 	my @all_judges = $m->comp("/funclib/tourn_judges.mas", tourn => $tourn);
 
 	my %judges;
+	my %judge_category;
+	my %judge_web_ids;
 
 	foreach my $judge (@all_judges) { 
 		my $jot_id = $judge->setting("jot_id");
@@ -930,15 +967,19 @@
 		next unless $csv->parse($line);
 
 		my (
-			$judge_id, $internal_school_id, $name, $message, $options, $round_limit, 
+			$internal_judge_id, $internal_school_id, $name, $message, $options, $round_limit, 
 			$flags, $private_note, $phone1, $phone2, $email, $region, $district, 
 			$obligation, $base_priority, $rating, $user_flags, $cell_phone, 
-			$pager, $code, $web_judge_id, @bullshit
+			$pager, $code, $judge_id, @bullshit
 		) = $csv->fields();
 
-		next if $judge_id eq "Judge ID";
+		next if $internal_judge_id eq "Judge ID";
+
 		$judge_id = int($judge_id);
+		$internal_judge_id = int($internal_judge_id);
 		$internal_school_id = int($internal_school_id);
+
+		$judge_id = $tourn->id."-".$internal_judge_id if $judge_id == -1;
 
 		my @already;
 		@already = @{$judges{$judge_id}} if $judges{$judge_id};
@@ -1033,7 +1074,6 @@
 			}
 
 		} else { 
-
 			$school = 0;
 			$chapter_judge = 0;
 		}
@@ -1041,14 +1081,14 @@
 		my %already;
 		my $judge;
 
-		foreach my $internal_event_id (keys %{$judge_pools{$judge_id}}) { 
+		foreach my $internal_event_id (keys %{$judge_pools{$internal_judge_id}}) { 
 
 			my $category_code = $event_categories{$internal_event_id};
 			my $category = $categories{$category_code};
 
-			$m->print("<p class='greentext'>Judge $judge_id $first $last entered into judge category ".$category->abbr."</p>");
-			
 			unless ($already{$category}++) { 
+
+				$m->print("<p class='greentext'>Judge $judge_id $first $last entered into judge category ".$category->abbr."</p>");
 
 				$judge = Tab::Judge->search(
 					person => $person->id
@@ -1088,12 +1128,14 @@
 				}
 
 				$judge->setting("jot_id", $judge_id);
+				push @{$judges{$judge_id}}, $judge;
+				$judge_category{$judge_id}{$category->id} = $judge;
 
 			}
 
 		}
 
-		unless (keys %{$judge_pools{$judge_id}}) { 
+		unless (keys %{$judge_pools{$internal_judge_id}}) { 
 
 			$judge = Tab::Judge->search(
 				person => $person->id
@@ -1121,8 +1163,12 @@
 			}) unless $judge;
 
 			$judge->setting("jot_id", $judge_id);
+
+			push @{$judges{$judge_id}}, $judge;
+			$judge_category{$judge_id}{$unpooled->id} = $judge;
 			
-			$m->print("<p class='semibold bluetext'>Judge $judge_id $first $last had no event pools; entered into the ".$unpooled->name." category</p>");
+			$m->print("<p class='semibold bluetext'>Judge $judge_id $first $last ");
+			$m->print("had no event pools; entered into the ".$unpooled->name." category</p>");
 
 		}
 
@@ -1135,6 +1181,7 @@
 	undef $segments{"judges"};
 	$ignore_me{"judges"}++;
 
+	$m->flush_buffer();
 	$m->print("<h6 class='redtext semibold'>Importing competitors</h6>");
 
 	my @all_students = $m->comp(
@@ -1229,9 +1276,11 @@
 				$candidate = $student unless $candidate;
 			}
 
+			my $search_nsda; 
+
 			unless ($candidate) { 
 
-				$m->print("<p class='orangetext'>No student found with name $first $last.");
+				$m->print("<p class='orangetext'>No competitor found with name $first $last.");
 				$m->print(" Creating in Tabroom</p>");
 
 				$candidate = Tab::Student->create({
@@ -1242,11 +1291,18 @@
 					novice  => 0,
 					retired => 0
 				});
+
+				$search_nsda++;
+				
+				$m->print("<p class='marleft'> &ndash; Attempting to link new competitor to NSDA membership: ");
 			}
 
 			unless ($candidate->ualt_id) { 
+				$m->print("<p class='marleft'> &ndash; Existing competitor does not have NSDA membership linked. Searching: ");
+				$search_nsda++;
+			}
 
-				$m->print("<p class='marleft'> &ndash; Student does not have NSDA membership info. Searching: ");
+			if ($search_nsda) { 
 
 				my $nsda = $m->comp(
 					"/funclib/nsda_student_search.mas", 
@@ -1257,7 +1313,9 @@
 
 				if ($nsda) { 
 
-					$m->print("<span class='inline greentext semibold'>Found NSDA member ".$nsda->ualt_id."</p>");
+					$m->print("<span class='inline greentext semibold'>Found NSDA ");
+					$m->print("member ".$nsda->ualt_id." and linking.</p>");
+
 					$candidate->grad_year($nsda->grad_yr);
 					$candidate->ualt_id($nsda->ualt_id);
 					$candidate->update();
@@ -1316,9 +1374,10 @@
 						}
 					}
 
-				} else { 
+				} elsif ($district) { 
 
-					$m->print("<span class='inline redtext semibold'>No matching NSDA member found.  Reconciliation will be required later.</p>");
+					$m->print("<span class='inline redtext semibold'>No matching NSDA member ");
+					$m->print("found.  Reconciliation will be required for Districts.</p>");
 				}
 			}
 
@@ -1366,6 +1425,9 @@
 		$entries{$jot_id} = $entry if $jot_id;
 		push @{$entry_tags{$entry->school->id}{$entry->event->id}}, $entry;
 	}
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold'>Importing entries</h6>");
 
 	# Can't spell entries apparently. 
 	ENTRY:
@@ -1428,7 +1490,7 @@
 				$m->print("<p>Entry $code already exists! ");
 			} else { 
 
-				$m->print("<p class='semibold orangetext'>Entry $code does not exist.  Importing to Tabroom: ");
+				$m->print("<p>Entry $code does not exist.  Importing to Tabroom: ");
 
 				$entry = Tab::Entry->create({
 					code          => $code,
@@ -1459,8 +1521,9 @@
 
 				$entry->code($code);
 				$entry->update();
+				$entries{$entry_id} = $entry;
 
-				$m->print("<span class='inline semibold greentext'>Import succeeded!</p>");
+				$m->print("<span class='inline semibold greentext marleft'>Succeeded!</p>");
 
 			} else { 
 
@@ -1470,6 +1533,167 @@
 		}
 		
 	}
+
+	undef @{$segments{"entrys"}};
+	undef $segments{"entrys"};
+	$ignore_me{"entrys"}++;
+
+	my %sections;
+	my %sections_by_tag;
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold marbottom'>Importing sections/debates/chambers</h6>");
+
+	my %event_counter;
+	my $overall;
+
+	# I hate that this is necessary.  It looks unnecessary.  But wait until you
+	# see the judge nightmare below. 
+	my %section_translator;
+
+	SECTION:
+	foreach my $line (@{$segments{"sections"}}) { 
+
+		next unless $csv->parse($line);
+
+		my ( 
+			$section_id, $internal_event_id, $round_id, $room_id, 
+				$letter, $num_judges, $dunno, $noclue
+		) = $csv->fields();
+
+		next if $section_id eq "Section ID";
+
+		my $bye++ if $round_id < 0;
+		$bye = 0 unless $bye;
+
+		$section_id = int($section_id);
+		$round_id = abs(int($round_id));
+		$room_id = int($room_id);
+		$letter =~ s/\s+//g;
+
+		my $event_id = $event_web_ids{int($internal_event_id)};
+
+		my $room = $rooms{$room_id};
+		my $event = $events{$event_id};
+		my $round = $rounds{$event_id}{$round_id};
+
+		if ($event->type eq "congress" && $room_id == -1) { 
+			# What fresh hell is this?
+			$sections{$section_id} = $sections_by_tag{$event_id}{$round_id}{"object"};
+			$section_translator{$section_id} = $sections_by_tag{$event_id}{$round_id}{"id"};
+			next SECTION;
+		}
+
+		my $section = Tab::Panel->create({
+			round  => $round->id,
+			letter => $letter,
+			bye    => $bye,
+			room   => $room
+		});
+
+		$event_counter{$event->abbr}++;
+		$sections{$section_id} = $section;
+		$sections_by_tag{$event_id}{$round_id}{"object"} = $section;
+		$sections_by_tag{$event_id}{$round_id}{"id"} = $section_id;
+
+	}
+
+	undef @{$segments{"sections"}};
+	undef $segments{"sections"};
+	$ignore_me{"sections"}++;
+
+	foreach my $abbr (keys %event_counter) { 
+		$m->print("<p class='semibold bluetext'>Created $event_counter{$abbr} sections of $abbr</p>");
+	}
+
+	$m->flush_buffer();
+	$m->print("<h6 class='redtext semibold marbottom'>Assigning judges and entries to sections</h6>");
+
+	my %section_judges;
+	my %yaf_judge_id;
+
+	# Sure let's needlessly renumber all the judges for NO APPARENT REASON
+
+	SECTION:
+	foreach my $line (@{$segments{"judsects"}}) { 
+
+		next unless $csv->parse($line);
+
+		my ( 
+			$internal_judge_id, $section_id, $yet_another_fucking_judge_id
+		) = $csv->fields();
+
+		next if $section_id eq "Judge ID";
+
+		my $section = $sections{$section_id};
+
+		my $judge_id = $judge_web_ids{int($internal_judge_id)};
+		my $judge = $judges{$judge_id};
+
+		if ($judge) { 
+
+			$section_judges{$section_id}{$yet_another_fucking_judge_id} = $judge;
+
+		} else { 
+
+			# This dumbass Congress hack makes my eyes bleed
+
+			my $actual_section_id = $section_translator{$section_id};
+			$judge = $section_judges{$actual_section_id}{$internal_judge_id};
+			$section_judges{$section_id}{$yet_another_fucking_judge_id} = $judge;
+
+		}
+	}
+
+	$ignore_me{"judsects"}++;
+
+	my %section_entries;
+
+	SECTION:
+	foreach my $line (@{$segments{"sectents"}}) { 
+
+		next unless $csv->parse($line);
+
+		my ( 
+			$section_id, $internal_entry_id, $speaker_order, $speaker_actual,$id
+		) = $csv->fields();
+
+		next if $section_id eq "Section ID";
+
+		my $entry_id = $entry_web_ids{int($internal_entry_id)};
+		my $entry = $entries{$entry_id};
+
+		Tab::debuglog("Order $speaker_order section $section_id is entry $entry from id $entry_id internal $internal_entry_id");
+		$section_entries{$section_id}{$speaker_order} = $entry;
+	}
+
+	$ignore_me{"sectents"}++;
+
+	foreach my $section_id (keys %section_entries) { 
+
+		my $section = $sections{$section_id};
+
+		$m->print("<p class='semibold'>Section ".$section->letter." of ");
+		$m->print($section->round->event->abbr." ".$section->round->name.":</p>");
+
+		$m->print("<p class='marleft bluetext semibold'>Entries:");
+	
+		foreach my $order (keys %{$section_entries{$section_id}}) { 
+			my $entry = $section_entries{$section_id}{$order};
+			$m->print("<span class='inline padleft'> $order.".$entry->code."</span>") if $entry;
+		}
+
+		$m->print("</p> <p class='marleft bluetext semibold'>Judges:");
+	
+		foreach my $order (keys %{$section_judges{$section_id}}) { 
+			my $judge = $section_judges{$section_id}{$order};
+			$m->print("<span class='inline padleft'> $order.".$judge->last."</span>") if $judge;
+		}
+
+		$m->print("</p>");
+
+	}
+
 
 	foreach my $label (sort {$a cmp $b} keys %segments) { 
 
@@ -1494,7 +1718,6 @@
 			<h5>Results</h5>
 
 %			foreach my $result (@results) { 
-
 				<div class="row padless">
 					<% $result %>
 				</div>
