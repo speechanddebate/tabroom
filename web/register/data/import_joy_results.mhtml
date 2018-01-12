@@ -1584,6 +1584,7 @@
 	# I hate that this is necessary.  It looks unnecessary.  But wait until you
 	# see the judge nightmare below. 
 	my %section_translator;
+	my %section_event; 
 
 	SECTION:
 	foreach my $linekey (sort keys %{$segments{"sections"}}) { 
@@ -1641,6 +1642,8 @@
 		$section_by_id{$section->id} = $section;
 		$sections{$section_id} = $section;
 
+		$section_event{$section_id} = $event;
+
 		$sections_by_tag{$event_id}{$round_id}{"object"} = $section;
 		$sections_by_tag{$event_id}{$round_id}{"id"}     = $section_id;
 
@@ -1663,7 +1666,6 @@
 	$m->print("<h6 class='redtext semibold marbottom'>Assigning judges and entries to sections</h6>");
 
 	my %section_judges;
-	my %yaf_judge_id;
 
 	# Sure let's needlessly renumber all the judges for NO APPARENT REASON
 
@@ -1694,25 +1696,28 @@
 			unless $judge;
 
 		unless ($judge) { 
-
 			foreach my $other_judge (@{$judges{$judge_id}}) { 
 				$judge = $other_judge if $other_judge && $other_judge->id;
 				last if $judge;
 			} 
-
 		} 
-
 
 		if ($judge) { 
 
-			$section_judges{$section->id}{$yet_another_fucking_judge_id} = $judge;
+			$section_judges{$section->id}{"yafj"}{$yet_another_fucking_judge_id} = $judge;
+			$section_judges{$section->id}{"real"}{$judge_id} = $judge;
 
 		} else { 
 
 			# This dumbass Congress hack makes my eyes bleed
 			my $actual_section_id = $section_translator{$section_id};
-			$judge = $section_judges{$actual_section_id}{$internal_judge_id};
-			$section_judges{$section->id}{$yet_another_fucking_judge_id} = $judge;
+
+			$judge = $section_judges{$actual_section_id}{"yafj"}{$internal_judge_id};
+
+			if ($judge) { 
+				$section_judges{$section->id}{"yafj"}{$yet_another_fucking_judge_id} = $judge;
+				$section_judges{$section->id}{"real"}{$judge_id} = $judge;
+			}
 
 		}
 	}
@@ -1747,10 +1752,57 @@
 
 	$ignore_me{"sectents"}++;
 
+	my %section_results;
+
 	SECTION:
 	foreach my $linekey (sort keys %{$segments{"jse"}}) { 
 
 		my $line = $segments{"jse"}{$linekey};
+
+		next unless $csv->parse($line);
+
+		my ( 
+			$internal_judge_id, $section_id, $internal_entry_id, $points, $rank, $points1, $points2
+		) = $csv->fields();
+
+		next if $internal_judge_id eq "Judge ID";
+
+		my $judge_id = $judge_web_ids{int($internal_judge_id)};
+
+		my $section = $sections{$section_id};
+		next unless $section;
+
+		my $judge = $section_judges{$section->id}{"real"}{$judge_id} if $judge_id;
+		$judge = $section_judges{$section->id}{"yafj"}{$internal_judge_id} unless $judge;
+
+		next unless $judge;
+
+		my $entry = $entries{$entry_web_ids{int($internal_entry_id)}};
+		my $event = $section_event{$section_id};
+
+		if ($event->type eq "congress") { 
+
+			$section_results{$section->id}{$judge->id}{$entry->id}{"rank"} = int($points);
+			$section_results{$section->id}{$judge->id}{$entry->id}{"maybepoints"} = int($rank);
+			$section_results{$section->id}{$judge->id}{$entry->id}{"points"} = int($points1);
+
+		} elsif ($event->type eq "speech") { 
+
+			if ($rank < 0)  { 
+				$section_results{$section->id}{$judge->id}{$entry->id}{"forfeit"}++;
+			} else { 
+				$section_results{$section->id}{$judge->id}{$entry->id}{"rank"} = int($rank);
+				$section_results{$section->id}{$judge->id}{$entry->id}{"points"} = int($points);
+			}
+
+		} else { 
+
+			$section_results{$section->id}{$judge->id}{$entry->id}{"winloss"} = 0;
+
+			# The actual value is 65536.  I am not making this up. 
+			$section_results{$section->id}{$judge->id}{$entry->id}{"winloss"} = 1
+				if $points > 0;
+		}
 
 	}
 
@@ -1795,17 +1847,18 @@
 
 		$m->print("<span class='quarter semibold bluetext'>");
 
-		my $notfirst;
-
-		my %first_at_order;
-		my @spares;
 		my %used;
+		my @spares;
+		my $notfirst;
+		my %first_at_order;
 
 		foreach my $order (sort keys %{$section_entries{$section->id}}) { 
 
 			next unless $section_entries{$section->id}{$order};
 
 			foreach my $entry (@{$section_entries{$section->id}{$order}}) { 
+
+				$order++ if $event->type eq "congress";
 
 				next unless $entry;
 				next if $used{$entry}++;
@@ -1817,11 +1870,50 @@
 				}
 			}
 
+			my $entry = $first_at_order{$order};
+
+			$m->print("<div class='padless full'>");
+
+			$m->print("<span class='third'>");
 			$m->print($order." ".$first_at_order{$order}->code) if $first_at_order{$order};
+			$m->print("</span>");
+			
+			$m->print("<span class='twothirds'>");
+
+			foreach my $judgekey (keys %{$section_judges{$section->id}{"real"}}) { 
+
+				my $judge = $section_judges{$section->id}{"real"}{$judgekey};
+
+				next unless $judge;
+
+				$m->print("<div class='padno full'>");
+				$m->print("J".$judgekey." ");
+			
+				my $fft = $section_results{$section->id}{$judge->id}{$entry->id}{"forfeit"};
+				my $win = $section_results{$section->id}{$judge->id}{$entry->id}{"winloss"};
+				my $rank = $section_results{$section->id}{$judge->id}{$entry->id}{"rank"};
+
+				if ($fft) { 
+					$m->print(" - FFT");
+				} elsif ($win == 1) { 
+					$m->print(" - WIN");
+				} elsif ($win == 0) { 
+					$m->print(" - LOSS");
+				}
+
+				if ($rank && $rank > 0) { 
+					$m->print(" - ".$rank);
+				}
+				
+				$m->print("</div>");
+			}
+
+			$m->print("</span>");
+			$m->print("</div>");
+
 		}
 
 		$m->print("</span>");
-
 		undef $notfirst;
 
 		if ($bye) {
@@ -1830,12 +1922,13 @@
 			$m->print("Bye round");
 			$m->print("</span>");
 
-		} elsif ($section_judges{$section->id}) { 
+		} elsif ($section_judges{$section->id}{"real"}) { 
 
 			$m->print("<span class='quarter semibold greentext'>");
 
-			foreach my $order (keys %{$section_judges{$section->id}}) { 
-				my $judge = $section_judges{$section->id}{$order};
+			foreach my $key (keys %{$section_judges{$section->id}{"real"}}) { 
+
+				my $judge = $section_judges{$section->id}{"real"}{$key};
 				next unless $judge;
 				$m->print(" - ") if $notfirst++;
 				$m->print("*") if $order == 1;
@@ -1870,11 +1963,9 @@
 			}
 
 			$m->print("</span>");
-
 			$m->print("</div>");
 
 		}
-
 	}
 
 
