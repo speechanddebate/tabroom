@@ -438,7 +438,6 @@
 
 	$m->print("<p class='semibold'>$found events found, $created events created</p>");
 
-	$m->flush_buffer();
 	$m->print("<h6 class='redtext semibold'>Importing schools</h6>");
 
 	my %schools = map{ $_->setting("jot_id") => $_} $tourn->schools;
@@ -1583,8 +1582,12 @@
 
 	# I hate that this is necessary.  It looks unnecessary.  But wait until you
 	# see the judge nightmare below. 
+
 	my %section_translator;
 	my %section_event; 
+	my %section_type; 
+
+	my %congress_round_section;
 
 	SECTION:
 	foreach my $linekey (sort keys %{$segments{"sections"}}) { 
@@ -1599,36 +1602,37 @@
 		) = $csv->fields();
 
 		next if $section_id eq "Section ID";
-		next if $round_id < 0;
 
 		$section_id = int($section_id);
-		$round_id = int($round_id);
 		$room_id = int($room_id);
 		$letter =~ s/\s+//g;
 
 		my $event_id = $event_web_ids{int($internal_event_id)};
-
 		my $room = $rooms{$room_id};
 		my $event = $events{$event_id};
-		my $round = $rounds{$event_id}{$round_id};
-
-		if ($event->type eq "congress" && $room_id == -1) { 
-
-			# What fresh hell is this?
-			$sections{$section_id} 
-				= $sections_by_tag{$event_id}{$round_id}{"object"};
-
-			$section_translator{$section_id} 
-				= $sections_by_tag{$event_id}{$round_id}{"id"};
-
-			next SECTION;
-		}
 
 		if ($event->type eq "congress") { 
+
+			$round_id = abs($round_id);
+			my $actual = $internal_event_id."-".$round_id;
+
+			$section_translator{$section_id} = $actual;
+			Tab::debuglog("Section $section_id corresponds to $actual");
+
+			$section_id = $actual;
+
+			next SECTION if $room_id == -1;
+			
 			$letter = $event_house_section{$internal_event_id}
 				if $event_house_section{$internal_event_id};
-		}
-		
+
+		} elsif ($round_id < 0) { 
+			next SECTION;
+		} 
+
+		$round_id = int($round_id);
+		my $round = $rounds{$event_id}{$round_id};
+
 		my $section = Tab::Panel->create({
 			round  => $round->id,
 			letter => $letter,
@@ -1643,6 +1647,7 @@
 		$sections{$section_id} = $section;
 
 		$section_event{$section->id} = $event;
+		$section_type{$section->id} = $event->type;
 
 		$sections_by_tag{$event_id}{$round_id}{"object"} = $section;
 		$sections_by_tag{$event_id}{$round_id}{"id"}     = $section_id;
@@ -1682,6 +1687,8 @@
 
 		next if $internal_judge_id eq "Judge ID";
 
+		$section_id = $section_translator{$section_id};
+
 		my $section = $sections{$section_id};
 		next unless $section;
 
@@ -1689,7 +1696,6 @@
 		my $category = $round->event->category;
 
 		my $judge_id = $judge_web_ids{int($internal_judge_id)};
-
 		my $judge = $judge_category{$judge_id}{$category->id};
 
 		$judge = $judge_category{$judge_id}{$unpooled->id} 
@@ -1703,22 +1709,8 @@
 		} 
 
 		if ($judge) { 
-
 			$section_judges{$section->id}{"yafj"}{$yet_another_fucking_judge_id} = $judge;
 			$section_judges{$section->id}{"real"}{$judge_id} = $judge;
-
-		} else { 
-
-			# This dumbass Congress hack makes my eyes bleed
-			my $actual_section_id = $section_translator{$section_id};
-
-			$judge = $section_judges{$actual_section_id}{"yafj"}{$internal_judge_id};
-
-			if ($judge) { 
-				$section_judges{$section->id}{"yafj"}{$yet_another_fucking_judge_id} = $judge;
-				$section_judges{$section->id}{"real"}{$judge_id} = $judge;
-			}
-
 		}
 	}
 
@@ -1740,6 +1732,7 @@
 
 		next if $section_id eq "Section ID";
 
+		$section_id = $section_translator{$section_id};
 		my $section = $sections{$section_id};
 		next unless $section;
 
@@ -1780,17 +1773,20 @@
 		) = $csv->fields();
 
 		next if $internal_judge_id eq "Judge ID";
+		$internal_judge_id = int($internal_judge_id);
+
+		$section_id = $section_translator{$section_id};
+		my $section = $sections{$section_id};
+		next unless $section;
 
 		my $judge_id = $judge_web_ids{int($internal_judge_id)};
 
-		my $section = $sections{$section_id};
+		my $judge;
+		$judge = $section_judges{$section->id}{"real"}{$judge_id} if $judge_id;
 
-		Tab::debuglog("Section $section_id gives $section");
-
-		next unless $section;
-
-		my $judge = $section_judges{$section->id}{"real"}{$judge_id} if $judge_id;
-		$judge = $section_judges{$section->id}{"yafj"}{$internal_judge_id} unless $judge;
+		unless ($judge) { 
+			$judge = $section_judges{$section->id}{"yafj"}{$internal_judge_id};
+		}
 
 		next unless $judge;
 
@@ -1798,9 +1794,6 @@
 		my $event = $section_event{$section->id};
 
 		if ($event->type eq "congress") { 
-
-			Tab::debuglog("Section $section judge $judge entry $entry gets rank $points");
-
 			$section_results{$section->id}{$judge->id}{$entry->id}{"rank"} = int($points);
 			$section_results{$section->id}{$judge->id}{$entry->id}{"maybepoints"} = int($rank);
 			$section_results{$section->id}{$judge->id}{$entry->id}{"points"} = int($points1);
@@ -1888,39 +1881,54 @@
 			}
 
 			my $entry = $first_at_order{$order};
+			next unless $entry;
 
-			$m->print("<div class='padless full'>");
+			$m->print("<div class='padless full marno'>");
 
 			$m->print("<span class='third'>");
-			$m->print($order." ".$first_at_order{$order}->code) if $first_at_order{$order};
+			$m->print($order." ".$entry->code) if $entry;
 			$m->print("</span>");
 			
-			$m->print("<span class='twothirds'>");
+			$m->print("<span class='twothirds nospace'>");
 
 			foreach my $judgekey (keys %{$section_judges{$section->id}{"real"}}) { 
 
 				my $judge = $section_judges{$section->id}{"real"}{$judgekey};
 				next unless $judge;
 
-				$m->print("<div class='padno full'>");
+				$m->print("<div class='marno padless full'>");
 				$m->print("J".$judgekey." ");
 			
 				my $fft = $section_results{$section->id}{$judge->id}{$entry->id}{"forfeit"};
 				my $win = $section_results{$section->id}{$judge->id}{$entry->id}{"winloss"};
 				my $rank = $section_results{$section->id}{$judge->id}{$entry->id}{"rank"};
 
-				if ($fft) { 
-					$m->print(" - FFT");
-				} elsif ($win == 1) { 
-					$m->print(" - WIN");
-				} elsif ($win == 0) { 
-					$m->print(" - LOSS");
+				if ($section_type{$section_id} eq "congress") { 
+
+					if ($rank && $rank > 0) { 
+						$m->print(" - ".$rank);
+					} else { 
+						$m->print(" - 9");
+					}
+
+				} elsif ($section_type{$section_id} eq "speech") { 
+
+					if ($rank && $rank > 0) { 
+						$m->print(" - ".$rank);
+					}
+
+				} else { 
+
+					if ($fft) { 
+						$m->print(" - FFT");
+					} elsif ($win == 1) { 
+						$m->print(" - WIN");
+					} elsif ($win == 0) { 
+						$m->print(" - LOSS");
+					}
+
 				}
 
-				if ($rank && $rank > 0) { 
-					$m->print(" - ".$rank);
-				}
-				
 				$m->print("</div>");
 			}
 
