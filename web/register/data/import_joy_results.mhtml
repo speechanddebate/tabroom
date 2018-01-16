@@ -435,6 +435,8 @@
 		}
 	}
 
+	my %tiebreaks = map {$_->name => $_} $tourn->tiebreak_sets();
+
 	undef $segments{"events"};
 	$ignore_me{"events"}++;
 
@@ -846,6 +848,40 @@
 
 			my $tiebreak_set;
 
+			if ($event->type eq "congress") { 
+				if ($round_type eq "prelim") { 
+					$tiebreak_set = $tiebreak_sets{"Congress Prelim"};
+				} elsif ($round_type eq "elim") { 
+					$tiebreak_set = $tiebreak_sets{"Congress Elim"};
+				} elsif ($round_type eq "final") { 
+					$tiebreak_set = $tiebreak_sets{"Congress Final"};
+				}
+			} elsif ($event->type eq "speech") { 
+				if ($round_type eq "prelim") { 
+					$tiebreak_set = $tiebreak_sets{"IE Prelim"};
+				} elsif ($round_type eq "elim") { 
+					$tiebreak_set = $tiebreak_sets{"IE Semi"};
+					$tiebreak_set = $tiebreak_sets{"IE Elim"} unless $tiebreak_set;
+					$tiebreak_set = $tiebreak_sets{"IE Prelim"} unless $tiebreak_set;
+				} elsif ($round_type eq "final") { 
+					$tiebreak_set = $tiebreak_sets{"IE Final"};
+					$tiebreak_set = $tiebreak_sets{"IE Elim"} unless $tiebreak_set;
+				}
+			} else { 
+				if ($round_type eq "elim") { 
+					$tiebreak_set = $tiebreak_sets{"Debate Elim"};
+					$tiebreak_set = $tiebreak_sets{"Debate Elims"} unless $tiebreak_set;
+				} elsif ($round_type eq "final") { 
+					$tiebreak_set = $tiebreak_sets{"Debate Final"};
+					$tiebreak_set = $tiebreak_sets{"Debate Finals"} unless $tiebreak_set;
+					$tiebreak_set = $tiebreak_sets{"Debate Elim"} unless $tiebreak_set;
+					$tiebreak_set = $tiebreak_sets{"Debate Elims"} unless $tiebreak_set;
+				} else { 
+					$tiebreak_set = $tiebreak_sets{"Debate Prelim"};
+					$tiebreak_set = $tiebreak_sets{"Debate"} unless $tiebreak_set;
+				}
+			}
+
 			$round = Tab::Round->create({
 				name         => $round_name,
 				type         => $round_type,
@@ -857,6 +893,7 @@
 				timeslot     => $timeslots{$start_time->epoch}->id,
 				site         => $event_site{$event_id}
 			});
+
 
 			$m->print(" Created round ".$round->name." as a ");
 			$m->print($round_type." round in ".$event->abbr."</p>");
@@ -1763,6 +1800,8 @@
 	$m->flush_buffer();
 	$m->print("<h6 class='redtext semibold marbottom'>Parsing actual results</h6>");
 
+	my %section_chairs;
+
 	SECTION:
 	foreach my $linekey (sort keys %{$segments{"jse"}}) { 
 
@@ -1829,6 +1868,7 @@
 			}
 
 			$section_results{$section->id}{$judge->id}{$entry->id}{"points"} = $actual_points;
+			$section_chair{$section->id}{$judge->id}++ if $internal_judge_id == 1;
 
 		} elsif ($event->type eq "speech") { 
 
@@ -1866,6 +1906,9 @@
 		sort {$section_data{$a}{"event"} cmp $section_data{$b}{"event"}}
 		@section_keys;
 
+	my %round_spares;
+	my %round_letter;
+
 	SECTION:
 	foreach my $section_id (@section_keys) { 
 
@@ -1878,22 +1921,10 @@
 		my $round = $section_data{$section_id}{"round"};
 		my $room  = $section_data{$section_id}{"room"};
 
-		$m->print("<div class='row'>");
-		
-		$m->print("<span class='quarter'>");
-		$m->print($event->abbr." R".$round->name);
-		$m->print(" $section_id Sect ".$section->score." ".$section->letter);
-		$m->print("</span>");
-
-		$m->print("<span class='quarter'>");
-		$m->print($room->name) if $room;
-		$m->print("</span>");
-
-		$m->print("<span class='third semibold bluetext marno'>");
+		$round_letter{$round->id} = $section->letter 
+			if $round_letter{$round->id} < $section->letter;
 
 		my %used;
-		my @spares;
-		my $notfirst;
 		my %first_at_order;
 
 		foreach my $order (sort {$a <=> $b} keys %{$section_entries{$section->id}}) { 
@@ -1906,7 +1937,7 @@
 				next if $used{$entry}++;
 
 				if ($first_at_order{$order}) { 
-					push @spares, $entry;
+					push @{$round_spares{$round->id}{"entries"}}, $entry;
 				} else { 
 					$first_at_order{$order} = $entry;
 				}
@@ -1915,120 +1946,121 @@
 			my $entry = $first_at_order{$order};
 			next unless $entry;
 
-			$m->print("<div class='padless full marno'>");
-
-			$m->print("<span class='third'>");
 			$m->print($order." ".$entry->code) if $entry;
-			$m->print("</span>");
-			
-			$m->print("<span class='twothirds nospace'>");
 
 			foreach my $judgekey (keys %{$section_judges{$section->id}{"real"}}) { 
 
 				my $judge = $section_judges{$section->id}{"real"}{$judgekey};
 				next unless $judge;
 
-				$m->print("<div class='marno padless full'>");
-				$m->print("J".$judgekey." ");
-			
+				my $chair = 0;
+				$chair++ if $section_chair{$section->id}{$judge->id}
+					&& $section_type{$section_id} eq "congress";
+
 				my $fft = $section_results{$section->id}{$judge->id}{$entry->id}{"forfeit"};
+				$fft = 0 unless $fft;
+
+				my $bye = $section_byes{$section_id};
+				$bye = 0 unless $bye;
+
+				my $ballot = Tab::Ballot->create({
+					entry         => $entry,
+					judge         => $judge,
+					panel         => $section,
+					speakerorder  => $order,
+					side          => $order,
+					chair         => $chair,
+					bye           => $bye,
+					forfeit       => $fft,
+					audit         => 1,
+				});
+
 				my $win = $section_results{$section->id}{$judge->id}{$entry->id}{"winloss"};
 				my $rank = $section_results{$section->id}{$judge->id}{$entry->id}{"rank"};
 				my $points = $section_results{$section->id}{$judge->id}{$entry->id}{"points"};
 
 				if ($section_type{$section_id} eq "congress") { 
 
-					if ($rank && $rank > 0) { 
-						$m->print(" - ".$rank);
-					} else { 
-						$m->print(" - 9");
-					}
+					$rank = 9 unless $rank;
+
+					Tab::Score->create({
+						ballot => $ballot,
+						tag    => "rank",
+						value  => $rank
+					});
 
 					if ($points) { 
-						$m->print(" Ps: $points");
+
+						my $speech;
+
+						foreach my $point (split(',', $points)) { 
+
+							$speech++;
+
+							Tab::Score->create({
+								ballot => $ballot,
+								tag    => "congress_speech",
+								value  => $points,
+								speech => $speech
+							});
+
+						}
 					}
 
 				} elsif ($section_type{$section_id} eq "speech") { 
 
-					if ($rank && $rank > 0) { 
-						$m->print(" - ".$rank);
-					}
+					Tab::Score->create({
+						ballot => $ballot,
+						tag    => "rank",
+						value  => $rank
+					});
 
 				} else { 
 
-					if ($fft) { 
-						$m->print(" - FFT");
-					} elsif ($win == 1) { 
-						$m->print(" - WIN");
-					} elsif ($win == 0) { 
-						$m->print(" - LOSS");
-					}
+					Tab::Score->create({
+						ballot => $ballot,
+						tag    => "ballot",
+						value  => $win
+					});
 
 				}
 
-				$m->print("</div>");
 			}
-
-			$m->print("</span>");
-			$m->print("</div>");
 
 		}
 
-		$m->print("</span>");
-		undef $notfirst;
+	}
 
-		if ($bye) {
+	foreach my $round_id (sort keys %round_spares) { 
 
-			$m->print("<span class='quarter semibold redtext'>");
-			$m->print("Bye round");
-			$m->print("</span>");
+		# These are people who bye through the various rounds
 
-		} elsif ($section_judges{$section->id}{"real"}) { 
+		my $letter = $round_letter{$round_id};
 
-			$m->print("<span class='sixth semibold greentext'>");
+		foreach my $spare (@{$round_spares{$round_id}}) {
 
-			foreach my $key (keys %{$section_judges{$section->id}{"real"}}) { 
+			$letter++;
 
-				my $judge = $section_judges{$section->id}{"real"}{$key};
-				next unless $judge;
-				$m->print(" - ") if $notfirst++;
-				$m->print("*") if $order == 1;
-				$m->print($judge->last);
-			}
+			my $section = Tab::Panel->create({
+				round  => $round_id,
+				letter => $letter,
+				bye    => 1,
+				room   => 0,
+			});
 
-			$m->print("</span>");
-
-		} 
-
-		$m->print("</div>");
-
-		if (@spares) { 
-		
-			$m->print("<div class='row'>");
-		
-			$m->print("<span class='quarter'>");
-			$m->print($event->abbr." R".$round->name);
-			$m->print("</span>");
-
-			$m->print("<span class='quarter'>");
-			$m->print("BYE THROUGH");
-			$m->print("</span>");
-
-			$m->print("<span class='quarter semibold bluetext'>");
-
-			my $notfirst;
-
-			foreach my $spare (@spares) { 
-				$m->print(" - ") if $notfirst++;
-				$m->print($spare->code);
-			}
-
-			$m->print("</span>");
-			$m->print("</div>");
+			my $ballot = Tab::Ballot->create({
+				judge        => 0,
+				entry        => $spare,
+				audit        => 1,
+				panel        => $section,
+				chair        => 0,
+				bye          => 0,
+				forfeit      => 0,
+				audit        => 1,
+			});
 
 		}
 	}
-
 
 	foreach my $label (sort {$a cmp $b} keys %segments) { 
 
@@ -2088,8 +2120,6 @@
 		return $result_string;
 
 	}
-
-
 
 </%init>
 
