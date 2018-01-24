@@ -31,6 +31,14 @@ cpanm Lingua::EN::Nums2Words
 cpanm REST::Client
 
 echo
+echo "Fixing Class DBI to talk to modern MySQL/MariaDB..."
+echo
+
+mv /usr/share/perl5/Class/DBI.pm /usr/share/perl5/Class/DBI.pm.orig
+cp /www/tabroom/doc/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
+
+
+echo
 echo "Creating database from schema file.  Uncompressing database file (takes a little bit of time)..."
 echo
 
