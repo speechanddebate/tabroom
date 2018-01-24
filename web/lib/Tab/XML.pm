@@ -42,7 +42,7 @@ sub sorted_keys {
 	} elsif ($name eq "BALLOT") { 
 		return ('ID', 'JUDGE', 'PANEL', 'ENTRY', 'SIDE', 'ROOM', 'BYE', 'NOSHOW');
 	} elsif ($name eq "BALLOT_SCORE") { 
-		return ('ID', 'BALLOT', 'RECIPIENT', 'SCORE_ID', 'SCORE');
+		return ('ID', 'BALLOT', 'RECIPIENT', 'SCORE_ID', 'SPEECH', 'SCORE');
 	} elsif ($name eq "SCORES") { 
 		return ('ID', 'SCORE_NAME', 'SCOREFOR', 'SORTORDER');
 	} elsif ($name eq "SCORE_SETTING") { 
