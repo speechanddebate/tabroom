@@ -34,7 +34,7 @@ sub sorted_keys {
 	} elsif ($name eq "ENTRY_STUDENT") { 
 		return ('ID', 'DOWNLOADRECORD', 'SCHOOL', 'ENTRY', 'FIRST', 'LAST');
 	} elsif ($name eq "SCHOOL") { 
-		return ('ID', 'DOWNLOADRECORD', 'CODE', 'SCHOOLNAME', 'COACHES');
+		return ('ID', 'DOWNLOADRECORD', 'CODE', 'SCHOOLNAME', 'COACHES', 'CHAPTER');
 	} elsif ($name eq "ROUND") { 
 		return ('ID', 'EVENT', 'TIMESLOT', 'TB_SET', 'RD_NAME', 'LABEL', 'FLIGHTING', 'JUDGESPERPANEL', 'JUDGEPLACESCHEME', 'PAIRINGSCHEME', 'TOPIC', 'CREATEDOFFLINE');
 	} elsif ($name eq "PANEL") { 
