@@ -1,0 +1,258 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$event_id => undef
+	$limit    => undef
+</%args>
+<%init>
+
+	my @events;
+	my $name = "CongressScores";
+	my $event_name;
+
+	if ($event_id eq "all") { 
+
+		push @events, $tourn->events(type => "congress");
+		$event_name = $tourn->name;
+
+	} elsif ($event_id == int($event_id)) { 
+		my $event = Tab::Event->retrieve($event_id);
+		$event_name = $event->name;
+		push @events, $event if $event;
+	}
+
+	unless (@events) { 
+		$m->comp("/funclib/abort.mas", 
+			message => "No Congress events found for that tournament"
+		);
+	}
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+    my $now = DateTime->now;    
+    $now->set_time_zone($tz);
+
+    $name =~ s/[\W_]//g;
+    $event_name =~ s/[\W_]//g;
+
+	my $filename = $name."-".$event_name;
+    my $filepath = $Tab::file_root."tmp/".$filename;
+    `rm -f $filepath.*`; 
+    
+    $m->comp("/funclib/printout.mas", 
+		tourn    => $tourn,
+		filename => $filename,
+		wide     => 1,
+		head     => 1
+	);
+
+    open (TEXOUT, ">>$filepath.tex");
+
+	foreach my $event (@events) {
+
+		print TEXOUT "\\strut \\hfill\n";
+		print TEXOUT "{\\huge \\bf Congress Speech Scores: ".$event->name." }\n";
+
+		print TEXOUT "\\medskip\n";
+		print TEXOUT "\\newline\n";
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $sth = $dbh->prepare("
+			select entry.code, entry.id, entry.name, 
+				school.name, school.code, congresscode.value,
+				round.id, round.name, round.type, round.label,
+				chamber.letter, chamber.id,
+				judge.id, judge.last, judge.first,
+				ballot.id, ballot.chair,
+				score.id, score.tag, score.value
+
+				from (entry, school, round, panel chamber, judge, ballot, score)
+
+				left join school_setting congresscode
+					on congresscode.tag = 'congress_code'
+					and congresscode.school = school.id
+
+				where round.event = ? 
+				and round.id = chamber.round
+				and chamber.id = ballot.panel
+				and ballot.id = score.ballot
+				and score.tag = 'congress_speech'
+				and ballot.judge = judge.id
+				and ballot.entry = entry.id
+				and entry.school = school.id
+				group by score.id
+				order by round.name, judge.last, score.speech
+		");
+
+		my %scores;
+		my %entries;
+		my %rounds;
+
+		$sth->execute($event->id);
+
+		while ( my (
+			$entry_code, $entry_id, $entry_name, 
+				$school_name, $school_code, $congress_code,
+				$round_id, $round_name, $round_type, $round_label,
+				$chamber_letter, $chamber_id,
+				$judge_id, $judge_last, $judge_first,
+				$ballot_id, $ballot_chair,
+				$score_id, $score_tag, $score_value
+			) = $sth->fetchrow_array()
+		) { 
+
+			unless ($rounds{$round_name}) { 
+				if ($round_label) { 
+					$rounds{$round_name}{"label"} = $round_label;
+				} else { 
+					$rounds{$round_name}{"label"} = "Session ".$round_name;
+				}
+			}
+
+			$entries{$entry_id}{"code"} = $entry_code;
+			$entries{$entry_id}{"name"} = $entry_name;
+
+			$entries{$entry_id}{"schoolcode"} = $school_code;
+			$entries{$entry_id}{"schoolcode"} = $congress_code if $congress_code;
+			$entries{$entry_id}{"schoolname"} = Tab::short_name($school_name);
+
+			$entries{$entry_id}{$round_name}{"chamber"} = $chamber_letter;
+			push @{$scores{$entry_id}{$round_name}{$judge_id}}, $score_value;
+
+		}
+
+		my $round_count = scalar (keys %rounds);
+		next unless $round_count;
+
+		my @entry_keys = 
+            map  { $_->[0] } 
+            sort { $a->[1] <=> $b->[1] } 
+            map  { [$_, $entries{$_}{"code"}=~/(\d+)/] } 
+			keys %entries;
+
+		@entry_keys = 
+            map  { $_->[0] } 
+            sort { uc($a->[1]) cmp uc($b->[1]) } 
+            map  { [$_, $entries{$_}{"code"} =~ /(\D+)/] } 
+            @entry_keys;
+
+		@entry_keys = 
+			sort {$entries{$a}{"schoolname"} cmp $entries{$b}{"schoolname"}}
+			@entry_keys;
+
+		my $length = 4.4 / $round_count;
+
+		$length -= ($round_count * .0225);
+
+
+		my $tabular = "\\begin{tabular}{p{1.15in}p{1.15in}";
+		foreach (1 .. $round_count) { 
+			$tabular .= "p{".$length."in}";
+		}
+		$tabular .= "p{.25in}}\n";
+
+		print TEXOUT $tabular;
+		print TEXOUT "\\rowcolor[rgb]{1,.95,.66}\[5.5pt\]\[5.5pt\]\n";
+		print TEXOUT " \\textsb{Entry} & \\textsb{School} ";
+
+		foreach my $round_name (sort keys %rounds) { 
+			print TEXOUT " & \\textsb{";
+			print TEXOUT Tab::texify($rounds{$round_name}{"label"})." }";
+		}
+		print TEXOUT " & \\textsb{Tot}";
+
+		print TEXOUT "\n";
+		print TEXOUT "\\end{tabular}\n";
+		print TEXOUT "\\newline\n";
+
+		my $switch;
+
+		foreach my $entry_id (@entry_keys) { 
+
+			my $code = $entries{$entry_id}{"code"};
+			my $name = $entries{$entry_id}{"name"};
+
+			print TEXOUT $tabular;
+			print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2;
+
+			unless (
+				(index($code, $name) != -1)
+				|| (index($name, $code) != -1)
+				|| ($name eq $code)
+			) { 
+				print TEXOUT "\\parbox{1in}{ ";
+				print TEXOUT "\\footnotesize ";
+
+				print TEXOUT Tab::texify($entries{$entry_id}{"code"});
+				print TEXOUT "\\smallskip\n";
+				print TEXOUT "\\newline\n";
+				print TEXOUT Tab::texify($entries{$entry_id}{"name"});
+				print TEXOUT " } ";
+			} else { 
+				print TEXOUT "\\footnotesize ";
+				print TEXOUT Tab::texify($entries{$entry_id}{"name"});
+			}
+
+			print TEXOUT " & ";
+
+			print TEXOUT "\\footnotesize ";
+			print TEXOUT Tab::texify($entries{$entry_id}{"schoolname"});
+
+			my $total;
+		
+			foreach my $round_name (sort keys %rounds) { 
+
+				print TEXOUT " & \\noindent ";
+
+				print TEXOUT "\\texttt{\\footnotesize ";
+			
+				print TEXOUT "C".$entries{$entry_id}{$round_name}{"chamber"}.":"
+					if $entries{$entry_id}{$round_name}{"chamber"};
+
+				my $not_firstjudge;
+
+				foreach my $judge_id (sort keys %{$scores{$entry_id}{$round_name}}) { 
+
+					if ($scores{$entry_id}{$round_name}{$judge_id}) { 
+
+						print TEXOUT " ";
+
+						my $notfirst;
+
+						foreach my $score (@{$scores{$entry_id}{$round_name}{$judge_id}}) { 
+							print TEXOUT "," if $notfirst++;
+							print TEXOUT Tab::texify($score);
+							$total += $score;
+						}
+					}
+				
+				}
+
+				print TEXOUT " } ";
+
+			}
+
+			print TEXOUT " & \\hfill ".Tab::texify($total)." ";
+
+			print TEXOUT "\n";
+			print TEXOUT "\\end{tabular}\n";
+			print TEXOUT "\\newline\n";
+
+
+		}
+
+		print TEXOUT "\\pagebreak\n";
+	}
+
+	close TEXOUT;
+
+    $m->comp("/funclib/printout.mas", 
+		tourn    => $tourn,
+		filename => $filename,
+		tail     => 1 
+	);
+
+</%init>
+
