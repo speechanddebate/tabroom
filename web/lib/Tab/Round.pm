@@ -3,17 +3,19 @@ use base 'Tab::DBI';
 Tab::Round->table('round');
 Tab::Round->columns(Primary => qw/id/);
 Tab::Round->columns(Essential => qw/type name label flighted published post_results created start_time 
-							 		event timeslot site tiebreak_set timestamp/);
+							 		event timeslot site tiebreak_set runoff timestamp/);
 Tab::Round->columns(TEMP => qw/speaks/);
 
 Tab::Round->has_a(site => 'Tab::Site');
 Tab::Round->has_a(event => 'Tab::Event');
+Tab::Round->has_a(runoff => 'Tab::Round');
 Tab::Round->has_a(tiebreak_set => 'Tab::TiebreakSet');
 Tab::Round->has_a(timeslot => 'Tab::Timeslot');
 
 Tab::Round->has_many(jpools => [Tab::JPoolRound => 'jpool']);
 Tab::Round->has_many(rpools => [Tab::RPoolRound => 'rpool']);
 Tab::Round->has_many(settings => 'Tab::RoundSetting', 'round');
+Tab::Round->has_many(parents => 'Tab::Round', 'runoff');
 
 Tab::Round->has_many(panels => 'Tab::Panel', 'round' => { order_by => 'letter'} );
 Tab::Round->has_many(results => 'Tab::Result', 'round');
