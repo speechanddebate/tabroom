@@ -10,6 +10,7 @@ Tab::NSDA::MemberSchool->columns(Essential => qw/school_id school_name
 			school_status
 			school_paid_status 
 			school_charter_status
+			school_trophy
 			school_trophy_points
 /);
 
