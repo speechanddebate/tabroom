@@ -1,0 +1,302 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$round_id        => undef
+	$tiebreak_set_id => undef
+	$exclude         => undef
+	$runoff_tbset_id => undef
+	$timeslot_id     => undef
+	$new_day         => undef
+	$new_start_time  => undef
+	$new_end_time    => undef
+</%args>
+<%init>
+
+	my $now = DateTime->now();
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	# Setup stuff first
+
+	# Round that originates everything: 
+
+	my $round = Tab::Round->retrieve($round_id) 
+		if $round_id
+		&& $round_id == int($round_id);
+
+	unless ($round) { 
+		$m->comp(
+			"/funclib/abort.mas", 
+			message => "No valid round found for ID $round_id"
+		);
+	}
+
+	my $event = $round->event;
+
+	# Runoff timeslot
+
+	my $runoff_timeslot;
+
+	$runoff_timeslot = Tab::Timeslot->retrieve($timeslot_id) 
+		if $timeslot_id;
+
+	unless ($runoff_timeslot) { 
+
+		my $start = eval { 
+			return Tab::dtme($new_day, $new_start_time, $tz);
+		};
+
+		my $end = eval { 
+			return Tab::dtme($new_day, $new_end_time, $tz);
+		};
+
+		my $err;
+
+		unless ($start) { 
+			$err = "Invalid start datetime sent: $new_day $new_start_time. Please try again";
+		}
+
+		unless ($end) { 
+			$err .= "<br />" if $err;
+			$err .= "Invalid end datetime sent: $new_day $new_end_time. Please try again";
+		}
+
+		if ($err) { 
+
+			$m->redirect("runoff.mhtml?round_id=$round_id&tiebreak_set_id=$tiebreak_set_id&err=$err");
+
+		}
+		$runoff_timeslot = Tab::Timeslot->search(
+			start => $start,
+			end   => $end
+		)->first;
+
+		$runoff_timeslot = Tab::Timeslot->create({
+			tourn => $tourn->id,
+			start => $start,
+			end   => $end,
+			name  => $event->abbr." Runoff"
+		}) unless $runoff_timeslot;
+
+	}
+
+	# Runoff tiebreaker set
+
+	my $runoff_tiebreak_set;
+
+	$runoff_tiebreak_set = 
+		Tab::TiebreakSet->retrieve($runoff_tbset_id)
+		if $runoff_tbset_id;
+
+	unless ($runoff_tiebreak_set) { 
+
+		if ($event->type eq "speech") { 
+
+			$runoff_tiebreak_set = Tab::TiebreakSet->search(
+				tourn => $tourn->id,
+				name => "Speech Runoffs"
+			)->first;
+
+			unless ($runoff_tiebreak_set) { 
+
+				$runoff_tiebreak_set = Tab::TiebreakSet->create({
+					tourn => $tourn->id,
+					name  => "Speech Runoffs"
+				});
+
+				Tab::Tiebreak->create({
+					tiebreak_set => $runoff_tiebreak_set->id,
+					name         => "ranks",
+					count        => "previous",
+					priority     => 1
+				});
+
+			}
+
+		} else { 
+
+			$runoff_tiebreak_set = Tab::TiebreakSet->search(
+				tourn => $tourn->id,
+				name => "Debate Elim"
+			)->first;
+
+			unless ($runoff_tiebreak_set) { 
+				$runoff_tiebreak_set = Tab::TiebreakSet->search(
+					tourn => $tourn->id,
+					name => "Debate Elims"
+				)->first;
+			}
+
+			unless ($runoff_tiebreak_set) { 
+				$runoff_tiebreak_set = Tab::TiebreakSet->search(
+					tourn => $tourn->id,
+					name => "Debate Runoffs"
+				)->first;
+			}
+
+			unless ($runoff_tiebreak_set) { 
+
+				$runoff_tiebreak_set = Tab::TiebreakSet->create({
+					tourn => $tourn->id,
+					name  => "Speech Runoffs"
+				});
+
+				Tab::Tiebreak->create({
+					tiebreak_set => $runoff_tiebreak_set->id,
+					name         => "ranks",
+					count        => "previous",
+					priority     => 1
+				});
+
+			}
+		}
+	} 
+
+	# Create or update the runoff round itself
+
+	# Is there an existing runoff already? 
+
+	my $final = $event->rounds(
+		type => "final"
+	)->first;
+
+	unless ($final) { 
+		my @rounds = 
+			sort {$b->name cmp $a->name} 
+			$event->rounds();
+		$final = $rounds[0];
+	}
+
+	my $runoff;
+	$runoff = $final->runoff if $final;	
+
+	if ($runoff) { 
+
+		$runoff->timeslot($runoff_timeslot->id);
+		$runoff->tiebreak_set($runoff_tiebreak_set->id);
+		$runoff->update();
+
+	} else { 
+
+		my $name = $final->name + 1;
+
+		$runoff = Tab::Round->create({
+			timeslot     => $runoff_timeslot->id,
+			tiebreak_set => $runoff_tiebreak_set->id,
+			label        => "Runoff",
+			name         => $name,
+			type         => 'runoff',
+			site         => $final->site->id,
+			start_time   => $runoff_timeslot->start,
+			created      => $now
+		});
+
+		$final->runoff($runoff->id);
+		$final->update();
+
+	}
+
+	my %already_entries = 
+		map {$_->id => $_}
+		$m->comp("/funclib/round_entries.mas", 
+			round => $runoff
+		) if $runoff;
+
+	my $tiebreak_set;
+
+	$tiebreak_set = Tab::TiebreakSet->retrieve($tiebreak_set_id) 
+		if $tiebreak_set_id
+		&& $tiebreak_set_id == int($tiebreak_set_id);
+
+	my (@results) = $m->comp(
+		"/tabbing/results/order_entries.mas",
+		round        => $round,
+		tiebreak_set => $tiebreak_set
+	);
+
+	my $entries_ref = pop @results if @results;
+
+    my %entry_ballots = $m->comp(
+		"/funclib/round_ballot_strings.mas",
+			round => $round
+		);
+
+    my %entry_by_id = 
+        map {$_->id => $_} $event->entries();
+
+	my @vacate_slots = $m->comp(
+		"/funclib/event_entry_settings.mas",
+		event => $event,
+		tag   => "nsda_vacate"
+	);
+
+	my %vacated = map {$_->entry->id => $_->value } @vacate_slots;
+
+	my @priorities = $m->comp(
+		"/funclib/event_entry_settings.mas",
+		event => $event,
+		tag   => "nsda_priority"
+	);
+
+	my %priorities = map {$_->entry->id => $_->value } @priorities;
+
+    my @tiebreak_keys =
+		sort {$a <=> $b}
+		keys %{$entries_ref->{"tier_description"}};
+
+
+	my $msg;
+
+	if (${$entries_ref}{"by_place"}) {
+
+		foreach my $key ( sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) {
+
+			next unless $ARGS{$key};
+			next unless (scalar @{${${$entries_ref}{"by_place"}}{$key}}) > 1;
+
+			my @tied;
+
+			ENTRY:
+			foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) {
+
+				next if $exclude && $exclude->{$entry_id};
+				next if $vacated{$entry_id};
+				next if $already_entries{$entry_id};
+
+				push @tied, $entry_id;
+			}
+
+			next unless scalar @tied > 1;
+
+			my $section = Tab::Panel->create({
+				round   => $runoff->id,
+				letter  => $round->name.$key,
+				bracket => $key
+			});
+
+			my $side;
+
+			foreach my $entry_id (@tied) { 
+
+				$side++;
+
+				my $ballot = Tab::Ballot->create({
+					panel        => $section->id,
+					judge        => 0,
+					entry        => $entry_id,
+					side         => $side,
+					speakerorder => $side,
+					audit        => 0
+				});
+
+			}
+
+			$msg .= "<br />" if $msg;
+			$msg .= "Runoff scheduled for the tie for $key out of ".$round->realname;
+
+		}
+	}
+
+	$m->redirect("/panel/schemat/show.mhtml?round_id=".$runoff->id."&msg=$msg");
+
+</%init>
