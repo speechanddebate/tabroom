@@ -15,12 +15,17 @@ Tab::Round->has_a(timeslot => 'Tab::Timeslot');
 Tab::Round->has_many(jpools => [Tab::JPoolRound => 'jpool']);
 Tab::Round->has_many(rpools => [Tab::RPoolRound => 'rpool']);
 Tab::Round->has_many(settings => 'Tab::RoundSetting', 'round');
-Tab::Round->has_many(parents => 'Tab::Round', 'runoff');
 
 Tab::Round->has_many(panels => 'Tab::Panel', 'round' => { order_by => 'letter'} );
 Tab::Round->has_many(results => 'Tab::Result', 'round');
 
 __PACKAGE__->_register_datetimes( qw/created start_time timestamp/);
+
+sub parents { 
+	my $self = shift;
+	return unless $self > 0;
+	return Tab::Round->search( runoff => $self->id);
+}
 
 sub realname { 
 	my $self = shift;
