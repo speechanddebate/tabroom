@@ -24,7 +24,6 @@
 	if ($one_event) { 
 		push @events, $one_event;
 	} else { 
-	
 		@events = $tourn->events;
 		unless ($all) { 
 			my $one = shift @events;
@@ -48,6 +47,9 @@
 	my $qual_string = "Qualifier";
 	$qual_string = "Placement" if $tourn_settings->{"nsda_nats"};
 
+	my $now = DateTime->now();
+
+	my %integer_tbs = $m->comp("/funclib/tiebreaks.mas");
 	# Per request by Lisa V, the Weird Sorting Matrix:
 
 	my %wsm = (
@@ -103,12 +105,12 @@
 
 		next unless $event;
 
-		my $hidden = "hidden"
-			unless $event->setting("nsda_audited");
+		my $hidden = "hidden" unless $event->setting("nsda_audited");
+		next if $hidden && $format eq "post";
 
 		undef $hidden if $person->site_admin;
-
 		undef $hidden if $person_settings->{"nsda_admin"};
+
 
 		my @rounds = sort {$b->name <=> $a->name} 
 			$m->comp("/funclib/event_rounds.mas", 
@@ -717,7 +719,7 @@
 					my $code = "H".$section->letter;
 
 					my $result_set  = Tab::ResultSet->search(
-						label => "District Qualifiers: $code"
+						label => "District Qualifiers: $code",
 						tourn => $tourn,
 						event => $event
 					)->first;
@@ -725,10 +727,14 @@
 					unless ($result_set) { 
 
 						$result_set  = Tab::ResultSet->create({
-							label => "District Qualifiers: $code"
-							tourn => $tourn,
-							event => $event
+							label     => "District Qualifiers: $code",
+							tourn     => $tourn,
+							event     => $event,
+							generated => $now
 						});
+					} else { 
+						$result_set->generated($now);
+						$result_set->update();
 					}
 
 					my (@results) = $m->comp(
@@ -741,24 +747,23 @@
 					);  
 
 					my $entries_ref = pop @results if @results;
-
+				
 					my @tiebreak_keys =
 						sort {$a <=> $b}
 						keys %{$entries_ref->{"tier_description"}};
 
+
 					Tab::ResultSet->set_sql(
 						delete_results => "
 							delete from result
-								where result_set_id = ?
+								where result_set = ?
 					");
 
-					Tab::ResultSet->sql_delete_standings->execute(
+					Tab::ResultSet->sql_delete_results->execute(
 						$result_set->id
 					);
 
 					my $qualled;
-
-					my %integer_tbs = $m->comp("/funclib/tiebreaks.mas");
 
 					if (${$entries_ref}{"by_place"}) {
 
@@ -781,7 +786,7 @@
 										tag         => "vacated",
 										no_sort     => 1,
 										priority    => 0,
-										description => "Entry Slot Vacated or Dropped"
+										description => "Entry Slot Vacated or Dropped",
 										value       => 1
 									});
 								}
@@ -799,11 +804,21 @@
 
 								}	
 
+								Tab::ResultValue->create({ 
+									tag         => "Place",
+									description => "Final Placement",
+									value       => $key,
+									priority    => 1,
+									sort_desc   => 0,
+									result      => $result->id
+								});
+
+
 								foreach my $key (@tiebreak_keys) { 
 
 									my $value = ${$entries_ref}{"tiebreak"}{$key}{$entry_id};
 
-									my $sort_desc;
+									my $sort_desc = 0;
 									$sort_desc = 1 if $ARGS{"threshold_direction"};
 
 									$value =~ s/\.(?:|.*[^0]\K)0*\z//;
@@ -814,7 +829,7 @@
 									Tab::ResultValue->create({ 
 										tag         => ${$entries_ref}{"tier_description"}{$key},
 										description => ${$entries_ref}{"tier_long_description"}{$key},
-										result      => $value,
+										value       => $value,
 										priority    => $key,
 										sort_desc   => $sort_desc,
 										result      => $result->id
@@ -822,13 +837,14 @@
 								}
 							}
 						}
+
 					} #End of entries by place
 				}
 
 			} else { 
 
 				my $result_set  = Tab::ResultSet->search(
-					label => "District Qualifiers"
+					label => "District Qualifiers",
 					tourn => $tourn,
 					event => $event
 				)->first;
@@ -836,19 +852,50 @@
 				unless ($result_set) { 
 
 					$result_set  = Tab::ResultSet->create({
-						label => "District Qualifiers"
-						tourn => $tourn,
-						event => $event
+						label     => "District Qualifiers",
+						tourn     => $tourn,
+						event     => $event,
+						generated => $now
 					});
+
+				} else { 
+					$result_set->generated($now);
+					$result_set->update();
 				}
+
+
+				Tab::ResultSet->set_sql(
+					delete_results => "
+						delete from result
+							where result_set = ?
+				");
+
+				Tab::ResultSet->sql_delete_results->execute(
+					$result_set->id
+				);
+
+				@prelims = sort {$b->name <=> $a->name} @prelims;
+
+				my %entry_done; 
+
+				my $current_rank = 1;
+
+				foreach my $round ($final, $semi, @prelims) { 
+
+					my $debate_all++ 
+						if $event->type eq "debate";
+
+					my $section_rank++ 
+						if $final_tiebreaks->setting("equal_elims");
 
 					my (@results) = $m->comp(
 						"order_entries.mas", 
 							long_names   => 1,
-							round        => $final,
+							round        => $round,
 							tiebreak_set => $final_tiebreaks,
+							all_entries  => $debate_all,
 							runoffs      => $runoffs,
-							section      => $section
+							section_rank => $section_rank
 					);  
 
 					my $entries_ref = pop @results if @results;
@@ -857,30 +904,20 @@
 						sort {$a <=> $b}
 						keys %{$entries_ref->{"tier_description"}};
 
-					Tab::ResultSet->set_sql(
-						delete_results => "
-							delete from result
-								where result_set_id = ?
-					");
-
-					Tab::ResultSet->sql_delete_standings->execute(
-						$result_set->id
-					);
-
-					my $qualled;
-
-					my %integer_tbs = $m->comp("/funclib/tiebreaks.mas");
-
 					if (${$entries_ref}{"by_place"}) {
 
 						foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) { 
 
+							my $did;
+
 							foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) {
 
+								next if $entry_done{$entry_id}++;
 								my $entry = Tab::Entry->retrieve($entry_id);
+								$did++;
 
 								my $result = Tab::Result->create({
-									rank       => $key,
+									rank       => $current_rank,
 									result_set => $result_set->id,
 									entry      => $entry_id,
 									school     => $entry->school->id
@@ -892,7 +929,7 @@
 										tag         => "vacated",
 										no_sort     => 1,
 										priority    => 0,
-										description => "Entry Slot Vacated or Dropped"
+										description => "Entry Slot Vacated or Dropped",
 										value       => 1
 									});
 								}
@@ -910,11 +947,29 @@
 
 								}	
 
+								Tab::ResultValue->create({ 
+									tag         => "Place",
+									description => "Final Placement",
+									value       => $current_rank,
+									priority    => 1,
+									sort_desc   => 0,
+									result      => $result->id
+								});
+
+								Tab::ResultValue->create({ 
+									tag         => "Rnd",
+									description => "Last Round Competed",
+									value       => $round->name,
+									priority    => 2,
+									sort_desc   => 0,
+									result      => $result->id
+								});
+
 								foreach my $key (@tiebreak_keys) { 
 
 									my $value = ${$entries_ref}{"tiebreak"}{$key}{$entry_id};
 
-									my $sort_desc;
+									my $sort_desc = 0;
 									$sort_desc = 1 if $ARGS{"threshold_direction"};
 
 									$value =~ s/\.(?:|.*[^0]\K)0*\z//;
@@ -925,8 +980,8 @@
 									Tab::ResultValue->create({ 
 										tag         => ${$entries_ref}{"tier_description"}{$key},
 										description => ${$entries_ref}{"tier_long_description"}{$key},
-										result      => $value,
-										priority    => $key,
+										value       => $value,
+										priority    => ($key + 2),
 										sort_desc   => $sort_desc,
 										result      => $result->id
 									})
@@ -935,256 +990,17 @@
 
 							}
 
-						}
-
-					} #End of entries by place
-
-				}
-
-
-					if ($up_event) { 
-
-						my $qual_count = scalar(keys %qualifiers);
-						$up_event->nAdvancing($qual_count);
-						$up_event->update();
-
-					} else { 
-
-						# THIS SO OFFENDS ME.  WHY NOT A UNIQUE ID LIKE EVERY DB ON
-						# EARTH WHY WHY WHY WHYYYYYY....
-
-						my $debate = "N";
-						my $congress = "N";
-						my $seli = 0;
-						
-						$debate = "Y" if $event->type eq "debate";
-						$congress = "N" if $event->type eq "congress";
-
-						my %used;
-						my $entry_count = 0;
-
-						foreach my $key (
-							keys %qualifiers, 
-							keys %vacated, 
-							keys %alternates, 
-							keys %others
-						) { 
-							$entry_count++ unless $used{$key}++;
-						}
-						
-						my $qual_count = scalar(keys %qualifiers);
-
-						$up_event = Tab::NSDA::NationalsUpEvent->create({
-							web_event_id => $event->id,
-							instance_id  => $instance->id,
-							event_id     => $nationals_event->event_id,
-							abbr         => $event_abbr,
-							name         => $event->name,
-							isdebate     => $debate,
-							iscongress   => $congress,
-							nRounds      => (scalar @rounds),
-							nEntries     => $entry_count,
-							nAdvancing   => $qual_count
-						});
-
-					} 
-
-					my $starting_place = scalar(keys(%in_elims));
-
-					foreach my $prelim (sort {$b->name <=> $a->name} @prelims) { 
-
-						my $debate_all++ 
-							if $event->type eq "debate";
-
-						my $section_rank++ 
-							if $final_tiebreaks->setting("equal_elims");
-
-						my (@results) = $m->comp(
-							"order_entries.mas", 
-								long_names   => 1,
-								round        => $prelim,
-								tiebreak_set => $final_tiebreaks,
-								all_entries  => $debate_all,
-								runoffs      => $runoffs,
-								section_rank => $section_rank
-						);  
-
-						my $entries_ref = pop @results if @results;
-
-						if (${$entries_ref}{"by_place"}) {
-
-							foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) { 
-
-								my $key_count;
-
-								foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) {
-									next if $in_elims{$entry_id};
-									$in_elims{$entry_id} = $key + $starting_place;
-								}
-
-								$starting_place += $key_count;
-
-							}
+							$current_rank += $did;
 
 						}
 
 					}
 
-					my $counter;
-
-					Tab::NSDA::NationalsStanding->set_sql( 
-						delete_standings => "
-							delete from final_standings 
-								where district_id = ?
-								and instance_event_id = ? 
-						");
-
-					Tab::NSDA::NationalsStanding->sql_delete_standings->execute(
-						$district->id,
-						$up_event->event_id
-					);
-
-					foreach my $entry_id (
-						sort {$in_elims{$a} <=> $in_elims{$b}} (keys %in_elims)
-					) { 
-
-						my $entry = Tab::Entry->retrieve($entry_id);
-						my @students = $entry->students;
-
-						next unless @students;
-
-						my $student = shift @students;
-						my $partner = shift @students if @students;
-
-						my $student_ualt = $student->ualt_id;
-						my $partner_ualt = $partner->ualt_id if $partner;
-
-						my $place = $in_elims{$entry_id};
-
-						unless ($student_ualt) { 
-
-							$m->print('<div class="full marno row redtext strong centeralign padtop padbottom">
-								Entry '.$entry->code." student $student is NOT REGISTERED AS AN NSDA MEMBER.  
-								Position: $place  not recorded
-							</div>");
-
-						} else { 
-
-							my $chapter_nsda = $student->chapter->nsda;
-
-							my $seli = 0;
-							$seli++ if $vacated{$entry_id}{"place"};
-
-							Tab::NSDA::NationalsStanding->create({
-								district_id       => $district->id,
-								src_instance_id   => $instance->id,
-								abbr              => $event_abbr,
-								place             => $place,
-								seli              => $seli,
-								school_id         => $chapter_nsda,
-								ualt_id           => $student_ualt,
-								partner_ualt_id   => $partner_ualt,
-								instance_event_id => $up_event->event_id,
-								skip              => 0
-							});
-						}
-
-						$counter++;
-
-						if ($qualifiers{$entry_id}) { 
-
-							next unless $qualifiers{$entry_id}{"place"};
-
-							my $string = "<span class='threequarters padmore'>";
-							$string .= "Entry ".$entry->code." from ".$entry->school->name." qualified: ";
-
-							foreach my $schmoe ($student, $partner) { 
-								next unless $schmoe;
-								$string .= $schmoe->first." ".$schmoe->last." Merit ID: ".$schmoe->ualt_id." ";
-							}
-
-							my %creation = (
-								tourn_id    => $school_year,
-								event_id    => $nationals_event->event_id,
-								district_id => $tourn_settings->{"nsda_district"},
-								school_id   => $entry->school->chapter->nsda,
-								student_id  => $student_ualt,
-								partner_id  => $partner_ualt
-							);
-
-							$creation{"partner_id"} = $partner->ualt_id if $partner;
-
-							my $eligible;
-							my $err;
-
-							foreach my $schmoe ($student, $partner) { 
-
-								next unless $schmoe;
-
-								my @already;
-
-								push @already, Tab::NSDA::NationalsEntry->search(
-									tourn_id   => $school_year,
-									event_id   => $nationals_event->event_id,
-									student_id => $schmoe->ualt_id
-								);
-
-								push @already, Tab::NSDA::NationalsEntry->search(
-									tourn_id   => $school_year,
-									event_id   => $nationals_event->event_id,
-									partner_id => $schmoe->ualt_id
-								);
-
-								if (@already) { 
-									foreach my $yo (@already) { 
-										$err .= "<br />" if $err;
-										$err .= $schmoe->first." ".$schmoe->last;
-										$err .= " is already registered in ".$event->abbr;
-										$err .= " as entry ID ".$yo->eligible_id;
-									}
-								}
-
-							} 
-							
-							unless ($err) { 
-								$err = eval { 
-									$eligible = Tab::NSDA::NationalsEntry->create(\%creation);
-								};
-
-							}
-
-							$string .= "</span>";
-
-							if ($eligible && ( (not defined $err) || $err eq int($err))  ) { 
-
-								$string .= "<span class='quarter rightalign greentext strong'>Succeeded!</span>";
-
-							} else { 
-
-								$string .= "<p><span class='third rightalign redtext strong'>Alert!</span>";
-								$string .= "</span><span class='redtext twothirds'>".$err."</span>";
-
-							}
-
-							$m->print("<div class='full marno row'>".$string."</div>");
-		
-						}
-					
-
-					}
-
-					$m->print('<p class="bluetext">Uploaded '.$counter.' entry standings</p>');
 				}
 
-			} else { 
-
-				$m->print("<h5 class='redtext'>No nationals event found corresponding to ".$event->abbr."</h5>");
 			}
 
-			$m->flush_buffer();
-		
-		} else {
-
+		} else { 
 
 </%init>
 
@@ -1217,7 +1033,6 @@
 						name  = "full"
 						value = "<% $full %>"
 					>
-
 
 					<select
 						name     = "event_id"
@@ -1270,14 +1085,13 @@
 							$person_settings->{"nsda_admin"} 
 							|| $person->site_admin
 						)
-						&& (1 == 0) #Not ready for new system yet
 					) { 
 </%perl>
 
 						<a 
-							title = "Post Results to Nationals Dashboard"
-							class = "buttonwhite fa fa-lg fa-arrow-up orangetext hover"
-							href  = "nsda_qualifiers.mhtml?format=registration&event_id=<% $event->id %>&full=<% $full %>"
+							title = "Finalize for Publication and Nationals Registration"
+							class = "buttonwhite fa fa-lg fa-arrow-circle-up orangetext hover"
+							href  = "nsda_qualifiers.mhtml?format=post&event_id=<% $event->id %>&full=<% $full %>"
 						></a>
 
 %					}
@@ -1305,16 +1119,17 @@
 							class = "buttonwhite fa fa-lg fa-file-excel-o purpletext hover"
 							href  = "nsda_qualifiers.mhtml?format=simplecsv&all=1"
 						></a>
+<%perl>
 
-%						if ( 
-%						($person_settings->{"nsda_admin"} || $person->site_admin)
-%						&& (1 == 0) #Not ready for new system yet
-%						) { 
-
+						if ( 
+							$person_settings->{"nsda_admin"} 
+							|| $person->site_admin
+						) { 
+</%perl>
 							<a 
 								title = "Post Results to Nationals Dashboard"
-								class = "buttonwhite fa fa-lg fa-arrow-up orangetext hover"
-								href  = "nsda_qualifiers.mhtml?format=registration&all=1"
+								class = "buttonwhite fa fa-lg fa-arrow-circle-up orangetext hover"
+								href  = "nsda_qualifiers.mhtml?format=post&all=1"
 							></a>
 
 %						}
@@ -1649,6 +1464,11 @@
 			filename => $filename,
 			tail     => 1 
 		);
+
+	} elsif ($format eq "post") { 
+
+		my $msg = scalar @events." events posted for publication or Nationals registration";
+		$m->redirect("/tabbing/publish/index.mhtml?msg=$msg");
 
 	} else { 
 
