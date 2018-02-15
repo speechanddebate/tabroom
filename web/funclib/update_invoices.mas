@@ -1,0 +1,106 @@
+<%args>
+	$school_id => undef
+	$target_id => undef
+</%args>
+<%init>
+
+    use JSON;
+    use MIME::Base64;
+    use REST::Client;
+
+	$school_id = $target_id unless $school_id;
+
+	my $school = Tab::School->retrieve($school_id) if $school_id;
+
+	return unless $school;
+
+	my @invoices;
+
+	if ($school_id) { 
+
+		@invoices = Tab::Invoice->search(
+			paid   => 0,
+			school => $school_id
+		);
+
+	} else { 
+
+		@invoices = Tab::Invoice->search(
+			paid => 0
+		);
+
+	}
+
+    my $auth_header = encode_base64($Tab::nsda_invoice_user.":".$Tab::nsda_invoice_key);
+
+	my $true = bless( do{\(my $o = 1)}, 'JSON::PP::Boolean' ); 
+
+	my $client = REST::Client->new(
+		host => $Tab::nsda_invoice_endpoint 
+	);
+
+	foreach my $invoice (@invoices) { 
+
+		if ($invoice
+			&& $invoice->school
+			&& $invoice->school->chapter
+			&& $invoice->school->chapter->nsda
+		) { 
+
+			$client->GET(
+				"/v1/schools/".$invoice->school->chapter->nsda."/invoices?status=all",
+				{
+					'Authorization' => "Basic $auth_header",
+					'Content-Type'  => 'application/json',
+					'Accept'        => 'application/json'
+				}
+			);
+
+			my $response_json = $client->responseContent();
+
+	        my %answered_invoices = eval {
+				return %{JSON::decode_json($response_json)};
+			};
+
+			foreach my $response_invoice (@{$answered_invoices{"invoices"}}) { 
+
+				next unless $response_invoice->{"invoiceId"} == $invoice->blusynergy;
+
+				if ($response_invoice->{"status"} eq "paid") { 
+
+					$invoice->paid(1);
+					$invoice->update;
+
+					my $amount = $response_invoice->{"total"} * -1;
+
+					my $payment = Tab::Fine->create({
+						school  => $invoice->school->id,
+						reason  => "NSDA Invoice #".$invoice->blusynergy." paid",
+						payment => 1,
+						amount  => $amount,
+						deleted => 0,
+						tourn   => $invoice->school->tourn->id
+					});
+				}
+			}
+		}
+	}
+
+	if ($ARGS{"property_name"} eq "admin") { 
+
+		$m->clear_buffer();
+		$r->content_type('application/json');
+
+		my $msg = $school->name." invoice paid status has been updated";
+
+		$m->print('{ "error": false, "message": "'.$msg.'"}');
+
+		$m->abort();
+	
+	} else { 
+
+		return "Invoice statuses updated";
+
+	}
+
+</%init>

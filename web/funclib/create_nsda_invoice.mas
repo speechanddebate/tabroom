@@ -1,0 +1,161 @@
+<%args>
+	$person
+	$school    => undef
+	$school_id => undef
+	$admin     => undef
+</%args>
+<%init>
+
+    use JSON;
+    use JSON::PP::Boolean;
+    use MIME::Base64;
+    use REST::Client;
+    use Data::Dumper;
+
+	$school = Tab::School->retrieve($school_id) unless $school;
+
+	unless ($school) { 
+		my $err = "No valid school found for ID $school_id $school";
+		$m->redirect("/user/home.mhtml?err=$err");
+	} 
+
+	unless ($school && $school->chapter && $school->chapter->nsda) { 
+		my $err = "That school is not marked as an NSDA member and therefore cannot pay via the NSDA system";
+		$m->redirect("fees.mhtml?school_id=".$school->id."&err=$err");
+	}
+
+	my $tourn = $school->tourn;
+	my %tourn_settings = $tourn->all_settings();
+
+	my %codes = (
+		"entries"  => 2001,
+		"bond"        => 2003,
+		"judges"      => 2102,
+		"fines"       => 2103,
+		"concessions" => 2201
+	);
+
+	if ($tourn_settings{'nsda_ms_nats'}) { 
+		$codes{"entries"} = 2002;
+		$codes{"bond"} = 2004;
+	};
+
+	my ($owed, $feline_ref, $subtotals, $fines_ref, $orders_ref) = $m->comp(
+		"/funclib/school_fees.mas",
+			all            => 1,
+			ignore_judging => $tourn_settings{"ncfl"},
+			school         => $school,
+			tourn          => $tourn,
+			tourn_settings => \%tourn_settings,
+		);
+
+	my @invoices = $school->invoices();
+	my %totals = %{$subtotals};
+
+	my %invoiced = ();
+	my %still_owed = ();
+
+	foreach my $invoice (@invoices) { 
+
+		my %invoice = eval { 
+			return %{JSON::decode_json($invoice->details)};
+		};
+
+		foreach my $key (keys %codes) { 
+			$invoiced{$key} += $invoice{$key};
+		}
+	}
+
+	my $total_owed;
+	my @items;
+
+	my $ualt_id = $person->ualt_id;
+
+	foreach my $key (keys %codes) { 
+
+		$still_owed{$key} = ($totals{$key} - $invoiced{$key});
+		$total_owed += $still_owed{$key};
+
+		if ($still_owed{$key} > 0) { 
+			my %item = (
+            	product_id => $codes{$key},
+				price      => $still_owed{$key},
+			);
+
+			$item{"person_id"} = $ualt_id if $ualt_id;
+
+			push @items, \%item;
+
+		}
+
+	}
+
+	if ($total_owed > 0) { 
+
+		my $true = bless( do{\(my $o = 1)}, 'JSON::PP::Boolean' );
+
+		my %new_invoice = (
+			school_id => $school->chapter->nsda,
+			items     => \@items,
+			nationals => $true
+		);
+
+		my $json = JSON::encode_json(\%new_invoice);
+	
+		my $auth_header = encode_base64($Tab::nsda_invoice_user.":".$Tab::nsda_invoice_key);
+
+		my $client = REST::Client->new(
+			host => $Tab::nsda_invoice_endpoint
+		);
+	
+		$client->POST( 
+			"/v1/invoices",
+			$json,
+            {
+				'Authorization' => "Basic $auth_header",
+				'Content-Type'  => 'application/json',
+				'Accept'        => 'application/json'
+			}
+		); 
+
+		my $response_json = $client->responseContent();
+	
+		my %answered_invoice = eval { 
+			return %{JSON::decode_json($response_json)};
+		};
+
+		if ($answered_invoice{"message"} eq "Invoice successfully created") { 
+
+			foreach my $invoice (@{$answered_invoice{"invoices"}}) { 
+
+				my $invoice = Tab::Invoice->create({
+					blusynergy => $invoice->{"invoiceId"},
+					total      => $invoice->{"total"},
+					school     => $school->id,
+					paid       => 0,
+					details    => JSON::encode_json(\%still_owed)
+				});
+			}
+
+		} else { 
+
+			$m->print("<pre>: Something went wrong: ".$answered_invoice{"message"}."</pre>");
+			$m->print('<pre>: Please send the above message to help@tabroom.com for assistance</pre>');
+			$m->abort();
+
+		}
+
+	}
+
+	my $update = $m->comp("/funclib/update_invoices.mas", school => $school->id);
+
+	if ($admin) { 
+		my $msg = "Invoice created and updated for user";
+		$m->redirect("/register/school/invoice.mhtml?school_id=".$school->id."&msg=$msg");
+	} else { 
+		$m->redirect("https://www.speechanddebate.org/account/#/".$school->chapter->nsda."/invoices");
+
+	}
+
+</%init>
+
