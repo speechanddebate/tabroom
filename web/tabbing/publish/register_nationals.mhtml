@@ -1,0 +1,669 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$person_settings
+	$perms
+	$confirmation => undef
+</%args>
+<%init>
+
+	my $district = Tab::District->retrieve($tourn_settings->{"nsda_district"})
+		if $tourn_settings->{"nsda_district"};
+
+	my $nationals = $m->comp("/funclib/current_nationals.mas");
+
+	unless ($district) { 
+		$m->comp("/funclib/abort.mas", 
+			message => "Your district could not be loaded"
+		);
+	}
+
+	unless ($nationals) { 
+		$m->comp("/funclib/abort.mas", 
+			message => "The current national tournament could not be found"
+		);
+	}
+
+	Tab::Event->set_sql( undone_events => "
+		select event.*
+		from event, event_setting, weekend
+		where event.tourn = ? 
+		and event.id = event_setting.event
+		and event_setting.tag = 'weekend'
+		and event_setting.value = weekend.id
+		and weekend.end > NOW()
+	");
+
+	my @undone_events = Tab::Event->search_undone_events($tourn->id);
+
+	Tab::Event->set_sql( unaudited_events => "
+		select event.*
+		from event
+		where event.tourn = ? 
+		and not exists ( 
+			select event_setting.id
+			from event_setting
+			where event_setting.event = event.id
+			and event_setting.tag = 'nsda_audited'
+		)
+
+		and not exists ( 
+			select weekend.id
+			from event_setting weekend
+			where weekend.event = event.id
+			and weekend.tag = 'weekend'
+			and weekend.value = 'nope'
+		)
+	");
+
+	my @unaudited_events = Tab::Event->search_unaudited_events($tourn->id);
+
+	Tab::Event->set_sql( unposted_events => "
+		select event.*
+		from event
+		where event.tourn = ? 
+		and not exists ( 
+			select result_set.id
+			from result_set
+			where result_set.event = event.id
+			and result_set.label like 'District Qualifiers%'
+		)
+		and not exists ( 
+			select weekend.id
+			from event_setting weekend
+			where weekend.event = event.id
+			and weekend.tag = 'weekend'
+			and weekend.value = 'nope'
+		)
+	");
+
+	my @unposted_events = 
+		Tab::Event->search_unposted_events($tourn->id);
+
+	Tab::Entry->columns(TEMP => "source_entry");
+	Tab::Entry->columns(TEMP => "autoqual");
+
+	Tab::Entry->set_sql( districts => "
+		select entry.*, 
+			sourceentry.value as source_entry,
+			autoqual.value as autoqual
+
+		from (entry, school)
+
+		left join entry_setting autoqual 
+			on entry.id = autoqual.entry
+			and autoqual.tag = 'autoqual'
+
+		left join entry_setting sourceentry
+			on entry.id = sourceentry.entry
+			and sourceentry.tag = 'source_entry'
+
+		where entry.school = school.id
+		and school.district = ? 
+		and school.tourn = ?
+	");
+
+	my @district_entries = 
+		Tab::Entry->search_districts($district->id, $nationals->id);
+
+	my %nationals_events = 
+		map {$_->abbr => $_}
+		$nationals->events();
+
+	my %existing_entries  = 
+		map {$_->source_entry => $_} 
+		@district_entries;
+
+	my $full_msg; 
+
+	if ($confirmation == 1) { 
+
+		unless (
+			@unposted_events 
+			|| @undone_events 
+			|| @unaudited_events
+		) { 
+
+			foreach my $event ( $tourn->events() ) { 
+
+				my %qualifiers = $m->comp(
+					"/funclib/district_qualifiers.mas",
+					event => $event
+				);
+
+				my $posted = 0;
+				next unless keys %qualifiers;
+
+				foreach my $key (
+					sort {$a <=> $b} 
+					keys %qualifiers
+				) { 
+							
+					next unless ($nationals_events{$event->abbr});
+
+					next if $key eq "tags";
+					next if $key eq "descs";
+
+					my $entry = $qualifiers{$key}{"entry"};
+
+					next unless $entry;
+
+					my $entry_string;
+
+				 	unless (
+						$qualifiers{$key}{"vacated"}
+						|| $existing_entries{$entry->id}
+					) { 
+
+						my $new_entry = $m->comp(
+							"/funclib/transfer_entry.mas",
+							person   => $person,
+							entry    => $entry,
+							event    => $nationals_events{$event->abbr},
+							district => $district->id
+						);
+
+						if ($new_entry && $new_entry eq int($new_entry)) { 
+							$posted++;
+							$entry_string .= " ".$new_entry->id." ".$new_entry->name;
+						} else { 
+
+							$full_msg .= "<br/> $new_entry ";
+
+						}
+
+					} 
+
+					my $msg = "Posted $entry_string into ".$nationals_events{$event->abbr}->abbr;
+
+					$m->comp("/funclib/log.mas",
+						tourn       => $tourn,
+						event       => $event,
+						type        => "tabbing",
+						person      => $person,
+						description => $msg
+					);
+
+				}
+
+
+				if ($posted > 0) { 
+					$full_msg .= "<br />" if $full_msg;
+					$full_msg .= "$posted Qualifiers posted in ".$event->abbr;
+				}
+
+			}
+		}
+
+		undef @district_entries;
+		undef %existing_entries;
+
+		@district_entries = 
+			Tab::Entry->search_districts($district->id, $nationals->id);
+
+		%existing_entries  = 
+			map {$_->source_entry => $_} 
+			@district_entries;
+
+
+	}
+
+</%init>
+
+	<script>
+
+%		if ($full_msg) { 
+			$(document).ready( function(){
+				alertify.alert("<% $full_msg %>");
+			});
+%		}
+
+		function toggleSubmit() { 
+			if ($("#confirmation").prop("checked")) { 
+				$("#submit_confirmed").removeAttr('disabled');
+			} else { 
+				$("#submit_confirmed").attr('disabled', "true");
+			}
+		}
+
+	</script>
+
+
+	<div class="main">
+
+		<h2 class="normalweight nospace">
+			<% $nationals->start->year %> <% $nationals->name %>
+		</h2>
+
+<%perl>
+		unless (
+			@unposted_events 
+			|| @undone_events 
+			|| @unaudited_events
+		) { 
+</%perl>
+
+			<span class="fourfifths">
+				<h4 class="marvert nospace padvert">
+					<% $district->name %> qualifiers
+				</h4>
+			</span>
+
+			<span 
+				id    = "qualifiers_buttonarea"
+				class = "fifth nospace rightalign"
+			></span>
+
+			<& "/funclib/tablesorter.mas", table => "qualifiers" &>
+
+			<table id="qualifiers">
+
+				<thead>
+
+					<tr class="yellowrow smallish semibold padvert">
+
+						<th>
+							Status
+						</th>
+
+						<th>
+							Event
+						</th>
+
+						<th>
+							Code
+						</th>
+
+						<th>
+							Name
+						</th>
+
+						<th>
+							Place
+						</th>
+
+						<th class="nosort">
+							Tiebreakers
+						</th>
+
+						<th
+							title="This indicates that the entry has refused the spot to nationals, either because of single entry intents or because the coach dropped the spot on registration"
+						>
+							Vacated?
+						</th>
+
+					</tr>
+
+				</thead>
+
+				<tbody>
+
+<%perl>
+				foreach my $event ( $tourn->events() ) { 
+
+					my %qualifiers = $m->comp(
+						"/funclib/district_qualifiers.mas",
+						event => $event
+					);
+
+					next unless keys %qualifiers;
+
+					my $posted;
+
+					foreach my $key (
+						sort {$a <=> $b} 
+						keys %qualifiers
+					) { 
+
+						my $entry_id = $qualifiers{$key}{"entry"};
+						$posted++ if $existing_entries{$entry_id};
+					}
+
+					foreach my $key (
+						sort {$a <=> $b} 
+						keys %qualifiers
+					) { 
+						next if $key eq "tags";
+						next if $key eq "descs";
+
+</%perl>
+
+						<tr class="smallish <% $qualifiers{$key}{"vacated"} ? "strike" : "" %> ">
+
+							<td class="centeralign">
+
+<%perl>
+								my $entry_id = $qualifiers{$key}{"entry"};
+
+								if ($existing_entries{$entry_id}) { 
+
+									if ($qualifiers{$key}{"vacated"}) { 
+</%perl>
+										<div 
+											title="This entry was dropped or rejected by the school/coach"
+											class="full redtext semibold padless marless"
+										>
+											REJECTED
+										</div>
+%									} elsif ($existing_entries{$entry_id}->unconfirmed) { 
+										<div 
+											title="This entry is eligble for acceptance by the school/coach"
+											class="full bluetext semibold padless marless">
+											AVAILABLE
+										</div>
+%									} else { 
+										<div 
+											title="This entry was accepted by the school/coach"
+											class="full greentext semibold padless marless">
+											ACCEPTED
+										</div>
+%									} 
+%								} elsif ($qualifiers{$key}{"vacated"}) { 
+
+%								} else { 
+									<div class="full graytext semibold padless marless">
+										NOT POSTED
+									</div>
+%								}
+
+							</td>
+
+							<td>
+								<% $event->abbr %>
+							</td>
+
+							<td>
+								<% $qualifiers{$key}{"entry"}
+								 	?  $qualifiers{$key}{"entry"}->code
+									: ""
+								%>
+							</td>
+
+							<td>
+								<% $qualifiers{$key}{"entry"}
+								 	?  $qualifiers{$key}{"entry"}->name
+									: ""
+								%>
+							</td>
+
+							<td class="rightalign">
+								<% $key %>
+							</td>
+
+							<td class="nospace centeralign">
+
+<%perl>
+
+								foreach my $priority (
+									sort {$a <=> $b} 
+									keys %{$qualifiers{$key}{"results"}}
+								) {
+
+									next if $qualifiers{$key}{"tag"}{$priority} eq "Place";
+
+</%perl>
+									<span class="seventh centeralign ltborderright nospace">
+										<span 
+											class = "seveneighths rightalign hover padvert"
+											title = "<% $qualifiers{$key}{"tag"}{$priority} %>"
+										><% $qualifiers{$key}{"results"}{$priority} %></span>
+									</span>
+
+%								}
+							</td>
+
+							<td class="padless centeralign">
+
+%								if ($posted) { 
+
+%									if ($qualifiers{$key}{"vacated"}) { 
+
+										<span class="redtext semibold normalsize">
+											Y
+										</span>
+
+%									} else { 
+
+										<span class="graytext semibold normalsize">
+											N
+										</span>
+		
+%									}
+
+%								} else { 
+
+									<span class="hidden"><% $qualifiers{$key}{"vacated"} %></span>
+
+									<label class="switch smaller">
+
+										<input 
+											type         = "checkbox"
+											value        = "1"
+											id           = "<% $entry_id %>_nsda_vacate"
+											setting_name = "nsda_vacate"
+											target_type  = "entry"
+											on_success   = "refresh"
+											target_id    = "<% $entry_id %>" 
+											onChange     = "postSwitch(
+												this, 
+												'/register/entry/entry_switch.mhtml'
+											);"
+
+											<% $qualifiers{$key}{"vacated"} ?  'checked="checked"' : "" %>
+										>
+										<div class="onred slider"></div>
+
+									</label>
+%								}
+
+							</td>
+
+						</tr>
+
+%					}
+%				}
+
+				</tbody>
+
+			</table>
+
+
+			<h5 class="martopmore">
+				Confirm registration for Nationals
+			</h5>
+
+			<form 
+				action = "register_nationals.mhtml"
+				method = "post"
+			>
+
+			<div class="odd">
+
+				<span class="seveneighths semibold redtext">
+					I certify I have inspected and audited the above results
+					and they are true to the best of my knowledge.
+				</span>
+
+				<label for="confirmation">
+					<span class="eighth centeralign hover padvertmore">
+						<input 
+							type    = "checkbox"
+							class   = "bigger"
+							name    = "confirmation"
+							id      = "confirmation"
+							value   = "1"
+							onClick = "toggleSubmit();"
+						>
+					</span>
+				</label>
+
+			</div>
+
+			<div class="libl full rightalign marno padvertmore">
+
+				<input
+					id    = "submit_confirmed"
+					type  = "submit"
+					value = "Post Nationals Registration"
+					disabled
+				>
+			</div>
+
+%		}
+
+	</div>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<h4>Status checks:</h4>
+
+			<div class="row">
+
+				<span class="threequarters semibold bluetext">
+					All events have run 
+				</span>
+
+				<span class="quarter centeralign nospace">
+%					if (@undone_events) { 
+						<a class=" redtext fa fa-lg fa-times"></a>
+%					} else {
+						<a class=" greentext fa fa-lg fa-check"></a>
+%					}
+				</span>
+			</div>
+
+%			if (@undone_events) { 
+				<div class="row borderredvert">
+					<span class="third redtext semibold bigger">
+						Missing:
+					</span>
+
+					<span class="twothirds semibold bigger centeralign">
+%						foreach my $event (@undone_events) { 
+							<% $event->abbr %>
+%						}
+					</span>
+				</div>
+%			}
+
+			<div class="row">
+
+				<span class="threequarters semibold bluetext">
+					All events were audited
+				</span>
+
+				<span class="quarter centeralign nospace">
+%					if (@unaudited_events) { 
+						<a class=" redtext fa fa-lg fa-times"></a>
+%					} else {
+						<a class=" greentext fa fa-lg fa-check"></a>
+%					}
+				</span>
+
+			</div>
+
+%			if (@unaudited_events) { 
+
+				<div class="row borderredvert">
+
+					<span class="third redtext semibold bigger">
+						Missing:
+					</span>
+
+					<span class="twothirds semibold bigger centeralign">
+%						foreach my $event (@unaudited_events) { 
+							<% $event->abbr %>
+%						}
+					</span>
+
+				</div>
+%			}
+
+			<div class="row">
+
+				<span class="threequarters semibold bluetext">
+					Results lists created
+				</span>
+
+				<span class="quarter centeralign nospace">
+%					if (@unposted_events) { 
+						<a class=" redtext fa fa-lg fa-times"></a>
+%					} else {
+						<a class=" greentext fa fa-lg fa-check"></a>
+%					}
+				</span>
+
+			</div>
+
+%			if (@unposted_events) { 
+
+				<div class="row borderredvert">
+
+					<span class="third redtext semibold bigger">
+						Missing:
+					</span>
+
+					<span class="twothirds semibold bigger centeralign">
+%						foreach my $event (@unposted_events) { 
+							<% $event->abbr %>
+%						}
+					</span>
+
+					<div class="full">
+
+						<span class="centeralign semibold bigger full">
+							Create results lists from the <br />Results &rarr; Qualifiers page:
+						</span>
+
+						<a 
+							class  = "yellow full martop marbottommore"
+							href   = "nsda_qualifiers.mhtml"
+							target = "_blank"
+						>Create Results Postings</a>
+
+					</div>
+
+				</div>
+%			}
+
+
+		</div>
+
+		<div class="sidenote">
+
+			<h4>What is "vacated"?</h4>
+
+			<p class="bigger">
+				<span class="redtext inline semibold">Vacated entries</span>
+				are entries that have given up their spot to Nationals for any
+				reason.  That can include entrants who have qualified and
+				preferred another event, or entries that dropped from Nationals
+				registration, or so on.  
+			</p>
+
+			<p class="bigger">
+				When an entry is vacated, the next spot in the qualifier list
+				moves up and is eligible for promotion to Nationals.  You
+				cannot change an entry's vacated status after you have posted
+				your Nationals reg; contact the office if there's a problem.
+			</p>
+
+			<h4>If these results are wrong</h4>
+
+			<p class="bigger">
+
+				If you spot an ordering mistake or issue in these results,
+				check the Qualifiers list for the event/category in question
+				(Results &rarr; Qualifiers in the menu above).   If the
+				Qualifiers list is correct, hit the orange up arrow next to the
+				event name on the top right to regenerate the Qualifiers list.
+				If the Qualifiers list is incorrect and you are unable to fix
+				it, please send the details to help@tabroom.com.
+			</p>
+
+		</div>
+
+	</div>
