@@ -1,0 +1,215 @@
+<%args>
+	$school
+	$student_id => undef
+</%args>
+<%init>
+
+	my $student = Tab::Student->retrieve($student_id) if $student_id;
+
+	unless ($student) { 
+		$m->comp('/funclib/abort.mas', 
+			message => "No student record found for ID number $student_id"
+		);
+	}
+
+	unless ($student->chapter->id == $school->chapter->id) {
+		$m->comp('/funclib/abort.mas', 
+			message => "Student ".$student->first." ".$student->last." does not belong to your school."
+		);
+	}
+
+	my $tourn = $school->tourn();
+
+	my %incomplete;
+
+	#2 Entry Release Form
+
+	my %release_forms = eval { 
+		return %{JSON::decode_json($school->setting("release_forms"))};
+	};
+
+	my $req = Apache2::Request->new($r);
+	my $upload = $req->upload("entry_release_".$student->id);
+
+	if ($upload) { 
+
+		my $filename  = $upload->filename;
+
+        $filename =~ s/.*[\/\\](.*)/$1/;
+        $filename =~ s/\ //g;
+        $filename =~ s/\)//g;
+        $filename =~ s/\(//g;
+        $filename =~ s/\'//g;  # '  stupid vim
+				
+		$filename = substr($filename, 0, 120);
+
+        my $filetemp = $upload->tempname;
+
+		system $Tab::s3cmd." put $filetemp ".$Tab::s3_bucket."/tourns/".$tourn->id."/".$school->id."/releases/".$student->id."/".$filename;
+
+		$release_forms{$student->id} = $filename;
+
+		$school->setting(
+			"release_forms",
+			"text", 
+			JSON::encode_json(\%release_forms)
+		);
+	}
+
+	$incomplete{"No release forms uploaded"}++ 
+		unless $release_forms{$student->id};
+
+	#3 Pronuncation Guide
+	$student->phonetic($ARGS{"phonetic"});
+	$student->update();
+
+	#4-6 Entry Details
+
+	my %entries = $m->comp(
+		"/funclib/nationals_entries.mas",
+		student => $student,
+		tourn   => $tourn
+	);
+
+	my @settings = ("coach_points", "coach_script",
+		"author", "title", "publisher",
+		"publish_isbn", "publish_url", "publish_date"
+	);
+
+	my @date_settings = ("publish_print_date");
+
+	foreach my $type ("main", "supp", "conn") { 
+
+		next unless $entries{$type};
+
+		foreach my $entry (@{$entries{$type}}) { 
+
+			my $event = $entry->event;
+			my $abbr = $event->abbr;
+
+			my %local_incomplete;
+
+
+			if ($ARGS{$entry->id."_coach_points"}) { 
+
+				unless ($ARGS{$entry->id."_coach_script"}) {
+
+					my $coach = Tab::NSDA::Person->search(
+						ualt_id => $ARGS{$entry->id."_coach_points"}
+					)->first;
+
+					if ($coach) { 
+						$ARGS{$entry->id."_coach_script"} = $coach->ufname." ".$coach->ulname;
+					}
+
+				}
+
+			} else {
+
+			}
+
+			foreach my $setting (@settings) { 
+				$entry->setting($setting, $ARGS{$entry->id."_$setting"});
+			}
+
+			foreach  my $setting (@date_settings) { 
+
+				my $date = eval {
+					return Tab::dateme( $ARGS{$entry->id."_".$setting} );
+				};
+
+				if ($date) { 
+					$entry->setting($setting, "date", $ARGS{$entry->id."_$setting"});
+				} else { 
+					undef $ARGS{$entry->id."_".$setting};
+				}
+
+			}
+
+			my $upload = $req->upload($entry->id."_script");
+
+			if ($upload) { 
+
+				my $filename  = $upload->filename;
+
+				$filename =~ s/.*[\/\\](.*)/$1/;
+				$filename =~ s/\ //g;
+				$filename =~ s/\)//g;
+				$filename =~ s/\(//g;
+				$filename =~ s/\'//g;  # '  stupid vim
+				
+				$filename = substr($filename, 0, 120);
+
+				my $filetemp = $upload->tempname;
+
+				system $Tab::s3cmd." put $filetemp ".$Tab::s3_bucket."/tourns/".$tourn->id."/".$school->id."/scripts/".$entry->id."/".$filename;
+
+				$entry->setting('script_file', $filename);
+
+				$ARGS{$entry->id."_script_file"} = $filename;
+
+			} else { 
+
+				$ARGS{$entry->id."_script_file"} = $entry->setting('script_file');
+			}
+
+			$local_incomplete{"No coach for points listed for ".$abbr}++ 
+				unless $ARGS{$entry->id."_coach_points"};
+
+			if ($event->setting("ask_for_titles")) { 
+
+				$local_incomplete{"Piece title missing for ".$abbr}++ 
+					unless $ARGS{$entry->id."_title"};
+
+				$local_incomplete{"Manuscript/cutting missing for ".$abbr}++ 
+					unless $ARGS{$entry->id."_script_file"};
+			}
+
+			if ($event->setting("ask_for_authors")) { 
+
+				$local_incomplete{"Piece author missing for ".$abbr}++ 
+					unless $ARGS{$entry->id."_author"};
+
+				unless (
+					( $ARGS{$entry->id."_publisher"} 
+					  && $ARGS{$entry->id."_publish_date"} 
+					  && $ARGS{$entry->id."_publish_isbn"} 
+					) || ( 
+					  $ARGS{$entry->id."_publish_url"} 
+					  && $ARGS{$entry->id."_publish_print_date"} 
+					)
+				) { 
+					$local_incomplete{"Publication date is incomplete for ".$abbr}++;
+				}
+			}
+
+			if (keys %local_incomplete) { 
+
+				$entry->setting("status", "incomplete");
+
+				foreach my $key (keys %local_incomplete) { 
+					$incomplete{$key}++;
+				}
+
+			} else { 
+				$entry->setting("status", "complete");
+			}
+		}
+	}
+
+	my $err;
+	my $msg;
+
+	if (keys %incomplete) { 
+		foreach my $key (keys %incomplete) { 
+			$err .= "<br />" if $err;
+			$err .= $key;
+		}
+	} else { 
+		$msg = "All entry information is complete!";
+	}
+
+	$m->redirect("details.mhtml?student_id=".$student->id."&school_id=".$school->id."&err=$err") if $err;
+	$m->redirect("entries.mhtml?school_id=".$school->id."&msg=$msg");
+
+</%init>
