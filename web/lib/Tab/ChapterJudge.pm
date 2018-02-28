@@ -2,8 +2,9 @@ package Tab::ChapterJudge;
 use base 'Tab::DBI';
 Tab::ChapterJudge->table('chapter_judge');
 Tab::ChapterJudge->columns(Primary => qw/id/);
-Tab::ChapterJudge->columns(Essential => qw/first middle last ada retired phone email diet notes notes_timestamp gender
-										   chapter person person_request timestamp/);
+Tab::ChapterJudge->columns(Essential => qw/first middle last ada retired phone email 
+											diet notes notes_timestamp gender ualt_id
+										    chapter person person_request timestamp/);
 
 Tab::ChapterJudge->has_a(chapter => 'Tab::Chapter');
 Tab::ChapterJudge->has_a(person => 'Tab::Person');
