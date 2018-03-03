@@ -417,6 +417,8 @@ function autoWin(input,e,aff,neg,affid,negid) {
 	var maxPoints = $(input).attr("max");
 	var pointStep = $(input).attr("step");
 
+	console.log("Max is "+maxPoints+" step is "+pointStep+" and len is "+len);
+
 	if (nototal) { 
 		totalPoints = function() { 
 			return;
@@ -475,6 +477,16 @@ function autoWin(input,e,aff,neg,affid,negid) {
 		number = number / 10;
 
 		input.value = number;
+		changeFocus(input);
+		totalPoints(side,ratio);
+
+	} else if (pointStep === "1" 
+		&& maxPoints < 99
+		&& input.value.length >= len 
+		&& !containsElement(filter,keyCode)
+	) {
+
+		console.log("I am here with input "+input.value);
 		changeFocus(input);
 		totalPoints(side,ratio);
 
