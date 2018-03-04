@@ -189,10 +189,7 @@
 			}
 		});
 
-
 	}
-
-
 
 /* zebra stripe the rows */ 
 
