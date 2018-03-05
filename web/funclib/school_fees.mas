@@ -23,6 +23,7 @@
 <%init>
 
 	use POSIX;
+	use Data::Dumper;
 
 	my $total;
 	my @felines;
@@ -82,86 +83,6 @@
 			map {$_->id => $_} $tourn->hotels();
 	}
 
-	if ( $entry_fees && 
-		(	$tourn_settings->{"per_student_fee"}
-			|| $tourn_settings->{$tourn->id}{"hotels"}
-		)
-	) { 
-
-		my $hotel;
-
-		if ($bulk) { 
-			$hotel = $tourn_settings->{$tourn->id}{"hotels"}{$school->setting("hotel")};
-		} elsif (not defined $bulk) { 
-			my $hotel_id = $school->setting("hotel");
-			$hotel = Tab::Hotel->retrieve($hotel_id) if $hotel_id;
-		}
-
-		my $hotel_surcharge = $hotel->surcharge if $hotel;
-
-		if ($tourn_settings->{"per_student_fee"} || $hotel_surcharge ) { 
-
-			my @students = $m->comp(
-				"/funclib/school_students.mas", 
-				school   => $school,
-				waitlist => $tourn_settings->{"invoice_waitlist"}
-			);
-
-			if ($tourn_settings->{"per_student_fee"}) { 
-
-				my %student_line = ();
-
-				$student_line{"fee"} = (scalar @students) * $tourn_settings->{"per_student_fee"};
-
-				$total += $student_line{"fee"};
-				
-				$total_entry_fees += $student_line{"fee"};
-				$only_entry_fees += $student_line{"fee"};
-
-				unless ($bulk) { 
-
-					$student_line{"name"} = scalar @students.' individual students at x '.$tourn_settings->{"per_student_fee"};
-
-					$student_line{"quantity"} = scalar @students;
-					$student_line{"per_unit"} = $tourn_settings->{"per_student_fee"};
-					$student_line{"short_name"} = "Students in Attendance";
-
-					push (@felines, {%student_line});
-
-				}
-			}
-			
-			if ($hotel_surcharge) { 
-
-				my %surcharge_line = ();
-
-				$surcharge_line{"fee"} = (scalar @students) * $hotel_surcharge;
-
-				$total += $surcharge_line{"fee"};
-				$total_entry_fees += $surcharge_line{"fee"};
-				$only_entry_fees += $surcharge_line{"fee"};
-
-				unless ($bulk) { 
-
-					if ($surcharge_line{"fee"} > 0) { 
-
-						$surcharge_line{"name"} = "Hotel surcharge: ".scalar @students.' competitors staying outside the block x '.$hotel_surcharge; 
-						$surcharge_line{"short_name"} = "Block hotel discount";
-					} else { 
-
-						$surcharge_line{"name"} = "Hotel discount: ".scalar @students.' competitors in the block x '.$hotel_surcharge; 
-						$surcharge_line{"short_name"} = "Non-block hotel surcharge";
-					}
-
-					$surcharge_line{"quantity"} = scalar @students;
-					$surcharge_line{"per_unit"} = $hotel_surcharge;
-
-					push (@felines, {%surcharge_line});
-
-				}
-			}
-		}
-	}
 
 	my $judging_fees;
 
@@ -314,13 +235,17 @@
 					@{$category_settings->{$category_id}{"shifts"}}
 						= $category->shifts(type => "strike");
 				}
+
 			
 				my $rounds_per = $category_settings->{$category_id}{"rounds_per"};
+				$rounds_per++ if $category_settings->{$category_id}{"nats_category"};
 				my $judge_per = $category_settings->{$category_id}{"judge_per"};
 				my $attending_judge_fee = $category_settings->{$category_id}{"attending_judge_fee"}; 
 
 				if ($category_settings->{$category_id}{"drops_no_burden"}) { 
+
 					my @undropped;
+
 					foreach my $entry (@{$entries_by_category{$category_id}{"confirmed"}}) { 
 						push @undropped, $entry unless $entry->dropped;
 					}
@@ -329,18 +254,57 @@
 
 				}
 
-				my ($uncovered, $extra ) = $m->comp(
-					"/funclib/judgemath/uncovered_burden_by_category.mas", 
-					category          => $category,
-					category_settings => $category_settings->{$category_id},
-					event_settings    => $event_settings,
-					judges            => $judges->{$category_id},
-					hires             => $hires->{$category_id},
-					school            => $school,
-					confirmed         => $entries_by_category{$category_id}{"confirmed"},
-					waitlist          => $entries_by_category{$category_id}{"waitlist"},
-					bulk              => $bulk
-				);
+				my $extra;
+				my $uncovered;
+
+				if ($category_settings->{$category_id}{"nats_category"}) { 
+
+					my %burden = $m->comp(
+						"/funclib/judgemath/nats_burden.mas",
+						category => $category,
+						school   => $school
+					);
+
+					my %provided = $m->comp(
+						"/funclib/judgemath/nats_judging.mas",
+						category => $category,
+						school   => $school
+					);
+
+					my @jpools = $m->comp(
+						"/funclib/category_jpools.mas",
+						category => $category,
+						limit   => "registrant"
+					);
+
+					foreach my $jpool (@jpools) { 
+						$uncovered += ($burden{$jpool->id} - $provided{$jpool->id});
+					}
+
+					my $judge_hire = Tab::JudgeHire->search(
+						category => $category->id,
+						school   => $school->id
+					)->first;
+
+					$uncovered -= $judge_hire->rounds_accepted if $judge_hire;
+
+					undef $extra;
+
+				} else { 
+
+					($uncovered, $extra ) = $m->comp(
+						"/funclib/judgemath/uncovered_burden_by_category.mas", 
+						category          => $category,
+						category_settings => $category_settings->{$category_id},
+						event_settings    => $event_settings,
+						judges            => $judges->{$category_id},
+						hires             => $hires->{$category_id},
+						school            => $school,
+						confirmed         => $entries_by_category{$category_id}{"confirmed"},
+						waitlist          => $entries_by_category{$category_id}{"waitlist"},
+						bulk              => $bulk
+					);
+				}
 
 				if ($attending_judge_fee) { 
 
@@ -385,7 +349,9 @@
 					$total += $judge_fee_hash{"fee"};
 					$judging_fees += $judge_fee_hash{"fee"};
 
-				} elsif ($category_settings->{$category_id}{"track_judge_hires"}) {
+				} 
+				
+				if ($category_settings->{$category_id}{"track_judge_hires"}) {
 
 					my ($requests, $total_accepted) = $m->comp(
 						'/funclib/school_hires.mas', 
@@ -441,8 +407,8 @@
 
 								unless ($bulk) { 
 
-									$hired_fee{"name"} = $accepted." rounds of judging in ";
-									$hired_fee{"name"} .= $category->name.' at '. $fee." each";
+									$hired_fee{"name"} = $accepted." rounds hired judging in ";
+									$hired_fee{"name"} .= $category->name.'. '. $fee." each";
 
 									$hired_fee{"quantity"} = $accepted;
 									$hired_fee{"per_unit"} = $fee;
@@ -702,11 +668,91 @@
 					}	
 				}	
 
-
 			} #end of foreach group
-
 		} 
 	} 
+
+
+	if ( $entry_fees && 
+		(	$tourn_settings->{"per_student_fee"}
+			|| $tourn_settings->{$tourn->id}{"hotels"}
+		)
+	) { 
+
+		my $hotel;
+
+		if ($bulk) { 
+			$hotel = $tourn_settings->{$tourn->id}{"hotels"}{$school->setting("hotel")};
+		} elsif (not defined $bulk) { 
+			my $hotel_id = $school->setting("hotel");
+			$hotel = Tab::Hotel->retrieve($hotel_id) if $hotel_id;
+		}
+
+		my $hotel_surcharge = $hotel->surcharge if $hotel;
+
+		if ($tourn_settings->{"per_student_fee"} || $hotel_surcharge ) { 
+
+			my @students = $m->comp(
+				"/funclib/school_students.mas", 
+				school   => $school,
+				waitlist => $tourn_settings->{"invoice_waitlist"}
+			);
+
+			if ($tourn_settings->{"per_student_fee"}) { 
+
+				my %student_line = ();
+
+				$student_line{"fee"} = (scalar @students) * $tourn_settings->{"per_student_fee"};
+
+				$total += $student_line{"fee"};
+				
+				$total_entry_fees += $student_line{"fee"};
+				$only_entry_fees += $student_line{"fee"};
+
+				unless ($bulk) { 
+
+					$student_line{"name"} = scalar @students.' individual students at x '.$tourn_settings->{"per_student_fee"};
+
+					$student_line{"quantity"} = scalar @students;
+					$student_line{"per_unit"} = $tourn_settings->{"per_student_fee"};
+					$student_line{"short_name"} = "Students in Attendance";
+
+					push (@felines, {%student_line});
+
+				}
+			}
+			
+			if ($hotel_surcharge) { 
+
+				my %surcharge_line = ();
+
+				$surcharge_line{"fee"} = (scalar @students) * $hotel_surcharge;
+
+				$total += $surcharge_line{"fee"};
+				$total_entry_fees += $surcharge_line{"fee"};
+				$only_entry_fees += $surcharge_line{"fee"};
+
+				unless ($bulk) { 
+
+					if ($surcharge_line{"fee"} > 0) { 
+
+						$surcharge_line{"name"} = "Hotel surcharge: ".scalar @students.' competitors staying outside the block x '.$hotel_surcharge; 
+						$surcharge_line{"short_name"} = "Block hotel discount";
+					} else { 
+
+						$surcharge_line{"name"} = "Hotel discount: ".scalar @students.' competitors in the block x '.$hotel_surcharge; 
+						$surcharge_line{"short_name"} = "Non-block hotel surcharge";
+					}
+
+					$surcharge_line{"quantity"} = scalar @students;
+					$surcharge_line{"per_unit"} = $hotel_surcharge;
+
+					push (@felines, {%surcharge_line});
+
+				}
+			}
+		}
+	}
 
 	my @all_orders;
 	my %concessions_by_code;
