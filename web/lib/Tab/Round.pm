@@ -29,6 +29,7 @@ sub parents {
 
 sub realname { 
 	my $self = shift;
+	return unless $self ;
 	return $self->label if $self->label && $self->label ne $self->name;
 	return "Session ".$self->name if $self->event->type eq "congress";
 	return "Round ".$self->name;
