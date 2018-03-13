@@ -1,0 +1,275 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$person_settings
+	$save_csv => undef
+</%args>
+<%init>
+
+	my %autoquals = @{JSON::decode_json($tourn_settings->{'autoquals'})}
+		if $tourn_settings->{'autoquals'};
+
+	use Tab::NSDA::Person;
+
+	my $error_log;
+
+	if ($save_csv) { 
+
+		# Get the upload and create the file handle.
+		my $req = Apache2::Request->new($r);
+		my @csv_handles = $r->upload(); 
+		my $csv_file = $req->upload($csv_handles[0]);
+		my $io = $csv_file->io;
+
+		my $csv = Text::CSV->new({ sep_char => ',' });
+
+		LINE:
+		foreach my $line (<$io>) { 
+
+	        next unless $csv->parse($line);
+	        my ($event_abbr, $nsda_chapter, $ualt_id, $ualt_id_2) = $csv->fields();
+
+			unless ($event_abbr && $ualt_id && $nsda_chapter) { 
+				$error_log .= "Error in line $line: no chapter/event/student found \n";
+				next;
+			}
+
+
+			my $event = $tourn->events(
+				abbr => $event_abbr
+			)->first;
+
+			unless ($event) { 
+				$error_log .= "Error in line $line: no event $event_abbr found\n";
+				next;
+			}
+
+			if (
+				$event->setting("min_entry") > 1 
+				&& not defined $ualt_id_2
+			) { 
+				$error_log .= "Error in line $line: no partner found \n";
+				next;
+			} elsif ($ualt_id_2) { 
+
+				if ($autoquals{$event_abbr}{$ualt_id_2}) { 
+					$error_log .= "Error in line $line: Entry $ualt_id_2 is already in $event_abbr \n";
+					next LINE;
+				}
+
+			}
+
+			my @ualts= ($ualt_id);
+			push @ualts, $ualt_id_2 if $ualt_id_2;
+
+			# First find if there are existing Tabroom records; 
+			my $chapter;
+
+			my $nsda_school = Tab::NSDA::MemberSchool->retrieve(
+				school_id => $nsda_chapter
+			);
+
+			unless ($nsda_school) { 
+				$error_log .= "No NSDA member school found for $nsda_chapter\n";
+				next;
+			}
+
+			$chapter = Tab::Chapter->search(
+				nsda => $nsda_chapter
+			)->first;
+
+			unless ($chapter) { 
+				$chapter = $m->comp(
+					"/funclib/chapter_import.mas", 
+					nome        => 1,
+					person      => $person,
+					nsda_school => $nsda_school
+				);
+			}
+
+			unless ($chapter) { 
+				$error_log .= "No Tabroom school could be created for NSDA chapter $nsda_chapter\n";
+				next;
+			}
+
+			my @students;
+
+			foreach my $ualt (@ualts) { 
+				my $student = $chapter->students(
+					ualt_id => $ualt
+				)->first;
+
+				if ($student){ 
+					push @students, $student;
+				} else { 
+					$error_log .= "No student could be found for $ualt in chapter $nsda_chapter\n";
+					next LINE;
+				}
+			}
+
+			@students = sort {$a->id <=> $b->id} @students;
+
+			if ($autoquals{$event->id}{$students[0]->id}) { 
+				$error_log .= "Error in line $line: Entry $ualt_id is already in $event_abbr \n";
+				next;
+			}
+
+			my %this_autoqual = { 
+				event    => $event->id,
+				chapter  => $chapter->id,
+				district => $chapter->district->id,
+				students => \@students
+			};
+
+			$autoquals{$event->id}{$students[0]->id} = \%this_autoqual;
+		}
+	}
+
+	if ($ARGS{"form_post"}) { 
+
+		foreach my $event_id (keys %autoquals) { 
+
+			foreach my $student_id (
+				keys %{$autoquals{$event_id}}
+			) { 
+				if ($ARGS{"deleted_".$student_id}) { 
+					undef $autoquals{$event_id}{$student_id}
+				}
+			}
+		}
+	}
+
+	$tourn->setting("autoquals", "text", JSON::decode_json(\%autoquals));
+
+</%init>
+
+	<div class="main">
+
+		<span class="fourfifths nospace">
+			<h4>Autoquals pending or taken:</h4>
+		</span>
+
+		<span 
+			class = "fifth rightalign"
+			id    = "autoquals_buttonarea"
+		>
+		</span>
+
+		<& "/funclib/tablesorter.mas", table => "autoquals" &>
+
+		<table id="autoquals">
+
+			<tr>
+				<th>
+					Chapter
+				</th>
+
+				<th>
+					Event
+				</th>
+
+				<th>
+					Student Merit
+				</th>
+
+				<th>
+					Student
+				</th>
+
+				<th>
+					Partner Merit
+				</th>
+
+				<th>
+					Partner
+				</th>
+
+				<th>
+					Posted?
+				</th>
+
+			</tr>
+
+		</table>
+
+%		foreach my $autoqual (@autoquals) { 
+
+			<tr>
+
+				<td>
+					<% $autoqual{"event"} %>
+				</td>
+
+				<td>
+					<% $autoqual{"chapter"} %>
+				</td>
+
+%				if (@{$autoquals{'students'}}[0]) { 
+					<td>
+						<% ${$autoquals{'students'}}[0] %>
+					</td>
+
+					<td>
+					</td>
+%				}
+
+%				if (@{$autoquals{'students'}}[1]) { 
+					<td>
+						<% ${$autoquals{'students'}}[1] %>
+					</td>
+
+					<td>
+					</td>
+%				}
+
+				<td>
+				</td>
+			</tr>
+
+%		}
+
+	</div>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<h4>Upload autoquals</h4>
+
+			<form 
+				enctype = "multipart/form-data"
+				action  = "autoquals.mhtml"
+				method  = "post"
+			>
+				<p>format:  event abbr, chapter id, ualt, ualt </p>
+
+				<div class="uploader centearlign">
+
+					<input 
+						type     = "file"
+						name     = "save_csv"
+						style    = "opacity: 0;"
+						onchange = "uploaderName('new_autoquals', 'new_autoquals_file');"
+						id       = "new_autoquals"
+					>
+					<span 
+						id    = "new_autoquals_file"
+						class = "filename"
+						style = "-webkit-user-select: none;"
+					>No file selected</span>
+
+					<span 
+						class="action" 
+						style="-webkit-user-select: none;"
+					>Choose File</span>
+
+				</div>
+
+			</form>
+
+		</div>
+
+	</div>
+
+
