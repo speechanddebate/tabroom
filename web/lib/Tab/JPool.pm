@@ -2,13 +2,16 @@ package Tab::JPool;
 use base 'Tab::DBI';
 Tab::JPool->table('jpool');
 Tab::JPool->columns(Primary => qw/id/);
-Tab::JPool->columns(Essential => qw/name category site timestamp/);
+Tab::JPool->columns(Essential => qw/name category site parent timestamp/);
 
-Tab::JPool->has_a(site => 'Tab::Site');
+Tab::JPool->has_a(site     => 'Tab::Site');
+Tab::JPool->has_a(parent   => 'Tab::JPool');
 Tab::JPool->has_a(category => "Tab::Category");
 
-Tab::JPool->has_many(settings => 'Tab::JPoolSetting', 'jpool');
+Tab::JPool->has_many(children    => 'Tab::JPool', 'parent');
+Tab::JPool->has_many(settings    => 'Tab::JPoolSetting', 'jpool');
 Tab::JPool->has_many(pool_judges => 'Tab::JPoolJudge', 'jpool');
+
 Tab::JPool->has_many(judges => [Tab::JPoolJudge => 'judge']);
 Tab::JPool->has_many(rounds => [Tab::JPoolRound => 'round']);
 

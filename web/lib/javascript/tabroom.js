@@ -146,9 +146,14 @@
 						$("#"+targetId).remove();
 					}
 
+					if (data.destroy) { 
+						$("#"+data.destroy).remove();
+					}
+
 					if (
 						successAction === "refresh" 
 						|| successAction === "reload"
+						|| data.refresh
 					) { 
 						window.location.reload();
 					}
