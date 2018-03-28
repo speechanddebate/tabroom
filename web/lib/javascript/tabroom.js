@@ -395,14 +395,6 @@ function autoWin(input,e,aff,neg,affid,negid) {
        	input.form[next_index].focus();
 	}
 
-    function getIndex(input) {
-        var index = -1, i = 0, found = false;
-        while (i < input.form.length && index == -1)
-        if (input.form[i] == input) index = i; 
-        else i++; 
-        return index;
-    }    
-
     return true;
 }
 
@@ -646,16 +638,17 @@ function autoWin(input,e,aff,neg,affid,negid) {
        	input.form[next_index].focus();
 	}
 
-    function getIndex(input) {
-        var index = -1, i = 0, found = false;
-        while (i < input.form.length && index == -1)
-        if (input.form[i] == input)index = i; 
-        else i++; 
-        return index;
-    }    
-
     return true;
 }
+
+function getIndex(input) {
+	var index = -1, i = 0, found = false;
+	while (i < input.form.length && index == -1)
+	if (input.form[i] == input)index = i; 
+	else i++; 
+	return index;
+}    
+
 
 /* Autoselect which kids are valid speakers for WSDC style debate ballot entry */
 
@@ -679,14 +672,6 @@ function autoSel(input, event) {
 	}
 
 	input.form[next_index].focus();
-
-    function getIndex(input) {
-        var index = -1, i = 0, found = false;
-        while (i < input.form.length && index == -1)
-        if (input.form[i] == input)index = i; 
-        else i++; 
-        return index;
-    }    
 
 }
 
@@ -790,14 +775,6 @@ function autoTab(input,len,e) {
        	input.form[next_index].focus();
 	}
 
-
-    function getIndex(input) {
-        var index = -1, i = 0, found = false;
-        while (i < input.form.length && index == -1)
-        if (input.form[i] == input)index = i; 
-        else i++; 
-        return index;
-    }    
 
     return true;
 }
