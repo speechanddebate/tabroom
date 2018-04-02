@@ -291,8 +291,9 @@
 				result = txt[1];
 			}
 
-			// Palmer added these; removes any hidden spans or divs from the
-			// table cells. 
+			// Tabroom custom: removes any hidden spans or divs from the table
+			// cells. 
+
 			result = result.replace(output.regexHIDEDIV, '');
 			result = result.replace(output.regexHIDESPAN, '');
 
