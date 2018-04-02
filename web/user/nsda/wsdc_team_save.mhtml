@@ -1,0 +1,138 @@
+<%args>
+	$person
+	$tourn_id 
+	$district_id 
+</%args>
+<%init>
+
+	my $now = DateTime->now();
+
+	my $tourn = Tab::Tourn->retrieve($tourn_id);
+	my $district = Tab::District->retrieve($district_id);
+
+	unless ($tourn && $district) { 
+		$m->comp("/funclib/abort.mas",
+			message => "No tournament found for $tourn_id or district found for $district_id"
+		);
+	}
+
+	my $ws_event = $tourn->events(
+		type => "wsdc"
+	)->first;
+
+	my $district_school = $tourn->schools( 
+		chapter  => 0,
+		district => $district->id
+	)->first;
+
+	unless ($district_school) { 
+		$district_school = Tab::School->create({
+			name     => $district->name,
+			state    => substr($district->location,0,2),
+			tourn    => $tourn->id,
+			district => $district->id,
+			chapter  => 0
+		});
+	}
+
+	my @existing_teams = $district_school->entries( 
+		event => $ws_event->id 
+	) if $district_school;
+
+	my $max = $ws_event->setting('max_entry');
+	my $min = $ws_event->setting('min_entry');
+
+	my $errs; 
+	my %already;
+
+	my $cap = $ws_event->setting('district_cap');
+	$cap = scalar @existing_teams if (scalar @existing_teams) > $cap;
+
+	TEAM:
+	foreach my $team (1 .. $cap) { 
+
+		my $entry;
+		$entry = shift @existing_teams if @existing_teams;
+
+		my $color = ucfirst($ARGS{$team."_color"});
+		my $code = $district->name." ".$color;
+
+		my @student_ids; 
+
+		foreach my $count (1 .. $max) { 
+			my $school_id = $ARGS{$team."_".$count."_school"};
+			next unless $school_id;
+
+			my $student_id = $ARGS{$team."_".$count."_".$school_id."_student"};
+			next unless $student_id;
+
+			next if $already{$student_id}++;
+			push @student_ids, $student_id;
+		}
+
+		my $count_students = scalar @student_ids;
+
+		if ( 
+			($count_students < $min) || ($count_students > $max) 
+		) { 
+
+			$entry->delete() if $entry;
+			next TEAM;
+		}
+
+		if ($entry) { 
+
+			$entry->code($code);
+			$entry->update();
+			$entry->setting("nsda_awards_coach_names", $ARGS{"coaches"});
+
+			Tab::debuglog("Entry $entry already exists!");
+
+		} else { 
+
+			$entry = Tab::Entry->create({
+				event         => $ws_event->id,
+				school        => $district_school->id,
+				code          => $code,
+				dropped       => 0,
+				waitlist      => 0,
+				unconfirmed   => 0,
+				active        => 1,
+				created_at    => $now,
+				registered_by => $person->id
+			});
+
+			Tab::debuglog("I created entry $entry");
+		}
+
+		my %es_exists = map {$_->id => $_ } $entry->entry_students();
+
+		foreach my $student_id (@student_ids) { 
+
+			if ($es_exists{$student_id}) { 
+
+				undef $es_exists{$student_id};
+
+			} else { 
+
+				Tab::EntryStudent->create({
+					entry   => $entry->id,
+					student => $student_id
+				});
+			}
+
+			foreach my $student_id (keys %es_exists) { 
+
+				if ($es_exists{$student_id}) { 
+					$es_exists{$student_id}->delete();
+				}
+			}
+		}
+	}
+
+	my $msg  = "$cap teams saved for ".$district_school->name." in ".$ws_event->name;
+
+	$m->redirect("/user/nsda/district.mhtml?district_id=".$district_id."&msg=$msg&err=$errs");
+
+</%init>
+

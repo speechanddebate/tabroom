@@ -9,8 +9,6 @@
 # Tabroom must be installed from /www/tabroom/web; otherwise many more things
 # other than this script will break.
 
-# -- Palmer
-
 # Last updated 7/7/13
 
 echo

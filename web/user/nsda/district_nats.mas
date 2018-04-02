@@ -5,9 +5,13 @@
 	$chapter => undef
 </%args>
 <%init>
-		my $now = DateTime->now();
-		my $deadline = $tourn->setting("bill_deadline");
-		$deadline->set_time_zone($tourn->tz);
+
+	my $now = DateTime->now();
+	my $deadline = $tourn->setting("bill_deadline");
+	$deadline->set_time_zone($tourn->tz);
+
+	use List::Util;
+		
 </%init>
 
 		<div class="martopmuchmore padtopmore bordertop full padno">
@@ -141,8 +145,347 @@
 
 %		}
 
-<!--
-		<div class="martopmuchmore bordertop full padno">
-			<h5 class="martopmore">Worlds Schools Teams</h5>
+<%perl>
+
+		my $ws_event = $tourn->events(
+			type => "wsdc"
+		)->first;
+
+		my $district_school = $tourn->schools( 
+			chapter  => 0,
+			district => $district->id
+		)->first;
+
+		my @existing_teams = $district_school->entries( 
+			event => $ws_event->id 
+		) if $district_school;
+
+		my @paid_members;
+		my %taken;
+
+		foreach my $member ($district->chapters()) { 
+			next unless $member->nsda;
+			next unless $member->setting("nsda_paid");
+			push @paid_members, $member;
+			$taken{$member->nsda}++;
+		}
+
+		my @non_tabroom_schools; 
+
+		SCHOOL:
+		foreach my $nsda_school (
+			$m->comp("/funclib/district_schools.mas", 
+				district => $district
+			)
+		) { 
+
+			next if $taken{$nsda_school->school_id};
+
+			my $other = Tab::Chapter->search(
+				nsda => $nsda_school->school_id
+			)->first;
+
+			if ($other) { 
+				$other->district($district->id);
+				$other->update();
+				push @paid_members, $other;
+				next SCHOOL;
+			} elsif ($nsda_school->school_status > 0) { 
+				push @non_tabroom_schools, $nsda_school;
+			}
+		}
+
+		my $year = $now->year;
+		$year++ if $now->month > 8;
+
+		Tab::Student->set_sql(nats_eligible => "
+
+			select student.* 
+				from student 
+				where student.chapter = ? 
+				and student.ualt_id > 0
+				and student.retired != 1
+				and student.grad_year > ?
+
+				and exists ( 
+					select nsda_paid.id
+					from student_setting nsda_paid
+					where nsda_paid.student = student.id
+					and nsda_paid.tag = 'nsda_paid'
+					and nsda_paid.value = 1
+				)
+
+				and exists ( 
+					select student_email.id
+					from student_setting student_email
+					where student_email.student = student.id
+					and student_email.tag = 'student_email'
+				)
+
+				and not exists (
+					select es.id
+					from entry_student es, entry, event
+					where event.tourn = ? 
+					and event.id = entry.event
+					and entry.id = es.entry
+					and es.student = student.id
+
+					and not exists ( 
+						select supp.id
+						from event_setting supp
+						where supp.event = event.id
+						and supp.tag = 'supp'
+						and supp.value = 1
+					)
+					and not exists ( 
+						select conn.id
+						from event_setting conn
+						where conn.event = event.id
+						and conn.tag = 'conn'
+						and conn.value = 1
+					)
+				)
+
+				order by student.last
+		");
+
+		my %chapter_students;
+
+		foreach my $paid_member (@paid_members) { 
+		 	push @{$chapter_students{$paid_member->id}}, 
+				Tab::Student->search_nats_eligible($paid_member->id, $year, $tourn->id);
+		}
+
+		my @colors = ( 
+			"red",
+			"white",
+			"blue",
+			"black",
+			"orange",
+			"violet",
+			"gold",
+			"green",
+			"yellow",
+			"gray",
+			"silver",
+			"brown"
+		);
+
+	@paid_members = sort {$a->name cmp $b->name} @paid_members;
+
+	my $cap = $ws_event->setting("district_cap");
+	$cap = scalar @existing_teams if (scalar @existing_teams) > $cap; 
+
+	my $max = $ws_event->setting('max_entry');
+	my $min = $ws_event->setting('min_entry');
+
+</%perl>
+
+		<div class="martopmuchmore bordertop full padno nospace">
+
+			<span class="half nospace martopmore">
+				<h4 class="nospace">
+					World Schools District Teams
+				</h4>
+			</span>
+			<span class="half nospace rightalign semibold redtext martopmore">
+				Teams must have <% $min %>-<% $max %> competitors
+			</span>
 		</div>
--->
+
+%		if (@non_tabroom_schools) { 
+
+			<form 
+				action = "import_chapter.mhtml"
+				method = "post"
+			>
+
+			<div class="row">
+
+				<span class="third semibold bluetext rightalign padsetting">
+					Add a school not in Tabroom:
+				</span>
+
+				<span class="half centeralign">
+					<select 
+						name  = "nsda_school_id"
+						class = "fixedbig"
+					>
+%					foreach my $nts (@non_tabroom_schools) { 
+						<option 
+							value="<% $nts->school_id %>"
+						><% $nts->school_name %></option>
+%					}
+					</select>
+				</span>
+
+				<span class="sixth centeralign nospace">
+					<input type="submit" value="Import">
+				</span>
+
+			</div>
+			</form>
+%		}
+
+		<form 
+			action = "/user/nsda/wsdc_team_save.mhtml"
+			method = "post"
+		>
+
+		<input 
+			type  = "hidden"
+			name  = "tourn_id"
+			value = "<% $tourn->id %>"
+		>
+		<input 
+			type  = "hidden"
+			name  = "district_id"
+			value = "<% $district->id %>"
+		>
+
+<%perl>
+
+		foreach my $team (1 .. $cap) { 
+
+			my $existing = shift @existing_teams if @existing_teams;
+
+			my $code;
+			$code = $existing->code if $existing;
+
+			my $dist_name = $district->name." ";
+			$code =~ s/$dist_name//g;
+			$code = lc($code);
+
+			my @students;
+			@students = $existing->students if $existing;
+
+</%perl>
+
+			<div class="full">
+
+				<span class="sixth nospace">
+					<h5 class="nospace">Team <% $team %></h5>
+				</span>
+
+				<span class="fivesixths rightalign nospace">
+
+					<span class='third rightalign'>
+						<% $district->name %>
+					</span>
+
+					<span class='third leftalign marrightmore'>
+						<select name="<% $team %>_color" class="fixedsmall">
+%							foreach my $color (List::Util::shuffle @colors) { 
+								<option 
+									value="<% $color %>"
+									<% $color eq $code ? "selected" : "" %>
+								><% ucfirst($color) %></option>
+%							}
+						</select>
+					</span>
+
+					<span class="third explain semibold centeralign bluetext">
+						It is traditional to choose team colors
+						from your state or national flag.
+					</span>
+
+				</span>
+
+			</div>
+
+%			foreach my $count (1 .. $ws_event->setting('max_entry')) { 
+
+%				my $already;
+%				$already = shift @students if @students;
+
+				<div class="row">
+
+					<span class="tenth semibold bluetext padsetting centeralign">
+						<% $count %>.
+
+						<% $already %>
+					</span>
+
+					<span class="fourtenths centeralign">
+
+						<select 
+							name     = "<% $team %>_<% $count %>_school"
+							id       = "<% $team %>_<% $count %>_school"
+							class    = "fixedbig schools"
+							team     = "<% $team %>"
+							count    = "<% $count %>"
+							onChange = "showSchools();"
+						>
+
+						<option value=""></option>
+
+%						foreach my $chapter (@paid_members) { 
+							<option value="<% $chapter->id %>"
+								<% $already && $already->chapter->id == $chapter->id 
+									? "selected='true'" : "" %>
+							><% $chapter->name %></option>
+%						}
+						</select>
+
+					</span>
+
+					<span class="fourtenths centeralign">
+
+%						foreach my $chapter (@paid_members) { 
+
+							<span 
+								id    = "<% $team %>_<% $count %>_<% $chapter->id %>"
+								class = "schoolstudents">
+
+							<select 
+								name  = "<% $team %>_<% $count %>_<% $chapter->id %>_student"
+								class = "fixedbig"
+							>
+								<option value=""></option>
+%								foreach my $student ($already, @{$chapter_students{$chapter->id}}) { 
+%									next unless $student > 0;
+									<option 
+										value = "<% $student->id %>"
+										<% $already && $already->id == $student->id ? "selected" : "" %>
+									><% 
+										$student->first." ".$student->last.
+										" (".$student->grad_year.", #".$student->ualt_id.")" 
+									%></option>
+%								}
+
+							</select>
+							</span>
+%						}
+					</span>
+
+				</div>
+
+%			}
+%		}
+
+		<div class="liblrow rightalign">
+			<input type="submit" value="Save Teams">
+		</div>
+
+	<script>
+
+		function showSchools() { 
+
+			$(".schoolstudents").addClass('hidden');
+
+			$(".schools").each(function() { 
+
+				var schoolId = this.id;
+				var teamId = $(this).attr('team');
+				var countId = $(this).attr('count');
+				var selectedSchool = $("#"+schoolId+" option:selected").val();
+				$("#"+teamId+"_"+countId+"_"+selectedSchool).removeClass("hidden");
+			});
+		}
+
+		$(document).ready(function() {
+			showSchools();
+		});
+
+	</script>
+
