@@ -105,6 +105,7 @@ use Tab::Site;
 use Tab::Stats;
 use Tab::Strike;
 use Tab::Student;
+use Tab::StudentBallot;
 use Tab::StudentSetting;
 use Tab::SweepInclude;
 use Tab::SweepSet;
