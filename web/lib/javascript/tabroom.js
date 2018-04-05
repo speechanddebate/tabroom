@@ -117,8 +117,6 @@
 			},
 			success : function(data) {
 
-				$('table').trigger('applyWidgets');
-				$('table').trigger('update', [true])
 
 				if (data.reply) { 
 					
@@ -140,6 +138,7 @@
 					
 				} else if (data.message) { 
 
+					alertify.dismissAll();
 					alertify.notify(data.message, "custom");
 
 					if (successAction === "destroy") { 
@@ -177,9 +176,13 @@
 						});
 
 					}
-					
-					$('table').trigger('applyWidgets');
-					$('table').trigger('update', [true])
+
+					if (data.norefresh) { 
+
+					} else { 
+						$('table').trigger('applyWidgets');
+						$('table').trigger('update', [true]);
+					}
 
 				} else { 
 
@@ -190,6 +193,8 @@
 				if (callback) { 
 					callback(data);
 				}
+
+				return;
 
 			}
 		});
