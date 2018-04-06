@@ -32,14 +32,13 @@
 
 	foreach my $ballot (@all_ballots) { 
 		next unless $ballot->entry;
-		next if $ballot->entry->dropped;
 		push @ballots, $ballot;
 	}
 
 	my $event = $round->event;
     my $type = $event->type;
 
-	my %event_settings = $event->all_settings;
+	my %event_settings = $event->all_settings();
 
 	my $allow_lowpoints++ if $event_settings{"allow_lowpoints"};
     my $tiebreaks = $round->tiebreak_set;
@@ -135,11 +134,9 @@
     my $point_increments = $event_settings{"point_increments"};
     my $point_ties = $event_settings{"point_ties"};
 
-	my $errs;
-
+	my %ballot_errs;
 	my %scores = ();
 	my %ballot_forfeit = ();
-
 
 	if ($points) { 
 
@@ -149,7 +146,7 @@
 
 			my $points = $ARGS{$ballot->id."_points"};
 	
-			$errs .= "<p>Points missing</p>" if not defined $points || $ballot_forfeit{$ballot->id};
+			$ballot_errs{$ballot->id} .= "<p>Points missing</p>" if not defined $points || $ballot_forfeit{$ballot->id};
 			next unless $points;
 
 			$points = int($points + 0.5) if $point_increments eq "whole";
@@ -166,10 +163,10 @@
 				$points = $points/2;
 			}
 
-			$errs .= "<p>$points Points must be a number</p>" unless ($points eq $points + 0);
+			$ballot_errs{$ballot->id} .= "<p>$points Points must be a number</p>" unless ($points eq $points + 0);
 
-			$errs .= "<p>Tied points forbidden: you have two speakers with points $points </p>"  if $points_taken{$points} && $point_ties < 1;
-			$errs .= "<p>Points $points are outside of range</p>" if $points < $min_points || $points > $max_points;
+			$ballot_errs{$ballot->id} .= "<p>Tied points forbidden: you have two speakers with points $points </p>"  if $points_taken{$points} && $point_ties < 1;
+			$ballot_errs{$ballot->id} .= "<p>Points $points are outside of range</p>" if $points < $min_points || $points > $max_points;
 
 			$points_taken{$points}++;
 			$scores{$ballot->id."_points"} = $points;
@@ -183,7 +180,11 @@
 		my %rank_taken;
 		my %rank_points;
 
+		my $sample_ballot;
+
 		foreach my $ballot (@ballots) { 
+
+			$sample_ballot = $ballot unless $ballot->entry->dropped;
 			
 			$ballot_forfeit{$ballot->id} = $ARGS{"forfeit_".$ballot->id};
 			$ballot_tv{$ballot->id} = $ARGS{"tv_".$ballot->id};
@@ -191,18 +192,18 @@
 			my $rank = $ARGS{$ballot->id."_ranks"};
 			$rank = $truncate_fill unless $rank;
 
-			undef $errs if $ballot_forfeit{$ballot->id};
-			$errs .= "<p>Rank missing</p>" unless $rank || $ballot_forfeit{$ballot->id};
+			undef $ballot_errs{$ballot->id} if $ballot_forfeit{$ballot->id};
+			$ballot_errs{$ballot->id} .= "<p>Rank missing</p>" unless $rank || $ballot_forfeit{$ballot->id};
 			next unless $rank;
 
-			$errs .= "<p>Rank must be a number</p>" unless ($rank eq $rank + 0);
+			$ballot_errs{$ballot->id} .= "<p>Rank must be a number</p>" unless ($rank eq $rank + 0);
 
-			$errs .= "<p>You have repeated the rank $rank.  All ranks must be unique.</p>" 
+			$ballot_errs{$ballot->id} .= "<p>You have repeated the rank $rank.  All ranks must be unique.</p>" 
 				if $rank_taken{$rank} 
 				&& (not defined $event_settings{"allow_rank_ties"}) 
 				&& $rank != $truncate_fill;
 
-			$errs .= "<p>Rank $rank is outside of range.</p>" 
+			$ballot_errs{$ballot->id} .= "<p>Rank $rank is outside of range.</p>" 
 				if $rank < 1 
 				|| $rank > scalar @ballots;
 
@@ -221,7 +222,7 @@
 
 			foreach my $rk (reverse sort keys %rank_points) { 
 
-				$errs .= "<p>Entry ranked $rk has lower points than a worse-ranked ballot (".$rank_points{$rk}." vs ".$current.")</p>" 
+				$ballot_errs{$sample_ballot->id} .= "<p>Entry ranked $rk has lower points than a worse-ranked ballot (".$rank_points{$rk}." vs ".$current.")</p>" 
 				if $rank_points{$rk} < $current;
 
 				$current = $rank_points{$rk};
@@ -232,11 +233,19 @@
 
 	$m->comp("/funclib/panel_dedupe.mas", panel => $panel);
 
-	if ($errs) { 
+	my $all_errs;
 
-		$m->redirect("/tabbing/entry/index.mhtml?timeslot_id=".$round->timeslot->id."&judge_id=$judge_id&flight=".$panel->flight."&errs=$errs&err=Trouble in Paradise!");
+	foreach my $ballot (@ballots) { 
+		unless ($ballot->entry->dropped) { 
+			$all_errs .= $ballot_errs{$ballot->id};
+		}
+	}
 
-	} else { 
+	if ($all_errs) { 
+		$m->redirect("/tabbing/entry/index.mhtml?timeslot_id=".$round->timeslot->id."&judge_id=$judge_id&flight=".$panel->flight."&errs=$all_errs&err=Trouble in Paradise!");
+	}
+
+	foreach my $ballot (@ballots) { 
 
 		my $ballot_err;
 
@@ -286,6 +295,8 @@
 					$ballot_err .= $scores{$ballot->id."_points"}." vs ".$ballot_points{$ballot->id}." <br />";
 				}
 			}
+
+			undef $ballot_err if $ballot->entry->dropped;
 
 			$audit = 2 unless ($ballot_err); 
 
@@ -339,6 +350,10 @@
 					$ballot->entered_by($person->id);
 				}
 
+				if ($ballot->entry->dropped) { 
+					$ballot->audit(1);
+				}
+
 				$ballot->tv($ballot_tv{$ballot->id});
 				$ballot->forfeit($ballot_forfeit{$ballot->id});
 
@@ -346,14 +361,15 @@
 		
 				unless ($audit == 2) { 
 
-					if ($points) { 
+					if ($points && defined ($scores{$ballot->id."_points"})) { 
 
 						eval { 
 
-							unless (Tab::Score->search( 
-										ballot => $ballot->id,
-										tag    => "points" 
-									)
+							unless (
+								Tab::Score->search( 
+									ballot => $ballot->id,
+									tag    => "points" 
+								)
 							) {
 
 								Tab::Score->create({
@@ -368,10 +384,13 @@
 
 					}
 
-					if ($ranks) { 
+					if ($ranks && defined ($scores{$ballot->id."_rank"})) { 
 
 						eval { 
-							unless (Tab::Score->search( ballot => $ballot->id, tag => "rank" )) {
+							unless (Tab::Score->search( 
+								ballot => $ballot->id,
+								tag    => "rank" )
+							) {
 								Tab::Score->create({
 									ballot   => $ballot->id,
 									tag      => "rank",
