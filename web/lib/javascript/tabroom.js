@@ -165,6 +165,7 @@
 						$("#"+targetId).prependTo("#"+data.newParent);
 					}
 
+
 					if (data.replace) { 
 
 						data.replace.forEach( function(item) { 
