@@ -7,7 +7,10 @@
 			message,
 			function(event) {
 				if (event) { 
-                    if (typeof(link)==='function' && typeof(dest)!='undef' && typeof(payload)!='undef'){
+                    if (typeof(link)==='function' 
+						&& typeof(dest)!='undef' 
+						&& typeof(payload)!='undef'
+					){
                         link(dest,payload);
                     }else{
 					    window.location.href = link.href;
@@ -78,7 +81,9 @@
 		var newParent     = $(checkObject).attr("new_parent");
 
 		var propertyValue = checkObject.value;
+
 		var otherObject = $(checkObject).attr("other_value");
+		var otherTextId = $(checkObject).attr("other_text");
 
 		var parentObject = $(checkObject).parent();
 		var parentObjectId = 0;
@@ -94,8 +99,17 @@
 			$("#"+otherObject).val("");
 		}
 
+		var otherText;
+		if (otherTextId) { 
+			otherText = $("#"+otherTextId).val();
+		}
+
 		if (propertyValue === undefined) { 
 			propertyValue = $(checkObject).attr("value");
+		}
+
+		if (propertyValue === undefined) { 
+			propertyValue = $(checkObject).val();
 		}
 
 		if (checkObject.type === "checkbox") { 
@@ -105,14 +119,15 @@
 		}
 
 		$.ajax({ 
-			type    : 'POST',
-			url     : replyUrl,
-			data    : { 
+			type : 'POST',
+			url  : replyUrl,
+			data : {
 				target_id      : targetId,
 				property_name  : propertyName,
 				setting_name   : settingName,
 				property_value : propertyValue,
 				other_value    : otherValue,
+				other_text     : otherText,
 				parent_id      : parentObjectId
 			},
 			success : function(data) {
@@ -196,10 +211,8 @@
 				}
 
 				return;
-
 			}
 		});
-
 	}
 
 /* zebra stripe the rows */ 
@@ -417,8 +430,6 @@ function autoWin(input,e,aff,neg,affid,negid) {
 	var maxPoints = $(input).attr("max");
 	var pointStep = $(input).attr("step");
 
-	console.log("Max is "+maxPoints+" step is "+pointStep+" and len is "+len);
-
 	if (nototal) { 
 		totalPoints = function() { 
 			return;
@@ -486,7 +497,6 @@ function autoWin(input,e,aff,neg,affid,negid) {
 		&& !containsElement(filter,keyCode)
 	) {
 
-		console.log("I am here with input "+input.value);
 		changeFocus(input);
 		totalPoints(side,ratio);
 
