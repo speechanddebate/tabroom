@@ -15,7 +15,6 @@ use JavaScript::Minifier qw(minify);
 		'jquery-migrate.js',
 		'jquery.ui.touch-punch.min.js',
 		'chosen-selects.js',
-		'iphone_switch.js',
 		'jquery.tablesorter.combined.js',
 		'widget-columnSelector.js',
 		'widget-print.js',
