@@ -132,7 +132,6 @@
 			},
 			success : function(data) {
 
-
 				if (data.reply) { 
 					
 					if (replyTarget) { 
