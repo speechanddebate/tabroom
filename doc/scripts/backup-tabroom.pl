@@ -15,6 +15,10 @@ my $backup_dir = "/data/dailies";
 
 `rm $backup_dir/*.*`;
 
+# Delete the backup from 2 weeks ago, unless it's the one from the 1st day of the month.
+my $delete_day = $dt->clone;
+$delete_day->subtract(days => 14);
+
 foreach my $db (@databases) { 
 
 	chomp $db;
@@ -35,18 +39,17 @@ foreach my $db (@databases) {
 	`/bin/chmod -R 660 $sql_file.bz2`;
 	print "...done.\n";
 
+	print "\nCopying to local biweekly archive:...";
+	`/bin/mkdir -p $backup_dir/$date`;
+	`/bin/cp $sql_file.bz2  $backup_dir/$date/`;
+
 	print "\nCopying to S3:....";
 	`/usr/bin/s3cmd put $sql_file.bz2 s3://tabroom-db/$date/$db.sql.bz2`;
 	`/usr/bin/s3cmd cp s3://tabroom-db/$date/$db.sql.bz2 s3://tabroom-db/latest/$db.sql.bz2`;
 	print "...done.\n";
-
 }
 
 print "\nBackup of databases completed on ".$dt->mdy('/')." at ".$dt->hms(':')." \n";
-
-# Delete the backup from 2 weeks ago, unless it's the one from the 1st day of the month.
-my $delete_day = $dt->clone;
-$delete_day->subtract(days => 14);
 
 unless ($delete_day->day == 1) {
 	print "Deleting the backup from two weeks ago:";
