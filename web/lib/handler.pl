@@ -74,6 +74,8 @@ use Tab::JudgeShift;
 use Tab::Login;
 use Tab::Panel;
 use Tab::Permission;
+use Tab::Practice;
+use Tab::Permission;
 use Tab::JPool;
 use Tab::JPoolSetting;
 use Tab::JPoolJudge;
