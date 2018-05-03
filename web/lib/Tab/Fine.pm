@@ -10,6 +10,7 @@ Tab::Fine->columns(TEMP => qw/schoolid regionid judgeid/);
 Tab::Fine->has_a(judge => 'Tab::Judge');
 Tab::Fine->has_a(tourn => 'Tab::Tourn');
 Tab::Fine->has_a(parent => 'Tab::Fine');
+Tab::Fine->has_a(invoice => 'Tab::Invoice');
 Tab::Fine->has_a(school => 'Tab::School');
 Tab::Fine->has_a(region => 'Tab::Region');
 Tab::Fine->has_a(levied_by => 'Tab::Person');
