@@ -4,6 +4,8 @@
 </%args>
 <%init>
 
+	my $dbh = Tab::DBI->db_Main();
+
 	my $whoami = "deadbeats";
 
 	my %category_settings;
@@ -11,7 +13,6 @@
 
 	my @categories = $tourn->categories();
 	my @events = $tourn->events();
-	my @concessions = $tourn->concessions();
 
 	foreach my $category (@categories) { 
 		%{$category_settings{$category->id}} = $category->all_settings();
@@ -29,10 +30,10 @@
 			all   => 1
 	);
 
-	my %school_entries;
+	my %schools; 
 
 	foreach my $entry (@entries) { 
-		push @{$school_entries{$entry->schoolid}}, $entry;
+		push @{$schools{"entries"}{$entry->schoolid}}, $entry;
 	}
 
 	my @judges = $m->comp(
@@ -41,11 +42,9 @@
 			all   => 1
 	);
 
-	my %school_judges;
-
 	foreach my $judge (@judges) { 
-		push @{$school_judges{$judge->schoolid}{$judge->categoryid}}, $judge;
-		push @{$school_judges{$judge->schoolid}{"all"}}, $judge;
+		push @{$schools{"judges"}{$judge->schoolid}{$judge->categoryid}}, $judge;
+		push @{$schools{"judges"}{$judge->schoolid}{"all"}}, $judge;
 	}
 
 	my @fines = $m->comp(
@@ -54,10 +53,18 @@
 			all   => 1
 	);
 
-	my %school_fines;
-
 	foreach my $fine (@fines) { 
-		push @{$school_fines{$fine->schoolid}}, $fine;
+		push @{$schools{"fines"}{$fine->schoolid}}, $fine;
+	}
+
+	my @concessions = $tourn->concessions();
+
+	if (@concessions) { 
+
+		%{$schools{"orders"}} = $m->comp(
+			"/funclib/tourn_purchases.mas",
+			tourn => $tourn
+		);
 	}
 
 	my @hotels = $tourn->hotels;
@@ -65,6 +72,12 @@
 	if (@hotels) { 
 		%{$tourn_settings->{$tourn->id}{"hotels"}} =
 			map {$_->id => $_} @hotels;
+
+		%{$schools{"hotels"}} = $m->comp(
+			"/funclib/school_settings.mas", 
+			tourn => $tourn,
+			tag   => "hotel"
+		);
 	}
 
 	my @hires = $m->comp(
@@ -72,19 +85,28 @@
 		tourn => $tourn 
 	);
 
-	my %school_hires;
-
 	foreach my $hire (@hires) { 
-		push @{$school_hires{$hire->schoolid}{$hire->categoryid}}, $hire;
-		push @{$school_hires{$hire->schoolid}{"all"}}, $hire;
+		push @{$schools{"hires"}{$hire->schoolid}{$hire->categoryid}}, $hire;
+		push @{$schools{"hires"}{$hire->schoolid}{"all"}}, $hire;
 	}
 
-	my %school_worlds;
 	my $worlds;
+	my %invoiced; 
+
+	Tab::EventSetting->set_sql( adjustments => "
+        select adjustment.id
+        from event, event_setting adjustment
+        where event.tourn = ? 
+        and event.id = adjustment.event 
+        and adjustment.tag = 'adjust_judges_fees'
+	");
+
+	$tourn_settings->{"adjustments"}++ if Tab::EventSetting->search_adjustments($tourn->id);
 
 	if ($tourn_settings->{"nsda_nats"}) { 
 
-		my @worlds_events = $m->comp("/funclib/nationals_events.mas",
+		my @worlds_events = $m->comp(
+			"/funclib/nationals_events.mas",
 			tourn => $tourn,
 			type  => "usa_wsdc"
 		);
@@ -109,10 +131,50 @@
 			");
 
 			foreach my $student (Tab::Student->search_worlds_students($worlds->id)) { 
-				push @{$school_worlds{$student->schoolid}}, $student; 
+				push @{$schools{"worlds"}{$student->schoolid}}, $student; 
 			}
 		}
+
+
+		my $invoiced_sth = $dbh->prepare("
+			select school.id, invoice.total
+				from school, invoice
+				where invoice.school = school.id
+				and school.tourn = ? 
+		");
+
+		$invoiced_sth->execute($tourn->id);
+
+		while (
+			my ($school_id, $amount) = $invoiced_sth->fetchrow_array()
+		) { 
+
+			$invoiced{$school_id} += $amount;
+		}
 	}
+
+	my %school_by_id = map {$_->id => $_} $tourn->schools();
+
+	my %school_data;
+
+    my $school_sth = $dbh->prepare('
+        select school.id, school.name, school.state
+        from school
+        where school.tourn = ? 
+    ');
+
+    $school_sth->execute($tourn->id);
+
+    while (
+        my ($school_id, $school_name, $school_state, $contact_name, $contact_email) 
+            = $school_sth->fetchrow_array()
+    ) { 
+
+        $school_data{$school_id}{"name"} = $school_name;
+        $school_data{$school_id}{"state"} = $school_state;
+        $school_data{$school_id}{"short_name"} = Tab::short_name($school_name);
+    }   
+
 
 </%init>
 
@@ -229,6 +291,15 @@
 						Total
 					</th>
 
+%					if ($tourn_settings->{"nsda_nats"}) { 
+						<th>
+							Invoiced
+						</th>
+						<th>
+							Uninvoiced
+						</th>
+%					}
+
 					<th>
 						Paid
 					</th>
@@ -251,12 +322,14 @@
 			<tbody>
 
 <%perl>
-
-			foreach my $school (sort {$a->name cmp $b->name} $tourn->schools) {
+            foreach my $school_id (
+                sort {$school_data{$a}{"short_name"} cmp $school_data{$b}{"short_name"}}
+                keys %school_data
+            ) {
 
 				my ($total, $feline_ref, $total_ref) = 
 					$m->comp("/funclib/school_fees.mas", 
-						school            => $school,
+						school            => $school_by_id{$school_id},
 						tourn             => $tourn,
 						tourn_settings    => $tourn_settings,
 						categories        => \@categories,
@@ -266,11 +339,8 @@
 						event_settings    => \%event_settings,
 						all               => 1,
 						bulk              => 1,
-						entries           => $school_entries{$school->id},
-						judges            => $school_judges{$school->id},
-						fines             => $school_fines{$school->id},
-						hires             => $school_hires{$school->id},
-						worlds            => $school_worlds{$school->id},
+						entries           => $schools{"entries"}{$school_id},
+						schools           => \%schools,
 						worlds_event      => $worlds
 					);
 
@@ -285,22 +355,38 @@
 						<a 
 							class="white" 
 							target="_blank"
-							href="/register/school/edit.mhtml?school_id=<% $school->id %>"
+							href="/register/school/edit.mhtml?school_id=<% $school_id %>"
 						>
-							<% $school->name %>
+							<% $school_data{$school_id}{"name"} %>
 						</a>
 					</td>
 
-					<td>
-						<% $total_ref->{"entry_fees"} %>
+					<td class="rightalign code">
+						<% sprintf ("%.2f", $total_ref->{"total_fees"}) %>
 					</td> 
 				
-					<td>
-						<% $total_ref->{"payments"} %>
+%					if ($tourn_settings->{"nsda_nats"}) { 
+						<td class="rightalign code">
+							<% sprintf ("%.2f", $invoiced{$school_id}
+								?  $invoiced{$school_id} 
+								: "0")
+							%>
+						</td> 
+
+						<td class="rightalign code">
+							<% sprintf ("%.2f", ($total_ref->{"total_fees"} - $invoiced{$school_id}) 
+								?  ($total_ref->{"total_fees"} - $invoiced{$school_id})
+								: "0")
+							%>
+						</td> 
+%					}
+
+					<td class="rightalign code">
+						<% sprintf ("%.2f", $total_ref->{"payments"} )%>
 					</td> 
 				
-					<td>
-						<% ($total < 0) ? "Refund Due:" : "Owes:" %>
+					<td class="centeralign smallish">
+						<% ($total < 0) ? "Refund:" : "Owes:" %>
 					</td> 
 				
 					<td class="rightalign code">
@@ -312,14 +398,14 @@
 							class  = "bluetext buttonwhite fa fa-lg fa-credit-card"
 							target = "_blank"
 							title  = "Edit money screen"
-							href   = "/register/school/invoice.mhtml?school_id=<% $school->id %>"
+							href   = "/register/school/invoice.mhtml?school_id=<% $school_id %>"
 						>
 						</a>
 						<a 
 							class  = "redtext buttonwhite fa fa-lg fa-file-pdf-o"
 							target = "_blank"
 							title  = "Printable invoice"
-							href   = "/register/school/invoice_print.mhtml?school_id=<% $school->id %>"
+							href   = "/register/school/invoice_print.mhtml?school_id=<% $school_id %>"
 						>
 						</a>
 					</td>
