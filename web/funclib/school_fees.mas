@@ -15,10 +15,8 @@
 	$concession_array  => undef
 	$event_settings    => undef
 	$bulk              => undef
+	$schools           => undef
 	$entries           => undef
-	$judges            => undef
-	$fines             => undef
-	$hires             => undef
 </%args>
 <%init>
 
@@ -78,11 +76,12 @@
 		}
 	}
 
-	unless ($bulk) {
-		%{$tourn_settings->{$tourn->id}{"hotels"}} = 
-			map {$_->id => $_} $tourn->hotels();
+	unless ($schools) {
+		if ($tourn->hotels) { 
+			%{$tourn_settings->{$tourn->id}{"hotels"}} = map {$_->id => $_} $tourn->hotels();
+			$schools->{"hotels"}{$school_id} = $school->setting('hotel');
+		}
 	}
-
 
 	my $judging_fees;
 
@@ -127,12 +126,8 @@
 		my $hotel_multiplier;
 		my $hotel;
 
-		if ($bulk && $tourn_settings->{$tourn->id}{"hotels"}) { 
-			$hotel = $tourn_settings->{$tourn->id}{"hotels"}{$school->setting("hotel")};
-			$hotel_multiplier = $hotel->multiple if $hotel;
-		} elsif (not defined $bulk) { 
-			my $hotel_id = $school->setting("hotel");
-			$hotel = Tab::Hotel->retrieve($hotel_id) if $hotel_id;
+		if ($tourn_settings->{$tourn->id}{"hotels"}) { 
+			$hotel = $tourn_settings->{$tourn->id}{"hotels"}{$schools->{"hotel"}{$school_id}};
 			$hotel_multiplier = $hotel->multiple if $hotel;
 		}
 
@@ -172,7 +167,11 @@
 			if ($ARGS{"worlds_event"} 
 				&& $ARGS{"worlds_event"}->id == $event_id
 			) { 
-				push @entries, @{$ARGS{"worlds"}} if $ARGS{"worlds"};
+				push @entries, @{$schools->{"worlds"}{$school_id}} if (
+					$schools
+					&& $schools->{"worlds"}
+					&& $schools->{"worlds"}{$school_id}
+				);
 			}
 
 			next unless @entries;
@@ -325,12 +324,15 @@
 				my $uncovered;
 
 				if ($category_settings->{$category_id}{"nats_category"} && $bulk) { 
+				
+					Tab::debuglog("Bulk is $bulk!");
+
 
 					my $fee = $category_settings->{$category_id}{"round_hire_fee"};
 
 					if ($fee) { 
-						
-						foreach my $hire (@{$hires->{$category_id}}) { 
+
+						foreach my $hire (@{$schools->{"hires"}{$school_id}{$category_id}}) { 
 
 							my $accepted = $hire->rounds_accepted;
 
@@ -339,18 +341,20 @@
 								$total += $accepted * $fee;
 								$judging_fees += $accepted * $fee;
 							}
-
 						}
 						
-						undef @{$hires->{$category_id}};
+						undef @{$schools->{"hires"}{$school_id}{$category_id}};
 					} 
 
 				} elsif ($category_settings->{$category_id}{"nats_category"}) { 
 
 					my ($provided, $burden) = $m->comp(
 						"/funclib/judgemath/nats_judging.mas",
-						category => $category,
-						school   => $school
+						category          => $category,
+						school            => $school,
+						category_settings => $category_settings->{$category_id},
+						tourn_settings    => $tourn_settings,
+						event_settings    => $event_settings,
 					);
 
 					my @jpools = $m->comp(
@@ -394,13 +398,15 @@
 
 				} else { 
 
+
 					($uncovered, $extra ) = $m->comp(
 						"/funclib/judgemath/uncovered_burden_by_category.mas", 
 						category          => $category,
 						category_settings => $category_settings->{$category_id},
+						tourn_settings    => $tourn_settings,
 						event_settings    => $event_settings,
-						judges            => $judges->{$category_id},
-						hires             => $hires->{$category_id},
+						judges            => $schools->{"judges"}{$school_id}{$category_id},
+						hires             => $schools->{"hires"}{$school_id}{$category_id},
 						school            => $school,
 						confirmed         => $entries_by_category{$category_id}{"confirmed"},
 						waitlist          => $entries_by_category{$category_id}{"waitlist"},
@@ -414,18 +420,13 @@
 
 					my @judges;
 					
-					if ($judges) { 
+					if ($schools->{"judges"}{$school_id}) { 
 
-						foreach my $judge (@{$judges->{$all}}) { 
-							push @judges, $judge if $judge->categoryid == $category_id;
-						}
+						@judges = @{$schools->{"judges"}{$school_id}{$category_id}};
 					
 					} else {
 
-						@judges = Tab::Judge->search( 
-							school   => $school_id,
-							category => $category_id 
-						);
+						@judges = $school->judges(category => $category_id);
 					}
 
 					unless ($bulk) { 
@@ -460,21 +461,29 @@
 						school            => $school,
 						category          => $category,
 						category_settings => $category_settings->{$category_id},
-						hires             => $hires->{$category_id},
+						hires             => $schools->{"hires"}{$school_id}{$category_id},
 						bulk              => $bulk
 					);
 
-					my %adjustments = $m->comp(
-						"/funclib/judge_hire_adjustments.mas", 
-						school            => $school,
-						category          => $category,
-						category_settings => $category_settings->{$category_id},
-						hires             => $hires->{$category_id}
-					);
-
+					my @adjustments;
+					my %adjustments;
 					my %hired_fee = ();
 
-					my @adjustments = sort {$b <=> $a} keys %adjustments;
+					if ($tourn_settings->{"adjustments"}) { 
+
+						%adjustments = $m->comp(
+							"/funclib/judge_hire_adjustments.mas", 
+							school            => $school,
+							category          => $category,
+							category_settings => $category_settings->{$category_id},
+							hires             => $schools->{"hires"}{$school_id}{$category_id}
+						);
+
+
+						@adjustments = sort {$b <=> $a} keys %adjustments;
+
+					}
+
 					push @adjustments, 0; 
 
 					my $adjustment_amount;
@@ -488,7 +497,6 @@
 							$accepted = $total_accepted; 
 						
 						} else { 
-
 							$accepted = $adjustments{$adjustment};
 							$accepted = $total_accepted if $accepted > $total_accepted;
 							$total_accepted -= $accepted; 
@@ -502,7 +510,6 @@
 							if ($accepted ) { 
 
 								$hired_fee{"fee"} = $accepted * $fee;
-
 								$total_entry_fees += $accepted * $fee;
 								$total += $accepted * $fee;
 								$judging_fees += $accepted * $fee;
@@ -717,8 +724,8 @@
 						school            => $school,
 						confirmed         => $entries_by_category{$category_id}{"confirmed"},
 						waitlist          => $entries_by_category{$category_id}{"waitlist"},
-						judges            => $judges->{$category_id},
-						hires             => $hires->{$category_id},
+						judges            => $schools->{"judges"}{$school_id}{$category_id},
+						hires             => $schools->{"hires"}{$school_id}{$category_id},
 						shifts			  => $category_settings->{$category_id}{"shifts"},
 						bulk              => $bulk
 					);
@@ -774,15 +781,12 @@
 	) { 
 
 		my $hotel;
+		my $hotel_surcharge;
 
-		if ($bulk) { 
-			$hotel = $tourn_settings->{$tourn->id}{"hotels"}{$school->setting("hotel")};
-		} elsif (not defined $bulk) { 
-			my $hotel_id = $school->setting("hotel");
-			$hotel = Tab::Hotel->retrieve($hotel_id) if $hotel_id;
+		if ($tourn_settings->{$tourn->id}{"hotels"}) { 
+			$hotel = $tourn_settings->{$tourn->id}{"hotels"}{$schools->{"hotel"}{$school_id}};
+			$hotel_surcharge = $hotel->surcharge if $hotel;
 		}
-
-		my $hotel_surcharge = $hotel->surcharge if $hotel;
 
 		if ($tourn_settings->{"per_student_fee"} || $hotel_surcharge ) { 
 
@@ -855,48 +859,55 @@
 		my @concessions;
 
 		@concessions = @{$concession_array} if $concession_array;
+		@concessions = $tourn->concessions unless @concessions;
 
-		@concessions = $tourn->concessions 
-			unless @concessions || $bulk;
+		if ($bulk) { 
 
-		foreach my $concession (@concessions) {
+			foreach my $order_id (keys %{$schools->{'orders'}{$school_id}}) { 
+				$total += $schools->{"orders"}{$school_id}{$order_id}{"total"};
+				$total_concessions += $schools->{"orders"}{$school_id}{$order_id}{"total"};
+				
+				Tab::debuglog("Order $order_id total concessions is $total_concessions") if $school_id == 214196;
 
-			my @orders = Tab::ConcessionPurchase->search( 
-				school     => $school_id,
-				concession => $concession->id 
-			);
-
-			my $quantity;
-
-			foreach my $order (@orders) { 
-				$quantity += $order->quantity;
-			}
-		
-			next unless $quantity;
-
-			$total += $quantity * $concession->price;
-			$total_concessions += $quantity * $concession->price;
-
-			next if $bulk;
-
-			push @all_orders, @orders;
-
-			my %line = ();
-
-			$line{"name"} = $quantity." ".$concession->name." at ".$concession->price." each";
-			$line{"fee"} = $quantity * $concession->price;
-
-			$line{"quantity"} = $quantity;
-			$line{"per_unit"} = $concession->price;
-			$line{"short_name"} = $concession->name;
-
-			if ($concession->billing_code) { 
-				$line{"billing_code"} = $concession->billing_code;
-				$concessions_by_code{$concession->billing_code} += ($quantity * $concession->price);
 			}
 
-			push (@felines, {%line});
+		} else { 
 
+			foreach my $concession (@concessions) {
+
+				my @orders = Tab::ConcessionPurchase->search( 
+					school     => $school_id,
+					concession => $concession->id 
+				);
+
+				my $quantity;
+
+				foreach my $order (@orders) { 
+					$quantity += $order->quantity;
+				}
+			
+				next unless $quantity;
+
+				$total += $quantity * $concession->price;
+				$total_concessions += $quantity * $concession->price;
+
+				push @all_orders, @orders;
+				my %line = ();
+
+				$line{"name"} = $quantity." ".$concession->name." at ".$concession->price." each";
+				$line{"fee"} = $quantity * $concession->price;
+
+				$line{"quantity"} = $quantity;
+				$line{"per_unit"} = $concession->price;
+				$line{"short_name"} = $concession->name;
+
+				if ($concession->billing_code) { 
+					$line{"billing_code"} = $concession->billing_code;
+					$concessions_by_code{$concession->billing_code} += ($quantity * $concession->price);
+				}
+
+				push (@felines, {%line});
+			}
 		}
 	}
 
@@ -908,7 +919,10 @@
 
 		my @all_fines;
 		
-		@all_fines = @{$fines} if $fines;
+		@all_fines = @{$schools->{"fines"}{$school_id}} 
+			if $schools
+			&& $schools->{"fines"}
+			&& $schools->{"fines"}{$school_id};
 
 		@all_fines = Tab::Fine->search(
 			school => $school_id
@@ -996,6 +1010,7 @@
 		$totals{"entries"}     = $only_entry_fees;
 		$totals{"entry_fees"}  = $total_entry_fees;
 		$totals{"concessions"} = $total_concessions;
+		$totals{"total_fees"}  = $total_concessions + $total_entry_fees;
 		$totals{"payments"}    = $total_payments;
 		$totals{"judges"}      = $judging_fees;
 		$totals{"bond"}        = $bond_total;
