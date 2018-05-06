@@ -9,11 +9,12 @@
 	$school_id   => 0
 	$obligation  => 0
 	$hired       => 0
-	$first_year  => undef
-	$gender      => undef
 	$category_id => undef
 </%args>
 <%init>
+
+	use Tab::NSDA::Person;
+	use Email::Valid;
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
@@ -22,100 +23,338 @@
 
 	my $category = Tab::Category->retrieve( $category_id );
 
-	unless ($category && $category->tourn && $category->tourn->id == $tourn->id) { 
-		$m->print("<p>No valid category for judge sent.  Please try again</p>");
-		$m->abort;
-	}
-
-	my $code;
-	my $judge;
-
-	unless ($category->setting("no_codes")) { 
-		$code = $m->comp("/funclib/category_code.mas", category => $category);
-	}
-
-	$email = $ARGS{"tabroom_email"} if $ARGS{"tabroom_email"};
-
-	if ($email) { 
-
-		my $judge_person = Tab::Person->search( 
-			email => $email 
-		)->first;
-
-		$m->redirect("add.mhtml?category_id=$category_id&err=No person found with email $email") 
-			unless $judge_person;
-
-		my $already = Tab::Judge->search( 
-			category => $category_id,
-			person   => $judge_person->id
-		)->first;
-
-		$m->redirect("add.mhtml?category_id=$category_id&err=That judge is already judging in that judge category") unless $judge_person;
-
-		$judge = Tab::Judge->create({
-			first      => $judge_person->first,
-			last       => $judge_person->last,
-			person     => $judge_person->id,
-			active     => 1,
-			obligation => $obligation,
-			hired      => $hired,
-			school     => $school_id,
-			category   => $category->id,
-			code       => $code
-		});
-
-		$judge->setting("special", $ARGS{"special"}) if $ARGS{"special"};
-		$judge->setting("notes", $ARGS{"notes"}) if $ARGS{"notes"};
-		$judge->setting("tab_rating", $ARGS{"tab_rating"}) if $ARGS{"tab_rating"};
-		$judge->setting("diversity", $ARGS{"diversity"}) if $ARGS{"diversity"};
-		$judge->setting("gender", $judge_person->gender) if $judge_person->gender;
-		$judge->setting("registered_by", $person->id);
-
-		my $phone = $judge_person->phone if $judge_person;
-		my $provider = $judge_person->provider if $judge_person;
-
-		Tab::Follower->create({
-			judge  => $judge->id,
-			cell   => $phone,
-			domain => $provider,
-			type   => "judge"
-		}) if $provider;
-
-		my $email = $judge_person->email if $judge_person;
-		my $no_email = $judge_person->no_email if $judge_person;
-
-		Tab::Follower->create({
-			judge => $judge->id,
-			email => $email,
-			type  => "judge"
-		}) unless $no_email;
-
-		$m->comp("/funclib/person_conflict.mas", 
-			tourn  => $tourn,
-			person => $person
+	unless ($category) { 
+		$m->comp('/funclib/abort.mas', 
+			message => "No judge category found for $category_id"
 		);
+	}
+
+	my $school = Tab::School->retrieve($school_id) if $school_id;
+	my $judge; 
+	my $chapter = $school->chapter;
+
+	my $judge_person;
+	my $nsda_person;
+	my $chapter_judge;
+
+	my %category_settings = $category->all_settings();
+
+	my $max_rounds = $category_settings{'max_rounds'};
+	$max_rounds = 8 unless $max_rounds;
+
+	my $msg;
+
+	$chapter_judge = 
+		Tab::ChapterJudge->retrieve($ARGS{"chapter_judge_id"});
+
+	$nsda_person = Tab::NSDA::Person->search(
+		ualt_id => $ARGS{"nsda_ualt_id"}
+	)->first if $ARGS{"nsda_ualt_id"} > 0;
+
+	foreach my $email ($ARGS{"tabroom_email"}, $ARGS{"email"}) { 
+
+		next unless $email;
+		next if $judge_person;
+
+		$judge_person = Tab::Person->search(
+			email => $email
+		)->first;
+
+		unless ($judge_person) { 
+			my $login = Tab::Login->search(
+				username => $email
+			)->first;
+
+			$judge_person = $login->person() if $login;
+		}
+
+		unless ($nsda_person) { 
+			$nsda_person = Tab::NSDA::Person->search(
+				uemail => $email
+			)->first;
+		}
+	}
+
+	unless ($judge_person) { 
+		$judge_person = $chapter_judge->person if $chapter_judge
+			&& $chapter_judge->person > 0;
+	}
+
+	unless ($chapter_judge 
+		|| $nsda_person 
+		|| $judge_person 
+		|| ($ARGS{"first"} && $ARGS{"last"})
+	) { 
+
+		my $err = "Insufficient information provided to register a judge: must have at least one of a valid Tabroom judge, a NSDA coach record, a valid Tabroom account email or a first &amp; last name";
+
+		$m->redirect("add.mhtml?category_id=".$category->id."&school_id=".$school->id."&err=$err");
+
+	}
+
+	#Check for duplicates
+
+	my @existing;
+
+	if ($judge_person > 0) { 
+		push @existing, $m->comp(
+			"/funclib/person_judges.mas", 
+			person => $judge_person,
+			tourn  => $tourn
+		);
+	}
+
+	if ($nsda_person > 0 ) { 
+		push @existing, $m->comp(
+			"/funclib/nsda_person_judges.mas", 
+			nsda_person => $nsda_person,
+			tourn       => $tourn
+		);
+	}
+
+	if ($chapter_judge > 0) { 
+		
+		Tab::Judge->set_sql( tourn => "
+			select judge.*
+			from judge, category
+				where category.tourn = ? 
+				and category.id = judge.category
+				and judge.chapter_judge = ? 
+		");
+
+		push @existing, Tab::Judge->search_tourn(
+			$tourn->id, 
+			$chapter_judge->id
+		);
+	}
+
+	if (@existing) { 
+
+		my $err = "That judge is already registered in the tournament: ";
+
+		my %done;
+
+		foreach my $other (@existing) { 
+
+			next if $done{$other->id}++;
+
+			$err .= "<br />" if $err;
+			$err .= $other->first." ".$other->last;
+			$err .= " from ".$other->school->name." " if $other->school > 0;
+			$err .= " in ".$other->category->abbr;
+		}
+
+		$m->redirect("judge_edit.mhtml?category_id=".$category->id."&school_id=".$school->id."&err=$err");
 
 	} else { 
 
-		$judge = Tab::Judge->create({
-			first       => $first,
-			last        => $last,
-			active      => 1,
-			obligation  => $obligation,
-			hired       => $hired,
-			school      => $school_id,
-			category => $category->id,
-			code        => $code
-		});
+		my $warning; 
 
-		$judge->setting("gender", $gender);
-		$judge->setting("special", $ARGS{"special"});
-		$judge->setting("notes", $ARGS{"notes"});
-		$judge->setting("tab_rating", $ARGS{"tab_rating"}) if $ARGS{"tab_rating"};
-		$judge->setting("diversity", $ARGS{"diversity"}) if $ARGS{"diversity"};
-		$judge->setting("registered_by", $person->id);
+		unless ($nsda_person) { 
 
+			my $ualt_id;
+			my $email;
+
+			$ualt_id = $judge_person->ualt_id 
+				if ($judge_person && $judge_person->ualt_id);
+
+			$ualt_id = $chapter_judge->ualt_id 
+				if ($chapter_judge && $chapter_judge->ualt_id);
+
+			$email = $chapter_judge->email 
+				if $chapter_judge 
+				&& $chapter_judge->email;
+
+			$email = $judge_person->email 
+				if $judge_person;
+
+			$nsda_person = Tab::NSDA::Person->search( 
+				ualt_id => $ualt_id
+			)->first if $ualt_id;
+
+			unless ($nsda_person) { 
+				$nsda_person = Tab::NSDA::Person->search( 
+					uemail => $email
+				)->first if $email;
+			}
+		}
+
+		unless ($judge_person) { 
+
+			my $ualt_id;
+			my $email;
+
+			$ualt_id = $chapter_judge->ualt_id 
+				if ($chapter_judge && $chapter_judge->ualt_id);
+
+			$ualt_id = $nsda_person->ualt_id 
+				if ($nsda_person && $nsda_person->ualt_id);
+
+			$email = $chapter_judge->email 
+				if ($chapter_judge && $chapter_judge->email);
+
+			$email = $nsda_person->uemail 
+				if ($nsda_person && $nsda_person->uemail);
+
+			undef $email unless Email::Valid->address(
+				  -address => $email,
+				   -mxcheck => 0
+			);
+
+			$judge_person = Tab::Person->search( 
+				email => $email
+			)->first if $email;
+
+			unless ($judge_person) { 
+				$judge_person = Tab::Person->search( 
+					ualt_id => $ualt_id
+				)->first if $ualt_id;
+			}
+		}
+
+		if ($judge_person && $nsda_person && $judge_person->ualt_id != $nsda_person->ualt_id) { 
+			$judge_person->ualt_id($nsda_person->ualt_id);
+			eval { $judge_person->update; };
+		}
+
+		if ($chapter_judge) { 
+
+			if ($judge_person) { 
+				$chapter_judge->person($judge_person->id);
+			}
+
+			if ($nsda_person) { 
+				$chapter_judge->ualt_id($nsda_person->ualt_id);
+			}
+
+			$chapter_judge->update();
+
+		} else { 
+
+			if ($judge_person) { 
+				$chapter_judge = $judge_person->chapter_judges(
+					chapter => $chapter->id,
+					last    => $judge_person->last
+				)->first;
+			}
+
+			unless ($chapter_judge) { 
+				if ($nsda_person) { 
+					$chapter_judge = $chapter->chapter_judges(
+						ualt_id => $nsda_person->ualt_id
+					)->first;
+				}
+			}
+
+			unless ($chapter_judge) { 
+
+				# There might be another one by name or something but I
+				# could be here all friggin day checking iterations
+
+				my $first = $ARGS{"first"};
+				my $middle;
+				my $last  = $ARGS{"last"};
+				my $phone = $ARGS{"phone"};
+				my $email = $ARGS{"email"};
+				my $ualt_id; 
+				my $judge_person_id;
+
+				if ($nsda_person) {
+					$first   = $nsda_person->ufname;
+					$middle  = $nsda_person->umname;
+					$last    = $nsda_person->ulname;
+					$phone   = $nsda_person->cell;
+					$email   = $nsda_person->uemail;
+					$ualt_id = $nsda_person->ualt_id;
+				}
+
+				if ($judge_person) { 
+					$first     = $judge_person->first;
+					$middle    = $judge_person->middle;
+					$last      = $judge_person->last;
+					$email     = $judge_person->email;
+					$phone     = $judge_person->phone;
+					$judge_person_id = $judge_person->id;
+				}
+
+				undef $email unless Email::Valid->address(
+					  -address => $email,
+					   -mxcheck => 0
+				);
+
+				unless ($first && $last) { 
+
+					my $err = "You must supply a name, or a Coach/Tabroom record, to register a judge";
+					$m->redirect("judge_edit.mhtml?category_id=".$category->id."&school_id=".$school->id."&err=$err");
+				} else {
+
+					$chapter_judge = Tab::ChapterJudge->search(
+						first   => $first,
+						last    => $last,
+						chapter => $school->chapter->id,
+					)->first;
+
+					if ($chapter_judge) { 
+						$chapter_judge->ualt_id($ualt_id) if $ualt_id;
+						$chapter_judge->update();
+					}
+				}
+
+				unless ($chapter_judge) { 
+
+					$chapter_judge = Tab::ChapterJudge->create({
+						first   => $first,
+						middle  => $middle,
+						last    => $last,
+						chapter => $school->chapter->id,
+						phone   => $phone,
+						email   => $email,
+						ualt_id => $ualt_id,
+						person  => $judge_person_id
+					});
+
+				}
+			}
+		}
+
+		if ($chapter_judge) { 
+			
+			my $ualt_id = $nsda_person->ualt_id if $nsda_person;
+			my $judge_person_id = $judge_person->id if $judge_person;
+			$judge_person_id = 0 unless $judge_person_id;
+
+			my $code;
+
+			unless ($category_settings{"no_codes"}) { 
+				$code = $m->comp(
+					"/funclib/category_code.mas", 
+					category => $category
+				);
+			}
+
+			$judge = Tab::Judge->create({
+				chapter_judge => $chapter_judge->id,
+				first         => $chapter_judge->first,
+				middle        => $chapter_judge->middle,
+				last          => $chapter_judge->last,
+				active        => 1,
+				code          => $code,
+				obligation    => $max_rounds,
+				category      => $category->id,
+				covers        => $category->id,
+				school        => $school->id,
+				person        => $judge_person_id
+			});
+
+			$judge->setting("ualt_id", $ualt_id) if $ualt_id;
+	
+			$judge->setting("phone", $phone) if $phone;
+			$judge->setting("email", $email) if $email;
+
+		}
 	}
+
+	$msg = "Judge ".$judge->first." ".$judge->last." created";
 
 	my $description = "Entered ".$category->abbr." judge ".$judge->code ." ".$judge->first." ".$judge->last;
 
@@ -128,107 +367,19 @@
 	   person      => $person->id
 	) if $school_id;
 
-	foreach my $jpool ($category->jpools) { 
+    if (
+		$category_settings{"coach_ratings"} 
+		|| $category_settings{"ask_alts"}
+	) { 
+		$m->redirect("/register/school/judge_details.mhtml?judge_id=".$judge->id."&school_id=".$school->id);
+	} else {
 
-		next unless $ARGS{$jpool->id};
+		$m->redirect("/register/school/judges.mhtml?school_id=".$school_id."&category_id=$category_id&msg=$description") 
+			if $from && $school_id;
 
-		Tab::JPoolJudge->create({
-			jpool  => $jpool->id,
-			judge => $judge->id
-		});
+		$m->redirect("add.mhtml?last_id=".$judge->id."&category_id=$category_id&msg=$description");
 
 	}
-
-    if ($category->rating_subsets) { 
-
-        foreach my $subset ($category->rating_subsets) { 
-    
-            my @judge_ratings = Tab::Rating->search(
-                judge         => $judge->id,
-                rating_subset => $subset->id,
-                type          => "coach"
-            );
-
-            my $notfirst;
-
-            JR:
-            foreach my $jr (@judge_ratings) { 
-
-                if ($notfirst) { 
-                    $jr->delete;
-                    next JR;
-                } else { 
-					my $tier = $ARGS{$subset->id."_rating"};
-					$tier = 0 unless $tier;
-                    $jr->rating_tier($tier);
-                    $jr->entered($now);
-                    $jr->update;
-                    $notfirst++;
-                }
-
-            }
-
-            unless ($notfirst) { 
-
-                my $tier = $ARGS{$subset->id."_rating"};
-				$tier = 0 unless $tier;
-
-                Tab::Rating->create({
-                    judge         => $judge->id,
-                    tourn         => $tourn->id,
-                    type          => "coach",
-                    rating_tier   => $tier,
-                    rating_subset => $subset->id,
-                    entered       => $now
-                });
-            }
-
-        }
-
-    } else {
-
-        my @judge_ratings = Tab::Rating->search(
-            judge => $judge->id,
-            type => "coach"
-        );
-
-        my $notfirst;
-
-        JR:
-        foreach my $jr (@judge_ratings) {
-
-            if ($notfirst) {
-                $jr->delete;
-                next JR;
-            } else {
-                $jr->rating_tier($ARGS{"rating"});
-                $jr->update;
-                $notfirst++;
-            }
-        }
-
-        unless ($notfirst) {
-
-			my $tier = $ARGS{"rating"};
-			$tier = 0 unless $tier;
-
-            Tab::Rating->create({
-                judge       => $judge->id,
-                tourn       => $tourn->id,
-                type        => "coach",
-                rating_tier => $tier,
-                entered     => $now
-            });
-
-        }
-
-    }
-
-	$judge->setting("phone", $phone);
-	$judge->setting("first_year", $first_year);
-
-	$m->redirect("/register/school/judges.mhtml?school_id=".$school_id."&category_id=$category_id") if $from && $school_id;
-	$m->redirect("add.mhtml?last_id=".$judge->id."&category_id=$category_id");
 	
 </%init>
 
