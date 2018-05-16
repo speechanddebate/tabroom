@@ -1,0 +1,416 @@
+<%args>
+	$tourn
+	$mode => "pdf"
+</%args>
+<%init>
+
+	our $pagesize = 45; 
+	our $line = $pagesize + 2;
+	our $counter;
+
+	my $dbh = Tab::DBI->db_Main(); 
+
+	my $sth = $dbh->prepare("
+		select student.id, student.first, student.middle, student.last, event.abbr,
+			count(distinct(year(points.startdate))) as count_nats,
+			school.id, school.name, school.state, coaches.value,
+			(SELECT sum(appear) FROM points.NAT_APPEARANCES WHERE school_id = chapter.nsda) 
+			as appearances
+
+		from (student, entry_student, entry, school, event, chapter)
+
+		left join entry_setting coach_ualt
+			on coach_ualt.entry = entry.id
+			and coach_ualt.tag = 'coach_points'
+
+		left join points.NEW_POINTS points
+			on student.ualt_id = points.student_id
+			and points.event_cat_id = 4
+
+		left join school_setting coaches
+			on coaches.school = school.id
+			and coaches.tag = 'tbook_coaches'
+
+		where event.tourn       = ?
+		and event.tourn         = school.tourn
+		and school.chapter      = student.chapter
+		and chapter.id          = school.chapter
+		and student.id          = entry_student.student
+		and entry_student.entry = entry.id
+		and entry.active        = 1
+		and entry.event         = event.id
+
+		and not exists ( 
+			select supp.id
+			from event_setting supp
+			where supp.event = event.id
+			and supp.tag = 'supp'
+		)
+
+		and not exists ( 
+			select conn.id
+			from event_setting conn
+			where conn.event = event.id
+			and conn.tag = 'conn'
+		)
+
+		group by student.id
+		order by school.state, school.name, student.last, event.id
+	");
+
+	$sth->execute($tourn->id);
+
+	my %school;
+
+	while ( 
+	
+		my (
+			$student_id, $student_first, $student_middle, $student_last, $student_main,
+			$count_nats, $school_id, $school_name, $school_state, $coaches, $appearances
+		) = $sth->fetchrow_array()
+
+	) { 
+
+		unless ($school{$school_id}) { 
+			$school{$school_id}{"name"}  = $school_name;
+			$school{$school_id}{"state"} = $school_state;
+			$school{$school_id}{"extra_coaches"} = $coaches;
+			$school{$school_id}{"appearances"} = $appearances;
+		}
+
+
+		unless ($school{"students"}{$student_id}) { 
+			$school{$school_id}{"students"}{$student_id}{"first"}       = $student_first;
+			$school{$school_id}{"students"}{$student_id}{"middle"}      = $student_middle;
+			$school{$school_id}{"students"}{$student_id}{"last"}        = $student_last;
+			$school{$school_id}{"students"}{$student_id}{"main"}        = $student_main;
+			$school{$school_id}{"students"}{$student_id}{"count"}       = $count_nats;
+		}
+	}
+
+	my $coach_sth = $dbh->prepare("
+
+        select distinct
+			entry.school, 
+			person.ualt_id, person.ufname, person.umname, person.ulname, 
+			max(degree.diamonds)
+
+        from (points.NEW_USERS person, tabroom.entry entry,
+			tabroom.entry_setting coach, tabroom.event event)
+
+		left join points.NEW_USERS_TO_DEGREES nutd
+			on nutd.ualt_id = person.ualt_id
+
+		left join points.degree_levels degree
+			on nutd.degree_id = degree.degree_id
+
+        where event.tourn = ?
+		and event.id      = entry.event
+        and entry.id      = coach.entry
+		and entry.active  = 1 
+        and coach.tag     = 'coach_points'
+        and coach.value   = person.ualt_id
+
+        group by person.ualt_id
+
+	");
+
+	$coach_sth->execute($tourn->id);
+
+	while ( 
+	
+		my (
+			$school_id, $coach_id, $coach_ufname, $coach_umname, $coach_ulname, $diamonds
+		) = $coach_sth->fetchrow_array()
+
+	) { 
+		unless ($school{$school_id}{"coaches"}{$coach_id}) { 
+			$school{$school_id}{"coaches"}{$coach_id}{"first"}    = $coach_ufname;
+			$school{$school_id}{"coaches"}{$coach_id}{"middle"}   = $coach_umname;
+			$school{$school_id}{"coaches"}{$coach_id}{"last"}     = $coach_ulname;
+			$school{$school_id}{"coaches"}{$coach_id}{"diamonds"} = $diamonds;
+		}
+	}
+
+	my $states = $m->comp("/funclib/state_hash.mas");
+
+	my @keys = 
+		sort {$school{$a}{"name"} cmp $school{$b}{"name"}} 
+		keys %school;
+
+	@keys = 
+		sort {$states->{$school{$a}{"state"}} cmp $states->{$school{$b}{"state"}}} 
+		@keys;
+
+	my $name = $tourn->name;
+	$name =~ s/[\W_]//g;
+	my $filename = "TournamentBook-$name";
+
+	if ($mode eq "csv") { 
+		$m->clear_buffer();
+		$r->content_type('application/csv');
+		$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename.csv";
+	} else { 
+
+	    $m->comp("/funclib/printout.mas", 
+			tourn     => $tourn,
+            filename  => $filename,
+			wider     => 1,
+			array     => 1.1,
+			linespace => .9,
+			vmargin   => 2.1,
+			hmargin   => .4,
+			no_footer => 1,
+            head      => 1,
+        );
+
+	    my $filepath = $Tab::file_root."tmp/".$filename;
+	   	open (TEXOUT, ">>$filepath.tex");
+
+	}
+
+	print TEXOUT "\\footnotesize\n";
+
+	my $last_state;
+
+	my $linecounter; 
+
+	print TEXOUT "\\begin{minipage}[t][][t]{2.25in}\n";
+	print TEXOUT "\\parbox{1.65in}{\\textsb{Student and Instructor}} ";
+	print TEXOUT "\\parbox{.4in}{\\raggedleft \\textsb{Event}} ";
+	print TEXOUT "\\medskip\n";
+	print TEXOUT "\\newline\n";
+	print TEXOUT "\\raggedright\n";
+
+	foreach my $school_id (@keys) { 
+			
+		next unless $school{$school_id}{"students"};
+		my $state = $school{$school_id}{"state"};
+
+		if ($state ne $last_state) { 
+
+			if ($mode eq "csv") { 
+				$m->print($states->{$state}."\n");
+			} else { 
+				&print_state($states->{$state});
+			}
+
+			$last_state = $state; 
+		}
+
+		if ($mode eq "csv") { 
+			$m->print(',"'.$school{$school_id}{'name'}.'",');
+			$m->print('"'.$school{$school_id}{"appearances"}.'"');
+			$m->print("\n");
+		} else { 
+			&print_school($school{$school_id}{'name'}, $school{$school_id}{"appearances"});
+		}
+
+		foreach my $student_id ( sort {
+				$school{$school_id}{"students"}{$a}{"last"} 
+				cmp $school{$school_id}{"students"}{$b}{"last"}
+			} keys %{$school{$school_id}{"students"}} 
+
+		) { 
+
+			if ($mode eq "csv") { 
+				$m->print(",,");
+				$m->print('"'.$school{$school_id}{"students"}{$student_id}{"last"}.'",');
+				$m->print('"'.$school{$school_id}{"students"}{$student_id}{"first"}.'",');
+				$m->print('"'.$school{$school_id}{"students"}{$student_id}{"middle"}.'",');
+
+				foreach (
+					1 ..  $school{$school_id}{"students"}{$student_id}{"count"}
+				) { 
+					$m->print('\\#');
+				}
+				$m->print(",");
+				$m->print($school{$school_id}{"students"}{$student_id}{"main"});
+				$m->print("\n");
+			} else { 
+
+				my $name_string;
+				$name_string .= $school{$school_id}{"students"}{$student_id}{"first"};
+				$name_string .= " ".$school{$school_id}{"students"}{$student_id}{"middle"}
+					if $school{$school_id}{"students"}{$student_id}{"middle"};
+				$name_string .= " ". $school{$school_id}{"students"}{$student_id}{"last"};
+			
+				&print_student(
+					$name_string, 
+					$school{$school_id}{"students"}{$student_id}{"count"}, 
+					$school{$school_id}{"students"}{$student_id}{"main"}
+				);
+			}
+
+		}
+
+		foreach my $coach_id ( sort {
+				$school{$school_id}{"coaches"}{$a}{"last"} 
+				cmp $school{$school_id}{"coaches"}{$b}{"last"}
+			} keys %{$school{$school_id}{"coaches"}} 
+
+		) { 
+
+			if ($mode eq "csv") { 
+				$m->print(",,");
+				$m->print('"'.$school{$school_id}{"coaches"}{$coach_id}{"last"}.'",');
+				$m->print('"'.$school{$school_id}{"coaches"}{$coach_id}{"first"}.'",');
+				$m->print('"'.$school{$school_id}{"coaches"}{$coach_id}{"middle"}.'",');
+				foreach (1 .. $school{$school_id}{"coaches"}{$coach_id}{"diamonds"}) { 
+					$m->print('*');
+				}
+				$m->print("\n");
+			} else { 
+
+				my $name_string = $school{$school_id}{"coaches"}{$coach_id}{"first"};
+				$name_string .= " ".$school{$school_id}{"coaches"}{$coach_id}{"middle"}
+					if $school{$school_id}{"coaches"}{$coach_id}{"middle"};
+				$name_string .= " ".$school{$school_id}{"coaches"}{$coach_id}{"last"};
+
+				&print_coach(
+					$name_string,
+					$school{$school_id}{"coaches"}{$coach_id}{"diamonds"}
+				);
+			}
+
+		}
+
+		if ($school{$school_id}{"extra_coaches"}) { 
+
+			foreach my $extra (split(/\,/, $school{$school_id}{"extra_coaches"}) ) { 
+
+				$extra =~ s/^\s+//;
+				$extra =~ s/\s+$//;
+
+				my @names = split(/\ /, $extra);
+
+				my $first;
+				my $last;
+				my $middle;
+
+				$first = shift @names if @names;
+				$last = pop @names if @names;
+				$middle = join (" ", @names) if @names;
+
+				if ($mode eq "csv") { 
+					$m->print(",,");
+					$m->print('"'.$first.'",');
+					$m->print('"'.$middle.'",');
+					$m->print('"'.$last."\"\n");
+				}
+			}
+		}
+	}
+
+	sub column_break { 
+		print TEXOUT "\\end{minipage}\n";
+		print TEXOUT "\\newpage\n" if $counter++ % 2;
+		print TEXOUT "\\begin{minipage}[t][][t]{2.25in}\n";
+		print TEXOUT "\\parbox{1.65in}{\\textsb{Student and Instructor}} ";
+		print TEXOUT "\\parbox{.4in}{\\raggedleft \\textsb{Event}} ";
+		print TEXOUT "\\medskip\n";
+		print TEXOUT "\\newline\n";
+		print TEXOUT "\\raggedright\n";
+		$line = $pagesize;
+		return;
+	}
+
+	sub print_state { 
+
+		my $state = shift;
+		&column_break() if $line-- < 1;
+		$line--;
+
+		if ($counter) { 
+			print TEXOUT "\\vspace{1mm}\n";
+			print TEXOUT "\\newline\n";
+		}
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\textsb{".uc($state)."}\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\newline\n";
+		return;
+	}
+
+	sub print_school { 
+
+		my ($school, $natcount) = @_;
+
+		undef $natcount if $natcount < 1;
+
+		&column_break() if $line-- < 1;
+
+		print TEXOUT "\\parbox{1.85in}{";
+		print TEXOUT "\\truncate{1.8in}{ ";
+		print TEXOUT Tab::texify($school)."}}";
+		print TEXOUT "\\parbox{.2in}{\\raggedleft $natcount } ";
+		print TEXOUT "\\newline\n";
+
+		return;
+	}
+
+	sub print_student { 
+
+		my ($name, $nats, $event) = @_;
+
+		&column_break() if $line-- < 1;
+
+		my $nats_string;
+		foreach my $nats (1 .. $nats) { 
+			$nats_string .= '\#';
+		}
+
+		print TEXOUT "\\parbox{.1in}{\\strut} ";
+		print TEXOUT "\\parbox{1.3in}{";
+		print TEXOUT "\\truncate{1.25in}{ ";
+		print TEXOUT Tab::texify($name)." } } ";
+		print TEXOUT "\\parbox{.30in}{ \\raggedleft \\strut ".$nats_string."} ";
+		print TEXOUT "\\parbox{.30in}{ \\raggedleft $event } ";
+		print TEXOUT "\\newline\n";
+		return;
+	}
+
+	sub print_coach { 
+
+		my ($name, $diamonds) = @_;
+
+		my $diamond_string;
+
+		if ($diamonds) { 
+			$diamond_string = '$';
+			foreach my $diamond (1 .. $diamonds) { 
+				$diamond_string .= "{\\star}";
+			}
+			$diamond_string .= '$';
+		}
+
+		&column_break() if $line-- < 1;
+
+		my $diamond_length = $diamonds * .05;
+		my $name_box = 1.9 - $diamond_length;
+
+		print TEXOUT "\\parbox{.1in}{\\strut} ";
+		print TEXOUT "\\parbox{".$name_box."in}{";
+		print TEXOUT "\\truncate{".($name_box - .05)."in}{\\textsb{";
+		print TEXOUT Tab::texify($name)."}}} ";
+		print TEXOUT "\\parbox{".$diamond_length."in}{\\scriptsize\\raggedleft $diamond_string}";
+		print TEXOUT "\\newline\n";
+		return;
+	}
+
+	undef $line; 
+	undef $pagesize;
+	undef $counter;
+
+	print TEXOUT "\\end{minipage}\n";
+
+	$m->comp("/funclib/printout.mas", 
+		tourn     => $tourn,
+		filename  => $filename,
+		tail      => 1,
+	);
+
+
+</%init>
