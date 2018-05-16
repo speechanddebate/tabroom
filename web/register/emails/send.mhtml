@@ -1,13 +1,16 @@
 <%args>
 	$tourn
+	$tourn_settings
 	$person
-	$subject     => undef
-	$content     => undef
-	$email_id    => undef
-	$everybody   => undef
-	$diodirs     => undef
-	$judge_short => undef
-	$tba         => undef
+	$subject       => undef
+	$content       => undef
+	$email_id      => undef
+	$everybody     => undef
+	$diodirs       => undef
+	$judge_short   => undef
+	$money_short   => undef
+	$invoice_short => undef
+	$tba           => undef
 </%args>
 <%init>
 
@@ -48,29 +51,87 @@
 
 	if ($judge_short) { 
 
-		my @categories = $tourn->categories;
-		$sent_to .= " Schools short on judges at ".$tourn->name;
+		if ($tourn_settings->{"nsda_nats"}) { 
 
-   		foreach my $school ($tourn->schools) {
+			$m->comp("/register/reports/nsda_judging.mas", 
+				tourn          => $tourn,
+				tourn_settings => $tourn_settings,
+				return         => 1
+			);
 
-			my $short;
+			Tab::School->set_sql(short_judging => "
 
-			foreach my $category (@categories) { 
+				select distinct school.*
+				from school, school_setting
+					where school.tourn = ? 
+					and school_setting.school = school.id
+					and school_setting.tag = 'judging_unmet'
 
-				my ($uncovered, $overage) = $m->comp(
-					"/funclib/judgemath/uncovered_burden_by_category.mas",
-					category => $category,
-					school   => $school
-				);
+					and exists (
+						select entry.id
+						from entry
+						where entry.school = school.id
+						and entry.active = 1
+					)
+			");
 
-				$short++ if $uncovered;
-				last if $short;
+			push @schools, Tab::School->search_short_judging($tourn->id);
+
+		} else { 
+
+			my @categories = $tourn->categories;
+			$sent_to .= " Schools short on judges at ".$tourn->name;
+
+			foreach my $school ($tourn->schools) {
+
+				my $short;
+
+				foreach my $category (@categories) { 
+
+					my ($uncovered, $overage) = $m->comp(
+						"/funclib/judgemath/uncovered_burden_by_category.mas",
+						category => $category,
+						school   => $school
+					);
+
+					$short++ if $uncovered;
+					last if $short;
+				}
+
+				next unless $short;
+
+				push @schools, $school;
+			}
+		}
+	}
+
+	my %school_balances;
+
+	if ($money_short || $invoice_short) { 
+
+		$sent_to = " Schools with positive balances at ".$tourn->name;
+
+		%school_balances = $m->comp(
+			"/funclib/school_balances.mas", 
+			tourn          => $tourn,
+			tourn_settings => $tourn_settings
+		);
+
+		foreach my $school_id (keys %school_balances) { 
+
+			my $yup;
+
+			if ($money_short && $school_balances{$school_id}{"balance"} > 0) { 
+				$yup++;
 			}
 
-			next unless $short;
+			if ($invoice_short && $school_balances{$school_id}{"uninvoiced"} > 0) { 
+				$yup++;
+			}
 
-			push @schools, $school;
+			push @schools, Tab::School->retrieve($school_id) if $yup;
 		}
+
 	}
 	
 	if ($tba) { 
@@ -122,40 +183,11 @@
 
 		next if $done{$school->id}++;
 
-		push (@recipients, $m->comp(
+		push (@emails, $m->comp(
 			"/funclib/school_contacts.mas",
 				school => $school
 			)
 		);
-
-		push @emails, $school->setting("contact_email") 
-			if $school->setting("contact_email");
-
-		foreach my $follower ($school->followers(type => "contact")) { 
-
-			my $is_follower;
-			my $is_email;
-
-			eval { 
-				$is_follower = $follower->follower;
-			};
-
-			eval { 
-				$is_email = $follower->email;
-			};
-
-
-			if ($is_follower) { 
-
-				push @recipients, $is_follower;
-
-			} elsif ($is_email) { 
-
-				push @emails, $is_email;
-
-			}
-		}
-
 	}
 
 	my $email;
@@ -179,9 +211,10 @@
 		$email = Tab::Email->create({
 			subject => $subject,
 			content => $content,
-			sent_at  => $now,
+			sent_at => $now,
 			tourn   => $tourn->id,
-			sender  => $person->id });
+			sender  => $person->id
+		});
 
 	} 
 
@@ -190,7 +223,6 @@
 		$err .= "I bet you didn't want to do that.  Choose a group of recipients at right to continue";
 		$m->redirect("compose.mhtml?email_id=".$email->id."&err=$err");
 	}
-
 
 	foreach my $director ($m->comp("/funclib/tourn_admins.mas", tourn => $tourn)) {
 		push (@recipients, $director);
@@ -214,7 +246,6 @@
 		next if $nseen{$recipient->email}++;
 		push @emails, $recipient->email unless $recipient->no_email;
 	}
-
 
 	$m->comp( "/funclib/send_email.mas", 
 		from    => $person,
