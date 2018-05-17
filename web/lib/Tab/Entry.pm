@@ -64,10 +64,16 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::EntrySetting->search(
+	my @existings = Tab::EntrySetting->search(
 		entry => $self->id,
 		tag   => $tag
-	)->first;
+	);
+
+	my $existing = shift @existings if @existings;
+
+	foreach (@existings) { 
+		$_->delete();
+	}
 
 	if (defined $value) {
 			

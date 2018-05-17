@@ -29,13 +29,19 @@ sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
 
-	$/ = "";			#Remove all trailing newlines
+	#Remove all trailing newlines
+	$/ = "";		
+
 	chomp $blob;
 
-	my $existing = Tab::EventSetting->search(
+	my @existing = Tab::EventSetting->search(
 		event => $self->id,
 		tag   => $tag
-	)->first;
+	);
+
+	my $existing = shift @existing if @existing;
+
+	foreach (@existing) { $_->delete(); }
 
 	if (defined $value) {
 			
