@@ -23,7 +23,8 @@ use JavaScript::Minifier qw(minify);
 		'cycle.js',
 		'alertify.js',
 		'mousetrap.js',
-		'timepicker.js'
+		'timepicker.js',
+		'stopwatch.js'
 	);
 
 	my $custom_file = "tabroom.js";
