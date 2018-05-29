@@ -135,10 +135,23 @@ sub all_permissions {
 
 			} else { 
 				$perms{"tourn"}{$tourn->id} = $tag;
+				$perms{"undetailed"}{$tourn->id}++;
 				$perms{$tag} = $perm;
 			}
 		}
 
+		if ($self && $self->site_admin) { 
+			$perms{"owner"}++;
+			delete $perms{"entry_only"};
+			delete $perms{"details"};
+		}   
+
+	}
+				
+	if ($perms{"undetailed"}{$tourn->id}) { 
+		# Universal perms override specific ones
+		delete $perms{"details"};
+		delete $perms{"detailed"};
 	}
 
 	Tab::Permission->set_sql( other_perms => "
