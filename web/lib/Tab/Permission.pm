@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Permission->table('permission');
 Tab::Permission->columns(All   => qw/id tag person category tourn 
 										chapter region district circuit 
-										timestamp/);
+										details timestamp/);
 
 Tab::Permission->has_a(circuit => "Tab::Circuit");
 Tab::Permission->has_a(district => "Tab::District");
