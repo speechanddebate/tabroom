@@ -148,7 +148,7 @@ sub all_permissions {
 
 	}
 				
-	if ($perms{"undetailed"}{$tourn->id}) { 
+	if ($tourn && $perms{"undetailed"}{$tourn->id}) { 
 		# Universal perms override specific ones
 		delete $perms{"details"};
 		delete $perms{"detailed"};
