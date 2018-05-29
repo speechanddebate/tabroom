@@ -116,11 +116,27 @@ sub all_permissions {
 			and permission.tourn = ? 
 		");
 
-		my @tourn_perms =  Tab::Permission->search_tourn_perms( $self->id, $tourn->id);
+		my @tourn_perms =  Tab::Permission->search_tourn_perms( 
+			$self->id,
+			$tourn->id
+		);
 
 		foreach my $perm (@tourn_perms) { 
-			$perms{"tourn"}{$perm->tourn->id} = $perm->tag;
-			$perms{$perm->tag} = $perm;
+
+			my $tag = $perm->tag;
+
+			if ($tag eq "detailed") { 
+
+				$perms{$tag} = $perm;
+				$perms{"tourn"}{$tourn->id} = $tag;
+				$perms{"details"} = eval { 
+					return JSON::decode_json($perm->details);
+				};
+
+			} else { 
+				$perms{"tourn"}{$tourn->id} = $tag;
+				$perms{$tag} = $perm;
+			}
 		}
 
 	}
@@ -129,31 +145,40 @@ sub all_permissions {
 		select permission.*
 		from permission
 		where permission.person = ? 
-		and permission.tourn is null
+		and (permission.tourn is null or permission.tourn = 0)
 	");
 
-	my @other_perms =  Tab::Permission->search_other_perms( $self->id );
+	my $dbh = Tab::DBI->db_Main();
 
-	foreach my $perm (@other_perms) { 
+    my $sth = $dbh->prepare("
+		select permission.tag, permission.region, permission.circuit, 
+			permission.chapter, permission.district
+		from permission
+		where permission.person = ? 
+			and (permission.tourn is null or permission.tourn = 0)
+    ");
+    
+    $sth->execute($self->id);
+    
+    while( 
+		my ($tag, $region, $circuit, $chapter, $district)  = $sth->fetchrow_array() 
+	) { 
 
-		if ($perm->tag eq "chair" || $perm->tag eq "member") { 
-
-			$perms{"district"}{$perm->district->id} = $perm->tag;
-
-		} elsif ($perm->tag eq "region") {
-
-			$perms{"region"}{$perm->region->id} = $perm->tag;
-
-		} elsif ($perm->tag eq "circuit") {
-
-			$perms{"circuit"}{$perm->circuit->id} = $perm->tag;
-
-		} elsif ($perm->tag eq "chapter" || $perm->tag eq "prefs") { 
-
-			$perms{"chapter"}{$perm->chapter->id} = $perm->tag;
-
+		if ($district) { 
+			$perms{"district"}{$district} = $tag;
 		}
 
+		if ($region) {
+			$perms{"region"}{$region} = $tag;
+		}
+
+		if ($circuit) {
+			$perms{"circuit"}{$circuit} = $tag;
+		}
+
+		if ($chapter) { 
+			$perms{"chapter"}{$chapter} = $tag;
+		}
 	}
 
 	$perms{"owner"}++ if $self->site_admin;

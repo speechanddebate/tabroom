@@ -2,20 +2,19 @@ package Tab::Region;
 use base 'Tab::DBI';
 Tab::Region->table('region');
 Tab::Region->columns(Primary => qw/id/);
-Tab::Region->columns(Essential => qw/circuit name code timestamp/);
-Tab::Region->columns(Others => qw/quota arch sweeps cooke_pts tourn/);
+Tab::Region->columns(Essential => qw/circuit name code tourn timestamp/);
 Tab::Region->columns(TEMP => qw/registered unregistered/);
 
 Tab::Region->has_a(circuit => 'Tab::Circuit');
 Tab::Region->has_a(tourn => 'Tab::Tourn');
 
-Tab::Region->has_many(schools => 'Tab::School', 'region');
-Tab::Region->has_many(fines => 'Tab::RegionFine', 'region');
+Tab::Region->has_many(schools     => 'Tab::School', 'region');
+Tab::Region->has_many(fines       => 'Tab::RegionFine', 'region');
 Tab::Region->has_many(permissions => 'Tab::Permission', 'region');
-Tab::Region->has_many(admins => [ Tab::Permission => 'person']);
-Tab::Region->has_many(persons => [ Tab::Permission => 'person']);
-Tab::Region->has_many(chapters => [ Tab::ChapterCircuit => 'chapter']);
 
+Tab::Region->has_many(admins   => [ Tab::Permission     => 'person']);
+Tab::Region->has_many(persons  => [ Tab::Permission     => 'person']);
+Tab::Region->has_many(chapters => [ Tab::ChapterCircuit => 'chapter']);
 
 sub setting {
 
@@ -72,6 +71,6 @@ sub setting {
 		return $existing->value;
 
 	}
-
 }
+
 
