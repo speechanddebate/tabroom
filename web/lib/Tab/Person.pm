@@ -145,13 +145,12 @@ sub all_permissions {
 			delete $perms{"entry_only"};
 			delete $perms{"details"};
 		}   
-
-	}
 				
-	if ($tourn && $perms{"undetailed"}{$tourn->id}) { 
-		# Universal perms override specific ones
-		delete $perms{"details"};
-		delete $perms{"detailed"};
+		if ($perms{"undetailed"}{$tourn->id}) { 
+			# Universal perms override specific ones
+			delete $perms{"details"};
+			delete $perms{"detailed"};
+		}
 	}
 
 	Tab::Permission->set_sql( other_perms => "
