@@ -1,5 +1,6 @@
 <%args>
 	$tourn
+	$tourn_settings
 	$session
 	$sort_by => "name"
 </%args>
@@ -13,7 +14,8 @@
     $r->content_type('text/csv');
     $r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
 
-	my $ncfl++ if $tourn->setting("ncfl");
+	my $ncfl++ if $tourn_settings->{"ncfl"};
+	my $nsda++ if $tourn_settings->{"nsda_nats"};
 
 	my @schools = $tourn->schools;
 	@schools = sort { $a->name cmp $b->name } @schools;
@@ -22,32 +24,78 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $category_sth = $dbh->prepare("
-		select school.id, category.abbr, count(entry.id)
-		from school, entry, event, category
-		where category.tourn = ? 
-		and category.id = event.category
-		and event.id = entry.event
-		and entry.school = school.id
-		and entry.active = 1
+		select school.id, category.abbr, count(entry.id), 
+			district.name, district.code, region.code, region.name,
+			disclaimed_at.value_date,
+			contact_name.value,
+			contact_email.value,
+			contact_number.value
+			from (school, entry, event, category)
+		left join region on region.id = school.region
+		left join district on district.id = school.district
+
+		left join school_setting disclaimed_at 
+			on disclaimed_at.school = school.id
+			and disclaimed_at.tag = 'disclaimed_at'
+
+		left join school_setting contact_name 
+			on contact_name.school = school.id
+			and contact_name.tag = 'contact_name'
+
+		left join school_setting contact_email 
+			on contact_email.school = school.id
+			and contact_email.tag = 'contact_name'
+
+		left join school_setting contact_number 
+			on contact_number.school = school.id
+			and contact_number.tag = 'contact_number'
+
+		where category.tourn = ?
+			and category.id      = event.category
+			and event.id         = entry.event
+			and entry.school     = school.id
+			and entry.active     = 1
 		group by school.id, category.id
 		order by school.code
 	");
 
 	$category_sth->execute($tourn->id);
 
-	my %school_category_count;
+	my %schools;
 	my %categories;
 
 	while ( 
-		my ($school_id, $category_abbr, $entry_count) 
+		my (
+			$school_id, $category_abbr, $entry_count,
+			$district_name, $district_code, $region_code, $region_name,
+			$disclaimed_at,
+			$contact_name,
+			$contact_email,
+			$contact_number
+		) 
 		= $category_sth->fetchrow_array()
 	) { 
 
-		$school_category_count{$school_id}{$category_abbr} = $entry_count;
+		$schools{$school_id}{"category_count"}{$category_abbr} = $entry_count;
+		$schools{$school_id}{"district_name"}  = $district_name;
+		$schools{$school_id}{"district_code"}  = $district_code;
+		$schools{$school_id}{"region_name"}    = $region_name;
+		$schools{$school_id}{"region_code"}    = $region_code;
+		$schools{$school_id}{"disclaimed_at"}  = $disclaimed_at;
+		$schools{$school_id}{"contact_number"} = $contact_number;
+		$schools{$school_id}{"contact_name"}   = $contact_name;
+		$schools{$school_id}{"contact_email"}  = $contact_email;
+		$schools{$school_id}{"entries"}++;
 		$categories{$category_abbr}++;
 	}
 
-	$m->print("Name,School,State,Country,Contact,Number,Email");
+	if ($ncfl) { 
+		$m->print("Name,Diocese,DioCode,Contact,Number,Email,Timestamp");
+	} elsif ($nsda) { 
+		$m->print("Name,State,StCode,District,DCode,Contact,Number,Email,Timestamp");
+	} else { 
+		$m->print("Name,Code,State,Country,Contact,Number,Email,Timestamp");
+	}
 
 	foreach my $key (sort {$a cmp $b} keys %categories) { 
 		$m->print(",".$key);
@@ -57,33 +105,49 @@
 
 	foreach my $school (@schools) { 
 
+		my $school_id = $school->id;
+		
+		next unless $schools{$school_id}{"entries"};
+
 		next if ($school->name eq "Unaffiliated");
 
 		$m->print('"'.$school->name.'",');
 
 		if ($ncfl) { 
-			$m->print('"'.$school->region->name.'",' );
-			$m->print('"'.$school->region->code.'",' );
+			$m->print('"'.$schools{$school_id}{"region_name"}.'",');
+			$m->print('"'.$schools{$school_id}{"region_code"}.'",');
+		} elsif ($nsda) { 
+			$m->print('"'.$schools{$school_id}{"region_name"}.'",');
+			$m->print('"'.$schools{$school_id}{"region_code"}.'",');
+			$m->print('"'.$schools{$school_id}{"district_name"}.'",');
+			$m->print('"'.$schools{$school_id}{"district_code"}.'",');
 		} else { 
 			$m->print('"'.$school->code.'",' );
 			$m->print('"'.$school->chapter->state.'",' );
 			$m->print('"'.$school->chapter->country.'",' );
 		}
 
-		$m->print('"'.$school->setting("contact_name").'",');
-		$m->print('"'.Tab::phoneme($school->setting("contact_number")).'",');
-		$m->print('"'.$school->setting("contact_email").'",');
+		$m->print('"'.$schools{$school_id}{"contact_name"}.'",');
+		$m->print('"'.Tab::phoneme($schools{$school_id}{"contact_number"}).'",');
+		$m->print('"'.$schools{$school_id}{"contact_email"}.'",');
+
+		$m->print('"');
+		$m->print( $m->comp("/funclib/showdate.mas", 
+			length => "sortable", 
+			string => $schools{$school_id}{"disclaimed_at"}
+		));
+		$m->print('",');
 
 		foreach my $key (sort {$a cmp $b} keys %categories) { 
-			$m->print($school_category_count{$school->id}{$key});
+			$m->print($schools{$school_id}{"category_count"}{$key});
 			$m->print(",");
 		}
+
 
 		$m->print("\n");
 	}
 
 	$m->abort();
-
 
 </%init>
 
