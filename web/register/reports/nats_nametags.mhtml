@@ -1,0 +1,236 @@
+<%args>
+	$tourn
+	$tourn_settings
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $filename = $tourn->name;
+	$filename =~ s/[\W_]//g;
+	$filename .= "-NameBadges.csv";
+
+	my $dbh = Tab::DBI->db_Main();
+
+    my $sth = $dbh->prepare("
+		select judge.id, judge.first, judge.last,
+			diamonds.value, ualt_id.value,
+			school.chapter, school.name, school.state, 
+			judge_school.name, judge_school.state
+		from (judge, category)
+
+		left join judge_setting ualt_id 
+			on ualt_id.judge = judge.id
+			and ualt_id.tag = 'ualt_id'
+
+		left join judge_setting diamonds 
+			on diamonds.judge = judge.id
+			and diamonds.tag = 'diamonds'
+
+		left join judge_setting original_school 
+			on original_school.judge = judge.id
+			and original_school.tag = 'original_school'
+	
+		left join school judge_school
+			on judge_school.id = original_school.value
+
+		left join school 
+			on school.id = judge.school
+
+		where judge.category = category.id
+		and category.tourn = ? 
+    ");
+
+    $sth->execute($tourn->id);
+
+    my %people;
+	my %keys;
+
+    while (my (
+		$judge_id, $judge_first, $judge_last, $diamonds, $ualt_id,
+			$school_chapter, $school_name, $school_state,
+			$judge_school_name, $judge_school_state
+    )  = $sth->fetchrow_array() ) { 
+
+		my $id;
+
+		if ($ualt_id) { 
+			$id = $ualt_id;
+		} else { 
+			$id = "j".$judge_id;
+		}
+
+		$people{$id}{"judge"}++;
+
+		my $key = $judge_first."-".$judge_last."-".$school_name;
+		$keys{$key} = $id;
+
+		$people{$id}{"first"} = $judge_first;
+		$people{$id}{"last"} = $judge_last;
+		$people{$id}{"diamonds"} = $diamonds if $diamonds > 0;
+		$people{$id}{"ualt_id"} = $ualt_id;
+
+		if ($school_chapter) { 
+			$people{$id}{"school"} = $school_name;
+			$people{$id}{"state"} = $school_state;
+		} else { 
+			$people{$id}{"school"} = $judge_school_name;
+			$people{$id}{"state"} = $judge_school_state;
+		}
+
+	}
+
+    my $coach_sth = $dbh->prepare("
+		select entry.id, 
+			coach.ufname, coach.ulname, coach.ualt_id,
+			max(degree.diamonds),
+			school.name, school.state
+
+		from (entry, school, entry_setting coach_points, 
+			points.NEW_USERS coach,
+			points.degree_levels degree, 
+			points.NEW_USERS_TO_DEGREES nutd
+		)
+
+		where school.tourn = ? 
+			and school.id = entry.school
+			and entry.active = 1
+			and coach_points.entry = entry.id
+			and coach_points.tag = 'coach_points'
+			and coach_points.value = coach.ualt_id
+			and nutd.ualt_id = coach.ualt_id
+            and nutd.degree_id = degree.degree_id
+		group by coach.ualt_id
+    ");
+
+    $coach_sth->execute($tourn->id);
+
+    while (my (
+			$entry_id,
+			$coach_first, $coach_last, $ualt_id,
+			$diamonds,
+			$school_name, $school_state
+		)  = $coach_sth->fetchrow_array() 
+	) { 
+
+		my $id;
+
+		if ($ualt_id) { 
+			$id = $ualt_id;
+		} else { 
+			$id = "e".$entry_id;
+		}
+
+		my $key = $coach_first."-".$coach_last."-".$school_name;
+
+		if ($people{$id}) { 
+			$people{$id}{"coach"}++;
+			next;
+		} elsif ( $keys{$key}) { 
+			my $id = $keys{$key};
+			$people{$id}{"diamonds"} = $diamonds if $diamonds > 0;
+			$people{$id}{"coach"}++;
+			next;
+		}
+
+		$keys{$key} = $id;
+		$people{$id}{"coach"}++;
+		$people{$id}{"first"} = $coach_first;
+		$people{$id}{"last"} = $coach_last;
+		$people{$id}{"diamonds"} = $diamonds if $diamonds > 0;
+		$people{$id}{"ualt_id"} = $ualt_id;
+		$people{$id}{"school"} = $school_name;
+		$people{$id}{"state"} = $school_state;
+	}
+
+    my $other_coach_sth = $dbh->prepare("
+		select school.id, school.name, school.state,  coaches.value, chapter.nsda
+		from school, school_setting coaches, chapter
+		where school.tourn = ?
+		and school.id      = coaches.school
+		and coaches.tag    = 'tbook_coaches'
+		and school.chapter = chapter.id
+    ");
+
+    $other_coach_sth->execute($tourn->id);
+
+    while (my (
+		$school_id, $school_name, $school_state, $coaches, $nsda_id,
+		)  = $other_coach_sth->fetchrow_array() 
+	) { 
+
+		my @coaches = split(",", $coaches);
+
+		my $counter;
+
+		foreach my $coach (@coaches) { 
+	
+			$counter++;
+
+			my $id = $school_id."-".$counter;
+			my @names = split(/\ /, $coach);
+			my $first = shift @names if @names;
+			my $last  = pop @names if @names;
+
+			my $person = $m->comp(
+				"/funclib/nsda_person_search.mas",
+				first  => $first,
+				last   => $last,
+				school => $nsda_id
+			);
+
+		
+			my $key = $first."-".$last."-".$school_name;
+
+			if ($people{$id}) { 
+				$people{$id}{"coach"}++;
+				next;
+			} elsif ($keys{$key}) { 
+				my $id = $keys{$key};
+				$people{$id}{"diamonds"} = $person->diamonds if $person && $person->diamonds > 0;
+				$people{$id}{"coach"}++;
+				next;
+			}
+
+			$keys{$key} = $id;
+			$people{$id}{"coach"}++;
+			$people{$id}{"first"}  = $first;
+			$people{$id}{"last"}   = $last;
+			$people{$id}{"school"} = $school_name;
+			$people{$id}{"state"}  = $school_state;
+
+			if ($person) { 
+				$people{$id}{"diamonds"} = $person->diamonds if $person->diamonds > 0;
+				$people{$id}{"ualt_id"} = $person->ualt_id;
+			}
+
+		}
+	}
+
+	$m->clear_buffer();
+	$r->content_type('application/csv');
+	$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+
+	$m->print("First,Last,School,State,Diamonds,Judge,Coach\n");
+
+	foreach my $id (sort {$people{$a}{"school"} cmp $people{$b}{"school"}} keys %people) { 
+
+		foreach my $field ("first", "last", "school", "state", "diamonds") { 
+			$m->print('"');
+			$m->print($people{$id}{$field});
+			$m->print('",');
+		}
+
+		foreach my $field ("judge", "coach") { 
+			$m->print('"');
+			$m->print("Y") if $people{$id}{$field};
+			$m->print('",');
+		}
+
+		$m->print("\n");
+	}
+
+	$m->abort();
+
+</%init>
