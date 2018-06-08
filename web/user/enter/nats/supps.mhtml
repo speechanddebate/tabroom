@@ -1,0 +1,303 @@
+<%args>
+	$person
+	$school
+	$tourn
+	$tourn_settings
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	my %tourn_settings = $tourn->all_settings();
+
+	my $now = DateTime->now();
+	$now->set_time_zone($tz);
+	use Data::Dumper;
+
+	Tab::Entry->columns(TEMP => "reregistered_by");
+	Tab::Entry->columns(TEMP => "reregistered_at");
+	Tab::Entry->columns(TEMP => "rereg_start");
+	Tab::Entry->columns(TEMP => "rereg_end");
+	Tab::Entry->columns(TEMP => "eventabbr");
+	Tab::Entry->columns(TEMP => "studentid");
+
+	Tab::Entry->set_sql( supps => "
+		select entry.*, 
+			event.abbr as eventabbr,
+			reregistered.value as reregistered_by,
+			reregistered.timestamp as reregistered_at,
+			rereg_start.value_date as rereg_start,
+			rereg_end.value_date as rereg_end,
+			entry_student.student as studentid
+		from (entry, event, entry_student)
+	
+		left join entry_setting reregistered
+			on reregistered.entry = entry.id
+			and reregistered.tag = 'reregistered'
+
+		left join event_setting rereg_start
+			on rereg_start.event = event.id
+			and rereg_start.tag = 'rereg_start'
+
+		left join event_setting rereg_end
+			on rereg_end.event = event.id
+			and rereg_end.tag = 'rereg_end'
+
+		where entry.school = ? 
+			and entry.unconfirmed = 0 
+			and entry.event = event.id
+			and entry.id = entry_student.entry
+			and (
+				exists (
+					select supp.id
+					from event_setting supp
+					where supp.event = event.id
+					and supp.tag = 'supp'
+				) or exists ( 
+					select conn.id
+					from event_setting conn
+					where conn.event = event.id
+					and conn.tag = 'conn'
+				)
+			)
+	");
+
+	my @entries = Tab::Entry->search_supps($school->id);
+
+	my %deadlines; 
+	my %entry_ok;
+
+	Tab::Student->columns(TEMP => "eventabbr");
+
+	Tab::Student->set_sql( unclear_supps => "
+		select student.*, event.abbr as eventabbr
+		from student, entry_student, entry, event, ballot, panel, round
+		where student.chapter = ?
+			and student.id = entry_student.student
+			and entry_student.entry = entry.id
+			and entry.unconfirmed = 0 
+			and entry.event = event.id
+			and event.tourn = ? 
+
+			and not exists ( 
+				select supp.id
+				from event_setting supp
+				where supp.event = event.id
+				and supp.tag = 'supp'
+			)
+
+			and not exists ( 
+				select conn.id
+				from event_setting conn
+				where conn.event = event.id
+				and conn.tag = 'conn'
+			)
+
+			and ballot.entry = entry.id
+			and ballot.panel = panel.id
+			and panel.round  = round.id
+			and round.name in ( 
+				select max(last.name)
+				from round last
+				where last.event = round.event
+				and  (
+					last.published > 0 
+					or exists (
+						select round_setting.id
+						from round_setting
+						where round_setting.round = last.id
+						and round_setting.tag = 'publish_entry_list'
+					)
+				)
+			)
+	");
+
+	my @students = Tab::Student->search_unclear_supps($school->chapter, $tourn->id);
+	my %unclear_students = map {$_->id => $_} @students;
+
+</%init> 
+
+	<div class="main">
+
+		<& "../tabbar.mas", 
+			school         => $school,
+			tourn          => $tourn,
+			tourn_settings => $tourn_settings,
+			whoami         => "supps"
+		&>
+
+		<span class="threequarters">
+			<h4>Supplemental &amp; Consolation Entries</h4>
+		</span>
+
+		<span 
+			id="supps_buttonarea"
+			class="quarter rightalign nospace"
+		></span>
+
+		<& "/funclib/tablesorter.mas", table => "supps" &>
+
+		<table id="supps">
+
+			<thead>
+			<tr class="yellowrow smallish">
+
+				<th>
+					Name
+				</th>
+
+				<th>
+					Code
+				</th>
+
+				<th>
+					Event
+				</th>
+
+				<th>
+					Deadline
+				</th>
+
+				<th>
+					Status
+				</th>
+
+				<th>
+				</th>
+			</tr>
+
+			</thead>
+
+			<tbody>
+
+<%perl>
+				foreach my $entry (@entries) { 
+
+					unless ($deadlines{$entry->eventabbr}) { 
+
+						$deadlines{$entry->eventabbr}{"start"} = eval { 
+							my $dt = DateTime::Format::MySQL->parse_datetime($entry->rereg_start);
+							$dt->set_time_zone("UTC");
+							$dt->set_time_zone($tz);
+							return $dt;
+						};
+
+						$deadlines{$entry->eventabbr}{"end"} = eval { 
+							my $dt = DateTime::Format::MySQL->parse_datetime($entry->rereg_end);
+							$dt->set_time_zone("UTC");
+							$dt->set_time_zone($tz);
+							return $dt;
+						};
+
+					}
+
+					next unless $deadlines{$entry->eventabbr} 
+						&& $deadlines{$entry->eventabbr}{"start"};
+
+					my $registered_at = eval { 
+						my $dt = DateTime::Format::MySQL->parse_datetime($entry->reregistered_at);
+						$dt->set_time_zone($tz);
+						return $dt;
+					};
+
+					my $registered_by = eval { 
+						return Tab::Person->retrieve($entry->reregistered_by);
+					};
+
+</%perl>
+
+					<tr>
+						<td>
+							<% $entry->name %>
+						</td>
+
+						<td>
+							<% $entry->code %>
+						</td>
+
+						<td>
+							<% $entry->eventabbr %>
+						</td>
+
+						<td class="centeralign">
+%							if ($deadlines{$entry->eventabbr}{"start"} > $now) { 
+								<span class="greentext nospace full">
+									Opens <& "/funclib/showdate.mas", 
+									dt => $deadlines{$entry->eventabbr}{"start"} &>
+								</span>
+%							} else { 
+								<span class="redtext nospace full">
+									Due: <& "/funclib/showdate.mas", 
+										dt => $deadlines{$entry->eventabbr}{"end"}
+									&>
+									at <& "/funclib/showtime.mas", 
+										dt      => $deadlines{$entry->eventabbr}{"end"},
+										show_tz => 1,
+										tz      => $tz
+									&>
+								</span>
+%							} 
+						</td>
+
+						<td id="<% $entry->id %>" class='centeralign'>
+%							if ($registered_at) { 
+								Confirmed on <& "/funclib/showdate.mas", dt => $registered_at &>
+								at <& "/funclib/showtime.mas", dt => $registered_at &>
+								<% $registered_by ? "<br />by ".$registered_by->email : "" %>
+%							} else { 
+								Not Confirmed
+%							}
+						</td>
+
+						<td class="centeralign">
+<%perl>
+							if ($deadlines{$entry->eventabbr}{"start"} < $now 
+								&& $deadlines{$entry->eventabbr}{"end"} > $now
+							) { 
+
+								if ($unclear_students{$entry->studentid}) { 
+									my $title = "Students may not enter Supps &amp; Cons before they are eliminated in Main events";
+   									$m->print("<div class='padvert orangetext semibold yellowhover' title='".$title."'>");
+   									$m->print("Active in ".$unclear_students{$entry->studentid}->eventabbr);
+   									$m->print("</div>");
+								} else { 
+</%perl>
+									<label class="switch marless">
+										<input 
+											type         = "checkbox"
+											value        = "1"
+											id           = "<% $entry->id %>"
+											setting_name = "reregistered"
+											target_id    = "<% $entry->id %>"
+											onChange     = "postSwitch(this, '/register/entry/entry_switch.mhtml');"
+											<% $entry->setting("reregistered") ? 'checked="checked"' : "" %>
+										>
+										<div class="slider"></div>
+									</label>
+<%perl>
+								}
+							} else { 
+								$m->print("Registration closed");
+							}
+</%perl>
+						</td>
+
+					</tr>
+%				}
+
+			</tbody>
+
+		</table>
+
+
+	</div>
+
+	<div class="menu">
+
+		<div class="sidenote">
+		
+			<h4>Supps &amp; Conns</h4>
+
+		</div>
+
+	</div>
+
