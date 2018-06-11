@@ -1,0 +1,525 @@
+<%args>
+	$person
+	$tourn
+	$tourn_settings
+	$perms
+	$session
+	$event_id => undef
+	$round_id => undef
+	$judge_id => undef
+</%args>
+<%init>
+
+    my ($eventref, $catref) = $m->comp(
+        "/funclib/allowed_events.mas", 
+        tourn => $tourn,
+        perms => $perms,
+        type  => "admin"
+    );  
+
+    #EVENTS
+    my @events = @{$eventref};
+    my $event = Tab::Event->retrieve($event_id) if $event_id;
+	$event = $session->event unless $event;
+
+    my %event_by_id = map {$_->id => $_} @events if @events;
+
+    undef $event unless (not defined $event) ||$event_by_id{$event->id};
+
+    if (@events) { 
+        if (scalar @events == 1) { 
+            $event = $events[0];
+        }
+        unless ($perms->{'owner'} || $perms->{"full_admin"} || $event) { 
+            $event = $events[0];
+        }
+    }
+
+	my @rounds;
+	my $round;
+
+	$round = Tab::Round->retrieve($round_id) if $round_id;
+
+	my %event_settings;
+
+	if ($event) { 
+		@rounds = $event->rounds;
+		my $current_round = $m->comp(
+			"/funclib/event_current_round.mas", 
+			event => $event
+		);
+		$round = $current_round unless $round;
+		%event_settings = $event->all_settings();
+	}
+
+	my $aff_string = $event_settings{"aff_string"};
+	my $neg_string = $event_settings{"neg_string"};
+
+	$aff_string = "Aff" unless $aff_string;
+	$neg_string = "Neg" unless $neg_string;
+
+</%init>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<form action="combined.mhtml" method="post">
+
+			<h4>Events</h4>
+
+			<div class="full row centeralign">
+				<select 
+					name     = "event_id"
+					class    = "fixedmed"
+					onChange = "this.form.submit();"
+				>
+
+					<option value=""></option>
+%					foreach my $oevent (@events) { 
+						<option 
+							value="<% $oevent->id %>"
+							<% $event == $oevent ? "selected" : "" %>
+						><% $oevent->abbr%> <% $oevent->name %></option>
+%					}
+				</select>
+			</div>
+
+			<h4>Rounds</h4>
+
+			<div class="full row centeralign">
+				<select 
+					name     = "round_id"
+					class    = "fixedmed"
+					onChange = "this.form.submit();"
+				>
+					<option value=""></option>
+%					foreach my $oround (@rounds) { 
+						<option 
+							value = "<% $oround->id %>"
+							<% $round == $oround ? "selected" : "" %>
+						><% $oround->name %> <% $oround->realname %></option>
+%					}
+				</select>
+			</div>
+
+		</div>
+
+<%perl>
+
+		my $no_codes;
+		my %judges; 
+
+		if ($round) { 
+
+			$no_codes = $event->category->setting("no_codes");
+
+			my $dbh = Tab::DBI->db_Main();
+
+			my $sth = $dbh->prepare("
+				select judge.id, judge.first, judge.last, judge.code, panel.id,
+					count(unentered.id), count(unaudited.id), count(audited.id)
+
+				from (judge, ballot, panel)
+
+					left join ballot unentered 
+						on unentered.id = ballot.id
+						and not exists ( 
+							select score.id
+							from score
+							where score.ballot = unentered.id
+							and score.tag in ('ballot', 'rank', 'points', 'subpoints')
+						)
+
+					left join ballot unaudited 
+						on unaudited.id = ballot.id
+						and (unaudited.audit = 0
+							or unaudited.audit is null)
+						and exists ( 
+							select score.id
+							from score
+							where score.ballot = unaudited.id
+							and score.tag in ('ballot', 'rank', 'points', 'subpoints')
+						)
+
+					left join ballot audited 
+						on audited.id = ballot.id
+						and audited.audit > 0
+
+					where panel.round = ? 
+					and panel.id = ballot.panel
+					and ballot.judge = judge.id
+
+				group by judge.id
+
+			");
+
+			$sth->execute($round->id);
+
+			my $undone_count;
+			my $done_count;
+
+			my %already;
+
+			while (
+				my ($judge_id, $judge_first, $judge_last, $judge_code, $panel_id,
+					$unentered, $unaudited, $done ) = $sth->fetchrow_array()
+			) { 
+
+				$judges{$judge_id}{"name"}      = $judge_last." ".$judge_first;
+				$judges{$judge_id}{"code"}      = $judge_code;
+				$judges{$judge_id}{"sortcode"}  = $judge_code;
+				$judges{$judge_id}{"unentered"} = $unentered;
+				$judges{$judge_id}{"unaudited"} = $unaudited;
+				$judges{$judge_id}{"done"}      = $done;
+
+				$judges{$judge_id}{"sortcode"} =~ s/[\D_]//g;
+
+				unless ($already{$judge_id}++) { 
+
+					if ($unentered > 0) { 
+						$undone_count++;
+					} elsif ($unaudited > 0) { 
+						$undone_count++;
+					} else { 
+						$done_count++;
+					}
+				}
+			}
+
+			my @judge_ids = keys %judges; 
+
+			if ($no_codes) { 
+				@judge_ids = sort {$judges{$a}{"name"} cmp $judges{$b}{"name"}} @judge_ids;
+			} else {
+				@judge_ids = sort {$judges{$a}{"sortcode"} <=> $judges{$b}{"sortcode"}} @judge_ids;
+			}
+
+
+			my @undone;
+			my @done;
+
+			foreach my $judge_id (@judge_ids) { 
+				if ($judges{$judge_id}{"unentered"} || $judges{$judge_id}{"unaudited"}) { 
+					push @undone, $judge_id;
+				} else { 
+					push @done, $judge_id;
+				}
+			}
+</%perl>
+
+			<div class="sidenote">
+
+				<h4>Judges</h4>
+
+                <ul 
+					id    = "tabnav"
+					class = "marno martop centeralign"
+				>
+
+                    <li id="pending" class="tab selected" >
+                        <a onClick="judgeSwitch('pending');"><% $undone_count %> Undone</a>
+                    </li>
+
+                    <li id="done" class="tab">
+                        <a onClick="judgeSwitch('done');" ><% $done_count %> Done</a>
+                    </li>
+
+                    <li id="info" class="tab">
+                        <a onClick="judgeSwitch('info');" >Info</a>
+                    </li>
+
+				</ul>
+
+				<div class="navbox pending full marno">
+
+
+%					my $break = POSIX::floor((scalar @undone) / 3);
+%					my $counter;
+
+					<span class="threetenths top">
+
+%					foreach my $undone_id (@undone) { 
+
+%						if ($counter++ >= $break) { 
+							</span>
+							<span class="threetenths top marleft">
+%							undef $counter;
+%						}
+
+						<a class="full padless marno ltborder bigger semibold judgebutton nowrap yellowhover
+							<% $judge_id == $undone_id ? "invert" : "" %>
+							<% $judges{$undone_id}{"unentered"} ? "bluetext" : "orangetext" %>
+							<% $no_codes ? "" : "centeralign" %>"
+							href="combined.mhtml?event_id=<% $event %>&round_id=<% $round %>&judge_id=<% $undone_id %>"
+							title="<% $judges{$undone_id}{"name"} %>"
+						><% $no_codes ? $judges{$undone_id}{"name"} : $judges{$undone_id}{"code"} %> <% $undone_id %></a>
+%					}
+
+					</span>
+
+				</div>
+
+				<div class="navbox done full marno hidden">
+
+%					$break = POSIX::floor((scalar @done) / 3);
+%					undef $counter;
+
+					<span class="threetenths nospace top">
+
+%					foreach my $done_id (@done) { 
+
+%						if ($counter++ >= $break) { 
+							</span>
+							<span class="threetenths nospace top">
+%							undef $counter;
+%						}
+
+						<a class="full padless marno ltborder bigger semibold judgebutton nowrap yellowhover redtext
+							<% $judge_id == $done_id ? "buttonwhite bluetext" : "" %>
+							<% $no_codes ? "" : "centeralign" %>"
+							href="combined.mhtml?event_id=<% $event %>&round_id=<% $round %>&judge_id=<% $done_id %>"
+							title="<% $judges{$done_id}{"name"} %>"
+						><% $no_codes ? $judges{$done_id}{"name"} : $judges{$done_id}{"code"} %> <% $done_id %></a>
+%					}
+
+					</span>
+				</div>
+
+				<div class="navbox info full marno hidden">
+					Info Sheets
+				</div>
+
+			</div>
+
+			<script>
+
+				function judgeSwitch(boxClass) { 
+					
+					$(".tab").removeClass("selected");
+					$(".navbox").addClass("hidden");
+
+					$("."+boxClass).removeClass('hidden');
+					$("#"+boxClass).addClass('selected');
+				}
+
+			</script>
+
+%		} 
+
+	</div>
+
+<%perl>
+
+	if ($judge_id) { 
+
+		my $judge = Tab::Judge->retrieve($judge_id);
+
+		my @panels = $m->comp(
+			"/funclib/judge_panels.mas", 
+			judge => $judge,
+			round => $round
+		);
+
+</%perl>
+
+		<div class="main">
+		
+			<span class="twothirds nowrap">
+				<h4 class="nospace">
+					<% $no_codes ? "" : $judges{$judge}{"code"} %>
+					<% $judges{$judge}{"name"} %>
+				</h4>
+			</span>
+
+			<span class="third rightalign">
+				<a class="buttonwhite bluetext invert marno"
+					href="/panel/schemat/show.mhtml?round_id=<% $round->id %>"
+				><% $event->abbr %> <% $round->realname %></a>
+			</span>
+
+<%perl>
+			foreach my $panel (@panels) { 
+
+				my @ballots = $panel->ballots( judge => $judge );
+
+				my $undone;
+				my $scored;
+				my $audited;
+
+				my $entered;
+
+				foreach my $ballot (@ballots) { 
+
+					if ($ballot->audit) { 
+						$audited++;
+					} elsif ($ballot->entered_by) { 
+						$scored++;
+					} else { 
+						$undone++;
+					}	
+
+					if ($ballot->entered_by) { 
+						$entered = "Entry by ".$ballot->entered_by->first;
+						$entered .= " ".$ballot->entered_by->last 
+					}
+				}
+
+</%perl>
+				<div 
+					id    = "<% $panel->id %>"
+					class = "martopmuchmore padmore ltborder"
+				>
+
+					<span 
+						id    = "entered_<% $panel->id %>"
+						class = "third nospace"
+					>
+						<% $entered %>
+					</span>
+
+					<span class="third centeralign">
+						<h5 class="normalweight nospace">Flight <% $panel->flight %></h5>
+					</span>
+<%perl>
+
+					my $class;
+					my $text; 
+
+					if ($undone) { 
+						$class = "graytext";
+						$text  = "NOT ENTERED";
+					} elsif ($scored) { 
+						$class = "orangetext";
+						$text  = "ENTERED ONCE";
+					} elsif ($audited) { 
+						$class = "greentext";
+						$text  = "CONFIRMED";
+					}
+</%perl>
+					<span 
+						id    = "status_<% $panel->id %>"
+						class = "third nospace rightalign bigger nospace semibold <% $class %>"
+					>
+						<% $text %>
+					</span>
+
+%					foreach my $ballot (@ballots) { 
+
+						<span class = "half centeralign">
+
+							<span 
+								id        = "<% $ballot->id %>"
+								ballot_id = "<% $ballot->id %>"
+								audit     = "<% $scored || $audited ? 1 : 0 %>"
+								class     = "half centeralign border hover ballot_<% $panel->id %>"
+								onClick   = "markWinner(this, 'combined_winner.mhtml');"
+							>
+								<h5 class="centeralign martop nospace">
+									<% $ballot->side == 1 ? $aff_string : "" %>
+									<% $ballot->side == 2 ? $neg_string : "" %>
+								</h5>
+
+								<h5>
+									<% $ballot->entry->code %>
+								</h5>
+							</span>
+
+						</span>
+%					}
+
+				</div>
+%			}
+
+		</div>
+
+%	} else { 
+
+		<div class="main">
+
+			<h5 class="martopmuchmore centearlign">
+				Choose a judge at right to start
+			</h5>
+		</div>
+
+%	}
+
+	<script> 
+
+		function markWinner(ballotObject, replyUrl) { 
+
+			var ballotId = $(ballotObject).attr("ballot_id") || 0;
+			var auditMode = $(ballotObject).attr("audit") || 0;
+
+			$.ajax({ 
+				type : 'POST',
+				url  : replyUrl,
+				data : {
+					ballot_id : ballotId,
+					audit     : auditMode
+				},
+				success : function(response) {
+
+					if (response.error) { 
+
+						alertify.error(response.error);
+						
+					} else if (response.message || response.warning) { 
+
+						alertify.dismissAll();
+					
+						if (response.warning) { 
+							alertify.warning(response.warning);
+						}
+
+						alertify.notify(response.message, "custom");
+
+						if (response.replace) { 
+
+							response.replace.forEach( function(item) { 
+								if (item.destroy) { 
+									$("#"+item.id).remove();
+								} else if (item.content) { 
+									$("#"+item.id).html(item.content);
+								}
+
+								if (item.removeClass) { 
+									item.removeClass.forEach( function(cssClass) { 
+										if (item.id) { 
+											$("#"+item.id).removeClass(cssClass);
+										} 
+										if (item.targetClass) { 
+											$("."+item.targetClass).removeClass(cssClass);
+										}
+									});
+								}
+
+								if (item.addClass) { 
+									item.addClass.forEach( function(cssClass) { 
+										if (item.id) { 
+											$("#"+item.id).addClass(cssClass);
+										} 
+										if (item.targetClass) { 
+											$("."+item.targetClass).addClass(cssClass);
+										}
+									});
+								}
+							});
+
+						}
+
+						if (response.deAudit) { 
+							$(ballotObject).attr("audit", 0);
+						}
+
+					} else { 
+						console.log(response);
+						alertify.warning("An error condition was tripped.");
+					}
+
+					return;
+				}
+			});
+		}
+
+	</script>
