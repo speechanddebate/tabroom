@@ -1,0 +1,255 @@
+<%args>
+	$tourn
+	$tourn_settings
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my %category_settings;
+	my %event_settings;
+
+	my @categories = $tourn->categories();
+	my @events = $tourn->events();
+	my @event_ids; 
+	foreach my $ev (@events) { 
+		push @event_ids, $ev->id;
+	}
+
+	foreach my $category (@categories) { 
+		%{$category_settings{$category->id}} = $category->all_settings();
+		$category_settings{$category->id}{"shifts"} = $category->shifts(type => "strike");
+	}
+
+	foreach my $event (@events) { 
+		%{$event_settings{$event->id}} = $event->all_settings();
+		$event_settings{$event->id}{"fee"} = $event->fee;
+	}
+
+	my @entries = $m->comp(
+		"/funclib/tourn_entries.mas", 
+			tourn => $tourn,
+			all   => 1
+	);
+
+	my %schools; 
+
+	foreach my $entry (@entries) { 
+		push @{$schools{"entries"}{$entry->schoolid}}, $entry;
+	}
+
+	my @judges = $m->comp(
+		"/funclib/tourn_judges.mas", 
+			tourn => $tourn,
+			all   => 1
+	);
+
+	foreach my $judge (@judges) { 
+		push @{$schools{"judges"}{$judge->schoolid}{$judge->categoryid}}, $judge;
+		push @{$schools{"judges"}{$judge->schoolid}{"all"}}, $judge;
+	}
+
+	my @fines = $m->comp(
+		"/funclib/tourn_fines.mas", 
+			tourn => $tourn,
+			all   => 1
+	);
+
+	foreach my $fine (@fines) { 
+		push @{$schools{"fines"}{$fine->schoolid}}, $fine;
+	}
+
+	my @concessions = $tourn->concessions();
+
+	if (@concessions) { 
+
+		%{$schools{"orders"}} = $m->comp(
+			"/funclib/tourn_purchases.mas",
+			tourn => $tourn
+		);
+	}
+
+	my @hotels = $tourn->hotels;
+
+	if (@hotels) { 
+		%{$tourn_settings->{$tourn->id}{"hotels"}} =
+			map {$_->id => $_} @hotels;
+
+		%{$schools{"hotels"}} = $m->comp(
+			"/funclib/school_settings.mas", 
+			tourn => $tourn,
+			tag   => "hotel"
+		);
+
+	}
+
+	my @hires = $m->comp(
+		"/funclib/tourn_hires.mas",
+		tourn => $tourn 
+	);
+
+	foreach my $hire (@hires) { 
+		push @{$schools{"hires"}{$hire->schoolid}{$hire->categoryid}}, $hire;
+		push @{$schools{"hires"}{$hire->schoolid}{"all"}}, $hire;
+	}
+
+	my $worlds;
+	my $worlds_id;
+	my %invoiced; 
+
+	Tab::EventSetting->set_sql( adjustments => "
+        select adjustment.id
+        from event, event_setting adjustment
+        where event.tourn = ? 
+        and event.id = adjustment.event 
+        and adjustment.tag = 'adjust_judges_fees'
+	");
+
+	$tourn_settings->{"adjustments"}++ if Tab::EventSetting->search_adjustments($tourn->id);
+
+	if ($tourn_settings->{"nsda_nats"}) { 
+
+		my @worlds_events = $m->comp(
+			"/funclib/nationals_events.mas",
+			tourn => $tourn,
+			type  => "usa_wsdc"
+		);
+
+		if (@worlds_events) { 
+
+			$worlds = shift @worlds_events;
+			$worlds_id = $worlds->id;
+
+			my $worlds_sth = $dbh->prepare("
+				select student.id, school.id as schoolid
+				from student, entry_student, entry, chapter, school, event, category
+				where entry.event = ? 
+					and entry.id = entry_student.entry
+					and entry_student.student = student.id
+					and student.chapter = chapter.id
+					and chapter.id = school.chapter
+					and school.tourn = category.tourn
+					and category.id = event.category
+					and event.id = entry.event
+			");
+
+			$worlds_sth->execute($worlds_id);
+
+			while (
+				my ($student_id, $school_id) = $worlds_sth->fetchrow_array()
+			) { 
+				push @{$schools{"worlds"}{$school_id}}, $student_id; 
+			}
+		}
+
+		my $invoiced_sth = $dbh->prepare("
+			select school.id, invoice.total
+				from school, invoice
+				where invoice.school = school.id
+				and school.tourn = ? 
+		");
+
+		$invoiced_sth->execute($tourn->id);
+
+		while (
+			my ($school_id, $amount) = $invoiced_sth->fetchrow_array()
+		) { 
+
+			$invoiced{$school_id} += $amount;
+		}
+	}
+
+	my %school_by_id = map {$_->id => $_} $tourn->schools();
+
+	my %school_data;
+
+    my $school_sth = $dbh->prepare('
+        select school.id, school.name, school.state, chapter.nsda
+        from school
+		left join chapter on school.chapter = chapter.id
+        where school.tourn = ? 
+		and school.chapter > 0
+    ');
+
+    $school_sth->execute($tourn->id);
+
+    while (
+        my ($school_id, $school_name, $school_state, $chapter_nsda) 
+            = $school_sth->fetchrow_array()
+    ) { 
+
+        $school_data{$school_id}{"name"} = $school_name;
+        $school_data{$school_id}{"nsda"} = $chapter_nsda;
+        $school_data{$school_id}{"state"} = $school_state;
+        $school_data{$school_id}{"short_name"} = Tab::short_name($school_name);
+    }   
+
+	Tab::SchoolSetting->set_sql( rm_balance => "
+		delete from school_setting 
+		where school = ?
+		and tag = 'balance'
+	");
+
+	SCHOOL:
+	foreach my $school_id (
+		sort {$school_data{$a}{"short_name"} cmp $school_data{$b}{"short_name"}}
+		keys %school_data
+	) {
+
+		my ($balance, $feline_ref, $total_ref) = 
+			$m->comp("/funclib/school_fees.mas", 
+				school            => $school_by_id{$school_id},
+				tourn             => $tourn,
+				tourn_settings    => $tourn_settings,
+				categories        => \@categories,
+				category_settings => \%category_settings,
+				events            => \@event_ids,
+				concession_array  => \@concessions,
+				event_settings    => \%event_settings,
+				all               => 1,
+				bulk              => 1,
+				entries           => $schools{"entries"}{$school_id},
+				schools           => \%schools,
+				worlds_event      => $worlds_id
+			);
+
+		if ($balance == 0 && (not defined $ARGS{"all"})) { 
+			delete $school_data{$school_id};
+			next SCHOOL;
+		}
+		
+		$school_data{$school_id}{"total_entries"} += scalar @{$schools{"entries"}{$school_id}} 
+			if $schools{"entries"}{$school_id};
+		
+		$school_data{$school_id}{"total_entries"} += scalar @{$schools{"worlds"}{$school_id}} 
+			if $schools{"worlds"}{$school_id};
+		
+		$school_data{$school_id}{"total_fees"} = sprintf("%.2f", $total_ref->{"total_fees"});
+		$school_data{$school_id}{"payments"} = sprintf("%.2f", $total_ref->{"payments"});
+		$school_data{$school_id}{"balance"} = sprintf("%.2f", $balance);
+
+		if ($tourn_settings->{"nsda_nats"}) { 
+			$school_data{$school_id}{"invoiced"} = sprintf ("%.2f", $invoiced{$school_id});
+			$school_data{$school_id}{"uninvoiced"} = 
+				$school_data{$school_id}{"total_fees"} - $school_data{$school_id}{"invoiced"};
+			$school_data{$school_id}{"uninvoiced"} = 0
+				if $school_data{$school_id}{"uninvoiced"} < 0
+		}
+
+		if ($ARGS{"save_status"} && $balance > 0) { 
+			Tab::SchoolSetting->create({ 
+				school => $school_id,
+				tag    => 'balance',
+				value  => $balance
+			});
+
+		} else { 
+			Tab::SchoolSetting->sql_rm_balance->execute($school_id);
+		}
+
+	}
+
+	return %school_data;
+
+</%init>
+
