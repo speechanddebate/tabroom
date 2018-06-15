@@ -7,12 +7,20 @@
 	$session_id => undef
 	$event_id => undef
 	$round_name => undef
+	$jpool => undef
+	$jname_update => undef
 </%args>
 <%init>
 
-	$m->print("<p>Made it to the tabroom code!</p>");
-	$m->print("event_id is ".$event_id." and round_name is ".$round_name."<br>");
+#updated 6-15-2018
 
+	$m->print("<p>Made connection to tabroom...</p>");
+	my $event = Tab::Event->retrieve($event_id);
+	$m->print("tabroom.com event_id is ".$event_id." for event ".$event->name ." and round_name is ".$round_name." for tourn_id ".$tourn_id."<br>");
+	$m->print("Uploading judge pools...<br>") if $jpool;
+	$m->print("Updating judge names...<br>") if $jname_update;
+	#$m->print ("tourn id is also ".$event->tourn);
+	
 	use strict;
 	use warnings;
 	use Data::Dumper; 
@@ -32,8 +40,6 @@
 		session_id => $session_id
 	); 
 
-	$m->print("<p>Session is $session, person $person, tourn $tourn</p>");
-
 	if ($person && $tourn) { 
 		#Everything's OK!
 	} elsif ($person) { 
@@ -43,7 +49,14 @@
 		$m->print("No valid user found for $username with that password");
 		$m->abort();
 	}
-	
+
+unless ( $perms->{"owner"} || $perms->{"full_admin"} || $perms->{"details"}{$event_id} )
+{
+	$m->abort();
+} else {
+		$m->print("<p>Successfully authenticated with the api</p>");
+}
+
 	my $tz = $tourn->tz if $tourn->tz;
 	$tz = "UTC" unless $tz;
 	
@@ -61,7 +74,7 @@
 
 	my $json_filename = $json_file->tempname;
 	my $filename = $json_filename;
-	$m->print("file name is ".$filename);
+	#$m->print("file name is ".$filename);
 
 	#### This reads the file and converts the JSON to a hash called %data ###
 		
@@ -78,18 +91,179 @@
 	my $HashReferenceDecoded = decode_json($json);
 	my %data = %$HashReferenceDecoded;
 
-	print "Time to load JSON file into a hash:"; printf("%.2f\n", time() - $start) ; print "<br>";
+	#print "Time to load JSON file into a hash:"; printf("%.2f\n", time() - $start) ; print "<br>";
 
-	$m->print("Upload successful");
+	my @round = Tab::Round->search( 
+		name 	=> $round_name,
+		event	=> $event_id
+	);
 	
-	foreach my $rec (sort keys %{ $data{'event'} } ) {
+	my $round_id=$round[0]->id;
+	$m->print("Tabroom round ID is ".$round_id." (nothing to worry about for TRPC users)<br>");
 	
-		# Assuming $rec is an event id, this checks if the person has event access.
-		# If they have overall access, the "details" has not existing suffices.
-		# login_api.mas will already kick them out if they're entry only.  -CLP
-		next if $perms->{'details'} && $perms->{"details"}{$rec} ne "admin";
+### UPLOAD COMPLETE!!!!! NOW PROCESSING THE HASH AND SAVING IT BACK TO TABROOM
+	
+	###	STEP ONE: CLEAN UP THE HASH
+	### erase SCORE field from panel and judge in the $data hash -- they are just temporary things and don't need to be restored
+	### This is just random cleanup
 
-		$m->print( $data{'event'}{$rec}{'name'} );
+foreach my $rec (sort keys %{ $data{'judge'} } ) {
+	delete $data{'judge'}{$rec}{'score'};
+}
+foreach my $rec (sort keys %{ $data{'panel'} } ) {
+	delete $data{'panel'}{$rec}{'score'};
+}
+
+#Validate rooms, entries, and judges here --
+#entries first
+my %ents;
+my $sql = "select entry.id, entry.code from entry where entry.event=$event_id";
+my $sth = $dbh->prepare( $sql );
+$sth->execute();
+while (my ($id, $code )  = $sth->fetchrow_array() ) {
+	$ents{$id} = $code;
+}
+foreach my $rec (sort keys %{ $data{'ballot'} }) {
+	unless ( $ents{$data{'ballot'}{$rec}{'entry'}} ) {
+		$m->print( "HEY!!!!!!!! There is a ballot for entry ".$data{'ballot'}{$rec}{'entry'}." but no such entry in tabroom.  Report this now!<br>" ) ;
+	}
+}
+$m->print("Entry double-check complete<br>");
+
+#now judges
+my %judges;
+$sql = "select judge.id, judge.code from judge where category=24423";
+$sth = $dbh->prepare( $sql );
+$sth->execute();
+while (my ($id, $code )  = $sth->fetchrow_array() ) {
+	$judges{$id} = $code;
+}
+foreach my $rec (sort keys %{ $data{'ballot'} }) {
+	unless ( $judges{$data{'ballot'}{$rec}{'judge'}} || $data{'ballot'}{$rec}{'judge'} == 0 ) {
+		$m->print( "HEY!!!!!!!!!! There is a ballot for judge ".$data{'ballot'}{$rec}{'judge'}." but no such judge number in tabroom.  Report this now!<br>" ) ;
+	}
+}
+$m->print("Judge double-check complete<br>");
+
+#now rooms
+my %rooms;
+$sql = "select room.id, room.name from room, tourn_site where room.site=tourn_site.site and tourn_site.tourn=9700";
+$sth = $dbh->prepare( $sql );
+$sth->execute();
+while (my ($id, $name )  = $sth->fetchrow_array() ) {
+	$rooms{$id} = $name;
+}
+foreach my $rec (sort keys %{ $data{'panel'} }) {
+	unless ( $rooms{$data{'panel'}{$rec}{'room'}} || $rooms{$data{'panel'}{$rec}{'room'}}==0 ) {
+		$m->print( "HEY!!!!!!!!!!! There is a panel for room ".$data{'panel'}{$rec}{'room'}." but no such room number in tabroom  Report this now!<br>" ) ;
+	}
+}
+$m->print("Room double-check complete<br>");
+	
+
+if ($jname_update) {
+	foreach my $rec (sort keys %{ $data{'judge'} }) {
+		$sth = $dbh->prepare( "UPDATE judge set first='".$data{'judge'}{$rec}{'first'}."', last='".$data{'judge'}{$rec}{'last'}."' WHERE id=".$data{'judge'}{$rec}{'id'} );
+		$sth->execute();
+	}
+	$m->print("Updated judge names<br>");	
+}
+
+#get rid of anything you don't want that's still in the hash -- only keep the 3 tables you need
+foreach my $table (sort keys %data) {
+	if ( $table ne 'panel' && $table ne 'score' && $table ne 'ballot' && $table ne 'jpool_judge') {
+		delete $data{$table};
+		#$m->print("deleting ".$table."<br>");
+	}
+}
+
+#get rid of the Congress jpool assignments
+foreach my $rec (sort keys %{ $data{'jpool_judge'} }) {
+	if ( $data{'jpool'}{ $data{'jpool_judge'}{$rec}{'jpool'} }{'parent'} == 33664 )
+	{
+		print "Deleteing jpool_judge ".$data{'jpool_judge'}{$rec}{'judge'}." because they are in pool ".$data{'jpool_judge'}{$rec}{'jpool'}."<br>";
+		delete $data{'jpool_judge'}{$rec};
+	}
+}
+print "Just finished deleting all the jpool assignments for congresss<br>";
+
+		#### STEP TWO: Delete current pairings in the database
+
+	#Need to update score, ballot, panel, ( used to include: round, round_setting, result, result_value)
+
+	$sth = $dbh->prepare( "DELETE score.* from score, ballot, panel where score.ballot=ballot.id and ballot.panel=panel.id and panel.round=".$round_id );
+	$sth->execute();
+	$sth = $dbh->prepare( "DELETE ballot.* from ballot, panel where ballot.panel=panel.id and panel.round=".$round_id );
+	$sth->execute();
+	$sth = $dbh->prepare( "DELETE panel.* from panel where panel.round=".$round_id );
+	$sth->execute();
+	
+	#$m->print("finished deleting round results and clearing the hash");
+	
+		#### STEP THREE: Save stuff to the database
+	
+	my $ctr;
+	my $table;
+	my $field_name;
+	my $field_str;
+	
+	for (my $i=0; $i <= 3; $i++) {
+		if ( $i == 1 ) { $table="panel"; }
+		if ( $i == 2 ) { $table="ballot"; }
+		if ( $i == 3 ) { $table="score"; }
+		
+		#$m->print($table."<br>");
+		
+		foreach my $rec (sort keys %{ $data{$table} }) {
+			$ctr=0;
+			my @field_values;
+		
+			foreach my $field (sort keys %{ $data{$table}{$rec} }) {
+				if ($field ne 'id') {				
+					if ( $ctr == 0 ) {
+						$field_name = $field ;
+						$field_str = "?" ;
+					} else {
+						$field_name = $field_name.", ".$field;
+						$field_str = $field_str.", ?" ;
+					}
+					$field_values[$ctr] = $data{$table}{$rec}{$field};
+					$field_values[$ctr] = $data{'panel'}{ $data{$table}{$rec}{$field} }{'id'} if $field eq 'panel';
+					$field_values[$ctr] = $data{'ballot'}{ $data{$table}{$rec}{$field} }{'id'} if $field eq 'ballot';
+					$ctr++;
+				}
+			}
+			$sql = 'INSERT INTO '.$table.' ('.$field_name.') VALUES ('.$field_str.')' ;
+			my $sth = $dbh->prepare( $sql );
+			#$m->print($field_name." values 2 and 3=".$field_values[2]." ".$field_values[3]."<br>");
+			$sth->execute(@field_values);
+			$data{$table}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+		}
 	}
 
+print "<br>Time to create records:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+	### STEP FOUR: UPLOAD JPOOLS
+	
+if ($jpool) {
+
+	#Delete all the jpools in the MAIN category
+																																	  #this exclucdes the congress pool; since it's a 1-off I'm not writing longer sql
+	$sth = $dbh->prepare( "delete jpool_judge.* from jpool_judge, jpool where jpool_judge.jpool=jpool.id and jpool.category=24423 and jpool_judge.jpool != 33664 and jpool.parent != 33664" );
+	$sth->execute();
+	print "jpool delete completed<br>";
+
+	#TBD -- STRIP THE CONGRESS POOLS FROM THE HASH	
+	#now loop and add
+	foreach my $rec (sort keys %{ $data{'jpool_judge'} } ) {
+		#$m->print("judge=".$data{'jpool_judge'}{$rec}{'judge'}." jpool=".$data{'jpool_judge'}{$rec}{'jpool'}."<br>" );
+		$sth = $dbh->prepare( "INSERT INTO jpool_judge (judge, jpool) VALUES (".$data{'jpool_judge'}{$rec}{'judge'}.", ".$data{'jpool_judge'}{$rec}{'jpool'}.")" );
+		$sth->execute();
+	}	
+
+	print "jpool insert done<br>";
+}
+print "Alll done!  Check the website to make sure everything looks good.<br>";
+
 </%init>
+
