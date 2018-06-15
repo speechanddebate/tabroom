@@ -1,0 +1,193 @@
+<%args>
+	$person
+	$tourn
+	$tourn_settings
+	$perms
+	$session
+	$round_id => undef
+</%args>
+<%init>
+
+
+	my $round;
+	my @rounds;
+
+    my ($eventref, $catref) = $m->comp(
+        "/funclib/allowed_events.mas", 
+        tourn => $tourn,
+        perms => $perms,
+        type  => "admin"
+    );  
+
+    #EVENTS
+    my @events = @{$eventref};
+    my %event_by_id = map {$_->id => $_} @events if @events;
+    
+	$round = Tab::Round->retrieve($round_id) if $round_id;
+
+	unless ($round) { 
+		$m->comp("/funclib/abort.mas", 
+			message => "No valid round ID sent"
+		);
+	}
+
+	my $event = $round->event;
+
+	if ($event && (not defined $event_by_id{$event})) { 
+		$m->comp("/funclib/abort.mas", 
+			message => "You do not have permission for ".$event->abbr
+		);
+	}
+
+	my %event_settings = $event->all_settings();
+
+	my $name = $round->realname;
+	my $event_name = $event->abbr;
+	$name =~ s/[\W_]//g;
+	$event_name =~ s/[\W_]//g;
+
+	my $filename = "AuditSheet-$event_name-$name";
+    my $filepath = $Tab::file_root."tmp/".$filename;
+    `rm -f $filepath.*`;
+
+    $m->comp("/funclib/printout.mas", 
+        tourn     => $tourn,
+        filename  => $filename,
+        head      => 1,
+        array     => "1.3"
+    );  
+
+    open (TEXOUT, ">>$filepath.tex");
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select judge.id, judge.code, 
+			panel.id, panel.letter, panel.flight,
+			entry.id, entry.code, 
+			ballot.side, score.value
+
+			from (judge, panel, entry, ballot, score)
+
+			where panel.round = ? 
+
+			and panel.id = ballot.panel
+			and ballot.judge = judge.id
+			and ballot.entry = entry.id
+			and ballot.id = score.ballot
+			and score.tag = 'ballot'
+		group by ballot.id, panel.flight, judge.code
+	");
+
+	$sth->execute($round->id);
+
+	my %judges;
+	my %panels;
+	my %entries;
+
+	while (
+		my ($judge_id, $judge_code, 
+			$panel_id, $panel_letter, $panel_flight,
+			$entry_id, $entry_code, 
+			$ballot_side, $score_value
+		) = $sth->fetchrow_array()
+	) { 
+
+		$judges{$judge_id}{"code"} = $judge_code;
+		$judges{$judge_id}{"sort"} = $judge_code;
+		$judges{$judge_id}{"sort"} =~ s/[\D_]//g;
+
+		$judges{$judge_id}{"panels"}{$panel_id}++;
+
+		$panels{$panel_id}{"letter"} = $panel_letter;
+		$panels{$panel_id}{"flight"} = $panel_flight;
+
+		if ($ballot_side == 1) { 
+			$panels{$panel_id}{"aff"} = $entry_id;
+			$panels{$panel_id}{"aff_code"} = $entry_code;
+		} elsif ($ballot_side == 2) { 
+			$panels{$panel_id}{"neg"} = $entry_id;
+			$panels{$panel_id}{"neg_code"} = $entry_code;
+		}
+
+		if ($score_value > 0) { 
+			$panels{$panel_id}{"winner"} = $entry_id;
+		}
+	}
+
+    print TEXOUT "\\noindent\n";
+    print TEXOUT "\\textsb{\\Large ". Tab::texify($event->abbr." ".$round->realname);
+    print TEXOUT "} \\hfill \\textsb{\\Large Audit Sheet} \n";
+    print TEXOUT "\\newline\n";
+    print TEXOUT "\\small\n";
+
+	print TEXOUT "\\raggedright\n";
+
+	my $counter;
+
+	foreach my $judge_id (
+		sort {$judges{$a}{"code"} <=> $judges{$b}{"code"}} 
+		keys %judges
+	) { 
+
+		print TEXOUT "\\begin{minipage}[t]{1.05in}\n";
+		print TEXOUT "\\hfill \\textbf{";
+		print TEXOUT Tab::texify($judges{$judge_id}{"code"});
+		print TEXOUT "} \\hfill \n";
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\newline\n";
+
+		print TEXOUT "\\begin{tabular}{|p{.3in}|p{.3in}|}\n";
+		print TEXOUT "\\hline\n";
+
+		foreach my $panel_id (
+			sort {$panels{$a}{"flight"} <=> $panels{$b}{"flight"}}
+			keys %{$judges{$judge_id}{"panels"}}
+		) { 
+
+			if ($panels{$panel_id}{"aff"} == $panels{$panel_id}{"winner"}) { 
+				print TEXOUT "\\textbf{";
+			} else { 
+				print TEXOUT "\\emph{\\color{black!64} \\scriptsize ";
+			}
+
+			print TEXOUT Tab::texify($panels{$panel_id}{"aff_code"});
+			print TEXOUT "}";
+
+			print TEXOUT " & ";
+
+			if ($panels{$panel_id}{"neg"} == $panels{$panel_id}{"winner"}) { 
+				print TEXOUT "\\textsb{";
+			} else { 
+				print TEXOUT "\\emph{\\color{black!64} \\scriptsize ";
+			}
+
+			print TEXOUT Tab::texify($panels{$panel_id}{"neg_code"});
+			print TEXOUT "}";
+
+			print TEXOUT " \\\\ ";
+			print TEXOUT "\\hline\n";
+		}
+
+		print TEXOUT "\\end{tabular}\n";
+		print TEXOUT "\\end{minipage}\n";
+		print TEXOUT "\\hspace{1mm}\n";
+
+		if ($counter++ > 4) { 
+			print TEXOUT "\\medskip\n";
+			print TEXOUT "\\newline\n";
+			undef $counter;
+		}
+
+	}
+
+	print TEXOUT "\\strut\n";
+	print TEXOUT "\\newline\n";
+
+    $m->comp("/funclib/printout.mas",
+        tourn     => $tourn,
+        filename  => $filename,
+        tail      => 1
+    );
+
+</%init>

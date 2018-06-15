@@ -1,0 +1,200 @@
+<%args>
+	$tourn
+	$person
+	$perms
+	$ballot_id => undef
+	$audit     => undef
+</%args>
+<%init>
+
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	my %response;
+
+	unless ($ballot_id) { 
+		$response{"warning"} = "No ballot ID sent";
+		$m->print(JSON::encode_json(\%response));
+		$m->abort();
+	}
+
+	my $ballot = Tab::Ballot->retrieve($ballot_id);
+
+	unless ($ballot) { 
+		$response{"warning"} = "No ballot found for ID $ballot_id";
+		$m->print(JSON::encode_json(\%response));
+		$m->abort();
+	}
+
+	my $panel = $ballot->panel;
+
+	unless ($panel) { 
+		$response{"warning"} = "No panel found for ballot $ballot";
+		$m->print(JSON::encode_json(\%response));
+		$m->abort();
+	}
+
+	if ($perms->{"detailed"}) { 
+
+		my $round = $panel->round;
+
+		my ($eventref, $catref) = $m->comp(
+			"/funclib/allowed_events.mas", 
+			tourn => $tourn,
+			perms => $perms,
+			type  => "admin"
+		);  
+
+		my $ok;
+
+		foreach my $event (@{$eventref}) { 
+			$ok++ if $event == $round->event;
+			last if $ok;
+		}
+
+		unless ($ok) {
+			$response{"warning"} = "You do not have permission to enter results for that event";
+			$m->print(JSON::encode_json(\%response));
+			$m->abort();
+		}
+	}
+
+	my $did;
+
+	if ($audit) { 
+
+		my $marked_winner; 
+		my $marked_loser; 
+
+		foreach my $oballot ($panel->ballots) { 
+			my $result = $oballot->scores( 
+				tag => "ballot"
+			)->first;
+			$marked_winner = $oballot 
+				if $result && $result->value == 1;
+			$marked_loser = $oballot 
+				if $result && $result->value != 1;
+		}
+
+		if ($marked_winner == $ballot) { 
+
+			my @addClass = ("greentext");
+			my @removeClass = ("graytext", "orangetext");
+
+			my %change = (
+				id          => "status_".$panel->id,
+				content     => "CONFIRMED",
+				addClass    => \@addClass,
+				removeClass => \@removeClass
+			);
+
+			push @{$response{"replace"}}, \%change;
+
+			foreach my $oballot ($panel->ballots) { 
+				$oballot->audit(1);
+				$oballot->update();
+			}
+
+			$response{"message"} = "Ballot entry complete";
+
+		} else { 
+
+			my @addClass = ("redtext");
+			my @removeClass = ("graytext", "orangetext", "greentext");
+
+			my %change = (
+				id          => "status_".$panel->id,
+				deaudit     => 1,
+				content     => "AGREEMENT ERROR",
+				addClass    => \@addClass,
+				removeClass => \@removeClass
+			);
+
+			push @{$response{"replace"}}, \%change;
+
+			$response{"warning"} = "This entry disagreed with the last.  ";
+			$response{"warning"} .= "Pass to someone else to confirm.";
+
+			undef $audit;
+			$did++;
+		}
+
+	}
+	
+	unless ($audit) { 
+
+		Tab::Score->set_sql( rm_scores => " delete score.*
+			from score, ballot
+			where score.tag = 'ballot'
+			and score.ballot = ballot.id
+			and ballot.panel = ? ");
+
+		Tab::Score->sql_rm_scores->execute($panel->id);
+
+		foreach my $oballot ($panel->ballots) { 
+
+			my $winner = 0;
+			$winner = 1 if $oballot->id == $ballot->id;
+
+			Tab::Score->create({
+				ballot   => $oballot->id,
+				tag      => "ballot",
+				tiebreak => 2,
+				value    => $winner,
+			});
+
+			$oballot->audit(0);
+			$oballot->entered_by($person->id);
+			$oballot->update();
+		}
+
+		unless ($did) { 
+
+			$response{"message"} = "First entry complete";
+
+			my %entered_change = (
+				id          => "entered_".$panel->id,
+				content     => "Entry by ".$person->first." ".$person->last
+			);
+
+			push @{$response{"replace"}}, \%entered_change;
+
+			my @addClass = ("orangetext");
+			my @removeClass = ("graytext", "greentext", "redtext");
+
+			my %status_change = ( 
+				id          => "status_".$panel->id,
+				content     => "ENTERED ONCE",
+				addClass    => \@addClass, 
+				removeClass => \@removeClass
+			);
+
+			push @{$response{"replace"}}, \%status_change;
+
+		}
+
+	}
+
+	my @removeBallot = ("dkgreen");
+
+	my %clear_change = (
+		targetClass => "ballot_".$panel->id,
+		removeClass => \@removeBallot
+	);
+
+	push @{$response{"replace"}}, \%clear_change;
+
+	my @addBallot = ("dkgreen");
+
+	my %ballot_change = (
+		id       => $ballot->id,
+		addClass => \@addBallot
+	);
+
+	push @{$response{"replace"}}, \%ballot_change;
+
+    $m->print(JSON::encode_json(\%response));
+	$m->abort();
+
+</%init>
+

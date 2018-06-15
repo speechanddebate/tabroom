@@ -8,17 +8,115 @@
 
 	use POSIX;
 
-	my @entries = $m->comp("/funclib/tourn_entries.mas", tourn => $tourn);
+    my $dbh = Tab::DBI->db_Main();
 
-	my @students = $m->comp("/funclib/tourn_students.mas", tourn => $tourn);
+    my $entries_sth = $dbh->prepare('
+		select entry.id, event.id, event.abbr,
+			student.id, school.id, region.id,
+			chapter.id, chapter.state
 
-	my @judges = $m->comp("/funclib/tourn_judges.mas", tourn => $tourn);
+			from (entry, event, entry_student, student, school)
 
-	my @schools = $tourn->schools;
+			left join region on region.id = school.region
+			left join chapter on chapter.id = school.chapter
 
-	my @regions;
+		where school.tourn = ?
+		and school.id = entry.school
+		and entry.id = entry_student.entry
+		and entry_student.student = student.id
+		and entry.school = school.id
+		and entry.active = 1
+		and entry.event = event.id
+		group by entry_student.id
+    ');
 
-	my @jpools = $m->comp("/funclib/tourn_jpools.mas", tourn => $tourn);
+	my %counters;
+
+	$entries_sth->execute($tourn->id);
+
+	my $count;
+
+	while( 
+		my (
+			$entry_id, $event_id, $event_abbr, 
+			$student_id, $school_id, $region_id, 
+			$chapter_id, $chapter_state
+		) = $entries_sth->fetchrow_array() ) {
+
+		$counters{"schools"}{$school_id}++;
+		$counters{"regions"}{$region_id}++;
+		$counters{"states"}{$chapter_state}++;
+
+		$counters{"students"}{$student_id}++;
+		$counters{"entries"}{$entry_id}++;
+		$counters{"event_entries"}{$event_abbr}{$entry_id}++;
+
+		$counters{"event_states"}{$event_abbr}{$chapter_state}++;
+
+		$counters{"event_students"}{$event_abbr}{$student_id}++;
+		$counters{"event_states"}{$event_abbr}{$chapter_state}++;
+
+		$counters{"people"}{"s".$student_id}++;
+
+		$count++;
+	}
+
+
+    my $judges_sth = $dbh->prepare('
+		select judge.id, category.id, category.abbr,
+			school.id, region.id,
+			chapter.id, chapter.state
+
+			from (judge, category) 
+
+			left join school on judge.school = school.id
+			left join chapter on chapter.id = school.chapter
+			left join region on region.id = school.region
+
+		where category.tourn = ?
+		and category.id = judge.category
+    ');
+
+	$judges_sth->execute($tourn->id);
+
+	while( 
+		my (
+			$judge_id,
+			$category_id, $category_abbr,
+			$school_id, $region_id,
+			$chapter_id, $chapter_state
+		) = $judges_sth->fetchrow_array() ) {
+
+		$counters{"schools"}{$school_id}++;
+		$counters{"regions"}{$region_id}++;
+		$counters{"states"}{$chapter_state}++;
+
+		$counters{"judges"}{$judge_id}++;
+		$counters{"category_judges"}{$category_abbr}{$judge_id}++;
+
+		$counters{"people"}{"j".$judge_id}++;
+
+	}
+
+	my $limit = "registrant" if $tourn_settings->{"nsda_nats"};
+
+	Tab::JPool->set_sql(counts => "
+       select distinct jpool.*, count(jpool_judge.id) as judgecount
+        from (jpool, category)
+            left join jpool_judge on jpool_judge.jpool = jpool.id
+        where jpool.category = category.id
+        and category.tourn = ?
+		and exists (
+			select jpool_setting.id from jpool_setting 
+			where jpool_setting.jpool = jpool.id 
+			and jpool_setting.tag = 'registrant'
+		)
+        group by jpool.id
+        order by category.name, jpool.name
+	");
+
+    Tab::JPool->columns(TEMP => "judgecount");
+	my @jpools = Tab::JPool->search_counts($tourn->id);
 
 </%init>
 
@@ -59,7 +157,7 @@
 				</td> 
 				
 				<td class="rightalign">
-					<% scalar @regions %>
+					<% $counters{"regions"} ? scalar (keys %{$counters{"regions"}}) : 0%>
 				</td>
 
 			</tr>
@@ -73,7 +171,7 @@
 			</td> 
 			
 			<td class="rightalign">
-				<% scalar @schools %>
+				<% $counters{"schools"} ? scalar (keys %{$counters{"schools"}}) : 0%>
 			</td>
 			
 		</tr>
@@ -85,7 +183,7 @@
 			</td>
 
 			<td class="rightalign">
-				<% scalar @students %>
+				<% $counters{"students"} ? scalar (keys %{$counters{"students"}}) : 0%>
 			</td>
 
 		</tr>
@@ -97,7 +195,7 @@
 			</td>
 			
 			<td class="rightalign">
-				<% scalar @judges %>
+				<% $counters{"judges"} ? scalar (keys %{$counters{"judges"}}) : 0%>
 			</td>
 
 		</tr>
@@ -109,7 +207,7 @@
 			</td>
 			
 			<td class="rightalign">
-				<% scalar @judges + scalar @students %>
+				<% $counters{"people"} ? scalar (keys %{$counters{"people"}}) : 0%>
 			</td>
 
 		</tr>
@@ -122,7 +220,7 @@
 			</td>
 			
 			<td class="rightalign">
-				<% scalar @entries %>
+				<% $counters{"entries"} ? scalar (keys %{$counters{"entries"}{"all"}}) : 0%>
 			</td>
 
 		</tr>
@@ -134,60 +232,78 @@
 			</td>
 
 			<td class="rightalign">
-				<% $m->comp("/funclib/tourn_states.mas", tourn => $tourn) %> 
+				<% $counters{"states"} ? scalar (keys %{$counters{"states"}}) : 0%>
 			</td>
 
 		</tr>
 
 	</table>
 
-	<h4>Judges by Group</h4>
+	<h4>Judges by Category</h4>
 
 	<table>
 
-%		foreach my $category (sort {$a->name cmp $b->name} $tourn->categories) { 
+		<tr class="yellowrow">
+
+			<th class="smaller">
+				Category
+			</th>
+
+			<th class="smaller">
+				Judges
+			</th>
+
+		</tr>
+
+%		foreach my $abbr (sort {$a cmp $b} keys %{$counters{"category_judges"}}) { 
 
 			<tr class="row">
 	
 				<td>
-					<% $category->name %>
+					<% $abbr %>
 				</td>
 	
 				<td class="rightalign">
-					<% scalar $category->judges %>
+					<% $counters{"category_judges"}{$abbr} 
+						? scalar (keys %{$counters{"category_judges"}{$abbr}}) 
+						: 0
+					%>
 				</td>
-
 			</tr>
-
 %		}
 
 	</table>
 
-%	if (@jpools) { 
+	<h4>Judges by Pool</h4>
 
-		<h4>Judges by Pool</h4>
+	<table>
 
-		<table>
+		<tr class="yellowrow">
 
-%			foreach my $jpool ($m->comp("/funclib/tourn_jpools.mas", tourn => $tourn)) { 
+			<th class="smaller">
+				Judge Pool
+			</th>
 
-				<tr class="row">
+			<th class="smaller">
+				Judges
+			</th>
 
-					<td>
-						<% $jpool->name %>
-					</td> 
-				
-					<td class="rightalign">
-						<% scalar $jpool->judges %>
-					</td> 
-				
-				</tr>
+		</tr>
 
-%			}
+%		foreach my $jpool (@jpools) { 
 
-		</table>
+			<tr class="row">
+				<td>
+					<% $jpool->name %>
+				</td>
 
-%	}
+				<td class="rightalign">
+					<% $jpool->judgecount %>
+				</td>
+			</tr>
+%		}
+
+	</table>
 
 	</span>
 
@@ -215,78 +331,45 @@
 				States
 			</th>
 
-			<th class="smaller" style="line-height: 12px;">
-				Min Rooms
-			</th>
-
-			<th class="smaller" style="line-height: 12px;">
-				Max Rooms
-			</th>
-
 		</tr>
 
 <%perl>
 
-		foreach my $event (
-			sort {$a->name cmp $b->name} 
-			$m->comp("/funclib/tourn_events.mas", 
-				tourn => $tourn
-			)
+		foreach my $abbr (
+			sort {$a cmp $b} 
+			keys %{$counters{"event_entries"}}
 		) { 
-
-   
-			my $minpanelsize = $event->setting("min_panel_size");
-			$minpanelsize = 5 unless $minpanelsize;
-
-			my $maxpanelsize = $event->setting("max_panel_size");
-			$maxpanelsize = 8 unless $maxpanelsize;
-
-			my $defaultpanelsize = $event->setting("default_panel_size");
-			$defaultpanelsize = 6 unless $defaultpanelsize;
-
- 			my @entries = Tab::Entry->search( 
-				event => $event->id, 
-				active => 1
-			);
 
 </%perl>
 
 			<tr class="row">
 
 				<td class="smallish">
-					<% $event->abbr %>
+					<% $abbr %>
 				</td> 
 				
 				<td class="centeralign smallish">
-					<% scalar @entries %>
+					<% $counters{"event_entries"}{$abbr} 
+						? scalar (keys %{$counters{"event_entries"}{$abbr}}) 
+						: 0
+					%>
 				</td> 
 				
 				<td class="centeralign smallish">
-					<% scalar $m->comp("/funclib/event_students.mas", event => $event) %>
+					<% $counters{"event_students"}{$abbr} 
+						?  scalar (keys %{$counters{"event_students"}{$abbr}})
+						: 0
+					%>
 				</td> 
 
 				<td class="centeralign smallish">
-					<% $m->comp("/funclib/event_states.mas", event => $event) %>
+					<% $counters{"event_states"}{$abbr} 
+						?  scalar (keys %{$counters{"event_states"}{$abbr}})
+						: 0
+					%>
 				</td>
 
-				<td class="centeralign smallish">
-%					if ($event->type eq "speech" || $event->type eq "congress") { 
-						<% ceil( scalar @entries / $maxpanelsize) %>
-%					} else { 
-						<% ceil((scalar @entries - 1) / 4) %>
-%					}
-				</td>
-
-				<td class="centeralign smallish">
-%					if ($event->type eq "speech" || $event->type eq "congress") { 
-						<% ceil( scalar @entries / $minpanelsize) %>
-%					} else { 
-						<% floor( scalar @entries / 2) %>
-%					}
-				</td>
-				
 			</tr>
-
 %		}
 
 	</table>
