@@ -1,0 +1,327 @@
+<%args>
+	$tourn
+	$tourn_settings
+</%args>
+<%init>
+
+	my %schools;
+
+    my $dbh = Tab::DBI->db_Main(); 
+
+	# Missing release forms or scripts etc. 
+	my $missing_releases = $dbh->prepare("
+
+		select school.id, school.name, 
+			chapter.nsda, school.state,
+			entry.id, entry.name, event.abbr, 
+			incomplete.value_text
+
+		from (school, entry, event, entry_setting status, entry_setting incomplete, chapter)
+
+		where school.tourn = ? 
+			and school.id = entry.school
+			and entry.event = event.id
+			and entry.id = status.entry
+			and status.tag = 'status'
+			and status.value = 'incomplete'
+			and school.chapter = chapter.id
+
+			and incomplete.entry = entry.id
+			and incomplete.tag = 'incomplete_reasons'
+	");
+
+	$missing_releases->execute($tourn->id);
+			
+    while (
+        my ($school_id, $school_name, 
+			$nsda_id, $state,
+			$entry_id, $entry_name, $event_abbr, 
+			$incomplete_text
+		) = $missing_releases->fetchrow_array()
+    ) {
+
+		$schools{$school_id}{"name"} = $school_name;
+		$schools{$school_id}{"state"} = $state;
+		$schools{$school_id}{"nsda_id"} = $nsda_id;
+
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"name"} = $entry_name;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"event"} = $event_abbr;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"reason"} = $incomplete_text;
+	}
+
+	# Missing coaches
+	my $missing_coaches = $dbh->prepare("
+
+		select school.id, school.name, 
+			chapter.nsda, school.state,
+			entry.id, entry.name, event.abbr
+
+		from (school, entry, event, chapter)
+
+		where school.tourn = ? 
+
+			and school.id = entry.school
+			and entry.event = event.id
+			and school.chapter = chapter.id
+			and entry.unconfirmed = 0
+
+			and not exists ( 
+				select coach.id
+				from entry_setting coach
+				where coach.entry = entry.id
+				and coach.tag = 'coach_points'
+			)
+	");
+
+	$missing_coaches->execute($tourn->id);
+			
+    while (
+        my ($school_id, $school_name, 
+			$nsda_id, $state,
+			$entry_id, $entry_name, $event_abbr
+		) = $missing_coaches->fetchrow_array()
+    ) {
+		$schools{$school_id}{"name"}    = $school_name;
+		$schools{$school_id}{"state"}   = $state;
+		$schools{$school_id}{"nsda_id"} = $nsda_id;
+
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"name"} = $entry_name;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"event"} = $event_abbr;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"reason"} = "No coach listed for entries";
+	}
+
+	$m->comp("nsda_judging.mas", 
+		tourn          => $tourn,
+		return         => 1,
+		tourn_settings => $tourn_settings
+	);
+
+	my $judges_borked = $dbh->prepare("
+		select school.id, school.name, 
+			chapter.nsda, school.state,
+			unmet.value_text
+
+		from (school, school_setting unmet, chapter)
+
+		where school.tourn = ? 
+			and school.chapter = chapter.id
+			and unmet.tag = 'judging_unmet'
+			and unmet.school = school.id
+			group by school.id
+	");
+
+	$judges_borked->execute($tourn->id);
+			
+    while (
+        my ($school_id, $school_name, 
+			$nsda_id, $state,
+			$reasons
+		) = $judges_borked->fetchrow_array()
+    ) {
+		$schools{$school_id}{"name"}    = $school_name;
+		$schools{$school_id}{"state"}   = $state;
+		$schools{$school_id}{"nsda_id"} = $nsda_id;
+
+		$reasons =~ s/\n/\n\n/g;
+		$reasons =~ s/\n\n\n/\n\n/g;
+		$schools{$school_id}{"bad"}{"judging"}  = $reasons
+	}
+
+	# Owes money
+	my %balances = $m->comp(
+		"/funclib/balances.mas", 
+		tourn          => $tourn,
+		tourn_settings => $tourn_settings
+	);
+
+	foreach my $school_id (keys %balances) { 
+
+		next unless $balances{$school_id}{"balance"} > 0;
+
+		$schools{$school_id}{"name"}           = $balances{$school_id}{"name"};
+		$schools{$school_id}{"state"}          = $balances{$school_id}{"state"};
+		$schools{$school_id}{"nsda_id"}        = $balances{$school_id}{"nsda"};
+		$schools{$school_id}{"bad"}{"balance"} = $balances{$school_id}{"balance"};
+	}
+
+	my $filename = "ProblemReports-Nationals";
+    my $filepath = $Tab::file_root."tmp/".$filename;
+    `rm -f $filepath.*`;
+
+    $m->comp("/funclib/printout.mas", 
+        tourn     => $tourn,
+        filename  => $filename,
+        head      => 1,
+        array     => "1.3",
+		linespace => 1.4
+    );  
+
+    open (TEXOUT, ">>$filepath.tex");
+
+	my @ids = 
+		sort {$schools{$a}{"name"} cmp $schools{$b}{"name"}} 
+		keys %schools;
+
+	@ids = 
+		sort {$schools{$a}{"state"} cmp $schools{$b}{"state"}} @ids;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now(time_zone => $tz);
+
+	foreach my $school_id (@ids) { 
+
+		print TEXOUT "\\noindent\n";
+		print TEXOUT "\\large\n";
+	
+		print TEXOUT "\\textsb{ ".Tab::texify($schools{$school_id}{"state"})." }";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\textsb{ ".Tab::texify($schools{$school_id}{"name"})." }";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\textsb{ ".Tab::texify($schools{$school_id}{"nsda_id"})." }";
+
+		print TEXOUT "\\vspace{8mm}\n";
+		print TEXOUT "\\newline\n";
+		print TEXOUT "\\strut\n";
+
+		print TEXOUT "\\hfill \\textbf{\\Huge Please Visit the Problem Tables} \\hfill";
+
+		print TEXOUT "\\bigskip\n";
+		print TEXOUT "\\newline\n";
+		print TEXOUT "\\large\n";
+
+		print TEXOUT "Your registration was incomplete as listed below. You can
+		still fix a lot of these issues online without waiting in line.  Upload
+		script information and release forms online on http://www.tabroom.com.
+		Fees are still payable online on http://www.speechanddebate.org/account.
+		If you fix or have fixed the issues below, the SELF SERVICE table can
+		clear you for registration.";
+
+		print TEXOUT "\\bigskip\n";
+		print TEXOUT "\\newline\n";
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\textsb{\\emph{ Printed on ".Tab::nicedt($now)." }} \n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\medskip\n";
+		print TEXOUT "\\newline\n";
+
+		my %already;
+
+		foreach my $reason (sort {$a cmp $b} keys %{$schools{$school_id}{"bad"}}) { 
+
+			if ($reason eq "balance") { 
+
+				print TEXOUT "\\emph{\\small Please check with the FINANCE table to resolve:}\n";
+				print TEXOUT "\\newline\n";
+
+				print TEXOUT "\\fbox{\\begin{minipage}{7in}\n";
+				print TEXOUT "\\hspace{.25in}\n";
+				print TEXOUT "\\parbox{3.5in}{\n";
+				print TEXOUT "\\vspace{4mm}\n";
+				print TEXOUT "\\textsb{\\large Unpaid Balance: } \n";
+				print TEXOUT "\\vspace{4mm}\n";
+				print TEXOUT "}\n";
+
+				print TEXOUT "\\parbox{2.5in}{\n";
+				print TEXOUT "\\textsb{";
+				print TEXOUT Tab::texify('$'.$schools{$school_id}{"bad"}{"balance"});
+				print TEXOUT "}}\n";
+				print TEXOUT "\\end{minipage}\n";
+				print TEXOUT "}\n";
+
+			} elsif ($reason eq "judging") { 
+
+				print TEXOUT "\\emph{\\small Please check with the JUDGING table to resolve:}\n";
+				print TEXOUT "\\newline\n";
+
+				print TEXOUT "\\fbox{\\begin{minipage}{7in}\n";
+				print TEXOUT "\\hspace{.25in}\n";
+				print TEXOUT "\\parbox{1.5in}{\n";
+				print TEXOUT "\\vspace{4mm}\n";
+				print TEXOUT "\\textsb{\\large Judging Issues: } \n";
+				print TEXOUT "\\vspace{4mm}\n";
+				print TEXOUT "}\n";
+
+				print TEXOUT "\\parbox{4.5in}{\\small \n";
+				print TEXOUT Tab::texify($schools{$school_id}{"bad"}{"judging"});
+				print TEXOUT "}\n";
+				print TEXOUT "\\end{minipage}\n";
+				print TEXOUT "}\n";
+
+			} else { 
+
+				print TEXOUT "\\emph{\\small Please check with the main table to resolve:}\n";
+				print TEXOUT "\\newline\n";
+
+				print TEXOUT "\\textsb{\\Large ".Tab::texify(ucfirst($reason))." } \n";
+				print TEXOUT "\\medskip\n";
+				print TEXOUT "\\newline\n";
+				print TEXOUT "\\small\n";
+
+				foreach my $entry_id (sort keys %{$schools{$school_id}{"bad"}{$reason}}) { 
+
+					my @all_reasons = split("-", $schools{$school_id}{"bad"}{$reason}{$entry_id}{"reason"});
+					my @reasons;
+
+					foreach my $reason (@all_reasons) { 
+						$reason =~ s/^\s+//; 
+						$reason =~ s/\s+$//;
+						if ($already{$reason}) { 
+						} else { 
+							push @reasons, $reason unless ($already{$reason});
+						}
+					}
+					next unless @reasons;
+				
+					print TEXOUT "\\fbox{\\begin{minipage}{7in}\n";
+
+					print TEXOUT "\\parbox{.5in}{\n";
+					print TEXOUT "\\vspace{4mm}\n";
+					print TEXOUT Tab::texify($schools{$school_id}{"bad"}{$reason}{$entry_id}{"event"});
+					print TEXOUT "\\vspace{4mm}\n";
+					print TEXOUT "}\n";
+
+					print TEXOUT "\\parbox{1.5in}{\n";
+					print TEXOUT Tab::texify($schools{$school_id}{"bad"}{$reason}{$entry_id}{"name"});
+					print TEXOUT "}\n";
+
+					print TEXOUT "\\parbox{4.5in}{\n";
+
+					my $notfirst;
+					foreach my $reason (@reasons) { 
+
+						if ($notfirst++) { 
+							print TEXOUT "\\newline\n";
+						}
+						print TEXOUT Tab::texify($reason);
+						if (index($reason, "No release forms uploaded for") != -1) {
+							$already{$reason}++;
+						}
+					}
+
+					print TEXOUT "}\n";
+					print TEXOUT "\\end{minipage}\n";
+					print TEXOUT "}\n";
+				}
+			}
+
+			print TEXOUT "\\medskip\n";
+			print TEXOUT "\\newline\n";
+		}
+
+		print TEXOUT "\\newpage\n";
+	}
+
+    close (TEXOUT);
+
+    $m->comp(
+		"/funclib/printout.mas",
+        tourn     => $tourn,
+        filename  => $filename,
+        tail      => 1
+    );
+
+</%init>
+
