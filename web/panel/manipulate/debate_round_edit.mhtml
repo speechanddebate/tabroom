@@ -1,11 +1,13 @@
 <%args>
 	$tourn
+	$tourn_settings
 	$entry_id => undef
 	$round_id => undef
 </%args>
 <%init>
 
 	my $round = Tab::Round->retrieve($round_id);
+	my $entry = Tab::Entry->retrieve($entry_id) if $entry_id;
 
 	unless ($round) { 
 		$m->comp("/funclib/abort.mas", 
@@ -13,105 +15,389 @@
 		);
 	}
 
+	my $dbh = Tab::DBI->db_Main();
 
-	my $ncfl ++ if $tourn->setting("ncfl");
+	my $sth = $dbh->prepare("
+		select ballot.id, ballot.side,
+			entry.id, entry.code, entry.name, 
+			judge.id, judge.code, judge.first, judge.last,
+				judgeschool.id, judgeschool.name, judgeschool.code,
+				judgeregion.id, judgeregion.name, judgeregion.code,
+				judgedistrict.id, judgedistrict.name, judgedistrict.code,
+			panel.id, panel.letter, panel.bracket,
+			school.id, school.name, school.code, 
+			region.id, region.code, 
+			district.id, district.code,
+			room.name
 
-	my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
-	my %entry_panel_id;
-	my %entry_panel_code;
-	my %entry_panel_school;
+		from (ballot, entry, panel, school) 
 
-	foreach my $entry (@entries) { 
-		$entry_panel_id{$entry->panelid}{$entry->side} = $entry->id;
-		$entry_panel_code{$entry->panelid}{$entry->side} = $entry->code;
-		$entry_panel_school{$entry->panelid}{$entry->side} = $entry->schname;
-	}
+			left join room on panel.room = room.id
+			left join district on district.id = school.district
+			left join region on region.id = school.region
+			left join judge on ballot.judge = judge.id
+			left join school judgeschool on judge.school = school.id
+			left join region judgeregion on judgeschool.region = region.id
+			left join district judgedistrict on judgeschool.district = district.id
 
-	my $entry = Tab::Entry->retrieve($entry_id);
-	my $school_id = $entry->school->id if $entry && $entry->school;
-
-	my @hits = $m->comp(
-		"/funclib/entry_hits.mas",
-		entry  => $entry,
-		not_in => $round
-	) if $entry;
-
-	my @judge_hits = $m->comp(
-		"/funclib/entry_judge_hits.mas",
-		entry  => $entry,
-		not_in => $round
-	) if $entry;
-
-	my %entries_hit = map { $_->id => 1 } @hits;
-
-	my %judges_hit = map { $_->id => 1 } @judge_hits;
-
-	foreach my $hit (@hits, @judge_hits) { 
-		undef $hit;
-	}
-
-	my @panels = sort {$b->bracket <=> $a->bracket} $round->panels;
-
-	my %panel_size;
-	my %panel_same_hits;
-	my %panel_school_hits;
-	my %panel_judge_hits;
-	my %panel_score;
-
-	
-	Tab::Panel->set_sql( size => "
-		select count(distinct entry.id)
-		from entry, ballot
-		where entry.id = ballot.entry
-		and entry.dropped = 0
-		and entry.dq = 0
-		
-		and ballot.panel = ? 
+		where panel.round = ? 
+		and panel.id = ballot.panel 
+		and ballot.entry = entry.id
+		and entry.school = school.id
+		group by ballot.id
+		order by panel.bracket desc
 	");
 
-	Tab::Panel->set_sql( same_hits => "
-		select count(distinct p2e2.entry)
-			from ballot p2e1, ballot p2e2
-			where p2e1.entry = ? 
-			and p2e2.entry != p2e1.entry
-			and p2e2.panel = p2e1.panel
-			and p2e2.entry in 
-			 	(select ballot.entry 
-					from ballot where ballot.panel = ?)
+	my %panels; 
+	my %entry;
+	my %judge;
+
+	$sth->execute($round->id);
+
+	while (
+		my (
+			$ballot_id, $ballot_side, 
+			$entry_id, $entry_code, $entry_name, 
+			$judge_id, $judge_code, $judge_first, $judge_last, 
+			$judgeschool_id, $judgeschool_name, $judgeschool_code, 
+			$judgeregion_id, $judgeregion_name, $judgeregion_code, 
+			$judgedistrict_id, $judgedistrict_name, $judgedistrict_code, 
+			$panel_id, $panel_letter, $panel_bracket, 
+			$school_id, $school_name, $school_code, 
+			$region_id, $region_code, 
+			$district_id, $district_code,
+			$room_name
+		)  = $sth->fetchrow_array() ) {
+
+		$panels{$panel_id}{"room"} = $room_name;
+		$panels{$panel_id}{"bracket"} = $panel_bracket;
+		$panels{$panel_id}{"letter"} = $panel_letter;
+
+		$panels{$panel_id}{"me"}++ if $entry_id == $entry->id;
+
+		$panels{$panel_id}{"entries"}{$ballot_side}{$entry_id}++;
+		$panels{$panel_id}{"judges"}{$judge_id}++;
+
+		$panels{$panel_id}{"entrycount"}++;
+
+		unless ($judge{$judge_id}) { 
+
+			$judge{$judge_id}{"school_id"} = $judgeschool_id;
+			$judge{$judge_id}{"region_id"} = $judgeregion_id;
+			$judge{$judge_id}{"district_id"} = $judgedistrict_id;
+
+			$judge{$judge_id}{"school_name"} = $judgeschool_name;
+
+			$judge{$judge_id}{"school_code"} = $judgeschool_code;
+			$judge{$judge_id}{"region_code"} = $judgeregion_code;
+			$judge{$judge_id}{"district_code"} = $judgedistrict_code;
+
+			$judge{$judge_id}{"code"} = $judge_code,
+			$judge{$judge_id}{"first"} = $judge_first,
+			$judge{$judge_id}{"last"} = $judge_last,
+
+		}
+
+		unless ($entry{$entry_id}) { 
+
+			$entry{$entry_id}{"code"}  = $entry_code,
+			$entry{$entry_id}{"name"} = $entry_name,
+
+			$entry{$entry_id}{"school_id"}   = $school_id;
+			$entry{$entry_id}{"region_id"}   = $region_id;
+			$entry{$entry_id}{"district_id"} = $district_id;
+
+			$entry{$entry_id}{"school_name"}   = $school_name;
+
+			$entry{$entry_id}{"school_code"}   = $school_code;
+			$entry{$entry_id}{"region_code"}   = $region_code;
+			$entry{$entry_id}{"district_code"} = $district_code;
+
+		}
+	}
+
+	Tab::Entry->columns(TEMP => "roundname");
+
+	Tab::Entry->set_sql(debated => "
+		select entry.*, round.name as roundname
+		from entry, ballot, panel, ballot b2, round
+		where b2.entry = ? 
+		and b2.panel = panel.id
+		and panel.id = ballot.panel 
+		and panel.round = round.id
+		and round.id != ? 
+		and ballot.entry = entry.id
+		and b2.entry != ballot.entry
 	");
 
-	if ($ncfl) { 
+	my @hit_before = Tab::Entry->search_debated($entry->id, $round->id);
 
-		Tab::Panel->set_sql( same_school_hits => "
-			select count(distinct entry.id) 
-				from entry, ballot, school
-				where ballot.entry = entry.id
-				and entry.school = school.id
-				and entry.dropped = 0
-				and entry.dq = 0
-				
-				and school.region = ? 
-				and ballot.panel = ?
-			");  #my head hurts.
+	my %hits = map {$_->id => $_} @hit_before; 
 
-		$school_id = $entry->school->region->id;
+	my @panel_ids = sort {$panels{$b}{"me"} <=> $panels{$a}{"me"}} keys %panels;
 
-	} else { 
+	@panel_ids = sort {$panels{$a}{"entrycount"} <=> $panels{$b}{"entrycount"}} @panel_ids;
 
-		Tab::Panel->set_sql( same_school_hits => "
-			select count(distinct entry.id) 
-				from entry, ballot
-				where ballot.entry = entry.id
-				and entry.school = ? 
-				and entry.dropped = 0
-				and entry.dq = 0
-				
-				and ballot.panel = ?
-		");  #my head hurts.
-
-	} 
+	my $event = $round->event;
+	my @all_rounds = $event->rounds();
 
 </%init>
+
+	<div class="main">
+
+		<& "/funclib/tablesorter.mas", 
+			table     => "movedebate",
+			nobuttons => 1
+		&>
+
+		<div class="full">
+
+			<span class="half">
+				<h4 class="nospace">Adjust Pairing</h4>
+			</span>
+
+%			if ($entry) { 
+				<span class="half rightalign padno">
+					<h4 class="nospace">
+						Moving Entry: <% $entry->school->code %> <% $entry->code %>
+					</h4>
+				</span>
+%			}
+
+		</div>
+
+%		if ($entry) { 
+			<p>
+				Tap on an entry or blank position to swap in <%
+				$entry->code %>.  Orange entries have debated <%
+				$entry->code %> before.  Red entries are from the same
+				school/institution.
+			</p>
+%		}
+
+		<table id="movedebate">
+
+			<thead>
+
+				<tr class="yellowrow">
+
+					<th class="smallish">
+						Room
+					</th>
+
+					<th class="smallish">
+						Judges
+					</th>
+
+					<th class="smallish">
+						AFF
+					</th>
+
+					<th class="smallish">
+						NEG
+					</th>
+
+%					if ($round->type ne "prelim") { 
+						<th class="smallish">
+							Bracket	
+						</th>
+%					} 
+
+				</tr>
+
+			</thead>
+
+			<tbody>
+
+%				foreach my $panel_id (@panel_ids) { 
+
+					<tr>
+
+						<td class="smallish">
+							<a class="white" 
+								href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel_id %>"
+							>
+								<% $panels{$panel_id}{"room"}  
+									?  $panels{$panel_id}{"room"}  
+									: "NONE"
+								%>
+							</a>
+						</td>
+
+						<td class="smallish">
+<%perl>
+							foreach my $judge_id (keys %{$panels{$panel_id}{"judges"}}) {
+
+								my $same_school++ 
+									if $judge{$judge_id}{"school_id"} == 
+										$entry{$entry_id}{"school_id"};
+
+								my $same_region++ 
+									if $judge{$judge_id}{"region_id"} == 
+										$entry{$entry_id}{"region_id"};
+
+								$m->print('<div class="padless marno">');
+
+								if ($tourn_settings->{"nsda"} 
+									|| $tourn_settings->{"ncfl"}
+								) { 
+									my $sr = "dkred semibold whitetext" 
+										if $judge{$judge_id}{"region_id"} ==
+										$entry{$entry_id}{"region_id"};
+</%perl>
+									<span class="quarter <% $sr %>">
+										<% $judge{$judge_id}{"region_code"} %>
+									</span>
+<%perl>
+								} else { 
+									my $sr = "dkred semibold whitetext" 
+										if $judge{$judge_id}{"school_id"} ==
+										$entry{$entry_id}{"school_id"};
+</%perl>
+									<span class="quarter">
+										<% $judge{$judge_id}{"school_code"} 
+											 ? $judge{$judge_id}{"school_code"} 
+											 : $judge{$judge_id}{"school_name"} 
+										 %>
+									</span>
+%								}
+
+								<span class="threequarters">
+									<% $judge{$judge_id}{"code"} %>
+									<% $judge{$judge_id}{"first"} %>
+									<% $judge{$judge_id}{"last"} %>
+								</span>
+
+								</div>
+%							}
+
+						</td>
+
+%						foreach my $side ( 1 .. 2 ) { 
+
+							<td class="nospace centeralign noundies">
+
+<%perl>
+							if ($panels{$panel_id}{"entries"}{$side}) { 
+
+								foreach my $other_id (keys %{$panels{$panel_id}{"entries"}{$side}}) { 
+
+									my $class = "bluetext";
+									my $textclass = "redtext";
+									my $code = $entry{$other_id}{"code"};
+									my $school_code = $entry{$other_id}{"school_code"};
+									$school_code = $entry{$other_id}{"school_name"} unless $school_code;
+
+
+									if ($hits{$other_id}) { 
+										$class = "dkyellow semibold whitetext";
+										$textclass = "whitetext";
+									}
+
+									if ($entry{$other_id}{"school_id"} == $entry{$entry_id}{"school_id"}) { 
+										$class = "dkred semibold whitetext";
+										$textclass = "whitetext";
+									}
+
+									if ($tourn_settings->{"nsda_nats"} 
+										|| $tourn_settings->{"ncfl"}
+									) { 
+
+										if ($entry{$other_id}{"region_id"} == $entry{$entry_id}{"region_id"}) { 
+											$class = "dkred semibold whitetext";
+											$textclass = "whitetext";
+										}
+
+										$school_code = $entry{$other_id}{"region_code"};
+
+									} else { 
+										if ($entry{$other_id}{"region_id"} == $entry{$entry_id}{"region_id"}) { 
+											$class = "dkyellow semibold";
+											$textclass = "whitetext";
+										}
+										$school_code .= $entry{$other_id}{"region_code"};
+									}		
+
+
+
+</%perl>
+%									if ($entry_id == $other_id) { 
+
+										<div class="full padvert dkblue"> 
+											<span class="quarter">
+												<% $school_code %>
+											</span>
+											<span class="half">
+												<% $code %>
+											</span>
+											<span class="quarter">
+												MOVING
+											</span>
+											<div class="padless marno whitetext centeralign">
+											<& "/funclib/entry_sides.mas", 
+												entry_id => $other_id,
+												print    => 1,
+												rounds   => \@all_rounds,
+												event    => $event
+											&></div>
+										</div>
+
+%									} else { 
+
+										<a class="plain nospace grayhover" 
+											title="Swap with <% $entry{$other_id}{"name"} %>"
+											href="debate_swap.mhtml?entry_id=<% $entry_id %>&panel_id=<% $panel_id %>&side=<% $side %>">
+
+											<div class="full padvert <% $class %>">
+												<span class="quarter">
+													<% $school_code %>
+												</span>
+												<span class="half">
+													<% $code %>
+												</span>
+												<span class="quarter">
+													<% $hits{$other_id} ? "Hit R".$hits{$other_id}->roundname : "" %>
+												</span>
+
+												<div class="padless marno centeralign <% $textclass %>">
+													<& "/funclib/entry_sides.mas", 
+														entry_id => $other_id,
+														print    => 1,
+														rounds   => \@all_rounds,
+														event    => $event
+													&></div>
+											</div>
+										</a>
+%									}
+%								}
+
+%							} else { 
+								<div class="full padvert centeralign">
+									<a class="buttonwhite bluetext invert" 
+										href="debate_swap.mhtml?entry_id=<% $entry_id %>&panel_id=<% $panel_id %>&side=<% $side %>">
+									EMPTY SPOT
+									</a>
+								</div>
+%							}
+
+							</td>
+%						}
+
+%						if ($round->type ne "prelim") { 
+							<td class="smallish centeralign">
+								<% $panels{$panel_id}{"bracket"} %>
+							</td>
+%						}
+
+					</tr>
+
+%				}
+
+			</tbody>
+
+		</table>
+
+	</div>
 
 	<div class="menu">
 
@@ -141,7 +427,12 @@
 			<h5>Move another debater:</h5>
 
 			<form action="debate_round_edit.mhtml" method="post">
-			<input type="hidden" name="round_id" value="<% $round_id %>">
+
+			<input 
+				type  = "hidden"
+				name  = "round_id"
+				value = "<% $round_id %>"
+			>
 				
 			<div class="evenrow full">
 				
@@ -223,34 +514,59 @@
 			<h4>Add More Rooms</h4>
 
 			<div class="evenrow full padless">
-				<form action="create_panels.mhtml" method="post">
-				<input type="hidden" name="round_id" value="<% $round->id %>">
-				<input type="hidden" name="entry_id" value="<% $entry_id %>">
 
-				<span class="smallish smallerspan padless">
+				<form action="create_panels.mhtml" method="post">
+
+				<input 
+					type  = "hidden"
+					name  = "round_id"
+					value = "<% $round->id %>"
+				>
+
+				<input 
+					type  = "hidden"
+					name  = "entry_id"
+					value = "<% $entry_id %>"
+				>
+
+				<span class="smallish quarter padless">
 					Number
 				</span>
 
-				<span class="eighty padless">
-					<input class="notfirst thin" type="number" size="3" min="0" max="999" name="number">
+				<span class="half padless">
+					<input 
+						class = "notfirst thin"
+						type  = "number"
+						size  = "3"
+						min   = "0"
+						max   = "999"
+						name  = "number"
+					>
 				</span>
 
-				<span class="smallerspan padless">
-					<input type="submit" value="Go" class="notfirst thin">
+				<span class="smallish padless">
+					<input 
+						type  = "submit"
+						value = "Go"
+						class = "notfirst thin"
+					>
 					</form>
 				</span>
 			</div>
 
-%			my ($none_ref, $bye_ref) = $m->comp("/funclib/round_byes.mas", round => $round);
+<%perl>
+			my ($none_ref, $bye_ref) = 
+				$m->comp("/funclib/round_byes.mas", 
+					round => $round
+				);
 
-%			if (@{$none_ref}) { 
+			if (@{$none_ref}) { 
+</%perl>
 				<h4>Not Assigned</h4>
 %				foreach my $none (@{$none_ref}) { 
-%					next if $none->waitlist;
-%					next if $none->dropped;
 					<a class="nowrap <% $none->id == $entry_id ? "dk" : "" %>yellow full" 
 						href="debate_round_edit.mhtml?round_id=<% $round->id %>&entry_id=<% $none->id %>">
-						<% $none->code %>
+						<% $none->code %> <% $none->name %>
 					</a>
 %				}
 %			}
@@ -266,164 +582,14 @@
 
 %			if ($entry) { 
 
-				<a class="ltyellow full" 
+				<a class="yellow half semibold bluetext" 
 					href="debate_bye.mhtml?round_id=<% $round->id %>&entry_id=<% $entry->id %>">
 					Give <% $entry->code %> a bye
 				</a>
 %			}
 
-
-
 		</div>
 
 	</div>
-
-	<div class="main">
-
-		<& /funclib/tablesorter.mas, table => "sortme" &>
-
-		<div class="full">
-			<span class="half" style="height: 36px;">
-				<h2 class="padno marno">Move Entry</h2>
-			</span>
-%			if ($entry) { 
-				<span class="half rightalign padno">
-					<h4 class="padno" style="padding-top: 12px;"><% $entry->school->code %> <% $entry->code %> </h2>
-				</span>
-%			}
-		</div>
-
-%			if ($entry) { 
-				<p>
-					Tap on an entry or blank position to swap in <% $entry->code %>.  Orange entries have debated <% $entry->code %> before.  Red entries are from the same school/institution.
-				</p>
-%			}
-
-			<table cellpadding="4" cellspacing="1" id="sortme">
-
-				<thead>
-
-					<tr class="yellowrow">
-
-						<th class="smallish">
-							Room
-						</th>
-
-						<th class="smallish">
-							Judges
-						</th>
-
-						<th class="smallish">
-							AFF
-						</th>
-
-						<th class="smallish">
-							NEG
-						</th>
-
-						<th class="smallish">
-							Bracket	
-						</th>
-
-					</tr>
-
-				</thead>
-
-				<tbody>
-
-%					foreach my $panel (@panels) { 
-
-%						next if $panel->bye && $round->type ne "elim";
-%						my $mine;
-
-						<tr>
-
-							<td class="smallish">
-								<a class="white" 
-									href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel->id %>">
-								<% $panel->room && $panel->room->name ? $panel->room->name : " None" %>
-								</a>
-							</td>
-
-							<td class="smallish">
-%								foreach my $judge ($m->comp("/funclib/panel_judges.mas", panel => $panel)) { 
-
-									<span 
-										class="<% $panel_judge_hits{$panel->id} ? "strike" : "white" %> 
-											padno huntwofive nowrap full"
-									>
-
-										<a class="
-											<% $judge->school && $judge->school->id == $school_id 
-												? "dkred" 
-												: $judges_hit{$judge->id} 
-													? "dkyellow" 
-													: "white" 
-											%> padless full" 
-											href="/register/judge/edit.mhtml?judge_id=<% $judge->id %>">
-											(<% $judge->school ? $judge->school->code : "HIRE" %>)
-											<% $judge->last.", ".$judge->first %>
-										</a>
-									</span>
-%								}
-							</td>
-
-%							foreach my $side ( 1 .. 2 ) { 
-
-%								my $other_id = $entry_panel_id{$panel->id}{$side};
-%								my $other_code = $entry_panel_code{$panel->id}{$side};
-%								my $other_school = $entry_panel_school{$panel->id}{$side};
-
-								<td class="smallish <% $other_id ? "" : "dkblue centeralign padno marno " %> 
-							        <% $other_id == $entry_id ? "dkbluenohover" : $other_school == $school_id ? "red" : $entries_hit{$other_id} ? "orange" : "" %> 
-									">
-
-%									unless ($entry_id == $other_id) { 
-										<a class="full padno marno" 
-											href="debate_swap.mhtml?entry_id=<% $entry_id %>&panel_id=<% $panel->id %>&side=<% $side %>">
-%									}
-
-%									if ($entry_id == $other_id) { 
-										<span class="padno">
-											ME:
-%									} else { 
-										<span class="white padno">
-%									}
-
-%										if ($other_id) {
-											<% $other_code %>
-%										} else { 
-												EMPTY
-%										} 
-										</span>
-
-										<div class="full padno smaller rightalign">
-%											if ($other_id) {
-												<% $m->comp("/funclib/entry_sides.mas", entry_id => $other_id) %>
-%											} 
-										</div>
-
-									</a>
-
-								</td>
-%							}
-
-							</td>
-
-							<td class="smallish centeralign">
-								<% $panel->bracket %>
-							</td>
-
-						</tr>
-
-%					}
-
-				</tbody>
-
-			</table>
-
-	</div>
-
-
 
 	
