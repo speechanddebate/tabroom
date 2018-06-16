@@ -1,20 +1,20 @@
 <%args>
-	$round_id
-	$flight => 1
 	$tourn
 	$tourn_settings
+	$round_id
+	$flight => 1
 </%args>
 <%init>
 
-	my $round = Tab::Round->retrieve($round_id);
-	my $event = $round->event;
+	my $round    = Tab::Round->retrieve($round_id);
+	my $event    = $round->event;
+	my $category = $event->category;
+	my %event_settings = $event->all_settings;
 
 	my $flights = $round->flighted; 
-
 	my $wudc++ if $event->type eq "wudc";
-
-	my $rounds_per = $event->category->setting("rounds_per");
-	my $online_ballots = $event->setting("online_ballots");
+	my $rounds_per = $category->setting("rounds_per");
+	my $online_ballots = $event_settings{"online_ballots"};
 
 	my $jpool_limit;
 	my $jpool_table;
@@ -30,8 +30,8 @@
 		$jpool_limit = " and judge.category = event.category ";
 	}
 
-	my $aff_string = $event->setting("aff_string");
-	my $neg_string = $event->setting("neg_string");
+	my $aff_string = $event_settings{"aff_string"};
+	my $neg_string = $event_settings{"neg_string"};
 
 	$aff_string = "Aff" unless $aff_string;
 	$neg_string = "Neg" unless $neg_string;
@@ -51,12 +51,14 @@
 	Tab::Judge->columns(TEMP => "tab_rating");
 	Tab::Judge->columns(TEMP => "coach_rating");
 	Tab::Judge->columns(TEMP => "parli");
+	Tab::Judge->columns(TEMP => "regioncode");
 
 	Tab::Judge->set_sql( available_judges => "
 
 		select distinct judge.id, judge.first, judge.last, judge.obligation, judge.hired, 
 			tab_rating.value tab_rating,
 			coach_rating_tier.name coach_rating,
+			region.code regioncode,
 			parli.value parli
 		from (judge, event, round, $jpool_table timeslot)
 		left join judge_setting tab_rating 
@@ -73,6 +75,9 @@
 
 		left join rating_tier coach_rating_tier
 			on coach_rating_tier.id = coach_rating.rating_tier
+
+		left join school on judge.school = school.id
+		left join region on school.region = region.id
 
 		where judge.active = 1
 		and judge.active = 1
@@ -115,15 +120,20 @@
 
 	my %judge_by_id = map {$_->id => $_} @all_judges;
 
-	my @round_judges = $m->comp("/funclib/round_judges.mas", round => $round);
+	my @round_judges = $m->comp(
+		"/funclib/round_judges.mas", 
+		round => $round
+	);
 
-	my $use_ref = $m->comp("/funclib/judge_use.mas", round_id => $round->id);
+	my $use_ref = $m->comp(
+		"/funclib/judge_use.mas", 
+		round_id => $round->id
+	);
 
 	foreach my $judge (@round_judges) { 
 		next if $judge_by_id{$judge->id};
 		$judge_by_id{$judge->id} = $judge;
 	}
-
 
 	my @panels = Tab::Panel->search_like( 
 		flight    => $flight,
@@ -131,9 +141,19 @@
 		{order_by => 'bracket'}
 	);
 
-	my %entry_by_id = map {$_->id => $_} $round->event->entries(active => 1);
+	Tab::Entry->columns(TEMP => "regioncode");
+	Tab::Entry->set_sql(all => "
+		select entry.*, region.code as regioncode
+		from entry
+		left join school on entry.school = school.id
+		left join region on school.region = region.id
+			where entry.active = 1
+			and entry.event = ? 
+	");
 
-	my $prefs = $event->category->setting("prefs");
+	my %entry_by_id = map {$_->id => $_} Tab::Entry->search_all($event->id);
+
+	my $prefs = $category->setting("prefs");
 	undef $prefs if $prefs eq "none";
 
 	my $dbh = Tab::DBI->db_Main();
@@ -142,8 +162,8 @@
 		select distinct panel.id, ballot.chair, ballot.judge, 
 			ballot.entry, ballot.side, ballot.speakerorder
 		from panel, ballot
-		where panel.round = ".$round->id."
-		and panel.flight = ".$flight."
+		where panel.round = ? 
+		and panel.flight = ? 
 		and panel.id = ballot.panel
 		group by ballot.id
 	");
@@ -155,7 +175,7 @@
 	my %entry_order;
 	my %used_judge;
 
-	$this_round_sth->execute;
+	$this_round_sth->execute($round->id, $flight);
 
 	while (
 		my ($panel, $chair, $judge, $entry, $side, $order)  
@@ -170,8 +190,12 @@
 
 	my %judge_constraints = $m->comp(
 		"/funclib/judge_cannotsee.mas", 
-		category => $round->event->category,
-		round    => $round
+		category       => $category,
+		round          => $round,
+		event          => $event,
+		event_settings => \%event_settings,
+		tourn          => $tourn,
+		tourn_settings => $tourn_settings
 	);
 
 	my %judge_ratings = $m->comp(
@@ -179,13 +203,13 @@
 		event => $round->event
 	);
 
-	my $blind_mode = $event->setting('blind_mode');
+	my $blind_mode = $event_settings{'blind_mode'};
 	undef $blind_mode if $round->published > 0;
 
 	my %anonymize = $m->comp("/funclib/blind_mode.mas", round => $round)
 		if $blind_mode;
 
-	my $code_style = $event->setting('code_style');
+	my $code_style = $event_settings{'code_style'};
 
 	my $code_size = "threetenths";
 
@@ -232,14 +256,13 @@
 						panel_id : droppableId,
 						chair    : isChair
                     }).done(function(data) { 
-
 						console.log(data);
-
                         if (data.error) { 
                             alertify.warning(data.message);
                         } else { 
+							console.log(data.message);
                             alertify.set('notifier','delay', 2);
-                            alertify.notify(data.message);
+							alertify.notify(data.message, "custom")
                             alertify.set('notifier','delay', 5);
                         }
                     });
@@ -311,8 +334,13 @@
 
 	<div class="main yscroll">
 
-		<h2><% $round->realname %> Manual Judges</h2>
-
+		<span class="threequarters nospace">
+			<h2 class="nospace"><% $round->realname %> Manual Judges</h2>
+		</span>
+		<span 
+			id    = "judgeme_buttonarea"
+			class = "quarter rightalign">
+		</span>
 
 %       if ($flights > 1) { 
 
@@ -447,6 +475,10 @@
 
 								$entry_name = $entry_by_id{$entry}->name;
 								$entry_code = $entry_by_id{$entry}->code;
+
+								if ($tourn_settings->{"nsda_nats"} || $tourn_settings->{"ncfl"}) { 
+									$entry_code = $entry_by_id{$entry}->regioncode." ".$entry_code;
+								}
 							}
 
 </%perl>
@@ -543,11 +575,15 @@
 							next unless $judge;
 
 							my $judge_name;
+
+							if ($tourn_settings->{"nsda_nats"} || $tourn_settings->{"ncfl"}) { 
+								$judge_name = $judge->regioncode." ";
+							}
 							
 							if ($blind_mode) { 
-								$judge_name = $anonymize{"judge"}{$judge->id};
+								$judge_name .= $anonymize{"judge"}{$judge->id};
 							} else { 
-								$judge_name = $judge->last.". ".$judge->first;
+								$judge_name .= $judge->last.". ".$judge->first;
 							}
 </%perl>
 
@@ -599,10 +635,14 @@
 
 							my $judge_name;
 
+							if ($tourn_settings->{"nsda_nats"} || $tourn_settings->{"ncfl"}) { 
+								$judge_name = $judge->regioncode." ";
+							}
+
 							if ($blind_mode) { 
-								$judge_name = $anonymize{"judge"}{$judge->id};
+								$judge_name .= $anonymize{"judge"}{$judge->id};
 							} else { 
-								$judge_name = $judge->last.". ".$judge->first;
+								$judge_name .= $judge->last.". ".$judge->first;
 							}
 
 </%perl>
@@ -699,10 +739,14 @@
 
 					my $judge_name;
 
+					if ($tourn_settings->{"nsda_nats"} || $tourn_settings->{"ncfl"}) { 
+						$judge_name = $judge->regioncode." ";
+					}
+
 					if ($blind_mode) { 
-						$judge_name = $anonymize{"judge"}{$judge->id};
+						$judge_name .= $anonymize{"judge"}{$judge->id};
 					} else { 
-						$judge_name = $judge->last.". ".$judge->first;
+						$judge_name .= $judge->last.". ".$judge->first;
 					}
 
 </%perl>
