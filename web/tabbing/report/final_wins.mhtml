@@ -1,0 +1,297 @@
+<%args>
+	$tourn
+	$session
+	$tourn_settings
+	$event_id => undef
+</%args>
+<%init>
+
+	my $event = Tab::Event->retrieve($event_id);
+
+	my $final = $event->rounds(
+		type => "final"
+	)->first;
+
+    my @elims = sort {$b->name <=> $a->name} $event->rounds(type => "elim");
+
+	Tab::debuglog("Elims is ".scalar @elims);
+
+    my $last_elim = $elims[0] if @elims;
+
+    my $min_round_name = 7;
+    my $max_round_name = $min_round_name + scalar @elims;
+    my $final_number = $final->name;
+
+	my $final_tbs = $final->tiebreak_set if $final;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare(" 
+		select entry.id, 
+			entry.code, 
+				GROUP_CONCAT(
+					distinct(CONCAT(student.first,' ',student.last))
+					SEPARATOR ' & '
+				) as entryname,
+			school.name, school.state,
+			round.id, round.name, 
+			rank.tag, rank.value,
+			winloss.tag, winloss.value
+		from (entry, round, panel, ballot, school, entry_student, student)
+
+		left join score rank on rank.tag = 'rank' 
+			and rank.ballot = ballot.id
+
+		left join score winloss on winloss.tag = 'ballot' 
+			and winloss.ballot = ballot.id
+
+		where entry.event = ? 
+			and entry.id = ballot.entry
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and entry.school = school.id
+			and (
+				round.type = 'elim'
+				or round.type = 'final'
+			)
+
+			and entry_student.entry = entry.id
+			and entry_student.student = student.id
+
+		group by ballot.id
+
+	");
+
+	$sth->execute($event->id);
+
+	my %entries;
+	my %results;
+	my $max_round;
+
+	while (
+		my ($entry_id, $entry_code, $entry_name, $school_name, $school_state,
+			$round_id, $round_name, 
+			$rank_tag, $rank_value, 
+			$winloss_tag, $winloss_value
+		) = $sth->fetchrow_array()
+	) { 
+
+		if ($results{$entry_id}{$round_name} && $round_name == $final_number) { 
+			$results{$entry_id}{$round_name} .= " \\hspace{2mm} ";
+		} else { 
+			$results{$entry_id}{$round_name} .= " \\hspace{.1mm}";
+		}
+
+		if ($winloss_tag) { 
+			$results{$entry_id}{$round_name} .= "W" if $winloss_value == 1; 
+			$results{$entry_id}{$round_name} .= "L" if $winloss_value == 0; 
+		} else {
+			$results{$entry_id}{$round_name} .= $rank_value if $rank_tag;
+		}
+
+		if ($final 
+			&& $round_id == $final->id
+			&& (not defined $results{$entry_id}{"finals"})
+		) { 
+			push @{$results{"finals"}}, $entry_id;
+			$results{$entry_id}{"finals"}++;
+		} elsif (not defined $results{$entry_id}{"semis"}) { 
+			$results{$entry_id}{"semis"}++;
+			push @{$results{"semis"}}, $entry_id;
+		}
+
+		$max_round = $round_name if $max_round < $round_name;
+
+		$entries{$entry_id}{"code"}   = $entry_code;
+		$entries{$entry_id}{"name"}   = $entry_name;
+		$entries{$entry_id}{"state"}  = $school_state;
+		$entries{$entry_id}{"school"} = $school_name;
+
+	}
+
+	my $entry_count;
+	my $previous;
+
+	my %done;
+
+	foreach my $round ($final, @elims) { 
+
+		my @results = $m->comp(
+			"/tabbing/results/order_entries.mas",
+			round        => $round,
+			tiebreak_set => $final_tbs
+		);
+
+		my $round_ref = pop @results if @results;
+		my $round_count;
+
+		if (${$round_ref}{"by_place"}) {
+			foreach my $key (sort {$a <=> $b} keys %{${$round_ref}{"by_place"}}) {
+				foreach my $entry_id (@{${${$round_ref}{"by_place"}}{$key}}) {
+					next if $done{$entry_id}++;
+
+					$entries{$entry_id}{"place"} = $key;
+					$round_count++;
+
+					$entries{$entry_id}{"final_count"} = $round_ref->{"tiebreak"}{1}{$entry_id};
+
+					$entries{$entry_id}{"last_round"} = $round_ref->{"tiebreak"}{2}{$entry_id};
+					$entries{$entry_id}{"elim_ballots"} = $round_ref->{"tiebreak"}{3}{$entry_id};
+					$entries{$entry_id}{"prelim_ballots"} = $round_ref->{"tiebreak"}{5}{$entry_id};
+					$entries{$entry_id}{"h2h_elim"} = $round_ref->{"tiebreak"}{6}{$entry_id};
+					$entries{$entry_id}{"h2h_prelim"} = $round_ref->{"tiebreak"}{7}{$entry_id};
+				}
+			}
+		}
+
+		$previous += $round_count;
+		last if $previous >= 14;
+	}
+
+	my $name = $event->name;
+	$name =~ s/[\W_]//g;
+
+    my $filename = "FinalResults-$name-".$session->id;
+    my $filepath = $Tab::file_root."tmp/".$filename;
+    `rm -f $filepath.*`;
+
+    $m->comp("/funclib/printout.mas", 
+        tourn     => $tourn,
+        filename  => $filename,
+        head      => 1,
+        array     => "1.8",
+        landscape => 1,
+    );  
+
+    open (TEXOUT, ">>$filepath.tex");
+
+	print TEXOUT "\\strut \\hfill \\huge \\textsb{".$event->name."} \\hfill \\strut";
+	print TEXOUT "\\medskip\n";
+	print TEXOUT "\\newline\n";
+
+	print TEXOUT "\\strut \\hfill \\Large ".$event->setting("result_description")." \\hfill \\strut";
+	print TEXOUT "\\medskip\n";
+	print TEXOUT "\\newline\n";
+
+	print TEXOUT "\\scriptsize\n";
+	print TEXOUT "\\begin{tabular}{p{.30in}p{1.75in}p{1.25in}p{.25in}";
+
+	my $elimcount = (scalar @elims) + 6;
+	my $count_twice = $elimcount - 2;
+
+	foreach my $round (7 .. $count_twice) { 
+		print TEXOUT "p{.30in}";
+	}
+
+	print TEXOUT "p{.35in}p{.35in}";
+
+	print TEXOUT "p{.2in}p{.2in}p{.4in}}\n";
+
+	print TEXOUT "\\rowcolor[rgb]{1,.96,.66}\[5.5pt\]\[5.5pt\]\n";
+	foreach my $header ("Code", "Name", "School", "State") { 
+		print TEXOUT "\\textsb{".$header."} & ";
+	}
+
+	foreach my $round (7 .. $elimcount) { 
+		next if $round == $final_number;
+		print TEXOUT "\\textsb{R".$round."} & ";
+	}
+
+	print TEXOUT "\\textsb{Rnd} & \\textsb{EBal} & \\textsb{Place} \\\\";
+
+	my $switch;
+
+	foreach my $entry_id (
+		sort {$entries{$b}{"place"} <=> $entries{$a}{"place"}}
+		@{$results{"semis"}}
+	) { 
+
+		next if $results{$entry_id}{"finals"};
+		next unless $entries{$entry_id}{"place"} > 0;
+		next if $entries{$entry_id}{"place"} > 14;
+
+		print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2; 	
+
+		print TEXOUT Tab::texify($entries{$entry_id}{"code"}); 
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"name"});
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"school"});
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"state"});
+		print TEXOUT " & ";
+
+		foreach my $round (7 .. $elimcount) { 
+			print TEXOUT $results{$entry_id}{$round}." & ";
+		}
+
+		print TEXOUT "\\footnotesize\n";
+		print TEXOUT $entries{$entry_id}{"last_round"}." & ";
+		print TEXOUT "\\footnotesize\n";
+		print TEXOUT $entries{$entry_id}{"elim_ballots"}." & ";
+		print TEXOUT "\\footnotesize\n";
+
+		unless ($results{$entry_id}{"finals"}) { 
+			print TEXOUT "\\hfill \\textsb{".Tab::texify(Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"place"}))."} \\hfill \\strut ";
+		}
+		print TEXOUT "\\\\ \n";
+	}
+
+	print TEXOUT "\\end{tabular}\n";
+
+	print TEXOUT "\\bigskip\n";
+	print TEXOUT "\\newline\n";
+
+	print TEXOUT "\\strut \\hfill \\Large Finalists \\hfill \\strut";
+	print TEXOUT "\\medskip\n";
+	print TEXOUT "\\newline\n";
+
+	print TEXOUT "\\footnotesize\n";
+	print TEXOUT "\\begin{tabular}{p{.25in}p{2.5in}p{1.5in}p{.4in}p{2in}p{.75in}p{.75in}}\n";
+
+	print TEXOUT "\\rowcolor[rgb]{1,.96,.66}\[5.5pt\]\[5.5pt\]\n";
+
+	foreach my $header ("Code", "Name", "School", "State") { 
+		print TEXOUT "\\textsb{".$header."} & ";
+	}
+
+	print TEXOUT "\\textsb{ Finals } & ";
+
+	print TEXOUT "\\textsb{ Final Ballots } & \\textsb{Place} \\\\";
+
+	foreach my $entry_id (
+		sort {$entries{$b}{"place"} <=> $entries{$a}{"place"}}
+		@{$results{"finals"}}
+	) { 
+
+		print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2; 	
+
+		print TEXOUT Tab::texify($entries{$entry_id}{"code"}); 
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"name"});
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"school"});
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"state"});
+		print TEXOUT " & ";
+
+		print TEXOUT "\\footnotesize\n";
+		print TEXOUT $results{$entry_id}{$final_number}." & ";
+		print TEXOUT "\\footnotesize\n";
+		print TEXOUT $entries{$entry_id}{"final_count"}." & ";
+		print TEXOUT "\\footnotesize\n";
+
+		print TEXOUT "\\textsb{".Tab::texify(Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"place"}))."}";
+		print TEXOUT "\\\\ \n";
+	}
+
+	print TEXOUT "\\end{tabular}\n";
+
+    $m->comp("/funclib/printout.mas",
+        tourn     => $tourn,
+        filename  => $filename,
+        landscape => 1,
+        tail      => 1
+    );
+
+</%init>
