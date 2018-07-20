@@ -33,12 +33,36 @@
 			and alt_event_id = ? 
 	");
 
+	Tab::NSDA::Points->set_sql(killme => "
+		delete auto_points.* 
+		from auto_points
+		where event_id = ? 
+		and nfl_student_id = ? 
+	");
+
+	Tab::NSDA::PostedPoints->set_sql(killme => "
+		delete point.*
+		from NEW_POINTS point, AUTO_POINT_TRANSFER apt
+		where apt.alt_event_id = ? 
+		and apt.nfl_student_id = ? 
+		and apt.point_id = point.point_id
+	");
+
+	Tab::NSDA::APT->set_sql(killme => "
+		delete apt.*
+		from AUTO_POINT_TRANSFER apt
+		where apt.alt_event_id = ? 
+		and apt.nfl_student_id = ? 
+	");
+
 	# This should be A for actually posting, N for testing, and X for expired.
 	# I didn't come up with the letter codes, don't blame me. 
 
 	my $status = "A"; 
 
 	if ($ARGS{"attach"}) { 
+
+		Tab::debuglog("attach mode activated!");
 
 		#IGNORE!
 
@@ -215,8 +239,9 @@
 				status   => $status,
 			)->first;
 
+		}
 
-		} else { 
+		unless ($instance) { 
 
 			$instance = Tab::NSDA::Instance->create({
 				status     => $status,
@@ -277,6 +302,8 @@
 		foreach my $event ($tourn->events) { 
 
 			next if $ARGS{"exclude_".$event->id};
+
+			Tab::debuglog("Doing event $event which is ".$event->name);
 
 			my $nsda_event_category;
 			my $nsda_cat;
@@ -442,6 +469,13 @@
 					foreach my $student_id (keys %students) {
 
 						my $ualt = $student_data{$student_id}{"ualt"};
+
+						if ($ARGS{"attach"}) { 
+							Tab::NSDA::PostedPoints->sql_killme->execute($event->id, $ualt);
+							Tab::NSDA::APT->sql_killme->execute($event->id, $ualt);
+							Tab::NSDA::Points->sql_killme->execute($event->id, $ualt);
+						}
+
 						next unless $ualt;
 
 						my $name = $student_data{$student_id}{"name"};
@@ -484,13 +518,12 @@
 									$day_total += $average;
 							
 								}
-
 							}
 
 							$day_total = $points_cap if $day_total > $points_cap;
 
 							next unless $day_total;
-
+	
 							Tab::NSDA::Points->create({
 								id             => $count++,
 								instance_id    => $instance->id,
@@ -546,6 +579,7 @@
 					my $nfl_school_id  = $student_nsda{$student_id}{"chapter"};
 					my $ualt = $student_data{$student_id}{"ualt"};
 					my $name = $student_data{$student_id}{"name"};
+
 
 					Tab::NSDA::Points->create({
 						id             => $count++,
@@ -629,8 +663,8 @@
 							entry.id, entry.school,
 							round.type, round.id, round.name,
 							panel.id, panel.letter, panel.bye, 
-							ballot.bye, ballot.forfeit, ballot.judge,
-							score.tag, score.value, score.student
+							ballot.id, ballot.bye, ballot.forfeit, ballot.judge,
+							score.id, score.tag, score.value, score.student
 
 						from (student, panel, ballot, entry_student, round, entry)
 
@@ -650,6 +684,8 @@
 
 						and entry.active = 1
 
+						group by score.id
+
 					");
 
 					$result_sth->execute($event->id);
@@ -664,8 +700,8 @@
 								$entry_id, $school_id,
 								$round_type, $round_id, $round_name,
 								$panel_id, $panel_letter, $panel_bye,
-								$ballot_bye, $ballot_forfeit, $judge_id,
-								$score_tag, $score_value, $score_student
+								$ballot_id, $ballot_bye, $ballot_forfeit, $judge_id,
+								$score_id, $score_tag, $score_value, $score_student
 							) = $result_sth->fetchrow_array()
 						) { 
 
@@ -685,18 +721,10 @@
 							} elsif ($score_tag eq "ballot") { 
 
 								if ($score_value > 0) { 
-									if ($round_type eq "prelim" && $edata{$entry_id}{"round"}{$round_id}{"result"} eq "L") { 
-										$edata{$entry_id}{"round"}{$round_id}{"result"} = "S";
-									} else { 
-										$edata{$entry_id}{"round"}{$round_id}{"result"} = "W";
-									}
+									$edata{$entry_id}{"round"}{$round_id}{"result"} = "W";
 									$edata{$entry_id}{"round"}{$round_id}{"wins"}++;
 								} else { 
-									if ($round_type eq "prelim" && $edata{$entry_id}{"round"}{$round_id}{"result"} eq "W") { 
-										$edata{$entry_id}{"round"}{$round_id}{"result"} = "S";
-									} else { 
-										$edata{$entry_id}{"round"}{$round_id}{"result"} = "L";
-									}
+									$edata{$entry_id}{"round"}{$round_id}{"result"} = "L";
 									$edata{$entry_id}{"round"}{$round_id}{"losses"}++;
 								}
 
@@ -709,6 +737,7 @@
 									} elsif ($edata{$entry_id}{"round"}{$round_id}{"wins"} == 2) { 
 										$edata{$entry_id}{"round"}{$round_id}{"points"} = "10";
 									} elsif ($edata{$entry_id}{"round"}{$round_id}{"wins"} == 1) { 
+										$edata{$entry_id}{"round"}{$round_id}{"result"} = "S";
 										$edata{$entry_id}{"round"}{$round_id}{"points"} = "8";
 									} else { 
 										$edata{$entry_id}{"round"}{$round_id}{"points"} = "7";
@@ -840,14 +869,21 @@
 					}
 
 					my $count = 1;
-
+								
 					foreach my $entry_id (keys %edata) { 
 
 						foreach my $student_id (keys %{$edata{$entry_id}{"students"}}) { 
+								
+							my $ualt = $student_data{$student_id}{"ualt"};
+
+							if ($ARGS{"attach"}) { 
+								Tab::NSDA::PostedPoints->sql_killme->execute($event->id, $ualt);
+								Tab::NSDA::APT->sql_killme->execute($event->id, $ualt);
+								Tab::NSDA::Points->sql_killme->execute($event->id, $ualt);
+							}
 
 							my $school_id = $student_nsda{$student_id}{"school"};
 							my $nfl_school_id  = $student_nsda{$student_id}{"chapter"};
-							my $ualt = $student_data{$student_id}{"ualt"};
 
 							next unless $school_id && $nfl_school_id && $ualt;
 
@@ -855,7 +891,7 @@
 
 								my $result = $edata{$entry_id}{"round"}{$round_id}{"result"};
 								$result = "" unless $result;
-							
+										
 								my $APT;
 
 								Tab::NSDA::Points->create({
@@ -937,7 +973,6 @@
 						}
 
 					}
-
 
 				} else { 
 
@@ -1153,6 +1188,12 @@
 
 									my $ualt = $student_data{$student}{"ualt"};
 									my $name = $student_data{$student}{"name"};
+
+									if ($ARGS{"attach"}) { 
+										Tab::NSDA::PostedPoints->sql_killme->execute($event->id, $ualt);
+										Tab::NSDA::APT->sql_killme->execute($event->id, $ualt);
+										Tab::NSDA::Points->sql_killme->execute($event->id, $ualt);
+									}
 
 									if ($event->type eq "wsdc") { 
 
