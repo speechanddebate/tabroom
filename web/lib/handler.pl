@@ -36,6 +36,7 @@ use Sys::Syslog;
 
 use Tab::General;
 use Tab::DBI;
+use Tab::Ad;
 use Tab::Person;
 use Tab::PersonSetting;
 use Tab::Conflict;
