@@ -10,7 +10,6 @@ var cookieParser = require('cookie-parser');
 var bodyParser = require('body-parser');
 var crypt = require('crypt3');
 
-var db = require(__dirname + '/models');
 
 var app = express();
 

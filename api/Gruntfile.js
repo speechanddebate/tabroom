@@ -10,13 +10,11 @@ module.exports = function(grunt) {
 				// files to lint
 				src: [
 					'app.js',
-					'routes/*.js',
-					'models/*.js',
+					'routes/*.js'
 				],
 				// files to exclude
 				exclude: [
 					'config/config.js',
-					'models/index.js'
 				],
 				// lint options
 				directives: {
