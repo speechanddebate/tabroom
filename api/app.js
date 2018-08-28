@@ -10,7 +10,6 @@ var cookieParser = require('cookie-parser');
 var bodyParser = require('body-parser');
 var crypt = require('crypt3');
 
-
 var app = express();
 
 	// View engine setup -- Jade
