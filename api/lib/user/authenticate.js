@@ -18,58 +18,72 @@ var BluePromise = require('bluebird');
 						
 		req.session = { };
 
-		db.session.findAll(
-			{ 
-				where: { userkey: req.cookies[config.cookieName] },
-				include: [
-					{ model: db.person, required: true },
-					{ model: db.person, as: "su", required: false}
-				]
-			}
+		if (req.cookies[config.cookieName]) { 
 
-		).then(function(Sessions) { 
+			db.session.findAll(
+				{ 
+					where: { userkey: req.cookies[config.cookieName] },
+				}
 
-			if (Sessions[0]) { 
+			).then(function(Sessions) { 
 
-				var Session = Sessions[0];
+				if (Sessions[0]) { 
 
-				var cryptString = Session.id.toString()+config.sessionSalt;
-				var cryptHash = req.cookies[config.cookieName];
+					var Session = Sessions[0];
 
-				if (Session) { 
+					var cryptString = Session.id.toString()+config.sessionSalt;
+					var cryptHash = req.cookies[config.cookieName];
 
-					if (crypt(cryptString, cryptHash) === cryptHash) {
+					if (Session) { 
 
-						res.locals.session = Session.id;
+						if (crypt(cryptString, cryptHash) === cryptHash) {
 
-						if (Session.su) { 
-							res.locals.su = Session.su.id;
-							req.app.su = Session.su.id;
+							res.locals.session = Session.id;
+
+							if (Session.person) { 
+
+								db.person.findById(Session.person).then(function(Person) { 
+
+									res.locals.person = Person.id;
+									res.locals.username = Person.email;
+									res.locals.realname = Person.first;
+
+									if (Person.middle) { 
+										res.locals.realname += " "+Person.middle;
+									}
+									res.locals.realname += " "+Person.last;
+									res.locals.site_admin = Person.site_admin;
+
+									if (Session.su) { 
+										res.locals.su = Session.su;
+										req.app.su = Session.su;
+									}
+
+									req.session = { 
+										person     : res.locals.person,
+										site_admin : res.locals.site_admin,
+									};
+								
+									next();
+
+								});
+
+							} else { 
+							
+								next();
+
+							}
 						}
-
-						res.locals.user = Session.person.id;
-						res.locals.username = Session.person.email;
-						res.locals.realname = Session.person.first;
-						if (Session.person.middle) { 
-							res.locals.realname += " "+Session.person.middle;
-						}
-						res.locals.realname += " "+Session.person.last;
-						res.locals.site_admin = Session.person.site_admin;
-
-						req.session = { 
-							user       : res.locals.user,
-							site_admin : res.locals.site_admin,
-							event      : Session.event_id,
-							category   : Session.category_id,
-						};
-
 					}
 				}
-			}
-						
+
+			});
+
+		} else { 
+
 			next();
 
-		});
+		}
 
 	};
 
