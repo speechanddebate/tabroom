@@ -6,10 +6,8 @@ var config = require(__dirname + '/../../config/config.json')[env];
 
 /* GET home page. */
 router.get('/', function(req, res, next) {
-  res.render('index', { title: 'Tab Functions' });
+  res.json({title: 'League/NSDA Administrative Functions' });
 });
-
-router.use('/status', require('./status'));
 
 module.exports = router;
 

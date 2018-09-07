@@ -1,71 +1,61 @@
-var express = require('express');
-var path = require('path');
-var favicon = require('serve-favicon');
+const express = require('express');
+const path = require('path');
 
-var env    = process.env.NODE_ENV || "development";
-var config = require(__dirname + '/config/config.json')[env];
+const env    = process.env.NODE_ENV || "development";
+const config = require(__dirname + '/config/config.json')[env];
 
-var logger = require('morgan');
-var cookieParser = require('cookie-parser');
-var bodyParser = require('body-parser');
-var crypt = require('crypt3');
+const logger = require('morgan');
+const cookieParser = require('cookie-parser');
+const bodyParser = require('body-parser');
+const crypt = require('crypt3');
 
 var app = express();
+app.use(logger('dev'));
 
-	// View engine setup -- Jade
-	app.set('views', path.join(__dirname, 'views'));
-	app.set('view engine', 'jade');
+// BodyParser allows one to access the data from POSTs
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: false }));
 
-	app.use(favicon(path.join(__dirname, 'public', 'favicon.ico')));
-	app.use(logger('dev'));
-	app.use(bodyParser.json());
-	app.use(bodyParser.urlencoded({ extended: false }));
+// CookieParser reads in the data from cookies for auth
+app.use(cookieParser());
 
-	app.use(cookieParser());
-	app.use(express.static(path.join(__dirname, 'public')));
+// Check for a valid session and populate to the req.session
+var authenticate = require('./lib/user/authenticate');
 
-	// Check for a valid session and populate to the req.session
-	var authenticate = require('./lib/user/authenticate');
+app.use(function(req, res, next) { 
+	authenticate(req,res,next);
+});
 
-	app.use(function(req, res, next) { 
-		authenticate(req,res,next);
-	});
+// Set the URL routes
+app.use('/', require('./routes'));
 
-	// If there is an active login, load the permissions feed into
+// Catch 404s and forward to error handler
+app.use(function(req, res, next) {
+	var err = new Error('Not Found');
+	err.status = 404;
+	next(err);
+});
 
-	// Set the URL routes
-	app.use('/', require('./routes'));
-	app.use('/user', require('./routes/user'));
-	//app.use('/nsdatab', require('./routes/nsdatab'));
-
-	// Catch 404s and forward to error handler
-	app.use(function(req, res, next) {
-		var err = new Error('Not Found');
-		err.status = 404;
-		next(err);
-	});
-
-	// Development error handler
-	// Prints stacktrace
-	if (app.get('env') === 'development') {
-		app.use(function(err, req, res, next) {
-			res.status(err.status || 500);
-			res.render('error', {
-				message: err.message,
-				error: err
-			});
-		});
-	}
-
-	// Production error handler
-	// No stacktraces leaked to user
+// Development error handler
+// Prints stacktrace
+if (app.get('env') === 'development') {
 	app.use(function(err, req, res, next) {
 		res.status(err.status || 500);
-		res.render('error', {
+		res.json({
 			message: err.message,
-			error: {}
+			error: err
 		});
 	});
+}
 
+// Production error handler
+// No stacktraces leaked to user
+app.use(function(err, req, res, next) {
+	res.status(err.status || 500);
+	res.json({
+		message: err.message,
+		error: {}
+	});
+});
 
 module.exports = app;

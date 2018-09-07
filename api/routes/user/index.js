@@ -6,7 +6,13 @@ var Permissions = require('../../lib/user/permissions');
 /* GET users listing. */
 
 router.get('/', function(req, res, next) {
-	res.send('respond with a resource');
+	if (req.session.person) { 
+		db.person.findById(req.session.person).then( function(Person) { 
+			res.json(Person);
+		});
+	} else { 
+		res.json({error: "No User Logged In"});
+	}
 });
 
 router.get('/:userid', function(req, res, next) { 
