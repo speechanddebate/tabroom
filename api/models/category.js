@@ -10,7 +10,15 @@ module.exports = function(sequelize, DataTypes) {
 		abbr: {
 			type: DataTypes.STRING(15),
 			allowNull: true
-		}
+		},
+		tourn: {
+			type: DataTypes.INTEGER,
+			allowNull: false
+		},
+		pattern: {
+			type: DataTypes.INTEGER,
+			allowNull: false
+		},
 	});
 };
 
