@@ -18,37 +18,37 @@ var BluePromise = require('bluebird');
 	kingdomsKeys = "select permission.id, permission.tag, "+
 		"circuit.id circuitID, circuit.name circuitName, " +
 		"region.id regionID, region.name regionName, "+
-		"region.circuit_id as regionCircuit, region.archdiocese regionArch, " + 
+		"region.circuit as regionCircuit, region.arch regionArch, " + 
 		"chapter.id as chapterID, chapter.name chapterName, " + 
 		"tourn.id as tournId, tourn.name tournName, tourn.start, tourn.end " + 
 		"from permission "+
-		"left join chapter on chapter.id = permission.chapter_id " + 
-		"left join circuit on circuit.id = permission.circuit_id " +
-		"left join region on region.id = permission.region_id " +
-		"left join tourn on tourn.id = permission.tourn_id "+
+		"left join chapter on chapter.id = permission.chapter " + 
+		"left join circuit on circuit.id = permission.circuit " +
+		"left join region on region.id = permission.region " +
+		"left join tourn on tourn.id = permission.tourn "+
 			" and tourn.start > utc_timestamp() "+
-		"where permission.person_id = ";
+		"where permission.person = ";
 
 	judgesQuery = "select judge.id, judge.first, judge.last, " +
 		"category.name categoryName, "+
 		"tourn.name tournName, tourn.start tournStart "+
 		"from judge, category, tourn "+
 		"where tourn.end > utc_timestamp() "+
-		"and tourn.id = category.tourn_id "+
-		"and category.id = judge.category_id "+
-		"and judge.person_id = ";
+		"and tourn.id = category.tourn "+
+		"and category.id = judge.category "+
+		"and judge.person = ";
 
 	sjQuery = "select chapter_judge.id, chapter_judge.first, chapter_judge.last, "+
 		"chapter.name chapterName "+
 		"from chapter_judge, chapter "+
-		"where chapter.id = chapter_judge.chapter_id "+
-		"and chapter_judge.person_id = ";
+		"where chapter.id = chapter_judge.chapter "+
+		"and chapter_judge.person = ";
 
 	studentsQuery = "select student.id, student.first, student.last, "+
 		"chapter.name chapterName "+
 		"from student, chapter "+
-		"where chapter.id = student.chapter_id "+
-		"and student.person_id = ";
+		"where chapter.id = student.chapter "+
+		"and student.person = ";
 
 	module.exports = function(userId, locals, tournId) { 
 
@@ -59,9 +59,9 @@ var BluePromise = require('bluebird');
 			return new BluePromise ( function(resolve, reject) { 
 
 				tournQuery = " select permission.id, permission.tag, "+
-				" permission.category_id from permission "+
-				" where permission.tourn_id = "+tournId +
-				" and permission.person_id = "+userId;
+				" permission.category from permission "+
+				" where permission.tourn = "+tournId +
+				" and permission.person = "+userId;
 
 				db.sequelize.query(tournQuery).spread(
 					function (permissionRows, metadata) { 
