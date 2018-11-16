@@ -4,8 +4,12 @@ drop trigger if exists `update_entry_active`;
 
 update entry set active=1;
 
-update entry set active=0 where ( waitlist = 1 OR dropped = 1 OR dq = 1 OR unconfirmed = 1 );
-
+update entry set active=0 where ( waitlist = 1 
+	OR dropped = 1 
+	OR dq = 1 
+	OR unconfirmed = 1
+	OR unconfirmed = 2
+);
 
 delimiter $$ 
 
@@ -20,6 +24,7 @@ delimiter $$
 				OR NEW.waitlist = 1 
 				OR NEW.dq = 1 
 				OR NEW.unconfirmed = 1
+				OR NEW.unconfirmed = 2
 			THEN
 				set NEW.active = 0;
 			ELSE
@@ -46,6 +51,7 @@ delimiter $$
 				OR NEW.waitlist = 1 
 				OR NEW.dq = 1 
 				OR NEW.unconfirmed = 1
+				OR NEW.unconfirmed = 2
 			THEN
 				set NEW.active = 0;
 			ELSE
