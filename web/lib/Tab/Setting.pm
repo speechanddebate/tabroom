@@ -27,3 +27,5 @@ sub label {
 	my ($self, $lang) = @_;
 	return Tab::SettingLabel->search( setting => $self->id, lang => $lang)->first;
 }
+
+
