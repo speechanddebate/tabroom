@@ -144,6 +144,7 @@
 
 					$(".replybucket").text(data.reply);
 					$(".replyappend").append(data.reply);
+
 				}
 
 				if (data.error) { 
@@ -178,7 +179,6 @@
 					if (data.newParent) { 
 						$("#"+targetId).prependTo("#"+data.newParent);
 					}
-
 
 					if (data.replace) { 
 
@@ -789,7 +789,6 @@ function autoTab(input,len,e) {
 		}
        	input.form[next_index].focus();
 	}
-
 
     return true;
 }
