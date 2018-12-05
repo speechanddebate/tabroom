@@ -126,12 +126,27 @@
 	my $team_points++ if $event_settings{"team_points"};
 
 	# Rounds by things
-	my @event_rounds = sort {$a->name <=> $b->name } $event->rounds;
+	my @event_rounds = ($round);
+	foreach my $round ($event->rounds) { 
+		push @event_rounds, $round unless $round->type eq "runoff";
+	}
+	@event_rounds = sort {$a->name <=> $b->name } @event_rounds;
+	my $roff = $round->runoff;
+	while ($roff) { 
+		push @event_rounds, $roff;
+		if ($roff->runoff) { 
+			$roff = $roff->runoff;
+		} else { 
+			undef $roff;
+		}
+	}
 
 	my %rounds = ();
 	%{$rounds{"type"}} = map {$_->id => $_->type} @event_rounds;
 	%{$rounds{"name"}} = map {$_->id => $_->name} @event_rounds;
 	%{$rounds{"by_name"}} = map {$_->name => $_} @event_rounds;
+	%{$rounds{"by_id"}} = map {$_->id => $_} @event_rounds;
+
 
 	# Redundant and harmful
 	undef $team_points if $event_type eq "congress"; 
@@ -146,8 +161,8 @@
 	my %tb_tiers = ();
 	my %tb_count = ();
 	my %tb_round = ();
-	my %tbid_tiers = ();
 
+	TB:
 	foreach my $tb ($tiebreak_set->tiebreaks) { 
 
 		$tb_count{$tb->id} = $tb->count;
@@ -155,8 +170,14 @@
 		#This will only aggregate the present round for Points purposes.
 		$tb_count{$tb->id} = "previous" if $nsda;
 
-		if ($tb_count{$tb->id} == "specific") { 
-			$tb_round{$tb->id} = $rounds{"by_name"}{$tb->count_round};
+		if ($tb_count{$tb->id} eq "specific") { 
+			if ($rounds{"by_id"}{$tb->count_round}) { 
+				$tb_round{$tb->id} = $rounds{"by_id"}{$tb->count_round};
+			} elsif ($rounds{"by_name"}{$tb->count_round}) {
+				$tb_round{$tb->id} = $rounds{"by_name"}{$tb->count_round};
+			} else { 
+				next TB;
+			}
 		}
 
 		if ($nsda 
@@ -174,7 +195,6 @@
 
 		$truncate_to_smallest++ if $tb->truncate_smallest; 
 		push @{$tb_tiers{$tb->priority}}, $tb;
-		push @{$tbid_tiers{$tb->priority}}, $tb->id;
 
 	}   
 
@@ -202,7 +222,8 @@
 	undef $dropped_limit if $districts;
 
 	my $round_limit;
-	my $section_limit = "and panel.letter = ".$section->letter if $section;
+	my $section_limit;
+	$section_limit = "and panel.letter = ".$section->letter if $section;
 
 	my $sth = $dbh->prepare("
 		select 
@@ -437,6 +458,8 @@
 	my @all_rounds;
 
 	foreach my $all_round (@event_rounds) { 
+		
+		next if $rounds{"done"}{$all_round}++;
 
 		# Do not measure the future.  the Doctor will get angry at us.
 		next if $rounds{"name"}{$all_round} > $this_round_name;  
@@ -555,7 +578,8 @@
 
 		$prep_stuff->execute($event->id);
 			
-		my $limit = ", ballot.judge" if $event_settings{"show_panel_average"};
+		my $limit;
+		$limit = ", ballot.judge" if $event_settings{"show_panel_average"};
 
 		my $round_max = $dbh->prepare("
 			select distinct(round.id), score.tag, count(score.id)
@@ -599,7 +623,16 @@
 
 	foreach my $key (sort {$a <=> $b} keys %tb_tiers) { 
 
+		TB:
 		foreach my $tb (sort {$a <=> $b} @{$tb_tiers{$key}}) { 
+		
+			if ($tb_count{$tb->id} eq "specific") { 
+				if ($rounds{"by_id"}{$tb->count_round}) { 
+				} elsif ($rounds{"by_name"}{$tb->count_round}) {
+				} else { 
+					next TB;
+				}
+			}
 
 			$needs{"ranks"}++ if $tb->name eq "ranks";
 			$needs{"ranks"}++ if $tb->name eq "reciprocals";
@@ -738,42 +771,53 @@
 	}
 
 	# Add in a runoff as a pseudo composite rank
-	my $runoff = $round->runoff;
-	undef $runoff unless $runoff > 0 && $runoff->id;
+	my $runoff;
+	$runoff = $round->runoff if $round->runoff && $round->runoff->panels;
+
 	my $runoff_tb;
+	my $current_parent = $tiebreak_set->id;
 
-	if ($runoff) { 
-
-		my @keys = sort {$b <=> $a} keys %tb_tiers;
-
-		my $max_key = $keys[0];
-		$max_key++;
+	while ($runoff) { 
 
 		$runoff_tb = Tab::Tiebreak->search({
-			name       => "ranks",
-			count      => "previous",
-			multiplier => 1
+			name         => "ranks",
+			count        => "specific",
+			count_round  => $runoff->id,
+			multiplier   => 1,
+			tiebreak_set => $tiebreak_set->id
 		})->first;
 
 		unless ($runoff_tb) { 
 
-			$runoff_tb = Tab::Tiebreak->create({
-				name       => "ranks",
-				count      => "previous",
-				multiplier => 1
-			});
+			my @keys = sort {$b <=> $a} keys %tb_tiers;
+			my $max_key = $keys[0];
+			$max_key++;
 
+			$runoff_tb = Tab::Tiebreak->create({
+				name         => "ranks",
+				count        => "specific",
+				priority     => $max_key,
+				count_round  => $runoff->id,
+				multiplier   => 1,
+				tiebreak_set => $tiebreak_set->id
+			});
+		
+			$tb_info{$runoff_tb}{"name"} = "ranks";
+			push @{$tb_info{$runoff_tb}{"rounds"}}, $round;
+			push @{$tb_tiers{$max_key}}, $runoff_tb;
 		}
 		
+		$tb_info{$runoff_tb}{"runoff"} = $runoff;
 		$tb_info{$runoff_tb}{"child"} = $runoff->tiebreak_set;
 
-		push @{$tb_tiers{$max_key}}, $runoff_tb;
 		push @{$composite_rounds{$runoff_tb->id}}, $runoff;
-		push @{$tbid_tiers{$max_key}}, $runoff_tb->id;
 
-		$tb_info{$runoff_tb}{"name"} = "ranks";
-		$tb_info{$runoff_tb}{"runoff"} = $runoff;
-		push @{$tb_info{$runoff_tb}{"rounds"}}, $round;
+		if ($runoff->runoff) { 
+			$current_parent = $runoff->tiebreak_set;
+			$runoff = $runoff->runoff;
+		} else { 
+			undef $runoff;
+		}
 
 	}
 
@@ -1257,6 +1301,10 @@
 			$tier_long_desc .= " in ".ucfirst($tb_count{$tb->id})." round" 
 				if $tb_count{$tb->id};
 
+			if ($tb_count{$tb->id} eq "specific") { 
+				$tier_long_desc .= " (R".$tb->count_round.")";
+			}
+
 			$tier_long_desc .= " Rounds" 
 				if $tb_count{$tb->id} 
 				&& ($tb_count{$tb->id} eq "all");
@@ -1354,7 +1402,9 @@
 			my $tier_total;
 			my $round_averages;
 
-			foreach my $tb (@{$tbid_tiers{$key}}) { 
+			foreach my $tbo (@{$tb_tiers{$key}}) { 
+
+				my $tb = $tbo->id;
 
 				my $name = $tb_info{$tb}{"name"};
 				next unless $tb_info{$tb}{"rounds"};
@@ -1417,9 +1467,9 @@
 		
 							my $runoff = $tb_info{$tb}{"runoff"};
 		
-							$tier_descs{$key} = "RO Rk";
+							$tier_descs{$key} = "RO ".$runoff->name." Rk";
 							$entries{"tb_digits"}{$key} = 0;
-							$tier_long_descs{$key} = "Ranking from Runoff from ".$round->realname;
+							$tier_long_descs{$key} = "Ranking from Runoff ".$runoff->label." ".$runoff->name;
 
 							if ($tourn_settings{"nsda_speech_method"} eq "doubledown") { 
 								$total += $entries{"unbroken_rank"}{$entry}{$runoff};
