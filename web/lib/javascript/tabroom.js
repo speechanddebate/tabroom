@@ -156,15 +156,15 @@
 					alertify.dismissAll();
 					alertify.notify(data.message, "custom");
 
-					if (successAction === "destroy") { 
-						$("#"+targetId).remove();
-					}
-
 					if (data.destroy) { 
 						$("#"+data.destroy).remove();
 					}
 
-					if (
+					if (successAction === "destroy") { 
+						$("#"+targetId).remove();
+					} else if (successAction === "hide") { 
+						$("#"+targetId).addClass("hidden");
+					} else if (
 						successAction === "refresh" 
 						|| successAction === "reload"
 						|| data.refresh
