@@ -43,29 +43,22 @@
 /* Respond to switch calls */
 
 	function postEnter(e, checkObject, replyUrl) { 
-
 		if (e.keyCode == 13) { 
 			postSwitch(checkObject, replyUrl);
 			return false;
 		}
-
 		return true;
-
 	}
 
 	function postConfirm(alertMessage, checkObject, replyUrl) { 
-
-		alertify.confirm(alertMessage, function(e) { 
-	
+		alertify.confirm(alertMessage, function(e) { 	
 			if (e) { 
 				postSwitch(checkObject, replyUrl);
 				return;
 			} else {
 				return;
 			}
-
 		});
-
 		return;
 	}
 
@@ -74,6 +67,7 @@
 		var targetId      = $(checkObject).attr("target_id");
 		var propertyName  = $(checkObject).attr("property_name");
 		var settingName   = $(checkObject).attr("setting_name");
+		var relatedThing   = $(checkObject).attr("related_thing");
 
 		var successAction = $(checkObject).attr("on_success");
 		var replyTarget   = $(checkObject).attr("reply_target");
@@ -128,6 +122,7 @@
 				property_value : propertyValue,
 				other_value    : otherValue,
 				other_text     : otherText,
+				related_thing  : relatedThing,
 				parent_id      : parentObjectId
 			},
 			success : function(data) {
