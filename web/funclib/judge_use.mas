@@ -52,6 +52,7 @@
 	$event = $round->event unless $event;
 
 	my $category = $event->category;
+	my $tourn = $category->tourn;
 	my $round_start = $round->timeslot->start;
 	my $round_end = $round->timeslot->end;
 	my $debates_per++ if $category->setting('sections_per');
@@ -61,11 +62,24 @@
 
 	my $j_sth = $dbh->prepare("
 		select judge.id, judge.obligation, judge.hired
-		from judge
-		where category = ?
-		order by judge.id");
+		from judge, category
+			where
+				judge.category = category.id
+				and category.tourn = ?
+			and (
+				judge.category = ?
+				or exists ( 
+					select jpool_judge.id
+					from jpool_judge, jpool_round
+					where jpool_judge.judge = judge.id
+					and jpool_judge.jpool = jpool_round.jpool
+					and jpool_round.round = ? 
+				)
+			)
+		order by judge.id
+	");
 
-	$j_sth->execute($category->id);
+	$j_sth->execute($tourn->id, $category->id, $round->id);
 
 	while (
 		my ($judge, $obligation, $hired)  = $j_sth->fetchrow_array()
@@ -74,46 +88,61 @@
 		$judge_hash{$judge}{"avail_current"} = 1;
 	}
 
+	my $limit;
 	my $current_name = $round->name;
-	my $round_limit = "and round.name <= ".$current_name." " if $limit_past;
+	my $now = DateTime->now();
+
+	if ($limit_past) { 
+		$limit = " and timeslot.start < ".DateTime::Format::MySQL->format_datetime($now);
+	}
 
 	my $sth = $dbh->prepare("
-		select judge.id, round.id, round.name, panel.id, panel.flight, round.type, round.timeslot, event.type
-		from ballot, panel, round, judge, event
-		where event.category = ? 
-		and round.event = event.id
-		and round.id = panel.round
-		and panel.id = ballot.panel
-		and ballot.judge = judge.id
+		select judge.id, 
+			round.id, round.name, 
+			panel.id, panel.flight, 
+			round.type, round.timeslot
+		from ballot, panel, round, judge, timeslot
+			where round.timeslot = timeslot.id
+			and round.id         = panel.round
+			and panel.id         = ballot.panel
+			and ballot.judge     = judge.id
+			and timeslot.tourn   = ?
+
+		and (
+			judge.category = ? 
+
+			or exists ( 
+				select jpool_judge.id
+				from jpool_judge, jpool_round
+				where jpool_judge.judge = judge.id
+				and jpool_judge.jpool = jpool_round.jpool
+				and jpool_round.round = ? 
+			)
+		)
 		group by panel.id
 	");
 
-	$sth->execute($event->category->id);
+	$sth->execute($tourn->id, $category->id, $round->id);
 
 	my %used;
 
 	while (
-		my ($judge, $round_id, $roundname, $panel_id, $flight, $type, $timeslot, $event_type)  
-		= $sth->fetchrow_array() 
+		my ($judge,
+			$round_id, $roundname, 
+			$panel_id, $flight, 
+			$type, $timeslot
+		)  = $sth->fetchrow_array() 
 	) {
 
-		next unless $roundname <= $current_name 	
-			|| $event_type eq "speech" 
-			|| $event_type eq "congress";
-
 		if ($debates_per) { 
-			next if $used{$judge."-".$panel_id}++;
+			next if $used{$judge}{$panel_id}++;
 		} else { 
-			next if $used{$judge."-".$round_id}++;
+			next if $used{$judge}{$round_id}++;
 		}
-
-		$judge_hash{$judge}{"judged_all"}++ 
-			if $roundname < $current_name 
-			|| $event_type eq "speech" 
-			|| $event_type eq "congress";
 
 		next if $type eq "elim" || $type eq "final";
 
+		$judge_hash{$judge}{"judged_all"}++ 		if $roundname < $current_name;
 		$judge_hash{$judge}{"judged_already"}++ 	if $roundname <= $current_name;
 		$judge_hash{$judge}{"will_judge"}++ 		if $roundname > $current_name;
 		$judge_hash{$judge}{"in_round"}++ 			if $round_id == $round->id;
