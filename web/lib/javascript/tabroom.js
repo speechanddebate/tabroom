@@ -23,9 +23,7 @@
 				}
 			}
 		);
-
 		return false;
-
 	}
 
 /* master toggle for checkboxes */
