@@ -9,7 +9,7 @@ router.get('/', function(req, res, next) {
   res.json({ greeting: 'Welcome to the Tabroom.com API' });
 });
 
-router.use('/public', require('./public'));
+router.use('/invite', require('./invite'));
 router.use('/tourn', require('./tourn'));
 router.use('/user', require('./user'));
 router.use('/admin', require('./admin'));

@@ -3,17 +3,12 @@
 module.exports = function(grunt) {
 
 	grunt.initConfig({
-
 		env : {
 			options : {
 				//Shared Options Hash
 			},
-			dev : {
-				NODE_ENV : 'development',
-			},
-			prod : {
-				NODE_ENV : 'production',
-			},
+			dev  : { NODE_ENV : 'development', },
+			prod : { NODE_ENV : 'production', },
 		},
 
 		jslint: {
@@ -42,29 +37,24 @@ module.exports = function(grunt) {
 		},			
 
 		jshint: {
-			all: [
-			] 
+			all: [ ] 
 		},
-
 
 		// Launch nodemon script for the Express instance
 		nodemon: {
-			dev: { script: 'bin/www' }
+			dev: { script: 'bin/tabroom' }
 		},
 
 		concurrent: {
-			options: {
-				logConcurrentOutput: true
-			},
+			options: { logConcurrentOutput: true },
 			tasks: ['nodemon']
 		}	 
-
 	});
 
 	// load nodemon
 	grunt.loadNpmTasks('grunt-jslint');
-	grunt.loadNpmTasks('grunt-env');
 	grunt.loadNpmTasks('grunt-contrib-jshint');
+	grunt.loadNpmTasks('grunt-env');
 	grunt.loadNpmTasks('grunt-nodemon');
 	grunt.loadNpmTasks('grunt-concurrent');
 
