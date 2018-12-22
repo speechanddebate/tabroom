@@ -14,4 +14,3 @@ router.get('/:tournId', function(req, res, next) {
 
 module.exports = router;
 
-

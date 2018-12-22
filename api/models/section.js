@@ -1,7 +1,8 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('panel', { 
+	return sequelize.define('section', { 
+		tableName : 'panel',    //Mistakes were made --CLP
 		letter: {
 		  type: DataTypes.STRING,
 		  allowNull: true

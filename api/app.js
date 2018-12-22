@@ -1,22 +1,47 @@
+// Express is the router and framework
 const express = require('express');
-const path = require('path');
+const path    = require('path');
 
-const env    = process.env.NODE_ENV || "development";
+// Env determines if we're running production, development or whatever
+const env = process.env.NODE_ENV || "development";
+
+// Conflict just parses the configuration file for the environment in question
 const config = require(__dirname + '/config/config.json')[env];
 
-const logger = require('morgan');
+// Morgan is a logging engine that displays to console in dev and logfiles in prod.
+const morgan = require('morgan');
+
+// CookieParser reads in the data from cookies for auth
 const cookieParser = require('cookie-parser');
+
+// BodyParser allows one to access the data from POSTs
 const bodyParser = require('body-parser');
+
+// Crypt allows the API to parse the tabroom native cookie format for auth
 const crypt = require('crypt3');
 
 var app = express();
-app.use(logger('dev'));
 
-// BodyParser allows one to access the data from POSTs
+// Log requests to the console on dev, into a file on prod Note that this must
+// come before you handle the routes (app.use('/')) or else it logs nothing.
+// Palmer's mistakes become your wisdom. 
+
+if (env === 'development') {
+	app.use(morgan('combined'));
+} else { 
+	var accessLogStream = rfs('tabroom-api.log',
+		{
+			path     : '/var/log/tabroom/tabroom-api.log',
+			interval : '3d', // rotate every 3 days
+			flags    : 'a'
+		}
+	);
+	app.use(morgan('combined', { stream: accessLogStream }));
+}
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// CookieParser reads in the data from cookies for auth
 app.use(cookieParser());
 
 // Check for a valid session and populate to the req.session
@@ -36,9 +61,9 @@ app.use(function(req, res, next) {
 	next(err);
 });
 
-// Development error handler
-// Prints stacktrace
-if (app.get('env') === 'development') {
+// Development error handler, prints stacktrace
+if (env === 'development') {
+
 	app.use(function(err, req, res, next) {
 		res.status(err.status || 500);
 		res.json({
@@ -46,16 +71,16 @@ if (app.get('env') === 'development') {
 			error: err
 		});
 	});
-}
 
-// Production error handler
-// No stacktraces leaked to user
-app.use(function(err, req, res, next) {
-	res.status(err.status || 500);
-	res.json({
-		message: err.message,
-		error: {}
+// Production error handler, No stacktraces leaked to user
+} else { 
+	app.use(function(err, req, res, next) {
+		res.status(err.status || 500);
+		res.json({
+			message: err.message,
+			error: {}
+		});
 	});
-});
+}
 
 module.exports = app;
