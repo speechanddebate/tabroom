@@ -40,4 +40,3 @@ router.get('/perms/:userid', function(req, res, next) {
 
 module.exports = router;
 
-
