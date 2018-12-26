@@ -6,6 +6,10 @@ module.exports = function(sequelize, DataTypes) {
 		tag: {
 			type: DataTypes.STRING(16),
 			allowNull: true
+		},
+		details: {
+			type: DataTypes.JSON,
+			allowNull: true
 		}
 	});
 

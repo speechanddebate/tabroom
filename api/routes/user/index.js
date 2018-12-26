@@ -15,10 +15,9 @@ router.get('/', function(req, res, next) {
 	}
 });
 
-router.get('/:userid', function(req, res, next) { 
-
-	if (req.session.user === req.params.userid || req.session.site_admin) { 
-		db.person.findById(req.params.userid).then( function(Person) { 
+router.get('/:userID', function(req, res, next) { 
+	if (req.session.user === req.params.userID || req.session.site_admin) { 
+		db.person.findById(req.params.userID).then( function(Person) { 
 			res.json(Person);
 		});
 	} else { 
@@ -26,16 +25,25 @@ router.get('/:userid', function(req, res, next) {
 	}
 });
 
-router.get('/perms/:userid', function(req, res, next) { 
-
-	if (req.session.user === req.params.userid || req.session.site_admin) { 
-		Permissions(req.params.userid, router.locals).then(function(Perms) {
+router.get('/:userID/perms', function(req, res, next) { 
+	if (req.session.user === req.params.userID || req.session.site_admin) { 
+		Permissions(req.params.userID, router.locals).then(function(Perms) {
 			res.json(Perms);
 		});
 	} else { 
 		res.json({error: "Not Authorized"});
 	}
+});
 
+router.get('/:userID/perms/tourn/:tournID', function(req, res, next) { 
+
+	if (req.session.user === req.params.userID || req.session.site_admin) { 
+		Permissions(req.params.userID, router.locals, req.params.tournID).then(function(Perms) {
+			res.json(Perms);
+		});
+	} else { 
+		res.json({error: "Not Authorized"});
+	}
 });
 
 module.exports = router;
