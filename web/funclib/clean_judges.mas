@@ -88,7 +88,7 @@
 
 	my $pre_paneled;
 
-	my @entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
+	my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
 
 	if ($whole_round || scalar @entries < 1) { 
 
@@ -114,15 +114,13 @@
 
 			next if $eround->name > $round->name;
 
-			$last_entryful_round = $eround 
-				unless $last_entryful_round;
+			$last_entryful_round = $eround unless $last_entryful_round;
 
 			$last_entryful_round = $eround 
 				if $last_entryful_round->name < $eround->name;
 		}
 
 		$pre_paneled++;
-
 	}
 
 	my @clean_judges;
@@ -186,11 +184,9 @@
 	my @reasons;
 
 	push (@reasons, "school");
-	push (@reasons, "hire");
 	push (@reasons, "neutral") if $category_settings{"neutrals"};
 
 	foreach my $reason (@reasons) {
-
 
 		# $sql_from_hell is the variable that contains the text of the SQL
 		# transaction that gets us what we want.  We add SQL code to it as we
@@ -210,9 +206,7 @@
 
 		if ($parlis) { 
 			$left_joins .= "
-				left join judge_setting parli 
-					on parli.judge = judge.id
-					and parli.tag = 'parli'
+				left join judge_setting parli on parli.judge = judge.id and parli.tag = 'parli'
 			";
 		}
 
@@ -237,10 +231,6 @@
 
 		$sql_from_hell .= ",school.name as schoolname, school.code as schoolcode";
 
-		if ($reason eq "hire") { 
-			$sql_from_hell .= ",'HIRED' as schoolname, '--' as schoolcode";
-		}
-
 		if ($reason eq "neutral") { 
 			$sql_from_hell .= ",'NEUTRAL' as schoolname, '--' as schoolcode";
 		}
@@ -259,7 +249,7 @@
 			$left_joins
 			where panel.id = ?
 			and round.id = panel.round
-			and event.id = ? 
+			and event.id = round.event
 			and timeslot.id = round.timeslot 		
 			and judge.active = 1
 			and judge.category = category.id
@@ -267,26 +257,30 @@
 			and timeslot.tourn = tourn.id
 		";
 
-#		If the jpool system is being used, the judge must be in the jpool for
-#		this round.  Otherwise check for category 
+		$sql_from_hell .= "
+			and (
+				judge.category = event.category 
+				or judge.alt_category = event.category
+		";
 
-		if (@jpools) { 
-		
+		unless ($category_settings{"override_jpools"}) { 
+
+		#	If the jpool system is being used, the judge must be in the jpool
+		#	for this round.
+
 			$sql_from_hell .= "
-			and jpool_judge.judge = judge.id
-			and jpool_judge.jpool = jpool_round.jpool
-			and jpool_round.round = round.id ";
-
-		} 
-
-		unless (@jpools && (not defined $category_settings{"override_jpools"}) ) { 
-			$sql_from_hell .= "
-				and (
-					judge.category = event.category 
-					or judge.alt_category = event.category
+				or exists ( select jpool_judge.id
+					from jpool_judge, jpool_round
+					where jpool_judge.judge = judge.id
+					and jpool_judge.jpool = jpool_round.jpool
+					and jpool_round.round = round.id
 				)
 			";
 		}
+
+		$sql_from_hell .= " ) ";
+
+		# The judge should not be in a jpool marked for the tabroom
 
 		$sql_from_hell .= "
 			and not exists ( 
@@ -299,7 +293,6 @@
 		";
 
 		if ($parlis) { 
-		
 			$sql_from_hell .= "
 				and not exists (
 					select parliballot.id
@@ -311,26 +304,6 @@
 					and parliballot.judge = judge.id
 				)
 			";
-
-		}
-
-#		If this is NCFL the diocese counts as much as the school does:
-
-		if ($reason eq "school") {  #this only applies to non hired judges
-
-			$sql_from_hell .= "
-				and judge.school = school.id
-				and school.tourn = tourn.id
-				and tourn.id = event.tourn
-				";
-
-			if ($event_settings{"usa_wsdc"}) { 
-
-			} elsif ($conflict_states) { 
-				$sql_from_hell .= " 
-					and school.chapter = chapter.id
-				";
-			}
 		}
 
 		# Take care of the various sorts of strikes that can be manually
@@ -341,22 +314,21 @@
 			and not exists( 		
 				select strike.id from strike 		
 				where strike.judge = judge.id 		
-				and strike.type = 'entry'
+				and strike.entry > 0 
 				and strike.entry in (
 					select distinct entry.id  								
 					from entry,ballot as bcc
 					where bcc.entry = entry.id 								
-					and bcc.panel =
-					$panel_id
+					and bcc.panel = $panel_id
 				) 	
 			)  	
 
 			and not exists( 		
-				select strike.id 
-				from strike
-				where strike.school = judge.school
-				and strike.type = 'hybrid'
-				and strike.entry in (
+				select hybrid.id 
+				from strike hybrid
+				where judge.school = hybrid.school
+				and hybrid.type = 'hybrid'
+				and hybrid.entry in (
 					select distinct entry.id  								
 					from entry,ballot as bccc
 					where bccc.entry = entry.id 								
@@ -370,6 +342,7 @@
 				where hybrid.judge = judge.id
 				and hybrid.school = schstrike.school
 				and schstrike.type = 'hybrid'
+				and schstrike.entry > 0 
 				and schstrike.entry in (
 					select distinct entry.id  								
 					from entry,ballot as bccc
@@ -381,36 +354,13 @@
 			and not exists( 		
 				select strike.id from strike 		
 				where strike.judge = judge.id 		
-				and strike.type = 'conflict'
-				and strike.entry in (
-					select distinct entry.id  								
-					from entry,ballot as bccc
-					where bccc.entry = entry.id 								
-					and bccc.panel =
-					$panel_id 
-				) 
-			)  	
-
-			and not exists( 		
-				select strike.id from strike 		
-				where strike.judge = judge.id 		
-				and strike.type = 'conflict'
+				and strike.school > 0 
 				and strike.school in (
 					select distinct entry.school
 					from entry,ballot as bcsc
 					where bcsc.entry = entry.id
-					and bcsc.panel = $panel_id ) 	
-			)  	
-
-			and not exists( 		
-				select strike.id from strike
-				where strike.judge = judge.id
-				and strike.type = 'school'
-				and strike.school in (
-					select distinct entry.school
-					from entry,ballot as bcs
-					where bcs.entry = entry.id
-					and bcs.panel = $panel_id ) 	
+					and bcsc.panel = $panel_id
+				) 	
 			)  	
 
 			and not exists(
@@ -425,7 +375,10 @@
 				where strike.judge = judge.id 		
 				and strike.event = round.event
 				and strike.type = 'elim' 		
-				and round.type = 'prelim'
+				and (round.type = 'prelim'
+					or round.type = 'highhigh'
+					or round.type = 'highlow'
+				)
 			)  	
 
 			and not exists( 		
@@ -573,7 +526,7 @@
 
 			unless ($event_settings{"allow_judge_own"}) { 
 
-				if ($m->comp("/funclib/panel_entries.mas", panel => $panel) < 1) { 
+				if ($pre_paneled) { 
 
 					if (
 						not defined $last_entryful_round 
@@ -592,32 +545,9 @@
 					# have no kids in a given speech event anyway.
 
 					$sql_from_hell = $sql_from_hell ."
-
 						and judge.school NOT IN ( 
 							select distinct entry.school from entry
 							where entry.event = ".$event->id."
-						)
-					";
-
-					# That means we also have to be more careful with school and
-					# competitor strikes as well
-
-					$sql_from_hell = $sql_from_hell . "
-					   
-						 and not exists(
-							select strike.id from strike,entry as cc35
-							where strike.judge = judge.id
-							and strike.type = 'entry'
-							and strike.entry = cc35.id
-							and cc35.event = ".$event->id."
-						)
-
-						and not exists(
-							select strike.id from strike,entry as cc36
-							where strike.judge = judge.id
-							and strike.type = 'school'
-							and cc36.school = strike.school
-							and cc36.event = ".$event->id."
 						)
 					";
 
@@ -761,9 +691,7 @@
 									and state_school.chapter = state_chapter.id 
 									and state_chapter.state is not null 
 									and state_chapter.state != '0' 
-
 						)";
-					
 					}
 					
 					# Either way, do not allow a judge to judge anyone from
@@ -775,48 +703,51 @@
 							select distinct cc.school 
 							from entry as cc,ballot as bc 		
 							where bc.panel = $panel_id  		
-							and bc.entry = cc.id )
-					
+							and bc.entry = cc.id
+						)
 					";
 
 				} #end of if this isn't a preset round
-			
 
 			} #end of unless allowed to judge our own
-
 		} 
 
-		if ($reason eq "hire") {    #Make sure the judge isn't from the same school:
+		# Check strikes against the whole event if this is a preset round and
+		# the latest paneled round is a prelim. 
 
-			#These are hired judges
-			$sql_from_hell .= " and judge.school < 1 ";
+		if ($last_entryful_round && $last_entryful_round->type ne "prelim") {
 
-			#No struck judges here too, please.
-			if ($last_entryful_round && $last_entryful_round->type ne "prelim") {
+			if (not defined $last_entryful_round 
+				|| ($last_entryful_round && $last_entryful_round->type eq "prelim") &! $ncfl 
+			) { 
 
-				if (not defined $last_entryful_round 
-					|| ($last_entryful_round && $last_entryful_round->type eq "prelim") &! $ncfl 
-				) { 
+				$sql_from_hell = $sql_from_hell . "
+				   
+					 and not exists(
+						select strike.id from strike,entry as cc35
+						where strike.judge = judge.id
+						and strike.type = 'entry'
+						and strike.entry = cc35.id
+						and cc35.event = ".$event->id."
+					)
 
-					$sql_from_hell = $sql_from_hell . "
-					   
-						 and not exists(
-							select strike.id from strike,entry as cc35
-							where strike.judge = judge.id
-							and strike.type = 'entry'
-							and strike.entry = cc35.id
-							and cc35.event = ".$event->id."
-						)
+					and not exists(
+						select strike.id from strike,entry as cc36
+						where strike.judge = judge.id
+						and strike.type = 'school'
+						and cc36.school = strike.school
+						and cc36.event = ".$event->id."
+					)
 
-						and not exists(
-							select strike.id from strike,entry as cc36
-							where strike.judge = judge.id
-							and strike.type = 'school'
-							and cc36.school = strike.school
-							and cc36.event = ".$event->id."
-						)
-					";
-				}
+					and not exists(
+						select strike.id from strike,entry as cc37, school as s37
+						where strike.judge = judge.id
+						and strike.type = 'region'
+						and s37.region = strike.region	
+						and cc37.school = s37.id
+						and cc37.event = ".$event->id."
+					)
+				";
 			}
 		}
 
@@ -831,50 +762,14 @@
 				and judge_setting.tag = 'neutral'
 				and judge_setting.value = 1)
 			";
-
-			if ($last_entryful_round) { 
-
-				# Check strikes against the whole event if this is a preset round
-				# and the latest paneled round is a prelim. 
-
-				if (not defined $last_entryful_round || ($last_entryful_round && $last_entryful_round->type eq "prelim")) {
-
-					$sql_from_hell = $sql_from_hell . "
-					   
-						 and not exists(
-							select strike.id from strike,entry as cc35
-							where strike.judge = judge.id
-							and strike.type = 'entry'
-							and strike.entry = cc35.id
-							and cc35.event = ".$event->id."
-						)
-
-						and not exists(
-							select strike.id from strike,entry as cc36
-							where strike.judge = judge.id
-							and strike.type = 'school'
-							and cc36.school = strike.school
-							and cc36.event = ".$event->id."
-						)
-
-						and not exists(
-							select strike.id from strike,entry as cc37, school as s37
-							where strike.judge = judge.id
-							and strike.type = 'region'
-							and s37.region = strike.region	
-							and cc37.school = s37.id
-							and cc37.event = ".$event->id."
-						)
-					";
-				}
-			}   
 		}
 
 		# ALLOWING OR DISALLOWING JUDGES TO JUDGE THE SAME EVENT TWICE.
 
-		if ( $event->type eq "speech" && (not defined $category_settings{"judge_event_twice"} 
-				|| ($m->comp("/funclib/round_entries.mas", round => $round) < 1 
-				&& ($last_entryful_round && $last_entryful_round->type eq "prelim")))
+		if ( $event->type eq "speech" 
+				&& (not defined $category_settings{"judge_event_twice"} 
+					|| ($pre_paneled && $last_entryful_round && $last_entryful_round->type eq "prelim")
+				)
 			) { 
 
 		# Do not allow judges to judge an event they've judged before if we're
@@ -1107,13 +1002,15 @@
 					and rt.id = pt.round
 					and pt.id = bt.panel
 					and pt.flight = panel.flight
-					and bt.judge = judge.id )
+					and bt.judge = judge.id
+				)
 				and not exists ( 		
 					select bt.id from panel as pt,ballot as bt
 					where pt.round = panel.round
 					and pt.flight = panel.flight
 					and pt.id = bt.panel
-					and bt.judge = judge.id )
+					and bt.judge = judge.id 
+				)
 				and not exists ( 		
 					select bt.id from panel as pt,ballot as bt,timeslot as tt, round as rt
 					where tt.start = timeslot.start
@@ -1123,7 +1020,22 @@
 					and rt.id = pt.round
 					and pt.id = bt.panel
 					and pt.flight = panel.flight
-					and bt.judge = judge.id )
+					and bt.judge = judge.id
+				)
+
+				and not exists ( 
+					select ba.id 
+						from panel pa, ballot as ba, timeslot as ta, round as ra, judge as ja
+					where ta.start < timeslot.end
+					and ta.end > timeslot.start 
+					and ta.tourn = tourn.id
+					and ta.id = ra.timeslot
+					and ra.id = pa.round
+					and pa.id = ba.panel
+					and ba.judge = ja.id
+					and ja.person = judge.person
+					and ja.person > 0
+				)
 			";
 
 		} elsif (1 == 1) { 
@@ -1204,7 +1116,6 @@
 						and dioregion1.tag = 'region-$event'
 						and dioregion1.value = dioregion2.value
 					)";
-
 				}
 			}
 		}
@@ -1228,7 +1139,7 @@
 
 		Tab::Judge->set_sql(clean_judges => $sql_from_hell);
 
-		push (@clean_judges, Tab::Judge->search_clean_judges($panel->id, $event->id));
+		push (@clean_judges, Tab::Judge->search_clean_judges($panel->id));
 
 	}
 

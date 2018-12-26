@@ -10,12 +10,12 @@
 var db = require('../../models');
 var BluePromise = require('bluebird');
 
-	var currentRound = "",
-		unstarted = "", 	
-		unvoted = "", 
-		unconfirmed = "";
+	const currentRound = "",
+		unstarted    = "",
+		unvoted      = "",
+		unconfirmed  = "";
 
-	currentRound = " select distinct round.* 
+	currentRound = ` select distinct round.* 
             from round
                 where round.event = ? 
                     and exists (
@@ -30,17 +30,17 @@ var BluePromise = require('bluebird');
                             and panel.round = round.id
                     )
                 order by round.name limit 1
-	";
+	`;
 
-	unstarted = " select distinct judge.*
+	unstarted = ` select distinct judge.*
 		from judge, panel, ballot
 		where panel.round = ? 
 		and panel.id = ballot.panel
 		and ballot.judge = judge.id
 		and ballot.judge_started is null
-	";
+	`;
 
-	unvoted = " select distinct judge.*
+	unvoted = ` select distinct judge.*
 		from judge, panel, ballot
 		where panel.round = ? 
 		and panel.id = ballot.panel
@@ -51,9 +51,9 @@ var BluePromise = require('bluebird');
 			from score 
 			where score.ballot = ballot.id
 		)
-	";
+	`;
 
-	unconfirmed = " select distinct judge.*
+	unconfirmed = ` select distinct judge.*
 		from judge, panel, ballot
 		where panel.round = ? 
 		and panel.id = ballot.panel
@@ -65,9 +65,7 @@ var BluePromise = require('bluebird');
 			where score.ballot = ballot.id
 		)
 		and ballot.audit != 1
-	";
-
-
+	`;
 
 	module.exports = function(userId, locals, tournId) { 
 
@@ -77,10 +75,10 @@ var BluePromise = require('bluebird');
 
 			return new BluePromise ( function(resolve, reject) { 
 
-				tournQuery = " select permission.id, permission.tag, "+
-				" permission.category_id from permission "+
-				" where permission.tourn_id = "+tournId +
-				" and permission.person_id = "+userId;
+				tournQuery = ` select permission.id, permission.tag, 
+				 permission.category_id from permission 
+				 where permission.tourn_id = ? 
+				 and permission.person_id = ? `;
 
 				db.sequelize.query(tournQuery).spread(
 					function (permissionRows, metadata) { 
@@ -94,7 +92,6 @@ var BluePromise = require('bluebird');
 						resolve(tournPerms);
 					}
 				);
-
 			});
 				
 
