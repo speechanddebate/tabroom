@@ -24,14 +24,12 @@ module.exports = function(req, res, Person) {
 			}).then(function(Permission) { 
 
 				if (Permission && Permission.tag === "chapter") { 
-
 					Person.full = true;
-					
 				} else { 
 					Person.coaches = undefined;
-					Person.naudl = undefined;
-					Person.nces = undefined;
-					Person.ipeds = undefined;
+					Person.naudl   = undefined;
+					Person.nces    = undefined;
+					Person.ipeds   = undefined;
 				}
 
 				res.json({
@@ -45,7 +43,6 @@ module.exports = function(req, res, Person) {
 					messages: [ { text: "Person "+req.params.id+" not found", severity: "failure" } ] 
 				});
 			});
-
 		}
 	}
 };
