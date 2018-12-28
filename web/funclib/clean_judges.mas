@@ -1,13 +1,15 @@
 <%args> 
-	$panel             => undef
-	$panel_id          => undef
-	$event             => undef
-	$round             => undef
-	$event_settings    => undef
-	$tourn_settings    => undef
-	$category_settings => undef
-	$round_data        => undef
-	$event_data        => undef
+	$panel               => undef
+	$panel_id            => undef
+	$event               => undef
+	$round               => undef
+	$event_settings      => undef
+	$tourn_settings      => undef
+	$category_settings   => undef
+	$round_data          => undef
+	$event_data          => undef
+	$last_entryful_round => undef
+	$pre_paneled         => undef
 </%args>
 <%init> 
 
@@ -71,147 +73,37 @@
 	my $nsda_nats = $tourn_settings->{"nsda_nats"};
 	my $regions   = $tourn_settings->{"regions"};
 
-	Tab::Round->set_sql( last_entryful => "
-		select round.*
-		from round, panel, ballot
-		where round.event = ?
-		and round.id = panel.round
-		and panel.id = ballot.panel
-		and ballot.entry > 0
-		order by round.name DESC limit 1
-	");
-
 	my $dio_regions         = $category_settings->{"conflict_region_judges"};
 	my $conflict_states     = $category_settings->{"conflict_state_judges"};
 	my $region_judge_forbid = $event_settings->{"region_judge_forbid"};
 
 	# If this is a round without entries, then I'm pre-paneling judges.
-
-	my $last_entryful_round = Tab::Round->search_last_entryful($event_id)->first;
-
-	my $pre_paneled++ if $last_entryful_round 
-		&& $last_entryful_round->name < $round_data->{"name"};
+	unless ($ARGS{"not_preset"}) { 
+		unless ($last_entryful_round) { 
+			$last_entryful_round = $m->comp("/funclib/last_round_entries.mas", event => $event);
+		}
+		$pre_paneled++ if $last_entryful_round 
+			&& $last_entryful_round->name < $round_data->{"name"};
+	}
 
 	# Score the sections based on how many kids are from the judge's school in
 	# this event.  This means that the first judge who comes up as clean is the
 	# judge whose school does this event the most, but is still clean to judge
 	# it.
 
-	my $dbh = Tab::DBI->db_Main();
+	my %judges = $m->comp("/funclib/judge_priority.mas", event => $event_id);
 
-	my $limit;
+	Tab::debuglog("This thing says Elria has ".$judges{"912705"}{"ballots"}." ballots");
 
-	unless ($category_settings->{"override_jpools"}) { 
-
-		$limit = "or exists ( select jpool_judge.id
-				from jpool_judge, jpool_round
-				where jpool_judge.judge = judge.id
-					and jpool_judge.jpool = jpool_round.jpool
-					and jpool_round.round = round.id
-			)";
+	unless (defined $ARGS{"standby"}) { 
+		%{$ARGS{"standby"}} = $m->comp("/funclib/judge_standby.mas", round => $round_id);
 	}
 
-	my $sth = $dbh->prepare(" 
-		select judge.id, school.id, region.id,
-			count(distinct entry.id), 
-			count(distinct struckentry.id), 
-			count(distinct schoolstruckentry.id),
-			count(distinct ballot.panel)
-		from (judge, event, round, category)
-
-		left join school on judge.school = school.id
-		left join region on school.region = region.id
-
-		left join entry on entry.school = judge.school
-			and entry.event = event.id
-
-		left join strike entrystrike 
-			on entrystrike.judge = judge.id 
-			and entrystrike.entry > 0
-
-		left join entry struckentry
-			on struckentry.id = entrystrike.entry
-			and struckentry.event = event.id
-
-		left join strike schoolstrike 
-			on schoolstrike.judge = judge.id 
-			and schoolstrike.school > 0
-
-		left join entry schoolstruckentry
-			on schoolstruckentry.school = schoolstrike.school
-			and schoolstruckentry.event = event.id
-
-		left join ballot on ballot.judge = judge.id
-
-		where round.id = ? 
-			and round.event = event.id
-            and event.tourn = category.tourn
-            and category.id = judge.category
-
-			and (
-				judge.category = event.category
-				or judge.alt_category = event.category
-					$limit
-			)
-
-			group by judge.id
-	");
-
-	$sth->execute($round_id);
-
-	my %judges;
-
-	while (
-		my (
-			$judge_id, $school_id, $region_id, 
-			$own_count, $struck_entries, $struck_entries_two, $ballots
-		) = $sth->fetchrow_array()
-	) {
-
-		$judges{$judge_id}{"own"} = $own_count;
-			
-		unless ($event_settings->{"allow_judge_own"}) { 
-			$judges{$judge_id}{"strikes"} += $own_count;
+	if ($ARGS{"standby"}) { 
+		foreach my $standby_id  (keys %{$ARGS{"standby"}}) { 
+			$judges{$standby_id}{"standby"} = 1;
 		}
-
-		$judges{$judge_id}{"strikes"} += $struck_entries;
-		$judges{$judge_id}{"strikes"} += $struck_entries_two;
-		$judges{$judge_id}{"ballots"} += $ballots;
-		$judges{$judge_id}{"school"} += $school_id;
-		$judges{$judge_id}{"region"} += $region_id;
 	}
-
-	# This will priorities the judges who are on standby for this particular
-	# round already; do not assign them for rounds automatically but make them
-	# first for rounds done manually
-
-	$sth = $dbh->prepare("
-		select jpool_judge.judge
-
-		from jpool, jpool_judge,
-			jpool_setting standby, jpool_setting standby_timeslot, round, event
-
-		where round.id = ? 
-			and round.event = event.id
-			and event.category = jpool.category
-
-		and standby.jpool = jpool.id
-		and standby.tag = 'standby'
-
-		and standby_timeslot.jpool = jpool.id
-		and standby_timeslot.tag = 'standby_timeslot'
-		and standby_timeslot.value = round.timeslot
-		and jpool_judge.jpool = jpool.id
-	");
-
-	$sth->execute($round_id);
-
-	while( 
-		my ($judge) = $sth->fetchrow_array() 
-	) { 
-		$judges{$judge}{"standby"}++;
-	}
-
 
 	# This setting when applied does not let people in a jpool judge cross
 	# category. 
@@ -752,8 +644,6 @@
 
 	} elsif ($event_data->{"type"} eq "speech") { 
 
-		Tab::debuglog("I am checking here!");
-
 		# If there are pre-assigned judges in this event, the judge cannot
 		# judge it now if they're assigned to it
 
@@ -797,8 +687,6 @@
 			# Finally, if the round is not preset (and therefore has kids assigned
 			# to it), we just check to see if the kids have been judged by the
 			# judge.
-
-			Tab::debuglog("Here I am!  Checking the conflict");
 
 			$sql_from_hell .= " 
 				and not exists( 
@@ -919,59 +807,52 @@
 	# This either prevents judges from judging a round when the previous round
 	# ended, or not, as the user defines
 
+	my $lt_symbol = '=';
+	my $gt_symbol = '=';
+
 	if ($category_settings->{"no_back_to_back"}) { 
+		$lt_symbol = '<=';
+		$gt_symbol = '>=';
+	}
 
-		$sql_from_hell = $sql_from_hell. " 
-			and not exists ( 		
-				select bt.id from panel as pt,ballot as bt,timeslot as tt, round as rt
-				where tt.start <= timeslot.end
-				and tt.end >= timeslot.start
-				and tt.id = rt.timeslot
-				and tt.tourn = tourn.id
-				and rt.id = pt.round
-				and pt.id = bt.panel
-				and pt.flight = panel.flight
-				and bt.judge = judge.id )
-		";
-
-	} elsif (not defined $ARGS{"stealable"}) { 
+	if (not defined $ARGS{"stealable"}) { 
 
 		$sql_from_hell .= "
 			and not exists ( 		
 				select bt.id from panel as pt,ballot as bt,timeslot as tt, round as rt
-				where tt.start < timeslot.end
-				and tt.end > timeslot.start
-				and tt.id = rt.timeslot
-				and tt.tourn = tourn.id
-				and rt.id = pt.round
-				and pt.id = bt.panel
+				where tt.start $lt_symbol  timeslot.end
+				and tt.end $gt_symbol timeslot.start
+				and tt.id     = rt.timeslot
+				and tt.tourn  = tourn.id
+				and rt.id     = pt.round
+				and pt.id     = bt.panel
 				and pt.flight = panel.flight
-				and bt.judge = judge.id
+				and bt.judge  = judge.id
 			)
 			and not exists ( 		
 				select bt.id from panel as pt,ballot as bt
 				where pt.round = panel.round
-				and pt.flight = panel.flight
-				and pt.id = bt.panel
-				and bt.judge = judge.id 
+				and pt.flight  = panel.flight
+				and pt.id      = bt.panel
+				and bt.judge   = judge.id
 			)
 			and not exists ( 		
 				select bt.id from panel as pt,ballot as bt,timeslot as tt, round as rt
 				where tt.start = timeslot.start
-				and tt.end = timeslot.end
-				and tt.id = rt.timeslot
-				and tt.tourn = tourn.id
-				and rt.id = pt.round
-				and pt.id = bt.panel
-				and pt.flight = panel.flight
-				and bt.judge = judge.id
+				and tt.end     = timeslot.end
+				and tt.id      = rt.timeslot
+				and tt.tourn   = tourn.id
+				and rt.id      = pt.round
+				and pt.id      = bt.panel
+				and pt.flight  = panel.flight
+				and bt.judge   = judge.id
 			)
 
 			and not exists ( 
 				select ba.id 
 					from panel pa, ballot as ba, timeslot as ta, round as ra, judge as ja
-				where ta.start < timeslot.end
-				and ta.end > timeslot.start 
+				where ta.start $lt_symbol timeslot.end
+				and ta.end $gt_symbol timeslot.start 
 				and ta.tourn = tourn.id
 				and ta.id = ra.timeslot
 				and ra.id = pa.round
@@ -1073,8 +954,14 @@
 		$sql_from_hell .= " order by tab_rating.value DESC ";
 	}
 
-	$sth = $dbh->prepare($sql_from_hell);
+	my $dbh = Tab::DBI->db_Main();
+	my $sth = $dbh->prepare($sql_from_hell);
 	$sth->execute($panel_id);
+
+	foreach my $jid (keys %judges) { 
+		undef $judges{$jid}{"clean"};
+		undef $judges{$jid}{"busy"};
+	}
 
 	while (
 		my ( $judge_id, 
