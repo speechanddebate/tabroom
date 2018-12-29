@@ -1,0 +1,284 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+</%args>
+<%init> 
+
+    use Text::Wrap;
+
+	my $debug;
+
+    my $dbh = Tab::DBI->db_Main(); 
+	my %schools; 
+
+	if ($ARGS{"pending"}) { 
+
+		my $unconfirmed_sth = $dbh->prepare("
+			select school.id, school.name,
+				entry.id, entry.name, event.abbr, 
+				DATE_FORMAT(entry.created_at, '%c/%e') as created
+			from school, entry, event
+				where school.id       = entry.school
+				and school.tourn      = ?
+				and entry.unconfirmed = 1
+				and school.chapter > 0
+				and entry.event = event.id
+
+				and not exists (
+					select es.id 
+					from entry_setting es
+					where es.tag = 'rejected_by'
+					and es.entry = entry.id
+				)
+
+				and not exists (
+					select supp.id 
+					from event_setting supp
+					where supp.tag = 'supp'
+					and supp.event = entry.event
+				)
+
+				and not exists (
+					select conn.id 
+					from event_setting conn
+					where conn.tag = 'conn'
+					and conn.event = entry.event
+				)
+
+			group by entry.id
+		");
+
+		$unconfirmed_sth->execute($tourn->id);
+
+		while (
+			my (
+				$school_id, $school_name, $entry_id, $entry_name, $event_abbr, $entry_created
+			) = $unconfirmed_sth->fetchrow_array()
+		) {
+			$schools{$school_id}{$entry_id}{'school_name'} = $school_name;
+			$schools{$school_id}{$entry_id}{'name'}        = $entry_name;
+			$schools{$school_id}{$entry_id}{'created'}     = $entry_created;
+			$schools{$school_id}{$entry_id}{'event'}       = $event_abbr;
+			$schools{$school_id}{$entry_id}{'status'}      = "pending";
+		}
+	}
+
+	if ($ARGS{"entries"}) { 
+
+		my $incomplete_sth = $dbh->prepare("
+			select school.id, school.name,
+				entry.id, entry.name, event.abbr,
+				reason.value_text
+			from (school, entry, event, entry_setting status)
+
+			left join entry_setting reason on reason.entry = entry.id
+				and reason.tag = 'incomplete_reasons'
+
+				where school.tourn = ? 
+				and school.id = entry.school
+				and school.chapter > 0
+
+				and entry.unconfirmed = 0
+				and entry.id = status.entry
+
+				and status.tag = 'status'
+				and status.value = 'incomplete'
+				and entry.event = event.id
+
+				and not exists (
+					select es.id 
+					from entry_setting es
+					where es.tag = 'rejected_by'
+					and es.entry = entry.id
+				)
+			group by entry.id
+		");
+
+		$incomplete_sth->execute($tourn->id);
+
+		while (
+			my (
+				$school_id, $school_name, $entry_id, $entry_name, $event_abbr, $reason
+			) = $incomplete_sth->fetchrow_array()
+		) {
+			$schools{$school_id}{$entry_id}{'name'}   = $entry_name;
+			$schools{$school_id}{$entry_id}{'school_name'} = $school_name;
+			$reason =~ s/-/\r\t\t/g;
+			$schools{$school_id}{$entry_id}{'reason'} = $reason;
+			$schools{$school_id}{$entry_id}{'event'}  = $event_abbr;
+			$schools{$school_id}{$entry_id}{'status'} = "incomplete";
+		}
+	}
+
+	if ($ARGS{"judges"}) { 
+
+		my $judge_sth = $dbh->prepare("
+			select school.id, school.name,
+				judge.id, judge.first, judge.last, incomplete.value_text
+			from (school, judge, judge_setting incomplete)
+
+				where school.tourn = ? 
+				and school.id = judge.school
+				and school.chapter > 0
+
+				and judge.id       = incomplete.judge
+				and judge.active   = 1
+				and incomplete.tag = 'incomplete'
+			group by judge.id
+		");
+
+		$judge_sth->execute($tourn->id);
+
+		while (
+			my (
+				$school_id, $school_name, $judge_id, $judge_first, $judge_last, $reason
+			) = $judge_sth->fetchrow_array()
+		) {
+			$schools{$school_id}{$judge_id}{'first'}       = $judge_first;
+			$schools{$school_id}{$judge_id}{'last'}        = $judge_last;
+			$schools{$school_id}{$judge_id}{'school_name'} = $school_name;
+			$schools{$school_id}{$judge_id}{'reason'}      = $reason;
+			$schools{$school_id}{$judge_id}{'status'}      = "judge";
+		}
+	}
+
+
+    my %tourn_contacts = $m->comp( "/funclib/tourn_contacts.mas", tourn => $tourn);
+
+    my $body = $ARGS{"body"};
+    
+#	$body = $strip->parse($body);
+#    my $strip = HTML::Strip->new();
+#    my $body = $strip->parse($ARGS{"body"});
+#    $body =~ s/[^[:ascii:]]//g;
+#    $body =~ s/^\s+//; 
+#    $body =~ s/\s+$//;
+
+#    $Text::Wrap::columns = 72; 
+#   eval{ $body = wrap('', '', $body); };  
+
+	my $subject = $ARGS{"subject"};
+	$subject = "Registration incomplete for ".$tourn->name unless $subject;
+
+	foreach my $school (keys %schools) { 
+
+       	my @emails = keys %{$tourn_contacts{$school}};
+		my $notfirst;
+		my $school_text = $body;
+		my $issues;
+		my $school_name;
+
+		my %named; 
+
+		foreach my $entry (
+			sort {
+				$schools{$school}{$a}{'status'} cmp $schools{$school}{$b}{"status"}
+				|| $schools{$school}{$a}{'name'} cmp $schools{$school}{$b}{"name"}
+			}
+			keys %{$schools{$school}}  
+		) { 
+
+			next unless $schools{$school}{$entry}{"status"} eq "pending";
+			unless ($notfirst++) { 
+				$issues .= "Entries Pending Acceptance/Rejection:\n";
+			}
+
+			$issues .= "\n";
+			if ($named{$schools{$school}{$entry}{"name"}}++) { 
+				$issues .= "\t";
+			} else { 
+				$issues .= "\n".$schools{$school}{$entry}{"name"};
+			}
+			$issues .= "\t pending since ".$schools{$school}{$entry}{"created"};
+
+			$school_name = $schools{$school}{$entry}{"school_name"};
+		}
+
+		undef $notfirst;
+
+		foreach my $entry (
+			sort {
+				$schools{$school}{$a}{'status'} cmp $schools{$school}{$b}{"status"}
+				|| $schools{$school}{$a}{'name'} cmp $schools{$school}{$b}{"name"}
+			}
+			keys %{$schools{$school}}  
+		) { 
+
+			next unless $schools{$school}{$entry}{"status"} eq "incomplete";
+			unless ($notfirst++) { 
+				$issues .= "\nIncomplete Entries:\n";
+			}
+			$issues .= "\n";
+			if ($named{$schools{$school}{$entry}{"name"}}++) { 
+				$issues .= "\t";
+			} else { 
+				$issues .= "\n".$schools{$school}{$entry}{"name"};
+			}
+			$issues .= "\t ".$schools{$school}{$entry}{"reason"};
+			$school_name = $schools{$school}{$entry}{"school_name"};
+		}
+
+		undef $notfirst;
+
+		foreach my $judge (
+			sort {
+				$schools{$school}{$a}{'status'} cmp $schools{$school}{$b}{"status"}
+				|| $schools{$school}{$a}{'last'} cmp $schools{$school}{$b}{"last"}
+			}
+			keys %{$schools{$school}}  
+		) { 
+
+			next unless $schools{$school}{$judge}{"status"} eq "judge";
+			unless ($notfirst++) { 
+				$issues .= "\nIncomplete Judges:\n";
+			}
+			$issues .= "\n";
+			$issues .= $schools{$school}{$judge}{"first"}." ".$schools{$school}{$judge}{"last"};
+			$issues .= "\t ".$schools{$school}{$judge}{"reason"};
+			$school_name = $schools{$school}{$judge}{"school_name"};
+		}
+
+		$school_text .= "\n";
+		$school_text .= "========================\n";
+		$school_text .= "Outstanding Registration Issues for $school $school_name:\n";
+		$school_text .= $issues;
+
+		if ($debug) { 
+
+			$m->print("Sender ".$person->email." \n");
+			$m->print("Subject ".$subject." \n");
+			$m->print("To @emails \n");
+			$m->print("Text:\n");
+			$m->print($school_text);
+			$m->print("\n\n");
+
+			$m->flush_buffer();
+
+		} else { 
+
+			$m->comp( "/funclib/send_email.mas", 
+				from    => $person,
+				array   => \@emails,
+				subject => $subject,
+				body    => $school_text
+			);  
+		}
+	}
+
+	my $msg = "Pending notices sent to ".scalar(keys %schools)." schools";
+
+	#LOG IT
+    my $now = DateTime->now();
+
+    my $change = Tab::ChangeLog->create({
+        person      => $person,
+        type        => "notification",
+        description => $msg,
+        tourn       => $tourn,
+        created     => $now
+    });
+
+	$m->redirect("nats_notices.mhtml?msg=$msg") unless $debug;
+
+</%init>
