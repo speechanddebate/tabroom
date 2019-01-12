@@ -11,6 +11,9 @@
 	my $student1 = Tab::Student->retrieve($id1) if $id1;
 	my $student2 = Tab::Student->retrieve($id2) if $id2;
 	$m->abort unless $student1;
+
+	my $student1_id = $student1->id;
+	my $student2_id = $student2->id if $student2;
 	
 	use Time::HiRes qw( time );
 	use DateTime;
@@ -25,197 +28,212 @@
 	my $start_dt = Tab::dtme($start_string);	
 	my $end_dt = Tab::dtme($end_string);	
 
-	# NOW PULL EVERY BALLOT FOR EVERY ENTRY THAT EITHER SPEAKER HAS BEEN ON
+	my $start_epoch = $start_dt->epoch;
+	my $end_epoch = $end_dt->epoch;
 
-	Tab::Ballot->columns(TEMP => qw/entry_code/);
-	Tab::Ballot->columns(TEMP => qw/score_id/);
-	Tab::Ballot->columns(TEMP => qw/score_tag/);
-	Tab::Ballot->columns(TEMP => qw/score_student/);
-	Tab::Ballot->columns(TEMP => qw/score_value/);
-	Tab::Ballot->columns(TEMP => qw/round_name/);
-	Tab::Ballot->columns(TEMP => qw/round_type/);
-	Tab::Ballot->columns(TEMP => qw/round_label/);
-	Tab::Ballot->columns(TEMP => qw/round_id/);
-	Tab::Ballot->columns(TEMP => qw/event_name/);
-	Tab::Ballot->columns(TEMP => qw/tourn_name/);
-	Tab::Ballot->columns(TEMP => qw/tourn_id/);
-	Tab::Ballot->columns(TEMP => qw/tourn_start/);	
-	Tab::Ballot->columns(TEMP => qw/judge_name/);		
-	Tab::Ballot->columns(TEMP => qw/opponent/);		
-	Tab::Ballot->columns(TEMP => qw/event_id/);
+	# NOW PULL EVERY BALLOT FOR EVERY ENTRY THAT EITHER SPEAKER HAS BEEN 
 
-	Tab::Ballot->set_sql(pull_ballots => "
-		select distinct ballot.id, ballot.*, 
-		score.*, score.tag as score_tag, score.student as score_student, 
-		score.id as score_id, score.value as score_value, 
-		round.name as round_name, round.label as round_label, round.type as round_type, round.id as round_id,
-		event.name as event_name, opponent.code as opponent,
-		tourn.name as tourn_name, tourn.start as tourn_start, tourn.id as tourn_id, event.id as event_id,
-		CONCAT(judge.last, ', ', judge.first) as judge_name
-		from ballot, entry_student, score, round, panel, event, tourn, judge, ballot oppballot, entry opponent
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			ballot.id, ballot.side, ballot.bye, ballot.entry,
+			panel.id, panel.letter,
+			score.id, score.tag, score.student, score.value, 
+			round.id, round.name, round.label, round.type, 
+			event.name, opponent.code,
+			tourn.id, tourn.name, tourn.start,
+			event.id, 
+			CONCAT(judge.last, ', ', judge.first) as judge_name,
+			level.value, 
+			round_robin.value,
+			aff_label.value, neg_label.value,
+			score_student.id, score_student.first, score_student.last
+
+		from (ballot, entry_student, score, round, panel, event, tourn, judge, ballot oppballot, entry opponent)
+
+		left join event_setting level on level.event = event.id and level.tag = 'level'
+		left join event_setting round_robin on round_robin.event = event.id and round_robin.tag = 'round_robin'
+		left join event_setting aff_label on aff_label.event = event.id and aff_label.tag = 'aff_label'
+		left join event_setting neg_label on neg_label.event = event.id and neg_label.tag = 'neg_label'
+		left join student score_student on score.student = score_student.id
+
 		where entry_student.student = ? 
-		and ballot.entry = entry_student.entry
-		and score.ballot = ballot.id
-		and judge.id = ballot.judge		
-		and panel.id = ballot.panel
-		and round.id = panel.round
-		and round.post_results  =  2
-		and event.id = round.event
-		and tourn.id = event.tourn
-		and panel.id = oppballot.panel
-		and oppballot.entry = opponent.id
-		and opponent.id != entry_student.entry
+			and ballot.entry = entry_student.entry
+			and score.ballot = ballot.id
+			and judge.id = ballot.judge		
+			and panel.id = ballot.panel
+			and round.id = panel.round
+			and round.post_results =  2
+			and event.id = round.event
+			and tourn.id = event.tourn
+			and panel.id = oppballot.panel
+			and oppballot.entry = opponent.id
+			and opponent.id != entry_student.entry
+		group by score.id
 		order by tourn.start desc, event.id asc, ballot.panel asc
 	");
-	#date sort is failing and I'm not sure why.  OR maybe it does work! 1/15/18.  No, it probably doesnt.
-	
-	my @ballots  =  Tab::Ballot->search_pull_ballots($student1->id) if $student1;
-	push @ballots, Tab::Ballot->search_pull_ballots($student2->id) if $student2;
-
-	my %seen = ();
-	@ballots = grep { ! $seen{$_->id} ++ } @ballots;
 
 	my %panel;
 	my %summary;
-	my $last_entry = - 999;
-	my @students;
-	my $tourn_order = 1;
+	my %students;
 
-	print "This many ballots: ".scalar(@ballots)."<br>" if $debug;
-		
-	#just fuck it; I don't know how to dig down and pull 2 event_settings with different tags via sql, so this will do it
-	
-	my %event_setting;
-	foreach my $ballot (@ballots) {
-		unless( $event_setting{ $ballot->event_id} ) {
-			my $event = Tab::Event->retrieve($ballot->event_id);
-			$event_setting{$ballot->event_id}{'level'} = $event->setting("level");
-			$event_setting{$ballot->event_id}{'round_robin'} = $event->setting("round_robin");
-		}
-	}
-	
-	foreach my $ballot (@ballots) { 
+	foreach my $student ($student1, $student2) { 
 
-		if ($debug) { 
-			print "ballot_id=".$ballot->id." tourn=".$ballot->tourn_id." rd=".$ballot->round_name." panel=".$ballot->panel." tag=".$ballot->score_tag; 
-			print "judge=".$ballot->judge." value=".$ballot->score_value." student=".$ballot->score_student." score_id=".$ballot->score_id."<br>";
-		}
+		next unless $student;
+		$sth->execute($student1);
 
-		$panel{$ballot->panel}{'tourn'} = $ballot->tourn_name;
-		$panel{$ballot->panel}{'tourn_id'} = $ballot->tourn_id;
-		$panel{$ballot->panel}{'round_id'} = $ballot->round_id;
-		$panel{$ballot->panel}{'tourn_start'} = substr($ballot->tourn_start,0,10);
-		$panel{$ballot->panel}{'event_name'} = $ballot->event_name;
-		$panel{$ballot->panel}{'opponent'} = $ballot->opponent;
-		$panel{$ballot->panel}{'round_name'} = $ballot->round_name;
-		$panel{$ballot->panel}{'round_label'} = $ballot->round_name;
-		$panel{$ballot->panel}{'round_label'} = $ballot->round_label if $ballot->round_label;
-		$panel{$ballot->panel}{'elim'} = 0;
-		$panel{$ballot->panel}{'this_yr'} = 0;
-		$panel{$ballot->panel}{'event_level'} = $event_setting{$ballot->event_id}{'level'};
-		$panel{$ballot->panel}{'event_level'} = "rr" if $event_setting{$ballot->event_id}{'round_robin'};
-		$panel{$ballot->panel}{'event_level'} = "missing" unless $panel{$ballot->panel}{'event_level'};
-		$panel{$ballot->panel}{'event_id'} = $ballot->event_id;
-		my $event = Tab::Event->retrieve($ballot->event_id);
-		$panel{$ballot->panel}{'side'} = $event->setting("aff_label") if $ballot->side == 1;
-		$panel{$ballot->panel}{'side'} = $event->setting("neg_label") if $ballot->side == 2;
-		if ($ballot->side == 1) {
-			$panel{$ballot->panel}{'side'} = "Aff" unless $event->setting("aff_label");
-		};
-		if ($ballot->side == 2) {
-			$panel{$ballot->panel}{'side'} = "Neg" unless $event->setting("neg_label");
-		};
-		
-		
-		
-		my $epoch = str2time($ballot->tourn_start);
-		my $fake_dt = DateTime->from_epoch(epoch => $epoch);
+		my $last_entry;
 
-		if ( $fake_dt >= $start_dt ) {
-			$panel{$ballot->panel}{'this_yr'} = 1;
-		}
+		while (
 
-		if ( $ballot->round_type eq "elim" || $ballot->round_type eq "final" ) { $panel{$ballot->panel}{'elim'} = 1 };
+			my (
+				$ballot_id, $ballot_side, $ballot_bye, $entry_id,
+				$panel_id, $panel_letter,
+				$score_id, $score_tag, $score_student, $score_value,
+				$round_id, $round_name, $round_label, $round_type,
+				$event_name, $opponent_code,
+				$tourn_id, $tourn_name, $tourn_start,
+				$event_id,
+				$judge_name,
+				$level, $round_robin, $aff_label, $neg_label,
+				$student_id, $student_first, $student_last
+			) = $sth->fetchrow_array() 
 
-		if ( $ballot->score_tag eq "ballot" ) {
+		) { 
 
-			$panel{$ballot->panel}{'judge'} .= "<span class=\"smallish third nospace nowrap\">".$ballot->judge_name." </span> ";
-			$panel{$ballot->panel}{'total_ballots'}++;
-			$panel{$ballot->panel}{'ballots_won'} += $ballot->score_value;
+			Tab::debuglog("I have a round 1 ballot $ballot_id panel $panel_id round $round_name at $tourn_name!") if $round_name == 1;
 
-			if ( $ballot->score_value == 1 ) { 
-				$panel{$ballot->panel}{'decision_str'}.= "W"; 
+			$panel{$panel_id}{'tourn'}       = $tourn_name;
+			$panel{$panel_id}{'tourn_id'}    = $tourn_id;
+			$panel{$panel_id}{'round_id'}    = $round_id;
+			$panel{$panel_id}{'tourn_start'} = substr($tourn_start,0,10);
+			$panel{$panel_id}{'event_name'}  = $event_name;
+			$panel{$panel_id}{'opponent'}    = $opponent_code;
+			$panel{$panel_id}{'round_name'}  = $round_name;
+			$panel{$panel_id}{'round_label'} = $round_name;
+			$panel{$panel_id}{'round_label'} = $round_label if $round_label;
+			$panel{$panel_id}{'elim'}        = 0;
+
+			$panel{$panel_id}{"tourn_order"} = str2time($tourn_start);
+
+			if ( $panel{$panel_id}{"tourn_order"} >= $start_epoch ) {
+				$panel{$panel_id}{'this_yr'} = 1;
 			} else { 
-				$panel{$ballot->panel}{'decision_str'}.= "L"; 
+				$panel{$panel_id}{'this_yr'} = 0;
 			}
 
-			if ($debug) { 
-				print " total_ballots:".$panel{$ballot->panel}{'total_ballots'};
-				print " ballots_won:".$panel{$ballot->panel}{'ballots_won'};
-			}
-		}
-
-		if ( lc($ballot->score_tag) eq "points" ) {
-
-			if ($ballot->score_student == $student1->id) { 
-				$panel{$ballot->panel}{'spkr1_pts'} .= $ballot->score_value." "; 
+			if ($round_robin) { 
+				$panel{$panel_id}{'event_level'} = "rr";
+			} elsif ($level) { 
+				$panel{$panel_id}{'event_level'} = $level;
+			} else { 
+				$panel{$panel_id}{'event_level'} = "missing";
 			}
 
-			if ($student2 && $ballot->score_student == $student2->id) { 
-				$panel{$ballot->panel}{'spkr2_pts'} .= $ballot->score_value." "; 
+			$panel{$panel_id}{'event_id'} = $event_id;
+
+			if ($ballot_side == 1) {
+				$panel{$panel_id}{'side'} = "Aff";
+				$panel{$panel_id}{'side'} = $aff_label if $aff_label;
+			} elsif ($ballot_side == 2) {
+				$panel{$panel_id}{'side'} = "Neg";
+				$panel{$panel_id}{'side'} = $neg_label if $neg_label;
+			};
+
+
+			if ( $round_type eq "elim" || $round_type eq "final" ) {
+				$panel{$panel_id}{'elim'} = 1;
 			}
 
-			print " student:".$ballot->score_student if $debug;
-			print " pts1:".$panel{$ballot->panel}{'spkr1_pts'} if $debug;
-			print " pts2:".$panel{$ballot->panel}{'spkr2_pts'} if $debug;
+			if ( $score_tag eq "ballot" ) {
+
+				$panel{$panel_id}{'judge'} .= "<span class=\"smallish third nospace nowrap\">".$judge_name." </span> ";
+				$panel{$panel_id}{'total_ballots'}++;
+				$panel{$panel_id}{'ballots_won'} += $score_value;
+
+				if ( $score_value == 1 ) { 
+					$panel{$panel_id}{'decision_str'}.= "W"; 
+				} else { 
+					$panel{$panel_id}{'decision_str'}.= "L"; 
+				}
+			}
+
+			if ($score_tag eq "points" ) {
+				if ($score_student == $student1_id) { 
+					$panel{$panel_id}{'spkr1_pts'} .= $score_value." "; 
+				}
+
+				if ($student2 && $score_student == $student2_id) { 
+					$panel{$panel_id}{'spkr2_pts'} .= $score_value." "; 
+				}
+			}
+
+
+			if ($student1 && $student_id == $student1_id) { 
+				$panel{$panel_id}{'spkr1_on_entry'} = 1;
+			}
+
+			if ($student2 && $student_id == $student2_id) { 
+				$panel{$panel_id}{'spkr2_on_entry'} = 1;
+			}
+
+			if ( $student1 && $panel{$panel_id}{'spkr1_on_entry'} == 1 && $student_id != $student1_id) { 
+				$panel{$panel_id}{'third_speaker'} = $student_first." ".$student_last;
+			}
+
+			if ( $student2 && $panel{$panel_id}{'spkr2_on_entry'} == 1 && $student_id != $student2_id) { 
+				$panel{$panel_id}{'third_speaker'} = $student_first." ".$student_last; 
+			}
+
+			$last_entry = $entry_id;
+			print "<br>" if $debug;
 		}
 
-		if ($last_entry != $ballot->entry ) {
-		   	$tourn_order++;
-			@students = $ballot->entry->students;
-		}
-
-    	$panel{$ballot->panel}{'tourn_order'}=$tourn_order;
-    	foreach my $student (@students) {
-			if ($student1 && $student->id == $student1->id) { $panel{$ballot->panel}{'spkr1_on_entry'} = 1; }
-			if ($student2 && $student->id == $student2->id) { $panel{$ballot->panel}{'spkr2_on_entry'} = 1; }
-			if ( $student1 && $panel{$ballot->panel}{'spkr1_on_entry'} == 1 && $student->id != $student1->id) { $panel{$ballot->panel}{'third_speaker'} = $student->first." ".$student->last; }
-			if ( $student2 && $panel{$ballot->panel}{'spkr2_on_entry'} == 1 && $student->id != $student2->id) { $panel{$ballot->panel}{'third_speaker'} = $student->first." ".$student->last; }
-		}
-
-		$last_entry = $ballot->entry;
-		print "<br>" if $debug;
 	}
 
-	foreach my $key ( keys %panel ) {
 
-		my $dummy;
-		
-		my $this_yr="other_yr";
-		$this_yr ="this_yr" if $panel{$key}{'this_yr'} == 1;
-		
-		if ( $panel{$key}{'spkr1_on_entry'} == 1 && $panel{$key}{'spkr2_on_entry'} == 1 ) { $dummy="together"; }
-		if ( $panel{$key}{'spkr1_on_entry'} == 1 && $panel{$key}{'spkr2_on_entry'} != 1 ) { $dummy="spkr1"; }
-		if ( $panel{$key}{'spkr1_on_entry'} != 1 && $panel{$key}{'spkr2_on_entry'} == 1 ) { $dummy="spkr2"; }
-		$dummy .= "-".$this_yr."-".$panel{$key}{'event_level'};
-		
-		if ( $panel{$key}{'elim'} == 0 ) {
-			$summary{$dummy}{'prelim_ballots'} += $panel{$key}{'total_ballots'};
-			$summary{$dummy}{'prelim_ballots_won'} += $panel{$key}{'ballots_won'};
-			$summary{$dummy}{'prelim_rds'} ++;
-			if ( $panel{$key}{'ballots_won'} > ( $panel{$key}{'total_ballots'} - $panel{$key}{'ballots_won'} ) ) {
-				$summary{$dummy}{'prelim_wins'} ++;
-			}
-		} else {
-			$panel{$key}{'elim_level'} = $m->comp("/funclib/round_elim_level.mas", round_id => $panel{$key}{'round_id'});
-			$summary{$dummy}{'elim_ballots'} += $panel{$key}{'total_ballots'};
-			$summary{$dummy}{'elim_ballots_won'} += $panel{$key}{'ballots_won'};
-			$summary{$dummy}{'elim_rds'} ++;
-			if ( $panel{$key}{'ballots_won'} > ( $panel{$key}{'total_ballots'} - $panel{$key}{'ballots_won'} ) ) {
-				$summary{$dummy}{'elim_wins'} ++;
-			}
-		}
-	}
+
+    foreach my $key ( keys %panel ) {    
+    
+        my $dummy;    
+            
+        my $this_yr="other_yr";    
+        $this_yr ="this_yr" if $panel{$key}{'this_yr'} == 1;    
+            
+        if ( $panel{$key}{'spkr1_on_entry'} == 1 && $panel{$key}{'spkr2_on_entry'} == 1 ) { $dummy="together"; }    
+        if ( $panel{$key}{'spkr1_on_entry'} == 1 && $panel{$key}{'spkr2_on_entry'} != 1 ) { $dummy="spkr1"; }    
+        if ( $panel{$key}{'spkr1_on_entry'} != 1 && $panel{$key}{'spkr2_on_entry'} == 1 ) { $dummy="spkr2"; }    
+    
+        my $dummy0 = $dummy;    
+        my $dummy1 = $dummy."-".$this_yr;    
+        my $dummy2 = $dummy."-".$this_yr."-".$panel{$key}{'event_level'};    
+    
+        foreach my $dummy ($dummy0, $dummy1, $dummy2) {     
+            
+            if ( $panel{$key}{'elim'} == 0 ) {    
+    
+                $summary{$dummy}{'prelim_ballots'} += $panel{$key}{'total_ballots'};    
+                $summary{$dummy}{'prelim_ballots_won'} += $panel{$key}{'ballots_won'};    
+                $summary{$dummy}{'prelim_rds'} ++;    
+                if ( $panel{$key}{'ballots_won'} > ( $panel{$key}{'total_ballots'} - $panel{$key}{'ballots_won'} ) ) {    
+                    $summary{$dummy}{'prelim_wins'} ++;    
+                } elsif ( $panel{$key}{'ballots_won'} < ( $panel{$key}{'total_ballots'} - $panel{$key}{'ballots_won'} ) ) {    
+                    $summary{$dummy}{'prelim_losses'} ++;    
+                }    
+            } else {    
+                $panel{$key}{'elim_level'} = $m->comp("/funclib/round_elim_level.mas", round_id => $panel{$key}{'round_id'});    
+                $summary{$dummy}{'elim_ballots'} += $panel{$key}{'total_ballots'};    
+                $summary{$dummy}{'elim_ballots_won'} += $panel{$key}{'ballots_won'};    
+                $summary{$dummy}{'elim_rds'} ++;    
+                if ( $panel{$key}{'ballots_won'} > ( $panel{$key}{'total_ballots'} - $panel{$key}{'ballots_won'} ) ) {    
+                    $summary{$dummy}{'elim_wins'} ++;    
+                } elsif ( $panel{$key}{'ballots_won'} < ( $panel{$key}{'total_ballots'} - $panel{$key}{'ballots_won'} ) ) {    
+                    $summary{$dummy}{'elim_losses'} ++;    
+                }        
+            }    
+        }    
+    }    
 	
 	#add the levels
 	foreach my $key (keys(%summary)) {
