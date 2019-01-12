@@ -20,7 +20,6 @@
 			$m->comp("/funclib/abort.mas",
 				warning => "You do not have access to perform that function."
 			);
-
 		}
 	}
 
@@ -30,9 +29,7 @@
 	use Data::Dumper;
 
 	my $now = DateTime->now();
-
-	my $date_limit = "2017-07-01 00:00:00";
-
+	my $date_limit = "2018-07-01 00:00:00";
 	my $result_text;
 
 	Tab::Tourn->columns(TEMP => "naudl_league");
@@ -104,29 +101,35 @@
 
 	my $response = `$query`;
 
-	my %response_data = %{decode_json($response)};
+	my %response_data = eval { 
+		return %{decode_json($response)};
+	};
 
 	my $nottfirst;
 
 	foreach my $tourn (@tourns) { 
 	
 		my %posted_tournaments; 
-
 		my $league = $tourn->naudl_league;
 		$league = "a0IE0000004hec4" unless $league;
 
 		my $location = $tourn->city.", " if $tourn->city;
 		$location .= $tourn->state;
 
+		my $tourn_name = $tourn->name;
+		$tourn_name =~ s/[^\w\s]//g;
+		$location =~ s/[^\w\s]//g;
+
 		my %tourn_info = (
 			TournID         => "TR".$tourn->id,
-			Name            => $tourn->name,
+			Name            => $tourn_name,
 			Location        => $location,
 			Tournament_Date => DateTime::Format::MySQL->format_datetime($tourn->start),
 			League          => $league
 		);
 
 		push @{$posted_tournaments{"posted_tournaments"}}, \%tourn_info;
+				
 
 		my $client = REST::Client->new(
 			host => $response_data{"instance_url"}
@@ -143,17 +146,26 @@
 				}
 			);
 
-			my $response = decode_json($client->responseContent());
+			my $response = eval { 
+				return decode_json($client->responseContent());
+			};
 
 			if ($response->{"success"} eq "true") { 
-				$result_text .= "\nTournaments posting SUCCEEDED!\n";
+				$result_text .= "\nTournaments posting SUCCEEDED for $tourn ".$tourn_name."\n";
+			} elsif ($response->{"message"} =~ /DUPLICATE_VALUE/) { 
+				$result_text .= "\nTournaments posting DUPLICATED for $tourn ".$tourn_name."\n";
+				$tourn->setting("naudl_processed", "date", $now);
 			} else { 
-				$result_text .= "\nTournaments posting FAILED:\n";
-
+				$result_text .= "\nTournaments posting FAILED for $tourn ".$tourn_name.":\n";
+				$tourn->setting("naudl_processed", "date", $now);
 			}
 
-			foreach my $key (keys %{$response}) { 
-				$result_text .= "\t$key: ".$response->{$key}."\n";
+			if ($response) { 
+				foreach my $key (keys %{$response}) { 
+					$result_text .= "\t$key: ".$response->{$key}."\n";
+				}
+			} else { 
+				$result_text .= "Salesforce reply malformed: ".$client->responseContent();
 			}
 
 			$result_text .= "\n";
@@ -203,7 +215,7 @@
 						my $already = Tab::StudentSetting->search(
 							student => $student_id,
 							tag     => "naudl_updated"
-						);
+						)->first;
 
 						if ($already) { 
 
@@ -219,9 +231,16 @@
 								value_date => $now
 							});
 						}
-					} else { 
-						$result_text .= "\nNew students posting FAILED:\n";
 
+					} elsif ($response->{"message"} =~ /DUPLICATE_VALUE/) { 
+				
+						push @{$updated->{"students_from_tabroom"}}, $student;
+						$result_text .= "Record exists for ".$student->{"tabroomid"}."\n";
+						$result_text .= "Moving to update process\n";
+
+					} else { 
+
+						$result_text .= "\nNew students posting FAILED:\n";
 						$result_text .= "\nInput:\n";
 						$result_text .= encode_json(\%student_record);
 					}
@@ -230,8 +249,6 @@
 						$result_text .= "\t$key: ".$response->{$key}."\n";
 					}
 				}
-
-
 			} 
 
 			if ($updated) { 
@@ -248,7 +265,35 @@
 				my $response = decode_json($client->responseContent());
 
 				if ($response->{"success"} eq "true") { 
+
 					$result_text .= "\nStudent update posting SUCCEEDED!\n";
+
+					foreach my $student (@{$updated->{"students_from_tabroom"}}) { 
+
+						my $student_id = $student->{"tabroomid"};
+						$student_id =~ s/TR//g;
+
+						my $already = Tab::StudentSetting->search(
+							student => $student_id,
+							tag     => "naudl_updated"
+						)->first;
+
+						if ($already) { 
+
+							$already->value_date($now);
+							$already->update();
+
+						} else { 
+
+							Tab::StudentSetting->create({
+								student    => $student_id,
+								tag        => "naudl_updated",
+								value      => "date",
+								value_date => $now
+							});
+						}
+					}
+
 				} else { 
 					$result_text .= "\nStudent update posting FAILED:\n";
 				}
@@ -258,8 +303,6 @@
 				}
 
 			}
-
-			$result_text .="\nUPDATED: $updated\n";
 
 			if ($sta) { 
 
@@ -272,21 +315,38 @@
 					}
 				);
 
-				my $response = decode_json($client->responseContent());
+				my $answer = $client->responseContent();
+				my $response = decode_json($answer);
+
+				my %response_hash = eval { 
+					return %{$response};
+				};
+
+				my @response_array = eval { 
+					return @{$response};
+				};
 
 				$result_text .= "\n\nSTA Update post:\n";
 
-				if ($response && $response->{"success"} eq "true") { 
+				if (@response_array) { 
+
+					$result_text .= "\nErrors encountered:";
+					foreach my $line (@{$response}) { 
+						$result_text .= "\n".$line;
+					}
+
+				} elsif (%response_hash && $response_hash{"success"} eq "true") { 
 					$result_text .= "\nStudent Tournament Records posting SUCCEEDED!\n";
 					$tourn->setting("naudl_processed", "date", $now);
 				} else { 
 					$result_text .= "\nStudent Tournament Records FAILED:\n";
 				}
 
-				foreach my $key (keys %{$response}) { 
-					$result_text .= "\t$key: ".$response->{$key}."\n";
+				if (%response_hash) { 
+					foreach my $key (keys %response_hash) { 
+						$result_text .= "\t$key: ".$response->{$key}."\n";
+					}
 				}
-
 			}
 
 		} else { 
@@ -340,17 +400,17 @@
 
 		} else { 
 
-#				$m->clear_buffer();
-#				$r->content_type('text/plain');
-#				$m->print($result_text);
-#				$m->abort();
+#			$m->clear_buffer();
+#			$r->content_type('text/plain');
+#			$m->print($result_text);
+#			$m->abort();
 
 			my $msg = $result_text;
 			$m->redirect("tourns.mhtml?msg=$msg");
 
 		}  
 
-	} else { 
+	   } else { 
 
 #		$m->clear_buffer();
 #		$r->content_type('application/json');

@@ -25,11 +25,7 @@
 	$settings{"ncfl"}      = $tourn_settings->{"ncfl"};
 	$settings{"region"}    = $tourn_settings->{"regions"};
 
-
-	$m->comp(
-		"/funclib/panel_dedupe.mas", 
-		panel => $panel
-	);
+	$m->comp("/funclib/panel_dedupe.mas", panel => $panel);
 
 	my $entry_only++ if ${$perms}{"entry_only"};
 
@@ -42,7 +38,14 @@
 		$m->abort;
 	}
 
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
 	my $round = $panel->round;
+	my $timeslot = $round->timeslot;
+	my $event = $round->event;
+	my $start = $timeslot->start->set_time_zone($tz);
+	my %event_settings = $event->all_settings();
 
 	$settings{"flighted"} = $round->flighted;
 
@@ -51,24 +54,10 @@
 		panel => $panel
 	);
 
-	my $timeslot = $round->timeslot;
-
-	my $tz = $tourn->tz;
-	$tz = "UTC" unless $tz;
-	my $start = $timeslot->start->set_time_zone($tz);
-
-	my $event = $round->event;
-
-	my %event_settings = $event->all_settings();
-
 	my %judge_sites = ();
 
-	my $blind_mode++ 
-		if $event_settings{"blind_mode"} 
-		&& $round->published < 1;
-
+	my $blind_mode++ if $event_settings{"blind_mode"} && $round->published < 1;
 	$settings{"blind_mode"} = $blind_mode;
-
 	$settings{"online_ballots"}++ if $event_settings{"online_ballots"};
 
 	my %anonymize = $m->comp(
@@ -129,7 +118,6 @@
 	}
 
 	$settings{"region"}++ if $event_settings{"region_avoid"};
-
 	$settings{"region"}++ if $event_settings{"region_constrain"};
 
 	my $category = $event->category;
@@ -165,16 +153,20 @@
 		panel => $panel
 	);
 
+	my $all++ if $tourn_settings->{"nsda_nats"} && $event_settings{"supp"};
+
 	my %entry_wins = $m->comp(
 		"/funclib/entry_wins.mas", 
 			event => $event,
-			round => $round
+			round => $round,
+			all   => $all
 		);
 
 	my %entry_losses = $m->comp(
 		"/funclib/entry_losses.mas", 
 		event => $event,
-		round => $round
+		round => $round,
+		all   => $all
 	);
 
 	my @reserved_rooms;
@@ -194,15 +186,9 @@
 		@entries = sort {$a->side <=> $b->side} @entries;
 	}
 
-	my %schools;
+	my %schools = map {$_->school->id => 1} @entries;
 
-	foreach my $entry (@entries) { 
-		$schools{$entry->school->id}++;
-	}
-
-	$settings{"tab_ratings"}++ 
-		if $category_settings{"tab_ratings"};
-
+	$settings{"tab_ratings"}++ if $category_settings{"tab_ratings"};
 	$settings{"prefs"} = $category_settings{"prefs"};
 
 	if ($settings{"prefs"} eq "ndt") { 
@@ -218,21 +204,6 @@
 	$settings{"no_judge_codes"}++ if $category_settings{"no_codes"};
 	$settings{"no_school_codes"}++ if $tourn_settings->{"school_codes"} eq "none";
 	$settings{"diversity"}++ if $category_settings{"track_diversity"};
-
-	my %judge_tab_ratings  = ();
-
-	if ($settings{"tab_ratings"}) { 
-
-		my @all_tab_ratings = $m->comp(
-			"/funclib/category_judge_settings.mas", 
-			category => $category,
-			tag      => "tab_rating"
-		);
-
-		%judge_tab_ratings = 
-			map {$_->judge->id, $_->value} 
-			@all_tab_ratings;
-	}
 
 	my %rating_by_judge = ();
 			
@@ -254,16 +225,21 @@
 		}
 
 		foreach my $rating (@ratings) { 
-			$rating_by_judge{$rating->judge->id} 
-				= $tier_names{$rating->rating_tier->id} 
+			$rating_by_judge{$rating->judge->id} = $tier_names{$rating->rating_tier->id} 
 				if $rating && $rating->rating_tier;
-
 		}
 
 	}
 
 	$settings{"rating_by_judge_ref"} = \%rating_by_judge;
 	$settings{"rounds_per"} = $category_settings{"rounds_per"};
+
+	my $round_type = $round->type;
+
+	undef $settings{"rounds_per"} 
+		if $round_type eq "elim" 
+		|| $round_type eq "final"
+		|| $round_type eq "runoff";
 
 	my $section = "Debate";
 	$section = "Section" if $event->type eq "speech";
@@ -301,75 +277,69 @@
 
 	my %judge_use = %{$judge_use_ref};
 
-	my $round_type = $round->type;
-
 	$round_type = "flip" if $event_settings{"no_side_constraints"};
 
 	my $judge_indicator;
 
 	# Judges who are not judging this round
 
-	my @good_judges = $m->comp(
+	my %clean_judges = $m->comp(
 		"/funclib/clean_judges.mas", 
-		panel => $panel,
-		round => $round,
-		event => $event
+			panel => $panel,
+			round => $round,
+			event => $event
 	);
 
-	my %judge_info = $m->comp(
-		"/funclib/judge_info.mas", 
-		category => $category
-	);
+	my @good_judges = keys %clean_judges;
+	@good_judges = sort {$clean_judges{$b}{"strikes"} <=> $clean_judges{$a}{"strikes"}} @good_judges;
+	@good_judges = sort {$clean_judges{$b}{"ballots"} <=> $clean_judges{$a}{"ballots"}} @good_judges;
 
-	@good_judges = 
-		sort {
-			$rating_by_judge{$a->id} 
-			cmp 
-			$rating_by_judge{$b->id}
-		} @good_judges 
-		if $settings{"coach_ratings"};	
+	if ($settings{"coach_ratings"}) { 
+		@good_judges = 
+			sort { $rating_by_judge{$a} cmp $rating_by_judge{$b} } 
+			@good_judges;
 
-	@good_judges = 
-		sort {
-			length($rating_by_judge{$b->id}) 
-			<=> 
-			length($rating_by_judge{$a->id})
-		} @good_judges 
-		if $settings{"coach_ratings"};	
+		@good_judges = 
+			sort { length($rating_by_judge{$b}) <=> length($rating_by_judge{$a})} 
+			@good_judges;
+	}
 
-	@good_judges = 
-		sort {
-			$judge_tab_ratings{$a->id} 
-			<=> 
-			$judge_tab_ratings{$b->id}
-		} @good_judges 
-		if $settings{"tab_ratings"};
+	if ($settings{"tab_ratings"}) {
+		@good_judges = 
+			sort { $clean_judges{$a}{"tab_ratings"} <=> $clean_judges{$b}{"tab_ratings"} }
+			@good_judges;
+	}
 
 	# These are judges who are already judging in this round but could be
 	# stolen to judge this one. Useful for preffed divisions
 
-	my @busy_judges = $m->comp(
+	my %busy_judges = $m->comp(
 		"/funclib/clean_judges.mas", 
-		panel     => $panel,
-		round     => $round,
-		event     => $event,
-		stealable => "daveroberts"
+			panel     => $panel,
+			round     => $round,
+			event     => $event,
+			stealable => "daveroberts"
 	);
 
-	@busy_judges = 
-		sort {$rating_by_judge{$a->id} cmp $rating_by_judge{$b->id}} 
-		@busy_judges 
-		if $settings{"coach_ratings"};	
+	my @busy_judges = keys %busy_judges;
+	@busy_judges = sort {$busy_judges{$b}{"strikes"} <=> $busy_judges{$a}{"strikes"}} @busy_judges;
+	@busy_judges = sort {$busy_judges{$b}{"ballots"} <=> $busy_judges{$a}{"ballots"}} @busy_judges;
 
-	@busy_judges = 
-		sort {length($rating_by_judge{$b->id}) <=> length($rating_by_judge{$a->id})} 
-		@busy_judges 
-		if $settings{"coach_ratings"};	
+	if ($settings{"coach_ratings"}) { 
+		@busy_judges = 
+			sort { $rating_by_judge{$a} cmp $rating_by_judge{$b} } 
+			@busy_judges;
 
-	@busy_judges = 
-		sort {$judge_tab_ratings{$a->id} <=> $judge_tab_ratings{$b->id}} 
-		@busy_judges 
-		if $settings{"tab_ratings"};
+		@busy_judges = 
+			sort { length($rating_by_judge{$b}) <=> length($rating_by_judge{$a})} 
+			@busy_judges;
+	}
+
+	if ($settings{"tab_ratings"}) {
+		@busy_judges = 
+			sort { $busy_judges{$a}{"tab_ratings"} <=> $busy_judges{$b}{"tab_ratings"} }
+			@busy_judges;
+	}
 
 	my $affref;
 	my $negref;
@@ -377,9 +347,9 @@
 
 	my %others = $m->comp(
 		"/funclib/round_judge_panels.mas", 
-		round  => $round,
-		event  => $event,
-		flight => $panel->flight
+			round  => $round,
+			event  => $event,
+			flight => $panel->flight
 	);
 
 	$settings{"others_ref"} = \%others;
@@ -403,25 +373,29 @@
 		my %sort_score;
 
 		foreach my $gj (@good_judges) { 
-			${$diffref}{$gj->id} = 110 unless defined ${$diffref}{$gj->id};
-			$sort_score{$gj->id} = ${$diffref}{$gj->id} * $mutuality 
-				+ (${$affref}{$gj->id} + ${$negref}{$gj->id}) * $preference;
+			${$diffref}{$gj} = 110 unless defined ${$diffref}{$gj};
+			$sort_score{$gj} = ${$diffref}{$gj} * $mutuality 
+				+ (${$affref}{$gj} + ${$negref}{$gj}) * $preference;
 		}
 
 		foreach my $bj (@busy_judges) { 
-			${$diffref}{$bj->id} = 110 unless defined ${$diffref}{$bj->id};
-			$sort_score{$bj->id} = ${$diffref}{$bj->id} * $mutuality 
-				+ (${$affref}{$bj->id} + ${$negref}{$bj->id}) * $preference;
+			${$diffref}{$bj} = 110 unless defined ${$diffref}{$bj};
+			$sort_score{$bj} = ${$diffref}{$bj} * $mutuality 
+				+ (${$affref}{$bj} + ${$negref}{$bj}) * $preference;
 		}
 
 		@good_judges = 
-			sort {$sort_score{$a->id} <=> $sort_score{$b->id}} 
+			sort {$sort_score{$a} <=> $sort_score{$b}} 
 			@good_judges;
 
 		@busy_judges = 
-			sort {$sort_score{$a->id} <=> $sort_score{$b->id}} 
+			sort {$sort_score{$a} <=> $sort_score{$b}} 
 			@busy_judges;
 	}
+
+	@good_judges = 
+		sort {$clean_judges{$b}{"standby"} <=> $clean_judges{$a}{"standby"}}
+		@good_judges;
 
 	my %burned;
 
@@ -432,8 +406,9 @@
 	) { 
 
 		foreach my $gj (@good_judges) { 
-			$burned{$gj}++ if $judge_use{$gj->id}{'left'} < 1;
+			$burned{$gj}++ if $judge_use{$gj}{'left'} < 1;
 		}
+
 		@good_judges = sort {$burned{$a} <=> $burned{$b}} @good_judges;
 	}
 
@@ -447,29 +422,22 @@
 
 	my $worlds++ if $event->setting('usa_wsdc');
 
-	my %judge_settings = $m->comp("/funclib/judge_settings.mas", 
-		category => $category
-	);
-
-
 	my %good_fields = $m->comp(
 		"/funclib/judge_swaplabels.mas", 
-		judge_array_ref => \@good_judges,
-		judge_settings  => \%judge_settings,
-		judge_info      => \%judge_info,
-		settings_ref    => \%settings,
-		worlds          => $worlds,
-		anonymize       => \%anonymize
+		judges       => \%clean_judges,
+		settings_ref => \%settings,
+		worlds       => $worlds,
+		category     => $category,
+		anonymize    => \%anonymize
 	);
 
 	my %busy_fields = $m->comp(
 		"/funclib/judge_swaplabels.mas", 
-		judge_array_ref => \@busy_judges,
-		judge_settings  => \%judge_settings,
-		judge_info      => \%judge_info,
-		settings_ref    => \%settings,
-		busy            => 1,
-		anonymize       => \%anonymize
+		judges       => \%busy_judges,
+		settings_ref => \%settings,
+		busy         => 1,
+		category     => $category,
+		anonymize    => \%anonymize
 	);
 
 </%init>
@@ -669,7 +637,6 @@
 							</th>
 %						}
 
-
 %						if ($settings{"rounds_per"}) { 
 							<th class="smaller">
 								Use
@@ -753,18 +720,14 @@
 
 %	 			foreach my $judge (@judges) { 
 
-					<tr>
+					<tr id="<% $judge->id %>">
 
 						<td class="smaller centeralign padless">
 
 							<a 
-								class="buttonwhite hover semibold bigger padless
-									<% $judge->chair ? "greentext" : "redtext" %> 
-									<% $event->type eq "congress"
-										?  $judge->chair ? "fa fa-gavel" : "fa fa-file-text-o"
-										:  ""
-									%>
-								"
+								id    = "chair_<% $judge->id %>"
+								class = "chairs buttonwhite hover semibold bigger padless
+									<% $judge->chair ? "greentext fa fa-gavel" : "redtext fa fa-times" %>"
 								href="chair_switch.mhtml?judge_id=<% $judge->id %>&panel_id=<% $panel->id %>"
 							><% $event->type eq "congress" ? "" : $judge->chair ? "Y" : "N" %></a>
 
@@ -781,7 +744,7 @@
 										href="/register/judge/edit.mhtml?judge_id=<% $judge->id %>"
 									> 
 %								}
-									<% ($settings{"no_judge_codes"}) ? "" : $judge->code  %>
+									<% ($settings{"no_judge_codes"}) ? "" : '<span class="fifth nospace">'.$judge->code."</span>"  %>
 									<% $judge->first." ".$judge->last %>
 								</a>
 %							}
@@ -866,18 +829,16 @@
 %	 					}
 
 %	 					if ($settings{"tab_ratings"}) { 
-
 							<td class="smallish centeralign">
-								<% $judge_tab_ratings{$judge->id} %>
+								<% $judge->setting("tab_rating") %>
 							</td>
-
 %	 					}
 
 						<td class="smallish">
 %							unless ($blind_mode) { 
 								<% $judge->schoolname 
 									? Tab::short_name($judge->schoolname)
-									: "HIRE"
+									: "HIRED"
 								%>
 %		 					}
 						</td>
@@ -946,31 +907,37 @@
 										<& "/funclib/confirm.mas", warn => $warn.$chair_warn &>
 %									}
 
-									href="judge_rm.mhtml?from=<% $from %>&judge_id=<%$judge->id %>&panel_id=<% $panel->id %>&<% $rm_chair %>">
+									href="judge_rm.mhtml?from=<% $from %>&judge_id=<%$judge_id %>&panel_id=<% $panel->id %>&<% $rm_chair %>">
 									<span class="fa fa-gavel"></span>
 								</a>
 %							}
 
 							<a 
-								class = "buttonwhite redtext hover padless marno"
-								alt   = "Remove from this section"
-								title = "Remove from this section"
+								class         = "buttonwhite redtext hover padless marno"
+								alt           = "Remove judge from this section"
+								title         = "Remove judge from this section"
+								target_id     = "<% $judge->id %>"
+								property_name = "<% $panel->id %>"
+								onClick       = "postSwitch(this, 'judge_remove.mhtml');"
+								on_success    = "destroy"
 %								if ($warn) { 
 									<& "/funclib/confirm.mas", warn => $warn &>
 %								}
-
-								href="judge_rm.mhtml?from=<% $from %>&judge_id=<%$judge->id %>&panel_id=<% $panel->id %>">
+							>
 								<span class="fa fa-trash"></span>
 							</a>
 						</td>
 						
 						<td class="centeralign nospace">
 							<a 
-								class = "buttonwhite redtext hover padless marno"
-								alt   = "Remove & Fine"
-								title = "Remove & Fine"
-								href  = "judge_rm.mhtml?from=<% $from %>&judge_id=<% $judge->id %>&panel_id=<% $panel->id %>&fine=yes&<% $rm_chair %>"
-
+								class         = "buttonwhite redtext hover padless marno"
+								alt           = "Remove & Fine"
+								title         = "Remove & Fine"
+								target_id     = "<% $judge->id %>"
+								property_name = "<% $panel->id %>"
+								setting_name  = "cha-ching!"
+								onClick       = "postSwitch(this, 'judge_remove.mhtml');"
+								on_success    = "destroy"
 %								if ($warn) { 
 									<& "/funclib/confirm.mas", warn => $warn &>
 %								}
@@ -993,13 +960,13 @@
 					
 								Yes&nbsp;&nbsp;<a 
 									class="button dkgreen" 
-									href="admin_unset.mhtml?judge_id=<% $judge->id %>&panel_id=<% $panel->id %>"
+									href="admin_unset.mhtml?judge_id=<% $judge_id %>&panel_id=<% $panel->id %>"
 								>&nbsp; Unset &nbsp;</a>
 
 %							} else {
 								No&nbsp;&nbsp;<a 
 									class="button dkgreen" 
-									href="admin_set.mhtml?judge_id=<% $judge->id %>&panel_id=<% $panel->id %>"
+									href="admin_set.mhtml?judge_id=<% $judge_id %>&panel_id=<% $panel->id %>"
 								>&nbsp; Set &nbsp;</a>
 %							}
 %						}
@@ -1074,32 +1041,33 @@
 
 			<div class="row smallish martopmore">
 
-				<span class="sixth nospace semibold padleft centeralign">
+				<span class="tenth nospace semibold padleft centeralign">
 					Available
 				</span>
 
-				<span class="threequarter padno centeralign"> 
+				<span class="fourfifths padno centeralign"> 
 
 					<select 
 						name             = "judge_id"
-						class            = "fixedbigger chosen"
+						class            = "fixedmost chosen"
 						data-placeholder = "Clean judges without assignments..."
 					>
 
-%						my %used;
-%						my $in_standby;
-%						my $not_in_standby;
-%						my $wilderson;
-
+<%perl>
+						my %used;
+						my $in_standby;
+						my $not_in_standby;
+						my $wilderson;
+</%perl>
 						<option value=""></option>
 
 						<optgroup class="key" label="<% $good_fields{"label"} %>">
 
-%						foreach my $judge (@good_judges) { 
-
-%							next if $used{$judge->id}++;
-
-%							if ($burned{$judge->id} && not defined $wilderson) {
+<%perl>
+						foreach my $judge_id (@good_judges) { 
+							next if $used{$judge_id}++;
+							if ($burned{$judge_id} && not defined $wilderson) {
+</%perl>
 								<option 
 									value    = "x"
 									disabled = "true"
@@ -1108,33 +1076,33 @@
 %	 							$wilderson++;
 %							}
 
-%							if ($judge->standby && not defined $in_standby) { 
+%							if ($clean_judges{$judge_id}{"standby"} && not defined $in_standby) { 
 								<option 
 									value    = "x"
 									disabled = "true"
 									class    = "key"
 								>Judges in standby pool:</option>
-%								 $in_standby++;
-%							}
+<%perl>
+								 $in_standby++;
+							}
 
-%							if ($in_standby &! $not_in_standby &! $judge->standby) { 
+							if ($in_standby 
+								&& (not defined $not_in_standby) 
+								&& (not defined $clean_judges{$judge_id}{"standby"})
+							) { 
+</%perl>
 								<option 
 									value    = "x"
 									disabled = "true"
 									class    = "key"
 								>Judges not in standby pool:</option>
-%								$not_in_standby++ unless $judge->standby;
+%								undef $in_standby;
 %							} 
-
-							<option value="<%$judge->id %>"><% $good_fields{$judge->id} %></option>
-
+							<option value="<%$judge_id %>"><% $good_fields{$judge_id} %></option>
 %	 					} 
 
-
 						</optgroup>
-
 					</select> 
-
 				</span>
 
 				<span class="tenth centeralign">
@@ -1164,11 +1132,11 @@
 
 				<div class="row smallish">
 
-					<span class="sixth nospace semibold padleft centeralign">
+					<span class="tenth nospace semibold padleft centeralign">
 						Judging 
 					</span>
 						
-					<span class="threequarter padno centeralign"> 
+					<span class="fourfifths padno centeralign"> 
 
 						<input 
 							type  = "hidden"
@@ -1178,16 +1146,16 @@
 
 						<select 
 							name             = "judge_id"
-							class            = "fixedbigger chosen"
+							class            = "fixedmost chosen"
 							data-placeholder = "Clean judges who are judging already..."
 						>
 
 						<option value=""></option>
 						<optgroup class="key" label="<% $busy_fields{"label"} %>">
 
-%						foreach my $judge (@busy_judges) { 
-%							next if $used{$judge->id}++;
-							<option value="<%$judge->id %>"><% $busy_fields{$judge->id} %></option>
+%						foreach my $judge_id (@busy_judges) { 
+%							next if $used{$judge_id}++;
+							<option value="<%$judge_id %>"><% $busy_fields{$judge_id} %></option>
 %	 					} 
 
 						</optgroup>
@@ -1386,37 +1354,34 @@
 					
 				<td class="smallish">
 %					unless ($blind_mode) { 
-					<% (not defined $settings{"no_school_codes"}) 
-						? $entry->schoolcode  
-						: ""
-					%>
-					<% Tab::short_name($entry->schoolname) %> 
+						<% (not defined $settings{"no_school_codes"}) 
+							? $entry->schoolcode  
+							: ""
+						%>
+						<% Tab::short_name($entry->schoolname) %> 
 %					}
 				</td>
 
 %				unless ($blind_mode) { 
-%				if ($tourn_settings->{"nsda_nats"}) { 
-
-					<td class="smallish centeralign">
-						<% $entry->regioncode %>
-					</td>
-
-					<td class="smallish centeralign">
-						<% $entry->districtcode %>
-					</td>
-
-%				} elsif ($tourn_settings->{"regions"} || $tourn_settings->{"ncfl"} ) { 
-
-					<td class="smallish centeralign">
-						<% $entry->regioncode %>
-					</td>
-
-%					if ($settings{"dio_regions"}) { 
+%					if ($tourn_settings->{"nsda_nats"}) { 
 						<td class="smallish centeralign">
-							<% $settings{"dio_region"}{$entry->regioncode} %>
+							<% $entry->regioncode %>
 						</td>
+
+						<td class="smallish centeralign">
+							<% $entry->districtcode %>
+						</td>
+%					} elsif ($tourn_settings->{"regions"} || $tourn_settings->{"ncfl"} ) { 
+						<td class="smallish centeralign">
+							<% $entry->regioncode %>
+						</td>
+
+%						if ($settings{"dio_regions"}) { 
+							<td class="smallish centeralign">
+								<% $settings{"dio_region"}{$entry->regioncode} %>
+							</td>
+%						}
 %					}
-%				}
 %				}
 
 %				unless ($entry_only) { 
@@ -1762,34 +1727,6 @@
 				</form>
 %			}
 
-%			if ($event_settings{"judge_publish_results"}) { 
-
-				<label for="<% $panel->id %>_publish">
-				<div class="row nospace padless hover">
-
-					<span class="twofifths padleft semibold bigger marno">
-						Published
-					</span>
-
-                    <span class="threefifths nospace centeralign">
-                        <span class="hidden"><% $panel->publish %></span>
-                        <label class="switch">
-                            <input 
-                                type          = "checkbox"
-                                value         = "1"
-                                id            = "<% $panel->id %>_publish"
-                                property_name = "publish"
-                                target_type   = "panel"
-                                target_id     = "<% $panel->id %>"
-                                onChange      = "postSwitch( this, 'panel_switch.mhtml');"
-                                <% $panel->publish ? 'checked="checked"' : "" %>
-                            >
-                            <div class="slider"></div>
-                        </label>
-                    </span>
-				</div>
-				 </label>
-%			}
 
 
 %			my @jpools = $round->jpools;
@@ -1821,6 +1758,34 @@
 		<div class="sidenote">
 
 			<h4>Make Changes</h4>
+
+%			if ($round->published > 0 && $event_settings{"judge_publish_results"}) { 
+				<label for="<% $panel->id %>_publish">
+					<div class="row nospace padless hover marbottom">
+
+						<span class="twothirds semibold bluetext">
+							Results Published
+						</span>
+
+						<span class="third nospace centeralign">
+							<span class="hidden"><% $panel->publish %></span>
+							<label class="switch smaller">
+								<input 
+									type          = "checkbox"
+									value         = "1"
+									id            = "<% $panel->id %>_publish"
+									property_name = "publish"
+									target_type   = "panel"
+									target_id     = "<% $panel->id %>"
+									onChange      = "postSwitch( this, 'panel_switch.mhtml');"
+									<% $panel->publish ? 'checked="checked"' : "" %>
+								>
+								<div class="slider"></div>
+							</label>
+						</span>
+					</div>
+				 </label>
+%			}
 
 %			if ($event->type eq "speech" || $event->type eq "congress") { 
 

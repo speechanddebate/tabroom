@@ -1,0 +1,241 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$perms
+	$target_id      => undef
+	$property_name  => undef
+	$setting_name   => undef
+	$property_value => 0
+	$flag           => undef
+</%args>
+<%init>
+
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	unless ($target_id) { 
+		$m->print('{ "error": true, "message": "No judge ID sent"}');
+		$m->abort();
+	}
+
+	unless ($property_name) { 
+		$m->print('{ "error": true, "message": "No section ID sent"}');
+		$m->abort();
+	}
+
+	my $judge = Tab::Judge->retrieve($target_id);
+
+	unless ($judge) { 
+		$m->print('{ "error": true, "message": "No judge found for ID '.$target_id.'"}');
+		$m->abort();
+	}
+
+	my $section = Tab::Panel->retrieve($property_name);
+
+	unless ($section) { 
+		$m->print('{ "error": true, "message": "No section found for ID '.$property_name.'"}');
+		$m->abort();
+	}
+
+	my $fine++ if $setting_name;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+	my $now = DateTime->now(time_zone => $tz);
+
+	my $round = $section->round;
+	my $event = $round->event;
+
+	$m->comp(
+		"/funclib/judge_rm.mas", 
+		panel => $section, 
+		judge => $judge
+	);
+
+	if ($fine) { 
+
+		Tab::Fine->set_sql( revoke_bond => "
+			update fine
+			set deleted = 1
+			where reason  = 'Judge Bond'
+			and school = ? 
+		");
+	
+		my $reason = "JUDGE FINE: Judge ".substr($judge->first,0,1);
+		$reason .= " ".$judge->last." ".$round->realname." of ".$event->abbr;
+
+		my $fine_amount = $tourn_settings->{"forfeit_judge_fine"} 
+			if $round->type eq "prelim";
+
+		$fine_amount = $tourn_settings->{"forfeit_judge_fine_elim"} 
+			unless $round->type eq "prelim";
+
+		if ($tourn_settings->{"first_forfeit_multiplier"}) { 
+		
+			if ($tourn_settings->{"nsda_nats"} 
+				|| $tourn_settings->{"nsda_ms_nats"}
+			) { 
+
+				Tab::Fine->set_sql( judge_fine => "
+					select * from fine 	
+						where reason like 'BOND REVOKED:%'
+						and fine.deleted != 1
+						and school = ? 
+				");
+
+				my $fine_id = Tab::Fine->search_judge_fine($judge->school->id) if $judge->school;
+
+				unless ($fine_id) { 
+					$fine_amount = $fine_amount * $tourn_settings->{"first_forfeit_multiplier"};
+					$reason =~ s/^JUDGE FINE: //g;
+					$reason = "BOND REVOKED: ".$reason;
+		            Tab::Fine->sql_revoke_bond->execute($judge->school->id) 
+						if $judge->school;
+				}
+
+			} else { 
+
+				Tab::Fine->set_sql( judge_fine => "
+					select * from fine 	
+						where reason like 'JUDGE FINE:%'
+						and school = ? 
+				");
+
+				my $fine_id = Tab::Fine->search_judge_fine($judge->school->id)
+					if $judge->school;
+
+				unless ($fine_id) { 
+					$fine_amount = $fine_amount * $tourn_settings->{"first_forfeit_multiplier"};
+				}
+			}
+
+		}
+
+		if ($tourn_settings->{"ncfl"} && $judge->school && $judge->school->region) { 
+
+			$reason .= " (".$judge->school->short_name.")" if $judge->school;
+
+		    $fine = Tab::Fine->create({
+				tourn     => $tourn->id,
+	        	region    => $judge->school->region->id,
+				school    => $judge->school->id,
+	        	amount    => $fine_amount,
+	        	reason    => $reason,
+				levied_at => $now,
+				levied_by => $person->id
+	    	});
+
+		} elsif ($judge->school) { 
+
+		    $fine = Tab::Fine->create({
+				tourn     => $tourn->id,
+	        	school    => $judge->school->id,
+	        	amount    => $fine_amount,
+	        	reason    => $reason,
+				levied_at => $now,
+				levied_by => $person->id,
+				payment   => 0,
+				deleted   => 0
+	    	});
+
+		} else { 
+
+		    $fine = Tab::Fine->create({
+				tourn     => $tourn->id,
+	        	judge     => $judge->id,
+	        	amount    => $fine_amount,
+	        	reason    => $reason,
+				levied_at => $now,
+				levied_by => $person->id,
+				payment   => 0,
+				deleted   => 0
+	    	});
+
+		}
+
+	}
+
+	if ($fine && $judge->school && $tourn_settings->{'forfeit_notify_coaches'}) { 
+
+		my $subject = "Fine levied for missing judge"; 
+
+		my $reason = $judge->first." ".$judge->last;
+		$reason .=  " failed to appear for ".$round->realname." of ".$event->name;
+
+		my $message = "\n\tThe ".$tourn->name." has issued a fine to your school in the amount of
+
+\$".sprintf ("%.2f", $fine->amount)."
+
+This fine was triggered because:
+
+$reason
+
+Please contact the tournament officials if you believe this to be in error. 
+
+";
+
+		$message .= $tourn_settings->{"judge_fine_message"};
+
+		foreach my $sendto (
+			$m->comp("/funclib/chapter_admins.mas", 
+				chapter => $judge->school->chapter
+			)
+		) { 
+
+			next if $sendto->no_email;
+
+			if ($sendto->phone && $sendto->provider) { 
+				$m->comp( 
+					"/funclib/send_notify.mas", 
+						from    => 'Tabroom Notify <notify@tabroom.com>',
+						to      => $sendto->phone.'@'.$sendto->provider,
+						subject => $subject,
+						body    => $message 
+				);
+			}
+
+			$m->comp( 
+				"/funclib/send_notify.mas", 
+					from    => 'Tabroom Notify <notify@tabroom.com>',
+					to      => $sendto->email,
+					subject => $subject,
+					body    => $message 
+			);
+		}   
+
+	}
+
+	my $description = "Removed judge ".$judge->first." ".$judge->last." (";
+	$description .= $judge->school->short_name if $judge->school;
+	$description .= "Hired" unless $judge->school;
+	$description .= ") from ".$event->name." panel ".$section->letter." round ".$round->realname;
+	$description .= "and fined them ".$fine->amount if $fine;
+
+	my $change = Tab::ChangeLog->create({ 
+		tourn       => $tourn->id,
+		type        => "judge",
+		judge       => $judge,
+		description => $description,
+		old_panel   => $section->id,
+		event       => $event->id,
+		created     => $now,
+		person      => $person->id
+	});
+
+	$change->fine($fine->id) if $fine;
+	$change->update;
+
+	my $msg = "Judge ".$judge->first." ".$judge->last." has been removed from this panel";
+	$msg .= " and fined \$".$fine->amount if $fine;
+
+    my %response = (
+		error   => 0,
+		message => $msg
+    );
+
+    $m->print(JSON::encode_json(\%response));
+
+	$m->abort();
+
+</%init>

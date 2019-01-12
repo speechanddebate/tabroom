@@ -8,15 +8,17 @@
 
 	my $round = Tab::Round->retrieve($round_id);
 
-	if ($round->event->setting('wsdc_multiple_sites')) { 
+	my $event = $round->event;
+
+	if ($event->setting('wsdc_multiple_sites')) { 
 		$m->redirect("rooms_multisite.mhtml?round_id=".$round->id);
 	}
 
 	my $round_type = $round->type;
-
 	my $num_judges = $round->setting('num_judges');
 
-	$m->comp("/funclib/clean_empty_rounds.mas", 
+	$m->comp(
+		"/funclib/clean_empty_rounds.mas", 
 		round => $round
 	);
 
@@ -29,6 +31,39 @@
 		"/funclib/clean_rooms.mas", 
 		round => $round
 	);
+	
+	my @reserve;
+	my %in_last_round;
+
+	if ($event->setting("repeat_rooms")) { 
+
+		my @all_rounds = $event->rounds;
+		my $last_round;
+
+		foreach my $oround (@all_rounds) { 
+			next if $oround->name >= $round->name;
+			$last_round = $oround unless $last_round;
+			$last_round = $oround if $oround->name > $last_round->name;
+		}
+
+		if ($last_round) { 
+
+			my %in_round = 
+				map {$_->id => 1} 
+				$m->comp("/funclib/round_rooms.mas", round => $last_round);
+
+			my @base = @rooms;
+			undef @rooms;
+
+			foreach my $room (@base) { 
+				if ($in_round{$room->id}) { 
+					push @rooms, $room;
+				} else { 
+					push @reserve, $room;
+				}
+			}
+		}
+	}
 
 	my %room_strikes = $m->comp(
 		"/funclib/room_strikes.mas", 
@@ -41,7 +76,7 @@
 	unless ($round->setting("reset_room_moves")) { 
 
 		my $last_round = Tab::Round->search( 
-			event => $round->event, 
+			event => $event, 
 			name => ($round->name - 1)
 		)->first;
 
@@ -53,7 +88,7 @@
 	} else { 
 
 		my $last_round = Tab::Round->search( 
-			event => $round->event,
+			event => $event,
 			name  => ($round->name - 1)
 		)->first;
 
@@ -65,8 +100,6 @@
 	}
 
 	my %judge_already = ();
-	my %judge_reserved = ();
-
 	my %room_count = ();
 	my %room_avail = map {$_->id => $_} @rooms;
 
@@ -77,14 +110,42 @@
 
 	my @first_set = @rooms;
 
+	my %panel_ada;
 	my %judge_count;
 	my %panel_judges;
 	my %panel_entries;
-	my %panel_judge_count;
-	my %panel_ada;
-	my %panel_preferred;
 	my %panel_reserved;
+	my %panel_preferred;
+	my %panel_judge_count;
 
+	my %judge_reservations = 
+		map {$_->judge->id => $_->value} $m->comp(
+			"/funclib/category_judge_settings.mas",
+			category => $event->category,
+			tag      => "room_reserved"
+		);
+
+	my %room_reserved;
+	foreach my $judge_id (keys %judge_reservations) { 
+		$room_reserved{$judge_reservations{$judge_id}}++;
+	}
+
+	my @new;
+	foreach my $room (@rooms) { 
+		unless ($room_reserved{$room}) { 
+			push @new, $room;
+		}
+	}
+	@rooms = @new;
+
+	undef @new;
+	foreach my $room (@reserve) { 
+		next if $room_reserved{$room};
+		push @new, $room;
+	}
+	@reserve = @new;
+
+	PANEL:
 	foreach my $panel (@panels) { 
 
 		next if $panel->room > 0;
@@ -105,8 +166,11 @@
 			|| $round_type eq "runoff"
 		) { 
 			foreach my $judge (@{$panel_judges{$panel->id}}){ 
-				$panel_reserved{$panel->id}++ 
-					if $judge->setting("room_reserved");
+				if ($judge_reservations{$judge}) { 
+					$panel->room($judge_reservations{$judge});
+					$panel->update();
+					next PANEL;
+				}
 			}
 		}
 	}
@@ -118,11 +182,12 @@
 	my %room_pod;
 	my %pod_rooms;
 
-	if ($round->event->setting("round_robin")) { 
+	if ($event->setting("round_robin")) { 
 
 		foreach my $entry (keys %previous_rooms) { 
 
 			next unless $previous_rooms{$entry}{"room"};
+			next if $room_reserved{$previous_rooms{$entry}{"room"}};
 
 			$room_pod{$previous_rooms{$entry}{"room"}} 
 				= $previous_rooms{$entry}{"pod"};
@@ -157,10 +222,14 @@
 			while (
 				my ($judge_id, $room_id) = $sth->fetchrow_array() 
 			) {
+			
+				next if $room_reserved{$room_id};
 				$room_already{$judge_id} = $room_id;
 			}
 		}
 	}
+
+	my $reset_room_moves = $round->setting("reset_room_moves");
 
 	foreach my $panel (@panels) { 
 
@@ -170,15 +239,8 @@
 		foreach my $judge (@{$panel_judges{$panel->id}}){ 
 
 			$judge_count{$judge->id}++;
-
 			$panel_ada{$panel->id}++ if $judge->ada;
-
-			$judge_reserved{$judge->id} = $judge->setting("room_reserved") 
-				unless $round_type eq "elim" 
-				|| $round_type eq "final"
-				|| $round_type eq "runoff";
-
-			$judge_reserved{$judge->id} = $room_already{$judge->id} 
+			$judge_reservations{$judge->id} = $room_already{$judge->id} 
 				if $room_already{$judge->id};
 		}
 
@@ -187,7 +249,7 @@
 			if ($entry->ada) { 
 				$panel_ada{$panel->id}++;
 	
-				unless ($round->setting("reset_room_moves")) { 
+				unless ($reset_room_moves) { 
 					undef $panel_preferred{$panel->id} if $panel_preferred{$panel->id};
 
 					push (@{$panel_preferred{$panel->id}}, $previous_rooms{$entry->id}{"room"}) 
@@ -198,7 +260,7 @@
 
 			next if $panel_ada{$panel->id};
 
-			unless ($round->setting("reset_room_moves")) { 
+			unless ($reset_room_moves) { 
 				push @{$panel_preferred{$panel->id}}, $previous_rooms{$entry->id}{"room"}
 					if $previous_rooms{$entry->id}{"room"} 
 					&& $room_avail{$previous_rooms{$entry->id}{"room"}} 
@@ -213,9 +275,7 @@
 					if $previous_rooms{$entry->id}{"pod"} 
 					&& $pod_rooms{$previous_rooms{$entry->id}{"pod"}};
 			}
-
 		}
-
 	}
 
 	foreach my $panel (@panels) { 
@@ -226,7 +286,7 @@
 		}
 	}
 
-	if ($round->event->setting("bracket_rooms") > 0) { 
+	if ($event->setting("bracket_rooms") > 0) { 
 		@panels = sort {$b->bracket <=> $a->bracket} @panels;
 		@panels = sort {$a->bracket <=> $b->bracket} @panels if $round->type eq "elim";
 		@rooms = sort {$a->quality <=> $b->quality} @rooms;
@@ -247,34 +307,38 @@
 		next if $panel->bye > 0;
 		next if $panel->room > 0;
 
+		unless (@rooms) { 
+			@rooms = @reserve;
+			undef @reserve;
+		}
+
 		my $room;
 		my @judges = @{$panel_judges{$panel->id}} if $panel_judges{$panel->id};
 
 		foreach my $judge (@judges) { 
-			if ($judge_reserved{$judge->id}) { 
-				$room = $room_avail{$judge_reserved{$judge->id}}; 
+			if ($judge_reservations{$judge->id}) { 
+				$room = $room_avail{$judge_reservations{$judge->id}}; 
 			}
 		}
 
-		my @ada_rooms;
+		unless ($room) { 
+			my @ada_rooms;
+			foreach my $room (@rooms) { 
+				next if $used{$room->id};
+				next if $room_reserved{$room->id};
+				push @ada_rooms, $room if $room->ada;
+			}
 
-		foreach my $room (@rooms) { 
-			next if $used{$room->id};
-			push @ada_rooms, $room if $room->ada;
-		}
-
-		if ($panel_ada{$panel}) { 
-
-			if ($panel_preferred{$panel}) { 
-
-				foreach my $pref (@{$panel_preferred{$panel->id}}) { 
-
-					next if $room;
-					next unless $room_avail{$pref};
-					next unless $room_avail{$pref}->ada;
-					next if $used{$pref} > 0;
-					$room = $room_avail{$pref};
-
+			if ($panel_ada{$panel}) { 
+				if ($panel_preferred{$panel}) { 
+					foreach my $pref (@{$panel_preferred{$panel->id}}) { 
+						next if $room;
+						next unless $room_avail{$pref};
+						next unless $room_avail{$pref}->ada;
+						next if $used{$pref} > 0;
+						next if $room_reserved{$pref};
+						$room = $room_avail{$pref};
+					}
 				}
 			}
 		}
@@ -288,6 +352,7 @@
 
 	foreach my $room (@rooms) { 
 		next if $used{$room->id};
+		next if $room_reserved{$room->id};
 		push @ada_rooms, $room if $room->ada;
 	}
 
@@ -296,9 +361,13 @@
 		next if $panel->bye > 0;
 		next if $panel->room > 0;
 
+		unless (@rooms) { 
+			@rooms = @reserve;
+			undef @reserve;
+		}
+
 		my $room;
 		$room = $panel_room{$panel};
-
 
 		my @judges = @{$panel_judges{$panel->id}} if $panel_judges{$panel->id};
 
@@ -314,6 +383,7 @@
 				next if $room;
 				next if $used{$pref};
 				next unless $room_avail{$pref};
+				next if $room_reserved{$pref};
 				$room = $room_avail{$pref};
 			}
 
@@ -354,11 +424,13 @@
 			while (@first_set) { 
 				$room = shift @first_set;
 				next if $used{$room->id};
+				next if $room_reserved{$room->id};
 				last if $room;
 			}
 			undef $room if $room && $used{$room->id};
 		}
 
+		next if $room && $room_reserved{$room->id};
 		$used{$room}++ if $room;
 
 		next if $room && $room_count{$room->id} >= $flights;
@@ -392,9 +464,11 @@
 		$oh_crap_ran_out++;
 
 		if ($panel_ada{$panel}) { 
+
 			foreach my $room (@ada_rooms) { 
 				next if $room_count{$room->id} >= $flights;
 				next if $room_strikes{$panel->id}{$room->id};
+				next if $room_reserved{$room->id};
 		
 				$panel->room($room->id);
 				$room_count{$room->id}++;
@@ -405,9 +479,10 @@
 			}
 		}
 
-		foreach my $room (@rooms) { 
+		foreach my $room (@rooms, @reserve) { 
 			next if $room_count{$room->id} >= $flights;
 			next if $room_strikes{$panel->id}{$room->id};
+			next if $room_reserved{$room->id};
 		
 			$panel->room($room->id);
 			$room_count{$room->id}++;
@@ -416,15 +491,14 @@
 			$oh_crap_ran_out--;
 			next PANEL;
 		}
-
 	}
 
-	my $description = "Assigned Rooms in ".$round->realname." of ".$round->event->abbr;
+	my $description = "Assigned Rooms in ".$round->realname." of ".$event->abbr;
 
 	Tab::ChangeLog->create({ 
 		type        => 'tabbing',
-		event       => $round->event->id,
-		tourn       => $round->event->tourn->id,
+		event       => $event->id,
+		tourn       => $tourn->id,
 		person      => $person->id,
 		description => $description
 	});
