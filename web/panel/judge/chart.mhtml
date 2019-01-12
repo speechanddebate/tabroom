@@ -31,89 +31,105 @@
 	my %judge_unique_rounds = ();
 
 	my $rounds_per;
+	my %judges;
 
 	if ($category) { 
 
-		@judges = sort {$a->last cmp $b->last} $category->judges;
-		$nocodes++ if $category->setting("no_codes");
+		my $dbh = Tab::DBI->db_Main();
 
-		my @rooms = $m->comp(
-			"/funclib/category_rooms.mas", 
-			category => $category);
+		my $sth = $dbh->prepare("
 
-		my @panels = $m->comp(
-			"/funclib/category_panels.mas", 
-			category => $category,
-			by_judge => 1
-		);
+			select 
+				judge.id, judge.code, judge.first, judge.last, judge.obligation, judge.hired, judge.active,
+				event.abbr, event.id,
+				school.name, school.code, school.id,
+				region.name, region.code, region.id,
+				district.name, district.code, district.id,
+				panel.id, panel.letter, panel.flight,
+				room.name, room.id,
+				round.name, round.label, round.start_time, round.timeslot, round.flighted
 
-		my @rounds = $m->comp(
-			"/funclib/category_rounds.mas", 
-			category => $category
-		);
+			from (judge) 
 
-		my @ballots = $m->comp(
-			"/funclib/category_ballots.mas", 
-			category => $category
-		);
+			left join school on school.id = judge.school
+			left join region on school.region = region.id
+			left join district on school.district = district.id
+
+			left join ballot on ballot.judge = judge.id
+			left join panel on ballot.panel = panel.id
+			left join round on panel.round = round.id
+			left join event on round.event = event.id
+
+			left join room on room.id = panel.room
+
+			where judge.category = ?
+			order by ballot.judge, round.name, panel.flight
+		");
+
+		$sth->execute($category->id);
+
+		my %dts;
+
+		while( 
+			my(
+				$judge_id, $judge_code, $judge_first, $judge_last,
+					$judge_obligation, $judge_hired, $judge_active,
+				$event_abbr, $event_id,
+				$school_name, $school_code, $school_id,
+				$region_name, $region_code, $region_id,
+				$district_name, $district_code, $district_id,
+				$panel_id, $panel_letter, $panel_flight,
+				$room_name,
+				$room_id,
+				$round_name, $round_label, $round_start_time, $timeslot_id, $flighted
+			) = $sth->fetchrow_array()
+		) {
+
+			$judges{$judge_id}{"first"} = $judge_first;
+			$judges{$judge_id}{"last"} = $judge_last;
+			$judges{$judge_id}{"code"} = $judge_code;
+			$judges{$judge_id}{"active"} = $judge_active;
+			$judges{$judge_id}{"obligation"} = $judge_obligation + $judge_hired;
+
+			$judges{$judge_id}{"school_name"} = $school_name;
+			$judges{$judge_id}{"school_code"} = $school_code;
+			$judges{$judge_id}{"region_name"} = $region_name;
+			$judges{$judge_id}{"region_code"} = $region_code;
+			$judges{$judge_id}{"district_name"} = $district_name;
+			$judges{$judge_id}{"district_code"} = $district_code;
+
+			next unless $panel_id;
+
+			$judges{$judge_id}{"panels"}{$panel_id}{"letter"} = $panel_letter;
+			$judges{$judge_id}{"panels"}{$panel_id}{"flight"} = $panel_flight if $flighted > 1;
+			$judges{$judge_id}{"panels"}{$panel_id}{"round"} = $round_name;
+			$judges{$judge_id}{"panels"}{$panel_id}{"room"} = $room_name;
+			$judges{$judge_id}{"panels"}{$panel_id}{"event"} = $event_abbr;
+
+			my $dt = $dts{$round_start_time};
+
+			unless ($dt) { 
+				$dt = DateTime::Format::MySQL->parse_datetime($round_start_time);
+				$dt->set_time_zone("UTC");
+				$dt->set_time_zone($tz);
+				$dts{$round_start_time} = $dt;
+			}
+
+			$judges{$judge_id}{"panels"}{$panel_id}{"start"} = $dt->epoch;
+			$judges{$judge_id}{"panels"}{$panel_id}{"start_time"} = Tab::shorttime($dt);
+
+			if ($round_label) { 
+				$judges{$judge_id}{"panels"}{$panel_id}{"round_name"} = $round_label;
+			} else { 
+				$judges{$judge_id}{"panels"}{$panel_id}{"round_name"} = "R".$round_name;
+			}
+		}
 
 		my @standbys = $m->comp(
 			"/funclib/category_standbys.mas", 
 			category => $category,
 			type     => "time"
 		);
-
-		my @timeslots = $m->comp(
-			"/funclib/category_timeslots.mas",
-			category => $category
-		);
-
-		my %timeslot_start = ();
-
-		foreach my $timeslot (@timeslots) { 
-			$timeslot_start{$timeslot->id} = 
-				Tab::shorttime($timeslot->start->set_time_zone($tz));
-		}
-
-		my %round_label = ();
-		foreach my $round (sort {$a->name <=> $b->name} @rounds) { 
-			$round_label{$round->id} = $round->name."-".$timeslot_start{$round->timeslot->id};
-		}
-
-		my %room_name = ();
-		foreach my $room (@rooms) { 
-			$room_name{$room->id} = $room->name;
-		}
-
-		my %panel_label = ();
-		my %panel_round = ();
-
-		foreach my $panel (@panels) { 
-			$panel_round{$panel->id} = $panel->round->id;
-			$panel_label{$panel->id} = 
-				'<a class="white" href="/panel/schemat/panel_view.mhtml?panel_id='.$panel->id.'">'.
-			$round_label{$panel->round->id}." ".$panel->eventname." in ".$room_name{$panel->room}."</a>";
-		}
-
-		my %used;
-
-		foreach my $ballot (@ballots) { 
-			next if $used{$ballot->panel->id."-".$ballot->judge->id};
-			push @{$judge_rounds{$ballot->judge->id}}, $panel_label{$ballot->panel->id};
-			$used{$ballot->panel->id."-".$ballot->judge->id}++;
-			push @{$judge_unique_rounds{$ballot->judge->id}}, $panel_round{$ballot->panel->id};
-
-		}
-
-		foreach my $standby (@standbys) { 
-			push @{$judge_rounds{$standby->judge->id}}, "Standby at ".$timeslot_start{$standby->jpool->setting("standby_timeslot")};
-		}
-
-	 	$rounds_per = $category->setting("rounds_per");
-
-	}
-
-	foreach my $judge (@judges) { 
 	}
 
 </%init>
@@ -126,6 +142,7 @@
 		only_category     => $only_category,
 		tourn_settings    => $tourn_settings,
 		eventsref         => $eventsref,
+		childrenref       => $childrenref,
 		categoriesref     => $categoriesref,
 		jpoolsref         => $jpoolsref,
 		jpool_settingsref => $jpool_settingsref,
@@ -135,8 +152,8 @@
 
 %		if ($category) { 
 	
-			<& /funclib/tablesorter.mas, 
-				table => "sortable_table"
+			<& "/funclib/tablesorter.mas", 
+				table => "judges"
 			&>
 
 			<h2><% $category->name %></h2>
@@ -148,7 +165,7 @@
 				whoami   => "chart"
 			&>
 
-			<table id="sortable_table">
+			<table id="judges">
 
 				<thead>
 
@@ -186,47 +203,97 @@
 
 				<tbody>
 
-%				foreach my $judge (@judges) { 
-		
-%					my %uniq;
-%					my @things = grep { ! $uniq{$_}++ } @{$judge_unique_rounds{$judge->id}};
+%				foreach my $judge_id (sort {$judges{$a}{"last"} cmp $judges{$b}{"last"}} keys %judges) { 
 
-					<tr <% $judge->active ? "" : 'class="liblrow"' %>>
+					<tr>
 
 						<td class="smaller centeralign nowrap">
-							<% $judge->school->code %> <% $nocodes ? "" : $judge->code %>
+							<% $judges{$judge_id}{"school_code"} %>
+							<% $nocodes ? "" : $judges{$judge_id}{"code"} %>
 						</td>
 
-						<td class="smallish">
-							<a class="white" href="/register/judge/edit.mhtml?judge_id=<% $judge->id %>">
-							<% $judge->first %>
+						<td class="smallish nospace">
+							<a class="white" href="/register/judge/edit.mhtml?judge_id=<% $judge_id %>">
+								<% $judges{$judge_id}{"first"} %>
 							</a>
 						</td>
 
 						<td class="smallish">
-							<a class="white" href="/register/judge/edit.mhtml?judge_id=<% $judge->id %>">
-							<% $judge->last %>
+							<a class="white" href="/register/judge/edit.mhtml?judge_id=<% $judge_id %>">
+								<% $judges{$judge_id}{"last"} %>
 							</a>
 						</td>
 
-						<td>
-%							foreach my $string (@{$judge_rounds{$judge->id}}) {
-								<span class="third smallish nospace">
-									<% $string %>
+						<td class="nospace">
+%							unless ($judges{$judge_id}{"active"}) { 
+								<span class="redtext semibold third padleft padvertmore">
+									Inactive
 								</span>
 %							}
-							<% $judge->active ? "" : "Inactive" %>
-							<% $judge->setting('special_job') ? "(".$judge->setting('special_job').")" : "" %>
+%							if ($judges{$judge_id}{"special"}) { 
+								<span class="bluetext semibold third padleft padvert">
+									<% $judges{$judge_id}{"special"} %>
+								</span>
+%							}
+
+<%perl>
+
+							my @panel_ids = keys %{$judges{$judge_id}{"panels"}};
+
+							@panel_ids = 
+								sort {$judges{$judge_id}{"panels"}{$a}{"start"} cmp
+									$judges{$judge_id}{"panels"}{$b}{"start"} }
+									@panel_ids;
+
+							@panel_ids = 
+								sort {$judges{$judge_id}{"panels"}{$a}{"flight"} <=> 
+									$judges{$judge_id}{"panels"}{$b}{"flight"} }
+									@panel_ids;
+
+							my $panel_count = scalar @panel_ids;
+</%perl>
+
+%							foreach my $panel_id (@panel_ids) { 
+
+								<span class="third smallish padless ltborder centeralign">
+
+									<a 
+										class="white nospace hover"
+										href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel_id %>"
+									>
+										<span class="full nospace padvertless">
+											<% $judges{$judge_id}{"panels"}{$panel_id}{"start_time"} %>
+											&ndash;
+											<% $judges{$judge_id}{"panels"}{$panel_id}{"event"} %>
+											&ndash;
+											<% $judges{$judge_id}{"panels"}{$panel_id}{"round_name"} %>
+											&ndash;
+											S<% $judges{$judge_id}{"panels"}{$panel_id}{"letter"} %>
+											<% $judges{$judge_id}{"panels"}{$panel_id}{"flight"} 
+												?  "&ndash; F".$judges{$judge_id}{"panels"}{$panel_id}{"flight"} 
+												: ""
+											%>
+										</span>
+										<span class="full nospace padvertless smaller">
+											<% $judges{$judge_id}{"panels"}{$panel_id}{"room"}
+												? "In" : "" %>
+											<% $judges{$judge_id}{"panels"}{$panel_id}{"room"} %>
+										</span>
+
+									</a>
+
+								</span>
+%							}
 						</td>
 
 %						if ($rounds_per) { 
 							<td class="smallish centeralign">
-								<% $judge->obligation + $judge->hired %>
+								<% $judges{$judge_id}{"obligation"} %>
 							</td>
 %						}
 
 						<td class="smallish centeralign">
-							<% scalar @{$judge_rounds{$judge->id}} %><% scalar @things != scalar @{$judge_rounds{$judge->id}} ? "/".scalar @things : ""%>
+							<% $panel_count %>
 						</td>
 
 					</tr>

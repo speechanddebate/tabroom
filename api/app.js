@@ -1,73 +1,86 @@
-var express = require('express');
-var path = require('path');
-var favicon = require('serve-favicon');
+// Express is the router and framework
+const express = require('express');
+const path    = require('path');
 
-var env    = process.env.NODE_ENV || "development";
-var config = require(__dirname + '/config/config.json')[env];
+// Env determines if we're running production, development or whatever
+const env = process.env.NODE_ENV || "development";
 
-var logger = require('morgan');
-var cookieParser = require('cookie-parser');
-var bodyParser = require('body-parser');
-var crypt = require('crypt3');
+// Conflict just parses the configuration file for the environment in question
+const config = require(__dirname + '/config/config.json')[env];
 
-var db = require(__dirname + '/models');
+// Morgan is a logging engine that displays to console in dev and logfiles in prod.
+const morgan = require('morgan');
+
+// CookieParser reads in the data from cookies for auth
+const cookieParser = require('cookie-parser');
+
+// BodyParser allows one to access the data from POSTs
+const bodyParser = require('body-parser');
+
+// Crypt allows the API to parse the tabroom native cookie format for auth
+const crypt = require('crypt3');
 
 var app = express();
 
-	// View engine setup -- Jade
-	app.set('views', path.join(__dirname, 'views'));
-	app.set('view engine', 'jade');
+// Log requests to the console on dev, into a file on prod Note that this must
+// come before you handle the routes (app.use('/')) or else it logs nothing.
+// Palmer's mistakes become your wisdom. 
 
-	app.use(favicon(path.join(__dirname, 'public', 'favicon.ico')));
-	app.use(logger('dev'));
-	app.use(bodyParser.json());
-	app.use(bodyParser.urlencoded({ extended: false }));
+if (env === 'development') {
+	app.use(morgan('combined'));
+} else { 
+	var accessLogStream = rfs('tabroom-api.log',
+		{
+			path     : '/var/log/tabroom/tabroom-api.log',
+			interval : '3d', // rotate every 3 days
+			flags    : 'a'
+		}
+	);
+	app.use(morgan('combined', { stream: accessLogStream }));
+}
 
-	app.use(cookieParser());
-	app.use(express.static(path.join(__dirname, 'public')));
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: false }));
 
-	// Check for a valid session and populate to the req.session
-	var authenticate = require('./lib/user/authenticate');
+app.use(cookieParser());
 
-	app.use(function(req, res, next) { 
-		authenticate(req,res,next);
-	});
+// Check for a valid session and populate to the req.session
+var authenticate = require('./lib/user/authenticate');
 
-	// If there is an active login, load the permissions feed into
+app.use(function(req, res, next) { 
+	authenticate(req,res,next);
+});
 
-	// Set the URL routes
-	app.use('/', require('./routes'));
-	app.use('/user', require('./routes/user'));
-	//app.use('/nsdatab', require('./routes/nsdatab'));
+// Set the URL routes
+app.use('/', require('./routes'));
 
-	// Catch 404s and forward to error handler
-	app.use(function(req, res, next) {
-		var err = new Error('Not Found');
-		err.status = 404;
-		next(err);
-	});
+// Catch 404s and forward to error handler
+app.use(function(req, res, next) {
+	var err = new Error('Not Found');
+	err.status = 404;
+	next(err);
+});
 
-	// Development error handler
-	// Prints stacktrace
-	if (app.get('env') === 'development') {
-		app.use(function(err, req, res, next) {
-			res.status(err.status || 500);
-			res.render('error', {
-				message: err.message,
-				error: err
-			});
-		});
-	}
+// Development error handler, prints stacktrace
+if (env === 'development') {
 
-	// Production error handler
-	// No stacktraces leaked to user
 	app.use(function(err, req, res, next) {
 		res.status(err.status || 500);
-		res.render('error', {
+		res.json({
+			message: err.message,
+			error: err
+		});
+	});
+
+// Production error handler, No stacktraces leaked to user
+} else { 
+	app.use(function(err, req, res, next) {
+		res.status(err.status || 500);
+		res.json({
 			message: err.message,
 			error: {}
 		});
 	});
-
+}
 
 module.exports = app;

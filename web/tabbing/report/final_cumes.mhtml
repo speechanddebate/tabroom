@@ -1,0 +1,418 @@
+<%args>
+	$tourn
+	$session
+	$tourn_settings
+	$event_id => undef
+	$sort_by  => "audit"
+</%args>
+<%init>
+
+	my $event = Tab::Event->retrieve($event_id);
+
+	$m->redirect("final_wins.mhtml?event_id=$event_id") if $event->type eq "debate";
+
+	my $final = $event->rounds(
+		type => "final"
+	)->first;
+
+	my @elims = sort {$b->name <=> $a->name} $event->rounds(type => "elim");
+
+	my $last_elim = $elims[0] if @elims;
+
+	my $min_round_name = 7;
+	my $max_round_name = 12;
+	my $final_number   = 13;
+	my $supp;
+
+	if ($event->setting("supp") || $event->setting("conn")) { 
+		$min_round_name = 1;
+		my @rounds      = $event->rounds;
+		$final_number   = scalar @rounds;
+		$max_round_name = $final_number - 1;
+		$supp++;
+	}
+
+	my $bowl_tbset = Tab::TiebreakSet->search(
+		name => "NSDA Final Bowl",
+		tourn => $tourn->id
+	)->first;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare(" 
+		select entry.id, 
+			entry.code, 
+				GROUP_CONCAT(
+					CONCAT(student.first,' ',student.last)
+					SEPARATOR ' & '
+				) as entryname,
+			school.name, school.state,
+			round.id, round.name, 
+			rank.tag, rank.value,
+			winloss.tag, winloss.value,
+			ballot.judge, ballot.speakerorder
+		from (entry, round, panel, ballot, school, entry_student, student)
+
+		left join score rank on rank.tag = 'rank' 
+			and rank.ballot = ballot.id
+
+		left join score winloss on winloss.tag = 'ballot' 
+			and winloss.ballot = ballot.id
+
+		where entry.event = ? 
+			and entry.id = ballot.entry
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and entry.school = school.id
+			and (
+				round.type = 'elim'
+				or round.type = 'final'
+			)
+
+			and entry_student.entry = entry.id
+			and entry_student.student = student.id
+
+		group by ballot.id
+		order by round.name, ballot.judge, ballot.speakerorder
+	");
+
+	my $duo++ if $event->setting("max_entry") > 1;
+
+	$sth->execute($event->id);
+
+	my %entries;
+	my %results;
+	my $max_round;
+
+	while (
+		my ($entry_id, $entry_code, $entry_name, $school_name, $school_state,
+			$round_id, $round_name, 
+			$rank_tag, $rank_value, 
+			$winloss_tag, $winloss_value,
+			$judge, $order
+		) = $sth->fetchrow_array()
+	) { 
+
+		if ($results{$entry_id}{$round_name} && $round_name == $final_number) { 
+			$results{$entry_id}{$round_name} .= " ";
+		} else { 
+			$results{$entry_id}{$round_name} .= " \\hspace{.1mm}";
+		}
+
+		if ($winloss_tag) { 
+			$results{$entry_id}{$round_name} .= "W" if $winloss_value == 1; 
+			$results{$entry_id}{$round_name} .= "L" if $winloss_value == 0; 
+		}
+
+		$results{$entry_id}{$round_name} .= $rank_value if $rank_tag;
+
+		if ($last_elim 
+			&& $round_id == $last_elim->id
+			&& (not defined $results{$entry_id}{"semis"})
+		) { 
+			$results{$entry_id}{"semis"}++;
+			push @{$results{"semis"}}, $entry_id;
+		}
+
+		if ($final 
+			&& $round_id == $final->id
+			&& (not defined $results{$entry_id}{"finals"})
+		) { 
+			push @{$results{"finals"}}, $entry_id;
+			$results{$entry_id}{"finals"}++;
+		}
+
+		$max_round = $round_name if $max_round < $round_name;
+
+		$entries{$entry_id}{"code"}   = $entry_code;
+		$entries{$entry_id}{"order"}  = $order;
+		$entries{$entry_id}{"name"}   = $entry_name;
+		$entries{$entry_id}{"state"}  = $school_state;
+		$entries{$entry_id}{"school"} = $school_name;
+
+	}
+
+	my @semis_results = $m->comp(
+		"/tabbing/results/order_entries.mas",
+		round => $last_elim
+	) if $last_elim;
+
+
+	my $semis_ref = pop @semis_results if @semis_results;
+	my @semis_tiebreak_keys = sort {$a <=> $b} keys %{$semis_ref->{"tier_description"}};
+
+	if (${$semis_ref}{"by_place"}) {
+		foreach my $key (sort {$a <=> $b} keys %{${$semis_ref}{"by_place"}}) {
+			foreach my $entry_id (@{${${$semis_ref}{"by_place"}}{$key}}) {
+				$entries{$entry_id}{"semis_place"} = $key;
+			}
+		}
+	}
+
+	my @finals_results = $m->comp(
+		"/tabbing/results/order_entries.mas",
+		round => $final
+	) if $final;
+
+	my $finals_ref = pop @finals_results if @finals_results;
+	my @finals_tiebreak_keys = sort {$a <=> $b} keys %{$finals_ref->{"tier_description"}};
+
+	if (${$finals_ref}{"by_place"}) {
+		foreach my $key (sort {$a <=> $b} keys %{${$finals_ref}{"by_place"}}) {
+			foreach my $entry_id (@{${${$finals_ref}{"by_place"}}{$key}}) {
+				$entries{$entry_id}{"finals_place"} = $key;
+			}
+		}
+	}
+
+	my @bowl_results = $m->comp(
+		"/tabbing/results/order_entries.mas",
+		round        => $final,
+		tiebreak_set => $bowl_tbset,
+	) if $final && $bowl_tbset;
+
+	my $bowl_ref = pop @bowl_results if @bowl_results;
+	my @bowl_tiebreak_keys = sort {$a <=> $b} keys %{$bowl_ref->{"tier_description"}};
+
+	my @bowl_winners;
+	my %done;
+
+	if (${$bowl_ref}{"by_place"}) {
+		foreach my $key (sort {$a <=> $b} keys %{${$bowl_ref}{"by_place"}}) {
+			foreach my $entry_id (@{${${$bowl_ref}{"by_place"}}{1}}) {
+				next if $done{$entry_id}++;
+				push @bowl_winners, $entry_id;
+			}
+		}
+	}
+
+	my $name = $event->name;
+	$name =~ s/[\W_]//g;
+
+    my $filename = "FinalResults-$name-".$session->id;
+    my $filepath = $Tab::file_root."tmp/".$filename;
+    `rm -f $filepath.*`;
+
+    $m->comp("/funclib/printout.mas", 
+        tourn     => $tourn,
+        filename  => $filename,
+        head      => 1,
+        array     => "1.8",
+        landscape => 1,
+    );  
+
+    open (TEXOUT, ">>$filepath.tex");
+
+	print TEXOUT "\\strut \\hfill \\huge \\textsb{".$event->name."} \\hfill \\strut";
+	print TEXOUT "\\medskip\n";
+	print TEXOUT "\\newline\n";
+
+	print TEXOUT "\\strut \\hfill \\Large ".$event->setting("result_description")." \\hfill \\strut";
+	print TEXOUT "\\medskip\n";
+	print TEXOUT "\\newline\n";
+
+	print TEXOUT "\\scriptsize\n";
+
+	if ($duo) { 
+		print TEXOUT "\\begin{tabular}{p{.40in}p{2in}p{1.25in}p{.3in}";
+		foreach my $round ($min_round_name .. $max_round_name - 2) { 
+			print TEXOUT "p{.40in}";
+		}
+		print TEXOUT "p{.45in}p{.45in}p{.2in}p{.2in}p{.45in}}\n";
+
+	} elsif ($supp) {
+		print TEXOUT "\\begin{tabular}{p{.40in}p{1.5in}p{1.75in}p{.3in}";
+		foreach my $round ($min_round_name .. $max_round_name - 2) { 
+			print TEXOUT "p{.20in}" if $final_number >= 6;
+			print TEXOUT "p{.50in}" if $final_number < 6;
+		}
+		print TEXOUT "p{.55in}p{.55in}p{.2in}p{.2in}p{.55in}}\n" if ($final_number < 6);
+		print TEXOUT "p{.45in}p{.55in}p{.2in}p{.2in}p{.55in}}\n" if ($final_number >= 6);
+	} else {
+		print TEXOUT "\\begin{tabular}{p{.40in}p{1.5in}p{1.75in}p{.3in}";
+		foreach my $round ($min_round_name .. $max_round_name - 2) { 
+			print TEXOUT "p{.40in}";
+		}
+		print TEXOUT "p{.45in}p{.45in}p{.2in}p{.2in}p{.45in}}\n";
+	}
+
+	print TEXOUT "\\rowcolor[rgb]{1,.96,.66}\[5.5pt\]\[5.5pt\]\n";
+	foreach my $header ("Code", "Name", "School", "State") { 
+		print TEXOUT "\\textsb{".$header."} & ";
+	}
+
+	foreach my $round ($min_round_name .. $max_round_name) { 
+		print TEXOUT "\\textsb{R".$round."} & ";
+	}
+
+	if ($supp) { 
+		print TEXOUT "\\textsb{Elims} & \\textsb{All} & \\textsb{Place} \\\\ \n";
+	} else { 
+		print TEXOUT "\\textsb{Elims} & \\textsb{Semis} & \\textsb{Place} \\\\ \n";
+	}
+
+	my $switch;
+
+	foreach my $entry_id (
+		sort {$entries{$b}{"semis_place"} <=> $entries{$a}{"semis_place"}}
+		@{$results{"semis"}}
+	) { 
+
+		next if $entries{$entry_id}{"semis_place"} > 14;
+
+		print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2; 	
+
+		print TEXOUT Tab::texify($entries{$entry_id}{"code"}); 
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"name"});
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"school"});
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"state"});
+		print TEXOUT " & ";
+
+		foreach my $round ($min_round_name .. $max_round_name) { 
+			print TEXOUT "\\footnotesize\n";
+			print TEXOUT $results{$entry_id}{$round}." & ";
+		}
+
+		print TEXOUT "\\footnotesize\n";
+		print TEXOUT ${$semis_ref}{"tiebreak"}{1}{$entry_id}." & ";
+		print TEXOUT "\\footnotesize\n";
+		print TEXOUT ${$semis_ref}{"tiebreak"}{2}{$entry_id}." & ";
+		print TEXOUT "\\footnotesize\n";
+
+		unless ($results{$entry_id}{"finals"}) { 
+			print TEXOUT "\\hfill \\textsb{".Tab::texify(Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"semis_place"}))."} \\hfill \\strut ";
+		}
+		print TEXOUT "\\\\ \n";
+	}
+
+	print TEXOUT "\\end{tabular}\n";
+	print TEXOUT "\\bigskip\n";
+	print TEXOUT "\\newline\n";
+	print TEXOUT "\\strut \\hfill \\Large Finalists (Round $final_number) \\hfill \\strut";
+	print TEXOUT "\\medskip\n";
+	print TEXOUT "\\newline\n";
+
+	print TEXOUT "\\footnotesize\n";
+
+	if ($duo) { 
+		print TEXOUT "\\begin{tabular}{p{.35in}p{.35in}p{1.75in}p{1.25in}p{.30in}p{1.75in}p{.45in}p{.55in}p{.35in}p{.3in}p{.35in}}\n";
+	} elsif ($supp) { 
+		print TEXOUT "\\begin{tabular}{p{.35in}p{.35in}p{1.75in}p{1.25in}p{.30in}p{1.2in}p{.45in}p{.55in}p{.35in}p{.3in}p{.35in}}\n";
+	} else { 
+		print TEXOUT "\\begin{tabular}{p{.35in}p{.35in}p{1.25in}p{1.75in}p{.30in}p{1.75in}p{.45in}p{.55in}p{.45in}p{.35in}p{.35in}}\n";
+	}
+
+	print TEXOUT "\\rowcolor[rgb]{1,.96,.66}\[5.5pt\]\[5.5pt\]\n";
+
+	foreach my $header ("Spoke", "Code", "Name", "School", "State") { 
+		print TEXOUT "\\textsb{".$header."} & ";
+	}
+
+	print TEXOUT "\\textsb{ Finals } & ";
+
+	if ($supp) { 
+		print TEXOUT "\\textsb{All Finals} & \\textsb{Finals -H\/L} & \\textsb{All} & \\textsb{Total} & \\textsb{Place} \\\\ \n";
+	} else { 
+		print TEXOUT "\\textsb{All Finals} & \\textsb{Finals -H\/L} & \\textsb{Elims} & \\textsb{Total} & \\textsb{Place} \\\\ \n";
+	}
+
+	my @results;
+
+	if ($sort_by eq "audit") { 
+		@results = sort {$entries{$a}{"order"} <=> $entries{$b}{"order"}} @{$results{"finals"}};
+	} else { 
+		@results = sort {$entries{$b}{"finals_place"} <=> $entries{$a}{"finals_place"}} @{$results{"finals"}};
+	}
+
+	foreach my $entry_id (@results) { 
+
+		print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2; 	
+
+		print TEXOUT Tab::texify(Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"order"}));
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"code"}); 
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"name"});
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"school"});
+		print TEXOUT " & ";
+		print TEXOUT Tab::texify($entries{$entry_id}{"state"});
+		print TEXOUT " & ";
+
+		print TEXOUT "\\footnotesize\n \\tt ";
+		print TEXOUT $results{$entry_id}{$final_number}." & ";
+
+		if ($supp) { 
+
+			print TEXOUT "\\footnotesize\n";
+			print TEXOUT ${$finals_ref}{"tiebreak"}{4}{$entry_id}." & ";
+			print TEXOUT "\\footnotesize\n";
+			print TEXOUT ${$finals_ref}{"tiebreak"}{2}{$entry_id}." & ";
+			print TEXOUT "\\footnotesize\n";
+			print TEXOUT ${$semis_ref}{"tiebreak"}{1}{$entry_id}." & ";
+			print TEXOUT "\\footnotesize\n";
+			print TEXOUT ${$finals_ref}{"tiebreak"}{1}{$entry_id}." & ";
+			print TEXOUT "\\footnotesize\n";
+
+		} else { 
+
+			print TEXOUT "\\footnotesize\n";
+			print TEXOUT ${$finals_ref}{"tiebreak"}{7}{$entry_id}." & ";
+			print TEXOUT "\\footnotesize\n";
+			print TEXOUT ${$finals_ref}{"tiebreak"}{2}{$entry_id}." & ";
+			print TEXOUT "\\footnotesize\n";
+			print TEXOUT ${$semis_ref}{"tiebreak"}{1}{$entry_id}." & ";
+			print TEXOUT "\\footnotesize\n";
+			print TEXOUT ${$finals_ref}{"tiebreak"}{1}{$entry_id}." & ";
+			print TEXOUT "\\footnotesize\n";
+		}
+
+		unless ($sort_by eq "audit") { 
+			print TEXOUT "\\textsb{".Tab::texify(Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"finals_place"}))."}";
+		}
+		print TEXOUT "\\\\ \n";
+	}
+
+	print TEXOUT "\\end{tabular}\n";
+
+	unless ($sort_by eq "audit" || $supp) { 
+		if (@bowl_winners) { 
+
+			print TEXOUT "\\medskip\n";
+			print TEXOUT "\\newline\n";
+			print TEXOUT "\\strut \\hfill \\normalsize \\textsb{".$event->setting("bowl_description")." } ";
+
+			my $notfirst;
+
+			foreach my $entry_id (@bowl_winners) { 
+
+				if ($notfirst++) { 
+					print TEXOUT "\\hfill\n";
+					print TEXOUT "\\strut\n";
+					print TEXOUT "\\newline\n";
+					print TEXOUT "\\strut\n";
+					print TEXOUT "\\hfill\n";
+				}
+				print TEXOUT Tab::texify($entries{$entry_id}{"name"});
+				print TEXOUT ", ";
+				print TEXOUT Tab::texify($entries{$entry_id}{"school"});
+				print TEXOUT ", ";
+				print TEXOUT Tab::texify($entries{$entry_id}{"state"});
+			}
+
+			print TEXOUT "\\hfill\n";
+			print TEXOUT "\\strut\n";
+			print TEXOUT "\\newline\n";
+		}
+	}
+
+    $m->comp("/funclib/printout.mas",
+        tourn     => $tourn,
+        filename  => $filename,
+        tail      => 1
+    );
+
+</%init>

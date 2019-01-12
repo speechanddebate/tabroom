@@ -7,145 +7,235 @@
 // Because I'm learning node LIKE A BOSS, I'm going to return a promise instead
 // of dealing with callback hell.  Or die trying.  
 
-var db = require('../../models');
-var BluePromise = require('bluebird');
+const db = require('../../models');
+const Promise = require('bluebird');
 
-	var kingdomsKeys = "", 	
-		judgesQuery = "", 
-		sjQuery = "", 
-		studentsQuery = "";
+	const kingdomsKeys = `select permission.id, permission.tag, 
+			circuit.id circuitID, circuit.name circuitName, 
+			region.id regionID, region.name regionName, 
+			region.circuit as regionCircuit, region.arch regionArch,  
+			chapter.id as chapterID, chapter.name chapterName,  
+			tourn.id as tournID, tourn.name tournName, tourn.start, tourn.end  
+		from permission 
+			left join chapter on chapter.id = permission.chapter  
+			left join circuit on circuit.id = permission.circuit 
+			left join region on region.id = permission.region 
+			left join tourn on tourn.id = permission.tourn 
+		    and tourn.start > utc_timestamp() 
+		where permission.person = ? `;
 
-	kingdomsKeys = "select permission.id, permission.tag, "+
-		"circuit.id circuitID, circuit.name circuitName, " +
-		"region.id regionID, region.name regionName, "+
-		"region.circuit_id as regionCircuit, region.archdiocese regionArch, " + 
-		"chapter.id as chapterID, chapter.name chapterName, " + 
-		"tourn.id as tournId, tourn.name tournName, tourn.start, tourn.end " + 
-		"from permission "+
-		"left join chapter on chapter.id = permission.chapter_id " + 
-		"left join circuit on circuit.id = permission.circuit_id " +
-		"left join region on region.id = permission.region_id " +
-		"left join tourn on tourn.id = permission.tourn_id "+
-			" and tourn.start > utc_timestamp() "+
-		"where permission.person_id = ";
+	const judgesQuery = `select judge.id, judge.first, judge.last, 
+		category.name categoryName, 
+		tourn.name tournName, tourn.start tournStart 
+		from judge, category, tourn 
+		where tourn.end > utc_timestamp() 
+		and tourn.id = category.tourn 
+		and category.id = judge.category 
+		and judge.person = ? `;
 
-	judgesQuery = "select judge.id, judge.first, judge.last, " +
-		"category.name categoryName, "+
-		"tourn.name tournName, tourn.start tournStart "+
-		"from judge, category, tourn "+
-		"where tourn.end > utc_timestamp() "+
-		"and tourn.id = category.tourn_id "+
-		"and category.id = judge.category_id "+
-		"and judge.person_id = ";
+	const sjQuery = `select chapter_judge.id, chapter_judge.first, chapter_judge.last, 
+		chapter.name chapterName 
+		from chapter_judge, chapter 
+		where chapter.id = chapter_judge.chapter 
+		and chapter_judge.person = ? `;
 
-	sjQuery = "select chapter_judge.id, chapter_judge.first, chapter_judge.last, "+
-		"chapter.name chapterName "+
-		"from chapter_judge, chapter "+
-		"where chapter.id = chapter_judge.chapter_id "+
-		"and chapter_judge.person_id = ";
+	const studentsQuery = 
+		` select student.id, student.first, student.last, 
+		chapter.name chapterName 
+		from student, chapter 
+		where chapter.id = student.chapter 
+		and student.person = ?`;
 
-	studentsQuery = "select student.id, student.first, student.last, "+
-		"chapter.name chapterName "+
-		"from student, chapter "+
-		"where chapter.id = student.chapter_id "+
-		"and student.person_id = ";
-
-	module.exports = function(userId, locals, tournId) { 
+	module.exports = function(userID, locals, tournID) { 
 
 		// Check if the inputs are valid and sane 
 
-		if (tournId) { 
+		if (userID) { 
 
-			return new BluePromise ( function(resolve, reject) { 
+			if (tournID) { 
 
-				tournQuery = " select permission.id, permission.tag, "+
-				" permission.category_id from permission "+
-				" where permission.tourn_id = "+tournId +
-				" and permission.person_id = "+userId;
+				return new Promise ( function(resolve, reject) { 
 
-				db.sequelize.query(tournQuery).spread(
-					function (permissionRows, metadata) { 
-						
-						var tournPerms;
-					
-						permissionRows.forEach( function(row) { 
-							tournPerms[row.tag] = row;
-						});
+					db.tourn.findById(tournID, 
+						{include: ["Events"]}
+					).then(function(Tourn) { 
 
-						resolve(tournPerms);
-					}
-				);
+						db.permission.findAll({ 
+							where: { person: userID, tourn: tournID },
+							include: ["Category", "Person"] 
+						}).then(function(Permissions) { 
 
-			});
-				
+							let tournPerms = {};
 
-		} else { 
-		
-			return new BluePromise ( function(resolve, reject) { 
+							Tourn.Events.forEach(function(Event) { 
+								allEvents[Event.id] = "admin";
+								categoryEvents[Event.category] = {} 
+								categoryEvents[Event.category][Event.id] = "admin";
+							});
 
-				db.sequelize.query(kingdomsKeys + userId).spread(
-					function(permissionRows, metadata) { 
+							if (Permissions.length == 0) { 
 
-					var perms = {
-						circuit       : {},
-						region        : {},
-						chapter       : {},
-						tourn         : {},
-						judge         : {},
-						chapter_judge : {},
-						student       : {}
-					},
+							} else { 
 
-					taken = [];
+								Permissions.forEach(function(perm) {
+										
+									let allEvents = {};
+									let categoryEvents = {};
+									tournPerms.events = {};
 
-					permissionRows.forEach( function(row) { 
 
-						switch (row.tag) { 
+									console.log("perm object is");
+									console.log(perm);
+									console.log("Person object is");
+									console.log(perm.Person);
 
-							case "circuit":
-								perms.circuit[row.circuitID] = row;
-								break;
-							case "region":
-								perms.region[row.regionID] = row;
-								break;
-							case "chapter":
-								perms.chapter[row.chapterID] = row;
-								break;
-							case "chapter_prefs":
-								perms.chapter[row.chapterID] = row;
-								break;
-							case "prefs":
-								perms.chapter[row.chapterID] = row;
-								break;
-							default: 
-								if (row.tournName) { 
-									if (taken[row.tournId] === undefined) {
-										taken[row.tournId] = true;
+									if (perm.Person.site_admin) { 
+
+										tournPerms.owner        = true;
+										tournPerms.settings     = true;
+										tournPerms.registration = true;
+										tournPerms.tabbing      = true;
+
+										Object.keys(allEvents).forEach(function(eventID) { 
+											tournPerms.events[eventID] = "admin";
+										});
+
+										resolve(tournPerms);
+									} 
+										
+									if (perm.tag === "owner") { 
+
+										tournPerms.owner        = true;
+										tournPerms.settings     = true;
+										tournPerms.registration = true;
+										tournPerms.tabbing      = true;
+										Object.keys(allEvents).forEach(function(eventID) { 
+											tournPerms.events[eventID] = "admin";
+										});
+
+									} else if (perm.tag === "full_admin") { 
+
+										tournPerms.settings     = true;
+										tournPerms.registration = true;
+										tournPerms.tabbing      = true;
+
+										Object.keys(allEvents).forEach(function(eventID) { 
+											tournPerms.events[eventID] = "admin";
+										});
+
+									} else if (perm.tag === "entry_only") { 
+
+										tournPerms.entry = true;
+
+									} else if (perm.tag === "registration") { 
+
+										tournPerms.registration = true;
+
+									} else if (perm.tag === "tabulation") { 
+
+										tournPerms.tabbing = true;
+
+										Object.keys(allEvents).forEach(function(eventID) { 
+											tournPerms.events[eventID] = "admin";
+										});
+
+									} else if (perm.tag === "category_tab") {
+
+										Object.keys(categoryEvents[perm.category]).forEach(function(eventID) { 
+											tournPerms.events[eventID] = "admin";
+										});
+
+										tournPerms.tabbing = true;
+
+									} else if (perm.tag === "detailed") { 
+										tournPerms.events = JSON.parse(perm.details);
 									}
-								}
-							break;
-						}
+
+								});
+
+								resolve(tournPerms);
+							}
+						});
 					});
-					
-					db.sequelize.query(judgesQuery + userId).spread(
-						function(judgeRows, metadata) { 
+				});
 
-						perms.judges = judgeRows;
+			} else { 
+			
+				return new Promise ( function(resolve, reject) { 
 
-						db.sequelize.query(sjQuery + userId).spread(
-							function(sjRows, metadata) { 
+					db.sequelize.query(
+						kingdomsKeys,
+						{replacements: [userID]}
+					).spread(
+						function(permissionRows, metadata) { 
 
-							perms.chapterJudges = sjRows;
+						var perms = {
+							circuit       : {},
+							region        : {},
+							chapter       : {},
+							tourn         : {},
+							judge         : {},
+							chapter_judge : {},
+							student       : {}
+						},
 
-							db.sequelize.query(studentsQuery + userId).spread(
-								function(studentRows, metadata) { 
+						taken = [];
 
-								perms.students = studentRows;
-								resolve(perms);
+						permissionRows.forEach( function(row) { 
+
+							switch (row.tag) { 
+
+								case "circuit":
+									perms.circuit[row.circuitID] = row;
+									break;
+								case "region":
+									perms.region[row.regionID] = row;
+									break;
+								case "chapter":
+									perms.chapter[row.chapterID] = row;
+									break;
+								case "chapter_prefs":
+									perms.chapter[row.chapterID] = row;
+									break;
+								case "prefs":
+									perms.chapter[row.chapterID] = row;
+									break;
+								default: 
+									if (row.tournName) { 
+										if (taken[row.tournID] === undefined) {
+											taken[row.tournID] = true;
+										}
+									}
+								break;
+							}
+						});
+						
+						db.sequelize.query(
+							judgesQuery,
+							{replacements: [userID]}
+						).spread(
+							function(judgeRows, metadata) { 
+
+							perms.judges = judgeRows;
+
+							db.sequelize.query(
+								sjQuery,
+								{replacements: [userID]}
+							).spread(function(sjRows, metadata) { 
+
+								perms.chapterJudges = sjRows;
+
+								db.sequelize.query(
+									studentsQuery,
+									{replacements: [userID]}
+								).spread(function(studentRows, metadata) { 
+									perms.students = studentRows;
+									resolve(perms);
+								});
 							});
 						});
 					});
 				});
-			});
+			}
 		}
 	};

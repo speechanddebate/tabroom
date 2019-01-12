@@ -23,9 +23,7 @@
 				}
 			}
 		);
-
 		return false;
-
 	}
 
 /* master toggle for checkboxes */
@@ -43,29 +41,22 @@
 /* Respond to switch calls */
 
 	function postEnter(e, checkObject, replyUrl) { 
-
 		if (e.keyCode == 13) { 
 			postSwitch(checkObject, replyUrl);
 			return false;
 		}
-
 		return true;
-
 	}
 
 	function postConfirm(alertMessage, checkObject, replyUrl) { 
-
-		alertify.confirm(alertMessage, function(e) { 
-	
+		alertify.confirm(alertMessage, function(e) { 	
 			if (e) { 
 				postSwitch(checkObject, replyUrl);
 				return;
 			} else {
 				return;
 			}
-
 		});
-
 		return;
 	}
 
@@ -74,6 +65,7 @@
 		var targetId      = $(checkObject).attr("target_id");
 		var propertyName  = $(checkObject).attr("property_name");
 		var settingName   = $(checkObject).attr("setting_name");
+		var relatedThing   = $(checkObject).attr("related_thing");
 
 		var successAction = $(checkObject).attr("on_success");
 		var replyTarget   = $(checkObject).attr("reply_target");
@@ -128,6 +120,7 @@
 				property_value : propertyValue,
 				other_value    : otherValue,
 				other_text     : otherText,
+				related_thing  : relatedThing,
 				parent_id      : parentObjectId
 			},
 			success : function(data) {
@@ -144,6 +137,7 @@
 
 					$(".replybucket").text(data.reply);
 					$(".replyappend").append(data.reply);
+
 				}
 
 				if (data.error) { 
@@ -155,15 +149,15 @@
 					alertify.dismissAll();
 					alertify.notify(data.message, "custom");
 
-					if (successAction === "destroy") { 
-						$("#"+targetId).remove();
-					}
-
 					if (data.destroy) { 
 						$("#"+data.destroy).remove();
 					}
 
-					if (
+					if (successAction === "destroy") { 
+						$("#"+targetId).remove();
+					} else if (successAction === "hide") { 
+						$("#"+targetId).addClass("hidden");
+					} else if (
 						successAction === "refresh" 
 						|| successAction === "reload"
 						|| data.refresh
@@ -178,7 +172,6 @@
 					if (data.newParent) { 
 						$("#"+targetId).prependTo("#"+data.newParent);
 					}
-
 
 					if (data.replace) { 
 
@@ -790,7 +783,6 @@ function autoTab(input,len,e) {
        	input.form[next_index].focus();
 	}
 
-
     return true;
 }
 
@@ -828,4 +820,5 @@ $(document).ready(function() { $('.show-menu').click(function() {
 		$('.hide-menu').removeClass('hidden');
 	});
 });
+
 

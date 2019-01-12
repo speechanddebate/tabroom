@@ -2,6 +2,14 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('file', { 
+		tag: {
+			type: DataTypes.STRING(128),
+			allowNull: true
+		},
+		type: {
+			type: DataTypes.STRING(16),
+			allowNull: true
+		},
 		label: {
 			type: DataTypes.STRING(128),
 			allowNull: false,

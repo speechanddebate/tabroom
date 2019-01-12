@@ -17,11 +17,12 @@
 	$bulk              => undef
 	$schools           => undef
 	$entries           => undef
+	$weekend           => undef
 </%args>
 <%init>
 
 	use POSIX;
-	use Data::Dumper;
+	use Math::Round;
 
 	my $total;
 	my @felines;
@@ -43,37 +44,12 @@
 	my $only_entry_fees;
 	my $total_concessions;
 	my $total_payments;
-
 	my $alterna_state = $tourn_settings->{"fees_alternate_state"};
 
 	if ($alterna_state) { 
 		undef $alterna_state 
 			unless $school->chapter 
 			&& $school->chapter->state eq $alterna_state;
-	}
-
-	if ($entry_fees && $tourn_settings->{"per_person_fee"}) { 
-	
-		my $individuals = $school->setting('individuals');
-
-		my %person_line = ();
-
-		$person_line{"fee"} = $individuals * $tourn_settings->{"per_person_fee"};
-
-		$total += $person_line{"fee"};
-
-		$total_entry_fees += $person_line{"fee"};
-		$only_entry_fees += $person_line{"fee"};
-
-		unless ($bulk) { 
-
-			$person_line{"name"} = $individuals.' people at x '.$tourn_settings->{"per_person_fee"};
-			$person_line{"quantity"} = $individuals;
-			$person_line{"per_unit"} = $tourn_settings->{"per_person_fee"};
-			$person_line{"short_name"} = "Individuals in Attendance";
-
-			push (@felines, {%person_line});
-		}
 	}
 
 	unless ($schools) {
@@ -88,6 +64,42 @@
 		if ($tourn_settings->{$tourn->id}{"hotels"}) {
 			$schools->{"hotels"}{$school_id} = $school->setting('hotel');
 		}
+
+		$schools->{"all_fee_discount"}{$school_id} = $school->setting('all_fee_discount');
+		$schools->{"concession_fee_discount"}{$school_id} = $school->setting('concession_fee_discount');
+		$schools->{"individuals"}{$school_id} = $school->setting('individuals');
+		$schools->{"entry_fee_discount"}{$school_id} = $school->setting('entry_fee_discount');
+	}
+
+	if ($entry_fees && $tourn_settings->{"per_person_fee"}) { 
+	
+		my %person_line = ();
+		my $individuals = $schools->{"individuals"}{$school_id};
+
+		$person_line{"fee"} = $individuals * $tourn_settings->{"per_person_fee"};
+
+		if ($schools->{"entry_fee_discount"}{$school_id}) { 
+			$person_line{"fee"} = $person_line{"fee"} * ($schools->{"entry_fee_discount"}{$school_id} / 100);
+			$person_line{"fee"} = nearest(.01, $person_line{"fee"});
+		}
+
+		$total += $person_line{"fee"};
+		$total_entry_fees += $person_line{"fee"};
+		$only_entry_fees += $person_line{"fee"};
+
+		unless ($bulk) { 
+			$person_line{"name"} = $individuals.' people at x '.$tourn_settings->{"per_person_fee"};
+			$person_line{"quantity"} = $individuals;
+			$person_line{"per_unit"} = $tourn_settings->{"per_person_fee"};
+			$person_line{"short_name"} = "Individuals in Attendance";
+
+			if ($schools->{"entry_fee_discount"}{$school_id}) { 
+				$person_line{"name"} .= " x ".$schools->{"entry_fee_discount"}{$school_id}."% discount";
+				$person_line{"short_name"} .= " x ".$schools->{"entry_fee_discount"}{$school_id}."% off";
+			}
+
+			push (@felines, {%person_line});
+		}
 	}
 
 	my $judging_fees;
@@ -95,10 +107,20 @@
 	if ($entry_fees) { 
 
 		my @entries;
-
 		@entries = @{$entries} if $entries;
 
 		unless (@entries || $bulk) { 
+
+			my $limit;
+
+			if ($weekend) { 
+
+				$limit = " and exists ( select event_setting.id from event_setting 
+					where event_setting.event = event.id
+					and event_setting.tag = 'weekend'
+					and event_setting.value = ".$weekend->id."
+				)";
+			}
 
 			Tab::Entry->set_sql( with_event => "
 				select entry.*, entry.event as eventid, event.category as categoryid
@@ -112,6 +134,8 @@
 					where entry_setting.entry = entry.id
 					and entry_setting.tag = 'rejected_by'
 				)
+				$limit
+				order by entry.code, entry.id
 			");
 
 			@entries = Tab::Entry->search_with_event($school_id);
@@ -119,7 +143,7 @@
 
 		my %entries_by_event;
 		my %entries_by_category;
-
+		
 		foreach my $entry (@entries) { 
 			if ($entry->waitlist) { 
 				push @{$entries_by_event{$entry->eventid}{"waitlist"}}, $entry;
@@ -139,16 +163,11 @@
 		}
 
 		unless ($bulk) { 
-
 			if ($hotel && $hotel_multiplier > 1) { 
-
 				my %hotel_warning = ();
-
 				$hotel_warning{"name"} = "You are marked as staying at ".$hotel->name.".  Your entry fees are therefore adjusted by ".$hotel->multiple."x";
-
 				$hotel_warning{"message"}++;
 				push @felines, \%hotel_warning;
-
 			}
 		}
 
@@ -195,7 +214,10 @@
 
 			my $fee_total = $fee_per * scalar @entries;
 			$fee_total = $fee_total * $hotel_multiplier if $hotel_multiplier > 1;
-
+			if ($schools->{"entry_fee_discount"}{$school_id}) { 
+				$fee_total = $fee_total * ($schools->{"entry_fee_discount"}{$school_id} / 100);
+				$fee_total = nearest(.01, $fee_total);
+			}
 
 			next EVENT unless $fee_total;
 
@@ -205,26 +227,25 @@
 
 			unless ($bulk) { 
 
-				my $name = scalar @entries. " entries in ".$event->abbr.' x '.$fee_per;
-
 				$fee_per = sprintf("%.2f", $fee_per);
-
 				my %line_hash= ();
-
 				$line_hash{"quantity"} = scalar @entries;
 				$line_hash{"per_unit"} = $fee_per;
 				$line_hash{"short_name"} = "Entries in ".$event->name;
-				$line_hash{"name"} = $name;
+				$line_hash{"name"} .= scalar @entries. " entries in ".$event->abbr.' x '.$fee_per;
 				$line_hash{"fee"} = $fee_total;
 
-				push (@felines, {%line_hash});
+				if ($schools->{"entry_fee_discount"}{$school_id}) { 
+					$line_hash{"name"} .= " x ".$schools->{"entry_fee_discount"}{$school_id}."% discount";
+					$line_hash{"short_name"} .= " x ".$schools->{"entry_fee_discount"}{$school_id}."% off";
+				}
 
+				push (@felines, {%line_hash});
 			}
 		}
 
 		if ($tourn_settings->{"nsda_nats"} &! $bulk) {	
 		
-
 			EVENT:
 			foreach my $event (@events) { 
 
@@ -255,6 +276,10 @@
 
 					my $fee_total = $fee_per * $count;
 					$fee_total = $fee_total * $hotel_multiplier if $hotel_multiplier > 0;
+					if ($schools->{"entry_fee_discount"}{$school_id}) { 
+						$fee_total = $fee_total * ($schools->{"entry_fee_discount"}{$school_id} / 100);
+						$fee_total = nearest(.01, $fee_total);
+					}
 
 					if ($fee_total) { 
 
@@ -276,6 +301,11 @@
 							$line_hash{"name"} = $name;
 							$line_hash{"fee"} = $fee_total;
 
+							if ($schools->{"entry_fee_discount"}{$school_id}) { 
+								$line_hash{"name"} .= " x ".$schools->{"entry_fee_discount"}{$school_id}."% discount";
+								$line_hash{"short_name"} .= " x ".$schools->{"entry_fee_discount"}{$school_id}."% off";
+							}
+
 							push (@felines, {%line_hash});
 
 						}
@@ -293,6 +323,8 @@
 			GROUP:
 			foreach my $category (@categories) { 
 
+				next if $weekend && $weekend->id != $category->setting("weekend");
+
 				my $category_id = $category->id;
 
 				next unless $entries_by_category{$category_id}{"confirmed"}
@@ -307,44 +339,31 @@
 			
 				my $rounds_per = $category_settings->{$category_id}{"rounds_per"};
 				$rounds_per++ if $category_settings->{$category_id}{"nats_category"};
-
 				my $judge_per = $category_settings->{$category_id}{"judge_per"};
 				my $attending_judge_fee = $category_settings->{$category_id}{"attending_judge_fee"}; 
 
-
 				if ($category_settings->{$category_id}{"drops_no_burden"}) { 
-
 					my @undropped;
-
 					foreach my $entry (@{$entries_by_category{$category_id}{"confirmed"}}) { 
 						push @undropped, $entry unless $entry->dropped;
 					}
-
 					@{$entries_by_category{$category_id}{"confirmed"}} = @undropped;
-
 				}
 
 				my $extra;
 				my $uncovered;
 
 				if ($category_settings->{$category_id}{"nats_category"} && $bulk) { 
-				
-
 					my $fee = $category_settings->{$category_id}{"round_hire_fee"};
-
 					if ($fee) { 
-
 						foreach my $hire (@{$schools->{"hires"}{$school_id}{$category_id}}) { 
-
 							my $accepted = $hire->rounds_accepted;
-
 							if ($accepted) { 
 								$total_entry_fees += $accepted * $fee;
 								$total += $accepted * $fee;
 								$judging_fees += $accepted * $fee;
 							}
 						}
-						
 						undef @{$schools->{"hires"}{$school_id}{$category_id}};
 					} 
 
@@ -383,7 +402,6 @@
 						# because who needs to follow our own rules?  
 
 						my %minimum_hash;
-
 						$minimum_hash{"name"} = "No judging for a minimum ";
 						$minimum_hash{"name"} .= $category_settings->{$category_id}{"minimum_supplied"};
 						$minimum_hash{"name"} .= " rounds committment provided";
@@ -399,7 +417,6 @@
 					}
 
 				} else { 
-
 
 					($uncovered, $extra ) = $m->comp(
 						"/funclib/judgemath/uncovered_burden_by_category.mas", 
@@ -419,7 +436,6 @@
 				if ($attending_judge_fee) { 
 
 					my %judge_fee_hash;
-
 					my @judges;
 					
 					if ($schools->{"judges"}{$school_id} 
@@ -449,13 +465,11 @@
 						$judge_fee_hash{"short_name"} = "Judges in Attendance";
 					
 						push (@felines, {%judge_fee_hash});
-
 					}
 
 					$total_entry_fees += $judge_fee_hash{"fee"};
 					$total += $judge_fee_hash{"fee"};
 					$judging_fees += $judge_fee_hash{"fee"};
-
 				} 
 				
 				if ($category_settings->{$category_id}{"track_judge_hires"}) {
@@ -489,7 +503,6 @@
 					}
 
 					push @adjustments, 0; 
-
 					my $adjustment_amount;
 
 					foreach my $adjustment (@adjustments) { 
@@ -527,9 +540,7 @@
 									$hired_fee{"per_unit"} = $fee;
 									$hired_fee{"short_name"} = "Rounds of ".$category->abbr." hired judging";
 									push (@felines, {%hired_fee});
-
 								}
-
 							}
 
 						} elsif ($category_settings->{$category_id}{"hired_fee"}) { 
@@ -549,7 +560,6 @@
 								unless ($bulk) { 
 
 									$hired_fee{"name"} = $accepted." hired judges for ".$category->name.' at '.$fee." each";
-
 									$hired_fee{"quantity"} = $accepted;
 									$hired_fee{"per_unit"} = $fee;
 									$hired_fee{"short_name"} = $category->abbr." hired judges";
@@ -1001,6 +1011,7 @@
 					$fine_hash{"name"} .= " by ". $fine->levied_by->first." ".$fine->levied_by->last  
 						if $fine->levied_by && $names;
 				}
+
 			
 				$fine_hash{"fine_id"} = $fine->id;
 				$fine_hash{"fee"} = $fine->amount;
@@ -1031,6 +1042,40 @@
 	} 
 
 	my %totals = ();
+
+	if ($entry_fees) { 
+		if ($schools->{"all_fee_discount"}{$school_id}) { 
+			my $discount = $total_entry_fees * ($schools->{"all_fee_discount"}{$school_id} / 100);
+			$discount = nearest(.01, $discount);
+			$total_entry_fees -= $discount;
+			$total -= $discount;
+
+			my %discount_line = ();
+			$discount_line{"name"} = $schools->{"all_fee_discount"}{$school_id}."% discount to all fees";
+			$discount_line{"short_name"} = $schools->{"all_fee_discount"}{$school_id}."% off fees";
+			$discount_line{"quantity"} = 1;
+			$discount_line{"per_unit"} = $discount;
+			$discount_line{"fee"} = -$discount;
+			push (@felines, {%discount_line});
+		}
+	}
+
+	if ($concessions) { 
+		if ($schools->{"concession_fee_discount"}{$school_id}) { 
+			my $discount = $total_concessions * ($schools->{"concession_fee_discount"}{$school_id} / 100);
+			$discount = nearest(.01, $discount);
+			$total_concessions -= $discount;
+			$total -= $discount;
+
+			my %discount_line = ();
+			$discount_line{"name"} = $schools->{"concession_fee_discount"}{$school_id}."% discount to concessions";
+			$discount_line{"short_name"} = $schools->{"concession_fee_discount"}{$school_id}."% off concessions";
+			$discount_line{"quantity"} = 1;
+			$discount_line{"per_unit"} = $discount;
+			$discount_line{"fee"} = -$discount;
+			push (@felines, {%discount_line});
+		}
+	}
 
 	if ($all) { 
 		$totals{"entries"}     = $only_entry_fees;

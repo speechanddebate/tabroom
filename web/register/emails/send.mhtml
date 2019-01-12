@@ -9,7 +9,6 @@
 	$diodirs       => undef
 	$judge_short   => undef
 	$money_short   => undef
-	$invoice_short => undef
 	$tba           => undef
 </%args>
 <%init>
@@ -23,8 +22,28 @@
 	my @recipients;
 	my @notifieds;
 	my @emails;
-
 	my @schools;
+
+	Tab::School->set_sql(empties => "
+		select school.* 
+			from school
+			where tourn = ? 
+			and not exists ( 
+				select entry.*
+				from entry
+				where entry.school = school.id
+				and entry.active = 1
+			)
+			and not exists ( 
+				select judge.*
+				from judge
+				where judge.school = school.id
+				and judge.active = 1
+			)
+	");
+
+	my @empts = Tab::School->search_empties($tourn->id);
+	my %empties = map {$_->id => $_} @empts;
 
 	unless ($content) { 
 		my $err = "The email had no message body.  Try again,";
@@ -32,22 +51,23 @@
 	}
 
 	if ($diodirs) { 
-
 		$sent_to .= "Diocesan Moderators of ".$tourn->name;
-
-   		foreach my $region ($m->comp("/funclib/tourn_regions.mas", tourn => $tourn)) {
+   		foreach my $region (
+			$m->comp("/funclib/tourn_regions.mas", tourn => $tourn)
+		) {
       	   	push @recipients, $region->admins;
 		}
-
 	}
 
 	if ($everybody) { 
-
 		$sent_to .= "All Registrants of ".$tourn->name;
-
 		push @schools, $tourn->schools;
-
 	} 
+
+	if ($ARGS{"not_checked_in"}) { 
+		push @schools, $tourn->schools(onsite => 0);
+		$sent_to .= "Schools not checked in from ".$tourn->name;
+	}
 
 	if ($judge_short) { 
 
@@ -107,39 +127,33 @@
 
 	my %school_balances;
 
-	if ($money_short || $invoice_short) { 
+	if ($money_short || $ARGS{"invoice_short"}) { 
 
-		$sent_to = " Schools with positive balances at ".$tourn->name;
+		$sent_to .= " Schools with positive balances at ".$tourn->name if $money_short;
+		$sent_to .= " Schools with uninvoiced balances at ".$tourn->name if $ARGS{"invoice_short"};
 
 		%school_balances = $m->comp(
 			"/funclib/school_balances.mas", 
 			tourn          => $tourn,
+			person         => $person,
 			tourn_settings => $tourn_settings
 		);
 
 		foreach my $school_id (keys %school_balances) { 
-
 			my $yup;
-
 			if ($money_short && $school_balances{$school_id}{"balance"} > 0) { 
 				$yup++;
 			}
-
-			if ($invoice_short && $school_balances{$school_id}{"uninvoiced"} > 0) { 
+			if ($ARGS{"invoice_short"} && $school_balances{$school_id}{"uninvoiced"} > 0) { 
 				$yup++;
 			}
-
 			push @schools, Tab::School->retrieve($school_id) if $yup;
 		}
-
 	}
-	
+
 	if ($tba) { 
-
 		$sent_to .= "Schools with TBA entries at ".$tourn->name;
-
 		push @schools, $m->comp("/funclib/tourn_school_tba.mas", tourn => $tourn);
-
 	} 
 
 	unless ($everybody || $judge_short || $tba) {
@@ -150,13 +164,18 @@
 
 		foreach my $event ($tourn->events) { 
 
-			my $event_key = "event_".$event->id;
-			next unless $ARGS{$event_key};
+			next unless $ARGS{"event_".$event->id};
+
+			my $waitlist;
+			$waitlist++ if $ARGS{"wl_".$event->id};
 			
 			$sent_to .= $event->name."\n";
 
-			push @schools, $m->comp("/funclib/event_schools.mas", event => $event);
-
+			push @schools, $m->comp(
+				"/funclib/event_schools.mas", 
+				event    => $event,
+				waitlist => $waitlist
+			);
 		} 
 	} 
 
@@ -179,15 +198,12 @@
 
 	my %done;
 
+	my %tourn_contacts = $m->comp("/funclib/tourn_contacts.mas", tourn => $tourn);
+
 	foreach my $school (@schools) { 
-
 		next if $done{$school->id}++;
-
-		push (@emails, $m->comp(
-			"/funclib/school_contacts.mas",
-				school => $school
-			)
-		);
+		next if $empties{$school->id};
+		push @emails, keys %{$tourn_contacts{$school->id}};
 	}
 
 	my $email;
@@ -219,8 +235,9 @@
 	} 
 
 	unless (@recipients || @notifieds || @emails) { 
-		my $err = "You have not chosen any recipients.  As much as sending an email to nobody sounds fun, ";
-		$err .= "I bet you didn't want to do that.  Choose a group of recipients at right to continue";
+		my $err = "The categories/checkboxes you have selected did not have any recipients.";
+		$err .= "It's possible you didn't check boxes, or that the categories you chose ";
+		$err .= "have no active entries.";
 		$m->redirect("compose.mhtml?email_id=".$email->id."&err=$err");
 	}
 

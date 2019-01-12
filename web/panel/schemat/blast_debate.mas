@@ -1,30 +1,30 @@
 <%args>
-	$round       => undef
-	$panel       => undef
-	$debug       => undef
-	$message     => undef
-	$only        => undef
-	$motion      => undef
+	$tourn
+	$event
+	$tourn_settings
+	$round   => undef
+	$panel   => undef
+	$message => undef
+	$only    => undef
+	$motion  => undef
+	$flight  => undef
 </%args>
 <%init>
 
 	$message = substr($message, 0, 50);
-
 	$round = $panel->round if $panel;
+	my %event_settings = $event->all_settings();
 
-	my $event = $round->event;
-	my $tourn = $event->tourn;
-
-	my $ncfl = $tourn->setting("ncfl");
-
+	my $ncfl               = $tourn_settings->{"ncfl"};
+	my $nsda               = $tourn_settings->{"nsda_nats"};
 	my $include_room_notes = $round->setting("include_room_notes");
+	my $aff_string         = $event_settings{"aff_label"};
+	my $neg_string         = $event_settings{"neg_label"};
 
-	my $aff_string = $event->setting("aff_label");
-	my $neg_string = $event->setting("neg_label");
 	$aff_string = "Aff" unless $aff_string;
 	$neg_string = "Neg" unless $neg_string;
 
-	my $nosides++ if $event->setting("no_side_constraints");
+	my $nosides++ if $event_settings{"no_side_constraints"};
 
 	my $sidelocks++ if (
 		$round->type eq "elim" 
@@ -32,7 +32,8 @@
 		|| $round->type eq "runoff"
 	) && not defined $nosides;
 
-	undef $sidelocks if $tourn->setting("nsda_nats") && (not defined $event->setting("not_nats"));
+	undef $sidelocks if $tourn_settings->{"nsda_nats"} 
+		&& (not defined $event_settings{"not_nats"});
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
@@ -42,342 +43,232 @@
 	$start->set_time_zone($tz);
 
 	my %flight_start;
-	my $flight_offset = $event->setting("flight_offset");
+	my $flight_offset = $event_settings{"flight_offset"};
 
 	my $flighted = $round->flighted;
 	$flighted = 1 unless $flighted;
 
 	foreach my $flight (1 .. $flighted) { 
 		my $temp_start = $start->clone;
-
-		$flight_start{$flight} = $temp_start if $flight == 1;
+ 
+		if ($flight == 1) { 
+			$flight_start{$flight} = $m->comp(
+				"/funclib/showtime.mas", 
+					return => 1,
+					length => "short",
+					dt     => $temp_start
+			);
+		}
 		next if $flight == 1;
 
 		$temp_start->add( minutes => $flight_offset * ($flight - 1) );
-		$flight_start{$flight} = $temp_start;
+
+		$flight_start{$flight} = $m->comp(
+			"/funclib/showtime.mas", 
+				return => 1,
+				length => "short",
+				dt     => $temp_start
+		);
 	}
 
-	my @panels;
-	my @judges;
-	my @entries;
-	my @ballots;
+	my $dbh = Tab::DBI->db_Main();
 
-	unless ($panel) { 
-	
-		Tab::Panel->columns(TEMP => "roomname");
-		Tab::Panel->columns(TEMP => "roomnotes");
+	my $limit = "and panel.id = ".$panel->id if $panel;
+	$limit .= " and panel.flight = ".$flight if $flight && $flight == int($flight);
 
-		Tab::Panel->set_sql( schemat => "
-			select panel.*, room.name as roomname, room.notes as roomnotes 
-			from panel
-			left join room on room.id = panel.room
+	my $sth = $dbh->prepare("
+		select panel.id, panel.letter, panel.flight, panel.bye, 
+			ballot.side, entry.code, student.last, pentry.pronoun,
+			judge.code, judge.first, judge.last, pjudge.pronoun, pjudge.id,
+			room.name, room.notes
+
+			from (panel, entry, ballot)
+
+			left join entry_student es on entry.id = es.entry
+			left join student on student.id = es.student
+			left join person pentry on student.person = pentry.id
+
+			left join room on panel.room = room.id
+
+			left join judge on ballot.judge = judge.id
+			left join person pjudge on judge.person = pjudge.id
+
 			where panel.round = ? 
-			order by panel.letter");
-
-		@panels = Tab::Panel->search_schemat($round->id);
-
-		@judges = $m->comp("/funclib/round_judges.mas", round => $round);
-		@entries = $m->comp("/funclib/round_entries.mas", round => $round);
-		@ballots = $m->comp("/funclib/round_ballots.mas", round => $round);
-
-	} else { 
-
-		push @panels, $panel;
-		@judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
-		@entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
-		@ballots = $panel->ballots;
-
-	}
-
-
-	my %entries_by_panel = ();
-
-	foreach my $entry (@entries) { 
-		next if $entry->dropped;
-		next if $entry->dq;
-		push (@{$entries_by_panel{$entry->panelid}}, $entry);
-		push (@{$entries_by_panel{$panel->id}}, $entry) if $panel;
-	}
-
-	my %ballots_by_entry = ();
-	my %panel_undone = ();
-
-	foreach my $ballot (@ballots) { 
-		push (@{$ballots_by_entry{$ballot->entry->id}}, $ballot) if $ballot->entry;
-		$panel_undone{$ballot->panel->id}++ unless $ballot->audit;
-	}
-
-	my %judges_by_panel = ();
-
-	foreach my $panel (@panels) { 
-		foreach my $judge ($m->comp('/funclib/panel_judges.mas', panel => $panel)) {
-			push @{$judges_by_panel{$panel->id}}, $judge;
-		}
-	}
-
-	unless ($panel) { 
-		@panels = sort {$a->roomname cmp $b->roomname} @panels;
-		@panels = sort {$panel_undone{$b->id} <=> $panel_undone{$a->id}} @panels;
-	}
-
-	my %school_text = ();
-
-	my %done = ();
-
-	foreach my $panel (@panels) { 
-
-		my $locked_aff =  $m->comp(
-			"/funclib/round_elim_dueaff.mas", 
-			panel => $panel
-		) if $sidelocks;
-		my $locked = "locked" if $locked_aff;
-
-		my $aff;
-		my $neg;
-		my $bye;
-		$bye++ if $panel->bye;
-
-		my $pronouns_string;
-
-		Tab::Student->set_sql( pronouns => "
-			select student.id, student.last, entry.code code, person.pronoun entry
-			from ballot, entry, entry_student, student, person
-			where ballot.panel = ? 
+			and panel.id = ballot.panel
 			and ballot.entry = entry.id
-			and entry.id = entry_student.entry
-			and entry_student.student = student.id
-			and student.person = person.id
-			group by person.id ");
+			$limit
+			group by ballot.id
+	");
+
+	$sth->execute($round->id);
+
+	my %panels; 
+
+	while (
+		my ($panel_id, $panel_letter, $panel_flight, $panel_bye,
+			$ballot_side, $entry_code, $student_last, $pentry_pronouns,
+			$judge_code, $judge_first, $judge_last, $pjudge_pronouns, $pjudge_id,
+			$room_name, $room_notes
+		)  = $sth->fetchrow_array()
+	) { 
+
+		if ($ncfl) { 
+			$panels{$panel_id}{"judges"}{$judge_code}++;
+		} else { 
+			$panels{$panel_id}{"judges"}{$judge_last.", ".$judge_first}++;
+		}
+
+		$panels{$panel_id}{"entries"}{$ballot_side} = $entry_code;
+		$panels{$panel_id}{"room"} = $room_name;
+		$panels{$panel_id}{"room_notes"} = $room_notes;
+		$panels{$panel_id}{"bye"} = $panel_bye;
+		$panels{$panel_id}{"flight"} = $panel_flight;
 
 		unless ($ncfl) { 
-
-			foreach my $student (Tab::Student->search_pronouns($panel->id)) { 
-				next unless $student->entry;
-				$pronouns_string .= $student->code."'s ".$student->last." prefers ".$student->entry." ";
+			if ($pentry_pronouns) { 
+				$panels{$panel_id}{"pronouns"}{$entry_code." ".$student_last." pronouns: ".$pentry_pronouns}++;
 			}
 
-			foreach my $judge (@{$judges_by_panel{$panel->id}}) {
-				next unless $judge->person && $judge->person->pronoun;
-				$pronouns_string .= "Judge ".$judge->last." prefers ".$judge->person->pronoun." ";
-			}
-
-		}
-
-		foreach my $pc (@{$entries_by_panel{$panel->id}}) { 
-			if ($ballots_by_entry{$pc->id}) { 
-				$aff = $pc if ${$ballots_by_entry{$pc->id}}[0]->side == "1";
-				$neg = $pc if ${$ballots_by_entry{$pc->id}}[0]->side == "2";
+			if ($pjudge_pronouns) { 
+				$panels{$panel_id}{"pronouns"}{"Judge ".$judge_last." pronouns: ".$pjudge_pronouns}++;
 			}
 		}
-
-		foreach my $pc (@{$entries_by_panel{$panel->id}}) { 
-			if ($ballots_by_entry{$pc->id}) { 
-
-				if ($aff) { 
-					$neg = $pc if not defined $neg;
-				} else { 
-					$aff = $pc if not defined $aff;
-				}
-			}   
-		}   
-
-		unless ($only eq "judges") { 
-
-			foreach my $pc ($aff, $neg) { 
-
-				next unless $pc && $pc->id;
-
-				next if $done{"entry_".$pc->id}++;
-
-				my $own_txt = " \n".$pc->code." ";
-
-				if ($nosides || ($sidelocks && not defined $locked_aff)) { 
-					
-					if ($aff && $neg) { 
-						$own_txt .= " vs ".$aff->code." (Flip)" if $pc->id == $neg->id;
-						$own_txt .= " vs ".$neg->code." (Flip)" if $pc->id == $aff->id;
-					} 
-
-				} else { 
-
-					if ($aff && $neg) { 
-						$own_txt .= "on " if $sidelocks;
-						$own_txt .= $aff_string." vs ".$neg->code if $pc->id == $aff->id;
-						$own_txt .= $neg_string." vs ".$aff->code if $pc->id == $neg->id;
-					}
-				}
-
-				my $num_judges = scalar @{$judges_by_panel{$panel->id}} 
-					if $judges_by_panel{$panel->id};
-
-				unless ($bye) { 
-					$own_txt .= " \nJudge";
-					$own_txt .= "s" if $num_judges > 1;
-					$own_txt .= " ";
-				} else { 
-					$own_txt .= " \nBYE";
-				}
-
-				my $notfirst;
-
-				foreach my $judge (@{$judges_by_panel{$panel->id}}) {
-					$own_txt .= " - " if $notfirst;
-					$own_txt .= $judge->code if $ncfl;
-					$own_txt .= $judge->last.", ".substr($judge->first,0,3)." " unless $ncfl;
-					$notfirst++;
-				}
-
-				$own_txt .= " \n";
-
-				$own_txt .= "In ".$panel->room->name." \n" 
-					if $panel->room 
-					&& not defined $bye;
-
-				$own_txt .= "Opp Prep in: ".$panel->room->notes." \n" 
-					if $include_room_notes > 0 
-					&& $panel->room 
-					&& not defined $bye;
-
-				$own_txt .= "Fl. ".$panel->flight." " 
-					if $panel->round
-					&& $panel->round->flighted > 1 
-					&& not defined $bye;
-
-				my $panel_start = $start->clone;
-
-				$panel_start = $flight_start{$panel->flight}->clone 
-					if $panel->flight 
-					&& $flight_start{$panel->flight};
-
-				$own_txt .= " At ".Tab::shorttime($panel_start)." ".Tab::tzname($tz) 
-					unless $bye;
-
-				$own_txt .= "\n\nMotion: ".$motion if $motion;
-
-				$own_txt .= "Pronouns \n" 
-					if $pronouns_string 
-					&& not defined $ncfl;
-
-				$own_txt .= $pronouns_string." \n" 
-					if $pronouns_string 
-					&& not defined $ncfl;
-
-				$school_text{$pc->school->id} .= $own_txt." \n\n";
-
-				$own_txt .= " \n$message" if $message;
-
-				my @followers = $m->comp(
-					"/funclib/entry_follower.mas", 
-					entry => $pc
-				);
-
-				if (@followers) { 
-					$m->comp( "/funclib/send_notify.mas", 
-						from    => 'Tabroom.com <live@tabroom.com>',
-						array   => \@followers,
-						subject => $round->label." ".$pc->code,
-						body    => $own_txt
-					);
-				}
-
-			}
-		}
-
-		unless ($only eq "entries") { 
-
-			foreach my $judge (@{$judges_by_panel{$panel->id}}) {
-
-				next if $done{"judge_".$judge->id."_".$panel->id}++;
-
-				my @followers = $m->comp(
-					"/funclib/judge_follower.mas", 
-					judge => $judge
-				);
-
-				next unless @followers;
-				my $own_txt;
-
-				if ($ncfl) { 
-					$own_txt = " \n".$judge->code." judging ".$event->abbr." ".$round->realname;
-				} else { 
-					$own_txt = " \n".$judge->last." judging ".$event->abbr." ".$round->realname;
-				}
-
-				$own_txt .= " \nIn ".$panel->room->name." \n" if $panel->room;
-
-				$own_txt .= "Opp Prep ".$panel->room->notes." \n" 
-					if $include_room_notes > 0 
-					&& $panel->room 
-					&& not defined $bye;
-
-				if ($nosides || ($sidelocks && not defined $locked_aff)) { 
-					$own_txt .= $aff->code if $aff;
-					$own_txt .= " vs ";
-					$own_txt .= $neg->code if $neg;
-					$own_txt .= " (Flip) ";
-				} else { 
-					$own_txt .= $aff_string.": ".$aff->code if $aff;
-					$own_txt .= "  ".$neg_string.": ".$neg->code if $neg;
-				}
-
-				$own_txt .= " \nFlt ".$panel->flight 
-					if $panel->round
-					&& $panel->round->flighted > 1 
-					&& not defined $bye;
-
-				my $panel_start = $start->clone;
-
-				$panel_start = $flight_start{$panel->flight}->clone 
-					if $panel->flight 
-					&& $flight_start{$panel->flight};
-
-				$own_txt .= " At ".Tab::shorttime($panel_start)." ".Tab::tzname($tz) 
-					unless $bye;
-
-				$own_txt .= "\n\nMotion: ".$motion if $motion;
-
-				$own_txt .= " \n Pronouns:" 
-					if $pronouns_string;
-				$own_txt .= " \n".$pronouns_string 
-					if $pronouns_string;
-
-				$school_text{$judge->school->id} .= $own_txt." \n\n" 
-					if $judge->school;
-
-				$own_txt .= " \n$message" if $message;
-					
-				$m->comp( "/funclib/send_notify.mas", 
-					from    => 'Tabroom.com <live@tabroom.com>',
-					array   => \@followers,
-					subject => $round->label." ".$judge->last,
-					body    => $own_txt
-				);
-			
-			}
-		}
-
 	}
 
-	foreach my $school_id (keys %school_text) { 
+	my %locked_panels;
 
-		my $school = Tab::School->retrieve($school_id);
-		next unless $school;
+	if ($sidelocks) { 
 
-		my @followers  = $m->comp("/funclib/school_follower.mas", school_id => $school_id);
-		next unless @followers;
+		my $locked_sth = $dbh->prepare("
+			select panel.id
+			from (panel, round r1, round r2, ballot r1b1, ballot r1b2, panel p2, ballot r2b1, ballot r2b2)
 
-		my $own_txt = " \nFull round pairing for ".$school->short_name.": \n";
+			where r1.id = ? 
+			and panel.round = r1.id
 
-		$own_txt .= $school_text{$school_id};
-		$own_txt .= " \n$message" if $message;
+			and panel.id = r1b1.panel
+			and panel.id = r1b2.panel
+			and r1b2.entry != r1b1.entry
+
+			and r2.id != r1.id
+			and r2.name < r1.name
+
+			and r2.event = r1.event
+			and p2.round = r2.id
+			and p2.id = r2b1.panel
+			and p2.id = r2b2.panel
+			and r2b2.entry != r2b1.entry
+
+			and r2b2.entry = r1b2.entry
+			and r2b1.entry = r1b1.entry
+		");
+
+		$locked_sth->execute($round->id);
+
+		while (
+			my ($panel_id) = $locked_sth->fetchrow_array()
+		) { 
+			$locked_panels{$panel_id}++;
+		}
+	}
+
+	my %recipients = $m->comp(
+		"/funclib/round_blast.mas", 
+			round => $round,
+			ncfl  => $ncfl,
+			only  => $only
+	);
+
+	my %school_emails;
+
+	PANELS:
+	foreach my $panel_id (keys %panels) { 
+		next unless $recipients{"in"}{$panel_id} || $recipients{"school"}{$panel_id};
+
+		my $panel_text;
+
+		if ($panels{$panel_id}{"bye"}) { 
+			
+			my $notfirst;
+			foreach my $side (keys %{$panels{$panel_id}{"entries"}}) { 
+				$panel_text .= " vs. " if $notfirst++;
+				$panel_text .= $panels{$panel_id}{"entries"}{$side};
+			}
+
+			$panel_text .= " BYE ";
+
+		} else { 
+
+			if ($nosides || ($sidelocks && (not defined $locked_panels{$panel_id}))  ) {
+				my $notfirst;
+				foreach my $side (keys %{$panels{$panel_id}{"entries"}}) { 
+					$panel_text .= " vs. " if $notfirst++;
+					$panel_text .= $panels{$panel_id}{"entries"}{$side};
+				}
+				$panel_text .= " (Flip) \n";
+			} else { 
+				my $notfirst;
+				foreach my $side (sort keys %{$panels{$panel_id}{"entries"}}) { 
+					$panel_text .= " vs. " if $notfirst++;
+					$panel_text .= "$aff_string " if $side == 1;
+					$panel_text .= "$neg_string " if $side == 2;
+					$panel_text .= $panels{$panel_id}{"entries"}{$side};
+				}
+			
+				if ($locked_panels{$panel_id}) { 
+					$panel_text .= "\nSide locked\n";
+				}
+
+				$panel_text .= "\n";
+			}
+
+			$panel_text .= "Judging:\n";
+			foreach my $judge (keys %{$panels{$panel_id}{"judges"}}) { 
+				$panel_text .= $judge."\n";
+			}
+
+			$panel_text .= "Flight ".$panels{$panel_id}{"flight"} if $flighted > 1; 
+			$panel_text .= "Start ".$flight_start{$panels{$panel_id}{"flight"}}."\n";
+			$panel_text .= "Room: ".$panels{$panel_id}{"room"}." \n";
+			$panel_text .= "Room Notes: ".$panels{$panel_id}{"room_notes"}."\n" if $include_room_notes;
+			$panel_text .= "Motion: ".$motion."\n" if $motion;
+
+
+			foreach my $pronoun (keys %{$panels{$panel_id}{"pronouns"}}) { 
+				$panel_text .= $pronoun."\n";
+			}
+		}
+
+		foreach my $code (keys %{$recipients{"in"}{$panel_id}}) { 
+
+			my @followers = keys %{$recipients{"in"}{$panel_id}{$code}};
+
+			$m->comp( "/funclib/send_notify.mas", 
+				from    => 'Tabroom.com <live@tabroom.com>',
+				array   => \@followers,
+				subject => $round->label." ".$code,
+				body    => $panel_text
+			);
+
+		}
+
+		foreach my $code (keys %{$recipients{"school"}{$panel_id}}) { 
+			foreach my $email (keys %{$recipients{"school"}{$panel_id}{$code}}) { 
+				$school_emails{$email} .= "$code:\n";
+				$school_emails{$email} .= "$panel_text\n\n";
+			}
+		}
+	}
+
+	foreach my $email (keys %school_emails) { 
 
 		$m->comp( "/funclib/send_notify.mas", 
 			from    => 'Tabroom.com <live@tabroom.com>',
-			array   => \@followers,
-			subject => $round->event->abbr." ".$round->label,
-			body    => $own_txt,
-			email   => "yes"
+			to      => $email,
+			subject => $round->label,
+			body    => $school_emails{$email}
 		);
+		
 	}
 
 </%init>

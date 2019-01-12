@@ -3,6 +3,13 @@
 module.exports = function(grunt) {
 
 	grunt.initConfig({
+		env : {
+			options : {
+				//Shared Options Hash
+			},
+			dev  : { NODE_ENV : 'development', },
+			prod : { NODE_ENV : 'production', },
+		},
 
 		jslint: {
 			// lint the server code
@@ -10,13 +17,11 @@ module.exports = function(grunt) {
 				// files to lint
 				src: [
 					'app.js',
-					'routes/*.js',
-					'models/*.js',
+					'routes/*.js'
 				],
 				// files to exclude
 				exclude: [
 					'config/config.js',
-					'models/index.js'
 				],
 				// lint options
 				directives: {
@@ -32,97 +37,29 @@ module.exports = function(grunt) {
 		},			
 
 		jshint: {
-			all: [
-			] 
+			all: [ ] 
 		},
-
-		uglify: { 
-
-			options: {
-				sourceMap: true 
-			},
-
-			build: { 
-				files : {
-					'static/js/treo.min.js': [
-					], 
-					'source/vendor/vendor.min.js' : [
-					]
-				}
-			}
-		},
-
-		concat: { 
-			js : { 
-				src : [ 
-				],
-				dest: "static/js/treo-vendor.js"
-			},
-
-			debugjs : { 
-				src : [ 
-				],
-				dest: "static/js/treo-debug.js"
-			}
-		},
-
-		sass: {
-			dist: {
-				files : [{ 
-				}],
-			}
-		},
-
-		cssmin: { 
-			build: {
-				files: { 
-					'static/css/treo-vendor.css': [ 
-					],
-					'static/css/treo-local.css': [ 
-					]
-				}
-			}
-		},
-
-		watch: {
-			css: {
-				files: ['source/css/*.css'],
-				tasks: ['cssmin']
-			},
-			js: {
-				files: ['source/js/*.js'],
-				tasks: ['jshint', 'jslint', 'uglify', 'concat:debugjs']
-			}
-		},
-
 
 		// Launch nodemon script for the Express instance
 		nodemon: {
-			dev: { script: 'bin/www' }
+			dev: { script: 'bin/tabroom' }
 		},
 
 		concurrent: {
-			options: {
-				logConcurrentOutput: true
-			},
-			tasks: ['nodemon', 'watch']
+			options: { logConcurrentOutput: true },
+			tasks: ['nodemon']
 		}	 
-
 	});
 
 	// load nodemon
 	grunt.loadNpmTasks('grunt-jslint');
-	grunt.loadNpmTasks('grunt-contrib-concat');
 	grunt.loadNpmTasks('grunt-contrib-jshint');
-	grunt.loadNpmTasks('grunt-contrib-uglify');
-	grunt.loadNpmTasks('grunt-contrib-cssmin');
-	grunt.loadNpmTasks('grunt-contrib-sass');
-	grunt.loadNpmTasks('grunt-contrib-watch');
+	grunt.loadNpmTasks('grunt-env');
 	grunt.loadNpmTasks('grunt-nodemon');
 	grunt.loadNpmTasks('grunt-concurrent');
 
 	// register the nodemon task when we run grunt
-	grunt.registerTask('default', ['jslint', 'jshint', 'uglify', 'concat', 'concurrent']);
+	grunt.registerTask('default', ['concurrent']);
 
 };
 
