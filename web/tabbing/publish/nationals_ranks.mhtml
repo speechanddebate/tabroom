@@ -1,0 +1,132 @@
+<%args>
+	$tourn
+	$event_id   => undef
+	$round_name => undef
+</%args>
+<%init>
+
+	my @events;
+
+	if ($event_id && $event_id eq int($event_id)) { 
+		push @events, Tab::Event->retrieve($event_id);
+	} else { 
+		@events = $tourn->events();
+	}
+
+	foreach my $event (@events) { 
+
+		next if $event->type eq "congress";
+
+		my $exclude_round = $event->rounds( name => $round_name)->first;
+		my $exclude_number;
+		$exclude_number = $exclude_round->name if $exclude_round;
+
+		my $label;
+
+		unless ($exclude_number) { 
+			$exclude_number = 314159;
+			$label          = "All Rounds";
+		} else { 
+			$label = "Results up to round ".$exclude_number;
+		}
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $sth = $dbh->prepare(" 
+			select entry.id, round.name, 
+				rank.tag, rank.value,
+				winloss.tag, winloss.value
+			from (entry, round, panel, ballot)
+
+				left join score rank on rank.tag = 'rank' 
+					and rank.ballot = ballot.id
+
+				left join score winloss on winloss.tag = 'ballot' 
+					and winloss.ballot = ballot.id
+
+			where entry.event = ?
+			and entry.id      = ballot.entry
+			and entry.active  = 1
+			and ballot.panel  = panel.id
+			and panel.round   = round.id
+			and round.name < ?
+
+			and not exists ( 
+				select advanced.id
+				from ballot advanced, panel advpanel
+				where advpanel.round = ? 
+				and advpanel.id = advanced.panel
+				and advanced.entry = entry.id
+			)
+			group by ballot.id
+		");
+
+		$sth->execute($event->id, $round_name, $exclude_number);
+
+		my %results;
+		my $max_round;
+
+		while (
+			my ($entry_id, $round_name, 
+				$rank_tag, $rank_value, 
+				$winloss_tag, $winloss_value
+			) = $sth->fetchrow_array()
+		) { 
+
+			$results{$entry_id}{$round_name} .= " " if $results{$entry_id}{$round_name};
+
+			if ($winloss_tag) { 
+				$results{$entry_id}{$round_name} .= "W" if $winloss_value == 1; 
+				$results{$entry_id}{$round_name} .= "L" if $winloss_value == 0; 
+			}
+
+			$results{$entry_id}{$round_name} .= $rank_value if $rank_tag;
+
+			$max_round = $round_name if $max_round < $round_name;
+		}
+
+		my $now = DateTime->now();
+
+		my @existing = Tab::ResultSet->search( 
+			tourn     => $tourn,
+			event     => $event,
+			label     => $label
+		);
+
+		foreach my $exists (@existing) { 
+			$exists->delete();
+		}
+
+		my $result_set = Tab::ResultSet->create({
+			tourn     => $tourn,
+			event     => $event,
+			label     => $label,
+			generated => $now
+		});
+
+		foreach my $entry (keys %results) { 
+
+			my $result = Tab::Result->create({ 
+				entry      => $entry,
+				result_set => $result_set
+			});
+
+			foreach my $round_name (1 ..$max_round) { 
+
+				my $result_value = Tab::ResultValue->create({
+					result      => $result,
+					tag         => "R".$round_name,
+					value       => $results{$entry}{$round_name},
+					no_sort     => 1,
+					priority    => $round_name,
+					description => "Round $round_name results"
+				});
+
+			}
+		}
+	}
+
+	my $msg = "Results sheet generated";
+	$m->redirect("index.mhtml?msg=$msg");
+
+</%init>

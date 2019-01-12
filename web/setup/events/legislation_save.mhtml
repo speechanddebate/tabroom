@@ -1,0 +1,159 @@
+<%args>
+	$person
+	$person_settings
+	$tourn
+	$tourn_settings
+	$event_id
+</%args>
+<%init>
+
+	my $event = Tab::Event->retrieve($event_id);
+	$m->abort unless $event;
+	my %event_settings = $event->all_settings();
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now();
+
+
+	my @settings = (
+		"upload_legislation",
+		"legislation_cap",
+		"bill_category_cap",
+		"bill_author_required",
+		"bill_category_required"
+	);
+
+	foreach my $setting (@settings) {
+
+		my $value = $ARGS{$setting};
+		if ($value eq $event_settings{$setting}) {
+
+		} else { 
+
+			$value = 0 unless $value;
+			my $description = "Setting $setting changed to $value";
+
+			Tab::ChangeLog->create({ 
+				type        => 'tabbing',
+				event       => $event->id,
+				tourn       => $event->tourn->id,
+				person      => $person->id,
+				description => $description,
+				created     => $now
+			}); 
+
+			$event->setting($setting, $value);
+		}
+	}
+
+	my @date_fields = (
+		"bill_deadline",
+	);
+
+	my $err;
+
+	foreach my $setting (@date_fields) { 
+
+		my $date = $ARGS{$setting};
+		my $time = $ARGS{$setting."time"};
+
+		my $dt = eval { 
+			return Tab::dtme($date, $time, $tz);
+		};
+
+		if ($date && (not defined $dt)) { 
+			$err .= "Invalid date/time sent for $setting: $date $time.";
+			$err .= " Please be sure they are properly formatted using the date and time pickers";
+		}
+
+		if ($setting eq "deadline" && $dt > $tourn->reg_end->set_time_zone($tz)) { 
+			$err .= "A custom entry deadline can only be set BEFORE the tournament wide deadline.";
+			undef $dt;
+		}
+
+		if ($dt > $tourn->end->set_time_zone($tz)) { 
+			$err .= "Deadline $setting set after tournament end.";
+			undef $dt;
+		}
+
+		if ($dt eq $event_settings{$setting}) {
+
+
+		} else { 
+
+			my $description;
+
+			if ($dt) { 
+				$description = "Setting $setting changed to ".Tab::xmldt($dt);
+				$event->setting($setting, "date", $dt);
+			} else { 
+				$description = "Setting $setting removed";
+				$event->setting($setting, "0");
+			}
+
+			Tab::ChangeLog->create({ 
+				type        => 'tabbing',
+				event       => $event->id,
+				tourn       => $event->tourn->id,
+				person      => $person->id,
+				description => $description,
+				created     => $now
+			}); 
+
+		}
+	}
+
+	my @upload_fields = (
+		"bill",
+		"resolution",
+		"amendment"
+	);
+
+	my $req = Apache2::Request->new($r);
+
+	foreach my $type (@upload_fields) { 
+
+		next unless $ARGS{$type};
+        my $upload = $req->upload($type);
+        my $filename  = $upload->filename;
+
+        $filename =~ s/.*[\/\\](.*)/$1/;
+        $filename =~ s/\ //g;
+        $filename =~ s/\'//g;  # '  stupid vim
+        my $filepath = "$Tab::file_root/files/tourns/".$tourn->id."/".$event->id."/".$type."_template/";
+
+        my $garbage = `rm -f $filepath`;
+        $garbage = `mkdir -p $filepath`;
+        my $filetemp = $upload->tempname;
+
+        system $Tab::s3_cmd." put $filetemp ".$Tab::s3_bucket."/tourns/".$tourn->id."/".$event->id."/".$type."_template/$filename";
+
+        $event->setting($type."_template", $filename);
+
+	}
+
+	my %bill_categories = eval {
+        return %{ JSON::decode_json($event->setting("bill_categories"))};
+    };
+
+	foreach my $string (split(/\,/, $ARGS{"category_names"})) { 
+		$bill_categories{$string} = 1;
+	}
+
+	my $json = eval { 
+		return JSON::encode_json(\%bill_categories);
+	};
+
+	if ($json) { 
+		$event->setting("bill_categories", "text", $json);
+	} else { 
+		$event->setting("bill_categories", 0);
+	}
+
+	my $msg = "Legislation upload settings saved";
+
+	$m->redirect("legislation.mhtml?event_id=".$event->id."&msg=$msg&err=$err");
+		
+</%init>

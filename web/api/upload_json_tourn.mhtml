@@ -5,13 +5,93 @@
 	$include_rooms => undef	
 	$username   => undef
 	$password   => undef
+	$event_id   => undef
 </%args>
 
 <%init>
 
+#set up some global utility variables
+my $dbh = Tab::DBI->db_Main();
+my $sql;
+my $ctr = 0;
+my $matched;
+my $new_rec;
+my $comparisons;
+my $skip_for_now;
+my %table_updated;
+my $sth = $dbh;
+
 unless ($tourn_id && $person_id && $session_id) {
 	my $err = "Tournament restore aborted because essential information is missing";
 	$m->redirect("/setup/tourn/main.mhtml?msg=$err");
+}
+
+my ($person, $tourn, $session, $perms) = $m->comp("login_api.mas", 
+	tourn_id   => $tourn_id,
+	username   => $username,
+	password   => $password,
+	session_id => $session_id
+); 
+
+# you can't do this unless you own the tournament
+unless ( $perms->{"owner"} || $perms->{"full_admin"} )
+{
+	$m->abort();
+}
+
+
+#create a blank site if none exists
+my $site_id;
+my @sites = Tab::Site->search( name => 'nsda2017' );
+if ( scalar(@sites) == 0 ) {
+	$sql = 'INSERT INTO site (name) VALUES ( ? )' ;
+	$sth = $dbh->prepare( $sql );
+	$sth->execute( "nsda2017" );
+	$site_id = $dbh->{'mysql_insertid'};
+} else {
+	$site_id = $sites[0]->id;
+}
+
+#create a blank school to house unaffiliated judges
+my $blank_school_id;
+my @blank_schools = Tab::School->search( name => 'unaffiliated2017', tourn => $tourn_id );
+if ( scalar(@blank_schools) == 0 ) {
+	$sql = 'INSERT INTO school (name, tourn) VALUES ( ?, ? )' ;
+	$sth = $dbh->prepare( $sql );
+	$sth->execute( "unaffiliated2017", $tourn_id );
+	$blank_school_id = $dbh->{'mysql_insertid'};
+} else {
+	$blank_school_id = $blank_schools[0]->id;
+}
+
+#create a category for TRPC imports
+my $trpc_category;
+my @tourn_cats = Tab::Category->search( name => 'trpc2017', tourn => $tourn_id );
+if ( scalar(@tourn_cats) == 0 ) {
+	$sql = 'INSERT INTO category (name, tourn) VALUES ( ?, ? )' ;
+	$sth = $dbh->prepare( $sql );
+	$sth->execute( "trpc2017", $tourn_id );
+	$trpc_category = $dbh->{'mysql_insertid'};
+} else {
+	$trpc_category = $tourn_cats[0]->id;
+}
+
+print "category is $trpc_category and blank school id is $blank_school_id and site id is $site_id<br>";
+
+#DELETE SEQUENCE
+if ($event_id == 99) {
+	my @events = Tab::Event->search( tourn => $tourn_id );
+	foreach my $event (@events) {
+		if ($event->id > 86100 || $event->id == 64841 || $event->id == 64840 || $event->id == 65239 ) {
+			print "deleting event ".$event->id."<br>";
+			$m->comp("/setup/events/event_rm.mhtml", event_id => $event->id, fire_as_function => 42, tourn => $tourn, person => $person);
+		}
+	}
+	$sql = "delete from room where site=$site_id";
+	$sth = $dbh->prepare( $sql );
+	$sth->execute();
+	print "totally done deleting<br>";
+	$m->abort();
 }
 
 ########################################################################################
@@ -37,26 +117,9 @@ unless ($tourn_id && $person_id && $session_id) {
 
 	my $start = time(); 
 
-	#$username='jbruschke@fullerton.edu'; $password='123Eadie';
-
-	my ($person, $tourn, $session, $perms) = $m->comp("login_api.mas", 
-		tourn_id   => $tourn_id,
-		username   => $username,
-		password   => $password,
-		session_id => $session_id
-	); 
-
-	# you can't do this unless you own the tournament
-	unless ( $perms->{"owner"} || $perms->{"full_admin"} )
-	{
-		$m->abort();
-	}
-	
 	my $tz = $tourn->tz if $tourn->tz;
 	$tz = "UTC" unless $tz;
 	
-	my $dbh = Tab::DBI->db_Main();
-
 #upload sequence
 my $now = DateTime->now;
 $now->set_time_zone($tz);
@@ -83,16 +146,6 @@ my %data = %$HashReferenceDecoded;
 
 print "Time to load JSON file into a hash:"; printf("%.2f\n", time() - $start) ; print "<br>";
 
-#set up some global utility variables
-my $sql;
-my $ctr = 0;
-my $matched;
-my $new_rec;
-my $comparisons;
-my $skip_for_now;
-my %table_updated;
-my $sth = $dbh;
-
 	# erase SCORE field from panel and judge in the $data hash -- they are just
 	# temporary things and don't need to be restored  This is just random cleanup
 
@@ -103,36 +156,289 @@ foreach my $rec (sort keys %{ $data{'panel'} } ) {
 	delete $data{'panel'}{$rec}{'score'};
 }
 
-		#### STEP TWO: Delete the whole tourney
+print "from entries: AT START<br>";
+print scalar keys %{ $data{'entry'} };
+print "<br>";
 
-$m->comp("delete_tourn.mas", session => $session, include_rooms => $include_rooms, tourn => $tourn, person => $person);
-print "Time to complete deletion:"; printf("%.2f\n", time() - $start) ; print "<br>";
+$data{'tourn'}{42}{'id'} = $tourn_id;
 
-	#### STEP THREE: match schools to existing chapters and students to existing students, schools/chapters first		
+foreach my $rec (sort keys %{ $data{'tourn'} } ) {
+	print $rec." ".$data{'tourn'}{$rec}{'id'}."<br>";
+}
+$m->print("That's all the tourn records<br>");
+
+#clean up dropped field
+foreach my $rec (sort keys %{ $data{'entry'} } ) {
+	$data{'entry'}{$rec}{'dropped'} = 0;
+	#print $rec." ".$data{'entry'}{$rec}{'id'}." dropped:".$data{'entry'}{$rec}{'dropped'}."<br>" if $data{'entry'}{$rec}{'dropped'};
+}
+
+#delete events you are not using
+delete $data{'event'}{'19'};
+delete $data{'event'}{'20'};
+delete $data{'event'}{'21'};
+delete $data{'event'}{'22'};
+delete $data{'event'}{'23'};
+delete $data{'event'}{'24'};
+delete $data{'event'}{'25'};
+
+		#### SAVE THE EVENT
+if ($event_id) {
+
+	my @events = Tab::Event->search( abbr => $data{'event'}{$event_id}{'abbr'}, tourn => $tourn_id );
+	my $tr_event_id = $events[0]->id;
+
+	#only entries for this event
+	foreach my $rec (sort keys %{ $data{'entry'} } ) {
+		delete $data{'entry'}{$rec} unless $data{'entry'}{$rec}{'event'} == $event_id;
+	}
+
+	#delete panels not in this event
+	foreach my $rec (sort keys %{ $data{'panel'} }) {
+		delete $data{'panel'}{$rec} unless $data{'round'}{ $data{'panel'}{$rec}{'round'} }{'event'} == $event_id;
+	}
+
+	#delete all  ballots ballots for this event
+	foreach my $rec (sort keys %{ $data{'ballot'} }) {
+		unless ( $data{'panel'}{ $data{'ballot'}{$rec}{'panel'} }{'id'} ) {
+			delete $data{'ballot'}{$rec};
+		}
+	}
+
+	#pull tabroom value for each entry
+	my %ents;
+	$sql = "select entry_setting.entry, entry_setting.value from entry_setting, entry where entry.event=$tr_event_id and entry_setting.entry=entry.id and entry_setting.tag='trpc_id'";
+	$sth = $dbh->prepare( $sql );
+	$sth->execute();
+	while (my ($tr_id, $trpc_id)  = $sth->fetchrow_array() ) {
+		$ents{$trpc_id} = $tr_id;
+	}
+#	foreach my $rec (sort keys %{ $data{'entry'} }) {	
+#		print "entry tabroom for ".$rec." is=".$ents{$rec}."<br>";
+#	}
+
+	#pull tabroom value for each judge
+	my %judge_trpc;
+	$sql = "select judge_setting.judge, judge_setting.value from judge_setting WHERE judge_setting.tag='trpc_id'";
+	$sth = $dbh->prepare( $sql );
+	$sth->execute();
+	while (my ($tr_id, $trpc_id)  = $sth->fetchrow_array() ) {
+		$judge_trpc{$trpc_id} = $tr_id;
+	}
+#	foreach my $rec (sort keys %{ $data{'judge'} }) {	
+#		print "judge tabroom id=".$rec." ".$judge_trpc{$rec}."<br>";
+#	}
+
+	#pull tabroom value for each student
+	my %student_trpc;
+	$sql = "select student_setting.student, student_setting.value from student_setting where  student_setting.tag='trpc_id'";
+	$sth = $dbh->prepare( $sql );
+	$sth->execute();
+	while (my ($tr_id, $trpc_id)  = $sth->fetchrow_array() ) {
+		#print "tabroom id=".$tr_id." trpc_id=".$trpc_id."<br>";
+		$student_trpc{$trpc_id} = $tr_id;
+	}
+#	foreach my $rec (sort keys %{ $data{'student'} }) {	
+#		print "student tabroom id=".$rec." trpc id".$student_trpc{$rec}."<br>";
+#	}
+
+#ballot TESTER
+#foreach my $rec (sort keys %{ $data{'ballot'} }) {
+#	print "panel=".$data{'ballot'}{$rec}{'panel'}." ballot = $rec";
+#	print " trpc team=".$data{'ballot'}{$rec}{'entry'}." tr team id=".$ents{ $data{'ballot'}{$rec}{'entry'} };
+#	print " judge trpcid=".$data{'ballot'}{$rec}{'judge'}." and tr id=".$judge_trpc{ $data{'ballot'}{$rec}{'judge'} }."<br>";
+#}
+#$m->abort();
+
+	#make rounds
+	my @timeslots = Tab::Timeslot->search( tourn => $tourn_id );
+	my $timeslot_ctr;
+	foreach my $rec (sort keys %{ $data{'round'} }) {
+
+		if ( $data{'round'}{$rec}{'event'} == $event_id ) {
+			$timeslot_ctr++; print $timeslots[$timeslot_ctr]->id."<br>";
+			$data{'round'}{$rec}{'tiebreak_set'} = 46863 if $data{'round'}{$rec}{'tiebreak_set'} == 1;
+			$data{'round'}{$rec}{'tiebreak_set'} = 46864 if $data{'round'}{$rec}{'tiebreak_set'} == 5;
+			$data{'round'}{$rec}{'tiebreak_set'} = 47194 if $data{'round'}{$rec}{'tiebreak_set'} == 3;
+
+			$sql = 'INSERT INTO round (type, name, label, flighted, event, timeslot, tiebreak_set, site) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+			my $sth = $dbh->prepare( $sql );
+			$sth->execute( $data{'round'}{$rec}{'type'}, $data{'round'}{$rec}{'name'}, $data{'round'}{$rec}{'label'}, $data{'round'}{$rec}{'flighted'}, $tr_event_id, $timeslots[$timeslot_ctr]->id, $data{'round'}{$rec}{'tiebreak_set'}, 3844 );
+			$data{'round'}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+
+		}
+	}
+
+	#Add panels
+	foreach my $rec (sort keys %{ $data{'panel'} }) {
+
+		my $room_id = 0;
+		$data{'round'}{$rec}{'bye'} = 0 unless  $data{'round'}{$rec}{'bye'};
+		if ( $data{'panel'}{$rec}{'room'} > 0 ) {
+			my @room = Tab::Room->search( name => $data{'room'}{ $data{'panel'}{$rec}{'room'} }{'name'}, site => $site_id );
+			if ( scalar(@room) == 0 ) { $room_id = 0; } else { $room_id = $room[0]->id };
+		}
+		$sql = 'INSERT INTO panel (room, round, flight, bye) VALUES (?, ?, ?, ?)';
+		my $sth = $dbh->prepare( $sql );
+		$sth->execute( $room_id, $data{'round'}{ $data{'panel'}{$rec}{'round'} }{'id'}, $data{'round'}{$rec}{'flight'}, $data{'round'}{$rec}{'bye'} );
+		$data{'panel'}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+	}
+
+	#Add ballot
+	foreach my $rec (sort keys %{ $data{'ballot'} }) {
+		my $judge_id=0;
+		$judge_id = $judge_trpc{ $data{'ballot'}{$rec}{'judge'} } if $judge_trpc{ $data{'ballot'}{$rec}{'judge'} };
+		$sql = 'INSERT INTO ballot (side, speakerorder, judge, panel, entry, bye, forfeit, audit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+		my $sth = $dbh->prepare( $sql );
+		$sth->execute( $data{'ballot'}{$rec}{'side'}, $data{'ballot'}{$rec}{'speakerorder'}, $judge_id , $data{'panel'}{ $data{'ballot'}{$rec}{'panel'} }{'id'}, $ents{ $data{'ballot'}{$rec}{'entry'} }, $data{'ballot'}{$rec}{'bye'}, $data{'ballot'}{$rec}{'forfeit'}, $data{'ballot'}{$rec}{'audit'} );
+		$data{'ballot'}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+	}
+
+	#Add score
+	foreach my $rec (sort keys %{ $data{'score'} }) {
+		my $student_id = 0;
+		$student_id = $student_trpc{ $data{'score'}{$rec}{'student'} } if $student_trpc{ $data{'score'}{$rec}{'student'} };
+		$sql = 'INSERT INTO score (ballot, tag, value, student) VALUES (?, ?, ?, ?)';
+		my $sth = $dbh->prepare( $sql );
+		$sth->execute( $data{'ballot'}{ $data{'score'}{$rec}{'ballot'} }{'id'}, $data{'score'}{$rec}{'tag'}, $data{'score'}{$rec}{'value'}, $student_id );
+	}
+
+	print "And now we're done uploading event $event_id which is $tr_event_id";
+	$m->abort();
+}
+
+	#### STEP THREE-A: match schools to existing chapters
+
+my %schools;
+$sql = "select school.id, school_setting.value, school.name from school left join school_setting on school.id=school_setting.school and school_setting.tag='nsda_id' where school.tourn=$tourn_id order by name";
+$sth = $dbh->prepare( $sql );
+$sth->execute();
+while (my ($school_id, $school_nsda_id, $school_name)  = $sth->fetchrow_array() ) {
+	#print "tr id:".$school_id." ".$school_name." nsda_id=".$school_nsda_id."<br>";
+	$schools{$school_id}{"name"} = $school_name;
+	$schools{$school_id}{"nsda_id"} = $school_nsda_id;
+}
 
 #match schools to chapters
 foreach my $rec (sort keys %{ $data{'school'}}) {
-	$sql = "Select id, name from chapter WHERE name='".$data{'school'}{$rec}{'name'}."'" ;
-	$sql = $sql . " AND district=".$data{'school'}{$rec}{'district'} if $data{'school'}{$rec}{'district'} ;
-	my $sth = $dbh->prepare( $sql );
-	$sth->execute();
-	$matched=0;
-	while (my ($chapter_id, $chapter_name)  = $sth->fetchrow_array() ) {
-		#print "matched school ".$data{'school'}{$rec}{'name'}." with chapter $chapter_name<br>";
-		$matched = $chapter_id;
+	
+	$matched = 0;
+
+	foreach my $rec2 (sort keys %schools) {
+		if ( $schools{$rec2}{'name'} eq $data{'school'}{$rec}{'name'} || $schools{$rec2}{'nsda_id'} == $data{'school'}{$rec}{'nsda_id'} ) {
+			$data{'school'}{$rec}{'id'} = $rec2;
+			$matched = $rec2;
+			#print $data{'school'}{$rec}{'name'}." matched by name to ".$schools{$rec2}{'name'}."<br>" if $schools{$rec2}{'name'} eq $data{'school'}{$rec}{'name'} ;
+			#print $data{'school'}{$rec}{'name'}." matched by nsda_id to ".$schools{$rec2}{'name'}."<br>" if $schools{$rec2}{'nsda_id'} == $data{'school'}{$rec}{'nsda_id'} ;
+		last;
+		}
 	}
-	#print "NO match for ".$data{'school'}{$rec}{'name'}."<br>" if $matched==0;
-	$sql = 'INSERT INTO school (name, chapter, district, tourn) VALUES ( ?, ?, ?, ? )' ;
-	$sth = $dbh->prepare( $sql );
-	$sth->execute( $data{'school'}{$rec}{'name'}, $matched, $data{'school'}{$rec}{'district'}, $tourn_id );
-	#Now grab the current id and store it in the hash
-	$data{'school'}{$rec}{'id'} = $dbh->{'mysql_insertid'};
-	$data{'school'}{$rec}{'chapter'} = $matched;
-	#print $rec." updated to ".$data{'school'}{$rec}{'id'}."<br>";
+	
+	if ( $matched == 0) { print "No match for ".$data{'school'}{$rec}{'name'}." so making new record<br>"; }
+
+	#still nothing, so pull by chapter and insert it new
+	if ( $matched == 0 ) {
+		$sql = "Select id, name from chapter WHERE name='".$data{'school'}{$rec}{'name'}."'" ;
+		$sql = $sql . " AND district=".$data{'school'}{$rec}{'district'} if $data{'school'}{$rec}{'district'} ;
+		my $sth = $dbh->prepare( $sql );
+		$sth->execute();
+		$matched=0;
+		while (my ($chapter_id, $chapter_name)  = $sth->fetchrow_array() ) {
+			#print "matched school ".$data{'school'}{$rec}{'name'}." with chapter $chapter_name<br>";
+			$matched = $chapter_id;
+		}
+		$sql = 'INSERT INTO school (name, chapter, district, tourn) VALUES ( ?, ?, ?, ? )' ;
+		$sth = $dbh->prepare( $sql );
+		$sth->execute( $data{'school'}{$rec}{'name'}, $matched, $data{'school'}{$rec}{'district'}, $tourn_id );
+		#Now grab the current id and store it in the hash
+		$data{'school'}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+		$data{'school'}{$rec}{'chapter'} = $matched;
+		print $rec." updated to ".$data{'school'}{$rec}{'id'}."<br>";
+	}
 }
+
+print "Unmatched schools:<br>";
+
+foreach my $rec (sort keys %{ $data{'school'} } ) {
+	print $data{'school'}{$rec}{'name'}." trpc ID=".$rec." new tabroom id=".$data{'school'}{$rec}{'id'}."<br>" if $rec == $data{'school'}{$rec}{'id'};
+}
+
 print "Time to match schools:"; printf("%.2f\n", time() - $start) ; print "<br>";
 
-#print "<br>STUDENTS<BR><BR>";
+	#### STEP THREE-B: match judges
+
+#loads in judges already in the tabroom tourn
+my %judges;
+$sql = "select judge.id, judge_setting.value, judge.last, judge.first, category.tourn from judge left join judge_setting on judge.id=judge_setting.judge and judge_setting.tag='nsda_id' inner join category on judge.category=category.id and category.tourn=$tourn_id order by last";
+$sth = $dbh->prepare( $sql );
+$sth->execute();
+while (my ($judge_id, $judge_nsda_id, $judge_last, $judge_first)  = $sth->fetchrow_array() ) {
+	#print "tr id:".$judge_id." ".$judge_first." ".$judge_last." nsda_id=".$judge_nsda_id."<br>";
+	$judges{$judge_id}{"last"} = $judge_last;
+	$judges{$judge_id}{"first"} = $judge_first;
+	$judges{$judge_id}{"nsda_id"} = $judge_nsda_id;
+}
+
+#copy the alt_id into the trpc judge records
+foreach my $rec (sort keys %{ $data{'judge_setting'}}) {
+	if ( $data{'judge_setting'}{$rec}{'tag'} eq 'alt_id' ) {
+		$data{'judge'}{ $data{'judge_setting'}{$rec}{'judge'} }{'alt_id'} = $data{'judge_setting'}{$rec}{'value'};
+	}
+}
+
+foreach my $rec (sort keys %{ $data{'judge'}}) {
+	
+	$matched = 0;
+
+	#if ( $data{'judge'}{$rec}{'alt_id'} ) { print $data{'judge'}{$rec}{'last'}." is ".$data{'judge'}{$rec}{'alt_id'}."<br>"; } else { print "No nsda id for ".$data{'judge'}{$rec}{'last'}."<br>"; }
+
+	foreach my $rec2 (sort keys %judges) {
+
+		if ( $judges{$rec2}{'nsda_id'} == $data{'judge'}{$rec}{'alt_id'} && $data{'judge'}{$rec}{'alt_id'} ) {
+			$data{'judge'}{$rec}{'id'} = $rec2;
+			$matched = $rec2;
+			#print "tr nsda id= ".$data{'judge'}{$rec}{'alt_id'} ." ".$data{'judge'}{$rec}{'last'}." matched by nsda_id to ".$judges{$rec2}{'last'}." ".$judges{$rec2}{'nsda_id'}."<br>";
+			last;
+		}
+		if ( $judges{$rec2}{'last'} eq $data{'judge'}{$rec}{'last'} && $judges{$rec2}{'first'} eq $data{'judge'}{$rec}{'first'} ) {
+			$data{'judge'}{$rec}{'id'} = $rec2;
+			$matched = $rec2;
+			#print $data{'judge'}{$rec}{'alt_id'}." ".$data{'judge'}{$rec}{'last'}." matched by name to ".$judges{$rec2}{'last'}." ".$data{'judge'}{$rec}{'nsda_id'}."<br>";
+			last;
+		}
+
+	}
+	
+	#still nothing, so insert a new judge
+	if ( $matched == 0 && $data{'judge'}{$rec}{'last'} ) {
+		print "No match for ".$data{'judge'}{$rec}{'last'}." so making new record<br>";
+		my $new_school_id = $data{'school'}{ $data{'judge'}{$rec}{'school'} }{'id'};
+		$new_school_id = $blank_school_id unless $new_school_id;
+		$sql = 'INSERT INTO judge (first, last, code, active, ada, obligation, hired, category, school) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ? )' ;
+		$sth = $dbh->prepare( $sql );
+		$sth->execute( $data{'judge'}{$rec}{'first'}, $data{'judge'}{$rec}{'last'}, $data{'judge'}{$rec}{'code'}, $data{'judge'}{$rec}{'active'}, $data{'judge'}{$rec}{'ada'}, $data{'judge'}{$rec}{'obligation'}, $data{'judge'}{$rec}{'hired'}, $trpc_category, $new_school_id );
+		$data{'judge'}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+	}
+
+	### save the id			
+	unless ( $data{'judge'}{ $data{'judge'}{$rec}{'id'} }{'trpc_id_done'} ) {
+		print "saving trpc value for judge $rec<br>";
+		$sql = 'INSERT INTO judge_setting (tag, value, judge) VALUES ( ?, ?, ? )' ;
+		$sth = $dbh->prepare( $sql );
+		$sth->execute( "trpc_id", $rec, $data{'judge'}{$rec}{'id'} );
+		$data{'judge'}{ $data{'judge'}{$rec}{'id'} }{'trpc_id_done'} = $rec;
+	}
+
+}
+
+print "Unmatched judges:<br>";
+
+foreach my $rec (sort keys %{ $data{'judge'} } ) {
+	print $data{'judge'}{$rec}{'last'}." trpc ID=".$rec." new tabroom id=".$data{'judge'}{$rec}{'id'}."<br>" if $rec == $data{'judge'}{$rec}{'id'};
+}
+print "Time to match judges:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+	#### STEP THREE-C: match students
 
 #match students in local hash to students in master database
 my $school_dummy;
@@ -168,10 +474,31 @@ foreach my $rec (sort keys %{ $data{'student'}}) {
 		$sth = $dbh->prepare( $sql );
 		$sth->execute( $data{'student'}{$rec}{'first'}, $data{'student'}{$rec}{'last'}, $chpt_dummy );
 		$data{'student'}{$rec}{'id'} = $dbh->{'mysql_insertid'};
-		#print $rec." ".$data{'student'}{$rec}{'last'}." updated to ".$data{'student'}{$rec}{'id'}." with an INSERT<br>";
+		print $rec." ".$data{'student'}{$rec}{'last'}." updated to ".$data{'student'}{$rec}{'id'}." with an INSERT<br>";
 	}
+	### save the id	
+	print "saving trpc value for student $rec<br>";		
+	$sql = 'INSERT INTO student_setting (tag, value, student) VALUES ( ?, ?, ? )' ;
+	$sth = $dbh->prepare( $sql );
+	$sth->execute( "trpc_id", $rec, $data{'student'}{$rec}{'id'} );
+}
+print "Unmatched students:<br>";
+foreach my $rec (sort keys %{ $data{'judge'} } ) {
+	print $data{'student'}{$rec}{'last'}." trpc ID=".$rec." new tabroom id=".$data{'student'}{$rec}{'id'}."<br>" if $rec == $data{'student'}{$rec}{'id'};
 }
 print "Time to match students:"; printf("%.2f\n", time() - $start) ; print "<br>";
+
+delete $data{'entry'}{0};
+
+#clean up entries 
+foreach my $rec (sort keys %{ $data{'entry'} } ) {
+	$data{'entry'}{$rec}{'dropped'} = 0;
+	delete $data{'entry'}{$rec} unless $data{'entry'}{$rec}{'id'};
+}
+
+print "from entries: AT END";
+print scalar keys %{ $data{'entry'} };
+print "<br>";
 
 		#### STEP FOUR: Insert the records you want to restore in to the database
 		#### Now scroll through the hash, add the records to the database, and store the new
@@ -181,99 +508,53 @@ my $field_name;
 my $field_str;
 my $counter_counts;
 my $all_updated;
+my $table;
 
-#these are already matched so no new insert
-$table_updated{'student'} = 1;
-$table_updated{'school'} = 1;
-$table_updated{'district'} = 1; #not matched, just don't update it
-$table_updated{'room'} = 1 unless $include_rooms; 
-
-delete $data{'region'};
-delete $data{'region_fine'};
-delete $data{'circuit'};
-delete $data{'site'} unless $include_rooms;
-delete $data{'chapter'};
-delete $data{'district'};
-delete $data{'person'};
-delete $data{'tourn'};
-delete $data{'room'} unless $include_rooms;
-
-while ( $counter_counts < 5 ) {
+for (my $i=0; $i <= 4; $i++) {
+	if ( $i == 1 ) { $table="event"; }
+	if ( $i == 2 ) { $table="entry"; }
+	if ( $i == 3 ) { $table="entry_student"; }
+	if ( $i == 4 ) { $table="room"; }
 	
-	$counter_counts++;
-	print "<br><br>PASS NUMBER $counter_counts<br><br>";
-	my $all_updated=1;
-	foreach my $table (sort keys %data) {
-		if ( $table_updated{$table} == 0 ) {
-			$all_updated=0;
+	foreach my $rec (sort keys %{ $data{$table} }) {
+		$ctr=0;
+		my @field_values;
+	
+		foreach my $field (sort keys %{ $data{$table}{$rec} }) {
+			if ($table eq "room") { $data{$table}{$rec}{'notes'} = $rec; }
+			if ($field ne 'id') {				
+				if ( $ctr == 0 ) {
+					$field_name = $field ;
+					$field_str = "?" ;
+				} else {
+					$field_name = $field_name.", ".$field;
+					$field_str = $field_str.", ?" ;
+				}
+				$field_values[$ctr] = $data{$table}{$rec}{$field};
+				if ( $field eq 'school' || $field eq 'event' || $field eq 'entry' || $field eq 'student' ) {
+					$field_values[$ctr] = $data{$field}{ $data{$table}{$rec}{$field} }{'id'};
+				}
+				$field_values[$ctr] = $site_id if $field eq 'site';
+				$field_values[$ctr] = $trpc_category if $field eq 'category';
+				$field_values[$ctr] = $tourn_id if $field eq 'tourn';
+				$ctr++;
+			}
 		}
-	}
-	print "All updated!" if $all_updated;
-	last if $all_updated;
-	
-	foreach my $table (sort keys %data) {
-	
-		next if $table_updated{$table};
-			
-		foreach my $rec (sort keys %{ $data{$table} }) {
-
-				#don't do the insert if this depend on another table that needs inserting first
-				$skip_for_now = 0;
-				foreach my $field (sort keys %{ $data{$table}{$rec} }) {
-					if ( $data{$field} && $table_updated{$field} == 0 ) {
-						print $table." depends on another table called ".$field." that has not yet been updated<br>";
-						$skip_for_now = 1;
-					}
-				}
-				last if $skip_for_now;
-	
-				$ctr=0;
-				my @field_values;
-				foreach my $field (sort keys %{ $data{$table}{$rec} }) {
-					if ($field ne 'id') {
-						if ( $ctr == 0 ) {
-							$field_name = $field ;
-							$field_str = "?" ;
-						} else {
-							$field_name = $field_name.", ".$field;
-							$field_str = $field_str.", ?" ;
-						}
-						$field_values[$ctr] = $data{$table}{$rec}{$field};
-						unless ( $table eq 'score' && $field eq 'tiebreak' ) {
-							$field_values[$ctr] = $data{$field}{ $data{$table}{$rec}{$field} }{'id'} if $data{$field} && $data{$table}{$rec}{$field} ;
-							if ( $table eq 'score' && $field eq 'tiebreak' ) { print "Why the hell are you here?<br>"; }
-						}
-						if ($table eq 'strike' && $field eq 'shift' ) {
-							$field_values[$ctr] = $data{'timeslot'}{ $data{$table}{$rec}{$field} }{'id'};
-						}
-						#I have no idea why I have to do this but it catches null values
-						if ($table eq 'rating_tier' && $field eq 'strike') { 
-							$field_values[$ctr] = 0 unless $field_values[$ctr];
-						}
-						$field_values[$ctr] = $tourn_id if $field eq 'tourn' ;
-						$ctr++;
-					}
-				}
-				
-				$sql = 'INSERT INTO '.$table.' ('.$field_name.') VALUES ('.$field_str.')' ;
-				my $sth = $dbh->prepare( $sql );
-				$sth->execute(@field_values);
-				#Now grab the current id and store it in the hash
-				$data{$table}{$rec}{'id'} = $dbh->{'mysql_insertid'};
-				if ( $table eq 'entry_student' ) {
-					print $sql;
-					foreach my $fld_val (@field_values) {
-						print " ".$fld_val;
-					}
-					print "<br>";
-				}
-				$table_updated{$table} = 1;
+		$sql = 'INSERT INTO '.$table.' ('.$field_name.') VALUES ('.$field_str.')' ;
+		my $sth = $dbh->prepare( $sql );
+		$sth->execute(@field_values);
+		$data{$table}{$rec}{'id'} = $dbh->{'mysql_insertid'};
+		print $sql."<br>";
+		if ($i <= 2 ) {
+			$sql = 'INSERT INTO '.$table.'_setting (tag, value, '.$table.') VALUES ( ?, ?, ? )' ;
+			$sth = $dbh->prepare( $sql );
+			$sth->execute( "trpc_id", $rec, $data{$table}{$rec}{'id'} );
+			#print $sql."<br>";
 		}
-		print "$table updated=".$table_updated{$table}."<br>";
 	}
 }
 
-print "Time to create records:"; printf("%.2f\n", time() - $start) ; print "<br>";
+print "Time to finish save records:"; printf("%.2f\n", time() - $start) ; print "<br>";
 
 #clean up the speaker tiebreak settings
 foreach my $rec (sort keys %{ $data{'event_setting'} }) {
@@ -300,25 +581,12 @@ foreach my $rec (sort keys %{ $data{'strike'} }) {
 		$sth->execute();
 	}
 }
-print "Time to update times in timeslot_strikes:"; printf("%.2f\n", time() - $start) ; print "<br>";
+print "DONE! Time to update times in timeslot_strikes:"; printf("%.2f\n", time() - $start) ; print "<br>";
 
-#add a tourn setting so it doesn't freak out
-$sql = "INSERT INTO tourn_setting (tourn, tag, value) VALUES ($tourn_id, 'refund_information', 0)";
-$sth = $dbh->prepare( $sql ) ;
-$sth->execute();
-
-print "And now we're done!";
+print "You have now updated the event, entry, room, and entry_student tables.  You now need to upload the actual data in each event one at a time<br>";
 
 my $err = "tourn ". $tourn->name ." has been completely deleted and from a backup (restored using the non-native backup function) by ".$person->first." ".$person->last;
 
-my $change = Tab::ChangeLog->create({
-    tourn       => $tourn->id,
-    person      => $person->id,
-    type        => "tabbing",
-    description => $err
-
-}); 
-
-$m->redirect("/setup/tourn/main.mhtml?msg=Data restored");
+#$m->redirect("/setup/tourn/main.mhtml?msg=Data restored");
 
 </%init>

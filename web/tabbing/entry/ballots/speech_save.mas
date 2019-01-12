@@ -30,8 +30,14 @@
 
 	my @ballots;
 
+	BALLOT:
 	foreach my $ballot (@all_ballots) { 
 		next unless $ballot->entry;
+		if ($ballot->entry->dropped) { 
+			$ballot->audit(1);
+			$ballot->update();
+			next BALLOT;
+		}
 		push @ballots, $ballot;
 	}
 
@@ -112,7 +118,7 @@
 				if $points_taken{$points} && $point_ties < 1;
 
 			$ballot_errs{$ballot->id} .= "<p>Points $points are outside of range</p>" 
-				if $points < $min_points || $points > $max_points;
+				if $points < $min_points || ($points > $max_points && $points != $truncate_fill);
 
 			$points_taken{$points}++;
 			$scores{$ballot->id."_points"} = $points;
@@ -151,7 +157,7 @@
 
 			$ballot_errs{$ballot->id} .= "<p>Rank $rank is outside of range.</p>" 
 				if $rank < 1 
-				|| $rank > scalar @ballots;
+				|| ($rank > scalar @ballots && $rank != $truncate_fill);
 
 			$rank_taken{$rank}++;
 			$scores{$ballot->id."_rank"} = $rank;
@@ -191,183 +197,178 @@
 		$m->redirect("/tabbing/entry/index.mhtml?timeslot_id=".$round->timeslot->id."&judge_id=$judge_id&flight=".$panel->flight."&errs=$all_errs&err=Trouble in Paradise!");
 	}
 
-	foreach my $ballot (@ballots) { 
+	my $ballot_err;
 
-		my $ballot_err;
+	my $audit_method = $event->category->setting("audit_method");
+	$audit_method = "twice" unless $audit_method;
 
-		my $audit_method = $event->category->setting("audit_method");
-		$audit_method = "twice" unless $audit_method;
+	my $audit = 0;
+	$audit = 1 if $audit_method eq "none";
 
-		my $audit = 0;
-		$audit = 1 if $audit_method eq "none";
+	my $shenanigan;
 
-		my $shenanigan;
+	if (@scores && $audit_method eq "twice") { 
 
-		if (@scores && $audit_method eq "twice") { 
+		my %ballot_rank;
+		my %ballot_points;
 
-			my %ballot_rank;
-			my %ballot_points;
+		foreach my $bv (@scores) { 
+			$ballot_rank{$bv->ballot->id} = $bv->value 
+				if $bv->tag eq "rank";
 
-			foreach my $bv (@scores) { 
-				$ballot_rank{$bv->ballot->id} = $bv->value 
-					if $bv->tag eq "rank";
+			$ballot_points{$bv->ballot->id} = $bv->value 
+				if $bv->tag eq "points";
+		}
 
-				$ballot_points{$bv->ballot->id} = $bv->value 
-					if $bv->tag eq "points";
-			}
+		foreach my $ballot (@ballots) { 
+			$ballot_err = "Time violations differed for results" 
+				if $ballot->tv != $ballot_tv{$ballot->id};
 
+			$ballot_err = "No-shows differed for results" 
+				if $ballot->forfeit != $ballot_forfeit{$ballot->id};
+		}
+
+		if ($tb_types{"ranks"}) { 
 			foreach my $ballot (@ballots) { 
-				$ballot_err = "Time violations differed for results" 
-					if $ballot->tv != $ballot_tv{$ballot->id};
 
-				$ballot_err = "No-shows differed for results" 
-					if $ballot->forfeit != $ballot_forfeit{$ballot->id};
+				next if $ballot_rank{$ballot->id} == $scores{$ballot->id."_rank"};
+
+				$ballot_err .= "Ranks for ".$ballot->entry->code." differed from first entry ";
+				$ballot_err .= $scores{$ballot->id."_rank"}." vs ". $ballot_rank{$ballot->id} ."<br />";
 			}
+		}
 
-			if ($tb_types{"ranks"}) { 
+		if ($tb_types{"points"}) { 
+			foreach my $ballot (@ballots) {   
+				next if $ballot_points{$ballot->id} == $scores{$ballot->id."_points"};
+				$ballot_err .= "Points for ".$ballot->entry->code." differed from first entry ";
+				$ballot_err .= $scores{$ballot->id."_points"}." vs ".$ballot_points{$ballot->id}." <br />";
+			}
+		}
+
+		$audit = 2 unless ($ballot_err); 
+
+		if ($audit) { 
+
+			unless ($person->site_admin || $tourn->id == 9700) { 
 				foreach my $ballot (@ballots) { 
-
-					next if $ballot_rank{$ballot->id} == $scores{$ballot->id."_rank"};
-
-					$ballot_err .= "Ranks for ".$ballot->entry->code." differed from first entry ";
-					$ballot_err .= $scores{$ballot->id."_rank"}." vs ". $ballot_rank{$ballot->id} ."<br />";
-				}
-			}
-
-			if ($tb_types{"points"}) { 
-				foreach my $ballot (@ballots) {   
-					next if $ballot_points{$ballot->id} == $scores{$ballot->id."_points"};
-					$ballot_err .= "Points for ".$ballot->entry->code." differed from first entry ";
-					$ballot_err .= $scores{$ballot->id."_points"}." vs ".$ballot_points{$ballot->id}." <br />";
-				}
-			}
-
-			undef $ballot_err if $ballot->entry->dropped;
-
-			$audit = 2 unless ($ballot_err); 
-
-			if ($audit) { 
-
-				unless ($person->site_admin) { 
-
-					foreach my $ballot (@ballots) { 
-						next if $ballot->entered_by && $person->id != $ballot->entered_by->id;
-						$ballot_err = "You did the first entry for that ballot, and thus are not permitted to do the second. <br/>";
-						$shenanigan++;
-					}
-				}
-			}
-
-		} 
-
-		unless ($audit == 2) { 
-
-			#Clear the old cruft
-
-			Tab::Score->set_sql( clear_cruft => "
-				delete score.*
-				from score, ballot
-				where ballot.panel = ?
-				and ballot.judge = ? 
-				and (
-						score.tag = 'rank' 
-						or score.tag = 'points' 
-						or score.tag = 'ballot'
-					) 
-				and ballot.id = score.ballot");
-
-			Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id);
-
-		}
-
-		unless ($shenanigan) { 
-
-			foreach my $ballot (@ballots) { 
-
-				$ballot->audit(0);
-
-				if ($audit >= 1) { 
-					$ballot->audit(1);
-					$panel->started($now) unless $panel->started;
-					$panel->confirmed($now) unless $panel->confirmed;
-					$ballot->audited_by($person->id);
-					$panel->update;
-				} else { 
-					$ballot->entered_by($person->id);
-				}
-
-				if ($ballot->entry->dropped) { 
-					$ballot->audit(1);
-				}
-
-				$ballot->tv($ballot_tv{$ballot->id});
-				$ballot->forfeit($ballot_forfeit{$ballot->id});
-
-				$ballot->update;
-		
-				unless ($audit == 2) { 
-
-					if ($tb_types{"points"} && defined ($scores{$ballot->id."_points"})) { 
-
-						eval { 
-
-							unless (
-								Tab::Score->search( 
-									ballot => $ballot->id,
-									tag    => "points" 
-								)
-							) {
-
-								Tab::Score->create({
-									ballot   => $ballot->id,
-									tag      => "points",
-									tiebreak => 3,
-									value    => $scores{$ballot->id."_points"},
-									student  => 0
-								});
-							}
-						};
-
-					}
-
-					if ($tb_types{"ranks"} && defined ($scores{$ballot->id."_rank"})) { 
-
-						eval { 
-							unless (Tab::Score->search( 
-								ballot => $ballot->id,
-								tag    => "rank" )
-							) {
-								Tab::Score->create({
-									ballot   => $ballot->id,
-									tag      => "rank",
-									tiebreak => 1,
-									value    => $scores{$ballot->id."_rank"},
-									student  => 0
-								});
-							}
-						};
-					}
+					next unless $ballot->entered_by;
+					next if $ballot->entered_by && $person->id != $ballot->entered_by->id;
+					$ballot_err = "You did the first entry for that ballot, and thus are not permitted to do the second. <br/>";
+					$shenanigan++;
 				}
 			}
 		}
 
-		my $yellowmsg;
-		my $greenmsg;
-		my $err;
+	} 
 
-		if ($ballot_err) { 
-			$err = "Trouble in paradise!";
-		} else { 
-			$yellowmsg = "Ballot first entry complete.  Ready for a doublecheck" unless $audit > 0;
-			$greenmsg = "Ballot entry complete." if $audit > 0;
-		}
+	unless ($audit == 2) { 
 
-		my $next_code = $ARGS{"next_code"};
+		#Clear the old cruft
 
-		$m->comp("/funclib/round_done.mas", round => $round);
+		Tab::Score->set_sql( clear_cruft => "
+			delete score.*
+			from score, ballot
+			where ballot.panel = ?
+			and ballot.judge = ? 
+			and (
+					score.tag = 'rank' 
+					or score.tag = 'points' 
+					or score.tag = 'ballot'
+				) 
+			and ballot.id = score.ballot");
 
-		$m->redirect("/tabbing/entry/index.mhtml?timeslot_id=".$round->timeslot->id."&judge_code=$next_code&greenmsg=$greenmsg&yellowmsg=$yellowmsg&err=$err&ballot_err=$ballot_err");
+		Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id);
 
 	}
+
+	unless ($shenanigan) { 
+
+		foreach my $ballot (@ballots) { 
+
+			$ballot->audit(0);
+
+			if ($audit >= 1) { 
+				$ballot->audit(1);
+				$panel->started($now) unless $panel->started;
+				$panel->confirmed($now) unless $panel->confirmed;
+				$ballot->audited_by($person->id);
+				$panel->update;
+			} else { 
+				$ballot->entered_by($person->id);
+			}
+
+			if ($ballot->entry->dropped) { 
+				$ballot->audit(1);
+			}
+
+			$ballot->tv($ballot_tv{$ballot->id});
+			$ballot->forfeit($ballot_forfeit{$ballot->id});
+
+			$ballot->update;
+	
+			unless ($audit == 2) { 
+
+				if ($tb_types{"points"} && defined ($scores{$ballot->id."_points"})) { 
+
+					eval { 
+
+						unless (
+							Tab::Score->search( 
+								ballot => $ballot->id,
+								tag    => "points" 
+							)
+						) {
+
+							Tab::Score->create({
+								ballot   => $ballot->id,
+								tag      => "points",
+								tiebreak => 3,
+								value    => $scores{$ballot->id."_points"},
+								student  => 0
+							});
+						}
+					};
+
+				}
+
+				if ($tb_types{"ranks"} && defined ($scores{$ballot->id."_rank"})) { 
+
+					eval { 
+						unless (Tab::Score->search( 
+							ballot => $ballot->id,
+							tag    => "rank" )
+						) {
+							Tab::Score->create({
+								ballot   => $ballot->id,
+								tag      => "rank",
+								tiebreak => 1,
+								value    => $scores{$ballot->id."_rank"},
+								student  => 0
+							});
+						}
+					};
+				}
+			}
+		}
+	}
+
+	my $yellowmsg;
+	my $greenmsg;
+	my $err;
+
+	if ($ballot_err) { 
+		$err = "Trouble in paradise!";
+	} else { 
+		$yellowmsg = "Ballot first entry complete.  Ready for a doublecheck" unless $audit > 0;
+		$greenmsg = "Ballot entry complete." if $audit > 0;
+	}
+
+	my $next_code = $ARGS{"next_code"};
+
+	$m->comp("/funclib/round_done.mas", round => $round);
+
+	$m->redirect("/tabbing/entry/index.mhtml?timeslot_id=".$round->timeslot->id."&judge_code=$next_code&greenmsg=$greenmsg&yellowmsg=$yellowmsg&err=$err&ballot_err=$ballot_err");
+
 
 </%init>

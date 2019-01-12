@@ -1,0 +1,159 @@
+<%args>
+	$panel_id => undef
+</%args>
+<%init>
+
+	use List::Util 'shuffle';
+
+	my $now = DateTime->now();
+
+	Tab::Round->set_sql( pending => "
+		select round.*
+		from round, round_setting
+		where round.id = round_setting.round
+		and round_setting.tag = 'strikes_published'
+		and round_setting.value = 1
+		and round.published != 1
+		order by round.start_time
+	");
+
+	foreach my $round ( Tab::Round->search_pending() ) { 
+
+		my $limit  = $round->setting("strikes");
+		next unless $limit;
+
+		my $auto   = $round->setting("strikes_auto");
+		my $target = $round->setting("strikes_panel_size");
+		my $due    = $round->setting("strikes_due");
+
+		my %struck_panels = eval { 
+			return %{JSON::decode_json($round->setting("strike_panels"))};
+		};
+
+		my $after;
+		$after++ if $due < $now;
+
+		my $undone;
+
+		foreach my $panel ($round->panels()) { 
+			next if $panel->bye();
+
+			next if $struck_panels{$panel->id};
+			my $result = process_panel($panel, $limit, $auto, $target, $after);
+
+			if ($result) {  
+				$struck_panels{$panel->id}++;
+			} else { 
+				$undone++;
+			}
+		}
+
+		$round->setting("strike_panels", "text", JSON::encode_json(\%struck_panels));
+
+		if ($auto && (not defined $undone)) { 
+
+			$round->published(1);
+			$round->update();
+			$round->setting("strikes_published", 0);
+
+			eval { 
+				$m->comp("/panel/schemat/blast.mhtml", 
+					scheduled => 1,
+					tourn     => $round->event->tourn,
+					round_id  => $round->id,
+					confirm   => "yup"
+				);
+			
+				$round->setting("blasted", "date", $now);
+			};
+
+		}
+
+
+	}
+
+	sub process_panel { 
+
+		my ($panel, $limit, $auto, $target, $after) = @_; 
+		my %entry_strike_count = ();
+		my %the_struck = ();
+
+		foreach my $ballot ($panel->ballots) { 
+
+			my $did;
+
+			if ($ballot->scores(tag => "no_strike")) { 
+				$entry_strike_count{$ballot->entry->id} = $limit;
+				$did++;
+			} 
+
+			if ($ballot->scores(tag => "strike")) { 
+				$the_struck{$ballot->judge->id}++;
+				$entry_strike_count{$ballot->entry->id}++;
+				$did++;
+			}
+
+			unless ($did || (defined $entry_strike_count{$ballot->entry->id})) { 
+				$entry_strike_count{$ballot->entry->id} = 0;
+			}
+		}
+
+		foreach my $entry_id (keys %entry_strike_count) { 
+
+			if ( 
+				($entry_strike_count{$entry_id} < $limit) 
+				&& (not defined $after)
+			) { 
+				return;
+			}
+		}
+
+		my @judges;
+
+		foreach my $judge ($m->comp("/funclib/panel_judges.mas", panel => $panel)) { 
+
+			if ($the_struck{$judge->id}) { 
+
+				$m->comp("/funclib/judge_rm.mas", 
+					judge => $judge,
+					panel => $panel,
+				);
+
+			} else { 
+				push @judges, $judge;
+			}
+		}
+
+		if ($auto) { 
+
+			if ($target) { 
+
+				while ( (scalar @judges) > $target ) { 
+				
+					@judges = shuffle(@judges);
+					my $rando = shift @judges;
+
+					$m->comp("/funclib/judge_rm.mas", 
+						judge => $rando,
+						panel => $panel,
+					);
+				}
+			}
+
+			unless ( (scalar @judges) % 2 || (scalar @judges < 1) ) { 
+
+				@judges = shuffle(@judges);
+				my $rando = shift @judges;
+					
+				$m->comp("/funclib/judge_rm.mas", 
+					judge => $rando,
+					panel => $panel,
+				);
+
+			}
+		}
+
+		return 1;
+	}
+
+</%init>

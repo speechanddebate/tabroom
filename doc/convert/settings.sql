@@ -1,32 +1,32 @@
-alter table tabroom.tourn_setting add setting int; 
-alter table tabroom.judge_group_setting add setting int; 
-alter table tabroom.judge_setting add setting int; 
-alter table tabroom.event_setting add setting int; 
-alter table tabroom.entry_setting add setting int; 
-alter table tabroom.round_setting add setting int; 
-alter table tabroom.circuit_setting add setting int; 
-alter table tabroom.account_setting add setting int; 
-alter table tabroom.jpool_setting add setting int; 
-alter table tabroom.rpool_setting add setting int; 
-alter table tabroom.tiebreak_setting add setting int; 
-alter table tabroom.school_setting add setting int; 
+
+drop table if exists setting; 
+drop table if exists setting_header; 
+drop table if exists setting_label;
+
+create table `setting_header` ( 
+	id int NOT NULL AUTO_INCREMENT,
+	tab varchar(31) NOT NULL,
+	tag varchar(31) NOT NULL, 
+	sort_order SMALLINT,
+	timestamp timestamp,
+	PRIMARY KEY (`id`),
+	UNIQUE KEY `tag_constraint` (`tag`),
+	UNIQUE KEY `order_constraint` (`tab`, `sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 create table `setting` ( 
 	id int NOT NULL AUTO_INCREMENT,
-
 	tag varchar(31) NOT NULL,
-
-	type varchar(31) NOT NULL,
-	subtype varchar(31) NOT NULL,
-
-	value_type enum("text", "string", "bool", "integer", "float", "datetime", "enum"),
-
-	conditions text,
+	sort_order SMALLINT,
+	answer_type enum("text", "string", "bool", "integer", "float", "datetime", "enum"),
+	answer text,
+	conditional_on varchar(31),
+	conditional_value varchar(31),
+	setting_header int not null,
 	timestamp timestamp,
-
 	PRIMARY KEY (`id`),
 	UNIQUE KEY `tag` (`tag`),
-	KEY `category` (`type`)
+	KEY `setting_header` (`setting_header`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 create table `setting_label` ( 

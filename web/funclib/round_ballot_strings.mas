@@ -12,16 +12,26 @@
 		return;
 	}
 
+	my $event = $round->event;
+	my $type = $event->type;
+
+	my $points = $event->setting("point_increments");
+	my $sprintf;
+
+	if ($points eq "fourths") { 
+		$sprintf = '%.2f';
+	} elsif ( $points eq "half" || $points eq "tenths") { 
+		$sprintf = '%.1f';
+	} else { 
+		$sprintf = '%3d';
+	}
+
 	unless ($round->tiebreak_set) { 
 		my $err = "That round does not have tiebreakers set.  ";
 		$err .= "Please establish tiebreakers for all rounds";
 
-		$m->redirect("/setup/schedule/event.mhtml?event_id=".$round->event->id."&err=$err");
+		$m->redirect("/setup/schedule/event.mhtml?event_id=".$event->id."&err=$err");
 	}
-
-	use Data::Dumper;
-
-	my $type = $round->event->type;
 
 	my %tb_types = $m->comp(
 		"/funclib/tiebreak_types.mas", 
@@ -31,12 +41,13 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $sth = $dbh->prepare("
-		select value.id, value.tag, value.value, 
+		select score.id, score.tag, score.value, score.student,
 			ballot.entry, ballot.judge, 
 			panel.bye, ballot.bye, ballot.forfeit, ballot.chair, 
-			round.id, round.name, round.type
+			round.id, round.name
 		from (ballot, panel, round)
-		left join score value on value.ballot = ballot.id
+		left join score on score.ballot = ballot.id
+			and score.tag in ('ballot', 'rank', 'points', 'rebuttal_points')
 		where ballot.panel = panel.id
 		and panel.round = round.id
 		and round.name <= ?
@@ -46,94 +57,172 @@
 				from round_setting where round_setting.tag = 'ignore_results' 
 				and round_setting.round = round.id
 			)
-		order by round.name, ballot.entry, ballot.chair, ballot.judge, 
-
-			CASE value.tag 
-
-				WHEN 'ballot' then 1 
-				when 'rank' then 2 
-				when 'points' then 3 
-				when 'rebuttal_points' then 4 
-				end
+		order by round.name, ballot.entry, ballot.chair, ballot.judge, score.student
 	");
 
 	$round_name = int($round_name);
 	$round_name = $round->name unless $round_name;
+	$sth->execute($round_name, $event->id); 
 
-	$sth->execute($round_name, $round->event->id); 
-
-	my %entry_round;
-	my %entry_ballots;
-	my $last_round;
-
+	my %rounds;
+	my %entries;
 	my %done;
 
-	while (my (
-		$id, $tag, $value, $entryid, $judge, 
-		$pbye, $bye, $fft, $chair, 
-		$roundid, $roundname, $roundtype
+	while (
+		my (
+			$id, $tag, $value, $student,
+			$entry_id, $judge_id, 
+			$pbye, $bye, $fft, $chair, 
+			$round_id, $roundname
+		) = $sth->fetchrow_array() 
+	) { 
 
-	) = $sth->fetchrow_array() ) { 
-
-		if ($roundname != $entry_round{$entryid}) { 
-			if ($simple) { 
-				$entry_ballots{$entryid} .= " - " if $entry_ballots{$entryid};
-			} elsif ($delimiter) { 
-				$entry_ballots{$entryid} .= " ".$delimiter." " if $entry_ballots{$entryid};
-			} else { 
-				$entry_ballots{$entryid} .= " \n R$roundname:";
-			}
-
-			if ($entries_ref 
-				&& $entries_ref->{"used_composite"}{$entryid}{$roundid}
-			) { 
-				$entry_ballots{$entryid} .= " Comp ".$entries_ref->{"used_composite"}{$entryid}{$roundid}." - ";
-			}
-		}
+		next if $done{$id}++;
 
 		unless ($tag) { 
+
 			if ($pbye || $bye) { 
-				$entry_ballots{$entryid} .= " B ";
+				$entries{$entry_id}{$round_id}{"full"} = "BYE ";
 			} elsif ($fft) { 
-				$entry_ballots{$entryid} .= " F "; 
-			}
-			$entry_ballots{$entryid} .= " ";
+				$entries{$entry_id}{$round_id}{"full"} = "FORFEIT ";
+			} 
+
+			next;
+		} 
+
+		if ($tag eq "points") { 
+			$value = sprintf($sprintf, $value);
 		}
+
+		$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= "," 
+			if $entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag};
+
+		$rounds{$round_id} = $roundname;
 
 		if ($tag eq "ballot") { 
-
-			$entry_ballots{$entryid} .= " " if $roundname != $entry_round{$entryid};
-
-			if ($pbye || $bye) { 
-				$entry_ballots{$entryid} .= "B"; 
-			} elsif ($fft) { 
-				$entry_ballots{$entryid} .= "F";
-			} else { 
-				$entry_ballots{$entryid} .= "W" if $value > 0;
-				$entry_ballots{$entryid} .= "L" if $value < 1;
-			}
-
-		} elsif ($type eq "speech" && $tag eq "rank") { 
-
-			$entry_ballots{$entryid} .= " ";
-			$entry_ballots{$entryid} .= " ".$value unless $value == -1;
-
-		} elsif ($tb_types{"ranks"} && $tag eq "rank") {
-
-			$entry_ballots{$entryid} .= " ".$value unless $value == -1;
-
-		} elsif ($tb_types{"points"} && $tag eq "points") {
-
-			$entry_ballots{$entryid} .= " ".$value unless $value == -1;
-
-		} elsif ($tb_types{"points"} && $tag eq "rebuttal_points") {
-
-			$entry_ballots{$entryid} .= " ".$value unless $value == -1;
-
+			$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= " W " if $value; 
+			$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= " L " unless $value;
+		} else { 
+			$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= " " 
+				if $entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag};
+			$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= $value;
+			$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= '*'
+				if $type eq "congress" && $chair;
 		}
 
-		$entry_round{$entryid} = $roundname;
+		$entries{$entry_id}{$round_id}{"total"}{$tag} = 0 
+			unless $entries{$entry_id}{$round_id}{"total"}{$tag};
 
+		$entries{$entry_id}{$round_id}{"total"}{$tag} += $value;
+		$entries{$entry_id}{$round_id}{"total"}{"points"} += $value
+			if $tag eq "rebuttal_points";
+
+		$entries{$entry_id}{$round_id}{"chair"} += $value if $chair;
+		$entries{$entry_id}{$round_id}{"students"}{$student}++ if $student;
+
+	}
+
+	if ($entries_ref) { 
+		foreach my $entry_id (keys %entries) { 
+			foreach my $round_id (keys %{$entries{$entry_id}}) { 
+				if ($entries_ref->{"used_composite"}{$entry_id}{$round_id}) { 
+					$entries{$entry_id}{$round_id}{"composite"}
+						= $entries_ref->{"used_composite"}{$entry_id}{$round_id};
+				}
+			}
+		}
+	}
+
+	my %entry_ballots; 
+
+	my @scores; 
+
+	if ($type eq 'speech' || $type eq "congress") { 
+		@scores = ("ballot", "rank", "points");
+	} elsif ($type eq "wudc") { 
+		@scores = ("ballot", "points", "rebuttal_points", "rank");
+	} else { 
+		@scores = ("ballot", "points", "rank");
+	}
+
+	foreach my $entry_id (keys %entries) { 
+
+		Tab::debuglog("Calculating entry $entry_id") if $entry_id == 1776685;
+
+		foreach my $round_id (
+			sort {$rounds{$a} <=> $rounds{$b}}
+			keys %{$entries{$entry_id}}
+		) { 
+
+			$entry_ballots{$entry_id} .= "\n";
+			$entry_ballots{$entry_id} .= "R".$rounds{$round_id};
+
+			foreach (length($rounds{$round_id}) .. 2) { 
+				$entry_ballots{$entry_id} .= " ";
+			}
+
+			if ($entries{$entry_id}{$round_id}{"full"}) { 
+				$entry_ballots{$entry_id} .=  $entries{$entry_id}{$round_id}{"full"}." ";
+			}
+
+			foreach my $judge_id (sort keys %{$entries{$entry_id}{$round_id}{'judges'}}) { 
+				foreach my $tag (@scores) { 
+					if ($entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag}) { 
+						$entry_ballots{$entry_id} .= " ".$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag};
+			
+						if ($entry_id == 1776685) { 
+							Tab::debuglog("Giving entry $tag score with value");
+							Tab::debuglog($entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag});
+						}
+					}
+				}
+			}
+
+			if (defined $entries{$entry_id}{$round_id}{"total"}{"ballot"}) { 
+				if (scalar (keys %{$entries{$entry_id}{$round_id}{'judges'}}) > 1) { 
+
+					my $judges = scalar (keys %{$entries{$entry_id}{$round_id}{"judges"}});
+					my $wins = $entries{$entry_id}{$round_id}{"total"}{"ballot"};
+					my $remainder = $judges - $wins;
+
+					$entry_ballots{$entry_id} .= " (";
+					$entry_ballots{$entry_id} .= $wins."-";
+					$entry_ballots{$entry_id} .= $remainder;
+					$entry_ballots{$entry_id} .= ")";
+				}
+			}
+
+			if (
+				scalar (keys %{$entries{$entry_id}{$round_id}{"students"}}) > 1
+				|| scalar (keys %{$entries{$entry_id}{$round_id}{'judges'}}) > 1
+			) { 
+		
+				my $notfirst;
+
+				foreach my $tag (@scores) { 
+					next if $tag eq "rebuttal_points";
+					next if $tag eq "ballot";
+					next unless $entries{$entry_id}{$round_id}{"total"}{$tag};
+
+					my $value = $entries{$entry_id}{$round_id}{"total"}{$tag};
+					$value = sprintf($sprintf, $value) if $tag eq "points";
+
+					if ($notfirst++) { 
+						$entry_ballots{$entry_id} .= ",";
+					} else { 
+						$entry_ballots{$entry_id} .= " (";
+					}
+
+					$entry_ballots{$entry_id} .= $value;
+				}
+
+				$entry_ballots{$entry_id} .= ") " if $notfirst;
+			}
+
+			if ($entries{$entry_id}{$round_id}{"composite"}) { 
+				$entry_ballots{$entry_id} .= " Comp: ".$entries{$entry_id}{$round_id}{"composite"};
+			}
+		}
 	}
 
 	return %entry_ballots;
