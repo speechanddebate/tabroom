@@ -4,7 +4,7 @@ Tab::Student->table('student');
 Tab::Student->columns(Primary => qw/id/);
 Tab::Student->columns(Essential => qw/person first middle last chapter novice 
 									 grad_year retired gender person_request diet/);
-Tab::Student->columns(Other => qw/timestamp phonetic race birthdate school_sid ualt_id/);
+Tab::Student->columns(Other => qw/timestamp phonetic race birthdate school_sid ualt_id nsda/);
 Tab::Student->columns(TEMP => qw/code entry event school region status/);
 
 Tab::Student->has_a(chapter => 'Tab::Chapter');

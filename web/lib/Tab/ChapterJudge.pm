@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::ChapterJudge->table('chapter_judge');
 Tab::ChapterJudge->columns(Primary => qw/id/);
 Tab::ChapterJudge->columns(Essential => qw/first middle last ada retired phone email 
-											diet notes notes_timestamp gender ualt_id
+											diet notes notes_timestamp gender ualt_id nsda
 										    chapter person person_request timestamp/);
 
 Tab::ChapterJudge->has_a(chapter => 'Tab::Chapter');
