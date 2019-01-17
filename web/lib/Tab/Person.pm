@@ -4,12 +4,11 @@ use base 'Tab::DBI';
 Tab::Person->table('person');
 Tab::Person->columns(Primary   => qw/id/);
 
-Tab::Person->columns(Essential => qw/email first middle last phone ualt_id 
-									 provider site_admin /);
+Tab::Person->columns(Essential => qw/email first middle last phone provider site_admin /);
 
 Tab::Person->columns(Others    => qw/street city state zip country postal
                                    gender pronoun no_email tz diversity 
-								   timestamp googleplus/);
+									ualt_id nsda timestamp googleplus/);
 
 Tab::Person->columns(TEMP => qw/prefs student_id judge_id/);
 
