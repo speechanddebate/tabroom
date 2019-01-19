@@ -1,0 +1,144 @@
+<%args>
+	$round    => undef
+	$round_id => undef
+</%args>
+<%init>
+
+	if ($round) { 
+		$round_id = $round->id;
+	} else { 
+		$round = Tab::Round->retrieve($round_id);
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare(" 
+
+		select entry.id, r2.id, b2.side, p2.id
+
+		from (entry, round, panel, ballot, round r2, panel p2, ballot b2)
+
+		where round.id = ? 
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and entry.id = ballot.entry
+
+			and r2.event = round.event
+			and r2.name < round.name
+			and r2.id = p2.round
+			and p2.id = b2.panel
+
+			and b2.entry = entry.id
+
+			and p2.bye != 1
+			and b2.bye != 1
+			and b2.forfeit != 1
+	");
+
+	my %done;
+	my %entries;
+
+	$sth->execute($round->id);
+
+	while (
+		my ($entry, $round, $side, $panel) = $sth->fetchrow_array()
+	) { 
+		next if $done{$entry}{$panel}++;
+		$entries{$entry}{$side}++;
+	}
+
+	$sth = $dbh->prepare(" 
+
+		select entry.id, ballot.side, panel.id, panel.letter, opponent.entry, opponent.side
+
+		from (entry, ballot, panel)
+
+		left join ballot opponent 
+			on opponent.panel = panel.id 
+			and opponent.entry != entry.id
+
+		where panel.round = ? 
+			and panel.id = ballot.panel
+			and ballot.entry = entry.id
+			and (ballot.side = 0
+				or exists ( 
+					select b2.id
+					from ballot b2
+					where b2.entry != ballot.entry
+					and b2.judge = ballot.judge
+					and b2.panel = ballot.panel
+					and b2.side = ballot.side
+				)
+			)
+	");
+
+	$sth->execute($round_id);
+
+	my %panels;
+
+	while (
+		my ($entry_id, $side, $panel, $letter, $opp_entry, $opp_side) = $sth->fetchrow_array
+	) { 
+		$panels{$panel}{$entry_id} = $side;
+	};
+
+	Tab::Ballot->set_sql( update_side => "
+		update ballot 
+		set side = ? 
+		where entry = ?
+		and panel = ? 
+	");
+
+	undef %done;
+
+	foreach my $panel (keys %panels) { 
+
+		next if $done{$panel}++;
+
+		my %status;
+
+		foreach my $entry (keys %{$panels{$panel}}) { 
+
+			if ($entries{$entry}{1} < $entries{$entry}{2}) { 
+
+				$status{$entry}{"aff"} = $entries{$entry}{2} - $entries{$entry}{1};
+
+			} elsif ($entries{$entry}{1} > $entries{$entry}{2}) { 
+
+				$status{$entry}{"neg"} = $entries{$entry}{1} - $entries{$entry}{2};
+			}
+		}
+
+		my $aff;
+		my $aff_score;
+		my $neg;
+		my $neg_score;
+
+		foreach my $entry (keys %{$panels{$panel}}) { 
+
+			if ($status{$entry}{"aff"} > $aff_score) { 
+				$neg = $aff if $aff;
+				$aff = $entry;
+				$aff_score = $status{$entry}{"aff"};
+			} elsif ($status{$entry}{"neg"} > $neg_score) { 
+				$aff = $neg if $neg;
+				$neg = $entry;
+				$neg_score = $status{$entry}{"neg"};
+			} else { 
+				if ($aff) { 
+					$neg = $entry;
+				} else { 
+					$aff = $entry;
+				}
+			}
+
+		}
+
+		Tab::Ballot->sql_update_side->execute(2, $neg, $panel);
+		Tab::Ballot->sql_update_side->execute(1, $aff, $panel);
+
+	}
+
+	return;
+
+</%init>
