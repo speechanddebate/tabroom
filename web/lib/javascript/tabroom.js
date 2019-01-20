@@ -1,7 +1,6 @@
 /* confirmation dialog */
 
 	function confirmAction(link, message, dest, payload) { 
-
 		alertify.confirm(
 			"Are you sure?",
 			message,
