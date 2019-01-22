@@ -1,7 +1,9 @@
 <%args>
 	$round_id
 	$filename
-	$schools => undef
+	$schools        => undef
+	$event_settings => undef
+	$tourn_settings => undef
 </%args>
 <%init>
 
@@ -15,130 +17,183 @@
 	my $event = $round->event;
 	my $tourn = $event->tourn;
 
-	my $flighted = $round->flighted;
+	my $flighted = $round->flighted if $round->flighted > 1;
 
 	my $no_judge_codes++ if	$event->category->setting("no_codes");
 
-	my $ncfl++ if $tourn->setting("ncfl");
+	my $ncfl++ if $tourn_settings->{"ncfl"};
+	undef $schools if $tourn_settings->{"school_codes"} eq "none";
 
-	undef $schools if $tourn->setting("school_codes") eq "none";
-
-	my $code_type = $event->setting("code_style");
-	my $code_style = $event->setting("schem_designation");
-
-	my @panels = sort {$a->letter cmp $b->letter} $round->panels;
-	@panels = sort {length($a->letter) <=> length($b->letter)} @panels;
-
-	if ($flighted > 1) { 
-		@panels = sort {$a->flight <=> $b->flight} $round->panels;
-		my %room_panel = map {$_->id => $_->room->name} @panels;
-		@panels = sort {$room_panel{$a} cmp $room_panel{$b}} @panels;
+	unless ($event_settings) { 
+		%{$event_settings} = $event->all_settings();
 	}
+
+	my $code_type = $event_settings->{"code_style"};
+	my $code_style = $event_settings->{"schem_designation"};
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
+
+	my @panels = $m->comp(
+		"/funclib/round_panels.mas", 
+		round   => $round,
+		sort_by => "room"
+	);
+
+	if ($flighted > 1) { 
+		@panels = sort {$a->flight <=> $b->flight} @panels;
+		my %room_panel = map {$_->id => $_->roomname} @panels;
+		@panels = sort {$room_panel{$a} cmp $room_panel{$b}} @panels;
+	}
 
 	my $start = $round->start_time;
 	$start = $round->timeslot->start unless $start;
 	$start->set_time_zone($tz);
 
+	my $prep_offset;  
+	if ($event_settings->{"prep_offset"}) {  
+		$prep_offset = $start->clone(); 
+		$prep_offset->subtract( minutes => $event_settings->{"prep_offset"}); 
+	}  
+
+	my %flight_start;
+	my $flight_offset = $event_settings->{"flight_offset"};
+
+	if ($flighted && $flight_offset) { 
+		foreach my $flight (1 .. $round->flighted) { 
+			my $offset_time = $start->clone;
+			my $offset_factor = $flight_offset * ($flight - 1);
+			$offset_time->add( minutes => $offset_factor );
+			$flight_start{$flight} = $offset_time;
+		}
+	}
+
 	print TEXOUT "\\sloppy\n";
+	print TEXOUT "\\raggedright\n";
 
 	print TEXOUT "\\indent\n";
-	print TEXOUT "\\LARGE {\\bf ". Tab::texify($round->realname)." } ";
+	print TEXOUT "\\textsb{\\LARGE ". Tab::texify($round->realname)." } ";
 	print TEXOUT "\\hfill";
-	print TEXOUT "\\large Start: ".$start->hour_12.":".$start->strftime("%M")." ".$start->strftime("%p");
-	print TEXOUT " \\hfill \\LARGE {\\bf ".Tab::texify($round->event->name)." } \n";
+
+	print TEXOUT " \\parbox{1.5in}{";
+
+	if ($flighted) { 
+		foreach my $flight (sort keys %flight_start) { 
+			print TEXOUT "{\\large Flight $flight Start: ";
+			print TEXOUT $m->comp("/funclib/showtime.mas", 
+				dt     => $flight_start{$flight},
+				return => 1
+			);
+			print TEXOUT "} \n";
+		}
+	} else { 
+		print TEXOUT "{\\large Start: ";
+		print TEXOUT $m->comp("/funclib/showtime.mas", 
+			dt     => $start,
+			return => 1
+		);
+		print TEXOUT "} \n";
+	}
+
+	if ($prep_offset) { 
+
+		Tab::debuglog("prep offset");
+		print TEXOUT "\n\n";
+		print TEXOUT "{\\normalsize Draw Begins: ";
+		print TEXOUT $m->comp("/funclib/showtime.mas", 
+			dt     => $prep_offset,
+			return => 1
+		);
+		print TEXOUT "} \n";
+	}
+
+	print TEXOUT "} \n";
+
+	print TEXOUT " \\hfill \\textsb{\\LARGE ".Tab::texify($round->event->name)." } \n";
 	print TEXOUT "\\newline\n";
 	print TEXOUT "\\medskip\n";
 	print TEXOUT "\\newline\n";
 
-	my %panel_entries;
-	my %panel_judges;
 	my $max_lines;
+	my %panel_judges;
+	my %panel_entries;
+
+	my @round_judges = $m->comp('/funclib/round_judges.mas', round => $round);
+	my @round_entries = $m->comp('/funclib/round_entries.mas', round => $round);
+
+	my $length;
+	my %entry_codes; 
+
+	foreach my $entry (@round_entries) { 
+		push @{$panel_entries{$entry->panelid}}, $entry;
+
+		if ($schools && $ncfl) { 
+			$entry_codes{$entry->id} .= $entry->regioncode." ";
+		} elsif ($schools) {
+			$entry_codes{$entry->id} .= $entry->schoolcode." ";
+		}
+
+		$entry_codes{$entry->id} .= $entry->code if $code_style ne "names";
+		$entry_codes{$entry->id} .= $entry->name if $code_style ne "codes";
+
+		$length = length($entry_codes{$entry->id}) 
+			if length($entry_codes{$entry->id}) > $length;
+	}
+
+	my $fontplus++ if $length < 7;
+	my %judge_codes;
+
+	foreach my $judge (@round_judges) { 
+
+		push @{$panel_judges{$judge->panelid}}, $judge;
+
+		if ($ncfl) { 
+			$judge_codes{$judge->id} .= $judge->regioncode." ";
+		} elsif ($judge->schoolcode) { 
+			$judge_codes{$judge->id} .= $judge->schoolcode." ";
+		}
+
+		$judge_codes{$judge->id} .= $judge->code." ".$judge->last if $judge->code;
+		$judge_codes{$judge->id} .= $judge->first." ".$judge->last unless $judge->code;
+
+		$length = length($judge_codes{$judge->id}) 
+			if length($judge_codes{$judge->id}) > $length;
+	}
 
 	foreach my $panel (@panels) {
-
-		push @{$panel_judges{$panel->id}}, $m->comp(
-			"/funclib/panel_judges.mas", 
-			panel => $panel
-		);
-
-		push @{$panel_entries{$panel->id}}, $m->comp(
-			"/funclib/panel_entries.mas", 
-			panel    => $panel,
-			no_drops => 1);
-
 		my $lines = scalar @{$panel_judges{$panel->id}};
 		$lines += scalar @{$panel_entries{$panel->id}};
 		$lines++;
-
 		$max_lines = $lines if $lines > $max_lines;
 	}
 
-	my $height = .17 * $max_lines;
-	$height = .19 * $max_lines if $code_style eq "codes"; 
-
-	my $width0 = 1.5;
-	my $width1 = 1.3;
-	my $width2 = 1.2;
-
-	if ($code_style eq "both") { 
-
-		$width0 = 1.9;
-		$width1 = 1.7;
-		$width2 = 1.5;
-
-	} elsif ($code_style eq "codes") { 
-
-		$width0 = 1.4;
-		$width1 = 1.2;
-		$width2 = 1.0;
-	}
-
-	$fontsize = "scriptsize";
-	
-	if (scalar @panels < 10) { 
-		$fontsize = "small";
-		$width0 = $width0 * 1.3;
-		$width1 = $width1 * 1.3;
-		$width2 = $width2 * 1.3;
-		$height = $height * 1.2;
-	}
-
-	if (scalar @panels < 8) { 
-		$fontsize = "large";
-		$width0 = $width0 * 1.5;
-		$width1 = $width1 * 1.5;
-		$width2 = $width2 * 1.5;
-		$height = $height * 1.3;
-	}
-
-	$fontsize = $ARGS{"fontsize"} if $ARGS{"fontsize"} && $ARGS{"fontsize"} ne "default";
+	my $height = .24 * $max_lines;
+	$fontsize = $ARGS{"fontsize"};
+	$fontsize = "small" if $fontsize eq "default";
 
 	print TEXOUT "\\$fontsize\n";
 
 	foreach my $panel (@panels) {
 
-		print TEXOUT "\\parbox[t][".$height."in][t]{".$width0."in}{";
+		print TEXOUT "\\parbox[t][][t]{".$length."ex}{";
 
-		print TEXOUT Tab::texify($panel->letter)." -- ";
+		print TEXOUT "\\$fontsize\n";
+		print TEXOUT Tab::texify($panel->roomname) if $panel->room;
+		print TEXOUT " \\hspace{1mm} Flight ".Tab::texify($panel->flight) if $flighted > 1;
+		print TEXOUT " \\vspace{-2mm}\n";
+		print TEXOUT " \\newline";
 
-		print TEXOUT "In ".Tab::texify($panel->room->name) if $panel->room;
-		print TEXOUT " \\hspace{.3in} Flight ".Tab::texify($panel->flight) if $flighted > 1;
-		print TEXOUT " \n\n";
-		print TEXOUT "\\makebox[".$width2."in][c]{\\hrulefill}\n\n";
+		print TEXOUT "\\makebox[".$length."ex][c]{\\hrulefill}\n";
+		print TEXOUT " \\newline";
 
 		foreach my $judge (@{$panel_judges{$panel->id}}) { 
-
-			my $code = "\\makebox[.35in][l]{".$judge->code."} " 
-				unless $no_judge_codes;
-
-			print TEXOUT "\\truncate{".$width1."in}{ J: $code ".$judge->last.", ".$judge->first." }\n\n";
-
+			print TEXOUT "\\truncate{".$length."ex}{ J: ".$judge_codes{$judge->id}." }\n";
+			print TEXOUT " \\newline";
 		}
 
-		print TEXOUT "\\makebox[".$width2."in][c]{\\hrulefill}\n\n";
+		print TEXOUT " \\vspace{-4ex}\n";
+		print TEXOUT "\\makebox[".$length."ex][c]{\\hrulefill}\n";
+		print TEXOUT " \\newline";
 
 		my $center = "c";
 		$center = "l" if $code_type eq "names";
@@ -150,47 +205,32 @@
 		$center = "l" if $code_type eq "school_name_only";
 		$center = "l" if $code_type eq "code_name";
 
-		foreach my $entry (sort {$a->speaks <=> $b->speaks} @{$panel_entries{$panel->id}}) { 
+		foreach my $entry (@{$panel_entries{$panel->id}}) { 
 
-			my $codeline;
-
-			if ($schools && $ncfl) { 
-				$codeline .= $entry->school->region->code." ";
-			} elsif ($schools) {
-				$codeline .= $entry->school->code." ";
+			print TEXOUT "\\makebox[".$length."ex][$center]{\n";
+			if ($fontplus) { 
+				print TEXOUT "\\Huge\n" if $fontsize eq "huge";
+				print TEXOUT "\\huge\n" if $fontsize eq "LARGE";
+				print TEXOUT "\\LARGE\n" if $fontsize eq "Large";
+				print TEXOUT "\\Large\n" if $fontsize eq "large";
+				print TEXOUT "\\large\n" if $fontsize eq "normalsize";
+				print TEXOUT "\\normalsize\n" if $fontsize eq "small";
+				print TEXOUT "\\small\n" if $fontsize eq "footnotesize";
+				print TEXOUT "\\footnotesize\n" if $fontsize eq "scriptsize";
+				print TEXOUT "\\scriptsize\n" if $fontsize eq "tiny";
+			} else { 
+				print TEXOUT "\\$fontsize\n";
 			}
-
-			if ($code_style eq "codes")  { 
-		
-				print TEXOUT "\\small\n";
-				print TEXOUT "\\makebox[".$width2."in][$center]{\n";
-				print TEXOUT Tab::texify($codeline.$entry->code);
-				print TEXOUT "}\n\n";
-
-			} elsif ($code_style eq "names")  { 
-			
-				print TEXOUT "\\truncate{".$width1."in}{";
-				print TEXOUT Tab::texify($codeline.$entry->name);
-				print TEXOUT "}\n\n";
-
-			} elsif ($code_style eq "both") { 
-
-				print TEXOUT "\\truncate{".$width1."in}{";
-				print TEXOUT "\\noindent \\makebox[.35in][$center]{";
-				print TEXOUT Tab::texify($codeline.$entry->code);
-				print TEXOUT "} ".Tab::texify($entry->name);
-				print TEXOUT "}\n\n";
-
-			}
-
+			print TEXOUT Tab::texify($entry_codes{$entry->id});
+			print TEXOUT "}\n\n";
 		}
 
-		print TEXOUT "}\n ";
-
+		print TEXOUT "\\vspace{4ex}\n";
+		print TEXOUT "}\n";
+		print TEXOUT "\\hspace{1mm}\n";
 	}
 
 	print TEXOUT "\\newline\n";
-
 	return;
 
 </%init>
