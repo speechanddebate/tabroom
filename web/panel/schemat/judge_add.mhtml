@@ -1,212 +1,70 @@
 <%args>
+	$person
 	$tourn
 	$tourn_settings
-	$person
-	$panel          => undef
-	$judge          => undef
 	$panel_id       => undef
 	$judge_id       => undef
-	$code           => undef
-	$return         => undef
 	$steal          => undef
-	$judge_replaced => undef
-	$bypass_check   => undef
 	$chair          => undef
 </%args>
 <%init>
 
-	$panel = Tab::Panel->retrieve($panel_id) unless $panel;
-	$judge = Tab::Judge->retrieve($judge_id) unless $judge;
+	my $panel = Tab::Panel->retrieve($panel_id);
+	my $judge = Tab::Judge->retrieve($judge_id);
 
 	$m->abort unless $panel;
-	my $now = DateTime->now();
 
-	my $round = $panel->round;
-	my $event;
+	my $round = $panel->round();
+	my $event = $round->event();
 
-	if ($round->event) { 
-		$event = $round->event;
-	} else { 
-		$event = $round->parents->first->event;
-	}
+	my $came_from;
+	my $msg;
 
-	# double-check judge is not already placed in this timeslot and flight
+	if ($steal) { 
 
-	Tab::Ballot->set_sql( round_ballots => "
-		select distinct ballot.*
-		from ballot, panel, round
-		where ballot.judge = ?
-  		and panel.id = ballot.panel
-		and round.id = panel.round
-  		and round.timeslot = ?
-	");
+		Tab::Ballot->columns(TEMP => "panelid");
 
-	Tab::Ballot->set_sql( update_ballot => "
-		update ballot
-		set judge = ?
-		where panel = ?
-		and judge = 0
-	");
+		Tab::Ballot->set_sql( steal_judge => "
+			select ballot.*, panel.id as panelid
+			from panel, ballot
+			where panel.round = ? 
+			and panel.flight = ?
+			and panel.id = ballot.panel
+			and ballot.judge = ? 
+		");
 
-	Tab::Ballot->set_sql( update_ballot_start => "
-		update ballot
-		set judge_started = NULL
-		where id = ? 
-	");
+		my @ballots = Tab::Ballot->search_steal_judge($round->id, $panel->flight, $judge->id);
 
-	Tab::Ballot->set_sql( make_chair => "
-		update ballot
-		set chair = 1 
-		where judge = ?
-		and panel = ?
-	");
+		my %done;
 
-	my $wudc++ if $event->type eq "wudc";
+		foreach my $ballot (@ballots) { 
 
-	unless ($judge) { 
+			next if $done{$ballot->panelid}++;
 
-		my @judges = $m->comp('/funclib/tourn_judges.mas', 
-			tourn => $tourn, 
-			code => $code
-		) if $code;
+			my $remove = Tab::Panel->retrieve($ballot->panelid);
 
-		$judge = shift @judges if @judges;
-
-		unless ($judge) {
-			my $err = "No judge found with code $code";
-			return if $return;
-			$m->redirect("panel_view.mhtml?panel_id=$panel_id&err=$err");
-		}
-
-	}
-
-	Tab::Ballot->set_sql( round_ballots => "
-		select distinct ballot.*
-		from ballot, panel
-		where ballot.judge = ? 
-		and ballot.panel = panel.id
-		and panel.round = ? 
-		and panel.flight = ? 
-	");
-
-	my @currents = Tab::Ballot->search_round_ballots( 
-		$judge_id,
-		$round->id,
-		$panel->flight 
-	);
-
-	my @others = $m->comp(
-		"/funclib/panel_judges.mas", 
-		panel => $panel
-	);
-
-	my @entries = $m->comp(
-		"/funclib/panel_entries.mas", 
-		panel => $panel
-	);
-
-	Tab::Entry->set_sql( already => "
-		select entry.*
-		from entry, ballot
-		where ballot.entry = entry.id
-		and ballot.panel = ? 
-		and ballot.judge = ? 
-	");
-
-	if (@others) { 
-
-		my $sample = shift @others;
-
-		my %done = map {$_->id => 1} Tab::Entry->search_already( $panel->id, $judge->id );
-
-		my @ballots = Tab::Ballot->search( 
-			panel => $panel->id, 
-			judge => $sample->id
-		);
-
-
-		my $audit = 0;
-		$audit = 1 if $wudc;
-
-		foreach my $ballot (@ballots)  {
-
-			next if $ballot->entry && $done{$ballot->entry->id};
-
-			my $entry_id = $ballot->entry->id if $ballot->entry;
-
-			next unless $judge && $judge->id;
-
-			next unless $panel && $panel->id;
-
-			next if Tab::Ballot->search( 
-				panel => $panel->id,
-				judge => $judge->id,
-				entry => $entry_id
-			);
-
-			my $side = $ballot->side;
-
-			my $new = $ballot->copy({
-				judge         => $judge->id,
-				audit         => $audit,
-				side          => $side,
-				collected     => "",
-				collected_by  => 0,
-				entered_by    => 0,
-				chair         => 0,
-				hangout_admin => 0,
-				pullup        => 0
-			});
-
-			Tab::Ballot->sql_update_ballot_start->execute($new->id);
-
-			unless ($new->side) { 
-				$new->side($side);
-				$new->update();
+			if ($remove) { 
+				$came_from = $remove->id;
+				$m->comp("/funclib/judge_rm.mas", panel => $remove, judge => $judge);
+				$msg = "Judge ".$judge->first." ".$judge->last." was swapped out of this section.  Please replace.";
 			}
-
-		}
-	
-	} elsif (@entries) { 
-
-		Tab::Ballot->sql_update_ballot->execute($judge->id, $panel->id);
-
-		Tab::Ballot->sql_make_chair->execute($judge->id, $panel->id) 
-			if ($round->type eq "elim" 
-				|| $round->type eq "final" 
-				|| $round->type eq "runoff" 
-				|| $event->type eq "wudc"
-			) && $event->type ne "congress";
-
-	} else {
-
-        my $ballot = Tab::Ballot->create({
-            judge        => $judge_id,
-            panel        => $panel->id,
-            speakerorder => 0,
-			chair        => 1
-        });
-
-	}
-
-	my $warn;
-
-	if ($steal && @currents) { 
-
-		my $current_panel = $currents[0]->panel;
-
-		my @usual = $m->comp("/funclib/panel_judges.mas", panel => $current_panel);
-
-		foreach my $current (@currents) { 
-			$current->judge("") if scalar @usual == 1;
-			$current->update if scalar @usual == 1;
-			$current->delete if scalar @usual > 1;
 		}
 	}
 
-	my $regline = "Judge ".$judge->code." ".$judge->last." moved into section ".$panel->letter." round ".$round->realname." of ".$event->abbr;
+	my $wudc; 
+	$wudc++ if $event->type eq "wudc";
 
-	$regline .= $warn;
+	$m->comp(
+		"/funclib/panel_judgeadd.mas",
+		panel => $panel,
+		judge => $judge,
+		wudc  => $wudc,
+		chair => $chair
+	);
+
+	my $regline = "Judge ".$judge->last." moved into section ".$panel->letter." round ".$round->realname." of ".$event->abbr;
+
+	my $now = DateTime->now();
 
 	Tab::ChangeLog->create({
 		type        => "judge",
@@ -221,62 +79,14 @@
 	
 	$m->comp("/funclib/panel_dedupe.mas", panel => $panel);
 
-	my $msg = "Judge ".$judge->first." ".$judge->last." has been added. <br />";
+	$msg .= "Judge ".$judge->first." ".$judge->last." has been added. <br />";
 
-	if ($steal) { 
-		$warn = $judge->last." was already scheduled and needs to be replaced in the original debate."; 
-	}
+	return if $ARGS{"return"};
 
-	$msg .= $warn;
-
-	if (defined $chair) { 
-
-		$m->comp("chair_switch.mhtml",
-			tourn          => $tourn,
-			tourn_settings => $tourn_settings,
-			person         => $person,
-			judge_id       => $judge_id,
-			panel_id       => $panel_id,
-			chair          => $chair,
-			return         => 'yasplz'
-		);
-
-	}
-	
-	Tab::Ballot->set_sql( check_doubles => "
-		select ballot.*
-		from ballot, ballot other, panel, round, event
-		where ballot.panel = ?
-		and ballot.panel   = panel.id
-		and panel.round    = round.id
-		and round.event    = event.id
-		and event.type     = 'debate'
-		and other.panel    = panel.id
-		and other.side     = ballot.side
-		and other.id != ballot.id
-	");
-
-	my @doubles = Tab::Ballot->search_check_doubles($panel_id);
-
-	if (@doubles)  { 
-		Tab::log("Panel Schemat Judge add yielded a doubled debate panel $panel_id");
-		Tab::log("Called by ".$r->uri." Panel Schemat Judge Add doubled debate panel $panel_id with side ".$doubles[0]->side);
-	}
-
-	print "Return value is $return<br>";
-	
-	return if $return;
-
-	if ( $return eq "judge_push" ) {
-		$m->redirect("/panel/schemat/judge_push.mhtml?panel_id=$panel_id&msg=$msg");
-	}
-
-	if ( $return eq "judge_fits" ) {
+	if ($came_from) { 
+		$m->redirect("/panel/schemat/panel_view.mhtml?panel_id=$came_from&msg=$msg");
+	} else { 
 		$m->redirect("/panel/schemat/panel_view.mhtml?panel_id=$panel_id&msg=$msg");
 	}
-	
-	$m->redirect("/panel/schemat/panel_view.mhtml?panel_id=$panel_id&msg=$msg");
-
 
 </%init>
-
