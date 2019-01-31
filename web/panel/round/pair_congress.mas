@@ -1,9 +1,9 @@
 <%args>
 	$round
 	$num_panels
-	$no_rooms    => undef
-	$first       => undef
-	$wipe        => undef
+	$no_rooms	=> undef
+	$first	   => undef
+	$wipe	    => undef
 </%args>
 <%perl>
 
@@ -11,23 +11,33 @@
 	use List::Util 'shuffle';
 
 	our %penalties = ( 
-		school      => 100000000000000,
-		district    => 100000000000,
-		region      => 1000000000,
-		state       => 10000000,
-		bill_topic  => 100000,
-		bill        => 1000,
-		bloc_school => 100,
+		school      => 1000000000000,
+		state       => 1000000000,
+		bill_topic  => 1000000,
+		author      => 10000,
 		name        => 1
 	);
+
+	our @constraints;
+	push @constraints, "state";
 
 	my $event = $round->event;
 	my $tourn = $event->tourn;
 
+	my %event_settings = $event->all_settings();
 	my %tourn_settings = $tourn->all_settings();
 
-	if ($tourn_settings{"nsda_nats"}) { 
+	if ($tourn_settings{"regions"}) { 
+		$penalties{"region"} = 10000000000;
+		push @constraints, "region";
+	}
 
+	if ($tourn_settings{"nsda_district"}) { 
+		$penalties{"bloc_school"} = 10000;
+		push @constraints, "bloc_school";
+	}
+
+	if ($tourn_settings{"nsda_nats"}) { 
 		%penalties = ( 
 			district  => 10000000000,
 			state     => 100000000,
@@ -37,6 +47,8 @@
 			name      => 1,
 			nsda_nats => 1
 		);
+
+		push @constraints, "district";
 	}
 
 	my $use_seeds++ if $event_settings{"seed_presets"};
@@ -85,8 +97,7 @@
 	} elsif (
 		$round->type eq "prelim"
 		|| (
-			$round->type eq "elim" 
-			&& $tourn_settings{"nsda_nats"}
+			$round->type eq "elim" && $tourn_settings{"nsda_nats"}
 		)
 	) { 
 
@@ -103,10 +114,7 @@
 
 			next if $other->id == $round->id;
 
-			my @entries = $m->comp(
-				'/funclib/round_entries.mas', 
-				round => $other
-			);
+			my @entries = $m->comp( '/funclib/round_entries.mas', round => $other);
 
 			next unless @entries;
 
@@ -121,10 +129,6 @@
 				});
 
 				my $parli = Tab::Judge->search_get_parli($panel->id)->first;
-
-				if ($new_panel->letter == 4) { 
-					my @entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
-				}
 
 				foreach my $entry (
 					$m->comp("/funclib/panel_entries.mas", panel => $panel)
@@ -173,16 +177,32 @@
 	my %settings = $m->comp(
 		"/funclib/event_entry_settings.mas", 
 		event   => $event,
-		all     => 1,
+		all	 => 1,
 		inverse => 1,
 		value   => 1
 	);
+
+	Tab::File->columns(TEMP => "entryid");
+
+	Tab::File->set_sql( authors => "
+		select file.*, entry.id as entryid
+		from file, entry
+		where file.type = 'legislation'
+		and file.entry  = entry.id
+		and entry.event = ? 
+	");
+
+	my @bills = Tab::File->search_authors($event->id);
+
+	my %bills_by_entry = map {$_->entryid => $_} @bills;
+
 
 	my @schools;
 
 	if ($tourn_settings{"ncfl"}) {
 
 		$penalties{"region"} = $penalties{"school"};
+
 		%{$entries{"school"}} = map {$_->id => $_->regionid} @all_entries;
 
 		foreach my $entry (@all_entries) { 
@@ -219,6 +239,7 @@
 			foreach my $entry (@all_entries) { 
 
 				$entries{"state"}{$entry->id} = $entry->state;
+
 				$entries{"district"}{$entry->id} = $entry->districtid;
 
 				$entries{"region"}{$entry->id} = $district_region{$entry->districtid} 
@@ -230,19 +251,23 @@
 
 		} else { 
 
-			%{$entries{"state"}}  = map {$_->id => $_->state} @all_entries;
+			%{$entries{"state"}} = map {$_->id => $_->state} @all_entries;
 
 			if ($event_settings{"region_avoid"}) { 
 				%{$entries{"region"}}  = map {$_->id => $_->regionid} @all_entries;
 			}
-
 		}
-				
 
 		foreach my $entry (@all_entries) { 
 			push @schools, $entries{"school"}{$entry->id};
 			$size_of_school{$entries{"school"}{$entry->id}}++;
-
+			my $bill = $bills_by_entry{$entry->id};
+			if ($bill) { 
+				$entries{"author"}{$entry->id}++;
+				$entries{"bill_topic"}{$entry->id} = $bill->tag if $bill->tag; 
+				#Leading whitespace was a thing. 
+				$entries{"bill_topic"}{$entry->id} =~ s/^\s+//;
+			}
 		}
 
 		$entries{"bloc"} = $settings{"nsda_house_bloc"};
@@ -289,99 +314,93 @@
 
 	my %chambers = ();
 
-    use List::Util 'shuffle';
-    my @keys =  shuffle(1 .. $num_panels);
+	use List::Util 'shuffle';
+	my @keys =  shuffle(1 .. $num_panels);
 
 	my %school_count;
 
-    foreach my $entry (@all_entries) {
+	foreach my $entry (@all_entries) {
 
-        my $score = "3141592653";
-        my $picked_key;
+	    my $score = "3141592653";
+	    my $picked_key;
 
 		my $last_resort;
 
 		my $msg;
 
-        KEY:
-        foreach my $key (@keys) {
+	    KEY:
+	    foreach my $key (@keys) {
 
-            next if $score == 0;
+	        next if $score == 0;
 
 			$msg .= "Trying $key";
 
-            my @chamber = @{$chambers{$key}} if $chambers{$key};
-            next KEY if (scalar @chamber == $max_size);
+	        my @chamber = @{$chambers{$key}} if $chambers{$key};
+	        next KEY if (scalar @chamber == $max_size);
 			
 			$msg .= " - got past max size";
 
-            if (scalar @chamber == $min_size) {
-                next KEY unless $remainder > 0;
-            }
+	        if (scalar @chamber == $min_size) {
+	            next KEY unless $remainder > 0;
+	        }
 
 			$msg .= " - got past min size";
 
-            if (@chamber) {
+	        if (@chamber) {
 
-                push (@chamber, $entry->id);
+	            push (@chamber, $entry->id);
 
-                my $new_score = score_chamber(\@chamber, \%entries);
+	            my $new_score = score_chamber(\@chamber, \%entries);
 
-                if ($new_score < $score) {
-                    $picked_key = $key;
-                    $score = $new_score;
-                    last KEY if $score == 0;
+	            if ($new_score < $score) {
+	                $picked_key = $key;
+	                $score = $new_score;
+	                last KEY if $score == 0;
 
-                } else { 
+	            } else { 
 					$last_resort = $key;
 				}
 
+	        } else {
 
-            } else {
-
-                $picked_key = $key;
-                $score = 0;
-                last KEY;
-            }
-
-        }
+	            $picked_key = $key;
+	            $score = 0;
+	            last KEY;
+	        }
+	    }
 
 		$picked_key = $last_resort unless $picked_key;
 
-        $remainder-- 
+	    $remainder-- 
 			if $chambers{$picked_key} 
 			&& scalar @{$chambers{$picked_key}} == $min_size;
 
-        push (@{$chambers{$picked_key}}, $entry->id);
+	    push (@{$chambers{$picked_key}}, $entry->id);
 
-        my $k = shift @keys;
-        push (@keys, $k);
+	    my $k = shift @keys;
+	    push (@keys, $k);
 
-    }
+	}
 
 	my @chamber_keys = shuffle(keys %chambers);
 
 	my $no_improvement = 1;
 
 	unless ($num_panels == 1) { 
-
-		foreach my $counter (1 .. 7) { 
+		
+		foreach my $counter (1 .. 4) { 
 
 			my $total;
 
 			next if $no_improvement == 0;
+
 			$no_improvement = 0;
 
 			foreach my $chamber_key (@chamber_keys) { 
 			
 				my @section = @{$chambers{$chamber_key}};
 
-				my $entry_section1_score = 
-					score_chamber(
-						\@section, 
-						\%entries,
-						1
-				);
+				my $entry_section1_score = score_chamber( \@section, \%entries);
 
 				next if $entry_section1_score < 1;
 
@@ -406,16 +425,11 @@
 					foreach my $other_key (@chamber_keys) { 
 
 						# Can't switch to the same section
-						next if $other_key == $chamber_key; 				
+						next if $other_key <= $chamber_key; 				
 
 						# Find the other section for scoring
 						my @section2 = @{$chambers{$other_key}}; 			
-
-						my $other_section2_score = 
-							score_chamber(
-								\@section2, 
-								\%entries
-							);
+						my $other_section2_score = score_chamber( \@section2, \%entries);
 
 						# Put me into this section for testing
 						push (@section2, $entry_id);					
@@ -427,12 +441,7 @@
 							push (@section1, $other_entry_id);				
 
 							$count++;
-
-							my $other_section1_score = 
-								score_chamber(
-									\@section1, 
-									\%entries
-								);
+							my $other_section1_score = score_chamber( \@section1, \%entries);
 
 							# Remove swap candidate from the section
 							my $index = 0;									
@@ -440,27 +449,21 @@
 							$index++ until $section2[$index] == $other_entry_id;
 							splice(@section2, $index, 1);
 
-							my $entry_section2_score = 
-								score_chamber(
-									\@section2, 
-									\%entries
-								);
+							my $entry_section2_score = score_chamber( \@section2, \%entries);
 
 							my $squo_score = $entry_section1_score + $other_section2_score;
 							my $swap_score = $entry_section2_score + $other_section1_score;
 							my $diff = $squo_score - $swap_score;
 
 							my $replace = pop(@section1);  #remove me from this section
-							push (@section2, $replace);    #put me back from whence I came
+							push (@section2, $replace);	#put me back from whence I came
 
 							if ( $diff > 0 && $diff > $current_diff) { 
 								$current_diff = $diff;
 								$swap_entry = $other_entry_id;
 								$swap_section = $other_key;
 							}
-
 						}
-
 					}
 
 					if ($swap_entry && $swap_section) { 
@@ -483,14 +486,11 @@
 
 						@section = @section1;
 
-						$entry_section1_score = 
-							score_chamber(
-								\@section1, 
-								\%entries
-							);
+						$entry_section1_score = score_chamber( \@section1, \%entries);
 					}
 				}
 			}
+
 			last if $no_improvement < 1;
 		}
 	}
@@ -632,22 +632,14 @@
 	my %jseen = (); 
 	@judge_keys = grep { ! $jseen{$_} ++ } @judge_keys;
 
-	my @rooms = $m->comp(
-		"/funclib/round_rooms.mas", 
-		round => $round
-	);
+	my @rooms = $m->comp("/funclib/round_rooms.mas", round => $round);
 
 	# Clear out the old
-
 	Tab::Score->sql_delete_round->execute($round->id);
-
 	Tab::Ballot->sql_delete_round->execute($round->id);
-
 	Tab::Panel->sql_delete_round->execute($round->id);
 
 	my $letter = 1;
-
-	my %event_settings = $event->all_settings();
 
 	$letter = "A" if $event_settings{"panel_lables"} eq "letters";
 
@@ -696,89 +688,88 @@
 				})
 
 			}
-		
 		}
-
 	}
-
-	my $now = DateTime->now;
 	$round->created($now);
 	$round->update;
 
 	undef %penalties;
+	undef @constraints;
 
 	return;
 
-    sub score_chamber {
+	sub score_chamber {
 
-        my ($panref, $entries, $loud) = @_;
+	    my ($panref, $entries) = @_;
 
-        my @pan_entries = @$panref;
+	    my $score = 0;
 
-        my $score = 0;
+	    foreach my $entry (@{$panref}) { 
 
-        foreach my $entry (@pan_entries) { 
+	        foreach my $other (@{$panref}) { 
 
-            foreach my $other (@pan_entries) { 
+	            next unless $other > $entry;
 
-                next unless $other > $entry;
+				if (defined ${$entries}{"cache"}{$entry}{$other}) { 
 
-                if (
-					$penalties{"school"}
-					&& ${$entries}{"school"}{$other}
-					&& ${$entries}{"school"}{$other} eq ${$entries}{"school"}{$entry}
-				) { 
+					$score += ${$entries}{"cache"}{$entry}{$other};
 
-                	if (
-						${$entries}{"bloc"}{$other} 
-						&& ${$entries}{"bloc"}{$other} eq ${$entries}{"bloc"}{$entry}
-					) { 
+				} else { 
 
-                    	$score -= $penalties{"bloc_school"}; 
+					my $local_score = 0;
+
+					if (${$entries}{"school"}{$other} eq ${$entries}{"school"}{$entry}) { 
+
+						if ($penalties{"bloc_school"}
+							&& (${$entries}{"bloc"}{$other} eq ${$entries}{"bloc"}{$entry})
+						) { 
+							$local_score -= $penalties{"bloc_school"}; 
+						} elsif (${$entries}{"bloc"}{$other} eq ${$entries}{"bloc"}{$entry}) { 
+							$local_score += $penalties{"school"};
+						}
 
 					} else { 
 
-                    	$score += $penalties{"school"};
-					}
-                }
-
-               	if (${$entries}{"name"}{$other} eq ${$entries}{"name"}{$entry}) { 
-                   	$score += $penalties{"name"};
-				}
-
-				if (
-					$penalties{"nsda_nats"}
-					|| (
-						${$entries}{"school"}{$other} 
-						&& ${$entries}{"school"}{$other} != ${$entries}{"school"}{$entry}
-					)
-				) {
-
-					foreach my $constraint ("region", "district", "state") { 
-
-						if (${$entries}{$constraint}{$entry}
-							&& ${$entries}{$constraint}{$other} eq ${$entries}{$constraint}{$entry}
-						) { 
-					
-							$score += $penalties{$constraint};
+						foreach my $constraint (@constraints) { 
+							if (${$entries}{$constraint}{$entry}
+								&& ${$entries}{$constraint}{$other} eq ${$entries}{$constraint}{$entry}
+							) { 
+								$local_score += $penalties{$constraint};
+							}
 						}
 					}
-				}
 
-				foreach my $constraint ("auto_qual", "author") { 
-
-					if ( ${$entries}{$constraint}{$entry} 
-						&& ${$entries}{$constraint}{$other} 
-					) {
-						$score += $penalties{$constraint};
-							
+					if (${$entries}{"name"}{$other} eq ${$entries}{"name"}{$entry}) { 
+						$local_score += $penalties{"name"};
 					}
-				}
-            }
-        }
 
-        return $score;
+					if ($penalties{"auto_qual"}) { 
+						if (${$entries}{"auto_qual"}{$entry} && ${$entries}{"auto_qual"}{$other} ) {
+							$local_score += $penalties{"auto_qual"};
+						}
+					}
 
-    }
+					if ($penalties{"author"}) { 
+						if (${$entries}{"author"}{$entry} && ${$entries}{"author"}{$other} ) {
+							$local_score += $penalties{"author"};
+						}
+					}
+
+					if ($penalties{"bill_topic"}) { 
+						if (${$entries}{"bill_topic"}{$entry}
+							&& ${$entries}{"bill_topic"}{$entry} eq ${$entries}{"bill_topic"}{$other} ) {
+							$local_score += $penalties{"bill_topic"};
+						}
+					}
+
+					$score += $local_score;
+					${$entries}{"cache"}{$entry}{$other} = $local_score;
+
+	        	}
+	       	}
+	    }
+
+	    return $score;
+	}
 	
 </%perl>
