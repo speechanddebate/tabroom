@@ -138,22 +138,18 @@ sub handler {
     my $r = shift;  # Apache request object;
 
     if ($r->hostname =~ /www.tabroom.com/) {
-    
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
 			comp_root   => $Tab::file_root,
 			data_dir    => $Tab::file_root."mason",
 			error_mode  => 'fatal'
 		); 
-
 	} else { 
-
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
 			comp_root   => $Tab::file_root,
 			data_dir    => $Tab::file_root."mason",
 		); 
-
  	}
 	
 	my $return = eval { 
@@ -167,9 +163,7 @@ sub handler {
 		return $ah->handle_request($r);
 	
 	}
-
 	return $return;
-
 }
 
 1;
