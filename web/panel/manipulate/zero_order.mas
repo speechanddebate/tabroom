@@ -1,0 +1,183 @@
+<%args>
+	$target_id     => undef
+	$property_name => undef
+	$setting_name  => undef
+	$round         => undef
+	$round_id      => undef
+	$panel         => undef
+	$panel_id      => undef
+	$congress      => undef
+	$from          => undef
+</%args>
+<%init>
+
+	use List::Util 'shuffle';
+
+	my $limit;
+
+	if ($target_id) { 
+
+		$m->clear_buffer();
+		$r->content_type('application/json');
+		$round_id = $target_id;
+		$round = Tab::Round->retrieve($round_id);
+
+	} elsif ($panel || $panel_id || $setting_name) { 
+
+		if ($setting_name) { 
+			$m->clear_buffer();
+			$r->content_type('application/json');
+			$panel_id = $setting_name;
+		}
+
+		if ($panel_id && (not defined $panel)) { 
+			$panel = Tab::Panel->retrieve($panel_id);
+		}
+
+		if ($panel) { 
+			$round = $panel->round;
+			$limit .= " and panel.id = ".$panel->id;
+		}
+	} 
+	
+	if ($round) { 
+		$round_id = $round->id;
+	} elsif ($round_id) { 
+		$round = Tab::Round->retrieve($round_id);
+	}
+
+	return unless $round;
+
+	if ($property_name) { 
+		$from = $property_name;
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	#First try to fix it by just going to other rounds
+
+	my $sth = $dbh->prepare(" 
+		select panel.id
+		from panel, ballot b1, ballot b2
+		where panel.round = ? 
+			$limit
+			and panel.id = b1.panel
+			and panel.id = b2.panel
+			and b1.entry != b2.entry
+			and b1.judge = b2.judge 
+			and b1.speakerorder = b2.speakerorder 
+		group by panel.id
+	");
+
+	my %panels;
+	my %entries; 
+
+	$sth->execute($round->id);
+
+	while (
+		my ($panel_id) = $sth->fetchrow_array()
+	) { 
+		$panels{$panel_id}++;		
+	}
+
+	foreach my $panel (keys %panels) { 
+
+		my @ballots = Tab::Ballot->search(
+			panel => $panel
+		); 
+
+		my %done;
+		my @survived;
+
+		foreach my $ballot (@ballots) { 
+
+			unless ($ballot->entry > 0) { 
+				$ballot->delete();
+			} else { 				
+
+				my $entry = $ballot->entry;
+				$done{$entry->id}++;
+				my $code;
+
+				if ($entry->dropped) { 
+					$code = "ZZ-".$entry->code;
+				} else { 
+					$code = "AA-".$entry->code;
+				}
+				$entries{$entry} = $code;
+
+				push @survived, $ballot;
+			}
+		}
+
+		@ballots = @survived;
+
+		Tab::debuglog("Doing the ".scalar @ballots." of $panel");
+
+		my %taken_order;
+		my %entry_order;
+
+		if ($congress) { 
+
+			@ballots = sort {
+				$entries{$a->entry->id} <=> $entries{$b->entry->id}
+				|| $entries{$a->entry->id} cmp $entries{$b->entry->id}
+			} @ballots;
+
+			my $order = 1;
+
+			foreach my $ballot (@ballots) { 
+
+				my $entry_id = $ballot->entry->id;
+				next if $entry_order{$entry_id};
+				$entry_order{$entry_id} = $order++;
+			}
+
+		} else { 
+
+			BALLOT:
+
+			foreach my $ballot (shuffle @ballots) { 
+
+				unless ($ballot->entry > 0) { 
+					$ballot->delete();
+					next BALLOT;
+				}
+
+				my $entry_id = $ballot->entry->id;
+				next if $entry_order{$entry_id};
+				my $order = 1; 
+
+				if ($taken_order{$ballot->speakerorder} || $ballot->speakerorder < 1) { 
+
+					while ($taken_order{$order}) { 
+						$order++;
+					}
+
+				} else { 
+					$order = $ballot->speakerorder;
+				}
+
+				$entry_order{$entry_id} = $order;
+				$taken_order{$order}++;
+			}
+		}
+
+		foreach my $ballot (@ballots) { 
+			$ballot->speakerorder($entry_order{$ballot->entry->id});
+			$ballot->update();
+		}
+	}
+
+	if ($target_id || $setting_name) {
+		$m->print('{ 
+			"error"   : false,
+			"message" : "Same order fix applied"
+		}');
+ 
+		$m->abort(); 
+	} 
+
+	return;
+
+</%init>
