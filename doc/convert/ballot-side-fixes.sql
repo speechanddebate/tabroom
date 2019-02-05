@@ -1,5 +1,4 @@
 
-
 	alter table ballot modify speakerorder int not null default 0;
 	alter table ballot modify entry int not null default 0;
 	alter table ballot modify panel int not null default 0;
