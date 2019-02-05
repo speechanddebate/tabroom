@@ -1,8 +1,13 @@
 
+
+	alter table ballot modify speakerorder int not null default 0;
+	alter table ballot modify entry int not null default 0;
+	alter table ballot modify panel int not null default 0;
+
 	update score, ballot            
 		set score.speech = ballot.speechnumber          
 		where score.speech is null              
-		and ballot.speechnumber is not null             
+		and ballot.speechnumber > 0
 		and ballot.id = score.ballot;
 
     update IGNORE
@@ -27,19 +32,17 @@
             and score.student = s2.student
             and score.id != s2.id
 
-
 	delete from panel where round = 0;
 	delete from panel where round is null;
 	
 	delete from panel where not exists ( select round.id from round where round.id = panel.round);
 	delete from ballot where not exists ( select panel.id from panel where panel.id = ballot.panel);
+	delete from ballot where not exists ( select entry.id from entry where entry.id = ballot.entry);
 	delete from score where not exists ( select ballot.id from ballot where ballot.id = score.ballot);
 
     delete ballot.*
     from ballot, ballot b2
     where ballot.entry = b2.entry
 		and ballot.judge = b2.judge
-		and not exists ( 
-			select score.id from score where score.ballot = ballot.id
-		);
+		and not exists ( select score.id from score where score.ballot = ballot.id);
 
