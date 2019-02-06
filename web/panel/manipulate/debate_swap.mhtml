@@ -1,274 +1,126 @@
 <%args>
 	$person
-	$panel_id
-	$entry_id
-	$side
+	$tourn
+	$panel_id => undef
+	$entry_id => undef
+	$side     => undef
 </%args>
 <%init>
 
-	my $panel = Tab::Panel->retrieve($panel_id);
-	my $entry = Tab::Entry->retrieve($entry_id);
+	my $origin_entry = Tab::Entry->retrieve($entry_id) if $entry_id;
+	my $target_panel = Tab::Panel->retrieve($panel_id) if $panel_id;
 
-	$m->abort unless $panel;
-	$m->abort unless $entry;
+	unless ($target_panel && $origin_entry) {
+		$m->print("No debate for '.$panel_id.' or entry for '.$entry_id.' found.  Please refresh this page and start again");
+		$m->abort;
+	}
+	unless ($side) {
+		$m->print("No debate side sent: '.$side.'");
+		$m->abort;
+	}
+
+	my $round = $target_panel->round;
+
+	Tab::Panel->set_sql( origin => "
+		select panel.*
+			from panel, ballot
+			where panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.entry = ?
+	");
+
+	Tab::Entry->set_sql( target => "
+		select entry.*
+			from entry, ballot
+			where ballot.panel = ?
+			and ballot.side = ?
+			and ballot.entry = entry.id
+	");
+
+	my $origin_panel = Tab::Panel->search_origin($round->id, $origin_entry->id)->first;
+	my $target_entry = Tab::Entry->search_target($target_panel->id, $side)->first;
+
+	if ($origin_entry == $target_entry) {
+		$m->print("No move made");
+		$m->abort();
+	}
+
+	if ($origin_panel == $target_panel) {
+
+		my $tb = $origin_panel->ballots( entry => $origin_entry )->first;
+		my $target_side = $tb->side;
+
+		my $description = $target_entry->code." and ".$origin_entry->code." swapped sides";
+
+		$m->comp("/funclib/swap_sides.mas", panel => $origin_panel);
+
+		my $now = DateTime->now();
+
+		my $changeline = Tab::ChangeLog->create({
+			type        => 'tabbing',
+			event       => $target_entry->event->id,
+			entry       => $origin_entry->id,
+			person      => $person->id,
+			tourn       => $tourn->id,
+			created     => $now,
+			description => $description
+		});
+
+		my $msg = $description;
+		$m->redirect("debate_round_edit.mhtml?round_id=".$round->id."&entry_id=$entry_id&msg=$msg");
+
+	}
+
+	my $origin_side;
+
+	Tab::Score->set_sql( wipe_scores => "
+		delete score.*
+		from score, ballot
+		where score.ballot = ballot.id
+		and ballot.entry = ?
+		and ballot.panel = ?
+	");
+
+	Tab::Ballot->set_sql( swap => "
+		update ballot set entry = ?
+			where panel = ?
+			and entry = ?
+	");
+
+	my $description;
+
+	if ($origin_panel && $origin_entry && $target_entry) {
+
+
+		Tab::Score->sql_wipe_scores->execute($origin_entry, $origin_panel);
+		Tab::Ballot->sql_swap->execute($target_entry, $origin_panel, $origin_entry);
+		$description .= "Moved ".$target_entry->code." to ".$origin_panel->letter;
+
+		my $ob = $origin_panel->ballots( entry => $target_entry )->first;
+		$origin_side = $ob->side;
+
+	}
+
+	if ($target_panel && $target_entry && $origin_entry) {
+		Tab::Score->sql_wipe_scores->execute($target_entry, $target_panel);
+		Tab::Ballot->sql_swap->execute($origin_entry, $target_panel, $target_entry);
+		$description .= ".  Moved ".$origin_entry->code." to ".$target_panel->letter;
+	}
 
 	my $now = DateTime->now();
-	my $round = $panel->round;
-	my $event = $round->event;
 
-	my @existing_ballots = $m->comp("/funclib/entry_ballots.mas", entry => $entry, round => $round);
-
-	my %already;
-
-	foreach my $ballot (@existing_ballots) { 
-
-		if ($ballot->panel->id == $panel_id && $ballot->side != $side) { 
-
-			my @other_entry_ballots = Tab::Ballot->search( panel => $panel_id, side => $side);
-
-			my $other;
-
-			foreach my $otherballot (@other_entry_ballots) { 
-				$otherballot->side(1) if $side == 2;
-				$otherballot->side(2) if $side == 1;
-				$otherballot->update;
-				$other = $otherballot->entry unless $other;
-			}
-
-			foreach my $exist (@existing_ballots) { 
-				$exist->side($side);
-				$exist->update;
-			}
-	
-			my $msg = $entry->code." swapped sides with ".$other->code if $other;
-
-			Tab::ChangeLog->create({ 
-				type        => 'tabbing',
-				event       => $round->event->id,
-				tourn       => $round->event->tourn->id,
-				person      => $person->id,
-				created     => $now,
-				description => $msg
-			}); 
-
-			$m->redirect("debate_round_edit.mhtml?round_id=".$round->id."&entry_id=$entry_id&msg=$msg");
-
-		}
-
-		foreach my $value ($ballot->values) { 
-			next unless $ballot;
-			$value->delete;
-		}
-
-		$ballot->audit("0");
-		$ballot->bye("0");
-		$ballot->forfeit("0");
-		$ballot->update;
-
-		$already{$ballot->judge->id."-".$ballot->entry->id}++;  
-
-	}
-
-	my @other_entry_ballots = Tab::Ballot->search( panel => $panel_id, side => $side);
-
-	my $other_side = 1;
-	$other_side = 2 if $side == 1;
-
-	my @opponent_ballots = Tab::Ballot->search( panel => $panel_id, side => $other_side);
-
-	if (@opponent_ballots) { 
-
-		foreach my $ballot (@opponent_ballots) { 
-
-			foreach my $value ($ballot->values) { 
-				$value->delete;
-			}
-			
-			if ($ballot->judge && $ballot->entry && $already{$ballot->judge->id."-".$ballot->entry->id}++) { 
-				$ballot->delete;
-			} else { 
-				$ballot->audit("0");
-				$ballot->bye("0");
-				$ballot->forfeit("0");
-				$ballot->update;
-			}
-		}
-	}
-
-	my $other;
-
-	if (@other_entry_ballots) { 
-	
-		foreach my $ballot (@other_entry_ballots) { 
-			foreach my $value ($ballot->values) { 
-				$value->delete;
-			}
-			$other = $ballot->entry;
-			$ballot->entry($entry_id);
-			$ballot->audit("0");
-			$ballot->bye("0");
-			$ballot->forfeit("0");
-			$ballot->update;
-		}
-
-	} else { 
-
-		my $judgeful;
-
-		foreach my $judge ($m->comp("/funclib/panel_judges.mas", panel => $panel)) { 
-
-			$judgeful++;
-
-			Tab::Ballot->create({
-				panel => $panel->id,
-				entry => $entry_id,
-				judge => $judge->id,
-				audit => 0,
-				side  => $side
-			});
-	
-		}
-
-		unless ($judgeful) { 
-
-			Tab::Ballot->create({
-				panel => $panel->id,
-				entry => $entry_id,
-				judge => 0,
-				audit => 0,
-				side  => $side
-			});
-	
-		}
-
-	}
-
-	#Now put the person displaced back where I came from
-
-	if ($other) { 
-
-		if (@existing_ballots) { 
-
-			my $other_side = 1;
-			my $panel;
-	
-			foreach my $ballot (@existing_ballots) { 
-
-				next unless $ballot;
-
-				foreach my $value ($ballot->values) { 
-					next unless $value && $value->id;
-					$value->delete if $value;
-				}
-
-				$ballot->entry($other->id);
-				$ballot->audit(0);
-				$ballot->bye("0");
-				$ballot->forfeit("0");
-				$ballot->update;
-			
-				$other_side = 2 if $ballot->side == 1;
-				$panel = $ballot->panel;
-
-			}
-
-			my @opponent_existing = Tab::Ballot->search( panel => $panel->id, side => $other_side );
-			
-			foreach my $ballot (@opponent_existing) { 
-
-				foreach my $value ($ballot->values) { 
-					$value->delete;
-				}
-
-				$ballot->audit(0);
-				$ballot->bye("0");
-				$ballot->forfeit("0");
-				$ballot->update;
-			}
-
-		} else { 
-
-			#Give this person a bye.
-
-			my @existing = $round->panels;
-
-			@existing = sort {$b->letter <=> $a->letter} @existing;
-			@existing = sort {$b->letter cmp $a->letter} @existing if $round->event->setting("panel_labels") eq "letters";
-
-			my $last = shift @existing;
-
-			my $letter = $last->letter;
-
-			if ($letter eq "Z") { 
-				$letter = "AA";
-			} elsif ($letter eq "AZ") { 
-				$letter = "BA";
-			} elsif ($letter eq "BZ") {
-				$letter = "CA";
-			} elsif ($letter eq "CZ") {
-				$letter = "DA";
-			} elsif ($letter eq "DZ") {
-				$letter = "EA";
-			} elsif ($letter eq "EZ") {
-				$letter = "FA";
-			} else { 
-				$letter++;
-			}   
-
-			my $bye_panel = Tab::Panel->create({ 
-				round  => $round->id,
-				letter => $letter,
-				flight => 1,
-				bye    => 1
-			});
-
-			Tab::Ballot->create({
-				panel => $bye_panel->id,
-				entry => $other->id,
-				bye   => 1,
-				audit => 0,
-				judge => 0
-			});
-
-		}
-
-	} else { 
-
-		# Otherwise, delete the ballots that are now unused, and the panel too
-		# if it's just a bye placeholder.
-
-		my $bye_panel;
-
-		foreach my $ballot (@existing_ballots) { 
-			next unless $ballot && $ballot->id;
-			$bye_panel = $ballot->panel if $ballot->panel->bye;
-			$ballot->delete;
-		}
-
-		$bye_panel->delete if $bye_panel;
-
-	}
-
-	my $aff_string = $event->setting("aff_label");
-	my $neg_string = $event->setting("neg_label");
-	$aff_string = "Aff" unless $aff_string;
-	$neg_string = "Neg" unless $neg_string;
-
-	my $side_string = $aff_string if $side == 1;
-	$side_string = $neg_string if $side == 2;
-
-	my $msg = $entry->code." was swapped into ".$side." of section ".$panel->letter;
-	$msg = $entry->code." was swapped for ".$other->code if $other;
-
-    Tab::ChangeLog->create({ 
-        type        => 'tabbing',
-        event       => $round->event->id,
-        tourn       => $round->event->tourn->id,
-        person      => $person->id,
+	my $changeline = Tab::ChangeLog->create({
+		type        => 'tabbing',
+		event       => $target_entry->event->id,
+		entry       => $origin_entry->id,
+		person      => $person->id,
+		tourn       => $tourn->id,
 		created     => $now,
-        description => $msg
-    }); 
+		description => $description
+	});
 
+	my $msg = $description;
 	$m->redirect("debate_round_edit.mhtml?round_id=".$round->id."&entry_id=$entry_id&msg=$msg");
+
 
 </%init>
