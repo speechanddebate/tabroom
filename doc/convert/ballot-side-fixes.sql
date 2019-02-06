@@ -29,7 +29,7 @@
             and b2.entry = ballot.entry
             and score.tag = s2.tag
             and score.student = s2.student
-            and score.id != s2.id
+            and score.id != s2.id;
 
 	delete from panel where round = 0;
 	delete from panel where round is null;
