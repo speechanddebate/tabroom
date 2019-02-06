@@ -7,117 +7,108 @@
 <%init>
 
 	$m->clear_buffer;
+	$r->content_type('application/json');
 
-	my $entry = Tab::Entry->retrieve($entry_id) if $entry_id;
-
+	my $origin_entry = Tab::Entry->retrieve($entry_id) if $entry_id;
 	my ($panel_id, $side) = split(/_/, $panel_marker) if $panel_marker;
+	my $target_panel = Tab::Panel->retrieve($panel_id) if $panel_id;
 
-	my $panel = Tab::Panel->retrieve($panel_id) if $panel_id;
+	unless ($target_panel && $origin_entry) { 
 
-	Tab::Ballot->set_sql( round_and_entry => "
-		select distinct ballot.*
-		from ballot, panel
-		where ballot.entry = ? 
-		and ballot.panel = panel.id
-		and panel.round = ? 
+		$m->print('{ 
+			"error": true,
+			"message": "No debate for '.$panel_id.' or entry for '.$entry_id.' found.  Please refresh this page and start again"}
+		');
+		$m->abort;
+	}
+	unless ($side) {
+		$m->print('{ 
+			"error": true,
+			"message": "No debate side sent: '.$side.'"}
+		');
+		$m->abort;
+	}
+
+	Tab::Panel->set_sql( origin => "
+		select panel.* 
+			from panel, ballot
+			where panel.round = ? 
+			and panel.id = ballot.panel
+			and ballot.entry = ? 
 	");
 
-	unless ($panel && $entry) { 
+	Tab::Entry->set_sql( target => "
+		select entry.* 
+			from entry, ballot
+			where ballot.panel = ? 
+			and ballot.side = ? 
+			and ballot.entry = entry.id
+	");
 
-		$m->print("No panel or entry found.  Please refresh this page and start again");
-		$m->abort;
+	my $origin_panel = Tab::Panel->search_origin($target_panel->round->id, $origin_entry->id)->first;
 
-	} else { 
+	if ($origin_panel == $target_panel) { 
+		$m->abort();
+	}
 
-		my $now = DateTime->now();
+	my $target_entry = Tab::Entry->search_target($target_panel->id, $side)->first;
 
-		my $round = $panel->round;
+	my $origin_side;
 
-		my $err;
-		my $origin;
-		my $origin_id;
+	Tab::Score->set_sql( wipe_scores => " 
+		delete score.* 
+		from score, ballot 
+		where score.ballot = ballot.id
+		and ballot.entry = ? 
+		and ballot.panel = ? 
+	");
 
-		foreach my $ballot (
-			Tab::Ballot->search_round_and_entry(
-				$entry->id,
-				$round->id
-			)
-		) { 
+	Tab::Ballot->set_sql( swap => "
+		update ballot set entry = ? 
+			where panel = ? 
+			and entry = ? 
+	");
 
-			if ($ballot->audit) { 
-				$err = "These ballots have scores! ";
-				$err .= "Please use the entry screen interfaces to make changes
-				because you can do some serious damage here!";
+	my $description;
 
-			} else { 
+	if ($origin_panel && $origin_entry && $target_entry) { 
 
-				$origin_id = $ballot->panel->id;
-				$origin = "Section ".$ballot->panel->letter." speaker ".$ballot->speakerorder;
-				$ballot->delete;
 
-			}
+		Tab::Score->sql_wipe_scores->execute($origin_entry, $origin_panel);
+		Tab::Ballot->sql_swap->execute($target_entry, $origin_panel, $origin_entry);
+		$description .= "Moved ".$target_entry->code." to ".$origin_panel->letter;
 
-		}
-
-		if ($err) { 
-
-			$m->print($err);
-			$m->abort;
-
-		} else { 
-
-			my @judges = $m->comp(
-				"/funclib/panel_judges.mas", 
-				panel => $panel
-			);
-
-			my $ballot;
-
-			if (@judges) { 
-
-				foreach my $judge (@judges) {
-
-					$ballot = Tab::Ballot->create({
-						panel => $panel->id,
-						judge => $judge->id,
-						entry => $entry->id,
-						side  => $side
-					});
-				}
-
-			} else { 
-
-				$ballot = Tab::Ballot->create({
-					panel => $panel->id,
-					judge => 0,
-					entry => $entry->id,
-					side  => $side
-				});
-
-			}
-
-			my $sidestring = "Aff" if $side == 1;
-			$sidestring = "Neg" if $side == 2;
-
-			my $description = "Moved ".$entry->code." to ".$panel->letter." side ".$sidestring." from $origin";
-
-			my $changeline = Tab::ChangeLog->create({ 
-				type        => 'tabbing',
-				event       => $panel->round->event->id,
-				entry       => $entry->id,
-				tourn       => $tourn->id,
-				person      => $person->id,
-				created     => $now,
-				description => $description
-			});
-
-			$m->print($description);
-			$m->abort;
-
-		}
+		my $ob = $origin_panel->ballots( entry => $target_entry )->first;
+		$origin_side = $ob->side;
 
 	}
 
-	$m->abort;
+	if ($target_panel && $target_entry && $origin_entry) { 
+		Tab::Score->sql_wipe_scores->execute($target_entry, $target_panel);
+		Tab::Ballot->sql_swap->execute($origin_entry, $target_panel, $target_entry);
+		$description .= ".  Moved ".$origin_entry->code." to ".$target_panel->letter;
+	}
+
+	my $now = DateTime->now();
+
+	my $changeline = Tab::ChangeLog->create({ 
+		type        => 'tabbing',
+		event       => $target_entry->event->id,
+		entry       => $origin_entry->id,
+		person      => $person->id,
+		tourn       => $tourn->id,
+		created     => $now,
+		description => $description
+	});
+
+    $m->print('{
+		"error"        : false,
+		"message"      : "'.$description.'",
+		"origin_panel" : "'.$origin_panel.'",
+		"origin_side"  : "'.$origin_side.'",
+		"target_entry" : "'.$target_entry.'"
+	}');
+
+	$m->abort();
 
 </%init>
