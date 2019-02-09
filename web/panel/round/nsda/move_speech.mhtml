@@ -9,30 +9,45 @@
 	$m->clear_buffer;
 	$r->content_type('application/json');
 
-	my $origin_entry = Tab::Entry->retrieve($entry_id) if $entry_id;
-	my ($panel_id, $speakerorder) = split(/_/, $panel_marker) if $panel_marker;
-	my $target_panel = Tab::Panel->retrieve($panel_id) if $panel_id;
+	my $origin_entry;
+	my $target_panel;
+	my $panel_id;
+	my $target_speakerorder;
+
+	$origin_entry = Tab::Entry->retrieve($entry_id) if $entry_id;
+	($panel_id, $target_speakerorder) = split(/_/, $panel_marker) if $panel_marker;
+	$target_panel = Tab::Panel->retrieve($panel_id) if $panel_id;
 
 	my $event;
 
-	unless ($target_panel && $origin_entry) {
+	unless ($target_panel) {
+		$m->print('{
+			"error": true,
+			"message": "No section for '.$panel_id.' found.  Please refresh this page and start again"}
+		');
+		$m->abort;
+	}
+	unless ($origin_entry) {
+		$m->print('{
+			"error": true,
+			"message": "No entry for '.$entry_id.' found.  Please refresh this page and start again"}
+		');
+		$m->abort;
+	}
+	unless ($target_speakerorder > 0) {
+		$m->print('{
+			"error": true,
+			"message": "No section speakerorder sent: '.$target_speakerorder.'"}
+		');
+		$m->abort;
+	}
 
-		$m->print('{
-			"error": true,
-			"message": "No section for '.$panel_id.' or entry for '.$entry_id.' found.  Please refresh this page and start again"}
-		');
-		$m->abort;
-	}
-	unless ($speakerorder > 0) {
-		$m->print('{
-			"error": true,
-			"message": "No section speakerorder sent: '.$speakerorder.'"}
-		');
-		$m->abort;
-	}
+	my $round = $target_panel->round;
+
+	Tab::Panel->columns(TEMP => "speakerorder");
 
 	Tab::Panel->set_sql( origin => "
-		select panel.*
+		select panel.*, ballot.speakerorder as speakerorder
 			from panel, ballot
 			where panel.round = ?
 			and panel.id = ballot.panel
@@ -47,89 +62,57 @@
 			and ballot.entry = entry.id
 	");
 
-	my $origin_panel = Tab::Panel->search_origin($target_panel->round->id, $origin_entry->id)->first;
-	my $target_entry = Tab::Entry->search_target($target_panel->id, $speakerorder)->first;
+	Tab::Ballot->set_sql(move_entry => "
+		update ballot
+		set panel = ?, speakerorder = ?
+		where ballot.panel = ?
+		and ballot.entry = ?
+	");
 
-	if ($origin_entry == $target_entry) {
-		$m->print('{
-			"error": true,
-			"message": "No move made"}
-		');
-		$m->abort();
-	}
-
-	if ($origin_panel == $target_panel) {
-
-		my $tb = $origin_panel->ballots( entry => $origin_entry )->first if $origin_entry;
-		my $target_speakerorder = $tb->speakerorder;
-
-		my $ob = $target_panel->ballots( entry => $target_entry )->first if $target_entry;
-		my $origin_speakerorder = $ob->speakerorder if $ob;
-
-		Tab::Ballot->set_sql( update_order => "
-			update ballot
-				set speakerorder = ?
-				where entry      = ?
-				and panel        = ?
-		");
-
-		Tab::Ballot->sql_update_order->execute(-1, $target_entry->id, $target_panel->id)
-			if $target_entry && $target_panel;
-
-		Tab::Ballot->sql_update_order->execute($origin_speakerorder, $origin_entry->id, $origin_panel->id)
-			if $origin_speakerorder && $origin_entry && $origin_panel;
-
-		Tab::Ballot->sql_update_order->execute($speakerorder, $target_entry->id, $target_panel->id)
-			if $target_entry && $target_panel;
-
-		my $description = ("Entries ".$target_entry->code." and ".$origin_entry->code." have swapped speaker order")
-			if $target_entry && $origin_entry;
-
-		$m->print('{
-			"error"               : false,
-			"message"             : "'.$description.'",
-			"origin_panel"        : "'.$origin_panel.'",
-			"origin_speakerorder" : "'.$target_speakerorder.'",
-			"target_entry"        : "'.$target_entry.'"
-		}');
-
-		$m->abort();
-	}
-
+	my $origin_panel = Tab::Panel->search_origin($round->id, $origin_entry->id )->first;
 	my $origin_speakerorder;
 
-	Tab::Score->set_sql( wipe_scores => "
-		delete score.*
-		from score, ballot
-		where score.ballot = ballot.id
-		and ballot.entry = ?
-		and ballot.panel = ?
-	");
-
-	Tab::Ballot->set_sql( swap => "
-		update ballot set entry = ?
-			where panel = ?
-			and entry = ?
-	");
-
-	my $description;
-
-	if ($origin_panel && $origin_entry && $target_entry) {
-		Tab::Score->sql_wipe_scores->execute($origin_entry, $origin_panel);
-		Tab::Ballot->sql_swap->execute($target_entry, $origin_panel, $origin_entry);
-		$description .= "Moved ".$target_entry->code." to ".$origin_panel->letter;
-
-		my $ob = $origin_panel->ballots( entry => $target_entry )->first;
-		$origin_speakerorder = $ob->speakerorder;
-
-		$event = $target_entry->event;
+	if ($origin_panel) {
+		my $sample_ballot = $origin_panel->ballots(entry => $origin_entry)->first;
+		$origin_speakerorder = $sample_ballot->speakerorder;
+		undef $sample_ballot;
 	}
 
-	if ($target_panel && $target_entry && $origin_entry) {
-		Tab::Score->sql_wipe_scores->execute($target_entry, $target_panel);
-		Tab::Ballot->sql_swap->execute($origin_entry, $target_panel, $target_entry);
-		$description .= ".  Moved ".$origin_entry->code." to ".$target_panel->letter;
-		$event = $origin_entry->event;
+	my $target_entry = Tab::Entry->search_target($target_panel->id, $target_speakerorder)->first;
+
+	if ($target_entry) {
+		Tab::Ballot->sql_move_entry->execute($target_panel->id, -1, $target_panel->id, $target_entry->id);
+	}
+
+	Tab::Ballot->sql_move_entry->execute($target_panel->id, $target_speakerorder, $origin_panel->id, $origin_entry->id);
+	my $description .= "Entry ".$origin_entry->code." moved to ".$target_panel->letter;
+
+	if ($target_entry) {
+		Tab::Ballot->sql_move_entry->execute($origin_panel->id, $origin_speakerorder, $target_panel->id, $target_entry->id);
+		$description .= "Entry ".$target_entry->code." moved to ".$origin_panel->letter;
+	}
+
+	foreach my $panel ($origin_panel, $target_panel) {
+		next unless $panel > 0;
+
+		my @ballots = sort {$a->speakerorder <=> $b->speakerorder} $panel->ballots;
+
+		my $max_order;
+		foreach my $ballot (@ballots) {
+			$max_order = $ballot->speakerorder if $max_order < $ballot->speakerorder
+		}
+
+		my $order = $max_order + 1;
+		foreach my $ballot (@ballots) {
+			$ballot->speakerorder($order++);
+			$ballot->update();
+		}
+
+		$order = 1;
+		foreach my $ballot (@ballots) {
+			$ballot->speakerorder($order++);
+			$ballot->update();
+		}
 	}
 
 	my $now = DateTime->now();
@@ -138,6 +121,8 @@
 		type        => 'tabbing',
 		event       => $event,
 		entry       => $origin_entry,
+		old_panel   => $origin_panel,
+		new_panel   => $target_panel,
 		person      => $person,
 		tourn       => $tourn,
 		created     => $now,
