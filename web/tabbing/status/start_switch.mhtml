@@ -1,4 +1,5 @@
 <%args>
+	$tourn
 	$person
 	$target_id => undef
 	$parent_id => undef
@@ -8,84 +9,95 @@
 	$m->clear_buffer();
 	$r->content_type('application/json');
 
-	unless ($target_id) { 
+	unless ($target_id) {
 		$m->print('{ "error": true, "message": "No ballot ID sent"}');
 		$m->abort();
 	}
 
 	my $ballot = Tab::Ballot->retrieve($target_id);
 
-	unless ($ballot) { 
+	unless ($ballot) {
 		$m->print('{ "error": true, "message": "No ballot ID retrieved"}');
 		$m->abort();
 	}
 
-	my @ballots = Tab::Ballot->search(
-		judge => $ballot->judge->id,
-		panel => $ballot->panel->id
-	);
+	my $judge_id = $ballot->judge->id;
+	my $panel_id = $ballot->panel->id;
 
 	my $message;
-	my $reply;
 
-	Tab::Ballot->set_sql( update_ballot_start => "
-		update ballot
-		set judge_started = NULL
-		where id = ? 
+	Tab::Ballot->set_sql( sanitize_ballot => "
+		delete from ballot
+		where ballot.panel = ?
+		and (
+			ballot.entry = 0
+			or ballot.entry is null
+			or ballot.entry = ""
+		)
 	");
 
-	my $counter;
+	Tab::Ballot->sql_sanitize_ballot->execute($panel_id);
+
+	Tab::Ballot->set_sql( clear_ballot_start => "
+		update panel, ballot
+		set ballot.judge_started = NULL, panel.started = NULL
+		where ballot.judge = ?
+		and ballot.panel = panel.id
+		and panel.id = ?
+	");
+
+	Tab::Ballot->set_sql( set_ballot_start => "
+		update panel, ballot
+		set ballot.judge_started = ?, panel.started = ?
+		where ballot.judge = ?
+		and ballot.panel = panel.id
+		and panel.id = ?
+	");
+
 	my $return_to;
 
-	foreach my $ballot (@ballots) { 
-		
-		next unless $ballot->entry;
-		next unless $ballot->entry->event;
-		next unless $ballot->entry->event->tourn;
+	if ($parent_id eq "started_body") {
 
-		$counter++;
+		Tab::Ballot->sql_clear_ballot_start->execute($judge->id, $panel->id);
 
-		if ($parent_id eq "started_body") { 
+		$reply = $judge->last." section ".$panel->letter;
+		$reply .= " Flight ".$panel->flight if $panel->flight > 1;
+		$reply .= " marked unstarted";
 
-			$reply = $ballot->panel->round->event->abbr unless $reply;
-			$message = $ballot->judge->last." ballots marked unstarted" unless $message;
+		$return_to = "unstarted_body";
 
-			Tab::Ballot->sql_update_ballot_start->execute($ballot->id);
+	} elsif ($parent_id eq "unstarted_body") {
 
-			$return_to = "unstarted_body";
+		my $now = DateTime->now(time_zone => $tourn->tz);
 
-		} elsif ($parent_id eq "unstarted_body") { 
+		Tab::Ballot->sql_clear_ballot_start->execute(
+			DateTime::Format::MySQL->format_datetime($now),
+			DateTime::Format::MySQL->format_datetime($now),
+			$judge->id,
+			$panel->id
+		);
 
-			my $tz = $ballot->entry->event->tourn->tz;
-			$tz = "UTC" unless $tz;
+		$reply = $judge->last." section ".$panel->letter;
+		$reply .= " Flight ".$panel->flight if $panel->flight > 1;
+		$reply .= " marked started";
+		$return_to = "started_body";
 
-			my $now = DateTime->now(time_zone => $tz);
+	} else {
 
-			$ballot->judge_started($now);
-			$ballot->update();
+		$m->print('{
+			"error": true,
+			"message": "No valid value sent for starting this round"
+		}');
 
-			unless ($ballot->panel->started) { 
-				$ballot->panel->started($now);
-				$ballot->panel->update();
-			}
-
-			$reply = Tab::nicetime($now) unless $reply;
-			$message = $ballot->judge->last." ballots marked started" unless $message;
-			$return_to = "started_body";
- 
-		} else { 
-
-			$m->print('{ "error": true, "message": "No other value sent"}');
-			$m->abort();
-		}
+		$m->abort();
 
 	}
 
-	$m->print('{ 
-		"error": false,
-		"message": "'.$message.'",
-		"reply": "'.$reply.'",
-		"newParent": "'.$return_to.'"
+	$m->print('{
+		"error"     : false,
+		"message"   : "'.$message.'",
+		"reply"     : "'.$reply.'",
+		"newParent" : "'.$return_to.'"
 	}');
 
 	$m->abort();
