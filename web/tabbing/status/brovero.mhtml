@@ -1,0 +1,429 @@
+<%args>
+	$tourn
+	$perms
+	$person
+	$session
+	$timeslot_id   => undef
+	$category_id   => undef
+	$entry_only    => undef
+	$only_category => undef
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $timeslot = Tab::Timeslot->retrieve($timeslot_id) if $timeslot_id;
+
+	my ($eventref, $catref) = $m->comp(
+		"/funclib/allowed_events.mas",
+		tourn => $tourn,
+		perms => $perms
+	);
+
+	my @events = @{$eventref};
+	my @categories = @{$catref};
+
+	if ($category_id) {
+		$session->category($category_id);
+		$session->update;
+	}
+
+	my $session_category = $session->category;
+
+    if ($session_category && $session_category->tourn != $tourn) {
+        $session->category("");
+        $session->update;
+        undef $session_category;
+    }
+
+    unless ($session_category) {
+      	$session_category = $categories[0];
+        $session->category($session_category->id) if $session_category;
+        $session->update;
+    }
+
+	unless ($session_category) {
+		$m->print("Your tournament has no categories, and cannot run like this.  ");
+		$m->print("Please start from the Setup menu to proceed");
+		$m->abort;
+	}
+
+	Tab::Timeslot->set_sql(unseen_count => "
+
+		select count(distinct judge.id)
+		from (judge, ballot, panel, round, event)
+		left join room on room.id = panel.room
+
+		where round.timeslot = ?
+			and round.id = panel.round
+			and panel.bye != 1
+			and panel.id = ballot.panel
+			and ballot.bye != 1
+			and ballot.forfeit != 1
+			and ballot.judge = judge.id
+			and round.event = event.id
+			and ballot.judge = judge.id
+
+			and not exists (
+				select js.id
+				from judge_setting js
+				where js.judge = judge.id
+				and js.tag = 'adri_saw_you'
+				and js.conditional = round.timeslot
+			)
+	");
+
+	Tab::Timeslot->set_sql(seen_count => "
+
+		select count(distinct judge.id)
+		from (judge, ballot, panel, round, event, judge_setting js)
+		left join room on room.id = panel.room
+
+		where round.timeslot = ?
+			and round.id = panel.round
+			and panel.bye != 1
+			and panel.id = ballot.panel
+			and ballot.bye != 1
+			and ballot.forfeit != 1
+			and ballot.judge = judge.id
+			and round.event = event.id
+			and ballot.judge = judge.id
+			and js.judge = judge.id
+			and js.tag = 'adri_saw_you'
+			and js.conditional = round.timeslot
+	");
+
+</%init>
+
+	<script>
+
+		function statusCounter() {
+			var unseen = $("#unseen_body").children().length;
+			var seen = $("#seen_body").children().length;
+			$("#unseen_count").text(unseen);
+			$("#seen_count").text(seen);
+		};
+
+		$(document).ready(function() {
+			statusCounter();
+		});
+
+	</script>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+%			if ($entry_only) {
+				<a
+					href  = "/tabbing/entry/index.mhtml"
+					class = "yellow full"
+				>Return to Ballot Entry</a>
+				<br />
+%			}
+
+%			unless ($only_category) {
+
+				<span class="evenrow full marbottom centeralign">
+
+					<form action="brovero.mhtml" method="post">
+					<input
+						type  = "hidden"
+						name  = "timeslot"
+						value = "<% $timeslot ? $timeslot->id : "" %>"
+					>
+
+					<select
+						name     = "category_id"
+						onchange = 'this.form.submit()'
+						class    = "chosen fixedmed notfirst"
+					>
+						<option value="">Choose judge category:</option>
+
+%						foreach my $other_category (@categories) {
+							<option
+								value="<% $other_category->id %>"
+								<% ($session_category && $other_category->id == $session_category->id)
+									? "selected"
+									: ""
+								%>><% $other_category->name %></option>
+%						}
+					</select>
+					</form>
+				</span>
+%			}
+
+			<h4>Timeslots:</h4>
+
+<%perl>
+				my @timeslots = $m->comp(
+					"/funclib/category_timeslots.mas",
+			  		category => $session_category,
+					events   => \@events
+				);
+
+				foreach my $ts (@timeslots) {
+
+					my $seen_count = Tab::Timeslot->sql_seen_count->select_val($ts->id);
+					my $unseen_count = Tab::Timeslot->sql_unseen_count->select_val($ts->id);
+</%perl>
+
+					<a href="brovero.mhtml?timeslot_id=<% $ts->id %>"
+						class="<%
+							$ts->id == $timeslot_id ? "dk" : ""
+						%><% $unseen_count ? "yellow" : "green" %> full martop"
+					>
+						<span class="half ">
+							<% $ts->name %>
+						</span>
+
+						<span class="quarter">
+							<% $seen_count %> SEEN
+						</span>
+						<span class="quarter">
+							<% $unseen_count %> NOT
+						</span>
+					</a>
+%				}
+		</div>
+	</div>
+
+	<div class="main">
+
+		<h2><% $tourn->name %></h2>
+
+		<& "tabbar.mas",
+			whoami => 'brovero',
+			tourn  => $tourn
+		&>
+
+%		if ($timeslot) {
+
+			<h4 class="centeralign">
+				Judge attendance for <% $timeslot->name %>
+			</h4>
+
+			<p class="italic semibold redtext centeralign">
+				Click a judge to move them to the other column
+			</p>
+<%perl>
+
+			Tab::Judge->columns(TEMP => "flights");
+			Tab::Judge->columns(TEMP => "eventabbr");
+			Tab::Judge->columns(TEMP => "roomname");
+			Tab::Judge->columns(TEMP => "seen");
+			Tab::Judge->columns(TEMP => "flights");
+			Tab::Judge->columns(TEMP => "flighted");
+
+			Tab::Judge->set_sql( no_brovero => "
+				select judge.*, event.abbr as eventabbr, room.name as roomname,
+					group_concat(distinct(panel.flight)) as flights,
+					round.flighted as flighted
+				from (judge, ballot, panel, round, event)
+				left join room on room.id = panel.room
+
+				where round.timeslot = ?
+					and round.id = panel.round
+					and panel.bye != 1
+					and panel.id = ballot.panel
+					and ballot.bye != 1
+					and ballot.forfeit != 1
+					and ballot.judge = judge.id
+					and round.event = event.id
+					and ballot.judge = judge.id
+
+					and not exists (
+						select js.id
+						from judge_setting js
+						where js.judge = judge.id
+						and js.tag = 'adri_saw_you'
+						and js.conditional = round.timeslot
+					)
+				group by judge.id
+				order by judge.last, judge.first, panel.flight
+			");
+
+			my @unseen = Tab::Judge->search_no_brovero($timeslot->id);
+
+			Tab::Judge->set_sql( brovero => "
+				select judge.*, event.abbr as eventabbr, js.value_date as seen, room.name as roomname
+				from (judge, ballot, panel, round, event, judge_setting js)
+				left join room on room.id = panel.room
+
+				where round.timeslot = ?
+					and round.id = panel.round
+					and panel.bye != 1
+					and panel.id = ballot.panel
+					and ballot.bye != 1
+					and ballot.forfeit != 1
+					and ballot.judge = judge.id
+					and round.event = event.id
+					and ballot.judge = judge.id
+
+					and js.judge = judge.id
+					and js.tag = 'adri_saw_you'
+					and js.conditional = round.timeslot
+
+				group by judge.id
+				order by judge.last, judge.first, panel.flight
+			");
+
+			my @seen = Tab::Judge->search_brovero($timeslot->id);
+
+</%perl>
+			<span class="pagehalf">
+
+				<div class="full nospace semibold bigger">
+					<span
+						class="quarter"
+						id="unseen_count"
+					></span>
+
+					<span class="half">
+						Judges not seen
+					</span>
+
+					<span class="quarter rightalign smallish"
+						id="unseen_buttonarea"
+					> </span>
+
+				</div>
+
+				<& "/funclib/tablesorter.mas", table => "unseen" &>
+
+				<table id="unseen">
+
+					<thead>
+						<tr class="yellowrow smallish">
+
+							<th>
+								Room
+							</th>
+							<th>
+								Judge
+							</th>
+							<th>
+								Event
+							</th>
+						</tr>
+					</thead>
+
+					<tbody id="unseen_body">
+
+%					foreach my $judge (@unseen) {
+
+						<tr
+							class         = "hover countme"
+							id            = "<% $judge->id %>"
+							target_id     = "<% $judge->id %>"
+							property_name = "<% $timeslot->id %>"
+							reply_target  = "<% $judge->id %>_status"
+							onClick       = 'postSwitch(this, "brovero_switch.mhtml", statusCounter);'
+						>
+
+							<td class="padvertmore">
+								<% $judge->roomname %>
+							</td>
+
+							<td>
+								<% $judge->last.", ".$judge->first %>
+							</td>
+
+							<td id="<% $judge->id %>_status">
+								<% $judge->eventabbr %>
+								<% $judge->flighted ne "1" ? " Flt ".$judge->flights : "" %>
+							</td>
+
+						</tr>
+%					}
+
+					</tbody>
+
+				</table>
+
+			</span>
+
+
+			<span class="pagehalf">
+
+				<div class="full nospace semibold bigger">
+
+					<span
+						class="quarter"
+						id="seen_count"
+					></span>
+
+					<span class="half">
+						Judges Seen
+					</span>
+
+					<span class="quarter rightalign smallish"
+						id="seen_buttonarea"
+					>
+					</span>
+				</div>
+
+				<& "/funclib/tablesorter.mas",
+					table => "seen"
+				&>
+
+				<table id="seen">
+
+					<thead>
+						<tr class="yellowrow smallish">
+
+							<th>
+								Room
+							</th>
+							<th>
+								Judge
+							</th>
+							<th>
+								Spotted
+							</th>
+						</tr>
+					</thead>
+
+					<tbody id="seen_body">
+
+%					foreach my $judge (@seen) {
+
+						<tr
+							class         = "hover countme"
+							id            = "<% $judge->id %>"
+							target_id     = "<% $judge->id %>"
+							property_name = "<% $timeslot->id %>"
+							reply_target  = "<% $judge->id %>_status"
+							onClick       = 'postSwitch(this, "brovero_switch.mhtml", statusCounter);'
+						>
+
+							<td class="padvertmore">
+								<% $judge->roomname %>
+							</td>
+
+							<td>
+								<% $judge->last.", ".$judge->first %>
+							</td>
+
+							<td id="<% $judge->id %>_status">
+								<% 	Tab::nicetime(
+										Tab::DBI::date_inflate($judge->seen)->set_time_zone($tz)
+									)
+								%>
+							</td>
+
+						</tr>
+
+%					}
+
+					</tbody>
+
+				</table>
+
+			</span>
+
+%		}
+
+	</div>
+
