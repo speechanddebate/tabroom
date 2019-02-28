@@ -33,31 +33,233 @@
     my $json = JSON->new->allow_nonref->convert_blessed;
 	my $jdata = $json->decode($io);
 
-	my $start_dt = parse_date($jdata->{start});
-	my $end_dt = parse_date($jdata->{end});
+	$m->flush_buffer();
+	$m->print("<h5>Uploading data from file into ".$tourn->name."</h5>\n");
 
-	$tourn->name($jdata->{name}) if $jdata->{name};
-	$tourn->tz($jdata->{tz}) if $jdata->{tz};
-	$tourn->start($start_dt) if $start_dt;
-	$tourn->end($end_dt) if $end_dt;
-	$tourn->update();
+	my $timestamp = parse_date($jdata->{timestamp});
 
-	Tab::SchoolSetting->set_sql(rm_settings => "delete from school_setting.* where school = ?");
+	$m->print("<p class='specific'>Data file was created on ");
+	$m->comp("/funclib/showdt.mas", dt => $timestamp);
+	$m->print(" by ".$jdata->{creator}."</p>");
+
+	unless ($jdata->{event_only} || $jdata->{school_only}) {
+
+		#TOURN DATA
+
+		my $reg_start_dt = parse_date($jdata->{reg_start});
+		my $reg_end_dt = parse_date($jdata->{reg_end});
+
+		$m->print("<p class='action'> Updating tournament</p>");
+
+		$tourn->name($jdata->{name}) if $jdata->{name};
+		$tourn->tz($jdata->{tz}) if $jdata->{tz};
+		$tourn->start($start_dt) if $start_dt;
+		$tourn->end($end_dt) if $end_dt;
+		$tourn->start($reg_start_dt) if $reg_start_dt;
+		$tourn->end($reg_end_dt) if $reg_end_dt;
+
+		$m->print("<p class='specific'>Loaded tournament data changes</p>");
+		$tourn->update();
+
+		#TOURN SETTINGS
+
+		if ($jdata->{settings})  {
+
+			$m->print("<p class='specific'> Loading ".scalar @{$jdata->{settings}}." tournament settings </p>");
+
+			Tab::TournSetting->set_sql(rm_all => "
+				delete from tourn_setting where tourn = ?
+			");
+
+			Tab::TournSetting->sql_rm_all->execute($tourn->id);
+
+			foreach my $jsetting (@{$jdata->{settings}}) {
+				my @reply = parse_setting($jsetting);
+				$tourn->setting(@reply) if @reply;
+			}
+		}
+
+	} elsif ($jdata->{event_only}) {
+
+		$m->print("<p class='action'>Update event(s) only</p>");
+
+	} elsif ($jdata->{school_only}) {
+
+		$m->print("<p class='action'>Update school(s) only</p>");
+
+	}
+
+	my %translator;
+
+	unless ($jdata->{school_only}) {
+
+		my @categories = $tourn->categories();
+		my %category_by_id = map {$_->id => $_} @categories;
+		my %category_by_name = map {$_->name => $_} @categories;
+		my %category_by_abbr = map {$_->abbr => $_} @categories;
+
+		$m->print("<p class='action'> Importing ".scalar @{$jdata->{categories}}." judge categories </p>");
+
+		Tab::CategorySetting->set_sql(
+			rm_all => "delete from category_setting where category = ?"
+		);
+
+		Tab::EventSetting->set_sql(
+			rm_all => "delete from event_setting where event = ?"
+		);
+
+		# CATEGORY CATEGORIES
+		foreach my $category (@{$jdata->{categories}}) {
+
+			my $ocategory = $category_by_id{$category->{id}};
+
+			$m->print("<p class='specific'> No category found for id ".$category->{id}." Trying abbr ".$category->{abbr}."</p>");
+			$ocategory = $category_by_abbr{$category->{abbr}} unless $ocategory;
+
+			$m->print("<p class='specific'> No category found for id ".$category->{id}." Trying name ".$category->{name}."</p>");
+			$ocategory = $category_by_name{$category->{name}} unless $ocategory;
+
+			if ($ocategory) {
+				$ocategory->name($category->{name});
+				$ocategory->abbr($category->{abbr});
+				$ocategory->update();
+			} else {
+
+				$m->print("<p class='specific'> No category found for name ".$category->{name}." Creating</p>");
+				$ocategory = Tab::Category->create({
+					tourn => $tourn->id,
+					name  => $category->{name},
+					abbr  => $category->{abbr},
+				});
+
+				$translator{category}{$category->{id}} = $ocategory->id;
+			}
+
+			if ($category->{settings})  {
+				$m->print("<p class='specific'> Loading ".scalar @{$category->{settings}}." categoryament settings </p>");
+
+				Tab::CategorySetting->sql_rm_all->execute($ocategory->id);
+
+				foreach my $jsetting (@{$category->{settings}}) {
+					my @reply = parse_setting($jsetting);
+					$ocategory->setting(@reply) if @reply;
+				}
+			}
+
+			# PREFS AND PREF SHEETS
+			my @rts = $ocategory->rating_tiers;
+			my %rt_by_id = map {$_->id => $_} @rts;
+			my %rt_by_name = map {$_->name => $_} @rts;
+
+			foreach my $rt (@{$category->{rating_tiers}}) {
+				my $ort = $rt_by_id{$rt->{id}};
+
+				$m->print("<p class='specific'> No rating tier found for id ".$rt->{id}." Trying name ".$rt->{name}."</p>");
+				$ort = $rt_by_name{$rt->{name}} unless $ort;
+
+				unless ($ort) {
+					$ort = Tab::RatingTier->create{{
+						category    => $ocategory->id,
+						type        => $rt->{tag},
+						name        => $rt->{name},
+						description => $rt->{description},
+						strike      => $rt->{strike},
+						conflict    => $rt->{conflict},
+						min         => $rt->{min},
+						max         => $rt->{max},
+						start       => $rt->{start},
+					});
+					$translator{rating_tier}{$rt->{id}} = $ort->id;
+				}
+			}
+
+			my @rss = $ocategory->rating_subsets;
+			my %rs_by_id = map {$_->id => $_} @rss;
+			my %rs_by_name = map {$_->name => $_} @rss;
+
+			#RATING SUBSETS
+			foreach my $rs (@{$category->{rating_subsets}}) {
+				my $ors = $rs_by_id{$rs->{id}};
+
+				$m->print("<p class='specific'> No rating subset found for id ".$rs->{id}." Trying name ".$rs->{name}."</p>");
+				$ors = $rs_by_name{$rs->{name}} unless $ors;
+
+				unless ($ors) {
+					$ors = Tab::RatingTier->create{{
+						category => $ocategory->id,
+						name     => $rs->{name}
+					});
+					$translator{rating_subset}{$rs->{id}} = $ors->id;
+				}
+			}
+
+			# EVENTS
+			if ($category->{events}) {
+
+				my @events = $oevent->events();
+				my %event_by_id = map {$_->id => $_} @events;
+				my %event_by_name = map {$_->name => $_} @events;
+				my %event_by_abbr = map {$_->abbr => $_} @events;
+
+				$m->print("<p class='action'> Importing ".scalar @{$jdata->{events}}." events </p>");
+
+				foreach my $event (@{$jdata->{events}}) {
+
+					my $oevent = $event_by_id{$event->{id}};
+
+					$m->print("<p class='specific'> No event found for id ".$event->{id}." Trying abbr ".$event->{abbr}."</p>");
+					$oevent = $event_by_abbr{$event->{abbr}} unless $oevent;
+
+					$m->print("<p class='specific'> No event found for id ".$event->{id}." Trying name ".$event->{name}."</p>");
+					$oevent = $event_by_name{$event->{name}} unless $oevent;
+
+					if ($oevent) {
+						$oevent->name($event->{name});
+						$oevent->abbr($event->{abbr});
+						$oevent->update();
+					} else {
+
+						$m->print("<p class='specific'> No event found for name ".$event->{name}." Creating</p>");
+						$oevent = Tab::Event->create({
+							tourn => $tourn->id,
+							name  => $event->{name},
+							abbr  => $event->{abbr},
+							type  => $event->{type}
+						});
+					}
+
+					if ($event->{settings})  {
+						$m->print("<p class='specific'> Loading ".scalar @{$event->{settings}}." eventament settings </p>");
+
+						Tab::EventSetting->sql_rm_all->execute($event->id);
+
+						foreach my $jsetting (@{$event->{settings}}) {
+							my @reply = parse_setting($jsetting);
+							$event->setting(@reply) if @reply;
+						}
+					}
+				}
+			}
+		}
+	}
 
 	my $log;
 	my %schools;
 
-	if ($jdata->{schools}) {
+	if ($jdata->{schools} && (not defined $jdata->{event_only})) {
 
 		my @schools = $tourn->schools;
 		my %school_by_id = map {$_->id => $_} @schools;
 		my %school_by_name = map {$_->name => $_} @schools;
 
+		$m->print("<p class='action'> Importing ".scalar @{$jdata->{schools}}." school registrations</p>");
+
 		# SCHOOLS
-		foreach my $school ($jdata->{schools}) {
+		foreach my $school (@{$jdata->{schools}}) {
 
 			my $oschool;
 			$oschool = $school_by_id{$school->id};
+			my $chapter;
 
 			unless ($oschool) {
 				$oschool = $school_by_name{$school->name};
@@ -67,12 +269,23 @@
 
 				$oschool->name($school->{name});
 				$oschool->code($school->{code});
+				$oschool->onsite($school->{onsite});
 				$oschool->region($school->{region});
 				$oschool->district($school->{district});
 
+				$chapter = $oschool->chapter;
+
+				if ($chapter) {
+					if ($school->{nsda} && (not defined $chapter->nsda)) {
+						$chapter->nsda($school->{nsda});
+						$chapter->update();
+					}
+				}
+
 			} else {
 
-				my $chapter = Tab::Chapter->retrieve($school->{chapter}) if $school->{chapter};
+				$chapter = Tab::Chapter->retrieve($school->{chapter})
+					if $school->{chapter};
 
 				if ((not defined $chapter) && $school->{nsda}) {
 
@@ -83,6 +296,7 @@
 							school_id => $school->{nsda}
 						)->first;
 
+						$m->print("<p class='specific'>No chapter with NSDA ID ".$school->{nsda}." found.  Importing from NSDA DB</p>");
 						if ($nsda_school) {
 							$chapter = $m->comp(
 								"/funclib/chapter_import.mas",
@@ -94,9 +308,12 @@
 					}
 
 					unless ($chapter) {
+
 						$chapter = Tab::Chapter->create({
 							name => $school->{name}
 						});
+
+						$m->print("<p class='specific'>No chapter with name ".$school->{name}." or NSDA ID ".$school->{nsda}." found.  Created $chapter</p>");
 					}
 				}
 
@@ -117,29 +334,32 @@
 					district => $school->{district},
 				});
 
+				$m->print("<p class='specific'>No school with name ".$school->{name}." found.  Created $chapter</p>");
 			}
 
 			if ($oschool) {
 
 				$schools{$school->{id}} = $oschool;
 
-				# SCHOOL SETTINGS
-				Tab::SchoolSetting->sql_rm_settings->execute($oschool->id);
+				#SCHOOL SETTINGS
 
-				foreach my $setting ($school->{settings}) {
-					if ($setting->{meta} eq "date") {
-						my $string = $setting->{value};
-						$string =~ s/T/ /g;
-						my $dt = DateTime::Format::MySQL->parse_datetime($dt);
-						$oschool->setting($setting->{tag}, "date", $dt);
-					} elsif ($setting->{meta} eq "text") {
-						$oschool->setting($setting->{tag}, "text", $setting->{value});
-					} else {
-						$oschool->setting($setting->{tag}, $setting->{value});
+				if ($school->{settings})  {
+
+					$m->print("<p class='specific'> Loading ".scalar @{$school->{settings}}." school settings </p>");
+
+					Tab::SchoolSetting->set_sql(rm_all => "
+						delete from school_setting where school = ?
+					");
+
+					Tab::SchoolSetting->sql_rm_all->execute($school->id);
+
+					foreach my $jsetting (@{$school->{settings}}) {
+						my @reply = parse_setting($jsetting);
+						$school->setting(@reply) if @reply;
 					}
 				}
 
-				#ENTRIES
+				# ENTRIES
 				my @entries = $oschool->entries;
 				my %entry_by_id = map {$_->id => $_} @entries;
 				my %entry_by_name = map {$_->name => $_} @entries;
@@ -150,7 +370,22 @@
 					$oentry = $entry_by_id{$entry->{id}};
 					$oentry = $entry_by_name{$entry->{name}} unless $oentry;
 					$oentry = $entry_by_code{$entry->{code}} unless $oentry;
-				}
+
+					unless ($oentry) {
+
+						$oentry->create({
+							event => $entry->{event}
+						});
+
+					}
+
+
+				# STUDENTS
+				my @students = $chapter->students(retired => 0);
+				my %students_by_id = map {$_->id => $_} @students;
+				my %students_by_nsda = map {$_->nsda => $_} @students;
+				my %students_by_name = map {$_->first."-".$_->last => $_} @students;
+
 
 			}
 		}
@@ -197,7 +432,7 @@
 		my %tseen = ();
 		@timeslots = grep { ! $tseen{$_->id} ++ } @timeslots;
 
-		# TIMESLOTS
+		#TIMESLOTS
 		foreach my $ts (@timeslots) {
 
 			my $json_ts = {
@@ -331,7 +566,7 @@
 		select
 			rating.id, rating.type, rating.entry, rating.judge,
 			rating.ordinal, rating.percentile,
-			rating_tier.name
+			rating_tier.name, rating.rating_subset
 
 		from (rating, judge)
 
@@ -707,7 +942,6 @@
 				};
 
 				push @{$json_result->{"values"}}, $json_rv;
-
 			}
 		}
 
@@ -720,7 +954,8 @@
 			while (
 				my (
 					$rating_id, $rating_type, $rating_entry, $rating_judge,
-					$rating_ordinal, $rating_percentile, $rating_tier_name
+					$rating_ordinal, $rating_percentile, $rating_tier_name,
+					$rating_subset
 				) = $rating_sth->fetchrow_array()
 			) {
 
@@ -732,12 +967,10 @@
 					judge => $rating_judge
 				};
 
-				if ($rating_tier_name) {
-					$json_rating->{rating} = $rating_tier_name;
-				} else {
-					$json_rating->{rating} = $rating_ordinal;
-					$json_rating->{percentile} = $rating_percentile;
-				}
+				$json_rating->{rating} = $rating_tier_name if $rating_tier_name;
+				$json_rating->{rating} = $rating_ordinal if $rating_ordinal;
+				$json_rating->{rating} = $rating_percentile if $rating_percentile;
+				$json_rating->{rating} = $rating_subset if $rating_subset;
 
 				push (@{$judges{$rating_judge}{"ratings"}}, $json_rating);
 			}
@@ -1087,6 +1320,20 @@
 		return eval {
 			return DateTime::Format::MySQL->parse_datetime($string);
 		};
+	}
+
+	sub parse_setting {
+		my $json_ref = shift;
+
+		if ($json_ref->{meta} eq "date") {
+			my $dt = parse_date($json_ref->{value});
+			return unless $dt;
+			return ($json_ref->{tag}, $json_ref->{meta}, $dt);
+		} elsif ($json_ref->{meta} eq "text") {
+			return ($json_ref->{tag}, $json_ref->{meta}, $json_ref->{value});
+		} else {
+			return ($json_ref->{tag}, $json_ref->{value});
+		}
 	}
 
 </%init>
