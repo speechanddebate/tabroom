@@ -38,14 +38,23 @@ __PACKAGE__->_register_datetimes( qw/timestamp /);
 
 sub setting {
 
-	my ($self, $tag, $value, $blob) = @_;
+	my ($self, $tag, $value, $blob, $blob2) = @_;
+
+	my $conditional;
+
+	if ($value eq "text" || $value eq "date") { 
+		$conditional = $blob2;
+	} else { 
+		$conditional = $blob;
+	}
 
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
 	my $existing = Tab::JudgeSetting->search(  
-		judge => $self->id,
-		tag   => $tag,
+		judge       => $self->id,
+		tag         => $tag,
+		conditional => $conditional
 	)->first;
 
 	if (defined $value) { 
@@ -55,10 +64,10 @@ sub setting {
 			$existing->value($value);
 			$existing->value_text($blob) if $value eq "text";
 			$existing->value_date($blob) if $value eq "date";
-			$existing->update;
+			$existing->update();
 
 			if ($value eq "delete" || $value eq "" || $value eq "0") { 
-				$existing->delete;
+				$existing->delete();
 			}
 
 			return;
@@ -67,26 +76,24 @@ sub setting {
 
 			eval { 
 				$existing = Tab::JudgeSetting->create({
-					judge => $self->id,
-					tag   => $tag,
-					value => $value,
+					judge       => $self->id,
+					tag         => $tag,
+					value       => $value,
+					conditional => $conditional
 				});
 			};
 
 			if ($existing) { 
 
+				# I'm going to hell for this - CLP
 				if ($value eq "text") { 
 					$existing->value_text($blob);
-				}
-
-				if ($value eq "date") { 
+				} elsif ($value eq "date") { 
 					$existing->value_date($blob);
 				}
 
 				$existing->update;
-
 			}
-
 		}
 
 	} else {
@@ -97,7 +104,6 @@ sub setting {
 		return $existing->value;
 
 	}
-
 }
 
 
@@ -110,7 +116,7 @@ sub all_settings {
 	my $dbh = Tab::DBI->db_Main();
 
     my $sth = $dbh->prepare("
-		select setting.tag, setting.value, setting.value_date, setting.value_text
+		select setting.tag, setting.value, setting.value_date, setting.value_text, setting.conditional
 		from judge_setting setting
 		where setting.judge = ? 
         order by setting.tag
@@ -118,22 +124,18 @@ sub all_settings {
     
     $sth->execute($self->id);
     
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
+    while( my ($tag, $value, $value_date, $value_text, $conditional)  = $sth->fetchrow_array() ) { 
 
 		if ($value eq "date") { 
-
 			my $dt = Tab::DBI::dateparse($value_date); 
 			$all_settings{$tag} = $dt if $dt;
-
 		} elsif ($value eq "text") { 
-
 			$all_settings{$tag} = $value_text;
-
 		} else { 
-
 			$all_settings{$tag} = $value;
-
 		}
+
+		$all_settings{$tag."-conditional"} = $conditional;
 
 	}
 
