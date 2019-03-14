@@ -25,7 +25,7 @@ sub sorted_keys {
 			$keylog .= $key;
 		} 
 		
-		return ('ID', 'DOWNLOADRECORD','SCHOOL','FIRST','LAST','OBLIGATION','HIRED','TABRATING','STOPSCHEDULING','ADA','DIVERSE','NOTES','EMAIL', @event_keys, @ts_keys);
+		return ('ID', 'DOWNLOADRECORD','SCHOOL','FIRST','LAST','PERSON','OBLIGATION','HIRED','TABRATING','STOPSCHEDULING','ADA','DIVERSE','NOTES','EMAIL', @event_keys, @ts_keys);
 		
 	} elsif ($name eq "TOURN") { 
 		return ('ID', 'TOURNNAME', 'STARTDATE','ENDDATE','DOWNLOADSITE');
