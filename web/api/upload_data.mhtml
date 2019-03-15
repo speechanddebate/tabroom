@@ -47,6 +47,16 @@
 
 	# Shared Database functions
 
+	Tab::EntryStudent->columns(TEMP => "entryid");
+	Tab::EntryStudent->columns(TEMP => "studentid");
+
+	Tab::EntryStudent->set_sql (by_school => "
+		select entry_student.*, entry_student.entry entryid, entry_student.student studentid
+		from entry_student, entry
+		where entry_student.entry = entry.id
+		and entry.school = ?
+	");
+
 	Tab::Concession->set_sql(rm_all => "
 		delete from concession where school = ?
 	");
@@ -1083,8 +1093,13 @@
 				$m->print("<p class='action'>".$oschool->name." has ".scalar @{$school->{entries}}." entries</p>");
 				$m->flush_buffer();
 
-				my $created;
 				my $found;
+				my $created;
+				my %es_by_entry;
+
+				foreach my $es (Tab::EntryStudent->search_by_school( $oschool->id )) {
+					$es_by_entry{$es->entryid}{$es->studentid} = $es;
+				}
 
 				foreach my $category (@{$jdata->{categories}}) {
 
@@ -1100,9 +1115,7 @@
 
 						foreach my $entry (@{$school->{entries}}) {
 
-							Tab::debuglog("1 Entry $entry has event ".$entry->{event}." and this is ".$event->{id});
 							next unless $entry->{event} == $event->{id};
-							Tab::debuglog("2 Success!");
 
 							my $oentry;
 							$oentry = $entry_by_id{$entry->{id}};
@@ -1116,7 +1129,7 @@
 							unless ($oentry) {
 								$oentry = Tab::Entry->create({
 									school      => $oschool->id,
-									event       => $event->id,
+									event       => $oevent->id,
 									name        => $entry->{name},
 									code        => $entry->{code},
 									ada         => $entry->{ada},
@@ -1130,7 +1143,7 @@
 
 								$oentry->name($entry->{name});
 								$oentry->code($entry->{code});
-								$oentry->event($event->id);
+								$oentry->event($oevent->id);
 								$oentry->ada($entry->{ada});
 								$oentry->tba($entry->{tba});
 								$oentry->dropped($entry->{dropped});
@@ -1152,16 +1165,13 @@
 							}
 
 							#ENTRY STUDENTS
-							my @es = Tab::EntryStudent->search( entry => $entry->id);
-							my %esen = map {$_->student->id => $_} @es;
-
 							foreach my $student_id (@{$entry->{students}}) {
 
 								my $ostudent = $translator{student}{$student_id};
 
-								unless ($esen{$ostudent->id}) {
+								if ($es_by_entry{$oentry->id}{$ostudent->id}) {
 									# So I can spare this existing from deletion later
-									delete $esen{$ostudent->id};
+									delete $es_by_entry{$oentry->id}{$ostudent->id};
 								} else {
 									Tab::EntryStudent->create({
 										entry   => $oentry->id,
@@ -1170,9 +1180,9 @@
 								}
 							}
 
-							foreach my $spare (keys %esen) {
-								$esen{$spare}->delete();
-								delete $esen{$spare};
+							foreach my $spare (keys %{$es_by_entry{$oentry->id}}) {
+								$es_by_entry{$oentry->id}{$spare}->delete();
+								delete $es_by_entry{$oentry->id}{$spare};
 							}
 						}
 
@@ -1758,6 +1768,7 @@
 							ada           => $judge->{ada},
 							obligation    => $judge->{obligation},
 							hired         => $judge->{hired},
+							person        => $judge->{person},
 							school        => $oschool,
 							category      => $ocategory,
 							alt_category  => $alt_category,
@@ -1773,6 +1784,7 @@
 						$ojudge->last($judge->{last});
 						$ojudge->active($judge->{active});
 						$ojudge->ada($judge->{ada});
+						$ojudge->person($judge->{person});
 						$ojudge->obligation($judge->{obligation});
 						$ojudge->hired($judge->{hired});
 
@@ -1880,8 +1892,10 @@
 					$site = $default_site unless $site;
 
 					my $oround;
-					$oround = $round_by_id{$round->{id}};
-					$oround = $round_by_name{$round->{name}} unless $oround;
+
+					#Reverse these to avoid the constraint about one round per number per event
+					$oround = $round_by_name{$round->{name}};
+					$oround = $round_by_id{$round->{id}} unless $oround;
 
 					my $tiebreak_set = $translator{tiebreak_set}{$round->{tiebreak_set}};
 
@@ -1917,7 +1931,6 @@
 
 						$oround = Tab::Round->create({
 							event        => $oevent->id,
-							id           => $round->{id},
 							type         => $round->{type},
 							name         => $round->{name},
 							published    => $round->{published},
@@ -1951,17 +1964,17 @@
 
 						foreach my $section (@{$round->{sections}}) {
 
-							my $room = $translator{room}{$section->{room}};
+							my $oroom = $translator{room}{$section->{room}};
 
 							# Also to help foreign imports and Speechwire
-							unless ($room) {
-								$room = $translator{roomname}{$section->{room_name}};
+							unless ($oroom) {
+								$oroom = $translator{roomname}{$section->{room_name}};
 							}
 
 							$section->{bye} = 0 unless $section->{bye} > 0;
 
-							if ( (not defined $room) && $section->{room_name}) {
-								$room = Tab::Room->create({
+							if ( (not defined $oroom) && $section->{room_name}) {
+								$oroom = Tab::Room->create({
 									site     => $site->id,
 									name     => $section->{room_name},
 									ada      => 0,
@@ -1973,7 +1986,7 @@
 							$flight = 1 unless $flight;
 
 							my $osection = Tab::Panel->create({
-								room   => $room,
+								room   => $oroom,
 								round  => $oround,
 								letter => $section->{letter},
 								flight => $flight,
@@ -1990,14 +2003,14 @@
 
 								foreach my $ballot (@{$section->{ballots}}) {
 
-									my $entry = $translator{entry}{$ballot->{entry}};
-									next unless $entry;
+									my $oentry = $translator{entry}{$ballot->{entry}};
+									next unless $oentry;
 
-									my $judge = $translator{judge}{$ballot->{judge}};
-									$judge = 0 unless $judge;
+									my $ojudge = $translator{judge}{$ballot->{judge}};
+									$ojudge = 0 unless $ojudge;
 
 									foreach my $tag ("side", "speakerorder", "chair", "bye", "forfeit", "tv", "audit") {
-										$ballot->{$tag} = 0 unless $ballot->{tag} > 0;
+										$ballot->{$tag} = 0 unless $ballot->{$tag} > 0;
 									}
 
 									while ($taken{$ballot->{side}."-".$ballot->{speakerorder}}) {
@@ -2012,8 +2025,8 @@
 
 									my $oballot = Tab::Ballot->create({
 										panel        => $osection->id,
-										entry        => $entry,
-										judge        => $judge,
+										entry        => $oentry,
+										judge        => $ojudge,
 										side         => $ballot->{side},
 										speakerorder => $ballot->{speakerorder},
 										bye          => $ballot->{bye},
@@ -2034,7 +2047,7 @@
 												ballot   => $oballot->id,
 												tag      => $score->{tag},
 												value    => $score->{value},
-												speaker  => $score->{speaker},
+												student  => $score->{speaker},
 												speech   => $score->{speech},
 												topic    => $score->{topic},
 												position => $score->{position}
