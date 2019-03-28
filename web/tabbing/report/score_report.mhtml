@@ -1,6 +1,8 @@
 <%args>
 	$tourn
 	$session
+	$person
+	$person_settings
 	$event_id   => undef
 	$round_name => undef
 </%args>
@@ -20,6 +22,13 @@
 
 	my $exclude_number = $exclude_round->name if $exclude_round;
 
+	my $codes = $event->setting('code_style');
+
+	my $show_codes++ unless ($codes eq "names"
+		|| $codes eq "last_names"
+		|| $codes eq "code_name"
+		|| $codes eq "names_lastfirst");
+
 	my $label;
 
 	unless ($exclude_number) {
@@ -29,7 +38,11 @@
 		$label = "Results up to round ".$exclude_number;
 	}
 
+    my $fontsize = $person_settings->{"fontsize"};
+    $fontsize = "scriptsize" if ($fontsize eq "default" || (not defined $fontsize));
+
 	my $dbh = Tab::DBI->db_Main();
+	my $code_length;
 
 	my $sth = $dbh->prepare("
 		select entry.id,
@@ -39,9 +52,12 @@
 				SEPARATOR ' & '
 			) as entryname,
 			school.name, school.state,
-			round.name,
+			round.name, round.type,
 			rank.tag, rank.value,
-			winloss.tag, winloss.value
+			winloss.tag, winloss.value,
+			points.tag, points.value,
+			panel.bye, ballot.bye, ballot.forfeit
+
 		from (entry, round, panel, ballot, school, entry_student, student)
 
 			left join score rank on rank.tag = 'rank'
@@ -50,12 +66,15 @@
 			left join score winloss on winloss.tag = 'ballot'
 				and winloss.ballot = ballot.id
 
+			left join score points on points.tag = 'points'
+				and points.ballot = ballot.id
+
 		where entry.event = ?
 		and entry.id      = ballot.entry
 		and entry.active  = 1
 		and ballot.panel  = panel.id
 		and panel.round   = round.id
-		and round.name < ?
+		and round.name 	  <= ?
 
 		and entry.school = school.id
 		and entry_student.entry = entry.id
@@ -75,17 +94,25 @@
 
 	my %results;
 	my $max_round;
+	my %round_type;
+
+	my $name_length;
+	my $school_length;
 
 	while (
 		my ($entry_id,
 			$entry_code,
 			$entry_name,
 			$school_name, $school_state,
-			$round_name,
+			$round_name, $round_type,
 			$rank_tag, $rank_value,
-			$winloss_tag, $winloss_value
+			$winloss_tag, $winloss_value,
+			$points_tag, $points_value,
+			$pbye, $bbye, $forfeit
 		) = $sth->fetchrow_array()
 	) {
+
+		$school_name = $m->comp('/funclib/short_name.mas', name => $school_name);
 
 		$results{$entry_id}{"entry_code"}   = $entry_code;
 		$results{$entry_id}{"entry_name"}   = $entry_name;
@@ -94,13 +121,29 @@
 
 		$results{$entry_id}{$round_name} .= " " if $results{$entry_id}{$round_name};
 
-		if ($winloss_tag) {
+		if ($pbye || $bbye) {
+			$results{$entry_id}{$round_name} .= "Bye";
+		} elsif ($forfeit) {
+			$results{$entry_id}{$round_name} .= "Fft";
+		} elsif ($winloss_tag) {
 			$results{$entry_id}{$round_name} .= "W" if $winloss_value == 1;
 			$results{$entry_id}{$round_name} .= "L" if $winloss_value == 0;
 		} elsif ($rank_tag) {
 			$results{$entry_id}{$round_name} .= $rank_value;
 		}
+
+		if ($points_tag) {
+			$results{$entry_id}{$round_name} .= "/".$points_value;
+		}
+
 		$max_round = $round_name if $max_round < $round_name;
+
+		$code_length = length($entry_code) if $code_length < length($entry_code);
+		$name_length = length($entry_name) if $name_length < length($entry_name);
+		$school_length = length($school_name) if $school_length < length($school_name);
+
+		$round_type{$round_name} = length($results{$entry_id}{$round_name})
+			if $round_type{$round_name} < length($results{$entry_id}{$round_name});
 	}
 
     my $name = $event->name;
@@ -122,33 +165,42 @@
 
     open (TEXOUT, ">>$filepath.tex");
 
-	print TEXOUT "\\Large \\textsb{".$event->name."} \\hfill \\textsb{Results Report} \n";
+	print TEXOUT "\\Large \\textsb{".$event->name."} \\hfill \\textsb{Raw Results Report} \n";
     print TEXOUT "\\medskip\n";
     print TEXOUT "\\newline\n";
 
-	print TEXOUT "\\centering\n";
-
-	my $tabular =  "\\begin{tabular}{p{.15in}p{1.25in}p{1.2in}p{.1in}";
+	my $tabular =  "\\begin{tabular}{";
+	$tabular .= "p{".($code_length + 1)."ex}" if $show_codes;
+	$tabular .= "p{".($name_length + 1)."ex}p{".($school_length + 1)."ex}p{.1in}";
 
 	foreach my $round (1 .. $max_round) {
-		next if $round > $max_round - 3;
-		next if $round > $max_round - 3 && $event->type eq 'speech';
-		$tabular .= "p{.2in}";
+		$tabular .= "p{".$round_type{$round}."ex}";
 	}
 
-	$tabular .= "p{.25in}";
-	$tabular .= "p{.35in}";
-	$tabular .= "p{1.15in}";
 	$tabular .= "}\n";
 
-	print TEXOUT "\\tiny\n";
-	my $switch;
+	print TEXOUT "\\raggedright\n";
+	print TEXOUT "\\".$fontsize."\n";
 
-	foreach my $entry (keys %results) {
+	my $switch = 1;
+	my $twostep;
+	my $take_steps;
+
+	if ($max_round < 4) {
+		$take_steps++;
+	}
+
+	foreach my $entry (
+		sort {
+			$results{$a}{"school_state"} cmp $results{$b}{"school_state"}
+			|| $results{$a}{"school_name"} cmp $results{$b}{"school_name"}
+			|| $results{$a}{"entry_name"} cmp $results{$b}{"entry_name"}
+		} keys %results
+	) {
 
 		print TEXOUT $tabular;
-		print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2;
-		print TEXOUT Tab::texify($results{$entry}{"entry_code"})." & ";
+		print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch % 2;
+		print TEXOUT Tab::texify($results{$entry}{"entry_code"})." & " if $show_codes;
 		print TEXOUT Tab::texify($results{$entry}{"entry_name"})." & ";
 		print TEXOUT Tab::texify($results{$entry}{"school_name"})." & ";
 		print TEXOUT Tab::texify($results{$entry}{"school_state"});
@@ -157,7 +209,16 @@
 			print TEXOUT "& \\tt ".$results{$entry}{$round_name};
 		}
 		print TEXOUT "\\end{tabular}\n";
-		print TEXOUT "\\newline\n";
+
+		if ($take_steps) {
+			if ($twostep++ % 2) {
+				$switch++;
+				print TEXOUT "\\newline\n";
+			}
+		} else {
+			$switch++;
+			print TEXOUT "\\newline\n";
+		}
 	}
 
     $m->comp("/funclib/printout.mas",
