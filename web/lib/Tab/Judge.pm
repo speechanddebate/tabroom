@@ -9,30 +9,30 @@ Tab::Judge->columns(Others => qw /alt_category covers obligation hired person_re
 
 # Wow, that's a lot. 
 Tab::Judge->columns(TEMP => qw/categoryid schoolid tier pref panelid chair 
-							   hangout_admin tourn avg eventtype eventid
-							   diet ballotid personid tab_rating cjid schoolname 
-							   schoolcode state regname regcode region standby 
-							   site neutral diversity
+				   hangout_admin tourn avg eventtype eventid
+				   diet ballotid personid tab_rating cjid schoolname 
+				   schoolcode state regname regcode region standby 
+				   site neutral diversity
 /);
 
-Tab::Judge->has_a(category    => 'Tab::Category');
-Tab::Judge->has_a(alt_category      => 'Tab::Category');
+Tab::Judge->has_a(category       => 'Tab::Category');
+Tab::Judge->has_a(alt_category   => 'Tab::Category');
 Tab::Judge->has_a(covers         => 'Tab::Category');
 Tab::Judge->has_a(school         => 'Tab::School');
 Tab::Judge->has_a(person         => 'Tab::Person');
 Tab::Judge->has_a(person_request => 'Tab::Person');
 Tab::Judge->has_a(chapter_judge  => 'Tab::ChapterJudge');
 
-Tab::Judge->has_many(ratings => 'Tab::Rating', 'judge');
-Tab::Judge->has_many(strikes => 'Tab::Strike', 'judge');
-Tab::Judge->has_many(ballots => 'Tab::Ballot', 'judge');
-Tab::Judge->has_many(settings => "Tab::JudgeSetting", "judge");
-Tab::Judge->has_many(hires => "Tab::JudgeHire", "judge");
+Tab::Judge->has_many(ratings  => 'Tab::Rating'       , 'judge');
+Tab::Judge->has_many(strikes  => 'Tab::Strike'       , 'judge');
+Tab::Judge->has_many(ballots  => 'Tab::Ballot'       , 'judge');
+Tab::Judge->has_many(settings => "Tab::JudgeSetting" , "judge");
+Tab::Judge->has_many(hires    => "Tab::JudgeHire"    , "judge");
 
 Tab::Judge->has_many(jpools => [Tab::JPoolJudge => 'jpool']);
 
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where category = ?");
-Tab::Judge->set_sql(lowest_code => "select MIN(code) from judge where category = ?");
+Tab::Judge->set_sql(lowest_code  => "select MIN(code) from judge where category = ?");
 
 __PACKAGE__->_register_datetimes( qw/timestamp /);
 
@@ -45,7 +45,7 @@ sub setting {
 
 	my $existing = Tab::JudgeSetting->search(  
 		judge => $self->id,
-		tag   => $tag,
+		tag         => $tag,
 	)->first;
 
 	if (defined $value) { 
@@ -63,29 +63,23 @@ sub setting {
 
 			return;
 
-		} elsif ($value ne "delete" && (defined $value) && $value ne "0") {
+		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			eval { 
-				$existing = Tab::JudgeSetting->create({
-					judge => $self->id,
-					tag   => $tag,
-					value => $value,
-				});
-			};
+			my $existing = Tab::JudgeSetting->create({
+				judge => $self->id,
+				tag   => $tag,
+				value => $value,
+			});
 
-			if ($existing) { 
-
-				if ($value eq "text") { 
-					$existing->value_text($blob);
-				}
-
-				if ($value eq "date") { 
-					$existing->value_date($blob);
-				}
-
-				$existing->update;
-
+			if ($value eq "text") { 
+				$existing->value_text($blob);
 			}
+
+			if ($value eq "date") { 
+				$existing->value_date($blob);
+			}
+
+			$existing->update;
 
 		}
 
@@ -97,14 +91,11 @@ sub setting {
 		return $existing->value;
 
 	}
-
 }
-
 
 sub all_settings { 
 
 	my $self = shift;
-
 	my %all_settings;
 
 	my $dbh = Tab::DBI->db_Main();
@@ -132,12 +123,9 @@ sub all_settings {
 		} else { 
 
 			$all_settings{$tag} = $value;
-
 		}
-
 	}
 
 	return %all_settings;
 
 }
-

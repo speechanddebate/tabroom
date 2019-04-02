@@ -9,20 +9,11 @@
 	my $prelim_seeds;
 
 	return unless $sweep_set && $sweep_set->id;
-
-	Tab::debuglog("Doing sweep set ".$sweep_set->name);
-
 	my @rules = $sweep_set->rules;
 
 	foreach my $rule (@rules) {
-
-		$novice_only++
-			if $rule->tag eq "novice_only"
-			&& $rule->value == 1;
-
-		$skip_round{$rule->value}++
-			if $rule->tag eq "ignore_round";
-
+		$novice_only++ if $rule->tag eq "novice_only" && $rule->value == 1;
+		$skip_round{$rule->value}++ if $rule->tag eq "ignore_round";
 		$prelim_seeds++ if $rule->tag eq "prelim_seed";
 	}
 
@@ -42,64 +33,75 @@
 
 	my @entries;
 	my %entries;
-
 	my %entry_code;
+	my %event_count;
 	my %entry_event;
 	my %entry_school;
 	my %entry_manual;
 
-	my %event_count;
-
 	my $dbh = Tab::DBI->db_Main();
 
 	my $entry_sth = $dbh->prepare("
-		select entry.id, entry.code, entry.name, entry.event, entry.school,
+		select entry.id, entry.code, entry.name, entry.event, event.abbr,
+			entry.school,
 			school.name as schoolname, chapter.state as state, chapter.nsda as nsda,
-			district.id as districtid, district.name as districtname
+			district.id as districtid, district.name as districtname,
+			es.student as studentid
 		from (entry, event)
-		left join school on entry.school = school.id
-		left join chapter on chapter.id = school.chapter
-		left join district on district.id = school.district
+			left join school on entry.school  = school.id
+			left join chapter on chapter.id   = school.chapter
+			left join district on district.id = school.district
+			left join entry_student es on es.entry = entry.id
 		where entry.event = event.id
-		and event.tourn  = ?
-		and entry.unconfirmed = 0
+			and event.tourn  = ?
+			and entry.unconfirmed = 0
 
-		and not exists (
-			select entry_setting.id
-			from entry_setting
-			where entry_setting.entry = entry.id
-			and entry_setting.tag = 'exclude_from_sweeps'
-			and entry_setting.value > 0
-		)
-
+			and not exists (
+				select entry_setting.id
+				from entry_setting
+				where entry_setting.entry = entry.id
+				and entry_setting.tag = 'exclude_from_sweeps'
+				and entry_setting.value > 0
+			)
 		order by entry.code
 	");
 
     $entry_sth->execute($tourn->id);
 
     while (
-		my ($id, $code, $name, $event, $school, $schoolname, $state, $nsda, $districtid, $districtname)
-		= $entry_sth->fetchrow_array()
+		my (
+			$id, $code, $name,
+			$event, $event_abbr,
+			$school, $schoolname,
+			$state, $nsda,
+			$districtid, $districtname,
+			$student_id
+		) = $entry_sth->fetchrow_array()
 	) {
 
+		$entries{$id}{"eventabbr"} = $event_abbr;
 		next unless $event_include{$event};
 
-		push @entries, $id;
+		unless ($entries{$id}{"code"}) {
+			push @entries, $id;
 
-		$entries{$id}{"code"} = $code;
-		$entries{$id}{"name"} = $name;
-		$entries{$id}{"event"} = $event;
-		$entries{$id}{"school"} = $school;
-		$entries{$id}{"schoolname"} = $schoolname;
-		$entries{$id}{"state"} = $state;
-		$entries{$id}{"districtid"} = $districtid;
-		$entries{$id}{"nsda_school_id"} = $nsda;
-		$entries{$id}{"districtname"} = $districtname;
+			$entries{$id}{"code"} = $code;
+			$entries{$id}{"name"} = $name;
+			$entries{$id}{"event"} = $event;
+			$entries{$id}{"eventabbr"} = $event_abbr;
 
-		$entry_event{$id}  = $event;
-		$entry_school{$id} = $school;
-		$entry_code{$id}   = $code;
-		$event_count{$event}++;
+			$entries{$id}{"school"} = $school;
+			$entries{$id}{"schoolname"} = $schoolname;
+			$entries{$id}{"state"} = $state;
+			$entries{$id}{"districtid"} = $districtid;
+			$entries{$id}{"nsda_school_id"} = $nsda;
+			$entries{$id}{"districtname"} = $districtname;
+
+			$entry_event{$id}  = $event;
+			$entry_school{$id} = $school;
+			$entry_code{$id}   = $code;
+			$event_count{$event}++;
+		}
 	}
 
 	foreach my $event (@events) {
@@ -117,23 +119,23 @@
 		}
 	}
 
-
 	my $sth = $dbh->prepare("
 		select score.id, entry.id, event.id,
 			round.type, round.id,
 			score.tag, score.value,
 			panel.id,
-			student.id, student.ualt_id, student.nsda, student.novice
+			student.novice
 
-		from score, ballot, panel, round, event, entry, entry_student, student
+		from (score, ballot, panel, round, event, entry)
+			left join student on student.id = score.student
 		where score.ballot = ballot.id
-		and ballot.panel = panel.id
-		and panel.round = round.id
-		and round.event = event.id
-		and event.tourn = ?
-		and ballot.entry = entry.id
-		and entry.active = 1
-		and entry.dq != 1
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and round.event = event.id
+			and event.tourn = ?
+			and ballot.entry = entry.id
+			and entry.active = 1
+			and entry.dq != 1
 
 		and not exists (
 			select entry_setting.id
@@ -143,8 +145,6 @@
 			and entry_setting.value > 0
 		)
 
-		and entry.id = entry_student.entry
-		and entry_student.student = student.id
 		group by score.id
 		order by event.id, round.name
 	");
@@ -169,8 +169,10 @@
 	my @scores;
 
     while (
-		my ($id, $entry, $event, $type, $round, $tag, $value, $panel, $student, $ualt_id, $nsda, $novice)
-		= $sth->fetchrow_array()
+		my (
+			$id, $entry, $event, $type,
+			$round, $tag, $value, $panel, $novice
+		) = $sth->fetchrow_array()
 	) {
 
 		next if $type eq "runoff";
@@ -178,13 +180,7 @@
 		next unless $event_include{$event};
 		next if $skip_round{$round};
 
-		$entry_novice{$entry} = $novice;
-		next if $novice_only && $novice < 1;
 
-		$entries{$entry}{"students"}{$student}{"ualt_id"} = $ualt_id if $ualt_id;
-		$entries{$entry}{"students"}{$student}{"nsda"} = $nsda if $nsda;
-
-		$entries{$entry}{"students"}{$student}{"novice"} = $novice;
 		$entries{$entry}{"rounds"}{$round}++;
 
 		push @scores, $id;
@@ -212,16 +208,51 @@
 
 	}
 
+	$sth->finish();
+
+	my $student_sth = $dbh->prepare("
+		select student.id, student.ualt_id, student.nsda, student.novice, entry.id
+		from student, entry_student, entry, event
+		where event.tourn = ?
+			and event.id = entry.event
+			and entry.unconfirmed = 0
+			and entry.id = entry_student.entry
+			and entry_student.student = student.id
+	");
+
+	$student_sth->execute($tourn->id);
+
+	while(
+		my (
+			$student, $ualt_id, $nsda, $novice, $entry
+		) = $student_sth->fetchrow_array()
+	) {
+
+		$entry_novice{$entry} = $novice;
+		next if $novice_only && $novice < 1;
+
+		if ($ualt_id) {
+			$entries{$entry}{"students"}{$student}{"ualt_id"} = $ualt_id;
+		}
+		if ($nsda) {
+			$entries{$entry}{"students"}{$student}{"nsda"} = $nsda;
+		}
+
+		$entries{$entry}{"students"}{$student}{"novice"} = $novice;
+	}
+
+	$student_sth->finish();
+
 	my $bye_sth = $dbh->prepare("
 		select entry.id, event.id, round.type, round.id, panel.id, panel.bye, ballot.bye
 		from panel, round, event, entry, ballot
 		where ballot.panel = panel.id
-		and panel.round = round.id
-		and round.event = event.id
-		and event.tourn = ?
-		and ballot.entry = entry.id
-		and entry.active = 1
-		and entry.dq != 1
+			and panel.round = round.id
+			and round.event = event.id
+			and event.tourn = ?
+			and ballot.entry = entry.id
+			and entry.active = 1
+			and entry.dq != 1
 
 		and not exists (
 			select entry_setting.id
@@ -241,8 +272,9 @@
 	my %entry_byes_by_type;
 
     while (
-		my ($entry, $event, $type, $round, $panel, $panel_bye, $ballot_bye)
-		= $bye_sth->fetchrow_array()
+		my (
+			$entry, $event, $type, $round, $panel, $panel_bye, $ballot_bye
+		) = $bye_sth->fetchrow_array()
 	) {
 
 		next if $skip_round{$round};
@@ -264,6 +296,8 @@
 		$entry_round_panel{$entry."-".$round} = $panel;
 
 	}
+
+	$bye_sth->finish();
 
 	my %seen = ();
 	@entries = grep { ! $seen{$_} ++ } @entries;
@@ -301,7 +335,6 @@
 			);
 
 			my $fullref = pop @results if @results;
-
 			$prelim_seeding{$event->id} = $fullref->{"by_place"};
 
 		}
@@ -624,9 +657,9 @@
 		}
 
 
-
 		if (
 			$rule->tag eq "rev_overall"
+			|| $rule->tag eq "rev_overall_base"
 			|| $rule->tag eq "place"
 			|| $rule->tag eq "place_above"
 			|| $rule->tag eq "rev_per_overall_place"
@@ -695,34 +728,60 @@
 					}
 				}
 
-				Tab::debuglog("Entry 173 placement is ".$entry_placement{2259136});
-				Tab::debuglog("Entry 158 placement is ".$entry_placement{2267314});
-
 				$placement_done = $type."-".$tiebreak_set;
 			}
 		}
 
-
 		if ($rule->tag eq "rev_overall" && $rule->tiebreak_set) {
+
+			my $rule_id = $rule->id;
 
 			foreach my $event (@events) {
 
-				next unless $event && $event->id;
+				next unless $event > 0;
+				my $event_id = $event->id;
+
+				# The +1 is so the DFL entry doesn't get zero points and
+				# therefore aren't told yet again how much THEY SUCK.
+
+				# Because kindness matters or something -- CLP
+				my $num_entries = scalar (keys %{$entry_placement_event{$event_id}}) + 1;
+
+				my $multiplier = $rule->value;
+				$multiplier = 1 unless $multiplier;
+
+				foreach my $entry_id (keys %{$entry_placement_event{$event_id}}) {
+
+					my $placement_points
+						= ($num_entries - $entry_placement_event{$event_id}{$entry_id}) * $multiplier;
+
+					$placement_points = 0 if $placement_points < 0;
+					$entries{$entry_id}{$rule_id} = $placement_points;
+				}
+			}
+		}
+
+		if ($rule->tag eq "rev_overall_base" && $rule->tiebreak_set) {
+
+			my $base = $rule->place;
+			my $rule_id = $rule->id;
+
+			foreach my $event (@events) {
+
+				next unless $event > 0;
+				my $event_id = $event->id;
 
 				# The +1 is so the DFL entry doesn't get zero points and
 				# therefore aren't told yet again how much THEY SUCK.
 
 				# Because kindness matters or something -- CLP
 
-				my $num_entries = scalar (keys %{$entry_placement{$event->id}}) + 1;
-
 				my $multiplier = $rule->value;
 				$multiplier = 1 unless $multiplier;
 
-				foreach my $entry_id (keys %{$entry_placement_event{$event->id}{$event->id}}) {
+				foreach my $entry_id (keys %{$entry_placement_event{$event_id}}) {
 
-					my $placement_points
-						= ($num_entries - $entry_placement_event{$event->id}{$entry_id}) * $multiplier;
+					my $placement_points = ($base - $entry_placement_event{$event_id}{$entry_id}) * $multiplier;
 
 					$placement_points = 0 if $placement_points < 0;
 					$entries{$entry_id}{$rule->id} = $placement_points;
@@ -733,9 +792,7 @@
 		if ($rule->tag eq "percentage" && $rule->tiebreak_set) {
 
 			my $type = $rule->count;
-
 			my $tiebreak_set = $rule->tiebreak_set;
-
 			my $points = $rule->value;
 
 			foreach my $event (@events) {
@@ -809,8 +866,13 @@
 					);
 
 					my $entries_ref = pop @results;
+					my $entries_count;
 
-					my $entries_count = scalar( keys %{$entries_ref->{"by_place"}} );
+					foreach my $place (sort {$a <=> $b} keys %{$entries_ref->{"by_place"}}) {
+						foreach my $entry_id (@{$entries_ref->{"by_place"}{$place}}) {
+							$entries_count += scalar @{$entries_ref->{"by_place"}{$place}};
+						}
+					}
 
 					my $threshold = ceil($rule->place * .01 * $entries_count);
 
@@ -818,23 +880,15 @@
 						sort {$a <=> $b} keys %{$entries_ref->{"by_place"}}
 					) {
 
-						next if $place > $threshold;
-
+						next if $place >= $threshold;
 						if ($entries_ref->{"by_place"}{$place}) {
-
 							foreach my $entry_id (@{$entries_ref->{"by_place"}{$place}}) {
-
 								$entries{$entry_id}{$rule->id} += $points;
 							}
-
 						}
-
 					}
-
 				}
-
 			}
-
 		}
 
 		if ($rule->tag eq "rev_per_overall_place") {
@@ -874,7 +928,6 @@
 				next unless $entry_placement{$entry} < 7;
 
 				my $event = $event_include{$entry_event{$entry}};
-
 				my $baseline_score = 10;
 
 				$baseline_score-- if $event->type eq "speech";
@@ -882,15 +935,14 @@
 
 				my $field_size = $event_count{$event};
 
-				if ($event->setting("max_entry") > 1) {
-
-					$baseline_score-- if $field_size < 50;
-					$baseline_score-- if $field_size < 30;
-
-				} else {
-
-					$baseline_score-- if $field_size < 58;
-					$baseline_score-- if $field_size < 38;
+				unless ($event->type eq "congress") {
+					if ($event->setting("max_entry") > 1) {
+						$baseline_score-- if $field_size < 50;
+						$baseline_score-- if $field_size < 30;
+					} else {
+						$baseline_score-- if $field_size < 58;
+						$baseline_score-- if $field_size < 38;
+					}
 				}
 
 				my $points = 0;
@@ -902,10 +954,8 @@
 
 					$points = $baseline_score - $entry_placement{$entry};
 				}
-
 				$entries{$entry}{$rule->id} += $points;
 			}
-
 		}
 
 		if ($rule->tag eq "debate_win" || $rule->tag eq "debate_loss" ) {
@@ -922,9 +972,7 @@
 				}
 
 				my $entry = $score_entry{$score};
-
 				next if $novice_only && not defined $score_novice{$score};
-
 				next unless $score_tag{$score} eq "ballot";
 
 				if ($rule->tag eq "debate_win") {
@@ -938,7 +986,6 @@
 						if $score_value{$score} == 0;
 				}
 			}
-
 		}
 
 		if ($rule->tag eq "debate_round_win" || $rule->tag eq "debate_round_loss" ) {
@@ -947,7 +994,6 @@
 
 			my $points = $rule->value;
 			my $count = $rule->count;
-
 			my @round_keys;
 			my @entries;
 			my %round_ballots_won;
@@ -999,7 +1045,6 @@
 						$entries{$entry}{$rule->id} += $points
 							if $round_ballots_won{$entry}{$key} < $round_ballots_lost{$entry}{$key};
 					}
-
 				}
 			}
 		}
@@ -1034,12 +1079,11 @@
 					next unless $score_tag{$score} eq "presiding_officer";
 
 					unless ( (not defined $count) || $count eq "all") {
-
 						next if $score_type{$score} eq "prelim" && $count ne "prelim";
 						next if $score_type{$score} eq "elim" && $count ne "elim";
 						next if $score_type{$score} eq "final" && $count ne "final";
-
 					}
+
 					next if $novice_only && not defined $score_novice{$score};
 					$rounds{$score_round{$score}}++;
 				}

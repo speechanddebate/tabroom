@@ -26,1067 +26,2565 @@
 
 	my $now = DateTime->now(time_zone => $tz);
 
-    my $req     = Apache2::Request->new($r);
-    my $upload  = $req->upload("tourn_data");
-    my $io      = $upload->io;
+	my $req    = Apache2::Request->new($r);
+	my @handles = $r->upload;
+	my $upload = $req->upload($handles[0]);
 
-    my $json = JSON->new->allow_nonref->convert_blessed;
-	my $jdata = $json->decode($io);
+	my $contents;
+	$upload->slurp($contents);
 
-	my $start_dt = parse_date($jdata->{start});
-	my $end_dt = parse_date($jdata->{end});
+	my $json = JSON->new->allow_nonref->convert_blessed;
+	my $jdata = $json->decode($contents);
 
-	$tourn->name($jdata->{name}) if $jdata->{name};
-	$tourn->tz($jdata->{tz}) if $jdata->{tz};
-	$tourn->start($start_dt) if $start_dt;
-	$tourn->end($end_dt) if $end_dt;
-	$tourn->update();
+	$m->print("<h5>Uploading data from file into ".$tourn->name."</h5>\n");
 
-	Tab::SchoolSetting->set_sql(rm_settings => "delete from school_setting.* where school = ?");
+	my $timestamp = parse_date($jdata->{backup_created});
 
-	my $log;
-	my %schools;
+	$m->print("<p class='specific'>Data file was created on ");
+	$m->comp("/funclib/showdt.mas", dt => $timestamp);
+	$m->print(" by ".$jdata->{creator}."</p>");
+	$m->flush_buffer();
 
-	if ($jdata->{schools}) {
+	# Shared Database functions
 
-		my @schools = $tourn->schools;
-		my %school_by_id = map {$_->id => $_} @schools;
-		my %school_by_name = map {$_->name => $_} @schools;
+	Tab::EntryStudent->columns(TEMP => "entryid");
+	Tab::EntryStudent->columns(TEMP => "studentid");
 
-		# SCHOOLS
-		foreach my $school ($jdata->{schools}) {
+	Tab::EntryStudent->set_sql (by_school => "
+		select entry_student.*, entry_student.entry entryid, entry_student.student studentid
+		from entry_student, entry
+		where entry_student.entry = entry.id
+		and entry.school = ?
+	");
 
-			my $oschool;
-			$oschool = $school_by_id{$school->id};
+	Tab::Concession->set_sql(rm_all => "
+		delete from concession where school = ?
+	");
 
-			unless ($oschool) {
-				$oschool = $school_by_name{$school->name};
+	Tab::RoundSetting->set_sql(rm_all => "
+		delete from round_setting where round = ?
+	");
+
+	Tab::TournSetting->set_sql(rm_all => "
+		delete from tourn_setting where tourn = ?
+	");
+
+	Tab::CategorySetting->set_sql(
+		rm_all => "delete from category_setting where category = ?"
+	);
+
+	Tab::EventSetting->set_sql(
+		rm_all => "delete from event_setting where event = ?"
+	);
+
+	Tab::TiebreakSetSetting->set_sql(rm_all => "
+		delete from tiebreak_set_setting where tiebreak_set = ?
+	");
+
+	Tab::SchoolSetting->set_sql(rm_all => "
+		delete from school_setting where school = ?
+	");
+
+	Tab::EntrySetting->set_sql(rm_all => "
+		delete from entry_setting where entry = ?
+	");
+
+	Tab::JudgeSetting->set_sql(rm_all => "
+		delete from judge_setting where judge = ?
+	");
+
+	Tab::JPoolSetting->set_sql(rm_all => "
+		delete from jpool_setting where jpool = ?
+	");
+
+	Tab::Rating->set_sql(rm_all => "
+		delete from rating where judge = ?
+	");
+
+	Tab::Score->set_sql(rm_all => "
+		delete score.* from panel, ballot, score
+		where panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.id = score.ballot
+	");
+
+	Tab::Ballot->set_sql(rm_all => "
+		delete ballot.* from panel, ballot
+		where panel.round = ?
+			and panel.id = ballot.panel
+	");
+
+	Tab::Panel->set_sql(rm_all => "
+		delete from panel where panel.round = ?
+	");
+
+	Tab::RoomStrike->set_sql( by_site => "
+		select rs.*
+		from room_strike rs, room
+		where rs.room = room.id
+			and room.site = ?
+			and rs.tourn = ?
+	");
+
+	unless ($jdata->{event_only} || $jdata->{school_only}) {
+
+		#TOURN DATA
+
+		my $start_dt = parse_date($jdata->{start});
+		my $end_dt = parse_date($jdata->{end});
+		my $reg_start_dt = parse_date($jdata->{reg_start});
+		my $reg_end_dt = parse_date($jdata->{reg_end});
+
+		$m->print("<p class='action'> Updating tournament</p>");
+		$m->flush_buffer();
+
+		$tourn->name($jdata->{name}) if $jdata->{name};
+		$tourn->tz($jdata->{tz}) if $jdata->{tz};
+		$tourn->start($start_dt) if $start_dt;
+		$tourn->end($end_dt) if $end_dt;
+		$tourn->start($reg_start_dt) if $reg_start_dt;
+		$tourn->end($reg_end_dt) if $reg_end_dt;
+
+		my $hidden = $jdata->{hidden};
+		$hidden = 0 unless $hidden;
+		$tourn->hidden($hidden);
+
+		$m->print("<p class='specific'>Loaded tournament data changes</p>");
+		$m->flush_buffer();
+
+		$tourn->update();
+
+		#TOURN SETTINGS
+		Tab::TournSetting->sql_rm_all->execute($tourn->id);
+
+		if ($jdata->{settings})  {
+
+			$m->print("<p class='specific'> Loading ".scalar @{$jdata->{settings}}." tournament settings </p>");
+			$m->flush_buffer();
+
+			foreach my $jsetting (@{$jdata->{settings}}) {
+				my @reply = parse_setting($jsetting);
+				$tourn->setting(@reply) if @reply;
+			}
+		}
+
+	} elsif ($jdata->{event_only}) {
+		$m->print("<p class='action'>Update event(s) only</p>");
+		$m->flush_buffer();
+	} elsif ($jdata->{school_only}) {
+		$m->print("<p class='action'>Update school(s) only</p>");
+		$m->flush_buffer();
+	}
+
+	my %translator;
+	my @categories = $tourn->categories();
+	my %category_by_id = map {$_->id => $_} @categories;
+	my %category_by_name = map {$_->name => $_} @categories;
+	my %category_by_abbr = map {$_->abbr => $_} @categories;
+
+	unless ($jdata->{school_only}) {
+
+		#PATTERNS
+		my @patterns = $tourn->patterns;
+		my %pattern_by_id = map {$_->id => $_} @patterns;
+		my %pattern_by_name = map {$_->name => $_} @patterns;
+
+		if ($jdata->{patterns}) {
+
+			foreach my $pattern (@{$jdata->{patterns}}) {
+
+				my $opattern;
+				$opattern = $pattern_by_id{$pattern->{id}};
+
+				unless ($opattern) {
+					$opattern = $pattern_by_name{$pattern->{name}};
+				}
+
+				if ($opattern) {
+
+					$opattern->name($pattern->{name});
+					$opattern->type($pattern->{tag});
+					$opattern->max($pattern->{max});
+					$opattern->exclude($pattern->{exclude});
+					$opattern->update();
+					delete $pattern_by_id{$opattern->id};
+
+				} else {
+					$opattern = Tab::Pattern->create({
+						tourn   => $tourn->id,
+						name    => $pattern->{name},
+						type    => $pattern->{tag},
+						max     => $pattern->{max},
+						exclude => $pattern->{exclude}
+					});
+				}
+
+				$translator{pattern}{$pattern->{id}} = $opattern;
 			}
 
-			if ($oschool) {
+		} else {
+			$translator{pattern} = \%pattern_by_id;
+		}
+
+		prune_unused( \%pattern_by_id, $translator{pattern}, $jdata->{patterns});
+
+		$m->print("<p class='action'> Importing ".scalar @{$jdata->{categories}}." judge categories </p>");
+		$m->flush_buffer();
+
+		# CATEGORY CATEGORIES
+		foreach my $category (@{$jdata->{categories}}) {
+
+			my $ocategory = $category_by_id{$category->{id}};
+
+			$ocategory = $category_by_abbr{$category->{abbr}} unless $ocategory;
+
+			$ocategory = $category_by_name{$category->{name}} unless $ocategory;
+
+			if ($ocategory) {
+				$m->print("<p class='specific'> Importing judge category ".$category->{abbr}." into matching category ".$ocategory->abbr."</p>");
+				$ocategory->name($category->{name});
+				$ocategory->abbr($category->{abbr});
+				$ocategory->update();
+				delete $category_by_id{$ocategory->id};
+			} else {
+
+				$m->print("<p class='specific'> No category found for name ".$category->{name}." Creating</p>");
+				$ocategory = Tab::Category->create({
+					tourn => $tourn->id,
+					name  => $category->{name},
+					abbr  => $category->{abbr},
+				});
+			}
+
+			$translator{category}{$category->{id}} = $ocategory;
+
+			Tab::CategorySetting->sql_rm_all->execute($ocategory->id);
+			if ($category->{settings})  {
+				$m->print("<p class='specific'> Loading ".scalar @{$category->{settings}}." categoryament settings </p>");
+
+				foreach my $jsetting (@{$category->{settings}}) {
+					my @reply = parse_setting($jsetting);
+					$ocategory->setting(@reply) if @reply;
+				}
+			}
+
+			# PREFS AND PREF SHEETS
+			my @rts = $ocategory->rating_tiers;
+			my %rt_by_id = map {$_->id => $_} @rts;
+			my %rt_by_name = map {$_->name => $_} @rts;
+
+			# PREF TIERS
+			foreach my $rt (@{$category->{rating_tiers}}) {
+
+				my $ort = $rt_by_id{$rt->{id}};
+				$ort = $rt_by_name{$rt->{name}} unless $ort;
+
+				foreach my $tag ("strike", "conflict", "start") {
+					$rt->{$tag} = 0 unless $rt->{$tag} > 0;
+				}
+
+				unless ($ort) {
+					$ort = Tab::RatingTier->create({
+						category    => $ocategory->id,
+						type        => $rt->{tag},
+						name        => $rt->{name},
+						description => $rt->{description},
+						strike      => $rt->{strike},
+						conflict    => $rt->{conflict},
+						min         => $rt->{min},
+						max         => $rt->{max},
+						start       => $rt->{start},
+					});
+
+					$m->print("<p class='specific'> No rating tier found for ".$rt->{id}." ".$rt->{name}." RT $ort created</p>");
+
+				} else {
+
+					$m->print("<p class='specific'> Rating tier $ort found for  ".$rt->{id}." ".$rt->{name}."</p>");
+					$ort->type($rt->{tag});
+					$ort->name($rt->{name});
+					$ort->description($rt->{description});
+					$ort->strike($rt->{strike});
+					$ort->conflict($rt->{conflict});
+					$ort->min($rt->{min});
+					$ort->max($rt->{max});
+					$ort->start($rt->{start});
+					$ort->update();
+					delete $rt_by_id{$ort->id};
+				}
+
+				$translator{rating_tier}{$rt->{id}} = $ort;
+			}
+
+			prune_unused( \%rt_by_id, $translator{rating_tier}, $category->{rating_tiers});
+
+			my @rss = $ocategory->rating_subsets;
+			my %rs_by_id = map {$_->id => $_} @rss;
+			my %rs_by_name = map {$_->name => $_} @rss;
+
+			#RATING SUBSETS
+			foreach my $rs (@{$category->{rating_subsets}}) {
+
+				my $ors = $rs_by_id{$rs->{id}};
+				$m->print("<p class='specific'> No rating subset found for id ".$rs->{id}." Trying name ".$rs->{name}."</p>");
+				$ors = $rs_by_name{$rs->{name}} unless $ors;
+
+				unless ($ors) {
+					$ors = Tab::RatingSubset->create({
+						category => $ocategory->id,
+						name	 => $rs->{name}
+					});
+					$m->print("<p class='specific'> No rating subset found for ".$rs->{id}." ".$rs->{name}." RS $ors created</p>");
+				} else {
+					$m->print("<p class='specific'> Rating subset $ors found for  ".$rs->{id}." ".$rs->{name}."</p>");
+					$ors->name($rs->{name});
+					$ors->update();
+				}
+
+				$translator{rating_subset}{$rs->{id}} = $ors;
+
+			}
+
+			prune_unused( \%rs_by_id, $translator{rating_subset}, $category->{rating_subsets});
+
+			# EVENTS
+			my @events = $ocategory->events();
+			my %event_by_id = map {$_->id => $_} @events;
+			my %event_by_name = map {$_->name => $_} @events;
+			my %event_by_abbr = map {$_->abbr => $_} @events;
+
+			if ($category->{events}) {
+
+				$m->print("<p class='action'> Importing ".scalar @{$category->{events}}." events </p>");
+
+				EVENT:
+				foreach my $event (@{$category->{events}}) {
+
+					$m->print("<p class='specific'> Importing event ".$event->{abbr}."</p>");
+
+					my $oevent = $event_by_id{$event->{id}};
+
+					unless ($event->{type}) {
+						$m->print("<p class='specific'> No event type listed for ".$event->{id}." Cannot import.</p>");
+						next EVENT;
+					}
+
+					$oevent = $event_by_abbr{$event->{abbr}} unless $oevent;
+					$oevent = $event_by_name{$event->{name}} unless $oevent;
+
+					my $opattern = $translator{pattern}{$event->{pattern}};
+					$opattern = 0 unless $opattern;
+
+					my $orating_subset = $translator{rating_subset}{$event->{rating_subset}};
+					$orating_subset = 0 unless $orating_subset;
+
+					if ($oevent) {
+
+						$oevent->category($ocategory->id);
+						$oevent->name($event->{name});
+						$oevent->abbr($event->{abbr});
+						$oevent->type($event->{type});
+						$oevent->fee($event->{fee});
+						$oevent->pattern($opattern);
+						$oevent->rating_subset($orating_subset);
+						$oevent->update();
+
+						#Prevent a double pump
+						delete $event_by_id{$oevent->id};
+
+					} else {
+
+						$m->print("<p class='specific'> No event found for name ".$event->{name}." Creating</p>");
+
+						$oevent = Tab::Event->create({
+							tourn         => $tourn->id,
+							category      => $ocategory->id,
+							name          => $event->{name},
+							abbr          => $event->{abbr},
+							type          => $event->{type},
+							fee           => $event->{fee},
+							pattern       => $opattern,
+							rating_subset => $orating_subset
+						});
+					}
+
+					$translator{event}{$event->{id}} = $oevent;
+
+					Tab::EventSetting->sql_rm_all->execute($oevent->id);
+
+					if ($event->{settings})  {
+
+						foreach my $jsetting (@{$event->{settings}}) {
+							my @reply = parse_setting($jsetting);
+							eval{ $oevent->setting(@reply) };
+						}
+					}
+				}
+			} else {
+				$translator{event} = \%event_by_id;
+			}
+			prune_unused( \%event_by_id, $translator{event}, $category->{events});
+		}
+		prune_unused( \%category_by_id, $translator{category}, $jdata->{categories});
+	}
+
+	#TIEBREAK SETS
+	my @tiebreak_sets = $tourn->tiebreak_sets;
+	my %tiebreak_set_by_id = map {$_->id => $_} @tiebreak_sets;
+	my %tiebreak_set_by_name = map {$_->name => $_} @tiebreak_sets;
+
+	if ($jdata->{tiebreak_sets}) {
+
+		$m->print("<p class='action'>Importing tiebreaker sets</p>");
+
+		foreach my $tiebreak_set (@{$jdata->{tiebreak_sets}}) {
+
+			my $otiebreak_set;
+			$otiebreak_set = $tiebreak_set_by_id{$tiebreak_set->{id}};
+
+			unless ($otiebreak_set) {
+				$otiebreak_set = $tiebreak_set_by_name{$tiebreak_set->{name}};
+			}
+
+			unless ($otiebreak_set) {
+				$otiebreak_set = Tab::TiebreakSet->create({
+					name  => $tiebreak_set->{name},
+					tourn => $tourn->id
+				});
+			} else {
+				$otiebreak_set->name($tiebreak_set->{name});
+				$otiebreak_set->update();
+				#Prevent a double pump
+				delete $tiebreak_set_by_id{$otiebreak_set->id};
+			}
+
+			$translator{tiebreak_set}{$tiebreak_set->{id}} = $otiebreak_set;
+
+			$m->print("<p class='action'>Tiebreak set ".$otiebreak_set->id." stored for ".$tiebreak_set->{id}." named ".$otiebreak_set->name."</p>");
+
+			foreach my $tiebreak ($otiebreak_set->tiebreaks) {
+				$tiebreak->delete();
+			}
+
+			#TIEBREAK SET SETTINGS
+			Tab::TiebreakSetSetting->sql_rm_all->execute($otiebreak_set->id);
+
+			if ($tiebreak_set->{settings})  {
+				foreach my $jsetting (@{$tiebreak_set->{settings}}) {
+					my @reply = parse_setting($jsetting);
+					$otiebreak_set->setting(@reply) if @reply;
+				}
+			}
+		}
+
+		# TIEBREAKS
+
+		# These are broken off to ensure that Child tiebreak sets with
+		# derivative sets are available for translation.  No pruning required
+		# because all tiebreakers are loaded fresh every time an import
+		# happens.
+
+		foreach my $tiebreak_set (@{$jdata->{tiebreak_sets}}) {
+
+			my $otiebreak_set = $translator{tiebreak_set}{$tiebreak_set->{id}};
+
+			foreach my $tiebreak (@{$tiebreak_set->{tiebreaks}}) {
+
+				my $child_set = $translator{tiebreak_set}{$tiebreak->{child}};
+
+				$tiebreak->{count} = 0 unless $tiebreak->{count} > 0;
+				$tiebreak->{truncate_smallest} = 0 unless $tiebreak->{truncate_smallest} > 0;
+
+				Tab::Tiebreak->create({
+					tiebreak_set      => $otiebreak_set->id,
+					name              => $tiebreak->{name},
+					priority          => $tiebreak->{priority},
+					count             => $tiebreak->{count},
+					highlow_count     => $tiebreak->{highlow_count},
+					count_round       => $tiebreak->{count_round},
+					truncate          => $tiebreak->{truncate},
+					truncate_smallest => $tiebreak->{truncate_smallest},
+					multiplier        => $tiebreak->{multiplier},
+					child             => $child_set
+				});
+			}
+		}
+
+		prune_unused( \%tiebreak_set_by_id, $translator{tiebreak_set}, $jdata->{tiebreak_sets});
+
+	} else {
+
+		$translator{tiebreak_set} = \%tiebreak_set_by_id;
+	}
+
+
+	#TIMESLOTS
+	my @timeslots = $tourn->timeslots;
+	my %timeslot_by_id = map {$_->id => $_} @timeslots;
+	my %timeslot_by_name = map {$_->name => $_} @timeslots;
+
+	if ($jdata->{timeslots}) {
+
+		foreach my $timeslot (@{$jdata->{timeslots}}) {
+
+			my $otimeslot;
+			$otimeslot = $timeslot_by_id{$timeslot->{id}};
+
+			unless ($otimeslot) {
+				$otimeslot = $timeslot_by_name{$timeslot->{name}};
+			}
+
+			my $start = parse_date($timeslot->{start});
+			my $end = parse_date($timeslot->{end});
+
+			unless ($otimeslot) {
+				$otimeslot = Tab::Timeslot->create({
+					name  => $timeslot->{name},
+					tourn => $tourn->id,
+					start => $start,
+					end   => $end
+				});
+			} else {
+				$otimeslot->name($timeslot->{name});
+				$otimeslot->start($timeslot->{start});
+				$otimeslot->end($timeslot->{end});
+				$otimeslot->update();
+
+				#Prevent a double pump
+				delete $timeslot_by_id{$otimeslot->id};
+			}
+
+			$translator{timeslot}{$timeslot->{id}} = $otimeslot;
+		}
+
+	} else {
+
+		$translator{timeslot} = \%timeslot_by_id;
+	}
+
+	prune_unused( \%timeslot_by_id, $translator{timeslot}, $jdata->{timeslots});
+
+	my $default_site;
+
+	# SITES
+	my @sites = $tourn->sites;
+	my %site_by_id = map {$_->id => $_} @sites;
+	my %site_by_name = map {$_->name => $_} @sites;
+
+	if ($jdata->{sites}) {
+
+		foreach my $site (@{$jdata->{sites}}) {
+
+			my $osite;
+			$osite = $site_by_id{$site->{id}};
+
+			unless ($osite) {
+				$osite = $site_by_name{$site->{name}};
+			}
+
+			$site->{name} = $tourn->name." Site" unless $site->{name};
+
+			if ($osite) {
+
+				$osite->name($site->{name});
+				$osite->update();
+
+				#Double pump
+				delete $site_by_id{$osite->id};
+
+			} else {
+
+				my $circuit = $tourn->circuits->first;
+				$circuit = 6 unless $circuit;
+
+				$osite = Tab::Site->create({
+					name    => $site->{name},
+					circuit => $circuit
+				});
+			}
+
+			$translator{site}{$site->{id}} = $osite;
+			$default_site = $osite unless $default_site;
+
+			my @rooms = $osite->rooms;
+			my %room_by_id = map {$_->id => $_} @rooms;
+			my %room_by_name = map {$_->name => $_} @rooms;
+
+			# ROOMS
+			if ($site->{rooms}) {
+
+				foreach my $room (@{$site->{rooms}}) {
+
+					my $oroom;
+					$oroom = $room_by_id{$room->{id}};
+
+					unless ($oroom) {
+						$oroom = $room_by_name{$room->{name}};
+					}
+
+					foreach my $tag ("ada", "inactive") {
+						$room->{$tag} = 0 unless $room->{$tag};
+					}
+
+					if ($oroom) {
+
+						$oroom->name($room->{name});
+						$oroom->rows($room->{rows});
+						$oroom->seats($room->{seats});
+						$oroom->ada($room->{ada});
+						$oroom->inactive($room->{inactive});
+
+						$oroom->quality($room->{quality});
+						$oroom->capacity($room->{capacity});
+						$oroom->notes($room->{notes});
+						$oroom->url($room->{url});
+
+					} else {
+
+						$oroom = Tab::Room->create({
+							site     => $osite->id,
+							name     => $room->{name},
+							rows     => $room->{rows},
+							seats    => $room->{seats},
+							ada      => $room->{ada},
+							inactive => $room->{inactive},
+							quality  => $room->{quality},
+							capacity => $room->{capacity},
+							notes    => $room->{notes},
+							url      => $room->{url},
+						});
+					}
+
+					$translator{room}{$room->{id}} = $oroom;
+				}
+			}
+		}
+
+	} else {
+		$translator{site} = \%site_by_id;
+		$default_site = $sites[0];
+
+		my @rooms;
+		foreach my $site ($tourn->sites) {
+			push @rooms, $site->rooms;
+		}
+
+		%{$translator{room}} = map {$_->id => $_} @rooms;
+		%{$translator{roomname}} = map {$_->name => $_} @rooms;
+	}
+
+
+	# WEEKENDS
+	my @weekends = $tourn->weekends;
+	my %weekend_by_id = map {$_->id => $_} @weekends;
+	my %weekend_by_name = map {$_->name => $_} @weekends;
+
+	if ($jdata->{weekends}) {
+
+		foreach my $weekend (@{$jdata->{weekends}}) {
+
+			next unless $weekend->{name};
+
+			my $oweekend;
+			$oweekend = $weekend_by_id{$weekend->{id}};
+
+			unless ($oweekend) {
+				$oweekend = $weekend_by_name{$weekend->{name}};
+			}
+
+			my $start           = parse_date($weekend->{start});
+			my $end             = parse_date($weekend->{end});
+			my $reg_start       = parse_date($weekend->{reg_start});
+			my $reg_end         = parse_date($weekend->{reg_end});
+			my $fine_deadline   = parse_date($weekend->{fine_deadline});
+			my $freeze_deadline = parse_date($weekend->{freeze_deadline});
+			my $judge_deadline  = parse_date($weekend->{judge_deadline});
+			my $drop_deadline   = parse_date($weekend->{drop_deadline});
+
+			next unless $start;
+			next unless $end;
+			next unless $reg_start;
+			next unless $reg_end;
+			next unless $fine_deadline;
+			next unless $freeze_deadline;
+			next unless $judge_deadline;
+			next unless $drop_deadline;
+
+			my $site = $translator{site}{$weekend->{site}};
+			$site = $default_site unless $site;
+
+			if ($oweekend) {
+
+				$oweekend->name($weekend->{name});
+				$oweekend->state($weekend->{state});
+				$oweekend->city($weekend->{city});
+				$oweekend->end($end);
+				$oweekend->start($start);
+				$oweekend->reg_end($reg_end);
+				$oweekend->reg_start($reg_start);
+				$oweekend->drop_deadline($drop_deadline);
+				$oweekend->freeze_deadline($freeze_deadline);
+				$oweekend->judge_deadline($judge_deadline);
+				$oweekend->fine_deadline($fine_deadline);
+				$oweekend->site($site);
+
+			} else {
+
+				$oweekend = Tab::Weekend->create({
+					name            => $weekend->{name},
+					end             => $end,
+					start           => $start,
+					reg_end         => $reg_end,
+					reg_start       => $reg_start,
+					drop_deadline   => $drop_deadline,
+					freeze_deadline => $freeze_deadline,
+					judge_deadline  => $judge_deadline,
+					fine_deadline   => $fine_deadline,
+					site            => $site
+				});
+			}
+
+			$translator{weekend}{$weekend->{id}} = $oweekend;
+		}
+
+	} else {
+
+		$translator{weekend} = \%weekend_by_id;
+	}
+
+	prune_unused( \%weekend_by_id, $translator{weekend}, $jdata->{weekends});
+
+	# REGIONS
+
+	my @regions = $m->comp("/funclib/tourn_regions.mas", tourn => $tourn);
+	my %region_by_id = map {$_->id => $_} @regions;
+	my %region_by_name = map {$_->name => $_} @regions;
+	my %region_by_code = map {$_->code => $_} @regions;
+
+	if ($jdata->{regions}) {
+
+		foreach my $region (@{$jdata->{regions}}) {
+
+			my $oregion;
+			$oregion = $region_by_id{$region->{id}};
+
+			unless ($oregion) {
+				$oregion = $region_by_code{$region->{code}};
+			}
+
+			unless ($oregion) {
+				$oregion = $region_by_name{$region->{name}};
+			}
+
+			unless ($oregion) {
+
+				$oregion = Tab::Region->create({
+					tourn     => $tourn->id,
+					name      => $region->{name},
+					code      => $region->{code},
+					quota     => $region->{quota},
+					arch      => $region->{arch},
+					cooke_pts => $region->{cooke_points},
+					sweeps    => $region->{sweeps},
+					circuit   => $region->{circuit},
+				});
+
+			} else {
+
+				 $oregion->name($region->{name});
+				 $oregion->code($region->{code});
+				 $oregion->quota($region->{quota});
+				 $oregion->arch($region->{arch});
+				 $oregion->cooke_pts($region->{cooke_points});
+				 $oregion->sweeps($region->{sweeps});
+				 $oregion->circuit($region->{circuit});
+				 $oregion->update();
+				delete $region_by_id{$oregion->id};
+			}
+
+			$translator{region}{$region->{id}} = $oregion;
+		}
+
+	} else {
+
+		$translator{region} = \%region_by_id;
+	}
+
+	# CONCESSIONS
+	my @concessions = $tourn->concessions;
+	my %concession_by_id = map {$_->id => $_} @concessions;
+	my %concession_by_name = map {$_->name => $_} @concessions;
+
+	my %ctype_by_id;
+	my %ctype_by_name;
+
+	my %coption_by_id;
+	my %coption_by_name;
+
+	foreach my $concession (@concessions) {
+		foreach my $ctype ($concession->types) {
+			$ctype_by_id{$ctype->{id}} = $ctype;
+			$ctype_by_name{$ctype->{name}} = $ctype;
+
+			foreach my $option ($ctype->options) {
+				$coption_by_id{$option->{id}} = $option;
+				$coption_by_name{$option->{name}} = $option;
+			}
+		}
+	}
+
+	if ($jdata->{concessions}) {
+
+		foreach my $concession (@{$jdata->{concessions}}) {
+
+			my $oconcession = $concession_by_id{$concession->{id}};
+
+			unless ($oconcession) {
+				$oconcession = $concession_by_name{$concession->{name}};
+			}
+
+			unless ($oconcession) {
+				$oconcession = Tab::Concession->create({
+                    name         => $concession->{name},
+                    price        => $concession->{price},
+                    description  => $concession->{description},
+                    deadline     => $concession->{deadline},
+                    cap          => $concession->{cap},
+                    school_cap   => $concession->{school_cap},
+                    billing_code => $concession->{billing_code}
+				});
+
+			} else {
+
+				$oconcession->name($concession->{name});
+				$oconcession->price($concession->{price});
+				$oconcession->description($concession->{description});
+				$oconcession->deadline($concession->{deadline});
+				$oconcession->cap($concession->{cap});
+				$oconcession->school_cap($concession->{school_cap});
+				$oconcession->billing_code($concession->{billing_code});
+				$oconcession->update();
+			}
+
+			$translator{concession}{$concession->{id}} = $oconcession;
+
+			if ($concession->{types}) {
+
+				foreach my $ctype (@{$concession->{types}}) {
+
+					my $octype = $ctype_by_id{$ctype->{id}};
+
+					unless ($octype) {
+						$octype = $ctype_by_name{$ctype->{name}};
+					}
+
+					unless ($octype) {
+
+						$octype = Tab::ConcessionType->create({
+							name        => $ctype->{name},
+							description => $ctype->{description},
+							concession  => $oconcession->id
+						});
+
+					} else {
+
+						$octype->name($ctype->{name});
+						$octype->description($ctype->{description});
+						$octype->concession($oconcession->id);
+						$octype->update();
+
+					}
+
+					$translator{ctype}{$ctype->{id}} = $octype;
+
+					foreach my $coption ($ctype->{options}) {
+
+						my $ocoption = $coption_by_id{$coption->{id}};
+
+						unless ($ocoption) {
+							$ocoption = $coption_by_name{$coption->{name}};
+						}
+
+						unless ($ocoption) {
+
+							$ocoption = Tab::ConcessionOption->create({
+								name            => $ocoption->{name},
+								description     => $ocoption->{description},
+								disabled        => $ocoption->{disabled},
+								concession_type => $octype->id
+							});
+
+						} else {
+
+							$ocoption->name($ocoption->{name});
+							$ocoption->description($ocoption->{description});
+							$ocoption->disabled($ocoption->{disabled});
+							$ocoption->concession_type($octype->id);
+							$ocoption->update();
+						}
+
+						$translator{coption}{$coption->{id}} = $ocoption;
+
+					}
+				}
+			}
+		}
+
+	} else {
+
+		$translator{concession} = \%concession_by_id;
+		$translator{ctype} = \%ctype_by_id;
+		$translator{coption} = \%coption_by_id;
+	}
+
+	prune_unused( \%concession_by_id, $translator{concession}, $jdata->{concessions});
+
+	my @schools = $tourn->schools();
+	my %school_by_id = map {$_->id => $_} @schools;
+	my %school_by_name = map {$_->name => $_} @schools;
+
+	my @chapters = $m->comp("/funclib/tourn_chapters.mas", tourn => $tourn);
+	my %chapter_by_id = map {$_->id => $_} @chapters;
+	my %chapter_by_name = map {$_->name => $_} @chapters;
+
+	if ($jdata->{schools} && (not defined $jdata->{event_only})) {
+
+		$m->print("<h4 class='action'>REGISTRATION DATA</h4>");
+		$m->print("<p class='action'> Importing ".scalar @{$jdata->{schools}}." school registrations</p>");
+		$m->flush_buffer();
+
+		# SCHOOLS
+		foreach my $school (@{$jdata->{schools}}) {
+
+			my $region = $translator{region}{$school->{region}};
+
+			#CHAPTER
+			my $ochapter = $chapter_by_id{$school->{chapter}};
+
+			unless ($ochapter) {
+				$ochapter = Tab::Chapter->retrieve($school->{chapter}) if $school->{chapter};
+			}
+
+			unless ($ochapter) {
+				if ($school->{nsda}) {
+					$ochapter = Tab::Chapter->search(nsda => $school->{nsda})->first;
+				}
+			}
+
+			unless ($ochapter) {
+
+				my $nsda_school = Tab::NSDA::MemberSchool->search(
+					school_id => $school->{nsda}
+				)->first;
+
+				if ($nsda_school) {
+
+					$m->print("<p class='specific'>No chapter with NSDA ID ".$school->{nsda}." found.  Importing from NSDA</p>");
+					$m->flush_buffer();
+
+					$ochapter = $m->comp(
+						"/funclib/chapter_import.mas",
+							nsda_school => $nsda_school,
+							person      => $person,
+							nome        => "yup"
+					);
+				}
+			}
+
+			unless ($ochapter) {
+
+				$ochapter = Tab::Chapter->create({
+					name     => $school->{name},
+					state    => $school->{state},
+					nsda     => $school->{nsda},
+					district => $school->{district}
+				});
+
+				$m->print("<p class='specific'>No chapter with name ".$school->{name}." or NSDA ID ".$school->{nsda}." found.  Created $ochapter</p>");
+				$m->flush_buffer();
+			} else {
+
+				$ochapter->nsda($school->{nsda});
+				$ochapter->update();
+			}
+
+			$translator{chapter}{$school->{chapter}} = $ochapter;
+
+			my $oschool = $school_by_id{$school->{id}};
+
+			unless ($oschool) {
+				$oschool = $school_by_name{$school->{name}};
+			}
+
+			$school->{onsite} = 0 unless $school->{onsite};
+
+			unless ($oschool) {
+
+				$m->print("<p class='specific'> Creating ".$school->{id}." ".$school->{name}." ");
+				$m->flush_buffer();
+
+				$oschool = Tab::School->create({
+					name     => $school->{name},
+					code     => $school->{code},
+					onsite   => $school->{onsite},
+					tourn    => $tourn,
+					chapter  => $ochapter,
+					state    => $school->{state},
+					region   => $region,
+					district => $school->{district}
+				});
+
+			} else {
+
+				$m->print("<p class='specific'> ".$oschool->name." found for ".$school->{id}." ".$school->{name}." | ");
+				$m->flush_buffer();
 
 				$oschool->name($school->{name});
 				$oschool->code($school->{code});
-				$oschool->region($school->{region});
+				$oschool->state($school->{state});
+				$oschool->onsite($school->{onsite});
+				$oschool->region($region);
 				$oschool->district($school->{district});
-
-			} else {
-
-				my $chapter = Tab::Chapter->retrieve($school->{chapter}) if $school->{chapter};
-
-				if ((not defined $chapter) && $school->{nsda}) {
-
-					$chapter = Tab::Chapter->search(nsda => $school->{nsda})->first;
-
-					unless ($chapter) {
-						my $nsda_school = Tab::NSDA::MemberSchool->search(
-							school_id => $school->{nsda}
-						)->first;
-
-						if ($nsda_school) {
-							$chapter = $m->comp(
-								"/funclib/chapter_import.mas",
-									nsda_school => $nsda_school,
-									person      => $person,
-									nome        => "yup"
-							);
-						}
-					}
-
-					unless ($chapter) {
-						$chapter = Tab::Chapter->create({
-							name => $school->{name}
-						});
-					}
-				}
-
-				my %data;
-
-				if ($chapter) {
-					$data{chapter} = $chapter->id;
-					$data{state} = $chapter->state;
-				}
-
-				$oschool->create({
-					tourn    => $tourn->id,
-					chapter  => $data{chapter},
-					state    => $data{state},
-					name     => $school->{name},
-					code     => $school->{code},
-					region   => $school->{region},
-					district => $school->{district},
-				});
-
+				$oschool->update();
+				#Double pump
+				delete $school_by_id{$oschool->id};
 			}
+
+			$translator{school}{$school->{id}} = $oschool;
 
 			if ($oschool) {
 
-				$schools{$school->{id}} = $oschool;
+				#SCHOOL SETTINGS
+				Tab::SchoolSetting->sql_rm_all->execute($oschool->id);
+				if ($school->{settings})  {
 
-				# SCHOOL SETTINGS
-				Tab::SchoolSetting->sql_rm_settings->execute($oschool->id);
+					$m->flush_buffer();
 
-				foreach my $setting ($school->{settings}) {
-					if ($setting->{meta} eq "date") {
-						my $string = $setting->{value};
-						$string =~ s/T/ /g;
-						my $dt = DateTime::Format::MySQL->parse_datetime($dt);
-						$oschool->setting($setting->{tag}, "date", $dt);
-					} elsif ($setting->{meta} eq "text") {
-						$oschool->setting($setting->{tag}, "text", $setting->{value});
-					} else {
-						$oschool->setting($setting->{tag}, $setting->{value});
+					foreach my $jsetting (@{$school->{settings}}) {
+						my @reply = parse_setting($jsetting);
+						$oschool->setting(@reply) if @reply;
 					}
 				}
 
-				#ENTRIES
-				my @entries = $oschool->entries;
-				my %entry_by_id = map {$_->id => $_} @entries;
-				my %entry_by_name = map {$_->name => $_} @entries;
-				my %entry_by_code = map {$_->code => $_} @entries;
+				# STUDENTS
+				my @students = $ochapter->students();
+				my %student_by_id = map {$_->id => $_} @students;
+				my %student_by_nsda = map {$_->nsda => $_} @students;
+				my %student_by_name = map {$_->first."-".$_->last => $_} @students;
 
-				foreach my $entry ($school->{entries}) {
-					my $oentry;
-					$oentry = $entry_by_id{$entry->{id}};
-					$oentry = $entry_by_name{$entry->{name}} unless $oentry;
-					$oentry = $entry_by_code{$entry->{code}} unless $oentry;
+				foreach my $student (@{$school->{students}}) {
+
+					next unless $student->{first} && $student->{last};
+					next if $translator{student}{$student->{id}};
+
+					my $ostudent;
+					$ostudent = $student_by_id{$student->{id}};
+					$ostudent = $student_by_nsda{$student->{nsda}} unless $ostudent;
+					$ostudent = $student_by_name{$student->{first}." ".$student->{last}} unless $ostudent;
+
+					my $already;
+
+					unless ($ostudent) {
+
+						$ostudent->create({
+							chapter => $ochapter->id,
+							first   => $student->{first},
+							last	=> $student->{last},
+							middle  => $student->{middle},
+							nsda	=> $student->{nsda}
+						});
+
+					} else {
+
+						$already = $ostudent->nsda;
+
+						$ostudent->first($student->{first});
+						$ostudent->last($student->{last});
+						$ostudent->middle($student->{middle}) if $student->{middle};
+						$ostudent->nsda($student->{nsda}) if $student->{nsda} > 0;
+						$ostudent->update();
+						delete $student_by_id{$ostudent->id};
+					}
+
+					if ($student->{nsda} > 0 && ($student->{nsda} ne $already)) {
+						$m->comp("/funclib/nsda_person_link.mas", student => $ostudent);
+					}
+
+					$translator{student}{$student->{id}} = $ostudent;
 				}
 
-			}
-		}
-	}
+				# ENTRIES
+				$m->print(" ".$oschool->name." has ".scalar @{$school->{entries}}." entries</p>");
+				$m->flush_buffer();
 
-	foreach my $school_id
+				my $found;
+				my $created;
+				my %es_by_entry;
 
-	my %schools_used;
-	my %events_used;
-
-	unless ($school_id) {
-
-		if ($event_id) {
-			push @events, Tab::Event->retrieve($event_id);
-			unless (@events) {
-				$m->clear_buffer();
-				$m->print("No event found for ID $event_id");
-				$m->abort;
-			}
-			$file_name = $events[0]->name;
-		} elsif ($category_id) {
-			my $category = Tab::Category->retrieve($category_id);
-			unless ($category) {
-				$m->clear_buffer();
-				$m->print("No judge category found for ID $category_id");
-				$m->abort;
-			}
-			$file_name = $category->name;
-			push @events, $category->events;
-		} else {
-			push @events, $tourn->events;
-		}
-
-		foreach my $event (@events) {
-			my $category = $event->category;
-			unless ($category_events{$category->id}) {
-				push @categories, $category;
-			}
-			push @{$category_events{$category->id}}, $event;
-			push (@timeslots, $m->comp("/funclib/event_timeslots.mas", event => $event));
-			$events_used{$event->id} = $event;
-		}
-
-		my %tseen = ();
-		@timeslots = grep { ! $tseen{$_->id} ++ } @timeslots;
-
-		# TIMESLOTS
-		foreach my $ts (@timeslots) {
-
-			my $json_ts = {
-				id    => $ts->id,
-				name  => $ts->name,
-				start => $ts->start->datetime()."+00:00",
-				end   => $ts->end->datetime()."+00:00"
-			};
-
-
-			push (@{$json_tourn->{timeslots}}, $json_ts);
-		}
-
-		# SITES AND ROOMS
-		foreach my $site ($tourn->sites) {
-
-			push @{$json_tourn->{sites}}, $site->id;
-
-			foreach my $room ($site->rooms(deleted => 0)) {
-
-				my $json_room = {
-					id   => $room->id,
-					name => $room->name,
-					site => $site->id
-				};
-
-				$json_room->{quality} = $room->quality if $room->quality;
-				$json_room->{capacity} = $room->capacity if $room->capacity;
-				$json_room->{notes} = $room->notes if $room->notes;
-				$json_room->{url} = $room->url if $room->url;
-
-				if ($room->inactive) {
-					$json_room->{inactive} = "true";
-				} else {
-					$json_room->{inactive} = "false";
+				foreach my $es (Tab::EntryStudent->search_by_school( $oschool->id )) {
+					$es_by_entry{$es->entryid}{$es->studentid} = $es;
 				}
 
-				push (@{$json_tourn->{rooms}}, $json_room);
-			}
-		}
-
-		# TOURN SETTINGS
-		foreach my $tourn_setting ($tourn->settings) {
-
-			my $json_tset = {
-				tag   => $tourn_setting->tag,
-				value => setting_value($tourn_setting),
-				tourn => $tourn->id
-			};
-
-			push (@{$json_tourn->{"settings"}}, $json_tset);
-		}
-	}
-
-	my $score_sth = $dbh->prepare("
-		select
-			score.id, score.tag, score.student, score.value, score.speech, score.position, score.topic, score.content,
-			ballot.id, ballot.panel, ballot.judge, ballot.entry, ballot.bye,
-				ballot.forfeit, ballot.side, ballot.speakerorder, ballot.audit, ballot.chair,
-			panel.id, panel.letter, panel.round, panel.room, panel.bye, panel.flight, panel.bracket,
-			round.id, round.name, round.event, round.flighted, round.tiebreak_set,
-				round.label, round.type, round.timeslot, runoff.id
-
-			from (round)
-
-			left join panel on panel.round = round.id
-			left join ballot on ballot.panel = panel.id
-			left join score on score.ballot = ballot.id
-			left join round runoff on runoff.id = round.runoff
-
-			where round.event = ?
-
-			group by score.id
-	");
-
-	my $rs_sth = $dbh->prepare("
-		select
-			round.id, round_setting.id, round_setting.tag,
-			round_setting.value, round_setting.value_date, round_setting.value_text
-		from (round, round_setting)
-
-		where round.event = ?
-			and round.id = round_setting.round
-	");
-
-	my $j_sth = $dbh->prepare("
-		select
-			judge.id, judge_setting.id, judge_setting.tag,
-			judge_setting.value, judge_setting.value_date, judge_setting.value_text
-		from (judge, judge_setting)
-
-		where judge.category = ?
-			and judge.id = judge_setting.judge
-	");
-
-	my $judge_sth = $dbh->prepare("
-		select
-			judge.id, judge.first, judge.middle, judge.last, judge.person,
-			judge.code, judge.ada, judge.active, judge.obligation, judge.hired,
-			judge.alt_category, judge.covers, judge.chapter_judge,
-			judge.school,
-			person.id, person.email, person.phone,
-			tab_rating.value
-
-		from judge
-		left join person on person.id = judge.person
-		left join judge_setting tab_rating
-			on tab_rating.tag = 'tab_rating'
-			and tab_rating.judge = judge.id
-
-		where judge.category = ?
-	");
-
-	my $jpool_sth = $dbh->prepare("
-		select
-			jpool.id,
-			jpool_judge.judge,
-			jpool.name, jpool.category, jpool.site, jpool.parent
-		from jpool
-		left join jpool_judge on jpool.id = jpool_judge.jpool
-		where jpool.category = ?
-	");
-
-	my $round_jpool_sth = $dbh->prepare("
-		select jpool_round.jpool
-		from jpool_round
-		where jpool_round.round = ?
-	");
-
-	my $rating_sth = $dbh->prepare("
-		select
-			rating.id, rating.type, rating.entry, rating.judge,
-			rating.ordinal, rating.percentile,
-			rating_tier.name
-
-		from (rating, judge)
-
-		left join rating_tier on rating_tier.id = rating.rating_tier
-
-		where rating.judge = judge.id
-		and judge.category = ?
-	");
-
-	my $strike_sth = $dbh->prepare("
-		select
-			strike.id, strike.type, strike.start, strike.end,
-			strike.judge, strike.entry, strike.event, strike.school,
-			strike.region, strike.district, strike.timeslot,
-			strike.shift, strike.registrant, strike.conflictee
-
-		from (strike, judge)
-
-		where strike.judge = judge.id
-		and judge.category = ?
-	");
-
-	my $results_sth = $dbh->prepare("
-		select
-			rv.id, rv.tag, rv.value, rv.priority, rv.description, rv.no_sort, rv.sort_desc,
-			result.id, result.rank, result.percentile, result.entry, result.student, result.school, result.round,
-			rs.id, rs.label, rs.bracket, rs.published, rs.coach, rs.tourn, rs.event
-
-			from result_set rs
-
-			left join result on result.result_set = rs.id
-			left join result_value rv on rv.result = result.id
-
-			where rs.event = ?
-	");
-
-	my %judges;
-	my %jpools;
-
-	# CATEGORY CATEGORIES
-
-	unless ($school_id) {
-	foreach my $category (@categories) {
-
-		my $category_id = $category->id;
-		next unless $category_events{$category_id};
-
-		my $json_category = {
-			id   => $category_id,
-			name => $category->name,
-			abbr => $category->abbr
-		};
-
-		push (@{$json_tourn->{categories}}, $json_category);
-
-		# JUDGES
-
-		$judge_sth->execute($category_id);
-
-		while (
-			my (
-				$judge_id, $judge_first, $judge_middle, $judge_last,
-				$judge_person, $judge_code, $judge_ada, $judge_active,
-				$judge_obligation, $judge_hired, $judge_alt_category,
-				$judge_covers, $judge_chapter_judge, $judge_school,
-				$person_id, $person_email, $person_phone,
-				$tab_rating
-
-			) = $judge_sth->fetchrow_array()
-		) {
-
-			my $json_judge = {
-				id             => $judge_id,
-				first          => $judge_first,
-				last           => $judge_last
-			};
-
-			$schools_used{$judge_school}++ if $judge_school;
-
-			$person_phone =~ s/[\D_]//g;
-
-			$json_judge->{school}     = $judge_school if $judge_school;
-			$json_judge->{inactive}   = "true" unless $judge_active;
-			$json_judge->{ada}        = "true" if $judge_ada;
-			$json_judge->{email}      = lc($person_email) if $person_email;
-			$json_judge->{phone}      = $person_phone if $person_phone;
-			$json_judge->{person}     = $person_id if $person_id;
-			$json_judge->{obligation} = $judge_obligation if $judge_obligation;
-			$json_judge->{hired}      = $judge_hired if $judge_hired;
-			$json_judge->{rating}     = $tab_rating if $tab_rating;
-
-			$judges{$judge_id} = $json_judge;
-			push @{$json_category->{"judges"}}, $json_judge;
-		}
-
-		$judge_sth->finish();
-
-		$j_sth->execute($category_id);
-
-		while(
-			my (
-				$judge_id, $js_id, $js_tag, $js_value, $js_value_date, $js_value_text
-			) = $j_sth->fetchrow_array()
-		) {
-
-			if ($js_value eq "date") {
-				$js_value_date =~ s/ /T/g;
-				$js_value = $js_value_date."-00:00";
-			} elsif ($js_value eq "text") {
-				$js_value = $js_value_text;
-			}
-
-			my $js_setting = {
-				tag   => $js_tag,
-				value => $js_value
-			};
-
-			push @{$judges{$judge_id}->{settings}}, $js_setting;
-		}
-
-		$j_sth->finish();
-
-		# JUDGE POOLS
-		$jpool_sth->execute($category_id);
-
-		while(
-			my (
-				$jpool_id,
-				$judge_id,
-				$jpool_name, $jpool_category, $jpool_site, $jpool_parent
-			) = $jpool_sth->fetchrow_array()
-		) {
-
-			my $json_jpool;
-
-			if ($jpools{$jpool_id}) {
-				$json_jpool = $jpools{$jpool_id};
-			} else {
-				$json_jpool = {
-					id     => $jpool_id,
-					name   => $jpool_name,
-					site   => $jpool_site,
-					parent => $jpool_parent
-				};
-				$jpools{$jpool_id} = $json_jpool;
-
-				push @{$json_category->{"judge_pools"}}, $json_jpool;
-			}
-
-			push @{$json_jpool->{"judges"}}, $judge_id;
-		}
-
-		# EVENTS
-		foreach my $event (@{$category_events{$category_id}}) {
-
-			my $json_event = {
-				id          => $event->id,
-				name        => $event->name,
-				abbr        => $event->abbr,
-				type        => $event->type
-			};
-
-			foreach my $event_setting ($event->settings) {
-
-				my $json_eset = {
-					tag   => $event_setting->tag,
-					value => setting_value($event_setting),
-					event => $event_id
-				};
-
-				push (@{$json_event->{settings}}, $json_eset);
-			}
-
-			push @{$json_category->{"events"}}, $json_event;
-
-			my %rounds;
-			my %sections;
-			my %ballots;
-
-			$score_sth->execute($event->id);
-
-			# ROUNDS BALLOTS AND SCORES
-			while (
-				my (
-					$score_id, $score_tag, $score_student, $score_value, $score_speech,
-					$score_position, $score_topic, $score_content,
-					$ballot_id, $ballot_panel, $ballot_judge, $ballot_entry, $ballot_bye,
-					$ballot_forfeit, $ballot_side, $ballot_speakerorder, $ballot_audit, $ballot_chair,
-					$panel_id, $panel_letter, $panel_round, $panel_room, $panel_bye, $panel_flight, $panel_bracket,
-					$round_id, $round_name, $round_event, $round_flighted, $round_tiebreak_set,
-					$round_label, $round_type, $round_timeslot,
-					$num_judges, $motion, $runoff_id
-				) = $score_sth->fetchrow_array()
-			) {
-
-				next if $score_tag eq "comments";
-				next if $score_tag eq "rfd";
-
-				my $json_round;
-
-				if ($rounds{$round_id}) {
-
-					$json_round = $rounds{$round_id};
-
-				} else {
-
-					$json_round = {
-						id           => $round_id,
-						timeslot     => $round_timeslot,
-						tiebreak_set => $round_tiebreak_set,
-						name         => $round_name,
-						type         => $round_type
-					};
-
-					$json_round->{label }  = $round_label if $round_label;
-					$json_round->{flights} = $round_flighted if $round_flighted;
-					$json_round->{runoff}  = $runoff_id if $runoff_id;
-
-					# ROUND SETTINGS
-					$json_round->{settings} = raw_value($rs_sth, $event->id);
-
-					# ROUND JPOOLS
-
-					$round_jpool_sth->execute($round_id);
-					while ( my ($jpool_id) = $round_jpool_sth->fetchrow_array()) {
-						if ($jpools{$jpool_id}) {
-							push @{$jpools{$jpool_id}->{"rounds"}}, $round_id;
+				foreach my $category (@{$jdata->{categories}}) {
+
+					# Done by event to catch double entries with the same code & name
+					foreach my $event (@{$category->{events}}) {
+
+						my $oevent = $translator{event}{$event->{id}};
+
+						my @entries = $oschool->entries(event => $oevent->id);
+						my %entry_by_id = map {$_->id => $_} @entries;
+						my %entry_by_name = map {$_->name => $_} @entries;
+						my %entry_by_code = map {$_->code => $_} @entries;
+
+						foreach my $entry (@{$school->{entries}}) {
+
+							next unless $entry->{event} == $event->{id};
+
+							my $oentry;
+							$oentry = $entry_by_id{$entry->{id}};
+							$oentry = $entry_by_name{$entry->{name}} unless $oentry;
+							$oentry = $entry_by_code{$entry->{code}} unless $oentry;
+
+							foreach my $tag ("ada", "active", "tba", "dropped", "waitlist", "unconfirmed") {
+								$entry->{$tag} = 0 unless $entry->{$tag} > 0;
+							}
+
+							unless ($oentry) {
+								$oentry = Tab::Entry->create({
+									school      => $oschool->id,
+									event       => $oevent->id,
+									name        => $entry->{name},
+									code        => $entry->{code},
+									ada         => $entry->{ada},
+									tba         => $entry->{tba},
+									dropped     => $entry->{dropped},
+									waitlist    => $entry->{waitlist},
+									unconfirmed => $entry->{unconfirmed}
+								});
+
+							} else {
+
+								$oentry->name($entry->{name});
+								$oentry->code($entry->{code});
+								$oentry->event($oevent->id);
+								$oentry->ada($entry->{ada});
+								$oentry->tba($entry->{tba});
+								$oentry->dropped($entry->{dropped});
+								$oentry->waitlist($entry->{waitlist});
+								$oentry->unconfirmed($entry->{unconfirmed});
+								$oentry->update();
+								delete $entry_by_id{$oentry->id};
+							}
+
+							$translator{entry}{$entry->{id}} = $oentry;
+
+							#ENTRY SETTINGS
+							Tab::EntrySetting->sql_rm_all->execute($oentry->id);
+
+							if ($entry->{settings})  {
+								foreach my $jsetting (@{$entry->{settings}}) {
+									my @reply = parse_setting($jsetting);
+									$oentry->setting(@reply) if @reply;
+								}
+							}
+
+							#ENTRY STUDENTS
+							my %done;
+
+							STUDENT:
+							foreach my $student_id (@{$entry->{students}}) {
+
+								next if $done{$student_id}++;
+
+								my $ostudent = $translator{student}{$student_id};
+
+								unless ($ostudent) {
+									$m->print("<p>WARN: could not find student for $student_id</p>");
+									next STUDENT;
+								}
+
+								if ($es_by_entry{$oentry->id}{$ostudent->id}) {
+									# So I can spare this existing from deletion later
+									delete $es_by_entry{$oentry->id}{$ostudent->id};
+								} else {
+									eval {
+										Tab::EntryStudent->create({
+											entry   => $oentry->id,
+											student => $ostudent->id
+										});
+									};
+								}
+							}
+
+							foreach my $spare (keys %{$es_by_entry{$oentry->id}}) {
+								$es_by_entry{$oentry->id}{$spare}->delete();
+								delete $es_by_entry{$oentry->id}{$spare};
+							}
+						}
+
+						prune_unused( \%entry_by_id, $translator{entry}, $school->{entries});
+					}
+				}
+
+				# SCHOOL JUDGES
+
+				# Ordinarily the judges are stored with the categories to
+				# account for neutral/hired judges but if you are importing a
+				# school on its own this includes the judges here.
+
+				if ($school->{judges}) {
+
+					my @chapter_judges;
+					if ($oschool->chapter) {
+						@chapter_judges = $oschool->chapter->chapter_judges();
+					}
+
+					my %cjs_by_id = map {$_->id => $_} @chapter_judges;
+					my %cjs_by_person = map {$_->person => $_} @chapter_judges;
+					my %cjs_by_nsda = map {$_->nsda => $_} @chapter_judges;
+					my %cjs_by_name = map {$_->first."-".$_->last => $_} @chapter_judges;
+
+					$m->print("<p class='specific'> Loading ".scalar @{$school->{judges}}." judges.</p>");
+					$m->flush_buffer;
+
+					foreach my $category (@{$jdata->{categories}}) {
+
+						my $ocategory = $translator{category}{$category->{id}};
+						my @judges = $oschool->judges( category => $ocategory->id);
+
+						my %judge_by_id = map {$_->id => $_} @judges;
+						my %judge_by_person = map {$_->person => $_} @judges;
+						my %judge_by_name = map {$_->first."-".$_->last => $_} @judges;
+						my %judge_by_nsda;
+
+						foreach my $judge (@judges) {
+							next unless $judge->chapter_judge > 0;
+							next unless $judge->chapter_judge->nsda > 0;
+							$judge_by_nsda{$judge->chapter_judge->nsda} = $judge;
+						}
+
+						foreach my $judge (@{$school->{judges}}) {
+
+							next if $translator{judge}{$judge->{id}};
+
+							next unless $judge->{category} == $category->{id};
+							my $ojudge = $judge_by_id{$judge->{id}};
+
+							unless ($ojudge) {
+								$ojudge = $judge_by_person{$judge->{person}} if $judge->{person} > 0;
+							}
+
+							unless ($ojudge) {
+								$ojudge = $judge_by_nsda{$judge->{nsda}} if $judge->{nsda} > 0;
+							}
+
+							unless ($ojudge) {
+								$ojudge = $judge_by_name{$judge->{name}};
+							}
+
+							# Chapter Judge link if possible
+							my $ocj;
+							$ocj = $ojudge->chapter_judge if $ojudge && $ojudge->chapter_judge > 0;
+
+							unless ($ocj) {
+								$ocj = $cjs_by_id{$judge->{chapter_judge}};
+								$ocj = $cjs_by_person{$judge->{person}} unless $ocj;
+								$ocj = $cjs_by_nsda{$judge->{nsda}} unless $ocj;
+								$ocj = $cjs_by_name{$judge->{first}."-".$judge->{last}} unless $ocj;
+							}
+
+							#nulls, whiny nulls.
+							foreach my $flag ("active", "ada", "school", "person") {
+								$judge->{$flag} = 0 unless $judge->{$flag} > 0;
+							}
+
+							unless ($ojudge) {
+
+								$ojudge->create({
+									code          => $judge->{code},
+									middle        => $judge->{middle},
+									first         => $judge->{first},
+									last          => $judge->{last},
+									nsda          => $judge->{nsda},
+									category      => $judge->{category},
+									alt_category  => $judge->{alt_category},
+									covers        => $judge->{covers},
+									active        => $judge->{active},
+									ada           => $judge->{ada},
+									person        => $judge->{person},
+									obligation    => $judge->{obligation},
+									hired         => $judge->{hired},
+									school        => $judge->{school},
+									chapter_judge => $ocj
+								});
+
+							} else {
+
+								$ojudge->code($judge->{code});
+								$ojudge->middle($judge->{middle});
+								$ojudge->first($judge->{first});
+								$ojudge->last($judge->{last});
+								$ojudge->nsda($judge->{nsda});
+								$ojudge->category($judge->{category});
+								$ojudge->alt_category($judge->{alt_category});
+								$ojudge->covers($judge->{covers});
+								$ojudge->active($judge->{active});
+								$ojudge->ada($judge->{ada});
+								$ojudge->person($judge->{person});
+								$ojudge->obligation($judge->{obligation});
+								$ojudge->hired($judge->{hired});
+								$ojudge->school($judge->{school});
+								$ojudge->chapter_judge($ocj);
+
+								$ojudge->update();
+							}
+
+							$translator{judge}{$judge->{id}} = $ojudge;
+
+							#SCHOOL JUDGE SETTINGS
+							Tab::JudgeSetting->sql_rm_all->execute($ojudge->id);
+
+							if ($judge->{settings})  {
+								foreach my $jsetting (@{$judge->{settings}}) {
+									if ($jsetting->{tag} eq "tab_rating") {
+										my $value = $translator{entry}{$jsetting->{value}};
+										$ojudge->setting("tab_rating", $value) if $value;
+									} else {
+										my @reply = parse_setting($jsetting);
+										eval{$ojudge->setting(@reply);};
+									}
+								}
+							}
+
+							# PREFS
+							Tab::Rating->sql_rm_all->execute($ojudge->id);
+
+							if ($judge->{ratings}) {
+
+								foreach my $rating (@{$judge->{ratings}}) {
+
+									my $entry = $translator{entry}{$rating->{entry}};
+									my $school = $translator{school}{$rating->{school}};
+
+									my $tier = $translator{rating_tier}{$rating->{rating_tier}};
+									$tier = 0 unless $tier > 0;
+									my $subset = $translator{rating_subset}{$rating->{rating_subset}};
+
+									next unless (($tier > 0) || ($rating->{ordinal} > 0));
+
+									foreach my $key ("ordinal") {
+										$rating->{$key} = 0 unless $rating->{$key} > 0;
+									}
+
+									Tab::Rating->create({
+										type          => $rating->{tag},
+										entered       => $rating->{entered},
+										ordinal       => $rating->{ordinal},
+										percentile    => $rating->{percentile},
+										rating_tier   => $tier,
+										tourn         => $tourn,
+										entry         => $entry,
+										judge         => $ojudge,
+										school        => $school,
+										rating_subset => $subset
+									});
+								}
+							}
+						}
+
+						# Delete the spare judges from this category
+						prune_unused( \%judge_by_id, $translator{judge}, $school->{judges});
+					}
+				}
+
+				# INVOICES (NSDA ONLY)
+
+				my @invoices = $oschool->invoices;
+				my %invoice_by_id = map {$_->id => $_} @invoices;
+				my %invoice_by_blusynergy = map {$_->blusynergy => $_} @invoices;
+
+				if ($school->{invoices}) {
+
+					foreach my $invoice (@{$school->{invoices}}) {
+
+						my $oinvoice = $invoice_by_id{$invoice->{id}};
+						next unless $invoice->{total} > 0;
+
+						unless ($oinvoice) {
+							$oinvoice = $invoice_by_blusynergy{$invoice->{blusynergy}};
+						}
+
+						unless ($oinvoice) {
+
+							$oinvoice = Tab::Invoice->create({
+								school     => $oschool->id,
+								blusynergy => $invoice->{blusynergy},
+								blu_number => $invoice->{blu_number},
+								total      => $invoice->{total},
+								paid       => $invoice->{paid},
+								details    => $invoice->{details}
+							});
+
+						} else {
+
+							$oinvoice->school($oschool->id);
+							$oinvoice->blusynergy($invoice->{blusynergy});
+							$oinvoice->blu_number($invoice->{blu_number});
+							$oinvoice->total($invoice->{total});
+							$oinvoice->paid($invoice->{paid});
+							$oinvoice->details($invoice->{details});
+							$oinvoice->update();
+						}
+
+						$translator{invoice}{$invoice->{id}} = $oinvoice;
+					}
+				}
+
+				prune_unused( \%invoice_by_id, $translator{invoice}, $school->{invoices});
+
+				# CONCESSION PURCHASES ORDERS
+				my %purchase_by_id = map {$_->id => $_} $oschool->purchases;
+
+				if ($school->{purchases}) {
+
+					foreach my $purchase (@{$school->{purchases}}) {
+
+						next unless $purchase->{quantity} > 0;
+						my $opurchase = $purchase_by_id{$purchase->{id}};
+
+						my $concession = $translator{concession}{$purchase->{concession}};
+						next unless $concession;
+
+						my $invoice = $translator{invoice}{$purchase->{invoice}};
+
+						unless ($opurchase) {
+
+							$opurchase = Tab::Invoice->create({
+								school     => $oschool->id,
+								quantity   => $purchase->{quantity},
+								placed     => $purchase->{placed},
+								fulfilled  => $purchase->{fulfilled},
+								concession => $concession->id,
+								invoice    => $invoice
+							});
+
+						} else {
+
+							$opurchase->school($oschool->id);
+							$opurchase->quantity($purchase->{quantity});
+							$opurchase->placed($purchase->{placed});
+							$opurchase->fulfilled($purchase->{fulfilled});
+							$opurchase->concession($concession->id);
+							$opurchase->invoice($invoice);
+							$opurchase->update();
+
+						}
+
+						$translator{purchase}{$purchase->{id}} = $opurchase;
+						my %option_by_id = map {$_->concession_option->id => $_} $purchase->purchase_options();
+						my %done;
+
+						foreach my $option ($purchase->{options}) {
+
+							next if $option_by_id{$option};
+							my $ooption = $translator{coption}{$option};
+							next unless $ooption;
+							$done{$ooption->id}++;
+
+							Tab::ConcessionPurchaseOption->create({
+								concession_purchase => $opurchase->id,
+								concession_option   => $ooption->id,
+							});
+						}
+
+						foreach my $option (keys %option_by_id) {
+							next if $done{$option};
+							$option_by_id{$option}->delete;
+							delete $option_by_id{$option};
 						}
 					}
-					$round_jpool_sth->finish();
-
-					$rounds{$round_id} = $json_round;
-					push @{$json_event->{"rounds"}}, $json_round;
-
 				}
 
-				# SECTIONS PANELS
-				my $json_section;
+				prune_unused( \%purchase_by_id, $translator{purchase}, $school->{purchases});
+			}
+		}
 
-				if ($sections{$panel_id}) {
+		prune_unused( \%school_by_id, $translator{school}, $jdata->{schools});
 
-					$json_section = $sections{$panel_id};
+		$m->print("<p class='action'>Importing payments and fees</p>");
+
+		# FINES FEES AND PAYMENTS
+		my @fines = $tourn->fines;
+		my %fine_by_id = map {$_->id => $_} @fines;
+		my %fine_by_school_reason = map {$_->school."-".$_->reason => $_} @fines;
+
+		if ($jdata->{fines}) {
+
+			foreach my $fine (@{$jdata->{fines}}) {
+
+				my $school = $translator{school}{$fine->{school}};
+				my $region = $translator{region}{$fine->{region}};
+				my $judge  = $translator{judge}{$fine->{judge}};
+
+				my $ofine = $fine_by_id{$fine->{id}};
+
+				unless ($ofine) {
+					$ofine = $fine_by_school_reason{$fine->{school}."-".$fine->{reason}};
+				}
+
+				my $deleted_at = parse_date($fine->{deleted_at});
+				my $levied_at = parse_date($fine->{levied_at});
+
+				$fine->{deleted} = 0 unless $fine->{deleted};
+				$fine->{payment} = 0 unless $fine->{payment};
+
+				unless ($ofine) {
+
+					$ofine = Tab::Fine->create({
+						reason     => $fine->{reason},
+						amount     => $fine->{amount},
+						payment    => $fine->{payment},
+						levied_by  => $fine->{levied_by},
+						levied_at  => $levied_at,
+						deleted    => $fine->{deleted},
+						deleted_by => $fine->{deleted_by},
+						deleted_at => $deleted_at,
+						tourn      => $tourn->id,
+						school     => $school,
+						region     => $region,
+						judge      => $judge,
+						invoice    => $fine->{invoice}
+					});
 
 				} else {
 
-					my $json_section = {
-						id     => $panel_id,
-						round  => $round_id,
-						room   => $panel_room,
-						letter => $panel_letter
-					};
+					$ofine->reason($fine->{reason});
+					$ofine->amount($fine->{amount});
+					$ofine->payment($fine->{payment});
+					$ofine->levied_at($levied_at);
+					$ofine->levied_by($fine->{levied_by});
+					$ofine->deleted($fine->{deleted});
+					$ofine->deleted_by($fine->{deleted_by});
+					$ofine->deleted_at($deleted_at);
+					$ofine->tourn($tourn);
+					$ofine->school($school);
+					$ofine->region($region);
+					$ofine->judge($judge);
+					$ofine->invoice($fine->{invoice});
+					$ofine->update();
 
-					$json_section->{bye} = "true" if $panel_bye;
-					$json_section->{bracket} = $panel_bracket if $panel_bracket;
+					delete $fine_by_id{$ofine->id};
+				}
 
-					if ($panel_flight) {
-						$json_section->{flight} = $panel_flight;
-					} else {
-						$json_section->{flight} = 1;
+				$translator{fine}{$fine->{id}} = $ofine;
+			}
+
+			foreach my $fine (@{$jdata->{fines}}) {
+				next unless $fine->{parent};
+				my $ofine = $translator{fine}{$fine->{id}};
+				my $oparent = $translator{fine}{$fine->{parent}};
+				$ofine->parent($oparent);
+				$ofine->update();
+			}
+		}
+
+		prune_unused( \%fine_by_id, $translator{fine}, $jdata->{fines});
+
+		my @emails = $tourn->emails;
+		my %email_by_id = map {$_->id => $_} @emails;
+		my %email_by_subject = map {$_->subject => $_} @emails;
+
+		$m->print("<p class='action'>Importing tournament emails</p>");
+
+		#EMAILS
+		if ($jdata->{emails}) {
+
+			foreach my $email (@{$jdata->{emails}}) {
+
+				my $oemail = $email_by_id{$email->{id}};
+
+				unless ($oemail) {
+					$oemail = $email_by_subject{$email->{subject}};
+				}
+
+				unless ($oemail) {
+
+					$oemail = Tab::Email->create({
+						tourn	=> $tourn->id,
+						subject  => $email->{subject},
+						content  => $email->{content},
+						metadata => $email->{metadata},
+						sent_to  => $email->{sent_to},
+						sent_at  => $email->{sent_at},
+						sender   => $email->{sender}
+					});
+
+				} else {
+
+					$oemail->subject($email->{subject});
+					$oemail->content($email->{content});
+					$oemail->metadata($email->{metadata});
+					$oemail->sent_to($email->{sent_to});
+					$oemail->sent_at($email->{sent_at});
+					$oemail->sender($email->{sender});
+					$oemail->update();
+				}
+			}
+		}
+
+		prune_unused( \%email_by_id, $translator{email}, $jdata->{emails});
+
+		my @webpages = $tourn->webpages;
+		my %webpage_by_id = map {$_->id => $_} @webpages;
+		my %webpage_by_title = map {$_->title => $_} @webpages;
+
+		$m->print("<p class='action'>Importing tournament website data</p>");
+		$m->flush_buffer();
+
+		#WEBPAGES
+		if ($jdata->{webpages}) {
+
+			foreach my $webpage (@{$jdata->{webpages}}) {
+
+				my $owebpage = $webpage_by_id{$webpage->{id}};
+
+				unless ($owebpage) {
+					$owebpage = $webpage_by_title{$webpage->{title}};
+				}
+
+				$webpage->{published} = 0 unless $webpage->{published};
+
+				unless ($owebpage) {
+
+					$owebpage = Tab::Webpage->create({
+						tourn       => $tourn->id,
+						title       => $webpage->{title},
+						content     => $webpage->{content},
+						published   => $webpage->{published},
+						special     => $webpage->{special},
+						page_order  => $webpage->{page_order},
+						last_editor => $webpage->{last_editor},
+					});
+
+				} else {
+
+					$owebpage->title($webpage->{title});
+					$owebpage->content($webpage->{content});
+					$owebpage->published($webpage->{published});
+					$owebpage->special($webpage->{special});
+					$owebpage->page_order($webpage->{page_order});
+					$owebpage->last_editor($webpage->{last_editor});
+					$owebpage->update();
+				}
+
+				$translator{webpage}{$webpage->{id}} = $owebpage;
+			}
+
+			foreach my $webpage (@{$jdata->{webpages}}) {
+				next unless $webpage->{parent};
+				my $owebpage = $translator{webpage}{$webpage->{id}};
+				my $oparent = $translator{webpage}{$webpage->{parent}};
+				$owebpage->parent($oparent);
+				$owebpage->update();
+			}
+		}
+		prune_unused( \%webpage_by_id, $translator{webpage}, $jdata->{webpages});
+	}
+
+	# EVENTS PART DEUX: ROUNDS AND RESULTS
+	if ($jdata->{categories} && (not defined $jdata->{school_only})) {
+
+		$m->print("<h4 class='action'>ROUNDS AND RESULTS</h4>");
+
+		my %cjs;
+
+		CATEGORY:
+		foreach my $category (@{$jdata->{categories}}) {
+
+			my $ocategory = $translator{category}{$category->{id}};
+
+			unless ($ocategory) {
+				$m->print("<p class='error'> No category found for ID ".$category->{id}."?  Error in data, skipping</p>");
+				$m->flush_buffer;
+				next CATEGORY;
+			}
+
+			if (not defined $jdata->{event_only}) {
+
+				# CATEGORY JUDGES.  This is the ordinary way judges are imported
+				# unless this is a single school import, to account for
+				# neutral/hires.
+
+				my @judges = $ocategory->judges();
+
+				my %judge_by_id = map {$_->id => $_} @judges;
+				my %judge_by_person = map {$_->person => $_} @judges;
+				my %judge_by_name = map {$_->first."-".$_->last => $_} @judges;
+				my %judge_by_nsda;
+
+				foreach my $judge (@judges) {
+					next unless $judge->chapter_judge > 0;
+					next unless $judge->chapter_judge->nsda > 0;
+					$judge_by_nsda{$judge->chapter_judge->nsda} = $judge;
+				}
+
+				if ($category->{judges}) {
+
+					$m->print("<p class='action'> Importing ".scalar @{$category->{judges}}." judges into category ".$ocategory->abbr."</p>");
+					$m->flush_buffer();
+
+					foreach my $judge (@{$category->{judges}}) {
+
+						next if $translator{judge}{$judge->{id}};
+
+						my $ojudge = $judge_by_id{$judge->{id}};
+
+						unless ($ojudge) {
+							$ojudge = $judge_by_person{$judge->{person}} if $judge->{person} > 0;
+						}
+
+						unless ($ojudge) {
+							$ojudge = $judge_by_nsda{$judge->{nsda}} if $judge->{nsda} > 0;
+						}
+
+						unless ($ojudge) {
+							$ojudge = $judge_by_name{$judge->{name}};
+						}
+
+						# Chapter Judge link if possible
+						my $ocj;
+						$ocj = $ojudge->chapter_judge if $ojudge && $ojudge->chapter_judge > 0;
+
+						unless ($ocj) {
+
+							my $school_id = $judge->{school};
+
+							if ($school_id && $cjs{$school_id}) {
+
+								$ocj = $cjs{$school_id}{id}{$judge->{chapter_judge}};
+								$ocj = $cjs{$school_id}{person}{$judge->{person}} unless $ocj;
+								$ocj = $cjs{$school_id}{nsda}{$judge->{nsda}} unless $ocj;
+								$ocj = $cjs{$school_id}{name}{$judge->{first}."-".$judge->{last}} unless $ocj;
+
+							} elsif ($school_id) {
+
+								my $oschool = $translator{school}{$school_id};
+
+								if ($oschool && $oschool->chapter) {
+
+									my @chapter_judges = $oschool->chapter->chapter_judges();
+
+									%{$cjs{$school_id}{id}} = map {$_->id => $_} @chapter_judges;
+									%{$cjs{$school_id}{person}} = map {$_->person => $_} @chapter_judges;
+									%{$cjs{$school_id}{nsda}} = map {$_->nsda => $_} @chapter_judges;
+									%{$cjs{$school_id}{name}} = map {$_->first."-".$_->last => $_} @chapter_judges;
+								}
+
+							} else {
+								$ocj = 0;
+							}
+						}
+
+						#nulls, whiny nulls.
+						foreach my $flag ("active", "ada", "school", "person") {
+							$judge->{$flag} = 0 unless $judge->{$flag} > 0;
+						}
+
+						my $oschool = $translator{school}{$judge->{school}};
+						$oschool = 0 unless $oschool > 0;
+
+						my $alt_category = $translator{category}{$judge->{alt_category}};
+						$alt_category = 0 unless $alt_category > 0;
+
+						my $covers = $translator{category}{$judge->{covers}};
+						$covers = 0 unless $covers > 0;
+
+						unless ($ojudge) {
+
+							$ojudge = Tab::Judge->create({
+								code          => $judge->{code},
+								middle        => $judge->{middle},
+								first         => $judge->{first},
+								last          => $judge->{last},
+								active        => $judge->{active},
+								ada           => $judge->{ada},
+								obligation    => $judge->{obligation},
+								hired         => $judge->{hired},
+								person        => $judge->{person},
+								school        => $oschool,
+								category      => $ocategory,
+								alt_category  => $alt_category,
+								covers        => $covers,
+								chapter_judge => $ocj
+							});
+
+						} else {
+
+							$ojudge->code($judge->{code});
+							$ojudge->middle($judge->{middle});
+							$ojudge->first($judge->{first});
+							$ojudge->last($judge->{last});
+							$ojudge->active($judge->{active});
+							$ojudge->ada($judge->{ada});
+							$ojudge->person($judge->{person});
+							$ojudge->obligation($judge->{obligation});
+							$ojudge->hired($judge->{hired});
+
+							$ojudge->school($oschool);
+							$ojudge->category($ocategory);
+							$ojudge->alt_category($alt_category);
+							$ojudge->covers($covers);
+							$ojudge->chapter_judge($ocj);
+
+							$ojudge->update();
+						}
+
+						$translator{judge}{$judge->{id}} = $ojudge;
+
+						#JUDGE SETTINGS
+						Tab::JudgeSetting->sql_rm_all->execute($ojudge->id);
+
+						if ($judge->{settings})  {
+							foreach my $jsetting (@{$judge->{settings}}) {
+								my @reply = parse_setting($jsetting);
+								eval{$ojudge->setting(@reply)};
+							}
+						}
+
+						# PREFS
+						Tab::Rating->sql_rm_all->execute($ojudge->id);
+
+						if ($judge->{ratings}) {
+
+							foreach my $rating (@{$judge->{ratings}}) {
+
+								my $entry = $translator{entry}{$rating->{entry}};
+								my $school = $translator{school}{$rating->{school}};
+
+								my $tier = $translator{rating_tier}{$rating->{rating_tier}};
+								my $subset = $translator{rating_subset}{$rating->{rating_subset}};
+
+								next unless ((defined $tier) || ($rating->{ordinal} > 0));
+
+								foreach my $key ("ordinal") {
+									$rating->{$key} = 0 unless $rating->{$key} > 0;
+								}
+
+								Tab::Rating->create({
+									type          => $rating->{tag},
+									entered       => $rating->{entered},
+									ordinal       => $rating->{ordinal},
+									percentile    => $rating->{percentile},
+									rating_tier   => $tier,
+									tourn         => $tourn,
+									entry         => $entry,
+									judge         => $ojudge,
+									school        => $school,
+									rating_subset => $subset
+								});
+							}
+						}
+					}
+				}
+
+				prune_unused( \%judge_by_id, $translator{judge}, $category->{judges});
+
+
+				EVENT:
+				foreach my $event (@{$category->{events}}) {
+
+					unless ($event->{rounds}) {
+						$m->print("<p class='error'> No rounds for event ".$event->{abbr}.". Skipping</p>");
+						next EVENT;
 					}
 
-					push @{$json_round->{"sections"}}, $json_section;
-					$sections{$panel_id} = $json_section;
+					my $oevent = $translator{event}{$event->{id}};
+
+					unless ($oevent) {
+						$m->print("<p class='error'> No event found for ID ".$event->{id}."?  Error in data, skipping</p>");
+						next EVENT;
+					}
+
+					$m->print("<p class='action'> Importing ".scalar @{$event->{rounds}}." rounds in ".$oevent->name." </p>");
+					$m->flush_buffer();
+
+					my @rounds = $oevent->rounds();
+					my %round_by_id = map {$_->id => $_} @rounds;
+					my %round_by_name = map {$_->name => $_} @rounds;
+
+					$m->print("<p style='padding-left: 32px;' class='action'>");
+					$m->flush_buffer();
+
+					ROUND:
+					foreach my $round (sort {$a->{name} <=> $b->{name}} @{$event->{rounds}}) {
+
+						$m->print("Round ".$round->{name}." ".$round->{label}." -- ");
+						$m->flush_buffer();
+
+						my $otimeslot = $translator{timeslot}{$round->{timeslot}};
+
+						unless ($otimeslot) {
+							$m->print("<p class='error'> No timeslot found for ID ".$round->{timeslot}."?  Error in data, skipping round ".$round->{name}."</p>");
+							next ROUND;
+						}
+
+						my $site = $translator{site}{$round->{site}};
+						$site = $default_site unless $site;
+
+						my $oround;
+
+						#Reverse these to avoid the constraint about one round per number per event
+						$oround = $round_by_name{$round->{name}};
+						if ($oround) {
+							$m->print("Round ".$oround." found on name ".$round->{name}." -- ");
+						}
+
+						unless (defined $oround) {
+							$oround = $round_by_id{$round->{id}};
+							if ($oround) {
+								$m->print("Round ".$oround." found on id ".$round->{id}." -- ");
+							}
+						}
+
+						$m->flush_buffer();
+
+						my $tiebreak_set = $translator{tiebreak_set}{$round->{tiebreak_set}};
+
+						#This facilitates importing foreign Districts results from Speechwire
+						unless ($tiebreak_set) {
+							$tiebreak_set = $tiebreak_set_by_name{$round->{tiebreak_set_name}};
+						}
+
+						unless ($tiebreak_set) {
+							$m->print("<p class='error'> No tiebreak set found for ID ".$round->{tiebreak_set}."?  Error in data, skipping round ".$round->{name}."</p>");
+							next ROUND;
+						}
+
+						my $start_time = parse_date($round->{start_time});
+						my $created = parse_date($round->{created});
+
+						if ($oround) {
+
+							$oround->type($round->{type});
+							$oround->name($round->{name});
+							$oround->published($round->{published});
+							$oround->post_results($round->{post_results});
+							$oround->timeslot($otimeslot->id);
+							$oround->site($round->{site});
+							$oround->label($round->{label});
+							$oround->flighted($round->{flighted});
+							$oround->tiebreak_set($tiebreak_set);
+							$oround->created($created) if $created;
+							$oround->start_time($start_time) if $start_time;
+							$oround->update();
+
+							#Prevent a double pump
+							delete $round_by_id{$oround->id};
+
+						} else {
+
+							$m->print("No round found for ID ".$round->{id}." name ".$round->{name}." so creating one. -- ");
+							$m->flush_buffer();
+
+							$oround = Tab::Round->create({
+								event        => $oevent->id,
+								type         => $round->{type},
+								name         => $round->{name},
+								published    => $round->{published},
+								post_results => $round->{post_results},
+								timeslot     => $otimeslot->id,
+								created      => $created,
+								start_time   => $start_time,
+								site         => $round->{site},
+								label        => $round->{label},
+								flighted     => $round->{flighted},
+								tiebreak_set => $tiebreak_set->id,
+							});
+						}
+
+						$translator{round}{$round->{id}} = $oround;
+
+						Tab::RoundSetting->sql_rm_all->execute($oround->id);
+
+						if ($round->{settings}) {
+							foreach my $jsetting (@{$round->{settings}}) {
+								my @reply = parse_setting($jsetting);
+								$oround->setting(@reply) if @reply;
+							}
+						}
+						Tab::Score->sql_rm_all->execute($oround->id);
+						Tab::Ballot->sql_rm_all->execute($oround->id);
+						Tab::Panel->sql_rm_all->execute($oround->id);
+
+						my $section_count;
+
+						#SECTIONS PANELS AND FUN
+						if ($round->{sections}) {
+
+							foreach my $section (@{$round->{sections}}) {
+
+								my $oroom = $translator{room}{$section->{room}};
+
+								# Also to help foreign imports and Speechwire
+								unless ($oroom) {
+									$oroom = $translator{roomname}{$section->{room_name}};
+								}
+
+								$section->{bye} = 0 unless $section->{bye} > 0;
+
+								if ( (not defined $oroom) && $section->{room_name}) {
+									$oroom = Tab::Room->create({
+										site     => $site->id,
+										name     => $section->{room_name},
+										ada      => 0,
+										inactive => 0
+									});
+								}
+
+								my $flight = $section->{flight} if $section->{flight} > 0;
+								$flight = 1 unless $flight;
+
+								my $osection = Tab::Panel->create({
+									room   => $oroom,
+									round  => $oround,
+									letter => $section->{letter},
+									flight => $flight,
+									bye    => $section->{bye}
+								});
+
+								$osection->publish($section->{publish}) if $section->{publish};
+								$osection->bracket($section->{bracket}) if $section->{bracket};
+								$osection->update();
+
+								my %done;
+
+								if ($section->{ballots}) {
+
+									my %taken;
+
+									foreach my $ballot (@{$section->{ballots}}) {
+
+										my $oentry = $translator{entry}{$ballot->{entry}};
+										next unless $oentry;
+
+										my $ojudge = $translator{judge}{$ballot->{judge}};
+										$ojudge = 0 unless $ojudge;
+
+										next if $done{$ojudge}{$oentry}{$osection}++;
+
+										foreach my $tag ("side", "speakerorder", "chair", "bye", "forfeit", "tv", "audit") {
+											$ballot->{$tag} = 0 unless $ballot->{$tag} > 0;
+										}
+
+										while ($taken{$ballot->{judge}."-".$ballot->{side}."-".$ballot->{speakerorder}}) {
+											if ($oevent->type eq "debate" || $oevent->type eq "wsdc") {
+												$ballot->{side}++
+											} else {
+												$ballot->{speakerorder}++;
+											}
+										}
+
+										$taken{$ballot->{judge}."-".$ballot->{side}."-".$ballot->{speakerorder}}++;
+
+										my $oballot = Tab::Ballot->create({
+											panel        => $osection->id,
+											entry        => $oentry,
+											judge        => $ojudge,
+											side         => $ballot->{side},
+											speakerorder => $ballot->{speakerorder},
+											bye          => $ballot->{bye},
+											chair        => $ballot->{chair},
+											audit        => $ballot->{audit},
+											forfeit      => $ballot->{forfeit},
+											tv           => $ballot->{tv}
+										});
+
+										if ($ballot->{scores}) {
+
+											foreach my $score (@{$ballot->{scores}}) {
+
+												next unless (defined $score->{value});
+												next unless $score->{tag};
+
+												my $oscore = Tab::Score->create({
+													ballot   => $oballot->id,
+													tag      => $score->{tag},
+													value    => $score->{value},
+													student  => $score->{speaker},
+													speech   => $score->{speech},
+													topic    => $score->{topic},
+													position => $score->{position}
+												});
+											}
+										}
+									}
+								}
+
+								$section_count++;
+							}
+						}
+
+						$m->print(" $section_count sections done. <br />");
+						$m->flush_buffer();
+					}
+
+					prune_unused(\%round_by_id, $translator{round}, $event->{rounds});
+
+					#RESULT SETS
+
+					my @result_sets = $oevent->result_sets();
+					my %result_set_by_id =  map {$_->id => $_ } @result_sets;
+					my %result_set_by_label =  map {$_->label => $_ } @result_sets;
+
+					if ($event->{result_sets}) {
+
+						foreach my $result_set (@{$event->{result_sets}}) {
+
+							my $oresult_set;
+							$oresult_set = $result_set_by_id{$result_set->{id}};
+
+							unless ($oresult_set) {
+								$oresult_set = $result_set_by_label{$result_set->{label}};
+							}
+
+							my $generated_dt = parse_date($result_set->{generated});
+
+							unless ($oresult_set) {
+
+								$oresult_set = Tab::ResultSet->create({
+									event     => $oevent->id,
+									label     => $result_set->{label},
+									bracket   => $result_set->{bracket},
+									published => $result_set->{published},
+									coach     => $result_set->{coach},
+									generated => $generated_dt,
+									tourn     => $tourn->id
+								});
+
+							} else {
+
+								$oresult_set->event($oevent->id);
+								$oresult_set->label($result_set->{label});
+								$oresult_set->bracket($result_set->{bracket});
+								$oresult_set->published($result_set->{published});
+								$oresult_set->coach($result_set->{coach});
+								$oresult_set->generated($generated_dt);
+								$oresult_set->tourn($tourn->id);
+								$oresult_set->update();
+
+								#Prevent a double pump
+								delete $result_set_by_id{$oresult_set->id};
+
+							}
+
+							$translator{result_set}{$result_set->{id}} = $oresult_set;
+
+							my @results = $oresult_set->results();
+							my %result_by_id = map {$_->id => $_} @results;
+							my %result_by_entry = map {$_->entry => $_} @results;
+
+							if ($result_set->{results}) {
+
+								foreach my $result (@{$result_set->{results}}) {
+
+									my $oentry   = $translator{entry}{$result->{entry}};
+									my $ostudent = $translator{student}{$result->{student}};
+									my $oschool  = $translator{school}{$result->{school}};
+									my $oround   = $translator{round}{$result->{round}};
+
+									my $oresult = $result_by_id{$result->{id}};
+
+									unless ($oresult) {
+										$oresult = $result_by_entry{$result->{entry}};
+									}
+
+									unless ($oresult) {
+
+										$oresult = Tab::Result->create({
+											result_set => $oresult_set,
+											entry      => $oentry,
+											student    => $ostudent,
+											school     => $oschool,
+											round      => $oround,
+											rank       => $result->{rank},
+											percentile => $result->{percentile}
+										});
+
+									} else {
+
+										$oresult->result_set($oresult_set);
+										$oresult->entry($oentry);
+										$oresult->student($ostudent);
+										$oresult->school($oschool);
+										$oresult->round($oround);
+										$oresult->rank($result->{rank});
+										$oresult->percentile($result->{percentile});
+										$oresult->update();
+										delete $result_by_id{$oresult->id};
+
+									}
+
+									$translator{result}{$result->{id}} = $oresult;
+
+									my @values = $oresult->values();
+									my %value_by_id = map {$_->id => $_} @values;
+									my %value_by_priority = map {$_->priority => $_} @values;
+
+									if ($result->{values}) {
+
+										foreach my $value (@{$result->{values}}) {
+
+											my $ovalue = $value_by_id{$value->{id}};
+
+											unless ($ovalue) {
+												$ovalue = $value_by_priority{$value->{priority}};
+											}
+
+											$value->{no_sort} = 0 unless $value->{no_sort};
+											$value->{sort_desc} = 0 unless $value->{sort_desc};
+
+											unless ($ovalue) {
+
+												$ovalue = Tab::ResultValue->create({
+													result      => $oresult->id,
+													tag         => $value->{tag},
+													value       => $value->{value},
+													priority    => $value->{priority},
+													description => $value->{description},
+													no_sort     => $value->{no_sort},
+													sort_desc   => $value->{sort_desc},
+												});
+
+											} else {
+
+												$ovalue->result($oresult->id);
+												$ovalue->tag($value->{tag});
+												$ovalue->value($value->{value});
+												$ovalue->priority($value->{priority});
+												$ovalue->description($value->{description});
+												$ovalue->no_sort($value->{no_sort});
+												$ovalue->sort_desc($value->{sort_desc});
+												$ovalue->update();
+												delete $value_by_id{$ovalue->id};
+											}
+
+											$translator{value}{$value->{id}} = $ovalue;
+
+										}
+									}
+
+									prune_unused( \%value_by_id, $translator{value}, $result->{values});
+								}
+							}
+
+							prune_unused( \%result_by_id, $translator{result}, $result_set->{results});
+						}
+					}
+
+					$m->print(" ...Event Done</p>");
+					$m->flush_buffer();
+
+
+					prune_unused( \%result_set_by_id, $translator{result_set}, $event->{result_sets});
+				}
+			}
+
+			$m->print("<p class='action'> Importing judge pools </p>");
+			$m->flush_buffer();
+
+			#JPOOLS JUDGE POOLS
+			my @jpools = $ocategory->jpools;
+			my %jpool_by_id = map { $_->id => $_ } @jpools;
+			my %jpool_by_name = map { $_->name => $_ } @jpools;
+
+			if ($category->{judge_pools}) {
+
+				foreach my $jpool (@{$category->{judge_pools}}) {
+
+					my $ojpool = $jpool_by_id{$jpool->{id}};
+
+					unless ($ojpool) {
+						$ojpool = $jpool_by_name{$jpool->{name}};
+					}
+
+					my $site = $translator{site}{$jpool->{site}};
+					$site = 0 unless $site;
+
+					unless ($ojpool) {
+
+						$ojpool = Tab::JPool->create({
+							category => $ocategory->id,
+							name     => $jpool->{name},
+							site     => $site
+						});
+
+					} else {
+						$ojpool->category($ocategory->id);
+						$ojpool->name($jpool->{name});
+						$ojpool->site($site);
+						$ojpool->update();
+						delete $jpool_by_id{$ojpool->id};
+					}
+
+					$translator{jpool}{$jpool->{id}} = $ojpool;
+
+					#JPOOL SETTINGS
+					Tab::JPoolSetting->sql_rm_all->execute($ojpool->id);
+
+					if ($jpool->{settings})  {
+						foreach my $jsetting (@{$jpool->{settings}}) {
+							my @reply = parse_setting($jsetting);
+							eval{$ojpool->setting(@reply)};
+						}
+					}
+
+					#JPOOL ROUNDS
+					my %jpool_rounds = map { $_->round->id => $_ } Tab::JPoolRound->search(jpool => $ojpool->id);
+
+					if ($jpool->{rounds}) {
+
+						foreach my $round (@{$jpool->{rounds}}) {
+							my $oround = $translator{round}{$round};
+
+							if ($jpool_rounds{$oround}) {
+								delete ($jpool_rounds{$oround});
+							} else {
+								Tab::JPoolRound->create({
+									round => $oround->id,
+									jpool => $ojpool->id
+								});
+							}
+						}
+					}
+
+					foreach my $key (keys %jpool_rounds) {
+						$jpool_rounds{$key}->delete();
+					}
+
+					#JPOOL JUDGES
+
+					my %jpool_judges = map { $_->judge->id => $_ } Tab::JPoolJudge->search(jpool => $ojpool->id);
+
+					if ($jpool->{judges}) {
+
+						foreach my $judge (@{$jpool->{judges}}) {
+
+							my $ojudge = $translator{judge}{$judge};
+							next unless $ojudge;
+
+							if ($jpool_judges{$ojudge}) {
+								delete $jpool_judges{$ojudge};
+							} else {
+								Tab::JPoolJudge->create({
+									judge => $ojudge->id,
+									jpool => $ojpool->id
+								});
+							}
+						}
+					}
+
+					foreach my $key (keys %jpool_judges) {
+						$jpool_judges{$key}->delete();
+					}
+				}
+			}
+
+			prune_unused( \%jpool_by_id, $translator{jpool}, $category->{judge_pools});
+		}
+
+		#ROOM POOLS
+
+		my @rpools = $tourn->rpools;
+		my %rpool_by_id = map { $_->id => $_ } @rpools;
+		my %rpool_by_name = map { $_->name => $_ } @rpools;
+
+		$m->print("<p class='action'> Importing global room pools </p>");
+		$m->flush_buffer();
+
+		if ($jdata->{room_pools}) {
+
+			RPOOL:
+			foreach my $rpool (@{$jdata->{room_pools}}) {
+
+				my $orpool = $rpool_by_id{$rpool->{id}};
+
+				unless ($orpool) {
+					$orpool = $rpool_by_name{$rpool->{name}};
 				}
 
-				my $json_ballot;
+				my $site = $translator{site}{$rpool->{site}};
+				$site = 0 unless $site;
 
-				# BALLOTS
-				if ($ballots{$ballot_id}) {
+				unless ($orpool) {
 
-					$json_ballot = $ballots{$ballot_id};
+					$orpool = Tab::RPool->create({
+						tourn => $tourn->id,
+						name  => $rpool->{name}
+					});
 
 				} else {
 
-					$json_ballot = {
-						id    => $ballot_id,
-						panel => $panel_id,
-						entry => $ballot_entry
-					};
-
-					$json_ballot->{speakerorder} = $ballot_speakerorder if $ballot_speakerorder;
-
-					$json_ballot->{judge}   = $ballot_judge if $ballot_judge;
-					$json_ballot->{side}    = $ballot_side if $ballot_side;
-					$json_ballot->{bye}     = "true" if $ballot_bye;
-					$json_ballot->{chair}   = "true" if $ballot_chair;
-					$json_ballot->{audit}   = "true" if $ballot_audit;
-					$json_ballot->{forfeit} = "true" if $ballot_forfeit;
-
-					$ballots{$ballot_id} = $json_ballot;
-					push @{$json_section->{"ballots"}}, $json_ballot;
+					$orpool->name($rpool->{name});
+					$orpool->update();
+					delete $rpool_by_id{$orpool->id};
 				}
 
-				# SCORES
-				if ($score_id) {
+				$translator{rpool}{$rpool->{id}} = $orpool;
+				next unless $orpool;
 
-					my $json_score = {
-						id       => $score_id,
-						type     => $score_tag,
-						value    => $score_value,
-					};
+				#RPOOL ROUNDS
+				my %rpool_rounds = map { $_->round->id => $_ } Tab::RPoolRound->search(rpool => $orpool->id);
 
-					$json_score->{speaker}  = $score_student if $score_student;
-					$json_score->{topic}    = $score_topic if $score_topic;
-					$json_score->{speech}   = $score_speech if $score_speech;
-					$json_score->{position} = $score_position if $score_position;
+				if ($rpool->{rounds}) {
+					foreach my $round (@{$rpool->{rounds}}) {
 
-					push @{$json_ballot->{"scores"}}, $json_score;
-				}
-			}
+						my $oround = $translator{round}{$round};
+						next unless $oround && $oround->id;
 
-			$score_sth->finish();
-
-			# RESULTS SHEETS
-			$results_sth->execute($event_id);
-
-			my %results;
-			my %result_sets;
-
-			while(
-				my (
-					$rv_id, $rv_tag, $rv_value, $rv_priority, $rv_description, $rv_no_sort, $rv_sort_desc,
-					$result_id, $result_rank, $result_percentile, $result_entry, $result_student, $result_school, $result_round,
-					$rs_id, $rs_label, $rs_bracket, $rs_published, $rs_coach, $rs_tourn, $rs_event
-				) = $results_sth->fetchrow_array()
-			) {
-
-				my $json_rs;
-
-				if ($result_sets{$rs_id}) {
-
-					$json_rs = $result_sets{$rs_id};
-
-				} else {
-
-					$json_rs = {
-						label     => $rs_label,
-						bracket   => $rs_bracket,
-						published => $rs_published,
-						coach     => $rs_coach
-					};
-
-					push @{$json_event->{result_sets}}, $json_rs;
-
+						if ($rpool_rounds{$oround}) {
+							delete $rpool_rounds{$oround};
+						} else {
+							Tab::RPoolRound->create({
+								round => $oround->id,
+								rpool => $orpool->id
+							});
+						}
+					}
 				}
 
-				my $json_result;
-				if ($results{$result_id}) {
+				#RPOOL ROOMS
+				my %rpool_rooms = map { $_->room->id => $_ } Tab::RPoolRoom->search(rpool => $orpool->id);
 
-					$json_result = $results{$result_id};
+				if ($rpool->{rooms}) {
 
-				} else {
+					foreach my $room (@{$rpool->{rooms}}) {
 
-					$json_result = {
-						rank       => $result_rank,
-						percentile => $result_percentile,
-						entry      => $result_entry,
-						student    => $result_student,
-						school     => $result_school,
-						round      => $result_round,
-					};
+						my $oroom = $translator{room}{$room};
+						next unless $oroom > 0;
 
-					push @{$json_rs->{results}}, $json_result;
+						if ($rpool_rooms{$oroom}) {
+							delete $rpool_rooms{$oroom};
+						} else {
+							Tab::RPoolRoom->create({
+								room  => $oroom->id,
+								rpool => $orpool->id
+							});
+						}
+					}
 				}
 
-				my $json_rv = {
-					tag         => $rv_tag,
-					value       => $rv_value,
-					priority    => $rv_priority,
-					description => $rv_description,
-					no_sort     => $rv_no_sort,
-					sort_desc   => $rv_sort_desc,
-				};
+				foreach my $key (keys %rpool_rooms) {
+					$rpool_rooms{$key}->delete();
+					delete $rpool_rooms{$key};
+				}
 
-				push @{$json_result->{"values"}}, $json_rv;
-
+				foreach my $key (keys %rpool_rounds) {
+					$rpool_rounds{$key}->delete();
+					delete $rpool_rounds{$key};
+				}
 			}
 		}
 
-		# PREFS RATINGS AND STRIKES
+		prune_unused( \%rpool_by_id, $translator{rpool}, $jdata->{room_pools});
 
-		unless ($public) {
+		#ROOM TIMEBLOCKS AND EVENT BLOCKS
+		foreach my $site (@{$jdata->{sites}}) {
 
-			$rating_sth->execute($category_id);
+			my $osite = $translator{site}{$site->{id}};
+			next unless $osite;
 
-			while (
-				my (
-					$rating_id, $rating_type, $rating_entry, $rating_judge,
-					$rating_ordinal, $rating_percentile, $rating_tier_name
-				) = $rating_sth->fetchrow_array()
-			) {
+			my @blocks = Tab::RoomStrike->search_by_site($osite->id, $tourn->id);
+			my %block_by_id = map {$_->id => $_} @blocks;
 
-				next unless $rating_ordinal || $rating_tier_name;
+			if ($site->{blocks}) {
 
-				my $json_rating = {
-					id    => $rating_id,
-					entry => $rating_entry,
-					judge => $rating_judge
-				};
+				foreach my $block (@{$site->{blocks}}) {
 
-				if ($rating_tier_name) {
-					$json_rating->{rating} = $rating_tier_name;
-				} else {
-					$json_rating->{rating} = $rating_ordinal;
-					$json_rating->{percentile} = $rating_percentile;
+					my $oblock;
+					$oblock = $block_by_id{$block->{id}};
+
+					if ($oblock) {
+						$oblock->type($block->{tag});
+						$oblock->room($block->{room});
+					} else {
+						$oblock = Tab::RoomStrike->create({
+							type => $block->{tag},
+							room => $block->{room},
+						});
+					}
+
+					my $start_dt = parse_date($block->{start});
+					my $end_dt = parse_date($block->{end});
+
+					$oblock->start($start_dt);
+					$oblock->end($end_dt);
+
+					foreach my $key ("event", "judge", "entry") {
+						if ($block->{$key}) {
+							my $obj = $translator{$key}{$block->{$key}};
+							$oblock->$key($obj->id) if $obj > 0;
+						}
+					}
+					$oblock->update();
+					delete $block_by_id{$oblock->id};
+
+					$translator{roomblock}{$block->{id}} = $oblock;
 				}
-
-				push (@{$judges{$rating_judge}{"ratings"}}, $json_rating);
 			}
 
-			$rating_sth->finish();
-			$strike_sth->execute($category_id);
-
-			while (
-				my (
-					$strike_id, $strike_type, $strike_start, $strike_end, $strike_judge,
-					$strike_entry, $strike_event, $strike_school, $strike_region, $strike_district,
-					$strike_timeslot, $strike_shift, $strike_registrant, $strike_conflictee
-				) = $strike_sth->fetchrow_array()
-			) {
-
-				my $json_strike = {
-					id    => $strike_id,
-					tag   => $strike_type,
-					judge => $strike_judge
-				};
-
-				$json_strike->{entry} = $strike_entry if $strike_entry;
-				$json_strike->{event} = $strike_event if $strike_event;
-				$json_strike->{school} = $strike_school if $strike_school;
-				$json_strike->{region} = $strike_region if $strike_region;
-				$json_strike->{district} = $strike_district if $strike_district;
-				$json_strike->{shift} = $strike_shift if $strike_shift;
-				$json_strike->{timeslot} = $strike_timeslot if $strike_timeslot;
-
-				if ($strike_start && $strike_end) {
-					$json_strike->{start} = $strike_start."+00:00";
-					$json_strike->{end} = $strike_end."+00:00";
-				}
-
-				push (@{$judges{$strike_judge}{"strike"}}, $json_strike);
-			}
-
-			foreach my $key (keys %judges) {
-				push @{$json_category->{judges}}, $judges{$key};
-			}
-		}
-
-		# RESULTS SHEETS
-	}
-	}
-
-	my $student_sth = $dbh->prepare("
-		select
-			entry_student.id,
-			student.id, student.first, student.middle, student.last, student.nsda, student.phonetic, student.chapter,
-			entry.id, entry.code, entry.name, entry.event, entry.school, entry.ada, entry.active, entry.dropped, entry.waitlist,
-			school.id, school.name, school.chapter, school.code, school.onsite, school.state, school.region, school.district,
-			chapter.nsda, pairing_seed.value
-
-			from (entry, school, chapter, event)
-
-			left join entry_student on entry_student.entry = entry.id
-			left join student on student.id = entry_student.student and student.chapter = chapter.id
-
-			left join entry_setting pairing_seed
-				on pairing_seed.tag = 'pairing_seed'
-				and pairing_seed.entry = entry.id
-
-			where event.tourn = ?
-			and event.id = entry.event
-			and entry.school = school.id
-			and school.chapter = chapter.id
-			group by entry_student.id
-	");
-
-	my $ss_sth = $dbh->prepare("
-		select
-			school.id, school_setting.id, school_setting.tag,
-			school_setting.value, school_setting.value_date, school_setting.value_text
-		from (school, school_setting)
-
-		where school.event = ?
-			and school.id = school_setting.school
-	");
-
-	my $es_sth = $dbh->prepare("
-		select
-			entry.id, entry_setting.id, entry_setting.tag,
-			entry_setting.value, entry_setting.value_date, entry_setting.value_text
-		from (entry, entry_setting)
-
-		where entry.event = ?
-			and entry.id = entry_setting.entry
-	");
-
-	my %schools;
-	my %students;
-	my %entries;
-
-	unless ($event_id || $category_id) {
-
-		$student_sth->execute($tourn->id);
-
-		while (
-			my (
-				$entry_student_id,
-				$student_id, $student_first, $student_middle, $student_last,
-				$student_nsda, $student_phonetic, $student_chapter,
-				$entry_id, $entry_code, $entry_name, $entry_event, $entry_school,
-				$entry_ada, $entry_active, $entry_dropped, $entry_waitlist,
-				$this_school_id, $school_name, $school_chapter, $school_code, $school_onsite,
-				$school_state, $school_region, $school_district,
-				$chapter_nsda, $entry_seed
-			) = $student_sth->fetchrow_array()
-		) {
-
-			if ($school_id) {
-				next if ($school_id != $entry_school);
-				$file_name = $school_name;
-			} else {
-				next unless $events_used{$entry_event};
-			}
-
-			my $json_school;
-
-			#SCHOOLS
-
-			if ($schools{$entry_school}) {
-
-				$json_school = $schools{$entry_school};
-
-			} else {
-
-				$json_school = {
-					id      => $entry_school,
-					name    => $school_name,
-					chapter => $school_chapter
-				};
-
-				$json_school->{code} = $school_code if $school_code;
-				$json_school->{nsda} = $chapter_nsda if $chapter_nsda;
-				$json_school->{region} = $school_region if $school_region;
-				$json_school->{district} = $school_district if $school_district;
-
-				$json_school->{settings} = raw_value($es_sth, $entry_school);
-
-				$schools{$entry_school} = $json_school;
-				push (@{$json_tourn->{schools}}, $json_school);
-			}
-
-			my $json_entry;
-
-			if ($entries{$entry_id}) {
-
-				$json_entry = $entries{$entry_id};
-
-			} else {
-
-				$json_entry = {
-					id     => $entry_id,
-					school => $entry_school,
-					event  => $event_id,
-					code   => $entry_code,
-					name   => $entry_name
-				};
-
-				$json_entry->{ada}      = "true" if $entry_ada;
-				$json_entry->{rating}   = "true" if $entry_seed;
-				$json_entry->{dropped}  = "true" if $entry_dropped;
-				$json_entry->{waitlist} = "true" if $entry_waitlist;
-
-				$json_entry->{settings} = raw_value($es_sth, $entry_id);
-				$entries{$entry_id} = $json_entry;
-				push (@{$json_school->{entries}}, $json_entry);
-			}
-
-			my $json_student;
-
-			if ($students{$student_id}) {
-				$json_student = $students{$student_id};
-
-			} else {
-
-				$json_student = {
-					id      => $student_id,
-					chapter => $student_chapter,
-					school  => $entry_school,
-					first   => $student_first,
-					last    => $student_last
-				};
-
-				$json_student->{nsda}   = $student_nsda if $student_nsda;
-				$json_student->{middle} = $student_middle if $student_middle;
-
-				push (@{$json_school->{students}}, $json_student);
-				$students{$student_id} = $json_student;
-			}
-
-			push @{$json_student->{entries}}, $entry_id;
-			push @{$json_entry->{students}}, $student_id;
-		}
-
-		$student_sth->finish();
-	}
-
-	unless ($school_id) {
-
-		my $tb_sth = $dbh->prepare("
-			select
-				tiebreak.id, tiebreak.name, tiebreak.count, tiebreak.count_round,
-				tiebreak.truncate, tiebreak.truncate_smallest,
-				tiebreak.multiplier, tiebreak.priority,
-				tiebreak.highlow, tiebreak.highlow_count,
-				tiebreak.child,
-				ts.id, ts.name
-
-			from tiebreak, tiebreak_set ts
-				where ts.tourn = ?
-				and ts.id = tiebreak.tiebreak_set
-		");
-
-		my $ts_sth = $dbh->prepare("
-			select
-				tiebreak_set.id, tiebreak_set_setting.id, tiebreak_set_setting.tag,
-				tiebreak_set_setting.value, tiebreak_set_setting.value_date, tiebreak_set_setting.value_text
-			from (tiebreak_set, tiebreak_set_setting)
-
-			where tiebreak_set.id = ?
-				and tiebreak_set.id = tiebreak_set_setting.tiebreak_set
-		");
-
-		my %tbsets;
-
-		$tb_sth->execute($tourn_id);
-
-		while (
-			my (
-				$tiebreak_id, $tiebreak_name, $tiebreak_count, $tiebreak_count_round,
-				$tiebreak_truncate, $tiebreak_truncate_smallest,
-				$tiebreak_multiplier, $tiebreak_priority,
-				$tiebreak_highlow, $tiebreak_highlow_count, $tiebreak_child,
-				$ts_id, $ts_name
-			) = $tb_sth->fetchrow_array()
-		) {
-
-			my $json_tbset;
-
-			if ($tbsets{$ts_id}) {
-
-				$json_tbset = $tbsets{$ts_id};
-
-			} else {
-
-				$json_tbset = {
-					name => $ts_name
-				};
-
-				$json_tbset->{settings} = raw_value($ts_sth, $ts_id);
-
-				$tbsets{$ts_id} = $json_tbset;
-				push @{$json_tourn->{"tiebreak_sets"}}, $json_tbset;
-
-			};
-
-			my $json_tb = {
-				name     => $tiebreak_name,
-				priority => $tiebreak_priority,
-				count    => $tiebreak_count
-			};
-
-			$json_tb->{highlow_count}     = $tiebreak_highlow_count if $tiebreak_highlow_count;
-			$json_tb->{count}             = $tiebreak_count if $tiebreak_count;
-			$json_tb->{count_round}       = $tiebreak_count_round if $tiebreak_count_round;
-			$json_tb->{truncate}          = $tiebreak_truncate if $tiebreak_truncate;
-			$json_tb->{truncate_smallest} = $tiebreak_truncate_smallest if $tiebreak_truncate_smallest;
-			$json_tb->{multiplier}        = $tiebreak_multiplier if $tiebreak_multiplier;
-			$json_tb->{child}             = $tiebreak_child if $tiebreak_child;
-
-			push (@{$json_tbset->{tiebreaks}}, $json_tb);
+			prune_unused( \%block_by_id, $translator{roomblock}, $site->{blocks});
 		}
 	}
 
-	unless ($public || $event_id || $category_id) {
-
-		# FINES FEES PAYMENTS
-
-		my $fine_sth = $dbh->prepare("
-			select
-				fine.id, fine.reason, fine.amount, fine.payment, fine.levied_at, fine.levied_by,
-				fine.deleted, fine.deleted_at, fine.deleted_by,
-				fine.tourn, fine.school, fine.region, fine.judge, fine.parent, fine.invoice
-			from fine
-			where fine.tourn = ?
-		");
-
-		$fine_sth->execute($tourn->id);
-
-		while (
-			my (
-				$fine_id, $fine_reason, $fine_amount, $fine_payment,
-				$fine_levied_at, $fine_levied_by,
-				$fine_deleted, $fine_deleted_at, $fine_deleted_by,
-				$fine_tourn, $fine_school, $fine_region, $fine_judge,
-				$fine_parent, $fine_invoice
-			) = $fine_sth->fetchrow_array()
-		) {
-
-			next if ($school_id && ($school_id != $fine_school));
-
-			my $json_fine = {
-				id         => $fine_id,
-				reason     => $fine_reason,
-				amount     => $fine_amount,
-				payment    => $fine_payment,
-				levied_by  => $fine_levied_by,
-				levied_at  => $fine_levied_at."+00:00",
-				deleted    => $fine_deleted,
-				deleted_by => $fine_deleted_by,
-				deleted_at => $fine_deleted_at."+00:00",
-				tourn      => $fine_tourn,
-				school     => $fine_school,
-				region     => $fine_region,
-				judge      => $fine_judge,
-				parent     => $fine_parent,
-				invoice    => $fine_invoice,
-			};
-
-			push @{$json_tourn->{"fines"}}, $json_fine;
-		}
-	}
-
-	$dbh->disconnect();
-
-	$m->clear_buffer();
-	$m->print("Content-Type: application/json");
-
-	$file_name =~ s/[\W_]//g;
-
-	my $filename = $tourn->name;
-	$filename =~ s/[\W_]//g;
-	$filename = $file_name."-".$filename if $file_name;
-	$filename = $filename."-".$now->ymd('-')."-at-".$now->hms('-').".json";
-	my $json = JSON->new->allow_nonref->convert_blessed;
-
-	$r->content_type('application/json');
-	$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
-	$m->print($json->pretty->encode( $json_tourn ));
-	$m->abort();
+	$m->print("<h5 class='action'>Fin.</h5>");
+	$m->flush_buffer();
 
 	sub parse_date {
 		my $string = shift;
-		return eval {
+		$string =~ s/T/ /g;
+
+		my $dt = eval {
 			return DateTime::Format::MySQL->parse_datetime($string);
 		};
+		return $dt;
 	}
+
+	sub parse_setting {
+		my $json_ref = shift;
+
+		return unless $json_ref->{tag};
+		return unless $json_ref->{value};
+
+		if ($json_ref->{meta} eq "date") {
+			my $dt = parse_date($json_ref->{value});
+			return unless $dt;
+			return ($json_ref->{tag}, $json_ref->{meta}, $dt);
+		} elsif ($json_ref->{meta} eq "text") {
+			return ($json_ref->{tag}, $json_ref->{meta}, $json_ref->{value});
+		} else {
+			return ($json_ref->{tag}, $json_ref->{value});
+		}
+	}
+
+	sub prune_unused {
+
+		my ($objects, $translator, $json) = @_;
+
+		my %taken;
+		foreach my $value (@{$json}) {
+			next unless $translator->{$value->{id}} > 0;
+			$taken{$translator->{$value->{id}}}++;
+		}
+
+		foreach my $key (keys %{$objects}) {
+			next if $taken{$key};
+			$objects->{$key}->delete;
+			delete $objects->{$key};
+		}
+
+		return;
+	}
+
 
 </%init>

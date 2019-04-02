@@ -84,8 +84,8 @@
 
 	my %entry_seed_position = ();
 
-	my $best_judges_highest_seed =
-		$event_settings{"best_judges_highest_seed"};
+	my $best_judges_highest_seed = $event_settings{"best_judges_highest_seed"};
+	my $invert_ratings = $event_settings{"invert_ratings"};
 
 	my $logfirst;
 
@@ -513,7 +513,7 @@
 		and judge.category = event.category
 		and event.id = ?
 		and round.event = event.id
-		and strike.type = 'time'
+		and (strike.type = 'time' or strike.type = 'departure')
 		and strike.start < timeslot.end
 		and strike.end > timeslot.start
 		and timeslot.id = round.timeslot
@@ -551,9 +551,37 @@
 		$busy_sth->execute($round->id);
 
 		while (my ($judge) = $busy_sth->fetchrow_array() ) {
-
 			$judges{"out"}{$judge}++;
 		}
+
+		$busy_sth = $dbh->prepare("
+			select distinct judge.id
+			from ballot, panel, round, timeslot, timeslot mytime, round myround,
+				judge, judge jjudge, jpool_judge, jpool_round
+			where myround.id = ?
+			and myround.timeslot = mytime.id
+
+			and mytime.start < timeslot.end
+			and mytime.end > timeslot.start
+
+			and timeslot.id = round.timeslot
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and ballot.judge = judge.id
+			and judge.person = jjudge.person
+			and judge.person > 0
+			and jjudge.person = jpool_judge.judge
+			and jpool_judge.jpool = jpool_round.jpool
+			and jpool_round.round = myround.id
+		");
+
+		$busy_sth->execute($round->id);
+
+		while (my ($judge) = $busy_sth->fetchrow_array() ) {
+			$judges{"out"}{$judge}++;
+		}
+
+		$busy_sth->finish();
 
 	} else {
 
@@ -574,10 +602,30 @@
 		$busy_sth->execute($round->id, $category->id);
 
 		while (my ($judge) = $busy_sth->fetchrow_array() ) {
-
 			$judges{"out"}{$judge}++;
 		}
 
+		$busy_sth = $dbh->prepare("
+			select distinct judge.id
+			from ballot, panel, round, timeslot, timeslot mytime, round myround, judge, judge pjudge
+			where myround.id = ?
+				and mytime.start < timeslot.end
+				and mytime.end > timeslot.start
+				and myround.timeslot = mytime.id
+				and timeslot.id      = round.timeslot
+				and round.id         = panel.round
+				and panel.id         = ballot.panel
+				and ballot.judge     = pjudge.id
+				and pjudge.person    > 0
+				and pjudge.person    = judge.person
+				and judge.category   = ?
+		");
+
+		$busy_sth->execute($round->id, $category->id);
+
+		while (my ($judge) = $busy_sth->fetchrow_array() ) {
+			$judges{"out"}{$judge}++;
+		}
 	}
 
 	my %tier_value;
@@ -667,7 +715,7 @@
 	$suckage          = 3 if not defined $suckage;
 	$mutuality        = 40 if not defined $mutuality;
 	$preference       = 15 if not defined $preference;
-	$preference       = 100 if $best_judges_highest_seed;
+	$preference       = 100 if $invert_ratings;
 	$default_mjp      = 2 if not defined $default_mjp;
 	$round_burn_avoid = 5 if not defined $round_burn_avoid;
 	$prefer_hireds    = 10 if not defined $prefer_hireds;
@@ -721,8 +769,6 @@
 				|| ($tourn_settings->{"nsda_nats"} && (not defined $event_settings{"not_nats"}))
 			)
 		) {
-
-
 			$judges{"out"}{$judge}++ if $num_rounds >= $judges{"obligation"}{$judge};
 			my $remaining_prelims = $prelim_count + 1 - $round->name;
 
@@ -909,8 +955,7 @@
 
 				$mult = 3 if $round->name == 1 && $order == 0;
 
-				$bracket_score{$panel} =
-					($max_panel_bracket_rank - $panels{"bracketrank"}{$panel}) ** $mult;
+				$bracket_score{$panel} = ($max_panel_bracket_rank - $panels{"bracketrank"}{$panel}) ** $mult;
 
 			} else {
 				$bracket_score{$panel} = $order * 2;
@@ -1001,18 +1046,7 @@
 				# Score each judge against this entry for various reasons.  The
 				# below penalizes judge strikes a lot.
 				$score += 50000 if $judges{"avoid"}{$entry};
-				$score += 500000 if $judges{"avoid"}{$entry} && $prefs eq "ordinals";
 				$score += 100000000 if $judges{"entry_strike"}{$judge}{$entry};
-
-				my $mjp_rating = $mjp{$judge}{$entry};
-				$mjp_rating = $default_mjp unless $mjp_rating;
-
-				# Ignore prefs if entry is not eligible to clear
-				if ($dont_care && $max_nobreak_pref) {
-					$score += 500000 if $mjp_rating > $max_nobreak_pref;
-				} elsif ($max_pref) {
-					$score += 500000 if $mjp_rating > $max_pref;
-				}
 
 				# Light regional constraints
 				if ($event_settings{"region_avoid"}) {
@@ -1034,6 +1068,18 @@
 
 				# Scores judges bsaed on MJP weights
 				if ($prefs && $prefs ne "none") {
+
+					$score += 500000 if $judges{"avoid"}{$entry} && $prefs eq "ordinals";
+					my $mjp_rating = $mjp{$judge}{$entry};
+					$mjp_rating = $default_mjp unless $mjp_rating;
+
+					# Ignore prefs if entry is not eligible to clear
+					if ($dont_care && $max_nobreak_pref) {
+						$score += 500000 if $mjp_rating > $max_nobreak_pref;
+					} elsif ($max_pref) {
+						$score += 500000 if $mjp_rating > $max_pref;
+					}
+
 					if ($mjp_first) {
 						$diff = abs($mjp_first - $mjp_rating)
 							if $mjp_first && $mjp_rating;
@@ -1072,7 +1118,11 @@
 			$score += $use_priority{$judge."-dontcare"} if $dont_care;
 
 			if ($tab_ratings) {
-				$use_priority{$judge} -= $judges{"rating"}{$judge} * $preference;
+				if ($invert_ratings) {
+					$use_priority{$judge} -= $judges{"rating"}{$judge} * $preference;
+				} else {
+					$use_priority{$judge} += $judges{"rating"}{$judge} * $preference;
+				}
 			}
 
 			if ($tab_ratings &! $dont_care) {
