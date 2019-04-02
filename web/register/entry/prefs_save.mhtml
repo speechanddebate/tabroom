@@ -1,4 +1,4 @@
-<%args> 
+<%args>
 	$tourn
 	$entry_id => undef
 	$event_id => undef
@@ -14,44 +14,51 @@
 	my $event = $entry->event;
 	my $category = $event->category;
 
-	my $prefs = $category->setting("prefs");
-	my $rounds_per = $category->setting("rounds_per");
+	my $prefs            = $category->setting("prefs");
+	my $rounds_per       = $category->setting("rounds_per");
+	my $ignore_conflicts = $category->setting("conflict_denominator");
 
 	my %tier_by_name = ();
 
-	if ($prefs eq "tiered" || $prefs eq "tiered_round" || $prefs eq "caps") { 
-		foreach my $tier ($category->rating_tiers) { 
+	if ($prefs eq "tiered"
+		|| $prefs eq "tiered_round"
+		|| $prefs eq "caps"
+	) {
+		foreach my $tier ($category->rating_tiers) {
 			$tier_by_name{$tier->name} = $tier->id;
 		}
 	}
 
-	if ($prefs eq "ordinals") { 
+	if ($prefs eq "ordinals") {
 		Tab::Entry->set_sql(
-			wipe_prefs => 
+			wipe_prefs =>
 			"delete from rating where entry = ? and ordinal > 0"
 		);
 		Tab::Entry->sql_wipe_prefs->execute($entry->id);
-	} else { 
+	} else {
 		Tab::Entry->set_sql(wipe_prefs => "delete from rating where entry = ? and rating_tier > 0");
 		Tab::Entry->sql_wipe_prefs->execute($entry->id);
 	}
 
-	my @conflicts = Tab::Strike->search( 
-		entry => $entry->id, 
-		type => "conflict" 
+	my @conflicts = Tab::Strike->search(
+		entry => $entry->id,
+		type => "conflict"
 	);
 
-	push @conflicts, Tab::Strike->search( 
+	push @conflicts, Tab::Strike->search(
 		school => $entry->school->id,
 		type   => "school"
 	);
 
-	my %conflicts_by_id = map {$_->judge->id => $_} @conflicts;
+	my %event_struck =
+		map {$_->judge->id => 1}
+		Tab::Strike->search(type => "event", event => $entry->event->id);
 
+	my %conflicts_by_id = map {$_->judge->id => $_} @conflicts;
 	my $school_id = $entry->school->id;
 
 	my @school_conflicts = $m->comp(
-		"/funclib/school_conflicts.mas", 
+		"/funclib/school_conflicts.mas",
 		school   => $entry->school,
 		category => $category
 	);
@@ -59,10 +66,10 @@
 
 	my @all_judges;
 
-	if ($category->setting("pref_jpool")) { 
+	if ($category->setting("pref_jpool")) {
 		my $jpool = Tab::JPool->retrieve($category->setting("pref_jpool"));
 		@all_judges = $m->comp("/funclib/jpool_judges.mas", jpool => $jpool);
-	} else { 
+	} else {
 		@all_judges = $category->judges( active => 1 );
 	}
 
@@ -70,14 +77,18 @@
 	my %ordinal_by_judge = ();
 	my %judges_at_rating = ();
 	my $total_rounds;
-	
+
 	JUDGE:
 	foreach my $judge (@all_judges) {
 
-		next if $school_conflicts_by_id{$judge->id};
-		next if $judge->school->id == $school_id;
+		if ($ignore_conflicts) {
+			next JUDGE if $school_conflicts_by_id{$judge->id};
+			next JUDGE if $judge->school->id == $school_id;
+		}
 
-		if ($conflicts_by_id{$judge->id}) { 
+		next if $event_struck{$judge->id};
+
+		if ($conflicts_by_id{$judge->id}) {
 
 			next JUDGE if $ARGS{"conflict_".$judge->id};
 			$conflicts_by_id{$judge->id}->delete;
@@ -92,18 +103,18 @@
 			});
 		}
 
-		if ($rounds_per) { 
-			unless ($ARGS{$judge->id} == 999) { 
+		if ($rounds_per) {
+			unless ($ARGS{$judge->id} == 999) {
 				$total_rounds += $judge->obligation;
 				$total_rounds += $judge->hired;
 			}
-		} else { 
+		} else {
 			$total_rounds++;
 		}
 
 		next unless $ARGS{$judge->id};
 
-		if ($prefs eq "ordinals") { 
+		if ($prefs eq "ordinals") {
 
 			my $rating = Tab::Rating->create({
 				type    => "entry",
@@ -118,7 +129,7 @@
 			$ordinal_by_judge{$judge->id} = $ARGS{$judge->id};
 			push (@{$judges_at_rating{$ARGS{$judge->id}}}, $judge );
 
-		} else { 
+		} else {
 
 			next JUDGE unless $tier_by_name{$ARGS{$judge->id}};
 
@@ -131,43 +142,39 @@
 				entered     => $now
 			});
 		}
-	}	
+	}
 
 	my $rounds_before;
 
-	if ($prefs eq "ordinals") { 
-		
-		$total_rounds = scalar @all_judges unless $total_rounds;
+	if ($prefs eq "ordinals") {
 
+		$total_rounds = scalar @all_judges unless $total_rounds;
 		my $rounds_before = 1;
 		my $count;
-		
-		foreach my $ordinal (sort {$a <=> $b} keys %judges_at_rating ) {
-			
-			next unless $ordinal > 0;
 
+		foreach my $ordinal (sort {$a <=> $b} keys %judges_at_rating ) {
+
+			next unless $ordinal > 0;
 			my $rounds_add;
 			my $judge_count;
-		
-			foreach my $judge (@{$judges_at_rating{$ordinal}}) { 
 
+			foreach my $judge (@{$judges_at_rating{$ordinal}}) {
 				$judge_count++;
 				$count++;
 
-				if ($rounds_per) { 
+				if ($rounds_per) {
 					$rounds_add += $judge->obligation;
 					$rounds_add += $judge->hired;
-				} else { 
+				} else {
 					$rounds_add++;
 				}
 			}
 
-			foreach my $judge (@{$judges_at_rating{$ordinal}}) { 
+			foreach my $judge (@{$judges_at_rating{$ordinal}}) {
 				my $percentile = ($rounds_before / $total_rounds) * 100;
 				my $rating = $rating_by_judge{$judge->id};
-
 				$rating->percentile($percentile);
-				$rating->update; 
+				$rating->update;
 			}
 
 			$rounds_before += $rounds_add;
