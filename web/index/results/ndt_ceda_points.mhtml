@@ -8,14 +8,17 @@
 	use Time::HiRes qw( time );
 	use Data::Dumper;
 	my $start = time();
-		
+
 	#season is the year in which a season ends, so for 2014-15 season=2015
 	$season=Tab::school_year->year unless $season;
 
 	my $key = $season;
-	return if $m->cache_self( key => $key, expires_in => '20m' );
+	return if $m->cache_self(
+		key        => $key,
+		expires_in => '20m'
+	);
 
-	my $startdate; 
+	my $startdate;
 	my $enddate;
 
 	$startdate="8/1/".$season if not $startdate;
@@ -31,391 +34,499 @@
 
 	my $start_date = $parser->parse_datetime($startdate);
 	my $end_date = $parser->parse_datetime($enddate);
-		
-	#Load in every ballot for the circuit
 
-	#Pull all events with honors_weight into an array
-	Tab::ResultValue->columns(TEMP => qw/entry/);
-	Tab::ResultValue->columns(TEMP => qw/entry_name/);
-	Tab::ResultValue->columns(TEMP => qw/entry_chpt/);
-	Tab::ResultValue->columns(TEMP => qw/chpt_name/);
-	Tab::ResultValue->columns(TEMP => qw/tourn/);
-	Tab::ResultValue->columns(TEMP => qw/tourn_id/);
-	Tab::ResultValue->columns(TEMP => qw/level/);
-	Tab::ResultValue->columns(TEMP => qw/state/);
-	Tab::ResultValue->set_sql(pull_results => "
-		SELECT result_value.*, result.entry as entry, entry.code as entry_name, school.chapter as entry_chpt, tourn.name as tourn,
-		chapter.name as chpt_name, event_setting.value as level, chapter.state as state, tourn.id as tourn_id
-		FROM result, result_set, result_value, entry, school, event, tourn, chapter, event_setting
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		SELECT
+			result_value.tag, result_value.value,
+			entry.id, entry.code, event_setting.value,
+			chapter.id, chapter.name, chapter.state,
+			tourn.id, tourn.name,
+			chapter1.id, chapter1.name, chapter1.state,
+			chapter2.id, chapter2.name, chapter2.state
+		FROM (result, result_set, result_value, entry, school, event, tourn, chapter, event_setting)
+
+			left join entry_student es1 on es1.entry = entry.id
+			left join student student1 on student1.id = es1.student
+			left join chapter chapter1 on student1.chapter = chapter1.id
+
+			left join entry_student es2 on es2.entry = entry.id and es2.id != es1.id
+			left join student student2 on student2.id = es2.student
+			left join chapter chapter2 on student2.chapter = chapter2.id
+
 		WHERE result_value.result=result.id
-				and result.result_set = result_set.id
-				and ( result_set.label = 'ceda_pts' or result_set.label = 'ndt_pts' )
-				and entry.id = result.entry
-				and school.id=entry.school
-				and event.id=entry.event
-				and event_setting.event=event.id
-				and event_setting.tag='Level'
-				and tourn.id=event.tourn
-				and chapter.id = school.chapter
-				and tourn.start>='$start_date'
-		and tourn.end<='$end_date'
+			and result.result_set = result_set.id
+			and (
+				result_set.label = 'ceda_pts'
+				or result_set.label = 'ndt_pts'
+			)
+			and result_set.event    = event.id
+			and entry.id            = result.entry
+			and school.id           = entry.school
+			and event.id            = entry.event
+			and event_setting.event = event.id
+			and event_setting.tag   = 'level'
+			and tourn.id            = event.tourn
+			and chapter.id          = school.chapter
+
+			and tourn.start >= ?
+			and tourn.end <= ?
 	");
-	my @results = Tab::ResultValue->search_pull_results;
-	
-	my $end = time();
-	if ($debug) { print "time to sql pull:  "; printf("%.2f\n", $end - $start); print "<br>"; }
 
-#Create a hash that stores all info per entries;
-		
+	$sth->execute($start_date, $end_date);
+
+	# Create a hash that stores all info per entries;
+
+	my $highest_id;
 	my %entry;
-	foreach my $result ( @results ) {
-		if ( $result->tag eq "ceda_tot" ) { $entry{$result->entry}{'ceda_tot'} = $result->value; }
-		if ( $result->tag eq "ceda_prelims" ) { $entry{$result->entry}{'ceda_prelims'} = $result->value; }
-		if ( $result->tag eq "ceda_elims" ) { $entry{$result->entry}{'ceda_elims'} = $result->value; }
-		if ( $result->tag eq "ndt_tot" ) { $entry{$result->entry}{'ndt_tot'} = $result->value; }
-	if ( $result->tag eq "ndt_tot" && $result->level eq "open") { $entry{$result->entry}{'ndt_varsity'} = $result->value; }
-		if ( $result->tag eq "ndt_prelims" ) { $entry{$result->entry}{'ndt_prelims'} = $result->value; }
-		if ( $result->tag eq "ndt_elims" ) { $entry{$result->entry}{'ndt_elims'} = $result->value; }
-		if ( $result->tag eq "ceda_tb" ) { $entry{$result->entry}{'ceda_tb'} = $result->value; }
-		$entry{$result->entry}{'name'} = $result->entry_name;
-		$entry{$result->entry}{'entry_chpt'} = $result->entry_chpt;
-		$entry{$result->entry}{'chpt_name'} = $result->chpt_name;
-		$entry{$result->entry}{'tourn'} = $result->tourn;
-		$entry{$result->entry}{'tourn_id'} = $result->tourn_id;
-		$entry{$result->entry}{'level'} = $result->level;
-		$entry{$result->entry}{'state'} = $result->state;
+
+	my %school_data;
+
+	while(
+		my (
+			$result_tag, $result_value,
+			$entry_id, $entry_code, $event_level,
+			$chapter_id, $chapter_name, $chapter_state,
+			$tourn_id, $tourn_name,
+			$chapter1_id, $chapter1_name, $chapter1_state,
+			$chapter2_id, $chapter2_name, $chapter2_state
+		) = $sth->fetchrow_array()
+	) {
+
+		if ( $result_tag eq "ceda_tot" ) {
+			$entry{$entry_id}{'ceda_tot'} = $result_value;
+		}
+
+		if ( $result_tag eq "ceda_prelims" ) {
+			$entry{$entry_id}{'ceda_prelims'} = $result_value;
+		}
+
+		if ( $result_tag eq "ceda_elims" ) {
+			$entry{$entry_id}{'ceda_elims'} = $result_value;
+		}
+
+		if ( $result_tag eq "ndt_tot" ) {
+			$entry{$entry_id}{'ndt_tot'} = $result_value;
+		}
+
+		if ( $result_tag eq "ndt_tot" && lc($event_level) eq "open") {
+			$entry{$entry_id}{'ndt_varsity'} = $result_value;
+		}
+
+		if ( $result_tag eq "ndt_prelims" ) {
+			$entry{$entry_id}{'ndt_prelims'} = $result_value;
+		}
+
+		if ( $result_tag eq "ndt_elims" ) {
+			$entry{$entry_id}{'ndt_elims'} = $result_value;
+		}
+
+		if ( $result_tag eq "ceda_tb" ) {
+			$entry{$entry_id}{'ceda_tb'} = $result_value;
+		}
+
+		$entry{$entry_id}{'name'}       = $entry_code;
+
+		$school_data{$chapter_id}{"name"} = $chapter_name;
+		$school_data{$chapter_id}{"state"} = $chapter_state;
+
+		$entry{$entry_id}{'chapter'} = $chapter_id;
+		$entry{$entry_id}{'tourn'}      = $tourn_name;
+		$entry{$entry_id}{'tourn_id'}   = $tourn_id;
+		$entry{$entry_id}{'level'}      = $event_level;
+
+		if ($chapter1_id != $chapter_id) {
+			$entry{$entry_id}{"hybrid"}++;
+			$entry{$entry_id}{"second_chapter"} = $chapter1_id;
+			$school_data{$chapter1_id}{"name"} = $chapter1_name;
+			$school_data{$chapter1_id}{"state"} = $chapter1_state;
+		} elsif ($chapter2_id != $chapter_id) {
+			$entry{$entry_id}{"hybrid"}++;
+			$entry{$entry_id}{"second_chapter"} = $chapter2_id;
+			$school_data{$chapter2_id}{"name"} = $chapter2_name;
+			$school_data{$chapter2_id}{"state"} = $chapter2_state;
+		}
+
+		$highest_id = $entry_id if $entry_id > $highest_id;
 	}
-	
-	#now adjust hybrids; cut the points and create a new record with half the points
-	@results = sort {$a->{'entry'} <=> $b->{'entry'}} @results;
 
-	my $last_result = pop @results if @results;
-	my $hi_entry_id = $last_result->entry if $last_result; #this is for hybrids
+	foreach my $entry_id (keys %entry) {
 
-	foreach my $result ( @results ) {
-		if ( $result->tag eq "hybrid" && $result->value == 1 ) {
-			#print $entry{$result->entry}{'name'}." identified as a hybrid at ". $entry{$result->entry}{'tourn'}."<br>";
-			$entry{$result->entry}{'ceda_tot'} = $entry{$result->entry}{'ceda_tot'} / 2;
-			$entry{$result->entry}{'ceda_prelims'} = $entry{$result->entry}{'ceda_prelims'} / 2;
-			$entry{$result->entry}{'ceda_elims'} = $entry{$result->entry}{'ceda_elims'} / 2;
-			$entry{$result->entry}{'ceda_tb'} = $entry{$result->entry}{'ceda_tb'} / 2;
-			$entry{$result->entry}{'ndt_tot'} = 0;
-			$entry{$result->entry}{'ndt_prelims'} = 0;
-			$entry{$result->entry}{'ndt_varsity'} = 0;
-			$entry{$result->entry}{'ndt_elims'} = 0;
-			$hi_entry_id++;
-			$entry{$hi_entry_id}{'name'} = $result->entry_name;
-			my @entry_student = Tab::EntryStudent->search( entry => $result->entry );
-			foreach my $entry_student (@entry_student) {
-				if ( $entry_student->student->chapter != $entry{$result->entry}{'chpt_name'} ) {
-					$entry{$hi_entry_id}{'entry_chpt'} = $entry_student->student->chapter;
-					$entry{$hi_entry_id}{'chpt_name'} = $entry_student->student->chapter->name;
-				}
-			}
-			$entry{$hi_entry_id}{'name'} = $result->entry_name;
-			$entry{$hi_entry_id}{'tourn'} = $result->tourn;
-			$entry{$hi_entry_id}{'tourn_id'} = $result->tourn_id;
-			$entry{$hi_entry_id}{'level'} = $result->level;
-			$entry{$hi_entry_id}{'state'} = $result->state;
-			$entry{$hi_entry_id}{'ceda_tot'} = $entry{$result->entry}{'ceda_tot'};
-			$entry{$hi_entry_id}{'ceda_prelims'} = $entry{$result->entry}{'ceda_prelims'};
-			$entry{$hi_entry_id}{'ceda_elims'} = $entry{$result->entry}{'ceda_elims'};
-			$entry{$hi_entry_id}{'ceda_tb'} = $entry{$result->entry}{'ceda_tb'};
-			$entry{$hi_entry_id}{'ndt_tot'} = $entry{$result->entry}{'ndt_tot'};
-			$entry{$hi_entry_id}{'ndt_prelims'} = $entry{$result->entry}{'ndt_prelims'};
-			$entry{$hi_entry_id}{'ndt_elims'} = $entry{$result->entry}{'ndt_elims'};
+		if ($entry{$entry_id}{"hybrid"}) {
+
+			$entry{$entry_id}{'ceda_tot'}     = $entry{$entry_id}{'ceda_tot'} / 2;
+			$entry{$entry_id}{'ceda_prelims'} = $entry{$entry_id}{'ceda_prelims'} / 2;
+			$entry{$entry_id}{'ceda_elims'}   = $entry{$entry_id}{'ceda_elims'} / 2;
+			$entry{$entry_id}{'ceda_tb'}      = $entry{$entry_id}{'ceda_tb'} / 2;
+
+			$entry{$entry_id}{'ndt_tot'}      = 0;
+			$entry{$entry_id}{'ndt_prelims'}  = 0;
+			$entry{$entry_id}{'ndt_varsity'}  = 0;
+			$entry{$entry_id}{'ndt_elims'}    = 0;
+
+			$highest_id++;
+
+			$entry{$highest_id}{'name'}    = $entry{$entry_id}{name};
+			$entry{$highest_id}{'chapter'} = $entry{$entry_id}{"second_chapter"};
+
+			$entry{$highest_id}{'name'}     = $entry{$entry_id}{name};
+			$entry{$highest_id}{'tourn'}    = $entry{$entry_id}{tourn};
+			$entry{$highest_id}{'tourn_id'} = $entry{$entry_id}{tourn_id};
+			$entry{$highest_id}{'level'}    = $entry{$entry_id}{level};
+			$entry{$highest_id}{'state'}    = $entry{$entry_id}{state};
+
+			$entry{$highest_id}{'ceda_tot'}     = $entry{$entry_id}{'ceda_tot'};
+			$entry{$highest_id}{'ceda_prelims'} = $entry{$entry_id}{'ceda_prelims'};
+			$entry{$highest_id}{'ceda_elims'}   = $entry{$entry_id}{'ceda_elims'};
+			$entry{$highest_id}{'ceda_tb'}      = $entry{$entry_id}{'ceda_tb'};
+			$entry{$highest_id}{'ndt_tot'}      = $entry{$entry_id}{'ndt_tot'};
+			$entry{$highest_id}{'ndt_prelims'}  = $entry{$entry_id}{'ndt_prelims'};
+			$entry{$highest_id}{'ndt_elims'}    = $entry{$entry_id}{'ndt_elims'};
 		}
 	}
-	
-	$end = time();
-	if ($debug) { print "time to make entry hash:  "; printf("%.2f\n", $end - $start); print "<br>"; }
 
-#load all entries to find hybrids
-
-#sort ceda points and store totals by school and tourney
+	# load all entries to find hybrids
+	# sort ceda points and store totals by school and tourney
 
 	my %school;
-	my $ctr=0; 
-	my $tourn_id=0; 
-	my $school_id;
-	my $pt_str;
-	
-	for (my $i=1; $i <= 4; $i++) {
-		if ( $i == 1 ) { $pt_str="ceda_tot"; }
-		if ( $i == 2 ) { $pt_str="ndt_tot"; }
-		if ( $i == 3 ) { $pt_str="ndt_varsity"; }
-		if ( $i == 4 ) { $pt_str="ceda_tb"; }
-		
-		foreach my $key (sort {$entry{$b}->{'entry_chpt'} <=> $entry{$a}->{'entry_chpt'} || $entry{$b}->{'tourn_id'} <=> $entry{$a}->{'tourn_id'} || $entry{$b}->{$pt_str} <=> $entry{$a}->{$pt_str} } keys(%entry) ) {
-		
-			if ( $entry{$key}{'tourn_id'} != $tourn_id || $entry{$key}{'entry_chpt'} != $school_id ){
-				$tourn_id = $entry{$key}{'tourn_id'};
-				$ctr = 0;
-				#print "reset counter<br>";
+
+	foreach my $point_type ("ceda_tot", "ndt_tot", "ndt_varsity", "ceda_tb") {
+
+		my $tourn_id;
+		my $chapter_id;
+		my $counter;
+		my @keys;
+
+		KEY:
+		foreach my $key (
+			sort {$entry{$b}->{'chapter'} <=> $entry{$a}->{'chapter'}
+				|| $entry{$b}->{'tourn_id'} <=> $entry{$a}->{'tourn_id'}
+				|| $entry{$b}->{$point_type} <=> $entry{$a}->{$point_type}
+			} keys %entry
+		) {
+
+			next KEY if $point_type eq "ndt_varsity" && $entry{$key}{"level"} ne "open";
+
+			if ( $entry{$key}{'tourn_id'} != $tourn_id || $entry{$key}{'chapter'} != $chapter_id) {
+				$tourn_id   = $entry{$key}{'tourn_id'};
+				$chapter_id = $entry{$key}{'chapter'};
+				undef $counter;
 			}
-	
-			#print "for $pt_str ctr ".$ctr." entry=".$entry{$key}{'name'}." chpt=".$entry{$key}{'entry_chpt'}." tourn=".$entry{$key}{'tourn'}." pts=".$entry{$key}{$pt_str}."<br>";
-		#if ( $i == 3 && $entry{$key}{'entry_chpt'} == 6261) {
-		#	print "for $pt_str ctr ".$ctr." entry=".$entry{$key}{'name'}." chpt=".$entry{$key}{'entry_chpt'}." tourn=".$entry{$key}{'tourn'}." pts=".$entry{$key}{$pt_str}."<br>";
-		#}
-		
-			$school_id = $entry{$key}{'entry_chpt'};
-			$school{$school_id}{$tourn_id}{'name'} = $entry{$key}{'chpt_name'};
-			$school{$school_id}{$tourn_id}{'tourn'} = $entry{$key}{'tourn'};
-			$ctr++;
-			
-			#if ($i == 3 ) { print $entry{$key}{'name'}." ctr=$ctr and level=".$entry{$key}{'level'}."<br>";}
-			if ($ctr <= 2 && ($i<=2 || $entry{$key}{'level'} eq "open") ) {
-				$school{$school_id}{$tourn_id}{$pt_str} += $entry{$key}{$pt_str};
-				$school{$school_id}{$tourn_id}{'state'} = $entry{$key}{'state'};
-				#print $school{$school_id}{$tourn_id}{'state'}." for tourn $tourn_id<br>" if $school_id == 6278;
-				#print "Record added: ".$school{$school_id}{$tourn_id}{$pt_str}." for ".$school_id." at ".$tourn_id."<br>" if ($i==2 && $entry{$key}{'entry_chpt'} == 6261);
-			}
+
+			next KEY if $counter++ > 1;
+			$school{$chapter_id}{$tourn_id}{'tourn'} = $entry{$key}{'tourn'};
+			$school{$chapter_id}{$tourn_id}{$point_type} += $entry{$key}{$point_type};
 		}
-		$end = time();
-		if ($debug) { print "time to $pt_str sort:  "; printf("%.2f\n", $end - $start); print "<br>"; }
+
 	}
-	
-#sort the school hash to come up with a set of standings
-		my %standings; 
-		for (my $i=1; $i <= 4; $i++) {
-			if ( $i == 1 ) { $pt_str="ceda_tot"; }
-			if ( $i == 2 ) { $pt_str="ndt_tot"; }
-			if ( $i == 3 ) { $pt_str="ndt_varsity"; }
-			if ( $i == 4 ) { $pt_str="ceda_tb"; }
-			foreach my $key ( keys %school ) {
-				my $ctr=0;
-				foreach my $tourn ( sort { $school{$key}{$b}->{$pt_str} <=> $school{$key}{$a}->{$pt_str} } keys %{$school{$key}} ) {
-					#print $pt_str." ".$key." ".$school{$key}{$tourn}{'name'}." ".$school{$key}{$tourn}{$pt_str}."<br>";
-					$ctr++;
-					if ( ( ($i == 1 || $i == 4) && $ctr <= 6) || ( ($i == 2 || $i == 3) && $ctr <= 8) ) {
-						$standings{$key}{$pt_str} += $school{$key}{$tourn}{$pt_str};
-						$standings{$key}{'name'} = $school{$key}{$tourn}{'name'};
-						#print $school{$key}{$tourn}{'state'}."<br>" if $key == 6278;
-						my $dummy_chpt = Tab::Chapter->retrieve($key);
-						$standings{$key}{'state'} = $dummy_chpt->state;
-						#$standings{$key}{'state'} = $school{$key}{$tourn}{'state'};
-					}
-				}
+
+	#sort the school hash to come up with a set of standings
+	my %standings;
+
+	foreach my $key ( keys %school ) {
+
+		foreach my $point_type ("ceda_tot", "ndt_tot", "ndt_varsity", "ceda_tb") {
+
+			my $counter;
+
+			my @keys;
+
+			if ($point_type eq "ceda_tb") {
+				@keys =
+					sort { $school{$key}{$b}->{ceda_tot} <=> $school{$key}{$a}->{ceda_tot} }
+				keys %{$school{$key}};
+			} else {
+				@keys =
+					sort { $school{$key}{$b}->{$point_type} <=> $school{$key}{$a}->{$point_type} }
+				keys %{$school{$key}};
+			}
+
+			foreach my $tourn (@keys) {
+				$counter++;
+				next if ($point_type eq "ceda_tot" || $point_type eq "ceda_tb") && $counter > 6;
+				next if ($point_type eq "ndt_tot" || $point_type eq "ndt_varsity") && $counter > 8;
+
+				$standings{$key}{$point_type} += $school{$key}{$tourn}{$point_type};
 			}
 		}
-		$end = time();
-		if ($debug) { print "time to standings sort:  "; printf("%.2f\n", $end - $start); print "<br>"; }
+	}
 
-#assign ndt, ceda districts
 
-		foreach my $key ( keys %school ) {
-			if ( $standings{$key}{'state'} eq "CA" ) { $standings{$key}{'ndt_dist'} = 1; $standings{$key}{'ceda_dist'} = "Pacific";}
-			if ( $standings{$key}{'state'} eq "AZ" ) { $standings{$key}{'ndt_dist'} = 1; $standings{$key}{'ceda_dist'} = "Pacific";}
-			if ( $standings{$key}{'state'} eq "HI" ) { $standings{$key}{'ndt_dist'} = 1; $standings{$key}{'ceda_dist'} = "Pacific";}
-			if ( $standings{$key}{'state'} eq "NV" ) { $standings{$key}{'ndt_dist'} = 1; $standings{$key}{'ceda_dist'} = "Pacific";}
-			if ( $standings{$key}{'state'} eq "AK" ) { $standings{$key}{'ndt_dist'} = 2; $standings{$key}{'ceda_dist'} = "West";}
-			if ( $standings{$key}{'state'} eq "CO" ) { $standings{$key}{'ndt_dist'} = 2; $standings{$key}{'ceda_dist'} = "West";}
-			if ( $standings{$key}{'state'} eq "ID" ) { $standings{$key}{'ndt_dist'} = 2; $standings{$key}{'ceda_dist'} = "West";}
-			if ( $standings{$key}{'state'} eq "MT" ) { $standings{$key}{'ndt_dist'} = 2; $standings{$key}{'ceda_dist'} = "West";}
-			if ( $standings{$key}{'state'} eq "OR" ) { $standings{$key}{'ndt_dist'} = 2; $standings{$key}{'ceda_dist'} = "West";}
-			if ( $standings{$key}{'state'} eq "UT" ) { $standings{$key}{'ndt_dist'} = 2; $standings{$key}{'ceda_dist'} = "West";}
-			if ( $standings{$key}{'state'} eq "WA" ) { $standings{$key}{'ndt_dist'} = 2; $standings{$key}{'ceda_dist'} = "West";}
-			if ( $standings{$key}{'state'} eq "WY" ) { $standings{$key}{'ndt_dist'} = 2; $standings{$key}{'ceda_dist'} = "West";}
-			if ( $standings{$key}{'state'} eq "AR" ) { $standings{$key}{'ndt_dist'} = 3; $standings{$key}{'ceda_dist'} = "Southeast";}
-			if ( $standings{$key}{'state'} eq "KS" ) { $standings{$key}{'ndt_dist'} = 3; $standings{$key}{'ceda_dist'} = "Mid-American";}
-			if ( $standings{$key}{'state'} eq "MO" ) { $standings{$key}{'ndt_dist'} = 3; $standings{$key}{'ceda_dist'} = "Mid-American";}
-			if ( $standings{$key}{'state'} eq "NM" ) { $standings{$key}{'ndt_dist'} = 3; $standings{$key}{'ceda_dist'} = "West";}
-			if ( $standings{$key}{'state'} eq "LA" ) { $standings{$key}{'ndt_dist'} = 3; $standings{$key}{'ceda_dist'} = "South-Central";}
-			if ( $standings{$key}{'state'} eq "OK" ) { $standings{$key}{'ndt_dist'} = 3; $standings{$key}{'ceda_dist'} = "Mid-American";}
-			if ( $standings{$key}{'state'} eq "TX" ) { $standings{$key}{'ndt_dist'} = 3; $standings{$key}{'ceda_dist'} = "South-Central";}
-			if ( $standings{$key}{'state'} eq "IA" ) { $standings{$key}{'ndt_dist'} = 4; $standings{$key}{'ceda_dist'} = "North-Central";}
-			if ( $standings{$key}{'state'} eq "MN" ) { $standings{$key}{'ndt_dist'} = 4; $standings{$key}{'ceda_dist'} = "North-Central";}
-			if ( $standings{$key}{'state'} eq "NE" ) { $standings{$key}{'ndt_dist'} = 4; $standings{$key}{'ceda_dist'} = "North-Central";}
-			if ( $standings{$key}{'state'} eq "ND" ) { $standings{$key}{'ndt_dist'} = 4; $standings{$key}{'ceda_dist'} = "North-Central";}
-			if ( $standings{$key}{'state'} eq "SD" ) { $standings{$key}{'ndt_dist'} = 4; $standings{$key}{'ceda_dist'} = "North-Central";}
-			if ( $standings{$key}{'state'} eq "WI" ) { $standings{$key}{'ndt_dist'} = 4; $standings{$key}{'ceda_dist'} = "North-Central";}
-			if ( $standings{$key}{'state'} eq "IL" ) { $standings{$key}{'ndt_dist'} = 5; $standings{$key}{'ceda_dist'} = "North-Central";}
-			if ( $standings{$key}{'state'} eq "IN" ) { $standings{$key}{'ndt_dist'} = 5; $standings{$key}{'ceda_dist'} = "East-Central";}
-			if ( $standings{$key}{'state'} eq "MI" ) { $standings{$key}{'ndt_dist'} = 5; $standings{$key}{'ceda_dist'} = "East-Central";}
-			if ( $standings{$key}{'state'} eq "OH" ) { $standings{$key}{'ndt_dist'} = 5; $standings{$key}{'ceda_dist'} = "East-Central";}
-			if ( $standings{$key}{'state'} eq "AL" ) { $standings{$key}{'ndt_dist'} = 6; $standings{$key}{'ceda_dist'} = "Southeast";}
-			if ( $standings{$key}{'state'} eq "FL" ) { $standings{$key}{'ndt_dist'} = 6; $standings{$key}{'ceda_dist'} = "Southeast";}
-			if ( $standings{$key}{'state'} eq "GA" ) { $standings{$key}{'ndt_dist'} = 6; $standings{$key}{'ceda_dist'} = "Southeast";}
-			if ( $standings{$key}{'state'} eq "KY" ) { $standings{$key}{'ndt_dist'} = 6; $standings{$key}{'ceda_dist'} = "Southeast";}
-			if ( $standings{$key}{'state'} eq "MS" ) { $standings{$key}{'ndt_dist'} = 6; $standings{$key}{'ceda_dist'} = "Southeast";}
-			if ( $standings{$key}{'state'} eq "NC" ) { $standings{$key}{'ndt_dist'} = 6; $standings{$key}{'ceda_dist'} = "Southeast";}
-			if ( $standings{$key}{'state'} eq "SC" ) { $standings{$key}{'ndt_dist'} = 6; $standings{$key}{'ceda_dist'} = "Southeast";}
-			if ( $standings{$key}{'state'} eq "TN" ) { $standings{$key}{'ndt_dist'} = 6; $standings{$key}{'ceda_dist'} = "Southeast";}
-			if ( $standings{$key}{'state'} eq "DE" ) { $standings{$key}{'ndt_dist'} = 7; $standings{$key}{'ceda_dist'} = "Mid-Atlantic";}
-			if ( $standings{$key}{'state'} eq "DC" ) { $standings{$key}{'ndt_dist'} = 7; $standings{$key}{'ceda_dist'} = "Mid-Atlantic";}
-			if ( $standings{$key}{'state'} eq "MD" ) { $standings{$key}{'ndt_dist'} = 7; $standings{$key}{'ceda_dist'} = "Mid-Atlantic";}
-			if ( $standings{$key}{'state'} eq "NJ" ) { $standings{$key}{'ndt_dist'} = 7; $standings{$key}{'ceda_dist'} = "Northeast";}
-			if ( $standings{$key}{'state'} eq "PA" ) { $standings{$key}{'ndt_dist'} = 7; $standings{$key}{'ceda_dist'} = "Mid-Atlantic";}
-			if ( $standings{$key}{'state'} eq "VA" ) { $standings{$key}{'ndt_dist'} = 7; $standings{$key}{'ceda_dist'} = "Mid-Atlantic";}
-			if ( $standings{$key}{'state'} eq "WV" ) { $standings{$key}{'ndt_dist'} = 7; $standings{$key}{'ceda_dist'} = "Northeast";}
-			if ( $standings{$key}{'state'} eq "CT" ) { $standings{$key}{'ndt_dist'} = 8; $standings{$key}{'ceda_dist'} = "Northeast";}
-			if ( $standings{$key}{'state'} eq "ME" ) { $standings{$key}{'ndt_dist'} = 8; $standings{$key}{'ceda_dist'} = "Northeast";}
-			if ( $standings{$key}{'state'} eq "MA" ) { $standings{$key}{'ndt_dist'} = 8; $standings{$key}{'ceda_dist'} = "Northeast";}
-			if ( $standings{$key}{'state'} eq "NH" ) { $standings{$key}{'ndt_dist'} = 8; $standings{$key}{'ceda_dist'} = "Northeast";}
-			if ( $standings{$key}{'state'} eq "NY" ) { $standings{$key}{'ndt_dist'} = 8; $standings{$key}{'ceda_dist'} = "Northeast";}
-			if ( $standings{$key}{'state'} eq "RI" ) { $standings{$key}{'ndt_dist'} = 8; $standings{$key}{'ceda_dist'} = "Northeast";}
-			if ( $standings{$key}{'state'} eq "VT" ) { $standings{$key}{'ndt_dist'} = 8; $standings{$key}{'ceda_dist'} = "Northeast";}
-			$standings{$key}{'comm_coll'} = "No";
-			if ( $key == 6347) {$standings{$key}{'comm_coll'} = "Yes";}
-			if ( $key == 6893) {$standings{$key}{'comm_coll'} = "Yes";}
-			if ( $key == 6298) {$standings{$key}{'comm_coll'} = "Yes";}
-			if ( $key == 13531) {$standings{$key}{'comm_coll'} = "Yes";}
-			if ( $key == 6111) {$standings{$key}{'comm_coll'} = "Yes";}
-			if ( $key == 6299) {$standings{$key}{'comm_coll'} = "Yes";}
-			
+	#assign ndt, ceda districts
+
+		foreach my $key ( keys %school_data ) {
+			if ( $school_data{$key}{'state'} eq "CA" ) { $school_data{$key}{'ndt_dist'} = 1; $school_data{$key}{'ceda_dist'} = "Pacific";}
+			if ( $school_data{$key}{'state'} eq "AZ" ) { $school_data{$key}{'ndt_dist'} = 1; $school_data{$key}{'ceda_dist'} = "Pacific";}
+			if ( $school_data{$key}{'state'} eq "HI" ) { $school_data{$key}{'ndt_dist'} = 1; $school_data{$key}{'ceda_dist'} = "Pacific";}
+			if ( $school_data{$key}{'state'} eq "NV" ) { $school_data{$key}{'ndt_dist'} = 1; $school_data{$key}{'ceda_dist'} = "Pacific";}
+			if ( $school_data{$key}{'state'} eq "AK" ) { $school_data{$key}{'ndt_dist'} = 2; $school_data{$key}{'ceda_dist'} = "West";}
+			if ( $school_data{$key}{'state'} eq "CO" ) { $school_data{$key}{'ndt_dist'} = 2; $school_data{$key}{'ceda_dist'} = "West";}
+			if ( $school_data{$key}{'state'} eq "ID" ) { $school_data{$key}{'ndt_dist'} = 2; $school_data{$key}{'ceda_dist'} = "West";}
+			if ( $school_data{$key}{'state'} eq "MT" ) { $school_data{$key}{'ndt_dist'} = 2; $school_data{$key}{'ceda_dist'} = "West";}
+			if ( $school_data{$key}{'state'} eq "OR" ) { $school_data{$key}{'ndt_dist'} = 2; $school_data{$key}{'ceda_dist'} = "West";}
+			if ( $school_data{$key}{'state'} eq "UT" ) { $school_data{$key}{'ndt_dist'} = 2; $school_data{$key}{'ceda_dist'} = "West";}
+			if ( $school_data{$key}{'state'} eq "WA" ) { $school_data{$key}{'ndt_dist'} = 2; $school_data{$key}{'ceda_dist'} = "West";}
+			if ( $school_data{$key}{'state'} eq "WY" ) { $school_data{$key}{'ndt_dist'} = 2; $school_data{$key}{'ceda_dist'} = "West";}
+			if ( $school_data{$key}{'state'} eq "AR" ) { $school_data{$key}{'ndt_dist'} = 3; $school_data{$key}{'ceda_dist'} = "Southeast";}
+			if ( $school_data{$key}{'state'} eq "KS" ) { $school_data{$key}{'ndt_dist'} = 3; $school_data{$key}{'ceda_dist'} = "Mid-American";}
+			if ( $school_data{$key}{'state'} eq "MO" ) { $school_data{$key}{'ndt_dist'} = 3; $school_data{$key}{'ceda_dist'} = "Mid-American";}
+			if ( $school_data{$key}{'state'} eq "NM" ) { $school_data{$key}{'ndt_dist'} = 3; $school_data{$key}{'ceda_dist'} = "West";}
+			if ( $school_data{$key}{'state'} eq "LA" ) { $school_data{$key}{'ndt_dist'} = 3; $school_data{$key}{'ceda_dist'} = "South-Central";}
+			if ( $school_data{$key}{'state'} eq "OK" ) { $school_data{$key}{'ndt_dist'} = 3; $school_data{$key}{'ceda_dist'} = "Mid-American";}
+			if ( $school_data{$key}{'state'} eq "TX" ) { $school_data{$key}{'ndt_dist'} = 3; $school_data{$key}{'ceda_dist'} = "South-Central";}
+			if ( $school_data{$key}{'state'} eq "IA" ) { $school_data{$key}{'ndt_dist'} = 4; $school_data{$key}{'ceda_dist'} = "North-Central";}
+			if ( $school_data{$key}{'state'} eq "MN" ) { $school_data{$key}{'ndt_dist'} = 4; $school_data{$key}{'ceda_dist'} = "North-Central";}
+			if ( $school_data{$key}{'state'} eq "NE" ) { $school_data{$key}{'ndt_dist'} = 4; $school_data{$key}{'ceda_dist'} = "North-Central";}
+			if ( $school_data{$key}{'state'} eq "ND" ) { $school_data{$key}{'ndt_dist'} = 4; $school_data{$key}{'ceda_dist'} = "North-Central";}
+			if ( $school_data{$key}{'state'} eq "SD" ) { $school_data{$key}{'ndt_dist'} = 4; $school_data{$key}{'ceda_dist'} = "North-Central";}
+			if ( $school_data{$key}{'state'} eq "WI" ) { $school_data{$key}{'ndt_dist'} = 4; $school_data{$key}{'ceda_dist'} = "North-Central";}
+			if ( $school_data{$key}{'state'} eq "IL" ) { $school_data{$key}{'ndt_dist'} = 5; $school_data{$key}{'ceda_dist'} = "North-Central";}
+			if ( $school_data{$key}{'state'} eq "IN" ) { $school_data{$key}{'ndt_dist'} = 5; $school_data{$key}{'ceda_dist'} = "East-Central";}
+			if ( $school_data{$key}{'state'} eq "MI" ) { $school_data{$key}{'ndt_dist'} = 5; $school_data{$key}{'ceda_dist'} = "East-Central";}
+			if ( $school_data{$key}{'state'} eq "OH" ) { $school_data{$key}{'ndt_dist'} = 5; $school_data{$key}{'ceda_dist'} = "East-Central";}
+			if ( $school_data{$key}{'state'} eq "AL" ) { $school_data{$key}{'ndt_dist'} = 6; $school_data{$key}{'ceda_dist'} = "Southeast";}
+			if ( $school_data{$key}{'state'} eq "FL" ) { $school_data{$key}{'ndt_dist'} = 6; $school_data{$key}{'ceda_dist'} = "Southeast";}
+			if ( $school_data{$key}{'state'} eq "GA" ) { $school_data{$key}{'ndt_dist'} = 6; $school_data{$key}{'ceda_dist'} = "Southeast";}
+			if ( $school_data{$key}{'state'} eq "KY" ) { $school_data{$key}{'ndt_dist'} = 6; $school_data{$key}{'ceda_dist'} = "Southeast";}
+			if ( $school_data{$key}{'state'} eq "MS" ) { $school_data{$key}{'ndt_dist'} = 6; $school_data{$key}{'ceda_dist'} = "Southeast";}
+			if ( $school_data{$key}{'state'} eq "NC" ) { $school_data{$key}{'ndt_dist'} = 6; $school_data{$key}{'ceda_dist'} = "Southeast";}
+			if ( $school_data{$key}{'state'} eq "SC" ) { $school_data{$key}{'ndt_dist'} = 6; $school_data{$key}{'ceda_dist'} = "Southeast";}
+			if ( $school_data{$key}{'state'} eq "TN" ) { $school_data{$key}{'ndt_dist'} = 6; $school_data{$key}{'ceda_dist'} = "Southeast";}
+			if ( $school_data{$key}{'state'} eq "DE" ) { $school_data{$key}{'ndt_dist'} = 7; $school_data{$key}{'ceda_dist'} = "Mid-Atlantic";}
+			if ( $school_data{$key}{'state'} eq "DC" ) { $school_data{$key}{'ndt_dist'} = 7; $school_data{$key}{'ceda_dist'} = "Mid-Atlantic";}
+			if ( $school_data{$key}{'state'} eq "MD" ) { $school_data{$key}{'ndt_dist'} = 7; $school_data{$key}{'ceda_dist'} = "Mid-Atlantic";}
+			if ( $school_data{$key}{'state'} eq "NJ" ) { $school_data{$key}{'ndt_dist'} = 7; $school_data{$key}{'ceda_dist'} = "Northeast";}
+			if ( $school_data{$key}{'state'} eq "PA" ) { $school_data{$key}{'ndt_dist'} = 7; $school_data{$key}{'ceda_dist'} = "Mid-Atlantic";}
+			if ( $school_data{$key}{'state'} eq "VA" ) { $school_data{$key}{'ndt_dist'} = 7; $school_data{$key}{'ceda_dist'} = "Mid-Atlantic";}
+			if ( $school_data{$key}{'state'} eq "WV" ) { $school_data{$key}{'ndt_dist'} = 7; $school_data{$key}{'ceda_dist'} = "Northeast";}
+			if ( $school_data{$key}{'state'} eq "CT" ) { $school_data{$key}{'ndt_dist'} = 8; $school_data{$key}{'ceda_dist'} = "Northeast";}
+			if ( $school_data{$key}{'state'} eq "ME" ) { $school_data{$key}{'ndt_dist'} = 8; $school_data{$key}{'ceda_dist'} = "Northeast";}
+			if ( $school_data{$key}{'state'} eq "MA" ) { $school_data{$key}{'ndt_dist'} = 8; $school_data{$key}{'ceda_dist'} = "Northeast";}
+			if ( $school_data{$key}{'state'} eq "NH" ) { $school_data{$key}{'ndt_dist'} = 8; $school_data{$key}{'ceda_dist'} = "Northeast";}
+			if ( $school_data{$key}{'state'} eq "NY" ) { $school_data{$key}{'ndt_dist'} = 8; $school_data{$key}{'ceda_dist'} = "Northeast";}
+			if ( $school_data{$key}{'state'} eq "RI" ) { $school_data{$key}{'ndt_dist'} = 8; $school_data{$key}{'ceda_dist'} = "Northeast";}
+			if ( $school_data{$key}{'state'} eq "VT" ) { $school_data{$key}{'ndt_dist'} = 8; $school_data{$key}{'ceda_dist'} = "Northeast";}
+
+			$school_data{$key}{'comm_coll'} = "No";
+			if ( $key == 6347) {$school_data{$key}{'comm_coll'} = "Yes";}
+			if ( $key == 6893) {$school_data{$key}{'comm_coll'} = "Yes";}
+			if ( $key == 6298) {$school_data{$key}{'comm_coll'} = "Yes";}
+			if ( $key == 13531) {$school_data{$key}{'comm_coll'} = "Yes";}
+			if ( $key == 6111) {$school_data{$key}{'comm_coll'} = "Yes";}
+			if ( $key == 6299) {$school_data{$key}{'comm_coll'} = "Yes";}
 		}
-		$end = time();
-		if ($debug) { print "time to add districts:  "; printf("%.2f\n", $end - $start); print "<br>"; }
-		
+
 </%init>
 
-		<input id="sort_break" type="hidden" value="0" >
-		
-<script>
+		<input
+			id    = "sort_break"
+			type  = "hidden"
+			value = "0"
+		>
 
-	display_toggle = function(table_id) {
-		var MasterTable = document.getElementById(table_id);
-		if ( MasterTable.style.display == "none" ) {
-			MasterTable.style.display = "table" ;
-		} else {
-			MasterTable.style.display = "none" ;
-		}
-		
-		
-	}
-		
-	make_standings = function() {
-		var break_on = document.getElementById("sort_break").value;
-		var MasterTable = document.getElementById("standings");
-		var TableRows = MasterTable.getElementsByTagName("tr");
-		var ctr=0; var ctr_str;
-		for (var i = 1; i < TableRows.length; i++) {
-			ctr = ctr+1;
-			if ( break_on > 0 ) {
-				if ( TableRows[i].cells[break_on].textContent != TableRows[i-1].cells[break_on].textContent ) { ctr=1; }
+	<script>
+
+		display_toggle = function(table_id) {
+			var MasterTable = document.getElementById(table_id);
+			if ( MasterTable.style.display == "none" ) {
+				MasterTable.style.display = "table" ;
+			} else {
+				MasterTable.style.display = "none" ;
 			}
-			ctr_str=ctr;
-			if ( ctr == 1 ) { ctr_str = ctr_str+"st"; }
-			if ( ctr == 2 ) { ctr_str = ctr_str+"nd"; }
-			if ( ctr == 3 ) { ctr_str = ctr_str+"rd"; }
-			if ( ctr > 3 ) { ctr_str = ctr_str+"th"; }
-			if ( break_on == 0 && ctr > 25) { ctr_str="--"; }
-			if ( break_on > 0 && ctr > 10) { ctr_str="--"; }
-			TableRows[i].cells[9].textContent=ctr_str;
-		}		
-	}
-	
-	mark_table_click = function () {
-		var break_on = document.getElementById("sort_break");
-		break_on.value=0;
-	}
-	
-	$(document).ready(function() { 
-		$("standings").tablesorter();
-		var break_on = document.getElementById("sort_break");
-		
-		$("table").bind("sortStart",function() { 
-			//$("#overlay").show(); 
-		}).bind("sortEnd",function() {
-			make_standings();
-			//$("#overlay").hide(); 
-		});
-	
-		$("#ceda-district-sort").click(function() {
-			sort_break.value = 2;
-			// set sorting column and direction, this will sort on the first and third column the column index starts at zero 
-			var sorting = [[2,0],[5,1],[6,1]]; 
-			// sort on the first column
-			$("table").trigger("sorton",[sorting]);
-			//make_standings(2);
-			// return false to stop default link action 
-			return false; 
-		});
-		$("#ndt-district-sort").click(function() {
-			sort_break.value = 3;
-			// set sorting column and direction, this will sort on the first and third column the column index starts at zero 
-			var sorting = [[3,0],[7,1]]; 
-			// sort on the first column 
-			$("table").trigger("sorton",[sorting]); 
-			// return false to stop default link action 
-			return false; 
-		});
-		$("#ndt-varsity-district-sort").click(function() {
-			sort_break.value = 3;
-			// set sorting column and direction, this will sort on the first and third column the column index starts at zero 
-			var sorting = [[3,0],[8,1]]; 
-			// sort on the first column 
-			$("table").trigger("sorton",[sorting]); 
-			// return false to stop default link action 
-			return false; 
-		});
-		$("#ndt-comm_coll-sort").click(function() {
-			sort_break.value = 4;
-			// set sorting column and direction, this will sort on the first and third column the column index starts at zero 
-			var sorting = [[4,1],[7,1]]; 
-			// sort on the first column 
-			$("table").trigger("sorton",[sorting]); 
-			// return false to stop default link action 
-			return false; 
-		}); 
+		}
 
-		
-	});
-		
-</script>
+		make_standings = function() {
+			var break_on = document.getElementById("sort_break").value;
+			var MasterTable = document.getElementById("standings");
+			var TableRows = MasterTable.getElementsByTagName("tr");
+			var ctr=0; var ctr_str;
+			for (var i = 1; i < TableRows.length; i++) {
+				ctr = ctr+1;
+				if ( break_on > 0 ) {
+					if ( TableRows[i].cells[break_on].textContent != TableRows[i-1].cells[break_on].textContent ) { ctr=1; }
+				}
+				ctr_str=ctr;
+				if ( ctr == 1 ) { ctr_str = ctr_str+"st"; }
+				if ( ctr == 2 ) { ctr_str = ctr_str+"nd"; }
+				if ( ctr == 3 ) { ctr_str = ctr_str+"rd"; }
+				if ( ctr > 3 ) { ctr_str = ctr_str+"th"; }
+				if ( break_on == 0 && ctr > 25) { ctr_str="--"; }
+				if ( break_on > 0 && ctr > 10) { ctr_str="--"; }
+				TableRows[i].cells[9].textContent=ctr_str;
+			}
+		}
+
+		mark_table_click = function () {
+			var break_on = document.getElementById("sort_break");
+			break_on.value=0;
+		}
+
+		$(document).ready(function() {
+
+			$("standings").tablesorter();
+			var break_on = document.getElementById("sort_break");
+
+			$("table").bind("sortStart",function() {
+				//$("#overlay").show();
+			}).bind("sortEnd",function() {
+				make_standings();
+				//$("#overlay").hide();
+			});
+
+			$("#ceda-district-sort").click(function() {
+				sort_break.value = 2;
+				// set sorting column and direction, this will sort on the
+				// first and third column the column index starts at zero
+				var sorting = [[2,0],[5,1],[6,1]];
+				// sort on the first column
+				$("table").trigger("sorton",[sorting]);
+				//make_standings(2);
+				// return false to stop default link action
+				return false;
+			});
+
+			$("#ndt-district-sort").click(function() {
+				sort_break.value = 3;
+				// set sorting column and direction, this will sort on the
+				// first and third column the column index starts at zero
+				var sorting = [[3,0],[7,1]];
+				// sort on the first column
+				$("table").trigger("sorton",[sorting]);
+				// return false to stop default link action
+				return false;
+			});
+
+			$("#ndt-varsity-district-sort").click(function() {
+				sort_break.value = 3;
+				// set sorting column and direction, this will sort on the
+				// first and third column the column index starts at zero
+				var sorting = [[3,0],[8,1]];
+				// sort on the first column
+				$("table").trigger("sorton",[sorting]);
+				// return false to stop default link action
+				return false;
+			});
+
+			$("#ndt-comm_coll-sort").click(function() {
+				sort_break.value = 4;
+				// set sorting column and direction, this will sort on the
+				// first and third column the column index starts at zero
+				var sorting = [[4,1],[7,1]];
+				// sort on the first column
+				$("table").trigger("sorton",[sorting]);
+				// return false to stop default link action
+				return false;
+			});
+		});
+
+	</script>
 
 	<div class="main">
-		
+
 		<h2>CEDA and NDT points for <% $season %>-<% $season+1 %></h2>
-		
-		For overall CEDA, NDT, or NDT Varsity point standings, simply click on the column header.  For breakdowns by distict, use the
-		links to the right. You can also jump to <a href="#school_checker">school points by tournament</a> or jump to the <a href="#checker">checker table</a> to view points
-		by entry or tournament.
-		
+
+			For overall CEDA, NDT, or NDT Varsity point standings, simply click
+			on the column header.  For breakdowns by distict, use the links to
+			the right. You can also jump to
+
+			<a href="#school_checker">school points by tournament</a> or jump to the <a href="#checker">checker table</a>
+
+			to view points by entry or tournament.
+
 		<& /funclib/tablesorter.mas, table => "standings" &>
-		
-		<h4>Standings</h4>
+
+		<span class="half nospace">
+			<h4>Standings</h4>
+		</span>
+		<span
+			class = "half nospace rightalign"
+			id    = "standings_buttonarea"
+		>
+		</span>
 
 		<table id="standings">
-
 			<thead>
 				<tr class="yellowrow">
-						<th class="smaller">Chapter</th>
-						<th class="smaller">State</th>
-						<th class="smaller">CEDA District</th>
-						<th class="smaller">NDT District</th>
-						<th class="smaller">Community College</th>
-						<th onclick="mark_table_click()" class="smaller">CEDA pts</th>
-						<th class="smaller">CEDA tiebreaker</th>
-						<th onclick="mark_table_click()" class="smaller">NDT pts</th>
-						<th onclick="mark_table_click()" class="smaller">NDT varsity</th>
-						<th class="smaller">Standings</th>
+					<th class="smaller">Chapter</th>
+					<th class="smaller">State</th>
+					<th class="smaller">CEDA Dist</th>
+					<th class="smaller">NDT Dist</th>
+					<th class="smaller" title="Community College">Comm Coll</th>
+					<th onclick="mark_table_click()" class="smaller">CEDA pts</th>
+					<th class="smaller">CEDA tiebreak</th>
+					<th onclick="mark_table_click()" class="smaller">NDT pts</th>
+					<th onclick="mark_table_click()" class="smaller">NDT Varsity</th>
+					<th class="smaller">Standings</th>
 				</tr>
 			</thead>
 
 			<tbody>
-%			   $ctr=0; my $ctr_str;		   
-%				foreach my $key (sort { $standings{$b}->{'ceda_tot'} <=> $standings{$a}->{'ceda_tot'} || $standings{$b}->{'ceda_tb'} <=> $standings{$a}->{'ceda_tb'} } keys %standings ) {
-%			   $ctr++; if ( $ctr<=25 ) { $ctr_str=$ctr; } else { $ctr_str="--"; }
+<%perl>
+				my $counter;
+				my $counter_str;
+
+				foreach my $key (
+					sort {
+						$standings{$b}->{'ceda_tot'} <=> $standings{$a}->{'ceda_tot'}
+						|| $standings{$b}->{'ceda_tb'} <=> $standings{$a}->{'ceda_tb'}
+					} keys %standings
+				) {
+
+					$counter++;
+
+					if ( $counter<=25 ) {
+						$counter_str = $counter;
+					} else {
+						$counter_str = "--";
+					}
+</%perl>
 					<tr>
-						<td> <% $standings{$key}{'name'} %>  </td>
-						<td> <% $standings{$key}{'state'} %>  </td>
-						<td> <% $standings{$key}{'ceda_dist'} %>  </td>
-						<td> <% $standings{$key}{'ndt_dist'} %>  </td>
-						<td> <% $standings{$key}{'comm_coll'} %>  </td>
-						<td> <% $standings{$key}{'ceda_tot'} %>  </td>
-						<td> <% $standings{$key}{'ceda_tb'} %>  </td>
-						<td> <% $standings{$key}{'ndt_tot'} %>  </td>
-						<td> <% $standings{$key}{'ndt_varsity'} %>  </td>
-						<td> <% $ctr_str %>  </td>
+						<td>
+							<% $school_data{$key}{'name'} %>
+						</td>
+						<td>
+							<% $school_data{$key}{'state'} %>
+						</td>
+						<td class="centeralign smaller">
+							<% $school_data{$key}{'ceda_dist'} %>
+						</td>
+						<td class="centeralign">
+							<% $school_data{$key}{'ndt_dist'} %>
+						</td>
+						<td class="centeralign">
+							<% $school_data{$key}{'comm_coll'} %>
+						</td>
+						<td class="rightalign">
+							<% $standings{$key}{'ceda_tot'} %>
+						</td>
+						<td class="rightalign">
+							<% $standings{$key}{'ceda_tb'} %>
+						</td>
+						<td class="rightalign">
+							<% $standings{$key}{'ndt_tot'} %>
+						</td>
+						<td class="rightalign">
+							<% $standings{$key}{'ndt_varsity'} %>
+						</td>
+						<td class="rightalign">
+							<% $counter_str %>
+						</td>
 					</tr>
 %				}
 			</tbody>
-
 		</table>
 
-		<h4>Points by School and Tournament</h4>
+		<div class="full nospace martopmore">
+			<span class="half nospace">
+				<h4>Points by Tournament</h4>
+			</span>
+			<span
+				class = "half nospace rightalign"
+				id    = "school_checker_buttonarea"
+			>
+			</span>
+		</div>
 
 		<& /funclib/tablesorter.mas, table => "school_checker" &>
 
@@ -426,6 +537,7 @@
 					<th class="smaller">Chapter</th>
 					<th class="smaller">Tourn</th>
 					<th class="smaller">CEDA pts</th>
+					<th class="smaller">CEDA tb</th>
 					<th class="smaller">NDT pts</th>
 					<th class="smaller">NDT varsity</th>
 				</tr>
@@ -433,23 +545,56 @@
 
 			<tbody>
 
-%			foreach my $key (sort keys %school ) {
-%				foreach my $tourn ( sort { $school{$key}{$b}->{'ceda_tot'} <=> $school{$key}{$a}->{'ceda_tot'} } keys %{$school{$key}} ) {
+<%perl>
+			foreach my $key (sort keys %school ) {
+				foreach my $tourn (
+					sort { $school{$key}{$b}->{'ceda_tot'} <=> $school{$key}{$a}->{'ceda_tot'} }
+					keys %{$school{$key}}
+				) {
+</%perl>
 					<tr>
-						<td> <% $school{$key}{$tourn}{'name'} %>  </td>
-						<td> <% $school{$key}{$tourn}{'tourn'} %>  </td>
-						<td> <% $school{$key}{$tourn}{'ceda_tot'} %>  </td>
-						<td> <% $school{$key}{$tourn}{'ndt_tot'} %>  </td>
-						<td> <% $school{$key}{$tourn}{'ndt_varsity'} %>  </td>
+						<td>
+							<% $school_data{$key}{"name"} %>
+						</td>
+
+						<td>
+							<% $school{$key}{$tourn}{'tourn'} %>
+						</td>
+
+						<td>
+							<% $school{$key}{$tourn}{'ceda_tot'} %>
+						</td>
+
+						<td>
+							<% $school{$key}{$tourn}{'ceda_tb'} %>
+						</td>
+
+						<td>
+							<% $school{$key}{$tourn}{'ndt_tot'} %>
+						</td>
+
+						<td>
+							<% $school{$key}{$tourn}{'ndt_varsity'} %>
+						</td>
 					</tr>
-%				}							
+%				}
 %			}
 
 			</tbody>
 		</table>
 
-		<h4>Checker Sheets</h4>
-		
+
+		<div class="full nospace martopmore">
+			<span class="half nospace">
+				<h4>Checker Sheets</h4>
+			</span>
+			<span
+				class = "half nospace rightalign"
+				id    = "checker_buttonarea"
+			>
+			</span>
+		</div>
+
 		<& /funclib/tablesorter.mas, table => "checker" &>
 
 		<table id="checker">
@@ -470,80 +615,104 @@
 				</tr>
 			</thead>
 
-%			undef $ctr;
+%			undef $counter;
 
 			<tbody>
 
-%			foreach my $key (sort {$entry{$b}->{'entry_chpt'} <=> $entry{$a}->{'entry_chpt'} || $entry{$b}->{'tourn'} <=> $entry{$a}->{'tourn'} || $entry{$b}->{'ceda_tot'} <=> $entry{$a}->{'ceda_tot'} } keys(%entry) ) {
+<%perl>
+			foreach my $key (
+				sort {
+					$entry{$b}->{'chapter'} <=> $entry{$a}->{'chapter'}
+					|| $entry{$b}->{'tourn'} <=> $entry{$a}->{'tourn'}
+					|| $entry{$b}->{'ceda_tot'} <=> $entry{$a}->{'ceda_tot'}
+				} keys(%entry)
+			) {
 
-%			   $entry{$key}{'ndt_elims'} = 0 unless $entry{$key}{'ndt_elims'};
-%			   $ctr++; 
+			   $entry{$key}{'ndt_elims'} = 0 unless $entry{$key}{'ndt_elims'};
+			   $counter++;
+
+			   my $chapter_id = $entry{$key}{chapter};
+
+</%perl>
 				<tr>
-					<td> <a href="/index/tourn/postings/entry_record.mhtml?tourn_id=<% $entry{$key}{'tourn_id'} %>&entry_id=<% $key %>"> <% $entry{$key}{'name'} %>  </a> </td>
-					<td> <% $entry{$key}{'tourn'} %>  </td>
-					<td> <% $entry{$key}{'level'} %>  </td>
-					<td > <% $entry{$key}{'entry_chpt'} %>  </td>
-					<td> <% $entry{$key}{'ceda_tot'} %> </td>
-					<td> <% $entry{$key}{'ceda_prelims'} %> </td>
-					<td> <% $entry{$key}{'ceda_elims'} %> </td>
-					<td> <% $entry{$key}{'ceda_tb'} %> </td>
-					<td> <% $entry{$key}{'ndt_tot'} %> </td>
-					<td> <% $entry{$key}{'ndt_prelims'} %> </td>
-					<td> <% $entry{$key}{'ndt_elims'} %> </td>
-					<td> <% $entry{$key}{'ndt_varsity'} %> </td>
+					<td><a
+						class = "plain full padvertless"
+						href  = "/index/tourn/postings/entry_record.mhtml?tourn_id=<% $entry{$key}{'tourn_id'} %>&entry_id=<% $key %>"
+						><% $entry{$key}{'name'} %></a>
+					</td>
+
+					<td><% $entry{$key}{'tourn'} %> </td>
+					<td><% $entry{$key}{'level'} %> </td>
+					<td><% $chapter_id %></td>
+					<td><% $entry{$key}{'ceda_tot'} %> </td>
+					<td><% $entry{$key}{'ceda_prelims'} %> </td>
+					<td><% $entry{$key}{'ceda_elims'} %> </td>
+					<td><% $entry{$key}{'ceda_tb'} %> </td>
+					<td><% $entry{$key}{'ndt_tot'} %> </td>
+					<td><% $entry{$key}{'ndt_prelims'} %> </td>
+					<td><% $entry{$key}{'ndt_elims'} %> </td>
+					<td><% $entry{$key}{'ndt_varsity'} %> </td>
 				</tr>
 %			}
 		</table>
-			
-% 		$end = time();
-% 		print "total processing time:  "; printf("%.2f\n", $end - $start); 
 
 	</div>
 
 		<div class="menu">
 
 			<div class="sidenote">
-			
+
 				<h4>Navigate</h4>
-				
+
 				<a class="blue full" href="#" id="ceda-district-sort">CEDA standings by district</a>
 				<a class="blue full" href="#" id="ndt-district-sort">NDT overall standings by district</a>
 				<a class="blue full" href="#" id="ndt-varsity-district-sort">NDT varsity standings by district</a>
 				<a class="blue full" href="#" id="ndt-comm_coll-sort">NDT community college standings</a>
 				<a class="blue full" href="ada_points.mhtml">ADA points</a>
-
 				<a class="blue full martop" href="index.mhtml">Back to results main</a>
+
 			</div>
-			
+
 			<div class="sidenote">
 
 				<h4>Season selector:</h4>
 
-				<form action="ndt_ceda_points.mhtml" method="post">
+				<form
+					action = "ndt_ceda_points.mhtml"
+					method = "post"
+				>
 
 				<div class="row">
-	
 					<span class="third">
 						School Year
 					</span>
 
-%				   	my $this_year = Tab::school_year; 
+%				   	my $this_year = Tab::school_year;
 %					my $year = $this_year->year;
 
 					<span class="twothird">
-						<select name="season" class="fixedsmaller chosen">
-%							foreach my $tick (2012 .. $year+1) { 
-								<option value="<% $tick %>" <% $tick == $year ? "selected" : "" %>> <% $tick." - ".($tick + 1) %> </option>
+						<select
+							name  = "season"
+							class = "fixedsmaller chosen"
+						>
+%							foreach my $tick (2012 .. $year+1) {
+								<option
+									value="<% $tick %>"
+									<% $tick == $year ? "selected" : "" %>
+								> <% $tick." - ".($tick + 1) %> </option>
 %							}
 						</select>
 					</span>
-					
-					<div class="liblrow rightalign">
-						<input type="submit" value="Search" class="thin">
-						</form>
-					</div>
 
+					<div class="liblrow rightalign">
+						<input
+							type  = "submit"
+							value = "Search"
+							class = "thin"
+						>
+					</div>
 				</div>
+
+				</form>
 			</div>
-		
 		</div>
