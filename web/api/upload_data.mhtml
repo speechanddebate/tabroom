@@ -14,7 +14,8 @@
 
 	my $dbh = Tab::DBI->db_Main();
 
-	my ($person, $tourn) = $m->comp("login_api.mas",
+	my ($person, $tourn) = $m->comp(
+		"login_api.mas",
 		tourn_id   => $tourn_id,
 		username   => $username,
 		password   => $password,
@@ -24,8 +25,7 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my $now = DateTime->now(time_zone => $tz);
-
+	my $now     = DateTime->now(time_zone => $tz);
 	my $req     = Apache2::Request->new($r);
 	my @handles = $r->upload;
 	my $upload  = $req->upload($handles[0]);
@@ -184,7 +184,102 @@
 	my %category_by_name = map {$_->name => $_} @categories;
 	my %category_by_abbr = map {$_->abbr => $_} @categories;
 
+	my @tiebreak_sets = $tourn->tiebreak_sets;
+	my %tiebreak_set_by_id = map {$_->id => $_} @tiebreak_sets;
+	my %tiebreak_set_by_name = map {$_->name => $_} @tiebreak_sets;
+
+	my $default_site;
+	my @sites = $tourn->sites;
+	my %site_by_id = map {$_->id => $_} @sites;
+	my %site_by_name = map {$_->name => $_} @sites;
+
 	unless ($jdata->{school_only}) {
+
+		#TIEBREAK SETS
+
+		if ($jdata->{tiebreak_sets}) {
+
+			$m->print("<p class='action'>Importing tiebreaker sets</p>");
+
+			foreach my $tiebreak_set (@{$jdata->{tiebreak_sets}}) {
+
+				my $otiebreak_set;
+				$otiebreak_set = $tiebreak_set_by_id{$tiebreak_set->{id}};
+
+				unless ($otiebreak_set) {
+					$otiebreak_set = $tiebreak_set_by_name{$tiebreak_set->{name}};
+				}
+
+				unless ($otiebreak_set) {
+					$otiebreak_set = Tab::TiebreakSet->create({
+						name  => $tiebreak_set->{name},
+						tourn => $tourn->id
+					});
+				} else {
+					$otiebreak_set->name($tiebreak_set->{name});
+					$otiebreak_set->update();
+					#Prevent a double pump
+					delete $tiebreak_set_by_id{$otiebreak_set->id};
+				}
+
+				$translator{tiebreak_set}{$tiebreak_set->{id}} = $otiebreak_set;
+
+				$m->print("<p class='action'>Tiebreak set ".$otiebreak_set->id." stored for ".$tiebreak_set->{id}." named ".$otiebreak_set->name."</p>");
+
+				foreach my $tiebreak ($otiebreak_set->tiebreaks) {
+					$tiebreak->delete();
+				}
+
+				#TIEBREAK SET SETTINGS
+				Tab::TiebreakSetSetting->sql_rm_all->execute($otiebreak_set->id);
+
+				if ($tiebreak_set->{settings})  {
+					foreach my $jsetting (@{$tiebreak_set->{settings}}) {
+						my @reply = parse_setting($jsetting);
+						$otiebreak_set->setting(@reply) if @reply;
+					}
+				}
+			}
+
+			# TIEBREAKS
+
+			# These are broken off to ensure that Child tiebreak sets with
+			# derivative sets are available for translation.  No pruning required
+			# because all tiebreakers are loaded fresh every time an import
+			# happens.
+
+			foreach my $tiebreak_set (@{$jdata->{tiebreak_sets}}) {
+
+				my $otiebreak_set = $translator{tiebreak_set}{$tiebreak_set->{id}};
+
+				foreach my $tiebreak (@{$tiebreak_set->{tiebreaks}}) {
+
+					my $child_set = $translator{tiebreak_set}{$tiebreak->{child}};
+
+					$tiebreak->{count} = "all" unless $tiebreak->{count};
+					$tiebreak->{truncate_smallest} = 0 unless $tiebreak->{truncate_smallest} > 0;
+
+					Tab::Tiebreak->create({
+						tiebreak_set      => $otiebreak_set->id,
+						name              => $tiebreak->{name},
+						priority          => $tiebreak->{priority},
+						count             => $tiebreak->{count},
+						highlow_count     => $tiebreak->{highlow_count},
+						count_round       => $tiebreak->{count_round},
+						truncate          => $tiebreak->{truncate},
+						truncate_smallest => $tiebreak->{truncate_smallest},
+						multiplier        => $tiebreak->{multiplier},
+						child             => $child_set
+					});
+				}
+			}
+
+			prune_unused( \%tiebreak_set_by_id, $translator{tiebreak_set}, $jdata->{tiebreak_sets});
+
+		} else {
+
+			$translator{tiebreak_set} = \%tiebreak_set_by_id;
+		}
 
 		#PATTERNS
 		my @patterns = $tourn->patterns;
@@ -220,7 +315,6 @@
 						exclude => $pattern->{exclude}
 					});
 				}
-
 				$translator{pattern}{$pattern->{id}} = $opattern;
 			}
 
@@ -344,7 +438,6 @@
 				}
 
 				$translator{rating_subset}{$rs->{id}} = $ors;
-
 			}
 
 			prune_unused( \%rs_by_id, $translator{rating_subset}, $category->{rating_subsets});
@@ -417,8 +510,17 @@
 					if ($event->{settings})  {
 
 						foreach my $jsetting (@{$event->{settings}}) {
-							my @reply = parse_setting($jsetting);
-							eval{ $oevent->setting(@reply) };
+
+							if (
+								$jsetting->{tag} eq "speaker_tbset"
+								|| $jsetting->{tag} eq "po_tbset"
+							) {
+								my $set = $translator{tiebreak_set}{$jsetting->{value}};
+								eval{ $oevent->setting($jsetting->{tag}, $set); };
+							} else {
+								my @reply = parse_setting($jsetting);
+								eval{ $oevent->setting(@reply) };
+							}
 						}
 					}
 				}
@@ -428,520 +530,426 @@
 			prune_unused( \%event_by_id, $translator{event}, $category->{events});
 		}
 		prune_unused( \%category_by_id, $translator{category}, $jdata->{categories});
-	}
 
-	#TIEBREAK SETS
-	my @tiebreak_sets = $tourn->tiebreak_sets;
-	my %tiebreak_set_by_id = map {$_->id => $_} @tiebreak_sets;
-	my %tiebreak_set_by_name = map {$_->name => $_} @tiebreak_sets;
+		#TIMESLOTS
+		my @timeslots = $tourn->timeslots;
+		my %timeslot_by_id = map {$_->id => $_} @timeslots;
+		my %timeslot_by_name = map {$_->name => $_} @timeslots;
 
-	if ($jdata->{tiebreak_sets}) {
+		if ($jdata->{timeslots}) {
 
-		$m->print("<p class='action'>Importing tiebreaker sets</p>");
+			foreach my $timeslot (@{$jdata->{timeslots}}) {
 
-		foreach my $tiebreak_set (@{$jdata->{tiebreak_sets}}) {
+				my $otimeslot;
+				$otimeslot = $timeslot_by_id{$timeslot->{id}};
 
-			my $otiebreak_set;
-			$otiebreak_set = $tiebreak_set_by_id{$tiebreak_set->{id}};
-
-			unless ($otiebreak_set) {
-				$otiebreak_set = $tiebreak_set_by_name{$tiebreak_set->{name}};
-			}
-
-			unless ($otiebreak_set) {
-				$otiebreak_set = Tab::TiebreakSet->create({
-					name  => $tiebreak_set->{name},
-					tourn => $tourn->id
-				});
-			} else {
-				$otiebreak_set->name($tiebreak_set->{name});
-				$otiebreak_set->update();
-				#Prevent a double pump
-				delete $tiebreak_set_by_id{$otiebreak_set->id};
-			}
-
-			$translator{tiebreak_set}{$tiebreak_set->{id}} = $otiebreak_set;
-
-			$m->print("<p class='action'>Tiebreak set ".$otiebreak_set->id." stored for ".$tiebreak_set->{id}." named ".$otiebreak_set->name."</p>");
-
-			foreach my $tiebreak ($otiebreak_set->tiebreaks) {
-				$tiebreak->delete();
-			}
-
-			#TIEBREAK SET SETTINGS
-			Tab::TiebreakSetSetting->sql_rm_all->execute($otiebreak_set->id);
-
-			if ($tiebreak_set->{settings})  {
-				foreach my $jsetting (@{$tiebreak_set->{settings}}) {
-					my @reply = parse_setting($jsetting);
-					$otiebreak_set->setting(@reply) if @reply;
+				unless ($otimeslot) {
+					$otimeslot = $timeslot_by_name{$timeslot->{name}};
 				}
-			}
-		}
 
-		# TIEBREAKS
+				my $start = parse_date($timeslot->{start});
+				my $end = parse_date($timeslot->{end});
 
-		# These are broken off to ensure that Child tiebreak sets with
-		# derivative sets are available for translation.  No pruning required
-		# because all tiebreakers are loaded fresh every time an import
-		# happens.
+				unless ($otimeslot) {
+					$otimeslot = Tab::Timeslot->create({
+						name  => $timeslot->{name},
+						tourn => $tourn->id,
+						start => $start,
+						end   => $end
+					});
+				} else {
+					$otimeslot->name($timeslot->{name});
+					$otimeslot->start($timeslot->{start});
+					$otimeslot->end($timeslot->{end});
+					$otimeslot->update();
 
-		foreach my $tiebreak_set (@{$jdata->{tiebreak_sets}}) {
-
-			my $otiebreak_set = $translator{tiebreak_set}{$tiebreak_set->{id}};
-
-			foreach my $tiebreak (@{$tiebreak_set->{tiebreaks}}) {
-
-				my $child_set = $translator{tiebreak_set}{$tiebreak->{child}};
-
-				$tiebreak->{count} = "all" unless $tiebreak->{count};
-				$tiebreak->{truncate_smallest} = 0 unless $tiebreak->{truncate_smallest} > 0;
-
-				Tab::Tiebreak->create({
-					tiebreak_set      => $otiebreak_set->id,
-					name              => $tiebreak->{name},
-					priority          => $tiebreak->{priority},
-					count             => $tiebreak->{count},
-					highlow_count     => $tiebreak->{highlow_count},
-					count_round       => $tiebreak->{count_round},
-					truncate          => $tiebreak->{truncate},
-					truncate_smallest => $tiebreak->{truncate_smallest},
-					multiplier        => $tiebreak->{multiplier},
-					child             => $child_set
-				});
-			}
-		}
-
-		prune_unused( \%tiebreak_set_by_id, $translator{tiebreak_set}, $jdata->{tiebreak_sets});
-
-	} else {
-
-		$translator{tiebreak_set} = \%tiebreak_set_by_id;
-	}
-
-
-	#TIMESLOTS
-	my @timeslots = $tourn->timeslots;
-	my %timeslot_by_id = map {$_->id => $_} @timeslots;
-	my %timeslot_by_name = map {$_->name => $_} @timeslots;
-
-	if ($jdata->{timeslots}) {
-
-		foreach my $timeslot (@{$jdata->{timeslots}}) {
-
-			my $otimeslot;
-			$otimeslot = $timeslot_by_id{$timeslot->{id}};
-
-			unless ($otimeslot) {
-				$otimeslot = $timeslot_by_name{$timeslot->{name}};
-			}
-
-			my $start = parse_date($timeslot->{start});
-			my $end = parse_date($timeslot->{end});
-
-			unless ($otimeslot) {
-				$otimeslot = Tab::Timeslot->create({
-					name  => $timeslot->{name},
-					tourn => $tourn->id,
-					start => $start,
-					end   => $end
-				});
-			} else {
-				$otimeslot->name($timeslot->{name});
-				$otimeslot->start($timeslot->{start});
-				$otimeslot->end($timeslot->{end});
-				$otimeslot->update();
-
-				#Prevent a double pump
-				delete $timeslot_by_id{$otimeslot->id};
-			}
-
-			$translator{timeslot}{$timeslot->{id}} = $otimeslot;
-		}
-
-	} else {
-
-		$translator{timeslot} = \%timeslot_by_id;
-	}
-
-	prune_unused( \%timeslot_by_id, $translator{timeslot}, $jdata->{timeslots});
-
-	my $default_site;
-
-	# SITES
-	my @sites = $tourn->sites;
-	my %site_by_id = map {$_->id => $_} @sites;
-	my %site_by_name = map {$_->name => $_} @sites;
-
-	if ($jdata->{sites}) {
-
-		foreach my $site (@{$jdata->{sites}}) {
-
-			my $osite;
-			$osite = $site_by_id{$site->{id}};
-
-			unless ($osite) {
-				$osite = $site_by_name{$site->{name}};
-			}
-
-			$site->{name} = $tourn->name." Site" unless $site->{name};
-
-			if ($osite) {
-
-				$osite->name($site->{name});
-				$osite->update();
-
-				#Double pump
-				delete $site_by_id{$osite->id};
-
-			} else {
-
-				my $circuit = $tourn->circuits->first;
-				$circuit = 6 unless $circuit;
-
-				$osite = Tab::Site->create({
-					name    => $site->{name},
-					circuit => $circuit
-				});
-			}
-
-			$translator{site}{$site->{id}} = $osite;
-			$default_site = $osite unless $default_site;
-
-			my @rooms = $osite->rooms;
-			my %room_by_id = map {$_->id => $_} @rooms;
-			my %room_by_name = map {$_->name => $_} @rooms;
-
-			# ROOMS
-			if ($site->{rooms}) {
-
-				foreach my $room (@{$site->{rooms}}) {
-
-					my $oroom;
-					$oroom = $room_by_id{$room->{id}};
-
-					unless ($oroom) {
-						$oroom = $room_by_name{$room->{name}};
-					}
-
-					foreach my $tag ("ada", "inactive") {
-						$room->{$tag} = 0 unless $room->{$tag};
-					}
-
-					if ($oroom) {
-
-						$oroom->name($room->{name});
-						$oroom->rows($room->{rows});
-						$oroom->seats($room->{seats});
-						$oroom->ada($room->{ada});
-						$oroom->inactive($room->{inactive});
-
-						$oroom->quality($room->{quality});
-						$oroom->capacity($room->{capacity});
-						$oroom->notes($room->{notes});
-						$oroom->url($room->{url});
-
-						$oroom->update();
-
-					} else {
-
-						$oroom = Tab::Room->create({
-							site     => $osite->id,
-							name     => $room->{name},
-							rows     => $room->{rows},
-							seats    => $room->{seats},
-							ada      => $room->{ada},
-							inactive => $room->{inactive},
-							quality  => $room->{quality},
-							capacity => $room->{capacity},
-							notes    => $room->{notes},
-							url      => $room->{url},
-						});
-					}
-
-					$translator{room}{$room->{id}} = $oroom;
+					#Prevent a double pump
+					delete $timeslot_by_id{$otimeslot->id};
 				}
+
+				$translator{timeslot}{$timeslot->{id}} = $otimeslot;
 			}
+
+		} else {
+
+			$translator{timeslot} = \%timeslot_by_id;
 		}
 
-	} else {
+		prune_unused( \%timeslot_by_id, $translator{timeslot}, $jdata->{timeslots});
 
-		$translator{site} = \%site_by_id;
-		$default_site = $sites[0];
+		# SITES
 
-		my @rooms;
-		foreach my $site ($tourn->sites) {
-			push @rooms, $site->rooms;
-		}
+		if ($jdata->{sites}) {
 
-		%{$translator{room}} = map {$_->id => $_} @rooms;
-		%{$translator{roomname}} = map {$_->name => $_} @rooms;
-	}
+			foreach my $site (@{$jdata->{sites}}) {
 
+				my $osite;
+				$osite = $site_by_id{$site->{id}};
 
-	# WEEKENDS
-	my @weekends = $tourn->weekends;
-	my %weekend_by_id = map {$_->id => $_} @weekends;
-	my %weekend_by_name = map {$_->name => $_} @weekends;
+				unless ($osite) {
+					$osite = $site_by_name{$site->{name}};
+				}
 
-	if ($jdata->{weekends}) {
+				$site->{name} = $tourn->name." Site" unless $site->{name};
 
-		foreach my $weekend (@{$jdata->{weekends}}) {
+				if ($osite) {
 
-			next unless $weekend->{name};
-			my $oweekend;
-			$oweekend = $weekend_by_id{$weekend->{id}};
+					$osite->name($site->{name});
+					$osite->update();
 
-			unless ($oweekend) {
-				$oweekend = $weekend_by_name{$weekend->{name}};
-			}
+					#Double pump
+					delete $site_by_id{$osite->id};
 
-			my $start           = parse_date($weekend->{start});
-			my $end             = parse_date($weekend->{end});
-			my $reg_start       = parse_date($weekend->{reg_start});
-			my $reg_end         = parse_date($weekend->{reg_end});
-			my $fine_deadline   = parse_date($weekend->{fine_deadline});
-			my $freeze_deadline = parse_date($weekend->{freeze_deadline});
-			my $judge_deadline  = parse_date($weekend->{judge_deadline});
-			my $drop_deadline   = parse_date($weekend->{drop_deadline});
+				} else {
 
-			next unless $start;
-			next unless $end;
-			next unless $reg_start;
-			next unless $reg_end;
-			next unless $fine_deadline;
-			next unless $freeze_deadline;
-			next unless $judge_deadline;
-			next unless $drop_deadline;
+					my $circuit = $tourn->circuits->first;
+					$circuit = 6 unless $circuit;
 
-			my $site = $translator{site}{$weekend->{site}};
-			$site = $default_site unless $site;
+					$osite = Tab::Site->create({
+						name    => $site->{name},
+						circuit => $circuit
+					});
+				}
 
-			if ($oweekend) {
+				$translator{site}{$site->{id}} = $osite;
+				$default_site = $osite unless $default_site;
 
-				$oweekend->name($weekend->{name});
-				$oweekend->state($weekend->{state});
-				$oweekend->city($weekend->{city});
-				$oweekend->end($end);
-				$oweekend->start($start);
-				$oweekend->reg_end($reg_end);
-				$oweekend->reg_start($reg_start);
-				$oweekend->drop_deadline($drop_deadline);
-				$oweekend->freeze_deadline($freeze_deadline);
-				$oweekend->judge_deadline($judge_deadline);
-				$oweekend->fine_deadline($fine_deadline);
-				$oweekend->site($site);
+				my @rooms = $osite->rooms;
+				my %room_by_id = map {$_->id => $_} @rooms;
+				my %room_by_name = map {$_->name => $_} @rooms;
 
-			} else {
+				# ROOMS
+				if ($site->{rooms}) {
 
-				$oweekend = Tab::Weekend->create({
-					name            => $weekend->{name},
-					end             => $end,
-					start           => $start,
-					reg_end         => $reg_end,
-					reg_start       => $reg_start,
-					drop_deadline   => $drop_deadline,
-					freeze_deadline => $freeze_deadline,
-					judge_deadline  => $judge_deadline,
-					fine_deadline   => $fine_deadline,
-					site            => $site
-				});
-			}
+					foreach my $room (@{$site->{rooms}}) {
 
-			$translator{weekend}{$weekend->{id}} = $oweekend;
-		}
+						my $oroom;
+						$oroom = $room_by_id{$room->{id}};
 
-	} else {
-
-		$translator{weekend} = \%weekend_by_id;
-	}
-
-	prune_unused( \%weekend_by_id, $translator{weekend}, $jdata->{weekends});
-
-	# REGIONS
-
-	my @regions = $m->comp("/funclib/tourn_regions.mas", tourn => $tourn);
-	my %region_by_id = map {$_->id => $_} @regions;
-	my %region_by_name = map {$_->name => $_} @regions;
-	my %region_by_code = map {$_->code => $_} @regions;
-
-	if ($jdata->{regions}) {
-
-		foreach my $region (@{$jdata->{regions}}) {
-
-			my $oregion;
-			$oregion = $region_by_id{$region->{id}};
-
-			unless ($oregion) {
-				$oregion = $region_by_code{$region->{code}};
-			}
-
-			unless ($oregion) {
-				$oregion = $region_by_name{$region->{name}};
-			}
-
-			unless ($oregion) {
-
-				$oregion = Tab::Region->create({
-					tourn     => $tourn->id,
-					name      => $region->{name},
-					code      => $region->{code},
-					quota     => $region->{quota},
-					arch      => $region->{arch},
-					cooke_pts => $region->{cooke_points},
-					sweeps    => $region->{sweeps},
-					circuit   => $region->{circuit},
-				});
-
-			} else {
-
-				 $oregion->name($region->{name});
-				 $oregion->code($region->{code});
-				 $oregion->quota($region->{quota});
-				 $oregion->arch($region->{arch});
-				 $oregion->cooke_pts($region->{cooke_points});
-				 $oregion->sweeps($region->{sweeps});
-				 $oregion->circuit($region->{circuit});
-				 $oregion->update();
-				delete $region_by_id{$oregion->id};
-			}
-
-			$translator{region}{$region->{id}} = $oregion;
-		}
-
-	} else {
-
-		$translator{region} = \%region_by_id;
-	}
-
-	# CONCESSIONS
-	my @concessions = $tourn->concessions;
-	my %concession_by_id = map {$_->id => $_} @concessions;
-	my %concession_by_name = map {$_->name => $_} @concessions;
-
-	my %ctype_by_id;
-	my %ctype_by_name;
-
-	my %coption_by_id;
-	my %coption_by_name;
-
-	foreach my $concession (@concessions) {
-		foreach my $ctype ($concession->types) {
-			$ctype_by_id{$ctype->{id}} = $ctype;
-			$ctype_by_name{$ctype->{name}} = $ctype;
-
-			foreach my $option ($ctype->options) {
-				$coption_by_id{$option->{id}} = $option;
-				$coption_by_name{$option->{name}} = $option;
-			}
-		}
-	}
-
-	if ($jdata->{concessions}) {
-
-		foreach my $concession (@{$jdata->{concessions}}) {
-
-			my $oconcession = $concession_by_id{$concession->{id}};
-
-			unless ($oconcession) {
-				$oconcession = $concession_by_name{$concession->{name}};
-			}
-
-			unless ($oconcession) {
-				$oconcession = Tab::Concession->create({
-                    name         => $concession->{name},
-                    price        => $concession->{price},
-                    description  => $concession->{description},
-                    deadline     => $concession->{deadline},
-                    cap          => $concession->{cap},
-                    school_cap   => $concession->{school_cap},
-                    billing_code => $concession->{billing_code}
-				});
-
-			} else {
-
-				$oconcession->name($concession->{name});
-				$oconcession->price($concession->{price});
-				$oconcession->description($concession->{description});
-				$oconcession->deadline($concession->{deadline});
-				$oconcession->cap($concession->{cap});
-				$oconcession->school_cap($concession->{school_cap});
-				$oconcession->billing_code($concession->{billing_code});
-				$oconcession->update();
-			}
-
-			$translator{concession}{$concession->{id}} = $oconcession;
-
-			if ($concession->{types}) {
-
-				foreach my $ctype (@{$concession->{types}}) {
-
-					my $octype = $ctype_by_id{$ctype->{id}};
-
-					unless ($octype) {
-						$octype = $ctype_by_name{$ctype->{name}};
-					}
-
-					unless ($octype) {
-
-						$octype = Tab::ConcessionType->create({
-							name        => $ctype->{name},
-							description => $ctype->{description},
-							concession  => $oconcession->id
-						});
-
-					} else {
-
-						$octype->name($ctype->{name});
-						$octype->description($ctype->{description});
-						$octype->concession($oconcession->id);
-						$octype->update();
-
-					}
-
-					$translator{ctype}{$ctype->{id}} = $octype;
-
-					foreach my $coption ($ctype->{options}) {
-
-						my $ocoption = $coption_by_id{$coption->{id}};
-
-						unless ($ocoption) {
-							$ocoption = $coption_by_name{$coption->{name}};
+						unless ($oroom) {
+							$oroom = $room_by_name{$room->{name}};
 						}
 
-						unless ($ocoption) {
+						foreach my $tag ("ada", "inactive") {
+							$room->{$tag} = 0 unless $room->{$tag};
+						}
 
-							$ocoption = Tab::ConcessionOption->create({
-								name            => $ocoption->{name},
-								description     => $ocoption->{description},
-								disabled        => $ocoption->{disabled},
-								concession_type => $octype->id
+						if ($oroom) {
+
+							$oroom->name($room->{name});
+							$oroom->rows($room->{rows});
+							$oroom->seats($room->{seats});
+							$oroom->ada($room->{ada});
+							$oroom->inactive($room->{inactive});
+
+							$oroom->quality($room->{quality});
+							$oroom->capacity($room->{capacity});
+							$oroom->notes($room->{notes});
+							$oroom->url($room->{url});
+
+							$oroom->update();
+
+						} else {
+
+							$oroom = Tab::Room->create({
+								site     => $osite->id,
+								name     => $room->{name},
+								rows     => $room->{rows},
+								seats    => $room->{seats},
+								ada      => $room->{ada},
+								inactive => $room->{inactive},
+								quality  => $room->{quality},
+								capacity => $room->{capacity},
+								notes    => $room->{notes},
+								url      => $room->{url},
+							});
+						}
+
+						$translator{room}{$room->{id}} = $oroom;
+					}
+				}
+			}
+
+		} else {
+
+			$translator{site} = \%site_by_id;
+			$default_site = $sites[0];
+
+			my @rooms;
+			foreach my $site ($tourn->sites) {
+				push @rooms, $site->rooms;
+			}
+
+			%{$translator{room}} = map {$_->id => $_} @rooms;
+			%{$translator{roomname}} = map {$_->name => $_} @rooms;
+		}
+
+
+		# WEEKENDS
+		my @weekends = $tourn->weekends;
+		my %weekend_by_id = map {$_->id => $_} @weekends;
+		my %weekend_by_name = map {$_->name => $_} @weekends;
+
+		if ($jdata->{weekends}) {
+
+			foreach my $weekend (@{$jdata->{weekends}}) {
+
+				next unless $weekend->{name};
+				my $oweekend;
+				$oweekend = $weekend_by_id{$weekend->{id}};
+
+				unless ($oweekend) {
+					$oweekend = $weekend_by_name{$weekend->{name}};
+				}
+
+				my $start           = parse_date($weekend->{start});
+				my $end             = parse_date($weekend->{end});
+				my $reg_start       = parse_date($weekend->{reg_start});
+				my $reg_end         = parse_date($weekend->{reg_end});
+				my $fine_deadline   = parse_date($weekend->{fine_deadline});
+				my $freeze_deadline = parse_date($weekend->{freeze_deadline});
+				my $judge_deadline  = parse_date($weekend->{judge_deadline});
+				my $drop_deadline   = parse_date($weekend->{drop_deadline});
+
+				next unless $start;
+				next unless $end;
+				next unless $reg_start;
+				next unless $reg_end;
+				next unless $fine_deadline;
+				next unless $freeze_deadline;
+				next unless $judge_deadline;
+				next unless $drop_deadline;
+
+				my $site = $translator{site}{$weekend->{site}};
+				$site = $default_site unless $site;
+
+				if ($oweekend) {
+
+					$oweekend->name($weekend->{name});
+					$oweekend->state($weekend->{state});
+					$oweekend->city($weekend->{city});
+					$oweekend->end($end);
+					$oweekend->start($start);
+					$oweekend->reg_end($reg_end);
+					$oweekend->reg_start($reg_start);
+					$oweekend->drop_deadline($drop_deadline);
+					$oweekend->freeze_deadline($freeze_deadline);
+					$oweekend->judge_deadline($judge_deadline);
+					$oweekend->fine_deadline($fine_deadline);
+					$oweekend->site($site);
+
+				} else {
+
+					$oweekend = Tab::Weekend->create({
+						name            => $weekend->{name},
+						end             => $end,
+						start           => $start,
+						reg_end         => $reg_end,
+						reg_start       => $reg_start,
+						drop_deadline   => $drop_deadline,
+						freeze_deadline => $freeze_deadline,
+						judge_deadline  => $judge_deadline,
+						fine_deadline   => $fine_deadline,
+						site            => $site
+					});
+				}
+
+				$translator{weekend}{$weekend->{id}} = $oweekend;
+			}
+
+		} else {
+
+			$translator{weekend} = \%weekend_by_id;
+		}
+
+		prune_unused( \%weekend_by_id, $translator{weekend}, $jdata->{weekends});
+
+		# REGIONS
+
+		my @regions = $m->comp("/funclib/tourn_regions.mas", tourn => $tourn);
+		my %region_by_id = map {$_->id => $_} @regions;
+		my %region_by_name = map {$_->name => $_} @regions;
+		my %region_by_code = map {$_->code => $_} @regions;
+
+		if ($jdata->{regions}) {
+
+			foreach my $region (@{$jdata->{regions}}) {
+
+				my $oregion;
+				$oregion = $region_by_id{$region->{id}};
+
+				unless ($oregion) {
+					$oregion = $region_by_code{$region->{code}};
+				}
+
+				unless ($oregion) {
+					$oregion = $region_by_name{$region->{name}};
+				}
+
+				unless ($oregion) {
+
+					$oregion = Tab::Region->create({
+						tourn     => $tourn->id,
+						name      => $region->{name},
+						code      => $region->{code},
+						quota     => $region->{quota},
+						arch      => $region->{arch},
+						cooke_pts => $region->{cooke_points},
+						sweeps    => $region->{sweeps},
+						circuit   => $region->{circuit},
+					});
+
+				} else {
+
+					 $oregion->name($region->{name});
+					 $oregion->code($region->{code});
+					 $oregion->quota($region->{quota});
+					 $oregion->arch($region->{arch});
+					 $oregion->cooke_pts($region->{cooke_points});
+					 $oregion->sweeps($region->{sweeps});
+					 $oregion->circuit($region->{circuit});
+					 $oregion->update();
+					delete $region_by_id{$oregion->id};
+				}
+
+				$translator{region}{$region->{id}} = $oregion;
+			}
+
+		} else {
+
+			$translator{region} = \%region_by_id;
+		}
+
+		# CONCESSIONS
+		my @concessions = $tourn->concessions;
+		my %concession_by_id = map {$_->id => $_} @concessions;
+		my %concession_by_name = map {$_->name => $_} @concessions;
+
+		my %ctype_by_id;
+		my %ctype_by_name;
+
+		my %coption_by_id;
+		my %coption_by_name;
+
+		foreach my $concession (@concessions) {
+			foreach my $ctype ($concession->types) {
+				$ctype_by_id{$ctype->{id}} = $ctype;
+				$ctype_by_name{$ctype->{name}} = $ctype;
+
+				foreach my $option ($ctype->options) {
+					$coption_by_id{$option->{id}} = $option;
+					$coption_by_name{$option->{name}} = $option;
+				}
+			}
+		}
+
+		if ($jdata->{concessions}) {
+
+			foreach my $concession (@{$jdata->{concessions}}) {
+
+				my $oconcession = $concession_by_id{$concession->{id}};
+
+				unless ($oconcession) {
+					$oconcession = $concession_by_name{$concession->{name}};
+				}
+
+				unless ($oconcession) {
+					$oconcession = Tab::Concession->create({
+						name         => $concession->{name},
+						price        => $concession->{price},
+						description  => $concession->{description},
+						deadline     => $concession->{deadline},
+						cap          => $concession->{cap},
+						school_cap   => $concession->{school_cap},
+						billing_code => $concession->{billing_code}
+					});
+
+				} else {
+
+					$oconcession->name($concession->{name});
+					$oconcession->price($concession->{price});
+					$oconcession->description($concession->{description});
+					$oconcession->deadline($concession->{deadline});
+					$oconcession->cap($concession->{cap});
+					$oconcession->school_cap($concession->{school_cap});
+					$oconcession->billing_code($concession->{billing_code});
+					$oconcession->update();
+				}
+
+				$translator{concession}{$concession->{id}} = $oconcession;
+
+				if ($concession->{types}) {
+
+					foreach my $ctype (@{$concession->{types}}) {
+
+						my $octype = $ctype_by_id{$ctype->{id}};
+
+						unless ($octype) {
+							$octype = $ctype_by_name{$ctype->{name}};
+						}
+
+						unless ($octype) {
+
+							$octype = Tab::ConcessionType->create({
+								name        => $ctype->{name},
+								description => $ctype->{description},
+								concession  => $oconcession->id
 							});
 
 						} else {
 
-							$ocoption->name($ocoption->{name});
-							$ocoption->description($ocoption->{description});
-							$ocoption->disabled($ocoption->{disabled});
-							$ocoption->concession_type($octype->id);
-							$ocoption->update();
+							$octype->name($ctype->{name});
+							$octype->description($ctype->{description});
+							$octype->concession($oconcession->id);
+							$octype->update();
+
 						}
 
-						$translator{coption}{$coption->{id}} = $ocoption;
+						$translator{ctype}{$ctype->{id}} = $octype;
 
+						foreach my $coption ($ctype->{options}) {
+
+							my $ocoption = $coption_by_id{$coption->{id}};
+
+							unless ($ocoption) {
+								$ocoption = $coption_by_name{$coption->{name}};
+							}
+
+							unless ($ocoption) {
+
+								$ocoption = Tab::ConcessionOption->create({
+									name            => $ocoption->{name},
+									description     => $ocoption->{description},
+									disabled        => $ocoption->{disabled},
+									concession_type => $octype->id
+								});
+
+							} else {
+
+								$ocoption->name($ocoption->{name});
+								$ocoption->description($ocoption->{description});
+								$ocoption->disabled($ocoption->{disabled});
+								$ocoption->concession_type($octype->id);
+								$ocoption->update();
+							}
+
+							$translator{coption}{$coption->{id}} = $ocoption;
+
+						}
 					}
 				}
 			}
+
+		} else {
+
+			$translator{concession} = \%concession_by_id;
+			$translator{ctype} = \%ctype_by_id;
+			$translator{coption} = \%coption_by_id;
 		}
 
-	} else {
+		prune_unused( \%concession_by_id, $translator{concession}, $jdata->{concessions});
 
-		$translator{concession} = \%concession_by_id;
-		$translator{ctype} = \%ctype_by_id;
-		$translator{coption} = \%coption_by_id;
 	}
-
-	prune_unused( \%concession_by_id, $translator{concession}, $jdata->{concessions});
 
 	my @schools = $tourn->schools();
 	my %school_by_id = map {$_->id => $_} @schools;
@@ -1700,7 +1708,6 @@
 	if ($jdata->{categories} && (not defined $jdata->{school_only})) {
 
 		$m->print("<h4 class='action'>ROUNDS AND RESULTS</h4>");
-
 		my %cjs;
 
 		CATEGORY:
