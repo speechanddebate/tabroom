@@ -73,4 +73,43 @@ sub setting {
 	}
 }
 
+sub all_settings { 
+
+	my $self = shift;
+
+	my %all_settings;
+
+	my $dbh = Tab::DBI->db_Main();
+
+    my $sth = $dbh->prepare("
+		select setting.tag, setting.value, setting.value_date, setting.value_text
+		from region_setting setting
+		where setting.region = ? 
+        order by setting.tag
+    ");
+    
+    $sth->execute($self->id);
+    
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
+
+		if ($value eq "date") { 
+
+			my $dt = Tab::DBI::dateparse($value_date); 
+			$all_settings{$tag} = $dt if $dt;
+
+		} elsif ($value eq "text") { 
+
+			$all_settings{$tag} = $value_text;
+
+		} else { 
+
+			$all_settings{$tag} = $value;
+
+		}
+
+	}
+
+	return %all_settings;
+
+}
 
