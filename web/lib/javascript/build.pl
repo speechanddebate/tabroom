@@ -2,9 +2,9 @@
 
 use JavaScript::Minifier qw(minify);
 
-# Builds the javascript files together and then minifies them. 
+# Builds the javascript files together and then minifies them.
 
-# order matters here, jquery comes first etc. 
+# order matters here, jquery comes first etc.
 
 	my $source_dir = "sources";
 
@@ -30,13 +30,15 @@ use JavaScript::Minifier qw(minify);
 
 	my $custom_file = "tabroom.js";
 	my $output_file = "tabroom.min.js";
+	my $sources_file = "sources.js";
 
 	# First, concatenate them together
 
 	my $temp_file = $output_file.".tmp";
 
-	foreach my $source_file (@source_files) { 
+	foreach my $source_file (@source_files) {
 		`/bin/cat $source_dir/$source_file >> $temp_file`;
+		`/bin/cat $source_dir/$source_file >> $sources_file`;
 	}
 
 	# Then, add in the custom stuff
@@ -46,11 +48,8 @@ use JavaScript::Minifier qw(minify);
 	`/bin/mv $output_file $output_file.old`;
 
 	open(INFILE, $temp_file) or die;
-
 	open(OUTFILE, "> $output_file") or die;
-
   	minify(input => *INFILE, outfile => *OUTFILE);
-
   	close(INFILE);
   	close(OUTFILE);
 
