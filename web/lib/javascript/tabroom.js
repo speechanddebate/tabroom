@@ -11,10 +11,10 @@
 
 					if (
 						typeof(link) === "object"
-						&& link.form
+						&& link.submit
 					) {
 
-						link.form.submit();
+						link.submit();
 
 					} else if (
 						typeof(link) === 'function'
@@ -288,7 +288,6 @@
 	function uploadName(inputBox) {
 		var fileTag = $(inputBox).attr("id");
 		var fileName = $("#"+fileTag).val().replace(/C:\\fakepath\\/i, '');
-		console.log("File Tag is "+fileTag+" and filename is "+fileName);
 		$("."+fileTag).html(fileName);
 		$("."+fileTag).html(fileName);
 	}
