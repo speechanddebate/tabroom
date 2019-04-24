@@ -7,7 +7,8 @@
 <%init>
 
 	my $category = Tab::Category->retrieve($category_id) if $category_id;
-	my $entry = Tab::Entry->retrieve($entry_id) if $entry_id;
+	my $entry    = Tab::Entry->retrieve($entry_id) if $entry_id;
+
 	my $tourn = $school->tourn;
 
 	use POSIX;
@@ -15,13 +16,14 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my $strike_end = $category->setting("strike_end");
-	$strike_end->set_time_zone($tz) if $strike_end;
-	my $read_only++ if $strike_end < $now;
+	my %category_settings = $category->all_settings();
 
-	my $strike_start = $category->setting("strike_start");
-	$strike_start->set_time_zone($tz) if $strike_start;
-	$read_only++ if $strike_start > $now;
+	$category_settings{"strike_end"}->set_time_zone($tz);
+	$category_settings{"strike_start"}->set_time_zone($tz);
+
+	my $read_only;
+	$read_only++ if $category_settings{"strike_end"} < $now;
+	$read_only++ if $category_settings{"strike_start"} > $now;
 
 	undef $read_only if $entry && $entry->setting("open_prefs");
 
@@ -33,8 +35,7 @@
     }
 
 	my @shifts = $category->shifts;
-
-	my $coach_ratings = $category->setting("coach_ratings");
+	my $coach_ratings = $category_settings{"coach_ratings"};
     my %rating_by_judge = ();
 
 	if ($coach_ratings)  {
@@ -52,24 +53,26 @@
 
 	my @judges = $m->comp("judges.mas", category => $category);
 
-	my %conflicts_by_id = ();
+	my %conflicts_by_judge = ();
 
-	my @entry_conflicts = $m->comp(
-		"/funclib/entry_conflicts.mas",
-			entry     => $entry,
-			category  => $category,
-			conflicts => 'only'
-	) if $entry;
+	foreach my $conflict ($entry->strikes( conflict => 1, registrant => 1)) {
+		$conflicts_by_judge{$conflict->judge->id} = "Entry Conflict";
+	}
 
-	my @school_conflicts = $m->comp(
-		"/funclib/school_conflicts.mas",
-			school    => $school,
-			category  => $category,
-			conflicts => 'only'
-	) if $entry;
+	foreach my $conflict ($school->strikes( conflict => 1, registrant => 1)) {
+		$conflicts_by_judge{$conflict->judge->id} = "School Conflict";
+	}
 
-	foreach (@entry_conflicts, @school_conflicts) {
-		$conflicts_by_id{$_->judge->id} = $_;
+	foreach my $conflict ($school->strikes( conflict => 0, registrant => 1)) {
+		$conflicts_by_judge{$conflict->judge->id} = "School Strike";
+	}
+
+	JUDGE:
+	foreach my $judge ($school->judges()) {
+		if ($category_settings{"neutrals"}) {
+			next JUDGE if $judge->setting("neutral");
+		}
+		$conflicts_by_judge{$judge->id} = "School's Judge";
 	}
 
 	my @entry_strikes = $m->comp(
@@ -80,27 +83,19 @@
 
 	my %strikes_by_id = map {$_->judge->id => $_} @entry_strikes;
 
-    my @school_strikes = $m->comp(
-		"/funclib/school_strikes.mas",
-			school => $school,
-			category => $category
-		);
-
-	my %school_strikes_by_id = map {$_->judge->id => $_} @school_strikes;
-
-	@judges = sort { $school_strikes_by_id{$b->id} <=> $school_strikes_by_id{$a->id} } @judges;
 	@judges = sort { $strikes_by_id{$b->id} <=> $strikes_by_id{$a->id} } @judges;
+	@judges = sort { $conflicts_by_judge{$b->id} cmp $conflicts_by_judge{$a->id} } @judges;
 
 	my @event_struck_judges = $m->comp(
 		"/funclib/event_strike_judges.mas",
-		event => $entry->event
+			event => $entry->event
 	) if $entry;
 
 	my %event_struck = map {$_->id => 1} @event_struck_judges;
 
 	my %paradigms = $m->comp("/funclib/judge_paradigms.mas", tourn => $tourn);
 
-	my $limit = $category->setting("entry_strikes");
+	my $limit = $category_settings{"entry_strikes"};
 	$limit += $entry->event->setting("adjust_strikes") if $entry;
 
 </%init>
@@ -145,7 +140,10 @@
 			whoami => "ratings"
 		&>
 
-		<& "paradigm_check.mas", school => $school, category => $category &>
+		<& "paradigm_check.mas",
+			school   => $school,
+			category => $category
+		&>
 
 %		unless ($entry) {
 
@@ -161,21 +159,28 @@
 			<h6>Limit: <% $limit %></h6>
 		</span>
 
-%		if ($read_only) {
+%		if ($now < $category_settings{"strike_start"}) {
 			<p class="redtext semibold centeralign biggish">
-				Pref deadline was <% Tab::nicedt($strike_end) %> <% Tab::tzname($tz) %>
+				Strike sheets open at <% Tab::nicedt($category_settings{"strike_start"}) %> <% Tab::tzname($tz) %>
 			</p>
-%		} else {
-			<p class="bluetext semibold centeralign biggish">
-				Pref deadline is <% Tab::nicedt($strike_end) %> <% Tab::tzname($tz) %>
+%		} elsif ($now > $category_settings{"strike_end"}) {
+			<p class="redtext semibold centeralign biggish">
+				Strike deadline was <% Tab::nicedt($category_settings{"strike_end"}) %> <% Tab::tzname($tz) %>
 			</p>
 
-%			if (%freebie) {
-				<p class="semibold centeralign greentext biggish">
-					Judges highlighted in green are free strikes
-				</p>
-%			}
+%		} else {
+			<p class="bluetext semibold centeralign biggish">
+				Strike sheets are due by <% Tab::nicedt($category_settings{"strike_end"}) %> <% Tab::tzname($tz) %>
+			</p>
 %		}
+
+%		if (%freebie) {
+			<p class="semibold centeralign greentext biggish">
+				Judges highlighted in green are free strikes
+			</p>
+%		}
+
+%		if ($now > $category_settings{"strike_start"}) {
 
 		<table id="strikes">
 
@@ -199,7 +204,7 @@
 
 %					if (@shifts) {
 						<th>
-							Constraints
+							Time Constraints
 						</th>
 %					}
 
@@ -217,9 +222,8 @@
 				foreach my $judge (@judges) {
 
 					next if $event_struck{$judge->id};
-					next if $judge->school && $judge->school->id == $school->id;
-
 					my $paradigm = $paradigms{$judge->id}{"paradigm"};
+
 </%perl>
 
 					<tr <% $freebie{$judge->id} ? 'class="ligrnrow"' : "" %>>
@@ -263,16 +267,15 @@
 
 						<td class="centeralign padless">
 
-%							if ($conflicts_by_id{$judge->id}) {
-								<a class="orangetext semibold">Conflict</a>
-%							} elsif ($school_strikes_by_id{$judge->id}) {
-								<a class="orangetext semibold">School Strike</a>
+%							if ($conflicts_by_judge{$judge->id}) {
+								<a class="orangetext semibold">
+									<% $conflicts_by_judge{$judge->id} %>
+								</a>
 %							} elsif ($read_only) {
 								<span class="semibold <% $strikes_by_id{$judge->id} ? "invert redtext" : "bluetext" %>">
 									<% ($strikes_by_id{$judge->id}) ? "Struck" : "Not Struck" %>
 								</span>
 %							} else {
-
 								<label class="switch">
 									<input
 										type          = "checkbox"
@@ -295,5 +298,6 @@
 %				}
 			</tbody>
 		</table>
+%		}
 %		}
 	</div>
