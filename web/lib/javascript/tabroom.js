@@ -80,10 +80,10 @@
 
 	function postSwitch(checkObject, replyUrl, callback) {
 
-		var targetId      = $(checkObject).attr("target_id");
-		var propertyName  = $(checkObject).attr("property_name");
-		var settingName   = $(checkObject).attr("setting_name");
-		var relatedThing   = $(checkObject).attr("related_thing");
+		var targetId     = $(checkObject).attr("target_id");
+		var propertyName = $(checkObject).attr("property_name");
+		var settingName  = $(checkObject).attr("setting_name");
+		var relatedThing = $(checkObject).attr("related_thing");
 
 		var successAction = $(checkObject).attr("on_success");
 		var replyTarget   = $(checkObject).attr("reply_target");
