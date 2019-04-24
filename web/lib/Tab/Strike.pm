@@ -2,9 +2,9 @@ package Tab::Strike;
 use base 'Tab::DBI';
 Tab::Strike->table('strike');
 Tab::Strike->columns(Primary => qw/id/); 
-Tab::Strike->columns(Essential => qw/type start end registrant conflictee 
+Tab::Strike->columns(Essential => qw/type start end registrant conflict conflictee 
 							tourn judge event entry school district region timeslot shift 
-							entered_by timestamp/);
+							entered_by created_at timestamp/);
 
 Tab::Strike->has_a(tourn      => 'Tab::Tourn');
 Tab::Strike->has_a(judge      => 'Tab::Judge');
@@ -17,6 +17,6 @@ Tab::Strike->has_a(timeslot   => 'Tab::Timeslot');
 Tab::Strike->has_a(shift      => 'Tab::JudgeShift');
 Tab::Strike->has_a(entered_by => 'Tab::Person');
 
-__PACKAGE__->_register_datetimes( qw/start end timestamp/);
+__PACKAGE__->_register_datetimes( qw/start end timestamp created_at/);
 
 
