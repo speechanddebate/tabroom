@@ -37,6 +37,10 @@
 	my %category_events;
 	my $file_name;
 
+	my %schools;
+	my %students;
+	my %entries;
+
 	my $json_tourn = {
 		name           => $tourn->name,
 		start          => $start_string,
@@ -68,8 +72,11 @@
 		$json_tourn->{whole} = 1;
 	}
 
-
-	unless ($school_id || $event_id) {
+	unless (
+		$json_tourn->{school_only}
+		|| $json_tourn->{category_only}
+		|| $json_tourn->{event_only}
+	) {
 
 		# TOURN SETTINGS
 		my $ts_sth = $dbh->prepare("
@@ -105,7 +112,7 @@
 	my $event_entries_sth = $dbh->prepare("
 		select entry_student.id,
 			student.id, student.first, student.middle, student.last, student.grad_year,
-				student.nsda, student.phonetic, student.chapter, hybrid.school,
+				student.nsda, student.phonetic, student.chapter, hybrid.id,
 			entry.id, entry.code, entry.name, entry.event, entry.school, school.chapter,
 				entry.ada, entry.active, entry.dropped, entry.waitlist, entry.unconfirmed
 		from (entry_student, entry, student, school)
@@ -121,41 +128,58 @@
 		group by entry_student.id
 	");
 
-	unless ($school_id) {
+	my $es_sth = $dbh->prepare("
+		select
+			entry.id, entry_setting.id, entry_setting.tag,
+			entry_setting.value, entry_setting.value_date, entry_setting.value_text
+		from (entry, entry_setting)
 
-		if ($event_id) {
-			push @events, Tab::Event->retrieve($event_id);
-			unless (@events) {
-				$m->clear_buffer();
-				$m->print("No event found for ID $event_id");
-				$m->abort;
-			}
-			$file_name = $events[0]->name;
-		} elsif ($category_id) {
-			my $category = Tab::Category->retrieve($category_id);
-			unless ($category) {
-				$m->clear_buffer();
-				$m->print("No judge category found for ID $category_id");
-				$m->abort;
-			}
-			$file_name = $category->name;
-			push @events, $category->events;
-		} else {
-			push @events, $tourn->events;
+		where entry.id = ?
+			and entry.id = entry_setting.entry
+	");
+
+	if ($json_tourn->{event_only}) {
+
+		push @events, Tab::Event->retrieve($event_id);
+		unless (@events) {
+			$m->clear_buffer();
+			$m->print("No event found for ID $event_id");
+			$m->abort;
+		}
+		$file_name = $events[0]->name;
+
+	} elsif ($json_tourn->{category_only}) {
+
+		my $category = Tab::Category->retrieve($category_id);
+		unless ($category) {
+			$m->clear_buffer();
+			$m->print("No judge category found for ID $category_id");
+			$m->abort;
+		}
+		$file_name = $category->name;
+
+	} else {
+		push @events, $tourn->events;
+	}
+
+	foreach my $event (@events) {
+
+		my $category = $event->category();
+
+		unless ($category_events{$category->id}) {
+			push @categories, $category;
 		}
 
-		foreach my $event (@events) {
+		push @{$category_events{$category->id}}, $event;
+		push (@timeslots, $m->comp("/funclib/event_timeslots.mas", event => $event));
+		$events_used{$event->id} = $event;
+	}
 
-			my $category = $event->category;
-
-			unless ($category_events{$category->id}) {
-				push @categories, $category;
-			}
-
-			push @{$category_events{$category->id}}, $event;
-			push (@timeslots, $m->comp("/funclib/event_timeslots.mas", event => $event));
-			$events_used{$event->id} = $event;
-		}
+	unless (
+		$json_tourn->{event_only}
+		|| $json_tourn->{school_only}
+		|| $json_tourn->{category_only}
+	) {
 
 		my %tseen = ();
 		@timeslots = grep { ! $tseen{$_->id} ++ } @timeslots;
@@ -250,7 +274,6 @@
 		}
 
 		# ROOM POOLS RPOOLS
-
 		my %rpools;
 		$rpool_sth->execute($tourn->id);
 
@@ -291,7 +314,6 @@
 		}
 
 		# WEEKENDS
-
 		foreach my $weekend ($tourn->weekends) {
 
 			my $json_weekend = {
@@ -313,7 +335,6 @@
 			push @{$json_tourn->{weekends}}, $json_weekend;
 		}
 	}
-
 
 	my $score_sth = $dbh->prepare("
 		select
@@ -375,7 +396,6 @@
 			and judge.id = judge_setting.judge
 	");
 
-
 	my $judge_sth = $dbh->prepare("
 		select
 			judge.id, judge.first, judge.middle, judge.last, judge.person,
@@ -390,7 +410,6 @@
 		where judge.category = ?
 		group by judge.id
 	");
-
 
 	my $school_judge_sth = $dbh->prepare("
 		select
@@ -477,7 +496,7 @@
 	my %jpools;
 
 	# CATEGORY CATEGORIES
-	unless ($school_id) {
+	unless ($json_tourn->{school_only}) {
 
 		foreach my $category (@categories) {
 
@@ -493,188 +512,192 @@
 				abbr => $category->abbr
 			};
 
-			$json_category->{settings} = raw_value($cs_sth, $category_id);
-
 			push (@{$json_tourn->{categories}}, $json_category);
 
-			# RATINGS PREFS RATING TIERS
-			foreach my $rt ($category->rating_tiers) {
-				my $json_rating = {
-					id          => $rt->id,
-					tag         => $rt->type,
-					name        => $rt->name,
-					strike      => $rt->strike,
-					conflict    => $rt->conflict,
-					description => $rt->description,
-					min         => $rt->min,
-					max         => $rt->max,
-					start       => $rt->start
-				};
+			unless ($json_tourn->{event_only}) {
 
-				push @{$json_category->{'rating_tiers'}}, $json_rating;
-			}
+				$json_category->{settings} = raw_value($cs_sth, $category_id);
 
-			# RATINGS PREFS RATING TIERS
-			foreach my $rs ($category->rating_subsets) {
-				my $json_subset = {
-					id   => $rs->id,
-					name => $rs->name,
-				};
-				push @{$json_category->{'rating_subsets'}}, $json_subset;
-			}
-
-			# JUDGES
-			$judge_sth->execute($category_id);
-
-			my %done_judge;
-
-			while (
-				my (
-					$judge_id, $judge_first, $judge_middle, $judge_last,
-					$judge_person, $judge_code, $judge_ada, $judge_active,
-					$judge_obligation, $judge_hired,
-					$judge_alt_category,
-					$judge_covers, $judge_chapter_judge, $judge_school,
-					$person_id, $person_email, $person_phone
-				) = $judge_sth->fetchrow_array()
-			) {
-
-				next if $done_judge{$judge_id}++;
-
-				my $json_judge = {
-					id       => $judge_id,
-					first    => $judge_first,
-					last     => $judge_last
-				};
-
-				$schools_used{$judge_school}++ if $judge_school;
-				$person_phone =~ s/[\D_]//g;
-
-				$json_judge->{school}        = $judge_school if $judge_school;
-				$json_judge->{active}        = $judge_active;
-				$json_judge->{ada}           = $judge_ada unless $public;
-				$json_judge->{email}         = lc($person_email) if $person_email;
-				$json_judge->{phone}         = $person_phone if $person_phone;
-				$json_judge->{person}        = $person_id if $person_id;
-				$json_judge->{obligation}    = $judge_obligation if $judge_obligation;
-				$json_judge->{hired}         = $judge_hired if $judge_hired;
-				$json_judge->{alt_category}  = $judge_alt_category if $judge_alt_category;
-				$json_judge->{covers}        = $judge_covers if $judge_covers;
-				$json_judge->{chapter_judge} = $judge_chapter_judge if $judge_chapter_judge;
-
-				$judges{$judge_id} = $json_judge;
-				push @{$json_category->{judges}}, $json_judge;
-			}
-
-			$judge_sth->finish();
-			$cj_sth->execute($category_id);
-
-			while(
-				my (
-					$judge_id, $js_id, $js_tag, $js_value, $js_value_date, $js_value_text
-				) = $cj_sth->fetchrow_array()
-			) {
-
-				my $meta;
-				if ($js_value eq "date") {
-					$js_value_date =~ s/ /T/g;
-					$js_value = $js_value_date;
-					$meta = "date";
-				} elsif ($js_value eq "text") {
-					$js_value = $js_value_text;
-					$meta = "text";
-				}
-
-				my $js_setting = {
-					tag   => $js_tag,
-					value => $js_value,
-					meta  => $meta
-				};
-
-				push @{$judges{$judge_id}->{settings}}, $js_setting;
-			}
-
-			$cj_sth->finish();
-
-			# JUDGE POOLS JPOOLS
-
-			$jpool_sth->execute($category_id);
-
-			while(
-				my (
-					$jpool_id,
-					$judge_id,
-					$jpool_name, $jpool_category, $jpool_site, $jpool_parent
-				) = $jpool_sth->fetchrow_array()
-			) {
-
-				my $json_jpool = $jpools{$jpool_id};
-
-				unless ($json_jpool) {
-					$json_jpool = {
-						id     => $jpool_id,
-						name   => $jpool_name,
-						site   => $jpool_site,
-						parent => $jpool_parent
+				# RATINGS PREFS RATING TIERS
+				foreach my $rt ($category->rating_tiers) {
+					my $json_rating = {
+						id          => $rt->id,
+						tag         => $rt->type,
+						name        => $rt->name,
+						strike      => $rt->strike,
+						conflict    => $rt->conflict,
+						description => $rt->description,
+						min         => $rt->min,
+						max         => $rt->max,
+						start       => $rt->start
 					};
-					$jpools{$jpool_id} = $json_jpool;
+
+					push @{$json_category->{'rating_tiers'}}, $json_rating;
 				}
 
-				push @{$jpools{$jpool_id}->{judges}}, $judge_id;
-			}
+				# RATINGS PREFS RATING TIERS
+				foreach my $rs ($category->rating_subsets) {
+					my $json_subset = {
+						id   => $rs->id,
+						name => $rs->name,
+					};
+					push @{$json_category->{'rating_subsets'}}, $json_subset;
+				}
 
-			foreach my $key (keys %jpools) {
-				push @{$json_category->{judge_pools}}, $jpools{$key};
-			}
 
-			$jpool_setting_sth->execute($category_id);
+				# JUDGES
+				$judge_sth->execute($category_id);
 
-			while (
-				my (
-					$setting_id, $setting_tag, $setting_value,
-					$setting_value_text, $setting_value_date, $setting_jpool
-				) = $jpool_setting_sth->fetchrow_array()
-			) {
+				my %done_judge;
 
-				my $jpool = $jpools{$setting_jpool};
+				while (
+					my (
+						$judge_id, $judge_first, $judge_middle, $judge_last,
+						$judge_person, $judge_code, $judge_ada, $judge_active,
+						$judge_obligation, $judge_hired,
+						$judge_alt_category,
+						$judge_covers, $judge_chapter_judge, $judge_school,
+						$person_id, $person_email, $person_phone
+					) = $judge_sth->fetchrow_array()
+				) {
 
-				if ($jpool) {
+					next if $done_judge{$judge_id}++;
+
+					my $json_judge = {
+						id       => $judge_id,
+						first    => $judge_first,
+						last     => $judge_last
+					};
+
+					$schools_used{$judge_school}++ if $judge_school;
+					$person_phone =~ s/[\D_]//g;
+
+					$json_judge->{school}        = $judge_school if $judge_school;
+					$json_judge->{active}        = $judge_active;
+					$json_judge->{ada}           = $judge_ada unless $public;
+					$json_judge->{email}         = lc($person_email) if $person_email;
+					$json_judge->{phone}         = $person_phone if $person_phone;
+					$json_judge->{person}        = $person_id if $person_id;
+					$json_judge->{obligation}    = $judge_obligation if $judge_obligation;
+					$json_judge->{hired}         = $judge_hired if $judge_hired;
+					$json_judge->{alt_category}  = $judge_alt_category if $judge_alt_category;
+					$json_judge->{covers}        = $judge_covers if $judge_covers;
+					$json_judge->{chapter_judge} = $judge_chapter_judge if $judge_chapter_judge;
+
+					$judges{$judge_id} = $json_judge;
+					push @{$json_category->{judges}}, $json_judge;
+				}
+
+				$judge_sth->finish();
+				$cj_sth->execute($category_id);
+
+				while(
+					my (
+						$judge_id, $js_id, $js_tag, $js_value, $js_value_date, $js_value_text
+					) = $cj_sth->fetchrow_array()
+				) {
 
 					my $meta;
-
-					if ($setting_value eq "date") {
-						$setting_value_date =~ s/ /T/g;
-						$setting_value = $setting_value_date;
+					if ($js_value eq "date") {
+						$js_value_date =~ s/ /T/g;
+						$js_value = $js_value_date;
 						$meta = "date";
-					} elsif ($setting_value eq "text") {
-						$setting_value = $setting_value_text;
+					} elsif ($js_value eq "text") {
+						$js_value = $js_value_text;
 						$meta = "text";
 					}
 
-					my $jpool_setting = {
-						tag   => $setting_tag,
-						value => $setting_value,
+					my $js_setting = {
+						tag   => $js_tag,
+						value => $js_value,
 						meta  => $meta
 					};
 
-					push @{$jpool->{settings}}, $jpool_setting;
+					push @{$judges{$judge_id}->{settings}}, $js_setting;
 				}
-			}
 
-			# JPOOL ROUNDS
+				$cj_sth->finish();
 
-			$jpool_round_sth->execute($tourn->id);
+				# JUDGE POOLS JPOOLS
 
-			while (
-				my (
-					$jpool, $round
-				) = $jpool_round_sth->fetchrow_array()
-			) {
+				$jpool_sth->execute($category_id);
 
-				my $jpool = $jpools{$jpool};
+				while(
+					my (
+						$jpool_id,
+						$judge_id,
+						$jpool_name, $jpool_category, $jpool_site, $jpool_parent
+					) = $jpool_sth->fetchrow_array()
+				) {
 
-				if ($jpool) {
-					push @{$jpool->{rounds}}, $round;
+					my $json_jpool = $jpools{$jpool_id};
+
+					unless ($json_jpool) {
+						$json_jpool = {
+							id     => $jpool_id,
+							name   => $jpool_name,
+							site   => $jpool_site,
+							parent => $jpool_parent
+						};
+						$jpools{$jpool_id} = $json_jpool;
+					}
+
+					push @{$jpools{$jpool_id}->{judges}}, $judge_id;
+				}
+
+				foreach my $key (keys %jpools) {
+					push @{$json_category->{judge_pools}}, $jpools{$key};
+				}
+
+				$jpool_setting_sth->execute($category_id);
+
+				while (
+					my (
+						$setting_id, $setting_tag, $setting_value,
+						$setting_value_text, $setting_value_date, $setting_jpool
+					) = $jpool_setting_sth->fetchrow_array()
+				) {
+
+					my $jpool = $jpools{$setting_jpool};
+
+					if ($jpool) {
+
+						my $meta;
+
+						if ($setting_value eq "date") {
+							$setting_value_date =~ s/ /T/g;
+							$setting_value = $setting_value_date;
+							$meta = "date";
+						} elsif ($setting_value eq "text") {
+							$setting_value = $setting_value_text;
+							$meta = "text";
+						}
+
+						my $jpool_setting = {
+							tag   => $setting_tag,
+							value => $setting_value,
+							meta  => $meta
+						};
+
+						push @{$jpool->{settings}}, $jpool_setting;
+					}
+				}
+
+				# JPOOL ROUNDS
+
+				$jpool_round_sth->execute($tourn->id);
+
+				while (
+					my (
+						$jpool, $round
+					) = $jpool_round_sth->fetchrow_array()
+				) {
+
+					my $jpool = $jpools{$jpool};
+
+					if ($jpool) {
+						push @{$jpool->{rounds}}, $round;
+					}
 				}
 			}
 
@@ -704,7 +727,9 @@
 				push @{$json_category->{"events"}}, $json_event;
 
 				# EVENT ENTRIES
-				# If we are downloading only one event or category, then we need the entries here as well.
+
+				# If we are downloading only one event or category, then we
+				# need the entries here as well.
 
 				if ($json_tourn->{event_only} || $json_tourn->{category_only}) {
 
@@ -712,11 +737,13 @@
 
 					while (
 						my (
+
 							$entry_student_id,
 							$student_id, $student_first, $student_middle, $student_last,
 							$student_grad_year, $student_nsda, $student_phonetic, $student_chapter, $student_school,
 							$entry_id, $entry_code, $entry_name, $entry_event, $entry_school, $entry_chapter,
 							$entry_ada, $entry_active, $entry_dropped, $entry_waitlist, $entry_unconfirmed
+
 						) = $event_entries_sth->fetchrow_array()
 					) {
 
@@ -736,22 +763,20 @@
 								name   => $entry_name
 							};
 
-							$json_entry->{ada}         = $entry_ada unless $public;
-							$json_entry->{active}      = $entry_active;
-
 							if ($student_chapter != $entry_chapter) {
 								$json_entry->{hybrid} = $student_school;
 							}
 
+							$json_entry->{ada}         = $entry_ada unless $public;
+							$json_entry->{active}      = $entry_active;
 							$json_entry->{dropped}     = $entry_dropped;
 							$json_entry->{waitlist}    = $entry_waitlist;
 							$json_entry->{unconfirmed} = $entry_unconfirmed;
 							$json_entry->{settings}    = raw_value($es_sth, $entry_id);
-
-							$entries{$entry_id} = $json_entry;
-							push (@{$json_school->{entries}}, $json_entry);
-
 						}
+
+						$entries{$entry_id} = $json_entry;
+						push (@{$json_event->{entries}}, $json_entry);
 
 						my $json_student = {
 							id        => $student_id,
@@ -787,12 +812,12 @@
 						$score_id, $score_tag, $score_student, $score_value, $score_speech,
 						$score_position, $score_topic, $score_content,
 						$ballot_id, $ballot_panel, $ballot_judge, $ballot_entry, $ballot_bye,
-						$ballot_forfeit, $ballot_side, $ballot_speakerorder, $ballot_audit, $ballot_chair,
-						$panel_id, $panel_letter, $panel_round, $panel_room, $panel_bye, $panel_flight, $panel_bracket,
-							$panel_started, $panel_publish,
+							$ballot_forfeit, $ballot_side, $ballot_speakerorder, $ballot_audit, $ballot_chair,
+						$panel_id, $panel_letter, $panel_round, $panel_room, $panel_bye, $panel_flight,
+							$panel_bracket, $panel_started, $panel_publish,
 						$round_id, $round_name, $round_event, $round_flighted, $round_tiebreak_set,
-						$round_label, $round_type, $round_timeslot, $round_site,
-						$round_published, $round_results, $round_created, $round_start_time,
+							$round_label, $round_type, $round_timeslot, $round_site,
+							$round_published, $round_results, $round_created, $round_start_time,
 						$runoff_id
 					) = $score_sth->fetchrow_array()
 				) {
@@ -920,7 +945,7 @@
 									$json_score->{position} = $score_position if $score_position;
 
 									if ($score_content) {
-										my $compressed = compress($score_content)
+										my $compressed = compress($score_content);
 										$json_score->{content} = $compressed;
 									}
 
@@ -1126,26 +1151,6 @@
 			and school.id = school_setting.school
 	");
 
-	my $es_sth = $dbh->prepare("
-		select
-			entry.id, entry_setting.id, entry_setting.tag,
-			entry_setting.value, entry_setting.value_date, entry_setting.value_text
-		from (entry, entry_setting)
-
-		where entry.id = ?
-			and entry.id = entry_setting.entry
-	");
-
-	my $es_sth = $dbh->prepare("
-		select
-			entry.id, entry_setting.id, entry_setting.tag,
-			entry_setting.value, entry_setting.value_date, entry_setting.value_text
-		from (entry, entry_setting)
-
-		where entry.id = ?
-			and entry.id = entry_setting.entry
-	");
-
 	my $purchase_sth = $dbh->prepare("
 		select purchase.id, purchase.school,
 			purchase.quantity, purchase.placed, purchase.fulfilled,
@@ -1168,11 +1173,10 @@
 	");
 
 
-	my %schools;
-	my %students;
-	my %entries;
-
-	unless ($event_id || $category_id) {
+	unless (
+		$json_tourn->{category_only}
+		|| $json_tourn->{event_only}
+	) {
 
 		$student_sth->execute($tourn->id);
 
@@ -1426,7 +1430,11 @@
 		}
 	}
 
-	unless ($event_id || $category_id) {
+	unless (
+		$json_tourn->{school_only}
+		|| $json_tourn->{category_only}
+		|| $json_tourn->{event_only}
+	) {
 
 		my $region_sth = $dbh->prepare("
 			select region.id, region.name, region.code,
@@ -1460,7 +1468,11 @@
 		}
 	}
 
-	unless ($school_id) {
+	unless (
+		$json_tourn->{school_only}
+		|| $json_tourn->{category_only}
+		|| $json_tourn->{event_only}
+	) {
 
 		my $tb_sth = $dbh->prepare("
 			select
@@ -1481,7 +1493,6 @@
 				tiebreak_set.id, tiebreak_set_setting.id, tiebreak_set_setting.tag,
 				tiebreak_set_setting.value, tiebreak_set_setting.value_date, tiebreak_set_setting.value_text
 			from (tiebreak_set, tiebreak_set_setting)
-
 			where tiebreak_set.id = ?
 				and tiebreak_set.id = tiebreak_set_setting.tiebreak_set
 		");
@@ -1751,8 +1762,6 @@
 
 #	$r->content_type('application/json');
 #	$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
-
-#	Tab::debuglog("Filepath is $filepath");
 
 	open my $fh, ">", $filepath;
 	print $fh $json->pretty->encode($json_tourn);
