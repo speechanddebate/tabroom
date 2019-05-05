@@ -6,60 +6,141 @@
 </%args>
 <%init>
 
-	my $switch; 
+	my $switch;
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
 	my $event = Tab::Event->retrieve($event_id) if $event_id;
 	my $quota = $region->quota;
+
 	my $max = $event->setting("max_entry") if $event;
 
 	my $hide_codes = $tourn->setting("hide_codes");
-
 	my $now = DateTime->now(time_zone => $tz);
 
 	my $entry_deadline = $tourn->reg_end->set_time_zone($tz);
 	my $drop_deadline = $tourn->setting("drop_deadline");
 	$drop_deadline->set_time_zone($tz);
 
+	my $dbh = Tab::DBI::db_Main();
+	my $sth = $dbh->prepare("
+		select
+			student.id, student.first, student.last, school.id
+			from student, school, tourn
+			where student.chapter = school.chapter
+			and school.region = ?
+			and tourn.id = ?
+			and school.tourn = tourn.id
+			and student.retired != 1
+			and student.grad_year >= YEAR(tourn.start)
+
+			and not exists (
+				select es.id
+				from entry_student es, entry, event
+				where event.tourn = tourn.id
+				and event.id = entry.event
+				and entry.id = es.entry
+				and es.student = student.id
+			)
+	");
+
+	$sth->execute($region->id, $tourn->id);
+
+	my %school_students;
+
+	while (
+		my (
+			$student_id, $student_first, $student_last, $school_id
+		) = $sth->fetchrow_array()
+	) {
+
+		$school_students{$school_id}{$student_id}{"first"} = $student_first;
+		$school_students{$school_id}{$student_id}{"last"} = $student_last;
+	}
+
 </%init>
+
+	<script>
+
+		$(document).ready(function() {
+			schoolStudents();
+		});
+
+
+		function schoolStudents() {
+
+			$(".stepselects").each(function() {
+
+				var stepID = $(this).attr("id");
+				var schoolID = $(this).val();
+
+				$("."+stepID+"_selects").prop("disabled", "true");
+				$("."+stepID+"_boxes").addClass('hidden');
+				$("."+stepID+"_text").addClass('hidden');
+
+				$("."+stepID+"_"+schoolID).prop("disabled", false);
+
+				$(".school_"+stepID+"_"+schoolID).removeClass('hidden');
+
+				var studentID = $("#studentpicker_"+stepID+"_"+schoolID).val();
+
+				if (schoolID && studentID === "add") {
+					$("."+stepID+"_text").removeClass('hidden');
+					$("."+stepID+"_drop").addClass('hidden');
+				}
+
+			});
+		};
+
+	</script>
 
 	<div class="main">
 
-		<h2><% $region->arch ? "Archdiocese" : "Diocese" %> of <% $region->name %> at <% $tourn->name %></h2> 
+		<h2>
+			<% $region->arch ? "Archdiocese" : "Diocese" %> of <% $region->name %>
+		</h2>
 
-		<& menubar.mas, tourn => $tourn, region => $region, whoami => "entries" &>
+		<& menubar.mas,
+			tourn  => $tourn,
+			region => $region,
+			whoami => "entries"
+		&>
 
-%		unless ($event) { 
+%		unless ($event) {
 
 			<h4>Choose an event</h4>
+
 			<p>Choose an event to right to enter students</p>
 
-%		} else { 
+%		} else {
 
 			<div>
 				<span class="twothird">
 					<h4>Entry in <% $event->name %></h4>
 				</span>
 				<span class="third rightalign">
-					<h5>Limit is <% $quota %></h5>
+					<h5 class="bluetext">Limit is <% $quota %></h5>
 				</span>
 			</div>
 
-%			if ($now < $drop_deadline) { 
-				<form action="tourn_entries_save.mhtml" method="post">
-				<input 
+%			if ($now < $drop_deadline) {
+				<form
+					action = "tourn_entries_save.mhtml"
+					method = "post"
+				>
+
+				<input
 					type  = "hidden"
 					name  = "region_id"
 					value = "<% $region->id %>"
 				>
-				<input 
+				<input
 					type  = "hidden"
 					name  = "tourn_id"
 					value = "<% $tourn->id %>"
 				>
-				<input 
+				<input
 					type  = "hidden"
 					name  = "event_id"
 					value = "<% $event->id %>"
@@ -70,188 +151,282 @@
 
 				<tr class="yellowrow">
 
-					<th class="smallish">
-						<% $hide_codes ? "" : "Code" %>
+					<th>
+						<% $hide_codes ? "Slot" : "Code" %>
 					</th>
 
-					<th class="smallish">
+					<th>
 						School
 					</th>
 
-					<th class="smallish">
-						First
+					<th>
+						Competitor from Roster
 					</th>
 
-					<th class="smallish">
-						Last
+					<th>
 					</th>
-
 
 				</tr>
 
-%				my @entries = $m->comp("/funclib/region_entries.mas", region => $region, event => $event);
-%				my @schools = Tab::School->search(  region => $region->id, tourn => $tourn->id );
+<%perl>
 
-%				foreach my $step (1 .. $quota) { 
+				my @entries = $m->comp(
+					"/funclib/region_entries.mas",
+					region => $region,
+					event  => $event
+				);
 
-%					my $entry = shift @entries if @entries;
-%					my @students = $entry->students if $entry;
+				@entries = sort {$a->id <=> $b->id} @entries;
 
-%					next if $now > $entry_deadline && not defined $entry;
+				my @schools = Tab::School->search(
+					region => $region->id,
+					tourn  => $tourn->id
+				);
 
-					<tr class="<% $max > 1 ? "libordertop" : "" %> <% $step % 2 ? "evenrow" : "oddrow" %>">
 
-						<th rowspan="<% $max %>">
+				foreach my $step (1 .. $quota) {
+
+					my $entry = shift @entries if @entries;
+					my @students = $entry->students if $entry;
+
+					# Existing entries will be filtered by the above select
+					foreach my $student (@students) {
+						$school_students{$entry->school->id}{$student->id}{"first"} = $student->first;
+						$school_students{$entry->school->id}{$student->id}{"last"} = $student->last;
+					}
+
+					next if $now > $entry_deadline && not defined $entry;
+</%perl>
+
+					<tr class="<%
+							$max > 1 ? "libordertop" : ""
+						%> <%
+							$step % 2 ? "even" : "odd"
+						%>"
+					>
+
+						<th class="centeralign" rowspan="<% $max %>">
 							<% $hide_codes ? $step."." : $entry ? $entry->code : "" %>
 						</th>
 
-						<td rowspan="<% $max %>">
+						<td rowspan="<% $max %>" class="centeralign">
 
-%							if ($now > $drop_deadline) { 
+%							if ($now > $drop_deadline) {
 								<% $entry->school->short_name %>
-%							} else { 
+%							} else {
 
-								<select name="school_<% $step %>" class="fixedmed">
+								<select
+									id       = "<% $step %>"
+									name     = "school_<% $step %>"
+									class    = "fixedmed stepselects"
+									onChange = "schoolStudents();"
+								>
 									<option value=""></option>
-%									foreach my $school (@schools) { 
-										<option value="<% $school->id %>" <% $entry && $entry->school->id == $school->id ? "selected" : "" %> >
-											<% $school->name %>
-										</option>
+
+%									foreach my $school (@schools) {
+										<option
+											value="<% $school->id %>"
+											<% $entry && $entry->school->id == $school->id ? "selected" : "" %>
+										> <% $school->name %> </option>
 %									}
-									<option value="">Drop Entry</option>
 								</select>
 %							}
 
-						</th>
-
-%						my $notfirst;
-
-%						foreach my $stu (1 .. $max) { 
-
-%							my $student = shift @students if @students;
-
-%							if ($notfirst) { 
-								<tr class="<% $step % 2 ? "evenrow" : "oddrow" %>">
-%							}
-
-%							$notfirst++;
-
-							<td>
-								<span class="hidden"><% $student ? $student->first : "" %></span>
-%								if ($now > $drop_deadline) { 
-									<% $student->first %>
-%								} else { 
-									<input type="text" size="23" name="<% $step %>_<% $stu %>_first" value=<% $student ? $student->first : "" %>>
-%								} 
-							</td>
-
-							<td>
-								<span class="hidden"><% $student ? $student->last : "" %></span>
-%								if ($now > $drop_deadline) { 
-									<span class="block">
-										<% $student->last %>
-									</span>
-%								} else { 
-									<input type="text" size="23" name="<% $step %>_<% $stu %>_last" value=<% $student ? $student->last : "" %>>
-%								} 
-							</td>
-
-						</tr>
-
-%					}
-
-%				}
-
-%			if ($now < $drop_deadline) { 
-					<tr class="liblrow">
-						
-						<td colspan="4" class="rightalign">
-							<input type="submit" value="Save Entries">
-							</form>
 						</td>
 
-					</tr>
-					
-				</table>
+<%perl>
+						my $notfirst;
 
-%				if ($now > $entry_deadline) { 
-					<p class="strong redtext">
+						foreach my $stu (1 .. $max) {
+
+							my $entry_student = shift @students if @students;
+
+							if ($notfirst++) {
+</%perl>
+								<tr class="<% $step % 2 ? "even" : "odd" %>">
+%							}
+
+							<td class="centeralign">
+
+%								foreach my $school (@schools) {
+
+									<div
+										class = "full nospace <% $step %>_boxes school_<% $step %>_<% $school->id %>"
+										id    = "school_<% $step %>_<% $school->id %>"
+									>
+
+									<select
+										class    = "<% $step %>_selects <% $step %>_<% $school->id %> fixedmed"
+										name     = "<% $step %>_<% $stu %>"
+										onChange = "schoolStudents();"
+										id       = "studentpicker_<% $step %>_<% $school->id %>"
+									>
+
+<%perl>
+									my $school_id = $school->id;
+
+									foreach my $student_id (
+										sort {
+											$school_students{$school_id}{$a}{"last"} cmp $school_students{$school_id}{$b}{"last"}
+										} keys (%{$school_students{$school_id}})
+									) {
+</%perl>
+										<option value=""></option>
+										<option
+											value="<% $student_id %>"
+											<% $student_id == $entry_student ? "selected" : "" %>
+										><%
+											$school_students{$school_id}{$student_id}{"first"}." ".
+											$school_students{$school_id}{$student_id}{"last"}
+										%></option>
+%									}
+
+										<option value="add">Add New Student</option>
+
+									</select>
+
+									</div>
+
+%								}
+							</td>
+
+							<td>
+								<div class="half nospace <% $step %>_text">
+									<input
+										type        = "text"
+										name        = "<% $step %>_<% $stu %>_first"
+										placeholder = "First Name"
+										size        = "18"
+									>
+								</div>
+								<div class="half nospace <% $step %>_text">
+									<input
+										type        = "text"
+										name        = "<% $step %>_<% $stu %>_last"
+										placeholder = "Last Name"
+										size        = "18"
+									>
+								</div>
+
+%								if ($entry && ($now < $drop_deadline)) {
+									<div class="full nospace <% $step %>_drop centeralign">
+										<a
+											<& "/funclib/confirm.mas",
+												warn => "This action will drop the entry entirely.  If this is past the deadline, you cannot re-add another without contacting the tournament.  If you want to change entry names and school, do not drop, and use the menus to the left to change names. " &>
+											class = "redtext buttonwhite fa-trash fa fa-sm"
+											href  = "entry_drop.mhtml?entry_id=<% $entry->id %>&region_id=<% $region->id %>"
+										></a>
+									</div>
+%								}
+							</td>
+							</tr>
+%						}
+					<!--end of row-->
+%				}
+			</table>
+
+%			if ($now < $entry_deadline) {
+
+				<div class="liblrow rightalign">
+					<div class="quarter centeralign">
+						<input type="submit" value="Save Entries">
+						</form>
+					</div>
+				</div>
+
+
+%				if ($now > $entry_deadline) {
+					<p class="semibold bigger redtext">
 						The deadline for new entries has passed.  You may change names or drop until
 						<% Tab::nicedt($drop_deadline) %> <% Tab::tzname($tz) %>
 					</p>
 
-%				} else { 
+%				} else {
 
-					<div class="centeralign strong bluetext">
+					<div class="centeralign semibold bigger bluetext">
 
 						<p>
-							You may enter new entries until 
+							You may enter new entries until
 							<% Tab::nicedt($entry_deadline) %> <% Tab::tzname($tz) %>
 						</p>
 
 						<p>
-							You may change names or drop online until 
+							You may change names or drop online until
 							<% Tab::nicedt($drop_deadline) %> <% Tab::tzname($tz) %>
 						</p>
 
 					</div>
-%				} 
+%				}
 
-%			} else { 
+%			} else {
 
-				</table>
+				<div class="centeralign semibold bigger bluetext">
+					The change deadline has passed.  Please submit any further changes by email to
 
-				<p>The change deadline has passed.  
-					Please submit any further changes by email 
-					to <a href="mailto:ncfl@tabroom.com">ncfl@tabroom.com</a>
+<%perl>
+					my $notfirst;
+
+					foreach my $contact_perm ($tourn->permissions(tag => 'contact')) {
+
+						my $contact = $contact_perm->person;
+
+</%perl>
+						<% $notfirst++ ? " or " : "" %>
+						<a
+							href="mailto:<% $contact->email %>"
+							class="full hover bluetext"
+						><% $contact->first." ".$contact->last %>: <% $contact->email %></a>
+%					}
 				</p>
-
 %			}
-
 %		}
 
 	</div>
 
 	<div class="menu">
-	
+
 		<div class="sidenote">
 
 			<h4>Events</h4>
 
 <%perl>
 
-				foreach my $oevent (sort {$a->name cmp $b->name} $tourn->events) { 
+				foreach my $oevent (sort {$a->name cmp $b->name} $tourn->events) {
 
-					my @entries = $m->comp("/funclib/region_entries.mas", region => $region, event => $oevent);
+					my @entries = $m->comp("/funclib/region_entries.mas",
+						region => $region,
+						event  => $oevent
+					);
 
+					my $textclass;
 					my $block;
 
-					if (scalar @entries == $quota) { 
+					if ($event && $event->id == $oevent->id) {
+						$block = "even";
+					} else {
+						$block = "odd";
+					}
 
-						if ($event && $event->id == $oevent->id) { 
-							$block = "dkblue";
-						} else { 
-							$block = "green";
-						}
 
-					} else { 
+					if (scalar @entries == $quota) {
 
-						if ($event && $event->id == $oevent->id) { 
-							$block = "dkred";
-						} else { 
-							$block = "red";
-						}
+						$textclass = "greentext";
+
+					} else {
+						$textclass = "redtext";
 					}
 
 </%perl>
 
-					<a class="<% $block %> full" href="tourn_entries.mhtml?event_id=<% $oevent->id %>&region_id=<% $region->id %>&tourn_id=<% $tourn->id %>">
+					<a class="white marvertno full <% $block %>"
+						href="tourn_entries.mhtml?event_id=<% $oevent->id %>&region_id=<% $region->id %>&tourn_id=<% $tourn->id %>"
+					>
 
 						<span class="threequarter">
 							<% $oevent->name %>
 						</span>
 
-						<span class="quarter">
+						<span class="quarter bigger <% $textclass %>">
 							<% scalar @entries %>/<% $quota %>
 						</span>
 					</a>
