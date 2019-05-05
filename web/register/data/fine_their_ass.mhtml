@@ -1,28 +1,33 @@
 <%args>
 	$tourn
+	$tourn_settings
 </%args>
 <%init>
 
 	my $reason = 'Nationals Registration incomplete ';
-
 	my $now = DateTime->now();
-
 	my $dbh = Tab::DBI->db_Main();
 
+	my %exclude_district;
+
+	$exclude_district{"29"}++;  	# Hoosier Crossroads
+	$exclude_district{"30"}++; 	# Northeast Indiana
+	$exclude_district{"69"}++;		# North Coast
+
     my $unrejected_sth = $dbh->prepare("
-        select school.id, school.name
+        select school.id, school.name, school.district
         from school, entry
             where school.id = entry.school
             and school.tourn = ?
             and school.chapter > 0
             and not exists (
-                select es.id 
+                select es.id
                 from entry_setting es
                 where es.tag = 'rejected_by'
                 and es.entry = entry.id
             )
             and not exists (
-                select es.id 
+                select es.id
                 from entry_setting es
                 where es.tag = 'dropped_by'
                 and es.entry = entry.id
@@ -31,17 +36,17 @@
     ");
 
     $unrejected_sth->execute($tourn->id);
-
 	my %schools = ();
 
 	while (
-		my ($school_id, $name) = $unrejected_sth->fetchrow_array()
-	) { 
+		my ($school_id, $name, $district) = $unrejected_sth->fetchrow_array()
+	) {
+		next if $exclude_district{$district};
 		$schools{$school_id}{"unrejected"}++;
 	}
-		
+
     my $not_already_sth = $dbh->prepare("
-        select school.id,  school.name
+        select school.id, school.name, school.district
         from school
             where school.tourn = ?
             and school.chapter > 0
@@ -55,22 +60,27 @@
 
     $not_already_sth->execute($tourn->id, $reason.'%');
 
-	while (
-		my ($school_id, $name) = $not_already_sth->fetchrow_array()
-	) { 
+    my %balances = $m->comp(
+        "/funclib/balances.mas",
+        tourn          => $tourn,
+        tourn_settings => $tourn_settings,
+		save_status    => 1
+    );
 
+	while (
+		my ($school_id, $name, $district) = $not_already_sth->fetchrow_array()
+	) {
 		$schools{$school_id}{"exempt"}++;
 		$schools{$school_id}{"name"} = $name;
 	}
-		
 
     my $unpaid_sth = $dbh->prepare("
-        select school.id, school.name
+        select school.id, school.name, school.district
         from school
 			where school.tourn = ?
             and school.chapter > 0
             and exists (
-                select ss.id 
+                select ss.id
                 from school_setting ss
                 where ss.tag = 'balance'
                 and ss.school = school.id
@@ -81,79 +91,95 @@
     $unpaid_sth->execute($tourn->id);
 
 	while (
-		my ($school_id, $name) = $unpaid_sth->fetchrow_array()
-	) { 
+		my ($school_id, $name, $district) = $unpaid_sth->fetchrow_array()
+	) {
+		next if $exclude_district{$district};
 		$schools{$school_id}{"unpaid"}++;
 		$schools{$school_id}{"name"} = $name;
 	}
 
     my $nojudge_sth = $dbh->prepare("
-        select school.id, school.name
-        from school
+        select school.id, school.name, school.district, judging_unmet.value_text
+        from school, school_setting judging_unmet
 			where school.tourn = ?
             and school.chapter > 0
-            and exists (
-                select ss.id 
-                from school_setting ss
-                where ss.tag = 'judging_unmet'
-                and ss.school = school.id
-				and ss.value > 0
-            )
+			and school.id = judging_unmet.school
+			and judging_unmet.tag = 'judging_unmet'
     ");
 
     $nojudge_sth->execute($tourn->id);
 
 	while (
-		my ($school_id, $name) = $nojudge_sth->fetchrow_array()
-	) { 
+		my ($school_id, $name, $district, $reason) = $nojudge_sth->fetchrow_array()
+	) {
+		next if $exclude_district{$district};
 		$schools{$school_id}{"nojudge"}++;
 		$schools{$school_id}{"name"} = $name;
+		$schools{$school_id}{"judge_reason"} .= $reason;
 	}
 
     my $incomplete_sth = $dbh->prepare("
 
-        select school.id, school.name
+        select school.id, school.name, school.district
             from school, entry
             where school.id = entry.school
-            and school.tourn = ? 
+            and school.tourn = ?
             and entry.active = 1
             and school.chapter > 0
             and not exists (
                 select es.id
                 from entry_setting es
                 where es.tag = 'status'
-                and es.value = 'complete'
-                and es.entry = entry.id
+				and es.value = 'complete'
+				and es.entry = entry.id
             )
             and not exists (
                 select evset.id
                 from event_setting evset
                 where evset.tag = 'supp'
-                and evset.event = entry.event
+				and evset.event = entry.event
             )
             and not exists (
                 select evset.id
                 from event_setting evset
                 where evset.tag = 'conn'
-                and evset.event = entry.event
+				and evset.event = entry.event
             )
 
 		group by school.id
 
     ");
 
+	my $contacts_sth = $dbh->prepare("
+		select person.email
+		from person, permission, school
+			where person.id = permission.person
+			and permission.tag = 'chapter'
+			and permission.chapter = school.chapter
+			and school.id = ?
+	");
+
     $incomplete_sth->execute($tourn->id);
 
 	while (
-		my ($school_id, $name) = $incomplete_sth->fetchrow_array()
-	) { 
+		my ($school_id, $name, $district) = $incomplete_sth->fetchrow_array()
+	) {
+		next if $exclude_district{$district};
 		$schools{$school_id}{"incomplete"}++;
 		$schools{$school_id}{"name"} = $name;
 	}
 
-	$m->clear_buffer();
+    $m->print("<div class=\"main\">");
+	if ($ARGS{"nofine"}) {
+    	$m->print("<h2>Fine Warnings</h2>");
+	} else {
+    	$m->print("<h2>Late Fines Applied</h2>");
+	}
+    $m->print("<span class='nospace upload_scroll'>");
 
-	foreach my $school_id (keys %schools) { 
+	my $counter;
+
+	foreach my $school_id (keys %schools) {
 
 		next if $schools{$school_id}{"exempt"};
 		next unless $schools{$school_id}{"unrejected"};
@@ -164,15 +190,31 @@
 
 		my $local_reason;
 
-		$local_reason .=  " Judging burden not met. " if $schools{$school_id}{"nojudge"};
-		$local_reason .=  " Fees unpaid. " if $schools{$school_id}{"unpaid"};
-		$local_reason .=  " Entry information incomplete. " if $schools{$school_id}{"incomplete"};
+		if ($schools{$school_id}{"nojudge"}) {
+			$local_reason .= " Judging burden not met:\n";
+			$local_reason .= " ".$schools{$school_id}{"judge_reason"}."\n";
+		}
 
-		$m->print("<p>Fees for $school_id ".$schools{$school_id}{"name"}." because : $local_reason</p>");
+		$local_reason .= "\n" if $local_reason;
+		$local_reason .= " You have an unpaid balance. " if $schools{$school_id}{"unpaid"};
 
-		$m->flush_buffer();
+		$local_reason .= "\n" if $local_reason;
+		$local_reason .= " Entry information incomplete. " if $schools{$school_id}{"incomplete"};
 
-my $msg = "
+		if ($ARGS{"nofine"}) {
+			$m->print("<p class='action'>Notification for ".$schools{$school_id}{"name"}."</p>");
+		} else {
+			$m->print("<p class='action'>Fine for ".$schools{$school_id}{"name"}."</p>");
+		}
+
+		$m->print("<p class='specific'>Reasons : $local_reason</p>");
+		my $msg;
+
+		$counter++;
+
+		unless ($ARGS{"nofine"}) {
+
+$msg = "
 
 		Hello!
 
@@ -185,26 +227,78 @@ my $msg = "
 		This was the result of an automatic process so it is possible that you
 		have issues in progress with the office or extenuating circumstances
 		that were not caught.  If so, please reply to this email or contact the
-		NSDA office.  
+		NSDA office.  If payment arrives postmarked before the deadline and no
+		other issues are outstanding, this fine will be removed.
 
 		Otherwise, please complete your registration as quickly as possible to
 		ensure your registration for Nationals is accepted, or alternates have
 		the chance to make plans to attend if your students cannot.
-		
-	";
 
-		Tab::Fine->create({
-			school    => $school_id,
-			reason    => $reason.": ".$local_reason,
-			amount    => "200",
-			tourn     => $tourn->id,
-			levied_at => $now,
-			deleted   => 0,
-			payment   => 0,
-		});
+";
 
+			Tab::Fine->create({
+				school    => $school_id,
+				reason    => $reason.": ".$local_reason,
+				amount    => "200",
+				tourn     => $tourn->id,
+				levied_at => $now,
+				deleted   => 0,
+				payment   => 0,
+			});
+
+		} else {
+
+$msg = "
+		Hello!
+
+		This is an automated message to let you that your school registration
+		at Nationals is overdue, and you are potentially liable for a \$200
+		late charge, because of:
+
+		$local_reason
+
+		This was the result of an automatic process so it is possible that you
+		have issues in progress with the office or extenuating circumstances
+		that were not caught.  If so, please reply to this email or contact the
+		NSDA office.
+
+		Otherwise, please complete your registration as quickly as possible to
+		avoid assessment of this charge and ensure your registration for
+		Nationals is accepted, or alternates have the chance to make plans to
+		attend if your students cannot.
+";
+		}
+
+		if ($school_id && $msg) {
+
+			$contacts_sth->execute($school_id);
+
+			my $all_emails;
+			my %done;
+
+			while (
+				my ($contact) = $contacts_sth->fetchrow_array()
+			) {
+				next if $done{$contact}++;
+				$all_emails .= "," if $all_emails;
+				$all_emails .= $contact;
+			}
+
+			$m->print("<p class='specific'>Sending notification email to ".$all_emails."</p>");
+
+			$m->comp("/funclib/send_email.mas",
+				raw         => $all_emails,
+				subject     => "Alert: Nationals Registration Overdue",
+				from_string => "nsda",
+				body        => $msg
+			);
+		}
+
+		$m->flush_buffer();
 	}
 
-	$m->abort();
+    $m->print("</span>");
+	$m->print("<p class='semibold centeralign redtext'>Messages sent to ".$counter." schools</p>");
+	$m->print("</div>");
 
 </%init>

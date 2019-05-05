@@ -6,14 +6,103 @@
 </%args>
 <%init>
 
-	unless ($person->site_admin) { 
+	unless ($person->site_admin) {
 		$m->print("Stop screwing around");
 		$m->abort;
 	}
 
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+
+		select school.id, school.name, school.state,
+			chapter.id, chapter.nsda, chapter.state, chapter.country, chapter.timestamp,
+			district.code, district.name,
+			region.code, region.name,
+			GROUP_CONCAT(circuit.abbr)
+
+		from (school)
+
+		left join chapter on chapter.id = school.chapter
+		left join district on school.district = district.id
+		left join region on school.region = region.id
+
+		left join chapter_circuit cc on cc.chapter = school.chapter
+		left join circuit on cc.circuit = circuit.id
+
+		where school.tourn = ?
+
+		and not exists (
+			select permission.id
+			from permission
+			where permission.chapter = school.chapter
+			and permission.chapter > 0
+		)
+
+		group by school.id
+		order by school.name
+		limit 64
+	");
+
+	$sth->execute($tourn->id);
+
+	my %schools;
+
+	while (
+		my (
+			$school_id, $school_name, $school_state,
+			$chapter_id, $chapter_nsda, $chapter_state, $chapter_country, $chapter_timestamp,
+			$district_code, $district_name,
+			$region_code, $region_name,
+			$circuits
+		) = $sth->fetchrow_array()
+	) {
+
+		$schools{$school_id}{"name"} = $school_name;
+		$schools{$school_id}{"shortname"} = $m->comp('/funclib/short_name.mas', name => $school_name);
+		$schools{$school_id}{"state"} = $chapter_state;
+		$schools{$school_id}{"country"} = $chapter_country;
+
+		$schools{$school_id}{"regionname"} = $region_name;
+		$schools{$school_id}{"regioncode"} = $region_code;
+
+		$schools{$school_id}{"districtname"} = $district_name;
+		$schools{$school_id}{"districtcode"} = $district_code;
+
+		$schools{$school_id}{"chapter"} = $chapter_id;
+		$schools{$school_id}{"chapter_timestamp"} = $chapter_timestamp;
+		$schools{$school_id}{"nsda"} = $chapter_nsda;
+		$schools{$school_id}{"circuits"} = $circuits;
+	}
+
+	$sth->finish();
+
+	$sth = $dbh->prepare("
+		select chapter.id, chapter.name, chapter.nsda, chapter.state, chapter.country, chapter.timestamp,
+			district.code, district.name,
+			GROUP_CONCAT(distinct circuit.abbr), GROUP_CONCAT(distinct person.email), GROUP_CONCAT(region.code)
+
+		from (chapter)
+
+		left join chapter_circuit cc on cc.chapter = chapter.id
+		left join circuit on cc.circuit = circuit.id
+		left join region on cc.region = region.id
+
+		left join district on district.id = chapter.district
+		left join permission on permission.chapter = chapter.id
+		left join person on permission.person = person.id
+
+		where chapter.name like ?
+		group by chapter.id
+
+		order by chapter.nsda DESC, chapter.name, chapter.timestamp DESC
+
+	");
+
+
 </%init>
 
-	<& "menu.mas", 
+	<& "menu.mas",
 		tourn          => $tourn,
 		tourn_settings => $tourn_settings,
 		person         => $person,
@@ -24,28 +113,20 @@
 
 		<h2>School person merges</h4>
 
-		<form 
+		<form
 			action = "chapter_merge_save.mhtml"
 			method = "post"
 		>
 
 <%perl>
 
-			foreach my $school ($tourn->schools) { 
+			my @ids = keys %schools;
 
-				my $name = $school->short_name;
-				$name =~ s/CP//g;
-				$name =~ s/Schools//g;
+			@ids = sort {$schools{$a}{name} cmp $schools{$b}{"name"}} @ids;
 
-				my @candidates = Tab::Chapter->search_where( 
-					name => { "like", "%".$name."%"} 
-				);
+			foreach my $school_id (@ids) {
 
-				my $chapter = $school->chapter;
-				next unless $chapter;
-
-				my @admins = $chapter->admins if $chapter;
-				next if @admins && not defined $all;
+				$sth->execute("%".$schools{$school_id}{"shortname"}."%");
 
 </%perl>
 
@@ -53,22 +134,23 @@
 
 					<span class="twofifth top">
 
-						<h5><% $chapter->id %> <% $school->name %></h5>
+						<h5><% $schools{$school_id}{"chapter"} %> <% $schools{$school_id}{name} %></h5>
 
-						<label for="prefer_<% $chapter->id %>">
+						<label for="prefer_<% $schools{$school_id}{"chapter"} %>">
 
-							<div class="full smallish marless padless hover even">
+							<div class="full smallish marless padless yellowhover row">
 
 								<span class="twothirds nospace">
-									Prefer setup from:
+									Target for Merge
 								</span>
 
 								<span class="third nospace">
-									<input 
+									<input
 										type    = "radio"
-										id      = "prefer_<% $chapter->id %>"
-										name    = "prefer_<% $school->id %>"
-										value   = "<% $chapter->id %>"
+										id      = "prefer_<% $schools{$school_id}{"chapter"} %>"
+										name    = "prefer_<% $school_id %>"
+										value   = "<% $schools{$school_id}{"chapter"} %>"
+										class   = "notfirst"
 										checked = "checked"
 									>
 								</span>
@@ -76,139 +158,187 @@
 							</div>
 						</label>
 
-						<div class="full smallish marless padless">
+						<div class="full smallish marless padless row">
 
-							<span class="third nospace">
-								Last edit:
+							<span class="third nospace padvertless semibold bluetext">
+								Last Change
 							</span>
 							<span class="twothirds nospace">
-								<% Tab::shortdate($chapter->timestamp) %>
+								<% $schools{$school_id}{"chapter_timestamp"} %>
 							</span>
 
 						</div>
-						
-						<div class="full smallish marless padless">
 
-							<span class="third nospace">
-								Circuits:
+						<div class="full smallish marless padless row">
+
+							<span class="third nospace padvertless semibold bluetext">
+								Circuits
 							</span>
 
 							<span class="twothirds nospace">
-%								foreach my $circuit ($chapter->circuits) {  $m->print($circuit->abbr." "); }
+								<% $schools{$school_id}{"circuits"} %>
 							</span>
 						</div>
 
-						<div class="full smallish marless padless">
-
-							<span class="third nospace">
-								Location: 
+						<div class="full smallish marless padless row">
+							<span class="third nospace padvertless semibold bluetext">
+								Location
 							</span>
 							<span class="twothirds nospace">
-								<% $chapter->state %>/<% $chapter->country %>
+								<% $schools{$school_id}{"state"} %>
+								<% $schools{$school_id}{"state"} && $schools{$school_id}{"country"} ? "/" : "" %>
+								<% $schools{$school_id}{"country"} %>
 							</span>
 						</div>
 
-						<div class="full smallish marless padless">
-							Current Admins:
-						</div>
-
-%						foreach my $admin (@admins) { 
-							<div class="full smaller padleftmore padless marless">
-								<% $admin->email %>
+%						if ($schools{$school_id}{"regioncode"} || $schools{$school_id}{"regionname"}) {
+							<div class="full smallish marless padless row">
+								<span class="third nospace padvertless semibold bluetext">
+									Region
+								</span>
+								<span class="twothirds nospace">
+									<% $schools{$school_id}{"regioncode"} %>
+									<% $schools{$school_id}{"regionname"} %>
+								</span>
 							</div>
 %						}
 
-
+%						if ($schools{$school_id}{"districtcode"} || $schools{$school_id}{"districtname"}) {
+							<div class="full smallish marless padless row">
+								<span class="third nospace padvertless semibold bluetext">
+									District
+								</span>
+								<span class="twothirds nospace">
+									<% $schools{$school_id}{"districtcode"} %>
+									<% $schools{$school_id}{"districtname"} %>
+								</span>
+							</div>
+%						}
 					</span>
 
 					<span class="twothird smallish padno ">
+<%perl>
+						while (
 
-%						foreach my $candidate (@candidates) { 
+							my (
+								$candidate_id, $candidate_name, $candidate_nsda, $candidate_state, $candidate_country, $candidate_timestamp,
+								$district_code, $district_name,
+								$circuits, $admins, $regions
+							) = $sth->fetchrow_array()
+						) {
 
-%							my @circuits = $candidate->circuits;
-%							next if scalar @circuits == 1 && $circuits[0]->id == 3;
+							next if $candidate_id == $schools{$school_id}{"chapter"};
 
-%							next if $candidate->id == $chapter->id;
+							$admins =~ s/,/<br \/>/g;
+
+</%perl>
 
 							<div class="full nospace row">
 
-								<div class="full nospace">
-									<label for="<% $school->id %>-<% $candidate->id %>">
-										<span class="threefifths padtop padbottom padleft marno strong hover">
-											<% $candidate->id %> <% $candidate->name %>
-										</span>
-									</label>
+								<span class="threefifths top">
 
-									<label for="prefer_<% $candidate->id %>">
-										<span class="fifth hover centeralign padless marno">
-											Prefer: <input 
-												type  = "radio"
-												name  = "prefer_<% $school->id %>"
-												id    = "prefer_<% $candidate->id %>"
-												value = "<% $candidate->id %>"
-											>
-										</span>
-									</label>
-
-									<label for="<% $school->id %>-<% $candidate->id %>">
-										<span class="hover fifth centeralign padless marno">
-											Merge: <input 
-												type  = "checkbox"
-												name  = "<% $school->id %>"
-												value = "<% $candidate->id %>"
-												id    = "<% $school->id %>-<% $candidate->id %>"
-											>
-										</span>
-									</label>
-								</div>
-
-								<div class="full nospace">
-
-									<span class="sixth top">
-										<% $candidate->state %>/<% $candidate->country %>
-									</span>
-
-									<span class="fifth top padno">
-%										foreach my $circuit ($candidate->circuits) {  
-											<div class="full padless marless">
-												<% $circuit->abbr %>
-											</div>
-%										}
-									</span>
-
-									<span class="threefifths top">
-										Admins:
-%										foreach my $contact ($candidate->admins) { 
-											<div class="full padless marless padleftmore nowrap">
-												<% $contact->email %>
-											</div>
-%										}
-									</span>
-
-								</div>
-
-								<label for="exclude_<% $candidate->id %>">
-									<div class="full padless marless hover">
-										Exclude admins from merge 
-											<input 
-												type = "checkbox"
-												name = "exclude_<% $candidate->id %>"
-												id   = "exclude_<% $candidate->id %>"
-											>
+									<div class="full padtop padbottom padleft marno semibold bluetext">
+										<% $candidate_id %> <% $candidate_name %>
 									</div>
-								</label>
 
-							</div>
+									<div class="full nospace">
+										<span class="third">
+											<% $candidate_state %>/<% $candidate_country %>
+										</span>
 
-%						}
+										<span class="twothirds">
+											<% $circuits %>
+										</span>
+									</div>
+
+%									if ($regions) {
+										<div class="full nospace">
+											<span class="quarter semibold bluetext">
+												Regions/Dios:
+											</span>
+											<span class="twothirds">
+												<% $regions %>
+											</span>
+										</div>
+%									}
+									<div class="full nospace">
+										<span class="quarter semibold bluetext">
+											Last Change
+										</span>
+										<span class="twothirds">
+											<% $candidate_timestamp %>
+										</span>
+									</div>
+
+									<div class="full nospace">
+										<span class="quarter semibold bluetext">
+											NSDA ID
+										</span>
+										<span class="twothirds">
+											<% $candidate_nsda %>
+										</span>
+									</div>
+
+%									if ($admins) {
+										<div class="full nospace padvert bluetext semibold">
+											Accounts w/Access
+										</div>
+										<div class="full nospace">
+											<% $admins %>
+										</div>
+%									}
+
+								</span>
+
+								<span class="twofifths top">
+
+									<label for="prefer_<% $candidate_id %>">
+										<span class="half yellowhover rightalign padless marno">
+											Target <input
+												type  = "radio"
+												class = "notfirst"
+												name  = "prefer_<% $school_id %>"
+												id    = "prefer_<% $candidate_id %>"
+												value = "<% $candidate_id %>"
+											>
+										</span>
+									</label>
+
+									<label for="<% $school_id %>-<% $candidate_id %>">
+										<span class="half yellowhover rightalign padless marno">
+											Merge Into <input
+												class = "notfirst"
+												type  = "checkbox"
+												name  = "<% $school_id %>"
+												value = "<% $candidate_id %>"
+												id    = "<% $school_id %>-<% $candidate_id %>"
+											>
+										</span>
+									</label>
+
+									<label for="exclude_<% $candidate_id %>">
+										<div class="full padless marless yellowhover rightalign">
+											Exclude admins from merge
+												<input
+													type  = "checkbox"
+													class = "notfirst"
+													name  = "exclude_<% $candidate_id %>"
+													id    = "exclude_<% $candidate_id %>"
+												>
+										</div>
+									</label>
+								</div>
+%							}
 					</span>
-
 				</div>
-%		}
+%			}
 
-		<div class="libl full rightalign">
-			<input type="submit" value=" Merge Chapters ">
-		</div>
+			<div class="libl full rightalign">
+				<input
+					type  = "submit"
+					value = "Merge Chapters"
+				>
+			</div>
 
 		</form>
 

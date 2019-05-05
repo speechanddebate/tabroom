@@ -5,19 +5,19 @@
 	$setting_name   => undef
 	$property_name  => undef
 	$property_value => undef
-	$related_thing    => undef
+	$related_thing  => undef
 </%args>
 <%init>
 
 	$m->clear_buffer();
 	$r->content_type('application/json');
 
-	unless ($target_id) { 
+	unless ($target_id) {
 		$m->print('{ "error": true, "message": "No judge ID sent"}');
 		$m->abort();
 	}
 
-	unless ($property_name) { 
+	unless ($property_name) {
 		$m->print('{ "error": true, "message": "No entry or school ID sent"}');
 		$m->abort();
 	}
@@ -26,47 +26,63 @@
 	my $entry;
 	my $school;
 
+	my $now = DateTime->now();
+
 	$entry = Tab::Entry->retrieve($property_name) if $setting_name eq "entry";
 	$school = Tab::School->retrieve($property_name) if $setting_name eq "school";
 
-	unless ($judge) { 
+	unless ($judge) {
 		$m->print('{ "error": true, "message": "No judge found for ID '.$target_id.'"}');
 		$m->abort();
 	}
 
-	unless ($entry || $school) { 
+	unless ($entry || $school) {
 		$m->print('{ "error": true, "message": "No school or entry found for ID '.$property_name.'"}');
 		$m->abort();
 	}
 
+	unless ($school) {
+		$school = $entry->school;
+	}
+
+	unless ($person->site_admin || $perms->{"chapter"}{$school->chapter->id}) {
+		$m->print('{ "error": true, "message": "You do not have permission to change strikes for '.$school->short_name.'}');
+		$m->abort();
+	}
+
+	my $bank;
+	my $event;
 	my $message;
 	my @strikes;
-	my $bank;
-
 	my $category;
-	
-	if ($related_thing) { 
-		$category = Tab::Category->retrieve($related_thing);	
-	} elsif ($entry) { 
-		$category = $entry->event->category;
-	} else { 
+
+	if ($related_thing) {
+		$category = Tab::Category->retrieve($related_thing);
+	} elsif ($entry) {
+		$event = $entry->event;
+		$category = $event->category;
+	} else {
 		$category = $judge->category;
 	}
 
-	if ($setting_name eq "school") { 
+	my $adjust = $event->setting("adjust_strikes");
 
-    	@strikes = $m->comp("/funclib/school_strikes.mas", 
-			school   => $school,
-			category => $category
+	if ($setting_name eq "school") {
+
+    	@strikes = $m->comp(
+			"/funclib/school_strikes.mas",
+				school   => $school,
+				category => $category
 		);
 
 		$bank = $category->setting("school_strikes");
+		$bank += $adjust;
 
-	} elsif ($setting_name eq "entry") { 
+	} elsif ($setting_name eq "entry") {
 
 		@strikes = $m->comp('/funclib/entry_strikes.mas', entry => $entry);
 		$bank = $category->setting("entry_strikes");
-
+		$bank += $adjust;
 	}
 
 	my %freebie = $m->comp("/funclib/free_strikes.mas", category => $category);
@@ -74,37 +90,45 @@
 	my %strikes_by_id = ();
 	my %already;
 
-	foreach (@strikes) { 
-		if ($already{$_->judge->id}++) { 
-			$_->delete();
-		} else { 
-			$strikes_by_id{$_->judge->id} = $_; 
-			$bank-- unless $freebie{$_->judge->id};
+	foreach my $strike (@strikes) {
+
+		next unless $strike->registrant;
+		next if $strike->conflict;
+
+		if ($already{$strike->judge->id}++) {
+			$strike->delete();
+		} else {
+			$strikes_by_id{$strike->judge->id} = $strike;
+			$bank-- unless $freebie{$strike->judge->id};
 		}
 	}
 
-	if ($property_value == 1) { 
+	if ($property_value == 1) {
 
-		if ($freebie{$judge->id} || $bank > 0) { 
+		if ($freebie{$judge->id} || $bank > 0) {
 
-			unless ($strikes_by_id{$judge->id}) { 
+			unless ($strikes_by_id{$judge->id}) {
 
-				if ($entry) { 
+				if ($entry) {
 
 					my $strike = Tab::Strike->create({
 						tourn      => $category->tourn->id,
 						entry      => $entry,
 						type       => "entry",
+						entered_by => $person,
+						created_at => $now,
 						registrant => 1,
 						judge      => $judge->id
 					});
 
-				} elsif ($school) { 
+				} elsif ($school) {
 
 					my $strike = Tab::Strike->create({
 						tourn      => $category->tourn->id,
 						school     => $school,
 						type       => "school",
+						entered_by => $person,
+						created_at => $now,
 						registrant => 1,
 						judge      => $judge->id
 					});
@@ -112,20 +136,19 @@
 
 				$message = "You have struck ".$judge->first." ".$judge->last." like a gong.";
 			}
-		} else { 
+		} else {
 
 			$message = "You already have reached your strike limit! ";
 			$message .= "Unstrike another judge if you hate ".$judge->first." ".$judge->last;
 			$message .= " sufficiently to strike them instead";
-
 			$m->print('{ "error": true, "message": "'.$message.'"}');
 			$m->abort();
 		}
 
-	} elsif ($strikes_by_id{$judge->id}) { 
+	} elsif ($strikes_by_id{$judge->id}) {
 		$strikes_by_id{$judge->id}->delete();
 		$message = "You have un-struck ".$judge->first." ".$judge->last;
-	} else { 
+	} else {
 		$message = "No changes made";
 	}
 

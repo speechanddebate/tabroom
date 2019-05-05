@@ -1,0 +1,159 @@
+<%args>
+	$tourn
+</%args>
+<%init>
+	use POSIX;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+    my $now = DateTime->now;
+    $now->set_time_zone($tz);
+
+    my $name = $tourn->name;
+    $name =~ s/[\W_]//g;
+
+    my $filename = "CoachList-$name.csv";
+	$m->clear_buffer;
+    $r->content_type('application/csv');
+    $r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+
+    my $dbh = Tab::DBI->db_Main();
+
+	my $coach_sth = $dbh->prepare("
+
+		select
+			school.id, school.name, school.code, school.state,
+			chapter.nsda,
+			district.id, district.code, district.name,
+			contact_name.value, contact_email.value,
+			second_contact_name.value, second_contact_email.value,
+			tbook_coaches.value,
+			pcoach.ufname, pcoach.umname, pcoach.ulname, pcoach.uemail
+
+		from (school, chapter)
+
+			left join school_setting contact_name
+				on school.id = contact_name.school and contact_name.tag = 'contact_name'
+			left join school_setting contact_email
+				on school.id = contact_email.school and contact_email.tag = 'contact_email'
+
+			left join school_setting second_contact_name
+				on school.id = second_contact_name.school and second_contact_name.tag = 'second_contact_name'
+			left join school_setting second_contact_email
+				on school.id = second_contact_email.school and second_contact_email.tag = 'second_contact_email'
+
+			left join school_setting tbook_coaches
+				on school.id = tbook_coaches.school and tbook_coaches.tag = 'tbook_coaches'
+
+			left join entry on entry.school = school.id
+
+			left join entry_setting coachset on coachset.entry = entry.id and coachset.tag = 'coach_points'
+			left join points.NEW_USERS pcoach on pcoach.user_id = coachset.value
+
+			left join district on district.id = school.district
+
+		where school.tourn = ?
+		and school.chapter = chapter.id
+
+		order by school.id
+
+	");
+
+	$coach_sth->execute($tourn->id);
+
+	my $whoami_sth = $dbh->prepare("
+		select nu.user_id, nu.uemail
+		from points.NEW_USERS nu, points.NEW_USERS_TO_SCHOOLS nuts
+		where nu.ufname = ?
+		and nu.ulname = ?
+		and nu.ualt_id = nuts.ualt_id
+		and nuts.school_id = ?
+		and nuts.enddate = '0000-00-00 00:00:00'
+	");
+
+	$m->print("School,School ID,State,District,Coach,Email,Maybe Email,Record Type\n");
+
+	my %done;
+
+    while(
+		my (
+			$school_id, $school_name, $school_code, $school_state,
+			$chapter_nsda,
+			$district_id, $district_code, $district_name,
+			$contact_name_value, $contact_email_value,
+			$second_contact_name_value, $second_contact_email_value,
+			$tbook_coaches_value,
+			$pcoach_ufname, $pcoach_umname, $pcoach_ulname, $pcoach_email
+		)
+		= $coach_sth->fetchrow_array()
+	) {
+
+		$pcoach_ufname =~ s/^\s+//;
+		$pcoach_ufname =~ s/\s+$//;
+
+		$pcoach_ulname =~ s/^\s+//;
+		$pcoach_ulname =~ s/\s+$//;
+
+		if ($contact_email_value
+			&& ($done{$school_id}{$contact_email_value}++ < 1)
+		) {
+			printme($school_name, $chapter_nsda, $school_state,
+				$district_name, $contact_name_value, $contact_email_value, "", "Main Contact");
+		}
+
+		if ($second_contact_email_value
+			&& ($done{$school_id}{$second_contact_email_value}++ < 1)
+		) {
+			printme($school_name, $chapter_nsda, $school_state,
+				$district_name, $second_contact_name_value, $second_contact_email_value, "", "2nd Contact");
+		}
+
+		my $pcoach_name = $pcoach_ufname." ".$pcoach_ulname;
+
+		if ($pcoach_email
+			&& ($done{$school_id}{$pcoach_email}++ < 1)
+		) {
+			printme($school_name, $chapter_nsda, $school_state,
+				$district_name, $pcoach_name, $pcoach_email, "", "Entry Coach");
+		}
+
+		if ($tbook_coaches_value && ($done{$school_id}{"tbook_coaches"}++ < 1)) {
+
+			foreach my $name (split(/\,/, $tbook_coaches_value)) {
+
+				my @names = split(/\ /, $name);
+				my $first_name = shift @names if @names;
+				my $last_name = pop @names if @names;
+
+				$whoami_sth->execute($first_name, $last_name, $chapter_nsda);
+
+				my @rows = $whoami_sth->fetchrow_array();
+				my ($nsda, $temail) = shift @rows;
+
+				if ($temail && $done{$school_id}{$temail}++ < 1) {
+					printme($school_name, $chapter_nsda, $school_state, $district_name, $name, "", $temail,"TBook Coach");
+				}
+			}
+		}
+	}
+
+	$m->flush_buffer();
+	$m->abort();
+
+	sub printme {
+
+		foreach (@_) {
+
+			my $field = $_;
+			$field =~ s/^\s+//;
+			$field =~ s/\s+$//;
+			$m->print('"');
+			$m->print($field);
+			$m->print('",');
+		}
+
+		$m->print("\n");
+	}
+
+</%init>
