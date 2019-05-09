@@ -4,7 +4,6 @@
 	$tourn_settings
 	$jpool_id      => undef
 	$category_id   => undef
-	$hires         => undef
 	$only_category => undef
 </%args>
 <%init>
@@ -12,134 +11,207 @@
 	my $jpool;
 	my $category;
 
-	if ($jpool_id) {
-		$jpool = Tab::JPool->retrieve($jpool_id);
-		$category = $jpool->category();
+	$jpool = Tab::JPool->retrieve($jpool_id) if $jpool_id;
+
+	if ($jpool) {
+		$category = $jpool->category;
+		if ($only_category && ($category != $only_category)) {
+			$m->comp("/funclib/abort.mas", message => "You do not have access to pools in category ".$category->abbr);
+		}
+	} elsif ($only_category) {
+		$category = $only_category;
 	} else {
 		$category = Tab::Category->retrieve($category_id);
-		$category = $only_category if $only_category;
 	}
 
-	$m->abort unless $category;
+	my $dbh = Tab::DBI->db_Main();
 
-	my %category_settings = $category->all_settings;
+	my $from;
+	my $limit;
 
-	my @judges;
-
-	if ($jpool)  {
-		@judges = $m->comp(
-		"/funclib/jpool_judges.mas",
-			jpool => $jpool,
-			hires    => $hires
-		);
-
+	if ($jpool) {
+		$from = "(judge, jpool_judge)";
+		$limit = "where jpool_judge.jpool = ? and jpool_judge.judge = judge.id";
 	} else {
-		@judges = $m->comp(
-		"/funclib/category_judges.mas",
-			category => $category,
-			hires    => $hires
-		);
+		$from = "judge";
+		$limit = "where judge.category = ?";
 	}
 
-	my %judge_settings = $m->comp(
-		"/funclib/category_judge_settings.mas",
-			category => $category,
-			value    => 1,
-			all      => 1
-	);
-
-	my %paradigms = ();
-
-	if ($category_settings{"ask_paradigm"}) {
-	 	%paradigms = $m->comp(
-			"/funclib/judge_paradigms.mas",
-			category => $category
-		);
+	if ($ARGS{"hires"}) {
+		$limit .= " and judge.school = 0 "
 	}
 
-	my @events = $category->events;
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.code, judge.first, judge.middle, judge.last,
+				judge.obligation, judge.hired, judge.active,
+				judge.ada, notes.value,
+				chapter_judge.notes, chapter_judge.notes_timestamp,
+			school.id, school.code, school.name, school.state,
+			region.id, region.name, region.code,
+			district.id, district.name, district.code,
+			diverse.value, tab_rating.value, parli.value, neutral.value, prefers_congress.value,
+			person.email, person.id,
+			paradigm.value
+
+			from $from
+
+			left join person on judge.person = person.id
+			left join person_setting paradigm on paradigm.person = person.id and paradigm.tag = 'paradigm'
+			left join chapter_judge on chapter_judge.id = judge.chapter_judge
+			left join school on school.id = judge.school
+			left join region on region.id = school.region
+			left join district on district.id = school.district
+			left join judge_setting notes on notes.judge = judge.id and notes.tag = 'notes'
+			left join judge_setting diverse on diverse.judge = judge.id and diverse.tag = 'diverse'
+			left join judge_setting tab_rating on tab_rating.judge = judge.id and tab_rating.tag = 'tab_rating'
+			left join judge_setting parli on parli.judge = judge.id and parli.tag = 'parli'
+			left join judge_setting neutral on neutral.judge = judge.id and neutral.tag = 'neutral'
+			left join judge_setting prefers_congress on prefers_congress.judge = judge.id and prefers_congress.tag = 'prefers_congress'
+			$limit
+	");
+
+	my %judges;
+	my $total_rounds;
+	my $total_judges;
+
+	if ($jpool) {
+		$sth->execute($jpool->id);
+	} else {
+		$sth->execute($category->id);
+	}
+
+	while (
+		my (
+
+			$judge_id, $judge_code, $judge_first, $judge_middle, $judge_last,
+			$judge_obligation, $judge_hired, $judge_active, $judge_ada,
+			$notes_value, $chapter_judge_notes, $chapter_judge_notes_timestamp,
+			$school_id, $school_code, $school_name, $school_state,
+			$region_id, $region_name, $region_code,
+			$district_id, $district_name, $district_code,
+			$diverse_value, $tab_rating_value, $parli_value, $neutral_value, $prefers_congress_value,
+			$person_email, $person_id,
+			$paradigm_value
+		) = $sth->fetchrow_array()
+	) {
+
+		next if $judges{$judge_id};
+
+		if ($judge_active) {
+			$total_rounds += $judge_obligation + $judge_hired;
+			$total_judges++;
+		}
+
+		$judges{$judge_id}{"code"} = $judge_code;
+		$judges{$judge_id}{"first"} = $judge_first;
+		$judges{$judge_id}{"middle"} = $judge_middle;
+		$judges{$judge_id}{"last"} = $judge_last;
+		$judges{$judge_id}{"active"} = $judge_active;
+		$judges{$judge_id}{"ada"} = $judge_ada;
+
+		$judges{$judge_id}{"obligation"} = $judge_obligation;
+		$judges{$judge_id}{"hired"} = $judge_hired;
+		$judges{$judge_id}{"total"} = $judge_hired + $judge_obligation;
+		$judges{$judge_id}{"notes"} = $notes_value;
+		$judges{$judge_id}{"notes_timestamp"} = $chapter_judge_notes_timestamp if $chapter_judge_notes eq $notes_value;
+
+		if ($school_id) {
+			$judges{$judge_id}{"school_state"} = $school_state;
+			$judges{$judge_id}{"school_name"}  = $school_name;
+			$judges{$judge_id}{"school_code"}  = $school_code;
+			$judges{$judge_id}{"school_id"}    = $school_id;
+		} else {
+			$judges{$judge_id}{"school_name"} = "Hired";
+			$judges{$judge_id}{"school_code"} = "00";
+		}
+
+		if ($region_id) {
+			$judges{$judge_id}{"region_id"} = $region_id;
+			$judges{$judge_id}{"region_name"} = $region_name;
+			$judges{$judge_id}{"region_code"} = $region_code;
+		}
+
+		if ($district_id) {
+			$judges{$judge_id}{"district_id"} = $district_id;
+			$judges{$judge_id}{"district_name"} = $district_name;
+			$judges{$judge_id}{"district_code"} = $district_code;
+		}
+
+		$judges{$judge_id}{"diverse"} = $diverse_value;
+		$judges{$judge_id}{"tab_rating"} = $tab_rating_value;
+		$judges{$judge_id}{"parli"} = $parli_value;
+		$judges{$judge_id}{"neutral"} = $neutral_value;
+		$judges{$judge_id}{"prefers_congress"} = $prefers_congress_value;
+
+		$judges{$judge_id}{"person_id"} = $person_id;
+		$judges{$judge_id}{"person_email"} = $person_email;
+		$judges{$judge_id}{"paradigm"} = $paradigm_value;
+	}
 
 	my $regions++ if $tourn_settings->{"ncfl"};
 	$regions++ if $tourn_settings->{"regions"};
 
-	Tab::Judge->set_sql( check_rounds =>
-		"select coalesce(sum(obligation),0) + coalesce(sum(hired),0) from judge where judge.category = ? "
-	);
-
-	my $rounds = Tab::Judge->sql_check_rounds->select_val($category->id)
-		if $category_settings{"rounds_per"};
-
-	my %rating_name = ();
-
-	foreach my $tier ($category->rating_tiers) {
-		$rating_name{$tier->id} = $tier->name;
-	}
-
-	my %rating_by_judge = ();
-
-	foreach my $rating (
-		$m->comp("/funclib/category_ratings.mas",
-			category => $category,
-			type     => "coach"
-		)
-	){
-
-		$rating_by_judge{$rating->judge->id} = $rating_name{$rating->rating_tier->id}
-			if $rating->rating_tier && $rating->judge;
-
-	}
-
-	my $tab_rating = $category_settings{"tab_ratings"};
-	my $total_obligation;
-	my $total_hired;
+	my %category_settings = $category->all_settings;
 
 </%init>
 
 	<&
-		menu.mas,
+		"menu.mas",
 		tourn_settings => $tourn_settings,
 		tourn          => $tourn,
 		whoami         => "roster",
 		category       => $category,
 		jpool          => $jpool,
-		hires          => $hires,
+		hires          => $ARGS{"hires"},
 		only_category  => $only_category
 	&>
 
 	<div class="main">
 
 		<div>
-
 			<span class="half nospace">
 				<h4 class="nospace">
+					<% $ARGS{'hires'} ? "&ndash; Hired " : "" %>
+					Judges:
 %					if ($jpool) {
-						<% ($hires) ? "Hired" : "" %> <% $jpool->name %> Judges
+						Pool <% $jpool->name %>
 %					} else {
-						<% ($hires) ? "Hired" : "" %> <% $category->name %> Judges
+						Category <% $category->name %>
 %					}
 				</h4>
 			</span>
 
-			<span class="half rightalign nospace">
-				<span class="threequarters nospace">
-					<h6 class="nospace normalweight">
-						<% ($rounds) ? $rounds." rounds - " : "" %><% scalar @judges." judges" %>
-					</h6>
+%			if ($category_settings{"rounds_per"} || $category_settings{"nats_category"}) {
+				<span class="threeeighths nospace centeralign bigger semibold">
+					<span class="fifth">
+						Active:
+					</span>
+					<span class="twofifths redtext">
+						<% $total_rounds %> rounds
+					</span>
+					<span class="twofifths bluetext">
+						<% $total_judges %> judges
+					</span>
 				</span>
+%			} else {
+				<span class="threeeighths nospace centeralign bigger semibold bluetext">
+					<% $total_judges %> active judges
+				</span>
+%			}
 
-				<span
-					id    = "judges_buttonarea"
-					class = "quarter marno"
-				> </span>
-			</span>
+			<span
+				id    = "judge_roster_buttonarea"
+				class = "eighth nospace rightalign"
+			> </span>
 
 		</div>
 
 	</span>
 
-	<& /funclib/tablesorter.mas, table => "judges" &>
+	<& /funclib/tablesorter.mas, table => "judge_roster" &>
 
-	<table id="judges" class="narrow smallish">
+	<table id="judge_roster" class="narrow smallish">
 
 		<thead>
 
@@ -156,33 +228,40 @@
 				</th>
 
 				<th>
-					Last
+					Middle
 				</th>
 
 				<th>
-					School
+					Last
 				</th>
 
-%				if ($tab_rating) {
+%				if ($tourn_settings->{"school_codes"} ne "none") {
+					<th title="School Code">
+						SCode
+					</th>
+%				}
+
+%				unless ($ARGS{"hired"}) {
+					<th>
+						School
+					</th>
+%				}
+
+%				if ($category_settings{"tab_rating"}) {
 					<th class="centeralign">
 						Rating
 					</th>
 %				}
 
-
-%				if ($category_settings{"rounds_per"} || $rounds) {
-					<th class="centeralign">
+%				if ($category_settings{"rounds_per"} || $category_settings{"nats_category"}) {
+					<th title="Rounds obligated for the school" class="centeralign">
 						Rds
 					</th>
-
-					<th class="centeralign">
+					<th title="Rounds hired out to others/the tournament" class="centeralign">
 						Hire
 					</th>
-%				}
-
-%				if ($category_settings{"coach_ratings"}) {
-					<th class="centeralign">
-						Rtng
+					<th title = "Total round obligation" class="centeralign">
+						Tot
 					</th>
 %				}
 
@@ -191,237 +270,179 @@
 						Dist
 					</th>
 					<th title="State" class="centeralign">
-						ST
+						St
+					</th>
+%				}
+
+%				if ($tourn_settings->{"ncfl"}) {
+					<th title="Diocese" class="centeralign">
+						Dio
+					</th>
+%				}
+
+%				if ($tourn_settings->{"nsda_nats"} && $category_settings{"nats_category"}) {
+					<th
+						class="centeralign"
+						title="Prefers Congress">
+						PrefCon
 					</th>
 %				}
 
 %				if ($category_settings{"ask_parli"}) {
-
-					<th class="centeralign">
+					<th title="Marked as Parliamentarian" class="centeralign">
 						Parl
 					</th>
-
-%					if ($tourn_settings->{"nsda_nats"}) {
-						<th
-							class="centeralign"
-							title="Prefers to judge Congress">
-							Pref
-						</th>
-%					}
 %				}
 
 %				if ($category_settings{"ask_paradigm"}) {
-					<th class="centeralign">
-						Paradigm?
+					<th title="Has a Paradigm" class="centeralign">
+						Para
 					</th>
 %				}
 
-%				$m->print("<th>Dio</th>") if $tourn_settings->{"ncfl"};
-
-				<th class="centeralign">
-					Coach Notes
+				<th>
+					Notes
 				</th>
 
-%				if ($person->id == 6425){
-					<th class="centeralign">
-						Activate/Deactivate
-					</th>
-%				}
+				<th class="centeralign">
+					ADA
+				</th>
+
+				<th class="centeralign">
+					Active
+				</th>
+
 			</tr>
+
 		</thead>
 
 		<tbody>
 
-%		foreach my $judge (@judges) {
+%		foreach my $judge_id (sort {$judges{$a}{last} cmp $judges{$b}{last}} keys %judges) {
 
-%			my $region = $judge->school->region if $judge->school && $regions;
-
-			<tr <% $judge->active ? "" : 'class="lirdrow"' %>>
+			<tr class="<% $judges{$judge_id}{"active"} ? "" : "italic redrow" %>">
 
 %				unless ($category_settings{"no_codes"}) {
-
-					<td class="centeralign">
+					<td>
 						<a
-							class="white"
-							href="/register/judge/edit.mhtml?from=list&judge_id=<% $judge->id %>"
-						>
-							<% ($judge->code) ? $judge->code : "Edit"%>
-						</a>
+							href ="/register/judge/edit.mhtml?judge_id=<% $judge_id %>"
+							class="full marno padless padvertless white"
+						><% $judges{$judge_id}{"code"} ? $judges{$judge_id}{"code"} : "&nbsp;" %></a>
 					</td>
 %				}
 
-				<td >
+				<td>
 					<a
-						class="white"
-						href="/register/judge/edit.mhtml?from=list&judge_id=<% $judge->id %>"
-					>
-						<% $judge->first %>
-					</a>
+						href ="/register/judge/edit.mhtml?judge_id=<% $judge_id %>"
+						class="full marno padless padvertless white"
+					><% $judges{$judge_id}{"first"} %></a>
 				</td>
 
-				<td >
+				<td>
 					<a
-						class="white"
-						href="/register/judge/edit.mhtml?from=list&judge_id=<% $judge->id %>"
-					>
-						<% $judge->last %>
-					</a>
+						href ="/register/judge/edit.mhtml?judge_id=<% $judge_id %>"
+						class="full marno padless padvertless white"
+					><% $judges{$judge_id}{"middle"} ? $judges{$judge_id}{"middle"} : "&nbsp;" %></a>
 				</td>
 
-				<td class="padleft">
-
+				<td>
 					<a
-						class="white"
-						href="<% $judge->school > 0 ? "/register/school/judges.mhtml?from=list&category_id=".$category_id."&school_id=".$judge->school : "/register/judge/roster.mhtml?hires=1&category_id=".$category_id %>"
-					>
-
-						<% ($judge_settings{$judge}{"neutral"})
-							? "Neutral ("
-								: "" %><% ($judge->school && $judge->school->short_name)
-								? substr($judge->school->short_name,0,25)
-							: "Hired" %><% ($judge_settings{$judge}{"neutral"}) ? ")" : "" %>
-
-					</a>
+						href ="/register/judge/edit.mhtml?judge_id=<% $judge_id %>"
+						class="full marno padless padvertless white"
+					><% $judges{$judge_id}{"last"} %></a>
 				</td>
 
-%				if ($tab_rating) {
-					<td class="centeralign">
-						<% $judge_settings{$judge}{"tab_rating"} %>
+%				if ($tourn_settings->{"school_codes"} ne "none") {
+					<td title="School Code">
+						<% $judges{$judge_id}{"school_code"} %>
 					</td>
 %				}
 
-%				if ($category_settings{"rounds_per"} || $rounds) {
-
-%					$total_obligation += $judge->obligation;
-%					$total_hired += $judge->hired;
-					<td class="centeralign">
-						<% $judge->obligation %>
-					</td>
-					<td class="centeralign">
-						<% $judge->hired %>
+%				unless ($ARGS{"hired"}) {
+					<td class='nospace'>
+						<a
+							href ="/register/school/judges.mhtml?category_id=<% $category->id %>&school_id=<% $judges{$judge_id}{"school_id"} %>"
+							class="full marno padless padvertless white"
+						><% $judges{$judge_id}{"school_name"} %></a>
 					</td>
 %				}
 
-%				if ($category_settings{"coach_ratings"}) {
+%				if ($category_settings{"tab_rating"}) {
 					<td class="centeralign">
-						<% $rating_by_judge{$judge->id} %>
+						<% $judges{$judge_id}{"tab_rating"} %>
+					</td>
+%				}
+
+%				if ($category_settings{"rounds_per"} || $category_settings{"nats_category"}) {
+					<td title="Rounds obligated for the school" class="centeralign">
+						<% $judges{$judge_id}{"obligation"} %>
+					</td>
+					<td title="Rounds hired out to others/the tournament" class="centeralign">
+						<% $judges{$judge_id}{"hired"} %>
+					</td>
+					<td title = "Total round obligation" class="centeralign">
+						<% $judges{$judge_id}{"total"} %>
 					</td>
 %				}
 
 %				if ($tourn_settings->{"nsda_nats"}) {
-					<td class="centeralign">
-						<% $jpool ? $judge->districtcode : $judge->distcode %>
+					<td title="<% $judges{$judge_id}{"district_name"} %>" class="centeralign">
+						<% $judges{$judge_id}{"district_code"} %>
 					</td>
-					<td class="centeralign">
-						<% $jpool ? $judge->regioncode : $judge->state %>
+					<td title="State" class="centeralign">
+						<% $judges{$judge_id}{"school_state"} %>
 					</td>
-
-%				}
-
-%				if ($category_settings{"ask_parli"}) {
-
-					<td class="centeralign">
-						<% $judge_settings{$judge}{"parli"} ? "Y" : "" %>
-					</td>
-
-%					if ($tourn_settings->{"nsda_nats"}) {
-						<td class="centeralign">
-							<% $judge_settings{$judge}{"prefers_congress"} ? "Y" : "" %>
-						</td>
-%					}
 %				}
 
 %				if ($tourn_settings->{"ncfl"}) {
-
-					<td class="centeralign padno">
-						<% $region ? $region->code : "" %>
+					<td title="<% $judges{$judge_id}{"diocese_name"} %>" class="centeralign">
+						<% $judges{$judge_id}{"diocese_code"} %>
 					</td>
+%				}
 
+%				if ($tourn_settings->{"nsda_nats"} && $category_settings{"nats_category"}) {
+					<td
+						class = "centeralign greentext semibold"
+						title = "Prefers Congress"
+					>
+						<% $judges{$judge_id}{"prefers_congress"} ? "Y" : "" %>
+					</td>
+%				}
+
+%				if ($category_settings{"ask_parli"}) {
+					<td
+						class = "centeralign semibold bluetext"
+						title = "Marked as Parliamentarian"
+					>
+						<% $judges{$judge_id}{"parli"} ? "Y" : "" %>
+					</td>
 %				}
 
 %				if ($category_settings{"ask_paradigm"}) {
-					<td class="centeralign">
-						<% $paradigms{$judge->id}{"paradigm"}
-							? "Y"
-							: '<span class="redtext semibold">N</span>'
-						%>
+					<td
+						class = "centeralign semibold redtext"
+						title = "Has a Paradigm"
+					>
+						<% $judges{$judge_id}{"paradigm"} ? "Y" : "" %>
 					</td>
 %				}
 
-				<td class="smallish">
-					<% $judge_settings{$judge}{'notes'} %>
+				<td class="centeralign" title="Last changed <% $judges{$judge_id}{"notes_timestamp"} %>">
+					<% $judges{$judge_id}{"notes"} %>
 				</td>
 
-%				if ($person->id == 6425){
-				<td class="centeralign">
-					<span class="quarter nospace">
-
-						<span class="hidden"><% $judge->active %></span>
-
-						<label class="switch">
-							<input
-								type          = "checkbox"
-								value         = "1"
-								id            = "<% $judge->id %>_active"
-								property_name = "active"
-								target_type   = "judge"
-								target_id     = "<% $judge->id %>"
-								onChange      = "postSwitch( this, 'judge_switch.mhtml');
-												statusSwitch('active');"
-								<% $judge->active ? 'checked="checked"' : "" %>
-							>
-							<div class="slider offred"></div>
-						</label>
-
-						</span>
-					</div>
+				<td class="centeralign semibold">
+					<% $judges{$judge_id}{"ada"} ? "Y" : "" %>
 				</td>
-%				}
-
-
+				<td class="centeralign semibold">
+					<% $judges{$judge_id}{"active"} ? "Y" : "N" %>
+				</td>
 
 			</tr>
 
-% 		}
+%		}
 
 		<tbody>
-
-%		if ($category_settings{"rounds_per"} || $rounds) {
-
-			<tr class="liblrow">
-
-				<th colspan="3" class="rightalign padvertless">
-					Totals:
-				</th>
-
-%				if ($tab_rating) {
-					<th class="centeralign">
-					</th>
-%				}
-
-				<th class="centeralign">
-					<% $total_obligation %>
-				</th>
-
-				<th class="centeralign">
-					<% $total_hired %>
-				</th>
-
-				<th class="centeralign">
-					<% $total_obligation + $total_hired %>
-				</th>
-
-%				if ($tourn_settings->{"nsda_nats"}) {
-
-					<th class="centeralign">
-					</th>
-					<th class="centeralign">
-					</th>
-%				}
-
-
-			</tr>
-% 		}
 
 	</table>
 
