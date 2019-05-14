@@ -51,18 +51,109 @@
 			");
 
 			push @schools, Tab::School->search_unclaimed($tourn->id);
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= "Schools with unclaimed entries ";
 
 		}
 
 		if ($ARGS{"noncomplete_entries"}) {
+
+			Tab::School->set_sql( incomplete => "
+				select school.*
+				from school, entry, entry_student es
+				where school.id = entry.school
+					and school.tourn = ?
+					and entry.id     = es.entry
+					and entry.active = 1
+
+					and not exists (
+						select es.id
+						from entry_setting es
+						where es.entry = entry.id
+						and es.tag = 'status'
+						and es.value = 'complete'
+					)
+					and not exists (
+						select evs.id
+						from event_setting evs
+						where evs.event = entry.event
+						and evs.tag = 'usa_wsdc'
+					)
+			");
+
+			push @schools, Tab::School->search_incomplete($tourn->id);
+
+			my $dbh = Tab::DBI->db_Main();
+
+			my $sth = $dbh->prepare("
+				select school.id, rf.value_text, student.id
+				from (school, entry, entry_student es, student, chapter, event, event_setting usa)
+					left join school_setting rf
+						on rf.school = school.id
+						and rf.tag = 'release_forms'
+				where event.tourn = ?
+					and event.id = entry.event
+					and entry.active = 1
+					and entry.id = es.entry
+					and es.student = student.id
+					and student.chapter = chapter.id
+					and chapter.id = school.chapter
+					and school.tourn = event.tourn
+					and event.id = usa.event
+					and usa.tag = 'usa_wsdc'
+			");
+
+			$sth->execute($tourn->id);
+			my %school_forms;
+			my %out = map {$_->id => 1} @schools;
+			my %dinged;
+
+			while (
+				my ($school_id, $rf_json, $student_id) = $sth->fetchrow_array()
+			) {
+				next if $out{$school_id};
+				next if $dinged{$school_id};
+
+				unless ($school_forms{$school_id}) {
+					$school_forms{$school_id} = eval {
+						return JSON::decode_json($rf_json);
+					};
+				}
+
+				unless ($school_forms{$school_id}{$student_id}) {
+					$dinged{$school_id}++;
+				}
+			}
+
+			foreach my $school_id (keys %dinged) {
+				push @schools, Tab::School->retrieve($school_id);
+			}
+
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= "Schools with incomplete entries ";
 		}
 
 		if ($ARGS{"noncomplete_judges"}) {
-		}
 
-		if ($ARGS{"noncomplete_judges"}) {
-		}
+		    Tab::School->set_sql( incomplete => "
+				select school.id, count(judge.id)
+				from school, judge
+				where school.id = judge.school
+					and school.tourn = ?
+					and school.chapter > 0
+					and exists (
+						select js.id
+						from judge_setting js
+						where js.tag = 'incomplete'
+						and js.judge = judge.id
+					)
+				group by school.id
+			");
 
+			push @schools, Tab::School->search_incomplete($tourn->id);
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= "Schools with incomplete judges";
+		}
 	}
 
 	Tab::School->set_sql(empties => "
@@ -129,7 +220,7 @@
 
 		if ($tourn_settings->{"nsda_nats"}) {
 
-			$m->comp("/register/reports/nsda_judging.mas",
+			$m->comp("/register/judge/nsda_judge_status.mhtml",
 				tourn          => $tourn,
 				tourn_settings => $tourn_settings,
 				return         => 1
@@ -240,28 +331,86 @@
 		}
 	}
 
+	my $balance_log;
+
 	foreach my $category ($tourn->categories) {
 
-		my $category_key = "category_".$category->id;
-		next unless $ARGS{$category_key};
+		foreach my $jpool ($category->jpools) {
+
+			if ($ARGS{"incomplete_jpool_".$jpool->id}) {
+
+				my $tag = $jpool->setting('paradigm_form');
+				next unless $tag;
+
+				Tab::Judge->set_sql( no_paradigm => "
+					select judge.*
+					from judge, jpool_judge
+					where judge.id = jpool_judge.judge
+					and judge.active = 1
+					and jpool_judge.jpool = ?
+					and not exists (
+						select js.id
+						from judge_setting js
+						where js.judge = judge.id
+						and js.tag = 'form_complete_$tag'
+					)
+				");
+
+				my @judges = Tab::Judge->search_no_paradigm($jpool->id);
+
+				foreach my $judge (@judges) {
+					$balance_log .= "\n" if $balance_log;
+					$balance_log .= "Sent to ".$judge->first." ".$judge->last;
+
+					push @emails, $m->comp("/funclib/judge_follower.mas",
+						judge       => $judge->id,
+						emails      => 1,
+						person_only => 1
+					);
+				}
+
+				$sent_to .= "<br />" if $sent_to;
+				$sent_to .= "Sent to ".$jpool->name." judges without a completed paradigm\n";
+			}
+
+			if ($ARGS{"jpool_".$jpool->id}) {
+
+				my @jpools = $m->comp("/funclib/judge_follower.mas",
+					jpool       => $jpool->id,
+					emails      => 1,
+					person_only => 1
+				);
+
+				push @emails, @jpools;
+
+				$balance_log .= "\n" if $balance_log;
+				$balance_log .= "Sent to ".scalar @jpools." judges in judge pool ".$jpool->name;
+				$sent_to .= "<br />" if $sent_to;
+				$sent_to .= $jpool->name." judges\n";
+			}
+		}
+
+		next unless $ARGS{"category_".$category->id};
 
 		$sent_to .= $category->name." judges\n";
 
-		foreach my $judge ($category->judges) {
-   	      	push (@notifieds,
-				$m->comp("/funclib/judge_follower.mas",
-				judge  => $judge,
-				emails => 1
-			));
-		}
+		my @categories = $m->comp("/funclib/judge_follower.mas",
+			category    => $category->id,
+			emails      => 1,
+			person_only => 1
+		);
 
+		push @emails, @categories;
+
+		$balance_log .= "\n" if $balance_log;
+		$balance_log .= "Sent to ".scalar @categories." judges in judge pool ".$category->name;
+		$sent_to .= "<br />" if $sent_to;
+		$sent_to .= $category->name." judges\n";
 	}
 
 	my %done;
 
 	my %tourn_contacts = $m->comp("/funclib/tourn_contacts.mas", tourn => $tourn);
-
-	my $balance_log;
 
 	foreach my $school (sort {$a->name cmp $b->name} @schools) {
 
@@ -297,6 +446,7 @@
 			});
 		}
 
+		$email->subject($subject);
 		$email->sent_at($now);
 		$email->metadata($balance_log);
 
@@ -310,7 +460,6 @@
 			sender   => $person->id,
 			metadata => $balance_log
 		});
-
 	}
 
 	unless (@recipients || @notifieds || @emails) {
@@ -324,13 +473,6 @@
 		push (@recipients, $director);
 	}
 
-	$content = $content."\n-----------------------------<br />\n";
-	$content = $content." $sent_to\n\n ";
-
-	$email->sent_to($sent_to);
-	$email->content($content);
-	$email->update;
-
 	#uniq
 
     my %nseen = ();
@@ -343,16 +485,24 @@
 		push @emails, $recipient->email unless $recipient->no_email;
 	}
 
-	$m->comp( "/funclib/send_email.mas",
-		from    => $person,
-		array   => \@emails,
+	$m->comp( "/funclib/send_notify.mas",
+		from    => $person->email,
+		array   => \@notifieds,
 		subject => $subject,
 		body    => $content
 	);
 
-	$m->comp( "/funclib/send_notify.mas",
-		from    => $person->email,
-		array   => \@notifieds,
+	$content = $content."\n-----------------------------<br />\n";
+	$content = $content."Email sent to:\n";
+	$content = $content." $sent_to\n\n ";
+
+	$email->sent_to($sent_to);
+	$email->content($content);
+	$email->update();
+
+	$m->comp( "/funclib/send_email.mas",
+		from    => $person,
+		array   => \@emails,
 		subject => $subject,
 		body    => $content
 	);
@@ -361,4 +511,3 @@
 	$m->redirect("/register/emails/index.mhtml?email_id=".$email->id."&msg=$msg");
 
 </%init>
-
