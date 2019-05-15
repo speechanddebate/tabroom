@@ -11,8 +11,8 @@
 	use List::Util qw(shuffle);
 
 	my $now = DateTime->now();
-
 	my $round = Tab::Round->retrieve($round_id);
+	my $dbh = Tab::DBI->db_Main();
 
 	unless ($round) {
 		$m->comp( "/funclib/abort.mas", err => "No round found for ID $round_id");
@@ -224,24 +224,52 @@
 
 	} else {
 
-		my %rating_by_judge_event = ();
+		my %rating_by_judge = ();
 
 		if ($category_settings{"coach_ratings"}
-			&! ($event_settings{"elim_only_ratings"} && $round->type eq "prelim")
+			&! ($category_settings{"elim_only_ratings"} && $round->type eq "prelim")
 		) {
 
-			my %tier_names = map {$_->id => $_->name} $category->rating_tiers;
+			my $rating_sth = $dbh->prepare("
+				select judge.id, rating_tier.name, subrt.name
 
-			foreach my $event ($category->events) {
+				from (judge, round, event, rating_tier, rating)
 
-				my @ratings = $m->comp("/funclib/category_ratings.mas", event => $event);
+				left join rating_subset on rating_subset.id = event.rating_subset
+				left join rating subrating on subrating.rating_subset = rating_subset.id
+					and subrating.judge = judge.id
+					and subrating.type = 'coach'
 
-				foreach my $rating (@ratings) {
+				left join rating_tier subrt on subrt.id = subrating.rating_tier
 
-					$rating_by_judge_event{$rating->judge->id}{$event_id} = $tier_names{$rating->rating_tier->id}
-						if $rating && $rating->rating_tier;
-				}
+				where round.id = ?
+				and round.event = event.id
+				and judge.id = rating.judge
+				and rating.rating_tier = rating_tier.id
+				and rating.type = 'coach'
+
+				and (
+					judge.category = event.category
+					or judge.alt_category = event.category
+					or exists (
+						select jpj.id
+						from jpool_judge jpj, jpool_round jpr
+						where jpj.judge = judge.id
+						and jpj.jpool = jpr.jpool
+						and jpr.round = round.id
+					)
+				)
+			");
+
+			$rating_sth->execute($round->id);
+
+			while (
+				my ( $judge_id, $rating_tier, $better_rating_tier) = $rating_sth->fetchrow_array()
+			) {
+				$rating_by_judge{$judge_id} = $rating_tier;
+				$rating_by_judge{$judge_id} = $better_rating_tier if $better_rating_tier;
 			}
+
 		}
 
 		my %panel_judges = ();
@@ -274,19 +302,13 @@
 
 			my @judges = shuffle(keys %{$panel_judges{$panel->id}}) if $panel_judges{$panel->id};
 
-			unless ($event_settings{"elim_only_ratings"} && $round->type eq "prelim") {
+			unless ($category_settings{"elim_only_ratings"} && $round->type eq "prelim") {
 
-				@judges = sort {$rating_by_judge_event{$a}{$event_id}
-					cmp $rating_by_judge_event{$b}{$event_id}} @judges;
+				@judges = sort {
+					length($rating_by_judge{$a}) cmp length($rating_by_judge{$b})
+					|| $rating_by_judge{$a} cmp $rating_by_judge{$b}
+				} @judges;
 
-				@judges = sort {length($rating_by_judge_event{$b}{$event_id})
-					<=> length($rating_by_judge_event{$a}{$event_id})} @judges;
-
-				Tab::debuglog("Sorted judges by ratings!");
-
-				foreach my $judge (@judges) {
-					Tab::debuglog("Judge ".$judge." rating ".$rating_by_judge_event{$judge}{$event_id});
-				}
 			}
 
 			FLIGHT:
