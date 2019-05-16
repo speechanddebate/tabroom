@@ -10,22 +10,30 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-    my $now = DateTime->now;    
+    my $now = DateTime->now();
     $now->set_time_zone($tz);
 
 	my $round = Tab::Round->retrieve($round_id);
 	my $event = $round->event;
 	my %event_settings = $event->all_settings();
 
+	if (
+		($round->type eq "elim" || $round->type eq "final")
+		&& (not defined $event_settings{"set_elim_sides"})
+	) {
+		$event_settings{"no_side_constraints"}++
+	}
+
 	my $aff_string = $event_settings{"aff_label"};
 	my $neg_string = $event_settings{"neg_label"};
+
 	$aff_string = "Aff" unless $aff_string;
 	$neg_string = "Neg" unless $neg_string;
 
     my $dbh = Tab::DBI->db_Main();
 
 	my $sth = $dbh->prepare("
-		select entry.id, entry.code, room.name, ballot.side, panel.flight, 
+		select entry.id, entry.code, room.name, ballot.side, panel.flight, panel.bye,
 			GROUP_CONCAT(distinct judge.code SEPARATOR ','),
 			GROUP_CONCAT(distinct judge.last SEPARATOR ',')
 
@@ -34,33 +42,37 @@
 			left join room on room.id = panel.room
 			left join judge on judge.id = ballot.judge
 
-			where panel.round = ? 
+			where panel.round = ?
 				and panel.id = ballot.panel
 				and ballot.entry = entry.id
-				and ballot.judge = judge.id
 
 			group by entry.id order by entry.code
 	");
 
 	$sth->execute($round->id);
 
-	my %rooms; 
+	my %rooms;
 
 	while (
-		my ($entry_id, $entry_code, $room_name, $ballot_side, $panel_flight, $judge_code, $judge_name) 
+		my ($entry_id, $entry_code, $room_name, $ballot_side, $panel_flight, $panel_bye, $judge_code, $judge_name)
 			= $sth->fetchrow_array()
-	) { 
+	) {
 
 		$rooms{$entry_id}{"entry"}  = $entry_code;
 		$rooms{$entry_id}{"sort"}   = $entry_code;
-		$rooms{$entry_id}{"room"}   = $room_name;
+		$rooms{$entry_id}{"sort"} =~ s/[\D_]//g;
+
+		if ($panel_bye) {
+			$rooms{$entry_id}{"bye"}++;
+			$rooms{$entry_id}{"room"}   = "BYE";
+		} else {
+			$rooms{$entry_id}{"room"}   = $room_name;
+		}
 		$rooms{$entry_id}{"judge_codes"} = $judge_code;
 		$rooms{$entry_id}{"judge_names"} = $judge_name;
 		$rooms{$entry_id}{"flight"} = $panel_flight;
 
-		$rooms{$entry_id}{"sort"} =~ s/[\D_]//g;
-
-		unless ($event_settings{"no_side_constraints"}) { 
+		unless ($event_settings{"no_side_constraints"}) {
 			$rooms{$entry_id}{"side"} = $aff_string if $ballot_side == 1;
 			$rooms{$entry_id}{"side"} = $neg_string if $ballot_side == 2;
 		}
@@ -85,19 +97,38 @@
 	$m->print('"'.$round->realname.'"');
 	$m->print("\n");
 
-	$m->print("Entry,Room,Flight,Side,Judges\n");
+	$m->print("Entry,Room,");
+
+	if ($round->flighted > 1) {
+		$m->print("Flight,");
+	}
+	unless ($event_settings{"no_side_constraints"}) {
+		$m->print("Side,");
+	}
+	$m->print("Judges\n");
 
 	foreach my $entry_id (
-		sort {$rooms{$a}{"sort"} <=> $rooms{$b}{"sort"}} 
+		sort {
+			$rooms{$b}{"bye"} <=> $rooms{$a}{"bye"}
+			|| $rooms{$a}{"sort"} <=> $rooms{$b}{"sort"}
+		}
 		keys %rooms
-	) { 
+	) {
+
 		$m->print('"'.$rooms{$entry_id}{"entry"}.'",');
 		$m->print('"'.$rooms{$entry_id}{"room"}.'",');
-		$m->print('"'.$rooms{$entry_id}{"flight"}.'",');
-		$m->print('"'.$rooms{$entry_id}{"side"}.'",');
-		if ($rooms{$entry_id}{"judge_codes"}) { 
+
+		if ($round->flighted > 1) {
+			$m->print('"'.$rooms{$entry_id}{"flight"}.'",');
+		}
+
+		unless ($event_settings{"no_side_constraints"}) {
+			$m->print('"'.$rooms{$entry_id}{"side"}.'",');
+		}
+
+		if ($rooms{$entry_id}{"judge_codes"}) {
 			$m->print('"'.$rooms{$entry_id}{"judge_codes"}.'",');
-		} else { 
+		} else {
 			$m->print('"'.$rooms{$entry_id}{"judge_names"}.'",');
 		}
 		$m->print("\n");
