@@ -5,17 +5,18 @@ use Class::DBI::AbstractSearch;
 Tab::DBI->connection("dbi:mysql:$Tab::dbname:$Tab::dbhost", $Tab::dbuser, $Tab::dbpass) || die $!;;
 
 sub _register_datetimes {
- 	my $class = shift;
- 	$class = ref $class if ref $class;
- 	foreach my $column (@_) {
-		$class->has_a(
-			$column => 'DateTime',
-     		inflate => \&date_inflate,
-     		deflate => \&date_deflate,
-   		)
- 	}
- 	$class;
+    my $class = shift;
+    $class = ref $class if ref $class;
+    foreach my $column (@_) {
+        $class->has_a(
+            $column => 'DateTime',
+            inflate => \&date_inflate,
+            deflate => \&date_deflate,
+        )
+    }
+    $class;
 }
+
 
 sub date_inflate {
 

@@ -32,7 +32,10 @@ use Apache2::Cookie;
 use Apache2::Request;
 use Apache2::Upload;
 use Switch;
+use Math::Round;
 use Sys::Syslog;
+
+no warnings "uninitialized";
 
 use Tab::General;
 use Tab::DBI;
@@ -131,6 +134,8 @@ use Tab::Webpage;
 
 use Tab::NSDA::PointsDBI;
 
+no warnings "uninitialized";
+
 my $ah;
 
 sub handler {
@@ -143,17 +148,17 @@ sub handler {
 			comp_root   => $Tab::file_root,
 			data_dir    => $Tab::file_root."mason",
 			error_mode  => 'fatal'
-		); 
-	} else { 
+		);
+	} else {
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
 			comp_root   => $Tab::file_root,
 			data_dir    => $Tab::file_root."mason",
-		); 
+		);
  	}
-	
-	my $return = eval { 
-		$ah->handle_request($r) 
+
+	my $return = eval {
+		$ah->handle_request($r)
 	};
 
 	if ( my $err = $@ ) {
@@ -161,7 +166,7 @@ sub handler {
 		$r->pnotes( error => $err );
 		$r->filename( $r->document_root . '/index/oh_crap.mhtml' );
 		return $ah->handle_request($r);
-	
+
 	}
 	return $return;
 }
