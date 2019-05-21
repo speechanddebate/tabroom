@@ -25,7 +25,7 @@ sub default {
 		my $json = eval{ 
 			return JSON::encode_json($input);
 		};
-
+	
 		$self->defaults($json);
 		$self->update();
 
