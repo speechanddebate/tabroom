@@ -1,11 +1,23 @@
 <%args>
 	$tourn
 	$tourn_settings
+	$school_id => undef
 </%args>
 <%init>
 
 	my %schools;
     my $dbh = Tab::DBI->db_Main();
+
+	my $school;
+	$school = Tab::School->retrieve($school_id) if $school_id;
+
+	my $school_limit;
+	my @keys = ($tourn->id);
+
+	if ($school > 0) {
+		$school_limit = "and school.id = ? ";
+		push @keys, $school->id;
+	}
 
 	# Missing release forms or scripts etc.
 	my $missing_releases = $dbh->prepare("
@@ -18,6 +30,7 @@
 		from (school, entry, event, entry_setting status, entry_setting incomplete, chapter)
 
 		where school.tourn = ?
+			$school_limit
 			and school.id = entry.school
 			and entry.event = event.id
 			and entry.id = status.entry
@@ -29,7 +42,7 @@
 			and incomplete.tag = 'incomplete_reasons'
 	");
 
-	$missing_releases->execute($tourn->id);
+	$missing_releases->execute(@keys);
 
     while (
         my ($school_id, $school_name,
@@ -48,6 +61,61 @@
 		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"reason"} = $incomplete_text;
 	}
 
+	# Worlds Students missing releases
+
+	my $usa_wsdc_sth = $dbh->prepare("
+		select student.id, student.first, student.last, entry.code,
+			event.abbr,
+			school.id, school.name, school.state, chapter.nsda,
+			release_forms.value_text
+		from (entry, event, entry_student es, student, event_setting usa, school, chapter)
+			left join school_setting release_forms
+				on release_forms.school = school.id
+				and release_forms.tag = 'release_forms'
+			where school.tourn  = ?
+			$school_limit
+			and school.chapter  = student.chapter
+			and school.chapter = chapter.id
+			and student.id      = es.student
+			and es.entry        = entry.id
+			and entry.event     = usa.event
+			and usa.tag         = 'usa_wsdc'
+			and entry.event     = event.id
+			and event.tourn     = school.tourn
+	");
+
+	$usa_wsdc_sth->execute(@keys);
+
+	my %forms;
+
+	while (
+		my (
+			$student_id, $student_first, $student_last, $entry_code,
+			$event_abbr,
+			$school_id, $school_name, $school_state, $chapter_nsda,
+			$release_json
+		) = $usa_wsdc_sth->fetchrow_array()
+	) {
+
+		unless ($forms{$school_id}) {
+			$forms{$school_id} = eval{
+				return JSON::decode_json($release_json);
+			};
+		}
+
+		next if $forms{$school_id}{$student_id};
+
+		$schools{$school_id}{"name"} = $school_name;
+		$schools{$school_id}{"state"} = $school_state;
+		$schools{$school_id}{"nsda_id"} = $chapter_nsda;
+
+		$schools{$school_id}{"bad"}{"entries"}{"S".$student_id}{"name"} = $student_first." ".$student_last;
+		$schools{$school_id}{"bad"}{"entries"}{"S".$student_id}{"event"} = $event_abbr;
+		$schools{$school_id}{"bad"}{"entries"}{"S".$student_id}{"reason"} = "Missing release form";
+	}
+
+	$usa_wsdc_sth->finish();
+
 	# Missing coaches
 	my $missing_coaches = $dbh->prepare("
 
@@ -58,11 +126,12 @@
 		from (school, entry, event, chapter)
 
 		where school.tourn = ?
+			$school_limit
 
 			and school.id = entry.school
 			and entry.event = event.id
 			and school.chapter = chapter.id
-			and entry.unconfirmed = 0
+			and entry.active = 1
 
 			and not exists (
 				select coach.id
@@ -72,7 +141,7 @@
 			)
 	");
 
-	$missing_coaches->execute($tourn->id);
+	$missing_coaches->execute(@keys);
 
     while (
         my ($school_id, $school_name,
@@ -86,14 +155,25 @@
 
 		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"name"} = $entry_name;
 		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"event"} = $event_abbr;
-		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"reason"} = "No coach listed for entries";
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"reason"} = "No coach listed for points credit";
 	}
 
-	$m->comp("/register/judge/nsda_judge_status.mhtml",
-		tourn          => $tourn,
-		return         => 1,
-		tourn_settings => $tourn_settings
-	);
+	if ($school) {
+
+        $m->comp("/funclib/judgemath/nats_check_judging.mas",
+            school         => $school,
+            tourn          => $tourn,
+            tourn_settings => $tourn_settings
+        );
+
+	} else {
+
+		$m->comp("/register/judge/nsda_judge_status.mhtml",
+			tourn          => $tourn,
+			return         => 1,
+			tourn_settings => $tourn_settings
+		);
+	}
 
 	my $judges_borked = $dbh->prepare("
 		select school.id, school.name,
@@ -103,13 +183,14 @@
 		from (school, school_setting unmet, chapter)
 
 		where school.tourn = ?
+			$school_limit
 			and school.chapter = chapter.id
 			and unmet.tag = 'judging_unmet'
 			and unmet.school = school.id
 			group by school.id
 	");
 
-	$judges_borked->execute($tourn->id);
+	$judges_borked->execute(@keys);
 
     while (
         my ($school_id, $school_name,
@@ -127,23 +208,57 @@
 	}
 
 	# Owes money
-	my %balances = $m->comp(
-		"/funclib/balances.mas",
-		tourn          => $tourn,
-		tourn_settings => $tourn_settings
-	);
+	my %balances = ();
 
-	foreach my $school_id (keys %balances) {
+	if ($school) {
 
-		next unless $balances{$school_id}{"balance"} > 0;
+		my @fees = $m->comp("/funclib/school_fees.mas",
+			school => $school,
+			all    => 1
+		);
 
-		$schools{$school_id}{"name"}           = $balances{$school_id}{"name"};
-		$schools{$school_id}{"state"}          = $balances{$school_id}{"state"};
-		$schools{$school_id}{"nsda_id"}        = $balances{$school_id}{"nsda"};
-		$schools{$school_id}{"bad"}{"balance"} = $balances{$school_id}{"balance"};
+		my $money_due = shift @fees;
+
+		if ($money_due > 0) {
+			$balances{$school->id}{"balance"} = $money_due;
+			$schools{$school->id}{"bad"}{"balance"} = $money_due;
+		}
+
+	} else {
+
+		%balances = $m->comp(
+			"/funclib/balances.mas",
+			tourn          => $tourn,
+			tourn_settings => $tourn_settings
+		);
+
+		foreach my $school_id (keys %balances) {
+
+			next unless $balances{$school_id}{"balance"} > 0;
+
+			$schools{$school_id}{"name"}           = $balances{$school_id}{"name"};
+			$schools{$school_id}{"sort_name"}      = $balances{$school_id}{"name"};
+			$schools{$school_id}{"state"}          = $balances{$school_id}{"state"};
+			$schools{$school_id}{"nsda_id"}        = $balances{$school_id}{"nsda"};
+			$schools{$school_id}{"bad"}{"balance"} = $balances{$school_id}{"balance"};
+			$schools{$school_id}{"sort_name"} =~ s/^The //g;
+		}
 	}
 
 	my $filename = "ProblemReports-Nationals";
+
+	if ($school) {
+		my $school_name = $school->name;
+		$school_name =~ s/[\W_]//g;
+		$filename = "ProblemReport-".$school_name."-Nationals";
+		$schools{$school->id}{"name"}           = $school->name;
+		$schools{$school->id}{"sort_name"}      = $school->name;
+		$schools{$school->id}{"state"}          = $school->state;
+		$schools{$school->id}{"nsda_id"}        = $school->chapter->nsda;
+		$schools{$school->id}{"sort_name"} =~ s/^The //g;
+
+	}
+
     my $filepath = $Tab::file_root."tmp/".$filename;
 
     $m->comp("/funclib/printout.mas",
@@ -157,11 +272,13 @@
     open (TEXOUT, ">>$filepath.tex");
 
 	my @ids =
-		sort {$schools{$a}{"name"} cmp $schools{$b}{"name"}}
+		sort {$schools{$a}{"sort_name"} cmp $schools{$b}{"sort_name"}}
 		keys %schools;
 
 	@ids =
 		sort {$schools{$a}{"state"} cmp $schools{$b}{"state"}} @ids;
+
+	push @ids, $school->id if $school && (scalar @ids < 1);
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
@@ -183,18 +300,53 @@
 		print TEXOUT "\\newline\n";
 		print TEXOUT "\\strut\n";
 
-		print TEXOUT "\\hfill \\textbf{\\Huge Please Visit the Problem Tables} \\hfill";
+		my $ive_got_issues = scalar(keys %{$schools{$school_id}{"bad"}});
 
-		print TEXOUT "\\bigskip\n";
-		print TEXOUT "\\newline\n";
-		print TEXOUT "\\large\n";
+		if ($ive_got_issues) {
 
-		print TEXOUT "Your registration was incomplete as listed below. You can
-		still fix a lot of these issues online without waiting in line.  Upload
-		script information and release forms online on http://www.tabroom.com.
-		Fees are still payable online on http://www.speechanddebate.org/account.
-		If you fix or have fixed the issues below, the SELF SERVICE table can
-		clear you for registration.";
+			if ($schools{$school_id}{"nsda_id"} == 4177) {
+				print TEXOUT "\\hfill \\textbf{\\Huge You Done Messed Up, A-Aron} \\hfill";
+			} else {
+				print TEXOUT "\\hfill \\textbf{\\Huge Please Visit the Problem Tables} \\hfill";
+			}
+
+			print TEXOUT "\\bigskip\n";
+			print TEXOUT "\\newline\n";
+			print TEXOUT "\\large\n";
+
+			print TEXOUT "Your registration is incomplete as listed below.
+
+			You can still fix many issues online without waiting in line.  Upload
+			script information and release forms online on {\\underline http://www.tabroom.com}.
+			Fees are still payable at {\\underline http://www.speechanddebate.org/account}.
+
+			If you have fixed these issues, go to Tabroom and PRINT UPDATED PROBLEM SHEET
+			(yellow button on the top right of your school's Tabroom Nationals registration,
+			under the General tab), or the SELF SERVICE table can clear you for registration.";
+
+		} else {
+
+			print TEXOUT "\\hfill \\textbf{\\Huge PROBLEM CLEARED} \\hfill";
+
+			print TEXOUT "\\bigskip\n";
+			print TEXOUT "\\newline\n";
+
+			print TEXOUT "\\strut\\hfill\n";
+			print TEXOUT "\\textsb{\\LARGE Thank you!}\n";
+			print TEXOUT "\\hfill\\strut\n";
+			print TEXOUT "\\bigskip\n";
+			print TEXOUT "\\newline\n";
+
+			print TEXOUT "\\strut\\hfill\n";
+			print TEXOUT "\\textsb{\\large You have successfully resolved your pending issues.}\n";
+			print TEXOUT "\\hfill\\strut\n";
+			print TEXOUT "\\bigskip\n";
+			print TEXOUT "\\newline\n";
+
+			print TEXOUT "\\strut\\hfill\n";
+			print TEXOUT "\\textsb{\\large You may now proceed with registration.}\n";
+			print TEXOUT "\\hfill\\strut\n";
+		}
 
 		print TEXOUT "\\bigskip\n";
 		print TEXOUT "\\newline\n";
@@ -252,7 +404,7 @@
 
 			} else {
 
-				print TEXOUT "\\emph{\\small Please check with the main table to resolve:}\n";
+				print TEXOUT "\\emph{\\small Please check with the ENTRIES table to resolve:}\n";
 				print TEXOUT "\\newline\n";
 
 				print TEXOUT "\\textsb{\\Large ".Tab::texify(ucfirst($reason))." } \n";
