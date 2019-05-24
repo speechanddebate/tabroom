@@ -1,42 +1,29 @@
 <%args>
 	$person
 	$person_settings
-	$panel_id => undef
+	$event_id => undef
 	$judge_id => undef
 	$errs     => undef
 </%args>
 <%init>
 
-	unless ($panel_id && $judge_id) {
-		my $err = "I didn't get both a judge and a ballot record";
+	unless ($event_id && $judge_id) {
+		my $err = "I didn't get both a judge and an event";
 		$m->redirect("/user/home.mhtml?err=$err");
 	}
 
-	my $panel = Tab::Panel->retrieve($panel_id);
+	my $event = Tab::Event->retrieve($event_id);
 	my $judge = Tab::Judge->retrieve($judge_id);
 
-	$m->comp("/funclib/panel_dedupe.mas", panel => $panel);
+	$m->abort unless $event;
 
-	$m->abort unless $panel;
-
-	my $round = $panel->round;
-	my $event = $round->event;
 	my $category = $event->category;
 	my $tourn = $category->tourn;
-
-	if ($event->type eq "wsdc") {
-		$m->redirect("wsdc_ballot.mhtml?panel_id=".$panel->id."&judge_id=".$judge->id);
-	}
-
-	if ($tourn->setting("legion")) {
-		$m->redirect("legion_ballot.mhtml?panel_id=".$panel->id."&judge_id=".$judge->id);
-	}
 
 	my %event_settings = $event->all_settings;
 	my %category_settings = $category->all_settings;
 
 	my $now = DateTime->now();
-
     my $subscores = $event_settings{"wsdc_categories"};
 
     my %max_subpoints = ();
@@ -80,10 +67,7 @@
 	my $type = $event->type;
 	my $wudc++ if $type eq "wudc";
 
-	unless ($panel && $judge) {
-		my $err = "No ballots found for that judge and that panel.";
-		$m->redirect("/user/home.mhtml?err=$err");
-	}
+	my $round = $event->rounds->first;
 
 	unless ($judge->person->id == $person->id || $person->site_admin) {
 		my $err = "You are not authorized to enter ballots for that judge.";
@@ -96,63 +80,7 @@
 		$m->redirect("/user/judge/panels.mhtml?err=$err");
 	}
 
-	my @ballots = sort {$a->side <=> $b->side}
-		Tab::Ballot->search(
-			judge => $judge->id,
-			panel => $panel->id
-		);
-
-	@ballots =
-		sort {$a->speakerorder <=> $b->speakerorder}
-		@ballots if $type eq "speech";
-
-	my @clean;
-	foreach my $ballot (@ballots) {
-		next unless $ballot->entry > 0;
-		push @clean, $ballot;
-	}
-
-	@ballots = @clean;
-	unless (@ballots) {
-		my $err = "That judge does not judge in that room.";
-		$m->redirect("/user/home.mhtml?err=$err");
-	}
-
-	$ballot_rules = $event_settings{"ballot_rules_chair"} if $ballots[0]->chair;
-
-	Tab::Panel->set_sql(update_start => "
-		update panel
-			set started = ?
-			where id = ?
-			and (panel.started is NULL
-				or panel.started = 0
-				or panel.started = ''
-				or panel.started < '1000-01-01 00:00:01'
-			)
-	");
-
-	Tab::Panel->sql_update_start->execute(
-		DateTime::Format::MySQL->format_datetime($now),
-		$panel->id
-	);
-
-	Tab::Ballot->set_sql(update_start => "
-		update ballot
-			set judge_started = ?
-			where panel = ?
-			and judge = ?
-			and (ballot.judge_started is NULL
-				or ballot.judge_started = 0
-				or ballot.judge_started = ''
-				or ballot.judge_started < '1000-01-01 00:00:01'
-			)
-	");
-
-	Tab::Ballot->sql_update_start->execute(
-		DateTime::Format::MySQL->format_datetime($now),
-		$panel->id,
-		$judge->id,
-	);
+	my $tiebreak_set = $round->tiebreak_set;
 
 	my %tb_types = $m->comp(
 		"/funclib/tiebreak_types.mas",
@@ -169,16 +97,11 @@
 
 	undef $tb_types{"ranks"} if $wudc;
 
-	my @panel_students = $m->comp(
-		'/funclib/panel_students.mas',
-		panel => $panel
-	);
-
 	my $tv++ if $type eq "speech"
-		&& $round->tiebreak_set->setting("mfl_time_violation");
+		&& $tiebreak_set->setting("mfl_time_violation");
 
 	my $forfeit++ if $type eq "speech"
-		&& $round->tiebreak_set->setting("forfeits_never_break");
+		&& $tiebreak_set->setting("forfeits_never_break");
 
 	my $max_points = $event_settings{"max_points"};
 	my $min_points = $event_settings{"min_points"};
@@ -195,19 +118,6 @@
 
 		$min_ob_points = 0 unless $min_ob_points;
 		$max_ob_points = 6 unless $max_ob_points;
-
-        my @scores = $m->comp(
-            '/funclib/judge_scores.mas',
-            judge    => $judge,
-            timeslot => $round->timeslot,
-            tag      => "congress_speech"
-        );
-
-        foreach my $score (@scores) {
-            $entry_scores{$score->entryid}{$score->speech} = $score;
-			$entry_scores{$score->entryid}{"total"} += $score->value;
-			$entry_scores{$score->entryid}{"count"}++;
-        }
 
 	} elsif ($event->type eq 'speech') {
 
@@ -236,11 +146,6 @@
 			|| $round->type eq "final"
 			|| $round->type eq "runoff")
 		&& not defined $no_side_constraints;
-
-	my $locked =  $m->comp(
-		"/funclib/round_elim_dueaff.mas",
-		panel => $panel
-	) if $sidelocks;
 
 </%init>
 
@@ -278,8 +183,6 @@
 			return;
 		}
 
-
-
 		function sortTable() {
 
 			var rows = $(".ballotrows").get();
@@ -305,7 +208,6 @@
 			});
 
 			return;
-
 		}
 
 		function doneSwitch(which) {
@@ -352,13 +254,12 @@
                     } else {
 
                         pointTotal += Float;
-
                     }
 				}
 
 			});
 
-			$("#"+entryID+studentID+"_points")
+			$("#"+studentID+"_points")
 				.val(pointTotal)
 				.change(function() {
 					checkTotal(studentID, entryID);
@@ -402,17 +303,13 @@
 			var teamTotal = 0;
 
 			$("."+entryID).each(function() {
-
 				var Float = parseFloat(this.value);
-
 				if (Float) {
 					teamTotal += Float;
 				}
-
 			});
 
 			$("#"+entryID+"_total").val(teamTotal);
-
 		}
 
 		function checkLPW(selectMenu) {
@@ -439,17 +336,13 @@
 
 %					if ($event_settings{"no_lpw"}) {
 
-						alertify.error(
-							"You gave the winning team fewer points.  Please correct."
-						);
-
+						alertify.error( "You gave the winning team fewer points.  Please correct.");
 						$("#winbox").addClass("lird");
 
 %					} else {
 
 						$("#lpwbox").addClass("redtext");
 						$("#lpwbox").addClass("semibold");
-
 %					}
 
 				} else {
@@ -457,7 +350,6 @@
 					$("#winbox").removeClass("lird");
 					$("#lpwbox").removeClass("redtext");
 					$("#lpwbox").removeClass("semibold");
-
 				}
 
 			} else {
@@ -465,10 +357,7 @@
 				$("#winbox").removeClass("lird");
 				$("#lpwbox").removeClass("redtext");
 				$("#lpwbox").removeClass("semibold");
-
 			}
-
-
 		}
 
 		$(document).ready(function () {
@@ -483,27 +372,16 @@
 				<h4>
 					<% $event->abbr %>
 					<% $round->realname %>
-					<% $round->flighted > 1 ? "Flt ".$panel->flight : "" %>
-					Ballot for
-					<% $judge->last %>
+					Ballot for <% $judge->last %>
 				</h4>
 			</span>
 
 			<span class="half nospace rightalign">
 				<h5 class="normalweight bluetext">
-					<% $panel->room > 0
-						? "Room: ". $panel->room->name
-						: "NO ROOM ASSIGNED"
-					%>
+					Room A1234
 				</h5>
 			</span>
 		</div>
-
-%		if ($round->setting("notes")) {
-			<p class="warning padleft">
-				Note: <% $round->setting("notes") %>
-			</p>
-%		}
 
 <%perl>
 
@@ -526,7 +404,6 @@
 						person_settings => $person_settings,
 						tourn           => $tourn,
 						judge           => $judge,
-						panel           => $panel,
 						event           => $event,
 						missing         => $ARGS{"missing"},
 						event_settings  => \%event_settings,
@@ -538,7 +415,6 @@
 			<div class="rankings screens">
 
 %		}
-
 
 %		if ($errs) {
 
@@ -566,19 +442,19 @@
 %		}
 
 		<form
-			action="<% $wudc ? "wudc_save.mhtml" : "ballot_save.mhtml" %>"
+			action="<% $wudc ? "wudc_save.mhtml" : "training_save.mhtml" %>"
 			method="post">
-
-		<input
-			type  = "hidden"
-			name  = "panel_id"
-			value = "<% $panel->id %>"
-		>
 
 		<input
 			type  = "hidden"
 			name  = "judge_id"
 			value = "<% $judge->id %>"
+		>
+
+		<input
+			type  = "hidden"
+			name  = "event_id"
+			value = "<% $event->id %>"
 		>
 
 %		if ($event->type eq 'speech' || $event->type eq "congress") {
@@ -648,43 +524,7 @@
 %				}
 
 			</span>
-<%perl>
 
-
-			if ($decision_deadline) {
-
-				$start = $round->start_time;
-				$start = $round->timeslot->start unless $start;
-				$start->set_time_zone($tz);
-
-				$decision_time = $start->clone;
-				$decision_time->add("minutes", $decision_deadline);
-
-				if ($event_settings{"flight_offset"}) {
-					foreach my $flight (2 .. $panel->flight) {
-						$decision_time->add('minutes', $event_settings{"flight_offset"}) if $decision_time;
-						$start->add('minutes', $event_settings{"flight_offset"});
-					}
-				}
-
-				my $time_left = ($decision_time - $now);
-
-</%perl>
-
-				<span class="half rightalign semibold bigger smidge">
-					Decision due: <% Tab::nicetime($decision_time) %>
-
-					<span class="orangetext inline borderleft marleft padleft">
-						Time left:
-						<& "/funclib/stopwatch.mas",
-							label     => "deadline",
-							inline    => "true",
-							autostart => "true",
-							default   => ($time_left->in_units('minutes'))
-						&>
-					</span>
-				</span>
-%			}
 		</div>
 %		}
 
@@ -703,7 +543,7 @@
 %				} elsif ($type ne "speech" && $type ne "congress") {
 
 					<th>
-						Side <% $sidelocks ? $locked ? "(Locked)" : "(Flip)" : "" %>
+						Side
 					</th>
 %				}
 
@@ -791,9 +631,7 @@
 					my $tick;
 
 					if (
-						($tb_types{"ranks"} || $tb_types{"points"}
-						&& (scalar @panel_students > scalar @ballots)
-					)
+						($tb_types{"ranks"} || $tb_types{"points"})
 						&& not defined $team_points
 					) {
 
@@ -858,35 +696,27 @@
 
 			my %doubled = $m->comp("/funclib/round_doubled.mas", round => $round);
 
-			foreach my $ballot (@ballots) {
+			my $ballot_count;
 
-				my $entry = $ballot->entry;
-				next unless $entry;
+			if ($event->type eq "speech") {
+				$ballot_count = 6;
+			} elsif ($event->type eq "congress") {
+				$ballot_count = 18;
+			} else {
+				$ballot_count = 2;
+			}
 
-				next if $entry->dropped && $type eq "speech";
-				next if $entry->dropped && $type eq "congress";
-
-				my @students = $entry->students;
-
-				my $doubled = scalar (keys %{$doubled{$ballot->entry}});
-				my $daggers;
-				foreach (1 .. $doubled) {
-					$daggers .= "&dagger;";
-				}
-				$i_can_haz_doubled++ if $doubled;
+			foreach my $ballot (1 .. $ballot_count) {
 
 </%perl>
 				<tr
-					id    = "<% $ballot->id %>"
+					id    = "<% $ballot %>"
 					class = "<% ($switch % 2) ? "odd" : "even" %> ballotrows"
 				>
 
 <%perl>
-
-					my $columns = scalar @students;
-
+					my $columns = $event_settings{"max_entry"};
 					$columns = 1 if $team_points;
-
 					$columns = 1 unless ($tb_types{"points"} || $tb_types{"ranks"});
 
 					unless ($type eq "speech" || $type eq "congress") {
@@ -896,10 +726,10 @@
 							class   = "centeralign"
 						>
 
-%							if ($no_side_constraints || $sidelocks && not defined $locked) {
+%							if ($no_side_constraints || $sidelocks) {
 
 								<select
-									name  = "<% $ballot->id %>_side"
+									name  = "<% $ballot %>_side"
 									class = "fixedtiny chosen"
 								>
 
@@ -910,13 +740,13 @@
 									<option
 										value = "1"
 										id    = "aff"
-										<% $ballot->side == 1 ? "selected" : ""%>
+										<% $ballot == 1 ? "selected" : ""%>
 									><% $aff_string %></option>
 
 									<option
 										value = "2"
 										id    = "neg"
-										<% $ballot->side == 2 ? "selected" : ""%>
+										<% $ballot == 2 ? "selected" : ""%>
 									><% $neg_string %></option>
 
 								</select>
@@ -928,7 +758,7 @@
 							) {
 </%perl>
 
-								<select name="<% $ballot->id %>_speakerorder">
+								<select name="<% $ballot %>_speakerorder">
 									<option value="">Pick</option>
 									<option value="1">1st Gov</option>
 									<option value="2">1st Opp</option>
@@ -938,13 +768,13 @@
 
 %							} elsif ($wudc) {
 
-								<% ($ballot->speakerorder == 1) ? "1st Gov" : "" %>
-								<% ($ballot->speakerorder == 2) ? "1st Opp" : "" %>
-								<% ($ballot->speakerorder == 3) ? "2nd Gov" : "" %>
-								<% ($ballot->speakerorder == 4) ? "2nd Opp" : "" %>
+								<% ($ballot == 1) ? "1st Gov" : "" %>
+								<% ($ballot == 2) ? "1st Opp" : "" %>
+								<% ($ballot == 3) ? "2nd Gov" : "" %>
+								<% ($ballot == 4) ? "2nd Opp" : "" %>
 
 %							} else {
-								<% ($ballot->side == 1) ? $aff_string : $neg_string %>
+								<% ($ballot == 1) ? $aff_string : $neg_string %>
 %							}
 
 						</td>
@@ -954,9 +784,9 @@
 							<td>
 
 								<select
-									id        = "<% $ballot->id %>_speakerorder"
-									name      = "<% $ballot->id %>_speakerorder"
-									ballot_id = "<% $ballot->id %>"
+									id        = "<% $ballot %>_speakerorder"
+									name      = "<% $ballot %>_speakerorder"
+									ballot_id = "<% $ballot %>"
 									class     = "fixedtiny speakerorder plain"
 									onChange  = "swapOrder(this);"
 								>
@@ -970,14 +800,14 @@
 										value = "1"
 										id    = "1"
 										class = "orders"
-										<% $ballot->speakerorder == 1 ? "selected" : ""%>
+										<% $ballot == 1 ? "selected" : ""%>
 									>1</option>
 
 									<option
 										value = "2"
 										id    = "2"
 										class = "orders"
-										<% $ballot->speakerorder == 2 ? "selected" : ""%>
+										<% $ballot == 2 ? "selected" : ""%>
 									>2</option>
 
 								</select>
@@ -988,66 +818,50 @@
 
 %					if ($type eq "speech") {
 						<td class='centeralign'>
-							<% Lingua::EN::Numbers::Ordinate::ordinate($ballot->speakerorder) %>
+							<% Lingua::EN::Numbers::Ordinate::ordinate($ballot) %>
 						</td>
 %					}
 
 					<td class = "leftalign semibold" >
-						<span class="inline redtext semibold">
-							<% $doubled ? $daggers : "" %>
-						</span>
-						<% $entry->code %>
+						Entry <% $ballot %>
 					</td>
 
 %					if ($ballot_school_code) {
 						<td class = "centeralign">
-							<% $entry->school->code %>
+							School <% $ballot %>
 						</td>
 %					}
 
 %					if ($ballot_school_name) {
 						<td class = "padleftmore">
-							<% $entry->school->name %>
+							School of <% $ballot %>
 						</td>
 %					}
 
 %					if ($ballot_entry_name) {
 						<td class = "padleftmore" >
-							<% $entry->name %>
+							An Entry Named <% $ballot %>
 						</td>
 %					}
 
 %					if ($ballot_entry_first_name) {
 						<td class = "centeralign" >
-%							foreach my $student ($entry->students) {
-								<% $student->first %>
+%							foreach my $student (1 .. $event_settings{"max_events"}) {
+								Student <% $student %>
 %							}
 						</td>
 %					}
 
-<%perl>
-					if ($ballot_entry_title) {
+%					if ($ballot_entry_title) {
 
-						my $exists = $ballot->scores(tag => "title")->first;
-
-						my $title;
-
-						if ($exists) {
-							$title = $exists->content();
-						} else {
-							$title = $entry->setting("title");
-						}
-
-</%perl>
 						<td class="centeralign">
 
 							<input
 								type          = "text"
-								name          = "<% $ballot->id %>"
-								target_id     = "<% $ballot->id %>"
+								name          = "<% $ballot %>"
+								target_id     = "<% $ballot %>"
 								property_name = "title"
 								tabindex      = -1
-								value         = "<% $title %>"
 								size          = "30"
 								placeholder   = "Enter title or extemp question"
 								onBlur        = "postSwitch(this, 'title_save.mhtml');"
@@ -1059,22 +873,18 @@
 
 						<td class="centeralign">
 <%perl>
+							my $entry = $ballot;
 							my $notfirst;
-							foreach my $speech (keys %{$entry_scores{$entry->id}}) {
+							foreach my $speech (keys %{$entry_scores{$entry}}) {
 								next if $speech eq "total";
 								next if $speech eq "count";
 								$m->print(", ") if $notfirst++;
-								$m->print($entry_scores{$entry->id}{$speech}->value);
 							}
 </%perl>
 						</td>
 
 						<td class="centeralign">
-%							if ($entry_scores{$entry->id}{"count"}) {
-								<% $entry_scores{$entry->id}{"total"} / $entry_scores{$entry->id}{"count"} %>
-%							}
 						</td>
-
 <%perl>
 					}
 
@@ -1094,7 +904,7 @@
 										step     = "1"
 										size     = "5"
 										name     = "<% $ballot %>_ranks"
-										max      = "<% scalar @panel_students %>"
+										max      = "6"
 										value    = "<% $ARGS{$ballot."_ranks"} %>"
 									>
 								</td>
@@ -1107,15 +917,15 @@
 									class="centeralign">
 
 									<input
-										class    = "<% $entry->id %>"
+										class    = "<% $ballot %>"
 										type     = "number"
 										step     = "<% $step %>"
-										name     = "<% $ballot->id %>_points"
-										id       = "<% $ballot->id %>_points"
+										name     = "<% $ballot %>_points"
+										id       = "<% $ballot %>_points"
 										size     = "5"
 										min      = "<% $min_points %>"
 										max      = "<% $max_points %>"
-										value    = "<% $ARGS{$ballot->id."_points"} %>"
+										value    = "<% $ARGS{$ballot."_points"} %>"
 										tabindex = <% $index++ %>
 									>
 								</td>
@@ -1125,11 +935,11 @@
 %							if ($tv) {
 
 								<td class="centeralign nospace">
-									<label for="<% $ballot->id %>_tv">
+									<label for="<% $ballot %>_tv">
 										<span class="full padvertless hover">
 											<input
 												type  = "checkbox"
-												name  = "<% $ballot->id %>_tv"
+												name  = "<% $ballot %>_tv"
 												value = "1"
 											>
 										</span>
@@ -1139,11 +949,11 @@
 
 %							if ($forfeit) {
 								<td class="centeralign nospace">
-									<label for="<% $ballot->id %>_forfeit">
+									<label for="<% $ballot %>_forfeit">
 										<span class="full padvertless hover">
 											<input
 												type  = "checkbox"
-												name  = "<% $ballot->id %>_forfeit"
+												name  = "<% $ballot %>_forfeit"
 												value = "1"
 												<& "/funclib/warn.mas",
 													warn => "You are marking the student as having forfeited the round.  Be sure you accomodated their double entry and are following the tournament policy on forfeits before doing so.  This entry will receive no ranks or points." &>
@@ -1160,16 +970,16 @@
 %							my $length = "twothirds";
 %							$length = "third" if $tb_types{"ranks"} && $tb_types{"points"};
 
-%							foreach my $student (@students) {
+%							foreach my $student (1 .. $event_settings{max_entry}) {
 
 								<div class="padless marno borderbottom centeralign">
 
-									<span class='smallish <% $length %> marno padless leftalign <% $student->id."_row" %>' >
+									<span class='smallish <% $length %> marno padless leftalign <% $student."_row" %>' >
 
-										<% substr($student->first." ".$student->last.":", 0, 30) %>
+										Student <% $student %>.
 
 										<div
-											id    = "<% $student->id %>_warning"
+											id    = "<% $student %>_warning"
 											class = "hidden redtext semibold nospace padtop"
 										>
 											Total incorrect!
@@ -1186,9 +996,10 @@
 											type     = "number"
 											step     = "1"
 											size     = "5"
-											name     = "<% $ballot.$student %>_ranks"
+											name     = "<% $student %>_ranks"
 											min      = "1"
-											max      = "<% scalar @panel_students %>"
+											max      = "6"
+											value    = "<% $ARGS{$student."_ranks"} %>"
 										>
 
 									</span>
@@ -1205,18 +1016,18 @@
 											<span class="quarter centeralign">
 
 												<input
-													class    = "<% $student->id %>"
+													class    = "<% $student %>"
 													type     = "number"
 													step     = "<% $step %>"
-													name     = "<% $student->id %>_<% $score %>"
+													name     = "<% $student %>_<% $score %>"
 													size     = "5"
 													min      = "<% $min_subpoints{$score} %>"
 													max      = "<% $max_subpoints{$score} %>"
-													value    = "<% $ARGS{$student->id."_".$score} %>"
+													value    = "<% $ARGS{$student."_".$score} %>"
 													tabindex = <% $index++ %>
 													onBlur = "speakerTotal(
-														'<% $student->id %>',
-														'<% $entry->id %>'
+														'<% $student %>',
+														'<% $ballot %>'
 													);"
 												>
 											</span>
@@ -1225,19 +1036,19 @@
 
 										<span class="quarter centeralign">
 											<input
-												class    = "<% $entry->id %>"
+												class    = "<% $ballot %>"
 												type     = "number"
 												step     = "<% $step %>"
-												name     = "<% $ballot.$student %>_points"
-												id       = "<% $ballot.$student %>_points"
+												name     = "<% $student %>_points"
+												id       = "<% $student %>_points"
 												size     = "5"
 												min      = "<% $min_subpoints{"total"} %>"
 												max      = "<% $max_subpoints{"total"} %>"
-												value    = "<% $ARGS{$ballot.$student."_points"} %>"
+												value    = "<% $ARGS{$student."_points"} %>"
 												tabindex = <% $index++ %>
 												onChange = "checkTotal(
-													'<% $student->id %>',
-													'<% $entry->id %>'
+													'<% $student %>',
+													'<% $ballot %>'
 												);"
 											>
 										</span>
@@ -1251,13 +1062,13 @@
 											<input
 												type     = "number"
 												class    = "<% $class %>"
-												ballotID = "<% $ballot->id %>"
+												ballotID = "<% $ballot %>"
 												step     = "<% $step %>"
-												name     = "<% $ballot.$student %>_points"
+												name     = "<% $student %>_points"
 												size     = "5"
 												min      = "<% $min_points %>"
 												max      = "<% $max_points %>"
-												value    = "<% $ARGS{$ballot.$student."_points"} %>"
+												value    = "<% $ARGS{$student."_points"} %>"
 												tabindex = <% $index++ %>
 											>
 										</span>
@@ -1275,7 +1086,7 @@
 								<td>
 									<input
 										type  = "checkbox"
-										name  = "<% $ballot->id %>_tv"
+										name  = "<% $ballot %>_tv"
 										value = "1"
 									>
 								</td>
@@ -1285,7 +1096,7 @@
 								<td>
 									<input
 										type  = "checkbox"
-										name  = "<% $ballot->id %>_forfeit"
+										name  = "<% $ballot %>_forfeit"
 										value = "1"
 									>
 								</td>
@@ -1298,7 +1109,7 @@
 						<td>
 							<input
 								type     = "checkbox"
-								name     = "<% $ballot->id %>_win"
+								name     = "<% $ballot %>_win"
 								tabindex = <% $index++ %>
 							>
 						</td>
@@ -1338,13 +1149,13 @@
 							<td
 								class="rightalign bluetext semibold"
 								colspan="<% $columns %>"
-							><% $entry->code %> TOTAL:</td>
+							>Entry <% $ballot %> TOTAL:</td>
 
 							<td class="centeralign">
 								<input
-									ballotID = "<% $ballot->id %>"
+									ballotID = "<% $ballot %>"
 									type    = "number"
-									id      = "<% $entry->id %>_total"
+									id      = "<% $ballot %>_total"
 									class   = "totals"
 									readonly
 								>
@@ -1383,12 +1194,11 @@
 
 							<option value="">Choose Winning Entry</option>
 
-%							foreach my $ballot (@ballots) {
-%								next unless $ballot->entry;
+%							foreach my $ballot (1 .. $ballot_count) {
 								<option
-									value="<% $ballot->id %>"
-									<% $ARGS{"winner"} == $ballot->id ? "selected" : "" %>
-								><% $ballot->entry->code %></option>
+									value="<% $ballot %>"
+									<% $ARGS{"winner"} == $ballot ? "selected" : "" %>
+								>Entry <% $ballot %></option>
 %							}
 						</select>
 					</td>
@@ -1556,7 +1366,7 @@
 				<h4>General Feedback</h4>
 			</span>
 
-%			if (scalar @ballots > 3) {
+%			if ($ballot_count > 3) {
 
 				<span class="twothirds rightalign">
 
@@ -1574,21 +1384,16 @@
 							<option value="rfd">Everyone (Reason for Rankings)</option>
 
 <%perl>
-							foreach my $ballot (@ballots) {
+							foreach my $ballot (1 .. $ballot_count) {
 
 								next if $type eq "congress";
 
-								my $entry = $ballot->entry if $ballot->entry;
-								next unless $entry;
-								next if $entry->dropped;
+								my $entry = "Entry ".$ballot;
 
 </%perl>
 								<option
-									value="<% $ballot->id %>"
-								><% $entry->code
-									%>&nbsp;&nbsp;<%
-									$entry->code ne $entry->name ? $entry->name : ""
-								%></option>
+									value="<% $ballot %>"
+								><% $entry %></option>
 %							}
 
 						</select>
@@ -1599,7 +1404,7 @@
 
 		<ul id="tabnav">
 
-%			if (scalar @ballots < 4) {
+%			if ($ballot_count < 4) {
 
 				<li id="header_rfd" class="selected commentzing">
 					<a onclick="return doneSwitch('rfd')">
@@ -1610,20 +1415,11 @@
 					</a>
 				</li>
 
-<%perl>
-
-				@ballots = sort {$a->entry->code cmp $b->entry->code} @ballots;
-
-				foreach my $ballot (@ballots) {
-
-					next unless $ballot->entry;
-
-</%perl>
-
-					<li id="header_<% $ballot->id %>" class="commentzing">
+%				foreach my $ballot ($ballot_count) {
+					<li id="header_<% $ballot %>" class="commentzing">
 						<a
-							onclick="return doneSwitch(<% $ballot->id %>)"
-						><% $ballot->entry->code %></a>
+							onclick="return doneSwitch(<% $ballot %>)"
+						>Entry <% $ballot %></a>
 					</li>
 %				}
 %			}
@@ -1641,10 +1437,7 @@
 			</p>
 
 <%perl>
-			my $rfd = Tab::Score->search(
-				tag    => "rfd",
-				ballot => $ballots[0]->id
-			)->first if @ballots;
+			my $rfd;
 </%perl>
 
 			<div class="full centeralign">
@@ -1658,58 +1451,32 @@
 		</div>
 
 %		unless ($event->type eq "congress") {
-%		BALLOT:
-%		foreach my $ballot (@ballots) {
+%			BALLOT:
+%			foreach my $ballot (1 .. $ballot_count) {
 
-			<div
-				id    = "box_<% $ballot->id %>"
-				class = "commentary hidden"
-			>
+				<div
+					id    = "box_<% $ballot %>"
+					class = "commentary hidden"
+				>
 
-<%perl>
+%					my $code = "Entry $ballot";
 
-				my $entry = $ballot->entry;
+					<p class="semibold bluetext centeralign full">
+						These comments go only to <% $code %> &amp; coaches
+					</p>
 
-				unless ($entry) {
-					$ballot->delete;
-					next BALLOT;
-				}
+%					my $comments;
 
-				my $code = $entry->code;
-				$code .= " &ndash; ".$entry->school->code if $ballot_school_code;
-				$code .= " &ndash; ".$entry->school->name if $ballot_school_name;
-				$code .= " &ndash; ".$entry->name if $ballot_entry_name;
-				$code .= " &ndash; ".$entry->setting("title") if $ballot_entry_title;
-				if ($ballot_entry_first_name) {
-					foreach my $student ($entry->students) {
-						$code .= " &ndash; ".$student->first;
-					}
-				}
+					<div class="row centeralign">
+						<textarea
+							name = "comments_<% $ballot %>"
+							rows = "15"
+							cols = "60"
+						><% $comments ? $comments->content : "" %></textarea>
+					</div>
 
-</%perl>
-
-				<p class="semibold bluetext centeralign full">
-					These comments go only to <% $code %> &amp; coaches
-				</p>
-
-<%perl>
-				my $comments = Tab::Score->search(
-					tag    => "comments",
-					ballot => $ballot->id
-				)->first;
-</%perl>
-
-				<div class="row centeralign">
-					<textarea
-						name = "comments_<% $ballot->id %>"
-						rows = "15"
-						cols = "60"
-					><% $comments ? $comments->content : "" %></textarea>
 				</div>
-
-			</div>
-
-%		}
+%			}
 %		}
 
 		<div class="libl full rightalign">
@@ -1766,7 +1533,7 @@
 					Room:
 				</span>
 				<span class="threequarter">
-					<% $panel->room ? $panel->room->name : "" %>
+					A123
 				</span>
 			</div>
 
@@ -1787,35 +1554,10 @@
 					</span>
 
 					<span class="threequarter">
-						<% $panel->flight %>
+						1
 					</span>
 
 				</div>
-%			}
-
-%			if ($round->setting("num_judges") > 1) {
-
-				<div class="row nospace">
-
-				<span class="quarter semibold">
-					Panel:
-				</span>
-
-				<span class="threequarters nospace">
-
-%					foreach my $other_judge ($m->comp("/funclib/panel_judges.mas", panel => $panel)) {
-
-%						next if $other_judge->id == $judge->id;
-
-						<div class="nowrap padless marno">
-							<% $other_judge->code." ".$other_judge->first." ".$other_judge->last %>
-						</div>
-%					}
-
-				</span>
-
-				</div>
-
 %			}
 
 			<a
@@ -1917,7 +1659,7 @@
 			</span>
 
 			<& "/funclib/stopwatch.mas",
-				label   => $panel->id."_timer",
+				label   => "training_timer",
 				default => $event_settings{"default_time"}
 			&>
 
@@ -1930,12 +1672,12 @@
 					$event_settings{"prep_time"} = 4;
 				}
 
-				foreach my $ballot (@ballots) {
+				foreach my $ballot (1 .. $ballot_count) {
 </%perl>
 
 					<& "/funclib/stopwatch.mas",
-						label   => $ballot->id."_timer",
-						title   => $ballot->entry->code." Prep",
+						label   => $ballot."_timer",
+						title   => $ballot." Prep",
 						default => $event_settings{"prep_time"}
 					&>
 
@@ -1953,7 +1695,6 @@
 			) {
 
 				next unless $opanel->round->published;
-				next if $opanel->id == $panel->id;
 
 </%perl>
 				<a
@@ -1975,7 +1716,6 @@
 				)
 			) {
 
-				next if $opanel->id == $panel->id;
 </%perl>
 
 				<a
