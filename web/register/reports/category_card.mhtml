@@ -1,0 +1,320 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$session
+	$category_id => undef
+	$school_id => undef
+</%args>
+<%init>
+
+    my $now = DateTime->now;
+    $now->set_time_zone($tourn->tz) if $tourn->tz;
+
+	if ($category_id) {
+
+		my $category = $tourn->categories( id => $category_id )->first;
+		my $name = $category->abbr;
+		$name =~ s/[\W_]//g;
+
+		my $school;
+
+		if ($school_id) {
+			$school = Tab::School->retrieve($school_id);
+			my $school_name = $school->name;
+			$school_name =~ s/[\W_]//g;
+			$name .= "-".$school_name
+		}
+
+		my $filename = "CategoryRegistration-".$name."-".$session->id;
+		my $filepath = $Tab::file_root."tmp/".$filename;
+
+		$m->comp("/funclib/printout.mas",
+			tourn    => $tourn,
+			filename => $filename,
+			head     => 1
+		);
+
+		open (TEXOUT, ">>$filepath.tex");
+
+		my $logo_file = $tourn_settings->{"logo"};
+
+		if ($logo_file && (not defined -e "$Tab::file_root/tmp/".$logo_file)) {
+			system "cd $Tab::file_root/tmp;
+			$Tab::latex_path_prefix/wget ".$Tab::s3_url."/".$tourn->id."/".$logo_file;
+		}
+
+		unless ($logo_file && -e "$Tab::file_root/tmp/".$logo_file) {
+			undef $logo_file;
+		}
+
+		# Get student registrations
+
+		my $dbh = Tab::DBI->db_Main();
+		my $limit;
+		$limit = " and school.id = ".$school->id if $school;
+
+		my $student_reg_sth = $dbh->prepare("
+
+			select
+				entry.id,
+				entry.code, entry.name,
+				school.id, school.name, school.state,
+				district.id, district.name, district.code,
+				region.code
+
+			from (entry, school, event)
+
+				left join district on school.district = district.id
+				left join region on school.region = region.id
+
+			where event.category = ?
+			and event.id = entry.event
+			and entry.active = 1
+			and entry.school = school.id
+
+			$limit
+
+			order by school.state, school.name
+		");
+
+		$student_reg_sth->execute($category->id);
+
+		my %schools;
+
+		while (
+			my (
+				$entry_id,
+				$entry_code, $entry_name,
+				$school_id, $school_name, $school_state,
+				$district_id, $district_name, $district_code,
+				$region_code
+			) = $student_reg_sth->fetchrow_array()
+		) {
+
+			unless ($schools{$school_id}{"name"}) {
+				$schools{$school_id}{"name"} = $school_name;
+				$schools{$school_id}{"state"} = $school_state;
+				$school_name =~ s/^The //g;
+				$schools{$school_id}{"sort_name"} = $school_name;
+				$schools{$school_id}{"district"} = $district_id;
+				$schools{$school_id}{"district_name"} = $district_name;
+				$schools{$school_id}{"district_code"} = $district_code;
+				$schools{$school_id}{"state_code"} = $region_code;
+			}
+
+			$schools{$school_id}{"entries"}{$entry_id}{"code"} = $entry_code;
+			$schools{$school_id}{"entries"}{$entry_id}{"name"} = $entry_name;
+		}
+
+		$student_reg_sth->finish();
+
+		my @keys_in_order =
+			sort {
+				$schools{$a}{"state"} cmp $schools{$b}{"state"}
+				|| $schools{$a}{"sort_name"} cmp $schools{$b}{"sort_name"}
+			}
+			keys %schools;
+
+		my $judge_reg_sth = $dbh->prepare("
+
+			select
+				judge.id,
+				judge.code, judge.first, judge.last,
+				person.email, school.id
+
+			from (judge, school)
+				left join person on judge.person = person.id
+
+			where judge.category = ?
+			and judge.school = school.id
+
+			$limit
+
+		");
+
+		$judge_reg_sth->execute($category->id);
+
+		while (
+			my (
+				$judge_id, $judge_code, $judge_first, $judge_last, $person_email, $school_id
+			) = $judge_reg_sth->fetchrow_array()
+		) {
+			$schools{$school_id}{"judges"}{$judge_id}{"code"} = $judge_code;
+			$schools{$school_id}{"judges"}{$judge_id}{"name"} = $judge_first." ".$judge_last;
+			$schools{$school_id}{"judges"}{$judge_id}{"person"} = $person_email;
+		}
+
+		my $message = $m->comp(
+			"/funclib/print_format.mas",
+			message => $tourn_settings->{"registration_notice"}
+		);
+
+		my $jm = $category->setting("judge_sheet_notice");
+
+		my $judge_message = $m->comp(
+			"/funclib/print_format.mas",
+			message => $jm
+		);
+
+		chomp $judge_message;
+
+		#Print the pages
+
+		my $start_year = $tourn->start->year;
+		my $tourn_name = $tourn->name;
+
+		foreach my $school_id (@keys_in_order) {
+
+			print TEXOUT "\\noindent\n";
+
+			if ($logo_file) {
+				print TEXOUT "\\begin{minipage}[l]{1.5in}\n";
+				print TEXOUT "\\includegraphics[height=1in,width=1in,keepaspectratio]{".$logo_file."}\n";
+				print TEXOUT "\\end{minipage}\n";
+				print TEXOUT "\\begin{minipage}[r]{5.5in}\n";
+			} else {
+				print TEXOUT "\\begin{minipage}[r]{6.75in}\n";
+			}
+
+			print TEXOUT "\\strut\n";
+			print TEXOUT "\\hfill\n";
+
+			print TEXOUT "{\\LARGE \\bf ".$start_year." ".Tab::texify($tourn_name)." } \n";
+			print TEXOUT "\\medskip\n\\newline\n";
+			print TEXOUT "\\strut\n";
+			print TEXOUT "\\hfill\n";
+			print TEXOUT "{\\Large \\bf \\color{black!64}  ".uc($category->name)." REGISTRATION } \n";
+			print TEXOUT "\\end{minipage}\n";
+
+			print TEXOUT "\\vspace{.2in}\n";
+			print TEXOUT "\\newline\n";
+
+			print TEXOUT "\\begin{minipage}[l]{5in}\n";
+			print TEXOUT "{\\bf \\huge ";
+			print TEXOUT "\\righthyphenmin=10 \\lefthyphenmin=10 \n";
+			print TEXOUT "\\raggedright ";
+			print TEXOUT Tab::texify($schools{$school_id}{"school_name"});
+			print TEXOUT "}  \n";
+
+			print TEXOUT "\\end{minipage}\n";
+			print TEXOUT "\\begin{minipage}[r]{2in}\n";
+
+			print TEXOUT "\\hfill ";
+			print TEXOUT "{\\bf \\color{black!64}  \\Large ";
+			print TEXOUT Tab::texify($schools{$school_id}{"district_name"});
+			print TEXOUT "} \n";
+			print TEXOUT "\\smallskip\n";
+			print TEXOUT "\\newline\n";
+
+			print TEXOUT "\\noindent ";
+			print TEXOUT "\\strut \\hfill ";
+			print TEXOUT "{\\bf \\color{black!64}  \\Large ";
+			print TEXOUT Tab::texify($schools{$school_id}{"state"});
+			print TEXOUT "} \n";
+
+			print TEXOUT "\\end{minipage}\n";
+
+			print TEXOUT "\\medskip\n";
+			print TEXOUT "\\newline\n";
+
+			print TEXOUT "\\textsb{\\LARGE Entry}\n";
+			print TEXOUT "\\smallskip\n";
+			print TEXOUT "\\newline\n";
+
+			if (defined $message) {
+				print TEXOUT "\\noindent\n ";
+				print TEXOUT $message;
+				print TEXOUT "\\smallskip\n";
+				print TEXOUT "\\newline \n ";
+			}
+
+			print TEXOUT "\\hrulefill";
+
+			foreach my $entry_id (keys %{$schools{$school_id}{"entries"}}) {
+
+				print TEXOUT "\\smallskip\n";
+				print TEXOUT "\\newline\n";
+				print TEXOUT "\\normalsize\n";
+
+				print TEXOUT Tab::texify($schools{$school_id}{"entries"}{$entry_id}{"code"});
+				print TEXOUT "\\hfill\n";
+				print TEXOUT Tab::texify($schools{$school_id}{"entries"}{$entry_id}{"name"});
+
+				print TEXOUT "\\newline\n";
+				print TEXOUT "\\hrulefill";
+			}
+
+			print TEXOUT "\\medskip\n";
+			print TEXOUT "\\newline\n";
+			print TEXOUT "\\textsb{\\LARGE Judging}\n";
+			print TEXOUT "\\smallskip\n";
+			print TEXOUT "\\newline\n";
+
+			if (defined $judge_message) {
+				print TEXOUT "\\vspace{2mm}\n";
+				print TEXOUT "\\newline \n ";
+
+				print TEXOUT "\\noindent\n ";
+				print TEXOUT $judge_message;
+			}
+
+			print TEXOUT "\\hrulefill";
+
+			foreach my $judge_id (keys %{$schools{$school_id}{"judges"}}) {
+
+				print TEXOUT "\\smallskip\n";
+				print TEXOUT "\\newline\n";
+				print TEXOUT "\\normalsize\n";
+
+				print TEXOUT Tab::texify($schools{$school_id}{"judges"}{$judge_id}{"code"});
+				print TEXOUT "\\hfill\n";
+				print TEXOUT Tab::texify($schools{$school_id}{"judges"}{$judge_id}{"name"});
+
+				print TEXOUT "\\newline\n";
+				print TEXOUT "\\hrulefill";
+			}
+
+			print TEXOUT "\\newpage\n";
+
+		}
+
+		$m->comp("/funclib/printout.mas",
+			tourn    => $tourn,
+			filename => $filename,
+			tail     => 1
+		);
+
+	}
+
+</%init>
+
+	<div class="main">
+
+		<form action="category_card.mhtml" method="post">
+
+			<h5>Choose a judge category to print registration sheets:</h5>
+
+			<div class="full even">
+
+				<span class="threequarters">
+					<select name="category_id" class="fixedbig">
+						<option value=""></option>
+%						foreach my $category ($tourn->categories) {
+							<option
+								value="<% $category->id %>"
+							><% $category->name %></option>
+%						}
+					</select>
+				</span>
+
+				<span class="quarters">
+					<input type="submit" value="Print">
+				</span>
+
+			</div>
+
+
+		</form>
+
+	</div>
+
