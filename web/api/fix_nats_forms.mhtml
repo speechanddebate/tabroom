@@ -1,0 +1,124 @@
+<%args>
+
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+
+		select school.id, school.name, release_forms.value_text,
+			student.id, student.first, student.last
+
+		from school, entry, entry_student es, student, school_setting release_forms
+
+			where school.tourn = ?
+			and school.id = entry.school
+			and entry.id = es.entry
+			and entry.active = 1
+			and es.student = student.id
+			and release_forms.school = school.id
+			and release_forms.tag = 'release_forms'
+
+		group by student.id
+	");
+
+	$sth->execute(11965);
+
+	my %schools;
+
+	while (
+		my (
+			$school_id, $school_name,
+			$release_forms_value_text,
+			$student_id, $student_first, $student_last
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($schools{$school_id}) {
+			$schools{$school_id}{"name"} = $school_name;
+			$schools{$school_id}{"forms"} = JSON::decode_json($release_forms_value_text);
+		}
+
+		$schools{$school_id}{"students"}{$student_id}{"first"} = $student_first;
+		$schools{$school_id}{"students"}{$student_id}{"last"}  = $student_last;
+	}
+
+	$sth->finish();
+
+	$sth = $dbh->prepare("
+
+		select school.id, student.id, student.first, student.last
+
+		from tab2.school, tab2.student
+
+			where school.tourn = ?
+			and school.chapter = student.chapter
+
+		group by student.id
+
+	");
+
+	$sth->execute(11965);
+
+	while (
+		my (
+			$school_id, $student_id, $student_first, $student_last
+		) = $sth->fetchrow_array()
+	) {
+		$schools{$school_id}{"old"}{$student_first." ".$student_last} = $student_id;
+	}
+
+	$sth->finish;
+
+	$m->clear_buffer();
+
+	$m->print("<h5>Checking forms against second database</h5>");
+
+	my $update_sth = $dbh->prepare("
+		update school_setting
+			set school_setting.value_text = ?
+			where school_setting.school = ?
+			and school_setting.tag = 'release_forms'
+	");
+
+	foreach my $school_id (keys %schools) {
+
+		foreach my $student_id (keys %{$schools{$school_id}{"students"}}) {
+
+			next if $schools{$school_id}{"forms"}{$student_id};
+
+			$m->print("<p>Form not found for ".$schools{$school_id}{"name"}." student $student_id: ");
+
+			my $student_first = $schools{$school_id}{"students"}{$student_id}{"first"};
+			my $student_last = $schools{$school_id}{"students"}{$student_id}{"last"};
+
+			my $old_sid = $schools{$school_id}{"old"}{$student_first." ".$student_last};
+
+			if ($old_sid) {
+
+				if ($schools{$school_id}{'forms'}{$old_sid}) {
+
+					$m->print("...found form for $old_sid that matches.  Correcting JSON</p>");
+					$schools{$school_id}{"forms"}{$student_id} = $schools{$school_id}{"forms"}{$old_sid};
+					delete $schools{$school_id}{'forms'}{$old_sid};
+
+				} else {
+					$m->print("...found old student $old_sid but still no form.</p>");
+				}
+
+			} else {
+				$m->print("Found no old student for $student_first $student_last</p>");
+			}
+
+			$update_sth->execute(JSON::encode_json($schools{$school_id}{'forms'}), $school_id);
+			$update_sth->finish();
+			$m->flush_buffer();
+		}
+	}
+
+	$dbh->disconnect();
+
+	$m->print("<h4>Done</h4>");
+
+</%init>
