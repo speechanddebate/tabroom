@@ -11,239 +11,16 @@
 	my $limit;
 	my $tz = $tourn->tz;
 
-	if ($category_id && $category_id eq int($category_id)) {
-		$limit .= " and judge.category = ".$category_id;
-	}
+	my %data = $m->comp("/funclib/judge_card.mas",
+		tourn          => $tourn,
+		tourn_settings => $tourn_settings,
+		category_id    => $category_id,
+		school_id      => $school_id,
+		judge_id       => $judge_id,
+	);
 
-	if ($school_id && $school_id eq int($school_id)) {
-		$limit .= " and judge.school = ".$school_id;
-	}
-
-	if ($judge_id && $judge_id eq int($judge_id)) {
-		$limit .= " and judge.id = ".$judge_id;
-	}
-
-	my $dbh = Tab::DBI->db_Main();
-
-	my $jpool_sth = $dbh->prepare("
-		select jpool.id, jpool.name, site.name,
-			timeslot.name, timeslot.start, timeslot.end,
-			rtimeslot.name, rtimeslot.start, rtimeslot.end,
-			show_judges.value,
-			message.value_text
-
-		from (jpool, category)
-
-		left join site on jpool.site = site.id
-		left join jpool_setting st on st.jpool = jpool.id
-			and st.tag = 'standby_timeslot'
-		left join timeslot on timeslot.id = st.value
-
-		left join jpool_setting show_judges on show_judges.jpool = jpool.id
-			and show_judges.tag = 'show_judges'
-		left join jpool_setting message on message.jpool = jpool.id
-			and message.tag = 'message'
-		left join jpool_round on jpool_round.jpool = jpool.id
-		left join round on jpool_round.round = round.id
-		left join timeslot rtimeslot on rtimeslot.id = round.timeslot
-
-		where jpool.category = category.id
-			and category.tourn = ?
-	");
-
-	my %jpools;
-	my %times;
-
-	$jpool_sth->execute($tourn->id);
-
-	while (
-		my (
-			$jpool_id, $jpool_name, $site_name,
-			$timeslot_name, $timeslot_start, $timeslot_end,
-			$rtimeslot_name, $rtimeslot_start, $rtimeslot_end,
-			$show_judges, $message
-		) = $jpool_sth->fetchrow_array()
-	) {
-
-		$jpools{$jpool_id}{name} = $jpool_name;
-		$jpools{$jpool_id}{site} = $site_name;
-
-		unless ($timeslot_name && $timeslot_start) {
-			$timeslot_name  = $rtimeslot_name;
-			$timeslot_start = $rtimeslot_start;
-		}
-
-		$jpools{$jpool_id}{timeslot} = $timeslot_name;
-
-		my $start_dt = $times{$timeslot_start};
-
-		unless ($start_dt) {
-			if ($timeslot_start) {
-				$start_dt = DateTime::Format::MySQL->parse_datetime($timeslot_start);
-				$start_dt->set_time_zone("UTC");
-				$start_dt->set_time_zone($tz);
-				$times{$timeslot_start} = $start_dt;
-			}
-		}
-
-		Tab::debuglog("Timeslot start $timeslot_start yielded startdt $start_dt") if $jpool_id == 35177;
-
-		if ($start_dt) {
-			$jpools{$jpool_id}{epoch} = $start_dt->epoch;
-			$jpools{$jpool_id}{start} = $start_dt;
-		}
-
-		$jpools{$jpool_id}{show_judges} = $show_judges;
-		$jpools{$jpool_id}{message} = $message;
-
-	}
-
-	my $judge_sth = $dbh->prepare("
-		select
-			judge.id, judge.code, judge.first, judge.middle, judge.last,
-			person.id, person.email,
-			school.id, school.name, school.state,
-			category.id, category.abbr, jpool_judge.jpool
-
-		from (judge, category, jpool_judge)
-
-		left join school on judge.school = school.id
-		left join person on judge.person = person.id
-
-		where category.tourn = ?
-			and category.id = judge.category
-			and judge.id = jpool_judge.judge
-			$limit
-	");
-
-	my %judges;
-
-	$judge_sth->execute($tourn->id);
-
-	while (
-		my (
-			$judge_id, $code, $first, $middle, $last,
-			$person_id, $person_email,
-			$school_id, $school_name, $school_state,
-			$category_id, $category_abbr, $jpool_id
-		) = $judge_sth->fetchrow_array()
-	) {
-
-		unless ($judges{$judge_id}) {
-
-			$judges{$judge_id}{"code"} = $code;
-			$judges{$judge_id}{"first"} = $first;
-			$judges{$judge_id}{"middle"} = $middle;
-			$judges{$judge_id}{"last"} = $last;
-
-			$judges{$judge_id}{"person"} = $person_id;
-			$judges{$judge_id}{"email"} = $person_email;
-			$judges{$judge_id}{"category"} = $category_abbr;
-			$judges{$judge_id}{"category_id"} = $category_id;
-
-			$judges{$judge_id}{"school_id"} = $school_id;
-			$judges{$judge_id}{"school_name"} = $school_name;
-			$judges{$judge_id}{"school_state"} = $school_state;
-
-			$school_name =~ s/^The //g;
-			$judges{$judge_id}{"school_sort_name"} = $school_name;
-		}
-
-		$judges{$judge_id}{"pools"}{$jpool_id}++;
-		my $epoch = $jpools{$jpool_id}{"epoch"};
-
-		Tab::debuglog("Judge $judge_id is in pool $jpool_id with epoch $epoch") if $jpool_id == 35177;
-
-		$judges{$judge_id}{epochs}{$epoch}{slot_id} = $jpool_id;
-		$judges{$judge_id}{epochs}{$epoch}{slot_type} = "jpool";
-
-	}
-
-	my $rounds_sth = $dbh->prepare("
-		select
-			judge.id,
-			event.abbr,
-			round.id, round.start_time, round.name, round.label,
-			timeslot.id, timeslot.start, timeslot.end,
-			panel.letter, panel.flight,
-			room.name, site.name
-
-		from (judge, ballot, panel, round, event, category, timeslot)
-
-			left join room on panel.room = room.id
-			left join site on round.site = site.id
-
-		where category.tourn = ?
-			and category.id = judge.category
-			$limit
-
-			and judge.id = ballot.judge
-			and ballot.panel = panel.id
-			and panel.round = round.id
-			and round.timeslot = timeslot.id
-			and round.event = event.id
-	");
-
-	my %rounds;
-	$rounds_sth->execute($tourn->id);
-
-	while (
-		my (
-			$judge_id,
-			$event_abbr,
-			$round_id, $round_start, $round_name, $round_label,
-			$timeslot_id, $timeslot_start, $timeslot_end,
-			$panel_letter, $panel_flight,
-			$room_name, $site_name
-		) = $rounds_sth->fetchrow_array()
-	) {
-
-		unless ($rounds{$judge_id}{$round_id}) {
-
-			$rounds{$judge_id}{$round_id}{"event"} = $event_abbr;
-
-			if ($round_label) {
-				$rounds{$judge_id}{$round_id}{"round_name"} = $round_label;
-			} else {
-				$rounds{$judge_id}{$round_id}{"round_name"} = $round_name;
-			}
-
-			$rounds{$judge_id}{$round_id}{"timeslot"} = $timeslot_id;
-			$rounds{$judge_id}{$round_id}{"letter"}   = $panel_letter;
-			$rounds{$judge_id}{$round_id}{"flight"}   = $panel_flight;
-			$rounds{$judge_id}{$round_id}{"room"}     = $room_name;
-			$rounds{$judge_id}{$round_id}{"site"}     = $site_name;
-
-			my $round_start_dt = $times{$round_start};
-			unless ($round_start_dt) {
-				$round_start_dt = DateTime::Format::MySQL->parse_datetime($round_start);
-				$round_start_dt->set_time_zone("UTC");
-				$round_start_dt->set_time_zone($tz);
-				$times{$round_start} = $round_start_dt;
-			}
-
-			my $start_dt = $times{$timeslot_start};
-			unless ($start_dt) {
-				$start_dt = DateTime::Format::MySQL->parse_datetime($timeslot_start);
-				$start_dt->set_time_zone("UTC");
-				$start_dt->set_time_zone($tz);
-				$times{$timeslot_start} = $start_dt;
-			}
-
-			my $epoch;
-
-			if ($round_start_dt) {
-				$rounds{$judge_id}{$round_id}{start} = $round_start_dt;
-				$epoch = $round_start_dt->epoch;
-			} else {
-				$rounds{$judge_id}{$round_id}{start} = $start_dt;
-				$epoch = $start_dt->epoch;
-			}
-
-			$judges{$judge_id}{epochs}{$epoch}{slot_id} = $round_id;
-			$judges{$judge_id}{epochs}{$epoch}{slot_type} = "round";
-		}
-	}
+	# Name the file.  This shouldn't really require 50 lines of code but
+	# whatever.
 
 	my $name;
 
@@ -271,21 +48,6 @@
 		$name .= "-".$judge_name
 	}
 
-	my %messages;
-
-	foreach my $category ($tourn->categories) {
-
-        my $jm = $category->setting("judge_sheet_notice");
-
-        my $judge_message = $m->comp(
-            "/funclib/print_format.mas",
-            message => $jm
-        );
-
-        chomp $judge_message;
-		$messages{$category->id} = $judge_message;
-	}
-
 	my $filename = "JudgeCards-".$name."-".$session->id;
 	my $filepath = $Tab::file_root."tmp/".$filename;
 
@@ -298,6 +60,8 @@
 
 	open (TEXOUT, ">>$filepath.tex");
 
+	# If the tournament has a logo try to be pretty about it.
+
 	my $logo_file = $tourn_settings->{"logo"};
 
 	if ($logo_file && (not defined -e "$Tab::file_root/tmp/".$logo_file)) {
@@ -309,6 +73,20 @@
 		undef $logo_file;
 	}
 
+	my %judges;
+	%judges = %{$data{"judges"}} if $data{"judges"};
+
+	my %messages;
+	%messages = %{$data{"messages"}} if $data{"messages"};
+
+	my %jpools;
+	%jpools = %{$data{"jpools"}} if $data{"jpools"};
+
+	my %rounds;
+	%rounds = %{$data{"rounds"}} if $data{"rounds"};
+
+	# Create each judge card and let 'er rip.
+
 	foreach my $judge_id (
 		sort {
 			$judges{$a}{"school_state"} cmp $judges{$b}{"school_state"}
@@ -318,14 +96,18 @@
 	) {
 
 		print TEXOUT "\\begin{minipage}[l][][t]{5.35in}\n";
+
 			print TEXOUT "\\textsb{\\huge ";
 			print TEXOUT "\\parbox{1in}{";
-			print TEXOUT Tab::texify($judges{$judge_id}{"code"});
-			print TEXOUT "}";
-			print TEXOUT "\\parbox{4.25in}{";
-			print TEXOUT Tab::texify($judges{$judge_id}{"last"}),", ";
-			print TEXOUT Tab::texify($judges{$judge_id}{"first"});
-			print TEXOUT " ".Tab::texify($judges{$judge_id}{"middle"}) if $judges{$judge_id}{"middle"};
+				print TEXOUT Tab::texify($judges{$judge_id}{"code"});
+				print TEXOUT "}";
+				print TEXOUT "\\parbox{4.25in}{";
+				print TEXOUT Tab::texify($judges{$judge_id}{"last"}),", ";
+				print TEXOUT Tab::texify($judges{$judge_id}{"first"});
+				if ($judges{$judge_id}{"middle"}) {
+					print TEXOUT " ".Tab::texify($judges{$judge_id}{"middle"});
+				}
+
 			print TEXOUT "}}\n";
 
 			print TEXOUT "\\smallskip\n";
@@ -333,10 +115,10 @@
 
 			print TEXOUT "{\\Large ";
 			print TEXOUT "\\parbox{1in}{";
-			print TEXOUT Tab::texify($judges{$judge_id}{"school_state"});
+				print TEXOUT Tab::texify($judges{$judge_id}{"school_state"});
 			print TEXOUT "} ";
 			print TEXOUT "\\parbox{4.25in}{";
-			print TEXOUT Tab::texify($judges{$judge_id}{"school_name"});
+				print TEXOUT Tab::texify($judges{$judge_id}{"school_name"});
 			print TEXOUT "}}\n";
 
 			if ($judges{$judge_id}{"person_email"}) {
@@ -346,6 +128,7 @@
 				print TEXOUT "Linked to ".Tab::texify($judges{$judge_id}{"person_email"});
 				print TEXOUT " \\hfill ";
 			}
+
 		print TEXOUT "\\end{minipage}\n";
 
 		if ($logo_file) {
@@ -445,9 +228,9 @@
 			print TEXOUT " \\strut ";
 			print TEXOUT " \\hfill ";
 			print TEXOUT "\\parbox{6in}{\n";
-			print TEXOUT "\\raggedright\n ";
-			print TEXOUT "\\normalsize\n ";
-			print TEXOUT $messages{$judges{$judge_id}{category_id}};
+				print TEXOUT "\\raggedright\n ";
+				print TEXOUT "\\normalsize\n ";
+				print TEXOUT $messages{$judges{$judge_id}{category_id}};
 			print TEXOUT " } \n";
 			print TEXOUT " \\hfill ";
 			print TEXOUT " \\strut ";
