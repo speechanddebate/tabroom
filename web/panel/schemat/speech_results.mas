@@ -7,20 +7,102 @@
 </%args>
 <%init>
 
-		my @done_panels = $m->comp(
-			"/funclib/round_results.mas",
-			round => $round
-		);
+	my $dbh = Tab::DBI->db_Main();
 
-		my $points;
+	my $sth = $dbh->prepare("
+		select
+		panel.id, panel.letter, panel.flight, panel.bye,
+		judge.id, judge.code, judge.first, judge.last,
+		entry.id, entry.code, entry.name,
+		school.code, school.name,
+		region.code, region.name,
+		ballot.audit, ballot.bye, ballot.forfeit,
+		winloss.value,
+			points.value, points_student.last, points_student.first,
+			rank.value, rank_student.last, rank_student.first
 
-		my $tiebreak_set = $round->tiebreak_set;
+		from (panel, entry, ballot)
 
-		if ($tiebreak_set) {
-			foreach my $tiebreak ($tiebreak_set->tiebreaks) {
-				$points++ if $tiebreak->name eq "points";
-			}
+		left join judge on judge.id = ballot.judge
+		left join school on entry.school = school.id
+		left join region on school.region = region.id
+		left join score winloss on winloss.ballot = ballot.id and winloss.tag = 'ballot'
+		left join score points on points.ballot = ballot.id and points.tag = 'points'
+			left join student points_student on points_student.id = points.student
+		left join score rank on rank.ballot = ballot.id and rank.tag = 'rank'
+			left join student rank_student on rank_student.id = rank.student
+
+		where panel.round = ?
+		and panel.id = ballot.panel
+		and ballot.entry = entry.id
+		and ballot.audit = 1
+		group by ballot.id
+	");
+
+	my %panels;
+
+	$sth->execute($round->id);
+
+	my %scores;
+
+	while (
+		my (
+			$panel_id, $panel_letter, $panel_flight, $panel_bye,
+			$judge_id, $judge_code, $judge_first, $judge_last,
+			$entry_id, $entry_code, $entry_name,
+			$school_code, $school_name,
+			$region_code, $region_name,
+			$ballot_speakerorder, $ballot_audit, $ballot_bye, $ballot_forfeit,
+			$winloss_value,
+				$points_value, $points_student_last, $points_student_first,
+				$rank_value, $rank_student_last, $rank_student_first
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($panels{$panel_id}{"letter"}) {
+			$panels{$panel_id}{"letter"} = $panel_letter;
+			$panels{$panel_id}{"flight"} = $panel_flight;
+			$panels{$panel_id}{"bye"} = $panel_bye;
 		}
+
+		unless ($panels{$panel_id}{"judge"}{$judge_id}) {
+			$panels{$panel_id}{"judge"}{$judge_id}{"name"} = $judge_code;
+			$panels{$panel_id}{"judge"}{$judge_id}{"name"} .= $judge_last;
+			$panels{$panel_id}{"judge"}{$judge_id}{"name"} .= ", ".$judge_first;
+		}
+
+		unless ($panels{$panel_id}{"entry"}{$entry_id}) {
+			$panels{$panel_id}{"entry"}{$entry_id}{"code"} = $entry_code;
+			$panels{$panel_id}{"entry"}{$entry_id}{"name"} = $entry_name;
+
+			$panels{$panel_id}{"entry"}{$entry_id}{"school_name"} = $school_name;
+			$panels{$panel_id}{"entry"}{$entry_id}{"school_code"} = $school_code;
+			$panels{$panel_id}{"entry"}{$entry_id}{"region_code"} = $region_code;
+			$panels{$panel_id}{"entry"}{$entry_id}{"region_name"} = $region_name;
+
+			$scores{region}++ if $region_name || $region_code;
+
+			$panels{$panel_id}{"entry"}{$entry_id}{"order"} = $ballot_speakerorder;
+			$panels{$panel_id}{"entry"}{$entry_id}{"forfeit"} = $ballot_forfeit;
+		}
+
+		if ($winloss_value) {
+			$panels{$panel_id}{"entry"}{$entry_id}{$judge_id}{"winloss"} = $winloss_value;
+			$scores{winloss}++;
+		}
+
+		if ($points_value) {
+			$panels{$panel_id}{"entry"}{$entry_id}{$judge_id}{"points"} = $points_value;
+			$scores{points}++;
+		}
+
+		if ($rank_value) {
+			$panels{$panel_id}{"entry"}{$entry_id}{$judge_id}{"rank"} = $rank_value;
+			$scores{rank}++;
+		}
+	}
+
+	my $num_scores = scalar(keys %scores);
 
 </%init>
 
@@ -28,7 +110,7 @@
 			<h5><% $round->realname %> Results</h5>
 		</span>
 
-		<span 
+		<span
 			id    = "round_results_buttonarea"
 			class = "half rightalign nospace"
 		>
@@ -49,35 +131,50 @@
 				<tr class="yellowrow">
 
 					<th class="smaller">
+						Section
+					</th>
+
+					<th class="smaller">
 						Room
 					</th>
 
 					<th class="smaller">
-						Code
+						Entry
 					</th>
 
 					<th class="smaller">
-						Name
+						Entry Name
 					</th>
 
 					<th class="smaller">
-						School
+						Entry School
 					</th>
 
-					<th class="smaller">
-						Judging
-					</th>
-
-					<th class="smaller">
-						Ranks
-					</th>
-
-%					if ($points) {
+%					if ($scores{regions}) {
 						<th class="smaller">
-							Points
+							Entry Region
 						</th>
 %					}
 
+					<th class="smaller nosort">
+						Judge
+					</th>
+
+%					if ($scores{winloss}) {
+						<th class="smaller nosort">
+							Win/Loss
+						</th>
+%					}
+%					if ($scores{rank}) {
+						<th class="smaller nosort">
+							Rank
+						</th>
+%					}
+%					if ($scores{points}) {
+						<th class="smaller nosort">
+							Points
+						</th>
+%					}
 				</tr>
 
 			</thead>
@@ -85,31 +182,23 @@
 			<tbody>
 <%perl>
 
-			my %seen = ();
+			foreach my $panel_id (
+				sort {
+					length($panels{$a}{"letter"}) <=> length($panels{$b}{"letter"})
+					|| $panels{$a}{"letter"} cmp $panels{$b}{"letter"}
+				} keys %panels
+			) {
 
-			@done_panels = grep { ! $seen{$_->id} ++ } @done_panels;
+				my @judges = sort {
+					$panels{$panel_id}{"judge"}{$a}{"name"} cmp $panels{$panel_id}{"judge"}{$b}{"name"}
+				} keys %{$panels{$panel_id}{"judge"}};
 
-			my %done_entry;
-
-			foreach my $done (@done_panels) {
-
-				my @judges = $m->comp('/funclib/panel_judges.mas', panel => $done);
-
-				my @entries = $m->comp('/funclib/panel_entries.mas', panel => $done);
-
-				my %eseen = ();
-				@entries = grep { ! $eseen{$_->id} ++ } @entries;
-
-				my @scores = $m->comp('/funclib/panel_scores.mas', panel => $done);
-
-				my %scores = ();
-
-				foreach my $score (@scores) {
-					push @{$scores{$score->judgeid."-".$score->entryid}}, $score;
-				}
-
-				foreach my $entry (sort {$a->side <=> $b->side} @entries) {
-
+				foreach my $entry_id (
+					sort {
+						$panels{$panel_id}{"entry"}{$a}{"order"} <=> $panels{$panel_id}{"entry"}{$b}{"order"}
+						|| $panels{$panel_id}{"entry"}{$a}{"code"} cmp $panels{$panel_id}{"entry"}{$b}{"code"}
+					} keys %{$panels{$panel_id}{"entry"}}
+				) {
 </%perl>
 
 					<tr>
@@ -117,84 +206,81 @@
 						<td class="smallish">
 							<a
 								class="plain padmuchmore hover full"
-								href="/panel/schemat/panel_view.mhtml?panel_id=<% $done->id %>"
+								href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel_id %>"
 							>
-								<% $done->room ? $done->room->name : $done->letter %>
+								<% $panels{$panel_id}{"letter"} %>
 							</a>
 						</td>
 
 						<td class="smallish">
 							<a
-								href="/register/entry/edit.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $entry->id %>"
-								class="white padno">
-								<% $entry->code %>
-							</a>
-						</td>
-						<td class="smallish">
-							<a
-								href="/register/entry/edit.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $entry->id %>"
-								class="white padno">
-								<% $entry->name %>
-							</a>
+								class="plain padmuchmore hover full"
+								href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel_id %>"
+							><% $panels{$panel_id}{"room"} %></a>
 						</td>
 
 						<td class="smallish">
-
 							<a
-								href="/register/school/edit.mhtml?tourn_id=<% $tourn->id %>&school_id=<% $entry->school->id %>"
+								href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
 								class="white padno"
-							>
-								<% $entry->school->short_name %>
-							</a>
-
+							><% $panels{$panel_id}{"entry"}{$a}{"code"} %></a>
 						</td>
 
-						<td class="smallish centeralign">
-
-%							foreach my $judge (@judges) {
-								<div class="nowrap">
-
-									<div class="white marno padless">
-										<% $judge->last %>, <% $judge->first %>
-									</div>
-								</div>
-%							}
+						<td class="smallish">
+							<a
+								href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
+								class="white padno"
+							><% $panels{$panel_id}{"entry"}{$a}{"name"} %></a>
 						</td>
 
-						<td class="smallish centeralign">
-
-%							foreach my $judge (@judges) {
-
-								<div class="nowrap">
-
-%									if ($scores{$judge->id."-".$entry->id}) {
-%										foreach my $score (@{$scores{$judge->id."-".$entry->id}}) {
-%											next unless $score->tag eq "rank";
-											<div class="white marno padless">
-												<% $score->value  %>
-											</div>
-%										}
-%									}
-
-								</div>
-%							}
+						<td class="smallish">
+							<% $panels{$panel_id}{"entry"}{$a}{"school_code"} %>
+							<% $panels{$panel_id}{"entry"}{$a}{"school_name"} %>
 						</td>
 
-%						if ($points) {
-							<td class="smallish centeralign">
-%								foreach my $judge (@judges) {
-									<div class="nowrap block marno padless">
-%										if ($scores{$judge->id."-".$entry->id}) {
-%											foreach my $score (@{$scores{$judge->id."-".$entry->id}}) {
-												<a class="white padno">
-												<% $score->tag eq "points" ? $score->value : "" %>
-												</a>
-%											}
-%										}
-									</div>
-%								}
+%						if ($scores{regions}) {
+							<td class="smallish">
+								<% $panels{$panel_id}{"entry"}{$a}{"region_code"} %>
+								<% $panels{$panel_id}{"entry"}{$a}{"region_name"} %>
 							</td>
 %						}
+
+						<td class="smallish">
+%							foreach my $judge_id (@judges) {
+								<div class="full marless padno ltborderbottom">
+									<% $panels{$panel_id}{"judge"}{$judge_id}{"name"} %>
+								</div>
+%							}
+						</td>
+
+%						if ($scores{winloss}) {
+%							foreach my $judge_id (@judges) {
+								<td class="smallish centeralign">
+									<div class="full marless padno ltborderbottom">
+										<% $panels{$panel_id}{"entry"}{$entry_id}{$judge_id}{"winloss"} %>
+									</div>
+								</td>
+%							}
+%						}
+%						if ($scores{rank}) {
+%							foreach my $judge_id (@judges) {
+								<td class="smallish centeralign">
+									<div class="full marless padno ltborderbottom">
+										<% $panels{$panel_id}{"entry"}{$entry_id}{$judge_id}{"rank"} %>
+									</div>
+								</td>
+%							}
+%						}
+%						if ($scores{points}) {
+%							foreach my $judge_id (@judges) {
+								<td class="smallish centeralign">
+									<div class="full marless padno ltborderbottom">
+										<% $panels{$panel_id}{"entry"}{$entry_id}{$judge_id}{"points"} %>
+									</div>
+								</td>
+%							}
+%						}
+
 					</tr>
 %				}
 %			}
