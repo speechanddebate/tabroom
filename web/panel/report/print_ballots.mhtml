@@ -18,6 +18,8 @@
 	my $limit;
 	my $name = "Ballots";
 
+	my $has_bq;
+
 	if ($round_id && $round_id == int($round_id)) {
 		$round_id = int($round_id);
 		$limit .= " and round.id = ".$round_id;
@@ -65,11 +67,15 @@
 	my $setting_sth = $dbh->prepare("
 		select
 			combined_ballots.value,
+			separate_codes.value,
+			dumb_signature_line.value_text,
 			team_points.value,
 			speech_times.value,
 			point_scale.value,
 			big_questions.value,
+			resolution.value_text,
 			num_judges.value,
+			motion.value_text,
 			flip_round.value,
 			flight_offset.value,
 			ballot_rules.value_text,
@@ -79,12 +85,17 @@
 			no_side_constraints.value,
 			no_elim_side_constraints.value,
 			no_lpw.value,
+			wsdc_no_rfd.value,
 			max_points.value,
 			min_points.value,
 			max_entry.value
 
 		from (round, event)
 
+			left join event_setting dumb_signature_line on dumb_signature_line.event = event.id
+				and dumb_signature_line.tag = 'dumb_signature_line'
+			left join event_setting separate_codes on separate_codes.event = event.id
+				and separate_codes.tag = 'separate_codes'
 			left join event_setting combined_ballots on combined_ballots.event = event.id
 				and combined_ballots.tag = 'combined_ballots'
 			left join event_setting team_points on team_points.event = event.id
@@ -95,6 +106,8 @@
 				and point_scale.tag = 'point_scale'
 			left join event_setting big_questions on big_questions.event = event.id
 				and big_questions.tag = 'big_questions'
+			left join event_setting resolution on resolution.event = event.id
+				and resolution.tag = 'resolution'
 			left join event_setting ballot_rules on ballot_rules.event = event.id
 				and ballot_rules.tag = 'ballot_rules'
 			left join event_setting chair_ballot_rules on chair_ballot_rules.event = event.id
@@ -121,13 +134,16 @@
 
 			left join round_setting num_judges on num_judges.round = round.id
 				and num_judges.tag = 'num_judges'
+			left join round_setting motion on motion.round = round.id
+				and motion.tag = 'motion'
 			left join round_setting flip_round on flip_round.round = round.id
 				and flip_round.tag = 'flip_round'
+			left join event_setting wsdc_no_rfd on wsdc_no_rfd.event = event.id
+				and wsdc_no_rfd.tag = 'wsdc_no_rfd'
 
 		where round.id = ?
 			and round.event = event.id
 	");
-
 
 	my $sth = $dbh->prepare("
 		select
@@ -136,21 +152,27 @@
 			panel.id, panel.letter, panel.flight,
 			room.name,
 			judge.id, judge.code, judge.first, judge.middle, judge.last,
-			judge_school.name, judge_school.code,
+			judge_school.name, judge_school.code, judge_congress.value,
 			judge_region.name, judge_region.code,
 			phone.value, judge_person.phone, judge_person.email,
 			entry.id, entry.code, entry.name, group_concat(student.first) firstname,
 				group_concat(concat_ws(' ', student.first, student.last) SEPARATOR 'NAMESEP') students,
-			entry_school.code, entry_school.name, entry_region.code, entry_region.name,
+			entry_school.code, entry_congress.value, entry_school.name, entry_region.code, entry_region.name,
 			title.value,
-			event.abbr, event.name, event.type, event.category,
+			event.id, event.abbr, event.name, event.type, event.category,
 			round.id, round.name, round.label, round.flighted, round.type, round.start_time, timeslot.start, round.tiebreak_set
 
 		from (ballot, entry, panel, round, event, timeslot)
 			left join judge on ballot.judge = judge.id
 			left join school judge_school on judge.school = judge_school.id
+			left join school_setting judge_congress
+				on judge_congress.school = judge_school.id
+				and judge_congress.tag ='congress_code'
 			left join region judge_region on judge_school.region = judge_region.id
 			left join school entry_school on entry.school = entry_school.id
+			left join school_setting entry_congress
+				on entry_congress.school = entry_school.id
+				and entry_congress.tag ='congress_code'
 			left join region entry_region on entry_school.region = entry_region.id
 
 			left join entry_student es on es.entry = entry.id
@@ -173,12 +195,13 @@
 			group by ballot.id
 	");
 
-	my %doubled;
 	my %sections;
 	my %rounds;
 	my %judge_sections;
-
 	my %starts;
+
+	my $has_ws;
+
 	$sth->execute();
 
 	while (
@@ -188,13 +211,13 @@
 			$panel_id, $panel_letter, $panel_flight,
 			$room_name,
 			$judge_id, $judge_code, $judge_first, $judge_middle, $judge_last,
-			$judge_school_name, $judge_school_code,
+			$judge_school_name, $judge_school_code, $judge_congress_code,
 			$judge_region_name, $judge_region_code,
 			$phone_value, $judge_person_phone, $judge_person_email,
 			$entry_id, $entry_code, $entry_name, $student_first, $students,
-			$entry_school_code, $entry_school_name, $entry_region_code, $entry_region_name,
+			$entry_school_code, $entry_congress_code, $entry_school_name, $entry_region_code, $entry_region_name,
 			$title,
-			$event_abbr, $event_name, $event_type, $event_category,
+			$event_id, $event_abbr, $event_name, $event_type, $event_category,
 			$round_id, $round_name, $round_label, $round_flighted, $round_type, $round_start_time, $timeslot_start, $tiebreak_set_id
 		) = $sth->fetchrow_array()
 	) {
@@ -210,7 +233,10 @@
 			$rounds{$round_id}{"category"}     = $event_category;
 			$rounds{$round_id}{"event_name"}   = $event_name;
 			$rounds{$round_id}{"event_abbr"}   = $event_abbr;
+			$rounds{$round_id}{"event_id"}   = $event_id;
 			$rounds{$round_id}{"event_type"}   = $event_type;
+			$has_ws++ if $event_type eq "wsdc";
+
 			$rounds{$round_id}{"tiebreak_set"} = $tiebreak_set_id;
 
 			if ($round_label) {
@@ -222,11 +248,15 @@
 			while (
 				my (
 					$combined_ballots,
+					$separate_codes,
+					$dumb_signature_line,
 					$team_points,
 					$speech_times,
 					$point_scale,
 					$big_questions,
+					$resolution,
 					$num_judges,
+					$motion,
 					$flip_round,
 					$flight_offset,
 					$ballot_rules,
@@ -236,6 +266,7 @@
 					$no_side_constraints,
 					$no_elim_side_constraints,
 					$no_lpw,
+					$wsdc_no_rfd,
 					$max_points,
 					$min_points,
 					$max_entry
@@ -244,27 +275,34 @@
 
 				$rounds{$round_id}{"ballot_rules"}        = $m->comp("/funclib/print_format.mas", message => $ballot_rules);
 				$rounds{$round_id}{"chair_ballot_rules"}  = $m->comp("/funclib/print_format.mas", message => $chair_ballot_rules);
+				$rounds{$round_id}{"dumb_signature_line"} = $m->comp("/funclib/print_format.mas", message => $dumb_signature_line);
 
 				$rounds{$round_id}{"combined_ballots"} = $combined_ballots;
+				$rounds{$round_id}{"separate_codes"}   = $separate_codes;
 				$rounds{$round_id}{"team_points"}      = $team_points;
 				$rounds{$round_id}{"speech_times"}     = $speech_times;
 				$rounds{$round_id}{"point_scale"}      = $point_scale;
 				$rounds{$round_id}{"big_questions"}    = $big_questions;
+				$rounds{$round_id}{"resolution"}       = $resolution;
 				$rounds{$round_id}{"num_judges"}       = $num_judges;
+				$rounds{$round_id}{"motion"}           = $motion;
 				$rounds{$round_id}{"flip_round"}       = $flip_round;
 				$rounds{$round_id}{"flight_offset"}    = $flight_offset;
+
+				$has_bq++ if $big_questions;
 
 				$rounds{$round_id}{"aff_string"}          = $aff_string;
 				$rounds{$round_id}{"aff_string"}          = "Aff" unless $aff_string;
 				$rounds{$round_id}{"neg_string"}          = $neg_string;
 				$rounds{$round_id}{"neg_string"}          = "Neg" unless $neg_string;
 
-				$rounds{$round_id}{"no_side_constraints"} = $no_side_constraints;
+				$rounds{$round_id}{"no_side_constraints"}      = $no_side_constraints;
 				$rounds{$round_id}{"no_elim_side_constraints"} = $no_elim_side_constraints;
-				$rounds{$round_id}{"no_lpw"}              = $no_lpw;
-				$rounds{$round_id}{"max_points"}          = $max_points;
-				$rounds{$round_id}{"min_points"}          = $min_points;
-				$rounds{$round_id}{"max_entry"}           = $max_entry;
+				$rounds{$round_id}{"no_lpw"}                   = $no_lpw;
+				$rounds{$round_id}{"no_rfd"}                   = $wsdc_no_rfd;
+				$rounds{$round_id}{"max_points"}               = $max_points;
+				$rounds{$round_id}{"min_points"}               = $min_points;
+				$rounds{$round_id}{"max_entry"}                = $max_entry;
 			}
 
 			unless (
@@ -314,6 +352,8 @@
 			if ($judge_school_name) {
 				$sections{$panel_id}{"judge"}{$judge_id}{"school_name"} = $judge_school_name;
 				$sections{$panel_id}{"judge"}{$judge_id}{"school_code"} = $judge_school_code;
+				$sections{$panel_id}{"judge"}{$judge_id}{"school_code"} = $judge_congress_code
+					if $rounds{$round_id}{"separate_codes"};
 			} else {
 				$sections{$panel_id}{"judge"}{$judge_id}{"school_name"} = "Hired";
 				$sections{$panel_id}{"judge"}{$judge_id}{"school_code"} = "XX";
@@ -347,6 +387,8 @@
 			$sections{$panel_id}{"entry"}{$entry_id}{"first_name"}    = $student_first;
 			$sections{$panel_id}{"entry"}{$entry_id}{"student_names"} = $students;
 			$sections{$panel_id}{"entry"}{$entry_id}{"school_code"}   = $entry_school_code;
+			$sections{$panel_id}{"entry"}{$entry_id}{"school_code"}   = $entry_congress_code
+					if $rounds{$round_id}{"separate_codes"};
 			$sections{$panel_id}{"entry"}{$entry_id}{"region_code"}   = $entry_region_code;
 			$sections{$panel_id}{"entry"}{$entry_id}{"school_code"}   = $entry_school_code;
 			$sections{$panel_id}{"entry"}{$entry_id}{"region_name"}   = $entry_region_name;
@@ -393,6 +435,99 @@
         unless (-e "$Tab::file_root/tmp/$logo") {
             system "cd $Tab::file_root/tmp; $Tab::latex_path_prefix/wget ".$Tab::s3_url."/".$tourn->id."/".$logo;
         }
+	}
+
+	my %bq_stuff;
+
+	if ($has_bq) {
+
+		$bq_stuff{bqd_logo}  = $Tab::file_root."/lib/images/big-questions-logo.jpg";
+		$bq_stuff{nsda_logo} = $Tab::file_root."/lib/images/nsda-logo-printable.png";
+		$bq_stuff{jtf_logo}  = $Tab::file_root."/lib/images/templeton-logo.png";
+
+		$bq_stuff{resolution} = Tab::TournSetting->search(
+			tourn => 0,
+			tag   => "bqd_resolution"
+		)->first;
+
+		$bq_stuff{resolution} = $m->comp("/funclib/print_format.mas",
+			message =>  $bq_stuff{resolution}->value_text
+		);
+
+		$bq_stuff{rules} = Tab::TournSetting->search(
+			tourn => 0,
+			tag   => "bqd_rules"
+		)->first;
+
+		$bq_stuff{rules} = $m->comp("/funclib/print_format.mas",
+			message =>  $bq_stuff{rules}->value_text
+		);
+
+		$bq_stuff{speech_times} = Tab::TournSetting->search(
+			tourn => 0,
+			tag   => "bqd_speech_times"
+		)->first;
+
+		$bq_stuff{speech_times} = $bq_stuff{speech_times}->value_text;
+
+		$bq_stuff{jesus_loves_topicality}
+			= "I verify that this round followed the event rules and that the winning debater ran a topical position:";
+	}
+
+	my %ws_stuff;
+
+	if ($has_ws) {
+
+		Tab::debuglog("I have worlds schools!");
+
+		foreach my $round_id (keys (%rounds)) {
+
+			Tab::debuglog("Round $round_id has type ".$rounds{$round_id}{event_type});
+
+			next unless $rounds{$round_id}{event_type} eq "wsdc";
+
+			my $event_id = $rounds{$round_id}{'event_id'};
+			next if $ws_stuff{$event_id};
+
+			Tab::debuglog("And so I am here");
+
+			my %max_points;
+			my %min_points;
+
+			my @scores = ("style", "content", "strategy", "poi");
+			my @used_scores;
+
+			my %event_settings = Tab::Event->retrieve($event_id)->all_settings();
+
+			foreach my $key (@scores) {
+
+				$min_points{$key} = $event_settings{"min_".$key."_points"};
+				$max_points{$key} = $event_settings{"max_".$key."_points"};
+
+				next unless $max_points{$key};
+				$min_points{$key} = 0 unless $min_points{$key};
+
+				push @used_scores, $key;
+
+				$min_points{"total"} += $min_points{$key} unless $key eq "poi";
+				$max_points{"total"} += $max_points{$key} unless $key eq "poi";
+			}
+
+			$ws_stuff{$event_id}{ws_scores} = \@used_scores;
+			$ws_stuff{$event_id}{max_points} = \%max_points;
+			$ws_stuff{$event_id}{min_points} = \%min_points;
+		}
+
+		foreach my $round_id (keys (%rounds)) {
+
+			next unless $rounds{$round_id}{event_type} eq "wsdc";
+			my $event_id = $rounds{$round_id}{'event_id'};
+
+			$rounds{$round_id}{ws_scores} = $ws_stuff{$event_id}{ws_scores} ;
+			$rounds{$round_id}{max_points} = $ws_stuff{$event_id}{max_points} ;
+			$rounds{$round_id}{min_points} = $ws_stuff{$event_id}{min_points} ;
+
+		}
 	}
 
 	# These methods will print by judge key first
@@ -456,6 +591,10 @@
 			my $event_type      = $rounds{$round_id}{"event_type"};
 			my $tiebreak_set_id = $rounds{$round_id}{"tiebreak_set"};
 
+			if ($rounds{$round_id}{"big_questions"}) {
+				$rounds{$round_id}{"speech_times"}  = $bq_stuff{"speech_times"};
+			}
+
 			#Header
 			print $texout "\\parbox[l][.75in][t]{2.85in}{\n";
 
@@ -479,18 +618,27 @@
 
 			print $texout "\\parbox[c][.75in][t]{1.75in}{\n";
 
-			if (-e "$Tab::file_root/tmp/".$logo) {
-				print $texout "\\centerline{\\includegraphics[height=.7in,width=1.45in,keepaspectratio]{".$logo."}}\n";
+			if ($rounds{$round_id}{"big_questions"}) {
+
+				print $texout "\\centerline{\\includegraphics[height=.7in,width=1.45in,keepaspectratio]{".$bq_stuff{"bqd_logo"}."}}\n";
+
 			} else {
 
-				print $texout "\\strut\n";
-				print $texout "\\hfill\n";
-				print $texout "\\textsb{\\fontsize{32pt}{32pt}\\selectfont ".$rounds{$round_id}{"round_name"}." } \n\n ";
-				print $texout "\\hfill\n";
-				print $texout "\\strut\n";
+				if (-e "$Tab::file_root/tmp/".$logo) {
+					print $texout "\\centerline{\\includegraphics[height=.7in,width=1.45in,keepaspectratio]{".$logo."}}\n";
+				} else {
+
+					print $texout "\\strut\n";
+					print $texout "\\hfill\n";
+					print $texout "\\textsb{\\fontsize{32pt}{32pt}\\selectfont ".$rounds{$round_id}{"round_name"}." } \n\n ";
+					print $texout "\\hfill\n";
+					print $texout "\\strut\n";
+				}
+
 			}
 
 			print $texout "}\n";
+
 			print $texout "\\parbox[r][.75in][t]{2.85in}{\n";
 
 				print $texout "\\strut\n";
@@ -549,30 +697,63 @@
 				}
 
 			print $texout "} \n";
+
+
+			print $texout "\\smallskip\n";
 			print $texout "\\newline\n";
 
 			print $texout "\\strut \\hfill\n";
 			print $texout "{\\Large \\bf \\color{black!64} ".&Tab::texify(uc($tourn_name))." } \n";
 			print $texout "\\hfill \\strut\n";
-			print $texout "\\smallskip\n";
-			print $texout "\\newline\n";
 
 			unless ($tiebreak_set_id) {
+				print $texout "\\smallskip\n";
+				print $texout "\\newline\n";
 				print $texout "\\strut \\hfill\n";
 				print $texout "{\\LARGE \\bf \\color{red} You have no tiebreakers set so this ballot is blank.";
 				print $texout " You must set tiebreakers for the ballot to have score blanks }";
 				print $texout "\\hfill \\strut\n";
-				print $texout "\\smallskip\n";
-				print $texout "\\newline\n";
 			}
 
+			print $texout "\\smallskip\n";
+			print $texout "\\newline\n";
+
+			if ($rounds{$round_id}{'big_questions'}) {
+				print $texout "\\parbox[t][7.5in][t]{7.5in}{\n";
+			} else {
+				print $texout "\\parbox[t][8.25in][t]{7.5in}{\n";
+			}
+
+
+			if ($rounds{$round_id}{"big_questions"}) {
+
+				print $texout "\\strut \\hfill\n";
+				print $texout "\\large \\textsb{ Motion: }";
+				print $texout Tab::texify($bq_stuff{"resolution"});
+				print $texout "\\hfill \\strut\n";
+				print $texout "\\newline\n";
+
+			} elsif ($rounds{$round_id}{"resolution"}) {
+
+				print $texout "\\strut \\hfill\n";
+				print $texout "\\large \\textsb{ Resolution: }";
+				print $texout Tab::texify($rounds{$round_id}{"resolution"});
+				print $texout "\\hfill \\strut\n";
+				print $texout "\\newline\n";
+
+			} elsif ($rounds{$round_id}{"motion"}) {
+
+				print $texout "\\strut \\hfill\n";
+				print $texout "\\large \\textsb{ Resolution: }";
+				print $texout Tab::texify($rounds{$round_id}{"motion"});
+				print $texout "\\hfill \\strut\n";
+				print $texout "\\newline\n";
+			}
 
 			if ($sections{$section_id}{"judge"}{$judge_id}{"chair"}) {
 
 				if ($rounds{$round_id}{"chair_ballot_rules"}) {
 
-					print $texout "\\strut\n";
-					print $texout "\\medskip\n";
 					print $texout "\\newline\n";
 					print $texout "\\strut \\hfill\n";
 					print $texout "\\textsb{\\Large \\color{black!64} CHAIR INSTRUCTIONS }\n";
@@ -595,8 +776,6 @@
 
 			if ($rounds{$round_id}{"ballot_rules"}) {
 
-				print $texout "\\strut\n";
-				print $texout "\\medskip\n";
 				print $texout "\\newline\n";
 
 				print $texout "\\strut \\hfill\n";
@@ -617,6 +796,29 @@
 				print $texout "\\newline \n ";
 			}
 
+			if ($rounds{$round_id}{"big_questions"} && $bq_stuff{'rules'}) {
+
+				print $texout "\\newline\n";
+
+				print $texout "\\strut \\hfill\n";
+				print $texout "\\textsb{\\Large \\color{black!64} BIG QUESTIONS RULES }\n";
+				print $texout "\\hfill \\strut\n";
+				print $texout "\\smallskip\n";
+				print $texout "\\newline\n";
+
+				print $texout "\\strut \\hfill\n";
+				print $texout "\\begin{minipage}{6in}\n";
+				print $texout "\\footnotesize\n ";
+				print $texout "\\noindent\n ";
+				print $texout $bq_stuff{"rules"};
+				print $texout "\\end{minipage}\n";
+				print $texout "\\hfill \\strut\n";
+
+				print $texout "\\medskip\n";
+				print $texout "\\newline \n ";
+
+			}
+
 			my $other_names;
 
 			foreach my $oj_id (keys %{$sections{$section_id}{"judge"}}) {
@@ -628,13 +830,21 @@
 					$other_names .= $sections{$section_id}{"judge"}{$oj_id}{"code"}." ";
 				}
 				$other_names .= $sections{$section_id}{"judge"}{$oj_id}{"name"};
+
+				if ($sections{$section_id}{"judge"}{$oj_id}{"chair"}) {
+
+					if ($rounds{$round_id}{"event_type"} eq "congress") {
+						$other_names .= "(Parliamentarian)";
+					} else {
+						$other_names .= "(Chair)";
+					}
+				}
 			}
 
 			if ($other_names) {
-
 				print $texout "\\strut\n";
 				print $texout "\\hfill\n";
-				print $texout "\\large \\textsb{ DO NOT START UNTIL ".$rounds{$round_id}{"num_judges"}." JUDGES ARE PRESENT.}\n";
+				print $texout "\\large \\textsb{ DO NOT START UNTIL ALL JUDGES ARE PRESENT.}\n";
 				print $texout "\\hfill\n";
 				print $texout "\\strut\n";
 
@@ -651,7 +861,6 @@
 				print $texout "\\newline \n";
 			}
 
-
 			unless ($tb_types{$tiebreak_set_id}) {
 				%{$tb_types{$tiebreak_set_id}} = $m->comp(
 					"/funclib/tiebreak_types.mas",
@@ -659,7 +868,7 @@
 				);
 			}
 
-			if ($event_type eq "speech") {
+			if ($event_type eq "speech" || $event_type eq "congress") {
 
 				$m->comp("ballot/speech.mas",
 					texout            => $texout,
@@ -689,29 +898,10 @@
 					tb_types          => $tb_types{$tiebreak_set_id}
 				);
 
-			} elsif ($event_type eq "congress") {
-
-				$m->comp("ballot/congress.mas",
-					texout            => $texout,
-					category_settings => $category_settings{$category_id},
-					section           => $sections{$section_id},
-					rounds            => $rounds{$round_id},
-					tb_types          => $tb_types{$tiebreak_set_id}
-				);
 
 			} elsif ($rounds{$round_id}{"combined_ballots"}) {
 
 				$m->comp("ballot/combined_ballots.mas",
-					texout            => $texout,
-					category_settings => $category_settings{$category_id},
-					section           => $sections{$section_id},
-					rounds            => $rounds{$round_id},
-					tb_types          => $tb_types{$tiebreak_set_id}
-				);
-
-			} elsif ($rounds{$round_id}{"big_questions"}) {
-
-				$m->comp("ballot/big_questions.mas",
 					texout            => $texout,
 					category_settings => $category_settings{$category_id},
 					section           => $sections{$section_id},
@@ -730,14 +920,30 @@
 				);
 			}
 
+			print $texout " } \n"; # End of enclosing paragraph box.
+
+			if ($rounds{$round_id}{"dumb_signature_line"}) {
+				print $texout "\\emph{\\normalsize ";
+				print $texout $rounds{$round_id}{"dumb_signature_line"};
+				print $texout "} \\smallskip \\newline\n";
+			}
 
 			if (
 				$category_settings{$category_id}{"ballot_signature"}
 				|| $category_settings{$category_id}{"ballot_judge_phones"}
 			) {
+
+				if ($rounds{$round_id}{"big_questions"}) {
+					print $texout "\\emph{\\normalsize ";
+					print $texout $bq_stuff{jesus_loves_topicality};
+					print $texout "} \\smallskip \\newline\n";
+				}
+
+
 				print $texout "\\strut\n";
 				print $texout "\\hspace{.65in}\n";
 				print $texout "\\newline \n";
+
 			}
 
 			print $texout "\\parbox[l][][t]{4in}{\n";
@@ -753,7 +959,9 @@
 				print $texout "\\parbox[l][][t]{3in}{\n";
 				print $texout "\\textsb{\\normalsize Phone number:} \n";
 				if ($sections{$section_id}{"judge"}{$judge_id}{"phone"}) {
+					print $texout "\\makebox[.5in]{\\hrulefill}.";
 					print $texout Tab::phoneme($sections{$section_id}{"judge"}{$judge_id}{"phone"});
+					print $texout "\\makebox[.5in]{\\hrulefill}.";
 				} else {
 					print $texout "\\makebox[2.25in]{\\hrulefill}\n";
 				}
@@ -773,9 +981,21 @@
 				print $texout "\\newline\n";
 			}
 
+			if ($rounds{$round_id}{"big_questions"}) {
+				print $texout "\\includegraphics[height=.6in,keepaspectratio]{".$bq_stuff{nsda_logo}."}\n";
+				print $texout "\\hfill\n";
+
+				if (-e "$Tab::file_root/tmp/".$logo) {
+					print $texout "\\includegraphics[height=.6in,keepaspectratio]{".$logo."}\n";
+					print $texout "\\hfill\n";
+				}
+
+				print $texout "\\includegraphics[height=.6in,keepaspectratio]{".$bq_stuff{jtf_logo}."}\n";
+				print $texout "\\newline\n";
+			}
 
 			print $texout "\\strut\n";
-			print $texout "\\hfill {\\scriptsize ".$section_id." }\n";
+			print $texout "\\hfill {\\scriptsize ".$section_id." } \\hfill \\strut\n";
 			print $texout "\\newpage\n";
 
 		}
