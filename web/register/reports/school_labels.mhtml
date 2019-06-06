@@ -1,5 +1,6 @@
 <%args>
 	$tourn
+	$tourn_settings
 	$session
 </%args>
 <%init>
@@ -8,6 +9,17 @@
 
 	my @schools;
 
+	Tab::School->columns(TEMP => 'sortname');
+
+	Tab::School->set_sql(with_entries => "
+		select school.*
+		from school, entry
+		where school.tourn = ?
+		and school.id = entry.school
+		and entry.active = 1
+		group by school.id
+	");
+
 	if ($session->weekend) {
 
 		Tab::School->set_sql(by_weekend => "
@@ -15,11 +27,12 @@
 			from school, entry, event_setting weekend
 			where school.tourn = ?
 			and school.id = entry.school
+			and entry.active = 1
 			and entry.event = weekend.event
 			and weekend.tag = 'weekend'
 			and weekend.value = ?
 			group by school.id
-			order by school.name
+			order by school.name, school.state
 		");
 
 		@schools = $m->comp(
@@ -27,36 +40,141 @@
 			weekend => $session->weekend
 		);
 
+	} elsif (
+		$tourn_settings->{nsda_nats}
+		|| $tourn_settings->{nsda_ms_nats}
+	) {
+
+		@schools = Tab::School->search_with_entries($tourn->id);
+
+		foreach my $school (@schools) {
+			my $sort_name = $school->name();
+			$sort_name =~ s/^The //g;
+			$school->sortname($sort_name);
+		}
+
+		@schools = sort {
+			$a->state cmp $b->state
+			|| $a->sortname cmp $b->sortname
+		} @schools;
+
 	} else {
 
 		@schools =
 			sort {$a->short_name cmp $b->short_name}
-			$tourn->schools;
+			Tab::School->search_with_entries($tourn->id);
 	}
 
-	#Set up the filename and the needed trace files
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
 
-	my $session_id = $session->id;
-	`mkdir $Tab::file_root/tmp/school-labels-$tourn_id-$session_id`;
-	`cp -r $Tab::file_root/funclib/school_labels.tex $Tab::file_root/tmp/school-labels-$tourn_id-$session_id`;
+	my $top_margin =  $tourn->setting("top_margin");
+	my $left_margin = $tourn->setting("left_margin");
+	my $col_space = $tourn->setting("col_space");
+	my $row_space = $tourn->setting("row_space");
 
-     my $filename = $Tab::file_root."/tmp/school-labels-$tourn_id-$session_id/school-label-source";
-     my $garbage = `rm -f $filename.*`;
+	$tourn->setting("top_margin", 12) unless $top_margin;
+	$tourn->setting("left_margin", 7) unless $left_margin;
+	$tourn->setting("col_space", 2) unless $col_space;
+	$tourn->setting("row_space", 0) unless $row_space;
 
-	open (TEXOUT, ">$filename.tex");
+	$top_margin = "12" unless $top_margin;
+	$left_margin = "7" unless $left_margin;
+	$row_space = "2" unless $row_space;
+	$col_space = "0" unless $col_space;
+
+	$top_margin .= "mm";
+	$left_margin .= "mm";
+	$row_space .= "mm";
+	$col_space .= "mm";
+
+	my $tourn_name = $tourn->name;
+	$tourn_name =~ s/[^\w.]//g;
+	my $filename = "BallotLabels-$tourn_name-".$session->id;
+
+    my $filepath = $Tab::file_root."/tmp/";
+	`cd $Tab::file_root/tmp; rm -f $filename.pdf $filename.tex $filename.log $filename.dvi $filename.aux`;
+
+    my $now = DateTime->now();
+    my $epoch = $now->epoch();
+	$now->set_time_zone($tourn->tz);
+    my $timestamp = Tab::texify($now->ymd." ".$now->hms);
+
+	open (my $texout, ">>$filepath"."$filename.tex");
+
+	print $texout <<"EOF";
+\\documentclass[letterpaper,10pt]{article}
+\\usepackage[newdimens]{labels}
+\\usepackage[scaled]{beramono}
+\\usepackage{setspace}
+\\usepackage[breakall]{truncate}
+\\usepackage{fancyhdr,lastpage}
+\\usepackage{electrum}
+\\usepackage{amssymb}
+
+
+\\LabelCols=3       % Number of columns of labels per page
+\\LabelRows=10      % Number of rows of labels per page
+
+\\LeftPageMargin=$left_margin	% These four parameters give the
+\\TopPageMargin=$top_margin  	% the outer labels are the specified
+\\RightPageMargin=7mm       	% page gutter sizes. The outer edges of
+\\BottomPageMargin=15mm     	% distances from the edge of the paper.
+
+\\InterLabelColumn=$col_space  	% Gap between columns of labels
+\\InterLabelRow=$row_space     	% Gap between rows of labels
+
+\\LeftLabelBorder=5mm   % These four parameters give the extra
+\\RightLabelBorder=5mm  % space used around the text on each
+\\TopLabelBorder=5mm    % actual label.
+
+\\usepackage[default]{sourceserifpro}
+
+\\renewcommand{\\baselinestretch}{1.2}
+
+\\pagestyle{fancy}
+\\fancyhf{} % clear all header and footer fields
+\\fancyfoot[C]{
+	\\tiny{ Printed $timestamp }
+	\\scriptsize{ Page \\thepage\\ of \\pageref{LastPage} }
+}
+
+\\begin{document}
+\\begin{labels}
+EOF
 
 	foreach my $school (@schools) {
 
-		print TEXOUT "\\lb{ {\\Large {\\bf \\centering ". &Tab::texify($school->short_name)."} } } \n";
+		print $texout "\\begin{center}\n";
 
-	} # end of foreach event
+		if ($tourn_settings->{nsda_nats} || $tourn_settings->{nsda_ms_nats}) {
+			if ($school->state) {
+				print $texout "\\parbox[c][][c]{2.2in}{\\centering ";
+				print $texout "\\textbf{\\Large ".Tab::texify($school->state)." } ";
+				print $texout "} \\vspace{-8mm} \\newline\n";
+			} elsif ($school->chapter->country) {
+				print $texout "\\parbox[c][][c]{2.2in}{\\centering ";
+				print $texout "\\textbf{\\Large ".Tab::texify("INT: ".$school->chapter->country)." } ";
+				print $texout "} \\vspace{-8mm} \\newline\n";
+			}
+		}
 
-	close TEXOUT;
+		print $texout "\\parbox[c][][c]{2.2in}{\\centering \\large ";
+		print $texout Tab::texify($school->name);
+		print $texout "}\n \\end{center} \n\n";
 
-	$garbage = `cd $Tab::file_root/tmp/school-labels-$tourn_id-$session_id; $Tab::latex_path school_labels.tex; $Tab::dvipdfm_path school_labels.dvi`;
+	} # end of foreach label
 
-	`rm _f school_labels.tex school_labels.log school_labels.dvi school_labels.aux`;
+	print $texout "\\end{labels}\n";
+	print $texout "\\end{document}\n";
 
-	$m->redirect("$Tab::url_prefix/tmp/school-labels-$tourn_id-$session_id/school_labels.pdf");
+	close $texout;
+
+	`cd $filepath; $Tab::pdflatex_path $filename.tex`;
+	`cd $filepath; $Tab::pdflatex_path $filename.tex`;
+#	`cd $Tab::file_root/tmp; rm -f $filename.tex $filename.log $filename.dvi $filename.aux` if $Tab::hostname eq "www.tabroom.com";
+
+	`cd $filepath; mv $filename.pdf $filename-$epoch.pdf`;
+	$m->redirect("/tmp/$filename-$epoch.pdf");
 
 </%init>
