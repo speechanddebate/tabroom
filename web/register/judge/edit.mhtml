@@ -9,6 +9,11 @@
 </%args>
 <%init>
 
+	my $dbh = Tab::DBI->db_Main();
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
 	my $judge = Tab::Judge->retrieve($judge_id) if $judge_id;
 
 	$m->abort unless $judge;
@@ -29,8 +34,6 @@
 		$cap_repel++ if $event->setting("wsdc_cap_repel");
 		$usa_wsdc++ if $event->setting("usa_wsdc");
 	}
-
-	my @schools = sort {$a->name cmp $b->name} $tourn->schools;
 
 	my @districtschools;
 
@@ -71,7 +74,7 @@
 
 	my %in_jpool = map {$_->id => $_} $judge->jpools();
 
-	my @sub_pools;
+	my %all_jpools;
 
 	if ($tourn_settings->{"nsda_nats"}) {
 
@@ -85,13 +88,88 @@
 
 		foreach my $jpool (@this_jpools) {
 			next unless $in_jpool{$jpool->id};
-			push @sub_pools, $jpool->children();
 
 			push @questionnaires, $jpool->setting("paradigm_form")
 				if $jpool->setting("paradigm_form");
 
 			$ask_parli++ if $jpool->setting("parli");
 			$prefer_congress++ if $jpool->setting("prefer");
+		}
+
+        my $dbh = Tab::DBI->db_Main();
+
+        my $sth = $dbh->prepare("
+            select
+                jpool.id, jpool.name,
+                rounds.value,
+				round.name,
+                event.abbr, event.id,
+                jpool_judge.id,
+                timeslot.id, timeslot.start, timeslot.end,
+				count(others.judge)
+            from (jpool, jpool_round, round, event, category, timeslot)
+
+            left join jpool_setting rounds on rounds.tag = 'rounds' and rounds.jpool = jpool.id
+            left join jpool_judge on jpool_judge.judge = ? and jpool_judge.jpool = jpool.id
+			left join jpool_judge others on others.jpool = jpool.id
+
+            where jpool.category = category.id
+                and category.tourn = ?
+                and jpool.id = jpool_round.jpool
+                and jpool_round.round = round.id
+                and round.event = event.id
+                and round.timeslot = timeslot.id
+
+			and not exists (
+				select jpool_setting.id
+				from jpool_setting
+				where jpool_setting.jpool = jpool.id
+				and jpool_setting.tag = 'registrant'
+			)
+			group by jpool.id
+            order by round.name, jpool.name
+        ");
+
+        $sth->execute($judge->id, $tourn->id);
+
+		my %tslot_cache;
+
+        while (
+            my (
+                $jpool_id, $jpool_name,
+				$rounds_value, $round_name,
+                $event_abbr, $event_id,
+                $jpool_judge_id,
+				$timeslot_id, $timeslot_start, $timeslot_end,
+				$count_judges
+            ) = $sth->fetchrow_array()
+        ) {
+
+            $all_jpools{$jpool_id}{"name"}         = $jpool_name;
+            $all_jpools{$jpool_id}{"rounds"}       = $rounds_value;
+            $all_jpools{$jpool_id}{"round_name"}   = $round_name;
+            $all_jpools{$jpool_id}{"event_abbr"}   = $event_abbr;
+            $all_jpools{$jpool_id}{"event_id"}     = $event_id;
+            $all_jpools{$jpool_id}{"count_judges"} = $count_judges;
+
+			unless ($tslot_cache{$timeslot_start}) {
+				$tslot_cache{$timeslot_start} = DateTime::Format::MySQL->parse_datetime($timeslot_start);
+				$tslot_cache{$timeslot_start}->set_time_zone($tz);
+			}
+
+			unless ($tslot_cache{$timeslot_end}) {
+				$tslot_cache{$timeslot_end} = DateTime::Format::MySQL->parse_datetime($timeslot_end);
+				$tslot_cache{$timeslot_end}->set_time_zone($tz);
+			}
+
+            if ($tslot_cache{$timeslot_start}) {
+				$all_jpools{$jpool_id}{"start"}       = $tslot_cache{$timeslot_start};
+				$all_jpools{$jpool_id}{"start_epoch"} = $tslot_cache{$timeslot_start}->epoch;
+			}
+
+            $all_jpools{$jpool_id}{"end"} = $tslot_cache{timeslot_end};
+            $all_jpools{$jpool_id}{"in"}  = 1 if $jpool_judge_id;
+
 		}
 
 	} else {
@@ -104,7 +182,6 @@
 		foreach my $category (sort {$a->abbr cmp $b->abbr} $tourn->categories) {
 			next if $category == $judge->category;
 			next if $category == $judge->alt_category;
-
 			push @other_jpools, sort {$a->name cmp $b->name} $category->jpools;
 		}
 	}
@@ -122,9 +199,7 @@
 	push @tabs, "edit";
 	push @tabs, "pools" if @this_jpools || @other_jpools;
 	push @tabs, "noms" if $judge_settings{"nomination"};
-
 	push @tabs, "TabRoom" if $category_settings{"tab_room"};
-
 	push @tabs, "rounds" if @panels;
 	push @tabs, "paradigm" if ($category_settings{"ask_paradigm"} && $judge->person);
 
@@ -137,6 +212,7 @@
 		"/funclib/judgemath/nats_check_judging.mas",
 		school => $school
 	) if $tourn_settings->{"nsda_nats"};
+
 </%init>
 
 	<script>
@@ -151,8 +227,6 @@
 			var accountEmail = $("#accountEmail").val();
 			var judgeId      = $("#accountEmail").attr("judge");
 			var replyUrl     = 'link.mhtml';
-
-			console.log("Submitting to "+replyUrl);
 
 			$.ajax({
 				type    : 'POST',
@@ -414,14 +488,27 @@
 <%perl>
 					}
 
-					foreach my $oschool (@schools) {
 
-						next if $school_already{$oschool->id}++;
+        			my $sth = $dbh->prepare("
+						select school.id, school.name
+						from school
+						where school.tourn = ?
+					");
+
+					$sth->execute($tourn->id);
+
+					my $school_id = $school->id;
+
+					while (
+						my ($oschool_id, $oschool_name) = $sth->fetchrow_array()
+					) {
+
+						next if $school_already{$oschool_id}++;
 </%perl>
 
-						<option value="<% $oschool->id %>"
-							<% ($oschool->id eq $school->id) ? 'selected' : '' %>
-						> <% $oschool->name%> </option>
+						<option value="<% $oschool_id %>"
+							<% ($oschool_id eq $school_id) ? 'selected' : '' %>
+						> <% $oschool_name%> </option>
 %					}
 
 				</select>
@@ -430,7 +517,22 @@
 
 		</div>
 
-%		if ($school && $school->chapter > 0) {
+<%perl>
+		if ($school && $school->chapter > 0) {
+
+			my $jcj_id = $judge->chapter_judge->id;
+
+			my $judge_sth = $dbh->prepare("
+				select cj.id, cj.first, cj.middle, cj.last, person.email
+				from (chapter_judge cj, school)
+					left join person on person.id = cj.person
+				where school.id = ?
+					and cj.chapter = school.chapter
+					and cj.retired = 0
+				order by cj.last, person.id DESC
+			");
+
+</%perl>
 			<div class="row">
 
 				<span class="twofifths padleft">
@@ -443,10 +545,21 @@
 						class = "fixedmed"
 					>
 					<option value="">Not On Roster</option>
-%					foreach my $cj ($school->chapter->chapter_judges(retired => 0)) {
-						<option value="<% $cj->id %>"
-							<% ($cj->id eq $judge->chapter_judge) ? 'selected' : '' %>
-							> <% $cj->first." ".$cj->last %> </option>
+
+<%perl>
+					$judge_sth->execute($school->id);
+
+					while (
+						my ($cj_id, $cj_first, $cj_middle, $cj_last, $cj_email) = $judge_sth->fetchrow_array()
+					) {
+</%perl>
+						<option value="<% $cj_id %>"
+							<% ($cj_id eq $jcj_id) ? 'selected' : '' %>
+							> <%
+								$cj_last.", ".$cj_first." ".$cj_middle." "
+							%> <%
+								$cj_email ? "(".$cj_email.")" : ""
+							%> </option>
 %					}
 					</select>
 				</span>
@@ -1155,76 +1268,64 @@
 				<tbody>
 
 <%perl>
+					foreach my $panel (
+						$m->comp("/funclib/judge_panels.mas", judge => $judge, sort_by => "time")
+					) {
 
-			foreach my $panel (
-				sort {$a->round->timeslot->start <=> $b->round->timeslot->start}
-				$m->comp("/funclib/judge_panels.mas", judge => $judge)
-			) {
-
-				my $round = $panel->round;
-
-				my $start_time = $round->start_time;
-				$start_time = $round->timeslot->start unless $start_time;
-
-				my $tz = $tourn->tz;
-				$tz = "UTC" unless $tz;
-
-				$start_time->set_time_zone($tz);
+						my $round = $panel->round;
+						my $start_time = $round->start_time;
+						$start_time = $round->timeslot->start unless $start_time;
+						$start_time->set_time_zone($tz);
 
 </%perl>
 
-				<tr>
+						<tr>
 
-					<td>
-						<% $panel->eventname %>
-					</td>
+							<td>
+								<% $panel->eventname %>
+							</td>
 
-					<td>
-						<span class="hidden"><% $round->name %>-<% $panel->flight %></span>
-						<% $round->realname %>
-						<% $panel->flight > 1 ? "Flt ".$panel->flight : "" %>
-					</td>
+							<td>
+								<span class="hidden"><% $round->name %>-<% $panel->flight %></span>
+								<% $round->realname %>
+								<% $panel->flight > 1 ? "Flt ".$panel->flight : "" %>
+							</td>
 
-					<td>
-						<span class="hidden"><% $start_time->epoch %></span>
-						<% Tab::niceshortdayt($start_time) %>
-					</td>
+							<td>
+								<span class="hidden"><% $start_time->epoch %></span>
+								<% Tab::niceshortdayt($start_time) %>
+							</td>
 
-					<td>
-						<% $panel->roomname %>
-					</td>
+							<td>
+								<% $panel->roomname %>
+							</td>
 
-					<td>
-%						foreach my $entry ($m->comp("/funclib/panel_entries.mas", panel => $panel)) {
-							<span class="padless">
-								<% $entry->code %>
-							</span>
-%						}
-					</td>
+							<td>
+%								foreach my $entry ($m->comp("/funclib/panel_entries.mas", panel => $panel)) {
+									<span class="padless">
+										<% $entry->code %>
+									</span>
+%								}
+							</td>
 
-					<td class="centeralign padless">
-						<a
-							class = "buttonwhite bluetext fa fa-lg fa-eye"
-							target= "_blank"
-							href  = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel->id %>"
-						>
-						</a>
-					</td>
-
-				</tr>
-
-% 			}
-
-			</tbody>
-
+							<td class="centeralign padless">
+								<a
+									class = "buttonwhite bluetext fa fa-lg fa-eye"
+									target= "_blank"
+									href  = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel->id %>"
+								>
+								</a>
+							</td>
+						</tr>
+%		 			}
+				</tbody>
 			</table>
-
 		</div>
-
 <%perl>
  	}
 
  	if (@this_jpools || @other_jpools) {
+
 		my %used;
 
 </%perl>
@@ -1246,6 +1347,12 @@
 					Click a pool to move the judge in/out of it
 				</p>
 			</span>
+
+%           if (keys %all_jpools) {
+                <h4 class="padtop nospace">
+                    Registration Pools
+                </h4>
+%           }
 
 			<span class="pagehalf">
 
@@ -1401,34 +1508,11 @@
 %					}
 
 					</tbody>
-
 				</table>
-
 			</span>
 
+
 		<script type="text/javascript">
-
-			$(document).ready( function(){
-				countPools();
-			});
-
-			function countPools() {
-
-				var countIn = $("#in .judge:visible").length;
-				var countOut = $("#out .judge:visible").length;
-
-				$("#outcount").text(countOut);
-				$("#incount").text(countIn);
-
-				$("#insort").trigger("applyWidgets");
-				$("#insort").trigger("update");
-				$("#insort").trigger('resort');
-
-				$("#outsort").trigger("applyWidgets");
-				$("#outsort").trigger("update");
-				$("#outsort").trigger('resort');
-
-			}
 
 			function togglePool(judgeSpan) {
 
@@ -1438,18 +1522,12 @@
 
 				var postValue, newParent;
 
-				console.log("Parent is "+parentID);
-
 				if (parentID === "in") {
-
 					postValue = 0;
 					newParent = "out";
-
 				} else {
-
 					postValue = 1;
 					newParent = "in";
-
 				}
 
 				$.ajax({
@@ -1459,7 +1537,6 @@
 						judge_id : judgeID,
 						value    : postValue,
 						jpool_id : poolID,
-
 					}, success: function(data) {
 
 						if (data.error) {
@@ -1471,7 +1548,6 @@
 							alertify.set('notifier','delay', 2);
 							alertify.notify(data.message, "custom");
 							alertify.set('notifier','delay', 5);
-
 							$("#"+poolID).prependTo("#"+newParent)
 
 						}
@@ -1484,8 +1560,165 @@
 
 		</script>
 
-		</div>
+%		if (keys %all_jpools) {
 
+			<& "/funclib/tablesorter.mas",
+				table     => "nats_inpools"
+			&>
+
+			<div class="full martopmore nospace">
+				<span class="half nospace">
+					<h4>
+						Competition Pools
+					</h4>
+				</span>
+
+				<span
+					class = "half nospace rightalign"
+					id    = "nats_inpools_buttonarea"
+				>
+				</span>
+			</div>
+
+			<table id="nats_inpools">
+
+				<thead>
+
+					<tr class="yellowrow smallish">
+
+						<th>
+							Pool
+						</th>
+
+						<th>
+							Event
+						</th>
+
+						<th>
+							Round
+						</th>
+
+						<th>
+							Start
+						</th>
+
+						<th>
+							Judge Count
+						</th>
+
+						<th>
+						</th>
+
+					</tr>
+
+				</thead>
+
+				<tbody id="competitives">
+
+<%perl>
+					foreach my $jpool_id (
+						sort {
+							$all_jpools{$b}{"in"} <=> $all_jpools{$a}{"in"}
+							|| $all_jpools{$a}{"start_epoch"} <=> $all_jpools{$b}{"start_epoch"}
+						} keys %all_jpools
+					) {
+
+						unless ($all_jpools{$jpool_id}{"in"}) {
+							last;
+							next;
+						}
+</%perl>
+
+						<tr id="<% $jpool_id %>">
+
+							<td>
+								<% $all_jpools{$jpool_id}{"name"} %>
+							</td>
+
+							<td class="centeralign">
+								<% $all_jpools{$jpool_id}{"event_abbr"} %>
+							</td>
+
+							<td class="centeralign">
+								<% $all_jpools{$jpool_id}{"round_name"} %>
+							</td>
+
+							<td class="rightalign">
+								<& "/funclib/showdt.mas",
+									dt     => $all_jpools{$jpool_id}{"start"},
+									length => "casual"
+								&>
+							</td>
+
+							<td class="rightalign">
+								<% $all_jpools{$jpool_id}{"count_judges"} %>
+							</td>
+
+							<td class="centeralign nospace padvertless">
+								<a
+									value         = "1"
+									id            = "<% $jpool_id %>"
+									target_id     = "<% $jpool_id %>"
+									property_name = "<% $judge->id %>"
+									on_success    = "destroy"
+									onClick       = "postSwitch( this, 'jpool_judge_rm.mhtml');"
+									class         = "buttonwhite fa fa-sm fa-trash redtext"
+									title         = "Remove from This Pool"
+								></a>
+							</td>
+						</tr>
+%					}
+				</tbody>
+			</table>
+
+			<div class="liblrow">
+
+				<span class="fifth semibold bluetext">
+					Add to pool:
+				</span>
+
+				<span class="threefifths">
+					<select
+						id    = "jpool_id"
+						name  = "jpool_id"
+						class = "fixedbigger"
+					>
+<%perl>
+					foreach my $jpool_id (
+						sort {
+							$all_jpools{$a}{"in"} <=> $all_jpools{$b}{"in"}
+							|| $all_jpools{$a}{"event_abbr"} cmp $all_jpools{$b}{"event_abbr"}
+							|| $all_jpools{$a}{"start_epoch"} <=> $all_jpools{$b}{"start_epoch"}
+						} keys %all_jpools
+					) {
+
+</%perl>
+						<option
+							value="<% $jpool_id %>"
+						><%
+								$all_jpools{$jpool_id}{"name"}
+							%> - <& "/funclib/showdt.mas",
+									dt     => $all_jpools{$jpool_id}{"start"},
+									length => "casual"
+							&> - <%
+								$all_jpools{$jpool_id}{"count_judges"}
+						%></option>
+%					}
+					</select>
+				</span>
+
+				<span class="sixth centeralign">
+					<button
+						type        = "buttonwhite invert bluetext"
+						target_id   = "<% $judge->id %>"
+						other_value = "jpool_id"
+						onClick     = "postSwitch(this, 'jpool_judge_add.mhtml');"
+					>Add Pool</a>
+				</span>
+
+			</div>
+% 		}
+		</div>
 % 	}
 
 %	if ($category_settings{"ask_paradigm"} && $judge->person) {
