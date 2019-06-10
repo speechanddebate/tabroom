@@ -1,6 +1,7 @@
 <%args>
 	$round
 	$num_panels
+	$tourn_settings
 	$nsda        => undef
 	$entries_ref => undef
 	$limit_to    => undef
@@ -8,21 +9,67 @@
 </%args>
 <%perl>
 
+	use POSIX qw/ceil floor/;
+	use List::Util 'shuffle';
+
 	return unless $round > 0;
+
+	my $dbh = Tab::DBI->db_Main();
 
 	my %round_settings = $round->all_settings;
 	return if $round_settings{"flight_a_round"};
 
-	use POSIX;
 	my $event = $round->event;
 	my $tourn = $event->tourn;
 
-	my %tourn_settings = $tourn->all_settings;
 	my %event_settings = $event->all_settings;
 
-	my $percent_limit = $event_settings{"school_percent_limit"};
+	my %hits = ();
+	my %entries = ();
+	my %size_of_school = ();
 
-	my $dbh = Tab::DBI->db_Main();
+	# Weights and scores for various bad things.  At some point these should
+	# likely become settings
+
+	if ($tourn_settings->{"nsda_district"}) {
+
+		$hits{scores}{school} = 1000000000;
+		$hits{scores}{title}  = 10000;
+		$hits{scores}{repeat} = 100;
+
+		$hits{scores}{repeat_school} = 10;
+
+	} elsif ($tourn_settings->{"nsda_nats"}) {
+
+		# These four are absolute and given the size should always be achievable
+		# "Region ID" is actually state
+
+		$hits{scores}{school}   = 1000000;
+		$hits{scores}{district} = 1000000;
+		$hits{scores}{region}   = 1000000;
+		$hits{scores}{repeat}   = 1000000;
+		$hits{scores}{order}    = 100;
+
+		$hits{scores}{repeat_school} = 50;
+
+		#This one almost certainly cannot be achieved due to the size of some states
+		$hits{scores}{repeat_region} = 1;
+
+	} else {
+
+		$hits{scores}{school} = 1000000;
+		$hits{scores}{repeat} = 1000;
+		$hits{scores}{repeat_school} = 10;
+
+		if ($event_settings{"region_avoid"}) {
+			$hits{scores}{region} = 100000;
+			$hits{scores}{repeat_region} = 1;
+		}
+
+		if ($seed_basis) {
+			$hits{scores}{average} = 100;
+		}
+	}
 
 	my $previous_round = Tab::Round->search(
 		event => $event->id,
@@ -31,30 +78,25 @@
 
 	my %entries_by_section = ();
 
-	my %hits = ();
-	my %entries = ();
-	my %size_of_school = ();
-
 	my $sth = $dbh->prepare("
-		select ballot.id, ballot.entry, ballot.speakerorder,
-			panel.id, round.id, round.name
-
+		select
+			ballot.id, ballot.entry, ballot.speakerorder, panel.id, round.id, round.name
 		from ballot, panel, round
 			where ballot.panel = panel.id
 			and panel.round = round.id
-			and round.name < ?
+			and round.type = 'prelim'
 			and round.event = ?
 	");
 
-	$sth->execute($round->name, $event->id);
+	$sth->execute($event->id);
 
 	my $previous_round_id;
 	$previous_round_id = $previous_round->id if $previous_round;
 
 	while (
-
-		my ($ballot_id, $entry_id, $speakerorder, $panel_id, $round_id, $round_name) = $sth->fetchrow_array()
-
+		my (
+			$ballot_id, $entry_id, $speakerorder, $panel_id, $round_id, $round_name
+		) = $sth->fetchrow_array()
 	) {
 
 		push (@{$entries_by_section{$panel_id}}, $entry_id);
@@ -66,6 +108,10 @@
 		if ($round_id == $previous_round_id) {
 			$entries{$entry_id}{"last_order"} = $speakerorder;
 		}
+
+		if ($hits{scores}{order}) {
+			$entries{$entry_id}{"order"}{$speakerorder}++;
+		}
 	}
 
 	my $speaker_priority_first = $event_settings{"speaker_priority_first"};
@@ -73,8 +119,8 @@
 	my @schools;
 
 	$sth = $dbh->prepare("
-		select entry.id, entry.code, entry.name, school.id,
-			school.region, school.state
+		select
+			entry.id, entry.code, entry.name, school.id, school.region
 		from entry, school
 		where entry.event = ?
 		and entry.active = 1
@@ -85,7 +131,9 @@
 	my @all_entries;
 
 	while (
-		my ($entry_id, $entry_code, $entry_name, $school_id, $region_id, $state) = $sth->fetchrow_array()
+		my (
+			$entry_id, $entry_code, $entry_name, $school_id, $region_id
+		) = $sth->fetchrow_array()
 	) {
 
 		push @all_entries, $entry_id;
@@ -93,7 +141,7 @@
 		$entries{$entry_id}{"code"} = $entry_code;
 		$entries{$entry_id}{"name"} = $entry_name;
 
-		if ($tourn_settings{"ncfl"} || $event_settings{"region_conflict"}) {
+		if ($tourn_settings->{"ncfl"} || $event_settings{"region_conflict"} || $tourn_settings->{"nsda_nats"}) {
 
 			$entries{$entry_id}{'school'} = $region_id;
 
@@ -102,13 +150,8 @@
 			$entries{$entry_id}{'school'} = $school_id;
 			$size_of_school{$school_id}++;
 
-			if ($event_settings{"region_avoid"}) {
+			if ($event_settings{"region_avoid"} || $tourn_settings->{"nsda_nats"}) {
 				$entries{$entry_id}{"region"} = $region_id;
-			}
-
-			if ($tourn_settings{"nsda_nats"}) {
-				$entries{$entry_id}{"region"} = $region_id;
-				$entries{$entry_id}{"state"} = $state;
 			}
 
 		}
@@ -129,14 +172,12 @@
 
 				my $other_school = $entries{$other_id}{"school"};
 				my $other_region = $entries{$other_id}{"region"};
-				my $other_state  = $entries{$other_id}{"state"};
 
 				next unless $other_school;
 
 				$hits{$entry_id}{"entry"}{$other_id}++;
 				$hits{$entry_id}{"school"}{$other_school}++;
 				$hits{$entry_id}{"region"}{$other_region}++ if $other_region;
-				$hits{$entry_id}{"state"}{$other_state}++ if $other_state;
 
 				if ($other_school == $entries{$entry_id}{"school"}) {
 					$hits{$entry_id}{"ownschool"}++;
@@ -146,39 +187,23 @@
 					$hits{$entry_id}{"ownregion"}++;
 				}
 
-				if ($other_state eq $entries{$entry_id}{"state"}) {
-					$hits{$entry_id}{"ownstate"}++;
-				}
 			}
 		}
 	}
 
-	if ($tourn_settings{"nsda_district"}) {
+	if ($hits{scores}{title} && $event_settings{"ask_for_titles"}) {
 
-		$hits{"nsda"}++;
+		my @titles = $m->comp(
+			"/funclib/event_entry_settings.mas",
+			event => $event,
+			tag   => "title"
+		);
 
-		if ($event_settings{"ask_for_titles"}) {
-
-			my @titles = $m->comp(
-				"/funclib/event_entry_settings.mas",
-				event => $event,
-				tag   => "title"
-			);
-
-			foreach my $title (@titles) {
-				my $value = $title->value;
-				$value =~ s/[\W_]//g;
-				$entries{$title->entry->id}{"title"} = $value;
-			}
+		foreach my $title (@titles) {
+			my $value = $title->value;
+			$value =~ s/[\W_]//g;
+			$entries{$title->entry->id}{"title"} = $value;
 		}
-	}
-
-	if ($tourn_settings{"nsda_nats"}) {
-		$hits{"regions"}++;
-		$hits{"states"}++;
-		$hits{"nats"}++;
-	} elsif ($event_settings{"region_avoid"}) {
-		$hits{"regions"}++;
 	}
 
 	if ($limit_to > 0 && $limit_to != (scalar @all_entries)) {
@@ -194,7 +219,6 @@
 		$entries_ref = pop @results if @results;
 
 		my $counter;
-
 		my %cleared = ();
 
 		if (${$entries_ref}{"by_place"}) {
@@ -345,39 +369,37 @@
 	my $remainder = (scalar @all_entries - ($num_panels * $min_size));
 
 	my %sections = ();
-
-	use List::Util 'shuffle';
 	my @keys =  shuffle( 1 .. $num_panels);
 
 	my %forbidden_sections = ();
 
-	my $limit_count =  (scalar @keys) * $percent_limit * .01;
+	if ($event_settings{"school_percent_limit"}) {
 
+		my $limit_count =  (scalar @keys) * $event_settings{"school_percent_limit"} * .01;
 
-	if ($limit_count > 0) {
+		if ($limit_count > 0) {
 
-		foreach my $school (@schools) {
+			foreach my $school (@schools) {
 
-			next if $size_of_school{$school} < $limit_count;
+				next if $size_of_school{$school} < $limit_count;
 
-			my $counter;
-			my $limited;
+				my $counter;
+				my $limited;
 
-			foreach my $key (shuffle @keys) {
-				next if $counter++ <= $limit_count;
-				$forbidden_sections{$school}{$key}++;
-				$limited++;
+				foreach my $key (shuffle @keys) {
+					next if $counter++ <= $limit_count;
+					$forbidden_sections{$school}{$key}++;
+					$limited++;
+				}
+
 			}
 
+			@all_entries =
+				sort { $size_of_school{$entries{$b}{"school"}}
+					<=> $size_of_school{$entries{$a}{"school"}} }
+				@all_entries;
 		}
-
-		@all_entries =
-			sort { $size_of_school{$entries{$b}{"school"}}
-				<=> $size_of_school{$entries{$a}{"school"}} }
-			@all_entries;
-
 	}
-
 
 	foreach my $entry_id (@all_entries) {
 
@@ -588,7 +610,6 @@
 			last if $no_improvement < 1;
 
 		}
-
 	}
 
 	my @judges = $m->comp(
@@ -828,9 +849,7 @@
 					entry        => $entry_id,
 					speakerorder => $position
 				});
-
 			}
-
 		}
 
 		if ($letter eq "Z") {
@@ -851,105 +870,78 @@
 
 		my ($panref, $hitsref, $entref, $verbose) = @_;
 
-		my @pan_entries = @$panref;
-
 		my $score = 0;
-		my $tick;
-
-		my %scores ;
-
-		if (${$hitsref}{"nsda"}) {
-
-			$scores{school}        = 1000000000;
-			$scores{title}         = 10000;
-			$scores{repeat}        = 100;
-			$scores{repeat_school} = 10;
-
-		} elsif (${$hitsref}{"nats"}) {
-
-			$scores{school}        = 1000000000;
-			$scores{region}        = 1000000000;
-			$scores{state}         = 1000000;
-			$scores{repeat}        = 1000;
-			$scores{repeat_region} = 50;
-			$scores{repeat_state}  = 10;
-
-		} else {
-			$scores{school}        = 100000000;
-			$scores{region}        = 1000 if ${$hitsref}{"regions"};
-			$scores{average}       = 100 if ${$hitsref}{"seed_average"};
-			$scores{repeat}        = 100;
-			$scores{repeat_school} = 10;
-			$scores{repeat_region} = 1 if ${$hitsref}{"regions"};
-		}
-
 		my $panel_total;
 
-		foreach my $entry_id (@pan_entries) {
+		foreach my $entry_id (@{$panref}) {
 
-			$panel_total += ${$entref}{$entry_id}{"seed"};
+			$panel_total += $entref->{$entry_id}{"seed"};
 
-			foreach my $other (@pan_entries) {
+			foreach my $other (@{$panref}) {
 
 				next unless $other > $entry_id;
 
 				my $local_score;
 
-				if (${$entref}{$other}{"school"} == ${$entref}{$entry_id}{"school"}) {
-					$local_score += $scores{school};
-					$local_score += $scores{school} if ${$hitsref}{$entry_id}{"ownschool"};
+				# Try not to hit the same school as mine
+				if ($entref->{$other}{"school"} == $entref->{$entry_id}{"school"}) {
+					$local_score += $hitsref->{scores}{school};
+
+					#Double penalty if I've already had to hit my own school so someone else does
+					$local_score += $hitsref->{scores}{school} if ${$hitsref}{$entry_id}{"ownschool"};
 				}
 
-				if ($scores{region} && ${$entref}{$entry_id}{"region"}) {
-					if (${$entref}{$other}{"region"} == ${$entref}{$entry_id}{"region"}) {
-						$local_score += $scores{region};
-						$local_score += $scores{region} if ${$hitsref}{$entry_id}{"ownregion"};
+				# Try not to hit the same region as mine
+				if ($hitsref->{scores}{region} && $entref->{$entry_id}{"region"}) {
+					if ($entref->{$other}{"region"} == $entref->{$entry_id}{"region"}) {
+						$local_score += $hitsref->{scores}{region};
+
+						#Double penalty if I've already had to hit my own region so someone else does
+						$local_score += $hitsref->{scores}{region} if ${$hitsref}{$entry_id}{"ownregion"};
 					}
 				}
 
-				if ($scores{state} && ${$entref}{$entry_id}{"state"}) {
-					if (${$entref}{$other}{"state"} eq ${$entref}{$entry_id}{"state"}) {
-						$local_score += $scores{state};
-						$local_score += $scores{state} if ${$hitsref}{$entry_id}{"ownstate"};
+				# Try not to hit the same piece title as mine
+				if ($hitsref->{scores}{title} && $entref->{$entry_id}{"title"}) {
+					if ($entref->{$other}{"title"} eq $entref->{$entry_id}{"title"}) {
+						$local_score += $hitsref->{scores}{title};
 					}
 				}
 
-				if ($scores{title} && ${$entref}{$entry_id}{"title"}) {
-					if (${$entref}{$other}{"title"} eq ${$entref}{$entry_id}{"title"}) {
-						$local_score += $scores{title};
-					}
+				# Try not to hit the same entry twice
+				if ($hitsref->{scores}{repeat} && ${$hitsref}{$entry_id}{"entry"}{$other}) {
+					$local_score += $hitsref->{scores}{repeat};
 				}
 
-				$local_score += $scores{repeat} if ${$hitsref}{$entry_id}{"entry"}{$other};
-
-				if ($scores{repeat_school}) {
-					my $other_school = ${$entref}{$other}{"school"};
+				# Try not to hit 2 different entries from the same school that often.
+				if ($hitsref->{scores}{repeat_school}) {
+					my $other_school = $entref->{$other}{"school"};
 					if (${$hitsref}{$entry_id}{"school"}{$other_school}) {
-						$local_score += $scores{repeat_school}
+						$local_score += $hitsref->{scores}{repeat_school}
 					}
 				}
 
-				if ($scores{repeat_region}) {
-					my $other_region = ${$entref}{$other}{"region"};
+				# Try not to hit 2 different entries from the same region that often.
+				if ($hitsref->{scores}{repeat_region}) {
+					my $other_region = $entref->{$other}{"region"};
 					if (${$hitsref}{$entry_id}{"region"}{$other_region}) {
-						$local_score += $scores{repeat_region}
+						$local_score += $hitsref->{scores}{repeat_region}
 					}
 				}
 
-				if ($scores{repeat_state}) {
-					my $other_state = ${$entref}{$other}{"state"};
-					if (${$hitsref}{$entry_id}{"state"}{$other_state}) {
-						$local_score += $scores{repeat_state}
+				# Repel entries who have spoken in the same speaker positions I have
+				if ($hitsref->{scores}{order}) {
+					foreach my $order (keys %{$entref->{$entry_id}{"order"}}) {
+						$local_score += $hitsref->{scores}{order};
 					}
 				}
 
 				$score += $local_score;
-
 			}
 		}
 
-		my $average = ($panel_total / (scalar @pan_entries)) if $panel_total;
-		$score += abs($average - ${$hitsref}{"seed_average"})  * $scores{average};
+		my $average = ($panel_total / (scalar @{$panref})) if $panel_total;
+		$score += abs($average - ${$hitsref}{"seed_average"})  * $hitsref->{scores}{average};
 		return $score;
 	}
 
