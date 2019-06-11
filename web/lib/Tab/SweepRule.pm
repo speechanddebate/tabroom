@@ -4,7 +4,7 @@ Tab::SweepRule->table('sweep_rule');
 
 Tab::SweepRule->columns(All => qw/
 		id sweep_set tag 
-		value place count 
+		value place count count_round
 		tiebreak_set timestamp
 	/);
 
