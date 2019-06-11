@@ -1,0 +1,259 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$event
+</%args>
+<%init>
+
+	my $final = $event->rounds(
+		type => "final"
+	)->first;
+
+	my @elims = sort {$b->name <=> $a->name} $event->rounds(type => "elim");
+
+	my $last_elim = $elims[0] if @elims;
+
+	my $supp++ if $event->setting("supp");
+    my $min_round_name = 7;
+    my $max_round_name = $min_round_name + scalar @elims;
+    my $final_number = $final->name;
+
+	if ($event->type eq "debate") {
+
+		my $final_tbs = $final->tiebreak_set if $final;
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $sth = $dbh->prepare("
+			select entry.id,
+				entry.code,
+					GROUP_CONCAT(
+						distinct(CONCAT(student.first,' ',student.last))
+						SEPARATOR ' & '
+					) as entryname,
+				school.name, school.state,
+				round.id, round.name,
+				rank.tag, rank.value,
+				winloss.tag, winloss.value
+			from (entry, round, panel, ballot, school, entry_student, student)
+
+			left join score rank on rank.tag = 'rank'
+				and rank.ballot = ballot.id
+
+			left join score winloss on winloss.tag = 'ballot'
+				and winloss.ballot = ballot.id
+
+			where entry.event = ?
+				and entry.id = ballot.entry
+				and ballot.panel = panel.id
+				and panel.round = round.id
+				and entry.school = school.id
+				and (
+					round.type = 'elim'
+					or round.type = 'final'
+				)
+
+				and entry_student.entry = entry.id
+				and entry_student.student = student.id
+
+			group by ballot.id
+
+		");
+
+		$sth->execute($event->id);
+
+		my %entries;
+		my %results;
+		my $max_round;
+
+		while (
+			my ($entry_id, $entry_code, $entry_name, $school_name, $school_state,
+				$round_id, $round_name,
+				$rank_tag, $rank_value,
+				$winloss_tag, $winloss_value
+			) = $sth->fetchrow_array()
+		) {
+
+			if ($results{$entry_id}{$round_name} && $round_name == $final_number) {
+				$results{$entry_id}{$round_name} .= " \\hspace{2mm} ";
+			} else {
+				$results{$entry_id}{$round_name} .= " \\hspace{.1mm}";
+			}
+
+			if ($winloss_tag) {
+				$results{$entry_id}{$round_name} .= "W" if $winloss_value == 1;
+				$results{$entry_id}{$round_name} .= "L" if $winloss_value == 0;
+			} else {
+				$results{$entry_id}{$round_name} .= $rank_value if $rank_tag;
+			}
+
+			if ($final
+				&& $round_id == $final->id
+				&& (not defined $results{$entry_id}{"finals"})
+			) {
+				push @{$results{"finals"}}, $entry_id;
+				$results{$entry_id}{"finals"}++;
+			} elsif (not defined $results{$entry_id}{"semis"}) {
+				$results{$entry_id}{"semis"}++;
+				push @{$results{"semis"}}, $entry_id;
+			}
+
+			$max_round = $round_name if $max_round < $round_name;
+
+			$entries{$entry_id}{"code"}   = $entry_code;
+			$entries{$entry_id}{"name"}   = $entry_name;
+			$entries{$entry_id}{"state"}  = $school_state;
+			$entries{$entry_id}{"school"} = $school_name;
+
+		}
+
+		my %done;
+		my $previous;
+		my $entry_count;
+
+		foreach my $round ($final, @elims) {
+
+			my @results = $m->comp(
+				"/tabbing/results/order_entries.mas",
+				round        => $round,
+				tiebreak_set => $final_tbs
+			);
+
+			my $round_ref = pop @results if @results;
+			my $round_count;
+
+			if (${$round_ref}{"by_place"}) {
+				foreach my $key (sort {$a <=> $b} keys %{${$round_ref}{"by_place"}}) {
+					foreach my $entry_id (@{${${$round_ref}{"by_place"}}{$key}}) {
+						next if $done{$entry_id}++;
+
+						$entries{$entry_id}{"place"} = $key;
+						$round_count++;
+						$entries{$entry_id}{"final_count"}       = $round_ref->{"tiebreak"}{1}{$entry_id};
+						$entries{$entry_id}{"last_round"}        = $round_ref->{"tiebreak"}{2}{$entry_id};
+						$entries{$entry_id}{"elim_ballots"}      = $round_ref->{"tiebreak"}{3}{$entry_id};
+						$entries{$entry_id}{"supp_elim_ballots"} = $round_ref->{"tiebreak"}{4}{$entry_id};
+						$entries{$entry_id}{"prelim_ballots"}    = $round_ref->{"tiebreak"}{5}{$entry_id};
+						$entries{$entry_id}{"h2h_elim"}          = $round_ref->{"tiebreak"}{6}{$entry_id};
+						$entries{$entry_id}{"h2h_prelim"}        = $round_ref->{"tiebreak"}{7}{$entry_id};
+					}
+				}
+			}
+
+			$previous += $round_count;
+			last if $previous >= 14;
+		}
+
+		return \%entries;
+
+	} else {
+
+		if ($event->setting("supp") || $event->setting("conn")) {
+			$min_round_name = 1;
+			my @rounds      = $event->rounds;
+			$final_number   = scalar @rounds;
+			$max_round_name = $final_number - 1;
+			$supp++;
+		}
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $sth = $dbh->prepare("
+			select entry.id,
+				entry.code,
+					GROUP_CONCAT(
+						CONCAT(student.first,' ',student.last)
+						SEPARATOR ' & '
+					) as entryname,
+				school.name, school.state,
+				round.id, round.name,
+				rank.tag, rank.value,
+				winloss.tag, winloss.value,
+				ballot.judge, ballot.speakerorder
+			from (entry, round, panel, ballot, school, entry_student, student)
+
+			left join score rank on rank.tag = 'rank'
+				and rank.ballot = ballot.id
+
+			left join score winloss on winloss.tag = 'ballot'
+				and winloss.ballot = ballot.id
+
+			where entry.event = ?
+				and entry.id = ballot.entry
+				and ballot.panel = panel.id
+				and panel.round = round.id
+				and entry.school = school.id
+				and (
+					round.type = 'elim'
+					or round.type = 'final'
+				)
+
+				and entry_student.entry = entry.id
+				and entry_student.student = student.id
+
+			group by ballot.id
+			order by round.name, ballot.judge, ballot.speakerorder
+		");
+
+		my $duo++ if $event->setting("max_entry") > 1;
+
+		$sth->execute($event->id);
+
+		my %entries;
+		my %results;
+
+		while (
+			my ($entry_id, $entry_code, $entry_name, $school_name, $school_state,
+				$round_id, $round_name,
+				$rank_tag, $rank_value,
+				$winloss_tag, $winloss_value,
+				$judge, $order
+			) = $sth->fetchrow_array()
+		) {
+
+			$entries{$entry_id}{"code"}   = $entry_code;
+			$entries{$entry_id}{"order"}  = $order;
+			$entries{$entry_id}{"name"}   = $entry_name;
+			$entries{$entry_id}{"state"}  = $school_state;
+			$entries{$entry_id}{"school"} = $school_name;
+		}
+
+		my @semis_results = $m->comp(
+			"/tabbing/results/order_entries.mas",
+			round => $last_elim
+		) if $last_elim;
+
+		my $semis_ref = pop @semis_results if @semis_results;
+		my @semis_tiebreak_keys = sort {$a <=> $b} keys %{$semis_ref->{"tier_description"}};
+
+		if (${$semis_ref}{"by_place"}) {
+			foreach my $key (sort {$a <=> $b} keys %{${$semis_ref}{"by_place"}}) {
+				foreach my $entry_id (@{${${$semis_ref}{"by_place"}}{$key}}) {
+					next if $entries{$entry_id}{"semis_place"} > 14;
+					$entries{$entry_id}{"semis_place"} = $key;
+					$entries{$entry_id}{"place"} = $key;
+				}
+			}
+		}
+
+		my @finals_results = $m->comp(
+			"/tabbing/results/order_entries.mas",
+			round => $final
+		) if $final;
+
+		my $finals_ref = pop @finals_results if @finals_results;
+		my @finals_tiebreak_keys = sort {$a <=> $b} keys %{$finals_ref->{"tier_description"}};
+
+		if (${$finals_ref}{"by_place"}) {
+			foreach my $key (sort {$a <=> $b} keys %{${$finals_ref}{"by_place"}}) {
+				foreach my $entry_id (@{${${$finals_ref}{"by_place"}}{$key}}) {
+					$entries{$entry_id}{"finals_place"} = $key;
+					$entries{$entry_id}{"place"} = $key;
+				}
+			}
+		}
+
+		return \%entries;
+	}
+
+</%init>
