@@ -1,0 +1,258 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$event_id => undef
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+	my $event = Tab::Event->retrieve($event_id);
+
+	my $sth = $dbh->prepare("
+		select
+			entry.id, entry.code,
+			round.id, round.name,
+			ballot.speakerorder,
+			panel.id, panel.letter
+		from entry, ballot, panel, round
+		where entry.event = ?
+			and entry.active  = 1
+			and ballot.entry  = entry.id
+			and ballot.panel  = panel.id
+			and panel.round   = round.id
+			and round.type    = 'prelim'
+	");
+
+	$sth->execute($event->id);
+
+	my %entries = ();
+	my %rounds = ();
+	my $goodcount;
+
+	while (
+		my (
+			$entry_id, $entry_code, $round_id, $round_name, $order, $panel_id, $panel_letter
+		) = $sth->fetchrow_array()
+	) {
+
+		next if $entries{$entry_id}{"order"}{$round_name};
+
+		$rounds{$round_name}{$panel_id}{$entry_id}++;
+		$rounds{$round_name}{"id"} = $round_id;
+
+		$entries{$entry_id}{"code"} = $entry_code;
+		$entries{$entry_id}{"order"}{$round_name} = $order;
+		$entries{$entry_id}{"taken"}{$order}++;
+
+		$entries{$entry_id}{$round_name}{"order"}      = $order;
+		$entries{$entry_id}{$round_name}{panel_id}     = $panel_id;
+		$entries{$entry_id}{$round_name}{panel_letter} = $panel_letter;
+
+	}
+
+	if ($ARGS{"improve_me"}) {
+
+		foreach my $entry_id (keys %entries) {
+
+			foreach my $round (sort keys %rounds) {
+
+				my $order = $entries{$entry_id}{"order"}{$round};
+				next unless $entries{$entry_id}{"taken"}{$order} > 1;
+
+				my $panel_id = $entries{$entry_id}{$round}{"panel_id"};
+
+				my $swap_with;
+				my $swap_order;
+
+				foreach my $other_id (keys %{$rounds{$round}{$panel_id}}) {
+
+					#Don't create another problem
+					next if $entries{$other_id}{"taken"}{$order} > 0;
+
+					my $other_order = $entries{$other_id}{"order"}{$round};
+					next if $entries{$entry_id}{"taken"}{$other_order} > 0;
+
+					$swap_with = $other_id;
+					$swap_order = $other_order;
+					last;
+				}
+
+				if ($swap_with) {
+
+					&swap_sides($panel_id, $entry_id, $swap_with);
+
+					$entries{$entry_id}{"order"}{$round} = $swap_order;
+					$entries{$entry_id}{"taken"}{$order}--;
+					$entries{$entry_id}{"taken"}{$swap_order}++;
+
+					$entries{$swap_with}{"order"}{$round} = $order;
+					$entries{$swap_with}{"taken"}{$swap_order}--;
+					$entries{$swap_with}{"taken"}{$order}++;
+				}
+			}
+		}
+	}
+
+	foreach my $entry_id (keys %entries) {
+		my $bad;
+		foreach my $order (keys %{$entries{$entry_id}{"taken"}}) {
+			$bad++ if $entries{$entry_id}{"taken"}{$order} > 1;
+		}
+		$goodcount++ unless $bad;
+	}
+
+	sub swap_sides {
+
+		my ($panel, $entry, $other) = @_;
+
+		Tab::Ballot->set_sql(max_order => "select max(ballot.speakerorder) from ballot where panel = ? ");
+		Tab::Ballot->set_sql(entry_order => "select ballot.speakerorder from ballot where panel = ? and entry = ? limit 1");
+
+		my $max_order = Tab::Ballot->sql_max_order->select_val($panel);
+		$max_order++;
+
+		my $entry_order = Tab::Ballot->sql_entry_order->select_val($panel, $entry);
+		my $other_order = Tab::Ballot->sql_entry_order->select_val($panel, $other);
+
+		Tab::Ballot->set_sql(reverse_orders => "update ballot set speakerorder = ? where entry = ? and panel = ?");
+
+		Tab::Ballot->sql_reverse_orders->execute($max_order, $entry, $panel);
+		Tab::Ballot->sql_reverse_orders->execute($entry_order, $other, $panel);
+		Tab::Ballot->sql_reverse_orders->execute($other_order, $entry, $panel);
+		return;
+	}
+
+</%init>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<h4>Do Stuff</h4>
+
+			<a
+				class="yellow full"
+				href="nats_speakerorder.mhtml?event_id=<% $event_id %>&improve_me=1"
+			>Improve Ordering through Internal Swaps</a>
+
+			<h4>Schematics</h4>
+
+%			foreach my $round (sort keys %rounds) {
+				<a
+					class="blue full"
+					href="/panel/schemat/show.mhtml?round_id=<% $rounds{$round}{"id"} %>"
+				>Round <% $round %> Schematic</a>
+%			}
+
+		</div>
+
+	</div>
+
+	<div class="main">
+
+		<div class="full nospace">
+			<span class="threeeighths nospace">
+				<h4><% $event->abbr %> Speaker order check</h4>
+			</span>
+
+			<span class="threeeighths nospace centeralign bluetext semibold">
+				<% $goodcount %>/<% scalar(keys %entries) %> OK
+			</span>
+
+			<span
+				class = "quarter rightalign"
+				id    = "speakers_buttonarea"
+			></span>
+		</div>
+
+		<& "/funclib/tablesorter.mas", table => "speakers" &>
+
+		<table id="speakers">
+
+			<thead>
+				<tr class="yellowrow smallish">
+
+					<th>
+						Count
+					</th>
+
+					<th>
+						Entry
+					</th>
+
+%					foreach my $round (sort keys %rounds) {
+						<th class="centeralign">
+							<% $round %>
+						</th>
+%					}
+
+					<th>
+						Status
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+<%perl>
+
+			my $count = 1;
+
+			foreach my $entry_id (
+				sort {$entries{$a}{"code"} cmp $entries{$b}{"code"}}
+				keys %entries
+			) {
+
+			my %bads = ();
+</%perl>
+
+				<tr>
+					<td>
+						<% $count++ %>.
+					</td>
+
+					<td>
+						<% $entries{$entry_id}{'code'} %>
+					</td>
+
+<%perl>
+					foreach my $round (sort keys %rounds) {
+						my $bad;
+
+						# I promise these hash arrays started reasonable but
+						# then kept growing. THEY JUST KEPT GROWING.  SEND
+						# HELP -- CLP
+
+						if ($entries{$entry_id}{taken}{  $entries{$entry_id}{"order"}{$round}  } > 1 ) {
+
+							if ($bads{ $entries{$entry_id}{"order"}{$round} }) {
+								$bads{ $entries{$entry_id}{"order"}{$round} } .= ", ";
+							}
+
+							$bads{ $entries{$entry_id}{"order"}{$round} } .= $round;
+						}
+</%perl>
+						<td class='centeralign <% $bad ? "semibold redtext" : "" %>'>
+							<span class="hidden"><% $entries{$entry_id}{$round}{"panel_letter"} %></span>
+							<% $entries{$entry_id}{"order"}{$round} %>
+						</td>
+%					}
+
+					<td>
+%						if (keys %bads) {
+%							foreach my $order (sort keys %bads) {
+								<span class="nospace limit2">
+									Repeats <% $order %> in Rds <% $bads{$order} %>
+								</span>
+%							}
+
+%						} else {
+							<span class="hidden">ZZZZZZ</span>
+							<span class="full nospace centeralign fa fa-sm fa-check greentext"></span>
+%						}
+					</td>
+				</tr>
+%			}
+
+			</tbody>
+		</table>
+	</div>
