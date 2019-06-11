@@ -4,6 +4,11 @@
 </%args>
 <%init>
 
+	my %tourn_settings = $tourn->all_settings();
+
+	my $districts    = $tourn_settings{"nsda_district"};
+	my $nsda_nats    = $tourn_settings{"nsda_nats"};
+
 	my $novice_only;
 	my %skip_round;
 	my $prelim_seeds;
@@ -224,7 +229,9 @@
 	$student_sth->finish();
 
 	my $bye_sth = $dbh->prepare("
-		select entry.id, event.id, round.type, round.id, panel.id, panel.bye, ballot.bye
+		select entry.id, event.id,
+			round.type, round.id, round.name,
+			panel.id, panel.bye, ballot.bye
 		from panel, round, event, entry, ballot
 		where ballot.panel = panel.id
 			and panel.round = round.id
@@ -233,6 +240,8 @@
 			and ballot.entry = entry.id
 			and entry.active = 1
 			and entry.dq != 1
+
+			and (ballot.bye = 1 or panel.bye = 1)
 
 		and not exists (
 			select entry_setting.id
@@ -248,13 +257,10 @@
 
     $bye_sth->execute($tourn->id);
 
-	my %entry_byes;
-	my %entry_byes_by_type;
-
     while (
 		my (
-			$entry, $event,
-			$round_type, $round_id,
+			$entry_id, $event,
+			$round_type, $round_id, $round_name,
 			$panel, $panel_bye, $ballot_bye
 		) = $bye_sth->fetchrow_array()
 	) {
@@ -263,19 +269,18 @@
 		next unless $event_include{$event};
 		next unless $panel_bye || $ballot_bye;
 
-		next if $novice_only && $entries{$entry}{"novice"};
+		next if $novice_only && $entries{$entry_id}{"novice"};
 
-		$entry_byes{$entry}++;
+		$entries{$entry_id}{"byes"}++;
+		$entries{$entry_id}{"round_bye"}{$round_name}++;
 
 		$round_type = "prelim"
 			if $round_type eq "preset"
 			|| $round_type eq "highhigh"
 			|| $round_type eq "highlow";
 
-		$entry_byes_by_type{$entry}{$round_type}++;
-
-		$entries{$entry}{"round_panel"}{$round_id} = $panel;
-
+		$entries{$entry_id}{"bye_type"}{$round_type}++;
+		$entries{$entry_id}{"round_panel"}{$round_id} = $panel;
 	}
 
 	$bye_sth->finish();
@@ -284,15 +289,13 @@
 	@entries = grep { ! $seen{$_} ++ } @entries;
 
 	my %entry_points;
-	my %entry_placement;
 	my %entry_placement_event;
 
 	my %places = ();
 	my $placement_done;
 
 	foreach my $rule (@rules) {
-		$places{$rule->place} = $rule->value
-			if $rule->place && $rule->tag ne "cume";
+		$places{$rule->place} = $rule->value if $rule->place && $rule->tag ne "cume";
 	}
 
 	my %prelim_seeding = ();
@@ -356,7 +359,12 @@
 
 				my %pseen = ();
 				@panels = grep { ! $pseen{$_} ++ } @panels;
-				$entries{$entry_id}{$rule_id} += ($points * (scalar @panels));
+
+				if (@panels) {
+					$entries{$entry_id}{$rule_id} += ($points * (scalar @panels));
+				} elsif ($count eq "specific" && $entries{$entry_id}{"round_bye"}{$count_round}) {
+					$entries{$entry_id}{$rule_id} += $points;
+				}
 			}
 		}
 
@@ -640,12 +648,10 @@
 						$points = 1 if $points < 1;
 
 						$entries{$entry_id}{$rule_id} += $points;
-
 					}
 				}
 			}
 		}
-
 
 		if (
 			$rule_tag eq "rev_overall"
@@ -656,69 +662,83 @@
 			|| $rule_tag eq "nsda_place"
 		) {
 
-			my $round_type = $rule->count;
+			my $round_type   = $rule->count;
 			my $tiebreak_set = $rule->tiebreak_set;
-
-			my $districts = $tourn->setting("nsda_district");
 
 			unless ($placement_done eq $round_type."-".$tiebreak_set) {
 
 				foreach my $event (@events) {
 
-					my $pilot++ if $tourn->setting("nsda_pilot_".$event->type);
+					if ($nsda_nats) {
 
-					next unless $event && $event->id;
-
-					my @rounds = sort {$b->name <=> $a->name} $event->rounds();
-					next unless @rounds;
-
-					if ($districts && ($event->type eq "speech" || $event->type eq "debate")) {
-						my $final;
-						foreach my $round (@rounds) {
-							$final = $round if $round->type eq "final";
-							last if $final;
-						}
-						$tiebreak_set = $final->tiebreak_set if $final;
-					}
-
-					my $did_stuff;
-
-					foreach my $round (@rounds) {
-
-						next if $skip_round{$round->id};
-						next unless ($round->type eq $round_type) || ($round_type eq "all");
-
-						if ($pilot && $round->type ne "final" && $round->type ne "elim") {
-							$tiebreak_set = $rule->tiebreak_set;
-						}
-
-						my @results = $m->comp(
-							"/tabbing/results/order_entries.mas",
-								round        => $round,
-								tiebreak_set => $tiebreak_set
+						my $result_entries = $m->comp("/tabbing/report/nsda/final_placement.mas",
+							event          => $event,
+							tourn          => $tourn,
+							tourn_settings => \%tourn_settings
 						);
 
-						my $entries_ref = pop @results;
-						my $counter;
+						foreach my $entry_id (keys %{$result_entries}) {
+							$entries{$entry_id}{"placement"} = $result_entries->{$entry_id}{"place"};
+							$entry_placement_event{$event->id}{$entry_id} = $entries{$entry_id}{"placement"};
+						}
 
-						foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) {
-							foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) {
-								next if $entry_placement{$entry_id};
-								$entry_placement{$entry_id} = $key;
-								$entry_placement_event{$event->id}{$entry_id} = $key;
-								$counter++;
+					} else {
+
+						my $pilot++ if $tourn_settings{"nsda_pilot_".$event->type};
+
+						next unless $event && $event->id;
+
+						my @rounds = sort {$b->name <=> $a->name} $event->rounds();
+						next unless @rounds;
+
+						if ($districts && ($event->type eq "speech" || $event->type eq "debate")) {
+							my $final;
+							foreach my $round (@rounds) {
+								$final = $round if $round->type eq "final";
+								last if $final;
+							}
+							$tiebreak_set = $final->tiebreak_set if $final;
+						}
+
+						my $did_stuff;
+
+						foreach my $round (@rounds) {
+
+							next if $skip_round{$round->id};
+							next unless ($round->type eq $round_type) || ($round_type eq "all");
+
+							if ($pilot && $round->type ne "final" && $round->type ne "elim") {
+								$tiebreak_set = $rule->tiebreak_set;
+							}
+
+							my @results = $m->comp(
+								"/tabbing/results/order_entries.mas",
+									round        => $round,
+									tiebreak_set => $tiebreak_set
+							);
+
+							my $entries_ref = pop @results;
+							my $counter;
+
+							foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) {
+								foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) {
+									next if $entries{$entry_id}{"placement"};
+									$entries{$entry_id}{"placement"} = $key;
+									$entry_placement_event{$event->id}{$entry_id} = $key;
+									$counter++;
+								}
+							}
+
+							if ($counter) {
+								last if $round->type eq "prelim";
+								last if $round->type eq "highhigh";
+								last if $round->type eq "highlow";
 							}
 						}
 
-						if ($counter) {
-							last if $round->type eq "prelim";
-							last if $round->type eq "highhigh";
-							last if $round->type eq "highlow";
-						}
+						$placement_done = $round_type."-".$tiebreak_set;
 					}
 				}
-
-				$placement_done = $round_type."-".$tiebreak_set;
 			}
 		}
 
@@ -883,26 +903,28 @@
 
 		if ($rule_tag eq "rev_per_overall_place") {
 			foreach my $entry_id (@entries) {
-				next unless $entry_placement{$entry_id};
-				my $points = 6 - $entry_placement{$entry_id};
+				next unless $entries{$entry_id}{"placement"};
+				my $points = 6 - $entries{$entry_id}{"placement"};
 				$points = 0 unless $points;
 				$entries{$entry_id}{$rule_id} += $points;
 			}
 		}
 
 		if ($rule_tag eq "place_above") {
+
+			my $points = $rule->value;
 			foreach my $entry_id (@entries) {
-				next unless $entry_placement{$entry_id};
-				next if $entry_placement{$entry_id} > $rule->place;
-				$entries{$entry_id}{$rule_id} += $places{$entry_placement{$entry_id}};
+				next unless $entries{$entry_id}{"placement"};
+				next if $entries{$entry_id}{"placement"} > $rule->place;
+				$entries{$entry_id}{$rule_id} += $points;
 			}
 		}
 
 		if ($rule_tag eq "place") {
 			foreach my $entry_id (@entries) {
-				next unless $entry_placement{$entry_id};
-				next if $entry_placement{$entry_id} != $rule->place;
-				$entries{$entry_id}{$rule_id} += $places{$entry_placement{$entry_id}};
+				next unless $entries{$entry_id}{"placement"};
+				next if $entries{$entry_id}{"placement"} != $rule->place;
+				$entries{$entry_id}{$rule_id} += $places{$entries{$entry_id}{"placement"}};
 			}
 		}
 
@@ -913,8 +935,8 @@
 
 			foreach my $entry_id (@entries) {
 
-				next unless $entry_placement{$entry_id};
-				next unless $entry_placement{$entry_id} < 7;
+				next unless $entries{$entry_id}{"placement"};
+				next unless $entries{$entry_id}{"placement"} < 7;
 
 				my $event = $event_include{$entries{$entry_id}{"event"}};
 				my $baseline_score = 10;
@@ -937,11 +959,11 @@
 				my $points = 0;
 
 				if (
-					($entry_placement{$entry_id} < 7)
-					&& ($entry_placement{$entry_id} > 0)
+					($entries{$entry_id}{"placement"} < 7)
+					&& ($entries{$entry_id}{"placement"} > 0)
 				) {
 
-					$points = $baseline_score - $entry_placement{$entry_id};
+					$points = $baseline_score - $entries{$entry_id}{"placement"};
 				}
 				$entries{$entry_id}{$rule_id} += $points;
 			}
@@ -1045,10 +1067,10 @@
 
 			foreach my $entry_id (@entries) {
 
-				if ($count && $count ne "all") {
-					$entries{$entry_id}{$rule_id} += $entry_byes_by_type{$entry_id}{$count} * $points;
+				if ($count && $count ne "all" && $count ne "specific") {
+					$entries{$entry_id}{$rule_id} += $entries{$entry_id}{"bye_type"}{$count} * $points;
 				} else {
-					$entries{$entry_id}{$rule_id} += $entry_byes{$entry_id} * $points;
+					$entries{$entry_id}{$rule_id} += $entries{$entry_id}{"byes"} * $points;
 				}
 			}
 		}
