@@ -10,8 +10,6 @@
 
 	my $dbh = Tab::DBI->db_Main();
 
-	my %judge_constraint;
-
 	unless ($event) {
 		$event = $round->event;
 	}
@@ -19,203 +17,168 @@
 		%{$event_settings} = $event->all_settings;
 	}
 
-	$category = $event->category unless $category;
+	my %counts;
+	my %entries;
 
-	unless ($event_settings->{"allow_judge_own"}) {
+	my $hires_conflict++ if $category->setting("auto_conflict_hires");
 
-		my $same_school_sth = $dbh->prepare("
-			select judge.id, entry.id
-			from judge, entry, event
-			where judge.school = entry.school
-			and entry.event    = event.id
-			and event.category = ?
-		");
-
-		$same_school_sth->execute($category->id);
-
-		while (my ($judge, $entry) = $same_school_sth->fetchrow_array() ) {
-			$judge_constraint{$judge}{$entry}++;
-		}
-
-		my $hybrid_same_sth = $dbh->prepare("
-			select judge.id, entry.id
-			from judge, strike, entry, event
-			where entry.event  = event.id
-			and event.category = ?
-			and judge.school   = strike.school
-			and strike.type    = 'hybrid'
-			and strike.entry   = entry.id
-		");
-
-		$hybrid_same_sth->execute($category->id);
-
-		while (my ($judge, $entry) = $hybrid_same_sth->fetchrow_array() ) {
-			$judge_constraint{$judge}{$entry}++;
-		}
-
-	}
-
-	if ($category->setting("auto_conflict_hires")) {
-
-		my $auto_conflict_sth = $dbh->prepare("
-			select judge.id, entry.id
-			from judge, judge_hire, entry, event
-			where judge.id        = judge_hire.judge
-			and judge_hire.school = entry.school
-			and entry.event       = event.id
-			and event.category    = ?
-		");
-
-		$auto_conflict_sth->execute($category->id);
-
-		while (my ($judge, $entry) = $auto_conflict_sth->fetchrow_array() ) {
-			$judge_constraint{$judge}{$entry}++;
-		};
-
-	}
-
-	my $hybrid_strike_sth = $dbh->prepare("
-		select judge.id, entry.id
-		from judge, strike hybrid, strike schoolstrike, entry, event
-		where entry.event      = event.id
-		and event.category     = ?
-		and hybrid.type        = 'hybrid'
-		and hybrid.entry       = entry.id
-		and hybrid.school      = schoolstrike.school
-		and schoolstrike.judge = judge.id
+	my $sth = $dbh->prepare("
+		select entry.id, entry.school, school.region, school.district, hybrid.school,
+			ballot.side
+		from (entry, school, ballot, panel)
+			left join strike hybrid on hybrid.type = 'hybrid' and hybrid.entry = entry.id
+		where panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.entry = entry.id
+			and entry.school = school.id
+			and entry.active = 1
 	");
 
-	$hybrid_strike_sth->execute($category->id);
-
-	while (my ($judge, $entry) = $hybrid_strike_sth->fetchrow_array() ) {
-		$judge_constraint{$judge}{$entry}++;
-	}
-
-	unless ($event_settings->{"allow_repeat_judging"}) {
-
-		unless ($event_settings->{"allow_repeat_elims"} && ($round->type eq "elim" || $round->type eq "final")) {
-
-			my $judged_sth;
-
-			if ($event_settings->{"allow_repeat_prelim_side"}) {
-
-				$judged_sth = $dbh->prepare("
-					select judge.id, ballot.entry, ballot.side
-					from (judge, ballot, panel, round, entry, event,
-							ballot b2, panel p2, round r2)
-					where ballot.judge     = judge.id
-						and ballot.entry   = entry.id
-						and entry.event    = event.id
-						and event.category = ?
-						and ballot.panel   = panel.id
-						and panel.round    = round.id
-						and round.id      != r2.id
-						and r2.id          = ?
-						and r2.id          = p2.round
-						and p2.id          = b2.panel
-						and b2.entry       = entry.id
-						and b2.side        = ballot.side
-				");
-
-				$judged_sth->execute($event->id, $round->id);
-
-			} else {
-
-				$judged_sth = $dbh->prepare("
-					select judge.id, ballot.entry, ballot.side
-					from judge, ballot, panel, round, entry, event
-					where ballot.judge = judge.id
-					and ballot.entry   = entry.id
-					and entry.event    = event.id
-					and event.category = ?
-					and ballot.panel   = panel.id
-					and panel.round    = round.id
-					and round.id 	  != ?
-				");
-
-				$judged_sth->execute($category->id, $round->id);
-			}
-
-			while (my ($judge, $entry) = $judged_sth->fetchrow_array() ) {
-				$judge_constraint{$judge}{$entry}++;
-			}
-		}
-	}
-
-	my $school_strike_sth = $dbh->prepare("
-		select judge.id, entry.id
-		from judge, strike, entry, event
-		where judge.id     = strike.judge
-			and event.category = ?
-			and entry.event    = event.id
-			and strike.type    = 'school'
-			and strike.school  = entry.school
-	");
-
-	$school_strike_sth->execute($category->id);
-
-	while (my ($judge, $entry) = $school_strike_sth->fetchrow_array() ) {
-		$judge_constraint{$judge}{$entry}++;
-	}
-
-	my $conflict_strike_sth = $dbh->prepare("
-		select judge.id, entry.id
-		from judge, strike, entry, event
-		where judge.id = strike.judge
-			and entry.event    = event.id
-			and event.category = ?
-			and strike.type    = 'entry'
-			and strike.entry   = entry.id
-	");
-
-	$conflict_strike_sth->execute($category->id);
-
-	while (my ($judge, $entry) = $conflict_strike_sth->fetchrow_array() ) {
-		$judge_constraint{$judge}{$entry}++;
-	}
-
-	my $region_strike_sth = $dbh->prepare("
-		select judge.id, entry.id
-		from (judge, strike, entry, event, school, category)
-		where event.category = ?
-		and entry.event      = event.id
-		and entry.school     = school.id
-		and school.region    = strike.region
-		and strike.judge     = judge.id
-		and judge.category   = category.id
-		and category.tourn   = event.tourn
-		and school.region > 0
-	");
-
-	$region_strike_sth->execute($category->id);
+	$sth->execute($round->id);
 
 	while (
-		my ($judge, $entry) = $region_strike_sth->fetchrow_array()
+		my (
+			$entry_id, $school_id, $region_id, $district_id, $hybrid_id, $ballot_side
+		) = $sth->fetchrow_array()
 	) {
-		$judge_constraint{$judge}{$entry}++;
+
+		$counts{"school"}{$school_id}{$entry_id}++;
+		$counts{"school"}{$hybrid_id}{$entry_id}++;
+		$counts{"region"}{$region_id}{$entry_id}++;
+		$counts{"district"}{$district_id}{$entry_id}++;
+		$entries{$entry_id}{side}{$ballot_side}++;
 	}
 
-	if ($event_settings->{"region_constrain"}) {
+	$sth->finish();
 
-		my $region_sth = $dbh->prepare("
-			select judge.id, entry.id
-			from (judge, entry, school, school jschool)
-			where entry.event = ?
-			and entry.school  = school.id
-			and school.region = jschool.region
-			and school.tourn  = jschool.tourn
-			and jschool.id    = judge.school
-			and school.region > 0
-		");
+	$sth = $dbh->prepare("
+        select judge.id, judge.school, school.region, school.district,
+            strike.id, strike.entry, strike.school, strike.region, strike.district, strike.type,
+			judge_hire.school
 
-		$region_sth->execute($category->id);
+        from (judge, category)
+        left join school on judge.school = school.id
+        left join strike on judge.id = strike.judge
+		left join judge_hire on judge.id = judge_hire.judge
 
-		while (
-			my ($judge, $entry) = $region_sth->fetchrow_array()
-		) {
-			$judge_constraint{$judge}{$entry}++;
+        where category.tourn = ?
+            and category.id = judge.category
+            and judge.active = 1
+	");
+
+	my %judge_constraint;
+
+	$sth->execute($category->tourn->id);
+
+	while (
+		my (
+			$judge_id, $judge_school, $judge_region, $judge_district,
+			$strike_id, $strike_entry, $strike_school, $strike_region, $strike_district, $strike_type,
+			$hire_school
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($judge_constraint{$judge_id}) {
+
+			unless ($event_settings->{"allow_judge_own"}) {
+
+				if ($counts{school}{$judge_school}) {
+					foreach my $entry_id (keys %{$counts{school}{$judge_school}}) {
+						$judge_constraint{$judge_id}{$entry_id}++;
+					}
+				}
+
+				if ($tourn_settings->{nsda_nats}|| $tourn_settings->{ncfl}) {
+					if ($counts{region}{$judge_region}) {
+						foreach my $entry_id (keys %{$counts{region}{$judge_region}}) {
+							$judge_constraint{$judge_id}{$entry_id}++;
+						}
+					}
+				}
+
+				if ($tourn_settings->{nsda_nats}) {
+					if ($counts{district}{$judge_district}) {
+						foreach my $entry_id (keys %{$counts{district}{$judge_district}}) {
+							$judge_constraint{$judge_id}{$entry_id}++;
+						}
+					}
+				}
+			}
 		}
 
+		if ($hires_conflict && $hire_school > 0) {
+			$judge_constraint{$judge_id} = eval {
+				return { %{$judge_constraint{$judge_id}}, %{$counts{school}{$hire_school}} };
+			}
+		}
+
+		if ($strike_school > 0) {
+			$judge_constraint{$judge_id} = eval {
+				return { %{$judge_constraint{$judge_id}}, %{$counts{school}{$strike_school}} };
+			};
+		}
+		if ($strike_region > 0) {
+			$judge_constraint{$judge_id} = eval {
+				return { %{$judge_constraint{$judge_id}}, %{$counts{region}{$strike_region}} };
+			};
+		}
+		if ($strike_district > 0) {
+			$judge_constraint{$judge_id} = eval {
+				return { %{$judge_constraint{$judge_id}}, %{$counts{district}{$strike_district}} };
+			};
+		}
+
+		if ($strike_entry > 0) {
+			$judge_constraint{$judge_id}{$strike_entry}++;
+		}
+	}
+
+	$sth->finish();
+
+	unless (
+		$event_settings->{"allow_repeat_judging"}
+		|| (
+				$event_settings->{"allow_repeat_elims"}
+				&& ($round->type eq "final" || $round->type eq "elim")
+				&& (not defined $event_settings->{"disallow_repeat_drop"})
+			)
+	) {
+
+		$sth = $dbh->prepare("
+			select
+				judge.id, round.type, ballot.entry, ballot.side, winloss.value
+			from (category, judge, ballot, panel, round)
+				left join score winloss on winloss.ballot = ballot.id and winloss.tag = 'ballot'
+
+			where category.tourn = ?
+				and category.id = judge.category
+				and judge.active = 1
+				and judge.id = ballot.judge
+				and ballot.panel = panel.id
+				and panel.round = round.id
+				and round.name < ?
+		");
+
+		$sth->execute($category->tourn->id, $round->name);
+
+		while (
+			my (
+				$judge_id, $round_type, $entry_id, $ballot_side, $winloss_value
+			) = $sth->fetchrow_array()
+		) {
+
+			if ($event_settings->{"allow_repeat_prelim_side"}
+				&& $ballot_side != $entries{$entry_id}{side}{$ballot_side}
+			) {
+				next;
+			}
+
+			if ($event_settings->{"allow_repeat_elims"} && $event_settings->{"disallow_repeat_drop"}) {
+				next if $winloss_value == 1;
+			}
+
+			$judge_constraint{$judge_id}{$entry_id}++;
+		}
 	}
 
 	$dbh->disconnect();

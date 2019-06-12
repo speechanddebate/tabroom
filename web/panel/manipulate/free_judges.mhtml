@@ -1,9 +1,12 @@
 <%args>
 	$tourn
+	$tourn_settings
 	$round_id
 	$flight => 1
 </%args>
 <%init>
+
+	my $dbh = Tab::DBI->db_Main();
 
 	my $round = Tab::Round->retrieve($round_id);
 	my $event = $round->event;
@@ -17,8 +20,6 @@
 	my $rounds_per  = $category_settings{"rounds_per"};
 	my $no_codes    = $category_settings{"no_codes"};
 	my $prefs       = $category_settings{"prefs"};
-	my $diversity   = $category_settings{"track_diversity"};
-	my $tab_ratings = $category_settings{"tab_ratings"};
 
 	my %strikes;
 
@@ -29,7 +30,6 @@
 	undef $prefs if $prefs eq "none";
 
 	my $round_name = $round->name;
-	my $ncfl = $tourn->setting("ncfl");
 
 	my $debate++;
 
@@ -48,8 +48,11 @@
 
 	$no_codes++ if $blind_mode;
 
-	my %anonymize = $m->comp("/funclib/blind_mode.mas", round => $round)
-		if $blind_mode;
+	my %anonymize = ();
+
+	if ($blind_mode) {
+		%anonymize = $m->comp("/funclib/blind_mode.mas", round => $round);
+	}
 
 	my $mutuality = $category_settings{"mutuality"};
 	my $preference = $category_settings{"preference"};
@@ -65,28 +68,30 @@
 
 	my $jpool_table = "jpool_judge, jpool_round, " if @jpools;
 
-	my %judge_name;
-
-	if ($blind_mode) {
-		%judge_name = map {$_ => $anonymize{"judge"}{$_->id}} $category->judges;
-
-	} else {
-		%judge_name = map {$_ => $_->last.", ".substr($_->first,0,1)} $category->judges;
-	}
-
 	my $judge_use_ref = $m->comp("/funclib/judge_use.mas", round_id => $round->id);
 	my %judge_use = %{$judge_use_ref} if $judge_use_ref;
-	my %school_name = map {$_->id => $_->name} $tourn->schools;
 
-	Tab::Judge->columns( TEMP => "tab_rating");
+	my %judges;
 
-	Tab::Judge->set_sql( available_judges => "
-		select distinct judge.id, judge.first, judge.last, judge.obligation, judge.hired,
-			tab_rating.value as tab_rating
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.code, judge.first, judge.last, judge.obligation, judge.hired,
+			school.id, school.name,
+			region.id, region.code, region.name,
+			person.id, person.email,
+			tab_rating.value as tab_rating,
+			diverse.value as diverse
 		from (judge, event, round, $jpool_table timeslot)
 		left join judge_setting as tab_rating
 			on tab_rating.judge = judge.id
 			and tab_rating.tag = 'tab_rating'
+
+		left join judge_setting as diverse
+			on diverse.judge = judge.id
+			and diverse.tag = 'diverse'
+		left join school on school.id = judge.school
+		left join region on region.id = school.region
+		left join person on person.id = judge.person
 
 		where judge.category = event.category
 		and judge.active = 1
@@ -125,51 +130,79 @@
 		order by tab_rating.value, judge.last
 	");
 
-	my @all_judges = Tab::Judge->search_available_judges($round->id);
+	$sth->execute($round->id);
+
+	while (
+		my (
+			$judge_id, $judge_code, $judge_first, $judge_last, $judge_obligation, $judge_hired,
+			$school_id, $school_name,
+			$region_id, $region_code, $region_name,
+			$person_id, $person_email,
+			$tab_rating, $diverse
+		) = $sth->fetchrow_array()
+	) {
+
+		$judges{$judge_id}{"code"} = $judge_code;
+		$judges{$judge_id}{"first"} = $judge_first;
+		$judges{$judge_id}{"last"} = $judge_last;
+		$judges{$judge_id}{"obligation"} = ($judge_obligation + $judge_hired);
+
+		$judges{$judge_id}{"school"} = $school_id;
+		$judges{$judge_id}{"school_name"} = $school_name;
+		$school_name =  s/^The //g;
+		$judges{$judge_id}{"school_sort"} = $school_name;
+
+		$judges{$judge_id}{"region"} = $region_id;
+		$judges{$judge_id}{"region_code"} = $region_code;
+		$judges{$judge_id}{"region_name"} = $region_name;
+
+		$judges{$judge_id}{"person"} = $person_id;
+		$judges{$judge_id}{"email"} = $person_email;
+		$judges{$judge_id}{"tab_rating"} = $tab_rating;
+		$judges{$judge_id}{"diverse"} = $diverse;
+	}
+
+	$sth->finish();
 
 	my @panels = Tab::Panel->search_like( round => $round->id, {order_by => 'bracket'});
 
-	my %panel_letter = map {$_->id => $_->letter} @panels;
-	my %panel_flight = map {$_->id => $_->flight} @panels;
-	my %panel_bye = map {$_->id => $_->bye} @panels;
-
-	my %entry_by_id = map {$_->id => $_} $round->event->entries;
-	my $dbh = Tab::DBI->db_Main();
-
 	my $this_round_sth = $dbh->prepare("
-		select distinct panel.id, ballot.chair, ballot.judge, ballot.
-			entry, entry.code, ballot.side, ballot.speakerorder, panel.flight, panel.bracket
-		from panel, ballot, entry
+		select panel.id, panel.letter, panel.bye, panel.bracket,
+			ballot.chair, ballot.judge, ballot.entry, entry.code,
+			ballot.side, ballot.speakerorder,
+			judge.first, judge.last
+
+		from (panel)
+			left join ballot on panel.id = ballot.panel
+			left join entry on entry.id = ballot.entry
+			left join judge on judge.id = ballot.judge
 		where panel.round = ?
-		and panel.id = ballot.panel
-		and panel.flight = ?
-		and ballot.entry = entry.id
+			and panel.flight = ?
 		group by ballot.id
 		order by ballot.side
 	");
 
-	my %panel_chair;
-	my %panel_judge;
-	my %panel_entry;
-	my %panel_bracket;
-	my %entry_side;
-	my %entry_order;
-	my %entry_code;
-	my %used_judge;
+	my %panels;
+	my %entries;
 
 	$this_round_sth->execute($round->id, $flight);
 
 	while (
-		my ($panel, $chair, $judge, $entry, $code, $side, $order, $flight, $bracket)
-		= $this_round_sth->fetchrow_array()
+		my (
+			$panel, $letter, $bye, $bracket, $chair, $judge, $entry, $code, $side, $order,
+			$judge_first, $judge_last
+		) = $this_round_sth->fetchrow_array()
 	) {
-		push @{$panel_judge{$panel}}, $judge;
-		$used_judge{$judge}++;
-		push @{$panel_entry{$panel}}, $entry;
-		$panel_bracket{$panel} = $bracket;
-		$entry_side{$entry} = $side;
-		$entry_order{$entry} = $order;
-		$entry_code{$entry} = $code;
+
+		$panels{$panel}{"judges"}{$judge}{"name"} = $judge_last.", ".$judge_first;
+		$panels{$panel}{"entries"}{$entry}{"code"} = $code;
+
+		$panels{$panel}{"bracket"} = $bracket;
+		$panels{$panel}{'letter'} = $letter;
+		$panels{$panel}{"bye"}     = $bye;
+
+		$entries{$entry}{"code"} = $code;
+
 	}
 
 	my %judge_constraints = $m->comp(
@@ -205,16 +238,6 @@
 			%judge_ratings = (%judge_ratings, %alt_ratings);
 		}
     }
-
-	@all_judges =
-		sort {$judge_use{$b}{'left'} <=> $judge_use{$a}{'left'}}
-		@all_judges
-		if $rounds_per && $judge_use_ref;
-
-	@all_judges =
-		sort {$judge_use{$b}{'judged_already'} <=> $judge_use{$a}{'judged_already'}}
-		@all_judges
-		unless $rounds_per;
 
 </%init>
 
@@ -254,7 +277,11 @@
 						</th>
 %					}
 
-%					if ($ncfl ) {
+					<th class="smaller centeralign" title="Linked to online accounts?">
+						<span class="nospace fa fa-sm fa-link">
+						</span>
+					</th>
+%					if ($tourn_settings->{ncfl} ) {
 						<th class="smaller">
 							Diocese
 						</th>
@@ -264,13 +291,19 @@
 						</th>
 %					}
 
-%					if ($tab_ratings) {
+%					if ($tourn_settings->{nsda_nats} ) {
+						<th class="smaller">
+							State
+						</th>
+%					}
+
+%					if ($category_settings{"tab_ratings"}) {
 						<th class="smaller" title="Tab Rating">
 							Rate
 						</th>
 %					}
 
-%					if ($diversity) {
+%					if ($category_settings{"track_diversity"}) {
 						<th class="smaller" title="Diversity-enhancing judge">
 							Div
 						</th>
@@ -308,7 +341,13 @@
 <%perl>
 			my $first;
 
-			foreach my $judge (@all_judges) {
+			foreach my $judge_id (
+				sort {
+					$judge_use{$b}{"left"} <=> $judge_use{$a}{"left"}
+					|| $judge_use{$a}{"judged_already"} <=> $judge_use{$b}{"judged_already"}
+					|| $judges{$a}{"last"} cmp $judges{$b}{"last"}
+				} keys %judges
+			) {
 
 				my $class_warfare;
 				my $class_struggle;
@@ -317,7 +356,7 @@
 					|| $round_type eq "final"
 					|| $round_type eq "runoff"
 					|| (not defined $rounds_per)
-					|| $judge_use{$judge}{'left'}
+					|| $judge_use{$judge_id}{'left'}
 				) {
 					$class_warfare = 'redtext semibold"';
 					unless ($first++) {
@@ -329,7 +368,7 @@
 				<tr class="<% $class_struggle %>">
 %					unless ($no_codes) {
 						<td class=" smallish">
-							<% $judge->code %>
+							<% $judges{$judge_id}{code} %>
 						</td>
 %					}
 
@@ -337,53 +376,59 @@
 						<a
 							class  = "plain full hover"
 							target = "_blank"
-							href   = "/register/judge/edit.mhtml?judge_id=<% $judge->id %>"
-						><% $judge_name{$judge} %></a>
+							href   = "/register/judge/edit.mhtml?judge_id=<% $judge_id %>"
+						><% $blind_mode ? $anonymize{"judge"}{$judge_id} : $judges{$judge_id}{"last"}.", ".$judges{$judge_id}{"first"} %></a>
 					</td>
 
 %					unless ($blind_mode) {
 						<td class=" smallish">
-							<% $judge->school->id ? $school_name{$judge->school->id} : "Hired" %>
+							<span class="hidden"><% $judges{$judge_id}{"school_sort"} ? $judges{$judge_id}{"school_sort"} : "AAAAAAA" %></span>
+							<% $judges{$judge_id}{"school_name"} ? $judges{$judge_id}{"school_name"} : "Hired" %>
 						</td>
 %					}
 
-%					if ($ncfl) {
+					<td class="centeralign smallish redtext semibold nospace">
+						<% $judges{$judge_id}{"person"}
+							? ""
+							: "<span class='full marno hover' title='LUDDITE!  NOT LINKED ONLINE!'>L</span>"
+						%>
+					</td>
 
-						<td class="smallish">
-							<% $judge->school && $judge->school->region
-								? $judge->school->region->code : "Hired" %>
+%					if ($tourn_settings->{ncfl} || $tourn_settings->{nsda_nats}) {
+
+						<td class="smallish centeralign">
+							<% $judges{$judge_id}{"region_code"} ? $judges{$judge_id}{"region_code"} : "Hired" %>
 						</td>
+%					}
 
+%					if ($tourn_settings->{ncfl}) {
 						<td class="centeralign smallish">
-							<% $judge->school && $judge->school->region
-								? $judge->school->region->setting("region-".$event->id) : "Hired" %>
 						</td>
 %					}
 
-
-%					if ($diversity) {
-						<td class=" smallish">
-							<% $judge->setting("diverse") ? "D" : "" %>
+%					if ($category_settings{"track_diversity"}) {
+						<td class="centeralign greentext semibold smallish">
+							<% $judges{$judge_id}{"diverse"} ? "D" : "" %>
 						</td>
 %					}
 
-%					if ($tab_ratings) {
+%					if ($category_settings{"tab_ratings"}) {
 						<td class=" smallish centeralign">
-							<% $judge->tab_rating %>
+							<% $judges{$judge_id}{"tab_rating"} %>
 						</td>
 %					}
 
 %					if ($rounds_per) {
 						<td class="centeralign nowrap <% $class_warfare %> smallish">
-							<% $judge_use{$judge->id}{percentage} %>
+							<% $judge_use{$judge_id}{percentage} %>
 						</td>
 %					}
 
 					<td class="centeralign nowrap <% $class_warfare %> smallish">
 %						if ($rounds_per) {
-							<% $judge_use{$judge->id}{'left'}."/".($judge_use{$judge->id}{'judged_already'} + $judge_use{$judge->id}{'will_judge'})."/".$judge_use{$judge->id}{'oblig'} %>
+							<% $judge_use{$judge_id}{'left'}."/".($judge_use{$judge_id}{'judged_already'} + $judge_use{$judge_id}{'will_judge'})."/".$judge_use{$judge_id}{'oblig'} %>
 %						} else {
-							<% $judge_use{$judge->id}{'judged_already'} %>
+							<% $judge_use{$judge_id}{'judged_already'} %>
 %						}
 					</td>
 
@@ -391,7 +436,7 @@
 						<td class="centeralign nowrap <% $class_warfare %> smallish">
 <%perl>
 							$m->print($m->comp("/funclib/judge_avg_rating.mas",
-								judge_id => $judge->id,
+								judge_id => $judge_id,
 								category => $category,
 								style    => $prefs));
 </%perl>
@@ -407,18 +452,16 @@
 
 							my %pref_score;
 							my %done;
-							my $judge_id = $judge->id;
 
 							PANEL:
-							foreach my $panel (keys %panel_letter) {
+							foreach my $panel (keys %panels) {
 
-								next if $panel_flight{$panel} != $flight;
-								next if $panel_bye{$panel};
+								next if $panels{$panel}{"bye"};
 								my $diff;
 
 								next if $done{$panel."p"}++;
 
-								foreach my $entry (@{$panel_entry{$panel}}) {
+								foreach my $entry (keys %{$panels{$panel}{"entries"}}) {
 
 									next PANEL if $judge_constraints{$judge_id}{$entry};
 
@@ -430,11 +473,11 @@
 										if ($blind_mode) {
 											$entry_string{$panel} .= $anonymize{"entry"}{$entry}." ";
 										} else {
-											$entry_string{$panel} .= $entry_code{$entry}." ";
+											$entry_string{$panel} .= $entries{$entry}{"code"}." ";
 										}
 
 									} else {
-										$entry_string{$panel} = "Section ".$panel_letter{$panel};
+										$entry_string{$panel} = "Section ".$panels{$panel}{"letter"};
 									}
 
 									if ($prefs) {
@@ -476,22 +519,23 @@
 						<input
 							type  = "hidden"
 							name  = "judge_id"
-							value = "<% $judge->id %>"
+							value = "<% $judge_id %>"
 						>
 
 						<select
 							name="swap_with"
 							class="fixedbig larger plain"
 						>
-
-%							foreach my $panel (@judge_panels) {
-
-%								foreach my $judge_id (@{$panel_judge{$panel}}) {
-
 <%perl>
+
+							foreach my $panel (@judge_panels) {
+
+								foreach my $judge_id (sort keys %{$panels{$panel}{"judges"}}) {
+
 									next if $done{$judge_id."-".$panel}++;
 
-									my $judge_string .= substr($judge_name{$judge_id},0,11);
+									my $judge_string .= substr($panels{$panel}{"judges"}{$judge_id}{"name"},0,11);
+
 									foreach (length($judge_string) .. 12 ) {
 	                                   	$judge_string .= "&nbsp;";
 									}
@@ -513,7 +557,7 @@
 	        	                   }
 
 									my $rated;
-									foreach my $entry (@{$panel_entry{$panel}}) {
+									foreach my $entry (sort keys %{$panels{$panel}{"entries"}}) {
 										next if $done{$judge_id."-".$entry."-".$panel}++;
 										$judge_string .= "-" if $rated++;
 										$judge_string .= $judge_ratings{$entry}{$judge_id};
@@ -526,7 +570,7 @@
 									>
 										<% $rating_string{$panel} %>
 										[<% $avail_string %> <% $judge_string %>]
-										<% $panel_bracket{$panel}."-".($round_name - 1 - $panel_bracket{$panel}) %>
+										<% $panels{$panel}{"bracket"}."-".($round_name - 1 - $panels{$panel}{"bracket"}) %>
 										<% $entry_string{$panel} %>
 									</option>
 %								}
