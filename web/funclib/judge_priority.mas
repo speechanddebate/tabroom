@@ -5,80 +5,111 @@
 </%args>
 <%init>
 
+	my $tourn = $event->category->tourn;
+
 	my $dbh = Tab::DBI->db_Main();
 
-	my $region_weight;
-
-	if ($nsda || $ncfl) {
-		$region_weight = ",
-			(select count(entry.id)
-			from entry, school
-			where school.region = region.id
-			and school.id = entry.school
-			and entry.event = event.id
-			and entry.active = 1
-		) as regioncount
-		";
-	}
+	my %entry_counts;
 
 	my $sth = $dbh->prepare("
-		select judge.id, school.id, region.id,
-
-            (select count(entry.id)
-                from entry
-                where entry.school = judge.school
-                and entry.event = event.id
-				and entry.active = 1
-            ) as entrycount,
-
-            (select count(struckentry.entry)
-                from strike struckentry
-                where struckentry.judge = judge.id
-            ) as struckentry,
-
-            (select count(schoolstruck_entry.id)
-                from strike schoolstrike, entry schoolstruck_entry
-                where schoolstrike.judge = judge.id
-                and schoolstrike.school = schoolstruck_entry.school
-            ) as struckentry,
-
-            ( select count(distinct ballot.panel)
-                from ballot where ballot.judge = judge.id
-            ) as ballotcount
-			$region_weight
-
-		from (judge, event, round, category, category judgecat)
-
-		left join school on judge.school = school.id
-		left join region on school.region = region.id
-
-		where event.id = ?
-			and round.event = event.id
-			and event.category = category.id
-			and category.tourn = judgecat.tourn
-			and judge.category = judgecat.id
-			group by judge.id
+		select entry.id, entry.school, school.region, school.district
+		from (entry, event, school)
+		where entry.event = ?
+			and entry.active = 1
+			and entry.event = event.id
+			and entry.school = school.id
+		group by entry.id
 	");
 
-	$sth->execute($event);
+	$sth->execute($event->id);
+
+	while (
+		my (
+			$entry_id, $entry_school, $school_region, $school_district
+		) = $sth->fetchrow_array()
+	) {
+		$entry_counts{school}{$entry_school}++;
+		$entry_counts{region}{$school_region}++;
+		$entry_counts{district}{$school_district}++;
+	}
+
+	$sth->finish();
+
+	$sth = $dbh->prepare("
+		select judge.id, judge.school, school.region,
+			strike.id, strike.entry, strike.school, strike.region, strike.district, strike.type
+
+		from (judge, category)
+		left join school on judge.school = school.id
+		left join strike on judge.id = strike.judge
+
+		where category.tourn = ?
+			and category.id = judge.category
+			and judge.active = 1
+	");
+
+	$sth->execute($tourn->id);
 
 	my %judges;
 
 	while (
-		my (
-			$judge_id, $school_id, $region_id,
-			$own_count, $struck_entries, $struck_entries_two, $ballots, $regioncount
+		my ($judge_id, $judge_school, $judge_region, $judge_district,
+			$strike_id, $strike_entry, $strike_school, $strike_region, $strike_district, $strike_type
 		) = $sth->fetchrow_array()
 	) {
 
-		$judges{$judge_id}{"own"} = $own_count;
-		$judges{$judge_id}{"region_count"} = $regioncount;
-		$judges{$judge_id}{"strikes"} += $struck_entries;
-		$judges{$judge_id}{"strikes"} += $struck_entries_two;
-		$judges{$judge_id}{"ballots"} += $ballots;
-		$judges{$judge_id}{"school"} += $school_id;
-		$judges{$judge_id}{"region"} += $region_id;
+		unless ($judges{$judge_id}) {
+			$judges{$judge_id}{"own"} = $entry_counts{school}{$judge_school};
+			$judges{$judge_id}{"school"} += $judge_school;
+			$judges{$judge_id}{"region"} += $judge_region;
+			$judges{$judge_id}{"district"} += $judge_district;
+
+			if (($nsda) && $judge_district) {
+				$judges{$judge_id}{"own_district"} = $entry_counts{district}{$judge_district};
+			}
+
+			if (($nsda || $ncfl) && $judge_region) {
+				$judges{$judge_id}{"own"} = $entry_counts{region}{$judge_region};
+				$judges{$judge_id}{"own_region"} = $entry_counts{region}{$judge_region};
+			}
+		}
+
+		if ($strike_entry) {
+			$judges{$judge_id}{"strikes"}++;
+		} elsif ($strike_school) {
+			$judges{$judge_id}{"strikes"} += $entry_counts{school}{$strike_school};
+		} elsif ($strike_region) {
+			$judges{$judge_id}{"strikes"} += $entry_counts{region}{$strike_region};
+		} elsif ($strike_district) {
+			$judges{$judge_id}{"strikes"} += $entry_counts{district}{$strike_district};
+		} else {
+			#Likely a time strike or something, give it a generic largish penalty.
+			$judges{$judge_id}{"strikes"} += 20;
+		}
 	}
+
+	$sth->finish();
+
+	$sth = $dbh->prepare("
+	    select judge.id, count(ballot.panel)
+		from category, judge, ballot
+		where category.tourn = ?
+			and category.id = judge.category
+			and judge.id = ballot.judge
+		group by judge.id
+	");
+
+	$sth->execute($tourn->id);
+
+	while (
+		my (
+			$judge_id, $ballotcount
+		) = $sth->fetchrow_array()
+	) {
+		$judges{$judge_id}{"ballots"} = $ballotcount;
+	}
+
+	$sth->finish();
 
 	return %judges;
 
