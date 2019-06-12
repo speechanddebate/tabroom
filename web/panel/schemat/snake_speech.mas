@@ -1,5 +1,6 @@
 <%args>
 	$tourn
+	$tourn_settings
 	$person
 	$round
 	$event
@@ -9,8 +10,8 @@
 </%args>
 <%init>
 
-	$round = Tab::Round->retrieve($round_id) 
-		if $round_id 
+	$round = Tab::Round->retrieve($round_id)
+		if $round_id
 		&& (not defined $round);
 
 	$m->abort unless $round;
@@ -18,60 +19,134 @@
 
 	my %event_settings = $event->all_settings;
 
-	my $ncfl++ if $tourn->setting("ncfl");
+	my %panels;
+	my %entries;
+	my $max_speaker;
 
-	my @panels = $round->panels;
+	my $dbh = Tab::DBI->db_Main();
 
-    my %panel_entries = ();
+	my $sth = $dbh->prepare("
+		select
+			panel.id, panel.letter,
+			entry.id, entry.code,
+			ballot.speakerorder,
+			school.id, school.code, school.name,
+			region.id, region_code,
+			district.id, district.code
 
-	my %entry_school = ();
-	my %school;
+		from (panel, ballot, entry, school)
+			left join region on region.id = school.region
+			left join district on district.id = school.district
 
-	foreach my $panel (@panels) { 
+		where panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.entry = entry.id
+			and entry.school = school.id
 
-		my @entries = $m->comp(
-			"/funclib/panel_entries.mas", 
-			panel => $panel
-		);
+		group by entry.id
+	");
 
-        push (@{$panel_entries{$panel->id}}, @entries);
+	$sth->execute($round_id);
 
-		foreach my $entry (@entries) { 
+	while (
+		my (
+			$panel_id, $panel_letter,
+			$entry_id, $entry_code,
+			$ballot_speakerorder,
+			$school_id, $school_code, $school_name,
+			$region_id, $region_code,
+			$district_id, $district_code
+		) = $sth->fetchrow_array()
+	) {
 
-			my $code;
-			my $id;
+		$entries{$entry_id}{code} = $entry_code;
+		$entries{$entry_id}{school} = $school_id;
+		$entries{$entry_id}{school_code} = $school_code;
+		$entries{$entry_id}{school_name} = $school_name;
 
-			if ($ncfl) { 
-				$code = $entry->school->region->code;
-				$id = $entry->school->region->id;
-			} else { 
-				$code = $entry->school->code;
-				$id = $entry->school->id;
-			}
+		$entries{$entry_id}{region} = $region_id;
+		$entries{$entry_id}{region_code} = $region_code;
 
-			$entry_school{$entry->id}{"code"} = $code;
-			$entry_school{$entry->id}{"school"} = $id;
+		$entries{$entry_id}{district} = $district_id;
+		$entries{$entry_id}{district_code} = $district_code;
 
-			unless ($school{$id}) {
-				$school{$id} = $code;
-			}
+		$entries{$entry_id}{order} = $ballot_speakerorder;
+
+		$panels{$panel_id}{"letter"} = $panel_letter;
+		$panels{$panel_id}{"entries"}{$entry_id}++;
+
+		$panels{$panel_id}{"by_order"}{$ballot_speakerorder} = $entry_id;
+
+		if ($max_speaker < $ballot_speakerorder) {
+			$max_speaker = $ballot_speakerorder;
 		}
-    }
 
-	my %crosses_entries = $m->comp(
-		"/funclib/event_doubled.mas", 
-		round => $round 
-	);
+	}
 
-	my %event_speaker_order = $m->comp(
-		"/funclib/event_speaker_order.mas",
-		round => $round
-	);
+	my %crosses_entries;
 
-	my %hit_before = $m->comp(
-		"/funclib/event_entry_hits.mas",
-		round => $round
-	);
+	unless ($tourn_settings->{ncfl} || $tourn_settings->{nsda_nats}) {
+
+		my %crosses_entries = $m->comp(
+			"/funclib/event_doubled.mas",
+			round => $round
+		);
+	}
+
+	$sth->finish;
+
+	$sth = $db->prepare("
+
+		select
+			entry.id,
+			round.id, round.name, round.type,
+			ballot.speakerorder,
+			pairing_seed.value,
+			group_contact(other.id SEPARATOR ',')
+
+		from (round, entry, ballot, panel, ballot otherballot, entry other)
+			left join entry_setting pairing_seed
+				on pairing_seed.entry = entry.id
+				and pairing_seed.tag = 'pairing_seed'
+
+		where round.event = ?
+		and round.name != ?
+		and round.id = panel.round
+		and panel.id = ballot.panel
+		and ballot.entry = entry.id
+
+		and panel.id = otherballot.panel
+		and otherballot.entry = other.id
+
+		and other.id != entry.id
+
+		group by entry.id
+	")
+
+	$sth->execute($event->id, $round->id)
+
+	while (
+		my (
+			$entry_id,
+			$round_id, $round_name, $round_type,
+			$ballot_speakerorder,
+			$pairing_seed,
+			$opponents
+		) = $sth->fetchrow_array()
+	) {
+
+		$entries{$entry_id}{"orders"}{$round_name} = $ballot_speakerorder;
+		$entries{$entry_id}{"orders_bytype"}{$round_type}{$round_name} = $ballot_speakerorder;
+		$entries{$entry_id}{"pairing_seed"} = $pairing_seed;
+
+		foreach my $other (split(/,/, $opponents) {
+			$entries{$entry_id}{"hits"}{$other}++;
+			$entries{$entry_id}{"hits_bytype"}{$round_type}{$other}++;
+			$entries{$entry_id}{"hits_byround"}{$round_name}{$other}++;
+		}
+	}
+
+	my $round_type = $round->type;
 
 	my $previous_round = Tab::Round->search(
 		name => ($round->name - 1),
@@ -80,7 +155,7 @@
 
     my $entries_ref;
 
-    if ($previous_round) { 
+    if ($previous_round) {
 
         my @results = $m->comp(
             "/tabbing/results/order_entries.mas",
@@ -89,41 +164,37 @@
 
         $entries_ref = pop @results if @results;
 
-	}
+		if ($entries_ref) {
 
-	my %seeds = %{$entries_ref->{'seed'}} 
-		if $entries_ref 
-		&& $entries_ref->{"seed"};
+			if ($entries_ref->{"seed"}) {
+				foreach my $entry_id (keys %{$entries_ref->{seed}}) {
+					$entries{$entry_id}{"seed"} = $entries_ref->{'seed'}{$entry_id};
+				}
+			}
 
-	my %section_ranks = %{$entries_ref->{'section_rank'}} 
-		if $round->type eq "elim"
-		&& $entries_ref 
-		&& $entries_ref->{"section_rank"};
+			if ($entries_ref->{"section_rank"}) {
+				foreach my $entry_id (keys %{$entries_ref->{section_rank}}) {
+					$entries{$entry_id}{"section_rank"} = $entries_ref->{'section_rank'}{$entry_id};
+				}
+			}
 
-	my %sections = %{$entries_ref->{'section'}} 
-		if $round->type eq "elim"
-		&& $entries_ref 
-		&& $entries_ref->{"section"};
+			if ($entries_ref->{"section"}) {
+				foreach my $entry_id (keys %{$entries_ref->{section}}) {
+					$entries{$entry_id}{"section"} = $entries_ref->{'section'}{$entry_id};
+				}
+			}
 
-
-	my $strength = ${$entries_ref}{"tiebreak"}{"1"} 
-		if $entries_ref;
-
-	if ($event_settings->{"seed_presets"} && $event->type ne "elim") { 
-
-		my @seeds = $m->comp(
-			"/funclib/event_entry_settings.mas",
-			event => $event,
-			tag   => "pairing_seed"
-		);
-
-		%seeds = map {$_->entry->id => $_->value} @seeds;
+			if ($entries_ref->{"tiebreak"}{"1"}) {
+				foreach my $entry_id (keys %{$entries_ref->{"tiebreak"}{"1"}}) {
+					$entries{$entry_id}{"strength"} = $entries->ref->{"tiebreak"}{"1"}{$entry_id};
+				}
+			}
+		}
 	}
 
 	my $code_style = $event_settings->{"code_style"};
 
 	my $code_block = "big";
-
 	$code_block = "small" if $code_style eq "numbers";
 	$code_block = "small" if $code_style eq "school_number";
 
@@ -132,24 +203,22 @@
 	<script>
 
 		$(document).ready( function(){
-
-%			foreach my $panel (@panels) { 
-				averageStrength('<% $panel->id %>');
+%			foreach my $panel_id (sort {$panels{$a}{"letter"} cmp $panels{$b}{"letter"}} keys %panels) {
+				averageStrength('<% $panel_id %>');
 %			}
-
 		});
 
-		function averageStrength(panelID) { 
+		function averageStrength(panelID) {
 
 			var total = 0, counter = 0, average = 0, already = {};
 
-			$("#panel_"+panelID).find(".strength").each(function(index) { 
+			$("#panel_"+panelID).find(".strength").each(function(index) {
 
 				var strengthScore = parseInt(this.id);
 
 				var entryID = $(this).attr("entry");
 
-				if (!(entryID in already)) { 
+				if (!(entryID in already)) {
 					total = total + strengthScore;
 					counter++;
 					already[entryID]++;
@@ -157,7 +226,7 @@
 
 			});
 
-			if (counter) { 
+			if (counter) {
 				average = (total / counter);
 			}
 
@@ -165,28 +234,28 @@
 
 		}
 
-		function toggleShow(elementType) { 
+		function toggleShow(elementType) {
 			$("#"+elementType).toggleClass("invert");
 			$("."+elementType).toggleClass("hidden");
 		}
 
-		function hideColor (colorToggle) { 
+		function hideColor (colorToggle) {
 			$(".entries").removeClass(colorToggle);
 			$(".schooltoggle").removeClass('invert');
 			$(".key_"+colorToggle).addClass('hidden');
 		}
 
-		function toggleColor (keyID, panelID, clashKey, clashType, colorToggle) { 
+		function toggleColor (keyID, panelID, clashKey, clashType, colorToggle) {
 
 			$(".entries").not("."+clashType+"_"+clashKey).removeClass(colorToggle);
 			$(".schooltoggle").not("#"+keyID).removeClass('invert');
 
 			$("#"+keyID).toggleClass('invert');
 
-			if (clashType === "hits") { 
+			if (clashType === "hits") {
 				$("."+clashType).toggleClass("hidden");
 				$("."+clashType).toggleClass(colorToggle);
-			} else { 
+			} else {
 				$("."+clashType+"_"+clashKey).toggleClass(colorToggle);
 				$("."+clashType+"_"+clashKey).toggleClass("hidden");
 			}
@@ -203,20 +272,20 @@
                 accept           : ":not(.ui-sortable-helper)",
                 disableSelection : "true",
 
-                drop             : function( event, ui) {
+                drop : function( event, ui) {
 
                     var droppableId = this.id;
 
-                    $.post("move_confirm.mhtml",{ 
+                    $.post("move_confirm.mhtml",{
                         entry_id     : ui.draggable.attr("id"),
                         panel_marker : this.id
-                    }).done(function(data) { 
+                    }).done(function(data) {
 
 						console.log(data);
 
-						if (data.error) { 
+						if (data.error) {
 							alertify.error(data.message);
-						} else { 
+						} else {
 							alertify.set('notifier','delay', 2);
 							alertify.success(data.message);
 							alertify.set('notifier','delay', 5);
@@ -237,7 +306,6 @@
 					averageStrength(panelID);
 
 					$("#"+this.id).removeClass("strength_"+panelID);
-					
 
                 }
 
@@ -261,7 +329,7 @@
 					$("."+this.id).show();
 				},
 
-				stop: function(event, ui) { 
+				stop: function(event, ui) {
 					$("."+this.id).hide();
 
 					var schoolID = $("#"+this.id).attr("school");
@@ -271,8 +339,8 @@
 
 				},
 
-				start: function(event, ui) { 
-			
+				start: function(event, ui) {
+
 					var schoolID = $("#"+this.id).attr("school");
 
 					$(".schools").addClass("hidden");
@@ -301,14 +369,14 @@
 		<div class="full nospace">
 
 			<span class="twentieth">
-%				if ($sort_by eq "seed") { 
-					<a 
+%				if ($sort_by eq "seed") {
+					<a
 						class = "fa fa-lg buttonwhite redtext fa-sort"
 						title = "Sort by speaker order"
 						href="show_snake.mhtml?round_id=<% $round->id %>&sort_by=speaker"
 					></a>
-%				} else { 	
-					<a 
+%				} else {
+					<a
 						class = "fa fa-lg buttonwhite bluetext fa-sort"
 						title = "Sort by seed order"
 						href="show_snake.mhtml?round_id=<% $round->id %>&sort_by=seed"
@@ -326,38 +394,35 @@
 					Show:
 				</span>
 
-
-				<span 
+				<span
 					id      = "schools"
 					class   = "buttonwhite redtext padless"
 					onClick = "toggleShow(this.id)";
 				>
-					<% $ncfl ? "Dioceses" : "Schools" %>
+					<% $tourn_settings->{ncfl} ? "Dioceses" : "Schools" %>
 				</span>
 
-%				unless ($round->type eq "elim") { 
-
-					<span 
+%				unless ($round_type eq "elim") {
+					<span
 						id      = "hits"
 						class   = "buttonwhite orangetext padless"
 						onClick = "toggleShow(this.id)";
 					>
 						Hits
 					</span>
-
 %				}
 
-				<span 
+				<span
 					id      = "orders"
 					class   = "buttonwhite greentext padless"
 					onClick = "toggleShow(this.id)";
 				>
-					Order
+					Orders
 				</span>
 
-%				unless ($ncfl) { 
+%				unless ($tourn_settings->{ncfl} || $tourn_settings->{nsda_nats}) {
 
-					<span 
+					<span
 						id      = "crosses"
 						class   = "buttonwhite graytext padless"
 						onClick = "toggleShow(this.id)";
@@ -365,9 +430,9 @@
 						Cross
 					</span>
 
-%				} else { 
+%				} elsif ($tourn_settings->{ncfl}) {
 
-					<span 
+					<span
 						id      = "sections"
 						class   = "buttonwhite bluetext padless"
 						onClick = "toggleShow(this.id)";
@@ -375,38 +440,33 @@
 						Section
 					</span>
 
-					<span 
+					<span
 						id      = "section_ranks"
 						class   = "buttonwhite graytext padless"
 						onClick = "toggleShow(this.id)";
 					>
 						Section Rank
 					</span>
-
 %				}
 
-%				unless ($round->type eq "elim") { 
-
-					<span 
+%				unless ($round_type eq "elim" || $tourn_settings{nsda_nats}) {
+					<span
 						id      = "strength"
 						class   = "buttonwhite purpletext padless"
 						onClick = "toggleShow(this.id)";
 					>
 						Strength
 					</span>
-
 %				}
 
-%				if (keys %seeds) { 
-
-					<span 
+%				if (keys %seeds) {
+					<span
 						id      = "seeds"
 						class   = "buttonwhite orangetext padless"
 						onClick = "toggleShow(this.id)";
 					>
 						Seeds
 					</span>
-
 %				}
 
 			</span>
@@ -415,118 +475,111 @@
 
 <%perl>
 
-		my $max_speaker;
-		my %entry_by_speaker = ();
+		foreach my $panel_id (
+			sort {
+				$panels{$a}{"letter"} <=> $panels{$b}{"letter"}
+			} keys %panels
+		) {
 
-		my %order_by_seed = ();
+			my %counts;
+			my %entry_hash;
+			my $max = $max_speaker;
 
-		my %in_section = ();
+			if ($sort_by eq 'seed') {
 
-		foreach my $panel (@panels) { 
+				my $counter;
 
-			foreach my $entry (@{$panel_entries{$panel->id}}) { 
+				foreach my $entry_id (
+					sort {
+						$entries{$a}{"seed"} <=> $entries{$b}{"seed"}
+					} keys %entries
+				) {
+					$counter++;
+					$entry_hash{$counter} = $entry_id;
+				}
 
-				push @{$entry_by_speaker{$panel->id}{$entry->speaks}}, $entry;
+				$max = $counter;
 
-				$order_by_seed{$panel->id}{$entry->speaks} = $seeds{$entry->id};
+			} else {
 
-				$max_speaker = $entry->speaks 
-					if $entry->speaks > $max_speaker;
-
-				$in_section{$entry->id} = $panel->id;
+				foreach my $entry_id (keys %entries) {
+					$entry_hash{$entries{$entry_id}{"order"}} = $entry_id;
+				}
 			}
-		}
-
-		my $count;
-
-		foreach my $panel (@panels) { 
-
-			my %schools;
-			my $order_count;
-			my $last_order_count;
-			my $crosses_total_clash;
-			my $hit_total;
-
-			my @speakers = (1 .. $max_speaker);
-
-			@speakers = 
-				sort { $order_by_seed{$panel->id}{$a} <=> $order_by_seed{$panel->id}{$b} }
-				@speakers
-				if $sort_by eq 'seed';
-
 </%perl>
 
-			<span 
+			<span
 				class="inline marless top fixedwidth"
-				id = "panel_<% $panel->id %>"
+				id = "panel_<% $panel_id %>"
 			>
 
 				<div class="
-						yellowrow padmore smallish centeralign semibold marno 
-						bordersides bordertop"
-				>
-					Section <% $panel->letter %> 
+					yellowrow padmore smallish centeralign semibold marno
+					bordersides bordertop">
+					Section <% $panels{$panel_id}{"letter"} %>
 				</div>
 
-%				foreach my $speaker ( @speakers) { 
+%				foreach my $speaker (1 .. $max) {
 
-					<div class="full lightrow nospace bordersides">
+					<div class="full row nospace bordersides">
 
 						<span class="tenth padless marno centeralign">
 							<% $speaker %>
 						</span>
 
-						<span 
-							id      = "<% $panel->id %>_<% $speaker %>"
-							panel   = "<% $panel->id %>"
+						<span
+							id      = "<% $panel_id %>_<% $speaker %>"
+							panel   = "<% $panel_id %>"
 							class   = "marno fivesixths droppable speaker_<% $speaker %>"
 						>
-
 <%perl>
-						unless ($entry_by_speaker{$panel->id}{$speaker}) {
+						my $entry_id;
+
+						unless ($entry_hash{$speaker}) {
 							$m->print("</span></div>\n");
 							next;
+						} else {
+							$entry_id = $entry_hash{$speaker};
 						}
 
-						foreach my $entry (@{$entry_by_speaker{$panel->id}{$speaker}}) {
-
-							$schools{$entry_school{$entry->id}{"school"}}++;
+							$counts{"schools"}{$entries{$entry_id}{"school"}}++;
 
 							my $order_string;
-							my %orders = ();
-
 							my $last_order;
+							my %orders;
 
-							foreach my $round (sort keys %{$event_speaker_order{$entry->id}}) { 
+							foreach my $round_name ( sort keys %{$entries{$entry_id}{"orders"}} ) {
 
-								$order_string .= ", " if $order_string;
-								$order_string .= $event_speaker_order{$entry->id}{$round};
+								my $order = $entries{$entry_id}{"orders"}{$round_name};
 
-								$orders{$event_speaker_order{$entry->id}{$round}}++;
-								$last_order = $event_speaker_order{$entry->id}{$round};
+								$order_string .= ", ";
+								$order_string .= $order;
+								$last_order = $order;
+								$orders{$order}++;
 							}
 
-							if ($speaker == $last_order) { 
-								$last_order_count++ 
+							if ($speaker == $last_order) {
+								$counts{"last_order"}++
 							} else {
-								$order_count += $orders{$speaker};
+								$counts{"order"} += $orders{$speaker};
 							}
 
 							my $crosses_clash;
 
-							foreach my $other (keys %{$crosses_entries{$entry->id}}) { 
-													
-								if (
-									(abs $crosses_entries{$entry->id}{$other}{"order"} - $speaker) 
-									< 2
-								) {
-									$crosses_total_clash++;
-									$crosses_clash++;
+							if ($crosses_entries{$entry_id}) {
+								foreach my $other (keys %{$crosses_entries{$entry_id}}) {
+									if (
+										(abs $crosses_entries{$entry_id}{$other}{"order"} - $speaker)
+										< 2
+									) {
+										$counts{"crosses"}++;
+										$crosses_clash++;
+									}
 								}
 							}
 </%perl>
 
-							<span 
+							<span
 								class="
 									marno
 									entries
@@ -536,8 +589,8 @@
 									<% $orders{$speaker} ? "order_normal" : "" %>
 									<% $crosses_clash ? "crosses_normal" : "" %>
 								"
-								id         = "<% $entry->id %>"
-								school     = "<% $entry_school{$entry->id}{"school"} %>"
+								id         = "<% $entry_id %>"
+								school     = "<% $entries{$entry_id}{"school"} %>"
 								orders     = "<% $order_string %>"
 								last_order = "<% $last_order %>"
 							>
@@ -547,113 +600,145 @@
 									<% $entry->code %>
 								</div>
 
-								<span 
+								<span
 									class="
-										school_<% $entry_school{$entry->id}{"school"} %>
+										school_<% $entries{$entry_id}{"school"} %>
 										nospace half schools hidden biggish redtext semibold"
 								>
-									<% $entry_school{$entry->id}{"code"} %>
+									<% $entries{$entry_id}{"school_code"}
+										? $entries{$entry_id}{"school_code"}
+										: $entries{$entry_id}{"school_name"}
+									%>
 								</span>
 
-%								unless ($round->type eq "elim") { 
+								<span
+									class="
+										region_<% $entries{$entry_id}{"region"} %>
+										nospace half regions hidden biggish redtext semibold"
+								>
+									<% $entries{$entry_id}{"region_code"} %>
+								</span>
+
+								<span
+									class="
+										district_<% $entries{$entry_id}{"district"} %>
+										nospace half districts hidden biggish redtext semibold"
+								>
+									<% $entries{$entry_id}{"district_code"}  %>
+								</span>
+
+%								unless ($round_type eq "elim" || $round_type eq 'final') {
 
 									<span class="
-										hits_<% $panel->id %> 
+										hits_<% $panel_id %>
 										nospace half schools hidden biggish orangetext semibold"
 									>
+<%perl>
+										foreach my $hit (
+											sort {$entries{$a}{"code"} cmp $entries{$b}{"code"}}
+											keys %{$entries{$entry_id}{"hits"}}
+										) {
 
-%										foreach my $hit (sort keys %{$hit_before{$entry->id}}) {
-
-%											next unless $in_section{$hit} == $panel->id;
-
-%											$hit_total++;
-
+											next unless $panels{$panel_id}{"entries"}{$hit};
+											$counts{"hits"}++;
+</%perl>
 											<span class="full nospace semibold">
-												<% $hit_before{$entry->id}{$hit}{"code"} %>
-												<% $hit_before{$entry->id}{$hit}{"count"} %>x
+												<% $entries{$hit}{"code"} %>
+												<% $entries{$entry_id}{"hits"}{$hit} %>x
 											</span>
 %										}
 
 									</span>
 
-%									foreach my $hit (sort keys %{$hit_before{$entry->id}}) {
+%									foreach my $hit (sort keys %{$hit_before{$entry_id}}) {
 										<span class="
-											centeralign orangetext full nospace 
+											centeralign orangetext full nospace
 											semibold hitcounter hit_<% $hit %> hidden
 										">
-											<% $hit_before{$entry->id}{$hit}{"count"} %>x
+											<% $hit_before{$entry_id}{$hit}{"count"} %>x
 										</span>
 %									}
 
-%								} else { 
+%								} else {
 
-									<span 
+									<span
 										class="nospace half seeds hidden biggish orangetext semibold"
-										entry = "<% $entry->id %>"
-										id    = "<% $seeds{$entry->id} %>"
+										entry = "<% $entry_id %>"
+										id    = "<% $seeds{$entry_id} %>"
 									>
-										<% $seeds{$entry->id} %>
-									</span>
-							
-									<span 
-										class="nospace quarter sections hidden biggish bluetext semibold"
-										entry = "<% $entry->id %>"
-										id    = "<% %sections ? $sections{$entry->id} : ""  %>"
-									>
-										<% %sections ? $sections{$entry->id} : ""  %>
-									</span>
-							
-									<span 
-										class="nospace quarter section_ranks hidden biggish greytext semibold"
-										entry = "<% $entry->id %>"
-										id    = "<% %section_ranks ? $section_ranks{$entry->id} : ""  %>"
-									>
-										<% %section_ranks ? $section_ranks{$entry->id} : ""  %>
+										<% $seeds{$entry_id} %>
 									</span>
 
+									<span
+										class="nospace quarter sections hidden biggish bluetext semibold"
+										entry = "<% $entry_id %>"
+										id    = "<% %sections ? $sections{$entry_id} : ""  %>"
+									>
+										<% %sections ? $sections{$entry_id} : ""  %>
+									</span>
+
+									<span
+										class="nospace quarter section_ranks hidden biggish greytext semibold"
+										entry = "<% $entry_id %>"
+										id    = "<% %section_ranks ? $section_ranks{$entry_id} : ""  %>"
+									>
+										<% %section_ranks ? $section_ranks{$entry_id} : ""  %>
+									</span>
 
 %								}
 
-								<span 
+								<span
 									class="nospace half strengths hidden biggish purpletext semibold"
-									entry = "<% $entry->id %>"
-									id    = "<% $strength ? ${$strength}{$entry->id} : ""  %>"
+									entry = "<% $entry_id %>"
+									id    = "<% $strength ? ${$strength}{$entry_id} : ""  %>"
 								>
-									<% $strength ? ${$strength}{$entry->id} : ""  %>
+									<% $strength ? ${$strength}{$entry_id} : ""  %>
 								</span>
 
-								<span 
-									class="nospace orders code_<% $panel->id %> hidden"
+								<span
+									class="nospace orders code_<% $panel_id %> hidden"
 								>
-%									foreach my $round (
-%										sort keys %{$event_speaker_order{$entry->id}}
-%									) { 
-										<span class="full padless marno">
+
+<%perl>
+									my @rounds = keys %{$event_speaker_order{$entry_id}};
+									my $rounds_ref = \@rounds;
+
+									$m->comp("/funclib/mixed_sort.mas", array => $rounds_ref, actual => 1);
+
+									my $total;
+
+									foreach my $round (@{$rounds_ref}) {
+
+										$total += $event_speaker_order{$entry_id}{$round};
+</%perl>
+										<span class="third padless marno">
 										<% $round %>-<%
 											Lingua::EN::Numbers::Ordinate::ordinate(
-												$event_speaker_order{$entry->id}{$round}
+												$event_speaker_order{$entry_id}{$round}
 											)
 										%>
 										</span>
 %									}
-								</span>
 
-								<span class="nospace crosses code_<% $panel->id %> hidden">
-
-%									foreach my $other (keys %{$crosses_entries{$entry->id}}) { 
-
-										<span class="full nospace">
-
-											<% $crosses_entries{$entry->id}{$other}{"event"} %>-<% 	
-												Lingua::EN::Numbers::Ordinate::ordinate(
-													$crosses_entries{$entry->id}{$other}{"order"} 
-												) 
-										%>
-
-										</span>
-%									}
+									<span class="full padless marno semibold">
+										Spk Total <% $total %>
+									</span>
 
 								</span>
+
+%								unless ($tourn_settings->{ncfl} || $tourn_settings->{nsda}) {
+									<span class="nospace crosses code_<% $panel_id %> hidden">
+%										foreach my $other (keys %{$crosses_entries{$entry_id}}) {
+											<span class="full nospace">
+												<% $crosses_entries{$entry_id}{$other}{"event"} %>-<%
+													Lingua::EN::Numbers::Ordinate::ordinate(
+														$crosses_entries{$entry_id}{$other}{"order"}
+													)
+											%>
+											</span>
+%										}
+									</span>
+%								}
 
 							</span>
 %						}
@@ -661,11 +746,11 @@
 					</div>
 %				}
 
-				<div class="lightrow centeralign padmore marno bordersides borderbottom">
+				<div class="row centeralign padmore marno bordersides borderbottom">
 
 					<p class="leftalign semibold smallish marno">Status:</p>
 
-%					unless ($round->type eq "elim") { 
+%					unless ($round_type eq "elim") {
 
 						<div class = "full padless marno purpletext" >
 
@@ -673,124 +758,118 @@
 								Avg Rank:
 							</span>
 
-							<span 
+							<span
 								class = "half leftalign semibold"
-								id    = "average_<% $panel->id %>">
+								id    = "average_<% $panel_id %>">
 							</span>
-
 						</div>
+<%perl>
+					}
 
-%					}
+					my $blah;
 
-%					my $blah;
+					foreach my $key (keys %schools) {
 
-%					foreach my $key (keys %schools) { 
+						next unless $counts{"schools"}{$key} > 1;
+						$blah++;
+</%perl>
 
-%						next unless $schools{$key} > 1;
-%						$blah++;
-
-						<span 
-							id      = "<% $key %>_<% $panel->id %>"
+						<span
+							id      = "<% $key %>_<% $panel_id %>"
 							class	= "schooltoggle buttonwhite marbottom redtext padless smallish full"
-							onClick = "toggleColor( 
+							onClick = "toggleColor(
 								this.id,
-								<% $panel->id %>,
-								<% $key %>, 
+								<% $panel_id %>,
+								<% $key %>,
 								'school',
 								''
 							);"
 						>
-							<% $schools{$key} %> from 
-							<% $ncfl ? "Dio" : "School" %> 
+							<% $counts{"schools"}{$key} %> from
+							<% $tourn_settings->{ncfl} ? "Dio" : "School" %>
 							<% $school{$key} %>
-
 						</span>
+<%perl>
+					}
 
-%					}
+					if ($counts{"order"}) {
 
-%					if ($order_count) { 
-
-%						$blah++;
-
-						<span 
-							id      = "order_<% $panel->id %>"
+						$blah++;
+</%perl>
+						<span
+							id      = "order_<% $panel_id %>"
 							class	= "ordertoggle buttonwhite marbottom greentext padless smallish full"
-							onClick = "toggleColor( 
+							onClick = "toggleColor(
 								this.id,
-								<% $panel->id %>,
+								<% $panel_id %>,
 								'normal',
 								'order',
 								'green'
 							);"
 						>
-							<% $order_count %> order repeats
+							<% $counts{"order"} %> order repeats
 						</span>
-%					}
+<%perl>
+					}
 
-%					if ($last_order_count) { 
-%						$blah++;
+					if ($counts{"last_order"}) {
+						$blah++;
+</%perl>
 
-						<span 
-							id      = "last_order_<% $panel->id %>"
+						<span
+							id      = "last_order_<% $panel_id %>"
 							class	= "last_ordertoggle buttonwhite marbottom greentext padless smallish full"
-							onClick = "toggleColor( 
+							onClick = "toggleColor(
 								this.id,
-								<% $panel->id %>,
+								<% $panel_id %>,
 								'last',
 								'order',
 								'dkgreen'
 							);"
 						>
-							<% $last_order_count %> same order R<% $round->name - 1 %>
+							<% $counts{"last_order"} %> same order R<% $round->name - 1 %>
 						</span>
-%					}
+<%perl>
+					}
 
-%					unless ($ncfl) { 
-%						if ($crosses_total_clash) { 
-%							$blah++;
+					unless ($tourn_settings->{ncfl}) {
 
-							<span 
-								id      = "crosses_<% $panel->id %>"
+						if ($counts{"crosses"}) {
+							$blah++;
+</%perl>
+							<span
+								id      = "crosses_<% $panel_id %>"
 								class	= "crossestoggle buttonwhite marbottom graytext padless smallish full"
-								onClick = "toggleColor( this.id, <% $panel->id %>, 'normal', 'crosses', 'dkgrey');"
+								onClick = "toggleColor( this.id, <% $panel_id %>, 'normal', 'crosses', 'dkgrey');"
 							>
-								<% $crosses_total_clash %> crosses entry order
+								<% $counts{"crosses"} %> crosses entry order
 							</span>
-%						}
-%					}
+<%perl>
+						}
+					}
 
-
-%					unless ($round->type eq "elim") { 
-
-%						if ($hit_total) { 
-
-%							$blah++;
-
-							<span 
-								id      = "hit_<% $panel->id %>"
+					unless ($round_type eq "elim") {
+						if ($counts{"hits"}) {
+							$blah++;
+</%perl>
+							<span
+								id      = "hit_<% $panel_id %>"
 								class	= "hittoggle buttonwhite marbottom orangetext padless smallish full"
-								onClick = "toggleColor( this.id, <% $panel->id %>, 'hits', 'hits', 'orangetext');"
+								onClick = "toggleColor( this.id, <% $panel_id %>, 'hits', 'hits', 'orangetext');"
 							>
-								<% $hit_total %> repeat hits
+								<% $counts{"hits"} %> repeat hits
 							</span>
 %						}
 %					}
 
-%					unless ($blah) { 
-		
+%					unless ($blah) {
 						<span class="buttonwhite greentext padless">
-
-							<span class="fa fa-check fa-lg greentext">
-							</span>
-
+							<span class="fa fa-check fa-lg greentext"></span>
 							All OK!
-
 						</span>
-
 %					}
 
 				</div>
-
 			</span>
 %		}
 
