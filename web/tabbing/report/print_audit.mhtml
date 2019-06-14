@@ -1,35 +1,73 @@
 <%args>
 	$tourn
+	$tourn_settings
 	$session
-	$timeslot_id
-	$no_points => undef
-	$sort_by   => undef
+	$perms
+	$defaults    => undef
+	$category_id => undef
+	$timeslot_id => undef
+	$event_id    => undef
+	$round_id    => undef
+	$no_points   => undef
+	$sort_by     => undef
 </%args>
 <%init>
 
-	my $session_category = $session->category;
+    my ($eventref, $catref) = $m->comp(
+        "/funclib/allowed_events.mas",
+        tourn => $tourn,
+        perms => $perms
+    );
 
-	my $session_event = $session->event
-		if $session->event && $session->event->id;
+    my %event_by_id = map {$_->id => $_} @{$eventref};
+    my %cat_by_id = map {$_->id => $_} @{$catref};
 
-	my $name;
+	if ((not defined $category_id) && $defaults->{category}) {
+		$category_id = $defaults->{category};
+	}
+	if ((not defined $event_id) && $defaults->{event}) {
+		$event_id = $defaults->{event};
+	}
 
-	my @events;
+	if ($category_id && (not defined $cat_by_id{$category_id})) {
+		my $err = "You do not have access to that category";
+		$m->redirect("/tabbing/entry/index.mhtml?err=$err");
+	}
 
-	if ($session_event) {
-		$name = $session_event->name;
-		push @events, $session_event;
-	} elsif ($session_category) {
-		$name = $session_category->name;
-		push @events, $session_category->events;
+	if ($event_id && (not defined $event_by_id{$event_id})) {
+		my $err = "You do not have access to that event";
+		$m->redirect("/tabbing/entry/index.mhtml?err=$err");
+	}
+
+	my $limit;
+	my $name = "AuditSheets-";
+
+	if ($category_id && $category_id == int($category_id)) {
+		$limit .= " and event.category = ".$category_id;
+		$name .= "Cat".$category_id;
+	}
+
+	if ($event_id && $event_id == int($event_id)) {
+		$limit .= " and event.id = ".$event_id;
+		$name .= "Ev".$event_id;
+	}
+	if ($timeslot_id && $timeslot_id == int($timeslot_id)) {
+		$limit .= " and round.timeslot = ".$timeslot_id;
+		$name .= "Ts".$timeslot_id;
+	}
+	if ($round_id && $round_id == int($round_id)) {
+		$limit .= " and round.id = ".$round_id;
+		$name .= "Rd".$round_id;
+	}
+
+	unless ($limit) {
+		my $err = "No audit limits sent, cannot print";
+		$m->redirect("/tabbing/entry/index.mhtml?err=$err");
 	}
 
 	$name =~ s/[\W_]//g;
-
     my $filename = "BallotAudit-$name-".$session->id;
     my $filepath = $Tab::file_root."tmp/".$filename;
-
-	my $no_codes++ if $session_category && $session_category->setting("no_codes");
 
     $m->comp("/funclib/printout.mas",
 		tourn     => $tourn,
@@ -38,584 +76,211 @@
 		array     => 1.2
 	);
 
-    open (TEXOUT, ">>$filepath.tex");
+	my $dbh = Tab::DBI->db_Main();
 
-	print TEXOUT "\\renewcommand {\\TruncateMarker}{} \n";
+	my %rounds;
 
-	my $timeslot = Tab::Timeslot->retrieve($timeslot_id);
+	my $sth = $dbh->prepare("
 
-	my @ballots = $m->comp(
-		"/funclib/timeslot_ballots.mas",
-		timeslot => $timeslot
-	);
+		select
+			round.id, round.name, round.label,
+			event.id, event.abbr, event.name,
+			panel.id, panel.letter, room.name, panel.bye,
+			judge.id, judge.code, judge.first, judge.last,
+			entry.id, entry.code, ballot.bye, ballot.forfeit,
+			ballot.side, ballot.speakerorder,
+			winloss.value,
+			rank.value,
+			points.value
 
-	my %panel_ballots;
+		from (round, event, panel, judge, entry, ballot)
 
-	foreach my $ballot (@ballots) {
-		push @{$panel_ballots{$ballot->panel->id}{$ballot->judge->id}}, $ballot;
-	}
+			left join score winloss on winloss.ballot = ballot.id and winloss.tag = 'ballot'
+			left join score rank on rank.ballot = ballot.id and rank.tag = 'rank'
+			left join score points on points.ballot = ballot.id and points.tag = 'points'
+			left join room on panel.room = room.id
 
-	my $notfirst;
+		where
+			ballot.panel = panel.id
+			and panel.round = round.id
+			and round.event = event.id
+			and ballot.judge = judge.id
+			and ballot.entry = entry.id
+			$limit
+	");
 
-	foreach my $event (@events) {
+	$sth->execute();
 
-		if ($notfirst++) {
-			print TEXOUT "\\newpage\n";
-		}
+	while (
+		my (
+			$round_id, $round_name, $round_label,
+			$event_id, $event_abbr, $event_name,
+			$panel_id, $panel_letter, $room_name, $panel_bye,
+			$judge_id, $judge_code, $judge_first, $judge_last,
+			$entry_id, $entry_code,
+			$ballot_side, $order, $bye, $fft,
+			$winloss_value,
+			$rank_value,
+			$points_value
+		) = $sth->fetchrow_array()
+	) {
 
-		print TEXOUT "\\noindent\n";
-		print TEXOUT "{\\LARGE \\bf ".Tab::texify($event->name);
-		print TEXOUT " \\hfill ".Tab::texify($timeslot->name)." ballot check }\n";
-		print TEXOUT "\\bigskip\n";
-		print TEXOUT "\\newline\n";
-		print TEXOUT "\\footnotesize\n";
-
-		my $switch;
-
-		my @judges = $m->comp(
-			"/funclib/timeslot_judges.mas",
-			timeslot => $timeslot,
-			event    => $event
-		);
-
-		my $tabular;
-		my $width;
-
-		my $aff_string = $event->setting("aff_label");
-		my $neg_string = $event->setting("neg_label");
-
-		$aff_string = "Aff" unless $aff_string;
-		$neg_string = "Neg" unless $neg_string;
-
-		my $truncate_fill = $event->setting("truncate_fill");
-
-		my $event_type = $event->type;
-
-		$event_type = "debate"
-			if $event_type eq "debate"
-			|| $event_type eq "policy"
-			|| $event_type eq "pf"
-			|| $event_type eq "ld"
-			|| $event_type eq "parli";
-
-		if ($event_type eq "wudc") {
-
-			$tabular = "\\begin{tabular}{p{.75in}p{.25in}p{.75in}p{.25in}p{1.25in}p{.25in}p{.75in}p{.25in}p{1.25in}}\n";
-
-
-		} elsif ($event_type eq "speech" || $event_type eq "congress") {
-
-			unless ($no_points) {
-				$tabular = "\\begin{tabular}{p{.6in}p{.1in}p{.45in}}";
-				$width   = 1.65;
-				print TEXOUT "\\begin{adjustwidth}{-1mm}{+10mm}\n";
-			} else {
-				$tabular = "\\begin{tabular}{p{.7in}p{.2in}}";
-				$width   = 1.35;
-				print TEXOUT "\\begin{adjustwidth}{-1mm}{+8mm}\n";
-			}
-
+		if ($round_label) {
+			$rounds{$round_id}{label} = $round_label;
 		} else {
-
-			$tabular = "\\begin{tabular}{p{.75in}p{1in}p{1.25in}p{1in}p{1.25in}p{1in}}\n";
+			$rounds{$round_id}{label} = "Round ".$round_name;
 		}
 
-		foreach my $judge (@judges) {
+		$rounds{$round_id}{name}       = $round_name;
+		$rounds{$round_id}{event}      = $event_id;
+		$rounds{$round_id}{event_abbr} = $event_abbr;
+		$rounds{$round_id}{event_name} = $event_name;
+
+		$rounds{$round_id}{panels}{$panel_id}{letter}  = $panel_letter;
+		$rounds{$round_id}{panels}{$panel_id}{room}    = $room_name;
+
+		$rounds{$round_id}{panels}{$panel_id}{entries}{$entry_id}{"code"} = $entry_code;
+
+		if ($panel_bye) {
+			$rounds{$round_id}{panels}{$panel_id}{entries}{$entry_id}{"side"} = "B";
+		} elsif ($bye) {
+			$rounds{$round_id}{panels}{$panel_id}{entries}{$entry_id}{"side"} = "B";
+		} elsif ($fft) {
+			$rounds{$round_id}{panels}{$panel_id}{entries}{$entry_id}{"side"} = "F";
+		} elsif ($ballot_side) {
+			if ($ballot_side == 1) {
+				$rounds{$round_id}{panels}{$panel_id}{entries}{$entry_id}{"side"} = "A";
+			} else {
+				$rounds{$round_id}{panels}{$panel_id}{entries}{$entry_id}{"side"} = "N";
+			}
+		} elsif ($order) {
+			$rounds{$round_id}{panels}{$panel_id}{entries}{$entry_id}{"order"} = $order;
+		}
+
+
+		if ($judge_code) {
+			$rounds{$round_id}{panels}{$panel_id}{judges}{$judge_id}{"code"} = $judge_code;
+		} else {
+			$rounds{$round_id}{panels}{$panel_id}{judges}{$judge_id}{"code"} = $judge_last.", ".$judge_first;
+		}
+
+		if ($winloss_value) {
+			if ($winloss_value == 1) {
+				$rounds{$round_id}{panels}{$panel_id}{scores}{$judge_id}{$entry_id}{win} = "W";
+			} else {
+				$rounds{$round_id}{panels}{$panel_id}{scores}{$judge_id}{$entry_id}{win} = "L";
+			}
+		} elsif ($rank_value) {
+			$rounds{$round_id}{panels}{$panel_id}{scores}{$judge_id}{$entry_id}{rank} .= ","
+				if $rounds{$round_id}{panels}{$panel_id}{scores}{$judge_id}{$entry_id}{rank};
+			$rounds{$round_id}{panels}{$panel_id}{scores}{$judge_id}{$entry_id}{rank} .= $rank_value;
+		} elsif ($points_value) {
+			$rounds{$round_id}{panels}{$panel_id}{scores}{$judge_id}{$entry_id}{points} .= ","
+				if $rounds{$round_id}{panels}{$panel_id}{scores}{$judge_id}{$entry_id}{points};
+			$rounds{$round_id}{panels}{$panel_id}{scores}{$judge_id}{$entry_id}{points} .= $points_value;
+		}
+	}
+
+	my @rounds = sort {
+		$rounds{$a}{event_abbr} cmp $rounds{$b}{event_abbr}
+		|| $rounds{$a}{name} <=> $rounds{$b}{name}
+	} keys %rounds;
+
+    open (my $texout, ">>$filepath.tex");
+
+	my $size = ".5in";
+
+	my $psize = "1in";
+
+	if ($tourn_settings->{nsda_nats}) {
+		$size = ".25in";
+		$psize = ".75in";
+	}
+
+	foreach my $round_id (@rounds) {
+
+		print $texout "\\noindent\n";
+		print $texout "\\textsb{\\LARGE Audit Sheet } \n";
+		print $texout "\\hfill\n";
+		print $texout "\\textsb{\\LARGE ".Tab::texify($rounds{$round_id}{event_abbr})." } \n";
+		print $texout "\\hfill\n";
+		print $texout "\\textsb{\\LARGE ".Tab::texify($rounds{$round_id}{label})." } \n";
+		print $texout "\\medskip\n";
+		print $texout "\\newline\n";
+
+		print $texout "\\footnotesize\n";
+		print $texout "\\sloppy\n";
+
+		foreach my $panel_id (
+			sort {
+				$rounds{$round_id}{panels}{$a}{letter} <=> $rounds{$round_id}{panels}{$b}{letter}
+				|| $rounds{$round_id}{panels}{$a}{room} <=> $rounds{$round_id}{panels}{$b}{room}
+			} keys %{$rounds{$round_id}{panels}}
+		) {
+
+			my $panel = $rounds{$round_id}{panels}{$panel_id};
+
+			foreach my $judge_id (sort keys %{$panel->{judges}}) {
+
+				my $judge = $panel->{judges}{$judge_id};
+
+				print $texout "\\parbox[t][][t]{".$psize."}{\n";
+				print $texout "\\begin{tabular}{p{.2in}p{".$size."}}\n";
+				print $texout "\\textsb{ ".$panel->{letter}."} & \\truncate{.45in}{ ";
+				print $texout Tab::texify($judge->{code});
+				print $texout "} \\\\ \\hline \n";
+				print $texout "\\end{tabular}\n";
+				print $texout "\\newline\n";
+
+				my $switch;
 
-			my @panels = $m->comp("/funclib/judge_panels.mas",
-				judge    => $judge,
-				timeslot => $timeslot
-			);
+				my @entries = sort {
+					$panel->{entries}{$a}{"side"} cmp $panel->{entries}{$b}{"side"}
+					|| $panel->{entries}{$a}{"order"} <=> $panel->{entries}{$b}{"order"}
+				} keys %{$panel->{entries}};
 
-			foreach my $panel (@panels) {
-
-				next if $panel->round->event->id != $event->id;
-
-				my @scores = $m->comp(
-					"/funclib/panel_scores.mas",
-					judge => $judge,
-					panel => $panel
-				);
-
-				my @ballots =
-					sort {$a->side <=> $b->side} @{$panel_ballots{$panel->id}{$judge->id}}
-					if $panel_ballots{$panel->id}{$judge->id};
-
-				next unless @ballots;
-
-				next unless @scores || $panel->bye;
-
-				if ($event_type eq "debate" || $event_type eq "wsdc") {
-
-					print TEXOUT $tabular;
-					print TEXOUT "\\rowcolor[rgb]{.90,.90,.90}\[5.5pt\]\[5.5pt\]\n" unless $switch++ % 2;
-
-					if ($panel->bye) {
-
-						print TEXOUT "BYE & \\truncate{.95in}{ ";
-
-						my $first = shift @ballots if @ballots;
-						print TEXOUT $first->entrycode if $first;
-						print TEXOUT " } & & \\truncate{.95in}{ ";
-
-						my $second = shift @ballots if @ballots;
-						print TEXOUT $second->entrycode if $second;
-						print TEXOUT " } & & \n";
-
-					} else {
-
-						print TEXOUT "\t\\truncate{.75in}{".Tab::texify($judge->code." ".$judge->last)."}\n & "
-							unless $no_codes;
-
-						print TEXOUT "\t\\truncate{.75in}{".Tab::texify($judge->last.", ".$judge->first)."}\n &"
-							if $no_codes;
-
-						my $aff_bye;
-						my $neg_bye;
-
-						my $first = shift @ballots if @ballots;
-						my $second = shift @ballots if @ballots;
-
-						my $winner;
-
-						$aff_bye = uc($aff_string)." FFT" if $first && $first->forfeit;
-						$aff_bye = uc($aff_string)." BYE" if $first && $first->bye;
-
-						$neg_bye = uc($neg_string)." FFT" if $second && $second->forfeit;
-						$neg_bye = uc($neg_string)." BYE" if $second && $second->bye;
-
-						print TEXOUT "\\truncate{.95in}{ \t\t".Tab::texify($first->entrycode)." } & ";
-
-						print TEXOUT "\\begin{minipage}[c]{1.2in} ";
-						print TEXOUT "\\vspace{.04in} \n";
-
-						my $notfirst;
-
-						my %student_order = ();
-
-						my $counter;
-
-						my @students = $first->entry->students;
-
-						foreach my $student (@students) {
-
-							my $rank;
-							my $points;
-							my $reply_points;
-
-							my $position;
-							$counter++;
-
-							foreach my $score (@scores) {
-
-								$rank = $score->value
-									if $score->tag eq "rank"
-									&& $score->student->id == $student->id;
-
-								$points = $score->value
-									if $score->tag eq "points"
-									&& $score->student->id == $student->id;
-
-
-								# WSDC
-								$position = $score->position
-									if $score->tag eq "points"
-									&& $score->student->id == $student->id
-									&& $score->position;
-
-								$reply_points = $score->value
-									if $score->tag eq "rebuttal_points"
-									&& $score->student->id == $student->id;
-
-								next if $winner;
-
-								next unless $score->tag eq "ballot" && $score->value == 1;
-
-								$winner = $aff_bye." ".$neg_bye if $aff_bye || $neg_bye;
-
-								my $winner_break = "\\textendash ";
-
-								if ($event_type eq "wsdc") {
-									$winner_break = " } \\newline \\truncate{.95in}{\t\t ";
-								}
-
-								$winner .= $aff_string." ".$winner_break if $score->ballot->side == 1;
-								$winner .= $neg_string." ".$winner_break if $score->ballot->side == 2;
-
-								$winner .= Tab::texify($score->ballot->entrycode);
-
-							}
-
-							$points .= " \\hfill ".$reply_points if $points && $reply_points;
-
-							if ($rank || $points) {
-								$position = $counter unless $position;
-								$student_order{$position}{"rank"} = $rank;
-								$student_order{$position}{"points"} = $points;
-								$student_order{$position}{"name"} = $student->last;
-							}
-
-
-						}
-
-						foreach my $order (sort(keys %student_order)) {
-
-							print TEXOUT "\\newline " if $notfirst++;
-
-							if ($event_type eq "wsdc") {
-
-								print TEXOUT "\\makebox[.64in]{\\truncate{.58in}{".Tab::texify($student_order{$order}{"name"})."}}";
-
-								unless ($no_points) {
-									print TEXOUT "\\makebox[.50in][l]{".$student_order{$order}{"points"}."} "
-										if $student_order{$order}{"points"};
-								}
-
-							} else {
-
-								print TEXOUT "\\makebox[.72in]{\\truncate{.7in}{".Tab::texify($student_order{$order}{"name"})."}}";
-
-								unless ($no_points) {
-									print TEXOUT "\\makebox[.44in][l]{".$student_order{$order}{"points"}."} "
-										if $student_order{$order}{"points"};
-								}
-							}
-
-							print TEXOUT "\\makebox[.1in][l]{".$student_order{$order}{"rank"}."} "
-								if $student_order{$order}{"rank"};
-
-						}
-
-						print TEXOUT "\\end{minipage} \n \\vspace{.075in}\n";
-
-						print TEXOUT " & ";
-
-						print TEXOUT "\\truncate{.95in}{ \t\t".Tab::texify($second->entrycode)."} \n "
-							if $second && $second->entry;
-
-						print TEXOUT " & ";
-
-						print TEXOUT "\\begin{minipage}[c]{1.2in} ";
-						print TEXOUT "\\vspace{.04in} \n";
-
-						undef $notfirst;
-
-						undef %student_order;
-
-						if ($second && $second->entry) {
-
-							my @students = $second->entry->students;
-
-							my $counter;
-
-							foreach my $student (@students) {
-
-								$counter++;
-
-								my $rank;
-								my $points;
-								my $reply_points;
-
-								my $position;
-
-								foreach my $score (@scores) {
-
-									$rank = $score->value
-										if $score->tag eq "rank"
-										&& $score->student->id == $student->id;
-
-									$points = $score->value
-										if $score->tag eq "points"
-										&& $score->student->id == $student->id;
-
-									# WSDC
-									$position = $score->position
-										if $score->tag eq "points"
-										&& $score->student->id == $student->id
-										&& $score->position;
-
-									$reply_points = $score->value
-										if $score->tag eq "rebuttal_points"
-										&& $score->student->id == $student->id;
-								}
-
-								$points .= " \\hfill ".$reply_points if $points && $reply_points;
-
-								if ($rank || $points) {
-									$position = $counter unless $position;
-									$student_order{$position}{"rank"} = $rank;
-									$student_order{$position}{"points"} = $points;
-									$student_order{$position}{"name"} = $student->last;
-								}
-
-
-							}
-
-						}
-
-						foreach my $order (sort(keys %student_order)) {
-
-							print TEXOUT "\\newline \n" if $notfirst++;
-
-							if ($event_type eq "wsdc") {
-
-								print TEXOUT "\\makebox[.64in]{\\truncate{.58in}{".Tab::texify($student_order{$order}{"name"})."}}";
-
-								unless ($no_points) {
-
-									print TEXOUT "\\makebox[.50in][l]{".$student_order{$order}{"points"}."} "
-										if $student_order{$order}{"points"};
-
-								}
-
-							} else {
-
-								print TEXOUT "\\makebox[.72in]{\\truncate{.7in}{".Tab::texify($student_order{$order}{"name"})."}}";
-
-								unless ($no_points) {
-									print TEXOUT "\\makebox[.44in][l]{".$student_order{$order}{"points"}."} "
-										if $student_order{$order}{"points"};
-								}
-							}
-
-							print TEXOUT "\\makebox[.1in][l]{".$student_order{$order}{"rank"}."} "
-								if $student_order{$order}{"rank"};
-
-						}
-
-						print TEXOUT "\\end{minipage} \n";
-
-						print TEXOUT " & ";
-
-						print TEXOUT "\\vspace{.075in}\n" unless $event_type eq "wsdc";
-						print TEXOUT "\\vspace{-.15in}\n" if $event_type eq "wsdc";
-
-						$winner = "\\bf {\\color{red} WOE IS ME! }} \\newline \\truncate{.95in}{ \\bf {\\color{red}  NO WINNER! }" unless $winner;
-
-						print TEXOUT "\\truncate{.95in}{".$winner."} \n" if $winner;
-
-					}
-
-					print TEXOUT "\\end{tabular}\n";
-					print TEXOUT "\\newline\n";
-
-				} elsif ($event_type eq "wudc") {
-
-					@ballots = sort {$a->speakerorder <=> $b->speakerorder} @ballots;
-
-					print TEXOUT $tabular;
-					print TEXOUT "\\rowcolor[rgb]{.90,.90,.90}\[5.5pt\]\[5.5pt\]\n" if $switch % 2;
-
-					print TEXOUT "\t\\truncate{.75in}{";
-					print TEXOUT Tab::texify($judge->code) unless $no_codes;
-					print TEXOUT Tab::texify($judge->last.", ".$judge->first)."}\n & ";
-
-					my @positions = ( "1G", "1O", "2G", "2O" );
-
-					foreach my $ballot (@ballots) {
-
-						my $order = shift @positions;
-
-						print TEXOUT $order.". & ";
-						print TEXOUT "\\truncate{.73in}{".Tab::texify($ballot->entrycode)."} & ";
-
-						my $rank;
-						foreach my $score (@scores) {
-							$rank = $score->value
-								if $score->tag eq "rank"
-								&& $score->ballotid == $ballot->id;
-						}
-						print TEXOUT (4 - $rank)." & ";
-
-						print TEXOUT "\\begin{minipage}{1.25in}\n";
-
-						my $notfirst;
-
-						foreach my $student ($ballot->entry->students) {
-
-							print TEXOUT "\\newline " if $notfirst++;
-
-							my $points;
-							foreach my $score (@scores) {
-								$points = $score->value
-									if $score->tag eq "points"
-									&& $score->student->id == $student->id;
-							}
-
-							print TEXOUT "\\makebox[.95in]{\\truncate{.90in}{";
-							print TEXOUT Tab::texify($student->last.", ".$student->first)."}}";
-							print TEXOUT "\\makebox[.25in][l]{".$points."} " if $points;
-						}
-
-						print TEXOUT "\\end{minipage}\n";
-
-						if ($order eq "1O") {
-							print TEXOUT "\\\\ \n";
-							print TEXOUT "\\rowcolor[rgb]{.84,.84,.84}\[5.5pt\]\[5.5pt\]\n" if $switch % 2;
-							print TEXOUT " & ";
-						} elsif ($order eq "2O") {
-
-						} else {
-							print TEXOUT " & ";
-						}
-
-					}
-
-					$switch++;
-
-					print TEXOUT "\\end{tabular}\n";
-					print TEXOUT "\\newline\n";
-
-				} elsif ($event_type eq "speech" || $event_type eq "congress") {
-
-					@ballots = sort {$a->speakerorder <=> $b->speakerorder} @ballots
-						if $event_type eq "speech";
-
-					@ballots = sort {$a->firstname cmp $b->firstname} @ballots
-						if $event_type eq "congress";
-
-					@ballots = sort {$a->lastname cmp $b->lastname} @ballots
-						if $event_type eq "congress";
-
-					my %ballot_scores;
-
-					@scores = sort {$a->speech <=> $b->speech} @scores
-						if $event_type eq "congress";
-
-					foreach my $score (@scores) {
-
-						if ($score->tag eq "rank") {
-
-							$ballot_scores{$score->ballotid}{"rank"}
-								= $score->value;
-
-						} elsif ($score->tag eq "points") {
-
-							$ballot_scores{$score->ballotid}{"points"}
-								= $score->value;
-
-						} elsif ($score->tag eq "congress_speech") {
-
-							$ballot_scores{$score->ballotid}{"speeches"} .= ", "
-								if $ballot_scores{$score->ballotid}{"speeches"};
-
-							$ballot_scores{$score->ballotid}{"speeches"} .= $score->value;
-						}
-					}
-
-					@ballots =
-						sort {$ballot_scores{$a}{"rank"} <=> $ballot_scores{$b}{"rank"} }
-						@ballots if $sort_by eq "rank";
-
-					undef $switch;
-
-					print TEXOUT "\\begin{minipage}[t]{".$width."in}\n";
-
-					print TEXOUT "\\scriptsize\n";
-
-					my $truncate_width = $width - .1;
-
-					print TEXOUT "\\truncate{".$truncate_width."in}{\\bf ";
-					print TEXOUT "\\centering\n";
-					print TEXOUT Tab::texify($judge->code." ") unless $no_codes;
-					print TEXOUT Tab::texify($judge->last.", ".$judge->first);
-					print TEXOUT " }\n\n";
-
-					if ($panel->room > 0) {
-						print TEXOUT "\\noindent\n";
-						print TEXOUT "\\truncate{".$truncate_width."in}{ ";
-						print TEXOUT "Section " if $event_type eq "speech";
-						print TEXOUT "Chamber " if $event_type eq "congress";
-						print TEXOUT $panel->letter." ";
-						print TEXOUT Tab::texify($panel->room->name);
-						print TEXOUT " }\n\n";
-					}
-
-					print TEXOUT "\\vspace{2mm}\n\n";
-
-					print TEXOUT "\\noindent\n";
-					print TEXOUT $tabular;
-
-					my $previous_name;
-
-					my %taken;
-
-					foreach my $ballot (@ballots) {
-						$taken{$ballot->lastname}++;
-					}
-
-					foreach my $ballot (@ballots) {
-
-						print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n"
-							unless $switch++ % 2;
-
-						print TEXOUT "\\truncate{.75in}{";
-
-						print TEXOUT Tab::texify($ballot->entrycode)."} & " if $event_type eq "speech";
-
-						if ($event_type eq "congress") {
-
-							print TEXOUT Tab::texify($ballot->lastname);
-
-							if ($taken{$ballot->lastname} > 1) {
-								print TEXOUT ", ".Tab::texify($ballot->firstname);
-							}
-
-							print TEXOUT "} & ";
-
-						}
-
-						if ($ballot->forfeit) {
-
-							print TEXOUT "\\multicolumn{2}{r}{}{\\bf FFT }";
-
-						} else {
-
-							unless ($truncate_fill == $ballot_scores{$ballot->id}{"rank"}) {
-								print TEXOUT "\\hfill ".$ballot_scores{$ballot->id}{"rank"};
-							}
-
-							unless ($no_points) {
-
-								print TEXOUT " & ";
-
-								if ($event_type eq "speech") {
-
-									print TEXOUT "\\hfill ".$ballot_scores{$ballot->id}{"points"};
-									print TEXOUT " tv " if $ballot->tv;
-
-								} elsif ($event_type eq "congress") {
-
-									print TEXOUT "\\hfill ".$ballot_scores{$ballot->id}{"speeches"};
-								}
-
-							}
-
-						}
-
-						print TEXOUT "\\\\ \n";
-
-					}
-
-					print TEXOUT "\\end{tabular}\n";
-					print TEXOUT "\\medskip\n";
-					print TEXOUT "\\newline\n";
-					print TEXOUT "\\end{minipage}\n";
-					print TEXOUT "\\hspace{4mm}\n";
-
+				if ($sort_by eq "rank") {
+					@entries = sort {
+						$panel->{scores}{$judge_id}{$a}{rank} <=> $panel->{scores}{$judge_id}{$b}{rank}
+					} @entries;
 				}
+
+				foreach my $entry_id (@entries) {
+
+					my $entry = $panel->{entries}{$entry_id};
+
+					print $texout "\\begin{tabular}{p{.3in}p{.15in}p{.15in}p{.15in}}\n";
+					print $texout "\\rowcolor[rgb]{.90,.90,.90}\n" unless $switch++ % 2;
+					print $texout Tab::texify($entry->{code});
+
+					if ($panel->{scores}{$judge_id}{$entry_id}{win}) {
+						print $texout " & ";
+						print $texout $panel->{scores}{$judge_id}{$entry_id}{win};
+					}
+
+					if ($panel->{scores}{$judge_id}{$entry_id}{rank}) {
+						print $texout " & ";
+						print $texout $panel->{scores}{$judge_id}{$entry_id}{rank};
+					}
+
+					if ($panel->{scores}{$judge_id}{$entry_id}{points}) {
+						print $texout " & ";
+						print $texout $panel->{scores}{$judge_id}{$entry_id}{points};
+					}
+
+					print $texout "\\end{tabular}\n";
+					print $texout "\\newline\n";
+				}
+
+				print $texout "}\n";
+				print $texout "\\hspace{4mm}\n";
 			}
 		}
 
-		if ($event_type eq "speech" || $event_type eq "congress") {
-			print TEXOUT "\\end{adjustwidth}\n";
-		}
-
-		undef @judges;
-
+		print $texout "\\newpage\n";
 	}
 
-	close TEXOUT;
+	close $texout;
 
     $m->comp("/funclib/printout.mas",
 		tourn     => $tourn,
