@@ -1,0 +1,160 @@
+<%args>
+	$person
+	$tourn
+	$entry_id     => undef
+	$panel_marker => undef
+</%args>
+<%init>
+
+	$m->clear_buffer;
+	$r->content_type('application/json');
+
+	my $origin_entry;
+	my $target_panel;
+	my $panel_id;
+	my $target_speakerorder;
+
+	$origin_entry = Tab::Entry->retrieve($entry_id) if $entry_id;
+	($panel_id, $target_speakerorder) = split(/_/, $panel_marker) if $panel_marker;
+	$target_panel = Tab::Panel->retrieve($panel_id) if $panel_id;
+
+	my $event;
+
+	unless ($target_panel) {
+		$m->print('{
+			"error": true,
+			"message": "No section for '.$panel_id.' found.  Please refresh this page and start again"
+		}');
+
+		$m->abort;
+	}
+
+	unless ($origin_entry) {
+		$m->print('{
+			"error": true,
+			"message": "No entry for '.$entry_id.' found.  Please refresh this page and start again"
+		}');
+		$m->abort;
+	}
+
+	unless ($target_speakerorder > 0) {
+		$m->print('{
+			"error": true,
+			"message": "No section speakerorder sent for '.$target_speakerorder.'"
+		}');
+		$m->abort;
+	}
+
+	my $round = $target_panel->round;
+
+	Tab::Panel->columns(TEMP => "speakerorder");
+
+	Tab::Panel->set_sql( origin => "
+		select panel.*, ballot.speakerorder as speakerorder
+			from panel, ballot
+			where panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.entry = ?
+	");
+
+	Tab::Entry->set_sql( target => "
+		select entry.*
+			from entry, ballot
+			where ballot.panel = ?
+			and ballot.speakerorder = ?
+			and ballot.entry = entry.id
+	");
+
+	Tab::Ballot->set_sql(move_entry => "
+		update ballot
+		set panel = ?, speakerorder = ?
+		where ballot.panel = ?
+		and ballot.entry = ?
+	");
+
+	my $origin_panel = Tab::Panel->search_origin($round->id, $origin_entry->id )->first;
+
+	my $origin_speakerorder;
+
+	if ($origin_panel) {
+		my $sample_ballot = $origin_panel->ballots(entry => $origin_entry)->first;
+		$origin_speakerorder = $sample_ballot->speakerorder;
+		undef $sample_ballot;
+	}
+
+	my $target_entry = Tab::Entry->search_target($target_panel->id, $target_speakerorder)->first;
+
+	if ($target_entry) {
+		Tab::Ballot->sql_move_entry->execute($target_panel->id, -1, $target_panel->id, $target_entry->id);
+	}
+
+	Tab::Ballot->sql_move_entry->execute($target_panel->id, $target_speakerorder, $origin_panel->id, $origin_entry->id);
+
+
+	my $description = "Entry ".$origin_entry->code." moved to ".$target_panel->letter." speaker $target_speakerorder";
+
+	if ($target_entry) {
+		Tab::Ballot->sql_move_entry->execute($origin_panel->id, $origin_speakerorder, $target_panel->id, $target_entry->id);
+		$description .= "  Entry ".$target_entry->code." moved to ".$origin_panel->letter." speaker ".$origin_speakerorder;
+	}
+
+	foreach my $panel ($origin_panel, $target_panel) {
+
+		next unless $panel > 0;
+
+		my @ballots = sort {$a->speakerorder <=> $b->speakerorder} $panel->ballots;
+
+		my $max_order;
+		foreach my $ballot (@ballots) {
+			$max_order = $ballot->speakerorder if $max_order < $ballot->speakerorder
+		}
+
+		my %orders;
+		my $order = $max_order + 1;
+
+		foreach my $ballot (@ballots) {
+			unless ($orders{$ballot->entry}) {
+				$orders{$ballot->entry} = $order++;
+			}
+			$ballot->speakerorder($orders{$ballot->entry}++);
+			$ballot->update();
+		}
+
+		my %fresh_orders;
+		$order = 1;
+
+		foreach my $ballot (@ballots) {
+			unless ($fresh_orders{$ballot->entry}) {
+				$fresh_orders{$ballot->entry} = $order++;
+			}
+			$ballot->speakerorder($fresh_orders{$ballot->entry}++);
+			$ballot->update();
+		}
+
+	}
+
+	my $now = DateTime->now();
+
+	my $changeline = Tab::ChangeLog->create({
+		type        => 'tabbing',
+		event       => $event,
+		entry       => $origin_entry,
+		old_panel   => $origin_panel,
+		new_panel   => $target_panel,
+		person      => $person,
+		tourn       => $tourn,
+		created     => $now,
+		description => $description
+	});
+
+    $m->print('{
+		"error"               : false,
+		"message"             : "'.$description.'",
+		"origin_panel"        : "'.$origin_panel.'",
+		"origin_speakerorder" : "'.$origin_speakerorder.'",
+		"target_entry"        : "'.$target_entry.'"
+	}');
+
+	$m->abort();
+
+</%init>
