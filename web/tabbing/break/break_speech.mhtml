@@ -34,6 +34,7 @@
 	$m->comp("/funclib/autopublish_round.mas", event => $event);
 
 	my %event_settings = $event->all_settings;
+	my $method = $event_settings{"elim_method"};
 
 	my $ncfl++ if $tourn->setting("ncfl");
 	$ncfl++ if $event_settings{"region_avoid"};
@@ -146,38 +147,50 @@
 
 	if ($tourn_settings->{nsda_nats}) {
 
-		$entries{settings}{school_score}    = 100000000;
+		$method = "nsda_snake";
 
+		$entries{settings}{school_score}    = 100000000;
 		if ($from->name < 10) {
-			$entries{settings}{district_score} = 1000000;
+			$entries{settings}{district_score} = 100000000;
 		}
+
 		#This is the same as states at Nationals
-		$entries{settings}{region_score}    = 10000;
-		$entries{settings}{top_seeds_score} = 100;
-		$entries{settings}{hit_score}       = 1;
+		$entries{settings}{region_score}   = 100000;
+		$entries{settings}{top_seed_score} = 10000;
+		$entries{settings}{average_score}  = 1000;
+		$entries{settings}{last_hit_score} = 100;
+		$entries{settings}{hit_score}      = 1;
 
 		$sth = $dbh->prepare("
-			select entry.id, group_concat(other.entry SEPARATOR ',')
 
-			from entry, ballot, ballot other
+			select entry.id, group_concat(other.entry SEPARATOR ','), round.name, round.id
+
+			from entry, ballot, ballot other, panel, round
 
 			where entry.event = ?
 				and entry.active = 1
 				and entry.id = ballot.entry
 				and ballot.panel = other.panel
+				and ballot.panel = panel.id
+				and panel.round = round.id
 				and ballot.entry != other.entry
 		");
 
 		$sth->execute($event->id);
 
 		while (
-			my ($entry_id, $opponents) = $sth->fetchrow_array()
+			my (
+				$entry_id, $opponents, $round_name, $round_id
+			) = $sth->fetchrow_array()
 		) {
 
 			next unless $entries{$entry_id};
-
 			foreach my $other_id (split(/\,/, $opponents)) {
 				$entries{$entry_id}{"hits"}{$other_id}++;
+			}
+
+			if ($round_id == $from_id) {
+				$entries{$entry_id}{"last_hit"}{$other_id}++;
 			}
 		}
 	}
@@ -186,7 +199,6 @@
 	my @breaks;
 
 	foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) {
-
 		foreach my $entry_id (@{${$entries_ref}{$seed}}) {
 
 			next unless $entries{$entry_id};
@@ -211,6 +223,9 @@
 		);
 	}
 
+	my $total_strength;
+	my $count_strength;
+
 	foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) {
 
 		foreach my $entry_id (@{${$entries_ref}{$seed}}) {
@@ -222,12 +237,22 @@
 				next if $notfirst++;
 				$entries{$entry_id}{"first_tb"} = ${$tbs_ref}{$entry_id}{$key};
 
+				$total_strength += ${$tbs_ref}{$entry_id}{$key};
+				$count_strength++;
+
 				if ($seed <= $panels) {
 					$entries{$entry_id}{"top_seed"} = 1;
 				}
 			}
 		}
 	}
+
+	our $average_strength;
+	if ($count_strength > 0) {
+		$average_strength = $total_strength / $count_strength;
+	}
+
+	$entries->{settings}{average_strength} = $average_strength;
 
 	my @existing_panels = $into->panels;
 	my @use_panels;
@@ -259,8 +284,6 @@
 	foreach my $ep (@existing_panels) {
 		$ep->delete();   #KILL THE SPARES
 	}
-
-	my $method = $event_settings{"elim_method"};
 
 	my @snake_panels = @use_panels;
 	my %panel_entries = ();
@@ -304,7 +327,7 @@
 			|| $method eq "snake_school_overall_cume"
 			|| $method eq "snake_school_force"
 			|| $method eq "ky_semis_snake"
-			|| $tourn_settings->{'nsda_nats'}
+			|| $method eq "nsda_snake"
 		) {
 
 			foreach my $panel (sort @use_panels) {
@@ -353,6 +376,7 @@
 
 								next if ($seed_dist > 2 && $method eq "snake_school");
 								next if ($seed_dist > 2 && $method eq "ky_semis_snake");
+
 								next if ($tb_dist > 0 && $method eq "snake_school_rank");
 								next if ($tb_dist > 0 && $method eq "snake_school_prelim_cume");
 								next if ($tb_dist > 0 && $method eq "snake_school_overall_cume");
@@ -479,11 +503,9 @@
 		my @entries = @{$panel_entries{$key}};
 
 		@entries = shuffle(@entries);
-
 		@entries = sort {$entries{$b}{"order_sum"} <=> $entries{$a}{"order_sum"}} @entries;
 
 		my $size_of_panel = scalar @entries;
-
 		my $moved = 1;
 
 		foreach (1 .. 10) {
@@ -519,7 +541,6 @@
 				}
 			}
 		}
-
 		@{$panel_entries{$key}} = @entries;
 	}
 
@@ -582,18 +603,25 @@
 	}
 
 	my $msg = "Final round paneled" if $into->type eq "final";
+
 	$m->redirect("/panel/schemat/show.mhtml?round_id=".$into->id."&msg=$msg");
 
 	sub score_panel {
 
 		my ($panel, $entries) = @_;
 
-		my $score = 0;
+		my $strength_score = 0;
+		my $strength_count = 0;
 
 		foreach my $entry_id (@$panel) {
 
 			foreach my $other_id (@$panel) {
 				next unless $other_id > $entry_id;
+
+				if ($entries->{settings}{average_score}) {
+					$strength_score += $entries->{$entry_id}{"first_tb"};
+					$strength_count++;
+				}
 
 				if ($entries->{settings}{school_score}) {
 					if (
@@ -640,12 +668,31 @@
 					}
 				}
 
+				if ($entries->{settings}{last_hit_score}) {
+					if (
+						$entries->{$entry_id}{last_hit} > 0
+						&& $entries->{$entry_id}{last_hit} == $entries->{$other_id}{last_hit}
+					) {
+						$score += $entries->{settings}{last_hit_score};
+					}
+				}
+
 				if ($entries->{settings}{hit_score}) {
 					if ($entries->{$entry_id}{"hits"}{$other_id}) {
 						$score += $entries->{settings}{hit_score};
 					}
 				}
 			}
+		}
+
+		if ($entries->{settings}{average_score}) {
+			my $section_average;
+			if ($strength_count) {
+				$section_average = $strength_score / $strength_count;
+			}
+			my $strength_dist = abs($entries->{settings}{average_strength} - $section_average);
+
+			$score += $strength_dist * $entries->{settings}{average_score};
 		}
 
 		return $score;
