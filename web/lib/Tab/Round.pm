@@ -13,7 +13,6 @@ Tab::Round->has_a(runoff => 'Tab::Round');
 Tab::Round->has_a(tiebreak_set => 'Tab::TiebreakSet');
 Tab::Round->has_a(timeslot => 'Tab::Timeslot');
 
-
 Tab::Round->has_many(jpools => [Tab::JPoolRound => 'jpool']);
 Tab::Round->has_many(rpools => [Tab::RPoolRound => 'rpool']);
 Tab::Round->has_many(settings => 'Tab::RoundSetting', 'round');
