@@ -1,0 +1,400 @@
+<%args>
+	$result_set => undef
+</%args>
+<%init>
+
+	return unless $result_set;
+
+	my $event = $result_set->event;
+
+	if ($event->type eq "wudc") {
+		$m->redirect("bracket_wudc.mhtml?result_set_id=".$result_set->id);
+	}
+
+	my %event_settings = $event->all_settings();
+	my $tourn = $event->tourn;
+
+	my $breakout;
+
+	if ($result_set->label ne "Bracket") {
+		foreach my $breakout_id (1 .. $event_settings{"breakouts"}) {
+
+			next if $event_settings{"breakout_".$breakout_id."_deleted"};
+			my $test_string = $event_settings{"breakout_".$breakout_id."_label"}." Bracket";
+
+			$breakout = $breakout_id if $test_string eq $result_set->label;
+			last if $breakout;
+		}
+	}
+
+	my $limit;
+	if ($breakout) {
+		$limit = "
+			and exists (
+				select rs.id
+				from round_setting rs
+				where rs.round = round.id
+					and rs.tag = 'use_for_breakout'
+					and rs.value = ".$breakout."
+			)
+		";
+	} else {
+		$limit = "
+			and not exists (
+				select rs.id
+				from round_setting rs
+				where rs.round = round.id
+					and rs.tag = 'use_for_breakout'
+			)
+		";
+	}
+
+	Tab::Round->set_sql( elims => "
+		select round.*
+		from round
+		where round.event = ?
+		and round.type in ('elim', 'final')
+		$limit
+		and not exists (
+			select rs.id
+			from round_setting rs
+			where rs.round = round.id
+				and rs.tag = 'omit_from_bracket'
+		)
+		order by round.name
+	");
+
+	my @rounds = Tab::Round->search_elims($event->id);
+
+	my %results = ();
+	my %entries;
+	my @champs;
+
+	foreach my $result (sort {$a->round->name <=> $b->round->name} $result_set->results() ) {
+
+		my $round = $result->round;
+		next unless $round;
+
+		my $entry = $result->entry;
+		next unless $entry;
+
+		$results{$round->id}{"by_seed"}{$result->rank} = $result;
+		$results{$round->id}{"entry_by_seed"}{$result->rank} = $entry->id;
+		$results{$round->id}{"counter"}++;
+
+		unless ($entries{$entry->id}) {
+			$entries{$entry->id}{"code"} = $entry->code;
+			$entries{$entry->id}{"name"} = $entry->name;
+		}
+
+		push @champs, $entry if $result->rank == 1 and $round->type eq "final";
+
+		unless ($results{$round->id}{"name"}) {
+			$results{$round->id}{"name"} = $round->name;
+			$results{$round->id}{"object"} = $round;
+		}
+	}
+
+	foreach my $round_id (keys %results) {
+
+		# This works out the power of 2 that is nearest above the actual
+		# number, to work out partial eliminations
+
+		my $number = $results{$round_id}{"counter"};
+		my $power = 1;
+
+		while ($power < $number) {
+			$power = $power * 2;
+		}
+
+		$results{$round_id}{"power"} = $power;
+
+		# This works out the ordering of the seeds in that level of the bracket
+		# given the number of seeds we have.
+
+		my @bracket_order = (1);
+		my $step_power = 1;
+		my $step_result;
+
+		while ($step_result < $power) {
+
+			$step_result = 2 ** $step_power;
+			my $step_target = $step_result + 1;
+			$step_power++;
+
+			my $step = 1;
+			my @new_order;
+
+			foreach my $order (@bracket_order) {
+
+				if ($step++ % 2) {
+					push @new_order, $order;
+					push @new_order, $step_target - $order;
+				} else {
+					push @new_order, $step_target - $order;
+					push @new_order, $order;
+				}
+
+			}
+
+			@bracket_order = @new_order;
+		}
+
+		$results{$round_id}{"bracket_order"} = \@bracket_order;
+	}
+
+	my @round_ids = sort {$results{$a}{"name"} <=> $results{$b}{"name"}} keys %results;
+
+</%init>
+
+	<div class="blankfull">
+
+        <div class="full nospace padbottommore">
+
+            <span class="quarter nospace">
+                <h5 class="nospace">
+					<% $result_set->label %>
+                </h5>
+            </span>
+
+            <span class="fivetenths true centeralign nospace semibold bluetext">
+                <h5 class="nospace">
+                    <% $tourn->name %>
+                </h5>
+            </span>
+
+            <span class="quarter nospace semibold bluetext rightalign">
+                <h5 class="nospace">
+                    <% $event->name %>
+                </h5>
+            </span>
+
+        </div>
+
+		<table>
+
+			<tr class="yellowrow">
+
+%				foreach my $round_id (@round_ids) {
+					<th
+						class   = "smaller"
+						colspan = "2"
+						style   = "border-bottom: 10px solid #fcfcfc;"
+					>
+						<% $results{$round_id}{"object"}->realname %> (<% $results{$round_id}{"power"} %>)
+					</th>
+%				}
+
+%				if (@champs) {
+					<th
+						class   = "smaller"
+						colspan = "2"
+						style   = "border-bottom: 10px solid #fcfcfc;"
+					>
+						<% scalar @champs > 1 ? "Co-Champs" : "Champion" %>
+					</th>
+%				}
+
+			</tr>
+
+<%perl>
+
+			my $first_round = shift @round_ids;
+
+			my $count;
+			my %round_count = ();
+
+			if ($first_round) {
+
+				foreach my $order (@{$results{$first_round}{"bracket_order"}}) {
+
+					my $result = $results{$first_round}{"by_seed"}{$order};
+					my $entry_id = $results{$first_round}{"entry_by_seed"}{$order};
+
+					my $entry_code;
+					my $entry_name;
+
+					if ($entry_id) {
+						$entry_code = $entries{$entry_id}{"code"};
+						$entry_name = $entries{$entry_id}{"name"};
+					}
+
+
+</%perl>
+
+					<tr>
+
+						<td
+							class="padno nowrap smallish bracketbox <%
+								$count ? "": "notfirst"
+							%> <%
+								$count % 2 ? "oddseed" : "evenseed"
+							%>
+							"
+						>
+
+							<span class="sixth padless">
+%								if ($result) {
+									<% $order %>.
+%								}
+							</span>
+
+							<span
+								class="fivesixth nospace"
+								title="<% $entry_id ? $entry_name : "" %>"
+							>
+%								if ($entry_id && $ARGS{"public"}) {
+									<a
+										class="white button leftalign marno padless"
+										href="/index/tourn/postings/entry_record.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $entry_id %>"
+									>
+										<% $entry_code %>
+									</a>
+%								} elsif ($entry_id) {
+									<a
+										class="white button leftalign marno padless"
+										href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
+									>
+										<% $entry_code %>
+									</a>
+%								}
+							</span>
+						</td>
+
+%						# These little doohickers form the triangle halves of
+%						# the bracket slope for the next round
+
+%						if ($count % 2) {
+
+							<td class="downslope">
+								<div class="downslope">
+								</div>
+							</td>
+
+%						} else {
+
+							<td class="upslope">
+								<div class="upslope">
+								</div>
+							</td>
+%						}
+
+<%perl>
+
+						# The factor will be how large the next box is relative
+						# to the last.  Each is a power of 2, because octo
+						# boxes are 2x the size of doubles, then quarters are
+						# 2x the size of octos, etc.
+
+						my $factor = 1;
+
+						foreach my $round_id (@round_ids) {
+
+							# Each time we do this go up by a power of 2 to determine the next bracket
+							$factor = $factor * 2;
+							next unless $results{$round_id};
+
+							unless ($count % $factor) {
+
+								$round_count{$round_id}++;
+								my $round_order = shift @{$results{$round_id}{"bracket_order"}};
+								my $entry_id = $results{$round_id}{"entry_by_seed"}{$round_order};
+
+								my $entry_code;
+								my $entry_name;
+
+								if ($entry_id) {
+									$entry_code = $entries{$entry_id}{"code"};
+									$entry_name = $entries{$entry_id}{"name"};
+								}
+</%perl>
+
+								<td
+									rowspan="<% $factor %>"
+									class="bracketbox
+											<% $count ? "" : "notfirst" %>
+											<% $round_count{$round_id} % 2 ? "evenseed" : "oddseed" %>
+										  "
+								>
+%									if ($entry_id && $ARGS{"public"}) {
+										<a
+											class="white button leftalign marno padless"
+											href="/index/tourn/postings/entry_record.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $entry_id %>"
+										>
+											<% $entry_code %>
+										</a>
+%									} elsif ($entry_id) {
+										<a
+											class="white button leftalign marno padless"
+											href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
+										>
+											<% $entry_code %>
+										</a>
+%									}
+								</td>
+
+%								if ($round_count{$round_id} % 2) {
+
+									<td
+										rowspan = "<% $factor %>"
+										class="downslope"
+									>
+										<div class="upslope">
+										</div>
+									</td>
+
+%								} else {
+
+									<td
+										rowspan = "<% $factor %>"
+										class   = "upslope"
+									>
+										<div class="downslope">
+										</div>
+									</td>
+<%perl>
+
+								}
+							}
+						}
+
+						if (@champs && not defined $count) {
+
+							my $champ_factor = $factor * 4;
+</%perl>
+
+							<td
+								rowspan = "<% $champ_factor %>"
+								class   = "bracketchamp"
+							>
+%								foreach my $champ (@champs) {
+%									if ($entry_id && $ARGS{"public"}) {
+										<a
+											class="white button leftalign marno padless semibold bluetext"
+											href="/index/tourn/postings/entry_record.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $entry_id %>"
+										>
+											<% $champ->code %>
+											<% $champ->name %>
+										</a>
+%									} elsif ($entry_id) {
+										<a
+											class="white button leftalign marno padless semibold bluetext"
+											href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
+										>
+											<% $champ->code %>
+											<br />
+											<% $champ->name %>
+										</a>
+<%perl>
+									}
+								}
+   							$m->print("</td>");
+						}
+						$count++;
+					$m->print("</tr>");
+				}
+			}
+</%perl>
+
+		</table>
+	</div>

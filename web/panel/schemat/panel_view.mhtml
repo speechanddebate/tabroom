@@ -50,10 +50,31 @@
 
 	$settings{"flighted"} = $round->flighted;
 
-	my @scores = $m->comp(
-		"/funclib/panel_scores.mas",
-		panel => $panel
-	);
+	my %judge_scores;
+
+	my $score_sth = $dbh->prepare("
+		select judge.id, score.id
+
+		from judge, ballot, score
+		where ballot.panel = ?
+		and ballot.judge = judge.id
+		and ballot.id = score.ballot
+		and score.tag in (
+			'comments', 'point', 'rank', 'refute',
+			'rfd', 'speech', 'categories', 'winloss'
+		)
+		group by judge.id
+	");
+
+	$score_sth->execute($panel->id);
+
+	while (
+		my ($judge_id, $score_id) = $score_sth->fetchrow_array()
+	) {
+		$judge_scores{$judge_id}++;
+	}
+
+	$score_sth->finish;
 
 	my %judge_sites = ();
 
@@ -259,24 +280,6 @@
 	my $room = $panel->room if $panel->room;
 	my $panel_room = $room->id if $room;
 
-	my $last_round;
-	my $prelims_left;
-
-	foreach my $other_round (
-		sort {$a->name <=> $b->name} $event->rounds
-	) {
-
-		$last_round  = $other_round
-			unless $other_round->name >= $round->name;
-
-		next if $other_round->name < $round->name;
-		next if $other_round->type eq "elim";
-		next if $other_round->type eq "final";
-		next if $other_round->type eq "runoff";
-
-		$prelims_left++;
-	}
-
 	my $judge_use_ref = $m->comp(
 		"/funclib/judge_use.mas",
 			round      => $round,
@@ -454,6 +457,7 @@
 			anonymize    => \%anonymize
 	);
 
+	my ($code_school, $code_name) = $m->comp("/funclib/code_style.mas", event => $event);
 
 </%init>
 
@@ -565,15 +569,25 @@
 				|| $round->type eq "runoff"
 			) {
 
-				my @scores = $m->comp("/funclib/panel_scores.mas", panel => $panel);
+				my $winner_sth = $dbh->prepare("
+					select entry.code
+					from entry, ballot, score
+					where ballot.panel = ?
+						and ballot.id = score.ballot
+						and score.tag = 'winloss'
+						and score.value = 1
+						and ballot.entry = entry.id
+				");
 
+				$winner_sth->execute($panel->id);
 				my $winner;
 
-				foreach my $score (@scores) {
-					$winner = $score->ballot->entry
-						if $score->value == 1
-						&& $score->tag eq "ballot";
+				while (
+					my ($winner_code) = $winner_sth->fetchrow_array()
+				) {
+					$winner = $winner_code;
 				}
+
 </%perl>
 
 				<h5 class="centeralign redtext">
@@ -586,7 +600,7 @@
 
 				<div class="full padtopmore padbottommore centeralign bluetext semibold">
 %					if ($winner) {
-						<% $winner->code %> is marked as advancing
+						<% $winner %> is marked as advancing
 %					}
 				</div>
 
@@ -887,17 +901,14 @@
 							}
 						}
 
-
 						my $warn;
 						my $chair_warn;
 						my $rm_chair;
 
-						if (@scores) {
-
-							$warn = "These ballots have scores entered.";
-							$warn .= " If you remove the judge you will also delete those scores.";
+						if ($judge_scores{$judge->id}) {
+							$warn = $judge->first." ".$judge->last." has scores or feedback entered.";
+							$warn .= " If you remove the judge, you will also delete those scores.";
 							$warn .= " Continue?";
-
 						}
 
 						if ($judge->chair
@@ -1201,7 +1212,9 @@
 
 		</div>
 
-		<h5 class="martopmore"><% scalar @entries %> Entries</h5>
+		<h5 class="martopmore">
+			<% scalar @entries %> Entries
+		</h5>
 
 		<table>
 
@@ -1275,7 +1288,7 @@
 			<tr class="<% $entry->dropped ? "lirdrow" : "row" %>">
 
 %				if ($event->type eq "speech") {
-					<td class="smallish">
+					<td class="smallish centeralign">
 						<% $entry->speaks
 							? Lingua::EN::Numbers::Ordinate::ordinate($entry->speaks)
 							: ""
@@ -1300,7 +1313,7 @@
 							|| $round_type eq "runoff"
 							|| $round_type eq "flip"
 						)
-						&& (scalar @scores < 1)
+						&& (scalar (keys %judge_scores) < 1)
 						&& (not defined $aff)
 					) {
 
@@ -1353,34 +1366,40 @@
 				<td class="smallish nospace">
 
 %					if ($blind_mode) {
+
 						<% $anonymize{"entry"}{$entry->id} %>
 
 %					} else {
+
 %						unless ($entry_only) {
 							<a
 								class="white button leftalign"
 								href="/register/entry/edit.mhtml?entry_id=<% $entry->id %>"
 							>
 %						}
-%						if ($event_settings{"code_style"} eq "names"
-%							|| $event_settings{"code_style"} eq "names_lastfirst"
-%						) {
 
-							<% ($entry->dq) ? "DQ -" : "" %>
-							<% ($entry->dropped) ? "DROP -" : "" %>
-							<% $entry->name %>
+%						if ($code_name) {
 
-%						} else {
-							<span class="third marno">
-								<% ($entry->dq) ? "DQ -" : "" %>
-								<% ($entry->dropped) ? "DROP -" : "" %>
+							<span class="threequarters marno">
 								<% $entry->code %>
 							</span>
 
-							<span class="threefifths marno padleft">
+%						} else {
+
+							<span class="quarter marno">
+								<% $entry->code %>
+							</span>
+
+							<span class="half marno">
 								<% $entry->name %>
 							</span>
 %						}
+
+						<span class="quarter semibold redtext">
+							<% ($entry->dq) ? "DQ": "" %>
+							<% ($entry->dropped) ? "DROP" : "" %>
+						</span>
+
 %					}
 
 					</a>
@@ -1395,7 +1414,7 @@
 				<td class="smallish">
 %					unless ($blind_mode) {
 						<% (not defined $settings{"no_school_codes"})
-							? $entry->schoolcode
+							? '<span class="quarter">'.$entry->schoolcode.'</span>'
 							: ""
 						%>
 						<% Tab::short_name($entry->schoolname) %>
