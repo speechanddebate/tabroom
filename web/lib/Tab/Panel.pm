@@ -5,7 +5,7 @@ Tab::Panel->columns(Primary => qw/id/);
 Tab::Panel->columns(Essential => qw/letter round room flight bye bracket started/);
 Tab::Panel->columns(Others => qw/timestamp confirmed publish label
 								room_ext_id g_event invites_sent
-								cat_id score /);
+								cat_id score/);
 Tab::Panel->columns(TEMP => qw/opp pos side entryid judge audit 
 								timeslotid roomname eventname judgenum 
 								panelsize ada speakerorder

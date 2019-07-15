@@ -171,6 +171,10 @@
 						$("#"+data.destroy).remove();
 					}
 
+					if (data.reveal) {
+						$("#"+data.reveal).removeClass("hidden");
+					}
+
 					if (successAction === "destroy") {
 						$("#"+targetId).remove();
 					} else if (successAction === "hide") {

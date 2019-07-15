@@ -1,73 +1,96 @@
 <%args>
+	$target_id
 	$person
-	$panel_id
 </%args>
 <%init>
 
-	my $panel = Tab::Panel->retrieve($panel_id);
-	
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	unless ($target_id) {
+		$m->print('{ "error": true, "message": "No Section ID sent"}');
+		$m->abort();
+	}
+
+	my $panel = Tab::Panel->retrieve($target_id);
+
+	unless ($target_id) {
+		$m->print('{ "error": true, "message": "No Section found with the ID '.$target_id.'"}');
+		$m->abort();
+	}
+
 	Tab::Judge->set_sql( panel_person => "
 		select judge.*
 		from judge, ballot
-		where ballot.panel = ? 
+		where ballot.panel = ?
 		and ballot.judge = judge.id
 		and judge.person = ?
 	");
 
 	my $judge = Tab::Judge->search_panel_person($panel->id, $person->id)->first;
 
-	unless ($judge) { 
-
-		my $msg = "You are not a judge on that section. ";
-		$msg .= " If you think this is in error contact ";
-		$msg .= " the tournament officials";
-
-		$m->comp("abort.mas", message => $msg);
+	unless ($judge) {
+		$m->print('{ "error": true, "message": "You are not listed as a judge in that section"}');
+		$m->abort();
 	}
 
 	my $event = $panel->round->event;
 
-	unless ($event->setting("judge_publish_results")) { 
-		my $err = "This tournament is not using the judge publishing system";
-		$m->redirect("ballot_confirm.mhtml?panel_id=".$panel->id."&judge_id=".$judge->id."&err=$err");
+	unless ($event->setting("judge_publish_results")) {
+		$m->print('{ "error": true, "message": "This event is not set to use judge results publishing"}');
+		$m->abort();
 	}
 
-	if ($panel->ballots( audit => 0 )) { 
-		my $err = "There are still oustanding ballots in this section. ";
-		$err .= " If you think this is in error please contact the tournament officials";
-		$m->redirect("ballot_confirm.mhtml?panel_id=".$panel->id."&judge_id=".$judge->id."&err=$err");
+	Tab::Ballot->set_sql(outstanding => "
+		select ballot.*
+		from ballot, entry
+		where ballot.panel = ?
+		and ballot.entry = entry.id
+		and entry.active = 1
+		and ballot.audit != 1
+	");
+
+	if (Tab::Ballot->search_outstanding($panel->id)) {
+		$m->print('{ "error": true, "message": "There are still unconfirmed ballots in this section"}');
+		$m->abort();
 	}
 
 	$panel->publish(1);
 	$panel->update();
+	$m->comp("/funclib/blast_results.mas", panel  => $panel);
 
-	$m->comp("/funclib/blast_results.mas", 
-		panel  => $panel
-	);
+	Tab::Panel->set_sql( unpublished => "
+		select panel.*
+		from panel
+		where panel.round = ?
+		and panel.publish != 1
+		and panel.bye != 1
+	");
 
-	my $total_panels = scalar($panel->round->panels());
+	# If all the results are published go ahead and publish the whole round
 
-	my $published_panels = scalar(
-		$panel->round->panels(
-			publish => 1,
-			bye     => 0
-		)
-	);
+	my $round = $panel->round;
 
-	if ($total_panels <= $published_panels) { 
-
-		my $round = $panel->round;
-	
-		if ($event->setting("judge_publish_results") eq "all") { 
-			$round->post_results(2);
-		} else { 
-			$round->post_results(1);
+	unless ($round->post_results > 0) {
+		unless (Tab::Panel->search_unpublished($round->id)) {
+			if ($event->setting("judge_publish_results") eq "all") {
+				$round->post_results(2);
+			} else {
+				$round->post_results(1);
+			}
+			$round->update();
 		}
-		$round->update();
 	}
 
 	my $msg = "Panel results have been published";
 
-	$m->redirect("ballot_confirm.mhtml?panel_id=".$panel->id."&judge_id=".$judge->id."&msg=$msg");
+	$m->print('{
+		"error"   : false,
+		"message" : "These results have been published online",
+		"destroy" : "publishme",
+		"reveal"  : "published"
+	}');
+
+	$m->abort();
 
 </%init>
