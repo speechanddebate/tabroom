@@ -121,33 +121,10 @@ update (result, result_value)
 		and result.place is null
 		and result_value.tag = 'Champion';
 
-set SESSION sql_mode="STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION";;
+set SESSION sql_mode = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION';
 
-delete result_value.*
-	from result_value, result_key
-		where result_value.result_key = result_key.id
-		and result_key.tag = 'Champion';
-
-delete from result_key where tag = 'Champion';
-
-delete result_value.*
-	from result_value, result_key
-		where result_value.result_key = result_key.id
-		and result_key.tag = 'Place';
-
-delete from result_key where tag = 'Place';
-
-delete result_value.*
-	from result_value, result_key
-		where result_value.result_key = result_key.id
-		and result_key.tag = 'Order';
-
-delete from result_key where tag = 'Order';
-
-delete result_value.*
-	from result_value, result_key
-		where result_value.result_key = result_key.id
-		and result_key.tag = 'Seed';
-
-delete from result_key where tag = 'Seed';
+delete from result_value where result_value.tag = 'Champion';
+delete from result_value where result_value.tag = 'Place';
+delete from result_value where result_value.tag = 'Order';
+delete from result_value where result_value.tag = 'Seed';
 
