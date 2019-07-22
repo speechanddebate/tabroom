@@ -62,6 +62,7 @@
 	#erase any current round
 	erase_current_round($round);
 
+
 	my $side_locked;
 	my $side_lock_against;
 
@@ -88,6 +89,84 @@
 
 	my %entry_by_id = %{$entry_by_id_hash_ref};
 	my %precluded = %{$precluded_hash_ref};
+
+	my %autobye;
+
+	if ($event_settings{"autobye_nojudge"}) {
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $bye_sth = $dbh->prepare('
+			select entry.id, round.id
+			from entry, round, panel, ballot
+			where entry.id = ballot.entry
+				and ballot.panel = panel.id
+				and panel.round = round.id
+				and (ballot.bye = 1 or panel.bye = 1)
+				and entry.event = ?
+		');
+
+		$bye_sth->execute($event->id);
+
+		my %entry_info;
+
+		while (
+			my (
+				$entry_id, $round_id
+			) = $bye_sth->fetchrow_array()
+		) {
+			$entry_info{$entry_id}{"bye_count"}++;
+		}
+
+		my $available_judges = $m->comp(
+			"/funclib/round_available_judges.mas",
+			round => $round
+		);
+
+		my $num_flights = $round->flighted;
+		$num_flights = 1 unless $num_flights;
+
+		my $num_judges = $round->setting('num_judges');
+		$num_judges = 1 unless $num_judges;
+
+		$available_judges = $available_judges * $num_flights;
+
+		# Sort entries so those with fewer byes go to the front
+		my @entries = shuffle (keys %entry_by_id);
+		my $num_debates = POSIX::floor( (scalar @entries) / (2 * $num_judges));
+
+		@entries = sort {
+			$entry_info{$a}{"bye_count"} <=> $entry_info{$b}{"bye_count"}
+			|| $entry_by_id{$b}{'bracket'} <=> $entry_by_id{$a}{"bracket"}
+		} @entries;
+
+		while ($num_debates > $available_judges) {
+			my $excluded = shift @entries;
+			$autobye{$excluded}++;
+			delete $entry_by_id{$excluded};
+			$num_debates = POSIX::floor( (scalar @entries) / 2);
+		}
+
+		foreach my $bye (keys %autobye) {
+
+			my $panel = Tab::Panel->create({
+				round   => $round->id,
+				bye     => 1,
+				letter  => $num_debates++,
+				flight  => 1,
+				bracket => 0
+			});
+
+			Tab::Ballot->create({
+				panel  => $panel->id,
+				judge  => 0,
+				entry  => $bye,
+				side   => 1
+			});
+
+		}
+	}
+
 	my $entry_count = keys %entry_by_id;
 
 	unless ($entry_count > 0) {
@@ -104,7 +183,7 @@
 		if ($side_lock_against) {
 
 			Tab::Ballot->set_sql( "round_side_lock" => "
-				select distinct ballot.*
+				select distinct ballot.*, ballot.entry as entryid
 				from ballot, panel
 				where panel.round = ?
 				and ballot.panel = panel.id
@@ -112,26 +191,25 @@
 			");
 
 			foreach my $ballot (Tab::Ballot->search_round_side_lock($side_lock_against)) {
-				push @{$entry_ballots{$ballot->entry->id}}, $ballot;
+				push @{$entry_ballots{$ballot->entryid}}, $ballot;
 			}
 
 		} else {
 
 			Tab::Ballot->set_sql( "tourn_side_lock" => "
-				select distinct ballot.*
+				select distinct ballot.*, ballot.entry as entryid
 				from ballot, panel, round
 				where round.name < ?
-				and round.event = ?
-				and panel.round = round.id
-				and ballot.panel = panel.id
-				and ballot.entry > 0
+					and round.event = ?
+					and panel.round = round.id
+					and ballot.panel = panel.id
+					and ballot.entry > 0
 				order by ballot.entry
 			");
 
 			foreach my $ballot (Tab::Ballot->search_tourn_side_lock($round->name, $event->id)) {
-				push @{$entry_ballots{$ballot->entry->id}}, $ballot;
+				push @{$entry_ballots{$ballot->entryid}}, $ballot;
 			}
-
 		}
 
 		my $aff;
@@ -177,9 +255,9 @@
 					foreach my $ballot (@{$entry_ballots{$entry_id}}) {
 						if ( $ballot->bye == 1 or $ballot->panel->bye == 1) {
 							$entry_by_id{$entry_id}{'sidedue'} = $side_needed;
-							$error_log .= "Switching side due for ".$entry_id." because
-								sides need to be evened and they had a bye\n\n" ;
-							$fixmarker=1;
+							$error_log .= "Switching side due for ".$entry_id." because ";
+							$error_log .= "sides need to be evened and they had a bye\n\n" ;
+							$fixmarker = 1;
 							last;
 						}
 					}
@@ -197,7 +275,7 @@
 	# should just get treated like another team that's always last in the
 	# bracket and is only precluded from teams it's hit before
 
-	my $top_ofer_seed=999;
+	my $top_ofer_seed = 999;
 
 	if ($round->type eq "highlow") {
 
@@ -207,15 +285,17 @@
 		}
 	}
 
-	if ( int($entry_count/2) != ($entry_count/2) ) {
+	if ($entry_count % 2) {
 
-		$entry_by_id{-1}{'code'} = "Bye";
-		$entry_by_id{-1}{'wins'} = 0;
-		$entry_by_id{-1}{'bracket'} = 0;
-		$entry_by_id{-1}{'seed'} = $entry_count + 1;
+		$entry_by_id{-1}{'code'}        = "Bye";
+		$entry_by_id{-1}{'wins'}        = 0;
+		$entry_by_id{-1}{'bracket'}     = 0;
+		$entry_by_id{-1}{'seed'}        = $entry_count + 1;
 		$entry_by_id{-1}{'seed_nowins'} = $entry_count + 1;
 
-		#These two prevent the bye from being pulled up unless all else is bad bad bad.
+		# These two prevent the bye from being pulled up unless all else is bad
+		# bad bad.
+
 		$entry_by_id{-1}{'oppseed'} = 1;
 		$entry_by_id{-1}{'opp_wins'} = $entry_count + 1;
 
@@ -247,11 +327,6 @@
 			$error_log .= " Now there now are this many teams including the bye:".(keys %entry_by_id)."<br>";
 		}
 	}
-
-#	print "Here's what you're working with:\n\n" ;
-#	foreach my $key ( sort { $entry_by_id{$a}->{'seed'} <=> $entry_by_id{$b}->{'seed'} } keys(%entry_by_id) ) {
-#		print $entry_by_id{$key}{'seed'}." ".$entry_by_id{$key}{'code'}." wins:".$entry_by_id{$key}{'wins'}." due:".$entry_by_id{$key}{'sidedue'}."\n\n" ;
-#	}
 
 	# FIGURE OUT WHETHER NORMAL POWER MATCH IS POSSIBLE
 
@@ -285,10 +360,8 @@
 
 	#if it's zero bail to disaster mode
 	if ($min_possible_opponents == 0) {
-
 		$m->print(" This can't be paired by normal means; one team has no possible opponents.");
 		$m->print(" Try pairing by hand; use the back button on your browser.\n\n");
-
 		$m->abort;
 	}
 
@@ -934,13 +1007,15 @@
 
 		# identifies which side you need to pull up; zero means either is OK
 
-		my ($side,
-		 $pullup_method,
-		 $pullup_repeat,
-		 $pullup_protect,
-		 $entry_by_id_ref,
-		 $bracket_ref,
-		 $precluded_ref) = @_;
+		my (
+			$side,
+			$pullup_method,
+			$pullup_repeat,
+			$pullup_protect,
+			$entry_by_id_ref,
+			$bracket_ref,
+			$precluded_ref
+		) = @_;
 
 		my %entry_by_id = %{$entry_by_id_ref};
 
@@ -1583,12 +1658,15 @@
 
 		my $returnvalue = 0;
 
-		if (${$precluded_ref}{$team1}{$team2} == 1) { $returnvalue = 1; }
+		if (${$precluded_ref}{$team1}{$team2} == 1) {
+			$returnvalue = 1;
+		}
 
-		if (${$precluded_ref}{$team2}{$team1} == 1) { $returnvalue = 1; }
+		if (${$precluded_ref}{$team2}{$team1} == 1) {
+			$returnvalue = 1;
+		}
 
 		return $returnvalue;
-
 	}
 
 	sub erase_current_round {
