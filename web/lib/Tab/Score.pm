@@ -18,7 +18,6 @@ sub text {
 	if ($input) { 
 		$self->content(compress($input));
 		$self->update();
-	
 	} else { 
 		return uncompress($self->content);
 	}
