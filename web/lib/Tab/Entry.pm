@@ -8,7 +8,7 @@ Tab::Entry->columns(Essential => qw/code name active dropped waitlist
 Tab::Entry->columns(Others => qw/registered_by ada tba created_at timestamp/);
 
 Tab::Entry->columns(TEMP => qw/panelid speaks side ballot othername schname regname 
-								regcode region pullup bracketseed won lost schoolid 
+								regcode region pullup won lost schoolid 
 								categoryid eventid
 								rejected_by rejected_at accepted_by accepted_at/);
 
