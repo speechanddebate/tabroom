@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Login->table('login');
 Tab::Login->columns(Primary => qw/id/);
 Tab::Login->columns(Essential => qw/username password sha512 person accesses last_access/);
-Tab::Login->columns(Others => qw/pass_changekey pass_timestamp pass_change_expires source timestamp ualt_id nsda_login_id/);
+Tab::Login->columns(Others => qw/pass_changekey pass_timestamp pass_change_expires timestamp/);
 
 Tab::Login->has_a(person => 'Tab::Person');
 
