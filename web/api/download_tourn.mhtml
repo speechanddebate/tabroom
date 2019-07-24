@@ -211,6 +211,8 @@
 
 		$pref_type{$event->id} = $event->category->setting("prefs");
 
+		delete $pref_type{$event->id} if $pref_type{$event->id} eq "none";
+
 		my $xml_event = {
 			ID          => $event->id,
 			EVENTNAME   => $event->name,
@@ -380,23 +382,6 @@
 	  	$number++;
 	}
 
-	my %rating_by_id = ();
-
-	foreach  my $rt (
-		$m->comp(
-			"/funclib/tourn_rating_tiers.mas",
-			tourn => $tourn
-		)
-	) {
-
-		if ($rt->name =~ m/\D/) {
-			$rating_by_id{$rt->id} = $alpha_nums{$rt->name}
-		} else {
-			$rating_by_id{$rt->id} = $rt->name
-				unless $rating_by_id{$rt->id};
-		}
-	}
-
 	Tab::JudgeSetting->set_sql(cat_id => "
 		select distinct judge_setting.*
 		from judge_setting, judge, category
@@ -425,60 +410,100 @@
 			by_entry => 'screwyoudoubleentry'
 	);
 
-
 	my %judge_strikes = ();
 	my %entry_strikes = ();
 	my %school_strikes = ();
 
-	foreach my $strike ($tourn->strikes) {
+	my $dbh = Tab::DBI->db_Main();
 
-		$judge_strikes{$strike->judge->id."-ev-".$strike->event->id} = $strike
-			if $strike->judge && $strike->event;
+	my $sth = $dbh->prepare("
+		select strike.id, strike.judge, strike.start, strike.end, strike.school, strike.entry, strike.event
+		from strike, judge
+		where strike.judge = judge.id
+		and judge.category = ?
+	");
 
-		if ($strike->type eq "time") {
-			foreach my $timeslot (@timeslots) {
+	$sth->execute($category->id);
 
-				my $start = $starts_by_id{$timeslot->id};
-				my $end = $ends_by_id{$timeslot->id};
+	my %cache;
 
-				next if $strike->start->set_time_zone($tz) > $end;
-				next if $strike->end->set_time_zone($tz) < $start;
+	while (
+		my (
+			$strike_id, $strike_judge, $strike_start, $strike_end, $strike_school, $strike_entry, $strike_event
+		) = $sth->fetchrow_array()
+	) {
 
-				$judge_strikes{$strike->judge->id."-ts-".$timeslot->id} = $strike;
+		if ($strike_entry) {
 
+			push @{$entry_strikes{$strike_entry}}, $strike_judge;
+
+		} elsif ($strike_school) {
+
+			push @{$school_strikes{$strike_school}}, $strike_judge;
+
+		} elsif ($strike_event) {
+
+			$judge_strikes{$strike_judge}{event}{$strike_event}++;
+
+		} elsif ($strike_start && $strike_end) {
+
+			unless ($cache{$strike_start}) {
+				$cache{$strike_start} = eval {
+					return DateTime::Format::MySQL->parse_datetime($strike_start);
+				};
 			}
-		}
+			unless ($cache{$strike_end}) {
+				$cache{$strike_end} = eval {
+					return DateTime::Format::MySQL->parse_datetime($strike_end);
+				};
+			}
 
-		if ($strike->entry) {
-			next unless $strike->judge;
-			push @{$entry_strikes{$strike->entry->id}}, $strike;
-		}
+			my $sstart = $cache{$strike_start};
+			my $send = $cache{$strike_end};
 
-		if ($strike->school) {
-			next unless $strike->judge;
-			push @{$school_strikes{$strike->school->id}}, $strike->judge;
+			if ($sstart && $send) {
+
+				foreach my $timeslot (@timeslots) {
+
+					if ($sstart <= $ends_by_id{$timeslot->id}
+						&& $send >= $starts_by_id{$timeslot->id}
+					) {
+						$judge_strikes{$strike_judge}{timeslot}{$timeslot->id}++;
+					}
+				}
+			}
+
 		}
 	}
 
 	my $prefs;
-
 	my %school_entries = ();
-
 	my %entry_ratings = ();
+
+	my $rating_sth = $dbh->prepare("
+		select rating.id, rating.entry, rating.judge, rating.ordinal, rating.percentile,
+			rating_tier.id, rating_tier.name
+		from (rating, entry)
+		left join rating_tier on rating_tier.id = rating.rating_tier
+		where rating.entry = entry.id
+		and entry.event = ?
+	");
 
 	foreach my $event (@events) {
 
-		my @ratings = $m->comp(
-			"/funclib/event_ratings.mas",
-			event => $event
-		);
+		$rating_sth->execute($event->id);
 
-		foreach my $rating (@ratings) {
-
-			push @{$entry_ratings{$rating->entry->id}}, $rating
-				if $rating->entry && $rating->entry->id;
+		while (
+			my (
+				$rating_id, $rating_entry, $rating_judge, $rating_ordinal,
+				$rating_percentile, $rating_tier_id, $rating_tier_name
+			) = $rating_sth->fetchrow_array()
+		) {
+			$entry_ratings{$rating_entry}{$rating_judge}{"ordinal"} = $rating_ordinal;
+			$entry_ratings{$rating_entry}{$rating_judge}{"percentile"} = $rating_percentile;
+			$entry_ratings{$rating_entry}{$rating_judge}{"tier_name"} = $rating_tier_name;
+			$entry_ratings{$rating_entry}{$rating_judge}{"tier_id"} = $rating_tier_id;
 		}
-
 	}
 
 	ENTRY:
@@ -547,18 +572,15 @@
 
 			if ($entry_strikes{$entry->id}) {
 
-				foreach my $strike (@{$entry_strikes{$entry->id}}) {
+				foreach my $judge (@{$entry_strikes{$entry->id}}) {
 
-					next unless $strike->judge > 0;
-					next unless $strike->judge->category->id == $category->id;
-
-					$used_judge{$strike->judge->id}++;
-					next if $rated_already{$strike->judge->id."-".$entry->id}++;
+					$used_judge{$judge}++;
+					next if $rated_already{$judge}{$entry->id}++;
 
 					my $xml_rating = {
-						ID     => $strike->id,
+						ID     => $entry->id.$judge,
 						TEAM   => $entry->id,
-						JUDGE  => $strike->judge->id,
+						JUDGE  => $judge,
 						RATING => "999",
 						ORDPCT => "99.99"
 					};
@@ -572,68 +594,48 @@
 
 				foreach my $judge (@{$school_strikes{$entry->school->id}}) {
 
-					next unless $judge > 0;
-					next unless $judge->category->id == $category->id;
-
-					$used_judge{$judge->id}++;
-					next if $rated_already{$judge->id."-".$entry->id}++;
+					$used_judge{$judge}++;
+					next if $rated_already{$judge}{$entry->id}++;
 
 					my $xml_rating = {
-						ID     => $entry->id.$judge->id,
+						ID     => $entry->school->id.$judge,
 						TEAM   => $entry->id,
-						JUDGE  => $judge->id,
+						JUDGE  => $judge,
 						RATING => "999",
 						ORDPCT => "99.99"
 					};
 
 					push (@{$xml_ratings}, $xml_rating);
-
 				}
 			}
 
 			my $event = $entry->event;
+			my $entry_id = $entry->id;
 
-			if ($entry_ratings{$entry->id}) {
+			if ($pref_type{$event->id} && $entry_ratings{$entry_id}) {
 
-				foreach my $rating (@{$entry_ratings{$entry->id}}) {
+				foreach my $rating_judge (keys %{$entry_ratings{$entry_id}}) {
 
-					next ENTRY unless $pref_type{$event->id} eq "ordinals"
-						|| $pref_type{$event->id} eq "tiered"
-						|| $pref_type{$event->id} eq "caps"
-						|| $pref_type{$event->id} eq "tiered_round"
-						|| $pref_type{$event->id} eq "ndt";
+					next if $rated_already{$rating_judge}{$entry_id}++;
+					next if $used_judge{$rating_judge};
 
-					next unless $rating->judge;
-					next if $used_judge{$rating->judge->id};
+					my $pref;
+					my $percentile;
 
-					my $pref = 0;
-
-					$pref = $rating->ordinal
-						if $pref_type{$event->id} eq "ordinals";
-
-					$pref = $rating_by_id{$rating->rating_tier->id}
-						if $pref_type{$event->id} eq "tiered"
-						|| $pref_type{$event->id} eq "caps"
-						|| $pref_type{$event->id} eq "tiered_round"
-						|| $pref_type{$event->id} eq "ndt";
+					if ($entry_ratings{$entry_id}{$rating_judge}{"ordinal"}) {
+						$pref = $entry_ratings{$entry_id}{$rating_judge}{"ordinal"};
+						$percentile = $entry_ratings{$entry_id}{$rating_judge}{"percentile"};
+					} else {
+						$pref = $entry_ratings{$entry_id}{$rating_judge}{"tier_name"};
+						$percentile = 0;
+					}
 
 					next unless $pref;
 
-					my $percentile = $rating->percentile;
-					$percentile = 1 unless $percentile;
-
-					my $judge_id = $rating->judge->id
-						if $rating->judge->id;
-
-					$judge_id = $judge_id_translator{$judge_id}
-						if $judge_id_translator{$judge_id};
-
-					next if $rated_already{$judge_id."-".$entry->id}++;
-
 					my $xml_rating = {
-						ID     => $rating->id,
-						TEAM   => $entry->id,
-						JUDGE  => $judge_id,
+						ID     => $rating_judge.$entry_id,
+						TEAM   => $entry_id,
+						JUDGE  => $rating_judge,
 						RATING => $pref,
 						ORDPCT => $percentile
 					};
@@ -704,7 +706,7 @@
 
 		foreach my $event (@events) {
 
-			if ($judge_strikes{$judge->id."-ev-".$event->id}) {
+			if ($judge_strikes{$judge->id}{event}{$event->id}) {
 				$xml_judge->{"Event".$event->id} = "false";
 			} else {
 				$xml_judge->{"Event".$event->id} = "true";
@@ -713,13 +715,11 @@
 		}
 
 		foreach my $timeslot (@timeslots) {
-
-			if ($judge_strikes{$judge->id."-ts-".$timeslot->id}) {
+			if ($judge_strikes{$judge->id}{timeslot}{$timeslot->id}) {
 				$xml_judge->{"Timeslot".$timeslot->id} = "false";
 			} else {
 				$xml_judge->{"Timeslot".$timeslot->id} = "true";
 			}
-
 		}
 
 		push (@{$xml_judges}, $xml_judge);
