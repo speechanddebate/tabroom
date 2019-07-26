@@ -4,46 +4,31 @@
 	$tourn_settings
 	$person
 	$from_id       => undef
+	$into_id       => undef
 	$event_id      => undef
-	$preset_id     => undef
 	$only_category => undef
 	$breakout      => undef
 </%args>
 <%init>
 
 	my $event;
-	my $round;
-	my $preset;
+	my $from;
+	my $into;
 
 	$event = Tab::Event->retrieve($event_id) if $event_id;
-	$round = Tab::Round->retrieve($from_id)  if $from_id;
-
-	$preset = Tab::Round->retrieve($preset_id) if $preset_id;
+	$from = Tab::Round->retrieve($from_id)  if $from_id;
+	$into = Tab::Round->retrieve($into_id) if $into_id;
 
 	unless ($event) {
-		$event = $preset->event if $preset;
-		$event = $round->event if $round;
+		$event = $into->event if $into;
+		$event = $from->event if $from;
 	}
 
-	$breakout = $preset->setting("use_for_breakout") if $preset;
+	$breakout = $into->setting("use_for_breakout") if $into;
 	undef $breakout if $breakout eq "nomas";
 	my $breakout_label = $event->setting("breakout_".$breakout."_label") if $breakout;
 
-	unless ($round) {
-
-		my @done_rounds = $m->comp(
-			"/funclib/event_rounds.mas",
-			event    => $event,
-			done     => "yes",
-			breakout => $breakout
-		);
-
-		$round = $done_rounds[0]
-			if @done_rounds
-			&& (not defined $round);
-	}
-
-	unless ($preset) {
+	unless ($into) {
 
 		my @empties_rounds = $m->comp(
 			"/funclib/event_rounds.mas",
@@ -52,17 +37,37 @@
 			empties  => "yes"
 		);
 
-		$preset = shift @empties_rounds if @empties_rounds;
+		$into = shift @empties_rounds if @empties_rounds;
 	}
 
-	if ($preset && $preset->setting("seed_round")) {
-		$round = Tab::Round->retrieve($preset->setting("seed_round"));
+	if ($into && $into->setting("seed_round")) {
+		$from = Tab::Round->retrieve($into->setting("seed_round"));
+	}
+
+	if ($into && (not defined $from)) {
+		$from = $event->rounds( name => ($into->name - 1))->first;
+	}
+
+	unless ($from) {
+
+		my @done_rounds = $m->comp(
+			"/funclib/event_rounds.mas",
+			event    => $event,
+			done     => "yes",
+			breakout => $breakout
+		);
+
+		foreach my $dr (@done_rounds) {
+			next if $into && $dr->name >= $into->name;
+			$from = $dr unless $from;
+			$from = $dr if $dr->name > $from->name;
+		}
 	}
 
 	my %entry_ballots = $m->comp(
 		"/funclib/round_ballot_strings.mas",
-		round => $round
-	) if $round;
+		round => $from
+	) if $from;
 
 	my @ineligibles = $m->comp(
 		"/funclib/event_entry_settings.mas",
@@ -83,208 +88,484 @@
 
 <%perl>
 
-		if ($round) {
+		if ($from) {
 
 			my @results = $m->comp(
 				"/tabbing/results/order_entries.mas",
-					round    => $round,
+					round    => $from,
 					breakout => $breakout
 			);
 
 			my $results_ref = pop @results if @results;
 
 			my $equal_elims++
-				if $round->tiebreak_set->setting('equal_elims')
-				&& $round->type eq "elim";
+				if $from->tiebreak_set->setting('equal_elims')
+				&& $from->type eq "elim";
 
 			my $round_robin++
 		   		if $event->setting('round_robin')
-				&& $round->type ne "elim"
-				&& $round->type ne "final"
-				&& $round->type ne "runoff";
+				&& $from->type ne "elim"
+				&& $from->type ne "final"
+				&& $from->type ne "runoff";
+
+
+			if ($from_id && $event->type eq "debate" || $event->type eq "wsdc") {
+
+				Tab::Panel->set_sql( unscored_byes =>  "
+					select distinct panel.*
+					from panel,ballot b1, ballot b2
+					where panel.bye = 1
+					and panel.round = ?
+					and panel.id = b1.panel
+					and panel.id = b2.panel
+					and b2.entry != b1.entry
+					and b1.bye = 0
+					and b1.forfeit = 0
+					and b2.bye = 0
+					and b2.forfeit = 0
+					and not exists
+					(	select score.* from score, ballot
+						where score.ballot = ballot.id
+							and ballot.panel = panel.id
+							and score.tag    = 'winloss'
+					)
+				");
+
+				my @undone_byes = Tab::Panel->search_unscored_byes($from_id);
+
+				if (@undone_byes) {
+					my $err = " You have coachovers or byes without a winner marked.";
+					$err .= " Enter their results by clicking the BYE on the rounds in question ";
+					$m->redirect("/panel/schemat/show.mhtml?from_id=".$from_id."&err=".$err);
+				}
+
+			}
+
+			my $results_count;
+
+			if (
+				$event->type eq "debate"
+				&& $from->type eq "elim"
+			) {
 
 </%perl>
 
-            <div>
+				<div class="full nospace centeralign">
 
-                <span class="pagehalf">
-					<h4>Break from <% $round->realname %> of <% $event->abbr %></h4>
-                </span>
+					<h4>Advancing from <% $from->realname %> of <% $event->abbr %></h4>
+<%perl>
 
-                <span class="third rightalign smallish">
-					Hover mouse over codes to see scores
-                </span>
+					my %winners;
+					my %losers;
+					my %out;
 
-                <span
-					id    = "breaks_buttonarea"
-					class = "sixth rightalign"
-				>
-                </span>
+					my $dbh = Tab::DBI->db_Main();
 
-            </div>
+					my $sth = $dbh->prepare("
+						select entry.id, panel.bracket
+						from entry, ballot, panel
+						where entry.id = ballot.entry
+						and ballot.panel = panel.id
+						and panel.round = ?
+					");
+
+					$sth->execute($from->id);
+
+					while(
+						my ($entry_id, $panel_bracket) = $sth->fetchrow_array()
+					) {
+						unless ($panel_bracket) {
+							$m->comp("/funclib/abort.mas",
+								message => "Your elim panels are horked.  There are no bracket numbers listed for each section
+											so Tabroom cannot advance to the next debate."
+							);
+						}
+
+						$results_ref->{bracket}{$entry_id} = $panel_bracket;
+					}
+
+					my $result_sth = $dbh->prepare("
+						select
+							panel.id, ballot.entry, ballot.side, score.value
+							from (ballot, panel)
+								left join score on ballot.id = score.ballot and score.tag = 'winloss'
+							where panel.round = ?
+								and panel.id = ballot.panel
+								and ballot.id = score.ballot
+								and score.tag = 'winloss'
+					");
+
+					my $aff_label = $event->setting("aff_label");
+					my $neg_label = $event->setting("neg_label");
+
+					$result_sth->execute($from->id);
+
+					my %panels;
+
+					while (
+						my ($panel_id, $entry_id, $side, $win) = $result_sth->fetchrow_array()
+					) {
+						$panels{panel_total}{$panel_id}++ if $win == 1;
+						$panels{by_panel}{$panel_id}{$entry_id} += $win;
+						$panels{by_entry}{$entry_id}{panel} = $panel_id;
+						$panels{by_entry}{$entry_id}{side}  = $side;
+					}
+
+					my $pads;
+
+					if ($event->setting("double_elimination")) {
+
+						foreach my $entry_id (sort keys %{$results_ref->{"tbs"}}) {
+
+							# I advance to the winners bracket if I have no losses
+							if ($results_ref->{tbs}{$entry_id}{0} == 0) {
+								$winners{$results_ref->{bracket}{$entry_id}}{id} = $entry_id;
+								$winners{$results_ref->{bracket}{$entry_id}}{code} = $results_ref->{code}{$entry_id};
+							# I advance to the losers bracket if I have 1 loss
+							} elsif ($results_ref->{tbs}{$entry_id}{0} == 1) {
+								$losers{$results_ref->{bracket}{$entry_id}}{code} = $results_ref->{code}{$entry_id};
+								$losers{$results_ref->{bracket}{$entry_id}}{id} = $entry_id;
+							} else {
+							# YOU ARE THE WEAKEST LINK.  GOODBYE.
+								$out{$results_ref->{bracket}{$entry_id}}{code} = $results_ref->{code}{$entry_id};
+								$out{$results_ref->{bracket}{$entry_id}}{id} = $entry_id;
+							}
+
+						}
+
+					} else {
+
+						foreach my $entry_id (sort keys %{$results_ref->{"tbs"}}) {
+
+							# I advance if I won the last round
+
+							if ($results_ref->{tbs}{$entry_id}{1} == 1) {
+								$winners{$results_ref->{bracket}{$entry_id}}{id} = $entry_id;
+								$winners{$results_ref->{bracket}{$entry_id}}{code} = $results_ref->{code}{$entry_id};
+							} else {
+
+								# YOU ARE THE WEAKEST LINK.  GOODBYE.
+								if ($results_ref->{bracket}{$entry_id}) {
+									$out{$results_ref->{bracket}{$entry_id}}{code} = $results_ref->{code}{$entry_id};
+									$out{$results_ref->{bracket}{$entry_id}}{id} = $entry_id;
+								}
+							}
+						}
+
+						$pads = scalar(keys %winners) - scalar(keys %out);
+					}
+
+					my $seed_correction = (scalar(keys %winners)) * 2;
+
+					$results_count = scalar(keys %out) + scalar(keys %losers) + scalar (keys %winners);
+
+</%perl>
+
+%					if (%winners) {
+
+						<span class="third top leftalign">
+
+							<h5 class="bluetext semibold"><% scalar keys %winners %> Advancing</h5>
+
+<%perl>
+							foreach my $seed (sort {$a <=> $b} keys %winners) {
+
+								my $entry_id = $winners{$seed}{id};
+								my $panel_id = $panels{by_entry}{$entry_id}{panel};
+								my $side = $panels{by_entry}{$entry_id}{side};
+</%perl>
+								<div class="nospace padvertless ltbordertop ltborderbottom">
+									<span class="fifth semibold bluetext">
+										<% $seed %>.
+									</span>
+									<span class="threefifths nospace">
+										<% $winners{$seed}{code} %>
+									</span>
+									<span class="fifth semibold bluetext">
+										<% $side == 1 ? $aff_label : $neg_label %>
+									</span>
+								</div>
+%							}
+
+						</span>
+%					}
+
+%					if (%losers) {
+
+						<span class="third top marleft leftalign">
+
+							<h5 class="greentext semibold">1-loss Bracket</h5>
+<%perl>
+							foreach my $seed (sort {$b <=> $a} keys %losers) {
+
+								my $actual;
+
+								if ($seed < $seed_correction) {
+									$actual = $seed_correction - $seed;
+								} else {
+									$actual = $seed;
+								}
+</%perl>
+								<div class="nospace padvertless ltbordertop ltborderbottom">
+									<span class="fifth semibold bluetext">
+										<% $actual %>.
+									</span>
+
+									<span class="threefifths">
+										<% $losers{$seed}{code} %>
+									</span>
+
+									<span class="fifth semibold bluetext">
+										Seed <% $actual %>.
+									</span>
+								</div>
+%							}
+
+						</span>
+%					}
+
+%					if (%out) {
+
+						<span class="third top marleftmore leftalign">
+
+							<h5 class="redtext semibold"><% scalar keys %out %> Eliminated</h5>
+
+%							if ($pads) {
+%								foreach (1 .. $pads) {
+									<div class="nospace padvertless ltbordertop ltborderbottom">
+										<span class="threequarters italic graytext">
+											Bye
+										</span>
+									</div>
+<%perl>
+
+								}
+							}
+
+							$seed_correction++;
+
+							foreach my $seed (sort {$a <=> $b} keys %out) {
+
+								my $entry_id = $out{$seed}{id};
+								my $panel_id = $panels{by_entry}{$entry_id}{panel};
+								my $side = $panels{by_entry}{$entry_id}{side};
+
+								my $record = ($panels{panel_total}{$panel_id} - $panels{by_panel}{$panel_id}{$entry_id})."-".
+									$panels{by_panel}{$panel_id}{$entry_id};
+
+</%perl>
+								<div class="nospace padvertless ltbordertop ltborderbottom">
+
+									<span class="threefifths nospace">
+										<% $out{$seed}{code} %>
+									</span>
+
+									<span class="fifth semibold centeralign bluetext">
+										<% $side == 1 ? $aff_label : $neg_label %>
+									</span>
+
+									<span class="fifth semibold centeralign">
+										<% $record %>
+									</span>
+
+								</div>
+%							}
+
+						</span>
+%					}
+
+				</div>
+
+%			} else {
+
+				<div>
+
+					<span class="pagehalf">
+						<h4>Break from <% $from->realname %> of <% $event->abbr %></h4>
+					</span>
+
+					<span class="third rightalign smallish">
+						Hover mouse over codes to see scores
+					</span>
+
+					<span
+						id    = "breaks_buttonarea"
+						class = "sixth rightalign"
+					>
+					</span>
+
+				</div>
 
 <%perl>
 
-			if (
-				$tourn_settings->{"nsda_district"}
-				&& $round
-				&& $round->type eq "prelim"
-			) {
+				if (
+					$tourn_settings->{"nsda_district"}
+					&& $from
+					&& $from->type eq "prelim"
+				) {
 
-				$advance_target = Math::Round::nearest(1, (scalar($event->entries(active => 1))) * .25);
+					$advance_target = Math::Round::nearest(1, (scalar($event->entries(active => 1))) * .25);
 </%perl>
 
-				<div class="full nospace semibold bluetext marbottom">
-					<span class="half centeralign">
-						<% scalar($event->entries(active => 1)) %> active entries
-					</span>
+					<div class="full nospace semibold bluetext marbottom">
+						<span class="half centeralign">
+							<% scalar($event->entries(active => 1)) %> active entries
+						</span>
 
-					<span class="half centeralign">
-						Target to advance: <% $advance_target %>
-					</span>
+						<span class="half centeralign">
+							Target to advance: <% $advance_target %>
+						</span>
+					</div>
+%				}
+
+				<div class="fullnoscroll">
+
+				<table id="breaks">
+
+					<thead>
+
+						<tr class="yellowrow">
+
+							<th class="smallish">
+								#
+							</th>
+
+							<th class="smallish">
+								Code
+							</th>
+
+%	                       if ($equal_elims) {
+								<th class="smaller" title="Rank within room">
+									SectRk
+								</th>
+								<th class="smaller" title="Room/section">
+									Sect
+								</th>
+%	                       }  elsif ($round_robin) {
+								<th class="smaller" title="Rank within Pod">
+									PodRk
+								</th>
+								<th class="smaller" title="Pod">
+									Pod
+								</th>
+%	                       }
+
+%							foreach my $key (sort {$a <=> $b} keys %{$results_ref->{"tier_description"}}) {
+								<th
+									class="smallish"
+									title="<% ${$results_ref}{"tier_long_description"}{$key} %>"
+								>
+									<% ${$results_ref}{"tier_description"}{$key} %>
+								</th>
+%							}
+
+							<th>
+							</th>
+
+						</tr>
+
+					</thead>
+
+					<tbody>
+
+<%perl>
+						my $count;
+
+						$results_count = scalar(keys %{$results_ref->{'by_place'}});
+
+						foreach my $key (sort {$a <=> $b} keys %{$results_ref->{'by_place'}}) {
+
+							my $tie++ if scalar @{${$results_ref}{"by_place"}{$key}} > 1;
+
+							foreach my $entry_id (@{${$results_ref}{"by_place"}{$key}}) {
+</%perl>
+
+								<tr
+									<% $ineligible{$entry_id}
+										? 'title="Marked Ineligible To Clear"' : ""
+									%>
+									class="
+										<% $tie ? "lirdrow" : "" %>
+										<% $ineligible{$entry_id} ? "strike" : "" %>
+										<% $tie == 1 ? "libordertop" : "" %>"
+									>
+
+%									$tie++ if $tie;
+
+									<td class="centeralign smallish nowrap" style="width: 25px;">
+										<% $key %><% $tie ? "-T" : "" %>
+									</td>
+
+									<td class="smallish nowrap" style="width: 50px;">
+										<span title="<% $entry_ballots{$entry_id} %>">
+											<% ${$results_ref}{"code"}{$entry_id} %>
+										</span>
+									</td>
+
+%	                               if ($equal_elims) {
+
+										<td class="smallish">
+											<% ${$results_ref}{"section_rank"}{$entry_id} %>
+										</td>
+										<td class="smallish">
+											<% ${$results_ref}{"section"}{$entry_id} %>
+										</td>
+
+%									} elsif ($round_robin) {
+
+										<td class="smallish">
+											<% ${$results_ref}{"pod_rank"}{$entry_id} %>
+										</td>
+										<td class="smallish">
+											<% ${$results_ref}{"pod"}{$entry_id} %>
+										</td>
+
+%	                               }
+
+	<%perl>
+									foreach my $key (
+										sort {$a <=> $b} keys %{$results_ref->{"tier_description"}}
+									) {
+
+										my $digits = '%.'.$results_ref->{"tb_digits"}{$key}.'f';
+										my $value = ${$results_ref}{"tbs"}{$entry_id}{$key};
+										$value =~ s/\.(?:|.*[^0]\K)0*\z//;
+										$value = sprintf($digits, $value);
+	</%perl>
+
+										<td class="smallish nowrap">
+											<% $value %>
+										</td>
+%									}
+
+									<td class="centeralign smallish nowrap" style="width: 25px;">
+										<% ${$results_ref}{"forfeit"}{$entry_id} ? "NS" : $count++ %>
+									</td>
+
+								</tr>
+<%perl>
+
+							}
+
+							if ($tourn_settings->{"nsda_district"} && $from && $from->type eq "prelim") {
+
+								if ((not defined $target_count) && ($count >= $advance_target)) {
+									$target_count = $count;
+								}
+							}
+						}
+</%perl>
+
+						</tbody>
+					</table>
+
 				</div>
 %			}
 
-			<div class="noscroll">
 
-			<table id="breaks">
-
-				<thead>
-
-					<tr class="yellowrow">
-
-						<th class="smallish">
-							#
-						</th>
-
-						<th class="smallish">
-							Code
-						</th>
-
-%                       if ($equal_elims) {
-                            <th class="smaller" title="Rank within room">
-                                SectRk
-                            </th>
-                            <th class="smaller" title="Room/section">
-                                Sect
-                            </th>
-%                       }  elsif ($round_robin) {
-                            <th class="smaller" title="Rank within Pod">
-                                PodRk
-                            </th>
-                            <th class="smaller" title="Pod">
-                                Pod
-                            </th>
-%                       }
-
-%						foreach my $key (sort {$a <=> $b} keys %{$results_ref->{"tier_description"}}) {
-							<th
-								class="smallish"
-								title="<% ${$results_ref}{"tier_long_description"}{$key} %>"
-							>
-								<% ${$results_ref}{"tier_description"}{$key} %>
-							</th>
-%						}
-
-						<th>
-						</th>
-
-					</tr>
-
-				</thead>
-
-				<tbody>
-
-<%perl>
-					my $count;
-
-					my $results_count = scalar(keys %{$results_ref->{'by_place'}});
-
-					foreach my $key (sort {$a <=> $b} keys %{$results_ref->{'by_place'}}) {
-
-						my $tie++ if scalar @{${$results_ref}{"by_place"}{$key}} > 1;
-
-						foreach my $entry_id (@{${$results_ref}{"by_place"}{$key}}) {
-</%perl>
-
-							<tr
-								<% $ineligible{$entry_id}
-									? 'title="Marked Ineligible To Clear"' : ""
-								%>
-								class="
-									<% $tie ? "lirdrow" : "" %>
-									<% $ineligible{$entry_id} ? "strike" : "" %>
-									<% $tie == 1 ? "libordertop" : "" %>"
-								>
-
-%								$tie++ if $tie;
-
-								<td class="centeralign smallish nowrap" style="width: 25px;">
-									<% $key %><% $tie ? "-T" : "" %>
-								</td>
-
-								<td class="smallish nowrap" style="width: 50px;">
-									<span title="<% $entry_ballots{$entry_id} %>">
-										<% ${$results_ref}{"code"}{$entry_id} %>
-									</span>
-								</td>
-
-%                               if ($equal_elims) {
-									<td class="smallish">
-										<% ${$results_ref}{"section_rank"}{$entry_id} %>
-									</td>
-									<td class="smallish">
-										<% ${$results_ref}{"section"}{$entry_id} %>
-									</td>
-
-%								} elsif ($round_robin) {
-									<td class="smallish">
-										<% ${$results_ref}{"pod_rank"}{$entry_id} %>
-									</td>
-									<td class="smallish">
-										<% ${$results_ref}{"pod"}{$entry_id} %>
-									</td>
-%                               }
-
-<%perl>
-								foreach my $key (
-									sort {$a <=> $b} keys %{$results_ref->{"tier_description"}}
-								) {
-
-									my $digits = '%.'.$results_ref->{"tb_digits"}{$key}.'f';
-									my $value = ${$results_ref}{"tbs"}{$entry_id}{$key};
-									$value =~ s/\.(?:|.*[^0]\K)0*\z//;
-									$value = sprintf($digits, $value);
-</%perl>
-
-									<td class="smallish nowrap">
-										<% $value %>
-									</td>
-%								}
-
-								<td class="centeralign smallish nowrap" style="width: 25px;">
-									<% ${$results_ref}{"forfeit"}{$entry_id} ? "NS" : $count++ %>
-								</td>
-
-							</tr>
-<%perl>
-
-						}
-
-						if ($tourn_settings->{"nsda_district"} && $round && $round->type eq "prelim") {
-
-							if ((not defined $target_count) && ($count >= $advance_target)) {
-								$target_count = $count;
-							}
-						}
-					}
-</%perl>
-
-				</tbody>
-			</table>
-			</div>
-			<% $results_count %>
-
+			<p class="centeralign semibold bluetext">
+				<% $results_count %> Total Entries
+			</p>
 %		}
 
 	</div>
@@ -294,8 +575,8 @@
 		perms          => $perms,
 		tourn_settings => $tourn_settings,
 		event          => $event,
-		round          => $round,
-		preset         => $preset,
+		from           => $from,
+		into           => $into,
 		only_category  => $only_category,
 		breakout       => $breakout,
 		target_count   => $target_count
