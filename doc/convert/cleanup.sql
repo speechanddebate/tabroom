@@ -35,3 +35,6 @@ alter table ballot drop collected;
 alter table ballot drop collected_by;
 alter table ballot drop seed;
 alter table ballot drop pullup;
+
+update entry_setting set tag="autoqual" where tag="auto_qual";
+update entry_setting set tag="registered_seed" where tag="regsitered_seed";
