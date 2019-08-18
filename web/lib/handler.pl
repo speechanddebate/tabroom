@@ -125,6 +125,7 @@ use Tab::Tiebreak;
 use Tab::TiebreakSetSetting;
 use Tab::TiebreakSet;
 use Tab::Timeslot;
+use Tab::Topic;
 use Tab::Tourn;
 use Tab::TournSetting;
 use Tab::Weekend;
