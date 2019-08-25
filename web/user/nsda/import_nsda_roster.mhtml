@@ -11,6 +11,11 @@
 	use Tab::NSDA::Login;
 	use Tab::NSDA::PersonSchool;
 
+  use JSON;
+  use JSON::PP::Boolean;
+  use MIME::Base64;
+  use REST::Client;
+
 	my $chapter = Tab::Chapter->retrieve($chapter_id) if $chapter_id;
 
 	unless ($chapter) {
@@ -32,26 +37,48 @@
 	# sorts already linked people to the bottom;
     @students = sort {length($a->nsda) <=> length($b->nsda)} @students;
 
-	Tab::NSDA::Person->set_sql( students => "
-		select distinct NEW_USERS.*
-		from NEW_USERS, NEW_USERS_TO_SCHOOLS
-		where NEW_USERS_TO_SCHOOLS.school_id = ?
-		and NEW_USERS_TO_SCHOOLS.ualt_id = NEW_USERS.ualt_id
-		and (
-			NEW_USERS.utype = 'Student'
-			or NEW_USERS.utype = 'PKDStudent'
-			or NEW_USERS.utype = 'MIDStudent'
-		)
-		and NEW_USERS_TO_SCHOOLS.enddate = '0000-00-00 00:00:00'
-		and NEW_USERS.grad_yr >= ?
-		order by NEW_USERS.ulname, NEW_USERS.ufname
-	");
+#	Tab::NSDA::Person->set_sql( students => "
+#		select distinct NEW_USERS.*
+#		from NEW_USERS, NEW_USERS_TO_SCHOOLS
+#		where NEW_USERS_TO_SCHOOLS.school_id = ?
+#		and NEW_USERS_TO_SCHOOLS.ualt_id = NEW_USERS.ualt_id
+#		and (
+#			NEW_USERS.utype = 'Student'
+#			or NEW_USERS.utype = 'PKDStudent'
+#			or NEW_USERS.utype = 'MIDStudent'
+#		)
+#		and NEW_USERS_TO_SCHOOLS.enddate = '0000-00-00 00:00:00'
+#		and NEW_USERS.grad_yr >= ?
+#		order by NEW_USERS.ulname, NEW_USERS.ufname
+#	");
+#
+#	my @nsda_students = Tab::NSDA::Person->search_students( $chapter->nsda, $grad_year_limit );
 
-	my @nsda_students = Tab::NSDA::Person->search_students( $chapter->nsda, $grad_year_limit );
+  my $client = REST::Client->new( host => "https://api.speechanddebate.org/v2" );
+
+  my $auth_header = encode_base64($Tab::nsda_api_v2_user.":".$Tab::nsda_api_v2_token);
+
+  my $nsda_school_id = $chapter->nsda;
+  
+  $nsda_school_id = $nsda_school_id + 10000;
+
+  my $path = "/schools/".$nsda_school_id."/members?quick=true";
+
+  $client->GET(
+    $path,
+    {
+      'Authorization' => "Basic $auth_header",
+      'Accept'        => 'application/json'
+    }
+  );
+
+  my $json  = JSON->new->allow_nonref->utf8->relaxed
+              ->escape_slash->loose->allow_singlequote
+              ->allow_barekey;
+
+  my $json_arr = $json->decode($client->responseContent());
 
 	my %used_students = map {$_->nsda => 1} @students;
-
-	Tab::debuglog("Student for Woodring is ".$used_students{10571755});
 
 	my %student_name = map {$_->first." ".$_->middle." ".$_->last => 1} @students;
 	my %student_grad = map {$_->first." ".$_->middle." ".$_->last => $_->grad_year} @students;
@@ -63,32 +90,34 @@
 		my $count;
 
 		NSDA:
-		foreach my $nsda_student (@nsda_students) {
+		foreach my $nsda_student (@{$json_arr}) {
 
-			next if $used_students{$nsda_student->user_id};
-			next if $ARGS{"exclude_".$nsda_student->user_id};
+			next if $used_students{$nsda_student->{person_id}};
+			next if $ARGS{"exclude_".$nsda_student->{person_id}};
+      next if $nsda_student->{role} ne "Student";
 
-			my $name = lc($nsda_student->ufname." ".$nsda_student->umname." ".$nsda_student->ulname);
+			my $name = lc($nsda_student->{first}." ".$nsda_student->{middle}."
+".$nsda_student->{last});
 
 			# Prevent duplications.
 			next if $student_name{$name};
 
-			my $grad_year = $nsda_student->grad_yr;
+			my $grad_year = $nsda_student->{grad_year};
 			$grad_year = $school_year unless $grad_year;
 
 			my $student = Tab::Student->create({
-				first     => $nsda_student->ufname,
-				last      => $nsda_student->ulname,
+				first     => $nsda_student->{first},
+				last      => $nsda_student->{last},
 				chapter   => $chapter->id,
-				grad_year => $nsda_student->grad_yr,
+				grad_year => $nsda_student->{grad_year},
 				novice    => 0,
 				retired   => 0,
-				nsda      => $nsda_student->user_id
+				nsda      => $nsda_student->{person_id}
 			});
 
 			$m->comp("/funclib/nsda_person_link.mas", student => $student);
 
-			$used_students{$nsda_student->user_id}++;
+			$used_students{$nsda_student->{person_id}}++;
 			$student_name{$name}++;
 			$count++;
 		}
@@ -109,7 +138,7 @@
 	<div class="main">
 
 		<span class="threequarters nospace">
-			<h2 class="nospace">Import your NSDA Roster</h2>
+			<h2 class="nospace">Import NSDA Roster for <% $chapter->name %></h2>
 		</span>
 
 		<span
@@ -166,33 +195,32 @@
 
 			<tbody>
 
-%				foreach my $nsda_student (@nsda_students) {
+%				foreach my $nsda_student (@{$json_arr}) {
 
-%					Tab::debuglog("Skipping because Woodring?") if $nsda_student->user_id == 10571755;
-%					next if $used_students{$nsda_student->user_id};
-%					Tab::debuglog("Mysteriously, nope") if $nsda_student->user_id == 10571755;
+%					next if $used_students{$nsda_student->{person_id}};
+%					next if $nsda_student->{role} ne "Student";
 
 					<tr class="smallish">
 
 						<td>
-							<% $nsda_student->ufname %>
+							<% $nsda_student->{first} %>
 						</td>
 
 						<td>
-							<% $nsda_student->ulname %>
+							<% $nsda_student->{last} %>
 						</td>
 
 						<td class="centeralign">
-							<% $nsda_student->grad_yr %>
+							<% $nsda_student->{grad_year} %>
 						</td>
 
 						<td class="centeralign">
-							<% $nsda_student->user_id %>
+							<% $nsda_student->{person_id} %>
 						</td>
 
 						<td class="nospace">
 
-							<label for="exclude_<% $nsda_student->user_id %>">
+							<label for="exclude_<% $nsda_student->{person_id} %>">
 
 								<span class="full redhover nowrap centeralign marno">
 									<span class="redtext semibold inline">
@@ -201,8 +229,8 @@
 									<input
 										type  = "checkbox"
 										value = "1"
-										id    = "exclude_<% $nsda_student->user_id %>"
-										name  = "exclude_<% $nsda_student->user_id %>"
+										id    = "exclude_<% $nsda_student->{person_id} %>"
+										name  = "exclude_<% $nsda_student->{person_id} %>"
 									>
 								</span>
 							</label>
