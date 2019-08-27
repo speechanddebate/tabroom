@@ -42,6 +42,7 @@ no warnings "uninitialized";
 use Tab::General;
 use Tab::DBI;
 use Tab::Ad;
+use Tab::Autoqueue;
 use Tab::Person;
 use Tab::PersonSetting;
 use Tab::Conflict;
