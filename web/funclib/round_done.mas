@@ -14,9 +14,12 @@
 	my $judges_left = scalar @left;
 
 	my $event = $round->event;
+	my %event_settings = $event->all_settings();
+
+	my $tourn = $event->tourn;
 
 	#First ballot in notification
-	my $first_notified = $event->setting("first_round_notified");
+	my $first_notified = $event_settings{"first_round_notified"};
 
 	unless ($ARGS{"admin_done"}) {
 		unless ($round->setting("first_ballot")) {
@@ -27,10 +30,10 @@
 
 	if ($first_notified < $round->name) {
 
-		my $follower_ids = $event->setting("followers");
+		my $follower_ids = $event_settings{"followers"};
 		my $subject = $event->name;
 
-		my $body = "\n\n".$round->realname." of ".$event->name." first ballot entered.  $judges_left  left.\n";
+		my $body = "\n\n".$round->realname." of ".$event->name." first ballot entered.  $judges_left left.\n";
 
 		foreach my $id (split(/,/, $follower_ids)) {
 
@@ -65,11 +68,15 @@
 	return if $judges_left > 0;
 
 	# Last ballot in notification
-	my $notified = $event->setting("round_notified");
+	my $notified = $event_settings{"round_notified"};
+
+	Tab::debuglog("Notified is $notified and round name is ".$round->name);
 
 	if ($notified < $round->name) {
 
-		my $follower_ids = $event->setting("followers");
+		Tab::debuglog("I am here!");
+
+		my $follower_ids = $event_settings{"followers"};
 		my $subject = $event->name;
 		my $body = "\n\n".$round->realname." of ".$event->name." last ballot entered.\n";
 
@@ -82,7 +89,6 @@
 			my $to;
 
 			if ($person->phone && $person->provider) {
-
 				my $phone = $person->phone;
 				$phone =~ s/[\D_]//g;
 				$to = $phone.'@'.$person->provider;
@@ -100,36 +106,100 @@
 
 		$event->setting("round_notified", $round->name);
 
-=begin PALMERHOPE
-
-		This used to be a thing that had to happen because we would get random
-		scores without a concurrent tag that I'm hoping was the fault of either
-		code that's been cleaned up since or the CAT.  It hasn't happened in
-		forever which either means this code is working or it's not necessary,
-		and since I'd rather like to eliminate the "tiebreak" field in the
-		scores, I'm hoping it's the latter and commenting out this fixer for
-		now.
-
-		my $dbh = Tab::DBI->db_Main();
-
-		my $ranks_sth = $dbh->prepare("
-			update score set tag = 'rank' where tag = '' and tiebreak = 1;
-			update score set tag = 'winloss' where tag = '' and tiebreak = 2;
-			update score set tag = 'point' where tag = '' and tiebreak = 3;
-			update score set tag = 'point' where tag = '' and tiebreak = 4;
-			update score set tag = 'point' where tag = '' and tiebreak = 5;
-		");
-
-		$ranks_sth->execute();
-
-=end PALMERHOPE
-=cut
-
 		$m->comp(
 			"/funclib/auto_backups.mas",
 			subject => "Last Ballot Entered",
 			round   => $round
 		);
+
+		unless ($event_settings{"no_autopair"} || $tourn->setting("nsda_district")) {
+
+			Tab::Round->columns(TEMP => "panelcount");
+
+			Tab::Round->set_sql( next => "
+				select round.*, count(panel.id) as panelcount
+				from (round)
+					left join panel on panel.round = round.id
+				where round.name > ?
+				and round.event = ?
+				group by round.id
+				order by round.name
+			");
+
+			my $next = Tab::Round->search_next($round->name, $event->id)->first;
+
+			if ( $next && $next->panelcount < 1) {
+
+				if ($next
+					&& $next->type ne "final"
+					&& $next->type ne "elim"
+					&& $next->type ne "runoff"
+				) {
+
+					Tab::Autoqueue->create({
+						round      => $next->id,
+						tag        => "pair_prelim",
+						created_by => 0,
+						created_at => $now,
+					});
+
+				} elsif (
+					($next->type eq "elim" || $next->type eq "final")
+					&& $round->type eq "elim"
+				) {
+
+					Tab::Autoqueue->create({
+						round      => $next->id,
+						tag        => "pair_elim",
+						created_by => 0,
+						created_at => $now,
+					});
+				}
+			}
+		}
+
+		unless ($tourn->setting("nsda_district")) {
+
+			my $next = Tab::Round->search_next($round->name, $event->id)->first;
+
+			Tab::debuglog("My next is $next which is ".$next->name." type ".$next->type);
+
+			if ($next
+				&& $next->type eq "elim"
+				&& $round->type ne "elim"
+			) {
+
+				Tab::Autoqueue->create({
+					event      => $event->id,
+					round      => $round->id,
+					tag        => "prelim_results",
+					created_by => 0,
+					created_at => $now,
+				});
+
+			} elsif ($round->type eq "final") {
+
+				Tab::Autoqueue->create({
+					event      => $event->id,
+					round      => $round->id,
+					tag        => "final_results",
+					created_by => 0,
+					created_at => $now,
+				});
+			}
+
+			if ($round->type eq "elim" && $round->id == $event_settings{"bid_round"}) {
+
+				Tab::Autoqueue->create({
+					event      => $event->id,
+					round      => $round->id,
+					tag        => "toc_bids",
+					created_by => 0,
+					created_at => $now,
+				});
+
+			}
+		}
 	}
 
 	return;
