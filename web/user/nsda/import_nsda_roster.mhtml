@@ -6,30 +6,33 @@
 </%args>
 <%init>
 
-	use Tab::NSDA::MemberSchool;
-	use Tab::NSDA::Person;
-	use Tab::NSDA::Login;
-	use Tab::NSDA::PersonSchool;
-
-  use JSON;
-  use JSON::PP::Boolean;
-  use MIME::Base64;
-  use REST::Client;
-
 	my $chapter = Tab::Chapter->retrieve($chapter_id) if $chapter_id;
 
 	unless ($chapter) {
 		$m->comp("/funclib/abort.mas", message => "No valid chapter ID sent: $chapter_id");
 	}
 
+    # Get the NSDA roster for the school
+
+    my $nsda_roster_ref = $m->comp("/funclib/nsda/school_roster.mas", chapter => $chapter);
+    my @nsda_roster = @{$nsda_roster_ref};
+    my @student_roster;
+
+    foreach my $roster (@nsda_roster) {
+        next unless $roster->{'role'} eq "Student";
+        push @student_roster, $roster;
+    }
+
+    my %student_by_person_id = map {$_->{person_id} => $_} @student_roster;
+
 	my $now = DateTime->now;
-	my $grad_year_limit = $now->year;
-	$grad_year_limit++ if $now->month > 8;
+	my $school_year = $now->year;
+	$school_year++ if $now->month > 8;
 
     my @students = Tab::Student->search_where(
 		chapter => $chapter->id,
 		retired => 0,
-		grad_year => { ">=", $grad_year_limit}
+		grad_year => { ">=", $school_year}
 	);
 
     @students = sort {$a->last cmp $b->last} @students;
@@ -37,92 +40,52 @@
 	# sorts already linked people to the bottom;
     @students = sort {length($a->nsda) <=> length($b->nsda)} @students;
 
-#	Tab::NSDA::Person->set_sql( students => "
-#		select distinct NEW_USERS.*
-#		from NEW_USERS, NEW_USERS_TO_SCHOOLS
-#		where NEW_USERS_TO_SCHOOLS.school_id = ?
-#		and NEW_USERS_TO_SCHOOLS.ualt_id = NEW_USERS.ualt_id
-#		and (
-#			NEW_USERS.utype = 'Student'
-#			or NEW_USERS.utype = 'PKDStudent'
-#			or NEW_USERS.utype = 'MIDStudent'
-#		)
-#		and NEW_USERS_TO_SCHOOLS.enddate = '0000-00-00 00:00:00'
-#		and NEW_USERS.grad_yr >= ?
-#		order by NEW_USERS.ulname, NEW_USERS.ufname
-#	");
-#
-#	my @nsda_students = Tab::NSDA::Person->search_students( $chapter->nsda, $grad_year_limit );
-
-  my $client = REST::Client->new( host => "https://api.speechanddebate.org/v2" );
-
-  my $auth_header = encode_base64($Tab::nsda_api_v2_user.":".$Tab::nsda_api_v2_token);
-
-  my $nsda_school_id = $chapter->nsda;
-  
-  $nsda_school_id = $nsda_school_id + 10000;
-
-  my $path = "/schools/".$nsda_school_id."/members?quick=true";
-
-  $client->GET(
-    $path,
-    {
-      'Authorization' => "Basic $auth_header",
-      'Accept'        => 'application/json'
-    }
-  );
-
-  my $json  = JSON->new->allow_nonref->utf8->relaxed
-              ->escape_slash->loose->allow_singlequote
-              ->allow_barekey;
-
-  my $json_arr = $json->decode($client->responseContent());
-
-	my %used_students = map {$_->nsda => 1} @students;
-
-	my %student_name = map {$_->first." ".$_->middle." ".$_->last => 1} @students;
-	my %student_grad = map {$_->first." ".$_->middle." ".$_->last => $_->grad_year} @students;
-
-	my $school_year = Tab::school_year();
+	my %linked_students = map {$_->nsda => 1} @students;
+	my %student_name = map { lc($_->first." ".$_->middle." ".$_->last." ".$_->grad_year) => 1} @students;
 
 	if ($confirm) {
 
 		my $count;
 
 		NSDA:
-		foreach my $nsda_student (@{$json_arr}) {
+		foreach my $nsda_student (@student_roster) {
 
-			next if $used_students{$nsda_student->{person_id}};
+			next if $linked_students{$nsda_student->{person_id}};
 			next if $ARGS{"exclude_".$nsda_student->{person_id}};
-      next if $nsda_student->{role} ne "Student";
-
-			my $name = lc($nsda_student->{first}." ".$nsda_student->{middle}."
-".$nsda_student->{last});
 
 			# Prevent duplications.
+			my $name = lc($nsda_student->{first}." ".$nsda_student->{middle}." ".$nsda_student->{last}." ".$nsda_student->{grad_year});
 			next if $student_name{$name};
 
 			my $grad_year = $nsda_student->{grad_year};
 			$grad_year = $school_year unless $grad_year;
 
+			my $novice = 0;
+			$novice = 1 if ($grad_year - $school_year) > 3;
+
 			my $student = Tab::Student->create({
 				first     => $nsda_student->{first},
+				middle    => $nsda_student->{middle},
 				last      => $nsda_student->{last},
 				chapter   => $chapter->id,
-				grad_year => $nsda_student->{grad_year},
-				novice    => 0,
+				grad_year => $grad_year,
+				novice    => $novice,
 				retired   => 0,
 				nsda      => $nsda_student->{person_id}
 			});
 
-			$m->comp("/funclib/nsda_person_link.mas", student => $student);
+			$m->comp("/funclib/nsda/student_link.mas",
+				student     => $student,
+				student_ref => $nsda_student
+			);
 
-			$used_students{$nsda_student->{person_id}}++;
+			$linked_students{$nsda_student->{person_id}}++;
 			$student_name{$name}++;
 			$count++;
 		}
 
 		return if $return;
+
 		my $msg = "$count entrants imported from the NSDA to your roster";
 		$m->redirect("/user/chapter/students.mhtml?chapter_id=$chapter_id&msg=$msg");
 
@@ -187,6 +150,10 @@
 					</th>
 
 					<th>
+						Points
+					</th>
+
+					<th>
 						Exclude?
 					</th>
 
@@ -195,10 +162,9 @@
 
 			<tbody>
 
-%				foreach my $nsda_student (@{$json_arr}) {
+%				foreach my $nsda_student (@student_roster) {
 
-%					next if $used_students{$nsda_student->{person_id}};
-%					next if $nsda_student->{role} ne "Student";
+%					next if $linked_students{$nsda_student->{person_id}};
 
 					<tr class="smallish">
 
@@ -216,6 +182,10 @@
 
 						<td class="centeralign">
 							<% $nsda_student->{person_id} %>
+						</td>
+
+						<td class="centeralign">
+							<% $nsda_student->{points} %>
 						</td>
 
 						<td class="nospace">
@@ -240,19 +210,16 @@
 
 			</tbody>
 
-			<tr class="liblrow">
-
-				<td colspan="5" class="rightalign">
-					<input
-						type  = "submit"
-						name  = "confirm"
-						value = "Import Students"
-					>
-					</form>
-				</td>
-
-			</tr>
-
 		</table>
+
+		<span class="liblrow rightalign">
+
+			<input
+				type  = "submit"
+				name  = "confirm"
+				value = "Import Students"
+			>
+			</form>
+		</span>
 
 	</div>
