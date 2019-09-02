@@ -1,0 +1,115 @@
+<%args>
+	$district_id => undef
+</%args>
+<%init>
+
+	my ($districts_ref, $raw) = $m->comp("api_client.mas",
+		path => "/districts?realm=hs&full=true"
+	);
+
+	my $dbh = Tab::DBI->db_Main();
+
+	foreach my $district_ref (@{$districts_ref}) {
+
+		next if $district_id && $district_id != $district_ref->{id};
+
+		$m->print("<p>Updating permissions for district ".$district_ref->{name}."</p>");
+		$m->flush_buffer;
+
+		my $district = Tab::District->retrieve($district_ref->{id});
+
+		if ($district) {
+
+			if ($district_ref->{realm} eq "hs") {
+				$district_ref->{realm} = "NSDA";
+			}
+
+			$district_ref->{name} =~ s/\([^)]+\)//g;
+
+			$district->name($district_ref->{name});
+			$district->level($district_ref->{level});
+			$district->location($district_ref->{location});
+			$district->level($district_ref->{level});
+			$district->realm($district_ref->{realm});
+
+			$district->update();
+
+		} else {
+
+			$district = Tab::District->create({
+				id       => $district_ref->{id},
+				code     => $district_ref->{id},
+				name     => $district_ref->{name},
+				location => $district_ref->{location},
+				level    => $district_ref->{level},
+				realm    => $district_ref->{realm},
+			});
+		}
+
+		my $sth = $dbh->prepare("update chapter set district = ? where nsda = ?");
+
+		my ($schools_ref, $school_raw) = $m->comp("api_client.mas",
+			path => "/districts/".$district->{id}."/schools"
+		);
+
+		my %schools_by_nsda_id = map {$_->nsda => $_} $district->chapters;
+
+		if ($schools_ref) {
+			foreach my $school (@{$schools_ref}) {
+				unless ($schools_by_nsda_id{$school->{school_id}}) {
+					$sth->execute($district->id, $school->{school_id});
+				}
+			}
+		}
+
+		my ($leaders_ref, $lead_raw) = $m->comp('api_client.mas',
+			path => "/districts/".$district->{id}."/leaders"
+		);
+
+		my %permissions =
+			map {$_->person->nsda => $_}
+			Tab::Permission->search( district => $district->id );
+
+		foreach my $leader (@{$leaders_ref}) {
+
+			$leader->{position} = lc($leader->{position});
+			next if $leader->{position} eq "alternate";
+
+			if ($permissions{$leader->{"person_id"}}) {
+
+				my $perm = $permissions{$leader->{"person_id"}};
+				$perm->tag($leader->{position});
+				$perm->update();
+				delete $permissions{$leader->{"person_id"}};
+
+			} else {
+
+				my $person = Tab::Person->search(
+					nsda => $leader->{"person_id"}
+				)->first;
+
+				unless ($person) {
+
+					$person = $m->comp("user_import.mas",
+						nsda_id => $leader->{"person_id"}
+					);
+				}
+
+				if ($person) {
+
+					Tab::Permission->create({
+						person   => $person->id,
+						tag      => $leader->{position},
+						district => $district->id
+					});
+				}
+			}
+		}
+
+		foreach my $key (keys %permissions) {
+			$permissions{$key}->delete();
+		}
+
+	}
+
+</%init>
