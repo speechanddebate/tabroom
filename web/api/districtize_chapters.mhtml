@@ -3,70 +3,88 @@
 </%args>
 <%init>
 
-	Tab::Chapter->set_sql(nsda => "
-		select * from chapter where nsda > 0 
-		and not exists ( 
-			select chapter_setting.id 
-				from chapter_setting
-				where chapter_setting.tag = 'nsda_degrees'
-				and chapter_setting.chapter = chapter.id 
-		)
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select chapter.id, chapter.name, chapter.nsda,
+			district.id,
+			nsda_strength.value,
+			nsda_charter.value,
+			nsda_paid.value
+		from (chapter, district)
+
+			left join chapter_setting nsda_strength
+				on nsda_strength.tag = 'nsda_strength'
+				and nsda_strength.chapter = chapter.id
+
+			left join chapter_setting nsda_charter
+				on nsda_charter.tag = 'nsda_charter'
+				and nsda_charter.chapter = chapter.id
+
+			left join chapter_setting nsda_paid
+				on nsda_paid.tag = 'nsda_paid'
+				and nsda_paid.chapter = chapter.id
+
+		where chapter.nsda > 0
+			and chapter.district = district.id
+
+		order by chapter.district
 	");
 
-	my $count;
+	my %members;
 
-	foreach my $chapter (Tab::Chapter->search_nsda) { 
-		$chapter->setting("nsda_degrees", "X");
-		$chapter->setting("nsda_charter", "X");
-		$chapter->setting("nsda_paid", "X");
-		$count++;
-	}
-
-	$m->print("Done with that, yup.  $count chapters marked</br>");
-	$m->print("Adding the NSDA settings to every student who's been linked <br />");
-	$m->flush_buffer();
-
-	Tab::Student->set_sql(nsda => "
-		select * from student where nsda > 0
-		and not exists (
-			select student_setting.id
-			from student_setting
-			where student_setting.student = student.id
-			and student_setting.tag = 'nsda_points'
-		)
+	my $clean_sth = $dbh->prepare("
+		delete from chapter_setting where chapter = ?
+			and tag in ('nsda_paid', 'nsda_strength', 'nsda_charter')
 	");
 
-	undef $count;
-
-	foreach my $student (Tab::Student->search_nsda) { 
-		$student->setting("nsda_paid", "X");
-		$student->setting("nsda_points", "X");
-		$student->setting("nsda_joined", "X");
-		$count++;
-	}
-
-	$m->print("Count of students marked is $count <br />");
-
-	$m->print("Adding the email settings because apparently those died somehow <br />");
-
-	Tab::Student->set_sql(no_email => "
-		select * from student where nsda > 0
-		and not exists (
-			select student_setting.id
-			from student_setting
-			where student_setting.student = student.id
-			and student_setting.tag = 'student_email'
-		)
+	my $sync_sth = $dbh->prepare("
+		insert into chapter_setting (chapter, tag, value) values (?, ?, ?)
 	");
 
-	undef $count;
+	$sth->execute();
 
-	foreach my $student (Tab::Student->search_no_email) { 
-		$student->setting("student_email", "X");
-		$count++;
+	$m->clear_buffer();
+
+	while (
+		my (
+			$chapter_id, $chapter_name, $nsda, $district, $strength, $charter, $paid
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($members{$district}) {
+
+			my ($array, $junque) = $m->comp(
+				"/funclib/nsda/api_client.mas",
+				path => "/districts/".$district."/schools"
+			);
+
+			%{$members{$district}} = map {$_->{school_id} => $_} @{$array} if $array;
+		}
+
+		if ($members{$district}{$nsda}) {
+
+			unless (
+				$members{$district}{$nsda}{"strength"} == $strength
+				&& $members{$district}{$nsda}{"paid"} == $paid
+				&& $members{$district}{$nsda}{"charter"} == $charter
+			) {
+
+				$m->print("<p>Updating $chapter_name $nsda</p>");
+				$m->flush_buffer();
+
+				$clean_sth->execute($chapter_id);
+
+				$sync_sth->execute($chapter_id, "nsda_strength", $members{$district}{$nsda}{"strength"})
+					if $members{$district}{$nsda}{"strength"};
+
+				$sync_sth->execute($chapter_id, "nsda_paid", $members{$district}{$nsda}{"paid"})
+					if $members{$district}{$nsda}{"paid"};
+
+				$sync_sth->execute($chapter_id, "nsda_charter", $members{$district}{$nsda}{"charter"})
+					if $members{$district}{$nsda}{"charter"};
+			}
+		}
 	}
-
-	$m->print("Count of students marked is $count <br />");
-	$m->print("Done with that now too <br />");
 
 </%init>
