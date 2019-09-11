@@ -1,0 +1,266 @@
+<%args>
+	$chapter           => undef
+	$student           => undef
+	$member_ref        => undef
+	$chapter_judge     => undef
+	$chapter_judge_ref => undef
+</%args>
+<%init>
+
+	my $limit;
+	my $dbh = Tab::DBI->db_Main();
+
+	my $only;
+	my $chapter_nsda_id;
+
+	if ($chapter) {
+
+		$chapter_nsda_id = $chapter->nsda;
+
+		my $district_id = $chapter->district->id if $chapter->district;
+
+		my ($nsda_chapter, $quoi)  = $m->comp(
+			"/funclib/nsda/api_client.mas",
+			path => "/schools/".$chapter_nsda_id
+		);
+
+		$chapter->setting("nsda_charter", $nsda_chapter->{"charter"});
+		$chapter->setting("nsda_paid", $nsda_chapter->{"paid"});
+
+	} elsif ($student) {
+
+		$chapter = $student->chapter if $student;
+		return "Neither student record nor chapter was sent" unless $chapter;
+
+		$chapter_nsda_id = $chapter->nsda;
+		$limit =  "and student.id = ".$student->id;
+
+		$only = "student";
+
+	} elsif ($chapter_judge) {
+
+		$chapter = $chapter_judge->chapter if $chapter_judge;
+		return "Neither judge record nor chapter was sent" unless $chapter;
+
+		$chapter_nsda_id = $chapter->nsda;
+		$limit =  "and chapter_judge.id = ".$chapter_judge->id;
+
+		$only = "judge";
+	}
+
+	return "$chapter_nsda_id is not an NSDA member number" unless $chapter_nsda_id;
+
+	my $counter;
+	my $all_counter;
+
+	my $student_json;
+
+	($member_ref, $student_json) = $m->comp(
+		"/funclib/nsda/api_client.mas",
+		path => "/schools/".$chapter_nsda_id."/members"
+	) unless $member_ref;
+
+	my %nsda_members = eval {
+		return map {$_->{person_id} => $_} @{$member_ref};
+	};
+
+	return "No members were found that belong to that chapter:" unless $member_ref;
+
+	unless ($only eq "judge") {
+
+		my $sth = $dbh->prepare("
+
+			select student.id, student.first, student.last, student.nsda,
+				districts_eligible.value,
+				nsda_points.value,
+				nsda_paid.value,
+				nsda_joined.value_date
+
+			from (student, chapter)
+
+				left join student_setting districts_eligible
+					on districts_eligible.student = student.id
+					and districts_eligible.tag = 'districts_eligible'
+
+				left join student_setting nsda_points
+					on nsda_points.student = student.id
+					and nsda_points.tag = 'nsda_points'
+
+				left join student_setting nsda_paid
+					on nsda_paid.student = student.id
+					and nsda_paid.tag = 'nsda_paid'
+
+				left join student_setting nsda_joined
+					on nsda_joined.student = student.id
+					and nsda_joined.tag = 'nsda_joined'
+
+			where student.chapter = chapter.id
+				and chapter.nsda = ?
+				and student.retired != 1
+				and student.nsda > 0
+				$limit
+		");
+
+		$sth->execute($chapter_nsda_id);
+
+		my $clear_sth = $dbh->prepare("
+			delete from student_setting
+				where student_setting.student = ?
+				and student_setting.tag in
+					('districts_eligible', 'nsda_points', 'nsda_paid', 'nsda_joined');
+		");
+
+		my $set_sth = $dbh->prepare("
+			insert into student_setting (student, tag, value) values (?, ?, ?);
+		");
+		my $set_date_sth = $dbh->prepare("
+			insert into student_setting (student, tag, value_date, value) values (?, ?, ?, 'date');
+		");
+
+		while (
+			my ( $student_id, $student_first, $student_last, $student_nsda,
+				$districts_eligible,
+				$nsda_points,
+				$nsda_paid,
+				$nsda_joined
+			) = $sth->fetchrow_array()
+		) {
+
+			unless (
+				$nsda_members{$student_nsda}->{"districts_eligible"} == $districts_eligible
+				&& $nsda_members{$student_nsda}->{"points"} == $nsda_points
+				&& $nsda_members{$student_nsda}->{"paid"} == $nsda_paid
+				&& $nsda_members{$student_nsda}->{"start"} eq $nsda_joined
+			) {
+
+				$clear_sth->execute($student_id);
+
+				$set_date_sth->execute($student_id, "nsda_joined", $nsda_members{$student_nsda}->{"start"});
+
+				$set_sth->execute($student_id, "nsda_paid", $nsda_members{$student_nsda}->{"paid"});
+				$set_sth->execute($student_id, "nsda_points", $nsda_members{$student_nsda}->{"points"});
+
+				if ($nsda_members{$student_nsda}->{"districts_eligible"} > 0) {
+					$set_sth->execute($student_id, "districts_eligible", $nsda_members{$student_nsda}->{"districts_eligible"});
+				}
+
+				$counter++;
+			}
+
+			$all_counter++;
+
+		}
+
+		if ($student) {
+			return $nsda_members{$student->nsda};
+		}
+
+	}
+
+	unless ($only eq "student") {
+
+=pod
+		my ($degrees_ref, $junque) = $m->comp(
+			"/funclib/nsda/api_client.mas",
+			path => "/honors?type="
+		);
+
+
+		my %honors =
+			map {$_->{'honor_id'} => $_->{"description"}}
+			@{$degrees_ref};
+
+=cut
+
+		my $judge_sth = $dbh->prepare("
+
+			select chapter_judge.id, chapter_judge.nsda, chapter_judge.person,
+				diamonds.value,
+				nsda_degree.value,
+				nsda_points.value,
+				nsda_paid.value
+
+			from (chapter_judge, chapter)
+
+				left join person_setting diamonds
+					on diamonds.person = chapter_judge.person
+					and diamonds.tag = 'diamonds'
+
+				left join person_setting nsda_points
+					on nsda_points.person = chapter_judge.person
+					and nsda_points.tag = 'nsda_points'
+
+				left join person_setting nsda_degree
+					on nsda_degree.person = chapter_judge.person
+					and nsda_degree.tag = 'nsda_degree'
+
+				left join person_setting nsda_paid
+					on nsda_paid.person = chapter_judge.person
+					and nsda_paid.tag = 'nsda_paid'
+
+			where chapter_judge.chapter = chapter.id
+				and chapter.nsda = ?
+				and chapter_judge.retired != 1
+				and chapter_judge.nsda > 0
+				and chapter_judge.person > 0
+		");
+
+		$judge_sth->execute($chapter_nsda_id);
+
+		my $clear_sth = $dbh->prepare("
+			delete from person_setting
+				where person_setting.person = ?
+				and person_setting.tag in
+					('diamonds', 'nsda_points', 'nsda_paid', 'nsda_degree');
+		");
+
+		my $set_sth = $dbh->prepare("
+			insert into person_setting (person, tag, value) values (?, ?, ?);
+		");
+
+		while (
+			my (
+				$judge_id, $judge_nsda, $person_id,
+				$diamonds,
+				$nsda_degree,
+				$nsda_points,
+				$nsda_paid
+			) = $judge_sth->fetchrow_array()
+		) {
+
+			unless (
+				$nsda_members{$judge_nsda}->{"diamonds"} == $diamonds
+				&& $nsda_members{$judge_nsda}->{"points"} == $nsda_points
+				&& $nsda_members{$judge_nsda}->{"paid"} == $nsda_paid
+				&& $nsda_members{$judge_nsda}->{"degree_name"} eq $nsda_degree
+			) {
+
+				$clear_sth->execute($person_id);
+
+				$set_sth->execute($person_id, "nsda_paid", $nsda_members{$judge_nsda}->{"paid"})
+					if $nsda_members{$judge_nsda}->{"paid"};
+
+				$set_sth->execute($person_id, "nsda_points", $nsda_members{$judge_nsda}->{"points"})
+					if $nsda_members{$judge_nsda}->{"points"};
+
+				$set_sth->execute($person_id, "diamonds", $nsda_members{$judge_nsda}->{"diamonds"})
+					if $nsda_members{$judge_nsda}->{"diamonds"};
+
+				$set_sth->execute($person_id, "nsda_degree", $nsda_members{$judge_nsda}->{"degree_name"})
+					if $nsda_members{$judge_nsda}->{"degree_name"};
+
+				$counter++;
+			}
+
+			$all_counter++;
+		}
+
+		if ($chapter_judge) {
+			return $nsda_members{$chapter_judge->nsda};
+		}
+
+	}
+
+	return $all_counter." linked members examined, $counter updated";
+
+</%init>
