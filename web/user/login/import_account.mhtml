@@ -22,7 +22,11 @@
 		password => $password
 	);
 
-	unless ($person && $person->id) {
+	my $person_id = eval {
+		return $person->id;
+	};
+
+	unless ($person_id) {
 		$m->comp("/funclib/abort.mas", message => $person);
 	}
 
@@ -34,196 +38,225 @@
 	});
 
 	my $salt = $m->comp("/funclib/generate_randomstring.mas");
-
 	my $sha_user = crypt($session->id.$Tab::string, '$6$'.$salt);
 
+	my $log = $now->mdy('/')." ".$now->hms;
+
+	$log .= "Importing user ".$username." via the NSDA succeeded";
+
 	$session->userkey($sha_user);
-	$session->update;
+	$session->update();
 
-    my $tokencookie = Apache2::Cookie->new(
-        $r,
-        -name    => 'TabroomToken',
-        -value   => $sha_user,
-		-domain  =>  '.tabroom.com',
-        -expires => '+96h',
-        -path    => '/'
-    );
+	my $tokencookie;
 
-    $tokencookie->bake($r);
+	if ($r->hostname eq "www.tabroom.com" ) {
 
-	$m->print('<p>'.$msg.'</p>');
+		$tokencookie = Apache2::Cookie->new(
+			$r,
+			-name     => 'TabroomToken',
+			-value    => $sha_user,
+			-expires  => '-1s',
+			-domain   => '.tabroom.com',
+			-secure   => 1,
+			-httponly => 1,
+			-path     => '/'
+		);
+
+		$tokencookie = Apache2::Cookie->new(
+			$r,
+			-name     => 'TabroomToken',
+			-value    => $sha_user,
+			-expires  => '+1024h',
+			-domain   => 'www.tabroom.com',
+			-secure   => 1,
+			-httponly => 1,
+			-path     => '/'
+		);
+
+	} else {
+
+		$tokencookie = Apache2::Cookie->new(
+			$r,
+			-name     => 'TabroomToken',
+			-value    => $sha_user,
+			-secure   => 0,
+			-httponly => 1,
+			-path     => '/'
+		);
+	}
+
+	my $result = $tokencookie->bake($r);
+	$log .= "....Succeeded: $result";
+
+	Tab::log("$log");
+
+	my $login = $person->logins(username => $username)->first;
 
 	if ($login) {
-		$login->sha512($sha512);
+		$login->accesses($login->accesses + 1);
+		$login->last_access($now);
 		$login->update;
 	}
 
+	# SCHOOLS
+	my $nsda_schools_ref = $m->comp("/funclib/nsda/user_schools.mas", nsda_id => $person->nsda);
 
-	#SCHOOLS
+	if ($nsda_schools_ref) {
 
-	unless (@nsda_schools) {
-		my $err .= " I found your NSDA account, but found no institutions you ";
-		$err .= " have admin access to.  Please have the coach of record create your";
-		$err .= " account.  NSDA ID ".$person->nsda;
+		my @exists;
+		my @non_exists;
 
-		$m->redirect("/user/login/new_user.mhtml?err=$err");
-	}
+		foreach my $role (@{$nsda_schools_ref}) {
 
-	# STEP TWO: CREATE SCHOOLS, ADMINS and STUDENTS unless they already exist
+			my $school_id = $role->{"school_id"};
 
-	my %used_school = ();
+			my $existing = Tab::Chapter->search( nsda => $school_id )->first;
 
-	my %not_found = ();
+			if ($existing) {
 
-	SCHOOL:
-	foreach my $nsda_school (@nsda_schools) {
+				Tab::Permission->create({
+					tag     => "chapter",
+					chapter => $existing->id,
+					person  => $person->id
+				});
 
-		next if $used_school{$nsda_school}++;
+				push @exists, $existing;
 
-		# Create my login
+			} else {
 
-		$m->print("<h2>NSDA Team Found</h2>");
+			    my ($school_ref, $raw) = $m->comp(
+					"/funclib/nsda/api_client.mas",
+					path => "/schools/".$school_id
+				);
 
-		$m->print("<p>".$nsda_school->school_id." ".$nsda_school->school_name."</p>");
-
-		my @already_chapters;
-
-		push @already_chapters,
-			Tab::Chapter->search(
-				nsda => $nsda_school->school_id
-			);
-
-		if (@already_chapters) {
-
-			foreach my $chapter (@already_chapters) {
-
-				$m->print("<h5>Oops! ".$nsda_school->school_name." already exists in Tabroom</h5>");
-				$m->print("<p>Tabroom school name: ".$chapter->name."</p>");
-				$m->print("<p>Coaches with access:</p>");
-
-				foreach my $admin ($chapter->permissions) {
-
-					next if $admin->tag eq "prefs";
-					my $coach = $admin->person;
-
-					$m->print('<p class="marleft padleftmore">');
-					$m->print($coach->first." ".$coach->last);
-					$m->print(" &lt;".$coach->email."&gt;</p>");
-
-				}
-
-				$m->print("<p>This school already has a Tabroom account.</p>");
-				$m->print("<p>If you need access, please contact one of them ");
-				$m->print(" or help\@tabroom.com</p>");
-
-				next SCHOOL;
-			}
-
-		}
-
-		# Create the school
-
-		$m->print("<h6>Creating a Tabroom school for ");
-		$m->print($nsda_school->school_name."</h6>");
-
-		my $chapter = $m->comp("/funclib/chapter_import.mas",
-			nsda_school => $nsda_school,
-			person => $person
-		);
-
-		$m->print("<h6>Chapter created and student roster imported for ");
-		$m->print($nsda_school->school_name."</h6>");
-
-	}
-
-	$m->print("<h2>Process complete!</h2>");
-	$m->print("<div class='full centeralign'>");
-	$m->print('<a href="/user/home.mhtml" class="buttonwhite bluetext"> Return to Tabroom Home Screen</a>');
-
-	$m->print("</div>");
-
-	sub find_login {
-
-		my ($username, $nsda_person, $nsda_login) = @_;
-
-		# Check if a login already exists with that username:
-
-		my $existing_login = Tab::Login->search( username => $username)->first;
-		my $existing_person;
-
-		my $msg;
-
-		if ($existing_login) {
-
-			$msg = "A Tabroom.com account already exists for ".$username.".  Using it.";
-			$existing_person = $existing_login->person;
-
-		} else {
-
-			$existing_person = Tab::Person->search( email => $username)->first;
-
-			if ($existing_person) {
-				$msg = "A Tabroom.com account already exists for ".$username.".  Using it";
-			}
-
-		}
-
-		# Check if there is an existing login out there with the same nsda user_id
-		# For the curious, this is the point in the process I started really
-		# swearing loudly about how totally insane the points database is.
-
-		unless ($existing_person && $existing_person->nsda == $nsda_person->user_id) {
-
-			my $clashing_person = Tab::Person->search( nsda => $nsda_person->user_id )->first;
-
-			if ($clashing_person) {
-
-				$msg = " A Tabroom account is already linked with ".$nsda_person->uemail."'s NSDA ID.  ";
-				$msg .= " I'm connecting that account, ".$clashing_person->email." to your school ";
-				$msg .= " instead of creating a new one.";
-
-				$existing_person = $clashing_person;
+				push @non_exists, $school_ref if $school_ref;
 			}
 		}
 
-		$existing_person = Tab::Person->search(
-			email => $username
-		)->first unless $existing_person;
-
-		unless ($existing_person) {
-
-			$msg = " No user found for $username.  Creating: ";
-
-			$existing_person = Tab::Person->create({
-				first   => $nsda_person->ufname,
-				middle  => $nsda_person->umname,
-				last    => $nsda_person->ulname,
-				email   => $username,
-				phone   => $nsda_person->cell,
-				nsda    => $nsda_person->user_id
-			});
-
-			$m->comp("/funclib/claim_followers.mas",
-				person => $existing_person
-			);
-		}
-
-		unless ($existing_login) {
-
-			$msg .= " No account found for $username.  Creating with your NSDA Password: ";
-
-			$existing_login = Tab::Login->create({
-				username      => $username,
-				person        => $existing_person->id,
-				accesses      => 1,
-				source        => "points"
-			});
-
-		}
-
-		return ($existing_person, $existing_login, $msg);
-
-	}
-
+		if (@exists || @non_exists) {
 
 </%init>
+
+			<div class="main">
+
+			<h4>Your account <% $username %> has been imported</h4>
+
+%			if (@exists) {
+
+				<p class="semibold bigger bluetext">
+					You are an NSDA advisor and have access to the following Tabroom schools:
+				</p>
+
+%				foreach my $exist (@exists) {
+
+					<div class="row">
+
+						<span class="half semibold">
+							<% $exist->name %>
+						</span>
+
+						<span class="quarter">
+							<% $exist->state %><% $exist->state && $exist->country ? "/" : "" %><% $exist->country %>
+						</span>
+
+						<span class="quarter">
+						</span>
+
+					</div>
+
+%				}
+%			}
+
+%			if (@non_exists) {
+
+				<form
+					action = "import_chapter.mhtml"
+					method = "post"
+				>
+
+				<p class="semibold bigger redtext padtopmore martopmore marbottommore">
+					The following NSDA member schools have no Tabroom school.  Import them?
+				</p>
+
+%				foreach my $non_exist (@non_exists) {
+
+					<div class="row">
+
+						<span class="half semibold">
+							<% $non_exist->{'official_name'} %>
+						</span>
+
+						<span class="quarter">
+							<%
+								$non_exist->{state}
+							%><%
+								$non_exist->{state} && $non_exist->{country} ? "/" : ""
+							%><%
+								$non_exist->{country}
+							%>
+						</span>
+
+						<label for="<% $non_exist->{school_id} %>">
+							<span
+								class="quarter centeralign hover redtext semibold"
+							>
+								IMPORT:
+
+								<input
+									type  = "checkbox"
+									name  = "<% $non_exist->{school_id} %>"
+									id    = "<% $non_exist->{school_id} %>"
+									value = 1
+								>
+							</span>
+						</label>
+					</div>
+%				}
+
+				<div class="liblrow rightalign">
+					<span class="quarter centeralign">
+						<input type="submit" value="Import">
+					</span>
+				</div>
+%			}
+
+%		} else {
+
+			<div class="main">
+
+				<h2>Process complete!</h2>
+
+				<div class='full centeralign'>
+
+					<a href="/user/home.mhtml" class="buttonwhite bluetext">
+						Return to Tabroom Home Screen
+					</a>
+
+				</div>
+%		}
+
+		</div>
+
+%	} else {
+
+		<div class="main">
+
+			<h2>Process complete!</h2>
+
+			<p class='biggish'>
+				Your account has been copied from the NSDA into Tabroom.com.
+				You are now logged into Tabroom and can proceed.
+			</p>
+
+			<div class='full centeralign'>
+
+				<a href="/user/home.mhtml" class="buttonwhite bluetext">
+					Return to Tabroom Home Screen
+				</a>
+
+			</div>
+
+		</div>
+
+%	}
+
