@@ -1,5 +1,6 @@
 <%args>
 	$nsda_school_id => undef
+	$chapter        => undef
 </%args>
 <%init>
 
@@ -8,6 +9,7 @@
 	unless ($chapter) {
 
 		return "No ID number sent" unless $nsda_school_id;
+
 		return "ID number is not a valid NSDA school" unless $nsda_school_id > 10000;
 
 		# Check if there's already a school by that ID
@@ -22,24 +24,27 @@
 	} elsif (not defined $nsda_school_id) {
 
 		$nsda_school_id = $chapter->nsda;
+
 		if (not defined $nsda_school_id) {
 			return "Chapter does not have an NSDA member number and none was provided";
 		}
 
 	} else {
 
-		$chapter->nsda($nsda_school_id);
 	}
 
-	my ($jsonref, $raw) = $m->comp( "api_client.mas",
+	my ($jsonref, $raw) = $m->comp(
+		"api_client.mas",
 		path => "/schools/".$nsda_school_id
 	);
+
 
 	my $school_address;
 
 	if ($jsonref) {
 
 		unless ($chapter) {
+
 			my $already = Tab::Chapter->search(
 				name  => $jsonref->{"official_name"},
 				state => $jsonref->{"state"}
@@ -55,24 +60,26 @@
 		};
 
 		if (@addresses) {
+
 			foreach my $address (@addresses) {
+
 				if ($address->{"primary"}) {
 					$school_address = $address
 				}
+
 				last if $school_address;
 			}
 		}
 
-		unless ($chapter) {
+		my $coach_names;
 
-			my $level = "highschool";
-			$level = "middle" if $jsonref->{"realm"} eq "ms";
+		unless ($chapter) {
 
 			$chapter = Tab::Chapter->create({
 				name => $jsonref->{"official_name"},
 			});
 
-			my $roles_ref = $m->comp("api_client.mas",
+			my ($roles_ref, $roles_raw) = $m->comp("api_client.mas",
 				path => "/schools/$nsda_school_id/members?current=true&confirmed=true"
 			);
 
@@ -82,7 +89,11 @@
 
 			my $dbh = Tab::DBI->db_Main();
 			my $sth = $dbh->prepare("
-				insert into student_setting (student, tag, value, value_date) values (?, ?, ?, ?);
+				insert into student_setting (student, tag, value) values (?, ?, ?);
+			");
+
+			my $sth_date = $dbh->prepare("
+				insert into student_setting (student, tag, value, value_date) values (?, ?, 'date', ?);
 			");
 
 			foreach my $role (@{$roles_ref}) {
@@ -100,7 +111,7 @@
 
 				}
 
-				my $person = 0 unless $person;
+				$person = 0 unless $person;
 
 				if ($role->{role} eq "Student") {
 
@@ -115,13 +126,21 @@
 						person    => $person
 					});
 
-					$sth->execute($student->id, "nsda_paid", "1", "") if $role->{paid};
-					$sth->execute($student->id, "nsda_points", $role->{points}, "") if $role->{points};
-					$sth->execute($student->id, "nsda_joined", "date", $role->{start});
-					$sth->execute($student->id, "districts_eligible", "date", $role->{districts_eligible});
+					$sth->execute($student->id, "nsda_paid", "1") if $role->{paid};
+					$sth->execute($student->id, "nsda_points", $role->{points}) if $role->{points};
+					$sth->execute($student->id, "districts_eligible", $role->{districts_eligible});
+
+					$sth_date->execute($student->id, "nsda_joined", $role->{start});
+
 					$sth->finish();
 
-				} elsif ($role->{role} eq "Coach") {
+				} elsif ($role->{role} eq "Coach" || $role->{"role"} eq "Advisor") {
+
+					if ($coach_names) {
+						$coach_names .= ", ";
+					}
+
+					$coach_names .= $role->{"first"}." ".$role->{"last"};
 
 					my $chapter_judge = Tab::ChapterJudge->create({
 						chapter   => $chapter->id,
@@ -133,7 +152,15 @@
 						person    => $person
 					});
 
-				} elsif ($role->{role} eq "Advisor") {
+				}
+
+				if ($role->{role} eq "Advisor") {
+
+					if ($coach_names) {
+						$coach_names = $role->{first}." ".$role->{last}.", ".$coach_names;
+					} else {
+						$coach_names = $role->{"first"}." ".$role->{"last"};
+					}
 
 					unless ($person) {
 						$person = $m->comp("user_import.mas", nsda_id => $role->{person_id});
@@ -147,6 +174,19 @@
 							tag     => "chapter"
 						});
 					}
+
+					$person = 0 unless $person;
+
+					my $chapter_judge = Tab::ChapterJudge->create({
+						chapter   => $chapter->id,
+						first     => $role->{'first'},
+						middle    => $role->{'middle'},
+						last      => $role->{'last'},
+						phone     => $role->{'phone'},
+						email     => $role->{'email'},
+						person    => $person
+					});
+
 				}
 			}
 		}
@@ -156,9 +196,18 @@
 		$chapter->state($jsonref->{"state"});
 		$chapter->country($jsonref->{"country"});
 		$chapter->district($jsonref->{"district_id"});
-		$chapter->nces($jsonref->{"nces_id"});
+		$chapter->nsda($jsonref->{"school_id"});
+
+		$chapter->setting("nces", $jsonref->{"nces_id"});
+		$chapter->setting('coaches', "text", $coach_names);
+
+		my $level = "highschool";
+		$level = "middle" if $jsonref->{"realm"} eq "ms";
+
+		$chapter->level($level);
 
 		if ($school_address) {
+
 			$chapter->street($school_address->{street});
 			$chapter->city($school_address->{city});
 
@@ -170,6 +219,30 @@
 		}
 
 		$chapter->update();
+
+		if ($level eq "highschool") {
+
+            Tab::ChapterCircuit->create({
+                chapter     => $chapter->id,
+                circuit     => 6,
+                full_member => 1
+            });
+
+            Tab::ChapterCircuit->create({
+                chapter     => $chapter->id,
+                circuit     => 83,
+                full_member => 1
+            });
+
+        } elsif ($level eq "middle") {
+
+            Tab::ChapterCircuit->create({
+                chapter     => $chapter->id,
+                circuit     => 25,
+                full_member => 1
+            });
+
+		}
 	}
 
 	return $chapter;
