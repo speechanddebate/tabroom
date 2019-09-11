@@ -18,18 +18,83 @@
 
 	my @students;
 
-	if ($show_grads) {
-		@students = $chapter->students;
+	my $limit;
+
+	if ($show_grads > 0) {
 	} else {
-		@students = $chapter->students( retired => 0 );
+		$limit .= " and student.retired = 0 ";
 	}
 
-    my @student_requests = Tab::Student->search_where({
-        chapter        => $chapter->id,
-        person_request => { ">", 0 }
-    });
+	my $dbh = Tab::DBI->db_Main();
 
-	my $message;
+	my $sth = $dbh->prepare("
+
+		select
+			student.id, student.first, student.middle, student.last,
+			student.grad_year, student.nsda, student.novice, student.retired,
+			person_request.email, person_request.id,
+			person.email, person.id,
+			nsda_points.value, nsda_de.value
+
+		from (student)
+
+			left join student_setting nsda_points
+				on nsda_points.student = student.id
+				and nsda_points.tag = 'nsda_points'
+
+			left join student_setting nsda_de
+				on nsda_de.student = student.id
+				and nsda_de.tag = 'districts_eligible'
+
+			left join person on student.person = person.id
+			left join person person_request on student.person_request = person_request.id
+
+		where student.chapter = ?
+		$limit
+
+		order by student.grad_year DESC, student.last
+
+
+	");
+
+	my %students;
+	my %student_requests;
+
+	$sth->execute($chapter->id);
+
+	while (
+		my (
+			$student_id, $student_first, $student_middle, $student_last,
+			$student_grad_year, $student_nsda, $student_novice, $student_retired,
+			$person_request_email, $person_request_id,
+			$person_email, $person_id,
+			$nsda_points, $nsda_de
+		) = $sth->fetchrow_array()
+	) {
+
+		$students{$student_id}{"first"} = $student_first;
+		$students{$student_id}{"middle"} = $student_middle;
+		$students{$student_id}{"last"} = $student_last;
+
+		$students{$student_id}{"nsda"} = $student_nsda;
+		$students{$student_id}{"grad_year"} = $student_grad_year;
+		$students{$student_id}{"novice"} = $student_novice;
+		$students{$student_id}{"retired"} = $student_retired;
+
+		$students{$student_id}{"points"} = $nsda_points;
+		$students{$student_id}{"de"} = $nsda_de;
+
+		$students{$student_id}{"person"} = $person_id;
+		$students{$student_id}{"person_email"} = $person_email;
+
+		if ($person_request_id) {
+			$students{$student_id}{"person_request"} = $person_request_id;
+			$students{$student_id}{"person_request_email"} = $person_request_email;
+			$student_requests{$student_id}++;
+		}
+	}
+
+	my $nsda = $chapter->nsda;
 
 </%init>
 
@@ -44,7 +109,7 @@
 			whoami  => "students"
 		&>
 
-%		if (@student_requests) {
+%		if (keys %student_requests) {
 
 			<h4>Competitors requesting online access</h4>
 
@@ -82,38 +147,28 @@
 				</thead>
 
 				<tbody>
-<%perl>
 
-				foreach my $request (@student_requests) {
+%				foreach my $student_id (sort keys %student_requests) {
 
-					unless ($request->person_request && $request->person_request->id) {
-						$request->delete;
-						next;
-					}
-
-</%perl>
-					<tr id="<% $request->id %>">
+					<tr id="<% $student_id %>">
 
 						<td>
-							<% $request->first." ".$request->last %>
+							<% $students{$student_id}{"first"} %>
+							<% $students{$student_id}{"last"} %>
 						</td>
 
-						<td>
-							<span class="half">
-								<% $request->person_request->first %>
-								<% $request->person_request->last %>
-							</span>
-							<span class="half nospace rightalign">
-								<a href="mailto:<% $request->person_request->email %>">
-								(<% $request->person_request->email %>)
-								</a>
-							</span>
+						<td class="centeralign">
+							<a
+								class="full white"
+								href="mailto:<% $students{$student_id}{"person_request_email"} %> ">
+								<% $students{$student_id}{"person_request_email"} %>
+							</a>
 						</td>
 
 						<td class="centeralign nospace padvertless">
 							<a
 								class         = "buttonwhite greentext fa fa-lg fa-check invert"
-								target_id     = "<% $request->id %>"
+								target_id     = "<% $student_id %>"
 								property_name = "accept"
 								on_success    = "destroy"
 								onClick       = "postSwitch(this, 'link.mhtml');"
@@ -123,7 +178,7 @@
 						<td class="centeralign nospace padvertless">
 							<a
 								class="buttonwhite redtext fa fa-lg fa-times invert"
-								target_id     = "<% $request->id %>"
+								target_id     = "<% $student_id %>"
 								property_name = "deny"
 								on_success    = "destroy"
 								onClick       = "postSwitch(this, 'link.mhtml');"
@@ -144,7 +199,7 @@
 		<div class="full nospace">
 			<span class="half nospace">
 				<h4>
-					<% scalar @students %>
+					<% scalar keys (%students) %>
 					<% $show_grads ? "Total" : "Active" %>
 					Competitors
 				</h4>
@@ -170,6 +225,7 @@
 				<tr class="yellowrow">
 
 					<th class="smaller">
+						Record
 					</th>
 
 					<th class="smaller">
@@ -191,6 +247,17 @@
 						Account
 					</th>
 
+%					if ($nsda) {
+
+						<th class="smaller nowrap">
+							Points
+						</th>
+
+						<th class="smaller">
+							Districts
+						</th>
+%					}
+
 					<th class="smaller nowrap">
 						Novice
 					</th>
@@ -202,97 +269,114 @@
 			</thead>
 			<tbody>
 
-% 			foreach my $student (@students) {
+<%perl>
+			foreach my $student_id (
+				sort {
+					$students{$a}{"grad_year"} <=> $students{$b}{"grad_year"}
+					|| $students{$a}{"last"} cmp $students{$b}{"last"}
+				} keys %students
+			) {
+</%perl>
 
-				<tr>
+				<tr id="<% $student_id %>">
 
 					<td class="centeralign">
-						<a class="hidden" id="<% $student->id %>"></a>
+						<a class="hidden" id="<% $student_id %>"></a>
 						<a
-							class  = "buttonwhite greentext smallish hover"
+							class  = "buttonwhite greentext smallish hover fa fa-lg fa-file-text-o"
 							target = "_blank"
-							href   = "record.mhtml?student_id=<% $student->id %>&from=<% $student->id %>"
+							href   = "record.mhtml?student_id=<% $student_id %>&from=<% $student_id %>"
+						></a>
+					</td>
+
+					<td class="smallish">
+						<a
+							class = "white"
+							href  = "student_edit.mhtml?student_id=<% $student_id %>&from=<% $student_id %>"
 						>
-							Records
+							<% $students{$student_id}{"first"} %>
+						</a>
+					</td>
+					<td class="smallish">
+						<a
+							class = "white"
+							href  = "student_edit.mhtml?student_id=<% $student_id %>&from=<% $student_id %>"
+						>
+							<% $students{$student_id}{"middle"} %>
 						</a>
 					</td>
 
 					<td class="smallish">
 						<a
 							class = "white"
-							href  = "student_edit.mhtml?student_id=<% $student->id %>&from=<% $student->id %>"
+							href  = "student_edit.mhtml?student_id=<% $student_id %>&from=<% $student_id %>"
 						>
-							<% $student->first %>
-						</a>
-					</td>
-					<td class="smallish">
-						<a
-							class = "white"
-							href  = "student_edit.mhtml?student_id=<% $student->id %>&from=<% $student->id %>"
-						>
-							<% $student->middle %>
-						</a>
-					</td>
-
-					<td class="smallish">
-						<a
-							class = "white"
-							href  = "student_edit.mhtml?student_id=<% $student->id %>&from=<% $student->id %>"
-						>
-							<% $student->last %>
+							<% $students{$student_id}{"last"} %>
 						</a>
 					</td>
 
 					<td class="centeralign smallish">
-						<% $student->grad_year %>
+						<% $students{$student_id}{"grad_year"} %>
 					</td>
 
 					<td class="smallish">
-%						if ($student->person > 0) {
+%						if ($students{$student_id}{"person_email"}) {
 							<a
-								class="white"
-								href="mailto:<% ($student->person) ? $student->person->email : "" %>"
+								class = "white full"
+								href  = "mailto:<% $students{$student_id}{"person_email"} %>"
 							>
-								<% ($student->person) ? $student->person->email : "" %>
+								<% $students{$student_id}{"person_email"} %>
 							</a>
 %						}
 					</td>
 
-					<td class="centeralign smallish">
+%					if ($nsda) {
 
-						<span class="hidden"><% $student->novice %></span>
+						<td class="centeralign smallish">
+							<% $students{$student_id}{"points"} %>
+						</td>
 
-						<label class="switch">
+						<td class="centeralign smallish">
+							<% $students{$student_id}{"de"}  ? "Y" : "" %>
+						</td>
+%					}
+
+					<td class="centeralign">
+
+						<span class="hidden"><% $students{$student_id}{"novice"} %></span>
+
+						<label class="switch smaller">
 							<input
 								type          = "checkbox"
 								value         = "1"
-								id            = "<% $student->id %>_novice"
+								id            = "<% $student_id %>_novice"
 								property_name = "novice"
 								target_type   = "student"
-								target_id     = "<% $student->id %>"
+								target_id     = "<% $student_id %>"
 								onChange      = "postSwitch( this, 'novice_switch.mhtml');"
 
-								<% $student->novice ? 'checked="checked"' : "" %>
+								<% $students{$student_id}{"novice"} ? 'checked="checked"' : "" %>
 							>
 							<div class="slider"></div>
 						</label>
 					</td>
 
-					<td class="centeralign smallish">
+					<td class="centeralign">
 
-						<span class="hidden"><% $student->retired %></span>
+						<span class="hidden"><% $students{$student_id}{"retired"} %></span>
 
-						<label class="switch">
+						<label class="smaller switch">
 							<input
 								type          = "checkbox"
 								value         = "1"
-								id            = "<% $student->id %>_retired"
+								id            = "<% $student_id %>_retired"
 								property_name = "retired"
 								target_type   = "student"
-								target_id     = "<% $student->id %>"
+								target_id     = "<% $student_id %>"
+								on_success    = "destroy"
 								onChange      = "postSwitch( this, 'retired_switch.mhtml');"
 
-								<% $student->retired ? 'checked="checked"' : "" %>
+								<% $students{$student_id}{"retired"} ? 'checked="checked"' : "" %>
 							>
 							<div class="slider offmore"></div>
 						</label>
@@ -346,6 +430,14 @@
 				<h6 class="martop">NSDA Points</h6>
 
 %				if ($chapter && $chapter->nsda > 0) {
+
+					<a
+						class="blue full"
+						href="/user/nsda/sync_roster.mhtml?chapter_id=<% $chapter->id %>"
+					>
+						Sync NSDA Points &amp; Degrees
+					</a>
+
 
 					<a
 						class="blue martop full"

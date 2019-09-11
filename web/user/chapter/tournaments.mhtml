@@ -67,20 +67,24 @@
 
 	my @existing_tourns = Tab::Tourn->search_by_entered_tourn($chapter->id, $search_start_string);
 
-	Tab::Tourn->set_sql("by_open_tourn", "
-		select distinct tourn.*
-			from tourn,tourn_circuit,chapter_circuit
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			tourn.id, tourn.name, tourn.city, tourn.state, tourn.country,
+				tourn.start, tourn.end, tourn.webname,
+				tourn.reg_start, tourn.reg_end,
+				group_concat(circuit.abbr SEPARATOR ',') as circuits
+
+			from tourn, tourn_circuit, chapter_circuit, circuit
+
 			where chapter_circuit.chapter = ?
 			and chapter_circuit.circuit = tourn_circuit.circuit
 			and tourn_circuit.tourn = tourn.id
+			and tourn_circuit.circuit = circuit.id
 			and tourn.hidden != 1
-			and tourn.reg_start < ?
-			and tourn.reg_end > ?
-			and not exists (
-				select school.id from school
-				where school.chapter = chapter_circuit.chapter
-				and school.tourn = tourn.id
-			)
+			and tourn.reg_end > NOW()
+			and tourn.reg_start < NOW()
 
 			and not exists (
 				select tourn_setting.id
@@ -120,31 +124,81 @@
 				and tourn_setting.tourn = tourn.id
 			)
 
+			group by tourn.id
 			order by tourn.start, tourn.name
-		");
+	");
 
-	my @open_tourns = Tab::Tourn->search_by_open_tourn(
-		$chapter->id,
-		$now_string,
-		$now_string
-	);
+	my %open_tourns;
 
-	my $district;
+	$sth->execute($chapter->id);
+
+	while (
+		my (
+			$tourn_id, $tourn_name, $tourn_city, $tourn_state, $tourn_country,
+			$tourn_start, $tourn_end, $tourn_webname,
+			$tourn_reg_start, $tourn_reg_end,
+			$circuits
+		) = $sth->fetchrow_array()
+	) {
+
+		$open_tourns{$tourn_id}{"name"}     = $tourn_name;
+		$open_tourns{$tourn_id}{"city"}     = $tourn_city;
+		$open_tourns{$tourn_id}{"state"}    = $tourn_state;
+		$open_tourns{$tourn_id}{"webname"}  = $tourn_webname;
+		$open_tourns{$tourn_id}{"circuits"} = $circuits;
+
+		$open_tourns{$tourn_id}{"state"} = $tourn_country
+			unless $open_tourns{$tourn_id}{"state"};
+
+		$open_tourns{$tourn_id}{"start_sort"} = $tourn_start;
+		$open_tourns{$tourn_id}{"start_sort"} =~ s/[\D_]//g;
+		$open_tourns{$tourn_id}{"reg_end_sort"} = $tourn_reg_end;
+
+		$open_tourns{$tourn_id}{"start"} = substr($tourn_start, 5, 2)."/".substr($tourn_start, 8, 2);
+		$open_tourns{$tourn_id}{"end"} = substr($tourn_end, 5, 2)."/".substr($tourn_end, 8, 2);
+
+		$open_tourns{$tourn_id}{"reg_start"} = substr($tourn_reg_start, 5, 2)."/".substr($tourn_reg_start, 8, 2);
+		$open_tourns{$tourn_id}{"reg_end"} = substr($tourn_reg_end, 5, 2)."/".substr($tourn_reg_end, 8, 2);
+		$open_tourns{$tourn_id}{"reg_end"} =~ s/^0//;
+		$open_tourns{$tourn_id}{"reg_end"} =~ s/\/0/\//;
+	}
+
+	my $districts;
 
 	if ($chapter->district) {
-
-		my @districts = $m->comp(
+		($districts) = $m->comp(
 			"/funclib/district_tourns.mas",
 			district => $chapter->district,
-			open     => 1
+			open     => 1,
+			tabroom  => 1
 		);
 
-		$district = shift @districts if @districts;
+		if ($districts) {
 
-		undef $district if $district && $district->setting('nsda_tabbing_software') ne "tabroom";
+			$open_tourns{$districts->id}{"name"} = $districts->name;
+			$open_tourns{$districts->id}{"start_sort"} = 1;
+			$open_tourns{$districts->id}{"start"} = $districts->start->month."/".$districts->start->day;
+			$open_tourns{$districts->id}{"end"} = $districts->end->month."/".$districts->end->day;
 
-		unshift @open_tourns, $district if $district;
+			foreach my $weekend ($districts->weekends) {
 
+				unless ($weekend->state eq $open_tourns{$districts->id}{state}) {
+					$open_tourns{$districts->id}{state} .= ", " unless
+						$open_tourns{$districts->id}{state};
+
+					$open_tourns{$districts->id}{state} .= $weekend->state;
+				}
+
+				unless ($weekend->city eq $open_tourns{$districts->id}{city}) {
+					$open_tourns{$districts->id}{city} .= ", " unless
+						$open_tourns{$districts->id}{city};
+
+					$open_tourns{$districts->id}{city} .= $weekend->city;
+				}
+			}
+
+			$open_tourns{$districts->id}{circuits} = "NSDA";
+		}
 	}
 
 </%init>
@@ -305,7 +359,7 @@
 										Entries
 									</a>
 
-%									if ($et->id == $district){
+%									if ($et->id == $districts ){
 										<br />
 										<a
 											class	= "smallish buttonwhite greentext hover"
@@ -385,7 +439,7 @@
 				</table>
 %			}
 
-%			if (@open_tourns) {
+%			if (%open_tourns) {
 
 				<div class="full martopmuchmore nospace">
 
@@ -395,7 +449,7 @@
 						</h4>
 					</span>
 
-					<span class="third rightalign nospace" id="metoo_buttonarea">
+					<span class="third rightalign nospace" id="open_tourns_buttonarea">
 						<a
 							onClick = "showIgnores();"
 							class   = "buttonwhite bluetext hover fa-sm fa fa-eye"
@@ -416,7 +470,7 @@
 
 				</div>
 
-				<& /funclib/tablesorter.mas, table => "metoo" &>
+				<& /funclib/tablesorter.mas, table => "open_tourns" &>
 
 				<script>
 
@@ -427,9 +481,9 @@
 						$("#"+targetId+"_ignoreme").addClass("hidden");
 						$("#"+targetId+"_ignoremenot").removeClass("hidden");
 
-						$("#metoo").trigger("applyWidgets");
-						$("#metoo").trigger("update");
-						$("#metoo").trigger('resort');
+						$("#open_tourns").trigger("applyWidgets");
+						$("#open_tourns").trigger("update");
+						$("#open_tourns").trigger('resort');
 					}
 
 
@@ -439,28 +493,28 @@
 						$("#"+targetId).removeClass("ignored");
 						$("#"+targetId+"_ignoreme").removeClass("hidden");
 						$("#"+targetId+"_ignoremenot").addClass("hidden");
-						$("#metoo").trigger("applyWidgets");
-						$("#metoo").trigger("update");
-						$("#metoo").trigger('resort');
+						$("#open_tourns").trigger("applyWidgets");
+						$("#open_tourns").trigger("update");
+						$("#open_tourns").trigger('resort');
 					}
 
 					function showIgnores() {
 						$(".ignored").removeClass("hidden");
 						$("#ignoreswitch").addClass("hidden");
 						$("#ignorenotswitch").removeClass("hidden");
-						$("#metoo").trigger("applyWidgets");
+						$("#open_tourns").trigger("applyWidgets");
 					}
 
 					function hideIgnores() {
 						$(".ignored").addClass("hidden");
 						$("#ignoreswitch").removeClass("hidden");
 						$("#ignorenotswitch").addClass("hidden");
-						$("#metoo").trigger("applyWidgets");
+						$("#open_tourns").trigger("applyWidgets");
 					}
 
 				</script>
 
-				<table id="metoo">
+				<table id="open_tourns">
 
 					<thead>
 
@@ -479,15 +533,18 @@
 							</th>
 
 							<th class="smallish">
-								Locale
+								City
 							</th>
 
+							<th class="smallish">
+								Location
+							</th>
 							<th class="smallish">
 								Circuits
 							</th>
 
 							<th class="smallish">
-								Due
+								Reg Close
 							</th>
 
 							<th class="nosort">
@@ -496,28 +553,35 @@
 
 					</thead>
 					<tbody>
+<%perl>
 
-%					my %ignores = $m->comp("/funclib/tourn_ignores.mas", person => $person);
+					my %ignores = $m->comp("/funclib/tourn_ignores.mas", person => $person);
 
-%					foreach my $ot (@open_tourns) {
+					foreach my $tourn_id (
+						sort {
+							$open_tourns{$a}{"start_sort"} <=> $open_tourns{$b}{"start_sort"}
+							|| $open_tourns{$a}{"name"} cmp $open_tourns{$b}{"name"}
+						} keys %open_tourns
+					) {
 
-%						next if $used{$ot->id}++;
+						next if $used{$tourn_id}++;
+</%perl>
 
 						<tr
-							id    = "<% $ot->id %>"
-							class = "<% $ignores{$ot->id} ? "ignored hidden" : "" %>"
+							id    = "<% $tourn_id %>"
+							class = "<% $ignores{$tourn_id} ? "ignored hidden" : "" %>"
 						>
 
-							<td class="nospace">
+							<td class="nospace centeralign">
 
 								<a
 									value         = "1"
-									id            = "<% $ot->id %>_ignoreme"
+									id            = "<% $tourn_id %>_ignoreme"
 									property_name = "ignore"
 									target_type   = "tourn"
-									target_id     = "<% $ot->id %>"
+									target_id     = "<% $tourn_id %>"
 									onClick       = "postSwitch(this, 'ignore_switch.mhtml'); ignoreTourn(this);"
-									class         = "<% $ignores{$ot->id} ? "hidden" : "" %>
+									class         = "<% $ignores{$tourn_id} ? "hidden" : "" %>
 													 buttonwhite fa-sm fa fa-eye-slash redtext hover"
 									title         = "Conceal this tournament"
 								>
@@ -525,12 +589,12 @@
 
 								<a
 									value         = "0"
-									id            = "<% $ot->id %>_ignoremenot"
+									id            = "<% $tourn_id %>_ignoremenot"
 									property_name = "ignore"
 									target_type   = "tourn"
-									target_id     = "<% $ot->id %>"
+									target_id     = "<% $tourn_id %>"
 									onClick       = "postSwitch( this, 'ignore_switch.mhtml'); revealTourn(this);"
-									class         = "<% $ignores{$ot->id} ? "" : "hidden" %>
+									class         = "<% $ignores{$tourn_id} ? "" : "hidden" %>
 													 buttonwhite fa-sm fa fa-eye greentext hover"
 									title         = "Reveal tournament"
 								>
@@ -539,44 +603,47 @@
 							</td>
 
 							<td class="smaller nowrap">
-								<span class="hidden"><% $ot->start->epoch %></span>
-								<% Tab::niceshortdate($ot->start->set_time_zone($tz)) %>
-								<% ($ot->start->day != $ot->end->day) ? "-".Tab::niceshortdate($ot->end->set_time_zone($tz)) : "" %>
+								<span class="hidden"><% $open_tourns{$tourn_id}{start_sort} %></span>
+								<%
+									$open_tourns{$tourn_id}{start}
+								%><% $open_tourns{$tourn_id}{start} ne $open_tourns{$tourn_id}{end}
+									? "-".$open_tourns{$tourn_id}{end}
+									: ""
+								%>
 							</td>
 
 							<td class="smallish nospace">
 								<a
 									class="white padvert"
-									href="/index/tourn/index?tourn_id=<% $ot->id %>"
+									href="/index/tourn/index?tourn_id=<% $tourn_id %>"
 								>
-									<% $ot->name %>
+									<% $open_tourns{$tourn_id}{name} %>
 								</a>
 							</td>
 
-							<td class="centeralign smallish">
-								<% $ot->location %>
+							<td class="smallish">
+								<% $open_tourns{$tourn_id}{city} %>
 							</td>
 
-							<td class="centeralign smallish nospace">
+							<td class="centeralign smallish">
+								<% $open_tourns{$tourn_id}{state} %>
+							</td>
+
+							<td class="centeralign smallish">
 								<span class="limitwrap">
-								<% $m->comp(
-										"/funclib/tourn_circuits.mas",
-										tourn      => $ot,
-										print_abbr => 1
-									)
-								%>
+									<% $open_tourns{$tourn_id}{circuits} %>
 								</span>
 							</td>
 
 							<td width="8%" class="centeralign smallish">
-								<span class="hidden"><% $ot->reg_end->epoch %></span>
-								<% Tab::niceshortdate($ot->reg_end->set_time_zone($tz)) %>
+								<span class="hidden"><% $open_tourns{$tourn_id}{reg_end_sort} %></span>
+								<%  $open_tourns{$tourn_id}{reg_end} %>
 							</td>
 
 							<td class="centeralign marno padless">
 								<a
 									class="smallish buttonwhite greentext smallish hover invert"
-									href="/user/enter/create.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $ot->id %>">
+									href="/user/enter/create.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $tourn_id %>">
 									Register
 								</a>
 							</td>
@@ -588,7 +655,7 @@
 				</table>
 %			}
 
-%			unless (@open_tourns || @existing_tourns) {
+%			unless (%open_tourns || @existing_tourns) {
 
 %				if ($m->comp('/funclib/chapter_circuits.mas', chapter => $chapter)) {
 
