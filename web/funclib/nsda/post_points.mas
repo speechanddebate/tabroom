@@ -1,0 +1,678 @@
+<%args>
+	$tourn  => undef
+	$event  => undef
+	$person => undef
+	$debug  => undef
+</%args>
+<%init>
+
+	use Math::Round qw(nearest);
+
+	my @events;
+
+	if ($event) {
+		push @events, $event;
+		$tourn = $event->tourn;
+	} elsif ($tourn) {
+		push @events, $tourn->events;
+	}
+
+	return ("No event or tournament sent") unless @events;
+
+	my $districts = JSON::false;
+	my $nationals = JSON::false;
+
+	if ($tourn->setting("nsda_district")) {
+		$districts = JSON::true;
+	} elsif ($tourn->setting("nsda_nats")) {
+		$nationals = JSON::true;
+	}
+
+	my $tourn_data = {
+		id        => int($tourn->id),
+		name      => $tourn->name,
+		location  => $tourn->city,
+		state     => $tourn->state,
+		start     => DateTime::Format::MySQL->format_datetime($tourn->start),
+		end       => DateTime::Format::MySQL->format_datetime($tourn->end),
+		source    => "TR",
+		districts => $districts,
+		nationals => $nationals
+	};
+
+	my $results;
+
+	EVENT:
+	foreach my $event (@events) {
+
+		my $data;
+		$data->{"tourn"} = $tourn_data;
+
+		my %event_settings = $event->all_settings();
+		my $event_posted = $event_settings{"nsda_points_posted"};
+
+		undef $event_posted if $person && $person->site_admin && $ARGS{'repeat'};
+		undef $event_posted if $debug;
+
+		if ($event_posted) {
+			$event->setting("nsda_points_posted", 1);
+			$event->setting("nsda_point_codefail", 0);
+			$results .= $event->name." was already posted.  Skipped \n";
+			next EVENT;
+		}
+
+		my $event_code = $event_settings{"nsda_event_category"};
+
+		unless ($event_code) {
+			$event_code = 301 if $event->type eq "congress";
+			$event_code = 105 if $event->type eq "wsdc";
+			$event_code = &guess_code($event->name) unless $event_code;
+			$event_code = &guess_code($event->abbr) unless $event_code;
+		}
+
+		unless ($event_code) {
+			$results .= $event->name." category code undetermined. Skipped and flagged for review.\n";
+			$event->setting("nsda_point_codefail", 1);
+			next EVENT;
+		}
+
+		unless ($event_code eq $event_settings{"nsda_event_category"}) {
+			$event->setting("nsda_event_category", $event_code);
+		}
+
+		my $event_hash = {
+			id          => int($event->id),
+			category_id => int($event_code),
+			name        => $event->name
+		};
+
+		push @{$data->{'events'}}, $event_hash;
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $sth = $dbh->prepare("
+			select
+				chapter.nsda, chapter.name,
+				student.id, student.first, student.last, student.nsda,
+				entry.id,
+				timeslot.start,
+				round.id, round.name, round.type,
+				panel.id, panel.letter, panel.bye,
+				ballot.id, ballot.bye, ballot.forfeit, ballot.judge,
+				score.id, score.tag, score.value, score.student, score.speech,
+				sstudent.id, sstudent.nsda,
+				schapter.id, schapter.nsda, schapter.name
+
+			from
+				(entry, entry_student es, student, chapter, round, timeslot, panel, ballot)
+
+			left join score on score.ballot = ballot.id and score.tag in ('point', 'winloss', 'rank', 'speech')
+			left join student sstudent on sstudent.id = score.student
+			left join chapter schapter on schapter.id = sstudent.chapter
+
+			where entry.event = ?
+				and entry.id = es.entry
+				and entry.dq != 1
+				and es.student = student.id
+				and student.chapter = chapter.id
+				and entry.id = ballot.entry
+				and ballot.panel = panel.id
+				and panel.round = round.id
+				and round.timeslot = timeslot.id
+		");
+
+		$sth->execute($event->id);
+
+		my %scores;
+		my %rounds;
+		my %sections;
+		my %students;
+
+		my $event_type = $event->type;
+		$event_type = "debate" if $event_type eq "wsdc";
+
+		my %days;
+		my $tz = $tourn->tz;
+		$tz = "UTC" unless $tz;
+
+		if ($event->type eq "congress") {
+
+			my $start = $tourn->start;
+			my $end = $tourn->end;
+
+			my $counter = 1;
+			$days{$start->day} = $counter;
+
+			while ($start->day != $end->day) {
+				$counter++;
+				$start->add( days => 1);
+				$days{$start->day} = $counter;
+			}
+		}
+
+		while (
+			my (
+				$chapter_nsda, $chapter_name,
+				$student_id, $student_first, $student_last, $student_nsda,
+				$entry_id,
+				$timeslot_start,
+				$round_id, $round_name, $round_type,
+				$section_id, $section_letter, $section_bye,
+				$ballot_id, $ballot_bye, $ballot_forfeit, $judge_id,
+				$score_id, $score_tag, $score_value, $score_student, $score_speech,
+				$sstudent_id, $sstudent_nsda,
+				$schapter_id, $schapter_nsda, $schapter_name
+			) = $sth->fetchrow_array()
+		) {
+
+			my $school_id = $schapter_nsda;
+			$school_id = $chapter_nsda unless $school_id > 0;
+
+			my $student_id = $sstudent_nsda;
+			$student_id = $student_nsda unless $student_id;
+
+			if ($student_id) {
+				unless ($students{$student_id}{"school"}) {
+					$students{$student_id}{"school"} = $school_id;
+				}
+			}
+
+			next unless $students{$student_id}{"school"};
+
+			if ($event_type eq "congress") {
+
+				next unless $score_tag eq "speech";
+
+				unless ($rounds{$round_name}{"day"}) {
+					$rounds{$round_name}{"day"} = eval {
+						my $dt = DateTime::Format::parse_datetime($timeslot_start);
+						$dt->set_time_zone("UTC");
+						$dt->set_time_zone($tz);
+						return $days{$dt->day};
+					};
+				}
+
+				unless ($rounds{$round_name}{"day"}) {
+					$rounds{$round_name}{"day"} = 1;
+				}
+
+				if ($student_id && $school_id) {
+					$scores{$entry_id}{$student_id}{$round_name}{"speech"}{$score_speech}{$judge_id} = $score_value;
+				}
+
+			} elsif ($event_type eq "speech") {
+
+				next unless $score_tag eq "rank" && $score_value > 0;
+
+				unless ($sections{$section_id}{$entry_id}{$judge_id}) {
+					$sections{$section_id}{$entry_id}{"rank"} += $score_value;
+					$sections{$section_id}{$entry_id}{"recip"} += (1 / $score_value);
+					$sections{$section_id}{$entry_id}{$judge_id}++;
+				}
+
+				if ($student_id && $school_id) {
+					$scores{$entry_id}{$student_id}{$round_name}{"rank"}{$judge_id} = $score_value;
+					$scores{$entry_id}{$student_id}{$round_name}{"section"} = $section_id;
+				}
+
+			} elsif ($event_type eq "debate") {
+
+				if ($round_type eq "elim" || $round_type eq "final" || $round_type eq "runoff") {
+					$scores{$entry_id}{$sstudent_nsda}{$round_name}{"spoke"}++ if $sstudent_nsda;
+					$scores{$entry_id}{$student_nsda}{$round_name}{"spoke"}++ if $student_nsda;
+
+				} else {
+					$scores{$entry_id}{$sstudent_nsda}{$round_name}{"spoke"}++ if $sstudent_nsda;
+				}
+
+				if ($student_id && $school_id) {
+
+					if ($section_bye || $ballot_bye) {
+						$scores{$entry_id}{$student_id}{$round_name}{"bye"}++;
+					} elsif ($ballot_forfeit) {
+						$scores{$entry_id}{$student_id}{$round_name}{"forfeit"}++;
+					} else {
+						next unless $score_tag eq "winloss";
+						$score_value = 0 unless $score_value;
+						$scores{$entry_id}{$student_id}{$round_name}{"winloss"}{$judge_id} = $score_value;
+					}
+				}
+			}
+		}
+
+		unless (keys %scores) {
+			$event->setting("nsda_points_posted", 1);
+			$event->setting("nsda_point_codefail", 0);
+			$results .= $event->name." had no entries or results.  Marked and skipped \n";
+			next EVENT;
+		}
+
+		if ($event_type eq "congress") {
+
+			foreach my $entry_id (keys %scores) {
+				foreach my $student_id (keys %{$scores{$entry_id}}) {
+					foreach my $round_name (keys %{$scores{$entry_id}{$student_id}}) {
+
+						my $result;
+						my $round_total;
+
+						foreach my $speech (keys %{$scores{$student_id}{$round_name}{"speech"}}) {
+
+							my $speech_total;
+							my $judge_count;
+
+							foreach my $judge (keys %{$scores{$student_id}{$round_name}{"speech"}{$speech}}) {
+								$judge_count++;
+								$speech_total += $scores{$student_id}{$round_name}{"speech"}{$speech}{$judge};
+							}
+
+							my $speech_score = nearest($speech_total / $judge_count);
+							$round_total += $speech_score;
+						}
+
+						if ($round_total) {
+							$result = {
+								person_id => int($student_id),
+								entry_id  => int($entry_id),
+								school_id => int($students{$student_id}{"school"}),
+								event_id  => int($event->id),
+								round     => int($round_name),
+								result    => $round_total,
+								day       => int($rounds{$round_name}{"day"})
+							};
+
+							push @{$data->{'results'}}, $result;
+						}
+					}
+				}
+			}
+
+		} elsif ($event_type eq "speech") {
+
+			foreach my $section_id (keys %sections) {
+
+				my $last_rank;
+				my $last_recip;
+
+				my $counter;
+				my $delayed_count;
+
+				foreach my $entry_id (
+					sort {
+						$sections{$section_id}{$a}{"rank"} <=> $sections{$section_id}{$b}{"rank"}
+						|| $sections{$section_id}{$b}{"recip"} <=> $sections{$section_id}{$a}{"recip"}
+					} keys %{$sections{$section_id}}
+				) {
+
+					if (
+						$sections{$section_id}{$entry_id}{'ranks'} == $last_rank
+						&& $sections{$section_id}{$entry_id}{'recip'} == $last_recip
+						&& ($last_rank && $last_recip)
+					)  {
+
+						$delayed_count++;
+
+					} else {
+
+						$counter++;
+
+						$counter += $delayed_count;
+						undef $delayed_count;
+
+						$last_rank = $sections{$section_id}{$entry_id}{'rank'};
+						$last_recip = $sections{$section_id}{$entry_id}{'recip'};
+					}
+
+					$sections{$section_id}{$entry_id}{"place"} = $counter;
+
+				}
+			}
+
+			foreach my $entry_id (keys %scores) {
+				foreach my $student_id (keys %{$scores{$entry_id}}) {
+					foreach my $round_name (keys %{$scores{$entry_id}{$student_id}}) {
+
+						my $section_id = $scores{$entry_id}{$student_id}{$round_name}{"section"};
+						my $place = $sections{$section_id}{$entry_id}{"place"};
+
+						next unless $place;
+
+						my $result = {
+							person_id => int($student_id),
+							entry_id  => int($entry_id),
+							school_id => int($students{$student_id}{"school"}),
+							event_id  => int($event->id),
+							round     => int($round_name),
+							result    => $place
+						};
+
+
+						push @{$data->{'results'}}, $result;
+					}
+				}
+			}
+
+		} elsif ($event_type eq "debate") {
+
+			foreach my $entry_id (keys %scores) {
+				foreach my $student_id (keys %{$scores{$entry_id}}) {
+					foreach my $round_name (keys %{$scores{$entry_id}{$student_id}}) {
+
+						next unless $scores{$entry_id}{$student_id}{$round_name}{"spoke"};
+
+						my $place;
+
+						if ($scores{$entry_id}{$student_id}{$round_name}{"bye"}) {
+
+							$place = "B";
+
+						} elsif ($scores{$entry_id}{$student_id}{$round_name}{"forfeit"}) {
+
+							$place = "F";
+
+						} else {
+
+							my $wins;
+							my $losses;
+
+							foreach my $judge_id ( keys %{$scores{$entry_id}{$student_id}{$round_name}{"winloss"}}) {
+
+								if ($scores{$entry_id}{$student_id}{$round_name}{"winloss"}{$judge_id} > 0) {
+									$wins++;
+								} else {
+									$losses++;
+								}
+							}
+
+							if ($wins > $losses) {
+								$place = "W"; # Win
+							} elsif ($wins < $losses) {
+								$place = "L";  # Loss
+							} elsif ( ($wins > 0) && $wins == $losses) {
+								$place = "S"; # Split
+							} else {
+								$place = "ND"; # No decision
+							}
+						}
+
+						my $result = {
+							person_id => int($student_id),
+							entry_id  => int($entry_id),
+							school_id => int($students{$student_id}{"school"}),
+							event_id  => int($event->id),
+							round     => int($round_name),
+							result    => $place
+						};
+
+						push @{$data->{'results'}}, $result;
+					}
+				}
+			}
+		}
+
+		unless ($data->{'results'} && scalar @{$data->{'results'}}) {
+			$event->setting("nsda_points_posted", 1);
+			$event->setting("nsda_point_codefail", 0);
+			$results .= $event->name." had no points and results.  Marked and skipped \n";
+			next EVENT;
+		}
+
+		if ($debug) {
+			$m->clear_buffer();
+			$r->content_type('application/json');
+			my $filename = $event->name;
+			$filename =~ s/[\W_]//g;
+			$filename .= "-Autopoints.json";
+			$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+			$m->print(JSON::encode_json($data));
+			$m->abort();
+		}
+
+		if ($data) {
+
+			my ($results_hash, $raw) = $m->comp(
+				"api_client.mas",
+				path     => "/autopoints",
+				post_ref => $data
+			);
+
+			my $raw_hash = JSON::decode_json($raw);
+
+			if ($raw_hash
+				&& $raw_hash->{"message"} eq "Invalid person_ids"
+				&& $raw_hash->{"invalidIds"}
+			) {
+
+				my $dbh = Tab::DBI->db_Main();
+
+				my $sth = $dbh->prepare("
+					update student set student.nsda = NULL where student.nsda = ?
+				");
+
+				foreach my $nsda_id (@{$raw_hash->{"invalidIds"}}) {
+					if ($nsda_id > 0) {
+						$sth->execute($nsda_id);
+						$sth->finish();
+					}
+				}
+
+				unless ($ARGS{"level"}) {
+					# OMG RECURSION OMG OMG
+					$results .= $m->comp(
+						"post_points.mas",
+						event  => $event,
+						tourn  => $tourn,
+						person => $person,
+						repeat => $ARGS{'repeat'},
+						level  => 1
+					);
+				}
+
+			} elsif ($raw_hash->{"message"} eq "Autopoints successfully posted") {
+
+				$results .= $event->name." points posted successfully.\n";
+
+				my $now = DateTime->now();
+
+				Tab::ChangeLog->create({
+					type        => 'tabbing',
+					event       => $event->id,
+					tourn       => $tourn->id,
+					person      => 0,
+					created     => $now,
+					description => "NSDA Points auto-posted"
+				});
+
+				$event->setting("nsda_points_posted", 1);
+				$event->setting("nsda_point_codefail", 0);
+				next EVENT;
+
+			} else {
+
+				$results .= $event->name." points not posted with error ".$raw_hash->{"message"};
+				next EVENT;
+			}
+		}
+	}
+
+	return $results;
+
+	sub guess_code {
+
+		my $event_name = shift;
+
+		$event_name =~ s/1st Year//g;
+		$event_name =~ s/2nd Year//g;
+		$event_name =~ s/First Year//g;
+		$event_name =~ s/Second Year//g;
+		$event_name =~ s/Novice//g;
+		$event_name =~ s/Junior Varsity//g;
+		$event_name =~ s/Varsity//g;
+		$event_name =~ s/Open//g;
+		$event_name =~ s/RR//g;
+		$event_name =~ s/Round Robin//g;
+		$event_name =~ s/High School//g;
+		$event_name =~ s/HS//g;
+		$event_name =~ s/Middle School//g;
+		$event_name =~ s/MS//g;
+		$event_name =~ s/JV//g;
+
+		$event_name =~ s/[\W_]//g;
+
+		$event_name =~ s/^\s+|\s+$//g;
+		$event_name = lc($event_name);
+
+		my %category_names = (
+			"childrensliterature"            => 201,
+			"childrenliterature"             => 201,
+			"kiddielit"                      => 201,
+			"declamation"                    => 201,
+			"oratoricaldeclamation"          => 201,
+			"dec"                            => 201,
+			"demonstration"                  => 201,
+			"demo"                           => 201,
+			"discussion"                     => 201,
+			"groupdiscussion"                => 201,
+			"demonstration"                  => 201,
+			"demonstrationspeaking"          => 201,
+			"dramaticinterpretation"         => 204,
+			"dramaticinterp"                 => 204,
+			"dramatichumorousinterp"         => 204,
+			"dramatichumorousinterpretation" => 204,
+			"humorousdramaticinterpretation" => 204,
+			"humorousdramaticinterp"         => 204,
+			"dramatic"                       => 204,
+			"dramaticperformance"            => 204,
+			"soloacting"                     => 204,
+			"soloactingserious"              => 204,
+			"soloactinghumorous"             => 204,
+			"di"                             => 204,
+			"duet"                           => 206,
+			"duetacting"                     => 206,
+			"improvduo"                      => 201,
+			"improvisationalduo"             => 201,
+			"info"                           => 208,
+			"informative"                    => 208,
+			"informativespeaking"            => 208,
+			"inf"                            => 208,
+			"duo"                            => 206,
+			"duoperformance"                 => 206,
+			"duoacting"                      => 206,
+			"duointerp"                      => 206,
+			"duointerpretation"              => 206,
+			"exp"                            => 213,
+			"expos"                          => 213,
+			"expository"                     => 213,
+			"expositoryspeaking"             => 213,
+			"extemp"                         => 202,
+			"extemporaneous"                 => 202,
+			"extemporaneousspeaking"         => 202,
+			"ext"                            => 202,
+			"fx"                             => 202,
+			"ix"                             => 202,
+			"dx"                             => 202,
+			"usx"                            => 202,
+			"internationalextemporaneous"    => 202,
+			"internationalextemp"            => 202,
+			"foreignextemp"                  => 202,
+			"foreignextemporaneous"          => 202,
+			"domesticextemp"                 => 202,
+			"domesticextemporaneous"         => 202,
+			"unitedstatesextemp"             => 202,
+			"unitedstatesextemporaneous"     => 202,
+			"usextemp"                       => 202,
+			"farrago"                        => 201,
+			"humorousinterpretation"         => 205,
+			"humorousinterp"                 => 205,
+			"humorous"                       => 205,
+			"humor"                          => 205,
+			"hi"                             => 205,
+			"impromptuspeaking"              => 211,
+			"impromptu"                      => 211,
+			"imp"                            => 211,
+			"ld"                             => 102,
+			"lddebate"                       => 102,
+			"lincolndouglas"                 => 102,
+			"lincoln/douglas"                => 102,
+			"lincoln-douglas"                => 102,
+			"lincoln-douglass"               => 102,
+			"lincolndouglass"                => 102,
+			"lincolndouglasdebate"           => 102,
+			"lincoln/douglasdebate"          => 102,
+			"lincoln-douglasdebate"          => 102,
+			"lincoln-douglassdebate"         => 102,
+			"lincolndouglassdebate"          => 102,
+			"momentsinhistory"               => 201,
+			"oratoricalinterp"               => 201,
+			"originaloratory"                => 203,
+			"oratory"                        => 203,
+			"oo"                             => 203,
+			"originalproseandpoetry"         => 201,
+			"originalprosepoetry"            => 201,
+			"opp"                            => 201,
+			"originalprose"                  => 201,
+			"originalpoetry"                 => 201,
+			"parliamentary"                  => 107,
+			"parliamentarydebate"            => 107,
+			"parlidebate"                    => 107,
+			"parli"                          => 107,
+			"par"                            => 107,
+			"pf"                             => 104,
+			"pufo"                           => 104,
+			"pfd"                            => 104,
+			"pfdebate"                       => 104,
+			"playreading"                    => 201,
+			"play"                           => 201,
+			"publicforum"                    => 104,
+			"publicforumdebate"              => 104,
+			"policydebate"                   => 103,
+			"bigquestions"                   => 108,
+			"bigquestion"                    => 108,
+			"bigquestionsdebate"             => 108,
+			"bigquestiondebate"              => 108,
+			"bqd"                            => 108,
+			"bq"                             => 108,
+			"policy"                         => 103,
+			"crossex"                        => 103,
+			"cx"                             => 103,
+			"cxdebate"                       => 103,
+			"teamdebate"                     => 103,
+			"prosereading"                   => 214,
+			"prose"                          => 214,
+			"pro"                            => 214,
+			"multiple"                       => 201,
+			"multiplereading"                => 201,
+			"poetryreading"                  => 215,
+			"poetry"                         => 215,
+			"prosepoetry"                    => 201,
+			"programmedoralinterp"           => 207,
+			"programoralinterp"              => 207,
+			"programinterp"                  => 207,
+			"programmedinterp"               => 207,
+			"poi"                            => 207,
+			"oralinterp"                     => 201,
+			"oralinterpretationofliterature" => 201,
+			"oralinterpretation"             => 201,
+			"oi"                             => 201,
+			"oil"                            => 201,
+			"proseandpoetry"                 => 201,
+			"prosepoetry"                    => 201,
+			"broadcastannouncing"            => 201,
+			"tvannouncing"                   => 201,
+			"tvbroadcasting"                 => 201,
+			"tvnewsteam"                     => 201,
+			"radioannouncing"                => 201,
+			"radiobroadcasting"              => 201,
+			"specialoccasionspeaking"        => 201,
+			"specialoccasion"                => 201,
+			"storytelling"                   => 212,
+			"story"                          => 212,
+			"thematicinterp"                 => 207,
+			"thematic"                       => 207,
+			"TI"                             => 207,
+		);
+
+		return $category_names{$event_name};
+	}
+
+</%init>
