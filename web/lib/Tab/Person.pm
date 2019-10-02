@@ -99,11 +99,9 @@ sub setting {
 sub all_permissions {
 
 	my $self = shift;
-
 	return unless $self;
 
 	my $tourn = shift;
-
 	my %perms;
 
 	if ($tourn) { 
@@ -120,9 +118,15 @@ sub all_permissions {
 			$tourn->id
 		);
 
+		PERM:
 		foreach my $perm (@tourn_perms) { 
 
 			my $tag = $perm->tag;
+
+			if ($tag eq "contact") { 
+				$perms{$tag} = $perm;
+				next PERM;
+			}
 
 			if ($tag eq "detailed") { 
 
@@ -152,12 +156,6 @@ sub all_permissions {
 		}
 	}
 
-	Tab::Permission->set_sql( other_perms => "
-		select permission.*
-		from permission
-		where permission.person = ? 
-		and (permission.tourn is null or permission.tourn = 0)
-	");
 
 	my $dbh = Tab::DBI->db_Main();
 

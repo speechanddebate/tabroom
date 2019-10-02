@@ -9,19 +9,201 @@
 
 	my $tourn;
 	my %tourn_settings;
+
+	my %perms;
+	my %person_settings;
+
+	my $only_category;
+
 	my $defaults;
 
-	if ($session) { 
-		#Tournament being managed
-		$tourn = $session->tourn;
-		%tourn_settings = $tourn->all_settings if $tourn;
+	if ($person) { 
+		%person_settings = $person->all_settings;
 		$defaults = $session->default;
 	}
 
-	my %person_settings = $person->all_settings if $person;
-	my %perms = $person->all_permissions($tourn) if $person;
-	my $event = Tab::Event->retrieve($ARGS{"event_id"}) if ($ARGS{"event_id"});
-	$event = $session->event if $session && not defined $event;
+	# If the user is in the tournament specific areas, verify that they have
+	# access to the tournament queried and then supply the tournament,
+	# permissions, and tourn_settings required for it. 
+
+	my $test;
+	my $disallow;
+
+	if ( $person && ( $r->uri =~ /setup/ 
+			|| $r->uri =~ /register/ 
+			|| $r->uri =~ /panel/ 
+			|| $r->uri =~ /tabbing/ 
+			|| $r->uri =~ /api\/upload_data.mhtml/ 
+		)
+	) { 
+
+		my $dbh = Tab::DBI->db_Main();
+		my $sth;
+
+		my %checks;
+
+		if ($ARGS{"round_id"}) { 
+
+			$test++;
+			$disallow = "Round ".$ARGS{"round_id"};
+
+			$sth = $dbh->prepare(" 
+				select category.tourn, permission.id, event.id, category.id
+				from (round, event, category)
+				left join permission on permission.tourn = category.tourn and permission.person = ? 
+
+				where round.id = ? 
+				and round.event = event.id
+				and event.category = category.id
+			");
+
+			$sth->execute($person, $ARGS{"round_id"});
+			$checks{"event"}++;
+			$checks{"category"}++;
+
+		} elsif ($ARGS{"event_id"}) { 
+
+			$test++;
+			$disallow = "Event ".$ARGS{"event_id"};
+
+			$sth = $dbh->prepare(" 
+				select category.tourn, permission.id, event.id, category.id
+				from (event, category)
+				left join permission on permission.tourn = category.tourn and permission.person = ? 
+
+				where event.id = ? 
+				and event.category = category.id
+			");
+
+			$sth->execute($person, $ARGS{"event_id"});
+			$checks{"event"}++;
+			$checks{"category"}++;
+
+		} elsif ($ARGS{"category_id"}) { 
+
+			$test++;
+			$disallow = "Category ".$ARGS{"category_id"};
+
+			$sth = $dbh->prepare(" 
+				select category.tourn, permission.id, category.id, category.id
+				from (category)
+				left join permission on permission.tourn = category.tourn and permission.person = ? 
+				where category.id = ?
+			");
+
+			$sth->execute($person, $ARGS{"category_id"});
+			$checks{"category"}++;
+
+		} elsif ($ARGS{"school_id"}) { 
+
+			$test++;
+			$disallow = "School ".$ARGS{"school_id"};
+
+			$sth = $dbh->prepare(" 
+				select school.tourn, permission.id
+				from (school)
+				left join permission on permission.tourn = school.tourn and permission.person = ? 
+				where school.id = ? 
+			");
+
+			$sth->execute($person, $ARGS{"school_id"});
+
+		} elsif ($ARGS{"tourn_id"}) { 
+
+			$defaults->{tourn} = $ARGS{"tourn_id"};
+		}
+
+		Tab::debuglog("tourn ID is ".$defaults->{tourn});
+
+		if ($sth) { 
+
+			Tab::debuglog("Yo");
+
+			delete $defaults->{tourn};
+
+			my $event_check;
+			my $category_check;
+
+			while (my ($tourn_id, $permission_id, $event_id, $category_id) = $sth->fetchrow_array()) { 
+
+				if ($checks{"category"} && $category_id) { 
+					$checks{"category"} = $category_id;
+				}
+
+				if ($checks{"event"} && $event_id) { 
+					$checks{"event"} = $event_id;
+				}
+
+				if ($person->site_admin || $permission_id) { 
+					unless ($defaults->{tourn} == $tourn_id) { 
+						$defaults->{tourn} = $tourn_id;
+						$session->default($defaults);
+						last;
+					}
+				}
+			}
+
+			$sth->finish();
+			$dbh->disconnect();
+		}
+
+		#Out with the old
+		if ($session->tourn && (not defined $defaults->{tourn})) { 
+
+			unless ($test) { 
+				$tourn = $session->tourn;
+				$defaults->{tourn} = $tourn->id;
+			}
+			$session->tourn(0);
+			$session->update();
+		} 
+
+		#In with the new
+
+		if ($defaults->{tourn}) { 
+			
+			$tourn = Tab::Tourn->retrieve($defaults->{tourn}) unless $tourn;
+			%perms = $person->all_permissions($tourn);
+
+			if (
+				$perms{detailed} 
+				&& $checks{"event"} 
+				&& (not defined $perms{"details"}{$checks{'event'}}) 
+			) { 
+
+				undef $tourn;
+				my $err = "You do not have access to that area.";
+				$m->redirect("/tabbing/entry/index.mhtml?err=$err");
+
+			} elsif (
+				$perms{category_tab} 
+				&& $checks{"category"} 
+				&& ($checks{"category"} != $perms{category_tab}->category)
+			) { 
+
+				undef $tourn;
+				my $err = "You do not have access to that area.";
+				$m->redirect("/tabbing/entry/index.mhtml?err=$err");
+
+			} elsif ($perms{tourn}{$tourn->id}) { 
+
+				%tourn_settings = $tourn->all_settings();
+				$disallow .= " Tournament ".$defaults->{tourn};
+
+				if ($perms{category_tab} && $perms{category_tab}->category) { 
+					$only_category = $perms{category_tab}->category;
+				} elsif ($perms{category_tab}) { 
+					my $err = "You have limited access to a category that does not exist.";
+					$m->redirect("/user/home.mhtml?err=$err");
+				}
+
+			} else { 
+				undef $tourn;
+				my $err = "You do not have access to that tournament.";
+				$m->redirect("/user/home.mhtml?err=$err");
+			}
+		}
+	}
 
 </%init>
 
@@ -104,6 +286,30 @@
 					content    = "60"
 				>
 %			}
+<%perl>
+
+			if ($test && (not defined $perms{"tourn"}{$tourn})) { 
+
+				my $now = DateTime->now();    
+		
+				Tab::ChangeLog->create({           
+					tourn       => $tourn,
+					person      => $person->id,
+					type        => 'access_error',
+					created     => $now,
+					description => "Access denial to $disallow from ".$ENV{REMOTE_ADDR}
+				});     
+
+				$m->print("</head><body><div id='wrapper'><div id='content'>");
+				$m->comp("/funclib/abort.mas", 
+					message => "You do not have access to $disallow.  Please go back and try again",
+					noback  => 1
+				);
+			}
+
+</%perl>
+
+
 
 			<title>
 				<% 
@@ -112,14 +318,6 @@
 					$tourn ?  $tourn->name : "" 
 				%> Tabroom.com
 			</title>
-
-%			if ($r->uri eq "/index/index.mhtml" && $person && $person->site_admin) { 
-				<& "/funclib/external_ad.mas" &>
-%			}
-
-%			if ($r->uri eq "/index/adindex.mhtml") { 
-				<& "/funclib/external_ad.mas" &>
-%			}
 
 %			if ($r->hostname eq "local.tabroom.com" || $r->hostname eq "dev.tabroom.com" ) { 
 				<script
@@ -246,7 +444,7 @@
 
 %			}
 
-				});
+			});
 			</script>
 
 %			if ($r->hostname eq "www.tabroom.com" ) { 
@@ -357,67 +555,47 @@
 					</a>
 
 %				} else { 
-
 					<& "/user/login/login_block.mas" &>
-
-
 %				}
 
-<%perl>
+%				if ($tourn) { 
 
-				if ($tourn && (
-					$r->uri =~ /setup/ 
-					|| $r->uri =~ /register/ 
-					|| $r->uri =~ /panel/ 
-					|| $r->uri =~ /tabbing/ 
-					|| $r->uri =~ /com\/results\//)
-				) { 
+					<span 
+						id    = "search"
+						title = "Search schools, judges and entries"
+					>	
 
-					if ( 
-						$perms{"owner"} 
-						|| $perms{"registration"} 
-						|| $perms{"full_admin"} 
-						|| $perms{"tabbing"} 
-						|| $perms{"category_tab"} ) { 
+						<form action="/register/search/tourn_search.mhtml">	
 
-</%perl>
-						<span 
-							id    = "search"
-							title = "Search schools, judges and entries"
-						>	
+						<input 
+							type           = "text"
+							maxlength      = "128"
+							size           = "15"
+							name           = "search"
+							placeholder    = "SEARCH ENTRIES"
+							autocomplete   = "off"
+							autocorrect    = "off"
+							autocapitalize = "off"
+							spellcheck     = "false"
+							id             = "searchtext"
+							class          = "notfirst"
+							tabindex       = "-1"
+						>
 
-							<form action="/register/search/tourn_search.mhtml">	
+						<input 
+							type  = "hidden"
+							name  = "caller"
+							value = "<% $r->unparsed_uri %>"
+						>
 
-							<input 
-								type           = "text"
-								maxlength      = "128"
-								size           = "15"
-								name           = "search"
-								placeholder    = "SEARCH"
-								autocomplete   = "off"
-								autocorrect    = "off"
-								autocapitalize = "off"
-								spellcheck     = "false"
-								id             = "searchtext"
-								class          = "notfirst"
-								tabindex       = "-1"
-							>
+						<button 
+							type  = "submit"
+							class = "search notfirst">
 
-							<input 
-								type  = "hidden"
-								name  = "caller"
-								value = "<% $r->unparsed_uri %>"
-							>
-
-							<button 
-								type  = "submit"
-								class = "search notfirst">
-
-								<img src="/lib/images/search.png">
-							</button>
-							</form>
-						</span>
-%					}
+							<img src="/lib/images/search.png">
+						</button>
+						</form>
+					</span>
 
 %				} else { 
 
@@ -433,7 +611,7 @@
 							maxlength      = "128"
 							size           = "15"
 							name           = "search"
-							placeholder    = "SEARCH"
+							placeholder    = "SEARCH TOURNAMENTS"
 							autocomplete   = "off"
 							autocorrect    = "off"
 							autocapitalize = "off"
@@ -476,16 +654,8 @@
 			</span>
 
 			<span id="menus"> 
-<%perl>
-				if ($tourn && ($r->uri =~ /setup/ 
-					|| $r->uri =~ /register/ 
-					|| $r->uri =~ /panel/ 
-					|| $r->uri =~ /tabbing/ 
-					|| $r->uri =~ /api\/upload_data.mhtml/ 
-					|| $r->uri =~ /com\/results\//)
-				) { 
 
-</%perl>
+%				if ($tourn) { 
 
 					<& 
 						"/lib/menu/menubar_tourn.mas", 
@@ -531,6 +701,7 @@
 			tourn           => $tourn,
 			tourn_settings  => \%tourn_settings,
 			person_settings => \%person_settings,
+			only_category   => $only_category,
 			perms           => \%perms
 		);
 
@@ -585,7 +756,6 @@
 
 	</div>
 
-
 	</div>
 
 <%perl>
@@ -604,5 +774,5 @@
 </html>
 
 % }	else { 
-%		$m->call_next;
+%		$m->call_next();
 % }
