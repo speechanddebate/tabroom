@@ -145,6 +145,8 @@ sub all_permissions {
 
 		if ($self && $self->site_admin) { 
 			$perms{"owner"}++;
+			$perms{"tourn"}{$tourn->id} = "owner";
+			$perms{"undetailed"}{$tourn->id}++;
 			delete $perms{"entry_only"};
 			delete $perms{"details"};
 		}   
