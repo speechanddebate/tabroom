@@ -10,11 +10,11 @@
 	my $entry = Tab::Entry->retrieve($entry_id);
 	my $school = Tab::School->retrieve($school_id);
 
-	unless ($entry) { 
-		$m->redirect("by_person_edit.mhtml?student_id=$student_id&school_id=$school_id") 
+	unless ($entry) {
+		$m->redirect("by_person_edit.mhtml?student_id=$student_id&school_id=$school_id")
 			if $from eq "by_person";
 
-		$m->redirect("onsite.mhtml?school_id=$school_id") 
+		$m->redirect("onsite.mhtml?school_id=$school_id")
 			if $from eq "onsite";
 
 		$m->redirect("students.mhtml?school_id=$school_id");
@@ -22,8 +22,10 @@
 
 	my $event = $entry->event;
 	my $tourn = $event->tourn;
+	my $now = DateTime->now;
 
 	my $drop_deadline = $tourn->setting("drop_deadline");
+
 	my $freeze_deadline;
 
 	$freeze_deadline = $event->setting("freeze_deadline");
@@ -32,62 +34,82 @@
 	$drop_deadline = $tourn->reg_end unless $drop_deadline;
 	$freeze_deadline = $tourn->reg_end unless $freeze_deadline;
 
-	if ($tourn->setting("nsda_district")) { 
+	if ($tourn->setting("nsda_district")) {
 		my $weekend = Tab::Weekend->retrieve($event->setting('weekend'));
 		$drop_deadline = $weekend->drop_deadline;
 		$freeze_deadline = $weekend->freeze_deadline;
 	}
 
-	my $now = DateTime->now;
-
-	if ($drop_deadline < $now) { 
+	if ($drop_deadline < $now) {
 
 		my $err = "The online drop deadline for this tournament has passed.  Please contact the tournament directly";
 
-		$m->redirect("by_person_edit.mhtml?student_id=$student_id&school_id=$school_id&err=$err") 
+		$m->redirect("by_person_edit.mhtml?student_id=$student_id&school_id=$school_id&err=$err")
 			if $from eq "by_person";
 
-		$m->redirect("onsite.mhtml?entry_id=$entry_id&school_id=$school_id&err=$err") 
+		$m->redirect("onsite.mhtml?entry_id=$entry_id&school_id=$school_id&err=$err")
 			if $from eq "onsite";
 
 		$m->redirect("students.mhtml?entry_id=$entry_id&school_id=$school_id&err=$err");
 
 	}
 
-	if ($tourn->setting("track_reg_changes")) { 
-			
-		my $description = $person->first." ".$person->last." dropped ".$entry->event->abbr." entry ".$entry->code." ".$entry->name; 
+	my $fine_deadline = $tourn->setting("fine_deadline");
+	my $event_fine_deadline = $event->setting('fine_deadline');
 
-		$description = $person->first." ".$person->last." un-dropped ".$entry->event->abbr." entry ".$entry->code." ".$entry->name 
+	if ($event_fine_deadline) {
+		if (not defined $fine_deadline) {
+			$fine_deadline = $event_fine_deadline;
+		} elsif ($event_fine_deadline->epoch < $fine_deadline->epoch) {
+			$fine_deadline = $event_fine_deadline;
+		}
+	}
+
+	my $drop_fine;
+
+	if ($fine_deadline < $now) {
+		if ($event->setting("drop_fine")) {
+			$drop_fine = $event->setting('drop_fine');
+		} else {
+			$drop_fine = $tourn->setting("drop_fine");
+		}
+	}
+
+
+	if ($tourn->setting("track_reg_changes")) {
+
+		my $description = $person->first." ".$person->last." dropped ".$entry->event->abbr." entry ".$entry->code." ".$entry->name;
+
+		$description = $person->first." ".$person->last." un-dropped ".$entry->event->abbr." entry ".$entry->code." ".$entry->name
 			if $entry->dropped;
-	
-		my $change = $m->comp("/funclib/log.mas", 
+
+		my $change = $m->comp("/funclib/log.mas",
 			tourn       => $tourn->id,
 			school      => $school_id,
 			type        => "registration",
 			description => $description,
 			person      => $person->id
-		); 
-		
-	} 
+		);
+
+	}
 
 	my $stu_count;
 
 	STUDENT:
-	foreach my $student ($entry->students) { 
+	foreach my $student ($entry->students) {
 
 		$stu_count++;
 
 		foreach my $other ($m->comp(
-			"/funclib/student_entries.mas", 
-				tourn => $tourn, 
+			"/funclib/student_entries.mas",
+				tourn => $tourn,
 				student => $student
 			)
-		) { 
+		) {
 			next STUDENT if $other->id != $entry->id;
 		}
 
-		foreach my $housing ($student->housing($tourn)) { 
+		foreach my $housing ($student->housing($tourn)) {
 			$housing->delete if $housing;
 		}
 
@@ -97,67 +119,61 @@
 	$name =~ s/\&/and/g;
 
 	my $msg = "Entry ".$name." dropped";
+	my $drop_reason = "Dropped ". $entry->code ." by ".$person->last." after nuisance fine deadline";
 
-	if ($freeze_deadline > $now) { 
+	if ($entry->dropped) {
 
-		if ($entry->dropped) { 
-			$entry->dropped(0);
-			$entry->update;
-			$entry->setting("dropped_at", "");
-		} else {
-			$entry->delete();
-			$school->setting("individuals", 
-				($school->setting("individuals") - $stu_count)
-			) 
-			if $school->setting("individuals");
-		}
+		$entry->dropped(0);
+		$entry->update;
+		$entry->setting("dropped_at", "");
+
+		my $fine = Tab::Fine->search(
+			school => $entry->school->id,
+			reason => $drop_reason
+		)->first;
+
+		$fine->delete if $fine;
 
 	} else {
 
-		if ($entry->dropped) { 
+		unless ($entry->waitlist) {
+			if ($drop_fine) {
+				my $fine = Tab::Fine->create({
+					school    => $entry->school->id,
+					amount    => $drop_fine,
+					reason    => $drop_reason,
+					levied_at => $now,
+					levied_by => $person->id
+				});
 
-			$entry->dropped(0);
-			$entry->update;
-			$entry->setting("dropped_at", "");
+				$msg .= "and drop fine of $drop_fine was levied";
+			}
+		}
+
+		if ($freeze_deadline > $now) {
+
+			$entry->delete();
+
+			my $individuals = $school->setting("individuals");
+
+			if ($individuals) {
+				$school->setting("individuals", ($individuals - $stu_count));
+			}
 
 		} else {
+
 			$entry->dropped(1);
 			$entry->update;
 			$entry->setting("dropped_at", "date", $now);
 			$entry->setting("dropped_by", $person->id);
 		}
-		
-		my $drop_reason = "Dropped ". $entry->code ." by ".$person->last; 
 
-		if ($tourn->setting("fine_deadline") < $now && $entry->waitlist < 1) { 
-
-			if ($entry->dropped) { 
-		
-				my $fine = Tab::Fine->create({
-					school => $entry->school->id,
-					amount => $tourn->setting("drop_fine"),
-					reason => $drop_reason,
-					levied_at => $now,
-					levied_by => $person->id
-				}) if $tourn->setting("drop_fine") > 0; 
-
-			} else { 
-
-				my $fine = Tab::Fine->search( 
-					school => $entry->school->id,
-					reason => $drop_reason
-				)->first;
-
-				$fine->delete if $fine;
-
-			}
-		} 
 	}
 
-	$m->redirect("by_person_edit.mhtml?student_id=$student_id&school_id=$school_id&msg=$msg") 
+	$m->redirect("by_person_edit.mhtml?student_id=$student_id&school_id=$school_id&msg=$msg")
 		if $from eq "by_person";
 
-	$m->redirect("onsite.mhtml?event_id=".$event->id."&school_id=$school_id&msg=$msg") 
+	$m->redirect("onsite.mhtml?event_id=".$event->id."&school_id=$school_id&msg=$msg")
 		if $from eq "onsite";
 
 	$m->redirect("students.mhtml?event_id=".$event->id."&school_id=$school_id&msg=$msg");
