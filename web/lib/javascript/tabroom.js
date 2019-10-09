@@ -226,66 +226,19 @@
 		});
 	}
 
-
 /* zebra stripe the rows */
 
 	function zebraRows() {
+		$(document).find(".row").parent().find(".row:even").removeClass("odd");
+		$(document).find(".row").parent().find(".row:even").addClass("even");
+		$(document).find(".row").parent().find(".row:odd").removeClass("even");
+		$(document).find(".row").parent().find(".row:odd").addClass("odd");
 
-		$(".main").find(".row:even").addClass("even");
-		$(".main").find(".row:odd").addClass("odd");
-
-		$(".blankfull").find(".row:even").addClass("even");
-		$(".blankfull").find(".row:odd").addClass("odd");
-
-		$(".menu").find(".row:even").addClass("even");
-		$(".menu").find(".row:odd").addClass("odd");
-
-		$(".sidenote").find(".row:even").removeClass("odd");
-		$(".sidenote").find(".row:odd").removeClass("even");
-		$(".sidenote").find(".row:even").addClass("even");
-		$(".sidenote").find(".row:odd").addClass("odd");
-
-		$("table").find(".row:even").removeClass("odd");
-		$("table").find(".row:even").addClass("even");
-
-		$("table").find(".row:odd").removeClass("even");
-		$("table").find(".row:odd").addClass("odd");
-
-		$(".pagehalf").find(".row:even").addClass("even");
-		$(".pagehalf").find(".row:even").removeClass("odd");
-		$(".pagehalf").find(".row:odd").addClass("odd");
-		$(".pagehalf").find(".row:odd").removeClass("even");
-
-		$(".main").find(".lightrow:even").addClass("lighteven");
-		$(".main").find(".lightrow:even").removeClass("lightodd");
-		$(".main").find(".lightrow:odd").addClass("lightodd");
-		$(".main").find(".lightrow:odd").removeClass("lighteven");
-
-		$(".blankfull").find(".lightrow:even").addClass("lighteven");
-		$(".blankfull").find(".lightrow:even").removeClass("lightodd");
-		$(".blankfull").find(".lightrow:odd").addClass("lightodd");
-		$(".blankfull").find(".lightrow:odd").removeClass("lighteven");
-
-		$(".menu").find(".lightrow:even").addClass("lighteven");
-		$(".menu").find(".lightrow:odd").addClass("lightodd");
-
-		$(".sidenote").find(".lightrow:even").removeClass("lightodd");
-		$(".sidenote").find(".lightrow:even").addClass("lighteven");
-		$(".sidenote").find(".lightrow:odd").removeClass("lighteven");
-		$(".sidenote").find(".lightrow:odd").addClass("lightodd");
-
-		$("table").find(".lightrow:even").removeClass("lightodd");
-		$("table").find(".lightrow:even").addClass("lighteven");
-		$("table").find(".lightrow:odd").removeClass("lighteven");
-		$("table").find(".lightrow:odd").addClass("lightodd");
-
-		$(".pagehalf").find(".lightrow:even").addClass("lighteven");
-		$(".pagehalf").find(".lightrow:even").removeClass("lightodd");
-
-		$(".pagehalf").find(".lightrow:odd").addClass("lightodd");
-		$(".pagehalf").find(".lightrow:odd").removeClass("lighteven");
+		$(document).find(".lightrow").parent().find(".row:even").addClass("even");
+		$(document).find(".lightrow").parent().find(".row:even").removeClass("odd");
+		$(document).find(".lightrow").parent().find(".row:odd").addClass("odd");
+		$(document).find(".lightrow").parent().find(".row:odd").removeClass("even");
 	};
-
 
 /* Change the file uploader div to show the name of the uploaded file */
 
