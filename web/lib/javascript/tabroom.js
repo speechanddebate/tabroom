@@ -229,15 +229,16 @@
 /* zebra stripe the rows */
 
 	function zebraRows() {
-		$(document).find(".row").parent().find(".row:even").removeClass("odd");
-		$(document).find(".row").parent().find(".row:even").addClass("even");
-		$(document).find(".row").parent().find(".row:odd").removeClass("even");
-		$(document).find(".row").parent().find(".row:odd").addClass("odd");
 
-		$(document).find(".lightrow").parent().find(".row:even").addClass("even");
-		$(document).find(".lightrow").parent().find(".row:even").removeClass("odd");
-		$(document).find(".lightrow").parent().find(".row:odd").addClass("odd");
-		$(document).find(".lightrow").parent().find(".row:odd").removeClass("even");
+		var tags = ['.row', '.lightrow'];
+
+		tags.forEach(function(tag) {
+			$(document).find(tag).parent("span, div").find(".row:even").removeClass("odd");
+			$(document).find(tag).parent("span, div").find(".row:even").addClass("even");
+			$(document).find(tag).parent("span, div").find(".row:odd").removeClass("even");
+			$(document).find(tag).parent("span, div").find(".row:odd").addClass("odd");
+		});
+
 	};
 
 /* Change the file uploader div to show the name of the uploaded file */
