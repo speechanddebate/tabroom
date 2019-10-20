@@ -233,10 +233,10 @@
 		var tags = ['.row', '.lightrow'];
 
 		tags.forEach(function(tag) {
-			$(document).find(tag).parent("span, div").find(".row:even").removeClass("odd");
-			$(document).find(tag).parent("span, div").find(".row:even").addClass("even");
-			$(document).find(tag).parent("span, div").find(".row:odd").removeClass("even");
-			$(document).find(tag).parent("span, div").find(".row:odd").addClass("odd");
+			$(document).find(tag).parent().closest("span, div, table").find(".row:even").removeClass("odd");
+			$(document).find(tag).parent().closest("span, div, table").find(".row:even").addClass("even");
+			$(document).find(tag).parent().closest("span, div, table").find(".row:odd").removeClass("even");
+			$(document).find(tag).parent().closest("span, div, table").find(".row:odd").addClass("odd");
 		});
 
 	};
