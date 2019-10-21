@@ -35,6 +35,28 @@
 		taller   => 1
 	);
 
+	my $dbh = Tab::DBI->db_Main();
+	my $sth = $dbh->prepare("
+		select
+			entry.id, entry.code, entry.name, entry.active,
+			school.id, school.name, school.code,
+			round.id,
+			panel.id, panel.letter, panel.flight, panel.bye,
+			ballot.id, ballot.speakerorder, ballot.bye, ballot.forfeit, ballot.audit,
+			judge.id, judge.code, judge.last, judge.first,
+			score.id, score.tag, score.value
+
+		from (entry)
+			left join ballot on ballot.entry = entry.id
+			left join score on ballot.id = score.ballot
+			left join judge on ballot.judge = judge.id
+			left join panel on ballot.panel = panel.id
+			left join round on panel.round = round.id
+			left join school on entry.school = school.id
+		where entry.event = ?
+	");
+
+
 	open (TEXOUT, ">>$filepath.tex");
 	print TEXOUT "\\smallskip\n";
 
@@ -44,21 +66,116 @@
 
 	foreach my $event (@events) {
 
-		foreach my $entry (
-			sort {$a->code cmp $b->code}
-			$event->entries(active => 1)
+		my %rounds;
+
+		foreach my $round ($event->rounds()) {
+			$rounds{$round->id}{"name"} = $round->name;
+			$rounds{$round->id}{"realname"} = $round->realname;
+			$rounds{$round->id}{"type"} = $round->type;
+
+			my @composites;
+
+            foreach my $tiebreak ($round->tiebreak_set->tiebreaks) {
+                push @composites, $tiebreak->child if $tiebreak->child > 0;
+            }
+
+			my $composite_set = $composites[0];
+			my (@results) = $m->comp(
+				"/tabbing/results/order_entries.mas",
+					long_names   => 1,
+					nsda         => 1,
+					round        => $round,
+					tiebreak_set => $composite_set,
+					section_rank => $composite_set
+			);
+
+			$rounds{$round->id}{"results"} = pop @results if @results;
+
+			my (@other_results) = $m->comp(
+				"/tabbing/results/order_entries.mas",
+					round        => $round
+			);
+
+			$rounds{$round->id}{"downs"} = pop @other_results if @other_results;
+		}
+
+		$sth->execute($event_id);
+
+		my %entries;
+
+		while (
+			my (
+				$entry_id, $entry_code, $entry_name, $entry_active,
+				$school_id, $school_name, $school_code,
+				$round_id,
+				$panel_id, $panel_letter, $panel_flight, $panel_bye,
+				$ballot_id, $ballot_speakerorder, $ballot_bye, $ballot_forfeit, $ballot_audit,
+				$judge_id, $judge_code, $judge_last, $judge_first,
+				$score_id, $score_tag, $score_value
+			) = $sth->fetchrow_array()
 		) {
+
+			unless ($entries{$entry_id}) {
+				$entries{$entry_id}{"code"} = $entry_code;
+				$entries{$entry_id}{"name"} = $entry_name;
+				$entries{$entry_id}{"active"} = $entry_active;
+				$entries{$entry_id}{"school_code"} = $school_code;
+				$entries{$entry_id}{"school_name"} = $m->comp("/funclib/short_name.mas", name => $school_name);
+			}
+
+			unless ($entries{$entry_id}{$round_id}) {
+
+				$entries{$entry_id}{$round_id}{"section"} = $panel_id;
+				$entries{$entry_id}{$round_id}{"letter"} = $panel_letter;
+				$entries{$entry_id}{$round_id}{"flight"} = $panel_flight;
+				$entries{$entry_id}{$round_id}{"speakerorder"} = $ballot_speakerorder;
+
+				if ($ballot_bye || $panel_bye) {
+					$entries{$entry_id}{$round_id}{"bye"} = 1;
+				} elsif ($ballot_forfeit) {
+					$entries{$entry_id}{$round_id}{"forfeit"} = 1;
+				}
+			}
+
+			if ($score_tag eq "rank" || $score_tag eq "point") {
+				unless ($entries{$entry_id}{$round_id}{"judges"}{$judge_id}) {
+					$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{"name"} = $judge_last." ".$judge_first;
+					$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{"code"} = $judge_code;
+				}
+				$entries{$entry_id}{$round_id}{"score"}{$judge_id}{$score_tag} = $score_value;
+			}
+		}
+
+		my @ids = keys %entries;
+
+        @ids =
+            map  { $_->[0] }
+            sort { $a->[1] <=> $b->[1] }
+            map  { [$_, $entries{$_}{"code"} =~/(\d+)/] }
+            @ids;
+
+        @ids =
+            map  { $_->[0] }
+            sort { uc($a->[1]) cmp uc($b->[1]) }
+            map  { [$_, $entries{$_}{code} =~ /(\D+)/] }
+            @ids;
+
+		foreach my $entry_id (@ids) {
 
 			print TEXOUT "\\noindent\n";
 			print TEXOUT "\\begin{minipage}{7in}";
 			print TEXOUT "\\truncate{1.4in} { ";
 			print TEXOUT "\\LARGE \\bf ";
-			print TEXOUT &Tab::texify($entry->code);
+			print TEXOUT &Tab::texify($entries{$entry_id}{"code"});
 			print TEXOUT " } ";
 			print TEXOUT "\\hspace{.25in} ";
 
-			print TEXOUT "\\textsb{\\large ".&Tab::texify($entry->name)." }\n";
-			print TEXOUT "\\hfill {\\normalsize ". &Tab::texify($entry->school->short_name)." } \n";
+			print TEXOUT "\\textsb{\\large ".&Tab::texify($entries{$entry_id}{"name"})." }\n";
+
+			if ($entries{$entry_id}{"school_code"}) {
+				print TEXOUT "\\hfill {\\normalsize ". &Tab::texify($entries{$entry_id}{"school_code"})." } \n";
+			}
+			print TEXOUT "\\hfill {\\normalsize ". &Tab::texify($entries{$entry_id}{"school_name"})." } \n";
 
 			print TEXOUT "\\hfill ";
 			print TEXOUT "\\textsb{\\large ".&Tab::texify($event->abbr)." } ";
@@ -68,22 +185,64 @@
 
 			print TEXOUT "\\raggedright\n";
 
-			my $tabular = "\\begin{tabular}{||p{1.25in}|p{.5in}|p{1.5in}|p{1.5in}||p{1.25in}||}\n";
-			my $index = "\\textsb{Speaker} & \\textsb{Rnd} & \\textsb{Section} & \\textsb{Round Rank} & \\textsb{Up/Down} ";
+			my $tabular = "\\begin{tabular}{||p{.5in}|p{1in}|p{1in}|p{1in}||p{.75in}||p{.75in}||p{1in}||}\n";
+			my $index = "\\textsb{Rnd} & \\textsb{Section} & \\textsb{Speaker} & ";
+			$index .= "\\textsb{Ranks} & \\textsb{Total} & \\textsb{Sect. Rank} & \\textsb{Downs} ";
 
 			print TEXOUT $tabular."\n";
 			print TEXOUT "\\hline \\hline \n\n";
 			print TEXOUT "\\rowcolor[rgb]{.84,.89,.94}\[5.3pt\]\[5.3pt\]\n";
 			print TEXOUT $index." \\\\ \n";
 
-			foreach my $tick (1 .. 8 ) {
+			my $counter;
+
+			foreach my $round_id (
+				sort {
+					$rounds{$a}{"name"} <=> $rounds{$b}{"name"}
+				} keys %rounds
+			) {
 
 				print TEXOUT "\\hline \\hline \n\n";
-				print TEXOUT "\\rowcolor[rgb]{1,.95,.66}\[5.3pt\]\[5.3pt\]\n" if $tick % 2;
-				print TEXOUT " & ";
-				print TEXOUT "\\hfill $tick \\hfill \\strut & ";
-				print TEXOUT " & ";
-				print TEXOUT " & ";
+				print TEXOUT "\\rowcolor[rgb]{1,.95,.66}\[5.3pt\]\[5.3pt\]\n" if $counter++ % 2;
+				print TEXOUT "\\hfill \\strut ";
+				print TEXOUT Tab::texify($rounds{$round_id}{"realname"});
+				print TEXOUT "\\hfill \\strut & \\strut \\hfill";
+				print TEXOUT $entries{$entry_id}{$round_id}{"letter"};
+				print TEXOUT "\\hfill \\strut & \\strut \\hfill";
+				print TEXOUT $entries{$entry_id}{$round_id}{"speakerorder"};
+				print TEXOUT "\\hfill \\strut & \\strut \\hfill";
+
+				my $notfirst;
+				my $total;
+
+				if ($entries{$entry_id}{$round_id}{"bye"}) {
+					print TEXOUT " \\strut \\hfill BYE \\hfill \\strut ";
+				} elsif ($entries{$entry_id}{$round_id}{"forfeit"}) {
+					print TEXOUT " \\strut \\hfill FFT \\hfill \\strut ";
+				} else {
+					foreach my $judge_id (sort keys %{$entries{$entry_id}{$round_id}{"judges"}}) {
+						print TEXOUT ", " if $notfirst++;
+						print TEXOUT $entries{$entry_id}{$round_id}{"score"}{$judge_id}{"rank"};
+						$total += $entries{$entry_id}{$round_id}{"score"}{$judge_id}{"rank"};
+					}
+				}
+
+				print TEXOUT "\\hfill \\strut & \\strut \\hfill";
+				print TEXOUT $rounds{$round_id}{"results"}{"tiebreak"}{1}{$entry_id};
+				print TEXOUT "\\hfill \\strut & \\strut \\hfill";
+				print TEXOUT $rounds{$round_id}{"results"}{"section_rank"}{$entry_id};
+				print TEXOUT "\\hfill \\strut & \\strut \\hfill";
+
+				if ($rounds{$round_id}{"type"} eq "final") {
+					print TEXOUT $rounds{$round_id}{"downs"}{"tiebreak"}{1}{$entry_id};
+					print TEXOUT "\\hfill";
+					print TEXOUT $rounds{$round_id}{"downs"}{"tiebreak"}{2}{$entry_id};
+					print TEXOUT "\\hfill";
+					print TEXOUT $rounds{$round_id}{"downs"}{"tiebreak"}{3}{$entry_id};
+				} else {
+					print TEXOUT $rounds{$round_id}{"downs"}{"tiebreak"}{1}{$entry_id};
+				}
+				print TEXOUT "\\hfill \\strut";
 				print TEXOUT "\\\\ \n";
 
 			}
