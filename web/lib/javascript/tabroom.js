@@ -231,14 +231,16 @@
 	function zebraRows() {
 
 		var tags = ['.row', '.lightrow'];
+		var parents = ['div', 'span', 'table'];
 
-		tags.forEach(function(tag) {
-			$(document).find(tag).parent().closest("span, div, table").find(".row:even").removeClass("odd");
-			$(document).find(tag).parent().closest("span, div, table").find(".row:even").addClass("even");
-			$(document).find(tag).parent().closest("span, div, table").find(".row:odd").removeClass("even");
-			$(document).find(tag).parent().closest("span, div, table").find(".row:odd").addClass("odd");
+		tags.forEach(function(Tag) {
+			parents.forEach(function(Parent) {
+				$(document).find(Tag).parent().closest(Parent).find(".row:even").removeClass("odd");
+				$(document).find(Tag).parent().closest(Parent).find(".row:even").addClass("even");
+				$(document).find(Tag).parent().closest(Parent).find(".row:odd").removeClass("even");
+				$(document).find(Tag).parent().closest(Parent).find(".row:odd").addClass("odd");
+			});
 		});
-
 	};
 
 /* Change the file uploader div to show the name of the uploaded file */
