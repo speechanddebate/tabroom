@@ -15,11 +15,11 @@ All other dependencies should be resolved by the docker virtualization platform.
 
 1. Clone a copy of the git repository into /www/tabroom.
 
-`git clone https://github.com/NationalSpeechandDebateAssociation/tabroom.git /www/tabroom`
+`git clone https://github.com/NationalSpeechandDebateAssociation/tabroom.git /www/`
 
-2. From the docs/docker directory, build the docker container from the Dockerfile
+1. From the docs/docker directory, build the docker container from the Dockerfile
 
-`cd /www/tabroom/doc/docker && docker build . -t tabroom-app`
+`cd /www/tabroom/doc/tabroom-docker && docker build . -t tabroom-app`
 
 3. Create a copy of General.pm in /www/tabroom/web/lib/Tab
 
