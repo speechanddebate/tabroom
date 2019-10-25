@@ -84,6 +84,7 @@
 		var propertyName = $(checkObject).attr("property_name");
 		var settingName  = $(checkObject).attr("setting_name");
 		var relatedThing = $(checkObject).attr("related_thing");
+		var tournID      = $(checkObject).attr("tourn_id");
 
 		var successAction = $(checkObject).attr("on_success");
 		var replyTarget   = $(checkObject).attr("reply_target");
@@ -139,6 +140,7 @@
 				other_value    : otherValue,
 				other_text     : otherText,
 				related_thing  : relatedThing,
+				tourn_id       : tournID,
 				parent_id      : parentObjectId
 			},
 			success : function(data) {
