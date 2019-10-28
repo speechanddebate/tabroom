@@ -24,10 +24,11 @@ DELIMITER ;;
 	FOR EACH ROW
 		BEGIN
 
-			IF 
-				NEW.dropped = 1 
-				OR NEW.waitlist = 1 
+			IF
+				NEW.dropped = 1
+				OR NEW.waitlist = 1
 				OR NEW.unconfirmed = 1
+				OR NEW.unconfirmed = 2
 			THEN
 				set NEW.active = 0;
 			ELSE
@@ -57,10 +58,11 @@ DELIMITER ;;
 	FOR EACH ROW
 		BEGIN
 
-			IF 
-				NEW.dropped = 1 
-				OR NEW.waitlist = 1 
+			IF
+				NEW.dropped = 1
+				OR NEW.waitlist = 1
 				OR NEW.unconfirmed = 1
+				OR NEW.unconfirmed = 2
 			THEN
 				set NEW.active = 0;
 			ELSE
