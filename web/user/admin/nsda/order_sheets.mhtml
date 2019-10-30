@@ -1,0 +1,449 @@
+<%args>
+	$person
+	$person_settings
+	$perms
+	$year => undef
+</%args>
+<%init>
+
+	my $after;
+
+	if ($year) {
+		$after = DateTime->new({
+			year   => $year,
+			month  => 7,
+			day    => 1,
+			hour   => 0,
+			minute => 0,
+			second => 0
+		});
+	}
+
+	unless ($after) {
+		$after = &Tab::school_year();
+	}
+
+	$after = DateTime->now() if $ARGS{"future"};
+	unless ($year) {
+		$year = $after->year;
+	}
+
+	my $limit = $after->clone();
+	$limit->add(years => 1);
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			tourn.id, tourn.name, tourn_setting.value, tourn.start,
+			district.id, district.name, district.location, district.level,
+			event.id, event.name, event.abbr, event.type,
+				ballots.value, fees.value,
+			weekend.id, weekend.name, weekend.start, weekend.end,
+				weekend.reg_start, weekend.reg_end, weekend.timestamp,
+				weekend_site.name, weekend.city, weekend.state,
+			chair.id, chair.email, chair.first, chair.last, chair.phone,
+			chair.street, chair.city, chair.state, chair.zip, chair.postal, chair.country,
+			chair.nsda,
+			shipping.value_text
+
+		from (tourn, tourn_setting, event, district)
+		left join permission chairperm
+			on chairperm.district = tourn_setting.value
+			and chairperm.tag = 'chair'
+		left join person chair on chairperm.person = chair.id
+		left join event_setting esw on esw.event = event.id and esw.tag = 'weekend'
+		left join event_setting ballots on ballots.event = event.id and ballots.tag = 'nsda_ballot_order'
+		left join event_setting fees on fees.event = event.id and fees.tag = 'survey_fees'
+		left join weekend on weekend.id = esw.value
+		left join site weekend_site on weekend_site.id = weekend.site
+		left join tourn_setting shipping on shipping.tourn = tourn.id and shipping.tag = 'shipping_address'
+
+		where tourn.id = tourn_setting.tourn
+			and tourn_setting.tag = 'nsda_district'
+			and tourn_setting.value > 0
+			and tourn.start > ?
+			and tourn.end < ?
+			and tourn.id = event.tourn
+			and district.id = tourn_setting.value
+
+		group by event.id
+		order by tourn.start, tourn_setting.value, tourn.timestamp DESC
+	");
+
+	$sth->execute(
+		DateTime::Format::MySQL->format_datetime($after),
+		DateTime::Format::MySQL->format_datetime($limit)
+	);
+
+	my ($keys, $event_ref) = $m->comp("/funclib/nsda_events.mas");
+	my %questions = $m->comp("/funclib/districts_awards.mas");
+
+	my %tourns;
+	my %weekends;
+	my %chairs;
+
+	sub dateme {
+		my $string = shift;
+		my ($date, $time) = split(/\ /, $string);
+		my ($yr, $mo, $dy) = split(/-/, $date);
+
+		$mo =~ s/^0//g;
+		$dy =~ s/^0//g;
+		$yr =~ s/^20//g;
+		return $mo."/".$dy."/".$yr;
+	}
+
+	while (
+		my (
+            $tourn_id, $tourn_name, $tourn_district, $tourn_start,
+			$district_id, $district_name, $district_location, $district_level,
+            $event_id, $event_name, $event_abbr, $event_type,
+			$event_ballots, $event_fees,
+            $weekend_id, $weekend_name, $weekend_start, $weekend_end,
+				$weekend_reg_start, $weekend_reg_end, $weekend_timestamp,
+				$weekend_sitename, $weekend_city, $weekend_state,
+            $chair_id, $chair_email, $chair_first, $chair_last, $chair_phone,
+				$chair_street, $chair_city, $chair_state, $chair_zip, $chair_postal, $chair_country,
+				$chair_nsda,
+			$shipping_address
+		) = $sth->fetchrow_array()
+	) {
+
+		next unless $district_name;
+
+		unless ($tourns{$tourn_id}{"name"}) {
+			$tourns{$tourn_id}{"name"}              = $tourn_name;
+			$tourns{$tourn_id}{"district"}          = $district_id;
+			$tourns{$tourn_id}{"district_name"}     = $district_name;
+			$tourns{$tourn_id}{"district_level"}    = $district_level;
+			$tourns{$tourn_id}{"district_location"} = $district_location;
+			$tourns{$tourn_id}{"chair"}             = $chair_id;
+
+			$chairs{$chair_nsda} = $tourn_id;
+
+			$tourns{$tourn_id}{"chair_email"}       = $chair_email;
+			$tourns{$tourn_id}{"chair_phone"}       = $chair_phone;
+			$tourns{$tourn_id}{"chair_name"}        = $chair_first." ".$chair_last;
+
+			if ($shipping_address) {
+				$tourns{$tourn_id}{"address"} = eval {
+					return JSON::decode_json($shipping_address);
+				};
+			}
+		}
+
+
+		if ($weekend_id) {
+
+			unless ($weekends{$weekend_id}{"name"}) {
+
+				$weekends{$weekend_id}{'tourn'}     = $tourn_id;
+				$weekends{$weekend_id}{"name"}      = $weekend_name;
+				$weekends{$weekend_id}{"state"}     = $weekend_state;
+				$weekends{$weekend_id}{"site"}      = $weekend_sitename;
+				$weekends{$weekend_id}{"city"}      = $weekend_city;
+				$weekends{$weekend_id}{"timestamp"} = $weekend_timestamp;
+				$weekends{$weekend_id}{"start"}     = $weekend_start;
+				$weekends{$weekend_id}{"end"}       = $weekend_end;
+				$weekends{$weekend_id}{"reg_start"} = $weekend_reg_start;
+				$weekends{$weekend_id}{"reg_end"}   = $weekend_reg_end;
+
+				my $weekend_epoch = $weekend_start;
+				$weekend_epoch =~ s/[\D_]//g;
+
+				$weekends{$weekend_id}{"start_epoch"} = $weekend_epoch;
+
+				if (
+					(not defined $tourns{$tourn_id}{"start_epoch"})
+					|| ($weekend_epoch < $tourns{$tourn_id}{'start_epoch'})
+				) {
+					$tourns{$tourn_id}{'start_epoch'} = $weekend_epoch;
+					$tourns{$tourn_id}{'start'} = $weekend_start;
+				}
+
+				$weekends{$weekend_id}{"tourn"} = $tourn_id;
+				$tourns{$tourn_id}{"weekends"}{$weekend_id} = $weekends{$weekend_id};
+			}
+
+			push @{$weekends{$weekend_id}{"events"}}, $event_id;
+			$weekends{$weekend_id}{$event_abbr} = $event_id;
+
+		} else {
+			$tourns{$tourn_id}{"nope"}{$event_id}++;
+		}
+
+		$tourns{$tourn_id}{"events"}{$event_id}{"ballots"} = $event_ballots;
+		$tourns{$tourn_id}{"events"}{$event_id}{"fees"}    = $event_fees;
+		$tourns{$tourn_id}{"events"}{$event_id}{"name"}    = $event_name;
+		$tourns{$tourn_id}{"events"}{$event_id}{"abbr"}    = $event_abbr;
+		$tourns{$tourn_id}{"events"}{$event_id}{"type"}    = $event_type;
+		$tourns{$tourn_id}{"events"}{$event_id}{"weekend"} = $weekend_id;
+
+		$tourns{$tourn_id}{"events"}{$event_id}{"weekend_start"} = $weekend_start;
+		$tourns{$tourn_id}{"eventabbr"}{$event_abbr}             = $event_id;
+
+	}
+
+	$sth->finish();
+
+	$sth = $dbh->prepare("
+		select tourn.id, tourn_setting.tag,
+			tourn_setting.value, tourn_setting.value_date, tourn_setting.value_text
+		from tourn_setting, tourn
+		where tourn.start > ?
+		and tourn.end < ?
+		and tourn.id = tourn_setting.tourn
+
+		and exists (
+			select district.id
+			from tourn_setting district
+			where district.tourn = tourn.id
+			and district.tag = 'nsda_district'
+		)
+	");
+
+	my %tourn_settings;
+
+	$sth->execute(
+		DateTime::Format::MySQL->format_datetime($after),
+		DateTime::Format::MySQL->format_datetime($limit)
+	);
+
+	while(
+		my ($tourn_id, $tag, $value, $value_date, $value_text) = $sth->fetchrow_array()
+	) {
+
+		$tourn_settings{$tourn_id}{$tag} = $value;
+		$tourn_settings{$tourn_id}{$tag} = $value_date if $value eq "date";
+		$tourn_settings{$tourn_id}{$tag} = $value_text if $value eq "text";
+	}
+
+	my ($leaders_ref, $junque) = $m->comp(
+		"/funclib/nsda/api_client.mas",
+		path => "/reports/district-leaders"
+	);
+
+
+	foreach my $address (@{$leaders_ref->{data}}) {
+
+		next unless $address->{position} eq "Chair";
+
+		my $tourn_id = $chairs{$address->{person_id}};
+
+		next unless $tourn_id;
+		next if $tourns{$tourn_id}{"address"}{"street"};
+
+		$tourns{$tourn_id}{"address"}{"system"}++;
+
+		$tourns{$tourn_id}{"address"}{"name"}    = $address->{"first"}." ".$address->{"last"};
+		$tourns{$tourn_id}{"address"}{"street"}  = $address->{"school_name"};
+		$tourns{$tourn_id}{"address"}{"street2"} = $address->{"school_street"};
+		$tourns{$tourn_id}{"address"}{"city"}    = $address->{"school_city"};
+		$tourns{$tourn_id}{"address"}{"state"}   = $address->{"school_state"};
+		$tourns{$tourn_id}{"address"}{"zip"}     = $address->{"school_zip"};
+		$tourns{$tourn_id}{"address"}{"country"} = $address->{"school_country"};
+	}
+
+    my $now = DateTime->now;
+    $now->set_time_zone("America/Chicago");
+
+    my $filename = "AwardsOrderList-".$year;
+    my $filepath = $Tab::file_root."tmp/".$filename;
+
+    `rm -f $filepath.*`;
+
+    $m->comp("/funclib/printout.mas",
+        filename  => $filename,
+        head      => 1,
+		no_footer => 1
+    );
+
+    open (my $texout, ">>$filepath.tex");
+
+	foreach my $tourn_id (
+		sort {
+			$tourns{$a}{"start_epoch"} <=> $tourns{$b}{"start_epoch"}
+		} keys %tourns
+	) {
+
+		print $texout "\\strut \\hfill \\textsb{\\LARGE Start Date: \\hspace{2mm}".dateme($tourns{$tourn_id}{"start"})."}\n";
+		print $texout "\\bigskip \\newline\n";
+
+		print $texout "\\textsb{\\huge ".Tab::texify($tourns{$tourn_id}{"district_name"})." }";
+		print $texout "\\vspace{.5in} \\newline\n";
+
+		print $texout "\\parbox[t][3.4in][t]{3.45in}{ ";
+		print $texout "\\strut \\hfill \\textsb{\\color{black!64}\\Large AWARDS} \\hfill \\strut\n";
+		print $texout "\\smallskip \\newline\n";
+		print $texout "\\makebox[3.45in]{\\hrulefill}\n";
+		print $texout "\\medskip \\newline\n";
+		print $texout "\\large\n";
+
+		foreach my $key (sort keys %questions) {
+			next if $questions{$key}{"short"} eq "Ext";
+			next unless $tourn_settings{$tourn_id}{$questions{$key}{"label"}};
+			$questions{$key}{"text"} =~ s/ award//g;
+			print $texout "\\parbox{.5in}{\\hrulefill} \\hspace{5mm} ".Tab::texify($questions{$key}{"text"});
+			print $texout "\\bigskip \\newline\n";
+		}
+
+		print $texout " } \\hspace{2mm} ";
+
+		print $texout "\\parbox[t][3.4in][t]{3.45in}{ ";
+		print $texout "\\strut \\hfill \\textsb{\\color{black!64}\\Large BALLOTS} \\hfill \\strut\n";
+		print $texout "\\smallskip \\newline\n";
+		print $texout "\\makebox[3.45in]{\\hrulefill}\n";
+		print $texout "\\medskip \\newline\n";
+		print $texout "\\normalsize\n";
+
+		my $did;
+
+		print $texout "\\strut \\hfill\n";
+		print $texout "\\parbox[t][][t]{1.5in}{ ";
+		print $texout "\\large";
+
+		foreach my $event_id (sort keys %{$tourns{$tourn_id}{"events"}}) {
+			next unless $tourns{$tourn_id}{"events"}{$event_id}{"ballots"};
+			$did++;
+
+			print $texout "\\textsb{".Tab::texify($tourns{$tourn_id}{"events"}{$event_id}{"abbr"})."} ";
+			print $texout "\\dotfill ";
+			print $texout $tourns{$tourn_id}{"events"}{$event_id}{"ballots"};
+			print $texout "\n \\bigskip \\newline\n";
+		}
+
+		unless ($did) {
+			print $texout "\\strut \\hfill No ballots ordered \\hfill \\strut \n";
+			print $texout "\\smallskip \\newline\n";
+		}
+
+		print $texout " } \\hfill \\strut \n";
+		print $texout " } \n";
+		print $texout "\\medskip \\newline\n";
+		print $texout "\\makebox[7in]{\\hrulefill}\n";
+		print $texout "\\smallskip \\newline\n";
+		print $texout "\\textsb{\\Large District Level: \\hspace{2mm} ".Tab::texify($tourns{$tourn_id}{"district_level"})." }";
+		print $texout "\\bigskip \\newline\n";
+
+		print $texout "\\textsb{\\Large Events held: } \\hfill ";
+		print $texout "\\large\n";
+
+		my $last_type = "congress";
+
+		foreach my $event_id (sort {
+				$tourns{$tourn_id}{"events"}{$a}{"type"} cmp $tourns{$tourn_id}{"events"}{$b}{"type"}
+				|| $tourns{$tourn_id}{"events"}{$a}{"abbr"} cmp $tourns{$tourn_id}{"events"}{$b}{"abbr"}
+			} keys %{$tourns{$tourn_id}{"events"}}
+		) {
+
+			next if $tourns{$tourn_id}{"nope"}{$event_id};
+
+			unless ($last_type) {
+				$last_type = $tourns{$tourn_id}{"events"}{$event_id}{"type"};
+			} elsif ($last_type ne $tourns{$tourn_id}{"events"}{$event_id}{"type"}) {
+				print $texout " \\strut \\hfill \\strut \\hfill ";
+				$last_type = $tourns{$tourn_id}{"events"}{$event_id}{"type"};
+			}
+
+			print $texout Tab::texify($tourns{$tourn_id}{"events"}{$event_id}{"abbr"});
+			print $texout " \\hfill ";
+		}
+
+		print $texout "\\bigskip \\newline\n";
+
+		print $texout "\\makebox[7in]{\\hrulefill}\n";
+		print $texout "\\medskip \\newline\n";
+
+		print $texout "\\textsb{\\Large Not Held: } \\hspace{5mm} ";
+		print $texout "\\large\n";
+
+		foreach my $event_id (sort {
+				$tourns{$tourn_id}{"events"}{$a}{"type"} cmp $tourns{$tourn_id}{"events"}{$b}{"type"}
+				|| $tourns{$tourn_id}{"events"}{$a}{"abbr"} cmp $tourns{$tourn_id}{"events"}{$b}{"abbr"}
+			} keys %{$tourns{$tourn_id}{"events"}}
+		) {
+
+			next unless $tourns{$tourn_id}{"nope"}{$event_id};
+
+			print $texout Tab::texify($tourns{$tourn_id}{"events"}{$event_id}{"abbr"});
+			print $texout " \\hspace{2mm} ";
+		}
+
+		print $texout "\\bigskip \\newline\n";
+		print $texout "\\makebox[7in]{\\hrulefill}\n";
+		print $texout "\\medskip \\newline\n";
+
+		print $texout "\\begin{tabular}{p{1in}p{2.25in}}\n";
+
+			print $texout "\\large\n";
+
+			print $texout "\\textsb{\\color{black!64} District Chair:} & ";
+			print $texout Tab::texify($tourns{$tourn_id}{"chair_name"});
+			print $texout "\\\\ \n";
+
+			print $texout "\\textsb{\\color{black!64} Email:} & ";
+			print $texout Tab::texify($tourns{$tourn_id}{"chair_email"});
+			print $texout "\\\\ \n";
+
+			print $texout "\\textsb{\\color{black!64} Phone:} & ";
+			print $texout Tab::texify(Tab::phone($tourns{$tourn_id}{"chair_phone"}));
+			print $texout "\\\\ \n";
+
+		print $texout "\\end{tabular} \n";
+
+		print $texout "\\bigskip\n";
+		print $texout "\\newline\n";
+
+		print $texout "\\parbox[t][][t]{3.45in}{ ";
+
+			if ($tourns{$tourn_id}{"address"}{"system"}) {
+				print $texout "\\textsb{\\color{black!64} School Shipping Address:} ";
+			} else {
+				print $texout "\\textsb{\\color{black!64} Shipping Address Provided:} ";
+			}
+
+			print $texout "\\vspace{.5in} \\newline\n";
+
+			if ($tourns{$tourn_id}{"address"}{"name"}) {
+
+				print $texout "\\tt\n";
+				print $texout "\\Large\n";
+
+				print $texout Tab::texify($tourns{$tourn_id}{"address"}{"name"})."\n \\newline\n";
+				print $texout Tab::texify($tourns{$tourn_id}{"address"}{"street"})."\n \\newline\n";
+				print $texout Tab::texify($tourns{$tourn_id}{"address"}{"street2"})."\n \\newline\n";
+
+				print $texout Tab::texify($tourns{$tourn_id}{"address"}{"city"}).", ";
+				print $texout Tab::texify($tourns{$tourn_id}{"address"}{"state"})." ";
+				print $texout Tab::texify($tourns{$tourn_id}{"address"}{"zip"});
+
+				unless (uc($tourns{$tourn_id}{"address"}{"country"}) eq "US") {
+
+					my $country = $m->comp("/funclib/country_translate.mas",
+						country => $tourns{$tourn_id}{"address"}{"country"}
+					);
+
+					if ($country) {
+						print $texout "\\newline\n";
+						print $texout Tab::texify(uc($country));
+					} else {
+						print $texout "\\newline\n";
+						print $texout Tab::texify(uc($tourns{$tourn_id}{"address"}{"country"}));
+					}
+				}
+
+				print $texout "\\smallskip \\newline\n";
+			}
+
+		print $texout " } \n";
+		print $texout "\\newpage\n";
+	}
+
+    $m->comp("/funclib/printout.mas",
+		filename  => $filename,
+		tail      => 1,
+		no_footer => 1
+    );
+
+</%init>
