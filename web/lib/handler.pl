@@ -137,8 +137,6 @@ use Tab::TournIgnore;
 use Tab::TournSite;
 use Tab::Webpage;
 
-use Tab::NSDA::PointsDBI;
-
 no warnings "uninitialized";
 
 my $ah;
