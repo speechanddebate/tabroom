@@ -2,7 +2,7 @@ package Tab::StudentVote;
 use base 'Tab::DBI';
 Tab::StudentVote->table('student_vote');
 Tab::StudentVote->columns(Primary => qw/id/);
-Tab::StudentVote->columns(Essential => qw/rank panel entry voter entered_by entered_at timestamp/);
+Tab::StudentVote->columns(Essential => qw/tag value panel entry voter entered_by entered_at timestamp/);
 
 Tab::StudentVote->has_a(entry => 'Tab::Entry');
 Tab::StudentVote->has_a(voter => 'Tab::Entry');

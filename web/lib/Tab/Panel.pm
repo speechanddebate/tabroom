@@ -15,8 +15,6 @@ Tab::Panel->has_a(round => 'Tab::Round');
 Tab::Panel->has_many(ballots => 'Tab::Ballot', 'panel');
 Tab::Panel->has_many(student_votes => 'Tab::StudentVote', 'panel');
 
-Tab::Panel->has_many(student_ballots => 'Tab::StudentBallot', 'panel' => { order_by => 'value'});
-
 __PACKAGE__->_register_datetimes( qw/started timestamp/);
 
 __PACKAGE__->add_trigger(after_set_room => \&new_hangout);
