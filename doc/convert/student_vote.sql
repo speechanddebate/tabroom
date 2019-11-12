@@ -1,16 +1,9 @@
 
-create table student_vote (
-	id int auto_increment primary key,
-	rank int not null default 0,
-	panel int,
-	entry int,
-	voter int,
-	entered_by int,
-	entered_at datetime,
-	timestamp timestamp
-);
+alter table student_vote add tag enum("nominee", "rank") not null default "rank" after id;
+alter table student_vote change rank value int;
 
-create index entry on student_vote(entry);
-create index voter on student_vote(voter);
+update tiebreak set name = "student_rank" where name = "student_vote";
+update tiebreak set name = "student_rank" where name = "student_ranks";
+update tiebreak set name = "student_nominee" where name = "student_ballot";
 
-ALTER TABLE student_vote ADD CONSTRAINT sv_evp UNIQUE (panel, entry, voter);
+
