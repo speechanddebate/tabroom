@@ -237,10 +237,10 @@
 
 		tags.forEach(function(Tag) {
 			parents.forEach(function(Parent) {
-				$(document).find(Tag).parent().closest(Parent).find(".row:even").removeClass("odd");
-				$(document).find(Tag).parent().closest(Parent).find(".row:even").addClass("even");
-				$(document).find(Tag).parent().closest(Parent).find(".row:odd").removeClass("even");
-				$(document).find(Tag).parent().closest(Parent).find(".row:odd").addClass("odd");
+				$(document).find(Tag).parent().closest(Parent).find(".row:visible:even").removeClass("odd");
+				$(document).find(Tag).parent().closest(Parent).find(".row:visible:even").addClass("even");
+				$(document).find(Tag).parent().closest(Parent).find(".row:visible:odd").removeClass("even");
+				$(document).find(Tag).parent().closest(Parent).find(".row:visible:odd").addClass("odd");
 			});
 		});
 	};
