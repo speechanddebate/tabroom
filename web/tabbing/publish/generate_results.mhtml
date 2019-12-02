@@ -86,6 +86,31 @@
 		}
 	}
 
+
+	Tab::ResultValue->set_sql( rm_label => "
+		delete result_value.*
+		from result, result_value, result_set
+		where result_value.result = result.id
+		and result.result_set = result_set.id
+		and result_set.event = ?
+		and result_set.label = ?
+	");
+
+	Tab::Result->set_sql( rm_label => "
+		delete result.*
+		from result, result_set
+		where result.result_set = result_set.id
+		and result_set.event = ?
+		and result_set.label = ?
+	");
+
+	Tab::ResultSet->set_sql( rm_label => "
+		delete from result_set
+		where event = ?
+		and label = ?
+	");
+
+
 	$breakout_label .= ") " if $breakout_label;
 
 	if ($result_type eq "ndca") {
@@ -134,7 +159,7 @@
 
 			my $event_settings = $es{$event->id};
 
-			my $bracket = $m->comp("generate_bracket.mas", 
+			my $bracket = $m->comp("generate_bracket.mas",
 				event    => $event,
 				breakout => $breakout,
 				label    => "Bracket ".$breakout_label
@@ -145,6 +170,198 @@
 			$msg .= "Bracket for ".$event->abbr." regenerated";
 		}
 
+	} elsif ($result_type eq "chamber") {
+
+		foreach my $event (@events) {
+
+			my @rounds =
+				sort {$b->name <=> $a->name}
+				$m->comp("/funclib/event_rounds.mas",
+					event => $event,
+					done => "yes"
+				);
+
+			my %buckets;
+
+			my %round_settings = $m->comp("/funclib/round_settings.mas",
+				event => $event,
+				tag   => "session_lock"
+			);
+
+			ROUND:
+			foreach my $round (@rounds) {
+
+				if ($round_settings{$round->id}{"session_lock"}) {
+
+					my $already = eval {
+						return $buckets{$round_settings{$round->id}{"session_lock"}};
+					};
+
+					if ($already && $already->name > $round->name) {
+						next ROUND;
+					}
+
+					Tab::debuglog("Round ".$round->realname." is here under session lock to ".$round_settings{$round->id}{"session_lock"});
+
+					$buckets{$round_settings{$round->id}{"session_lock"}} = $round;
+
+					if (
+						$buckets{$round->type}
+						&& $buckets{$round->type}->id == $round_settings{$round->id}{"session_lock"}
+					) {
+						delete $buckets{$round->type};
+					}
+
+				} else {
+
+					my $already = eval {
+						return $buckets{$round->type};
+					};
+
+					if ($already && $already->name > $round->name) {
+						next ROUND;
+					}
+
+					$buckets{$round->type} = $round;
+				}
+			}
+
+			foreach my $key (keys %buckets) {
+
+				my $round = $buckets{$key};
+				my $label = $round->label;
+
+				if ($label) {
+					$label =~ s/\d//g;
+				} else {
+					$label = ucfirst($round->type);
+				}
+
+				$label .= " Chamber Results";
+
+				Tab::ResultValue->sql_rm_label->execute($event->id, $label);
+				Tab::Result->sql_rm_label->execute($event->id, $label);
+				Tab::ResultSet->sql_rm_label->execute($event->id, $label);
+
+				my $set = Tab::ResultSet->create({
+					tourn     => $tourn->id,
+					event     => $event->id,
+					label     => $label,
+					generated => $now,
+					published => $publish
+				});
+
+				my %keys = map {$_->tag => $_} $set->result_keys();
+
+				my %seed;
+				my $tiebreak_set = $round->tiebreak_set;
+
+				my @results = $m->comp("/tabbing/results/order_entries.mas", round => $round);
+				my %entry_ballots = $m->comp("/funclib/round_ballot_strings.mas", round => $round);
+
+				my $entries = pop @results if @results;
+				my $round_id = $round->id;
+				my %chambers;
+
+				foreach my $panel_id (sort keys %{$entries->{"by_section"}}) {
+
+					my $rank = 1;
+					my %used;
+					my $park;
+
+					foreach my $key (sort {$a <=> $b} keys %{$entries->{"by_place"}}) {
+
+						my @entries;
+
+						foreach my $entry ( @{${$entries->{"by_place"}}{$key}} ) {
+							next unless $entries->{"by_section"}{$panel_id}{$entry};
+							next if $breakout && (not defined $limit_entries{$entry});
+							next if $used{$entry}++;
+							push @entries, $entry
+						}
+
+						next unless @entries;
+
+						my $tie++ if scalar @entries > 1;
+
+						foreach my $entry (@entries) {
+
+							$park++;
+
+							$seed{$entry} = $rank;
+							my $key_value = $rank;
+							$key_value .= "-T" if $tie;
+
+							my $result = Tab::Result->create({
+								entry      => $entry,
+								rank       => $rank,
+								result_set => $set->id,
+								panel      => $panel_id,
+								round      => $round_id,
+								place      => $key_value
+							});
+
+							foreach my $key (sort {$a <=> $b} keys %{$entries->{tier_description}}) {
+
+								my $tag = ${$entries->{tier_description}}{$key};
+								my $description = ${$entries->{tier_long_description}}{$key};
+
+								my $sort_desc = 0;
+								$sort_desc = 1 if ${$entries->{tier_direction}}{$key} eq "down";
+
+								my $value = ${$entries->{tbs}}{$entry}{$key};
+								$value = sprintf("%.2f", $value);
+
+								Tab::debuglog("Tag is $tag for which the key is ".$keys{$tag});
+
+								unless ($keys{$tag}) {
+									$keys{$tag} = Tab::ResultKey->create({
+										result_set  => $set->id,
+										tag         => $tag,
+										description => $description,
+										sort_desc   => $sort_desc
+									});
+								}
+
+								Tab::ResultValue->create({
+									result       => $result->id,
+									value        => $value,
+									priority     => $key,
+									result_key   => $keys{$tag},
+									tiebreak_set => $tiebreak_set
+								});
+							}
+
+							unless ($keys{"Ballots"}) {
+								$keys{"Ballots"} = Tab::ResultKey->create({
+									result_set  => $set->id,
+									tag         => "Ballots",
+									description => "Unadjusted Raw Scores",
+									no_sort     => 1
+								});
+							}
+
+							Tab::ResultValue->create({
+								result_key   => $keys{"Ballots"},
+								result       => $result->id,
+								value        => $entry_ballots{$entry},
+								tiebreak_set => $tiebreak_set,
+								priority     => 999
+							});
+						}
+
+						$rank += $park;
+
+						Tab::debuglog("park was $park and now rank is $rank");
+						undef $park;
+					}
+
+				}
+
+			}
+
+		}
+
 	} else {
 
 		my $label = "Prelim Seeds" if ($result_type eq "prelim_seed");
@@ -153,29 +370,6 @@
 		$label = "Cume Sheet" if ($result_type eq "cumesheet");
 
 		$label .= $breakout if $breakout;
-
-		Tab::ResultValue->set_sql( rm_label => "
-			delete result_value.*
-			from result, result_value, result_set
-			where result_value.result = result.id
-			and result.result_set = result_set.id
-			and result_set.event = ?
-			and result_set.label = ?
-		");
-
-		Tab::Result->set_sql( rm_label => "
-			delete result.*
-			from result, result_set
-			where result.result_set = result_set.id
-			and result_set.event = ?
-			and result_set.label = ?
-		");
-
-		Tab::ResultSet->set_sql( rm_label => "
-			delete from result_set
-			where event = ?
-			and label = ?
-		");
 
 		foreach my $event (@events) {
 
@@ -451,12 +645,11 @@
 
 			} elsif ($last_prelim) {
 
-				my (
-					$entries_ref, $tbs_ref, $desc_ref, $forfeit_ref,
-					$tier_dir, $panrank_ref, $panletter_ref, $long_desc_ref
-				) = $m->comp("/tabbing/results/order_entries.mas", round => $last_prelim);
+				my (@results) = $m->comp("/tabbing/results/order_entries.mas", round => $last_prelim);
 
-				my $tiebreak_set = $last_prelim->tiebreak_set;
+				my $entries = pop @results;
+
+				my $tiebreak_set = $last_prelim->tiebreak_set();
 
 				my %entry_ballots = $m->comp(
 					"/funclib/round_ballot_strings.mas",
@@ -464,18 +657,18 @@
 
 				my $counter = 1;
 
-				foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+				foreach my $key (sort {$a <=> $b} keys %{$entries->{"by_place"}}) {
 
 					next if $limit && $counter > $limit;
 
 					my @entries;
 
 					if ($breakout) {
-						foreach my $entry ( @{${$entries_ref}{$key}} ) {
+						foreach my $entry ( @{${$entries->{"by_place"}}{$key}} ) {
 							push @entries, $entry if $limit_entries{$entry};
 						}
 					} else {
-						@entries = @{${$entries_ref}{$key}};
+						@entries = @{${$entries->{"by_place"}}{$key}};
 					}
 
 					my $tie++ if scalar @entries > 1;
@@ -500,15 +693,15 @@
 							place      => $key_value
 						});
 
-						foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+						foreach my $key (sort {$a <=> $b} keys %{$entries->{tier_description}}) {
 
-							my $tag = ${$desc_ref}{$key};
-							my $description = ${$long_desc_ref}{$key};
+							my $tag = ${$entries->{tier_description}}{$key};
+							my $description = ${$entries->{tier_long_description}}{$key};
 
 							my $sort_desc = 0;
-							$sort_desc = 1 if ${$tier_dir}{$key} eq "down";
+							$sort_desc = 1 if ${$entries->{tier_direction}}{$key} eq "down";
 
-							my $value = ${$tbs_ref}{$entry}{$key};
+							my $value = ${$entries->{tbs}}{$entry}{$key};
 							$value = sprintf("%.2f", $value);
 
 							unless ($keys{$tag}) {
@@ -562,9 +755,8 @@
 						my $type = $round->type;
 						my $label = substr($round->label, 0, 8);
 
-						my ($entries_ref, $tbs_ref, $desc_ref, $forfeit_ref,
-							$tier_dir, $panrank_ref, $panletter_ref, $long_desc_ref
-						) = $m->comp("/tabbing/results/order_entries.mas", round => $round);
+						my @results = $m->comp("/tabbing/results/order_entries.mas", round => $round);
+						my $entries = pop @results if @results;
 
 						my $tiebreak_set = $round->tiebreak_set;
 
@@ -573,16 +765,16 @@
 							round => $round
 						);
 
-						foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
+						foreach my $key (sort {$a <=> $b} keys %{$entries->{"by_place"}}) {
 
-							my $tie++ if scalar @{${$entries_ref}{$key}} > 1;
+							my $tie++ if scalar @{${$entries->{"by_place"}}{$key}} > 1;
 
-							@{${$entries_ref}{$key}} =
+							@{${$entries->{"by_place"}}{$key}} =
 								sort {
 									$prelim_seed{$a} <=> $prelim_seed{$b}
-								} @{${$entries_ref}{$key}};
+								} @{${$entries->{"by_place"}}{$key}};
 
-							foreach my $entry (@{${$entries_ref}{$key}}) {
+							foreach my $entry (@{${$entries->{"by_place"}}{$key}}) {
 
 								next if $breakout && not defined $limit_entries{$entry};
 								next if $used{$entry}++;
@@ -608,7 +800,7 @@
 									place      => $key_value
 								});
 
-								foreach my $key (sort {$a <=> $b} keys %{$desc_ref}) {
+								foreach my $key (sort {$a <=> $b} keys %{$entries->{tier_description}}) {
 
 									if (
 										($type eq "elim" || $type eq "final")
@@ -641,10 +833,10 @@
 
 									} else {
 
-										my $tag = ${$desc_ref}{$key};
-										my $description = ${$long_desc_ref}{$key};
+										my $tag = ${$entries->{tier_description}}{$key};
+										my $description = ${$entries->{tier_long_description}}{$key};
 										my $sort_desc = 0;
-										$sort_desc = 1 if ${$tier_dir}{$key} eq "down";
+										$sort_desc = 1 if ${$entries->{tier_direction}}{$key} eq "down";
 
 										unless ($keys{$tag}) {
 											$keys{$tag} = Tab::ResultKey->create({
@@ -657,7 +849,7 @@
 
 										Tab::ResultValue->create({
 											result       => $result->id,
-											value        => ${$tbs_ref}{$entry}{$key},
+											value        => ${$entries->{tbs}}{$entry}{$key},
 											priority     => $key,
 											result_key   => $keys{$tag},
 											tiebreak_set => $tiebreak_set
