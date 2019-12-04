@@ -10,4 +10,3 @@ Tab::ResultValue->has_a(result_key => 'Tab::ResultKey');
 Tab::ResultValue->has_a(tiebreak_set => 'Tab::TiebreakSet');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
-
