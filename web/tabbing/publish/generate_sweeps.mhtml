@@ -1,0 +1,503 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$sweep_set_id => undef
+	$scope        => undef
+	$publish      => 0
+	$limit        => undef
+	$circuit_id   => undef
+</%args>
+<%init>
+
+	my $msg;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now( time_zone => $tz);
+
+	my $sweep_set = Tab::SweepSet->retrieve($sweep_set_id);
+
+	unless ($sweep_set) {
+		$m->comp("/funclib/abort.mas",
+			message => "No valid sweep ruleset found for ID $sweep_set_id"
+		);
+	}
+
+	Tab::ResultValue->set_sql( rm_label => "
+		delete result_value.*
+		from result, result_value, result_set
+		where result_value.result = result.id
+		and result.result_set = result_set.id
+		and result_set.tourn = ?
+		and result_set.label = ?
+	");
+
+	Tab::Result->set_sql( rm_label => "
+		delete result.*
+		from result, result_set
+		where result.result_set = result_set.id
+		and result_set.tourn = ?
+		and result_set.label = ?
+	");
+
+	Tab::ResultSet->set_sql( rm_label => "
+		delete from result_set
+		where tourn = ?
+		and label = ?
+	");
+
+	my $err;
+
+	if ($scope eq "schools") {
+
+		my $label = $sweep_set->name()." (Schools)";
+		Tab::ResultValue->sql_rm_label->execute($tourn->id, $label);
+		Tab::Result->sql_rm_label->execute($tourn->id, $label);
+		Tab::ResultSet->sql_rm_label->execute($tourn->id, $label);
+
+		my %schools = $m->comp(
+			"/tabbing/results/sweep_schools.mas",
+			sweep_set => $sweep_set,
+			tourn     => $tourn
+		);
+
+		my %event_by_id = map {$_->id => $_} $tourn->events;
+
+		my $set = Tab::ResultSet->create({
+			tourn     => $tourn->id,
+			sweep_set => $sweep_set->id,
+			label     => $label,
+			generated => $now,
+			published => $publish
+		});
+
+		my %keys = map {$_->tag => $_} $set->result_keys();
+
+		my $count = 1;
+		my $place;
+		my $last_points;
+		my $add_to_place;
+
+		my %tiers;
+
+		foreach my $school_id ( sort {
+			$schools{$b}{"points"} <=> $schools{$a}{"points"}
+			} keys %schools
+		) {
+
+			next unless $schools{$school_id}{"points"};
+
+			if ($last_points == $schools{$school_id}{"points"}) {
+				$add_to_place++;
+			} elsif ($add_to_place) {
+				$place++;
+				$place += $add_to_place;
+				undef $add_to_place;
+			}  else {
+				$place++;
+			}
+
+			$last_points = $schools{$school_id}{"points"};
+			push @{$tiers{$place}}, $school_id;
+		}
+
+		my $was_tie;
+
+		foreach my $place (sort {$a <=> $b} keys %tiers) {
+
+			next if $limit && $place > $limit;
+
+			my $tie;
+			$tie++ if scalar @{$tiers{$place}} > 1;
+
+			foreach my $school_id (@{$tiers{$place}}) {
+
+				my $key_value = $place;
+				$key_value .= "-T" if $tie;
+
+				my $priority = 1;
+
+				my $result = Tab::Result->create({
+					school     => $school_id,
+					rank       => $place,
+					result_set => $set->id,
+					place      => $key_value
+				});
+
+				unless ($keys{"points"}) {
+					$keys{"points"} = Tab::ResultKey->create({
+						result_set  => $set->id,
+						tag         => "points",
+						description => "Points",
+						sort_desc   => 1
+					});
+				}
+
+				Tab::ResultValue->create({
+					result       => $result->id,
+					value        => $schools{$school_id}{"points"},
+					priority     => $priority++,
+					result_key   => $keys{"points"},
+				});
+
+				unless ($keys{"counted"}) {
+					$keys{"counted"} = Tab::ResultKey->create({
+						result_set  => $set->id,
+						tag         => "counted",
+						description => "Entries Counted",
+						sort_desc   => 0
+					});
+				}
+
+				Tab::ResultValue->create({
+					result       => $result->id,
+					value        => $schools{$school_id}{"counted_entry_count"},
+					priority     => $priority++,
+					result_key   => $keys{"counted"},
+				});
+
+				unless ($keys{"entries"}) {
+					$keys{"entries"} = Tab::ResultKey->create({
+						result_set  => $set->id,
+						tag         => "entries",
+						description => "Total Number of Entries",
+						sort_desc   => 0
+					});
+				}
+
+				Tab::ResultValue->create({
+					result       => $result->id,
+					value        => $schools{$school_id}{"all_entry_count"},
+					priority     => $priority++,
+					result_key   => $keys{"entries"},
+				});
+
+				foreach my $student_id (keys %{$schools{$school_id}{students}}) {
+
+					unless ($keys{"students"}) {
+						$keys{"students"} = Tab::ResultKey->create({
+							result_set  => $set->id,
+							tag         => "students",
+							description => "Competitors in Entry",
+							no_sort     => 0
+						});
+					}
+
+					Tab::ResultValue->create({
+						result       => $result->id,
+						value        => $student_id,
+						priority     => $priority++,
+						result_key   => $keys{"students"},
+					});
+
+				}
+			}
+		}
+
+	} elsif ($scope eq "students") {
+
+		my $label = $sweep_set->name()." (Individual)";
+
+		Tab::ResultValue->sql_rm_label->execute($tourn->id, $label);
+		Tab::Result->sql_rm_label->execute($tourn->id, $label);
+		Tab::ResultSet->sql_rm_label->execute($tourn->id, $label);
+
+	    my %students = $m->comp("/tabbing/results/sweep_students.mas", sweep_set => $sweep_set);
+
+		my $set = Tab::ResultSet->create({
+			tourn     => $tourn->id,
+			sweep_set => $sweep_set->id,
+			label     => $label,
+			generated => $now,
+			published => $publish
+		});
+
+		my %keys = map {$_->tag => $_} $set->result_keys();
+
+		my $count = 1;
+		my $place;
+		my $last_points;
+		my $add_to_place;
+		my %done;
+
+		my @students = sort {
+			$students{$b}{"points"} <=> $students{$a}{"points"}
+			|| $students{$b}{"counted_entry_count"} <=> $students{$a}{"counted_entry_count"}
+			|| $students{$b}{"all_entry_count"} <=> $students{$a}{"all_entry_count"}
+		} keys %students;
+
+		my %tiers;
+
+		foreach my $student_id (@students) {
+
+			next unless $students{$student_id}{"points"};
+
+			my $tie;
+
+			if ($last_points == $students{$student_id}{"points"}) {
+				$add_to_place++;
+			} elsif ($add_to_place) {
+				$place++;
+				$place += $add_to_place;
+				undef $add_to_place;
+			}  else {
+				$place++;
+			}
+
+			push @{$tiers{$place}}, $student_id;
+		}
+
+		foreach my $place (sort keys %tiers) {
+
+			next if $limit && $place > $limit;
+			my $tie++ if scalar @{$tiers{$place}} > 1;
+
+			foreach my $student_id (sort @{$tiers{$place}}) {
+
+				my $key_value = $place;
+				$key_value .= "-T" if $tie;
+
+				my $result = Tab::Result->create({
+					student    => $student_id,
+					rank       => $place,
+					result_set => $set->id,
+					place      => $key_value
+				});
+
+				unless ($keys{"points"}) {
+					$keys{"entries"} = Tab::ResultKey->create({
+						result_set  => $set->id,
+						tag         => "entries",
+						description => "Points",
+						sort_desc   => 1
+					});
+				}
+
+				Tab::ResultValue->create({
+					result       => $result->id,
+					value        => $students{$student_id}{"points"},
+					priority     => 1,
+					result_key   => $keys{"points"},
+				});
+
+				unless ($keys{"counted"}) {
+					$keys{"counted"} = Tab::ResultKey->create({
+						result_set  => $set->id,
+						tag         => "counted",
+						description => "Entries Counted",
+						sort_desc   => 0
+					});
+				}
+
+				Tab::ResultValue->create({
+					result       => $result->id,
+					value        => $students{$student_id}{"counted_entry_count"},
+					priority     => 2,
+					result_key   => $keys{"counted"},
+				});
+
+				unless ($keys{"entries"}) {
+					$keys{"entries"} = Tab::ResultKey->create({
+						result_set  => $set->id,
+						tag         => "entries",
+						description => "Total Number of Entries",
+						sort_desc   => 0
+					});
+				}
+
+				Tab::ResultValue->create({
+					result       => $result->id,
+					value        => $students{$student_id}{"all_entry_count"},
+					priority     => 3,
+					result_key   => $keys{"entries"},
+				});
+
+				unless ($keys{"subtotals"}) {
+					$keys{"subtotals"} = Tab::ResultKey->create({
+						result_set  => $set->id,
+						tag         => "subtotals",
+						description => "Subtotals by Entry",
+						no_sort     => 0
+					});
+				}
+
+				my $json = eval {
+					return JSON::encode_json($students{$student_id}{"subtotals"});
+				};
+
+				if ($json) {
+					Tab::ResultValue->create({
+						result       => $result->id,
+						value        => $json,
+						priority     => 4,
+						result_key   => $keys{"subtotals"},
+					});
+				}
+			}
+		}
+
+	} elsif ($scope eq "entries") {
+
+		my $label = $sweep_set->name()." (Entry)";
+		Tab::ResultValue->sql_rm_label->execute($tourn->id, $label);
+		Tab::Result->sql_rm_label->execute($tourn->id, $label);
+		Tab::ResultSet->sql_rm_label->execute($tourn->id, $label);
+
+		my @results = $m->comp(
+			"/tabbing/results/sweep_tourn.mas",
+			sweep_set => $sweep_set,
+			tourn     => $tourn
+		);
+
+		my $entries_ref = pop @results;
+		my $rules_ref   = pop @results;
+
+		my %event_by_id = map {$_->id => $_} $tourn->events;
+
+		my $set = Tab::ResultSet->create({
+			tourn     => $tourn->id,
+			sweep_set => $sweep_set->id,
+			label     => $label,
+			generated => $now,
+			published => $publish
+		});
+
+		my %keys = map {$_->tag => $_} $set->result_keys();
+
+		my $count = 1;
+		my $place;
+		my $last_points;
+		my $add_to_place;
+		my %done;
+
+		my @entries = sort {
+			$entries_ref->{$b}{"points"} <=> $entries_ref->{$a}{"points"}
+		} keys %{$entries_ref};
+
+		my %tiers;
+
+		foreach my $entry_id (@entries) {
+
+			next unless $entries_ref->{$entry_id}{"points"};
+
+			my $tie;
+
+			if ($last_points == $entries_ref->{$entry_id}{"points"}) {
+				$add_to_place++;
+			} elsif ($add_to_place) {
+				$place++;
+				$place += $add_to_place;
+				undef $add_to_place;
+			}  else {
+				$place++;
+			}
+
+			push @{$tiers{$place}}, $entry_id;
+		}
+
+		foreach my $place (sort keys %tiers) {
+
+			next if $limit && $place > $limit;
+			my $tie++ if scalar @{$tiers{$place}} > 1;
+
+			foreach my $entry_id (sort @{$tiers{$place}}) {
+
+				my $key_value = $place;
+				$key_value .= "-T" if $tie;
+
+				my $result = Tab::Result->create({
+					entry      => $entry_id,
+					rank       => $place,
+					result_set => $set->id,
+					place      => $key_value
+				});
+
+				my $priority = 1;
+
+				unless ($keys{"event"}) {
+					$keys{"event"} = Tab::ResultKey->create({
+						result_set  => $set->id,
+						tag         => "event",
+						description => "Event Entered",
+						no_sort     => 0
+					});
+				}
+
+				Tab::ResultValue->create({
+					result       => $result->id,
+					value        => $entries_ref->{$entry_id}{"eventabbr"},
+					priority     => $priority++,
+					result_key   => $keys{"event"}
+				});
+
+				foreach my $rule_id (sort keys %{$rules_ref}) {
+
+					my $tag = $rules_ref->{$rule_id}{"short_tag"};
+
+					unless ($keys{$tag}) {
+						$keys{$tag} = Tab::ResultKey->create({
+							result_set  => $set->id,
+							tag         => $tag,
+							description => $rules_ref->{$rule_id}{"tag"},
+							no_sort     => 0
+						});
+					}
+
+					Tab::ResultValue->create({
+						result       => $result->id,
+						value        => $entries_ref->{$entry_id}{$rule_id},
+						priority     => $priority++,
+						result_key   => $keys{$tag}
+					});
+				}
+
+				unless ($keys{"points"}) {
+					$keys{"points"} = Tab::ResultKey->create({
+						result_set  => $set->id,
+						tag         => "points",
+						description => "Points",
+						sort_desc   => 1
+					});
+				}
+
+				Tab::ResultValue->create({
+					result       => $result->id,
+					value        => $entries_ref->{$entry_id}{"points"},
+					priority     => $priority++,
+					result_key   => $keys{"points"},
+				});
+
+				foreach my $student_id (keys %{$entries_ref->{$entry_id}{students}}) {
+
+					unless ($keys{"students"}) {
+						$keys{"students"} = Tab::ResultKey->create({
+							result_set  => $set->id,
+							tag         => "students",
+							description => "Competitors in Entry",
+							no_sort     => 0
+						});
+					}
+
+					Tab::ResultValue->create({
+						result       => $result->id,
+						value        => $student_id,
+						priority     => $priority++,
+						result_key   => $keys{"students"},
+					});
+
+				}
+			}
+		}
+	} else {
+		$err = "You did not choose a correct scope for this result set";
+	}
+
+	if ($ARGS{'return'}) {
+		return $msg;
+	}
+
+	$m->redirect("/user/circuit/tourn_results.mhtml?circuit_id=$circuit_id&msg=$msg&err=$err") if $circuit_id;
+	$m->redirect("index.mhtml?msg=$msg&err=$err");
+
+</%init>
