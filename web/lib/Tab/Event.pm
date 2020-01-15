@@ -17,12 +17,8 @@ Tab::Event->has_a(rating_subset => 'Tab::RatingSubset');
 Tab::Event->has_many(files => 'Tab::File', 'event');
 Tab::Event->has_many(settings => "Tab::EventSetting", "event");
 Tab::Event->has_many(result_sets => "Tab::ResultSet", "event");
-
-Tab::Event->has_many(entries => 'Tab::Entry', 
-						'event' => { order_by => 'code'} );
-
-Tab::Event->has_many(rounds => 'Tab::Round',
-						'event' => { order_by => 'name'}  );
+Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
+Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
 
 sub setting {
 
