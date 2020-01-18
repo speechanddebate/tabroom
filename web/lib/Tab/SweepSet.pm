@@ -1,10 +1,10 @@
 package Tab::SweepSet;
 use base 'Tab::DBI';
 Tab::SweepSet->table('sweep_set');
-Tab::SweepSet->columns(All => qw/id tourn name circuit scope timestamp/);
+Tab::SweepSet->columns(All => qw/id tourn name sweep_award timestamp/);
 
 Tab::SweepSet->has_a(tourn => 'Tab::Tourn');
-Tab::SweepSet->has_a(circuit => 'Tab::Circuit');
+Tab::SweepSet->has_a(sweep_award => 'Tab::SweepAward');
 
 Tab::SweepSet->has_many(rules => 'Tab::SweepRule', 'sweep_set');
 Tab::SweepSet->has_many(sweep_events => 'Tab::SweepEvent', 'sweep_set');
