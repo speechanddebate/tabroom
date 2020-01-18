@@ -19,7 +19,6 @@ sub _register_datetimes {
 
 
 sub date_inflate {
-
 	my $value = shift;
 	my $dt = eval { 
 		return DateTime::Format::MySQL->parse_datetime($value); 
@@ -47,16 +46,16 @@ sub date_deflate {
 }
 
 sub _register_dates {
- my $class = shift;
- $class = ref $class if ref $class;
- foreach my $column (@_) {
-   $class->has_a(
-     $column => 'DateTime',
-     inflate => \&date_only_inflate,
-     deflate => \&date_only_deflate,
-   )
- }
- $class;
+	my $class = shift;
+	$class = ref $class if ref $class;
+	foreach my $column (@_) {
+		$class->has_a(
+			 $column => 'DateTime',
+			 inflate => \&date_only_inflate,
+			 deflate => \&date_only_deflate,
+		)
+	}
+	$class;
 }
 
 sub date_only_inflate {
