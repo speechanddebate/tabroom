@@ -1,4 +1,3 @@
-
 	alter table sweep_set drop circuit;
 	alter table sweep_set drop scope;
 	alter table sweep_set add sweep_award int after tourn;
