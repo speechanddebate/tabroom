@@ -3,8 +3,9 @@ use base 'Tab::DBI';
 Tab::Event->table('event');
 Tab::Event->columns(Primary => qw/id/);
 Tab::Event->columns(Essential => qw/tourn name abbr category 
-									type fee rating_subset pattern 
-									timestamp/);
+									type level fee 
+									rating_subset pattern timestamp
+								/);
 Tab::Event->columns(TEMP => qw/panelid supp conn/);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
