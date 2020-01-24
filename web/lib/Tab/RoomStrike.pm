@@ -20,14 +20,14 @@ sub name {
 
 	return "No rounds of ".$self->event->name if $self->type eq "event";
 
-	return "No use between ". Tab::niceshortdayt($self->start->set_time_zone($tz)) ." and ".  Tab::niceshortdayt($self->end->set_time_zone($tz)) 
+	return Tab::niceshortdayt($self->start->set_time_zone($tz)) ." until ".  Tab::niceshortdayt($self->end->set_time_zone($tz)) 
 		if $self->type eq "time" && $self->start->day != $self->end->day;
 
-	return "No use between ". Tab::niceshortdayt($self->start->set_time_zone($tz)) ." to ".  Tab::nicetime($self->end->set_time_zone($tz)) 
+	return Tab::niceshortdayt($self->start->set_time_zone($tz)) ." until ".  Tab::nicetime($self->end->set_time_zone($tz)) 
 		if $self->type eq "time" && $self->start->day == $self->end->day;
 
-	return "Block against judge ".$self->judge->code." ".$self->judge->first." ".$self->judge->last if $self->type eq "judge";
-	return "Block against entry ".$self->entry->code." ".$self->entry->name if $self->type eq "entry";
+	return "No judge ".$self->judge->code." ".$self->judge->first." ".$self->judge->last if $self->type eq "judge";
+	return "No entry ".$self->entry->code." ".$self->entry->name if $self->type eq "entry";
 }
 
 
