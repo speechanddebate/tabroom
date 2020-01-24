@@ -1,24 +1,25 @@
 package Tab::Circuit;
 use base 'Tab::DBI';
 Tab::Circuit->table('circuit');
-Tab::Circuit->columns(Primary => qw/id/);
+Tab::Circuit->columns(Primary   => qw/id/);
 Tab::Circuit->columns(Essential => qw/name abbr tz active state country webname/);
-Tab::Circuit->columns(Others => qw/timestamp/);
+Tab::Circuit->columns(Others    => qw/timestamp/);
 
-Tab::Circuit->has_many(sites => "Tab::Site");
-Tab::Circuit->has_many(regions => "Tab::Region");
-Tab::Circuit->has_many(webpages => "Tab::Webpage");
+Tab::Circuit->has_many(sites       => "Tab::Site");
+Tab::Circuit->has_many(regions     => "Tab::Region");
+Tab::Circuit->has_many(webpages    => "Tab::Webpage");
 Tab::Circuit->has_many(permissions => "Tab::Permission");
 
-Tab::Circuit->has_many(settings => "Tab::CircuitSetting", "circuit");
-
-Tab::Circuit->has_many(tourn_circuits => "Tab::TournCircuit");
-Tab::Circuit->has_many(chapter_circuits => "Tab::ChapterCircuit");
+Tab::Circuit->has_many(settings            => "Tab::CircuitSetting", "circuit");
+Tab::Circuit->has_many(tourn_circuits      => "Tab::TournCircuit");
+Tab::Circuit->has_many(chapter_circuits    => "Tab::ChapterCircuit");
 Tab::Circuit->has_many(circuit_memberships => "Tab::CircuitMembership");
+Tab::Circuit->has_many(awards              => "Tab::SweepAward");
+Tab::Circuit->has_many(sweep_awards        => "Tab::SweepAward");
 
-Tab::Circuit->has_many(tourns => [ Tab::TournCircuit => 'tourn' ]);
+Tab::Circuit->has_many(tourns   => [ Tab::TournCircuit   => 'tourn' ]);
 Tab::Circuit->has_many(chapters => [ Tab::ChapterCircuit => 'chapter' ]);
-Tab::Circuit->has_many(admins => [ Tab::Permission => 'person' ]);
+Tab::Circuit->has_many(admins   => [ Tab::Permission     => 'person' ]);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
@@ -43,7 +44,6 @@ sub shorter_name {
 	$name =~ s/Debate Circuit/DL/;
 	return $name;
 }
-
 
 sub setting {
 
