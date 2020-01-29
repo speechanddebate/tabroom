@@ -21,6 +21,20 @@ Tab::Event->has_many(result_sets => "Tab::ResultSet", "event");
 Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
 
+
+Tab::Round->set_sql(prelims_by_event => "
+	select round.*
+		from round
+	where round.event = ? 
+		and round.type in ('prelim', 'highlow', 'highhigh')
+	order by round.name
+");
+
+sub prelims { 
+	my $self = shift; 
+	return Tab::Round->search_prelims_by_event($self->id);
+}
+
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
