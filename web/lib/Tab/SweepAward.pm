@@ -1,7 +1,7 @@
 package Tab::SweepAward;
 use base 'Tab::DBI';
 Tab::SweepAward->table('sweep_award');
-Tab::SweepAward->columns(All => qw/id name description circuit target count period timestamp/);
+Tab::SweepAward->columns(All => qw/id name description circuit target count min_entries min_schools period timestamp/);
 
 Tab::SweepAward->has_a(circuit => 'Tab::Circuit');
 
