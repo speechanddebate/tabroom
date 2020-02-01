@@ -47,15 +47,17 @@
 	my @reserve;
 	my %in_last_round;
 
+	my $last_round = Tab::Round->search(
+		event => $event,
+		name => ($round->name - 1)
+	)->first;
+
 	if ($event_settings{"repeat_rooms"}) {
 
 		my @all_rounds = $event->rounds;
-		my $last_round;
 
 		foreach my $oround (@all_rounds) {
 			next if $oround->name >= $round->name;
-			$last_round = $oround unless $last_round;
-			$last_round = $oround if $oround->name > $last_round->name;
 		}
 
 		if ($last_round) {
@@ -84,31 +86,49 @@
 	);
 
 	my %previous_rooms = ();
+	my %brackets = ();
 
-	unless ($round->setting("reset_room_moves")) {
+	if ($last_round) {
 
-		my $last_round = Tab::Round->search(
-			event => $event,
-			name => ($round->name - 1)
-		)->first;
+		unless ($round->setting("reset_room_moves")) {
 
-		%previous_rooms = $m->comp(
-			"/funclib/round_entry_rooms.mas",
-			round => $last_round
-		) if $last_round;
+			%previous_rooms = $m->comp(
+				"/funclib/round_entry_rooms.mas",
+				round => $last_round
+			);
 
-	} else {
+		} else {
 
-		my $last_round = Tab::Round->search(
-			event => $event,
-			name  => ($round->name - 1)
-		)->first;
+			%previous_rooms = $m->comp(
+				"/funclib/round_entry_rooms.mas",
+				ada   => 1,
+				round => $last_round
+			);
+		}
+	}
 
-		%previous_rooms = $m->comp(
-			"/funclib/round_entry_rooms.mas",
-			ada   => 1,
-			round => $last_round
-		) if $last_round;
+	if ($last_round && $last_round->type eq "elim") {
+
+		my $sth = $dbh->prepare("
+			select entry.id, panel.id, panel.bracket
+			from entry, ballot, panel
+			where panel.round = ?
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+			order by panel.bracket
+		");
+
+		$sth->execute($last_round->id);
+
+		while (
+			my (
+				$entry_id, $panel_id, $panel_bracket
+			) = $sth->fetchrow_array()
+		) {
+			$brackets{$entry_id} = $panel_bracket;
+		}
+
+		$sth->finish();
 	}
 
 	my %rpool_count;
@@ -184,13 +204,15 @@
 			push @new, $room;
 		}
 	}
-	@rooms = @new;
 
+	@rooms = @new;
 	undef @new;
+
 	foreach my $room (@reserve) {
 		next if $room_reserved{$room};
 		push @new, $room;
 	}
+
 	@reserve = @new;
 
 	PANEL:
@@ -223,8 +245,7 @@
 		}
 	}
 
-	@panels = sort {$panel_reserved{$b->id} <=> $panel_reserved{$a->id}}
-		@panels;
+	@panels = sort {$panel_reserved{$b->id} <=> $panel_reserved{$a->id}} @panels;
 
 	my %room_pod;
 	my %pod_rooms;
@@ -291,6 +312,10 @@
 				if $room_already{$judge->id};
 		}
 
+		if ($last_round && $last_round->type eq "elim") {
+			@{$panel_entries{$panel->id}}  = sort {$brackets{$a} <=> $brackets{$b}} @{$panel_entries{$panel->id}};
+		}
+
 		foreach my $entry (@{$panel_entries{$panel->id}}){
 
 			if ($entry->ada) {
@@ -302,6 +327,12 @@
 					&& $room_avail{$previous_rooms{$entry->id}{"room"}}
 				) {
 					push (@{$panel_preferred{$panel->id}}, $previous_rooms{$entry->id}{"room"});
+				}
+
+			} elsif ($last_round && $last_round->type eq "elim") {
+
+				unless ($panel_preferred{$panel->id}) {
+					push @{$panel_preferred{$panel->id}}, $previous_rooms{$entry->id}{"room"};
 				}
 
 			} elsif (not defined $reset_room_moves) {
