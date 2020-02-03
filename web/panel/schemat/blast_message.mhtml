@@ -18,134 +18,155 @@
 		push @rounds, $oround;
 	}
 
-	my %used;
-	my $counter = 0;
+	my $dbh = Tab::DBI->db_Main();
+	my $counter;
+	my %targets;
 
 	foreach my $round (@rounds) {
 
-		my @judges;
-		my @entries;
+		my $limit;
+
+		if ($panels eq "unstarted") {
+			$limit .= " and ballot.judge_started is NULL ";
+		} elsif ($panels eq "unentered") {
+			$limit .= " and not exists (select score.id from score where ballot.id = score.ballot) ";
+		} elsif ($panels eq "unconfirmed") {
+			$limit .= " and ballot.audit != 1 ";
+		}
 
 		$flight = int($flight);
 		undef $flight if $flight < 1;
 
-		if ($panels eq "all") {
-			unless ($sendto eq "entries") {
-				@judges = $m->comp(
-					"/funclib/round_judges.mas",
-					flight => $flight,
-					round  => $round
-				);
+		if ($flight) {
+			$limit .= " and panel.flight = ".$flight;
+		}
+
+		unless ($sendto eq "entries") {
+
+			my $judges_sth = $dbh->prepare("
+				select person.email, person.phone, person.provider
+				from panel, ballot, judge, person
+				where panel.round = ?
+				and panel.id = ballot.panel
+				and ballot.judge = judge.id
+				and judge.person = person.id
+				and person.no_email = 0
+				$limit
+			");
+
+			my $jf_sth = $dbh->prepare("
+				select
+					follower.email, follower.cell, follower.domain,
+					person.email, person.phone, person.provider
+				from (panel, ballot, judge, follower)
+					left join person on person.id = follower.follower and person.no_email = 0
+				where panel.round = ?
+					and panel.id = ballot.panel
+					and ballot.judge = judge.id
+					and judge.id = follower.judge
+				$limit
+			");
+
+			$judges_sth->execute($round->id);
+
+			while (
+				my (
+					$person_email, $person_phone, $person_provider
+				) = $judges_sth->fetchrow_array()
+			) {
+				$targets{$person_email}++ if $person_email;
+				$targets{$person_phone.'@'.$person_provider}++ if $person_phone && $person_provider;
 			}
 
-			unless ($sendto eq "judges") {
-				@entries = $m->comp(
-					"/funclib/round_entries.mas",
-					flight => $flight,
-					round  => $round
-				);
-			}
+			$jf_sth->execute($round->id);
 
-		} elsif ($panels eq "unstarted") {
+			while (
+				my (
+					$follower_email, $follower_phone, $follower_provider,
+					$person_email, $person_phone, $person_provider
+				) = $jf_sth->fetchrow_array()
+			) {
 
-			unless ($sendto eq "entries") {
-				@judges = $m->comp(
-					"/funclib/round_judges.mas",
-					round     => $round,
-					flight    => $flight,
-					unstarted => "yep"
-				);
-			}
+				$targets{$person_email}++ if $person_email;
+				$targets{$person_phone.'@'.$person_provider}++ if $person_phone && $person_provider;
 
-			unless ($sendto eq "judges") {
-				@entries = $m->comp(
-					"/funclib/round_entries.mas",
-						round     => $round,
-						flight    => $flight,
-						unstarted => "yep"
-				);
-			}
-
-		} elsif ($panels eq "unentered") {
-
-			unless ($sendto eq "entries") {
-				@judges = $m->comp(
-					"/funclib/round_judges.mas",
-					round     => $round,
-					flight    => $flight,
-					unentered => "yep"
-				);
-			}
-
-			unless ($sendto eq "judges") {
-				@entries = $m->comp(
-					"/funclib/round_entries.mas",
-					round     => $round,
-					flight    => $flight,
-					unentered => "yep"
-				);
-			}
-
-		} elsif ($panels eq "unconfirmed") {
-
-			unless ($sendto eq "entries") {
-				@judges = $m->comp(
-					"/funclib/round_judges.mas",
-					round       => $round,
-					flight      => $flight,
-					not_in 		=> "yep"
-				);
-			}
-
-			unless ($sendto eq "judges") {
-				@entries = $m->comp("/funclib/round_entries.mas",
-					round       => $round,
-					flight      => $flight,
-					not_in 		=> "yep"
-				);
+				$targets{$follower_email}++ if $follower_email;
+				$targets{$follower_phone.'@'.$follower_provider}++ if $follower_phone && $follower_provider;
 			}
 		}
 
-		if ($include_motion) {
-			$message .= "\r\n " if $message;
-			$message .= " Motion: ".$motion;
-		}
+		unless ($sendto eq "judges") {
 
-		foreach my $entry (@entries) {
+			my $entries_sth = $dbh->prepare("
+				select person.email, person.phone, person.provider
+				from panel, ballot, person, entry_student, student
+				where panel.round = ?
+				and panel.id = ballot.panel
+				and ballot.entry = entry_student.entry
+				and entry_student.student = student.id
+				and student.person = person.id
+				and person.no_email = 0
+				$limit
+			");
 
-			foreach my $follower ($m->comp("/funclib/entry_follower.mas", entry => $entry)) {
+			my $ef_sth = $dbh->prepare("
+				select
+					follower.email, follower.cell, follower.domain,
+					person.email, person.phone, person.provider
+				from (panel, ballot, entry, follower)
+					left join person on person.id = follower.follower and person.no_email = 0
+				where panel.round = ?
+					and panel.id = ballot.panel
+					and ballot.entry = entry.id
+					and entry.id = follower.entry
+				$limit
+			");
 
-				$m->comp(
-					"/funclib/send_notify.mas",
-					from    => 'Tabroom.com <live@tabroom.com>',
-					to      => $follower,
-					subject => "Message from Tab",
-					body    => $message
-				);
+			$entries_sth->execute($round->id);
 
-				$counter++;
-				$used{$follower}++;
+			while (
+				my (
+					$person_email, $person_phone, $person_provider
+				) = $entries_sth->fetchrow_array()
+			) {
+				$targets{$person_email}++ if $person_email;
+				$targets{$person_phone.'@'.$person_provider}++ if $person_phone && $person_provider;
 			}
-		}
 
-		foreach my $judge (@judges) {
+			$ef_sth->execute($round->id);
 
-			foreach my $follower ($m->comp("/funclib/judge_follower.mas", judge => $judge)) {
+			while (
+				my (
+					$follower_email, $follower_phone, $follower_provider,
+					$person_email, $person_phone, $person_provider
+				) = $ef_sth->fetchrow_array()
+			) {
 
-				next if $used{$follower}++;
+				$targets{$person_email}++ if $person_email;
+				$targets{$person_phone.'@'.$person_provider}++ if $person_phone && $person_provider;
 
-				$m->comp(
-					"/funclib/send_notify.mas",
-						from    => 'Tabroom.com <live@tabroom.com>',
-						to      => $follower,
-						subject => "Message from Tab",
-						body    => $message
-				);
-
-				$counter++;
+				$targets{$follower_email}++ if $follower_email;
+				$targets{$follower_phone.'@'.$follower_provider}++ if $follower_phone && $follower_provider;
 			}
 		}
 	}
+
+	if ($include_motion) {
+		$message .= "\r\n " if $message;
+		$message .= " Motion: ".$motion;
+	}
+
+	my @sendto = sort {$a cmp $b} keys %targets;
+
+	$m->comp(
+		"/funclib/send_notify.mas",
+		from    => 'Tabroom.com <live@tabroom.com>',
+		array   => \@sendto,
+		subject => "Message from Tab",
+		body    => $message
+	);
+
+	$counter += scalar @sendto;
 
 	my $msg = "Blast Message sent to $counter recipients";
 	$m->redirect("blast.mhtml?round_id=$round_id&msg=$msg");
