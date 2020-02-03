@@ -5,7 +5,7 @@
 <%init>
 
 	my %tourn_settings = $tourn->all_settings();
-	my $districts    = $tourn_settings{"nsda_district"};
+	my $districts      = $tourn_settings{"nsda_district"};
 
 	my $novice_only;
 	my $multiplier;
@@ -41,7 +41,6 @@
 	}
 
 	if ($limit) {
-
 		Tab::Event->set_sql(by_type => "
 			select event.*
 			from event
@@ -51,11 +50,9 @@
 
 		my @levels = Tab::Event->search_by_type($tourn->id);
 		push @events, @levels if @levels;
-
 	}
 
 	my %events = map {$_->id => $_} @events;
-
 	return unless (keys %events);
 
 	my %entries;
@@ -291,8 +288,10 @@
 	my $bye_sth = $dbh->prepare("
 		select entry.id, event.id,
 			round.type, round.id, round.name,
-			panel.id, panel.bye, ballot.bye
-		from panel, round, event, entry, ballot
+			panel.id, panel.bye, ballot.bye,
+			score.value
+		from (panel, round, event, entry, ballot)
+			left join score on score.ballot = ballot.id and score.tag = 'winloss'
 		where ballot.panel = panel.id
 			and panel.round = round.id
 			and round.event = event.id
@@ -321,7 +320,8 @@
 		my (
 			$entry_id, $event,
 			$round_type, $round_id, $round_name,
-			$panel, $panel_bye, $ballot_bye
+			$panel, $panel_bye, $ballot_bye,
+			$advanced
 		) = $bye_sth->fetchrow_array()
 	) {
 
@@ -333,6 +333,7 @@
 
 		$entries{$entry_id}{"byes"}++;
 		$entries{$entry_id}{"round_bye"}{$round_id}++;
+		$entries{$entry_id}{"advanced"}{$round_id} = $advanced;
 
 		$round_type = "prelim"
 			if $round_type eq "preset"
@@ -352,15 +353,15 @@
 
 	foreach my $rule (@rules) {
 
-		my $rule_tag = $rule->tag;
-		my $rule_id  = $rule->id;
+		my $rule_tag    = $rule->tag;
+		my $rule_id     = $rule->id;
+		my $count       = $rule->count;
+		my $count_round = $rule->count_round;
+		my $points      = $rule->value;
+		my $place       = $rule->place;
+		my $truncate    = $rule->truncate;
+		my $rev_min     = $rule->rev_min;
 
-		my $count             = $rule->count;
-		my $count_round       = $rule->count_round;
-		my $points            = $rule->value;
-		my $place             = $rule->place;
-		my $truncate          = $rule->truncate;
-		my $rev_min           = $rule->rev_min;
 		my $rule_tiebreak_set = $rule->tiebreak_set;
 
 		my %target_rounds;
@@ -450,11 +451,10 @@
 					my $round_id = $scores{$score_id}{"round_id"};
 					next unless $target_rounds{$event_id}{$round_id};
 
-					my $points;
-
-					$points = $place - $scores{$score_id}{"value"};
-					$points = $rev_min if $points < $rev_min;
-					$entries{$entry_id}{$rule_id} += $points;
+					my $local_points;
+					$local_points = $place - $scores{$score_id}{"value"};
+					$local_points = $rev_min if $local_points < $rev_min;
+					$entries{$entry_id}{$rule_id} += $local_points;
 				}
 			}
 		}
@@ -778,15 +778,76 @@
 						next unless $seeding{$event_id}{$tag}{$entry_id} > 0;
 						next unless $seeding{$event_id}{$tag}{$entry_id} < 7;
 
-						my $points = 0;
-						$points = $baseline_score - $seeding{$event_id}{$tag}{$entry_id};
-						$entries{$entry_id}{$rule_id} += $points;
+						my $local_points = 0;
+						$local_points = $baseline_score - $seeding{$event_id}{$tag}{$entry_id};
+						$entries{$entry_id}{$rule_id} += $local_points;
 					}
 				}
 			}
 		}
 
-		if ($rule_tag eq "debate_win" || $rule_tag eq "debate_loss" ) {
+		if ($rule_tag eq "prorated_ballots") {
+
+			foreach my $entry_id (keys %entries) {
+
+				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
+				my $event_id = $entries{$entry_id}{"event"};
+
+				my %entry_rounds;
+
+				SCORE:
+				foreach my $score_id (keys %{$entries{$entry_id}{"scoretag"}{"winloss"}}) {
+
+					my $round_id = $scores{$score_id}{"round_id"};
+					next unless $target_rounds{$event_id}{$round_id};
+					next unless $scores{$score_id}{"tag"} eq "winloss";
+
+					if ($scores{$score_id}{"value"} == 1) {
+						$entry_rounds{$round_id}{"win"}++;
+					} else {
+						$entry_rounds{$round_id}{"loss"}++;
+					}
+				}
+
+				foreach my $round_id (keys %entry_rounds) {
+
+					if ( ($entry_rounds{$round_id}{"win"} + $entry_rounds{$round_id}{"loss"}) == 1) {
+						$entries{$entry_id}{$rule_id} += ($points * $entry_rounds{$round_id}{"win"});
+					} else {
+
+						if ($entry_rounds{$round_id}{"loss"} == 0) {
+
+							$entries{$entry_id}{$rule_id} += ($points * 3);
+
+						} elsif ($entry_rounds{$round_id}{"win"} == 0) {
+
+						} elsif ($entry_rounds{$round_id}{"win"} > $entry_rounds{$round_id}{"loss"}) {
+
+							$entries{$entry_id}{$rule_id} += ($points * 2);
+
+						} elsif ($entry_rounds{$round_id}{"win"} < $entry_rounds{$round_id}{"loss"}) {
+
+							$entries{$entry_id}{$rule_id} += $points;
+						}
+					}
+				}
+			}
+		}
+
+		if ($rule_tag eq "coachover_advance") {
+			foreach my $entry_id (keys %entries) {
+				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
+				my $event_id = $entries{$entry_id}{"event"};
+
+				foreach my $round_id (keys %{$entries{$entry_id}{"round_bye"}}) {
+					next unless $target_rounds{$event_id}{$round_id};
+					next unless $entries{$entry_id}{"advanced"}{$round_id};
+					$entries{$entry_id}{$rule_id} += $points;
+				}
+			}
+		}
+
+		if ($rule_tag eq "ballot_win" || $rule_tag eq "ballot_loss" ) {
 
 			foreach my $entry_id (keys %entries) {
 
@@ -800,18 +861,18 @@
 					next unless $target_rounds{$event_id}{$round_id};
 					next unless $scores{$score_id}{"tag"} eq "winloss";
 
-					if ($rule_tag eq "debate_win" && ($scores{$score_id}{"value"} == 1)) {
+					if ($rule_tag eq "ballot_win" && ($scores{$score_id}{"value"} == 1)) {
 						$entries{$entry_id}{$rule_id} += $points;
 					}
 
-					if ($rule_tag eq "debate_loss" && ($scores{$score_id}{"value"} == 0)) {
+					if ($rule_tag eq "ballot_loss" && ($scores{$score_id}{"value"} == 0)) {
 						$entries{$entry_id}{$rule_id} += $points;
 					}
 				}
 			}
 		}
 
-		if ($rule_tag eq "debate_round_win" || $rule_tag eq "debate_round_loss" ) {
+		if ($rule_tag eq "round_win" || $rule_tag eq "round_loss" ) {
 
 			my %wins;
 			my %totals;
@@ -832,11 +893,11 @@
 
 					$totals{$entry_id}{$round_id}++;
 
-					if ($rule_tag eq "debate_round_win" && ($scores{$score_id}{"value"} == 1)) {
+					if ($rule_tag eq "round_win" && ($scores{$score_id}{"value"} == 1)) {
 						$wins{$entry_id}{$round_id}++;
 					}
 
-					if ($rule_tag eq "debate_round_loss" && ($scores{$score_id}{"value"} == 0)) {
+					if ($rule_tag eq "round_loss" && ($scores{$score_id}{"value"} == 0)) {
 						$wins{$entry_id}{$round_id}++;
 					}
 				}
@@ -851,9 +912,7 @@
 			}
 		}
 
-		if ($rule_tag eq "debate_round_bye") {
-			my $points = $rule->value;
-			my $count = $rule->count;
+		if ($rule_tag eq "round_bye") {
 
 			foreach my $entry_id (keys %entries) {
 				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
@@ -912,32 +971,32 @@
 			$rules{$rule_id}{"short_tag"} =~ s/points_per/Rnd/g;
 			$rules{$rule_id}{"short_tag"} =~ s/place_above/Plc/g;
 			$rules{$rule_id}{"short_tag"} =~ s/_/ /g;
-			$rules{$rule_id}{"short_tag"} .= "  ".Lingua::EN::Numbers::Ordinate::ordinate($rule->place) if $rule->place;
+			$rules{$rule_id}{"short_tag"} .= "  ".Lingua::EN::Numbers::Ordinate::ordinate($place) if $place;
 
-			$rules{$rule_id}{"short_tag"} =~ s/Debate round win/Win/g;
-			$rules{$rule_id}{"short_tag"} =~ s/Debate round loss/Loss/g;
-			$rules{$rule_id}{"short_tag"} =~ s/Debate ballot win/BalWin/g;
-			$rules{$rule_id}{"short_tag"} =~ s/Debate ballot loss/BalLoss/g;
+			$rules{$rule_id}{"short_tag"} =~ s/Round win/Win/g;
+			$rules{$rule_id}{"short_tag"} =~ s/Round loss/Loss/g;
+			$rules{$rule_id}{"short_tag"} =~ s/Ballot win/BalWin/g;
+			$rules{$rule_id}{"short_tag"} =~ s/Ballot loss/BalLoss/g;
 
 			$rules{$rule_id}{"tag"} = ucfirst($rule_tag);
 			$rules{$rule_id}{"tag"} =~ s/points_per_po_round/Elected PO/g;
 			$rules{$rule_id}{"tag"} =~ s/points_per/In a round/g;
 			$rules{$rule_id}{"tag"} =~ s/place_above/Placed above/g;
 			$rules{$rule_id}{"tag"} =~ s/_/ /g;
-			$rules{$rule_id}{"tag"} .= "  ".Lingua::EN::Numbers::Ordinate::ordinate($rule->place) if $rule->place;
+			$rules{$rule_id}{"tag"} .= "  ".Lingua::EN::Numbers::Ordinate::ordinate($place) if $place;
 
-			if ($rule->count eq "last_prelims") {
+			if ($count eq "last_prelims") {
 
-				$rules{$rule_id}{"tag"} .= " in the last ".$rule->count_round." prelims";
-				$rules{$rule_id}{"short_tag"} .= " last ".$rule->count_round." prelims";
+				$rules{$rule_id}{"tag"} .= " in the last ".$count_round." prelims";
+				$rules{$rule_id}{"short_tag"} .= " last ".$count_round." prelims";
 				$rules{$rule_id}{"short_tag"} =~ s/round//g;
 
-			} elsif ($rule->count && $rule->count ne "all") {
+			} elsif ($count && $count ne "all") {
 
-				$rules{$rule_id}{"tag"} .= " in ".ucfirst($rule->count)."s";
+				$rules{$rule_id}{"tag"} .= " in ".ucfirst($count)."s";
 				$rules{$rule_id}{"tag"} =~ s/Debate round//g;
 
-				$rules{$rule_id}{"short_tag"} .= " in ".ucfirst($rule->count)."s";
+				$rules{$rule_id}{"short_tag"} .= " in ".ucfirst($count)."s";
 				$rules{$rule_id}{"short_tag"} =~ s/round//g;
 
 				$rules{$rule_id}{"short_tag"} =~ s/Minimum/Min/g;
