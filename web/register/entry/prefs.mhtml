@@ -1,4 +1,4 @@
-<%args> 
+<%args>
 	$tourn
 	$tourn_settings
 	$entry_id => undef
@@ -8,114 +8,119 @@
 
 	my $entry = Tab::Entry->retrieve($entry_id);
 
-	unless ($entry) { 
+	unless ($entry) {
 		$m->print("No such entry");
 		$m->abort;
 	}
 
-	my $school = $entry->school if $entry;
+	my $event = $entry->event;
+	my $category = $event->category;
 
-	my $diocese = $m->comp(
-		"/school_region.mas",
-		school => $school
-	) if $tourn_settings->{"ncfl"};
+	my $dbh = Tab::DBI->db_Main();
 
-	my $category = $entry->event->category;
+	my $limit;
+	my $field;
 
-	my @all_judges;
+	my $pref_jpool = $category->setting("pref_jpool");
+	my $pref_style = $category->setting("prefs");
 
-	if ($category->setting("pref_jpool")) { 
-		my $jpool = Tab::JPool->retrieve($category->setting("pref_jpool"));
-		@all_judges = $m->comp("/funclib/jpool_judges.mas", jpool => $jpool);
-	} else { 
-		@all_judges = $category->judges( active => 1 );
+	if ($pref_jpool) {
+		$field = ", jpool_judge";
+		$limit = " and jpool_judge.judge = judge.id and jpool_judge.jpool = ".int($pref_jpool);
+	} else {
+		$limit = " and judge.category = ".int($category->id);
 	}
 
-	Tab::Strike->columns(TEMP => qw/judge_id/);
-	Tab::Strike->columns(TEMP => qw/event_name/);
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.first, judge.last, judge.obligation, judge.hired,
+			school.name, school.state,
+			rating.ordinal, rating.percentile, rating_tier.name
 
-	Tab::Strike->set_sql( strikes => "
-		select judge.id as judge_id, event.name as event_name
-		from judge, strike, event
-		where strike.judge     = judge.id
-		and strike.type      = 'event'
-		and event.id         = strike.event
-		and event.category   = ? 
+		from (judge, entry $field)
+
+		left join school on judge.school = school.id
+		left join rating on judge.id = rating.judge and rating.entry = entry.id
+		left join rating_tier on rating.rating_tier = rating_tier.id
+
+		where entry.id = ?
+		$limit
+		and judge.active = 1
+		and judge.school != entry.school
 	");
 
-	my @strikes = Tab::Strike->search_strikes($category->id);
+	$sth->execute($entry->id);
 
-	my %judge_event_strike;
+	my %ratings;
 
-	foreach my $strike(@strikes) {
-		$judge_event_strike{$strike->judge_id} = $strike->event_name;
-	}
+	while (
+		my (
+			$judge_id, $judge_first, $judge_last, $judge_obligation, $judge_hired,
+			$school_name, $school_state,
+			$rating_ordinal, $rating_percentile, $rating_tier_name
+		) = $sth->fetchrow_array()
+	) {
 
- 	my @panels = $m->comp('/funclib/entry_panels.mas', entry => $entry);
+		$ratings{$judge_id}{"first"}        = $judge_first;
+		$ratings{$judge_id}{"last"}         = $judge_last;
+		$ratings{$judge_id}{"rounds"}       = $judge_obligation + $judge_hired;
+		$ratings{$judge_id}{"school_name"}  = Tab::short_name($school_name);
+		$ratings{$judge_id}{"school_state"} = $school_state;
 
-	my %used;
-	my $switch = 1;
-
-	my $prefs = $category->setting("prefs");
-
-	my $ndt++ if $prefs eq "ndt";
-	$prefs = "ordinals" if $prefs eq "ndt" && $style ne "elims";
-	$prefs = "caps" if $prefs eq "ndt" && $style eq "elims";
-
-	my %judge_pref; 
-	my %judge_percentile; 
-
-	if ($prefs eq "ordinals") { 
-	
-		my @ratings = Tab::Rating->search_where({   
-			entry   => $entry->id,
-			ordinal => {">", "0"} 
-		});
-
-		%judge_pref = map {$_->judge->id => $_->ordinal} @ratings;
-
-		%judge_percentile = map {$_->judge->id => $_->percentile} @ratings;
-
-	}  elsif ($prefs eq "tiered" || $prefs eq "tiered_round" || $prefs eq "caps") { 
-
-		my @ratings = Tab::Rating->search_where({ 
-			entry => $entry->id, 
-			rating_tier => {">", "0"}  
-		});
-
-		my %tier_name = ();
-
-		foreach my $tier ($category->rating_tiers) { 
-			$tier_name{$tier->id} = $tier->name;
+		if ($pref_style eq "ordinals") {
+			$ratings{$judge_id}{"rating"}    = $rating_ordinal;
+			$ratings{$judge_id}{"percentile"} = $rating_percentile;
+		} else {
+			$ratings{$judge_id}{"rating"}    = $rating_tier_name;
 		}
-
-		%judge_pref = map {$_->judge->id => $tier_name{$_->rating_tier}} @ratings;
-
 	}
 
-	my %judge_conflict;
+	$sth->finish();
 
-	foreach my $conflict ($m->comp(
-		"/funclib/judge_entry_rating.mas", 
-			entry => $entry,
-			type  => "conflicted")) {
-		$judge_conflict{$conflict->id}++;
+	$sth = $dbh->prepare("
+		select judge.id, strike.type
+		from (strike, judge)
+		where strike.entry = ?
+			and strike.judge = judge.id
+			and judge.active = 1
+	");
+
+	$sth->execute($entry->id);
+
+	while (
+		my (
+			$judge_id, $strike_type
+		) = $sth->fetchrow_array()
+	) {
+		$ratings{$judge_id}{"strike"} = $strike_type;
 	}
 
-	my @school_conflicts = $m->comp(
-		"/funclib/school_conflicts.mas", 
-			school   => $entry->school,
-			category => $category);
+	$sth = $dbh->prepare("
+		select judge.id, strike.type
+		from (strike, judge)
+		where strike.school = ?
+			and strike.judge = judge.id
+			and judge.active = 1
+	");
 
-	my %school_conflict = map {$_->judge->id => 1} @school_conflicts;
-	
+	$sth->execute($category->id);
+
+	while (
+		my (
+			$judge_id, $strike_type
+		) = $sth->fetchrow_array()
+	) {
+		$ratings{$judge_id}{"strike"} = "Institution ".$strike_type;
+	}
+
 </%init>
 
    	<& "/register/menubar.mas",
-			school         => $school,
-			whoami         => "students",
-			tourn          => $tourn,
-			tourn_settings => $tourn_settings &>
+		school         => $entry->school,
+		whoami         => "students",
+		tourn          => $tourn,
+		tourn_settings => $tourn_settings
+	&>
 
 	<div>
 
@@ -125,61 +130,65 @@
 
 		<span class="fifth">
 			<h5 class="rightalign">
-				<% scalar @all_judges %> judges
+				<% scalar (keys %ratings) %> judges
 			</h5>
 		</span>
 
 		<span class="fifth rightalign nospace">
-			<a 
+			<a
 				class="fa fa-lg fa-file-pdf-o buttonwhite redtext"
 				href="prefs_print.mhtml?entry_id=<% $entry->id %>&style=<% $style %>"
 			>
 			</a>
 
-			<a 
+			<a
 				class="fa fa-lg fa-file-excel-o buttonwhite greentext"
 				href="prefs_export.mhtml?entry_id=<% $entry->id %>&style=<% $style %>"
 			>
 			</a>
-
 		</span>
 
 	</div>
 
-	<p class="explain padno">
+	<p class="italic semibold redtext centeralign padvertless">
 		Note: Quotas are not enforced on this screen.  You can
 		feel free to blow your own foot off if you so choose.
 	</p>
 
-	<& "/funclib/tablesorter.mas", table => "sortme", nobuttons => 1 &>
+	<& "/funclib/tablesorter.mas",
+		table     => "prefs",
+		nobuttons => 1
+	&>
 
 		<form action="prefs_save.mhtml" method="post">
-		<input 
+
+		<input
 			type    = "hidden"
 			name    = "entry_id"
 			value   = "<% $entry->id %>"
 		>
-		<input 
+		<input
 			type  = "hidden"
 			name  = "style"
 			value = "<% $style %>"
 		>
 
-		<table id="sortme">
+		<table id="prefs">
 
 			<thead>
 
 				<tr class="yellowrow">
 
-					<th>
+					<th class="smallish">
+						Last
 					</th>
 
 					<th class="smallish">
-						Judge Last
+						First
 					</th>
 
 					<th class="smallish">
-						Judge First
+						Institution
 					</th>
 
 					<th class="centeralign smallish">
@@ -187,14 +196,10 @@
 					</th>
 
 					<th class="centeralign smallish">
-						Conflict
-					</th>
-
-					<th class="centeralign smallish">
 						Rating
 					</th>
 
-%					if ($prefs eq "ordinals") { 
+%					if ($pref_style eq "ordinals") {
 						<th class="centeralign smallish">
 							%ile
 						</th>
@@ -206,82 +211,65 @@
 
 			<tbody>
 
-%			foreach my $judge (@all_judges) { 
+<%perl>
+			foreach my $judge_id (
+				sort {
+					$ratings{$a}{"rating"} <=> $ratings{$b}{"rating"}
+					|| $ratings{$a}{"last"} cmp $ratings{$b}{"last"}
+				} keys %ratings
+			) {
+</%perl>
 
 				<tr>
 
-					<td>
-						<% $switch++ %>
+					<td class="nospace">
+						<a class="white full padvertless" href="/register/judge/edit.mhtml?judge_id=<% $judge_id %>">
+							<% $ratings{$judge_id}{"last"} %>
+						</a>
 					</td>
 
 					<td>
-						<% $judge->last %>
+						<a class="white full padvert" href="/register/judge/edit.mhtml?judge_id=<% $judge_id %>">
+							<% $ratings{$judge_id}{"first"} %>
+						</a>
 					</td>
 
-					<td>
-						<% $judge->first %>
+					<td class="smallish">
+						<span class="hidden">
+							<% $ratings{$judge_id}{"school_name"}
+								? $ratings{$judge_id}{"school_name"}
+								: "AAA"
+							%>
+						</span>
+						<% $ratings{$judge_id}{"school_name"}
+							? $ratings{$judge_id}{"school_name"}
+							: "Hired"
+						%>
 					</td>
 
 					<td class="centeralign">
-						<% $judge->obligation + $judge->hired %>
+						<% $ratings{$judge_id}{"rounds"} %>
 					</td>
 
-%					if ($judge->school->id == $entry->school->id) { 
+%					if ($ratings{$judge_id}{"strike"}) {
 
-						<td class="centeralign">
-							X
+						<td <% $pref_style eq "ordinals" ? 'colspan="2"' : "" %>>
+							<% $ratings{$judge_id}{"strike"} %>
 						</td>
 
-						<td class="centeralign semibold redtext padvert">
-							<span class="padvert">
-								Own Judge
-							</span>
-						</td>
+%					} else {
 
-%						if ($prefs eq "ordinals") { 
-							<td>
-							</td>
-%						}
-
-%					} elsif ($school_conflict{$judge->id}) { 
-
-						<td>
-						</td>
-
-						<td class="centeralign">
-							School
-						</td>
-
-						<td class="centeralign">
-							Conflict
-						</td>
-
-%					} else { 
-
-						<td class="centeralign">
-							<span class="hiddencsv"><% $judge_conflict{$judge->id} %></span>
-
-							<input 
-								type     = "checkbox"
-								class    = "notfirst"
-								tabindex = "-1"
-								name     = "conflict_<% $judge->id %>"
-								value    = "1"
-								<% $judge_conflict{$judge->id} ? 'checked="checked"' : "" %> 
-							>
-						</td>
-
-						<td class="centeralign">
+						<td class="centeralign nospace padvertless">
 
 							<span class="hiddencsv">
-								<% $judge_pref{$judge->id} %>
+								<% $ratings{$judge_id}{"rating"} ? $ratings{$judge_id}{"rating"} : "9999" %>
 							</span>
 
-							<input 
+							<input
 								type           = "text"
 								size           = "5"
-								name           = "<% $judge->id %>"
-								value          = "<% $judge_pref{$judge->id} %>"
+								name           = "<% $judge_id %>"
+								value          = "<% $ratings{$judge_id}{"rating"} %>"
 								autocomplete   = "off"
 								autocorrect    = "off"
 								autocapitalize = "off"
@@ -289,27 +277,26 @@
 							>
 						</td>
 
-%						if ($prefs eq "ordinals") { 
+%						if ($pref_style eq "ordinals") {
 							<td class="centeralign">
-								<% sprintf "%.2f", $judge_percentile{$judge->id} %>
+								<% sprintf "%.2f", $ratings{$judge_id}{"percentile"} %>
 							</td>
-%						} 
-%					} 
-
+%						}
+%					}
 				</tr>
 
 %			}
 
 			</tbody>
-
-			<tr class="liblrow">
-				<td colspan="9" class="rightalign">
-					<input type="submit" value=" Save Prefs ">
-					</form>
-				</tr>
-			</tr>
-
 		</table>
+
+		<div class="libl rightalign">
+			<span class="third centeralign">
+				<input type="submit" value=" Save Prefs ">
+			</span>
+		</div>
+
+		</form>
 
 	</div>
 
@@ -318,35 +305,16 @@
 		<div class="sidenote">
 
 			<h4>Return</h4>
-			
-			<a class="yellow full" 
+
+			<a class="yellow full"
 				href="edit.mhtml?entry_id=<% $entry_id %>">
 				Return to <% $entry->code %>
 			</a>
 
-			<a class="yellow full" 
+			<a class="yellow full"
 				href="/register/reports/prefs.mhtml">
 				Return to Prefs Report
 			</a>
-
-			<br />
-
-
-%			if ($ndt) { 
-				<a 
-					class="<% $style eq "elims" ? "" : "dk" %>blue full" 
-					href="prefs.mhtml?entry_id=<% $entry->id %>">
-
-					Prelim Pref Sheet
-				</a>
-
-				<a 
-					class="<% $style eq "elims" ? "dk" : "" %>blue full" 
-					href="prefs.mhtml?entry_id=<% $entry->id %>&style=elims"
-				>
-					Elim Pref Sheet
-				</a>
-%			}
 
 		</div>
 
@@ -356,18 +324,18 @@
 
 <%perl>
 
-			foreach my $other (Tab::Entry->search( 
+			foreach my $other (Tab::Entry->search(
 					event  => $entry->event->id,
 					school => $entry->school->id,
 					active => 1
 				)
-			) { 
+			) {
 </%perl>
 
 %				next if $other->id == $entry->id;
-			
-				<a 
-					class="nowrap blue full" 
+
+				<a
+					class="nowrap blue full"
 					href="prefs.mhtml?entry_id=<% $other->id %>"
 				>
 					<% $other->name %> (<% $other->code %>)
@@ -375,20 +343,20 @@
 %			}
 
 			<h4>Clone Prefs</h4>
-			
+
 			<p>Copy <% $entry->code %>'s prefs to:</p>
 
 			<div class="row full">
 
 				<form action="clone.mhtml" method="post">
 
-				<input 
+				<input
 					type  = "hidden"
 					name  = "clone_id"
 					value = "<% $entry->id %>"
 				>
 
-				<input 
+				<input
 					type  = "hidden"
 					name  = "school_id"
 					value = "<% $entry->school->id %>"
@@ -396,18 +364,18 @@
 
 				<span class="threequarters">
 
-					<select 
+					<select
 						name  = "entry_id"
 						class = "fixedsmall"
 					>
 
 <%perl>
-						undef %used;
+						my %used;
 
 						foreach my $other ($m->comp(
-							"/funclib/school_entry_by_category.mas", 
-								category => $entry->event->category,
-								school   => $school
+							"/funclib/school_entry_by_category.mas",
+								category => $category,
+								school   => $entry->school
 							)
 						) {
 
@@ -416,23 +384,21 @@
 							next if $entry->dropped;
 </%perl>
 							<option value="<% $other->id %>"><% $other->name %></option>
-%					   }   
+%					   }
 
 						<optgroup label="Other Schools">
 
-%						foreach my $other ($entry->event->entries( active => 1)) { 
-
+%						foreach my $other ($entry->event->entries( active => 1)) {
 %							next if $used{$other->id}++;
 
 							<option value="<% $other->id %>"><% $other->name %></option>
-
 %						}
 
 					</select>
 				</span>
 
 				<span class="quarter">
-					<input 
+					<input
 						type  = "submit"
 						value = "Go"
 						class = "thin"
