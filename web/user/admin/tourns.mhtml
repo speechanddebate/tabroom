@@ -9,80 +9,151 @@
 	my @tourns;
 
 	my $circuit = Tab::Circuit->retrieve($circuit_id) if $circuit_id;
+	my $dbh = Tab::DBI->db_Main();
 
-	if ($name || $circuit_id) {
+	my $limit;
+	my $weekend_limit;
+	my $fields;
 
-		if ($name && $circuit_id) {
+	if ($name) {
+		$limit .= ' where name like "%'.$name.'%" ';
+	}
 
-			Tab::Tourn->set_sql( tourn_name => "
-				select distinct tourn.id
-				from tourn, tourn_circuit
-				where tourn.id = tourn_circuit.tourn
-					and tourn_circuit.circuit = ?
-					and tourn.name like ?
-				order by tourn.start DESC, name
-			");
+	if ($circuit_id && $circuit_id == int($circuit_id)) {
+		$fields .= ", tourn_circuit";
+		$limit .= ' where tourn.id = tourn_circuit.tourn and tourn_circuit.circuit = '.$circuit_id;
+	}
 
-			@tourns = Tab::Tourn->search_tourn_name($circuit_id, "%".$name."%");
+	my $tourns_now;
 
-		} elsif ($name) {
+	unless ($limit) {
 
-			@tourns = Tab::Tourn->search_like(
-				name      => "%".$name."%",
-				{order_by => 'start DESC, name'}
-			);
+		my $now = DateTime->now();
+		my $start_before = $now->clone;
+		my $end_after = $now->clone;
 
-		} elsif ($circuit_id) {
+		$start_before->add(days => 4);
+		$end_after->subtract(days => 1);
 
-			$circuit->tourns();
+		$tourns_now++;
+		$limit .= ' where tourn.start < "'.DateTime::Format::MySQL->format_datetime($start_before).'"';
+		$limit .= ' and tourn.end > "'.DateTime::Format::MySQL->format_datetime($end_after).'"';
 
+		$weekend_limit .= ' where weekend.tourn = tourn.id ';
+		$weekend_limit .= ' and weekend.start < "'.DateTime::Format::MySQL->format_datetime($start_before).'"';
+		$weekend_limit .= ' and weekend.end > "'.DateTime::Format::MySQL->format_datetime($end_after).'"';
+	}
+
+	my $sth = $dbh->prepare("
+		select
+			tourn.id, tourn.name, tourn.start, tourn.end,
+			tourn.city, tourn.state, tourn.country,
+			tourn.hidden,
+			person.id, person.first, person.last, person.email
+
+		from (tourn $fields)
+
+			left join permission on permission.tourn = tourn.id and permission.tag = 'owner'
+			left join person on person.id = permission.person
+
+			$limit
+			and not exists (
+				select weekend.id from weekend where weekend.tourn = tourn.id
+			)
+		order by tourn.start, tourn.name
+	");
+
+	$sth->execute();
+
+	my %tourns;
+
+	while (
+		my (
+			$tourn_id, $tourn_name, $tourn_start, $tourn_end,
+			$tourn_city, $tourn_state, $tourn_country, $tourn_hidden,
+			$person_id, $person_first, $person_last, $person_email
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($tourns{$tourn_id}{"name"}) {
+			$tourns{$tourn_id}{"name"}    = $tourn_name;
+			$tourns{$tourn_id}{"start"}   = $tourn_start;
+			$tourns{$tourn_id}{"end"}     = $tourn_end;
+			$tourns{$tourn_id}{"city"}    = $tourn_city;
+			$tourns{$tourn_id}{"state"}   = $tourn_state;
+			$tourns{$tourn_id}{"country"} = $tourn_country;
+			$tourns{$tourn_id}{"hidden"}  = 1 if $tourn_hidden;
+		}
+
+		unless ($tourns{$tourn_id}{"owner"}{$person_id}{"first"}) {
+			$tourns{$tourn_id}{"owner"}{$person_id}{"first"} = $person_first;
+			$tourns{$tourn_id}{"owner"}{$person_id}{"last"}  = $person_last;
+			$tourns{$tourn_id}{"owner"}{$person_id}{"email"} = $person_email;
 		}
 	}
 
-	Tab::Tourn->columns(TEMP => "weekendname");
-	Tab::Tourn->columns(TEMP => "weekendstart");
+	$sth->finish();
 
-	Tab::Tourn->set_sql(now => "
-		select tourn.*
-		from tourn
-		where tourn.end > ?
-		and tourn.start < ?
-		and not exists (
-			select weekend.id
-			from weekend
-			where weekend.tourn = tourn.id
-		)
+	$sth = $dbh->prepare("
+		select
+			tourn.id, tourn.name,
+			weekend.id, weekend.start, weekend.end, weekend.name,
+			weekend.city, weekend.state, tourn.country, tourn.hidden,
+			person.id, person.first, person.last, person.email
+
+		from (tourn, weekend $fields)
+
+			left join permission on permission.tourn = tourn.id and permission.tag = 'owner'
+			left join person on person.id = permission.person
+
+		$weekend_limit
+		order by tourn.start, tourn.name
 	");
 
-	Tab::Tourn->set_sql(now_weekend => "
-		select tourn.*, weekend.name as weekendname, weekend.start as weekendstart
-		from tourn, weekend
-		where tourn.id = weekend.tourn
-		and weekend.end > ?
-		and weekend.start < ?
-	");
+	$sth->execute();
 
-	my $now = DateTime->now();
-	my $start = $now->clone;
-	my $end = $now->clone;
+	while (
+		my (
+			$tourn_id, $tourn_name,
+			$weekend_id, $weekend_start, $weekend_end, $weekend_name,
+			$tourn_city, $tourn_state, $tourn_country, $tourn_hidden,
+			$person_id, $person_first, $person_last, $person_email
+		) = $sth->fetchrow_array()
+	) {
 
-	$end->add(days => 3);
-	$start->subtract(days => 3);
+		unless ($tourns{$tourn_id}{"name"}) {
+			$tourns{$tourn_id}{"name"}    = $tourn_name;
+			$tourns{$tourn_id}{"city"}    = $tourn_city;
+			$tourns{$tourn_id}{"state"}   = $tourn_state;
+			$tourns{$tourn_id}{"country"} = $tourn_country;
+			$tourns{$tourn_id}{"hidden"}  = 1 if $tourn_hidden;
+		}
 
-	my @tourns_now;
+		unless ($tourns{$tourn_id}{"weekends"}{$weekend_id}) {
+			$tourns{$tourn_id}{"weekend"} = $weekend_name;
+			$tourns{$tourn_id}{"start"} = $weekend_start;
+			$tourns{$tourn_id}{"end"}   = $weekend_end;
+		}
 
-	push @tourns_now, Tab::Tourn->search_now_weekend(
-		DateTime::Format::MySQL->format_datetime($start),
-		DateTime::Format::MySQL->format_datetime($end)
-	);
+		unless ($tourns{$tourn_id}{"owner"}{$person_id}{"first"}) {
+			$tourns{$tourn_id}{"owner"}{$person_id}{"first"} = $person_first;
+			$tourns{$tourn_id}{"owner"}{$person_id}{"last"}  = $person_last;
+			$tourns{$tourn_id}{"owner"}{$person_id}{"email"} = $person_email;
+		}
+	}
 
-	push @tourns_now, Tab::Tourn->search_now(
-		DateTime::Format::MySQL->format_datetime($start),
-		DateTime::Format::MySQL->format_datetime($end)
-	);
+	$sth->finish;
 
+	my %circuits;
+	$sth = $dbh->prepare("select circuit.id, circuit.name from circuit ");
 
-	@tourns_now = sort {$a->hidden <=> $b->hidden} @tourns_now;
+	$sth->execute();
+
+	while (
+		my ( $circuit_id, $circuit_name ) = $sth->fetchrow_array()
+	) {
+		$circuits{$circuit_id} = $circuit_name;
+	}
 
 </%init>
 
@@ -129,62 +200,50 @@
 					class="fixed"
 					name="circuit_id"
 				>
-
 					<option value="">Search All</option>
-
-<%perl>
-					foreach my $circuit (
-						sort {$a->name cmp $b->name}
-						Tab::Circuit->retrieve_all
-					) {
-</%perl>
-						<option
-							value="<% $circuit->id%>"
-							<% $circuit->id == $circuit_id ? "selected" : "" %>
-						><% $circuit->name %></option>
+%						foreach my $ocircuit (sort {$circuits{$a} cmp $circuits{$b}} keys %circuits) {
+							<option value="<% $ocircuit %>"
+								<% $circuit_id == $ocircuit ? "selected" : "" %>
+						><% $circuits{$ocircuit} %></option>
 %					}
 				</select>
 			</span>
 
 		</div>
 
-		<div class="liblrow rightalign marno">
+		<div class="liblrow rightalign marno marbottommore">
 			<input type="submit" value=" Go ">
 			</form>
 		</div>
 
-		<& "/funclib/tablesorter.mas", table => 'found' &>
+		<& "/funclib/tablesorter.mas", table => 'tourn_search' &>
 
-%		if ($name || $circuit_id) {
+%		if (%tourns) {
 
 			<span class="fivesixths">
-				<h6>Tournaments
-					<%
-						$name ? "matching \"".$name."\"" : ""
-					%><%
-						$circuit ? "in ".$circuit->abbr : ""
-					%>:
-				</h6>
+%				if ($tourns_now) {
+					<h5>Tournaments happening around now</h5>
+%				} else {
+					<h5>Tournaments
+						<%
+							$name ? "matching \"".$name."\"" : ""
+						%><%
+							$circuit ? "in ".$circuit->abbr : ""
+						%>
+					</h5>
+%				}
 			</span>
 
-			<span class="sixth rightalign"
-				id="found_buttonarea"
+			<span class="sixth rightalign true"
+				id="tourn_search_buttonarea"
 			></span>
 
-%			if (@tourns) {
-
-				<table id="found">
-
+				<table id="tourn_search">
 					<thead>
-
 						<tr class="yellowrow">
 
 							<th class="smallish">
 								Test
-							</th>
-
-							<th class="smallish">
-								Circs
 							</th>
 
 							<th class="smallish">
@@ -196,7 +255,7 @@
 							</th>
 
 							<th class="smallish">
-								Locale
+								Location
 							</th>
 
 							<th class="smallish">
@@ -211,327 +270,107 @@
 					</thead>
 					<tbody>
 
-%					foreach my $tourn (@tourns) {
-
+<%perl>
+					foreach my $tourn_id (
+						sort {
+							$tourns{$a}{"hidden"} <=> $tourns{$b}{"hidden"}
+							|| $tourns{$a}{"start"} cmp $tourns{$b}{"start"}
+						} keys %tourns
+					) {
+</%perl>
 						<tr>
-
 							<td class="smallish centeralign nospace">
-								<span class="hidden"><% $tourn->hidden ? "1" : "0" %></span>
+								<span class="hidden"><% $tourns{$tourn_id}{"hidden"} ? "1" : "0" %></span>
                             	<label class="switch smaller">
 									<input
 										type          = "checkbox"
 										value         = "1"
-										id            = "<% $tourn->id %>"
+										id            = "<% $tourn_id %>"
 										property_name = "hidden"
-										target_id     = "<% $tourn->id %>"
+										target_id     = "<% $tourn_id %>"
 										onChange      = "postSwitch( this, 'tourn_switch.mhtml');"
-
-										<% $tourn->hidden ? 'checked="checked"' : "" %>
+										<% $tourns{$tourn_id}{"hidden"} ? 'checked="checked"' : "" %>
 									>
 									<div class="slider onred"></div>
-
 								</label>
 							</td>
 
-							<td class="centeralign smallish">
-								<% $m->comp(
-										"/funclib/tourn_circuits.mas",
-										tourn      => $tourn,
-										print_abbr => 1
-								) %>
-							</td>
-
 							<td class="smallish">
-
 <%perl>
-								if ($tourn->weekendname) {
+								my $year = substr($tourns{$tourn_id}{"start"}, 0, 4);
 
-									my $name = $tourn->name;
+								if ($tourns{$tourn_id}{"weekend"}) {
+									my $name = $tourns{$tourn_id}{"name"};
 									$name =~ s/District Tournament//g;
 </%perl>
 									<span class="half semibold">
-										<% $name %>
+										<% $year %> <% $name %>:
 									</span>
 
-									<span class="half nowrap rightalign">
-										<% $tourn->weekendname %>
+									<span class="half">
+										<% $tourns{$tourn_id}{"weekend"} %>
 									</span>
 
 %								} else {
-									<% $tourn->start->year %>
-									<% $tourn->name %>
+									<% $year %>
+									<% $tourns{$tourn_id}{"name"} %>
+%								}
+							</td>
+
+							<td class="smallish nospace">
+%								foreach my $person_id (keys %{$tourns{$tourn_id}{"owner"}}) {
+									<a
+										class = "white padvertless full"
+										title = "<% $tourns{$tourn_id}{"owner"}{$person_id}{"email"} %>"
+										href  = "mailto: <% $tourns{$tourn_id}{"owner"}{$person_id}{"email"} %>"
+									><%
+										$tourns{$tourn_id}{"owner"}{$person_id}{"first"}
+										." ".
+										$tourns{$tourn_id}{"owner"}{$person_id}{"last"}
+									%></a>
 %								}
 							</td>
 
 							<td class="smallish">
-
-%								foreach my $admin (
-%									$m->comp("/funclib/tourn_admins.mas",
-%										tourn => $tourn,
-%										contact => 1)
-%								) {
-									<a
-										class = "white nowrap padvert padless"
-										href  = "mailto:<% $admin->email %>"
-									>
-										<span style="text-decoration: none;">
-										<% $admin->first." ".$admin->last %> <br />
-									</a>
-%								}
-							</td>
-
-							<td class="centeralign smallish">
-								<% $tourn->location %>
+								<% $tourns{$tourn_id}{"city"} %>
+								<% $tourns{$tourn_id}{"state"} %>
 							</td>
 
 							<td class="smallish nospace limit3">
-%								if ($tourn->weekends) {
-%									foreach my $weekend ($tourn->weekends) {
-
-										<div class="nospace full">
-
-											<span class="leftalign twofifths padless marno nowrap">
-												<% $weekend->name %>
-											</span>
-
-											<span class="rightalign threefifths padless marno nowrap">
-												<&
-													"/funclib/showdate.mas", dt     => $weekend->start, length => "shortest"
-												&> &ndash; <&
-													"/funclib/showdate.mas", dt     => $weekend->end, length => "shortest"
-												&>
-											</span>
-										</div>
-
-%									}
-%							} else {
-								<& "/funclib/showdate.mas", dt => $tourn->start, length => "short" &>
-								<& "/funclib/showdate.mas", dt => $tourn->end, length => "short" &>
-%							}
+								<& "/funclib/showdate.mas",
+									string => $tourns{$tourn_id}{"start"},
+									length => "short"
+								&>
+								<& "/funclib/showdate.mas",
+									string => $tourns{$tourn_id}{"end"},
+									length => "short"
+								&>
 							</td>
 
 							<td class="centeralign nospace">
 								<a
 									class="bluetext button buttonwhite fa fa-edit fa-sm"
-									href="/user/tourn/select.mhtml?tourn_id=<% $tourn->id %>"
+									href="/user/tourn/select.mhtml?tourn_id=<% $tourn_id %>"
 								>
 								</a>
 							</td>
 
-%           				my $warn = "This will delete the tournament ".$tourn->name." utterly.";
+%           				my $warn = "This will delete the tournament ".$tourns{$tourn_id}{"name"}." utterly.";
 %							$warn .=" There is no going back.  Be sure";
 
 							<td class="centeralign nospace">
 								<a
 									class="redtext button buttonwhite fa fa-trash fa-sm"
-									href="tourn_delete.mhtml?tourn_id=<% $tourn->id %>"
+									href="tourn_delete.mhtml?tourn_id=<% $tourn_id %>"
 									<& "/funclib/confirm.mas", warn => $warn &>
 								>
 								</a>
 							</td>
-
 						</tr>
-
 %					}
-					</tbody>
-
-				</table>
-
-%			} else {
-
-				<h5>None found</h5>
-
-				<p class="centeralign">
-					<object
-						style="height: 195px; width: 320px">
-						<param
-							name="movie"
-							value="http://www.youtube.com/v/1ytCEuuW2_A?version=3&feature=player_detailpage&autoplay=1">
-						<param
-							name  = "allowFullScreen"
-							value = "true">
-						<param
-							name  = "allowScriptAccess"
-							value = "always">
-						<embed
-							src="http://www.youtube.com/v/1ytCEuuW2_A?version=3&feature=player_detailpage"
-							type              = "application/x-shockwave-flash"
-							allowfullscreen   = "true"
-							allowScriptAccess = "always"
-							width             = "320"
-							height            = "195"
-						>
-					</object>
-				</p>
-
-%			}
-
-%		}
-
-		</br>
-
-%		if (@tourns_now) {
-
-			<& "/funclib/tablesorter.mas", table => 'now' &>
-
-			<span class="threequarters">
-				<h6><% scalar @tourns_now %> Tournaments happening around now:</h6>
-			</span>
-
-			<span
-				id    = "now_buttonarea"
-				class = "quarter rightalign"
-			>
-			</span>
-
-
-			<table id="now">
-
-				<thead>
-
-				<tr class="yellowrow">
-
-					<th class="smallish">
-						Test
-					</th>
-
-					<th class="smallish">
-						Circs
-					</th>
-
-					<th class="smallish">
-						Name
-					</th>
-
-					<th class="smallish">
-						Contacts
-					</th>
-
-					<th class="smallish">
-						Locale
-					</th>
-
-					<th class="smallish">
-						Dates
-					</th>
-
-					<th colspan="2">
-					</th>
-				</tr>
-
-				</thead>
-
-				<tbody>
-
-%				foreach my $tourn_now (@tourns_now) {
-
-					<tr>
-
-						<td class="smallish centeralign nospace">
-							<span class="hidden"><% $tourn_now->hidden ? "1" : "0" %></span>
-                            <label class="switch smaller">
-                                <input
-                                    type          = "checkbox"
-                                    value         = "1"
-                                    id            = "<% $tourn_now->id %>"
-                                    property_name = "hidden"
-                                    target_id     = "<% $tourn_now->id %>"
-                                    onChange      = "postSwitch( this, 'tourn_switch.mhtml');"
-
-                                    <% $tourn_now->hidden ? 'checked="checked"' : "" %>
-                                >
-                                <div class="slider onred"></div>
-
-                            </label>
-						</td>
-
-						<td class="smallish">
-
-%							if ($tourn_now->weekendname) {
-
-%								my $name = $tourn_now->name;
-%								$name =~ s/District Tournament//g;
-								<% $name %>
-
-%							} else {
-								<% $m->comp("/funclib/tourn_circuits.mas",
-										tourn => $tourn_now,
-										print_abbr => 1
-									)
-								%>
-%							}
-						</td>
-
-						<td class="smallish">
-%							if ($tourn_now->weekendname) {
-								<% $tourn_now->weekendname %>
-%							} else {
-								<% $tourn_now->name %>
-%							}
-
-						</td>
-
-						<td class="smallish">
-
-<%perl>
-							foreach my $admin_now (
-								$m->comp("/funclib/tourn_admins.mas",
-									tourn => $tourn_now,
-									contact => 1
-								)
-							) {
-</%perl>
-								<a
-									class="white nowrap padless"
-									href="mailto:<% $admin_now->email %>"
-								>
-									<span style="text-decoration: none;">
-									<% $admin_now->first." ".$admin_now->last %> <br />
-								</a>
-%							}
-						</td>
-
-						<td class="centeralign smallish">
-							<% $tourn_now->location %>
-						</td>
-
-						<td class="centeralign smallish">
-%							if ($tourn_now->weekendstart) {
-								<& "/funclib/showdate.mas", length => "shortest",
-									dt =>  Tab::DBI::date_inflate($tourn_now->weekendstart)
-								&>
-%							} else {
-								<&
-									"/funclib/showdate.mas", dt => $tourn_now->start, length => "short"
-								&> &ndash; <&
-									"/funclib/showdate.mas", dt => $tourn_now->end, length => "short"
-								&>
-%							}
-						</td>
-
-						<td class="centeralign">
-							<a
-								class = "bluetext button buttonwhite fa fa-edit fa-sm"
-								href  = "/user/tourn/select.mhtml?tourn_id=<% $tourn_now->id %>"
-							></a>
-						</td>
-
-%          				my $warn = "This will delete the tournament ".$tourn_now->name." utterly.";
-%						$warn .=" There is no going back.  Be sure";
-
-						<td class="centeralign">
-							<a
-								class = "redtext button buttonwhite fa fa-trash fa-sm"
-								href  = "tourn_delete.mhtml?tourn_id=<% $tourn_now->id %>"
-								<& "/funclib/confirm.mas", warn => $warn &>
-							></a>
-						</td>
-					</tr>
-
-%				}
-
 				</tbody>
 			</table>
 %		}
+
 	</div>
 
