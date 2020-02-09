@@ -11,15 +11,17 @@
 
 	my $key = $country."-".$year."-".$state."-".$circuit_id;
 
-	return if $m->cache_self(
-		key        => $key,
-		expires_in => '10m'
-	);
+#	return if $m->cache_self(
+#		key        => $key,
+#		expires_in => '10m'
+#	);
 
 	my $tz = $person->tz if $person;
 	$tz = "UTC" unless $tz;
 
 	my $now = DateTime->now;
+	my $start = $now->clone;
+
 	my $limit;
 	my $weekend_limit;
 	my $amount;
@@ -27,7 +29,6 @@
 	$year = int($year);
 
 	if ($year > 0 && $year < 3000) {
-
 		$limit .= " and tourn.start < '$year-07-01 00:00:00'";
 		$weekend_limit .= " and weekend.start < '$year-07-01 00:00:00'";
 		$year--;
@@ -38,9 +39,9 @@
 
 	} else {
 
-		$now->subtract(days => 2);
-		$limit .= " and tourn.end > '".DateTime::Format::MySQL->format_datetime($now)."'";
-		$weekend_limit .= " and weekend.end > '".DateTime::Format::MySQL->format_datetime($now)."'";
+		$start->subtract(days => 2);
+		$limit .= " and tourn.end > '".DateTime::Format::MySQL->format_datetime($start)."'";
+		$weekend_limit .= " and weekend.end > '".DateTime::Format::MySQL->format_datetime($start)."'";
 		$amount = " limit 256";
 	}
 
@@ -58,27 +59,43 @@
 		$weekend_limit .= " and tourn.country = '$country'";
 	}
 
-	my $circuit = Tab::Circuit->retrieve($circuit_id)
-		if $circuit_id
-		&& $circuit_id eq int($circuit_id);
+	my $circuit;
 
-	if ($circuit) {
+	if ($circuit_id && $circuit_id == int($circuit_id)) {
 		$limit .= "\nand exists ( select tourn_circuit.id from tourn_circuit ";
 		$limit .= "where tourn_circuit.tourn = tourn.id ";
 		$limit .= "and tourn_circuit.approved = 1 ";
-		$limit .= "and tourn_circuit.circuit = '$circuit->id' )\n";
+		$limit .= "and tourn_circuit.circuit = '$circuit_id' )\n";
 
 		$weekend_limit .= "\nand exists ( select tourn_circuit.id from tourn_circuit ";
 		$weekend_limit .= "where tourn_circuit.tourn = tourn.id ";
 		$weekend_limit .= "and tourn_circuit.approved = 1 ";
-		$weekend_limit .= "and tourn_circuit.circuit = '$circuit->id')\n";
+		$weekend_limit .= "and tourn_circuit.circuit = '$circuit_id')\n";
+
+		my $circuit = Tab::Circuit->retrieve($circuit_id);
 	}
 
-	Tab::Tourn->columns(TEMP => qw/nats msnats tournname tournid/);
+	my $dbh = Tab::DBI->db_Main();
 
-	Tab::Tourn->set_sql(front_page => "
-		select tourn.*, msnats.id as msnats, nats.id as nats
+	my $sth = $dbh->prepare("
+		select tourn.id, tourn.webname, tourn.name, tourn.tz, tourn.hidden,
+			tourn.state, tourn.country, tourn.city,
+			CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
+			CONVERT_TZ(tourn.end, '+00:00', tourn.tz) end,
+			CONVERT_TZ(tourn.reg_end, '+00:00', tourn.tz) reg_end,
+			CONVERT_TZ(tourn.reg_start, '+00:00', tourn.tz) reg_start,
+			msnats.id as msnats,
+			nats.id as nats,
+			closed.value as closed,
+			count(distinct school.id) as tourncount,
+			YEAR(tourn.start) as year,
+			WEEK(tourn.start) as week
+
 		from tourn
+
+		left join tourn_setting closed
+			on closed.tourn = tourn.id
+			and closed.tag = 'closed_entry'
 
 		left join tourn_setting msnats
 			on msnats.tourn = tourn.id
@@ -88,27 +105,144 @@
 			on nats.tourn = tourn.id
 			and nats.tag = 'nsda_nats'
 
-		where tourn.hidden = 0
+		left join school on
+			tourn.id = school.tourn
+
+		where tourn.hidden != 1
 		$limit
 		and not exists (
 			select weekend.id
 			from weekend
 			where weekend.tourn = tourn.id
 		)
-		order by tourn.end
+		group by tourn.id
+		order by tourn.start, tourncount
 		$amount
 	");
 
-	my @tourns = Tab::Tourn->search_front_page();
+	my %tourns;
+	my %cache;
 
-	Tab::Weekend->columns(TEMP => qw/tz webname location city state country tournname tournid/);
+	$sth->execute();
 
-	Tab::Weekend->set_sql(front_page => "
-		select weekend.*,
-			tourn.id as tournid, tourn.tz as tz, tourn.webname as webname, tourn.city as location,
-			tourn.city as city, tourn.state as state, tourn.country as country,
-			tourn.name as tournname
+	while (
+		my (
+			$tourn_id, $tourn_webname, $tourn_name, $tourn_tz, $hidden,
+			$state, $country, $city,
+			$tourn_start, $tourn_end,
+			$reg_end, $reg_start,
+			$msnats, $nats,
+			$closed,
+			$tourn_count,
+			$year,
+			$week
+		) = $sth->fetchrow_array()
+	) {
+
+		$tourns{$tourn_id}{"web"}  = $tourn_webname;
+		$tourns{$tourn_id}{"name"} = $tourn_name;
+
+		$tourns{$tourn_id}{"count"} = $tourn_count;
+		$tourns{$tourn_id}{"year"}  = $year;
+		$tourns{$tourn_id}{"week"}  = $week;
+
+		$tourns{$tourn_id}{"city"}    = $city;
+		$tourns{$tourn_id}{"state"}   = $state;
+		$tourns{$tourn_id}{"country"} = $country;
+
+		if ($msnats || $nats) {
+			$tourns{$tourn_id}{"nats"}++;
+		}
+
+		unless ($cache{$tourn_tz}) {
+			$cache{$tourn_tz} = Tab::tzname($tourn_tz);
+		}
+
+		$tourns{$tourn_id}{"tz"} = $cache{$tourn_tz};
+		foreach my $key ($tourn_start, $tourn_end, $reg_start, $reg_end) {
+			$cache{"date"}{$key} = DateTime::Format::MySQL->parse_datetime($key);
+		}
+
+		my $start_date = $cache{"date"}{$tourn_start}->month."/".$cache{"date"}{$tourn_start}->day;
+		my $end_date = $cache{"date"}{$tourn_end}->month."/".$cache{"date"}{$tourn_end}->day;
+
+		unless ($start_date eq $end_date) {
+			$tourns{$tourn_id}{"dates"} = $start_date." - ".$end_date;
+		} else {
+			$tourns{$tourn_id}{"dates"} = $start_date;
+		}
+
+		my $reg_start_dt;
+		my $reg_start_time;
+		my $reg_end_dt;
+		my $reg_end_time;
+
+		if ($closed) {
+
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="redtext full centeralign semibold">No open registration</span>
+			';
+
+		} elsif ($cache{"date"}{$reg_start} && $cache{"date"}{$reg_start}->epoch > $now->epoch) {
+
+			# Not yet open
+
+			$reg_start_dt = $cache{"date"}{$reg_start}->month."/".$cache{"date"}{$reg_start}->day;
+			$reg_start_time .= $cache{"date"}{$reg_start}->hour_12.":".$cache{"date"}{$reg_start}->strftime("%M")." ".$cache{"date"}{$reg_start}->strftime('%p');
+
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="orangetext semibold quarter">Opens</span>
+				<span class="quarter">'.$reg_start_dt.'</span>
+				<span class="half">'.$reg_start_time.' '.$tourns{$tourn_id}{"tz"}.'</span>
+			';
+
+		} elsif ($cache{"date"}{$reg_end} && $cache{"date"}{$reg_end}->epoch > $now->epoch) {
+
+			# Open, when's it due?
+			$reg_end_dt = $cache{"date"}{$reg_end}->month."/".$cache{"date"}{$reg_end}->day;
+			$reg_end_time .= $cache{"date"}{$reg_end}->hour_12.":".$cache{"date"}{$reg_end}->strftime("%M")." ".$cache{"date"}{$reg_end}->strftime('%p');
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="greentext semibold quarter">Due by</span>
+				<span class="quarter centeralign">'.$reg_end_dt.'</span>
+				<span class="half">'.$reg_end_time.' '.$tourns{$tourn_id}{"tz"}.'</span>
+			';
+
+		} else {
+
+			# Deadline passed
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="redtext full centeralign semibold">Closed</span>
+			';
+		}
+	}
+
+	$sth->finish();
+
+	$sth = $dbh->prepare("
+		select
+			tourn.id, tourn.webname, tourn.name, tourn.tz,
+			weekend.name, weekend.city, weekend.state,
+			site.name, closed.value,
+			CONVERT_TZ(weekend.start, '+00:00', tourn.tz) start,
+			CONVERT_TZ(weekend.end, '+00:00', tourn.tz) end,
+			CONVERT_TZ(weekend.reg_end, '+00:00', tourn.tz) reg_end,
+			CONVERT_TZ(weekend.reg_start, '+00:00', tourn.tz) reg_start,
+			count(distinct school.id) as tourncount,
+			YEAR(weekend.start) as year,
+			WEEK(weekend.start) as week,
+			nsda_tabbing_software.value
+
 		from (tourn, weekend)
+
+		left join site on weekend.site = site.id
+
+		left join tourn_setting nsda_tabbing_software
+			on nsda_tabbing_software.tourn = tourn.id
+			and nsda_tabbing_software.tag = 'nsda_tabbing_software'
+
+		left join tourn_setting closed
+			on closed.tourn = tourn.id
+			and closed.tag = 'closed_entry'
 
 		left join tourn_setting msnats
 			on msnats.tourn = tourn.id
@@ -118,18 +252,135 @@
 			on nats.tourn = tourn.id
 			and nats.tag = 'nsda_nats'
 
-		where tourn.hidden = 0
-		and tourn.id = weekend.tourn
+		left join school on tourn.id = school.tourn
+
+		where tourn.hidden != 1
 		$weekend_limit
-		order by weekend.end
+		and weekend.tourn = tourn.id
+
+		group by tourn.id
+		order by tourn.start, tourncount
 		$amount
 	");
 
-	my @weekends = Tab::Weekend->search_front_page();
+	$sth->execute();
 
-	push @tourns, @weekends;
+	while (
+		my (
+			$tourn_id, $tourn_webname, $tourn_name, $tourn_tz,
+			$weekend_name, $city, $state,
+			$site_name, $closed,
+			$tourn_start, $tourn_end,
+			$reg_end, $reg_start,
+			$tourn_count, $year, $week,
+			$tabbing
+		) = $sth->fetchrow_array()
+	) {
 
-	@tourns = sort {$a->end->epoch <=> $b->end->epoch} @tourns;
+		$tourn_name =~ s/District Tournament//g;
+
+		$tourns{$tourn_id}{"web"}  = $tourn_webname;
+		$tourns{$tourn_id}{"name"} = $tourn_name;
+
+		$tourns{$tourn_id}{"weekend_name"} = $weekend_name;
+		$tourns{$tourn_id}{"districts"} = 1;
+
+		$tourns{$tourn_id}{"count"} = $tourn_count;
+		$tourns{$tourn_id}{"year"}  = $year;
+		$tourns{$tourn_id}{"week"}  = $week;
+
+		if ($city) {
+			$tourns{$tourn_id}{"city"}  = $city;
+		} else {
+			$tourns{$tourn_id}{"city"}  = $site_name;
+		}
+
+		$tourns{$tourn_id}{"state"} = $state;
+
+		unless ($cache{$tourn_tz}) {
+			$cache{$tourn_tz} = Tab::tzname($tourn_tz);
+		}
+
+		foreach my $key ($tourn_start, $tourn_end, $reg_start, $reg_end) {
+			$cache{"date"}{$key} = DateTime::Format::MySQL->parse_datetime($key);
+		}
+
+		my $start_date = $cache{"date"}{$tourn_start}->month."/".$cache{"date"}{$tourn_start}->day;
+		my $end_date = $cache{"date"}{$tourn_end}->month."/".$cache{"date"}{$tourn_end}->day;
+
+		unless ($start_date eq $end_date) {
+			$tourns{$tourn_id}{"dates"} = $start_date." - ".$end_date;
+		} else {
+			$tourns{$tourn_id}{"dates"} = $start_date;
+		}
+
+		my $reg_start_dt;
+		my $reg_start_time;
+		my $reg_end_dt;
+		my $reg_end_time;
+
+		if ($tabbing eq "jot") {
+
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="full centeralign semibold">On Joy of Tournments</span>
+			';
+
+		} elsif ($tabbing eq "speechwire") {
+
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="full centeralign semibold">On Speechwire</span>
+			';
+
+		} elsif ($closed) {
+
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="redtext full centeralign semibold">No open registration</span>
+			';
+
+		} elsif ($cache{"date"}{$reg_start} && $cache{"date"}{$reg_start}->epoch > $now->epoch) {
+
+			# Not yet open
+
+			$reg_start_dt = $cache{"date"}{$reg_start}->month."/".$cache{"date"}{$reg_start}->day;
+			$reg_start_time .= $cache{"date"}{$reg_start}->hour_12.":".$cache{"date"}{$reg_start}->strftime("%M")." ".$cache{"date"}{$reg_start}->strftime('%p');
+
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="orangetext semibold quarter">Opens</span>
+				<span class="quarter">'.$reg_start_dt.'</span>
+				<span class="half">'.$reg_start_time.' '.$tourns{$tourn_id}{"tz"}.'</span>
+			';
+
+		} elsif ($cache{"date"}{$reg_end} && $cache{"date"}{$reg_end}->epoch > $now->epoch) {
+
+			# Open, when's it due?
+			$reg_end_dt = $cache{"date"}{$reg_end}->month."/".$cache{"date"}{$reg_end}->day;
+			$reg_end_time .= $cache{"date"}{$reg_end}->hour_12.":".$cache{"date"}{$reg_end}->strftime("%M")." ".$cache{"date"}{$reg_end}->strftime('%p');
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="greentext semibold quarter">Due by</span>
+				<span class="quarter centeralign">'.$reg_end_dt.'</span>
+				<span class="half">'.$reg_end_time.' '.$tourns{$tourn_id}{"tz"}.'</span>
+			';
+
+		} else {
+
+			# Deadline passed
+			$tourns{$tourn_id}{"registration"} = '
+				<span class="redtext full centeralign semibold">Closed</span>
+			';
+		}
+	}
+
+	$sth->finish();
+
+	my $circuit_th = $dbh->prepare('
+		select
+			circuit.id, circuit.abbr, circuit.name
+		from circuit
+		where circuit.active = 1
+		order by circuit.name
+	');
+
+	$circuit_th->execute();
 
 </%init>
 
@@ -177,10 +428,14 @@
 
 					<option value=""></option>
 
-%					foreach my $circuit (sort {$a->name cmp $b->name} Tab::Circuit->search(active => 1)) {
-						<option value="<% $circuit->id %>"
-							<% $circuit_id == $circuit->id ? 'selected' : "" %>
-						> <% $circuit->abbr %> <% $circuit->name %>
+<%perl>
+					while (
+						my ($id, $name, $abbr) = $circuit_th->fetchrow_array()
+					) {
+</%perl>
+						<option value="<% $id %>"
+							<% $circuit_id == $id ? 'selected' : "" %>
+						> <% $abbr %> <% $name %>
 						</option>
 %					}
 
@@ -238,16 +493,15 @@
 
 <%perl>
 
-	my $dbh = Tab::DBI->db_Main();
-
-	my $sth = $dbh->prepare('
+	my $state_sth = $dbh->prepare('
 		select distinct state
 		from tourn
 		where state is not null
 		and state != ""
-		order by state');
+		order by state'
+	);
 
-	$sth->execute();
+	$state_sth->execute();
 
 	my $cth = $dbh->prepare('
 		select distinct country
@@ -293,7 +547,7 @@
 
 					<option value=""></option>
 
-%					while( my $astate = $sth->fetchrow_array() ) {
+%					while( my $astate = $state_sth->fetchrow_array() ) {
 %						next unless $astate;
 						<option
 							value="<% $astate %>"
@@ -357,10 +611,10 @@
 
 %			$sth->finish();
 %			$cth->finish();
+%			$circuit_th->finish();
 %			$dbh->disconnect();
 
 		</div>
-
 	</div>
 
 %	if ($r->hostname eq "www.tabroom.com" ) {
@@ -376,7 +630,7 @@
 
 				<h2>
 %					if ($year || $country || $state) {
-						<% scalar @tourns %> Tournaments
+						<% scalar (keys %tourns) %> Tournaments
 %					} else {
 						Upcoming Tournaments
 %					}
@@ -384,8 +638,10 @@
 
 			</span>
 
-			<span class="third nospace rightalign">
-
+			<span
+				class = "third nospace rightalign"
+				id    = "tournlist_buttonarea"
+			>
 				<h6>
 %					if ($state) {
 						in <% $state_hash->{$state} %>
@@ -397,19 +653,16 @@
 %					if ($year) {
 						in the <% ($year - 1)%>-<% $year %> school year
 %					}
-
-%					if ($circuit > 0) {
+%					if ($circuit_id > 0) {
 						in <% $circuit->name %>
 %					}
 				</h6>
-
 			</span>
 
 		</div>
 
 		<& "/funclib/tablesorter.mas",
 			table     => "tournlist",
-			nobuttons => 1
 		&>
 
 		<table
@@ -433,8 +686,8 @@
 					City
 				</th>
 
-				<th class="smaller">
-					Locale
+				<th title="US State or Country" class="smaller centeralign">
+					ST/CY
 				</th>
 
 				<th class="smaller">
@@ -448,131 +701,74 @@
 			<tbody class="smaller">
 
 <%perl>
+				my $counter;
 
-				my $counter = 256;
+				foreach my $tourn_id (
+					sort {
+						$tourns{$a}{"week"} <=> $tourns{$b}{"week"}
+						|| $tourns{$b}{"count"} <=> $tourns{$a}{"count"}
+						|| $tourns{$a}{"name"} cmp $tourns{$b}{"name"}
+					} keys %tourns
+				) {
 
-				foreach my $tourn (@tourns) {
-
-					next unless $counter-- > 1;
-
-					my $tz;
-					$tz = $person->tz if $person;
-					$tz = $tourn->tz if $tourn->tz && not defined $tz;
-					$tz = "UTC" unless $tz;
-
-					my $end = $tourn->end->set_time_zone($tz);
-
-					my $start = $tourn->start->set_time_zone($tz)
-						if $tourn->reg_start;
-
-					my $reg_end = $tourn->reg_end->set_time_zone($tz)
-						if $tourn->reg_end;
-
-					my $reg_start = $tourn->reg_start;
-
-					$reg_start->set_time_zone($tz) if $reg_start;
-					$reg_end->set_time_zone($tz) if $reg_end;
-
-					my $open++ if (
-						$tourn->reg_start
-						&& $tourn->reg_end
-						&& $tourn->reg_start->epoch < $now->epoch
-						&& $tourn->reg_end->epoch > $now->epoch
-					);
+					last if $counter++ > 256;
 </%perl>
 
-				<tr class="<% ($tourn->webname eq "msnats"
-					|| $tourn->webname eq "nationals")
-					? "semibold bluetext"
-					: ""
-				%>">
+				<tr <% $tourns{$tourn_id}{"nats"} ? "semibold bluetext" : "" %>>
 
 					<td class="centeralign smallish nowrap">
-
-						<span class="hidden"><% $start ? $start->epoch : "" %></span>
-
-						<% Tab::niceshortdate($start) %>
-						<% ($start && $end && $start->day != $end->day) ? "- ".Tab::niceshortdate($end) : "" %>
-
+						<span class="hidden"><% $tourns{$tourn_id}{'week'}.'.'.$tourns{$tourn_id}{"count"} %></span>
+						<% $tourns{$tourn_id}{"dates"} %>
 					</td>
 
 					<td class="nospace">
 						<a
-							class="white smallish nearfull"
-							href="tourn/index.mhtml?tourn_id=<% $tourn->tournid ? $tourn->tournid : $tourn->id %>"
+							class = "white smallish nearfull padvertless"
+							href  = "/index/tourn/index.mhtml?tourn_id=<% $tourn_id %>"
 						>
-
-%						my $tournname = $tourn->tournname;
-%						$tournname =~ s/District Tournament//g;
-							<% $tournname ? '<span class="semibold half">'.$tournname.'</span><span class="half">' : "" %>
-							<% $tourn->name %>
-							<% $tournname ? '</span>' : "" %>
-						</a>
-					</td>
-
-					<td title="<% $tourn->city %>" class="smallish white">
-%						eval { $m->print($tourn->site->name); };
-						<% substr($tourn->city, 0, 24) %>
-					</td>
-
-					<td title="<% $tourn->city %>" class="centeralign smallish">
-%						if ($tourn->state) {
-							<a class="white"
-								href="index.mhtml?state=<% $tourn->state %>&country=<% $country %>&circuit_id=<% $circuit_id %>&year=<% $year %>">
-%						} elsif ($tourn->country) {
-							<a class="white"
-								href="index.mhtml?country=<% $tourn->country %>&circuit_id=<% $circuit_id %>&year=<% $year %>">
+%						if ($tourns{$tourn_id}{"districts"}) {
+							<span class="semibold half">
+								NSDA: <% $tourns{$tourn_id}{"name"} %>
+							</span>
+							<span class="half">
+								<% $tourns{$tourn_id}{"weekend_name"} %>
+							</span>
+%						} else {
+							<% $tourns{$tourn_id}{"name"} %>
 %						}
-						<% $tourn->location %>
 						</a>
 					</td>
 
-					<td class="centeralign nowrap">
+					<td title="<% $tourns{$tourn_id}{"city"} %>" class="smallish padvertno">
+						<% substr($tourns{$tourn_id}{"city"}, 0, 24) %>
+					</td>
 
+					<td title="<% $tourns{$tourn_id}{"state"} %>" class="centeralign padvertless smallish">
+%						if ($tourns{$tourn_id}{"state"}) {
+							<a class="white"
+								href="index.mhtml?state=<% $tourns{$tourn_id}{"state"} %>&country=<% $country %>&circuit_id=<% $circuit_id %>&year=<% $year %>">
+%						} elsif ($tourns{$tourn_id}{"country"}) {
+							<a class="white"
+								href="index.mhtml?country=<% $tourns{$tourn_id}{"country"} %>&circuit_id=<% $circuit_id %>&year=<% $year %>">
+%						}
+							<% $tourns{$tourn_id}{"state"}
+								? $tourns{$tourn_id}{"state"}
+								: $tourns{$tourn_id}{"country"}
+							%>
+						</a>
+					</td>
+
+					<td class="nowrap">
 						<a
 							class="white smaller nospace"
-							href="tourn/index.mhtml?tourn_id=<% $tourn->id %>"
+							href="/index/tourn/index.mhtml?tourn_id=<% $tourn_id %>"
 						>
-
-						<span class="hidden">
-							<% ($open && $reg_end) ? $reg_end->epoch : "" %>
-							<% $reg_start && $reg_start > $now ? $reg_start->epoch : ""%>
-							<% $reg_end && $reg_end < $now ? $reg_end->epoch : "" %>
-						</span>
-
-%						if ($open) {
-
-							<span class="leftalign fifth greentext semibold">Due</span>
-
-							<span class="fifth nospace"><% Tab::niceshortdate($reg_end) %></span>
-
-							<span class="threefifths"><% Tab::nicetime($reg_end)." ".Tab::tzname($tz) %></span>
-
-%						} elsif ($reg_start > $now ) {
-
-							<span class="leftalign fifth bluetext semibold">Open</span>
-
-							<span class="fifth nospace"><% Tab::niceshortdate($reg_start) %></span>
-
-							<span class="threefifths"><% Tab::nicetime($reg_start)." ".Tab::tzname($tz) %></span>
-
-%						} elsif ($reg_end < $now) {
-
-							<span
-								class="centeralign redtext semibold"
-								title="Registration was due by <% Tab::niceshortdate($reg_end) %> <% Tab::nicetime($reg_end)." ".Tab::tzname($tz) %>"
-							>
-								Closed
-							</span>
-
-%						}
-
+							<% $tourns{$tourn_id}{"registration"}  %>
 						</a>
 					</td>
 				</tr>
 %			}
-
-		</tbody>
+			</tbody>
 		</table>
 
 	</div>
