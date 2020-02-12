@@ -12,8 +12,10 @@
 	my $judge = Tab::Judge->retrieve($judge_id);
 	my $panel = Tab::Panel->retrieve($panel_id);
 
-	my $wudc++ if $panel->round->event->type eq "wudc";
-	my $event = $panel->round->event;
+	my $round = $panel->round;
+	my $event = $round->event;
+
+	my $wudc++ if $event->type eq "wudc";
 
 	my $ballot = Tab::Ballot->search(
 		judge => $judge->id,
@@ -34,26 +36,27 @@
 		select distinct panel.*
 		from panel, round
 		where round.event = ?
-		and round.type    = ?
+		and round.id      = ?
 		and round.id      = panel.round
 		and panel.letter  = ?
 	");
 
-
 	if ($wudc) {
 
 		Tab::Ballot->set_sql(remove_all_chairs => "
-				update ballot
+			update ballot
 					set chair = 0,audit = 0
-					where panel = ?
-					and chair = 1");
+				where panel = ?
+					and chair = 1
+		");
 
 		Tab::Ballot->set_sql(remove_chairs => "
-				update ballot
+			update ballot
 					set chair = 0,audit = 0
-					where panel = ?
+				where panel = ?
 					and judge = ?
-					and chair = 1");
+					and chair = 1
+		");
 
 		Tab::Ballot->set_sql(rm_scores => "
 				delete score.*
@@ -71,191 +74,149 @@
 
 	} else {
 
-
 		Tab::Ballot->set_sql(remove_all_chairs => "
-				update ballot
-					set chair = 0, audit = 0
-					where panel = ?
-					and chair = 1");
+			update ballot
+				set chair = 0, audit = 0
+			where panel = ?
+				and chair = 1
+		");
 
 		Tab::Ballot->set_sql(remove_chairs => "
-				update ballot
-					set chair = 0, audit = 0
-					where panel = ?
-					and judge = ?
-					and chair = 1");
+			update ballot
+				set chair = 0, audit = 0
+			where panel = ?
+				and judge = ?
+				and chair = 1
+		");
 
 		Tab::Ballot->set_sql(add_chair => "
-				update ballot
-					set chair = 1 where panel = ?
-					and judge = ?
-					and chair = 0");
+			update ballot
+				set chair = 1
+			where panel = ?
+				and judge = ?
+				and chair = 0
+		");
 	}
 
 	my $msg;
+
+	# Remove this judge as the chair of the round without a replacement
 
 	if ($ballot && $ballot->chair || (defined $chair && $chair ne 1)) {
 
 		Tab::Ballot->sql_remove_chairs->execute($panel->id, $judge->id);
 
-		$msg = "Chair of panel removed";
+		$msg = $judge->last." removed as chair or parli";
 
-		if (
-			( 	$event->type eq "congress"
-				&& $panel->round->type eq "prelim"
-			)
-#			||
-#				( $event->type eq "congress"
-#				  && $panel->round->type eq "elim"
-#				  && $tourn_settings->{"nsda_nats"}
-#				)
-		) {
+		# Remove parliamentarian from other tied sessions
+		if ($event->type eq "congress") {
 
-			my $type = $panel->round->type;
+			foreach my $tie ($m->comp("/funclib/congress_ties.mas", round => $round)) {
 
-			my @panels = Tab::Panel->search_by_letter(
-				$event->id,
-				$type,
-				$panel->letter
-			);
+				next if $tie->id == $round->id;
 
-			foreach my $opanel (@panels) {
+				my $opanel = $tie->panels( letter => $panel->letter )->first;
 
-				next if $opanel->round->type ne $type;
-				next if $opanel->id == $ballot->panel->id;
+				if ($opanel) {
 
+					$m->comp("judge_rm.mhtml",
+						judge_id       => $judge->id,
+						panel_id       => $opanel->id,
+						tourn          => $tourn,
+						tourn_settings => $tourn_settings,
+						return         => "ohgodyes",
+						person         => $person
+					);
+				}
+			}
+
+			$msg .= " and judge removed from other sessions of this chamber";
+		}
+
+	} elsif ($ballot)  {
+
+	# Designate this judge as the chair of this round
+
+		my @ties;
+
+		if ($event->type eq "congress") {
+			@ties = $m->comp("/funclib/congress_ties.mas", round => $round);
+		} else {
+			push @ties, $round;
+		}
+
+		my $panel_letter = $panel->letter();
+
+		# Remove any existing chair from the section
+		my @chairs = $panel->ballots(chair => 1);
+
+		my $original_chair = $chairs[0]->judge if @chairs;
+
+		if ($original_chair) {
+			Tab::Ballot->sql_remove_chairs->execute($panel->id, $original_chair->id);
+		}
+
+		Tab::Ballot->sql_add_chair->execute($panel->id, $judge->id);
+
+		my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
+
+		foreach my $oround (sort {$a->name cmp $b->name} @ties) {
+
+			next if $oround->id == $round->id;
+
+			my $opanel = $oround->panels( letter => $panel_letter )->first;
+
+			if ($original_chair) {
 				$m->comp("judge_rm.mhtml",
-					judge_id       => $judge->id,
+					judge_id       => $original_chair->id,
 					panel_id       => $opanel->id,
 					tourn          => $tourn,
 					tourn_settings => $tourn_settings,
 					return         => "ohgodyes",
 					person         => $person
 				);
-
 			}
 
-			$msg .= " and judge removed from other sessions of this chamber";
+			$m->comp("judge_add.mhtml",
+				judge_id       => $judge->id,
+				panel_id       => $opanel->id,
+				tourn          => $tourn,
+				tourn_settings => $tourn_settings,
+				return         => "ohgodyes",
+				person         => $person
+			);
+
+			Tab::Ballot->sql_add_chair->execute($opanel->id, $judge->id);
+		}
+
+		if ($event->setting("parli_ballot")) {
+
+			my $last = pop @ties;
+
+			Tab::Ballot->set_sql( only_last => "
+				update ballot, panel
+				set ballot.audit   = 1
+				where ballot.judge = ?
+				and ballot.panel = panel.id
+				and panel.round  = ?
+			");
+
+			if (@ties) {
+				foreach my $tie (@ties) {
+					Tab::Ballot->sql_only_last->execute( $judge->id, $tie->id);
+				}
+			}
+
+			$msg = "Parliamentarian ".$judge->first." ".$judge->last." designated for chamber ".$panel->letter." in ALL ROUNDS";
 
 		}
 
-	} elsif ($ballot)  {
+	} else {
 
-		if (
-				(	$event->type eq "congress"
-					&& $panel->round->type eq "prelim"
-				)
-
-#			||
-#				( $event->type eq "congress"
-#				  && $panel->round->type eq "elim"
-#				  && $tourn_settings->{"nsda_nats"}
-#				)
-		) {
-
-			my $type = $panel->round->type;
-
-			unless (defined $chair && $chair eq 0) {
-
-				my @panels = Tab::Panel->search_by_letter(
-					$event->id,
-					$type,
-					$panel->letter
-				);
-
-				my @rounds =
-					sort {$a->name <=> $b->name}
-					$event->rounds( type => $type );
-
-				my $last_round = pop @rounds if @rounds;
-
-				foreach my $opanel (@panels) {
-
-					next if $opanel->round->type ne $type;
-
-					my %judges = map {$_->id => $_} $m->comp(
-						"/funclib/panel_judges.mas",
-						panel => $opanel
-					);
-
-					# Remove the non chair from the other sessions
-
-					foreach my $judge_id (keys %judges) {
-
-						next if $judge_id == $judge->id;
-
-						next if $opanel->id == $panel->id;
-
-						if ($judges{$judge_id}->chair) {
-
-							$m->comp("judge_rm.mhtml",
-								judge_id       => $judge_id,
-								panel_id       => $opanel->id,
-								tourn          => $tourn,
-								tourn_settings => $tourn_settings,
-								return         => "ohgodyes",
-								person         => $person
-							);
-						}
-					}
-
-					unless ($judges{$judge->id}) {
-
-						$m->comp("judge_add.mhtml",
-							judge_id       => $judge->id,
-							panel_id       => $opanel->id,
-							tourn          => $tourn,
-							tourn_settings => $tourn_settings,
-							return         => "ohgodyes",
-							person         => $person
-						);
-					}
-
-					Tab::Ballot->sql_rm_scores->execute($opanel->id) if $wudc;
-
-					Tab::Ballot->sql_remove_all_chairs->execute($opanel->id);
-
-					Tab::Ballot->sql_add_chair->execute($opanel->id, $judge->id);
-
-				}
-
-				if ($event->setting("parli_ballot")) {
-
-					Tab::Ballot->set_sql( only_last => "
-						update ballot, panel, round
-						set ballot.audit   = 1
-						where ballot.judge = ?
-						and ballot.panel = panel.id
-						and panel.round  = round.id
-						and round.event  = ?
-						and round.type  = ?
-						and round.name < ?
-					");
-
-					Tab::Ballot->sql_only_last->execute(
-						$judge->id,
-						$event->id,
-						$type,
-						$last_round->name
-					);
-
-				}
-
-				$msg = "Parliamentarian ".$judge->first." ".$judge->last." designated for chamber ".$panel->letter." in ALL ROUNDS";
-
-			}
-
-		} else {
-
-			Tab::Ballot->sql_rm_scores->execute($panel->id) if $wudc;
-
-			Tab::Ballot->sql_remove_all_chairs->execute($panel->id);
-
-			Tab::Ballot->sql_add_chair->execute($panel->id, $judge->id);
-
-			$msg = $judge->last." designated chair of panel";
-		}
-
+		Tab::Ballot->sql_rm_scores->execute($panel->id) if $wudc;
+		Tab::Ballot->sql_remove_all_chairs->execute($panel->id);
+		Tab::Ballot->sql_add_chair->execute($panel->id, $judge->id);
+		$msg = $judge->last." designated chair of panel";
 	}
 
 	if ($return) {
@@ -266,6 +227,5 @@
 
 		$m->redirect("panel_view.mhtml?panel_id=".$panel->id."&msg=$msg");
 	}
-
 
 </%perl>
