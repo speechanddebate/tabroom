@@ -57,16 +57,18 @@
 
 	my $delete_round_sth = $dbh->prepare("
 		delete score.*, ballot.*, panel.*
-		from round, ballot, score
-		where round.id = ?
-			and ballot.round = round.id
-			and score.ballot = ballot.id
+		from (panel, ballot)
+			left join score on ballot.id = score.ballot
+		where panel.round = ?
+			and ballot.panel = panel.id
 	");
 
 	my $round_clone_sth = $dbh->prepare("
 		select panel.letter, chair.id, entry.id, panel.room
-		from panel, ballot, entry
-			left join judge chair on chair.id = ballot.judge and ballot.chair = 1
+		from (panel, ballot, entry)
+			left join judge chair
+				on chair.id = ballot.judge
+				and ballot.chair = 1
 		where panel.round = ?
 			and panel.id = ballot.panel
 			and ballot.entry = entry.id
@@ -78,7 +80,7 @@
 	# Chained rounds
 	my @ties = $m->comp("/funclib/congress_ties.mas", round => $round);
 
-	if ($ARGS{"realign"} || $ARGS{'single'}) {
+	if ($ARGS{"congress_method"} eq "realign" || $ARGS{'congress_method'} eq "single") {
 
 		my $origin = $ties[0];
 		my $last_round = $ties[-1];
@@ -87,18 +89,19 @@
 
 			next if $other->id == $origin->id;
 
-			if ($ARGS{'single'}) {
-				next if $other->id != $ARGS{'single'};
+			if ($ARGS{'congress_method'} eq "single") {
+				next if $other->id != $round->id;
 			}
 
 			$delete_round_sth->execute($other->id);
-			$round_clone_sth->execute($other->id);
+			$round_clone_sth->execute($origin->id);
+
 			my %panels;
 
 			while (
 				my (
 					$panel_letter, $chair_id, $entry_id, $room_id
-				)
+				) = $round_clone_sth->fetchrow_array()
 			) {
 
 				if ($chair_id) {
@@ -109,20 +112,21 @@
 					$panels{$panel_letter}{"room"} = $room_id;
 				}
 
-				$panels{$panel_letter}{"entries"}{$entry_id};
+				$panels{$panel_letter}{"entries"}{$entry_id}++;
 			}
 
 			my $chair_audit = 0;
-			if ( ($other->id != $last_round->id) && $chair_judge) {
+
+			if ($other->id != $last_round->id) {
 				$chair_audit = 1;
 			}
 
 			foreach my $letter (keys %panels) {
 
-				my $room_id = $panels{$panel_letter}{"room"};
+				my $room_id = $panels{$letter}{"room"};
 				$room_id = 0 unless $room_id;
 
-				my $chair_id = $panels{$panel_letter}{"chair"}
+				my $chair_id = $panels{$letter}{"chair"};
 				$chair_id = 0 unless $chair_id;
 
 				my $chair = 0;
@@ -137,16 +141,21 @@
 
 				my $order = 1;
 
-				foreach my $entry_id (keys %{$panels{$panel_letter}{"entries"}}) {
+				my $audit;
+				if ($chair) {
+					$audit = $chair_audit;
+				}
+
+				foreach my $entry_id (keys %{$panels{$letter}{"entries"}}) {
 
 					my $ballot = Tab::Ballot->create({
 						panel        => $chamber->id,
 						judge        => $chair_id,
 						entry        => $entry_id,
-						speakerorder => $order++;
+						speakerorder => $order++,
 						audit        => $audit,
 						chair        => $chair
-					})
+					});
 				}
 			}
 
@@ -156,15 +165,21 @@
 
 		return;
 
-	} elsif ($ARGS{"wipe"}) {
+	} elsif ($ARGS{"congress_method"} eq "wipe") {
 
 		foreach my $tie (@ties) {
 			$delete_round_sth->execute($tie->id);
+			$delete_round_sth->finish();
 		}
 
-		my @all_entries = $m->comp("/funclib/event_entries.mas", event => $event, active => 1);
+		my @all_entries = $m->comp(
+			"/funclib/event_entries.mas",
+			event => $event,
+			active => 1
+		);
 
 		$num_panels = 1 unless $num_panels;
+
 		my $count;
 		my $cohort = 1;
 
@@ -252,9 +267,11 @@
 			}
 
 			foreach my $entry (@all_entries) {
+
 				push @schools, $entries{"school"}{$entry->id};
 				$size_of_school{$entries{"school"}{$entry->id}}++;
 				my $bill = $bills_by_entry{$entry->id};
+
 				if ($bill) {
 					$entries{"author"}{$entry->id}++;
 					$entries{"bill_topic"}{$entry->id} = $bill->tag if $bill->tag;
@@ -285,8 +302,7 @@
 
 		} else {
 
-			@all_entries =
-				shuffle(@all_entries);
+			@all_entries = shuffle(@all_entries);
 
 			@all_entries =
 				sort {$school_rank{$a->schoolid} <=> $school_rank{$b->schoolid}}
@@ -351,7 +367,10 @@
 				$msg .= "Trying $key";
 
 				my @chamber = @{$chambers{$key}} if $chambers{$key};
-				next KEY if (scalar @chamber == $max_size);
+
+				if (scalar @chamber == $max_size) {
+					next KEY;
+				}
 
 				$msg .= " - got past max size";
 
@@ -367,11 +386,10 @@
 
 					my $new_score = score_chamber(\@chamber, \%entries);
 
-					if ($score = -1 || ($new_score < $score)) {
+					if ($score == -1 || ($new_score < $score)) {
 						$picked_key = $key;
 						$score = $new_score;
 						last KEY if $score == 0;
-
 					} else {
 						$last_resort = $key;
 					}
@@ -394,29 +412,24 @@
 
 			my $k = shift @keys;
 			push (@keys, $k);
-
 		}
 
 		my @chamber_keys = shuffle(keys %chambers);
-
+		my $first = $chamber_keys[0];
 		my $no_improvement = 1;
 
 		unless ($num_panels == 1) {
 
-			foreach my $counter (1 .. 7) {
+			foreach my $counter (1 .. 4) {
 
 				my $total;
-
 				next if $no_improvement == 0;
-
 				$no_improvement = 0;
 
 				foreach my $chamber_key (@chamber_keys) {
 
 					my @section = @{$chambers{$chamber_key}};
-
 					my $entry_section1_score = score_chamber( \@section, \%entries);
-
 					next if $entry_section1_score < 1;
 
 					ENTRY:
@@ -498,7 +511,6 @@
 							@{$chambers{$swap_section}} = @section2;
 
 							@section = @section1;
-
 							$entry_section1_score = score_chamber( \@section1, \%entries);
 						}
 					}
@@ -523,11 +535,9 @@
 					}
 				}
 
-
 				foreach my $chamber_key (@chamber_keys) {
 
 					my @chamber = @{$chambers{$chamber_key}};
-
 					my $panel_score = score_chamber(\@chamber, \%entries);
 
 					OTHER:
@@ -679,7 +689,6 @@
 	sub score_chamber {
 
 		my ($panref, $entries) = @_;
-
 		my $score = 0;
 
 		foreach my $entry (@{$panref}) {
