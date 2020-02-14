@@ -13,29 +13,44 @@
 
 	my $round = $panel->round;
 
-	foreach my $tb ($round->tiebreak_set->tiebreaks) {
-		$ranks++ if (
-			$tb->name eq "ranks"
-			|| $tb->name eq "chair_ranks"
-			|| $tb->name eq "reciprocals"
-			|| $tb->name eq "opp_ranks"
-		);
+	my %tb_types = $m->comp("/funclib/tiebreak_types.mas", round => $round);
 
-		$points++ if ($tb->name eq "points" || $tb->name eq "opp_points");
-	}
+	my $dbh = Tab::DBI->db_Main();
 
-	my @ballots = Tab::Ballot->search(
-		judge => $judge->id,
-		panel => $panel->id);
+	my $scores_sth = $dbh->prepare("
+		select
+			entry.id, entry.code, entry.name, entry.dq,
+			student.first, student.last,
+			school.id, school.name, school.code, congress.value,
+			rank.id, rank.value,
+			point.id, point.value,
+			GROUP_CONCAT(speech.value),
+			sum(speech.value)
 
-	my @scores = $m->comp("/funclib/panel_scores.mas", panel => $panel);
+		from (entry, ballot)
+			left join entry_student es on es.entry = entry.id
+			left join student on es.student = student.id
+			left join school on entry.school = school.id
+			left join school_setting congress on congress.school = school.id and congress.tag = 'congress_code'
+			left join score rank on rank.ballot = ballot.id and rank.tag = 'rank'
+			left join score point on point.ballot = ballot.id and point.tag = 'point'
+			left join score speech on speech.ballot = ballot.id and speech.tag = 'speech'
 
-	my $min = $round->event->setting('min_points') if $panel;
-	my $max = $round->event->setting('max_points') if $panel;
+		where ballot.panel = ?
+			and ballot.judge = ?
+			and ballot.entry = entry.id
+			and entry.active = 1
+		group by ballot.entry
+		order by entry.code
+	");
+
+	my $event = $round->event;
+	my $min = $event->setting('min_points') if $panel;
+	my $max = $event->setting('max_points') if $panel;
 	$min = 0 unless $min;
 	$max = 100 unless $max;
 
-	my $pts = $round->event->setting('point_increments');
+	my $pts = $event->setting('point_increments');
 	my $point_step = 1;
 	my $digits = 2;
 
@@ -56,10 +71,6 @@
 		}
 	}
 
-	my $mfl_tv++ if $round->event->setting('mfl_time_violation');
-
-	my $forfeits++ if $round->event->setting('forfeits_never_break');
-
 </%init>
 
 	<div class="nospace">
@@ -76,13 +87,13 @@
 
 		<span class="half rightalign nospace">
 			<a
-				class="buttonwhite smallish bluetext marrightmore"
+				class="buttonwhite smallish bluetext marrightmore invert"
 				href="/panel/schemat/show.mhtml?from=entry&round_id=<% $round->id %>">
-				<% $round->event->abbr %>
+				<% $event->abbr %>
 				<% $round->realname %>
 			</a>
 
-			<a class="buttonwhite smallish bluetext"
+			<a class="buttonwhite smallish bluetext invert"
 				href="/panel/schemat/panel_view.mhtml?from=entry&judge_id=<% $judge->id %>&panel_id=<% $panel->id %>">
 				<% "Panel ". $panel->letter ." in ".$panel->room->name %>
 			</a>
@@ -91,18 +102,25 @@
 
 	<form action="audit/audit_save.mhtml" method="post">
 
-	<input type="hidden" name="judge_id" value="<% $judge->id %>">
+	<input
+		type  = "hidden"
+		name  = "judge_id"
+		value = "<% $judge->id %>"
+	>
 
-	<input type="hidden" name="panel_id" value="<% $panel->id %>">
+	<input
+		type  = "hidden"
+		name  = "panel_id"
+		value = "<% $panel->id %>"
+	>
 
-	<& "/funclib/tablesorter.mas", table => "notarealevent" &>
+	<& "/funclib/tablesorter.mas", table => "congress_audit", nobuttons => 1 &>
 
-	<table id="notarealevent">
+	<table id="congress_audit">
 
 		<thead>
 
 		<tr class="yellowrow smallish">
-
 
 			<th class="centeralign">
 				Entry
@@ -118,39 +136,30 @@
 				School
 			</th>
 
-%			if ($points || $ranks) {
-
+%			if ($tb_types{'rank'}) {
 				<th class="centeralign">
-
-%					if ($ranks) {
-						<span class="half">
-							Rank
-						</span>
-%					}
-
-
-%					if ($points) {
-						<span class="half">
-							Points
-						</span>
-%					}
-
-				</th>
-
-%			}
-
-%			if ($mfl_tv) {
-				<th class="smallish centeralign">
-					Overtime
+					Rank
 				</th>
 %			}
 
-%			if ($forfeits) {
-				<th class="smallish centeralign">
-					Forfeit*
+%			if ($tb_types{'point'}) {
+				<th class="centeralign">
+					Point
+				</th>
+%			}
+%			if ($tb_types{'point'}) {
+				<th class="centeralign">
+					Points
 				</th>
 %			}
 
+			<th class="centeralign">
+				Speeches
+			</th>
+
+			<th class="centeralign">
+				Speech Total
+			</th>
 		</tr>
 		</thead>
 
@@ -158,169 +167,179 @@
 
 <%perl>
 
-		my $notfirst;
-		my $switch;
-		my $counter;
+		$scores_sth->execute($panel->id, $judge->id);
 
-		my %done;
-
-		foreach my $ballot (sort {$a->speakerorder <=> $b->speakerorder} @ballots) {
-
-			my $entry = $ballot->entry;
-			next if $done{$entry->id}++;
-			next unless $entry;
-			next if $entry->dropped == 1;
-
-			my $ballot_rank;
-			my $ballot_points;
-
-			foreach my $score (@scores) {
-
-				$ballot_rank = $score->value
-					if $score->judgeid == $judge->id
-					&& $score->ballot->id == $ballot->id
-					&& $score->tag eq "rank";
-
-				$ballot_points = $score->value
-					if $score->judgeid == $judge->id
-					&& $score->ballot->id == $ballot->id
-					&& $score->tag eq "point";
-			}
-
-			my $student = $entry->students->first;
+		while (
+			my (
+				$entry_id, $entry_code, $entry_name, $entry_dq,
+				$student_first, $student_last,
+				$school_id, $school_name, $school_code, $congress_value,
+				$rank_id, $rank_value,
+				$point_id, $point_value,
+				$speech_string,
+				$speech_sum
+			) = $scores_sth->fetchrow_array()
+		) {
 
 </%perl>
 			<tr>
 
+				<td class="leftalign">
+					<% $entry_code %>
+					<% $entry_dq ? "<span class='redtext semibold third'>DQ</span>" : "" %>
+				</td>
+
+				<td>
+					<% $student_first %>
+				</td>
+				<td>
+					<% $student_last %>
+				</td>
+
 				<td class="centeralign">
-					<% $entry->code %>
-					<% ($entry->dq) ? "-- DQ" : "" %>
-				</td>
-
-				<td>
-					<% $student ? $student->first : "Entry has"%>
-				</td>
-
-				<td>
-					<% $student ? $student->last : "no student?!"%>
-				</td>
-
-
-				<td>
-					<% $entry->school ?
-						$entry->school->code
-							? $entry->school->code
-							: $entry->school->short_name
-						: "NONE"
+					<% $congress_value
+						? $congress_value
+						: $school_code
+							? $school_code
+							: $school_name
 					%>
 				</td>
 
-%				if ($points || $ranks) {
-
+%				if ($tb_types{'rank'}) {
 					<td class="centeralign">
-
-%						if ($ranks) {
-							<span class="half">
-								<% $ballot_rank %>
-							</span>
-%						}
-
-%						if ($points) {
-							<span class="half">
-								<% $ballot_points %>
-							</span>
-%						}
-
-
+						<% $rank_value %>
 					</td>
 %				}
 
-%				if ($mfl_tv) {
+%				if ($tb_types{'point'}) {
 					<td class="centeralign">
-						<% $ballot->tv ? "TV" : "" %>
+						<% $point_value %>
 					</td>
 %				}
 
-%				if ($forfeits) {
-					<td class="centeralign">
-						<% $ballot->forfeit ? "TV" : "" %>
-					</td>
-%				}
-
+				<td class="centeralign">
+					<% $speech_string %>
+				</td>
+				<td class="centeralign">
+					<% $speech_sum %>
+				</td>
 			</tr>
 
 %		}
 
 		</tbody>
 
-
-		<tr class="liblrow">
-
-			<td class="rightalign" colspan="6">
-
-				<span class="third">
-					<a
-						class = "buttonwhite redtext"
-						href="index.mhtml?panel_id=<% $panel->id %>&judge_id=<% $judge->id %>&timeslot_id=<% $timeslot->id %>">
-							Error: Edit Ballot
-					</a>
-				</span>
-
-%				unless ($round->event->category->setting('no_codes')) {
-					<span class="third rightalign">
-						Next judge code:
-						<input type="text" name="next_code" size="5" tabindex="<% $counter %>">
-					</span>
-
-%				} else {
-					<span class="third rightalign">
-					</span>
-%				}
-
-					<span class="third">
-						<input type="submit"  value="Confirm Scores">
-					</span>
-
-				</td>
-
-			</tr>
-
-
-
 	</table>
+
+	<div class="liblrow">
+
+		<span class="third centeralign">
+			<a
+				class = "buttonwhite redtext invert"
+				href="index.mhtml?panel_id=<% $panel->id %>&judge_id=<% $judge->id %>&timeslot_id=<% $timeslot->id %>">
+					Error: Edit Ballot
+			</a>
+		</span>
+
+		<span class="third centeralign">
+%			unless ($round->event->category->setting('no_codes')) {
+				Next judge code:
+				<input
+					type     = "text"
+					name     = "next_code"
+					size     = "5"
+					tabindex = "1"
+				>
+%			}
+		</span>
+
+		<span class="third centeralign">
+			<input type="submit"  value="Confirm Scores">
+		</span>
+
+	</div>
 
 <%perl>
 
-	my $entered_by;
+	my $sth = $dbh->prepare("
+		select ent.id, ent.first, ent.last, ent.email,
+			   aud.id, aud.first, aud.last, aud.email
+			from ballot
+				left join person ent on ent.id = ballot.entered_by
+				left join person aud on aud.id = ballot.audited_by
+			where ballot.panel = ?
+			order by ballot.entered_by DESC, ballot.audited_by DESC
+			limit 1
+	");
 
-	foreach my $ballot (@ballots) {
-		$entered_by = $ballot->entered_by if $ballot->entered_by;
+	my %whodunnit;
+
+	$sth->execute($panel->id);
+
+	while (
+		my (
+			$ent_id, $ent_first, $ent_last, $ent_email,
+			$aud_id, $aud_first, $aud_last, $aud_email
+		) = $sth->fetchrow_array()
+	) {
+		$whodunnit{"entered"}{"id"}    = $ent_id;
+		$whodunnit{"entered"}{"first"} = $ent_first;
+		$whodunnit{"entered"}{"last"}  = $ent_last;
+		$whodunnit{"entered"}{"email"} = $ent_email;
+
+		$whodunnit{"audited"}{"id"}    = $aud_id;
+		$whodunnit{"audited"}{"first"} = $aud_first;
+		$whodunnit{"audited"}{"last"}  = $aud_last;
+		$whodunnit{"audited"}{"email"} = $aud_email;
 	}
 
 </%perl>
 
-%	 if ($entered_by) {
+%	 if (%whodunnit) {
 
-		<div class="evenrow block centeralign padmore smallish" style="margin-top: 24px;">
-			<span class="medbigspan padmore">
+		<div class="odd full semibold bluetext centeralign padvertmore martopmuchmore ltbordertop">
+
+			<span class="sixth rightalign semibold bluetext">
+				Entry:
 			</span>
-			<span class="medbigspan padmore">
+
+			<span
+				title = "<% $whodunnit{"entered"}{"email"} %>"
+				class = "third centeralign"
+			>
+				<% $whodunnit{"entered"}{"first"}." ".$whodunnit{"entered"}{"last"} %>
 			</span>
-			<span class="medbigspan padmore">
-				<% $entered_by > 0 ? "1st Entry by ".$entered_by->first." ".$entered_by->last : "" %>
+
+			<span class="sixth rightalign semibold redtext">
+				Audit:
 			</span>
-			<br style="clear: both;" />
+
+			<span
+				title = "<% $whodunnit{"audited"}{"email"} %>"
+				class = "third centeralign"
+			>
+				<% $whodunnit{"audited"}{"first"}." ".$whodunnit{"audited"}{"last"} %>
+			</span>
+
 		</div>
 
 %	 }
 
 %	 if ($person->site_admin) {
 
-		<br style="clear: both;">
-
-		<p style="text-align: center; padding: 10px; background: #dedeff; width: 96%;">
-			Timeslot #: <% $timeslot->id %>, Round #: <% $round->id %>
-			Panel #: <% $panel->id %>, Judge #: <% $judge->id %>
-		</p>
+		<div class="full centeralign ltbordertop martopmuchmore">
+			<span class="quarter centeralign">
+				Timeslot #: <% $timeslot->id %>
+			</span>
+			<span class="quarter centeralign">
+				Round #: <% $round->id %>
+			</span>
+			<span class="quarter centeralign">
+				Panel #: <% $panel->id %>
+			</span>
+			<span class="quarter centeralign">
+				Judge #: <% $judge->id %>
+			</span>
+		</div>
 %	}
 
