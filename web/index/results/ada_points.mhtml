@@ -5,18 +5,14 @@
 <%init>
 
 	my $key = $season;
-	return if $m->cache_self( key => $key, expires_in => '20m' );
+	return if $m->cache_self( key => $key, expires_in => '1h' );
 
-	return;
-
-	my $debug=0;
-	use Time::HiRes qw( time );
 	use Data::Dumper;
-	my $start = time();
 
-	#season is the year in which a season ends, so for 2014-15 season=2015
+	#season is the year in which a season ends
 	$season=Tab::school_year->year unless $season;
-	my $startdate; my $enddate;
+	my $startdate;
+	my $enddate;
 	$startdate="8/1/".$season if not $startdate;
 	$enddate="12/31/".($season+1) if not $enddate;
 
@@ -42,36 +38,51 @@
 	Tab::ResultValue->columns(TEMP => qw/tourn_id/);
 	Tab::ResultValue->columns(TEMP => qw/level/);
 	Tab::ResultValue->columns(TEMP => qw/state/);
-	Tab::ResultValue->set_sql(pull_results => "
-		SELECT result_value.*, result.entry as entry, entry.code as entry_name, school.chapter as entry_chapter, tourn.name as tourn,
-		chapter.name as chapter_name, event_setting.value as level, chapter.state as state, tourn.id as tourn_id
-		FROM result, result_set, result_value, entry, school, event, tourn, chapter, event_setting
-		WHERE result_value.result=result.id
-				and result.result_set = result_set.id
-				and result_set.label = 'ada_pts'
-				and entry.id = result.entry
-				and school.id=entry.school
-				and event.id=entry.event
-				and event_setting.event=event.id
-				and event_setting.tag='Level'
-				and tourn.id=event.tourn
-				and chapter.id = school.chapter
-				and tourn.start>='$start_date'
-		and tourn.end<='$end_date'
-	");
-	my @results = Tab::ResultValue->search_pull_results;
+	Tab::ResultValue->columns(TEMP => qw/tag/);
 
-	my $end = time();
-	if ($debug) { print "time to sql pull:  "; printf("%.2f\n", $end - $start); print "<br>"; }
+	Tab::ResultValue->set_sql(pull_results => "
+		SELECT result_value.*, result.entry as entry,
+			entry.code as entry_name, school.chapter as entry_chapter, tourn.name as tourn,
+			chapter.name as chapter_name, event.level, chapter.state as state, tourn.id as tourn_id,
+			result_key.tag as tag
+
+		FROM result, result_set, result_value, entry, school, event, tourn, chapter, result_key
+
+		WHERE result_value.result = result.id
+
+			and result_value.result_key = result_key.id
+			and result.result_set       = result_set.id
+			and result_set.label        = 'ADA Points'
+			and entry.id                = result.entry
+			and school.id               = entry.school
+			and event.id                = entry.event
+			and tourn.id                = event.tourn
+			and chapter.id              = school.chapter
+			and tourn.start 		   >= ?
+			and tourn.end              <= ?
+	");
+
+	my @results = Tab::ResultValue->search_pull_results($start_date, $end_date);
 
 	#Create a hash that stores all info per entries;
 
 	my %entry;
 	foreach my $result ( @results ) {
-		if ( $result->tag eq "ada_total" ) { $entry{$result->entry}{'ada_total'} = $result->value; }
-		if ( $result->tag eq "ada_prelims" ) { $entry{$result->entry}{'ada_prelims'} = $result->value; }
-		if ( $result->tag eq "ada_elims" ) { $entry{$result->entry}{'ada_elims'} = $result->value; }
-		if ( $result->tag eq "ada_speaker" ) { $entry{$result->entry}{'ada_speaker'} = $result->value; }
+
+
+		if ( $result->tag eq "ADA Total" ) {
+			$entry{$result->entry}{'ada_total'} = $result->value;
+		}
+		if ( $result->tag eq "ADA Prelims" ) {
+			$entry{$result->entry}{'ada_prelims'} = $result->value;
+		}
+		if ( $result->tag eq "ADA Elims" ) {
+			$entry{$result->entry}{'ada_elims'} = $result->value;
+		}
+		if ( $result->tag eq "ADA Speaker Awards" ) {
+			$entry{$result->entry}{'ada_speaker'} = $result->value;
+		}
+
 		$entry{$result->entry}{'name'} = $result->entry_name;
 		$entry{$result->entry}{'entry_chapter'} = $result->entry_chapter;
 		$entry{$result->entry}{'chapter_name'} = $result->chapter_name;
@@ -102,38 +113,63 @@
 					$entry{$hi_entry_id}{'chapter_name'} = $entry_student->student->chapter->name;
 				}
 			}
-			$entry{$hi_entry_id}{'name'} = $result->entry_name;
-			$entry{$hi_entry_id}{'tourn'} = $result->tourn;
+			$entry{$hi_entry_id}{'name'}     = $result->entry_name;
+			$entry{$hi_entry_id}{'tourn'}    = $result->tourn;
 			$entry{$hi_entry_id}{'tourn_id'} = $result->tourn_id;
-			$entry{$hi_entry_id}{'level'} = $result->level;
+			$entry{$hi_entry_id}{'level'}    = $result->level;
 		}
 	}
 
-	$end = time();
-	if ($debug) { print "time to make entry hash:  "; printf("%.2f\n", $end - $start); print "<br>"; }
+	#sort the school hash to come up with a set of standings
+		my %standings;
+		my %lvl;
+		my %tourn;
+		my $curr_chpt;
 
-#sort the school hash to come up with a set of standings
-		my %standings; my %lvl; my %tourn; my $curr_chpt;
-		foreach my $key (sort {$entry{$b}->{'entry_chapter'} <=> $entry{$a}->{'entry_chapter'} || $entry{$b}->{'ada_total'} <=> $entry{$a}->{'ada_total'} } keys(%entry) ) {
-			#$debug=0; $debug = 1 if $entry{$key}{'entry_chapter'} == 6190;
-			print "level is ".$entry{$key}{'level'}." and tourney is ".$entry{$key}{'tourn_id'}."  " if $debug;
+		foreach my $key ( sort {
+			$entry{$b}->{'entry_chapter'} <=> $entry{$a}->{'entry_chapter'}
+			|| $entry{$b}->{'ada_total'} <=> $entry{$a}->{'ada_total'}
+			} keys(%entry)
+		) {
+
 			#count top 8 per level but not more than 2 per tournament
-			if ( $entry{$key}{'entry_chapter'} != $curr_chpt ) { %lvl = (); %tourn = (); }
-			print "currently counted ".$lvl{$entry{$key}{'level'}}." tourneys in this level and ".$tourn{$entry{$key}{'level'}}{$entry{$key}{'tourn_id'}}." entries at this tourney.<br>" if $debug;
-			if ( $lvl{$entry{$key}{'level'}} < 8 && $tourn{$entry{$key}{'level'}}{$entry{$key}{'tourn_id'}} < 2 ) {
+			if ( $entry{$key}{'entry_chapter'} != $curr_chpt ) {
+				%lvl   = ();
+				%tourn = ();
+			}
+
+			if (
+				$lvl{$entry{$key}{'level'}} < 8
+				&& $tourn{$entry{$key}{'level'}}{$entry{$key}{'tourn_id'}} < 2
+			) {
+
 				$standings{$entry{$key}{'entry_chapter'}}{'name'} = $entry{$key}{'chapter_name'};
 				$standings{$entry{$key}{'entry_chapter'}}{'ada_total'} += $entry{$key}{'ada_total'};
-				if ($entry{$key}{'level'} eq 'open' ) { $standings{$entry{$key}{'entry_chapter'}}{'ada_open'} += $entry{$key}{'ada_total'}; }
-				if ($entry{$key}{'level'} eq 'jv' ) { $standings{$entry{$key}{'entry_chapter'}}{'ada_jv'} += $entry{$key}{'ada_total'}; }
-				if ($entry{$key}{'level'} eq 'novice' ) { $standings{$entry{$key}{'entry_chapter'}}{'ada_novice'} += $entry{$key}{'ada_total'}; }
-				$lvl{$entry{$key}{'level'}} += 1; #count total entries per chapter per level
-				$tourn{$entry{$key}{'level'}}{$entry{$key}{'tourn_id'}} += 1; #count total entries per chapter per level per tournament
+
+				if ($entry{$key}{'level'} eq 'open' ) {
+					$standings{$entry{$key}{'entry_chapter'}}{'ada_open'} += $entry{$key}{'ada_total'};
+				}
+
+				if ($entry{$key}{'level'} eq 'jv' ) {
+					$standings{$entry{$key}{'entry_chapter'}}{'ada_jv'} += $entry{$key}{'ada_total'};
+				}
+
+				if ($entry{$key}{'level'} eq 'novice' ) {
+					$standings{$entry{$key}{'entry_chapter'}}{'ada_novice'} += $entry{$key}{'ada_total'};
+				}
+
+				#count total entries per chapter per level
+				$lvl{$entry{$key}{'level'}} += 1;
+
+				#count total entries per chapter per level per tournament
+				$tourn{$entry{$key}{'level'}}{$entry{$key}{'tourn_id'}} += 1;
+
 				$entry{$key}{'counted'} = "*";
 			}
 			$curr_chpt = $entry{$key}{'entry_chapter'};
 		}
 
-#load all entries to find hybrids
+		#load all entries to find hybrids
 
 </%init>
 
@@ -148,8 +184,6 @@
 		} else {
 			MasterTable.style.display = "none" ;
 		}
-
-
 	}
 
 	make_standings = function() {
@@ -221,30 +255,26 @@
 			// return false to stop default link action
 			return false;
 		});
-
-
 	});
 
 </script>
 
 	<div class="main">
 
+		<& /funclib/tablesorter.mas, table => "standings" &>
 		<div class="full">
 
-			<span class="threequarters">
-				<h2>ADA points for <% $season %>-<% $season+1 %></h2>
+			<span class="threequarters nospace">
+				<h2 class="nospace">ADA points for <% $season %>-<% $season+1 %></h2>
 			</span>
 
-			<span class="quarter rightalign">
-				<a class="button dkblue" href="#checker">Checker Table</a>
+			<span
+				class = "quarter rightalign nospace true"
+				id    = "standings_buttonarea"
+			>
+				<a class="buttonwhite invert bluetext marright" href="#checker">Checker Table</a>
 			</span>
 		</div>
-
-		<& /funclib/tablesorter.mas, table => "standings" &>
-
-		<h4>
-			Standings
-		</h4>
 
 		<table id="standings">
 
@@ -266,11 +296,11 @@
 %				foreach my $key (sort { $standings{$b}->{'ada_total'} <=> $standings{$a}->{'ada_total'}  } keys %standings ) {
 					<tr>
 						<td> <% $standings{$key}{'name'} %>  </td>
-						<td> <% $standings{$key}{'ada_total'} %>  </td>
-						<td> <% $standings{$key}{'ada_open'} %>  </td>
-						<td> <% $standings{$key}{'ada_jv'} %>  </td>
-						<td> <% $standings{$key}{'ada_novice'} %>  </td>
-						<td> <% $ctr++ <= 24 ? $ctr : "" %>  </td>
+						<td class="rightalign"> <% $standings{$key}{'ada_total'} %>  </td>
+						<td class="rightalign"> <% $standings{$key}{'ada_open'} %>  </td>
+						<td class="rightalign"> <% $standings{$key}{'ada_jv'} %>  </td>
+						<td class="rightalign"> <% $standings{$key}{'ada_novice'} %>  </td>
+						<td class="rightalign"> <% $ctr++ <= 24 ? $ctr : "" %>  </td>
 					</tr>
 %				}
 
@@ -318,13 +348,7 @@
 %			}
 
 			</tbody>
-
 		</table>
-
-
-% $end = time();
-% print "total processing time:  "; printf("%.2f\n", $end - $start);
-
 	</div>
 
 		<div class="menu">
@@ -336,7 +360,7 @@
 				<a class="blue full" href="#" id="open-sort">Open division standings</a>
 				<a class="blue full" href="#" id="jv-sort">JV standings</a>
 				<a class="blue full" href="#" id="novice-sort">Novice standings</a>
-				<a class="blue full" href="ndt_ceda_points.=.mhtml">CEDA/NDT points</a>
+				<a class="blue full" href="ndt_ceda_points.mhtml">CEDA points</a>
 
 				<a class="martop blue full" href="index.mhtml">Back to results main</a>
 			</div>
@@ -353,12 +377,15 @@
 							School Year
 					</span>
 
-%				   	my $this_year = Tab::school_year; my $year = $this_year->year;
+%				   	my $this_year = Tab::school_year;
+%					my $year = $this_year->year;
 
 					<span class="twothird">
 						<select name="season" class="fixedsmaller chosen">
 %							foreach my $tick (2012 .. $year+1) {
-								<option value="<% $tick %>" <% $tick == $year ? "selected" : "" %>> <% $tick." - ".($tick + 1) %> </option>
+								<option value="<% $tick %>"
+									<% $tick == $year ? "selected" : "" %>
+								> <% $tick." - ".($tick + 1) %> </option>
 %							}
 						</select>
 					</span>
@@ -371,5 +398,5 @@
 				</div>
 
 			</div>
-
 		</div>
+
