@@ -107,23 +107,48 @@
 	my $count;
 
 	my %entry_data = ();
-	my @from_panels = $from->panels;
 
-	foreach my $panel (@from_panels) {
-		foreach my $entry ($m->comp("/funclib/panel_entries.mas", panel => $panel)) {
-			$entry_data{$entry->id}{"panel"} = $panel->id;
-			$entry_data{$entry->id}{"prelim"} = $panel->letter;
-			$entry_data{$entry->id}{"entry"} = $entry;
-		}
+	my $entry_sth = $dbh->prepare("
+		select entry.id, panel.id, panel.letter, school.id, region.id, district.id
+		from (panel, ballot, entry)
+			left join school on entry.school = school.id
+			left join region on school.region = region.id
+			left join district on school.district = district.id
+		where panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.entry = entry.id
+			and entry.active = 1
+	");
+
+	$entry_sth->execute($from->id);
+
+	while (
+		my (
+			$entry_id, $panel_id, $panel_letter, $school_id, $region_id, $district_id
+		) = $entry_sth->fetchrow_array()
+	) {
+
+		$entry_data{$entry_id}{"panel"}    = $panel_id;
+		$entry_data{$entry_id}{"prelim"}   = $panel_letter;
+		$entry_data{$entry_id}{"school"}   = $school_id;
+		$entry_data{$entry_id}{"region"}   = $region_id;
+		$entry_data{$entry_id}{"district"} = $district_id;
 	}
+
+	$entry_sth->finish();
+	$entry_sth->execute($into->id);
 
 	my %already_broke = ();
 
-	foreach my $panel ($into->panels) {
-		foreach my $entry ($m->comp("/funclib/panel_entries.mas", panel => $panel)) {
-			$entry_data{$entry->id}{"broke"} = $panel;
-			$entry_data{$entry->id}{"entry"} = $entry;
-		}
+	while (
+		my (
+			$entry_id, $panel_id, $panel_letter, $school_id, $region_id, $district_id
+		) = $entry_sth->fetchrow_array()
+	) {
+			$entry_data{$entry_id}{"broke"}   = $panel_id;
+			$entry_data{$entry_id}{"school"}   = $school_id;
+			$entry_data{$entry_id}{"region"}   = $region_id;
+			$entry_data{$entry_id}{"district"} = $district_id;
 	}
 
 	my %panel_count = ();
@@ -147,23 +172,6 @@
 
 			push @breaks, $entry;
 			$entry_data{$entry}{"seed"} = $seed;
-
-			$entry_data{$entry}{"school"} = $entry_data{$entry}{"entry"}->school->id
-				if $entry_data{$entry}{"entry"}
-				&& $entry_data{$entry}{"entry"}->school;
-
-			if ($tourn_settings->{"nsda_nats"}) {
-
-				$entry_data{$entry}{"district"} = $entry_data{$entry}{"entry"}->school->district->id
-					if $entry_data{$entry}{"entry"}
-					&& $entry_data{$entry}{"entry"}->school
-					&& $entry_data{$entry}{"entry"}->school->district;
-
-				$entry_data{$entry}{"state"} = $entry_data{$entry}{"entry"}->school->chapter->state
-					if $entry_data{$entry}{"entry"}
-					&& $entry_data{$entry}{"entry"}->school
-					&& $entry_data{$entry}{"entry"}->school->chapter;
-			}
 		}
 	}
 
@@ -213,6 +221,8 @@
 
 	$count = 1;
 
+	Tab::debuglog("Here I am!");
+
 	if (scalar @use_panels == 1) {
 
 		@{$panel_entries{$use_panels[0]->id}} = @breaks;
@@ -252,9 +262,9 @@
 		}
 
 		foreach my $entry_id (keys %entry_data) {
-			my $panel = $entry_data{$entry_id}{"broke"};
-			next unless $panel;
-			push @{$panel_entries{$panel->id}}, $entry_data{$entry_id}{"entry"};
+			my $panel_id = $entry_data{$entry_id}{"broke"};
+			next unless $panel_id;
+			push @{$panel_entries{$panel_id}}, $entry_data{$entry_id}{"entry"};
 		}
 
 		if ($method eq "snake_school"
@@ -265,22 +275,25 @@
 
 			foreach (1 .. 7) {
 
+				Tab::debuglog("Pass $_");
+
 				foreach my $panel (@use_panels) {
 
 					my $initial_score = score_elim_chamber(\@{$panel_entries{$panel->id}}, \%entry_data);
 					next unless $initial_score > 0;
 
-					foreach my $entry (@{$panel_entries{$panel->id}}) {
+					my $panel_id = $panel->id;
+
+					foreach my $entry (@{$panel_entries{$panel_id}}) {
 
 						next if $entry_data{$entry}{"broke"};
-						my @test = @{$panel_entries{$panel->id}};
+						my @test = @{$panel_entries{$panel_id}};
 
 						my $index = 0;
 						$index++ until $test[$index] == $entry;
 						splice(@test, $index, 1);
 
 						my $test_score = score_elim_chamber(\@test, \%entry_data);
-						my $entry_obj = Tab::Entry->retrieve($entry);
 
 						if ($test_score < $initial_score) {
 
@@ -292,17 +305,19 @@
 
 							foreach my $other (@use_panels) {
 
+								my $other_id = $other->id;
+
 								# Can't switch to the same panel
-								next if $other->id == $panel->id;
-								next if $entry_data{$other->id}{"broke"};
+								next if $other_id == $panel_id;
+								next if $entry_data{$other_id}{"broke"};
 
 								# Find the other panel for scoring
-								my @other_panel = @{$panel_entries{$other->id}};
+								my @other_panel = @{$panel_entries{$other_id}};
 
 								# Put me into this panel for testing
 								my $other_score = score_elim_chamber(\@other_panel, \%entry_data);
 
-								foreach my $other_entry (@{$panel_entries{$other->id}}) {
+								foreach my $other_entry (@{$panel_entries{$other_id}}) {
 
 									my $seed_dist = abs(
 										$entry_data{$other_entry}{"seed"}
@@ -339,7 +354,7 @@
 										$swap_score = $diff;
 										$swap_seed_dist = $seed_dist;
 										$swap_tb_dist = $tb_dist;
-										$swap_panel = $other->id;
+										$swap_panel = $other_id;
 									}
 
 									if (
@@ -362,7 +377,7 @@
 										$swap_score = $new_other_score;
 										$swap_seed_dist = $seed_dist;
 										$swap_tb_dist = $tb_dist;
-										$swap_panel = $other->id;
+										$swap_panel = $other_id;
 									}
 
 									# Reset the table
@@ -387,7 +402,7 @@
 							if ($swap_entry) {
 
 								my @panel2 = @{$panel_entries{$swap_panel}};
-								my @panel1 = @{$panel_entries{$panel->id}};
+								my @panel1 = @{$panel_entries{$panel_id}};
 
 								push (@panel1, $swap_entry);
 
@@ -401,7 +416,7 @@
 
 								push (@panel2, $entry);
 
-								@{$panel_entries{$panel->id}} = @panel1;
+								@{$panel_entries{$panel_id}} = @panel1;
 								@{$panel_entries{$swap_panel}} = @panel2;
 
 								$initial_score = score_elim_chamber(\@panel1, \%entry_data);
