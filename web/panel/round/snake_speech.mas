@@ -12,54 +12,145 @@
 	my $event = $round->event;
 	my %event_settings = $event->all_settings;
 
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+	my $now = DateTime->now(time_zone => $tz);
+
+	my %entries;
+	my %entry_by_seed;
+
+	my %settings;
+
+	$settings{school_score}   = 1000000;
+	$settings{region_score}   = 1000;
+	$settings{average_score}  = 1000;
+	$settings{last_hit_score} = 100;
+	$settings{hit_score}      = 10;
+
 	my $previous_round;
 
-	if ($round->setting("seed_round")) {
+	my $dbh = Tab::DBI->db_Main();
 
-		$previous_round = Tab::Round->retrieve($round->setting("seed_round"));
+	if ($round->type eq "prelim" && $event->setting("seed_presets")) {
 
-	} elsif ($tourn_settings->{"nsda_nats"}) {
+		my $sth = $dbh->prepare("
+			select entry.id, seed.value, school.id, entry.code
+			from entry
+			left join school on entry.school = school.id
+			left join entry_setting seed
+				on seed.entry = entry.id
+				and seed.tag = 'pairing_seed'
+			where entry.event = ?
+			and entry.active = 1
+		");
 
-		if ($round->type eq "elim" && (not defined $round->name % 2)) {
-			$previous_round = Tab::Round->search(
-				event => $event->id,
-				name => ($round->name - 2)
-			)->first;
+		$sth->execute($event->id);
+
+		while (
+			my (
+				$entry_id, $seed_value, $school_id, $entry_code
+			) = $sth->fetchrow_array()
+		) {
+			$entries{$entry_id}{"seed"} = $seed_value;
+			$entries{$entry_id}{"school"} = $school_id;
+			$entries{$entry_id}{"code"} = $entry_code;
+		}
+
+		$previous_round = Tab::Round->search(
+			event => $event->id,
+			name => ($round->name - 1)
+		)->first;
+
+	} else {
+
+		if ($round->setting("seed_round")) {
+
+			$previous_round = Tab::Round->retrieve($round->setting("seed_round"));
+
+		} elsif ($tourn_settings->{"nsda_nats"}) {
+
+			if ($round->type eq "elim" && (not defined $round->name % 2)) {
+
+				$previous_round = Tab::Round->search(
+					event => $event->id,
+					name => ($round->name - 2)
+				)->first;
+			} else {
+				$previous_round = Tab::Round->search(
+					event => $event->id,
+					name => ($round->name - 1)
+				)->first;
+			}
+
 		} else {
+
 			$previous_round = Tab::Round->search(
 				event => $event->id,
 				name => ($round->name - 1)
 			)->first;
 		}
-	} else {
-		$previous_round = Tab::Round->search(
-			event => $event->id,
-			name => ($round->name - 1)
-		)->first;
+
+		return unless $previous_round;
+
+		my (@results) = $m->comp(
+			"/tabbing/results/order_entries.mas",
+			round => $previous_round
+		);
+
+		return unless @results;
+		my $entries_ref = pop @results;
+
+		foreach my $seed (sort {$a <=> $b} keys %{$entries_ref->{"by_place"}}) {
+
+			foreach my $entry_id (@{$entries_ref->{"by_place"}{$seed}}) {
+				$entries{$entry_id}{"seed"} = $seed;
+			}
+
+			if ($limit_to > 0) {
+				last if (scalar (keys %entries)) >= $limit_to;
+			}
+		}
 	}
 
-	return unless $previous_round;
+	my $previous_id;
+	if ($previous_round) {
+		$previous_id = $previous_round->id;
+	}
 
-	my $tz = $tourn->tz;
-	$tz = "UTC" unless $tz;
-	my $now = DateTime->now(time_zone => $tz);
+	my $hits_sth = $dbh->prepare("
 
-	my (@results) = $m->comp(
-		"/tabbing/results/order_entries.mas",
-		round => $previous_round
-	);
+		select entry.id, group_concat(other.entry SEPARATOR ','), round.name, round.id
 
-	return unless @results;
+		from entry, ballot, ballot other, panel, round
 
-	my $entries_ref = pop @results;
+		where entry.event = ?
+			and entry.active = 1
+			and entry.id = ballot.entry
+			and ballot.panel = other.panel
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and ballot.entry != other.entry
+		group by ballot.id
+	");
 
-	my @advancing;
+	$hits_sth->execute($event->id);
 
-	foreach my $seed (sort {$a <=> $b} keys %{$entries_ref->{"by_place"}}) {
-		push @advancing, @{$entries_ref->{"by_place"}{$seed}};
+	while (
+		my (
+			$entry_id, $opponents, $round_name, $round_id
+		) = $hits_sth->fetchrow_array()
+	) {
 
-		if ($limit_to > 0) {
-			last if scalar @advancing >= $limit_to;
+		next unless $entries{$entry_id};
+
+		foreach my $other_id (split(/\,/, $opponents)) {
+			$entries{$entry_id}{"hits"}{$other_id}++;
+		}
+
+		if ($previous_id && $round_id == $previous_id) {
+			foreach my $other_id (split(/\,/, $opponents)) {
+				$entries{$entry_id}{"last_hit"}{$other_id}++;
+			}
 		}
 	}
 
@@ -75,41 +166,41 @@
 		$panel = shift @already_panels if @already_panels;
 
 		unless ($panel) {
-
 			$panel = Tab::Panel->create({
 				letter => $letter++,
 				round  => $round,
 				flight => 1
 			});
-
 		}
+
 		push @panels, $panel;
 	}
 
+	my $max_seed = 1;
 	my %panel_entries;
-	my $max_seed;
+
 	my @next_panels = sort {$a->id <=> $b->id} @panels;
 	my @now_panels;
 
-	my $max_panelsize = POSIX::ceil( (scalar @advancing) / $num_panels );
+	my $max_panelsize = POSIX::ceil( (scalar (keys (%entries)) / $num_panels ));
 
 	if ($num_panels == 1) {
 
 		# this is a final round, no snaking or adjustment possible!
-
 		my $panel = $panels[0];
-		push @{$panel_entries{$panel->id}}, @advancing;
+		push @{$panel_entries{$panel->id}}, (keys %entries);
 
 	} else {
 
 		# Perform the initial snake;
 
-		foreach my $entry_id (@advancing) {
+		foreach my $entry_id (sort {
+			$entries{$a}{"seed"} <=> $entries{$b}{"seed"}
+			} keys %entries
+		) {
 
-			$max_seed++;
-
-			$entries_ref->{"entry_by_seed"}{$max_seed} = $entry_id;
-			$entries_ref->{"seed_position"}{$entry_id} = $max_seed;
+			$entries{$entry_id}{"seed_position"} = $max_seed++;
+			$entry_by_seed{$max_seed} = $entry_id;
 
 			unless (@now_panels) {
 				@now_panels = @next_panels;
@@ -118,12 +209,11 @@
 
 			my $panel = shift @now_panels;
 			push @{$panel_entries{$panel->id}}, $entry_id if $panel;
-			$entries_ref->{"panel"}{$entry_id} = $panel->id;
-			$entries_ref->{"letter"}{$entry_id} = $panel->letter;
 
+			$entries{$entry_id}{"panel"} = $panel->id;
+			$entries{$entry_id}{"letter"} = $panel->letter;
 			#Put at the start of the next row
 			unshift @next_panels, $panel;
-
 		}
 	}
 
@@ -138,18 +228,17 @@
 		# In the NSDA CA plan, entries are moved forward if necessary to avoid
 		# school conflicts
 
-		my %school_count = ();
 		my %done = ();
-
+		my %school_count = ();
 		my $seed = 1;
 
 		foreach my $seed (1 .. $max_seed) {
 
-			my $entry_id     = $entries_ref->{"entry_by_seed"}{$seed};
-			my $panel_id     = $entries_ref->{"panel"}{$entry_id};
-			my $panel_letter = $entries_ref->{"letter"}{$entry_id};
-			my $school_id    = $entries_ref->{"school_id"}{$entry_id};
-			my $code         = $entries_ref->{"code"}{$entry_id};
+			my $entry_id     = $entry_by_seed{$seed};
+			my $panel_id     = $entries{$entry_id}{"panel"};
+			my $panel_letter = $entries{$entry_id}{"letter"};
+			my $school_id    = $entries{$entry_id}{"school"};
+			my $code         = $entries{$entry_id}{"code"};
 
 			my $landed_here = $entry_id;
 
@@ -158,45 +247,30 @@
 				# There's a school conflict here!  Find the next available
 				# position.
 
-				my $real_seed = $entries_ref->{"seed_position"}{$entry_id};
+				my $real_seed = $entries{$entry_id}{"seed_position"};
 				my $target_seed;
 
 				foreach my $test_seed (1 .. $max_seed) {
 
-					my $test_entry = $entries_ref->{"entry_by_seed"}{$test_seed};
-
+					my $test_entry = $entry_by_seed{$test_seed};
+					next unless $test_entry;
 					next if $test_entry == $entry_id;
 
-					my $test_panel = $entries_ref->{"panel"}{$test_entry};
-					my $test_school = $entries_ref->{"school_id"}{$test_entry};
-
-					my $test_code = $entries_ref->{"code"}{$test_entry};
-
-					# Do not move a higher seed who's already been moved to
-					# avoid an existing school collision.
-
-					my $test_real_seed = $entries_ref->{"seed_position"}{$test_entry};
+					my $test_panel = $entries{$test_entry}{"panel"};
+					my $test_school = $entries{$test_entry}{"school"};
+					my $test_code = $entries{$test_entry}{"code"};
 
 					# Because this would just be pointless.
 					next if $test_school == $school_id;
 
 					# Don't move if it creates more damage than it solves for me
 
-					next if (
-						$school_count{$test_panel}{$school_id}
-						>=
-						$school_count{$panel_id}{$school_id}
-					);
+					next if ( $school_count{$test_panel}{$school_id} >= $school_count{$panel_id}{$school_id});
+					next if ( $school_count{$panel_id}{$test_school} > $school_count{$test_panel}{$test_school});
 
-
-					next if (
-						$school_count{$panel_id}{$test_school}
-						>
-						$school_count{$test_panel}{$test_school}
-					);
-
-					$target_seed = $test_seed;
-					last if $target_seed;
+					if (abs($seed - $test_seed) < abs($seed - $target_seed)) {
+						$target_seed = $test_seed;
+					}
 				}
 
 				if ($target_seed) {
@@ -206,37 +280,35 @@
 
 					foreach my $snake_seed ($seed .. $target_seed) {
 
-						my $snake_entry = $entries_ref->{"entry_by_seed"}{$snake_seed};
-						my $snake_code = $entries_ref->{"code"}{$snake_entry};
-						my $snake_real_seed = $entries_ref->{"seed_position"}{$snake_entry};
-
+						my $snake_entry     = $entry_by_seed{$snake_seed};
+						my $snake_code      = $entries{$snake_entry}{"code"};
+						my $snake_real_seed = $entries{$snake_entry}{"seed_position"};
 
 						if ($snake_real_seed < $seed) {
 							$skip_seeds{$snake_seed}++;
 						} else {
-
-							push @swap_train, $entries_ref->{"entry_by_seed"}{$snake_seed};
+							push @swap_train, $entry_by_seed{$snake_seed}
 						}
 					}
 
 					my $myself = shift @swap_train;  # This is me!
 					push @swap_train, $myself;       # To the end of the line;
 
-					my $current_panel = $entries_ref->{"panel"}{$myself};
-					my $current_letter = $entries_ref->{"letter"}{$myself};
+					my $current_panel = $entries{$myself}{"panel"};
+					my $current_letter = $entries{$myself}{"letter"};
 					my $new_seed = $seed;
 
 					foreach my $swap_entry (@swap_train) {
 
-						my $swap_code = $entries_ref->{"code"}{$swap_entry};
+						my $swap_code = $entries{$swap_entry}{"code"};
 
 						# Add to current panel
 						push @{$panel_entries{$current_panel}}, $swap_entry;
 
-						my $swap_school = $entries_ref->{"school_id"}{$swap_entry};
+						my $swap_school = $entries{$swap_entry}{"school"};
 
 						# Change my seed position to the new one
-						$entries_ref->{"entry_by_seed"}{$new_seed} = $swap_entry;
+						$entry_by_seed{$new_seed} = $swap_entry;
 						$new_seed++;
 
 						while ($skip_seeds{$new_seed}) {
@@ -245,18 +317,16 @@
 
 						@{$panel_entries{$current_panel}} =
 							sort {
-								$entries_ref->{"seed_position"}{$a}
-								<=>
-								$entries_ref->{"seed_position"}{$b}
+								$entries{$a}{"seed_position"} <=> $entries{$b}{"seed_position"}
 							} @{$panel_entries{$current_panel}};
 
 						# Find my old panel
-						my $old_panel = $entries_ref->{"panel"}{$swap_entry};
-						my $old_letter = $entries_ref->{"letter"}{$swap_entry};
+						my $old_panel = $entries{$swap_entry}{"panel"};
+						my $old_letter = $entries{$swap_entry}{"letter"};
 
 						# Change my current panel setting
-						$entries_ref->{"panel"}{$swap_entry} = $current_panel;
-						$entries_ref->{"letter"}{$entry_id} = $current_letter;
+						$entries{$swap_entry}{"panel"} = $current_panel;
+						$entries{$entry_id}{"letter"} = $current_letter;
 
 						# Remove me from my old panel
 						my $index = 0;
@@ -273,12 +343,136 @@
 				}
 			}
 
-			my $landed_school = $entries_ref->{'school_id'}{$landed_here};
+			my $landed_school = $entries{$landed_here}{'school'};
 			$school_count{$panel_id}{$landed_school}++ if $landed_here == $entry_id;
 
 			$seed++ if $landed_here == $entry_id;
 		}
+	}
 
+	foreach my $pass (1 .. 4) {
+
+		foreach my $panel (sort @panels) {
+
+			my $panel_id = int($panel);
+			my $initial_score = score_panel(\@{$panel_entries{$panel_id}}, \%entries, \%settings);
+
+			next unless $initial_score > 0;
+
+			foreach my $entry_id (@{$panel_entries{$panel_id}}) {
+
+				my @test = @{$panel_entries{$panel_id}};
+
+				my $index = 0;
+				$index++ until $test[$index] == $entry_id;
+				splice(@test, $index, 1);
+
+				my $test_score = score_panel(\@test, \%entries, \%settings);
+
+				if ($test_score < $initial_score) {
+
+					my $swap_seed_dist = 99;
+					my $swap_entry;
+					my $swap_panel;
+					my $swap_score = -99;
+
+					foreach my $other_panel (@panels) {
+
+						# Can't switch to the same panel
+						next if $other_panel == $panel_id;
+
+						# Find the other panel for scoring
+						my @other_panel = @{$panel_entries{$other_panel}};
+
+						my $other_score = score_panel(\@other_panel, \%entries, \%settings);
+
+						# Put me into this panel for testing
+						push (@other_panel, $entry_id);
+
+						foreach my $other_entry (@{$panel_entries{$other_panel}}) {
+
+							my $seed_dist = abs($entries{$other_entry}{seed} - $entries{$entry_id}{"seed"});
+							next if $seed_dist > 2;
+
+							# Remove swap candidate from the panel
+							$index = 0;
+
+							$index++ until $other_panel[$index] == $other_entry;
+							splice(@other_panel, $index, 1);
+
+							push (@test, $other_entry);
+
+							my $new_initial_score = score_panel(\@test, \%entries, \%settings);
+							my $new_other_score = score_panel(\@other_panel, \%entries, \%settings);
+
+							my $diff = ($other_score + $initial_score) - ( $new_other_score + $new_initial_score);
+
+							if ( $diff > 0 && $diff > $swap_score) {
+
+								$swap_entry     = $other_entry;
+								$swap_score     = $diff;
+								$swap_seed_dist = $seed_dist;
+								$swap_panel     = $other_panel;
+
+							}
+
+							if ( ($diff > 0
+									&& $diff == $swap_score
+									&& $seed_dist < $swap_seed_dist
+								)
+							) {
+
+								$swap_entry     = $other_entry;
+								$swap_score     = $new_other_score;
+								$swap_seed_dist = $seed_dist;
+								$swap_panel     = $other_panel;
+							}
+
+							# Reset the table
+
+							if ( grep( /^$other_entry/, @test ) ) {
+								$index = 0;
+								$index++ until $test[$index] == $other_entry;
+								splice(@test, $index, 1);
+							}
+
+							push (@other_panel, $other_entry);
+
+						}
+
+						if ( grep( /^$entry_id/, @other_panel ) ) {
+							$index = 0;
+							$index++ until $other_panel[$index] == $entry_id;
+							splice(@other_panel, $index, 1);
+						}
+					}
+
+					if ($swap_entry) {
+
+						my @panel2 = @{$panel_entries{$swap_panel}};
+						my @panel1 = @{$panel_entries{$panel_id}};
+
+						push (@panel1, $swap_entry);
+
+						my $swapdex = 0;
+						$swapdex++ until $panel1[$swapdex] == $entry_id;
+						splice(@panel1, $swapdex, 1);
+
+						$swapdex = 0;
+						$swapdex++ until $panel2[$swapdex] == $swap_entry;
+						splice(@panel2, $swapdex, 1);
+
+						push (@panel2, $entry_id);
+
+						@{$panel_entries{$panel_id}} = @panel1;
+						@{$panel_entries{$swap_panel}} = @panel2;
+
+						$initial_score = score_panel(\@panel1, \%entries, \%settings);
+
+					}
+				}
+			}
+		}
 	}
 
 	# Save the panels
@@ -296,9 +490,7 @@
 
 		@{$panel_entries{$panel}} =
 			sort {
-				$entries_ref->{"seed_position"}{$a}
-				<=>
-				$entries_ref->{"seed_position"}{$b}
+				$entries{$a}{"seed_position"} <=> $entries{$b}{"seed_position"}
 			} @{$panel_entries{$panel}};
 
 		foreach my $entry (@{$panel_entries{$panel}}) {
@@ -311,15 +503,69 @@
 					judge        => $judge,
 					speakerorder => $order++
 				});
-
 			}
 		}
-
 	}
 
 	#$m->comp("speaker_order.mas", round => $round);
 
 	my $msg = "Round sectioned.  Please check and adjust below for conflicts";
-	$m->redirect("/panel/round/nsda/california.mhtml?round_id=".$round->id."&msg=$msg")
+	$m->redirect("/panel/schemat/show_snake.mhtml?round_id=".$round->id."&msg=$msg");
+
+	sub score_panel {
+
+		my ($panel, $entries, $settings) = @_;
+
+		my $score = 0;
+		my $strength_score = 0;
+		my $strength_count = 0;
+
+		foreach my $entry_id (@$panel) {
+
+			foreach my $other_id (@$panel) {
+
+				if ($settings->{school_score}) {
+					if (
+						$entries->{$entry_id}{school} > 0
+						&& $entries->{$entry_id}{school} == $entries->{$other_id}{school}
+					) {
+						$score += $settings->{school_score};
+					}
+				}
+
+				if ($settings->{last_hit_score}) {
+					if (
+						$entries->{$entry_id}{last_hit} > 0
+						&& $entries->{$entry_id}{last_hit} == $entries->{$other_id}{last_hit}
+					) {
+						$score += $settings->{last_hit_score};
+					}
+				}
+
+				if ($settings->{hit_score}) {
+					if ($entries->{$entry_id}{"hits"}{$other_id}) {
+						$score += $settings->{hit_score};
+					}
+				}
+			}
+
+			if ($settings->{average_score}) {
+				$strength_score += $entries->{$entry_id}{"seed"};
+				$strength_count++;
+			}
+		}
+
+		if ($settings->{average_score}) {
+			my $section_average;
+			if ($strength_count) {
+				$section_average = $strength_score / $strength_count;
+			}
+
+			my $strength_dist = abs($settings->{average_strength} - $section_average);
+			$score += $strength_dist * $settings->{average_score};
+		}
+
+		return $score;
+	}
 
 </%init>
