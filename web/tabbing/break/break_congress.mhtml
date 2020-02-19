@@ -25,13 +25,15 @@
 	my $now = DateTime->now(time_zone => $tz);
 
 	our %penalties = (
-		school => "100000",
-		prelim => "10"
+		school    => "10000000",
+		panel     => "10000",
+		po        => "10",
+		last_name => "1"
 	);
 
 	if ($tourn_settings->{"nsda_nats"}) {
-		$penalties{"district"} = "10000";
-		$penalties{"state"} = "100";
+		$penalties{"district"} = "1000000";
+		$penalties{"state"} = "1000";
 	}
 
 	my $event = $from->event;
@@ -109,11 +111,13 @@
 	my %entry_data = ();
 
 	my $entry_sth = $dbh->prepare("
-		select entry.id, panel.id, panel.letter, school.id, region.id, district.id
+		select entry.id, panel.id, panel.letter, school.id, region.id, district.id, student.last
 		from (panel, ballot, entry)
 			left join school on entry.school = school.id
 			left join region on school.region = region.id
 			left join district on school.district = district.id
+			left join entry_student es on es.entry = entry.id
+			left join student on es.student = student.id
 		where panel.round = ?
 			and panel.id = ballot.panel
 			and ballot.entry = entry.id
@@ -124,19 +128,52 @@
 
 	while (
 		my (
-			$entry_id, $panel_id, $panel_letter, $school_id, $region_id, $district_id
+			$entry_id, $panel_id, $panel_letter, $school_id, $region_id, $district_id, $last_name
 		) = $entry_sth->fetchrow_array()
 	) {
 
-		$entry_data{$entry_id}{"panel"}    = $panel_id;
-		$entry_data{$entry_id}{"prelim"}   = $panel_letter;
-		$entry_data{$entry_id}{"school"}   = $school_id;
-		$entry_data{$entry_id}{"region"}   = $region_id;
-		$entry_data{$entry_id}{"district"} = $district_id;
+		$entry_data{$entry_id}{"panel"}     = $panel_id;
+		$entry_data{$entry_id}{"prelim"}    = $panel_letter;
+		$entry_data{$entry_id}{"school"}    = $school_id;
+		$entry_data{$entry_id}{"region"}    = $region_id;
+		$entry_data{$entry_id}{"district"}  = $district_id;
+		$entry_data{$entry_id}{"last_name"} = $last_name;
 	}
 
 	$entry_sth->finish();
 	$entry_sth->execute($into->id);
+
+	my @from_ties = $m->comp("/funclib/congress_ties.mas", round => $from);
+
+	my $from_string;
+
+	foreach my $ft (@from_ties) {
+		$from_string .= ", " if $from_string;
+		$from_string .= $ft->id;
+	}
+
+	my $po_sth = $dbh->prepare("
+		select ballot.entry
+			from panel,ballot,score
+		where panel.round in (".$from_string.")
+			and panel.id = ballot.panel
+			and ballot.id = score.ballot
+			and score.tag = 'po'
+		group by ballot.entry
+	");
+
+	$po_sth->execute();
+
+	my $po_count;
+
+	while (
+		my ($entry_id) = $po_sth->fetchrow_array()
+	) {
+		$entry_data{$entry_id}{"po"}++;
+		$po_count++;
+	}
+
+	my $po_target = POSIX::ceil($po_count / $panels);
 
 	my %already_broke = ();
 
@@ -145,10 +182,10 @@
 			$entry_id, $panel_id, $panel_letter, $school_id, $region_id, $district_id
 		) = $entry_sth->fetchrow_array()
 	) {
-			$entry_data{$entry_id}{"broke"}   = $panel_id;
-			$entry_data{$entry_id}{"school"}   = $school_id;
-			$entry_data{$entry_id}{"region"}   = $region_id;
-			$entry_data{$entry_id}{"district"} = $district_id;
+		$entry_data{$entry_id}{"broke"}   = $panel_id;
+		$entry_data{$entry_id}{"school"}   = $school_id;
+		$entry_data{$entry_id}{"region"}   = $region_id;
+		$entry_data{$entry_id}{"district"} = $district_id;
 	}
 
 	my %panel_count = ();
@@ -194,9 +231,10 @@
 	my @use_panels;
 
 	foreach my $count (1 .. $panels) {
-		my $existing = shift @existing_panels if @existing_panels;
 
+		my $existing = shift @existing_panels if @existing_panels;
 		if ($existing) {
+
 			push @use_panels, $existing;
 
 		} else {
@@ -215,23 +253,36 @@
 		$ep->delete();   #KILL THE SPARES
 	}
 
+	my %panels;
+	foreach my $up (@use_panels) {
+		$panels{$up->id}{"letter"} = $up->letter;
+		$panels{$up->id}{"flight"} = $up->flight;
+		if ($up->room) {
+			$panels{$up->id}{"room"} = $up->room->id;
+		}
+	}
+
+	#Get any pre-set judges for the later bit
+
 	my $method = $event->setting("elim_method");
-	my @snake_panels = @use_panels;
+
+	@use_panels = keys %panels;
+	my @snake_panels = keys %panels;
+
 	my %panel_entries = ();
 
 	$count = 1;
 
-	Tab::debuglog("Here I am!");
-
 	if (scalar @use_panels == 1) {
 
-		@{$panel_entries{$use_panels[0]->id}} = @breaks;
+		@{$panel_entries{$use_panels[0]}} = @breaks;
 
 	} else {
 
 		my $current_seed = 1;
 
 		foreach my $entry (@breaks) {
+
 			$count++;
 
 			unless (@snake_panels) {
@@ -256,9 +307,8 @@
 				}
 			}
 
-			my $panel = shift @snake_panels;
-			push @{$panel_entries{$panel->id}}, $entry;
-
+			my $panel_id = shift @snake_panels;
+			push @{$panel_entries{$panel_id}}, $entry;
 		}
 
 		foreach my $entry_id (keys %entry_data) {
@@ -275,14 +325,32 @@
 
 			foreach (1 .. 7) {
 
-				Tab::debuglog("Pass $_");
+				Tab::debuglog("Testing on pass $_");
+				my $pass_counter;
+				my $po_penalty = $penalties{"po"};
 
-				foreach my $panel (@use_panels) {
+				foreach my $panel_id (@use_panels) {
 
-					my $initial_score = score_elim_chamber(\@{$panel_entries{$panel->id}}, \%entry_data);
-					next unless $initial_score > 0;
+					if ($po_penalty) {
 
-					my $panel_id = $panel->id;
+						$penalties{"po"} = $po_penalty;
+
+						#If you don't skip POs a lot of the time it takes forever.
+						my $panel_po_count;
+						foreach my $entry_id (@{$panel_entries{$panel_id}}) {
+							$panel_po_count++ if $entry_data{$entry_id}{"po"};
+						}
+
+						unless ($panel_po_count > $po_target) {
+							delete $penalties{"po"};
+						}
+					}
+
+					unless ($panels{$panel_id}{"score"}) {
+						$panels{$panel_id}{"score"} = score_elim_chamber(\@{$panel_entries{$panel_id}}, \%entry_data);
+					}
+
+					next unless $panels{$panel_id}{"score"} > 0;
 
 					foreach my $entry (@{$panel_entries{$panel_id}}) {
 
@@ -295,7 +363,7 @@
 
 						my $test_score = score_elim_chamber(\@test, \%entry_data);
 
-						if ($test_score < $initial_score) {
+						if ($test_score < $panels{$panel_id}{"score"}) {
 
 							my $swap_seed_dist = 99;
 							my $swap_tb_dist   = 99;
@@ -303,9 +371,7 @@
 							my $swap_entry;
 							my $swap_panel;
 
-							foreach my $other (@use_panels) {
-
-								my $other_id = $other->id;
+							foreach my $other_id (@use_panels) {
 
 								# Can't switch to the same panel
 								next if $other_id == $panel_id;
@@ -315,7 +381,9 @@
 								my @other_panel = @{$panel_entries{$other_id}};
 
 								# Put me into this panel for testing
-								my $other_score = score_elim_chamber(\@other_panel, \%entry_data);
+								unless ($panels{$other_id}{"score"}) {
+									$panels{$other_id}{"score"} = score_elim_chamber(\@{$panel_entries{$other_id}}, \%entry_data);
+								}
 
 								foreach my $other_entry (@{$panel_entries{$other_id}}) {
 
@@ -344,8 +412,8 @@
 									my $new_other_score = score_elim_chamber(\@other_panel, \%entry_data);
 
 									my $diff =
-										$other_score
-										+ $initial_score
+										$panels{$other_id}{"score"}
+										+ $panels{$panel_id}{"score"}
 										- $new_other_score
 										- $new_initial_score;
 
@@ -401,6 +469,8 @@
 
 							if ($swap_entry) {
 
+								$pass_counter++;
+
 								my @panel2 = @{$panel_entries{$swap_panel}};
 								my @panel1 = @{$panel_entries{$panel_id}};
 
@@ -420,90 +490,47 @@
 								@{$panel_entries{$panel_id}} = @panel1;
 								@{$panel_entries{$swap_panel}} = @panel2;
 
-								$initial_score = score_elim_chamber(\@panel1, \%entry_data);
+								$panels{$panel_id}{"score"} = score_elim_chamber(\@panel1, \%entry_data);
+								$panels{$swap_panel}{"score"} = score_elim_chamber(\@panel2, \%entry_data);
 
 							}
 						}
 					}
 				}
+
+				Tab::debuglog("$pass_counter improving swaps made");
+				last unless $pass_counter > 1;
+
 			}
 		}
 	}
 
-	my $ob_sth = $dbh->prepare("
-		select entry.id, ballot.speakeroder
-		from entry, ballot, panel, round
-		where round.event = ?
-			and round.name <= ?
-			and round.id = panel.round
-			and panel.id = ballot.panel
-			and ballot.entry = entry.id
+	my $judge_sth = $dbh->prepare("
+		select panel.id, ballot.judge, ballot.chair
+		from panel, ballot
+		where panel.round = ?
+		and panel.id = ballot.panel
+		and ballot.judge > 0
+		group by ballot.judge
 	");
 
-	$ob_sth->execute($event->id, $into->name);
-	my %total_positions_by_entry = ();
-	my %positions_by_entry = ();
+	$judge_sth->execute($into->id);
 
 	while (
 		my (
-			$entry_id, $speakerorder
-		) = $ob_sth->fetchrow_array()
+			$panel_id, $judge_id, $chair
+		) = $judge_sth->fetchrow_array()
 	) {
-		$total_positions_by_entry{$entry_id} += $speakerorder;
-		$positions_by_entry{$entry}{$ob->speakerorder}++;
-	}
-
-
-	#Set speaker order
-	foreach my $key (keys %panel_entries) {
-
-		my @entries = @{$panel_entries{$key}};
-		@entries = shuffle(@entries);
-		@entries = sort {
-			$total_positions_by_entry{$b} <=> $total_positions_by_entry{$a}
-		} @entries;
-
-		my $size_of_panel = scalar @entries;
-
-		my $moved = 1;
-
-		foreach (1 .. 10) {
-
-			next unless $moved;
-			undef $moved;
-			my $position;
-
-			foreach my $entry (@entries) {
-
-				$position++;
-
-				if ($positions_by_entry{$entry}{$position}) {
-
-					#Remove from place in line
-					my $speakdex = 0;
-					$speakdex++ until $entries[$speakdex] == $entry;
-					splice(@entries, $speakdex, 1);
-
-					#Find a new home
-					my $place = $position;
-					while ($place == $position) {
-						$place = int(rand($size_of_panel));
-					}
-
-					$place--;
-					$place = 1 if $place < 0;
-					splice(@entries,($place - 1),0,$entry);
-					$moved++;
-				}
-			}
+		$panels{$panel_id}{"judges"}{$judge_id}++;
+		if ($chair == 1) {
+			$panels{$panel_id}{"chair"} = $judge_id;
 		}
-		@{$panel_entries{$key}} = @entries;
 	}
 
-	foreach my $panel (@use_panels) {
+	foreach my $panel_id (@use_panels) {
 
-		my @entries = @{$panel_entries{$panel->id}} if $panel_entries{$panel->id};
-		my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
+		my @entries = @{$panel_entries{$panel_id}} if $panel_entries{$panel_id};
+		my @judges = keys %{$panels{$panel_id}{"judges"}};
 
 		my $sth = $dbh->prepare("
 			delete score.*, ballot.*
@@ -512,40 +539,53 @@
 			and ballot.id = score.ballot
 		");
 
-		$sth->execute($panel->id);
+		$sth->execute($panel_id);
 
 		if (@judges) {
 
-			foreach my $judge (@judges) {
+			foreach my $judge_id (@judges) {
+
 				my $position;
+				my $chair = 0;
+
+				if ($panels{$panel_id}{"chair"} == $judge_id) {
+					$chair++;
+				}
 
 				foreach my $entry (@entries) {
 
 					$position++;
 					next unless $entry;
+
 					my $ballot = Tab::Ballot->create({
-						panel        => $panel->id,
-						judge        => $judge->id,
+						panel        => $panel_id,
+						judge        => $judge_id,
 						entry        => $entry,
+						chair        => $chair,
 						speakerorder => $position
-					})
+					});
+
+					$panels{$panel_id}{"ballots"}{$ballot->id} = $ballot;
 				}
 			}
 
 		} else {
 
 			my $position;
+
 			foreach my $entry (@entries) {
 
 				$position++;
 				next unless $entry;
 
 				my $ballot = Tab::Ballot->create({
-					panel        => $panel->id,
+					panel        => $panel_id,
 					judge        => 0,
 					entry        => $entry,
 					speakerorder => $position
 				});
+
+				$panels{$panel_id}{"ballots"}{$ballot->id} = $ballot;
 			}
 		}
 	}
@@ -561,11 +601,16 @@
 		foreach my $tie (@ties) {
 			next if $tie->id == $into->id;
 
-			foreach my $panel (@use_panels) {
-				my $new_panel = $panel->copy( round => $tie->id );
+			foreach my $panel_id (@use_panels) {
 
-				foreach my $ballot ($panel->ballots) {
-					my $new_ballot = $ballot->copy(
+				my $new_panel = Tab::Panel->create({
+					round  => $tie->id,
+					letter => $panels{$panel_id}{"letter"},
+					flight => $panels{$panel_id}{"flight"},
+				});
+
+				foreach my $ballot_id (keys %{$panels{$panel_id}{"ballots"}}) {
+					my $new_ballot = $panels{$panel_id}{"ballots"}{$ballot_id}->copy(
 						panel => $new_panel
 					);
 				}
@@ -575,6 +620,7 @@
 
 	my $msg = "Elim round paneled";
 	undef %penalties;
+	$dbh->disconnect();
 
 	return $msg if $ARGS{'return'};
 
@@ -589,25 +635,16 @@
 		my ($panref, $entref, $loud) = @_;
 		my $score = 0;
 
-		foreach my $entry (@$panref) {
-			foreach my $other (@$panref) {
+		foreach my $entry_id (@$panref) {
+			foreach my $other_id (@$panref) {
 
-				next unless $other > $entry;
+				next unless $other_id > $entry_id;
 
-				if ($entref->{$entry}{"school"} == $entref->{$other}{"school"}) {
-					$score += $penalties{"school"};
-				}
+				foreach my $tag (keys %penalties) {
 
-				if ($entref->{$entry}{"district"} == $entref->{$other}{"district"}) {
-					$score += $penalties{"district"};
-				}
-
-				if ($entref->{$entry}{"state"} eq $entref->{$other}{"state"}) {
-					$score += $penalties{"state"};
-				}
-
-				if ($entref->{$entry}{"prelim"} eq $entref->{$other}{"prelim"}) {
-					$score += $penalties{"prelim"};
+					if ($entref->{$entry_id}{$tag} eq $entref->{$other_id}{$tag}) {
+						$score += $penalties{$tag};
+					}
 				}
 			}
 		}
