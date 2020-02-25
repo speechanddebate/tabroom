@@ -348,7 +348,8 @@
 			$m->abort;
 		}
 
-		push @events, $round->event;
+		@events = ($round->event);
+		@timeslots = ($round->timeslot);
 
 		if ($person_id) {
 			$file_name = "AutoBackup-";
@@ -403,13 +404,15 @@
 		}
 
 		push @{$category_events{$category->id}}, $event;
-		push (@timeslots, $m->comp("/funclib/event_timeslots.mas", event => $event));
+
+		unless ($json_tourn->{round_only}) {
+			push (@timeslots, $m->comp("/funclib/event_timeslots.mas", event => $event));
+		}
 		$events_used{$event->id} = $event;
 	}
 
 	unless (
 		$json_tourn->{event_only}
-		|| $json_tourn->{round_only}
 		|| $json_tourn->{school_only}
 		|| $json_tourn->{category_only}
 	) {
@@ -429,146 +432,149 @@
 			push (@{$json_tourn->{timeslots}}, $json_ts);
 		}
 
-		# PATTERNS
-		foreach my $pattern ($tourn->patterns) {
+		unless ($json_tourn->{round_only}) {
 
-			my $json_pattern = {
-				id      => $pattern->id,
-				name    => $pattern->name,
-				tag     => $pattern->type,
-				max     => $pattern->max,
-				exclude => $pattern->exclude
-			};
+			# PATTERNS
+			foreach my $pattern ($tourn->patterns) {
 
-			push (@{$json_tourn->{patterns}}, $json_pattern);
-		}
-
-		my $room_strike_sth = $dbh->prepare("
-			select rs.id, rs.type, rs.start, rs.end, rs.room,
-				rs.event, rs.tourn, rs.entry, rs.judge
-			from room_strike rs, room
-			where rs.room = room.id
-			and room.site = ?
-			and rs.tourn = ?
-		");
-
-
-		unless ($json_tourn->{public}) {
-			# SITES AND ROOMS
-			foreach my $site ($tourn->sites) {
-
-				my $json_site = {
-					id => $site->id,
-					name => $site->name
+				my $json_pattern = {
+					id      => $pattern->id,
+					name    => $pattern->name,
+					tag     => $pattern->type,
+					max     => $pattern->max,
+					exclude => $pattern->exclude
 				};
 
-				push @{$json_tourn->{sites}}, $json_site;
+				push (@{$json_tourn->{patterns}}, $json_pattern);
+			}
 
-				foreach my $room ($site->rooms(deleted => 0)) {
+			my $room_strike_sth = $dbh->prepare("
+				select rs.id, rs.type, rs.start, rs.end, rs.room,
+					rs.event, rs.tourn, rs.entry, rs.judge
+				from room_strike rs, room
+				where rs.room = room.id
+				and room.site = ?
+				and rs.tourn = ?
+			");
 
-					my $json_room = {
-						id   => $room->id,
-						name => $room->name
+
+			unless ($json_tourn->{public}) {
+				# SITES AND ROOMS
+				foreach my $site ($tourn->sites) {
+
+					my $json_site = {
+						id => $site->id,
+						name => $site->name
 					};
 
-					$json_room->{rows} = $room->rowcount if $room->rowcount;
-					$json_room->{seats} = $room->seats if $room->seats;
-					$json_room->{inactive} = $room->inactive if $room->inactive;
-					$json_room->{ada} = $room->ada if $room->ada && (not defined $json_tourn->{public});
+					push @{$json_tourn->{sites}}, $json_site;
 
-					$json_room->{quality} = $room->quality if $room->quality;
-					$json_room->{capacity} = $room->capacity if $room->capacity;
-					$json_room->{notes} = $room->notes if $room->notes;
-					$json_room->{url} = $room->url if $room->url;
+					foreach my $room ($site->rooms(deleted => 0)) {
 
-					push (@{$json_site->{rooms}}, $json_room);
+						my $json_room = {
+							id   => $room->id,
+							name => $room->name
+						};
+
+						$json_room->{rows} = $room->rowcount if $room->rowcount;
+						$json_room->{seats} = $room->seats if $room->seats;
+						$json_room->{inactive} = $room->inactive if $room->inactive;
+						$json_room->{ada} = $room->ada if $room->ada && (not defined $json_tourn->{public});
+
+						$json_room->{quality} = $room->quality if $room->quality;
+						$json_room->{capacity} = $room->capacity if $room->capacity;
+						$json_room->{notes} = $room->notes if $room->notes;
+						$json_room->{url} = $room->url if $room->url;
+
+						push (@{$json_site->{rooms}}, $json_room);
+					}
+
+					$room_strike_sth->execute($site->id, $tourn->id);
+
+					while (
+						my ($rs_id, $rs_type, $rs_start, $rs_end, $rs_room,
+							$rs_event, $rs_tourn, $rs_entry, $rs_judge
+						) = $room_strike_sth->fetchrow_array()
+					) {
+
+						my $room_strike = {
+							id   => $rs_id,
+							tag  => $rs_type,
+							room => $rs_room
+						};
+
+						$room_strike->{start} = $rs_start if $rs_start;
+						$room_strike->{end} = $rs_end if $rs_end;
+						$room_strike->{event} = $rs_event if $rs_event;
+						$room_strike->{entry} = $rs_entry if $rs_entry;
+						$room_strike->{judge} = $rs_judge if $rs_judge;
+
+						push @{$json_site->{blocks}}, $room_strike;
+					}
 				}
 
-				$room_strike_sth->execute($site->id, $tourn->id);
+				# ROOM POOLS RPOOLS
+				my %rpools;
+				$rpool_sth->execute($tourn->id);
 
-				while (
-					my ($rs_id, $rs_type, $rs_start, $rs_end, $rs_room,
-						$rs_event, $rs_tourn, $rs_entry, $rs_judge
-					) = $room_strike_sth->fetchrow_array()
+				while(
+					my (
+						$rpool_id,
+						$rpool_name,
+						$room_id
+					) = $rpool_sth->fetchrow_array()
 				) {
 
-					my $room_strike = {
-						id   => $rs_id,
-						tag  => $rs_type,
-						room => $rs_room
-					};
+					my $json_rpool = $rpools{$rpool_id};
 
-					$room_strike->{start} = $rs_start if $rs_start;
-					$room_strike->{end} = $rs_end if $rs_end;
-					$room_strike->{event} = $rs_event if $rs_event;
-					$room_strike->{entry} = $rs_entry if $rs_entry;
-					$room_strike->{judge} = $rs_judge if $rs_judge;
+					unless ($json_rpool) {
+						$json_rpool = {
+							id     => $rpool_id,
+							name   => $rpool_name
+						};
+						$rpools{$rpool_id} = $json_rpool;
+						push @{$json_tourn->{"room_pools"}}, $json_rpool;
+					}
+					push @{$json_rpool->{"rooms"}}, $room_id;
+				}
 
-					push @{$json_site->{blocks}}, $room_strike;
+				$rpool_round_sth->execute($tourn->id);
+
+				while (
+					my (
+						$rpool, $round
+					) = $rpool_round_sth->fetchrow_array()
+				) {
+
+					my $rpool = $rpools{$rpool};
+
+					if ($rpool) {
+						push @{$rpool->{rounds}}, $round;
+					}
 				}
 			}
 
-			# ROOM POOLS RPOOLS
-			my %rpools;
-			$rpool_sth->execute($tourn->id);
+			# WEEKENDS
+			foreach my $weekend ($tourn->weekends) {
 
-			while(
-				my (
-					$rpool_id,
-					$rpool_name,
-					$room_id
-				) = $rpool_sth->fetchrow_array()
-			) {
+				my $json_weekend = {
+					id              => $weekend->id,
+					name            => $weekend->name,
+					city            => $weekend->city,
+					state           => $weekend->state,
+					site            => $weekend->site->id,
+					start           => $weekend->start->datetime(),
+					end             => $weekend->end->datetime(),
+					reg_start       => $weekend->reg_start->datetime(),
+					reg_end         => $weekend->reg_end->datetime(),
+					freeze_deadline => $weekend->freeze_deadline->datetime(),
+					drop_deadline   => $weekend->drop_deadline->datetime(),
+					judge_deadline  => $weekend->judge_deadline->datetime(),
+					fine_deadline   => $weekend->fine_deadline->datetime(),
+				};
 
-				my $json_rpool = $rpools{$rpool_id};
-
-				unless ($json_rpool) {
-					$json_rpool = {
-						id     => $rpool_id,
-						name   => $rpool_name
-					};
-					$rpools{$rpool_id} = $json_rpool;
-					push @{$json_tourn->{"room_pools"}}, $json_rpool;
-				}
-				push @{$json_rpool->{"rooms"}}, $room_id;
+				push @{$json_tourn->{weekends}}, $json_weekend;
 			}
-
-			$rpool_round_sth->execute($tourn->id);
-
-			while (
-				my (
-					$rpool, $round
-				) = $rpool_round_sth->fetchrow_array()
-			) {
-
-				my $rpool = $rpools{$rpool};
-
-				if ($rpool) {
-					push @{$rpool->{rounds}}, $round;
-				}
-			}
-		}
-
-		# WEEKENDS
-		foreach my $weekend ($tourn->weekends) {
-
-			my $json_weekend = {
-				id              => $weekend->id,
-				name            => $weekend->name,
-				city            => $weekend->city,
-				state           => $weekend->state,
-				site            => $weekend->site->id,
-				start           => $weekend->start->datetime(),
-				end             => $weekend->end->datetime(),
-				reg_start       => $weekend->reg_start->datetime(),
-				reg_end         => $weekend->reg_end->datetime(),
-				freeze_deadline => $weekend->freeze_deadline->datetime(),
-				drop_deadline   => $weekend->drop_deadline->datetime(),
-				judge_deadline  => $weekend->judge_deadline->datetime(),
-				fine_deadline   => $weekend->fine_deadline->datetime(),
-			};
-
-			push @{$json_tourn->{weekends}}, $json_weekend;
 		}
 	}
 
@@ -2458,8 +2464,6 @@
 		print $fh $json->encode($json_tourn);
 		close $fh;
 
-		Tab::debuglog("Returning! file named $filename on path $filepath");
-
 		# Return a reference so that the public path is not visible.
 		my @return = ($filepath, $filename);
 		return \@return;
@@ -2472,8 +2476,6 @@
 		system "mkdir -p $filedir";
 		my $filepath = $filedir."/".$filename;
 
-		Tab::debuglog("Printing! file named $filename on path $filepath");
-
 		open my $fh, ">", $filepath;
 		print $fh $json->encode($json_tourn);
 		close $fh;
@@ -2484,8 +2486,6 @@
 
 		# With a public download I don't care if it's slow and care about the
 		# storage costs
-
-		Tab::debuglog("The hell? file named $filename");
 
 		$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
 		$m->print($json->pretty->encode( $json_tourn ));
