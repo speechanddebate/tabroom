@@ -119,7 +119,45 @@
 	my $segment_label;
 
 	my $district_id = $tourn_settings->{"nsda_district"};
-	my $district = Tab::District->retrieve($district_id);
+	my $district = eval {
+		return Tab::District->retrieve($district_id);
+	};
+
+	my %district_schools;
+	my %empty_schools;
+	my %existing_schools;
+
+	if ($district) {
+
+		my ($empties, $real)  = $m->comp(
+			"/funclib/nsda/district_schools.mas",
+			district_id => $district->id,
+			all         => 1,
+		);
+
+		if ($empties) {
+			%{$empty_schools{"by_oname"}} = map {$_->{official_name} => $_->{school_id}} @{$empties};
+			%{$empty_schools{"by_name"}} = map {$_->{school_name} => $_->{school_id}} @{$empties};
+		}
+
+		if ($real) {
+			%district_schools = %{$real};
+
+			foreach my $key (keys %district_schools) {
+				my $chapter = $district_schools{$key};
+				$existing_schools{"by_name"}{$chapter->name} = $chapter;
+				$existing_schools{"by_oname"}{Tab::short_name($chapter->name)} = $chapter;
+			}
+		}
+	}
+
+	foreach my $key (keys %{$empty_schools{"by_oname"}}) {
+		Tab::debuglog("I have key $key");
+	}
+
+	foreach my $key (keys %{$empty_schools{"by_name"}}) {
+		Tab::debuglog("I also have key $key");
+	}
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
@@ -433,7 +471,7 @@
 
 		if ($event) {
 
-			$description .". Imported ".$entry_blank." to ".$event->abbr;
+			$description .= " Imported ".$entry_blank." to ".$event->abbr;
 			$event->setting('code_style', "numbers");
 
 			my $category = $event->category;
@@ -575,10 +613,30 @@
 				# Chapter with the same name in the same district?
 				my $chapter;
 
-				$chapter = Tab::Chapter->search(
-					name     => $name,
-					district => $district->id
-				)->first;
+				unless ($chapter) {
+					$chapter = $existing_schools{"by_name"}{$name};
+				}
+				unless ($chapter) {
+					$chapter = $existing_schools{"by_oname"}{$name};
+				}
+
+				unless ($chapter) {
+					$chapter = $existing_schools{"by_oname"}{Tab::short_name($name)};
+				}
+
+				unless ($chapter) {
+					$chapter = Tab::Chapter->search(
+						name     => $name,
+						district => $district->id
+					)->first;
+				}
+
+				unless ($chapter) {
+					$chapter = Tab::Chapter->search(
+						name     => Tab::short_name($name),
+						district => $district->id
+					)->first;
+				}
 
 				unless ($chapter) {
 
@@ -633,34 +691,43 @@
 
 					if ($chapter && ($chapter->nsda < 1)) {
 
-						my $nsda_school = $m->comp(
-							"/funclib/nsda_school.mas",
-							name        => $name,
-							district_id => $district->id
-						);
+						my $nsda_id;
 
-						$chapter->nsda($nsda_school->school_id)
-							if $nsda_school;
+						unless ($nsda_id) {
+							$nsda_id = $empty_schools{"by_name"}{$name};
+						}
 
-						$chapter->district($district->id);
-						$chapter->update();
+						unless ($nsda_id) {
+							$nsda_id = $empty_schools{"by_oname"}{$name};
+						}
 
-						push @changes, $chapter->id." linked to this district and NSDA school ".$chapter->nsda;
+						if ($nsda_id) {
+							$chapter->nsda($nsda_id);
+							$chapter->district($district->id);
+							$chapter->update();
+							push @changes, $chapter->id." linked to this district and NSDA school ".$chapter->nsda;
+						} else {
+							push @changes, $chapter->name." NSDA School membership could not be found";
+						}
 					}
 				}
 
 				unless ($chapter) {
 
-					my $nsda_school = $m->comp(
-						"/funclib/nsda_school.mas",
-						name        => $name,
-						district_id => $district->id
-					);
+					my $nsda_id;
 
-					if ($nsda_school) {
+					unless ($nsda_id) {
+						$nsda_id = $empty_schools{"by_name"}{$name};
+					}
+
+					unless ($nsda_id) {
+						$nsda_id = $empty_schools{"by_oname"}{$name};
+					}
+
+					if ($nsda_id) {
 
 						$chapter = Tab::Chapter->search(
-							nsda => $nsda_school->school_id
+							nsda => $nsda_id
 						)->first;
 
 						unless ($chapter) {
@@ -669,17 +736,25 @@
 							$nome++ unless $tabroom_account;
 
 							$chapter = $m->comp(
-								"/funclib/chapter_import.mas",
-								nsda_school => $nsda_school,
-								person      => $tabroom_account,
-								nome        => $nome
+								"/funclib/nsda/school_import.mas", nsda_school_id => $nsda_id,
 							);
 
-							my $change_result = $district->name." imported NSDA chapter $chapter ".$chapter->name;
-							$change_result   .= " for NSDA School ID ".$chapter->nsda;
+							my $change_result;
 
-							foreach my $admin ($chapter->admins) {
+							if ($chapter) {
+								$change_result = $district->name." imported NSDA chapter $chapter ".$chapter->name;
+								$change_result   .= " for NSDA School ID ".$chapter->nsda;
+
+								foreach my $admin ($chapter->admins) {
 								$change_result .= "Account ".$admin->email." (".$admin->first." ".$admin->last.") has access <br />";
+								}
+							} else {
+								$change_result = "Could not find a district chapter with a name matching $name.  Creating a dummy school.  This school will have to be linked later";
+
+								$chapter = Tab::Chapter->create({
+									name => $name
+								});
+
 							}
 
 							$m->print("<span class='half semibold bluetext'>".$change_result."</span>");
@@ -1471,12 +1546,19 @@
 	my %students;
 	my %student_web_ids;
 	my %student_tags;
+	my %student_nsda;
 
 	foreach my $student (@all_students) {
-		$students{$student->student_jot} = $student;
+
+		if ($student->student_jot) {
+			$students{$student->student_jot} = $student;
+		}
+
 		$student_tags{$student->schoolid}{$student->first}{$student->last} = $student;
+
 	}
 
+	my %chapter_nsda_students;
 	my %name_codes;
 	my $notfirst;
 
@@ -1581,77 +1663,50 @@
 				$search_nsda++;
 			}
 
+			unless ($chapter->nsda) {
+				undef $search_nsda;
+			}
+
 			if ($search_nsda) {
 
-				my $nsda = $m->comp(
-					"/funclib/nsda_student_search.mas",
-					chapter => $chapter,
-					first   => $first,
-					last    => $last
-				);
+				my $chapter_id = $chapter->id;
 
-				if ($nsda) {
+				unless ($chapter_nsda_students{$chapter_id}) {
 
-					$m->print("<span class='inline greentext semibold'>Found NSDA ");
-					$m->print("member ".$nsda->user_id."</span></span>");
+					$chapter_nsda_students{$chapter->id}{"raw"} = $m->comp(
+						"/funclib/nsda/school_roster.mas",
+						chapter => $chapter
+					);
 
-					$candidate->grad_year($nsda->grad_yr);
-					$candidate->nsda($nsda->user_id);
-					$candidate->update();
-
-					if ($nsda->paid_status) {
-						$candidate->setting("nsda_paid", 1);
-					} else {
-						$candidate->setting("nsda_paid", "X");
-					}
-
-					if ($nsda->total_pts) {
-						$candidate->setting("nsda_points", $nsda->total_pts);
-					} else {
-						$candidate->setting("nsda_points", "X");
-					}
-
-					my $joined = eval{
-						return DateTime::Format::MySQL->parse_datetime($nsda->high_joined);
+					my @roster = eval {
+						return @{$chapter_nsda_students{$chapter_id}{"raw"}};
 					};
 
-					if ($joined) {
-						$candidate->setting("nsda_joined", "date", $joined);
-					} else {
-						$candidate->setting("nsda_joined", "X");
-					}
+					if (@roster) {
 
-					my $test_person;
-
-					if ($candidate->person) {
-
-						$candidate->setting("student_email", $candidate->person->email);
-
-					} elsif ($nsda->demo) {
-
-						$candidate->setting("student_email", $nsda->demo);
-						$test_person = $nsda->demo;
-
-					} elsif ($nsda->login) {
-
-						$test_person = $nsda->login;
-						$candidate->setting("student_email", $nsda->login);
-
-					} else {
-						$candidate->setting("student_email", "X");
-					}
-
-					if ($test_person) {
-						my $person = Tab::Person->search(
-							email => $test_person
-						)->first;
-
-						unless ($person) {
-							my $login = Tab::Login->search(
-								username => $test_person
-							)->first;
+						foreach my $kid (@roster) {
+							next if $kid->{"role"} ne "Student";
+							$chapter_nsda_students{$chapter_id}{"byname"}{$kid->{"first"}}{$kid->{"last"}} = $kid;
 						}
+
+					} else {
+						$m->print("<span class='inline redtext semibold'>Roster not found ");
+						$m->print("for school ".$chapter->name.": ".$chapter_nsda_students{$chapter_id}{"raw"});
+						$m->print("</span></span>");
 					}
+				}
+
+				my $nsda_student = $chapter_nsda_students{$chapter_id}{"byname"}{$first}{$last};
+
+				if ($nsda_student) {
+
+					$m->print("<span class='inline greentext semibold'>Found NSDA ");
+					$m->print("member ".$nsda_student->{person_id}."</span></span>");
+
+					$m->comp("/funclib/nsda/student_link.mas",
+						student     => $candidate,
+						student_ref => $nsda_student
+					);
 
 				} elsif ($district) {
 
@@ -1995,7 +2050,7 @@
 
 		my %round_labels = eval{
 			return JSON::decode_json($round->setting("section_labels"));
-		}
+		};
 
 		my $section = Tab::Panel->create({
 			round  => $round->id,
