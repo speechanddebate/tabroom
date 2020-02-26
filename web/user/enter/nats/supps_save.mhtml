@@ -9,14 +9,14 @@
 
 	my $student = Tab::Student->retrieve($student_id) if $student_id;
 
-	unless ($student) { 
-		$m->comp('/funclib/abort.mas', 
+	unless ($student) {
+		$m->comp('/funclib/abort.mas',
 			message => "No student record found for ID number $student_id"
 		);
 	}
 
 	unless ($student->chapter->id == $school->chapter->id) {
-		$m->comp('/funclib/abort.mas', 
+		$m->comp('/funclib/abort.mas',
 			message => "Student ".$student->first." ".$student->last." does not belong to your school."
 		);
 	}
@@ -29,125 +29,182 @@
 		tourn => $tourn
 	);
 
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.abbr, event.name,
+			pattern.id, pattern.name, pattern.max, pattern.exclude,
+			supp.value, conn.value, stefan.value
+		from event
+			left join pattern on event.pattern = pattern.id
+			left join event_setting supp on supp.event = event.id and supp.tag = 'supp'
+			left join event_setting conn on conn.event = event.id and conn.tag = 'conn'
+			left join event_setting stefan on stefan.event = event.id and stefan.tag = 'stefan'
+		where event.tourn = ?
+	");
+
+	$sth->execute($tourn->id);
+
 	my %events;
+	my %patterns;
+	my %types;
 
-	foreach my $event ($tourn->events) {
+	while (
+		my (
+			$event_id, $event_abbr, $event_name,
+			$pattern_id, $pattern_name, $pattern_max, $pattern_exclude,
+			$supp_value, $conn_value, $stefan_value
+		) = $sth->fetchrow_array()
+	) {
 
-		if ($event->setting("supp")) { 
-			$events{$event->id} = "supp";
-			push @{$events{"supp"}}, $event;
-		} elsif ($event->setting("conn")) { 
-			$events{$event->id} = "conn";
-			push @{$events{"conn"}}, $event;
-		} elsif ($event->setting("stefan")) { 
-			$events{$event->id} = "stefan";
-			push @{$events{"stefan"}}, $event;
-		} else { 
-			$events{$event->id} = "main";
-			push @{$events{"main"}}, $event;
+		if ($stefan_value) {
+			$events{$event_id}{"type"} = "stefan";
+			$events{"by_pattern"}{"stefan"}{$event_id}++;
+			$types{"stefan"}++;
+		} elsif ($conn_value) {
+			$events{$event_id}{"type"} = "conn";
+			$events{"by_pattern"}{"conn"}{$event_id}++;
+			$types{"conn"}++;
+		} elsif ($supp_value) {
+			$events{$event_id}{"type"} = "supp";
+			$events{"by_pattern"}{"supp"}{$event_id}++;
+			$types{"supp"}++;
+		} else {
+			next;
 		}
 
-	}
+		$events{$event_id}{"abbr"} = $event_abbr;
+		$events{$event_id}{"name"} = $event_name;
 
-	my $counter;
+		if ($pattern_id) {
 
-	foreach my $tag ("supp", "conn") { 
+			$events{$event_id}{"pattern"} = $pattern_id;
+			$events{"by_pattern"}{$pattern_id}{$event_id}++;
 
-		if ($events{$tag}) {
+			unless ($patterns{$pattern_id}) {
+				$patterns{$pattern_id}{"name"} = $pattern_name;
+				$patterns{$pattern_id}{"max"} = $pattern_max;
 
-			foreach my $event (@{$events{$tag}}) { 
-
-				my $in = $ARGS{$event->id};
-
-				$counter++ if $in;
-
-				if ($entries{$event->id}) { 
-
-					unless ($in) { 
-
-						my $msg = "Entry ".$entries{$event->id}->name." deleted in ".$entries{$event->id}->event->abbr;
-						$m->comp("/funclib/log.mas",
-							tourn       => $entries{$event->id}->event->tourn->id,
-							event       => $entries{$event->id}->event->id,
-							school      => $entries{$event->id}->school->id,
-							type        => "registration",
-							person      => $person->id,
-							description => $msg
-						);
-
-						$entries{$event->id}->delete();
-
-					}
-
-				} else { 
-
-					if ($in) { 
-
-						my $entry = Tab::Entry->create({
-							event      => $event->id,
-							school     => $school->id,
-							tourn      => $tourn->id,
-							name       => $student->first." ".$student->last,
-							dropped    => 0,
-							created_at => $now,
-						});
-
-						$entry->setting("registered_by", $person->id);
-
-						my $es = Tab::EntryStudent->create({
-							entry   => $entry->id,
-							student => $student->id
-						});
-
-						my $msg = "Entry ".$entry->name." created in ".$entry->event->abbr;
-
-						$m->comp("/funclib/log.mas",
-							tourn       => $entry->event->tourn->id,
-							event       => $entry->event->id,
-							entry       => $entry->id,
-							school      => $entry->school->id,
-							type        => "registration",
-							person      => $person->id,
-							description => $msg
-						);
-
-					}
+				if ($pattern_exclude) {
+					$patterns{$pattern_id}{"exclude"} = eval {
+						return JSON::decode_json($pattern_exclude);
+					};
 				}
 			}
 		}
 	}
 
-	foreach my $tag ("supp", "conn") { 
-		foreach my $event (@{$events{$tag}}) { 
-			undef $entries{$event->id}; 
+	my %counter;
+	my $err;
+
+	foreach my $event_id (sort {$events{$a}{"abbr"} cmp $events{$b}{"abbr"}} keys %events) {
+
+		my $in = $ARGS{$event_id};
+
+		if ($in) {
+
+			# The following code is a solution in search of a problem.
+
+			my $pattern_id = $events{$event_id}{"pattern"};
+
+			# Maximum of 2 per pattern
+			if ($counter{"pattern"}{$pattern_id} >= $patterns{$pattern_id}{"max"}) {
+				undef $in;
+				$err = "You may only select ".$patterns{$pattern_id}{"max"}." events in Pattern ".$patterns{$pattern_id}{"name"}." Not registered in ".$events{$event_id}{"abbr"}.".";
+			}
+
+			if ($in) {
+				$counter{"total"}++;
+				if ($patterns{$pattern_id}{"max"}) {
+					$counter{"pattern"}{$pattern_id}++;
+				}
+			}
+		}
+
+		if ($entries{$event_id}) {
+
+			unless ($in) {
+				my $msg = "Entry ".$entries{$event_id}->name." deleted in ".$events{$event_id}{"abbr"};
+				$m->comp("/funclib/log.mas",
+					tourn       => $tourn->id,
+					event       => $event_id,
+					school      => $school->id,
+					type        => "registration",
+					person      => $person->id,
+					description => $msg
+				);
+
+				$entries{$event_id}->delete();
+			}
+
+		} elsif ($in) {
+
+			my $entry = Tab::Entry->create({
+				event      => $event_id,
+				school     => $school->id,
+				tourn      => $tourn->id,
+				name       => $student->first." ".$student->last,
+				dropped    => 0,
+				created_at => $now,
+			});
+
+			$entry->setting("registered_by", $person->id);
+
+			my $es = Tab::EntryStudent->create({
+				entry   => $entry->id,
+				student => $student->id
+			});
+
+			my $msg = "Entry ".$entry->name." created in ".$entry->event->abbr;
+
+			$m->comp("/funclib/log.mas",
+				tourn       => $tourn->id,
+				event       => $event_id,
+				entry       => $entry->id,
+				school      => $school->id,
+				type        => "registration",
+				person      => $person->id,
+				description => $msg
+			);
+
 		}
 	}
 
-	my %used; 
+	#Clear the objects because otherwise they persist and mess everything up
+	foreach my $event_id (keys %events) {
+		undef $entries{$event_id};
+	}
+
+	my %used;
 
 	foreach my $entry (
 		$m->comp(
-			"/funclib/student_entries.mas", 
+			"/funclib/student_entries.mas",
 			student     => $student,
 			tourn       => $tourn,
 			entry_check => 1
 		)
-	) { 
+	) {
 
 		my $event = $entry->event;
 		next if $events{$event->id} eq "main";
 
-		if ($used{$event->id}++) { 
+		if ($used{$event->id}++) {
 			$entry->delete();
-		} else { 
+		} else {
 			$entry->unconfirmed(0);
 			$entry->update();
 		}
-		
+
 	}
 
-	my $msg = $student->first." ".$student->last." has been pre-registered into $counter supplementals &amp; consolations";
+	my $msg;
 
-	$m->redirect("details.mhtml?student_id=".$student->id."&school_id=".$school->id."&msg=$msg");
+	unless ($err) {
+		$msg = $student->first." ".$student->last." has been pre-registered into ".$counter{"total"}." supplementals &amp; consolations";
+	}
+
+	$m->redirect("details.mhtml?student_id=".$student->id."&school_id=".$school->id."&err=$err&msg=$msg");
 
 </%init>
