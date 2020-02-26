@@ -31,26 +31,88 @@
 		tourn => $tourn
 	);
 
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.abbr, event.name,
+			pattern.id, pattern.name, pattern.max, pattern.exclude,
+			supp.value, conn.value, stefan.value
+		from event
+			left join pattern on event.pattern = pattern.id
+			left join event_setting supp on supp.event = event.id and supp.tag = 'supp'
+			left join event_setting conn on conn.event = event.id and conn.tag = 'conn'
+			left join event_setting stefan on stefan.event = event.id and stefan.tag = 'stefan'
+		where event.tourn = ?
+	");
+
+	$sth->execute($tourn->id);
+
 	my %events;
+	my %patterns;
+	my %types;
 
-	foreach my $event ($tourn->events) {
+	while (
+		my (
+			$event_id, $event_abbr, $event_name,
+			$pattern_id, $pattern_name, $pattern_max, $pattern_exclude,
+			$supp_value, $conn_value, $stefan_value
+		) = $sth->fetchrow_array()
+	) {
 
-		if ($event->setting("supp")) {
-			push @{$events{"supp"}}, $event;
-		} elsif ($event->setting("conn")) {
-			push @{$events{"conn"}}, $event;
-		} elsif ($event->setting("stefan")) {
-			push @{$events{"stefan"}}, $event;
+		if ($stefan_value) {
+			$events{$event_id}{"type"} = "stefan";
+			$events{"by_pattern"}{"stefan"}{$event_id}++;
+			$types{"stefan"}++;
+		} elsif ($conn_value) {
+			$events{$event_id}{"type"} = "conn";
+			$events{"by_pattern"}{"conn"}{$event_id}++;
+			$types{"conn"}++;
+		} elsif ($supp_value) {
+			$events{$event_id}{"type"} = "supp";
+			$events{"by_pattern"}{"supp"}{$event_id}++;
+			$types{"supp"}++;
 		} else {
-			push @{$events{"main"}}, $event;
+			$events{$event_id}{"type"} = "main";
+			$types{"main"}++;
+			$events{"by_pattern"}{"main"}{$event_id}++;
+		}
+
+		$events{$event_id}{"abbr"} = $event_abbr;
+		$events{$event_id}{"name"} = $event_name;
+
+		if ($pattern_id) {
+
+			$events{$event_id}{"pattern"} = $pattern_id;
+			$events{"by_pattern"}{$pattern_id}{$event_id}++;
+
+			unless ($patterns{$pattern_id}) {
+				$patterns{$pattern_id}{"name"} = $pattern_name;
+				$patterns{$pattern_id}{"max"} = $pattern_max;
+
+				if ($pattern_exclude) {
+					$patterns{$pattern_id}{"exclude"} = eval {
+						return JSON::decode_json($pattern_exclude);
+					};
+				}
+			}
 		}
 	}
 
 	my $coaches;
-	my $roster = $m->comp("/funclib/school_roster.mas", chapter => $school->chapter);
+	my $roster_ref = $m->comp(
+		"/funclib/nsda/school_roster.mas",
+		chapter => $school->chapter
+	);
 
-	foreach my $person (@{$roster}) {
-		if ($person->{role} eq "Coach")
+	my @roster = eval {
+		return @{$roster_ref};
+	};
+
+	foreach my $person (@roster) {
+		if ($person->{role} eq "Coach") {
+			push (@{$coaches}, $person);
+		} elsif ($person->{role} eq "Advisor") {
 			push (@{$coaches}, $person);
 		}
 	}
@@ -104,9 +166,17 @@
 			<h6>NSDA ID <% $student->nsda %></h4>
 		</span>
 
-		<h5 class="normalweight nospace martopmore marbottom">
-			1. Pre-register for Supplementals
-		</h5>
+		<div class="full martopmore marbottom nospace">
+			<span class="half nospace">
+				<h5 class="normalweight nospace">
+					1. Pre-register for Supplementals
+				</h5>
+			</span>
+
+			<span class="half nospace rightalign bigger semibold orangetext">
+				Supplementals and consolations have changed!  See note at right &rarr;
+			</span>
+		</div>
 
 		<div class="centeralign nospace">
 
@@ -139,43 +209,110 @@
 					>
 %				}
 
-%				if ($events{'supp'}) {
+%				if ($types{"supp"}) {
 
-					<div class="row bordertop padvert">
+					<div class="full nospace">
 
-						<span class="sixth semibold rightalign">
-							Supplementals
-						</span>
+%						if ($types{"conn"}) {
+							<span class="sixth semibold bigger">
+								Supplementals
+							</span>
+							<span class="fivesixths nospace padleft smaller">
+%						}
 
-						<span class="fivesixths nospace padleft smaller">
+%							if (%patterns) {
 
-%							foreach my $supp (@{$events{'supp'}}) {
-%								my $name = $supp->name;
-%								$name =~ s/Extemporaneous/Extemp/g;
+%								foreach my $pattern_id (sort keys %patterns) {
 
-								<label for="<% $supp->id %>">
-									<span
-										class = "realfifth hover nospace ltborderright"
-										title = "<% $supp->name %>"
-									>
-										<span class="threequarters smallish marno padleft">
-											<% $name %>
+									<div class='full nospace padvertless row'>
+
+										<span class='fifth bluetext biggish semibold'>
+											Pattern <% $patterns{$pattern_id}{"name"} %>
 										</span>
 
-										<span class="fifth centeralign marno">
-											<input
-												type  = "checkbox"
-												<% $nosupp ? 'disabled' : "" %>
-												name  = "<% $supp->id %>"
-												id    = "<% $supp->id %>"
-												value = "1"
-												<% $entries{$supp->id} ? "checked" : "" %>
+										<span class='fifth redtext semibold'>
+%											if ($patterns{$pattern_id}{"max"} > 1) {
+												Max <% $patterns{$pattern_id}{"max"} %> events in <% $patterns{$pattern_id}{"name"} %>
+%											}
+										</span>
+
+<%perl>
+
+									foreach my $supp_id ( sort {
+											$events{$a}{"abbr"} cmp $events{$b}{"abbr"}
+										} keys %{$events{"by_pattern"}{$pattern_id}}
+									) {
+
+										my $supp_name = $events{$supp_id}{"name"};
+										$supp_name =~ s/Extemporaneous/Extemp/g;
+</%perl>
+										<label for="<% $supp_id %>">
+											<span
+												class = "realfifth hover nospace ltborderright"
+												title = "<% $events{$supp_id}{"name"} %>"
 											>
+												<span class="threequarters smallish marno padleft">
+													<% $supp_name %>
+												</span>
+
+												<span class="fifth centeralign marno">
+													<input
+														type  = "checkbox"
+														class = "<% $pattern_id %>"
+														<% $nosupp ? 'disabled' : "" %>
+														name  = "<% $supp_id %>"
+														id    = "<% $supp_id %>"
+														value = "1"
+														<% $entries{$supp_id} ? "checked" : "" %>
+													>
+												</span>
+											</span>
+										</label>
+<%perl>
+									}
+
+									$m->print("</div>");
+								}
+
+							} else {
+
+								$m->print("<div class='row'>");
+
+								foreach my $supp_id ( sort {
+										$events{$a}{"abbr"} cmp $events{$b}{"abbr"}
+									} keys %{$events{"by_type"}{"supp"}}
+								) {
+
+									my $supp_name = $events{$supp_id}{"name"};
+									$supp_name =~ s/Extemporaneous/Extemp/g;
+</%perl>
+									<label for="<% $supp_id %>">
+										<span
+											class = "realfifth hover nospace ltborderright"
+											title = "<% $events{$supp_id}{"name"} %>"
+										>
+											<span class="threequarters smallish marno padleft">
+												<% $supp_name %>
+											</span>
+
+											<span class="fifth centeralign marno">
+												<input
+													type  = "checkbox"
+													<% $nosupp ? 'disabled' : "" %>
+													name  = "<% $supp_id %>"
+													id    = "<% $supp_id %>"
+													value = "1"
+													<% $entries{$supp_id} ? "checked" : "" %>
+												>
+											</span>
 										</span>
-									</span>
-								</label>
+									</label>
+%								}
+								</div>
 %							}
-						</span>
+%						if ($types{"conn"}) {
+							</span>
+%						}
 					</div>
 %				}
 
