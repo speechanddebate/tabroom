@@ -164,9 +164,6 @@ sub all_settings {
 
 		} elsif ($value eq "json") { 
 
-			# this makes no sense to me either but this is the only way it
-			# apparently returns a hash ref not a json text??? -CLP
-
 			$all_settings{$tag} = eval { 
 				return JSON::decode_json($value_text);
 			};
