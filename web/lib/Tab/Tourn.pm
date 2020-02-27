@@ -150,10 +150,9 @@ sub setting {
 		} elsif ($existing->value eq "date") { 
 			return $existing->value_date 
 		} elsif ($existing->value eq "json") { 
-			my $ref = eval { 
+			return eval { 
 				return JSON::decode_json($existing->value_text);
-			};
-			return $ref;
+			}; 
 		}
 		return $existing->value;
 	}
@@ -188,10 +187,12 @@ sub all_settings {
 
 		} elsif ($value eq "json") { 
 
-			my $jsonref = eval { 
-				JSON::decode_json($value_text);
+			# this makes no sense to me either but this is the only way it
+			# apparently returns a hash ref not a json text??? -CLP
+
+			$all_settings{$tag} = eval { 
+				return JSON::decode_json($value_text);
 			};
-			$all_settings{$tag} = $jsonref;
 
 		} else { 
 			$all_settings{$tag} = $value;
