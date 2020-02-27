@@ -90,7 +90,7 @@ sub setting {
 				my $json = eval{ 
 					return JSON::encode_json($blob);
 				};
-				$existing->value_text($jsonref);
+				$existing->value_text($json);
 			}
 
 			$existing->update;
