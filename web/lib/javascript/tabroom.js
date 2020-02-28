@@ -40,18 +40,6 @@
 		return false;
 	}
 
-/* master toggle for checkboxes */
-
-	function confirmAll(master, targetClass) {
-
-		if ($(master).prop("checked") === false) {
-			$("."+targetClass).prop("checked", false);
-		} else {
-			$("."+targetClass).prop("checked", true);
-		}
-	}
-
-
 /* Respond to switch calls */
 
 	function postEnter(e, checkObject, replyUrl) {
