@@ -42,10 +42,11 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my $round    = $panel->round;
-	my $timeslot = $round->timeslot;
-	my $event    = $round->event;
-	my $start    = $timeslot->start->set_time_zone($tz);
+	my $round      = $panel->round;
+	my $timeslot   = $round->timeslot;
+	my $event      = $round->event;
+	my $event_type = $event->type;
+	my $start      = $timeslot->start->set_time_zone($tz);
 
 	my %event_settings = $event->all_settings();
 
@@ -166,21 +167,32 @@
 
 	my $all++ if $tourn_settings->{"nsda_nats"} && $event_settings{"supp"};
 
-	my $last_round = Tab::Round->search(event => $event->id, name => ($round->name - 1))->first;
+	my %entry_wins;
+	my %entry_losses;
 
-	my %entry_wins = $m->comp(
-		"/funclib/entry_wins.mas",
+	my %tb_types = $m->comp("/funclib/tiebreak_types.mas", round => $round);
+
+	if ($tb_types{"winloss"}) {
+
+		my $last_round = Tab::Round->search(
+			event => $event->id,
+			name  => ($round->name - 1)
+		)->first;
+
+		%entry_wins = $m->comp(
+			"/funclib/entry_wins.mas",
+				event => $event,
+				round => $last_round,
+				all   => $all
+			);
+
+		%entry_losses = $m->comp(
+			"/funclib/entry_losses.mas",
 			event => $event,
 			round => $last_round,
 			all   => $all
 		);
-
-	my %entry_losses = $m->comp(
-		"/funclib/entry_losses.mas",
-		event => $event,
-		round => $last_round,
-		all   => $all
-	);
+	}
 
 	my @reserved_rooms;
 
@@ -190,16 +202,75 @@
 		push @reserved_rooms, $r2 if $r2;
 	}
 
-	my @entries = $m->comp(
-		"/funclib/panel_entries.mas",
-		panel => $panel
-	);
+	my $entries_sth = $dbh->prepare("
+		select
+			entry.id, entry.code, entry.name, entry.dropped, entry.dq,
+			student.last,
+			ballot.id, ballot.side, ballot.speakerorder,
+			school.id, school.code, school.name, school.state,
+			region.id, region.code, region.name,
+			district.id, district.code, district.name,
+			po.value,
+			count(follower.id), count(distinct student.person)
 
-	unless ($event->type eq "speech" || $event->type eq "congress") {
-		@entries = sort {$a->side <=> $b->side} @entries;
+		from (entry, ballot)
+			left join school on school.id = entry.school
+			left join region on school.region = region.id
+			left join district on school.district = district.id
+			left join score po on po.ballot = ballot.id and po.tag = 'po'
+			left join entry_student es on es.entry = entry.id
+			left join student on es.student = student.id
+			left join follower on follower.entry = entry.id
+
+			where entry.id = ballot.entry
+			and ballot.panel = ?
+
+		group by entry.id
+		order by ballot.side, ballot.speakerorder, entry.code
+	");
+
+	$entries_sth->execute($panel->id);
+
+	my %entries;
+	my %schools;
+
+	while (
+		my (
+			$entry_id, $entry_code, $entry_name, $entry_dropped, $entry_dq,
+			$student_last,
+			$ballot_id, $ballot_side, $ballot_speakerorder,
+			$school_id, $school_code, $school_name, $school_state,
+			$region_id, $region_code, $region_name,
+			$district_id, $district_code, $district_name,
+			$po_value,
+			$follower_count, $person_count
+		) = $entries_sth->fetchrow_array()
+	) {
+
+		$entries{$entry_id}{"followers"}    = int($follower_count + $person_count + 0);
+		$entries{$entry_id}{"dropped"}      = $entry_dropped;
+		$entries{$entry_id}{"dq"}           = $entry_dq;
+		$entries{$entry_id}{"code"}         = $entry_code;
+		$entries{$entry_id}{"name"}         = $entry_name;
+		$entries{$entry_id}{"school_code"}  = $school_code;
+		$entries{$entry_id}{"school_name"}  = $school_name;
+		$entries{$entry_id}{"school_state"} = $school_state;
+
+		$entries{$entry_id}{"region_code"} = $region_code;
+		$entries{$entry_id}{"region_name"} = $region_name;
+
+		$entries{$entry_id}{"district_code"} = $district_code;
+		$entries{$entry_id}{"district_name"} = $district_name;
+
+		if ($event_type eq "speech") {
+			$entries{$entry_id}{"speaks"} = $ballot_speakerorder;
+		} elsif ($event_type eq "congress") {
+			$entries{$entry_id}{"po"}   = $po_value;
+			$entries{$entry_id}{"last"} = $student_last;
+		} else {
+			$entries{$entry_id}{"sides"} = $ballot_side;
+		}
 	}
-
-	my %schools = map {$_->school->id => 1} @entries;
 
 	$settings{"tab_ratings"}++ if $category_settings{"tab_ratings"};
 	$settings{"prefs"} = $category_settings{"prefs"};
@@ -274,8 +345,8 @@
 		|| $round_type eq "runoff";
 
 	my $section = "Debate";
-	$section = "Section" if $event->type eq "speech";
-	$section = "Chamber" if $event->type eq "congress";
+	$section = "Section" if $event_type eq "speech";
+	$section = "Chamber" if $event_type eq "congress";
 
 	my $room = $panel->room if $panel->room;
 	my $panel_room = $room->id if $room;
@@ -441,7 +512,7 @@
 
 	my $aff;
 
-	if ($event->type eq "debate" && $round_type ne "flip") {
+	if ($event_type eq "debate" && $round_type ne "flip") {
 		$aff = $m->comp("/funclib/round_elim_dueaff.mas", panel => $panel);
 	}
 
@@ -657,7 +728,7 @@
 					<tr class="yellowrow">
 
 						<th class="smaller">
-%							if ($event->type eq "congress") {
+%							if ($event_type eq "congress") {
 								Parli
 %							} else {
 								Chair
@@ -777,7 +848,7 @@
 								class = "chairs buttonwhite hover semibold bigger padless
 									<% $judge->chair ? "greentext fa fa-gavel" : "redtext fa fa-times" %>"
 								href="chair_switch.mhtml?<% $url_args %>"
-							><% $event->type eq "congress" ? "" : $judge->chair ? "Y" : "N" %></a>
+							><% $event_type eq "congress" ? "" : $judge->chair ? "Y" : "N" %></a>
 
 						</td>
 
@@ -933,7 +1004,7 @@
 						}
 
 						if ($judge->chair
-							&& $event->type eq "congress"
+							&& $event_type eq "congress"
 							&& $round->type eq "prelim"
 						) {
 
@@ -1231,7 +1302,7 @@
 			</div>
 
 		<h5 class="martopmore">
-			<% scalar @entries %> Entries
+			<% scalar (keys %entries) %> Entries
 		</h5>
 
 		<table>
@@ -1240,16 +1311,18 @@
 
 			<tr class="yellowrow">
 
-%				if ($event->type eq "speech") {
+%				if ($event_type eq "speech") {
 					<th class="smaller">
 						Spks
 					</th>
-%				} elsif ($event->type eq "wudc") {
+%				} elsif ($event_type eq "wudc") {
 					<th class="smaller">
 						Pos
 					</th>
-%				} elsif ($event->type eq "congress") {
-
+%				} elsif ($event_type eq "congress") {
+					<th class="smaller">
+						PO
+					</th>
 %				} else {
 					<th class="smaller">
 						Side
@@ -1294,38 +1367,49 @@
 							Reg
 						</th>
 %					}
-
 %				}
 
 				<th colspan="3">
 				</th>
-
 			</tr>
 			</thead>
 			<tbody>
 
-% 			foreach my $entry (@entries) {
+<%perl>
+ 			foreach my $entry_id (
+				sort {
+					$entries{$b}{"po"} <=> $entries{$a}{"po"}
+					|| $entries{$a}{"speaks"} <=> $entries{$b}{"speaks"}
+					|| $entries{$a}{"side"} <=> $entries{$b}{"side"}
+					|| $entries{$a}{"last"} cmp $entries{$b}{"last"}
+					|| $entries{$a}{"code"} cmp $entries{$b}{"code"}
+				} keys %entries
+			) {
 
-				<tr class="<% $entry->dropped ? "lirdrow" : "row" %>">
+</%perl>
+				<tr class="<% $entries{$entry_id}{"dropped"} ? "lirdrow" : "row" %>">
 
-%					if ($event->type eq "speech") {
+%					if ($event_type eq "speech") {
 						<td class="smallish centeralign">
-							<% $entry->speaks
-								? Lingua::EN::Numbers::Ordinate::ordinate($entry->speaks)
+							<% $entries{$entry_id}{"speaks"}
+								? Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"speaks"})
 								: ""
 							%>
 						</td>
-%					} elsif ($event->type eq "wudc") {
-						<td class="smallish">
-							<% $entry->speaks == 1 ? "OG" : "" %>
-							<% $entry->speaks == 2 ? "OO" : "" %>
-							<% $entry->speaks == 3 ? "CG" : "" %>
-							<% $entry->speaks == 4 ? "CO" : "" %>
+%					} elsif ($event_type eq "wudc") {
+						<td class="smallish centeralign">
+							<% $entries{$entry_id}{"speaks"} == 1 ? "OG" : "" %>
+							<% $entries{$entry_id}{"speaks"} == 2 ? "OO" : "" %>
+							<% $entries{$entry_id}{"speaks"} == 3 ? "CG" : "" %>
+							<% $entries{$entry_id}{"speaks"} == 4 ? "CO" : "" %>
+						</td>
+
+%					} elsif ($event_type eq "congress" ) {
+
+						<td class="smallish centeralign bluetext semibold">
+							<% $entries{$entry_id}{"po"} ? "PO" : "" %>
 						</td>
 <%perl>
-
-					} elsif ($event->type eq "congress" ) {
-
 					} else {
 
 						if (
@@ -1337,7 +1421,6 @@
 							&& (scalar (keys %judge_scores) < 1)
 							&& (not defined $aff)
 						) {
-
 </%perl>
 							<td class="smallish centeralign">
 								Flip
@@ -1346,40 +1429,35 @@
 %						} else {
 
 							<td class="smallish centeralign">
-
 %								if ($aff) {
-
-%									if ($entry == $aff && $entry->side == 1)  {
-										<% $entry->side == 1 ? "Locked ".$aff_string : ""%>
-%									} elsif (($entry != $aff) && $entry->side == 2) {
-										<% $entry->side == 2 ? "Locked ".$neg_string : ""%>
+%									if ($entry_id == $aff && $entries{$entry_id}{"side"} == 1)  {
+										<% $entries{$entry_id}{"side"} == 1 ? "Locked ".$aff_string : ""%>
+%									} elsif (($entry_id != $aff) && $entries{$entry_id}{"side"} == 2) {
+										<% $entries{$entry_id}{"side"} == 2 ? "Locked ".$neg_string : ""%>
 %									} else {
 										<span class="redtext full marno padless semibold">
 											Sidelock broken!
 										</span>
 
 										<span class="redtext full marno padless semibold">
-											Locked <% $aff == $entry ? "Aff" : "Neg" %>
+											Locked <% $aff == $entry_id ? "Aff" : "Neg" %>
 										</span>
-
-										but on the <% $entry->side == 1 ? $aff_string : $neg_string %>
+										but on the <% $entries{$entry_id}{"side"} == 1 ? $aff_string : $neg_string %>
 %									}
-
 %								} else {
-									<% $entry->side == 1 ? $aff_string : $neg_string %>
+									<% $entries{$entry_id}{"side"} == 1 ? $aff_string : $neg_string %>
 %								}
-
 							</td>
 %						}
 
 						<td class="smallish centeralign">
 							<%
-								$entry_wins{$entry->id}
-								? $entry_wins{$entry->id}
+								$entry_wins{$entry_id}
+								? $entry_wins{$entry_id}
 								: 0
 							%>-<%
-								$entry_losses{$entry->id}
-								? $entry_losses{$entry->id}
+								$entry_losses{$entry_id}
+								? $entry_losses{$entry_id}
 								: 0
 							%>
 						</td>
@@ -1389,56 +1467,54 @@
 
 %						if ($blind_mode) {
 
-							<% $anonymize{"entry"}{$entry->id} %>
+							<% $anonymize{"entry"}{$entry_id} %>
 
 %						} else {
 
 %							unless ($entry_only) {
 								<a
 									class="white button leftalign"
-									href="/register/entry/edit.mhtml?entry_id=<% $entry->id %>"
+									href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
 								>
 %							}
 
 %							if ($code_name) {
 								<span class="threequarters marno">
-									<% $entry->code %>
+									<% $entries{$entry_id}{"code"} %>
 								</span>
 
 %							} else {
 
 								<span class="half nospace">
-									<% $entry->code %>
+									<% $entries{$entry_id}{"code"} %>
 								</span>
 
 								<span class="half nospace">
-									<% $entry->fullnames %>
+									<% $entries{$entry_id}{"name"} %>
 								</span>
 %							}
 
 							<span class="quarter semibold redtext">
-								<% ($entry->dq) ? "DQ": "" %>
-								<% ($entry->dropped) ? "DROP" : "" %>
+								<% ($entries{$entry_id}{"dq"}) ? "DQ" : "" %>
+								<% ($entries{$entry_id}{"dropped"}) ? "DROP" : "" %>
 							</span>
-
 %						}
-
 						</a>
 					</td>
 
 %	 				if ($live_updates) {
 						<td class="smallish centeralign">
-							<% scalar $m->comp("/funclib/entry_follower.mas", entry => $entry) %>
+							<% $entries{$entry_id}{"followers"} %>
 						</td>
 %					}
 
 					<td class="smallish">
 %						unless ($blind_mode) {
 							<% (not defined $settings{"no_school_codes"})
-								? '<span class="bluetext third">'.$entry->schoolcode.'</span><span class="twothirds">'
+								? '<span class="bluetext third">'.$entries{$entry_id}{"school_code"}.'</span><span class="twothirds">'
 								: ""
 							%>
-							<% Tab::short_name($entry->schoolname) %>
+							<% Tab::short_name($entries{$entry_id}{"school_name"}) %>
 							<% (not defined $settings{"no_school_codes"})
 								? '</span>'
 								: ""
@@ -1449,20 +1525,20 @@
 %					unless ($blind_mode) {
 %						if ($tourn_settings->{"nsda_nats"}) {
 							<td class="smallish centeralign">
-								<% $entry->regioncode %>
+								<% $entries{$entry_id}{"region_code"} %>
 							</td>
 
 							<td class="smallish centeralign">
-								<% $entry->districtcode %>
+								<% $entries{$entry_id}{"district_code"} %>
 							</td>
 %						} elsif ($tourn_settings->{"regions"} || $tourn_settings->{"ncfl"} ) {
 							<td class="smallish centeralign">
-								<% $entry->regioncode %>
+								<% $entries{$entry_id}{"region_code"} %>
 							</td>
 
 %							if ($settings{"dio_regions"}) {
 								<td class="smallish centeralign">
-									<% $settings{"dio_region"}{$entry->regioncode} %>
+									<% $settings{"dio_region"}{$entries{$entry_id}{"region_code"}} %>
 								</td>
 %							}
 %						}
@@ -1471,16 +1547,14 @@
 %					unless ($entry_only) {
 						<td class="smallish centeralign nospace">
 							<a
-								class="buttonwhite bluetext smallish"
-								href="/panel/manipulate/entry_edit.mhtml?entry_id=<%$entry->id%>&round_id=<% $round->id %>"
+								class="buttonwhite bluetext smallish invert"
+								href="/panel/manipulate/entry_edit.mhtml?entry_id=<%$entry_id%>&round_id=<% $round->id %>"
 							>Move</a>
 						</td>
 %					}
-
 				</tr>
 %	 		}
 			</tbody>
-
 		</table>
 
 		<br />
@@ -1918,16 +1992,16 @@
 				 </label>
 %			}
 
-%			if ($event->type eq "congress") {
+%			if ($event_type eq "congress") {
 
-%			} elsif ($event->type eq "speech") {
+%			} elsif ($event_type eq "speech") {
 				<a
 					href="speaker_order.mhtml?panel_id=<% $panel->id %>"
 					class="yellow full"
 				>
 					Change Speaker Order
 				</a>
-%			} elsif ($event->type eq "wudc") {
+%			} elsif ($event_type eq "wudc") {
 				<a
 					href="wudc_sides.mhtml?panel_id=<% $panel->id %>"
 					class="yellow full"
@@ -1961,7 +2035,7 @@
 %				}
 %			}
 
-% 			unless (@judges || @entries) {
+% 			unless (@judges || keys %entries) {
 				<a
 					href="/panel/manipulate/panel_rm.mhtml?panel_id=<% $panel_id %>"
 					class="dkred full"
@@ -2099,9 +2173,9 @@
 
 			<p class="padno semibold greentext">
 				Move this
-					<% $event->type eq "speech" ? "Section" : "" %>
-					<% $event->type eq "congress" ? "Chamber" : "" %>
-					<% $event->type ne "speech" && $event->type ne "congress" ? "Debate" : "" %>
+					<% $event_type eq "speech" ? "Section" : "" %>
+					<% $event_type eq "congress" ? "Chamber" : "" %>
+					<% $event_type ne "speech" && $event_type ne "congress" ? "Debate" : "" %>
 				to
 			</p>
 
@@ -2151,9 +2225,9 @@
 				>
 
 					Delete This
-						<% $event->type eq "speech" ? "Section" : "" %>
-						<% $event->type eq "congress" ? "Chamber" : "" %>
-						<% $event->type ne "speech" && $event->type ne "congress" ? "Debate" : "" %>
+						<% $event_type eq "speech" ? "Section" : "" %>
+						<% $event_type eq "congress" ? "Chamber" : "" %>
+						<% $event_type ne "speech" && $event_type ne "congress" ? "Debate" : "" %>
 				</a>
 			</div>
 
