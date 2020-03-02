@@ -6,53 +6,15 @@
 </%args>
 <%init>
 
-	my $switch;
+	my $dbh = Tab::DBI->db_Main();
 
-	my @events;
-	my @supps;
-	my @conns;
-	my @stefans;
+	my $limit;
 
-	if ($tourn_settings->{"nsda_nats"}) {
-
-		@events = $m->comp(
-			"/funclib/nationals_events.mas",
-			tourn  => $tourn,
-			status => "all",
-			type   => "mains"
-		);
-
-		@supps = $m->comp(
-			"/funclib/nationals_events.mas",
-			tourn  => $tourn,
-			status => "all",
-			type   => "supp"
-		);
-
-
-		@stefans = $m->comp(
-			"/funclib/nationals_events.mas",
-			tourn  => $tourn,
-			status => "all",
-			type   => "stefan"
-		);
-
-		@conns = $m->comp(
-			"/funclib/nationals_events.mas",
-			tourn  => $tourn,
-			status => "all",
-			type   => "conn"
-		);
-
-	} else {
-
-		if ($only_category) {
-			@events = $only_category->events;
-		} else {
-			@events = $tourn->events;
-		}
-
+	if ($only_category) {
+		$limit = "and event.category = ".$only_category->id;
 	}
+
+	my @events = $tourn->events;
 
 	if ($perms->{'details'}) {
 
@@ -62,33 +24,133 @@
 			events => \@events
 		);
 
-		@supps = $m->comp( "/funclib/event_perms.mas",
-			perms  => $perms,
-			type   => "admin",
-			events => \@supps
-		);
+		my $limit_ids;
 
-		@conns = $m->comp( "/funclib/event_perms.mas",
-			perms  => $perms,
-			type   => "admin",
-			events => \@conns
-		);
+		foreach my $event (@events) {
+			$limit_ids .= ", " if $limit_ids;
+			$limit_ids .= $event->id;
+		}
+
+		$limit .= " and event.id in (".$limit_ids.")";
 	}
 
-	if (scalar @events == 1) {
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.abbr, event.name, event.type,
+				entry.id, entry.active, entry.dropped, entry.waitlist, entry.unconfirmed,
+				rejected_by.value,
+				atlarge.value,
+				supp.value,
+				conn.value,
+				stefan.value,
+				usa_wsdc.value
 
+			from (event, entry)
+
+			left join event_setting supp on supp.tag = 'supp' and supp.event = event.id
+			left join event_setting conn on conn.tag = 'conn' and conn.event = event.id
+			left join event_setting stefan on stefan.tag = 'stefan' and stefan.event = event.id
+			left join event_setting usa_wsdc on usa_wsdc.tag = 'usa_wsdc' and usa_wsdc.event = event.id
+
+			left join entry_setting rejected_by
+				on rejected_by.entry = entry.id
+				and rejected_by.tag = 'rejected_by'
+
+			left join entry_setting atlarge
+				on atlarge.entry = entry.id
+				and atlarge.tag = 'atlarge'
+
+			where event.tourn = ?
+			and entry.event = event.id
+
+		order by CAST(event.type as char), event.abbr, entry.id
+	");
+
+	$sth->execute($tourn->id);
+
+	my %events;
+	my %totals;
+
+	while (
+
+		my (
+			$event_id, $event_abbr, $event_name, $event_type,
+				$entry_id, $entry_active, $entry_dropped, $entry_waitlist, $entry_unconfirmed,
+				$rejected_by,
+				$atlarge,
+				$supp,
+				$conn,
+				$stefan,
+				$usa_wsdc
+		) = $sth->fetchrow_array()
+
+	) {
+
+		unless ($events{$event_id}{"name"}) {
+			$events{$event_id}{"name"} = $event_name;
+			$events{$event_id}{"abbr"} = $event_abbr;
+			$events{$event_id}{"type"} = $event_type;
+
+			if ($stefan) {
+				$events{$event_id}{"type"} = "zstefan";
+			} elsif ($supp) {
+				$events{$event_id}{"type"} = "wsupp";
+			} elsif ($conn) {
+				$events{$event_id}{"type"} = "yconn";
+			}
+
+			if ($usa_wsdc || $stefan) {
+				$events{$event_id}{"normal"}++;
+			}
+		}
+
+		$events{$event_id}{"total"}++;
+		$totals{"total"}++;
+
+		if ($rejected_by) {
+
+			$events{$event_id}{"rejected"}++;
+			$totals{"rejected"}++;
+
+		} elsif ($entry_unconfirmed) {
+
+			$events{$event_id}{"pending"}++;
+			$totals{"pending"}++;
+
+		} elsif ($entry_dropped) {
+
+			$events{$event_id}{"dropped"}++;
+			$totals{"dropped"}++;
+
+		} elsif ($entry_waitlist) {
+
+			$events{$event_id}{"waitlist"}++;
+			$totals{"waitlist"}++;
+
+			if ($atlarge) {
+				$events{$event_id}{"atlarge"}++;
+				$totals{"atlarge"}++;
+			}
+
+		} elsif ($entry_active) {
+
+			$events{$event_id}{"active"}++;
+			$totals{"active"}++;
+
+			if ($atlarge) {
+				$events{$event_id}{"atlarge"}++;
+				$totals{"atlarge"}++;
+			}
+		}
+	}
+
+	$sth->finish();
+
+	if (scalar @events == 1) {
 		$m->redirect("nsda_roster.mhtml?event_id=".$events[0]->id)
 			if $tourn_settings->{"nsda_nats"};
 		$m->redirect("roster.mhtml?event_id=".$events[0]->id);
 	}
-
-	my $at_larges;
-
-	foreach my $event (@events) {
-		$at_larges++ if $event->setting("at_larges");
-	}
-
-	my %totals;
 
 </%init>
 
@@ -118,228 +180,121 @@
 
 			<thead>
 
-			<tr class="yellowrow">
-
-				<th class="smaller">
-					Event
-				</th>
-
-				<th class="smaller">
-					Abbr
-				</th>
-
-%				if ($tourn_settings->{"nsda_nats"}) {
+				<tr class="yellowrow">
 
 					<th class="smaller">
-						Accepted
+						Event
 					</th>
 
 					<th class="smaller">
-						Pending
+						Abbr
 					</th>
-
-					<th class="smaller">
-						Rejected
-					</th>
-
-					<th class="smaller">
-						Dropped/Inactive
-					</th>
-
-%				} else {
 
 					<th class="smaller">
 						Active
 					</th>
 
-					<th class="smaller">
-						Drops
-					</th>
-
-					<th class="smaller">
-						Waitlist
-					</th>
-
-%				}
-
-%				if ($at_larges) {
-					<th class="smaller">
-						At Large
-					</th>
-%				}
-
-				<th class="smaller">
-					Total
-				</th>
-
-			</tr>
-			</thead>
-			<tbody>
-
-<%perl>
-			if ($tourn_settings->{"nsda_nats"}) {
-				#This is super slow.  Fix it.
-				my $dbh = Tab::DBI->db_Main();
-			}
-
-			foreach my $event (@events, @supps, @stefans, @conns) {
-
-				next unless $event > 0 && $event->id;
-
-				my $at_large++ if $event->setting("at_larges");
-				my $normal++ if $event->setting("usa_wsdc") || $event->setting("stefan");
-
-				my %entries;
-
-				if ($tourn_settings->{"nsda_nats"} && (not defined $normal)) {
-
-					@{$entries{'all'}} = Tab::Entry->search(
-						event => $event->id
-					);
-
-					@{$entries{'active'}} = Tab::Entry->search(
-						event  => $event->id,
-						active => 1
-					);
-
-					@{$entries{'dropped'}} = Tab::Entry->search(
-						event   => $event->id,
-						dropped => 1
-					);
-
-					Tab::Entry->set_sql( rejected => "
-						select entry.*
-						from entry, entry_setting
-						where entry.event = ?
-						and entry.id = entry_setting.entry
-						and entry_setting.tag = 'rejected_by'
-					");
-
-					@{$entries{'rejected'}} = Tab::Entry->search_rejected($event->id);
-
-					Tab::Entry->set_sql( pending => "
-						select entry.*
-						from entry
-						where entry.event = ?
-						and entry.unconfirmed = 1
-						and not exists (
-							select entry_setting.id
-							from entry_setting
-							where entry.id = entry_setting.entry
-							and entry_setting.tag = 'rejected_by'
-						)
-					");
-
-					@{$entries{'pending'}} = Tab::Entry->search_pending($event->id);
-
-				} else {
-
-					@{$entries{'all'}} = Tab::Entry->search(
-						event       => $event->id,
-						unconfirmed => 0
-					);
-
-					@{$entries{"active"}} = Tab::Entry->search(
-						event => $event->id,
-						active => 1
-					);
-
-					@{$entries{"dropped"}} = Tab::Entry->search(
-						event       => $event->id,
-						unconfirmed => 0,
-						dropped     => 1
-					);
-
-					@{$entries{"waitlist"}} = Tab::Entry->search(
-						event       => $event->id,
-						unconfirmed => 0,
-						waitlist    => 1,
-						dropped     => 0
-					);
-
-				}
-
-				if ($at_large) {
-
-					my @at_large_settings = $m->comp(
-						"/funclib/event_entry_settings.mas",
-							event => $event,
-							tag   => "atlarge"
-					);
-
-					my %atl = map { $_->entry->id => 1} @at_large_settings;
-					@{$entries{"at_large"}} = keys %atl;
-				}
-
-				foreach my $key (%entries) {
-					next unless $entries{$key};
-					$totals{$key} += scalar @{$entries{$key}};
-				}
-
-</%perl>
-				<tr>
-
-					<td class="nospace">
-						<a class="white padleft padtop padbottom"
-							href="<% $tourn_settings->{"nsda_nats"} && (not defined $normal) ? "nsda_" : ""
-							%>roster.mhtml?event_id=<% $event->id %>">
-							<% $event->name %>
-						</a>
-					</td>
-					<td class="nospace centeralign smallish">
-						<% $event->abbr %>
-					</td>
-
 %					if ($tourn_settings->{"nsda_nats"}) {
 
-						<th class="smallish rightalign">
-							<% scalar @{$entries{"active"}} %>
+						<th class="smaller">
+							Pending
 						</th>
 
-						<th class="smallish rightalign">
-							<% scalar @{$entries{"pending"}} %>
-						</th>
-
-						<th class="smallish rightalign">
-							<% scalar @{$entries{"rejected"}} %>
-						</th>
-
-						<th class="smallish rightalign">
-							<% scalar @{$entries{"dropped"}} %>
+						<th class="smaller">
+							Rejected
 						</th>
 
 %					} else {
 
+%						if ($totals{"waitlist"}) {
+							<th class="smaller">
+								Waitlist
+							</th>
+%						}
+
+%						if ($totals{"atlarge"}) {
+							<th class="smaller">
+								At Large
+							</th>
+%						}
+%					}
+
+					<th class="smaller">
+						Dropped
+					</th>
+
+					<th class="smaller">
+						Total
+					</th>
+
+				</tr>
+			</thead>
+			<tbody>
+
+<%perl>
+
+			foreach my $event_id ( sort {
+					$events{$a}{"type"} cmp $events{$b}{"type"}
+					|| $events{$a}{"name"} cmp $events{$b}{"name"}
+				} keys %events
+			) {
+</%perl>
+
+				<tr>
+					<td class="nospace">
+						<a class="white padleft padtop padbottom"
+							href="<%
+								$tourn_settings->{"nsda_nats"} && (not defined $events{$event_id}{"normal"}) ? "nsda_" : ""
+							%>roster.mhtml?event_id=<% $event_id %>">
+							<% $events{$event_id}{"name"} %>
+						</a>
+					</td>
+
+					<td class="nospace centeralign smallish">
+						<% $events{$event_id}{"abbr"} %>
+					</td>
+
+					<td class="smallish rightalign">
+						<% $events{$event_id}{"active"} %>
+					</td>
+
+%					if ($tourn_settings->{"nsda_nats"}) {
+
 						<td class="smallish rightalign">
-							<% scalar @{$entries{"active"}} %>
+							<% $events{$event_id}{"pending"} %>
 						</td>
 
 						<td class="smallish rightalign">
-							<% scalar @{$entries{"dropped"}} %>
+							<% $events{$event_id}{"rejected"} %>
 						</td>
 
-						<td class="rightalign">
+%					} else {
 
-%							if ($event->setting("waitlist") || $event->setting("waitlist_all")) {
+%						if ($totals{"waitlist"}) {
+							<td class="rightalign">
 								<a
 									class="white"
-									href="roster.mhtml?waitlist=1&event_id=<% $event->id %>"
+									href="roster.mhtml?waitlist=1&event_id=<% $event_id %>"
 								>
-									<% scalar @{$entries{"waitlist"}} %>
+									<% $events{$event_id}{"waitlist"} %>
 								</a>
-%							}
-						</td>
+							</td>
+%						}
 
-%						if ($at_larges) {
+%						if ($totals{"atlarge"}) {
 							<td class="smallish rightalign">
-								<% scalar @{$entries{"at_large"}} %>
+								<% $events{$event_id}{"atlarge"} %>
 							</td>
 %						}
 
 %					}
 
 					<td class="smallish rightalign">
-						<% scalar @{$entries{"all"}} %>
+						<% $events{$event_id}{"dropped"} %>
+					</td>
+
+					<td class="smallish rightalign">
+						<% $events{$event_id}{"total"} %>
 					</td>
 
 				</tr>
@@ -359,11 +314,11 @@
 				<th>
 				</th>
 
-%				if ($tourn_settings->{"nsda_nats"}) {
+				<th class="rightalign">
+					<% $totals{"active"} %>
+				</th>
 
-					<th class="rightalign">
-						<% $totals{"active"} %>
-					</th>
+%				if ($tourn_settings->{"nsda_nats"}) {
 
 					<th class="rightalign">
 						<% $totals{"pending"} %>
@@ -373,40 +328,36 @@
 						<% $totals{"rejected"} %>
 					</th>
 
-					<th class="rightalign">
-						<% $totals{"dropped"} %>
-					</th>
-
 %				} else {
 
-					<th class="rightalign">
-						<% $totals{"active"} %>
-					</th>
+%					if ($totals{"waitlist"}) {
+						<th class="rightalign">
+							<% $totals{"waitlist"} %>
+						</th>
+%					}
 
-					<th class="rightalign">
-						<% $totals{"dropped"} %>
-					</th>
-
-					<th class="rightalign">
-						<% $totals{"waitlist"} %>
-					</th>
-
-%				}
-
-%				if ($at_larges) {
-					<th class="rightalign">
-						<% $totals{"at_large"} %>
-					</th>
+%					if ($totals{"atlarge"}) {
+						<th class="rightalign">
+							<% $totals{"atlarge"} %>
+						</th>
+%					}
 %				}
 
 				<th class="rightalign">
-					<% $totals{"all"} %>
+					<% $totals{"dropped"} %>
 				</th>
 
+				<th class="rightalign">
+					<%
+						$totals{"active"}
+						+ $totals{"dropped"}
+						+ $totals{"waitlisted"}
+						+ $totals{"pending"}
+						+ $totals{"rejected"}
+					%>
+				</th>
 			</tr>
-
 		</table>
 
 	</div>
-
 
