@@ -1,9 +1,6 @@
 <%args>
 	$round_id
 	$filename
-	$schools     => undef
-	$record      => undef
-	$by_judge    => undef
 	$judge_codes => undef
 </%args>
 <%init>
@@ -22,21 +19,31 @@
 	my $tourn    = $event->tourn;
 	my $category = $event->category;
 
-	my %event_settings = $event->all_settings();
-
 	my $ncfl++ if $tourn->setting("ncfl");
-	my $codes = $tourn->setting("schemat_display");
-	my $coach_ratings = $category->setting("coach_ratings");
+	my $nsda++ if $tourn->setting("nsda_nats");
+	my %event_settings = $event->all_settings();
+	
+	my $no_codes++ if $category->setting("no_codes");
+	my $no_side_constraints++ if $event_settings{'no_side_constraints'};
+	my $include_room_notes if $round->setting("include_room_notes");
 
-	my %tab_ratings;
+	my $sidelocks;
+		
+	if ($tourn->setting("nsda_nats") 
+		&& (not defined $event_settings{"not_nats"})
+	) { 
 
-	if ($category->setting("tab_ratings")) {
-		%tab_ratings = $m->comp(
-			"/funclib/judge_settings.mas",
-			category => $category,
-			tag      => "tab_rating"
-		);
-	};
+	} elsif (
+		(not defined $no_side_constraints)
+		&& (
+			$round->type eq "elim"
+			|| $round->type eq "final"
+			|| $round->type eq "runoff"
+	   ) 
+	) { 
+		$sidelocks++;
+		undef $ARGS{"by_judge"};
+	}
 
 	my $aff_string = $event_settings{"aff_label"};
 	my $neg_string = $event_settings{"neg_label"};
@@ -44,44 +51,199 @@
 	$aff_string = "Aff" unless $aff_string;
 	$neg_string = "Neg" unless $neg_string;
 
-	undef $by_judge if $round->type eq "elim";
-	undef $by_judge if $round->type eq "final";
-	undef $by_judge if $round->type eq "runoff";
+	my %pods;
 
-	Tab::Panel->columns(TEMP => "judgename");
-	Tab::Panel->columns(TEMP => "roomname");
-	Tab::Panel->columns(TEMP => "roomnotes");
+	my $dbh = Tab::DBI->db_Main();
+	my $sth = $dbh->prepare("
+		
+		select
+			entry.id, entry.code, entry.name,
+			pod.value,
+			school.id, school.name, school.code, school.state,
+			region.id, region.code, region.name, encfl_region.value,
+			district.id, district.code, district.name,
+			ballot.id, ballot.side, ballot.chair,
+			panel.id, panel.letter, panel.bye, panel.flight,
+			room.name, room.notes,
+			judge.id, judge.code, judge.first, judge.last,
+			judge_school.id, judge_school.code, judge_school.name,
+			judge_region.id, judge_region.code, judge_region.name, jncfl_region.value,
+			judge_district.id, judge_district.code, judge_district.name,
+			cr_tier.name, gcr_tier.name, tab_rating.value,
+			pod.value
 
-	Tab::Panel->set_sql( schemat => "
-		select panel.*, room.name as roomname, room.notes as roomnotes, judge.last as judgename
-		from panel
-		left join room on room.id = panel.room
-		left join ballot on ballot.panel = panel.id
-		left join judge on judge.id = ballot.judge
-		where panel.round = ?
-		group by panel.id
-		order by panel.letter
+		from (ballot, panel, entry, round, event)
+
+			left join room on panel.room = room.id
+			left join judge on ballot.judge = judge.id
+			left join school on entry.school = school.id
+			left join region on school.region = region.id
+			left join region_setting encfl_region 
+				on encfl_region.region = region.id
+				and encfl_region.tag = 'region_".$event->id."'
+
+			left join district on school.district = district.id
+			left join school judge_school on judge.school = judge_school.id
+			left join region judge_region on judge_school.region = judge_region.id
+			left join region_setting jncfl_region 
+				on jncfl_region.region = judge_region.id
+				and jncfl_region.tag = 'region_".$event->id."'
+			left join district judge_district on judge_school.district = judge_district.id
+			left join entry_setting pod on pod.entry = entry.id and pod.tag = 'pod'
+
+			left join rating coach_rating 
+				on coach_rating.rating_subset = event.rating_subset
+				and coach_rating.judge = judge.id
+
+			left join rating_tier cr_tier
+				on coach_rating.rating_tier = cr_tier.id
+				
+			left join rating gcoach_rating 
+				on gcoach_rating.judge = judge.id
+
+			left join rating_tier gcr_tier
+				on gcoach_rating.rating_tier = gcr_tier.id
+
+			left join judge_setting tab_rating 
+				on tab_rating.judge = judge.id
+				and tab_rating.tag = 'tab_rating'
+
+		where round.id = ? 
+			and panel.round = round.id
+			and ballot.panel = panel.id
+			and ballot.entry = entry.id
+			and event.id = round.event
+		order by 
+			panel.letter, ballot.side, judge.last DESC
 	");
 
-	my @all_panels = Tab::Panel->search_schemat($round->id);
+	$sth->execute($round->id);
+
+	my %panels;
+	my %room_judge_count;
+
+	while ( 
+		my (
+			$eid, $entry_code, $entry_name,
+			$pod_id,
+			$school_id, $school_name, $school_code, $school_state,
+			$region_id, $region_code, $region_name, $encfl_region,
+			$district_id, $district_code, $district_name,
+			$ballot_id, $ballot_side, $ballot_chair,
+			$pid, $panel_letter, $panel_bye, $panel_flight,
+			$room_name, $room_notes,
+			$jid, $judge_code, $judge_first, $judge_last,
+			$judge_school_id, $judge_school_name, $judge_school_code,
+			$judge_region_id, $judge_region_name, $judge_region_code, $jncfl_region,
+			$judge_district_id, $judge_district_name, $judge_district_code,
+			$coach_rating, $unspec_coach_rating, $tab_rating
+		) = $sth->fetchrow_array()
+	) { 
+
+		$panels{$pid}{"letter"} = $panel_letter;
+		$panels{$pid}{"room_name"} = $room_name;
+		$panels{$pid}{"room_notes"} = $room_notes;
+
+		my $room_number = $room_name;
+		my $room_string = $room_name;
+		$room_number =~  s/[\D_]//g;
+		$room_string =~  s/\d//g;
+		$panels{$pid}{"room_number"} = $room_number;
+		$panels{$pid}{"room_string"} = $room_string;
+
+		if ($panel_bye) { 
+			$panels{$pid}{"flight"} = 1;
+		} else { 
+			$panels{$pid}{"flight"} = $panel_flight;
+		}
+
+		if ($panel_bye) { 
+			$panels{$pid}{"bye"}++;
+		}
+
+		unless ($panels{$pid}{"judge_name"}) { 
+			$panels{$pid}{"judge_name"} = $judge_last;
+		}
+
+		my $tag = $ballot_side;
+
+		unless ($panels{$pid}{"judges"}{$jid}) { 
+			$panels{$pid}{"judges"}{$jid}{"chair"} = $ballot_chair;
+			$panels{$pid}{"judges"}{$jid}{"code"} = $judge_code;
+			$panels{$pid}{"judges"}{$jid}{"first"} = $judge_first;
+			$panels{$pid}{"judges"}{$jid}{"last"} = $judge_last;
+			$panels{$pid}{"judges"}{$jid}{"name"} = $judge_last.", ".$judge_first;
+			$panels{$pid}{"judges"}{$jid}{"school_name"} = $judge_school_name;
+			$panels{$pid}{"judges"}{$jid}{"school_code"} = $judge_school_code;
+			$panels{$pid}{"judges"}{$jid}{"region_name"} = $judge_region_name;
+			$panels{$pid}{"judges"}{$jid}{"region_code"} = $judge_region_code;
+			$panels{$pid}{"judges"}{$jid}{"region_ncfl"} = $jncfl_region;
+
+			$panels{$pid}{"judges"}{$jid}{"district_name"} = $judge_district_name;
+			$panels{$pid}{"judges"}{$jid}{"district_code"} = $judge_district_code;
+
+			if ($coach_rating) { 
+				$panels{$pid}{"judges"}{$jid}{"coach_rating"} = $coach_rating;
+			} elsif ($unspec_coach_rating) { 
+				$panels{$pid}{"judges"}{$jid}{"coach_rating"} = $unspec_coach_rating;
+			} 
+
+			$panels{$pid}{"judges"}{$jid}{"tab_rating"} = $tab_rating;
+
+			foreach my $ttag (keys %{$panels{$pid}{"judges"}{$jid}}) { 
+				$panels{$pid}{"judges"}{$jid}{$ttag} = Tab::texify($panels{$pid}{"judges"}{$jid}{$ttag});
+			}
+		}
+
+		if (
+			$panels{$pid}{"judges"} 
+			&& (scalar (keys %{$panels{$pid}{"judges"}}) > $room_judge_count{$room_name})
+		) { 
+			$room_judge_count{$room_name} = scalar (keys %{$panels{$pid}{"judges"}});
+		}
+
+		unless ($panels{$pid}{"entries"}{$tag}{$eid}) { 
+
+			if ($pod_id) { 
+				unless (defined $pods{$pod_id}) { 
+					$pods{$pod_id} = $event->setting("pod_".$pod_id);
+				}
+
+				unless ($pods{$pod_id}) { 
+					$pods{$pod_id} = " ";
+				}
+				$panels{$pid}{"entries"}{$tag}{$eid}{"pod"} = $pods{$pod_id};
+			}
+
+			$panels{$pid}{"entries"}{$tag}{$eid}{"id"} = $eid;
+			$panels{$pid}{"entries"}{$tag}{$eid}{"code"} = $entry_code;
+			$panels{$pid}{"entries"}{$tag}{$eid}{"name"} = $entry_name;
+			$panels{$pid}{"entries"}{$tag}{$eid}{"school_name"} = $school_name;
+			$panels{$pid}{"entries"}{$tag}{$eid}{"school_code"} = $school_code;
+
+			$panels{$pid}{"entries"}{$tag}{$eid}{"region_name"} = $region_name;
+			$panels{$pid}{"entries"}{$tag}{$eid}{"region_code"} = $region_code;
+			$panels{$pid}{"entries"}{$tag}{$eid}{"region_ncfl"} = $encfl_region;
+
+			$panels{$pid}{"entries"}{$tag}{$eid}{"district_name"} = $district_name;
+			$panels{$pid}{"entries"}{$tag}{$eid}{"district_code"} = $district_code;
+
+			foreach my $ttag (keys %{$panels{$pid}{"entries"}{$tag}{$eid}}) { 
+				$panels{$pid}{"entries"}{$tag}{$eid}{$ttag} = Tab::texify($panels{$pid}{"entries"}{$tag}{$eid}{$ttag});
+			}
+		}
+	}
 
 	my %entry_wins = ();
+	my %entry_losses = ();
 
-	my $no_side_constraints++ if $event_settings{'no_side_constraints'};
-
-	my $sidelocks++
-		if ($round->type eq "elim"
-			|| $round->type eq "final"
-			|| $round->type eq "runoff"
-		) && not defined $no_side_constraints;
-
-	undef $sidelocks if $tourn->setting("nsda_nats")
-		&& (not defined $event_settings{"not_nats"});
-
-	my $no_codes++ if $category->setting("no_codes");
-
-	if ($record) {
+	if ($ARGS{"record"}) {
 		%entry_wins = $m->comp("/funclib/entry_wins.mas",
+			event => $round->event,
+			round => $round
+		);
+
+		%entry_losses = $m->comp("/funclib/entry_losses.mas",
 			event => $round->event,
 			round => $round
 		);
@@ -106,19 +268,29 @@
 	my $tabular;
 	my $letters;
 
+	my $room_size;
+	my $judge_size;
+
 	if ($event_settings{"show_panel_letters"} || $ARGS{'by_section'}) {
 		$letters = "p{.075in}";
-		$tabular = "\\begin{tabular}{".$letters."p{1.4in}p{1.4in}p{2in}p{1.5in}}\n";
-		$tabular = "\\begin{tabular}{".$letters."p{.075in}p{1.05in}p{1.05in}p{1in}p{.75in}}\n" if $flighted == 2;
-		$tabular = "\\begin{tabular}{".$letters."p{.075in}p{1.4in}p{1.4in}p{1.9in}p{1.5in}}\n" if $flighted > 2;
-	} else {
-		$tabular = "\\begin{tabular}{".$letters."p{1.45in}p{1.45in}p{2in}p{1.5in}}\n";
-		$tabular = "\\begin{tabular}{".$letters."p{.075in}p{1.1in}p{1.1in}p{1in}p{.75in}}\n" if $flighted == 2;
-		$tabular = "\\begin{tabular}{".$letters."p{.075in}p{1.45in}p{1.45in}p{1.9in}p{1.5in}}\n" if $flighted > 2;
+	}
+		
+	if ($flighted == 2) { 
+		$tabular = "\\begin{tabular}{".$letters."p{.075in}p{1.05in}p{1.05in}p{1in}p{1in}}\n";
+	} elsif ($flighted > 2) { 
+		$tabular = "\\begin{tabular}{".$letters."p{.075in}p{1.4in}p{1.4in}p{1.9in}p{1.5in}}\n";
+	} else { 
+		$tabular = "\\begin{tabular}{".$letters."p{1.5in}p{1.5in}p{2in}p{2in}}\n";
 	}
 
-	my $entry_size = "1.5in";
-	$entry_size = "1.15in" if $flighted == 2;
+	my $entry_size = "1.5";
+	$entry_size = "1.15" if $flighted == 2;
+
+	if ($ARGS{"schools"}) { 
+		$entry_size -= .55;
+	}
+
+	$entry_size .= "in";
 
 	print TEXOUT "\\pagebreak[1]\n";
 	print TEXOUT "\\noindent\n";
@@ -131,92 +303,45 @@
 	print TEXOUT "\\newline\n";
 	print TEXOUT "\\".$fontsize."\n";
 
-	my @entries = $m->comp("/funclib/round_entries.mas", round => $round);
-	my @judges  = $m->comp("/funclib/round_judges.mas", round  => $round);
-	my @ballots = $m->comp("/funclib/round_ballots.mas", round => $round);
+	my @panel_ids = keys %panels;
 
-	my %coach_rating = ();
+	@panel_ids = sort {
+		$panels{$a}{"bye"} <=> $panels{$b}{"bye"}
+		|| $panels{$a}{"room_string"} cmp $panels{$b}{"room_string"}
+		|| $panels{$a}{"room_number"} <=> $panels{$b}{"room_number"}
+		|| $panels{$a}{"flight"} <=> $panels{$b}{"flight"}
+		|| $panels{$a}{"judge_name"} cmp $panels{$b}{"judge_name"}
+	} @panel_ids;
 
-	if ($coach_ratings) {
-
-		Tab::Rating->set_sql( "by_round" => "
-			select distinct rating.*
-			from rating, ballot, panel
-			where panel.round = ?
-			and panel.id = ballot.panel
-			and ballot.judge = rating.judge
-		");
-
-		my %tiername_by_id = map {$_->id => $_->name} $category->rating_tiers;
-		my @ratings = Tab::Rating->search_by_round($round->id);
-		%coach_rating = map {$_->judge->id => $tiername_by_id{$_->rating_tier->id} } @ratings;
+	if ($ARGS{"by_judge"}) { 
+		@panel_ids = sort {
+			$panels{$a}{"bye"} <=> $panels{$b}{"bye"}
+			|| $panels{$a}{"judge_name"} cmp $panels{$b}{"judge_name"}
+		} @panel_ids;
 	}
 
-	my %pod_name;
-
-	my %judge_by_id = ();
-	foreach my $judge (@judges) {
-		$judge_by_id{$judge->id} = $judge;
+	if ($ARGS{"by_section"}) { 
+		@panel_ids = sort {
+			length($panels{$a}{"panel_letter"}) <=> length($panels{$b}{"panel_letter"})
+			|| $panels{$a}{"panel_letter"} cmp $panels{$b}{"panel_letter"}
+		} @panel_ids;
 	}
 
-	my %entries_by_panel = ();
-	my %judges_by_panel = ();
-
-	foreach my $entry (@entries) {
-		push (@{$entries_by_panel{$entry->panelid}}, $entry);
-	}
-
-	my %ballots_by_entry = ();
-
-	my %panel_undone = ();
-
-	foreach my $ballot (@ballots) {
-
-		push @{$ballots_by_entry{$ballot->entry->id}}, $ballot
-			if $ballot->entry;
-
-		$panel_undone{$ballot->panel->id}++
-			unless $ballot->audit;
-
-		push @{$judges_by_panel{$ballot->panel->id}}, $judge_by_id{$ballot->judge->id}
-			if $ballot->judge
-			&& $judge_by_id{$ballot->judge->id};
-	}
-
-	my @panels;
-
-	PANEL:
-	foreach my $panel (@all_panels) {
-
-		unless ($entries_by_panel{$panel->id} || $judges_by_panel{$panel->id}) {
-			undef $ballots_by_entry{$panel->id};
-			$panel->delete();
-			next PANEL;
-		}
-
-		push @panels, $panel;
-	}
-
-	@panels = sort {$a->judgename cmp $b->judgename} @panels;
-	@panels = sort {$a->flight <=> $b->flight} @panels if $flighted;
-	@panels = sort {$a->roomname cmp $b->roomname} @panels;
-	@panels = sort {$a->judgename cmp $b->judgename} @panels if $by_judge;
-	@panels = sort {$a->bye <=> $b->bye} @panels;
-
+	my $num_panels = scalar @panel_ids;
 
 	if ($ARGS{"fontsize"} eq "default" || (not defined $ARGS{"fontsize"})) {
 
 		$fontsize = "\\footnotesize\n";
 
 		if ($flighted % 2) {
-			$fontsize = "\\small\n" if (scalar @panels < 12);
-			$fontsize = "\\scriptsize\n" if (scalar @panels > 32);
-			$fontsize = "\\tiny\n" if (scalar @panels > 59);
+			$fontsize = "\\small\n" if ($num_panels < 12);
+			$fontsize = "\\scriptsize\n" if ($num_panels > 32);
+			$fontsize = "\\tiny\n" if ($num_panels > 59);
 		} else {
-			$fontsize = "\\small\n" if (scalar @panels < 24);
-			$fontsize = "\\scriptsize\n" if (scalar @panels > 96);
-			$fontsize = "\\tiny\n" if (scalar @panels > 84) && (scalar @panels < 108);
-			$fontsize = "\\tiny\n" if (scalar @panels > 168);
+			$fontsize = "\\small\n" if ($num_panels < 24);
+			$fontsize = "\\scriptsize\n" if ($num_panels > 96);
+			$fontsize = "\\tiny\n" if ($num_panels > 84) && ($num_panels < 108);
+			$fontsize = "\\tiny\n" if ($num_panels > 168);
 		}
 
 		if ($fontsize eq "scriptsize") {
@@ -240,7 +365,6 @@
 
 	my $switch = 1;
 	my $last_room;
-	my $last_pod;
 	my $last_flight;
 	my $notfirst;
 
@@ -283,11 +407,11 @@
 
 			if ($sidelocks || $no_side_constraints) {
 
-				print TEXOUT "Fl & Entries & & Room & Judge \\\\ \n"
-					if $flighted > 1;
-
-				print TEXOUT "Teams & & Room & Judge \\\\ \n"
-					unless $flighted > 1;
+				if ($flighted > 1) { 
+					print TEXOUT "Fl & Entries & & Room & Judge \\\\ \n";
+				} else { 
+					print TEXOUT "Teams & & Room & Judge \\\\ \n";
+				}
 
 			} else {
 
@@ -305,226 +429,227 @@
 
 		print TEXOUT $fontsize;
 
-		foreach my $panel (@panels) {
+		foreach my $pid (@panel_ids) {
+			
+			next unless $panels{$pid}{"entries"};
 
-			my $pflight = $panel->flight;
-			$pflight = 1 if $pflight < 1;
-			next if $flighted != 2 && $pflight != $flight;
+			my $panel_flight = $panels{$pid}{"flight"};
+			$panel_flight = 1 if $panel_flight < 1;
+			next if $flighted != 2 && $panel_flight != $flight;
 
-			my $aff;
-			my $neg;
-			my @byes;
+			my $locked_aff;
 
-			my $locked_aff =  $m->comp(
-				"/funclib/round_elim_dueaff.mas",
-				panel => $panel
-			)
-			if $sidelocks;
-
-			foreach my $pc (@{$entries_by_panel{$panel->id}}) {
-
-				if ($ballots_by_entry{$pc->id}) {
-					push @byes, $pc if $panel->bye;
-					$aff = $pc if ${$ballots_by_entry{$pc->id}}[0]
-						&& ${$ballots_by_entry{$pc->id}}[0]->side == "1";
-
-					$neg = $pc if ${$ballots_by_entry{$pc->id}}[0]
-						&& ${$ballots_by_entry{$pc->id}}[0]->side == "2";
-				}
+			if ($sidelocks) { 
+				$locked_aff =  $m->comp(
+					"/funclib/round_elim_dueaff.mas",
+					panel_id => $pid
+				);
 			}
 
-			unless ($last_room && $last_room eq $panel->room) {
+			unless ($last_room && $last_room eq $panels{$pid}{"room_name"}) { 
 
 				print TEXOUT "\\newline\n";
 				$switch++;
 
-				if ($flighted == 2 && $panel->flight == 2) {
+				if ($flighted == 2 && $panel_flight == 2) {
 					print TEXOUT $tabular."\n";
 					print TEXOUT "\\rowcolor[rgb]{.91,.91,.91}\[5.5pt\]\[5.5pt\] " if $switch % 2;
 					if ($event_settings{"show_panel_letters"} || $ARGS{'by_section'}) {
 						print TEXOUT " & ";
 					}
-					print TEXOUT "& & & & \\\\ \n \\end{tabular}\n" if $panel->flight == 2;
+
+					print TEXOUT "& & & & ";
+
+					undef $notfirst;
+					foreach (1 .. $room_judge_count{$panels{$pid}{"room_name"}}) { 
+						
+						if ($notfirst++) { 
+							print TEXOUT "\\newline\n";
+							print TEXOUT "\\vspace{1mm}\n";
+						}
+						print TEXOUT "\\strut\n";
+					}
+
+					print TEXOUT "\\\\ \n \\end{tabular}\n" if $panel_flight == 2;
 				}
 
-				$last_room = $panel->room->id if $panel->room && $panel->room > 0;
+				$last_room = $panels{$pid}{"room_name"};
 			}
 
 			print TEXOUT $tabular;
 			print TEXOUT "\\rowcolor[rgb]{.91,.91,.91}\[5.5pt\]\[5.5pt\]" if $switch % 2;
 
 			if ($event_settings{"show_panel_letters"} || $ARGS{"by_section"}) {
-				print TEXOUT $panel->letter.' & ';
+				print TEXOUT $panels{$pid}{"panel_letter"}.' & ';
 			}
 
-			print TEXOUT $panel->flight." & " if $flighted > 1;
+			print TEXOUT $panel_flight." & " if $flighted > 1;
+			my $counter;
 
-			if ($panel->bye) {
+			foreach my $side (sort {$a <=> $b} keys %{$panels{$pid}{"entries"}}) { 
 
-				foreach my $bye (@byes) {
+				my $notfirst;
+				$counter++;
+
+				foreach my $eid (sort {$a <=> $b} keys %{$panels{$pid}{"entries"}{$side}}) { 
+
+					if ($notfirst++) { 
+						print TEXOUT "\\newline\n";
+					}
+
 					print TEXOUT $fontsize;
-					print TEXOUT Tab::texify($entry_wins{$bye->id}."-".($round_name - $entry_wins{$bye->id})." ") if $record;
-					print TEXOUT "\\raggedright ";
-					print TEXOUT "\\parbox{.2in}{ ".Tab::texify($bye->regioncode)." } " if $ARGS{'states'};
-					print TEXOUT Tab::texify($bye->code)." & ";
+
+					print TEXOUT "\\raggedright";
+
+					if ($ARGS{"record"}) { 
+						print TEXOUT "\\parbox[c][][l]{.1in}{".$entry_wins{$eid}."-".$entry_losses{$eid}." }\n";
+					}
+
+					if ($ARGS{"schools"}) {
+						
+						print TEXOUT "\\parbox[l][][l]{.5in}{";
+						print TEXOUT "\\truncate[]{.45in}{";
+						if ($ncfl) { 
+							print TEXOUT $panels{$pid}{"entries"}{$side}{$eid}{"region_ncfl"}." -- ";
+							print TEXOUT $panels{$pid}{"entries"}{$side}{$eid}{"region_code"};
+						} elsif ($panels{$pid}{"entries"}{$side}{$eid}{"school_code"}) { 
+							print TEXOUT $panels{$pid}{"entries"}{$side}{$eid}{"school_code"};
+						} else { 
+							my $short_name = $m->comp("/funclib/short_name.mas", 
+								name => $panels{$pid}{"entries"}{$side}{$eid}{"school_name"}
+							);
+							print TEXOUT Tab::texify($short_name);
+						}
+						print TEXOUT " } } ";
+					}
+
+					if ($ARGS{'states'}) { 
+						print TEXOUT "\\parbox{.2in}{ ".$panels{$pid}{"entries"}{$side}{$eid}{"region_code"}." } ";
+					}
+
+					print TEXOUT "\\parbox[c][][l]{$entry_size}{ \\raggedright ";
+					print TEXOUT $panels{$pid}{"entries"}{$side}{$eid}{"code"};
+					print TEXOUT "}";
+
+					if ($side == 1 && $locked_aff) { 
+						print TEXOUT "\\newline \\hspace*{0pt} \\hfill $fontsize ".$aff_string."";
+					} elsif ($side == 2 && $locked_aff) { 
+						print TEXOUT "\\newline \\hspace*{0pt} \\hfill $fontsize ".$neg_string."";
+					} elsif ($sidelocks) { 
+						print TEXOUT "\\newline \\hspace*{0pt} \\hfill $fontsize Flip"
+					}
+
 				}
-
-			} elsif ($aff) {
-
-				print TEXOUT $fontsize;
-				print TEXOUT Tab::texify($entry_wins{$aff->id}."-".($round_name - $entry_wins{$aff->id})." ") if $record;
-				print TEXOUT "\\raggedright \\truncate{$entry_size}{";
-
-					if ($ncfl && $schools) {
-						print TEXOUT "\\parbox[l][][l]{.35in}{";
-						print TEXOUT Tab::texify($aff->school->region->setting("region-".$event)." -- ");
-						print TEXOUT Tab::texify($aff->school->region->code);
-						print TEXOUT "}";
-
-						print TEXOUT "\\parbox[c][][l]{.2in}{";
-					}
-
-					print TEXOUT "\\parbox{.2in}{ ".Tab::texify($aff->regioncode)." } " if $ARGS{'states'};
-					print TEXOUT Tab::texify($aff->code);
-
-					if ($ncfl && $schools) {
-						print TEXOUT "}";
-						print TEXOUT Tab::texify($aff->name);
-					}
-				print TEXOUT "}";
-
-				print TEXOUT "\\newline \\hspace*{0pt} \\hfill $fontsize ".Tab::texify($aff_string).""
-					if $locked_aff;
-
-				print TEXOUT "\\newline \\hspace*{0pt} \\hfill $fontsize Flip"
-					if $sidelocks
-					&& not defined $locked_aff;
-
 				print TEXOUT " & ";
 			}
 
-			if ($panel->bye) {
-				if (scalar @byes > 1) {
-					print TEXOUT "BYE ";
-				} else {
-					print TEXOUT " BYE & ";
-				}
-			} elsif ($neg) {
-
-				print TEXOUT $fontsize;
-				print TEXOUT Tab::texify($entry_wins{$neg->id}."-".($round_name - $entry_wins{$neg->id})." ") if $record;
-
-				print TEXOUT "\\raggedright \\truncate{$entry_size}{";
-
-					if ($ncfl && $schools) {
-						print TEXOUT "\\parbox[l][][l]{.35in}{";
-						print TEXOUT Tab::texify($neg->school->region->setting("region-".$event)." -- ");
-						print TEXOUT Tab::texify($neg->school->region->code);
-						print TEXOUT "}";
-						print TEXOUT "\\parbox[c][][l]{.2in}{";
-					}
-
-					print TEXOUT "\\parbox{.2in}{ ".Tab::texify($aff->regioncode)." } " if $ARGS{'states'};
-					print TEXOUT Tab::texify($neg->code);
-
-					if ($ncfl && $schools) {
-						print TEXOUT "}";
-						print TEXOUT Tab::texify($neg->name);
-					}
-				print TEXOUT "}";
-
-				print TEXOUT "\\newline \\hspace*{0pt} \\hfill $fontsize ".Tab::texify($neg_string).""
-					if $locked_aff;
-
-				print TEXOUT "\\newline \\hspace*{0pt} \\hfill  $fontsize Flip"
-					if $sidelocks
-					&& not defined $locked_aff;
+			while ($counter < 2) {
+				print TEXOUT " & ";
+				$counter++;
 			}
 
-			print TEXOUT " & ";
 			print TEXOUT $fontsize;
 
-			my $roomname = Tab::texify($panel->roomname);
+			my $roomname = Tab::texify($panels{$pid}{"room_name"});
 			$roomname = "Ask Tab" unless $roomname;
 
-			if ($round->setting("include_room_notes") && $panel->roomnotes) {
-				$roomname = " \\parbox[l][][l]{\\textwidth}{\\vspace{.25\\baselineskip} ".$roomname." \\\\ ".$panel->roomnotes." \\vspace{.25\\baselineskip}} ";
+			if ($include_room_notes && $panels{$pid}{"room_notes"}) {
+				$roomname = " \\parbox[l][][l]{\\textwidth}{\\vspace{.25\\baselineskip} ".$roomname." \\\\ ".$panels{$pid}{"room_notes"}." \\vspace{.25\\baselineskip}} ";
 			}
 
-			print TEXOUT "\\truncate[]{.72in}{$roomname} & " if $flighted > 1 && $panel->bye < 1;
-			print TEXOUT "\\truncate[]{1.9in}{$roomname} & " unless $flighted > 1 || $panel->bye;
+			if ($panels{$pid}{"bye"}) { 
+				print TEXOUT " BYE ";
+			} elsif ($flighted > 1) { 
+				print TEXOUT "$roomname & ";
+			} else { 
+				print TEXOUT "$roomname & "
+			}
 
-			my $notfirst;
-			my %used = ();
+			undef $notfirst;
 
-			if ($judges_by_panel{$panel->id}) {
+			if ($panels{$pid}{"judges"} && (not defined $panels{$pid}{"bye"})) { 
 
-				foreach my $judge (sort {$b->chair <=> $a->chair} @{$judges_by_panel{$panel->id}}) {
+				foreach my $jid ( 
+					sort {
+						$panels{$pid}{"judges"}{$a}{"last"} cmp $panels{$pid}{"judges"}{$b}{"last"} 
+						|| $panels{$pid}{"judges"}{$a}{"first"} cmp $panels{$pid}{"judges"}{$b}{"first"} 
+					} keys %{$panels{$pid}{"judges"}}
+				) { 
 
-					next if $used{$judge->id};
-					$used{$judge->id}++;
-
-					if ($notfirst) {
-						unless ($ncfl && not defined $schools) {
-							print TEXOUT "\\smallskip \\newline\n";
-						}
+					if ($notfirst++) {
+						print TEXOUT "\\smallskip \\newline\n";
 					}
+
+					my $tab_rating = $panels{$pid}{"judges"}{$jid}{"tab_rating"};
+					my $coach_rating = $panels{$pid}{"judges"}{$jid}{"coach_rating"};
 
 					print TEXOUT $fontsize;
-					print TEXOUT " *" if $judge->chair;
+					print TEXOUT " *" if $panels{$pid}{"judges"}{$a}{"chair"};
 
-					if ($ncfl) {
+					if ($ncfl && $ARGS{"schools"}) { 
+						
+						if ($panels{$pid}{"judges"}{$jid}{"school_name"}) { 
 
-						if ($schools) {
-
-							if ($judge->school) {
-								print TEXOUT "\\truncate[]{.2in}{".Tab::texify($judge->school->region->code)." }";
-								print TEXOUT "\\truncate[]{.14in}{".Tab::texify($judge->school->region->setting("region-".$event->id))." }";
-
-							} else {
-								print TEXOUT "\\truncate[]{.34in}{HR}" unless $judge->school;
-							}
-
-							print TEXOUT "\\truncate[]{.2in}{".$coach_rating{$judge->id}."}";
-
-							print TEXOUT "\\truncate[]{.3in}{".Tab::texify($judge->code)."}" unless $no_codes;
-
-						} elsif ($record) {
-
-							print TEXOUT "\\truncate[]{.78in}{".$tab_ratings{$judge}." ".Tab::texify($judge->code)." }"
-								if $flighted;
-
-							print TEXOUT "\\truncate[]{1.90in}{".$tab_ratings{$judge}." ".Tab::texify($judge->code)." }"
-								unless $flighted;
+							print TEXOUT "\\truncate[]{.2in}{".$panels{$pid}{"judges"}{$jid}{"region_code"}." }";
+							print TEXOUT "\\truncate[]{.14in}{".$panels{$pid}{"judges"}{$jid}{"region_ncfl"}." }";
 
 						} else {
-							print TEXOUT "\\truncate[]{.3in}{".Tab::texify($judge->code)." }" unless $no_codes;
+							print TEXOUT "\\truncate[]{.34in}{HR}";
 						}
 
-					} else {
+						print TEXOUT "\\truncate[]{.2in}{".$coach_rating."}";
 
-						if ($record) {
+						if ($no_codes) { 
+							print TEXOUT "\\truncate[]{.3in}{".$panels{$pid}{"judges"}{$jid}{"code"}."}";
+						} else { 
+							print TEXOUT "\\truncate[]{.3in}{".$panels{$pid}{"judges"}{$jid}{"name"}."}";
+						}
 
-							if ($flighted) {
-								print TEXOUT "\\truncate[]{.78in}{";
-							} else {
-								print TEXOUT "\\truncate[]{1.90in}{";
-							}
+					} elsif ($ncfl) {
 
-							print TEXOUT Tab::texify($tab_ratings{$judge}) if %tab_ratings && $tab_ratings{$judge};
-							print TEXOUT " ".Tab::texify($judge->last.", ".$judge->first)." }";
+						if ($no_codes) { 
+							print TEXOUT "\\truncate[]{.3in}{".$panels{$pid}{"judges"}{$jid}{"name"}." }";
+						} else { 
+							print TEXOUT "\\truncate[]{.3in}{".$panels{$pid}{"judges"}{$jid}{"code"}." }";
+						}
 
-						} elsif ($judge_codes)  {
-
-							print TEXOUT "\\truncate[]{.78in}{".Tab::texify($judge->code)." }";
-
+					} else { 
+					
+						if ($flighted > 1) {
+							print TEXOUT "\\truncate[]{.95in}{";
 						} else {
-
-							print TEXOUT "\\truncate[]{.78in}{".Tab::texify($judge->last.", ".$judge->first)." }" if $flighted;
-							print TEXOUT "\\truncate[]{1.90in}{".Tab::texify($judge->last.", ".$judge->first)." }" unless $flighted;
+							print TEXOUT "\\truncate[]{1.90in}{";
 						}
+
+						if ($ARGS{"schools"}) { 
+
+							print TEXOUT $panels{$pid}{"judges"}{$jid}{"tab_rating"}." ";
+							print TEXOUT $panels{$pid}{"judges"}{$jid}{"coach_rating"}." ";
+
+							if ($panels{$pid}{"judges"}{$jid}{"school_code"}) { 
+								
+								print TEXOUT "\\parbox[c][][l]{.5in}{";
+								print TEXOUT "\\truncate[]{.45in}{";
+								print TEXOUT $panels{$pid}{"judges"}{$jid}{"school_code"};
+								print TEXOUT " } } ";
+
+							} else { 
+
+								my $short_name = $m->comp("/funclib/short_name.mas", 
+									name => $panels{$pid}{"judges"}{$jid}{"school_name"}
+								);
+						
+								if ($flighted > 1) {
+									print TEXOUT "\\truncate[]{.9in}{".Tab::texify($short_name)."} \\newline ";
+								} else { 
+									print TEXOUT "\\truncate[]{.1.8in}{".Tab::texify($short_name)."} \\newline ";
+								}
+
+							}
+						}
+
+						print TEXOUT " ".$panels{$pid}{"judges"}{$jid}{"name"}." }";
 					}
-					$notfirst++;
 				}
 			}
 			print TEXOUT "\n\\end{tabular}\n";
