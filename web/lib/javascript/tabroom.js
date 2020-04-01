@@ -51,14 +51,14 @@
 	}
 
 	function postConfirm(alertMessage, checkObject, replyUrl) {
-		alertify.confirm(alertMessage, function(e) {
+		alertify.confirm("Please confirm", alertMessage, function(e) {
 			if (e) {
 				postSwitch(checkObject, replyUrl);
 				return;
 			} else {
 				return;
 			}
-		});
+		}, function(no) { return; } );
 		return;
 	}
 
@@ -79,7 +79,7 @@
 		var replyAppend   = $(checkObject).attr("reply_append");
 		var newParent     = $(checkObject).attr("new_parent");
 
-		var propertyValue = checkObject.value;
+		var propertyValue = $(checkObject).val();
 
 		var otherObject = $(checkObject).attr("other_value");
 		var otherTextId = $(checkObject).attr("other_text");
@@ -95,7 +95,6 @@
 
 		if (otherObject) {
 			otherValue = $("#"+otherObject).val();
-			$("#"+otherObject).val("");
 		}
 
 		var otherText;
