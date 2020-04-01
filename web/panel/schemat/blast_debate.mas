@@ -12,6 +12,17 @@
 <%init>
 
 	$message = substr($message, 0, 50);
+
+	if ($round) {
+		my $now = DateTime->now();
+
+		if ($ARGS{"flipmode"}) {
+			$round->setting("flip_blasted", "date", $now);
+		} else {
+			$round->setting("blasted", "date", $now);
+		}
+	}
+
 	$round = $panel->round if $panel;
 	my %event_settings = $event->all_settings();
 
@@ -85,16 +96,24 @@
 	}
 
 	my $dbh = Tab::DBI->db_Main();
-	my $limit = "and panel.id = ".$panel->id if $panel;
-	$limit .= " and panel.flight = ".$flight if $flight && $flight == int($flight);
+
+	my $limit;
+
+	if ($panel) {
+		$limit = "and panel.id = ".$panel->id;
+	} elsif ($flight && $flight == int($flight)) {
+		$limit .= " and panel.flight = ".$flight;
+	}
 
 	my $sth = $dbh->prepare("
-		select panel.id, panel.letter, panel.flight, panel.bye,
-			ballot.side, entry.code, student.last, pentry.pronoun,
+		select
+			panel.id, panel.letter, panel.flight, panel.bye, panel.flip_at,
+			ballot.side, flip_win.value,
+			entry.code, student.last, pentry.pronoun,
 			judge.id, judge.code, judge.first, judge.last, pjudge.pronoun, pjudge.id,
 			room.name, room.notes, room.url
 
-			from (panel, entry, ballot)
+		from (panel, entry, ballot)
 
 			left join entry_student es on entry.id = es.entry
 			left join student on student.id = es.student
@@ -104,22 +123,27 @@
 
 			left join judge on ballot.judge = judge.id
 			left join person pjudge on judge.person = pjudge.id
+			left join score flip_win on flip_win.ballot = ballot.id and flip_win.tag = 'flip_win'
 
-			where panel.round = ?
+		where panel.round = ?
 			and panel.id = ballot.panel
 			and ballot.entry = entry.id
 			$limit
-			group by es.id, ballot.id
+		group by es.id, ballot.id
 	");
 
 	$sth->execute($round->id);
 
 	my %panels;
+	my %dt_cache;
 
 	while (
-		my ($panel_id, $panel_letter, $panel_flight, $panel_bye,
-			$ballot_side, $entry_code, $student_last, $pentry_pronouns,
-			$judge_id, $judge_code, $judge_first, $judge_last, $pjudge_pronouns, $pjudge_id,
+		my (
+			$panel_id, $panel_letter, $panel_flight, $panel_bye, $flip_at,
+			$ballot_side, $won_flip,
+			$entry_code, $student_last, $pentry_pronouns,
+			$judge_id, $judge_code, $judge_first, $judge_last,
+			$pjudge_pronouns, $pjudge_id,
 			$room_name, $room_notes, $room_url
 		)  = $sth->fetchrow_array()
 	) {
@@ -141,13 +165,35 @@
 		$panels{$panel_id}{"letter"} = $panel_letter;
 		$panels{$panel_id}{"flight"} = 1 unless $panel_flight;
 
+		if ($won_flip) {
+
+			$panels{$panel_id}{"flip_winner"} = $entry_code;
+
+			unless ($dt_cache{$flip_at}) {
+
+				$dt_cache{$flip_at} = $m->comp("/funclib/showtime.mas",
+					string      => $flip_at,
+					tz          => $tz,
+					length      => "day",
+					return      => 1
+				);
+
+				$dt_cache{$flip_at} = "Deadline at ".$dt_cache{$flip_at};
+			}
+
+			$panels{$panel_id}{"flip_deadline"} = $dt_cache{$flip_at};
+		}
+
 		unless ($ncfl) {
+
 			if ($pentry_pronouns) {
-				$panels{$panel_id}{"pronouns"}{$entry_code." ".$student_last." pronouns: ".$pentry_pronouns}++;
+				my $string = $entry_code." ".$student_last." pronouns: ".$pentry_pronouns;
+				$panels{$panel_id}{"pnoun"}{$string}++;
 			}
 
 			if ($pjudge_pronouns) {
-				$panels{$panel_id}{"pronouns"}{"Judge ".$judge_last." pronouns: ".$pjudge_pronouns}++;
+				my $string = "Judge ".$judge_last." pronouns: ".$pjudge_pronouns;
+				$panels{$panel_id}{"pnoun"}{$string}++;
 			}
 		}
 	}
@@ -157,27 +203,32 @@
 	if ($sidelocks) {
 
 		my $locked_sth = $dbh->prepare("
+
 			select panel.id
-			from (panel, round r1, round r2, ballot r1b1, ballot r1b2, panel p2, ballot r2b1, ballot r2b2)
+				from (
+					panel, round r1, round r2,
+					ballot r1b1, ballot r1b2,
+					panel p2, ballot r2b1, ballot r2b2
+				)
 
 			where r1.id = ?
-			and panel.round = r1.id
+				and panel.round = r1.id
 
-			and panel.id = r1b1.panel
-			and panel.id = r1b2.panel
-			and r1b2.entry != r1b1.entry
+				and panel.id = r1b1.panel
+				and panel.id = r1b2.panel
+				and r1b2.entry  != r1b1.entry
 
-			and r2.id != r1.id
-			and r2.name < r1.name
+				and r2.id  != r1.id
+				and r2.name < r1.name
 
-			and r2.event = r1.event
-			and p2.round = r2.id
-			and p2.id = r2b1.panel
-			and p2.id = r2b2.panel
-			and r2b2.entry != r2b1.entry
+				and r2.event   = r1.event
+				and p2.round   = r2.id
+				and p2.id      = r2b1.panel
+				and p2.id      = r2b2.panel
+				and r2b2.entry = r1b2.entry
+				and r2b1.entry = r1b1.entry
 
-			and r2b2.entry = r1b2.entry
-			and r2b1.entry = r1b1.entry
+				and r2b2.entry  != r2b1.entry
 		");
 
 		$locked_sth->execute($round->id);
@@ -189,75 +240,130 @@
 		}
 	}
 
+	if ($ARGS{"flipmode"}) {
+		$only = "entries";
+	}
+
 	my %recipients = $m->comp(
 		"/funclib/round_blast.mas",
 			round => $round,
 			ncfl  => $ncfl,
-			only  => $only
+			panel => $panel,
 	);
 
 	my %school_emails;
 
-	PANELS:
+	PANEL:
 	foreach my $panel_id (keys %panels) {
 
-		next unless $recipients{"in"}{$panel_id} || $recipients{"school"}{$panel_id};
+		unless (
+			$recipients{"in"}{$panel_id} || $recipients{"school"}{$panel_id}
+		) {
+			next PANEL;
+		}
 
 		my $panel_text;
 		my $map_text;
 
-		if ($panels{$panel_id}{"bye"}) {
+		if ($ARGS{"flipmode"}) {
 
-			my $notfirst;
 			foreach my $side (keys %{$panels{$panel_id}{"entries"}}) {
-				$panel_text .= " vs. " if $notfirst++;
+				$panel_text .= " and " if $panel_text;
 				$panel_text .= $panels{$panel_id}{"entries"}{$side};
 			}
 
-			$panel_text .= " BYE ";
+			$panel_text = "Debate between ".$panel_text;
+			$panel_text .= "\n";
+
+			$panel_text .= " ".$panels{$panel_id}{"flip_winner"};
+			$panel_text .= " has won the flip\n";
+
+			$panel_text .= $panels{$panel_id}{"flip_deadline"};
+
+			$panel_text .= "\n\nWinner should decide on their Tabroom account";
+			$map_text .= "\nat https://www.tabroom.com/user/enter/flip.mhtml\n";
 
 		} else {
 
-			if ($nosides || ($sidelocks && (not defined $locked_panels{$panel_id}))  ) {
+			if ($panels{$panel_id}{"bye"}) {
+
 				my $notfirst;
 				foreach my $side (keys %{$panels{$panel_id}{"entries"}}) {
 					$panel_text .= " vs. " if $notfirst++;
 					$panel_text .= $panels{$panel_id}{"entries"}{$side};
 				}
-				$panel_text .= " (Flip) \n";
+
+				$panel_text .= " BYE ";
+
 			} else {
-				my $notfirst;
-				foreach my $side (sort keys %{$panels{$panel_id}{"entries"}}) {
-					$panel_text .= " vs. " if $notfirst++;
-					$panel_text .= "$aff_string " if $side == 1;
-					$panel_text .= "$neg_string " if $side == 2;
-					$panel_text .= $panels{$panel_id}{"entries"}{$side};
+
+				if ($nosides || ($sidelocks && (not defined $locked_panels{$panel_id}))  ) {
+
+					my $notfirst;
+					foreach my $side (keys %{$panels{$panel_id}{"entries"}}) {
+						$panel_text .= " vs. " if $notfirst++;
+						$panel_text .= $panels{$panel_id}{"entries"}{$side};
+					}
+					$panel_text .= " (Flip) \n";
+
+				} else {
+					my $notfirst;
+					foreach my $side (sort keys %{$panels{$panel_id}{"entries"}}) {
+						$panel_text .= " vs. " if $notfirst++;
+						if ($side == 1) {
+							$panel_text .= $aff_string." ";
+						} elsif ($side == 2) {
+							$panel_text .= $neg_string." ";
+						}
+						$panel_text .= $panels{$panel_id}{"entries"}{$side};
+					}
+
+					if ($locked_panels{$panel_id}) {
+						$panel_text .= "\nSide locked\n";
+					}
+					$panel_text .= "\n";
 				}
 
-				if ($locked_panels{$panel_id}) {
-					$panel_text .= "\nSide locked\n";
+				$panel_text .= "Judging:\n";
+				foreach my $judge (keys %{$panels{$panel_id}{"judges"}}) {
+					next if $judge eq $ARGS{skip_judge};
+					$panel_text .= $judge."\n";
 				}
-				$panel_text .= "\n";
-			}
 
-			$panel_text .= "Judging:\n";
-			foreach my $judge (keys %{$panels{$panel_id}{"judges"}}) {
-				next if $judge eq $ARGS{skip_judge};
-				$panel_text .= $judge."\n";
-			}
+				if ($event_settings{show_panel_letters}) {
+					$panel_text .= " Debate #".$panels{$panel_id}{"letter"}."\n";
+				}
 
-			$panel_text .= " Debate #".$panels{$panel_id}{"letter"}."\n" if $event_settings{show_panel_letters};
-			$panel_text .= " Flt ".$panels{$panel_id}{"flight"} if $flighted > 1;
-			$panel_text .= " Start ".$flight_start{$panels{$panel_id}{"flight"}}."\n";
-			$panel_text .= " Room: ".$panels{$panel_id}{"room"}." \n";
-			$panel_text .= $panels{$panel_id}{"room_notes"}."\n" if $include_room_notes;
-			$panel_text .= " Motion: ".$motion."\n" if $motion;
-			$panel_text .= " Message: ".$message."\n" if $message;
+				if ($flighted > 1) {
+					$panel_text .= " Flt ".$panels{$panel_id}{"flight"};
+				}
 
-			$map_text = " Map: ".$panels{$panel_id}{"room_url"} if $panels{$panel_id}{"room_url"};
+				$panel_text .= " Start ".$flight_start{$panels{$panel_id}{"flight"}}."\n";
+				$panel_text .= " Room: ".$panels{$panel_id}{"room"}." \n";
 
-			foreach my $pronoun (keys %{$panels{$panel_id}{"pronouns"}}) {
-				$panel_text .= $pronoun."\n";
+				if ($include_room_notes) {
+					$panel_text .= $panels{$panel_id}{"room_notes"}."\n";
+				}
+
+				if ($motion) {
+					$panel_text .= " Motion: ".$motion."\n";
+				}
+
+				if ($message) {
+					$panel_text .= " Message: ".$message."\n";
+				}
+
+				if ($panels{$panel_id}{"room_url"}) {
+					if ($tourn_settings->{"online_format"}) {
+						$map_text = "Meeting link: ".$panels{$panel_id}{"room_url"};
+					} else {
+						$map_text = "Map: ".$panels{$panel_id}{"room_url"};
+					}
+				}
+
+				foreach my $pronoun (keys %{$panels{$panel_id}{"pnoun"}}) {
+					$panel_text .= $pronoun."\n";
+				}
 			}
 		}
 
