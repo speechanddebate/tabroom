@@ -3,7 +3,8 @@ use base 'Tab::DBI';
 Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
 Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder side audit bye forfeit tv/);
-Tab::Ballot->columns(Others => qw/chair seat entered_by audited_by hangout_admin judge_started started_by timestamp/);
+Tab::Ballot->columns(Others => qw/flip_win chair seat entered_by audited_by judge_started started_by 
+								  hangout_admin timestamp/);
 Tab::Ballot->columns(TEMP => qw/roundid entryid panelid judgename/);
 
 Tab::Ballot->has_a(judge => 'Tab::Judge');
@@ -31,13 +32,13 @@ sub value {
 
 	my @existing = Tab::Score->search(  
 		ballot => $self->id,
-		tag => $tag
+		tag    => $tag
 	);
 
 	@existing = Tab::Score->search(  
-		ballot => $self->id,
+		ballot  => $self->id,
 		student => $student->id,
-		tag => $tag
+		tag     => $tag
 	) if $student;
 
     if ($value) { 
@@ -46,10 +47,10 @@ sub value {
 
 			my $exists = shift @existing;
 			$exists->value($value);
-			$exists->update;
+			$exists->update();
 		
 			foreach my $other (@existing) { 
-				$other->delete;
+				$other->delete();
 			}
 
 			return;
@@ -62,7 +63,7 @@ sub value {
 				value => $value,
 			});
 
-			$exists->update;
+			$exists->update();
 		}
 
 	} else {

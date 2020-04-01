@@ -1,0 +1,239 @@
+<%args>
+	$person
+	$tourn
+	$tourn_settings
+	$setting_name   => undef
+	$property_name  => undef
+	$property_value => undef
+	$target_id      => undef
+</%args>
+<%init>
+
+	use List::Util 'shuffle';
+
+    $m->clear_buffer();
+    $r->content_type('application/json');
+
+    unless ($target_id) {
+        $m->print('{ "error": true, "message": "No ID sent for flip target"}');
+        $m->abort();
+    }
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $limit;
+	my @panels;
+	my $event;
+	my $only;
+	my $panel;
+	my $round;
+
+	if ($property_name eq "panel") {
+
+		$panel = Tab::Panel->retrieve($target_id);
+
+		unless ($panel) {
+			$m->print('{
+				"error"   : true,
+				"message" : "No section found for ID '.$target_id.'"
+			}');
+			$m->abort();
+		}
+
+		if ($panel->bye) {
+			$m->print('{
+				"error"   : true,
+				"message" : "There is no point in flipping a bye round"
+			}');
+			$m->abort();
+		}
+
+		push @panels, $panel;
+		$limit = " and panel.id = ".$panel->id;
+		$event = $panel->round->event;
+		$only = $panel->id;
+
+	} elsif ($property_name eq "round") {
+
+		$round = Tab::Round->retrieve($target_id);
+
+		unless ($round) {
+			$m->print('{ "error": true, "message": "No round found for ID '.$target_id.'"}');
+			$m->abort();
+		}
+
+		push @panels, $round->panels(bye => 0);
+		$limit = " and panel.round = ".$round->id;
+		$event = $round->event;
+	}
+
+	unless (@panels) {
+        $m->print('{ "error": true, "message": "No sections found for flips"}');
+        $m->abort();
+	}
+
+	my $now = DateTime->now();
+	my $deadline = $now->clone();
+	my $add_mins = $event->setting("flip_deadline");
+
+	$add_mins = 5 unless $add_mins > 0;
+	$deadline->add( minutes => $add_mins );
+
+	unless ($event->setting("flip_online")) {
+        $m->print('{ "error": true, "message": "This event is not set to enable online flips"}');
+        $m->abort();
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	if ($round && $setting_name eq "flip_published") {
+
+		$round->setting("flip_published", $property_value);
+
+		if ($property_value) {
+			$m->print('{ "error": false, "message": "Flip cards set to published"}');
+			$m->abort();
+
+		} else {
+			$m->print('{ "error": false, "message": "Flip cards set to NOT published"}');
+			$m->abort();
+		}
+
+	} elsif ($setting_name eq "deadline_only") {
+
+		my $dt = eval {
+			return Tab::dtme($round->start->mdy('/'), $property_value, $tz);
+		};
+
+		my $message;
+
+		if ($dt) {
+			foreach my $panel (@panels) {
+				my $sth = $dbh->prepare("update panel set flip_dt = ? where id = ?");
+				$sth->execute(DateTime::Format::MySQL->format_datetime($dt), $panel->id);
+			}
+
+			$message = "Deadline set to ".$property_value;
+		} else {
+			$message = "Invalid time sent.  Please try again";
+		}
+
+		$round->setting("flip_at", "date", $dt);
+
+        $m->print('{ "error": true, "message": "'.$message.'"}');
+        $m->abort();
+
+	}
+
+	my $sth = $dbh->prepare("
+		delete score.*
+		from (score, ballot, panel)
+		where ballot.panel = panel.id
+			and score.ballot = ballot.id
+			and score.tag = 'flip_win'
+			$limit
+	");
+
+	$sth->execute();
+	$sth->finish();
+
+	$sth = $dbh->prepare("
+		select panel.id, aff.id, neg.id
+		from panel
+			left join ballot aff on aff.panel = panel.id and aff.side = 1
+			left join ballot neg on neg.panel = panel.id and neg.side = 2
+		where panel.id = panel.id
+			and panel.bye != 1
+			$limit
+	");
+
+	$sth->execute();
+
+	while (
+		my (
+			$panel_id, $aff_id, $neg_id
+		) = $sth->fetchrow_array()
+	) {
+		my @sides = shuffle ($aff_id, $neg_id);
+		my $winner = shift @sides;
+
+		Tab::Score->create({
+			ballot => $winner,
+			tag    => "flip_win",
+			value  => 1
+		});
+	}
+
+	$sth->finish();
+
+	$sth = $dbh->prepare("
+		update panel set panel.flip_at = ?  where panel.id = panel.id $limit
+	");
+
+	$sth->execute(DateTime::Format::MySQL->format_datetime($deadline));
+
+	my $message = "Flips performed for ".$round->realname." of ".$event->abbr;
+	my $reply;
+
+	unless ($setting_name eq "no_blast") {
+
+		$message .= ", published and blasted.";
+
+		if ($property_name eq "panel") {
+
+			$m->comp("/panel/schemat/blast_debate.mas",
+				panel          => $panel,
+				event          => $event,
+				tourn          => $tourn,
+				tourn_settings => $tourn_settings,
+				flipmode       => 1
+			);
+
+		} elsif ($property_name eq "round") {
+
+			$round->setting("flip_published", $property_value);
+
+			$m->comp("/panel/schemat/blast_debate.mas",
+				round          => $round,
+				event          => $event,
+				tourn          => $tourn,
+				tourn_settings => $tourn_settings,
+				flipmode       => 1
+			);
+		}
+
+		$reply = $m->comp(
+			"/funclib/showdt.mas",
+				string => $now,
+				tz     => $tz,
+				return => 'yasplz'
+			);
+
+		Tab::debuglog("Got a reply $reply here on now $now and tz $tz");
+	}
+
+	Tab::debuglog("Reply is $reply");
+
+	my %response = (
+        error   => 0,
+        message => $message
+    );
+
+	if ($reply) {
+		$response{"reply"} = $reply;
+	}
+
+    Tab::ChangeLog->create({
+        type        => 'tabbing',
+        event       => $event->id,
+        tourn       => $tourn->id,
+        person      => $person->id,
+        description => $message,
+        created     => $now
+    });
+
+    $m->print(JSON::encode_json(\%response));
+    $m->abort();
+
+</%init>
