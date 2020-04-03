@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
 Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder side audit bye forfeit tv/);
-Tab::Ballot->columns(Others => qw/flip_win chair seat entered_by audited_by judge_started started_by 
+Tab::Ballot->columns(Others => qw/chair seat entered_by audited_by judge_started started_by 
 								  hangout_admin timestamp/);
 Tab::Ballot->columns(TEMP => qw/roundid entryid panelid judgename/);
 
