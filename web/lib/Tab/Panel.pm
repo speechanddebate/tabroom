@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Panel->table('panel');
 Tab::Panel->columns(Primary => qw/id/);
 Tab::Panel->columns(Essential => qw/letter round room flight bye bracket started/);
-Tab::Panel->columns(Others => qw/flip flip_done publish room_ext_id g_event invites_sent timestamp/);
+Tab::Panel->columns(Others => qw/flip flip_status publish room_ext_id g_event invites_sent timestamp/);
 
 Tab::Panel->columns(TEMP => qw/opp pos side entryid judge audit 
 	timeslotid roomname eventname judgenum panelsize ada speakerorder
