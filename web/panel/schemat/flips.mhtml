@@ -29,6 +29,22 @@
 	my $panel;
 	my $round;
 
+	if ($setting_name eq "cancel_autoqueue") {
+
+		foreach my $aq (Tab::Autoqueue->search( round => $target_id )) {
+			$aq->delete();
+		}
+
+		$m->print('{
+			"error"   : false,
+			"destroy" : "autoqueue"
+			"message" : "No section found for ID '.$target_id.'"
+		}');
+		$m->abort();
+
+	}
+
+
 	if ($property_name eq "panel") {
 
 		$panel = Tab::Panel->retrieve($target_id);
@@ -75,6 +91,12 @@
 
 	my $now = DateTime->now();
 	my $deadline = $now->clone();
+
+	unless ($deadline->second == 0) {
+		$deadline->set( second => 0 );
+		$deadline->add( minutes => 1);
+	}
+
 	my $add_mins = $event->setting("flip_deadline");
 
 	$add_mins = 5 unless $add_mins > 0;
@@ -132,94 +154,93 @@
 
 	}
 
-	my $sth = $dbh->prepare("
-		delete score.*
-		from (score, ballot, panel)
-		where ballot.panel = panel.id
-			and score.ballot = ballot.id
-			and score.tag = 'flip_win'
-			$limit
-	");
+	my $message;
 
-	$sth->execute();
-	$sth->finish();
+	unless ($setting_name eq "blast_only") {
 
-	$sth = $dbh->prepare("
-		select panel.id, aff.id, neg.id
-		from panel
-			left join ballot aff on aff.panel = panel.id and aff.side = 1
-			left join ballot neg on neg.panel = panel.id and neg.side = 2
-		where panel.id = panel.id
-			and panel.bye != 1
-			$limit
-	");
+		my $sth = $dbh->prepare("
+			delete score.*
+			from (score, ballot, panel)
+			where ballot.panel = panel.id
+				and score.ballot = ballot.id
+				and score.tag = 'flip_win'
+				$limit
+		");
 
-	$sth->execute();
+		$sth->execute();
+		$sth->finish();
 
-	while (
-		my (
-			$panel_id, $aff_id, $neg_id
-		) = $sth->fetchrow_array()
-	) {
-		my @sides = shuffle ($aff_id, $neg_id);
-		my $winner = shift @sides;
+		$sth = $dbh->prepare("
+			select panel.id, aff.id, neg.id
+			from panel
+				left join ballot aff on aff.panel = panel.id and aff.side = 1
+				left join ballot neg on neg.panel = panel.id and neg.side = 2
+			where panel.id = panel.id
+				and panel.bye != 1
+				$limit
+		");
 
-		Tab::Score->create({
-			ballot => $winner,
-			tag    => "flip_win",
-			value  => 1
-		});
+		$sth->execute();
+
+		while (
+			my (
+				$panel_id, $aff_id, $neg_id
+			) = $sth->fetchrow_array()
+		) {
+			my @sides = shuffle ($aff_id, $neg_id);
+			my $winner = shift @sides;
+
+			Tab::Score->create({
+				ballot => $winner,
+				tag    => "flip_win",
+				value  => 1
+			});
+		}
+
+		$sth->finish();
+
+		$sth = $dbh->prepare("
+			update panel
+				set panel.flip_at = ?, panel.flip_status = 'winner'
+				where panel.id = panel.id
+				$limit
+		");
+
+		$sth->execute(DateTime::Format::MySQL->format_datetime($deadline));
+		$message .= "Flips performed for ".$round->realname." of ".$event->abbr;
 	}
 
-	$sth->finish();
-
-	$sth = $dbh->prepare("
-		update panel set panel.flip_at = ?  where panel.id = panel.id $limit
-	");
-
-	$sth->execute(DateTime::Format::MySQL->format_datetime($deadline));
-
-	my $message = "Flips performed for ".$round->realname." of ".$event->abbr;
 	my $reply;
 
-	unless ($setting_name eq "no_blast") {
+	Tab::debuglog("Setting name is $setting_name and message right now is $message");
 
-		$message .= ", published and blasted.";
+	unless ($setting_name eq "flip_only") {
+
+		if ($message) {
+			$message .= ", published and blasted.";
+		} else {
+			$message .= "Flip status for ".$round->realname." blsated ";
+		}
 
 		if ($property_name eq "panel") {
 
-			$m->comp("/panel/schemat/blast_debate.mas",
-				panel          => $panel,
-				event          => $event,
-				tourn          => $tourn,
-				tourn_settings => $tourn_settings,
-				flipmode       => 1
+			$m->comp("/funclib/blast_flips.mas",
+				panel => $panel
 			);
 
 		} elsif ($property_name eq "round") {
 
-			$round->setting("flip_published", $property_value);
-
-			$m->comp("/panel/schemat/blast_debate.mas",
-				round          => $round,
-				event          => $event,
-				tourn          => $tourn,
-				tourn_settings => $tourn_settings,
-				flipmode       => 1
+			$m->comp("/funclib/blast_flips.mas",
+				round => $round
 			);
 		}
 
-		$reply = $m->comp(
-			"/funclib/showdt.mas",
-				string => $now,
-				tz     => $tz,
-				return => 'yasplz'
-			);
-
-		Tab::debuglog("Got a reply $reply here on now $now and tz $tz");
+		$reply = $m->comp("/funclib/showdt.mas",
+			string => $now,
+			tz     => $tz,
+			return => 'yasplz'
+		);
 	}
-
-	Tab::debuglog("Reply is $reply");
 
 	my %response = (
         error   => 0,

@@ -13,7 +13,6 @@
 						typeof(link) === "object"
 						&& link.submit
 					) {
-
 						link.submit();
 
 					} else if (
@@ -21,13 +20,10 @@
 						&& typeof(dest) != 'undef'
 						&& typeof(payload) != 'undef'
 					){
-
                         link(dest,payload);
 
                     } else {
-
 					    window.location.href = link.href;
-
                     }
 				}
 			},
@@ -79,12 +75,28 @@
 		var replyAppend   = $(checkObject).attr("reply_append");
 		var newParent     = $(checkObject).attr("new_parent");
 
-		var propertyValue = $(checkObject).val();
+		var propertyValue    = $(checkObject).val();
+		var otherObject      = $(checkObject).attr("other_value");
+		var otherOtherObject = $(checkObject).attr("other_other_value");
+		var optionOneId      = $(checkObject).attr("option_one");
+		var optionTwoId      = $(checkObject).attr("option_two");
 
-		var otherObject = $(checkObject).attr("other_value");
-		var otherTextId = $(checkObject).attr("other_text");
+		var optionOne;
+		var optionTwo;
+		if (optionOneId) {
+			if ($("#"+optionOneId).prop("checked")) {
+				optionOne = true;
+			}
+		}
 
-		var parentObject = $(checkObject).parent();
+		if (optionTwoId) {
+			if ($("#"+optionTwoId).prop("checked")) {
+				optionTwo = true;
+			}
+		}
+
+		var otherTextId    = $(checkObject).attr("other_text");
+		var parentObject   = $(checkObject).parent();
 		var parentObjectId = 0;
 
 		if (parentObject) {
@@ -92,9 +104,13 @@
 		}
 
 		var otherValue;
-
 		if (otherObject) {
 			otherValue = $("#"+otherObject).val();
+		}
+
+		var otherOtherValue;
+		if (otherOtherObject) {
+			otherOtherValue = $("#"+otherOtherObject).val();
 		}
 
 		var otherText;
@@ -125,6 +141,8 @@
 				setting_name   : settingName,
 				property_value : propertyValue,
 				other_value    : otherValue,
+				option_one     : optionOne,
+				option_two     : optionTwo,
 				other_text     : otherText,
 				related_thing  : relatedThing,
 				tourn_id       : tournID,
