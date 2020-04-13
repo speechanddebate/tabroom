@@ -1,0 +1,310 @@
+<%args>
+	$person
+	$target_id         => undef
+	$related_thing     => undef
+	$property_name     => undef
+	$option_one        => undef
+	$option_two        => undef
+	$other_value       => undef
+	$other_other_value => undef
+</%args>
+<%init>
+
+    $m->clear_buffer();
+    $r->content_type('application/json');
+
+	unless ($person) {
+        $m->print('{ "error": true, "message": "You are not logged into Tabroom"}');
+        $m->abort();
+	}
+
+    unless ($target_id) {
+        $m->print('{ "error": true, "message": "No Entry ID sent for flip target"}');
+        $m->abort();
+    }
+
+	my $entry = Tab::Entry->retrieve($target_id);
+
+	unless ($entry) {
+        $m->print('{ "error": true, "message": "No valid entry found for ID '.$target_id.'"}');
+        $m->abort();
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select student.id
+		from student, entry_student es
+		where es.entry = ?
+			and es.student = student.id
+			and student.person = ?
+	");
+
+	$sth->execute($entry->id, $person->id);
+
+	my $perms_ok;
+
+	if ($sth->fetchall) {
+		$perms_ok++;
+	} else {
+
+		$sth->finish();
+		$sth = $dbh->prepare("
+			select permission.id
+			from permission, student, entry_student es
+			where es.entry = ?
+				and es.student = student.id
+				and student.chapter = permission.chapter
+				and permission.tag = 'chapter'
+				and permission.person = ?
+		");
+
+		$sth->execute($entry->id, $person->id);
+
+		if ($sth->fetchall_array) {
+			$perms_ok++;
+		}
+	}
+
+	$sth->finish();
+
+	unless ($perms_ok) {
+        $m->print('{ "error": true, "message": "You do not have permission to flip for that entry"}');
+        $m->abort();
+	}
+
+    unless ($related_thing) {
+        $m->print('{ "error": true, "message": "No Section ID sent for flip"}');
+        $m->abort();
+    }
+
+	my $panel = Tab::Panel->retrieve($related_thing);
+
+	unless ($panel) {
+        $m->print('{ "error": true, "message": "No valid section found for ID '.$related_thing.'"}');
+        $m->abort();
+	}
+
+	my %flip = ();
+	%flip = eval {
+		return %{JSON::decode_json($panel->flip)};
+	};
+
+	if ($property_name eq "speakers") {
+
+		$flip{$entry->id}{$other_value} = 1;
+		$flip{$entry->id}{$other_other_value} = 2;
+
+		$panel->flip(JSON::encode_json(\%flip));
+		$panel->update();
+
+		my %response = (
+			error   => 0,
+			message => "Speaker order set for ".$entry->code
+		);
+
+		$m->print(JSON::encode_json(\%response));
+		$m->abort();
+	}
+
+	# Check if the flip is already done
+	if ($panel->flip_done) {
+        $m->print('{ "error": true, "message": "The flip for this debate is already complete"}');
+        $m->abort();
+	}
+
+	# Check against deadlines
+	my $flip_winner = $dbh->selectrow_array("
+		select ballot.entry
+		from ballot, score
+		where ballot.panel = ?
+			and ballot.id = score.ballot
+			and score.tag = 'flip_win'
+	", undef, $panel->id);
+
+	my $now = DateTime->now();
+	my $round = $panel->round;
+	my $event = $round->event;
+	my $tourn = $event->tourn;
+
+	my $deadline_offset = $event->setting('deadline_offset');
+	unless ($deadline_offset) {
+		$deadline_offset = 5;
+	}
+
+	my $second_deadline = $flip_deadline->clone();
+	$second_deadline->add(minutes => $deadline_offset);
+
+	my $flip_anyone = $event->setting('flip_anyone_chooses');
+
+	if ($second_deadline < $now) {
+        $m->print('{ "error": true, "message": "The flip deadline has passed"}');
+        $m->abort();
+	}
+
+	unless ($flip_anyone) {
+
+		if (
+			$flip_winner == $entry->id
+			&& ($flip_deadline < $now)
+		) {
+			$m->print('{ "error": true, "message": "Your deadline to flip has passed"}');
+			$m->abort();
+		} elsif (
+			($flip_winner != $entry->id)
+			&& ($flip_deadline > $now)
+		) {
+			$m->print('{ "error": true, "message": "You may not yet choose your side."}');
+			$m->abort();
+		}
+	}
+
+	# Check if I've made my choice
+	if ($flip{$entry->id}) {
+        $m->print('{ "error": true, "message": "This entry has already chosen"}');
+        $m->abort();
+	}
+
+	# Check if this choice is already done;
+	my $message;
+	my $pf_flip;
+
+	if ($event->setting("flip_team_order")) {
+		$pf_flip++;
+	} else {
+		$flip{"order_locked"}++;
+	}
+
+	my @replace;
+
+	if ($property_name eq "order") {
+
+		# Check if this decision has been made
+
+		if ($flip{"order_locked"}) {
+			$m->print('{
+				"error": true,
+				"message": "The choice of speaking order has already been made"
+			}');
+			$m->abort();
+		}
+
+		my $me_sth = $dbh->prepare("
+			update ballot set speakerorder = ? where panel = ? and entry = ?
+		");
+
+		my $not_me_sth = $dbh->prepare("
+			update ballot set speakerorder = ? where panel = ? and entry != ?
+		");
+
+		$not_me_sth->execute(127, $panel->id, $entry->id);
+
+		if ($option_one) {
+			$me_sth->execute(1, $panel->id, $entry->id);
+			$not_me_sth->execute(2, $panel->id, $entry->id);
+			$message = "Entry will speak FIRST in the round";
+
+		} elsif ($option_two) {
+			$me_sth->execute(2, $panel->id, $entry->id);
+			$not_me_sth->execute(1, $panel->id, $entry->id);
+			$message = "Entry will speak SECOND in the round";
+		}
+
+		$flip{$entry->id}++;
+		$flip{"order_chosen_by"} = $person->id;
+		$flip{"order_chosen_at"} = DateTime::Format::MySQL->format_datetime($now);
+		$flip{"order_locked"}    = 1;
+
+		if ($flip{"side_locked"}) {
+			# Flip is done!
+			$panel->flip_done(1);
+		}
+
+	} elsif ($property_name eq "side") {
+
+		# Check if this choice is made already
+		if ($flip{"side_chosen_by"}) {
+			$m->print('{
+				"error": true,
+				"message": "The choice of side has already been made"
+			}');
+			$m->abort();
+		}
+
+		my $me_sth = $dbh->prepare("
+			update ballot set side = ? where panel = ? and entry = ?
+		");
+
+		my $not_me_sth = $dbh->prepare("
+			update ballot set side = ? where panel = ? and entry != ?
+		");
+
+		$not_me_sth->execute(127, $panel->id, $entry->id);
+		my $side;
+
+		if ($option_one) {
+
+			my $aff_string = $event->setting("aff_string");
+			$aff_string = "Aff" unless $aff_string;
+
+			$me_sth->execute(1, $panel->id, $entry->id);
+			$not_me_sth->execute(2, $panel->id, $entry->id);
+			$message = "Entry chooses the ".$aff_string." side";
+			$side = $aff_string;
+
+		} elsif ($option_two) {
+
+			my $neg_string = $event->setting("neg_string");
+			$neg_string = "Neg" unless $neg_string;
+
+			$me_sth->execute(2, $panel->id, $entry->id);
+			$not_me_sth->execute(1, $panel->id, $entry->id);
+			$message = "Entry chooses the ".$neg_string." side";
+			$side = $neg_string;
+		}
+
+		$flip{$entry->id}++;
+		$flip{"side_chosen_by"} = $person->id;
+		$flip{"side_chosen_at"} = DateTime::Format::MySQL->format_datetime($now);
+		$flip{"side_locked"}    = 1;
+
+		if ($flip{"order_locked"}) {
+			# Flip is done!
+			$panel->flip_done(1);
+		}
+
+		my $content = '<span class="eighth"></span>
+			<span class="eighth semibold rightalign redtext padsetting"></span>
+			<span class="fifth semibold redtext padsetting">Sides chosen!</span>
+			<span class="eighth semibold rightalign bluetext">Your Side:</span>
+			<span class="sixth semibold bluetext">'.$side.'</span>';
+
+		my %item = (
+			id      => $entry->id."_side",
+			content => $content
+		);
+
+		push @replace, \%item;
+	}
+
+	$panel->flip(JSON::encode_json(\%flip));
+	$panel->update();
+
+	if ($panel->flip_done > 0) {
+		#Blast the result to all concerned!
+
+	}
+
+	my %response = (
+        error   => 0,
+        message => $message
+    );
+
+	if (@replace) {
+		$response{"replace"} = \@replace;
+	}
+
+    $m->print(JSON::encode_json(\%response));
+    $m->abort();
+
+</%init>
