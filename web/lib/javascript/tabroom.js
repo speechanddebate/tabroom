@@ -233,6 +233,16 @@
 		});
 	}
 
+	function pullUrl(targetUrl, callback) {
+		$.ajax({
+			type    : 'GET',
+			url     : targetUrl,
+			success : function() {
+				callback();
+			}
+		});
+	}
+
 /* zebra stripe the rows */
 
 	function zebraRows() {
