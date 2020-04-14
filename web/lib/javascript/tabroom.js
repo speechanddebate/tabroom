@@ -6,20 +6,17 @@
 			"Are you sure?",
 			message,
 			function(event) {
-
 				if (event) {
-
 					if (
 						typeof(link) === "object"
 						&& link.submit
 					) {
 						link.submit();
-
 					} else if (
 						typeof(link) === 'function'
 						&& typeof(dest) != 'undef'
 						&& typeof(payload) != 'undef'
-					){
+					) {
                         link(dest,payload);
 
                     } else {
@@ -233,12 +230,12 @@
 		});
 	}
 
-	function pullUrl(targetUrl, callback) {
+	function pullUrl(targetUrl) {
 		$.ajax({
 			type    : 'GET',
 			url     : targetUrl,
 			success : function() {
-				callback();
+				location.reload();
 			}
 		});
 	}
