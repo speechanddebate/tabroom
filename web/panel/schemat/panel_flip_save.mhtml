@@ -1,0 +1,167 @@
+<%args>
+	$panel_id
+	$tourn
+	$tourn_settings
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my %flips;
+
+	my $sth = $dbh->prepare("
+		select
+			entry.id, entry.code,
+			ballot.id, ballot.side, ballot.speakerorder,
+			panel.letter, panel.flip, panel.flip_status, panel.flip_at,
+			winner.id, winner.value,
+			CONVERT_TZ(round.start_time, '+00:00', tourn.tz),
+			CONVERT_TZ(timeslot.start, '+00:00', tourn.tz),
+			tourn.tz
+
+		from (entry, ballot, panel, round, timeslot, tourn)
+
+			left join score winner
+				on winner.ballot = ballot.id
+				and winner.tag = 'flip_win'
+
+		where panel.id = ?
+			and panel.id = ballot.panel
+			and panel.round = round.id
+			and round.timeslot = timeslot.id
+			and timeslot.tourn = tourn.id
+			and ballot.entry = entry.id
+	");
+
+	$sth->execute($panel_id);
+
+	while (
+		my (
+			$entry_id, $entry_code,
+			$ballot_id, $ballot_side, $ballot_speakerorder,
+			$panel_letter, $panel_flip, $panel_flip_status, $panel_flip_at,
+			$winner_id, $winner_value,
+			$round_start, $timeslot_start,
+			$tz
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($flips{"status"}) {
+
+			$flips{"status"} = $panel_flip_status;
+
+			$flips{"deadline"} = $m->comp("/funclib/showdt.mas",
+				string => $panel_flip_at,
+				tz     => $tz,
+				object => 'yasplz'
+			);
+
+			$flips{"tz"} = $tz;
+
+			$flips{'meta'} = eval {
+				return JSON::decode_json( $panel_flip );
+			};
+
+			if ($flips{"meta"} eq "null") {
+				undef $flips{"meta"};
+			}
+
+			if ($round_start) {
+				my ($date, $time) = split(/\ /, $round_start);
+				my ($year, $month, $day) = split(/-/, $date);
+				$flips{"start"} = $month.'/'.$day.'/'.$year;
+			} else {
+				my ($date, $time) = split(/\ /, $timeslot_start);
+				my ($year, $month, $day) = split(/-/, $date);
+				$flips{"start"} = $month.'/'.$day.'/'.$year;
+			}
+		}
+
+		if ($winner_id) {
+			$flips{"winner"} = $entry_id;
+			$flips{"win_id"} = $winner_id;
+		}
+
+		if ($ARGS{"winner_id"} eq $entry_id) {
+			$flips{"win_ballot"} = $ballot_id;
+		}
+	}
+
+	$sth->finish();
+
+	if (
+		($ARGS{'winner_id'} ne $flips{"win_id"})
+		&& $flips{"win_ballot"}
+	) {
+
+		$sth = $dbh->prepare("
+			delete score.*
+			from score, ballot
+			where ballot.panel = ?
+				and ballot.id = score.ballot
+				and score.tag = 'flip_win'
+		");
+
+		$sth->execute( $panel_id );
+		$sth->finish();
+
+		$sth = $dbh->prepare("
+			insert into score (ballot, tag, value) values (?, 'flip_win', 1);
+		");
+
+		$sth->execute($flips{"win_ballot"});
+	}
+
+	my $start_dt = eval {
+		return Tab::dtme(
+			$flips{"start"},
+			$ARGS{"flip_at"},
+			$flips{"tz"}
+		);
+	};
+
+	$start_dt->set_time_zone("UTC");
+	my $changeme;
+
+	if (
+		$ARGS{"flip_status"} ne $flips{"status"}
+		|| ((not defined $flips{"deadline"}) || $start_dt->epoch ne $flips{"deadline"}->epoch)
+	) {
+		$changeme++;
+	}
+
+	if (
+		$ARGS{'side_locked'} ne $flips{"meta"}{"side_locked"}
+		|| $ARGS{'order_locked'} ne $flips{"meta"}{"order_locked"}
+	) {
+		$flips{"meta"}{'side_locked'} = $ARGS{"side_locked"};
+		$flips{"meta"}{'order_locked'} = $ARGS{"order_locked"};
+		$changeme++;
+	}
+
+	if ($changeme)  {
+
+		$sth = $dbh->prepare("
+			update panel
+				set flip_status = ?, flip_at = ?, flip = ?
+			where panel.id = ?
+		");
+
+		my $json = JSON::encode_json($flips{"meta"});
+
+		$sth->execute(
+			$ARGS{"flip_status"},
+			DateTime::Format::MySQL->format_datetime($start_dt),
+			$json,
+			$panel_id
+		);
+
+		$sth->finish();
+	}
+
+	$dbh->disconnect();
+
+	my $message = "Flip settings saved";
+	$m->redirect("panel_view.mhtml?panel_id=$panel_id&msg=$message");
+
+</%init>

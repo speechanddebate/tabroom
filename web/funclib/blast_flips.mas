@@ -1,0 +1,284 @@
+<%args>
+	$panel_id => undef
+	$panel    => undef
+	$round_id => undef
+	$round    => undef
+</%args>
+<%init>
+
+	if ($panel) {
+		$panel_id = $panel->id;
+	}
+	if ($round) {
+		$round_id = $round->id;
+	}
+
+	$round_id = int($round_id);
+	$panel_id = int($panel_id);
+
+	my $limit;
+
+	if ($panel_id > 0) {
+
+		$limit = " and panel.id = $panel_id ";
+
+	} elsif ($round_id > 0) {
+
+		$limit = " and panel.round = $round_id ";
+
+	} else {
+		return "No valid section or round ID sent";
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $student_sth = $dbh->prepare("
+		select
+			ballot.panel,
+			sp.id, sp.email, sp.phone, sp.provider
+		from
+			student, entry_student es, person sp, ballot, panel
+
+		where ballot.panel = panel.id
+			and panel.bye != 1
+			and ballot.entry = es.entry
+			and es.student = student.id
+			and student.person = sp.id
+			$limit
+	");
+
+	my $coach_sth = $dbh->prepare("
+		select
+			ballot.panel,
+			coach.id, coach.email, coach.phone, coach.provider
+		from
+			panel, ballot, entry, school, permission, person coach
+
+
+		where ballot.panel = panel.id
+			and ballot.entry = entry.id
+			and entry.school = school.id
+			and panel.bye != 1
+			and school.chapter = permission.chapter
+			and permission.tag = 'chapter'
+			and permission.person = coach.id
+			$limit
+		group by coach.id
+	");
+
+	my $round_sth = $dbh->prepare("
+		select
+			panel.id, panel.flip_at, panel.flip_status,
+			entry.id, entry.code, ballot.side, ballot.speakerorder, winner.id, tourn.tz,
+			aff_string.value, neg_string.value, team_order.value
+
+		from (ballot, entry, panel, school, tourn)
+
+			left join score winner
+				on winner.ballot = ballot.id
+				and winner.tag = 'flip_win'
+
+			left join event_setting aff_string
+				on aff_string.event = entry.event
+				and aff_string.tag = 'aff_label'
+
+			left join event_setting neg_string
+				on neg_string.event = entry.event
+				and neg_string.tag = 'neg_label'
+
+            left join event_setting team_order
+                on team_order.event = entry.event
+                and team_order.tag = 'flip_team_order'
+
+		where ballot.panel = panel.id
+			and ballot.entry = entry.id
+			and panel.bye != 1
+			and entry.school = school.id
+			and school.tourn = tourn.id
+			$limit
+	");
+
+	my %destinations;
+	my %sections;
+
+	$coach_sth->execute();
+	$round_sth->execute();
+	$student_sth->execute();
+
+	my %deadline_cache;
+
+	while (
+		my (
+			$panel_id, $flip_at, $flip_status,
+			$entry_id, $entry_code, $side, $order, $winner, $tz,
+			$aff_string, $neg_string, $team_order
+		) = $round_sth->fetchrow_array()
+	) {
+
+		$sections{$panel_id}{"entries"}{$entry_code}++;
+
+		$aff_string = "Aff" unless $aff_string;
+		$neg_string = "Neg" unless $neg_string;
+
+		if ($side == 1) {
+			$sections{$panel_id}{"results"}{$entry_code} = $aff_string;
+		} elsif ($side == 2) {
+			$sections{$panel_id}{"results"}{$entry_code} = $neg_string;
+		}
+
+		if ($team_order) {
+			if ($order == 1) {
+				$sections{$panel_id}{'results'}{$entry_code} .= ", 1st speakers";
+			} elsif ($order == 2) {
+				$sections{$panel_id}{'results'}{$entry_code} .= ", 2nd speakers";
+			}
+		}
+
+		if ($winner) {
+			$sections{$panel_id}{"winner"} = $entry_code;
+		} else {
+			$sections{$panel_id}{"loser"} = $entry_code;
+		}
+
+		$sections{$panel_id}{"flip_status"} = $flip_status;
+
+		if ($flip_status ne "done") {
+
+			unless ($deadline_cache{$flip_at}) {
+                $deadline_cache{$flip_at} = $m->comp("/funclib/showtime.mas",
+                    string      => $flip_at,
+                    tz          => $tz,
+                    length      => "day",
+                    return      => 1
+                );
+			}
+
+			$sections{$panel_id}{"deadline"} = $deadline_cache{$flip_at}." ".Tab::tzname($tz);
+		}
+	}
+
+	while (
+		my (
+			$panel_id,
+			$contact_id, $contact_email, $contact_phone, $contact_provider
+		) = $student_sth->fetchrow_array()
+	) {
+
+		if ($contact_email) {
+			$destinations{$panel_id}{"email"}{$contact_email}++;
+		}
+
+		if ($contact_phone && $contact_provider) {
+			$destinations{$panel_id}{"phone"}{$contact_phone.'@'.$contact_provider}++;
+		}
+
+	}
+
+	while (
+		my (
+			$panel_id,
+			$coach_id, $coach_email, $coach_phone, $coach_provider
+		) = $coach_sth->fetchrow_array()
+	) {
+
+		if ($coach_email) {
+			$destinations{$panel_id}{"email"}{$coach_email}++;
+		}
+
+		if ($coach_phone && $coach_provider) {
+			$destinations{$panel_id}{"phone"}{$coach_phone.'@'.$coach_provider}++;
+		}
+	}
+
+	my $counter;
+
+	foreach my $panel_id (sort keys %destinations) {
+
+		my $round_string;
+		my $map_text;
+
+		foreach my $code (keys (%{$sections{$panel_id}{"entries"}})) {
+			$round_string .= " vs " if $round_string;
+			$round_string .= $code;
+		}
+
+		$round_string = " Debate between ".$round_string;
+
+		if ($sections{$panel_id}{"flip_status"} eq "done") {
+
+			$round_string .= "\n\n The flip for this debate is complete:\n";
+
+			foreach my $code (sort keys (%{$sections{$panel_id}{"entries"}})) {
+				$round_string .= $code.": ".$sections{$panel_id}{'results'}{$code}."\n";
+			}
+
+		} elsif ($sections{$panel_id}{"flip_status"} eq "winner") {
+
+			$round_string .= "\n\nThe winner of the flip is ".$sections{$panel_id}{"winner"};
+
+			$round_string .= "\nWinner has until ".$sections{$panel_id}{"deadline"}." to make a choice";
+			$round_string .= "\n\nDecide on your Tabroom account";
+			$map_text .= "\nat https://www.tabroom.com/user/enter/flip.mhtml\n";
+
+		} elsif ($sections{$panel_id}{"flip_status"} eq "loser") {
+
+			$round_string .= "\n\n ".$sections{$panel_id}{"loser"}." may now make their flip choice ";
+			$round_string .= "until ".$sections{$panel_id}{"deadline"};
+
+			$round_string .= "\n\nDecide on your Tabroom account";
+			$map_text .= "\nat https://www.tabroom.com/user/enter/flip.mhtml\n";
+
+		} elsif ($sections{$panel_id}{"flip_status"} eq "anyone") {
+
+			$round_string .= "\n\nThe deadline for a flip choice has expired.  Anyone may now choose.  First to choose wins";
+			$round_string .= "until ".$sections{$panel_id}{"deadline"};
+
+			$round_string .= "\n\nDecide on your Tabroom account";
+			$map_text .= "\nat https://www.tabroom.com/user/enter/flip.mhtml\n";
+		}
+
+		my @phone = keys %{$destinations{$panel_id}{"phone"}};
+		my @email = keys %{$destinations{$panel_id}{"email"}};
+
+		$m->comp( "/funclib/send_notify.mas",
+			from    => 'Tabroom.com <blasts@tabroom.com>',
+			array   => \@phone,
+			body    => $round_string
+		);
+
+		$m->comp( "/funclib/send_notify.mas",
+			from    => 'Tabroom.com <blasts@tabroom.com>',
+			array   => \@email,
+			subject => "Coinflip status update",
+			body    => $round_string.$map_text
+		);
+
+		$counter += (scalar (keys %{$destinations{$panel_id}{"email"}})) + (scalar (keys %{$destinations{$panel_id}{"phone"}}))
+	}
+
+	$round_sth->finish();
+	$student_sth->finish();
+	$coach_sth->finish();
+
+	if ($round_id ) {
+
+		my $sth = $dbh->prepare("
+			delete from round_setting where round = ? and tag = 'flip_blasted'
+		");
+
+		$sth->execute($round_id);
+		$sth->finish();
+
+		$sth = $dbh->prepare("
+			insert into round_setting (tag, round, value, value_date) values ('flip_blasted', ?, 'date', now())
+		");
+
+		$sth->execute($round_id);
+		$sth->finish();
+	}
+
+	$dbh->disconnect();
+
+	return $counter." messages sent about flips ";
+
+</%init>"

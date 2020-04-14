@@ -1,0 +1,162 @@
+<%args>
+	$panel_id => undef
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $limit;
+
+	if (int($panel_id) > 0) {
+		$limit = " and panel.id = ".int($panel_id);
+	}
+
+	my $sth = $dbh->prepare("
+		select
+			panel.id, panel.flip_status, panel.flip,
+			flip_team_order.value, flip_anyone_chooses.value, flip_deadline.value
+
+		from panel, round, event
+
+			left join event_setting flip_team_order
+				on flip_team_order.event = event.id
+				and flip_team_order.tag = 'flip_team_order'
+
+			left join event_setting flip_anyone_chooses
+				on flip_anyone_chooses.event = event.id
+				and flip_anyone_chooses.tag = 'flip_anyone_chooses'
+
+			left join event_setting flip_deadline
+				on flip_deadline.event = event.id
+				and flip_deadline.tag = 'flip_deadline'
+
+		where panel.flip_at <= ?
+			and panel.flip_status != 'done'
+			and panel.round = round.id
+			and round.event = event.id
+			$limit
+	");
+
+	my $now = DateTime->now();
+
+	$sth->execute(DateTime::Format::MySQL->format_datetime($now));
+
+	my $change_sth = $dbh->prepare("
+		update panel
+		set flip_status = ?, flip_at = ?, flip = ?
+		where id = ?
+	");
+
+	while (
+		my (
+			$panel_id, $flip_status, $flip,
+			$team_order, $anyone_chooses, $deadline
+		) = $sth->fetchrow_array()
+	)  {
+
+		my $new_dt = $now->clone();
+
+		my %flips = eval {
+			return %{JSON::decode_json($flip)};
+		};
+
+		unless ($deadline) {
+			$deadline = 5;
+		}
+
+		unless ($team_order) {
+			$flips{"order_locked"}++;
+		}
+
+		$new_dt->add(minutes => $deadline);
+		my $new_deadline = DateTime::Format::MySQL->format_datetime($new_dt);
+
+		my $new_status;
+
+		if ($flip_status eq "winner") {
+
+			if ($flips{"side_locked"} && $flips{"order_locked"}) {
+				$new_status = "done";
+			} elsif ($anyone_chooses) {
+				$new_status = "anyone";
+			} elsif ($team_order) {
+
+				if ($ARGS{"decision"}) {
+					$new_status = "loser";
+				} elsif ($flips{"side_locked"} || $flips{"order_locked"}) {
+					$new_status = "loser";
+				} else {
+					$new_status = "anyone";
+				}
+			} else {
+				$new_status = "loser";
+			}
+
+		} elsif ($flip_status eq "loser") {
+
+			if ($flips{"side_locked"} && $flips{"order_locked"}) {
+				$new_status = "done";
+			} elsif ($ARGS{"decision"}) {
+				$new_status = "winner";
+			} else {
+				$new_status = "anyone";
+			}
+
+		} elsif ($flip_status eq "anyone") {
+
+			unless ($team_order) {
+				$flips{"order_locked"}++;
+			}
+
+			unless ($flips{"side_locked"}) {
+
+				$flips{"side_auto_chosen"} = 1;
+				$flips{"side_chosen_at"} = DateTime::Format::MySQL->format_datetime($now);
+
+				my @flips = List::Util::shuffle(1, 2);
+
+				if ($flips[0] == 2) {
+					$m->comp("/funclib/swap_sides.mas", panel_id => $panel_id);
+				}
+			}
+
+			unless ($flips{"order_locked"}) {
+
+				$flips{"order_auto_chosen"} = 1;
+				$flips{"order_chosen_at"} = DateTime::Format::MySQL->format_datetime($now);
+
+				my @flips = List::Util::shuffle(1, 2);
+
+				#The fed side will be 2nd speaker
+				$m->comp("/funclib/swap_orders.mas",
+					panel_id => $panel_id,
+					side     => $flips[0]
+				);
+
+			}
+
+			$new_status = "done";
+		}
+
+		if ($new_status) {
+
+			my $json = JSON::encode_json(\%flips);
+
+			$change_sth->execute(
+				$new_status,
+				$new_deadline,
+				$json,
+				$panel_id
+			);
+
+			$change_sth->finish();
+
+			$m->comp("/funclib/blast_flips.mas",
+				panel_id    => $panel_id
+			);
+		}
+	}
+
+	return;
+
+</%init>
