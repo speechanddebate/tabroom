@@ -1,1 +1,1 @@
-grant ALL on itab.* to itab@localhost IDENTIFIED BY 'DataBasePassword';
+grant ALL on tabroom.* to tabroom@localhost IDENTIFIED BY 'DataBasePassword';
