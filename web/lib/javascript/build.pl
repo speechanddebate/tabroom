@@ -36,6 +36,8 @@ use JavaScript::Minifier qw(minify);
 
 	my $temp_file = $output_file.".tmp";
 
+	`/bin/rm $sources_file`;
+
 	foreach my $source_file (@source_files) {
 		`/bin/cat $source_dir/$source_file >> $temp_file`;
 		`/bin/cat $source_dir/$source_file >> $sources_file`;
