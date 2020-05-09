@@ -173,6 +173,7 @@
 
 					if (data.destroy) {
 						$("#"+data.destroy).remove();
+						$("."+data.destroy).remove();
 					}
 
 					if (data.reveal) {
