@@ -4,22 +4,38 @@
 # b/c this is for dev only, it only is set up to work with ubuntu linux.  Error
 # checking is a little light.  Mysql should be running with a blank root
 # password if it hasn't been already installed.  Adjust below if this squicks
-# you out, but hey, it's only for dev copies, so it shouldn't.
+# you out, but hey, it's only for dev copies or emergency restore situations, so it shouldn't.
 
 # Tabroom must be installed from /www/tabroom/web; otherwise many more things
 # other than this script will break.
 
-# Last updated 4/7/20
+# Last updated 5/13/20
 
 echo
 echo "Welcome to the Tabroom.com system installer."
 echo
 
+/usr/bin/apt-get update
+
+echo
+echo "Installing basic software toolchain"
+echo
+
+apt-get -y -q install \
+    wget \
+    curl \
+    git \
+    unzip \
+    make \
+    rsyslog \
+    openssl \
+    bzip2 \
+    awscli \
+    s3cmd
+
 echo
 echo "Installing the necessary software packages along with some ones I like having...."
 echo
-
-/usr/bin/apt-get update
 
 /usr/bin/apt-get -y -q install 
 	apache2 \
@@ -128,7 +144,6 @@ echo
 	libtext-csv-encoded-perl \
 	libtext-csv-perl
 
-
 cpanm JSON::WebToken
 cpanm Lingua::EN::Nums2Words
 cpanm REST::Client
@@ -140,11 +155,6 @@ echo
 mv /usr/share/perl5/Class/DBI.pm /usr/share/perl5/Class/DBI.pm.orig
 cp /www/tabroom/doc/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
 
-
-echo
-echo "Creating database from schema file.  Uncompressing database file (takes a little bit of time)..."
-echo
-
 echo
 echo "Creating the tab database schema and setting permissions..."
 echo
@@ -154,19 +164,23 @@ echo
 /usr/bin/mysql -u root -f tabroom < /www/tabroom/doc/init/grant.sql
 
 echo
+echo "Downloading and uncompressing database file (takes a little bit of time)..."
+echo
+
+/usr/bin/s3cmd get "s3://speechanddebate-db/$(date -I)/tabroom.sql.bz2" .
+/bin/bzip2 -d tabroom.sql.bz2
+
+echo
 echo "Loading the database file (sometimes takes a while, too.)..."
 echo
 
-/usr/bin/mysql -u root tabroom < /www/tabroom/doc/init/tabroom-schema.sql
-/usr/bin/mysql -u root -f -s tabroom < /www/tabroom/doc/init/account-create.sql
+/usr/bin/mysql -u root tabroom < /www/tabroom/doc/tabroom.sql
 
 echo
-echo "Updating the database to the latest version.  Please ignore errors here, there will be some..."
+echo "Removing sql dump file after importing"
 echo
 
-sleep 2
-
-/usr/bin/mysql -u root -f -s tabroom < /www/tabroom/doc/init/schema-updates.sql
+/bin/rm /www/tabroom/doc/tabroom.sql
 
 /bin/mkdir -p /www/tabroom/web/tmp
 /bin/mkdir -p /www/tabroom/web/mason
@@ -182,7 +196,9 @@ cp /www/tabroom/doc/local.tabroom.com.conf /etc/apache2/sites-available
 cp /www/tabroom/web/lib/Tab/General.pm.default /www/tabroom/web/lib/Tab/General.pm
 
 echo "ServerName  local.tabroom.com" >> /etc/apache2/conf.d/hostname
-echo "127.0.1.21 local local.tabroom.com" >> /etc/hosts
+
+# Commenting out as this is only for development purposes
+# echo "127.0.1.21 local local.tabroom.com" >> /etc/hosts
 
 ln -s /etc/apache2/sites-available/local.tabroom.com.conf /etc/apache2/sites-enabled/0-local.tabroom.conf
 
@@ -192,7 +208,7 @@ echo
 echo "Starting Apache..."
 echo
 
-/etc/init.d/apache2 restart
+/etc/init.d/apachectl start
 
 echo 
 echo "Yippee.  All done!  Unless, of course, you just saw errors."
