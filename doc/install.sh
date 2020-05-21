@@ -50,6 +50,7 @@ echo
 	libcompress-raw-zlib-perl \
 	libcrypt-passwdmd5-perl \
 	libcrypt-ssleay-perl \
+	libcrypt-jwt-perl \
 	libdate-manip-perl \
 	libdatetime-format-builder-perl \
 	libdatetime-format-mail-perl \
