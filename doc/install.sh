@@ -71,6 +71,7 @@ echo
 	libmime-tools-perl \
 	libmime-lite-perl \
 	liburi-perl \
+	liburi-encode-perl \
 	libwww-perl \
 	make \
 	mariadb-client \
@@ -132,6 +133,7 @@ echo
 cpanm JSON::WebToken
 cpanm Lingua::EN::Nums2Words
 cpanm REST::Client
+cpanm Net::SSH::Perl::Cipher
 
 echo
 echo "Fixing Class DBI to talk to modern MySQL/MariaDB..."
