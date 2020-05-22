@@ -166,6 +166,11 @@
 
 					alertify.error(data.message);
 
+					if (data.destroy) {
+						$("#"+data.destroy).remove();
+						$("."+data.destroy).remove();
+					}
+
 				} else if (data.message) {
 
 					alertify.dismissAll();
