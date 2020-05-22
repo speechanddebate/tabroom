@@ -30,6 +30,8 @@
 			message => "No first and last name sent; please hit back and try again"
 		);
 	}
+
+	my $err;
 	my $birth_dt;
 
 	if ($birthdate) {
@@ -37,10 +39,9 @@
 	}
 
 	my $student;
+	my $school = Tab::School->retrieve($school_id);
 
 	unless ($student_id) {
-
-		my $school = Tab::School->retrieve($school_id);
 
 		unless ($chapter_id) {
 
@@ -49,12 +50,10 @@
 			} else {
 				$chapter_id = $school->chapter->id;
 			}
-
-			Tab::debuglog("Manual chapter is $manual_chapter_id");
 		}
 
 		unless ($school) {
-			my $err = "That school is not entered in your tournament";
+			$err = "That school is not entered in your tournament";
 			$m->redirect("/register/index.mhtml?err=$err");
 		}
 
@@ -73,38 +72,9 @@
             race       => $race
 		});
 
-		$m->comp("/funclib/nsda/student_link.mas",
-			student => $student,
-			nsda_id => $nsda
-		) if $nsda;
-
-		$student->setting("coach_points", $coach_points);
-
-		if ($ARGS{"email"} || $person->site_admin) {
-
-			my $person = Tab::Person->search(email => $ARGS{"email"})->first if $ARGS{"email"};
-
-			if ($person) {
-				$student->person($person->id);
-			} else {
-				$m->comp("/funclib/student_unlink.mas", student => $student);
-			}
-
-			$student->update();
-		}
-
-		my $msg = "Student $first $last saved in ". $school->name;
-
-		if ($event_id) {
-			$m->redirect("/register/school/entry_add.mhtml?school_id=".$school->id."&event_id=$event_id&msg=$msg");
-		} else {
-			$m->redirect("/register/school/entries.mhtml?school_id=".$school->id."&msg=$msg");
-		}
-
 	} else  {
 
 		$student = Tab::Student->retrieve($student_id);
-		my $school = Tab::School->retrieve($school_id);
 
 		unless ($student) {
 			$m->comp("/funclib/abort.mas", message => "No student found for ID $student_id");
@@ -120,7 +90,6 @@
 	            description => $description,
 				person      => $person->id
 	        );
-
 		}
 
 		if ($manual_chapter_id) {
@@ -141,62 +110,76 @@
 		$student->chapter($chapter_id);
 		$student->race($race);
 
-		if ($ARGS{"email"} || $person->site_admin) {
-			my $person = Tab::Person->search(email => $ARGS{"email"})->first if $ARGS{"email"};
+	}
 
-			if ($person) {
-				$student->person($person->id);
-			} else {
-				$m->comp("/funclib/student_unlink.mas", student => $student);
+	$m->comp("/funclib/nsda/student_link.mas",
+		student => $student,
+		nsda_id => $nsda
+	) if $nsda;
+
+	my $coach;
+
+	if ($ARGS{"manual_coach_points"}) {
+		$coach = $m->comp("/funclib/nsda/user_import.mas", nsda_id => $ARGS{"manual_coach_points"});
+		Tab::debuglog("Manual coach points override was ".$ARGS{"manual_coach_points"}." and got me coach $coach");
+	}
+
+	if ($ARGS{"coach_points"} && (not defined $coach)) {
+		$coach = $m->comp("/funclib/nsda/user_import.mas", nsda_id => $ARGS{"coach_points"});
+	}
+
+	if ($coach) {
+		$student->setting("coach_points", $coach->nsda);
+	}
+
+	if ($ARGS{"email"} || $person->site_admin) {
+
+		my $student_person = Tab::Person->search(
+			email => $ARGS{"email"}
+		)->first if $ARGS{"email"};
+
+		if ($student_person) {
+			$err .= $m->comp("/funclib/student_link.mas",
+				student => $student,
+				target  => $student_person,
+				person  => $person
+			);
+		} else {
+			$m->comp("/funclib/student_unlink.mas", student => $student);
+		}
+	}
+
+	if ($tourn_settings->{"release_forms"}) {
+
+		my %release_forms = eval {
+			return %{JSON::decode_json($school->setting("release_forms"))};
+		};
+
+		my $req = Apache2::Request->new($r);
+
+		if ($req) {
+
+			my $upload = $req->upload("entry_release_".$student->id);
+
+			my $filename = $m->comp("/funclib/upload_test.mas", upload => $upload);
+
+			if ($filename) {
+
+				my $filetemp = $upload->tempname;
+
+				system $Tab::s3_cmd." put $filetemp ".$Tab::s3_bucket."/tourns/".$tourn->id."/".$school->id."/releases/".$student->id."/$filename";
+
+				$release_forms{$student->id} = $filename;
+				$school->setting(
+					"release_forms",
+					"text",
+					JSON::encode_json(\%release_forms)
+				);
 			}
 		}
+	}
 
-		$student->update();
-
-		$m->comp("/funclib/nsda/student_link.mas",
-			student => $student,
-			nsda_id => $nsda
-		) if $nsda;
-
-		$student->setting("coach_points", $coach_points);
-
-		if ($tourn_settings->{"nsda_nats"} || $tourn_settings->{"nsda_ms_nats"}) {
-
-			my %release_forms = eval {
-				return %{JSON::decode_json($school->setting("release_forms"))};
-			};
-
-			my $req = Apache2::Request->new($r);
-
-			if ($req) {
-
-				my $upload = $req->upload("entry_release_".$student->id);
-
-				if ($upload && $upload->filename) {
-
-					my $filename  = $upload->filename;
-
-					$filename =~ s/.*[\/\\](.*)/$1/;
-					$filename =~ s/\ //g;
-					$filename =~ s/\)//g;
-					$filename =~ s/\(//g;
-					$filename =~ s/\'//g;  # '  stupid vim
-
-					$filename = substr($filename, 0, 120);
-					my $filetemp = $upload->tempname;
-
-					system $Tab::s3_cmd." put $filetemp ".$Tab::s3_bucket."/tourns/".$tourn->id."/".$school->id."/releases/".$student->id."/$filename";
-
-					$release_forms{$student->id} = $filename;
-
-					$school->setting(
-						"release_forms",
-						"text",
-						JSON::encode_json(\%release_forms)
-					);
-				}
-			}
-		}
+	if ($tourn_settings->{"nsda_nats"} || $tourn_settings->{"nsda_ms_nats"}) {
 
 		$m->comp("/funclib/status_check.mas",
 			school  => $school,
@@ -210,7 +193,6 @@
 		) {
 
 			unless ($entry->event->setting("usa_wsdc")) {
-
 				my $name = $m->comp("/funclib/entry_name.mas",
 					entry => $entry,
 					full  => 1
@@ -219,10 +201,17 @@
 	            $entry->update;
 			}
         }
+	}
 
-		my $msg = "Changes saved to student $first $last.  Entries renamed in this tournament to follow suit.";
-		$m->redirect("/register/entry/student_edit.mhtml?student_id=$student_id&entry_id=$entry_id&msg=$msg");
+	my $msg = "Student $first $last saved in ". $school->name;
 
+	if ($student_id) {
+		$msg = "Changes saved to student $first $last.  Entries renamed in this tournament to follow suit.";
+		$m->redirect("/register/entry/student_edit.mhtml?student_id=$student_id&entry_id=$entry_id&msg=$msg&err=$err");
+	} elsif ($event_id) {
+		$m->redirect("/register/school/entry_add.mhtml?school_id=".$school->id."&event_id=$event_id&msg=$msg&err=$err");
+	} else {
+		$m->redirect("/register/school/entries.mhtml?school_id=".$school->id."&msg=$msg&err=$err");
 	}
 
 </%init>
