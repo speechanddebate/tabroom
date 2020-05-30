@@ -1,203 +1,395 @@
 <%args>
 	$tourn
 	$tourn_settings
+	$school          => undef
+	$reasons         => undef
+	$school_settings => undef
+	$fees            => undef
 </%args>
 <%init>
 
-    my $dbh = Tab::DBI->db_Main();
+	return unless $school;
+	return unless $tourn_settings->{"nsda_nats"};
 
-    my %school_data;
+	unless ($reasons) {
+		my %reason = $m->comp(
+			"/funclib/judgemath/nats_check_judging.mas",
+			school => $school
+		);
 
-	my $unconfirmed_sth = $dbh->prepare("
-		select school.id,
-			count(entry.id) as pending,
-			DATE_FORMAT(max(entry.created_at), '%c/%e') as last_created
-		from school, entry
-            where school.id = entry.school
-            and school.tourn = ?
-            and entry.unconfirmed = 1
-			and school.chapter > 0
-
-            and not exists (
-                select es.id
-                from entry_setting es
-                where es.tag = 'rejected_by'
-                and es.entry = entry.id
-            )
-
-            and not exists (
-                select supp.id
-                from event_setting supp
-                where supp.tag = 'supp'
-				and supp.event = entry.event
-            )
-
-            and not exists (
-                select conn.id
-                from event_setting conn
-                where conn.tag = 'conn'
-				and conn.event = entry.event
-            )
-
-        group by school.id
-	");
-
-	$unconfirmed_sth->execute($tourn->id);
-
-    while (
-        my ($school_id, $pending, $last_created) = $unconfirmed_sth->fetchrow_array()
-    ) {
-		$school_data{$school_id}{"pending"} = $pending;
-		$school_data{$school_id}{"last_created"} = $last_created;
+		$reasons = \%reason;
 	}
 
-	my $unrejected_sth = $dbh->prepare("
-		select school.id, count(entry.id)
-			from school, entry
-			where school.id = entry.school
-			and school.tourn = ?
-			and school.chapter > 0
-			and entry.unconfirmed = 0
+	unless ($school_settings) {
+		my %set = $school->all_settings();
+		$school_settings = \%set;
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my %school_data;
+
+	my $pending_sth = $dbh->prepare("
+		select count(entry.id)
+		from entry
+			where entry.school = ?
+			and entry.unconfirmed = 1
 			and not exists (
 				select es.id
 				from entry_setting es
 				where es.tag = 'rejected_by'
 				and es.entry = entry.id
 			)
-			group by school.id
-	");
-
-	$unrejected_sth->execute($tourn->id);
-
-    while (
-        my ($school_id, $entry_count) = $unrejected_sth->fetchrow_array()
-    ) {
-		$school_data{$school_id}{"unrejected"} = $entry_count;
-	}
-
-	my $incomplete_sth = $dbh->prepare("
-		select school.id, count(entry.id)
-			from school, entry
-			where school.id = entry.school
-			and school.tourn = ?
-			and entry.active = 1
-			and school.chapter > 0
 			and not exists (
 				select es.id
 				from entry_setting es
-				where es.tag = 'status'
-				and es.value = 'complete'
+				where es.tag = 'dropped_by'
 				and es.entry = entry.id
 			)
 			and not exists (
-				select evset.id
-				from event_setting evset
-				where evset.tag = 'supp'
-				and evset.event = entry.event
+				select evs.id
+				from event_setting evs
+				where evs.event = entry.event
+				and (
+					evs.tag = 'supp'
+					or evs.tag = 'conn'
+					or evs.tag = 'stefan'
+				)
 			)
-			and not exists (
-				select evset.id
-				from event_setting evset
-				where evset.tag = 'conn'
-				and evset.event = entry.event
-			)
-			group by school.id
 	");
 
-	$incomplete_sth->execute($tourn->id);
+	$pending_sth->execute($school->id);
 
-    while (
-        my ($school_id, $entry_count) = $incomplete_sth->fetchrow_array()
-    ) {
-		$school_data{$school_id}{"incomplete"} = $entry_count;
+	while (
+		my ($entrycount) = $pending_sth->fetchrow_array()
+	) {
+		$school_data{"pending"} += $entrycount;
 	}
 
-	$incomplete_sth->finish();
+	if ($school_data{"pending"}) {
+		$school_data{"entries"}++;
+	}
 
-	# World Schools kids missing forms are also incomplete
+	my $incomplete_sth = $dbh->prepare("
+		select student.id, student.first, student.last, status.value, GROUP_CONCAT(reason.value_text)
+		from (student, entry, entry_student es)
+			left join entry_setting status
+				on status.entry = entry.id
+				and status.tag = 'status'
+			left join entry_setting reason
+				on reason.entry = entry.id
+				and reason.tag = 'incomplete_reasons'
+		where entry.school = ?
+			and entry.id = es.entry
+			and entry.active = 1
+			and es.student = student.id
 
-	my $ws_sth = $dbh->prepare("
-		select school.id, rf.value_text, student.id
-		from (school, entry, entry_student es, student, chapter, event, event_setting usa)
-			left join school_setting rf
-				on rf.school = school.id
-				and rf.tag = 'release_forms'
-			where event.tourn = ?
+			and not exists (
+				select rejected.id
+				from entry_setting rejected
+				where rejected.entry = entry.id
+				and rejected.tag = 'rejected_by'
+			)
+
+		group by student.id
+	");
+
+	my %done;
+	$incomplete_sth->execute($school->id);
+
+	while (
+		my (
+			$student_id, $first, $last, $status, $reason
+		) = $incomplete_sth->fetchrow_array()
+	) {
+
+		next unless $reason;
+		next if $status eq "complete";
+		next if $done{$student_id}++;
+
+		$reason =~ s/,/-/g;
+		my @reasons = split(/\-/, $reason);
+
+		$school_data{"entry_reasons"} .= "</div>" if $school_data{"entry_reasons"};
+		$school_data{"entry_reasons"} .= '<div class="full padno marless padtop">';
+		$school_data{"entry_reasons"} .= '<span class="semibold bluetext inline">'.$first.' '.$last.'</span>  ';
+
+		my %used;
+		foreach my $reason (@reasons) {
+			$reason =~ s/^\s+//;
+			$reason =~ s/\s+$//;
+			next if $used{$reason}++;
+			$school_data{"entry_reasons"} .= '<br />&nbsp;&nbsp;&nbsp;'.$reason;
+		}
+	}
+
+	my $usa_wsdc_sth = $dbh->prepare("
+		select student.id, student.first, student.last, entry.code
+			from entry, event, entry_student es, student, event_setting usa
+		where student.chapter = ?
+			and student.id  = es.student
+			and es.entry	= entry.id
+			and entry.event = usa.event
+			and usa.tag	 = 'usa_wsdc'
+			and entry.event = event.id
+			and event.tourn = ?
+	");
+
+	$usa_wsdc_sth->execute($school->chapter->id, $tourn->id);
+
+	my %forms = eval{
+		return %{JSON::decode_json($school_settings->{'release_forms'})};
+	};
+
+	while (
+		my (
+			$student_id, $student_first, $student_last, $entry_code
+		) = $usa_wsdc_sth->fetchrow_array()
+	) {
+
+		unless (%forms) {
+		}
+
+		next if $forms{$student_id};
+		$school_data{"entry_reasons"} .= "</div>" if $school_data{"entry_reasons"};
+		$school_data{"entry_reasons"} .= '<div class="full padno marless padtop">';
+		$school_data{"entry_reasons"} .= '<span class="semibold bluetext inline">'.$student_first.' '.$student_last.'</span>  ';
+		$school_data{"entry_reasons"} .= "<br />&nbsp; Missing release forms for World Schools (".$entry_code.")";
+	}
+
+	$usa_wsdc_sth->finish();
+
+	# Missing coaches
+	my $missing_coaches = $dbh->prepare("
+
+		select entry.name, entry.id, event.abbr
+
+		from (entry, event)
+
+		where entry.school = ?
+			and entry.event = event.id
+			and entry.active = 1
+
+			and not exists (
+				select coach.id
+				from entry_setting coach
+				where coach.entry = entry.id
+				and coach.tag = 'coach_points'
+			)
+			and not exists (
+				select rejected.id
+				from entry_setting rejected
+				where rejected.entry = entry.id
+				and rejected.tag = 'rejected_by'
+			)
+	");
+
+	$missing_coaches->execute($school->id);
+
+	while (
+		my (
+			$entry_name, $entry_id, $event_abbr
+		) = $missing_coaches->fetchrow_array()
+	) {
+
+		$school_data{"entry_reasons"} .= "</div>" if $school_data{"entry_reasons"};
+		$school_data{"entry_reasons"} .= '<div class="full padno marless padtop">';
+		$school_data{"entry_reasons"} .= '<span class="semibold bluetext inline">'.$entry_name.'</span>  ';
+		$school_data{"entry_reasons"} .= "<br />&nbsp; Missing coach for points credit in ".$event_abbr;
+	}
+
+	my $unlinked_sth = $dbh->prepare("
+		select
+			entry.code, event.abbr, student.id, student.first, student.last
+
+		from entry, entry_student es, student, event, chapter, school
+
+			left join school_setting contact_name
+				on contact_name.school = school.id
+				and contact_name.tag = 'contact_name'
+
+			left join school_setting contact_email
+				on contact_email.school = school.id
+				and contact_email.tag = 'contact_email'
+
+		where event.tourn = ?
 			and event.id = entry.event
 			and entry.active = 1
 			and entry.id = es.entry
 			and es.student = student.id
 			and student.chapter = chapter.id
 			and chapter.id = school.chapter
-			and school.tourn = event.tourn
-			and event.id = usa.event
-			and usa.tag = 'usa_wsdc'
+			and school.id = ?
+
+			and not exists (
+				select person.id
+				from person
+				where person.id = student.person
+			)
+
+			group by student.id
 	");
 
-	$ws_sth->execute($tourn->id);
-
-	my %school_forms;
-	my %dinged;
-
+	$unlinked_sth->execute($tourn->id, $school->id);
 	while (
-		my ($school_id, $rf_json, $student_id) = $ws_sth->fetchrow_array()
+		my (
+			$entry_code, $event_abbr, $student_id, $student_first, $student_last,
+		) = $unlinked_sth->fetchrow_array()
 	) {
 
-		next if $dinged{$school_id};
-
-		unless ($school_forms{$school_id}) {
-			$school_forms{$school_id} = eval {
-				return JSON::decode_json($rf_json);
-			};
-		}
-
-		unless ($school_forms{$school_id}{$student_id}) {
-			$school_data{$school_id}{"incomplete"}++;
-		}
+		$school_data{"entry_reasons"} .= "</div>" if $school_data{"entry_reasons"};
+		$school_data{"entry_reasons"} .= '<div class="full padno marless padtop">';
+		$school_data{"entry_reasons"} .= '<span class="semibold bluetext inline">'.$student_first.' '.$student_last.'</span>  ';
+		$school_data{"entry_reasons"} .= "<a target='_blank' href='/user/chapter/student_edit.mhtml?student_id=".$student_id."' class='white inline link-underline'>";
+		$school_data{"entry_reasons"} .= "is not linked to a Tabroom account </a>";
 	}
 
-	my $incom_judge_sth = $dbh->prepare("
-		select school.id, count(judge.id)
-			from school, judge
-			where school.id = judge.school
-			and school.tourn = ?
-			and school.chapter > 0
-			and exists (
-				select js.id
-				from judge_setting js
-				where js.tag = 'incomplete'
-				and js.judge = judge.id
-			)
-			group by school.id
-	");
+	$school_data{"entry_reasons"} .= "</div>" if $school_data{"entry_reasons"};
 
-	$incom_judge_sth->execute($tourn->id);
-
-    while (
-        my ($school_id, $judge_count) = $incom_judge_sth->fetchrow_array()
-    ) {
-		$school_data{$school_id}{"incom_judges"} = $judge_count;
+	if ($school_data{"entry_reasons"}) {
+		$school_data{"entries"}++;
 	}
 
-	my $school_sth = $dbh->prepare('
-		select school.id, school.name, school.state
-		from school
-		where school.tourn = ?
-		and school.chapter > 0
-	');
-
-	$school_sth->execute($tourn->id);
-
-    while (
-        my ($school_id, $school_name, $school_state, $contact_name, $contact_email)
-			= $school_sth->fetchrow_array()
-    ) {
-
-		$school_data{$school_id}{"name"} = $school_name;
-		$school_data{$school_id}{"state"} = $school_state;
-		$school_data{$school_id}{"short_name"} = Tab::short_name($school_name);
+	unless ($fees) {
+		my @fee = $m->comp("/funclib/school_fees.mas",
+			school => $school,
+			all	=> 1
+		);
+		$fees = \@fee;
 	}
 
-	return %school_data;
+	$school_data{"money_due"} = shift @{$fees};
+	$school_data{"felines"} = shift @{$fees};
+	$school_data{"totals"} = shift @{$fees};
+
+	if ($school_data{"money_due"} < 0) {
+		delete $school_data{"money_due"};
+	}
+
+	if ($ARGS{"return"}) {
+		return \%school_data;
+	}
+
+	$school_settings->{"judging_unmet"} =~ s/\n/<br\/>/g;
+
+	my %measure;
+
+	if ($ARGS{"smol"}) {
+		$measure{"header"}    = "fifth";
+		$measure{"status"}    = "twenty";
+		$measure{"icon"}      = "fa-2x";
+		$measure{"iconspace"} = "nospace twenty";
+		$measure{"reason"}    = "seventenths padvertless";
+	} else {
+		$measure{"header"} = "quarter padsetting";
+		$measure{"status"} = "quarter";
+		$measure{"icon"}   = "fa-2x";
+		$measure{"reason"} = "half";
+	}
 
 </%init>
+
+%	unless ($ARGS{"smol"}) {
+		<div class="centeralign nospace">
+			<span class="ninetenths leftalign">
+
+				<div class="yellowrow smallish semibold">
+					<span class='<% $measure{"header"} %>'>
+						Area
+					</span>
+
+					<span class='<% $measure{"reason"} %> nospace'>
+						Issues
+					</span>
+
+					<span class='<% $measure{"status"} %> centeralign <% $measure{"iconspace"} %>'>
+						Status
+					</span>
+				</div>
+%	}
+
+			<div class="row">
+				<span class='<% $measure{"header"} %> semibold bluetext'>
+					Entries
+				</span>
+
+				<span class='<% $measure{"reason"} %> nospace'>
+%					if ($school_data{"pending"}) {
+						<% $school_data{"pending"} %> slots pending acceptance/rejection
+%					} elsif ($school_data{"entry_reasons"}) {
+						<% $school_data{"entry_reasons"} %>
+%					}
+
+%					unless ($school_data{"entries"}) {
+						No issues found
+%					}
+				</span>
+
+				<span class='<% $measure{"status"} %> centeralign <% $measure{"iconspace"} %>'>
+%					unless ($school_data{"entries"}) {
+						<span class="fa <% $measure{"icon"} %> fa-check-circle greentext"></span>
+%					} else {
+						<span class="fa <% $measure{"icon"} %> fa-times-circle redtext"></span>
+%					}
+				</span>
+			</div>
+
+			<div class="row">
+				<span class='<% $measure{"header"} %> semibold bluetext'>
+					Judging
+				</span>
+
+				<span class='<% $measure{"reason"} %> nospace'>
+%					if ($reasons->{"nope"}) {
+						<% $school_settings->{"judging_unmet"} %>
+%					} else {
+						Judging obligation met
+%					}
+				</span>
+
+				<span class='<% $measure{"status"} %> centeralign <% $measure{"iconspace"} %>'>
+%					if ($reasons->{"nope"}) {
+						<span class="fa <% $measure{"icon"} %> fa-times-circle redtext"></span>
+%					} else {
+						<span class="fa <% $measure{"icon"} %> fa-check-circle greentext"></span>
+%					}
+				</span>
+			</div>
+
+			<div class="row">
+				<span class='<% $measure{"header"} %> semibold bluetext'>
+					Fees
+				</span>
+
+				<span class='<% $measure{"reason"} %> nospace'>
+%					if ($school_data{"money_due"}) {
+						&#x24;<% $school_data{"money_due"} %> still owed (
+
+%						if ($school_data{"totals"}->{entry_fees}) {
+							&#x24; <% $school_data{"totals"}->{entry_fees} %> entry fees
+%						}
+%						if ($school_data{"totals"}->{concessions}) {
+							&#x24; <% $school_data{"totals"}->{concessions} %> concessions
+%						}
+%						if ($school_data{"totals"}->{payments}) {
+							&#x24; <% $school_data{"totals"}->{payments} * -1 %> paid
+%						}
+						)
+%					}
+				</span>
+
+				<span class='<% $measure{"status"} %> centeralign <% $measure{"iconspace"} %>'>
+%					if ($school_data{"money_due"}) {
+						<span class="fa <% $measure{"icon"} %> fa-times-circle redtext"></span>
+%					} else {
+						<span class="fa <% $measure{"icon"} %> fa-check-circle greentext"></span>
+%					}
+				</span>
+			</div>
+
+%		unless ($ARGS{"smol"}) {
+			</span>
+		</div>
+%	}
+
+%	return;
