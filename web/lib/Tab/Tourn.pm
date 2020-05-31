@@ -106,10 +106,9 @@ sub setting {
 			$existing->value_date($blob) if $value eq "date";
 
 			if ($value eq "json") { 
-				my $json = eval{ 
-					return JSON::encode_json($blob);
+				eval{ 
+					$existing->value_text(JSON::encode_json($blob));
 				};
-				$existing->value_text($json);
 			}
 
 			$existing->update;
@@ -133,10 +132,10 @@ sub setting {
 			} elsif ($value eq "date") { 
 				$existing->value_date($blob);
 			} elsif ($value eq "json") { 
-				my $json = eval{ 
-					return JSON::encode_json($blob);
+
+				eval{ 
+					$existing->value_text(JSON::encode_json($blob));
 				};
-				$existing->value_text($json);
 			}
 
 			$existing->update();
@@ -174,7 +173,11 @@ sub all_settings {
     
     $sth->execute($self->id);
     
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
+    while( 
+		my (
+			$tag, $value, $value_date, $value_text
+		)  = $sth->fetchrow_array()
+	) { 
 
 		if ($value eq "date") { 
 
@@ -186,9 +189,6 @@ sub all_settings {
 			$all_settings{$tag} = $value_text;
 
 		} elsif ($value eq "json") { 
-
-			# this makes no sense to me either but this is the only way it
-			# apparently returns a hash ref not a json text??? -CLP
 
 			$all_settings{$tag} = eval { 
 				return JSON::decode_json($value_text);

@@ -20,6 +20,7 @@ use HTML::Mason::ApacheHandler;
 use Digest::SHA;
 use Data::Dumper;
 use DateTime;
+use JSON::XS;
 use JSON;
 use Lingua::EN::Numbers::Ordinate;
 use MIME::Lite;
