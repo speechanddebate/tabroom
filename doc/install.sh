@@ -134,7 +134,7 @@ echo
 cpanm JSON::WebToken
 cpanm Lingua::EN::Nums2Words
 cpanm REST::Client
-cpanm Net::SSH::Perl::Cipher
+cpanm Text::Undiacritic
 
 echo
 echo "Fixing Class DBI to talk to modern MySQL/MariaDB..."
