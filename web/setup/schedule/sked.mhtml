@@ -37,19 +37,33 @@
 	my $today_limit;
 
 	if ($tourn_settings->{"nsda_district"}) {
-
 		my $last_date = $days[-1] if @days;
-
 		unless ($last_date->mdy eq $today->mdy) {
-
 			$today_limit = $today->clone();
-
 			$today_limit->set(
 				hour   => 21,
 				minute => 30
 			);
 		}
 	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select event.id
+			from event, event_setting online, event_setting online_mode
+		where event.tourn = ?
+			and event.id = online.event
+			and online.tag = 'online'
+			and online.value = 1
+			and event.id = online_mode.event
+			and online_mode.tag = 'online_mode'
+			and online_mode.value = 'async'
+	");
+
+	$sth->execute($tourn->id);
+	my $async = $sth->fetch();
+	$sth->finish();
 
 	my @timeslots;
 
@@ -78,10 +92,8 @@
 				)
 		;
 		$today = shift @days;
-
 	}
-
-	my $time_warning;
+	
 	my $impossible_warning;
 
 </%init>
@@ -144,6 +156,12 @@
 						Start Time
 					</th>
 
+%					if ($async && @days) {
+						<th>
+							End Day
+						</th>
+%					}
+
 					<th>
 						End Time
 					</th>
@@ -156,39 +174,59 @@
 			</thead>
 
 			<tbody>
-
 <%perl>
-
 			my %warning = ();
+
+			$sth = $dbh->prepare("
+				select event.id, event.type, online_mode.value, online.value
+				from (event, round)
+					left join event_setting online_mode 
+						on online_mode.event = event.id 
+						and online_mode.tag = 'online_mode'
+
+					left join event_setting online 
+						on online.event = event.id 
+						and online.tag = 'online'
+
+				where event.id = round.event
+					and round.timeslot = ? 
+			");
 
 			foreach my $timeslot (@timeslots) {
 
-				my $roundstart = $timeslot->start;
-				my $roundend = $timeslot->end;
-				my $duration = $roundend - $roundstart;
+				my $roundstart = $timeslot->start->set_time_zone($tz);
+				my $roundend   = $timeslot->end->set_time_zone($tz);
+				my $duration   = $roundend - $roundstart;
 
 				if ($duration->in_units('hours') > 4) {
 
-					my $non_congress;
+					$sth->execute($timeslot->id);
+					my $ok;
 
-					foreach my $round ($timeslot->rounds) {
-						$non_congress++ if $round->event->type ne "congress";
-						last if $non_congress;
+					while ( 
+						my ($event, $type, $mode, $online) = $sth->fetchrow_array()
+					) {
+
+						if ($type eq "congress") { 
+							$ok++;
+						}
+
+						if ($online && $mode eq "async") {
+							$ok++;
+						}
+						last if $ok;
 					}
 
-					if ($non_congress) {
+					$sth->finish();
 
+					unless ($ok) { 
 						$warning{$timeslot->id}{"color"} = "red";
-
 						$warning{$timeslot->id}{"text"} = "One or more rounds (in red) were scheduled for longer than 4 hours.  Dear God, what are you doing to those poor judges?  Chances are there's an am/pm problem here.";
 					}
-
 				}
 
 				if ($roundstart > $roundend) {
-
 					$warning{$timeslot->id}{"color"} = "blue";
-
 					$warning{$timeslot->id}{"text"} = "One or more rounds (in blue) ends before it is scheduled to begin.  While that sure would save a lot of time, we do not we control the fabric of space and time.  Chances are strong there's an am/pm problem here.";
 
 				}
@@ -223,40 +261,53 @@
 					</td>
 
 %					if (@days) {
-
 						<td class="centeralign">
-
-							<span class="hidden"><% $timeslot->start->day %></span>
-
+							<span class="hidden"><% $roundstart->day %></span>
 							<select
-								name  = "<% $timeslot->id %>_day"
-								class = "fixedtiny"
+								name  = "<% $timeslot->id %>_start_day"
+								class = "fixedsmallest"
 							>
-
 %								foreach my $day (@days) {
 									<option
 										value = "<% $day->mdy('/') %>"
-										<% $day->mdy eq $timeslot->start->mdy ? 'selected' : "" %>
+										<% $day->mdy eq $roundstart->mdy ? 'selected' : "" %>
 									> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
 %								}
 							</select>
-
 						</td>
 %					}
 
 					<td class="centeralign">
-						<span class="hidden"><% $timeslot->start->epoch %></span>
+						<span class="hidden"><% $roundstart->epoch %></span>
 						<& /funclib/timepicker.mas,
 							name => $timeslot->id."_start",
-							time => $timeslot->start->set_time_zone($tz)
+							time => $roundstart->set_time_zone($tz)
 						&>
 					</td>
 
+%					if (@days && $async) {
+						<td class="centeralign">
+							<span class="hidden"><% $roundend->day %></span>
+							<select
+								name  = "<% $timeslot->id %>_end_day"
+								class = "fixedsmallest"
+							>
+%								foreach my $day (@days) {
+									<option
+										value = "<% $day->mdy('/') %>"
+										<% $day->mdy eq $roundend->mdy ? 'selected' : "" %>
+									> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
+%								}
+							</select>
+						</td>
+%					}
+
+
 					<td class="centeralign">
-						<span class="hidden"><% $timeslot->end->epoch %></span>
+						<span class="hidden"><% $roundend->epoch %></span>
 						<& /funclib/timepicker.mas,
 							name => $timeslot->id."_end",
-							time => $timeslot->end->set_time_zone($tz)
+							time => $roundend->set_time_zone($tz)
 						&>
 					</td>
 
@@ -292,25 +343,19 @@
 					<% $warning{$timeslot->id}{"text"} %>
 				</div>
 %			}
-
-%			if (@timeslots) {
-
-				<tr class="liblrow">
-
-					<td colspan="5" class="rightalign">
-						<input
-							style = "width: 150px;"
-							type  = "submit"
-							value = "Save Timeslots"
-						>
-						</form>
-					</td>
-
-				</tr>
-
-%			}
-
 		</table>
+
+%		if (@timeslots) {
+			<div class="liblrow rightalign">
+				<span class="third centeralign">
+					<input
+						type  = "submit"
+						value = "Save Timeslots"
+					>
+				</span>
+			</div>
+%		}
+		</form>
 
 		<h4 class="martopmore">
 			Add a new timeslot:
@@ -358,3 +403,4 @@
 		</div>
 	</div>
 
+%	$dbh->disconnect();
