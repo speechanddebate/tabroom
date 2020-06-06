@@ -24,44 +24,259 @@
 
 	my $dbh = Tab::DBI->db_Main();
 
+	my $count_sth = $dbh->prepare("
+		select
+			event.id, count(distinct entry.id)
+		from entry, event
+		where event.category = ?
+			and event.id = entry.event
+			and entry.active = 1
+		group by event.id
+	");
+
+	$count_sth->execute($category->id);
+
+	my %counts;
+
+	while (
+		my (
+			$event_id, $count
+		) = $count_sth->fetchrow_array()
+	) {
+		$counts{$event_id} = $count;
+	}
+
+	$count_sth->finish();
+
+	my $jcount_sth = $dbh->prepare("
+		select
+			jpool.id, count(distinct jpj.judge), sum(judge.hired), sum(judge.obligation)
+		from jpool, jpool_judge jpj, judge
+		where jpool.category = ?
+			and jpool.id = jpj.jpool
+			and jpj.judge =judge.id
+			and judge.active =1
+		group by jpool.id
+	");
+
+	$jcount_sth->execute($category->id);
+	my %jcounts;
+
+	while (
+		my (
+			$jpool_id, $judge_count, $hired, $obligation
+		) = $jcount_sth->fetchrow_array()
+	) {
+
+		$jcounts{$jpool_id}{"judges"} = $judge_count;
+		$jcounts{$jpool_id}{"rounds"} = $hired + $obligation;
+	}
+
+	$jcount_sth->finish();
+
 	my $sth = $dbh->prepare("
 		select
-			jpool.id, jpool.name, parent.name,
-			registrant.value, rounds.value, target.value,
-			count(distinct round.id),
+			jpool.id, jpool.name,
+			parent.id, parent.name,
+			registrant.value,
+			rounds.value,
+			pool_target.value,
+			pool_priority.value,
+			pool_ignore.value,
 			num_judges.value,
-			round.name, event.abbr,
-			count(judge.id)
+			round.id, round.flighted, round.name, round.type, round.timeslot,
+			event.id, event.type, event.abbr,
+			max_panel_size.value,
+			min_panel_size.value,
+			count(judge.id),
+			sum(judge.obligation),
+			sum(judge.hired)
 
 		from (jpool)
 
 			left join jpool parent on parent.id = jpool.parent
-			left join jpool_setting registrant on registrant.jpool = jpool.id and registrant.tag = 'registrant'
-			left join jpool_setting rounds on rounds.jpool = jpool.id and rounds.tag = 'rounds'
-			left join jpool_setting target on target.jpool = jpool.id and target.tag = 'target'
 
-			left join jpool_round jpr
-				on jpr.jpool = jpool.id
+			left join jpool_setting registrant
+				on registrant.jpool = jpool.id
+				and registrant.tag = 'registrant'
 
+			left join jpool_setting rounds
+				on rounds.jpool = jpool.id
+				and rounds.tag = 'rounds'
+
+			left join jpool_setting pool_target
+				on pool_target.jpool = jpool.id
+				and pool_target.tag = 'pool_target'
+
+			left join jpool_setting pool_ignore
+				on pool_ignore.jpool = jpool.id
+				and pool_ignore.tag = 'pool_ignore'
+
+			left join jpool_setting pool_priority
+				on pool_priority.jpool = jpool.id
+				and pool_priority.tag = 'pool_priority'
+
+			left join jpool_round jpr on jpr.jpool = jpool.id
 			left join round on round.id = jpr.round
+			left join event on round.event = event.id
+
+			left join event_setting max_panel_size
+				on max_panel_size.event = event.id
+				and max_panel_size.tag = 'max_panel_size'
+
+			left join event_setting min_panel_size
+				on min_panel_size.event = event.id
+				and min_panel_size.tag = 'min_panel_size'
 
 			left join round_setting num_judges
 				on num_judges.round = round.id
 				and num_judges.tag = 'num_judges'
 
-			left join event on round.event = event.id
-
 			left join jpool_judge jpj on jpj.jpool = jpool.id
 			left join judge on judge.id = jpj.judge and judge.active = 1
 
 		where jpool.category = ?
-
-		group by jpool.id
-		order by registrant.value DESC, jpool.parent, jpool.name
-
+		group by jpool.id, round.id
+		order by registrant.value DESC, jpool.parent, jpool.name, round.name
 	");
 
 	$sth->execute($category->id);
+
+	my %jpools;
+
+	while (
+		my (
+			$jpool_id, $jpool_name,
+			$jpool_parent, $parent_name,
+			$registrant,
+			$rounds,
+			$pool_target,
+			$pool_priority,
+			$pool_ignore,
+			$num_judges,
+			$round_id, $flighted, $round_name, $round_type, $round_timeslot,
+			$event_id, $event_type, $event_abbr,
+			$max_panel_size,
+			$min_panel_size,
+			$judge_count,
+			$judge_rounds,
+			$judge_hired_rounds
+		)  = $sth->fetchrow_array()
+	) {
+
+		unless ($jpools{$jpool_id}{"name"}) {
+			$jpools{$jpool_parent}{"children"}{$jpool_id}++;
+			$jpools{$jpool_parent}{"child_count"}++;
+
+			$jpools{$jpool_id}{"name"}          = $jpool_name;
+			$jpools{$jpool_id}{"parent"}        = $jpool_parent;
+			$jpools{$jpool_id}{"registrant"}    = $registrant;
+			$jpools{$jpool_id}{"pool_target"}   = $pool_target;
+			$jpools{$jpool_id}{"pool_priority"} = $pool_priority;
+			$jpools{$jpool_id}{"pool_ignore"}   = $pool_ignore;
+			$jpools{$jpool_id}{"obligation"}    = $rounds;
+		}
+
+		unless ($jpools{$jpool_id}{"rounds"}{$round_id}) {
+
+			$jpools{$jpool_id}{"rounds"}{$round_id}++;
+
+			my $entry_count;
+
+			if ($round_type eq "final") {
+
+				if ($event_type eq "speech") {
+					$entry_count += 6;
+				} elsif ($event_type eq "congress") {
+					$entry_count += 18;
+				} else {
+					$entry_count += 2;
+				}
+
+			} elsif ($round_type eq "elim") {
+
+				if ($event_type eq "speech") {
+					if ($round_name > 10) {
+						$entry_count += 14;
+					} elsif ($round_name > 30) {
+						$entry_count += 30;
+					} else {
+						$entry_count += 60;
+					}
+				} elsif ($event_type eq "congress") {
+					$entry_count += (18 * 4)
+				} else {
+					if ($round_name < 9) {
+						$entry_count += 60;
+					} else {
+						my $entries = (40 - $round_name * 2);
+						$entry_count += $entries;
+					}
+				}
+			} else {
+				$entry_count += $counts{$event_id};
+			}
+
+			my $panel_min;
+			my $judge_min;
+
+			if ($event_type eq "speech" || $event_type eq "congress") {
+
+				if ($event_type eq "speech") {
+					$max_panel_size = "7" unless $max_panel_size;
+				} else {
+					$max_panel_size = "18" unless $max_panel_size;
+				}
+
+				$panel_min = POSIX::ceil($entry_count / $max_panel_size);
+
+				if ($flighted > 0) {
+					$panel_min = (POSIX::ceil($panel_min / $flighted));
+				}
+
+				$judge_min = ($panel_min * $num_judges);
+
+			} else {
+
+				$panel_min = POSIX::ceil($entry_count / 2);
+
+				if ($flighted) {
+					$panel_min = (POSIX::ceil($panel_min / $flighted));
+				}
+
+				$judge_min = ($panel_min * $num_judges);
+			}
+
+			$jpools{$jpool_id}{"ts"}{$round_timeslot}{"entry_count"} += $entry_count;
+			$jpools{$jpool_id}{"ts"}{$round_timeslot}{"panel_count"} += $panel_min;
+			$jpools{$jpool_id}{"ts"}{$round_timeslot}{"judge_count"} += $judge_min;
+		}
+	}
+
+	foreach my $jid (keys %jpools) {
+
+		my $min_judge;
+		my $min_panel;
+		my $min_entry;
+
+		foreach my $tid (keys %{$jpools{$jid}{"ts"}}) {
+
+			if ($jpools{$jid}{"ts"}{$tid}{"judge_count"} > $min_judge) {
+				$min_judge = $jpools{$jid}{"ts"}{$tid}{"judge_count"};
+			}
+			if ($jpools{$jid}{"ts"}{$tid}{"panel_count"} > $min_panel) {
+				$min_panel = $jpools{$jid}{"ts"}{$tid}{"panel_count"};
+			}
+			if ($jpools{$jid}{"ts"}{$tid}{"entry_count"} > $min_entry) {
+				$min_entry = $jpools{$jid}{"ts"}{$tid}{"entry_count"};
+			}
+		}
+
+
+		$jpools{$jid}{"min_panel"} = $min_panel;
+		$jpools{$jid}{"entries"}   = $min_entry;
+		$jpools{$jid}{"min_judge"} = $min_judge;
+	}
 
 </%init>
 
@@ -89,91 +304,203 @@
 
 		<thead>
 
-			<tr class="yellowrow">
+			<tr class="yellowrow smallish padvertless">
 				<th>
 					Pool
 				</th>
 
-				<th>
-					Reg
+				<th title="Is this a registrant judge pool?">
+					Reg?
 				</th>
 
-				<th>
-					Counts
+				<th title="How much obligation does an assignment cover?">
+					Obl
 				</th>
 
-				<th>
+				<th title="Parent judge pool">
 					Parent
 				</th>
 
-				<th>
-					Rounds
+				<th title="Total rounds in the pool">
+					Rds
 				</th>
 
-				<th>
-					Needs
+				<th title="Total entries in the pool">
+					Entry
 				</th>
 
-				<th>
+				<th title="Number of sections/estimated">
+					MinSct
+				</th>
+
+				<th title="Number of judges/estimated">
+					MinJdg
+				</th>
+
+				<th title="Ignore this jpool in pooling">
+					Ignore
+				</th>
+
+				<th title="Target number of judges to assign">
 					Target
 				</th>
 
-				<th>
-					Judges
+				<th title="Priority: lower means pull better judges first">
+					Priority
 				</th>
 
+				<th title="Judges in pool now">
+					Js
+				</th>
+				<th title="Judges in pool now">
+					Rs
+				</th>
 			</tr>
-
 		</thead>
 
 		<tbody>
 <%perl>
+			my %done;
 
-		while (
-			my (
-				$jpool_id, $jpool_name, $jpool_parent,
-				$registrant_value, $rounds_value, $target_value,
-				$round_name, $event_abbr, $judge_count
-			) = $sth->fetchrow_array()
-		) {
+			foreach my $jpool_id (
+				sort {
+					$jpools{$b}{"registrant"} <=> $jpools{$a}{"registrant"}
+					|| $jpools{$a}{"name"} cmp $jpools{$b}{"name"}
+					|| $jpools{$a}{"child_count"} <=> $jpools{$b}{"child_count"}
+				} keys %jpools
+			) {
 
-			next unless $jpool_id;
+				my @jpools = ($jpool_id);
+				next unless $jpool_id;
+
+				while (@jpools) {
+
+					my $jid = shift @jpools;
+					next unless $jid;
+
+					next if $done{$jid}++;
+
+					my @children = sort {
+						$jpools{$a}{"name"} cmp $jpools{$b}{"name"}
+					} keys %{$jpools{$jid}{"children"}};
+
+					if (@children) {
+						foreach my $chile (@children) {
+#							Tab::debuglog("$chile ".$jpools{$chile}{"name"}." is a child of parent $jid ".$jpools{$jid}{"name"});
+						}
+						unshift @jpools, @children;
+					}
+
+					my $pid = $jpools{$jid}{"parent"};
+					my $round_count = scalar (keys %{$jpools{$jid}{"rounds"}});
+
 </%perl>
-			<tr>
-				<td>
-					<% $jpool_name ? $jpool_name : $jpool_id %>
-				</td>
+					<tr>
+						<td class="<% $jpools{$jid}{"child_count"} > 0 ? "semibold" : "padleftmore" %>" >
+							<% $jpools{$jid}{"name"} %>
+						</td>
 
-				<td class="centeralign">
-					<% $registrant_value ? "Y" : "" %>
-				</td>
+						<td class="centeralign">
+							<& "/funclib/bool_switch.mas",
+								tag     => "registrant",
+								value   => $jpools{$jid}{"registrant"},
+								target  => $jid,
+								url     => "jpool_switch.mhtml",
+								smaller => 1
+							&>
+						</td>
 
-				<td class="centeralign">
-					<% $rounds_value %>
-				</td>
+						<td class="centeralign padless">
+							<input
+								type         = "text"
+								min 		 = 0
+								max 		 = 99
+								size         = "2"
+								target_id    = "<% $jid %>"
+								setting_name = "rounds",
+								value        = "<% $jpools{$jid}{"obligation"} %>"
+								onChange     = "postSwitch(this, 'jpool_switch.mhtml');"
+							>
+						</td>
 
-				<td>
-					<span class="hidden"><% $jpool_parent ? $jpool_parent."Z" : $jpool_name."A" %>></span>
-					<% $jpool_parent ? $jpool_parent : "" %>
-				</td>
+						<td>
+							<% $pid ? $jpools{$pid}{"name"} : "" %>
+						</td>
 
-				<td class="centeralign">
-					<% $event_abbr %>
-				</td>
+						<td class="centeralign">
+							<% $round_count %>
+						</td>
 
-				<td class="centeralign">
-					<% $round_name %>
-				</td>
+						<td class="centeralign">
+							<% $jpools{$jid}{"entries"} %>
+						</td>
 
-				<td class="rightalign">
-					<% $target_value %>
-				</td>
+						<td class="centeralign">
+							<%
+								$jpools{$jid}{"min_panel"}
+							%>
+						</td>
 
-				<td class="rightalign">
-					<% $judge_count %>
-				</td>
-			</tr>
-%		}
+						<td class="centeralign">
+							<%
+								$jpools{$jid}{"min_judge"}
+							%>
+						</td>
+
+						<td class="centeralign">
+							<& "/funclib/bool_switch.mas",
+								tag     => "pool_ignore",
+								value   => $jpools{$jid}{"pool_ignore"},
+								target  => $jid,
+								url     => "jpool_switch.mhtml",
+								smaller => 1
+							&>
+						</td>
+
+						<td class="centeralign padless">
+							<input
+								type         = "text"
+								min 		 = 0
+								max 		 = 99
+								size         = "2"
+								target_id    = "<% $jid %>"
+								setting_name = "pool_target",
+								value        = "<%
+													$jpools{$jid}{"pool_target"}
+													? $jpools{$jid}{"pool_target"}
+													: $jpools{$jid}{"min_judge"}
+												%>"
+								onChange     = "postSwitch(this, 'jpool_switch.mhtml');"
+							>
+						</td>
+
+						<td class="centeralign padless">
+							<input
+								type         = "text"
+								min 		 = 0
+								max 		 = 99
+								size         = "2"
+								target_id    = "<% $jid %>"
+								setting_name = "pool_priority",
+								value        = "<% $jpools{$jid}{"pool_priority"} %>"
+								onChange     = "postSwitch(this, 'jpool_switch.mhtml');"
+							>
+						</td>
+
+						<td class="centeralign padless">
+							<%
+								$jcounts{$jid}{"judges"}
+							%>
+						</td>
+						<td class="centeralign padless">
+							<%
+								$jcounts{$jid}{"rounds"}
+							%>
+						</td>
+
+					</tr>
+%				}
+%			}
 
 		</tbody>
 
@@ -189,3 +516,5 @@
 		});
 
 	</script>
+
+%	$dbh->disconnect();
