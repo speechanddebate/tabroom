@@ -1,0 +1,432 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$person_settings
+	$perms
+	$parent_id => undef
+</%args>
+<%init>
+
+	my %scores = (
+		strikes   => 1000000,
+		states    => 100000,
+		diversity => 1000,
+		diamonds  => 100,
+		remaining => 50,
+		already   => 10
+	);
+
+	my $parent = Tab::JPool->retrieve($parent_id);
+
+	unless ($parent) {
+		$m->comp("/funclib/abort.mas",
+			message => "No judge pool found with ID $parent_id"
+		);
+	}
+
+
+	# Strap in and lube up, this is gonna be rough.
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $children_sth = $dbh->prepare("
+		select jpool.id, jpool.name,
+			pool_target.value, pool_priority.value,
+			rounds.value,
+
+		from jpool
+			left join jpool_setting pool_target
+				on pool_target.tag = 'pool_target'
+				and pool_target.jpool = jpool.id
+
+			left join jpool_setting pool_priority
+				on pool_priority.tag = 'pool_priority'
+				and pool_priority.jpool = jpool.id
+
+			left join jpool_setting rounds
+				on rounds.tag = 'rounds'
+				and rounds.jpool = jpool.id
+
+		where jpool.parent = ?
+
+			and not exists (
+				select pool_ignore.id
+				from jpool_setting pool_ignore
+					on pool_ignore.tag = 'pool_ignore'
+					and pool_ignore.jpool = jpool.id
+			)
+
+		group by jpool.id
+	");
+
+	my %targets;
+
+	$children_sth->execute($parent_id);
+
+	while (
+		my (
+			$jpool_id, $jpool_name,
+			$pool_target, $pool_priority,
+			$rounds
+		) = $children_sth->fetchrow_array()
+	) {
+
+		$pool_priority = 99 unless $pool_priority;
+		$targets{$jpool_id}{"name"}          = $jpool_name;
+		$targets{$jpool_id}{"pool_target"}   = $pool_target;
+		$targets{$jpool_id}{"pool_priority"} = $pool_priority;
+		$targets{$jpool_id}{"rounds"}        = $rounds;
+	}
+
+	$children_sth->finish();
+
+	my $rounds_sth = $dbh->prepare("
+		select
+			jpool.id, min(timeslot.start), max(timeslot.end)
+
+		from jpool, jpool_round jpr, round, timeslot
+
+		where jpool.parent = ?
+			and jpool.id = jpr.jpool
+			and jpr.round = round.id
+			and round.timeslot = timeslot.id
+		group by jpool.id
+	");
+
+	$rounds_sth->execute($parent_id);
+
+	while (
+		my (
+			$jpool_id, $start, $end
+		) = $rounds_sth->fetchrow_array()
+	) {
+		$targets{$jpool_id}{"raw_start"} = $start;
+		$targets{$jpool_id}{"raw_end"} = $end;
+
+		$targets{$jpool_id}{"start"} = eval {
+			return DateTime::Format::MySQL->parse_datetime($start);
+		};
+		$targets{$jpool_id}{"end"} = eval {
+			return DateTime::Format::MySQL->parse_datetime($end);
+		};
+
+		$targets{$jpool_id}{"epoch_start"} = $targets{$jpool_id}{"start"}->epoch;
+		$targets{$jpool_id}{"epoch_end"} = $targets{$jpool_id}{"end"}->epoch;
+	}
+
+	my $entries_sth = $dbh->prepare("
+		select
+			jpool.id, entry.id, entry.school, school.region
+		from (entry, event, round, jpool_round jpr, jpool)
+			left join school on entry.school = school.id
+
+		where jpool.parent = ?
+			and jpool.id     = jpr.jpool
+			and jpr.round    = round.id
+			and round.event  = event.id
+			and event.id     = entry.event
+			and entry.active = 1
+		group by entry.id
+	");
+
+	$entries_sth->execute($parent_id);
+
+	while (
+		my (
+			$jpool_id, $entry_id, $entry_school, $school_region
+		) = $entries_sth->fetchrow_array()
+	) {
+		$targets{$jpool_id}{"state"}{$school_region}++;
+		$targets{$jpool_id}{"school"}{$entry_school}++;
+		$targets{$jpool_id}{"entries"}++;
+	}
+
+	# Calculate the percentage of the field that is from a given state, which
+	# later will be used to make sure the pool reflects that percentage as
+	# well.
+
+	foreach my ($jpool_id) {
+		foreach my $region_id (keys %{$targets{$jpool_id}{"state"}}) {
+			$targets{$jpool_id}{"state_ratio"}{$region_id} =
+				($targets{$jpool_id}{"state"}{$region_id} / $targets{$jpool_id}{"entries"});
+		}
+	}
+
+	$entries_sth->finish();
+
+	my $judge_sth = $dbh->prepare("
+		select
+			judge.id, judge.school, school.region,
+			judge.obligation, judge.hired,
+			diverse.value, diamonds.value, nsda_points.value,
+			strike.id, strike.tag, strike.start, strike.end, strike.event
+
+		from (judge, jpool_judge jpj, jpool)
+
+			left join person on judge.person = person.id
+			left join person_setting diamonds
+				on diamonds.tag = 'diamonds'
+				and diamonds.person = person.id
+			left join person_setting nsda_points
+				on nsda_points.tag = 'nsda_points'
+				and nsda_points.person = person.id
+
+			left join strike on strike.judge = judge.id
+
+		where jpool.parent = ?
+			and jpool.id     = jpj.jpool
+			and jpj.judge    = judge.id
+			and judge.active = 1
+	");
+
+	my %judges;
+
+	while (
+		my (
+			$jid, $judge_school, $school_region,
+			$judge_obligation, $judge_hired,
+			$diverse, $diamonds, $nsda_points,
+			$strike_id, $strike_tag, $strike_start, $strike_end, $strike_event
+		) = $judge_sth->fetchrow_array()
+	) {
+
+		unless ($judges{$jid}{"school"}) {
+			$judges{$jid}{"school"}      = $judge_school;
+			$judges{$jid}{"state"}       = $school_region;
+			$judges{$jid}{"obligation"}  = $judge_obligation + $judge_hired;
+			$judges{$jid}{"diverse"}     = $diverse;
+			$judges{$jid}{"diamonds"}    = $diamonds;
+			$judges{$jid}{"nsda_points"} = $nsda_points;
+		}
+
+		if ($diamonds) {
+			$judges{$jid}{"priority"} += $diamonds * $scores{"diamonds"};
+		}
+
+		if ($diverse) {
+			$judges{$jid}{"priority"} += $scores{"diversity"};
+		}
+
+		if ($judges{$jid}{"obligation"}) {
+			$judges{$jid}{"priority"} += $scores{"remaining"} * $judges{$jid}{"obligation"};
+		}
+
+		if ($strike_tag) {
+			$judges{$jid}{"strike_count"}++;
+
+			if ($strike_tag eq "time") {
+				$judges{$jid}{"strike"}{$strike_id}{"start"} = eval {
+					return DateTime::Format::MySQL->parse_datetime($strike_start);
+				};
+				$judges{$jid}{"strike"}{$strike_id}{"end"} = eval {
+					return DateTime::Format::MySQL->parse_datetime($strike_end);
+				};
+
+				$judges{$jid}{"strike"}{$strike_id}{"epoch_start"} = $judges{$jid}{"strike"}{$strike_id}{"start"}->epoch;
+				$judges{$jid}{"strike"}{$strike_id}{"epoch_end"} = $judges{$jid}{"strike"}{$strike_id}{"end"}->epoch;
+			}
+		}
+	}
+
+	$judge_sth->finish();
+
+	$judge_sth = $dbh->prepare("
+		select
+			judge.id,
+			jpool.id,
+			other.id, rounds.value, min(timeslot.start), max(timeslot.end)
+
+		from (judge, jpool_judge jpj, jpool,
+				jpool_judge ojpj, jpool other, jpool_round jpr,
+				rounds,
+				round, timeslot
+			)
+
+		where jpool.parent = ?
+			and jpool.id = jpj.jpool
+			and jpj.judge = judge.id
+
+			and ojpj.jpool != jpool.id
+			and ojpj.judge = judge.id
+			and ojpj.jpool = other.id
+
+			and other.id = jpr.jpool
+			and jpr.round = round.id
+			and round.timeslot = timeslot.id
+
+		group by judge.id, other.id
+	");
+
+	$judge_sth->execute($parent_id);
+
+	my %dt_cache;
+
+	while (
+		my (
+			$jid,
+			$jpool_id,
+			$other_id, $rounds, $timeslot_start, $timeslot_end
+		) = $judge_sth->fetchrow_array()
+	) {
+
+		unless ($judges{$jid}{"already"}{$jpool_id}) {
+
+			if ($rounds) {
+				$judges{$jid}{"obligation"} -= $rounds;
+				$judges{$jid}{"priority"} -= $scores{"remaining"} * $rounds;
+			}
+
+			$judges{$jid}{"priority"} += $rounds * $scores{"already"};
+
+			unless ($dt_cache{$timeslot_start}) {
+				$dt_cache{$timeslot_start} = eval {
+					my $dt = DateTime::MySQL->parse_datetime($timeslot_start);
+					return $dt->epoch;
+				};
+			}
+			unless ($dt_cache{$timeslot_end}) {
+				$dt_cache{$timeslot_end} = eval {
+					my $dt = DateTime::MySQL->parse_datetime($timeslot_end);
+					return $dt->epoch;
+				};
+			}
+
+			foreach my $tid (keys %targets) {
+				if (
+					$targets{$tid}{"epoch_start"} <= $dt_cache{$timeslot_end}->epoch
+					&& $targets{$tid}{"epoch_end"} >= $dt_cache{$timeslot_start}->epoch
+				) {
+					$judges{$jid}{"exclude"}{$tid}++;
+				}
+			}
+		}
+	}
+
+	$judge_sth->finish();
+
+	# OK now that you've scored the entire friggin world, how about some pooling
+
+	POOL:
+	foreach my $tid (
+		sort {
+			$targets{$a}{"pool_priority"} <=> $targets{$b}{"pool_priority"}
+			|| $targets{$b}{"rounds"} <=> $targets{$a}{"rounds"}
+		} keys %targets
+	) {
+
+		my $target_count = $targets{$tid}{"pool_target"};
+
+		JUDGE:
+		foreach my $jid (
+			sort {
+				$judges{$b}{"priority"} <=> $judges{$a}{"priority"}
+			} keys %judges
+		) {
+
+			next unless $judges{$jid}{"obligation"} >= $targets{$tid}{"rounds"};
+			next if $judges{$jid}{"exclude"}{$tid};
+
+			unless ($ARGS{'filler'}) {
+				my $jstate = $judges{$jid}{'state'};
+
+				if ($targets{$tid}{"state_ratio"}{$jstate}) {
+				}
+
+				my $state_quota = ceil($target_count * $targets{$tid}{"state_ratio"}{$jstate});
+
+				if ($targets{$tid}{"state_count"}{$jstate} > $state_quota) {
+					next JUDGE;
+				}
+			}
+
+			# Congratulations. You have been drafted.
+			$targets{$tid}{"judges"}{$jid}++;
+			$targets{$tid}{"judge_count"}++;
+			$targets{$tid}{"state_count"}{$jstate}++;
+
+			if ($judges{$jid}{"diverse"}) {
+				$targets{$tid}{"diverse_count"}++;
+			}
+
+			if ($judges{$jid}{"diamonds"}) {
+				$targets{$tid}{"diamond_count"}++;
+			}
+
+			$judges{$jid}{"obligation"} -= $targets{$tid}{"rounds"};
+			$judges{$jid}{"priority"} -= $scores{"remaining"} * $targets{$tid}{"rounds"};
+
+			if ($targets{$tid}{"judge_count"} > $target_count) {
+				next POOL;
+			}
+		}
+	}
+
+</%init>
+
+	<div class="main">
+
+		<h5>Results against <% $parent->name %></h5>
+
+		<& "/funclib/tablesorter.mas", table => "pool_results" &>
+
+		<table id="pool_results">
+			<thead>
+
+				<tr class="smallish yellowrow">
+
+					<th>
+						Pool
+					</th>
+
+					<th>
+						Target
+					</th>
+
+					<th>
+						Judge Count
+					</th>
+
+					<th>
+						Diverse Count
+					</th>
+
+					<th>
+						Diamonds Count
+					</th>
+
+				</tr>
+
+			</thead>
+
+			<tbody>
+
+%			foreach my $tid (keys %targets) {
+
+				<tr>
+
+					<td>
+						<% $targets{$tid}{"name"} %>
+					</td>
+
+					<td>
+						<% $targets{$tid}{"pool_target"} %>
+					</td>
+
+					<td>
+						<% $targets{$tid}{"judge_count"} %>
+					</td>
+
+					<td>
+						<% $targets{$tid}{"diverse_count"} %>
+					</td>
+
+					<td>
+						<% $targets{$tid}{"diamond_count"} %>
+					</td>
+				</tr>
+%			}
+
+			</tbody>
+		</table>
+	</div>
