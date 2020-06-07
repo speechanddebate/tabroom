@@ -33,7 +33,7 @@
 	my $children_sth = $dbh->prepare("
 		select jpool.id, jpool.name,
 			pool_target.value, pool_priority.value,
-			rounds.value,
+			rounds.value
 
 		from jpool
 			left join jpool_setting pool_target
@@ -53,7 +53,7 @@
 			and not exists (
 				select pool_ignore.id
 				from jpool_setting pool_ignore
-					on pool_ignore.tag = 'pool_ignore'
+					where pool_ignore.tag = 'pool_ignore'
 					and pool_ignore.jpool = jpool.id
 			)
 
@@ -71,7 +71,6 @@
 			$rounds
 		) = $children_sth->fetchrow_array()
 	) {
-
 		$pool_priority = 99 unless $pool_priority;
 		$targets{$jpool_id}{"name"}          = $jpool_name;
 		$targets{$jpool_id}{"pool_target"}   = $pool_target;
@@ -101,6 +100,9 @@
 			$jpool_id, $start, $end
 		) = $rounds_sth->fetchrow_array()
 	) {
+
+		next unless $targets{$jpool_id}{"name"};
+
 		$targets{$jpool_id}{"raw_start"} = $start;
 		$targets{$jpool_id}{"raw_end"} = $end;
 
@@ -137,7 +139,11 @@
 			$jpool_id, $entry_id, $entry_school, $school_region
 		) = $entries_sth->fetchrow_array()
 	) {
-		$targets{$jpool_id}{"state"}{$school_region}++;
+		next unless $targets{$jpool_id}{"name"};
+
+		if ($school_region) {
+			$targets{$jpool_id}{"state"}{$school_region}++;
+		}
 		$targets{$jpool_id}{"school"}{$entry_school}++;
 		$targets{$jpool_id}{"entries"}++;
 	}
@@ -146,8 +152,10 @@
 	# later will be used to make sure the pool reflects that percentage as
 	# well.
 
-	foreach my ($jpool_id) {
+	foreach my $jpool_id (keys %targets) {
 		foreach my $region_id (keys %{$targets{$jpool_id}{"state"}}) {
+			next unless $region_id;
+			next unless $targets{$jpool_id}{"name"};
 			$targets{$jpool_id}{"state_ratio"}{$region_id} =
 				($targets{$jpool_id}{"state"}{$region_id} / $targets{$jpool_id}{"entries"});
 		}
@@ -160,27 +168,37 @@
 			judge.id, judge.school, school.region,
 			judge.obligation, judge.hired,
 			diverse.value, diamonds.value, nsda_points.value,
-			strike.id, strike.tag, strike.start, strike.end, strike.event
+			strike.id, strike.type, strike.start, strike.end, strike.event
 
 		from (judge, jpool_judge jpj, jpool)
 
+			left join school on judge.school = school.id
+
 			left join person on judge.person = person.id
+
+			left join judge_setting diverse
+				on diverse.tag = 'diverse'
+				and diverse.judge = judge.id
+
 			left join person_setting diamonds
 				on diamonds.tag = 'diamonds'
 				and diamonds.person = person.id
+
 			left join person_setting nsda_points
 				on nsda_points.tag = 'nsda_points'
 				and nsda_points.person = person.id
 
 			left join strike on strike.judge = judge.id
 
-		where jpool.parent = ?
+		where jpool.id = ?
 			and jpool.id     = jpj.jpool
 			and jpj.judge    = judge.id
 			and judge.active = 1
+		group by judge.id, strike.id
 	");
 
 	my %judges;
+	$judge_sth->execute($parent->id);
 
 	while (
 		my (
@@ -239,9 +257,12 @@
 
 		from (judge, jpool_judge jpj, jpool,
 				jpool_judge ojpj, jpool other, jpool_round jpr,
-				rounds,
 				round, timeslot
 			)
+
+			left join jpool_setting rounds
+				on rounds.tag = 'rounds'
+				and rounds.jpool = other.id
 
 		where jpool.parent = ?
 			and jpool.id = jpj.jpool
@@ -293,6 +314,7 @@
 			}
 
 			foreach my $tid (keys %targets) {
+				next unless $targets{$tid}{"name"};
 				if (
 					$targets{$tid}{"epoch_start"} <= $dt_cache{$timeslot_end}->epoch
 					&& $targets{$tid}{"epoch_end"} >= $dt_cache{$timeslot_start}->epoch
@@ -315,6 +337,7 @@
 		} keys %targets
 	) {
 
+		next unless $targets{$tid}{"name"};
 		my $target_count = $targets{$tid}{"pool_target"};
 
 		JUDGE:
@@ -327,23 +350,24 @@
 			next unless $judges{$jid}{"obligation"} >= $targets{$tid}{"rounds"};
 			next if $judges{$jid}{"exclude"}{$tid};
 
-			unless ($ARGS{'filler'}) {
-				my $jstate = $judges{$jid}{'state'};
+			my $jstate = $judges{$jid}{'state'};
 
-				if ($targets{$tid}{"state_ratio"}{$jstate}) {
-				}
+			if ($jstate) {
+				unless ($ARGS{'filler'}) {
+					my $state_quota = POSIX::ceil($target_count * $targets{$tid}{"state_ratio"}{$jstate});
 
-				my $state_quota = ceil($target_count * $targets{$tid}{"state_ratio"}{$jstate});
-
-				if ($targets{$tid}{"state_count"}{$jstate} > $state_quota) {
-					next JUDGE;
+					if ($targets{$tid}{"state_count"}{$jstate} > $state_quota) {
+						next JUDGE;
+					}
 				}
 			}
 
 			# Congratulations. You have been drafted.
 			$targets{$tid}{"judges"}{$jid}++;
 			$targets{$tid}{"judge_count"}++;
-			$targets{$tid}{"state_count"}{$jstate}++;
+			if ($jstate) {
+				$targets{$tid}{"state_count"}{$jstate}++;
+			}
 
 			if ($judges{$jid}{"diverse"}) {
 				$targets{$tid}{"diverse_count"}++;
@@ -368,15 +392,22 @@
 
 		<h5>Results against <% $parent->name %></h5>
 
-		<& "/funclib/tablesorter.mas", table => "pool_results" &>
+		<& "/funclib/tablesorter.mas", table => "pool_results", nobuttons => 1 &>
 
 		<table id="pool_results">
 			<thead>
 
 				<tr class="smallish yellowrow">
+					<th>
+						ID
+					</th>
 
 					<th>
 						Pool
+					</th>
+
+					<th>
+						Priority
 					</th>
 
 					<th>
@@ -400,13 +431,29 @@
 			</thead>
 
 			<tbody>
+<%perl>
 
-%			foreach my $tid (keys %targets) {
+			foreach my $tid (
+				sort {
+					$targets{$a}{"pool_priority"} <=> $targets{$b}{"pool_priority"}
+					|| $targets{$a}{"name"} cmp $targets{$b}{"name"}
+				} keys %targets
+			) {
 
+				next unless $targets{$tid}{"name"};
+</%perl>
 				<tr>
 
 					<td>
+						<% $tid %>
+					</td>
+
+					<td>
 						<% $targets{$tid}{"name"} %>
+					</td>
+
+					<td>
+						<% $targets{$tid}{"pool_priority"} %>
 					</td>
 
 					<td>
