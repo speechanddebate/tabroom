@@ -1,0 +1,299 @@
+<%args>
+	$tourn
+	$school
+	$category_id => undef
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now();
+
+	my $category = Tab::Category->retrieve($category_id);
+
+	my %tourn_settings = $tourn->all_settings();
+
+	unless ($category->setting("nats_category")) {
+		$m->comp("/funclib/abort.mas",
+			warn => "You may only swap judge assignments in the MAIN category"
+		);
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+    my $rounds_sth = $dbh->prepare("
+        select
+            jpool.id, jpool.name,
+            min(CONVERT_TZ(timeslot.start, '+00:00', tourn.tz)),
+            max(CONVERT_TZ(timeslot.end, '+00:00', tourn.tz)),
+			no_swaps.value
+
+        from (jpool, jpool_round jpr, round, timeslot, tourn)
+
+			left join jpool_setting no_swaps
+				on no_swaps.jpool = jpool.id
+				and no_swaps.tag = 'no_swaps'
+
+        where jpool.category = ?
+            and jpool.id = jpr.jpool
+            and jpr.round = round.id
+            and round.timeslot = timeslot.id
+            and timeslot.tourn = tourn.id
+        group by jpool.id
+    ");
+
+    $rounds_sth->execute($category->id);
+
+    my %jpools;
+
+    while (
+        my (
+            $jpool_id, $jpool_name, $start, $end, $no_swaps
+        ) = $rounds_sth->fetchrow_array()
+    ) {
+
+		$jpools{$jpool_id}{"name"} = $jpool_name;
+
+		if ($no_swaps) {
+			Tab::debuglog("Jpool $jpool_name is a no swapper!");
+			$jpools{$jpool_id}{"no_swaps"} = $no_swaps;
+		}
+        $jpools{$jpool_id}{"raw_start"} = $start;
+        $jpools{$jpool_id}{"raw_end"} = $end;
+
+        $jpools{$jpool_id}{"start"} = eval {
+			my $dt = DateTime::Format::MySQL->parse_datetime($start);
+			$dt->set_time_zone("UTC");
+			$dt->set_time_zone($tz);
+			return $dt;
+        };
+
+        $jpools{$jpool_id}{"end"} = eval {
+            my $dt = DateTime::Format::MySQL->parse_datetime($end);
+			$dt->set_time_zone("UTC");
+			$dt->set_time_zone($tz);
+			return $dt;
+        };
+
+
+		$jpools{$jpool_id}{"day"} = $jpools{$jpool_id}{"start"}->day;
+
+		$jpools{$jpool_id}{"day_name"} = $jpools{$jpool_id}{"start"}->day_abbr;
+        $jpools{$jpool_id}{"epoch_start"} = $jpools{$jpool_id}{"start"}->epoch;
+        $jpools{$jpool_id}{"epoch_end"} = $jpools{$jpool_id}{"end"}->epoch;
+    }
+
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.first, judge.last,
+			jpj.id, jpool.id,
+			registrant.value
+
+		from judge
+			left join jpool_judge jpj on jpj.judge = judge.id
+			left join jpool on jpj.jpool = jpool.id
+
+			left join jpool_setting registrant
+				on registrant.jpool = jpool.id
+				and registrant.tag = 'registrant'
+
+		where judge.school = ?
+		and judge.category = ?
+		and judge.active = 1
+	");
+
+	$sth->execute($school->id, $category_id);
+
+	my $open = $category->setting("open_switcheroo");
+	my $close = $category->setting("close_switcheroo");
+
+	my %judges;
+
+	while (
+		my (
+			$judge_id, $first, $last, $jpj, $jpool_id, $reg
+		) = $sth->fetchrow_array()
+	) {
+
+		next if $reg;
+		$judges{$judge_id}{"name"} = $first." ".$last;
+
+		if ($jpj) {
+			$judges{$judge_id}{"count"}++;
+			my $day = $jpools{$jpool_id}{"day"};
+
+			$judges{$judge_id}{"day"}{$day} = $jpool_id;
+		}
+	}
+
+</%init>
+
+	<div class="menu">
+
+		<div class="sidenote">
+			<h5>Return</h5>
+			<a class="blue full"
+				href="judges.mhtml?category_id=<% $category->id %>&school_id=<% $school->id %>"
+			>Return to <% $category->abbr %> Judges</a>
+		</div>
+
+	</div>
+
+	<div class="main">
+
+		<& "../tabbar.mas",
+			school         => $school,
+			tourn          => $tourn,
+			tourn_settings => \%tourn_settings,
+			whoami         => "judges"
+		&>
+
+		<h5>Swap Judging Assignments</h5>
+
+		<span class="centeralign full">
+			<span class="ninetenths">
+
+				All swaps must be "legal"; the two judges must be free on the
+				days they're being swapped with.<br />
+
+				No judge can end up with more than 3 days of judging total.<br />
+
+				Some assignments, such as finals/late elims or supp prelims,
+				cannot be swapped.
+
+			</span>
+		</span>
+
+		<span class="centeralign semibold orangetext half marbottom">
+			Swaps begin on
+			<& "/funclib/showdt.mas",
+				dt     => $open,
+				tz     => $tz,
+				tzname => "yasqueen"
+			&>
+		</span>
+
+		<span class="centeralign semibold redtext half marbottom">
+			Swaps must be completed by
+			<& "/funclib/showdt.mas",
+				dt     => $close,
+				tz     => $tz,
+				tzname => "yasqueen"
+			&>
+		</span>
+
+%		if ($open > $now) {
+			<h5 class="centeralign">
+				Swaps are not yet open.
+			</h5>
+%		} elsif ($now > $close) {
+			<h5 class="centeralign">
+				Swaps are no longer open.
+			</h5>
+%		} else {
+
+		<form
+			action = "judge_swaps_save.mhtml"
+			method = "post"
+		>
+
+		<input
+			type  = "hidden"
+			name  = "school_id"
+			value = "<% $school->id %>"
+		>
+
+		<input
+			type  = "hidden"
+			name  = "category_id"
+			value = "<% $category->id %>"
+		>
+<%perl>
+
+		foreach my $judge_id (sort keys %judges) {
+
+			my @days = sort {$a <=> $b} keys %{$judges{$judge_id}{"day"}};
+</%perl>
+			<div class="row">
+
+				<span class="fifth semibold bluetext">
+					<% $judges{$judge_id}{"name"} %>
+				</span>
+
+				<span class="fourfifths nospace">
+<%perl>
+				foreach my $day (@days) {
+
+					my $jpool_id = $judges{$judge_id}{"day"}{$day};
+					my $no_swaps = $jpools{$jpool_id}{"no_swaps"};
+</%perl>
+
+					<span class="third nospace ltborderleft padleft">
+
+%						if ($day) {
+
+							<div class="semibold bluetext nospace padtop smallish">
+								<% $jpools{$jpool_id}{"name"} %>
+							</div>
+
+%							if ($no_swaps) {
+								<div class="semibold redtext padvertless">
+									Non-swappable
+								</div>
+%							} else {
+
+								<div class="padvertless">
+									<select name="<% $judge_id."_".$jpool_id %>" class="fixedmost">
+										<option value="">_</option>
+<%perl>
+										JUDGE:
+ 										foreach my $ojudge_id (sort keys %judges) {
+
+											next if $ojudge_id == $judge_id;
+											my $ojpool_id = $judges{$ojudge_id}{"day"}{$day};
+
+											if ($ojpool_id) {
+												next JUDGE if $jpools{$ojpool_id}{"no_swaps"};
+
+											} else {
+												# I have my quota already and can only swap.
+												if ($judges{$ojudge_id}{"count"} > 2
+													&& (not defined $ojpool_id)
+												) {
+													next JUDGE;
+												}
+
+												$ojpool_id = "add";
+											}
+</%perl>
+												<option
+													value="<% $ojudge_id."_".$ojpool_id %>"
+												> <%
+													$judges{$ojudge_id}{"name"}
+												%>: <%
+													$ojpool_id eq "add"
+														? "Add"
+														: "Swap w/".$jpools{$ojpool_id}{"name"}
+												%>
+												</option>
+%											}
+									</select>
+								</div>
+%							}
+%						}
+					</span>
+%				}
+
+				</span>
+			</div>
+%		}
+
+		<div class="liblrow rightalign">
+			<span class="third centeralign">
+				<input type="submit" value="Save Swaps">
+				</form>
+			</span>
+		</div>
+%		}
+	</div>
