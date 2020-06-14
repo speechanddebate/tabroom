@@ -7,6 +7,8 @@
 </%args>
 <%init>
 
+	my $dbh = Tab::DBI->db_Main();
+
 	my $judge = Tab::Judge->retrieve($judge_id) if $judge_id;
 
 	$m->comp("/funclib/abort.mas",
@@ -16,6 +18,9 @@
 	my $category = $judge->category;
 	my $start    = $tourn->start;
 	my $end      = $tourn->end;
+
+	my @strikes = $judge->strikes;
+	my @events = $category->events;
 
 	our $tz;
 	$tz = $tourn->tz;
@@ -49,10 +54,14 @@
 		tourn => $tourn
 	);
 
-	my %judges = $m->comp(
-		"/funclib/tourn_judges_hash.mas",
-		tourn => $tourn
-	);
+	my %judges;
+
+	unless ($tourn_settings->{'nsda_nats'}) {
+		%judges = $m->comp(
+			"/funclib/tourn_judges_hash.mas",
+			tourn => $tourn
+		);
+	}
 
 	my %students = $m->comp(
 		"/funclib/tourn_students_hash.mas",
@@ -65,26 +74,84 @@
 		actives => 1
 	);
 
-	my @timeslots = $m->comp(
-		"/funclib/category_timeslots.mas",
-		category => $category
-	);
+	my %timeslots;
+	my %days;
 
-	my @days = $m->comp(
-		"/funclib/tourn_days.mas",
-		tourn => $tourn
-	);
+	my $sth = $dbh->prepare("
+		select
+			timeslot.id, timeslot.name,
+			CONVERT_TZ(timeslot.start, '+00:00', tourn.tz),
+			CONVERT_TZ(timeslot.end, '+00:00', tourn.tz)
 
-	my @pools = $m->comp(
-		"/funclib/tourn_jpools.mas",
-		tourn => $tourn
-	);
+		from (timeslot, tourn, round, event)
+
+		where event.category = ?
+			and event.id = round.event
+			and round.timeslot = timeslot.id
+			and timeslot.tourn = tourn.id
+		group by timeslot.id
+		order by timeslot.start
+	");
+
+	$sth->execute($category->id);
+
+	while (
+		my (
+			$timeslot_id, $timeslot_name, $timeslot_start, $timeslot_end
+		) = $sth->fetchrow_array()
+	) {
+
+		$timeslots{$timeslot_id}{"name"} = $timeslot_name;
+
+		$timeslots{$timeslot_id}{"start"} = DateTime::Format::MySQL->parse_datetime($timeslot_start);
+		$timeslots{$timeslot_id}{"end"} = DateTime::Format::MySQL->parse_datetime($timeslot_end);
+
+		unless ($days{$timeslots{$timeslot_id}{"start"}->day}) {
+
+			my $start_dt = $timeslots{$timeslot_id}{"start"}->clone();
+			my $end_dt = $timeslots{$timeslot_id}{"end"}->clone();
+
+			$start_dt->set_time_zone($tz);
+			$end_dt->set_time_zone($tz);
+
+			$start_dt->set(
+				hour	  => "00",
+				minute	=> "00",
+				second	=> "00"
+			);
+
+			$end_dt->set(
+				hour	  => "23",
+				minute	=> "59",
+				second	=> "00"
+			);
+
+			$days{$start_dt->day}{"start"} = $start_dt;
+			$days{$start_dt->day}{"end"} = $end_dt;
+		}
+	}
+
+	my %pools;
+
+	$sth = $dbh->prepare("
+		select
+			jpool.id
+			from jpool, category
+			where category.tourn = ?
+			and category.id = jpool.category
+			limit 1
+	");
+
+	$sth->execute($category->id);
+	my $pools = $sth->fetch();
 
 	my %links;
 
 	$links{"edit"} = "edit.mhtml?judge_id=".$judge->id;
 
-	$links{"pools"} = $links{"edit"}."&default=pools" if @pools;
+	if ($pools) {
+		$links{"pools"} = $links{"edit"}."&default=pools";
+	}
 
 	$links{"noms"} = $links{"edit"}."&default=noms" if $judge->setting("nomination");
 
@@ -209,7 +276,7 @@
 
 		<h5>Time based</h5>
 
-%		if (scalar @days > 1) {
+%		if (scalar (keys %days) > 1) {
 
 			<form
 				action = "strike_save.mhtml"
@@ -235,45 +302,40 @@
 				</span>
 
 				<span class="threequarters nospace padless rightalign">
-
 <%perl>
-					my $first;
-					foreach my $day (@days)  {
+					my %time_strikes;
 
-						my $start_time = "00:00:00";
-						my $end_time = "23:59:00";
+					foreach my $strike (@strikes) {
+						next unless $strike->type eq "time";
+						$time_strikes{$strike->id}{"start"} = $strike->start;
+						$time_strikes{$strike->id}{"end"} = $strike->end;
+					}
 
-						$day->set_time_zone($tz);
+					foreach my $day_id (
+						sort {
+							$days{$a}{"start"}->epoch <=> $days{$b}{"start"}->epoch
+						} keys %days
+					) {
 
-						my $start_dt = $day->clone;
-						my $end_dt = $day->clone;
+						my $start_dt  = $days{$day_id}{"start"};
+						my $end_dt = $days{$day_id}{"end"};
+						my $existing;
 
-						$start_dt->set(
-							hour	  => "00",
-							minute	=> "00",
-							second	=> "00"
-						);
+						foreach my $strike_id (keys %time_strikes) {
+							next unless $time_strikes{$strike_id}{"start"} == $start_dt;
+							next unless $time_strikes{$strike_id}{"end"} == $end_dt;
+							$existing = $strike_id;
+						}
 
-						$end_dt->set(
-							hour	  => "23",
-							minute	=> "59",
-							second	=> "00"
-						);
-
-						next unless ($start_dt && $end_dt);
-
-						my $existing = Tab::Strike->search(
-							judge => $judge->id,
-							tourn => $tourn->id,
-							type  => "time",
-							start => $start_dt,
-							end   => $end_dt
-						)->first;
+						my $day = $start_dt;
 </%perl>
 
 						<label for="day_<% $day->mdy %>">
 
-							<span class="quarter hover nospace">
+							<span
+								class = "quarter hover nospace"
+								title = "<% $day->mdy %>"
+							>
 
 								<span class="half marno centeralign">
 									<% $day->day_abbr %>
@@ -297,7 +359,6 @@
 								</span>
 							</span>
 						</label>
-
 %	   				}
 				</span>
 			</div>
@@ -337,17 +398,21 @@
 				<option value=""></option>
 
 <%perl>
-					foreach my $timeslot (@timeslots) {
+					foreach my $timeslot_id (sort {
+						$timeslots{$a}{"start"}->epoch cmp $timeslots{$b}{"start"}->epoch
+						|| $timeslots{$a}{"name"} cmp $timeslots{$b}{"name"}
+						} keys %timeslots
+					) {
 
-						my $start = $timeslot->start->set_time_zone($tz);
-						my $end = $timeslot->end->set_time_zone($tz);
+						my $start = $timeslots{$timeslot_id}{"start"};
+						my $end = $timeslots{$timeslot_id}{"end"};
 
 						my $start_string = $start->day_abbr." ".$start->hour_12.":".$start->strftime('%M');
-						my $end_string = $end->hour_12.":".$end->strftime('%M')." ".$end->strftime('%p');;
+						my $end_string = $end->hour_12.":".$end->strftime('%M')." ".$end->strftime('%p');
 </%perl>
 						<option
-							value="<% $timeslot->id %>"
-						><% $timeslot->name %> (<% $start_string."-".$end_string %>)</option>
+							value="<% $timeslot_id %>"
+						><% $timeslots{$timeslot_id}{"name"} %> (<% $start_string."-".$end_string %>)</option>
 %					}
 				</select>
 			</span>
@@ -373,8 +438,30 @@
 			name  = "judge_id"
 		>
 
-%		my $d_strike = $judge->strikes(type => "departure")->first;
-%		my $departure = eval{ return $d_strike->start->set_time_zone($tourn->tz); };
+<%perl>
+
+		my $d_strike;
+
+		foreach my $strike (@strikes) {
+			next unless $strike->type eq "departure";
+			if ($d_strike) {
+				$strike->delete()
+			} else {
+				$d_strike = $strike;
+			}
+		}
+
+		my $departure;
+
+		if ($d_strike) {
+			$departure = $d_strike->start;
+		}
+
+		if ($departure) {
+			$departure->set_time_zone("UTC");
+			$departure->set_time_zone($tz);
+		}
+</%perl>
 
 		<div class="row">
 
@@ -382,34 +469,41 @@
 				Departs
 			</span>
 
-			<span class="half nospace">
-%				if (scalar @days > 3) {
-%					foreach my $day (@days) {
-						<label for="departure_<% $day->ymd %>">
-							<span class="quarter hover marno padless smallish">
+			<span class="fiftyfive nospace">
+<%perl>
+				my $length;
+				my $zero;
+
+				my @keys = keys %days;
+
+				if (scalar (keys %days) > 3) {
+					$length = "quarter";
+				} elsif (scalar (keys %days) > 1) {
+					$length = "third";
+				} else {
+					$zero = shift @keys;
+				}
+
+				if ($length) {
+					foreach my $day (
+						sort {
+							$days{$a}{"start"}->epoch <=> $days{$b}{"start"}->epoch
+						} keys %days
+					) {
+</%perl>
+						<label for="departure_<% $days{$day}{"start"}->ymd %>">
+							<span
+								class="<% $length %> hover marno nospace smallish"
+								hover="<% $days{$day}{"start"}->mdy('/') %>"
+							>
 								<input
 									type  = "radio"
 									name  = "departure_date"
-									value = "<% $day->mdy('/') %>"
-									id	= "departure_<% $day->ymd %>"
-									<% ($departure && $departure->ymd eq $day->ymd) ? "checked" : "" %>
+									value = "<% $days{$day}{"start"}->mdy('/') %>"
+									id    = "departure_<% $days{$day}{"start"}->ymd %>"
+									<% ($departure && $departure->ymd eq $days{$day}{"start"}->ymd) ? "checked" : "" %>
 								>
-								<% substr($day->day_abbr, 0, 2) %>
-							</span>
-						</label>
-%					}
-%				} elsif (scalar @days > 1) {
-%					foreach my $day (@days) {
-						<label for="departure_<% $day->ymd %>">
-							<span class="third hover nospace smallish">
-								<input
-									type  = "radio"
-									name  = "departure_date"
-									value = "<% $day->mdy('/') %>"
-									id	= "departure_<% $day->ymd %>"
-									<% ($departure && $departure->ymd eq $day->ymd) ? "checked" : "" %>
-								>
-								<% $day->day_abbr %>
+								<% substr($days{$day}{"start"}->day_abbr, 0, 2) %>
 							</span>
 						</label>
 %					}
@@ -417,21 +511,20 @@
 					<input
 						type  = "hidden"
 						name  = "departure_date"
-						value = "<% $days[0]->mdy('/') %>"
+						value = "<% $days{$zero}{"start"}->mdy('/') %>"
 					>
 %				}
 			</span>
 
-			<span class="twotenths marno">
-				@
+			<span class="fifth marno">
 				<& "/funclib/timepicker.mas",
 					name => "departure_time",
-					size => 6,
+					size => 5,
 					time => $departure
 				&>
 			</span>
 
-			<span class="nospace rightalign eighth">
+			<span class="nospace rightalign tenth">
 				<input
 					type  = "submit"
 					value = "Save"
@@ -475,7 +568,7 @@
 					class	= "fixedmed"
 				>
 					<option value=""></option>
-%					foreach my $event ($category->events) {
+%					foreach my $event (@events) {
 						<option
 							value="<% $event->id %>"
 						><% $event->name %></option>
@@ -517,7 +610,7 @@
 				>
 
 					<option value=""></option>
-%					foreach my $event ($category->events) {
+%					foreach my $event (@events) {
 						<option
 							value="<% $event->id %>"
 						> <% $event->name %> </option>
@@ -890,6 +983,29 @@
 			</div>
 			</form>
 
+<%perl>
+
+	$sth = $dbh->prepare("
+		select region.id, region.code, region.name
+		from region
+		where region.tourn = ?
+	");
+
+	my %regions;
+	$sth->execute($tourn->id);
+
+	while (
+		my (
+			$r_id, $r_code, $r_name
+		) = $sth->fetchrow_array()
+	) {
+		$regions{$r_id}{'name'} = $r_name;
+		$regions{$r_id}{'code'} = $r_code;
+	}
+
+</%perl>
+
+
 % 			if ($tourn_settings->{"regions"}) {
 
 				<h5>Region</h5>
@@ -932,8 +1048,10 @@
 							class	= "fixedmed"
 						>
 							<option value=""></option>
-%							foreach my $region (sort {$a->name cmp $b->name} $tourn->regions) {
-								<option value="<% $region->id %>"> <% $region->name %> </option>
+%							foreach my $r_id (sort {$regions{$a}{"name"} cmp $regions{$b}{name}} keys %regions) {
+								<option
+									value="<% $r_id %>"
+								><% $regions{$r_id}{"name"} %> <% $regions{$r_id}{"code"} ? "(".$regions{$r_id}{"code"}.")" : "" %></option>
 %							}
 						</select>
 					</span>
@@ -943,6 +1061,30 @@
 %			}
 
 % 			if ($tourn_settings->{"nsda_nats"}) {
+
+
+<%perl>
+
+	$sth = $dbh->prepare("
+		select district.id, district.code, district.name
+		from district, school
+		where school.tourn = ?
+		and school.district = district.id
+	");
+
+	my %districts;
+	$sth->execute($tourn->id);
+
+	while (
+		my (
+			$d_id, $d_code, $d_name
+		) = $sth->fetchrow_array()
+	) {
+		$districts{$d_id}{'name'} = $d_name;
+		$districts{$d_id}{'code'} = $d_code;
+	}
+
+</%perl>
 
 				<h5>Districts</h5>
 
@@ -984,16 +1126,12 @@
 							class	= "fixedmed"
 						>
 							<option value=""></option>
-<%perl>
-						foreach my $district (
-							sort {$a->name cmp $b->name}
-							$m->comp("/funclib/tourn_districts.mas", tourn => $tourn)
-						) {
-</%perl>
+
+%							foreach my $d_id (sort {$districts{$a}{"name"} cmp $districts{$b}{name}} keys %districts) {
 								<option
-									value="<% $district->id %>"
-								><% $district->code %> <% $district->name %> </option>
-%						}
+									value="<% $d_id %>"
+								><% $districts{$d_id}{"name"} %> <% $districts{$d_id}{"code"} ? "(".$districts{$d_id}{"code"}.")" : "" %></option>
+%							}
 						</select>
 					</span>
 
@@ -1050,16 +1188,11 @@
 							class = "fixedmed"
 						>
 							<option value=""></option>
-<%perl>
-						foreach my $region (
-							sort {$a->name cmp $b->name}
-							$m->comp("/funclib/tourn_regions.mas", tourn => $tourn)
-						) {
-</%perl>
-							<option
-								value="<% $region->id %>"
-							> <% $region->name %> <% sprintf("%2s", $region->code) %> </option>
-%						}
+%							foreach my $r_id (sort {$regions{$a}{"name"} cmp $regions{$b}{name}} keys %regions) {
+								<option
+									value="<% $r_id %>"
+								><% $regions{$r_id}{"name"} %> <% $regions{$r_id}{"code"} ? "(".$regions{$r_id}{"code"}.")" : "" %></option>
+%							}
 						</select>
 					</span>
 
@@ -1098,15 +1231,21 @@
 			</span>
 
 			<span class="threefifths marno">
+<%perl>
+	  			if (scalar (keys %days) > 1) {
 
-%	  			if (scalar @days > 1) {
-%					my $first;
-%					foreach my $day (@days)  {
+					my $first;
 
+					foreach my $day_id (
+						sort {
+							$days{$a}{"start"}->epoch <=> $days{$b}{"start"}->epoch
+						} keys %days
+					) {
+
+						my $day = $days{$day_id}{"start"};
+</%perl>
 						<label for="start_<% $day->ymd %>">
-
-							<span class="sixth hover marno">
-
+							<span class="sixth hover marno" title="<% $day->mdy('/') %>">
 								<input
 									type  = "radio"
 									name  = "start_date"
@@ -1116,10 +1255,8 @@
 								>
 								<% $day->day_abbr %>
 							</span>
-
 						</label>
 %	   				}
-
 %			   	} else {
 
 					<input
@@ -1155,13 +1292,21 @@
 
 			<span class="threefifths marno">
 
-%   			if (scalar @days > 1) {
+<%perl>
+	  			if (scalar (keys %days) > 1) {
 
-%					my $first;
+					my $first;
 
-%					foreach my $day (@days) {
+					foreach my $day_id (
+						sort {
+							$days{$a}{"start"}->epoch <=> $days{$b}{"start"}->epoch
+						} keys %days
+					) {
+
+						my $day = $days{$day_id}{"start"};
+</%perl>
 						<label for="end_<% $day->ymd %>">
-							<span class="sixth marno hover">
+							<span class="sixth hover marno" title="<% $day->mdy('/') %>">
 								<input
 									type  = "radio"
 									name  = "end_date"
@@ -1194,6 +1339,8 @@
 			</span>
 
 		</div>
+
+%		if (keys %judges) {
 
 		<h5 class="martopmore">
 			Clone Strikes &amp; Conflict
@@ -1251,6 +1398,8 @@
 
 		</div>
 
+%		}
+
 		<div class = "centeralign">
 
 			<p class="semibold redtext bigger centeralign fivesixths">
@@ -1273,7 +1422,6 @@
 		<div class="sidenote">
 
 <%perl>
-			my @strikes = $judge->strikes;
 			my @conflicts;
 			my @invisibles;
 			my @visibles;
