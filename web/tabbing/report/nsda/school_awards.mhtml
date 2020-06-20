@@ -1,0 +1,372 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$format => "show"
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+</%init>
+
+	<div class="main">
+
+<%perl>
+
+	my %won_overall;
+
+	TAG:
+	foreach my $tag ("Overall", "Speech", "Debate") {
+
+		my $asdf = "SOE ".$tag;
+
+		my $master_set = $tourn->sweep_sets(
+			name => $asdf
+		)->first;
+
+		my %schools = $m->comp(
+			"/tabbing/results/sweep_schools.mas",
+			sweep_set => $master_set
+		);
+
+		my $counter = 1;
+		my %last_round;
+		my %area_entries;
+		my %used_events;
+		my $school_event_sth;
+
+		my $sth = $dbh->prepare("
+			select entry.id, max(round.name)
+			from entry, ballot, panel, round, event
+			where event.tourn = ?
+				and event.id = round.event
+				and round.id = panel.round
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+				and entry.active = 1
+			group by entry.id
+		");
+
+		$sth->execute($tourn->id);
+
+		while (
+			my ($entry_id, $round_name) = $sth->fetchrow_array()
+		) {
+			$last_round{$entry_id} = $round_name;
+		}
+
+		$sth->finish();
+
+		my @sets;
+		my @events;
+		push @sets, $master_set;
+
+		while (@sets) {
+			my $set = shift @sets;
+
+			if ($set && $set->children) {
+				push @sets, $set->children();
+			}
+
+			if ($set) {
+				push @events, $set->events();
+			}
+		}
+
+		%used_events = map{ $_->id => $_} @events;
+		my $event_string = join(",", keys %used_events);
+
+		$school_event_sth = $dbh->prepare("
+			select school.id, count(entry.id), chapter.nsda, event.type
+			from entry, school, chapter, event
+			where school.tourn = ?
+				and entry.school = school.id
+				and entry.unconfirmed = 0
+				and entry.dq != 1
+				and entry.event in ($event_string)
+				and entry.event = event.id
+				and school.chapter = chapter.id
+			group by school.id
+		");
+
+		$school_event_sth->execute($tourn->id);
+
+		while (
+			my ($school_id, $count, $nsda) = $school_event_sth->fetchrow_array()
+		) {
+			$area_entries{$school_id} = $count;
+		}
+
+		$school_event_sth->finish();
+
+</%perl>
+
+		<&
+			"/funclib/tablesorter.mas",
+			table => $tag
+		&>
+
+		<div class="">
+			<span class="fourfifths nospace">
+				<h5>
+					<% $tag %>
+				</h5>
+			</span>
+
+			<span
+				class = "fifth rightalign"
+				id    = "<% $tag %>_buttonarea"
+			>
+			</span>
+		</div>
+
+		<table id="<% $tag %>" class="border">
+			<thead>
+				<tr class="yellowrow smaller">
+					<th>
+						Place
+					</th>
+					<th>
+						Award
+					</th>
+
+					<th>
+						Tie
+					</th>
+
+					<th>
+						School
+					</th>
+
+					<th>
+						District
+					</th>
+
+					<th>
+						Entries Counted
+					</th>
+
+					<th>
+						Entries in Area
+					</th>
+
+					<th>
+						Average
+					</th>
+
+					<th>
+						Total
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+<%perl>
+				my %tiers;
+				my $last_points;
+				my $add_to_place;
+				my $count = 1;
+				my $place;
+
+				my $overall_count = 10;
+
+				my $excellence_count;
+				my $honor_count;
+
+				unless ($tag eq "Overall") {
+					undef $overall_count;
+					$excellence_count = 20;
+					$honor_count      = 20;
+				}
+
+				foreach my $school_id (keys %schools) {
+
+					if ( ($tag ne "Overall") && $won_overall{$school_id}) {
+						undef $schools{$school_id}{"points"};
+					}
+
+					if ($tag eq "Overall") {
+
+						my $debate += $schools{$school_id}{"point_types"}{"debate"};
+						$debate += $schools{$school_id}{"point_types"}{"congress"};
+
+						my $speech += $schools{$school_id}{"point_types"}{"speech"};
+
+						unless ($debate > 0 && $speech > 0) {
+							undef $schools{$school_id}{"points"};
+						}
+					}
+
+					next unless $schools{$school_id}{"points"};
+					next unless $schools{$school_id}{"counted_entry_count"};
+
+					$schools{$school_id}{"average"} = sprintf("%.2f",
+						($schools{$school_id}{"points"} / $schools{$school_id}{"counted_entry_count"})
+					);
+				}
+
+				foreach my $school_id ( sort {
+					$schools{$b}{"points"} <=> $schools{$a}{"points"}
+					|| $schools{$b}{"average"} <=> $schools{$a}{"average"}
+					} keys %schools
+				) {
+
+					next unless $schools{$school_id}{"points"};
+
+					if ($last_points == $schools{$school_id}{"points"}) {
+						$add_to_place++;
+					} elsif ($add_to_place) {
+						$place++;
+						$place += $add_to_place;
+						undef $add_to_place;
+					}  else {
+						$place++;
+					}
+
+					$last_points = $schools{$school_id}{"points"};
+					push @{$tiers{$place}}, $school_id;
+				}
+
+				my $was_tie;
+
+				foreach my $place (sort {$a <=> $b} keys %tiers) {
+
+					my $tie;
+					$tie++ if scalar @{$tiers{$place}} > 1;
+					my $label;
+					my $border;
+
+					if ($tie > 0 && $was_tie > 0) {
+						$border++;
+					} elsif ($tie > 0) {
+						$was_tie++;
+					} else {
+						undef $was_tie;
+					}
+
+					my $notfirst;
+
+					my $done;
+
+					foreach my $school_id (@{$tiers{$place}}) {
+
+						if ($tag eq "Overall" && $overall_count > 0) {
+							$label = "Overall";
+							$overall_count--;
+							$won_overall{$school_id}++;
+						} elsif ($excellence_count > 0) {
+							$label = "Excellence";
+							$excellence_count--;
+						} elsif ($honor_count > 0) {
+							$label = "Honor";
+							$honor_count--;
+						} else {
+							$done++;
+						}
+</%perl>
+						<tr
+							class = "hover smaller"
+							title = "<% $schools{$school_id}{"count_string"} %>"
+						>
+
+%							undef $border;
+							<td class="smallish centeralign">
+								<% $place %>
+							</td>
+
+							<td class="smallish centeralign">
+								<% $label %>
+							</td>
+
+							<td class="smallish centeralign">
+								<% $tie ? "T" : "" %>
+							</td>
+
+							<td class="smallish">
+								<% $schools{$school_id}{"name"} %>
+							</td>
+
+							<td class="smallish" title="<% $schools{$school_id}{"regionname"} %>">
+								<% ($tourn_settings->{"regions"} || $tourn_settings->{"ncfl"})
+									? $schools{$school_id}{"regioncode"}
+									: $schools{$school_id}{"state"}
+								%>
+							</td>
+
+
+							<td class="smallish rightalign">
+								<% $schools{$school_id}{"counted_entry_count"} + $schools{$school_id}{"wildcard_count"} %>
+							</td>
+
+							<td class="smallish rightalign">
+								<% $area_entries{$school_id} %>
+							</td>
+
+							<td class="smallish rightalign">
+								<% $schools{$school_id}{"average"} %>
+							</td>
+
+							<td class="smallish rightalign">
+								<% $schools{$school_id}{"points"} %>
+							</td>
+
+						</tr>
+
+%						if ($ARGS{"what"} eq "Audit") {
+%							foreach my $entry_id (sort keys %{$schools{$school_id}{"entries"}}) {
+								<tr>
+									<td>
+										<span class="hidden"><% $place %></span>
+									</td>
+
+									<td class="smaller">
+										<span class="hidden"><% $label %></span>
+									</td>
+
+									<td class="smallish">
+										<span class="hidden"><% $schools{$school_id}{"name"} %></span>
+									</td>
+
+									<td class="smallish">
+									</td>
+
+									<td class="smallish">
+										<% $schools{$school_id}{"entries"}{$entry_id}{"code"} %>
+									</td>
+
+									<td class="smallish">
+										<% $schools{$school_id}{"entries"}{$entry_id}{"event"} %>
+									</td>
+
+									<td class="smallish">
+										Rd <% $last_round{$entry_id} %>
+									</td>
+
+									<td class="smallish">
+										Pts
+									</td>
+									<td class="smallish">
+										<% $schools{$school_id}{"entries"}{$entry_id}{"points"} %>
+									</td>
+								</tr>
+%							}
+
+							<tr>
+								<td colspan="10">
+									<span class="hiddencsv">-</span>
+								</td>
+							</tr>
+
+%						}
+%					}
+%					$was_tie++ if $tie;
+%					if ($done) {
+						</tbody>
+						</table>
+%						next TAG;
+%					}
+%				}
+			</tbody>
+		</table>
+%	}
+	</div>
