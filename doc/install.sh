@@ -21,8 +21,7 @@ echo
 
 /usr/bin/apt-get update
 
-/usr/bin/apt-get -y -q install 
-	apache2 \
+/usr/bin/apt-get -y -q install apache2 \
 	apache2-utils \
 	bzip2 \
 	libapache-session-perl \
@@ -122,6 +121,7 @@ echo
 	texlive-fonts-extra \
 	libswitch-perl \
 	libjson-perl \
+	libjson-webtoken-perl \
 	libjavascript-minifier-perl \
 	libcss-minifier-perl \
 	pv \
@@ -130,8 +130,6 @@ echo
 	libtext-csv-encoded-perl \
 	libtext-csv-perl
 
-
-cpanm JSON::WebToken
 cpanm Lingua::EN::Nums2Words
 cpanm REST::Client
 cpanm Text::Undiacritic
