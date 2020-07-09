@@ -17,43 +17,121 @@ Tab::Panel->has_many(student_votes => 'Tab::StudentVote', 'panel');
 
 __PACKAGE__->_register_datetimes( qw/started timestamp flip_at/);
 
-__PACKAGE__->add_trigger(after_set_room => \&new_hangout);
 
-# Set appropriate "room ID" value depending on what room was selected
-sub new_hangout() {
-    my $self = shift;
-    if ($self->room == -1) {
-        # Hangout room selected
-        if (!$self->g_event) {
-            # No GCal event? Means we may have just switched to a Hangout room
-            # So clear out HOA link and invitation record
-            $self->room_ext_id(undef);
-            $self->invites_sent(0);
-        }
-    } elsif ($self->room == -2) {
-        # Hangout On Air room selected
-        if ($self->g_event) {
-            # We just switched to a HOA room from a Hangout so...
-            # Delete Hangout event
-            Tab::GoogleCalendar->deleteEvent($self->g_event);
-            $self->g_event(undef);
-            $self->room_ext_id(undef);
-            $self->invites_sent(0);
-	} elsif (!$self->room_ext_id) {
-            # We may have just switched to a HOA room
-            # Clear out invitation record
-            $self->invites_sent(0);
-        }
-    } else {
-        # If the room isn't a Hangout of either kind, Hangout info should be blank
-        if ($self->g_event) {
-            # We just switched from a Hangout so...
-            # Delete Hangout event
-            Tab::GoogleCalendar->deleteEvent($self->g_event);
-            $self->g_event(undef);
-        }
-        $self->room_ext_id(undef);
-        $self->invites_sent(0);
-    }
+sub setting {
+
+	my ($self, $tag, $value, $blob) = @_;
+	$/ = ""; #Remove all trailing newlines
+
+	chomp $blob;
+
+	my @existing = Tab::PanelSetting->search(
+		panel => $self->id,
+		tag   => $tag
+	);
+
+	my $existing = shift @existing if @existing;
+
+	foreach (@existing) { $_->delete(); }
+
+	if (defined $value) {
+			
+		if ($existing) {
+
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+
+			if ($value eq "json") { 
+				my $json = eval{ 
+					return JSON::encode_json($blob);
+				};
+				$existing->value_text($json);
+			}
+
+			$existing->update;
+
+			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+				$existing->delete;
+			}
+
+			return;
+
+		} elsif ($value ne "delete" && $value && $value ne "0") {
+
+			my $existing = Tab::PanelSetting->create({
+				panel => $self->id,
+				tag   => $tag,
+				value => $value,
+			});
+
+			if ($value eq "text") { 
+				$existing->value_text($blob);
+			} elsif ($value eq "date") { 
+				$existing->value_date($blob);
+			} elsif ($value eq "json") { 
+				my $json = eval{ 
+					return JSON::encode_json($blob);
+				};
+				$existing->value_text($json);
+			}
+
+			$existing->update;
+		}
+
+	} else {
+
+		return unless $existing;
+		if ($existing->value eq "text") { 
+			return $existing->value_text 
+		} elsif ($existing->value eq "date") { 
+			return $existing->value_date 
+		} elsif ($existing->value eq "json") { 
+			return eval { 
+				return JSON::decode_json($existing->value_text);
+			}; 
+		}
+		return $existing->value;
+	}
+}
+
+
+sub all_settings { 
+
+	my $self = shift;
+	my %all_settings;
+	my $dbh = Tab::DBI->db_Main();
+
+    my $sth = $dbh->prepare("
+		select setting.tag, setting.value, setting.value_date, setting.value_text
+		from panel_setting setting
+		where setting.panel = ? 
+        order by setting.tag
+    ");
+    
+    $sth->execute($self->id);
+    
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
+
+		if ($value eq "date") { 
+
+			my $dt = Tab::DBI::dateparse($value_date); 
+			$all_settings{$tag} = $dt if $dt;
+
+		} elsif ($value eq "text") { 
+
+			$all_settings{$tag} = $value_text;
+
+		} elsif ($value eq "json") { 
+
+			$all_settings{$tag} = eval { 
+				return JSON::decode_json($value_text);
+			};
+
+		} else { 
+			$all_settings{$tag} = $value;
+		}
+	}
+	return %all_settings;
 }
 
