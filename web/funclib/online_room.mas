@@ -10,6 +10,38 @@
 
 	use Crypt::JWT qw(encode_jwt);
 
+	# This hash manages which time zones are assigned to which Amazon zones.
+	# Any time zone NOT listed will go to the default_server.  The tourn
+	# setting campus_zone overrides both.
+
+	my $default_server = "us-east-2";
+
+	my %zones = (
+		'America/Los_Angeles'   => "us-west-2",
+		'America/Denver'        => "us-west-2",
+		'America/Phoenix'       => "us-west-2",
+		'America/Adak'          => "us-west-2",
+		'America/Anchorage'     => "us-west-2",
+		'America/Boise'         => "us-west-2",
+		'America/Curacao'       => "us-west-2",
+		'America/Denver'        => "us-west-2",
+		'America/Edmonton'      => "us-west-2",
+		'America/El_Salvador'   => "us-west-2",
+		'America/Los_Angeles'   => "us-west-2",
+		'America/Managua'       => "us-west-2",
+		'America/Mexico_City'   => "us-west-2",
+		'America/Nome'          => "us-west-2",
+		'America/Phoenix'       => "us-west-2",
+		'America/Regina'        => "us-west-2",
+		'America/Santo_Domingo' => "us-west-2",
+		'America/Sitka'         => "us-west-2",
+		'America/Tijuana'       => "us-west-2",
+		'America/Vancouver'     => "us-west-2",
+		'America/Winnipeg'      => "us-west-2",
+		'Pacific/Honolulu'      => "us-west-2",
+		'Pacific/Guam'          => "us-west-2",
+	);
+
 	my %json;
 
 	unless ($person) {
@@ -26,7 +58,6 @@
 		} elsif ($util->{type} eq "jitsi") {
 			$json{"mode"}         = "nsda_jitsi";
 			$json{"server"}       = "public";
-			$json{"publicServer"} = JSON::true;
 			$json{"uuid"}         = $util->{"uuid"};
 			$json{"tourn_id"}     = $util->{tourn_id};
 			$json{"event_id"}     = $util->{event_id};
@@ -68,7 +99,6 @@
 
 		$json{"mode"}         = "nsda_jitsi";
 		$json{"server"}       = "public";
-		$json{"publicServer"} = JSON::true;
 		$json{"uuid"}         = substr(Digest::SHA::sha256_hex("school".$id),0,32);
 		$json{"tourn_id"}     = $tourn_id;
 		$json{"roomName"}     = $name." Squad Room";
@@ -81,10 +111,11 @@
 		my $sth = $dbh->prepare("
 			select
 				panel.id, panel.letter, panel.flight,
-				round.label, round.name,
+				round.label, round.name, round.type,
 				room.id, room.name, room.url, room.password, room.judge_url, room.judge_password,
 				event.abbr, event.tourn, event.id,
 				online_mode.value,
+				nsda_campus_public_elims.value,
 				online_public.value,
 				online_support.value,
 				online_instructions.value_text,
@@ -93,15 +124,24 @@
 				online_prepend_role.value,
 				judge.id, judge.code, judge.first, judge.last,
 				permission.tag,
+				tourn.tz, tourn.hidden, campus_zone.value,
 				person.first, person.last, person.email
 
-			from (ballot, panel, round, event, person)
+			from (ballot, panel, round, event, person, tourn)
 
 				left join room on panel.room = room.id
+
+				left join tourn_setting campus_zone
+					on campus_zone.tourn = tourn.id
+					and campus_zone.tag = 'campus_zone'
 
 				left join event_setting online_mode
 					on online_mode.event = event.id
 					and online_mode.tag = 'online_mode'
+
+				left join event_setting nsda_campus_public_elims
+					on nsda_campus_public_elims.event = event.id
+					and nsda_campus_public_elims.tag = 'nsda_campus_public_elims'
 
 				left join event_setting online_judge_display
 					on online_judge_display.event = event.id
@@ -137,6 +177,7 @@
 				and ballot.panel = panel.id
 				and panel.round = round.id
 				and round.event = event.id
+				and event.tourn = tourn.id
 				and person.id   = ?
 		");
 
@@ -173,23 +214,37 @@
 		while (
 			my (
 				$panel_id, $panel_letter, $panel_flight,
-				$round_label, $round_name,
+				$round_label, $round_name, $round_type,
 				$room_id, $room_name, $room_url, $room_password, $room_judge_url, $room_judge_password,
 				$event_abbr, $tourn_id, $event_id,
-				$online_mode, $online_public, $online_support,
+				$online_mode, $nsda_campus_public_elims, $online_public, $online_support,
 				$online_instructions,
 				$online_judge_display,
 				$online_entry_display,
 				$online_prepend_role,
 				$judge_id, $judge_code, $judge_first, $judge_last,
 				$permission_tag,
+				$tz, $hidden, $campus_zone,
 				$person_first, $person_last, $person_email
 			) = $sth->fetchrow_array()
 		) {
 
 			$json{"mode"} = $online_mode;
+
+			if ($hidden && $online_mode eq "nsda_private") {
+				$json{"mode"} = "nsda_jitsi"
+			}
+
+			if (
+				($nsda_campus_public_elims)
+				&& ($round_type eq "elim" || $round_type eq "final")
+			) {
+				$json{"mode"} = "nsda_jitsi"
+			}
+
 			$json{"tourn_id"} = $tourn_id;
 			$json{"event_id"} = $event_id;
+			$json{"tz"}       = $tz;
 
 			if ($online_mode eq "sync") {
 
@@ -208,16 +263,22 @@
 			} elsif ($online_mode eq "nsda_private" || $online_mode eq "nsda_jitsi") {
 
 				unless ($json{"link"}) {
+
 					$json{"roomName"}         = $event_abbr." ".$panel_letter;
 					$json{"roomInstructions"} = $online_instructions;
 					$json{"supportEmail"}     = $online_support;
 
 					if ($online_mode eq "nsda_jitsi") {
-						$json{"publicServer"} = JSON::true;
 						$json{"server"} = "public";
 					} elsif ($online_mode eq "nsda_private") {
-						$json{"publicServer"} = JSON::false;
-						$json{"server"} = "private";
+						if ($campus_zone) {
+							$json{"server"} = $campus_zone;
+						} elsif ($zones{$tz}) {
+							$json{"server"} = $zones{$tz};
+						} else {
+							$json{"server"} = $default_server;
+						}
+
 					} else {
 						return "This tournament is not configured to use the integrated online service";
 					}
