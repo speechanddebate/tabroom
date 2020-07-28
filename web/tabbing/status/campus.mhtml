@@ -1,0 +1,525 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$perms
+	$person
+	$session
+	$defaults   => undef
+	$entry_only => undef
+	$round_id   => undef
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $timeslot = Tab::Timeslot->retrieve($timeslot_id) if $timeslot_id;
+
+	my ($eventref, $catref) = $m->comp(
+		"/funclib/allowed_events.mas",
+		tourn => $tourn,
+		perms => $perms
+	);
+
+	my %cats = map {$_->id => $_} @{$catref};
+	my %evs = map {$_->id => $_} @{$eventref};
+
+	my $event;
+
+	if ($ARGS{event_id} && $evs{$ARGS{"event_id"}}) {
+		$event = $evs{$ARGS{"event_id"}};
+	} elsif ($defaults->{event} && $evs{$defaults->{event}}) {
+		$event = $evs{$defaults->{event}};
+	} elsif (scalar @{$eventref} == 1) {
+		$event = ${$eventref}[0];
+	}
+
+	$defaults->{event} = $event->id if $event;
+	$session->default($defaults);
+
+    my $eventlimit;
+
+    if ($eventref) {
+        $eventlimit = " and event.id in (";
+        my $notfirst;
+        foreach my $eid (@{$eventref}) {
+            if ($notfirst++) {
+                $eventlimit .= ",";
+			}
+            $eventlimit .= $eid->id;
+		}
+        $eventlimit .= ")";
+    }
+
+	my $dbh = Tab::DBI->db_Main();
+	my %rounds;
+
+	$round_sth = $dbh->prepare("
+		select
+			round.id, round.name, round.label,
+			panel.id, panel.bye,
+			ballot.audit, ballot.judge_started, ballot.bye, ballot.forfeit
+
+		from round, panel, ballot
+
+		where round.event = ?
+			and round.id = panel.round
+			and panel.id = ballot.round
+		group by ballot.judge
+		order by round.name
+	");
+
+	if ($event) {
+		$round_sth->execute($event->id);
+
+		while (
+			my (
+				$rid, $round_name, $round_label,
+				$panel_id, $panel_bye,
+				$ballot_audit, $ballot_judge_started, $ballot_bye, $ballot_forfeit
+			) = $round_sth->fetchrow_array()
+		) {
+
+			unless ($rounds{$rid}{"number"}) {
+
+				$rounds{$rid}{"number"} = $round_name;
+				if ($round_label) {
+					$rounds{$rid}{"label"} = $round_label;
+				} else {
+					$rounds{$rid}{"label"} = "Round ".$round_name;
+				}
+
+				$rounds{$rid}{"done"}++;
+				$rounds{$rid}{"started"}++;
+			}
+
+			next if $panel_bye;
+			next if $ballot_bye;
+			next if $ballot_forfeit;
+
+			$rounds{$rid}{"total"}++;
+
+			if ($ballot_audit) {
+				$rounds{$rid}{"audited"}++;
+			} else {
+				undef $rounds{$rid}{"done"};
+
+				unless ($round_id) {
+					$round_id = $rid;
+				}
+			}
+
+			if ($ballot_judge_started) {
+				$rounds{$rid}{"started"}++;
+			} else {
+				undef $rounds{$rid}{"started"};
+			}
+		}
+	}
+
+	my %panels;
+
+	if ($round_id) {
+
+		my $entries_sth = $dbh->prepare("
+			select
+				panel.id, panel.letter, panel.bye,
+				ballot.id, ballot.side, ballot.speakerorder, ballot.bye, ballot.forfeit,
+				entry.id, entry.code,
+				student.id, student.first, student.last, student.person
+
+			from panel, ballot, entry, entry_student es, student
+
+			where panel.round = ?
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+				and entry.id = es.entry
+				and es.student = student.id
+		");
+
+		$entries_sth->execute($round_id);
+		my $luddite_alert;
+
+		while (
+			my (
+				$panel_id, $panel_letter, $panel_bye,
+				$ballot_id, $ballot_side, $ballot_speakerorder, $ballot_bye, $ballot_forfeit,
+				$entry_id, $entry_code,
+				$student_id, $student_first, $student_last, $student_person
+			) = $entries_sth->fetchrow_array()
+		) {
+
+			$panels{$panel_id}{"letter"} = $panel_letter;
+
+			if ($panel_bye) {
+				$panels{$panel_id}{"bye"} = $panel_bye;
+			} elsif ($ballot_bye) {
+				$panels{$panel_id}{"entries"}{$entry_id}{"bye"}++
+			} elsif ($ballot_forfeit) {
+				$panels{$panel_id}{"entries"}{$entry_id}{"forfeit"}++
+			}
+
+			$panels{$panel_id}{"entries"}{$entry_id}{"code"} = $entry_code;
+
+			if ($student_person) {
+				$panels{$panel_id}{"entries"}{$entry_id}{"members"}{$student_person}
+					== ucfirst(substr($student_first, 0, 1)).ucfirst(substr($student_last, 0, 1));
+			} else {
+				$panels{$panel_id}{"entries"}{$entry_id}{"members"}{$student_id}
+					== ucfirst(substr($student_first, 0, 1)).ucfirst(substr($student_last, 0, 1))."*";
+				$luddite_alert++;
+			}
+			if ($ballot_side) {
+				$rounds{$round_id}{"sides"}++;
+				$panels{$panel_id}{"sides"}++;
+				$panels{$panel_id}{"entries"}{$entry_id}{"order"} = $ballot_side;
+			} elsif ($ballot_speakerorder) {
+				$panels{$panel_id}{"orders"}++;
+				$rounds{$round_id}{"orders"}++;
+				$panels{$panel_id}{"entries"}{$entry_id}{"order"} = $ballot_speakerorder;
+			}
+		}
+
+		$entries_sth->finish();
+
+		my $judges_sth = $dbh->prepare("
+			select
+				panel.id, panel.letter, panel.bye,
+				ballot.id, ballot.side, ballot.speakerorder, ballot.bye, ballot.forfeit,
+				judge.id, judge.code, judge.first, judge.last, judge.person
+
+			from panel, ballot, judge
+
+			where panel.round = ?
+				and panel.id = ballot.panel
+				and ballot.judge = judge.id
+		");
+
+		$judges_sth->execute($round_id);
+
+		while (
+			my (
+				$panel_id, $panel_letter, $panel_bye,
+				$ballot_id, $ballot_side, $ballot_speakerorder, $ballot_bye, $ballot_forfeit,
+				$judge_id, $judge_code, $judge_first, $judge_last, $judge_person
+			) = $judges_sth->fetchrow_array()
+		) {
+
+			next unless $panels{$panel_id}{"letter"};
+
+			$panels{$panel_id}{"judges"}{$judge_id}{"code"} = $judge_code;
+			$panels{$panel_id}{"judges"}{$judge_id}{"name"} = $judge_first." ".$judge_last;
+			$panels{$panel_id}{"judges"}{$judge_id}{"last"} = $judge_last;
+			$panels{$panel_id}{"judges"}{$judge_id}{"person"} = $judge_person;
+
+			$panels{$panel_id}{"judges"}{$judge_id}{"initials"}
+				== ucfirst(substr($judge_first, 0, 1)).ucfirst(substr($judge_last, 0, 1));
+
+			unless ($judge_person) {
+				$panels{$panel_id}{"judges"}{$judge_id}{"initials"} .= "*";
+				$luddite_alert++;
+			}
+		}
+
+		$judges_sth->finish();
+
+		$log_sth = $dbh->prepare("
+			select
+				cl.panel, cl.tag, cl.description, cl.person, cl.entry, cl.judge,
+					CONVERT_TZ(cl.timestamp, '+00:00', tourn.tz),
+				person.id, person.first, person.last
+
+			from panel, campus_log cl, tourn, person
+
+			where panel.round = ?
+				and panel.id = cl.panel
+				and cl.tourn = tourn.id
+				and cl.person = person.id
+		");
+
+		$log_sth->execute($round_id);
+
+		while (
+			my (
+				$panel_id, $tag, $desc, $person, $entry, $judge, $timestamp,
+				$id, $first, $last
+			) = $log_sth->fetchrow_array()
+		) {
+
+			if ($entry || $judge) {
+				$panels{$panel_id}{"attendance"}{$person} = $timestamp;
+			} else {
+				$panels{$panel_id}{"others"}{$person}{"time"} = $timestamp;
+				$panels{$panel_id}{"others"}{$person}{"name"} = $first." ".$last;
+				$panels{$panel_id}{"others"}{$person}{"desc"} = $desc;
+			}
+		}
+
+		$log_sth->finish;
+
+	}
+
+
+</%init>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+%			if ($entry_only) {
+				<a
+					href  = "/tabbing/entry/index.mhtml"
+					class = "yellow full"
+				>Return to Ballot Entry</a>
+				<br />
+%			}
+
+			<span class="row full marbottom centeralign">
+
+				<form
+					action = "campus.mhtml"
+					method = "post"
+				>
+					<input
+						type  = "hidden"
+						name  = "timeslot"
+						value = "<% $timeslot ? $timeslot->id : "" %>"
+					>
+
+					<select
+						name     = "event_id"
+						onchange = 'this.form.submit()'
+						class    = "fixedmed notfirst"
+					>
+						<option value="">Choose event:</option>
+
+%						foreach my $other_id (sort keys %evs) {
+							<option
+								value="<% $other_id %>"
+								<% ($other_id == $event)
+									? "selected"
+									: "" %>
+							><% $other_category->name %></option>
+%						}
+					</select>
+				</form>
+			</span>
+
+%			if ($event) {
+
+				<h4>Rounds</h4>
+<%perl>
+				foreach my $rid (
+					sort {
+						$rounds{$a}{"number"} <=> $rounds{$b}{"number"}
+					} keys %rounds
+				) {
+
+					my $color;
+
+					if ($rounds{$rid}{"done"}) {
+						$color = "green";
+					} elsif ($rounds{$rid}{"started"}) {
+						$color = "yellow";
+					} else {
+						$color = "gray";
+					}
+</%perl>
+					<a href="campus.mhtml?timeslot_id=<% $ts->id %>"
+						class="<%
+							$round_id == $rid ? "dk" : ""
+						%><% $color %> full"
+					>
+						<span class="twofifths">
+							<% $rounds{$rid}{"label"} %>
+						</span>
+
+						<span class="fifth smallish">
+							<% $rounds{$rid}{"started"} %> Started
+						</span>
+
+						<span class="fifth smallish">
+							<% $rounds{$rid}{"audited"} %> Done
+						</span>
+
+						<span class="fifth smallish">
+							<% $rounds{$rid}{"total"} %> Total
+						</span>
+					</a>
+%				}
+%			}
+		</div>
+	</div>
+
+	<div class="main">
+
+		<h2><% $tourn->name %></h2>
+
+		<& "tabbar.mas",
+			whoami         => 'campus',
+			tourn          => $tourn,
+			tourn_settings => $tourn_settings
+		&>
+
+%		if ($round_id) {
+
+			<span class="half nospace">
+				<h4 class="centeralign">
+					Online Room Access
+				</h4>
+			</span>
+
+			<span class="quarter nospace rightalign bigger semibold redtext">
+				<% scalar (keys %panels) %> sections
+			</span>
+
+			<span class="quarter nospace rightalign bigger semibold redtext">
+				<% $rounds{$round_id}{"total"} %> judges
+			</span>
+
+			<& "/funclib/tablesorter.mas", table => "campus" &>
+
+			<table id="campus">
+
+				<thead>
+					<tr class="yellowrow">
+						<th>
+							Section
+						</th>
+
+%						if ($rounds{$round_id}{"orders"}) {
+
+							<th>
+								Entries
+							</th>
+
+%						} else {
+
+							<th>
+								Aff
+							</th>
+
+							<th>
+								Neg
+							</th>
+%						}
+
+						<th>
+							Judges
+						</th>
+
+					</tr>
+				</thead>
+
+				<tbody>
+<%perl>
+					foreach my $panel_id (
+						sort {
+							length($panels{$a}{"letter"}) <=> length($panels{$b}{"letter"})
+							|| $panels{$a}{"letter"} cmp $panels{$b}{"letter"}
+						} keys %panels
+					) {
+</%perl>
+						<tr>
+
+							<td class="centeralign">
+								<% $panels{$a}{"letter"} %>
+							</td>
+<%perl>
+							unless ($rounds{$round_id}{"orders"}) {
+								$m->print("<td>");
+							}
+
+							if ($panels{$panel_id}{"entries"}) {
+
+								foreach my $entry_id (
+									sort {
+										$panels{$panel_id}{"entries"}{$a}{"order"} <=> $panels{$panel_id}{"entries"}{$b}{"order"}
+									} keys %{$panels{$panel_id}{"entries"}}
+								) {
+
+									my $size = 'full';
+
+									if ($rounds{$round_id}{"orders"}) {
+										$m->print("<td>");
+
+										if ($panels{$panel_id}{"entries"}{$entry_id}{"members"}) {
+											if (scalar (keys %{$panels{$panel_id}{"entries"}{$entry_id}{"members"}}) > 1) {
+												$size = "half";
+											}
+										}
+
+									} else {
+										$size = 'eighth';
+									}
+
+									foreach my $person_id (
+										sort {
+										} keys %{$panels{$panel_id}{"entries"}{$entry_id}{"members"}}
+									) {
+</%perl>
+										<span class="<% $size %>">
+
+											<% $panels{$panel_id}{"entries"}{$entry_id}{"members"}{$person_id} %>:
+
+%											if ($panels{$panel_id}{"attendance"}{$person_id}) {
+												<span
+													title="<&
+														"/funclib/showtime.mas",
+															string => $panels{$panel_id}{"attendance"}{$person},
+															length => "day"
+													&>"
+													class="half centeralign fa fa-sm fa-check greentext"
+												></span>
+%											} else {
+												<span class="half centeralign fa fa-sm fa-circle redtext"
+												></span>
+%											}
+										</span>
+%									}
+
+%									if ($rounds{$round_id}{"orders"}) {
+										</td>
+<%perl>
+									}
+								}
+							}
+
+							$m->print('<td class="nospace">');
+
+							if ($panels{$panel_id}{"judges"}) {
+
+								foreach my $judge_id (
+									sort {
+										$panels{$panel_id}{"judges"}{$a}{"last"} cmp $panels{$panel_id}{"judges"}{$b}{"last"}
+									} keys %{$panels{$panel_id}{"judges"}}
+								) {
+</%perl>
+									<span class="full padvertless">
+
+										<% $panels{$panel_id}{"judges"}{$judge_id}{"members"}{$person_id} %>:
+
+%										if ($panels{$panel_id}{"attendance"}{$person_id}) {
+											<span
+												title="<&
+													"/funclib/showtime.mas",
+														string => $panels{$panel_id}{"attendance"}{$person},
+														length => "day"
+												&>"
+												class="half centeralign fa fa-sm fa-check greentext"
+											></span>
+%										} else {
+											<span class="half centeralign fa fa-sm fa-circle redtext"
+											></span>
+%										}
+									</span>
+%								}
+%							}
+							</td>
+						</tr>
+%					}
+				</tbody>
+			</table>
+%		}
+	</div>
+
