@@ -41,7 +41,6 @@
 		$round = $rounds[0] unless $round;
 	}
 
-
 	my %round_settings = $round->all_settings if $round;
 	my $round_type = $round->type;
 
@@ -83,21 +82,16 @@
 
 	my $hihi_warn;
 
-
 	if ($round) {
 
-		my $oddround = $round->name % 2;
-
 		if ( $round_type eq "highhigh"
-			&! $oddround
+			&! ($round->name % 2)
 			&! $no_side_constraints
 		) {
-
 			$hihi_warn = " This round is set to pair high-high in a side-constrained round.  Pairing this way will lead to some weird brackets and results. If you don't have a very good reason you should probably change the settings to high-low and try again.";
 
 		}
 	}
-
 
 	my $unbalanced;
 
@@ -136,54 +130,53 @@
 		undef $all_done if $ballots_out{$flight} > 0;
 	}
 
+	my $dbh = Tab::DBI->db_Main();
 
+	my $missing_judges;
 	my $missing_rooms;
 
 	unless ($event_settings{"online_mode"}
 		&& $event_settings{"online_mode"} ne "sync"
 	) {
 
-		Tab::Panel->set_sql( missing_rooms => "
-			select panel.*
-			from panel
-			where panel.bye != 1
-			and panel.round = ?
-			and not exists (
-				select room.id
-				from room
-				where room.id = panel.room
-			)
-			and exists (
-				select ballot.id
-				from ballot
-				where ballot.panel = panel.id
+		my $room_sth = $dbh->prepare("
+			select panel.id
+			from panel, ballot
+			where panel.round = ?
+				and panel.bye != 1
+				and panel.ballot = ballot.id
 				and ballot.bye != 1
 				and ballot.forfeit != 1
+				and ballot.audit != 1
+			and not exists (
+				select room.id from room where room.id = panel.room
+			)
+
+		");
+
+		my $judge_sth = $dbh->prepare("
+			select panel.id
+			from panel, ballot
+			where panel.round = ?
+				and panel.bye != 1
+				and panel.ballot = ballot.id
+				and ballot.bye != 1
+				and ballot.forfeit != 1
+				and ballot.audit != 1
+			and not exists (
+				select judge.id from judge where ballot.judge = judge.id
 			)
 		");
 
-		my @missing = Tab::Panel->search_missing_rooms($round->id);
-		$missing_rooms++ if @missing;
-		my $all_missing_rooms++ if scalar @missing == scalar $round->panels;
+		$room_sth->execute($round);
+		$missing_rooms = $room_sth->fetch();
+		$room_sth->finish();
+
+		$judge_sth->execute($round);
+		$missing_judges = $judge_sth->fetch();
+		$judge_sth->finish();
 	}
 
-
-	Tab::Panel->set_sql( missing_judges => "
-		select panel.*
-		from panel, ballot
-		where panel.bye != 1
-		and panel.round = ?
-		and ballot.panel = panel.id
-		and ballot.bye != 1
-		and ballot.forfeit != 1
-		and not exists (
-			select judge.id
-			from judge
-			where judge.id = ballot.judge
-		)
-	");
-
-	my $missing_judges++ if Tab::Panel->search_missing_judges($round->id);
 	my $entered++ if $all_done && (not defined $missing_judges);
 	my $settings_visible++ if $missing_judges || $missing_rooms;
 
@@ -2064,49 +2057,61 @@
 
 <%perl>
 
-		if ($round_settings{"scheduled_blast"}) {
+		my $blast_sth = $dbh->prepare("
+			select
+				aq.id,
+				aq.tag,
+				aq.active_at,
+				aq.message,
+				person.email,
+				aq.created_at
+			from (autoqueue aq, event, tourn)
+				left join person on aq.created_by = person.id
+			where aq.round = ?
+				and aq.tag in ('blast', 'publish', 'blast_publish')
+				and aq.event = event.id
+				and event.tourn = tourn.id
+		");
 
-			my $blast_setting = Tab::RoundSetting->search(
-				round => $round->id,
-				tag => "scheduled_blast"
-			)->first;
+		$blast_sth->execute($round->id);
 
-			if ($blast_setting) {
-			my $when = $blast_setting->value_date->set_time_zone($tz) if $blast_setting;
-
+		while (
+			my ($id, $tag, $active, $message, $creator, $created) = $blast_sth->fetchrow_array()
+		) {
 </%perl>
-
 			<div class="dkred row marbottom">
 
 				<span class="twothirds martop">
 					Round will be
-						<% $blast_setting->value eq "both" ? "both blasted &amp; published" : "" %>
-						<% $blast_setting->value eq "blast" ? "blasted only" : "" %>
-						<% $blast_setting->value eq "publish" ? "published only" : "" %>
+						<% $tag eq "blast_publish" ? "both blasted &amp; published" : "" %>
+						<% $tag eq "blast" ? "blasted only" : "" %>
+						<% $tag eq "publish" ? "published only" : "" %>
 					on
 						<& "/funclib/showdt.mas",
-							dt     => $when,
+							string => $active,
 							tz     => $tz,
 							tzname => 1,
 							length => "longcasual"
 						&>
 
-					<% $blast_setting->value_text
-						? '<div class="padno full explain marbottom"> Message: '.$blast_setting->value_text.'</div>'
+					<% $message
+						? '<div class="padno full explain marbottom"> Message: '.$message.'</div>'
 						: "" %>
+					<div class="padno full explain marbottom">
+						Set by: <% $creator %>
+						at <& "/funclib/showdt.mas", string => $created, tz => $tz &>
+					</div>
 				</span>
 
 				<span class="third centeralign">
 					<a
 						class="buttonwhite orangetext hover invert"
-						href="blast_delete.mhtml?setting_id=<% $blast_setting->id %>"
+						href="blast_delete.mhtml?aq_id=<% $id %>"
 					>
 						Cancel Scheduled Blast
 					</a>
 				</span>
-
 			</div>
-%		}
 %		}
 
 %		if ($round) {
