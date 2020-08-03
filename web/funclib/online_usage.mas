@@ -1,0 +1,191 @@
+<%args>
+	$round => undef
+</%args>
+<%init>
+
+	return unless $round;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			tourn.id,
+			tourn.tz,
+			oround.id, oround.flighted, oround.event,
+			count(distinct panel.id),
+			nsda_campus_purchased.value purchased,
+			nsda_campus_days.value_text campus_days,
+			campus_room_limit.value event_limit
+
+		from (round, timeslot, event,
+				event_setting online,
+				event_setting online_mode,
+
+				tourn,
+				tourn_setting nsda_campus_purchased,
+				tourn_setting nsda_campus_days,
+
+				timeslot otimeslot,
+				event oevent,
+				round oround,
+				panel,
+				event_setting oonline,
+				event_setting oonline_mode
+			)
+
+		left join event_setting campus_room_limit
+			on campus_room_limit.event = oevent.id
+			and campus_room_limit.tag = 'campus_room_limit'
+
+		where round.id = ?
+			and round.timeslot = timeslot.id
+			and round.event = event.id
+
+			and event.id = online.event
+			and online.tag = 'online'
+
+			and event.id = online_mode.event
+			and online_mode.tag = 'online_mode'
+			and online_mode.value in ('nsda_jitsi', 'nsda_private')
+
+			and tourn.id = event.tourn
+			and nsda_campus_purchased.tourn = tourn.id
+			and nsda_campus_purchased.tag = 'nsda_campus_purchased'
+			and nsda_campus_days.tourn = tourn.id
+			and nsda_campus_days.tag = 'nsda_campus_days'
+
+			and timeslot.start < otimeslot.end
+			and timeslot.end   > otimeslot.start
+			and otimeslot.tourn = tourn.id
+
+			and otimeslot.id = oround.timeslot
+			and oround.event = oevent.id
+
+			and oevent.id = oonline.event
+			and oonline.tag = 'online'
+
+			and oevent.id = oonline_mode.event
+			and oonline_mode.tag = 'online_mode'
+			and oonline_mode.value in ('nsda_jitsi', 'nsda_private')
+
+			and oround.id = panel.round
+			and panel.flight in (0, 1)
+			and panel.bye != 1
+
+			and exists (
+				select ballot.id
+				from ballot
+				where ballot.panel = panel.id
+				and ballot.bye != 1
+				and ballot.forfeit != 1
+			)
+		group by round.id
+	");
+
+	my $timeslot = $round->timeslot;
+	my $event = $round->event;
+
+	$sth->execute($round->id);
+
+	my $id;
+	my $tz;
+	my $panel_count;
+	my $total;
+	my $campus_days;
+	my $event_limit;
+
+	while (
+		my (
+			$tid, $ttz, $pcount, $rid, $flights, $revent, $purchase, $daycounts, $event_lim
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($id) {
+			$id = $tid;
+			$tz = $ttz;
+			$total = $purchase;
+			$campus_days = JSON::decode_json($daycounts);
+			$event_limit = $event_lim;
+		}
+
+		if ($flights > 1) {
+			$pcount = POSIX::ceil($pcount / $flights);
+		}
+
+		if ($event_lim
+			&& $rid == $round->id
+			&& $pcount > $event_lim
+		) {
+
+			my $message = "You are over your room limit for this event.  <br /><br />";
+			$message .= " You are using $pcount NSDA Campus rooms and have <br /> ";
+			$message .= " limited the event to $event_lim.<br /><br />";
+			$message .= " Increase your allocations under Settings -> Event -> Online.<br />";
+
+			$m->clear_buffer();
+			$r->content_type('application/json');
+
+			my %response = (
+				error   => 1,
+				message => $message
+			);
+
+			$m->print(JSON::encode_json(\%response));
+			$m->abort();
+		}
+
+		$panel_count += $pcount;
+	}
+
+	$tz = "UTC" unless $tz;
+
+	return unless $panel_count;
+	my $tourn = Tab::Tourn->retrieve($id);
+
+    my %days = $m->comp("/funclib/campus_days.mas",
+        tourn  => $tourn,
+    );
+
+	my $day_key;
+	my $start = $timeslot->start->set_time_zone("UTC");
+	my $end = $timeslot->start->set_time_zone("UTC");
+
+	$start->set_time_zone($tz);
+	$end->set_time_zone($tz);
+
+	foreach my $id (sort keys %days) {
+
+		next if $start->epoch < $days{$id}{start}->epoch;
+		next if $end->epoch > $days{$id}{end}->epoch;
+		$day_key = $id;
+		last;
+	}
+
+	my $day_total = $campus_days->{$day_key}{"count"};
+	my $margin = $day_total - $panel_count;
+
+	if ($panel_count > $day_total) {
+
+		my $message = "You are over your daily room allocation for this timeslot.  <br /><br />";
+		$message .= " You are using $panel_count NSDA Campus rooms and have <br /> ";
+		$message .= " allocated $day_total to day $day_key <br /><br />";
+		$message .= " Increase your allocations under Settings -> Sites & Rooms -> NSDA Campus, <br />";
+		$message .= " or adjust your schedule to continue <br />";
+
+		$m->clear_buffer();
+		$r->content_type('application/json');
+
+		my %response = (
+			error   => 1,
+			message => $message
+		);
+
+		$m->print(JSON::encode_json(\%response));
+		$m->abort();
+
+	} else {
+
+		return (1, $margin);
+	}
+
+</%init>
