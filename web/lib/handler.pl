@@ -122,6 +122,8 @@ use Tab::Strike;
 use Tab::Student;
 use Tab::StudentVote;
 use Tab::StudentSetting;
+use Tab::SweepAward;
+use Tab::SweepAwardEvent;
 use Tab::SweepInclude;
 use Tab::SweepSet;
 use Tab::SweepRule;

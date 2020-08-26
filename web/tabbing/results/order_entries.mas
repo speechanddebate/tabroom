@@ -91,27 +91,10 @@
 	);
 
 	#Settings
-	my $mfl_time_violation = $tb_settings{"mfl_time_violation"};
 	my $maverick_method = $event_settings{"mavericks"};
 	$maverick_method = "double_rank" unless $maverick_method;
 
-	my $truncate = $tb_settings{"truncate_ranks_to"}
-		if $tb_settings{"truncate_ranks_to"};
-
-	my $truncate_to_smallest = $tb_settings{"truncate_to_smallest"};
-	my $truncate_prelims     = $tb_settings{"truncate_prelims"};
-	my $truncate_elims       = $tb_settings{"truncate_elims"};
-	my $truncate_finals      = $tb_settings{"truncate_finals"};
-
-	# This is for the purpose of determining NSDA points for posting
-
-	if ($nsda) {
-		undef $truncate;
-		undef $truncate_to_smallest;
-		undef $truncate_prelims;
-		undef $truncate_elims;
-		undef $truncate_finals;
-	}
+	my $truncate_to_smallest;
 
 	my $forfeits_never_break = $tb_settings{"forfeits_never_break"};
 	my $wsdc_byes = $event_settings{"wsdc_bye_win_average"};
@@ -226,6 +209,7 @@
 			$tb_info{$tb->id}{"truncate"}          = $tb->truncate;
 			$tb_info{$tb->id}{"truncate_smallest"} = $tb->truncate_smallest;
 			$tb_info{$tb->id}{"multiplier"}        = $tb->multiplier;
+			$tb_info{$tb->id}{"violation"}         = $tb->violation;
 			$tb_info{$tb->id}{"priority"}          = $tb->priority;
 			$tb_info{$tb->id}{"highlow_count"}     = $tb->highlow_count;
 
@@ -367,7 +351,22 @@
 			$scores{"judge"}{$score_id}    = $ballot_judge;
 			$scores{"round"}{$score_id}    = $round_name;
 			$scores{"round_id"}{$score_id} = $round_id;
-			$scores{"tv"}{$score_id}       = $ballot_tv;
+
+			if ($ballot_tv) {
+
+				$scores{"tv"}{$score_id}       = $ballot_tv;
+
+				unless ($entries{"tv_judge"}{$entry_id}{$round_id}{$ballot_judge}++) {
+					$entries{"tv_yes"}{$entry_id}{$round_id}++;
+				}
+
+			} else {
+
+				unless ($entries{"tv_judge"}{$entry_id}{$round_id}{$ballot_judge}++) {
+					$entries{"tv_no"}{$entry_id}{$round_id}++;
+				}
+			}
+
 			$scores{"student"}{$score_id}  = $score_student;
 			$scores{"chair"}{$score_id}    = $ballot_chair;
 
@@ -586,10 +585,6 @@
 
 		foreach my $round (@all_rounds) {
 
-			# Upper limit is the hard cap, if any
-			$rounds{"truncate"}{$round} = $truncate
-				if $truncate > 0;
-
 			foreach my $panel (@{$rounds{"panels"}{$round}}) {
 
 				my $size = scalar @{$panels{"entries"}{$panel}}
@@ -598,10 +593,10 @@
 				next unless $size > 0;
 
 				$rounds{"truncate"}{$round} = $size
-					unless $rounds{"truncate"}{$round};
+					unless $rounds{"smallest"}{$round};
 
-				$rounds{"truncate"}{$round} = $size
-					if $rounds{"truncate"}{$round} > $size;
+				$rounds{"smallest"}{$round} = $size
+					if $rounds{"smallest"}{$round} > $size;
 			}
 		}
 	}
@@ -880,7 +875,6 @@
 			$m->comp("/funclib/abort.mas",
 				message => "Your runoff round ".$runoff->realname." has no tiebreakers set, so Tabroom is unable to determine its results.  Please set tiebreakers to continue");
 		}
-
 
 		$runoff_tb = Tab::Tiebreak->search({
 			name         => "ranks",
@@ -1402,10 +1396,14 @@
 				$tier_long_desc .= " Composite based on ".$tb_info{$tb_id}{child}->name;
 			}
 
-			$tier_long_desc .= " multplied by ".$tb_info{$tb_id}{"multiplier"}
-				if $tb_info{$tb_id}{"multiplier"} != 1;
+			if ($tb_info{$tb_id}{"multiplier"} != 1) {
+				$tier_long_desc .= " multplied by ".$tb_info{$tb_id}{"multiplier"};
+				$tier_desc .= " x".$tb_info{$tb_id}{"multiplier"};
+			}
 
-			$tier_desc .= " x".$tb_info{$tb_id}{"multiplier"} if $tb_info{$tb_id}{"multiplier"} != 1;
+			if ($tb_info{$tb_id}{"violation"} > 0) {
+				$tier_long_desc .= " + ".$tb_info{$tb_id}{"violation"}." for violations";
+			}
 
 		}
 
@@ -1506,8 +1504,6 @@
 					my $count;
 					my $bye;
 
-					my $local_truncate = $tb_info{$tb_id}{"truncate"};
-
 					my $max_score;
 
 					foreach my $this_round (@rounds) {
@@ -1529,6 +1525,7 @@
 								$entries{"used_composite"}{$entry}{$this_round} =
 									$entries{"composite_rank"}{$entry}{$runoff};
 							}
+
 							$total = Math::Round::nearest(1, 100 * $total);
 
 						} else {
@@ -1577,14 +1574,24 @@
 											$entries{"used_composite"}{$entry}{$this_round} = $rank;
 										}
 
-										if ($local_truncate) {
-											#Tiebreaker specific truncation limit
-											$rank = $local_truncate if $rank > $local_truncate;
+										# Bump the rank up if it's a violation.  Truncation below will
+										# correct if this makes it bigger (ie if the TV was last place);
+
+										if (
+											$tb_info{$tb_id}{"violation"}
+											&& ($entries{"tv_yes"}{$entry}{$this_round} > $entries{"tv_no"}{$entry}{$this_round})
+										) {
+											$rank++;
 										}
 
-										if ($truncate_to_smallest || $tb_info{$tb_id}{"truncate_smallest"}) {
-											$rank = $rounds{"truncate"}{$this_round}
-												if $rank > $rounds{"truncate"}{$this_round};
+										if ($tb_info{$tb_id}{"truncate"}) {
+											#Tiebreaker specific truncation limit
+											$rank = $tb_info{$tb_id}{"truncate"} if $rank > $tb_info{$tb_id}{"truncate"};
+										}
+
+										if ($tb_info{$tb_id}{"truncate_smallest"}) {
+											$rank = $rounds{"smallest"}{$this_round}
+												if $rank > $rounds{"smallest"}{$this_round};
 										}
 
 										$round_done{$entry}{$this_round}++;
@@ -1605,40 +1612,16 @@
 												if $dq_panel_threshold{$this_panel}{$this_judge} < $rank;
 										}
 
-										# Bump the rank up if it's a time
-										# violation.  Truncation below will
-										# correct if this makes it bigger (ie
-										# if the TV was last place);
-										$rank++ if $scores{"tv"}{$score} && $mfl_time_violation;
+										# Bump the rank up if it's a violation.  Truncation below will
+										# correct if this makes it bigger (ie if the TV was last place);
 
-										if (
-											(	$rounds{"type"}{$this_round} eq "prelim"
-												&& defined $truncate_prelims
-											) || (
-												$rounds{"type"}{$this_round} eq "final"
-												&& defined $truncate_finals
-											) || (
-												$rounds{"type"}{$this_round} eq "elim"
-												&& defined $truncate_elims)
-											) {
-
-											# Promote anyone over the hard cap for truncation
-											$rank = $truncate if $truncate && $rank > $truncate;
-
-											# Promote anyone over the per-round floating cap for truncation
-											$rank = $rounds{"truncate"}{$this_round}
-												if $truncate_to_smallest
-												&& $rank > $rounds{"truncate"}{$this_round};
+										if ($scores{"tv"}{$score} && $tb_info{$tb_id}{"violation"}) {
+											$rank++;
 										}
 
-										if ($tb_info{$tb_id}{"truncate_smallest"})  {
-											$rank = $rounds{"truncate"}{$this_round}
-												if $rank > $rounds{"truncate"}{$this_round};
-										}
-
-										if ($local_truncate) {
+										if ($tb_info{$tb_id}{"truncate"}) {
 											#Tiebreaker specific truncation limit
-											$rank = $local_truncate if $rank > $local_truncate;
+											$rank = $tb_info{$tb_id}{"truncate"} if $rank > $tb_info{$tb_id}{"truncate"};
 										}
 
 										#Rank cannot be greater than the size of the round
@@ -1782,11 +1765,10 @@
 
 					my @votes;
 					my $truncate = $event_settings{"student_truncate_fill"};
-					my $local_truncate = $tb_info{$tb_id}{"truncate"};
 
-					$truncate = $local_truncate
-						if ($local_truncate > 0 && $truncate > $local_truncate)
-						|| ($local_truncate > 0 && $truncate < 1);
+					$truncate = $tb_info{$tb_id}{"truncate"}
+						if ($tb_info{$tb_id}{"truncate"} > 0 && $truncate > $tb_info{$tb_id}{"truncate"})
+						|| ($tb_info{$tb_id}{"truncate"} > 0 && $truncate < 1);
 
 					if ($entries{"student_rank"}{$entry}) {
 
@@ -2475,7 +2457,6 @@
 
 					my $chosen_panel;
 					my @chosen_entries;
-					my $local_truncate = $tb_info{$tb_id}{"truncate"};
 
 					foreach my $this_round (@rounds) {
 
@@ -2562,7 +2543,6 @@
 
 					my $chosen_panel;
 					my @chosen_entries;
-					my $local_truncate = $tb_info{$tb_id}{"truncate"};
 
 					foreach my $this_round (@rounds) {
 
@@ -2646,7 +2626,6 @@
 					my @chosen_entries;
 					my @all_entries;
 
-					my $local_truncate = $tb_info{$tb_id}{"truncate"};
 
 					foreach my $this_round (@rounds) {
 
@@ -2731,8 +2710,8 @@
 									my $judge_id = $scores{"judge"}{$score};
 
 									$judge_score{$chosen_panel}{$judge_id} = $scores{"value"}{$score};
-									$judge_score{$chosen_panel}{$judge_id} = $local_truncate
-										if $local_truncate
+									$judge_score{$chosen_panel}{$judge_id} = $tb_info{$tb_id}{"truncate"}
+										if $tb_info{$tb_id}{"truncate"}
 										&& $judge_score{$scores{"judge"}{$score}};
 
 								}
