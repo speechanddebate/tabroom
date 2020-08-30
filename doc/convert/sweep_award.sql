@@ -9,5 +9,6 @@ CREATE TABLE `sweep_award_event` (
   `sweep_set` int(11),
   `timestamp` timestamp,
   PRIMARY KEY (`id`),
+  KEY (`sweep_set`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
