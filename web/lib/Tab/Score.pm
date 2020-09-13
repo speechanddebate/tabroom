@@ -26,6 +26,7 @@ sub text {
 sub compress { 
 	my $text = shift;
 	return unless $text;
+	utf8::encode($text);
 	$text = Compress::Zlib::compress($text, 8);
 	$text = MIME::Base64::encode_base64($text);
 	return $text;
