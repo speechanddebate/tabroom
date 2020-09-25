@@ -3,8 +3,8 @@
 	$session
 	$round_id    => undef
 	$timeslot_id => undef
-	$debug       => undef
 	$event_id    => undef
+	$debug       => undef
 	$panel_id    => undef
 </%args>
 <%init>
@@ -14,68 +14,148 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my $tourn_id = $tourn->id;
-	my @events;
-	my @panels;
-	my $round;
+	my $limit;
+	my $filename;
 
-	if ($round_id) {
-		$round = Tab::Round->retrieve($round_id);
-		push @events, $round->event;
-	} elsif ($panel_id) {
-		push (@panels, Tab::Panel->retrieve($panel_id));
-		push (@events, $panels[0]->round->event);
-	} elsif ($event_id eq "all") {
-		@events = $m->comp(
-			"/funclib/tourn_events.mas",
-			tourn => $tourn
-		);
-	} else {
-		push (@events, Tab::Event->retrieve($event_id));
+	if ($panel_id) {
+
+		$limit = " and panel.id = ".int($panel_id);
+
+		my $panel = Tab::Panel->retrieve($panel_id);
+		$filename = $panel->round->event->abbr."-R".$panel->round->name."-Sect".$panel->letter;
+
+	} elsif ($round_id) {
+
+		$limit = " and round.id = ".int($round_id);
+
+		my $round = Tab::Round->retrieve($round_id);
+		$filename = $round->realname;
+		$filename =~  s/[\W_]//g;
+		$filename = $round->event->abbr."-".$filename;
+		$filename =~ s/\s+//g;
+
+	} elsif ($timeslot_id) {
+
+		$limit = " and timeslot.id = ".int($timeslot_id);
+		my $timeslot = Tab::Timeslot->retrieve($timeslot_id);
+		$filename = $timeslot->name;
+		$filename =~ s/[\W_]//g;
+		$filename = "Timeslot-".$filename;
 	}
 
- 	my @timeslots;
+	$filename = "Posters-".$filename;
 
-	if ($timeslot_id eq "all") {
-		@timeslots = $tourn->timeslots;
-	} else {
-		push (@timeslots, Tab::Timeslot->retrieve($timeslot_id));
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.abbr, event.name, event.type,
+			round.id, round.name, round.label, round.type,
+			CONVERT_TZ(round.start_time, '+00:00', tourn.tz) start,
+			timeslot.id,
+			CONVERT_TZ(timeslot.start, '+00:00', tourn.tz) start,
+
+			ballot.id, ballot.side, ballot.speakerorder, ballot.chair,
+			entry.id, entry.code, entry.name,
+			judge.id, judge.code, judge.first, judge.last,
+			room.name, panel.id, panel.flight, round.flighted, panel.letter
+
+		from (tourn, event, round, timeslot, panel, ballot, entry, judge)
+
+			left join room on panel.room = room.id
+
+		where
+			tourn.id = event.tourn
+			and event.id = round.event
+			and round.id = panel.round
+			and round.timeslot = timeslot.id
+			and panel.id = ballot.panel
+			and panel.bye != 1
+			and ballot.entry = entry.id
+			and ballot.judge = judge.id
+			$limit
+
+		group by ballot.id
+		order by panel.letter, ballot.chair DESC, ballot.speakerorder, ballot.side, judge.code, judge.last
+	");
+
+	$sth->execute();
+
+	my %panels;
+
+	while (
+		my (
+			$event_id, $event_abbr, $event_name, $event_type,
+			$round_id, $round_name, $round_label, $round_type, $round_start,
+			$timeslot_id, $timeslot_start,
+			$ballot_id, $ballot_side, $ballot_speakerorder, $ballot_chair,
+			$entry_id, $entry_code, $entry_name,
+			$judge_id, $judge_code, $judge_first, $judge_last,
+			$room_name, $pid, $flight, $flighted, $letter
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($panels{$pid}{"event_abbr"}) {
+
+			$panels{$pid}{"event_abbr"}  = $event_abbr;
+			$panels{$pid}{"event_name"}  = $event_name;
+			$panels{$pid}{"event_type"}  = $event_type;
+			$panels{$pid}{"room"}        = $room_name;
+			$panels{$pid}{"room_name"}   = $room_name;
+			$panels{$pid}{"room_number"} = $room_name;
+
+			$panels{$pid}{"room_name"}   =~ s/\d//g;
+			$panels{$pid}{"room_number"} =~ s/[\D_]//g;
+
+			$panels{$pid}{"letter"} = $letter;
+
+			if ($flighted > 1) {
+				$panels{$pid}{"flight"} = $flight;
+			}
+
+			if ($round_start) {
+				$panels{$pid}{"start"} = DateTime::Format::MySQL->parse_datetime($round_start);
+			} elsif ($timeslot_start) {
+				$panels{$pid}{"start"} = DateTime::Format::MySQL->parse_datetime($timeslot_start);
+			}
+
+			if ($round_label) {
+				$panels{$pid}{"round"} = $round_label;
+			} else {
+				$panels{$pid}{"round"} = "Round ".$round_name;
+			}
+			$panels{$pid}{"round_type"} = $round_type;
+		}
+
+		unless ($panels{$pid}{"judge_id"}{$judge_id}++) {
+
+			my $judge;
+			$judge .= "* " if $ballot_chair;
+
+			if ($judge_code) {
+				$judge .= $judge_code." ";
+			} else {
+				$judge .= $judge_first." ";
+			}
+			$judge .=  $judge_last;
+
+			if (length($judge) > $panels{$pid}{"longest_judge"}) {
+				$panels{$pid}{"longest_judge"} = length($judge);
+			}
+
+			push @{$panels{$pid}{"judges"}}, $judge;
+		}
+
+		unless ($panels{$pid}{"entry_id"}{$entry_id}++) {
+
+			if (length($entry_code) > $panels{$pid}{"longest_entry"}) {
+				$panels{$pid}{"longest_entry"} = length($entry_code);
+			}
+
+			push @{$panels{$pid}{"entries"}}, $entry_code;
+		}
 	}
 
-	@events = sort {$a->abbr <=> $b->abbr} @events;
-
-	my $ncfl = $tourn->setting("ncfl");
-
-	# Set up the filename and the needed trace files
-
-	my $event_name;
-
-	if ($event_id && @events) {
-		$event_name .= $events[0]->abbr;
-	}
-
-	$event_name =~ s/[\W_]//g;
-
-	my $timeslot_name;
-	if ($timeslot_id) {
-		$timeslot_name .= $timeslots[0]->name;
-	}
-	$timeslot_name =~ s/[\W_]//g;
-
-	my $panel_name;
-
-	if ($panel_id && $events[0]->type eq "speech") {
-		$panel_name .= "Section ".$panels[0]->letter;
-	}
-	$panel_name =~ s/[\W_]//g;
-
-	my $name = $event_name;
-	$name .= "-".$timeslot_name if $timeslot_name;
-	$name .= "-".$panel_name if $panel_name;
-	$name = $round->realname."-".$events[0]->abbr if $round;
-	$name =~ s/[\W_]//g;
-
-	my $filename = "Postings-$name";
     my $filepath = $Tab::file_root."/tmp/".$filename;
 
     $m->comp("/funclib/printout.mas",
@@ -87,300 +167,208 @@
 
     open (TEXOUT, ">>$filepath.tex");
 
-	foreach my $event (@events) {
+	foreach my $pid (
+		sort {
+			$panels{$a}{"event_abbr"} cmp $panels{$b}{"event_abbr"}
+			|| $panels{$a}{"room_name"} cmp  $panels{$b}{"room_name"}
+			|| $panels{$a}{"room_numbers"} <=> $panels{$b}{"room_numbers"}
+			|| $panels{$a}{"letter"} <=> $panels{$b}{"letter"}
+		} keys %panels
+	) {
 
-		my $names;
-		my $codes;
+		my $fontsize = 48;
+		$fontsize = 36 if length($panels{$pid}{"event_name"}) > 20;
+		$fontsize = 24 if length($panels{$pid}{"event_name"}) > 32;
 
-		my $no_codes = $event->category->setting("no_codes");
+		print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont ";
 
-		my $schem_style  = $event->setting("schem_designation");
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "{\\bf ".Tab::texify($panels{$pid}{"event_name"})." }\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\strut\n";
 
-		$names++ if $schem_style eq "names" || $schem_style eq "both";
-		$codes++ if $schem_style eq "codes" || $schem_style eq "both";
+		print TEXOUT "\\medskip\n";
+		print TEXOUT "\\newline\n";
 
-		$codes++ unless $names || $codes;
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
 
-		if ($round) {
+		$fontsize -= 8;
+		print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont ";
+		print TEXOUT "\\color{black!64}\n";
+		print TEXOUT Tab::texify(uc($panels{$pid}{"round"}))."\n";
 
-			@panels = $round->panels();
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\strut\n";
 
-		} elsif (@timeslots && (not defined $panel_id)) {
+		unless ($panels{$pid}{"round_type"} eq "final") {
 
-			@panels = ();
+			print TEXOUT "\\strut\n";
+			print TEXOUT "\\hfill\n";
 
-			foreach my $timeslot (@timeslots) {
-				push @panels, $m->comp(
-					"/funclib/event_panels.mas",
-						timeslot => $timeslot,
-						event    => $event
-					);
+			if ($panels{$pid}{"event_type"} eq "congress") {
+
+				print TEXOUT " CHAMBER ";
+				print TEXOUT Tab::texify(uc($panels{$pid}{"letter"}))."\n";
+
+			} elsif ($panels{$pid}{"event_type"} eq "speech") {
+
+				print TEXOUT " SECTION ";
+				print TEXOUT Tab::texify(uc($panels{$pid}{"letter"}))."\n";
 			}
 
+			print TEXOUT "\\hfill\n";
+			print TEXOUT "\\strut\n";
 		}
 
-		my $fontsize;
+		print TEXOUT "\\vspace{-10mm}\n";
+		print TEXOUT "\\newline\n";
 
-		foreach my $panel (@panels) {
 
-			my $round = $panel->round;
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\makebox[.8\\textwidth]{\\hrulefill}\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\vspace{-4mm}\n";
 
-			$fontsize = 48;
-			$fontsize = 36 if length($event->name) > 20;
-			$fontsize = 24 if length($event->name) > 32;
+		$fontsize = 48 - POSIX::floor($panels{$pid}{"longest_entry"} / 2);
 
-			print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont ";
+		print TEXOUT "\\vspace{4mm}\n";
+		print TEXOUT "\\newline\n";
 
-			print TEXOUT "\\strut\n";
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "{\\bf ".$event->name." }\n";
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\strut\n";
+		if ($panels{$pid}{"event_type"} eq "congress") {
+			$fontsize = POSIX::ceil($fontsize / 1.5);
+		}
 
-			print TEXOUT "\\medskip\n";
-			print TEXOUT "\\newline\n";
+		print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont ";
 
-			print TEXOUT "\\strut\n";
-			print TEXOUT "\\hfill\n";
+		my $counter;
 
-			$fontsize -= 8;
-			print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont ";
-			print TEXOUT Tab::texify(uc($round->realname))."\n";
+		if ($panels{$pid}{"event_type"} eq "congress") {
+			print TEXOUT "\\parbox[c][][c]{3.5in}{";
+		}
 
-			if ($round->type eq "final" || $round->type eq "runoff") {
-
-			} else {
-
-				print TEXOUT "\\hfill\n";
-
-				if ($event->type eq "congress") {
-					print TEXOUT " CHAMBER ";
-					print TEXOUT Tab::texify(uc($panel->letter))."\n"
-				} elsif ($event->type eq "speech") {
-					print TEXOUT " SECTION ";
-					print TEXOUT Tab::texify(uc($panel->letter))."\n"
-				}
-			}
-
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\strut\n";
-
-			if ($event->type eq "speech") {
-				print TEXOUT "\\vspace{-12mm}\n";
-			} else {
-				print TEXOUT "\\smallskip\n";
-			}
-
-			print TEXOUT "\\newline\n";
+		foreach my $entry (@{$panels{$pid}{"entries"}}) {
 
 			print TEXOUT "\\strut\n";
 			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\makebox[.8\\textwidth]{\\hrulefill}\n";
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\strut\n";
+			print TEXOUT Tab::texify($entry)." \n";
 
-			if ($event->type eq "speech") {
+			if ($panels{$pid}{"event_type"} eq "congress") {
 
-				print TEXOUT "\\vspace{4mm}\n";
-				print TEXOUT "\\newline\n";
-				$fontsize = 36;
+				if ($counter++ % 2) {
 
-			} elsif ($event->type eq "congress") {
-
-				print TEXOUT "\\vspace{4mm}\n";
-				print TEXOUT "\\newline\n";
-				$fontsize = 32 if $codes;
-				$fontsize = 24 if $names;
-
-			} else {
-
-				print TEXOUT "\\vspace{12mm}\n";
-				print TEXOUT "\\newline\n";
-				$fontsize = 54 if $codes;
-				$fontsize = 36 if $names;
-			}
-
-			print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont \n";
-
-			my $switch;
-			my $notfirst;
-
-			my @entries = $m->comp(
-				"/funclib/panel_entries.mas",
-				panel    => $panel,
-				no_drops => 1
-			);
-
-			my $switch_threshold = 3 if $codes;
-			$switch_threshold = 2 if $names;
-
-			if ($event->type eq "congress") {
-				@entries = sort {$a->code <=> $b->code} @entries if $codes;
-				@entries = sort {$a->lastname cmp $b->lastname} @entries if $names;
-			}
-
-			foreach my $entry (@entries) {
-
-				if ($event->type eq "speech") {
-
-					print TEXOUT "\\strut\n";
-					print TEXOUT "\\hfill\n";
-					print TEXOUT Tab::texify($entry->code)." \n" if $codes;
-					print TEXOUT Tab::texify($entry->name)." \n" if $names;
 					print TEXOUT "\\hfill\n";
 					print TEXOUT "\\strut\n";
+
+					print TEXOUT " } \n";
 
 					print TEXOUT "\\vspace{4mm}\n";
 					print TEXOUT "\\newline\n";
 
-				} elsif ($event->type eq "congress") {
-
-					if ($switch++) {
-						if ($switch % $switch_threshold) {
-							print TEXOUT "\\hfill\n ";
-						} else {
-							if ($names) {
-								print TEXOUT "\\vspace{4mm}\n";
-							} else {
-								print TEXOUT "\\vspace{8mm}\n";
-							}
-							print TEXOUT "\\newline\n";
-						}
-					} elsif ($switch_threshold == 3) {
-						$switch += 2; #ugly hack
-					} elsif ($switch_threshold == 2) {
-						$switch ++; #similarly ugly hack
-					}
-
-					print TEXOUT Tab::texify($entry->code)." \n" if $codes;
-					print TEXOUT Tab::texify($entry->name)." \n" if $names;
+					print TEXOUT "\\parbox[c][][c]{3.5in}{";
 
 				} else {
 
-					if ($notfirst++) {
-						print TEXOUT "\\newline\n";
-						print TEXOUT "\\strut\n";
-						print TEXOUT "\\hfill\n";
-						print TEXOUT "\\noindent \\emph{\\Huge vs} \n";
-						print TEXOUT "\\hfill\n";
-						print TEXOUT "\\strut\n";
-						print TEXOUT "\\bigskip\n";
-						print TEXOUT "\\newline\n";
-					}
+					print TEXOUT "\\hfill\n";
+					print TEXOUT "\\strut\n";
+					print TEXOUT " } \n";
 
-					print TEXOUT "\\strut\n";
-					print TEXOUT "\\hfill\n";
-					print TEXOUT Tab::texify($entry->code)." \n" if $codes;
-					print TEXOUT Tab::texify($entry->name)." \n" if $names;
-					print TEXOUT "\\hfill\n";
-					print TEXOUT "\\strut\n";
-					print TEXOUT "\\medskip\n";
+					print TEXOUT "\\parbox[c][][c]{3.5in}{";
 				}
 
-			}
-
-			if ($event->type eq "speech") {
-				print TEXOUT "\\vspace{-12mm}\n";
-			}
-
-			print TEXOUT "\\newline\n";
-
-			print TEXOUT "\\strut\n";
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\makebox[.8\\textwidth]{\\hrulefill}\n";
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\strut\n";
-
-			print TEXOUT "\\newline";
-
-			print TEXOUT "\\fontsize{24pt}{24pt}\\selectfont \n";
-
-			if ($panel->room > 0) {
+			} else {
 				print TEXOUT "\\strut\n";
 				print TEXOUT "\\hfill\n";
-				print TEXOUT "{\\bf ROOM: ".Tab::texify($panel->room->name) ."} ";
-				print TEXOUT "\\strut\n";
-				print TEXOUT "\\hfill\n";
-				print TEXOUT "\\medskip\n";
-				print TEXOUT "\\newline";
-			}
-
-			my $start = $round->start_time->set_time_zone($tz)
-				if $round->start_time;
-
-			$start = $round->timeslot->start->set_time_zone($tz)
-				unless $start;
-
-			print TEXOUT "\\strut\n";
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "BEGIN: ".Tab::texify(Tab::nicetime($start))."\n";
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\strut\n";
-
-			print TEXOUT "\\smallskip\n";
-			print TEXOUT "\\newline\n";
-
-			print TEXOUT "\\strut\n";
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\makebox[.8\\textwidth]{\\hrulefill}\n";
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\strut\n";
-
-			print TEXOUT "\\smallskip\n";
-			print TEXOUT "\\newline\n";
-
-			unless ($ARGS{"no_judges"}) {
-				print TEXOUT "\\strut\n";
-				print TEXOUT "\\hfill\n";
-				print TEXOUT "{\\bf JUDGES: }\n";
-				print TEXOUT "\\hfill\n";
-				print TEXOUT "\\strut\n";
-
-				print TEXOUT "\\medskip\n";
+				print TEXOUT "\\vspace{4mm}\n";
 				print TEXOUT "\\newline\n";
+			}
+		}
 
-				undef $switch;
+		if ($panels{$pid}{"event_type"} eq "congress") {
+			print TEXOUT " } \n";
+			print TEXOUT "\\smallskip\n";
+			print TEXOUT "\\newline\n";
+		}
 
-				$fontsize = 24;
-				$fontsize = 20 unless $no_codes;
+		print TEXOUT "\\vspace{-16mm}\n";
+		print TEXOUT "\\newline\n";
 
-				print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont \n";
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\makebox[.8\\textwidth]{\\hrulefill}\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\strut\n";
 
-				my @judges = $m->comp(
-					'/funclib/panel_judges.mas',
-					panel => $panel
-				);
+		print TEXOUT "\\newline";
 
-				foreach my $judge (@judges) {
+		print TEXOUT "\\fontsize{24pt}{24pt}\\selectfont \n";
 
-					if ($switch++) {
-						if ($switch % 2) {
-							print TEXOUT "\\vspace{4mm}\n";
-							print TEXOUT "\\newline\n";
-						} else {
-							print TEXOUT "\\hfill\n ";
-						}
-					}
+		if ($panels{$pid}{"room"}) {
+			print TEXOUT "\\strut\n";
+			print TEXOUT "\\hfill\n";
+			print TEXOUT "{\\bf ROOM: ".Tab::texify($panels{$pid}{"room"}) ."} ";
+			print TEXOUT "\\strut\n";
+			print TEXOUT "\\hfill\n";
+			print TEXOUT "\\medskip\n";
+			print TEXOUT "\\newline";
+		}
 
-					if ($judge->chair) {
-						print TEXOUT " \\emph{\*}" unless $event->type eq "congress";
-						print TEXOUT " \\emph{\*}" if $event->type eq "congress";
-					}
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "BEGIN: ".Tab::texify(Tab::nicetime($panels{$pid}{"start"}))."\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\strut\n";
 
-					print TEXOUT Tab::texify($judge->schoolcode)." " unless $no_codes;
-					print TEXOUT Tab::texify($judge->code)." " unless $no_codes;
+		print TEXOUT "\\smallskip\n";
+		print TEXOUT "\\newline\n";
 
-					print TEXOUT Tab::texify(ucfirst($judge->last));
-					print TEXOUT ", ".Tab::texify(ucfirst($judge->first));
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\makebox[.8\\textwidth]{\\hrulefill}\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\strut\n";
 
-				}
+		print TEXOUT "\\smallskip\n";
+		print TEXOUT "\\newline\n";
+
+		if ($panels{$pid}{"judges"} && (not defined $ARGS{"no_judges"})) {
+
+			if (scalar @{$panels{$pid}{"judges"}} > 6) {
+				print TEXOUT "\\fontsize{16pt}{16pt}\\selectfont \n";
+			} else {
+				print TEXOUT "\\fontsize{28pt}{28pt}\\selectfont \n";
 			}
 
-			print TEXOUT "\\newpage \n";
+			print TEXOUT "\\strut\n";
+			print TEXOUT "\\hfill\n";
+			print TEXOUT "{\\bf JUDGES: }\n";
+			print TEXOUT "\\hfill\n";
+			print TEXOUT "\\strut\n";
 
+			print TEXOUT "\\vspace{-10mm}\n";
+			print TEXOUT "\\newline\n";
+
+			print TEXOUT "\\begin{center}\n";
+
+			foreach my $judge (@{$panels{$pid}{"judges"}}) {
+				print TEXOUT "\\parbox[c][][c]{3.25in}{\\textsb{ ";
+				print TEXOUT "\\strut\n";
+				print TEXOUT "\\hfill\n";
+				print TEXOUT Tab::texify($judge);
+				print TEXOUT "\\hfill\n";
+				print TEXOUT "\\strut\n";
+				print TEXOUT "} } \n";
+			}
+
+			print TEXOUT "\\end{center}\n";
 		} # end of foreach panel
 
-	} # end of foreach event
+		print TEXOUT "\\newpage \n";
+
+	} # end of foreach panel
 
 	close TEXOUT;
 
