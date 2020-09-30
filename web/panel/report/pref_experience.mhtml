@@ -4,135 +4,423 @@
 </%args>
 <%init>
 
-	use Time::HiRes qw( time );
-	my $start_processing = time(); 
+	my $event = Tab::Event->retrieve($event_id);
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+
+		select
+			round.id, round.name, round.label,
+			entry.id, entry.code,
+			ballot.id, ballot.judge,
+			round.type,
+			rating.percentile, rating_tier.name,
+			opprating.percentile, opptier.name
+
+		from (entry, round, panel, ballot)
+
+			left join rating on rating.judge = ballot.judge and rating.entry = entry.id
+			left join rating_tier on rating_tier.id = rating.rating_tier
+
+			left join ballot oppballot on oppballot.panel = panel.id and oppballot.entry != entry.id
+
+			left join rating opprating on opprating.entry = oppballot.entry and opprating.judge = ballot.judge
+			left join rating_tier opptier on opprating.rating_tier = opptier.id
+
+		where entry.event = ?
+
+			and entry.id = ballot.entry
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and round.event = entry.event
+
+		order by entry.code, round.id
+	");
+
+	$sth->execute($event->id);
 
 	my %prefs;
-	my %judgecount;
+	my %rounds;
+	my %totals;
 
-	my $event = Tab::Event->retrieve($event_id);
-	my @rounds = Tab::Round->search( event=> $event_id, { order_by=>'name' });
-	my @entries = Tab::Entry->search( event=> $event_id, active => 1 );
+	while (
+		my (
+			$round_id, $round_name, $round_label,
+			$entry_id, $entry_code,
+			$ballot_id, $judge_id,
+			$round_type,
+			$percentile, $tier,
+			$opp_percentile, $opp_tier
+		) = $sth->fetchrow_array()
+	) {
 
-	my @rating_tiers = $event->category->rating_tiers;
-	my %tiers_by_id = map {$_->id => $_->name} @rating_tiers;
+		unless ($prefs{$entry_id}{"code"}) {
+			$prefs{$entry_id}{"code"} = $entry_code;
+			$prefs{$entry_id}{"code_name"} = $entry_code;
+			$prefs{$entry_id}{"code_number"} = $entry_code;
 
-	my $percentiles;
-
-	foreach my $round (@rounds) {
-
-		my @panels = Tab::Panel->search( round => $round->id, bye => 0 );
-
-		foreach my $panel (@panels) {
-
-			my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel); 
-			my @entries = $m->comp("/funclib/panel_entries.mas", panel => $panel);
-
-			foreach my $entry (@entries) {
-
-				foreach my $judge (@judges) {
-					my $pref = Tab::Rating->search( judge => $judge->id, entry=> $entry->id )->first;			
-					next unless $pref;
-
-					$judgecount{$entry->id}{$panel->round->id}++;
-
-					if ($pref->percentile) { 
-						$percentiles++;
-						$prefs{$entry->id}{$panel->round->id} += $pref->percentile;
-					} elsif ($pref->rating_tier->id) { 
-						$prefs{$entry->id}{$panel->round->id} += $tiers_by_id{$pref->rating_tier->id};
-					}
-
-				}
-			}	
+			$prefs{$entry_id}{"code_name"} =~ s/[\W_]//g;
+			$prefs{$entry_id}{"code_name"} =~ s/\d//g;
+			$prefs{$entry_id}{"code_number"} =~ s/[\D_]//g;
 		}
+
+		unless ($prefs{$entry_id}{"rounds"}{$round_name}{"done"}{$judge_id}++) {
+
+			my $rating;
+
+			if ($percentile) {
+				$rating = $percentile;
+			} elsif ($tier) {
+				$rating = $tier;
+			}
+
+			next unless $rating;
+
+			my $mutuality;
+
+			my $opp_rating;
+			if ($opp_percentile) {
+				$opp_rating = $opp_percentile;
+			} elsif ($opp_tier) {
+				$opp_rating = $opp_tier;
+			}
+
+			if ($opp_rating) {
+				$mutuality = abs($opp_rating - $rating);
+			}
+
+			$prefs{$entry_id}{"rounds"}{$round_name}{"total"} += $rating;
+			$prefs{$entry_id}{"rounds"}{$round_name}{"mutual"} += $mutuality;
+			$prefs{$entry_id}{"rounds"}{$round_name}{"count"}++;
+
+			if ($round_type eq "elim" || $round_type eq "final") {
+
+				$prefs{$entry_id}{"elim_total"} += $rating;
+				$prefs{$entry_id}{"elim_mutual"} += $mutuality;
+				$prefs{$entry_id}{"elim_count"}++;
+
+				$totals{"elim_total"} += $rating;
+				$totals{"elim_mutual"} += $mutuality;
+				$totals{"elim_count"}++;
+
+			} else {
+
+				$prefs{$entry_id}{"prelim_total"} += $rating;
+				$prefs{$entry_id}{"prelim_mutual"} += $mutuality;
+				$prefs{$entry_id}{"prelim_count"}++;
+
+				$totals{"prelim_total"} += $rating;
+				$totals{"prelim_mutual"} += $mutuality;
+				$totals{"prelim_count"}++;
+			}
+
+			$totals{"total"} += $rating;
+			$totals{"mutual"} += $mutuality;
+			$totals{"count"}++;
+
+			$prefs{$entry_id}{"total"} += $rating;
+			$prefs{$entry_id}{"mutual"} += $mutuality;
+			$prefs{$entry_id}{"count"}++;
+
+			$rounds{$round_name}{"total"} += $rating;
+			$rounds{$round_name}{"mutual"} += $mutuality;
+			$rounds{$round_name}{"count"}++;
+		}
+
+		if ($round_label) {
+			$rounds{$round_name}{"label"} = substr($round_label, 0, 2);
+		} else {
+			$rounds{$round_name}{"label"} = $round_name;
+		}
+
 	}
+
+	my @tabs = ("preferences", "mutuality");
 
 </%init>
 
-	<& menu.mas, 
+	<& menu.mas,
 		whoami => "tab",
-		tourn  => $tourn
+		tourn  => $tourn,
+		event  => $event
 	&>
 
 	<div class="main">
 
-		<span class="fivesixths">
-			<h4>Pref experience by team for <% $event->name %></h4>
-		</span>
-		<span 
-			class = "sixth rightalign"
-			id    = "prefs_buttonarea"
-		></span>
+		<div class="full nospace padbottom ltborderbottom">
+			<span class="half nospace">
+				<h4>MPJ By Entry</h4>
+			</span>
 
-		<& /funclib/tablesorter.mas, table => "prefs" &>
+			<span class="half nospace rightalign">
+				<h4><% $event->name %></h4>
+			</span>
+		</div>
 
-		<table id="prefs"> 
+		<& "/funclib/tabs.mas",
+			tabs    => \@tabs,
+			default => "preferences"
+		&>
 
-			<thead>
-			
-			<tr class="yellowrow">
-				<td>
-					Entry
-				</td>
-					
-%			foreach my $round (@rounds) {
-			<th class="yellowrow">
-				<% $round->name %>
-			</th>
-%			}		
+		<div class="screens preferences">
 
-			<th>
-				Avg
-			</th>
-				
-			</tr>
+			<div class="full nospace">
 
-			</thead>
+				<span class="fourfifths nospace">
+					<h5 class="bluetext">Average Preference of Judges Received</h5>
+				</span>
 
-			<tbody>
+				<span
+					class = "fifth rightalign"
+					id    = "prefs_buttonarea"
+				></span>
 
-%				foreach my $entry (@entries) {
+			</div>
 
-%					my $rds; 
-%					my $tot_pref;
+			<& /funclib/tablesorter.mas, table => "prefs" &>
 
-					<tr>
-						<td>
-							<a class="white" href="/register/entry/edit.mhtml?entry_id=<% $entry->id %>">
-								<% $entry->code %>
-							</a>
-						</td>
+			<table id="prefs">
 
-%						foreach my $round (@rounds) {
-							<td>
-%								if ($prefs{$entry->id}{$round->id}) {
-%									my $roundpref = $prefs{$entry->id}{$round->id} / $judgecount{$entry->id}{$round->id};
-%									$rds++; 
-%									$tot_pref += $roundpref;
-									<% $roundpref != int($roundpref) ? sprintf("%.1f", $roundpref) : $roundpref  %>
-%								}
-							</td>	
-%						}	
+				<thead>
+					<tr class="yellowrow">
 
-						<td>
-%							if ($rds) {			
-								<% sprintf("%.1f", $tot_pref/$rds) %>
-%							}
-						</td>
-									
+						<th>
+							Entry
+						</th>
+
+%						foreach my $round_name (sort {$a <=> $b} keys %rounds) {
+							<th>
+								<% $rounds{$round_name}{"label"} %>
+							</th>
+%						}
+
+						<th>
+							Pre
+						</th>
+
+						<th>
+							Elim
+						</th>
+
+						<th>
+							Avg
+						</th>
 					</tr>
-%				}
-			
-			</tbody>
-			
-		</table>
+				</thead>
 
-	<%perl>
-		my $end = time();
-		print "<br>processing time: ";
-		printf("%.2f\n", $end - $start_processing);
-	</%perl>
+				<tbody>
+<%perl>
+					foreach my $entry_id (
+						sort {
+							$prefs{$a}{"code_name"} cmp $prefs{$b}{"code_name"}
+							|| $prefs{$a}{"code_number"} <=> $prefs{$b}{"code_number"}
+						} keys %prefs
+					) {
+</%perl>
+						<tr>
+							<td>
+								<a class="white" href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>">
+									<% $prefs{$entry_id}{"code"} %>
+								</a>
+							</td>
 
+%							foreach my $round_name (sort {$a <=> $b} keys %rounds) {
+								<td class="rightalign">
+<%perl>
+									printavg(
+										$prefs{$entry_id}{"rounds"}{$round_name}{"total"},
+										$prefs{$entry_id}{"rounds"}{$round_name}{"count"}
+									);
+</%perl>
+								</td>
+%							}
+
+%							foreach my $tag ("prelim_", "elim_", "") {
+								<td class="rightalign">
+<%perl>
+									printavg(
+										$prefs{$entry_id}{$tag."total"},
+										$prefs{$entry_id}{$tag."count"}
+									);
+</%perl>
+								</td>
+%							}
+
+						</tr>
+%					}
+				</tbody>
+
+				<tr class="libl">
+					<td class="semibold redtext">
+						Averages
+					</td>
+
+%					foreach my $round_name (sort {$a <=> $b} keys %rounds) {
+						<td class="rightalign">
+<%perl>
+							printavg(
+								$rounds{$round_name}{"total"},
+								$rounds{$round_name}{"count"}
+							);
+</%perl>
+						</td>
+%					}
+
+%					foreach my $tag ("prelim_", "elim_", "") {
+						<td class="rightalign">
+<%perl>
+							printavg(
+								$totals{$tag."total"},
+								$totals{$tag."count"}
+							);
+</%perl>
+						</td>
+%					}
+
+				</tr>
+			</table>
+		</div>
+
+		<div class="screens mutuality">
+
+			<div class="full nospace">
+
+				<span class="fourfifths nospace">
+					<h5 class="bluetext">Average Mutuality of Judges Received</h5>
+				</span>
+
+				<span
+					class = "fifth rightalign"
+					id    = "mutual_buttonarea"
+				></span>
+
+			</div>
+
+			<& /funclib/tablesorter.mas, table => "mutual" &>
+
+			<table id="mutual">
+
+				<thead>
+					<tr class="yellowrow">
+
+						<th>
+							Entry
+						</th>
+
+%						foreach my $round_name (sort {$a <=> $b} keys %rounds) {
+							<th>
+								<% $rounds{$round_name}{"label"} %>
+							</th>
+%						}
+
+						<th>
+							Pre
+						</th>
+
+						<th>
+							Elim
+						</th>
+
+						<th>
+							Avg
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+<%perl>
+					foreach my $entry_id (
+						sort {
+							$prefs{$a}{"code_name"} cmp $prefs{$b}{"code_name"}
+							|| $prefs{$a}{"code_number"} <=> $prefs{$b}{"code_number"}
+						} keys %prefs
+					) {
+</%perl>
+						<tr>
+							<td>
+								<a class="white" href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>">
+									<% $prefs{$entry_id}{"code"} %>
+								</a>
+							</td>
+
+%							foreach my $round_name (sort {$a <=> $b} keys %rounds) {
+								<td class="rightalign">
+<%perl>
+									printavg(
+										$prefs{$entry_id}{"rounds"}{$round_name}{"mutual"},
+										$prefs{$entry_id}{"rounds"}{$round_name}{"count"}
+									);
+</%perl>
+								</td>
+%							}
+
+%							foreach my $tag ("prelim_", "elim_", "") {
+								<td class="rightalign">
+<%perl>
+									printavg(
+										$prefs{$entry_id}{$tag."mutual"},
+										$prefs{$entry_id}{$tag."count"}
+									);
+</%perl>
+								</td>
+%							}
+
+						</tr>
+%					}
+				</tbody>
+
+				<tr class="libl">
+
+					<td class="semibold redtext">
+						Averages
+					</td>
+
+%					foreach my $round_name (sort {$a <=> $b} keys %rounds) {
+						<td class="rightalign">
+<%perl>
+							printavg(
+								$rounds{$round_name}{"mutual"},
+								$rounds{$round_name}{"count"}
+							);
+</%perl>
+						</td>
+%					}
+
+%					foreach my $tag ("prelim_", "elim_", "") {
+						<td class="rightalign">
+<%perl>
+							printavg(
+								$totals{$tag."mutual"},
+								$totals{$tag."count"}
+							);
+</%perl>
+						</td>
+%					}
+
+				</tr>
+			</table>
+		</div>
 </div>
 
+<%perl>
+
+
+	sub printavg {
+
+		my ($total, $count) = @_;
+
+		unless ($count > 0) {
+			return;
+		}
+
+		my $average = $total / $count;
+
+		$average = Math::Round::nearest(1, $average);
+		$average = 1 if $average < 1;
+
+		$m->print($average);
+
+		return;
+	}
+
+</%perl>
