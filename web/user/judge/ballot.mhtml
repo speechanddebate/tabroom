@@ -42,6 +42,22 @@
 		$m->redirect("legion_ballot.mhtml?panel_id=".$panel->id."&judge_id=".$judge->id);
 	}
 
+	my $ballot_header;
+
+	if ($tourn_settings{"nsda_district"}
+		|| $tourn_settings{"nsda_nats"}
+		|| $tourn_settings{"nsda_billing"}
+	) {
+
+		my $nsda_district_ballot_header
+			= Tab::TournSetting->search(
+				tourn => 0,
+				tag   => "nsda_district_ballot_header"
+			)->first;
+
+		$ballot_header = $nsda_district_ballot_header->value_text();
+	}
+
 	my $tourn_logo = $tourn_settings{"logo"};
 	my %event_settings = $event->all_settings;
 	my %category_settings = $category->all_settings;
@@ -156,9 +172,13 @@
 		$m->redirect("/user/home.mhtml?err=$err");
 	}
 
+	my $notme;
+
 	unless ($judge->person->id == $person->id || $person->site_admin) {
 		my $err = "You are not authorized to enter ballots for that judge.";
 		$m->redirect("/user/home.mhtml?err=$err")
+	} elsif ($person->site_admin) {
+		$notme++;
 	}
 
 	unless ($round->tiebreak_set) {
@@ -185,15 +205,16 @@
 
 	my @clean;
 	my $chair;
-	my $audit;
+	my $audit = 1;
 
 	foreach my $ballot (@ballots) {
 		next unless $ballot->entry > 0;
 
 		unless ($chair) {
 			$chair++ if $ballot->chair;
-			$audit++ if $ballot->audit;
 		}
+
+		undef $audit unless $ballot->audit;
 		push @clean, $ballot;
 	}
 
@@ -203,37 +224,40 @@
 		$m->redirect("/user/home.mhtml?err=$err");
 	}
 
-	Tab::Panel->set_sql(update_start => "
-		update panel
-			set started = ?
-			where id = ?
-			and (panel.started is NULL
-				or panel.started < '2000-01-01 00:00:01'
-			)
-	");
+	unless ($notme) {
 
-	Tab::Panel->sql_update_start->execute(
-		DateTime::Format::MySQL->format_datetime($now), $panel->id
-	);
+		Tab::Panel->set_sql(update_start => "
+			update panel
+				set started = ?
+				where id = ?
+				and (panel.started is NULL
+					or panel.started < '2000-01-01 00:00:01'
+				)
+		");
 
-	Tab::Ballot->set_sql(update_start => "
-		update ballot
-			set judge_started = ?, started_by = ?
-			where panel = ?
-			and judge = ?
-			and (ballot.judge_started is NULL
-				or ballot.judge_started < '1000-01-01 00:00:01'
-			)
-	");
+		Tab::Panel->sql_update_start->execute(
+			DateTime::Format::MySQL->format_datetime($now), $panel->id
+		);
 
-	$now->set_time_zone("UTC");
+		Tab::Ballot->set_sql(update_start => "
+			update ballot
+				set judge_started = ?, started_by = ?
+				where panel = ?
+				and judge = ?
+				and (ballot.judge_started is NULL
+					or ballot.judge_started < '1000-01-01 00:00:01'
+				)
+		");
 
-	Tab::Ballot->sql_update_start->execute(
-		DateTime::Format::MySQL->format_datetime($now),
-		$person->id,
-		$panel->id,
-		$judge->id,
-	);
+		$now->set_time_zone("UTC");
+
+		Tab::Ballot->sql_update_start->execute(
+			DateTime::Format::MySQL->format_datetime($now),
+			$person->id,
+			$panel->id,
+			$judge->id,
+		);
+	}
 
 	my $team_points++ if $event_settings{"team_points"};
 	$team_points++ if $event_type eq "speech";
@@ -311,6 +335,8 @@
 		"/funclib/round_elim_dueaff.mas",
 		panel => $panel
 	) if $sidelocks;
+
+	my $show_async = $panel->setting("show_async");
 
 </%init>
 
@@ -658,6 +684,15 @@
 			</p>
 %		}
 
+%		if ($ballot_header) {
+
+			<div class="centeralign ltborder">
+				<span class="ninetenths biggish leftalign">
+					<% $ballot_header %>
+				</span>
+			</div>
+%		}
+
 <%perl>
 
 		if ($event_type eq "congress" && (not defined $audit)) {
@@ -891,9 +926,9 @@
 
 			<tr class="yellowrow smallish centeralign">
 
-%				if ($event_settings{"online_mode"} eq "async" || $panel->g_event) {
+%				if ($event_settings{"online_mode"} eq "async" || $event_settings{"show_async_links"} || $show_async) {
 					<th>
-						Video
+						Performance Video
 					</th>
 %				}
 
@@ -913,7 +948,7 @@
 					</th>
 %				} elsif ($event_type eq "speech") {
 					<th>
-						Speaker
+						Speaker Order
 					</th>
 %				} elsif ($event_type eq "congress" && $event_settings{"sort_precedence"}) {
 					<th>
@@ -922,7 +957,7 @@
 %				}
 
 				<th>
-					Code
+					Entry Code
 				</th>
 
 
@@ -972,7 +1007,6 @@
 						Title/Question
 					</th>
 <%perl>
-
 				}
 
 				if ($wudc && $tb_types{"winloss"} && $round->type eq "elim") {
@@ -987,6 +1021,7 @@
 						Champion
 					</th>
 %				}
+
 
 %				if ($event_type eq "congress" && (not defined $audit)) {
 
@@ -1014,74 +1049,75 @@
 						</th>
 %					}
 
-%				} elsif (not defined $audit) {
-
 <%perl>
+				} elsif (
+					($audit ne "1")
+					|| ($person->site_admin)
+				) {
+
 					my $num;
 					$num++ if $tb_types{"rank"};
 					$num++ if $tb_types{"point"};
 
 					if ($num > 0) {
 </%perl>
-					<th colspan="<% $num %>">
+						<th colspan="<% $num %>">
 <%perl>
+						my $tick;
 
-					my $tick;
+						if (
+							($tb_types{"rank"} || $tb_types{"point"}
+							&& (scalar @panel_students > scalar @ballots)
+						)
+							&& not defined $team_points
+						) {
 
-					if (
-						($tb_types{"rank"} || $tb_types{"point"}
-						&& (scalar @panel_students > scalar @ballots)
-					)
-						&& not defined $team_points
-					) {
-
-						$tick++;
+							$tick++;
 </%perl>
-						<span class="third marno padless centeralign">
-							Speaker
-						</span>
-%					}
-
-
-%					if ($tb_types{"rank"}) {
-						<span class="<% $tick ? "third padless" : "half" %> marno centeralign">
-							Rank
-						</span>
-%					}
-
-%					if ($tb_types{"point"}) {
-						<span class="<% $tick ? "third padless" : "half" %> marno centeralign">
-%						if ($subscores) {
-%							foreach my $score (@scores) {
-								<span class="marno quarter centeralign">
-									<% ucfirst ($score) %><br />
-									(<% $min_subpoints{$score} %> - <% $max_subpoints{$score} %>)
-								</span>
-%							}
-							<span class="marno quarter centeralign semibold">
-								Total <br />
-								(<% $min_subpoints{"total"} %> - <% $max_subpoints{"total"} %>)
+							<span class="third marno padless centeralign">
+								Speaker
 							</span>
-%						} else {
-							Points
 %						}
-						</span>
-%					}
-					</th>
 
-%					if ($tb_types{"tv"}) {
-						<th>
-							Violation
-						</th>
-%					}
+%						if ($tb_types{"rank"}) {
+							<span class="<% $tick ? "third padless" : "half" %> marno centeralign">
+								Rank
+							</span>
+%						}
 
-%					if ($forfeit) {
-						<th>
-							No show?
+%						if ($tb_types{"point"}) {
+							<span class="<% $tick ? "third padless" : "half" %> marno centeralign">
+%							if ($subscores) {
+%								foreach my $score (@scores) {
+									<span class="marno quarter centeralign">
+										<% ucfirst ($score) %><br />
+										(<% $min_subpoints{$score} %> - <% $max_subpoints{$score} %>)
+									</span>
+%								}
+								<span class="marno quarter centeralign semibold">
+									Total <br />
+									(<% $min_subpoints{"total"} %> - <% $max_subpoints{"total"} %>)
+								</span>
+%							} else {
+								Points
+%							}
+							</span>
+%						}
 						</th>
+
+%						if ($tb_types{"tv"}) {
+							<th>
+								Violation
+							</th>
+%						}
+
+%						if ($forfeit) {
+							<th>
+								No show?
+							</th>
+%						}
 %					}
 %				}
-%			}
 
 			</tr>
 
@@ -1148,14 +1184,23 @@
 					class = "<% ($switch % 2) ? "odd" : "even" %> ballotrows"
 				>
 
-%					if ($event_settings{"online_mode"} eq "async" || $panel->g_event) {
+<%perl>
+					if ($event_settings{"online_mode"} eq "async"
+						|| $event_settings{"show_async_links"}
+						|| $show_async
+					) {
+</%perl>
 						<td class="centeralign">
-%							if ($entry) {
+%							if ($entry && $entry->setting('video_link')) {
 								<a
 									target = "_blank"
 									class  = "buttonwhite bluetext invert fa fa-video-camera"
 									href   = "<% $entry->setting('video_link') %>"
 								></a>
+%							} else {
+								<span class="full nospace semibold orangetext">
+									NO VIDEO
+								</span>
 %							}
 						</td>
 %					}
@@ -1777,11 +1822,17 @@
 				<div class="liblrow rightalign">
 %			}
 
-%			unless ($audit) {
+%			if ($audit) {
+
+				<span class="full nospace centeralign redtext semibold">
+					This ballot has been entered and confirmed already.   <br />
+					Further changes require contacting the tournament staff.
+				</span>
+%			} else {
 				<input type="submit" value=" Submit Ballot ">
-				</div>
 %			}
 
+				</div>
 <%perl>
 
 		if ($tb_types{"point"}
