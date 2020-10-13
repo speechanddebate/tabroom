@@ -3,6 +3,7 @@ use base 'Tab::DBI';
 Tab::Round->table('round');
 Tab::Round->columns(Primary => qw/id/);
 Tab::Round->columns(Essential => qw/type name label flighted published post_results 
+							post_primary post_secondary post_feedback
 							created start_time event timeslot site tiebreak_set 
 							runoff timestamp/);
 Tab::Round->columns(TEMP => qw/speaks/);
