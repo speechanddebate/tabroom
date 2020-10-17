@@ -25,16 +25,11 @@
 		return;
 	}
 
-	my %entry_events;
 	my %admin_events;
 
 	if ($perms->{"detailed"}) {
 
 		foreach my $event_id (keys %{$perms->{"details"}}) {
-
-			$entry_events{$event_id}++
-				if $perms->{"details"}{$event_id} eq "entry";
-
 			$admin_events{$event_id}++
 				if $perms->{"details"}{$event_id} eq "admin";
 		}
@@ -58,163 +53,116 @@
 
 	# Get the listing of events I want to access
 
-	my @events;
+	my %events;
 
-	Tab::Event->set_sql("student_vote" => "
-		select event.id
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.abbr, event.name, event.type, event.category,
+			nsda_event_code.value,
+			supp.value, conn.value, stefan.value,
+			leadership.value, student_vote_tbset.value,
+			weekend.id, weekend.start, weekend.end
+
 		from event
-		where event.tourn = ?
-		and (
-			exists (
-				select leadership.id
-				from event_setting leadership
-				where leadership.tag = 'leadership_tbset'
+
+			left join event_setting nsda_event_code
+				on nsda_event_code.tag = 'nsda_event_code'
+				and nsda_event_code.event = event.id
+
+			left join event_setting supp
+				on supp.tag = 'supp'
+				and supp.event = event.id
+
+			left join event_setting conn
+				on conn.tag = 'conn'
+				and conn.event = event.id
+
+			left join event_setting stefan
+				on stefan.tag = 'stefan'
+				and stefan.event = event.id
+
+			left join event_setting leadership
+				on leadership.tag = 'leadership'
 				and leadership.event = event.id
-			) or (
-			exists (
-				select student_vote.id
-				from event_setting student_vote
-				where student_vote.tag = 'student_vote_tbset'
-				and student_vote.event = event.id
-			))
-		)
-		limit 1
+
+			left join event_setting student_vote_tbset
+				on student_vote_tbset.tag = 'student_vote_tbset'
+				and student_vote_tbset.event = event.id
+
+			left join event_setting weekend_set
+				on weekend_set.tag = 'weekend'
+				and weekend_set.event = event.id
+
+			left join weekend
+				on weekend.tourn = event.tourn
+				and weekend.id = weekend_set.value
+
+		where event.tourn = ?
 	");
 
-	my $student_vote = Tab::Event->sql_student_vote->select_val($tourn->id);
+	$sth->execute($tourn->id);
 
-	my %supps;
+	my $sv;
 
-	if ($tourn_settings->{"nsda_district"}) {
+	while (
+		my (
+			$event_id, $event_abbr, $event_name, $event_type, $category_id,
+			$nsda_code, $supp, $conn, $stefan,
+			$leadership, $student_vote,
+			$weekend_id, $weekend_start, $weekend_end
+		) = $sth->fetchrow_array()
+	) {
 
-		if ($perms->{"owner"}) {
-			$nsda_points++;
+		$events{$event_id}{"name"} = $event_name;
+		$events{$event_id}{"abbr"} = $event_abbr;
+
+		$events{$event_id}{"type"} = $event_type;
+		$events{$event_id}{"type"} = "debate" if $event_type eq "wsdc";
+
+		$events{$event_id}{"code"}     = $nsda_code;
+		$events{$event_id}{"category"} = $category_id;
+
+		$events{$event_id}{"supp"}   = $supp;
+		$events{$event_id}{"conn"}   = $conn;
+		$events{$event_id}{"stefan"} = $stefan;
+
+		if ($weekend_id) {
+
+			$events{$event_id}{"weekend_start"} = eval {
+				my $dt = DateTime::Format::MySQL->parse_datetime($weekend_start);
+				$dt->set_time_zone("UTC");
+				return $dt;
+			};
+
+			$events{$event_id}{"weekend_end"} = eval {
+				my $dt = DateTime::Format::MySQL->parse_datetime($weekend_end);
+				$dt->set_time_zone("UTC");
+				return $dt;
+			};
 		}
 
-		if (
-			$perms->{"owner"}
-			|| $person->site_admin
-			|| $person_settings->{"nsda_admin"}
-		) {
-
-			@events = $tourn->events;
-
-		} elsif ($perms->{"detailed"}) {
-
-			my @clear;
-
-			foreach my $event ($tourn->events) {
-				push (@clear, $event) if $admin_events{$event->id};
-			}
-
-			@events = @clear;
-
-		} else {
-
-			my $now = DateTime->now();
-			my $then = $now->clone();
-			$then->add(days => 7);
-			$now->subtract(days => 7);
-
-			Tab::Event->set_sql(weekend => "
-				select event.*, weekend.name
-				from event, event_setting, weekend
-				where event.tourn = ?
-				and event.id = event_setting.event
-				and event_setting.tag = 'weekend'
-				and event_setting.value = weekend.id
-				and weekend.tourn = event.tourn
-				and weekend.start < ?
-				and weekend.end > ?
-			");
-
-			@events = Tab::Event->search_weekend(
-				$tourn->id,
-				DateTime::Format::MySQL->format_datetime($then),
-				DateTime::Format::MySQL->format_datetime($now)
-			);
-
+		if ($leadership || $student_vote) {
+			$sv++;
 		}
+	}
 
-	} elsif ($tourn_settings->{"nsda_nats"}) {
+	my %ok;
 
-		my $sth = $dbh->prepare("
-
-			select event.id, event.name, event.abbr, supp.value, conn.value, stefan.value
-
-			from event
-			left join event_setting supp on supp.event = event.id and supp.tag = 'supp'
-			left join event_setting conn on conn.event = event.id and conn.tag = 'conn'
-			left join event_setting stefan on stefan.event = event.id and stefan.tag = 'stefan'
-
-			where event.tourn = ?
-		");
-
-		$sth->execute($tourn->id);
-
-		while (
-			my ($event_id, $event_name, $event_abbr, $supp, $conn, $stefan) = $sth->fetchrow_array()
-		) {
-			$supps{$event_id}{"supp"} = 1 if $supp;
-			$supps{$event_id}{"conn"} = 1 if $conn;
-			$supps{$event_id}{"conn"} = 1 if $stefan;
-		}
-
-		Tab::Event->set_sql(supps_and_shit => "
-			select event.*, supp.value as supp, conn.value as conn
-			from event
-			left join event_setting supp
-				on supp.event = event.id and supp.tag = 'supp'
-			left join event_setting conn
-				on conn.event = event.id and conn.tag = 'conn'
-			where event.tourn = ?
-		");
-
-		@events = Tab::Event->search_supps_and_shit($tourn->id);
-
-		if ($perms->{"detailed"}) {
-
-			my @clear;
-
-			foreach my $event (@events) {
-				push @clear, $event
-					if $admin_events{$event->id};
-			}
-
-			@events = @clear;
-		}
-
-		if ($person->site_admin) {
-			$nsda_points++;
-		}
-
-	} else {
-
-		if ($perms->{"category_tab"} && $perms->{"category_tab"}->category) {
-			@events = $perms->{"category_tab"}->category->events();
-		} elsif ($perms->{"category_tab"}) {
-
-		} elsif ($tabbing) {
-			@events = $tourn->events();
-		} elsif ($perms->{detailed}) {
-
-			my @clear;
-
-			foreach my $event ($tourn->events) {
-				push @clear, $event if $admin_events{$event->id};
-			}
-
-			@events = @clear;
-		}
+	if (
+		$perms->{"owner"}
+		|| $person->site_admin
+		|| $person_settings->{"nsda_admin"}
+		|| $person_settings->{"full_admin"}
+	) {
 
 		my $sth = $dbh->prepare("
 			select school.id
-			from school, chapter, entry, ballot
+				from school, chapter, entry, ballot
 			where school.tourn = ?
-			and school.chapter = chapter.id
-			and chapter.nsda > 0
-			and school.id = entry.school
-			and entry.id = ballot.entry
+				and school.chapter = chapter.id
+				and chapter.nsda > 0
+				and school.id = entry.school
+				and entry.id = ballot.entry
 			limit 1
 		");
 
@@ -223,20 +171,74 @@
 		if ($sth->fetchrow_array()) {
 			$nsda_points++;
 		}
+
+		foreach my $event_id (keys %events) {
+			$ok{$event_id}++;
+		}
 	}
 
-	@events = sort {
-		$a->type cmp $b->type
-		|| $a->name cmp $b->name
-	} @events;
+	if ($perms->{"detailed"}) {
 
-	if ($tourn_settings->{"nsda_nats"}) {
-		@events = sort {
-			$supps{$a}{"supp"} <=> $supps{$b}{"supp"}
-			|| $supps{$a}{"conn"} <=> $supps{$b}{"conn"}
-			|| $a->type cmp $b->type
-		} @events;
+		foreach my $event_id (keys %admin_events) {
+			$ok{$event_id}++;
+		}
 	}
+
+	if ($perms->{"category_tab"} > 0) {
+
+		foreach my $event_id (keys %events) {
+			if ($events{$event_id}{'category'} == $perms->{"category_tab"}) {
+				$ok{$event_id}++;
+			}
+		}
+
+	} elsif ($tabbing) {
+		foreach my $event_id (keys %events) {
+			$ok{$event_id}++;
+		}
+	}
+
+	if ($tourn_settings->{"nsda_district"}) {
+
+		unless (
+			$perms->{"owner"}
+			|| $person->site_admin
+			|| $person_settings->{"nsda_admin"}
+		) {
+
+			my $now = DateTime->now();
+			my $then = $now->clone();
+			$then->add(days => 7);
+			$now->subtract(days => 7);
+
+			foreach my $event_id (keys %ok) {
+				unless (
+					$events{$event_id}{"weekend_start"} < $now
+					&& $events{$event_id}{"weekend_end"} > $now
+				) {
+					delete $ok{$event_id};
+				}
+			}
+		}
+	}
+
+	unless (keys %ok) {
+		return;
+	}
+
+	foreach my $event_id (keys %events) {
+		next if $ok{$event_id};
+		delete $events{$event_id};
+	}
+
+	my @events = sort {
+		$events{$a}{"stefan"} cmp $events{$b}{"stefan"}
+		|| $events{$a}{"conn"} cmp $events{$b}{"conn"}
+		|| $events{$a}{"supp"} cmp $events{$b}{"supp"}
+		|| $events{$a}{"type"} cmp $events{$b}{"type"}
+		|| $events{$a}{"code"} cmp $events{$b}{"code"}
+		|| $events{$a}{"name"} cmp $events{$b}{"name"}
+	} keys %events;
 
 	my %menu = ();
 
@@ -327,7 +329,7 @@
 		}
 	}
 
-	if ($tabbing || keys %admin_events || keys %entry_events) {
+	if ($tabbing || keys %admin_events) {
 
 		if ($tabbing || keys %admin_events) {
 
@@ -370,7 +372,7 @@
 			delete $menu{"tabbing"}{"links"}{6};
 		}
 
-		if ($student_vote) {
+		if ($sv) {
 			$menu{"tabbing"}{"links"}{7} = ({
 				name => "Student Vote",
 				url  => "/tabbing/entry/student_vote.mhtml"
@@ -448,30 +450,31 @@
 			class => "narrow"
 		});
 
-		foreach my $event (@events) {
+		foreach my $event_id (@events) {
 
 			my $class;
 			$counter++;
 
-			$last_type = $event->type unless $last_type;
-			$class = "martop" if $event->type ne $last_type;
-			$last_type = $event->type;
+			$last_type = $events{$event_id}{type} unless $last_type;
+			$class = "martop" if $events{$event_id}{"type"} ne $last_type;
+			$last_type = $events{$event_id}{"type"};
 
-			if ($tourn_settings->{"nsda_nats"} && $event->type eq 'speech') {
+			if ($tourn_settings->{"nsda_nats"} && $events{$event_id}{"type"} eq 'speech') {
 
-				if ($event->supp && ($last_supp < 1)) {
+				if ($events{$event_id}{"supp"} && ($last_supp < 1)) {
 					$class = "martop";
 					$last_supp++;
 				}
 
-				if ($event->conn && ($last_conn < 1)) {
+				if ($events{$event_id}{"conn"} && ($last_conn < 1)) {
 					$class = "martop";
 					$last_conn++;
 				}
 			}
 
-			$menu{"schemats"}{"links"}{$counter}{"url"} = "/panel/schemat/show.mhtml?event_id=".$event->id;
-			$menu{"schemats"}{"links"}{$counter}{"name"} = $event->abbr;
+			$menu{"schemats"}{"links"}{$counter}{"url"} = "/panel/schemat/show.mhtml?event_id=".$event_id;
+			$menu{"schemats"}{"links"}{$counter}{"name"} = $events{$event_id}{"abbr"};
+			$menu{"schemats"}{"links"}{$counter}{"title"} = $events{$event_id}{"name"};
 			$menu{"schemats"}{"links"}{$counter}{"class"} = $class;
 
 		}
@@ -495,6 +498,7 @@
 					<li>
 						<a
 						class="<% $menu{$column}{"links"}{$link}{"class"} %>"
+						title="<% $menu{$column}{"links"}{$link}{"title"} %>"
 						href="<% $menu{$column}{"links"}{$link}{"url"} %><% $column ne "schemats" ? $tid : "" %>"
 						><% $menu{$column}{"links"}{$link}{"name"} %></a>
 					</li>
