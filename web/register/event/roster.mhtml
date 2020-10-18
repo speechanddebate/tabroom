@@ -11,65 +11,162 @@
 </%args>
 <%init>
 
-	my $event = Tab::Event->retrieve($event_id);
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
 
+	my $event = Tab::Event->retrieve($event_id);
 	$m->abort unless $event;
 
 	$m->abort if $only_category
 		&& $only_category->id != $event->category->id;
 
-	my @clear = Tab::Entry->search(
-		event  => $event->id,
-		active => 1
-	);
+	my %event_settings = $event->all_settings();
 
-	my @dropped = Tab::Entry->search(
-		event       => $event->id,
-		unconfirmed => 0,
-		dropped     => 1
-	);
+	my $dbh = Tab::DBI->db_Main();
 
-	my @waitlisted = Tab::Entry->search(
-		event       => $event->id,
-		dropped     => 0,
-		unconfirmed => 0,
-		waitlist    => 1
-	);
+	my $limit;
 
-	my @at_larges = $m->comp(
-		"/funclib/event_entries.mas",
-		event     => $event,
-		at_larges => "living"
-	) if $at_large;
+	if ($breakout) {
+        $limit .= "
+		and exists (
+            select entry_setting.id
+            from entry_setting
+            where entry_setting.entry = entry.id
+            and entry_setting.tag = 'breakout_".$breakout."'
+        )";
+	}
 
-	my @breakouts = $m->comp(
-		"/funclib/event_entries.mas",
-		event    => $event,
-		breakout => $breakout
-	) if $breakout;
+	my $sth = $dbh->prepare("
+		select
+			entry.id, entry.code, entry.name,
+			entry.active, entry.waitlist, entry.dropped, entry.created_at,
+			school.id, school.name,
+			atlarge.value,
+			waitlist_rank.value,
+			video_link.value_text,
+			dropped_at.value_date,
+			dropped_by.id, dropped_by.first, dropped_by.last, dropped_by.email,
+			student.id, student.nsda, person.id, student.first, student.last
 
-	my $total = (scalar @clear) + (scalar @dropped) + (scalar @waitlisted);
+		from entry
 
-	my @entries = @clear;
-	@entries = @dropped if $drops;
-	@entries = @waitlisted if $waitlist;
-	@entries = @at_larges if $at_large;
-	@entries = @breakouts if $breakout;
+			left join school on entry.school = school.id
+
+			left join entry_student es on es.entry = entry.id
+			left join student on es.student = student.id
+			left join person on person.id = student.person
+
+			left join entry_setting atlarge
+				on atlarge.tag = 'atlarge'
+				and atlarge.entry = entry.id
+
+			left join entry_setting dropped_at
+				on dropped_at.tag = 'dropped_at'
+				and dropped_at.entry = entry.id
+
+			left join entry_setting dropped_by_es
+				on dropped_by_es.tag = 'dropped_by'
+				and dropped_by_es.entry = entry.id
+
+			left join person dropped_by
+				on dropped_by_es.value = dropped_by.id
+
+			left join entry_setting waitlist_rank
+				on waitlist_rank.tag = 'waitlist_rank'
+				and waitlist_rank.entry = entry.id
+
+			left join entry_setting video_link
+				on video_link.tag = 'video_link'
+				and video_link.entry = entry.id
+
+		where entry.event = ?
+			and entry.unconfirmed != 1
+	");
+
+	$sth->execute($event->id);
+
+	my %entries;
+	my %stats;
+
+	while (
+		my (
+			$entry_id, $entry_code, $entry_name,
+			$entry_active, $entry_waitlist, $entry_dropped, $entry_created_at,
+			$school_id, $school_name,
+			$atlarge,
+			$waitlist_rank,
+			$video_link,
+			$dropped_at,
+			$dropped_by_id, $dropped_by_first, $dropped_by_last, $dropped_by_email,
+			$student_id, $student_nsda, $student_person, $student_first, $student_last
+		) = $sth->fetchrow_array()
+	) {
+
+		$entries{$entry_id}{"code"}       = $entry_code;
+		$entries{$entry_id}{"name"}       = $entry_name;
+		$entries{$entry_id}{"active"}     = $entry_active;
+		$entries{$entry_id}{"waitlist"}   = $entry_waitlist;
+		$entries{$entry_id}{"dropped"}    = $entry_dropped;
+		$entries{$entry_id}{"atlarge"}    = $atlarge;
+		$entries{$entry_id}{"video_link"} = $video_link;
+
+		Tab::debuglog("Entry $entry_code has link $video_link");
+
+		if ($entry_active) {
+			$stats{"byschool"}{$school_id}{$entry_id}++;
+		}
+
+		if ($entry_dropped) {
+			$stats{"dropped"}{$entry_id}++;
+		} elsif ($entry_waitlist) {
+			$stats{"waitlist"}{$entry_id}++;
+			$entries{$entry_id}{'waitlist_rank'} = $waitlist_rank;
+		} elsif ($entry_active) {
+			$stats{"active"}{$entry_id}++;
+		}
+
+
+		if ($entry_created_at) {
+			$entries{$entry_id}{"created_at"}  = DateTime::Format::MySQL->parse_datetime($entry_created_at);
+			$entries{$entry_id}{"created_at"}->set_time_zone("UTC");
+			$entries{$entry_id}{"created_at"}->set_time_zone($tz);
+			$entries{$entry_id}{"created_at_sort"}  = $entries{$entry_id}{"created_at"}->epoch;
+		}
+
+		if ($dropped_at) {
+			$entries{$entry_id}{"dropped_at"}  = DateTime::Format::MySQL->parse_datetime($dropped_at);
+			$entries{$entry_id}{"dropped_at"}->set_time_zone("UTC");
+			$entries{$entry_id}{"dropped_at"}->set_time_zone($tz);
+			$entries{$entry_id}{"dropped_at_sort"}  = $entries{$entry_id}{"dropped_at"}->epoch;
+		}
+
+		$entries{$entry_id}{"dropped_by_email"} = $dropped_by_email;
+		$entries{$entry_id}{"dropped_by_name"}  = $dropped_by_first." ".$dropped_by_last;
+
+		$entries{$entry_id}{"school"}      = $school_id;
+		$entries{$entry_id}{"school_name"} = $school_name;
+
+		unless ($student_person) {
+			$entries{$entry_id}{"unlinked"} .= $student_first." ".$student_last." is unlinked";
+		}
+
+		unless ($student_nsda) {
+			$entries{$entry_id}{"nonmember"} .= $student_first." ".$student_last." is unlinked";
+		}
+	}
 
 	my $namestring = "Entries";
 	$namestring = "Drops" if $drops;
 	$namestring = "Waitlist" if $waitlist;
 	$namestring = "At-Large Entries" if $at_large;
-	$namestring = $event->setting("breakout_".$breakout."_label") if $breakout;
 
-	@entries = sort {$a->created_at <=> $b->created_at} @entries;
+	$namestring = $event_settings{"breakout_".$breakout."_label"} if $breakout;
 
-	@entries = sort {$a->code <=> $b->code} @entries unless $waitlist;
-
-	my $tz = $tourn->tz;
-	$tz = "UTC" unless $tz;
-
-	my $no_codes++ if $event->setting("code_style") eq "names";
+	my @entries = sort {
+		$entries{$a}{"created_at_sort"} <=> $entries{$b}{"created_at_sort"}
+		|| $entries{$a}{"code"} <=> $entries{$b}{"code"}
+		|| $entries{$a}{"code"} cmp $entries{$b}{"code"}
+	} keys %entries;
 
 </%init>
 
@@ -93,22 +190,19 @@
 		<span class="half martop centeralign">
 
 			<span class="quarter semibold">
-				<% $breakout ?
-					scalar @breakouts
-					: scalar @clear
-				%> In
+				<% scalar (keys %{$stats{"active"}}) %> In
 			</span>
 
 			<span class="quarter semibold redtext">
-				<% scalar @dropped %> Drops
+				<% scalar (keys %{$stats{"dropped"}}) %> Drops
 			</span>
 
 			<span class="quarter semibold orangetext">
-				<% scalar @waitlisted %> WL
+				<% scalar (keys %{$stats{"waitlist"}}) %> WL
 			</span>
 
 			<span class="quarter semibold bluetext">
-				<% $total %> Total
+				<% scalar (keys %entries) %> Total
 			</span>
 
 		</span>
@@ -147,24 +241,43 @@
 
 			<tr class="yellowrow">
 
-%				unless ($no_codes) {
-					<th >
-						Code
-					</th>
-%				}
+				<th >
+					Code
+				</th>
 
 				<th >
 					Entry Name
 				</th>
 
-				<th >
+				<th>
 					School
 				</th>
 
+%				if ($event_settings{"online"} && $event_settings{'online_mode'} eq "async") {
+					<th>
+						Video
+					</th>
+%				}
 
-%				if ($waitlist && $event->setting('waitlist_rank')) {
+%				if ($event_settings{"online"}) {
+					<th title="Are the competitors linked to a tabroom account?">
+						Linked
+					</th>
+%				}
+
+%				if ($waitlist && $event_settings{'waitlist_rank'}) {
+					<th title="Active entries from this school already">
+						School Has
+					</th>
+
 					<th>
 						Priority
+					</th>
+%				}
+
+%				if ($at_large) {
+					<th>
+						At Large
 					</th>
 %				}
 
@@ -174,142 +287,154 @@
 
 %				if ($drops) {
 
-					<th >
-						Dropped
+					<th>
+						Dropped At
 					</th>
 
-%				} else {
+					<th>
+						Dropped By
+					</th>
+
+%				} elsif ($waitlist) {
 
 					<th>
 					</th>
 %				}
-
 			</tr>
 
 			</thead>
 
 			<tbody>
+<%perl>
+				foreach my $entry_id (@entries) {
 
-%			foreach my $entry (@entries) {
-
-%				next if $entry->dropped && $waitlist;
-
-				<tr class="<% ($entry->dropped && not defined $drops) ? "strike" : "" %>" >
-
-%					unless ($no_codes) {
-						<td >
-							<a
-								class="white"
-								href="/register/entry/edit.mhtml?entry_id=<% $entry->id %>"
-							>
-								<% $entry->code %>
-							</a>
-						</td>
-%					}
+					if ($waitlist) {
+						next if $entries{$entry_id}{"dropped"};
+						next unless $entries{$entry_id}{"waitlist"};
+					} elsif ($drops) {
+						next unless $entries{$entry_id}{"dropped"};
+					} else {
+						next if $entries{$entry_id}{"dropped"};
+					}
+</%perl>
+				<tr class="">
 
 					<td class="nospace">
 						<a
-							class="white full"
-							href="/register/entry/edit.mhtml?entry_id=<% $entry->id %>"
+							class="white"
+							href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
 						>
-							<% $entry->name %>
+							<% $entries{$entry_id}{"code"} %>
 						</a>
 					</td>
 
 					<td class="nospace">
-
-						<% $waitlist ? "<span class='padno threequarter'>": "" %>
-							<a
-								class="white full"
-								href="/register/school/entries.mhtml?event_id=<% $entry->event->id %>&school_id=<% $entry->school->id %>">
-								<% $entry->school->short_name %>
-							</a>
-
-						<% $waitlist ? "</span>" : "" %>
-
-%						if ($waitlist) {
-							<span class="quarter ">
-								<% scalar Tab::Entry->search(
-									event  => $entry->event->id,
-									school => $entry->school->id,
-									active => 1
-								) %>
-							</span>
-%						}
+						<a
+							class="white full"
+							href="/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
+						>
+							<% $entries{$entry_id}{"name"} %>
+						</a>
 					</td>
 
-%					if ($waitlist && $event->setting('waitlist_rank')) {
-						<td class="centeralign">
-							<% $entry->setting("waitlist_rank") %>
+					<td class="nospace">
+						<a
+							class="white full"
+							href="/register/school/entries.mhtml?entry_id=<% $entries{$entry_id}{"school"} %>"
+						>
+							<& "/funclib/short_name.mas",
+								name    => $entries{$entry_id}{"school_name"},
+								printme => 1
+							&>
+						</a>
+					</td>
+
+%					if ($event_settings{"online"} && $event_settings{'online_mode'} eq "async") {
+						<td class="nospace centeralign">
+%							if ($entries{$entry_id}{"video_link"}) {
+								<span class="hidden">1</span>
+								<a
+									class = "fa greentext fa-sm fa-check"
+									href  = "<% $entries{$entry_id}{"video_link"} %>"
+								></a>
+%							} else {
+								<span class="hidden">2</span>
+								<a class="fa redtext fa-sm fa-times"></a>
+%							}
 						</td>
 %					}
 
-					<td >
+%					if ($event_settings{"online"}) {
+						<td class="centeralign" title="<% $entries{$entry_id}{"unlinked"} %>">
+%							if ($entries{$entry_id}{"unlinked"}) {
+								<span class="hidden">1</span>
+								<a class="fa redtext fa-sm fa-times"></a>
+%							} else {
+								<span class="hidden">1</span>
+								<a
+									class = "fa greentext fa-sm fa-check"
+								></a>
+%							}
+						</td>
+%					}
+
+%					if ($waitlist) {
+%						my $school_id = $entries{$entry_id}{"school"};
+						<td class="centeralign">
+							<% scalar (keys %{$stats{"byschool"}{$school_id}}) %>
+						</td>
+
+						<td class="centeralign">
+							<% $entries{$entry_id}{"waitlist_rank"} %>
+						</td>
+%					}
+
+%					if ($at_large) {
+						<td class="centeralign">
+							<% $entries{$entry_id}{"atlarge"} %>
+						</td>
+%					}
+
+					<td>
 						<span class="hidden">
-							<% $entry->created_at
-								? $entry->created_at->set_time_zone($tz)->epoch
-								: ""
-							%>
+							<% $entries{$entry_id}{"created_at_sort"} %>
 						</span>
-						<% $entry->created_at
-							? &Tab::niceshortdt($entry->created_at->set_time_zone($tz))
-							: ""
-						%>
+
+						<& "/funclib/showdt.mas",
+							dt => $entries{$entry_id}{"created_at"}
+						&>
 					</td>
 
-					<td class="nospace nowrap centeralign">
-
-%						if ($waitlist) {
-
-							<label for="<% $entry->id %>">
+%					if ($waitlist) {
+						<td class="nospace nowrap centeralign">
+							<label for="<% $entry_id %>">
 								<div class="padmore hover">
 									Admit: <input
 										type  = "checkbox"
-										name  = "<% $entry->id %>"
-										id    = "<% $entry->id %>"
+										name  = "<% $entry_id %>"
+										id    = "<% $entry_id %>"
 										value = 1
 									>
 								</div>
 							</label>
+						</td>
 
-<%perl>
+%					} elsif ($drops) {
 
-						} elsif ($drops) {
+						<td>
+							<span class="hidden">
+								<% $entries{$entry_id}{"dropped_at_sort"} %>
+							</span>
 
-							my $dropped_at = $entry->setting("dropped_at");
+							<& "/funclib/showdt.mas",
+								dt => $entries{$entry_id}{"dropped_at"}
+							&>
+						</td>
 
-							my $dropped_by_id = $entry->setting("dropped_by");
-
-							my $dropped_by = Tab::Person->retrieve($dropped_by_id)
-								if $dropped_by_id;
-
-</%perl>
-							<div class="hidden">
-								<% $dropped_at ? $dropped_at->epoch : "" %>
-							</div>
-							<div class="marless padless smaller">
-								<% $dropped_at
-									? &Tab::niceshortdt($dropped_at->set_time_zone($tz))
-									: ""
-								%>
-							</div>
-
-							<div class="marless padless smaller">
-								by <% $dropped_by
-									? $dropped_by->first." ".$dropped_by->last
-									: ""
-									%>
-							</div>
-
-%						} else {
-
-							<% ($entry->dropped) ? "DROP" : "" %>
-							<% ($entry->waitlist) ? "WL" : "" %>
-							<% ($entry->dq) ? "DQ" : "" %>
-
-%						}
-
-					</td>
+						<td class="smaller" title="<% $entries{$entry_id}{"dropped_by_email"} %>">
+							by <% $entries{$entry_id}{"dropped_by_name"} %>
+						</td>
+%					}
 
 				</tr>
 %			}
