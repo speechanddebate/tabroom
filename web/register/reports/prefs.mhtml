@@ -32,19 +32,29 @@
 		my $sth = $dbh->prepare("
 			select
 				entry.id, entry.name, entry.code,
-				school.id, school.name, school.state,
+				school.id school, school.name, school.state,
 				event.id, event.abbr,
-				judge.id, judge.school
+				judge.id judge, judge.school jschool,
+				es.id evenstrike, cs.id conflict, ss.id schoolstrike,
+				rating.id rating
 
 			from (entry, event, school)
 
-			left join rating on entry.id = rating.entry
-			left join judge on judge.id = rating.judge and judge.active = 1
+			left join judge on judge.category = event.category and judge.active = 1
+			left join rating on entry.id = rating.entry and rating.judge = judge.id
+			left join strike es on es.judge = judge.id and es.event = entry.event
+			left join strike cs on cs.judge = judge.id and cs.entry = entry.id
+			left join strike ss on ss.judge = judge.id and ss.school = entry.school
 
 			where entry.event = event.id
-				and entry.school = school.id
+				and entry.school   = school.id
 				and event.category = ?
-				and entry.active = 1
+				and entry.active   = 1
+
+			group by judge.id, entry.id
+
+			order by entry.id
+
 		");
 
 		$sth->execute($category);
@@ -54,9 +64,13 @@
 				$entry_id, $entry_name, $entry_code,
 				$school_id, $school_name, $school_state,
 				$event_id, $event_abbr,
-				$judge_id, $judge_school
+				$judge_id, $judge_school,
+				$event_strike, $conflict_id, $school_strike,
+				$rating_id
 			) = $sth->fetchrow_array()
 		) {
+
+			next if $ratings{$entry_id}{$judge_id}++;
 
 			$ratings{$entry_id}{"name"}         = $entry_name;
 			$ratings{$entry_id}{"code"}         = $entry_code;
@@ -66,75 +80,21 @@
 			$ratings{$entry_id}{"event_id"}     = $event_id;
 			$ratings{$entry_id}{"event_abbr"}   = $event_abbr;
 
-			$ratings{$entry_id}{"rated_total"}++;
-			$ratings{$entry_id}{"rated"}{$judge_id}++;
-
-			$judges{$judge_id} = $judge_school;
-		}
-
-		$sth->finish();
-
-		$sth = $dbh->prepare("
-			select
-				entry.id, judge.id, strike.type
-			from (entry, event, strike, judge)
-
-			where entry.event = event.id
-				and event.category = ?
-				and entry.id = strike.entry
-				and strike.judge = judge.id
-				and judge.active = 1
-				and entry.active = 1
-		");
-
-		$sth->execute($category->id);
-
-		while (
-			my (
-				$entry_id, $judge_id, $strike_type
-			) = $sth->fetchrow_array()
-		) {
-			if ($strike_type eq "conflict") {
-				$ratings{$entry_id}{"conflicts"}++;
-				$ratings{$entry_id}{"conflicted"}{$judge_id}++;
-			} else {
+			if ($school_id == $judge_school) {
+				$ratings{$entry_id}{"own"}++;
+			} elsif ($conflict_id || $school_strike || $event_strike) {
 				$ratings{$entry_id}{"strikes"}++;
 				$ratings{$entry_id}{"struck"}{$judge_id}++;
+			} elsif ($rating_id) {
+				$ratings{$entry_id}{"rated_total"}++;
+				$ratings{$entry_id}{"rated"}{$judge_id}++;
+			} else {
+				$ratings{$entry_id}{"unrated"}++;
 			}
 		}
 
 		$sth->finish();
-		$sth = $dbh->prepare("
-			select
-				entry.id, judge.id, strike.type
 
-			from (entry, event, strike, judge)
-
-			where entry.event = event.id
-				and event.category = ?
-				and entry.school = strike.school
-				and strike.judge = judge.id
-				and judge.active = 1
-				and entry.active = 1
-		");
-
-		$sth->execute($category->id);
-
-		while (
-			my (
-				$entry_id, $judge_id, $strike_type
-			) = $sth->fetchrow_array()
-		) {
-			if ($strike_type eq "conflict") {
-				$ratings{$entry_id}{"conflicts"}++;
-				$ratings{$entry_id}{"conflicted"}{$judge_id}++;
-			} else {
-				$ratings{$entry_id}{"strikes"}++;
-				$ratings{$entry_id}{"struck"}{$judge_id}++;
-			}
-		}
-
-		$sth->finish();
 	}
 
 </%init>
@@ -201,15 +161,11 @@
 					</th>
 
 					<th class="smallish">
-						Preffed
+						Rated
 					</th>
 
-					<th class="smallish">
-						Struck
-					</th>
-
-					<th class="smallish">
-						Conflicted
+					<th class="smallish" title="Strike/Conflict">
+						S/C
 					</th>
 
 					<th class="smallish">
@@ -222,28 +178,6 @@
 
 			<tbody>
 <%perl>
-
-				foreach my $entry_id (sort {$ratings{$a}{"code"} cmp $ratings{$b}{"code"}} keys %ratings) {
-
-					my %stats;
-
-					foreach my $judge_id (keys %judges) {
-
-						if ($judges{$judge_id} == $ratings{$entry_id}{'school_id'}) {
-							$stats{"own"}++;
-						} elsif ($ratings{$entry_id}{"conflicted"}{$judge_id}) {
-							$stats{"conflicted"}++;
-						} elsif ($ratings{$entry_id}{"struck"}{$judge_id}) {
-							$stats{"struck"}++;
-						} elsif ($ratings{$entry_id}{"rated"}{$judge_id}) {
-							$stats{"rated"}++;
-						} else {
-							$stats{"unrated"}++;
-						}
-					}
-
-					$ratings{$entry_id}{"stats"} = \%stats;
-				}
 
 				foreach my $entry_id (sort {
 						$ratings{$b}{"stats"}{"unrated"} <=> $ratings{$a}{"stats"}{"unrated"}
@@ -272,23 +206,19 @@
 						</td>
 
 						<td class="centeralign">
-							<% $ratings{$entry_id}{"stats"}{"own"} %>
+							<% $ratings{$entry_id}{"own"} %>
 						</td>
 
 						<td class="centeralign">
-							<% $ratings{$entry_id}{"stats"}{"rated"} %>
+							<% $ratings{$entry_id}{"rated_total"} %>
 						</td>
 
 						<td class="centeralign">
-							<% $ratings{$entry_id}{"stats"}{"struck"} %>
+							<% $ratings{$entry_id}{"strikes"} %>
 						</td>
 
 						<td class="centeralign">
-							<% $ratings{$entry_id}{"stats"}{"conflicted"} %>
-						</td>
-
-						<td class="centeralign">
-							<% $ratings{$entry_id}{"stats"}{"unrated"} %>
+							<% $ratings{$entry_id}{"unrated"} %>
 						</td>
 
 					</tr>
