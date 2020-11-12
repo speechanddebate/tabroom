@@ -205,6 +205,14 @@
 						$("#"+targetId).prependTo("#"+data.newParent);
 					}
 
+					if (data.setvalue) {
+						data.setvalue.forEach( function(item) {
+							if (item.content) {
+								$("#"+item.id).val(item.content);
+							}
+						});
+					}
+
 					if (data.replace) {
 						data.replace.forEach( function(item) {
 							if (item.destroy) {
