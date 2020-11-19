@@ -1,10 +1,10 @@
 <%args>
 	$judge_id
 	$school_id
-	$alt_id       => undef
-	$ada          => 0
-	$notes        => undef
-	$rounds       => undef
+	$person
+	$alt_id => undef
+	$ada    => 0
+	$rounds => undef
 </%args>
 <%init>
 
@@ -26,6 +26,7 @@
 
 	my $school = Tab::School->retrieve($school_id);
 	my $missing_rating;
+	my $chapter = $school->chapter;
 
 	my $deadline;
 	my $judge_deadline = $tourn->setting("judge_deadline");
@@ -195,15 +196,15 @@
 
 	my %judge_settings = $judge->all_settings();
 
-	if ($notes ne $judge_settings{"notes"}) {
-		$judge->setting('notes', "text", $notes);
+	if ($ARGS{"notes"} ne $judge_settings{"notes"}) {
+		$judge->setting('notes', "text", $ARGS{"notes"});
 		$judge->setting("notes_processed", 0);
 	}
 
 	my $cj = $judge->chapter_judge;
 
-	if ($cj && $notes ne $cj->notes) {
-		$cj->notes($notes);
+	if ($cj && $ARGS{"permanent_notes"} ne $cj->notes) {
+		$cj->notes($ARGS{"permanent_notes"});
 		$cj->notes_timestamp($now);
 		$cj->update();
 	}
@@ -219,6 +220,7 @@
 	}
 
 	foreach my $tag ("qual_history") {
+
 		unless ($ARGS{$tag}) {
 			$ARGS{$tag} = 0;
 		}
@@ -243,7 +245,6 @@
 	}
 
 	$ARGS{"email"} =~ s/\s+//g;
-
 	my $judge_person = $judge->person;
 
 	unless ($judge_person && $judge_person->email eq $ARGS{"email"}) {
@@ -257,7 +258,18 @@
 
 		unless ($judge_person) {
 
-			$judge->setting("email", $ARGS{"email"});
+			if ($category->setting("linked_only")) {
+
+				$err = "Judges must be linked to Tabroom accounts to register.  The email ";
+				$err .= $ARGS{"email"}." does not have a Tabroom account.  Please enter a valid ";
+				$err .= "Tabroom account email to continue";
+
+			} else {
+
+				$judge->setting("email", $ARGS{"email"});
+				$judge->person(0);
+				$judge->update();
+			}
 
 		} else {
 
@@ -269,7 +281,23 @@
 				$count++;
 			}
 
+			unless ($count) {
+				if ($chapter) {
+					push @others, $chapter->chapter_judges(person => $judge_person->id, retired => 0);
+				}
+
+				foreach my $other (@others) {
+					next if $other == $cj;
+					$count++;
+				}
+			}
+
 			unless ($count > 0) {
+
+				if ($cj) {
+					$cj->person($judge_person->id);
+					$cj->update();
+				}
 
 				$judge->person($judge_person->id);
 				$judge->update();
@@ -280,23 +308,96 @@
 					person => $judge_person
 				);
 
+				$judge->setting("email", 0);
+
+				if ($judge_person->phone) {
+					$ARGS{"phone"} = $judge_person->phone;
+				}
+
 			} else {
 
-				$err = "A judge from your school already has that email address.  ";
-				$err .= "Please only put in the judge's OWN tabroom account, not yours ";
-				$err .= "or someone else's!  Otherwise things will go a little haywire.";
+				$err .= "A judge from your school already is linked to that account.  ";
+				$err .= "Please only put in the judge's OWN tabroom account. ";
 			}
+
+		}
+
+	} elsif ($judge_person) {
+
+		$judge->setting("email", 0);
+		$judge->setting("phone", 0);
+	}
+
+	$ARGS{"phone"} =~ s/[\D_]//g;
+
+	my $dupes;
+
+	unless ($judge_person && $judge_person->phone eq $ARGS{"phone"}) {
+
+		if ($person->phone eq $ARGS{"phone"} && $judge_person != $person) {
+
+			undef $ARGS{"phone"};
+			$err .= " Please enter the judge's phone number, not yours.  Entering your number ";
+			$err .= " causes problems for the tournament reaching judges when you cannot";
+			$err .= " be contacted.";
+
+		} elsif ($chapter && $cj) {
+
+			my $dbh = Tab::DBI->db_Main();
+
+			my $sth = $dbh->prepare("
+				select cj.first, cj.last
+					from chapter_judge cj, person
+				where cj.chapter = ?
+					and cj.id != ?
+					and cj.retired != 1
+					and cj.person = person.id
+					and person.phone = ?
+			");
+
+			$sth->execute($chapter, $cj, $ARGS{"phone"});
+
+			my ($first, $last) = $sth->fetchrow_array();
+
+			if ($first && $last) {
+				$dupes = $first." ".$last;
+			}
+
+			$sth->finish();
+			$dbh->disconnect();
 		}
 	}
 
-	unless ($judge_person && $judge_person->phone eq $ARGS{"phone"}) {
-		$ARGS{"phone"} =~ s/[\D_]//g;
-		if ($ARGS{"phone"} ne $judge_settings{"phone"}) {
-			$judge->setting("phone", $ARGS{"phone"});
-		}
+	if ($dupes) {
+
+		$err .= "That phone number is also listed for your judge $dupes. ";
+		$err .= "Please enter the judge's own phone number.";
+
+	} elsif ($judge_person && $judge_person->phone ne $ARGS{"phone"}) {
+
+		$judge_person->phone($ARGS{"phone"});
+		$judge_person->update();
+
+	} elsif ($judge_person) {
+
+		$ARGS{"phone"} = $judge_person->phone;
+
+	} elsif (
+		(not defined $judge_person)
+		&& $ARGS{"phone"}
+		&& $ARGS{"phone"} ne $judge_settings{"phone"}
+	) {
+
+		$judge->setting("phone", $ARGS{"phone"});
+
+	} elsif ($category_settings{"judge_cells"} && (not defined $ARGS{"phone"})) {
+
+		$err .= " Judge has no phone number listed, which is required for this tournament.";
+		$err .= " Please enter the judge's phone number.";
 	}
 
 	my %strike_by_event = ();
+
 	foreach my $strike (
 		Tab::Strike->search(
 			type       => "event",
@@ -339,6 +440,10 @@
 		$min_pool_counter < $category_settings{"min_registrant_jpools"}
 	) {
 		my $err = "All judges must be in a minimum of ".$category_settings{"min_registrant_jpools"}." pools";
+		$m->redirect("judge_details.mhtml?school_id=$school_id&judge_id=$judge_id&err=$err");
+	}
+
+	if ($err) {
 		$m->redirect("judge_details.mhtml?school_id=$school_id&judge_id=$judge_id&err=$err");
 	}
 
