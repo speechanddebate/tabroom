@@ -12,6 +12,7 @@ no warnings "uninitialized";
 no warnings "redefine";
 
 use DBI;
+use Apache::DBI;
 use POSIX;
 use Class::DBI::AbstractSearch;
 use Compress::Zlib;
