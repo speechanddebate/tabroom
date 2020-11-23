@@ -4,7 +4,7 @@ Tab::Room->table('room');
 Tab::Room->columns(Primary => qw/id/);
 Tab::Room->columns(Essential => qw/name site inactive/);
 Tab::Room->columns(Others => qw/quality timestamp capacity notes ada rowcount 
-								seats deleted url password judge_url judge_password/);
+								seats deleted url password judge_url judge_password api/);
 
 Tab::Room->columns(TEMP => "score");
 
