@@ -156,14 +156,14 @@ sub handler {
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
 			comp_root   => $Tab::file_root,
-			data_dir    => $Tab::file_root."mason",
+			data_dir    => $Tab::data_dir,
 			error_mode  => 'fatal'
 		);
 	} else {
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
 			comp_root   => $Tab::file_root,
-			data_dir    => $Tab::file_root."mason",
+			data_dir    => $Tab::data_dir
 		);
  	}
 
@@ -172,12 +172,11 @@ sub handler {
 	};
 
 	if ( my $err = $@ ) {
-
 		$r->pnotes( error => $err );
 		$r->filename( $r->document_root . '/index/oh_crap.mhtml' );
 		return $ah->handle_request($r);
-
 	}
+
 	return $return;
 }
 
