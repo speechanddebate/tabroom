@@ -15,13 +15,16 @@ use DBI;
 use POSIX;
 use Class::DBI::AbstractSearch;
 use Compress::Zlib;
+
 use MIME::Base64;
 use HTML::Mason::ApacheHandler;
 use Digest::SHA;
 use Data::Dumper;
 use DateTime;
+
 use JSON::XS;
 use JSON;
+
 use Lingua::EN::Numbers::Ordinate;
 use MIME::Lite;
 use HTML::FromText;
@@ -30,6 +33,7 @@ use HTML::Scrubber;
 use Email::Valid;
 use DateTime::Span;
 use DateTime::Format::MySQL;
+use Crypt::JWT;
 use Crypt::PasswdMD5;
 use Apache2::Cookie;
 use Apache2::Request;
@@ -145,6 +149,7 @@ use Tab::TournSite;
 use Tab::Webpage;
 
 no warnings "uninitialized";
+
 
 my $ah;
 
