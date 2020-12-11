@@ -15,13 +15,16 @@ use DBI;
 use POSIX;
 use Class::DBI::AbstractSearch;
 use Compress::Zlib;
+
 use MIME::Base64;
 use HTML::Mason::ApacheHandler;
 use Digest::SHA;
 use Data::Dumper;
 use DateTime;
+
 use JSON::XS;
 use JSON;
+
 use Lingua::EN::Numbers::Ordinate;
 use MIME::Lite;
 use HTML::FromText;
@@ -30,6 +33,7 @@ use HTML::Scrubber;
 use Email::Valid;
 use DateTime::Span;
 use DateTime::Format::MySQL;
+use Crypt::JWT;
 use Crypt::PasswdMD5;
 use Apache2::Cookie;
 use Apache2::Request;
@@ -146,6 +150,7 @@ use Tab::Webpage;
 
 no warnings "uninitialized";
 
+
 my $ah;
 
 sub handler {
@@ -156,14 +161,14 @@ sub handler {
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
 			comp_root   => $Tab::file_root,
-			data_dir    => $Tab::file_root."mason",
+			data_dir    => $Tab::data_dir,
 			error_mode  => 'fatal'
 		);
 	} else {
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
 			comp_root   => $Tab::file_root,
-			data_dir    => $Tab::file_root."mason",
+			data_dir    => $Tab::data_dir
 		);
  	}
 
@@ -172,12 +177,11 @@ sub handler {
 	};
 
 	if ( my $err = $@ ) {
-
 		$r->pnotes( error => $err );
 		$r->filename( $r->document_root . '/index/oh_crap.mhtml' );
 		return $ah->handle_request($r);
-
 	}
+
 	return $return;
 }
 
