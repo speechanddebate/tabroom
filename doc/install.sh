@@ -81,6 +81,7 @@ echo
 	ncurses-base \
 	ncurses-bin \
 	nmap \
+	neovim \
 	openprinting-ppds \
 	openssh-client \
 	openssh-server \
@@ -188,6 +189,7 @@ echo "127.0.1.21 local local.tabroom.com" >> /etc/hosts
 ln -s /etc/apache2/sites-available/local.tabroom.com.conf /etc/apache2/sites-enabled/0-local.tabroom.conf
 
 /usr/sbin/a2enmod apreq
+/usr/sbin/a2enmod proxy
 
 echo
 echo "Starting Apache..."
