@@ -141,7 +141,6 @@ use Tab::Tourn;
 use Tab::TournFee;
 use Tab::TournSetting;
 use Tab::Weekend;
-use Tab::WeekendSetting;
 use Tab::ChangeLog;
 use Tab::TournCircuit;
 use Tab::TournIgnore;
