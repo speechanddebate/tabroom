@@ -12,6 +12,8 @@
 		$m->redirect("/user/home.mhtml?err=$err");
 	}
 
+	my $dbh = Tab::DBI->db_Main();
+
 	my $panel = Tab::Panel->retrieve($panel_id);
 	$m->abort unless $panel;
 	$m->comp("/funclib/panel_dedupe.mas", panel => $panel);
@@ -98,18 +100,20 @@
 		time_zone => "UTC"
 	);
 
-
 	if (
 		($tourn->start > $start_bias || $tourn_settings{"bias_saved"})
 		&& (not defined $bias_rules)
 	) {
 
-	    my $bias_statement = Tab::TournSetting->search(
-			tourn => 0,
-			tag   => "bias_statement"
-		)->first;
+		$bias_rules = eval {
 
-		$bias_rules = $bias_statement->value_text;
+			my $bias_statement = Tab::TournSetting->search(
+				tourn => 0,
+				tag   => "bias_statement"
+			)->first;
+
+			return $bias_statement->value_text;
+		}
 	}
 
 	my $ballot_rules       = $event_settings{"ballot_rules"};
@@ -199,11 +203,13 @@
 
 	my $notme;
 
-	unless ($judge->person->id == $person->id || $person->site_admin) {
-		my $err = "You are not authorized to enter ballots for that judge.";
-		$m->redirect("/user/home.mhtml?err=$err")
+	if ($judge->person->id == $person->id) {
+
 	} elsif ($person->site_admin) {
 		$notme++;
+	} else {
+		my $err = "You are not authorized to enter ballots for that judge.";
+		$m->redirect("/user/home.mhtml?err=$err")
 	}
 
 	unless ($round->tiebreak_set) {
@@ -230,7 +236,8 @@
 
 	my @clean;
 	my $chair;
-	my $audit = 1;
+	my $audit;
+	my $i_can_haz_doubled;
 
 	foreach my $ballot (@ballots) {
 		next unless $ballot->entry > 0;
@@ -251,37 +258,32 @@
 
 	unless ($notme) {
 
-		Tab::Panel->set_sql(update_start => "
-			update panel
-				set started = ?
-				where id = ?
-				and (panel.started is NULL
-					or panel.started < '2000-01-01 00:00:01'
+		# Ballot start time
+
+		my $ballot_check_sth = $dbh->prepare("
+			select id from ballot
+				where judge = ?
+				and panel = ?
+				and (
+					ballot.judge_started IS NULL
+					or ballot.judge_started < ?
 				)
 		");
 
-		Tab::Panel->sql_update_start->execute(
-			DateTime::Format::MySQL->format_datetime($now), $panel->id
-		);
+		$ballot_check_sth->execute($judge->id, $panel->id, DateTime::Format::MySQL->format_datetime($tourn->start));
+		my ($id) = $ballot_check_sth->fetchrow_array();
+		$ballot_check_sth->finish();
 
-		Tab::Ballot->set_sql(update_start => "
-			update ballot
-				set judge_started = ?, started_by = ?
-				where panel = ?
-				and judge = ?
-				and (ballot.judge_started is NULL
-					or ballot.judge_started < '1000-01-01 00:00:01'
-				)
-		");
+		if ($id) {
 
-		$now->set_time_zone("UTC");
+			my $ballot_sth = $dbh->prepare("
+				update ballot set judge_started = NOW() where panel = ? and judge = ?
+			");
 
-		Tab::Ballot->sql_update_start->execute(
-			DateTime::Format::MySQL->format_datetime($now),
-			$person->id,
-			$panel->id,
-			$judge->id,
-		);
+			$ballot_sth->execute($panel->id, $judge->id);
+
+			$ballot_sth->finish();
+		}
 	}
 
 	my $team_points++ if $event_settings{"team_points"};
@@ -380,6 +382,8 @@
 	) if $sidelocks;
 
 	my $show_async = $panel->setting("show_async");
+
+	$dbh->disconnect();
 
 </%init>
 
@@ -704,7 +708,7 @@
 			</span>
 
 			<span title="And you are simply the best!" class="<% $segment %> nospace centeralign">
-				<h4 class="redtext">
+				<h4 class="graytext">
 					<% $judge->first %>
 					<% $judge->middle %>
 					<% $judge->last %>
@@ -847,7 +851,7 @@
 		if (
 			$event_settings{"po_points_required"}
 			&& (not defined $po_points)
-			&& (not defined $chair) 
+			&& (not defined $chair)
 		) {
 </%perl>
 			<h6 class="redtext centeralign padmore marbottom semibold">
@@ -923,13 +927,13 @@
 
 %		}
 
-%		if ($decision_deadline || $tb_types{"point"}) {
+%		if ($decision_deadline || $tb_types{"point"} || $flip_online) {
 
-			<div class="padvert marbottom marleftmore centeralign">
+			<div class="padvert marbottom centeralign ltbordertop">
 
 %				if ($tb_types{"point"}) {
 
-					<span class="half centeralign nospace">
+					<span class="twofifths centeralign nospace">
 
 						<span class="semibold redtext inline marright">
 							Points:
@@ -962,46 +966,50 @@
 					</span>
 %				}
 
+%				if ($flip_online) {
+					<span class="fifth semibold greentext centeralign bigger">
+						Online Flips <% $panel->flip_status eq "done" ? "Complete" : "Incomplete" %>
+					</span>
+%				}
+
 %				if ($decision_deadline) {
 
-					<span class="half centeralign semibold bigger smidge border">
+					<span class="twofifths centeralign semibold biggish smidge nospace">
 
-						<span class="half">
-							Decision due at: <% Tab::nicetime($decision_time) %>
+						<span class="half bigger">
+							Vote by <% Tab::nicetime($decision_time) %>
 						</span>
 
-						<span class="orangetext borderleft half">
-
-							<span class="inline nospace">
-								Time left:
+						<span class="orangetext half redborder nospace bigger">
+							<span class="fourtenths marno leftalign">
+								Time left
 							</span>
 
-							<& "/funclib/stopwatch.mas",
-								label     => "deadline",
-								inline    => "true",
-								autostart => "true",
-								default   => ($time_left->in_units('minutes'))
-							&>
+							<span class="half buttonwhite orangetext invert padbottom padleftless padrightless noborder">
+								<& "/funclib/stopwatch.mas",
+									label     => "deadline",
+									inline    => "true",
+									autostart => "true",
+									class     => "padtophalf",
+									default   => 135
+								&>
+							</span>
 						</span>
 					</span>
 %				}
-			</div>
-%		}
 
-%		if ($flip_online) {
-
-			<div class="odd centeralign ltbordervert padvert marbottommore">
-
-				<span class="fifth semibold bluetext">
-					Online Flip Status:
-				</span>
-
-				<span class="fifth semibold redtext">
-					<% $panel->flip_status eq "done" ? "Flip Complete" : "Flip Choices Incomplete" %>
-				</span>
 
 			</div>
 %		}
+
+%		if ($audit) {
+
+			<div class="ltbordertop ltborderbottom full centeralign redtext semibold padvertmuchmore">
+				This ballot has been entered and confirmed already.
+				Further changes require contacting the tournament staff.
+			</div>
+
+%		} else {
 
 		<table id="sortable">
 
@@ -1169,19 +1177,19 @@
 
 							$tick++;
 </%perl>
-							<span class="third marno padless centeralign">
+							<span class="half marno padless leftalign">
 								Speaker
 							</span>
 %						}
 
 %						if ($tb_types{"rank"}) {
-							<span class="<% $tick ? "third padless" : "half" %> marno centeralign">
+							<span class="<% $tb_types{"point"} ? "quarter padless" : "half" %> marno centeralign">
 								Rank
 							</span>
 %						}
 
 %						if ($tb_types{"point"}) {
-							<span class="<% $tick ? "third padless" : "half" %> marno centeralign">
+							<span class="<% $tb_types{"rank"} ? "quarter padless" : "half" %> marno centeralign">
 %							if ($subscores) {
 %								foreach my $score (@scores) {
 									<span class="marno quarter centeralign">
@@ -1230,7 +1238,6 @@
 
 			my $index = 1;
 			my $switch;
-			my $i_can_haz_doubled;
 			my %doubled;
 
 			unless ($event_settings{"online_mode"} eq "async") {
@@ -1277,6 +1284,7 @@
 				foreach (1 .. $doubled) {
 					$daggers .= "&dagger;";
 				}
+
 				$i_can_haz_doubled++ if $doubled;
 
 </%perl>
@@ -1633,6 +1641,8 @@
 								my $length = "half";
 								$length = "third" if $tb_types{"rank"} && $tb_types{"point"};
 
+								my $notfirst;
+
 								foreach my $student (
 									sort {
 										$sort{$a} <=> $sort{$b}
@@ -1641,7 +1651,7 @@
 								) {
 </%perl>
 
-									<div class="padless marno borderbottom centeralign">
+									<div class="padless marno <% $notfirst++ ? "ltbordertop" : "" %> centeralign">
 
 										<span class='smallish <% $length %> marno padless leftalign <% $student->id."_row" %>' >
 
@@ -1835,11 +1845,11 @@
 
 			<div class="odd">
 
-				<span class="quarter semibold redtext centeralign">
+				<span class="quarter semibold bluetext rightalign">
 					Winner
 				</span>
 
-				<span class="quarter centeralign" id = "winbox">
+				<span class="quarter leftalign" id = "winbox">
 
 					<select
 						id       = "winner"
@@ -1862,8 +1872,8 @@
 
 				<span class="quarter centeralign">
 					<div class="nowrap nospace">
-						<span class="quarter rightalign semibold redtext bluetext">
-							Side:
+						<span class="quarter rightalign semibold bluetext bluetext">
+							Side
 						</span>
 
 						<label for="winner_1">
@@ -1924,42 +1934,38 @@
 			</div>
 %		}
 
-		<div class="liblrow rightalign">
 
-%			if ($event_settings{"allow_lowpoints"}) {
 
-				<label for="lpw">
-					<div class="half centeralign hover nospace">
+			<div class="liblrow rightalign">
 
-						<span class="threequarters">
-							Low-Point Ranks?
+%				if ($event_settings{"allow_lowpoints"}) {
+					<label for="lpw">
+						<span class="half centeralign hover nospace">
+
+							<span class="threequarters">
+								Low-Point Ranks?
+							</span>
+
+							<span class="quarter centeralign">
+
+								<input
+									type  = "checkbox"
+									id    = "lpw"
+									value = "1"
+									name  = "lpw"
+									<% $ARGS{"lpw"} ? "checked" : "" %>
+								>
+							</span>
 						</span>
+					</label>
+%				}
 
-						<span class="quarter centeralign">
-
-							<input
-								type  = "checkbox"
-								id    = "lpw"
-								value = "1"
-								name  = "lpw"
-								<% $ARGS{"lpw"} ? "checked" : "" %>
-							>
-						</span>
-					</div>
-				</label>
-%			}
-%			if ($audit) {
-
-				<span class="full nospace centeralign redtext semibold">
-					This ballot has been entered and confirmed already.   <br />
-					Further changes require contacting the tournament staff.
+				<span class="half centeralign nospace">
+					<input type="submit" value=" Submit Ballot ">
 				</span>
 
-
-%			} else {
-				<input type="submit" value=" Submit Ballot ">
-				</div>
-%			}
+			</div>
+%		}
 
 <%perl>
 
@@ -1977,7 +1983,6 @@
 
 			</div>
 %		}
-
 
 %		if ($i_can_haz_doubled) {
 			<div class="row smallish redtext semibold centeralign padvertmore">
@@ -2081,8 +2086,8 @@
 					</p>
 				</span>
 
-				<span class="quarter rightalign semibold redtext">
-					Save Feedback:
+				<span class="quarter rightalign semibold bluetext">
+					Save Feedback
 					<button
 						type    = "button"
 						onClick = "saveComments(false);"
@@ -2156,8 +2161,8 @@
 							</p>
 						</span>
 
-						<span class="quarter rightalign semibold redtext">
-							Save Feedback:
+						<span class="quarter rightalign semibold bluetext">
+							Save Feedback
 							<button
 								type    = "button"
 								onClick = "saveComments(false);"
@@ -2346,11 +2351,11 @@
 			}
 </%perl>
 
-			<span class="third nospace">
+			<span class="quarter nospace">
 				<h4>Timers</h4>
 			</span>
 
-			<span class="twothirds explain rightalign biggish nospace ">
+			<span class="threequarters explain rightalign biggish nospace ">
 				If you refresh or leave, timers reset
 			</span>
 
