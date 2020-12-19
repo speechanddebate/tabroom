@@ -10,202 +10,33 @@
 </%args>
 <%init>
 
-	use Math::Round;
+	my $dbh = Tab::DBI->db_Main();
 
-	my $event = Tab::Event->retrieve($event_id);
+	my @events;
+	my $name;
 
-	unless ($event) {
+	if ($event_id eq "all") {
+		@events = $tourn->events();
+		$name = "AllEvents";
+	} elsif ($event_id eq int($event_id)) {
+		push @events, Tab::Event->retrieve($event_id);
+		$name = $events[0]->name if @events;
+	} else {
+		@events = $tourn->events(type => $event_id);
+		$name = ucfirst($event_id)."Events";
+	}
+
+	unless (scalar @events) {
 		$m->comp("/funclib/abort.mas", message => "No event corresponse to ID $event_id");
 	}
 
 	my $landscape;
 	$landscape++ if $tourn_settings->{nsda_nats};
-	$landscape++ if $event->type eq "debate";
 
-	my $exclude_round = $event->rounds(
-		name => $round_name
-	)->first;
-
-	my $exclude_number = $exclude_round->name if $exclude_round;
-
-	my $codes = $event->setting('code_style');
-
-	my $show_codes++ unless ($codes eq "names"
-		|| $codes eq "last_names"
-		|| $codes eq "code_name"
-		|| $codes eq "names_lastfirst");
-
-	my $label;
-
-	unless ($exclude_number) {
-		$label          = "All Rounds";
-		$exclude_number = 314159;
-	} else {
-		$label = "Results up to round ".$exclude_number;
+	foreach my $event (@events) {
+		$landscape++ if $event->type eq "debate";
 	}
 
-    my $fontsize = $person_settings->{"fontsize"};
-    $fontsize = "scriptsize" if ($fontsize eq "default" || (not defined $fontsize));
-
-	my $dbh = Tab::DBI->db_Main();
-	my $code_length;
-
-	my $name_string = "distinct(CONCAT(student.first,' ',student.last)) SEPARATOR ' & '";
-
-	if ($event->type eq "wsdc") {
-		$name_string = "distinct(CONCAT(student.last)) SEPARATOR ' & '";
-	}
-
-	my $sth = $dbh->prepare("
-		select entry.id,
-			entry.code as entry_code,
-			GROUP_CONCAT(
-				$name_string
-			) as entryname,
-			school.name, school.state,
-			region.code, region.name,
-			round.name, round.type,
-			rank.tag, rank.value,
-			winloss.tag, winloss.value,
-			point.tag, point.value,
-			panel.bye, ballot.bye, ballot.forfeit
-
-		from (entry, round, panel, ballot, school, entry_student, student)
-
-			left join score rank on rank.tag = 'rank'
-				and rank.ballot = ballot.id
-
-			left join score winloss on winloss.tag = 'winloss'
-				and winloss.ballot = ballot.id
-
-			left join score point on point.tag = 'point'
-				and point.ballot = ballot.id
-
-			left join region on school.region = region.id
-
-		where entry.event = ?
-		and entry.id      = ballot.entry
-		and entry.active  = 1
-		and ballot.panel  = panel.id
-		and panel.round   = round.id
-		and round.name 	  <= ?
-
-		and entry.school = school.id
-		and entry_student.entry = entry.id
-		and entry_student.student = student.id
-
-		and not exists (
-			select rs.id 
-				from round_setting rs
-			where rs.round = round.id
-				and rs.tag = 'ignore_results'
-		)
-
-		and not exists (
-			select advanced.id
-			from ballot advanced, panel advpanel
-			where advpanel.round = ?
-			and advpanel.id = advanced.panel
-			and advanced.entry = entry.id
-		)
-		group by ballot.id
-	");
-
-	$sth->execute($event->id, $round_name, $exclude_number);
-
-	my %results;
-	my $max_round;
-	my %round_type;
-
-	my $name_length;
-	my $school_length;
-
-	while (
-		my ($entry_id,
-			$entry_code,
-			$entry_name,
-			$school_name, $school_state,
-			$region_code, $region_name,
-			$round_name, $round_type,
-			$rank_tag, $rank_value,
-			$winloss_tag, $winloss_value,
-			$point_tag, $point_value,
-			$pbye, $bbye, $forfeit
-		) = $sth->fetchrow_array()
-	) {
-		
-		$school_name = $m->comp('/funclib/short_name.mas', name => $school_name);
-
-		if ($school_name eq "Air") {
-			$school_name = "Air Academy";
-		}
-
-		$results{$entry_id}{"entry_code"}   = $entry_code;
-		$results{$entry_id}{"entry_name"}   = $entry_name;
-
-		$school_name = substr($school_name, 0, 24);
-		$results{$entry_id}{"school_name"}  = $school_name;
-
-		if ($school_state) {
-			$results{$entry_id}{"school_state"} = $school_state;
-		} else {
-			$results{$entry_id}{"school_state"} = "INT";
-		}
-
-		$results{$entry_id}{"region_name"}  = $region_name;
-		$results{$entry_id}{"region_code"}  = $region_code;
-
-		unless ($results{$entry_id}{"divide"}{$round_name}) {
-			$results{$entry_id}{"divide"}{$round_name}++;
-		}
-
-		if ($results{$entry_id}{$round_name}) {
-
-			$results{$entry_id}{"counter"}{$round_name}++;
-			$results{$entry_id}{$round_name} .= " ";
-
-			if ($results{$entry_id}{"counter"}{$round_name} > 7) {
-				$results{$entry_id}{$round_name} .= "\\newline\n";
-				undef $results{$entry_id}{"counter"}{$round_name};
-				$results{$entry_id}{"divide"}{$round_name}++
-			}
-		}
-
-		$round_type{"type"}{$round_name} = $round_type;
-
-		$round_type{$round_name} = (length($results{$entry_id}{$round_name})/ $results{$entry_id}{"divide"}{$round_name})
-			if $round_type{$round_name} < (length($results{$entry_id}{$round_name}) / $results{$entry_id}{"divide"}{$round_name});
-
-		if ($pbye || $bbye) {
-			$results{$entry_id}{$round_name} = "BYE";
-		} elsif ($forfeit) {
-			$results{$entry_id}{$round_name} = "FFT";
-		} elsif ($winloss_tag) {
-			$results{$entry_id}{$round_name} .= "W" if $winloss_value == 1;
-			$results{$entry_id}{$round_name} .= "L" if $winloss_value == 0;
-		} elsif ($rank_tag) {
-			$results{$entry_id}{$round_name} .= $rank_value;
-		}
-
-		unless ($tourn_settings->{nsda_nats}) {
-			if ($point_tag) {
-				$results{$entry_id}{$round_name} .= "/".$point_value;
-			}
-		}
-
-		$max_round = $round_name if $max_round < $round_name;
-
-		$code_length = length($entry_code) if $code_length < length($entry_code);
-		$name_length = length($entry_name) if $name_length < length($entry_name);
-
-		$school_length = length($school_name) if $school_length < length($school_name);
-
-	}
-
-	$name_length -= 15;
-	$school_length -= 5;
-
-    my $name = $event->name;
     $name =~ s/[\W_]//g;
 
     my $filename = "FinalResults-$name-".$session->id;
@@ -217,7 +48,7 @@
         head        => 1,
 		superwide   => 1,
 		taller      => 1,
-		footer_text => $tourn->start->year." ".$tourn->name." -- ".$event->name." Results",
+		footer_text => $tourn->start->year." ".$tourn->name." -- Results",
 		no_footer   => 1,
         array       => "1.1",
 		landscape   => $landscape
@@ -226,88 +57,335 @@
     open (TEXOUT, ">>$filepath.tex");
 	binmode(TEXOUT, ":utf8");
 
-	print TEXOUT "\\Large \\textsb{".$event->name."} \\hfill \\textsb{Scores} \n";
-    print TEXOUT "\\medskip\n";
-    print TEXOUT "\\newline\n";
+	foreach my $event (@events) {
 
-	my $tabular =  "\\begin{tabular}{";
-	$tabular .= "p{".($code_length )."ex}" if $show_codes;
-	$tabular .= "p{".($name_length )."ex}";
-	$tabular .= "p{".($school_length)."ex}";
+		next if $event->type eq "congress";
 
-	if ($tourn_settings->{ncfl}) {
-		$tabular .= "p{1in}";
-	} else {
-		#states
-		$tabular .= "p{.1in}";
-	}
-
-	my $factor = 1 if $event->type eq "debate";
-
-	foreach my $round (1 .. $max_round) {
-		if ($round_type{"type"}{$round} eq "prelim") {
-			$tabular .= "p{".($round_type{$round} - 1)."ex}";
-		} elsif ($round_type{$round})  {
-			$tabular .= "p{".($round_type{$round} + 1)."ex}";
-		} else {
-			$tabular .= "p{1ex}";
+		unless ($round_name) {
+			$round_name = scalar ($event->rounds);
 		}
-	}
 
-	$tabular .= "}\n";
+		my $exclude_round = $event->rounds(
+			name => $round_name
+		)->first;
 
-	print TEXOUT "\\raggedright\n";
-	print TEXOUT "\\".$fontsize."\n";
+		my $exclude_number = $exclude_round->name if $exclude_round;
 
-	my $switch = 1;
-	my $twostep;
-	my $take_steps;
+		my $codes = $event->setting('code_style');
 
-	if ($max_round < 4) {
-		$take_steps++;
-	}
+		my $show_codes++ unless ($codes eq "names"
+			|| $codes eq "last_names"
+			|| $codes eq "code_name"
+			|| $codes eq "names_lastfirst");
 
-	my @entries = keys %results;
+		my $label;
 
-	@entries = sort {$results{$a}{"entry_code"} <=> $results{$b}{"entry_code"}} @entries;
+		unless ($exclude_number) {
+			$label          = "All Rounds";
+			$exclude_number = 314159;
+		} else {
+			$label = "Results up to round ".$exclude_number;
+		}
 
-	if ($tourn_settings->{nsda_nats}) {
-		@entries = sort {
-			$results{$a}{"school_state"} cmp $results{$b}{"school_state"}
-			|| $results{$a}{"school_name"} cmp $results{$b}{"school_name"}
-			|| $results{$a}{"entry_name"} cmp $results{$b}{"entry_name"}
-		} @entries;
-	}
+		my $fontsize = $person_settings->{"fontsize"};
+		$fontsize = "scriptsize" if ($fontsize eq "default" || (not defined $fontsize));
 
-	foreach my $entry (@entries) {
+		my $code_length;
 
-		print TEXOUT $tabular;
-		print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch % 2;
-		print TEXOUT Tab::texify($results{$entry}{"entry_code"})." & " if $show_codes;
-		print TEXOUT "\\scriptsize ".Tab::texify($results{$entry}{"entry_name"})." & ";
-		print TEXOUT "\\scriptsize ".Tab::texify($results{$entry}{"school_name"})." & ";
+		my $name_string = "distinct(CONCAT(student.first,' ',student.last)) SEPARATOR ' & '";
+
+		if ($event->type eq "wsdc") {
+			$name_string = "distinct(CONCAT(student.last)) SEPARATOR ' & '";
+		}
+
+		my $sth = $dbh->prepare("
+			select entry.id,
+				entry.code as entry_code,
+				GROUP_CONCAT(
+					$name_string
+				) as entryname,
+				school.name, school.state,
+				region.code, region.name,
+				round.name, round.type,
+				GROUP_CONCAT(distinct CONCAT(rank.id,'-',rank.value) SEPARATOR ' '),
+				winloss.value,
+				GROUP_CONCAT(distinct CONCAT(point.id,'-',point.value) SEPARATOR ' '),
+				panel.bye, ballot.bye, ballot.forfeit,
+				student.id
+
+			from (entry, round, panel, ballot, school, entry_student, student)
+
+				left join score rank on rank.tag = 'rank'
+					and rank.ballot = ballot.id
+
+				left join score winloss on winloss.tag = 'winloss'
+					and winloss.ballot = ballot.id
+
+				left join score point on point.tag = 'point'
+					and point.ballot = ballot.id
+
+				left join region on school.region = region.id
+
+			where entry.event = ?
+			and entry.id      = ballot.entry
+			and entry.active  = 1
+			and ballot.panel  = panel.id
+			and panel.round   = round.id
+			and round.name 	  <= ?
+
+			and entry.school = school.id
+			and entry_student.entry = entry.id
+			and entry_student.student = student.id
+
+			and not exists (
+				select rs.id
+					from round_setting rs
+				where rs.round = round.id
+					and rs.tag = 'ignore_results'
+			)
+
+			and not exists (
+				select advanced.id
+				from ballot advanced, panel advpanel
+				where advpanel.round = ?
+				and advpanel.id = advanced.panel
+				and advanced.entry = entry.id
+			)
+			group by ballot.id
+		");
+
+		$sth->execute($event->id, $round_name, $exclude_number);
+
+		my %results;
+		my $max_round;
+		my %round_type;
+
+		my $name_length;
+
+		while (
+			my ($entry_id,
+				$entry_code,
+				$entry_name,
+				$school_name, $school_state,
+				$region_code, $region_name,
+				$round_name, $round_type,
+				$rank_value,
+				$winloss_value,
+				$point_value,
+				$pbye, $bbye, $forfeit,
+				$student_id
+			) = $sth->fetchrow_array()
+		) {
+
+
+			unless ($results{$entry_id}{"school_name"}) {
+				$school_name = $m->comp('/funclib/short_name.mas', name => $school_name);
+
+				if ($school_name eq "Air") {
+					$school_name = "Air Academy";
+				}
+				$school_name = substr($school_name, 0, 24);
+				$results{$entry_id}{"school_name"}  = $school_name;
+			}
+
+			$results{$entry_id}{"entry_code"}   = $entry_code;
+			$results{$entry_id}{"entry_name"}   = $entry_name;
+
+			if ($tourn_settings->{nsda_nats}) {
+				if ($school_state) {
+					$results{$entry_id}{"school_state"} = $school_state;
+				} else {
+					$results{$entry_id}{"school_state"} = "INT";
+				}
+			}
+
+			$results{$entry_id}{"region_name"}  = $region_name;
+			$results{$entry_id}{"region_code"}  = $region_code;
+
+			unless ($results{$entry_id}{"divide"}{$round_name}) {
+				$results{$entry_id}{"divide"}{$round_name}++;
+			}
+
+			if ($results{$entry_id}{$round_name}) {
+
+				$results{$entry_id}{"counter"}{$round_name}++;
+				$results{$entry_id}{$round_name} .= " ";
+
+				if ($results{$entry_id}{"counter"}{$round_name} > 7) {
+					$results{$entry_id}{$round_name} .= "\\newline\n";
+					undef $results{$entry_id}{"counter"}{$round_name};
+					$results{$entry_id}{"divide"}{$round_name}++
+				}
+			}
+
+			$round_type{"type"}{$round_name} = $round_type;
+
+			$round_type{$round_name} = (
+				length($results{$entry_id}{$round_name})/ $results{$entry_id}{"divide"}{$round_name})
+				if $round_type{$round_name} <
+				(length($results{$entry_id}{$round_name}) / $results{$entry_id}{"divide"}{$round_name});
+
+			if ($pbye || $bbye) {
+				$results{$entry_id}{$round_name} = "BYE";
+			} elsif ($forfeit) {
+				$results{$entry_id}{$round_name} = "FFT";
+			} elsif (defined $winloss_value) {
+				$results{$entry_id}{$round_name} .= "W" if $winloss_value == 1;
+				$results{$entry_id}{$round_name} .= "L" if $winloss_value == 0;
+			} elsif ($rank_value) {
+
+				if (index($rank_value, "-") != -1) {
+					my ($id, $val) = split(/-/, $rank_value);
+					$rank_value = $val;
+				}
+				$results{$entry_id}{$round_name} .= $rank_value;
+			}
+
+			unless ($tourn_settings->{nsda_nats}) {
+				if ($point_value) {
+
+					if (index($point_value, " ") != -1) {
+						my ($first, $second) = split(/\ /, $point_value);
+						undef $point_value;
+						my ($id, $val) = split(/-/, $first);
+						$point_value = $val;
+						($id, $val) = split(/-/, $second);
+						$point_value .= ', '. $val;
+
+					} elsif (index($point_value, "-") != -1) {
+
+						my ($id, $val) = split(/-/, $point_value);
+						$point_value = $val;
+					}
+					$results{$entry_id}{$round_name} .= "/".$point_value;
+				}
+			}
+
+			$max_round = $round_name if $max_round < $round_name;
+			$code_length = length($entry_code) if $code_length < length($entry_code);
+
+			$name_length = length($entry_name) if $name_length < length($entry_name);
+
+		}
+
+		my $school_length = 20;
+
+		if ($tourn_settings->{nsda_nats}) {
+			$name_length -= 15;
+		} else {
+			$code_length = $code_length * .8;
+			$name_length = $name_length * .8;
+		}
+
+		print TEXOUT "\\Large \\textsb{".$event->name."} \\hfill \\textsb{Scores} \n";
+		print TEXOUT "\\medskip\n";
+		print TEXOUT "\\newline\n";
+
+		my $tabular =  "\\begin{tabular}{";
+		$tabular .= "p{".($code_length )."ex}" if $show_codes;
+		$tabular .= "p{".($name_length )."ex}";
+		$tabular .= "p{".($school_length)."ex}";
 
 		if ($tourn_settings->{ncfl}) {
-			print TEXOUT "\\truncate{.95in}{".Tab::texify($results{$entry}{"region_name"})."} ";
-		} else {
-			print TEXOUT "\\scriptsize ".Tab::texify($results{$entry}{"school_state"});
+			$tabular .= "p{1in}";
+		} elsif ($tourn_settings->{nsda_nats}) {
+			#states
+			$tabular .= "p{.1in}";
 		}
 
-		foreach my $round_name (1 ..$max_round) {
-			print TEXOUT "&\\tiny \\tt ".$results{$entry}{$round_name};
-		}
-		print TEXOUT "\\end{tabular}\n";
+		my $factor = 1 if $event->type eq "debate";
 
-		if ($take_steps) {
-			if ($twostep++ % 2) {
+		foreach my $round (1 .. $max_round) {
+
+			if ($tourn_settings->{nsda_nats}) {
+
+				if (
+					$round_type{"type"}{$round} eq "prelim"
+					|| $round_type{"type"}{$round} eq "highlow"
+					|| $round_type{"type"}{$round} eq "highhigh"
+				) {
+					$tabular .= "p{".($round_type{$round} - 1)."ex}";
+				} elsif ($round_type{$round})  {
+					$tabular .= "p{".($round_type{$round} + 1)."ex}";
+				} else {
+					$tabular .= "p{1ex}";
+				}
+
+			} else {
+
+				if (
+					$round_type{"type"}{$round} eq "prelim"
+					|| $round_type{"type"}{$round} eq "highlow"
+					|| $round_type{"type"}{$round} eq "highhigh"
+				) {
+					$tabular .= "p{".($round_type{$round} + 4)."ex}";
+				} elsif ($round_type{$round})  {
+					$tabular .= "p{".($round_type{$round})."ex}";
+				} else {
+					$tabular .= "p{2ex}";
+				}
+			}
+		}
+
+		$tabular .= "}\n";
+
+		print TEXOUT "\\raggedright\n";
+		print TEXOUT "\\".$fontsize."\n";
+
+		my $switch = 1;
+		my $twostep;
+		my $take_steps;
+
+		if ($max_round < 4) {
+			$take_steps++;
+		}
+
+		my @entries = keys %results;
+
+		@entries = sort {$results{$a}{"entry_code"} <=> $results{$b}{"entry_code"}} @entries;
+
+		if ($tourn_settings->{nsda_nats}) {
+			@entries = sort {
+				$results{$a}{"school_state"} cmp $results{$b}{"school_state"}
+				|| $results{$a}{"school_name"} cmp $results{$b}{"school_name"}
+				|| $results{$a}{"entry_name"} cmp $results{$b}{"entry_name"}
+			} @entries;
+		}
+
+		foreach my $entry (@entries) {
+
+			print TEXOUT $tabular;
+			print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch % 2;
+			print TEXOUT "\\scriptsize ".Tab::texify($results{$entry}{"entry_code"})." & " if $show_codes;
+			print TEXOUT "\\scriptsize ".Tab::texify($results{$entry}{"entry_name"})." & ";
+			print TEXOUT "\\scriptsize ".Tab::texify($results{$entry}{"school_name"})." ";
+
+			if ($tourn_settings->{ncfl}) {
+				print TEXOUT " & \\truncate{.95in}{".Tab::texify($results{$entry}{"region_name"})."} ";
+			} elsif ($tourn_settings->{nsda_nats}) {
+				print TEXOUT " & \\scriptsize ".Tab::texify($results{$entry}{"school_state"});
+			}
+
+			foreach my $round_name (1 ..$max_round) {
+				print TEXOUT " & \\tiny \\tt ".$results{$entry}{$round_name};
+			}
+			print TEXOUT "\\end{tabular}\n";
+
+			if ($take_steps) {
+				if ($twostep++ % 2) {
+					$switch++;
+					print TEXOUT "\\newline\n";
+				}
+			} else {
 				$switch++;
 				print TEXOUT "\\newline\n";
 			}
-		} else {
-			$switch++;
-			print TEXOUT "\\newline\n";
 		}
+
+		print TEXOUT "\\newpage\n";
 	}
+
+	$dbh->disconnect();
 
     $m->comp("/funclib/printout.mas",
         tourn     => $tourn,
