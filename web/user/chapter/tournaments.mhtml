@@ -31,41 +31,140 @@
 		$m->redirect("/user/chapter/settings.mhtml?chapter_id=".$chapter->id."&err=$err");
 	}
 
+	my $dbh = Tab::DBI->db_Main();
 	my $now = DateTime->now;
+	my $nowstring = DateTime::Format::MySQL->format_datetime($now);
+	$nowstring =~ s/[\D_]//g;
 
 	my $search_start = $now->clone;
-	$search_start->subtract(days => 14);
+	$search_start->subtract(days => 7);
 
 	my $search_start_string = DateTime::Format::MySQL->format_datetime($search_start);
-
 	my $now_string = DateTime::Format::MySQL->format_datetime($now);
 
-	Tab::Tourn->columns(TEMP => "school_onsite");
-
-	Tab::Tourn->set_sql("by_entered_tourn", "
-		select distinct tourn.*, school.id as schoolid, school.onsite as school_onsite
-			from (school, tourn)
-			where school.chapter = ?
-			and school.tourn = tourn.id
-			and tourn.end > ?
-			and tourn.hidden != 1
-
-			and not exists (
-				select tourn_setting.id
-				from tourn_setting
-				where tourn_setting.tag = 'ncfl'
-				and tourn_setting.tourn = tourn.id
-			)
-
-			order by tourn.start, tourn.name
-		"
-	);
-
-	my @existing_tourns = Tab::Tourn->search_by_entered_tourn($chapter->id, $search_start_string);
-
-	my $dbh = Tab::DBI->db_Main();
-
 	my $sth = $dbh->prepare("
+		select
+			tourn.id,
+			tourn.name,
+				CONVERT_TZ(tourn.start, '+00:00', tourn.tz),
+				CONVERT_TZ(tourn.end, '+00:00', tourn.tz),
+			tourn.tz,
+				CONVERT_TZ(tourn.reg_start, '+00:00', tourn.tz),
+				CONVERT_TZ(tourn.reg_end, '+00:00', tourn.tz),
+			tourn.city, tourn.state, tourn.country,
+			school.id, school.name, school.onsite,
+			onsite_registration.value,
+				CONVERT_TZ(onsite_starts.value_date, '+00:00', tourn.tz),
+				CONVERT_TZ(onsite_ends.value_date, '+00:00', tourn.tz)
+
+		from (tourn, school)
+
+			left join tourn_setting onsite_registration
+				on onsite_registration.tag = 'onsite_registration'
+				and onsite_registration.tourn = tourn.id
+
+			left join tourn_setting onsite_starts
+				on onsite_starts.tag = 'onsite_starts'
+				and onsite_starts.tourn = tourn.id
+
+			left join tourn_setting onsite_ends
+				on onsite_ends.tag = 'onsite_ends'
+				and onsite_ends.tourn = tourn.id
+
+		where tourn.end > ?
+			and tourn.hidden != 1
+			and tourn.id = school.tourn
+			and school.chapter = ?
+
+		and not exists (
+			select district.id
+				from tourn_setting district
+			where district.tourn = tourn.id
+				and district.tag = 'nsda_district'
+		)
+
+		order by tourn.start, tourn.name
+	");
+
+	$sth->execute($search_start_string, $chapter->id);
+
+	my %registered;
+
+	while (
+		my (
+			$id,
+			$tourn_name, $tourn_start, $tourn_end, $tourn_tz,
+			$tourn_reg_start, $tourn_reg_end,
+			$tourn_city, $tourn_state, $tourn_country,
+			$school_id, $school_name, $school_onsite,
+			$onsite_reg,
+			$onsite_start,
+			$onsite_end
+		) = $sth->fetchrow_array()
+	) {
+
+		$registered{$id}{"name"}         = $tourn_name;
+		$registered{$id}{"start"}        = $tourn_start;
+		$registered{$id}{"end"}          = $tourn_end;
+		$registered{$id}{"tz"}           = $tourn_tz;
+		$registered{$id}{"reg_start"}    = $tourn_reg_start;
+		$registered{$id}{"reg_end"}      = $tourn_reg_end;
+		$registered{$id}{"city"}         = $tourn_city;
+		$registered{$id}{"start"}        = $tourn_start;
+		$registered{$id}{"country"}      = $tourn_country;
+		$registered{$id}{"school"}       = $school_id;
+		$registered{$id}{"onsite"}       = $school_onsite;
+		$registered{$id}{"onsite_reg"}   = $onsite_reg;
+		$registered{$id}{"onsite_start"} = $onsite_start;
+		$registered{$id}{"onsite_end"}   = $onsite_end;
+
+		$tourn_start =~ s/[\D_]//g;
+		$registered{$id}{"startsort"} = $tourn_start;
+
+		$tourn_end =~ s/[\D_]//g;
+		$registered{$id}{"endsort"} = $tourn_end;
+
+		$tourn_reg_end =~ s/[\D_]//g;
+		$registered{$id}{"reg_endsort"} = $tourn_reg_end;
+
+		$onsite_end =~ s/[\D_]//g;
+		$registered{$id}{"onsite_endsort"} = $onsite_end;
+
+		$onsite_start =~ s/[\D_]//g;
+		$registered{$id}{"onsite_startsort"} = $onsite_start;
+	}
+
+	$sth->finish();
+
+	$sth = $dbh->prepare("
+		select tourn.id, round.id, entry.school as strikeschool
+			from round, round_setting, panel, ballot, entry, school, tourn
+		where entry.school = school.id
+			and school.chapter = ?
+			and entry.id = ballot.entry
+			and ballot.panel = panel.id
+			and panel.bye != 1
+			and panel.round = round.id
+			and round.id = round_setting.round
+			and round_setting.tag = 'strikes_published'
+			and round.published != 1
+			and round_setting.value = 1
+			and tourn.id = school.tourn
+			and tourn.start < now()
+		order by round.start_time
+	");
+
+	$sth->execute($chapter->id);
+
+	while (
+		my (
+			$tourn_id, $round_id, $school_id
+		) =  $sth->fetchrow_array()
+	) {
+		$registered{$tourn_id}{"strikes"}++;
+	}
+
+	$sth = $dbh->prepare("
 		select
 			tourn.id, tourn.name, tourn.city, tourn.state, tourn.country,
 				CONVERT_TZ(tourn.start, '+00:00', tourn.tz),
@@ -165,45 +264,72 @@
 			$open_tourns{$tourn_id}{$tag} =~ s/^0//g;
 			$open_tourns{$tourn_id}{$tag} =~ s/\/0/\//g;
 		}
-
 	}
 
-	my $districts;
+	$sth->finish();
 
-	if ($chapter->district) {
-		($districts) = $m->comp(
-			"/funclib/district_tourns.mas",
-			district => $chapter->district,
-			open     => 1,
-			tabroom  => 1
-		);
+	my %districts;
 
-		if ($districts) {
+	if ($chapter->district > 0) {
 
-			$open_tourns{$districts->id}{"name"}  = $districts->name;
-			$open_tourns{$districts->id}{"start"} = $districts->start->month."/".$districts->start->day;
-			$open_tourns{$districts->id}{"end"}   = $districts->end->month."/".$districts->end->day;
+		my $sth = $dbh->prepare("
+			select
+				tourn.id, tourn.name, tourn.start, tourn.end,
+				weekend.id, weekend.name, weekend.start, weekend.end,
+				weekend.reg_start, weekend.reg_end,
+				weekend.city, weekend.state,
+				school.id
 
-			$open_tourns{$districts->id}{"start_sort"} = 1;
+			from (tourn, tourn_setting district, weekend)
 
-			foreach my $weekend ($districts->weekends) {
+				left join school on school.tourn = tourn.id and school.chapter = ?
 
-				unless ($weekend->state eq $open_tourns{$districts->id}{state}) {
-					$open_tourns{$districts->id}{state} .= ", " unless
-						$open_tourns{$districts->id}{state};
+			where tourn.end > now()
+				and tourn.id = district.tourn
+				and district.tag = 'nsda_district'
+				and district.value = ?
+				and weekend.tourn =  tourn.id
+		");
 
-					$open_tourns{$districts->id}{state} .= $weekend->state;
-				}
+		$sth->execute($chapter->id, $chapter->district);
 
-				unless ($weekend->city eq $open_tourns{$districts->id}{city}) {
-					$open_tourns{$districts->id}{city} .= ", " unless
-						$open_tourns{$districts->id}{city};
+		while (
+			my (
+				$tid, $name, $start, $end,
+				$wid, $w_name, $w_start, $w_end,
+				$w_reg_start, $w_reg_end,
+				$w_city, $w_state,
+				$school
+			) = $sth->fetchrow_array()
+		) {
 
-					$open_tourns{$districts->id}{city} .= $weekend->city;
-				}
-			}
+			$districts{"id"}     = $tid;
+			$districts{"name"}   = $name;
+			$districts{"start"}  = $start;
+			$districts{"end"}    = $end;
+			$districts{"school"} = $school;
 
-			$open_tourns{$districts->id}{circuits} = "NSDA";
+			$districts{'weekends'}{$wid}{"name"}      = $w_name;
+			$districts{'weekends'}{$wid}{"start"}     = $w_start;
+			$districts{'weekends'}{$wid}{"end"}       = $w_end;
+			$districts{'weekends'}{$wid}{"reg_end"}   = $w_reg_end;
+			$districts{'weekends'}{$wid}{"reg_start"} = $w_reg_start;
+			$districts{'weekends'}{$wid}{"city"}      = $w_city;
+			$districts{'weekends'}{$wid}{"state"}     = $w_state;
+
+			$districts{"startsort"}                       = $start;
+			$districts{"endsort"}                         = $end;
+			$districts{'weekends'}{$wid}{"startsort"}     = $w_start;
+			$districts{'weekends'}{$wid}{"endsort"}       = $w_end;
+			$districts{'weekends'}{$wid}{"reg_endsort"}   = $w_reg_end;
+			$districts{'weekends'}{$wid}{"reg_startsort"} = $w_reg_start;
+
+			$districts{"startsort"}                       =~ s/[\D_]//g;
+			$districts{"endsort"}                         =~ s/[\D_]//g;
+			$districts{'weekends'}{$wid}{"startsort"}     =~ s/[\D_]//g;
+			$districts{'weekends'}{$wid}{"endsort"}       =~ s/[\D_]//g;
+			$districts{'weekends'}{$wid}{"reg_endsort"}   =~ s/[\D_]//g;
+			$districts{'weekends'}{$wid}{"reg_startsort"} =~ s/[\D_]//g;
 		}
 	}
 
@@ -229,56 +355,192 @@
 
 		<& /funclib/tablesorter.mas, table => "moi" &>
 
+%		if (keys %registered) {
+
+			<span class="twothirds nospace">
+				<h4>Existing tournament registrations</h4>
+			</span>
+
+			<span
+				class="third nospace rightalign"
+				id="moi_buttonarea"
+			>
+			</span>
+
+			<table id="moi">
+
+				<thead>
+					<tr class="yellowrow">
+						<th class="smallish">
+							Dates
+						</th>
+
+						<th class="smallish">
+							Name
+						</th>
+
+						<th class="smallish">
+							Location
+						</th>
+
+						<th class="smallish">
+							Due
+						</th>
+
+						<th class="nosort smallish">
+							Registration
+						</th>
+
+						<th class="nosort">
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
 <%perl>
 
-			my %used;
+					foreach my $tid (
+						sort {
+							$registered{$a}{"startsort"} <=> $registered{$b}{"startsort"}
+							|| $registered{$a}{"name"} cmp $registered{$b}{"name"}
+						} keys %registered
+					) {
 
-			if (@existing_tourns) {
-
-				Tab::Round->columns(TEMP => "strikeschool");
-
-				Tab::Round->set_sql( school_strikes => "
-					select round.*, entry.school as strikeschool
-						from round, round_setting, panel, ballot, entry, school
-					where entry.school = school.id
-						and school.chapter = ?
-						and entry.id = ballot.entry
-						and ballot.panel = panel.id
-						and panel.bye != 1
-						and panel.round = round.id
-						and round.id = round_setting.round
-						and round_setting.tag = 'strikes_published'
-						and round.published != 1
-						and round_setting.value = 1
-					order by round.start_time
-				");
-
-				my @cards = Tab::Round->search_school_strikes($chapter->id);
-				my %strike_cards = map {$_->strikeschool => 1} @cards;
+						my $one = substr($registered{$tid}{"start"}, 8, 2);
+						my $two = substr($registered{$tid}{"end"}, 8, 2);
 </%perl>
 
-				<span class="twothirds nospace">
-					<h4>Existing tournament registrations</h4>
-				</span>
+						<tr>
+							<td class="smaller nowrap centeralign">
+								<span class="hidden"><% $registered{$tid}{"startsort"} %></span>
+								<& "/funclib/showdate.mas",
+									string => $registered{$tid}{"start"},
+									length => "shortest"
+								&>
+%								if ($one ne $two) {
+									&ndash;
+									<& "/funclib/showdate.mas",
+										string => $registered{$tid}{"end"},
+										length => "shortest"
+									&>
+%								}
+							</td>
 
-				<span
-					class="third nospace rightalign"
-					id="moi_buttonarea"
-				>
-				</span>
+							<td class="nospace">
+								<a
+									class="white padmore padtop padbottom smallish padleft"
+									href="/user/enter/entry.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $tid %>"
+								><% $registered{$tid}{"name"} %></a>
+							</td>
 
-				<table cellpadding="2" id="moi">
+							<td width="15%" class="smallish leftalign">
+								<% $registered{$tid}{"city"} ? $registered{$tid}{"city"}."," : "" %>
+								<% $registered{$tid}{"state"} ? $registered{$tid}{"state"} : $registered{$tid}{"country"} %>
+							</td>
 
+							<td width="8%" class="centeralign smallish">
+								<span class="hidden"><% $registered{$tid}{"reg_endsort"} %></span>
+								<& "/funclib/showdate.mas",
+									string => $registered{$tid}{"reg_end"},
+									length => "shortest"
+								&>
+							</td>
+
+							<td class="centeralign nospace padleft padright">
+%								if ($nowstring < $registered{$tid}{"endsort"}) {
+									<a
+										class="smallish buttonwhite bluetext hover invert"
+										href="/user/enter/entry.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $tid %>"
+									>
+										Entries
+									</a>
+%								}
+
+							</td>
+
+							<td class="centeralign nospace padleft padright">
+%								if ($registered{$tid}{"strikes"}) {
+									<a
+										href  = "/user/enter/strike_cards.mhtml"
+										class = "smallish buttonwhite orangetext invert"
+									>Strike Cards</a>
+
+									<br />
+<%perl>
+								}
+
+								if (
+									$registered{$tid}{"onsite_reg"}
+									&& (not defined $registered{$tid}{"onsite"})
+									&& ($registered{$tid}{"onsite_startsort"} < $nowstring)
+									&& ($registered{$tid}{"onsite_endsort"} > $nowstring)
+								) {
+</%perl>
+									<a
+										class="smallish buttonwhite redtext invert hover"
+										href="/user/enter/onsite.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $tid %>">
+										Confirm Onsite
+									</a>
+<%perl>
+								}
+
+								if (
+									($nowstring > $registered{$tid}{"startsort"})
+									&& ($nowstring < $registered{$tid}{"endsort"})
+								) {
+</%perl>
+									<a
+										class="smallish buttonwhite greentext hover invert"
+										href="/user/enter/dashboard.mhtml?school_id=<% $registered{$tid}{"school"} %>"
+									>
+										Dashboard
+									</a>
+									<br />
+
+%								} elsif ($nowstring > $registered{$tid}{"endsort"}) {
+									<a
+										class="smallish buttonwhite graytext hover invert"
+										href="/user/results/report.mhtml?school_id=<% $registered{$tid}{"school"} %>">
+										Results
+									</a>
+%								}
+							</td>
+						</tr>
+%					}
+
+				</tbody>
+			</table>
+%		}
+
+%			if (scalar %districts) {
+
+%				my $tid = $districts{"id"};
+
+				<div class="martopmore">
+					<span class="twothirds nospace">
+						<h5><% $districts{'name'} %></h5>
+					</span>
+
+					<span class="third rightalign">
+						<a
+							class	= "smallish buttonwhite greentext hover invert"
+							href	= "/user/enter/nsda_roster_check.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $tid %>">
+							Check Student Eligibility
+						</a>
+					</span>
+				</div>
+
+				<& /funclib/tablesorter.mas, table => "districts", nobuttons => 1 &>
+
+				<table id="districts">
 					<thead>
-
 						<tr class="yellowrow">
-
 							<th class="smallish">
 								Dates
 							</th>
 
 							<th class="smallish">
-								Name
+								Weekend Name
 							</th>
 
 							<th class="smallish">
@@ -289,153 +551,126 @@
 								Due
 							</th>
 
-							<th class="nosort">
+							<th class="nosort smallish">
 								Registration
 							</th>
 
 							<th class="nosort">
 							</th>
-
 						</tr>
-
 					</thead>
+
 					<tbody>
 <%perl>
+						foreach my $wid (
+							sort {
+								$districts{"weekends"}{$a}{"startsort"} <=> $districts{"weekends"}{$b}{"startsort"}
+								|| $districts{"weekends"}{$a}{"name"} cmp $districts{"weekends"}{$b}{"name"}
+							} keys %{$districts{'weekends'}}
+						) {
 
-					foreach my $et (@existing_tourns) {
-
-						next if $used{$et->id}++;
-
-						unless ($et->schoolid) {
-
-							my $sch = Tab::School->search(
-								tourn   => $et->id,
-								chapter => $chapter_id
-							)->first;
-
-							$et->schoolid($sch->id);
-						}
-
-						my $start = $et->start;
-						my $end = $et->end;
-						my $reg_end = $et->reg_end;
-
-						$start->set_time_zone($tz);
-						$end->set_time_zone($tz);
-						$reg_end->set_time_zone($tz);
+							my $one = substr($districts{"weekends"}{$wid}{"start"}, 8, 2);
+							my $two = substr($districts{"weekends"}{$wid}{"end"}, 8, 2);
 </%perl>
 
-						<tr>
+							<tr>
+								<td class="smaller nowrap centeralign">
+									<span class="hidden"><% $districts{"weekends"}{$wid}{"startsort"} %></span>
+									<& "/funclib/showdate.mas",
+										string => $districts{"weekends"}{$wid}{"start"},
+										length => "shortest"
+									&>
+%									if ($one ne $two) {
+										&ndash;
+										<& "/funclib/showdate.mas",
+											string => $districts{"weekends"}{$wid}{"end"},
+											length => "shortest"
+										&>
+%									}
+								</td>
 
-							<td class="smaller nowrap centeralign">
-								<span class="hidden"><% $start->epoch %></span>
-								<% Tab::niceshortdate($start) %>
-								<% ($start->day != $end->day) ? " - ".Tab::niceshortdate($end) : "" %>
-							</td>
-
-							<td class="nospace">
-								<a
-									class="white padmore padtop padbottom smallish padleft"
-									href="/user/enter/entry.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $et->id %>"
-								><% $et->name %></a>
-							</td>
-
-							<td width="15%" class="smallish leftalign">
-								<% $et->city ? $et->city."," : "" %>
-								<% $et->state ? $et->state : $et->country %>
-							</td>
-
-							<td width="8%" class="centeralign smallish">
-								<span class="hidden"><% $reg_end->epoch %></span>
-								<% Tab::niceshortdate($reg_end) %>
-							</td>
-
-							<td class="centeralign nospace padleft padright">
-
-%								if ($now < $end) {
+								<td class="nospace">
 									<a
-										class="smallish buttonwhite bluetext hover invert"
-										href="/user/enter/entry.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $et->id %>">
-										Entries
-									</a>
-%								}
+										class="white padmore padtop padbottom smallish padleft"
+										href="/user/enter/entry.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $tid %>"
+									><% $districts{"weekends"}{$wid}{"name"} %></a>
+								</td>
 
-							</td>
+								<td width="15%" class="smallish leftalign">
+									<% $districts{"weekends"}{$wid}{"city"} ? $districts{"weekends"}{$wid}{"city"}."," : "" %>
+									<% $districts{"weekends"}{$wid}{"state"} ? $districts{"weekends"}{$wid}{"state"} : "" %>
+								</td>
 
-							<td class="centeralign nospace padleft padright">
-%								if ($et->id == $districts ){
-									<a
-										class	= "smallish buttonwhite greentext hover invert"
-										href	= "/user/enter/nsda_roster_check.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $et->id %>">
-										NSDA Eligibility
-									</a>
-									<br />
-%								}
-%								if ($strike_cards{$et->schoolid}) {
+								<td width="8%" class="centeralign smallish">
+									<span class="hidden"><% $districts{"weekends"}{$wid}{"reg_endsort"} %></span>
+									<& "/funclib/showdate.mas",
+										string => $districts{"weekends"}{$wid}{"reg_end"},
+										length => "shortest"
+									&>
+								</td>
 
-									<a
-										href  = "/user/enter/strike_cards.mhtml"
-										class = "smallish buttonwhite orangetext invert"
-									>Strike Cards</a>
+								<td class="centeralign nospace padleft padright">
+%									if ($nowstring < $districts{"weekends"}{$wid}{"reg_startsort"}) {
+										<div class="smallish centeralign padvertmore marno">
+											Opens
+											<& "/funclib/showdate.mas",
+												string => $districts{"weekends"}{$wid}{"reg_start"},
+												length => "shortest"
+											&>
+										</div>
+%									} elsif ($nowstring < $districts{"weekends"}{$wid}{"endsort"}) {
+										<a
+											class="smallish buttonwhite bluetext hover invert"
+											href="/user/enter/entry.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $tid %>"
+										>
+											Entries
+										</a>
+%									}
 
-									<br />
+								</td>
+
+								<td class="centeralign nospace padleft padright">
 <%perl>
-								}
-
-								my $onsited;
-
-								if ( $et->school_onsite != 1 && $et->setting("onsite_registration")) {
-
-									my $onsite_starts = $et->setting("onsite_starts");
-									$onsite_starts->set_time_zone($tz) if $onsite_starts;
-
-									my $onsite_ends = $et->setting("onsite_ends");
-									$onsite_ends->set_time_zone($tz) if $onsite_ends;
-
-									if ($onsite_ends > $now && $now > $onsite_starts && $end > $now) {
+									if (
+										$districts{"weekends"}{$wid}{"onsite_reg"}
+										&& (not defined $districts{"weekends"}{$wid}{"onsite"})
+										&& ($districts{"weekends"}{$wid}{"onsite_startsort"} < $nowstring)
+										&& ($districts{"weekends"}{$wid}{"onsite_endsort"} > $nowstring)
+									) {
 </%perl>
 										<a
-											class="smallish buttonwhite <% $et->school_onsite ? "greentext" : "redtext" %> invert hover"
-											href="/user/enter/onsite.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $et->id %>">
-											Confirm<% $et->school_onsite ? "ed" : ""%> Onsite
+											class="smallish buttonwhite redtext invert hover"
+											href="/user/enter/onsite.mhtml?chapter_id=<% $chapter->id %>&tourn_id=<% $tid %>">
+											Confirm Onsite
 										</a>
-
-										<br />
 <%perl>
 									}
-								}
 
-								unless ($onsited) {
-
-									if ($now > $start && $now < $end) {
+									if (
+										($nowstring > $districts{"weekends"}{$wid}{"startsort"})
+										&& ($nowstring < $districts{"weekends"}{$wid}{"endsort"})
+									) {
 </%perl>
 										<a
 											class="smallish buttonwhite greentext hover invert"
-											href="/user/enter/dashboard.mhtml?school_id=<% $et->schoolid %>"
+											href="/user/enter/dashboard.mhtml?school_id=<% $districts{"weekends"}{$wid}{"school"} %>"
 										>
 											Dashboard
 										</a>
 										<br />
 
-%									} elsif ($now > $end) {
+%									} elsif ($nowstring > $districts{"weekends"}{$wid}{"endsort"}) {
 										<a
 											class="smallish buttonwhite graytext hover invert"
-											href="/user/results/report.mhtml?school_id=<% $et->schoolid %>">
+											href="/user/results/report.mhtml?school_id=<% $districts{"weekends"}{$wid}{"school"} %>">
 											Results
 										</a>
 %									}
-%								}
-
-							</td>
-
-						</tr>
-%					}
-
+								</td>
+							</tr>
+%						}
 					</tbody>
 				</table>
-%			}
-
-%			if (%open_tourns) {
 
 				<div class="full martopmuchmore nospace">
 
@@ -515,7 +750,7 @@
 
 						<tr class="yellowrow">
 
-							<th class="smaller nosort">
+							<th class="smallish nosort">
 								Hide
 							</th>
 
@@ -534,12 +769,13 @@
 							<th class="smallish">
 								Location
 							</th>
+
 							<th class="smallish">
 								Circuits
 							</th>
 
 							<th class="smallish">
-								Reg Close
+								Due
 							</th>
 
 							<th class="nosort">
@@ -559,7 +795,7 @@
 						} keys %open_tourns
 					) {
 
-						next if $used{$tourn_id}++;
+						next if $registered{$tourn_id}++;
 </%perl>
 
 						<tr
@@ -648,7 +884,7 @@
 				</table>
 %			}
 
-%			unless (%open_tourns || @existing_tourns) {
+%			unless (%open_tourns || (keys %registered)) {
 
 %				if ($m->comp('/funclib/chapter_circuits.mas', chapter => $chapter)) {
 
@@ -720,3 +956,4 @@
 
 	</div>
 
+%	$dbh->disconnect();
