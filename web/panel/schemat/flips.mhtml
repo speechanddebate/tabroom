@@ -14,6 +14,9 @@
     $m->clear_buffer();
     $r->content_type('application/json');
 
+	my $dbh = Tab::DBI->db_Main();
+	my $now = DateTime->now();
+
     unless ($target_id) {
 
 		if ($ARGS{"auto"}) {
@@ -32,52 +35,194 @@
 	my $limit;
 	my @panels;
 	my $event;
+	my %event_settings;
 	my $only;
 	my $panel;
 	my $round;
 
-	if ($setting_name eq "cancel_aq") {
+	my %response = ();
 
-		foreach my $aq (Tab::Autoqueue->search(
-			round => $target_id,
-			tag   => "flip"
-		)) {
-			$aq->delete();
+	if ($property_name eq "reset_flips") {
+
+		$round = Tab::Round->retrieve($target_id);
+		$event = $round->event;
+
+		my $delete_sth = $dbh->prepare("
+			delete panel_setting.*
+				from panel_setting, panel
+			where panel_setting.tag like 'flip%'
+				and panel_setting.panel = panel.id
+				and panel.round = ?
+		");
+
+		$delete_sth->execute(int($target_id));
+		$delete_sth->finish();
+
+		$delete_sth = $dbh->prepare("
+			delete round_setting.*
+				from round_setting, round
+			where round_setting.tag like 'flip%'
+				and round_setting.round = round.id
+				and round.id = ?
+		");
+
+		$delete_sth->execute(int($target_id));
+		$delete_sth->finish();
+
+		$response{"error"}   = JSON::false;
+		$response{"message"} = "All flips reset and deleted";
+
+	} elsif (index($property_name, "cancel_aq") != -1) {
+
+		$round = Tab::Round->retrieve($target_id);
+		$event = $round->event;
+		my @setvalues;
+
+		if ($property_name eq "cancel_aq_all") {
+
+			my $sth = $dbh->prepare("
+				delete from autoqueue where tag like 'flip%' and round = ?
+			");
+
+			$sth->execute($target_id);
+			$sth->finish();
+			$response{"message"} = "All ";
+
+			push @setvalues, ({ id => "autoqueue_all", content => "" });
+
+			foreach my $flight (1 .. $round->flighted) {
+				push @setvalues, ({ id => "autoqueue_".$flight, content => "" });
+			}
+
+		} else {
+
+			my $round = Tab::Round->retrieve($target_id);
+
+			foreach my $flight (1 .. $round->flighted) {
+
+				if ($property_name eq "cancel_aq_".$flight) {
+
+					foreach my $aq (Tab::Autoqueue->search(
+						round => $target_id,
+						tag   => "flip_".$flight
+					)) {
+						$aq->delete();
+					}
+
+					$response{"message"} = "Flight ".$flight;
+					push @setvalues, ({ id => "autoqueue_".$flight, content => "" });
+				}
+			}
 		}
 
-		if ($ARGS{"auto"}) {
-			return "No section found for ID $target_id";
+		$response{"error"}   = JSON::false;
+		$response{"message"} .= " automatic flips canceled";
+
+		if (scalar @setvalues) {
+			$response{"setvalue"} = \@setvalues;
 		}
 
-		$m->print('{
-			"error"   : false,
-			"destroy" : "autoqueue",
-			"message" : "No section found for ID '.$target_id.'"
-		}');
+	} elsif (index($property_name, "autoqueue") != -1) {
 
-		$m->abort();
+		$round = Tab::Round->retrieve($target_id);
+		$event = $round->event;
 
-	} elsif ($setting_name eq "cancel_aq2") {
+		my $dt = eval {
+			return Tab::dtme($round->timeslot->start->mdy('/'), $property_value, $tz);
+		};
 
-		foreach my $aq (Tab::Autoqueue->search(
-			round => $target_id ,
-			tag   => "flip_2"
-		)) {
-			$aq->delete();
+		my @setvalues;
+
+		if ($dt && $dt <= $now) {
+
+			$response{"error"} = JSON::true;
+			$response{"message"} = "You may not schedule an auto-flip for the past";
+
+			if ($property_name eq "autoqueue_all") {
+
+				push @setvalues, ({ id => "autoqueue_all", content => "" });
+
+			} else {
+
+				foreach my $flight (1 .. $round->flighted) {
+					push @setvalues, ({ id => "autoqueue_".$flight, content => "" });
+				}
+			}
+
+		} elsif ($dt) {
+
+			if ($property_name eq "autoqueue_all") {
+
+				my $sth = $dbh->prepare("
+					delete from autoqueue where tag like 'flip%' and round = ?
+				");
+
+				$sth->execute($target_id);
+				$sth->finish();
+
+				Tab::Autoqueue->create({
+					round     => $target_id,
+					tag       => "flip",
+					active_at => $dt
+				});
+
+				$response{"message"} = "All ";
+
+				foreach my $flight (1 .. $round->flighted) {
+					push @setvalues, ({ id => "autoqueue_".$flight, content => "" });
+				}
+
+			} else {
+
+				foreach my $flight (1 .. $round->flighted) {
+
+					if ($property_name eq "autoqueue_".$flight) {
+
+						my $sth = $dbh->prepare("
+							delete from autoqueue where tag = 'flip_".$flight."' and round = ?
+						");
+
+						$sth->execute($target_id);
+
+						$sth = $dbh->prepare("
+							delete from autoqueue where tag = 'flip' and round = ?
+						");
+
+						$sth->execute($target_id);
+
+						$sth->finish();
+
+						Tab::Autoqueue->create({
+							round     => $target_id,
+							tag       => "flip_".$flight,
+							active_at => $dt
+						});
+
+						$response{"message"} = "Flight ".$flight;
+						push @setvalues, ({ id => "autoqueue_all", content => "" });
+					}
+				}
+			}
 		}
-		if ($ARGS{"auto"}) {
-			return "No section found for ID $target_id";
+
+		$dt->set_time_zone($tz);
+
+		if ($response{"error"} eq JSON::true) {
+
+			if (scalar @setvalues) {
+				$response{"errSetValue"} = \@setvalues;
+			}
+
+		} else {
+			$response{"error"}   = JSON::false;
+			$response{"message"} .= " automatic flips set for ".$dt->hms(':');
+
+			if (scalar @setvalues) {
+				$response{"setvalue"} = \@setvalues;
+			}
 		}
 
-		$m->print('{
-			"error"   : false,
-			"destroy" : "aq2",
-			"message" : "No section found for ID '.$target_id.'"
-		}');
-		$m->abort();
-	}
-
-	if ($property_name eq "panel") {
+	} elsif ($property_name eq "panel") {
 
 		$panel = Tab::Panel->retrieve($target_id);
 
@@ -87,32 +232,29 @@
 				return "No section found for ID $target_id";
 			}
 
-			$m->print('{
-				"error"   : true,
-				"message" : "No section found for ID '.$target_id.'"
-			}');
-			$m->abort();
-		}
+			$response{"error"}   = JSON::true;
+			$response{"message"} = "No section found for ID '.$target_id.'";
 
-		if ($panel->bye) {
+		} else {
 
-			if ($ARGS{"auto"}) {
-				return "Section $target_id is a bye round. No flip done";
+			if ($panel->bye) {
+				if ($ARGS{"auto"}) {
+					return "Section $target_id is a bye round. No flip done";
+				}
+
+				$response{"error"}   = JSON::true;
+				$response{"message"} = "There is no point in flipping a bye round";
 			}
 
-			$m->print('{
-				"error"   : true,
-				"message" : "There is no point in flipping a bye round"
-			}');
-			$m->abort();
+			push @panels, $panel;
+			$limit = " and panel.id = ".$panel->id;
+
+			$round = $panel->round;
+			$event = $round->event;
+			%event_settings = $event->all_settings();
+			$only  = $panel->id;
+
 		}
-
-		push @panels, $panel;
-		$limit = " and panel.id = ".$panel->id;
-
-		$round = $panel->round;
-		$event = $round->event;
-		$only = $panel->id;
 
 	} elsif ($property_name eq "round") {
 
@@ -123,308 +265,321 @@
 			if ($ARGS{"auto"}) {
 				return "No round found for ID $target_id";
 			}
-			$m->print('{ "error": true, "message": "No round found for ID '.$target_id.'"}');
-			$m->abort();
-		}
 
-		$event = $round->event();
-		$limit = " and panel.round = ".$round->id;
+			$response{"error"}   = JSON::true;
+			$response{"message"} = "No round found for ID '.$target_id.'";
 
-		if ($event->setting("flip_split_flights") && int($related_thing) > 0) {
-			push @panels, $round->panels(bye => 0, flight => int($related_thing));
-			$limit .= " and panel.flight = ".int($related_thing);
 		} else {
-			push @panels, $round->panels(bye => 0);
+
+			$event = $round->event();
+			%event_settings = $event->all_settings();
+			$limit = " and panel.round = ".$round->id;
+
+			if ($event_settings{"flip_split_flights"} && int($related_thing) > 0) {
+				push @panels, $round->panels(bye => 0, flight => int($related_thing));
+				$limit .= " and panel.flight = ".int($related_thing);
+			} else {
+				push @panels, $round->panels(bye => 0);
+			}
 		}
 	}
 
 	my %do_me;
 
-	unless ($event->setting("no_side_constraints")) {
-
-		my @clear_panels;
-
-		foreach my $panel (@panels) {
-			my $aff = $m->comp("/funclib/round_elim_dueaff.mas", panel => $panel);
-
-			if ($aff) {
-				next;
-			}
-
-			$do_me{$panel->id}++;
-		}
-	} elsif (@panels) {
-
-		%do_me = map {$_ => 1} @panels;
-	}
-
-	unless (@panels) {
-		if ($ARGS{"auto"}) {
-			return "No sections found in that round to flip";
-		}
-        $m->print('{
-			"error": true,
-			"message": "No sections found for flips"
-		}');
-        $m->abort();
-	}
-
-	unless ($event->setting("flip_online")) {
-		if ($ARGS{"auto"}) {
-			return "This event is not set to enable online flips";
-		}
-        $m->print('{
-			"error": true,
-			"message": "This event is not set to enable online flips"}
-		');
-        $m->abort();
-	}
-
-	my $now = DateTime->now();
-	my $deadline = $now->clone();
-
-	unless ($deadline->second == 0) {
-		$deadline->set( second => 0 );
-		$deadline->add( minutes => 1);
-	}
-
-	my $add_mins = $event->setting("flip_deadline");
-	$add_mins = 5 unless $add_mins > 0;
-	$deadline->add( minutes => $add_mins );
-
-	my $dbh = Tab::DBI->db_Main();
-
-	if ($round
-		&& ($setting_name eq "flip_published" || $setting_name eq "doall")
-	) {
-
-		if ($setting_name eq "doall") {
-			$property_value = 1;
-		}
-
-		$round->setting("flip_published", $property_value);
-
-		if ($setting_name eq "flip_published") {
-			if ($property_value) {
-				if ($ARGS{"auto"}) {
-					return "Flip cards are set to published";
-				}
-
-				$m->print('{
-					"error": false,
-					"message": "Flip cards set to published"
-				}');
-
-				$m->abort();
-
-			} else {
-				if ($ARGS{"auto"}) {
-					return "Flip cards set to NOT published";
-				}
-				$m->print('{
-					"error": false,
-					"message": "Flip cards set to NOT published"
-				}');
-
-				$m->abort();
-			}
-		}
-
-	} elsif ($setting_name eq "deadline_only") {
-
-		my $dt = eval {
-			return Tab::dtme($round->timeslot->start->mdy('/'), $property_value, $tz);
-		};
-
-		my $message;
-		my $error;
-
-		if ($dt) {
-
-			$dt->set_time_zone("UTC");
-
-			my $flight_offset = $event->setting("flight_offset");
-
-			if ($event->setting("flip_split_flights")) {
-				undef $flight_offset;
-			}
-
-			my $sth = $dbh->prepare("update panel set flip_at = ? where id = ?");
-
-			my %flight_cache;
+	unless ($response{"message"} ) {
+		unless ($event_settings{"no_side_constraints"}) {
 
 			foreach my $panel (@panels) {
-
-				next unless $do_me{$panel->id};
-
-				unless ($flight_cache{$panel->flight}) {
-
-					my $new_dt = $dt->clone();
-
-					$new_dt->add( minutes => ($flight_offset * ($panel->flight - 1)));
-
-					my $two_string = DateTime::Format::MySQL->format_datetime($new_dt);
-					$flight_cache{$panel->flight} = $two_string;
+				if ($m->comp("/funclib/round_elim_dueaff.mas", panel => $panel)) {
+					next;
 				}
-
-				my $string = $flight_cache{$panel->flight};
-				$sth->execute($string, $panel->id);
+				$do_me{$panel->id}++;
 			}
 
-			$message = "Deadline set to ".$property_value;
-			$error = "false";
-
-		} else {
-			$error = "true";
-			$message = "Invalid time sent.  Please try again";
+		} elsif (@panels) {
+			%do_me = map {$_ => 1} @panels;
 		}
 
-		$round->setting("flip_at", "date", $dt);
+		unless (@panels) {
 
-		if ($ARGS{"auto"}) {
-			return $message;
+			if ($ARGS{"auto"}) {
+				return "No sections found in that round to flip";
+			}
+
+			$response{"error"}   = JSON::true;
+			$response{"message"} = "No sections found in that round to flip";
 		}
 
-        $m->print('{ "error": '.$error.', "message": "'.$message.'"}');
-        $m->abort();
+		unless ($event_settings{"flip_online"}) {
+
+			if ($ARGS{"auto"}) {
+				return "This event is not set to enable online flips";
+			}
+
+			$response{"error"}   = JSON::true;
+			$response{"message"} = "This event is not set to enable online flips";
+		}
 	}
 
-	my $message;
+	my $deadline;
 
-	unless ($setting_name eq "blast_only") {
+	if ($round && (not defined $response{"message"})) {
 
-		my $sth = $dbh->prepare("
-			select panel.id, aff.entry, neg.entry
-			from panel
-				left join ballot aff on aff.panel = panel.id and aff.side = 1
-				left join ballot neg on neg.panel = panel.id and neg.side = 2
-			where panel.id = panel.id
-				and panel.bye != 1
-				$limit
-				group by panel.id
-		");
+		my $add_mins = $event_settings{"flip_deadline"};
+		my $before   = $event_settings{"flip_before_start"};
 
-		$sth->execute();
+		if ($before) {
 
-		my $delete_sth = $dbh->prepare("
-			delete from panel_setting
-			where panel_setting.tag in ('flip_winner', 'flip_at', 'flip_status')
-			and panel_setting.panel = ?
-		");
+			my $start;
 
-		while (
-			my (
-				$panel_id, $aff_id, $neg_id
-			) = $sth->fetchrow_array()
-		) {
-
-			next unless $do_me{$panel_id};
-
-			my @sides = shuffle ($aff_id, $neg_id);
-			my $winner = shift @sides;
-
-			$delete_sth->execute($panel_id);
-			$delete_sth->finish();
-
-			if ($winner) {
-
-				Tab::PanelSetting->create({
-					panel  => $panel_id,
-					tag    => "flip_winner",
-					value  => $winner
-				});
-
-				Tab::PanelSetting->create({
-					panel      => $panel_id,
-					tag        => "flip_at",
-					value      => "date",
-					value_date => DateTime::Format::MySQL->format_datetime($deadline)
-				});
-
-				Tab::PanelSetting->create({
-					panel => $panel_id,
-					tag   => "flip_status",
-					value => "winner"
-				});
+			if ($round->start_time) {
+				$start = $round->start_time();
+			} else {
+				$start = $round->timeslot->start();
 			}
-		}
 
-		if ($round) {
-
-			$message .= "Flips performed for ".$round->realname." of ".$event->abbr;
-			$round->setting("flipped_at", "date", $deadline);
+			$start->set( second => 0 );
+			$start->subtract( minutes => $before);
 
 		} else {
-			$message .= "Flips performed for ".$round->realname." of ".$event->abbr;
+
+			$deadline = $now->clone();
+
+			unless ($deadline->second == 0) {
+				$deadline->set( second => 0 );
+				$deadline->add( minutes => 1);
+			}
+
+			$add_mins = 5 unless $add_mins > 0;
+			$deadline->add( minutes => $add_mins );
 		}
 
-		if ($setting_name eq "doall"
-			&& (not defined $related_thing)
-			&& (not defined $ARGS{"auto"})
-		) {
+		if ($setting_name eq "flip_published" || $setting_name eq "doall") {
 
-			if ($event->setting("flip_split_flights")) {
+			if ($setting_name eq "doall") {
+				$property_value = 1;
+			}
 
-				my $flight_offset = $event->setting("flight_offset");
+			$round->setting("flip_published", $property_value);
+
+			if ($setting_name eq "flip_published") {
+
+				if ($property_value) {
+
+					if ($ARGS{"auto"}) {
+						return "Flip cards are set to published";
+					}
+
+					$response{"error"}   = JSON::false;
+					$response{"message"} = "Flip cards published";
+
+				} else {
+
+					if ($ARGS{"auto"}) {
+						return "Flip cards unpublished";
+					}
+
+					$response{"error"}   = JSON::false;
+					$response{"message"} = "Flip cards unpublished";
+
+				}
+			}
+
+		} elsif ($setting_name eq "deadline_only") {
+
+			my $dt = eval {
+				my $dtme = Tab::dtme($round->timeslot->start->mdy('/'), $property_value, $tz);
+				$dtme->set_time_zone("UTC");
+				return $dtme;
+			};
+
+			if ($dt && $dt <= $now) {
+
+				$response{"error"} = JSON::true;
+				$response{"message"} = "You may not set the deadline for the past.";
+
+				my @setvalues;
+				push @setvalues, ({ id => "flip_at", content => "" });
+				$response{"errSetValue"} = \@setvalues;
+
+			} elsif ($dt) {
+
+				my $flight_offset;
+
+				if ($event_settings{"flip_split_flights"}) {
+					$flight_offset = $event_settings{"flight_offset"};
+				}
+
+				my $sth = $dbh->prepare("update panel set flip_at = ? where id = ?");
+
+				my %flight_cache;
+
+				foreach my $panel (@panels) {
+
+					next unless $do_me{$panel->id};
+
+					unless ($flight_cache{$panel->flight}) {
+
+						my $new_dt = $dt->clone();
+
+						$new_dt->add( minutes => ($flight_offset * ($panel->flight - 1)));
+
+						my $two_string = DateTime::Format::MySQL->format_datetime($new_dt);
+						$flight_cache{$panel->flight} = $two_string;
+					}
+
+					my $string = $flight_cache{$panel->flight};
+					$sth->execute($string, $panel->id);
+					$sth->finish();
+				}
+
+				$round->setting("flip_round_deadline", "date", DateTime::Format::MySQL->format_datetime($dt));
+
+				$response{"error"}   = JSON::false;
+				$response{"message"} = "Flip deadline now ".$property_value." for all rounds";
 
 				if ($flight_offset) {
-					$now->add(minutes => $flight_offset);
-					my $aq = Tab::Autoqueue->create({
-						tag       => "flip_2",
-						round     => $round,
-						active_at => $now
-					});
+					$response{"message"} = "Flip deadline now ".$property_value." for F1 and $flight_offset min later for F2";
 				}
+
+			} else {
+
+				$response{"error"}   = JSON::true;
+				$response{"message"} = "Invalid deadline time sent.  Please try again";
+			}
+
+			if ($ARGS{"auto"}) {
+				return $response{"message"};
 			}
 		}
 	}
 
-	my $reply;
+	if (not defined $response{"message"}) {
 
-	unless ($setting_name eq "flip_only") {
+		unless ($setting_name eq "blast_only") {
 
-		if ($message) {
-			$message .= ", published and blasted.";
-		} elsif ($round) {
-			$message .= "Flip status for ".$round->realname." blasted ";
-		} else {
-			$message .= "Flip status for this debate blasted";
+			my $find_sth = $dbh->prepare("
+				select panel.id, aff.entry, neg.entry
+				from panel
+					left join ballot aff on aff.panel = panel.id and aff.side = 1
+					left join ballot neg on neg.panel = panel.id and neg.side = 2
+				where panel.id = panel.id
+					and panel.bye != 1
+					$limit
+					group by panel.id
+			");
+
+			$find_sth->execute();
+			$find_sth->finish();
+
+			my $delete_sth = $dbh->prepare("
+				delete *
+					from panel_setting
+				where panel_setting.tag like 'flip%'
+					and panel_setting.panel = ?
+			");
+
+			while (
+				my (
+					$panel_id, $aff_id, $neg_id
+				) = $find_sth->fetchrow_array()
+			) {
+
+				next unless $do_me{$panel_id};
+
+				my @sides = shuffle ($aff_id, $neg_id);
+				my $winner = shift @sides;
+
+				$delete_sth->execute($panel_id);
+				$delete_sth->finish();
+
+				if ($winner) {
+
+					Tab::PanelSetting->create({
+						panel  => $panel_id,
+						tag    => "flip_winner",
+						value  => $winner
+					});
+
+					Tab::PanelSetting->create({
+						panel      => $panel_id,
+						tag        => "flip_at",
+						value      => "date",
+						value_date => DateTime::Format::MySQL->format_datetime($deadline)
+					});
+
+					Tab::PanelSetting->create({
+						panel => $panel_id,
+						tag   => "flip_status",
+						value => "winner"
+					});
+				}
+
+				delete $do_me{$panel_id};
+			}
+
+			$round->setting("flipped_at", "date", $now);
+			$round->setting("flip_round_deadline", "date", $deadline);
+
+			$response{"error"} = JSON::false;
+			$response{"message"} .= "Flips performed for ".$round->realname." of ".$event->abbr;
+
+			if ($setting_name eq "doall"
+				&& (not defined $related_thing)
+				&& (not defined $ARGS{"auto"})
+			) {
+
+				if ($event_settings{"flip_split_flights"}) {
+
+					my $flight_offset = $event_settings{"flight_offset"};
+
+					if ($flight_offset) {
+
+						$now->add(minutes => $flight_offset);
+
+						my $aq = Tab::Autoqueue->create({
+							tag       => "flip_2",
+							round     => $round,
+							active_at => $now
+						});
+					}
+				}
+			}
 		}
 
-		if ($property_name eq "panel") {
+		unless ($setting_name eq "flip_only") {
 
-			$m->comp("/funclib/blast_flips.mas",
-				panel => $panel
+			if ($response{"message"}) {
+				$response{"message"} .= ", published and blasted.";
+			} elsif ($round) {
+				$response{"message"} .= "Flip status for ".$round->realname." blasted ";
+			} else {
+				$response{"message"} .= "Flip status for this debate blasted";
+			}
+
+			if ($property_name eq "panel") {
+
+				$m->comp("/funclib/blast_flips.mas", panel => $panel);
+				$panel->setting("flip_blasted", "date", $now);
+
+			} elsif ($property_name eq "round") {
+
+				$m->comp("/funclib/blast_flips.mas", round => $round);
+				$round->setting("flip_blasted", "date", $now);
+			}
+
+			$response{"error"}   = JSON::false;
+			$response{"reply"} = $m->comp("/funclib/showdt.mas",
+				string => $now,
+				tz     => $tz,
+				return => 'yasplz'
 			);
-
-		} elsif ($property_name eq "round") {
-
-			$m->comp("/funclib/blast_flips.mas",
-				round => $round
-			);
-
-			$round->setting("flip_blasted", "date", $now);
 		}
-
-		$reply = $m->comp("/funclib/showdt.mas",
-			string => $now,
-			tz     => $tz,
-			return => 'yasplz'
-		);
-	}
-
-	my %response = (
-        error   => 0,
-        message => $message
-    );
-
-	if ($reply) {
-		$response{"reply"} = $reply;
 	}
 
 	if ($ARGS{"auto"}) {
-		$message .= " by automatic process ";
-		return $message;
+		$response{"message"} .= " by automatic process ";
+		return $response{"message"};
 	}
 
     Tab::ChangeLog->create({
@@ -432,10 +587,13 @@
         event       => $event->id,
         tourn       => $event->tourn->id,
         person      => $person,
-        description => $message,
+        description => $response{"message"},
         created     => $now
     });
 
+	$dbh->disconnect();
+
+    Tab::debuglog(JSON::encode_json(\%response));
     $m->print(JSON::encode_json(\%response));
     $m->abort();
 

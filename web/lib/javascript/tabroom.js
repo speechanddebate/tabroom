@@ -171,6 +171,22 @@
 						$("."+data.destroy).remove();
 					}
 
+					if (data.errSetValue) {
+						data.errSetValue.forEach( function(item) {
+							$("#"+item.id).val(item.content);
+						});
+					}
+
+					if (data.errReplace) {
+						data.errReplace.forEach( function(item) {
+							if (item.destroy) {
+								$("#"+item.id).remove();
+							} else if (item.content) {
+								$("#"+item.id).html(item.content);
+							}
+						});
+					}
+
 				} else if (data.message) {
 
 					alertify.dismissAll();
@@ -207,9 +223,7 @@
 
 					if (data.setvalue) {
 						data.setvalue.forEach( function(item) {
-							if (item.content) {
-								$("#"+item.id).val(item.content);
-							}
+							$("#"+item.id).val(item.content);
 						});
 					}
 
