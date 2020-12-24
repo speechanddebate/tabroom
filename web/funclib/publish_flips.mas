@@ -7,16 +7,19 @@
 
 	my $sth = $dbh->prepare("
 		select round.flighted, round.type, round.published,
+			round.start_time, timeslot.start,
+			CONVERT_TZ(flip_already.active_at, '+00:00', tourn.tz),
 			event.id,
 			flip_online.value,
 			flip_autopublish.value,
+			flip_before_start.value,
 			flip_split_flights.value,
 			flight_offset.value,
 			flip_published.value,
 			no_side_constraints.value,
 			sidelock_elims.value
 
-		from (round, event)
+		from (round, event, timeslot, tourn)
 
 			left join event_setting flip_online
 				on flip_online.event = event.id
@@ -25,6 +28,10 @@
 			left join event_setting flip_autopublish
 				on flip_autopublish.event = event.id
 				and flip_autopublish.tag = 'flip_autopublish'
+
+			left join event_setting flip_before_start
+				on flip_before_start.event = event.id
+				and flip_before_start.tag = 'flip_before_start'
 
 			left join event_setting flight_offset
 				on flight_offset.event = event.id
@@ -46,15 +53,24 @@
 				on sidelock_elims.event = event.id
 				and sidelock_elims.tag = 'sidelock_elims'
 
+			left join autoqueue flip_already
+				on flip_already.round = round.id
+				and flip_already.tag like 'flip%'
+
 		where round.id = ?
 			and round.event = event.id
+			and round.timeslot = timeslot.id
+			and event.tourn = tourn.id
 	");
 
 	$sth->execute($round->id);
 
 	my (
-		$flighted, $type, $published, $event_id,
-		$online, $autopublish, $split, $offset,
+		$flighted, $type, $published,
+		$round_start, $timeslot_start,
+		$flip_already,
+		$event_id,
+		$online, $autopublish, $before_start, $split, $offset,
 		$posted, $nsc, $se
 	) = $sth->fetchrow_array();
 
@@ -80,43 +96,66 @@
 
 	unless ($posted) {
 
-		if ($online && $autopublish) {
+		if ($flip_already) {
+
+			$message .= "Auto-flips already scheduled for ";
+			$message .= $m->comp("/funclib/showtime.mas",
+				string => $flip_already,
+				length => "short",
+				return => 'pls'
+			);
+
+		} elsif ($online && ($before_start || $autopublish)) {
 
 			my $now = DateTime->now();
-			my $then = $now->clone();
-			$then->add(minutes => $autopublish);
+			my $start_dt;
+
+			if ($before_start) {
+
+				if ($round_start) {
+					$start_dt = DateTime::Format::MySQL->parse_datetime($round_start);
+				} else {
+					$start_dt = DateTime::Format::MySQL->parse_datetime($timeslot_start);
+				}
+
+				$start_dt->subtract(minutes => $before_start);
+				$message .= " and flips scheduled to happen ".$before_start." minutes before start times";
+
+			} elsif ($autopublish) {
+
+				my $start_dt = $now->clone();
+				$start_dt->add(minutes => $autopublish);
+
+				$message .= " and flips scheduled to happen in ".$autopublish." minutes";
+			}
 
 			if ($flighted > 1 && $offset && $split) {
 
 				my $aq1 = Tab::Autoqueue->create({
 					tag        => "flip_1",
 					round      => $round->id,
-					active_at  => $then,
+					active_at  => $start_dt,
 					created_at => $now
 				});
 
-				$message .= " and flips scheduled to happen in ".$autopublish."/".$offset." minutes";
-				$then->add(minutes => $offset);
+				$start_dt->add(minutes => $offset);
 
 				my $aq2 = Tab::Autoqueue->create({
 					tag        => "flip_2",
 					round      => $round->id,
-					active_at  => $then,
+					active_at  => $start_dt,
 					created_at => $now
 				});
 
 			} else {
 
-				$message .= " and flips scheduled to happen in ".$autopublish." minutes";
-
 				my $aq = Tab::Autoqueue->create({
 					tag        => "flip",
 					round      => $round->id,
-					active_at  => $then,
+					active_at  => $start_dt,
 					created_at => $now
 				});
 			}
-
 		}
 	}
 
