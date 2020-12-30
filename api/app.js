@@ -5,19 +5,20 @@ import uuid from 'uuid/v4';
 import expressWinston from 'express-winston';
 import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
-import { initialize } from 'express-openapi';
 import config from './config/config';
+import errorHandler from './indexcards/helpers/error';
 
-// import apiDoc from './indexcards/routes/api-doc';
-// import paths from './indexcards/routes/paths';
-// import errorHandler from './indexcards/helpers/error';
+import { initialize } from 'express-openapi';
+import apiDoc from './indexcards/routes/api-doc';
+import paths from './indexcards/routes/paths';
 // import auth from './indexcards/helpers/auth';
-// import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';
+
+import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';
 
 const app = express();
 
 // Startup log message
-console.log('Initializing API...');
+debugLogger.info('Initializing API...');
 
 // Enable Helmet security
 app.use(helmet());
@@ -52,15 +53,15 @@ app.use((req, res, next) => {
 });
 
 // Log all requests
-// app.use(expressWinston.logger({
-//    winstonInstance: requestLogger,
-//    meta: true,
-//    dynamicMeta: (req, res) => {
-//        return {
-//            logCorrelationId: req.uuid,
-//        };
-//    },
-// }));
+app.use(expressWinston.logger({
+   winstonInstance: requestLogger,
+   meta: true,
+   dynamicMeta: (req, res) => {
+       return {
+           logCorrelationId: req.uuid,
+       };
+   },
+}));
 
 // Parse body
 app.use(bodyParser.json({ type: ['json', 'application/*json'], limit: '10mb' }));
@@ -71,6 +72,8 @@ app.use(cookieParser());
 
 initialize({
 	app,
+	apiDoc,
+	paths,
 	promiseMode: true,
 });
 
@@ -99,13 +102,13 @@ app.use(expressWinston.errorLogger({
 }));
 
 // Final fallback error handling
-// app.use(errorHandler);
+app.use(errorHandler);
 
 // Start server
 const port = process.env.PORT || config.PORT || 9876;
 
 app.listen(port, () => {
-    console.log(`Server started. Listening on port ${port}`);
+    debugLogger.info(`Server started. Listening on port ${port}`);
 });
 
 export default app;
