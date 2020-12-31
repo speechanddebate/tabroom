@@ -7,6 +7,6 @@ import postError from '../controllers/utility/postError';
 // { path : '/user/person/' , module : getPerson },
 
 export default [
-    { path : '/status'       , module : status },
-    { path : '/error'       , module : postError },
+    { path : '/status', module : status },
+    { path : '/error' , module  : postError },
 ];
