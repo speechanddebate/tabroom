@@ -11,7 +11,7 @@ import errorHandler from './indexcards/helpers/error';
 import { initialize } from 'express-openapi';
 import apiDoc from './indexcards/routes/api-doc';
 import paths from './indexcards/routes/paths';
-// import auth from './indexcards/helpers/auth';
+import auth from './indexcards/helpers/auth';
 
 import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';
 
@@ -69,6 +69,9 @@ app.use(bodyParser.text({ type: '*/*', limit: '10mb' }));
 
 // Parse cookies as a fallback to basic auth
 app.use(cookieParser());
+app.use(function(req, res, next) {
+	auth(req,res,next);
+});
 
 initialize({
 	app,

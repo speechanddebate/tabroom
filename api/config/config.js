@@ -2,19 +2,10 @@ require('dotenv').config();
 
 // Default (Dev config)
 const config = {
-    PORT                  : 9876,
+    PORT                  : 10010,
     RATE_WINDOW           : 15 * 60 * 1000,
     RATE_MAX              : 100000,
     RATE_DELAY            : 0,
-    DB_HOST               : 'localhost',
-    DB_PORT               : '3306',
-    DB_USER               : 'username',
-    DB_PASS               : 'password',
-    DB_DATABASE           : 'tabroom',
-    DB_CONNECTION_LIMIT   : 500,
-    DB_CONNECTION_TIMEOUT : 60000,
-    DB_RETRIES            : 5,
-    DB_RETRY_DELAY        : 100,
     LOGIN_URL             : 'http://local.tabroom.com/user/login/login.mhtml',
     MAIL_FROM             : 'live@tabroom.com',
 	MAIL_SERVER           : 'localhost',
@@ -37,6 +28,19 @@ const config = {
 	NAUDL_TOURN_ENDPOINT  : 'tournamentServiceUrl',
 	NAUDL_STUDENT_ENDPOINT: 'studentServiceTabroomUrl',
 	NAUDL_STA_ENDPOINT    : 'staTabroomServiceUrl',
+	COOKIE_NAME           : 'TabroomToken',
+
+    DB_HOST               : 'localhost',
+    DB_PORT               : '3306',
+    DB_USER               : 'username',
+    DB_PASS               : 'password',
+    DB_DATABASE           : 'tabroom',
+	sequelizeOptions      : {
+		"dialect"         : "mariadb",
+		"freezeTableName" : true,
+		"underscored"     : true,
+		"timestamps"      : false
+	}
 };
 
 const env = process.env.NODE_ENV || 'development';
@@ -50,17 +54,25 @@ switch (env) {
         config.DB_USER = 'tabroom';
         config.DB_PASS = '';
         break;
-
     case 'production':
+		config.port       = 3000,
         config.DB_HOST    = 'db.speechanddebate.org';
         config.DB_USER    = 'tabroom';
         config.DB_PASS    = '';
+		config.sequelizeOptions.pool = {
+			"max"     : 50,
+			"min"     : 5,
+			"acquire" : 30000,
+			"idle"    : 10000
+		};
         break;
 
     case 'development':
     default:
         break;
 }
+
+config.sequelizeOptions.host = config.DB_HOST;
 
 // Override any config value if corresponding env var is set
 const configKeys = Object.keys(config);
