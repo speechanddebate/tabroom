@@ -8,60 +8,65 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
+	my %all_days;
+	my %ts_days;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	# First population any day that has a round in it already
+	my $sth = $dbh->prepare("
+		select distinct timeslot.id,
+			CONVERT_TZ(timeslot.start, '+00:00', tourn.tz)
+		from timeslot, tourn
+		where timeslot.tourn = ?
+			and timeslot.tourn = tourn.id
+	");
+
+	$sth->execute($tourn->id);
+
+	while (
+		my ($id, $start) = $sth->fetchrow_array()
+	) {
+		my $dt = DateTime::Format::MySQL->parse_datetime($start);
+		$dt->truncate( to => "day");
+		$dt->set_time_zone($tourn->tz);
+		$ts_days{$dt->mdy('/')} = $dt;
+	}
+
+	$sth->finish();
+
 	if ($tourn->setting("nsda_district")) {
 
-		my @tourn_days;
+		my $sth = $dbh->prepare("
+			select distinct weekend.id,
+				CONVERT_TZ(weekend.start, '+00:00', tourn.tz),
+				CONVERT_TZ(weekend.end, '+00:00', tourn.tz)
+			from weekend, tourn
+			where weekend.tourn = ?
+				and weekend.tourn = tourn.id
+		");
 
-		my @weekends;
+		$sth->execute($tourn->id);
 
-		if ($weekend) {
-			push @weekends, $weekend;
-		} else {
-			@weekends = $tourn->weekends();
-		}
+		while (
+			my ($id, $start, $end) = $sth->fetchrow_array()
+		) {
 
-		foreach my $weekend (@weekends) {
+			my $start_dt = DateTime::Format::MySQL->parse_datetime($start);
+			$start_dt->truncate( to => "day");
 
-			my $start = $weekend->start->clone;
-			my $end = $weekend->end->clone;
+			my $end_dt = DateTime::Format::MySQL->parse_datetime($end);
+			$end_dt->truncate( to => "day");
 
-			$start->set_time_zone($tz);
-			$end->set_time_zone($tz);
+			$all_days{$start_dt->mdy('/')} = $start_dt;
 
-			$end->truncate(to => 'day');
-			$start->truncate(to => 'day');
-
-			unless ($start->day == $end->day) {
-
-				my $holder = $start->clone;
-
-				until ($holder->epoch > $end->epoch) {
-					push (@tourn_days, $holder->clone);
-					$holder->add( days => 1);
-				}
-
-			} else {
-				push (@tourn_days, $start);
-			}
-
-			if ($add_one) {
-				my $first = $start->clone;
-				$first = $start->subtract( days => 1 );
-				unshift(@tourn_days, $first);
+			while ($start_dt->epoch < $end_dt->epoch) {
+				$start_dt->add(days => 1);
+				$all_days{$start_dt->mdy('/')} = $start_dt->clone;
 			}
 		}
 
-		# In case I move the tournament dates, show the old days if timeslots
-		# straggle.
-
-		foreach my $timeslot ($tourn->timeslots) {
-			push @tourn_days, $timeslot->start->clone->set_time_zone($tz);
-		}
-
-		my %seen = ();
-		@tourn_days = grep { ! $seen{$_->month."-".$_->day} ++ } @tourn_days;
-
-		return sort {$a->epoch <=> $b->epoch} @tourn_days;
+		$sth->finish();
 
 	} else {
 
@@ -77,47 +82,58 @@
 		$end->truncate(to => 'day');
 		$start->truncate(to => 'day');
 
-		my @tourn_days;
+		$all_days{$start->mdy('/')} = $start->clone;
 
-		unless ($start->day == $end->day) {
+		my $counter;
 
-			my $holder = $start->clone();
-
-			until ($holder->epoch > $end->epoch) {
-				push (@tourn_days, $holder->clone);
-				$holder->add( days => 1);
-			}
-
-		} else {
-			push (@tourn_days, $start);
+		while ($start->epoch < $end->epoch) {
+			$counter++;
+			$start->add(days => 1);
+			$all_days{$start->mdy('/')} = $start->clone;
 		}
 
-		if ($add_one) {
-			my $first = $start->clone();
-			$first = $start->subtract( days => 1);
-			unshift(@tourn_days, $first);
+	}
+
+	if ($ARGS{"both"}) {
+
+		my @ts_days;
+		my @all_days;
+
+		my $counter;
+		foreach my $key (keys %ts_days) {
+			push @ts_days, $ts_days{$key};
+			$counter++;
+		}
+		Tab::debuglog("TS is $counter days");
+
+		undef $counter;
+		foreach my $key (keys %all_days) {
+			push @all_days, $all_days{$key};
+			$counter++;
+		}
+		Tab::debuglog("All is $counter days");
+
+		@ts_days = sort {$a->epoch <=> $b->epoch} @ts_days;
+		@all_days = sort {$a->epoch <=> $b->epoch} @all_days;
+
+		return \@ts_days, \@all_days;
+
+	} else {
+
+		my @days;
+
+		foreach my $key (keys %ts_days) {
+			push @days, $ts_days{$key};
 		}
 
-		# In case I move the tournament dates, show the old days if timeslots
-		# straggle.
-
-		unless ($ARGS{"campus"}) {
-			foreach my $timeslot ($tourn->timeslots) {
-				my $start = $timeslot->start->set_time_zone("UTC");
-				my $end = $timeslot->end->set_time_zone("UTC");
-
-				$start->set_time_zone($tz);
-				$end->set_time_zone($tz);
-
-				push @tourn_days, $start;
-				push @tourn_days, $end;
-			}
+		foreach my $key (keys %all_days) {
+			next if $ts_days{$key};
+			push @days, $all_days{$key};
 		}
 
-		my %seen = ();
-		@tourn_days = grep { ! $seen{$_->day} ++ } @tourn_days;
+		@days = sort {$a->epoch <=> $b->epoch} @days;
 
-		return sort {$a->epoch <=> $b->epoch} @tourn_days;
+		return @days;
 
 	}
 
