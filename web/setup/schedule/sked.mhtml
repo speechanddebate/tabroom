@@ -3,7 +3,6 @@
 	$perms
 	$tourn_settings
 	$date            => undef
-	$all             => undef
 	$round_highlight => undef
 </%args>
 <%init>
@@ -15,36 +14,22 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my $today;
-	my $end = $tourn->end->set_time_zone($tz);
-	my $start = $tourn->start->set_time_zone($tz);
+	my $today = eval {
+		my $dt = Tab::dateme($date);
+		$dt->set_time_zone($tz);
+		return $dt;
+	};
 
-	if ($date) {
-		$today = Tab::dateme($date);
-	}
-
-	my @days = $m->comp(
+	my ($ts_days, $all_days) = $m->comp(
 		"/funclib/tourn_days.mas",
-		tourn => $tourn
+		tourn => $tourn,
+		both  => 1
 	);
 
-	$today = $days[0] unless $today;
-	$m->abort unless $today;
-
-	$today->set_time_zone($tz);
-	$today->truncate( to => 'day' );
-
-	my $today_limit;
-
-	if ($tourn_settings->{"nsda_district"}) {
-		my $last_date = $days[-1] if @days;
-		unless ($last_date->mdy eq $today->mdy) {
-			$today_limit = $today->clone();
-			$today_limit->set(
-				hour   => 21,
-				minute => 30
-			);
-		}
+	unless ($all_days) {
+		$m->comp("/funclib/abort.mas",
+			message => "No days found for schedule"
+		);
 	}
 
 	my $dbh = Tab::DBI->db_Main();
@@ -67,33 +52,49 @@
 
 	my @timeslots;
 
-	if (scalar @days > 1 && not defined $all) {
+	if (scalar @{$all_days} > 1) {
 
-		$today = $days[0] unless $today;
+		$today = ${$all_days}[0] unless $today;
 
-		my @tmp = Tab::Timeslot->search(
+		my @tmp = sort {$a->start <=> $b->start} Tab::Timeslot->search(
 			tourn => $tourn->id,
 			{order_by => 'start'}
 		);
 
 		foreach my $ts (@tmp) {
-			push (@timeslots, $ts)
-				if $ts->start
-				&& $ts->start->set_time_zone($tz)->mdy eq $today->mdy;
+
+			Tab::debuglog("Trying ts ".$ts->name);
+
+			$ts->start->set_time_zone("UTC");
+			$ts->start->set_time_zone($tz);
+
+			Tab::debuglog("Today is ".$today->mdy." and ts is ".$ts->start->mdy);
+
+			next if $ts->start->mdy ne $today->mdy;
+
+			push (@timeslots, $ts);
 		}
 
 	} else  {
 
-		@timeslots =
-			sort {$a->start <=> $b->start}
-				Tab::Timeslot->search(
-					tourn => $tourn->id,
-					{order_by => 'start'}
-				)
-		;
-		$today = shift @days;
+		@timeslots = sort {$a->start <=> $b->start}
+			Tab::Timeslot->search(
+				tourn => $tourn->id,
+				{order_by => 'start'}
+			);
+
+		$today = @{$all_days}[0];
 	}
-	
+
+	my $today_limit;
+	if ($tourn_settings->{"nsda_district"}) {
+		$today_limit = $today->clone();
+		$today_limit->set(
+			hour   => 21,
+			minute => 30
+		);
+	}
+
 	my $impossible_warning;
 
 </%init>
@@ -101,7 +102,7 @@
 	<& "menu.mas",
 		tourn => $tourn,
 		perms => $perms,
-		days  => \@days,
+		days  => $ts_days,
 		today => $today
 	&>
 
@@ -146,7 +147,7 @@
 						Label
 					</th>
 
-%					if (@days) {
+%					if (scalar @{$all_days} > 1) {
 						<th>
 							Day
 						</th>
@@ -156,7 +157,7 @@
 						Start Time
 					</th>
 
-%					if ($async && @days) {
+%					if ($async && (scalar @{$all_days} > 1)) {
 						<th>
 							End Day
 						</th>
@@ -180,48 +181,54 @@
 			$sth = $dbh->prepare("
 				select event.id, event.type, online_mode.value, online.value
 				from (event, round)
-					left join event_setting online_mode 
-						on online_mode.event = event.id 
+					left join event_setting online_mode
+						on online_mode.event = event.id
 						and online_mode.tag = 'online_mode'
 
-					left join event_setting online 
-						on online.event = event.id 
+					left join event_setting online
+						on online.event = event.id
 						and online.tag = 'online'
 
 				where event.id = round.event
-					and round.timeslot = ? 
+					and round.timeslot = ?
 			");
 
 			foreach my $timeslot (@timeslots) {
 
-				my $roundstart = $timeslot->start->set_time_zone($tz);
+				my $roundstart = $timeslot->start->set_time_zone("UTC");
+				$roundstart->set_time_zone($tz);
+
 				my $roundend   = $timeslot->end->set_time_zone($tz);
-				my $duration   = $roundend - $roundstart;
+				$roundend->set_time_zone($tz);
 
-				if ($duration->in_units('hours') > 4) {
+				unless ($async) {
 
-					$sth->execute($timeslot->id);
-					my $ok;
+					my $duration = $roundend - $roundstart;
+					if ($duration->in_units('hours') > 4) {
 
-					while ( 
-						my ($event, $type, $mode, $online) = $sth->fetchrow_array()
-					) {
+						$sth->execute($timeslot->id);
+						my $ok;
 
-						if ($type eq "congress") { 
-							$ok++;
+						while (
+							my ($event, $type, $mode, $online) = $sth->fetchrow_array()
+						) {
+
+							if ($type eq "congress") {
+								$ok++;
+							}
+
+							if ($online && $mode eq "async") {
+								$ok++;
+							}
+							last if $ok;
 						}
 
-						if ($online && $mode eq "async") {
-							$ok++;
+						$sth->finish();
+
+						unless ($ok) {
+							$warning{$timeslot->id}{"color"} = "red";
+							$warning{$timeslot->id}{"text"} = "One or more rounds (in red) were scheduled for longer than 4 hours.  Dear God, what are you doing to those poor judges?  Chances are there's an am/pm problem here.";
 						}
-						last if $ok;
-					}
-
-					$sth->finish();
-
-					unless ($ok) { 
-						$warning{$timeslot->id}{"color"} = "red";
-						$warning{$timeslot->id}{"text"} = "One or more rounds (in red) were scheduled for longer than 4 hours.  Dear God, what are you doing to those poor judges?  Chances are there's an am/pm problem here.";
 					}
 				}
 
@@ -237,14 +244,12 @@
 
 						$warning{$timeslot->id}{"color"} = "orange";
 
-						$warning{$timeslot->id}{"text"} = "One or more rounds (in orange) start after 9:30 PM. By NSDA rule, no round may start after 9:30 PM except on the last day of the tournament.  Extemp rounds may start no later than 9:45 PM.";
+						$warning{$timeslot->id}{"text"} = "One or more rounds (in orange) start after 9:30 PM. By NSDA rule, no round may start after 9:30 PM except on the last day of the weekend.  Extemp rounds may start no later than 9:45 PM.";
 
 					}
-
 				}
 
 </%perl>
-
 				<tr class="<% $warning{$timeslot->id}{"color"} %>row">
 
 					<td class="centeralign">
@@ -255,19 +260,19 @@
 							type  = "text"
 							name  = "<% $timeslot->id %>_name"
 							value = "<% $timeslot->name %>"
-							size  = "15"
+							size  = "16"
 						>
 
 					</td>
 
-%					if (@days) {
+%					if (scalar @{$all_days} > 1) {
 						<td class="centeralign">
 							<span class="hidden"><% $roundstart->day %></span>
 							<select
 								name  = "<% $timeslot->id %>_start_day"
 								class = "fixedsmallest"
 							>
-%								foreach my $day (@days) {
+%								foreach my $day (@{$all_days}) {
 									<option
 										value = "<% $day->mdy('/') %>"
 										<% $day->mdy eq $roundstart->mdy ? 'selected' : "" %>
@@ -285,14 +290,14 @@
 						&>
 					</td>
 
-%					if (@days && $async) {
+%					if ((scalar @{$all_days} > 1) && $async) {
 						<td class="centeralign">
 							<span class="hidden"><% $roundend->day %></span>
 							<select
 								name  = "<% $timeslot->id %>_end_day"
 								class = "fixedsmallest"
 							>
-%								foreach my $day (@days) {
+%								foreach my $day (@{$all_days}) {
 									<option
 										value = "<% $day->mdy('/') %>"
 										<% $day->mdy eq $roundend->mdy ? 'selected' : "" %>
@@ -301,7 +306,6 @@
 							</select>
 						</td>
 %					}
-
 
 					<td class="centeralign">
 						<span class="hidden"><% $roundend->epoch %></span>
@@ -313,7 +317,7 @@
 
 					<td class="centeralign nospace">
 						<a
-							class = "dkred button fa fa-lg fa-trash buttonwhite redtext"
+							class = "dkred button fa fa-trash buttonwhite redtext"
 							href  = "delete.mhtml?timeslot_id=<% $timeslot->id %>"
 							alt   = "Delete"
 							title = "Delete Timeslot &amp; Rounds"
@@ -361,15 +365,13 @@
 			Add a new timeslot:
 		</h4>
 
-		<form action="create.mhtml" method="post">
-
-		<input
-			type  = "hidden"
-			name  = "date"
-			value = "<% $today->mdy('/') %>"
+		<form
+			action="create.mhtml"
+			method="post"
 		>
 
 		<div class="ltyellow full">
+
 			<span class="quarter">
 				<input
 					type        = "text"
@@ -379,21 +381,56 @@
 				>
 			</span>
 
-			<span class="quarter">
+%			if (scalar @{$all_days} > 1) {
+				<span class="sixth centeralign">
+					<select
+						name  = "new_start_day"
+						class = "fixedsmallest"
+					>
+%						foreach my $day (@{$all_days}) {
+							<option
+								value = "<% $day->mdy('/') %>"
+								<% $today->epoch == $day->epoch ? "selected" : "" %>
+							> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
+%						}
+					</select>
+				</span>
+%			} else {
+
+				<input type="hidden" name="new_start_day" value="<% $today->mdy('/') %>">
+%			}
+
+			<span class="sixth">
 				<&
 					"/funclib/timepicker.mas",
 					name => "new_start"
 				&>
 			</span>
 
-			<span class="quarter">
+%			if ((scalar @{$all_days} > 1) && $async) {
+				<span class="sixth centeralign">
+					<select
+						name  = "new_end_day"
+						class = "fixedsmallest"
+					>
+%						foreach my $day (@{$all_days}) {
+							<option
+								value = "<% $day->mdy('/') %>"
+								<% $today->epoch == $day->epoch ? "selected" : "" %>
+							> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
+%						}
+					</select>
+				</span>
+%			}
+
+			<span class="sixth">
 				<&
 					"/funclib/timepicker.mas",
 					name => "new_end"
 				&>
 			</span>
 
-			<span class="quarter rightalign">
+			<span class="tenth rightalign nospace">
 				<input
 					type  = "submit"
 					value = "Add"
