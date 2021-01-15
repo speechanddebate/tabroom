@@ -1,100 +1,109 @@
 <%args>
 	$tourn
+	$tourn_settings
 	$person
 	$session
 </%args>
 <%init>
 
-	my $filename = "Entries-".$tourn->name."-".$session->id;
 
     my $tz = $tourn->tz;
     $tz = "UTC" unless $tz;
     my $now = DateTime->now->set_time_zone($tz);
 
-	$filename =~ s/[\W_]//g;
-	my $filepath = $Tab::file_root."/tmp/".$filename;
-	my $garbage = `rm -f $filepath.*`;
+	my $tourn_name = $tourn->name;
+	$tourn_name =~ s/[\W_]//g;
 
-	my $ncfl++ if $tourn->setting("ncfl");
+	my $filename = "Entries-".$tourn_name.".csv";
 
-	open (CSVOUT, ">$filepath.csv");
+	my $dbh = Tab::DBI->db_Main();
 
-	print CSVOUT "DioCode,Diocese," if $ncfl;
-	print CSVOUT "School,";
-	print CSVOUT "SchoolCode," unless $ncfl;
-	print CSVOUT "Hotel," if $ncfl;
-	print CSVOUT "Entry Event,";
-	print CSVOUT "Entry Code,";
-	print CSVOUT "Entry Name,";
-	print CSVOUT "Students\n";
+	$m->clear_buffer;
+	$r->content_type('application/csv');
+	$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
 
-	my @entries = $m->comp("/funclib/tourn_entries.mas", tourn => $tourn);
 
-	my @regions = $m->comp("/funclib/tourn_regions.mas", tourn => $tourn);
+	$m->print( "DioCode,Diocese,") if $tourn_settings->{"ncfl"};
+	$m->print( "School,");
+	$m->print( "SchoolCode,") unless $tourn_settings->{"ncfl"};
+	$m->print( "Hotel,") if $tourn_settings->{"ncfl"};
+	$m->print( "Event,");
+	$m->print( "Code,");
+	$m->print( "Name,");
+	$m->print( "Students\n");
 
-	my @students = $m->comp("/funclib/tourn_students.mas", tourn => $tourn);
+	my $sth = $dbh->prepare("
+		select
+			region.code, region.name,
+			school.name, school.code,
+			hotel.name,
+			event.abbr,
+			entry.code,
+			entry.name,
+			GROUP_CONCAT(CONCAT(student.first,' ',student.last) SEPARATOR ',') as students
 
-	my %dio_codes = map {$_->id => $_->code} @regions;
-	my %dio_names = map {$_->id => $_->name} @regions;
+		from (school, event, entry, entry_student es, student)
+			left join region on school.region = region.id
+			left join school_setting hs
+				on hs.school = school.id
+				and hs.tag = 'hotel'
+			left join hotel on hotel.id = hs.value
 
-	my @schools = $tourn->schools;
-	my %school_region = ();
+		where school.tourn = ?
+			and school.id = entry.school
+			and entry.unconfirmed = 0
+			and entry.event = event.id
+			and es.entry = entry.id
+			and es.student = student.id
+		group by entry.id
+		order by region.code, school.code, school.name, entry.code
+	");
 
-	if ($ncfl) {
-		%school_region = map {$_->id => $_->region->id} @schools;
-	}
+	$sth->execute($tourn->id);
 
-	my %school_name = map {$_->id => $_->name} @schools;
-	my %school_code = map {$_->id => $_->name} @schools unless $ncfl;
+	while (
+		my (
+			$region_code, $region_name,
+			$school_name, $school_code,
+			$hotel_name,
+			$event,
+			$code,
+			$name,
+			$students
+		) = $sth->fetchrow_array()
+	) {
 
-	my %event_code = map {$_->id => $_->abbr} $tourn->events;
+		$m->print('"');
 
-	my %school_hotel;
-
-	if ($ncfl) {
-		my %hotels = map {$_->id => $_->name} $tourn->hotels;
-		%school_hotel = map {$_->id => $hotels{$_->setting("hotel")}} @schools;
-	}
-
-	my %entry_students;
-
-	foreach my $student (@students) {
-		push @{$entry_students{$student->entry}}, $student;
-	}
-
-	foreach my $entry (@entries) {
-
-		print CSVOUT '"';
-
-		if ($ncfl) {
-			print CSVOUT $dio_codes{$school_region{$entry->school->id}}.'","';
-			print CSVOUT $dio_names{$school_region{$entry->school->id}}.'","';
+		if ($tourn_settings->{"ncfl"}) {
+			$m->print($region_code.'","');
+			$m->print($region_name.'","');
 		}
 
-		print CSVOUT $school_name{$entry->school->id}.'","';
-		print CSVOUT $school_code{$entry->school->id}.'","' unless $ncfl;
-		print CSVOUT $school_hotel{$entry->school->id}.'","' if $ncfl;
+		$m->print($school_name.'","');
 
-		print CSVOUT $event_code{$entry->event->id}.'","';
-		print CSVOUT $entry->code.'","';
-		print CSVOUT $entry->name.'","';
+		if ($tourn_settings->{"ncfl"}) {
+			$m->print($hotel_name.'","');
+		} else {
+			$m->print($school_code.'","');
+		}
 
-		foreach my $student (@{$entry_students{$entry->id}}) {
-            my $person = $student->person;
-            print CSVOUT $student->first.'","'.$student->last.'","';
-            print CSVOUT $person->email.'","' if $person;
-        }
+		$m->print($event.'","');
+		$m->print($code.'","');
+		$m->print($name);
 
-        print CSVOUT '"'."\n";
-
+		foreach my $student (split (/\,/, $students) ) {
+			$m->print('","');
+			$m->print($student);
+		}
+		$m->print('"'."\n");
 	}
 
-	close CSVOUT;
+	$sth->finish();
+	$dbh->disconnect();
 
-	$m->redirect("$Tab::url_prefix/tmp/$filename.csv");
+	$m->flush_buffer();
+	$m->abort();
 
 </%init>
 
-<div id="content">
-
-<p><% $filename %></p>
