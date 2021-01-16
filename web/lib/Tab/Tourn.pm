@@ -2,45 +2,45 @@ package Tab::Tourn;
 use base 'Tab::DBI';
 Tab::Tourn->table('tourn');
 Tab::Tourn->columns(Primary => qw/id/);
-Tab::Tourn->columns(Essential => qw/name city state country webname 
-						start end reg_start reg_end tz 
-						hidden timestamp 
+Tab::Tourn->columns(Essential => qw/name city state country webname
+						start end reg_start reg_end tz
+						hidden timestamp
 					/);
 
 Tab::Tourn->columns(TEMP => qw/schoolid/);
 
-Tab::Tourn->has_many(files => 'Tab::File', 'tourn');
-Tab::Tourn->has_many(rpools => 'Tab::RPool', 'tourn');
-Tab::Tourn->has_many(emails => 'Tab::Email', 'tourn');
-Tab::Tourn->has_many(hotels => 'Tab::Hotel', 'tourn' => {order_by => 'name'} );
-Tab::Tourn->has_many(events => 'Tab::Event', 'tourn' => { order_by => 'name'} );
-Tab::Tourn->has_many(entries => 'Tab::Entry', 'tourn');
-Tab::Tourn->has_many(ratings => 'Tab::Rating', 'tourn');
-Tab::Tourn->has_many(regions => 'Tab::Region', 'tourn');
-Tab::Tourn->has_many(strikes => 'Tab::Strike', 'tourn');
-Tab::Tourn->has_many(settings => 'Tab::TournSetting', 'tourn');
-Tab::Tourn->has_many(schools => 'Tab::School', 'tourn' => { order_by => 'name'} );
-Tab::Tourn->has_many(housings => 'Tab::Housing', 'tourn');
-Tab::Tourn->has_many(webpages => 'Tab::Webpage', 'tourn');
-Tab::Tourn->has_many(judge_hires => 'Tab::JudgeHire', 'tourn');
-Tab::Tourn->has_many(followers => 'Tab::Follower', 'tourn');
-Tab::Tourn->has_many(groups => 'Tab::Category', 'tourn' => { order_by => 'name'} );
-Tab::Tourn->has_many(timeslots => 'Tab::Timeslot', 'tourn' => { order_by => 'start'} );
-Tab::Tourn->has_many(sweep_sets => 'Tab::SweepSet', 'tourn' => {order_by => 'name'} );
-Tab::Tourn->has_many(tourn_fees => 'Tab::TournFee', 'tourn');
-Tab::Tourn->has_many(result_sets => "Tab::ResultSet", 'tourn');
-Tab::Tourn->has_many(tourn_sites => 'Tab::TournSite', 'tourn');
-Tab::Tourn->has_many(concessions => 'Tab::Concession', 'tourn' => { order_by => 'name'} );
-Tab::Tourn->has_many(permissions => 'Tab::Permission', 'tourn');
-Tab::Tourn->has_many(room_strikes => 'Tab::RoomStrike', 'tourn');
-Tab::Tourn->has_many(fines => 'Tab::Fine', 'tourn');
-Tab::Tourn->has_many(categories => 'Tab::Category', 'tourn');
-Tab::Tourn->has_many(change_logs => 'Tab::ChangeLog', 'tourn');
-Tab::Tourn->has_many(patterns => 'Tab::Pattern', 'tourn');
-Tab::Tourn->has_many(tiebreak_sets => 'Tab::TiebreakSet', 'tourn');
-Tab::Tourn->has_many(housing_slots => 'Tab::HousingSlots', 'tourn');
-Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit', 'tourn');
-Tab::Tourn->has_many(weekends => 'Tab::Weekend', 'tourn');
+Tab::Tourn->has_many(files          => 'Tab::File'         , 'tourn');
+Tab::Tourn->has_many(rpools         => 'Tab::RPool'        , 'tourn');
+Tab::Tourn->has_many(emails         => 'Tab::Email'        , 'tourn');
+Tab::Tourn->has_many(hotels         => 'Tab::Hotel'        , 'tourn'   => {order_by  => 'name'} );
+Tab::Tourn->has_many(events         => 'Tab::Event'        , 'tourn'   => { order_by => 'name'} );
+Tab::Tourn->has_many(entries        => 'Tab::Entry'        , 'tourn');
+Tab::Tourn->has_many(ratings        => 'Tab::Rating'       , 'tourn');
+Tab::Tourn->has_many(regions        => 'Tab::Region'       , 'tourn');
+Tab::Tourn->has_many(strikes        => 'Tab::Strike'       , 'tourn');
+Tab::Tourn->has_many(settings       => 'Tab::TournSetting' , 'tourn');
+Tab::Tourn->has_many(schools        => 'Tab::School'       , 'tourn'   => { order_by => 'name'} );
+Tab::Tourn->has_many(housings       => 'Tab::Housing'      , 'tourn');
+Tab::Tourn->has_many(webpages       => 'Tab::Webpage'      , 'tourn');
+Tab::Tourn->has_many(judge_hires    => 'Tab::JudgeHire'    , 'tourn');
+Tab::Tourn->has_many(followers      => 'Tab::Follower'     , 'tourn');
+Tab::Tourn->has_many(groups         => 'Tab::Category'     , 'tourn'   => { order_by => 'name'} );
+Tab::Tourn->has_many(timeslots      => 'Tab::Timeslot'     , 'tourn'   => { order_by => 'start'} );
+Tab::Tourn->has_many(sweep_sets     => 'Tab::SweepSet'     , 'tourn'   => {order_by  => 'name'} );
+Tab::Tourn->has_many(tourn_fees     => 'Tab::TournFee'     , 'tourn');
+Tab::Tourn->has_many(result_sets    => "Tab::ResultSet"    , 'tourn');
+Tab::Tourn->has_many(tourn_sites    => 'Tab::TournSite'    , 'tourn');
+Tab::Tourn->has_many(concessions    => 'Tab::Concession'   , 'tourn'   => { order_by => 'name'} );
+Tab::Tourn->has_many(permissions    => 'Tab::Permission'   , 'tourn');
+Tab::Tourn->has_many(room_strikes   => 'Tab::RoomStrike'   , 'tourn');
+Tab::Tourn->has_many(fines          => 'Tab::Fine'         , 'tourn');
+Tab::Tourn->has_many(categories     => 'Tab::Category'     , 'tourn');
+Tab::Tourn->has_many(change_logs    => 'Tab::ChangeLog'    , 'tourn');
+Tab::Tourn->has_many(patterns       => 'Tab::Pattern'      , 'tourn');
+Tab::Tourn->has_many(tiebreak_sets  => 'Tab::TiebreakSet'  , 'tourn');
+Tab::Tourn->has_many(housing_slots  => 'Tab::HousingSlots' , 'tourn');
+Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit' , 'tourn');
+Tab::Tourn->has_many(weekends       => 'Tab::Weekend'      , 'tourn');
 
 Tab::Tourn->has_many(admins => [ Tab::Permission => 'person']);
 Tab::Tourn->has_many(sites => [Tab::TournSite => 'site']);
@@ -48,13 +48,13 @@ Tab::Tourn->has_many(circuits => [Tab::TournCircuit => 'circuit']);
 
 __PACKAGE__->_register_datetimes( qw/start end reg_start reg_end timestamp/);
 
-sub location { 
+sub location {
 	my $self = shift;
 	my $location = $self->state."/" if $self->state;
 	return $location.$self->country;
 }
 
-sub full_location { 
+sub full_location {
 	my $self = shift;
 	my $location;
 	$location = $self->city.", " if $self->city;
@@ -62,17 +62,17 @@ sub full_location {
 	return $location.$self->country;
 }
 
-sub location_name { 
+sub location_name {
 
 	my $self = shift;
 
 	my $state = $m->comp(
-		"/funclib/state_translate.mas", 
+		"/funclib/state_translate.mas",
 		state => $self->state
 	) if $self->state;
 
 	my $country = $m->comp(
-		"/funclib/country_translate.mas", 
+		"/funclib/country_translate.mas",
 		country => $self->country
 	) if $self->country;
 
@@ -98,22 +98,22 @@ sub setting {
 	foreach (@existing) { $_->delete(); }
 
 	if (defined $value) {
-			
+
 		if ($existing) {
 
 			$existing->value($value);
 			$existing->value_text($blob) if $value eq "text";
 			$existing->value_date($blob) if $value eq "date";
 
-			if ($value eq "json") { 
-				eval{ 
+			if ($value eq "json") {
+				eval{
 					$existing->value_text(JSON::encode_json($blob));
 				};
 			}
 
 			$existing->update;
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
 			}
 
@@ -127,13 +127,13 @@ sub setting {
 				value => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
-			} elsif ($value eq "date") { 
+			} elsif ($value eq "date") {
 				$existing->value_date($blob);
-			} elsif ($value eq "json") { 
+			} elsif ($value eq "json") {
 
-				eval{ 
+				eval{
 					$existing->value_text(JSON::encode_json($blob));
 				};
 			}
@@ -144,21 +144,21 @@ sub setting {
 	} else {
 
 		return unless $existing;
-		if ($existing->value eq "text") { 
-			return $existing->value_text 
-		} elsif ($existing->value eq "date") { 
-			return $existing->value_date 
-		} elsif ($existing->value eq "json") { 
-			return eval { 
+		if ($existing->value eq "text") {
+			return $existing->value_text
+		} elsif ($existing->value eq "date") {
+			return $existing->value_date
+		} elsif ($existing->value eq "json") {
+			return eval {
 				return JSON::decode_json($existing->value_text);
-			}; 
+			};
 		}
 		return $existing->value;
 	}
 }
 
 
-sub all_settings { 
+sub all_settings {
 
 	my $self = shift;
 	my %all_settings;
@@ -167,34 +167,34 @@ sub all_settings {
     my $sth = $dbh->prepare("
 		select setting.tag, setting.value, setting.value_date, setting.value_text
 		from tourn_setting setting
-		where setting.tourn = ? 
+		where setting.tourn = ?
         order by setting.tag
     ");
-    
+
     $sth->execute($self->id);
-    
-    while( 
+
+    while(
 		my (
 			$tag, $value, $value_date, $value_text
 		)  = $sth->fetchrow_array()
-	) { 
+	) {
 
-		if ($value eq "date") { 
+		if ($value eq "date") {
 
-			my $dt = Tab::DBI::dateparse($value_date); 
+			my $dt = Tab::DBI::dateparse($value_date);
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value eq "text") { 
+		} elsif ($value eq "text") {
 
 			$all_settings{$tag} = $value_text;
 
-		} elsif ($value eq "json") { 
+		} elsif ($value eq "json") {
 
-			$all_settings{$tag} = eval { 
+			$all_settings{$tag} = eval {
 				return JSON::decode_json($value_text);
 			};
 
-		} else { 
+		} else {
 			$all_settings{$tag} = $value;
 		}
 	}
