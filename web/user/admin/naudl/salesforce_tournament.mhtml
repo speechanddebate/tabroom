@@ -10,22 +10,22 @@
 	Tab::School->columns(TEMP => "regioncode");
 
 	Tab::School->set_sql( naudl => "
-		select distinct school.*, region.code
+		select
+			distinct school.*, region.code
 		from school, chapter_circuit, region, circuit_setting
 		where school.tourn = ?
-		and school.chapter = chapter_circuit.chapter
-		and chapter_circuit.region = region.id
-		and chapter_circuit.circuit = circuit_setting.circuit
-		and circuit_setting.tag = 'naudl'
+			and school.chapter = chapter_circuit.chapter
+			and chapter_circuit.region = region.id
+			and chapter_circuit.circuit = circuit_setting.circuit
+			and circuit_setting.tag = 'naudl'
 	");
 
 	my @schools = Tab::School->search_naudl($tourn->id);
 
 	my %school_by_id = map {$_->id => $_} @schools;
-
 	my %event_by_id = map {$_->id => $_} $tourn->events;
-
 	my %entries_by_event;
+	my %entries;
 
 	foreach my $school (@schools) {
 
@@ -36,6 +36,7 @@
 			)
 		) {
 			push @{$entries_by_event{$entry->event->id}}, $entry;
+			$entries{$entry->id} = $entry;
 		}
 	}
 
@@ -49,7 +50,7 @@
 
 		my $round_robin = $event->setting('round_robin');
 
-		my $type = $event->type;
+		my $type = ucfirst($event->type);
 		$type = "Debate" unless $type;
 
 		my $last_prelim;
@@ -58,15 +59,10 @@
 
 		foreach my $round (sort {$b->name cmp $a->name} $event->rounds) {
 
-			$final = $round
-				if $round->type eq "final";
-
-			$final = $round
-				if $round->type eq "elim"
-				&& not defined $final;
+			$final = $round if $round->type eq "final";
+			$final = $round if $round->type eq "elim" && not defined $final;
 
 			push @elims, $round if $round->type eq "final";
-
 			push @elims, $round if $round->type eq "runoff";
 			push @elims, $round if $round->type eq "elim";
 
@@ -100,100 +96,207 @@
 		my $speaker_ref = pop @speaker_results;
 
 		my $dbh = Tab::DBI->db_Main();
-
-		my $sth = $dbh->prepare("
-            select
-                entry.id entry, student.id student, panel.bye bye,
-                    ballot.side, ballot.bye ballotbye, ballot.forfeit forfeit, ballot.judge judge,
-                    winloss.value win, point.value point,
-                    round.name round, round.type type,
-					naudl_updated.value_date, student.timestamp
-            from (entry, ballot, panel, round)
-                left join score point
-					on point.ballot = ballot.id
-					and point.tag = 'point'
-                left join score winloss
-					on winloss.ballot = ballot.id
-					and winloss.tag = 'winloss'
-                left join student
-					on point.student = student.id
-
-				left join student_setting naudl_updated
-					on naudl_updated.student = student.id
-					and naudl_updated.tag = 'naudl_updated'
-
-            where round.event = ?
-                and round.id = panel.round
-                and panel.id = ballot.panel
-                and ballot.entry = entry.id
-		");
-
-		$sth->execute($event->id);
-
 		my %student_data = ();
 
-		while(
-			my(
-				$entry_id, $student_id, $panel_bye,
-				$ballot_side, $ballot_bye, $ballot_forfeit, $ballot_judge,
-				$win, $points,
-				$round_name, $round_type,
-				$naudl_updated, $timestamp
-			) = $sth->fetchrow_array()
-		) {
+		if ($type eq "Speech" || $type eq "Congress") {
 
-			next if $ballot_forfeit;
+			my $sth = $dbh->prepare("
+				select
+					entry.id entry, student.id student, panel.bye bye,
+						ballot.speakerorder, ballot.bye ballotbye, ballot.forfeit forfeit, ballot.judge judge,
+						winloss.value win, point.value point, rank.value rank,
+						round.name round, round.type type,
+						naudl_updated.value_date, student.timestamp
+				from (entry, ballot, panel, round)
 
-			$student_data{"s".$student_id}{"naudl_updated"} = $naudl_updated;
-			$student_data{"s".$student_id}{"timestamp"} = $timestamp;
+					left join score rank
+						on rank.ballot = ballot.id
+						and rank.tag = 'rank'
 
-			push @{$student_data{"e".$entry_id}{"students"}}, $student_id;
+					left join score point
+						on point.ballot = ballot.id
+						and point.tag = 'point'
 
-			$student_data{"s".$student_id}{"total_points"} += $points;
+					left join score winloss
+						on winloss.ballot = ballot.id
+						and winloss.tag = 'winloss'
+
+					left join entry_student es
+						on es.entry = entry.id
+
+					left join student
+						on es.student = student.id
+
+					left join student_setting naudl_updated
+						on naudl_updated.student = student.id
+						and naudl_updated.tag = 'naudl_updated'
+
+				where round.event = ?
+					and round.id = panel.round
+					and panel.id = ballot.panel
+					and ballot.entry = entry.id
+			");
+
+			$sth->execute($event->id);
 
 
-			push @{$student_data{"e".$entry_id}{"rounds"}}, $round_name;
+			while(
+				my(
+					$entry_id, $student_id, $panel_bye,
+					$ballot_order, $ballot_bye, $ballot_forfeit, $ballot_judge,
+					$win, $points, $rank,
+					$round_name, $round_type,
+					$naudl_updated, $timestamp
+				) = $sth->fetchrow_array()
+			) {
 
-			$student_data{$entry_id}{$round_name}{"side"} = $ballot_side;
+				next unless $entries{$entry_id};
+				next if $ballot_forfeit;
 
-			$student_data{$entry_id}{$round_name}{"bye"}++ if $panel_bye;
-			$student_data{$entry_id}{$round_name}{"bye"}++ if $ballot_bye;
+				$student_data{"s".$student_id}{"naudl_updated"} = $naudl_updated;
+				$student_data{"s".$student_id}{"timestamp"} = $timestamp;
 
+				$student_data{"e".$entry_id}{"students"}{$student_id}++;
+				$student_data{"s".$student_id}{"total_points"} += $points;
+				$student_data{"e".$entry_id}{"rounds"}{$round_name}++;
 
-			if ($win > 0) {
-				$student_data{$entry_id}{$round_name}{"wins"}{$ballot_judge}++
-			} else {
-				$student_data{$entry_id}{$round_name}{"losses"}{$ballot_judge}++
+				$student_data{$entry_id}{$round_name}{"order"} = $ballot_order;
+				$student_data{$entry_id}{$round_name}{"bye"}++ if $panel_bye;
+				$student_data{$entry_id}{$round_name}{"bye"}++ if $ballot_bye;
+
+				if ($student_data{$entry_id}{$round_name}{"ranks"}) {
+					$student_data{$entry_id}{$round_name}{"ranks"} .= ",";
+				}
+
+				if ($rank) {
+					$student_data{$entry_id}{$round_name}{"ranks"} .= $rank;
+				} elsif ($type eq "Congress") {
+					$student_data{$entry_id}{$round_name}{"ranks"} .= "9";
+				}
+
+				if ($student_data{$entry_id}{$round_name}{"points"}) {
+					$student_data{$entry_id}{$round_name}{"points"} .= ",";
+				}
+
+				if ($points) {
+					$student_data{$entry_id}{$round_name}{"points"} .= $points;
+				}
+
+				$round_type = "prelim"
+					if $round_type ne "elim"
+					&& $round_type ne "final"
+					&& $round_type ne "runoff";
+
+				$student_data{"r".$round_name}{"type"} = $round_type;
 			}
 
-			$round_type = "prelim"
-				if $round_type ne "elim"
-				&& $round_type ne "final"
-				&& $round_type ne "runoff";
+		} else {
 
-			$student_data{"r".$round_name}{"type"} = $round_type;
+			my $sth = $dbh->prepare("
+				select
+						entry.id,
+						panel.bye,
+						ballot.side, ballot.bye, ballot.forfeit, ballot.judge,
+						score.tag,
+						score.student,
+						score.value,
+						student.id,
+						round.name, round.type,
+						naudl_updated.value_date, student.timestamp
+				from (entry, ballot, panel, round)
 
+					left join entry_student es on es.entry = entry.id
+					left join student on es.student = student.id
+
+					left join score on score.ballot = ballot.id
+						and (score.student = student.id OR score.student is NULL or score.student = 0)
+
+					left join student_setting naudl_updated
+						on naudl_updated.student = student.id
+						and naudl_updated.tag = 'naudl_updated'
+
+				where round.event = ?
+					and round.id = panel.round
+					and panel.id = ballot.panel
+					and ballot.entry = entry.id
+
+			");
+
+			$sth->execute($event->id);
+
+			while(
+				my(
+					$entry_id,
+					$panel_bye,
+					$ballot_side, $ballot_bye, $ballot_forfeit, $ballot_judge,
+					$tag, $score_student, $value,
+					$student_id,
+					$round_name, $round_type,
+					$naudl_updated, $timestamp
+				) = $sth->fetchrow_array()
+			) {
+
+				next unless $entries{$entry_id};
+				next if $ballot_forfeit;
+
+				if ($score_student) {
+					$student_id = $score_student;
+				}
+
+				$student_data{"s".$student_id}{"naudl_updated"} = $naudl_updated;
+				$student_data{"s".$student_id}{"timestamp"} = $timestamp;
+
+				$student_data{"e".$entry_id}{"students"}{$student_id}++;
+				$student_data{"e".$entry_id}{"rounds"}{$round_name}++;
+
+				$student_data{$entry_id}{$round_name}{"side"} = $ballot_side;
+				$student_data{$entry_id}{$round_name}{"bye"}++ if $panel_bye;
+				$student_data{$entry_id}{$round_name}{"bye"}++ if $ballot_bye;
+
+				if ($tag eq "winloss") {
+
+					unless ($student_data{$entry_id}{$round_name}{$ballot_judge}{"done_wins"}++) {
+						if ($value > 0) {
+							$student_data{$entry_id}{$round_name}{"wins"}{$ballot_judge}++
+						} else {
+							$student_data{$entry_id}{$round_name}{"losses"}{$ballot_judge}++
+						}
+					}
+
+				} elsif ($tag eq "points") {
+					unless ($student_data{$entry_id}{$round_name}{$ballot_judge}{"done_point"}++) {
+						$student_data{"s".$student_id}{"total_points"} += $value;
+					}
+				}
+
+				$round_type = "prelim"
+					if $round_type ne "elim"
+					&& $round_type ne "final"
+					&& $round_type ne "runoff";
+
+				$student_data{"r".$round_name}{"type"} = $round_type;
+
+			}
 		}
 
 		foreach my $entry (@{$entries_by_event{$event_id}}) {
 
 			my $entry_id = $entry->id;
-
 			next unless $student_data{"e".$entry_id}{"rounds"};
 
-			my @students =
-				@{$student_data{"e".$entry_id}{"students"}}
-				if $student_data{"e".$entry_id}{"students"};
+			my @students;
 
-			@students = $entry->students unless @students;
+			if ($student_data{"e".$entry_id}{"students"}) {
+				@students = keys %{$student_data{"e".$entry_id}{"students"}};
+			} else {
+				@students = $entry->students unless @students;
+			}
 
-			my %done;
+			Tab::debuglog("Entry $entry. Event ".$event->abbr." I have ".scalar @students." students");
 
 			my %entry_data;
 
-			foreach my $round_name (@{$student_data{"e".$entry_id}{"rounds"}}) {
-
-				next if $done{"r".$round_name}++;
+			foreach my $round_name (sort keys %{$student_data{"e".$entry_id}{"rounds"}}) {
 
 				my $side = "Affirmative" if $student_data{$entry_id}{$round_name}{"side"} == 1;
 				$side = "Negative" if $student_data{$entry_id}{$round_name}{"side"} == 2;
@@ -206,53 +309,85 @@
 
 					$entry_data{"Tournament_Rounds"}++;
 
-					my $wins = scalar(keys %{$student_data{$entry_id}{$round_name}{"wins"}});
+					if ($type eq "Speech" || $type eq "Congress") {
 
-					my $losses = scalar(keys %{$student_data{$entry_id}{$round_name}{"losses"}});
+						my $sample_student = $students[0];
 
-					if ($student_data{"r".$round_name}{"type"} eq "prelim") {
+						if ($student_data{"r".$round_name}{"type"} eq "prelim") {
 
-						if ($round_robin) {
+							if ($entry_data{"Ranks"}) {
+								$entry_data{"Ranks"} .= ",";
+							}
+							$entry_data{"Ranks"} .= $student_data{$entry_id}{$round_name}{"ranks"};
 
-							$entry_data{"Wins"} += $wins;
-							$entry_data{$side."_Wins"} += $wins;
-							$entry_data{"Losses"} += $losses;
-							$entry_data{$side."_Losses"} += $losses;
+							if ($entry_data{"Points"}) {
+								$entry_data{"Points"} .= ",";
+							}
+
+							$entry_data{"Points"} .= $student_data{$entry_id}{$round_name}{"points"};
+
+						} else {
+
+							if ($entry_data{"Elimination_Ranks"}) {
+								$entry_data{"Elimination_Ranks"} .= ",";
+							}
+							$entry_data{"Elimination_Ranks"} .= $student_data{$entry_id}{$round_name}{"ranks"};
+
+							if ($entry_data{"Elimination_Points"}) {
+								$entry_data{"Elimination_Points"} .= ",";
+							}
+
+							$entry_data{"Elimination_Points"} .= $student_data{$entry_id}{$round_name}{"points"};
+						}
+
+					} else {
+
+						my $wins = scalar(keys %{$student_data{$entry_id}{$round_name}{"wins"}});
+						my $losses = scalar(keys %{$student_data{$entry_id}{$round_name}{"losses"}});
+
+						if ($student_data{"r".$round_name}{"type"} eq "prelim") {
+
+							if ($round_robin) {
+
+								$entry_data{"Wins"} += $wins;
+								$entry_data{$side."_Wins"} += $wins;
+								$entry_data{"Losses"} += $losses;
+								$entry_data{$side."_Losses"} += $losses;
+
+							} else {
+
+								if ($wins > $losses) {
+
+									$entry_data{"Wins"}++;
+									$entry_data{$side."_Wins"}++;
+
+								} else {
+
+									$entry_data{"Losses"}++;
+									$entry_data{$side."_Losses"}++;
+								}
+							}
 
 						} else {
 
 							if ($wins > $losses) {
 
-								$entry_data{"Wins"}++;
+								$entry_data{"Elimination_Wins"}++;
 								$entry_data{$side."_Wins"}++;
 
 							} else {
 
-								$entry_data{"Losses"}++;
+								$entry_data{"Elimination_Losses"}++;
 								$entry_data{$side."_Losses"}++;
+
 							}
-
-						}
-
-					} else {
-
-						if ($wins > $losses) {
-
-							$entry_data{"Elimination_Wins"}++;
-							$entry_data{$side."_Wins"}++;
-
-						} else {
-
-							$entry_data{"Elimination_Losses"}++;
-							$entry_data{$side."_Losses"}++;
-
 						}
 
 					}
-
 				}
-
 			}
+
+			my %done;
 
 			foreach my $student_id (@students) {
 
@@ -275,6 +410,8 @@
 						);
 				}
 
+				Tab::debuglog("Pulling data for student $student_id into aggregates");
+
 				my %student_info = ();
 
 				$student_info{"tabroomid"} = "TR".$student_id;
@@ -287,7 +424,6 @@
 					if $speaker_ref->{$student_id};
 
 				$student_info{"Prelim_Rank"} = $prelim_ref->{"seed"}{$entry->id};
-
 				$student_info{"STA_Speaker_Points"} = $student_data{"s".$student_id}{"total_points"};
 
 				foreach my $key (keys %entry_data) {
@@ -297,9 +433,7 @@
 				push @{$sta_array{"stas_from_tabroom"}}, \%student_info;
 
 			}
-
 		}
-
 	}
 
 	my $new_students;
