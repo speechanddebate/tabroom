@@ -9,43 +9,143 @@
 
 	return if $m->cache_self(
 		key        => $key,
-		expires_in => '15m'
+		expires_in => '30m'
 	);
 
 	my $tourn =  Tab::Tourn->retrieve($tourn_id);
 	$m->abort unless $tourn;
 
-	Tab::Category->columns(TEMP => "nats");
+	my %judges;
+	my $category;
+	my %category;
 
-	Tab::Category->set_sql( field_reports => "
+	if ($category_id) {
 
-		select category.*, category_setting.tag as nats
+		my $dbh = Tab::DBI->db_Main();
 
-		from category, category_setting
-		where category.tourn = ?
+		$category = Tab::Category->retrieve($category_id);
 
-			and category_setting.category = category.id
-			and category_setting.value = 1
-			and (
-				category_setting.tag = 'field_report'
-			)
+		my $sth = $dbh->prepare("
+			select
+				judge.id, judge.first, judge.middle, judge.last, judge.hired, judge.obligation, judge.active,
+				hire_offer.value, hire_approved.value,
+				school.name, school.state, chapter.state, chapter.country,
+				person.id, paradigm.id, person.state, person.country,
+				rounds_per.value,
+				max_rounds.value,
+				category.id, category.name, category.abbr, nats_category.value
+			from (judge, category)
 
-		group by category.id
-		order by category.name
-	");
+				left join judge_setting hire_offer
+					on judge.id = hire_offer.judge
+					and hire_offer.tag='hire_offer'
 
-	my @categories = Tab::Category->search_field_reports($tourn->id);
+				left join judge_setting hire_approved
+					on judge.id = hire_approved.judge
+					and hire_approved.tag='hire_approved'
 
-	my $category =  Tab::Category->retrieve($category_id);
+				left join category_setting rounds_per
+					on category.id = rounds_per.category
+					and rounds_per.tag='rounds_per'
 
-	my $rounds_per = $category->setting("rounds_per") if $category;
+				left join category_setting max_rounds
+					on category.id = max_rounds.category
+					and max_rounds.tag='max_rounds'
+
+				left join category_setting nats_category
+					on category.id = nats_category.category
+					and nats_category.tag='nats_category'
+
+				left join school on judge.school = school.id
+				left join chapter on school.chapter = chapter.id
+				left join person on judge.person = person.id
+				left join person_setting paradigm on paradigm.person = person.id and paradigm.tag = 'paradigm'
+
+			where category.id = ?
+				and category.id = judge.category
+
+			group by judge.id
+		");
+
+		$sth->execute($category->id);
+
+		while (
+			my (
+				$id, $first, $middle, $last, $hired, $obligation, $active,
+				$hire_offer, $hire_approved,
+				$school_name, $school_state, $chapter_state, $chapter_country,
+				$person_id, $paradigm_id, $person_state, $person_country,
+				$rounds_per,
+				$max_rounds,
+				$category_id, $category_name, $category_abbr, $nats_category,
+			) = $sth->fetchrow_array()
+		) {
+
+			if ($hire_offer
+				&& (not defined $hire_approved)
+				&& ($obligation < 1)
+				&& ($hired < 1)
+			) {
+				next;
+			}
+
+			$judges{$id}{"first"}  = $first;
+			$judges{$id}{"middle"} = $middle;
+			if ($middle) {
+				$category{"middle"} = 1;
+			}
+			$judges{$id}{"last"}   = $last;
+
+			if ($school_name) {
+				$judges{$id}{"school"} = $school_name;
+
+				if ($chapter_state) {
+					$judges{$id}{"state"} = $chapter_state;
+				} else {
+					$judges{$id}{"country"} = $chapter_country;
+				}
+			} else {
+
+				if ($person_state) {
+					$judges{$id}{"state"} = $person_state;
+				} else {
+					$judges{$id}{"country"} = $person_country;
+				}
+			}
+
+			$judges{$id}{"person"} = $person_id;
+
+			if ($paradigm_id) {
+				$judges{$id}{"paradigm"} = 1;
+			}
+
+			$category{"name"} = $category_name;
+			$category{"abbr"} = $category_abbr;
+			$category{"nats"} = $nats_category;
+
+			if ($rounds_per) {
+				$category{"rounds_per"} = 1;
+
+				$judges{$id}{"rounds"}  = ($hired + $obligation);
+
+				if ($max_rounds) {
+					$category{"max_rounds"} = $max_rounds;
+					if ($category{"max_rounds"} < $judges{$id}{"rounds"}) {
+						$judges{$id}{"rounds"} = $category{"max_rounds"};
+					}
+				}
+			}
+		}
+
+		$sth->finish();
+		$dbh->disconnect();
+	}
+
 
     my $webpage = Tab::Webpage->search(
 		tourn => $tourn_id,
 		special => "judges"
 	)->first;
-
-	my $switch;
 
 </%init>
 
@@ -58,12 +158,10 @@
 			person => $person
 		&>
 
-%		if ($category) {
-
-%			my @judges = $m->comp("/funclib/category_judges.mas", category => $category);
+%		if ($category{"name"}) {
 
 			<span class="threequarters nospace">
-				<h4> <% scalar @judges %> Judges in <% $category->name %> </h4>
+				<h4><% $category{"name"} %>: <% scalar (keys %judges) %></h4>
 			</span>
 
 			<span
@@ -90,6 +188,12 @@
 						First
 					</th>
 
+%					if ($category{"middle"}) {
+						<th>
+							Middle
+						</th>
+%					}
+
 					<th>
 						Last
 					</th>
@@ -99,10 +203,10 @@
 					</th>
 
 					<th>
-						State
+						Location
 					</th>
 
-%					if ($rounds_per) {
+%					if ($category{"rounds_per"}) {
 						<th>
 							Rounds
 						</th>
@@ -114,14 +218,22 @@
 
 				<tbody>
 
-%				foreach my $judge (@judges) {
+<%perl>
 
+				foreach my $id (
+					sort {
+						$judges{$a}{"last"} cmp $judges{$b}{"last"}
+						|| $judges{$a}{"first"} cmp $judges{$b}{"first"}
+					} keys %judges
+				) {
+
+</%perl>
 					<tr>
 
 						<td class="nospace centeralign">
-%							if ($judge->paradigm) {
+%							if ($judges{$id}{"paradigm"}) {
 								<a
-									href="/index/paradigm.mhtml?judge_person_id=<% $judge->person->id %>"
+									href="/index/paradigm.mhtml?judge_person_id=<% $judges{$id}{"person"} %>"
 									class="buttonwhite bluetext fa fa-sm fa-file-text-o"
 									target="_blank"
 								></a>
@@ -129,45 +241,59 @@
 						</td>
 
 						<td class="nospace">
-%						if ($judge->paradigm) {
+%						if ($judges{$id}{"paradigm"}) {
 							<a class="white full padvert"
-								href="/index/paradigm.mhtml?judge_person_id=<% $judge->person->id %>"
+								href="/index/paradigm.mhtml?judge_person_id=<% $judges{$id}{"person"} %>"
 							>
 %						}
-							<% $judge->first %>
+							<% $judges{$id}{"first"} %>
 							</a>
 						</td>
+
+%						if ($category{"middle"}) {
+							<td class="nospace">
+%								if ($judges{$id}{"paradigm"}) {
+									<a class="white full padvert"
+										href="/index/paradigm.mhtml?judge_person_id=<% $judges{$id}{"person"} %>"
+									>
+%								}
+									<% $judges{$id}{"middle"} %>
+								</a>
+							</td>
+%						}
 
 						<td class="nospace">
-%							if ($judge->paradigm) {
+%							if ($judges{$id}{"paradigm"}) {
 								<a class="white full padvert"
-								href="/index/paradigm.mhtml?judge_person_id=<% $judge->person->id %>"
+								href="/index/paradigm.mhtml?judge_person_id=<% $judges{$id}{"person"} %>"
 								>
 %							}
-								<% $judge->last %>
+								<% $judges{$id}{"last"} %>
 							</a>
 						</td>
 
-
 						<td>
-							<% $judge->schname ? $judge->schname : "Hired" %>
+%							if ($judges{$id}{"school"}) {
+								<% $judges{$id}{"school"} %>
+%							} else {
+								<span class="hidden">1111111</span>
+								Hire
+%							}
 						</td>
 
 						<td class='centeralign'>
-							<% $judge->state %>
+							<% $judges{$id}{"state"} %>
 						</td>
 
-%						if ($rounds_per) {
-							<td>
-								<% $judge->obligation + $judge->hired %>
+%						if ($category{"rounds_per"}) {
+							<td class="centeralign">
+								<% $judges{$id}{"rounds"} %>
 							</td>
 %						}
 
 					</tr>
-
 %				}
 				</tbody>
-
 			</table>
 
 %		} elsif ($webpage) {
@@ -178,19 +304,17 @@
 
 %		} else {
 
-			<h6 class="martopmore centeralign">
-				Choose an judge category at right to see the judge list.
-			</h6>
+			<p class="martopmuchmore centeralign bigger semibold bluetext">
+				Choose a judge category at right to see the judge list.
+			</p>
 
-			<h6 class="martopmore centeralign">
-				You may not see all categories or divisions.
-				Tabroom only reports fields which the tournament
-				officials have released.
-			</h6>
+			<p class="martopmuchmore centeralign bigger semibold bluetext">
+				Tabroom only reports category lists which the tournament
+				officials have released, <br />so you may not be able to see
+				all judge categories.
+			</p>
 
 %		}
-
-		</table>
 
 	</div>
 
@@ -198,5 +322,4 @@
 		category => $category,
 		tourn    => $tourn
 	&>
-
 
