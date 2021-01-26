@@ -96,7 +96,6 @@ use Tab::JPool;
 use Tab::JPoolSetting;
 use Tab::JPoolJudge;
 use Tab::JPoolRound;
-use Tab::Qualifier;
 use Tab::Rating;
 use Tab::RatingSubset;
 use Tab::RatingTier;
