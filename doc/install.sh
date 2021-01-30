@@ -108,6 +108,7 @@ echo
 	liblingua-en-numbers-ordinate-perl \
 	libuniversal-can-perl \
 	texlive-latex-extra \
+	texlive-luatex \
 	libhtml-strip-perl \
 	libxml-simple-perl \
 	libnet-ldap-perl \
@@ -197,7 +198,7 @@ echo
 
 /etc/init.d/apache2 restart
 
-echo 
+echo
 echo "Yippee.  All done!  Unless, of course, you just saw errors."
 echo
 
