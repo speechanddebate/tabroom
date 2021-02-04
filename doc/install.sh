@@ -73,6 +73,7 @@ echo
 	liburi-perl \
 	liburi-encode-perl \
 	libwww-perl \
+	libtext-unidecode-perl \
 	make \
 	mariadb-client \
 	mariadb-common \
