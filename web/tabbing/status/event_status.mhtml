@@ -1,0 +1,173 @@
+<%args>
+	$person
+	$perms
+	$tourn
+	$tourn_settings
+	$event_id => undef
+	$session
+	$defaults
+</%args>
+<%init>
+
+
+	my @all = $tourn->events();
+
+	my @events = $m->comp(
+		"/funclib/event_perms.mas",
+		perms  => $perms,
+		events => \@all
+	);
+
+	my %status;
+	my %cache;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.name, event.abbr,
+			round.id, round.name, round.label, round.flighted,
+			CONVERT_TZ(round.start_time, '+00:00', tourn.tz),
+			CONVERT_TZ(timeslot.start, '+00:00', tourn.tz),
+			panel.id, panel.letter, panel.bye, panel.flight,
+			ballot.id, ballot.judge, ballot.bye, ballot.forfeit, ballot.audit, ballot.judge_started,
+			score.id, score.tag
+
+		from (round, panel, ballot, event, tourn, timeslot)
+
+			left join score on score.ballot = ballot.id
+				and score.tag in ('winloss', 'point', 'rank')
+
+		where round.event = ?
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and ballot.audit = 0
+			and ballot.bye = 0
+			and ballot.forfeit = 0
+			and panel.bye = 0
+			and round.event = event.id
+			and event.tourn = tourn.id
+			and round.timeslot = timeslot.id
+		order by round.name
+	");
+
+	my $last_sth = $dbh->prepare("
+		select
+			event.id, event.name, event.abbr,
+			round.id, round.name, round.label, round.type
+		from round, panel
+			where round.event = ?
+			and round.panel = panel.id
+		order by round.name desc
+		limit 1
+	");
+
+	foreach my $event (@events) {
+
+		$sth->execute($event->id);
+
+		while (
+			my (
+				$event_id, $event_name, $event_abbr,
+				$round_id, $round_name, $round_label, $flighted,
+				$round_start, $ts_start,
+				$panel_id, $panel_letter, $panel_bye, $flight,
+				$ballot_id, $judge, $bye, $forfeit, $audit, $judge_started,
+				$score_id, $score_tag
+			) = $sth->fetchrow_array()
+		) {
+
+			next if $cache{$event_id}{"rounds"}{$round_id}{"done_judges"}{$judge}{$flight}++;
+
+			unless ($status{$event_id}{"name"}) {
+				$status{$event_id}{"abbr"} = $event_abbr;
+				$status{$event_id}{"name"} = $event_name;
+			}
+
+			unless ($status{$event_id}{"rounds"}{$round_id}{"name"}) {
+
+				$status{$event_id}{"rounds"}{$round_id}{"number"}  = $round_name;
+				$status{$event_id}{"rounds"}{$round_id}{"flights"} = $flighted;
+
+				if ($round_start) {
+					$round_start = $m->comp("/funclib/showtime.mas", string => $round_start);
+				} else {
+					$round_start = $m->comp("/funclib/showtime.mas", string => $ts_start);
+				}
+
+				if ($round_label) {
+					$status{$event_id}{"rounds"}{$round_id}{"label"} = $round_label;
+				} else {
+					$status{$event_id}{"rounds"}{$round_id}{"label"} = "Rnd ".$round_name;
+				}
+			}
+
+			if (
+				$panel_bye
+				|| $bye
+				|| $forfeit
+				|| $audit
+			) {
+
+				$status{$event_id}{"rounds"}{$round_id}{$flight}{"complete"}++;
+				$cache{$event_id}{"started"}++;
+
+			} else {
+
+				$status{$event_id}{"rounds"}{$round_id}{$flight}{"undone"} = JSON::true;
+
+				if ($score_id) {
+
+					$status{$event_id}{"rounds"}{$round_id}{$flight}{"scored"}++;
+					$cache{$event_id}{"started"}++;
+					$status{$event_id}{"rounds"}{$round_id}{"in_progress"} = JSON::true;
+
+				} elsif ($judge_started) {
+
+					$status{$event_id}{"rounds"}{$round_id}{$flight}{"started"}++;
+					$cache{$event_id}{"started"}++;
+					$status{$event_id}{"rounds"}{$round_id}{"in_progress"} = JSON::true;
+
+				} else {
+
+					$status{$event_id}{"rounds"}{$round_id}{$flight}{"unstarted"}++;
+				}
+			}
+		}
+	}
+
+	foreach my $event_id (keys %status) {
+
+		foreach my $round_id (
+			sort {
+				$status{$event_id}{"rounds"}{$a}{"number"} <=> $status{$event_id}{"rounds"}{$b}{"number"}
+			} keys %{$status{$event_id}{"rounds"}}
+		) {
+
+			if ($cache{$event_id}{"started"}) {
+
+				unless ($status{$event_id}{"rounds"}{$round_id}{"in_progress"}) {
+					delete $status{$event_id}{"rounds"}{$round_id};
+				}
+
+			} else {
+
+				my $last = $cache{$event_id}{"last"};
+
+				if ($last) {
+					delete $status{$event_id}{"rounds"}{$last};
+				}
+				$cache{$event_id}{"last"} = $round_id;
+			}
+		}
+	}
+
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	my $json = JSON->new->allow_nonref->convert_blessed->utf8->pretty;
+	$m->print($json->encode(\%status));
+
+	$m->abort();
+
+</%init>
