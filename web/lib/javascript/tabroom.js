@@ -197,8 +197,20 @@
 						$("."+data.destroy).remove();
 					}
 
+					if (data.showAll) {
+						$("."+data.showAll).removeClass("hidden");
+					}
+
+					if (data.hideAll) {
+						$("."+data.hideAll).addClass("hidden");
+					}
+
 					if (data.reveal) {
 						$("#"+data.reveal).removeClass("hidden");
+					}
+
+					if (data.hide) {
+						$("#"+data.hide).addClass("hidden");
 					}
 
 					if (successAction === "destroy") {
