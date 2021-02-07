@@ -5,11 +5,6 @@
 	$person
 	$tourn_settings => undef
 	$only_category  => undef
-	$timeslot_id    => undef
-	$check_all      => undef
-	$type           => undef
-	$entry_only     => undef
-	$fs             => undef
 	$defaults       => undef
 </%args>
 <%init>
@@ -17,269 +12,50 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my %event_done;
-	my %event_round;
-	my %event_status;
+	my $dbh = Tab::DBI->db_Main();
 
-	my @all_events;
-	my %done_events = ();
-	my %ready_events = ();
+	my $dashboard_events = $defaults->{dashboard_events};
 
-	my $limit;
-	my $fields;
+	my $sth = $dbh->prepare("
+		select
+			round.id, round.name, round.label, round.flighted,
+			CONVERT_TZ(round.start_time, '+00:00', tourn.tz),
+			CONVERT_TZ(timeslot.start, '+00:00', tourn.tz),
+			event.id, event.name, event.abbr, event.type, event.category,
+			flight_offset.value
 
-	if ($only_category) {
+		from (event, round, timeslot, tourn)
 
-		my ($in_progress, $advance_me, $done)
-			= $m->comp('/funclib/event_breakable.mas',
-			tourn    => $tourn,
-			category => $only_category
-		);
+			left join event_setting nsda_event_category
+				on nsda_event_category.event = event.id
+				and nsda_event_category.tag = 'nsda_event_category'
 
-		%ready_events = map {$_ => 1} @{$advance_me};
-		%done_events = map {$_ => 1} @{$done};
-		$limit = " and event.category = ".$only_category->id;
+			left join event_setting flight_offset
+				on flight_offset.event = event.id
+				and flight_offset.tag = 'flight_offset'
 
-	} else {
+		where event.tourn = ?
+			and round.event = event.id
 
-		my ($in_progress, $advance_me, $done) =
-			$m->comp(
-			'/funclib/event_breakable.mas',
-				tourn    => $tourn,
-				category => $only_category
-			);
+			and exists (
+				select entry.id
+					from entry
+				where entry.active = 1
+				and entry.event = event.id
+			)
+			and event.tourn = tourn.id
+			and timeslot.id = round.timeslot
 
-		%ready_events = map {$_ => 1} @{$advance_me};
-		%done_events = map {$_ => 1} @{$done};
-		$fields .= ", category ";
-		$limit = " and event.category = category.id and category.tourn = ".$tourn->id;
-	}
-
-	Tab::Event->columns(TEMP => "nsda_code");
-
-	Tab::Event->set_sql(has_kidz => "
-		select event.*, nsda.value as nsda_code
-		from (event, entry $fields)
-			left join event_setting nsda
-				on nsda.tag = 'nsda_event_category'
-				and nsda.event = event.id
-		where entry.event = event.id
-		and entry.active = 1
-		$limit
-		group by event.id
+		order by nsda_event_category.value
 	");
 
-	@all_events = Tab::Event->search_has_kidz();
-
-	@all_events = $m->comp(
-		"/funclib/event_perms.mas",
-		perms  => $perms,
-		events => \@all_events
-	);
-
-	@all_events = sort {
-		$a->type cmp $b->type
-		|| $a->nsda_code <=> $b->nsda_code
-		|| $a->abbr cmp $b->abbr
-	} @all_events;
-
-	my @events;
-	my $debate;
-	my $speech;
-	my $congress;
-
-	my %event_flights;
-
-	my $num_rows = POSIX::floor( (scalar @all_events) / 4);
-	my $num_elements = POSIX::floor( (scalar @all_events) / $num_rows) if $num_rows;
-	my $count;
-
-	EVENT:
-	foreach my $event (@all_events) {
-
-		my $online_ballots = $event->setting('online_ballots');
-
-		my @rounds = $event->rounds;
-
-		my $round = $m->comp(
-			"/funclib/event_current_round.mas",
-			event => $event
-		);
-
-		my $done_round = $m->comp(
-			"/funclib/event_current_round.mas",
-			event => $event,
-			done => 1
-		);
-
-		my $last_round = pop @rounds;
-
-		$event_done{$event->id}++
-			if $done_round
-			&& $done_round->type eq "final";
-
-		$event_done{$event->id}++
-			if $done_round
-			&& $done_round->id == $last_round->id;
-
-		unless (
-			$event->type eq "speech"
-			|| $event->type eq "congress"
-		) {
-			$debate++;
-			next EVENT
-			if $type && $type ne "debate";
-		}
-
-		if ($event->type eq "speech") {
-			$speech++;
-			next EVENT
-			if $type && $type ne "speech";
-		}
-
-		if ($event->type eq "congress") {
-			$congress++;
-			next EVENT
-			if $type && $type ne "congress";
-		}
-
-		push @events, $event;
-
-		my $switch;
-
-		if ($round) {
-
-			my $flighted = $round->flighted();
-			$flighted = 1 unless $flighted;
-			$event_flights{$event->id} = $flighted;
-			my %done_round;
-
-			foreach my $flight (1 .. $flighted) {
-
-				next if $done_round{$round->id}{$flight};
-
-				unless ($event_round{$round->event->id}) {
-					my $round_name = $round->realname;
-					$round_name =~ s/Round/Rd/g;
-					$event_round{$event->id} = $round_name;
-				}
-
-				my $start = $round->start_time;
-				$start = $round->timeslot->start unless $start;
-
-				if ($start) {
-					$start->set_time_zone($tz);
-				}
-
-				if ($flighted > 1) {
-					$event_status{$event->id}{$flight} .= '<span class="full flighted ltborderbottom smaller nospace">';
-					$event_status{$event->id}{$flight} .= '<span class="nospace sixth leftalign">';
-					$event_status{$event->id}{$flight} .= '<h2 class="smaller nospace semibold martopless marleftless orangetext"> F'.$flight .'</h2></span>';
-					$event_status{$event->id}{$flight} .= '<span class="nospace fivesixths centeralign">';
-				} else {
-					$event_status{$event->id}{$flight} .= '<span class="nospace full">';
-				}
-
-				if ($online_ballots) {
-
-					my $unstarted = $m->comp(
-						"/funclib/round_status.mas",
-						round     => $round,
-						flight    => $flight,
-						unstarted => 1
-					);
-
-					if ($unstarted) {
-						$event_status{$event->id}{$flight} .= '
-							<span class="nospace third">
-							<span class="explain smaller"> Unstarted </span>
-							<h2 class="bluetext nospace centeralign">'.$unstarted.'</h2></span>';
-
-						$done_round{$round->id}{$flight}++;
-					}
-
-					my $unentered = $m->comp(
-						"/funclib/round_status.mas",
-						round     => $round,
-						flight    => $flight,
-						unentered => 1,
-						started   => 1
-					);
-
-					if ($unentered) {
-						$event_status{$event->id}{$flight} .= '
-							<span class="nospace third">
-							<span class="explain smaller"> Unentered </span>
-							<h2 class="redtext nospace centeralign">'.$unentered.'</h2></span>';
-
-						$done_round{$round->id}{$flight}++;
-					}
-
-				} else {
-
-					my $unentered = $m->comp(
-						"/funclib/round_status.mas",
-						round     => $round,
-						flight    => $flight,
-						unentered => 1
-					);
-
-					if ($unentered) {
-						$event_status{$event->id}{$flight} .= '
-							<span class="nospace third">
-							<span class="explain smaller"> Unentered </span>
-							<h2 class="redtext nospace centeralign">'.$unentered.'</h2></span>';
-					}
-					$done_round{$round->id}{$flight}++;
-				}
-
-				my $unconfirmed = $m->comp(
-					"/funclib/round_status.mas",
-					round       => $round,
-					flight      => $flight,
-					unconfirmed => 1
-				);
-
-				if ($unconfirmed) {
-					$event_status{$event->id}{$flight} .= '
-						<span class="nospace third">
-						<span class="explain smaller"> Unconfirmed </span>
-						<h2 class="orangetext nospace centeralign">'.$unconfirmed.'</h2></span>';
-
-					$done_round{$round->id}{$flight}++;
-				}
-
-				if ($flighted > 1) {
-					$event_status{$event->id}{$flight} .= '</span></span>';
-				} else {
-					$event_status{$event->id}{$flight} .= '</span>';
-				}
-
-				undef ($event_status{$event->id}{$flight}) unless $done_round{$round->id}{$flight};
-
-				if ($flight == $flighted) {
-					$event_status{$event->id}{$flight} .= '<div class="explain centeralign" style="bottom: 0px;">Start: ';
-					if ($start) {
-						$event_status{$event->id}{$flight} .= Tab::nicetime($start)."</div>";
-					} else {
-						$event_status{$event->id}{$flight} .= "No start listed?</div>";
-					}
-				}
-			}
-		}
-	}
-
-	my $num_types;
-	$num_types++ if $congress;
-	$num_types++ if $debate;
-	$num_types++ if $speech;
+	$sth->execute($tourn->id);
 
 </%init>
 
 	<div class="blankfull">
 
 		<div class="nospace">
-
 			<span class="third">
 				<h2>
 					Status
@@ -291,7 +67,6 @@
 					<% $tourn->name %>
 				</h4>
 			</span>
-
 		</div>
 
 		<& "tabbar.mas",
@@ -303,173 +78,275 @@
 		<div class="nospace">
 
 			<span class="third nospace">
-				<h4>Tournament Dashboard</h4>
+				<h4>Event Status</h4>
 			</span>
 
-			<span class="twothird nospace rightalign">
+			<span class="twothirds rightalign nospace">
 
-%				if ($num_types > 1) {
+				<span class="fifth rightalign semibold bluetext  padsettingtext marbottom" >
+					Hide events in
+				</span>
 
-					<a
-						href="dashboard.mhtml?type="
-						class="buttonwhite fifth centeralign smallish purpletext
-							<% $type ? "" : "invert" %>"
+				<span class="third leftalign padtop">
+					<form
+						action = "dashboard_ignore.mhtml"
+						method = "post"
+					>
+						<select
+							class = "fixedmost"
+							name = "category_id"
+							onChange = "this.form.submit();";
 						>
-						All
-					</a>
-
-%					if ($congress) {
-						<a
-							href="dashboard.mhtml?type=congress"
-							class="fifth centeralign smallish buttonwhite greentext
-								<% $type eq "congress" ? "invert" : "" %>"
-							>
-							Congress
-						</a>
-%					}
-
-%					if ($debate) {
-						<a
-							href="dashboard.mhtml?type=debate"
-							class="buttonwhite fifth centeralign smallish bluetext
-								<% $type eq "debate" ? "invert" : "" %>"
-							>
-							Debate
-						</a>
-%					}
-
-%					if ($speech) {
-
-						<a
-							href="dashboard.mhtml?type=speech"
-							class="buttonwhite fifth centeralign smallish redtext <% $type eq "speech" ? "invert" : "" %>"
-						>
-							Speech
-						</a>
-%					}
-%				}
-
+							<option value=""></option>
+%							foreach my $category ($tourn->categories) {
+								<option
+									value="<% $category->id %>"
+								><% $category->name %></option>
+%							}
+						</select>
+					</form>
+				</span>
 			</span>
 		</div>
 
 		<div class="centeralign">
 <%perl>
 
-		my $counter;
-		my $last_code;
+			while (
+				my (
+					$round_id, $round_name, $round_label, $round_flighted,
+					$round_start, $timeslot_start,
+					$event_id, $event_name, $event_abbr, $event_type, $event_category,
+					$flight_offset
+				) = $sth->fetchrow_array()
+			) {
 
-		foreach my $event (sort {
-			$a->type cmp $b->type
-			|| $a->nsda_code cmp $b->nsda_code
-			|| $a->abbr cmp $b->abbr
-		} @events) {
+				$round_label =~ s/finals/s/g;
+				$round_label =~ s/final//g;
 
-			my $flighted = $event_flights{$event->id};
-			$flighted = 1  if $ready_events{$event->id};
-			$flighted = 1  unless $flighted;
+				if ($perms->{"owner"}
+					|| $perms->{"full_admin"}
+					|| $perms->{"tabbing"}
+					|| ($perms->{"category_tab"} == $event_category)
+					|| ($perms->{"details"} && $perms->{"details"}{$event_id})
+				) {
 
-			if (scalar @events < 8 && $event->nsda_code) {
-
-				if ($last_code && $event->nsda_code ne $last_code) {
-					$m->print("<div class='full padlessvert'></div>");
-					undef $counter;
+				} else {
+					next;
 				}
 
-				$last_code = $event->nsda_code;
+				foreach my $flight (1 .. $round_flighted) {
 
-			} elsif ($counter >= 4) {
-				$m->print("<div class='full padlessvert'></div>");
-				undef $counter;
-			}
-
-			$counter++;
-</%perl>
-			<span
-				class = "padmore quarter border flexbox top"
-				style = "min-height: 150px; width: 212px;"
-			>
-
-				<div class="full nospace">
-					<span class="nospace twofifths nowrap">
-						<h5 class="nospace padvert"> <% $event->abbr %></h5>
-					</span>
-
-					<h6 class="nospace threefifths rightalign bluetext semibold">
-						<% $event_round{$event->id}
-							? substr($event_round{$event->id}, 0, 10)
-							: ""
-						%>
-					</h6>
-				</div>
-<%perl>
-
-				my $flight_statused;
-
-				foreach my $flight (1 .. $flighted) {
-
-					next unless $event_status{$event->id}{$flight}
-						|| $ready_events{$event->id}
-						|| $event_done{$event->id};
-
-					if ($event_status{$event->id}{$flight}) {
-						$flight_statused++;
-						$m->print($event_status{$event->id}{$flight});
+					unless ($round_start) {
+						$round_start = $timeslot_start;
 					}
-
-				}
-
-				unless ($flight_statused) {
 </%perl>
-%					if ($done_events{$event->id}) {
-						<div class="martop padmore">
-							<span class="dkgreen full centeralign martop">
-								All done!
-							<span>
+					<span
+						class = "hidden statusbox events rounds event_<% $event_id %> round_<% $round_id %>_<% $flight %>"
+						id    = "<% $round_id."-".$flight %>"
+					>
+
+						<div class="full nospace">
+							<span
+								class="twofifths nospace nowrap"
+								title="<% $event_name %>"
+							>
+								<h5 class="nospace padvert"><% $event_abbr %></h5>
+							</span>
+
+							<span
+								class="threefifths nospace rightalign"
+								title="Round <% $round_name %> <% $round_label %>"
+							>
+								<h6 class="nospace bluetext semibold padright nowrap">
+									<% $round_label ? $round_label : "Rnd ".$round_name %>
+									<% $round_flighted > 1 ? "Ft ".$flight : "" %>
+								</h6>
+							</span>
 						</div>
-%					} elsif ($ready_events{$event->id}) {
-						<div class="martop">
-%							if ($entry_only) {
-								<span class="dkyellow centeralign smallish full">
-%							} else {
+
+						<div
+							class = "full nospace centeralign italic smallish martop nospace"
+							id    = "<% $round_id."-".$flight."-start_time" %>"
+						>
+							<& "/funclib/showtime.mas",
+								string      => $round_start,
+								add_minutes => $flight_offset * ($flight - 1)
+							&>
+						</div>
+
+%						if ($flight == $round_flighted) {
+							<div
+								id="<% $round_id."-".$flight."-finished" %>"
+								class="centeralign martopmore full semibold greentext italic bigger marno littlebox"
+							>
+								Event Finished!
+							</div>
+
+							<div
+								id="<% $round_id."-".$flight."-advance" %>"
+								class="centeralign martopmore full semibold marno littlebox"
+							>
 								<a
-									class="dkyellow centeralign smallish full"
-								    href="/tabbing/break/index.mhtml?event_id=<% $event->id %>"
-								>
-%							}
-								Ready to advance
-%							if ($entry_only) {
+									href   = "/panel/schemat/show.mhtml?event_id=<% $event_id %>"
+									target = "_blank"
+									class  = "buttonwhite bluetext invert centeralign semibold"
+								>Ready to Advance</a>
+							</div>
+%						}
+
+						<div
+							class="centeralign nospace full"
+							id="<% $round_id."-".$flight."-status" %>"
+						>
+							<span
+								class = "third marno littlebox"
+								id    = "<% $round_id ."-".$flight."-unstartedbox"%>"
+							>
+								<span class="full explain nospace">
+									Unstarted
 								</span>
-%							} else {
-								</a>
-%							}
+								<span
+									class = "redtext semibold statustext"
+									id    = "<% $round_id ."-".$flight."-unstarted"%>"
+								>
+									0
+								</span>
+							</span>
+
+							<span
+								class = "third marno littlebox"
+								id    = "<% $round_id ."-".$flight."-startedbox"%>"
+							>
+								<span class="full explain nospace">
+									Started
+								</span>
+								<span
+									class = "orangetext semibold statustext"
+									id    = "<% $round_id ."-".$flight."-started"%>"
+								>
+									0
+								</span>
+							</span>
+
+							<span
+								class = "third marno littlebox"
+								id    = "<% $round_id ."-".$flight."-scoredbox"%>"
+							>
+								<span class="full explain nospace">
+									Results
+								</span>
+								<span
+									class = "yellowtext semibold statustext"
+									id    = "<% $round_id ."-".$flight."-scored"%>"
+								>
+									0
+								</span>
+							</span>
 						</div>
-%					}
+
+						<div class="full marno padno rightalign">
+							<a
+								title     = "Hide <% $event_abbr %>"
+								class     = "fa fa-times invert redtext smallish yellowhover padmore"
+								target_id = "<% $event_id %>"
+								onClick   = "postSwitch(this, 'dashboard_ignore.mhtml')"
+							></a>
+
+						</div>
+					</span>
 %				}
-			</span>
-%		}
-
-%		if ($person->site_admin && (defined $fs)) {
-
-			<span
-				class = "padmore quarter border"
-				style = "height: 150px; width: 212px;"
-			>
-
-				<div class="full marno marbottommore">
-					<h4 class="nospace centeralign martop">
-						Fucks Given
-					</h4>
-				</div>
-
-				<span class="nospace third">
-					<span class="explain smaller"> </span>
-					<h2 class="redtext nospace centeralign"><% $fs %></h2>
-				</span>
-
-			</span>
-
-%		}
-
+%			}
 		</div>
+
+%		if ($defaults->{dashboard_events}) {
+			<div class="full rightalign martopmuchmore">
+				<a
+					class         = "buttonwhite greentext yellowhover padmore semibold"
+					property_name = "all"
+					on_success    = "refresh"
+					onClick       = "postSwitch(this, 'dashboard_ignore.mhtml')"
+				>View All Events</a>
+			</div>
+%		}
 	</div>
 
+%#	Holy hell, Palmer wrote javascript in a hamfisted attempt to re-create
+%#	React or something.
+
+	<script>
+
+		function refreshStatus () {
+
+			$.getJSON('/tabbing/status/event_status.mhtml', function(status) {
+
+				$(".statusbox").addClass("hidden");
+				$(".littlebox").addClass("hidden");
+
+				Object.keys(status).map( function (event_id) {
+
+					var event = status[event_id];
+
+					Object.keys(event.rounds).map( function (round_id) {
+
+						var round = event.rounds[round_id];
+
+						for (var flight = 1; flight <= round.flighted; flight++) {
+
+							if (round[flight]) {
+
+								var roundKey = round_id + "-" + flight;
+
+								$("#" + roundKey + "-start_time").text(round[flight].start_time);
+
+								if (round[flight].undone) {
+
+									$("#" + roundKey).removeClass('hidden');
+
+									['unstarted', 'started', 'scored'].map( function(tag) {
+
+										var statusCount = round[flight][tag];
+										var roundTag = roundKey + "-" + tag;
+
+										if (statusCount) {
+											$("#"+roundTag+"box").removeClass("hidden");
+										}
+
+										if (statusCount != $("#"+roundTag).html()) {
+											$("#"+roundTag).fadeOut(500, function() {
+												$(this).html(statusCount);
+												$(this).fadeIn(1000);
+											});
+										}
+
+									});
+
+								} else if (flight == round.flighted && round.type === "final") {
+
+									$("#"+roundKey + "-finished").removeClass("hidden");
+									$("#" + roundKey).removeClass('hidden');
+
+								} else if (flight == round.flighted) {
+
+									$("#"+roundKey + "-advance").removeClass("hidden");
+									$("#" + roundKey).removeClass('hidden');
+
+								} else {
+
+								}
+
+							}
+						}
+					});
+
+				});
+			});
+		}
+
+		$(document).ready(function() {
+			refreshStatus();
+			setInterval(refreshStatus, 15000);
+		});
+
+
+	</script>
