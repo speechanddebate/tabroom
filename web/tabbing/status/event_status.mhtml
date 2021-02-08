@@ -25,7 +25,7 @@
 			score.id, score.tag,
 			flight_offset.value
 
-		from (round, panel, ballot, event, tourn, timeslot, judge)
+		from (round, panel, ballot, event, tourn, timeslot)
 
 			left join score on score.ballot = ballot.id
 				and score.tag in ('winloss', 'point', 'rank')
@@ -38,25 +38,42 @@
 			and round.event = event.id
 			and round.id = panel.round
 			and panel.id = ballot.panel
-			and ballot.bye = 0
-			and ballot.forfeit = 0
-			and panel.bye = 0
 			and round.event = event.id
 			and event.tourn = tourn.id
 			and round.timeslot = timeslot.id
-			and ballot.judge = judge.id
+
+			and ballot.audit = 0
+
+			and (
+				ballot.judge > 0
+				or ballot.bye = 1
+				or ballot.forfeit = 1
+				or panel.bye = 1
+			)
 		order by event.name, round.name
 	");
+
 
 	my $last_sth = $dbh->prepare("
 		select
 			event.id, event.name, event.abbr,
-			round.id, round.name, round.label, round.type
-		from round, panel
-			where round.event = ?
-			and round.panel = panel.id
-		order by round.name desc
-		limit 1
+			round.id, round.name, round.label, round.type,
+			CONVERT_TZ(round.start_time, '+00:00', tourn.tz),
+			CONVERT_TZ(timeslot.start, '+00:00', tourn.tz)
+		from round, panel, event, timeslot, tourn
+		where round.event = event.id
+			and round.id = panel.round
+			and event.tourn = ?
+			and round.name = (
+				select max(r2.name)
+					from round r2, panel p2
+					where r2.event = event.id
+					and r2.id = p2.round
+			)
+			and round.timeslot = timeslot.id
+			and timeslot.tourn = tourn.id
+		group by event.id
+		order by round.name
 	");
 
 	my $dashboard_events = $defaults->{dashboard_events};
@@ -162,6 +179,8 @@
 		}
 	}
 
+	$sth->finish();
+
 	foreach my $event_id (keys %status) {
 
 		foreach my $round_id (
@@ -213,11 +232,57 @@
 		}
 	}
 
+	$last_sth->execute($tourn->id);
+
+	while (
+		my (
+			$event_id, $event_name, $event_abbr,
+			$round_id, $round_name, $round_label, $round_type,
+			$round_start, $ts_start,
+		)  = $last_sth->fetchrow_array()
+	) {
+
+		if ($dashboard_events) {
+			next if $dashboard_events->{$event_id};
+		}
+		next if $status{$event_id}{"name"};
+
+		$status{$event_id}{"abbr"} = $event_abbr;
+		$status{$event_id}{"name"} = $event_name;
+		$status{$event_id}{"rounds"}{$round_id}{"number"}   = $round_name;
+		$status{$event_id}{"rounds"}{$round_id}{"flighted"} = 1;
+		$status{$event_id}{"rounds"}{$round_id}{"type"}     = $round_type;
+
+		if ($round_label) {
+			$status{$event_id}{"rounds"}{$round_id}{"label"} = $round_label;
+		} else {
+			$status{$event_id}{"rounds"}{$round_id}{"label"} = "Rnd ".$round_name;
+		}
+
+		my $start_time;
+
+		if ($round_start) {
+			$start_time = $m->comp("/funclib/showtime.mas",
+				string      => $round_start,
+				return      => 1
+			);
+		} else {
+			$start_time = $m->comp("/funclib/showtime.mas",
+				string      => $ts_start,
+				return      => 1
+			);
+		}
+
+		$status{$event_id}{"rounds"}{$round_id}{1}{'start_time'} = $start_time;
+	}
+
 	$m->clear_buffer();
 	$r->content_type('application/json');
 
 	my $json = JSON->new->allow_nonref->convert_blessed->utf8->pretty;
 	$m->print($json->encode(\%status));
+
+	$dbh->disconnect();
 
 	$m->abort();
 
