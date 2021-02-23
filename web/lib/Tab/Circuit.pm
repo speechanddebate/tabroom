@@ -13,7 +13,6 @@ Tab::Circuit->has_many(permissions => "Tab::Permission");
 Tab::Circuit->has_many(settings            => "Tab::CircuitSetting", "circuit");
 Tab::Circuit->has_many(tourn_circuits      => "Tab::TournCircuit");
 Tab::Circuit->has_many(chapter_circuits    => "Tab::ChapterCircuit");
-Tab::Circuit->has_many(circuit_memberships => "Tab::CircuitMembership");
 Tab::Circuit->has_many(awards              => "Tab::SweepAward");
 Tab::Circuit->has_many(sweep_awards        => "Tab::SweepAward");
 
@@ -23,26 +22,10 @@ Tab::Circuit->has_many(admins   => [ Tab::Permission     => 'person' ]);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-sub location { 
+sub location {
 	my $self = shift;
 	my $location = $self->state."/" if $self->state;
 	return $location.$self->country;
-}
-
-sub shorter_name {
-	my $self = shift;
-	my $name = $self->name;
-	$name =~ s/Catholic Forensic Circuit/CFL/;
-	$name =~ s/Catholic Forensics Circuit/CFL/;
-	$name =~ s/Forensic Circuit/FL/;
-	$name =~ s/Forensics Circuit/FL/;
-	$name =~ s/Forensic Association/FA/;
-	$name =~ s/Forensics Association/FA/;
-	$name =~ s/Urban Debate Circuit/UDL/;
-	$name =~ s/High School Speech Circuit/HSSL/;
-	$name =~ s/High School Debate Circuit/HSDL/;
-	$name =~ s/Debate Circuit/DL/;
-	return $name;
 }
 
 sub setting {
@@ -52,13 +35,13 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::CircuitSetting->search(  
+	my $existing = Tab::CircuitSetting->search(
 		circuit => $self->id,
 		tag    => $tag,
 	)->first;
 
-	if (defined $value) { 
-			
+	if (defined $value) {
+
 		if ($existing) {
 
 			$existing->value($value);
@@ -66,7 +49,7 @@ sub setting {
 			$existing->value_date($blob) if $value eq "date";
 			$existing->update;
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
 			}
 
@@ -80,11 +63,11 @@ sub setting {
 				value  => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
 			}
 
-			if ($value eq "date") { 
+			if ($value eq "date") {
 				$existing->value_date($blob);
 			}
 
@@ -103,7 +86,7 @@ sub setting {
 
 }
 
-sub all_settings { 
+sub all_settings {
 
 	my $self = shift;
 
@@ -114,24 +97,24 @@ sub all_settings {
     my $sth = $dbh->prepare("
 		select setting.tag, setting.value, setting.value_date, setting.value_text
 		from circuit_setting setting
-		where setting.circuit = ? 
+		where setting.circuit = ?
         order by setting.tag
     ");
-    
+
     $sth->execute($self->id);
-    
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
 
-		if ($value eq "date") { 
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
 
-			my $dt = Tab::DBI::dateparse($value_date); 
+		if ($value eq "date") {
+
+			my $dt = Tab::DBI::dateparse($value_date);
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value eq "text") { 
+		} elsif ($value eq "text") {
 
 			$all_settings{$tag} = $value_text;
 
-		} else { 
+		} else {
 
 			$all_settings{$tag} = $value;
 

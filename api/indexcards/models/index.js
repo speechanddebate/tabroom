@@ -36,26 +36,22 @@ Object.keys(db).forEach(function(modelName) {
 });
 
 // Relations, lots and lots of relations
-db.log.belongsTo(db.person,  { as: "Person",     foreignKey: "person"});
-db.log.belongsTo(db.tourn,   { as: "Tourn",      foreignKey: "tourn"});
-db.log.belongsTo(db.event,   { as: "Event",      foreignKey: "event"});
-db.log.belongsTo(db.school,  { as: "School",     foreignKey: "school"});
-db.log.belongsTo(db.entry,   { as: "Entry",      foreignKey: "entry"});
-db.log.belongsTo(db.judge,   { as: "Judge",      foreignKey: "judge"});
-db.log.belongsTo(db.section, { as: "oldSection", foreignKey: "old_panel"});
-db.log.belongsTo(db.section, { as: "newSection", foreignKey: "new_section"});
-db.log.belongsTo(db.fine,    { as: "Fine",       foreignKey: "fine"});
+db.changeLog.belongsTo(db.person,  { as: "Person",     foreignKey: "person"});
+db.changeLog.belongsTo(db.tourn,   { as: "Tourn",      foreignKey: "tourn"});
+db.changeLog.belongsTo(db.event,   { as: "Event",      foreignKey: "event"});
+db.changeLog.belongsTo(db.school,  { as: "School",     foreignKey: "school"});
+db.changeLog.belongsTo(db.entry,   { as: "Entry",      foreignKey: "entry"});
+db.changeLog.belongsTo(db.judge,   { as: "Judge",      foreignKey: "judge"});
+db.changeLog.belongsTo(db.section, { as: "oldSection", foreignKey: "old_panel"});
+db.changeLog.belongsTo(db.section, { as: "newSection", foreignKey: "new_section"});
+db.changeLog.belongsTo(db.fine,    { as: "Fine",       foreignKey: "fine"});
 
 db.circuit.belongsToMany(db.tourn,   { as: "Tourns",   foreignKey: "circuit", through: 'tourn_circuit'});
 db.circuit.belongsToMany(db.person,  { as: "Persons",  foreignKey: "circuit", through: 'permission'});
 db.circuit.belongsToMany(db.chapter, { as: "Chapters", foreignKey: "circuit", through: 'chapter_circuit'});
 
-db.circuit.hasMany(db.circuit_membership, { as: "CircuitMemberships", foreignKey: "circuit"});
 db.circuit.hasMany(db.file,               { as: "Files",              foreignKey: "circuit"});
 db.circuit.hasMany(db.permission,         { as: "Permissions",        foreignKey: "circuit"});
-
-db.circuit_membership.belongsTo(db.circuit, { as: "Circuit", foreignKey: "circuit"});
-db.circuit_membership.belongsTo(db.chapter, { as: "Chapter", foreignKey: "chapter"});
 
 db.site.belongsTo(db.person,  { as: 'Host',    foreignKey: "host"});
 db.site.belongsTo(db.circuit, { as: "Circuit", foreignKey: "circuit"});
@@ -81,7 +77,7 @@ db.room_strike.belongsTo(db.judge, { as: "Judge", foreignKey: "judge"});
 db.chapter.hasMany(db.student,       { as: "Students",      foreignKey: "chapter"});
 db.chapter.hasMany(db.permission,    { as: "Permissions",   foreignKey: "chapter"});
 db.chapter.hasMany(db.school,        { as: "Schools",       foreignKey: "chapter"});
-db.chapter.hasMany(db.chapter_judge, { as: "ChapterJudges", foreignKey: "chapter"});
+db.chapter.hasMany(db.chapterJudge, { as: "ChapterJudges", foreignKey: "chapter"});
 
 db.chapter.belongsTo(db.district, {as: "District", foreignKey: "district"});
 
@@ -90,16 +86,15 @@ db.chapter.belongsToMany(db.circuit, { as: "Circuits", foreignKey: "circuit", th
 db.chapter.belongsToMany(db.person,  { as: "Persons",  foreignKey: "circuit", through: 'permission'});
 
 
-db.chapter_circuit.belongsTo(db.circuit, {as: "Circuit", foreignKey: "circuit"});
-db.chapter_circuit.belongsTo(db.chapter, {as: "Chapter", foreignKey: "chapter"});
-db.chapter_circuit.belongsTo(db.region,  {as: "Region", foreignKey: "region"});
-db.chapter_circuit.belongsTo(db.circuit_membership, {as: "CircuitMembership", foreignKey: "circuit_membership"});
+db.chapterCircuit.belongsTo(db.circuit, {as: "Circuit", foreignKey: "circuit"});
+db.chapterCircuit.belongsTo(db.chapter, {as: "Chapter", foreignKey: "chapter"});
+db.chapterCircuit.belongsTo(db.region,  {as: "Region", foreignKey: "region"});
 
-db.chapter_judge.hasMany(db.judge,     { as: "Judges",        foreignKey: "chapter_judge"});
+db.chapterJudge.hasMany(db.judge,     { as: "Judges",        foreignKey: "chapter_judge"});
 
-db.chapter_judge.belongsTo(db.chapter, { as: "Chapter",       foreignKey: "chapter"});
-db.chapter_judge.belongsTo(db.person,  { as: "Person",        foreignKey: "person"});
-db.chapter_judge.belongsTo(db.person,  { as: "PersonRequest", foreignKey: "person_request"});
+db.chapterJudge.belongsTo(db.chapter, { as: "Chapter",       foreignKey: "chapter"});
+db.chapterJudge.belongsTo(db.person,  { as: "Person",        foreignKey: "person"});
+db.chapterJudge.belongsTo(db.person,  { as: "PersonRequest", foreignKey: "person_request"});
 
 
 db.district.hasMany(db.chapter,    { as: "Chapters",    foreignKey: "district"});
@@ -128,7 +123,7 @@ db.region.belongsToMany(db.person,  { as: "Persons",  foreignKey: "region", thro
 db.region.belongsToMany(db.chapter, { as: "Chapters", foreignKey: "region", through: 'chapter_circuit'});
 
 // Tournament wide relations
-db.tourn.hasMany(db.log,          { as: "Logs",         foreignKey: "tourn"});
+db.tourn.hasMany(db.changeLog,          { as: "ChangeLogs",         foreignKey: "tourn"});
 db.tourn.hasMany(db.category,     { as: "Categories",   foreignKey: "tourn"});
 db.tourn.hasMany(db.concession,   { as: "Concession",   foreignKey: "tourn"});
 db.tourn.hasMany(db.email,        { as: "Email",        foreignKey: "tourn"});
@@ -163,7 +158,7 @@ db.category.belongsTo(db.pattern,  { as: "Pattern", foreignKey: "pattern"});
 
 db.category.hasMany(db.event,      { as: "Events",      foreignKey: "category"});
 db.category.hasMany(db.judge,      { as: "Judges",      foreignKey: "category"});
-db.category.hasMany(db.log,        { as: "Logs",        foreignKey: "category"});
+db.category.hasMany(db.changeLog,        { as: "ChangeLogs",        foreignKey: "category"});
 db.category.hasMany(db.permission, { as: "Permissions", foreignKey: "category"});
 
 
@@ -176,7 +171,7 @@ db.event.hasMany(db.file,  { as: "Files",   foreignKey: "event"});
 db.event.hasMany(db.stats, { as: "Stats",   foreignKey: "event"});
 db.event.hasMany(db.entry, { as: "Entries", foreignKey: "event"});
 db.event.hasMany(db.round, { as: "Rounds",  foreignKey: "event"});
-db.event.hasMany(db.log,   { as: "Logs",    foreignKey: "event"});
+db.event.hasMany(db.changeLog,   { as: "ChangeLogs",    foreignKey: "event"});
 
 db.event.belongsToMany(db.sweep_set, { through: 'sweep_events'});
 
@@ -200,7 +195,7 @@ db.webpage.belongsTo(db.person,  { as: 'Editor', foreignKey: "last_editor"});
 db.webpage.belongsTo(db.webpage, { as: 'Parent', foreignKey: "tourn"});
 db.webpage.belongsTo(db.tourn,   { as: "Tourn",  foreignKey: "tourn"});
 
-db.webpage.hasMany(db.log,       { as: "Log",    foreignKey: "webpage"});
+db.webpage.hasMany(db.changeLog,       { as: "Log",    foreignKey: "webpage"});
 db.webpage.hasMany(db.file,      { as: "File",   foreignKey: "webpage"});
 db.webpage.hasMany(db.webpage,   { as: 'child',  foreignKey: 'parent'} );
 
@@ -222,29 +217,29 @@ db.tourn_setting.belongsTo(db.tourn,   { as: "Tourn",    foreignKey: "tourn"});
 db.tourn.hasMany(db.tourn_setting,     { as: "Settings", foreignKey: "tourn"});
 db.tourn_setting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
 
-db.category_setting.belongsTo(db.category, { as: "Category", foreignKey: "category"});
-db.category.hasMany(db.category_setting,   { as: "Settings", foreignKey: "category"});
-db.category_setting.belongsTo(db.setting,  { as: "Setting",  foreignKey: "setting"});
+db.categorySetting.belongsTo(db.category, { as: "Category", foreignKey: "category"});
+db.category.hasMany(db.categorySetting,   { as: "Settings", foreignKey: "category"});
+db.categorySetting.belongsTo(db.setting,  { as: "Setting",  foreignKey: "setting"});
 
-db.circuit_setting.belongsTo(db.circuit, { as: "Circuit",  foreignKey: "circuit"});
-db.circuit.hasMany(db.circuit_setting,   { as: "Settings", foreignKey: "circuit"});
-db.circuit_setting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
+db.circuitSetting.belongsTo(db.circuit, { as: "Circuit",  foreignKey: "circuit"});
+db.circuit.hasMany(db.circuitSetting,   { as: "Settings", foreignKey: "circuit"});
+db.circuitSetting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
 
-db.chapter_setting.belongsTo(db.chapter, { as: "Chapter",  foreignKey: "chapter"});
-db.chapter.hasMany(db.chapter_setting,   { as: "Settings", foreignKey: "chapter"});
-db.chapter_setting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
+db.chapterSetting.belongsTo(db.chapter, { as: "Chapter",  foreignKey: "chapter"});
+db.chapter.hasMany(db.chapterSetting,   { as: "Settings", foreignKey: "chapter"});
+db.chapterSetting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
 
 db.judge_setting.belongsTo(db.judge,   { as: "Judge",    foreignKey: "judge"});
 db.judge.hasMany(db.judge_setting,     { as: "Settings", foreignKey: "judge"});
 db.judge_setting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
 
-db.event_setting.belongsTo(db.event,   { as: "Event",    foreignKey: "event"});
-db.event.hasMany(db.event_setting,     { as: "Settings", foreignKey: "event"});
-db.event_setting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
+db.eventSetting.belongsTo(db.event,   { as: "Event",    foreignKey: "event"});
+db.event.hasMany(db.eventSetting,     { as: "Settings", foreignKey: "event"});
+db.eventSetting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
 
-db.entry_setting.belongsTo(db.entry,   { as: "Entry", foreignKey: "entry"});
-db.entry.hasMany(db.entry_setting,     { as: "Settings", foreignKey: "entry"});
-db.entry_setting.belongsTo(db.setting, { as: "Setting", foreignKey: "setting"});
+db.entrySetting.belongsTo(db.entry,   { as: "Entry", foreignKey: "entry"});
+db.entry.hasMany(db.entrySetting,     { as: "Settings", foreignKey: "entry"});
+db.entrySetting.belongsTo(db.setting, { as: "Setting", foreignKey: "setting"});
 
 db.round_setting.belongsTo(db.round,   { as: "Round", foreignKey: "round"});
 db.round.hasMany(db.round_setting,     { as: "Settings", foreignKey: "round"});
@@ -275,7 +270,7 @@ db.school.hasMany(db.entry,          { as: "Entries",    foreignKey: "school"});
 db.school.hasMany(db.rating,         { as: "Ratings",    foreignKey: "school"});
 db.school.hasMany(db.fine,           { as: "Fines",      foreignKey: "school"});
 db.school.hasMany(db.strike,         { as: "Strikes",    foreignKey: "school"});
-db.school.hasMany(db.log,            { as: "Logs",       foreignKey: "school"});
+db.school.hasMany(db.changeLog,            { as: "ChangeLogs",       foreignKey: "school"});
 db.school.hasMany(db.file,           { as: "Files",      foreignKey: "school"});
 db.school.hasMany(db.judge_hire,     { as: "JudgeHires", foreignKey: "school"});
 
@@ -293,14 +288,14 @@ db.fine.belongsTo(db.school, { as: "School", foreignKey: "school"});
 db.fine.belongsTo(db.region, { as: "Region", foreignKey: "region"});
 db.fine.belongsTo(db.judge,  { as: "Judge",  foreignKey: "judge"});
 
-db.fine.hasMany(db.log,      { as: "Logs",   foreignKey: "fine"});
+db.fine.hasMany(db.changeLog,      { as: "ChangeLogs",   foreignKey: "fine"});
 
 
 db.entry.hasMany(db.ballot,    { as: "Ballots",    foreignKey: "entry"});
 db.entry.hasMany(db.qualifier, { as: "Qualifiers", foreignKey: "entry"});
 db.entry.hasMany(db.rating,    { as: "Ratings",    foreignKey: "entry"});
 db.entry.hasMany(db.strike,    { as: "Strikes",    foreignKey: "entry"});
-db.entry.hasMany(db.log,       { as: "Logs",       foreignKey: "entry"});
+db.entry.hasMany(db.changeLog,       { as: "ChangeLogs",       foreignKey: "entry"});
 
 db.entry.belongsTo(db.tourn,   { as: "Tourn",        foreignKey: "tourn"});
 db.entry.belongsTo(db.school,  { as: "School",       foreignKey: "school"});
@@ -319,13 +314,13 @@ db.judge.hasMany(db.fine,          { as: "Fines",    foreignKey: "judge"});
 db.judge.hasMany(db.ballot,        { as: "Ballots",  foreignKey: "judge"});
 db.judge.hasMany(db.rating,        { as: "Ratings",  foreignKey: "judge"});
 db.judge.hasMany(db.strike,        { as: "Strikes",  foreignKey: "judge"});
-db.judge.hasMany(db.log,           { as: "Logs",     foreignKey: "judge"});
+db.judge.hasMany(db.changeLog,           { as: "ChangeLogs",     foreignKey: "judge"});
 
 db.judge.belongsTo(db.school,        { as: "School",        foreignKey: "school"});
 db.judge.belongsTo(db.category,      { as: "Category",      foreignKey: "category"});
 db.judge.belongsTo(db.category,      { as: "AltCategory",   foreignKey: "alt_category"});
 db.judge.belongsTo(db.category,      { as: "Covers",        foreignKey: "covers"});
-db.judge.belongsTo(db.chapter_judge, { as: "ChapterJudge",  foreignKey: "chapter_judge"});
+db.judge.belongsTo(db.chapterJudge, { as: "ChapterJudge",  foreignKey: "chapter_judge"});
 db.judge.belongsTo(db.person,        { as: "Person",        foreignKey: "person"});
 db.judge.belongsTo(db.person,        { as: 'PersonRequest', foreignKey: "person_request"});
 
@@ -343,22 +338,22 @@ db.judge_hire.belongsTo(db.category, { as: "Category",  foreignKey: "category"})
 
 db.concession.belongsTo(db.tourn, {as: "Tourn", foreignKey: "tourn"});
 
-db.concession.hasMany(db.concession_purchase, { as: "Purchases", foreignKey: "concession"});
-db.concession.hasMany(db.concession_type,     { as: "Types",     foreignKey: "concession"});
+db.concession.hasMany(db.concessionPurchase, { as: "Purchases", foreignKey: "concession"});
+db.concession.hasMany(db.concessionType,     { as: "Types",     foreignKey: "concession"});
 
-db.concession_type.hasMany(db.concession_option, { as: "Options",    foreignKey: "concession_type"});
-db.concession_type.belongsTo(db.concession,      { as: "Concession", foreignKey: "concession"});
+db.concessionType.hasMany(db.concessionOption, { as: "Options",    foreignKey: "concession_type"});
+db.concessionType.belongsTo(db.concession,      { as: "Concession", foreignKey: "concession"});
 
-db.concession_purchase.belongsTo(db.concession, { as: "Concession", foreignKey: "concession"});
-db.concession_purchase.belongsTo(db.school,     { as: "School",     foreignKey: "school"});
+db.concessionPurchase.belongsTo(db.concession, { as: "Concession", foreignKey: "concession"});
+db.concessionPurchase.belongsTo(db.school,     { as: "School",     foreignKey: "school"});
 
-db.concession_purchase.belongsToMany( db.concession_option,
+db.concessionPurchase.belongsToMany( db.concessionOption,
 	{ as: "Options", foreignKey: "concession_option", through: 'concession_purchase_option'}
 );
 
-db.concession_option.belongsTo(db.concession_type, {as: "Type", foreignKey:"concession_type"});
+db.concessionOption.belongsTo(db.concessionType, {as: "Type", foreignKey:"concession_type"});
 
-db.concession_option.belongsToMany( db.concession_purchase,
+db.concessionOption.belongsToMany( db.concessionPurchase,
 	{ as: "Purchases", foreignKey: "concession_purchase", through: 'concession_purchase_option'}
 );
 
@@ -413,7 +408,7 @@ db.strike.belongsTo(db.region,   { as: "Region",    foreignKey: "region"});
 db.strike.belongsTo(db.timeslot, { as: "Timeslot",  foreignKey: "timeslot"});
 db.strike.belongsTo(db.person,   { as: "EnteredBy", foreignKey: 'entered_by'});
 db.strike.belongsTo(db.shift,    { as: "Shift",     foreignKey: "shift"});
-db.strike.hasMany(db.log,        { as: "Log",       foreignKey: "event"});
+db.strike.hasMany(db.changeLog,        { as: "Log",       foreignKey: "event"});
 
 db.shift.hasMany(db.strike,     { as: "Strikes",  foreignKey: "shift"});
 db.shift.belongsTo(db.category, { as: "Category", foreignKey: "category"});
@@ -424,15 +419,15 @@ db.round.belongsTo(db.timeslot,     { as: "Timeslot",    foreignKey: "timeslot"}
 db.round.belongsTo(db.site,         { as: "Site",        foreignKey: "site"});
 db.round.belongsTo(db.tiebreak_set, { as: "TiebreakSet", foreignKey: "tiebreak_set"});
 
-db.round.hasMany(db.log, { as: "Logs", foreignKey: "round"});
+db.round.hasMany(db.changeLog, { as: "ChangeLogs", foreignKey: "round"});
 
 db.round.belongsToMany( db.rpool, {as: "RPools", foreignKey: "round", through: 'rpool_rounds'});
 
 db.section.belongsTo(db.room,   { as: "Room",    foreignKey: "room"});
 db.section.belongsTo(db.round,  { as: "Round",   foreignKey: "round"});
 db.section.belongsTo(db.ballot, { as: "Ballot",  foreignKey: "ballot"});
-db.section.hasMany(db.log,      { as: 'LogsOld', foreignKey: "old_panel"});
-db.section.hasMany(db.log,      { as: 'LogsNew', foreignKey: "new_panel"});
+db.section.hasMany(db.changeLog,      { as: 'LogsOld', foreignKey: "old_panel"});
+db.section.hasMany(db.changeLog,      { as: 'LogsNew', foreignKey: "new_panel"});
 
 db.ballot.belongsTo(db.entry,   { as: "Entry",   foreignKey: "entry"});
 db.ballot.belongsTo(db.judge,   { as: "Judge",   foreignKey: "judge"});
@@ -465,9 +460,9 @@ db.result_value.belongsTo(db.result, { as: "Result", foreignKey: "school"});
 db.person.hasMany(db.login,         { as: "Logins",        foreignKey: "person"});
 db.person.hasMany(db.student,       { as: "Students",      foreignKey: "person"});
 db.person.hasMany(db.judge,         { as: "Judges",        foreignKey: "person"});
-db.person.hasMany(db.chapter_judge, { as: "ChapterJudges", foreignKey: "person"});
+db.person.hasMany(db.chapterJudge, { as: "ChapterJudges", foreignKey: "person"});
 db.person.hasMany(db.conflict,      { as: "Conflicts",     foreignKey: "person"});
-db.person.hasMany(db.log,           { as: "Logs",          foreignKey: "person"});
+db.person.hasMany(db.changeLog,           { as: "ChangeLogs",          foreignKey: "person"});
 db.person.hasMany(db.permission,    { as: "Permissions",   foreignKey: "person"});
 
 db.person.belongsToMany(db.tourn,   { as: "TournIgnores", foreignKey: "person", through: 'tourn_ignore'});
