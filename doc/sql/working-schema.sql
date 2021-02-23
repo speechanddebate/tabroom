@@ -200,10 +200,6 @@ CREATE TABLE `fine` (
 -- Table structure for table `follower`
 
 CREATE TABLE `follower` (
-  `type` varchar(8) DEFAULT NULL,
-  `cell` bigint(20) DEFAULT NULL,
-  `domain` varchar(64) DEFAULT NULL,
-  `email` varchar(64) DEFAULT NULL,
   `follower` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `judge` int(11) DEFAULT NULL,
@@ -215,19 +211,11 @@ CREATE TABLE `follower` (
 -- Table structure for table `hotel`
 
 CREATE TABLE `hotel` (
-  `name` varchar(63) DEFAULT NULL,
-  `multiple` float DEFAULT NULL,
-  `surcharge` float DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
 
 -- Table structure for table `housing`
 
 CREATE TABLE `housing` (
-  `type` varchar(7) DEFAULT NULL,
-  `night` date DEFAULT NULL,
-  `waitlist` tinyint(1) NOT NULL DEFAULT 0,
-  `tba` tinyint(1) NOT NULL DEFAULT 0,
-  `requested` datetime DEFAULT NULL,
   `requestor` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `student` int(11) DEFAULT NULL,
@@ -244,12 +232,7 @@ CREATE TABLE `housing_slots` (
 -- Table structure for table `invoice`
 
 CREATE TABLE `invoice` (
-  `blusynergy` int(11) DEFAULT NULL,
-  `blu_number` varchar(31) DEFAULT NULL,
-  `total` decimal(8,2) NOT NULL DEFAULT 0.00,
-  `paid` tinyint(1) DEFAULT NULL,
   `school` int(11) NOT NULL,
-  `details` text DEFAULT NULL,
 
 -- Table structure for table `jpool`
 
