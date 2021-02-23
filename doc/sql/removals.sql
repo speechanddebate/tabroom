@@ -1,5 +1,3 @@
-
-
 alter table ballot drop hangout_admin;
 alter table category drop pattern;
 alter table change_log change created created_at datetime;
@@ -13,4 +11,8 @@ drop table circuit_membership;
 alter table chapter_setting drop created_at;
 drop table diocese;
 alter table district drop chair;
+alter table judge drop tmp;
+alter table judge drop score;
+alter table login drop source;
+alter table login drop password;
 

@@ -1,20 +1,21 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('judge_hire', { 
-		entries_requested: { 
+	return sequelize.define('judgeHire', {
+		table_name: 'judge_hire',
+		entries_requested: {
 			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
-		entries_accepted: { 
+		entries_accepted: {
 			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
-		rounds_requested: { 
+		rounds_requested: {
 			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
-		rounds_accepted: { 
+		rounds_accepted: {
 			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
