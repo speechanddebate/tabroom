@@ -2,14 +2,14 @@
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('log', { 
-		tableName: "change_log",  // mistakes were made - CLP
-		type: { 
-			type: DataTypes.STRING(8),
+	return sequelize.define('changeLog', {
+		table_name : "change_log",
+		tag: {
+			type: DataTypes.STRING(63),
 			allowNull: false
 		},
 		description: {
-			type: DataTypes.STRING,
+			type: DataTypes.TEXT("medium"),
 			allowNull: false
 		},
 		deleted          : {
@@ -17,7 +17,7 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull    : false,
 			defaultValue : false
 		},
-		created : { 
+		created_at : {
 			type         : DataTypes.DATE,
 			allowNull    : false
 		}
