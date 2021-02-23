@@ -2,9 +2,9 @@
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('jpool', { 
+	return sequelize.define('jpool', {
 		name: {
-			type: DataTypes.STRING(32),
+			type: DataTypes.STRING(63),
 			allowNull: false
 		}
 	});
