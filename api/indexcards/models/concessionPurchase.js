@@ -2,16 +2,17 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('concession_option', { 
-		name: {
-			type: DataTypes.STRING(8),
+	return sequelize.define('concessionPurchase', {
+		table_name : 'concession_purchase',
+		quantity: {
+			type: DataTypes.INTEGER(11),
 			allowNull: true
 		},
-		description : { 
-			type: DataTypes.STRING(31),
+		placed: {
+			type: DataTypes.DATE,
 			allowNull: true
 		},
-		disabled : { 
+		fulfilled: {
 			type: DataTypes.BOOLEAN,
 			allowNull: true
 		}

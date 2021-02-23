@@ -1,7 +1,9 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('chapter_judge', { 
+	return sequelize.define('chapterJudge', {
+		table_name: "chapter_judge",
+
 		first: {
 			type: DataTypes.STRING(127),
 			allowNull: false,
@@ -27,11 +29,11 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: 0
 		},
-		phone: { 
+		phone: {
 			type: DataTypes.STRING(31),
 			allowNull: true
 		},
-		email: { 
+		email: {
 			type: DataTypes.STRING(127),
 			allowNull: true
 		},
@@ -39,7 +41,7 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING,
 			allowNull: true
 		},
-		notes: { 
+		notes: {
 			type: DataTypes.STRING(255),
 			allowNull: true
 		},
@@ -49,6 +51,10 @@ module.exports = function(sequelize, DataTypes) {
 		},
 		gender: {
 			type: DataTypes.CHAR(4),
+			allowNull: true
+		},
+		nsda: {
+			type: DataTypes.INTEGER,
 			allowNull: true
 		}
 	});

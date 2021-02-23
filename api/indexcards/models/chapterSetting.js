@@ -1,13 +1,13 @@
-
-
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('event_setting', { 
+	return sequelize.define('chapterSetting', {
+		table_name : "chapter_setting",
 		tag: {
 			type: DataTypes.STRING(32),
-			allowNull: false
+			allowNull: false,
+			defaultValue: ''
 		},
 		value: {
 			type: DataTypes.STRING(64),
@@ -17,7 +17,7 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.TEXT,
 			allowNull: true
 		},
-		value_date: { 
+		value_date: {
 			type: DataTypes.DATE,
 			allowNull: true
 		}
