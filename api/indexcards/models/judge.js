@@ -1,9 +1,9 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('judge', { 
+	return sequelize.define('judge', {
 		code: {
-			type: DataTypes.INTEGER(6),
+			type: DataTypes.STRING(8),
 			allowNull: true
 		},
 		first: {
