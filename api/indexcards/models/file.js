@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('file', { 
+	return sequelize.define('file', {
 		tag: {
 			type: DataTypes.STRING(128),
 			allowNull: true
@@ -15,22 +15,22 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: ''
 		},
-		filename: { 
-			type: DataTypes.STRING(128),
+		filename: {
+			type: DataTypes.STRING(127),
 			allowNull: false,
 			defaultValue: ''
 		},
-		published: { 
+		published: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: 0
 		},
-		coach: { 
+		coach: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: 0
 		},
-		uploaded: { 
+		uploaded: {
 			type: DataTypes.DATE,
 			allowNull: true
 		}

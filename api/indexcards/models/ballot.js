@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('ballot', { 
+	return sequelize.define('ballot', {
 		side: {
 			type: DataTypes.INTEGER(1),
 			allowNull: true
@@ -24,16 +24,6 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
-		chair: {
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0'
-		},
-		seed: {
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0'
-		},
 		tv: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
@@ -44,11 +34,12 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
-		collected: {
-			type: DataTypes.DATE,
-			allowNull: true
+		chair: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
 		},
-		judge_started: { 
+		judge_started: {
 			type: DataTypes.DATE,
 			allowNull: true
 		}

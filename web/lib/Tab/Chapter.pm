@@ -3,8 +3,7 @@ use base 'Tab::DBI';
 Tab::Chapter->table('chapter');
 Tab::Chapter->columns(Primary => qw/id/);
 Tab::Chapter->columns(Essential => qw/name street city state zip postal country/);
-Tab::Chapter->columns(Others => qw/coaches self_prefs level naudl ipeds nces ceeb 
-									nsda district timestamp/);
+Tab::Chapter->columns(Others => qw/level naudl nsda district timestamp/);
 Tab::Chapter->columns(TEMP => qw/count prefs code member schoolid/);
 
 Tab::Chapter->has_a(district => 'Tab::District');
@@ -23,7 +22,7 @@ Tab::Chapter->has_many(permissions => 'Tab::Permission', 'chapter');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-sub location { 
+sub location {
 	my $self = shift;
 	my $location = $self->state."/" if $self->state;
 	return $location.$self->country;
@@ -31,9 +30,9 @@ sub location {
 
 sub full_member {
     my ($self, $circuit) = @_;
-	my @membership = Tab::ChapterCircuit->search( 
-		chapter => $self->id, 
-		circuit => $circuit->id 
+	my @membership = Tab::ChapterCircuit->search(
+		chapter => $self->id,
+		circuit => $circuit->id
 	);
 
     return $membership[0]->full_member if @membership;
@@ -42,12 +41,12 @@ sub full_member {
 
 sub circuit_code {
     my ($self, $circuit, $code) = @_;
-    my @membership = Tab::ChapterCircuit->search( 
+    my @membership = Tab::ChapterCircuit->search(
 		chapter => $self->id,
 		circuit => $circuit->id
 	);
 
-	if ($code) { 
+	if ($code) {
 		$membership[0]->code($code);
 		$membership[0]->update;
 		return;
@@ -59,8 +58,8 @@ sub circuit_code {
 
 sub region {
     my ($self, $circuit) = @_;
-    my @membership = Tab::ChapterCircuit->search( 
-		chapter => $self->id, 
+    my @membership = Tab::ChapterCircuit->search(
+		chapter => $self->id,
 		circuit => $circuit->id
 	);
     return $membership[0]->region if @membership;
@@ -69,9 +68,9 @@ sub region {
 
 sub circuit_membership {
     my ($self, $circuit) = @_;
-    my @membership = Tab::ChapterCircuit->search( 
-		chapter => $self->id, 
-		circuit => $circuit->id 
+    my @membership = Tab::ChapterCircuit->search(
+		chapter => $self->id,
+		circuit => $circuit->id
 	);
     return $membership[0] if @membership;
     return;
@@ -89,18 +88,18 @@ sub setting {
 	$/ = ""; # Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::ChapterSetting->search(  
+	my $existing = Tab::ChapterSetting->search(
 		chapter => $self->id,
 		tag     => $tag,
 	)->first;
 
-	if (defined $value) { 
-			
+	if (defined $value) {
+
 		if ($existing) {
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
-			} else { 
+			} else {
 				$existing->value($value);
 				$existing->value_text($blob) if $value eq "text";
 				$existing->value_date($blob) if $value eq "date";
@@ -117,11 +116,11 @@ sub setting {
 				value  => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
 			}
 
-			if ($value eq "date") { 
+			if ($value eq "date") {
 				$existing->value_date($blob);
 			}
 
@@ -151,24 +150,24 @@ sub all_settings {
     my $sth = $dbh->prepare("
 		select setting.tag, setting.value, setting.value_date, setting.value_text
 		from chapter_setting setting
-		where setting.chapter = ? 
+		where setting.chapter = ?
         order by setting.tag
     ");
-    
+
     $sth->execute($self->id);
-    
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
 
-		if ($value eq "date") { 
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
 
-			my $dt = Tab::DBI::dateparse($value_date); 
+		if ($value eq "date") {
+
+			my $dt = Tab::DBI::dateparse($value_date);
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value eq "text") { 
+		} elsif ($value eq "text") {
 
 			$all_settings{$tag} = $value_text;
 
-		} else { 
+		} else {
 
 			$all_settings{$tag} = $value;
 

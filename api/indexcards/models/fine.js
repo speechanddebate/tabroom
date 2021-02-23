@@ -1,30 +1,30 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('fine', { 
-		reason: { 
-			type: DataTypes.STRING(63),
+	return sequelize.define('fine', {
+		reason: {
+			type: DataTypes.STRING(255),
 			allowNull: true
 		},
-		amount: { 
-			type: DataTypes.FLOAT,
+		amount: {
+			type: DataTypes.DECIMAL(8,2),
 			allowNull: true
 		},
-		payment: { 
+		payment: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
 		},
-		levied_at: { 
+		levied_at: {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
-		deleted: { 
+		deleted: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
 		},
-		deleted_at: { 
+		deleted_at: {
 			type: DataTypes.DATE,
 			allowNull: true
 		}
