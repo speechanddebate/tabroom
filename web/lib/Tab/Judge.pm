@@ -2,16 +2,16 @@ package Tab::Judge;
 use base 'Tab::DBI';
 Tab::Judge->table('judge');
 Tab::Judge->columns(Primary => qw/id/);
-Tab::Judge->columns(Essential => qw/school first middle last code active 
-								ada category person chapter_judge score tmp/);
+Tab::Judge->columns(Essential => qw/school first middle last code active
+								ada category person chapter_judge/);
 
 Tab::Judge->columns(Others => qw /alt_category covers obligation hired person_request timestamp /);
 
-# Wow, that's a lot. 
-Tab::Judge->columns(TEMP => qw/categoryid schoolid tier pref panelid chair 
+# Wow, that's a lot.
+Tab::Judge->columns(TEMP => qw/categoryid schoolid tier pref panelid chair
 				   hangout_admin tourn avg eventtype eventid
-				   diet ballotid personid tab_rating cjid schoolname 
-				   schoolcode state regname regcode region standby 
+				   diet ballotid personid tab_rating cjid schoolname
+				   schoolcode state regname regcode region standby
 				   site neutral diversity
 /);
 
@@ -43,13 +43,13 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::JudgeSetting->search(  
+	my $existing = Tab::JudgeSetting->search(
 		judge => $self->id,
 		tag         => $tag,
 	)->first;
 
-	if (defined $value) { 
-			
+	if (defined $value) {
+
 		if ($existing) {
 
 			$existing->value($value);
@@ -57,7 +57,7 @@ sub setting {
 			$existing->value_date($blob) if $value eq "date";
 			$existing->update;
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
 			}
 
@@ -71,11 +71,11 @@ sub setting {
 				value => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
 			}
 
-			if ($value eq "date") { 
+			if ($value eq "date") {
 				$existing->value_date($blob);
 			}
 
@@ -93,7 +93,7 @@ sub setting {
 	}
 }
 
-sub all_settings { 
+sub all_settings {
 
 	my $self = shift;
 	my %all_settings;
@@ -103,24 +103,24 @@ sub all_settings {
     my $sth = $dbh->prepare("
 		select setting.tag, setting.value, setting.value_date, setting.value_text
 		from judge_setting setting
-		where setting.judge = ? 
+		where setting.judge = ?
         order by setting.tag
     ");
-    
+
     $sth->execute($self->id);
-    
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
 
-		if ($value eq "date") { 
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
 
-			my $dt = Tab::DBI::dateparse($value_date); 
+		if ($value eq "date") {
+
+			my $dt = Tab::DBI::dateparse($value_date);
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value eq "text") { 
+		} elsif ($value eq "text") {
 
 			$all_settings{$tag} = $value_text;
 
-		} else { 
+		} else {
 
 			$all_settings{$tag} = $value;
 		}
