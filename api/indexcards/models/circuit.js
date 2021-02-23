@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('circuit', { 
+	return sequelize.define('circuit', {
 		name: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
@@ -11,12 +11,16 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING(15),
 			allowNull: true
 		},
-		active: { 
+		tz: {
+			type: DataTypes.STRING(63),
+			allowNull: true
+		},
+		active: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: 0
 		},
-		state: { 
+		state: {
 			type: DataTypes.CHAR(4),
 			allowNull: true
 		},
@@ -24,16 +28,10 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.CHAR(4),
 			allowNull: true
 		},
-		tz: { 
-			type: DataTypes.STRING(63),
-			allowNull: true
-		},
-		webname: { 
+		webname: {
 			type: DataTypes.STRING(31),
 			allowNull: true
 		}
 	});
 };
-
-
 
