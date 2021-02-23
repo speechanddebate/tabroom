@@ -1,29 +1,29 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('chapter', { 
+	return sequelize.define('chapter', {
 		name: {
 			type: DataTypes.STRING(127),
 			allowNull: false,
 			defaultValue: ''
 		},
-		address: {
-			type: DataTypes.STRING,
+		street: {
+			type: DataTypes.STRING(255),
 			allowNull: true
 		},
 		city: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(63),
 			allowNull: true
 		},
 		state: {
 			type: DataTypes.CHAR(4),
 			allowNull: true
 		},
-		zip : { 
-			type: DataTypes.INTEGER(11),
+		zip : {
+			type: DataTypes.INTEGER(9),
 			allowNull: true
 		},
-		postal : { 
+		postal : {
 			type: DataTypes.STRING(15),
 			allowNull: true
 		},
@@ -46,6 +46,4 @@ module.exports = function(sequelize, DataTypes) {
 		}
 	});
 };
-
-
 

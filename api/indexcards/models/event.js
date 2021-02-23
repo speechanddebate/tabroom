@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('event', { 
+	return sequelize.define('event', {
 		name: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
@@ -12,8 +12,14 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: true
 		},
 		type: {
-			type: DataTypes.STRING(15),
-			allowNull: true
+			type: DataTypes.ENUM,
+			values: ['speech','congress','debate','wudc','wsdc'],
+			allowNull: false
+		},
+		level: {
+			type: DataTypes.ENUM,
+			values: ['open','jv','novice','champ','es-open','es-novice','middle'],
+			allowNull: false
 		},
 		fee: {
 			type: DataTypes.DECIMAL(8,2),
