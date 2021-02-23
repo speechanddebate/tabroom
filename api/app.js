@@ -12,6 +12,7 @@ import { initialize } from 'express-openapi';
 import apiDoc from './indexcards/routes/api-doc';
 import paths from './indexcards/routes/paths';
 import auth from './indexcards/helpers/auth';
+import db from './indexcards/models';
 
 import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';
 
