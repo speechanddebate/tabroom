@@ -174,6 +174,8 @@ echo
 cp /www/tabroom/doc/conf/tabroom.com.conf /etc/apache2/sites-available
 scp castor:/www/tabroom/web/lib/Tab/General.pm /www/tabroom/web/lib/Tab/General.pm
 
+cp /www/tabroom/doc/apache/mods-available /etc/apache2/mods-available/
+
 /usr/sbin/a2enmod apreq
 /usr/sbin/a2enmod proxy
 a2ensite tabroom.com
