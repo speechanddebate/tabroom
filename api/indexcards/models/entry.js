@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('entry', { 
+	return sequelize.define('entry', {
 		code: {
 			type: DataTypes.STRING(64),
 			allowNull: true
@@ -30,7 +30,7 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
-		waitlisted: {
+		waitlist: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
