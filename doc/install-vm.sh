@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Deployment script for tabroom.com web installations; this version creates a
-# Tabroom head node and skips the mysql server dump bits 
+# Tabroom head node and skips the mysql server dump bits
 
 # Tabroom must be installed from /www/tabroom/web; otherwise many more things
 # other than this script will break.
@@ -139,20 +139,27 @@ echo "Fixing Class DBI to talk to modern MySQL/MariaDB..."
 echo
 
 mv /usr/share/perl5/Class/DBI.pm /usr/share/perl5/Class/DBI.pm.orig
-cp /www/tabroom/doc/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
+cp /www/tabroom/doc/lib/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
 
 ln -s /cache/mason /www/tabroom/web/mason
 
 /bin/mkdir -p /cache/mason
 /bin/chmod 1777 /cache/mason
 
-echo 
+echo
+echo "Utility Scripts"
+echo
+
+ln -s /www/tabroom/doc/utility/refresh /usr/local/bin/
+ln -s /www/tabroom/doc/utility/deploy /usr/local/bin/
+
+echo
 echo "Postfix mail"
 echo
 
 apt -y install postfix
 
-echo 
+echo
 echo "Amazon S3 file access"
 echo
 
@@ -160,7 +167,7 @@ sudo -u tabroom scp castor:/www/tabroom/web/lib/s3.config /www/tabroom/web/lib/
 
 echo
 echo "Configuring the Tabroom logging..."
-echo 
+echo
 
 /bin/mkdir /var/log/tabroom
 chown syslog.adm /var/log/tabroom
@@ -179,15 +186,20 @@ cp /www/tabroom/doc/apache/mods-available/mpm_prefork.conf /etc/apache2/mods-ava
 ln -s /www/tabroom/doc/utility/refresh /usr/local/bin/
 ln -s /www/tabroom/doc/utility/deploy /usr/local/bin/
 
+cp /www/tabroom/doc/conf/status.conf /etc/apache2/mods-available/
+cp /www/tabroom/doc/conf/mpm_prefork.conf /etc/apache2/mods-available/
+
 /usr/sbin/a2enmod apreq
 /usr/sbin/a2enmod proxy
+/usr/sbin/a2enmod status
+
 a2ensite tabroom.com
 
 echo
 echo "Starting Apache..."
 echo
 
-systemctl restart apache2 
+systemctl restart apache2
 
 echo
 echo "Yippee.  All done!  Unless, of course, you just saw errors."

@@ -62,7 +62,6 @@ use Tab::ChapterJudge;
 use Tab::ChapterSetting;
 use Tab::Circuit;
 use Tab::CircuitSetting;
-use Tab::CircuitMembership;
 use Tab::Concession;
 use Tab::ConcessionOption;
 use Tab::ConcessionPurchase;

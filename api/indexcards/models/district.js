@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('district', { 
+	return sequelize.define('district', {
 		name: {
 			type: DataTypes.STRING(64),
 			allowNull: false,
@@ -11,15 +11,15 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING(16),
 			allowNull: true
 		},
-		location: { 
+		location: {
 			type: DataTypes.STRING(16),
 			allowNull: true
 		},
-		level: { 
+		level: {
 			type: DataTypes.INTEGER(4),
 			allowNull: true
 		},
-		realm: { 
+		realm: {
 			type: DataTypes.STRING(8),
 			allowNull: true
 		}
