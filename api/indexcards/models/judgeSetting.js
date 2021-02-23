@@ -3,7 +3,8 @@
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('jpool_setting', { 
+	return sequelize.define('judgeSetting', {
+		table_name: 'judge_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false
@@ -16,7 +17,7 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.TEXT,
 			allowNull: true
 		},
-		value_date: { 
+		value_date: {
 			type: DataTypes.DATE,
 			allowNull: true
 		}
