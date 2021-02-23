@@ -116,7 +116,7 @@ db.region.belongsTo(db.tourn,   { as: "Tourn", foreignKey: "tourn"});
 
 db.region.hasMany(db.strike,     { as: "Strikes",     foreignKey: "region"});
 db.region.hasMany(db.permission, { as: "Permissions", foreignKey: "region"});
-db.region.hasMany(db.judge_hire, { as: "JudgeHires",  foreignKey: "region"});
+db.region.hasMany(db.judgeHire, { as: "JudgeHires",  foreignKey: "region"});
 db.region.hasMany(db.fine,       { as: "Fines",       foreignKey: "region"});
 
 db.region.belongsToMany(db.person,  { as: "Persons",  foreignKey: "region", through: 'permission'});
@@ -229,9 +229,9 @@ db.chapterSetting.belongsTo(db.chapter, { as: "Chapter",  foreignKey: "chapter"}
 db.chapter.hasMany(db.chapterSetting,   { as: "Settings", foreignKey: "chapter"});
 db.chapterSetting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
 
-db.judge_setting.belongsTo(db.judge,   { as: "Judge",    foreignKey: "judge"});
-db.judge.hasMany(db.judge_setting,     { as: "Settings", foreignKey: "judge"});
-db.judge_setting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
+db.judgeSetting.belongsTo(db.judge,   { as: "Judge",    foreignKey: "judge"});
+db.judge.hasMany(db.judgeSetting,     { as: "Settings", foreignKey: "judge"});
+db.judgeSetting.belongsTo(db.setting, { as: "Setting",  foreignKey: "setting"});
 
 db.eventSetting.belongsTo(db.event,   { as: "Event",    foreignKey: "event"});
 db.event.hasMany(db.eventSetting,     { as: "Settings", foreignKey: "event"});
@@ -249,9 +249,9 @@ db.person_setting.belongsTo(db.person,  { as: "Person", foreignKey: "person"});
 db.person.hasMany(db.person_setting,    { as: "Settings", foreignKey: "person"});
 db.person_setting.belongsTo(db.setting, { as: "Setting", foreignKey: "setting"});
 
-db.jpool_setting.belongsTo(db.jpool);
-db.jpool.hasMany(db.jpool_setting,     { as: "Settings", foreignKey: "jpool"});
-db.jpool_setting.belongsTo(db.setting, { as: "Setting", foreignKey: "setting"});
+db.jpoolSetting.belongsTo(db.jpool);
+db.jpool.hasMany(db.jpoolSetting,     { as: "Settings", foreignKey: "jpool"});
+db.jpoolSetting.belongsTo(db.setting, { as: "Setting", foreignKey: "setting"});
 
 db.rpool_setting.belongsTo(db.rpool);
 db.rpool.hasMany(db.rpool_setting,     { as: "Settings", foreignKey: "rpool"});
@@ -272,7 +272,7 @@ db.school.hasMany(db.fine,           { as: "Fines",      foreignKey: "school"});
 db.school.hasMany(db.strike,         { as: "Strikes",    foreignKey: "school"});
 db.school.hasMany(db.changeLog,            { as: "ChangeLogs",       foreignKey: "school"});
 db.school.hasMany(db.file,           { as: "Files",      foreignKey: "school"});
-db.school.hasMany(db.judge_hire,     { as: "JudgeHires", foreignKey: "school"});
+db.school.hasMany(db.judgeHire,     { as: "JudgeHires", foreignKey: "school"});
 
 db.school.belongsTo(db.tourn,   { as: "Tourn",        foreignKey: "tourn"});
 db.school.belongsTo(db.chapter, { as: "Chapter",      foreignKey: "chapter"});
@@ -327,12 +327,12 @@ db.judge.belongsTo(db.person,        { as: 'PersonRequest', foreignKey: "person_
 db.judge.belongsToMany(db.section, { as: "Sections", foreignKey: "judge", through: 'ballot'});
 db.judge.belongsToMany(db.jpool,   { as: "JPools",  foreignKey: "judge", through: 'jpool_judges'});
 
-db.judge_hire.belongsTo(db.person,   { as: 'Requestor', foreignKey: "requestor"});
-db.judge_hire.belongsTo(db.judge,    { as: "Judge",     foreignKey: "judge"});
-db.judge_hire.belongsTo(db.tourn,    { as: "Tourn",     foreignKey: "tourn"});
-db.judge_hire.belongsTo(db.school,   { as: "School",    foreignKey: "school"});
-db.judge_hire.belongsTo(db.region,   { as: "Region",    foreignKey: "region"});
-db.judge_hire.belongsTo(db.category, { as: "Category",  foreignKey: "category"});
+db.judgeHire.belongsTo(db.person,   { as: 'Requestor', foreignKey: "requestor"});
+db.judgeHire.belongsTo(db.judge,    { as: "Judge",     foreignKey: "judge"});
+db.judgeHire.belongsTo(db.tourn,    { as: "Tourn",     foreignKey: "tourn"});
+db.judgeHire.belongsTo(db.school,   { as: "School",    foreignKey: "school"});
+db.judgeHire.belongsTo(db.region,   { as: "Region",    foreignKey: "region"});
+db.judgeHire.belongsTo(db.category, { as: "Category",  foreignKey: "category"});
 
 // Specialty registration data later
 
@@ -372,7 +372,7 @@ db.file.belongsTo(db.webpage, { as: "Webpage", foreignKey: "webpage"});
 db.hotel.belongsTo(db.tourn, {as: "Tourn", foreignKey: "tourn"});
 
 
-db.housing_slots.belongsTo(db.tourn, {as: "Tourn", foreignKey: "tourn"});
+db.housingSlots.belongsTo(db.tourn, {as: "Tourn", foreignKey: "tourn"});
 
 db.housing.belongsTo(db.person,  { as: "Requestor", foreignKey: "requestor"});
 db.housing.belongsTo(db.tourn,   { as: "Tourn",     foreignKey: "tourn"});

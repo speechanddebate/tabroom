@@ -1,13 +1,13 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('login', { 
+	return sequelize.define('login', {
 		username: {
 			type: DataTypes.STRING(64),
 			allowNull: false,
 			unique: true
 		},
-		password: {
+		sha512: {
 			type: DataTypes.STRING(128),
 			allowNull: true
 		},
