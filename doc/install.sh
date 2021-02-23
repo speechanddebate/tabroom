@@ -142,7 +142,7 @@ echo "Fixing Class DBI to talk to modern MySQL/MariaDB..."
 echo
 
 mv /usr/share/perl5/Class/DBI.pm /usr/share/perl5/Class/DBI.pm.orig
-cp /www/tabroom/doc/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
+cp /www/tabroom/doc/lib/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
 
 
 echo
@@ -158,19 +158,9 @@ echo
 /usr/bin/mysql -u root -f tabroom < /www/tabroom/doc/init/grant.sql
 
 echo
-echo "Loading the database file (sometimes takes a while, too.)..."
+echo "Loading the database schematic"
 echo
-
-/usr/bin/mysql -u root tabroom < /www/tabroom/doc/init/tabroom-schema.sql
-/usr/bin/mysql -u root -f -s tabroom < /www/tabroom/doc/init/account-create.sql
-
-echo
-echo "Updating the database to the latest version.  Please ignore errors here, there will be some..."
-echo
-
-sleep 2
-
-/usr/bin/mysql -u root -f -s tabroom < /www/tabroom/doc/init/schema-updates.sql
+/usr/bin/mysql -u root tabroom < /www/tabroom/doc/sql/current-schema.sql
 
 /bin/mkdir -p /www/tabroom/web/tmp
 /bin/mkdir -p /www/tabroom/web/mason
@@ -179,14 +169,33 @@ sleep 2
 /bin/chmod 1777 /www/tabroom/web/mason
 
 echo
+echo "Utility Scripts"
+echo
+
+ln -s /www/tabroom/doc/utility/database-sync /usr/local/bin/
+
+echo
+echo "Configuring the Tabroom logging..."
+echo
+
+/bin/mkdir /var/log/tabroom
+chown syslog.adm /var/log/tabroom
+cp /www/tabroom/doc/conf/rsyslog.conf /etc/rsyslog.d/90-tabroom.conf
+systemctl restart rsyslog
+
+echo
 echo "Configuring the local Apache webserver..."
 echo
 
-cp /www/tabroom/doc/local.tabroom.com.conf /etc/apache2/sites-available
+cp /www/tabroom/doc/conf/local.tabroom.com.conf /etc/apache2/sites-available
 cp /www/tabroom/web/lib/Tab/General.pm.default /www/tabroom/web/lib/Tab/General.pm
 
 echo "ServerName  local.tabroom.com" >> /etc/apache2/conf.d/hostname
 echo "127.0.1.21 local local.tabroom.com" >> /etc/hosts
+
+# Do it this way because the syntax for a virtual site that Ubuntu expects is a
+# moving target apparently.  Sometimes it wants you to include the .conf,
+# sometimes it just wants the domain....
 
 ln -s /etc/apache2/sites-available/local.tabroom.com.conf /etc/apache2/sites-enabled/0-local.tabroom.conf
 
