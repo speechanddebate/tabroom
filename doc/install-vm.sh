@@ -156,7 +156,7 @@ echo
 echo "Amazon S3 file access"
 echo
 
-scp castor:/www/tabroom/web/lib/s3.config /www/tabroom/web/lib/
+sudo -u tabroom scp castor:/www/tabroom/web/lib/s3.config /www/tabroom/web/lib/
 
 echo
 echo "Configuring the Tabroom logging..."
@@ -172,7 +172,12 @@ echo "Configuring the local Apache webserver..."
 echo
 
 cp /www/tabroom/doc/conf/tabroom.com.conf /etc/apache2/sites-available
-scp castor:/www/tabroom/web/lib/Tab/General.pm /www/tabroom/web/lib/Tab/General.pm
+sudo -u tabroom scp castor:/www/tabroom/web/lib/Tab/General.pm /www/tabroom/web/lib/Tab/General.pm
+cp /www/tabroom/doc/apache/mods-available/status.conf /etc/apache2/mods-available/
+cp /www/tabroom/doc/apache/mods-available/mpm_prefork.conf /etc/apache2/mods-available/
+
+ln -s /www/tabroom/doc/utility/refresh /usr/local/bin/
+ln -s /www/tabroom/doc/utility/deploy /usr/local/bin/
 
 /usr/sbin/a2enmod apreq
 /usr/sbin/a2enmod proxy
