@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('concession', { 
+	return sequelize.define('concession', {
 		name: {
 			type: DataTypes.STRING(64),
 			allowNull: false,
@@ -11,20 +11,24 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DECIMAL(6,2),
 			allowNull: true
 		},
-		description: { 
+		description: {
 			type: DataTypes.STRING,
 			allowNull: true
 		},
-		deadline: { 
+		deadline: {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
-		cap: { 
+		cap: {
 			type: DataTypes.INTEGER(11),
 			allowNull: true
 		},
-		school_cap: { 
+		school_cap: {
 			type: DataTypes.INTEGER(11),
+			allowNull: true
+		},
+		billing_code: {
+			type: DataTypes.STRING(63),
 			allowNull: true
 		}
 	});
