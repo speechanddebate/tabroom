@@ -15,4 +15,13 @@ alter table judge drop tmp;
 alter table judge drop score;
 alter table login drop source;
 alter table login drop password;
+rename nsda_event_category TO nsda_category;
+alter table panel drop started;
+alter table panel drop flip;
+alter table panel drop flip_at;
+alter table panel drop flip_status;
+alter table panel drop g_event;
+alter table panel drop room_ext_id;
+alter table panel drop invites_sent;
+alter table person modify gender char(4);
 
