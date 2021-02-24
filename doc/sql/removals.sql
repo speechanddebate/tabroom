@@ -23,5 +23,8 @@ alter table panel drop flip_status;
 alter table panel drop g_event;
 alter table panel drop room_ext_id;
 alter table panel drop invites_sent;
-alter table person modify gender char(4);
+alter table person drop gender;
+alter table person drop diversity;
+drop table qualifier;
+
 
