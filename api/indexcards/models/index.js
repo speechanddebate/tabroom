@@ -236,9 +236,9 @@ db.round_setting.belongsTo(db.round,   { as: "Round", foreignKey: "round"});
 db.round.hasMany(db.round_setting,     { as: "Settings", foreignKey: "round"});
 db.round_setting.belongsTo(db.setting, { as: "Setting", foreignKey: "setting"});
 
-db.person_setting.belongsTo(db.person,  { as: "Person", foreignKey: "person"});
-db.person.hasMany(db.person_setting,    { as: "Settings", foreignKey: "person"});
-db.person_setting.belongsTo(db.setting, { as: "Setting", foreignKey: "setting"});
+db.personSetting.belongsTo(db.person,  { as: "Person", foreignKey: "person"});
+db.person.hasMany(db.personSetting,    { as: "Settings", foreignKey: "person"});
+db.personSetting.belongsTo(db.setting, { as: "Setting", foreignKey: "setting"});
 
 db.jpoolSetting.belongsTo(db.jpool);
 db.jpool.hasMany(db.jpoolSetting,     { as: "Settings", foreignKey: "jpool"});
