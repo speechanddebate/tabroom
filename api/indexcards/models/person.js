@@ -13,15 +13,15 @@ module.exports = function(sequelize, DataTypes) {
 			unique: true
 		},
 		first: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(63),
 			allowNull: true
 		},
 		middle: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(63),
 			allowNull: true
 		},
 		last: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(63),
 			allowNull: true
 		},
 		tz: {
