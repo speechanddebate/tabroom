@@ -237,7 +237,6 @@ CREATE TABLE `invoice` (
 -- Table structure for table `jpool`
 
 CREATE TABLE `jpool` (
-  `name` varchar(63) DEFAULT NULL,
   `category` int(11) DEFAULT NULL,
   `site` int(11) NOT NULL DEFAULT 0,
   `parent` int(11) DEFAULT NULL,
@@ -257,24 +256,12 @@ CREATE TABLE `jpool_round` (
 -- Table structure for table `jpool_setting`
 
 CREATE TABLE `jpool_setting` (
-  `tag` varchar(32) NOT NULL,
-  `value` varchar(64) DEFAULT NULL,
-  `value_text` text DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
   `jpool` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
 -- Table structure for table `judge`
 
 CREATE TABLE `judge` (
-  `code` varchar(8) DEFAULT NULL,
-  `first` varchar(63) DEFAULT NULL,
-  `middle` varchar(63) DEFAULT NULL,
-  `last` varchar(63) DEFAULT NULL,
-  `active` tinyint(1) NOT NULL DEFAULT 0,
-  `ada` tinyint(1) NOT NULL DEFAULT 0,
-  `obligation` smallint(6) DEFAULT NULL,
-  `hired` smallint(6) DEFAULT NULL,
   `school` int(11) NOT NULL DEFAULT 0,
   `category` int(11) DEFAULT NULL,
   `alt_category` int(11) DEFAULT NULL,
@@ -282,17 +269,10 @@ CREATE TABLE `judge` (
   `chapter_judge` int(11) DEFAULT NULL,
   `person` int(11) NOT NULL DEFAULT 0,
   `person_request` int(11) DEFAULT NULL,
-  `score` int(11) DEFAULT NULL,
-  `tmp` varchar(63) DEFAULT NULL,
 
 -- Table structure for table `judge_hire`
 
 CREATE TABLE `judge_hire` (
-  `entries_requested` smallint(6) DEFAULT NULL,
-  `entries_accepted` smallint(6) DEFAULT NULL,
-  `rounds_requested` smallint(6) DEFAULT NULL,
-  `rounds_accepted` smallint(6) DEFAULT NULL,
-  `requested_at` datetime DEFAULT NULL,
   `requestor` int(11) DEFAULT NULL,
   `judge` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
@@ -303,10 +283,6 @@ CREATE TABLE `judge_hire` (
 -- Table structure for table `judge_setting`
 
 CREATE TABLE `judge_setting` (
-  `tag` varchar(31) NOT NULL DEFAULT '',
-  `value` varchar(127) NOT NULL DEFAULT '',
-  `value_text` mediumtext DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
   `judge` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
   `conditional` int(11) DEFAULT NULL,
@@ -314,27 +290,13 @@ CREATE TABLE `judge_setting` (
 -- Table structure for table `login`
 
 CREATE TABLE `login` (
-  `username` varchar(63) NOT NULL,
-  `password` varchar(63) DEFAULT NULL,
-  `sha512` varchar(128) DEFAULT NULL,
-  `accesses` int(11) NOT NULL DEFAULT 0,
-  `last_access` datetime DEFAULT NULL,
-  `pass_changekey` varchar(127) DEFAULT NULL,
-  `pass_change_expires` datetime DEFAULT NULL,
-  `source` char(4) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
 
 -- Table structure for table `nsda_event_category`
 
-CREATE TABLE `nsda_event_category` (
-  `name` varchar(31) DEFAULT NULL,
-  `type` enum('s','d','c') DEFAULT NULL,
-  `code` smallint(6) DEFAULT NULL,
-  `national` tinyint(1) NOT NULL DEFAULT 0,
-
 -- Table structure for table `panel`
 
-CREATE TABLE `panel` (
+CREATE TABLE `panel` (  -- HAS BECOME SECTION
   `letter` varchar(3) DEFAULT NULL,
   `flight` varchar(3) DEFAULT NULL,
   `bye` tinyint(1) NOT NULL DEFAULT 0,
