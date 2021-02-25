@@ -1,10 +1,11 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('section', { 
-		tableName : 'panel',    //Mistakes were made --CLP
+	return sequelize.define('section', {
+		//Mistakes were made --CLP
+		tableName : 'panel',
 		letter: {
-		  type: DataTypes.STRING,
+		  type: DataTypes.STRING(3),
 		  allowNull: true
 		},
 		flight: {
@@ -20,7 +21,12 @@ module.exports = function(sequelize, DataTypes) {
 		  type: DataTypes.INTEGER(6),
 		  allowNull: false,
 		  defaultValue: '0'
-		}
+		},
+		publish: {
+		  type: DataTypes.BOOLEAN,
+		  allowNull: false,
+		  defaultValue: '0'
+		},
 	});
 };
 
