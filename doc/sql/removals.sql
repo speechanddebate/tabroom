@@ -26,5 +26,10 @@ alter table panel drop invites_sent;
 alter table person drop gender;
 alter table person drop diversity;
 drop table qualifier;
-
-
+alter table rating drop sheet;
+drop table region_fine;
+alter table result drop honor;
+alter table result drop honor_site;
+alter table room drop building;
+alter table round drop post_results;
+alter table round change created created_at datetime;

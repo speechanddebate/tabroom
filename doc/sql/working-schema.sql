@@ -292,49 +292,20 @@ CREATE TABLE `judge_setting` (
 CREATE TABLE `login` (
   `person` int(11) DEFAULT NULL,
 
--- Table structure for table `nsda_event_category`
-
 -- Table structure for table `panel`
-
 CREATE TABLE `panel` (  -- HAS BECOME SECTION
-  `letter` varchar(3) DEFAULT NULL,
-  `flight` varchar(3) DEFAULT NULL,
-  `bye` tinyint(1) NOT NULL DEFAULT 0,
-  `started` datetime DEFAULT NULL,
-  `bracket` smallint(6) DEFAULT NULL,
-  `flip` varchar(511) DEFAULT NULL,
-  `flip_at` datetime DEFAULT NULL,
-  `flip_status` enum('winner','loser','anyone','done') NOT NULL DEFAULT 'done',
-  `publish` tinyint(1) DEFAULT NULL,
   `room` int(11) DEFAULT NULL,
   `round` int(11) DEFAULT NULL,
-  `g_event` varchar(63) DEFAULT NULL,
-  `room_ext_id` varchar(255) DEFAULT NULL,
-  `invites_sent` tinyint(1) NOT NULL DEFAULT 0,
-
--- Table structure for table `panel_setting`
-
-CREATE TABLE `panel_setting` (
-  `panel` int(11) DEFAULT NULL,
-  `tag` varchar(31) NOT NULL DEFAULT '',
-  `value` varchar(127) NOT NULL DEFAULT '',
-  `value_text` mediumtext DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
-  `setting` int(11) DEFAULT NULL,
 
 -- Table structure for table `pattern`
 
 CREATE TABLE `pattern` (
-  `name` varchar(31) DEFAULT NULL,
-  `type` tinyint(4) DEFAULT NULL,
-  `max` tinyint(4) DEFAULT NULL,
   `exclude` mediumtext DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
 
 -- Table structure for table `permission`
 
 CREATE TABLE `permission` (
-  `tag` varchar(15) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `region` int(11) DEFAULT NULL,
@@ -342,58 +313,16 @@ CREATE TABLE `permission` (
   `chapter` int(11) DEFAULT NULL,
   `circuit` int(11) DEFAULT NULL,
   `category` int(11) DEFAULT NULL,
-  `details` text DEFAULT NULL,
-
--- Table structure for table `person`
-
-CREATE TABLE `person` (
-  `email` varchar(127) NOT NULL DEFAULT '',
-  `first` varchar(63) DEFAULT NULL,
-  `middle` varchar(63) DEFAULT NULL,
-  `last` varchar(63) DEFAULT NULL,
-  `gender` char(1) DEFAULT NULL,
-  `pronoun` varchar(63) DEFAULT NULL,
-  `no_email` tinyint(1) NOT NULL DEFAULT 0,
-  `street` varchar(127) DEFAULT NULL,
-  `city` varchar(63) DEFAULT NULL,
-  `state` char(4) DEFAULT NULL,
-  `zip` varchar(15) DEFAULT NULL,
-  `postal` varchar(15) DEFAULT NULL,
-  `country` char(4) DEFAULT NULL,
-  `tz` varchar(63) DEFAULT NULL,
-  `phone` varchar(31) DEFAULT NULL,
-  `provider` varchar(63) DEFAULT NULL,
-  `site_admin` tinyint(1) DEFAULT NULL,
-  `diversity` tinyint(1) DEFAULT NULL,
-  `nsda` int(11) DEFAULT NULL,
 
 -- Table structure for table `person_setting`
 
 CREATE TABLE `person_setting` (
-  `tag` varchar(31) NOT NULL DEFAULT '',
-  `value` varchar(127) NOT NULL DEFAULT '',
-  `value_text` mediumtext DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
-
--- Table structure for table `qualifier`
-
-CREATE TABLE `qualifier` (
-  `name` varchar(63) DEFAULT NULL,
-  `result` varchar(127) DEFAULT NULL,
-  `entry` int(11) DEFAULT NULL,
-  `tourn` int(11) DEFAULT NULL,
-  `qualifier_tourn` int(11) DEFAULT NULL,
 
 -- Table structure for table `rating`
 
 CREATE TABLE `rating` (
-  `type` enum('school','entry','coach') DEFAULT NULL,
-  `draft` tinyint(1) NOT NULL DEFAULT 0,
-  `entered` datetime DEFAULT NULL,
-  `ordinal` smallint(6) NOT NULL DEFAULT 0,
-  `percentile` decimal(8,2) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
   `entry` int(11) DEFAULT NULL,
@@ -402,70 +331,22 @@ CREATE TABLE `rating` (
   `rating_subset` int(11) DEFAULT NULL,
   `sheet` int(11) DEFAULT NULL,
 
--- Table structure for table `rating_subset`
-
-CREATE TABLE `rating_subset` (
-  `name` varchar(63) DEFAULT NULL,
-  `category` int(11) DEFAULT NULL,
-
 -- Table structure for table `rating_tier`
 
 CREATE TABLE `rating_tier` (
-  `type` enum('coach','mpj') DEFAULT NULL,
-  `name` varchar(15) DEFAULT NULL,
-  `description` varchar(255) DEFAULT NULL,
-  `strike` tinyint(1) NOT NULL DEFAULT 0,
-  `conflict` tinyint(1) NOT NULL DEFAULT 0,
-  `min` decimal(8,2) DEFAULT NULL,
-  `max` decimal(8,2) DEFAULT NULL,
-  `start` tinyint(1) NOT NULL DEFAULT 0,
   `category` int(11) DEFAULT NULL,
   `rating_subset` int(11) DEFAULT NULL,
 
 -- Table structure for table `region`
 
 CREATE TABLE `region` (
-  `name` varchar(127) DEFAULT NULL,
-  `code` varchar(31) DEFAULT NULL,
-  `quota` tinyint(4) DEFAULT NULL,
-  `arch` tinyint(1) DEFAULT NULL,
-  `cooke_pts` int(11) DEFAULT NULL,
-  `sweeps` int(11) DEFAULT NULL,
   `circuit` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `created_at` datetime DEFAULT NULL,
 
--- Table structure for table `region_fine`
-
-CREATE TABLE `region_fine` (
-  `amount` float DEFAULT NULL,
-  `reason` varchar(63) DEFAULT NULL,
-  `levied_at` datetime DEFAULT NULL,
-  `levied_by` int(11) DEFAULT NULL,
-  `tourn` int(11) DEFAULT NULL,
-  `region` int(11) DEFAULT NULL,
-  `school` int(11) DEFAULT NULL,
-
--- Table structure for table `region_setting`
-
-CREATE TABLE `region_setting` (
-  `tag` varchar(32) DEFAULT NULL,
-  `value` varchar(127) DEFAULT NULL,
-  `value_text` text DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
-  `region` int(11) DEFAULT NULL,
-  `created_at` datetime DEFAULT NULL,
-  `setting` int(11) DEFAULT NULL,
-  `event` int(11) DEFAULT NULL,
-
 -- Table structure for table `result`
 
 CREATE TABLE `result` (
-  `rank` smallint(6) DEFAULT NULL,
-  `place` varchar(15) DEFAULT NULL,
-  `percentile` decimal(6,2) DEFAULT NULL,
-  `honor` varchar(255) DEFAULT NULL,
-  `honor_site` varchar(63) DEFAULT NULL,
   `result_set` int(11) DEFAULT NULL,
   `entry` int(11) DEFAULT NULL,
   `student` int(11) DEFAULT NULL,
@@ -476,31 +357,19 @@ CREATE TABLE `result` (
 -- Table structure for table `result_key`
 
 CREATE TABLE `result_key` (
-  `tag` varchar(63) DEFAULT NULL,
-  `description` varchar(255) DEFAULT NULL,
-  `no_sort` tinyint(1) DEFAULT NULL,
-  `sort_desc` tinyint(1) DEFAULT NULL,
   `result_set` int(11) DEFAULT NULL,
 
 -- Table structure for table `result_set`
 
 CREATE TABLE `result_set` (
-  `label` varchar(255) DEFAULT NULL,
-  `bracket` tinyint(1) NOT NULL DEFAULT 0,
-  `published` tinyint(1) NOT NULL DEFAULT 0,
-  `coach` tinyint(1) DEFAULT NULL,
-  `generated` datetime DEFAULT NULL,
   `tourn` int(11) NOT NULL,
   `sweep_set` int(11) DEFAULT NULL,
   `sweep_award` int(11) DEFAULT NULL,
   `event` int(11) NOT NULL,
-  `tag` enum('entry','student','chapter') NOT NULL DEFAULT 'entry',
 
 -- Table structure for table `result_value`
 
 CREATE TABLE `result_value` (
-  `value` mediumtext DEFAULT NULL,
-  `priority` smallint(6) DEFAULT NULL,
   `result` int(11) DEFAULT NULL,
   `result_key` int(11) NOT NULL DEFAULT 0,
   `tiebreak_set` int(11) NOT NULL DEFAULT 0,
@@ -508,29 +377,10 @@ CREATE TABLE `result_value` (
 -- Table structure for table `room`
 
 CREATE TABLE `room` (
-  `building` varchar(31) DEFAULT NULL,
-  `name` varchar(127) NOT NULL DEFAULT '',
-  `quality` smallint(6) DEFAULT NULL,
-  `capacity` smallint(6) DEFAULT NULL,
-  `rowcount` int(11) DEFAULT NULL,
-  `seats` tinyint(4) DEFAULT NULL,
-  `inactive` tinyint(1) NOT NULL DEFAULT 0,
-  `deleted` tinyint(1) NOT NULL DEFAULT 0,
-  `ada` tinyint(1) NOT NULL DEFAULT 0,
-  `notes` varchar(63) DEFAULT NULL,
-  `url` varchar(255) DEFAULT NULL,
-  `password` varchar(255) DEFAULT NULL,
-  `judge_url` varchar(255) DEFAULT NULL,
-  `judge_password` varchar(255) DEFAULT NULL,
-  `api` int(11) DEFAULT NULL,
   `site` int(11) DEFAULT NULL,
 
 -- Table structure for table `room_strike`
-
 CREATE TABLE `room_strike` (
-  `type` varchar(15) DEFAULT NULL,
-  `start` datetime DEFAULT NULL,
-  `end` datetime DEFAULT NULL,
   `room` int(11) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
@@ -540,17 +390,6 @@ CREATE TABLE `room_strike` (
 -- Table structure for table `round`
 
 CREATE TABLE `round` (
-  `type` varchar(15) DEFAULT NULL,
-  `name` smallint(6) DEFAULT NULL,
-  `label` varchar(31) DEFAULT NULL,
-  `flighted` tinyint(4) DEFAULT NULL,
-  `published` tinyint(4) DEFAULT NULL,
-  `post_results` tinyint(4) DEFAULT NULL,
-  `post_primary` tinyint(4) DEFAULT NULL,
-  `post_secondary` tinyint(4) DEFAULT NULL,
-  `post_feedback` tinyint(4) DEFAULT NULL,
-  `created` datetime DEFAULT NULL,
-  `start_time` datetime DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
   `timeslot` int(11) DEFAULT NULL,
   `site` int(11) DEFAULT NULL,
@@ -560,14 +399,12 @@ CREATE TABLE `round` (
 -- Table structure for table `round_setting`
 
 CREATE TABLE `round_setting` (
-  `tag` varchar(32) NOT NULL,
-  `value` varchar(64) DEFAULT NULL,
-  `value_text` mediumtext DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
   `round` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
 -- Table structure for table `rpool`
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++PALMER STOPPED HERE
 
 CREATE TABLE `rpool` (
   `name` varchar(31) DEFAULT NULL,

@@ -1,7 +1,8 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('room_strike', { 
+	return sequelize.define('roomStrike', {
+		table_name: 'room_strike',
 		type: {
 			type: DataTypes.STRING(15),
 			allowNull: false,
