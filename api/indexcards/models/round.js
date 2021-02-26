@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('round', { 
+	return sequelize.define('round', {
 		type: {
 			type: DataTypes.STRING(15),
 			allowNull: true
@@ -23,10 +23,17 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
-		post_results     : {
+		post_primary     : {
 			type         : DataTypes.INTEGER(4),
-			allowNull    : false,
-			defaultValue : '0'
+			allowNull    : true
+		},
+		post_secondary     : {
+			type         : DataTypes.INTEGER(4),
+			allowNull    : true
+		},
+		post_feedback     : {
+			type         : DataTypes.INTEGER(4),
+			allowNull    : true
 		},
 		created: {
 			type: DataTypes.DATE,

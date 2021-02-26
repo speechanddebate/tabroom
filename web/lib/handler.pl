@@ -99,7 +99,6 @@ use Tab::Rating;
 use Tab::RatingSubset;
 use Tab::RatingTier;
 use Tab::Region;
-use Tab::RegionFine;
 use Tab::RegionSetting;
 use Tab::Result;
 use Tab::ResultSet;
