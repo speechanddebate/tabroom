@@ -1,13 +1,9 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('room', { 
-		building: {
-			type: DataTypes.STRING(64),
-			allowNull: true
-		},
+	return sequelize.define('room', {
 		name: {
-			type: DataTypes.STRING(64),
+			type: DataTypes.STRING(127),
 			allowNull: false,
 			defaultValue: ''
 		},
@@ -17,6 +13,14 @@ module.exports = function(sequelize, DataTypes) {
 		},
 		capacity: {
 			type: DataTypes.INTEGER(6),
+			allowNull: true
+		},
+		rowcount: {
+			type: DataTypes.INTEGER(11),
+			allowNull: true
+		},
+		seats: {
+			type: DataTypes.INTEGER(4),
 			allowNull: true
 		},
 		inactive: {
@@ -34,8 +38,28 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
-		notes: { 
+		notes: {
 			type: DataTypes.STRING(63),
+			allowNull: true
+		},
+		url: {
+			type: DataTypes.STRING(255),
+			allowNull: true
+		},
+		judge_url: {
+			type: DataTypes.STRING(255),
+			allowNull: true
+		},
+		password: {
+			type: DataTypes.STRING(255),
+			allowNull: true
+		},
+		judge_password: {
+			type: DataTypes.STRING(255),
+			allowNull: true
+		},
+		api: {
+			type: DataTypes.INTEGER,
 			allowNull: true
 		}
 	});

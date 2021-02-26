@@ -1,17 +1,17 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('rating', { 
+	return sequelize.define('rating', {
 		type : {
 			type: DataTypes.ENUM('school', 'entry', 'coach'),
 			allowNull: true
 		},
-		draft : { 
+		draft : {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: 0
 		},
-		entered : { 
+		entered : {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
@@ -19,7 +19,7 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.INTEGER(6),
 			allowNull: true
 		},
-		percentile: { 
+		percentile: {
 			type: DataTypes.DECIMAL(8,2),
 			allowNull: true
 		}

@@ -2,13 +2,13 @@ package Tab::Entry;
 use base 'Tab::DBI';
 Tab::Entry->table('entry');
 Tab::Entry->columns(Primary => qw/id/);
-Tab::Entry->columns(Essential => qw/code name active dropped waitlist 
+Tab::Entry->columns(Essential => qw/code name active dropped waitlist
 									unconfirmed dq tourn school event/);
 
 Tab::Entry->columns(Others => qw/registered_by ada tba created_at timestamp/);
 
-Tab::Entry->columns(TEMP => qw/panelid speaks side ballot othername schname regname 
-								regcode region pullup won lost schoolid 
+Tab::Entry->columns(TEMP => qw/panelid speaks side ballot othername schname regname
+								regcode region pullup won lost schoolid
 								categoryid eventid
 								rejected_by rejected_at accepted_by accepted_at/);
 
@@ -23,34 +23,33 @@ Tab::Entry->has_many(settings => 'Tab::EntrySetting', 'entry');
 Tab::Entry->has_many(ballots => 'Tab::Ballot', 'entry');
 Tab::Entry->has_many(changes => 'Tab::ChangeLog', 'entry');
 Tab::Entry->has_many(ratings => 'Tab::Rating', 'entry');
-Tab::Entry->has_many(qualifiers => 'Tab::Qualifier', 'entry');
 Tab::Entry->has_many(entry_students => 'Tab::EntryStudent', 'entry');
 Tab::Entry->has_many(students => [Tab::EntryStudent => 'student']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp created_at/);
 
-sub add_student { 
+sub add_student {
 
 	my ($self, $student) = @_;
 
-	my @existing = Tab::EntryStudent->search( 
+	my @existing = Tab::EntryStudent->search(
 		student => $student,
 		entry   => $self->id
 	);
 
-	Tab::EntryStudent->create({ 
-		student => $student, 
+	Tab::EntryStudent->create({
+		student => $student,
 		entry => $self->id }) unless @existing;
 	return;
 }
 
-sub rm_student { 
+sub rm_student {
 
 	my ($self, $student) = @_;
 
-	my @existing = Tab::EntryStudent->search( 
+	my @existing = Tab::EntryStudent->search(
 		student => $student,
-		entry   => $self->id 
+		entry   => $self->id
 	);
 
 	foreach (@existing) { $_->delete; }
@@ -75,15 +74,15 @@ sub setting {
 	foreach (@existing) { $_->delete(); }
 
 	if (defined $value) {
-			
+
 		if ($existing) {
 
 			$existing->value($value);
 			$existing->value_text($blob) if $value eq "text";
 			$existing->value_date($blob) if $value eq "date";
 
-			if ($value eq "json") { 
-				my $json = eval{ 
+			if ($value eq "json") {
+				my $json = eval{
 					return JSON::encode_json($blob);
 				};
 				$existing->value_text($json);
@@ -91,7 +90,7 @@ sub setting {
 
 			$existing->update;
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
 			}
 
@@ -105,12 +104,12 @@ sub setting {
 				value => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
-			} elsif ($value eq "date") { 
+			} elsif ($value eq "date") {
 				$existing->value_date($blob);
-			} elsif ($value eq "json") { 
-				my $json = eval{ 
+			} elsif ($value eq "json") {
+				my $json = eval{
 					return JSON::encode_json($blob);
 				};
 				$existing->value_text($json);
@@ -122,21 +121,21 @@ sub setting {
 	} else {
 
 		return unless $existing;
-		if ($existing->value eq "text") { 
-			return $existing->value_text 
-		} elsif ($existing->value eq "date") { 
-			return $existing->value_date 
-		} elsif ($existing->value eq "json") { 
-			return eval { 
+		if ($existing->value eq "text") {
+			return $existing->value_text
+		} elsif ($existing->value eq "date") {
+			return $existing->value_date
+		} elsif ($existing->value eq "json") {
+			return eval {
 				return JSON::decode_json($existing->value_text);
-			}; 
+			};
 		}
 		return $existing->value;
 	}
 }
 
 
-sub all_settings { 
+sub all_settings {
 
 	my $self = shift;
 	my %all_settings;
@@ -145,30 +144,30 @@ sub all_settings {
     my $sth = $dbh->prepare("
 		select setting.tag, setting.value, setting.value_date, setting.value_text
 		from entry_setting setting
-		where setting.entry = ? 
+		where setting.entry = ?
         order by setting.tag
     ");
-    
+
     $sth->execute($self->id);
-    
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
 
-		if ($value eq "date") { 
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
 
-			my $dt = Tab::DBI::dateparse($value_date); 
+		if ($value eq "date") {
+
+			my $dt = Tab::DBI::dateparse($value_date);
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value eq "text") { 
+		} elsif ($value eq "text") {
 
 			$all_settings{$tag} = $value_text;
 
-		} elsif ($value eq "json") { 
+		} elsif ($value eq "json") {
 
-			$all_settings{$tag} = eval { 
+			$all_settings{$tag} = eval {
 				return JSON::decode_json($value_text);
 			};
-			
-		} else { 
+
+		} else {
 			$all_settings{$tag} = $value;
 		}
 	}
