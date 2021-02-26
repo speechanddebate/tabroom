@@ -20,14 +20,98 @@
 
 	my $now = DateTime->now( time_zone => $tz );
 
-	my $category = Tab::Category->retrieve($category_id)
-		if $category_id
-		&& $category_id == int($category_id);
+	my $dbh = Tab::DBI->db_Main();
 
-	undef $category
-		unless (not defined $category)
-		|| $category->tourn->id == $tourn->id;
+	my $sth = $dbh->prepare("
+		select
+			category.id, category.name, category.abbr,
+			CONVERT_TZ(public_signups_deadline.value_date, '+00:00', tourn.tz),
+			weekend.start, weekend.end,
+			rounds_per.value,
+			max_rounds.value,
+			double_entry.value,
+			public_signups_notice.value_text
 
+		from (category, category_setting public_signups_deadline, tourn)
+
+			left join category_setting cat_weekend
+				on cat_weekend.category = category.id
+				and cat_weekend.tag = 'weekend'
+
+			left join category_setting rounds_per
+				on rounds_per.category = category.id
+				and rounds_per.tag = 'rounds_per'
+
+			left join category_setting max_rounds
+				on max_rounds.category = category.id
+				and max_rounds.tag = 'max_rounds'
+
+			left join category_setting public_signups_notice
+				on public_signups_notice.category = category.id
+				and public_signups_notice.tag = 'public_signups_notice'
+
+			left join category_setting double_entry
+				on double_entry.category = category.id
+				and double_entry.tag = 'double_entry'
+
+			left join weekend on weekend.id = cat_weekend.value
+
+		where tourn.id = ?
+			and category.tourn = tourn.id
+			and public_signups_deadline.category = category.id
+			and public_signups_deadline.tag = 'public_signups_deadline'
+	");
+
+	$sth->execute($tourn->id);
+
+	my %categories;
+
+	while (
+		my (
+			$id, $name, $abbr,
+			$deadline,
+			$weekend_start, $weekend_end,
+			$rounds_per,
+			$max_rounds,
+			$public_signups_notice,
+			$double_entry
+		) = $sth->fetchrow_array()
+	) {
+		$categories{$id}{"name"}                  = $name;
+		$categories{$id}{"abbr"}                  = $abbr;
+		$categories{$id}{"deadline"}              = $deadline;
+		$categories{$id}{"weekend_start"}         = $weekend_start;
+		$categories{$id}{"weekend_end"}           = $weekend_end;
+		$categories{$id}{"rounds_per"}            = $rounds_per;
+		$categories{$id}{"max_rounds"}            = $max_rounds;
+		$categories{$id}{"public_signups_notice"} = $public_signups_notice;
+		$categories{$id}{"double_entry"}          = $double_entry;
+	}
+
+	$sth->finish();
+
+	unless ($category_id) {
+		my @keys = keys %categories;
+
+		if (scalar @keys == 1) {
+			$category_id = $keys[0];
+		}
+	}
+
+	my @already = $m->comp(
+		"/funclib/tourn_person_judges.mas",
+		tourn  => $tourn,
+		person => $person
+	);
+
+	my %already_by_cat = map {$_->category->id => $_} @already;
+
+	my %double_forbidden;
+
+	foreach my $already (@already) {
+		next if $already->category->setting("double_entry");
+		$double_forbidden{$already->category} = $already;
+	}
 
 </%init>
 
@@ -40,275 +124,195 @@
 			person     => $person
 		&>
 
-%		if ($category) {
+		<div class="full odd ltbordertop ltborderbottom rightalign">
 
-%			my %category_settings = $category->all_settings();
+			<span class="third rightalign semibold redtext">
+				Select a judge category:
+			</span>
 
-			<h5>Judge signup in <% $category->name %></h5>
+			<span class="third">
+				<form action="judge_signups.mhtml" method="post">
+					<input
+						type  = "hidden"
+						name  = "tourn_id"
+						value = "<% $tourn->id %>"
+					>
 
-%			if ($now > $category_settings{"public_signups_deadline"}) {
+					<select
+						class    = "fixedmost"
+						name     = "category_id"
+						onChange = "this.form.submit();"
+					>
 
-				<p class="bigger semibold redtext centeralign">
-					The signup deadline has passed.
-				</p>
-
-				<p class="biggish martopmore semibold bluetext centeralign">
-					The deadline for signups was
-					<% Tab::nicedt($category_settings{"public_signups_deadline"}) %>
-					<% Tab::tzname($tz) %>.
-				</p>
-
-%			} else {
-
-%				unless ($person) {
-
-					<p class="bigger semibold redtext centeralign">
-						You must be logged in to register as a judge.
-					</p>
-
-					<p class="biggish martopmore semibold bluetext centeralign">
-						If you have a Tabroom.com account, you must first
-						<a
-							href   = "/user/login/login.mhtml?return=judgesign&category_id=<% $category_id %>&tourn_id=<% $tourn_id %>"
-							target = "_blank"
-							class  = "inline"
-						>log in.</a>
-					</p>
-
-					<p class="biggish martopmore semibold bluetext centeralign">
-						If you do not, first
-						<a
-							href   = "/user/login/new_user.mhtml"
-							target = "_blank"
-							class  = "inline"
-						>sign up.</a>
-					</p>
-
+						<option value=""></option>
 <%perl>
+					foreach my $cat_id (
+						sort {
+							$categories{$a}{"abbr"} <=> $categories{$b}{"abbr"}
+						} keys %categories
+					) {
 
-				} else {
+						my $deadline = $m->comp("/funclib/showdate.mas",
+							string => $categories{$cat_id}{"public_signups_deadline"},
+							object => 1
+						);
 
-					my @already = $m->comp(
-						"/funclib/tourn_person_judges.mas",
-						tourn  => $tourn,
-						person => $person
-					);
+						next if $now > $deadline;
+						$categories{$cat_id}{deadline} = $deadline;
 
-
-					my $judge = shift @already if @already;
-
-					my $cant;
-
-					if ($judge) {
-
-						if ($judge->category->id != $category->id) {
+						my $weekend = $m->comp("/funclib/showdate.mas",
+							string => $categories{$cat_id}{"weekend_start"},
+							length => "shortest"
+						);
 </%perl>
-							<h5>You are already registered in <% $category->abbr %></h5>
 
-%							unless ($judge->category->setting("double_entry") && $category->setting("double_entry")) {
-								<p>You cannot register in both <% $judge->category->abbr %> and <% $category->abbr %></p>
-
-%								$cant++;
-%							}
-
-%						}
+						<option
+							value    = "<% $cat_id %>"
+							<% $category_id == $cat_id ? "selected" : "" %>
+						><%
+							$categories{$cat_id}{"name"}
+						%> <% $weekend
+								?  "(".$weekend.")"
+								: ""
+						%> </option>
 %					}
 
-%					unless ($cant) {
-
-						<form
-							action = "judge_signups_save.mhtml"
-							method = "post"
-						>
-
-							<input
-								type  = "hidden"
-								name  = "category_id"
-								value = "<% $category->id %>"
-							>
-
-							<input
-								type  = "hidden"
-								name  = "judge_id"
-								value = "<% $judge ? $judge->id : "" %>"
-							>
-
-							<input
-								type  = "hidden"
-								name  = "tourn_id"
-								value = "<% $tourn->id %>"
-							>
-
-%							my @shifts = $category->shifts( type => "signup");
-%							push @shifts, $category->shifts( type => "both");
-
-							<div class="full centeralign">
-
-%							if (@shifts) {
-
-								<% $category_settings{"public_signups_notice"} %>
-
-								<h5 class="centeralign martopmore">
-									Which judging shifts are you available for?
-								</h5>
+					</select>
+				</form>
+			</span>
+		</div>
 
 <%perl>
-								foreach my $shift (@shifts) {
 
-									my $nope_cant++ if $judge && $judge->strikes(shift => $shift->id);
+		if ($category_id > 0) {
 
-									my $start = $shift->start;
-									$start->set_time_zone("UTC");
-									$start->set_time_zone($tz);
-
-									my $end = $shift->end;
-									$end->set_time_zone("UTC");
-									$end->set_time_zone($tz);
+			my $category = $categories{$category_id};
 </%perl>
 
-									<label for="<% $shift->id %>">
-										<div class="row fourfifths marno leftalign hover">
+			<h4 class="martopmore">
+				Signup in <% $category->{"name"} %>
+			</h4>
 
-											<span class="quarter">
-												<% $shift->name %>
-											</span>
+			<div class="full centeralign">
 
-											<span class="quarter">
-												Start: <% Tab::niceshortdayt($start) %>
-												<% Tab::tzname($tz) %>
-											</span>
+%				if ($now > $category->{"deadline"}) {
 
-											<span class="quarter">
-												End: <% Tab::niceshortdayt($end) %>
-											</span>
+					<p class="bigger semibold redtext centeralign">
+						The signup deadline has passed.
+					</p>
 
-											<span class="quarter centeralign">
+					<p class="biggish martopmore semibold bluetext centeralign">
+						The deadline for signups was
+						<& /funclib/showdate.mas, dt => $category->{deadline} &>
+						<% Tab::tzname($tz) %>.
+					</p>
 
-												<span class="hidden"><% $nope_cant %></span>
+%				} else {
 
-												<input
-													type  = "checkbox"
-													value = "1"
-													id    = "<% $shift->id %>"
-													name  = "<% $shift->id %>"
-													<% $nope_cant ? "" : 'checked="checked"' %>
-												>
+%					unless ($person) {
 
-											</span>
-										</div>
-									</label>
-%								}
-%							}
+						<p class="bigger semibold redtext centeralign">
+							You must be logged in to register as a judge.
+						</p>
 
-							<div class="row fourfifths leftalign marno martopmore">
+						<p class="biggish martopmore semibold bluetext centeralign">
+							If you have a Tabroom.com account, you must first
+							<a
+								href   = "/user/login/login.mhtml?return=judgesign&category_id=<% $category_id %>&tourn_id=<% $tourn_id %>"
+								target = "_blank"
+								class  = "inline"
+							>log in.</a>
+						</p>
 
-								<span class="third">
-									Special requests/notes:
-								</span>
+						<p class="biggish martopmore semibold bluetext centeralign">
+							If you do not, first
+							<a
+								href   = "/user/login/new_user.mhtml"
+								target = "_blank"
+								class  = "inline"
+							>sign up.</a>
+						</p>
+<%perl>
+					} else {
 
-								<span class="twothirds">
+						if (
+							($categories{$category_id}->{double_entry})
+							&& (not defined $already_by_cat{$category_id})
+							&& @already
+						) {
+</%perl>
 
-									<input
-										type  = "text"
-										name  = "notes"
-										size  = 48
-										value = "<% $judge ? $judge->setting("notes") : "" %>"
-									>
-
-								</span>
-
-							</div>
-
-%							if ($category_settings{"rounds_per"}) {
-
-								<div class="row fourfifths leftalign marno">
-
-									<span class="third">
-										# of Prelim rounds available:
-									</span>
-
-									<span class="twothirds">
-										<input
-											type  = "number"
-											name  = "hired"
-											size  = 48
-											min   = "1"
-											max   = <% $category_settings{"max_rounds"} %>
-											value = "<% $judge ? $judge->hired : $category_settings{"max_rounds"} %>"
-										>
-									</span>
-
-								</div>
-
-%							}
-
-							<div class="libl rightalign fourfifths padvert marno">
-
-								<input
-									type  = "submit"
-									value = "<% $judge ? "Save Details" : "Register to Judge" %>"
-								>
-
-								</form>
-
-							</div>
-
-
-%						if ($judge) {
-
-							<div class="row fourfifths leftalign martopmore">
-
-								<span class="third">
-									Status:
-								</span>
-
-								<span class="twothirds marvert padvert rightalign semibold
-									<% $judge->active ? "greentext" : "redtext" %>">
-									<% $judge->active
-										? "REGISTERED &amp; APPROVED"
-										: "REGISTERED. APPROVAL PENDING"
-									%>
-								</span>
-
-							</div>
-
-							<h5 class="centeralign martopmore">
-								Conflicted Schools
+							<h5 class="centeralign redtext martopmuchmore">
+								Judging in <% $categories{$category_id}->{name} %>
+									and other categories is not allowed
 							</h5>
 
-%							foreach my $conflict ($judge->strikes(conflictee => 1)) {
+							<p class="ninetenths centeralign bluetext semibold bigger">
+								Because you are already registered in
+%								foreach my $already (@already) {
+									<% $already->category->name %>
+%								}
+								<br />
+								you may not also register in <% $categories{$category_id}{name} %>
+								by tournament policy.
+							</p>
+<%perl>
+						} elsif (
+							scalar (keys %double_forbidden) > 0
+							&& (not defined $already_by_cat{$category_id})
+						) {
+</%perl>
 
-								<div
-									id="<% $conflict->id %>"
-									class="row fourfifths marno"
-								>
-									<span class="twothirds leftalign">
-										<% $conflict->school ? $conflict->school->short_name : "" %>
-										<% $conflict->entry ? $conflict->entry->name : "" %>
+							<h5 class="centeralign redtext martopmuchmore">
+								Judging in multiple categories forbidden
+							</h5>
+
+							<p class="ninetenths centeralign bluetext semibold bigger">
+								You are already registered in
+%								foreach my $key (keys %double_forbidden) {
+									<% $categories{$key}{"name"} %>
+%								}
+								and that category is set to disallow judges from registering
+								in other categories by tournament policy.
+							</p>
+<%perl>
+						} else {
+
+							my $judge = $already_by_cat{$category_id};
+							my $obj = Tab::Category->retrieve($category_id);
+
+</%perl>
+							<% $category->{"public_signups_notice"} &&
+								$category->{"public_signups_notice"} ne "1"
+								? '<span class="ninetenths leftalign">'.$category->{"public_signups_notice"}.'</span>'
+								: ""
+							%>
+
+%							if ($judge) {
+								<div class="row ninetenths leftalign martopmore">
+									<span class="third semibold bluetext">
+										Status
 									</span>
-									<span class="third">
-										<a
-											class         = "buttonwhite redtext fa fa-trash"
-											target_id     = "<% $conflict->id %>"
-											on_success    = "destroy"
-											onClick       = "postSwitch(this, 'conflict_rm.mhtml');"
-											title         = "Remove Conflict"
-										></a>
+
+									<span class="twothirds marvert padvert centeralign semibold
+										<% $judge->active ? "greentext" : "redtext" %>">
+										<% $judge->active
+											? "REGISTERED &amp; APPROVED"
+											: "REGISTERED!  TOURNAMENT APPROVAL PENDING"
+										%>
 									</span>
 								</div>
 %							}
 
-							<div class="row fourfifths marno">
-
-								<form
-									action = "judge_strike.mhtml"
-									method = "post"
-								>
+							<form
+								action = "judge_signups_save.mhtml"
+								method = "post"
+							>
 
 								<input
 									type  = "hidden"
 									name  = "category_id"
-									value = "<% $category->id %>"
+									value = "<% $category_id %>"
 								>
 
 								<input
@@ -323,57 +327,231 @@
 									value = "<% $tourn->id %>"
 								>
 
-								<span class="twothirds">
-									<select name="school_id">
-										<option value=""></option>
-%										foreach my $school ($tourn->schools) {
-											<option
-												value="<% $school->id %>"
-											><% $school->name %></option>
-%										}
-									</select>
-								</span>
+%								my @shifts = $obj->shifts( type => "signup");
+%								push @shifts, $obj->shifts( type => "both");
 
-								<span class="sixth">
-									<input
-										type  = "submit"
-										value = "Add"
+%								if (@shifts) {
+
+									<h6 class="ninetenths leftalign martop marbottom semibold bluetext">
+										Which judging shifts are you available for?
+									</h6>
+<%perl>
+									foreach my $shift (@shifts) {
+
+										my $nope_cant++
+											if $judge && $judge->strikes(shift => $shift->id);
+
+										my $start = $shift->start;
+										$start->set_time_zone("UTC");
+										$start->set_time_zone($tz);
+
+										my $end = $shift->end;
+										$end->set_time_zone("UTC");
+										$end->set_time_zone($tz);
+</%perl>
+
+										<label for="<% $shift->id %>">
+											<div class="row ninetenths marno leftalign hover">
+
+												<span class="fifteenth centeralign">
+													<& "/funclib/showdate.mas",
+														dt     => $start,
+														length => "shortest"
+													&>
+												</span>
+												<span class="twofifths">
+													<% $shift->name %>
+												</span>
+
+												<span class="quarter">
+													Start: <% Tab::niceshortdayt($start) %>
+													<% Tab::tzname($tz) %>
+												</span>
+
+												<span class="fifth">
+													End: <% Tab::niceshortdayt($end) %>
+												</span>
+
+												<span class="tenth centeralign">
+
+													<span class="hidden"><% $nope_cant %></span>
+
+													<input
+														type  = "checkbox"
+														value = "1"
+														id    = "<% $shift->id %>"
+														name  = "<% $shift->id %>"
+														<% $nope_cant ? "" : 'checked="checked"' %>
+													>
+
+												</span>
+											</div>
+										</label>
+%									}
+%								}
+
+								<div class="row ninetenths leftalign marno martopmore">
+									<span class="third">
+										Special requests/notes:
+									</span>
+
+									<span class="twothirds">
+										<input
+											type  = "text"
+											name  = "notes"
+											size  = 48
+											value = "<% $judge ? $judge->setting("notes") : "" %>"
+										>
+									</span>
+								</div>
+
+%								if ($category->{"rounds_per"}) {
+
+									<div class="row ninetenths leftalign marno">
+										<span class="third">
+											# of Prelim rounds available:
+										</span>
+
+										<span class="twothirds">
+											<input
+												type  = "number"
+												name  = "hired"
+												size  = 48
+												min   = "1"
+												max   = <% $category->{"max_rounds"} %>
+												value = "<% $judge ? $judge->hired : $category->{"max_rounds"} %>"
+											>
+										</span>
+									</div>
+%								}
+
+								<div class="libl rightalign ninetenths padvert marno">
+									<span class="third centeralign nospace">
+										<input
+											type  = "submit"
+											value = "<% $judge ? "Save Details" : "Register to Judge" %>"
+										>
+									</span>
+								</div>
+
+							</form>
+
+%							if ($judge) {
+
+								<div class="ninetenths leftalign">
+
+								<h5 class="leftalign martopmore">
+									Conflicted Schools
+								</h5>
+
+								<p>
+									Please select any institutions
+									you should not judge because of
+									personal affiliations (alumni, former
+									coach, etc).
+								</p>
+
+%								foreach my $conflict ($judge->strikes(conflictee => 1)) {
+
+									<div
+										id="<% $conflict->id %>"
+										class="row ninetenths marno"
 									>
-								</span>
-							</div>
+										<span class="twothirds leftalign">
+											<% $conflict->school
+												? $conflict->school->short_name
+												: ""
+											%>
+											<% $conflict->entry
+												? $conflict->entry->name
+												: ""
+											%>
+										</span>
+										<span class="third">
+											<a
+												class         = "buttonwhite redtext fa fa-trash"
+												target_id     = "<% $conflict->id %>"
+												on_success    = "destroy"
+												onClick       = "postSwitch(this, 'conflict_rm.mhtml');"
+												title         = "Remove Conflict"
+											></a>
+										</span>
+									</div>
+%								}
 
+								<div class="row marno">
+									<form
+										action = "judge_strike.mhtml"
+										method = "post"
+									>
+
+									<input
+										type  = "hidden"
+										name  = "category_id"
+										value = "<% $category_id %>"
+									>
+
+									<input
+										type  = "hidden"
+										name  = "judge_id"
+										value = "<% $judge ? $judge->id : "" %>"
+									>
+
+									<input
+										type  = "hidden"
+										name  = "tourn_id"
+										value = "<% $tourn->id %>"
+									>
+
+									<span class="twothirds centeralign marvert">
+										<select name="school_id" class="fixedmost">
+											<option value=""></option>
+%											foreach my $school ($tourn->schools) {
+												<option
+													value="<% $school->id %>"
+												><% $school->name %></option>
+%											}
+										</select>
+									</span>
+
+									<span class="third centeralign">
+										<input
+											type  = "submit"
+											value = "Add Conflict"
+										>
+									</span>
+								</div>
+
+								</div>
+%							}
 %						}
-
-						</div>
-
-%					}
-
+					</div>
 %				}
-
 %			}
-
 %		}
 
 	</div>
 
 	<div class="menu">
 
-		<div class="sidenote">
+%		if (@already) {
 
-			<h4>Judge categories</h4>
+			<div class="sidenote">
+				<h4>Judge categories</h4>
 
-%			foreach my $other_category (
-%				$m->comp("/funclib/tourn_public_signups.mas", tourn => $tourn)
-%			) {
+				<p class="explain">
+					You are already registered to judge in:
+				</p>
 
-				<a
-					class = "<% $other_category == $category ? "dk" : "" %>blue full"
-					href  = "judge_signups.mhtml?category_id=<% $other_category->id %>&tourn_id=<% $tourn->id %>"
-				><% $other_category->name %></a>
+%				foreach my $already (@already) {
+					<a
+						class = "<% $already->category->id == $category_id ? "dk" : "" %>blue full"
+						href  = "judge_signups.mhtml?category_id=<% $already->category->id %>&tourn_id=<% $tourn->id %>&judge_id=<% $already->id %>"
+					>Registered in <% $already->category->name %></a>
+%				}
 
-%			}
-
-		</div>
+			</div>
+%		}
 
 	</div>
 
