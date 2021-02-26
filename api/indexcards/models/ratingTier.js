@@ -1,7 +1,8 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('rating_tier', { 
+	return sequelize.define('ratingTier', {
+		table_name: 'rating_tier',
 		type : {
 			type: DataTypes.ENUM('mpj', 'coach'),
 			allowNull: true
@@ -11,28 +12,28 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: true
 		},
 		description: {
-			type: DataTypes.STRING,
+			type: DataTypes.STRING(255),
 			allowNull: true
 		},
-		strike: { 
+		strike: {
+			type         : DataTypes.BOOLEAN,
+			allowNull    : false,
+			defaultValue : '0'
+		},
+		conflict: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
 		},
-		conflict: { 
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0'
-		},
-		min: { 
+		min: {
 			type: DataTypes.DECIMAL(8,2),
 			allowNull: true
 		},
-		max: { 
+		max: {
 			type: DataTypes.DECIMAL(8,2),
 			allowNull: true
 		},
-		start: { 
+		start: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
