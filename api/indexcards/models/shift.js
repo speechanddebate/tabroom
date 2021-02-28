@@ -1,14 +1,14 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('shift', { 
+	return sequelize.define('shift', {
 		name: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
 			defaultValue: ''
 		},
-		value_type: {
-			type: DataTypes.ENUM("public", "strike", "both"),
+		type: {
+			type: DataTypes.ENUM("signup", "strike", "both"),
 			allowNull: false,
 			defaultValue: "string"
 		},
@@ -20,9 +20,14 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
-		fine: { 
+		fine: {
 			type: DataTypes.FLOAT,
 			allowNull: true
+		},
+		no_hires: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: false
 		}
 	});
 };
