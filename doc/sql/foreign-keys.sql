@@ -250,3 +250,7 @@
 	update site set name="Gonzaga University" where id = 1912;
 	update site set name="VDR" where id = 7175;
 	update site set name="Zoom" where id=4889;
+
+	alter table setting_label ADD CONSTRAINT fk_setting_label FOREIGN KEY (setting)
+		REFERENCES setting(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
