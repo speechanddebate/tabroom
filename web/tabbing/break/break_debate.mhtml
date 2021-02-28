@@ -154,6 +154,8 @@
 
 	my %breaks;
 	my %losers;
+	my $max_loser;
+
 	my $ineligibles = $m->comp(
 		"/funclib/event_entry_settings.mas",
 			event => $event,
@@ -162,6 +164,7 @@
 	);
 
 	my $count = 1;
+	my $num_winners;
 
 	if ($from->type ne "elim" && $from->type ne "final") {
 
@@ -186,21 +189,27 @@
 
 		my $sth = $dbh->prepare("
 			select entry.id, panel.bracket
-			from entry, ballot, panel
+				from entry, ballot, panel
 			where entry.id = ballot.entry
-			and ballot.panel = panel.id
-			and panel.round = ?
+				and ballot.panel = panel.id
+				and panel.round = ?
 		");
 
 		$sth->execute($from->id);
 
 		while(
-			my ($entry_id, $panel_bracket) = $sth->fetchrow_array()
+			my (
+				$entry_id, $panel_bracket
+			) = $sth->fetchrow_array()
 		) {
 
 			unless ($panel_bracket) {
+
+				my $msg = "Your elim panels are horked.  There are no bracket numbers listed ";
+				$msg .= "for each section so Tabroom cannot advance to the next debate.";
+
 				$m->comp("/funclib/abort.mas",
-					message => "Your elim panels are horked.  There are no bracket numbers listed for each section so Tabroom cannot advance to the next debate."
+					message => $msg
 				);
 			}
 
@@ -214,16 +223,22 @@
 			if ($event_settings{"double_elimination"}) {
 
 				if ($entries->{tbs}{$entry_id}{1} == 0) {
+
 					# I advance to the winners bracket if I have no losses
 					$breaks{$entries->{bracket}{$entry_id}} = $entry_id;
 					$num_advancers++;
+					$num_winners++;
+
 				} elsif ($entries->{tbs}{$entry_id}{1} == 1) {
+
 					# I advance to the losers bracket if I have 1 loss
 					$losers{$entries->{bracket}{$entry_id}} = $entry_id;
 					$num_advancers++;
+
 				}
 
 			} else {
+
 				# I advance if I won the last round
 				if ($entries->{tbs}{$entry_id}{1} == 1) {
 					$breaks{$entries->{bracket}{$entry_id}} = $entry_id;
@@ -314,9 +329,10 @@
 
 	if ($event_settings{"double_elimination"} && keys %losers) {
 
-		# First establish the seed of the first-time losers.  They will carry
-		# in the seeding from winner of the debate they just lost, and need
-		# instead the seeding of the loser of the debate they just lost.
+		# First establish the seed of the first-time losers.  They will by
+		# default carry in the seeding from winner of the debate they just
+		# lost, and need instead the seeding of the loser of the debate they
+		# just lost.
 
 		my $seed_factor = ($target_bracket * 2) + 1;
 
@@ -344,30 +360,38 @@
 		# The bracket must also be a power of two; the top seeds are bye'd
 		# until it is
 
+		my $bracket_check = $num_winners;
 		my $num_losers = 1;
-		while ($num_losers < scalar @seeds) {
+
+		while ($num_losers < $bracket_check) {
 			$num_losers = $num_losers * 2;
 		}
 
-		unless ($num_losers == scalar @seeds) {
+		unless ($num_losers == $bracket_check) {
 
-			my $bye_count = $num_losers - scalar @seeds;
+			my $bye_count = $num_losers - $bracket_check;
 
 			while ($bye_count) {
-				my $seed = shift @seeds;
-				$byes{$seed} = $losers{$seed};
-				$bye_count--;
+				if (@seeds) {
+					my $seed = shift @seeds;
+					$byes{$seed} = $losers{$seed};
+					$bye_count--;
+				}
 			}
 		}
 
 		# Find the target seeding
 		my $seed_sum;
+		my $seed_loop = $num_winners;
 
-		foreach my $seed (@seeds) {
-			$seed_sum += $seed;
+		while ($seed_loop > 0) {
+			$seed_sum += $seed_loop;
+			$seed_loop--;
 		}
 
 		my $seed_target = (2 * $seed_sum) / (scalar @seeds);
+
+		Tab::debuglog("Seed target is $seed_target off sum $seed_sum with $num_winners winners");
 
 		# Next we have to check for repeat debates in elims.  If a loser's
 		# bracket round is going to be repeated the bracket is reversed,
@@ -394,7 +418,9 @@
 		my %repeats;
 
 		while (
-			my ($aff, $neg, $round_name) = $elim_sth->fetchrow_array()
+			my (
+				$aff, $neg, $round_name
+			) = $elim_sth->fetchrow_array()
 		) {
 			$repeats{$aff}{$neg} = $round_name;
 		}
@@ -411,6 +437,8 @@
 				last;
 			}
 		}
+
+		my $loser_debates;
 
 		foreach my $seed (@seeds) {
 
@@ -436,6 +464,8 @@
 				$target_id = $losers{$seed_target - $seed};
 			}
 
+			$loser_debates++;
+
 			if ($target_id) {
 
 				$done{$target_id}++;
@@ -448,6 +478,10 @@
 				$byes{$seed} = $entry_id;
 			}
 		}
+
+		my $pure_byes = $num_winners - ($loser_debates * 2);
+		$into->setting("loser_bracket_byes", $pure_byes);
+		Tab::debuglog("This bracket has $pure_byes missing debates");
 	}
 
 	my $letter = 1;
@@ -463,7 +497,8 @@
 		my $bye = 0;
 		my %seed;
 
-		if ( (not defined $ignore_schools)
+		if (
+			(not defined $ignore_schools)
 			&& ($entries->{"school_id"}{$aff} == $entries->{"school_id"}{$neg})
 		) {
 			$bye++;
