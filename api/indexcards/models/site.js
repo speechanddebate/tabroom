@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('site', { 
+	return sequelize.define('site', {
 		name: {
 			type: DataTypes.STRING,
 			allowNull: false,
@@ -14,6 +14,11 @@ module.exports = function(sequelize, DataTypes) {
 		dropoff: {
 			type: DataTypes.STRING,
 			allowNull: true
+		},
+		online: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: false
 		}
 	});
 };
