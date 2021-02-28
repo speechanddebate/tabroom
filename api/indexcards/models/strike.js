@@ -1,9 +1,9 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('strike', { 
+	return sequelize.define('strike', {
 		type: {
-			type: DataTypes.STRING(8),
+			type: DataTypes.STRING(31),
 			allowNull: false,
 			defaultValue: ''
 		},
@@ -15,18 +15,27 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
-		registrant: { 
+		registrant: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
 		},
-		conflictee: { 
+		conflict: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0'
 		},
-		dioregion: { 
+		conflictee: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
+		},
+		dioregion: {
 			type: DataTypes.INTEGER,
+			allowNull: true
+		},
+		created_at: {
+			type: DataTypes.DATE,
 			allowNull: true
 		}
 	});
