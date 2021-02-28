@@ -1,13 +1,9 @@
 package Tab::Session;
 use base 'Tab::DBI';
 Tab::Session->table('session');
-Tab::Session->columns(All    => qw/id person userkey timestamp ip tourn event category weekend su defaults created_at/);
+Tab::Session->columns(All    => qw/id person userkey timestamp ip su defaults created_at/);
 Tab::Session->has_a(person   => 'Tab::Person');
 Tab::Session->has_a(su       => 'Tab::Person');
-Tab::Session->has_a(tourn    => 'Tab::Tourn');
-Tab::Session->has_a(event    => 'Tab::Event');
-Tab::Session->has_a(weekend  => 'Tab::Weekend');
-Tab::Session->has_a(category => 'Tab::Category');
 
 sub account {
 	my $self = shift;
@@ -34,5 +30,4 @@ sub default {
 			return JSON::decode_json($self->defaults);
 		};
 	}
-
 }
