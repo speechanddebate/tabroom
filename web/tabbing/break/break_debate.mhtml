@@ -164,7 +164,6 @@
 	);
 
 	my $count = 1;
-	my $num_winners;
 
 	if ($from->type ne "elim" && $from->type ne "final") {
 
@@ -227,7 +226,6 @@
 					# I advance to the winners bracket if I have no losses
 					$breaks{$entries->{bracket}{$entry_id}} = $entry_id;
 					$num_advancers++;
-					$num_winners++;
 
 				} elsif ($entries->{tbs}{$entry_id}{1} == 1) {
 
@@ -268,11 +266,12 @@
 	}
 
 	# Do the winner's bracket first.
-	my $num_advancers = scalar(keys %breaks);
+	my $num_winners = scalar(keys %breaks);
+	my $num_advancers = $num_winners + scalar(keys %losers);
 
 	if (
 		((scalar (keys %losers)) == 1)
-		&& $num_advancers == 1
+		&& $num_winners == 1
 	) {
 		#Final round time
 		%breaks = (%breaks, %losers);
@@ -282,11 +281,13 @@
 	# The target number must always be a power of 2 or else promoted up to the
 	# next power of 2 and byes filled in.
 
-	my $target_bracket = 2;
+	my $target_bracket = 1;
 
-	while ($target_bracket < $num_advancers) {
+	while ($target_bracket < $num_winners) {
 		$target_bracket = $target_bracket * 2;
 	}
+
+	Tab::debuglog("Target bracket is $target_bracket");
 
 	my $master_seed = $target_bracket + 1;
 
@@ -314,12 +315,13 @@
 			my $debate_seed = $target;
 			$debate_seed = $seed if $seed < $debate_seed;
 
-			if ($breaks{$target}) {
+			if ($breaks{$target} && $target != $seed) {
 
 				# I have an opponent which adds up to my target!
 				$debates{$debate_seed}{1} = $entry_id;
 				$debates{$debate_seed}{0} = $breaks{$target};
 				$done{$breaks{$target}}++;
+
 			} else {
 				# I have no such opponent which means this is a partial
 				$byes{$debate_seed} = $entry_id;
@@ -334,15 +336,45 @@
 		# lost, and need instead the seeding of the loser of the debate they
 		# just lost.
 
-		my $seed_factor = ($target_bracket * 2) + 1;
+		my $lowest_seed;
+		my $highest_seed;
 
 		foreach my $seed (keys %losers) {
 
-			next if $seed > $num_advancers;
-			my $new_seed = $seed_factor - $seed;
+			Tab::debuglog("Entry ".$entries->{"code"}{$losers{$seed}}." has seed $seed");
+
+			if ($seed > $num_winners) {
+
+				if ($highest_seed < $seed) {
+					$highest_seed = $seed;
+				}
+
+				if ($lowest_seed > $seed || (not defined $lowest_seed)) {
+					$lowest_seed = $seed;
+				}
+
+				Tab::debuglog("Highest is $highest_seed, lowest is $lowest_seed");
+				next;
+			}
+
+			my $new_seed = $seed + $num_winners;
 
 			$losers{$new_seed} = $losers{$seed};
 			delete $losers{$seed};
+
+			Tab::debuglog("Reassigned to seed $new_seed.");
+
+			if ($lowest_seed > $new_seed
+				|| (not defined $lowest_seed)
+			) {
+				$lowest_seed = $new_seed;
+			}
+
+			if ($highest_seed < $new_seed) {
+				$highest_seed = $new_seed;
+			}
+			Tab::debuglog("Highest is $highest_seed, lowest is $lowest_seed");
+
 		}
 
 		foreach my $seed (keys %losers) {
@@ -360,16 +392,28 @@
 		# The bracket must also be a power of two; the top seeds are bye'd
 		# until it is
 
-		my $bracket_check = $num_winners;
-		my $num_losers = 1;
+		my $pure_byes = $from->setting("loser_bracket_byes");
+		my $num_losers = $num_advancers - $num_winners;
+		$num_losers += $pure_byes;
 
-		while ($num_losers < $bracket_check) {
-			$num_losers = $num_losers * 2;
+		my $bracket_limit = $num_losers;
+
+		if ($num_losers % 2) {
+			$bracket_limit--;
 		}
 
-		unless ($num_losers == $bracket_check) {
+		my $bracket_target = 1;
 
-			my $bye_count = $num_losers - $bracket_check;
+		while ($bracket_target < $bracket_limit) {
+			$bracket_target = $bracket_target * 2;
+		}
+
+		unless ($num_losers == $bracket_target) {
+			my $bye_count = $bracket_target - $bracket_limit;
+
+			if ($num_losers % 2) {
+				$bye_count++;
+			}
 
 			while ($bye_count) {
 				if (@seeds) {
@@ -378,21 +422,16 @@
 					$bye_count--;
 				}
 			}
+
+			while ($byes{$lowest_seed}) {
+				$lowest_seed++;
+			}
 		}
 
 		# Find the target seeding
-		my $seed_sum;
-		my $seed_loop = $num_winners;
+		my $seed_target = $lowest_seed + $highest_seed;
 
-		while ($seed_loop > 0) {
-			$seed_sum += $seed_loop;
-			$seed_loop--;
-		}
-
-		my $seed_target = (2 * $seed_sum) / (scalar @seeds);
-
-		Tab::debuglog("Seed target is $seed_target off sum $seed_sum with $num_winners winners");
-
+		Tab::debuglog("Seed target is $seed_target with $lowest_seed low seed and $highest_seed high seed");
 		# Next we have to check for repeat debates in elims.  If a loser's
 		# bracket round is going to be repeated the bracket is reversed,
 		# otherwise it goes through.
@@ -479,9 +518,8 @@
 			}
 		}
 
-		my $pure_byes = $num_winners - ($loser_debates * 2);
-		$into->setting("loser_bracket_byes", $pure_byes);
-		Tab::debuglog("This bracket has $pure_byes missing debates");
+		my $double_byes = ($num_winners / 2) - ($loser_debates);
+		$into->setting("loser_bracket_byes", $double_byes) if $double_byes > 0;
 	}
 
 	my $letter = 1;
@@ -506,6 +544,7 @@
 			$seed{$neg} = $m->comp("/funclib/entry_seed.mas", entry => $neg);
 		}
 
+
 		my $panel = Tab::Panel->create({
 			letter  => $letter,
 			round   => $into->id,
@@ -513,6 +552,8 @@
 			bracket => $seed,
 			bye     => $bye
 		});
+
+		Tab::debuglog("Creating a ballot for $aff on side aff with $neg on neg");
 
 		my $ballot = Tab::Ballot->create({
 			panel => $panel->id,
