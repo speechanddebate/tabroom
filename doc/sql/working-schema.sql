@@ -1,18 +1,15 @@
--- Table structure for table `ad`
 
 CREATE TABLE `ad` (
   `person` int(11) NOT NULL,
   `approved_by` int(11) NOT NULL,
   `created_at` datetime DEFAULT NULL,
 
--- Table structure for table `autoqueue`
 ;
 CREATE TABLE `autoqueue` (
   `round` int(11) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
   `created_by` int(11) NOT NULL DEFAULT 0,
 
--- Table structure for table `ballot`
 --;
 CREATE TABLE `ballot` (
   `started_by` int(11) DEFAULT NULL,
@@ -22,7 +19,6 @@ CREATE TABLE `ballot` (
   `panel` int(11) NOT NULL DEFAULT 0,
   `entry` int(11) NOT NULL DEFAULT 0,
 
--- Table structure for table `campus_log`
 
 CREATE TABLE `campus_log` (
   `person` int(11) NOT NULL DEFAULT 0,
@@ -36,13 +32,11 @@ CREATE TABLE `category` (
   `tourn` int(11) DEFAULT NULL,
   `pattern` int(11) DEFAULT NULL,
 
--- Table structure for table `category_setting`
 
 CREATE TABLE `category_setting` (
   `category` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `change_log`
 CREATE TABLE `change_log` (
   `person` int(11) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
@@ -56,67 +50,56 @@ CREATE TABLE `change_log` (
   `old_panel` int(11) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
 
--- Table structure for table `chapter`
 CREATE TABLE `chapter` (
   `district` int(11) DEFAULT NULL,
 
--- Table structure for table `chapter_circuit`
 CREATE TABLE `chapter_circuit` (
   `circuit` int(11) DEFAULT NULL,
   `chapter` int(11) NOT NULL DEFAULT 0,
   `region` int(11) DEFAULT NULL,
   `circuit_membership` int(11) DEFAULT NULL,
 
--- Table structure for table `chapter_judge`
 CREATE TABLE `chapter_judge` (
   `chapter` int(11) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
   `person_request` int(11) DEFAULT NULL,
 
--- Table structure for table `chapter_setting`
 
 CREATE TABLE `chapter_setting` (
   `chapter` int(11) DEFAULT NULL,
 
 CREATE TABLE `circuit` (
 
--- Table structure for table `circuit_setting`
 
 CREATE TABLE `circuit_setting` (
   `circuit` int(11) NOT NULL DEFAULT 0,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `concession`
 
 CREATE TABLE `concession` (
    `tourn` int(11) DEFAULT NULL,
 
--- Table structure for table `concession_option`
 
 CREATE TABLE `concession_option` (
   `name` varchar(8) NOT NULL,
   `concession_type` int(11) NOT NULL,
 
--- Table structure for table `concession_purchase`
 
 CREATE TABLE `concession_purchase` (
   `school` int(11) DEFAULT NULL,
   `concession` int(11) DEFAULT NULL,
   `invoice` int(11) DEFAULT NULL,
 
--- Table structure for table `concession_purchase_option`
 
 CREATE TABLE `concession_purchase_option` (
   `concession_purchase` int(11) NOT NULL,
   `concession_option` int(11) NOT NULL,
 
--- Table structure for table `concession_type`
 
 CREATE TABLE `concession_type` (
   `name` varchar(31) NOT NULL,
   `concession` int(11) NOT NULL,
 
--- Table structure for table `conflict`
 
 CREATE TABLE `conflict` (
   `person` int(11) DEFAULT NULL,
@@ -124,11 +107,9 @@ CREATE TABLE `conflict` (
   `chapter` int(11) NOT NULL DEFAULT 0,
   `added_by` int(11) DEFAULT NULL,
 
--- Table structure for table `district`
 
 CREATE TABLE `district` (
 
--- Table structure for table `email`
 
 CREATE TABLE `email` (
   `sender` int(11) DEFAULT NULL,
@@ -136,7 +117,6 @@ CREATE TABLE `email` (
   `tourn` int(11) DEFAULT NULL,
   `circuit` int(11) DEFAULT NULL,
 
--- Table structure for table `entry`
 
 CREATE TABLE `entry` (
   `tourn` int(11) DEFAULT NULL,
@@ -145,20 +125,17 @@ CREATE TABLE `entry` (
   `registered_by` int(11) DEFAULT NULL,
 
 
--- Table structure for table `entry_setting`
 
 CREATE TABLE `entry_setting` (
   `entry` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `entry_student`
 
 CREATE TABLE `entry_student` (
   `entry` int(11) DEFAULT NULL,
   `student` int(11) NOT NULL DEFAULT 0,
   `created_at` datetime DEFAULT NULL,
 
--- Table structure for table `event`
 
 CREATE TABLE `event` (
   `tourn` int(11) DEFAULT NULL,
@@ -166,13 +143,11 @@ CREATE TABLE `event` (
   `pattern` int(11) DEFAULT NULL,
   `rating_subset` int(11) DEFAULT NULL,
 
--- Table structure for table `event_setting`
 
 CREATE TABLE `event_setting` (
   `event` int(11) NOT NULL,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `file`
 
 CREATE TABLE `file` (
   `tourn` int(11) DEFAULT NULL,
@@ -185,7 +160,6 @@ CREATE TABLE `file` (
   `parent` int(11) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
 
--- Table structure for table `fine`
 
 CREATE TABLE `fine` (
   `levied_by` int(11) DEFAULT NULL,
@@ -197,7 +171,6 @@ CREATE TABLE `fine` (
   `parent` int(11) DEFAULT NULL,
   `invoice` int(11) DEFAULT NULL,
 
--- Table structure for table `follower`
 
 CREATE TABLE `follower` (
   `follower` int(11) DEFAULT NULL,
@@ -208,12 +181,10 @@ CREATE TABLE `follower` (
   `student` int(11) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
 
--- Table structure for table `hotel`
 
 CREATE TABLE `hotel` (
   `tourn` int(11) DEFAULT NULL,
 
--- Table structure for table `housing`
 
 CREATE TABLE `housing` (
   `requestor` int(11) DEFAULT NULL,
@@ -222,44 +193,37 @@ CREATE TABLE `housing` (
   `judge` int(11) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
 
--- Table structure for table `housing_slots`
 
 CREATE TABLE `housing_slots` (
   `night` date DEFAULT NULL,
   `slots` smallint(6) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
 
--- Table structure for table `invoice`
 
 CREATE TABLE `invoice` (
   `school` int(11) NOT NULL,
 
--- Table structure for table `jpool`
 
 CREATE TABLE `jpool` (
   `category` int(11) DEFAULT NULL,
   `site` int(11) NOT NULL DEFAULT 0,
   `parent` int(11) DEFAULT NULL,
 
--- Table structure for table `jpool_judge`
 
 CREATE TABLE `jpool_judge` (
   `judge` int(11) NOT NULL DEFAULT 0,
   `jpool` int(11) DEFAULT NULL,
 
--- Table structure for table `jpool_round`
 
 CREATE TABLE `jpool_round` (
   `jpool` int(11) DEFAULT NULL,
   `round` int(11) DEFAULT NULL,
 
--- Table structure for table `jpool_setting`
 
 CREATE TABLE `jpool_setting` (
   `jpool` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `judge`
 
 CREATE TABLE `judge` (
   `school` int(11) NOT NULL DEFAULT 0,
@@ -270,7 +234,6 @@ CREATE TABLE `judge` (
   `person` int(11) NOT NULL DEFAULT 0,
   `person_request` int(11) DEFAULT NULL,
 
--- Table structure for table `judge_hire`
 
 CREATE TABLE `judge_hire` (
   `requestor` int(11) DEFAULT NULL,
@@ -280,30 +243,25 @@ CREATE TABLE `judge_hire` (
   `region` int(11) DEFAULT NULL,
   `category` int(11) DEFAULT NULL,
 
--- Table structure for table `judge_setting`
 
 CREATE TABLE `judge_setting` (
   `judge` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
   `conditional` int(11) DEFAULT NULL,
 
--- Table structure for table `login`
 
 CREATE TABLE `login` (
   `person` int(11) DEFAULT NULL,
 
--- Table structure for table `panel`
 CREATE TABLE `panel` (  -- HAS BECOME SECTION
   `room` int(11) DEFAULT NULL,
   `round` int(11) DEFAULT NULL,
 
--- Table structure for table `pattern`
 
 CREATE TABLE `pattern` (
   `exclude` mediumtext DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
 
--- Table structure for table `permission`
 
 CREATE TABLE `permission` (
   `person` int(11) DEFAULT NULL,
@@ -314,13 +272,11 @@ CREATE TABLE `permission` (
   `circuit` int(11) DEFAULT NULL,
   `category` int(11) DEFAULT NULL,
 
--- Table structure for table `person_setting`
 
 CREATE TABLE `person_setting` (
   `person` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `rating`
 
 CREATE TABLE `rating` (
   `tourn` int(11) DEFAULT NULL,
@@ -331,20 +287,17 @@ CREATE TABLE `rating` (
   `rating_subset` int(11) DEFAULT NULL,
   `sheet` int(11) DEFAULT NULL,
 
--- Table structure for table `rating_tier`
 
 CREATE TABLE `rating_tier` (
   `category` int(11) DEFAULT NULL,
   `rating_subset` int(11) DEFAULT NULL,
 
--- Table structure for table `region`
 
 CREATE TABLE `region` (
   `circuit` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `created_at` datetime DEFAULT NULL,
 
--- Table structure for table `result`
 
 CREATE TABLE `result` (
   `result_set` int(11) DEFAULT NULL,
@@ -354,12 +307,10 @@ CREATE TABLE `result` (
   `round` int(11) DEFAULT NULL,
   `panel` int(11) DEFAULT NULL,
 
--- Table structure for table `result_key`
 
 CREATE TABLE `result_key` (
   `result_set` int(11) DEFAULT NULL,
 
--- Table structure for table `result_set`
 
 CREATE TABLE `result_set` (
   `tourn` int(11) NOT NULL,
@@ -367,19 +318,16 @@ CREATE TABLE `result_set` (
   `sweep_award` int(11) DEFAULT NULL,
   `event` int(11) NOT NULL,
 
--- Table structure for table `result_value`
 
 CREATE TABLE `result_value` (
   `result` int(11) DEFAULT NULL,
   `result_key` int(11) NOT NULL DEFAULT 0,
   `tiebreak_set` int(11) NOT NULL DEFAULT 0,
 
--- Table structure for table `room`
 
 CREATE TABLE `room` (
   `site` int(11) DEFAULT NULL,
 
--- Table structure for table `room_strike`
 CREATE TABLE `room_strike` (
   `room` int(11) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
@@ -387,7 +335,6 @@ CREATE TABLE `room_strike` (
   `entry` int(11) DEFAULT NULL,
   `judge` int(11) DEFAULT NULL,
 
--- Table structure for table `round`
 
 CREATE TABLE `round` (
   `event` int(11) DEFAULT NULL,
@@ -396,149 +343,62 @@ CREATE TABLE `round` (
   `tiebreak_set` int(11) DEFAULT NULL,
   `runoff` int(11) DEFAULT NULL,
 
--- Table structure for table `round_setting`
-
 CREATE TABLE `round_setting` (
   `round` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
-
--- Table structure for table `rpool`
-
-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++PALMER STOPPED HERE
 
 CREATE TABLE `rpool` (
   `name` varchar(31) DEFAULT NULL,
   `tourn` int(11) NOT NULL,
 
--- Table structure for table `rpool_room`
-
 CREATE TABLE `rpool_room` (
   `rpool` int(11) DEFAULT NULL,
   `room` int(11) NOT NULL,
-
--- Table structure for table `rpool_round`
 
 CREATE TABLE `rpool_round` (
   `rpool` int(11) DEFAULT NULL,
   `round` int(11) NOT NULL,
 
--- Table structure for table `rpool_setting`
-
 CREATE TABLE `rpool_setting` (
-  `type` varchar(32) NOT NULL,
-  `tag` varchar(32) NOT NULL,
-  `value` varchar(64) DEFAULT NULL,
-  `value_text` text DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
   `rpool` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `school`
 
 CREATE TABLE `school` (
-  `name` varchar(127) DEFAULT NULL,
-  `code` varchar(15) DEFAULT NULL,
-  `onsite` tinyint(1) NOT NULL DEFAULT 0,
   `tourn` int(11) DEFAULT NULL,
   `chapter` int(11) DEFAULT NULL,
   `state` varchar(4) DEFAULT NULL,
   `region` int(11) DEFAULT NULL,
   `district` int(11) DEFAULT NULL,
 
--- Table structure for table `school_setting`
-
 CREATE TABLE `school_setting` (
-  `tag` varchar(32) NOT NULL,
-  `value` varchar(64) DEFAULT NULL,
-  `value_text` text DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
   `chapter` int(11) DEFAULT NULL,
 
--- Table structure for table `score`
-
 CREATE TABLE `score` (
-  `tag` varchar(15) DEFAULT NULL,
-  `value` float NOT NULL DEFAULT 0,
-  `content` mediumtext DEFAULT NULL,
-  `topic` varchar(127) DEFAULT NULL,
-  `speech` smallint(6) NOT NULL DEFAULT 0,
-  `position` tinyint(4) NOT NULL DEFAULT 0,
   `ballot` int(11) DEFAULT NULL,
   `student` int(11) NOT NULL DEFAULT 0,
-  `tiebreak` tinyint(4) DEFAULT NULL,
-  `cat_id` int(11) DEFAULT NULL,
-
--- Table structure for table `session`
 
 CREATE TABLE `session` (
-  `userkey` varchar(127) DEFAULT NULL,
-  `ip` varchar(63) DEFAULT NULL,
-  `defaults` mediumtext DEFAULT NULL,
   `su` int(11) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
-  `tourn` int(11) DEFAULT NULL,
-  `event` int(11) DEFAULT NULL,
-  `category` int(11) DEFAULT NULL,
-  `weekend` int(11) DEFAULT NULL,
-
--- Table structure for table `setting`
 
 CREATE TABLE `setting` (
-  `type` varchar(31) NOT NULL,
-  `subtype` varchar(31) NOT NULL,
-  `tag` varchar(31) NOT NULL,
-  `value_type` enum('text','string','bool','integer','decimal','datetime','enum') DEFAULT NULL,
   `conditions` text DEFAULT NULL,
 
--- Table structure for table `setting_label`
-
 CREATE TABLE `setting_label` (
-  `lang` char(2) DEFAULT NULL,
-  `label` varchar(127) DEFAULT NULL,
-  `guide` text DEFAULT NULL,
-  `options` text DEFAULT NULL,
   `setting` int(11) NOT NULL,
 
--- Table structure for table `shift`
-
 CREATE TABLE `shift` (
-  `name` varchar(31) DEFAULT NULL,
-  `type` enum('signup','strike','both') DEFAULT NULL,
-  `fine` smallint(6) DEFAULT NULL,
-  `no_hires` tinyint(1) NOT NULL DEFAULT 0,
-  `start` datetime DEFAULT NULL,
-  `end` datetime DEFAULT NULL,
   `category` int(11) DEFAULT NULL,
 
--- Table structure for table `site`
-
 CREATE TABLE `site` (
-  `name` varchar(127) NOT NULL DEFAULT '',
-  `online` tinyint(1) NOT NULL DEFAULT 0,
-  `directions` mediumtext DEFAULT NULL,
-  `dropoff` varchar(255) DEFAULT NULL,
   `host` int(11) DEFAULT NULL,
   `circuit` int(11) DEFAULT NULL,
 
--- Table structure for table `stats`
-
-CREATE TABLE `stats` (
-  `type` varchar(15) DEFAULT NULL,
-  `tag` varchar(31) DEFAULT NULL,
-  `value` decimal(8,2) DEFAULT NULL,
-  `event` int(11) NOT NULL,
-
--- Table structure for table `strike`
 
 CREATE TABLE `strike` (
-  `type` varchar(31) DEFAULT NULL,
-  `start` datetime DEFAULT NULL,
-  `end` datetime DEFAULT NULL,
-  `registrant` tinyint(1) NOT NULL DEFAULT 0,
-  `conflict` tinyint(1) NOT NULL DEFAULT 0,
-  `conflictee` tinyint(1) NOT NULL DEFAULT 0,
   `tourn` int(11) DEFAULT NULL,
   `judge` int(11) NOT NULL DEFAULT 0,
   `event` int(11) DEFAULT NULL,
@@ -549,62 +409,24 @@ CREATE TABLE `strike` (
   `timeslot` int(11) DEFAULT NULL,
   `shift` int(11) DEFAULT NULL,
   `entered_by` int(11) DEFAULT NULL,
-  `created_at` datetime DEFAULT NULL,
-  `dioregion` int(11) DEFAULT NULL,
 
--- Table structure for table `student`
 
 CREATE TABLE `student` (
-  `first` varchar(63) NOT NULL DEFAULT '',
-  `middle` varchar(63) DEFAULT NULL,
-  `last` varchar(63) NOT NULL DEFAULT '',
-  `phonetic` varchar(63) DEFAULT NULL,
-  `grad_year` smallint(6) DEFAULT NULL,
-  `novice` tinyint(1) NOT NULL DEFAULT 0,
-  `retired` tinyint(1) NOT NULL DEFAULT 0,
-  `gender` char(1) DEFAULT NULL,
-  `diet` varchar(31) DEFAULT NULL,
-  `birthdate` date DEFAULT NULL,
-  `school_sid` varchar(63) DEFAULT NULL,
-  `race` varchar(31) DEFAULT NULL,
-  `nsda` int(11) DEFAULT NULL,
   `chapter` int(11) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
   `person_request` int(11) DEFAULT NULL,
 
--- Table structure for table `student_ballot`
-
-CREATE TABLE `student_ballot` (
-  `tag` varchar(15) DEFAULT NULL,
-  `panel` int(11) NOT NULL DEFAULT 0,
-  `entry` int(11) NOT NULL DEFAULT 0,
-  `voter` int(11) NOT NULL DEFAULT 0,
-  `value` int(11) DEFAULT NULL,
-  `entered_by` int(11) DEFAULT NULL,
-
--- Table structure for table `student_setting`
 
 CREATE TABLE `student_setting` (
-  `student` int(11) DEFAULT NULL,
-  `tag` varchar(32) DEFAULT NULL,
-  `value` varchar(127) DEFAULT NULL,
-  `value_text` text DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
-  `created_at` datetime DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `student_vote`
 
 CREATE TABLE `student_vote` (
-  `tag` enum('nominee','rank') NOT NULL DEFAULT 'rank',
-  `value` int(11) DEFAULT NULL,
   `panel` int(11) DEFAULT NULL,
   `entry` int(11) DEFAULT NULL,
   `voter` int(11) DEFAULT NULL,
   `entered_by` int(11) DEFAULT NULL,
-  `entered_at` datetime DEFAULT NULL,
 
--- Table structure for table `sweep_award`
 
 CREATE TABLE `sweep_award` (
   `name` varchar(127) NOT NULL,
@@ -616,7 +438,6 @@ CREATE TABLE `sweep_award` (
   `min_entries` smallint(6) NOT NULL DEFAULT 0,
   `circuit` int(11) DEFAULT NULL,
 
--- Table structure for table `sweep_award_event`
 
 CREATE TABLE `sweep_award_event` (
   `name` varchar(63) NOT NULL,
@@ -624,7 +445,6 @@ CREATE TABLE `sweep_award_event` (
   `level` varchar(15) DEFAULT NULL,
   `sweep_set` int(11) DEFAULT NULL,
 
--- Table structure for table `sweep_event`
 
 CREATE TABLE `sweep_event` (
   `sweep_set` int(11) DEFAULT NULL,
@@ -634,33 +454,23 @@ CREATE TABLE `sweep_event` (
   `nsda_event_category` int(11) DEFAULT NULL,
   `sweep_award_event` int(11) DEFAULT NULL,
 
--- Table structure for table `sweep_include`
 
 CREATE TABLE `sweep_include` (
   `parent` int(11) DEFAULT NULL,
   `child` int(11) DEFAULT NULL,
 
--- Table structure for table `sweep_rule`
 
 CREATE TABLE `sweep_rule` (
-  `tag` varchar(31) DEFAULT NULL,
-  `value` varchar(63) DEFAULT NULL,
-  `place` smallint(6) DEFAULT NULL,
-  `count` varchar(15) DEFAULT NULL,
-  `rev_min` int(11) DEFAULT NULL,
-  `count_round` int(11) DEFAULT NULL,
-  `truncate` smallint(6) DEFAULT NULL,
   `sweep_set` int(11) DEFAULT NULL,
   `tiebreak_set` int(11) DEFAULT NULL,
 
--- Table structure for table `sweep_set`
 
 CREATE TABLE `sweep_set` (
   `name` varchar(31) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `sweep_award` int(11) DEFAULT NULL,
 
--- Table structure for table `tiebreak`
+######## STOPPED HERE
 
 CREATE TABLE `tiebreak` (
   `name` varchar(15) DEFAULT NULL,
@@ -676,13 +486,11 @@ CREATE TABLE `tiebreak` (
   `child` int(11) DEFAULT NULL,
   `tiebreak_set` int(11) DEFAULT NULL,
 
--- Table structure for table `tiebreak_set`
 
 CREATE TABLE `tiebreak_set` (
   `name` varchar(127) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
 
--- Table structure for table `tiebreak_set_setting`
 
 CREATE TABLE `tiebreak_set_setting` (
   `tag` varchar(31) DEFAULT NULL,
@@ -692,7 +500,6 @@ CREATE TABLE `tiebreak_set_setting` (
   `value_text` mediumtext DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `timeslot`
 
 CREATE TABLE `timeslot` (
   `name` varchar(63) DEFAULT NULL,
@@ -700,7 +507,6 @@ CREATE TABLE `timeslot` (
   `end` datetime DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
 
--- Table structure for table `topic`
 
 CREATE TABLE `topic` (
   `tag` varchar(31) DEFAULT NULL,
@@ -712,7 +518,6 @@ CREATE TABLE `topic` (
   `created_at` datetime DEFAULT NULL,
   `created_by` int(11) NOT NULL DEFAULT 0,
 
--- Table structure for table `tourn`
 
 CREATE TABLE `tourn` (
   `name` varchar(63) NOT NULL DEFAULT '',
@@ -727,14 +532,12 @@ CREATE TABLE `tourn` (
   `reg_start` datetime DEFAULT NULL,
   `reg_end` datetime DEFAULT NULL,
 
--- Table structure for table `tourn_circuit`
 
 CREATE TABLE `tourn_circuit` (
   `approved` tinyint(1) NOT NULL DEFAULT 0,
   `tourn` int(11) NOT NULL DEFAULT 0,
   `circuit` int(11) NOT NULL DEFAULT 0,
 
--- Table structure for table `tourn_fee`
 
 CREATE TABLE `tourn_fee` (
   `start` datetime DEFAULT NULL,
@@ -743,13 +546,11 @@ CREATE TABLE `tourn_fee` (
   `amount` decimal(8,2) DEFAULT NULL,
   `reason` varchar(63) DEFAULT NULL,
 
--- Table structure for table `tourn_ignore`
 
 CREATE TABLE `tourn_ignore` (
   `tourn` int(11) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
 
--- Table structure for table `tourn_setting`
 
 CREATE TABLE `tourn_setting` (
   `tourn` int(11) NOT NULL DEFAULT 0,
@@ -759,13 +560,11 @@ CREATE TABLE `tourn_setting` (
   `value_date` datetime DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
--- Table structure for table `tourn_site`
 
 CREATE TABLE `tourn_site` (
   `tourn` int(11) DEFAULT NULL,
   `site` int(11) NOT NULL DEFAULT 0,
 
--- Table structure for table `webpage`
 
 CREATE TABLE `webpage` (
   `title` varchar(63) DEFAULT NULL,
@@ -777,8 +576,6 @@ CREATE TABLE `webpage` (
   `tourn` int(11) DEFAULT NULL,
   `parent` int(11) DEFAULT NULL,
   `last_editor` int(11) DEFAULT NULL,
-
--- Table structure for table `weekend`
 
 CREATE TABLE `weekend` (
   `name` varchar(64) NOT NULL,
