@@ -1,13 +1,13 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('student', { 
+	return sequelize.define('student', {
 		first: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
 		},
-		middle: { 
+		middle: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
@@ -37,14 +37,14 @@ module.exports = function(sequelize, DataTypes) {
 			defaultValue: '0'
 		},
 		gender: {
-			type: DataTypes.CHAR(1),
+			type: DataTypes.CHAR(4),
 			allowNull: true
 		},
 		diet: {
 			type: DataTypes.STRING(31),
 			allowNull: true
 		},
-		birthdate: { 
+		birthdate: {
 			type: DataTypes.DATE,
 			allowNull: true
 		},
@@ -56,7 +56,7 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.STRING(31),
 			allowNull: true
 		},
-		ualt_id: {
+		nsda: {
 			type: DataTypes.INTEGER(11),
 			allowNull: true
 		}

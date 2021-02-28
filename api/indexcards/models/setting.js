@@ -1,12 +1,12 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('setting', { 
-		type: { 
+	return sequelize.define('setting', {
+		type: {
 			type: DataTypes.STRING(31),
 			allowNull: false
 		},
-		subtype: { 
+		subtype: {
 			type: DataTypes.STRING(31),
 			allowNull: false
 		},
@@ -19,7 +19,7 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: "string"
 		},
-		conditions: { 
+		conditions: {
 			type: DataTypes.TEXT,
 			allowNull: true
 		}

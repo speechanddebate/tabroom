@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('score', { 
+	return sequelize.define('score', {
 		tag: {
 			type: DataTypes.STRING,
 			allowNull: false,

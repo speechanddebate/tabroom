@@ -2,13 +2,11 @@
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('rpool', { 
+	return sequelize.define('rpool', {
 		name: {
 			type: DataTypes.STRING(32),
 			allowNull: false
 		}
 	});
 };
-
-
 
