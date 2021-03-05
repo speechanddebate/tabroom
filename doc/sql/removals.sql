@@ -48,3 +48,7 @@ alter table school_setting drop chapter;
 alter table weekend modify state char(4) after end;
 update weekend set city="Crescenta Valley High School" where id="70";
 alter table weekend modify city varchar(127) after end;
+alter table sweep_event change nsda_event_category nsda_category int;
+drop table sweep_award_event;
+alter table rating drop sheet;
+
