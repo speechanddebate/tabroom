@@ -470,127 +470,45 @@ CREATE TABLE `sweep_set` (
   `tourn` int(11) DEFAULT NULL,
   `sweep_award` int(11) DEFAULT NULL,
 
-######## STOPPED HERE
-
 CREATE TABLE `tiebreak` (
-  `name` varchar(15) DEFAULT NULL,
-  `count` varchar(15) NOT NULL DEFAULT '0',
-  `count_round` int(11) DEFAULT NULL,
-  `truncate` int(11) DEFAULT NULL,
-  `truncate_smallest` tinyint(1) NOT NULL DEFAULT 0,
-  `multiplier` smallint(6) DEFAULT NULL,
-  `violation` smallint(6) DEFAULT NULL,
-  `priority` smallint(6) DEFAULT NULL,
-  `highlow` tinyint(4) DEFAULT NULL,
-  `highlow_count` tinyint(4) DEFAULT NULL,
   `child` int(11) DEFAULT NULL,
   `tiebreak_set` int(11) DEFAULT NULL,
 
-
-CREATE TABLE `tiebreak_set` (
-  `name` varchar(127) DEFAULT NULL,
-  `tourn` int(11) DEFAULT NULL,
-
-
 CREATE TABLE `tiebreak_set_setting` (
-  `tag` varchar(31) DEFAULT NULL,
-  `value` varchar(127) DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
   `tiebreak_set` int(11) DEFAULT NULL,
-  `value_text` mediumtext DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
 
-
 CREATE TABLE `timeslot` (
-  `name` varchar(63) DEFAULT NULL,
-  `start` datetime DEFAULT NULL,
-  `end` datetime DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
-
-
-CREATE TABLE `topic` (
-  `tag` varchar(31) DEFAULT NULL,
-  `source` varchar(15) DEFAULT NULL,
-  `event_type` varchar(31) DEFAULT NULL,
-  `topic_text` text DEFAULT NULL,
-  `school_year` int(11) DEFAULT NULL,
-  `sort_order` smallint(6) DEFAULT NULL,
-  `created_at` datetime DEFAULT NULL,
-  `created_by` int(11) NOT NULL DEFAULT 0,
-
-
-CREATE TABLE `tourn` (
-  `name` varchar(63) NOT NULL DEFAULT '',
-  `city` varchar(31) DEFAULT NULL,
-  `state` char(4) DEFAULT NULL,
-  `country` char(4) DEFAULT NULL,
-  `tz` varchar(31) DEFAULT NULL,
-  `webname` varchar(64) DEFAULT NULL,
-  `hidden` tinyint(1) NOT NULL DEFAULT 0,
-  `start` datetime DEFAULT NULL,
-  `end` datetime DEFAULT NULL,
-  `reg_start` datetime DEFAULT NULL,
-  `reg_end` datetime DEFAULT NULL,
-
 
 CREATE TABLE `tourn_circuit` (
   `approved` tinyint(1) NOT NULL DEFAULT 0,
   `tourn` int(11) NOT NULL DEFAULT 0,
   `circuit` int(11) NOT NULL DEFAULT 0,
 
-
 CREATE TABLE `tourn_fee` (
-  `start` datetime DEFAULT NULL,
-  `end` datetime DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
-  `amount` decimal(8,2) DEFAULT NULL,
-  `reason` varchar(63) DEFAULT NULL,
-
 
 CREATE TABLE `tourn_ignore` (
   `tourn` int(11) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
 
-
 CREATE TABLE `tourn_setting` (
   `tourn` int(11) NOT NULL DEFAULT 0,
-  `tag` varchar(31) NOT NULL DEFAULT '',
-  `value` varchar(127) NOT NULL DEFAULT '',
-  `value_text` mediumtext DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
   `setting` int(11) DEFAULT NULL,
-
 
 CREATE TABLE `tourn_site` (
   `tourn` int(11) DEFAULT NULL,
   `site` int(11) NOT NULL DEFAULT 0,
 
-
 CREATE TABLE `webpage` (
-  `title` varchar(63) DEFAULT NULL,
-  `content` mediumtext DEFAULT NULL,
-  `published` tinyint(1) NOT NULL DEFAULT 0,
-  `sitewide` tinyint(1) NOT NULL DEFAULT 0,
-  `special` varchar(15) DEFAULT NULL,
-  `page_order` smallint(6) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `parent` int(11) DEFAULT NULL,
   `last_editor` int(11) DEFAULT NULL,
 
 CREATE TABLE `weekend` (
-  `name` varchar(64) NOT NULL,
-  `start` datetime NOT NULL,
-  `end` datetime NOT NULL,
-  `reg_start` datetime NOT NULL,
-  `reg_end` datetime NOT NULL,
-  `freeze_deadline` datetime NOT NULL,
-  `drop_deadline` datetime NOT NULL,
-  `judge_deadline` datetime NOT NULL,
-  `fine_deadline` datetime NOT NULL,
   `tourn` int(11) NOT NULL,
   `site` int(11) NOT NULL,
-  `city` varchar(127) DEFAULT NULL,
-  `state` varchar(127) DEFAULT NULL,
 
 
 -- Dump completed on 2021-02-22 15:12:59
