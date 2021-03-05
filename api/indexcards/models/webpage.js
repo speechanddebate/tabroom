@@ -1,13 +1,13 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('webpage', { 
+	return sequelize.define('webpage', {
 		title: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
 			defaultValue: ''
 		},
-		content: { 
+		content: {
 			type: DataTypes.TEXT,
 			allowNull: true
 		},
@@ -21,7 +21,11 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
-		page_order: { 
+		special: {
+			type: DataTypes.STRING(15),
+			allowNull: true
+		},
+		page_order: {
 			type: DataTypes.INTEGER(6),
 			allowNull: true
 		}
