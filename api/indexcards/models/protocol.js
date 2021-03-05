@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('rule', {
+	return sequelize.define('protocol', {
 		table_name: 'tiebreak_set',
 		name: {
 			type: DataTypes.STRING,
