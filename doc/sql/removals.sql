@@ -45,3 +45,6 @@ alter table student modify gender char(4);
 drop table stats;
 alter table student_setting drop created_at;
 alter table school_setting drop chapter;
+alter table weekend modify state char(4) after end;
+update weekend set city="Crescenta Valley High School" where id="70";
+alter table weekend modify city varchar(127) after end;

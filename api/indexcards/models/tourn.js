@@ -1,11 +1,36 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('tourn', { 
+	return sequelize.define('tourn', {
 		name: {
 			type: DataTypes.STRING(64),
 			allowNull: false,
 			defaultValue: ''
+		},
+		city: {
+			type: DataTypes.STRING(31),
+			allowNull: true
+		},
+		state: {
+			type: DataTypes.CHAR(4),
+			allowNull: true
+		},
+		country: {
+			type: DataTypes.CHAR(4),
+			allowNull: true
+		},
+		tz: {
+			type: DataTypes.STRING(31),
+			allowNull: true
+		},
+		webname: {
+			type: DataTypes.STRING(64),
+			allowNull: true
+		},
+		hidden: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0'
 		},
 		start: {
 			type: DataTypes.DATE,
@@ -21,31 +46,6 @@ module.exports = function(sequelize, DataTypes) {
 		},
 		reg_end: {
 			type: DataTypes.DATE,
-			allowNull: true
-		},
-		hidden: {
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0'
-		},
-		webname: {
-			type: DataTypes.STRING(63),
-			allowNull: true
-		},
-		tz: {
-			type: DataTypes.STRING(32),
-			allowNull: true
-		},
-		city: {
-			type: DataTypes.STRING,
-			allowNull: true
-		},
-		state: {
-			type: DataTypes.STRING(16),
-			allowNull: true
-		},
-		country: {
-			type: DataTypes.STRING(16),
 			allowNull: true
 		}
 	});

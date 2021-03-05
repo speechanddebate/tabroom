@@ -3,7 +3,7 @@
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('tiebreakSetSetting', {
+	return sequelize.define('ruleSetting', {
 		table_name: 'tiebreak_set_setting',
 		tag: {
 			type: DataTypes.STRING(32),

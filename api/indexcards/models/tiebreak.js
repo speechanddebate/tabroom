@@ -1,7 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('tiebreak', { 
+	return sequelize.define('tiebreak', {
 		name: {
 			type: DataTypes.STRING(15),
 			allowNull: true
@@ -11,12 +11,26 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '0'
 		},
+		count_round: {
+			type: DataTypes.INTEGER,
+			allowNull: true
+		},
 		truncate: {
 			type: DataTypes.INTEGER(6),
 			allowNull: false,
 			defaultValue: '1'
 		},
+		truncate_smallest: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: false
+		},
 		multiplier: {
+			type: DataTypes.INTEGER(6),
+			allowNull: false,
+			defaultValue: '1'
+		},
+		violation: {
 			type: DataTypes.INTEGER(6),
 			allowNull: false,
 			defaultValue: '1'
