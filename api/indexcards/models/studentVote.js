@@ -1,7 +1,8 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('student', {
+	return sequelize.define('studentVote', {
+		table_name : 'student_vote',
 		tag: {
 			type         : DataTypes.ENUM('nominee', 'rank'),
 			allowNull    : false,
