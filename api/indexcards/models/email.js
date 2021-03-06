@@ -15,6 +15,11 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.TEXT("medium"),
 			allowNull: false
 		},
+		hidden: {
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: false
+		},
 		sent_to: {
 			type: DataTypes.STRING(128),
 			allowNull: false,
