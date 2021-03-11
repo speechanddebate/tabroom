@@ -7,6 +7,7 @@
 	$defaults    => undef
 	$entry_only  => undef
 	$round_id    => undef
+	$timeslot_id => undef
 </%args>
 <%init>
 
@@ -57,7 +58,9 @@
 
 	my $event;
 
-	if ($ARGS{event_id} && $evs{$ARGS{"event_id"}}) {
+	if ($ARGS{timeslot_id}) {
+
+	} elsif ($ARGS{event_id} && $evs{$ARGS{"event_id"}}) {
 		$event = $evs{$ARGS{"event_id"}};
 	} elsif ($defaults->{event} && $evs{$defaults->{event}}) {
 		$event = $evs{$defaults->{event}};
@@ -65,8 +68,10 @@
 		$event = ${$eventref}[0];
 	}
 
-	$defaults->{event} = $event->id if $event;
-	$session->default($defaults);
+	if ($event) {
+		$defaults->{event} = $event->id;
+		$session->default($defaults);
+	}
 
     my $eventlimit;
 
@@ -83,36 +88,48 @@
     }
 
 	my %rounds;
+	my $limit;
+
+	if ($timeslot_id) {
+		$timeslot_id = int($timeslot_id);
+		$limit = " where round.timeslot = ".$timeslot_id;
+	} elsif ($event) {
+		$limit = "where round.event = ".$event->id;
+	}
 
 	my $round_sth = $dbh->prepare("
 		select
 			round.id, round.name, round.label,
 			panel.id, panel.bye,
-			ballot.audit, ballot.judge_started, ballot.bye, ballot.forfeit
+			ballot.audit, ballot.judge_started, ballot.bye, ballot.forfeit,
+			event.abbr
 
-		from round, panel, ballot
+		from round, panel, ballot, event
 
-		where round.event = ?
+			$limit
 			and round.id = panel.round
 			and panel.id = ballot.panel
+			and round.event = event.id
 		group by panel.id,ballot.judge
 		order by round.name
 	");
 
-	if ($event) {
+	if ($event || $timeslot_id) {
 
-		$round_sth->execute($event->id);
+		$round_sth->execute();
 
 		while (
 			my (
 				$rid, $round_name, $round_label,
 				$panel_id, $panel_bye,
-				$ballot_audit, $ballot_judge_started, $ballot_bye, $ballot_forfeit
+				$ballot_audit, $ballot_judge_started, $ballot_bye, $ballot_forfeit,
+				$event_abbr
 			) = $round_sth->fetchrow_array()
 		) {
 
 			unless ($rounds{$rid}{"number"}) {
 
+				$rounds{$rid}{"event"} = $event_abbr;
 				$rounds{$rid}{"number"} = $round_name;
 				if ($round_label) {
 					$rounds{$rid}{"label"} = $round_label;
@@ -151,7 +168,18 @@
 	my %panels;
 	my $max_flight;
 
-	if ($round_id) {
+	if ($round_id || $timeslot_id) {
+
+		my $limit;
+
+		if ($round_id) {
+			$round_id = int($round_id);
+			$limit = "where round.id = ".$round_id;
+		} elsif ($timeslot_id) {
+			$timeslot_id = int($timeslot_id);
+			$limit = "where round.timeslot = ".$timeslot_id;
+		}
+
 
 		my $entries_sth = $dbh->prepare("
 			select
@@ -159,20 +187,23 @@
 				ballot.id, ballot.side, ballot.speakerorder, ballot.bye, ballot.forfeit,
 				entry.id, entry.code,
 				student.id, student.first, student.last, student.person,
-				room.name
+				room.name,
+				event.abbr
 
-			from (panel, ballot, entry, entry_student es, student)
+			from (panel, ballot, entry, entry_student es, student, round, event)
 
 				left join room on panel.room = room.id
 
-			where panel.round = ?
+			$limit
+				and round.id = panel.round
 				and panel.id = ballot.panel
 				and ballot.entry = entry.id
 				and entry.id = es.entry
 				and es.student = student.id
+				and entry.event = event.id
 		");
 
-		$entries_sth->execute($round_id);
+		$entries_sth->execute();
 		my $luddite_alert;
 
 		while (
@@ -181,7 +212,8 @@
 				$ballot_id, $ballot_side, $ballot_speakerorder, $ballot_bye, $ballot_forfeit,
 				$entry_id, $entry_code,
 				$student_id, $student_first, $student_last, $student_person,
-				$room_name
+				$room_name,
+				$event_abbr
 			) = $entries_sth->fetchrow_array()
 		) {
 
@@ -190,6 +222,7 @@
 			}
 
 			$panels{$panel_id}{"flight"} = $flight;
+			$panels{$panel_id}{"event"}  = $event_abbr;
 			$panels{$panel_id}{"letter"} = $panel_letter;
 			$panels{$panel_id}{"room"}   = $room_name;
 
@@ -230,14 +263,15 @@
 				ballot.id, ballot.side, ballot.speakerorder, ballot.bye, ballot.forfeit,
 				judge.id, judge.code, judge.first, judge.last, judge.person
 
-			from panel, ballot, judge
+			from (panel, ballot, judge, round)
 
-			where panel.round = ?
+			$limit
+				and round.id = panel.round
 				and panel.id = ballot.panel
 				and ballot.judge = judge.id
 		");
 
-		$judges_sth->execute($round_id);
+		$judges_sth->execute();
 
 		while (
 			my (
@@ -269,15 +303,18 @@
 					CONVERT_TZ(cl.timestamp, '+00:00', tourn.tz),
 				person.id, person.first, person.last
 
-			from panel, campus_log cl, tourn, person
+			from panel, campus_log cl, tourn, person, round
 
-			where panel.round = ?
+			$limit
+				and panel.round = round.id
 				and panel.id = cl.panel
 				and cl.tourn = tourn.id
 				and cl.person = person.id
+
+			order by cl.timestamp
 		");
 
-		$log_sth->execute($round_id);
+		$log_sth->execute();
 
 		while (
 			my (
@@ -286,12 +323,17 @@
 			) = $log_sth->fetchrow_array()
 		) {
 
+			unless ($entry || $judge) {
+				next;
+			}
+
+			if ($tag eq "absent") {
+				delete $panels{$panel_id}{"attendance"}{$person};
+				next;
+			}
+
 			if ($entry || $judge) {
 				$panels{$panel_id}{"attendance"}{$person} = $timestamp;
-			} else {
-				$panels{$panel_id}{"others"}{$person}{"time"} = $timestamp;
-				$panels{$panel_id}{"others"}{$person}{"name"} = $first." ".$last;
-				$panels{$panel_id}{"others"}{$person}{"desc"} = $desc;
 			}
 		}
 
@@ -314,7 +356,9 @@
 				<br />
 %			}
 
-			<h4>Event</h4>
+%			unless ($perms->{'details'}) {
+
+			<h4>Whole Timeslot</h4>
 
 			<span class="row full marbottom centeralign">
 
@@ -322,7 +366,40 @@
 					action = "campus.mhtml"
 					method = "post"
 				>
+					<select
+						name     = "timeslot_id"
+						onchange = 'this.form.submit()'
+						class    = "fixedmed notfirst"
+					>
+						<option value="">Choose timeslot:</option>
+<%perl>
+						foreach my $timeslot (
+							sort {
+								$a->start->epoch <=> $b->start->epoch
+							} $tourn->timeslots
+						) {
+</%perl>
+							<option
+								value="<% $timeslot->id %>"
+								<% ($timeslot_id == $timeslot->id)
+									? "selected"
+									: "" %>
+							><% $timeslot->name %></option>
+%						}
+					</select>
+				</form>
+			</span>
 
+%			}
+
+			<h4>Or, By Event</h4>
+
+			<span class="row full marbottom centeralign">
+
+				<form
+					action = "campus.mhtml"
+					method = "post"
+				>
 					<select
 						name     = "event_id"
 						onchange = 'this.form.submit()'
@@ -342,7 +419,7 @@
 				</form>
 			</span>
 
-%			if ($event) {
+%			if ($event || $timeslot_id) {
 
 				<span class="half nospace">
 					<h4>Rounds</h4>
@@ -363,6 +440,8 @@
 					} keys %rounds
 				) {
 
+					next unless $rounds{$rid}{"number"};
+
 					my $color;
 
 					if ($rounds{$rid}{"done"}) {
@@ -379,6 +458,7 @@
 						%><% $color %> full"
 					>
 						<span class="half nowrap">
+							<% $rounds{$rid}{"event"} %>
 							<% $rounds{$rid}{"label"} %>
 						</span>
 
@@ -409,7 +489,7 @@
 			tourn_settings => $tourn_settings
 		&>
 
-%		if ($round_id) {
+%		if ($round_id || $timeslot_id) {
 
 			<div class="full">
 
@@ -438,9 +518,12 @@
 
 				<thead>
 					<tr class="yellowrow">
+						<th>
+							Ev
+						</th>
 
 						<th>
-							Section
+							Sct
 						</th>
 
 %						if ($max_flight > 1) {
@@ -478,6 +561,9 @@
 							Count
 						</th>
 
+						<th>
+							Poke
+						</th>
 					</tr>
 				</thead>
 
@@ -497,6 +583,10 @@
 </%perl>
 						<tr>
 
+							<td class="centeralign nospace semibold bluetext">
+								<% $panels{$panel_id}{"event"} %>
+							</td>
+
 							<td class="centeralign nospace">
 								<a
 									href   = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel_id %>"
@@ -505,8 +595,10 @@
 								><%
 									$panels{$panel_id}{"bye"}
 									? "BYE"
-									: $event->abbr." ".$panels{$panel_id}{"letter"}
-								%> <% $panels{$panel_id}{"room"} %></a>
+									: $panels{$panel_id}{"room"}
+										? $panels{$panel_id}{"room"}
+										: $panels{$panel_id}{"letter"}
+								%></a>
 							</td>
 
 %							if ($max_flight > 1) {
@@ -533,13 +625,11 @@
 
 							if ($panels{$panel_id}{"entries"}) {
 
-
 								foreach my $entry_id (
 									sort {
 										$panels{$panel_id}{"entries"}{$a}{"order"} <=> $panels{$panel_id}{"entries"}{$b}{"order"}
 									} keys %{$panels{$panel_id}{"entries"}}
 								) {
-
 
 									$entry_count++;
 									my $size = 'full';
@@ -547,7 +637,8 @@
 									if ($rounds{$round_id}{"sides"}) {
 
 										if ($panels{$panel_id}{"entries"}{$entry_id}{"members"}) {
-											if (scalar (keys %{$panels{$panel_id}{"entries"}{$entry_id}{"members"}}) > 1) {
+											if (
+												scalar (keys %{$panels{$panel_id}{"entries"}{$entry_id}{"members"}}) > 1) {
 												$size = "half nowrap";
 											}
 										}
@@ -575,13 +666,17 @@
 
 									foreach my $person_id (
 										sort {
-											$panels{$panel_id}{"entries"}{$entry_id}{"members"}{$a} cmp $panels{$panel_id}{"entries"}{$entry_id}{"members"}{$b}
+											$panels{$panel_id}{"entries"}{$entry_id}{"members"}{$a}
+												cmp $panels{$panel_id}{"entries"}{$entry_id}{"members"}{$b}
 										} keys %{$panels{$panel_id}{"entries"}{$entry_id}{"members"}}
 									) {
 </%perl>
 										<span
-											class = "<% $size %> yellowhover leftalign"
-											title = "<% $panels{$panel_id}{"entries"}{$entry_id}{"code"} %>"
+											class         = "<% $size %> yellowhover leftalign"
+											title         = "<% $panels{$panel_id}{"entries"}{$entry_id}{"code"} %>"
+											target_id     = "<% $person_id %>"
+											related_thing = "<% $panel_id %>"
+											onClick       = "postSwitch(this, 'campus_switch.mhtml');"
 										>
 
 											<span class="half nospace centeralign">
@@ -599,10 +694,16 @@
 
 												<span class="half semibold centeralign graytext"
 												>FFT</span>
+<%perl>
+											} elsif (
+												$panels{$panel_id}{"attendance"}{$person_id}
+												|| $panels{$panel_id}{"bye"}
+											) {
 
-%											} elsif ($panels{$panel_id}{"attendance"}{$person_id} || $panels{$panel_id}{"bye"}) {
-%												$count++;
+												$count++;
+</%perl>
 												<span
+													id="<% $panel_id %>_<% $person_id %>"
 													title="<&
 														"/funclib/showtime.mas",
 															string => $panels{$panel_id}{"attendance"}{$person},
@@ -611,7 +712,9 @@
 													class="half fa fa-sm fa-check greentext"
 												></span>
 %											} else {
-												<span class="half fa fa-sm fa-circle brightredtext"
+												<span
+													id="<% $panel_id %>_<% $person_id %>"
+													class="half fa fa-sm fa-circle brightredtext"
 												></span>
 %											}
 										</span>
@@ -635,17 +738,24 @@
 
 								foreach my $judge_id (
 									sort {
-										$panels{$panel_id}{"judges"}{$a}{"last"} cmp $panels{$panel_id}{"judges"}{$b}{"last"}
+										$panels{$panel_id}{"judges"}{$a}{"last"}
+										cmp $panels{$panel_id}{"judges"}{$b}{"last"}
 									} keys %{$panels{$panel_id}{"judges"}}
 								) {
 
 									my $person_id = $panels{$panel_id}{"judges"}{$judge_id}{"person"};
 </%perl>
-									<span class="full marno padless">
+									<span
+										class         = "full marno padless yellowhover"
+										target_id     = "<% $person_id %>"
+										related_thing = "<% $panel_id %>"
+										onClick       = "postSwitch(this, 'campus_switch.mhtml');"
+									>
 
 %										if ($panels{$panel_id}{"attendance"}{$person_id}) {
 %											$count++;
 											<span
+												id="<% $panel_id %>_<% $person_id %>"
 												title="<&
 													"/funclib/showtime.mas",
 														string => $panels{$panel_id}{"attendance"}{$person},
@@ -654,7 +764,9 @@
 												class="sixth centeralign fa fa-sm fa-check greentext"
 											></span>
 %										} else {
-											<span class="sixth centeralign fa fa-sm fa-circle brightredtext"
+											<span
+												id="<% $panel_id %>_<% $person_id %>"
+												class="sixth centeralign fa fa-sm fa-circle brightredtext"
 											></span>
 %										}
 										<span class="threequarters">
@@ -667,6 +779,17 @@
 
 							<td class="centeralign limitsmall">
 								<% $count %>
+							</td>
+
+							<td
+								title = "Blast the missing people from this section"
+								class = "centeralign limitsmall"
+							>
+								<a
+									class     = "buttonwhite redtext fa fa-bell invert"
+									target_id = "<% $panel_id %>"
+									onClick   = "postSwitch(this, 'blast_missing.mhtml');"
+								></a>
 							</td>
 						</tr>
 %					}
