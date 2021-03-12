@@ -65,6 +65,7 @@
 		var propertyName = $(checkObject).attr("property_name");
 		var settingName  = $(checkObject).attr("setting_name");
 		var relatedThing = $(checkObject).attr("related_thing");
+		var anotherThing = $(checkObject).attr("another_thing");
 		var tournID      = $(checkObject).attr("tourn_id");
 
 		var successAction = $(checkObject).attr("on_success");
@@ -142,6 +143,7 @@
 				option_two     : optionTwo,
 				other_text     : otherText,
 				related_thing  : relatedThing,
+				another_thing  : anotherThing,
 				tourn_id       : tournID,
 				parent_id      : parentObjectId
 			},
@@ -245,6 +247,27 @@
 								$("#"+item.id).remove();
 							} else if (item.content) {
 								$("#"+item.id).html(item.content);
+							}
+						});
+					}
+
+					if (data.reclass) {
+						data.reclass.forEach( function(item) {
+							if (item.removeClass) {
+								$("#"+item.id).removeClass(item.removeClass);
+							}
+							if (item.addClass) {
+								$("#"+item.id).addClass(item.addClass);
+							}
+						});
+					}
+
+					if (data.reprop) {
+						data.reprop.forEach( function(item) {
+							if (item.value === 1) {
+								$("#"+item.id).attr(item.property, item.value);
+							} else {
+								$("#"+item.id).attr(item.property, 0);
 							}
 						});
 					}
