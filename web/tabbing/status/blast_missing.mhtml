@@ -1,0 +1,212 @@
+<%args>
+	$tourn
+	$person
+	$target_id      => undef
+	$related_thing  => undef
+	$another_thing  => undef
+	$setting_name   => undef
+	$property_name  => undef
+</%args>
+<%init>
+
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	unless ($target_id) {
+		$m->print('{ "error": true, "message": "No Panel ID sent"}');
+		$m->abort();
+	}
+
+	my $panel = Tab::Panel->retrieve($target_id);
+
+	unless ($panel) {
+		$m->print('{ "error": true, "message": "No Panel was found for ID '.$target_id.'"}');
+		$m->abort();
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $event_abbr;
+	my $round_name;
+	my $room_name;
+
+	my $entries_sth = $dbh->prepare("
+		select
+			person.id, person.email, person.phone, person.provider,
+			round.name, round.label, event.abbr, panel.letter, room.name
+
+		from (ballot, entry, entry_student es, student, person, round, event, panel)
+
+			left join room on room.id = panel.room
+
+		where ballot.panel = ?
+			and ballot.entry = entry.id
+			and entry.active = 1
+			and entry.id = es.entry
+			and es.student = student.id
+			and student.person = person.id
+			and person.no_email != 1
+			and entry.event = event.id
+			and panel.id = ballot.panel
+			and round.id = panel.round
+		group by person.id
+	");
+
+	my %addresses;
+
+	$entries_sth->execute($panel->id);
+
+	while (
+		my (
+			$id, $email, $phone, $provider,
+			$round_num, $round_label, $event,
+			$letter, $room
+		) = $entries_sth->fetchrow_array()
+	) {
+
+		if ($event) {
+			$event_abbr = $event;
+		}
+
+		if ($round_label) {
+			$round_name = $round_label;
+		} elsif ($round_num) {
+			$round_name = "Round ".$round_num;
+		}
+
+		if ($room) {
+			$room_name = $room;
+		} elsif ($letter) {
+			$room_name = "Section ".$letter;
+		}
+
+		if ($email) {
+			$addresses{$id}{"email"} = $email;
+		}
+
+		if ($phone && $provider) {
+			$phone =~ s/[\D_]//g;
+			$addresses{$id}{"sms"} = $phone.'@'.$provider;
+		}
+	}
+
+	my $judges_sth = $dbh->prepare("
+		select
+			person.id, person.email, person.phone, person.provider
+
+		from (ballot, judge, person)
+
+		where ballot.panel = ?
+			and ballot.judge = judge.id
+			and judge.person = person.id
+			and person.no_email != 1
+		group by person.id
+	");
+
+	$judges_sth->execute($panel->id);
+
+	while (
+		my (
+			$id, $email, $phone, $provider
+		) = $judges_sth->fetchrow_array()
+	) {
+		if ($email) {
+			$addresses{$id}{"email"} = $email;
+		}
+
+		if ($phone && $provider) {
+			$phone =~ s/[\D_]//g;
+			$addresses{$id}{"sms"} = $phone.'@'.$provider;
+		}
+	}
+
+	my $log_sth = $dbh->prepare("
+		select
+			cl.panel, cl.tag, cl.description, cl.person, cl.entry, cl.judge,
+				CONVERT_TZ(cl.timestamp, '+00:00', tourn.tz),
+			person.id, person.first, person.last
+
+		from panel, campus_log cl, tourn, person, round
+
+		where panel.id = ?
+			and panel.round = round.id
+			and panel.id = cl.panel
+			and cl.tourn = tourn.id
+			and cl.person = person.id
+
+		order by cl.timestamp
+	");
+
+	$log_sth->execute($panel->id);
+
+	my %ok;
+
+	while (
+		my (
+			$panel_id, $tag, $desc, $person, $entry, $judge, $timestamp,
+			$id, $first, $last
+		) = $log_sth->fetchrow_array()
+	) {
+
+		unless ($entry || $judge) {
+			next;
+		}
+
+		if ($tag eq "absent") {
+			delete $ok{$person};
+			next;
+		}
+
+		if ($entry || $judge) {
+			$ok{$person}++;
+		}
+	}
+
+	foreach my $okey (keys %ok) {
+		delete $addresses{$okey};
+	}
+
+	my @emails;
+	my $counter;
+
+	my %response;
+	my @reclass;
+
+	foreach my $id (keys %addresses) {
+
+		$counter++;
+		if ($addresses{$id}{"email"}) {
+			push @emails, $addresses{$id}{"email"};
+		}
+
+		if ($addresses{$id}{"sms"}) {
+			push @emails, $addresses{$id}{"sms"};
+		}
+
+		my %limit = ();
+		$limit{"id"} = "blast_".$target_id;
+		$limit{"addClass"} = "hidden";
+		push @reclass, \%limit;
+	}
+
+	my $message = "You are marked as not present in $round_name of $event_abbr in $room_name.  Please go to $room_name quickly so the tournament may continue.";
+
+	$m->comp(
+		"/funclib/send_notify.mas",
+		from    => 'Tabroom.com <live@tabroom.com>',
+		array   => \@emails,
+		subject => "Missing from $room_name",
+		body    => $message
+	);
+
+	$log_sth->finish;
+
+	$response{"error"} = JSON::false;
+	$response{"message"} = $counter." missing people blasted in ".$room_name;
+	$response{"reclass"} = \@reclass;
+
+	$m->print(JSON::encode_json(\%response));
+
+	$m->abort();
+
+</%init>
