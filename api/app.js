@@ -70,9 +70,10 @@ app.use(bodyParser.text({ type: '*/*', limit: '10mb' }));
 
 // Parse cookies as a fallback to basic auth
 app.use(cookieParser());
-app.use(function(req, res, next) {
-	auth(req,res,next);
-});
+
+// app.use(function(req, res, next) {
+//	auth(req,res,next);
+//});
 
 initialize({
 	app,
@@ -113,6 +114,10 @@ const port = process.env.PORT || config.PORT || 9876;
 
 app.listen(port, () => {
     debugLogger.info(`Server started. Listening on port ${port}`);
+});
+
+app.get('/', function(req, res) {
+	res.send("Welcome to Indexcards, the Tabroom.com API");
 });
 
 export default app;
