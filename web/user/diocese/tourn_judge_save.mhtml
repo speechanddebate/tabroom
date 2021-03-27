@@ -2,6 +2,8 @@
 	$category_id
 	$region
 	$tourn
+	$person
+	$cj_id        => undef
 	$first        => undef
 	$last         => undef
 	$judge_id     => undef
@@ -52,17 +54,107 @@
 
 		$msg = "Changes to Judge $first $last saved ";
 
+	} elsif ($cj_id) {
+
+		my $cj = Tab::ChapterJudge->retrieve($cj_id);
+
+		if (not defined $cj) {
+			$err = "Invalid judge record $cj_id";
+		} elsif (not defined $cj->person) {
+			$err = "Judge ".$cj->last." has no Tabroom account linked";
+		} elsif (not defined $cj->person->phone) {
+			$err = "Judge ".$cj->last." has no phone listed in their Tabroom account";
+		} else {
+
+			my $chapter = $cj->chapter;
+			my $school = $chapter->schools(tourn => $tourn->id)->first;
+
+			Tab::Judge->set_sql( cj_dupes => "
+				select
+					judge.id
+				from judge, category
+				where category.tourn = ?
+					and category.id = judge.category
+					and judge.chapter_judge = ?
+			");
+
+			my @cj_dupes = Tab::Judge->search_cj_dupes($tourn->id, $cj->id);
+
+			Tab::Judge->set_sql( person_dupes => "
+				select
+					judge.id
+				from judge, category
+				where category.tourn = ?
+					and category.id = judge.category
+					and judge.person = ?
+			");
+
+			my @person_dupes = Tab::Judge->search_person_dupes($tourn->id, $cj->person);
+
+			if (@cj_dupes) {
+
+				$err = "That school roster judge is already entered in the tournament in ".$cj_dupes[0]->category->abbr;
+
+			} elsif (@person_dupes) {
+
+				$err = "A judge with the tabroom account ".$cj->person->email." is already entered in the tournament in ".$person_dupes[0]->category->abbr;
+
+			} else {
+
+				unless ($school) {
+					$school = Tab::School->create({
+						tourn   => $tourn->id,
+						chapter => $chapter->id,
+						name    => $chapter->name,
+						region  => $region->id,
+					}) unless $school;
+
+					$school->setting("entered_on", "date", $now);
+					$school->setting("contact", $person->id);
+				}
+
+				$judge = Tab::Judge->create({
+					first         => $cj->first,
+					last          => $cj->last,
+					tourn         => $tourn->id,
+					school        => $school->id,
+					category      => $category_id,
+					alt_category  => $alt_category,
+					active        => 1,
+					chapter_judge => $cj->id,
+					person        => $cj->person,
+					hired         => 0,
+					obligation    => 0
+				});
+
+				$judge->setting("parli", $parli);
+				$judge->setting('notes', $notes);
+				$judge->setting('gender', $cj->gender);
+
+				$msg = "Judge ".$judge->first." ".$judge->last." has been added to ".$category->abbr;
+
+			}
+		}
+
+
 	} else {
 
 		if ($first && $last && $gender && $school) {
 
-			my $cj = Tab::ChapterJudge->create({
+			my $cj = $school->chapter->chapter_judges(
 				first   => $first,
 				last    => $last,
-				chapter => $school->chapter->id,
-				gender  => $gender
-			});
+				retired => 0
+			)->first;
 
+			unless ($cj) {
+				$cj = Tab::ChapterJudge->create({
+					first   => $first,
+					last    => $last,
+					chapter => $school->chapter->id,
+					gender  => $gender
+				});
+			}
 
 			$judge = Tab::Judge->create({
 				first         => $first,
@@ -95,26 +187,43 @@
 			$m->redirect("/user/diocese/judge_edit.mhtml?category_id=".$category->id."&tourn_id=".$tourn->id."&region_id=".$region->id."&err=$err");
 
 		}
-
 	}
 
 	if ($category->setting("ask_alts") &! $alt_category) {
 		$missing .= "alt_category" unless $alt_category;
-		$err .= "You did not specify an alternative judging category.  Please fix.<br />";
+		$err .= "Please specify an alternative judging category.<br />";
 	}
 
 	if ($category->setting("ask_parli") &! $parli) {
 
 		$missing .= "parli" unless $parli;
-		$err .= "You did not specify if the judge can be a parliamentarian.  Please fix.<br />";
+		$err .= "Please specify whether the judge can be a parliamentarian.<br />";
 
-	} elsif ($category->setting("ask_parli")
+	} elsif (
+		$category->setting("ask_parli")
 		&& $region->setting('quota') > 4
 		&& $parli ne "Y"
 	) {
-		$err .= "Your Congress judge is not a qualified parliamentarian.  Dioceses with ";
-		$err .= "quotas of 5 or 6 must bring a parliamentarian as their judge.  Substitute ";
-		$err .= "another judge <br />";
+
+		Tab::Judge->set_sql(parli => "
+			select judge.id
+			from judge, school, judge_setting parli
+
+			where judge.category = ?
+				and judge.school = school.id
+				and school.region = ?
+				and school.tourn = ?
+				and judge.id = parli.judge
+				and parli.tag = 'parli'
+		");
+
+		my @parlis = Tab::Judge->search_parli($category->id, $region->id, $tourn->id);
+
+		unless (@parlis) {
+			$err .= "Your Congress judges so far do not not include a qualified parliamentarian. ";
+			$err .= "Dioceses with quotas of 5 or 6 must bring at least one parliamentarian.  ";
+			$err .= "Add another or substitute a parliamentarian for this judge. <br />";
+		}
 	}
 
 	my @prelim_jpools = $m->comp("/funclib/category_jpools.mas",
@@ -204,7 +313,7 @@
 			$err .= "You did not rate the judge's experience.  Please try again.<br />";
 			$missing .= "rating";
 
-		} else {
+		} elsif ($judge) {
 
 			my @ratings = Tab::Rating->search( judge => $judge->id, type => "coach" );
 
@@ -237,18 +346,43 @@
 		my $person = Tab::Person->search( email => $email)->first;
 
 		if ($person) {
-			$judge->person($person->id);
-			$judge->update();
-		} else {
-			$judge->setting("email", $email);
-		}
 
+			Tab::Judge->set_sql( person_dupes => "
+				select
+					judge.id
+				from judge, category
+				where category.tourn = ?
+					and category.id = judge.category
+					and judge.person = ?
+			");
+
+			my @person_dupes = Tab::Judge->search_person_dupes($tourn->id, $person);
+
+			if (@person_dupes) {
+				$err .= "A judge with the tabroom account ".$person->email." is already entered ";
+				$err .= "in the tournament in ".$person_dupes[0]->category->abbr.", so you may ";
+				$err .= "not link this judge to that account";
+
+			} else {
+
+				unless ($person->phone > 0) {
+					$err .= "The Tabroom account $email is missing a phone number.  Ask the ";
+					$err .= "user to enter a valid phone number in their account to continue.";
+				} else {
+					$judge->person($person->id);
+					$judge->update();
+				}
+			}
+		} else {
+			$err .= "No Tabroom account was found for $email.  Please enter a valid Tabroom ";
+			$err .= "account to continue.";
+		}
 	}
 
 
 	if ($err) {
 
-		$m->redirect("/user/diocese/tourn_judge_edit.mhtml?judge_id=".$judge->id."&category_id=".$category->id."&region_id=".$region->id."&tourn_id=".$tourn->id."&missing=$missing&err=$err");
+		$m->redirect("/user/diocese/tourn_judge_edit.mhtml?judge_id=".$judge."&category_id=".$category->id."&region_id=".$region->id."&tourn_id=".$tourn->id."&missing=$missing&err=$err");
 
 	} elsif ($save eq "Save and Return To Roster") {
 
