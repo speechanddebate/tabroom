@@ -3,10 +3,16 @@ import responses from './definitions/responses';
 
 const apiDoc = {
 	openapi: '3.0.2',
-	servers: [{ url: '/' }],
+	servers: [{
+		url: '/v1'
+	}],
 	info: {
-		title: 'Tabroom IndexCards API v1',
+		title: 'IndexCards API',
 		version: '1.0.0',
+		description: 'Tabroom.com data & operational API',
+		license: {
+			name : "Copyright 2014-2021, National Speech & Debate Assocation",
+		}
 	},
 	components: {
 		schemas,
