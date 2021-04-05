@@ -5,6 +5,9 @@ const postError = {
         await clientLogger.error(req.body.err.message || 'Unspecified client error', req.body);
         return res.status(201).json({ message: 'Error successfully logged' });
     },
+    GET: async (req, res) => {
+        return res.status(200).json({ message: 'No error created; must use POST' });
+    },
 };
 
 postError.POST.apiDoc = {
@@ -31,3 +34,5 @@ postError.POST.apiDoc = {
 };
 
 export default postError;
+
+
