@@ -10,11 +10,17 @@ import errorHandler from './indexcards/helpers/error';
 
 import { initialize } from 'express-openapi';
 import apiDoc from './indexcards/routes/api-doc';
-import paths from './indexcards/routes/paths';
+
+import publicPaths from './indexcards/routes/paths/public';
+import userPaths from './indexcards/routes/paths/user';
+import tournPaths from './indexcards/routes/paths/tourn';
+
 import auth from './indexcards/helpers/auth';
 import db from './indexcards/models';
 
 import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';
+
+import swaggerUI from 'swagger-ui-express';
 
 const app = express();
 
@@ -75,25 +81,19 @@ app.use(cookieParser());
 //	auth(req,res,next);
 //});
 
-initialize({
+// Combine the various paths into one
+
+const paths = [...tournPaths, ...userPaths, ...publicPaths];
+
+// Initialize OpenAPI middleware
+const apiDocConfig = initialize({
 	app,
 	apiDoc,
 	paths,
-	promiseMode: true,
+	promiseMode     : true,
+	docsPath        : '/docs',
+	errorMiddleware : errorHandler
 });
-
-// Initialize OpenAPI middleware
-// initialize({
-//	 app,
-//	 apiDoc,
-//	 paths,
-//	 docsPath: '/docs',
-//	 promiseMode: true,
-//	 errorMiddleware: errorHandler,
-//	 securityHandlers: {
-// 		basic: auth,
-//	 },
-// });
 
 // Log global errors with Winston
 app.use(expressWinston.errorLogger({
@@ -109,6 +109,9 @@ app.use(expressWinston.errorLogger({
 // Final fallback error handling
 app.use(errorHandler);
 
+// Swagger UI interface for the API
+app.use('/', swaggerUI.serve, swaggerUI.setup(apiDocConfig.apiDoc));
+
 // Start server
 const port = process.env.PORT || config.PORT || 9876;
 
@@ -116,8 +119,5 @@ app.listen(port, () => {
     debugLogger.info(`Server started. Listening on port ${port}`);
 });
 
-app.get('/', function(req, res) {
-	res.send("Welcome to Indexcards, the Tabroom.com API");
-});
 
 export default app;
