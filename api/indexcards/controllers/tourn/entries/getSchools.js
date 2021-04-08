@@ -1,24 +1,24 @@
 import db from '../../../models';
 
-const getProfile = {
+const getSchools = {
     GET: async (req, res) => {
-        const result = await db.Person.findByPk(req.query.userId);
+        const result = await db.Person.findAll({ where: {tourn: req.params.tourn_id}});
 
         if (result.count < 1) {
-            return res.status(400).json({ message: 'User does not exist' });
+            return res.status(400).json({ message: 'No schools found' });
         }
         return res.status(200).json(result);
     },
 };
 
-getProfile.GET.apiDoc = {
-    summary: 'Load the profile data of the logged in user',
-    operationId: 'getProfile',
+getSchools.GET.apiDoc = {
+    summary: 'Listing of schools in the tournament',
+    operationId: 'getSchools',
     parameters: [
         {
             in          : 'path',
-            name        : 'person_id',
-            description : 'ID of user whose profile you wish to access',
+            name        : 'tourn_id',
+            description : 'Tournament ID',
             required    : true,
             schema      : {
 				type    : 'integer',
@@ -28,19 +28,19 @@ getProfile.GET.apiDoc = {
     ],
     responses: {
         200: {
-            description: 'Person Profile',
+            description: 'School Data',
             content: {
                 '*/*': {
                     schema: {
                         type: 'array',
-                        items: { $ref: '#/components/schemas/Person' },
+                        items: { $ref: '#/components/schemas/School' },
                     },
                 },
             },
         },
         default: { $ref: '#/components/responses/ErrorResponse' },
     },
-    tags: ['accounts'],
+    tags: ['tournament/entries'],
 };
 
-export default getProfile;
+export default getSchools;
