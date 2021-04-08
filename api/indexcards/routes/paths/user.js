@@ -3,13 +3,12 @@
 // account functions.
 
 // Utility functions
-import status from '../../controllers/utility/status';
-import postError from '../../controllers/utility/postError';
+import getProfile from '../../controllers/user/account/getProfile';
 
 // import getPerson from '../controllers/user/getPerson';
 // import getLogin from '../controllers/user/getLogin';
 // { path : '/user/person/' , module : getPerson },
 
 export default [
-    { path : '/profile', module : status },
+    { path : '/profile', module : getProfile },
 ];
