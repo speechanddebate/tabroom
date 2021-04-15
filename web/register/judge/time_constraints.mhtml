@@ -1,0 +1,244 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$category_id
+</%args>
+<%init>
+
+	my $category = Tab::Category->retrieve($category_id);
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $timeslot_sth = $dbh->prepare("
+		select
+			timeslot.id, timeslot.start, timeslot.end, round.type
+		from (timeslot, round, event)
+		where event.category = ?
+			and event.id = round.event
+			and round.timeslot = timeslot.id
+		group by timeslot.id
+	");
+
+	my %timeslots;
+
+	$timeslot_sth->execute($category->id);
+
+	while (
+		my (
+			$id, $start, $end, $type
+		) = $timeslot_sth->fetchrow_array()
+	) {
+
+		$timeslots{$id}{"start"} = eval {
+			return DateTime::Format::MySQL->parse_datetime($start);
+		};
+
+		$timeslots{$id}{"end"} = eval {
+			return DateTime::Format::MySQL->parse_datetime($end);
+		};
+
+		$timeslots{$id}{"type"} = $type;
+	}
+
+	my $strikes_sth = $dbh->prepare("
+		select
+			strike.id, strike.start, strike.end,
+			judge.id, judge.first, judge.last,
+			school.id, school.name
+
+		from (strike, judge)
+
+			left join school on judge.school = school.id
+
+		where judge.category = ?
+			and judge.active = 1
+			and judge.id = strike.judge
+			and strike.type in ('time', 'departure')
+	");
+
+	my %judges;
+	my %totals;
+	my %types;
+
+	$strikes_sth->execute($category->id);
+
+	while (
+		my (
+			$sid, $start, $end,
+			$jid, $first, $last,
+			$jschool_id, $jschool_name
+		) = $strikes_sth->fetchrow_array()
+	) {
+
+		my $start_dt = eval {
+			return DateTime::Format::MySQL->parse_datetime($start);
+		};
+		my $end_dt = eval {
+			return DateTime::Format::MySQL->parse_datetime($end);
+		};
+
+		my $tch;
+
+		foreach my $tid (keys %timeslots) {
+
+			if (
+				$timeslots{$tid}{"start"} < $end_dt
+				&& $timeslots{$tid}{"end"} > $start_dt
+			) {
+				my $type = $timeslots{$tid}{"type"};
+
+				$type = "prelim" if $type eq "highhigh";
+				$type = "prelim" if $type eq "highlow";
+				$type = "prelim" if $type eq "snaked_prelim";
+
+				$type = "elim" if $type eq "final";
+
+				$judges{$jid}{"count"}{$tid}++;
+				$judges{$jid}{"count_type"}{$type}{$tid}++;
+
+				$totals{"count"}{$jid."-".$tid}++;
+				$totals{"count_type"}{$type}{$jid."-".$tid}++;
+				$types{$type}++;
+				$tch++;
+			}
+		}
+
+		next unless $tch;
+
+		unless ($judges{$jid}{"first"}) {
+			$judges{$jid}{"first"} = $first;
+			$judges{$jid}{"last"} = $last;
+
+			if ($jschool_name) {
+				$judges{$jid}{"school"} = $m->comp("/funclib/short_name.mas", name => $jschool_name);
+				$judges{$jid}{"school_id"} = $jschool_id;
+			} else {
+				$judges{$jid}{"school"} = "Hired";
+			}
+		}
+	}
+
+</%init>
+
+	<& menu.mas,
+		tourn          => $tourn,
+		tourn_settings => $tourn_settings,
+		whoami         => "timeblocks",
+		category       => $category
+	&>
+
+	<& "/funclib/tablesorter.mas", table => "constraints" &>
+
+	<div class="main">
+
+		<span class="twothirds nospace">
+			<h5>
+				<% $category->abbr %> Time Constraint Totals
+			</h5>
+		</span>
+
+		<span
+			class = "third nospace rightalign"
+			id    = "constraints_buttonarea"
+		>
+		</span>
+
+		<table id="constraints">
+
+			<thead>
+				<tr class="yellowrow">
+					<th>
+						First
+					</th>
+
+					<th>
+						Last
+					</th>
+
+					<th>
+						School
+					</th>
+
+%					foreach my $key (keys %types) {
+						<th>
+							<% ucfirst($key) %>
+						</th>
+%					}
+
+					<th>
+						Total
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+<%perl>
+				foreach my $judge (
+					sort {
+						$judges{$a}{"last"} cmp $judges{$b}{"last"}
+						|| $judges{$a}{"first"} cmp $judges{$b}{"first"}
+					} keys %judges
+				) {
+</%perl>
+					<tr>
+						<td>
+							<a
+								class="plain full padvertless hover"
+								href="/register/judge/judge_strikes.mhtml?judge_id=<% $judge %>"
+							>
+								<% $judges{$judge}{"first"} %>
+							</a>
+						</td>
+
+						<td>
+							<a
+								class="plain full padvertless hover"
+								href="/register/judge/judge_strikes.mhtml?judge_id=<% $judge %>"
+							>
+								<% $judges{$judge}{"last"} %>
+							</a>
+						</td>
+
+						<td>
+%						 	if ($judges{$judge}{"school_id"}) {
+								<a
+									class="plain full padvertless"
+									href="/register/school/judges.mhtml?school_id=<% $judges{$judge}{"school_id"} %>"
+								><% $judges{$judge}{"school"} %></a>
+%							}
+						</td>
+
+%						foreach my $key (keys %types) {
+							<th>
+								<% scalar (keys %{$judges{$judge}{"count_type"}{$key}}) %>
+							</th>
+%						}
+
+						<td>
+							<% scalar (keys %{$judges{$judge}{"count"}}) %>
+						</td>
+					</tr>
+%				}
+
+			</tbody>
+
+			<tr class="libl semibold">
+				<td colspan="3" class="rightalign">
+					TOTAL
+					<span class="spacer"></span>
+				</td>
+
+%				foreach my $key (keys %types) {
+					<th>
+						<% scalar (keys %{$totals{"count_type"}{$key}}) %>
+					</th>
+%				}
+
+				<td>
+					<% scalar (keys %{$totals{"count"}}) %>
+				</td>
+			</tr>
+
+		</table>
+	</div>
+
