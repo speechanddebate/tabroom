@@ -29,7 +29,6 @@ const config = {
 	NAUDL_STUDENT_ENDPOINT: 'studentServiceTabroomUrl',
 	NAUDL_STA_ENDPOINT    : 'staTabroomServiceUrl',
 	COOKIE_NAME           : 'TabroomToken',
-
     DB_HOST               : 'localhost',
     DB_PORT               : '3306',
     DB_USER               : 'username',
@@ -37,9 +36,12 @@ const config = {
     DB_DATABASE           : 'tabroom',
 	sequelizeOptions      : {
 		"dialect"         : "mariadb",
-		"freezeTableName" : true,
-		"underscored"     : true,
-		"timestamps"      : false
+		"define" : {
+			"freezeTableName" : true,
+			"modelName"       : "singularName",
+			"underscored"     : true,
+			"timestamps"      : false
+		}
 	}
 };
 
