@@ -495,8 +495,8 @@ db.follower.belongsTo(db.student , { as: "Student"  , foreignKey: "student"});
 db.follower.belongsTo(db.tourn   , { as: "Tourn"    , foreignKey: "tourn"});
 
 // Sessions
-db.session.belongsTo(db.person,   { as: 'Su',       foreignKey: 'su'});
-db.session.belongsTo(db.person,   { as: 'Person',   foreignKey: 'person'});
+db.session.belongsTo(db.person, { as: 'Su',     foreignKey: 'su'});
+db.session.belongsTo(db.person, { as: 'Person', foreignKey: 'person'});
 
 db.setting.hasMany(db.settingLabel, { as: 'Labels', foreignKey: 'setting'});
 db.settingLabel.belongsTo(db.setting, { as: "Setting", foreignKey: "setting"});

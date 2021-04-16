@@ -33,6 +33,7 @@ app.use(helmet());
 // Enable getting forwarded client IP from proxy
 app.enable('trust proxy');
 
+
 // Rate limit all requests
 const limiter = rateLimiter({
     windowMs: config.RATE_WINDOW || 15 * 60 * 1000, // 15 minutes
@@ -53,9 +54,10 @@ app.use((req, res, next) => {
     next();
 });
 
-// Add a unique UUID to every request
+// Add a unique UUID to every request, and add the configuration for easy transport
 app.use((req, res, next) => {
     req.uuid = uuid();
+	req.config = config;
     return next();
 });
 
@@ -77,9 +79,9 @@ app.use(bodyParser.text({ type: '*/*', limit: '10mb' }));
 // Parse cookies as a fallback to basic auth
 app.use(cookieParser());
 
-// app.use(function(req, res, next) {
-//	auth(req,res,next);
-//});
+app.use(function(req, res, next) {
+	auth(req,res,next,db);
+});
 
 // Combine the various paths into one
 

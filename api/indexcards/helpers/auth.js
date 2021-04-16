@@ -2,54 +2,56 @@
 // Parse the Tabroom cookies and determine whether there's an active session
 //
 
-import config from '../../config/config';
-import db from '../models';
+const auth = async function(req, res, next, db) {
 
-const env = process.env.NODE_ENV || 'development';
-
-const auth = async function(req, res, next) {
-
-	if (req.cookies[config.COOKIE_NAME]) {
+	if (req.cookies[req.config.COOKIE_NAME]) {
 
 		const session = await db.session.findOne({
-			where: { userkey: req.cookies[config.cookieName] },
-			include: Person, Su
+			where: { userkey: req.cookies[req.config.COOKIE_NAME] },
+			include : [
+				{ model: db.person, as: 'Person'},
+				{ model: db.person, as: 'Su'}
+			]
 		});
 
 		if (session) {
 
-			if (session.su)  {
+			session.Su = await session.getSu();
 
-				let realname = session.su.first;
-				if (session.su.middle) {
-					realname += " "+session.su.middle;
+			if (session.Su)  {
+
+				let realname = session.Su.first;
+
+				if (session.Su.middle) {
+					realname += " "+session.Su.middle;
 				}
-				realname += " "+session.su.last;
+				realname += " "+session.Su.last;
 
 				req.session = {
 					id         : session.id,
-					person     : session.su.id,
-					site_admin : session.su.site_admin,
+					person     : session.Su.id,
+					site_admin : session.Su.site_admin,
 					defaults   : session.defaults,
-					email      : session.su.email,
+					email      : session.Su.email,
 					name       : realname,
-					su         : session.person.id
+					su         : session.Person.id
 				};
 
-			} else {
+			} else if (session.Person) {
 
-				let realname = session.person.first;
-				if (session.person.middle) {
-					realname += " "+session.person.middle;
+				let realname = session.Person.first;
+
+				if (session.Person.middle) {
+					realname += " "+session.Person.middle;
 				}
-				realname += " "+session.person.last;
+				realname += " "+session.Person.last;
 
 				req.session = {
 					id         : session.id,
-					person     : session.person.id,
-					site_admin : session.person.site_admin,
+					person     : session.Person.id,
+					site_admin : session.Person.site_admin,
 					defaults   : session.defaults,
-					email      : session.person.email,
+					email      : session.Person.email,
 					name       : realname
 				};
 			}
@@ -60,7 +62,7 @@ const auth = async function(req, res, next) {
 
 			req.session = {};
 			console.log("No valid session found for key");
-			console.log(req.cookies[config.COOKIE_NAME]);
+			console.log(req.cookies[req.config.COOKIE_NAME]);
 			next();
 		}
 
