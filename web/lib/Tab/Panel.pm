@@ -3,9 +3,9 @@ use base 'Tab::DBI';
 Tab::Panel->table('panel');
 Tab::Panel->columns(Primary => qw/id/);
 Tab::Panel->columns(Essential => qw/letter round room flight bye bracket started/);
-Tab::Panel->columns(Others => qw/flip flip_status flip_at publish room_ext_id g_event invites_sent timestamp/);
+Tab::Panel->columns(Others => qw/flip flip_status flip_at publish timestamp g_event/);
 
-Tab::Panel->columns(TEMP => qw/opp pos side entryid judge audit 
+Tab::Panel->columns(TEMP => qw/opp pos side entryid judge audit
 	timeslotid roomname eventname judgenum panelsize ada speakerorder
 /);
 
@@ -35,15 +35,15 @@ sub setting {
 	foreach (@existing) { $_->delete(); }
 
 	if (defined $value) {
-			
+
 		if ($existing) {
 
 			$existing->value($value);
 			$existing->value_text($blob) if $value eq "text";
 			$existing->value_date($blob) if $value eq "date";
 
-			if ($value eq "json") { 
-				my $json = eval{ 
+			if ($value eq "json") {
+				my $json = eval{
 					return JSON::encode_json($blob);
 				};
 				$existing->value_text($json);
@@ -51,7 +51,7 @@ sub setting {
 
 			$existing->update;
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
 			}
 
@@ -65,12 +65,12 @@ sub setting {
 				value => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
-			} elsif ($value eq "date") { 
+			} elsif ($value eq "date") {
 				$existing->value_date($blob);
-			} elsif ($value eq "json") { 
-				my $json = eval{ 
+			} elsif ($value eq "json") {
+				my $json = eval{
 					return JSON::encode_json($blob);
 				};
 				$existing->value_text($json);
@@ -82,21 +82,21 @@ sub setting {
 	} else {
 
 		return unless $existing;
-		if ($existing->value eq "text") { 
-			return $existing->value_text 
-		} elsif ($existing->value eq "date") { 
-			return $existing->value_date 
-		} elsif ($existing->value eq "json") { 
-			return eval { 
+		if ($existing->value eq "text") {
+			return $existing->value_text
+		} elsif ($existing->value eq "date") {
+			return $existing->value_date
+		} elsif ($existing->value eq "json") {
+			return eval {
 				return JSON::decode_json($existing->value_text);
-			}; 
+			};
 		}
 		return $existing->value;
 	}
 }
 
 
-sub all_settings { 
+sub all_settings {
 
 	my $self = shift;
 	my %all_settings;
@@ -105,30 +105,30 @@ sub all_settings {
     my $sth = $dbh->prepare("
 		select setting.tag, setting.value, setting.value_date, setting.value_text
 		from panel_setting setting
-		where setting.panel = ? 
+		where setting.panel = ?
         order by setting.tag
     ");
-    
+
     $sth->execute($self->id);
-    
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
 
-		if ($value eq "date") { 
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
 
-			my $dt = Tab::DBI::dateparse($value_date); 
+		if ($value eq "date") {
+
+			my $dt = Tab::DBI::dateparse($value_date);
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value eq "text") { 
+		} elsif ($value eq "text") {
 
 			$all_settings{$tag} = $value_text;
 
-		} elsif ($value eq "json") { 
+		} elsif ($value eq "json") {
 
-			$all_settings{$tag} = eval { 
+			$all_settings{$tag} = eval {
 				return JSON::decode_json($value_text);
 			};
 
-		} else { 
+		} else {
 			$all_settings{$tag} = $value;
 		}
 	}

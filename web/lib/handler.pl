@@ -88,9 +88,6 @@ use Tab::Login;
 use Tab::Panel;
 use Tab::PanelSetting;
 use Tab::Permission;
-#use Tab::Practice;
-#use Tab::PracticeStudent;
-use Tab::Permission;
 use Tab::JPool;
 use Tab::JPoolSetting;
 use Tab::JPoolJudge;
@@ -144,7 +141,6 @@ use Tab::TournSite;
 use Tab::Webpage;
 
 no warnings "uninitialized";
-
 
 my $ah;
 
