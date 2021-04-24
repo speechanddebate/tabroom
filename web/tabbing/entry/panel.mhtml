@@ -10,7 +10,8 @@
 </%args>
 <%init>
 
-	use Tab::DBI;
+	my $dbh = Tab::DBI->db_Main();
+
 
 	unless ($person->site_admin || $person_settings->{'nsda_admin'}) {
 		if ( $perms{"entry_only"} ) {
@@ -194,7 +195,52 @@
 		my $chair_mark = "*";
 		$chair_mark = "Par: " if $event->type eq "congress";
 
-		if (scalar @judges > 1) {
+		my %po_contest;
+
+		if ($event->type eq "congress") {
+
+			my $sth = $dbh->prepare("
+
+				select
+					event.id, event.name, event.abbr,
+					round.id, round.name,
+					panel.id, panel.letter
+
+				from event, event_setting es, round, panel
+
+					where event.tourn = ?
+					and event.id = es.event
+					and es.tag = 'po_contest'
+					and es.value = ?
+					and event.id = round.event
+					and round.name = ?
+					and round.id = panel.round
+					and panel.letter = ?
+			");
+
+			$sth->execute($tourn->id, $event->id, $round->name, $panel->letter);
+
+			while (
+				my (
+					$event_id, $event_name, $event_abbr,
+					$round_id, $round_name,
+					$panel_id, $panel_letter
+				) = $sth->fetchrow_array()
+			) {
+
+				$po_contest{"event_id"} = $event_id;
+				$po_contest{"event_name"} = $event_name;
+				$po_contest{"event_abbr"} = $event_abbr;
+
+				$po_contest{"round_id"} = $round_id;
+				$po_contest{"round_name"} = $round_name;
+
+				$po_contest{"panel_id"} = $panel_id;
+				$po_contest{"panel_letter"} = $panel_letter;
+			}
+		}
+
+		if (scalar @judges > 1 || $po_contest{"event_id"}) {
 
 			foreach my $judge (@judges) {
 				my $tab;
@@ -205,6 +251,10 @@
 				push @tabs, $judge->id;
 
 				$default = $judge->id unless $default;
+			}
+
+			if ($po_contest{"event_id"}) {
+				push @tabs, "entries";
 			}
 
 </%perl>
@@ -1273,6 +1323,182 @@
 
 			</form>
 
+			</div>
+%		}
+
+
+<%perl>
+		if ($po_contest{"event_id"}) {
+
+			my %voters;
+			my %pos;
+
+			my $sth = $dbh->prepare("
+
+				select
+					entry.id, entry.code, entry.name, entry.active,
+					sv.tag, sv.value, sv.panel, sv.entry,
+					CONVERT_TZ(sv.entered_at, '+00:00', tourn.tz),
+					po.id, po.code, po.name
+
+				from (ballot, entry, event, tourn)
+
+					left join student_vote sv on sv.panel = ? and sv.voter = entry.id
+					left join entry po on sv.entry = po.id
+
+				where ballot.panel = ?
+					and ballot.entry = entry.id
+					and entry.event = event.id
+					and event.tourn = tourn.id
+			");
+
+			$sth->execute($panel->id, $po_contest{"panel_id"});
+
+			while (
+				my (
+					$entry_id, $entry_code, $entry_name, $entry_active,
+					$sv_tag, $sv_value, $sv_panel, $sv_entry, $sv_timestamp,
+					$po_id, $po_code, $po_name
+				) = $sth->fetchrow_array()
+			) {
+
+				unless ($pos{$po_id}) {
+					$pos{$po_id}{"code"} = $po_code;
+					$pos{$po_id}{"name"} = $po_name;
+				}
+
+				$voters{$entry_id}{"code"} = $entry_code;
+				$voters{$entry_id}{"name"} = $entry_name;
+				$voters{$entry_id}{"active"} = $entry_active;
+
+				$voters{$entry_id}{"votes"}{$po_id}{$sv_tag} = $sv_value;
+				$voters{$entry_id}{timestamp} = $sv_timestamp;
+			}
+</%perl>
+
+			<div class="screens hidden entries">
+
+				<span class="twothirds nospace">
+					<h5>
+						PO Contest votes from <% $po_contest{"event_abbr"} %>
+						Chamber <% $po_contest{"panel_letter"} %>
+						Session <% $po_contest{"round_name"} %>
+					</h5>
+				</span>
+				<span class="third rightalign nospace">
+					<p class="semibold bluetext">
+						Target Section <% $po_contest{"panel_id"} %>
+					</p>
+				</span>
+
+				<& "/funclib/tablesorter.mas", table => "entry_vote", nobuttons => 1 &>
+
+				<form action="po_vote_save.mhtml" method="post">
+
+				<input
+					type  = "hidden"
+					name  = "panel_id"
+					value = "<% $panel->id %>"
+				>
+				<input
+					type  = "hidden"
+					name  = "target_id"
+					value = "<% $po_contest{"panel_id"} %>"
+				>
+
+				<table id="entry_vote">
+
+					<thead>
+						<tr class="yellowrow">
+							<th>
+								Voter Code
+							</th>
+							<th>
+								Voter Name
+							</th>
+							<th>
+								Timestamp
+							</th>
+
+%							foreach my $po (sort keys %pos) {
+%								next unless $po > 0;
+								<th title='<% $pos{$po}{"name"} %>'>
+									<% $pos{$po}{"code"} %>
+								</th>
+%							}
+							<th>
+								No Vote
+							</th>
+						</tr>
+					</thead>
+
+					<tbody>
+
+%						foreach my $voter_id (sort {$voters{$a}{"code"} cmp $voters{$b}{"code"}} keys %voters) {
+
+							<tr>
+
+								<td>
+									<% $voters{$voter_id}{"active"} ? "" : "DROP" %>
+									<% $voters{$voter_id}{"code"} %>
+								</td>
+
+								<td>
+									<% $voters{$voter_id}{"name"} %>
+								</td>
+								<td>
+									<% $voters{$voter_id}{"timestamp"} %>
+								</td>
+
+%								my $done;
+%								foreach my $po (sort keys %pos) {
+%									next unless $po > 0;
+%									$done++ if $voters{$voter_id}{"votes"}{$po}{"winloss"} > 0;
+									<td class="centeralign nospace">
+										<label for="<% $voter_id %>_<% $po %>">
+											<span class="full padvertless hover">
+												<input
+													type  = "radio"
+													name  = "vote_<% $voter_id %>"
+													id    = "<% $voter_id %>_<% $po %>"
+													value = "<% $po %>"
+													<% $voters{$voter_id}{"votes"}{$po}{"winloss"}
+														? "checked"
+														: ""
+													%>
+												>
+											</span>
+										</label>
+									</td>
+%								}
+								<td class="centeralign nospace">
+									<label for="<% $voter_id %>_NULL">
+										<span class="full padvertless yellowhover">
+											<input
+												type  = "radio"
+												name  = "vote_<% $voter_id %>"
+												id    = "<% $voter_id %>_NULL"
+												value = "NULL"
+												<% $done
+													? ""
+													: "checked"
+												%>
+											>
+										</span>
+									</label>
+								</td>
+							</tr>
+%						}
+					</tbody>
+				</table>
+
+				<div class="libl row rightalign">
+					<span class="third centeralign">
+						<input type="submit" value="Save Entry Votes">
+					</span>
+				</div>
+
+				</form>
 			</div>
 %		}
 
