@@ -1,0 +1,316 @@
+<%args>
+	$person
+	$person_settings
+	$school_year => undef
+</%args>
+<%init>
+
+	my $now = DateTime->now();
+
+	my $now_year = $now->year;
+	$now_year = $now_year - 1 if $now->month < 7;
+
+	$school_year = $now_year unless $school_year;
+
+	my @sources = ("NSDA", "NFHS", "NCFL", "CEDA", "NFA");
+	my @events = ("LD", "PF", "Policy");
+
+	Tab::Topic->set_sql( existing => "
+		select * from topic
+		where topic.school_year = ?
+		order by topic.school_year, topic.event_type, topic.sort_order
+	");
+
+	my @topics = Tab::Topic->search_existing($school_year);
+
+	Tab::Topic->set_sql( earliest => "
+		select min(school_year) from topic
+	");
+
+	my $start = Tab::Topic->sql_earliest->select_val();
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			topic.id, topic.tag, topic.source, topic.school_year, topic.event_type, topic.sort_order,
+			topic.topic_text,
+			event.id, event.abbr, event.name,
+			no_side_constraints.value,
+			ballot.side, ballot.speakerorder,
+			score.tag, score.value
+
+		from (topic, event_setting ets FORCE INDEX (tag_value), event, round, panel, ballot, score)
+
+		left join event_setting no_side_constraints
+			on no_side_constraints.event = event.id
+			and no_side_constraints.tag = 'no_side_constraints'
+
+		where topic.school_year = ?
+			and topic.id = ets.value
+			and ets.tag = 'topic'
+			and ets.event = event.id
+			and event.id = round.event
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and ballot.id = score.ballot
+			and ballot.bye != 1
+			and ballot.forfeit != 1
+			and panel.bye != 1
+			and score.tag in ('winloss', 'point')
+	");
+
+	my %topics;
+
+	$sth->execute($school_year);
+
+	while (
+		my (
+			$topic_id, $topic_tag, $topic_source, $topic_school_year, $topic_event_type, $topic_order,
+			$topic_text,
+			$event_id, $event_abbr, $event_name,
+			$no_side_constraints,
+			$ballot_side, $ballot_speakerorder,
+			$score_tag, $score_value
+		) = $sth->fetchrow_array()
+	) {
+
+		unless ($topics{$topic_id}{"tag"}) {
+			$topics{$topic_id}{"tag"} = $topic_tag;
+
+			$topic_text =~ s/Resolved://g;
+			$topic_text =~ s/United States Federal Government/USFG/g;
+			$topic_text =~ s/United States/US/g;
+
+			$topics{$topic_id}{"text"} = $topic_text;
+			$topics{$topic_id}{"source"} = $topic_source;
+			$topics{$topic_id}{"order"} = $topic_order;
+			$topics{$topic_id}{"event_type"} = $topic_event_type;
+		}
+
+		if ($score_tag eq "winloss") {
+
+			if ($ballot_side == 1) {
+				$topics{$topic_id}{"aff_wins"} += $score_value;
+			} elsif ($ballot_side == 2) {
+				$topics{$topic_id}{"neg_wins"} += $score_value;
+			}
+
+			if ($ballot_speakerorder == 1) {
+				if ($score_value > 0) {
+					$topics{$topic_id}{"first_speaker_win"}++;
+				}
+			} elsif ($ballot_speakerorder == 2) {
+				if ($score_value > 0) {
+					$topics{$topic_id}{"second_speaker_win"}++;
+				}
+			}
+
+		} elsif ($score_tag eq "point" && $score_value > 20 && $score_value < 30.1) {
+
+			if ($ballot_side == 1) {
+				$topics{$topic_id}{"aff_point_total"} += $score_value;
+				$topics{$topic_id}{"aff_point_count"}++;
+			} elsif ($ballot_side == 2) {
+				$topics{$topic_id}{"neg_point_total"} += $score_value;
+				$topics{$topic_id}{"neg_point_count"}++;
+			}
+
+			if ($ballot_speakerorder == 1) {
+				$topics{$topic_id}{"first_speaker_point"} += $score_value;
+				$topics{$topic_id}{"first_speaker_count"}++;
+			} elsif ($ballot_speakerorder == 2) {
+				$topics{$topic_id}{"second_speaker_point"} += $score_value;
+				$topics{$topic_id}{"second_speaker_count"}++;
+			}
+		}
+	}
+
+</%init>
+
+	<div class="blankfull">
+
+		<span class="half nospace">
+			<h4>Debate Topics Side Data</h4>
+		</span>
+
+		<span class="eighth nospace rightalign semibold bluetext">
+			School Year Beginning
+			<span class="halfspacer"></span>
+		</span>
+
+		<span class="tenth nospace semibold bluetext">
+
+			<form
+				action = "topic_report.mhtml"
+				method = "post"
+			>
+
+			<select
+				name     = "school_year"
+				class    = "fixedmost"
+				onChange = "this.form.submit();"
+			>
+%				foreach my $year ($start .. ($now->year + 3)) {
+					<option
+						value="<% $year %>"
+						<% $school_year == $year ? "selected" : "" %>
+					><% $year %></option>
+%				}
+			</select>
+
+			</form>
+		</span>
+
+		<span class="fifth centeralign">
+			<a
+				href  = "topics.mhtml?school_year=<% $school_year %>"
+				class = "buttonwhite bluetext invert"
+			>Edit Topics</a>
+		</span>
+
+		<span
+			id    = "topic_report_buttonarea"
+			class = "tenth nospace rightalign notmask"
+		>
+			<a
+				onClick="toggleAdd()"
+				id="toggleSign"
+				class="fa fa-sm fa-plus buttonwhite bluetext"
+			></a>
+		</span>
+
+		<& "/funclib/tablesorter.mas", table => "topic_report" &>
+
+		<table id="topic_report">
+
+			<thead>
+
+				<tr class="yellowrow smallish">
+
+					<th>
+						Source
+					</th>
+
+					<th>
+						Event
+					</th>
+
+					<th>
+						Tag
+					</th>
+
+					<th>
+						Topic
+					</th>
+
+					<th>
+						Aff Win %
+					</th>
+
+					<th>
+						Aff Pts
+					</th>
+
+					<th>
+						Neg Pts
+					</th>
+
+					<th>
+						1st Spk Win %
+					</th>
+
+					<th>
+						1st Spk Pts
+					</th>
+
+					<th>
+						2nd Spk Pts
+					</th>
+
+				</tr>
+
+			</thead>
+
+			<tbody>
+
+<%perl>
+				foreach my $topic_id (
+					sort {
+						$topics{$a}{"event_type"} cmp $topics{$b}{"event_type"}
+						|| $topics{$a}{"order"} cmp $topics{$b}{"order"}
+						|| $topics{$a}{"source"} cmp $topics{$b}{"source"}
+					} keys %topics
+				) {
+
+					my $total_win = $topics{$topic_id}{"aff_wins"} + $topics{$topic_id}{"neg_wins"};
+					my $aff_win = Math::Round::nearest(.01, ($topics{$topic_id}{"aff_wins"} / $total_win) * 100);
+
+					my $aff_points = Math::Round::nearest(.01, ($topics{$topic_id}{"aff_point_total"} / $topics{$topic_id}{"aff_point_count"}));
+					my $neg_points = Math::Round::nearest(.01, ($topics{$topic_id}{"neg_point_total"} / $topics{$topic_id}{"neg_point_count"}));
+
+					my $total_side_win = $topics{$topic_id}{"first_speaker_win"} + $topics{$topic_id}{"second_speaker_win"};
+					my $first_speaker_win = Math::Round::nearest(.01, ($topics{$topic_id}{"first_speaker_win"} / $total_side_win) * 100)
+						if $total_side_win > 0;
+
+					my $first_points = Math::Round::nearest(.01, ($topics{$topic_id}{"first_speaker_point"} / $topics{$topic_id}{"first_speaker_count"}))
+						if $topics{$topic_id}{"first_speaker_count"} > 0;
+					my $second_points = Math::Round::nearest(.01, ($topics{$topic_id}{"second_speaker_point"} / $topics{$topic_id}{"second_speaker_count"}))
+						if $topics{$topic_id}{"second_speaker_count"} > 0;
+
+</%perl>
+
+					<tr>
+						<td>
+							<% $topics{$topic_id}{"source"} %>
+						</td>
+
+						<td>
+							<% $topics{$topic_id}{"event_type"} %>
+						</td>
+
+						<td>
+							<span class="hidden"><% $topics{$topic_id}{"order"} %></span>
+							<% $topics{$topic_id}{"tag"} %>
+						</td>
+
+						<td class="smaller">
+							<% substr($topics{$topic_id}{"text"}, 0, 50) %>
+						</td>
+
+						<td>
+							<% $aff_win %>
+						</td>
+
+						<td>
+							<% $aff_points %>
+						</td>
+
+						<td>
+							<% $neg_points %>
+						</td>
+
+						<td>
+%							if ($topics{$topic_id}{"event_type"} eq "PF") {
+								<% $first_speaker_win %>
+%							}
+						</td>
+
+						<td>
+%							if ($topics{$topic_id}{"event_type"} eq "PF") {
+								<% $first_points %>
+%							}
+						</td>
+
+						<td>
+%							if ($topics{$topic_id}{"event_type"} eq "PF") {
+								<% $second_points %>
+%							}
+						</td>
+
+					</tr>
+%				}
+
+			</tbody>
+		</table>
+	</div>
