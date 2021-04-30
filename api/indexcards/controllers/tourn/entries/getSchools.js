@@ -2,7 +2,11 @@ import db from '../../../models';
 
 const getSchools = {
     GET: async (req, res) => {
-        const result = await db.Person.findAll({ where: {tourn: req.params.tourn_id}});
+		console.log("Getting schools for "+req.params.tourn_id);
+
+        const result = await res.locals.db.permission.findAll({
+			where: {tourn: req.params.tourn_id, person: req.session.person}
+		});
 
         if (result.count < 1) {
             return res.status(400).json({ message: 'No schools found' });
