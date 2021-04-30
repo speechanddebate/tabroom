@@ -4,12 +4,11 @@
 
 // Utility functions
 import status from '../../controllers/utility/status';
-
 import getSchools from '../../controllers/tourn/entries/getSchools';
 
 // import getRound from '../controllers/user/getPerson';
 // { path : '/user/person/' , module : getPerson },
 
 export default [
-    { path : '/t/{tourn_id}/schools', module : getSchools }
+    { path : '/tourn/{tourn_id}/schools', module : getSchools }
 ];
