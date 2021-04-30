@@ -2,11 +2,17 @@
 // Parse the Tabroom cookies and determine whether there's an active session
 //
 
-const auth = async function(req, res, next, db) {
+const auth = async function(req, res) {
+
+	const db = req.db;
+
+	if (req.session && req.session.id) {
+		return req.session;
+	}
 
 	if (req.cookies[req.config.COOKIE_NAME]) {
 
-		const session = await db.session.findOne({
+		let session = await db.session.findOne({
 			where: { userkey: req.cookies[req.config.COOKIE_NAME] },
 			include : [
 				{ model: db.person, as: 'Person'},
@@ -27,7 +33,7 @@ const auth = async function(req, res, next, db) {
 				}
 				realname += " "+session.Su.last;
 
-				req.session = {
+				session = {
 					id         : session.id,
 					person     : session.Su.id,
 					site_admin : session.Su.site_admin,
@@ -44,9 +50,10 @@ const auth = async function(req, res, next, db) {
 				if (session.Person.middle) {
 					realname += " "+session.Person.middle;
 				}
+
 				realname += " "+session.Person.last;
 
-				req.session = {
+				session = {
 					id         : session.id,
 					person     : session.Person.id,
 					site_admin : session.Person.site_admin,
@@ -56,21 +63,21 @@ const auth = async function(req, res, next, db) {
 				};
 			}
 
-			next();
+			return session;
 
 		} else {
 
-			req.session = {};
+			session = {};
 			console.log("No valid session found for key");
 			console.log(req.cookies[req.config.COOKIE_NAME]);
-			next();
+			return session;
 		}
 
 	} else {
 
-		req.session = {};
+		session = {};
 		console.log("No valid session cookie found");
-		next();
+		return session;
 	}
 }
 
