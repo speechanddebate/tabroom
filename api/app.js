@@ -16,6 +16,7 @@ import userPaths from './indexcards/routes/paths/user';
 import tournPaths from './indexcards/routes/paths/tourn';
 
 import auth from './indexcards/helpers/auth';
+import tournAuth from './indexcards/helpers/tourn-auth';
 import db from './indexcards/models';
 
 import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';
@@ -32,7 +33,6 @@ app.use(helmet());
 
 // Enable getting forwarded client IP from proxy
 app.enable('trust proxy');
-
 
 // Rate limit all requests
 const limiter = rateLimiter({
@@ -76,11 +76,26 @@ app.use(expressWinston.logger({
 app.use(bodyParser.json({ type: ['json', 'application/*json'], limit: '10mb' }));
 app.use(bodyParser.text({ type: '*/*', limit: '10mb' }));
 
-// Parse cookies as a fallback to basic auth
+// Parse cookies and add them to the session
 app.use(cookieParser());
 
-app.use(function(req, res, next) {
-	auth(req,res,next,db);
+// Database handle volleyball; don't have to call it in every last route.
+// For I am lazy, and unapologetic.
+app.use((req, res, next) => {
+    req.db = db;
+    return next();
+});
+
+// Authenticate against Tabroom cookie
+app.all('/user/*', (req, res, next) => {
+	auth(req, res);
+	next();
+});
+
+app.all('/tourn/:tourn_id/*', async (req, res, next) => {
+	req.session = await auth(req, res);
+	req.session = await tournAuth(req, res);
+	next();
 });
 
 // Combine the various paths into one
@@ -101,7 +116,7 @@ const apiDocConfig = initialize({
 app.use(expressWinston.errorLogger({
     winstonInstance: errorLogger,
     meta: true,
-    dynamicMeta: (req, res) => {
+    dynamicMeta: (req, res, next, db) => {
         return {
             logCorrelationId: req.uuid,
         };
@@ -112,7 +127,7 @@ app.use(expressWinston.errorLogger({
 app.use(errorHandler);
 
 // Swagger UI interface for the API
-app.use('/', swaggerUI.serve, swaggerUI.setup(apiDocConfig.apiDoc));
+app.use('/doc', swaggerUI.serve, swaggerUI.setup(apiDocConfig.apiDoc));
 
 // Start server
 const port = process.env.PORT || config.PORT || 9876;
