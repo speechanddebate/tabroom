@@ -216,7 +216,6 @@ db.webpage.belongsTo(db.person  , { as: 'Editor'    , foreignKey : "last_editor"
 db.webpage.belongsTo(db.webpage , { as: 'Parent'    , foreignKey : "tourn"});
 db.webpage.belongsTo(db.tourn   , { as: "Tourn"     , foreignKey : "tourn"});
 
-db.webpage.hasMany(db.changeLog, { as: "Log",    foreignKey: "webpage"});
 db.webpage.hasMany(db.file,      { as: "File",   foreignKey: "webpage"});
 db.webpage.hasMany(db.webpage,   { as: 'Child',  foreignKey: 'parent'} );
 
@@ -232,13 +231,13 @@ db.rpool.belongsToMany(db.room,  { as: "Rooms",  foreignKey: "rpool", through: '
 db.rpool.belongsToMany(db.round, { as: "Rounds", foreignKey: "rpool", through: 'rpool_round'});
 
 // Registration data
-db.school.hasMany(db.entry,          { as: "Entries",    foreignKey: "school"});
-db.school.hasMany(db.rating,         { as: "Ratings",    foreignKey: "school"});
-db.school.hasMany(db.fine,           { as: "Fines",      foreignKey: "school"});
-db.school.hasMany(db.strike,         { as: "Strikes",    foreignKey: "school"});
-db.school.hasMany(db.changeLog,            { as: "ChangeLogs",       foreignKey: "school"});
-db.school.hasMany(db.file,           { as: "Files",      foreignKey: "school"});
-db.school.hasMany(db.judgeHire,     { as: "JudgeHires", foreignKey: "school"});
+db.school.hasMany(db.entry     , { as: "Entries"    , foreignKey: "school"});
+db.school.hasMany(db.rating    , { as: "Ratings"    , foreignKey: "school"});
+db.school.hasMany(db.fine      , { as: "Fines"      , foreignKey: "school"});
+db.school.hasMany(db.strike    , { as: "Strikes"    , foreignKey: "school"});
+db.school.hasMany(db.changeLog , { as: "ChangeLogs" , foreignKey: "school"});
+db.school.hasMany(db.file      , { as: "Files"      , foreignKey: "school"});
+db.school.hasMany(db.judgeHire , { as: "JudgeHires" , foreignKey: "school"});
 
 db.school.belongsTo(db.tourn    , { as: "Tourn"   , foreignKey: "tourn"});
 db.school.belongsTo(db.chapter  , { as: "Chapter" , foreignKey: "chapter"});
@@ -384,7 +383,6 @@ db.round.belongsTo(db.timeslot   , { as: "Timeslot"   , foreignKey : "timeslot"}
 db.round.belongsTo(db.site       , { as: "Site"       , foreignKey : "site"});
 db.round.belongsTo(db.protocol   , { as: "Protocol"   , foreignKey : "tiebreak_set"});
 db.round.belongsTo(db.round      , { as: "Runoff"     , foreignKey : "runoff"});
-db.round.hasMany(db.changeLog    , { as: "ChangeLogs" , foreignKey : "round"});
 db.round.belongsToMany( db.rpool , { as: "RPools"     , foreignKey : "round", through : 'rpool_round'});
 
 db.section.belongsTo(db.room      , { as: "Room"        , foreignKey: "room"});
