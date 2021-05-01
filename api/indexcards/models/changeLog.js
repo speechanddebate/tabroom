@@ -3,7 +3,6 @@
 module.exports = function(sequelize, DataTypes) {
 
 	return sequelize.define('changeLog', {
-		table_name : "change_log",
 		tag: {
 			type: DataTypes.STRING(63),
 			allowNull: false
@@ -21,6 +20,8 @@ module.exports = function(sequelize, DataTypes) {
 			type         : DataTypes.DATE,
 			allowNull    : false
 		}
+	}, {
+		tableName : "change_log",
 	});
 };
 

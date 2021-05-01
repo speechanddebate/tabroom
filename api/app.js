@@ -87,14 +87,29 @@ app.use((req, res, next) => {
 });
 
 // Authenticate against Tabroom cookie
-app.all('/user/*', (req, res, next) => {
+app.all('/v1/user/*', (req, res, next) => {
 	auth(req, res);
 	next();
 });
 
-app.all('/tourn/:tourn_id/*', async (req, res, next) => {
+app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 	req.session = await auth(req, res);
 	req.session = await tournAuth(req, res);
+
+	if (req.session && req.params) {
+
+		if (req.session[req.params.tourn_id]
+			&& req.session[req.params.tourn_id].level
+		) {
+			console.log("YOUR LEVEL IS DEFINED!  YOU ARE "+req.session[req.params.tourn_id].level);
+			next();
+		} else {
+			return res.status(400).json({ message: 'You do not have admin access to that tournament' });
+		}
+	} else {
+		return res.status(400).json({ message: 'You are not logged into Tabroom' });
+	}
+
 	next();
 });
 

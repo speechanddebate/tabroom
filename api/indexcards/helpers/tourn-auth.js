@@ -7,6 +7,10 @@ const tournAuth = async function(req, res) {
 	const tournId = req.params.tourn_id;
 	let session = req.session;
 
+	if (session == null || Object.entries(session).length === 0) {
+		return session;
+	}
+
 	if (typeof(tournId) === "undefined") {
 		return session;
 	}
