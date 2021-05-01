@@ -67,17 +67,14 @@ const auth = async function(req, res) {
 
 		} else {
 
-			session = {};
-			console.log("No valid session found for key");
+			console.log("No valid Tabroom session found for key");
 			console.log(req.cookies[req.config.COOKIE_NAME]);
-			return session;
+			return;
 		}
 
 	} else {
-
-		session = {};
-		console.log("No valid session cookie found");
-		return session;
+		console.log("No valid Tabroom session cookie found");
+		return;
 	}
 }
 
