@@ -1,11 +1,8 @@
-
-
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
 
 	return sequelize.define('eventSetting', {
-		table_name : 'event_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false
@@ -22,6 +19,8 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		}
+	},{
+		tableName : 'event_setting',
 	});
 };
 

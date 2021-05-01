@@ -1,5 +1,5 @@
 
-const getSchools = {
+const getEvents = {
 
     GET: async (req, res) => {
 
@@ -10,24 +10,22 @@ const getSchools = {
 		if (tournId) {
 			// Filter out signup options for tournament admins
 
-			let schools = await db.school.findAll({
+			let events = await db.event.findAll({
 				where: { tourn: tournId },
 				include : [
-					{ model: db.schoolSetting, as: 'Settings',
+					{ model: db.eventSetting, as: 'Settings',
 						where : {
 							tag: { [op.notLike] : "signup_%"}
 						},
 						required: false
-					},
-					{ model: db.fine, as: 'Fines' },
-					{ model: db.chapter, as: 'Chapter'},
+					}
 				]
 			});
 
-			if (schools.count < 1) {
-				return res.status(400).json({ message: 'No schools found in that tournament' });
+			if (events.count < 1) {
+				return res.status(400).json({ message: 'No events found in that tournament' });
 			} else {
-				return res.status(200).json(schools);
+				return res.status(200).json(events);
 			}
 
 		} else {
@@ -37,9 +35,9 @@ const getSchools = {
     },
 };
 
-getSchools.GET.apiDoc = {
-    summary: 'Listing of schools in the tournament',
-    operationId: 'getSchools',
+getEvents.GET.apiDoc = {
+    summary: 'Listing of events in the tournament',
+    operationId: 'getEvents',
     parameters: [
         {
             in          : 'path',
@@ -54,12 +52,12 @@ getSchools.GET.apiDoc = {
     ],
     responses: {
         200: {
-            description: 'School Data',
+            description: 'Event Data',
             content: {
                 '*/*': {
                     schema: {
                         type: 'array',
-                        items: { $ref: '#/components/schemas/School' },
+                        items: { $ref: '#/components/schemas/Event' },
                     },
                 },
             },
@@ -69,4 +67,4 @@ getSchools.GET.apiDoc = {
     tags: ['tournament/entries'],
 };
 
-export default getSchools;
+export default getEvents;
