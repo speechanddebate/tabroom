@@ -30,104 +30,120 @@ sub short_name {
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
+	$/ = ""; #Remove all trailing newlines
 
-	$/ = ""; # Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::SchoolSetting->search(  
+	my @existing = Tab::SchoolSetting->search(
 		school => $self->id,
-		tag    => $tag,
-	)->first;
+		tag   => $tag
+	);
 
-	if (defined $value) { 
-			
+	my $existing = shift @existing if @existing;
+
+	foreach (@existing) { $_->delete(); }
+
+	if (defined $value) {
+
 		if ($existing) {
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			$existing->value($value);
+			$existing->value_text($blob) if $value eq "text";
+			$existing->value_date($blob) if $value eq "date";
+
+			if ($value eq "json") {
+				eval{
+					$existing->value_text(JSON::encode_json($blob));
+				};
+			}
+
+			$existing->update;
+
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
-			} else { 
-				$existing->value($value);
-				$existing->value_text($blob) if $value eq "text";
-				$existing->value_date($blob) if $value eq "date";
-				$existing->update;
 			}
 
 			return;
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::SchoolSetting->create({
+			my $existing = Tab::TournSetting->create({
 				school => $self->id,
-				tag    => $tag,
-				value  => $value,
+				tag   => $tag,
+				value => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
-			}
-
-			if ($value eq "date") { 
+			} elsif ($value eq "date") {
 				$existing->value_date($blob);
+			} elsif ($value eq "json") {
+
+				eval{
+					$existing->value_text(JSON::encode_json($blob));
+				};
 			}
 
-			$existing->update;
-
+			$existing->update();
 		}
 
 	} else {
 
 		return unless $existing;
-
-		return $existing->value_text 
-			if $existing->value eq "text";
-
-		return $existing->value_date 
-			if $existing->value eq "date";
-
+		if ($existing->value eq "text") {
+			return $existing->value_text
+		} elsif ($existing->value eq "date") {
+			return $existing->value_date
+		} elsif ($existing->value eq "json") {
+			return eval {
+				return JSON::decode_json($existing->value_text);
+			};
+		}
 		return $existing->value;
-
 	}
-
 }
 
 
-sub all_settings { 
+sub all_settings {
 
 	my $self = shift;
-
 	my %all_settings;
-
 	my $dbh = Tab::DBI->db_Main();
 
     my $sth = $dbh->prepare("
 		select setting.tag, setting.value, setting.value_date, setting.value_text
 		from school_setting setting
-		where setting.school = ? 
+		where setting.school = ?
         order by setting.tag
     ");
-    
+
     $sth->execute($self->id);
-    
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
 
-		if ($value eq "date") { 
+    while(
+		my (
+			$tag, $value, $value_date, $value_text
+		)  = $sth->fetchrow_array()
+	) {
 
-			my $dt = Tab::DBI::dateparse($value_date); 
+		if ($value eq "date") {
+
+			my $dt = Tab::DBI::dateparse($value_date);
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value eq "text") { 
+		} elsif ($value eq "text") {
 
 			$all_settings{$tag} = $value_text;
 
-		} else { 
+		} elsif ($value eq "json") {
 
+			$all_settings{$tag} = eval {
+				return JSON::decode_json($value_text);
+			};
+
+		} else {
 			$all_settings{$tag} = $value;
-
 		}
-
 	}
-
 	return %all_settings;
-
 }
 
