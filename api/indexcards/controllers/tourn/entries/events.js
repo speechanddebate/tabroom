@@ -1,43 +1,35 @@
 
-const getEvents = {
-
+export const listEvents = {
     GET: async (req, res) => {
-
 		const db = req.db;
 		const tournId = req.params.tourn_id;
 		const op = db.Sequelize.Op
 
-		if (tournId) {
-			// Filter out signup options for tournament admins
+		// Filter out signup options for tournament admins
 
-			let events = await db.event.findAll({
-				where: { tourn: tournId },
-				include : [
-					{ model: db.eventSetting, as: 'Settings',
-						where : {
-							tag: { [op.notLike] : "signup_%"}
-						},
-						required: false
-					}
-				]
-			});
+		let events = await db.event.findAll({
+			where: { tourn: tournId },
+			include : [
+				{ model: db.eventSetting, as: 'Settings',
+					where : {
+						tag: { [op.notLike] : "signup_%"}
+					},
+					required: false
+				}
+			]
+		});
 
-			if (events.count < 1) {
-				return res.status(400).json({ message: 'No events found in that tournament' });
-			} else {
-				return res.status(200).json(events);
-			}
-
+		if (events.count < 1) {
+			return res.status(400).json({ message: 'No events found in that tournament' });
 		} else {
-
-			return res.status(400).json({ message: 'No tournament ID sent' });
+			return res.status(200).json(events);
 		}
     },
 };
 
-getEvents.GET.apiDoc = {
+listEvents.GET.apiDoc = {
     summary: 'Listing of events in the tournament',
-    operationId: 'getEvents',
+    operationId: 'listEvents',
     parameters: [
         {
             in          : 'path',
@@ -67,4 +59,3 @@ getEvents.GET.apiDoc = {
     tags: ['tournament/entries'],
 };
 
-export default getEvents;
