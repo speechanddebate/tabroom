@@ -1,45 +1,40 @@
 
-const getSchools = {
+export const listSchools = {
 
     GET: async (req, res) => {
-
 		const db = req.db;
 		const tournId = req.params.tourn_id;
 		const op = db.Sequelize.Op
 
-		if (tournId) {
-			// Filter out signup options for tournament admins
+		// Filter out signup options for tournament admins, deliver the rest
 
-			let schools = await db.school.findAll({
-				where: { tourn: tournId },
-				include : [
-					{ model: db.schoolSetting, as: 'Settings',
-						where : {
-							tag: { [op.notLike] : "signup_%"}
-						},
-						required: false
+		let schools = await db.school.findAll({
+			where: { tourn: tournId },
+			include : [
+				{ model: db.schoolSetting, as: 'Settings',
+					where : {
+						tag: { [op.notLike] : "signup_%"}
 					},
-					{ model: db.fine, as: 'Fines' },
-					{ model: db.chapter, as: 'Chapter'},
-				]
-			});
+					required: false
+				},
+				{ model: db.fine, as: 'Fines' },
+				{ model: db.chapter, as: 'Chapter'},
+			]
+		});
 
-			if (schools.count < 1) {
-				return res.status(400).json({ message: 'No schools found in that tournament' });
-			} else {
-				return res.status(200).json(schools);
-			}
-
+		if (schools.count < 1) {
+			return res.status(400).json({ message: 'No schools found in that tournament' });
 		} else {
-
-			return res.status(400).json({ message: 'No tournament ID sent' });
+			return res.status(200).json(schools);
 		}
+
+		return;
     },
 };
 
-getSchools.GET.apiDoc = {
-    summary: 'Listing of schools in the tournament',
-    operationId: 'getSchools',
+listSchools.GET.apiDoc = {
+    summary: 'Listing of schools in the tournament, with chapter info, settings, and fines',
+    operationId: 'listSchools',
     parameters: [
         {
             in          : 'path',
@@ -69,4 +64,4 @@ getSchools.GET.apiDoc = {
     tags: ['tournament/entries'],
 };
 
-export default getSchools;
+

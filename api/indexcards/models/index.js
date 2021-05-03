@@ -238,6 +238,7 @@ db.school.hasMany(db.strike    , { as: "Strikes"    , foreignKey: "school"});
 db.school.hasMany(db.changeLog , { as: "ChangeLogs" , foreignKey: "school"});
 db.school.hasMany(db.file      , { as: "Files"      , foreignKey: "school"});
 db.school.hasMany(db.judgeHire , { as: "JudgeHires" , foreignKey: "school"});
+db.school.hasMany(db.judge     , { as: "Judges"     , foreignKey: "school"});
 
 db.school.belongsTo(db.tourn    , { as: "Tourn"   , foreignKey: "tourn"});
 db.school.belongsTo(db.chapter  , { as: "Chapter" , foreignKey: "chapter"});
