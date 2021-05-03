@@ -2,6 +2,7 @@ import Err from './Err';
 import Person from './Person';
 import Login from './Login';
 import School from './School';
+import SchoolSetting from './SchoolSetting';
 import Event from './Event';
 
 export default {
@@ -9,5 +10,6 @@ export default {
     Person,
 	Login,
 	School,
+	SchoolSetting,
 	Event
 };
