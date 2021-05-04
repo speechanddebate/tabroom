@@ -67,7 +67,7 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::TournSetting->create({
+			my $existing = Tab::SchoolSetting->create({
 				school => $self->id,
 				tag   => $tag,
 				value => $value,
