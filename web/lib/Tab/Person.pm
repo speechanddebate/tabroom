@@ -7,7 +7,7 @@ Tab::Person->columns(Primary   => qw/id/);
 Tab::Person->columns(Essential => qw/email first middle last phone provider site_admin /);
 
 Tab::Person->columns(Others    => qw/street city state zip country postal
-                                   	pronoun no_email tz nsda timestamp/);
+                                   	pronoun no_email tz nsda password timestamp/);
 
 Tab::Person->columns(TEMP => qw/prefs student_id judge_id/);
 
