@@ -21,40 +21,46 @@ export const listEntries = {
 		`;
 
 		// A raw query to go through the event filter
-		db.sequelize.query(
+		var results = await db.sequelize.query(
 			entryQuery,
 			{ replacements: {tourn: tournId }}
-		).then(output => {
+		);
 
-			let entries = {};
+		let entries = {};
 
-			for (let entry of output[0]) {
+		for (let entry of results[0]) {
 
-				let student = {
-					id     : entry.student_id,
-					first  : entry.student_first,
-					middle : entry.student_middle,
-					last   : entry.student_last,
-					nsda   : entry.student_nsda
-				};
+			let student = {
+				id     : entry.student_id,
+				first  : entry.student_first,
+				middle : entry.student_middle,
+				last   : entry.student_last,
+				nsda   : entry.student_nsda
+			};
 
-				if (entries[entry.id]) {
-					entries[entry.id].students.push(student);
-				} else {
-					entries[entry.id] = entry;
-					// this feels sufficiently annoying I think there must be a better way
+			if (entries[entry.id]) {
 
-					delete entries[entry.id].student_id;
-					delete entries[entry.id].student_first;
-					delete entries[entry.id].student_middle;
-					delete entries[entry.id].student_last;
-					delete entries[entry.id].student_nsda;
-					entries[entry.id].students = [student];
-				}
+				entries[entry.id].students.push(student);
+
+			} else {
+
+				entries[entry.id] = entry;
+
+				// this feels sufficiently annoying I think there must be a
+				// better way, though it does beat the perl requirement to
+				// populate all the fields I did want instead of eliminating
+				// those I did not.
+
+				delete entries[entry.id].student_id;
+				delete entries[entry.id].student_first;
+				delete entries[entry.id].student_middle;
+				delete entries[entry.id].student_last;
+				delete entries[entry.id].student_nsda;
+				entries[entry.id].students = [student];
 			}
+		}
 
-			return res.status(200).json(entries);
-		});
+		return res.status(200).json(entries);
     },
 };
 
