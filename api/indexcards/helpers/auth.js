@@ -2,7 +2,7 @@
 // Parse the Tabroom cookies and determine whether there's an active session
 //
 
-const auth = async function(req, res) {
+const auth = async (req) => {
 
 	const db = req.db;
 

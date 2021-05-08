@@ -49,6 +49,7 @@ const env = process.env.NODE_ENV || 'development';
 
 switch (env) {
     case 'test':
+		config.sequelizeOptions.logging = false;
         break;
 
     case 'staging':
@@ -67,6 +68,7 @@ switch (env) {
 			"acquire" : 30000,
 			"idle"    : 10000
 		};
+		config.sequelizeOptions.logging = false;
         break;
 
     case 'development':

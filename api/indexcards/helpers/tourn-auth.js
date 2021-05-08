@@ -2,7 +2,7 @@
 // Parse the Tabroom cookies and determine whether there's an active session
 //
 
-const tournAuth = async function(req, res) {
+const tournAuth = async function(req) {
 
 	const tournId = req.params.tourn_id;
 	let session = req.session;
@@ -28,6 +28,7 @@ const tournAuth = async function(req, res) {
 
 	if (req.session.site_admin) {
 		session[tournId].level = "owner";
+		session[tournId].menu  = "all";
 		return session;
 	}
 
@@ -36,6 +37,7 @@ const tournAuth = async function(req, res) {
 	const result = await req.db.permission.findAll({
 		where: {tourn: tournId, person: req.session.person}
 	});
+
 
 	if (result.count < 1) {
 
