@@ -11,8 +11,6 @@ Tab::Person->columns(Others    => qw/street city state zip country postal
 
 Tab::Person->columns(TEMP => qw/prefs student_id judge_id/);
 
-Tab::Person->has_many(logins => 'Tab::Login', 'person');
-
 Tab::Person->has_many(settings => 'Tab::PersonSetting', 'person');
 Tab::Person->has_many(sessions => 'Tab::Session', 'person');
 
