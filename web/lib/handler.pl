@@ -84,7 +84,6 @@ use Tab::Judge;
 use Tab::JudgeSetting;
 use Tab::JudgeHire;
 use Tab::JudgeShift;
-use Tab::Login;
 use Tab::Panel;
 use Tab::PanelSetting;
 use Tab::Permission;
