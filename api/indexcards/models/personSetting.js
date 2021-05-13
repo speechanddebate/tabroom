@@ -4,7 +4,6 @@
 module.exports = function(sequelize, DataTypes) {
 
 	return sequelize.define('personSetting', {
-		table_name: 'person_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false
@@ -21,6 +20,8 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		}
+	},{
+		tableName: 'person_setting',
 	});
 };
 
