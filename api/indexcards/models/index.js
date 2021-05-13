@@ -429,7 +429,6 @@ db.resultValue.belongsTo(db.protocol  , { as: "Protocol"  , foreignKey: "tiebrea
 
 // Person & identities
 
-db.person.hasMany(db.login,         { as: "Logins",        foreignKey: "person"});
 db.person.hasMany(db.student,       { as: "Students",      foreignKey: "person"});
 db.person.hasMany(db.judge,         { as: "Judges",        foreignKey: "person"});
 db.person.hasMany(db.chapterJudge,  { as: "ChapterJudges", foreignKey: "person"});
@@ -448,8 +447,6 @@ db.conflict.belongsTo(db.person  , { as: "Person"     , foreignKey: "person"});
 db.conflict.belongsTo(db.person  , { as: 'Conflicted' , foreignKey: "conflicted"});
 db.conflict.belongsTo(db.chapter , { as: "Chapter"    , foreignKey: "chapter"});
 db.conflict.belongsTo(db.person  , { as: 'AddedBy'    , foreignKey: "added_by"});
-
-db.login.belongsTo(db.person, { as: "Person", foreignKey: "person"});
 
 //Permissions
 db.permission.belongsTo(db.person,   { as: "Person",   foreignKey: "person"});
