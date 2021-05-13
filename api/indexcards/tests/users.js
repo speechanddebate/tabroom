@@ -62,5 +62,6 @@ export default {
 	testUserTournPerm : testUserTournPerm,
 	testAdminSession  : testAdminSession,
 	testUserSession   : testUserSession,
+	testPassword      : testPassword
 }
 
