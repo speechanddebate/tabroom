@@ -1,0 +1,282 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$tag => undef
+	$person
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my @schools;
+
+	if ($tag eq "unbilled") {
+
+		my %school_balances = $m->comp(
+            "/funclib/balances.mas",
+                tourn          => $tourn,
+                tourn_settings => $tourn_settings,
+                person         => $person
+        );
+
+        foreach my $school_id (keys %school_balances) {
+
+            if ($school_balances{$school_id}{"uninvoiced"} > 0) {
+                push @schools, Tab::School->retrieve($school_id);
+            }
+        }
+
+	} elsif ($tag eq "unclaimed") {
+
+		Tab::School->set_sql( unclaimed => "
+			select school.*
+			from school, entry
+			where school.id = entry.school
+				and school.tourn = ?
+				and entry.unconfirmed = 1
+				and entry.dropped != 1
+			and not exists (
+				select es.id
+				from entry_setting es
+				where es.entry = entry.id
+				and es.tag = 'rejected_by'
+			)
+			and not exists (
+				select evs.id
+				from event_setting evs
+				where evs.event = entry.event
+				and (evs.tag = 'supp' OR evs.tag = 'conn')
+			)
+		");
+
+		push @schools, Tab::School->search_unclaimed($tourn->id);
+
+	} elsif ($tag eq "incomplete_entries") {
+
+		Tab::School->set_sql( incomplete => "
+			select school.*
+			from school, entry, entry_student es
+			where school.id = entry.school
+				and school.tourn = ?
+				and entry.id     = es.entry
+				and entry.active = 1
+
+				and not exists (
+					select es.id
+					from entry_setting es
+					where es.entry = entry.id
+					and es.tag = 'status'
+					and es.value = 'complete'
+				)
+				and not exists (
+					select evs.id
+					from event_setting evs
+					where evs.event = entry.event
+					and evs.tag = 'usa_wsdc'
+				)
+		");
+
+		push @schools, Tab::School->search_incomplete($tourn->id);
+
+	} elsif ($tag eq "incomplete_judges") {
+
+		Tab::School->set_sql( incomplete => "
+			select school.id, count(judge.id)
+			from school, judge
+			where school.id = judge.school
+				and school.tourn = ?
+				and school.chapter > 0
+				and exists (
+					select js.id
+					from judge_setting js
+					where js.tag = 'incomplete'
+					and js.judge = judge.id
+				)
+			group by school.id
+		");
+
+		push @schools, Tab::School->search_incomplete($tourn->id);
+
+	}
+
+	my %contacts;
+
+	my $id_string;
+	my %used;
+
+	if (@schools) {
+
+		foreach my $school (@schools) {
+			next if $used{$school}++;
+			$id_string .= ',' if $id_string;
+			$id_string .= $school->id;
+		}
+
+		foreach my $tag ("contact", "second_contact") {
+
+			my $sth = $dbh->prepare("
+				select
+					contact_email.value, contact_name.value, school.name, school.id
+				from school_setting contact_email, school, school_setting contact_name
+				where contact_email.tag = '".$tag."_email'
+					and contact_email.school in ($id_string)
+					and contact_email.school = school.id
+					and school.tourn = ?
+					and contact_name.tag = '".$tag."_name'
+					and contact_name.school = school.id
+			");
+
+			$sth->execute($tourn->id);
+
+			while (
+				my ( $email, $name, $school_name, $school_id) = $sth->fetchrow_array()
+			) {
+
+				$email = lc($email);
+				$contacts{$email}{"name"} = $name;
+				$contacts{$email}{"school"} = $school_name;
+				$contacts{$email}{"school_id"} = $school_id;
+			}
+
+		}
+
+		if ($ARGS{"scope"} eq "all") {
+
+			my $sth = $dbh->prepare("
+				select person.email, person.first, person.last, school.name, school.id
+					from person, permission, school
+				where school.id in ($id_string)
+					and school.chapter = permission.chapter
+					and permission.tag = 'chapter'
+					and permission.person = person.id
+					and school.tourn = ?
+				group by person.id
+			");
+
+			$sth->execute($tourn->id);
+
+			while (
+				my ( $email, $first, $last, $school, $school_id ) = $sth->fetchrow_array()
+			) {
+				$email = lc($email);
+				$contacts{$email}{"name"} = $first." ".$last;
+				$contacts{$email}{"school"} = $school;
+				$contacts{$email}{"school_id"} = $school_id;
+			}
+		}
+	}
+
+</%init>
+
+	<& "menu.mas",
+		tourn          => $tourn,
+		session        => $ARGS{"session"},
+		defaults       => $ARGS{"defaults"},
+		tourn_settings => $tourn_settings,
+		whoami         => "problem_contacts"
+	&>
+
+	<div class="main">
+
+		<span class="third nospace">
+			<h4>Problem Contacts</h4>
+		</span>
+
+		<span class="twothirds rightalign nospace">
+
+			<form
+				action = "problem_contacts.mhtml"
+				method = "post"
+			>
+
+				<span class="threesevenths nospace">
+					<select name="tag" class="fixedmost">
+						<option value=""></option>
+
+%						foreach my $ptag ("unbilled", "unclaimed", "incomplete_entries", "incomplete_judges") {
+							<option
+								value="<% $ptag %>"
+								<% $ptag eq $tag ? "selected" : "" %>
+							><% ucfirst($ptag) %></option>
+%						}
+					</select>
+				</span>
+
+				<span class="threesevenths nospace">
+					<select name="scope" class="fixedmost">
+						<option value="contacts">Listed school contacts</option>
+						<option value="all">All Tabroom contacts &amp; admins</option>
+					</select>
+				</span>
+
+				<span class="seventh centeralign">
+					<input type="submit" value="Go">
+					</form>
+				</span>
+			</form>
+		</span>
+
+%		if (keys %contacts) {
+
+			<span class="threequarters biggish semibold bluetext">
+				Report scope: <% ucfirst($tag) %> - <% ucfirst($ARGS{'scope'}) %>
+			</span>
+
+			<span
+				class = "quarter rightalign"
+				id    = "natscontacts_buttonarea"
+			>
+			</span>
+
+			<& "/funclib/tablesorter.mas", table => "natscontacts" &>
+
+			<table id="natscontacts">
+
+				<thead>
+
+					<tr class="yellowrow">
+
+						<th>
+							Name
+						</th>
+
+						<th>
+							School
+						</th>
+
+						<th>
+							Email
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+
+%					foreach my $email ( sort {$a cmp $b} keys %contacts ) {
+						<tr>
+
+							<td>
+								<% $contacts{$email}{"name"} %>
+							</td>
+
+							<td>
+								<a
+									href="/register/school/edit.mhtml?school_id=<% $contacts{$email}{"school_id"} %>"
+									class="full plain marno"
+								><% $contacts{$email}{"school"} %></a>
+							</td>
+
+							<td>
+								<% $email %>
+							</td>
+						</tr>
+%					}
+				</tbody>
+
+			</table>
+
+%		}
+
+	</div>
+
+%	$dbh->disconnect();
