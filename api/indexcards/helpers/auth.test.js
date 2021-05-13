@@ -1,6 +1,7 @@
 import config from '../../config/config'
 import db from '../models';
 import auth from './auth';
+import login from './login';
 import tournAuth from './tourn-auth';
 
 import { assert } from 'chai';
@@ -56,23 +57,6 @@ describe ("Authentication Functions", () => {
 		assert.equal(session.email, 'i.am.test@speechanddebate.org');
 	});
 
-	it("Finds a session for an GLP Admin user", async () => {
-
-		let req = {
-			db: db,
-			config: config,
-			cookies : {
-				[config.COOKIE_NAME]: userData.testAdminSession.userkey
-			}
-		};
-
-		const session = await(auth(req));
-
-		assert.typeOf(session, 'object');
-		assert.equal(session.person, '70');
-		assert.equal(session.site_admin, true);
-		assert.equal(session.email, 'i.am.god@speechanddebate.org');
-	});
 
 	it("Permits an ordinary user access to a tournament it is admin for", async () => {
 
@@ -160,10 +144,11 @@ describe ("Authentication Functions", () => {
 	});
 
 	after("Remove Dummy Data", async () => {
-		await testUser.destroy(userData.testUser);
-		await testAdmin.destroy(userData.testAdmin);
-		await testUserSession.destroy(userData.testUserSession);
-		await testAdminSession.destroy(userData.testAdminSession);
+		await testUser.destroy();
+		await testAdmin.destroy();
+		await testUserSession.destroy();
+		await testAdminSession.destroy();
+		await testUserTournPerm.destroy();
 	});
 });
 
