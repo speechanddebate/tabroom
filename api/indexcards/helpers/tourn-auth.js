@@ -98,6 +98,6 @@ const tournAuth = async function(req) {
 	}
 
 	return session;
-}
+};
 
 export default tournAuth;
