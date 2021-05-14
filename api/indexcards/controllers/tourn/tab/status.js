@@ -1,5 +1,5 @@
 
-export const listEvents = {
+export const attendance = {
     GET: async (req, res) => {
 		const db = req.db;
 		const tournId = req.params.tourn_id;
@@ -27,15 +27,24 @@ export const listEvents = {
     },
 };
 
-listEvents.GET.apiDoc = {
-    summary: 'Listing of events in the tournament',
-    operationId: 'listEvents',
+attendance.GET.apiDoc = {
+    summary: 'Room attedance and start status of a round or timeslot',
+    operationId: 'roundStatus',
     parameters: [
         {
             in          : 'path',
             name        : 'tourn_id',
             description : 'Tournament ID',
-            required    : true,
+            required    : false,
+            schema      : {
+				type    : 'integer',
+				minimum : 1
+			},
+        },{
+            in          : 'path',
+            name        : 'round_id',
+            description : 'Round ID',
+            required    : false,
             schema      : {
 				type    : 'integer',
 				minimum : 1
@@ -44,11 +53,11 @@ listEvents.GET.apiDoc = {
     ],
     responses: {
         200: {
-            description: 'Event Data',
+            description: 'Status Data',
             content: {
                 '*/*': {
                     schema: {
-                        type: 'array',
+                        type: 'object',
                         items: { $ref: '#/components/schemas/Event' },
                     },
                 },
@@ -56,6 +65,6 @@ listEvents.GET.apiDoc = {
         },
         default: { $ref: '#/components/responses/ErrorResponse' },
     },
-    tags: ['tournament/entries'],
+    tags: ['tourn/tab'],
 };
 

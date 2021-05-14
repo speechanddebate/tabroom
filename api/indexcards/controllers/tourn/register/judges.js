@@ -13,7 +13,7 @@ export const listJudges = {
 			person.provider as person_provider,
 			person.nsda as person_nsda
 				from (category, judge)
-				left join person account on judge.person = account.id
+				left join person on judge.person = person.id
 			where category.tourn = :tourn
 				and category.id = judge.category
 		`;
@@ -39,7 +39,7 @@ export const listJudges = {
 
 			if (judges[judge.id]) {
 
-				judges[judge.id].account.push(person);
+				judges[judge.id].person.push(person);
 
 			} else {
 
@@ -57,7 +57,7 @@ export const listJudges = {
 				delete judges[judge.id].person_provider;
 				delete judges[judge.id].person_nsda;
 
-				judges[judge.id].account = [person];
+				judges[judge.id].person = [person];
 			}
 		}
 
@@ -94,6 +94,6 @@ listJudges.GET.apiDoc = {
         },
         default: { $ref: '#/components/responses/ErrorResponse' },
     },
-    tags: ['tournament/judges'],
+    tags: ['tournament/register'],
 };
 
