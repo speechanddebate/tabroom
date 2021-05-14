@@ -93,6 +93,6 @@ listEntries.GET.apiDoc = {
         },
         default: { $ref: '#/components/responses/ErrorResponse' },
     },
-    tags: ['tournament/entries'],
+    tags: ['tournament/register'],
 };
 

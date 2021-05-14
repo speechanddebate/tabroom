@@ -1,40 +1,35 @@
 
-export const listSchools = {
-
+export const listEvents = {
     GET: async (req, res) => {
 		const db = req.db;
 		const tournId = req.params.tourn_id;
 		const op = db.Sequelize.Op
 
-		// Filter out signup options for tournament admins, deliver the rest
+		// Filter out signup options for tournament admins
 
-		let schools = await db.school.findAll({
+		let events = await db.event.findAll({
 			where: { tourn: tournId },
 			include : [
-				{ model: db.schoolSetting, as: 'Settings',
+				{ model: db.eventSetting, as: 'Settings',
 					where : {
 						tag: { [op.notLike] : "signup_%"}
 					},
 					required: false
-				},
-				{ model: db.fine, as: 'Fines' },
-				{ model: db.chapter, as: 'Chapter'},
+				}
 			]
 		});
 
-		if (schools.count < 1) {
-			return res.status(400).json({ message: 'No schools found in that tournament' });
+		if (events.count < 1) {
+			return res.status(400).json({ message: 'No events found in that tournament' });
 		} else {
-			return res.status(200).json(schools);
+			return res.status(200).json(events);
 		}
-
-		return;
     },
 };
 
-listSchools.GET.apiDoc = {
-    summary: 'Listing of schools in the tournament, with chapter info, settings, and fines',
-    operationId: 'listSchools',
+listEvents.GET.apiDoc = {
+    summary: 'Listing of events in the tournament',
+    operationId: 'listEvents',
     parameters: [
         {
             in          : 'path',
@@ -49,19 +44,18 @@ listSchools.GET.apiDoc = {
     ],
     responses: {
         200: {
-            description: 'School Data',
+            description: 'Event Data',
             content: {
                 '*/*': {
                     schema: {
                         type: 'array',
-                        items: { $ref: '#/components/schemas/School' },
+                        items: { $ref: '#/components/schemas/Event' },
                     },
                 },
             },
         },
         default: { $ref: '#/components/responses/ErrorResponse' },
     },
-    tags: ['tournament/entries'],
+    tags: ['tournament/register'],
 };
-
 
