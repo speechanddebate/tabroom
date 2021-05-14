@@ -5,20 +5,19 @@
 import status from '../../controllers/utility/status';
 
 // Router controllers
-import { listSchools } from '../../controllers/tourn/entries/schools';
-import { listEvents } from '../../controllers/tourn/entries/events';
-import { listEntries } from '../../controllers/tourn/entries/entries';
-import { listJudges } from '../../controllers/tourn/entries/judges';
+import { listSchools } from '../../controllers/tourn/register/schools';
+import { listEvents } from '../../controllers/tourn/register/events';
+import { listEntries } from '../../controllers/tourn/register/entries';
+import { listJudges } from '../../controllers/tourn/register/judges';
 
-import { roundStatus } from '../../controllers/tourn/tabbing/status';
-import { timeslotStatus } from '../../controllers/tourn/tabbing/status';
+import { attendance } from '../../controllers/tourn/tab/status';
 
 export default [
-    { path : '/tourn/{tourn_id}/entry/schools' , module : listSchools } ,
-    { path : '/tourn/{tourn_id}/entry/events'  , module : listEvents },
-    { path : '/tourn/{tourn_id}/entry/entries' , module : listEntries },
-    { path : '/tourn/{tourn_id}/entry/judges'  , module : listJudges },
+    { path : '/tourn/{tourn_id}/register/schools' , module : listSchools } ,
+    { path : '/tourn/{tourn_id}/register/events'  , module : listEvents },
+    { path : '/tourn/{tourn_id}/register/entries' , module : listEntries },
+    { path : '/tourn/{tourn_id}/register/judges'  , module : listJudges },
 
-	{ path : '/tourn/{tourn_id}/tabbing/round/status/{round_id}', module : roundStatus }
-	{ path : '/tourn/{tourn_id}/tabbing/timeslot/status/{timeslot_id}', module : timeslotStatus }
+	{ path : '/tourn/{tourn_id}/tab/status/round/{round_id}', module : attendance },
+	{ path : '/tourn/{tourn_id}/tab/status/timeslot/{timeslot_id}', module : attendance }
 ];
