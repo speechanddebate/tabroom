@@ -63,3 +63,11 @@ export const condenseDateRange = (start, end) => {
     }
     return dates;
 };
+
+export const sqlDateTimeParse = (sqlDT) => {
+	// Split timestamp into [ Y, M, D, h, m, s ]
+	const t = sqlDT.split(/[- :]/);
+
+	// Apply each element to the Date function
+	return new Date(t[0], t[1]-1, t[2], t[3], t[4], t[5]);
+};
