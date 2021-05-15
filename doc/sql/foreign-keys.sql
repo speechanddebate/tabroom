@@ -254,3 +254,46 @@
 	alter table setting_label ADD CONSTRAINT fk_setting_label FOREIGN KEY (setting)
 		REFERENCES setting(id) ON DELETE CASCADE ON UPDATE CASCADE;
 
+	delete from campus_log where person.id IS NOT NULL and not exists (
+		select person.id from person where person.id = campus_log.person
+	);
+
+	alter table campus_log ADD CONSTRAINT fk_cl_person FOREIGN KEY (person)
+		REFERENCES person(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+	delete from campus_log where campus_log.entry IS NOT NULL and not exists (
+		select entry.id from entry where entry.id = campus_log.entry
+	);
+
+	alter table campus_log ADD CONSTRAINT fk_cl_entry FOREIGN KEY (entry)
+		REFERENCES entry(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+	delete from campus_log where campus_log.judge IS NOT NULL and not exists (
+		select judge.id from judge where judge.id = campus_log.judge
+	);
+
+	alter table campus_log ADD CONSTRAINT fk_cl_judge FOREIGN KEY (judge)
+		REFERENCES judge(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+	delete from campus_log where campus_log.tourn IS NOT NULL and not exists (
+		select tourn.id from tourn where tourn.id = campus_log.tourn
+	);
+
+	alter table campus_log ADD CONSTRAINT fk_cl_tourn FOREIGN KEY (tourn)
+		REFERENCES tourn(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+	delete from campus_log where campus_log.panel IS NOT NULL and not exists (
+		select panel.id from panel where panel.id = campus_log.panel
+	);
+
+	alter table campus_log ADD CONSTRAINT fk_cl_panel FOREIGN KEY (panel)
+		REFERENCES panel(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+	delete from campus_log where campus_log.school IS NOT NULL and not exists (
+		select school.id from school where school.id = campus_log.school
+	);
+
+	alter table campus_log ADD CONSTRAINT fk_cl_school FOREIGN KEY (school)
+		REFERENCES school(id) ON DELETE CASCADE ON UPDATE CASCADE;
+
+
