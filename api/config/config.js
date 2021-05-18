@@ -50,13 +50,17 @@ const env = process.env.NODE_ENV || 'development';
 switch (env) {
     case 'test':
 		config.sequelizeOptions.logging = false;
+        config.DB_HOST = 'localhost';
+        config.DB_USER = 'tabroom';
+        config.DB_PASS = 'C3Eil-aiQuaiseigoo4hee2YooG';
         break;
 
     case 'staging':
         config.DB_HOST = 'localhost';
         config.DB_USER = 'tabroom';
-        config.DB_PASS = '';
+        config.DB_PASS = 'C3Eil-aiQuaiseigoo4hee2YooG';
         break;
+
     case 'production':
 		config.port       = 3000,
         config.DB_HOST    = 'db.speechanddebate.org';
@@ -72,6 +76,9 @@ switch (env) {
         break;
 
     case 'development':
+        config.DB_HOST = 'localhost';
+        config.DB_USER = 'tabroom';
+        config.DB_PASS = 'C3Eil-aiQuaiseigoo4hee2YooG';
     default:
         break;
 }
