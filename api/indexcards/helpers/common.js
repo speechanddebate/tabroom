@@ -64,10 +64,121 @@ export const condenseDateRange = (start, end) => {
     return dates;
 };
 
-export const sqlDateTimeParse = (sqlDT) => {
+export const showDateTime = (
+	sqlDT,
+	options = { locale: "en-us", tz: "UTC" }
+) => {
+
 	// Split timestamp into [ Y, M, D, h, m, s ]
-	const t = sqlDT.split(/[- :]/);
+	const dtString = sqlDT.split(/[- :]/);
 
 	// Apply each element to the Date function
-	return new Date(t[0], t[1]-1, t[2], t[3], t[4], t[5]);
+	const dt = new Date(Date.UTC(dtString[0], dtString[1]-1, dtString[2], dtString[3], dtString[4], dtString[5]));
+
+	let dateFormat = {};
+
+	switch (options.format) {
+
+		case "full":
+			dateFormat = {
+				timeZone     : options.tz,
+				weekday      : 'long',
+				year         : 'numeric',
+				month        : 'long',
+				day          : 'numeric',
+				hour         : 'numeric',
+				minute       : 'numeric',
+				timeZoneName : 'short'
+			};
+		break;
+
+		case "long":
+			dateFormat = {
+				timeZone     : options.tz,
+				weekday      : 'short',
+				month        : 'long',
+				year         : 'numeric',
+				day          : 'numeric',
+				hour         : 'numeric',
+				minute       : 'numeric',
+				timeZoneName : 'short'
+			};
+		break;
+
+		case "medium":
+			dateFormat = {
+				timeZone     : options.tz,
+				month        : 'short',
+				day          : 'numeric',
+				hour         : 'numeric',
+				minute       : 'numeric',
+				timeZoneName : 'short'
+			};
+		break;
+
+		case "short":
+			dateFormat = {
+				timeZone     : options.tz,
+				month        : 'numeric',
+				day          : 'numeric',
+				hour         : 'numeric',
+				minute       : 'numeric'
+			};
+		break;
+
+		case "daytime":
+			dateFormat = {
+				timeZone     : options.tz,
+				day          : 'short',
+				hour         : 'numeric',
+				minute       : 'numeric'
+			};
+		break;
+
+		case "sortable":
+			const chopped = new Intl.DateTimeFormat(
+				options.locale,
+				{
+					timeZone     : options.tz,
+					month        : 'numeric',
+					day          : 'numeric',
+					hour         : 'numeric',
+					minute       : 'numeric',
+					hour12 		 : true
+				}
+			)
+			.formatToParts(dt)
+			.map(component => {
+				return component.reduce( (dtString, comp) => {
+					if (comp.type != 'literal') {
+						dtString[comp.type] = comp.value;
+					}
+				}, {});
+			});
+
+			return `${chopped.year}-${chopped.month}-${chopped.day} ${chopped.hour}-${chopped.minute}`;
+		break;
+
+		default:
+			return dt;
+	}
+
+	if (options.dateOnly) {
+		delete dateFormat.hour;
+		delete dateFormat.minute;
+		delete dateFormat.timeZoneName;
+	}
+
+	if (options.timeOnly) {
+		delete dateFormat.year;
+		delete dateFormat.month;
+		delete dateFormat.day;
+		delete dateFormat.timeZoneName;
+	}
+
+	return new Intl.DateTimeFormat(
+		options.locale,
+		dateFormat
+	).format(dt);
 };
+
