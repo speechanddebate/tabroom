@@ -1,4 +1,6 @@
 
+import {showDateTime} from '../helpers/common'
+
 export const attendance = {
     GET: async (req, res) => {
 
@@ -18,8 +20,9 @@ export const attendance = {
         const attendanceQuery = `
 			select
 				cl.panel panel, cl.tag tag, cl.description description,
-					CONVERT_TZ(cl.timestamp, '+00:00', tourn.tz) timestamp,
-				person.id person
+					CONVERT_TZ(cl.timestamp timestamp, "+00:00", tourn.tz),
+				person.id person,
+				tourn.tz tz
 
 			from panel, campus_log cl, tourn, person, round
 
@@ -51,8 +54,9 @@ export const attendance = {
 		const startsQuery = `
 			select
 				judge.person person, panel.id panel,
-				CONVERT_TZ(ballot.judge_started, '+00:00', tourn.tz) startTime,
-				started_by.first startFirst, started_by.last startLast
+				ballot.judge_started startTime,
+				started_by.first startFirst, started_by.last startLast,
+				tourn.tz tz
 
 			from (panel, tourn, round, ballot, event, judge)
 
@@ -78,12 +82,18 @@ export const attendance = {
 
 			status{start.person}{start.panel}{"started_by"} = `${start.startFirst} ${start.startLast}`;
 
+			status{start.person}{start.panel}{"started"} = showDateTime(
+				start.startTime,
+				{ tz: tourn.tz, format: "daytime" }
+			);
+
 		}
 
 		for (let attend of attendanceResults) {
-
+			status{attend.person}{"tag"} = attend.tag;
+			status{attend.person}{"timestamp"} = attend.timestamp;
+			status{attend.person}{"description"} = attend.description;
 		}
-
 
 		if (events.count < 1) {
 			return res.status(400).json({ message: 'No events found in that tournament' });
