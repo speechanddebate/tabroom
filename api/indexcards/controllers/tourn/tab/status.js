@@ -1,4 +1,6 @@
 
+import {showDateTime} from '../helpers/common'
+
 export const attendance = {
     GET: async (req, res) => {
 
@@ -17,9 +19,10 @@ export const attendance = {
 
         const attendanceQuery = `
 			select
-				cl.panel, cl.tag, cl.description,
-					CONVERT_TZ(cl.timestamp, '+00:00', tourn.tz),
-				person.id, person.first, person.last
+				cl.panel panel, cl.tag tag, cl.description description,
+					CONVERT_TZ(cl.timestamp timestamp, "+00:00", tourn.tz),
+				person.id person,
+				tourn.tz tz
 
 			from panel, campus_log cl, tourn, person, round
 
@@ -48,11 +51,12 @@ export const attendance = {
 			order by cl.timestamp
         `;
 
-		const startQuery = `
+		const startsQuery = `
 			select
-				ballot.id,  judge.person, panel.id,
-				CONVERT_TZ(ballot.judge_started, '+00:00', tourn.tz),
-				started_by.first, started_by.last
+				judge.person person, panel.id panel,
+				ballot.judge_started startTime,
+				started_by.first startFirst, started_by.last startLast,
+				tourn.tz tz
 
 			from (panel, tourn, round, ballot, event, judge)
 
@@ -69,12 +73,27 @@ export const attendance = {
 		`;
 
         // A raw query to go through the category filter
-        var results = await db.sequelize.query(
-            judgeQuery,
-            { replacements: {tourn: tournId }}
-        );
+        const attendanceResults = await db.sequelize.query(attendanceQuery);
+        const startsResults = await db.sequelize.query(startsQuery);
 
+		let status = {};
 
+		for (let start of startResults) {
+
+			status{start.person}{start.panel}{"started_by"} = `${start.startFirst} ${start.startLast}`;
+
+			status{start.person}{start.panel}{"started"} = showDateTime(
+				start.startTime,
+				{ tz: tourn.tz, format: "daytime" }
+			);
+
+		}
+
+		for (let attend of attendanceResults) {
+			status{attend.person}{"tag"} = attend.tag;
+			status{attend.person}{"timestamp"} = attend.timestamp;
+			status{attend.person}{"description"} = attend.description;
+		}
 
 		if (events.count < 1) {
 			return res.status(400).json({ message: 'No events found in that tournament' });
