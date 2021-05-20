@@ -1,5 +1,5 @@
 
-import {showDateTime} from '../helpers/common'
+import {showDateTime} from '../../../helpers/common'
 
 export const attendance = {
     GET: async (req, res) => {
@@ -11,7 +11,7 @@ export const attendance = {
 
 		if (req.params.timeslot_id && typeof req.params.timeslot_id == "integer") {
 			queryLimit = " where round.timeslot = ".req.params.timeslot_id;
-		if (req.params.round_id && typeof req.params.round_id == "integer") {
+		} else if (req.params.round_id && typeof req.params.round_id == "integer") {
 			queryLimit = " where round.id = ".req.params.round_id;
 		} else {
 			return;
@@ -80,9 +80,9 @@ export const attendance = {
 
 		for (let start of startResults) {
 
-			status{start.person}{start.panel}{"started_by"} = `${start.startFirst} ${start.startLast}`;
+			status[start.person][start.panel].started_by = start.startFirst+" "+start.startLast;
 
-			status{start.person}{start.panel}{"started"} = showDateTime(
+			status[start.person][start.panel].started = showDateTime(
 				start.startTime,
 				{ tz: tourn.tz, format: "daytime" }
 			);
@@ -90,15 +90,15 @@ export const attendance = {
 		}
 
 		for (let attend of attendanceResults) {
-			status{attend.person}{"tag"} = attend.tag;
-			status{attend.person}{"timestamp"} = attend.timestamp;
-			status{attend.person}{"description"} = attend.description;
+			status[attend.person].tag = attend.tag;
+			status[attend.person].timestamp = attend.timestamp;
+			status[attend.person].description = attend.description;
 		}
 
-		if (events.count < 1) {
+		if (status.count < 1) {
 			return res.status(400).json({ message: 'No events found in that tournament' });
 		} else {
-			return res.status(200).json(events);
+			return res.status(200).json(status);
 		}
     },
 };
