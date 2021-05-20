@@ -105,9 +105,9 @@ sub all_permissions {
 
 		Tab::Permission->set_sql( tourn_perms => "
 			select permission.*
-			from permission
+				from permission
 			where permission.person = ?
-			and permission.tourn = ?
+				and permission.tourn = ?
 		");
 
 		my @tourn_perms =  Tab::Permission->search_tourn_perms(
@@ -173,7 +173,12 @@ sub all_permissions {
 	) {
 
 		if ($district) {
-			$perms{"district"}{$district} = $tag;
+
+			if ($tag eq "wsdc") {
+				$perms{"district"}{$district} = $tag;
+			} else {
+				$perms{"district"}{$district} = $tag;
+			}
 		}
 
 		if ($region) {
