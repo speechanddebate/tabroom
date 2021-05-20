@@ -95,15 +95,15 @@ describe('DateTime Formatter', () => {
 	const dateSample = '2020-11-07 16:30:00';
 
 	it ('Returns a Date object if given a MySQL Date string and no other options', async () => {
-		const dtObject = showDateTime(dateSample);
 
-		assert.typeOf(dtObject, 'object', "Return an object");
+		const dtObject = showDateTime(dateSample);
 		assert.instanceOf(dtObject, Date, "Object is a date");
-		assert.equal(dtObject.getYear(), "2020", "Year is correct");
+		assert.equal(dtObject.getFullYear(), "2020", "Year is correct");
 
 	});
 
 	it ('Returns a US formatted EDT date given locale & options', async () => {
+
 		const dtString = showDateTime(dateSample, {
 			locale : "en-us",
 			tz     : "America/New_York",
@@ -111,7 +111,12 @@ describe('DateTime Formatter', () => {
 		});
 
 		assert.typeOf(dtString, "string", "Return a string");
-		assert.equal(dtString, "Sat, November 7, 2020, 11:30 AM EST", "String format is correct");
+
+		assert.equal(
+			dtString,
+			"Sat, November 7, 2020, 11:30 AM EST",
+			"String format is correct"
+		);
 	});
 
 });
