@@ -10,10 +10,14 @@ const auth = async (req) => {
 		return req.session;
 	}
 
+	console.log(req.cookies);
+
 	if (req.cookies[req.config.COOKIE_NAME]) {
 
 		let session = await db.session.findOne({
-			where: { userkey: req.cookies[req.config.COOKIE_NAME] },
+			where: {
+				userkey: req.cookies[req.config.COOKIE_NAME]
+			},
 			include : [
 				{ model: db.person, as: 'Person'},
 				{ model: db.person, as: 'Su'}
@@ -66,14 +70,10 @@ const auth = async (req) => {
 			return session;
 
 		} else {
-
-			console.log("No valid Tabroom session found for key");
-			console.log(req.cookies[req.config.COOKIE_NAME]);
 			return;
 		}
 
 	} else {
-		console.log("No valid Tabroom session cookie found");
 		return;
 	}
 }
