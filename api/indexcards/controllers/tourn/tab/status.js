@@ -2,6 +2,7 @@
 import {showDateTime} from '../../../helpers/common'
 
 export const attendance = {
+
     GET: async (req, res) => {
 
 		const db = req.db;
@@ -9,18 +10,26 @@ export const attendance = {
 
 		let queryLimit = "";
 
-		if (req.params.timeslot_id && typeof req.params.timeslot_id == "integer") {
-			queryLimit = " where round.timeslot = ".req.params.timeslot_id;
-		} else if (req.params.round_id && typeof req.params.round_id == "integer") {
-			queryLimit = " where round.id = ".req.params.round_id;
+		if (req.params.timeslot_id) {
+			req.params.timeslot_id = parseInt(req.params.timeslot_id);
+		}
+
+		if (req.params.round_id) {
+			req.params.round_id = parseInt(req.params.round_id);
+		}
+
+		if (req.params.timeslot_id) {
+			queryLimit = " where round.timeslot = "+req.params.timeslot_id;
+		} else if (req.params.round_id) {
+			queryLimit = " where round.id = "+req.params.round_id;
 		} else {
-			return;
+			return res.status(400).json({ message: 'No parameters sent for query' });
 		}
 
         const attendanceQuery = `
 			select
 				cl.panel panel, cl.tag tag, cl.description description,
-					CONVERT_TZ(cl.timestamp timestamp, "+00:00", tourn.tz),
+					CONVERT_TZ(cl.timestamp, "+00:00", tourn.tz) timestamp,
 				person.id person,
 				tourn.tz tz
 
@@ -73,26 +82,37 @@ export const attendance = {
 		`;
 
         // A raw query to go through the category filter
-        const attendanceResults = await db.sequelize.query(attendanceQuery);
-        const startsResults = await db.sequelize.query(startsQuery);
+        const [attendanceResults, attendanceMeta] = await db.sequelize.query(attendanceQuery);
+        const [startsResults, startsMeta] = await db.sequelize.query(startsQuery);
 
 		let status = {};
 
-		for (let start of startResults) {
+		for (let attend of attendanceResults) {
 
-			status[start.person][start.panel].started_by = start.startFirst+" "+start.startLast;
-
-			status[start.person][start.panel].started = showDateTime(
-				start.startTime,
-				{ tz: tourn.tz, format: "daytime" }
-			);
-
+			status[attend.person] = {
+				[attend.panel] : {
+					tag         : attend.tag,
+					timestamp   : attend.timestamp.toJSON,
+					description : attend.description,
+				}
+			};
 		}
 
-		for (let attend of attendanceResults) {
-			status[attend.person].tag = attend.tag;
-			status[attend.person].timestamp = attend.timestamp;
-			status[attend.person].description = attend.description;
+		for (let start of startsResults) {
+
+			if (!status[start.person]) {
+				status[start.person] = {};
+			}
+
+			if (!status[start.person][start.panel]) {
+				status[start.person][start.panel] = {};
+			}
+
+			status[start.person][start.panel].started_by = start.startFirst+" "+start.startLast;
+			status[start.person][start.panel].started = showDateTime(
+				start.startTime,
+				{ tz: start.tz, format: "daytime" }
+			);
 		}
 
 		if (status.count < 1) {

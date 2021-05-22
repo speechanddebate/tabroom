@@ -70,10 +70,15 @@ export const showDateTime = (
 ) => {
 
 	// Split timestamp into [ Y, M, D, h, m, s ]
-	const dtString = sqlDT.split(/[- :]/);
+	let dt;
 
-	// Apply each element to the Date function
-	const dt = new Date(Date.UTC(dtString[0], dtString[1]-1, dtString[2], dtString[3], dtString[4], dtString[5]));
+	if (typeof sqlDT == "string") {
+		const dtString = sqlDT.split(/[- :]/);
+		// Apply each element to the Date function
+		dt = new Date(Date.UTC(dtString[0], dtString[1]-1, dtString[2], dtString[3], dtString[4], dtString[5]));
+	} else {
+		dt = sqlDT;
+	}
 
 	let dateFormat = {};
 
@@ -128,10 +133,10 @@ export const showDateTime = (
 
 		case "daytime":
 			dateFormat = {
-				timeZone     : options.tz,
-				day          : 'short',
-				hour         : 'numeric',
-				minute       : 'numeric'
+				timeZone : options.tz,
+				weekday  : 'short',
+				hour     : 'numeric',
+				minute   : 'numeric'
 			};
 		break;
 
