@@ -64,6 +64,7 @@ export const attendance = {
 			select
 				judge.person person, panel.id panel,
 				ballot.judge_started startTime,
+				ballot.audit audited,
 				started_by.first startFirst, started_by.last startLast,
 				tourn.tz tz
 
@@ -113,6 +114,8 @@ export const attendance = {
 				start.startTime,
 				{ tz: start.tz, format: "daytime" }
 			);
+
+			status[start.person][start.panel].audited = start.audited;
 		}
 
 		if (status.count < 1) {
