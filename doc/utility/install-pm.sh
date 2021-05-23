@@ -20,3 +20,6 @@ pm2 install pm2-logrotate
 pm2 set pm2-logrotate:max_size 1G
 pm2 set pm2-logrotate:compress true
 pm2 set pm2-logrotate:rotateInterval '0 0 * * *'
+
+cp /www/tabroom/doc/conf/indexcards.service /etc/systemd/system
+systemctl enable indexcards
