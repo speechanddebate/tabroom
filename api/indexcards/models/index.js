@@ -60,9 +60,10 @@ db.changeLog.belongsTo(db.circuit  , { as: "Circuit"    , foreignKey: "circuit"}
 db.campusLog.belongsTo(db.person  , { as: "Person"  , foreignKey: "person"});
 db.campusLog.belongsTo(db.tourn   , { as: "Tourn"   , foreignKey: "tourn"});
 db.campusLog.belongsTo(db.section , { as: "Section" , foreignKey: "panel"});
-db.campusLog.belongsTo(db.school   , { as: "School"     , foreignKey: "school"});
-db.campusLog.belongsTo(db.entry    , { as: "Entry"      , foreignKey: "entry"});
-db.campusLog.belongsTo(db.judge    , { as: "Judge"      , foreignKey: "judge"});
+db.campusLog.belongsTo(db.school  , { as: "School"  , foreignKey: "school"});
+db.campusLog.belongsTo(db.student , { as: "Student" , foreignKey: "student"});
+db.campusLog.belongsTo(db.entry   , { as: "Entry"   , foreignKey: "entry"});
+db.campusLog.belongsTo(db.judge   , { as: "Judge"   , foreignKey: "judge"});
 
 db.circuit.belongsToMany(db.tourn,   { as: "Tourns",   foreignKey: "circuit", through: 'tourn_circuit'});
 db.circuit.belongsToMany(db.person,  { as: "Persons",  foreignKey: "circuit", through: 'permission'});
