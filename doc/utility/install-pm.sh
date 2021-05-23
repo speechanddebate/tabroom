@@ -21,6 +21,8 @@ pm2 set pm2-logrotate:max_size 1G
 pm2 set pm2-logrotate:compress true
 pm2 set pm2-logrotate:rotateInterval '0 0 * * *'
 
+scp freyr:/www/tabroom/api/config/config.js /www/tabroom/api/config/
+
 cp /www/tabroom/doc/conf/indexcards.service /etc/systemd/system
 systemctl enable indexcards
 
