@@ -102,16 +102,13 @@ app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 		if (req.session[req.params.tourn_id]
 			&& req.session[req.params.tourn_id].level
 		) {
-			console.log("You shall pass");
 			next();
+
 		} else {
-			console.log("No permission for that tournament");
 			return res.status(400).json({ message: 'You do not have admin access to that tournament' });
 		}
 
 	} else {
-
-		console.log("No session found");
 		return res.status(400).json({ message: 'You are not logged into Tabroom' });
 	}
 
