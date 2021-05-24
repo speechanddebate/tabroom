@@ -126,6 +126,8 @@ export const attendance = {
     },
 };
 
+export default attendance;
+
 attendance.GET.apiDoc = {
     summary: 'Room attedance and start status of a round or timeslot',
     operationId: 'roundStatus',
