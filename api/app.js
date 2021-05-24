@@ -144,7 +144,7 @@ app.use(expressWinston.errorLogger({
 app.use(errorHandler);
 
 // Swagger UI interface for the API
-app.use('/doc', swaggerUI.serve, swaggerUI.setup(apiDocConfig.apiDoc));
+app.use('/v1/apidoc', swaggerUI.serve, swaggerUI.setup(apiDocConfig.apiDoc));
 
 // Start server
 const port = process.env.PORT || config.PORT || 9876;
