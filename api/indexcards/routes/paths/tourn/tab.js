@@ -8,6 +8,7 @@ import status from '../../../controllers/utility/status';
 import { attendance } from '../../../controllers/tourn/tab/status';
 
 export default [
+	{ path : '/tourn/{tourn_id}/tab/status/update', module : attendance },
 	{ path : '/tourn/{tourn_id}/tab/status/round/{round_id}', module : attendance },
 	{ path : '/tourn/{tourn_id}/tab/status/timeslot/{timeslot_id}', module : attendance }
 ];

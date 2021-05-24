@@ -73,6 +73,7 @@ app.use(expressWinston.logger({
 }));
 
 // Parse body
+app.use(bodyParser.urlencoded({ extended: true}));
 app.use(bodyParser.json({ type: ['json', 'application/*json'], limit: '10mb' }));
 app.use(bodyParser.text({ type: '*/*', limit: '10mb' }));
 
