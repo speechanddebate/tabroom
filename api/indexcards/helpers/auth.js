@@ -10,8 +10,6 @@ const auth = async (req) => {
 		return req.session;
 	}
 
-	console.log(req.cookies);
-
 	if (req.cookies[req.config.COOKIE_NAME]) {
 
 		let session = await db.session.findOne({
