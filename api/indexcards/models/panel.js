@@ -1,9 +1,7 @@
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-	return sequelize.define('section', {
-		//Mistakes were made --CLP
-		tableName : 'panel',
+	return sequelize.define('panel', {
 		letter: {
 		  type: DataTypes.STRING(3),
 		  allowNull: true
@@ -29,6 +27,4 @@ module.exports = function(sequelize, DataTypes) {
 		},
 	});
 };
-
-
 
