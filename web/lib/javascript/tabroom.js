@@ -264,11 +264,8 @@
 
 					if (data.reprop) {
 						data.reprop.forEach( function(item) {
-							if (item.value === 1) {
-								$("#"+item.id).attr(item.property, item.value);
-							} else {
-								$("#"+item.id).attr(item.property, 0);
-							}
+							console.log(item);
+							$("#"+item.id).attr(item.property, item.value);
 						});
 					}
 

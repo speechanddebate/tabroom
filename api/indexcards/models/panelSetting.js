@@ -2,8 +2,7 @@
 
 module.exports = function(sequelize, DataTypes) {
 
-	return sequelize.define('sectionSetting', {
-		table_name: "panel_setting",
+	return sequelize.define('panelSetting', {
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false
@@ -20,6 +19,8 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		}
+	},{
+		tableName: "panel_setting",
 	});
 };
 
