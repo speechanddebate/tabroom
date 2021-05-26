@@ -129,33 +129,64 @@ export const attendance = {
 
 		const {body} = req;
 		const now = Date();
+		const db = req.db;
 
-		const eraseStart = `update ballot set started_by = NULL, judge_started = NULL where judge = :judgeId and panel = :panelId `;
+		const target = await ( () => {
+			try {
+				return db.person.findByPk(req.body.target_id);
+			} catch(err) {
+				return res.status(201).json({
+					error   : true,
+					message : `Bad parameters sent ${err}`
+				});
+			}
+		})();
 
-		try {
-			const target = await db.person.findById(req.body.target_id);
-			const panel = await db.person.findById(req.body.related_thing);
-		} catch(err) {
-			const reply = {
+		if (!target) {
+			return res.status(201).json({
 				error   : true,
-				message : `Bad parameters sent ${err}`
-			};
-			return res.status(200).json(reply);
+				message : `No person to mark present for ID ${req.body.target_id}`
+			});
+		}
+
+		const panel = await ( () => {
+			try {
+				return db.panel.findByPk(req.body.related_thing);
+			} catch(err) {
+				return res.status(201).json({
+					error   : true,
+					message : `Bad parameters sent ${err}`
+				});
+			}
+		})();
+
+
+		if (!panel) {
+			return res.status(201).json({
+				error   : true,
+				message : `No section found for ID ${req.body.related_thing}`
+			});
 		}
 
 		if (req.body.setting_name == "judge_started") {
 
-			try {
-				const judge = await db.judge.findById(req.body.another_thing);
-			} catch(err) {
-				const reply = {
-					error   : true,
-					message : `No user found for ID ${req.body.another_thing}`
-				};
-				return res.status(200).json(reply);
-			}
+			const judge = await ( () => {
+				try {
+					return db.judge.findByPk(req.body.another_thing);
+				} catch(err) {
+					return res.status(201).json({
+						error   : true,
+						message : `No judge found for ID ${req.body.another_thing}`
+					});
+				}
+			})();
 
-			if (req.body.property_value > 0) {
+			if (req.body.property_name > 0) {
+
+				const eraseStart = `update ballot set started_by = NULL,
+					judge_started = NULL
+					where judge = :judgeId
+					and panel = :panelId `;
 
 				await db.sequelize.query(eraseStart, {
 					replacements: { judgeId: judge.id, panelId: panel.id }
@@ -174,29 +205,37 @@ export const attendance = {
 						},
 					],
 					reprop: [
-						{   id          : `${panel.id}_${target.id}_start`,
+						{   id          : `start_${panel.id}_${target.id}`,
 							property	: "property_name",
-							value 		: 0
+							value 		: false
 						},{
-							id          : `${panel.id}_${target.id}_start`,
+							id          : `start_${panel.id}_${target.id}`,
 							property	: "title",
-							value 		: ""
+							value 		: "Not started"
 						},
 					],
 					message : "Judge marked as not started"
 				};
 
-				return res.status(200).json(response);
+				return res.status(201).json(response);
 
 			} else {
 
-				await db.ballot.update({
-					started_by: req.session.person,
-					judge_started : now.toJSON()
-				},{ where : {
-					panel : panel.id,
-					judge : judge.id
-				}});
+
+				try {
+					await db.ballot.update({
+						started_by: req.session.person,
+						judge_started : now
+					},{ where : {
+						panel : panel.id,
+						judge : judge.id
+					}});
+				} catch(err) {
+					return res.status(201).json({
+						error   : true,
+						message : `Bad parameters sent ${err}`
+					});
+				}
 
 				let response = {
 					error : false,
@@ -211,30 +250,31 @@ export const attendance = {
 						},
 					],
 					reprop: [
-						{   id          : `${panel.id}_${target.id}_start`,
+						{   id          : `start_${panel.id}_${target.id}`,
 							property	: "property_name",
 							value 		: 1
 						},{
-							id          : `${panel.id}_${target.id}_start`,
+							id          : `start_${panel.id}_${target.id}`,
 							property	: "title",
-							value 		: "Judge marked as started by "+req.session.name
+							value 		: "Judge marked as started by "+req.session.name,
 						},
 					],
-					message : "Judge marked as started by "+req.session.name
+					message : "Judge marked as started by "+req.session.name,
 				};
 
-				return res.status(200).json(response);
+				return res.status(201).json(response);
 			}
 
-		} else if (req.body.property_value == 1) {
+		} else if (req.body.property_name == 1) {
 
-			const message = `${target.first} ${target.last} marked as absent by ${req.session.name}`;
+			// The property already being 1 means that they're currently present,
+			// so mark them as absent.
 
-			let target = {};
+			const logMessage = `${target.first} ${target.last} marked as absent by ${req.session.email}`;
 
 			let log = {
 				tag         : "absent",
-				description : message,
+				description : logMessage,
 				person      : req.body.target_id,
 				tourn       : req.params.tourn_id,
 				panel       : panel.id
@@ -246,11 +286,21 @@ export const attendance = {
 				log.judge = req.body.another_thing;
 			}
 
-			await db.campusLog.create(log);
+			try {
+				await db.campusLog.create(log);
+			} catch(err) {
+				return res.status(201).json({
+					error   : true,
+					message : `Bad parameters sent ${err}`
+				});
+			}
 
-			return res.status(200).json({
+			// Oh for the days I have react going and don't need to do the
+			// following nonsense
+
+			return res.status(201).json({
 				error   : false,
-				message : message,
+				message : logMessage,
 				reclass : [
 					{	id          : `${panel.id}_${req.body.target_id}`,
 						removeClass : "greentext",
@@ -264,13 +314,61 @@ export const attendance = {
 				reprop  : [
 					{	id       : `container_${panel.id}_${req.body.target_id}`,
 						property : "property_name",
-						value    : 0
+						value    : false
 					}
 				]
 			});
 
 		} else {
 
+			// In this case they're currently marked absent, so we mark them
+			// present
+
+			const logMessage = `${target.first} ${target.last} marked as present by ${req.session.email}`;
+
+			let log = {
+				tag         : "present",
+				description : logMessage,
+				person      : req.body.target_id,
+				tourn       : req.params.tourn_id,
+				panel       : panel.id
+			};
+
+			if (req.body.setting_name == "entry") {
+				log.entry = req.body.another_thing;
+			} else if (req.body.setting_name == "judge") {
+				log.judge = req.body.another_thing;
+			}
+
+			try {
+				await db.campusLog.create(log);
+			} catch(err) {
+				return res.status(201).json({
+					error   : true,
+					message : `Bad parameters sent ${err}`
+				});
+			}
+
+			return res.status(201).json({
+				error   : false,
+				message : logMessage,
+				reclass : [
+					{	id          : `${panel.id}_${req.body.target_id}`,
+						addClass    : "greentext",
+						removeClass : "brightredtext"
+					},
+					{	id          : `${panel.id}_${req.body.target_id}`,
+						addClass    : "fa-check",
+						removeClass : "fa-circle"
+					}
+				],
+				reprop  : [
+					{	id       : `container_${panel.id}_${req.body.target_id}`,
+						property : "property_name",
+						value    : 1
+					}
+				]
+			});
 		}
 
 	}
