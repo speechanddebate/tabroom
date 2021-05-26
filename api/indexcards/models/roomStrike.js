@@ -2,7 +2,6 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('roomStrike', {
-		table_name: 'room_strike',
 		type: {
 			type: DataTypes.STRING(15),
 			allowNull: false,
@@ -16,6 +15,8 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		}
+	},{
+		tableName: 'room_strike',
 	});
 };
 
