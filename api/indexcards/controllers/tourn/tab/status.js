@@ -89,7 +89,6 @@ export const attendance = {
 		let status = {};
 
 		for (let attend of attendanceResults) {
-
 			status[attend.person] = {
 				[attend.panel] : {
 					tag         : attend.tag,
