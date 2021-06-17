@@ -149,8 +149,8 @@
 
 	my $ballot_sth = $dbh->prepare('
 		select distinct
-			entry.id,
-			opponent.id, opponent.school,
+			entry.id, entry.code,
+			opponent.id, opponent.code, opponent.school,
 			round.name, round.type,
 			ballot.bye, panel.bye, ballot.side
 
@@ -171,27 +171,30 @@
 			and panel.round = round.id
 			and round.name < ?
 
-			'.$limit.'
-
-			and not exists (
-				select rs.id
-				from round_setting rs
-				where rs.tag = "ignore_results"
-				and rs.round = round.id
-			)
+		and not exists (
+			select rs.id
+			from round_setting rs
+			where rs.tag = "ignore_results"
+			and rs.round = round.id
+		)
 	');
 
 	$ballot_sth->execute($event->id, $round->name);
 
+	my @ids;
+
 	while(
 		my (
-			$entry_id, $opp_id, $opp_school,
+			$entry_id, $entry_code,
+			$opp_id, $opp_code, $opp_school,
 			$round_name, $round_type,
 			$ballot_bye, $panel_bye,
 			$ballot_side
 		)
 		= $ballot_sth->fetchrow_array()
 	) {
+
+		push @ids, $entry_id;
 
 		if ($panel_bye) {
 			$entries{$entry_id}{"byes"}++;
@@ -203,14 +206,15 @@
 
 		$entries{$entry_id}{$round_name}{"opp"} = $opp_id;
 		$entries{$entry_id}{$round_name}{"side"} = $ballot_side;
+
 		push @{$entries{$entry_id}{"opponents"}}, $opp_id;
 
 		if ($tourn_settings->{nsda_nats} && $round->type eq "elim") {
 			next if $round_type eq "prelim";
 		}
 
+		push @{$entries{$entry_id}{"elim_opponents"}}, $opp_id;
 		$entries{$entry_id}{"side_count"}{$ballot_side}++;
-
 	}
 
 	our $round_log;
@@ -470,7 +474,7 @@
 
 					my $undefeated_loss;
 
-					foreach my $opponent (@{$entries{$entry_id}{"opponents"}}) {
+					foreach my $opponent (@{$entries{$entry_id}{"elim_opponents"}}) {
 						$undefeated_loss++ unless $entry_losses{$opponent} > 0;
 						last if $undefeated_loss;
 					}
@@ -601,9 +605,7 @@
 
 				my @opponents =
 					sort {
-						$entries{"scores"}{$entry}{$a}
-							<=>
-						$entries{"scores"}{$entry}{$b}
+						$entries{"scores"}{$entry}{$a} <=> $entries{"scores"}{$entry}{$b}
 					} keys (%{$entries{"unpaired"}});
 
 				my $aff_opponent;
@@ -741,9 +743,9 @@
 					$entry_baseline = $entries{"scores"}{$entry_opponent}{$entry}
 						if $entry_side == 2;
 
-					# Do this because the 0 loss bracket can pull up different debaters
-					# to solve conflicts; but the 1 loss bracket cannot solve conflicts
-					# from the 0 loss bracket.
+					# Do this because the 0 loss bracket can pull up different
+					# debaters to solve conflicts; but the 1 loss bracket
+					# cannot solve conflicts from the 0 loss bracket.
 
 					my $swap_candidate;
 					my $current_diff;
@@ -753,113 +755,154 @@
 					foreach my $other (shuffle (@{$entries{"brackets"}{$entry_bracket}}) ) {
 
 						next if $other == $entry;
-						next if $other == $entry_opponent;
 
-						my $other_opponent = $panels{$other}{"opponent"};
-						next if $other_opponent eq "BYE";
-						next if $entries{$other_opponent}{"losses"} < $bracket;
+						if ($other == $entry_opponent) {
 
-						# This is the point of comparison for any swapping
+							my $swap;
+							my $baseline;
 
-						# How does the candidate score if they go into my spot?
+							if ($entry_side == 1) {
+								$swap = $entries{"scores"}{$entry_opponent}{$entry};
+								$baseline = $entries{"scores"}{$entry}{$entry_opponent};
+							} elsif ($entry_side == 2) {
+								$swap = $entries{"scores"}{$entry}{$entry_opponent};
+								$baseline = $entries{"scores"}{$entry_opponent}{$entry};
+							}
 
-						my $other_swap;
+							my $swap_diff = $baseline - $swap;
 
-						$other_swap = $entries{"scores"}{$other}{$entry_opponent}
-							if $entry_side == 1;
+							# If the swapped scores are equal better than the
+							# current baseline, nominate the entry for a swap.
 
-						$other_swap = $entries{"scores"}{$entry_opponent}{$other}
-							if $entry_side == 2;
+							# The swapping if the scores are equal is order to
+							# set up some random rematching for future swap
+							# attempts
 
-						my $entry_swap;
-						my $other_baseline;
+							if ($swap_diff > $current_diff) {
+								$swap_candidate = $other;
+								$current_diff = $swap_diff;
+								$swap_counter++;
+							}
 
-						# If the swapee already has an opponent, test the converse too
+						} else {
 
-						if ($other_opponent) {
+							my $other_opponent = $panels{$other}{"opponent"};
+							next if $other_opponent eq "BYE";
+							next if $entries{$other_opponent}{"losses"} < $bracket;
 
-							my $other_side = $panels{$other}{"side"};
+							# This is the point of comparison for any swapping
 
-							$other_baseline = $entries{"scores"}{$other}{$other_opponent}
-								if $other_side == 1;
+							# How does the candidate score if they go into my spot?
 
-							$other_baseline = $entries{"scores"}{$other_opponent}{$other}
-								if $other_side == 2;
+							my $other_swap;
 
-							$entry_swap = $entries{"scores"}{$entry}{$other_opponent}
-								if $entry_side == 1;
+							if ($entry_side == 1) {
+								$other_swap = $entries{"scores"}{$other}{$entry_opponent};
+							} elsif ($entry_side == 2) {
+								$other_swap = $entries{"scores"}{$entry_opponent}{$other};
+							}
 
-							$entry_swap = $entries{"scores"}{$other_opponent}{$entry}
-								if $entry_side == 2;
+							my $entry_swap;
+							my $other_baseline;
 
+							# If the swapee already has an opponent, test the converse too
+
+							if ($other_opponent) {
+
+								my $other_side = $panels{$other}{"side"};
+
+								if ($other_side == 1) {
+									$other_baseline = $entries{"scores"}{$other}{$other_opponent};
+								} elsif ($other_side == 2) {
+									$other_baseline = $entries{"scores"}{$other_opponent}{$other};
+								}
+
+								if ($entry_side == 1) {
+									$entry_swap = $entries{"scores"}{$entry}{$other_opponent};
+								} elsif ($entry_side == 2) {
+									$entry_swap = $entries{"scores"}{$other_opponent}{$entry};
+								}
+
+							}
+
+							my $swap_total = $entry_swap + $other_swap;
+							my $baseline_total = $entry_baseline + $other_baseline;
+							my $swap_diff = $baseline_total - $swap_total;
+
+							# Only track swaps that improve scores because
+							# there's no reason to keep going if we're only
+							# doing zero-score swaps.
+
+							if ($swap_diff > $current_diff) {
+								$swap_counter++;
+							}
+
+							# If the swapped scores are equal better than the
+							# current baseline, nominate the entry for a swap.
+
+							# The swapping if the scores are equal is order to
+							# set up some random rematching for future swap
+							# attempts
+
+							if ($swap_diff >= $current_diff) {
+								$swap_candidate = $other;
+								$current_diff = $swap_diff;
+							}
 						}
-
-						my $swap_total = $entry_swap + $other_swap;
-						my $baseline_total = $entry_baseline + $other_baseline;
-
-						my $swap_diff = $baseline_total - $swap_total;
-
-						# Only track swaps that improve scores because
-						# there's no reason to keep going if we're only doing
-						# zero-score swaps.
-
-						if ($swap_diff > $current_diff) {
-							$swap_counter++;
-						}
-
-						# If the swapped scores are equal better than the current
-						# baseline, nominate the entry for a swap.
-
-						# The swapping if the scores are equal is order to set up
-						# some random rematching for future swap attempts
-
-						if ($swap_diff >= $current_diff) {
-
-							$swap_candidate = $other;
-							$current_diff = $swap_diff;
-						}
-
 					}
 
-					# An entry was found which improves the overall score, so swap
-					# them.
+					# An entry was found which improves the overall score, so
+					# swap them.
 
 					if ($swap_candidate) {
 
 						my $swap_opponent = $panels{$swap_candidate}{"opponent"};
-						my $swap_side = $panels{$swap_candidate}{"side"};
-						my $swap_bracket = $panels{$swap_candidate}{"bracket"};
-						my $entry_bracket = $panels{$entry}{"bracket"};
 
-						if ($swap_opponent) {
+						if ($swap_opponent == $entry) {
 
-							$panels{$entry}{"opponent"} = $swap_opponent;
-							$panels{$entry}{"bracket"} = $swap_bracket;
-							$panels{$entry}{"side"} = $swap_side;
-							$panels{$swap_opponent}{"opponent"}  = $entry;
-
-						} else {
-
-							undef $panels{$entry}{"opponent"};
-							undef $panels{$entry}{"bracket"};
-							undef $panels{$entry}{"side"};
-						}
-
-						if ($entry_opponent) {
-
-							$panels{$swap_candidate}{"opponent"} = $entry_opponent;
-							$panels{$swap_candidate}{"bracket"} = $entry_bracket;
 							$panels{$swap_candidate}{"side"} = $entry_side;
-							$panels{$entry_opponent}{"opponent"}  = $swap_candidate;
+
+							if ($entry_side == 1) {
+								$panels{$entry}{"side"} = 2;
+							} else {
+								$panels{$entry}{"side"} = 1;
+							}
 
 						} else {
 
-							undef $panels{$swap_candidate}{"opponent"};
-							undef $panels{$swap_candidate}{"bracket"};
-							undef $panels{$swap_candidate}{"side"};
+							my $swap_side     = $panels{$swap_candidate}{"side"};
+							my $swap_bracket  = $panels{$swap_candidate}{"bracket"};
+							my $entry_bracket = $panels{$entry}{"bracket"};
 
+							if ($swap_opponent) {
+
+								$panels{$entry}{"opponent"} = $swap_opponent;
+								$panels{$entry}{"bracket"} = $swap_bracket;
+								$panels{$entry}{"side"} = $swap_side;
+								$panels{$swap_opponent}{"opponent"}  = $entry;
+
+							} else {
+
+								undef $panels{$entry}{"opponent"};
+								undef $panels{$entry}{"bracket"};
+								undef $panels{$entry}{"side"};
+							}
+
+							if ($entry_opponent) {
+
+								$panels{$swap_candidate}{"opponent"} = $entry_opponent;
+								$panels{$swap_candidate}{"bracket"} = $entry_bracket;
+								$panels{$swap_candidate}{"side"} = $entry_side;
+								$panels{$entry_opponent}{"opponent"}  = $swap_candidate;
+
+							} else {
+
+								undef $panels{$swap_candidate}{"opponent"};
+								undef $panels{$swap_candidate}{"bracket"};
+								undef $panels{$swap_candidate}{"side"};
+
+							}
 						}
-
 					}
 				}
 
@@ -1002,9 +1045,7 @@
 			$score += $entries_ref->{"scores"}{"state"};
 		}
 
-		$score +=
-			$entries_ref->{"scores"}{"repeat"}
-			* $entries_ref->{$aff}{"hits"}{$neg};
+		$score += $entries_ref->{"scores"}{"repeat"} * $entries_ref->{$aff}{"hits"}{$neg};
 
 		my $aff_side_diff =
 			$entries_ref->{$aff}{"side_count"}{1}
