@@ -25,7 +25,8 @@
 
 	my %schools = $m->comp(
 		"/tabbing/results/sweep_schools.mas",
-		sweep_set => $master_set
+		sweep_set   => $master_set,
+		all_entries => 1
 	);
 
 	my $cumulatives = $master_set->rules(tag => "cumulative")->first;
@@ -50,8 +51,29 @@
 
 	if ($tourn_settings->{nsda_nats}) {
 
+		my $round_sth = $dbh->prepare("
+			select event.id, round.name, round.type, round.label
+			from event, round
+			where event.tourn = ?
+				and event.id = round.event
+		");
+
+		$round_sth->execute($tourn->id);
+
+		my %round_type;
+
+		while (
+			my (
+				$event_id, $round_name, $round_type, $round_label
+			) = $round_sth->fetchrow_array()
+		) {
+			$round_type{$event_id}{$round_name}{"type"} = $round_type;
+			$round_type{$event_id}{$round_name}{"label"} = $round_label;
+		}
+
+
 		my $sth = $dbh->prepare("
-			select entry.id, max(round.name)
+			select entry.id, entry.event, max(round.name)
 			from entry, ballot, panel, round, event
 			where event.tourn = ?
 				and event.id = round.event
@@ -60,14 +82,17 @@
 				and ballot.entry = entry.id
 				and entry.active = 1
 			group by entry.id
+			order by round.name desc
 		");
 
 		$sth->execute($tourn->id);
 
 		while (
-			my ($entry_id, $round_name) = $sth->fetchrow_array()
+			my ($entry_id, $event_id, $round_name) = $sth->fetchrow_array()
 		) {
-			$last_round{$entry_id} = $round_name;
+			$last_round{$entry_id}{'name'} = $round_name;
+			$last_round{$entry_id}{'type'} = $round_type{$event_id}{$round_name}{"type"};
+			$last_round{$entry_id}{'label'} = $round_type{$event_id}{$round_name}{"label"};
 		}
 
 		$sth->finish();
@@ -134,43 +159,60 @@
 
 	<div class="main">
 
-		<div>
-
-			<span class="threefifths nospace">
+		<div class="top">
+			<span class="half nospace">
 				<h5><% $master_set->name %> by Institution</h5>
 			</span>
 
-			<span class="twosevenths nospace centeralign">
+			<span class="quarter centeralign padtop martopless">
 				<form
 					action = "sweep_schools.mhtml"
 					method = "post"
 				>
+					<input
+						type  = "hidden"
+						name  = "what"
+						value = "<% $what %>"
+					>
 
-				<input
-					type  = "hidden"
-					name  = "what"
-					value = "<% $what %>"
-				>
-
-				<select
-					name     = "sweep_set_id"
-					class    = "fixedmedbig"
-					onchange = 'this.form.submit();'
-				>
-%					foreach my $set (sort {$a->name cmp $b->name} $tourn->sweep_sets) {
-						<option
-							<% $set->id eq $sweep_set_id ? 'selected="selected"' : "" %>
-							value="<% $set->id %>"
-						> <% $set->name %> </option>
-%					}
-				</select>
+					<select
+						name     = "sweep_set_id"
+						class    = "fixedmost"
+						onchange = 'this.form.submit();'
+					>
+%						foreach my $set (sort {$a->name cmp $b->name} $tourn->sweep_sets) {
+							<option
+								<% $set->id eq $sweep_set_id ? 'selected="selected"' : "" %>
+								value="<% $set->id %>"
+							> <% $set->name %> </option>
+%						}
+					</select>
 				</form>
 			</span>
 
 			<span
-				id="sweeps_table_buttonarea"
-				class="eighth nospace rightalign"
+				id    = "sweeps_table_buttonarea"
+				class = "quarter nospace rightalign"
 			>
+
+				<script>
+					function toggleAudit() {
+						$(".audit").toggleClass('hidden');
+						$("#auditButton").toggleClass('fa-eye-slash');
+						$("#auditButton").toggleClass('invert');
+						$("table").trigger("applyWidgets");
+					}
+				</script>
+
+%				if ($what eq "Audit") {
+					<a
+						id      = "auditButton"
+						class   = "buttonwhite orangetext fa fa-sm fa-eye"
+						onClick = "toggleAudit();"
+						title   = "Show/Hide Audit"
+					></a>
+%				}
+
 				<a
 					class="buttonwhite bluetext fa fa-sm fa-file-pdf-o"
 					href="sweep_schools_print.mhtml?sweep_set_id=<% $master_set->id %>"
@@ -180,6 +222,17 @@
 			<div class="full centeralign padless marno explain">
 				Hover over a school to see breakdown
 			</div>
+
+%			if ($what eq "Audit" && $tourn_settings->{"nsda_nats"}) {
+				<div class="full centeralign padless marno explain">
+					Remember for Nationals the "National Places" report under
+					Results &ndash;&gt; Web Publish must exist for this report
+					to be correct.
+
+					<br />  It does not need to be final; as long as it
+					reflects the top 6 in IE/Debate.
+				</div>
+%			}
 		</div>
 
 		<& "/funclib/tablesorter.mas", table => "sweeps_table" &>
@@ -267,11 +320,19 @@
 				foreach my $school_id (keys %schools) {
 					next unless $schools{$school_id}{"points"};
 					next unless $schools{$school_id}{"counted_entry_count"};
-					$schools{$school_id}{"average"} = sprintf("%.2f", ($schools{$school_id}{"points"} / $schools{$school_id}{"counted_entry_count"}));
+
+					$schools{$school_id}{"average"}
+						= sprintf("%.2f", ($schools{$school_id}{"points"} / $schools{$school_id}{"counted_entry_count"}));
+
+				 	if ($cumulatives) {
+						$schools{$school_id}{"cumulative"}
+							= sprintf("%.2f", ($schools{$school_id}{"points"} + $cumulative_points{$school_id}));
+					}
 				}
 
 				foreach my $school_id ( sort {
-					$schools{$b}{"points"} <=> $schools{$a}{"points"}
+					$schools{$b}{"cumulative"} <=> $schools{$a}{"cumulative"}
+					|| $schools{$b}{"points"} <=> $schools{$a}{"points"}
 					|| $schools{$b}{"average"} <=> $schools{$a}{"average"}
 				 	} keys %schools
 				) {
@@ -331,7 +392,11 @@
 							</td>
 
 							<td class="smallish">
-								<% $schools{$school_id}{"name"} %>
+								<a
+									href   = "/register/school/entries.mhtml?school_id=<% $school_id %>"
+									class  = "plain full"
+									target = "_blank"
+								><% $schools{$school_id}{"name"} %></a>
 							</td>
 
 							<td class="smallish" title="<% $schools{$school_id}{"regionname"} %>">
@@ -361,8 +426,9 @@
 								</td>
 %							}
 
-							<td class="smallish rightalign">
+							<td class="rightalign semibold bluetext">
 								<% $schools{$school_id}{"points"} %>
+								<span class="halfspacer"></span>
 							</td>
 
 %					 		if ($cumulatives) {
@@ -371,18 +437,25 @@
 									<% $cumulative_points{$school_id} %>
 								</td>
 
-								<td class="smallish rightalign">
+								<td class="rightalign semibold bluetext">
 									<% ($schools{$school_id}{"points"} + $cumulative_points{$school_id}) %>
+									<span class="halfspacer"></span>
 								</td>
 %							}
 
 						</tr>
+<%perl>
 
-%						if ($what eq "Audit") {
+						if ($what eq "Audit") {
 
-%							foreach my $entry_id (sort keys %{$schools{$school_id}{"entries"}}) {
-
-								<tr>
+							foreach my $entry_id (
+								sort {
+									$schools{$school_id}{"entries"}{$b}{"points"}
+									<=> $schools{$school_id}{"entries"}{$a}{"points"}
+								} keys %{$schools{$school_id}{"entries"}}
+							) {
+</%perl>
+								<tr class="audit">
 									<td>
 										<span class="hidden"><% $place %></span>
 									</td>
@@ -395,7 +468,11 @@
 									</td>
 
 									<td class="smallish">
-										<% $schools{$school_id}{"entries"}{$entry_id}{"code"} %>
+										<a
+											href   = "/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
+											class  = "plain full"
+											target = "_blank"
+										><% $schools{$school_id}{"entries"}{$entry_id}{"code"} %></a>
 									</td>
 
 									<td class="smallish">
@@ -403,19 +480,48 @@
 									</td>
 
 									<td class="smallish">
-										Rd <% $last_round{$entry_id} %>
+										Rd <% $last_round{$entry_id}{"name"} %>
 									</td>
 
 									<td class="smallish">
-										Pts
+										<%
+											$last_round{$entry_id}{"label"}
+											? ucfirst($last_round{$entry_id}{"label"})
+											: ucfirst($last_round{$entry_id}{"type"})
+										%>
 									</td>
-									<td class="smallish">
+
+
+									<td class="smallish rightalign
+										<%
+											$schools{$school_id}{"entries"}{$entry_id}{"points"}  > 0
+											? "semibold bluetext"
+											: "graytext"
+										%>
+									">
 										<% $schools{$school_id}{"entries"}{$entry_id}{"points"} %>
+										<span class="halfspacer"></span>
 									</td>
+
+%									if ($cumulatives) {
+
+										<td class="smallish rightalign">
+											<span class="hidden">
+												<% $cumulative_points{$school_id} %>
+											</span>
+										</td>
+
+										<td class="rightalign semibold bluetext">
+											<span class="hidden">
+											<% ($schools{$school_id}{"points"} + $cumulative_points{$school_id}) %>
+											</span>
+										</td>
+%									}
+
 								</tr>
 %							}
 
-							<tr>
+							<tr class="audit">
 								<td colspan="10">
 									<span class="hiddencsv">-</span>
 								</td>

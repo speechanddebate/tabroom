@@ -1,9 +1,11 @@
 <%args>
-
+	$tourn
 </%args>
 <%init>
 
-	my ($jsonref, $raw) = $m->comp("api_client.mas", path => "/reports/nats-appearances");
+	my ($jsonref, $raw) = $m->comp("api_client.mas",
+		path => "/reports/nats-appearances"
+	);
 
 	my $dbh = Tab::DBI->db_Main();
 
@@ -46,7 +48,53 @@
 		$insert_sth->finish();
 	}
 
-	($jsonref, $raw) = $m->comp("api_client.mas", path => "/reports/member-nats-appearances");
+    my $year = $tourn->start->year;
+
+    my $start_year = $year - 4;
+    my $start_date = $start_year."-05-01 00:00:00";
+
+    my $end_date = $tourn->end;
+    $end_date->add(months => 1);
+
+    my $sth = $dbh->prepare("
+        select
+            student.id, student.first, student.last, student.nsda,
+            chapter.id, chapter.nsda, chapter.name, chapter.state,
+            count(distinct tourn.id),
+            GROUP_CONCAT( CONCAT(tourn.start, ': ', event.abbr) SEPARATOR '\t')
+
+        from (student, entry_student, entry, event, tourn, chapter, tourn_setting nsda_nats)
+
+        where tourn.start > ?
+            and tourn.end < ?
+            and tourn.id = nsda_nats.tourn
+            and nsda_nats.tag = 'nsda_nats'
+            and tourn.id = event.tourn
+            and event.id = entry.event
+            and entry.id = entry_student.entry
+            and entry_student.student = student.id
+            and entry.unconfirmed = 0
+            and student.chapter = chapter.id
+
+            and not exists (
+                select event_setting.id
+                from event_setting
+                where event_setting.event = event.id
+                and event_setting.tag = 'supp'
+            )
+            and not exists (
+                select event_setting.id
+                from event_setting
+                where event_setting.event = event.id
+                and event_setting.tag = 'conn'
+            )
+
+        group by student.id
+        order by student.last, tourn.start
+    ");
+
+
+    $sth->execute($start_date, DateTime::Format::MySQL->format_datetime($end_date));
 
 	$exists_sth = $dbh->prepare("
 		select student.id, ss.id
@@ -65,22 +113,40 @@
 		insert into student_setting (value, student, tag) values (?, ?, 'nats_appearances');
 	");
 
-	undef $counter;
+	my %counter;
+	my %ids;
 
-	foreach my $student_ref (@{$jsonref->{data}}) {
+	while (
+		my (
+			$student_id, $student_first, $student_last, $student_nsda,
+			$chapter_id, $chapter_nsda, $chapter_name, $chapter_state,
+			$count,
+			$events
+		) = $sth->fetchrow_array()
+	) {
+		$counter{$student_nsda} += $count;
+		$ids{$student_nsda}{$student_id}++;
+	}
 
-		next unless $student_ref->{"appearances_main"} > 0;
+	foreach my $student_nsda (keys %counter) {
 
-		$exists_sth->execute($student_ref->{"person_id"});
+		my $count = $counter{$student_nsda};
+
+		$exists_sth->execute($student_nsda);
+
+		if ($student_nsda == 10581377) {
+			Tab::debuglog("Student $student_nsda count $count");
+		}
 
 		while (
 			my ($student_id, $setting_id) = $exists_sth->fetchrow_array()
 		) {
 
+
 			if ($setting_id) {
-				$update_sth->execute($student_ref->{"appearances_main"}, $setting_id);
+				$update_sth->execute($count, $setting_id);
 			} elsif ($student_id) {
-				$insert_sth->execute($student_ref->{"appearances_main"}, $student_id);
+				$insert_sth->execute($count, $student_id);
 			}
 		}
 

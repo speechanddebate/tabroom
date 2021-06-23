@@ -28,12 +28,16 @@
 
 	my $event_abbr;
 	my $round_name;
+	my $round_flighted;
 	my $room_name;
+	my $flight_name;
 
 	my $entries_sth = $dbh->prepare("
 		select
+			person.last,
 			person.id, person.email, person.phone, person.provider,
-			round.name, round.label, event.abbr, panel.letter, room.name
+			round.name, round.label, round.flighted,
+			event.abbr, panel.letter, room.name
 
 		from (ballot, entry, entry_student es, student, person, round, event, panel)
 
@@ -49,6 +53,12 @@
 			and entry.event = event.id
 			and panel.id = ballot.panel
 			and round.id = panel.round
+			and not exists (
+				select dont_poke_entries.id
+				from event_setting dont_poke_entries
+					where dont_poke_entries.event = event.id
+				and dont_poke_entries.tag = 'dont_poke_entries'
+			)
 		group by person.id
 	");
 
@@ -58,14 +68,20 @@
 
 	while (
 		my (
+			$last,
 			$id, $email, $phone, $provider,
-			$round_num, $round_label, $event,
+			$round_num, $round_label, $flighted,
+			$event,
 			$letter, $room
 		) = $entries_sth->fetchrow_array()
 	) {
 
 		if ($event) {
 			$event_abbr = $event;
+		}
+
+		if ($flighted > 1) {
+			$round_flighted++;
 		}
 
 		if ($round_label) {
@@ -84,6 +100,10 @@
 			$addresses{$id}{"email"} = $email;
 		}
 
+		if ($last) {
+			$addresses{$id}{"last"} = $last;
+		}
+
 		if ($phone && $provider) {
 			$phone =~ s/[\D_]//g;
 			$addresses{$id}{"sms"} = $phone.'@'.$provider;
@@ -92,6 +112,7 @@
 
 	my $judges_sth = $dbh->prepare("
 		select
+			person.last,
 			person.id, person.email, person.phone, person.provider
 
 		from (ballot, judge, person)
@@ -107,6 +128,7 @@
 
 	while (
 		my (
+			$last,
 			$id, $email, $phone, $provider
 		) = $judges_sth->fetchrow_array()
 	) {
@@ -117,6 +139,10 @@
 		if ($phone && $provider) {
 			$phone =~ s/[\D_]//g;
 			$addresses{$id}{"sms"} = $phone.'@'.$provider;
+		}
+
+		if ($last) {
+			$addresses{$id}{"last"} = $last;
 		}
 	}
 
@@ -129,11 +155,27 @@
 		from panel, campus_log cl, tourn, person, round
 
 		where panel.id = ?
+
 			and panel.round = round.id
 			and panel.id = cl.panel
 			and cl.tourn = tourn.id
 			and cl.person = person.id
 
+			and ( exists (
+					select ballot.id
+						from ballot, judge
+					where judge.id = ballot.judge
+						and judge.person = person.id
+						and ballot.panel = panel.id
+				) or exists (
+					select ballot.id
+						from ballot, entry_student es, student
+					where ballot.panel = panel.id
+						and ballot.entry = es.entry
+						and es.student = student.id
+						and student.person = person.id
+				)
+			)
 		order by cl.timestamp
 	");
 
@@ -165,6 +207,8 @@
 	my %response;
 	my @reclass;
 
+	my $went_to;
+
 	foreach my $id (keys %addresses) {
 
 		$counter++;
@@ -180,9 +224,18 @@
 		$limit{"id"} = "blast_".$target_id;
 		$limit{"addClass"} = "hidden";
 		push @reclass, \%limit;
+
+		$went_to .= ", " if $went_to;
+		$went_to .= $addresses{$id}{"last"};
 	}
 
-	my $message = "You are marked as not present in $round_name of $event_abbr in $room_name.  Please go to $room_name quickly so the tournament may continue.";
+	my $message = "You are currently marked as not present in $round_name of $event_abbr in $room_name.";
+
+	if ($round_flighted) {
+		$message .= " (Flight ".$panel->flight.") ";
+	}
+
+	$message .= " Please go to $room_name now so the round may proceed.";
 
 	$m->comp(
 		"/funclib/send_notify.mas",
@@ -195,7 +248,7 @@
 	$log_sth->finish;
 
 	$response{"error"} = JSON::false;
-	$response{"message"} = $counter." missing people blasted in ".$room_name;
+	$response{"message"} = $counter." missing people blasted in ".$room_name.": $went_to";
 	$response{"reclass"} = \@reclass;
 
 	$m->print(JSON::encode_json(\%response));

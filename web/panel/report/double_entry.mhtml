@@ -1,0 +1,394 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$timeslot_id => undef
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my %doubles;
+	my $timeslot;
+	my $timeslot_start;
+	my $timeslot_end;
+
+	if ($timeslot_id) {
+
+		$timeslot = Tab::Timeslot->retrieve($timeslot_id);
+
+		my $sth = $dbh->prepare("
+
+			select
+				entry.id, entry.code, entry.name, event.abbr,
+				student.id, student.first, student.last,
+				panel.letter, round.name, round.label, round.type,
+				other_entry.id, other_entry.code, other_entry.name, other_event.abbr,
+				other_round.id, other_round.name, other_round.label, other_round.start_time,
+				other_round.type,
+				other_panel.letter,
+				CONVERT_TZ(other_timeslot.start, '+00:00', tourn.tz),
+				CONVERT_TZ(other_timeslot.end, '+00:00', tourn.tz)
+
+			from (
+				student,
+				round, panel, ballot, entry, event, entry_student es,
+				tourn,
+				entry_student other_es,
+				entry other_entry,
+				ballot other_ballot,
+				panel other_panel,
+				round other_round,
+				event other_event,
+				timeslot other_timeslot
+			)
+
+			where round.timeslot = ?
+				and round.id     = panel.round
+				and panel.id     = ballot.panel
+				and ballot.entry = entry.id
+				and entry.event  = event.id
+				and entry.id     = es.entry
+				and es.student   = student.id
+
+				and other_entry.id != entry.id
+
+				and student.id         = other_es.student
+				and other_es.entry     = other_entry.id
+				and other_event.id     = other_entry.event
+				and other_event.tourn  = event.tourn
+				and event.tourn        = tourn.id
+				and other_entry.id     = other_ballot.entry
+				and other_ballot.panel = other_panel.id
+				and other_panel.round  = other_round.id
+				and other_timeslot.id = other_round.timeslot
+
+			order by other_timeslot.start
+		");
+
+		$sth->execute($timeslot->id);
+		my %ts_cache;
+
+		$timeslot_start = $timeslot->start;
+		$timeslot_start->set_time_zone("UTC");
+		$timeslot_start->set_time_zone($tourn->tz);
+
+		$timeslot_end = $timeslot->end;
+		$timeslot_end->set_time_zone("UTC");
+		$timeslot_end->set_time_zone($tourn->tz);
+
+		while (
+			my (
+				$entry_id, $entry_code, $entry_name, $event_abbr,
+				$student_id, $student_first, $student_last,
+				$panel_letter, $round_name, $round_label, $round_type,
+				$oentry_id, $oentry_code, $oentry_name, $oevent_abbr,
+				$oround_id, $oround_name, $oround_label, $oround_start_time, $oround_type,
+				$opanel_letter,
+				$ots_start, $ots_end
+			) = $sth->fetchrow_array()
+		) {
+
+			$doubles{$student_id}{"first"} = $student_first;
+			$doubles{$student_id}{"last"}  = $student_last;
+
+			$doubles{$student_id}{"entries"}{$entry_id}{'code'}        = $entry_code;
+			$doubles{$student_id}{"entries"}{$entry_id}{'name'}        = $entry_name;
+			$doubles{$student_id}{"entries"}{$entry_id}{'event'}       = $event_abbr;
+
+			if ($round_type eq "final") {
+				undef $doubles{$student_id}{"entries"}{$entry_id}{'section'};
+			} else {
+				$doubles{$student_id}{"entries"}{$entry_id}{'section'} = $panel_letter;
+			}
+
+			$doubles{$student_id}{"entries"}{$entry_id}{'round'}       = $round_name;
+			$doubles{$student_id}{"entries"}{$entry_id}{'round_label'} = $round_label;
+
+			$doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"code"}  = $oentry_code;
+			$doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"name"}  = $oentry_name;
+			$doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"event"} = $oevent_abbr;
+
+			unless ($ts_cache{$ots_start}) {
+				$ts_cache{$ots_start} = eval {
+					return DateTime::Format::MySQL->parse_datetime($ots_start);
+				};
+			}
+
+			unless ($ts_cache{$ots_end}) {
+				$ts_cache{$ots_end} = eval {
+					return DateTime::Format::MySQL->parse_datetime($ots_end);
+				};
+			}
+
+			if (
+				$ts_cache{$ots_start} < $timeslot_end
+				&& $ts_cache{$ots_end} > $timeslot_start
+			) {
+
+				$doubles{$student_id}{"entries"}{$entry_id}{"during"}{$oround_id}{"name"}  = $oround_name;
+				$doubles{$student_id}{"entries"}{$entry_id}{"during"}{$oround_id}{"label"} = $oround_label;
+				$doubles{$student_id}{"entries"}{$entry_id}{"during"}{$oround_id}{"time_start"} = $ts_cache{$ots_start};
+				$doubles{$student_id}{"entries"}{$entry_id}{"during"}{$oround_id}{"time_end"} = $ts_cache{$ots_end};
+
+				$doubles{$student_id}{"entries"}{$entry_id}{'during'}{$oround_id}{"entry"} = $oentry_id;
+				$doubles{$student_id}{"entries"}{$entry_id}{'during'}{$oround_id}{"code"}  = $oentry_code;
+				$doubles{$student_id}{"entries"}{$entry_id}{'during'}{$oround_id}{"name"}  = $oentry_name;
+				$doubles{$student_id}{"entries"}{$entry_id}{'during'}{$oround_id}{"event"} = $oevent_abbr;
+
+				if ($oround_type eq "final") {
+					undef $doubles{$student_id}{"entries"}{$entry_id}{'during'}{$oround_id}{"section"};
+				} else {
+					$doubles{$student_id}{"entries"}{$entry_id}{'during'}{$oround_id}{"section"}
+						= $opanel_letter;
+				}
+			}
+
+			if ($oround_name > $doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"last_round"}) {
+
+				$doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"last_round"} = $oround_name;
+				$doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"last_event"} = $oevent_abbr;
+
+				if ($oround_type eq "final") {
+					undef $doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"last_section"};
+				} else {
+					$doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"last_section"}
+						= $opanel_letter;
+				}
+
+				$doubles{$student_id}{"entries"}{$entry_id}{"others"}{$oentry_id}{"time_start"}
+					= $ts_cache{$ots_start};
+
+				$doubles{$student_id}{"entries"}{$entry_id}{"others"}{$oentry_id}{"time_end"}
+					= $ts_cache{$ots_end};
+
+				if ($oround_label) {
+					$doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"last_name"}
+						= $oround_label;
+				} else {
+					$doubles{$student_id}{"entries"}{$entry_id}{'others'}{$oentry_id}{"last_name"}
+						= "R ".$oround_name;
+				}
+			}
+		}
+	}
+
+</%init>
+
+	<& menu.mas,
+		tourn  => $tourn,
+		whoami => "doubles"
+	&>
+
+	<div class="main">
+
+		<div class="full nospace">
+			<span class="half nospace marbottom">
+				<h4>
+					Double Entries by Timeslot
+				</h4>
+			</span>
+
+			<span class="third centeralign">
+				<form
+					action = "double_entry.mhtml"
+					method = "post"
+				>
+					<select
+						name     = "timeslot_id"
+						class    = "fixedmost"
+						onChange = "this.form.submit();"
+					>
+						<option value=""></option>
+<%perl>
+						foreach my $ts (
+							sort {
+								$a->name cmp $b->name
+								|| $a->start->epoch <=> $b->start->epoch
+							} $tourn->timeslots
+						) {
+</%perl>
+							<option
+								value="<% $ts->id %>"
+								<% $timeslot_id == $ts->id ? "selected" : "" %>
+							><% $ts->name %></option>
+%						}
+					</select>
+				</form>
+			</span>
+
+			<span
+				class = "sixth rightalign marbottommore"
+				id    = "doubles_buttonarea"
+			>
+			</span>
+		</div>
+
+%		if ($timeslot) {
+
+			<p class="centeralign bigger semibold bluetext">
+				<% $timeslot->name %>:
+				<& "/funclib/showtime.mas", dt => $timeslot_start, length => "day" &>
+				- <& "/funclib/showtime.mas", dt => $timeslot_end &>
+			</p>
+%		}
+
+		<& "/funclib/tablesorter.mas", table => 'doubles' &>
+
+		<table id="doubles">
+
+			<thead>
+				<tr class="yellowrow smallish">
+
+					<th>
+						First
+					</th>
+
+					<th>
+						Last
+					</th>
+
+					<th>
+						Code
+					</th>
+
+					<th>
+						Ev
+					</th>
+
+					<th title="Round & Section">
+						R/S
+					</th>
+
+					<th>
+						Overlapping Rounds
+					</th>
+
+					<th>
+						Last Active
+					</th>
+
+				</tr>
+			</thead>
+
+			<tbody>
+<%perl>
+				foreach my $sid (
+					sort {
+						$doubles{$a}{"last"} cmp $doubles{$b}{"last"}
+						|| $doubles{$a}{"first"} cmp $doubles{$b}{"first"}
+					} keys %doubles
+				) {
+
+					foreach my $eid (
+						sort {
+							$doubles{$sid}{"entries"}{$a}{'event'} cmp $doubles{$sid}{"entries"}{$b}{'event'}
+							|| $doubles{$sid}{"entries"}{$a}{'code'} cmp $doubles{$sid}{"entries"}{$b}{'code'}
+						} keys %{$doubles{$sid}{'entries'}}
+					) {
+
+						my $entry = $doubles{$sid}{"entries"}{$eid};
+</%perl>
+						<tr>
+
+							<td class="smallish">
+								<% $doubles{$sid}{"first"} %>
+							</td>
+
+							<td class="smallish">
+								<% $doubles{$sid}{"last"} %>
+							</td>
+
+							<td class="smallish centeralign">
+								<a
+									class="full plain marno"
+									href="/register/entry/edit.mhtml?entry_id=<% $eid %>"
+									target="_blank"
+								><% $entry->{"code"} %></a>
+							</td>
+
+							<td class="smallish centeralign">
+								<% $entry->{"event"} %>
+							</td>
+
+							<td class="smallish">
+								<%
+									$entry->{"round_label"}
+									?  $entry->{"round_label"}
+									: "R".$entry->{"round"}
+								%><% $entry->{"section"} ? "/".$entry->{"section"} : "" %>
+							</td>
+
+							<td class="nospace limit2 padvertless padleftless padrightless">
+%								foreach my $oround (sort keys %{$entry->{"during"}}) {
+									<div class="full nospace padvertless smaller">
+										<span class="quarter marno">
+											<a
+												class="full plain marno"
+												href="/register/entry/edit.mhtml?entry_id=<% $entry->{"during"}{$oround}{"entry"} %>"
+												target="_blank"
+											>
+												<% $entry->{"during"}{$oround}{"event"} %>
+												<% $entry->{"during"}{$oround}{"code"} %>
+											</a>
+										</span>
+										<span class="threetenths marno">
+											<%
+												$entry->{"during"}{$oround}{"label"}
+												? $entry->{"during"}{$oround}{"label"}
+												: "R".$entry->{"during"}{$oround}{"name"}
+											%><% $entry->{"section"} ? "/".$entry->{"section"} : "" %>
+										</span>
+										<span class="fortyfive true marno rightalign">
+											<& 	"/funclib/showtime.mas",
+												dt => $entry->{'during'}{$oround}{"time_start"},
+												length => "shortday"
+											&> &ndash; <& 	"/funclib/showtime.mas",
+												dt => $entry->{'during'}{$oround}{"time_end"},
+												length => "shortest"
+											&>
+										</span>
+									</div>
+%								}
+							</td>
+
+							<td class="nospace limit2 padvertless padleftless padrightless">
+%								foreach my $other (sort keys %{$entry->{"others"}}) {
+									<div class="full nospace padvertless smaller">
+										<span class="quarter marno">
+											<a
+												class="full plain marno"
+												href="/register/entry/edit.mhtml?entry_id=<% $other %>"
+												target="_blank"
+											>
+												<% $entry->{"others"}{$other}{"event"} %>
+												<% $entry->{"others"}{$other}{"code"} %>
+											</a>
+										</span>
+										<span class="threetenths marno">
+											<%
+												$entry->{"others"}{$other}{"last_name"}
+											%><% $entry->{"others"}{$other}{"last_section"}
+												? "/".$entry->{"others"}{$other}{"last_section"}
+												: ""
+											%>
+										</span>
+										<span class="fortyfive true marno rightalign">
+											<& 	"/funclib/showtime.mas",
+												dt     => $entry->{'others'}{$other}{"time_start"},
+												length => "shortday"
+											&> &ndash; <& 	"/funclib/showtime.mas",
+												dt     => $entry->{'others'}{$other}{"time_end"},
+												length => "short"
+											&>
+										</span>
+									</div>
+%								}
+							</td>
+						</tr>
+%					}
+%				}
+
+			</tbody>
+		</table>
+	</div>
+
