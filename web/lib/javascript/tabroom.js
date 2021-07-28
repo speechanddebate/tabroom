@@ -1,4 +1,4 @@
-/* confirmation dialog */
+	/* confirmation dialog */
 
 	function confirmAction(link, message, dest, payload) {
 
@@ -149,143 +149,146 @@
 			},
 			success : function(data) {
 
-				if (data.reply) {
+				if (data) {
 
-					if (replyTarget) {
-						$("#"+replyTarget).text(data.reply);
+					if (data.reply) {
+
+						if (replyTarget) {
+							$("#"+replyTarget).text(data.reply);
+						}
+
+						if (replyAppend) {
+							$("#"+replyAppend).append(data.reply);
+						}
+
+						$(".replybucket").text(data.reply);
+						$(".replyappend").append(data.reply);
+
 					}
 
-					if (replyAppend) {
-						$("#"+replyAppend).append(data.reply);
-					}
+					if (data.error) {
 
-					$(".replybucket").text(data.reply);
-					$(".replyappend").append(data.reply);
+						alertify.error(data.message);
 
-				}
+						if (data.destroy) {
+							$("#"+data.destroy).remove();
+							$("."+data.destroy).remove();
+						}
 
-				if (data.error) {
+						if (data.errSetValue) {
+							data.errSetValue.forEach( function(item) {
+								$("#"+item.id).val(item.content);
+							});
+						}
 
-					alertify.error(data.message);
+						if (data.errReplace) {
+							data.errReplace.forEach( function(item) {
+								if (item.destroy) {
+									$("#"+item.id).remove();
+								} else if (item.content) {
+									$("#"+item.id).html(item.content);
+								}
+							});
+						}
 
-					if (data.destroy) {
-						$("#"+data.destroy).remove();
-						$("."+data.destroy).remove();
-					}
+					} else if (data.message) {
 
-					if (data.errSetValue) {
-						data.errSetValue.forEach( function(item) {
-							$("#"+item.id).val(item.content);
-						});
-					}
+						alertify.dismissAll();
+						alertify.notify(data.message, "custom");
 
-					if (data.errReplace) {
-						data.errReplace.forEach( function(item) {
-							if (item.destroy) {
-								$("#"+item.id).remove();
-							} else if (item.content) {
-								$("#"+item.id).html(item.content);
-							}
-						});
-					}
+						if (data.destroy) {
+							$("#"+data.destroy).remove();
+							$("."+data.destroy).remove();
+						}
 
-				} else if (data.message) {
+						if (data.showAll) {
+							$("."+data.showAll).removeClass("hidden");
+						}
 
-					alertify.dismissAll();
-					alertify.notify(data.message, "custom");
+						if (data.hideAll) {
+							$("."+data.hideAll).addClass("hidden");
+						}
 
-					if (data.destroy) {
-						$("#"+data.destroy).remove();
-						$("."+data.destroy).remove();
-					}
+						if (data.reveal) {
+							$("#"+data.reveal).removeClass("hidden");
+						}
 
-					if (data.showAll) {
-						$("."+data.showAll).removeClass("hidden");
-					}
+						if (data.hide) {
+							$("#"+data.hide).addClass("hidden");
+						}
 
-					if (data.hideAll) {
-						$("."+data.hideAll).addClass("hidden");
-					}
+						if (successAction === "destroy") {
+							$("#"+targetId).remove();
+						} else if (successAction === "hide") {
+							$("#"+targetId).addClass("hidden");
+						} else if (
+							successAction === "refresh"
+							|| successAction === "reload"
+							|| data.refresh
+						) {
+							window.location.reload();
+						}
 
-					if (data.reveal) {
-						$("#"+data.reveal).removeClass("hidden");
-					}
+						if (newParent) {
+							$("#"+targetId).prependTo("#"+newParent);
+						}
 
-					if (data.hide) {
-						$("#"+data.hide).addClass("hidden");
-					}
+						if (data.newParent) {
+							$("#"+targetId).prependTo("#"+data.newParent);
+						}
 
-					if (successAction === "destroy") {
-						$("#"+targetId).remove();
-					} else if (successAction === "hide") {
-						$("#"+targetId).addClass("hidden");
-					} else if (
-						successAction === "refresh"
-						|| successAction === "reload"
-						|| data.refresh
-					) {
-						window.location.reload();
-					}
+						if (data.setvalue) {
+							data.setvalue.forEach( function(item) {
+								$("#"+item.id).val(item.content);
+							});
+						}
 
-					if (newParent) {
-						$("#"+targetId).prependTo("#"+newParent);
-					}
+						if (data.replace) {
+							data.replace.forEach( function(item) {
+								if (item.destroy) {
+									$("#"+item.id).remove();
+								} else if (item.content) {
+									$("#"+item.id).html(item.content);
+								}
+							});
+						}
 
-					if (data.newParent) {
-						$("#"+targetId).prependTo("#"+data.newParent);
-					}
+						if (data.reclass) {
+							data.reclass.forEach( function(item) {
+								if (item.removeClass) {
+									$("#"+item.id).removeClass(item.removeClass);
+								}
+								if (item.addClass) {
+									$("#"+item.id).addClass(item.addClass);
+								}
+							});
+						}
 
-					if (data.setvalue) {
-						data.setvalue.forEach( function(item) {
-							$("#"+item.id).val(item.content);
-						});
-					}
+						if (data.reprop) {
+							data.reprop.forEach( function(item) {
+								console.log(item);
+								$("#"+item.id).attr(item.property, item.value);
+							});
+						}
 
-					if (data.replace) {
-						data.replace.forEach( function(item) {
-							if (item.destroy) {
-								$("#"+item.id).remove();
-							} else if (item.content) {
-								$("#"+item.id).html(item.content);
-							}
-						});
-					}
+						if (data.norefresh) {
 
-					if (data.reclass) {
-						data.reclass.forEach( function(item) {
-							if (item.removeClass) {
-								$("#"+item.id).removeClass(item.removeClass);
-							}
-							if (item.addClass) {
-								$("#"+item.id).addClass(item.addClass);
-							}
-						});
-					}
-
-					if (data.reprop) {
-						data.reprop.forEach( function(item) {
-							console.log(item);
-							$("#"+item.id).attr(item.property, item.value);
-						});
-					}
-
-					if (data.norefresh) {
+						} else {
+							$('table').trigger('applyWidgets');
+							$('table').trigger('update', [true]);
+						}
 
 					} else {
-						$('table').trigger('applyWidgets');
-						$('table').trigger('update', [true]);
+						console.log(data);
+						alertify.warning("An error condition was tripped.");
 					}
 
-				} else {
-					console.log(data);
-					alertify.warning("An error condition was tripped.");
-				}
+					if (callback) {
+						callback(data);
+					}
 
-				if (callback) {
-					callback(data);
+					return;
 				}
-
-				return;
 			}
 		});
 	}
