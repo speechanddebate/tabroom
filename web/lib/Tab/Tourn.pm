@@ -102,10 +102,12 @@ sub setting {
 		if ($existing) {
 
 			$existing->value($value);
-			$existing->value_text($blob) if $value eq "text";
-			$existing->value_date($blob) if $value eq "date";
 
-			if ($value eq "json") {
+			if ($value eq "text") {
+				$existing->value_text($blob);
+			} elsif ($value eq "date") {
+				$existing->value_date($blob);
+			} elsif ($value eq "json") {
 				eval{
 					$existing->value_text(JSON::encode_json($blob));
 				};

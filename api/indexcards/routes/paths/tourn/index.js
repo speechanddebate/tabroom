@@ -3,10 +3,12 @@
 
 // Utility functions
 import tab from './tab';
+import setup from './setup';
 import register from './register';
 
 export default [
 	...tab,
+	...setup,
 	...register
 ];
 
