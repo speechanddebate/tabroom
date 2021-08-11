@@ -1,7 +1,7 @@
 <%args>
 	$tourn_id
 	$event_id => undef
-	$person => undef
+	$person   => undef
 </%args>
 <%init>
 
@@ -12,54 +12,64 @@
 		expires_in => '15m'
 	);
 
-	$event_id =~ s/[\D_]//g;
-
 	my $tourn = Tab::Tourn->retrieve($tourn_id);
 	$m->abort unless $tourn;
 
-	my $event = Tab::Event->retrieve($event_id) if $event_id;
+	my $dbh = Tab::DBI->db_Main();
 
-	Tab::Event->set_sql( field_reports => "
-		select event.* from event, event_setting
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.abbr, event.name,
+			field_waitlist.value,
+			anonymous_public.value
+		from (event, event_setting)
+
+			left join event_setting field_waitlist
+				on field_waitlist.event = event.id
+				and field_waitlist.tag = 'field_waitlist'
+
+			left join event_setting anonymous_public
+				on anonymous_public.event = event.id
+				and anonymous_public.tag = 'anonymous_public'
+
 		where event.tourn = ?
-		and event.id = event_setting.event
-		and event_setting.tag = 'field_report'
-		and event_setting.value = 1
+			and event.id = event_setting.event
+			and event_setting.tag = 'field_report'
+			and event_setting.value = 1
 		order by event.name
 	");
 
-	my @events = Tab::Event->search_field_reports($tourn->id);
+	my %events;
+	$sth->execute($tourn->id);
 
-	$event = $events[0] if scalar @events == 1;
+	while (
+		my (
+			$event_id, $event_abbr, $event_name,
+			$waitlist, $anonymous
+		) = $sth->fetchrow_array()
+	) {
+		$events{$event_id}{"name"} = $event_name;
+		$events{$event_id}{"abbr"} = $event_abbr;
 
-	$event_id = $event->id if $event && (not defined $event_id);
+		if ($waitlist) {
+			$events{$event_id}{"waitlist"} = 1;
+		}
 
-	my %events_by_id = map { $_->id => 1} @events;
-
-	if ($event) {
-
-		unless ($events_by_id{$event_id}) {
-
-			$m->print("<div class='blankfull centeralign'>");
-			$m->print("<h6 class='martopmore marbottommore'>This entry field is not published</h6>");
-			$m->print("</div>");
-
-			$m->abort;
+		if ($anonymous) {
+			$events{$event_id}{"anonymous"} = 1;
 		}
 	}
 
-    my $webpage = Tab::Webpage->search(
-		tourn => $tourn_id,
-		special => "fields"
-	)->first;
-
-	my $ndt;
-
-	foreach my $circuit ($tourn->circuits) {
-		$ndt++ if $circuit->id == 43;
+	if ($event_id && (not defined $events{$event_id})) {
+		$m->comp("/funclib/abort.mas",
+			message => "This event's field is not published by the tournament"
+		);
 	}
 
-	my $anonymous_public = $event->setting("anonymous_public") if $event;
+    my $webpage = Tab::Webpage->search(
+		tourn   => $tourn_id,
+		special => "fields"
+	)->first;
 
 </%init>
 
@@ -68,34 +78,64 @@
 		<& title.mas, tourn => $tourn &>
 
         <& tabbar.mas,
-			tourn => $tourn,
+			tourn  => $tourn,
 			person => $person
 		&>
 
 <%perl>
 
-		if ($event) {
+		if ($events{$event_id}) {
 
-			my @entries =
-				sort {$a->school->name cmp $b->school->name}
-				$event->entries(active => 1);
+			my $limit;
 
-			@entries =
-				sort {$a->school->name cmp $b->school->name}
-				$event->entries(dropped => 0, unconfirmed => 0)
-			if $event->setting("field_waitlist");
+			if ($events{"waitlist"}) {
+				$limit = " and entry.dropped = 0 and entry.unconfirmed = 0 ";
+			} else {
+				$limit = " and entry.active = 1 ";
+			}
 
+			my $entries_sth = $dbh->prepare("
+				select
+					entry.id, entry.name, entry.code, entry.waitlist,
+					school.name, chapter.state, chapter.country
+
+				from entry
+					left join school on school.id = entry.school
+					left join chapter on school.chapter = chapter.id
+
+				where entry.event = ?
+				$limit
+				order by entry.code, school.name
+			");
+
+			my %entries;
+
+			$entries_sth->execute($event_id);
+
+			while (
+				my (
+					$id, $name, $code, $waitlist, $school, $state, $country
+				) = $entries_sth->fetchrow_array()
+			) {
+
+				$entries{$id}{"name"}     = $name;
+				$entries{$id}{"code"}     = $code;
+				$entries{$id}{"school"}   = $school;
+				$entries{$id}{"state"}    = $state;
+				$entries{$id}{"country"}    = $country;
+				$entries{$id}{"waitlist"} = $waitlist;
+			}
 </%perl>
 
 			<span class="threefifths nospace">
 				<h5 class="nospace">
-					Field in <% $event->name %>
+					Field in <% $events{$event_id}{"name"} %>
 				</h5>
 			</span>
 
 			<span class="fifth nospace bluetext semibold">
 				<h5 class="nospace">
-				<% scalar @entries %> entries
+					<% scalar (keys %entries) %> entries
 				</h5>
 			</span>
 
@@ -117,10 +157,10 @@
 						</th>
 
 						<th class="smallish">
-							Locale
+							Location
 						</th>
 
-%						unless ($anonymous_public) {
+%						unless ($events{$event_id}{"anonymous"}) {
 							<th class="smallish">
 								Entry
 							</th>
@@ -130,87 +170,69 @@
 							Code
 						</th>
 
-%						if ($event->setting("field_waitlist")) {
+%						if ($events{$event_id}{"waitlist"}) {
 							<th class="smallish">
 								Status
 							</th>
 %						}
-
-%						if ($ndt) {
-							<th class="smallish nosort">
-								Results
-							</th>
-							<th class="smallish nosort">
-								Bids
-							</th>
-%						}
-
 					</tr>
-
 				</thead>
 
 				<tbody>
 
-%				foreach my $entry (@entries) {
+<%perl>
+
+				my %short_names;
+
+				foreach my $entry_id (
+					sort {
+						$entries{$a}{"school"} cmp $entries{$b}{"school"}
+						|| length($entries{$a}{"code"}) <=> length($entries{$b}{"code"})
+						|| $entries{$a}{"code"} cmp $entries{$b}{"code"}
+					} keys %entries
+				) {
+
+					unless ($short_names{$entries{$entry_id}{"school"}}) {
+						$short_names{$entries{$entry_id}{"school"}} =
+							$m->comp("/funclib/short_name.mas", name => $entries{$entry_id}{"school"});
+					}
+
+					my $school = $short_names{$entries{$entry_id}{"school"}};
+
+</%perl>
 
 					<tr>
 
 						<td>
-							<% substr($entry->school->name,0,35) %>
+							<% $school %>
 						</td>
 
-						<td>
-							<% $entry->school->chapter ? $entry->school->chapter->location : "" %>
+						<td class="centeralign">
+							<%
+								$entries{$entry_id}{"state"}
+							%><%
+								$entries{$entry_id}{"state"} && $entries{$entry_id}{"country"}
+								? "/" : ""
+							%><% $entries{$entry_id}{"country"} %>
 						</td>
 
-%						unless ($anonymous_public) {
+%						unless ($events{$event_id}{"anonymous"}) {
 							<td>
-								<% $entry->name %>
+								<% $entries{$entry_id}{"name"} %>
 							</td>
 %						}
 
 						<td>
-							<% $entry->code %>
+							<% $entries{$entry_id}{"code"} %>
 						</td>
 
-%						if ($event->setting("field_waitlist")) {
+%						if ($events{$event_id}{"waitlist"}) {
 							<td class="centeralign">
-								<% $entry->waitlist ? "WL" : "In" %>
+								<% $entries{$entry_id}{"waitlist"} ? "WL" : "" %>
 							</td>
-%						}
-
-%						unless ($anonymous_public) {
-
-%							if ($ndt) {
-
-%								my ($student1, $student2, $crap) = $entry->students;
-
-%								if ($student1 && $student2) {
-
-									<td class="centeralign">
-										<a
-											href="/index/results/team_lifetime_record.mhtml?id1=<% $student1->id %>&id2=<% $student2->id %>"
-											class="buttonwhite bluetext hover smallish invert"
-										>
-											All Results
-										</a>
-									</td>
-
-									<td class="centeralign">
-										<a
-											href="/index/results/team_results.mhtml?id1=<% $student1->id %>&id2=<% $student2->id %>"
-											class="buttonwhite greentext hover smallish invert"
-										>
-											Bid Sheet
-										</a>
-									</td>
-%								}
-
-%							}
 %						}
 
 					</tr>
-
 %				}
 
 				</tbody>
@@ -239,20 +261,19 @@
 	</div>
 
 	<div class="menu">
-
 		<div class="sidenote">
-
 			<h4>Events</h4>
-
-%			foreach my $oevent (sort {$a->name cmp $b->name} @events) {
-
-%				$event_id = $oevent->id unless $event_id;
-
-				<a class="<% ($oevent->id == $event_id ) ? "dk" : "" %>blue full"
-					href="/index/tourn/fields.mhtml?tourn_id=<% $tourn_id %>&event_id=<% $oevent->id %>">
-					<% $oevent->name %>
+<%perl>
+			foreach my $oevent (
+				sort {
+					$events{$a}{"name"} cmp $events{$b}{"name"}
+				} keys %events
+			) {
+</%perl>
+				<a class="<% ($oevent == $event_id ) ? "dk" : "" %>blue full"
+					href="/index/tourn/fields.mhtml?tourn_id=<% $tourn_id %>&event_id=<% $oevent %>">
+					<% $events{$oevent}{"name"} %>
 				</a>
-
 %			}
 
 		</div>
