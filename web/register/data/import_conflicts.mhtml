@@ -1,0 +1,170 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+</%args>
+<%init>
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	# Get the upload and create the file handle.
+	my $req = Apache2::Request->new($r);
+	my @text_handles = $r->upload;
+	my $text_file = $req->upload($text_handles[0]);
+	my $io = $text_file->io;
+
+	my @judges;
+
+	# Fix line breaks
+	my @lines = (<$io>);
+
+    foreach (@lines) {
+        $_ =~ s/[\r]+/\n/g;
+        $_ =~ s/[\r\n]+/\n/g;
+        $_ =~ s/[\n]+/\n/g;
+        push @judges, split (/\n/, $_);
+    }
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $judges_sth = $dbh->prepare("
+		select
+			judge.id, person.email, judge.first, judge.last
+		from judge, category, person
+		where category.tourn = ?
+			and category.id = judge.category
+			and judge.person = person.id
+	");
+
+	$judges_sth->execute($tourn->id);
+
+	my %judges;
+
+	while (
+		my (
+			$judge, $email, $first, $last
+		) = $judges_sth->fetchrow_array()
+	) {
+		$judges{$email} = $judge;
+		$judges{"name"}{$judge} = $first." ".$last;
+	}
+
+	my $sth = $dbh->prepare("
+		select
+			student.id, student.first, student.last, student.person,
+			entry.id, school.name, entry.code
+		from student, entry_student es, entry, event, school
+		where event.tourn = ?
+			and event.id = entry.event
+			and entry.id = es.entry
+			and es.student = student.id
+			and entry.school = school.id
+	");
+
+	$sth->execute($tourn->id);
+
+	my %students;
+
+	while (
+		my (
+			$id, $first, $last, $person, $entry_id,
+			$school_name, $entry_code
+		) = $sth->fetchrow_array()
+	) {
+
+
+		$students{"name"}{$first." ".$last} = $id;
+		$students{"last"}{$last} = $id;
+		$students{"school"}{$id} = $school_name;
+		$students{"entry"}{$id} = $entry_id;
+		$students{"entry_code"}{$id} = $entry_code;
+	}
+
+	my $now;
+
+	$m->print("<div class='blankfull'>");
+
+	foreach my $judge (@judges) {
+
+		my ($judge_email, $conflicts) = split(/,/,$judge);
+
+		$judge_email = lc($judge_email);
+
+		next unless $conflicts;
+
+		my $judge = $judges{$judge_email};
+
+		unless ($judge) {
+			$m->print("<h5>NO judge found for $judge_email</h5>");
+			next;
+		}
+
+		my @conflicts = split (/;/, $conflicts);
+
+		$m->print($judges{"name"}{$judge}." has ".scalar @conflicts." conflicts");
+
+		$m->flush_buffer();
+
+		foreach my $conflict (@conflicts) {
+
+			$conflict =~ s/^\s+//;  # Leading only
+			$conflict =~ s/\s+$//;  # Trailing
+
+			my ($lab, @rest) = split (/\ /, $conflict);
+
+			if (@rest) {
+
+				my $names = join(" ", @rest);
+				my ($two_a, $two_n) = split('/', $names);
+
+				my ($two_a_first, $two_a_last) = split(/\ /, $two_a);
+				my ($two_n_first, $two_n_last) = split(/\ /, $two_n);
+
+				my $tas = $students{"name"}{$two_a_first." ".$two_a_last};
+				my $tns = $students{"name"}{$two_n_first." ".$two_n_last};
+
+				my $ea = $students{"entry"}{$tas};
+				my $en = $students{"entry"}{$tns};
+
+				unless ($ea && $en && $ea == $en) {
+					$tas = $students{"last"}{$two_a_last};
+					$tns = $students{"last"}{$two_n_last};
+					$ea = $students{"entry"}{$tas};
+					$en = $students{"entry"}{$tns};
+				}
+
+				if ($ea && $en && $ea == $en) {
+
+					my $code = $students{"entry_code"}{$tas};
+
+					Tab::Strike->create({
+						tourn      => $tourn->id,
+						judge      => $judge,
+						type       => "entry",
+						created_at => $now,
+						entered_by => $person->id,
+						entry      => $ea,
+						conflictee => 1,
+						registrant => 1,
+						conflict   => 1
+					});
+
+					$m->print("<p>Struck against $code</p>");
+					$m->flush_buffer();
+
+				} else {
+
+					$m->print("<p style='padding-left: 5pt;'>No match for lab $lab 2A $two_a_first $two_a_last 2N $two_n_first $two_n_last.  IDs $tas $tns </p>");
+					$m->flush_buffer();
+				}
+			}
+		}
+	}
+
+	$dbh->disconnect();
+
+	$m->print("<h4>Fin</h4>");
+	$m->print("</div>");
+
+</%init>
