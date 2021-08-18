@@ -69,28 +69,28 @@ const tournAuth = async function(req) {
 				delete session[tournId].events;
 
 			} else if (
-				perm.tag === "full_admin"
-				|| current === "full_admin"
+				perm.tag === "tabber"
+				|| current === "tabber"
 			) {
 
-				session[tournId].level = "full_admin";
+				session[tournId].level = "tabber";
 				session[tournId].menu  = "all";
 				delete session[tournId].events;
 
 			} else if (
-				perm.tag === "event_admin"
-				|| current === "event_admin"
+				perm.tag === "by_event"
+				|| current === "by_event"
 			) {
 
-				session[tournId].level  = "event_admin";
+				session[tournId].level  = "by_event";
 				session[tournId].menu   = "events";
 				session[tournId].events = perm.details;
 
 			} else if (
-				perm.tag === "entry_only"
+				perm.tag === "checker"
 			) {
 
-				session[tournId].level  = "entry_only";
+				session[tournId].level  = "checker";
 				session[tournId].menu   = "none";
 				session[tournId].events = perm.details;
 			}
