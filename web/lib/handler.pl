@@ -124,6 +124,7 @@ use Tab::SweepInclude;
 use Tab::SweepSet;
 use Tab::SweepRule;
 use Tab::SweepEvent;
+use Tab::TabroomSetting;
 use Tab::Tiebreak;
 use Tab::TiebreakSetSetting;
 use Tab::TiebreakSet;
