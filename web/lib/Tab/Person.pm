@@ -54,10 +54,10 @@ sub setting {
 			$existing->value($value);
 			$existing->value_text($blob) if $value eq "text";
 			$existing->value_date($blob) if $value eq "date";
-			$existing->update;
+			$existing->update();
 
 			if ($value eq "delete" || $value eq "" || $value eq "0") {
-				$existing->delete;
+				$existing->delete();
 			}
 
 			return;
@@ -78,8 +78,7 @@ sub setting {
 				$existing->value_date($blob);
 			}
 
-			$existing->update;
-
+			$existing->update();
 		}
 
 	} else {
@@ -90,7 +89,6 @@ sub setting {
 		return $existing->value;
 
 	}
-
 }
 
 sub all_permissions {
@@ -125,8 +123,7 @@ sub all_permissions {
 				next PERM;
 			}
 
-			if ($tag eq "detailed") {
-
+			if ($tag eq "by_event") {
 				$perms{$tag} = $perm;
 				$perms{"tourn"}{$tourn->id} = $tag;
 				$perms{"details"} = eval {
@@ -144,17 +141,16 @@ sub all_permissions {
 			$perms{"owner"}++;
 			$perms{"tourn"}{$tourn->id} = "owner";
 			$perms{"undetailed"}{$tourn->id}++;
-			delete $perms{"entry_only"};
+			delete $perms{"checker"};
 			delete $perms{"details"};
 		}
 
 		if ($perms{"undetailed"}{$tourn->id}) {
 			# Universal perms override specific ones
 			delete $perms{"details"};
-			delete $perms{"detailed"};
+			delete $perms{"by_event"};
 		}
 	}
-
 
 	my $dbh = Tab::DBI->db_Main();
 
@@ -169,11 +165,12 @@ sub all_permissions {
     $sth->execute($self->id);
 
     while(
-		my ($tag, $region, $circuit, $chapter, $district)  = $sth->fetchrow_array()
+		my (
+			$tag, $region, $circuit, $chapter, $district
+		)  = $sth->fetchrow_array()
 	) {
 
 		if ($district) {
-
 			if ($tag eq "wsdc") {
 				$perms{"district"}{$district} = $tag;
 			} else {
@@ -195,15 +192,12 @@ sub all_permissions {
 	}
 
 	$perms{"owner"}++ if $self->site_admin;
-
 	return %perms;
-
 }
 
 sub all_settings {
 
 	my $self = shift;
-
 	my %all_settings;
 
 	my $dbh = Tab::DBI->db_Main();
@@ -217,7 +211,11 @@ sub all_settings {
 
     $sth->execute($self->id);
 
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
+    while(
+		my (
+			$tag, $value, $value_date, $value_text
+		)  = $sth->fetchrow_array()
+	) {
 
 		if ($value eq "date") {
 
@@ -231,12 +229,9 @@ sub all_settings {
 		} else {
 
 			$all_settings{$tag} = $value;
-
 		}
-
 	}
 
 	return %all_settings;
-
 }
 
