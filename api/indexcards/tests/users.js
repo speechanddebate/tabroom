@@ -53,7 +53,7 @@ export let testAdminSession = {
 export let testUserTournPerm = {
 	tourn  : 1518,
 	person : 69,
-	tag    : "full_admin"
+	tag    : "tabber"
 };
 
 export default {

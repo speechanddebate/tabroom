@@ -66,6 +66,7 @@ use Tab::Concession;
 use Tab::ConcessionOption;
 use Tab::ConcessionPurchase;
 use Tab::ConcessionPurchaseOption;
+use Tab::Default;
 use Tab::Email;
 use Tab::Entry;
 use Tab::EntrySetting;
