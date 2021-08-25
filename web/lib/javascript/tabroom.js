@@ -78,6 +78,7 @@
 		var otherOtherObject = $(checkObject).attr("other_other_value");
 		var optionOneId      = $(checkObject).attr("option_one");
 		var optionTwoId      = $(checkObject).attr("option_two");
+		var postMethod       = $(checkObject).attr("post_method");
 
 		var optionOne;
 		var optionTwo;
@@ -130,8 +131,20 @@
 			}
 		}
 
+		var accessType = "";
+
+		if (postMethod === "get") { 
+			accessType = "GET";
+		} else if (postMethod === "delete") { 
+			accessType = "DELETE";
+		} else if (postMethod === "put") { 
+			accessType = "PUT";
+		} else { 
+			accessType = "POST";
+		}
+		
 		$.ajax({
-			type : 'POST',
+			type : accessType,
 			url  : replyUrl,
 			data : {
 				target_id      : targetId,
