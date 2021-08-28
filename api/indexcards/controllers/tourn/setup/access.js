@@ -41,18 +41,14 @@ export const changeAccess = {
 
 			} else { 
 
-				let newAdmin = await db.person.findByPk(personId);
+				let newAdmin = await db.person.findByPk(adminId);
 				
 				const newPerm =  db.permission.build({
 					person : newAdmin,
 					tag    : accessLevel
 				});
 
-				try {
-					await newPerm.save();
-				} catch(error) {
-					console.log(error);
-				}
+				await newPerm.save();
 
 				const changeLog = db.changeLog.build({
 					tag         : "access",
@@ -62,11 +58,7 @@ export const changeAccess = {
 					created_at  : Date()
 				});
 
-				try {
-					await changeLog.save();
-				} catch(error) {
-					console.log(error);
-				}
+				await changeLog.save();
 
 				return res.status(200).json({ 
 					error: false,
@@ -146,12 +138,7 @@ export const changeAccess = {
 			} else { 
 
 				existing.permObject.tag = accessLevel;
-
-				try {
-					await existing.permObject.save();
-				} catch(error) {
-					console.log(error);
-				}
+				await existing.permObject.save();
 				
 				const changeLog = db.changeLog.build({
 					tag         : "access",
@@ -161,11 +148,7 @@ export const changeAccess = {
 					description : `Changed ${existing.person.email} access level to ${accessLevel}`
 				});
 
-				try {
-					await changeLog.save();
-				} catch(error) {
-					console.log(error);
-				}
+				await changeLog.save();
 
 				return res.status(200).json({
 					error: false,
@@ -244,15 +227,116 @@ export const changeAccess = {
 			description : reply.message
 		});
 			
-		try {
-			await changeLog.save();
-		} catch(error) {
-			console.log(error);
-		}
-
+		await changeLog.save();
 		return res.status(200).json(reply);
 	},
 };
+
+export const changeEventAccess = {
+
+	// A post will add access level to a user
+
+    POST: async (req, res) => {
+		const db = req.db;
+		const adminId = req.params.target_id;
+		const tournId = req.params.tourn_id;
+		const eventId = req.params.setting_name;
+		let accessLevel = "checker";
+
+		if (req.params.other_value) { 
+			accessLevel = req.params.property_name;
+		};
+		
+		let already = await db.permission.findAll({
+			where : {tourn: tournId, person: adminId}
+		});
+
+		parsePerms(already).then(async function(existing) { 
+
+			const newAdmin = await db.person.findByPk(adminId);
+			const targetEvent = await db.event.findByPk(eventId);
+
+			if (targetEvent && newAdmin) {
+
+				existing.permObject.details[eventId] = accessLevel;
+				existing.permObject.changed("details", true);
+				existing.permObject.save();
+
+				const changeLog = db.changeLog.build({
+					tag         : "access",
+					tourn       : tournId,
+					person      : req.session.person,
+					description : `Added ${newAdmin.email} with ${accessLevel} level permissions to ${targetEvent.name}`,
+					created_at  : Date()
+				});
+
+				await changeLog.save();
+
+				// Need to add the button to the listing.  God this will be so
+				// much easier with React.  This is basically why react/angular
+				// etc were created I guess
+				
+				return res.status(200).json({ 
+					error   : false,
+					message : changeLog.description
+				});
+
+			} else { 
+				return res.status(200).json({ 
+					error: true,
+					message: 'Valid user or valid event not found'
+				});
+			}
+		});
+		return;
+    },
+
+	// A delete will revoke access to that event
+
+    DELETE: async (req, res) => {
+		
+		const db = req.db;
+		const adminId = req.body.target_id;
+		const tournId = req.params.tourn_id;
+		const eventId = req.body.setting_name;
+		
+		const already = await db.permission.findAll({
+			where : {tourn: tournId, person: adminId}
+		});
+
+		const newAdmin = await db.person.findByPk(adminId);
+		const targetEvent = await db.event.findByPk(eventId);
+
+		parsePerms(already).then(async function(existing) { 
+
+			console.log(existing.permObject.details);
+			delete existing.permObject.details[eventId];
+			existing.permObject.changed("details", true);
+			
+			console.log(existing.permObject.details);
+			await existing.permObject.save();
+
+			const changeLog = db.changeLog.build({
+				tag         : "access",
+				tourn       : tournId,
+				person      : req.session.person,
+				description : `Revoked ${newAdmin.email} permissions to ${targetEvent.name}`,
+				created_at  : Date()
+			});
+
+			await changeLog.save();
+			
+			return res.status(200).json({ 
+				error   : false,
+				message : changeLog.description,
+				destroy : `${eventId}_${adminId}`
+			});
+		});
+
+		return;
+		
+    },
+}
 
 changeAccess.POST.apiDoc = {
     summary     : 'Change, delete and add tournament permissions for user accounts',
