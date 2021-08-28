@@ -154,5 +154,4 @@ app.listen(port, () => {
     debugLogger.info(`Server started. Listening on port ${port}`);
 });
 
-
 export default app;
