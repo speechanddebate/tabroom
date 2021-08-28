@@ -7,12 +7,42 @@ import Sequelize from 'sequelize';
 
 const basename = path.basename(module.filename);
 
+
 const sequelize = new Sequelize(
 	config.DB_DATABASE,
 	config.DB_USER,
 	config.DB_PASS,
 	config.sequelizeOptions
 );
+
+const SequelizeModel = require('sequelize/lib/model'), orgFindAll = SequelizeModel.findAll
+
+// By default Sequelize wants you to try...catch every single database query
+// for Reasons.  Otherwise all your database errors just go unprinted and you
+// get a random unfathomable 500 error.  Yeah, because that's great.  This will
+// try/catch every query so I don't have to deal.
+
+function dbError(err) {
+	console.log(err);
+	process.exit(0);
+}
+
+SequelizeModel.findAll = function() {
+  return orgFindAll.apply(this, arguments).catch(err => {
+	dbError(err);
+  });
+}
+const orgCreate = SequelizeModel.create
+SequelizeModel.create = function() {
+  return orgCreate.apply(this, arguments).catch(err => {
+	dbError(err);
+  });
+}
+sequelize.query = function() {
+  return Sequelize.prototype.query.apply(this, arguments).catch(err => {
+	dbError(err);
+  });
+}
 
 const db = {};
 
@@ -25,7 +55,7 @@ fs
 		return (file.indexOf(".") !== 0) && (file !== basename);
 	})
 	.forEach(function(file) {
-		const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes)
+		const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes)	
 		db[model.name] = model;
 	});
 
@@ -546,6 +576,7 @@ db.student.hasMany(db.studentSetting   , { as: "Settings" , foreignKey : "studen
 
 
 // Initialize the data objects.
+
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
