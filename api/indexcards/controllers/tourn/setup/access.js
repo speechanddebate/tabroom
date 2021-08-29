@@ -5,12 +5,12 @@ export const changeAccess = {
 	// A POST creates a new tournament permission for the user
     POST: async (req, res) => {
 		const db = req.db;
-		const adminId = req.params.target_id;
+		const adminId = req.body.target_id;
 		const tournId = req.params.tourn_id;
 		let accessLevel = "checker";
 
-		if (req.params.other_value) { 
-			accessLevel = req.params.other_value;
+		if (req.body.other_value) { 
+			accessLevel = req.body.other_value;
 		};
 
 		if (
@@ -237,58 +237,89 @@ export const changeEventAccess = {
 	// A post will add access level to a user
 
     POST: async (req, res) => {
-		const db = req.db;
-		const adminId = req.params.target_id;
-		const tournId = req.params.tourn_id;
-		const eventId = req.params.setting_name;
-		let accessLevel = "checker";
 
-		if (req.params.other_value) { 
-			accessLevel = req.params.property_name;
-		};
-		
+		const db          = req.db;
+		const adminId     = req.body.target_id;
+		const tournId     = req.params.tourn_id;
+		const accessLevel = req.body.setting_name;
+
+		const accessKey = req.body.property_value;
+		const [accessType, accessId] = accessKey.split('_');
+
+		let events;
+
+		if (accessType === "event") { 
+			events = await db.event.findAll({
+				where : {id: accessId}
+			});
+		} else if (accessType === "category") { 
+			events = await db.event.findAll({
+				where : {category: accessId}
+			});
+		} else if (accessType === "type") { 
+			events = await db.event.findAll({
+				where : {
+					type: accessId,
+					tourn: tournId
+				}
+			});
+		}
+
 		let already = await db.permission.findAll({
 			where : {tourn: tournId, person: adminId}
 		});
 
 		parsePerms(already).then(async function(existing) { 
 
-			const newAdmin = await db.person.findByPk(adminId);
-			const targetEvent = await db.event.findByPk(eventId);
+			let logString = " ";
+			let replyButtons = " ";
+			let newAdmin = await db.person.findByPk(adminId);
 
-			if (targetEvent && newAdmin) {
+			for (let event of events) { 
 
-				existing.permObject.details[eventId] = accessLevel;
-				existing.permObject.changed("details", true);
-				existing.permObject.save();
+				existing.permObject.details[event.id] = accessLevel;
 
-				const changeLog = db.changeLog.build({
-					tag         : "access",
-					tourn       : tournId,
-					person      : req.session.person,
-					description : `Added ${newAdmin.email} with ${accessLevel} level permissions to ${targetEvent.name}`,
-					created_at  : Date()
-				});
-
-				await changeLog.save();
-
-				// Need to add the button to the listing.  God this will be so
-				// much easier with React.  This is basically why react/angular
-				// etc were created I guess
+				if (logString) {
+					logString += " ";
+				}
 				
-				return res.status(200).json({ 
-					error   : false,
-					message : changeLog.description
-				});
-
-			} else { 
-				return res.status(200).json({ 
-					error: true,
-					message: 'Valid user or valid event not found'
-				});
+				logString += event.abbr;
+				replyButtons += `<div
+					class = "third padvertless semibold greentext yellowhover centeralign nospace smaller"
+					id    = "${ event.id }_${ adminId }"
+					title = "Click event to remove access"
+					target_id    = "${ adminId }"
+					title        = "Click event to remove access"
+					post_method  = "delete"
+					setting_name = "${ event.id }"
+					onClick      = "postSwitch(this, '/v1/tourn/${tournId}/tab/setup/eventaccess');"
+				>${event.abbr}</div>`;
 			}
+
+			existing.permObject.changed("details", true);
+			existing.permObject.save();
+
+			const changeLog = db.changeLog.build({
+				tag         : "access",
+				tourn       : tournId,
+				person      : req.session.person,
+				description : `Added ${newAdmin.email} with ${accessLevel} level permissions to ${logString}`,
+				created_at  : Date()
+			});
+
+			await changeLog.save();
+
+			// Need to add the button to the listing.  God this will be so
+			// much easier with React.  This is basically why react/angular
+			// etc were created I guess
+
+			return res.status(200).json({ 
+				error   : false,
+				message : changeLog.description,
+				reply   : replyButtons
+			});
 		});
-		return;
+
     },
 
 	// A delete will revoke access to that event
@@ -309,11 +340,8 @@ export const changeEventAccess = {
 
 		parsePerms(already).then(async function(existing) { 
 
-			console.log(existing.permObject.details);
 			delete existing.permObject.details[eventId];
 			existing.permObject.changed("details", true);
-			
-			console.log(existing.permObject.details);
 			await existing.permObject.save();
 
 			const changeLog = db.changeLog.build({
