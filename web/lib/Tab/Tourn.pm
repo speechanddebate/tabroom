@@ -94,7 +94,6 @@ sub setting {
 	);
 
 	my $existing = shift @existing if @existing;
-
 	foreach (@existing) { $_->delete(); }
 
 	if (defined $value) {

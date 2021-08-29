@@ -10,6 +10,13 @@
 		ON DELETE CASCADE
 		ON UPDATE CASCADE;
 
+	alter table tourn_site
+		ADD CONSTRAINT fk_site_id FOREIGN KEY (site)
+		REFERENCES site(id)
+		ON DELETE CASCADE
+		ON UPDATE CASCADE;
+
+
 	delete from permission
 		where tourn IS NOT NULL
 		and tourn > 0
@@ -229,8 +236,6 @@
 		REFERENCES result(id) ON DELETE CASCADE ON UPDATE CASCADE;
 	alter table result_key ADD CONSTRAINT fk_result_key_result_set FOREIGN KEY (result_set)
 		REFERENCES result_set(id) ON DELETE CASCADE ON UPDATE CASCADE;
-	alter table result_set ADD CONSTRAINT fk_result_set_event FOREIGN KEY (event)
-		REFERENCES event(id) ON DELETE CASCADE ON UPDATE CASCADE;
 	alter table session ADD CONSTRAINT fk_session_person FOREIGN KEY (person)
 		REFERENCES person(id) ON DELETE CASCADE ON UPDATE CASCADE;
 
