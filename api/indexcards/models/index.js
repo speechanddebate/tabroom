@@ -18,7 +18,7 @@ const sequelize = new Sequelize(
 const SequelizeModel = require('sequelize/lib/model'), orgFindAll = SequelizeModel.findAll
 
 // By default Sequelize wants you to try...catch every single database query
-// for Reasons.  Otherwise all your database errors just go unprinted and you
+// for Reasons?  Otherwise all your database errors just go unprinted and you
 // get a random unfathomable 500 error.  Yeah, because that's great.  This will
 // try/catch every query so I don't have to deal.
 

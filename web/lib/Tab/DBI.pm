@@ -3,9 +3,9 @@ use base 'Class::DBI';
 use Class::DBI::AbstractSearch;
 
 Tab::DBI->connection(
-	"dbi:mysql:$Tab::dbname:$Tab::dbhost", 
-		$Tab::dbuser, 
-		$Tab::dbpass, 
+	"dbi:mysql:$Tab::dbname:$Tab::dbhost",
+		$Tab::dbuser,
+		$Tab::dbpass,
 		{mysql_enable_utf8 => 1}
 	) || die $!;;
 
@@ -22,11 +22,10 @@ sub _register_datetimes {
     $class;
 }
 
-
 sub date_inflate {
 	my $value = shift;
-	my $dt = eval { 
-		return DateTime::Format::MySQL->parse_datetime($value); 
+	my $dt = eval {
+		return DateTime::Format::MySQL->parse_datetime($value);
 	};
 
 	$dt = DateTime->now unless $dt;
@@ -77,3 +76,15 @@ sub date_only_deflate {
     return DateTime::Format::MySQL->format_date($dt);
 }
 
+sub _register_json {
+    my $class = shift;
+    $class = ref $class if ref $class;
+    foreach my $column (@_) {
+        $class->has_a(
+            $column => 'JSON',
+            inflate => \&decode_json,
+            deflate => \&encode_json,
+        )
+    }
+    $class;
+}
