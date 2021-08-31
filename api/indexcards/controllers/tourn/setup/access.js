@@ -34,6 +34,7 @@ export const changeAccess = {
 		parsePerms(already).then(async function(existing) { 
 
 			if (existing.level) { 
+
 				return res.status(200).json({ 
 					error: true,
 					message: 'User already has access'
@@ -43,14 +44,13 @@ export const changeAccess = {
 
 				let newAdmin = await db.person.findByPk(adminId);
 				
-				const newPerm =  db.permission.build({
+				const newPerm =  db.permission.create({
 					person : newAdmin,
+					tourn  : tournId,
 					tag    : accessLevel
 				});
 
-				await newPerm.save();
-
-				const changeLog = db.changeLog.build({
+				const changeLog = await db.changeLog.create({
 					tag         : "access",
 					tourn       : tournId,
 					person      : req.session.person,
@@ -58,14 +58,13 @@ export const changeAccess = {
 					created_at  : Date()
 				});
 
-				await changeLog.save();
-
 				return res.status(200).json({ 
 					error: false,
-					message: `User ${newAdmin.email} has been given ${accessLevel} access`
+					message: changeLog.description
 				});
 			}
 		});
+
 		return;
     },
 
@@ -76,14 +75,83 @@ export const changeAccess = {
 		const adminId = req.body.target_id;
 		const tournId = req.params.tourn_id;
 		let accessLevel = req.body.property_value;
-		let contactStatus = false;
-
-		if (req.body.property_name === "contact") { 
-			accessLevel = "contact";
-			contactStatus = true;
-		}
+		const newAdmin = await db.person.findByPk(adminId);
 
 		if (
+			req.body.property_name === "contact"
+			&& ( req.session[tournId].level === "owner"
+				 || adminId == req.session.person 
+				 || req.session[tournId].contact
+			)
+		) { 
+
+			let already = await db.permission.findByPk(28285536);
+
+			if (already === null) {
+
+				if (accessLevel > 0) {
+
+					// Checkbox checked so create it
+					const newPerm =  await db.permission.create({
+						person : newAdmin.id,
+						tourn  : tournId,
+						tag    : "contact"
+					});
+
+					const changeLog = await db.changeLog.create({
+						tag         : "access",
+						tourn       : tournId,
+						person      : req.session.person,
+						description : `Added ${newAdmin.email} as a contact`,
+						created_at  : Date()
+					});
+
+					return res.status(200).json({ 
+						error: false,
+						message: changeLog.description
+					});
+
+				} else {
+				
+					// Nope wasn't then isn't now
+					return res.status(200).json({
+						error: false,
+						message: `${newAdmin.email} was already not a contact for this tournament`
+					 });
+				}
+				
+			} else { 
+				
+				if (accessLevel > 0) { 
+
+					// Checkbox checked so keep it
+					return res.status(200).json({
+						error   : false,
+						message : newAdmin.email+' is already a contact for this tournament'
+					 });
+
+				} else {
+			
+					// Checkbox is unchecked so TERMINATE. TERMINATE. 
+					await already.destroy();
+
+					const changeLog = await db.changeLog.create({
+						tag         : "access",
+						tourn       : tournId,
+						person      : req.session.person,
+						description : `${newAdmin.email} is no longer a tournament contact`,
+						created_at  : Date()
+					});
+
+					return res.status(200).json({ 
+						error: false,
+						message: changeLog.description
+					});
+				}
+				 		
+			}
+
+		} else if (
 			accessLevel === "checker"
 			|| accessLevel === "tabber"
 			|| accessLevel === "by_event"
@@ -91,76 +159,32 @@ export const changeAccess = {
 		) { 
 
 			let already = await db.permission.findAll({
-				where : { tourn: tournId, person: adminId},
+				where:{ 
+					tourn  : tournId,
+					person : adminId
+				},
 				include : [
 					{ model: db.person, as: 'Person' },
 				]
 			});
 
-			var existing = await parsePerms(already);
-
-			if	(accessLevel === "contact") {
+			let existing = await parsePerms(already);
+			console.log(existing.permObject.toJSON);
+			await existing.permObject.update({tag: accessLevel});
+			console.log(existing.permObject.toJSON);
 				
-				if (contactStatus) { 
-
-					return res.status(200).json({
-						error: false,
-						message: 'Contact status kept'
-					 });
-
-					// I am a contact.  I have a contact.  All is well
-					
-				} else if (existing.contactObject) { 
-					
-					await existing.contactObject.destroy();
-					
-					const changeLog = db.changeLog.build({
-						tag         : "access",
-						tourn       : tournId,
-						person      : req.session.person,
-						description : `Removed ${existing.person.email} as a contact`,
-						created_at  : Date()
-					});
-
-					return res.status(200).json({
-						error: false,
-						message: 'Contact status removed'
-					 });
-
-				} else {
-					
-					return res.status(200).json({
-						error: false,
-						message: 'Contact status removed'
-					 });
-				}
-
-			} else { 
-
-				existing.permObject.tag = accessLevel;
-				await existing.permObject.save();
-				
-				const changeLog = db.changeLog.build({
-					tag         : "access",
-					tourn       : tournId,
-					person      : req.session.person,
-					created_at  : Date(),
-					description : `Changed ${existing.person.email} access level to ${accessLevel}`
-				});
-
-				await changeLog.save();
-
-				return res.status(200).json({
-					error: false,
-					message: `Permissions level changed for ${existing.person.email}`
-				 });
-			}
-
-		} else {
-			return res.status(200).json({ 
-				error: true,
-				message: `Invalid access level requested: ${accessLevel}`
+			const changeLog = await db.changeLog.create({
+				tag         : "access",
+				tourn       : tournId,
+				person      : req.session.person,
+				created_at  : Date(),
+				description : `Changed ${existing.person.email} access level to ${accessLevel}`
 			});
+
+			return res.status(200).json({
+				error: false,
+				message: changeLog.description
+			 });
 		}
 	},
 
@@ -172,8 +196,10 @@ export const changeAccess = {
 		const tournId = req.params.tourn_id;
 
 		let already = await db.permission.findAll({
-			where : { tourn: tournId, person: adminId},
-			include : [
+			where : {
+				tourn  : tournId,
+				person : adminId
+			}, include : [
 				{ model: db.person, as: 'Person' },
 			]
 		});
@@ -219,7 +245,7 @@ export const changeAccess = {
 		await checkOwner(existing);
 		await destroyPerms(existing);
 		
-		const changeLog = db.changeLog.build({
+		const changeLog = await db.changeLog.create({
 			tag         : "access",
 			Tourn       : tournId,
 			person      : req.session.person,
@@ -227,7 +253,6 @@ export const changeAccess = {
 			description : reply.message
 		});
 			
-		await changeLog.save();
 		return res.status(200).json(reply);
 	},
 };
@@ -266,7 +291,10 @@ export const changeEventAccess = {
 		}
 
 		let already = await db.permission.findAll({
-			where : {tourn: tournId, person: adminId}
+			where : {
+				tourn: tournId, 
+				person: adminId
+			}
 		});
 
 		parsePerms(already).then(async function(existing) { 
@@ -275,7 +303,17 @@ export const changeEventAccess = {
 			let replyButtons = " ";
 			let newAdmin = await db.person.findByPk(adminId);
 
+			console.log(existing.permObject.details);
+			
+			if (existing.permObject.details == null) {
+				existing.permObject.details = {};
+			}
+
 			for (let event of events) { 
+
+				if (existing.permObject.details[event.id] == accessLevel) { 
+					continue;
+				}
 
 				existing.permObject.details[event.id] = accessLevel;
 
@@ -284,6 +322,11 @@ export const changeEventAccess = {
 				}
 				
 				logString += event.abbr;
+
+				// Need to add the button to the listing.  God this will be so
+				// much easier with React.  This is basically why react/angular
+				// etc were created I guess.  Anguish.
+				
 				replyButtons += `<div
 					class = "third padvertless semibold greentext yellowhover centeralign nospace smaller"
 					id    = "${ event.id }_${ adminId }"
@@ -299,7 +342,7 @@ export const changeEventAccess = {
 			existing.permObject.changed("details", true);
 			existing.permObject.save();
 
-			const changeLog = db.changeLog.build({
+			const changeLog = await db.changeLog.create({
 				tag         : "access",
 				tourn       : tournId,
 				person      : req.session.person,
@@ -307,11 +350,7 @@ export const changeEventAccess = {
 				created_at  : Date()
 			});
 
-			await changeLog.save();
-
-			// Need to add the button to the listing.  God this will be so
-			// much easier with React.  This is basically why react/angular
-			// etc were created I guess
+			console.log(changeLog.toJSON);
 
 			return res.status(200).json({ 
 				error   : false,
@@ -319,7 +358,6 @@ export const changeEventAccess = {
 				reply   : replyButtons
 			});
 		});
-
     },
 
 	// A delete will revoke access to that event
@@ -344,15 +382,13 @@ export const changeEventAccess = {
 			existing.permObject.changed("details", true);
 			await existing.permObject.save();
 
-			const changeLog = db.changeLog.build({
+			const changeLog = await db.changeLog.create({
 				tag         : "access",
 				tourn       : tournId,
 				person      : req.session.person,
 				description : `Revoked ${newAdmin.email} permissions to ${targetEvent.name}`,
 				created_at  : Date()
 			});
-
-			await changeLog.save();
 			
 			return res.status(200).json({ 
 				error   : false,
