@@ -126,10 +126,7 @@ sub all_permissions {
 			if ($tag eq "by_event") {
 				$perms{$tag} = $perm;
 				$perms{"tourn"}{$tourn->id} = $tag;
-				$perms{"details"} = eval {
-					return JSON::decode_json($perm->details);
-				};
-
+				$perms{"details"} = $perm->get_details();
 			} else {
 				$perms{"tourn"}{$tourn->id} = $tag;
 				$perms{"undetailed"}{$tourn->id}++;
