@@ -169,9 +169,7 @@ export const changeAccess = {
 			});
 
 			let existing = await parsePerms(already);
-			console.log(existing.permObject.toJSON);
 			await existing.permObject.update({tag: accessLevel});
-			console.log(existing.permObject.toJSON);
 				
 			const changeLog = await db.changeLog.create({
 				tag         : "access",
@@ -302,8 +300,6 @@ export const changeEventAccess = {
 			let logString = " ";
 			let replyButtons = " ";
 			let newAdmin = await db.person.findByPk(adminId);
-
-			console.log(existing.permObject.details);
 			
 			if (existing.permObject.details == null) {
 				existing.permObject.details = {};
@@ -349,8 +345,6 @@ export const changeEventAccess = {
 				description : `Added ${newAdmin.email} with ${accessLevel} level permissions to ${logString}`,
 				created_at  : Date()
 			});
-
-			console.log(changeLog.toJSON);
 
 			return res.status(200).json({ 
 				error   : false,
