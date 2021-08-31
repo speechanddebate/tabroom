@@ -9,3 +9,12 @@
 
 	update permission set tag = "by_event" where tag  = "detailed";
 
+	delete from event_setting where id in (select event_setting.id
+	from event_setting
+	where event_setting.tag = 'online_mode'
+	and not exists (
+		select es.id
+		from event_setting es
+		where es.tag = 'online'
+		and es.event = event_setting.event
+	));

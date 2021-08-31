@@ -7,7 +7,6 @@ import Sequelize from 'sequelize';
 
 const basename = path.basename(module.filename);
 
-
 const sequelize = new Sequelize(
 	config.DB_DATABASE,
 	config.DB_USER,
@@ -15,12 +14,15 @@ const sequelize = new Sequelize(
 	config.sequelizeOptions
 );
 
-const SequelizeModel = require('sequelize/lib/model'), orgFindAll = SequelizeModel.findAll
-
 // By default Sequelize wants you to try...catch every single database query
 // for Reasons?  Otherwise all your database errors just go unprinted and you
 // get a random unfathomable 500 error.  Yeah, because that's great.  This will
 // try/catch every query so I don't have to deal.
+
+const SequelizeModel = require('sequelize/lib/model'),
+	orgFindAll = SequelizeModel.findAll,
+	orgFindOne = SequelizeModel.findOne,
+	orgCreate = SequelizeModel.create;
 
 function dbError(err) {
 	console.log(err);
@@ -32,7 +34,12 @@ SequelizeModel.findAll = function() {
 	dbError(err);
   });
 }
-const orgCreate = SequelizeModel.create
+SequelizeModel.findOne = function() {
+  return orgFindOne.apply(this, arguments).catch(err => {
+	dbError(err);
+  });
+}
+
 SequelizeModel.create = function() {
   return orgCreate.apply(this, arguments).catch(err => {
 	dbError(err);
@@ -55,7 +62,7 @@ fs
 		return (file.indexOf(".") !== 0) && (file !== basename);
 	})
 	.forEach(function(file) {
-		const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes)	
+		const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes)
 		db[model.name] = model;
 	});
 
@@ -96,7 +103,13 @@ db.campusLog.belongsTo(db.entry   , { as: "Entry"   , foreignKey: "entry"});
 db.campusLog.belongsTo(db.judge   , { as: "Judge"   , foreignKey: "judge"});
 
 db.circuit.belongsToMany(db.tourn,   { as: "Tourns",   foreignKey: "circuit", through: 'tourn_circuit'});
-db.circuit.belongsToMany(db.person,  { as: "Persons",  foreignKey: "circuit", through: 'permission'});
+db.circuit.belongsToMany(db.person,  { 
+	uniqueKey  : "id",
+	as         : "Persons",
+	foreignKey : "circuit",
+	otherKey   : "person",
+	through    : 'permission'
+});
 db.circuit.belongsToMany(db.chapter, { as: "Chapters", foreignKey: "circuit", through: 'chapter_circuit'});
 
 db.circuit.hasMany(db.file,               { as: "Files",              foreignKey: "circuit"});
@@ -130,7 +143,13 @@ db.chapter.hasMany(db.school,        { as: "Schools",       foreignKey: "chapter
 db.chapter.hasMany(db.chapterJudge, { as: "ChapterJudges", foreignKey: "chapter"});
 db.chapter.belongsToMany(db.region,  { as: "Regions",  foreignKey: "circuit", through: 'chapter_circuit'});
 db.chapter.belongsToMany(db.circuit, { as: "Circuits", foreignKey: "circuit", through: 'chapter_circuit'});
-db.chapter.belongsToMany(db.person,  { as: "Persons",  foreignKey: "circuit", through: 'permission'});
+db.chapter.belongsToMany(db.person,  {
+	uniqueKey  : "id",
+	as         : "Persons",
+	foreignKey : "chapter",
+	otherKey   : "person",
+	through    : 'permission'
+});
 
 db.chapterCircuit.belongsTo(db.circuit, { as: "Circuit", foreignKey: "circuit"});
 db.chapterCircuit.belongsTo(db.chapter, { as: "Chapter", foreignKey: "chapter"});
@@ -141,7 +160,6 @@ db.chapterJudge.hasMany(db.judge,     { as: "Judges",        foreignKey: "chapte
 db.chapterJudge.belongsTo(db.chapter, { as: "Chapter",       foreignKey: "chapter"});
 db.chapterJudge.belongsTo(db.person,  { as: "Person",        foreignKey: "person"});
 db.chapterJudge.belongsTo(db.person,  { as: "PersonRequest", foreignKey: "person_request"});
-
 
 db.district.hasMany(db.chapter,    { as: "Chapters",    foreignKey: "district"});
 db.district.hasMany(db.permission, { as: "Permissions", foreignKey: "district"});
@@ -160,16 +178,22 @@ db.studentVote.belongsTo(db.entry  , { as: "Entry"   , foreignKey: "entry"});
 db.studentVote.belongsTo(db.person , { as: "Voter"   , foreignKey: "voter"});
 db.studentVote.belongsTo(db.person , { as: "Entered" , foreignKey: "entered_by"});
 
-db.region.belongsTo(db.circuit, { as: "Circuit", foreignKey: "circuit"});
-db.region.belongsTo(db.tourn,   { as: "Tourn", foreignKey: "tourn"});
+db.region.belongsTo(db.circuit,    { as: "Circuit", foreignKey: "circuit"});
+db.region.belongsTo(db.tourn,      { as: "Tourn", foreignKey: "tourn"});
 
 db.region.hasMany(db.strike,     { as: "Strikes",     foreignKey: "region"});
 db.region.hasMany(db.permission, { as: "Permissions", foreignKey: "region"});
 db.region.hasMany(db.judgeHire,  { as: "JudgeHires",  foreignKey: "region"});
 db.region.hasMany(db.fine,       { as: "Fines",       foreignKey: "region"});
 
-db.region.belongsToMany(db.person,  { as: "Persons",  foreignKey: "region", through: 'permission'});
-db.region.belongsToMany(db.chapter, { as: "Chapters", foreignKey: "region", through: 'chapter_circuit'});
+db.region.belongsToMany(db.chapter, { uniqueKey: "id", as: "Chapters", foreignKey: "region", through: 'chapter_circuit'});
+db.region.belongsToMany(db.person,  {
+	uniqueKey  : "id",
+	as         : "Persons",
+	foreignKey : "region",
+	otherKey   : "person",
+	through    : 'permission'
+});
 
 db.regionSetting.belongsTo(db.region,  { as: "Region", foreignKey: "region"});
 db.region.hasMany(db.regionSetting,    { as: "Settings", foreignKey: "region"});
@@ -198,15 +222,22 @@ db.tourn.hasMany(db.webpage,      { as: "Webpages",     foreignKey: "tourn"});
 db.tourn.hasMany(db.weekend,      { as: "Weekends",     foreignKey: "tourn"});
 db.tourn.hasMany(db.permission,   { as: "Permissions",  foreignKey: "tourn"});
 
-db.tourn.belongsToMany(db.site,    { as: "Sites",    foreignKey: "tourn", through: 'tourn_site'});
-db.tourn.belongsToMany(db.person,  { as: "Persons",  foreignKey: "tourn", through: 'permissions'});
-db.tourn.belongsToMany(db.circuit, { as: "Circuits", foreignKey: "tourn", through: 'tourn_circuit'});
+db.tourn.belongsToMany(db.site,    { uniqueKey: "id", as: "Sites",    foreignKey: "tourn", through: 'tourn_site'});
+db.tourn.belongsToMany(db.person,  {
+	uniqueKey  : "id",
+	as         : "Persons",
+	foreignKey : "tourn",
+	otherKey   : "person",
+	through    : 'permission'
+});
+
+
+db.tourn.belongsToMany(db.circuit, { uniqueKey: "id", as: "Circuits", foreignKey: "tourn", through: 'tourn_circuit'});
 
 db.tournFee.belongsTo(db.tourn , { as: "Tourn"   , foreignKey: "tourn"});
 db.timeslot.belongsTo(db.tourn , { as: "Tourn"   , foreignKey: "tourn"});
 db.timeslot.hasMany(db.round   , { as: "Rounds"  , foreignKey: "timeslot"});
 db.timeslot.hasMany(db.strike  , { as: "Strikes" , foreignKey: "timeslot"});
-
 
 db.category.belongsTo(db.tourn,    { as: "Tourn",   foreignKey: "tourn"});
 db.category.belongsTo(db.pattern,  { as: "Pattern", foreignKey: "pattern"});
@@ -274,8 +305,6 @@ db.school.belongsTo(db.chapter  , { as: "Chapter" , foreignKey: "chapter"});
 db.school.belongsTo(db.region   , { as: "Region"  , foreignKey: "region"});
 db.school.belongsTo(db.district , { as: "District", foreignKey: "district"});
 
-db.school.belongsToMany(db.person, { as: "Persons", foreignKey: "school", through: 'school_contacts'});
-
 db.fine.belongsTo(db.person  , { as: 'LeviedBy'  , foreignKey: 'levied_by' });
 db.fine.belongsTo(db.person  , { as: 'DeletedBy' , foreignKey: 'deleted_by' });
 db.fine.belongsTo(db.tourn   , { as: "Tourn"     , foreignKey: "tourn"});
@@ -325,7 +354,6 @@ db.judgeHire.belongsTo(db.school,   { as: "School",    foreignKey: "school"});
 db.judgeHire.belongsTo(db.region,   { as: "Region",    foreignKey: "region"});
 db.judgeHire.belongsTo(db.category, { as: "Category",  foreignKey: "category"});
 
-
 // Specialty registration data later
 
 db.concession.belongsTo(db.tourn, { as: "Tourn", foreignKey: "tourn"});
@@ -362,7 +390,6 @@ db.file.belongsTo(db.person  , { as: "Person"  , foreignKey: "person"});
 
 db.file.belongsTo(db.file    , { as: "Parent"  , foreignKey: "parent"});
 db.file.hasMany(db.file , { as: "Children" , foreignKey: "parent"});
-
 db.hotel.belongsTo(db.tourn, { as: "Tourn", foreignKey: "tourn"});
 
 db.housing.belongsTo(db.person,  { as: "Requestor", foreignKey: "requestor"});
@@ -372,7 +399,6 @@ db.housing.belongsTo(db.judge,   { as: "Judge",     foreignKey: "judge"});
 db.housing.belongsTo(db.school,  { as: "School",    foreignKey: "school"});
 
 db.housingSlots.belongsTo(db.tourn, { as: "Tourn", foreignKey: "tourn"});
-
 db.invoice.belongsTo(db.school,  { as: "School",    foreignKey: "school"});
 
 // Pref Sheets
@@ -467,15 +493,42 @@ db.person.hasMany(db.permission,    { as: "Permissions",   foreignKey: "person"}
 db.person.hasMany(db.studentVote,   { as: "StudentVotes",  foreignKey: "voter"});
 
 db.person.belongsToMany(db.tourn,   { as: "IgnoredTourns", foreignKey: "person", through: 'tourn_ignore'});
-db.person.belongsToMany(db.tourn,   { as: "Tourns",        foreignKey: "person", through: 'permission'});
-db.person.belongsToMany(db.region,  { as: "Regions",       foreignKey: "person", through: 'permission'});
-db.person.belongsToMany(db.chapter, { as: "Chapters",      foreignKey: "person", through: 'permission'});
-db.person.belongsToMany(db.circuit, { as: "Circuits",      foreignKey: "person", through: 'permission'});
+db.person.belongsToMany(db.tourn,   {
+	uniqueKey  : "id",
+	as         : "Tourns",
+	foreignKey : "person",
+	otherKey   : "tourn",
+	through    : 'permission'
+});
+	
+db.person.belongsToMany(db.region,  { 
+	uniqueKey  : "id",
+	as         : "Regions",
+	foreignKey : "person",
+	otherKey   : "region",
+	through    : 'permission'
+});
+	
+db.person.belongsToMany(db.chapter, {
+	uniqueKey  : "id",
+	as         : "Chapters",
+	foreignKey : "person",
+	otherKey   : "chapter",
+	through    : 'permission'
+});
+		
+db.person.belongsToMany(db.circuit, {
+	uniqueKey  : "id",
+	as         : "Circuits",
+	foreignKey : "person",
+	otherKey   : "circuit",
+	through    : 'permission'
+});
 
-db.conflict.belongsTo(db.person  , { as: "Person"     , foreignKey: "person"});
-db.conflict.belongsTo(db.person  , { as: 'Conflicted' , foreignKey: "conflicted"});
-db.conflict.belongsTo(db.chapter , { as: "Chapter"    , foreignKey: "chapter"});
-db.conflict.belongsTo(db.person  , { as: 'AddedBy'    , foreignKey: "added_by"});
+db.conflict.belongsTo(db.person,  { as: "Person"     , foreignKey: "person"});
+db.conflict.belongsTo(db.person,  { as: 'Conflicted' , foreignKey: "conflicted"});
+db.conflict.belongsTo(db.chapter, { as: "Chapter"    , foreignKey: "chapter"});
+db.conflict.belongsTo(db.person,  { as: 'AddedBy'    , foreignKey: "added_by"});
 
 //Permissions
 db.permission.belongsTo(db.person,   { as: "Person",   foreignKey: "person"});
@@ -574,14 +627,10 @@ db.person.hasMany(db.personSetting     , { as: "Settings" , foreignKey : "person
 db.rpool.hasMany(db.rpoolSetting       , { as: "Settings" , foreignKey : "rpool"});
 db.student.hasMany(db.studentSetting   , { as: "Settings" , foreignKey : "student"});
 
-
 // Initialize the data objects.
-
-
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
 export default db;
 
 //db.Ballot.belongsTo(db.Person, { as: "CollectedBy"});
-
