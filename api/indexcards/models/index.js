@@ -22,6 +22,7 @@ const sequelize = new Sequelize(
 const SequelizeModel = require('sequelize/lib/model'),
 	orgFindAll = SequelizeModel.findAll,
 	orgFindOne = SequelizeModel.findOne,
+	orgSave = SequelizeModel.save,
 	orgCreate = SequelizeModel.create;
 
 function dbError(err) {
@@ -39,12 +40,18 @@ SequelizeModel.findOne = function() {
 	dbError(err);
   });
 }
+SequelizeModel.save = function() {
+  return orgSave.apply(this, arguments).catch(err => {
+	dbError(err);
+  });
+}
 
 SequelizeModel.create = function() {
   return orgCreate.apply(this, arguments).catch(err => {
 	dbError(err);
   });
 }
+
 sequelize.query = function() {
   return Sequelize.prototype.query.apply(this, arguments).catch(err => {
 	dbError(err);

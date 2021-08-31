@@ -11,7 +11,9 @@ export const changeAccess = {
 
 		if (req.body.other_value) { 
 			accessLevel = req.body.other_value;
-		};
+		} else if (req.body.setting_name) { 
+			accessLevel = req.body.setting_name;
+		}
 
 		if (
 			accessLevel === "checker"
@@ -192,6 +194,44 @@ export const changeAccess = {
 		const db = req.db;
 		const adminId = req.body.target_id;
 		const tournId = req.params.tourn_id;
+		const level = req.body.setting_name;
+
+		if (level == "backup") { 
+
+			const backupAccounts = await db.tournSetting.findOne({
+				where : { 
+					tourn: tournId, 
+					tag  : "backup_followers"
+				}
+			});
+
+			let followerString = "";
+			let newAdmin = await db.person.findByPk(adminId);
+
+			if (backupAccounts) {
+
+				let followers = backupAccounts.value.split(',');
+				let uniqueFollowers = followers.filter(onlyUnique);
+
+				for (let follower of uniqueFollowers) { 
+					if (follower != adminId) { 
+						if (followerString) { 
+							followerString += ",";
+						}
+						followerString += follower;
+					}
+				}
+
+				backupAccounts.value = followerString;
+				backupAccounts.save();			
+			}
+
+			return res.status(200).json({ 
+				error   : false,
+				message : `${newAdmin.email} will no longer get tournament backup emails`,
+				destroy : `backups_${newAdmin.id}`
+			});
+		}
 
 		let already = await db.permission.findAll({
 			where : {
@@ -454,3 +494,8 @@ const parsePerms = async (permsArray) => {
 
 	return permsOutput;
 }
+
+function onlyUnique(value, index, self) {
+	return self.indexOf(value) === index;
+}
+  

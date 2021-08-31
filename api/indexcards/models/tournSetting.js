@@ -1,9 +1,6 @@
-/* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
-
 	return sequelize.define('tournSetting', {
-		table_name : 'tourn_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
@@ -21,6 +18,8 @@ module.exports = function(sequelize, DataTypes) {
 			type: DataTypes.DATE,
 			allowNull: true
 		}
+	},{
+		tableName: 'tourn_setting',
 	});
 };
 
