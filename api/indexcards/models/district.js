@@ -5,26 +5,23 @@ module.exports = function(sequelize, DataTypes) {
 		name: {
 			type: DataTypes.STRING(64),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		code: {
 			type: DataTypes.STRING(16),
-			allowNull: true
+			allowNull: true,
 		},
 		location: {
 			type: DataTypes.STRING(16),
-			allowNull: true
+			allowNull: true,
 		},
 		level: {
 			type: DataTypes.INTEGER(4),
-			allowNull: true
+			allowNull: true,
 		},
 		realm: {
 			type: DataTypes.STRING(8),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

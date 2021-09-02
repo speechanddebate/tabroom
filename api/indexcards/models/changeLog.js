@@ -5,24 +5,23 @@ module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('changeLog', {
 		tag: {
 			type: DataTypes.STRING(63),
-			allowNull: false
+			allowNull: false,
 		},
 		description: {
-			type: DataTypes.TEXT("medium"),
-			allowNull: false
+			type: DataTypes.TEXT('medium'),
+			allowNull: false,
 		},
 		deleted          : {
 			type         : DataTypes.BOOLEAN,
 			allowNull    : false,
-			defaultValue : false
+			defaultValue : false,
 		},
 		createdAt : {
 			type      : DataTypes.DATE,
 			allowNull : false,
-			field     : "created_at"
-		}
+			field     : 'created_at',
+		},
 	}, {
-		tableName : "change_log",
+		tableName : 'change_log',
 	});
 };
-

@@ -10,5 +10,5 @@ import getProfile from '../../controllers/user/account/getProfile';
 // { path : '/user/person/' , module : getPerson },
 
 export default [
-    { path : '/profile', module : getProfile },
+	{ path : '/profile', module : getProfile },
 ];

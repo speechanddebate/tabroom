@@ -1,4 +1,3 @@
-
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
@@ -6,14 +5,11 @@ module.exports = function(sequelize, DataTypes) {
 		table_name: 'concession_type',
 		name: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		description : {
 			type: DataTypes.TEXT,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

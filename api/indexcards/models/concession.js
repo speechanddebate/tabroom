@@ -5,34 +5,31 @@ module.exports = function(sequelize, DataTypes) {
 		name: {
 			type: DataTypes.STRING(64),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		price: {
 			type: DataTypes.DECIMAL(6,2),
-			allowNull: true
+			allowNull: true,
 		},
 		description: {
 			type: DataTypes.STRING,
-			allowNull: true
+			allowNull: true,
 		},
 		deadline: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		cap: {
 			type: DataTypes.INTEGER(11),
-			allowNull: true
+			allowNull: true,
 		},
 		school_cap: {
 			type: DataTypes.INTEGER(11),
-			allowNull: true
+			allowNull: true,
 		},
 		billing_code: {
 			type: DataTypes.STRING(63),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

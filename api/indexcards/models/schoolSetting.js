@@ -5,22 +5,21 @@ module.exports = function(sequelize, DataTypes) {
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		value: {
 			type: DataTypes.STRING(64),
-			allowNull: true
+			allowNull: true,
 		},
 		value_text: {
 			type: DataTypes.TEXT,
-			allowNull: true
+			allowNull: true,
 		},
 		value_date: {
 			type: DataTypes.DATE,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	}, {
 		tableName: 'school_setting',
 	});
 };
-
