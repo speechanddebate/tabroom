@@ -146,7 +146,7 @@ export const attendance = {
 
 		if (req.body.setting_name === 'judge_started') {
 
-			const judge = db.judge.findByPk(req.body.another_thing);
+			const judge = await db.judge.findByPk(req.body.another_thing);
 
 			if (req.body.property_name > 0) {
 
