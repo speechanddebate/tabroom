@@ -8,81 +8,80 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull: false,
 			defaultValue: '',
 			validate: {
-				isEmail: true
+				isEmail: true,
 			},
-			unique: true
+			unique: true,
 		},
 		password: {
 			type: DataTypes.STRING(127),
-			allowNull: true
+			allowNull: true,
 		},
 		first: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		middle: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		last: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		pronoun: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		no_email: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		street: {
 			type: DataTypes.STRING(127),
-			allowNull: true
+			allowNull: true,
 		},
 		city: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		state: {
 			type: DataTypes.CHAR(4),
-			allowNull: true
+			allowNull: true,
 		},
 		zip: {
 			type: DataTypes.STRING(15),
-			allowNull: true
+			allowNull: true,
 		},
 		postal: {
 			type: DataTypes.STRING(15),
-			allowNull: true
+			allowNull: true,
 		},
 		country: {
 			type: DataTypes.CHAR(4),
-			allowNull: true
+			allowNull: true,
 		},
 		tz: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		phone: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		provider: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		site_admin: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		nsda: {
 			type: DataTypes.INTEGER(11),
 			allowNull: true,
-			unique: true
-		}
+			unique: true,
+		},
 	});
 };
-

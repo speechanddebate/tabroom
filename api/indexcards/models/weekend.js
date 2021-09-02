@@ -5,51 +5,48 @@ module.exports = function(sequelize, DataTypes) {
 		name: {
 			type: DataTypes.STRING(64),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		start : {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		end : {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		reg_start : {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		reg_end : {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 
 		freeze_deadline : {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		drop_deadline : {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		judge_deadline : {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		fine_deadline : {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		city: {
 			type: DataTypes.STRING(127),
-			allowNull: true
+			allowNull: true,
 		},
 		state: {
 			type: DataTypes.CHAR(4),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

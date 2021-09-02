@@ -4,42 +4,39 @@ module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('judge', {
 		code: {
 			type: DataTypes.STRING(8),
-			allowNull: true
+			allowNull: true,
 		},
 		first: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		middle: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		last: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		active: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		ada: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		obligation: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
+			allowNull: true,
 		},
 		hired: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-
