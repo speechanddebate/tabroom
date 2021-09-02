@@ -10,11 +10,13 @@ import userData from '../../../tests/users';
 describe('Status Board', () => {
 
     let testAdmin = {};
+    let testCampusLog = {};
     let testAdminSession = {};
 
     before("Set Dummy Data", async () => {
 		testAdmin = await db.person.create(userData.testAdmin);
 		testAdminSession = await db.session.create(userData.testAdminSession);
+		testCampusLog = await db.campusLog.create(userData.testCampusLog);
     });
 
 	it('Return a correct JSON status object', async () => {
@@ -25,8 +27,6 @@ describe('Status Board', () => {
 			.set('Cookie', [config.COOKIE_NAME+'='+testAdminSession.userkey])
 			.expect('Content-Type', /json/)
 			.expect(200);
-
-		console.log(res.body);
 
 		assert.isObject(res.body, 'Response is an object');
 
@@ -70,10 +70,38 @@ describe('Status Board', () => {
 			res.body[10],
 			'6',
 			"Judge 10 not present in section 6");
+	});
+
+	it('Mark an absent as present, and a present as absent', async () => {
 
 	});
 
+	it ("Reflects those changes in a new status object", async() => { 
+		let res = await request(server)
+			.post(`/v1/tourn/1/tab/status/update`)
+			.set('Accept', 'application/json')
+			.set('Cookie', [config.COOKIE_NAME+'='+testAdminSession.userkey])
+			.body({
+				target_id: 16,   	// person marked present
+				related_thing: 27, 	// panel ID
+			})
+			.expect('Content-Type', /json/)
+			.expect(200);
+
+		let res = await request(server)
+			.post(`/v1/tourn/1/tab/status/update`)
+			.set('Accept', 'application/json')
+			.set('Cookie', [config.COOKIE_NAME+'='+testAdminSession.userkey])
+			.body({target_id: 16, related_thing: 27})
+			.expect('Content-Type', /json/)
+			.expect(200);
+
+		
+	});
+
+
     after("Remove Dummy Data", async () => {
+        await testCampusLog.destroy();
         await testAdminSession.destroy();
         await testAdmin.destroy();
 	});

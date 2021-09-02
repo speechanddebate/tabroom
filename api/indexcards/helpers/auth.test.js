@@ -77,7 +77,7 @@ describe ("Authentication Functions", () => {
 		req.session = await(tournAuth(req));
 
 		assert.typeOf(req.session, 'object');
-		assert.equal(req.session[testTourn].level, 'full_admin');
+		assert.equal(req.session[testTourn].level, 'tabber');
 		assert.equal(req.session[testTourn].menu, 'all');
 	});
 

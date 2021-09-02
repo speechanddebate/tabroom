@@ -46,8 +46,8 @@ export let testUserSession = {
 
 export let testAdminSession = {
 	...testUserSession,
-	userkey    : '$6$Pu38ZiKn$FzP6b0eWARklPxm9WicHlNQts7tPJNsogbGWLZSQayUZlFBJY29XRDXA1XznWi3/72kej6gp8W0epnpsJLMKP.',
-	person     : "70",
+	userkey : '$6$Pu38ZiKn$FzP6b0eWARklPxm9WicHlNQts7tPJNsogbGWLZSQayUZlFBJY29XRDXA1XznWi3/72kej6gp8W0epnpsJLMKP.',
+	person  : "70",
 };
 
 export let testUserTournPerm = {
@@ -56,12 +56,20 @@ export let testUserTournPerm = {
 	tag    : "tabber"
 };
 
+export const testCampusLog = {
+	tag         : "present",
+	person      : 10,
+	tourn       : 1,
+	description : "Test Eleven marked as present by palmer@tabroom.com",
+	panel       : 37
+};
+
 export default {
 	testAdmin         : testAdmin,
 	testUser          : testUser,
 	testUserTournPerm : testUserTournPerm,
 	testAdminSession  : testAdminSession,
 	testUserSession   : testUserSession,
-	testPassword      : testPassword
+	testPassword      : testPassword,
+	testCampusLog     : testCampusLog
 }
-
