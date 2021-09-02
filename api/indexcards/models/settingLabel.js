@@ -5,22 +5,19 @@ module.exports = function(sequelize, DataTypes) {
 		table_name: 'setting_label',
 		lang: {
 			type: DataTypes.CHAR(2),
-			allowNull: false
+			allowNull: false,
 		},
 		label: {
 			type: DataTypes.STRING(127),
-			allowNull: false
+			allowNull: false,
 		},
 		guide: {
 			type: DataTypes.TEXT,
-			allowNull: true
+			allowNull: true,
 		},
 		options: {
 			type: DataTypes.TEXT,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

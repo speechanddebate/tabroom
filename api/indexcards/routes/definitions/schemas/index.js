@@ -7,9 +7,9 @@ import Event from './Event';
 
 export default {
 	Err,
-    Person,
+	Person,
 	Login,
 	School,
 	SchoolSetting,
-	Event
+	Event,
 };

@@ -8,18 +8,16 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('chapterCircuit', {
-		table_name : "chapter_circuit",
+		table_name : 'chapter_circuit',
 		code: {
 			type: DataTypes.STRING(15),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		full_member: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
-		}
+			defaultValue: '0',
+		},
 	});
 };
-
-

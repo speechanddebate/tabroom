@@ -1,4 +1,3 @@
-
 // Autoqueue
 
 module.exports = function(sequelize, DataTypes) {
@@ -6,20 +5,19 @@ module.exports = function(sequelize, DataTypes) {
 		tag: {
 			type         : DataTypes.STRING(31),
 			allowNull    : false,
-			defaultValue : ''
+			defaultValue : '',
 		},
 		message      : {
 			type      : DataTypes.STRING,
-			allowNull : true
+			allowNull : true,
 		},
 		active_at         : {
 			type      : DataTypes.DATE,
-			allowNull : true
+			allowNull : true,
 		},
 		created_at         : {
 			type      : DataTypes.DATE,
-			allowNull : true
-		}
+			allowNull : true,
+		},
 	});
 };
-

@@ -3,28 +3,27 @@
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('panel', {
 		letter: {
-		  type: DataTypes.STRING(3),
-		  allowNull: true
+			type: DataTypes.STRING(3),
+			allowNull: true,
 		},
 		flight: {
-		  type: DataTypes.STRING(3),
-		  allowNull: true
+			type: DataTypes.STRING(3),
+			allowNull: true,
 		},
 		bye: {
-		  type: DataTypes.BOOLEAN,
-		  allowNull: false,
-		  defaultValue: '0'
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0',
 		},
 		bracket: {
-		  type: DataTypes.INTEGER(6),
-		  allowNull: false,
-		  defaultValue: '0'
+			type: DataTypes.INTEGER(6),
+			allowNull: false,
+			defaultValue: '0',
 		},
 		publish: {
-		  type: DataTypes.BOOLEAN,
-		  allowNull: false,
-		  defaultValue: '0'
+			type: DataTypes.BOOLEAN,
+			allowNull: false,
+			defaultValue: '0',
 		},
 	});
 };
-

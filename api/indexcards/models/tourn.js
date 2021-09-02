@@ -5,51 +5,48 @@ module.exports = function(sequelize, DataTypes) {
 		name: {
 			type: DataTypes.STRING(64),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		city: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		state: {
 			type: DataTypes.CHAR(4),
-			allowNull: true
+			allowNull: true,
 		},
 		country: {
 			type: DataTypes.CHAR(4),
-			allowNull: true
+			allowNull: true,
 		},
 		tz: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		webname: {
 			type: DataTypes.STRING(64),
-			allowNull: true
+			allowNull: true,
 		},
 		hidden: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		start: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		end: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		reg_start: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		reg_end: {
 			type: DataTypes.DATE,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

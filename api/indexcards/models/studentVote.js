@@ -6,17 +6,16 @@ module.exports = function(sequelize, DataTypes) {
 		tag: {
 			type         : DataTypes.ENUM('nominee', 'rank'),
 			allowNull    : false,
-			defaultValue : 'rank'
+			defaultValue : 'rank',
 		},
 		value: {
 			type: DataTypes.INTEGER,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		entered_at : {
 			type: DataTypes.DATE,
-			allowNull: false
-		}
+			allowNull: false,
+		},
 	});
 };
-

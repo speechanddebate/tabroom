@@ -6,31 +6,31 @@ module.exports = function(sequelize, DataTypes) {
 		tag: {
 			type: DataTypes.STRING(31),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		value: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		place: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
+			allowNull: true,
 		},
 		count: {
 			type: DataTypes.STRING(15),
-			allowNull: true
+			allowNull: true,
 		},
 		rev_min: {
 			type: DataTypes.INTEGER,
-			allowNull: true
+			allowNull: true,
 		},
 		count_round: {
 			type: DataTypes.INTEGER,
-			allowNull: true
+			allowNull: true,
 		},
 		truncate: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };

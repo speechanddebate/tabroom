@@ -5,12 +5,11 @@ module.exports = function(sequelize, DataTypes) {
 		table_name: 'result_value',
 		value: {
 			type: DataTypes.TEXT('medium'),
-			allowNull: true
+			allowNull: true,
 		},
 		priority: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-

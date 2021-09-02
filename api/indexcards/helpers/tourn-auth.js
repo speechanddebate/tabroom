@@ -5,13 +5,13 @@
 const tournAuth = async function(req) {
 
 	const tournId = req.params.tourn_id;
-	let session = req.session;
+	const session = req.session;
 
 	if (session == null || Object.entries(session).length === 0) {
 		return session;
 	}
 
-	if (typeof(tournId) === "undefined") {
+	if (typeof (tournId) === 'undefined') {
 		return session;
 	}
 
@@ -27,17 +27,16 @@ const tournAuth = async function(req) {
 	// display or contact purposes (this skip_admin flag)
 
 	if (req.session.site_admin) {
-		session[tournId].level = "owner";
-		session[tournId].menu  = "all";
+		session[tournId].level = 'owner';
+		session[tournId].menu  = 'all';
 		return session;
 	}
 
 	// Dost thou hath the keys to this gate?
 
 	const result = await req.db.permission.findAll({
-		where: {tourn: tournId, person: req.session.person}
+		where: { tourn: tournId, person: req.session.person },
 	});
-
 
 	if (result.count < 1) {
 
@@ -45,56 +44,57 @@ const tournAuth = async function(req) {
 
 	} else {
 
-		for (let perm of result) {
+		result.forEach(perm => {
 
-			let current;
+			let current = '';
+
 			if (session[tournId]) {
 				current = session[tournId].level;
 			}
 
-			if (perm.tag === "contact") {
+			if (perm.tag === 'contact') {
 
 				session[tournId].contact = true;
 
 			} else if (
-				perm.tag === "owner"
-				|| current === "owner"
+				perm.tag === 'owner'
+				|| current === 'owner'
 			) {
 
-				// Nothing should override if I'm the owner already,
-				// so let's just skip the rest and clear the flags
+				// Nothing should override if I'm the owner already, so let's
+				// just skip the rest and clear the flags
 
-				session[tournId].level = "owner";
-				session[tournId].menu = "all";
+				session[tournId].level = 'owner';
+				session[tournId].menu = 'all';
 				delete session[tournId].events;
 
 			} else if (
-				perm.tag === "tabber"
-				|| current === "tabber"
+				perm.tag === 'tabber'
+				|| current === 'tabber'
 			) {
 
-				session[tournId].level = "tabber";
-				session[tournId].menu  = "all";
+				session[tournId].level = 'tabber';
+				session[tournId].menu  = 'all';
 				delete session[tournId].events;
 
 			} else if (
-				perm.tag === "by_event"
-				|| current === "by_event"
+				perm.tag === 'by_event'
+				|| current === 'by_event'
 			) {
 
-				session[tournId].level  = "by_event";
-				session[tournId].menu   = "events";
+				session[tournId].level  = 'by_event';
+				session[tournId].menu   = 'events';
 				session[tournId].events = perm.details;
 
 			} else if (
-				perm.tag === "checker"
+				perm.tag === 'checker'
 			) {
 
-				session[tournId].level  = "checker";
-				session[tournId].menu   = "none";
+				session[tournId].level  = 'checker';
+				session[tournId].menu   = 'none';
 				session[tournId].events = perm.details;
 			}
-		}
+		});
 	}
 
 	return session;
