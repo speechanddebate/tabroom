@@ -16,9 +16,10 @@ module.exports = function(sequelize, DataTypes) {
 			allowNull    : false,
 			defaultValue : false
 		},
-		created_at : {
-			type         : DataTypes.DATE,
-			allowNull    : false
+		createdAt : {
+			type      : DataTypes.DATE,
+			allowNull : false,
+			field     : "created_at"
 		}
 	}, {
 		tableName : "change_log",

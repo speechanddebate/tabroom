@@ -6,7 +6,6 @@ export const attendance = {
     GET: async (req, res) => {
 
 		const db = req.db;
-		const op = db.Sequelize.Op
 
 		let queryLimit = "";
 
@@ -100,11 +99,11 @@ export const attendance = {
 
 		for (let start of startsResults) {
 
-			if (!status[start.person]) {
+			if (status[start.person] == undefined) {
 				status[start.person] = {};
 			}
 
-			if (!status[start.person][start.panel]) {
+			if (status[start.person][start.panel] == undefined) {
 				status[start.person][start.panel] = {};
 			}
 
@@ -114,7 +113,9 @@ export const attendance = {
 				{ tz: start.tz, format: "daytime" }
 			);
 
-			status[start.person][start.panel].audited = start.audited;
+			if (start.audited) { 
+				status[start.person][start.panel].audited = true;
+			}
 		}
 
 		if (status.count < 1) {
@@ -126,7 +127,6 @@ export const attendance = {
 
     POST: async (req, res) => {
 
-		const {body} = req;
 		const now = Date();
 		const db = req.db;
 
