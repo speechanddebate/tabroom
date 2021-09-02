@@ -435,7 +435,6 @@ db.strike.belongsTo(db.district, { as: "District",  foreignKey: "district"});
 db.strike.belongsTo(db.timeslot, { as: "Timeslot",  foreignKey: "timeslot"});
 db.strike.belongsTo(db.person,   { as: "EnteredBy", foreignKey: 'entered_by'});
 db.strike.belongsTo(db.shift,    { as: "Shift",     foreignKey: "shift"});
-db.strike.hasMany(db.changeLog,  { as: "Log",       foreignKey: "strike"});
 
 db.shift.hasMany(db.strike,     { as: "Strikes",  foreignKey: "shift"});
 db.shift.belongsTo(db.category, { as: "Category", foreignKey: "category"});
