@@ -58,6 +58,38 @@ export const attendance = {
 			order by cl.timestamp
 		`;
 
+		const unlinkedAttendanceQuery = `
+			select
+				cl.panel panel, cl.tag tag, cl.description description,
+					CONVERT_TZ(cl.timestamp, '+00:00', tourn.tz) timestamp,
+				cl.student student, cl.judge judge,
+				tourn.tz tz
+
+			from panel, campus_log cl, tourn, round
+
+			${queryLimit}
+
+				and panel.round = round.id
+				and panel.id = cl.panel
+				and cl.tourn = tourn.id
+				and (cl.person is NULL OR cl.person = 0)
+
+				and ( exists (
+						select ballot.id
+							from ballot
+						where ballot.judge = cl.judge
+							and ballot.panel = panel.id
+					) or exists (
+						select ballot.id
+							from ballot, entry_student es
+						where ballot.panel = panel.id
+							and ballot.entry = es.entry
+							and es.student = cl.student
+					)
+				)
+			order by cl.timestamp
+		`;
+
 		const startsQuery = `
 			select
 				judge.person person, panel.id panel,
@@ -82,6 +114,7 @@ export const attendance = {
 
 		// A raw query to go through the category filter
 		const [attendanceResults] = await db.sequelize.query(attendanceQuery);
+		const [unlinkedAttendanceResults] = await db.sequelize.query(unlinkedAttendanceQuery);
 		const [startsResults] = await db.sequelize.query(startsQuery);
 		const status = {};
 
@@ -93,6 +126,25 @@ export const attendance = {
 					description : attend.description,
 				},
 			};
+		});
+
+		unlinkedAttendanceResults.forEach( attend => {
+
+			if (attend.student) {
+				attend.person = `student_${attend.student}`;
+			} else if (attend.judge) {
+				attend.person = `judge_${attend.judge}`;
+			}
+
+			if (attend.person) {
+				status[attend.person] = {
+					[attend.panel] : {
+						tag		 : attend.tag,
+						timestamp   : attend.timestamp.toJSON,
+						description : attend.description,
+					},
+				};
+			}
 		});
 
 		startsResults.forEach( start => {
@@ -126,7 +178,19 @@ export const attendance = {
 
 		const now = Date();
 		const db = req.db;
-		const target = db.person.findByPk(req.body.target_id);
+
+		let [targetType, targetId] = req.body.target_id.toString().split('_');
+		let target;
+
+		if (targetType === 'student') {
+			target = await db.student.findByPk(targetId);
+		} else if (targetType === 'judge') {
+			target = await db.judge.findByPk(targetId);
+		} else {
+			target = await db.person.findByPk(req.body.target_id);
+		}
+
+		targetId = req.body.target_id;
 
 		if (!target) {
 			return res.status(201).json({
@@ -146,7 +210,13 @@ export const attendance = {
 
 		if (req.body.setting_name === 'judge_started') {
 
-			const judge = await db.judge.findByPk(req.body.another_thing);
+			let judge = {};
+
+			if (targetType === 'judge') {
+				judge = target;
+			} else { 
+				judge = await db.judge.findByPk(req.body.another_thing);
+			}
 
 			if (req.body.property_name > 0) {
 
@@ -162,21 +232,21 @@ export const attendance = {
 				const response = {
 					error : false,
 					reclass: [
-						{   id		  : `${panel.id}_${target.id}_start`,
+						{   id		  : `${panel.id}_${targetId}_start`,
 							removeClass : 'greentext',
 							addClass	: 'yellowtext',
 						},{
-							id		  : `${panel.id}_${target.id}_start`,
+							id		  : `${panel.id}_${targetId}_start`,
 							removeClass : 'fa-star',
 							addClass	: 'fa-stop',
 						},
 					],
 					reprop: [
-						{   id		  : `start_${panel.id}_${target.id}`,
+						{   id		  : `start_${panel.id}_${targetId}`,
 							property	: 'property_name',
 							value 		: false,
 						},{
-							id		  : `start_${panel.id}_${target.id}`,
+							id		  : `start_${panel.id}_${targetId}`,
 							property	: 'title',
 							value 		: 'Not started',
 						},
@@ -185,7 +255,6 @@ export const attendance = {
 				};
 
 				return res.status(201).json(response);
-
 			}
 
 			await db.ballot.update({
@@ -201,21 +270,21 @@ export const attendance = {
 			const response = {
 				error : false,
 				reclass: [
-					{   id		  : `${panel.id}_${target.id}_start`,
+					{   id		  : `${panel.id}_${targetId}_start`,
 						addClass	: 'greentext',
 						removeClass : 'yellowtext',
 					},{
-						id		  : `${panel.id}_${target.id}_start`,
+						id		  : `${panel.id}_${targetId}_start`,
 						addClass	: 'fa-star',
 						removeClass : 'fa-stop',
 					},
 				],
 				reprop: [
-					{   id		  : `start_${panel.id}_${target.id}`,
+					{   id		  : `start_${panel.id}_${targetId}`,
 						property	: 'property_name',
 						value 		: 1,
 					},{
-						id		  : `start_${panel.id}_${target.id}`,
+						id		  : `start_${panel.id}_${targetId}`,
 						property	: 'title',
 						value 		: `Judge marked as started by ${req.session.name}`,
 					},
@@ -224,23 +293,31 @@ export const attendance = {
 			};
 
 			return res.status(201).json(response);
-
 		}
 
 		if (req.body.property_name === 1) {
 
-			// The property already being 1 means that they're currently present,
-			// so mark them as absent.
+			// The property already being 1 means that they're currently
+			// present, so mark them as absent.
 
 			const logMessage = `${target.first} ${target.last} marked as absent by ${req.session.email}`;
 
 			const log = {
 				tag         : 'absent',
 				description : logMessage,
-				person      : req.body.target_id,
 				tourn       : req.params.tourn_id,
 				panel       : panel.id,
 			};
+
+			if (targetType === 'student') {
+				log.student = target.id;
+			} else if (targetType === 'judge') {
+				log.judge = target.id;
+			} else {
+				log.person = target.id;
+			}
+
+			targetType = 'stfu_linter';
 
 			if (req.body.setting_name === 'entry') {
 				log.entry = req.body.another_thing;
@@ -257,37 +334,42 @@ export const attendance = {
 				error   : false,
 				message : logMessage,
 				reclass : [
-					{	id		  : `${panel.id}_${req.body.target_id}`,
+					{	id          : `${panel.id}_${targetId}`,
 						removeClass : 'greentext',
-						addClass	: 'brightredtext',
+						addClass    : 'brightredtext',
 					},
-					{	id		  : `${panel.id}_${req.body.target_id}`,
+					{	id          : `${panel.id}_${targetId}`,
 						removeClass : 'fa-check',
-						addClass	: 'fa-circle',
+						addClass    : 'fa-circle',
 					},
 				],
 				reprop  : [
-					{	id	   : `container_${panel.id}_${req.body.target_id}`,
+					{	id       : `container_${panel.id}_${targetId}`,
 						property : 'property_name',
-						value	: false,
+						value    : false,
 					},
 				],
 			});
-
 		}
 
-		// In this case they're currently marked absent, so we mark them
-		// present
+		// In this case they're currently marked absent, so we mark them present
 
 		const logMessage = `${target.first} ${target.last} marked as present by ${req.session.email}`;
 
 		const log = {
 			tag         : 'present',
 			description : logMessage,
-			person      : req.body.target_id,
 			tourn       : req.params.tourn_id,
 			panel       : panel.id,
 		};
+
+		if (targetType === 'student') {
+			log.student = target.id;
+		} else if (targetType === 'judge') {
+			log.judge = target.id;
+		} else {
+			log.person = target.id;
+		}
 
 		if (req.body.setting_name === 'entry') {
 			log.entry = req.body.another_thing;

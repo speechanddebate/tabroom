@@ -23,6 +23,7 @@ describe('Status Board', () => {
 			and ballot.panel = 37
 		`);
 
+		await db.sequelize.query(`update campus_log set timestamp = NOW() where person = 13 and tag = 'absent'`);
 		await db.sequelize.query(`delete from campus_log where person = 15 and tag = 'absent'`);
 		await db.sequelize.query(`delete from campus_log where person = 16 and tag = 'present'`);
 	});
@@ -81,9 +82,8 @@ describe('Status Board', () => {
 	});
 
 	it('Reflects absence & presence changes in a new status object', async() => {
-
+		
 		// Mark Entry 16 section 27 present
-
 		await request(server)
 			.post(`/v1/tourn/1/tab/status/update`)
 			.set('Accept', 'application/json')
@@ -133,10 +133,6 @@ describe('Status Board', () => {
 
 		assert.isObject(newResponse.body, 'Response is indeed an object');
 
-		assert.isUndefined(
-			newResponse.body[10][37].started_by,
-			'After the change, Judge Person 10 not marked started');
-
 		assert.equal(
 			newResponse.body[16][27].tag,
 			'present', 'After the change, Entry Person 16 present');
@@ -144,6 +140,10 @@ describe('Status Board', () => {
 		assert.equal(
 			newResponse.body[15][37].tag,
 			'absent', 'After the change, Entry Person 17 absent');
+
+		assert.isUndefined(
+			newResponse.body[10][37].started_by,
+			'After the change, Judge Person 10 not marked started');
 
 	});
 
