@@ -442,7 +442,7 @@ export const changeEventAccess = {
 				tag         : 'access',
 				tourn       : tournId,
 				person      : req.session.person,
-				description : `Revoked ${newAdmin.email} permissions to ${targetEvent.name}`,
+				description : `Revoked ${newAdmin.email} permissions to ${eventId}`,
 				created_at  : Date(),
 			});
 
