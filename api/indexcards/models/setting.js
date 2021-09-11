@@ -4,25 +4,24 @@ module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('setting', {
 		type: {
 			type: DataTypes.STRING(31),
-			allowNull: false
+			allowNull: false,
 		},
 		subtype: {
 			type: DataTypes.STRING(31),
-			allowNull: false
+			allowNull: false,
 		},
 		tag: {
 			type: DataTypes.STRING(31),
-			allowNull: false
+			allowNull: false,
 		},
 		value_type: {
-			type: DataTypes.ENUM("text", "string", "bool", "integer", "decimal", "datetime", "enum"),
+			type: DataTypes.ENUM('text', 'string', 'bool', 'integer', 'decimal', 'datetime', 'enum'),
 			allowNull: false,
-			defaultValue: "string"
+			defaultValue: 'string',
 		},
 		conditions: {
 			type: DataTypes.TEXT,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-

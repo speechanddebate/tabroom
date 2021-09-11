@@ -3,23 +3,22 @@
 module.exports = function(sequelize, DataTypes) {
 
 	return sequelize.define('regionSetting', {
-		table_name: "region_setting",
+		table_name: 'region_setting',
 		tag: {
 			type: DataTypes.STRING(32),
-			allowNull: false
+			allowNull: false,
 		},
 		value: {
 			type: DataTypes.STRING(64),
-			allowNull: true
+			allowNull: true,
 		},
 		value_text: {
 			type: DataTypes.TEXT,
-			allowNull: true
+			allowNull: true,
 		},
 		value_date: {
 			type: DataTypes.DATE,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-

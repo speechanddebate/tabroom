@@ -1,4 +1,3 @@
-
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
@@ -6,18 +5,15 @@ module.exports = function(sequelize, DataTypes) {
 		table_name : 'concession_purchase',
 		quantity: {
 			type: DataTypes.INTEGER(11),
-			allowNull: true
+			allowNull: true,
 		},
 		placed: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		fulfilled: {
 			type: DataTypes.BOOLEAN,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

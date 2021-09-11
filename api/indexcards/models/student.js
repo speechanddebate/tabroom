@@ -5,62 +5,60 @@ module.exports = function(sequelize, DataTypes) {
 		first: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		middle: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		last: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		phonetic: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		grad_year: {
 			type: DataTypes.INTEGER(6),
 			allowNull: false,
-			defaultValue: '2010'
+			defaultValue: '2010',
 		},
 		novice: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		retired: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		gender: {
 			type: DataTypes.CHAR(4),
-			allowNull: true
+			allowNull: true,
 		},
 		diet: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		birthdate: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		school_sid: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		race: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		nsda: {
 			type: DataTypes.INTEGER(11),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-

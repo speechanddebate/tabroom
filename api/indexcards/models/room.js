@@ -5,65 +5,62 @@ module.exports = function(sequelize, DataTypes) {
 		name: {
 			type: DataTypes.STRING(127),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		quality: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
+			allowNull: true,
 		},
 		capacity: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
+			allowNull: true,
 		},
 		rowcount: {
 			type: DataTypes.INTEGER(11),
-			allowNull: true
+			allowNull: true,
 		},
 		seats: {
 			type: DataTypes.INTEGER(4),
-			allowNull: true
+			allowNull: true,
 		},
 		inactive: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		deleted: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		ada: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		notes: {
 			type: DataTypes.STRING(63),
-			allowNull: true
+			allowNull: true,
 		},
 		url: {
 			type: DataTypes.STRING(255),
-			allowNull: true
+			allowNull: true,
 		},
 		judge_url: {
 			type: DataTypes.STRING(255),
-			allowNull: true
+			allowNull: true,
 		},
 		password: {
 			type: DataTypes.STRING(255),
-			allowNull: true
+			allowNull: true,
 		},
 		judge_password: {
 			type: DataTypes.STRING(255),
-			allowNull: true
+			allowNull: true,
 		},
 		api: {
 			type: DataTypes.INTEGER,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

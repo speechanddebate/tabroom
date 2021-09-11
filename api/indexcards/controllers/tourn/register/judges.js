@@ -1,8 +1,7 @@
 export const listJudges = {
-    GET: async (req, res) => {
+	GET: async (req, res) => {
 		const db      = req.db;
 		const tournId = req.params.tourn_id;
-		const op      = db.Sequelize.Op
 
 		const judgeQuery = `
 			select judge.*,
@@ -19,22 +18,22 @@ export const listJudges = {
 		`;
 
 		// A raw query to go through the category filter
-		var results = await db.sequelize.query(
+		const results = await db.sequelize.query(
 			judgeQuery,
-			{ replacements: {tourn: tournId }}
+			{ replacements: { tourn: tournId } }
 		);
 
-		let judges = {};
+		const judges = {};
 
-		for (let judge of results[0]) {
+		results[0].forEach(judge => {
 
-			let person = {
+			const person = {
 				id       : judge.person_id,
 				email    : judge.person_email,
 				no_email : judge.person_no_email,
 				phone    : judge.person_phone,
 				provider : judge.person_provider,
-				nsda     : judge.person_nsda
+				nsda     : judge.person_nsda,
 			};
 
 			if (judges[judge.id]) {
@@ -59,41 +58,42 @@ export const listJudges = {
 
 				judges[judge.id].person = [person];
 			}
-		}
+		});
 
 		return res.status(200).json(judges);
-    },
+	},
 };
+
+export default listJudges;
 
 listJudges.GET.apiDoc = {
-    summary: 'Listing of judges in the tournament',
-    operationId: 'listJudges',
-    parameters: [
-        {
-            in          : 'path',
-            name        : 'tourn_id',
-            description : 'Tournament ID',
-            required    : true,
-            schema      : {
+	summary: 'Listing of judges in the tournament',
+	operationId: 'listJudges',
+	parameters: [
+		{
+			in          : 'path',
+			name        : 'tourn_id',
+			description : 'Tournament ID',
+			required    : true,
+			schema      : {
 				type    : 'integer',
-				minimum : 1
+				minimum : 1,
 			},
-        },
-    ],
-    responses: {
-        200: {
-            description: 'Judge Data',
-            content: {
-                '*/*': {
-                    schema: {
-                        type: 'array',
-                        items: { $ref: '#/components/schemas/Judge' },
-                    },
-                },
-            },
-        },
-        default: { $ref: '#/components/responses/ErrorResponse' },
-    },
-    tags: ['tournament/register'],
+		},
+	],
+	responses: {
+		200: {
+			description: 'Judge Data',
+			content: {
+				'*/*': {
+					schema: {
+						type: 'array',
+						items: { $ref: '#/components/schemas/Judge' },
+					},
+				},
+			},
+		},
+		default: { $ref: '#/components/responses/ErrorResponse' },
+	},
+	tags: ['tournament/register'],
 };
-

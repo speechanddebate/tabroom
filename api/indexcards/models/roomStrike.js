@@ -5,20 +5,17 @@ module.exports = function(sequelize, DataTypes) {
 		type: {
 			type: DataTypes.STRING(15),
 			allowNull: false,
-			defaultValue: 'time'
+			defaultValue: 'time',
 		},
 		start: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		end: {
 			type: DataTypes.DATE,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	},{
 		tableName: 'room_strike',
 	});
 };
-
-
-

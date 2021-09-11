@@ -5,33 +5,32 @@ module.exports = function(sequelize, DataTypes) {
 		tag: {
 			type         : DataTypes.STRING(127),
 			allowNull    : false,
-			defaultValue : ''
+			defaultValue : '',
 		},
 		filename      : {
 			type      : DataTypes.STRING,
-			allowNull : true
+			allowNull : true,
 		},
 		url           : {
 			type      : DataTypes.STRING,
-			allowNull : true
+			allowNull : true,
 		},
 		sort_order    : {
 			type      : DataTypes.INTEGER(6),
-			allowNull : true
+			allowNull : true,
 		},
 		start         : {
 			type      : DataTypes.DATE,
-			allowNull : true
+			allowNull : true,
 		},
 		end           : {
 			type      : DataTypes.DATE,
-			allowNull : true
+			allowNull : true,
 		},
 		approved         : {
 			type         : DataTypes.BOOLEAN,
 			allowNull    : false,
-			defaultValue : false
-		}
+			defaultValue : false,
+		},
 	});
 };
-

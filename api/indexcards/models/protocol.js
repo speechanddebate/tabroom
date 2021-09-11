@@ -5,10 +5,7 @@ module.exports = function(sequelize, DataTypes) {
 		table_name: 'tiebreak_set',
 		name: {
 			type: DataTypes.STRING,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

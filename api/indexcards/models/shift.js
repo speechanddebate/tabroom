@@ -5,32 +5,29 @@ module.exports = function(sequelize, DataTypes) {
 		name: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		type: {
-			type: DataTypes.ENUM("signup", "strike", "both"),
+			type: DataTypes.ENUM('signup', 'strike', 'both'),
 			allowNull: false,
-			defaultValue: "string"
+			defaultValue: 'string',
 		},
 		start: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		end: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		fine: {
 			type: DataTypes.FLOAT,
-			allowNull: true
+			allowNull: true,
 		},
 		no_hires: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: false
-		}
+			defaultValue: false,
+		},
 	});
 };
-
-
-

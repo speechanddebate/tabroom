@@ -4,23 +4,19 @@ module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('follower', {
 		type: {
 			type: DataTypes.STRING(8),
-			allowNull: false
+			allowNull: false,
 		},
 		cell: {
 			type: DataTypes.INTEGER(20),
-			allowNull: false
+			allowNull: false,
 		},
 		domain: {
 			type: DataTypes.STRING(64),
-			allowNull: true
+			allowNull: true,
 		},
 		email: {
 			type: DataTypes.STRING(64),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-
-

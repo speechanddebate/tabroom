@@ -5,21 +5,20 @@ module.exports = function(sequelize, DataTypes) {
 		name: {
 			type: DataTypes.STRING,
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		directions: {
 			type: DataTypes.TEXT,
-			allowNull: true
+			allowNull: true,
 		},
 		dropoff: {
 			type: DataTypes.STRING,
-			allowNull: true
+			allowNull: true,
 		},
 		online: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: false
-		}
+			defaultValue: false,
+		},
 	});
 };
-

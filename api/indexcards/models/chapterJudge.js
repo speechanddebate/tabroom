@@ -2,63 +2,60 @@
 
 module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('chapterJudge', {
-		table_name: "chapter_judge",
+		table_name: 'chapter_judge',
 
 		first: {
 			type: DataTypes.STRING(127),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		middle: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		last: {
 			type: DataTypes.STRING(127),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		ada: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: 0
+			defaultValue: 0,
 		},
 		retired: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: 0
+			defaultValue: 0,
 		},
 		phone: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		email: {
 			type: DataTypes.STRING(127),
-			allowNull: true
+			allowNull: true,
 		},
 		diet: {
 			type: DataTypes.STRING,
-			allowNull: true
+			allowNull: true,
 		},
 		notes: {
 			type: DataTypes.STRING(255),
-			allowNull: true
+			allowNull: true,
 		},
 		notes_timestamp: {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		gender: {
 			type: DataTypes.CHAR(4),
-			allowNull: true
+			allowNull: true,
 		},
 		nsda: {
 			type: DataTypes.INTEGER,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

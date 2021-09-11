@@ -5,41 +5,38 @@ module.exports = function(sequelize, DataTypes) {
 		table_name: 'rating_tier',
 		type : {
 			type: DataTypes.ENUM('mpj', 'coach'),
-			allowNull: true
+			allowNull: true,
 		},
 		name: {
 			type: DataTypes.STRING(15),
-			allowNull: true
+			allowNull: true,
 		},
 		description: {
 			type: DataTypes.STRING(255),
-			allowNull: true
+			allowNull: true,
 		},
 		strike: {
 			type         : DataTypes.BOOLEAN,
 			allowNull    : false,
-			defaultValue : '0'
+			defaultValue : '0',
 		},
 		conflict: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		min: {
 			type: DataTypes.DECIMAL(8,2),
-			allowNull: true
+			allowNull: true,
 		},
 		max: {
 			type: DataTypes.DECIMAL(8,2),
-			allowNull: true
+			allowNull: true,
 		},
 		start: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
-		}
+			defaultValue: '0',
+		},
 	});
 };
-
-
-
