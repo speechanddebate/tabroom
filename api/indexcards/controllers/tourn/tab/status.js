@@ -176,134 +176,190 @@ export const attendance = {
 
 	POST: async (req, res) => {
 
-		const now = Date();
-		const db = req.db;
+		try {
 
-		let [targetType, targetId] = req.body.target_id.toString().split('_');
-		let target;
+			const now = Date();
+			const db = req.db;
 
-		if (targetType === 'student') {
-			target = await db.student.findByPk(targetId);
-		} else if (targetType === 'judge') {
-			target = await db.judge.findByPk(targetId);
-		} else {
-			target = await db.person.findByPk(req.body.target_id);
-		}
+			let [targetType, targetId] = req.body.target_id.toString().split('_');
+			let target;
 
-		targetId = req.body.target_id;
-
-		if (!target) {
-			return res.status(201).json({
-				error   : true,
-				message : `No person to mark present for ID ${req.body.target_id}`,
-			});
-		}
-
-		const panel = await db.panel.findByPk(req.body.related_thing);
-
-		if (!panel) {
-			return res.status(201).json({
-				error   : true,
-				message : `No section found for ID ${req.body.related_thing}`,
-			});
-		}
-
-		if (req.body.setting_name === 'judge_started') {
-
-			let judge = {};
-
-			if (targetType === 'judge') {
-				judge = target;
-			} else { 
-				judge = await db.judge.findByPk(req.body.another_thing);
+			if (targetType === 'student') {
+				target = await db.student.findByPk(targetId);
+			} else if (targetType === 'judge') {
+				target = await db.judge.findByPk(targetId);
+			} else {
+				target = await db.person.findByPk(req.body.target_id);
 			}
 
-			if (req.body.property_name > 0) {
+			targetId = req.body.target_id;
 
-				const eraseStart = `update ballot set started_by = NULL,
-					judge_started = NULL
-					where judge = :judgeId
-					and panel = :panelId `;
+			if (!target) {
+				return res.status(201).json({
+					error   : true,
+					message : `No person to mark present for ID ${req.body.target_id}`,
+				});
+			}
 
-				await db.sequelize.query(eraseStart, {
-					replacements: { judgeId: judge.id, panelId: panel.id },
+			const panel = await db.panel.findByPk(req.body.related_thing);
+
+			if (!panel) {
+				return res.status(201).json({
+					error   : true,
+					message : `No section found for ID ${req.body.related_thing}`,
+				});
+			}
+
+			if (req.body.setting_name === 'judge_started') {
+
+				let judge = {};
+
+				if (targetType === 'judge') {
+					judge = target;
+				} else {
+					judge = await db.judge.findByPk(req.body.another_thing);
+				}
+
+				if (parseInt(req.body.property_name) > 0) {
+
+					const eraseStart = `update ballot set started_by = NULL,
+						judge_started = NULL
+						where judge = :judgeId
+						and panel = :panelId `;
+
+					await db.sequelize.query(eraseStart, {
+						replacements: { judgeId: judge.id, panelId: panel.id },
+					});
+
+					const response = {
+						error : false,
+						reclass: [
+							{   id		  : `${panel.id}_${targetId}_start`,
+								removeClass : 'greentext',
+								addClass	: 'yellowtext',
+							},{
+								id		  : `${panel.id}_${targetId}_start`,
+								removeClass : 'fa-star',
+								addClass	: 'fa-stop',
+							},
+						],
+						reprop: [
+							{   id		  : `start_${panel.id}_${targetId}`,
+								property	: 'property_name',
+								value 		: false,
+							},{
+								id		  : `start_${panel.id}_${targetId}`,
+								property	: 'title',
+								value 		: 'Not started',
+							},
+						],
+						message : 'Judge marked as not started',
+					};
+
+					return res.status(201).json(response);
+				}
+
+				await db.ballot.update({
+					started_by: req.session.person,
+					judge_started : now,
+				},{
+					where : {
+						panel : panel.id,
+						judge : judge.id,
+					},
 				});
 
 				const response = {
 					error : false,
 					reclass: [
 						{   id		  : `${panel.id}_${targetId}_start`,
-							removeClass : 'greentext',
-							addClass	: 'yellowtext',
+							addClass	: 'greentext',
+							removeClass : 'yellowtext',
 						},{
 							id		  : `${panel.id}_${targetId}_start`,
-							removeClass : 'fa-star',
-							addClass	: 'fa-stop',
+							addClass	: 'fa-star',
+							removeClass : 'fa-stop',
 						},
 					],
 					reprop: [
 						{   id		  : `start_${panel.id}_${targetId}`,
 							property	: 'property_name',
-							value 		: false,
+							value 		: 1,
 						},{
 							id		  : `start_${panel.id}_${targetId}`,
 							property	: 'title',
-							value 		: 'Not started',
+							value 		: `Judge marked as started by ${req.session.name}`,
 						},
 					],
-					message : 'Judge marked as not started',
+					message : `Judge marked as started by ${req.session.name}`,
 				};
 
 				return res.status(201).json(response);
 			}
 
-			await db.ballot.update({
-				started_by: req.session.person,
-				judge_started : now,
-			},{
-				where : {
-					panel : panel.id,
-					judge : judge.id,
-				},
-			});
+			if (parseInt(req.body.property_name) === 1) {
 
-			const response = {
-				error : false,
-				reclass: [
-					{   id		  : `${panel.id}_${targetId}_start`,
-						addClass	: 'greentext',
-						removeClass : 'yellowtext',
-					},{
-						id		  : `${panel.id}_${targetId}_start`,
-						addClass	: 'fa-star',
-						removeClass : 'fa-stop',
-					},
-				],
-				reprop: [
-					{   id		  : `start_${panel.id}_${targetId}`,
-						property	: 'property_name',
-						value 		: 1,
-					},{
-						id		  : `start_${panel.id}_${targetId}`,
-						property	: 'title',
-						value 		: `Judge marked as started by ${req.session.name}`,
-					},
-				],
-				message : `Judge marked as started by ${req.session.name}`,
-			};
+				// The property already being 1 means that they're currently
+				// present, so mark them as absent.
 
-			return res.status(201).json(response);
-		}
+				const logMessage = `${target.first} ${target.last} marked as absent by ${req.session.email}`;
 
-		if (req.body.property_name === 1) {
+				const log = {
+					tag         : 'absent',
+					description : logMessage,
+					tourn       : req.params.tourn_id,
+					panel       : panel.id,
+				};
 
-			// The property already being 1 means that they're currently
-			// present, so mark them as absent.
+				if (targetType === 'student') {
+					log.student = target.id;
+				} else if (targetType === 'judge') {
+					log.judge = target.id;
+				} else {
+					log.person = target.id;
+				}
 
-			const logMessage = `${target.first} ${target.last} marked as absent by ${req.session.email}`;
+				targetType = 'stfu_linter';
+
+				if (req.body.setting_name === 'entry') {
+					log.entry = req.body.another_thing;
+				} else if (req.body.setting_name === 'judge') {
+					log.judge = req.body.another_thing;
+				}
+
+				await db.campusLog.create(log);
+
+				// Oh for the days I have react going and don't need to do the
+				// following nonsense
+
+				return res.status(201).json({
+					error   : false,
+					message : logMessage,
+					reclass : [
+						{	id          : `${panel.id}_${targetId}`,
+							removeClass : 'greentext',
+							addClass    : 'brightredtext',
+						},
+						{	id          : `${panel.id}_${targetId}`,
+							removeClass : 'fa-check',
+							addClass    : 'fa-circle',
+						},
+					],
+					reprop  : [
+						{	id       : `container_${panel.id}_${targetId}`,
+							property : 'property_name',
+							value    : false,
+						},
+					],
+				});
+			}
+
+			// In this case they're currently marked absent, so we mark them present
+
+			const logMessage = `${target.first} ${target.last} marked as present by ${req.session.email}`;
 
 			const log = {
-				tag         : 'absent',
+				tag         : 'present',
 				description : logMessage,
 				tourn       : req.params.tourn_id,
 				panel       : panel.id,
@@ -317,8 +373,6 @@ export const attendance = {
 				log.person = target.id;
 			}
 
-			targetType = 'stfu_linter';
-
 			if (req.body.setting_name === 'entry') {
 				log.entry = req.body.another_thing;
 			} else if (req.body.setting_name === 'judge') {
@@ -327,78 +381,32 @@ export const attendance = {
 
 			await db.campusLog.create(log);
 
-			// Oh for the days I have react going and don't need to do the
-			// following nonsense
-
 			return res.status(201).json({
 				error   : false,
 				message : logMessage,
 				reclass : [
-					{	id          : `${panel.id}_${targetId}`,
-						removeClass : 'greentext',
-						addClass    : 'brightredtext',
+					{	id		  : `${panel.id}_${req.body.target_id}`,
+						addClass	: 'greentext',
+						removeClass : 'brightredtext',
 					},
-					{	id          : `${panel.id}_${targetId}`,
-						removeClass : 'fa-check',
-						addClass    : 'fa-circle',
+					{	id		  : `${panel.id}_${req.body.target_id}`,
+						addClass	: 'fa-check',
+						removeClass : 'fa-circle',
 					},
 				],
 				reprop  : [
-					{	id       : `container_${panel.id}_${targetId}`,
+					{	id	   : `container_${panel.id}_${req.body.target_id}`,
 						property : 'property_name',
-						value    : false,
+						value	: 1,
 					},
 				],
 			});
+
+		} catch (err) {
+
+			console.log(err);
+
 		}
-
-		// In this case they're currently marked absent, so we mark them present
-
-		const logMessage = `${target.first} ${target.last} marked as present by ${req.session.email}`;
-
-		const log = {
-			tag         : 'present',
-			description : logMessage,
-			tourn       : req.params.tourn_id,
-			panel       : panel.id,
-		};
-
-		if (targetType === 'student') {
-			log.student = target.id;
-		} else if (targetType === 'judge') {
-			log.judge = target.id;
-		} else {
-			log.person = target.id;
-		}
-
-		if (req.body.setting_name === 'entry') {
-			log.entry = req.body.another_thing;
-		} else if (req.body.setting_name === 'judge') {
-			log.judge = req.body.another_thing;
-		}
-
-		await db.campusLog.create(log);
-
-		return res.status(201).json({
-			error   : false,
-			message : logMessage,
-			reclass : [
-				{	id		  : `${panel.id}_${req.body.target_id}`,
-					addClass	: 'greentext',
-					removeClass : 'brightredtext',
-				},
-				{	id		  : `${panel.id}_${req.body.target_id}`,
-					addClass	: 'fa-check',
-					removeClass : 'fa-circle',
-				},
-			],
-			reprop  : [
-				{	id	   : `container_${panel.id}_${req.body.target_id}`,
-					property : 'property_name',
-					value	: 1,
-				},
-			],
-		});
 	},
 };
 

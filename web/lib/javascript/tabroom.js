@@ -68,6 +68,8 @@
 		var anotherThing = $(checkObject).attr("another_thing");
 		var tournID      = $(checkObject).attr("tourn_id");
 
+		console.log("Tourn ID is "+tournID);
+
 		var successAction = $(checkObject).attr("on_success");
 		var replyTarget   = $(checkObject).attr("reply_target");
 		var replyAppend   = $(checkObject).attr("reply_append");
@@ -133,16 +135,16 @@
 
 		var accessType = "";
 
-		if (postMethod === "get") { 
+		if (postMethod === "get") {
 			accessType = "GET";
-		} else if (postMethod === "delete") { 
+		} else if (postMethod === "delete") {
 			accessType = "DELETE";
-		} else if (postMethod === "put") { 
+		} else if (postMethod === "put") {
 			accessType = "PUT";
-		} else { 
+		} else {
 			accessType = "POST";
 		}
-		
+
 		$.ajax({
 			type : accessType,
 			url  : replyUrl,
