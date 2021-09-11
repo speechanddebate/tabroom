@@ -4,27 +4,24 @@ module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('rating', {
 		type : {
 			type: DataTypes.ENUM('school', 'entry', 'coach'),
-			allowNull: true
+			allowNull: true,
 		},
 		draft : {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: 0
+			defaultValue: 0,
 		},
 		entered : {
 			type: DataTypes.DATE,
-			allowNull: true
+			allowNull: true,
 		},
 		ordinal: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
+			allowNull: true,
 		},
 		percentile: {
 			type: DataTypes.DECIMAL(8,2),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

@@ -7,6 +7,5 @@ import register from './register';
 
 export default [
 	...tab,
-	...register
+	...register,
 ];
-

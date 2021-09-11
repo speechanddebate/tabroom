@@ -78,12 +78,10 @@ sub setting {
 			} elsif ($value eq "date") {
 				$existing->value_date($blob);
 			} elsif ($value eq "json") {
-
 				eval{
 					$existing->value_text(JSON::encode_json($blob));
 				};
 			}
-
 			$existing->update();
 		}
 

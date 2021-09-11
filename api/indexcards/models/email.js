@@ -5,32 +5,29 @@ module.exports = function(sequelize, DataTypes) {
 		subject: {
 			type: DataTypes.STRING(128),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		content: {
-			type: DataTypes.TEXT("medium"),
-			allowNull: false
+			type: DataTypes.TEXT('medium'),
+			allowNull: false,
 		},
 		metadata: {
-			type: DataTypes.TEXT("medium"),
-			allowNull: false
+			type: DataTypes.TEXT('medium'),
+			allowNull: false,
 		},
 		hidden: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: false
+			defaultValue: false,
 		},
 		sent_to: {
 			type: DataTypes.STRING(128),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		sent_at: {
 			type: DataTypes.DATE,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

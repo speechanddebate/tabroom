@@ -14,12 +14,12 @@ const auth = async (req) => {
 
 		let session = await db.session.findOne({
 			where: {
-				userkey: req.cookies[req.config.COOKIE_NAME]
+				userkey: req.cookies[req.config.COOKIE_NAME],
 			},
 			include : [
-				{ model: db.person, as: 'Person'},
-				{ model: db.person, as: 'Su'}
-			]
+				{ model: db.person, as: 'Person' },
+				{ model: db.person, as: 'Su' },
+			],
 		});
 
 		if (session) {
@@ -31,9 +31,9 @@ const auth = async (req) => {
 				let realname = session.Su.first;
 
 				if (session.Su.middle) {
-					realname += " "+session.Su.middle;
+					realname += ` ${session.Su.middle}`;
 				}
-				realname += " "+session.Su.last;
+				realname += ` ${session.Su.last}`;
 
 				session = {
 					id         : session.id,
@@ -42,7 +42,7 @@ const auth = async (req) => {
 					defaults   : session.defaults,
 					email      : session.Su.email,
 					name       : realname,
-					su         : session.Person.id
+					su         : session.Person.id,
 				};
 
 			} else if (session.Person) {
@@ -50,10 +50,10 @@ const auth = async (req) => {
 				let realname = session.Person.first;
 
 				if (session.Person.middle) {
-					realname += " "+session.Person.middle;
+					realname += ` ${session.Person.middle}`;
 				}
 
-				realname += " "+session.Person.last;
+				realname += ` ${session.Person.last}`;
 
 				session = {
 					id         : session.id,
@@ -61,19 +61,14 @@ const auth = async (req) => {
 					site_admin : session.Person.site_admin,
 					defaults   : session.defaults,
 					email      : session.Person.email,
-					name       : realname
+					name       : realname,
 				};
 			}
 
 			return session;
 
-		} else {
-			return;
 		}
-
-	} else {
-		return;
 	}
-}
+};
 
 export default auth;

@@ -5,18 +5,15 @@ module.exports = function(sequelize, DataTypes) {
 		name: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		multiple: {
 			type: DataTypes.FLOAT,
-			allowNull: true
+			allowNull: true,
 		},
 		surcharge: {
 			type: DataTypes.FLOAT,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

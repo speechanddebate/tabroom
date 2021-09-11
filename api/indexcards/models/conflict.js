@@ -5,10 +5,7 @@ module.exports = function(sequelize, DataTypes) {
 		type: {
 			type: DataTypes.STRING(15),
 			allowNull: false,
-			defaultValue: ''
-		}
+			defaultValue: '',
+		},
 	});
 };
-
-
-

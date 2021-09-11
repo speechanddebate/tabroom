@@ -5,28 +5,27 @@ module.exports = function(sequelize, DataTypes) {
 		tag: {
 			type: DataTypes.STRING,
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		value: {
 			type: DataTypes.FLOAT,
-			allowNull: true
+			allowNull: true,
 		},
 		content: {
 			type: DataTypes.TEXT,
-			allowNull: true
+			allowNull: true,
 		},
 		topic: {
 			type: DataTypes.STRING(127),
-			allowNull: true
+			allowNull: true,
 		},
 		speech: {
 			type: DataTypes.INTEGER(4),
-			allowNull: true
+			allowNull: true,
 		},
 		position: {
 			type: DataTypes.INTEGER(4),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-

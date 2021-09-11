@@ -5,32 +5,29 @@ module.exports = function(sequelize, DataTypes) {
 		title: {
 			type: DataTypes.STRING(63),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		content: {
 			type: DataTypes.TEXT,
-			allowNull: true
+			allowNull: true,
 		},
 		published: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		sitewide: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		special: {
 			type: DataTypes.STRING(15),
-			allowNull: true
+			allowNull: true,
 		},
 		page_order: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-
