@@ -64,12 +64,10 @@ export const changeAccess = {
 		parsePerms(already).then(async (existing) => {
 
 			if (existing.level) {
-
 				return res.status(200).json({
 					error: true,
 					message: 'User already has access',
 				});
-
 			}
 
 			const newAdmin = await db.person.findByPk(adminId);
@@ -255,66 +253,73 @@ export const changeAccess = {
 			});
 		}
 
-		const already = await db.permission.findAll({
-			where : {
-				tourn  : tournId,
-				person : adminId,
-			},
-			include : [
-				{ model: db.person, as: 'Person' },
-			],
-		});
+		try {
 
-		const existing = await parsePerms(already);
-
-		if (existing.person === undefined) {
-			return res.status(200).json({
-				error: true,
-				message: 'That account has already lost access to this tournament.  You may want to refresh the page.',
+			const already = await db.permission.findAll({
+				where : {
+					tourn  : tournId,
+					person : adminId,
+				},
+				include : [
+					{ model: db.person, as: 'Person' },
+				],
 			});
-		}
 
-		const reply = {
-			error: false,
-			message: `${existing.person.first} ${existing.person.last}'s access to this tournament has been revoked.`,
-			destroy: existing.person.id,
-		};
+			const existing = await parsePerms(already);
 
-		const checkOwner = async (target) => {
-			if (target.level === 'owner') {
-				if (req.session[tournId].level !== 'owner') {
-					return res.status(200).json({
-						error: true,
-						message: 'Only a tournament owner may revoke privileges from another',
-					});
+			if (existing.person === undefined) {
+				return res.status(200).json({
+					error: true,
+					message: 'That account has already lost access to this tournament.  You may want to refresh the page.',
+				});
+			}
+
+			const reply = {
+				error: false,
+				message: `${existing.person.first} ${existing.person.last}'s access to this tournament has been revoked.`,
+				destroy: existing.person.id,
+			};
+
+			const checkOwner = async (target) => {
+				if (target.level === 'owner') {
+					if (req.session[tournId].level !== 'owner') {
+						return res.status(200).json({
+							error: true,
+							message: 'Only a tournament owner may revoke privileges from another',
+						});
+					}
 				}
-			}
 
-		};
+			};
 
-		const destroyPerms = async (target) => {
-			if (target.contactObject) {
-				await target.contactObject.destroy();
-			}
+			const destroyPerms = async (target) => {
+				if (target.contactObject) {
+					await target.contactObject.destroy();
+				}
 
-			if (target.permObject) {
-				await target.permObject.destroy();
-			}
+				if (target.permObject) {
+					await target.permObject.destroy();
+				}
 
-		};
+			};
 
-		await checkOwner(existing);
-		await destroyPerms(existing);
+			await checkOwner(existing);
+			await destroyPerms(existing);
 
-		await db.changeLog.create({
-			tag         : 'access',
-			Tourn       : tournId,
-			person      : req.session.person,
-			created_at  : Date(),
-			description : reply.message,
-		});
+			await db.changeLog.create({
+				tag         : 'access',
+				Tourn       : tournId,
+				person      : req.session.person,
+				created_at  : Date(),
+				description : reply.message,
+			});
 
-		return res.status(200).json(reply);
+			return res.status(200).json(reply);
+
+		} catch (err) {
+
+			console.log(err);
+		}
 	},
 };
 
@@ -442,7 +447,7 @@ export const changeEventAccess = {
 				tag         : 'access',
 				tourn       : tournId,
 				person      : req.session.person,
-				description : `Revoked ${newAdmin.email} permissions to ${eventId}`,
+				description : `Revoked ${newAdmin.email} permissions to ${targetEvent.abbr}`,
 				created_at  : Date(),
 			});
 
