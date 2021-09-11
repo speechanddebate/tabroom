@@ -5,8 +5,7 @@ module.exports = function(sequelize, DataTypes) {
 		table_name: 'rating_subset',
 		name: {
 			type: DataTypes.STRING(32),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-

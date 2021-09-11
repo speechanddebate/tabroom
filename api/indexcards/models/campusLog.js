@@ -5,18 +5,17 @@ module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('campusLog', {
 		tag: {
 			type: DataTypes.STRING(31),
-			allowNull: false
+			allowNull: false,
 		},
 		uuid: {
 			type: DataTypes.UUID,
-			allowNull: true
+			allowNull: true,
 		},
 		description: {
 			type: DataTypes.STRING,
-			allowNull: false
+			allowNull: false,
 		},
 	},{
-		tableName: "campus_log",
+		tableName: 'campus_log',
 	});
 };
-

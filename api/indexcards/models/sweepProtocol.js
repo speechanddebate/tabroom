@@ -1,4 +1,3 @@
-
 /* jshint indent: 4 */
 
 module.exports = function(sequelize, DataTypes) {
@@ -6,10 +5,7 @@ module.exports = function(sequelize, DataTypes) {
 		table_name: 'sweep_set',
 		name: {
 			type: DataTypes.STRING,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

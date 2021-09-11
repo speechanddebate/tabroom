@@ -4,27 +4,25 @@ module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('invoice', {
 		blusynergy: {
 			type: DataTypes.INTEGER,
-			allowNull: true
+			allowNull: true,
 		},
 		blu_number: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		total: {
 			type: DataTypes.DECIMAL(8,2),
 			allowNull: false,
-			defaultValue: '0.00'
+			defaultValue: '0.00',
 		},
 		paid: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
-			defaultValue: '0'
+			defaultValue: '0',
 		},
 		details: {
 			type: DataTypes.TEXT,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-

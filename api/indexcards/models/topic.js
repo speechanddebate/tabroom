@@ -4,34 +4,31 @@ module.exports = function(sequelize, DataTypes) {
 	return sequelize.define('topic', {
 		tag: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		source: {
 			type: DataTypes.STRING(15),
-			allowNull: true
+			allowNull: true,
 		},
 		event_type: {
 			type: DataTypes.STRING(31),
-			allowNull: true
+			allowNull: true,
 		},
 		topic_text: {
 			type: DataTypes.TEXT,
-			allowNull: true
+			allowNull: true,
 		},
 		school_year: {
 			type: DataTypes.INTEGER,
-			allowNull: true
+			allowNull: true,
 		},
 		sort_order: {
 			type: DataTypes.INTEGER(6),
-			allowNull: true
+			allowNull: true,
 		},
 		created_at: {
 			type: DataTypes.DATE,
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

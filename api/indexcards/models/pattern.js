@@ -5,18 +5,15 @@ module.exports = function(sequelize, DataTypes) {
 		name: {
 			type: DataTypes.STRING(31),
 			allowNull: false,
-			defaultValue: ''
+			defaultValue: '',
 		},
 		type: {
 			type: DataTypes.INTEGER(4),
-			allowNull: true
+			allowNull: true,
 		},
 		max: {
 			type: DataTypes.INTEGER(4),
-			allowNull: true
-		}
+			allowNull: true,
+		},
 	});
 };
-
-
-

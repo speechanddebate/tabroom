@@ -1,9 +1,7 @@
-
 export const listEntries = {
-    GET: async (req, res) => {
+	GET: async (req, res) => {
 		const db      = req.db;
 		const tournId = req.params.tourn_id;
-		const op      = db.Sequelize.Op
 
 		const entryQuery = `
 			select entry.*,
@@ -21,21 +19,21 @@ export const listEntries = {
 		`;
 
 		// A raw query to go through the event filter
-		var results = await db.sequelize.query(
+		const results = await db.sequelize.query(
 			entryQuery,
-			{ replacements: {tourn: tournId }}
+			{ replacements: { tourn: tournId } }
 		);
 
-		let entries = {};
+		const entries = {};
 
-		for (let entry of results[0]) {
+		results[0].forEach( entry => {
 
-			let student = {
+			const student = {
 				id     : entry.student_id,
 				first  : entry.student_first,
 				middle : entry.student_middle,
 				last   : entry.student_last,
-				nsda   : entry.student_nsda
+				nsda   : entry.student_nsda,
 			};
 
 			if (entries[entry.id]) {
@@ -58,41 +56,42 @@ export const listEntries = {
 				delete entries[entry.id].student_nsda;
 				entries[entry.id].students = [student];
 			}
-		}
+		});
 
 		return res.status(200).json(entries);
-    },
+	},
 };
+
+export default listEntries;
 
 listEntries.GET.apiDoc = {
-    summary: 'Listing of entries in the tournament',
-    operationId: 'listEntries',
-    parameters: [
-        {
-            in          : 'path',
-            name        : 'tourn_id',
-            description : 'Tournament ID',
-            required    : true,
-            schema      : {
+	summary: 'Listing of entries in the tournament',
+	operationId: 'listEntries',
+	parameters: [
+		{
+			in          : 'path',
+			name        : 'tourn_id',
+			description : 'Tournament ID',
+			required    : true,
+			schema      : {
 				type    : 'integer',
-				minimum : 1
+				minimum : 1,
 			},
-        },
-    ],
-    responses: {
-        200: {
-            description: 'Entry Data',
-            content: {
-                '*/*': {
-                    schema: {
-                        type: 'array',
-                        items: { $ref: '#/components/schemas/Entry' },
-                    },
-                },
-            },
-        },
-        default: { $ref: '#/components/responses/ErrorResponse' },
-    },
-    tags: ['tournament/register'],
+		},
+	],
+	responses: {
+		200: {
+			description: 'Entry Data',
+			content: {
+				'*/*': {
+					schema: {
+						type: 'array',
+						items: { $ref: '#/components/schemas/Entry' },
+					},
+				},
+			},
+		},
+		default: { $ref: '#/components/responses/ErrorResponse' },
+	},
+	tags: ['tournament/register'],
 };
-

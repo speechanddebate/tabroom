@@ -8,8 +8,8 @@ import { listEntries } from '../../../controllers/tourn/register/entries';
 import { listJudges } from '../../../controllers/tourn/register/judges';
 
 export default [
-    { path : '/tourn/{tourn_id}/register/schools' , module : listSchools } ,
-    { path : '/tourn/{tourn_id}/register/events'  , module : listEvents },
-    { path : '/tourn/{tourn_id}/register/entries' , module : listEntries },
-    { path : '/tourn/{tourn_id}/register/judges'  , module : listJudges },
+	{ path : '/tourn/{tourn_id}/register/schools' , module : listSchools } ,
+	{ path : '/tourn/{tourn_id}/register/events'  , module : listEvents },
+	{ path : '/tourn/{tourn_id}/register/entries' , module : listEntries },
+	{ path : '/tourn/{tourn_id}/register/judges'  , module : listJudges },
 ];
