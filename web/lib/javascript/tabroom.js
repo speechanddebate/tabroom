@@ -68,8 +68,6 @@
 		var anotherThing = $(checkObject).attr("another_thing");
 		var tournID      = $(checkObject).attr("tourn_id");
 
-		console.log("Tourn ID is "+tournID);
-
 		var successAction = $(checkObject).attr("on_success");
 		var replyTarget   = $(checkObject).attr("reply_target");
 		var replyAppend   = $(checkObject).attr("reply_append");
