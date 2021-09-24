@@ -112,7 +112,9 @@ export const changeAccess = {
 			)
 		) {
 
-			const already = await db.permission.findByPk(28285536);
+			const already = await db.permission.findOne({
+				where : { tourn: tournId, person: adminId, tag: "contact" },
+			});
 
 			if (already === null) {
 
