@@ -1,7 +1,7 @@
 package Tab::Session;
 use base 'Tab::DBI';
 Tab::Session->table('session');
-Tab::Session->columns(All    => qw/id person userkey timestamp ip su defaults created_at/);
+Tab::Session->columns(All    => qw/id person userkey timestamp ip su defaults created_at agent location/);
 Tab::Session->has_a(person   => 'Tab::Person');
 Tab::Session->has_a(su       => 'Tab::Person');
 
