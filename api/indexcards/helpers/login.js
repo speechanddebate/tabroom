@@ -3,7 +3,7 @@
 // return a session object
 //
 
-import crypt from 'crypt3';
+import crypt from '@idango/crypt3';
 
 const login = async (req) => {
 
