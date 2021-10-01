@@ -13,21 +13,21 @@ const ipLocation = {
 		Reader.open(config.IPLOCATION, options).then(async reader => {
 			const locationData = await reader.city(req.params.ip_address);
 
-			let returnData = { 
-				country       : locationData.country.names.en,
+			let returnData = {
+				country       : locationData.country?.names.en,
 				countryCode   : locationData.country.isoCode,
 				countryCode   : locationData.country.isoCode,
-				continent     : locationData.continent.names.en,
+				continent     : locationData.continent?.names.en,
 				continentCode : locationData.continent.isoCode,
-				city          : locationData.city.names.en,
-				isEU          : locationData.registeredCountry.isInEuropeanUnion,
+				city          : locationData.city?.names.en,
+				isEU          : locationData.registeredCountry?.isInEuropeanUnion,
 				latitude      : locationData.location.latitude,
 				longitude     : locationData.location.longitude,
 				timeZone      : locationData.location.timeZone,
-				postal        : locationData.postal.code
+				postal        : locationData.postal?.code
 			};
 
-			if (locationData.subdivisions) { 
+			if (locationData.subdivisions) {
 				returnData.state = locationData.subdivisions[0].isoCode;
 			}
 			res.json(returnData);
