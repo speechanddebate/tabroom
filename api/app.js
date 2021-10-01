@@ -35,9 +35,9 @@ app.enable('trust proxy');
 
 // Rate limit all requests
 const limiter = rateLimiter({
-	windowMs: config.RATE_WINDOW || 15 * 60 * 1000, // 15 minutes
-	max: config.RATE_MAX || 100000, // limit each IP to 100000 requests per windowMs
-	delayMs: config.RATE_DELAY || 0, // disable delaying - full speed until the max limit is reached
+	windowMs : config.RATE_WINDOW || 15 * 60 * 1000, // 15 minutes
+	max      : config.RATE_MAX || 100000, // limit each IP to 100000 requests per windowMs
+	delayMs  : config.RATE_DELAY || 0, // disable delaying - full speed until the max limit is reached
 });
 app.use(limiter);
 
@@ -115,7 +115,6 @@ app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 });
 
 // Combine the various paths into one
-
 const paths = [...tournPaths, ...userPaths, ...publicPaths];
 
 // Initialize OpenAPI middleware
