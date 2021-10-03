@@ -1,5 +1,5 @@
 
-const Reader = require('@maxmind/geoip2-node').Reader;
+import {Reader} from '@maxmind/geoip2-node';
 import config from '../../../../config/config';
 
 const ipLocation = {
@@ -14,17 +14,16 @@ const ipLocation = {
 			const locationData = await reader.city(req.params.ip_address);
 
 			let returnData = {
-				country       : locationData.country?.names.en,
-				countryCode   : locationData.country.isoCode,
-				countryCode   : locationData.country.isoCode,
-				continent     : locationData.continent?.names.en,
+				country: locationData.country.names.en,
+				countryCode: locationData.country.isoCode,
+				continent     : locationData.continent.names?.en,
 				continentCode : locationData.continent.isoCode,
-				city          : locationData.city?.names.en,
-				isEU          : locationData.registeredCountry?.isInEuropeanUnion,
+				city          : locationData.city.names.en,
+				isEU          : locationData.registeredCountry.isInEuropeanUnion,
 				latitude      : locationData.location.latitude,
 				longitude     : locationData.location.longitude,
 				timeZone      : locationData.location.timeZone,
-				postal        : locationData.postal?.code
+				postal        : locationData.postal.code
 			};
 
 			if (locationData.subdivisions) {
