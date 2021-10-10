@@ -211,6 +211,8 @@ echo
 
 /etc/init.d/apache2 restart
 
+cd /www/tabroom/api; npm install
+
 echo
 echo "Yippee.  All done!  Unless, of course, you just saw errors."
 echo
