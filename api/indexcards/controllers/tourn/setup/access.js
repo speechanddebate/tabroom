@@ -113,7 +113,7 @@ export const changeAccess = {
 		) {
 
 			const already = await db.permission.findOne({
-				where : { tourn: tournId, person: adminId, tag: "contact" },
+				where : { tourn: tournId, person: adminId, tag: 'contact' },
 			});
 
 			if (already === null) {

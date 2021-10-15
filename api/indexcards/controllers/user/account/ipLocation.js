@@ -1,37 +1,40 @@
-
-import {Reader} from '@maxmind/geoip2-node';
-import config from '../../../../config/config';
+import UAParser from 'ua-parser-js';
+import {findLocation, findISP} from '../../../helpers/clientInfo.js'
 
 const ipLocation = {
 
 	GET: async (req, res) => {
 
-		const options = {
-			// you can use options like `cache` or `watchForUpdates`
-		};
+		const requestIP = req.get('x-forwarded-for');
 
-		Reader.open(config.IPLOCATION, options).then(async reader => {
-			const locationData = await reader.city(req.params.ip_address);
+		if (
+			requestIP.startsWith(127)
+			|| requestIP.startsWith(192.168)
+		) { 
 
-			let returnData = {
-				country: locationData.country.names.en,
-				countryCode: locationData.country.isoCode,
-				continent     : locationData.continent.names?.en,
-				continentCode : locationData.continent.isoCode,
-				city          : locationData.city.names.en,
-				isEU          : locationData.registeredCountry.isInEuropeanUnion,
-				latitude      : locationData.location.latitude,
-				longitude     : locationData.location.longitude,
-				timeZone      : locationData.location.timeZone,
-				postal        : locationData.postal.code
-			};
+			console.log(req);
 
-			if (locationData.subdivisions) {
-				returnData.state = locationData.subdivisions[0].isoCode;
+			const locationData = await findLocation(req.params.ip_address);
+			const ispData = await findISP(req.params.ip_address);
+			const userAgent = UAParser(req.get('user-agent'));
+
+			locationData.isp = ispData.isp;
+
+			if (ispData.isp != ispData.organization) { 
+				locationData.organization = organizationData.organization;
 			}
-			res.json(returnData);
-		});
-	},
+
+			locationData.browser = userAgent.browser;
+			locationData.device = userAgent.device;
+			locationData.os = userAgent.os;
+			res.json(locationData);
+
+		} else { 
+
+			res.json({'message': 'This API for internal NSDA use only'});
+
+		}
+	}
 };
 
 export default ipLocation;
