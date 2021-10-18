@@ -11,5 +11,5 @@ import ipLocation from '../../controllers/user/account/ipLocation';
 export default [
 	{ path: '/user/profile', module : getProfile },
 	{ path: '/user/profile/{person_id}', module : getProfile },
-	{ path: '/user/iplocation/{ip_address}', module: ipLocation},
+	{ path: '/user/iplocation/{ip_address}', module: ipLocation },
 ];
