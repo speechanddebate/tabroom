@@ -1,5 +1,5 @@
 import UAParser from 'ua-parser-js';
-import {findLocation, findISP} from '../../../helpers/clientInfo.js'
+import { findLocation, findISP } from '../../../helpers/clientInfo.js';
 
 const ipLocation = {
 
@@ -10,7 +10,7 @@ const ipLocation = {
 		if (
 			requestIP.startsWith(127)
 			|| requestIP.startsWith(192.168)
-		) { 
+		) {
 
 			console.log(req);
 
@@ -20,8 +20,8 @@ const ipLocation = {
 
 			locationData.isp = ispData.isp;
 
-			if (ispData.isp != ispData.organization) { 
-				locationData.organization = organizationData.organization;
+			if (ispData.isp !== ispData.organization) {
+				locationData.organization = ispData.organization;
 			}
 
 			locationData.browser = userAgent.browser;
@@ -29,12 +29,12 @@ const ipLocation = {
 			locationData.os = userAgent.os;
 			res.json(locationData);
 
-		} else { 
+		} else {
 
-			res.json({'message': 'This API for internal NSDA use only'});
+			res.json( { message: 'This API for internal NSDA use only' } );
 
 		}
-	}
+	},
 };
 
 export default ipLocation;
