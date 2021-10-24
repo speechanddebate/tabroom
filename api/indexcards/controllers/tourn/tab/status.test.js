@@ -82,7 +82,7 @@ describe('Status Board', () => {
 	});
 
 	it('Reflects absence & presence changes in a new status object', async() => {
-		
+
 		// Mark Entry 16 section 27 present
 		await request(server)
 			.post(`/v1/tourn/1/tab/status/update`)
