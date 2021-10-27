@@ -1,5 +1,5 @@
 import { assert } from 'chai';
-import uuid from 'uuid/v4';
+import {v4}from 'uuid';
 import config from '../../config/config';
 import db from '../models';
 import login from './login';
@@ -20,7 +20,7 @@ describe('Login Password Validation', () => {
 		const req = {
 			db,
 			config,
-			uuid     : uuid(),
+			uuid     : v4(),
 			params   : {
 				email : userData.testUser.email,
 				password : userData.testPassword,
@@ -39,7 +39,7 @@ describe('Login Password Validation', () => {
 		const req = {
 			db,
 			config,
-			uuid     : uuid(),
+			uuid     : v4(),
 			params   : {
 				email : userData.testUser.email,
 				password : `${userData.testPassword}garbage`,
