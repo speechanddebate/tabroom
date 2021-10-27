@@ -131,11 +131,14 @@ echo
 	cpanminus \
 	librest-application-perl \
 	libtext-csv-encoded-perl \
-	libtext-csv-perl
+	libtext-csv-perl \
+	libgeoip2-perl \
+	libmaxmind-db-reader-perl
 
 cpanm Lingua::EN::Nums2Words
 cpanm REST::Client
 cpanm Text::Undiacritic
+cpanm HTTP::UA::Parser
 
 echo
 echo "Fixing Class DBI to talk to modern MySQL/MariaDB..."
@@ -207,6 +210,8 @@ echo "Starting Apache..."
 echo
 
 /etc/init.d/apache2 restart
+
+cd /www/tabroom/api; npm install
 
 echo
 echo "Yippee.  All done!  Unless, of course, you just saw errors."

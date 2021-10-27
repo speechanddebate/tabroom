@@ -29,9 +29,10 @@ Tab::Person->has_many(ignores => [ Tab::TournIgnore => 'tourn']);
 
 Tab::Person->has_many(permissions => 'Tab::Permission', 'person');
 Tab::Person->has_many(circuits => [ Tab::Permission => 'circuit']);
-Tab::Person->has_many(tourns => [ Tab::Permission => 'tourn']);
+Tab::Person->has_many(tourns   => [ Tab::Permission => 'tourn']);
 Tab::Person->has_many(chapters => [ Tab::Permission => 'chapter']);
-Tab::Person->has_many(regions => [ Tab::Permission => 'region']);
+Tab::Person->has_many(regions  => [ Tab::Permission => 'region']);
+Tab::Person->has_many(quizzes  => [Tab::PersonQuiz  => 'quiz']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
