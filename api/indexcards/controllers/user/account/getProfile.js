@@ -2,7 +2,16 @@ import db from '../../../models';
 
 const getProfile = {
 	GET: async (req, res) => {
-		const result = await db.Person.findByPk(req.query.userId);
+
+		let result;
+
+		if (req.params.person_id && req.session.site_admin) { 
+			result = await db.person.findByPk(req.params.person_id);
+		} else if (req.params.person_id ) {
+			return res.status(201).json({ message: 'Only admin staff may access another profile' });
+		} else { 
+			result = await db.person.findByPk(req.session.person);
+		}
 
 		if (result.count < 1) {
 			return res.status(400).json({ message: 'User does not exist' });
@@ -18,8 +27,8 @@ getProfile.GET.apiDoc = {
 		{
 			in          : 'path',
 			name        : 'person_id',
-			description : 'ID of user whose profile you wish to access',
-			required    : true,
+			description : 'ID of user whose profile you wish to access.  Defaults to present session.',
+			required    : false,
 			schema      : {
 				type    : 'integer',
 				minimum : 1,

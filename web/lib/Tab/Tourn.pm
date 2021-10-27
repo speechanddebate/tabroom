@@ -41,6 +41,7 @@ Tab::Tourn->has_many(tiebreak_sets  => 'Tab::TiebreakSet'  , 'tourn');
 Tab::Tourn->has_many(housing_slots  => 'Tab::HousingSlots' , 'tourn');
 Tab::Tourn->has_many(tourn_circuits => 'Tab::TournCircuit' , 'tourn');
 Tab::Tourn->has_many(weekends       => 'Tab::Weekend'      , 'tourn');
+Tab::Tourn->has_many(quizzes        => 'Tab::Quiz'         , 'tourn');
 
 Tab::Tourn->has_many(admins => [ Tab::Permission => 'person']);
 Tab::Tourn->has_many(sites => [Tab::TournSite => 'site']);

@@ -133,16 +133,16 @@
 
 		var accessType = "";
 
-		if (postMethod === "get") { 
+		if (postMethod === "get") {
 			accessType = "GET";
-		} else if (postMethod === "delete") { 
+		} else if (postMethod === "delete") {
 			accessType = "DELETE";
-		} else if (postMethod === "put") { 
+		} else if (postMethod === "put") {
 			accessType = "PUT";
-		} else { 
+		} else {
 			accessType = "POST";
 		}
-		
+
 		$.ajax({
 			type : accessType,
 			url  : replyUrl,

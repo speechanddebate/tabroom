@@ -1,7 +1,7 @@
 import express from 'express';
 import helmet from 'helmet';
 import rateLimiter from 'express-rate-limit';
-import uuid from 'uuid/v4';
+import uuid from 'uuid/v4.js';
 import expressWinston from 'express-winston';
 import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
@@ -14,11 +14,11 @@ import apiDoc from './indexcards/routes/api-doc';
 
 import publicPaths from './indexcards/routes/paths/public';
 import userPaths from './indexcards/routes/paths/user';
-import tournPaths from './indexcards/routes/paths/tourn';
+import tournPaths from './indexcards/routes/paths/tourn/index';
 
 import auth from './indexcards/helpers/auth';
 import tournAuth from './indexcards/helpers/tourn-auth';
-import db from './indexcards/models';
+import db from './indexcards/models/index';
 
 import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';
 
@@ -35,9 +35,9 @@ app.enable('trust proxy');
 
 // Rate limit all requests
 const limiter = rateLimiter({
-	windowMs: config.RATE_WINDOW || 15 * 60 * 1000, // 15 minutes
-	max: config.RATE_MAX || 100000, // limit each IP to 100000 requests per windowMs
-	delayMs: config.RATE_DELAY || 0, // disable delaying - full speed until the max limit is reached
+	windowMs : config.RATE_WINDOW || 15 * 60 * 1000, // 15 minutes
+	max      : config.RATE_MAX || 100000, // limit each IP to 100000 requests per windowMs
+	delayMs  : config.RATE_DELAY || 0, // disable delaying - full speed until the max limit is reached
 });
 app.use(limiter);
 
@@ -115,7 +115,6 @@ app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 });
 
 // Combine the various paths into one
-
 const paths = [...tournPaths, ...userPaths, ...publicPaths];
 
 // Initialize OpenAPI middleware

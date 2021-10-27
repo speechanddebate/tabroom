@@ -46,15 +46,15 @@
 	}
 
 	unless ($person->site_admin || $perms->{"chapter"}{$school->chapter->id}) {
-		$m->print('{ "error": true, "message": "You do not have permission to change strikes for '.$school->short_name.'}');
+		$m->print('{ 
+			"error": true, 
+			"message": "You do not have permission to change strikes for '.$school->short_name.'
+		}');
 		$m->abort();
 	}
 
-	my $bank;
-	my $event;
-	my $message;
-	my @strikes;
 	my $category;
+	my $event;
 
 	if ($related_thing) {
 		$category = Tab::Category->retrieve($related_thing);
@@ -65,51 +65,58 @@
 		$category = $judge->category;
 	}
 
-	my $adjust = $event->setting("adjust_strikes") if $event;
+	my %category_settings = $category->all_settings();
+	my $by_round;
 
-	if ($setting_name eq "school") {
-
-    	@strikes = $m->comp(
-			"/funclib/school_strikes.mas",
-				school   => $school,
-				category => $category
-		);
-
-		$bank = $category->setting("school_strikes");
-		$bank += $adjust;
-
-	} elsif ($setting_name eq "entry") {
-
-		@strikes = $m->comp('/funclib/entry_strikes.mas', entry => $entry);
-		$bank = $category->setting("entry_strikes");
-		$bank += $adjust;
+	if ( $category_settings{"rounds_per"} && $category_settings{"strikes_by_round"} ) { 
+		$by_round = 1;
 	}
 
-	my %freebie = $m->comp("/funclib/free_strikes.mas", category => $category);
+	my ($judgeref, $metaref) = $m->comp("/funclib/strike_judges.mas", 
+		entry    => $entry,
+		by_round => $by_round,
+		jpool    => $category_settings{"pref_jpool"}
+	);
+	
+	$metaref->{"by_round"} = $by_round;
 
-	my %strikes_by_id = ();
-	my %already;
-
-	foreach my $strike (@strikes) {
-
-		next unless $strike->registrant;
-		next if $strike->conflict;
-
-		if ($already{$strike->judge->id}++) {
-			$strike->delete();
-		} else {
-			$strikes_by_id{$strike->judge->id} = $strike;
-			$bank-- unless $freebie{$strike->judge->id};
+	if ( $metaref->{"by_round"}) {
+		$metaref->{"limit"} = POSIX::ceil($category_settings{"entry_strikes"} * $metaref->{"round_total"} / 100);
+	} else { 
+		$metaref->{"limit"} = $category_settings{"entry_strikes"};
+		if ($event) { 
+			$metaref->{"limit"} += $event->setting("adjust_strikes");
 		}
 	}
 
+	if ($judgeref) { 
+		foreach my $judge (keys %{$judgeref}) { 
+			if ($judgeref->{$judge}{"strike"}) { 
+				$metaref->{"already"} += $judgeref->{$judge}{"count"}
+			}
+		}
+	}
+
+	my $message;
+
 	if ($property_value == 1) {
 
-		if ($freebie{$judge->id} || $bank > 0) {
+		if ($judgeref->{$judge->id}{"free_strike"} || ($metaref->{"limit"} >= $metaref->{"already"})) {
 
-			unless ($strikes_by_id{$judge->id}) {
+			unless ($judgeref->{$judge->id}{"strike"}) {
 
-				if ($entry) {
+				if (
+					($judgeref->{$judge->id}{"count"} + $metaref->{"already"}) > $metaref->{"limit"}
+				) {
+
+					$message = "You have reached your strike limit! ";
+					$message .= " You have struck ".$metaref->{"already"}." of ".$metaref->{"limit"};
+					$message .= " Unstrike another judge if you dislike ".$judge->first." ".$judge->last;
+					$message .= " sufficiently to strike them instead";
+					$m->print('{ "error": true, "message": "'.$message.'"}');
+					$m->abort();
+
+				} else {
 
 					my $strike = Tab::Strike->create({
 						tourn      => $category->tourn->id,
@@ -121,33 +128,28 @@
 						judge      => $judge->id
 					});
 
-				} elsif ($school) {
-
-					my $strike = Tab::Strike->create({
-						tourn      => $category->tourn->id,
-						school     => $school,
-						type       => "school",
-						entered_by => $person,
-						created_at => $now,
-						registrant => 1,
-						judge      => $judge->id
-					});
+					$message = "You have struck ".$judge->first." ".$judge->last." like a gong.";
 				}
-
-				$message = "You have struck ".$judge->first." ".$judge->last." like a gong.";
 			}
+			
 		} else {
 
-			$message = "You already have reached your strike limit! ";
-			$message .= "Unstrike another judge if you hate ".$judge->first." ".$judge->last;
+			$message = "You already have reached your overall strike limit! ";
+			$message .= " You have struck ".$metaref->{"already"}." of ".$metaref->{"limit"};
+			$message .= " Unstrike another judge if you hate ".$judge->first." ".$judge->last;
 			$message .= " sufficiently to strike them instead";
 			$m->print('{ "error": true, "message": "'.$message.'"}');
 			$m->abort();
 		}
 
-	} elsif ($strikes_by_id{$judge->id}) {
-		$strikes_by_id{$judge->id}->delete();
+	} elsif ($judgeref->{$judge->id}{"strike"}) { 
+
+		my $id = $judgeref->{$judge->id}{"strike"};
+		my $strike = Tab::Strike->retrieve($id);
+		$strike->delete();	
+		
 		$message = "You have un-struck ".$judge->first." ".$judge->last;
+
 	} else {
 		$message = "No changes made";
 	}
