@@ -1,8 +1,7 @@
-
-import fs from 'fs';
-import path from 'path';
-import Sequelize from 'sequelize';
-import config from '../../config/config';
+const fs = require('fs');
+const path = require('path');
+const Sequelize = require('sequelize');
+const config = require ('../../config/config.cjs');
 
 const basename = path.basename(module.filename);
 
@@ -11,49 +10,49 @@ const sequelize = new Sequelize(
     config.DB_USER,
     config.DB_PASS,
     config.sequelizeOptions
-);    
-    
+);
+
 // By default Sequelize wants you to try...catch every single database query
 // for Reasons?  Otherwise all your database errors just go unprinted and you
 // get a random unfathomable 500 error.  Yeah, because that's great.  This will
 // try/catch every query so I don't have to deal.
 
-const errorsPlease = ['findAll', 'findOne', 'save', 'create', 'findByPk'];    
-    
-function dbError(err) {    
-    console.log(err);    
-    process.exit(0);    
-}    
-    
-errorsPlease.forEach((dingbat) => {    
-    const originalFunction = Sequelize[dingbat];    
-    Sequelize[dingbat] = function (...args) {    
-        return originalFunction.apply(this, args).catch(err => {    
-            dbError(err);    
-        });    
-    };    
-});    
-    
-const db = {};    
-    
-// This will read in all the model definitions in the /model directory and hook    
-// them in as sequelize objects populated into the db object    
-    
-fs.readdirSync(__dirname)    
-    .filter( file => {    
-        return (file.indexOf('.') !== 0) && (file !== basename);    
-    })    
-    .forEach( file => {    
-        const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes);    
-        db[model.name] = model;    
-    });    
-    
-Object.keys(db).forEach( (modelName) => {    
-    if ('associate' in db[modelName]) {    
-        db[modelName].associate(db);    
-    }    
-});    
-    
+const errorsPlease = ['findAll', 'findOne', 'save', 'create', 'findByPk'];
+
+function dbError(err) {
+    console.log(err);
+    process.exit(0);
+}
+
+errorsPlease.forEach((dingbat) => {
+    const originalFunction = Sequelize[dingbat];
+    Sequelize[dingbat] = function (...args) {
+        return originalFunction.apply(this, args).catch(err => {
+            dbError(err);
+        });
+    };
+});
+
+const db = {};
+
+// This will read in all the model definitions in the /model directory and hook
+// them in as sequelize objects populated into the db object
+
+fs.readdirSync(__dirname)
+    .filter( file => {
+        return (file.indexOf('.') !== 0) && (file !== basename);
+    })
+    .forEach( file => {
+        const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes);
+        db[model.name] = model;
+    });
+
+Object.keys(db).forEach( (modelName) => {
+    if ('associate' in db[modelName]) {
+        db[modelName].associate(db);
+    }
+});
+
 
 // Relations, lots and lots of relations
 //
@@ -612,6 +611,6 @@ db.student.hasMany(db.studentSetting   , { as: 'Settings' , foreignKey : 'studen
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
-export default db;
+module.exports = db;
 
 // db.Ballot.belongsTo(db.Person, { as: 'CollectedBy' });

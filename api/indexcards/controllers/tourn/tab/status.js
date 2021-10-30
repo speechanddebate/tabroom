@@ -1,4 +1,4 @@
-import { showDateTime } from '../../../helpers/common';
+import { showDateTime } from '../../../helpers/common.js';
 
 export const attendance = {
 
