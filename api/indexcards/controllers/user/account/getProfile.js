@@ -1,15 +1,15 @@
-import db from '../../../models';
+import db from '../../../models/index.cjs';
 
 const getProfile = {
 	GET: async (req, res) => {
 
 		let result;
 
-		if (req.params.person_id && req.session.site_admin) { 
+		if (req.params.person_id && req.session.site_admin) {
 			result = await db.person.findByPk(req.params.person_id);
 		} else if (req.params.person_id ) {
 			return res.status(201).json({ message: 'Only admin staff may access another profile' });
-		} else { 
+		} else {
 			result = await db.person.findByPk(req.session.person);
 		}
 

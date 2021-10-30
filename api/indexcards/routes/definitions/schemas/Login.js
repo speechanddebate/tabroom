@@ -1,4 +1,4 @@
-import { mysqlDate } from '../formats';
+import { mysqlDate } from '../formats.js';
 
 const Login = {
 	type : 'object',

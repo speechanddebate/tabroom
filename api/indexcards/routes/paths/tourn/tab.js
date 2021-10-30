@@ -2,8 +2,8 @@
 // logged in user with access to the tournament in question.
 
 // Router controllers
-import { attendance } from '../../../controllers/tourn/tab/status';
-import { changeAccess, changeEventAccess } from '../../../controllers/tourn/setup/access';
+import { attendance } from '../../../controllers/tourn/tab/status.js';
+import { changeAccess, changeEventAccess } from '../../../controllers/tourn/setup/access.js';
 
 export default [
 	{ path : '/tourn/{tourn_id}/tab/status/update', module : attendance },

@@ -1,10 +1,10 @@
 import { assert } from 'chai';
-import config from '../../config/config';
-import db from '../models';
-import auth from './auth';
-import tournAuth from './tourn-auth';
+import config from '../../config/config.js';
+import db from '../models/index.cjs';
+import auth from './auth.js';
+import tournAuth from './tourn-auth.js';
 
-import userData from '../tests/users';
+import userData from '../tests/users.js';
 
 describe('Authentication Functions', () => {
 
