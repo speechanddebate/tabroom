@@ -2,8 +2,8 @@
 // logged in user with access to the tournament in question.
 
 // Utility functions
-import tab from './tab';
-import register from './register';
+import tab from './tab.js';
+import register from './register.js';
 
 export default [
 	...tab,

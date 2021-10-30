@@ -1,9 +1,9 @@
-import Err from './Err';
-import Person from './Person';
-import Login from './Login';
-import School from './School';
-import SchoolSetting from './SchoolSetting';
-import Event from './Event';
+import Err from './Err.js';
+import Person from './Person.js';
+import Login from './Login.js';
+import School from './School.js';
+import SchoolSetting from './SchoolSetting.js';
+import Event from './Event.js';
 
 export default {
 	Err,
