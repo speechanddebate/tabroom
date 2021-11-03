@@ -15,7 +15,7 @@ import apiDoc from './indexcards/routes/api-doc.js';
 
 import userPaths from './indexcards/routes/paths/user/index.js';
 import tournPaths from './indexcards/routes/paths/tourn/index.js';
-const invitePaths = [];
+import invitePaths from './indexcards/routes/paths/invite/index.js';
 
 import auth from './indexcards/helpers/auth.js';
 import tournAuth from './indexcards/helpers/tourn-auth.js';
