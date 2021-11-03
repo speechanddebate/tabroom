@@ -4,10 +4,6 @@
 import getProfile from '../../../controllers/user/account/getProfile.js';
 import ipLocation from '../../../controllers/user/account/ipLocation.js';
 
-// import getPerson from '../controllers/user/getPerson';
-// import getLogin from '../controllers/user/getLogin';
-// { path : '/user/person/' , module : getPerson },
-
 export default [
 	{ path: '/user/profile', module : getProfile },
 	{ path: '/user/profile/{person_id}', module : getProfile },

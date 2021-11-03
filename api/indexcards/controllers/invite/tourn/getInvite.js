@@ -1,23 +1,36 @@
 import db from '../../../models/index.cjs';
 
-const getInviteByWebname = {
+const getInvite = {
 
 	GET: async (req, res) => {
-		const invite = await db.getInvite(req.params.webname);
-		return res.status(200).json(invite);
+		if (req.params.webname) {
+			const tourn = await db.tourn.findByPk(req.params.webname);
+			return res.status(200).json(invite);
+		} else if (req.params.tourn_id) {
+			const tourn = await db.tourn.findByPk(req.params.webname);
+			return res.status(200).json(invite);
+
+		}
 	},
 };
 
-getInviteByWebname.GET.apiDoc = {
+getInvite.GET.apiDoc = {
 	summary: 'Returns the public pages for a tournament',
-	operationId: 'getInviteByWebname',
+	operationId: 'getInvite',
 	parameters: [
 		{
 			in: 'path',
 			name: 'webname',
 			description: 'Public webname of the tournament to return',
-			required: true,
+			required: false,
 			schema: { type: 'string', minimum: 1 },
+		},
+		{
+			in: 'path',
+			name: 'tourn_id',
+			description: 'Tournament ID of tournament to return',
+			required: false,
+			schema: { type: 'integer', minimum: 1 },
 		},
 	],
 	responses: {
@@ -30,4 +43,4 @@ getInviteByWebname.GET.apiDoc = {
 	tags: ['invite', 'public'],
 };
 
-export default getInviteByWebname;
+export default getInvite;
