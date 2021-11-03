@@ -113,9 +113,10 @@ export const attendance = {
 		`;
 
 		// A raw query to go through the category filter
-		const [attendanceResults] = await db.sequelize.query(attendanceQuery);
+		const [attendanceResults]         = await db.sequelize.query(attendanceQuery);
 		const [unlinkedAttendanceResults] = await db.sequelize.query(unlinkedAttendanceQuery);
-		const [startsResults] = await db.sequelize.query(startsQuery);
+		const [startsResults]             = await db.sequelize.query(startsQuery);
+
 		const status = {};
 
 		attendanceResults.forEach( attend => {
@@ -166,6 +167,465 @@ export const attendance = {
 				status[start.person][start.panel].audited = true;
 			}
 		});
+
+		if (status.count < 1) {
+			return res.status(400).json({ message: 'No events found in that tournament' });
+		}
+
+		return res.status(200).json(status);
+	},
+
+	POST: async (req, res) => {
+
+		try {
+
+			const now = Date();
+			const db = req.db;
+
+			let [targetType, targetId] = req.body.target_id.toString().split('_');
+			let target;
+
+			if (targetType === 'student') {
+				target = await db.student.findByPk(targetId);
+			} else if (targetType === 'judge') {
+				target = await db.judge.findByPk(targetId);
+			} else {
+				target = await db.person.findByPk(req.body.target_id);
+			}
+
+			targetId = req.body.target_id;
+
+			if (!target) {
+				return res.status(201).json({
+					error   : true,
+					message : `No person to mark present for ID ${req.body.target_id}`,
+				});
+			}
+
+			const panel = await db.panel.findByPk(req.body.related_thing);
+
+			if (!panel) {
+				return res.status(201).json({
+					error   : true,
+					message : `No section found for ID ${req.body.related_thing}`,
+				});
+			}
+
+			if (req.body.setting_name === 'judge_started') {
+
+				let judge = {};
+
+				if (targetType === 'judge') {
+					judge = target;
+				} else {
+					judge = await db.judge.findByPk(req.body.another_thing);
+				}
+
+				if (parseInt(req.body.property_name) > 0) {
+
+					const eraseStart = `update ballot set started_by = NULL,
+						judge_started = NULL
+						where judge = :judgeId
+						and panel = :panelId `;
+
+					await db.sequelize.query(eraseStart, {
+						replacements: { judgeId: judge.id, panelId: panel.id },
+					});
+
+					const response = {
+						error : false,
+						reclass: [
+							{   id		  : `${panel.id}_${targetId}_start`,
+								removeClass : 'greentext',
+								addClass	: 'yellowtext',
+							},{
+								id		  : `${panel.id}_${targetId}_start`,
+								removeClass : 'fa-star',
+								addClass	: 'fa-stop',
+							},
+						],
+						reprop: [
+							{   id		  : `start_${panel.id}_${targetId}`,
+								property	: 'property_name',
+								value 		: false,
+							},{
+								id		  : `start_${panel.id}_${targetId}`,
+								property	: 'title',
+								value 		: 'Not started',
+							},
+						],
+						message : 'Judge marked as not started',
+					};
+
+					return res.status(201).json(response);
+				}
+
+				await db.ballot.update({
+					started_by: req.session.person,
+					judge_started : now,
+				},{
+					where : {
+						panel : panel.id,
+						judge : judge.id,
+					},
+				});
+
+				const response = {
+					error : false,
+					reclass: [
+						{   id		  : `${panel.id}_${targetId}_start`,
+							addClass	: 'greentext',
+							removeClass : 'yellowtext',
+						},{
+							id		  : `${panel.id}_${targetId}_start`,
+							addClass	: 'fa-star',
+							removeClass : 'fa-stop',
+						},
+					],
+					reprop: [
+						{   id		  : `start_${panel.id}_${targetId}`,
+							property	: 'property_name',
+							value 		: 1,
+						},{
+							id		  : `start_${panel.id}_${targetId}`,
+							property	: 'title',
+							value 		: `Judge marked as started by ${req.session.name}`,
+						},
+					],
+					message : `Judge marked as started by ${req.session.name}`,
+				};
+
+				return res.status(201).json(response);
+			}
+
+			if (parseInt(req.body.property_name) === 1) {
+
+				// The property already being 1 means that they're currently
+				// present, so mark them as absent.
+
+				const logMessage = `${target.first} ${target.last} marked as absent by ${req.session.email}`;
+
+				const log = {
+					tag         : 'absent',
+					description : logMessage,
+					tourn       : req.params.tourn_id,
+					panel       : panel.id,
+				};
+
+				if (targetType === 'student') {
+					log.student = target.id;
+				} else if (targetType === 'judge') {
+					log.judge = target.id;
+				} else {
+					log.person = target.id;
+				}
+
+				targetType = 'stfu_linter';
+
+				if (req.body.setting_name === 'entry') {
+					log.entry = req.body.another_thing;
+				} else if (req.body.setting_name === 'judge') {
+					log.judge = req.body.another_thing;
+				}
+
+				await db.campusLog.create(log);
+
+				// Oh for the days I have react going and don't need to do the
+				// following nonsense
+
+				return res.status(201).json({
+					error   : false,
+					message : logMessage,
+					reclass : [
+						{	id          : `${panel.id}_${targetId}`,
+							removeClass : 'greentext',
+							addClass    : 'brightredtext',
+						},
+						{	id          : `${panel.id}_${targetId}`,
+							removeClass : 'fa-check',
+							addClass    : 'fa-circle',
+						},
+					],
+					reprop  : [
+						{	id       : `container_${panel.id}_${targetId}`,
+							property : 'property_name',
+							value    : false,
+						},
+					],
+				});
+			}
+
+			// In this case they're currently marked absent, so we mark them
+			// present
+
+			const logMessage = `${target.first} ${target.last} marked as present by ${req.session.email}`;
+
+			const log = {
+				tag         : 'present',
+				description : logMessage,
+				tourn       : req.params.tourn_id,
+				panel       : panel.id,
+			};
+
+			if (targetType === 'student') {
+				log.student = target.id;
+			} else if (targetType === 'judge') {
+				log.judge = target.id;
+			} else {
+				log.person = target.id;
+			}
+
+			if (req.body.setting_name === 'entry') {
+				log.entry = req.body.another_thing;
+			} else if (req.body.setting_name === 'judge') {
+				log.judge = req.body.another_thing;
+			}
+
+			await db.campusLog.create(log);
+
+			return res.status(201).json({
+				error   : false,
+				message : logMessage,
+				reclass : [
+					{	id		  : `${panel.id}_${req.body.target_id}`,
+						addClass	: 'greentext',
+						removeClass : 'brightredtext',
+					},
+					{	id		  : `${panel.id}_${req.body.target_id}`,
+						addClass	: 'fa-check',
+						removeClass : 'fa-circle',
+					},
+				],
+				reprop  : [
+					{	id	   : `container_${panel.id}_${req.body.target_id}`,
+						property : 'property_name',
+						value	: 1,
+					},
+				],
+			});
+
+		} catch (err) {
+			console.log(err);
+		}
+	},
+};
+
+export const eventStatus = {
+
+	GET: async (req, res) => {
+
+		const db = req.db;
+		const perms = req.session.perms;
+
+		let queryLimit = '';
+
+		const eventQuery = `
+			select
+				event.id, event.name, event.abbr,
+				round.id round_id, round.name round_name, round.label, round.flighted, round.type,
+				CONVERT_TZ(round.start_time, '+00:00', tourn.tz) round_start,
+				CONVERT_TZ(timeslot.start, '+00:00', tourn.tz) timeslot_start,
+				panel.id panel_id, panel.bye, panel.flight,
+				ballot.id ballot_id, ballot.judge, ballot.bye bbye, ballot.forfeit bfft,
+					ballot.audit, ballot.judge_started,
+				score.id score_id, score.tag,
+				flight_offset.value offset
+
+			from (round, panel, ballot, event, tourn, timeslot)
+
+				left join score on score.ballot = ballot.id
+					and score.tag in ('winloss', 'point', 'rank')
+
+				left join event_setting flight_offset
+					on flight_offset.event = event.id
+					and flight_offset.tag = 'flight_offset'
+
+			where round.event = event.id
+
+				and event.tourn = ${req.params.tourn_id}
+
+				and round.id = panel.round
+				and panel.id = ballot.panel
+				and round.event = event.id
+				and event.tourn = tourn.id
+				and round.timeslot = timeslot.id
+
+				and panel.bye      = 0
+				and ballot.bye     = 0
+				and ballot.forfeit = 0
+				and ballot.judge > 0
+
+				and exists (
+					select b2.id
+						from ballot b2, panel p2
+						where b2.panel = p2.id
+						and p2.round   = round.id
+						and p2.bye     = 0
+						and b2.bye     = 0
+						and b2.audit   = 0
+						and b2.forfeit = 0
+						and b2.judge   > 0
+				)
+
+			order by event.name, round.name
+		`;
+
+		const [eventResults] = await db.sequelize.query(eventQuery);
+		const status         = {};
+		const statusCache    = { done_judges: {} };
+		const tournPerms     = req.session[req.params.tourn_id];
+
+		eventResults.forEach( event => {
+
+			if (
+				tournPerms.level === 'owner'
+				|| tournPerms.level === 'tabber'
+				|| tournPerms.events[event.id]
+			) {
+				// I am just A-OK!
+			} else {
+				next;
+			}
+
+			if (event.flighted < 1) {
+				event.flighted = 1;
+			}
+			if (event.flight < 1) {
+				event.flight = 1;
+			}
+
+			// I feel like if there's not a simple dynamic way to do this in JS
+			// that's a reason to take another look at Python.
+
+			if (statusCache.done_judges[event.judge+'-'+event.flight]) {
+
+				// next;  < == apparently this is now undefined. bleh.
+
+			} else {
+
+				statusCache.done_judges[event.judge+'-'+event.flight] = true;
+
+				if (status[event.id] == undefined) {
+					status[event.id] = {
+						abbr   : event.abbr,
+						name   : event.name,
+						rounds : {}
+					};
+				}
+
+				if (status[event.id].rounds[event.round_id] == undefined) {
+					status[event.id].rounds[event.round_id] = {
+						number   : event.round_name,
+						flighted : event.flighted,
+						type     : event.type,
+						label    : event.label,
+					}
+
+					if (status[event.id].rounds[event.round_id].label == '') {
+						status[event.id].rounds[event.round_id].label = `Rnd ${ event.round_name }`;
+					}
+				}
+
+				if (status[event.id].rounds[event.round_id][event.flight] == undefined) {
+
+					// This would be where I need the docs on the Moment library
+					// that Hardy mentioned, but because I'm on a plane with the
+					// crap wifi deal I can't get them without spending altogether
+					// more money than it's worth.  I mean, it's not a ton of
+					// money.  But it's the principle of the thing.
+
+					if (status[event.id].rounds[event.round_id][event.flight] == undefined) {
+						// this can't seriously be how this works.
+						status[event.id].rounds[event.round_id][event.flight] = {};
+					}
+
+					status[event.id].rounds[event.round_id][event.flight].start_time = event.round_start;
+				}
+
+				if (statusCache[event.id] == undefined) {
+					statusCache[event.id] = {};
+				}
+
+				if (event.bye
+					|| event.forfeit
+					|| event.audit
+					|| event.bbye
+				) {
+
+					//THIS IS SUCH A HORRIFIC ANTIPATTERN I BETTER BE WRONG ABOUT THIS
+					if (status[event.id].rounds[event.round_id][event.flight].complete) {
+						status[event.id].rounds[event.round_id][event.flight].complete++;
+					} else {
+						status[event.id].rounds[event.round_id][event.flight].complete = 1;
+					}
+
+					if (statusCache[event.id].finished) {
+						statusCache[event.id].finished++;
+					} else {
+						statusCache[event.id].finished = 1;
+					}
+
+				} else {
+
+					status[event.id].rounds[event.round_id][event.flight].undone = true;
+
+					if (event.score_id) {
+
+						status[event.id].rounds[event.round_id][event.flight].scored++;
+						status[event.id].rounds[event.round_id].in_progress = true;
+
+						if (statusCache[event.id].pending) {
+							statusCache[event.id].pending++;
+						} else {
+							statusCache[event.id].pending = 1;
+						}
+
+					} else if (event.judge_started) {
+
+						status[event.id].rounds[event.round_id][event.flight].started++;
+						status[event.id].rounds[event.round_id].in_progress = true;
+
+						if (statusCache[event.id].pending) {
+							statusCache[event.id].pending++;
+						} else {
+							statusCache[event.id].pending = 1;
+						}
+
+					} else {
+
+						status[event.id].rounds[event.round_id][event.flight].unstarted++;
+						status[event.id].rounds[event.round_id].incomplete = true;
+					}
+
+				}
+			}
+		});
+
+
+		const lastQuery = `
+			select
+				event.id, event.name, event.abbr,
+				round.id round_id, round.name round_name, round.label, round.type,
+				CONVERT_TZ(round.start_time, '+00:00', tourn.tz),
+				CONVERT_TZ(timeslot.start, '+00:00', tourn.tz)
+			from round, panel, event, timeslot, tourn
+
+			where round.event = event.id
+				and event.tourn = ${req.params.tourn_id}
+				and round.id = panel.round
+				and round.name = (
+					select max(r2.name)
+						from round r2, panel p2
+						where r2.event = event.id
+						and r2.id = p2.round
+				)
+				and round.timeslot = timeslot.id
+				and timeslot.tourn = tourn.id
+			group by event.id
+			order by round.name
+		`;
+
+//		const [lastResults]  = await db.sequelize.query(lastQuery);
 
 		if (status.count < 1) {
 			return res.status(400).json({ message: 'No events found in that tournament' });
@@ -408,7 +868,7 @@ export const attendance = {
 
 		}
 	},
-};
+}
 
 export default attendance;
 
