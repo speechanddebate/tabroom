@@ -1,5 +1,5 @@
 import {Reader} from '@maxmind/geoip2-node';
-import config from '../../config/config'
+import config from '../../config/config.js'
 
 export const findLocation = async (ipAddress) => {
 
@@ -10,10 +10,10 @@ export const findLocation = async (ipAddress) => {
 		|| ipAddress.startsWith('172.17')
 		|| ipAddress.startsWith('10')
 		|| ipAddress.startsWith('127')
-	) { 
+	) {
 		return;
 	}
-	
+
 	const options = {
 		// you can use options like `cache` or `watchForUpdates`
 	};
@@ -50,14 +50,14 @@ export const findISP = async (ipAddress) => {
 		|| ipAddress.startsWith('172.17')
 		|| ipAddress.startsWith('10')
 		|| ipAddress.startsWith('127')
-	) { 
+	) {
 		return;
 	}
 
 	const options = {
 		// you can use options like `cache` or `watchForUpdates`
 	};
-	
+
 	const reader = await Reader.open(config.IPISP, options);
 	const ispDB = await reader.isp(ipAddress);
 
