@@ -1,9 +1,9 @@
 import request from 'supertest';
 import { assert } from 'chai';
-import config from '../../../../config/config';
-import db from '../../../models';
-import server from '../../../../app';
-import userData from '../../../tests/users';
+import config from '../../../../config/config.js';
+import db from '../../../models/index.cjs';
+import server from '../../../../app.js';
+import userData from '../../../tests/users.js';
 
 describe('Status Board', () => {
 
@@ -16,10 +16,10 @@ describe('Status Board', () => {
 		testAdminSession = await db.session.create(userData.testAdminSession);
 		testCampusLog = await db.campusLog.create(userData.testCampusLog);
 
-		await db.sequelize.query(`
-			update ballot 
+		const result = await db.sequelize.query(`
+			update ballot
 			set judge_started = NOW(), started_by = 1
-			where ballot.judge = 355 
+			where ballot.judge = 355
 			and ballot.panel = 37
 		`);
 

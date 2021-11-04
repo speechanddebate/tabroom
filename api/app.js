@@ -7,20 +7,21 @@ import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
 import { initialize } from 'express-openapi';
 import swaggerUI from 'swagger-ui-express';
-import config from './config/config';
-import errorHandler from './indexcards/helpers/error';
+import config from './config/config.js';
 
-import apiDoc from './indexcards/routes/api-doc';
+import errorHandler from './indexcards/helpers/error.js';
 
-import publicPaths from './indexcards/routes/paths/public';
-import userPaths from './indexcards/routes/paths/user';
-import tournPaths from './indexcards/routes/paths/tourn/index';
+import apiDoc from './indexcards/routes/api-doc.js';
 
-import auth from './indexcards/helpers/auth';
-import tournAuth from './indexcards/helpers/tourn-auth';
-import db from './indexcards/models/index';
+import userPaths from './indexcards/routes/paths/user/index.js';
+import tournPaths from './indexcards/routes/paths/tourn/index.js';
+import invitePaths from './indexcards/routes/paths/invite/index.js';
 
-import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';
+import auth from './indexcards/helpers/auth.js';
+import tournAuth from './indexcards/helpers/tourn-auth.js';
+import db from './indexcards/models/index.cjs';
+
+import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger.js';
 
 const app = express();
 
@@ -115,7 +116,7 @@ app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 });
 
 // Combine the various paths into one
-const paths = [...tournPaths, ...userPaths, ...publicPaths];
+const paths = [...tournPaths, ...userPaths, ...invitePaths];
 
 // Initialize OpenAPI middleware
 const apiDocConfig = initialize({
