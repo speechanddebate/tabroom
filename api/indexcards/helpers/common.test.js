@@ -1,5 +1,5 @@
 import { assert } from 'chai';
-import { academicYear, ordinalize, escapeCSV, emailValidator, condenseDateRange, showDateTime } from './common';
+import { academicYear, ordinalize, escapeCSV, emailValidator, condenseDateRange, showDateTime } from './common.js';
 
 describe('Academic Year helper', () => {
 	it('Returns the correct academic year given a Date object', async () => {
