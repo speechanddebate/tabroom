@@ -423,13 +423,14 @@ export const eventStatus = {
 			select
 				event.id, event.name, event.abbr,
 				round.id round_id, round.name round_name, round.label, round.flighted, round.type,
-				CONVERT_TZ(round.start_time, '+00:00', tourn.tz) round_start,
-				CONVERT_TZ(timeslot.start, '+00:00', tourn.tz) timeslot_start,
+				round.start_time round_start,
+				timeslot.start timeslot_start,
 				panel.id panel_id, panel.bye, panel.flight,
 				ballot.id ballot_id, ballot.judge, ballot.bye bbye, ballot.forfeit bfft,
 					ballot.audit, ballot.judge_started,
 				score.id score_id, score.tag,
-				flight_offset.value offset
+				flight_offset.value offset,
+				tourn.tz tz
 
 			from (round, panel, ballot, event, tourn, timeslot)
 
@@ -484,22 +485,19 @@ export const eventStatus = {
 			) {
 				// I am just A-OK!
 			} else {
-				next;
+				return;
 			}
 
-			if (event.flighted < 1) {
-				event.flighted = 1;
-			}
-			if (event.flight < 1) {
-				event.flight = 1;
-			}
+			event.flighted = event.flighted || 1;
+			event.flight = event.flight || 1;
+			event.round_start = event.round_start || event.timeslot_start;
 
 			// I feel like if there's not a simple dynamic way to do this in JS
 			// that's a reason to take another look at Python.
 
 			if (statusCache.done_judges[event.judge+'-'+event.flight]) {
 
-				// next;  < == apparently this is now undefined. bleh.
+				return;
 
 			} else {
 
@@ -528,18 +526,20 @@ export const eventStatus = {
 
 				if (status[event.id].rounds[event.round_id][event.flight] == undefined) {
 
-					// This would be where I need the docs on the Moment library
-					// that Hardy mentioned, but because I'm on a plane with the
-					// crap wifi deal I can't get them without spending altogether
-					// more money than it's worth.  I mean, it's not a ton of
-					// money.  But it's the principle of the thing.
-
 					if (status[event.id].rounds[event.round_id][event.flight] == undefined) {
 						// this can't seriously be how this works.
 						status[event.id].rounds[event.round_id][event.flight] = {};
 					}
 
-					status[event.id].rounds[event.round_id][event.flight].start_time = event.round_start;
+					status[event.id]
+						.rounds[event.round_id][event.flight]
+						.start_time
+						= new Date(event.round_start).toLocaleTimeString(
+							'en-us', {
+								hour     : 'numeric',
+								minute   : '2-digit',
+								timeZone : event.tz
+							});
 				}
 
 				if (statusCache[event.id] == undefined) {
@@ -571,32 +571,29 @@ export const eventStatus = {
 
 					if (event.score_id) {
 
-						status[event.id].rounds[event.round_id][event.flight].scored++;
+						status[event.id].rounds[event.round_id][event.flight].scored =
+							++status[event.id].rounds[event.round_id][event.flight].scored || 1;
+
 						status[event.id].rounds[event.round_id].in_progress = true;
 
-						if (statusCache[event.id].pending) {
-							statusCache[event.id].pending++;
-						} else {
-							statusCache[event.id].pending = 1;
-						}
+						statusCache[event.id].pending = ++statusCache[event.id].pending || 1;
 
 					} else if (event.judge_started) {
 
-						status[event.id].rounds[event.round_id][event.flight].started++;
+
+						status[event.id].rounds[event.round_id][event.flight].started =
+							++status[event.id].rounds[event.round_id][event.flight].started || 1;
+
 						status[event.id].rounds[event.round_id].in_progress = true;
 
-						if (statusCache[event.id].pending) {
-							statusCache[event.id].pending++;
-						} else {
-							statusCache[event.id].pending = 1;
-						}
+						statusCache[event.id].pending = ++statusCache[event.id].pending || 1;
 
 					} else {
 
-						status[event.id].rounds[event.round_id][event.flight].unstarted++;
-						status[event.id].rounds[event.round_id].incomplete = true;
+						status[event.id].rounds[event.round_id][event.flight].unstarted =
+							++status[event.id].rounds[event.round_id][event.flight].unstarted
+							|| 1;
 					}
-
 				}
 			}
 		});
@@ -606,8 +603,9 @@ export const eventStatus = {
 			select
 				event.id, event.name, event.abbr,
 				round.id round_id, round.name round_name, round.label, round.type,
-				CONVERT_TZ(round.start_time, '+00:00', tourn.tz),
-				CONVERT_TZ(timeslot.start, '+00:00', tourn.tz)
+				round.start_time round_start,
+				timeslot.start timeslot_start,
+				tourn.tz tz
 			from round, panel, event, timeslot, tourn
 
 			where round.event = event.id
@@ -625,7 +623,63 @@ export const eventStatus = {
 			order by round.name
 		`;
 
-//		const [lastResults]  = await db.sequelize.query(lastQuery);
+		const [lastResults]  = await db.sequelize.query(lastQuery);
+
+		lastResults.forEach( event => {
+
+			if (status[event.id]) {
+				return;
+			}
+
+			event.flighted = event.flighted || 1;
+			event.flight = event.flight || 1;
+
+			if (status[event.id] == undefined) {
+				status[event.id] = {
+					abbr   : event.abbr,
+					name   : event.name,
+					rounds : {}
+				};
+			}
+
+			if (status[event.id].rounds[event.round_id] == undefined) {
+				status[event.id].rounds[event.round_id] = {
+					number   : event.round_name,
+					flighted : event.flighted,
+					type     : event.type,
+					label    : event.label,
+				}
+
+				if (status[event.id].rounds[event.round_id].label == '') {
+					status[event.id].rounds[event.round_id].label = `Rnd ${ event.round_name }`;
+				}
+			}
+
+			event.round_start = event.round_start || event.timeslot_start;
+
+			if (status[event.id].rounds[event.round_id][event.flight] == undefined) {
+
+				if (status[event.id].rounds[event.round_id][event.flight] == undefined) {
+					// this can't seriously be how this works.
+					status[event.id].rounds[event.round_id][event.flight] = {};
+				}
+
+				status[event.id]
+					.rounds[event.round_id][event.flight]
+					.start_time
+					= new Date(event.round_start).toLocaleTimeString(
+						'en-us', {
+							hour         : 'numeric',
+							minute       : '2-digit',
+							timeZone     : event.tz
+						});
+			}
+
+			if (statusCache[event.id] == undefined) {
+				statusCache[event.id] = {};
+			}
+
+		});
 
 		if (status.count < 1) {
 			return res.status(400).json({ message: 'No events found in that tournament' });
@@ -863,9 +917,7 @@ export const eventStatus = {
 			});
 
 		} catch (err) {
-
 			console.log(err);
-
 		}
 	},
 }
