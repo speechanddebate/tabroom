@@ -34,6 +34,7 @@ app.use(helmet());
 // Enable getting forwarded client IP from proxy
 app.enable('trust proxy');
 
+
 // Rate limit all requests
 const limiter = rateLimiter({
 	windowMs : config.RATE_WINDOW || 15 * 60 * 1000, // 15 minutes
@@ -76,6 +77,13 @@ app.use(expressWinston.logger({
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json({ type: ['json', 'application/*json'], limit: '10mb' }));
 app.use(bodyParser.text({ type: '*/*', limit: '10mb' }));
+
+if (process.env.NODE_ENV === 'development') {
+	// Pretty print JSON in the dev environment
+	app.use(bodyParser.json())
+	app.set('json spaces', 4)
+}
+
 
 // Parse cookies and add them to the session
 app.use(cookieParser());
