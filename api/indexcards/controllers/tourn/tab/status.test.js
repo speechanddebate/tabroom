@@ -154,3 +154,47 @@ describe('Status Board', () => {
 	});
 
 });
+
+describe('Event Dashboard', () => {
+
+	let testAdmin = {};
+	let testAdminSession = {};
+
+	before('Set Dummy Data', async () => {
+		testAdmin = await db.person.create(userData.testAdmin);
+		testAdminSession = await db.session.create(userData.testAdminSession);
+	});
+
+	it('Return a correct JSON status object', async () => {
+
+		const res = await request(server)
+			.get(`/v1/tourn/1/tab/dashboard`)
+			.set('Accept', 'application/json')
+			.set('Cookie', [`${config.COOKIE_NAME}=${testAdminSession.userkey}`])
+			.expect('Content-Type', /json/)
+			.expect(200);
+
+		assert.isObject(res.body, 'Response is an object');
+
+		assert.equal(
+			res.body[7].abbr,
+			'LD',
+			'Event 7 is LD');
+			
+		assert.equal(
+			res.body[7].rounds[1][1].unstarted,
+			'25',
+			'15 unstarted in Round 1 flight 1');
+
+		assert.isTrue(
+			res.body[7].rounds[1][2].undone,
+			'Flight 2 is not done');
+
+	});
+
+	after('Remove Dummy Data', async () => {
+		await testAdminSession.destroy();
+		await testAdmin.destroy();
+	});
+
+});
