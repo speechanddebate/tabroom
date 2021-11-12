@@ -8,17 +8,18 @@ const ipLocation = {
 		const requestIP = req.get('x-forwarded-for');
 
 		if (
-			requestIP.startsWith(127)
-			|| requestIP.startsWith(192.168)
+			requestIP?.startsWith(127)
+			|| requestIP?.startsWith(192.168)
+			|| process.env.NODE_ENV === 'development'
+			|| process.env.NODE_ENV === 'test'
 		) {
-
-			console.log(req);
 
 			const locationData = await findLocation(req.params.ip_address);
 			const ispData = await findISP(req.params.ip_address);
 			const userAgent = UAParser(req.get('user-agent'));
 
 			locationData.isp = ispData.isp;
+
 
 			if (ispData.isp !== ispData.organization) {
 				locationData.organization = ispData.organization;

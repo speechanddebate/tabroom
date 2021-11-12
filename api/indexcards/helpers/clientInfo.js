@@ -22,11 +22,11 @@ export const findLocation = async (ipAddress) => {
 	const locationDB = await reader.city(ipAddress);
 
 	let ispLocation = {
-		country       : locationDB.country.names?.en,
+		country       : locationDB.country?.names?.en,
 		countryCode   : locationDB.country.isoCode,
-		continent     : locationDB.continent.names?.en,
+		continent     : locationDB.continent?.names?.en,
 		continentCode : locationDB.continent.isoCode,
-		city          : locationDB.city.names?.en,
+		city          : locationDB.city?.names?.en,
 		isEU          : locationDB.registeredCountry?.isInEuropeanUnion,
 		latitude      : locationDB.location?.latitude,
 		longitude     : locationDB.location?.longitude,
