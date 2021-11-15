@@ -241,6 +241,7 @@ db.event.hasMany(db.changeLog, { as: 'ChangeLogs', foreignKey: 'event' });
 
 db.event.belongsToMany(db.sweepProtocol, { through: 'sweep_events' });
 
+
 db.pattern.hasMany(db.event,     { as: 'Events',     foreignKey: 'pattern' });
 db.pattern.hasMany(db.category,  { as: 'Categories', foreignKey: 'pattern' });
 db.pattern.belongsTo(db.pattern, { as: 'Exclude',    foreignKey: 'exclude' });
@@ -252,6 +253,7 @@ db.tiebreak.belongsTo(db.protocol , { as: 'Child'    , foreignKey : 'child' });
 db.protocol.belongsTo(db.tourn  , { as: 'Tourn'     , foreignKey : 'tourn' });
 db.protocol.hasMany(db.tiebreak , { as: 'Tiebreaks' , foreignKey : 'tiebreak_set' });
 db.protocol.hasMany(db.tiebreak , { as: 'Parents'   , foreignKey : 'child' });
+
 
 db.webpage.belongsTo(db.person  , { as: 'Editor'    , foreignKey : 'last_editor' });
 db.webpage.belongsTo(db.webpage , { as: 'Parent'    , foreignKey : 'tourn' });
@@ -413,16 +415,17 @@ db.shift.hasMany(db.strike,     { as: 'Strikes',  foreignKey: 'shift' });
 db.shift.belongsTo(db.category, { as: 'Category', foreignKey: 'category' });
 
 // Rounds & results
-db.round.belongsTo(db.event     , { as: 'Event'    , foreignKey : 'event' });
-db.round.belongsTo(db.timeslot  , { as: 'Timeslot' , foreignKey : 'timeslot' });
-db.round.belongsTo(db.site      , { as: 'Site'     , foreignKey : 'site' });
-db.round.belongsTo(db.protocol  , { as: 'Protocol' , foreignKey : 'tiebreak_set' });
-db.round.belongsTo(db.round     , { as: 'Runoff'   , foreignKey : 'runoff' });
-db.round.belongsToMany(db.rpool , { as: 'RPools'   , foreignKey : 'round', through : 'rpool_round' });
+db.round.belongsTo(db.event     , { as: 'Event'    , foreignKey: 'event' });
+db.round.belongsTo(db.timeslot  , { as: 'Timeslot' , foreignKey: 'timeslot' });
+db.round.belongsTo(db.site      , { as: 'Site'     , foreignKey: 'site' });
+db.round.belongsTo(db.protocol  , { as: 'Protocol' , foreignKey: 'tiebreak_set' });
+db.round.belongsTo(db.round     , { as: 'Runoff'   , foreignKey: 'runoff' });
+db.round.belongsToMany(db.rpool , { as: 'RPools'   , foreignKey: 'round', through: 'rpool_round' });
+db.round.hasMany(db.panel       , { as: 'Panels'   , foreignKey: 'round' });
 
-db.panel.hasMany(db.ballot      , { as: 'Ballots'     , foreignKey: 'panel' });
-db.panel.hasMany(db.changeLog   , { as: 'LogsOld'     , foreignKey: 'old_panel' });
-db.panel.hasMany(db.changeLog   , { as: 'LogsNew'     , foreignKey: 'new_panel' });
+db.panel.hasMany(db.ballot      , { as: 'Ballots'      , foreignKey: 'panel' });
+db.panel.hasMany(db.changeLog   , { as: 'LogsOld'      , foreignKey: 'old_panel' });
+db.panel.hasMany(db.changeLog   , { as: 'LogsNew'      , foreignKey: 'new_panel' });
 db.panel.hasMany(db.studentVote , { as: 'StudentVotes' , foreignKey: 'panel' });
 db.panel.belongsTo(db.room      , { as: 'Room'         , foreignKey: 'room' });
 db.panel.belongsTo(db.round     , { as: 'Round'        , foreignKey: 'round' });
