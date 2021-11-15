@@ -84,7 +84,6 @@ if (process.env.NODE_ENV === 'development') {
 	app.set('json spaces', 4)
 }
 
-
 // Parse cookies and add them to the session
 app.use(cookieParser());
 
