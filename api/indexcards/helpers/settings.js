@@ -11,7 +11,13 @@ export const tournSettings = {
 - 	DEADLINES
 	bill_deadline               
 	drop_deadline               
-	drop_fine                   
+	fine_deadline               
+	freeze_deadline             
+	judge_deadline              
+	refund_deadline             
+	release_deadline            
+	script_deadline             
+	supp_deadline               
 
 -	TOURN METADATA
 	created_at                  
@@ -21,6 +27,15 @@ export const tournSettings = {
 
 -	FINES AND FEES
 	add_fine                   
+	drop_fine                   
+	forfeit_judge_fine          
+	forfeit_judge_fine_elim     
+	noshow_judge_fine           
+	noshow_judge_fine_elim      
+	fees_alternate_state        
+	first_forfeit_multiplier    
+	per_person_fee              
+	per_student_fee             
 
 -	REGISTRATION
 	ask_regions                 
@@ -31,121 +46,108 @@ export const tournSettings = {
 	eligibility_doc_message     
 	eligibility_text            
 	eligibility_upload          
+	entry_release  
+	hide_codes                  
+	housing                     
+	invoice_waitlist            
+	judges_waitlist             
+	must_pay_dues               
+
+	onsite_ends                 
+	onsite_notes                
+	onsite_only_paid            
+	onsite_registration         
+	onsite_starts               
+	
+	track_reg_changes           
+
+	school_codes                
+	first_school_code           
+	nonunique_entry_codes       
+	no_waitlist_double_entry    
+	overall_cap                 
+	publish_schools             
+	refund_information          
+	refund_judge_bond           
+	regions                     
+	registration_packet         
+	require_adult_contact       
+	require_hotel_form          
+	second_adult_contact        
+	shipping_address            
+	show_jpools                 
+	tourn_notes                 
 
 -	PRINTING
 	top_margin                  
+	left_margin                 
+	hcorner                     
+	hlabel                      
 	vcorner                     
 	vlabel                      
 	col_space                   
-
-	
+	papersize                   
+	row_space
 
 -	TABBING
 	avoid_others_rooms          
 	backup_followers            
-
+	forfeit_notify_coaches      
+	naudl_processed             
+	noshow_notify_coaches       
+	senders
+	
 -	SPECIFIC FUCKED UP TOURNAMENTS
 	ceda_nationals              
 	usa_wsdc                    
 	wsdc                        
+	legion                      
 	ncfl                        
 	ncfl_codes                   -- Why separate?
+	pkd                         
+	pkd_no_nsda                 
 
 - 	CAMPUS USEFUL THINGS
-	campus_force_public -- this is an event setting now no?
+	campus_force_public -- this is an event_setting now no?
 
 -	MESSAGES
 	ballot_message              - aren't these event settings now
 	chair_ballot_message        - aren't these event settings now
 	bias_saved         ???
-	bias_statement              - event setting?
+	bias_statement              - event_setting?
 	waitlist_message            
 	web_message                 
-
 	competitor_form_message     
 	concession_invoice          
 	concession_name             
-
--   RANDO INFORMATIONAL NO LONGER REALLY NEEDED
-	async                       
-
--	NSDA SURVEY PROBS SHOULD BECOME JSON BLOBS
-	audit_procedures            
-
-- 	NATIONALS SPECIFIC TABBING AND REG
-	nsda_nats                   
-	nsda_ms_nats                
-
-	autoquals             
-	district_authorships        
-	district_regions            
-	fifty_percent_deadline      
-	hundred_percent_deadline    
-
--	THESE MAY NO LONGER MEAN ANYTHING
-	bid_min_cume                
-	bid_min_number              
-	bid_min_round               
-	bid_min_round_type          
-	bid_percent                 
-	bid_round_to_rank           
-
--	NSDA NONSENSE THAT SHOULD GET FOLDED INTO ONE JSON
-	disclaimer                  
-	disclaimer_1                
-	disclaimer_2                
-	disclaimer_3                
-	disclaimer_4                
-	disclaimer_5                
-
-
-ZZZZ
-	enable_credit               
-	entry_release               
-	fees_alternate_state        
-	fine_deadline               
-	first_forfeit_multiplier    
-	first_school_code           
-	forfeit_judge_fine          
-	forfeit_judge_fine_elim     
-	forfeit_notify_coaches      
-	freeze_deadline             
-
-	hcorner                     
-	hlabel                      
-
-	hide_codes                  
-
 	hotel_message               
-	housing                     
 	housing_message             
-	instructions_url            
 	invoice_address             
 	invoice_message             
-	invoice_waitlist            
-
+	instructions_url            
 	judgebond_message           
-	judges_waitlist             
-	judge_deadline              
 	judge_fine_message          
-	left_margin                 
-	legion                      
 	legislation_message         
 	mailing_address             
 	mailing_message             
-	must_pay_dues               
 	nats_open_message           
-	naudl_processed             
-	nco_purchased               
-	nco_requested               
-	nc_purchased                
-	nc_requested                
-	nonprofit                   
-	nonunique_entry_codes       
-	noshow_judge_fine           
-	noshow_judge_fine_elim      
-	noshow_notify_coaches       
-	no_waitlist_double_entry    
+	registration_message        
+
+-   RANDO INFORMATIONAL NO LONGER REALLY NEEDED
+	async                       
+	sync                        
+
+-	NSDA SURVEY PROBS SHOULD BECOME JSON BLOBS
+	audit_procedures            
+	
+	school_city                 
+	school_country              
+	school_name                 
+	school_state                
+	school_street               
+	school_street_2             
+	school_zip                  
+
 	nsda_administrator_trophy   
 	nsda_alum_trophy            
 	nsda_assistant_coach_trophy 
@@ -194,47 +196,9 @@ ZZZZ
 	nsda_tabroom_first          
 	nsda_tourn_id               
 	nsda_volunteer_trophy       
-	Online                      
-	online_rooms                
-	onsite_ends                 
-	onsite_notes                
-	onsite_only_paid            
-	onsite_registration         
-	onsite_starts               
-	overall_cap                 
-	papersize                   
-	per_person_fee              
-	per_student_fee             
-	pkd                         
-	pkd_no_nsda                 
-	publish_schools             
-	refund_deadline             
-	refund_information          
-	refund_judge_bond           
-	regions                     
-	registration_message        
-	registration_packet         
-	release_deadline            
-	require_adult_contact       
-	require_hotel_form          
-	reverse_awards              
-	row_space                   
-	school_city                 
-	school_codes                
-	school_country              
-	school_name                 
-	school_state                
-	school_street               
-	school_street_2             
-	school_zip                  
-	script_deadline             
-	second_adult_contact        
-	senders                     
-	shipping_address            
-	show_jpools                 
-	store_carts                 
-	suppconn_message            
-	supp_deadline               
+	
+
+	ALL THIS SHOULD BE ONE JSON
 	survey_done                 
 	survey_explanation          
 	survey_hire_con             
@@ -247,11 +211,48 @@ ZZZZ
 	survey_obligation_debate    
 	survey_obligation_ie        
 	survey_school_fee           
-	sync                        
+
+- 	NATIONALS SPECIFIC TABBING AND REG
+	nsda_nats                   
+	nsda_ms_nats                
+	suppconn_message            
+
+	autoquals             
+	district_authorships        
+	district_regions            
+	fifty_percent_deadline      
+	hundred_percent_deadline    
+
+-	THESE MAY NO LONGER MEAN ANYTHING
+	bid_min_cume                
+	bid_min_number              
+	bid_min_round               
+	bid_min_round_type          
+	bid_percent                 
+	bid_round_to_rank           
+
+-	NSDA NONSENSE THAT SHOULD GET FOLDED INTO ONE JSON
+	disclaimer                  
+	disclaimer_1                
+	disclaimer_2                
+	disclaimer_3                
+	disclaimer_4                
+	disclaimer_5                
+
+-	PURCHASE INFORMATION AND FLOW
+	store_carts                 
 	tabroom_grant               
 	tabroom_purchased           
 	tabroom_requested           
 	tech_contact                
-	tourn_notes                 
-	track_reg_changes           
-	
+	nco_purchased               
+	nco_requested               
+	nc_purchased                
+	nc_requested                
+
+BEATS THE HELL OUT OF ME
+	enable_credit               
+	nonprofit                   
+	online                      
+	online_rooms                
+	reverse_awards              
