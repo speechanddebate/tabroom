@@ -495,13 +495,12 @@ export const eventStatus = {
 			// I feel like if there's not a simple dynamic way to do this in JS
 			// that's a reason to take another look at Python.
 
-			if (statusCache.done_judges[event.judge+'-'+event.flight]) {
-
+			if (statusCache.done_judges[event.round_id+'-'+event.judge+'-'+event.flight]) {
 				return;
 
 			} else {
 
-				statusCache.done_judges[event.judge+'-'+event.flight] = true;
+				statusCache.done_judges[event.round_id+'-'+event.judge+'-'+event.flight] = true;
 
 				if (status[event.id] == undefined) {
 					status[event.id] = {
@@ -580,7 +579,6 @@ export const eventStatus = {
 
 					} else if (event.judge_started) {
 
-
 						status[event.id].rounds[event.round_id][event.flight].started =
 							++status[event.id].rounds[event.round_id][event.flight].started || 1;
 
@@ -598,6 +596,51 @@ export const eventStatus = {
 			}
 		});
 
+		Object.keys(status).forEach( event_id => {
+
+			const sortByRound = arr => {
+			   arr.sort((b, a) => {
+				   return parseInt(status[event_id].rounds[a].number) - parseInt(status[event_id].rounds[b].number);
+			   });
+			};
+
+			let rounds = Object.keys(status[event_id].rounds);
+			sortByRound(rounds);
+
+			rounds.forEach( round_id => {
+
+				if (statusCache[event_id].pending) { 
+					if (status[event.id].rounds[round_id].in_progress == 'undefined') { 
+						delete status[event.id].rounds[round_id];
+					}
+				} else { 
+
+					if (status[event_id].rounds[round_id].unstarted) { 
+
+						if (statusCache[event_id].first_unstarted == 'undefined') {
+							statusCache[event_id].first_unstarted = round_id;
+						} else { 
+							delete status[event_id].rounds[round_id];
+						}
+
+					} else { 
+
+						if (statusCache[event_id].first_unstarted) { 
+							delete status[event_id].rounds[round_id];
+						} else { 
+
+							if (statusCache[event_id].last_done) { 
+								delete status[event_id].rounds[statusCache[event_id].last_done];
+							}
+
+							statusCache[event_id].last_done = round_id
+						}
+					}
+				}
+
+			});
+
+		});
 
 		const lastQuery = `
 			select
