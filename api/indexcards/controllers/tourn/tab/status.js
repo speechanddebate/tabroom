@@ -611,7 +611,8 @@ export const eventStatus = {
 			rounds.forEach( round_id => {
 
 				if (statusCache[event_id].pending) { 
-					if (status[event_id].rounds[round_id].in_progress == 'undefined') { 
+
+					if (!status[event_id].rounds[round_id].in_progress) {
 						delete status[event_id].rounds[round_id];
 					}
 				} else { 
