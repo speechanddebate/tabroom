@@ -7,6 +7,7 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $mode;
+	my $hybrid;
 	my $event;
 
 	my $now = DateTime->now();
@@ -18,10 +19,17 @@
 		$tourn = $event->tourn;
 
 		my $online_mode = $event->setting('online_mode');
+		$hybrid = $event->setting("online_hybrid");
 
-		if ($online_mode eq "nsda_campus_observers" || $online_mode eq "public_jitsi_observers") {
+		if (
+			$online_mode eq "nsda_campus_observers"
+			|| $online_mode eq "public_jitsi_observers"
+		) {
 			$mode = "observers";
-		} elsif ($online_mode eq "nsda_campus" || $online_mode eq "public_jitsi") {
+		} elsif (
+			$online_mode eq "nsda_campus"
+			|| $online_mode eq "public_jitsi"
+		) {
 			$mode = "campus";
 		} else {
 			$mode = "tabroom";
@@ -30,13 +38,17 @@
 
 	return unless $event;
 
-	if ($mode eq "observers" || $mode eq "campus") {
+	if (
+		$mode eq "observers"
+		|| $mode eq "campus"
+	) {
 
-		my $timeslot = $round->timeslot;
+		my $timeslot = $round->timeslot();
 
 		my $tag;
 		my $purchase;
 		my $limit;
+		my $hybrid_limit;
 
 		if ($mode eq "observers") {
 
@@ -51,6 +63,20 @@
 			$purchase = "nc_purchased";
 		}
 
+		if ($hybrid) {
+
+			$hybrid_limit = "
+				and exists (
+					select ps.id
+					from panel_setting ps
+					where ps.tag = 'online_hybrid'
+					and ps.panel = panel.id
+				)
+			";
+
+			Tab::debuglog("Hybrid limit in place!");
+		}
+
 		my $sth = $dbh->prepare("
 			select
 				tourn.id,
@@ -60,16 +86,16 @@
 				nc_purchased.value purchased,
 				nsda_campus_days.value_text campus_days,
 				campus_room_limit.value event_limit
-
-			from (round, timeslot, event,
-					event_setting online_mode,
-					tourn,
-					timeslot otimeslot,
-					event oevent,
-					round oround,
-					panel,
-					event_setting oonline_mode
-				)
+			from (
+				round, timeslot, event,
+				event_setting online_mode,
+				tourn,
+				timeslot otimeslot,
+				event oevent,
+				round oround,
+				panel,
+				event_setting oonline_mode
+			)
 
 			left join event_setting campus_room_limit
 				on campus_room_limit.event = oevent.id
@@ -129,6 +155,9 @@
 					where normal_rooms.tag = 'use_normal_rooms'
 					and normal_rooms.round = oround.id
 				)
+
+				$hybrid_limit
+
 			group by oround.id
 		");
 
@@ -187,7 +216,6 @@
 			}
 
 			$panel_count += $pcount;
-
 			unless ($round_count{$rid}++) {
 				$rounds .= " ".$abbr." ".$rname;
 			}
@@ -198,136 +226,162 @@
 		$dbh->disconnect();
 		$tz = "UTC" unless $tz;
 
-		return unless $panel_count;
-		my $tourn = Tab::Tourn->retrieve($id);
-
-		my %days = $m->comp("/funclib/campus_days.mas",
-			tourn  => $tourn,
-		);
-
-		my $day_key;
-		my $start = $timeslot->start->set_time_zone("UTC");
-		my $end = $timeslot->start->set_time_zone("UTC");
-
-		$start->set_time_zone($tz);
-		$end->set_time_zone($tz);
-
-		foreach my $id (sort keys %days) {
-
-			next if $start->epoch < $days{$id}{start}->epoch;
-			next if $end->epoch > $days{$id}{end}->epoch;
-			$day_key = $id;
-			last;
+		if ((not defined $panel_count) && (not defined $hybrid)) {
+			return;
 		}
 
-		my $day_total = $campus_days->{$day_key}{"count"};
-		my $margin = $day_total - $panel_count;
+		if ($id) { 
 
-		if ($panel_count > $day_total) {
+			my $tourn = Tab::Tourn->retrieve($id);
+			my %days = $m->comp("/funclib/campus_days.mas", tourn => $tourn,);
 
-			my $message = "You are over your daily room allocation for this timeslot.  <br /><br />";
-			$message .= " You are using $panel_count NSDA Campus rooms and have <br /> ";
-			$message .= " allocated $day_total to day $day_key <br /><br />";
-			$message .= " Increase your allocations under Settings -> Sites & Rooms -> NSDA Campus, <br />";
-			$message .= " or adjust your schedule to continue <br />";
+			my $day_key;
+			my $start = $timeslot->start->set_time_zone("UTC");
+			my $end = $timeslot->start->set_time_zone("UTC");
 
-			$message .= " Rounds: ".$rounds;
+			$start->set_time_zone($tz);
+			$end->set_time_zone($tz);
 
-			if ($ARGS{"return"}) {
-				return $message;
+			foreach my $id (sort keys %days) {
+
+				next if $start->epoch < $days{$id}{start}->epoch;
+				next if $end->epoch > $days{$id}{end}->epoch;
+				$day_key = $id;
+				last;
 			}
 
-			$m->comp("/funclib/abort.mas", message => $message);
+			my $day_total = $campus_days->{$day_key}{"count"};
+			my $margin = $day_total - $panel_count;
 
-		} else {
-			return (1, $margin);
+			if ($panel_count > $day_total) {
+
+				my $message = "You are over your daily room allocation for this timeslot.  <br /><br />";
+				$message .= " You are using $panel_count NSDA Campus rooms and have <br /> ";
+				$message .= " allocated $day_total to day $day_key <br /><br />";
+				$message .= " Increase your allocations under Settings -> Sites & Rooms -> NSDA Campus, <br />";
+				$message .= " or adjust your schedule to continue <br />";
+
+				$message .= " Rounds: ".$rounds;
+
+				if ($ARGS{"return"}) {
+					return $message;
+				}
+
+				$m->comp("/funclib/abort.mas", message => $message);
+
+			} elsif (not defined $hybrid) {
+				return (1, $margin);
+			}
+		}
+	}
+
+	if ($now < $rollout) {
+		return (1, 1);
+	}
+
+	if ($tourn->start < $rollout) {
+		return (1, 1);
+	}
+
+	if ($tourn->setting("nsda_district")) {
+		return (1, 1);
+	}
+
+	# Check Tabroom licensing if we've gotten this far.
+
+	my $hybrid_sql;
+
+	if ($hybrid) {
+		$hybrid_sql = "
+			and not exists (
+				select es.id
+				from entry_setting es
+				where es.entry = entry.id
+				and es.tag = 'online_hybrid'
+			)
+		";
+	}
+
+	my $sth = $dbh->prepare("
+		select
+			count(distinct entry.id),
+			tabroom_purchased.value,
+			tabroom_grant.value
+
+		from entry, event, tourn
+
+			left join tourn_setting tabroom_purchased
+				on tabroom_purchased.tourn = tourn.id
+				and tabroom_purchased.tag = 'tabroom_purchased'
+
+			left join tourn_setting tabroom_grant
+				on tabroom_grant.tourn = tourn.id
+				and tabroom_grant.tag = 'tabroom_grant'
+
+			where tourn.id = ?
+			and event.tourn = tourn.id
+			and event.id = entry.event
+			and entry.active = 1
+
+			and exists (
+				select ballot.id
+					from ballot, panel, round
+				where round.event = event.id
+					and round.id      = panel.round
+					and panel.id      = ballot.panel
+					and ballot.entry  = entry.id
+					and ballot.bye != 1
+					and ballot.forfeit != 1
+					and panel.bye != 1
+			)
+
+			and (not exists (
+				select es.id
+					from event_setting es
+				where es.event = event.id
+					and es.tag = 'online_mode'
+					and es.value in (
+						'public_jitsi_observers',
+						'public_jitsi',
+						'nsda_campus',
+						'nsda_campus_observers'
+					)
+			) OR exists (
+				select es.id
+					from event_setting es
+				where es.event = event.id
+					and es.tag = 'online_hybrid'
+			))
+
+			$hybrid_sql
+	");
+
+	$sth->execute($tourn);
+
+	my ($count, $purchased, $grant) = $sth->fetchrow();
+
+	if ($count > ($purchased + $grant + 50)) {
+
+		my $total = $purchased + $grant + 50;
+		my $need = Math::Round::nearest(5, ($count - $total));
+		$need += 5 if $need < ($count - $total);
+
+		my $message = "Your current Tabroom license only covers $total entries. ";
+		$message .= " Please purchase $need more under Settings -> Tournament -> ";
+		$message .= " Payment to continue. <br />";
+
+		if ($ARGS{"return"}) {
+			return $message;
 		}
 
-	} elsif ($now < $rollout) {
-
-		return (1, 1);
-
-	} elsif ($tourn->start < $rollout) {
-
-		return (1, 1);
-
-	} elsif ($tourn->setting("nsda_district")) {
-		return (1, 1);
+		$m->comp("/funclib/abort.mas", message => $message);
 
 	} else {
 
-		my $sth = $dbh->prepare("
-			select
-				count(distinct entry.id),
-				tabroom_purchased.value,
-				tabroom_grant.value
-
-			from entry, event, tourn
-
-				left join tourn_setting tabroom_purchased
-					on tabroom_purchased.tourn = tourn.id
-					and tabroom_purchased.tag = 'tabroom_purchased'
-
-				left join tourn_setting tabroom_grant
-					on tabroom_grant.tourn = tourn.id
-					and tabroom_grant.tag = 'tabroom_grant'
-
-				where tourn.id = ?
-				and event.tourn = tourn.id
-				and event.id = entry.event
-				and entry.active = 1
-				and exists (
-					select ballot.id
-						from ballot, panel, round
-					where round.event = event.id
-						and round.id      = panel.round
-						and panel.id      = ballot.panel
-						and ballot.entry  = entry.id
-						and ballot.bye != 1
-						and ballot.forfeit != 1
-						and panel.bye != 1
-				)
-
-				and not exists (
-					select es.id
-						from event_setting es
-					where es.event = event.id
-						and es.tag = 'online_mode'
-						and es.value in (
-							'public_jitsi_observers',
-							'public_jitsi',
-							'nsda_campus',
-							'nsda_campus_observers'
-						)
-				)
-		");
-
-		$sth->execute($tourn);
-
-		my ($count, $purchased, $grant) = $sth->fetchrow();
-
-		if ($count > ($purchased + $grant + 50)) {
-
-			my $total = $purchased + $grant + 50;
-			my $need = Math::Round::nearest(5, ($count - $total));
-			$need += 5 if $need < ($count - $total);
-
-			my $message = "Your current Tabroom license only covers $total entries. Please purchase $need more ";
-			$message .= " under Settings -> Tournament -> Payment to continue. <br />";
-
-			if ($ARGS{"return"}) {
-				return $message;
-			}
-
-			$m->comp("/funclib/abort.mas", message => $message);
-
-		} else {
-
-			return (1, 1);
-		}
-
-		$sth->finish();
-		$dbh->disconnect();
+		return (1, 1);
 	}
+
+	$sth->finish();
+	$dbh->disconnect();
 
 </%init>
