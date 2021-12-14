@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Quiz->table('quiz');
 Tab::Quiz->columns(Primary => qw/id/);
 Tab::Quiz->columns(Essential => qw/tag label questions description badge created_at timestamp/);
-Tab::Quiz->columns(Others => qw/sitewide approval person circuit tourn/);
+Tab::Quiz->columns(Others => qw/sitewide approval admin_only person circuit tourn/);
 
 Tab::Quiz->has_a(person  => 'Tab::Person');
 Tab::Quiz->has_a(tourn   => 'Tab::Tourn');
