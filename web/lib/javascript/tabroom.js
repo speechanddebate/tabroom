@@ -931,6 +931,7 @@ function resizeAll() {
 		if (
 			$(this).parent().is("td")
 			|| $(this).parent().is("th")
+			|| $(this).parent().is("label")
 		) {
 		} else {
 			$(this).width($(this).parent().width()-20);
