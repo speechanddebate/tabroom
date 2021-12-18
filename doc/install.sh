@@ -140,6 +140,13 @@ cpanm REST::Client
 cpanm Text::Undiacritic
 cpanm HTTP::UA::Parser
 
+# This is for the NYT Profiler tools for development.  I'm mostly putting it
+# here to remove the XS dependency from cpanel that breaks it because I can
+# never remember that fix.
+
+cpanm Devel::NYTProf
+apt remove libcpanel-json-xs-perl
+
 echo
 echo "Fixing Class DBI to talk to modern MySQL/MariaDB..."
 echo
