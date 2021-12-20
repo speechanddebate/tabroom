@@ -2,8 +2,8 @@ package Tab::Quiz;
 use base 'Tab::DBI';
 Tab::Quiz->table('quiz');
 Tab::Quiz->columns(Primary => qw/id/);
-Tab::Quiz->columns(Essential => qw/tag label questions description badge created_at timestamp/);
-Tab::Quiz->columns(Others => qw/sitewide approval person circuit tourn/);
+Tab::Quiz->columns(Essential => qw/tag label questions description badge badge_link badge_description created_at timestamp/);
+Tab::Quiz->columns(Others => qw/sitewide approval admin_only person circuit tourn/);
 
 Tab::Quiz->has_a(person  => 'Tab::Person');
 Tab::Quiz->has_a(tourn   => 'Tab::Tourn');

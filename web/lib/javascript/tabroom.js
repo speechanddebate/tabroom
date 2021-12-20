@@ -869,9 +869,11 @@ function autoTab(input,len,e) {
     return true;
 }
 
-/* Login Box */
+/* Login Box and other initializations */
+
 
 $(document).ready(function() {
+
 	$('a.login-window').click(function() {
 		var loginBox = $(this).attr('href');
 		$(loginBox).slideDown(300);
@@ -890,21 +892,70 @@ $(document).ready(function() {
 		return false;
 	});
 
-});
-
-$(document).ready(function() { $('.hide-menu').click(function() {
+	$('.hide-menu').click(function() {
 		$('.menu').slideUp(300);
 		$('.content').addClass('nomenu');
 		$('.hide-menu').addClass('hidden');
 		$('.show-menu').removeClass('hidden');
 	});
-});
 
-$(document).ready(function() { $('.show-menu').click(function() {
+	$('.show-menu').click(function() {
 		$('.menu').slideDown(300);
 		$('.content').removeClass('nomenu');
 		$('.show-menu').addClass('hidden');
 		$('.hide-menu').removeClass('hidden');
 	});
+
+	resizeAll();
+
+});
+
+// Resize the inputs and be done with the eighty seven years of choosing I've
+// been doing.
+
+var waitForFinalEvent = (function () {
+  var timers = {};
+  return function (callback, ms, uniqueId) {
+    if (!uniqueId) {
+      uniqueId = "Don't call this twice without a uniqueId";
+    }
+    if (timers[uniqueId]) {
+      clearTimeout (timers[uniqueId]);
+    }
+    timers[uniqueId] = setTimeout(callback, ms);
+  };
+})();
+
+function resizeAll() {
+	$('input[type=text]').each(function(){
+		if (
+			$(this).parent().is("td")
+			|| $(this).parent().is("th")
+			|| $(this).parent().is("label")
+		) {
+		} else {
+			$(this).width($(this).parent().width()-20);
+		}
+	});
+
+	$('textarea').each(function(){
+		$(this).width($(this).parent().width()-20);
+	});
+
+	$('.chosen-container').each(function(){
+		if (
+			$(this).parent().is("td")
+			|| $(this).parent().is("th")
+		) {
+		} else {
+			$(this).width($(this).parent().width()-20);
+		}
+	});
+}
+
+$(window).resize(function () {
+	waitForFinalEvent(function(){
+		resizeAll();
+	}, 150, "ThisIsSupposedToBeUniqueTheySay");
 });
 
