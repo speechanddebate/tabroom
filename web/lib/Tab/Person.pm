@@ -33,6 +33,7 @@ Tab::Person->has_many(tourns   => [ Tab::Permission => 'tourn']);
 Tab::Person->has_many(chapters => [ Tab::Permission => 'chapter']);
 Tab::Person->has_many(regions  => [ Tab::Permission => 'region']);
 Tab::Person->has_many(quizzes  => [Tab::PersonQuiz  => 'quiz']);
+Tab::Person->has_many(answers  => 'Tab::PersonQuiz', 'person');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
