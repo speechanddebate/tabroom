@@ -17,18 +17,18 @@ Tab::Category->has_many(rating_subsets => "Tab::RatingSubset"    , "category");
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-sub next_code { 
-	
+sub next_code {
+
     my $self = shift;
 
 	my %judges_by_code = ();
-	foreach my $judge ($self->tourn->judges) { 
+	foreach my $judge ($self->tourn->judges) {
 		$judges_by_code{$judge->code}++;
 	}
 
     my $code = 100;
 
-    while (defined $judges_by_code{$code}) { 
+    while (defined $judges_by_code{$code}) {
         $code++;
         $code++ if $code eq "666";
         $code++ if $code eq "69";
@@ -45,21 +45,31 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::CategorySetting->search(  
+	my $existing = Tab::CategorySetting->search(
 		category => $self->id,
 		tag         => $tag,
 	)->first;
 
-	if (defined $value) { 
-			
+	if (defined $value) {
+
 		if ($existing) {
 
 			$existing->value($value);
-			$existing->value_text($blob) if $value eq "text";
-			$existing->value_date($blob) if $value eq "date";
-			$existing->update;
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			if ($value eq "text") {
+				$existing->value_text($blob);
+			} elsif ($value eq "date") {
+				$existing->value_date($blob);
+			} elsif ($value eq "json") {
+				my $json = eval{
+					return JSON::encode_json($blob);
+				};
+				$existing->value_text($json);
+			}
+
+			$existing->update();
+
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
 			}
 
@@ -73,30 +83,40 @@ sub setting {
 				value       => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
-			}
-
-			if ($value eq "date") { 
+			} elsif ($value eq "date") {
 				$existing->value_date($blob);
+			} elsif ($value eq "json") {
+				my $json = eval{
+					return JSON::encode_json($blob);
+				};
+				$existing->value_text($json);
 			}
 
-			$existing->update;
+			$existing->update();
 
 		}
 
 	} else {
 
 		return unless $existing;
-		return $existing->value_text if $existing->value eq "text";
-		return $existing->value_date if $existing->value eq "date";
+
+		if ($existing->value eq "text") {
+			return $existing->value_text
+		} elsif ($existing->value eq "date") {
+			return $existing->value_date
+		} elsif ($existing->value eq "json") {
+			return eval {
+				return JSON::decode_json($existing->value_text);
+			};
+		}
 		return $existing->value;
 
 	}
-
 }
 
-sub all_settings { 
+sub all_settings {
 
 	my $self = shift;
 
@@ -107,29 +127,33 @@ sub all_settings {
     my $sth = $dbh->prepare("
 		select setting.tag, setting.value, setting.value_date, setting.value_text
 		from category_setting setting
-		where setting.category = ? 
+		where setting.category = ?
         order by setting.tag
     ");
-    
+
     $sth->execute($self->id);
-    
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
 
-		if ($value eq "date") { 
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
 
-			my $dt = Tab::DBI::dateparse($value_date); 
+		if ($value eq "date") {
+
+			my $dt = Tab::DBI::dateparse($value_date);
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value eq "text") { 
+		} elsif ($value eq "text") {
 
 			$all_settings{$tag} = $value_text;
 
-		} else { 
+        } elsif ($value eq "json") {
+
+            $all_settings{$tag} = eval {
+                return JSON::decode_json($value_text);
+            };
+
+		} else {
 
 			$all_settings{$tag} = $value;
-
 		}
-
 	}
 
 	return %all_settings;
