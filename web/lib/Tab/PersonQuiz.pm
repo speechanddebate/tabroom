@@ -1,7 +1,7 @@
 package Tab::PersonQuiz;
 use base 'Tab::DBI';
 Tab::PersonQuiz->table('person_quiz');
-Tab::PersonQuiz->columns(All => qw/id approved approved_by person quiz timestamp/);
+Tab::PersonQuiz->columns(All => qw/id pending hidden approved_by answers person quiz timestamp/);
 
 Tab::PersonQuiz->has_a(quiz => 'Tab::Quiz');
 Tab::PersonQuiz->has_a(person => 'Tab::Person');
