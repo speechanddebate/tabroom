@@ -958,6 +958,7 @@ function fixVisual() {
 	resizeAll();
 	$('table').trigger('applyWidgets');
 	$('table').trigger('update', [true]);
+	console.log("Do it England");
 }
 
 $(window).resize(function () {
