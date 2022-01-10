@@ -953,6 +953,13 @@ function resizeAll() {
 	});
 }
 
+function fixVisual() {
+	zebraRows();
+	resizeAll();
+	$('table').trigger('applyWidgets');
+	$('table').trigger('update', [true]);
+}
+
 $(window).resize(function () {
 	waitForFinalEvent(function(){
 		resizeAll();
