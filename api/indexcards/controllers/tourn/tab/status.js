@@ -110,7 +110,7 @@ export const attendance = {
 				and ballot.panel = panel.id
 				and ballot.judge = judge.id
 				and ballot.judge_started > '1900-00-00 00:00:00'
-			group by panel.id
+			group by panel.id, judge.id
 		`;
 
 		// A raw query to go through the category filter
@@ -122,8 +122,7 @@ export const attendance = {
 
 		attendanceResults.forEach( attend => {
 			
-			
-			if (status[attend.person] == undefined) { 
+			if (status[attend.person] === undefined) { 
 				status[attend.person] = {};
 			}
 
