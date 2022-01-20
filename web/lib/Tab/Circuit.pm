@@ -9,6 +9,7 @@ Tab::Circuit->has_many(sites       => "Tab::Site");
 Tab::Circuit->has_many(regions     => "Tab::Region");
 Tab::Circuit->has_many(webpages    => "Tab::Webpage");
 Tab::Circuit->has_many(permissions => "Tab::Permission");
+Tab::Circuit->has_many(quizzes     => "Tab::Quiz");
 
 Tab::Circuit->has_many(settings            => "Tab::CircuitSetting", "circuit");
 Tab::Circuit->has_many(tourn_circuits      => "Tab::TournCircuit");
