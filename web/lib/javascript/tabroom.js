@@ -300,6 +300,7 @@
 						callback(data);
 					}
 
+					fixVisual();
 					return;
 				}
 			}
