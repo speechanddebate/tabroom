@@ -300,6 +300,7 @@
 						callback(data);
 					}
 
+					fixVisual();
 					return;
 				}
 			}
@@ -951,6 +952,13 @@ function resizeAll() {
 			$(this).width($(this).parent().width()-20);
 		}
 	});
+}
+
+function fixVisual() {
+	zebraRows();
+	resizeAll();
+	$('table').trigger('applyWidgets');
+	$('table').trigger('update', [true]);
 }
 
 $(window).resize(function () {
