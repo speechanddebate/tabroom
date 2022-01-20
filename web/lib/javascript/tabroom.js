@@ -55,11 +55,33 @@
 		return;
 	}
 
+
+	function postSwitch(checkObject, replyUrl, confirmMessage) {
+
+		if (confirmMessage) {
+			alertify.confirm("Please confirm", alertMessage, function(e) {
+				if (e) {
+				} else {
+					return;
+				}
+			}, function(no) { return; } );
+		}
+
+		var attributes = {};
+		attributes = $(checkObject).attr();
+		attributes[property_value] = $(checkObject).val();
+
+		console.log(attributes);
+
+		return;
+	}
+
+
 	// This started as a way to manage boolean switches posts and then morphed
 	// into posting just about everything and I am sorry but this is now the
 	// reality you're just going to have to cope with.
 
-	function postSwitch(checkObject, replyUrl, callback) {
+	function nopostSwitch(checkObject, replyUrl, callback) {
 
 		var targetId     = $(checkObject).attr("target_id");
 		var propertyName = $(checkObject).attr("property_name");
@@ -300,7 +322,6 @@
 						callback(data);
 					}
 
-					fixVisual();
 					return;
 				}
 			}
@@ -952,13 +973,6 @@ function resizeAll() {
 			$(this).width($(this).parent().width()-20);
 		}
 	});
-}
-
-function fixVisual() {
-	zebraRows();
-	resizeAll();
-	$('table').trigger('applyWidgets');
-	$('table').trigger('update', [true]);
 }
 
 $(window).resize(function () {
