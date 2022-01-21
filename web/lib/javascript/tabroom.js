@@ -55,123 +55,104 @@
 		return;
 	}
 
+	(function(old) {
+	  $.fn.attrs = function() {
+		if(arguments.length === 0) {
+		  if(this.length === 0) {
+			return null;
+		  }
 
-	// This started as a way to manage boolean switches posts and then morphed
-	// into posting just about everything and I am sorry but this is now the
-	// reality you're just going to have to cope with.
-
-	function postSwitch(checkObject, replyUrl, callback) {
-
-		var targetId     = $(checkObject).attr("target_id");
-		var propertyName = $(checkObject).attr("property_name");
-		var settingName  = $(checkObject).attr("setting_name");
-		var relatedThing = $(checkObject).attr("related_thing");
-		var anotherThing = $(checkObject).attr("another_thing");
-		var tournID      = $(checkObject).attr("tourn_id");
-
-		var successAction = $(checkObject).attr("on_success");
-		var replyTarget   = $(checkObject).attr("reply_target");
-		var replyAppend   = $(checkObject).attr("reply_append");
-		var newParent     = $(checkObject).attr("new_parent");
-
-		var propertyValue    = $(checkObject).val();
-		var otherObject      = $(checkObject).attr("other_value");
-		var otherOtherObject = $(checkObject).attr("other_other_value");
-		var optionOneId      = $(checkObject).attr("option_one");
-		var optionTwoId      = $(checkObject).attr("option_two");
-		var postMethod       = $(checkObject).attr("post_method");
-
-		var optionOne;
-		var optionTwo;
-		if (optionOneId) {
-			if ($("#"+optionOneId).prop("checked")) {
-				optionOne = true;
+		  var obj = {};
+		  $.each(this[0].attributes, function() {
+			if(this.specified) {
+			  obj[this.name] = this.value;
 			}
+		  });
+		  return obj;
 		}
 
-		if (optionTwoId) {
-			if ($("#"+optionTwoId).prop("checked")) {
-				optionTwo = true;
-			}
+		return old.apply(this, arguments);
+	  };
+	})($.fn.attrs);
+
+	function postSwitch(checkObject, replyUrl, confirmMessage) {
+
+		if (confirmMessage) {
+			alertify.confirm("Please confirm", alertMessage, function(e) {
+				if (e) {
+				} else {
+					return;
+				}
+			}, function(no) { return; } );
 		}
 
-		var otherTextId    = $(checkObject).attr("other_text");
-		var parentObject   = $(checkObject).parent();
-		var parentObjectId = 0;
+		var attributes = {};
+		attributes = $(checkObject).attrs();
 
-		if (parentObject) {
-			parentObjectId = parentObject.attr('id');
+		if (attributes.property_value === undefined) {
+			attributes.property_value = $(checkObject).attr("value");
 		}
 
-		var otherValue;
-		if (otherObject) {
-			otherValue = $("#"+otherObject).val();
-		}
-
-		var otherOtherValue;
-		if (otherOtherObject) {
-			otherOtherValue = $("#"+otherOtherObject).val();
-		}
-
-		var otherText;
-		if (otherTextId) {
-			otherText = $("#"+otherTextId).val();
-		}
-
-		if (propertyValue === undefined) {
-			propertyValue = $(checkObject).attr("value");
-		}
-
-		if (propertyValue === undefined) {
-			propertyValue = $(checkObject).val();
+		if (attributes.property_value === undefined) {
+			attributes.property_value = $(checkObject).val();
 		}
 
 		if (checkObject.type === "checkbox") {
 			if ($(checkObject).prop("checked") === false) {
-				propertyValue = 0;
+				attributes.property_value = 0;
 			}
+		}
+
+		if (attributes.parent_id === undefined) {
+			attributes.parent_id = $(checkObject).parent().attr('id');
+		}
+
+		// I hate myself a lot sometimes.
+
+		if ($(checkObject).attr("other_value")) {
+			var otherObjectId = $(checkObject).attr("other_value");
+			attributes.other_value = $("#"+otherObjectId).val();
+		}
+
+		// OK, most of the time.
+
+		if ($(checkObject).attr("other_other_value")) {
+			var otherObjectId = $(checkObject).attr("other_other_value");
+			attributes.other_other_value = $("#"+otherObjectId).val();
+		}
+
+		if ($(checkObject).attr("other_text")) {
+			var otherTextId = $(checkObject).attr("other_text");
+			attributes.other_text = $("#"+otherTextId).val();
 		}
 
 		var accessType = "";
 
-		if (postMethod === "get") {
+		if (attributes.post_method === "get") {
 			accessType = "GET";
-		} else if (postMethod === "delete") {
+		} else if (attributes.post_method === "delete") {
 			accessType = "DELETE";
-		} else if (postMethod === "put") {
+		} else if (attributes.post_method === "put") {
 			accessType = "PUT";
 		} else {
 			accessType = "POST";
 		}
 
 		$.ajax({
-			type : accessType,
-			url  : replyUrl,
-			data : {
-				target_id      : targetId,
-				property_name  : propertyName,
-				setting_name   : settingName,
-				property_value : propertyValue,
-				other_value    : otherValue,
-				option_one     : optionOne,
-				option_two     : optionTwo,
-				other_text     : otherText,
-				related_thing  : relatedThing,
-				another_thing  : anotherThing,
-				tourn_id       : tournID,
-				parent_id      : parentObjectId
-			},
-			success : function(data) {
+			type    : accessType,
+			url     : replyUrl,
+			data    : attributes,
+			success : function(data, status, object, callback) {
 
 				if (data) {
 
 					if (data.reply) {
 
-						if (replyTarget) {
-							$("#"+replyTarget).text(data.reply);
+						if (attributes.reply_target) {
+							$("#"+attributes.reply_target).text(data.reply);
 						}
 
-						if (replyAppend) {
+						if (attributes.reply_append) {
 							$("#"+replyAppend).append(data.reply);
 						}
 
@@ -231,20 +212,20 @@
 							$("#"+data.hide).addClass("hidden");
 						}
 
-						if (successAction === "destroy") {
+						if (attributes.on_success === "destroy") {
 							$("#"+targetId).remove();
-						} else if (successAction === "hide") {
+						} else if (attributes.on_success === "hide") {
 							$("#"+targetId).addClass("hidden");
 						} else if (
-							successAction === "refresh"
-							|| successAction === "reload"
+							attributes.on_success === "refresh"
+							|| attributes.on_success === "reload"
 							|| data.refresh
 						) {
 							window.location.reload();
 						}
 
-						if (newParent) {
-							$("#"+targetId).prependTo("#"+newParent);
+						if (attributes.new_parent) {
+							$("#"+targetId).prependTo("#"+attributes.new_parent);
 						}
 
 						if (data.newParent) {
@@ -305,7 +286,12 @@
 				}
 			}
 		});
+
+		console.log(attributes);
+
+		return;
 	}
+
 
 	function pullUrl(targetUrl) {
 		$.ajax({
