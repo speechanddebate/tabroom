@@ -287,8 +287,7 @@
 			}
 		});
 
-		console.log(attributes);
-
+		fixVisual();
 		return;
 	}
 
@@ -328,6 +327,15 @@
 			});
 		});
 	};
+
+/* Fix all the visual elements at once */
+
+	function fixVisual() {
+		zebraRows();
+		resizeAll();
+		$('table').trigger('applyWidgets');
+		$('table').trigger('update', [true]);
+	}
 
 /* Change the file uploader div to show the name of the uploaded file */
 
