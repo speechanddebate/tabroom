@@ -126,6 +126,37 @@
 			attributes.other_text = $("#"+otherTextId).val();
 		}
 
+		// Really, when don't I?
+
+		if (attributes.option_one) {
+			var optionOneId = $(checkObject).attr("option_one");
+
+			if (optionOneId) {
+				if ($("#"+optionOneId).prop("checked")) {
+					attributes.option_one = true;
+				}
+			}
+
+			if (attributes.option_one !== true) {
+				delete attributes.option_one;
+			}
+		}
+
+		if (attributes.option_two) {
+			var optionTwoId = $(checkObject).attr("option_two");
+
+			if (optionTwoId) {
+				if ($("#"+optionTwoId).prop("checked")) {
+					attributes.option_two = true;
+				}
+			}
+
+			if (attributes.option_two !== true) {
+				delete attributes.option_two;
+			}
+		}
+
+
 		var accessType = "";
 
 		if (attributes.post_method === "get") {
