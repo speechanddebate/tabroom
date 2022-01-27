@@ -75,10 +75,12 @@
 	  };
 	})($.fn.attrs);
 
-	function postSwitch(checkObject, replyUrl, confirmMessage) {
+	function postSwitch(checkObject, replyUrl, callback, confirmMessage) {
 
-		if (confirmMessage) {
-			alertify.confirm("Please confirm", alertMessage, function(e) {
+		console.log("Confirm message is "+confirmMessage);
+
+		if (confirmMessage != undefined && confirmMessage != "") {
+			alertify.confirm("Please confirm", confirmMessage, function(e) {
 				if (e) {
 				} else {
 					return;
