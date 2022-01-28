@@ -77,8 +77,6 @@
 
 	function postSwitch(checkObject, replyUrl, callback, confirmMessage) {
 
-		console.log("Confirm message is "+confirmMessage);
-
 		if (confirmMessage != undefined && confirmMessage != "") {
 			alertify.confirm("Please confirm", confirmMessage, function(e) {
 				if (e) {
@@ -158,7 +156,6 @@
 			}
 		}
 
-
 		var accessType = "";
 
 		if (attributes.post_method === "get") {
@@ -197,6 +194,8 @@
 					if (data.error) {
 
 						alertify.error(data.message);
+
+						console.log(data);
 
 						if (data.destroy) {
 							$("#"+data.destroy).remove();
@@ -246,9 +245,9 @@
 						}
 
 						if (attributes.on_success === "destroy") {
-							$("#"+targetId).remove();
+							$("#"+attributes.target_id).remove();
 						} else if (attributes.on_success === "hide") {
-							$("#"+targetId).addClass("hidden");
+							$("#"+attributes.target_id).addClass("hidden");
 						} else if (
 							attributes.on_success === "refresh"
 							|| attributes.on_success === "reload"
@@ -258,11 +257,11 @@
 						}
 
 						if (attributes.new_parent) {
-							$("#"+targetId).prependTo("#"+attributes.new_parent);
+							$("#"+attributes.target_id).prependTo("#"+attributes.new_parent);
 						}
 
 						if (data.newParent) {
-							$("#"+targetId).prependTo("#"+data.newParent);
+							$("#"+attributes.target_id).prependTo("#"+data.newParent);
 						}
 
 						if (data.setvalue) {
