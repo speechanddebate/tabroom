@@ -364,9 +364,10 @@
 
 	function fixVisual() {
 		zebraRows();
-		resizeAll();
 		$('table').trigger('applyWidgets');
 		$('table').trigger('update', [true]);
+		resizeAll();
+		console.log("Visuals were fixed!");
 	}
 
 /* Change the file uploader div to show the name of the uploaded file */
