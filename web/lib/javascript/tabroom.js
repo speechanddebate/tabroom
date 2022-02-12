@@ -980,6 +980,12 @@ function resizeAll() {
 	});
 }
 
+function toggleView(elementId, elementClass) {
+	$("."+elementClass).addClass('hidden');
+	$("."+elementId).removeClass('hidden');
+	fixVisual();
+}
+
 $(window).resize(function () {
 	waitForFinalEvent(function(){
 		resizeAll();
