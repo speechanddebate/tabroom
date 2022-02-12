@@ -310,7 +310,7 @@
 						alertify.warning("An error condition was tripped.");
 					}
 
-					if (callback) {
+					if (callback && callback != 'false') {
 						callback(data);
 					}
 
@@ -367,7 +367,6 @@
 		$('table').trigger('applyWidgets');
 		$('table').trigger('update', [true]);
 		resizeAll();
-		console.log("Visuals were fixed!");
 	}
 
 /* Change the file uploader div to show the name of the uploaded file */
