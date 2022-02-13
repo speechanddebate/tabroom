@@ -183,7 +183,7 @@
 						}
 
 						if (attributes.reply_append) {
-							$("#"+replyAppend).append(data.reply);
+							$("#"+attributes.reply_append).append(data.reply);
 						}
 
 						$(".replybucket").text(data.reply);
