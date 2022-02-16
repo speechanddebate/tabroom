@@ -1,8 +1,10 @@
 <%args>
 	$person          => undef
 	$judge_person_id => undef
+	$jp_id           => undef
 	$search_first    => undef
 	$search_last     => undef
+	$default         => "paradigm"
 </%args>
 <%init>
 
@@ -10,7 +12,11 @@
 	my $tz = $person->tz if $person;
 	$tz = "UTC" unless $tz;
 
-    my $key = $judge_person_id."-".$search_first."-".$search_last;
+	unless ($judge_person_id) {
+		$judge_person_id = $jp_id;
+	}
+
+    my $key = $judge_person_id."-".$search_first."-".$search_last."-".$ARGS{"quiz_id"};
 
 	return if $m->cache_self(
 		key        => $key,
@@ -43,16 +49,17 @@
 				select
 					person.id, person.first, person.last,
 					GROUP_CONCAT(chapter.name SEPARATOR ', ')
-				from (person, person_setting paradigm)
+				from (person)
 					left join chapter_judge on chapter_judge.person = person.id
 					left join chapter on chapter.id = chapter_judge.chapter
+					left join person_setting paradigm on paradigm.tag = 'paradigm' and paradigm.person = person.id
 
 				where person.id > 0
 					$limit
 
-					and person.id = paradigm.person
-					and paradigm.tag = 'paradigm'
-
+				and exists (
+					select judge.id from judge where judge.person = person.id
+				)
 				group by person.id
 				limit 75
 			");
@@ -80,15 +87,157 @@
 		}
 	}
 
+	my $jperson;
+
+	if ($judge_person_id) {
+		$jperson = Tab::Person->retrieve($judge_person_id);
+	}
+
+	my @certs = Tab::PersonQuiz->search(
+		person  => $jperson->id,
+		hidden  => 0,
+		pending => 0
+	) if $jperson;
+
+	my @tabs = ();
+
+	if ($jperson && $jperson->setting("paradigm")) {
+		push @tabs, "paradigm";
+	} elsif ($default eq "paradigm") {
+		$default = "record";
+	}
+
+	push @tabs, "record";
+	push @tabs, "certifications" if @certs;
+
+	Tab::PersonQuiz->set_sql( answers => "
+		select pq.*
+		from person_quiz pq, quiz
+		where pq.person = ?
+			and pq.hidden = 0
+			and pq.quiz = quiz.id
+			and quiz.show_answers = 1
+	");
+
+	my @answers;
+
+	if ($jperson) { 
+
+		@answers = Tab::PersonQuiz->search_answers($jperson->id);
+
+		foreach my $answer (@answers) {
+
+			push @tabs, $answer->quiz->tag;
+
+			if ($ARGS{"quiz_id"} == $answer->quiz) {
+				$default = $answer->quiz->tag;
+			}
+		}
+	}
+
 </%init>
 
 	<div class="main">
 
-%		if ($judge_person_id) {
+%		if ($jperson) {
+
+			<h3><% $jperson->first %> <% $jperson->last %></h3>
+
+			<& "/funclib/tabs.mas",
+				tabs    => \@tabs,
+				default => $default
+			&>
 
 			<& "paradigm.mas",
-				judge_person => $judge_person_id
+				judge_person => $judge_person_id,
+				screens => 1
 			&>
+
+%			if (@certs) {
+
+				<div class="screens certifications">
+
+					<h5 class="martopmore">Judge Certifications</h5>
+
+%					foreach my $cert (sort {$a <=> $b} @certs) {
+
+%						my $quiz = $cert->quiz;
+
+						<div class="full ltbordertop ltborderbottom marno">
+
+							<span class="quarter centeralign">
+								<& "/funclib/badge.mas",
+									quiz => $quiz,
+									size => "med"
+								&>
+
+%								unless ($quiz->badge) {
+
+									<h4><% $quiz->tag %></h4>
+%								}
+							</span>
+
+							<span class="threequarters">
+								<div
+									class = "padvertless marno semibold bluetext bigger"
+								>
+									<% $quiz->label %>
+								</div>
+
+								<p
+									class = "padvertless marno"
+								>
+									<% $quiz->description %>
+								</p>
+
+								<div class="full nospace rightalign">
+%									if ($quiz->show_answers > 0) {
+%										my $tag = $quiz->tag;
+%										$tag =~ s/_/ /g;
+										<span class="twothirds leftalign nospace true">
+											<a
+												class = "semibold redtext bigger link-underline hover padmore"
+												onClick = "updateTab('<% $tag %>');"
+											>See Answers</a>
+										</span>
+%									}
+
+									<span class="third rightalign nospace">
+%										if ($quiz->circuit > 0) {
+											<div
+												class = "padvertless marno rightalign semibold graytext"
+											>
+												<% $quiz->circuit->abbr %>
+											</div>
+%										}
+
+										<div
+											class = "padvertless marno rightalign graytext italic smaller"
+										>
+											Last Updated
+											<& "/funclib/showdt.mas", dt => $cert->updated_at &>
+										</div>
+									</span>
+								</div>
+							</span>
+						</div>
+%					}
+
+				</div>
+%			}
+
+
+%			if (@answers) {
+%				foreach my $answer (@answers) {
+					<div class="screens <% $answer->quiz->tag %>">
+				        <& "/funclib/view_questionnaire.mas",
+							person => $jperson,
+							quiz   => $answer->quiz,
+							noinfo => 1
+						&>
+					</div>
+%				}
+%			}
 
 %		} elsif (keys %results) {
 
@@ -169,7 +318,7 @@
 %			if ($search_first || $search_last) {
 				<p class="explain centeralign">
 					Your search for <% $search_first %> <% $search_last %>
-					returned no judges with paradigms.  Please
+					returned no judges.  Please
 					try again.
 				</p>
 %			}
@@ -198,29 +347,31 @@
 
 		<div class="sidenote">
 
-			<h4>Search Judges:</h4>
+			<h4>Search Judge Paradigms:</h4>
 
 			<form
 				action = "paradigm.mhtml"
 				method = "post"
 			>
 
-				<div class="row centeralign padvert marvertno">
-					<input
-						type        = "text"
-						name        = "search_first"
-						placeholder = "First name"
-						size        = "24"
-					>
+				<div class="full centeralign row padvert marvertno">
+					<div class="centeralign ninetenths nospace">
+						<input
+							type        = "text"
+							name        = "search_first"
+							placeholder = "First name"
+						>
+					</div>
 				</div>
 
-				<div class="row centeralign padvert marvertno">
-					<input
-						type        = "text"
-						name        = "search_last"
-						placeholder = "Last name"
-						size        = "24"
-					>
+				<div class="full centeralign row padvert marvertno">
+					<div class="centeralign ninetenths nospace">
+						<input
+							type        = "text"
+							name        = "search_last"
+							placeholder = "Last name"
+						>
+					</div>
 				</div>
 
 				<div class="liblrow rightalign">

@@ -110,6 +110,7 @@ export const attendance = {
 				and ballot.panel = panel.id
 				and ballot.judge = judge.id
 				and ballot.judge_started > '1900-00-00 00:00:00'
+			group by panel.id, judge.id
 		`;
 
 		// A raw query to go through the category filter
@@ -120,12 +121,15 @@ export const attendance = {
 		const status = {};
 
 		attendanceResults.forEach( attend => {
-			status[attend.person] = {
-				[attend.panel] : {
-					tag		 : attend.tag,
-					timestamp   : attend.timestamp.toJSON,
-					description : attend.description,
-				},
+			
+			if (status[attend.person] === undefined) { 
+				status[attend.person] = {};
+			}
+
+			status[attend.person][attend.panel] = {
+				tag		 : attend.tag,
+				timestamp   : attend.timestamp.toJSON,
+				description : attend.description,
 			};
 		});
 
@@ -136,7 +140,7 @@ export const attendance = {
 			} else if (attend.judge) {
 				attend.person = `judge_${attend.judge}`;
 			}
-
+			
 			if (attend.person) {
 				status[attend.person] = {
 					[attend.panel] : {
