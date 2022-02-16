@@ -55,123 +55,135 @@
 		return;
 	}
 
-	// This started as a way to manage boolean switches posts and then morphed
-	// into posting just about everything and I am sorry but this is now the
-	// reality you're just going to have to cope with.
+	(function(old) {
+	  $.fn.attrs = function() {
+		if(arguments.length === 0) {
+		  if(this.length === 0) {
+			return null;
+		  }
 
-	function postSwitch(checkObject, replyUrl, callback) {
-
-		var targetId     = $(checkObject).attr("target_id");
-		var propertyName = $(checkObject).attr("property_name");
-		var settingName  = $(checkObject).attr("setting_name");
-		var relatedThing = $(checkObject).attr("related_thing");
-		var anotherThing = $(checkObject).attr("another_thing");
-		var tournID      = $(checkObject).attr("tourn_id");
-
-		var successAction = $(checkObject).attr("on_success");
-		var replyTarget   = $(checkObject).attr("reply_target");
-		var replyAppend   = $(checkObject).attr("reply_append");
-		var newParent     = $(checkObject).attr("new_parent");
-
-		var propertyValue    = $(checkObject).val();
-		var otherObject      = $(checkObject).attr("other_value");
-		var otherOtherObject = $(checkObject).attr("other_other_value");
-		var optionOneId      = $(checkObject).attr("option_one");
-		var optionTwoId      = $(checkObject).attr("option_two");
-		var postMethod       = $(checkObject).attr("post_method");
-
-		var optionOne;
-		var optionTwo;
-		if (optionOneId) {
-			if ($("#"+optionOneId).prop("checked")) {
-				optionOne = true;
+		  var obj = {};
+		  $.each(this[0].attributes, function() {
+			if(this.specified) {
+			  obj[this.name] = this.value;
 			}
+		  });
+		  return obj;
 		}
 
-		if (optionTwoId) {
-			if ($("#"+optionTwoId).prop("checked")) {
-				optionTwo = true;
-			}
+		return old.apply(this, arguments);
+	  };
+	})($.fn.attrs);
+
+	function postSwitch(checkObject, replyUrl, callback, confirmMessage) {
+
+		if (confirmMessage != undefined && confirmMessage != "") {
+			alertify.confirm("Please confirm", confirmMessage, function(e) {
+				if (e) {
+				} else {
+					return;
+				}
+			}, function(no) { return; } );
 		}
 
-		var otherTextId    = $(checkObject).attr("other_text");
-		var parentObject   = $(checkObject).parent();
-		var parentObjectId = 0;
+		var attributes = {};
+		attributes = $(checkObject).attrs();
 
-		if (parentObject) {
-			parentObjectId = parentObject.attr('id');
+		if (attributes.property_value === undefined) {
+			attributes.property_value = $(checkObject).attr("value");
 		}
 
-		var otherValue;
-		if (otherObject) {
-			otherValue = $("#"+otherObject).val();
-		}
-
-		var otherOtherValue;
-		if (otherOtherObject) {
-			otherOtherValue = $("#"+otherOtherObject).val();
-		}
-
-		var otherText;
-		if (otherTextId) {
-			otherText = $("#"+otherTextId).val();
-		}
-
-		if (propertyValue === undefined) {
-			propertyValue = $(checkObject).attr("value");
-		}
-
-		if (propertyValue === undefined) {
-			propertyValue = $(checkObject).val();
+		if (attributes.property_value === undefined) {
+			attributes.property_value = $(checkObject).val();
 		}
 
 		if (checkObject.type === "checkbox") {
 			if ($(checkObject).prop("checked") === false) {
-				propertyValue = 0;
+				attributes.property_value = 0;
+			}
+		}
+
+		if (attributes.parent_id === undefined) {
+			attributes.parent_id = $(checkObject).parent().attr('id');
+		}
+
+		// I hate myself a lot sometimes.
+
+		if ($(checkObject).attr("other_value")) {
+			var otherObjectId = $(checkObject).attr("other_value");
+			attributes.other_value = $("#"+otherObjectId).val();
+		}
+
+		// OK, most of the time.
+
+		if ($(checkObject).attr("other_other_value")) {
+			var otherObjectId = $(checkObject).attr("other_other_value");
+			attributes.other_other_value = $("#"+otherObjectId).val();
+		}
+
+		if ($(checkObject).attr("other_text")) {
+			var otherTextId = $(checkObject).attr("other_text");
+			attributes.other_text = $("#"+otherTextId).val();
+		}
+
+		// Really, when don't I?
+
+		if (attributes.option_one) {
+			var optionOneId = $(checkObject).attr("option_one");
+
+			if (optionOneId) {
+				if ($("#"+optionOneId).prop("checked")) {
+					attributes.option_one = true;
+				}
+			}
+
+			if (attributes.option_one !== true) {
+				delete attributes.option_one;
+			}
+		}
+
+		if (attributes.option_two) {
+			var optionTwoId = $(checkObject).attr("option_two");
+
+			if (optionTwoId) {
+				if ($("#"+optionTwoId).prop("checked")) {
+					attributes.option_two = true;
+				}
+			}
+
+			if (attributes.option_two !== true) {
+				delete attributes.option_two;
 			}
 		}
 
 		var accessType = "";
 
-		if (postMethod === "get") {
+		if (attributes.post_method === "get") {
 			accessType = "GET";
-		} else if (postMethod === "delete") {
+		} else if (attributes.post_method === "delete") {
 			accessType = "DELETE";
-		} else if (postMethod === "put") {
+		} else if (attributes.post_method === "put") {
 			accessType = "PUT";
 		} else {
 			accessType = "POST";
 		}
 
 		$.ajax({
-			type : accessType,
-			url  : replyUrl,
-			data : {
-				target_id      : targetId,
-				property_name  : propertyName,
-				setting_name   : settingName,
-				property_value : propertyValue,
-				other_value    : otherValue,
-				option_one     : optionOne,
-				option_two     : optionTwo,
-				other_text     : otherText,
-				related_thing  : relatedThing,
-				another_thing  : anotherThing,
-				tourn_id       : tournID,
-				parent_id      : parentObjectId
-			},
-			success : function(data) {
+			type    : accessType,
+			url     : replyUrl,
+			data    : attributes,
+			success : function(data, status, object, callback) {
 
 				if (data) {
 
 					if (data.reply) {
 
-						if (replyTarget) {
-							$("#"+replyTarget).text(data.reply);
+						if (attributes.reply_target) {
+							$("#"+attributes.reply_target).text(data.reply);
 						}
 
-						if (replyAppend) {
-							$("#"+replyAppend).append(data.reply);
+						if (attributes.reply_append) {
+							$("#"+attributes.reply_append).append(data.reply);
 						}
 
 						$(".replybucket").text(data.reply);
@@ -182,6 +194,8 @@
 					if (data.error) {
 
 						alertify.error(data.message);
+
+						console.log(data);
 
 						if (data.destroy) {
 							$("#"+data.destroy).remove();
@@ -230,24 +244,24 @@
 							$("#"+data.hide).addClass("hidden");
 						}
 
-						if (successAction === "destroy") {
-							$("#"+targetId).remove();
-						} else if (successAction === "hide") {
-							$("#"+targetId).addClass("hidden");
+						if (attributes.on_success === "destroy") {
+							$("#"+attributes.target_id).remove();
+						} else if (attributes.on_success === "hide") {
+							$("#"+attributes.target_id).addClass("hidden");
 						} else if (
-							successAction === "refresh"
-							|| successAction === "reload"
+							attributes.on_success === "refresh"
+							|| attributes.on_success === "reload"
 							|| data.refresh
 						) {
 							window.location.reload();
 						}
 
-						if (newParent) {
-							$("#"+targetId).prependTo("#"+newParent);
+						if (attributes.new_parent) {
+							$("#"+attributes.target_id).prependTo("#"+attributes.new_parent);
 						}
 
 						if (data.newParent) {
-							$("#"+targetId).prependTo("#"+data.newParent);
+							$("#"+attributes.target_id).prependTo("#"+data.newParent);
 						}
 
 						if (data.setvalue) {
@@ -296,7 +310,7 @@
 						alertify.warning("An error condition was tripped.");
 					}
 
-					if (callback) {
+					if (callback && callback != 'false') {
 						callback(data);
 					}
 
@@ -304,7 +318,11 @@
 				}
 			}
 		});
+
+		fixVisual();
+		return;
 	}
+
 
 	function pullUrl(targetUrl) {
 		$.ajax({
@@ -341,6 +359,15 @@
 			});
 		});
 	};
+
+/* Fix all the visual elements at once */
+
+	function fixVisual() {
+		zebraRows();
+		$('table').trigger('applyWidgets');
+		$('table').trigger('update', [true]);
+		resizeAll();
+	}
 
 /* Change the file uploader div to show the name of the uploaded file */
 
@@ -869,9 +896,11 @@ function autoTab(input,len,e) {
     return true;
 }
 
-/* Login Box */
+/* Login Box and other initializations */
+
 
 $(document).ready(function() {
+
 	$('a.login-window').click(function() {
 		var loginBox = $(this).attr('href');
 		$(loginBox).slideDown(300);
@@ -890,21 +919,76 @@ $(document).ready(function() {
 		return false;
 	});
 
-});
-
-$(document).ready(function() { $('.hide-menu').click(function() {
+	$('.hide-menu').click(function() {
 		$('.menu').slideUp(300);
 		$('.content').addClass('nomenu');
 		$('.hide-menu').addClass('hidden');
 		$('.show-menu').removeClass('hidden');
 	});
-});
 
-$(document).ready(function() { $('.show-menu').click(function() {
+	$('.show-menu').click(function() {
 		$('.menu').slideDown(300);
 		$('.content').removeClass('nomenu');
 		$('.show-menu').addClass('hidden');
 		$('.hide-menu').removeClass('hidden');
 	});
+
+	resizeAll();
+
+});
+
+// Resize the inputs and be done with the eighty seven years of choosing I've
+// been doing.
+
+var waitForFinalEvent = (function () {
+  var timers = {};
+  return function (callback, ms, uniqueId) {
+    if (!uniqueId) {
+      uniqueId = "Don't call this twice without a uniqueId";
+    }
+    if (timers[uniqueId]) {
+      clearTimeout (timers[uniqueId]);
+    }
+    timers[uniqueId] = setTimeout(callback, ms);
+  };
+})();
+
+function resizeAll() {
+	$('input[type=text]').each(function(){
+		if (
+			$(this).parent().is("td")
+			|| $(this).parent().is("th")
+			|| $(this).parent().is("label")
+		) {
+		} else {
+			$(this).width($(this).parent().width()-20);
+		}
+	});
+
+	$('textarea').each(function(){
+		$(this).width($(this).parent().width()-20);
+	});
+
+	$('.chosen-container').each(function(){
+		if (
+			$(this).parent().is("td")
+			|| $(this).parent().is("th")
+		) {
+		} else {
+			$(this).width($(this).parent().width()-20);
+		}
+	});
+}
+
+function toggleView(elementId, elementClass) {
+	$("."+elementClass).addClass('hidden');
+	$("."+elementId).removeClass('hidden');
+	fixVisual();
+}
+
+$(window).resize(function () {
+	waitForFinalEvent(function(){
+		resizeAll();
+	}, 150, "ThisIsSupposedToBeUniqueTheySay");
 });
 

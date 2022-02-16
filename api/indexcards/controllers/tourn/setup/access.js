@@ -375,34 +375,36 @@ export const changeEventAccess = {
 				existing.permObject.details = {};
 			}
 
-			events.forEach( event => {
+			if (events) { 
+				events.forEach( event => {
 
-				if (existing.permObject.details[event.id] !== accessLevel) {
+					if (existing.permObject.details[event.id] !== accessLevel) {
 
-					existing.permObject.details[event.id] = accessLevel;
+						existing.permObject.details[event.id] = accessLevel;
 
-					if (logString) {
-						logString += ' ';
+						if (logString) {
+							logString += ' ';
+						}
+
+						logString += event.abbr;
+
+						// Need to add the button to the listing.  God this will be so
+						// much easier with React.  This is basically why react/angular
+						// etc were created I guess.  Anguish.
+
+						replyButtons += `<div
+							class = "third padvertless semibold greentext yellowhover centeralign nospace smaller"
+							id    = "${event.id}_${adminId}"
+							title = "Click event to remove access"
+							target_id    = "${adminId}"
+							title        = "Click event to remove access"
+							post_method  = "delete"
+							setting_name = "${event.id}"
+							onClick      = "postSwitch(this, '/v1/tourn/${tournId}/tab/setup/eventaccess');"
+						>${event.abbr}</div>`;
 					}
-
-					logString += event.abbr;
-
-					// Need to add the button to the listing.  God this will be so
-					// much easier with React.  This is basically why react/angular
-					// etc were created I guess.  Anguish.
-
-					replyButtons += `<div
-						class = "third padvertless semibold greentext yellowhover centeralign nospace smaller"
-						id    = "${event.id}_${adminId}"
-						title = "Click event to remove access"
-						target_id    = "${adminId}"
-						title        = "Click event to remove access"
-						post_method  = "delete"
-						setting_name = "${event.id}"
-						onClick      = "postSwitch(this, '/v1/tourn/${tournId}/tab/setup/eventaccess');"
-					>${event.abbr}</div>`;
-				}
-			});
+				});
+			}
 
 			existing.permObject.changed('details', true);
 			existing.permObject.save();
