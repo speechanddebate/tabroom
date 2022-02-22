@@ -7,6 +7,8 @@
 
 	my $tourn = $school->tourn;
 
+	my %tourn_settings =  $tourn->all_settings();
+
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
     my $now = DateTime->now;
@@ -64,6 +66,10 @@
 		)  = $sth->fetchrow_array()
 	) {
 
+		if ($tourn_settings{"nsda_members_only"}) {
+			next unless $student_nsda;
+		}
+
 		unless ($students{$student_id}{"name"}) {
 			$students{$student_id}{"name"}    = $student_first." ".$student_last;
 			$students{$student_id}{"last"}    = $student_last;
@@ -107,28 +113,88 @@
 
 	}
 
-	my @unregistered_students =
-		sort {$a->last cmp $b->last}
-			$school->chapter->students( retired => 0 );
+	my @unregistered_students = sort {$a->last cmp $b->last} $school->chapter->students( retired => 0 );
 
 	my $school_year  = Tab::school_year();
 	my $add_deadline = $tourn->reg_end;
 	$add_deadline->set_time_zone($tz);
 
-	my $drop_deadline = $tourn->setting("drop_deadline");
+	my $drop_deadline = $tourn_settings{"drop_deadline"};
 	$drop_deadline    = $add_deadline unless $drop_deadline;
 	$drop_deadline->set_time_zone($tz);
 
-	my $freeze_deadline = $tourn->setting("freeze_deadline");
+	my $freeze_deadline = $tourn_settings{"freeze_deadline"};
 	$freeze_deadline    = $add_deadline unless $freeze_deadline;
 	$freeze_deadline->set_time_zone($tz);
 
-	my $fine_deadline = $tourn->setting("fine_deadline");
-	my $drop_fine = $tourn->setting("drop_fine");
+	my $fine_deadline = $tourn_settings{"fine_deadline"};
+	my $drop_fine = $tourn_settings{"drop_fine"};
 	$fine_deadline    = $add_deadline unless $fine_deadline;
 	$fine_deadline->set_time_zone($tz);
 
-	my $currency = $tourn->setting('currency');
+	my $currency = $tourn_settings{'currency'};
+
+	my %qualled;
+	my %entered;
+
+	my $nationals;
+	my $nats_school;
+
+	if ($tourn_settings{"district_required"}) {
+
+		my $eligibles = $m->comp("/funclib/attended_districts.mas",
+			chapter     => $school->chapter
+		);
+
+		my @clean;
+
+		foreach my $student (@unregistered_students) {
+			next unless $eligibles->{$student->id};
+			push @clean, $student;
+		}
+		@unregistered_students = @clean;
+	}
+
+	my $non_quals = 0;
+
+	if ($tourn_settings{"nsda_online_nats"}) {
+
+		$nationals = $m->comp("/funclib/current_nationals.mas");
+		$nats_school = $nationals->schools( chapter => $school->chapter)->first;
+
+		my %qual_students = $m->comp(
+			"/funclib/nationals_students.mas",
+			school => $nats_school,
+			tourn  => $nationals,
+			limit  => "all"
+		);
+
+		foreach my $student_id (keys %qual_students) {
+
+			foreach my $entry (@{$qual_students{$student_id}{"main"}}) {
+				if ($entry->rejected_by) {
+					$qualled{$student_id}++;
+				} else {
+					$entered{$student_id} .= " ".$entry->eventabbr;
+				}
+			}
+
+			foreach my $entry (@{$qual_students{$student_id}{"supp"}}) {
+				$entered{$student_id} .= " ".$entry->eventabbr;
+			}
+		}
+
+		my %tourn_students = $m->comp(
+			"/funclib/nationals_students.mas",
+			school => $school,
+			tourn  => $tourn,
+			limit  => "all"
+		);
+
+		foreach my $student_id (keys %tourn_students) {
+			$non_quals++ unless $qualled{$student_id};
+		}
+	}
 
 </%init>
 
@@ -226,7 +292,6 @@
 <%perl>
 			foreach my $event ($tourn->events) {
 
-
 				my @entries = $school->entries(
 					event       => $event->id,
 					tba         => 0,
@@ -274,49 +339,62 @@
 				<h4>Competitors</h4>
 			</span>
 
+			<span class="fiveeighths nospace">
+
 %			unless ($now > $add_deadline) {
 
-				<span class="quarter nospace rightalign">
-					New competitor:
-				</span>
+				<form
+					action="by_person_edit.mhtml"
+					method="post"
+				>
 
-				<span class="third nospace centeralign">
-
-					<form
-						action="by_person_edit.mhtml"
-						method="post"
+					<input
+						type  = "hidden"
+						name  = "school_id"
+						value = "<% $school->id %>"
 					>
 
-						<input
-							type  = "hidden"
-							name  = "school_id"
-							value = "<% $school->id %>"
-						>
+					<span class="quarter nospace rightalign semibold">
+						Add competitor:
+					</span>
+
+					<span class="threequarters nospace centeralign">
 
 						<select
 							name        = "student_id"
-							class       = "fixedmed"
+							class       = "fixedmost"
 							onChange    = "this.form.submit();"
 						>
-
 							<option value=""></option>
-
 <%perl>
-
 							foreach my $student (@unregistered_students) {
 
-								next if $student->grad_year < $school_year->year;
 								next if $students{$student->id};
+								if ($tourn_settings{"nsda_members_only"}) {
+									next unless $student->nsda;
+								}
 </%perl>
-								<option value="<% $student->id %>"
-									><% $student->first." ".$student->middle." ".$student->last %></option>
+								<option
+									value="<% $student->id %>"
+										<% $entered{$student->id} ? 'disabled="true"' : "" %>
+									><%
+										$student->first." ".$student->middle." ".$student->last
+									%> -- <%
+										$entered{$student->id}
+											? " Ineligible, entered in ".$entered{$student->id}." at Nats "
+											: $qualled{$student->id}
+												? "Qualled, free entry"
+												: $non_quals >= $tourn_settings{"nsda_nonquals"}
+													?  " Ineligible, $non_quals non-qualifying slots used"
+													:  " Non qualifier, may register"
+								%></option>
 %							}
-
 						</select>
-
 					</form>
 				</span>
 %			}
+
+			</span>
 
 			<span class="eighth right padtopmore">
 				<a
@@ -340,7 +418,7 @@
 
 </%perl>
 
-			<div class="full row padless marno hover">
+			<div class="full odd ltbordertop padless marno hover border">
 
 %				my $url= "by_person_edit.mhtml?student_id=".$student_id."&school_id=".$school->id;
 
@@ -385,6 +463,11 @@
 %							} elsif ($entries{$entry_id}{"waitlist"}) {
 								<span class="third orangetext semibold">
 									Waitlisted
+								</span>
+
+%							} elsif ($tourn_settings{"hide_codes"}) {
+
+								<span class="third">
 								</span>
 
 %							} else {
