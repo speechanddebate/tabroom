@@ -218,6 +218,10 @@
 							});
 						}
 
+						if (data.refresh) {
+							window.location.reload();
+						}
+
 					} else if (data.message) {
 
 						alertify.dismissAll();
@@ -955,6 +959,17 @@ var waitForFinalEvent = (function () {
 
 function resizeAll() {
 	$('input[type=text]').each(function(){
+		if (
+			$(this).parent().is("td")
+			|| $(this).parent().is("th")
+			|| $(this).parent().is("label")
+		) {
+		} else {
+			$(this).width($(this).parent().width()-20);
+		}
+	});
+
+	$('input[type=email]').each(function(){
 		if (
 			$(this).parent().is("td")
 			|| $(this).parent().is("th")
