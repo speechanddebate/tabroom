@@ -3,6 +3,7 @@
 	$flight => 1
 </%args>
 <%init>
+	my $dbh = Tab::DBI->db_Main();
 
 	my $round = Tab::Round->retrieve($round_id);
 	my $event = $round->event;
@@ -69,64 +70,89 @@
 
 	my %room_by_id = map {$_->id => $_} @available_rooms;
 
-	my @round_rooms = $m->comp("/funclib/round_rooms.mas", round => $round);
-
-	foreach my $room (@round_rooms) {
-		next if $room_by_id{$room->id};
-		$room_by_id{$room->id} = $room;
-	}
-
-	my @round_judges = $m->comp("/funclib/round_judges.mas", round => $round);
-	my %judge_by_id = map {$_->id => $_} @round_judges;
-
-	my @ada = $m->comp("/funclib/round_panels_ada.mas", round => $round);
-	my %ada_panels = map {$_->id => $_->ada} @ada;
-	undef @ada;
-
-	my @panels = Tab::Panel->search_like(
-		flight => $flight,
-		round => $round->id,
-		{order_by => 'bracket'}
-	);
-
-	my %entry_by_id = map {$_->id => $_} $round->event->entries(active => 1);
-
-	my $dbh = Tab::DBI->db_Main();
-
 	my $this_round_sth = $dbh->prepare("
-		select distinct panel.id, panel.room,
-			ballot.chair, ballot.judge, ballot.entry, ballot.side, ballot.speakerorder
-		from panel, ballot
-		where panel.round = ".$round->id."
-		and panel.flight = ".$flight."
-		and panel.id = ballot.panel
+		select
+			panel.id, panel.room, panel.bracket, panel.bye, panel.letter,
+			ballot.chair, ballot.judge, ballot.entry, ballot.side, ballot.speakerorder,
+			judge.first, judge.last, judge.code, judge.ada, online_hybrid.value,
+			entry.name, entry.code, entry.ada, entry_hybrid.value,
+			room.name, room.url, room.ada, room.quality
+		from (panel, ballot)
+			left join judge on judge.id = ballot.judge
+			left join entry on entry.id = ballot.entry
+			left join room on panel.room = room.id
+			left join judge_setting online_hybrid on online_hybrid.tag = 'online_hybrid' and online_hybrid.judge = judge.id
+			left join entry_setting entry_hybrid on entry_hybrid.tag = 'online_hybrid' and entry_hybrid.entry = entry.id
+		where panel.round = ?
+			and panel.flight = ?
+			and panel.id = ballot.panel
 		group by ballot.id
 	");
 
-	my %panel_chair;
+	my %panels;
+
 	my %panel_room;
-	my %panel_judge;
 	my %panel_entry;
 	my %entry_side;
 	my %entry_order;
 
-	$this_round_sth->execute;
+	$this_round_sth->execute($round->id, $flight);
 
 	while (
-		my ($panel, $room, $chair, $judge, $entry, $side, $order)
+		my (
+			$panel, $room, $bracket, $bye, $letter,
+			$chair, $judge, $entry, $side, $order,
+			$jfirst, $jlast, $jcode, $jada, $jonline,
+			$ename, $ecode, $eada, $eonline,
+			$rname, $rurl, $rada, $rqual
+		)
 		= $this_round_sth->fetchrow_array()
 	) {
-		push @{$panel_chair{$panel}}, $judge if $chair;
-		push @{$panel_judge{$panel}}, $judge unless $chair;
-		$panel_room{$panel} = $room;
-		push @{$panel_entry{$panel}}, $entry;
-		$entry_side{$entry} = $side;
-		$entry_order{$entry} = $order;
+
+		$panels{$panel}{"letter"}  = $letter;
+		$panels{$panel}{"bye"}     = $bye;
+		$panels{$panel}{"bracket"} = $bracket;
+
+		$panels{$panel}{"room"}         = $room;
+		$panels{$panel}{"room_url"}     = $rurl;
+		$panels{$panel}{"room_name"}    = $rname;
+		$panels{$panel}{"room_ada"}     = $rada;
+		$panels{$panel}{"room_quality"} = $rqual;
+
+		if ($jada || $eada) {
+			$panels{$panel}{"ada"} = 1;
+		}
+
+		my %judge = (
+			id     => $judge,
+			first  => $jfirst,
+			chair  => $chair,
+			last   => $jlast,
+			code   => $jcode,
+			ada    => $jada,
+			online => $jonline,
+		);
+
+		$panels{$panel}{"judges"}{$judge} = \%judge;
+
+		my %entry = (
+			id     => $entry,
+			name   => $ename,
+			code   => $ecode,
+			side   => $side,
+			order  => $order,
+			ada    => $eada,
+			online => $eonline
+		);
+
+		$panels{$panel}{"entries"}{$entry} = \%entry;
 	}
 
 	my %used_room;
 	my %used_judge;
 	my $event_type = $event->type;
+
+	$dbh->disconnect();
 
 </%init>
 
@@ -139,34 +165,46 @@
 				accept			 : ":not(.ui-sortable-helper)",
 				disableSelection : "true",
 				drop			 : function( event, ui) {
-					var draggableId = ui.draggable.attr("id");
-					var droppableId = this.id;
-					$.post("manual_room_save.mhtml",{
-						round_id : <% $round_id %>,
-						flight   : <% $flight %>,
-						room_id  : draggableId,
-						panel_id : droppableId
 
-					}).done(function(data) {
+					var attributes = {};
 
-                        if (data.error) {
-                            alertify.error(data.message);
-                        } else {
-                            alertify.set('notifier','delay', 2);
-                            alertify.notify(data.message, "custom");
-                            alertify.set('notifier','delay', 5);
-                        }
+					attributes.room_id  = ui.draggable.attr("id");
+					attributes.panel_id = this.id;
+					attributes.round_id = <% $round_id %>;
+					attributes.flight   = <% $flight %>;
 
-						if (data.origin_panel && data.origin_room) {
-							console.log("Origins are "+data.origin_panel+" and "+data.origin_room);
-							$("#"+data.origin_room).appendTo("#"+data.origin_panel);
+					console.log(attributes.panel_id);
+
+					$.ajax({
+						type    : 'POST',
+						url     : "manual_room_save.mhtml",
+						data    : attributes,
+						success : function(data, status, object, callback) {
+
+							console.log("Posted!");
+
+							if (data.error) {
+								alertify.error(data.message);
+								console.log(data);
+							} else if (data.message) {
+								alertify.dismissAll();
+								alertify.set('notifier','delay', 2);
+								alertify.notify(data.message, "custom");
+								alertify.set('notifier','delay', 5);
+							}
+
+							if (data.origin_panel && data.origin_room) {
+								console.log("Origins are "+data.origin_panel+" and "+data.origin_room);
+								$("#"+data.origin_room).appendTo("#"+data.origin_panel);
+							}
+							ui.draggable.show();
 						}
                     });
-					ui.draggable.show();
-					$(this).prepend(ui.draggable);
-					$( this ).find( ".placeholder" ).remove();
 
+					$(this).prepend(ui.draggable);
+					$(this).find( ".placeholder" ).remove();
 				}
+
 			}).sortable({
 				items: ":not(.placeholder)",
 				sort: function() {
@@ -255,121 +293,166 @@
 <%perl>
 			my $switch;
 
-			foreach my $panel (sort {
-				$ada_panels{$b} <=> $ada_panels{$a}
-				|| $a->letter <=> $b->letter
-				|| $a->letter cmp $b->letter
-			} @panels) {
+			foreach my $panel_id (
+				sort {
+					$panels{$b}{"ada"} <=> $panels{$a}{"ada"}
+					|| $panels{$b}{"bracket"} <=> $panels{$a}{"bracket"}
+					|| length($panels{$b}{"letter"}) <=> length($panels{$a}{"letter"})
+					|| $panels{$b}{"letter"} cmp $panels{$a}{"letter"}
+				} keys %panels
+			) {
 
-				my $id = $panel->id;
-
-				my %used;
-
-				my @entries = sort {
-					$entry_side{$a} <=> $entry_side{$b}
-				} @{$panel_entry{$id}} if $panel_entry{$panel->id};
-
-				@entries = sort {$entry_order{$a} <=> $entry_order{$b}} @entries;
-				my %seen = ();
-				@entries = grep { ! $seen{$_} ++ } @entries;
-
-				my @judges = @{$panel_judge{$id}} if $panel_judge{$id};
-				my @chairs = @{$panel_chair{$id}} if $panel_chair{$id};
-
-				my %j_seen = ();
-				@chairs = grep { ! $j_seen{$_} ++ } @chairs;
-				@judges = grep { ! $j_seen{$_} ++ } @judges;
-
-				my $room = $room_by_id{$panel_room{$id}};
+				my $panel = $panels{$panel_id};
 </%perl>
 
 				<tr>
 
 					<td class="centeralign semibold bluetext">
 %						if ($event_type eq "speech" || $event_type eq "congress") {
-							<% $panel->letter %>
+							<% $panel->{letter} %>
 %						} else {
-							<% $panel->bye ? "BYE" : $panel->bracket %>
+							<% $panel->{bye} ? "BYE" : $panel->{bracket} %>
 %						}
 					</td>
 
 					<td>
-%						if ($event_type eq "speech" || $event_type eq "congress") {
-%							foreach my $entry (@entries) {
-%								next if $used{$entry}++;
-								<span class="third nospace padvertless smaller">
-									<% $entry_by_id{$entry} ? $entry_by_id{$entry}->code : "None" %>
-								</span>
-%							}
-%						} else {
-%							foreach my $entry (@entries) {
-%								next if $used{$entry}++;
-								<div class="full smaller marno padless padleft"
-									class="<% $entry %> <% $entry."_".$entry_side{$entry} %>"
-								>
-%								if ($event_type eq "wudc") {
-									<span class="sixth nospace">
-										<% $wudc && $entry_order{$entry} == 1 ? "1G" : "" %>
-										<% $wudc && $entry_order{$entry} == 2 ? "1O" : "" %>
-										<% $wudc && $entry_order{$entry} == 3 ? "2G" : "" %>
-										<% $wudc && $entry_order{$entry} == 4 ? "2O" : "" %>
+<%perl>
+						if ($panel->{"entries"}) {
+
+							if ($event_type eq "speech" || $event_type eq "congress" || $event_type eq "wudc") {
+
+								foreach my $entry_id (
+									sort {
+										$panel->{"entries"}{$a}{"order"} <=> $panel->{"entries"}{$b}{"order"}
+									} keys %{$panel->{entries}}
+								) {
+
+									my $entry = $panel->{"entries"}{$entry_id};
+</%perl>
+									<span
+										title = "<% $entry->{"name"} %> <% $entry->{'ada'} ? "ADA Room Required" : "" %>"
+										class = "third nospace padvertless smaller"
+									>
+										<span class="sixth nospace">
+											<% $entry->{"order"} %>
+										</span>
+										<span class="twothirds nospace">
+											<% $entry->{"code"} %>
+										</span>
+										<span class="sixth nospace">
+											<% $entry->{"online"}
+												?  '<span class="full greentext fa fa-sm fa-laptop"></span>'
+												: ''
+											%>
+										</span>
 									</span>
-									<span class="fivesixth nospace">
-										<% $entry_by_id{$entry} ? $entry_by_id{$entry}->code : "None" %>
-									</span>
-%								} else {
-									<span class="sixth nospace">
-										<% $entry_side{$entry} == 1 ? $aff_string : "" %>
-										<% $entry_side{$entry} == 2 ? $neg_string : "" %>
-									</span>
-									<span class="fivesixth nospace">
-										<% $entry_by_id{$entry} ? $entry_by_id{$entry}->code : "None" %>
-									</span>
+<%perl>
+								}
+
+							} else {
+
+								foreach my $entry_id (
+									sort {
+										$panel->{"entries"}{$a}{"side"} <=> $panel->{"entries"}{$b}{"side"}
+									} keys %{$panel->{entries}}
+								) {
+									my $entry = $panel->{"entries"}{$entry_id};
+</%perl>
+									<div class="full smaller marno padless padleft"
+										title = "<% $entry->{"name"} %>"
+									>
+										<span class="sixth nospace">
+											<% $entry->{'side'} == 1 ? $aff_string : "" %>
+											<% $entry->{'side'} == 2 ? $neg_string : "" %>
+										</span>
+										<span class="twothirds nospace">
+											<% $entry->{"code"} %>
+										</span>
+										<span class="sixth nospace rightalign">
+											<% $entry->{"online"}
+												? '<span class="fa fa-sm fa-laptop greentext"></span>'
+												: ""
+											%>
+											<% $entry->{'ada'}
+												? '<span class="fa fa-sm fa-wheelchair-alt bluetext"></span>'
+												: ""
+											%>
+										</span>
+									</div>
 %								}
-								</div>
 %							}
 %						}
 					</td>
 
 					<td class="nowrap">
-%						foreach my $chair_id (@chairs) {
-%							my $chair = $judge_by_id{$chair_id};
-%							next unless $chair;
-							<div class="full semibold smaller marno padless padleft" title="<% $chair->last." ".$chair->first %>">
-								* <% $chair->last.", ".$chair->first %>
-							</div>
-%						}
-%						foreach my $judge_id (@judges) {
-%							my $judge = $judge_by_id{$judge_id};
-%							next unless $judge;
-							<div class="full smaller marno padless padleft" title="<% $judge->last." ".$judge->first %>">
-								<% $judge->last.", ".$judge->first %>
+<%perl>
+						foreach my $judge_id (
+							sort {
+								$panel->{"judges"}{$b}{"chair"} <=> $panel->{"judges"}{$a}{"chair"}
+							} keys %{$panel->{judges}}
+						) {
+
+							my $judge = $panel->{"judges"}{$judge_id};
+</%perl>
+
+							<div
+								class="full <% $judge->{"chair"} ? "semibold" : "" %> smaller marno padless padleft"
+								title="<% $judge->{"last"}." ".$judge->{"first"} %>"
+							>
+								<span class="fivesixths nospace">
+									<% $judge->{"code"} %>
+									<% $judge->{"last"}.", ".$judge->{"first"} %>
+								</span>
+								<span class="sixth nospace rightalign">
+									<% $judge->{"chair"}
+										? '<span class="fa fa-sm fa-gavel redtext"></span>'
+										: ""
+									%>
+									<% $judge->{"online"}
+										? '<span class="fa fa-sm fa-laptop greentext"></span>'
+										: ""
+									%>
+									<% $judge->{'ada'}
+										? '<span class="fa fa-sm fa-wheelchair-alt bluetext"></span>'
+										: ""
+									%>
+								</span>
 							</div>
 %						}
 					</td>
 
 					<th class="centeralign semibold redtext">
-						<% $ada_panels{$id} ? "YES" : "" %>
+						<% $panel->{"ada"} ? "YES" : "" %>
+						<span class="hidden">
+							<% $panel->{"ada"} ? "" : "zz" %>
+						</span>
 					</th>
 
 					<td class="nospace limit3">
 						<div
 							style = "height: 100%;"
 							class = "centeralign ui-droppable droppable"
-							id    = "<% $id %>"
+							id    = "<% $panel_id %>"
 						>
-%							if ($room) {
-%								$used_room{$room->id}++;
+%							if ($panel->{"room"}) {
+
+%								$used_room{$panel->{"room"}}++;
 								<div
-									class = "<% $room->ada ? "adaroom" : "" %> leftalign draggable nowrap"
-									id    = "<% $room->id %>"
+									class = "<% $panel->{"room_ada"} ? "adaroom" : "" %> leftalign draggable nowrap"
+									id    = "<% $panel->{"room"} %>"
 								>
-									<span class="fifth nospace">
-										<% $room->quality %>
+									<span class="sixth nospace">
+										<% $panel->{"room_quality"} %>
 									</span>
-									<span class="fourfifth nospace">
-										<% $room->ada ? "*" : "" %>
-										<% $room->name  %>
+									<span class="twothirds nospace">
+										<% $panel->{"room_ada"} ? "*" : "" %>
+										<% $panel->{"room_name"}  %>
+									</span>
+									<span class="sixth nospace">
+										<% $panel->{"url"}
+											?  '<span class="full bluetext fa fa-sm fa-link"></span>'
+											: ""
+										%>
 									</span>
 								</div>
 %							}
@@ -453,4 +536,5 @@
 			</div>
 
 	</div>
+
 
