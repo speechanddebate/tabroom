@@ -991,6 +991,18 @@ function resizeAll() {
 		}
 	});
 
+	$('input[type=url]').each(function(){
+		if (
+			$(this).parent().is("td")
+			|| $(this).parent().is("th")
+			|| $(this).parent().is("label")
+		) {
+		} else {
+			$(this).width($(this).parent().width()-20);
+		}
+	});
+
+
 	$('textarea').each(function(){
 		$(this).width($(this).parent().width()-20);
 	});
