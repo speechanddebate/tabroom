@@ -1,0 +1,733 @@
+<%args>
+	$person
+	$person_settings
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $student_sth = $dbh->prepare("
+		select
+			student.id, student.first, student.middle, student.last, student.phonetic,
+				chapter.name chapter, student.timestamp, COUNT(distinct es.entry) count
+		from (student, chapter)
+			left join entry_student es on es.student = student.id
+		where student.person = ?
+			and student.chapter = chapter.id
+		group by student.id
+	");
+
+	my $judge_sth = $dbh->prepare("
+		select
+			chapter_judge.id, chapter_judge.first, chapter_judge.middle, chapter_judge.last,
+				chapter.name chapter, chapter_judge.timestamp, COUNT(distinct judge.id) count
+		from chapter_judge
+			left join judge on chapter_judge.id = judge.chapter_judge
+			left join chapter on chapter_judge.chapter = chapter.id
+		where chapter_judge.person = ?
+			and chapter_judge.chapter = chapter.id
+		group by chapter_judge.id
+	");
+
+	my $unaffiliated_judge_sth = $dbh->prepare("
+		select
+			judge.id, judge.first, judge.middle, judge.last
+
+		from judge
+			where judge.person = ?
+			and not exists (
+				select cj.id
+				from chapter_judge cj
+				where cj.id = judge.chapter_judge
+			)
+	");
+
+	$student_sth->execute($person->id);
+	$judge_sth->execute($person->id);
+	$unaffiliated_judge_sth->execute($person->id);
+
+	my $students = $student_sth->fetchall_hash();
+	my $judges   = $judge_sth->fetchall_hash();
+	my $hires    = $unaffiliated_judge_sth->fetchall_hash();
+
+	my $now = DateTime->now();
+	my $msg;
+
+	if ($ARGS{"save_me"}) {
+
+		if ($ARGS{"name_match"} || $ARGS{"hire_match"}) {
+
+			my $bulk_account_judges_sth = $dbh->prepare("
+				update judge, person
+					set judge.first = person.first,
+					judge.middle = person.middle,
+					judge.last = person.last
+				where judge.person = ?
+					and judge.person = person.id
+			");
+
+			$bulk_account_judges_sth->execute($person->id);
+
+			if ($ARGS{"name_match"}) {
+
+				my $bulk_account_cjudges_sth = $dbh->prepare("
+					update chapter_judge, person
+						set chapter_judge.first = person.first,
+						chapter_judge.middle = person.middle,
+						chapter_judge.last = person.last
+					where chapter_judge.person = ?
+						and chapter_judge.person = person.id
+				");
+
+				$bulk_account_cjudges_sth->execute($person->id);
+
+				my $bulk_account_students_sth = $dbh->prepare("
+					update student, person
+						set student.first = person.first,
+						student.middle = person.middle,
+						student.last = person.last,
+						student.gender = person.gender
+					where student.person = ?
+						and student.person = person.id
+				");
+
+				$bulk_account_students_sth->execute($person->id);
+
+				my $bulk_entries_sth = $dbh->prepare("
+					update entry, entry_student es, student
+						set entry.name = CONCAT(student.first,' ',student.last)
+					where entry.id = es.entry
+						and es.student = student.id
+						and student.person = ?
+
+						and NOT EXISTS(
+							select es2.id
+							from entry_student es2
+							where es2.entry = entry.id
+							and es2.student != student.id
+						)
+				");
+
+				$bulk_entries_sth->execute($person->id);
+
+				my $bulk_entrycode_sth = $dbh->prepare("
+					update entry, entry_student es, student, event, event_setting
+						set entry.code = CONCAT(student.first,' ',student.last)
+					where entry.id = es.entry
+						and es.student = student.id
+						and student.person = ?
+						and event.id = event_setting.event
+						and event_setting.tag = 'code_style'
+						and event_setting.value = 'names'
+				");
+
+				$bulk_entrycode_sth->execute($person->id);
+
+				my $bulk_judges_sth = $dbh->prepare("
+					update judge, chapter_judge
+						set judge.first = chapter_judge.first,
+						judge.middle = chapter_judge.middle,
+						judge.last = chapter_judge.last
+					where chapter_judge.person = ?
+					and chapter_judge.id = judge.chapter_judge
+				");
+
+				$bulk_judges_sth->execute($person->id);
+			}
+
+			$msg = "All changes made in bulk to update your records to match your account name";
+			$m->redirect("name_check.mhtml?msg=$msg");
+
+		} else {
+
+			my $change_judge_sth = $dbh->prepare("update chapter_judge set first = ?, middle = ?, last = ? where id = ?");
+			my $change_student_sth = $dbh->prepare("update student set first = ?, middle = ?, last = ?, phonetic = ? where id = ?");
+
+			my $bulk_entries_sth = $dbh->prepare("
+				update entry, entry_student es, student
+					set entry.name = CONCAT(student.first,' ',student.last)
+				where entry.id = es.entry
+					and es.student = student.id
+					and student.id = ?
+
+					and NOT EXISTS(
+						select es2.id
+						from entry_student es2
+						where es2.entry = entry.id
+						and es2.student != student.id
+					)
+			");
+
+			my $bulk_entrycode_sth = $dbh->prepare("
+				update entry, entry_student es, student, event, event_setting
+					set entry.code = CONCAT(student.first,' ',student.last)
+				where entry.id = es.entry
+					and es.student = student.id
+					and student.id = ?
+					and event.id = event_setting.event
+					and event_setting.tag = 'code_style'
+					and event_setting.value = 'names'
+			");
+
+			my $bulk_judges_sth = $dbh->prepare("
+				update judge, chapter_judge
+					set judge.first = chapter_judge.first,
+					judge.middle = chapter_judge.middle,
+					judge.last = chapter_judge.last
+				where chapter_judge.id = ?
+				and chapter_judge.id = judge.chapter_judge
+			");
+
+			my $mailme;
+
+			my @fields = ("first", "middle", "last");
+
+			foreach my $judge (@{$judges}) {
+				my $changeme;
+				my @changes;
+
+				foreach my $field (@fields) {
+					my $key = $field."_".$judge->{"id"};
+					chomp $ARGS{$key};
+					push @changes, $ARGS{$key};
+					$changeme++ if $ARGS{$key} ne $judge->{$field};
+				}
+
+				if ($changeme) {
+
+					$change_judge_sth->execute(@changes, $judge->{"id"});
+					$bulk_judges_sth->execute($judge->{"id"});
+
+					$mailme .= "\n" if $mailme;
+					$mailme .= " Judge ".$judge->{"first"}." ".$judge->{"middle"}." ".$judge->{"last"}." updated to";
+					$judge->{"timestamp"} = DateTime::Format::MySQL->format_datetime($now);
+
+					foreach my $field (@fields) {
+						my $key = $field."_".$judge->{"id"};
+						$judge->{$field} = $ARGS{$key};
+					}
+
+					foreach my $change (@changes) {
+						$mailme .= " ".$change
+					}
+				}
+			}
+
+			push @fields, "phonetic";
+
+			foreach my $student (@{$students}) {
+				my $changeme;
+				my @changes;
+
+				foreach my $field (@fields) {
+					my $key = $field."_".$student->{"id"};
+					chomp $ARGS{$key};
+					push @changes, $ARGS{$key};
+					$changeme++ if $ARGS{$key} ne $student->{$field};
+				}
+
+				if ($changeme) {
+
+					$change_student_sth->execute(@changes, $student->{"id"});
+					$bulk_entries_sth->execute($student->{"id"});
+					$bulk_entrycode_sth->execute($student->{"id"});
+
+					$mailme .= "\n" if $mailme;
+					$mailme .= " Competitor ".$student->{"first"}." ".$student->{"middle"}." ".$student->{"last"}." updated to";
+					$student->{"timestamp"} = DateTime::Format::MySQL->format_datetime($now);
+
+					foreach my $field (@fields) {
+						my $key = $field."_".$student->{"id"};
+						$student->{$field} = $ARGS{$key};
+					}
+
+					foreach my $change (@changes) {
+						$mailme .= " ".$change
+					}
+				}
+			}
+
+			if ($mailme) {
+
+				my $subject = "Your Tabroom.com name records have changed";
+
+				my $msg = "\n\tHello! \n";
+
+				$msg .= " Your Tabroom.com account was used to change the name of your competitor and/or judge records as follows: ";
+				$msg .= "\n";
+				$msg .= $mailme;
+				$msg .= "\n";
+
+				$msg .= "If you did not attempt to make this change, presumably someone ";
+				$msg .= "else has done so while logged into your Tabroom account.  Please notify us at ";
+				$msg .= 'help@tabroom.com immediately if you did not authorize or want this change. ';
+
+				my @raw;
+
+				if ($person->phone && $person->provider) {
+
+					push @raw, $person->phone.'@'.$person->provider;
+
+					$m->comp("/funclib/send_notify.mas",
+						array   => \@raw,
+						subject => $subject,
+						body    => $msg
+					);
+				}
+
+				$msg .= "\n\n";
+
+				$msg .= "Thank you!\n";
+				$msg .= "Tabroom.com & the National Speech & Debate Assocation\n";
+				$msg .= "https://www.tabroom.com\n";
+				$msg .= "https://www.speechanddebate.org\n";
+
+				undef @raw;
+				push @raw, $person->email;
+
+				$m->comp("/funclib/send_email.mas",
+					raw     => \@raw,
+					subject => $subject,
+					body    => $msg
+				);
+
+			}
+		}
+
+		$msg = "Changes saved!";
+	}
+
+</%init>
+
+%	if ($msg) {
+		<script>
+			$(document).ready(function() {
+				alertify.notify("<% $msg %>", "custom");
+			});
+		</script>
+%	}
+
+	<div class="menu">
+		<div class="sidenote">
+			<h4>Navigation</h4>
+
+			<a
+				class = "blue full"
+				href  = "/user/login/profile.mhtml"
+			>Return to Your Profile</a>
+		</div>
+
+%		if (@{$students}) {
+			<div class="sidenote">
+				<h4>Entry codes</h4>
+				<p class="nospace padvert ltbordertop smallish" style="line-height: 18px;">
+					Because of technical limitations this process
+					does not recode entries that might incorporate your
+					previous name in part, such as two-person team names
+					(Lastname &amp; Partnerlastname) or initials
+					(Schoolname AB). Contact your program's coach to
+					change those individually.
+				</p>
+			</div>
+%		}
+	</div>
+
+	<div class="main">
+
+%		my $not_same;
+% 		my $hire_same;
+
+%		if (@{$judges} || @{$students}) {
+
+			<form
+				action = "name_check.mhtml"
+				method = "post"
+			>
+				<input
+					type  = "hidden"
+					name  = "save_me"
+					value = "yasssskween!"
+				>
+%		}
+
+%		if (@{$students}) {
+
+			<& "/funclib/tablesorter.mas",
+				table     => "competitors",
+				nobuttons => 1
+			&>
+
+			<span class="twofifths nospace">
+				<h4>Competitor Records</h4>
+			</span>
+
+			<span
+				class="threefifths nospace rightalign"
+				id="competitors_buttonarea"
+			></span>
+
+			<table id="competitors">
+
+				<thead>
+					<tr class="yellowrow smallish padvert">
+						<th>
+							First
+						</th>
+
+						<th>
+							Middle
+						</th>
+
+						<th>
+							Last
+						</th>
+
+						<th>
+							Phonetic Guide
+						</th>
+
+						<th>
+							Institution
+						</th>
+
+						<th>
+							Last Change
+						</th>
+
+						<th>
+							# Entries
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+<%perl>
+					foreach my $student_ref (@{$students}) {
+
+						my $change;
+
+						if (
+							$student_ref->{'first'} ne $person->first
+							|| $student_ref->{'middle'} ne $person->middle
+							|| $student_ref->{'last'} ne $person->last
+						) {
+							$change++;
+							$not_same++;
+						}
+</%perl>
+						<tr class="smaller padvert">
+							<td class="padvertless">
+								<input
+									type  = "text"
+									name  = "first_<% $student_ref->{"id"} %>"
+									value = "<% $student_ref->{"first"} %>"
+								>
+							</td>
+
+							<td class="padvertless">
+								<input
+									type  = "text"
+									name  = "middle_<% $student_ref->{"id"} %>"
+									value = "<% $student_ref->{"middle"} %>"
+								>
+							</td>
+
+							<td class="padvertless">
+								<input
+									type  = "text"
+									name  = "last_<% $student_ref->{"id"} %>"
+									value = "<% $student_ref->{"last"} %>"
+								>
+							</td>
+
+							<td class="padvertless">
+								<input
+									type  = "text"
+									name  = "phonetic_<% $student_ref->{"id"} %>"
+									value = "<% $student_ref->{"phonetic"} %>"
+								>
+							</td>
+
+							<td>
+								<% $student_ref->{"chapter"} %>
+							</td>
+
+							<td class="smallish">
+								<span class="halfspacer"></span>
+								<& "/funclib/showdt.mas",
+									string => $student_ref->{"timestamp"},
+									tz     => $person->tz,
+									length => "medcasual"
+								&>
+							</td>
+
+							<td class="smallish centeralign">
+								<% $student_ref->{'count'} %>
+							</td>
+						</tr>
+%					}
+				</tbody>
+
+			</table>
+%		}
+
+%		if (@{$judges}) {
+
+			<& "/funclib/tablesorter.mas",
+				table     => "judges",
+				nobuttons => 1
+			&>
+
+			<span class="twofifths nospace">
+				<h4>Judge Records</h4>
+			</span>
+
+			<span
+				class="threefifths nospace rightalign"
+				id="judges_buttonarea"
+			></span>
+
+			<table id="judges">
+				<thead>
+					<tr class="yellowrow smallish padvert">
+						<th>
+							First
+						</th>
+
+						<th>
+							Middle
+						</th>
+
+						<th>
+							Last
+						</th>
+
+						<th>
+							Institution
+						</th>
+
+						<th>
+							Last Change
+						</th>
+
+						<th>
+							Times Judged
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+<%perl>
+					foreach my $judge_ref (@{$judges}) {
+
+						my $change;
+
+						if (
+							$judge_ref->{'first'} ne $person->first
+							|| $judge_ref->{'middle'} ne $person->middle
+							|| $judge_ref->{'last'} ne $person->last
+						) {
+							$change++;
+							$not_same++;
+						}
+</%perl>
+						<tr class="smallish padvertless">
+							<td class="padvertless">
+								<input
+									type  = "text"
+									name  = "first_<% $judge_ref->{"id"} %>"
+									value = "<% $judge_ref->{"first"} %>"
+								>
+							</td>
+
+							<td class="padvertless">
+								<input
+									type  = "text"
+									name  = "middle_<% $judge_ref->{"id"} %>"
+									value = "<% $judge_ref->{"middle"} %>"
+								>
+							</td>
+
+							<td class="padvertless">
+								<input
+									type  = "text"
+									name  = "last_<% $judge_ref->{"id"} %>"
+									value = "<% $judge_ref->{"last"} %>"
+								>
+							</td>
+
+							<td>
+								<% $judge_ref->{"chapter"} %>
+							</td>
+
+							<td class="smallish">
+								<& "/funclib/showdt.mas",
+									string => $judge_ref->{"timestamp"},
+									tz     => $person->tz,
+									length => "medcasual"
+								&>
+							</td>
+
+							<td class="smallish centeralign">
+								<% $judge_ref->{'count'} %>
+							</td>
+						</tr>
+%					}
+				</tbody>
+			</table>
+%		}
+
+%		if (@{$hires}) {
+
+			<& "/funclib/tablesorter.mas",
+				table     => "hires",
+				nobuttons => 1
+			&>
+
+			<span class="twofifths nospace">
+				<h4>Non-school affiliated judging</h4>
+			</span>
+
+			<span
+				class="threefifths nospace rightalign"
+				id="hires_buttonarea"
+			></span>
+
+			<table id="hires">
+				<thead>
+					<tr class="yellowrow smallish padvert">
+						<th>
+							First
+						</th>
+
+						<th>
+							Middle
+						</th>
+
+						<th>
+							Last
+						</th>
+
+						<th>
+							Count
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+<%perl>
+
+					my %count;
+
+					foreach my $judge_ref (@{$hires}) {
+						my $key = $judge_ref->{"first"}.'-'.$judge_ref->{"middle"}.'-'.$judge_ref->{"last"};
+						$count{$key}++;
+						Tab::debuglog("Did judge ".$judge_ref->{"id"});
+					}
+
+					my %done;
+
+					foreach my $judge_ref (@{$hires}) {
+
+						my $key = $judge_ref->{"first"}.'-'.$judge_ref->{"middle"}.'-'.$judge_ref->{"last"};
+						next if $done{$key}++;
+
+						my $change;
+
+						if (
+							$judge_ref->{'first'} ne $person->first
+							|| $judge_ref->{'middle'} ne $person->middle
+							|| $judge_ref->{'last'} ne $person->last
+						) {
+							$change++;
+							$not_same++;
+							$hire_same++;
+						}
+</%perl>
+						<tr class="smallish padvertless">
+							<td class="nospace">
+								<div class="nospace full padvertmore">
+									<span class="halfspacer"></span>
+									<% $judge_ref->{"first"} %>
+								</div>
+							</td>
+
+							<td class="nospace">
+								<div class="nospace full padvertmore">
+								<span class="halfspacer"></span>
+								<% $judge_ref->{"middle"} %>
+							</td>
+
+							<td class="nospace">
+								<div class="nospace full padvertmore">
+								<span class="halfspacer"></span>
+								<% $judge_ref->{"last"} %>
+							</td>
+
+							<td class="smallish centeralign">
+								<% $count{$key} %>
+							</td>
+						</tr>
+%					}
+				</tbody>
+			</table>
+
+%		}
+
+%		if (@{$judges} || @{$students}) {
+
+%			if ($hire_same) {
+				<div class="nospace bluebordertop">
+					<label for="hire_match">
+						<div class="nospace hover padvert">
+							<span class="sixsevenths semibold rightalign bluetext">
+								Update ONLY unaffiliated/hired judge &amp; records to match your
+								account name (<% $person->first." ".$person->middle." ".$person->last %>)?
+							</span>
+							<span class="eighth semibold" title="Make it so">
+								<input
+									type  = "checkbox"
+									id    = "hire_match"
+									name  = "hire_match"
+									value = "1"
+								>
+							</span>
+						</div>
+					</label>
+				</div>
+%			}
+
+%			if ($not_same) {
+				<div class="nospace ltbordertop">
+					<label for="name_match">
+						<div class="nospace hover padvert">
+							<span class="sixsevenths semibold rightalign bluetext">
+								Update ALL judge &amp; competitor records to match your
+								account name (<% $person->first." ".$person->middle." ".$person->last %>)?
+							</span>
+							<span class="eighth semibold" title="Make it so">
+								<input
+									type  = "checkbox"
+									id    = "name_match"
+									name  = "name_match"
+									value = "1"
+								>
+							</span>
+						</div>
+					</label>
+				</div>
+%			}
+
+			<div class="libl rightalign padvertless">
+				<span class="third centeralign">
+					<input
+						type  = "submit"
+						value = "Save All Changes"
+					>
+				</span>
+			</div>
+
+			</form>
+%		}
+	</div>
+

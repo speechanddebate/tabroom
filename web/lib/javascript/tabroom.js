@@ -958,7 +958,8 @@ var waitForFinalEvent = (function () {
 })();
 
 function resizeAll() {
-	$('input[type=text]').each(function(){
+
+	$('input[type=text], input[type=email], input[type=tel], input[type=date], input[type=time], input[type=url]').each(function(){
 		if (
 			$(this).parent().is("td")
 			|| $(this).parent().is("th")
@@ -968,40 +969,6 @@ function resizeAll() {
 			$(this).width($(this).parent().width()-20);
 		}
 	});
-
-	$('input[type=email]').each(function(){
-		if (
-			$(this).parent().is("td")
-			|| $(this).parent().is("th")
-			|| $(this).parent().is("label")
-		) {
-		} else {
-			$(this).width($(this).parent().width()-20);
-		}
-	});
-
-	$('input[type=tel]').each(function(){
-		if (
-			$(this).parent().is("td")
-			|| $(this).parent().is("th")
-			|| $(this).parent().is("label")
-		) {
-		} else {
-			$(this).width($(this).parent().width()-20);
-		}
-	});
-
-	$('input[type=url]').each(function(){
-		if (
-			$(this).parent().is("td")
-			|| $(this).parent().is("th")
-			|| $(this).parent().is("label")
-		) {
-		} else {
-			$(this).width($(this).parent().width()-20);
-		}
-	});
-
 
 	$('textarea').each(function(){
 		$(this).width($(this).parent().width()-20);
