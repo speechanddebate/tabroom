@@ -92,6 +92,8 @@ use Tab::JPoolRound;
 use Tab::Panel;
 use Tab::PanelSetting;
 use Tab::Permission;
+use Tab::Practice;
+use Tab::PracticeStudent;
 use Tab::Quiz;
 use Tab::Rating;
 use Tab::RatingSubset;
