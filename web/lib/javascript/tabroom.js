@@ -966,12 +966,12 @@ function resizeAll() {
 			|| $(this).parent().is("label")
 		) {
 		} else {
-			$(this).width($(this).parent().width()-20);
+			$(this).width($(this).parent().width()-10);
 		}
 	});
 
 	$('textarea').each(function(){
-		$(this).width($(this).parent().width()-20);
+		$(this).width($(this).parent().width()-10);
 	});
 
 	$('.chosen-container').each(function(){
@@ -980,7 +980,7 @@ function resizeAll() {
 			|| $(this).parent().is("th")
 		) {
 		} else {
-			$(this).width($(this).parent().width()-20);
+			$(this).width($(this).parent().width()-10);
 		}
 	});
 }
