@@ -1,0 +1,172 @@
+<%args>
+	$person
+	$perms
+	$tourn_settings
+	$panel_id => undef
+	$entry_id => undef
+	$entry_code => undef
+	$judge_id => undef
+</%args>
+<%init>
+
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	unless ($panel_id) {
+		$m->print('{ "error": true, "message": "No panel ID sent"}');
+		$m->abort();
+	}
+
+	unless ($entry_id) {
+		$m->print('{ "error": true, "message": "No entry ID sent"}');
+		$m->abort();
+	}
+
+	unless ($judge_id) {
+		$m->print('{ "error": true, "message": "No judge ID sent"}');
+		$m->abort();
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $check_sth = $dbh->prepare("
+		select count(entry.id)
+			from entry, score, ballot
+		where ballot.panel = ?
+			and ballot.judge = ?
+			and ballot.id = score.ballot
+			and score.tag = 'winloss'
+	");
+
+	$check_sth->execute($panel_id, $judge_id);
+	my $value = $check_sth->fetch();
+
+	if ($value == 2) {
+
+		my $update_sth = $dbh->prepare("
+			update score, ballot
+				set score.value = 0
+			where score.tag = 'winloss'
+				and score.ballot = ballot.id
+				and ballot.panel = ?
+				and ballot.judge = ?
+				and ballot.entry != ?
+		");
+
+		$update_sth->execute($panel_id, $judge_id, $entry_id);
+		$update_sth->finish();
+
+		$update_sth = $dbh->prepare("
+			update score, ballot
+				set score.value = 1
+			where score.tag = 'winloss'
+				and score.ballot = ballot.id
+				and ballot.panel = ?
+				and ballot.judge = ?
+				and ballot.entry = ?
+		");
+
+		$update_sth->execute($panel_id, $judge_id, $entry_id);
+		$update_sth->finish();
+
+	} else {
+
+		my $clean_sth = $dbh->prepare("
+			delete score.*
+			from score, ballot
+			where score.tag = 'winloss'
+				and score.ballot = ballot.id
+				and ballot.panel = ?
+				and ballot.judge = ?
+		");
+
+		$clean_sth->execute($panel_id, $judge_id);
+		$clean_sth->finish();
+
+		my $entry_sth = $dbh->prepare("
+			select ballot.id, ballot.entry
+			from ballot
+			where ballot.panel = ?
+			and ballot.judge = ?
+		");
+
+		$entry_sth->execute($panel_id, $judge_id);
+
+		my %done;
+
+		while (
+			my ($bid, $eid) = $entry_sth->fetchrow_array()
+		) {
+
+			next if $done{$bid}++;
+
+			my $win = 0;
+			$win = 1 if $eid == $entry_id;
+
+			my $insert_sth = $dbh->prepare("
+				insert into score (tag, ballot, value) values ('winloss', ?, ?)
+			");
+
+			$insert_sth->execute($bid, $win);
+			$insert_sth->finish();
+		}
+	}
+
+	my $extra;
+
+	if ($tourn_settings->{"backtab"}) {
+
+		my $check_sth = $dbh->prepare("
+			select entry.id, es.student, score.id, score.value, backtab.value, ballot.id
+				from (entry, ballot, entry_student es)
+				left join score on score.ballot = ballot.id and score.tag = 'point' and score.student = es.student
+				left join entry_setting backtab on backtab.entry = entry.id and backtab.tag = 'backtab'
+			where ballot.panel = ?
+				and ballot.judge = ?
+				and ballot.entry = entry.id
+				and entry.id = es.entry
+		");
+
+		$check_sth->execute($panel_id, $judge_id);
+
+		my $update_sth = $dbh->prepare("update score set value = ? where id = ?");
+
+		my $insert_sth = $dbh->prepare("
+			insert into score (tag, ballot, value, student) values ('point', ?, ?, ?)
+		");
+
+		my %counter;
+
+
+		while (
+			my ($entry, $student, $score, $value, $backtab, $ballot)  = $check_sth->fetchrow_array()
+		) {
+			next unless $backtab;
+
+			$counter{$entry}++;
+			my $points = $backtab / 2;
+
+			unless ($points == $value) {
+
+				if ($score) {
+					$update_sth->execute($score, $points);
+				} else {
+					$insert_sth->execute($ballot, $points, $student);
+				}
+			}
+		}
+		$extra = " Backtab points recorded as well for ".(scalar (keys %counter))." entries";
+	}
+
+	$dbh->disconnect();
+
+	$m->print('{
+		"error"     : false,
+		"message"   : "Win recorded for '.$entry_code.' '.$extra.'",
+		"norefresh" : true
+	}');
+
+	$m->abort();
+
+</%init>
+
