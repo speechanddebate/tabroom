@@ -1,0 +1,205 @@
+<%args>
+	$event_id
+	$tourn
+	$person
+	$person_settings
+	$tourn_settings
+	$only_category => undef
+	$mode => "event"
+</%args>
+<%init>
+
+	use Text::CSV;
+
+	my $event = Tab::Event->retrieve($event_id);
+	$m->abort unless $event;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my %event_settings = $event->all_settings();
+
+	my %options = eval {
+		return %{$event_settings{"student_ballot"}};
+	};
+
+	my $dbh = Tab::DBI->db_Main();
+	my $sth = $dbh->prepare("
+		select entry.id, entry.code, student_ballot.value_text, es.student, student.first, student.last
+			from entry, entry_setting student_ballot, entry_student es, student
+		where entry.event = ?
+			and entry.active = 1
+			and entry.id = student_ballot.entry
+			and student_ballot.tag = 'student_ballot'
+			and student_ballot.value = 'json'
+			and entry.id = es.entry
+			and es.student = student.id
+		group by es.student
+	");
+
+	my %votes;
+
+	$sth->execute($event->id);
+
+	while (
+		my ($id, $code, $vote_text, $student, $first, $last) = $sth->fetchrow_array()
+	) {
+
+		$votes{"by_entry"}{$id} = eval {
+			return JSON::decode_json($vote_text);
+		};
+
+		my $ballot;
+
+		if ($votes{"by_entry"}{$id}{$student}) {
+			$votes{"by_student"}{$student} = $votes{"by_entry"}{$id}{$student};
+			$ballot = $votes{"by_entry"}{$id}{$student};
+			$votes{"voters"}{$student} = $code." ".$first." ".$last;
+			$votes{"raw_vote"}{$student} = JSON::encode_json($votes{"by_entry"}{$id}{$student});
+		} elsif ($votes{"by_entry"}{$id}{"1"}) {
+			$ballot = $votes{"by_entry"}{$id};
+			$votes{"voters"}{$id} = $code;
+		}
+
+
+		foreach my $option (keys %options) {
+			if ($ballot->{$option} > 0) {
+				$votes{"option_total"}{$option} += $ballot->{$option};
+				$votes{"option_count"}{$option}++;
+				$votes{"option_tally"}{$option}{$ballot->{$option}}++;
+				$votes{"tallies"}{$ballot->{$option}}++;
+			}
+		}
+	}
+
+	foreach my $id (sort { $a <=> $b } keys %options ) {
+		if ($votes{"option_count"}{$id} > 0) {
+			$votes{"option_average"}{$id} = Math::Round::nearest(.01, ($votes{"option_total"}{$id} / $votes{"option_count"}{$id} ));
+		}
+	}
+
+</%init>
+
+	<div class="menu">
+		<& "menu.mas",
+			tourn          => $tourn,
+			person         => $person,
+			event          => $event,
+			only_category  => $only_category,
+			tourn_settings => $tourn_settings,
+			whoami         => "student_ballot"
+		&>
+	</div>
+
+	<div class="main">
+
+%		if ($mode eq "event") {
+			<h2><% $event->name %></h2>
+
+			<&
+				"tabbar.mas",
+				person          => $person,
+				person_settings => $person_settings,
+				event           => $event,
+				tourn           => $tourn,
+				districts       => $tourn_settings->{"nsda_district"},
+				tourn_settings  => $tourn_settings,
+				whoami          => "ballots"
+			&>
+%		}
+
+
+		<div class="full nospace">
+			<span class="threefifths nospace">
+				<h5><% $event_settings{'student_ballot_label'} %> Results: <% $event->abbr %></h4>
+			</span>
+
+			<span
+				class = "fifth rightalign"
+			>
+				<a
+					class="buttonwhite bluetext invert smallish"
+					href="student_ballot.mhtml?event_id=<% $event->id %>"
+				>Ballot Settings</a>
+			</span>
+			<span
+				class = "fifth rightalign true"
+				id    = "leg_results_buttonarea"
+			>
+			</span>
+		</div>
+
+		<& "/funclib/tablesorter.mas",
+			table => "leg_results"
+		&>
+
+		<table id="leg_results">
+
+			<thead>
+				<tr class="yellowrow">
+					<th>
+						Choice
+					</th>
+					<th>
+						Total
+					</th>
+					<th>
+						Votes
+					</th>
+					<th>
+						Average
+					</th>
+%					foreach my $vote (sort {$a <=> $b} keys %{$votes{"tallies"}}) {
+						<th>
+							<% $vote %>
+						</th>
+%					}
+				</tr>
+			</thead>
+
+			<tbody>
+%				foreach my $id (sort { $votes{"option_average"}{$a} <=> $votes{"option_average"}{$b} } keys %options ) {
+					<tr class="smallish">
+
+						<td title="<% $options{$id}{"label"} %>" class="centeralign">
+							<% $id %>
+						</td>
+
+						<td class="rightalign">
+							<% $votes{"option_total"}{$id} %>
+						</td>
+
+						<td class="rightalign">
+							<% $votes{"option_count"}{$id} %>
+						</td>
+
+						<td class="rightalign">
+							<% $votes{"option_average"}{$id} %>
+						</td>
+
+%						if ($votes{"tallies"}) {
+%							foreach my $vote (sort {$a <=> $b} keys %{$votes{"tallies"}}) {
+								<td class="rightalign">
+									<% $votes{"option_tally"}{$id}{$vote} %>
+								</td>
+%							}
+%						}
+					</tr>
+%				}
+			</tbody>
+		</table>
+
+		<div class="ltbordertop martop">
+			<h5>Votes received from</h5>
+
+%			if ($votes{"voters"}) {
+%				foreach my $student (sort {$votes{"voters"}{$a} cmp $votes{"voters"}{$b}} keys %{$votes{"voters"}}) {
+					<span class="fifth smallish" title='<% $votes{"raw_vote"}{$student} %>'>
+						<% $votes{"voters"}{$student} %>
+					</span>
+%				}
+%			}
+
+		</div>
+
+	</div>
