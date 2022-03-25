@@ -1,0 +1,265 @@
+<%args>
+	$person
+	$person_settings
+	$circuit_id => undef
+	$tag        => undef
+	$year       => undef
+</%args>
+<%init>
+
+	my $circuit = Tab::Circuit->retrieve($circuit_id);
+
+	my $perm = Tab::Permission->search(
+		person => $person->id,
+		circuit => $circuit->id
+	)->first;
+
+	unless ($person->site_admin || $perm) {
+		$m->abort("/funclib/abort.mas", message => "Foo");
+	}
+
+	my %toc_codes = $m->comp("/funclib/toc_codes.mas");
+
+	my $now = DateTime->now();
+
+	unless ($year) {
+		$year = $now->year;
+		$year-- if $now->month < 7;
+	}
+
+	my $start_string = $year."-07-15 00:00:00";
+	my $end_string = ($year + 1)."-07-01 00:00:00";
+
+    my $dbh = Tab::DBI->db_Main();
+
+    my $toc_sth = $dbh->prepare("
+
+		select tourn.id, tourn.name,
+			tourn.start, tourn.end,
+			owner.first, owner.last, owner.email,
+			event.id event, event.abbr eventabbr, event.name eventname,
+			event.level eventlevel,
+			result_set.id result_set, count(distinct result.id) result_count,
+			nsda_event_category.value nsda,
+			bid_round.value bid_round,
+			bid.name roundname, bid.label roundlabel
+
+			from (tourn, event, tourn_circuit, event_setting nsda_event_category)
+
+				left join event_setting bid_round on bid_round.event = event.id and bid_round.tag = 'bid_round'
+				left join round bid on bid.id = bid_round.value and bid.event = event.id
+
+				left join result_set on result_set.tourn = tourn.id and result_set.event = event.id and result_set.label = 'TOC Qualifying Bids'
+				left join result on result.result_set = result_set.id
+
+
+				left join permission on permission.tag = 'contact' and permission.tourn = tourn.id
+				left join person owner on owner.id = permission.person
+
+			where tourn.start > ?
+				and tourn.end < ?
+				and tourn.id = event.tourn
+				and tourn.id = tourn_circuit.tourn
+				and tourn_circuit.circuit = ?
+
+				and nsda_event_category.event = event.id
+				and nsda_event_category.tag = 'nsda_event_category'
+
+			group by event.id
+    ");
+
+    $toc_sth->execute($start_string, $end_string, $circuit->id);
+
+	my $result_ref = $toc_sth->fetchall_hash();
+	my %results;
+
+	foreach my $ref (@{$result_ref}) {
+
+		my $id = $ref->{"id"};
+
+		$results{$id}{"name"} = $ref->{"name"};
+		$results{$id}{"owner_name"} = $ref->{"first"}." ".$ref->{'last'};
+		$results{$id}{"owner_email"} = $ref->{"email"};
+
+		$results{$id}{"start"} = $m->comp("/funclib/showdate.mas",
+			string => $ref->{"start"},
+			tz     => $person->tz,
+			format => "sortable",
+			return => 1
+		);
+
+		$results{$id}{"startsort"} = $results{$id}{"start"};
+		$results{$id}{"startsort"} =~ s/[\D_]//g;
+
+		if ($ref->{"nsda"}) {
+
+			next if $ref->{'eventlevel'} eq "jv";
+			next if $ref->{'eventlevel'} eq "novice";
+
+			unless ($ref->{"result_set"} || $ref->{"roundname"}) {
+				next if $results{$id}{"events"}{$ref->{"nsda"}};
+			}
+
+			my $eventref;
+
+			if ($ref->{"roundlabel"}) {
+				$eventref->{'round'} = $ref->{"roundlabel"};
+			} elsif ($ref->{'roudnname'}) {
+				$eventref->{'round'} = "Rnd ".$ref->{"roundname"};
+			}
+
+			if ($ref->{'result_set'} && (not defined $ref->{"result_count"})) {
+				$ref->{"result_count"} = 0;
+			}
+
+			$eventref->{'result_count'} = $ref->{"result_count"};
+			$eventref->{'result_set'}   = $ref->{"result_set"};
+			$eventref->{"event"}        = $ref->{"eventabbr"};
+
+			$results{$id}{"events"}{$ref->{"nsda"}} = $eventref;
+		}
+	}
+
+	$toc_sth->finish;
+	$dbh->disconnect();
+
+</%init>
+
+	<div class="main">
+
+		<span class="fourfifths nospace">
+			<h3>Tournament TOC Bids</h3>
+		</span>
+
+		<span
+			id="bidpost_buttonarea"
+			class="fifth nospace rightalign"
+		>
+		</span>
+
+		<& "/funclib/tablesorter.mas", table => "bidpost" &>
+
+		<table id="bidpost">
+
+			<thead>
+				<tr class="smaller yellowrow">
+					<th>
+						Tournament
+					</th>
+
+					<th>
+						Date
+					</th>
+
+					<th>
+						Contact
+					</th>
+<%perl>
+					foreach my $key (
+						sort {
+							substr($a, 0, 1) <=> substr($b, 0, 1)
+							|| $toc_codes{$a}{"name"} cmp $toc_codes{$b}{"name"}
+						} keys %toc_codes
+					) {
+</%perl>
+						<th
+							title="<% $toc_codes{$key}{"name"} %>"
+						>
+							<% $toc_codes{$key}{"abbr"} %>
+						</th>
+%					}
+
+%					if ($person->site_admin) {
+						<th>
+							SA
+						</th>
+%					}
+				</tr>
+			</thead>
+
+			<tbody>
+<%perl>
+				foreach my $key (
+					sort {
+						$results{$b}{"startsort"} <=> $results{$a}{"startsort"}
+						|| $results{$a}{"name"} cmp $results{$b}{"name"}
+					} keys %results
+				) {
+</%perl>
+					<tr class="smallish">
+
+						<td class="limithalf">
+							<a
+								class = 'plain padvertless marno'
+								target = "_blank"
+								href  = "/index/tourn/results/index.mhtml?tourn_id=<% $key %>"
+							><% $results{$key}{"name"} %></a>
+						</td>
+
+						<td class="nowrap">
+							<% $results{$key}{"start"} %>
+						</td>
+
+						<td class     = "leftalign nospace">
+							<a href   = "mailto:<% $results{$key}{"owner_email"} %>"
+								class = "plain full padvertless marno"
+								target = "_blank"
+								title = "<% $results{$key}{"owner_email"} %>"
+							><% $results{$key}{"owner_name"} %></a>
+						</td>
+<%perl>
+						foreach my $code (
+							sort {
+								substr($a, 0, 1) <=> substr($b, 0, 1)
+								|| $toc_codes{$a}{"name"} cmp $toc_codes{$b}{"name"}
+							} keys %toc_codes
+						) {
+</%perl>
+							<td class="centeralign">
+
+%								if ($results{$key}{"events"}{$code}{"result_count"}) {
+									<a
+										class="plain padvertless marno greentext yellowhover"
+										href="/index/tourn/results/event_results.mhtml?tourn_id=<% $key %>&result_id=<% $results{$key}{"events"}{$code}{"result_set"} %>"
+										target = "_blank"
+										title="<% $results{$key}{"events"}{$code}{"result_count"} %> Bids Posted in Report"
+									><% $results{$key}{"events"}{$code}{"result_count"} %></a>
+
+%								} elsif ($results{$key}{"events"}{$code}{"round"}) {
+									<span
+										class="orangetext"
+										title="<% $results{$key}{"events"}{$code}{"round"} %> marked as bid round but unposted"
+									>UP</span>
+%								} elsif ($results{$key}{"events"}{$code}{"event"}) {
+									<span
+										class="graytext"
+										title="<% $results{$key}{"events"}{$code}{"event"} %> marked with NSDA code but no bid round marked"
+									>NoB</span>
+%								} else {
+									<span class="graytext" title="No event marked with that NSDA event code">
+									</span>
+%								}
+							</td>
+%						}
+
+%						if ($person->site_admin) {
+							<td class="centeralign nospace">
+								<a
+									href   = "/tabbing/publish/index.mhtml?tourn_id=<% $key %>"
+									target = "_blank"
+									title  = "Go to Web Publish screen for tournament"
+									class  = "fa fa-sm fa-external-link buttonwhite bluetext"
+								></a>
+							</td>
+%						}
+					</tr>
+%				}
+			</tbody>
+		</table>
+	</div>
+
+	<& menu.mas,
+		circuit => $circuit,
+		whoami  => "result_sheets"
+	&>
+
