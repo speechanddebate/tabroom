@@ -307,6 +307,7 @@
 						} else {
 							$('table').trigger('applyWidgets');
 							$('table').trigger('update', [true]);
+							fixVisual();
 						}
 
 					} else {
