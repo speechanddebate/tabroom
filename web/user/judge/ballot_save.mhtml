@@ -130,7 +130,9 @@
 			@{$entry{$entry->id}{"students"}} = @students;
 
 			foreach my $student (@students) {
-				$student{$student->id}{"entry"} = $entry;
+				$student{$student->id}{"entry"}  = $entry;
+				$student{$student->id}{"ballot"} = $ballot;
+				$student{$student->id}{"obj"} = $student;
 			}
 
 			$entry{$entry->id}{"headcount"} = scalar @students;
@@ -252,7 +254,7 @@
 		$po_round = $po_panel->round;
 
 		@po_entries = $m->comp(
-			"/funclib/panel_entries.mas", 
+			"/funclib/panel_entries.mas",
 			panel => $po_panel
 		);
 
@@ -646,7 +648,7 @@
 	}
 
 	if ($team_ranks) {
-		
+
 		my %rank_taken;
 		my %rank_points;
 
@@ -796,313 +798,434 @@
 			$points_taken{$points}++;
 			$entry{$ballot->entry->id}{"points"} += $points;
 		}
-
-	}
-
-	if ($tb_types{"point"}) {
-
-		my %points_taken;
-
-		foreach my $student (@students) {
-
-			my $points = $ARGS{$student->id."_points"};
-			$points = 0 unless $points;
-
-			$errs .= "<p>Points missing</p>"
-				if $min_ob_points > 0
-				&& (not defined $points);
-
-			$errs .= "<p>Points $points below minimum of ".$min_ob_points."</p>"
-				if $min_ob_points > $points;
-
-			next unless $points;
-
-			$points = int($points + 0.5) if $point_increments eq "whole";
-
-			if ($point_increments eq "tenths") {
-				$points = $points * 10;
-				$points = int($points + 0.5);
-				$points = $points/10;
-			}
-
-			$points = nearest(.5, $points) if $point_increments eq "half";
-
-			$errs .= "<p>$points Points must be a number</p>" unless ($points eq $points+0);
-
-			if ($subscores) {
-
-				my $subtotal;
-
-				foreach my $score (@scores) {
-
-					my $subpoints = $ARGS{$student->id."_".$score};
-
-					if ($subpoints < $min_subpoints{$score}
-						|| $subpoints > $max_subpoints{$score}) {
-
-						$errs .= "<p>Points $subpoints for ".$student->last." are out of range</p>";
-					}
-					$student{$student->id}{$score} = $subpoints;
-					$subtotal += $subpoints;
-				}
-
-				if ($subtotal != $points) {
-					$errs .= "<p>Point subscores do not add up to $points</p>";
-				}
-
-			}
-
-			$errs .= "<p>Tied points forbidden: you have two speakers with points $points </p>"
-				if $points_taken{$points}
-				&& $point_ties < 1;
-
-			$errs .= "<p>Points $points are outside of range $min_ob_points - $max_ob_points</p>"
-				if $points < $min_ob_points || $points > $max_ob_points;
-
-			$points_taken{$points}++;
-			$student{$student->id}{"points"} = $points;
-			$entry{$student{$student->id}{"entry"}}{"points"} += $points;
-			$total_points += $points;
-
-		}
 	}
 
 	my $winner;
+	my %rubrics;
 
-	if ($tb_types{"winloss"})  {
+	if ($event_settings{"ballot_rubric"}) {
 
-		my $winning_ballot = $ARGS{"winner"};
-		$winner = Tab::Ballot->retrieve($winning_ballot);
+		my $dbh = Tab::DBI->db_Main();
 
-		$errs .= "<p>You didn't choose a winner.  There are no ties in debate, though there are sometimes tears.  Be strong.</p>"
-		unless $winner;
+		my $last;
+		my %points_taken;
+		$team_points++;
 
-		$errs .= "<p>Your winner and your chosen side did not agree</p>"
-			if $winner
-			&& $winner->side != $ARGS{"winner_side"};
+		my $clear_scores_sth = $dbh->prepare("
+			delete score.* from score, ballot
+				where score.ballot = ballot.id
+				and score.tag IN ('rubric', 'point', 'winloss', 'speaker')
+				and ballot.panel = ?
+		");
 
-		#2nd bit avoid mavericks
-		if ($winner && $entry{$winner->entry->id}{"headcount"} == $max_headcount) {
+		$clear_scores_sth->execute($panel->id);
+		$clear_scores_sth->finish();
 
-			my $winner_points = $entry{$winner->entry->id}{"points"};
+		foreach my $ballot (@ballots) {
+
+			my $total;
+			my %rubric;
+
+			foreach my $order (sort {$a <=> $b} keys %{$event_settings{"ballot_rubric"}}) {
+
+				my $row = $event_settings{"ballot_rubric"}{$order};
+
+				if ($ARGS{$ballot."_".$order."_speaker"}) {
+					$rubric{$order}{"speaker"} = $ARGS{$ballot."_".$order."_speaker"};
+				}
+
+				$rubric{$order}{"points"}  = $ARGS{$ballot."_".$order."_points"};
+				$rubric{$order}{"label"}  = $row->{"label"};
+
+				$total += $ARGS{$ballot."_".$order."_points"};
+				$total_points += $ARGS{$ballot."_".$order."_points"};
+			}
+
+			Tab::Score->create({
+				ballot  => $ballot,
+				tag     => "rubric",
+				content => JSON::encode_json(\%rubric)
+			});
+
+			Tab::Score->create({
+				ballot => $ballot,
+				tag    => "point",
+				value  => $total
+			});
+
+			$rubrics{$ballot}{"scores"} = \%rubric;
+			$rubrics{$ballot}{"total"}  = $total;
+			$rubrics{$ballot}{"entry"}  = $ballot->entry;
+			$rubrics{$ballot}{"side"}   = $ballot->side;
+
+			if ($points_taken{$total}) {
+
+				$errs .= "<p>Tied points forbidden: you have two teams with points $total </p>";
+
+			} else {
+
+				if ($last) {
+					if ($total > $last) {
+						$winner = $ballot;
+						$last = $total;
+					}
+				} else {
+					$winner = $ballot;
+					$last = $total;
+				}
+			}
+		}
+
+		if ($winner) {
 
 			foreach my $ballot (@ballots) {
 
-				my $bal_points = $entry{$ballot->entry->id}{"points"};
+				my $result = 0;
 
-				if ($no_lpw) {
+				if ($ballot == $winner) {
+					$result = 1;
+					$ARGS{"winner_side"} = $ballot->side;
+				}
 
-					$errs .= "<p>Low point wins are not allowed by this tournament.  Please fix points.</p>"
-						if $winner_points < $bal_points;
+				Tab::Score->create({
+					ballot => $ballot,
+					tag    => 'winloss',
+					value  => $result
+				});
+			}
 
+		} else {
+			$errs .= "<p>Winner not selected.  Please fill in all points blanks for the winner to be determined.</p>";
+		}
+
+		if ($event_settings{"speakers_rubric"}) {
+
+			my %taken;
+
+			foreach my $order (sort {$a <=> $b} keys %{$event_settings{"speakers_rubric"}}) {
+
+				my $student_id = $ARGS{"speakers_".$order};
+				my $row = $event_settings{"speakers_rubric"}{$order};
+
+				if ($student_id) {
+					if ($student{$student_id}) {
+
+						if ($taken{$student_id}++) {
+							$errs .= "<p>You have selected the same Outstanding Speaker in multiple places</p>";
+						} else {
+
+							Tab::Score->create({
+								ballot  => $student{$student_id}{"ballot"},
+								tag     => 'speaker',
+								student => $student_id,
+								value   => $row->{"points"}
+							});
+
+							$rubrics{"outstanding"}{$order} = $student{$student_id}{"obj"};
+						}
+
+					} else {
+						$errs .= "<p>You have selected an invalid Outstanding Speaker for place number ".$order."</p>";
+					}
 				} else {
-
-					$errs .= "<p>Please mark if the low-point win is intended.  (Winner has $winner_points, loser has $bal_points)</p>"
-						if $winner_points < $bal_points
-						&& (not defined $ARGS{"lpw"});
-
-					$errs .= "<p>You marked the low-point win box but this isn't a low point win.  (Winner has $winner_points, loser has $bal_points)</p>"
-						if $winner_points > $bal_points
-						&& $ARGS{"lpw"};
+					$errs .= "<p>You have not selected an Outstanding Speaker for place number ".$order."</p>";
 				}
 			}
 		}
-	}
 
-	if ($errs) {
+		if ($errs) {
 
-		my $url_args = "?panel_id=$panel_id&judge_id=$judge_id&default=rankings";
+			my $url_args = "?panel_id=$panel_id&judge_id=$judge_id&default=rankings";
 
-		foreach my $key (keys %ARGS) {
-			next if $key eq "panel_id";
-			next if $key eq "judge_id";
-			next if $key eq "rfd";
-			next if index($key, 'comments') != -1;
-			$url_args .= "&$key=$ARGS{$key}";
+			foreach my $key (keys %ARGS) {
+				next if $key eq "panel_id";
+				next if $key eq "judge_id";
+				next if $key eq "rfd";
+				next if index($key, 'comments') != -1;
+				$url_args .= "&$key=$ARGS{$key}";
+			}
+
+			$url_args .= "&errs=$errs";
+			$m->redirect("ballot.mhtml".$url_args);
 		}
 
-		$url_args .= "&errs=$errs";
-		$m->redirect("ballot.mhtml".$url_args);
+		$dbh->disconnect();
 
 	} else {
 
-		# Clear the old cruft
+		if ($tb_types{"point"}) {
 
-		Tab::Score->set_sql( clear_cruft => "
-			delete score.*
-			from score, ballot
-			where ballot.panel = ?
-			and ballot.judge   = ?
-			and score.tag      = ?
-			and ballot.id      = score.ballot"
-		);
+			my %points_taken;
 
-		Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id, "rank");
-		Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id, "point");
-		Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id, "winloss");
+			foreach my $student (@students) {
 
-		if ($subscores) {
-			foreach my $score (@scores) {
-				Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id, "subpoints_".lc($score));
+				my $points = $ARGS{$student->id."_points"};
+				$points = 0 unless $points;
+
+				$errs .= "<p>Points missing</p>"
+					if $min_ob_points > 0
+					&& (not defined $points);
+
+				$errs .= "<p>Points $points below minimum of ".$min_ob_points."</p>"
+					if $min_ob_points > $points;
+
+				next unless $points;
+
+				$points = int($points + 0.5) if $point_increments eq "whole";
+
+				if ($point_increments eq "tenths") {
+					$points = $points * 10;
+					$points = int($points + 0.5);
+					$points = $points/10;
+				}
+
+				$points = nearest(.5, $points) if $point_increments eq "half";
+				$errs .= "<p>$points Points must be a number</p>" unless ($points eq $points+0);
+
+				if ($subscores) {
+
+					my $subtotal;
+
+					foreach my $score (@scores) {
+
+						my $subpoints = $ARGS{$student->id."_".$score};
+
+						if ($subpoints < $min_subpoints{$score}
+							|| $subpoints > $max_subpoints{$score}) {
+
+							$errs .= "<p>Points $subpoints for ".$student->last." are out of range</p>";
+						}
+						$student{$student->id}{$score} = $subpoints;
+						$subtotal += $subpoints;
+					}
+
+					if ($subtotal != $points) {
+						$errs .= "<p>Point subscores do not add up to $points</p>";
+					}
+				}
+
+				$errs .= "<p>Tied points forbidden: you have two speakers with points $points </p>"
+					if $points_taken{$points}
+					&& $point_ties < 1;
+
+				$errs .= "<p>Points $points are outside of range $min_ob_points - $max_ob_points</p>"
+					if $points < $min_ob_points || $points > $max_ob_points;
+
+				$points_taken{$points}++;
+				$student{$student->id}{"points"} = $points;
+				$entry{$student{$student->id}{"entry"}}{"points"} += $points;
+				$total_points += $points;
 			}
 		}
 
-		sleep 1;
+		if ($tb_types{"winloss"})  {
 
-		BALLOT:
-		foreach my $ballot (@ballots) {
+			my $winning_ballot = $ARGS{"winner"};
+			$winner = Tab::Ballot->retrieve($winning_ballot);
 
-			if ($tb_types{"tv"} && $entry{$ballot->entry->id}{"tv"}) {
-				$ballot->tv(1);
-			}
+			$errs .= "<p>You didn't choose a winner.  There are no ties in debate, though there are sometimes tears.  Be strong.</p>"
+			unless $winner;
 
-			$ballot->audit(0);
-			$ballot->update;
+			$errs .= "<p>Your winner and your chosen side did not agree</p>"
+				if $winner
+				&& $winner->side != $ARGS{"winner_side"};
 
-			if ($entry{$ballot->entry->id}{"forfeit"}) {
-				$ballot->forfeit(1);
-				$ballot->update();
-				next BALLOT;
-			}
+			#2nd bit avoid mavericks
+			if ($winner && $entry{$winner->entry->id}{"headcount"} == $max_headcount) {
 
-			if ($tb_types{"winloss"}) {
+				my $winner_points = $entry{$winner->entry->id}{"points"};
 
-				my $tigers_blood = 0;
+				foreach my $ballot (@ballots) {
 
-				$tigers_blood++ if $winner->id == $ballot->id;
+					my $bal_points = $entry{$ballot->entry->id}{"points"};
 
-				my $winner = Tab::Score->search({
-					ballot => $ballot->id,
-					tag	=> "winloss"
-				})->first;
+					if ($no_lpw) {
 
-				unless ($winner) {
+						$errs .= "<p>Low point wins are not allowed by this tournament.  Please fix points.</p>"
+							if $winner_points < $bal_points;
 
-					eval {
-						$winner = Tab::Score->create({
-							ballot   => $ballot->id,
-							value    => $tigers_blood,
-							tag      => "winloss",
-							student  => 0
-						});
-					};
-				}
-			}
+					} else {
 
-			if ($tb_types{"best_po"}) {
+						$errs .= "<p>Please mark if the low-point win is intended.  (Winner has $winner_points, loser has $bal_points)</p>"
+							if $winner_points < $bal_points
+							&& (not defined $ARGS{"lpw"});
 
-				my $best_po = Tab::Score->search({
-					ballot => $ballot->id,
-					tag    => "best_po"
-				})->first;
-
-				if ($ARGS{"best_po"} eq $ballot->id) {
-
-					unless ($best_po) {
-						$best_po = Tab::Score->create({
-							ballot   => $ballot->id,
-							value    => 1,
-							tag      => "best_po",
-							student  => 0
-						});
+						$errs .= "<p>You marked the low-point win box but this isn't a low point win.  (Winner has $winner_points, loser has $bal_points)</p>"
+							if $winner_points > $bal_points
+							&& $ARGS{"lpw"};
 					}
+				}
+			}
+		}
 
-					$entry{$ballot->entry->id}{"best_po"}++;
+		if ($errs) {
 
-				} elsif ($best_po) {
+			my $url_args = "?panel_id=$panel_id&judge_id=$judge_id&default=rankings";
 
-					$best_po->delete();
+			foreach my $key (keys %ARGS) {
+				next if $key eq "panel_id";
+				next if $key eq "judge_id";
+				next if $key eq "rfd";
+				next if index($key, 'comments') != -1;
+				$url_args .= "&$key=$ARGS{$key}";
+			}
+
+			$url_args .= "&errs=$errs";
+			$m->redirect("ballot.mhtml".$url_args);
+
+		} else {
+
+			# Clear the old cruft
+
+			Tab::Score->set_sql( clear_cruft => "
+				delete score.*
+					from score, ballot
+				where ballot.panel   = ?
+					and ballot.judge = ?
+					and score.tag    = ?
+					and ballot.id    = score.ballot"
+			);
+
+			Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id, "rank");
+			Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id, "point");
+			Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id, "winloss");
+
+			if ($subscores) {
+				foreach my $score (@scores) {
+					Tab::Score->sql_clear_cruft->execute($panel->id, $judge->id, "subpoints_".lc($score));
 				}
 			}
 
-			if ($team_points) {
+			sleep 1;
 
-				if ($type eq "speech" || $type eq "congress") {
+			BALLOT:
+			foreach my $ballot (@ballots) {
 
-					my $points = Tab::Score->search(
+				if ($tb_types{"tv"} && $entry{$ballot->entry->id}{"tv"}) {
+					$ballot->tv(1);
+				}
+
+				$ballot->audit(0);
+				$ballot->update;
+
+				if ($entry{$ballot->entry->id}{"forfeit"}) {
+					$ballot->forfeit(1);
+					$ballot->update();
+					next BALLOT;
+				}
+
+				if ($tb_types{"winloss"}) {
+
+					my $tigers_blood = 0;
+
+					$tigers_blood++ if $winner->id == $ballot->id;
+
+					my $winner = Tab::Score->search({
 						ballot => $ballot->id,
-						tag    => "point"
-					)->first;
+						tag	=> "winloss"
+					})->first;
 
-					eval {
-						$points = Tab::Score->create({
-							ballot   => $ballot->id,
-							tag      => "point",
-							value    => $entry{$ballot->entry->id}{"points"}
-						});
-					} unless $points;
+					unless ($winner) {
 
-				} else {
+						eval {
+							$winner = Tab::Score->create({
+								ballot   => $ballot->id,
+								value    => $tigers_blood,
+								tag      => "winloss",
+								student  => 0
+							});
+						};
+					}
+				}
+
+				if ($tb_types{"best_po"}) {
+
+					my $best_po = Tab::Score->search({
+						ballot => $ballot->id,
+						tag    => "best_po"
+					})->first;
+
+					if ($ARGS{"best_po"} eq $ballot->id) {
+
+						unless ($best_po) {
+							$best_po = Tab::Score->create({
+								ballot   => $ballot->id,
+								value    => 1,
+								tag      => "best_po",
+								student  => 0
+							});
+						}
+
+						$entry{$ballot->entry->id}{"best_po"}++;
+
+					} elsif ($best_po) {
+
+						$best_po->delete();
+					}
+				}
+
+				if ($team_points) {
+
+					if ($type eq "speech" || $type eq "congress") {
+
+						my $points = Tab::Score->search(
+							ballot => $ballot->id,
+							tag    => "point"
+						)->first;
+
+						eval {
+							$points = Tab::Score->create({
+								ballot   => $ballot->id,
+								tag      => "point",
+								value    => $entry{$ballot->entry->id}{"points"}
+							});
+						} unless $points;
+
+					} else {
+
+						foreach my $student (@students) {
+
+							next unless $student{$student->id}{"entry"} == $ballot->entry->id;
+
+							my $value = $entry{$ballot->entry->id}{"points"};
+
+							if (defined $value) {
+
+								unless (Tab::Score->search(
+									ballot  => $ballot->id,
+									tag     => "point",
+									student => $student->id
+								)) {
+
+									my $points = eval {
+										return Tab::Score->create({
+											ballot  => $ballot->id,
+											student => $student->id,
+											tag     => "point",
+											value   => $entry{$ballot->entry->id}{"points"}
+										});
+									};
+								}
+							}
+						}
+					}
+				}
+
+				if ($tb_types{"point"}) {
 
 					foreach my $student (@students) {
 
 						next unless $student{$student->id}{"entry"} == $ballot->entry->id;
 
-						my $value = $entry{$ballot->entry->id}{"points"};
+						my $points = Tab::Score->search(
+							ballot  => $ballot->id,
+							tag     => "point",
+							student => $student->id
+						)->first;
 
-						if (defined $value) {
+						$student{$student->id}{"points"} = 0 unless $student{$student->id}{"points"};
 
-							unless (Tab::Score->search(
-								ballot  => $ballot->id,
-								tag     => "point",
-								student => $student->id
-							)) {
-
-								my $points = eval {
-									return Tab::Score->create({
-										ballot  => $ballot->id,
-										student => $student->id,
-										tag     => "point",
-										value   => $entry{$ballot->entry->id}{"points"}
-									});
-								};
-							}
-						}
-					}
-				}
-			}
-
-			if ($tb_types{"point"}) {
-
-				foreach my $student (@students) {
-
-					next unless $student{$student->id}{"entry"} == $ballot->entry->id;
-
-					my $points = Tab::Score->search(
-						ballot  => $ballot->id,
-						tag     => "point",
-						student => $student->id
-					)->first;
-
-					$student{$student->id}{"points"} = 0 unless $student{$student->id}{"points"};
-
-					if ($points) {
-
-						if (not defined $student{$student->id}{"points"}) {
-							$points->delete();
-						} else {
-							$points->value($student{$student->id}{"points"});
-							$points->update();
-						}
-
-					} else {
-
-						$points = eval {
-							Tab::Score->create({
-								ballot   => $ballot->id,
-								student  => $student->id,
-								tag      => "point",
-								value    => $student{$student->id}{"points"}
-							});
-						};
-
-						unless ($points) {
-
-							$points = Tab::Score->search(
-								ballot  => $ballot->id,
-								tag     => "point",
-								student => $student->id
-							)->first;
+						if ($points) {
 
 							if (not defined $student{$student->id}{"points"}) {
 								$points->delete();
@@ -1110,100 +1233,127 @@
 								$points->value($student{$student->id}{"points"});
 								$points->update();
 							}
+
+						} else {
+
+							$points = eval {
+								Tab::Score->create({
+									ballot   => $ballot->id,
+									student  => $student->id,
+									tag      => "point",
+									value    => $student{$student->id}{"points"}
+								});
+							};
+
+							unless ($points) {
+
+								$points = Tab::Score->search(
+									ballot  => $ballot->id,
+									tag     => "point",
+									student => $student->id
+								)->first;
+
+								if (not defined $student{$student->id}{"points"}) {
+									$points->delete();
+								} else {
+									$points->value($student{$student->id}{"points"});
+									$points->update();
+								}
+							}
 						}
-					}
 
-					if ($subscores) {
+						if ($subscores) {
 
-						foreach my $score (@scores) {
+							foreach my $score (@scores) {
 
-							Tab::Score->create({
-								ballot   => $ballot->id,
-								student  => $student->id,
-								tag      => "subpoints_".lc($score),
-								content  => lc($score),
-								value    => $student{$student->id}{$score}
-							});
+								Tab::Score->create({
+									ballot   => $ballot->id,
+									student  => $student->id,
+									tag      => "subpoints_".lc($score),
+									content  => lc($score),
+									value    => $student{$student->id}{$score}
+								});
+							}
 						}
 					}
 				}
-			}
 
-			if ($tb_types{"rank"}) {
-
-				foreach my $student (@students) {
-
-					next unless $student{$student->id}{"entry"} == $ballot->entry->id;
-
-					my $value = 0;
-
-					$value = $student{$student->id}{"rank"}
-						if $student{$student->id}{"rank"};
-
-					my $ranks = Tab::Score->search({
-						ballot  => $ballot->id,
-						tag     => "rank",
-						student => $student->id}
-					)->first;
-
-					$ranks = eval {
-						return Tab::Score->create({
-							ballot   => $ballot->id,
-							student  => $student->id,
-							tag      => "rank",
-							value    => $value
-						});
-					}
-				}
-
-			}
-
-			if ($team_ranks) {
-
-				if ($type eq "speech" || $type eq "congress") {
-
-					my $ranks = Tab::Score->search(
-						ballot => $ballot->id,
-						tag    => "rank"
-					)->first;
-
-					if ($ranks) {
-
-						$ranks->value($entry{$ballot->entry->id}{"rank"});
-						$ranks->update();
-
-					} else {
-						$ranks = eval {
-							return Tab::Score->create({
-								ballot   => $ballot->id,
-								tag      => "rank",
-								value    => $entry{$ballot->entry->id}{"rank"}
-							});
-						};
-					}
-
-				} else {
+				if ($tb_types{"rank"}) {
 
 					foreach my $student (@students) {
 
 						next unless $student{$student->id}{"entry"} == $ballot->entry->id;
 
-						my $ranks = Tab::Score->search(
+						my $value = 0;
+
+						$value = $student{$student->id}{"rank"}
+							if $student{$student->id}{"rank"};
+
+						my $ranks = Tab::Score->search({
 							ballot  => $ballot->id,
 							tag     => "rank",
-							student => $student->id
+							student => $student->id}
 						)->first;
 
-						unless ($ranks) {
-							$ranks = Tab::Score->create({
-								ballot  => $ballot->id,
-								student => $student->id,
-								tag     => "rank",
-								value   => $entry{$ballot->entry->id}{"rank"}
+						$ranks = eval {
+							return Tab::Score->create({
+								ballot   => $ballot->id,
+								student  => $student->id,
+								tag      => "rank",
+								value    => $value
 							});
-						} else {
+						}
+					}
+
+				}
+
+				if ($team_ranks) {
+
+					if ($type eq "speech" || $type eq "congress") {
+
+						my $ranks = Tab::Score->search(
+							ballot => $ballot->id,
+							tag    => "rank"
+						)->first;
+
+						if ($ranks) {
+
 							$ranks->value($entry{$ballot->entry->id}{"rank"});
 							$ranks->update();
+
+						} else {
+							$ranks = eval {
+								return Tab::Score->create({
+									ballot   => $ballot->id,
+									tag      => "rank",
+									value    => $entry{$ballot->entry->id}{"rank"}
+								});
+							};
+						}
+
+					} else {
+
+						foreach my $student (@students) {
+
+							next unless $student{$student->id}{"entry"} == $ballot->entry->id;
+
+							my $ranks = Tab::Score->search(
+								ballot  => $ballot->id,
+								tag     => "rank",
+								student => $student->id
+							)->first;
+
+							unless ($ranks) {
+								$ranks = Tab::Score->create({
+									ballot  => $ballot->id,
+									student => $student->id,
+									tag     => "rank",
+									value   => $entry{$ballot->entry->id}{"rank"}
+								});
+							} else {
+								$ranks->value($entry{$ballot->entry->id}{"rank"});
+								$ranks->update();
+							}
 						}
 					}
 				}
@@ -1211,6 +1361,7 @@
 		}
 	}
 
+	Tab::debuglog("and winner is still $winner");
 
 </%init>
 
@@ -1256,7 +1407,6 @@
 
 			</div>
 <%perl>
-
 		}
 
 		if ($tb_types{"winloss"} && $side_disagree < 1) {
@@ -1264,391 +1414,125 @@
 			my $winside = $ARGS{"winner_side"};
 			my $side = $aff_string if $winside == 1;
 			$side = $neg_string if $winside == 2;
-
 </%perl>
 
-			<h5 class="semibold bluetext">
-				You voted for
-			</h5>
+			<div class="full ltborderbottom">
+				<span class="quarter">
+					<h5 class="semibold bluetext">
+						You voted for
+					</h5>
+				</span>
 
-			<div class="full padmuchmore martop centeralign">
+				<span class="half nowrap">
+					<h6 class="centeralign greentext semibold">
+						<% $side %>: <% $winner->entry->code %>
+					</h6>
+				</span>
 
-				<p class="centeralign greentext semibold bigger">
-					<% $winner->entry->code %> on the <% $side %>
-				</p>
-
-				<p class="martop centeralign normalweight bluetext biggish">
-					(<% $winner->entry->name
-						%><% $no_side_constraints ?
-						": ".Lingua::EN::Numbers::Ordinate::ordinate($winner->speakerorder)." speakers"
-						: ""
-					%>)
-				</p>
-
+				<span class="quarter rightalign nowrap">
+					<h6 class="bluetext">
+						(<% $winner->entry->name
+							%><% $no_side_constraints ?
+							": ".Lingua::EN::Numbers::Ordinate::ordinate($winner->speakerorder)." speakers"
+							: ""
+						%>)
+					</h6>
+				</span>
 			</div>
-
-			<br />
 
 %		} else {
 
 			<h4 class="marbottommore">
 				Please confirm your ranking of this round:
 			</h4>
-
 <%perl>
 		}
 
-		if (($team_points || $team_ranks)
-			&& $side_disagree < 1
-		) {
 
-			my $switch;
+		if ($event_settings{"ballot_rubric"}) {
 
-			@entries =
-				sort {$entry{$a->id}{"points"} <=> $entry{$b->id}{"points"} } @entries
-				if $team_points;
-
-			@entries =
-				sort {$entry{$a->id}{"rank"} <=> $entry{$b->id}{"rank"} } @entries
-				if $team_ranks;
-
+			foreach my $ballot (sort {$a->side <=> $b->side} @ballots) {
 </%perl>
-			<& "/funclib/tablesorter.mas",
-				table => "final",
-				nobuttons => 1
-			&>
+				<span class="pagehalf marbottom">
+					<h6><% $ballot->entry->code %> on the <% $ballot->side == 1 ? $aff_string : $neg_string %></h6>
 
-			<table id="final">
+%					my $notfirst;
+%					foreach my $order (sort {$a <=> $b} keys %{$event_settings{"ballot_rubric"}}) {
 
-				<thead>
+%						my $speaker = $student{$rubrics{$ballot}{"scores"}{$order}{"speaker"}};
 
-				<tr class="smallish yellowrow nosort centeralign">
-
-%					if ($team_ranks) {
-						<th>
-							Rank
-						</th>
-%					}
-
-%					if ($team_points) {
-						<th>
-							Points
-						</th>
-%					}
-
-%					if ($chair && $tb_types{"best_po"}) {
-						<th>
-							Best PO
-						</th>
-%					}
-
-					<th>
-						Code
-					</th>
-
-%				   if ($ballot_school_code) {
-						<th>
-							School
-						</th>
-%				   }
-%				   if ($ballot_school_name) {
-						<th>
-							School
-						</th>
-%				   }
-
-%				   if ($ballot_entry_name) {
-						<th>
-							Name
-						</th>
-%				   }
-
-%				   if ($ballot_entry_first_name) {
-						<th>
-							First Name
-						</th>
-%				   }
-
-%				   if ($category_settings{'ballot_entry_titles'}) {
-						<th>
-							Title/Question
-						</th>
-%				   }
-
-%					if ($type eq "speech") {
-						<th>
-							Spoke
-						</th>
-%					}
-
-%					if ($tb_types{"tv"}) {
-						<th>
-							Violation
-						</th>
-%					}
-
-				</tr>
-				</thead>
-
-				<tbody>
-
-<%perl>
-				foreach my $entry (@entries) {
-
-					next if $entry->dropped
-						&! $entry{$entry->id}{"rank"}
-						&! $entry{$entry->id}{"points"};
-</%perl>
-
-					<tr>
-%						if ($entry{$entry->id}{"forfeit"}) {
-							<td class="centeralign semibold redtext">
-								Forfeit
-							</td>
-
-%						} elsif ($team_ranks) {
-							<td class="centeralign">
-								<% $entry{$entry->id}{"rank"} %>
-							</td>
-%						}
-
-%						if ($team_points) {
-							<td class="centeralign">
-								<% $entry{$entry->id}{"points"}
-									?  $entry{$entry->id}{"points"}
-									: "ZERO"
-								%>
-							</td>
-%						}
-
-%						if ($chair && $tb_types{"best_po"}) {
-							<td class="centeralign">
-								<% $entry{$entry->id}{"best_po"}
-									? "YES"
-									: ""
-								%>
-							</td>
-%						}
-
-						<td class="centeralign">
-							<% $entry->code %>
-						</td>
-
-%						if ($ballot_school_code) {
-							<td class="centeralign">
-								<% $entry->school->code %>
-							</td>
-%					   	}
-
-%						if ($ballot_school_name) {
-							<td>
-								<% $entry->school->name %>
-							</td>
-%						}
-
-%					   if ($ballot_entry_name) {
-							<td>
-								<% $entry->name %>
-							</td>
-%					   }
-
-%					   if ($ballot_entry_first_name) {
-							<td>
-%								foreach my $student (@{$entry{$entry->id}{"students"}}) {
-									<% $student->first %>
+						<div class="row <% $notfirst++ ? "" : "bluebordertop" %>">
+							<span class="twothirds padvert">
+								<span class="halfspacer"></span>
+								<% $event_settings{"ballot_rubric"}{$order}{"label"} %>
+%								if ($speaker) {
+									<div class="full nospace padvertless italic graytext smallish">
+										<span class="spacer"></span>
+										<% $speaker->first." ". $speaker->last %>
+									</div>
 %								}
-							</td>
-<%perl>
-					   }
-
-					   if ($category_settings{'ballot_entry_titles'}) {
-
-					   		my $title;
-
-							$title = $entry{$entry->id}{"ballot"}->scores(
-								tag => "title"
-							)->first if $entry{$entry->id}{"ballot"};
-</%perl>
-							<td>
-								<% $title ? $title->text : "" %>
-							</td>
-%					   }
-
-%						if ($type eq "speech") {
-							<td class="centeralign">
-								<% Lingua::EN::Numbers::Ordinate::ordinate($entry->speaks) %>
-							</td>
-%						}
-%						if ($tb_types{"tv"}) {
-							<td class="centeralign redtext semibold">
-								<% $entry{$entry->id}{"ballot"}->tv ? "Y" : "" %>
-							</td>
-%						}
-
-					</tr>
-%				}
-
-				</tbody>
-			</table>
-<%perl>
-
-		}
-
-		if (($tb_types{"point"} || $tb_types{"rank"})
-			&& $side_disagree < 1
-		) {
-
-			foreach my $entry (@entries) {
-</%perl>
-
-				<span class="pagehalf">
-
-					<span class="semibold bigger bluetext centeralign full">
-						<% $entry->code %> (<% $entry->name %>)
-					</span>
-
-%					my $switch;
-%					foreach my $student (@{$entry{$entry->id}{"students"}}) {
-
-						<div class="row padmore">
-
-							<span class="half rightalign">
-								<%	$student->first." ".$student->last %>:
 							</span>
-
-%							if ($tb_types{"point"}) {
-								<span class="quarter centeralign">
-									<% $student{$student->id}{"points"}
-										?  $student{$student->id}{"points"}
-										: "ZERO"
-									%>
-								</span>
-%							}
-
-%							if ($tb_types{"rank"}) {
-								<span class="quarter centeralign">
-									<% Lingua::EN::Numbers::Ordinate::ordinate(
-										$student{$student->id}{"rank"}
-									) %>
-								</span>
-%							}
-
+							<span class="third centeralign semibold">
+								<% $rubrics{$ballot}{"scores"}{$order}{"points"} %>
+							</span>
 						</div>
-
 %					}
 
+					<div class="row bluebordertop">
+						<span class="twothirds padvert semibold redtext">
+							<span class="halfspacer"></span>
+							TEAM TOTAL
+						</span>
+						<span class="third centeralign semibold">
+							<% $rubrics{$ballot}{"total"} %>
+						</span>
+					</div>
 				</span>
 %			}
-%		}
 
-%		if ($event_settings{"po_contest"}) {
+%			if ($event_settings{"speakers_rubric"}) {
 
-			<h5>Presiding Officers</h5>
+				<div class="full centeralign nospace">
+					<span class="pagehalf leftalign">
+						<h6>Top Competitors</h6>
 <%perl>
-			foreach my $po_entry (@po_entries) {
+						my $notfirst;
 
-				my $po_ballot = $po_entry->ballots(
-					judge => $judge,
-					panel => $po_panel
-				)->first;
+						foreach my $order (sort {$a <=> $b} keys %{$event_settings{"speakers_rubric"}}) {
 
-				my %scores = map {$_->tag => $_} $po_ballot->scores;
+							my $student = $rubrics{"outstanding"}{$order};
+
+							if ($student) {
 </%perl>
-
-				<div class="row">
-
-					<span class="twofifths nospace">
-						<span class="third semibold">
-							<span class="spacer"></span>
-							<% $po_entry->code %>
-						</span>
-
-						<span class="twothirds">
-							<span class="spacer"></span>
-							<% $po_entry->name %>
-						</span>
-					</span>
-
-					<span class="fifth centeralign greentext semibold">
-%						if ($po_tb_types{"winloss"}) {
-%							if ($scores{"winloss"} && $scores{"winloss"}->value == 1) {
-								WINNER
-%							}
-%						}
-					</span>
-
-					<span class="fifth centeralign">
-%						if ($po_tb_types{"rank"}) {
-%							if ($scores{"rank"} && $scores{"rank"}->value == 1) {
-								RANK <% $scores{"rank"}->value %>
-%							}
-%						}
-					</span>
-
-					<span class="fifth centeralign">
-%						if ($po_tb_types{"point"}) {
-%							if ($scores{"point"} && $scores{"point"}->value == 1) {
-								<% $scores{"point"}->value %> POINTS
+								<div class="row <% $notfirst++ ? "" : "bluebordertop" %>">
+									<span class="twofifths padvert">
+										<span class="halfspacer"></span>
+										<% $student->first." ".$student->last %>
+									</span>
+									<span class="twofifths padvert graytext smallish">
+										<span class="halfspacer"></span>
+										<& "/funclib/short_name.mas", name => $student->chapter->name, printme => 1 &>
+									</span>
+									<span class="fifth centeralign semibold">
+										<% Lingua::EN::Numbers::Ordinate::ordinate($order) %>
+									</span>
+								</div>
 %							}
 %						}
 					</span>
 				</div>
 %			}
-%		}
 
-%		if ($side_disagree) {
-
-			<h1 class="redtext semibold centeralign">WHOOOPSIE DAISY!</h1>
-
-			<h6 class="redtext martopmore marbottommore semibold centeralign">
-				Your ballot disagreed with another judge's on sides.
-			</h6>
-
-			<h6 class="redtext martopmore marbottommore semibold centeralign">
-				You marked them the opposite way as another judge in this debate.
-			</h6>
-
-			<h6 class="orangetext martopmore marbottommore semibold centeralign">
-				Please confirm: which team was actually <% $aff_string %>? </h4>
-			<h6>
-
-			<div class="centeralign martopmuchmore">
-
-<%perl>
-
-				my $color;
-				foreach my $entry (@entries) {
-					$color = "blue" if $color eq "green";
-					$color = "green" unless $color;
-
-</%perl>
-					<span class="pagehalf">
-						<a
-							class = "confirm <% $color %>text buttonwhite invert full"
-							href="i_am_aff.mhtml?entry_id=<% $entry->id %>&judge_id=<% $judge_id %>&panel_id=<% $panel_id %>"
-						>
-							<% $entry->code %> was <% uc($aff_string) %>
-						</a>
-					</span>
-%				}
-			</div>
-
-%		} else {
-
-			<h6 class="centeralign padtop martopmuchmore bluetext semibold bluebordertop">
-				Please check the accuracy of the information above &amp; confirm.
-			</h6>
-
-			<h6 class="centeralign bluetext semibold">
-				You cannot change confirmed ballots online.
+			<h6 class="centeralign padtopmore martopmuchmore redtext semibold bluebordertop">
+				Please check the accuracy of the information above &amp; confirm below.
 			</h6>
 
 			<p class="centeralign graytext bigger semibold marbottommore">
-				You may write further feedback until the end of the tournament.
+				You cannot change scores once they have been confirmed.
+				You may write feedback until the end of the tournament.
 			</p>
 
-			<div class="full martopmuchmore">
-
+			<div class="full nospace">
 				<span class="pagehalf centeralign">
 					<a
 						class="redtext buttonwhite invert full confirm"
@@ -1666,14 +1550,378 @@
 						class="greentext buttonwhite invert full confirm"
 						href="ballot_confirm.mhtml?from=confirmation&panel_id=<% $panel_id %>&judge_id=<% $judge_id %>"
 					>
-						YES! CORRECT! CONFIRM IT
+						YES! CORRECT! CONFIRMED!
 					</a>
 				</span>
-
 			</div>
+<%perl>
 
+		} else {
+
+			if (($team_points || $team_ranks) && $side_disagree < 1) {
+
+				my $switch;
+
+				@entries =
+					sort {$entry{$a->id}{"points"} <=> $entry{$b->id}{"points"} } @entries
+					if $team_points;
+
+				@entries =
+					sort {$entry{$a->id}{"rank"} <=> $entry{$b->id}{"rank"} } @entries
+					if $team_ranks;
+
+</%perl>
+				<& "/funclib/tablesorter.mas",
+					table => "final",
+					nobuttons => 1
+				&>
+
+				<table id="final">
+
+					<thead>
+						<tr class="smallish yellowrow nosort centeralign">
+
+%							if ($team_ranks) {
+								<th>
+									Rank
+								</th>
+%							}
+
+%							if ($team_points) {
+								<th>
+									Points
+								</th>
+%							}
+
+%							if ($chair && $tb_types{"best_po"}) {
+								<th>
+									Best PO
+								</th>
+%							}
+
+							<th>
+								Code
+							</th>
+
+%						   if ($ballot_school_code) {
+								<th>
+									School
+								</th>
+%						   }
+%						   if ($ballot_school_name) {
+								<th>
+									School
+								</th>
+%						   }
+
+%						   if ($ballot_entry_name) {
+								<th>
+									Name
+								</th>
+%						   }
+
+%						   if ($ballot_entry_first_name) {
+								<th>
+									First Name
+								</th>
+%						   }
+
+%						   if ($category_settings{'ballot_entry_titles'}) {
+								<th>
+									Title/Question
+								</th>
+%						   }
+
+%							if ($type eq "speech") {
+								<th>
+									Spoke
+								</th>
+%							}
+
+%							if ($tb_types{"tv"}) {
+								<th>
+									Violation
+								</th>
+%							}
+
+						</tr>
+					</thead>
+
+					<tbody>
+
+<%perl>
+					foreach my $entry (@entries) {
+
+						next if $entry->dropped
+							&! $entry{$entry->id}{"rank"}
+							&! $entry{$entry->id}{"points"};
+</%perl>
+
+						<tr>
+%							if ($entry{$entry->id}{"forfeit"}) {
+								<td class="centeralign semibold redtext">
+									Forfeit
+								</td>
+
+%							} elsif ($team_ranks) {
+								<td class="centeralign">
+									<% $entry{$entry->id}{"rank"} %>
+								</td>
+%							}
+
+%							if ($team_points) {
+								<td class="centeralign">
+									<% $entry{$entry->id}{"points"}
+										?  $entry{$entry->id}{"points"}
+										: "ZERO"
+									%>
+								</td>
+%							}
+
+%							if ($chair && $tb_types{"best_po"}) {
+								<td class="centeralign">
+									<% $entry{$entry->id}{"best_po"}
+										? "YES"
+										: ""
+									%>
+								</td>
+%							}
+
+							<td class="centeralign">
+								<% $entry->code %>
+							</td>
+
+%							if ($ballot_school_code) {
+								<td class="centeralign">
+									<% $entry->school->code %>
+								</td>
+%							}
+
+%							if ($ballot_school_name) {
+								<td>
+									<% $entry->school->name %>
+								</td>
+%							}
+
+%						   if ($ballot_entry_name) {
+								<td>
+									<% $entry->name %>
+								</td>
+%						   }
+
+%						   if ($ballot_entry_first_name) {
+								<td>
+%									foreach my $student (@{$entry{$entry->id}{"students"}}) {
+										<% $student->first %>
+%									}
+								</td>
+<%perl>
+						   }
+
+						   if ($category_settings{'ballot_entry_titles'}) {
+
+								my $title;
+
+								$title = $entry{$entry->id}{"ballot"}->scores(
+									tag => "title"
+								)->first if $entry{$entry->id}{"ballot"};
+</%perl>
+								<td>
+									<% $title ? $title->text : "" %>
+								</td>
+%						   }
+
+%							if ($type eq "speech") {
+								<td class="centeralign">
+									<% Lingua::EN::Numbers::Ordinate::ordinate($entry->speaks) %>
+								</td>
+%							}
+%							if ($tb_types{"tv"}) {
+								<td class="centeralign redtext semibold">
+									<% $entry{$entry->id}{"ballot"}->tv ? "Y" : "" %>
+								</td>
+%							}
+
+						</tr>
+%					}
+
+					</tbody>
+				</table>
+<%perl>
+			}
+
+			if (($tb_types{"point"} || $tb_types{"rank"})
+				&& $side_disagree < 1
+			) {
+
+				foreach my $entry (@entries) {
+</%perl>
+					<span class="pagehalf">
+
+						<span class="semibold bigger bluetext centeralign full">
+							<% $entry->code %> (<% $entry->name %>)
+						</span>
+
+%						my $switch;
+%						foreach my $student (@{$entry{$entry->id}{"students"}}) {
+
+							<div class="row padmore">
+
+								<span class="half rightalign">
+									<%	$student->first." ".$student->last %>:
+								</span>
+
+%								if ($tb_types{"point"}) {
+									<span class="quarter centeralign">
+										<% $student{$student->id}{"points"}
+											?  $student{$student->id}{"points"}
+											: "ZERO"
+										%>
+									</span>
+%								}
+
+%								if ($tb_types{"rank"}) {
+									<span class="quarter centeralign">
+										<% Lingua::EN::Numbers::Ordinate::ordinate(
+											$student{$student->id}{"rank"}
+										) %>
+									</span>
+%								}
+
+							</div>
+
+%						}
+
+					</span>
+%				}
+%			}
+
+%			if ($event_settings{"po_contest"}) {
+
+				<h5>Presiding Officers</h5>
+<%perl>
+				foreach my $po_entry (@po_entries) {
+
+					my $po_ballot = $po_entry->ballots(
+						judge => $judge,
+						panel => $po_panel
+					)->first;
+
+					my %scores = map {$_->tag => $_} $po_ballot->scores;
+</%perl>
+					<div class="row">
+
+						<span class="twofifths nospace">
+							<span class="third semibold">
+								<span class="spacer"></span>
+								<% $po_entry->code %>
+							</span>
+
+							<span class="twothirds">
+								<span class="spacer"></span>
+								<% $po_entry->name %>
+							</span>
+						</span>
+
+						<span class="fifth centeralign greentext semibold">
+%							if ($po_tb_types{"winloss"}) {
+%								if ($scores{"winloss"} && $scores{"winloss"}->value == 1) {
+									WINNER
+%								}
+%							}
+						</span>
+
+						<span class="fifth centeralign">
+%							if ($po_tb_types{"rank"}) {
+%								if ($scores{"rank"} && $scores{"rank"}->value == 1) {
+									RANK <% $scores{"rank"}->value %>
+%								}
+%							}
+						</span>
+
+						<span class="fifth centeralign">
+%							if ($po_tb_types{"point"}) {
+%								if ($scores{"point"} && $scores{"point"}->value == 1) {
+									<% $scores{"point"}->value %> POINTS
+%								}
+%							}
+						</span>
+					</div>
+%				}
+%			}
+
+%			if ($side_disagree) {
+
+				<h1 class="redtext semibold centeralign">WHOOOPS!</h1>
+
+				<h6 class="redtext martopmore marbottommore semibold centeralign">
+					Your ballot disagreed with another judge's on sides.
+				</h6>
+
+				<h6 class="redtext martopmore marbottommore semibold centeralign">
+					You marked them the opposite way as another judge in this debate.
+				</h6>
+
+				<h6 class="orangetext martopmore marbottommore semibold centeralign">
+					Please confirm: which team was actually <% $aff_string %>? </h4>
+				<h6>
+
+				<div class="centeralign martopmuchmore">
+<%perl>
+					my $color;
+					foreach my $entry (@entries) {
+						$color = "blue" if $color eq "green";
+						$color = "green" unless $color;
+</%perl>
+						<span class="pagehalf">
+							<a
+								class = "confirm <% $color %>text buttonwhite invert full"
+								href="i_am_aff.mhtml?entry_id=<% $entry->id %>&judge_id=<% $judge_id %>&panel_id=<% $panel_id %>"
+							>
+								<% $entry->code %> was <% uc($aff_string) %>
+							</a>
+						</span>
+%					}
+				</div>
+
+%			} else {
+
+				<h6 class="centeralign padtop martopmuchmore bluetext semibold bluebordertop">
+					Please check the accuracy of the information above &amp; confirm.
+				</h6>
+
+				<h6 class="centeralign bluetext semibold">
+					You cannot change confirmed ballots online.
+				</h6>
+
+				<p class="centeralign graytext bigger semibold marbottommore">
+					You may write further feedback until the end of the tournament.
+				</p>
+
+				<div class="full martopmuchmore">
+					<span class="pagehalf centeralign">
+						<a
+							class="redtext buttonwhite invert full confirm"
+							href="ballot.mhtml?panel_id=<% $panel_id %>&judge_id=<% $judge_id %>"
+						>
+							NO! <% $side_disagree
+									? "FIX SIDES PLEASE"
+									: "RE-ENTER BALLOT"
+								%>
+						</a>
+					</span>
+
+					<span class="pagehalf centeralign">
+						<a
+							class="greentext buttonwhite invert full confirm"
+							href="ballot_confirm.mhtml?from=confirmation&panel_id=<% $panel_id %>&judge_id=<% $judge_id %>"
+						>
+							YES! CORRECT! CONFIRM IT
+						</a>
+					</span>
+				</div>
+%			}
 %		}
-
 	</div>
 
 	<div class="menu">
