@@ -11,20 +11,20 @@
 	my $circuit = Tab::Circuit->retrieve($circuit_id) if $circuit_id;
 	my $now = DateTime->now;
 
+	my $fromstring;
+	my $time_limit;
+
 	unless ($year) {
-		$year = $now->year;
-		$year-- if $now->month < 8;
+		my $from = $now->clone();
+		$from->set(day => 1);
+		$from->subtract(months => 1);
+		$fromstring = DateTime::Format::MySQL->format_datetime($from);
+		$time_limit = ' and tourn.start < NOW() ';
+	} else {
+		$fromstring = int($year)."-07-01 00:00:00";
 	}
 
-	my $fromstring = "$year-07-01 00:00:00";
-	my $tostring = ($year + 1)."-07-01 00:00:00";
-
-
 	my @published;
-
-	Tab::Tourn->columns(TEMP => "circuit_id");
-	Tab::Tourn->columns(TEMP => "circuit_abbr");
-
 	my $limit;
 
 	if ($state) {
@@ -45,128 +45,58 @@
 		}
 	}
 
-	my $search_name = $search;
+	my $search_limit;
 
-	if ($search_name) {
-		$search_name =~ s/[^\w\s]//g;
+	if ($search) {
+		my $search_name = $search;
+
+		if ($search_name) {
+			$search_name =~ s/[^\w\s]//g;
+		}
+
+		$search_name = '%'.$search_name.'%';
+		$search_limit = 'and tourn.name like \''.$search_name.'\'';
 	}
 
-	$search_name = '%'.$search_name.'%';
+	my $circuit_limit;
 
-	if ($circuit) {
-
-		Tab::Tourn->set_sql(by_results_published => "
-			select distinct tourn.*,
-				GROUP_CONCAT(distinct circuit.name) as circuit_abbr
-			from tourn, tourn_circuit, result_set, circuit
-			where result_set.tourn = tourn.id
-				and tourn.id = tourn_circuit.tourn
-				and tourn.hidden != 1
-				and tourn_circuit.circuit = ?
-				and circuit.id = tourn_circuit.circuit
-				and tourn.start > ?
-				and tourn.end < ?
-				and tourn.start < NOW()
-				".$limit."
-				and tourn.name like ?
-
-			group by tourn.id
-			order by tourn.start DESC
-			limit 256
-		");
-
-		Tab::Tourn->set_sql(by_round_results_published => "
-			select distinct tourn.*,
-				GROUP_CONCAT(distinct circuit.name) as circuit_abbr
-			from tourn, event, round, tourn_circuit, circuit
-			where tourn.id = event.tourn
-				and tourn.id = tourn_circuit.tourn
-				and tourn.hidden != 1
-				and tourn_circuit.circuit = ?
-				and circuit.id = tourn_circuit.circuit
-				and tourn.start > ?
-				and tourn.end < ?
-				and tourn.start < NOW()
-				and tourn.name like ?
-				and event.id = round.event
-				".$limit."
-				and round.post_primary > 2
-			group by tourn.id
-			order by tourn.start DESC
-			limit 256
-		");
-
-
-		push @published, Tab::Tourn->search_by_round_results_published(
-			$circuit->id,
-			$fromstring,
-			$tostring,
-			$search_name
-		);
-
-		push @published, Tab::Tourn->search_by_results_published(
-			$circuit->id,
-			$fromstring,
-			$tostring,
-			$search_name
-		);
-
-	} else {
-
-		Tab::Tourn->set_sql(by_results_published => "
-			select distinct tourn.*,
-				GROUP_CONCAT(distinct circuit.name) as circuit_abbr
-			from (tourn, result_set)
-				left join tourn_circuit on tourn.id = tourn_circuit.tourn
-				left join circuit on tourn_circuit.circuit = circuit.id
-			where result_set.tourn = tourn.id
-				and tourn.hidden != 1
-				and tourn.start > ?
-				and tourn.end < ?
-				and tourn.start < NOW()
-				".$limit."
-				and tourn.name like ?
-			group by tourn.id
-			order by tourn.start DESC
-			limit 256
-		");
-
-		Tab::Tourn->set_sql(by_round_results_published => "
-			select distinct tourn.*,
-				GROUP_CONCAT(distinct circuit.name) as circuit_abbr
-			from (tourn, event, round)
-				left join tourn_circuit on tourn.id = tourn_circuit.tourn
-				left join circuit on tourn_circuit.circuit = circuit.id
-			where tourn.id = event.tourn
-				and tourn.hidden != 1
-				and tourn.start > ?
-				and tourn.end < ?
-				and event.id = round.event
-				and round.post_secondary > 2
-				and tourn.start < NOW()
-				".$limit."
-				and tourn.name like ?
-			group by tourn.id
-			order by tourn.start DESC
-			limit 256
-		");
-
-		push @published, Tab::Tourn->search_by_round_results_published(
-			$fromstring,
-			$tostring,
-			$search_name
-		);
-
-		push @published, Tab::Tourn->search_by_results_published(
-			$fromstring,
-			$tostring,
-			$search_name
-		);
+	if ($circuit_id) {
+		$circuit_limit = "and exists ( select tc.id from tourn_circuit tc where tc.tourn = tourn.id and tc.circuit = ".int($circuit_id)." ) ";
 	}
 
-	my %seen = ();
-	@published = grep { ! $seen{$_} ++ } @published;
+	my $dbh = Tab::DBI->db_Main();
 
+	my $sth = $dbh->prepare("
+		select
+			tourn.*
+		from tourn
+			where tourn.start < NOW()
+			and tourn.hidden != 1
+			$search_limit
+			$time_limit
+			$limit
+			$circuit_limit
+
+			and (exists (
+					select event.id
+					from event, round
+					where event.tourn = tourn.id
+					and event.id = round.event
+					and round.post_primary > 2
+				) OR exists (
+					select result_set.id
+					from result_set
+					where result_set.tourn = tourn.id
+					and result_set.published = 1
+				)
+			)
+
+		order by tourn.start DESC
+		limit 256
+	");
+
+	$sth->execute();
+	my $results = $sth->fetchall_hash();
 
 </%init>
 
@@ -195,83 +125,121 @@
 		<table id="results">
 
 			<thead>
+				<tr class="yellowrow">
+					<th class="smaller">
+						Dates
+					</th>
 
-			<tr class="yellowrow">
+					<th class="smaller">
+						Tournament
+					</th>
 
-				<th class="smaller">
-					Dates
-				</th>
+					<th class="smaller">
+						Location
+					</th>
 
-				<th class="smaller">
-					Tournament
-				</th>
+					<th class="smaller">
+						State/Country
+					</th>
 
-				<th class="smaller">
-					Location
-				</th>
-
-				<th class="smaller">
-					Circuit(s)
-				</th>
-
-				<th class="smaller nosort">
-
-				</th>
-
-			</tr>
-
+					<th class="smaller nosort">
+						Results
+					</th>
+				</tr>
 			</thead>
 
 			<tbody>
+<%perl>
 
-%			foreach my $tourn (sort {$b->start <=> $a->start} @published) {
+				foreach my $tourn (@{$results}) {
 
-%				my $circuits = $tourn->circuit_abbr;
-%				$circuits =~ s/,/<br \/>/g;
+					my $start = $m->comp("/funclib/dtme.mas", string => $tourn->{start}, tz => $tourn->{tz});
 
-				<tr class="row">
+					my $end = $m->comp("/funclib/dtme.mas", string => $tourn->{end}, tz => $tourn->{tz});
+</%perl>
 
-					<td class="smallish">
-						<% Tab::pickerdate($tourn->start) %>
-					</td>
+					<tr class="row">
 
-					<td class="smallish">
-						<a
-							class="white full"
-							href="/index/tourn/index.mhtml?tourn_id=<% $tourn->id %>"
-						>
-							<% $tourn->name %>
-						</a>
-					</td>
+						<td class="smallish">
+							<span class="hiddencsv"><% $start->{"date"} %></span>
+							<span class="twothirds nospace">
+<%perl>
+							$m->comp("/funclib/showdate.mas",
+								print  => 1,
+								dt     => $start->{"dt"},
+								tz     => $tourn->{tz},
+								format => "murica_shorter",
+								print  => 1
+							);
 
-					<td class="smallish centeralign nospace">
-						<a
-							class="plain full marno"
-							href="index.mhtml?state=<% $tourn->state ? $tourn->state : "" %>&country=<% $tourn->country ? $tourn->country : "" %>"
-						>
-							<% $tourn->location %>
-						</a>
-					</td>
+							if ($start->{"dt"} && $end->{"dt"} && $start->{"dt"}->day != $end->{"dt"}->day) {
 
-					<td class="smaller nowrap">
-						<% $circuits %>
-					</td>
+								if ($start->{"dt"}->month != $end->{"dt"}->month) {
 
-					<td class="centeralign padless marno">
-						<a
-							class="buttonwhite bluetext smallish normal invert"
-							href="/index/tourn/results/index.mhtml?tourn_id=<% $tourn->id %>"
-						>
-							Results
-						</a>
-					</td>
+								 	$m->print("&ndash;");
 
-				</tr>
+									$m->comp("/funclib/showdate.mas",
+										print  => 1,
+										dt     => $end->{"dt"},
+										tz     => $tourn->{tz},
+										format => "murica_shorter"
+									);
 
-%			}
+								} else {
+								 	$m->print("&ndash;");
+									$m->print($end->{"dt"}->day);
+								}
+							}
+
+							if ($start->{"dt"}) {
+								$m->print('</span>');
+								$m->print('<span class="third nospace rightalign">');
+								$m->print($start->{'dt'}->year);
+								$m->print('</span>');
+							}
+</%perl>
+						</td>
+
+						<td class="smallish">
+							<a
+								class="white full"
+								href="/index/tourn/index.mhtml?tourn_id=<% $tourn->{id} %>"
+							>
+								<% $tourn->{name} %>
+							</a>
+						</td>
+
+						<td class="smallish nospace">
+							<span class="halfspacer"></span>
+							<% $tourn->{city} ? $tourn->{city} : "" %>
+						</td>
+
+						<td class="smallish centeralign nospace">
+							<a
+								class="plain full marno"
+								href="index.mhtml?state=<% $tourn->{state} ? $tourn->{state} : "" %>&country=<% $tourn->{country} ? $tourn->{country} : "" %>"
+							>
+								<% $tourn->{state}
+									? $tourn->{state}."/"
+									: ""
+								%><% $tourn->{country}
+									? $tourn->{country}
+									: ""
+								%>
+							</a>
+						</td>
+
+						<td class="centeralign padless marno">
+							<a
+								class="buttonwhite bluetext smallish normal invert fa fa-file-text-o"
+								href="/index/tourn/results/index.mhtml?tourn_id=<% $tourn->{id} %>"
+							>
+							</a>
+						</td>
+					</tr>
+%				}
 
 			</tbody>
-
 		</table>
 
 	</div>
