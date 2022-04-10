@@ -1,0 +1,238 @@
+<%args>
+	$tourn
+	$perms
+	$person
+	$tourn_settings
+	$person_settings
+</%args>
+<%init>
+
+	unless ($tourn_settings->{"vaccines"}) {
+		$m->comp("/funclib/abort.mas", 
+			message => "VaccineCheck is not enabled for this tournament"
+		);
+	};
+
+	unless ($perms && $perms->{"owner"} && $tourn_settings->{"vaccines"}) {
+		$m->comp("/funclib/abort.mas", 
+			message => "VaccineCheck access is reserved to tournament owners"
+		);
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $fix_sth = $dbh->prepare("
+		update
+			person, student, entry, entry_student es, school
+
+		SET person.nsda = student.nsda
+		WHERE (person.nsda = 0 OR person.nsda is NULL)
+			AND person.id = student.person
+			AND student.nsda != 0
+			AND student.nsda IS NOT NULL
+			AND student.id = es.student
+			AND es.entry = entry.id
+			AND entry.school = school.id
+			and school.tourn = ?
+	");
+
+	$fix_sth->execute($tourn->id);
+	$fix_sth->finish();
+
+	$fix_sth = $dbh->prepare("
+		update
+			person, judge, chapter_judge cj, category
+
+		SET person.nsda = cj.nsda
+		WHERE (person.nsda = 0 OR person.nsda is NULL)
+			AND person.id = judge.person
+			AND cj.nsda != 0
+			AND cj.nsda IS NOT NULL
+			AND judge.chapter_judge = cj.id
+			and judge.category = category.id
+			and category.tourn = ?
+	");
+
+	$fix_sth->execute($tourn->id);
+	$fix_sth->finish();
+
+	my $tag = "vaccine_".$tourn->id;
+
+	my $entry_sth = $dbh->prepare("
+		select
+			entry.id entry, entry.code, event.abbr,
+			CONCAT('S',student.id) as id, student.first as altfirst, student.middle as altmiddle, student.last as altlast, student.nsda snsda,
+			entry.active, entry.dropped,
+			'Entry' as type,
+			school.name schoolname, school.state, chapter.country,
+			person.id person, person.first, person.middle, person.last, person.email, person.phone, person.nsda nsda,
+			vaccine.value vaccine
+
+		from (school, entry, entry_student es, student, chapter)
+
+			left join person on student.person = person.id
+			left join event on event.id = entry.event
+			left join person_setting vaccine on vaccine.person = person.id and vaccine.tag = ?
+
+		where school.tourn = ?
+			and school.id = entry.school
+			and entry.id = es.entry
+			and es.student = student.id
+			and (entry.active = 1 OR entry.dropped = 1)
+			and school.chapter = chapter.id
+
+		group by person.id, student.id
+	");
+
+	$entry_sth->execute($tag, $tourn->id);
+
+	my $judge_sth = $dbh->prepare("
+		select
+			judge.id judge, judge.code, category.abbr, 'Judge' as type,
+			CONCAT('j',judge.id) as id, judge.first as altfirst, judge.middle as altmiddle, judge.last as altlast,
+			school.name schoolname, school.state, chapter.country,
+			person.id person, person.first, person.middle, person.last, person.email, person.phone, person.nsda nsda,
+			vaccine.value vaccine
+
+		from (category, judge)
+
+			left join person on judge.person = person.id
+			left join school on school.id = judge.school
+			left join chapter on school.chapter = chapter.id
+			left join person_setting vaccine on vaccine.person = person.id and vaccine.tag = ?
+
+		where category.tourn = ?
+			and category.id = judge.category
+			and judge.active = 1
+			and judge.school = 502564
+	");
+
+	$judge_sth->execute($tag, $tourn->id);
+
+	my $entref = $entry_sth->fetchall_hash();
+	my $judref = $judge_sth->fetchall_hash();
+
+	$entry_sth->finish();
+	$judge_sth->finish();
+
+	my %entries = map {$_->{"id"} =>  $_} @{$entref};
+	my %judges = map {$_->{"id"} =>  $_} @{$judref};
+	my %people = (%entries, %judges);
+
+	$dbh->disconnect();
+
+    my $filename = $tourn->name."-VaccineUpload";    
+    $filename =~ s/[\W_]//g;    
+    
+    $filename = $filename.".csv";       
+        
+    $m->clear_buffer;    
+    $r->content_type('application/csv');    
+    $r->headers_out->{'Content-Disposition'} = "filename=$filename";    
+
+	$m->print("Member Type (Required),Unit ID (Optional),Staff ID (Required if Email and Phone are empty),First Name (Required),");
+	$m->print("Middle Name,Last Name (Required),Email (Required if Staff ID and Phone are empty),Country Code,");
+	$m->print("Phone (Required if Staff ID and Email are empty),Group (Multiple separated by commas),,Birth Date(MM/DD/YYYY),");
+	$m->print("\"Vaccination First Date(MM/DD/YYYY)\",\"Vaccination Second Date(MM/DD/YYYY)\",Vaccination Single Date(MM/DD/YYYY),");
+	$m->print("\"Vaccination Status (confirmed, unconfirmed, partial dose, pending, boosted)\",,Unit Name (Optional),");
+	$m->print("Unit Type (Required if Unit Name is set),Unit Role (Required if Unit Name is set)");
+	$m->print("\n");
+
+	foreach my $pid (
+		sort {
+			$people{$a}{"state"} cmp $people{$b}{"state"}
+			|| $people{$a}{"schoolname"} cmp $people{$b}{"schoolname"}
+			|| $people{$a}{"type"} cmp $people{$b}{"type"}
+			|| $people{$a}{"abbr"} cmp $people{$b}{"abbr"}
+			|| $people{$a}{"last"} cmp $people{$b}{"last"}
+		} keys %people
+	) {
+
+		$people{$pid}{"phone"} =~ s/^1//g;
+
+		if ($people{$pid}{"dropped"}) {
+			$people{$pid}{"type"} = "Drop";
+		}
+
+		if ($people{$pid}{"abbr"} eq "ATTN") {
+			$people{$pid}{"type"} = "Attendee";
+		}
+
+		unless ($people{$pid}{"state"} || $people{$pid}{"country"}) {    
+			$people{$pid}{"country"} = "CN";    
+		}    
+
+		$people{$pid}{"schoolname"} =~ s/[^\w\s]//g;
+		my $school_string = $people{$pid}{"schoolname"}."-";
+
+		if ($people{$pid}{"state"}) {
+			$school_string .= "US-".$people{$pid}{"state"};
+		} else {
+			$school_string .= "INT-".$people{$pid}{"country"};
+		}
+
+		next unless ($people{$pid}{"person"});
+
+		$m->print("_guest,");
+		$m->print("$school_string,");
+
+		if ($people{$pid}{"nsda"}) { 
+			$m->print($people{$pid}{"nsda"});
+		} else {
+			$m->print("TR".$people{$pid}{"person"});
+		}
+
+		$m->print(",");
+
+		if ($people{$pid}{"first"}) { 
+			$m->print($people{$pid}{"first"});
+		} else {
+			$m->print($people{$pid}{"altfirst"});
+		}
+
+		$m->print(",");
+
+		if ($people{$pid}{"middle"}) { 
+			$m->print($people{$pid}{"middle"},);
+		} else {
+			$m->print($people{$pid}{"altmiddle"},);
+		}
+
+		$m->print(",");
+
+		if ($people{$pid}{"last"}) { 
+			$m->print($people{$pid}{"last"},);
+		} else {
+			$m->print($people{$pid}{"altlast"},);
+		}
+
+		$m->print(",");
+		$m->print($people{$pid}{"email"});
+		$m->print(",");
+
+		if ($people{$pid}{"country"} eq "CN") {
+			$m->print("86");
+		} elsif ($people{$pid}{"country"} eq "TW") {
+			$m->print("886");
+		} elsif ($people{$pid}{"country"} eq "KR") {
+			$m->print("82");
+		} elsif ($people{$pid}{"country"} eq "JP") {
+			$m->print("81");
+		} else { 
+			$m->print("1");
+		}
+		$m->print(",");
+
+		$m->print($people{$pid}{"phone"});
+		$m->print(",");
+		$m->print($people{$pid}{"type"});
+
+		#the dumbest
+		$m->print(",,,,,,,,,,");
+		$m->print("\n");
+	}
+
+	$m->flush_buffer;
+	$m->abort();
+
+</%init>
