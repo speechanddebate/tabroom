@@ -2,10 +2,11 @@
 	$tourn
 	$tourn_settings
 	$person
-	$round_id => undef
-	$round    => undef
-	$parlis   => undef
-	$return   => undef
+	$round_id   => undef
+	$round      => undef
+	$parlis     => undef
+	$return     => undef
+	$num_judges => undef
 </%args>
 <%init>
 
@@ -21,20 +22,22 @@
 		$m->comp( "/funclib/abort.mas", err => "No round found for ID ".$round->id);
 	}
 
-	my $event = $round->event;
+	my $event    = $round->event;
 	my $event_id = $event->id;
 	my $category = $event->category;
 
-	my %round_settings = $round->all_settings;
-	my %event_settings = $event->all_settings();
+	my %round_settings    = $round->all_settings;
+	my %event_settings    = $event->all_settings();
 	my %category_settings = $category->all_settings();
 
 	my @panels = sort {$a->letter <=> $b->letter} $round->panels;
 	@panels = sort {$b->bracket <=> $a->bracket} @panels;
 
-	my $num_judges = $round_settings{"num_judges"};
-	$num_judges = 1 unless $num_judges;
-	$num_judges = 1 if $parlis == 1;
+	unless ($num_judges) {
+		$num_judges = $round_settings{"num_judges"};
+		$num_judges = 1 unless $num_judges;
+		$num_judges = 1 if $parlis == 1;
+	}
 
 	my $num_flights = $round->flighted;
 	$num_flights = 1 unless $num_flights;
@@ -188,6 +191,7 @@
 			$num_judges = 3 unless $num_judges;
 			my %used_schools;
 			my %used_regions;
+			my %chair_done;
 
 			foreach (1 .. $num_judges ) {
 
@@ -230,9 +234,18 @@
 						}
 					}
 
+					my $chair = 0;
+
+					if ($event_settings{"auto_chairs"}) {
+						unless ($chair_done{$panel}++) {
+							$chair = 1;
+						}
+					}
+
 					$m->comp("/funclib/panel_judgeadd.mas",
 						panel    => $panel,
-						judge_id => $judge
+						judge_id => $judge,
+						chair    => $chair
 					) if $judge;
 
 					$used_judges{$judge}++
@@ -254,7 +267,8 @@
 
 		my %rating_by_judge = ();
 
-		if ($category_settings{"coach_ratings"}
+		if (
+			($category_settings{"coach_ratings"} || $category_settings{"tab_ratings"})
 			&& (
 				(not defined $category_settings{"elim_only_ratings"})
 				|| ($round->type ne "prelim")
@@ -263,48 +277,53 @@
 
 			my $rating_sth = $dbh->prepare("
 				select
-					judge.id, rating_tier.name, subrt.name
+					judge.id, rating_tier.name, subrt.name, tab_rating.value
 
-				from (judge, round, event, rating_tier, rating)
+				from (judge, round, event)
 
-				left join rating_subset on rating_subset.id = event.rating_subset
-				left join rating subrating on subrating.rating_subset = rating_subset.id
-					and subrating.judge = judge.id
-					and subrating.type = 'coach'
+					left join rating on rating.judge = judge.id and rating.type = 'coach'
+					left join rating_tier on rating_tier.id = rating.rating_tier
 
-				left join rating_tier subrt on subrt.id = subrating.rating_tier
+					left join rating_subset on rating_subset.id = event.rating_subset
+					left join rating subrating on subrating.rating_subset = rating_subset.id
+						and subrating.judge = judge.id
+						and subrating.type = 'coach'
+
+					left join rating_tier subrt on subrt.id = subrating.rating_tier
+
+					left join judge_setting tab_rating 
+						on tab_rating.judge = judge.id 
+						and tab_rating.tag = 'tab_rating'
 
 				where round.id = ?
-				and round.event = event.id
-				and judge.id = rating.judge
-				and rating.rating_tier = rating_tier.id
-				and rating.type = 'coach'
+					and round.event = event.id
 
-				and (
-					judge.category = event.category
-					or judge.alt_category = event.category
-					or exists (
-						select jpj.id
-						from jpool_judge jpj, jpool_round jpr
-						where jpj.judge = judge.id
-						and jpj.jpool = jpr.jpool
-						and jpr.round = round.id
+					and (
+						judge.category = event.category
+						or judge.alt_category = event.category
+						or exists (
+							select jpj.id
+							from jpool_judge jpj, jpool_round jpr
+							where jpj.judge = judge.id
+							and jpj.jpool = jpr.jpool
+							and jpr.round = round.id
+						)
 					)
-				)
 			");
 
 			$rating_sth->execute($round->id);
 
 			while (
-				my ( $judge_id, $rating_tier, $better_rating_tier) = $rating_sth->fetchrow_array()
+				my ( $judge_id, $rating_tier, $better_rating_tier, $tab_rating) = $rating_sth->fetchrow_array()
 			) {
+
 				$rating_by_judge{$judge_id} = $rating_tier;
 				$rating_by_judge{$judge_id} = $better_rating_tier if $better_rating_tier;
+				$rating_by_judge{$judge_id} = $tab_rating if $tab_rating;
 			}
 		}
 
 		my $judge_use = $m->comp("/funclib/judge_use.mas", round => $round);
-
 		my %panel_judges = ();
 
 		foreach my $panel (@panels) {
@@ -319,151 +338,174 @@
 					autopanel         => 1,
 					parlis            => $parlis
 			);
-
 		}
 
 		my %done = ();
 		my %all_judged = ();
+		my %chaired;
 
-		foreach my $panel (@panels) {
+		foreach my $tick (1 .. $num_judges) { 
 
-			next if $done{"P-".$panel->id};
+			@panels = reverse(@panels);
 
-			my @flights;
-			push @flights, $panel;
+			foreach my $panel (@panels) { 
 
-			my %flighted;
-			$flighted{$panel->id}++;
+				my @judges =
+					sort {
+						$judge_use->{$a}{"everything"} <=> $judge_use->{$b}{"everything"}
+					} shuffle(keys %{$panel_judges{$panel->id}})
+				if $panel_judges{$panel->id};
 
-			my @judges =
-				sort {
-					$judge_use->{$a}{"everything"} <=> $judge_use->{$b}{"everything"}
-				} shuffle(keys %{$panel_judges{$panel->id}})
-			if $panel_judges{$panel->id};
+				if ($category_settings{"rounds_per"}
+					&& $round->type ne "elim"
+					&& $round->type ne "final"
+					&& $round->type ne "runoff"
+				) {
+					@judges =
+					sort { $judge_use->{$b}{"left"} <=> $judge_use->{$a}{"left"} } @judges;
+				}
 
-			if ($category_settings{"rounds_per"}
-				&& $round->type ne "elim"
-				&& $round->type ne "final"
-				&& $round->type ne "runoff"
-			) {
-				@judges =
-				sort { $judge_use->{$b}{"left"} <=> $judge_use->{$a}{"left"} } @judges;
-			}
+				unless (
+					$category_settings{"elim_only_ratings"} && $round->type eq "prelim"
+				) {
 
-			unless ($category_settings{"elim_only_ratings"} && $round->type eq "prelim") {
-				@judges = sort {
-					length($rating_by_judge{$a}) cmp length($rating_by_judge{$b})
-					|| $rating_by_judge{$a} cmp $rating_by_judge{$b}
-				} @judges;
-			}
+					if ($event_settings{"invert_ratings"}) { 
+						@judges = sort {
+							length($rating_by_judge{$b}) <=> length($rating_by_judge{$a})
+							|| $rating_by_judge{$b} cmp $rating_by_judge{$a}
+						} @judges;
+					} else { 
+						@judges = sort {
+							length($rating_by_judge{$a}) <=> length($rating_by_judge{$b})
+							|| $rating_by_judge{$a} cmp $rating_by_judge{$b}
+						} @judges;
+					}
+				}
 
-			FLIGHT:
-			foreach my $flight_number (2 .. $num_flights) {
+				next if $done{"P-".$panel->id};
 
-				OTHER:
-				foreach my $other (@panels) {
+				my @flights;
+				push @flights, $panel;
 
-					next if $done{"P-".$other->id};
-					next if $flighted{$other->id};
+				my %flighted;
+				$flighted{$panel->id}++;
 
-					my %flight_judges = map {$_ => 1} keys %{$panel_judges{$other->id}};
-					my @clear;
+				FLIGHT:
+				foreach my $flight_number (2 .. $num_flights) {
 
-					foreach my $judge (@judges) {
+					OTHER:
+					foreach my $other (@panels) {
 
-						if ($category_settings{"rounds_per"}
-							&& $round->type ne "elim"
-							&& $round->type ne "final"
-							&& $round->type ne "runoff"
-						) {
-							next if $judge_use->{$judge}{"left"} < 1;
+						next if $done{"P-".$other->id};
+						next if $flighted{$other->id};
+
+						my %flight_judges = map {$_ => 1} keys %{$panel_judges{$other->id}};
+						my @clear;
+
+						foreach my $judge (@judges) {
+
+							if ($category_settings{"rounds_per"}
+								&& $round->type ne "elim"
+								&& $round->type ne "final"
+								&& $round->type ne "runoff"
+							) {
+								next if $judge_use->{$judge}{"left"} < 1;
+							}
+
+							next unless $flight_judges{$judge};
+							next if $done{"J-".$judge};
+							push @clear, $judge;
 						}
 
-						next unless $flight_judges{$judge};
-						next if $done{"J-".$judge};
-						push @clear, $judge;
+						next OTHER unless scalar @clear > $num_judges;
+
+						push @flights, $other;
+						@judges = @clear;
+						$flighted{$other->id}++;
+						next FLIGHT;
 					}
-
-					next OTHER unless scalar @clear > $num_judges;
-
-					push @flights, $other;
-					@judges = @clear;
-					$flighted{$other->id}++;
-					next FLIGHT;
 				}
-			}
 
-			my %already = ();
-			my @judge_panel;
+				my %already = ();
+				my $chosen;
 
-			# This sorts the parlis to the bottom; the steps that require them
-			# will go and get them, but then scorers will be drawn first from
-			# non-parlis so as not to absorb them all where not needed.
+				# This sorts the parlis to the bottom; the steps that require them
+				# will go and get them, but then scorers will be drawn first from
+				# non-parlis so as not to absorb them all where not needed.
 
-			foreach my $judge (@judges) {
+				foreach my $judge (@judges) {
 
-				next if $done{"J-".$judge};
+					next if $done{"J-".$judge};
 
-				next if
-					(not defined $category_settings{"allow_school_panels"})
-					&& (
-						$panel_judges{$panel->id}{$judge}{"school"} > 0
+					next if
+						(not defined $category_settings{"allow_school_panels"})
+						&& (
+							$panel_judges{$panel->id}{$judge}{"school"} > 0
+							&& $panel_judges{$panel->id}{$judge}{"school"}
+							&& $already{"school"}{$panel_judges{$panel->id}{$judge}{"school"}}
+						);
+
+					next if ($tourn_settings->{"ncfl"} || $event_settings{"region_judge_forbid"} )
 						&& $panel_judges{$panel->id}{$judge}{"school"}
-						&& $already{"school"}{$panel_judges{$panel->id}{$judge}{"school"}}
-					);
-
-				next if ($tourn_settings->{"ncfl"} || $event_settings{"region_judge_forbid"} )
-					&& $panel_judges{$panel->id}{$judge}{"school"}
-					&& $panel_judges{$panel->id}{$judge}{"region"}
-					&& $already{"region"}{$panel_judges{$panel->id}{$judge}{"region"}};
-
-				if ($parlis == 1) {
-					next if (not defined $judge_settings{$judge}{"parli"});
-					$done{$panel->id}{"parli"}++;
-				} elsif ($parlis == 3) {
-					next if (not defined $done{$panel->id}{"parli"});
-				}
-
-				if ($panel_judges{$panel->id}{$judge}{"school"}) {
-					$already{"school"}{$panel_judges{$panel->id}{$judge}{"school"}}++;
-				}
-
-				if ( ($tourn_settings->{"ncfl"} || $event_settings{"region_judge_forbid"} )
-					&& $panel_judges{$panel->id}{$judge}{"school"}
-					&& $panel_judges{$panel->id}{$judge}{"region"}
-				) {
-					$already{"region"}{$panel_judges{$panel->id}{$judge}{"region"}}++;
-				}
-
-				push @judge_panel, $judge;
-				last if scalar @judge_panel >= $num_judges;
-			}
-
-			my $flight_number = 1;
-
-			foreach my $chamber (@flights) {
-
-				$chamber->flight($flight_number);
-				$chamber->update();
-				$flight_number++;
-
-				$done{"flight"}{$chamber->id}++;
-
-				foreach my $judge (@judge_panel) {
-
-					my $chair;
+						&& $panel_judges{$panel->id}{$judge}{"region"}
+						&& $already{"region"}{$panel_judges{$panel->id}{$judge}{"region"}};
 
 					if ($parlis == 1) {
-						$chair++;
+						next if (not defined $judge_settings{$judge}{"parli"});
+						$done{$panel->id}{"parli"}++;
+					} elsif ($parlis == 3) {
+						next if (not defined $done{$panel->id}{"parli"});
 					}
 
-					if ($parlis == 3) {
-						$chair++
-							if $judge_settings{$judge}{"parli"}
-							&& (not defined $done{$panel->id}{"parli_done"});
+					if ($panel_judges{$panel->id}{$judge}{"school"}) {
+						$already{"school"}{$panel_judges{$panel->id}{$judge}{"school"}}++;
 					}
 
-					$done{$panel->id}{"parli_done"}++;
+					if ( ($tourn_settings->{"ncfl"} || $event_settings{"region_judge_forbid"} )
+						&& $panel_judges{$panel->id}{$judge}{"school"}
+						&& $panel_judges{$panel->id}{$judge}{"region"}
+					) {
+						$already{"region"}{$panel_judges{$panel->id}{$judge}{"region"}}++;
+					}
+
+					$chosen = $judge;
+					last;
+				}
+
+				my $flight_number = 1;
+
+				foreach my $chamber (@flights) {
+
+					$chamber->flight($flight_number);
+					$chamber->update();
+					$flight_number++;
+
+					$done{"flight"}{$chamber->id}++;
+					my $chair;
+
+					if (
+						($parlis || $event_settings{"auto_chairs"}) 
+						&& (not defined $chaired{$panel})
+					) { 
+
+						if ($event_settings{"auto_chairs"}) { 
+							unless ($done{$panel->id}{"chair"}++) {
+								$chair++;
+							}
+						}
+
+						if ($parlis == 1) { 
+							$chair++;
+						}
+
+						if ($parlis == 3) {
+							$chair++
+								if $judge_settings{$chosen}{"parli"}
+								&& (not defined $done{$panel->id}{"parli_done"});
+						}
+
+						$done{$panel->id}{"parli_done"}++;
+					}
 
 					if ($parlis && $chair) {
 
@@ -474,27 +516,26 @@
 							$m->comp(
 								"/funclib/panel_judgeadd.mas",
 								panel    => $ochamber,
-								judge_id => $judge,
+								judge_id => $chosen,
 								chair    => $chair,
 								done     => $audited
-							) if $judge;
+							) if $chosen;
 						}
+				
+						$done{"P-".$chamber->id}++;
 
 					} else {
 
 						$m->comp(
 							"/funclib/panel_judgeadd.mas",
 							panel    => $chamber,
-							judge_id => $judge,
+							judge_id => $chosen,
 							chair    => $chair
-						) if $judge;
+						) if $chosen;
 
 					}
-
-					$done{"J-".$judge}++;
+					$done{"J-".$chosen}++;
 				}
-
-				$done{"P-".$chamber->id}++;
 			}
 		}
 	}
