@@ -8,16 +8,25 @@
 		}
 	});
 
-	function confirmSubmit(message, form) {
+	function confirmSubmit(message, submitButton) {
+
 	    event.preventDefault();
 
-	    alertify.confirm(message, function(e) {
-			if (e) {
-				this.form.submit();
-			} else {
+	    alertify.confirm(
+			"Please Confirm", 
+			message, 
+			function(event) { 
+				if (event) {
+					var form = $(submitButton).closest('form');
+					form.submit();
+				} else {
+					alertify.error("Save cancelled");
+				}
+    		},
+			function() {
 				alertify.error("Save cancelled");
 			}
-    	});
+		);
 	};
 
 	function confirmAction(link, message, dest, payload) {
