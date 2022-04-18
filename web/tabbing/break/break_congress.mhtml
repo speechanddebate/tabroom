@@ -48,14 +48,14 @@
 
 	our %penalties = (
 		school    => "10000000",
-		panel     => "10000",
+		panel     => "100000",
 		po        => "100",
 		last_name => "1"
 	);
 
 	if ($tourn_settings->{"nsda_nats"}) {
 		$penalties{"district"} = "1000000";
-		$penalties{"state"} = "1000";
+		$penalties{"region"} = "10000";
 	}
 
 	my $event = $from->event;
@@ -129,7 +129,6 @@
 
 	my @breaks;
 	my $count;
-
 	my %entry_data = ();
 
 	my $entry_sth = $dbh->prepare("
@@ -185,10 +184,10 @@
 			entry.id
 			from entry, ballot, score, panel
 		where panel.round in ($from_string)
-			and panel.id = ballot.panel
+			and panel.id     = ballot.panel
 			and ballot.entry = entry.id
-			and ballot.id = score.ballot
-			and score.tag = 'po'
+			and ballot.id    = score.ballot
+			and score.tag    = 'po'
 		group by entry.id
 	");
 
@@ -205,21 +204,6 @@
 
 	my $po_target = POSIX::ceil($po_count / $panels);
 
-	Tab::debuglog("I have $po_count pos and target $po_target");
-
-	my %already_broke = ();
-
-	while (
-		my (
-			$entry_id, $panel_id, $panel_letter, $school_id, $region_id, $district_id
-		) = $entry_sth->fetchrow_array()
-	) {
-		$entry_data{$entry_id}{"broke"}   = $panel_id;
-		$entry_data{$entry_id}{"school"}   = $school_id;
-		$entry_data{$entry_id}{"region"}   = $region_id;
-		$entry_data{$entry_id}{"district"} = $district_id;
-	}
-
 	my %panel_count = ();
 	my $total_count;
 
@@ -234,7 +218,6 @@
 
 			next unless $entry;
 			next if $ineligible->{$entry};
-			next if $entry_data{$entry}{"broke"};
 			my $seed;
 
 			if ($advance_overall) {
@@ -320,7 +303,7 @@
 
 	if (scalar @use_panels == 1) {
 
-		@{$panel_entries{$use_panels[0]}} = @breaks;
+		%{$panel_entries{$use_panels[0]}} = map {$_ => 1} @breaks;
 
 	} else {
 
@@ -353,13 +336,7 @@
 			}
 
 			my $panel_id = shift @snake_panels;
-			push @{$panel_entries{$panel_id}}, $entry;
-		}
-
-		foreach my $entry_id (keys %entry_data) {
-			my $panel_id = $entry_data{$entry_id}{"broke"};
-			next unless $panel_id;
-			push @{$panel_entries{$panel_id}}, $entry_data{$entry_id}{"entry"};
+			$panel_entries{$panel_id}{$entry} = 1;
 		}
 
 		if ($method eq "snake_school"
@@ -373,174 +350,103 @@
 				my $pass_counter;
 				my $po_penalty = $penalties{"po"};
 
+				@use_panels = shuffle(@use_panels);
+
+				PANEL:
 				foreach my $panel_id (@use_panels) {
 
-					if ($po_penalty) {
-
-						$penalties{"po"} = $po_penalty;
-
-						#If you don't skip POs a lot of the time it takes forever.
-						my $panel_po_count;
-						foreach my $entry_id (@{$panel_entries{$panel_id}}) {
-							$panel_po_count++ if $entry_data{$entry_id}{"po"};
-						}
-
-						unless ($panel_po_count > $po_target) {
-							delete $penalties{"po"};
-						}
-					}
-
 					unless ($panels{$panel_id}{"score"}) {
-						$panels{$panel_id}{"score"} = score_elim_chamber(\@{$panel_entries{$panel_id}}, \%entry_data);
+						$panels{$panel_id}{"score"} = score_elim_chamber($panel_entries{$panel_id}, \%entry_data);
 					}
 
 					next unless $panels{$panel_id}{"score"} > 0;
 
-					foreach my $entry (@{$panel_entries{$panel_id}}) {
+					foreach my $entry (keys %{$panel_entries{$panel_id}}) {
 
-						next if $entry_data{$entry}{"broke"};
-						my @test = @{$panel_entries{$panel_id}};
+						delete $panel_entries{$panel_id}{$entry};
 
-						my $index = 0;
-						$index++ until $test[$index] == $entry;
-						splice(@test, $index, 1);
+						my $improvement;
+						my $swap_panel;
+						my $swap_entry;
 
-						my $test_score = score_elim_chamber(\@test, \%entry_data);
+						foreach my $other_panel (@use_panels) {
 
-						if ($test_score < $panels{$panel_id}{"score"}) {
+							# Can't switch to the same panel
+							next if $other_panel == $panel_id;
+							next unless $panel_entries{$panel_id};
 
-							my $swap_seed_dist = 99;
-							my $swap_tb_dist   = 99;
-							my $swap_score     = -99;
-							my $swap_entry;
-							my $swap_panel;
+							unless ($panels{$other_panel}{"score"}) {
+								$panels{$other_panel}{"score"} = score_elim_chamber($panel_entries{$other_panel}, \%entry_data);
+							}
 
-							foreach my $other_id (@use_panels) {
+							my $old_total = $panels{$other_panel}{"score"} + $panels{$panel_id}{"score"};
 
-								# Can't switch to the same panel
-								next if $other_id == $panel_id;
-								next if $entry_data{$other_id}{"broke"};
+							OTHER:
+							foreach my $other_entry (sort keys %{$panel_entries{$other_panel}}) {
 
-								# Find the other panel for scoring
-								my @other_panel = @{$panel_entries{$other_id}};
+								if (
+									$method eq "snake_school"
+									|| $method eq "snake_school_tight"
+								) {
+									my $seed_dist = abs(
+										$entry_data{$other_entry}{"seed"} - $entry_data{$entry}{"seed"}
+									);
 
-								# Put me into this panel for testing
-								unless ($panels{$other_id}{"score"}) {
-									$panels{$other_id}{"score"} = score_elim_chamber(\@{$panel_entries{$other_id}}, \%entry_data);
+									next OTHER if ($seed_dist > 2 && $method eq "snake_school");
+									next OTHER if ($seed_dist > 0 && $method eq "snake_school_tight");
 								}
 
-								foreach my $other_entry (@{$panel_entries{$other_id}}) {
-
-									my $seed_dist = abs(
-										$entry_data{$other_entry}{"seed"}
-										- $entry_data{$entry}{"seed"}
-									);
+								if ($method eq "snake_school_rank") {
 
 									my $tb_dist = abs(
-										$entry_data{$other_entry}{"tb"}
-										- $entry_data{$entry}{"tb"}
+										$entry_data{$other_entry}{"tb"} - $entry_data{$entry}{"tb"}
 									);
 
-									next if ($seed_dist > 2 && $method eq "snake_school");
-									next if ($seed_dist > 0 && $method eq "snake_school_tight");
-									next if ($tb_dist > 0 && $method eq "snake_school_rank");
-
-									# Remove swap candidate from the panel
-									$index = 0;
-									$index++ until $other_panel[$index] == $other_entry;
-									splice(@other_panel, $index, 1);
-
-									push (@test, $other_entry);
-
-									my $new_initial_score = score_elim_chamber(\@test, \%entry_data);
-									my $new_other_score = score_elim_chamber(\@other_panel, \%entry_data);
-
-									my $diff =
-										$panels{$other_id}{"score"}
-										+ $panels{$panel_id}{"score"}
-										- $new_other_score
-										- $new_initial_score;
-
-									if ( $diff > 0 && $diff > $swap_score) {
-										$swap_entry = $other_entry;
-										$swap_score = $diff;
-										$swap_seed_dist = $seed_dist;
-										$swap_tb_dist = $tb_dist;
-										$swap_panel = $other_id;
-									}
-
-									if (
-										($diff > 0
-											&& $diff == $swap_score
-											&& $seed_dist < $swap_seed_dist
-											&& ($method eq "snake_school"
-											   ||$method eq "snake_school_tight")
-										)
-
-									||
-										($diff > 0
-											&& $diff == $swap_score
-											&& $tb_dist < $swap_tb_dist
-											&& $method eq "snake_school_rank"
-										)
-									) {
-
-										$swap_entry = $other_entry;
-										$swap_score = $new_other_score;
-										$swap_seed_dist = $seed_dist;
-										$swap_tb_dist = $tb_dist;
-										$swap_panel = $other_id;
-									}
-
-									# Reset the table
-
-									if ( grep( /^$other_entry/, @test ) ) {
-										$index = 0;
-										$index++ until $test[$index] == $other_entry;
-										splice(@test, $index, 1);
-									}
-
-									push (@other_panel, $other_entry);
-
+									next OTHER if ($tb_dist > 0 && $method eq "snake_school_rank");
 								}
 
-								if ( grep( /^$entry/, @other_panel ) ) {
-									$index = 0;
-									$index++ until $other_panel[$index] == $entry;
-									splice(@other_panel, $index, 1);
+
+								delete $panel_entries{$other_panel}{$other_entry};
+
+								$panel_entries{$other_panel}{$entry} = 1;
+								$panel_entries{$panel_id}{$other_entry} = 1;
+
+								my $new_total = score_elim_chamber($panel_entries{$panel_id}, \%entry_data);
+								$new_total += score_elim_chamber($panel_entries{$other_panel}, \%entry_data);
+
+								my $diff = $old_total - $new_total;
+
+								if ($diff > $improvement) {
+									$improvement = $diff;
+									$swap_panel = $other_panel;
+									$swap_entry = $other_entry;
 								}
+
+								delete $panel_entries{$other_panel}{$entry};
+								delete $panel_entries{$panel_id}{$other_entry};
+								$panel_entries{$other_panel}{$other_entry} = 1;
 							}
+						}
 
-							if ($swap_entry) {
+						if ($swap_panel && $swap_entry) {
 
-								$pass_counter++;
+							delete $panel_entries{$panel_id}{$entry};
+							delete $panel_entries{$swap_panel}{$swap_entry};
 
-								my @panel2 = @{$panel_entries{$swap_panel}};
-								my @panel1 = @{$panel_entries{$panel_id}};
+							$panel_entries{$swap_panel}{$entry} = 1;
+							$panel_entries{$panel_id}{$swap_entry} = 1;
 
-								push (@panel1, $swap_entry);
+							$panels{$swap_panel}{"score"} = score_elim_chamber($panel_entries{$swap_panel}, \%entry_data);
+							$panels{$panel_id}{"score"} = score_elim_chamber($panel_entries{$panel_id}, \%entry_data);
 
-								my $swapdex = 0;
-								$swapdex++ until $panel1[$swapdex] == $entry;
+							$pass_counter++;
 
-								splice(@panel1, $swapdex, 1);
-
-								$swapdex = 0;
-								$swapdex++ until $panel2[$swapdex] == $swap_entry;
-								splice(@panel2, $swapdex, 1);
-
-								push (@panel2, $entry);
-
-								@{$panel_entries{$panel_id}} = @panel1;
-								@{$panel_entries{$swap_panel}} = @panel2;
-
-								$panels{$panel_id}{"score"} = score_elim_chamber(\@panel1, \%entry_data);
-								$panels{$swap_panel}{"score"} = score_elim_chamber(\@panel2, \%entry_data);
-
-							}
+						} else {
+							$panel_entries{$panel_id}{$entry} = 1;
 						}
 					}
 				}
+
 				last unless $pass_counter > 1;
 			}
 		}
@@ -570,7 +476,9 @@
 
 	foreach my $panel_id (@use_panels) {
 
-		my @entries = @{$panel_entries{$panel_id}} if $panel_entries{$panel_id};
+		next unless $panel_entries{$panel_id};
+
+		my @entries = keys %{$panel_entries{$panel_id}};
 		my @judges = keys %{$panels{$panel_id}{"judges"}};
 
 		my $sth = $dbh->prepare("
@@ -682,16 +590,20 @@
 	sub score_elim_chamber {
 
 		my ($panref, $entref, $loud) = @_;
+
+		return unless $panref;
+
+		my @entries = sort {$a <=> $b} keys %{$panref};
 		my $score = 0;
 
-		foreach my $entry_id (@$panref) {
-			foreach my $other_id (@$panref) {
-
+		foreach my $entry_id (@entries) {
+			foreach my $other_id (@entries) {
 				next unless $other_id > $entry_id;
-
 				foreach my $tag (keys %penalties) {
-
-					if ($entref->{$entry_id}{$tag} eq $entref->{$other_id}{$tag}) {
+					if (
+						$entref->{$entry_id}{$tag} &&
+						($entref->{$entry_id}{$tag} eq $entref->{$other_id}{$tag})
+					) {
 						$score += $penalties{$tag};
 					}
 				}
