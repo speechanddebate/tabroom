@@ -1,0 +1,269 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$session
+	$perms
+</%args>
+<%init>
+
+	use Text::CSV;
+
+	unless ($perms->{"owner"}) {
+		$m->comp("/funclib/abort.mas", message => "Access denied");
+	}
+
+	my $req = Apache2::Request->new($r);
+	my @csv_handles = $r->upload();
+
+	my @problems;
+	my %counts;
+
+    if (@csv_handles) {
+
+		my $dbh = Tab::DBI->db_Main();
+
+		my $entries_sth = $dbh->prepare("
+			select
+				person.id, person.first, person.last, person.nsda, vc.id vaccine_id, vc.value status
+			from person
+				left join person_setting vc on vc.tag = 'vaccine' and vc.person = person.id
+
+				where exists (
+					select student.id
+					from student, entry_student es, entry, event
+					where event.tourn = ?
+					and event.id = entry.event
+					and entry.id = es.entry
+					and es.student = student.id
+					and student.person = person.id
+				)
+		");
+
+		$entries_sth->execute($tourn->id);
+		my $entries_ref = $entries_sth->fetchall_hash();
+		$entries_sth->finish();
+
+		my $judges_sth = $dbh->prepare("
+			select
+				person.id, person.email, person.first, person.last, person.nsda, vc.id vaccine_id, vc.value status
+			from person
+				left join person_setting vc on vc.tag = 'vaccine' and vc.person = person.id
+
+				where exists (
+					select judge.id
+					from judge, category
+					where category.tourn = ?
+					and category.id = judge.category
+				)
+		");
+
+		my $create_sth = $dbh->prepare("
+			insert into person_setting (tag, person, value) values ('vaccine', ?, ?)
+		");
+
+		my $update_sth = $dbh->prepare("
+			update person_setting set value = ? where id = ?
+		");
+
+		$judges_sth->execute($tourn->id);
+		my $judges_ref = $judges_sth->fetchall_hash();
+		$judges_sth->finish();
+
+		my @people = @{$entries_ref};
+		push @people, @{$judges_ref};
+
+		my %targets;
+
+		foreach my $tag ("id", "nsda", "email", "phone") {
+			%{$targets{$tag}} = map {$_->{$tag} => $_} @people;
+		}
+
+        # Get the upload and create the file handle.
+        my $csv_file = $req->upload($csv_handles[0]);
+        my $io = $csv_file->io;
+        my $csv = Text::CSV->new({ sep_char => ',' });
+
+        LINE:
+        foreach my $line (<$io>) {
+
+            next unless $csv->parse($line);
+
+            my (
+				$type, $school, $staff,
+				$first, $middle, $last,
+				$email, $phone, $group, $status,
+				@garbage
+			)= $csv->fields();
+
+			next unless $status;
+
+			$email = lc($email);
+
+			if ($type eq "Member Type") {
+				next;
+			}
+
+			my $target;
+			my $id;
+			my $nsda;
+
+			if (index($staff, "TR") == -1) {
+				$nsda = $staff;
+			} else {
+				$id = $staff;
+				$id =~ s/[\D_]//g;
+			}
+
+			if ($phone && $targets{"phone"}{$phone}) {
+				$target = $targets{"phone"}{$phone};
+			} elsif ($email && $targets{"email"}{$email}) {
+				$target = $targets{"email"}{$email};
+			} elsif ($id && $targets{"id"}{$id}) {
+				$target = $targets{"id"}{$id};
+			} elsif ($nsda && $targets{"nsda"}{$nsda}) {
+				$target = $targets{"nsda"}{$nsda};
+			} else {
+				my %problem = (
+					type   => $type,
+					first  => $first,
+					middle => $middle,
+					last   => $last,
+					nsda   => $nsda,
+					school => $school,
+					email  => $email,
+					phone  => $phone,
+					group  => $group,
+					status => $status
+				);
+
+				push @problems, \%problem;
+				next LINE;
+			}
+
+			unless ($status eq $target->{'status'}) {
+				if ($target->{"vaccine_id"}) {
+					$update_sth->execute($status, $target->{'vaccine_id'});
+					$counts{"updated"}++;
+				} else {
+					$create_sth->execute($target->{"id"}, $status);
+					$counts{"recorded"}++;
+				}
+			}
+		}
+	}
+
+</%init>
+
+	<& "menu.mas",
+		tourn          => $tourn,
+		tourn_settings => $tourn_settings,
+		person         => $person,
+		whoami         => 'vaccine_import'
+	&>
+
+	<div class="main">
+
+		<div id="output">
+
+			<h5>File upload results:</h5>
+
+			<p><% $counts{'recorded'} %> vaccine status recorded for the first time</p>
+			<p><% $counts{'updated'} %> vaccine statuses updated</p>
+
+			<span class="seveneighths">
+				<h6>VaccineCheck users not found in this tournament</h6>
+			</span>
+
+			<span
+				class = "eighth rightalign nospace"
+				id    = "buttonarea_missing"
+			>
+			</span>
+
+			<& "/funclib/tablesorter.mas", table => "missing" &>
+
+			<table id = "missing">
+
+				<thead>
+					<tr class="yellowrow">
+						<th>
+							First
+						</th>
+						<th>
+							Middle
+						</th>
+						<th>
+							Last
+						</th>
+						<th>
+							Email
+						</th>
+						<th>
+							Phone
+						</th>
+						<th>
+							NSDA/TRID
+						</th>
+						<th>
+							School
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+%					foreach my $problem (@problems) {
+						<tr>
+							<td>
+								<% $problem->{'first'} %>
+							</td>
+
+							<td>
+								<% $problem->{'middle'} %>
+							</td>
+
+							<td>
+								<% $problem->{'last'} %>
+							</td>
+
+							<td>
+								<% $problem->{'email'} %>
+							</td>
+
+							<td>
+								<% $problem->{'phone'} %>
+							</td>
+
+							<td>
+								<% $problem->{'nsda'} %>
+							</td>
+
+							<td>
+								<% $problem->{'school'} %>
+							</td>
+						</tr>
+%					}
+				</tbody>
+			</table>
+
+		</div>
+
+		<div id="uploader">
+
+			<h3><% $tourn->name %></h3>
+
+			<h5 class="martopmore">Import VaccineCheck Data</h5>
+
+			<div class="even">
+				<& "/funclib/uploader.mas",
+					url      => "vaccine_import.mhtml",
+					filename => "importCsv",
+					output   => "output",
+					hideme   => "uploader",
+					submit   => "VaccineCheck Data"
+				&>
+			</div>
+		</div>
+	</div>
+
+
