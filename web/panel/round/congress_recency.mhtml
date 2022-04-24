@@ -1,0 +1,283 @@
+<%args>
+	$round    => undef
+	$round_id => undef
+	$event    => undef
+	$event_id => undef
+	$mode     => undef
+</%args>
+<%init>
+
+	use List::Util 'shuffle';
+
+	if ($round_id) {
+		$round = Tab::Round->retrieve($round_id);
+	}
+
+	if ($event_id) {
+		$event = Tab::Event->retrieve($event_id);
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	if ($mode eq "fix") {
+
+		my $sth = $dbh->prepare("
+			select
+				ballot.id, ballot.speakerorder sporder,
+				ballot.entry, panel.id panel, entry.active
+			from ballot, panel, entry
+			where ballot.panel = panel.id
+				and ballot.entry = entry.id
+				and (ballot.audit != 1 OR ballot.chair = 1)
+				and panel.round = ?
+		");
+
+		my $update_sth = $dbh->prepare("
+			update ballot
+				set ballot.speakerorder = ?
+			where ballot.entry = ?
+				and ballot.panel = ?
+				and (ballot.audit != 1 OR ballot.chair = 1)
+		");
+
+		$sth->execute($round->id);
+		my $result_ref = $sth->fetchall_hash();
+		my %panels;
+		my %inactive;
+
+		foreach my $result (@{$result_ref}) {
+
+			$panels{$result->{"panel"}}{$result->{"sporder"}} = $result->{"entry"};
+
+			unless ($result->{active}) {
+				$inactive{$result->{"entry"}}++;
+			}
+		}
+
+		my $max_order;
+
+		foreach my $panel_id (sort {$a <=> $b} keys %panels) {
+			foreach my $order (sort {$a <=> $b} keys %{$panels{$panel_id}} ) {
+				$max_order = $order if $order > $max_order;
+			}
+		}
+
+		foreach my $panel_id (sort {$a <=> $b} keys %panels) {
+
+			my $count = $max_order + 1;
+
+			#Park it with some other random number to get out of range
+			foreach my $order (sort {$a <=> $b} keys %{$panels{$panel_id}} ) {
+				my $entry = $panels{$panel_id}{$order};
+				$update_sth->execute($count++, $entry, $panel_id);
+			}
+
+			$count = 1;
+
+			# And now reset it to the actual order
+			foreach my $order (sort {$a <=> $b} keys %{$panels{$panel_id}} ) {
+				my $entry = $panels{$panel_id}{$order};
+				next if $inactive{$entry};
+				$update_sth->execute($count++, $entry, $panel_id);
+			}
+
+			# Drops to the end
+			foreach my $order (sort {$a <=> $b} keys %{$panels{$panel_id}} ) {
+				my $entry = $panels{$panel_id}{$order};
+				next unless $inactive{$entry};
+				$update_sth->execute($count++, $entry, $panel_id);
+			}
+		}
+
+		if ($ARGS{"redirect"}) {
+			my $msg = "Recency gaps filled for round ".$round->realname;
+			$m->redirect("show.mhtml?round_id=".$round->id."&msg=$msg");
+		}
+
+		return "Recency reshuffled for ".$round->realname;
+	}
+
+	my %already;
+
+	if ($round) {
+
+		my $event = $round->event;
+
+		my $sth = $dbh->prepare("
+			select entry.id entry,
+				ballot.id ballot, ballot.speakerorder sporder,
+				round.id round, round.name roundname, round.type,
+				ignore_results.value iverson
+
+			from (entry, ballot, panel, round)
+				left join round_setting ignore_results on ignore_results.round = round.id and ignore_results.tag = 'ignore_results'
+
+			where round.event = ?
+				and round.id = panel.round
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+				and entry.active = 1
+		");
+
+		$sth->execute($event->id);
+		my $result_ref = $sth->fetchall_hash();
+		$sth->finish();
+
+		foreach my $result (@{$result_ref}) {
+			next if $result->{"iverson"};
+			next if $round && $round->name >= $result->{"roundname"};
+			next if $already{$result->{"entry"}}{"done"}{$result->{"round"}}++;
+
+			$already{$result->{"entry"}}{"orders"}{$result->{"sporder"}}++;
+			$already{$result->{"entry"}}{"total"} += $result->{"sporder"};
+			$already{$result->{"entry"}}{"count"}++;
+		}
+
+		foreach my $entry (keys %already) {
+			next unless $already{$entry}{"count"};
+			$already{$entry}{"average"} = $already{$entry}{"total"} / $already{$entry}{"count"};
+		}
+	}
+
+	my @rounds;
+
+	if ($round) {
+		push @rounds, $round;
+	} elsif ($event) {
+		push @rounds, $event->rounds();
+	}
+
+	my $message;
+
+	foreach my $round (sort {$a->name <=> $b->name} @rounds) {
+
+		my @ties = $m->comp("/funclib/congress_ties.mas", round => $round);
+		my $parts = scalar @ties;
+
+		my $sth = $dbh->prepare("
+			select
+				ballot.id, ballot.entry, panel.id panel, entry.active,
+				ignore_results.value iverson, ballot.speakerorder sporder
+			from (ballot, panel, entry)
+				left join round_setting ignore_results on ignore_results.round = panel.round and ignore_results.tag = 'ignore_results'
+			where ballot.panel = panel.id
+				and ballot.entry = entry.id
+				and (ballot.audit != 1 OR ballot.chair = 1)
+				and panel.round = ?
+		");
+
+		my $update_sth = $dbh->prepare("
+			update ballot
+				set ballot.speakerorder = ?
+			where ballot.entry = ?
+				and ballot.panel = ?
+				and (ballot.audit != 1 OR ballot.chair = 1)
+		");
+
+		$sth->execute($round->id);
+		my $result_ref = $sth->fetchall_hash();
+		$sth->finish();
+
+		my %panels;
+
+		# Recalculate averages and distance maps
+		foreach my $entry (keys %already) {
+			next unless $already{$entry}{"count"};
+			$already{$entry}{"average"} = $already{$entry}{"total"} / $already{$entry}{"count"};
+		}
+
+		my $max_order;
+		my %inactive;
+
+		foreach my $result (@{$result_ref}) {
+			$panels{$result->{"panel"}}{$result->{"entry"}}++;
+			$max_order = $result->{'sporder'} if $max_order < $result->{'sporder'};
+			$inactive{$result->{"entry"}}++ unless $result->{"active"};
+		}
+
+		foreach my $panel_id (keys %panels) {
+
+			my $panel_size = scalar(keys %{$panels{$panel_id}});
+			my $cohort_size = $panel_size / $parts;
+
+			my %panel_sort;
+			my %cohorts;
+			my $count = $max_order + 1;
+
+			foreach my $entry (shuffle (keys %{$panels{$panel_id}}) ) {
+
+				# Park it with some other random number to get out of range
+				$update_sth->execute($count++, $entry, $panel_id);
+
+				if ($inactive{$entry}) {
+
+				} elsif ($round->name % 2) {
+
+					foreach my $past (keys %{$already{$entry}{"orders"}}) {
+						$panel_sort{$entry} += $past;
+					}
+
+					unless ($panel_sort{$entry}) {
+						$panel_sort{$entry} = $cohort_size;
+					}
+
+				} else {
+
+					my $best_order;
+					my $best_distance;
+
+					foreach my $order (1 .. $panel_size) {
+						my $total;
+
+						foreach my $past (keys %{$already{$entry}{"orders"}}) {
+							$total += abs($past - $order);
+						}
+
+						$panel_sort{$entry}{$order} = $total;
+					}
+				}
+			}
+
+			$count = 1;
+
+			if ($round->name % 2) {
+
+				foreach my $entry (sort {$panel_sort{$b} <=> $panel_sort{$a}} keys %panel_sort) {
+					$update_sth->execute($count, $entry, $panel_id);
+					$already{$entry}{"orders"}{$count}++;
+					$already{$entry}{"total"} += $count;
+					$already{$entry}{"count"}++;
+					$count++;
+				}
+
+			} else {
+
+				while (keys %panel_sort) {
+					my @entries = sort {$panel_sort{$b}{$count} <=> $panel_sort{$a}{$count}} keys %panel_sort;
+					my $entry = $entries[0];
+					delete $panel_sort{$entry};
+
+					$update_sth->execute($count, $entry, $panel_id);
+					$already{$entry}{"orders"}{$count}++;
+					$already{$entry}{"total"} += $count;
+					$already{$entry}{"count"}++;
+					$count++;
+				}
+			}
+		}
+
+		$message .= "<br />" if $message;
+		$message .= $round->realname." orders shuffled";
+	}
+
+	if ($ARGS{"redirect"}) {
+
+		if ($round) {
+			$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&msg=$message");
+		} else {
+			$m->redirect("/panel/schemat/show.mhtml?event_id=".$event->id."&msg=$message");
+		}
+	}
+	return $message;
+
+</%init>
