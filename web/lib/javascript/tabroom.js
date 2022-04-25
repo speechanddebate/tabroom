@@ -13,9 +13,9 @@
 	    event.preventDefault();
 
 	    alertify.confirm(
-			"Please Confirm", 
-			message, 
-			function(event) { 
+			"Please Confirm",
+			message,
+			function(event) {
 				if (event) {
 					var form = $(submitButton).closest('form');
 					form.submit();
@@ -217,13 +217,11 @@
 
 						$(".replybucket").text(data.reply);
 						$(".replyappend").append(data.reply);
-
 					}
 
 					if (data.error) {
 
 						alertify.error(data.message);
-
 						console.log(data);
 
 						if (data.destroy) {
@@ -347,7 +345,6 @@
 					if (callback && callback != 'false') {
 						callback(data);
 					}
-
 					return;
 				}
 			}
