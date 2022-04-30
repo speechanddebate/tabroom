@@ -12,54 +12,125 @@
 
 	$m->abort unless $chamber && $voter;
 
-	my $truncate = $chamber->round->event->setting('student_truncate_fill');
+	my $now = DateTime->now();
 
-	my @entries = $m->comp("/funclib/panel_entries.mas", panel => $chamber);
-	$truncate = scalar @entries unless $truncate;
+	my $round = $chamber->round;
+	my $event = $round->event;
 
-	my %taken;
+	my %tb_types = $m->comp(
+		"/funclib/tiebreak_types.mas",
+		round => $chamber->round
+	);
+
+	my $vote_event;
+	my $vote_chamber;
+	my $vote_session;
+
+	if ($event->setting("po_contest")) {
+
+		$vote_event = Tab::Event->retrieve($event->setting("po_contest"));
+
+		if ($vote_event) {
+
+			$vote_session = $vote_event->rounds(name => $round->name)->first;
+
+			if ($vote_session) {
+				$vote_chamber = $vote_session->panels(letter => $chamber->letter)->first;
+
+				if ($vote_chamber) {
+					%tb_types = $m->comp(
+						"/funclib/tiebreak_types.mas",
+						round => $vote_session
+					);
+				}
+			}
+		}
+	}
+
+	unless ($vote_chamber) {
+		$vote_chamber = $chamber;
+		$vote_event = $event;
+	}
+
+	my $truncate = $vote_event->setting('student_truncate_fill');
+
+	my @entries = $m->comp("/funclib/panel_entries.mas", panel => $vote_chamber);
+
+	if ($tb_types{"entry_winloss"}) {
+
+		my $winner = $ARGS{"winner"};
+
+		my $dbh = Tab::DBI->db_Main();
+		my $wipe_sth = $dbh->prepare("
+			delete vote.*
+            from student_vote vote
+            where vote.panel = ?
+				and vote.voter = ?
+		");
+
+		$wipe_sth->execute($vote_chamber, $voter);
+
+		Tab::StudentVote->create({
+			tag        => "winloss",
+			value      => 1,
+			panel      => $vote_chamber->id,
+			entry      => $ARGS{"winner"},
+			voter      => $voter->id,
+			entered_by => $person->id,
+			entered_at => $now
+		});
+	}
+
 	my $errs;
 
-	my @all_votes = Tab::StudentVote->search(panel => $chamber->id, voter => $voter->id);
+	if ($tb_types{"entry_rank"}) {
 
-	my %votes = map {$_->entry->id => $_} @all_votes;
+		my @entries = $m->comp("/funclib/panel_entries.mas", panel => $vote_chamber);
+		$truncate = scalar @entries unless $truncate;
 
-	my $now = DateTime->now(time_zone => $tourn->tz);
+		my %taken;
+		my $errs;
 
-	foreach my $entry (@entries) {
+		my @all_votes = Tab::StudentVote->search(panel => $chamber->id, voter => $voter->id);
 
-#		this event is stupid
-#		next if $entry->id == $voter->id;
+		my %votes = map {$_->entry->id => $_} @all_votes;
 
-		my $rank = $ARGS{$entry->id};
 
-		if ($taken{$rank}) {
-			$errs = "You have repeated the rank $rank. ";
-		} else {
+		foreach my $entry (@entries) {
 
-			$rank = $truncate unless $rank;
+#			this event is stupid
+#			next if $entry->id == $voter->id;
 
-			if ($votes{$entry->id}) {
-				$votes{$entry->id}->value($rank);
-				$votes{$entry->id}->entered_by($person->id);
-				$votes{$entry->id}->entered_at($now);
-				$votes{$entry->id}->update();
+			my $rank = $ARGS{$entry->id};
+
+			if ($taken{$rank}) {
+				$errs = "You have repeated the rank $rank. ";
 			} else {
 
-				Tab::StudentVote->create({
-					value      => $rank,
-					panel      => $chamber->id,
-					entry      => $entry->id,
-					voter      => $voter->id,
-					entered_by => $person->id,
-					entered_at => $now
-				});
+				$rank = $truncate unless $rank;
+
+				if ($votes{$entry->id}) {
+					$votes{$entry->id}->value($rank);
+					$votes{$entry->id}->entered_by($person->id);
+					$votes{$entry->id}->entered_at($now);
+					$votes{$entry->id}->update();
+				} else {
+
+					Tab::StudentVote->create({
+						value      => $rank,
+						panel      => $chamber->id,
+						entry      => $entry->id,
+						voter      => $voter->id,
+						entered_by => $person->id,
+						entered_at => $now
+					});
+				}
+
+				$taken{$rank}++ unless $rank == $truncate;
 			}
 
-			$taken{$rank}++ unless $rank == $truncate;
 		}
-
-	}
+}
 
 	my $msg = "Student ballot saved for ".$voter->code unless $errs;
 
