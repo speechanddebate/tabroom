@@ -92,10 +92,11 @@ export const attendance = {
 
 		const startsQuery = `
 			select
-				judge.person person, panel.id panel,
+				judge.person person, panel.id panel, panel.timestamp timestamp,
 				ballot.judge_started startTime,
 				ballot.audit audited,
 				started_by.first startFirst, started_by.last startLast,
+				judge.first judgeFirst, judge.last judgeLast,
 				tourn.tz tz
 
 			from (panel, tourn, round, ballot, event, judge)
@@ -127,9 +128,10 @@ export const attendance = {
 			}
 
 			status[attend.person][attend.panel] = {
-				tag		 : attend.tag,
+				tag         : attend.tag,
 				timestamp   : attend.timestamp.toJSON,
 				description : attend.description,
+				started     : showDateTime(attend.timestamp, { tz: attend.tz, format: 'daytime' })
 			};
 		});
 
@@ -143,10 +145,11 @@ export const attendance = {
 			
 			if (attend.person) {
 				status[attend.person] = {
-					[attend.panel] : {
-						tag		 : attend.tag,
+					[attend.panel]  : {
+						tag         : attend.tag,
 						timestamp   : attend.timestamp.toJSON,
 						description : attend.description,
+						started     : showDateTime(attend.timestamp, {tz: attend.tz, format: 'daytime' })
 					},
 				};
 			}
@@ -161,11 +164,18 @@ export const attendance = {
 				status[start.person][start.panel] = {};
 			}
 
-			status[start.person][start.panel].started_by = `${start.startFirst} ${start.startLast}`;
+			if (start.startFirst === undefined) { 
+				status[start.person][start.panel].started_by = start.judgeFirst+' '+start.judgeLast;
+			} else {
+				status[start.person][start.panel].started_by = start.startFirst+' '+start.startLast;
+			}
+
 			status[start.person][start.panel].started = showDateTime(
 				start.startTime,
 				{ tz: start.tz, format: 'daytime' }
 			);
+
+			status[start.person][start.panel].timestamp = start.timestamp;
 
 			if (start.audited) {
 				status[start.person][start.panel].audited = true;
