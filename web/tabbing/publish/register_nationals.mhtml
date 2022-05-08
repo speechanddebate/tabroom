@@ -12,7 +12,7 @@
 		Tab::District->retrieve($tourn_settings->{"nsda_district"})
 		if $tourn_settings->{"nsda_district"};
 
-	my $nationals = $m->comp("/funclib/current_nationals.mas", 
+	my $nationals = $m->comp("/funclib/current_nationals.mas",
 		time     => $tourn->start,
 		max_year => $tourn->end->year
 	);
@@ -23,14 +23,13 @@
 
 	my $gap = $nationals->start - $tourn->end;
 
-	if ($gap->months > 8) { 
+	if ($gap->months > 8) {
 		$m->comp("/funclib/abort.mas",
 			message => "The current national tournament is more than a year away from this tournament.  You are probably trying to post a previous year's districts?"
 		);
 	}
 
-
-	unless ($district) {
+	unless ($district || ($person->site_admin && $tourn_settings->{"nsda_district"} == 199)) {
 		$m->comp("/funclib/abort.mas",
 			message => "Your district could not be loaded"
 		);
@@ -107,11 +106,28 @@
 	my @unposted_events =
 		Tab::Event->search_unposted_events($tourn->id);
 
-	my @district_entries =
-		$m->comp("/funclib/nationals_entry.mas",
+	my @district_entries;
+
+	if ($district) {
+
+		 @district_entries = $m->comp("/funclib/nationals_entry.mas",
 			district => $district,
-			tourn => $nationals
+			tourn    => $nationals
 		);
+
+	} elsif ($person->site_admin) {
+
+		Tab::Entry->set_sql(lastchance => "
+			select entry.*
+				from entry, event, entry_setting es
+			where event.tourn = ?
+				and event.id = entry.event
+				and entry.id = es.entry
+				and es.tag = 'lastchance'
+		");
+
+		 @district_entries = Tab::Entry->search_lastchance($nationals);
+	}
 
 	my %nationals_events =
 		map {$_->abbr => $_}
@@ -123,15 +139,19 @@
 
 	my $full_msg;
 
-	my %autoquals =
-		%{JSON::decode_json($nationals->setting('autoquals'))}
-		if $nationals->setting('autoquals');
-
 	my %district_autoquals;
+	my %autoquals;
 
-	foreach my $aq_id (keys %autoquals) {
-		next unless $autoquals{$aq_id}{'district'} == $tourn_settings->{"nsda_district"};
-		push @{$district_autoquals{$autoquals{$aq_id}{'event'}}}, $aq_id;
+	if ($district) {
+		%autoquals =
+			%{JSON::decode_json($nationals->setting('autoquals'))}
+			if $nationals->setting('autoquals');
+
+
+		foreach my $aq_id (keys %autoquals) {
+			next unless $autoquals{$aq_id}{'district'} == $tourn_settings->{"nsda_district"};
+			push @{$district_autoquals{$autoquals{$aq_id}{'event'}}}, $aq_id;
+		}
 	}
 
 	my %national_events = map {$_->abbr => $_} $nationals->events;
@@ -195,7 +215,7 @@
 						person   => $person,
 						entry    => $entry,
 						event    => $nationals_events{$event->abbr},
-						district => $district->id
+						district => $district
 					);
 
 					if ($new_entry && $new_entry eq int($new_entry)) {
@@ -258,11 +278,19 @@
 
 				my $tabbing = uc($tourn_settings->{"nsda_district_questions"}{"nsda_tabbing_software"});
 
+				my $description;
+
+				if ($district) {
+					$description = "Registration open email sent for ".$district->name." ($tabbing) to $string";
+				} else {
+					$description = "Last Chance Qualifier posted";
+				}
+
 				$m->comp("/funclib/log.mas",
 					tourn       => $nationals,
 					type        => "notification",
 					person      => $person,
-					description => "Registration open email sent for ".$district->name." ($tabbing) to $string"
+					description => $description
 				);
 			}
 		}
@@ -375,8 +403,7 @@
 		undef %existing_entries;
 
 		# Refresh it
-		@district_entries =
-		$m->comp("/funclib/nationals_entry.mas",
+		@district_entries = $m->comp("/funclib/nationals_entry.mas",
 			district => $district,
 			tourn    => $nationals
 		);
@@ -389,17 +416,19 @@
 			$tourn->setting("nsda_registered", $person->id);
 		}
 
-		my $chair = $district->permissions( tag => "chair" )->first;
+		if ($district) {
+			my $chair = $district->permissions( tag => "chair" )->first;
 
-		eval {
-			foreach my $perm ($tourn->permissions()) {
-				next if $perm->person->id == $person->id;
-				next if $perm->person->id == $chair->person->id;
-				$perm->delete();
-				$full_msg .= "<br />" if $full_msg;
-				$full_msg .= "District tournament access has been revoked from everyone except the district chair";
-			}
-		};
+			eval {
+				foreach my $perm ($tourn->permissions()) {
+					next if $perm->person->id == $person->id;
+					next if $perm->person->id == $chair->person->id;
+					$perm->delete();
+					$full_msg .= "<br />" if $full_msg;
+					$full_msg .= "District tournament access has been revoked from everyone except the district chair";
+				}
+			};
+		}
 	}
 
 </%init>
@@ -440,7 +469,7 @@
 
 			<span class="fourfifths">
 				<h4 class="marvert nospace padvert">
-					<% $district->name %> qualifiers
+					<% $district ? $district->name : "Last Chance" %> qualifiers
 				</h4>
 			</span>
 
@@ -492,13 +521,10 @@
 						>
 							Vacate
 						</th>
-
 					</tr>
-
 				</thead>
 
 				<tbody>
-
 <%perl>
 				foreach my $event ( $tourn->events() ) {
 
@@ -508,6 +534,7 @@
 					);
 
 					my $nats_event = $national_events{$event->abbr};
+
 					next unless $nats_event;
 
 					my @event_autoquals = @{$district_autoquals{$nats_event->id}}
@@ -539,21 +566,15 @@
 						my $entry_id = $qualifiers{$key}{"entry"};
 						my $rank = $qualifiers{$key}{"rank"};
 						my $tied++ if $qualifiers{"ties"}{$rank};
-
 </%perl>
-
 						<tr class="smallish
 							<% $tied ? "orangetext semibold" : "" %>
 							<% $qualifiers{$key}{"vacated"} ? "strike" : "" %>
 							<% $qualifiers{$key}{"ineligible"} ? "redtext" : "" %>
 						">
-
 							<td class="centeralign">
-
 <%perl>
-
 								if ($existing_entries{$entry_id}) {
-
 									if ($qualifiers{$key}{"vacated"}) {
 </%perl>
 										<div
@@ -611,7 +632,7 @@
 									<div class="full graytext semibold padless marless">
 										NATIONALS PASSED
 									</div>
-		
+
 %								} else {
 									<div class="full graytext semibold padless marless">
 										NOT POSTED
@@ -681,21 +702,15 @@
 							<td class="padless centeralign">
 
 %								if ($posted) {
-
 %									if ($qualifiers{$key}{"vacated"}) {
-
 										<span class="redtext semibold normalsize">
 											Y
 										</span>
-
 %									} else {
-
 										<span class="graytext semibold normalsize">
 											N
 										</span>
-
 %									}
-
 %								} else {
 
 									<span class="hidden"><% $qualifiers{$key}{"vacated"} %></span>
@@ -802,11 +817,8 @@
 
 						</tr>
 %					}
-
 %				}
-
 				</tbody>
-
 			</table>
 
 			<h5 class="martopmore">
@@ -893,7 +905,6 @@
 %			}
 
 			<div class="row">
-
 				<span class="threequarters semibold bluetext">
 					All events were audited
 				</span>
@@ -905,13 +916,10 @@
 						<a class=" greentext fa fa-lg fa-check"></a>
 %					}
 				</span>
-
 			</div>
 
 %			if (@unaudited_events) {
-
 				<div class="row borderredvert">
-
 					<span class="third redtext semibold bigger">
 						Unaudited:
 					</span>
@@ -921,12 +929,10 @@
 							<% $event->abbr %>
 %						}
 					</span>
-
 				</div>
 %			}
 
 			<div class="row">
-
 				<span class="threequarters semibold bluetext">
 					Results lists created
 				</span>
@@ -938,13 +944,11 @@
 						<a class=" greentext fa fa-lg fa-check"></a>
 %					}
 				</span>
-
 			</div>
 
 %			if (@unposted_events) {
 
 				<div class="row borderredvert">
-
 					<span class="third redtext semibold bigger">
 						Unposted:
 					</span>
@@ -956,7 +960,6 @@
 					</span>
 
 					<div class="full">
-
 						<span class="centeralign semibold bigger full">
 							Create results lists from the <br />Results &rarr; Qualifiers page:
 						</span>
@@ -968,11 +971,8 @@
 						>Create Results Postings</a>
 
 					</div>
-
 				</div>
 %			}
-
-
 		</div>
 
 		<div class="sidenote">
