@@ -1,7 +1,7 @@
 <%args>
 	$tourn
 	$tourn_settings
-	$tag         => undef
+	$quiz_id     => undef
 	$category_id => undef
 </%args>
 <%init>
@@ -11,52 +11,84 @@
 	my $category = Tab::Category->retrieve($category_id);
 
 	my @all_categories = $tourn->categories();
-	$category = $all_categories[0] if scalar @all_categories == 1;
 
-	my @keys;
+	unless ($category) { 
+		$category = $all_categories[0];
+	}
 
-	if ($category) {
+	my @quizzes;
+
+	if ($category) { 
+
+		@quizzes = eval { 
+			return @{$category->setting('required_quizzes')};
+		};
 
 		foreach my $jpool (
-			$m->comp("/funclib/category_jpools.mas",
+			$m->comp("/funclib/category_jpools.mas", 
 				category => $category,
 				limit => "registrant"
 			)
-		) {
-			push @keys, $jpool->setting("paradigm_form")
-				if $jpool->setting("paradigm_form");
+		) { 
+			push @quizzes, $jpool->setting("paradigm_quiz") 
+				if $jpool->setting("paradigm_quiz");
 		}
-
-		push @keys, $category->setting("paradigm_form")
-			if $category->setting("paradigm_form");
 	}
 
-	my %seen;
-	@keys = grep { ! $seen{$_} ++ } @keys;
+	my %quiz_by_id;
 
-	if (scalar @keys == 1) {
-		$tag = $keys[0];
+	foreach my $key (@quizzes) { 
+		my $quiz = Tab::Quiz->retrieve($key);
+		$quiz_by_id{$quiz->id} = $quiz;
 	}
 
-	my $rtag = $tag;
+	my $quiz;
 
-	$rtag =~ s/[\W_]//g;
-	undef $rtag unless $category;
+	if ( (scalar (keys %quiz_by_id)) == 1 || (not defined $quiz_id)) {
+		$quiz_id = $quizzes[0];
+	}
 
-	my %form = $m->comp(
-		"/funclib/questions.mas",
-		tag => $rtag
-	) if $rtag;
+	$quiz =  $quiz_by_id{$quiz_id};
 
-	my %answer_settings = $m->comp(
-		"/funclib/judge_settings.mas",
-		category => $category,
-		tag      => "form_".$rtag
-	) if $rtag;
+	my %form = eval {
+		return %{JSON::decode_json($quiz->questions)};
+	};
 
 	my $dbh = Tab::DBI->db_Main();
 
 	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.first, judge.last, 
+			school.name school,
+			chapter.state state,
+			person.email, pq.answers,
+			district.name district,
+			GROUP_CONCAT(jpool.name) jpools
+		from judge
+			left join school on judge.school = school.id
+			left join chapter on school.chapter = chapter.id
+			left join district on school.district = district.id
+			left join person on judge.person = person.id
+			left join person_quiz pq on pq.person = person.id
+				and pq.quiz = ?
+
+			left join jpool_judge jpj on jpj.judge = judge.id
+			left join jpool on jpj.jpool = jpool.id AND EXISTS
+				( select jps.id from jpool_setting jps where jps.jpool = jpj.jpool and jps.tag = 'registrant')
+
+		where judge.category = ?
+		group by judge.id
+		order by chapter.state, school.name, judge.last
+	");
+
+	my $result_refs;
+
+	if ($quiz && $category) { 
+		$sth->execute($quiz, $category);
+		$result_refs = $sth->fetchall_hash();
+	}
+
+	$sth = $dbh->prepare("
 		select
 			judge.id,
 			diamonds.value,
@@ -87,8 +119,6 @@
 			return JSON::decode_json($nomination);
 		};
 	}
-
-	push @keys, "NSDADiversity" if $tourn_settings->{"nsda_nats"};
 
 </%init>
 
@@ -130,20 +160,20 @@
 			class    = "fixedmed"
 			onChange = "this.form.submit();"
 		>
-%			foreach my $key (@keys) {
+%			foreach my $key (@quizzes) {
 				<option
 					value="<% $key %>"
-					<% $key eq $tag ? 'selected' : "" %>
-				><% $key %></option>
+					<% $key eq $quiz_id ? 'selected' : "" %>
+				><% $quiz_by_id{$key}->label %></option>
 %			}
 		</select>
 	</span>
 
 	<span class="marno tenth rightalign"
-		id="<% $tag %>_buttonarea"
+		id="<% $quiz_id %>_buttonarea"
 	></span>
 
-	<& "/funclib/tablesorter.mas", table => $tag &>
+	<& "/funclib/tablesorter.mas", table => $quiz_id &>
 
 <%perl>
 
@@ -170,11 +200,9 @@
 			map  { [$_, $_ =~ /(\d+)/] }
 			@keys;
 
-		my @judges = $m->comp("/funclib/category_judges.mas", category => $category);
-
 </%perl>
 
-		<table id="<% $tag %>">
+		<table id="<% $quiz_id %>">
 
 			<thead>
 
@@ -199,6 +227,11 @@
 					<th>
 						Pools
 					</th>
+
+					<th class="hiddencsv">
+						Emails
+					</th>
+
 					<th title="Self Nomination">
 						SN
 					</th>
@@ -224,68 +257,88 @@
 			<tbody>
 <%perl>
 
-			foreach my $judge (@judges) {
-
-				next unless $answer_settings{$judge->id};
+			foreach my $judge (@{$result_refs}) {
 
 				my %answers = eval {
-					return %{JSON::decode_json($answer_settings{$judge->id})} if $judge;
+					return %{JSON::decode_json($judge->{"answers"})};
 				};
-
-				my $regpools = $judge->regpools;
-				$regpools =~ s/,/<br\/>/g;
-
 </%perl>
 
 				<tr class="smallish">
 
 					<td>
-						<% $judge->first %>
+						<% $judge->{"first"} %>
 					</td>
 
 					<td>
-						<% $judge->last %>
+						<% $judge->{"last"} %>
 					</td>
 
 					<td>
 						<& "/funclib/short_name.mas",
-							name => $judge->schname,
+							name => $judge->{"school"},
 							printme => 1
 						&>
 					</td>
 
 					<td class="centeralign">
-						<% $judge->regname %>
+						<% $judge->{'state'} %>
 					</td>
 
 					<td class="smaller">
-						<% $regpools %>
+						<% $judge->{"jpools"} %>
+					</td>
+
+					<td class="hiddencsv">
+						<% $judge->{"email"} %>
 					</td>
 
 					<td class='centeralign'>
-						<% $nomination{$judge->id} && $nomination{$judge->id}{"self_nominated"} ? "Y" : "" %>
+						<% $nomination{$judge->{"id"}} && $nomination{$judge->{"id"}}{"self_nominated"} ? "Y" : "" %>
 					</td>
 
 					<td class='centeralign'>
-						<% $diamonds{$judge->id} %>
+						<% $diamonds{$judge->{"id"}} %>
 					</td>
 
 					<td class='centeralign'>
-						<% $diverse{$judge->id} ? "Y" : "" %>
+						<% $diverse{$judge->{"id"}} ? "Y" : "" %>
 					</td>
 
 %					foreach my $key (@keys) {
+<%perl>
+						$answers{$key} =~ s/Prefer not to answer/Prefer not/g;
+						$answers{$key} =~ s/prefer not to answer/Prefer not/g;
+						$answers{$key} =~ s/female/F/g;
+						$answers{$key} =~ s/Cisgender/Cis/g;
+						$answers{$key} =~ s/cisgender/Cis/g;
+						$answers{$key} =~ s/Cis gendered/Cis/g;
+						$answers{$key} =~ s/Genderfluid/GenFl/g;
+						$answers{$key} =~ s/Female/F/g;
+						$answers{$key} =~ s/Woman/F/g;
+						$answers{$key} =~ s/woman/F/g;
+						$answers{$key} =~ s/Male/M/g;
+						$answers{$key} =~ s/male/M/g;
+						$answers{$key} =~ s/Non-binary/NB/g;
+						$answers{$key} =~ s/Non-Binary/NB/g;
+						$answers{$key} =~ s/non-binary/NB/g;
+						$answers{$key} =~ s/Nonbinary/NB/g;
+						$answers{$key} =~ s/nonbinary/NB/g;
+						$answers{$key} =~ s/Over 64/64+/g;
+</%perl>
 						<td class="<% $key == 4 ? 'nowrap rightalign' : "" %>">
+
+%							if ($key == 1 && (not defined $answers{$key})) { 
+								<span class="hidden">
+									99999
+								</span>
+%							}
 							<% ucfirst($answers{$key}) %>
 						</td>
 %					}
-
 				</tr>
-
 %			}
-
 		</tbody>
-
 	</table>
 
 %	}
