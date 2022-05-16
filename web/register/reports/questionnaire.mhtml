@@ -1,7 +1,7 @@
 <%args>
 	$tourn
 	$tourn_settings
-	$tag         => undef
+	$quiz_id     => undef
 	$category_id => undef
 </%args>
 <%init>
@@ -9,9 +9,11 @@
 	use Switch;
 
 	my $category = Tab::Category->retrieve($category_id);
-
 	my @all_categories = $tourn->categories();
-	$category = $all_categories[0] if scalar @all_categories == 1;
+
+	unless ($category) { 
+		$category = $all_categories[0];
+	}
 
 	my @keys;
 
@@ -23,36 +25,66 @@
 				limit => "registrant"
 			)
 		) { 
-			push @keys, $jpool->setting("paradigm_form") 
-				if $jpool->setting("paradigm_form");
+			push @keys, $jpool->setting("paradigm_quiz") 
+				if $jpool->setting("paradigm_quiz");
 		}
 
-		push @keys, $category->setting("paradigm_form") 
-			if $category->setting("paradigm_form");
+		push @keys, $category->setting("paradigm_quiz") 
+			if $category->setting("paradigm_quiz");
 	}
 
 	my %seen;
 	@keys = grep { ! $seen{$_} ++ } @keys;
 
-	if (scalar @keys == 1 || (not defined $tag)) {
-		$tag = $keys[0];
+	my %quiz_by_id;
+
+	foreach my $key (@keys) { 
+		my $quiz = Tab::Quiz->retrieve($key);
+		$quiz_by_id{$quiz->id} = $quiz;
 	}
 
-	my $rtag = $tag;
+	my $quiz;
 
-	$rtag =~ s/[\W_]//g;
-	undef $rtag unless $category;
+	if (scalar @keys == 1 || (not defined $quiz_id)) {
+		$quiz_id = $keys[0];
+	}
 
-	my %form = $m->comp(
-		"/funclib/questions.mas", 
-		tag => $rtag
-	) if $rtag;
+	$quiz =  $quiz_by_id{$quiz_id};
 
-	my %answer_settings = $m->comp(
-		"/funclib/judge_settings.mas", 
-		category => $category,
-		tag      => "form_".$rtag
-	) if $rtag;
+	my %form = eval {
+		return %{JSON::decode_json($quiz->questions)};
+	};
+
+	foreach my $key (keys %form) {
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.first, judge.last, 
+			school.name school,
+			chapter.state state,
+			person.email, pq.answers,
+			district.name district
+		from judge
+			left join school on judge.school = school.id
+			left join chapter on school.chapter = chapter.id
+			left join district on school.district = district.id
+			left join person on judge.person = person.id
+			left join person_quiz pq on pq.person = person.id
+				and pq.quiz = ?
+		where judge.category = ?
+
+		order by chapter.state, school.name, judge.last
+	");
+
+	my $result_refs;
+
+	if ($quiz && $category) { 
+		$sth->execute($quiz, $category);
+		$result_refs = $sth->fetchall_hash();
+	}
 
 </%init>
 
@@ -86,20 +118,21 @@
 	</span>
 
 	<span class="third centeralign">
-
 		<select 
-			name     = "tag"
+			name     = "quiz_id"
 			class    = "fixedmed"
 			onChange = "this.form.submit();"
 		>
 %			foreach my $key (@keys) { 
 				<option 
 					value="<% $key %>"
-					<% $key eq $tag ? 'selected' : "" %>
-				><% $key %></option>
+					<% $key eq $quiz->id ? 'selected' : "" %>
+				><% $quiz_by_id{$key}->label %></option>
 %			}
 		</select>
 	</span>
+
+	</form>
 
 <%perl>
 
@@ -109,33 +142,29 @@
 		
 		my @judges = $m->comp("/funclib/category_judges.mas", category => $category);
 
-		foreach my $judge (@judges) { 
+		foreach my $judge (@{$result_refs}) { 
 
-			next unless $answer_settings{$judge->id};
+			next unless $judge->{"answers"};
 
 			my %answers = eval { 
-				return %{JSON::decode_json($answer_settings{$judge->id})} if $judge;
+				return %{JSON::decode_json($judge->{"answers"})};
 			};
 
-			last if $counter++ > 10;
 </%perl>
-
-			<div class="full martopmore">
-
+			<div class="full martopmore padvertless">
 				<span class="quarter nospace">
-					<h6 class="nospace semibold">
-					<% $judge->first %> <% $judge->last %>
+					<h6 class="semibold nospace">
+					<% $judge->{"first"} %> <% $judge->{"last"} %>
 					</h6>
 				</span>
 
 				<span class="half rightalign semibold bigger nospace">
-					<% $judge->schname %>
+					<% $judge->{"school"} %>
 				</span>
 				<span class="quarter rightalign semibold bigger nospace">
-					<% $judge->regname %>
-					<% $judge->distcode %>
+					<% $judge->{"state"} %>
+					<% $judge->{"district"} %>
 				</span>
-
 			</div>
 <%perl>
 
@@ -159,9 +188,12 @@
 				my $subquestion;
 				$subquestion = 1 unless $key eq int($key);
 
-				my $class = $form{"questions"}{$key}{"class"};
+				my $question = $form{"questions"}{$key};
 
-				next if $form{"questions"}{$key}{"type"} eq "title";
+				my $class = $question->{"class"};
+
+				next if $question->{"type"} eq "title";
+				next if $question->{"type"} eq "subtitle";
 
 </%perl>
 
@@ -172,16 +204,16 @@
 						<span class="nineteen">
 %					}
 
-%					if ($form{"questions"}{$key}{"type"}eq "textbox") { 
+%					if ($question->{"type"} eq "textbox") { 
 
 						<span class="full">
 						<p class="bluetext semibold biggish">Additional remarks:</p>
 
-%					} elsif ($form{"questions"}{$key}{"type"} eq "boolean") { 
+%					} elsif ($question->{"type"} eq "boolean") { 
 
 						<span class="threequarters <% $subquestion ? "" : "semibold" %> marno bluetext padsetting">
 							<p class="nospace marleftmore">
-								<% $form{"questions"}{$key}{"question"} %>
+								<% $question->{"question"} %>
 							</p>
 						</span>
 
@@ -191,24 +223,22 @@
 
 						<span class="fiveeighths <% $subquestion ? "" : "semibold" %> marno bluetext padsetting">
 							<p class="nospace marleftmore">
-								<% $form{"questions"}{$key}{"question"} %>
+								<% $question->{"question"} %>
 							</p>
 						</span>
 					
 						<span class="threeeighths padvert marno">
-
 %					}
-					
 
 <%perl>
 
-					if ($form{"questions"}{$key}{"type"}eq "textbox") { 
+					if ($question->{"type"}eq "textbox") { 
 						$m->print("<p>");
-					} elsif ($form{"questions"}{$key}{"type"} eq "checkbox") { 
+					} elsif ($question->{"type"} eq "checkbox") { 
 	
 						my $notfirst;
 
-						foreach my $answer (@{$form{"questions"}{$key}{"answers"}}) { 
+						foreach my $answer (@{$question->{"answers"}}) { 
 							next unless $answers{$key."_".$answer};
 							$m->print(", ") if $notfirst++;
 							$m->print(ucfirst($answer));
@@ -219,9 +249,9 @@
 						$m->print( ucfirst($answers{$key}) );
 					} 
 
-					if ($form{"questions"}{$key}{"type"} eq "radio") { 
+					if ($question->{"type"} eq "radio") { 
 						my $max;
-						foreach my $answer (@{$form{"questions"}{$key}{"answers"}}) { 
+						foreach my $answer (@{$question->{"answers"}}) { 
 							next if $answer ne int($answer);
 							$max = $answer if $max < $answer;
 						}
