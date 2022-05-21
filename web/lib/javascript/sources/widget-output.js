@@ -428,7 +428,7 @@
 			output_trimSpaces     : true,
 			output_wrapQuotes     : false,
 			output_popupStyle     : 'width=500,height=300',
-			output_saveFileName   : 'mytable.csv',
+			output_saveFileName   : 'tabroom-export.csv',
 			// format $cell content callback
 			output_formatContent  : null, // function(config, widgetOptions, data){ return data.content; }
 			// callback executed when processing completes
