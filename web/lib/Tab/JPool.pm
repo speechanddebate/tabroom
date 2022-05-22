@@ -24,13 +24,13 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::JPoolSetting->search(  
+	my $existing = Tab::JPoolSetting->search(
 		jpool => $self->id,
 		tag   => $tag,
 	)->first;
 
-	if (defined $value) { 
-			
+	if (defined $value) {
+
 		if ($existing) {
 
 			$existing->value($value);
@@ -38,7 +38,7 @@ sub setting {
 			$existing->value_date($blob) if $value eq "date";
 			$existing->update;
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
 			}
 
@@ -52,11 +52,11 @@ sub setting {
 				value => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
 			}
 
-			if ($value eq "date") { 
+			if ($value eq "date") {
 				$existing->value_date($blob);
 			}
 
