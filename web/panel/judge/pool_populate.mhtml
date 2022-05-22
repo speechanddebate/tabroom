@@ -17,12 +17,13 @@
 	}
 
 	my %scores = (
-		strikes   => 1000000,
-		states    => 100000,
-		diversity => 800,
-		diamonds  => 800,
-		remaining => 50,
-		already   => 10
+		strikes     => 1000000,
+		states      => 100000,
+		diversity   => 800,
+		diamonds    => 800,
+		other_pools => 50,
+		remaining   => 50,
+		already     => 10
 	);
 
 	my $parent = Tab::JPool->retrieve($parent_id);
@@ -39,9 +40,10 @@
 
 	my $clear_children_sth = $dbh->prepare("
 		delete jpj.*
-		from jpool, jpool_judge jpj
+			from jpool, jpool_judge jpj
 		where jpool.parent = ?
-		and jpj.jpool = jpool.id
+			and jpj.jpool = jpool.id
+			and jpool.id != jpool.parent
 	");
 
 	$clear_children_sth->execute($parent_id);
@@ -167,6 +169,7 @@
 		if ($school_region) {
 			$targets{$jpool_id}{"state"}{$school_region}++;
 		}
+
 		$targets{$jpool_id}{"school"}{$entry_school}++;
 		$targets{$jpool_id}{"entries"}++;
 
@@ -209,9 +212,10 @@
 
 	my $judge_sth = $dbh->prepare("
 		select
-			judge.id, judge.school, school.region,
+			judge.id, judge.last, judge.school, school.region,
 			judge.obligation, judge.hired,
 			diverse.value, diamonds.value, nsda_points.value,
+			count(distinct rpj.jpool) registrant,
 			strike.id, strike.type,
 				min(CONVERT_TZ(strike.start, '+00:00', tourn.tz)),
 				max(CONVERT_TZ(strike.end, '+00:00', tourn.tz)),
@@ -237,6 +241,14 @@
 
 			left join strike on strike.judge = judge.id
 
+			left join jpool_judge rpj on rpj.judge = judge.id
+				and exists (
+					select jps.id
+					from jpool_setting jps
+					where jps.jpool = rpj.jpool
+					and jps.tag = 'registrant'
+				)
+
 		where jpool.id         = ?
 			and jpool.id       = jpj.jpool
 			and jpj.judge      = judge.id
@@ -254,21 +266,23 @@
 
 	while (
 		my (
-			$jid, $judge_school, $school_region,
+			$jid, $jlast, $judge_school, $school_region,
 			$judge_obligation, $judge_hired,
 			$diverse, $diamonds, $nsda_points,
+			$registrant,
 			$strike_id, $strike_tag, $strike_start, $strike_end, $strike_event
 		) = $judge_sth->fetchrow_array()
 	) {
 
 		unless ($judges{$jid}{"school"}) {
-			$judges{$jid}{"school"}      = $judge_school;
-			$judges{$jid}{"state"}       = $school_region;
-			$judges{$jid}{"obligation"}  = $judge_obligation + $judge_hired;
-			$obligation_total            += $judge_obligation + $judge_hired;
-			$judges{$jid}{"diverse"}     = $diverse;
-			$judges{$jid}{"diamonds"}    = $diamonds;
-			$judges{$jid}{"nsda_points"} = $nsda_points;
+			$judges{$jid}{"school"}        = $judge_school;
+			$judges{$jid}{"state"}         = $school_region;
+			$judges{$jid}{"obligation"}    = $judge_obligation + $judge_hired;
+			$obligation_total             += $judge_obligation + $judge_hired;
+			$judges{$jid}{"diverse"}       = $diverse;
+			$judges{$jid}{"diamonds"}      = $diamonds;
+			$judges{$jid}{"registrant"}    = $registrant;
+			$judges{$jid}{"nsda_points"}   = $nsda_points;
 		}
 
 		if ($diamonds) {
@@ -282,6 +296,8 @@
 		if ($judges{$jid}{"obligation"}) {
 			$judges{$jid}{"priority"} += $scores{"remaining"} * $judges{$jid}{"obligation"};
 		}
+
+		$judges{$jid}{"priority"} -= $scores{"other_pools"} * $judges{$jid}{"registrant"};
 
 		if ($strike_tag) {
 			$judges{$jid}{"strike_count"}++;
@@ -305,49 +321,40 @@
 	$judge_sth = $dbh->prepare("
 		select
 			judge.id,
-			jpool.id,
-			other.id, rounds.value,
+			jpool.id, jpool.name, rounds.value,
 			min(CONVERT_TZ(timeslot.start, '+00:00', tourn.tz)),
 			max(CONVERT_TZ(timeslot.end, '+00:00', tourn.tz))
 
-		from (judge, jpool_judge jpj, jpool,
-				jpool_judge ojpj, jpool other, jpool_round jpr,
-				round, timeslot, tourn
-			)
+		from (judge, jpool_judge jpj, jpool, jpool_judge rpj, category, tourn)
+
+			left join jpool_round jpr on jpr.jpool = jpool.id
+			left join round on jpr.round = round.id
+			left join timeslot on timeslot.id = round.timeslot
 
 			left join jpool_setting rounds
 				on rounds.tag = 'rounds'
-				and rounds.jpool = other.id
+				and rounds.jpool = jpool.id
 
-		where
-			(jpool.parent = ? or jpool.id = ?)
-			and jpool.id = jpj.jpool
-			and jpj.judge = judge.id
-
-			and ojpj.jpool != jpool.id
-			and ojpj.judge = judge.id
-			and ojpj.jpool = other.id
-
-			and other.id = jpr.jpool
-			and jpr.round = round.id
-			and round.timeslot = timeslot.id
-			and timeslot.tourn = tourn.id
-
+		where rpj.jpool = ?
+			and rpj.judge = judge.id
+			and judge.id = jpj.judge
+			and jpj.jpool = jpool.id
+			and jpj.jpool != rpj.jpool
+			and jpool.category = category.id
+			and category.tourn = tourn.id
 			$limit
-
-		group by judge.id, other.id
+		group by jpj.id
 	");
 
-	$judge_sth->execute($parent_id, $parent_id);
-					    #shut up I'm tired.
+	$judge_sth->execute($parent_id);
 
 	my %dt_cache;
 
 	while (
 		my (
-			$jid,
-			$jpool_id,
-			$other_id, $rounds, $timeslot_start, $timeslot_end
+			$jid, $jpool_id, $jpool_name,
+			$rounds,
+			$timeslot_start, $timeslot_end
 		) = $judge_sth->fetchrow_array()
 	) {
 
@@ -387,6 +394,27 @@
 
 	$judge_sth->finish();
 
+
+	#Process the time strikes
+
+	foreach my $tid (keys %targets) {
+
+		foreach my $jid (keys %judges) {
+
+			if ($judges{$jid}{"strike"}) {
+
+				foreach my $strike_id (keys %{$judges{$jid}{"strike"}}) {
+					if (
+						$targets{$tid}{"epoch_start"} <= $judges{$jid}{"strike"}{$strike_id}{"epoch_end"}
+						&& $targets{$tid}{"epoch_end"} >= $judges{$jid}{"strike"}{$strike_id}{"epoch_start"}
+					) {
+						$judges{$jid}{"exclude"}{$tid}++;
+					}
+				}
+			}
+		}
+	}
+
 	# OK now that you've scored the entire friggin world, how about some
 	# pooling
 
@@ -405,6 +433,10 @@
 		my $target_count = $targets{$tid}{"pool_target"};
 
 		my @jids;
+
+		@jids = sort {
+			$targets{$tid}{"school"}{$judges{$b}{"school"}} <=> $targets{$tid}{"school"}{$judges{$a}{"school"}}
+		} keys %judges;
 
 		@jids = sort {
 			$judges{$b}{"priority"} <=> $judges{$a}{"priority"}
@@ -505,180 +537,26 @@
 		$counter++;
 	}
 
+	my $add_sth = $dbh->prepare("
+		insert into jpool_judge (jpool, judge) values (?, ?)
+	");
+
+	my $extra;
+	my $zero;
+
+	foreach my $jid (
+		sort {
+			$judges{$b}{"obligation"} <=> $judges{$a}{"obligation"}
+		} keys %judges
+	) {
+
+		foreach my $pid (sort keys %{$judges{$jid}{"pools"}}) {
+			$add_sth->execute($pid, $jid);
+		}
+	}
+
+	my $msg = "Pooling done for children pools of ".$parent->name;
+	$m->redirect("pool_report.mhtml?parent_id=".$parent->id."&tourn_id=".$tourn."&msg=$msg");
+
 </%init>
 
-	<div class="main">
-
-		<h5>Results against <% $parent->name %></h5>
-
-		<& "/funclib/tablesorter.mas",
-			table     => "pool_results",
-			nobuttons => 1
-		&>
-
-		<table id="pool_results">
-			<thead>
-
-				<tr class="smallish yellowrow">
-					<th>
-						ID
-					</th>
-
-					<th>
-						Pool
-					</th>
-
-					<th>
-						Priority
-					</th>
-
-					<th>
-						Target
-					</th>
-
-					<th>
-						Judge Count
-					</th>
-
-					<th>
-						Diverse Count
-					</th>
-
-					<th>
-						Diamonds Count
-					</th>
-
-				</tr>
-
-			</thead>
-
-			<tbody>
-<%perl>
-
-			foreach my $tid (
-				sort {
-					$targets{$a}{"pool_priority"} <=> $targets{$b}{"pool_priority"}
-					|| $targets{$a}{"name"} cmp $targets{$b}{"name"}
-					|| $a <=> $b
-				} keys %targets
-			) {
-
-				next unless $targets{$tid}{"name"};
-</%perl>
-				<tr>
-
-					<td>
-						<% $tid %>
-					</td>
-
-					<td>
-						<% $targets{$tid}{"name"} %>
-					</td>
-
-					<td>
-						<% $targets{$tid}{"pool_priority"} %>
-					</td>
-
-					<td>
-						<% $targets{$tid}{"pool_target"} %>
-					</td>
-
-					<td>
-						<% $targets{$tid}{"judge_count"} %>
-					</td>
-
-					<td>
-						<% $targets{$tid}{"diverse_count"} %>
-					</td>
-
-					<td>
-						<% $targets{$tid}{"diamond_count"} %>
-					</td>
-
-				</tr>
-%			}
-
-			</tbody>
-		</table>
-
-		<h4>Judge rounds</h4>
-
-		<table>
-<%perl>
-			my $add_sth = $dbh->prepare("
-				insert into jpool_judge (jpool, judge) values (?, ?)
-			");
-
-			my $extra;
-			my $zero;
-
-			foreach my $jid (
-				sort {
-					$judges{$b}{"obligation"} <=> $judges{$a}{"obligation"}
-				} keys %judges
-			) {
-
-				$judges{$jid}{"obligation"} = 0 unless $judges{$jid}{"obligation"};
-				$judges{$jid}{"in_pools"} = 0 unless $judges{$jid}{"in_pools"};
-
-				unless ($judges{$jid}{"in_pools"}) {
-					$zero++;
-				}
-
-				$extra += $judges{$jid}{"obligation"};
-
-				foreach my $pid (sort keys %{$judges{$jid}{"pools"}}) {
-					$add_sth->execute($pid, $jid);
-				}
-</%perl>
-				<tr class="row">
-					<td class="nospace">
-						<a
-							class  = "plain full"
-							target = "_blank"
-							href   = "/register/judge/edit.mhtml?judge_id=<% $jid %>&default=pools"
-						><% $jid %></a>
-					</td>
-
-					<td>
-						<% $judges{$jid}{"state"} %>
-					</td>
-					<td>
-						div
-						<% $judges{$jid}{"diverse"} %>
-					</td>
-					<td>
-						dia
-						<% $judges{$jid}{"diamonds"} %>
-					</td>
-
-					<td>
-						<% $judges{$jid}{"in_pools"} %> Pools
-					</td>
-
-					<td>
-						<% $judges{$jid}{"obligation"} %> Left
-					</td>
-
-					<td>
-%						foreach my $pid (sort keys %{$judges{$jid}{"pools"}}) {
-							<span class="third nospace smallish">
-								<% $targets{$pid}{"name"} %>
-							</span>
-%						}
-					</td>
-				</tr>
-%			}
-		</table>
-	</div>
-
-	<div class="menu">
-		<div class="sidenote">
-			<p>
-				Zeros: <% $zero %>
-			</p>
-			<p>
-				Spares: <% $extra %>
-			</p>
-		</div>
-	</div>
