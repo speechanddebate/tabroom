@@ -1,0 +1,431 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$person_settings
+	$perms
+	$parent_id => undef
+</%args>
+<%init>
+
+	my $now = DateTime->now();
+	my $dbh = Tab::DBI->db_Main();
+
+	my $parent = Tab::JPool->retrieve($parent_id);
+
+	my $names_sth = $dbh->prepare("
+		select
+			jpool.id, jpool.name
+			from jpool, category
+			where jpool.category = category.id
+			and category.tourn = ?
+	");
+
+	$names_sth->execute($tourn->id);
+	my $name_refs = $names_sth->fetchall_hash();
+	my %names = map {$_->{"id"} => $_->{"name"}} @{$name_refs};
+
+	my $children_sth = $dbh->prepare("
+		select jpool.id, jpool.name,
+			pool_target.value target, pool_priority.value priority,
+			rounds.value rounds
+
+		from jpool
+			left join jpool_setting pool_target
+				on pool_target.tag = 'pool_target'
+				and pool_target.jpool = jpool.id
+
+			left join jpool_setting pool_priority
+				on pool_priority.tag = 'pool_priority'
+				and pool_priority.jpool = jpool.id
+
+			left join jpool_setting rounds
+				on rounds.tag = 'rounds'
+				and rounds.jpool = jpool.id
+
+		where jpool.parent = ?
+
+		and not exists (
+			select pool_ignore.id
+			from jpool_setting pool_ignore
+				where pool_ignore.tag = 'pool_ignore'
+				and pool_ignore.jpool = jpool.id
+		)
+		group by jpool.id
+	");
+
+	$children_sth->execute($parent->id);
+	my $target_refs = $children_sth->fetchall_hash();
+	$children_sth->finish();
+
+	my %targets = map {$_->{"id"} => $_} @{$target_refs};
+	my %judges;
+
+	my $judge_sth = $dbh->prepare("
+		select
+			judge.id, diamonds.value diamonds, diverse.value diverse,
+			judge.school school,
+			judge.obligation,
+			jpool.id jpool, chapter.state,
+			jps.id registrant,
+			rounds.value rounds
+
+		from (judge, jpool_judge ppj)
+
+			left join school on judge.school = school.id
+			left join chapter on school.chapter = chapter.id
+			left join person on judge.person = person.id
+
+			left join jpool_judge jpj
+				on jpj.judge = judge.id
+
+			left join jpool on jpool.id = jpj.jpool
+
+			left join jpool_setting jps
+				on jps.jpool = jpool.id
+				and jps.tag = 'registrant'
+
+			left join jpool_setting rounds
+				on rounds.jpool = jpj.jpool
+				and rounds.tag = 'rounds'
+
+			left join judge_setting diverse
+				on diverse.tag = 'diverse'
+				and diverse.judge = judge.id
+
+			left join person_setting diamonds
+				on diamonds.tag = 'diamonds'
+				and diamonds.person = person.id
+
+		where ppj.jpool = ?
+			and judge.id = ppj.judge
+			and judge.active = 1
+	");
+
+	my %done;
+
+	foreach my $jpool_id (keys %targets) {
+
+		$judge_sth->execute($jpool_id);
+
+		my $refs = $judge_sth->fetchall_hash();
+
+		$judge_sth->finish();
+
+		foreach my $result (@{$refs}) {
+
+			if ($result->{"diamonds"}) {
+				$targets{$result->{'jpool'}}{"diamond_count"}++;
+			}
+
+			if ($result->{"diverse"}) {
+				$targets{$result->{'jpool'}}{"diverse_count"}++;
+			}
+
+			unless ($judges{$result->{"id"}}) {
+				$judges{$result->{"id"}} = $result;
+				$judges{$result->{"id"}}{"left"} = $judges{$result->{"id"}}{"obligation"};
+			}
+
+			unless ($done{$result->{"jpool"}}{$result->{"id"}}++) {
+
+				if ($result->{'registrant'}) {
+					unless ($result->{"jpool"} eq $parent->id) {
+						$judges{$result->{"id"}}{"other_pools"}{$result->{"jpool"}}++;
+					}
+				} elsif ($result->{"jpool"} && $result->{"jpool"} ne $parent->id) {
+					$targets{$result->{'jpool'}}{"judge_count"}++;
+					$judges{$result->{"id"}}{"pools"}{$result->{"jpool"}}++;
+					$judges{$result->{"id"}}{"in_pools"}++;
+					$judges{$result->{"id"}}{"left"} -= $result->{"rounds"};
+				}
+			}
+		}
+	}
+
+	my $school_sth = $dbh->prepare("
+		select
+			entry.id, entry.school, jpr.jpool jpool
+		from school, jpool_round jpr, round, entry
+		where jpr.jpool = ?
+			and jpr.round = round.id
+			and round.event = entry.event
+			and entry.active = 1
+			and entry.school = school.id
+	");
+
+	my %school_counts;
+
+	foreach my $jpool (keys %targets) {
+		$school_sth->execute($jpool);
+		my $result_ref = $school_sth->fetchall_hash();
+		foreach my $result (@{$result_ref}) {
+			$school_counts{$result->{"jpool"}}{$result->{"school"}}++;
+		}
+	}
+
+</%init>
+
+	<div class="main">
+
+		<& "/funclib/tablesorter.mas", table => "pool_results" &>
+
+		<span class="fourfifths nospace">
+			<h4>Pooling results in <% $parent->name %></h4>
+		</span>
+
+		<span class="fifth rightalign" id="pool_results_buttonarea">
+		</span>
+
+		<table id="pool_results">
+			<thead>
+
+				<tr class="smallish yellowrow">
+					<th>
+						ID
+					</th>
+
+					<th>
+						Pool
+					</th>
+
+					<th>
+						Priority
+					</th>
+
+					<th>
+						Target
+					</th>
+
+					<th>
+						Judge Count
+					</th>
+
+					<th>
+						Diverse Count
+					</th>
+
+					<th>
+						Diamonds Count
+					</th>
+
+				</tr>
+
+			</thead>
+
+			<tbody>
+<%perl>
+
+			foreach my $jpool (
+				sort {
+					$targets{$a}{"priority"} <=> $targets{$b}{"priority"}
+					|| $targets{$a}{"name"} cmp $targets{$b}{"name"}
+					|| $a <=> $b
+				} keys %targets
+			) {
+
+				next unless $targets{$jpool}{"name"};
+</%perl>
+				<tr>
+
+					<td>
+						<% $targets{$jpool}{"id"} %>
+					</td>
+
+					<td>
+						<% $targets{$jpool}{"name"} %>
+					</td>
+
+					<td class="centeralign">
+						<% $targets{$jpool}{"priority"} %>
+					</td>
+
+					<td class="centeralign">
+						<% $targets{$jpool}{"target"} %>
+					</td>
+
+					<td class="centeralign">
+						<% $targets{$jpool}{"judge_count"} %>
+					</td>
+
+					<td class="centeralign">
+						<% $targets{$jpool}{"diverse_count"} %>
+					</td>
+
+					<td class="centeralign">
+						<% $targets{$jpool}{"diamond_count"} %>
+					</td>
+
+				</tr>
+%			}
+
+			</tbody>
+		</table>
+
+		<& "/funclib/tablesorter.mas", table => "judge_rounds" &>
+
+		<span class="fourfifths nospace martopmore">
+			<h5>Judge rounds</h5>
+		</span>
+
+		<span class="fifth rightalign" id="judge_rounds_buttonarea">
+		</span>
+
+		<table id = "judge_rounds">
+
+			<thead>
+				<tr class="yellowrow smallish">
+					<th>
+						Judge
+					</th>
+
+					<th>
+						State
+					</th>
+
+					<th>
+						Div
+					</th>
+
+					<th class='centeralign' title="Diamonds" alt="Diamonds">
+						<span class="centeralign fa fa-diamond orangetext fa-sm"></span>
+					</th>
+
+					<th>
+						Obl
+					</th>
+
+					<th>
+						Used
+					</th>
+
+					<th>
+						Left
+					</th>
+
+					<th>
+						Pools
+					</th>
+					<th>
+						Others
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+<%perl>
+			my $extra;
+			my $zero;
+			my $total;
+
+			foreach my $jid (
+				sort {
+					$judges{$b}{"obligation"} <=> $judges{$a}{"obligation"}
+					|| $judges{$a}{"state"} cmp $judges{$b}{"state"}
+					|| $a <=> $b
+				} keys %judges
+			) {
+
+				$total += $judges{$jid}{"obligation"};
+				$extra += $judges{$jid}{"left"};
+				$zero++ if  $judges{$jid}{"left"} == $judges{$jid}{"obligation"};
+</%perl>
+				<tr class="row">
+					<td class="nospace">
+						<a
+							class  = "plain full hover"
+							target = "_blank"
+							href   = "/register/judge/edit.mhtml?judge_id=<% $jid %>&default=pools"
+						><% $jid %></a>
+					</td>
+
+					<td class="centeralign">
+						<% $judges{$jid}{"state"} %>
+					</td>
+
+					<td class="centeralign">
+						<% $judges{$jid}{"diverse"} ? "Y" : ""%>
+					</td>
+
+					<td class="centeralign">
+						<% $judges{$jid}{"diamonds"} ? $judges{$jid}{"diamonds"} : "" %>
+					</td>
+
+					<td class='centeralign'>
+						<% $judges{$jid}{"obligation"} %>
+					</td>
+
+					<td class='centeralign'>
+						<% $judges{$jid}{"in_pools"} %>
+					</td>
+
+					<td class='centeralign'>
+						<% $judges{$jid}{"left"} %>
+					</td>
+
+					<td>
+%						foreach my $pid (sort keys %{$judges{$jid}{"pools"}}) {
+							<span class="third nospace smallish">
+								<%
+									$school_counts{$pid}{$judges{$jid}{"school"}}
+									? $school_counts{$pid}{$judges{$jid}{"school"}}
+									: 0
+								%> - <% $names{$pid} %>
+							</span>
+%						}
+					</td>
+					<td class="nospace">
+%						foreach my $pid (sort keys %{$judges{$jid}{"other_pools"}}) {
+							<div class="padvertless smallish">
+								<span class="quarterspacer"></span>
+								<% $names{$pid} %>
+							</div>
+%						}
+					</td>
+				</tr>
+%			}
+			</tbody>
+		</table>
+	</div>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<h5>Nav</h5>
+
+			<a
+				class="yellow full"
+				href="pool_counts.mhtml?category_id=<% $parent->category->id %>"
+			>Return to Pooling Central Control</a>
+
+			<h5>Stats</h5>
+
+			<div class="odd">
+				<span class="third semibold">
+					Zeros
+				</span>
+				<span class="third">
+					<% $zero %>
+				</span>
+			</div>
+
+			<div class="odd">
+				<span class="third semibold">
+					Spares
+				</span>
+				<span class="third">
+					<% $extra %>
+				</span>
+			</div>
+
+			<div class="odd">
+				<span class="third semibold">
+					Total
+				</span>
+				<span class="third">
+					<% $total %>
+				</span>
+			</div>
+		</div>
+	</div>
