@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import config from '../../../config/config.js';
 import db from '../../models/index.cjs';
-import { startOfYear } from '../../helpers/common';
+import { startOfYear } from '../../helpers/common.js';
 
 const getPersonRounds = {
 	GET: async (req, res) => {
