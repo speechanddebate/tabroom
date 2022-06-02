@@ -16,6 +16,7 @@ import apiDoc from './indexcards/routes/api-doc.js';
 import userPaths from './indexcards/routes/paths/user/index.js';
 import tournPaths from './indexcards/routes/paths/tourn/index.js';
 import invitePaths from './indexcards/routes/paths/invite/index.js';
+import caselistPaths from './indexcards/routes/paths/caselist/index.js';
 
 import auth from './indexcards/helpers/auth.js';
 import tournAuth from './indexcards/helpers/tourn-auth.js';
@@ -123,7 +124,7 @@ app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 });
 
 // Combine the various paths into one
-const paths = [...tournPaths, ...userPaths, ...invitePaths];
+const paths = [...tournPaths, ...userPaths, ...invitePaths, ...caselistPaths];
 
 // Initialize OpenAPI middleware
 const apiDocConfig = initialize({
