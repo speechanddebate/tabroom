@@ -16,7 +16,7 @@
 	use Text::Undiacritic qw(undiacritic);
 
 	unless ($perms->{"owner"}) {
-		$m->comp("/funclib/abort.mas", 
+		$m->comp("/funclib/abort.mas",
 			message => "Access denied"
 		);
 	}
@@ -26,6 +26,7 @@
 
 	my @problems;
 	my %counts;
+	my %already;
 
     if (@csv_handles) {
 
@@ -33,7 +34,7 @@
 
 		my $entries_sth = $dbh->prepare("
 			select
-				person.id, person.email, person.first, person.phone, person.first, person.last, person.nsda, 
+				person.id, person.email, person.first, person.phone, person.first, person.last, person.nsda,
 				vc.id vaccine_id, vc.value status
 			from person
 				left join person_setting vc on vc.tag = 'vaccine_".$tourn->id ."' and vc.person = person.id
@@ -55,7 +56,7 @@
 
 		my $judges_sth = $dbh->prepare("
 			select
-				person.id, person.email, person.phone, person.first, person.last, person.nsda, 
+				person.id, person.email, person.phone, person.first, person.last, person.nsda,
 				vc.id vaccine_id, vc.value status
 			from (person, judge, category)
 				left join person_setting vc on vc.tag = 'vaccine_".$tourn->id."' and vc.person = person.id
@@ -114,8 +115,7 @@
 			)= $csv->fields();
 
 			unless ($email) {
-
-				if ($debug) { 
+				if ($debug) {
 					Tab::debuglog("Parser rejected $line.  Trying undiacritic");
 					$debug = 1;
 				}
@@ -129,11 +129,11 @@
 					$email, $phone, $group, $status,
 					@garbage
 				)= $csv->fields();
-			} 
+			}
 
-			unless ($email) { 
+			unless ($email) {
 
-				if ($debug) { 
+				if ($debug) {
 					Tab::debuglog("Parser still rejected $line");
 					$debug = 1;
 				}
@@ -150,15 +150,16 @@
 			chomp $email;
 			$email =~ s/\s+//g;
 			$email = lc($email);
-			
+
 			# in case we have to mass unconfirm the partial dose bogons
 			my $partial;
+			my $original = $status;
 
-			if ($status eq "partial dose") { 
+			if ($status eq "partial dose") {
 				$status = "pending";
 			}
 
-			if ($status eq "not submitted") { 
+			if ($status eq "not submitted") {
 				undef $status;
 			}
 
@@ -184,7 +185,7 @@
 			} elsif ($nsda && $targets{"nsda"}{$nsda} && lc($targets{"nsda"}{$nsda}->{'last'}) eq lc($last)) {
 				$target = $targets{"nsda"}{$nsda};
 				logit($id, $target, "NSDA and Name", $status);;
-			} elsif ($phone > 0 && $targets{"phone"}{$phone} 
+			} elsif ($phone > 0 && $targets{"phone"}{$phone}
 				&& lc($targets{"phone"}{$phone}->{"last"}) eq lc($last)
 				&& lc($targets{"phone"}{$phone}->{"first"}) eq lc($first)
 			) {
@@ -196,22 +197,22 @@
 			} elsif ($email && $targets{"email"}{$email} && lc($targets{"email"}{$email}->{"last"}) eq lc($last)) {
 				$target = $targets{"email"}{$email};
 				logit($id, $target, "Email and Name", $status);;
-			} elsif ($nsda && $targets{"nsda"}{$nsda}) { 
+			} elsif ($nsda && $targets{"nsda"}{$nsda}) {
 
 				$target = $targets{"nsda"}{$nsda};
 				logit($id, $target, "NSDA but not Name", $status);;
 
-			} elsif ($phone && $targets{"phone"}{$phone}) { 
+			} elsif ($phone && $targets{"phone"}{$phone}) {
 
 				$target = $targets{"phone"}{$phone};
 				logit($id, $target, "Phone but not Name", $status);;
 
-			} elsif ($phone && $targets{"phone"}{$phone}) { 
+			} elsif ($phone && $targets{"phone"}{$phone}) {
 
 				$target = $targets{"phone"}{"1".$phone};
 				logit($id, $target, "1+Phone but not Name", $status);;
 
-			} elsif ($email && $targets{"email"}{$email}) { 
+			} elsif ($email && $targets{"email"}{$email}) {
 
 				$target = $targets{"email"}{$email};
 				logit($id, $target, "Email but not Name", $status);;
@@ -221,7 +222,7 @@
 				logit($id, $target, "Name only", $status);;
 			} else {
 
-				if ($debug) { 
+				if ($debug) {
 					Tab::debuglog("Line $line had no match");
 				}
 
@@ -242,33 +243,41 @@
 				next LINE;
 			}
 
-			if ($wipe && ($status ne $target->{"status"})) {
-				Tab::debuglog("Wiping status for ".$target->{'email'}." from ".$target->{'status'}." to ".$status);
-				$wipe_sth->execute($target->{"id"}, "vaccine_".$tourn->id);
-				undef $target->{"status"};
+			unless ($already{$target->{"id"}} eq "confirmed") {
+				if ($wipe && ($status ne $target->{"status"})) {
+					$wipe_sth->execute($target->{"id"}, "vaccine_".$tourn->id);
+					undef $target->{"status"};
+				}
 			}
 
 			if (
-				($target->{'status'} ne "confirmed") 
+				($target->{'status'} ne "confirmed")
 				&& (not defined $partial)
 				&& ($status ne $target->{'status'})
 			) {
-				if ($target->{"vaccine_id"}) {
-					$update_sth->execute($status, $target->{'vaccine_id'});
-					$counts{"updated"}++;
-				} elsif ($created{$target->{"id"}}) {
 
+				if ($status) {
+					if ($target->{"vaccine_id"}) {
+						$update_sth->execute($status, $target->{'vaccine_id'});
+						$counts{"updated"}++;
+						$already{$target->{"id"}} = $status;
+					} elsif ($created{$target->{"id"}}) {
+
+					} else {
+						$create_sth->execute($target->{"id"}, $status);
+						$already{$target->{"id"}} = $status;
+						$counts{"recorded"}++;
+						$created{$target->{'id'}}++;
+					}
 				} else {
-					$create_sth->execute($target->{"id"}, $status);
-					$counts{"recorded"}++;
-					$created{$target->{'id'}}++;
+					$wipe_sth->execute($target->{"id"}, "vaccine_".$tourn->id);
 				}
 			}
 		}
 	}
 
 	sub logit {
-		if ($debug) { 
+		if ($debug) {
 			my ($key, $match, $method, $status) = @_;
 			Tab::debuglog("Key $key matched to account ".$match->{"id"}." ".$match->{"email"}." via $method.  Status is $status");
 		}
