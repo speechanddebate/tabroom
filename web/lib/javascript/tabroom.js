@@ -201,7 +201,7 @@
 			type    : accessType,
 			url     : replyUrl,
 			data    : attributes,
-			success : function(data, status, object, callback) {
+			success : function(data, status, object, newCallback) {
 
 				if (data) {
 
@@ -344,6 +344,9 @@
 
 					if (callback && callback != 'false') {
 						callback(data);
+					}
+					if (newCallback && newCallback != 'false') {
+						newCallback(data);
 					}
 					return;
 				}
