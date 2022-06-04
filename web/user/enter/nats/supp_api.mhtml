@@ -1,0 +1,138 @@
+<%args>
+	$school
+</%args>
+<%init>
+
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			student.id student,
+			entry.id entry, entry.active active,
+			event.id event, event.pattern pattern,
+			pattern.max max, pattern.type type,
+			pattern.exclude exclude,
+			supp.id supp
+
+		from (student, entry_student es, entry, event)
+
+			left join event_setting supp on supp.event = event.id and supp.tag = 'supp'
+			left join pattern on event.pattern = pattern.id
+
+		where entry.school = ?
+			and entry.id = es.entry
+			and es.student = student.id
+			and entry.event = event.id
+		group by es.id
+	");
+
+	$sth->execute($school->id);
+
+	my $result_refs = $sth->fetchall_hash();
+
+	$sth->finish();
+
+	my %clear;
+	my %provisional;
+	my %excludes;
+
+	foreach my $result (@{$result_refs}) {
+
+		my $student = $result->{"student"};
+		my $pattern = $result->{"pattern"};
+		my $entry = $result->{"entry"};
+
+		if ($result->{"active"}) {
+
+			$clear{$student}{$entry}++;
+
+			# No cross entry
+			if ($pattern && $result->{"type"} == 2) {
+				$excludes{$result->{student}}{"all"}++;
+
+			# Limited
+			} elsif ($pattern && $result->{"type"} == 3) {
+
+				$excludes{$student}{"pattern_count"}{$pattern}++;
+
+				if ($excludes{$student}{"pattern_count"}{$pattern} >= $result->{"max"}) {
+					$excludes{$student}{"pattern"}{$pattern}++;
+				}
+			}
+
+			my %exclusions = eval {
+				return %{JSON::decode_json($result->{"exclude"})};
+			};
+
+			foreach my $exclusion (keys %exclusions) {
+				$excludes{$student}{"pattern"}{$exclusion}++;
+			}
+
+			$excludes{$student}{"in_pattern"}{$pattern}++;
+
+		} else {
+			$provisional{$student}{$entry} = $result;
+		}
+	}
+
+	if ($excludes{"all"}) {
+		undef %provisional;
+	}
+
+	foreach my $student_id (keys %provisional) {
+
+		ENTRY:
+		foreach my $entry_id (keys %{$provisional{$student_id}}) {
+
+			my $result = $provisional{$student_id}{$entry_id};
+
+			if ($excludes{$student_id}{"pattern"}{$result->{"pattern"}}) {
+				delete $provisional{$student_id}{$entry_id};
+				next ENTRY;
+			}
+
+			my $pattern = $result->{"pattern"};
+
+			# No cross entry
+			if ($pattern && $result->{"type"} == 2) {
+				if ($clear{$student_id}) {
+					delete $provisional{$student_id}{$entry_id};
+					next ENTRY;
+				}
+			}
+
+			my %exclusions = eval {
+				return %{JSON::decode_json($result->{"exclude"})};
+			};
+
+			foreach my $exclusion (keys %exclusions) {
+
+				if ($excludes{$student_id}{"in_pattern"}{$exclusion}) {
+					delete $provisional{$student_id}{$entry_id};
+					next ENTRY;
+				}
+			}
+
+			$clear{$student_id}{$entry_id}++;
+		}
+	}
+
+	my @entries;
+
+	foreach my $student_id (keys %clear) {
+		foreach my $entry_id (keys %{$clear{$student_id}}) {
+			push @entries, $entry_id;
+		}
+	}
+
+	if ($ARGS{"return"}) {
+		return \@entries;
+	}
+
+	$m->print(JSON::encode_json(\@entries));
+	$m->abort();
+
+</%init>
