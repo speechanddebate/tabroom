@@ -631,6 +631,128 @@
 				. $entry->code. " is scheduled twice in the same round ". $round_realname ."</p>";
 		}
 
+
+		#MEETING OWN DISTRICT
+		if ($tourn_settings->{"nsda_nats"}) {
+
+			$tags{"same_district_sections"} = "Entry: same district hits";
+			Tab::Entry->columns("TEMP", "distname");
+
+			Tab::Entry->set_sql( same_district_sections => "
+				select entry.*, opp.code as othername, district.name as distname
+					from entry, ballot, panel, school,
+					entry opp, ballot oballot, school oppschool, district
+
+				where entry.id = ballot.entry
+					and ballot.panel = oballot.panel
+					and oballot.entry = opp.id
+					and ballot.panel = panel.id
+					and panel.round = ?
+					and opp.school = oppschool.id
+					and entry.school = school.id
+					and school.district > 0
+					and school.district = oppschool.district
+					and school.district = district.id
+					and opp.id < entry.id
+			");
+
+			my %done;
+
+			foreach my $entry (Tab::Entry->search_same_district_sections($round->id )) {
+				next if $done{$entry->code."-".$entry->othername}++;
+				$problems{"same_district_sections"} .= '<p class="warning padless marno">';
+				$problems{"same_district_sections"} .= $entry->code." and ".$entry->othername;
+				$problems{"same_district_sections"} .= " are from the ".$entry->distname." district! ". $round_realname ."</p>";
+			}
+
+			if ($event_type eq "congress") {
+                if ($tourn_settings->{'district_regions'} ) {
+
+					$tags{"same_district_regions"} = "Entry: same metro regional hits";
+
+					my %district_region;
+
+                    my %regions_by_id = map {$_->id => $_} $tourn->regions;
+
+                    eval {
+                        %district_region = %{JSON::decode_json $tourn_settings->{'district_regions'}};
+                    };
+
+					my $dr_sth = $dbh->prepare("
+						select
+							panel.id, panel.letter, entry.code, school.district
+						from  panel, ballot, entry, school
+						where panel.round = ?
+							and panel.id = ballot.panel
+							and ballot.entry = entry.id
+							and entry.active = 1
+							and entry.school = school.id
+					");
+
+					$dr_sth->execute($round->id);
+
+					my %counter;
+					my $result_refs = $dr_sth->fetchall_hash();
+
+					my %tourn_regions = map {$_->id => $_->code} $tourn->regions;
+
+					foreach my $result (@{$result_refs}) {
+
+						my $region = $district_region{$result->{"district"}};
+
+						if ($region) {
+							if ($counter{$result->{"id"}}{$region}) {
+
+								$problems{"same_district_regions"} .= '<p class="warning padless marno">';
+								$problems{"same_district_regions"} .= $counter{$result->{"id"}}{$region}." and ".$result->{"code"};
+								$problems{"same_district_regions"} .= " are both from the ".$tourn_regions{$region}." region ". $round_realname ."</p>";
+
+							} else {
+								$counter{$result->{"id"}}{$region} = $result->{"code"};
+							}
+						}
+
+					}
+
+
+                }
+			}
+		}
+
+		unless (
+			$event_type eq "speech"
+			|| $event_type eq "congress"
+			|| $round->type eq "elim"
+			|| $round->type eq "final"
+		) {
+
+			$tags{"same_school_sections"} = "Entry: same school hits";
+
+			Tab::Entry->set_sql( same_school_sections => "
+				select entry.*, opp.code as othername
+				from entry, ballot, panel,
+				entry opp, ballot oballot
+
+					where entry.id = ballot.entry
+					and ballot.panel = oballot.panel
+					and oballot.entry = opp.id
+					and ballot.panel = panel.id
+					and panel.round = ?
+					and opp.school = entry.school
+					and opp.id < entry.id
+			");
+
+			my %done;
+
+			foreach my $entry (Tab::Entry->search_same_school_sections($round->id )) {
+				next if $done{$entry->code."-".$entry->othername}++;
+				$problems{"same_school_sections"} .= '<p class="warning padless marno">';
+				$problems{"same_school_sections"} .= $entry->code." and ".$entry->othername;
+				$problems{"same_school_sections"} .= " are from the same school! ". $round_realname ."</p>";
+			}
+		}
+
+
 		#MEETING OWN SCHOOL
 
 		unless (
@@ -917,7 +1039,7 @@
 			$tags{"roomless_sections"} = "Rooms assigned ";
 
 			Tab::Panel->set_sql( roomless_sections => "
-				select distinct panel.*, e1.code as opp, e2.code as pos, room.name as roomname
+				select distinct panel.*, e1.code as opp, e2.code as pos, room.name as roomname, room.id as roomid
 				from (panel, ballot b1, ballot b2, entry e1, entry e2)
 				left join room on panel.room = room.id
 
@@ -941,13 +1063,18 @@
 				group by panel.id
 			");
 
+			my $roomy_sections = $dbh->prepare("select count(panel.id) from panel, room where panel.room = room.id and panel.round = ?");
+			$roomy_sections->execute($round->id);
+			my $value = $roomy_sections->fetch();
+
 			my $any_rooms;
+
+			Tab::Panel->columns(TEMP => "roomid");
 
 			foreach my $panel (Tab::Panel->search_roomless_sections($round->id )) {
 
-				if ($panel->roomname) {
+				if ($panel->roomid > 0) {
 					$any_rooms++;
-
 				} else {
 					if ($event_type eq "debate") {
 
@@ -968,19 +1095,19 @@
 			}
 
 			unless ($any_rooms) {
-				$problems{"roomless_sections"} .= '<p class="warning padless marno">
-					No rooms have been assigned to '. $round_realname .'</p>';
+				delete $problems{"roomless_sections"};
+				$problems{"roomless_sections"} .= '<p class="warning padless marno"> No rooms have been assigned to round '. $round_realname .'</p>';
 			}
 		}
 
-		if ($tourn_settings->{'nsda_district'}) { 
+		if ($tourn_settings->{'nsda_district'}) {
 			#SIDELOCK SETTINGS
 			$tags{"sidelock_setting"} = "Side-locks set incorrectly";
 
 			my $sidelock_sth = $dbh->prepare("
 				select distinct rs.id
-					from round_setting rs 
-					where rs.round = ? 
+					from round_setting rs
+					where rs.round = ?
 					and rs.tag = 'sidelock_against'
 			");
 
@@ -988,7 +1115,7 @@
 
 			my $bad = $sidelock_sth->fetch();
 
-			if ($bad) { 
+			if ($bad) {
 				$problems{"sidelock_setting"}.= '<p class="warning padless marno"> '.$round->realname.' has a sidelock setting which is not appropriate for Districts.  Please correct in Settings tab of the schematic</p>';
 			}
 		}
@@ -1533,7 +1660,7 @@
 
 			# MEETING SAME STATE
 
-			$tags{"same_region_sections"} = "Entries hits within state code (Split TX/CA)";
+			$tags{"same_region_sections"} = "Entries hits within state group";
 
 			Tab::Entry->set_sql( same_region_sections => "
 				select entry.*, opp.code as othername, region.name as regname
