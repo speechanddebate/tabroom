@@ -11,6 +11,8 @@
 	my $event = $round->event;
 	$m->abort unless $event->tourn == $tourn->id;
 
+	my $dbh = Tab::DBI->db_Main();
+
 	my @types;
 	my $show_strength++ if $round->type eq "elim";
 
@@ -44,17 +46,6 @@
 
 	push @types, "last_name";
 
-	my %authorship;
-
-	if ($round->type eq "prelim") {
-		if ($tourn_settings->{'district_authorships'} ) {
-			eval {
-				%authorship = %{JSON::decode_json $tourn_settings->{'district_authorships'}};
-			};
-			push @types, "legislation";
-		}
-	}
-
 	my %district_region;
 
 	if ($tourn_settings->{'district_regions'} ) {
@@ -70,6 +61,7 @@
 		}
 
 		push @types, "region";
+
 	} elsif ($tourn_settings->{'regions'} ) {
 		push @types, "region";
 	}
@@ -89,7 +81,6 @@
 		chamber       => "black",
 		section_rank  => "grey",
 		strength      => "orange",
-		legislation   => "orange",
 		last_name     => 'black'
 	);
 
@@ -106,14 +97,15 @@
 		seed          => "third",
 		chamber       => "third",
 		section_rank  => "third",
-		strength      => "third",
-		legislation   => "third",
+		strength      => "third"
 	);
 
 	my %label = (
-		autoqual    => "AQ",
-		legislation  => "LEG",
+		autoqual     => "AQ",
+		POs          => "PO",
 		PO           => "PO",
+		pos          => "PO",
+		po           => "PO",
 		section_rank => "1",
 		seed         => "1",
 		strength     => "1"
@@ -127,17 +119,6 @@
 
 	my %event_settings = $event->all_settings;
 
-	my %entry_settings = $m->comp(
-		"/funclib/event_entry_settings.mas",
-		event => $event,
-		all   => 1,
-		value => 1
-	);
-
-	my @panels = sort {$a->letter <=> $b->letter} $round->panels;
-
-    my %panel_entries = ();
-
     my $entries_ref;
 
 	if ($show_strength) {
@@ -148,84 +129,122 @@
 		)->first;
 
 		if ($previous_round) {
-
 			my @results = $m->comp(
 				"/tabbing/results/order_entries.mas",
 				round => $previous_round,
 			) if $previous_round;
 
 			$entries_ref = pop @results if @results;
-
 		}
-
 	}
+
+	my %entries;
 
 	if ($show_strength) {
 
-
 		foreach my $seed_entry (keys %{$entries_ref->{'seed'}}) {
-			$entry_settings{$seed_entry}{"seed"}
+			$entries{$seed_entry}{"seed"}
 				= $entries_ref->{'seed'}{$seed_entry};
 		}
 
 		foreach my $section_rank_entry (keys %{$entries_ref->{'seed'}}) {
-			$entry_settings{$section_rank_entry}{"section_rank"}
+			$entries{$section_rank_entry}{"section_rank"}
 				= $entries_ref->{'section_rank'}{$section_rank_entry};
 		}
 
 		foreach my $section_entry (keys %{$entries_ref->{'section'}}) {
-			$entry_settings{$section_entry}{"chamber"}
+			$entries{$section_entry}{"chamber"}
 				= $entries_ref->{'section'}{$section_entry};
 		}
 
 		foreach my $strength_entry (keys %{$entries_ref->{'tiebreak'}{"1"}}) {
-			$entry_settings{$strength_entry}{"strength"}
+			$entries{$strength_entry}{"strength"}
 				= $entries_ref->{'tiebreak'}{"1"}{$strength_entry};
 		}
-
 	}
 
-	foreach my $panel (@panels) {
+	my $panel_sth = $dbh->prepare("
+		select
+			entry.id, entry.code, entry.name,
+			school.id schoolid, school.code schoolcode, school.name schoolname,
+			region.id regionid, region.code regioncode, region.name regionname,
+			district.id districtid, district.code districtcode, district.name districtname,
+			chapter.state, ballot.speakerorder,
+			panel.id panel, panel.letter letter,
+			student.last lastname
 
-		my @entries = $m->comp(
-			"/funclib/panel_entries.mas",
-			panel => $panel
-		);
+		from (entry, ballot, panel)
 
-        push (@{$panel_entries{$panel->id}}, @entries);
+			left join school on school.id = entry.school
+			left join region on region.id = school.region
+			left join district on district.id = school.district
+			left join chapter on chapter.id = school.chapter
+			left join entry_student es on es.entry = entry.id
+			left join student on es.student = student.id
 
-		foreach my $entry (@entries) {
+		where entry.active = 1
+			and entry.id = ballot.entry
+			and ballot.panel = panel.id
+			and panel.round = ?
+	");
 
-			delete $entry_settings{$entry->id}{"po"};
-			$entry_settings{$entry->id}{"school"} = $entry->school->id;
+	$panel_sth->execute($round->id);
+	my $panel_refs = $panel_sth->fetchall_hash();
 
-			$entry_settings{$entry->id}{"school_code"} = $entry->schoolcode;
-			$entry_settings{$entry->id}{"school_code"} =
-				substr(Tab::short_name($entry->schoolname), 0, 6)
-				unless $entry->schoolcode;
+	my %panels;
 
-			$entry_settings{$entry->id}{"school_name"}   = $entry->schoolname;
-			$entry_settings{$entry->id}{"region_code"}   = $entry->regioncode;
-			$entry_settings{$entry->id}{"region"}        = $entry->regioncode;
-			$entry_settings{$entry->id}{"region_name"}   = $entry->regionname;
-			$entry_settings{$entry->id}{"district_code"} = $entry->districtcode;
-			$entry_settings{$entry->id}{"district_name"} = $entry->districtname;
-			$entry_settings{$entry->id}{"last_name"}     = $entry->lastname;
-			$entry_settings{$entry->id}{"legislation"}   = $authorship{$entry->districtid};
+	foreach my $entry (@{$panel_refs}) {
+		$panels{$entry->{"panel"}}{"entries"}{$entry->{"id"}} = $entry;
+		$panels{$entry->{"panel"}}{"letter"} = $entry->{"letter"};
 
-			if ($tourn_settings->{"nsda_nats"}) {
-				$entry_settings{$entry->id}{"state"} = $entry->regioncode;
-			} else {
-				$entry_settings{$entry->id}{"state"} = $entry->state;
+		delete $entries{$entry->{"id"}}{"PO"};
+
+		$entries{$entry->{"id"}}{"code"} = $entry->{"code"};
+
+		$entries{$entry->{"id"}}{"school"} = $entry->{"schoolid"};
+		$entries{$entry->{"id"}}{"school_code"} = $entry->{"schoolcode"};
+		$entries{$entry->{"id"}}{"school_code"} =
+			substr(Tab::short_name($entry->{"schoolname"}), 0, 6)
+			unless $entry->{"schoolcode"};
+
+		$entries{$entry->{"id"}}{"school_name"} = $entry->{"schoolname"};
+
+		if ($tourn_settings->{'district_regions'} ) {
+
+			if ($district_region{$entry->{"districtid"}}) {
+
+				$entries{$entry->{"id"}}{"region_code"}
+					= $district_region{$entry->{"districtid"}}->code;
+
+				$entries{$entry->{"id"}}{"region"}
+					= $district_region{$entry->{"districtid"}}->code;
+
+				$entries{$entry->{"id"}}{"region_name"}
+					= $district_region{$entry->{"districtid"}}->name;
 			}
 
-			$entry_settings{$entry->id}{"region"}
-				= $district_region{$entry->districtid}->code
-				if $district_region{$entry->districtid};
+		} else {
+			$entries{$entry->{"id"}}{"region_code"} = $entry->{"regioncode"};
+			$entries{$entry->{"id"}}{"region"}      = $entry->{"regioncode"};
+			$entries{$entry->{"id"}}{"region_name"} = $entry->{"regionname"};
 		}
+
+		$entries{$entry->{"id"}}{"district_code"} = $entry->{"districtcode"};
+		$entries{$entry->{"id"}}{"district_name"} = $entry->{"districtname"};
+		$entries{$entry->{"id"}}{"last_name"}     = $entry->{"lastname"};
+
+		if ($tourn_settings->{"nsda_nats"}) {
+			$entries{$entry->{"id"}}{"state"} = $entry->{"regioncode"};
+		} else {
+			$entries{$entry->{"id"}}{"state"} = $entry->{"state"};
+		}
+
+		$entries{$entry->{"id"}}{"region"}
+			= $district_region{$entry->{"districtid"}}->code
+			if $district_region{$entry->{"districtid"}};
     }
 
-	if ($round->type eq "elim" || $round->type eq "final") { 
+	if ($round->type eq "elim" || $round->type eq "final") {
 
 		my @this_ties = $m->comp("/funclib/congress_ties.mas", round => $round);
 		@this_ties = sort {$a->name <=> $b->name} @this_ties;
@@ -235,12 +254,10 @@
 		my $previous = $event->rounds( name => $last)->first;
 		my $round_ids;
 
-		foreach my $tie ($m->comp("/funclib/congress_ties.mas", round => $previous)) { 
+		foreach my $tie ($m->comp("/funclib/congress_ties.mas", round => $previous)) {
 			$round_ids .= ',' if $round_ids;
 			$round_ids .= $tie->id;
 		}
-
-		my $dbh = Tab::DBI->db_Main();
 
 		my $sth = $dbh->prepare("
 			select
@@ -258,7 +275,7 @@
 		while (
 			my $eid = $sth->fetchrow_array()
 		) {
-			$entry_settings{$eid}{"po"} = 1;
+			$entries{$eid}{"PO"} = 1;
 		}
 	}
 
@@ -276,9 +293,9 @@
 
 		$(document).ready( function(){
 
-%			foreach my $panel (@panels) {
+%			foreach my $panel (keys %panels) {
 %				foreach my $average (@averages) {
-					averageContents('<% $panel->id %>', "<% $average %>");
+					averageContents('<% $panel %>', "<% $average %>");
 %				}
 %			}
 
@@ -293,9 +310,7 @@
 			$("#"+panelID).find("."+targetType+"s").each(function(index) {
 
 				var targetScore = parseInt($(this).text());
-
 				var entryID = $(this).attr("entry");
-
 
 				if (!(entryID in already)) {
 					total = total + targetScore;
@@ -354,7 +369,7 @@
                 accept           : ":not(.ui-sortable-helper)",
                 disableSelection : "true",
 
-                drop             : function( event, ui) {
+                drop : function( event, ui) {
 
                     var droppableId = this.id;
 
@@ -507,88 +522,73 @@
 %				}
 
 			</span>
-
 		</div>
-
 <%perl>
 
 		my $count;
 
-		foreach my $panel (@panels) {
+		foreach my $panel_id (sort keys %panels) {
 
+			my $panel = $panels{$panel_id};
 			my %counter = ();
-
 </%perl>
 
 			<span
 				class = "marless top congress_snake"
-				id    = "panel_<% $panel->id %>"
+				id    = "panel_<% $panel_id %>"
 			>
 
 				<div class="yellowrow padmore smallish centeralign semibold marno bordersides bordertop">
-					Chamber <% $panel->letter %>
+					Chamber <% $panel->{"letter"} %>
 				</div>
 
 				<div
-					id    = "<% $panel->id %>"
-					panel   = "<% $panel->id %>"
+					id    = "<% $panel_id %>"
+					panel   = "<% $panel_id %>"
 					class = "full row nospace bordersides droppable centeralign"
 				>
 
 <%perl>
-					foreach my $entry (@{$panel_entries{$panel->id}}) {
+					foreach my $entry_id (keys %{$panel->{"entries"}}) {
 
-						my $entry_id = $entry->id;
+						$counter{"autoqual"}{""}++ if $entries{$entry_id}{"autoqual"};
+						$counter{"PO"}{""}++ if $entries{$entry_id}{"PO"};
 
-						$counter{"autoqual"}{""}++ if
-								$entry_settings{$entry_id}{"autoqual"};
-
-						$counter{"PO"}{""}++ if
-								$entry_settings{$entry_id}{"po"};
-
-						$counter{"legislation"}{""}++ if
-								$entry_settings{$entry_id}{"legislation"};
-
-						$counter{"region"}{$entry_settings{$entry_id}{"region"}}++
-							if $entry_settings{$entry_id}{"region"};
+						$counter{"region"}{$entries{$entry_id}{"region"}}++
+							if $entries{$entry_id}{"region"};
 
    						if ($tourn_settings->{"nsda_nats"}) {
-
-							$counter{"district"}{$entry_settings{$entry_id}{"district_code"}}++;
-
-							$counter{"state"}{$entry_settings{$entry_id}{"state"}}++;
-
-							$counter{"last_name"}{$entry_settings{$entry_id}{"last_name"}}++;
-
+							$counter{"district"}{$entries{$entry_id}{"district_code"}}++;
+							$counter{"state"}{$entries{$entry_id}{"state"}}++;
+							$counter{"last_name"}{$entries{$entry_id}{"last_name"}}++;
 						} else {
-
-							$counter{"school"}{$entry->school->id}++;
+							$counter{"school"}{$entries{$entry_id}{"schoolid"}}++;
 						}
 
 </%perl>
 						<span
 							class="
 								biggish martop padtop padbottom marbottom draggable leftalign wider
-								school_<% $entry_settings{$entry_id}{"school"} %>
-								<% $entry_settings{$entry_id}{"po"} ? "PO" : "" %>
+								school_<% $entries{$entry_id}{"school"} %>
+								<% $entries{$entry_id}{"PO"} ? "PO" : "" %>
 %								if ($tourn_settings->{"nsda_nats"}) {
-									district_<% $entry_settings{$entry_id}{"district_code"} %>
-									state_<% $entry_settings{$entry_id}{"state"} %>
+									district_<% $entries{$entry_id}{"district_code"} %>
+									state_<% $entries{$entry_id}{"state"} %>
 %								}
-								region_<% $entry_settings{$entry_id}{"region"} %>
+								region_<% $entries{$entry_id}{"region"} %>
 							"
 							id     = "<% $entry_id %>"
-							school = "<% $entry->school->id %>"
+							school = "<% $entries{$entry_id}{"schoolid"} %>"
 							entry  = "<% $entry_id %>"
 
 %							if ($tourn_settings->{"nsda_nats"}) {
-								district = "<% $entry_settings{$entry_id}{"district"} %>"
-								state    = "<% $entry_settings{$entry_id}{"state"} %>"
+								district = "<% $entries{$entry_id}{"district"} %>"
+								state    = "<% $entries{$entry_id}{"state"} %>"
 %							}
 						>
 
 							<span class="marno padless full borderbottom codes" >
-								<% $entry->code %>
+								<% $entries{$entry_id}{"code"} %>
 							</span>
 
 %							foreach my $tag (@types) {
@@ -600,21 +600,20 @@
 								<span
 									class="leftalign <% $tag %>s <% $colors{$tag} %>text <% $sizes{$tag} %> semibold hidden
 									<% $short_tag ne $tag
-										? "text_".$short_tag."_".$entry_settings{$entry_id}{$tag}
+										? "text_".$short_tag."_".$entries{$entry_id}{$tag}
 										: ""
 									%>"
 									entry   = "<% $entry_id %>"
 								>
-									<% $entry_settings{$entry_id}{$tag} == 1 && $tag ne "chamber"
+									<% $entries{$entry_id}{$tag} == 1 && $tag ne "chamber"
 										? $label{$tag}
-										: $entry_settings{$entry_id}{$tag}
+										: $entries{$entry_id}{$tag}
 									%>
+
 								</span>
 %							}
-
 						</span>
 %					}
-
 				</div>
 
 				<div class="row centeralign padmore marno bordersides borderbottom">
@@ -630,14 +629,12 @@
 %							$tag_label =~ s/\Section/Sct/g;
 
 							<div class = "half padless marno <% $colors{$tag} %>text" >
-
 								<span class="half rightalign">
 									<% ucfirst($tag_label) %>:
 								</span>
-
 								<span
 									class = "half leftalign semibold"
-									id    = "average_<% $tag %>_<% $panel->id %>"
+									id    = "average_<% $tag %>_<% $panel_id %>"
 								>
 								</span>
 							</div>
@@ -661,23 +658,20 @@
 </%perl>
 							<span class="half centeralign nospace">
 								<span
-									id      = "<% $key %>_<% $panel->id %>"
+									id      = "<% $key %>_<% $panel_id %>"
 									class	= "<% $type %>toggle <% $color %>text buttonwhite marbottom padless smallish full"
 									onClick = "toggleColor(
 										this.id,
-										<% $panel->id %>,
+										<% $panel_id %>,
 										'<% $key %>',
 										'<% $type %>',
 										'<% $color %>'
 									);"
 								>
-%								if ($type eq "legislation") {
-									<% $counter{$type}{$key} %> authorships
-%								} else {
 									<% $counter{$type}{$key} %>
 										<% $key eq "PO" ? "" : "from" %>
-									<% $type ne "state" ? ucfirst($type): "" %> <% $key %><% $key eq "PO" ? "s" : "" %>
-%								}
+									<% $type ne "state" ? ucfirst($type): "" %>
+									<% $key %><% $key eq "PO" ? "s" : "" %>
 							</span>
 						</span>
 
