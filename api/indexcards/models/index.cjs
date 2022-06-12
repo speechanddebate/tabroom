@@ -473,6 +473,7 @@ db.person.hasMany(db.conflict,      { as: 'Conflicts',     foreignKey: 'person' 
 db.person.hasMany(db.changeLog,     { as: 'ChangeLogs',    foreignKey: 'person' });
 db.person.hasMany(db.permission,    { as: 'Permissions',   foreignKey: 'person' });
 db.person.hasMany(db.studentVote,   { as: 'StudentVotes',  foreignKey: 'voter' });
+db.person.hasMany(db.caseList,      { as: 'CaseLists',     foreignKey: 'person'});
 
 db.person.belongsToMany(db.tourn,   { as: 'IgnoredTourns', foreignKey: 'person', through: 'tourn_ignore' });
 db.person.belongsToMany(db.tourn,   {
@@ -506,6 +507,9 @@ db.person.belongsToMany(db.circuit, {
 	otherKey   : 'circuit',
 	through    : 'permission',
 });
+
+db.caseList.belongsTo(db.person, { as: 'Person' , foreignKey: 'person' });
+db.caseList.belongsTo(db.person, { as: 'Partner', foreignKey: 'partner' });
 
 db.conflict.belongsTo(db.person,  { as: 'Person'     , foreignKey: 'person' });
 db.conflict.belongsTo(db.person,  { as: 'Conflicted' , foreignKey: 'conflicted' });
