@@ -16,7 +16,7 @@ describe('Person Rounds', () => {
 	});
 
 	it('Returns rounds for a person', async () => {
-        const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
+		const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
 		const res = await request(server)
 			.get(`/v1/caselist/rounds?person_id=17145&caselist_key=${hash}`)
 			.set('Accept', 'application/json')
