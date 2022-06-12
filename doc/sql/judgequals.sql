@@ -30,3 +30,19 @@ CREATE TABLE `person_quiz` (
   CONSTRAINT `fk_pq_quiz` FOREIGN KEY (`quiz`) REFERENCES `quiz` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+
+CREATE TABLE `caselist` (
+	`id` int(11) NOT NULL AUTO_INCREMENT,
+	`slug` varchar(255) NOT NULL,
+	`eventcode` int(6) NOT NULL DEFAULT 0,
+	`person` int(11) NOT NULL,
+	`partner` int(11) NULL,
+	PRIMARY KEY (`id`),
+	KEY `slug` (`slug`),
+	KEY `person` (`person`),
+	KEY `partner` (`partner`),
+	CONSTRAINT `fk_cl_person` FOREIGN KEY (`person`) REFERENCES `person` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+	CONSTRAINT `fk_cl_partner` FOREIGN KEY (`partner`) REFERENCES `person` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+
