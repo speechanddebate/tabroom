@@ -4,22 +4,22 @@ import db from '../../models/index.cjs';
 
 const getPersonChapters = {
 	GET: async (req, res) => {
-        const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
-        if (req.query.caselist_key !== hash) { 
-            return res.status(401).json({ message: 'Invalid caselist key' });
-        }
-        const student = await db.sequelize.query(`
-            SELECT DISTINCT C.id, C.name, C.state
-            FROM chapter C
-            INNER JOIN student S ON S.chapter = C.id
-            WHERE S.person = ?
-        `, { replacements: [req.query.person_id] });
-        const advisor = await db.sequelize.query(`
-            SELECT DISTINCT C.id, C.name, C.state
-            FROM chapter C
-            INNER JOIN permission P ON P.chapter = C.id AND tag = 'chapter'
-            WHERE P.person = ?
-        `, { replacements: [req.query.person_id] });
+		const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
+		if (req.query.caselist_key !== hash) {
+			return res.status(401).json({ message: 'Invalid caselist key' });
+		}
+		const student = await db.sequelize.query(`
+			SELECT DISTINCT C.id, C.name, C.state
+			FROM chapter C
+			INNER JOIN student S ON S.chapter = C.id
+			WHERE S.person = ?
+		`, { replacements: [req.query.person_id] });
+		const advisor = await db.sequelize.query(`
+			SELECT DISTINCT C.id, C.name, C.state
+			FROM chapter C
+			INNER JOIN permission P ON P.chapter = C.id AND tag = 'chapter'
+			WHERE P.person = ?
+		`, { replacements: [req.query.person_id] });
 
 		return res.status(200).json([...student[0], ...advisor[0]]);
 	},

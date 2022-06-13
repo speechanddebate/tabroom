@@ -15,19 +15,19 @@ describe('Caselist Link', () => {
 	});
 
 	it('Creates a caselist link', async () => {
-        const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
-		const res = await request(server)
+		const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
+		await request(server)
 			.post(`/v1/caselist/link`)
-            .body({ person_id: 17145, slug: '/test', caselist_key: hash })
 			.set('Accept', 'application/json')
 			.set('Cookie', [`${config.COOKIE_NAME}=${testAdminSession.userkey}`])
+			.send({ person_id: 17145, slug: '/test', eventcode: 'cx', caselist_key: hash })
 			.expect('Content-Type', /json/)
 			.expect(201);
 	});
 
 	after('Remove Dummy Data', async () => {
-        await db.sequelize.query(`
-            DELETE FROM person_setting WHERE person = 17145 AND tag = 'caselist_link'
+		await db.sequelize.query(`
+            DELETE FROM caselist WHERE person = 17145
         `);
 		await testAdminSession.destroy();
 		await testAdmin.destroy();
