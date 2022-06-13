@@ -4,15 +4,15 @@ import db from '../../models/index.cjs';
 
 const getPersonStudents = {
 	GET: async (req, res) => {
-        const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
-        if (req.query.caselist_key !== hash) { 
-            return res.status(401).json({ message: 'Invalid caselist key' });
-        }
+		const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
+		if (req.query.caselist_key !== hash) {
+			return res.status(401).json({ message: 'Invalid caselist key' });
+		}
 
-        // Get all students on the same roster as the person,
-        // but limit to students with future entries with a chapter with future tourns
-        // to limit out camp and observer-only chapters
-        const students = await db.sequelize.query(`
+		// Get all students on the same roster as the person,
+		// but limit to students with future entries with a chapter with future tourns
+		// to limit out camp and observer-only chapters
+		const students = await db.sequelize.query(`
             SELECT
                 DISTINCT S.id,
                 S.first,

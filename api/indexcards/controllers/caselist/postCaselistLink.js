@@ -4,17 +4,17 @@ import db from '../../models/index.cjs';
 
 const postCaselistLink = {
 	POST: async (req, res) => {
-        const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
-        if (req.body.caselist_key !== hash) { 
-            return res.status(401).json({ message: 'Invalid caselist key' });
-        }
+		const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
+		if (req.body.caselist_key !== hash) {
+			return res.status(401).json({ message: 'Invalid caselist key' });
+		}
 
-        await db.sequelize.query(`
-            INSERT INTO person_setting (tag, value_text, person)
-            VALUES ('caselist_link', ?, ?)
-        `, { replacements: [req.body.slug.trim(), req.body.person_id] });
+		await db.sequelize.query(`
+            INSERT INTO caselist (slug, eventcode, person)
+            VALUES (?, ?, ?)
+        `, { replacements: [req.body.slug.trim(), req.body.eventcode.trim(), req.body.person_id] });
 
-		return res.status(201).json({ message: 'Successfully created caselist link'});
+		return res.status(201).json({ message: 'Successfully created caselist link' });
 	},
 };
 
