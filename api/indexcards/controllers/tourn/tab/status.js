@@ -42,17 +42,21 @@ export const attendance = {
 
 				and ( exists (
 						select ballot.id
-							from ballot, judge
+							from ballot, judge, entry
 						where judge.id = ballot.judge
 							and judge.person = person.id
 							and ballot.panel = panel.id
+							and ballot.entry = entry.id
+							and entry.active = 1
 					) or exists (
 						select ballot.id
-							from ballot, entry_student es, student
+							from ballot, entry_student es, student, entry
 						where ballot.panel = panel.id
 							and ballot.entry = es.entry
 							and es.student = student.id
 							and student.person = person.id
+							and ballot.entry = entry.id
+							and entry.active = 1
 					)
 				)
 			order by cl.timestamp
@@ -76,15 +80,19 @@ export const attendance = {
 
 				and ( exists (
 						select ballot.id
-							from ballot
+							from ballot, entry
 						where ballot.judge = cl.judge
 							and ballot.panel = panel.id
+							and ballot.entry = entry.id
+							and entry.active = 1
 					) or exists (
 						select ballot.id
-							from ballot, entry_student es
+							from ballot, entry_student es, entry
 						where ballot.panel = panel.id
 							and ballot.entry = es.entry
 							and es.student = cl.student
+							and ballot.entry = entry.id
+							and entry.active = 1
 					)
 				)
 			order by cl.timestamp
@@ -99,7 +107,7 @@ export const attendance = {
 				judge.first judgeFirst, judge.last judgeLast,
 				tourn.tz tz
 
-			from (panel, tourn, round, ballot, event, judge)
+			from (panel, tourn, round, ballot, event, judge, entry)
 
 				left join person started_by on ballot.started_by = started_by.id
 
@@ -111,6 +119,8 @@ export const attendance = {
 				and ballot.panel = panel.id
 				and ballot.judge = judge.id
 				and ballot.judge_started > '1900-00-00 00:00:00'
+				and ballot.entry = entry.id
+				and entry.active = 1
 			group by panel.id, judge.id
 		`;
 
@@ -446,7 +456,7 @@ export const eventStatus = {
 				flight_offset.value offset,
 				tourn.tz tz
 
-			from (round, panel, ballot, event, tourn, timeslot)
+			from (round, panel, ballot, event, tourn, timeslot, entry)
 
 				left join score on score.ballot = ballot.id
 					and score.tag in ('winloss', 'point', 'rank')
@@ -464,6 +474,8 @@ export const eventStatus = {
 				and round.event = event.id
 				and event.tourn = tourn.id
 				and round.timeslot = timeslot.id
+				and ballot.entry = entry.id
+				and entry.active = 1
 
 				and panel.bye      = 0
 				and ballot.bye     = 0
@@ -472,14 +484,16 @@ export const eventStatus = {
 
 				and exists (
 					select b2.id
-						from ballot b2, panel p2
-						where b2.panel = p2.id
+						from ballot b2, panel p2, entry e2
+					where b2.panel = p2.id
 						and p2.round   = round.id
 						and p2.bye     = 0
 						and b2.bye     = 0
 						and b2.audit   = 0
 						and b2.forfeit = 0
 						and b2.judge   > 0
+						and b2.entry  = e2.id
+						and e2.active = 1
 				)
 
 			order by event.name, round.name
