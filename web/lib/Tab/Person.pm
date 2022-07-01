@@ -37,62 +37,6 @@ Tab::Person->has_many(answers  => 'Tab::PersonQuiz', 'person');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-sub setting {
-
-	my ($self, $tag, $value, $blob) = @_;
-
-	$/ = "";			#Remove all trailing newlines
-	chomp $blob;
-
-	my $existing = Tab::PersonSetting->search(
-		person => $self->id,
-		tag    => $tag,
-	)->first;
-
-	if (defined $value) {
-
-		if ($existing) {
-
-			$existing->value($value);
-			$existing->value_text($blob) if $value eq "text";
-			$existing->value_date($blob) if $value eq "date";
-			$existing->update();
-
-			if ($value eq "delete" || $value eq "" || $value eq "0") {
-				$existing->delete();
-			}
-
-			return;
-
-		} elsif ($value ne "delete" && $value && $value ne "0") {
-
-			my $existing = Tab::PersonSetting->create({
-				person => $self->id,
-				tag    => $tag,
-				value  => $value,
-			});
-
-			if ($value eq "text") {
-				$existing->value_text($blob);
-			}
-
-			if ($value eq "date") {
-				$existing->value_date($blob);
-			}
-
-			$existing->update();
-		}
-
-	} else {
-
-		return unless $existing;
-		return $existing->value_text if $existing->value eq "text";
-		return $existing->value_date if $existing->value eq "date";
-		return $existing->value;
-
-	}
-}
-
 sub all_permissions {
 
 	my $self = shift;
@@ -194,11 +138,82 @@ sub all_permissions {
 	return %perms;
 }
 
+sub setting {
+
+	my ($self, $tag, $value, $blob) = @_;
+	$/ = ""; #Remove all trailing newlines
+
+	chomp $blob;
+
+	my @existing = Tab::PersonSetting->search(
+		person => $self->id,
+		tag    => $tag
+	);
+
+	my $existing;
+	$existing = shift @existing if @existing;
+
+	foreach (@existing) { $_->delete(); }
+
+	if (defined $value) {
+
+		if (
+			(not defined $existing)
+			&& $value ne "delete" && $value && $value ne "0"
+		) {
+			$existing = Tab::PersonSetting->create({
+				person => $self->id,
+				tag    => $tag,
+				value  => $value,
+			});
+		}
+
+		if ($existing) {
+
+			$existing->value($value);
+
+			if ($value eq "text") {
+				$existing->value_text($blob)
+			} elsif ($value eq "date") {
+				$existing->value_date($blob);
+			} elsif ($value eq "json") {
+				my $json = eval{
+					return Tab::Utils::compress(JSON::encode_json($blob));
+				};
+				$existing->value_text($json);
+			}
+
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
+				$existing->delete();
+			} else {
+				$existing->update();
+			}
+		}
+
+		return;
+
+	} else {
+
+		return unless $existing;
+
+		if ($existing->value eq "text") {
+			return $existing->value_text
+		} elsif ($existing->value eq "date") {
+			return $existing->value_date
+		} elsif ($existing->value eq "json") {
+			return eval {
+				return JSON::decode_json(Tab::Utils::decompress($existing->value_text));
+			};
+		}
+		return $existing->value;
+	}
+}
+
+
 sub all_settings {
 
 	my $self = shift;
 	my %all_settings;
-
 	my $dbh = Tab::DBI->db_Main();
 
     my $sth = $dbh->prepare("
@@ -210,11 +225,7 @@ sub all_settings {
 
     $sth->execute($self->id);
 
-    while(
-		my (
-			$tag, $value, $value_date, $value_text
-		)  = $sth->fetchrow_array()
-	) {
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
 
 		if ($value eq "date") {
 
@@ -225,12 +236,17 @@ sub all_settings {
 
 			$all_settings{$tag} = $value_text;
 
-		} else {
+		} elsif ($value eq "json") {
 
+			$all_settings{$tag} = eval {
+				return JSON::decode_json(Tab::Utils::decompress($value_text));
+			};
+
+		} else {
 			$all_settings{$tag} = $value;
 		}
 	}
-
 	return %all_settings;
 }
 
+return 1;

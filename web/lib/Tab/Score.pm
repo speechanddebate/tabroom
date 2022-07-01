@@ -11,32 +11,15 @@ Tab::Score->has_a(student => 'Tab::Student');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-sub text { 
+sub text {
 
 	my ($self, $input) = @_;
 
-	if ($input) { 
-		$self->content(compress($input));
+	if ($input) {
+		$self->content(Tab::Utils::compress($input));
 		$self->update();
-	} else { 
-		return uncompress($self->content);
+	} else {
+		return Tab::Utils::uncompress($self->content);
 	}
-}
-
-sub compress { 
-	my $text = shift;
-	return unless $text;
-	utf8::encode($text);
-	$text = Compress::Zlib::compress($text, 8);
-	$text = MIME::Base64::encode_base64($text);
-	return $text;
-}
-
-sub uncompress { 
-	my $text = shift;
-	return unless $text;
-	$text = MIME::Base64::decode_base64($text);
-	$text = Compress::Zlib::uncompress($text);
-	return $text;
 }
 
