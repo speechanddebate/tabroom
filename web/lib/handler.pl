@@ -45,6 +45,7 @@ use Sys::Syslog;
 no warnings "uninitialized";
 
 use Tab::General;
+use Tab::Utils;
 use Tab::DBI;
 use Tab::Ad;
 use Tab::Autoqueue;
