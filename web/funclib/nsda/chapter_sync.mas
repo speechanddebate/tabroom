@@ -1,0 +1,185 @@
+<%args>
+	$chapter           => undef
+	$student           => undef
+	$chapter_judge     => undef
+</%args>
+<%init>
+
+	unless ($chapter) {
+		return;
+	}
+
+	unless ($chapter->nsda) {
+		return;
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my ($nsda_chapter, $quoi)  = $m->comp(
+		"/funclib/nsda/api_client.mas",
+		path => "/schools/".$chapter->nsda
+	);
+
+	if ($nsda_chapter) {
+		$chapter->setting("nsda_charter", $nsda_chapter->{"charter"});
+		$chapter->setting("nsda_paid", $nsda_chapter->{"paid"});
+	}
+
+	if ($ARGS{"short"}) {
+		return "Chapter membership synced";
+	}
+
+	my ($member_ref, $student_json) = $m->comp(
+		"/funclib/nsda/api_client.mas",
+		path => "/schools/".$chapter->nsda."/members"
+	);
+
+	my %nsda_members = eval {
+		return map {$_->{person_id} => $_} @{$member_ref};
+	};
+
+	return "No members were found that belong to that chapter:" unless $member_ref;
+
+	my $student_sth = $dbh->prepare("
+
+		select student.id, student.first, student.last, student.nsda,
+			student.grad_year,
+			districts_eligible.value districts_eligible,
+			nsda_points.value nsda_points
+
+		from (student, chapter)
+
+			left join person_setting nsda_membership
+				on nsda_membership.person = student.person
+				and nsda_membership.tag = 'nsda_membership'
+
+			left join student_setting districts_eligible
+				on districts_eligible.student = student.id
+				and districts_eligible.tag = 'districts_eligible'
+
+			left join student_setting nsda_points
+				on nsda_points.student = student.id
+				and nsda_points.tag = 'nsda_points'
+
+		where student.chapter = chapter.id
+			and chapter.nsda = ?
+			and student.retired != 1
+			and student.nsda > 0
+	");
+
+	$student_sth->execute($chapter->nsda);
+
+	my $students = $student_sth->fetchall_hash();
+
+	my $clear_sth = $dbh->prepare("
+		delete from student_setting
+			where student_setting.student = ?
+			and student_setting.tag IN ('districts_eligible', 'nsda_points', 'nsda_membership');
+	");
+
+	my $grad_year = $dbh->prepare("
+		update student set grad_year = ? where id = ?
+	");
+
+	my $set_sth = $dbh->prepare("
+		insert into student_setting (student, tag, value) values (?, ?, ?);
+	");
+
+	my $set_json_sth = $dbh->prepare("
+		insert into student_setting (student, tag, value, value_text) values (?, ?, 'json', ?);
+	");
+
+	foreach my $ref (@{$students}) {
+
+		my $member = $nsda_members{$ref->{'nsda'}};
+
+		unless($member->{"points"} == $ref->{nsda_points}) {
+
+			my $membership = jsonify($member);
+
+			$clear_sth->execute($ref->{"id"});
+			$set_sth->execute($ref->{"id"}, "districts_eligible", $member->{"districts_eligible"});
+			$set_sth->execute($ref->{"id"}, "nsda_points", $member->{"points"});
+
+			$set_json_sth->execute($ref->{"id"}, "nsda_membership", $membership);
+		}
+
+		if ($member->{"grad_year"} != $ref->{"grad_year"}) {
+			$grad_year->execute($member->{'grad_year'}, $ref->{"id"});
+		}
+	}
+
+	my $judge_sth = $dbh->prepare("
+		select chapter_judge.id cj, person.nsda, person.id,
+			nsda_points.value nsda_points
+
+		from (chapter_judge, person)
+
+		left join person_setting nsda_points
+			on nsda_points.person = chapter_judge.person
+			and nsda_points.tag = 'nsda_points'
+
+		where chapter_judge.chapter = ?
+			and chapter_judge.person = person.id
+			and chapter_judge.retired != 1
+	");
+
+	$judge_sth->execute($chapter->id);
+
+	my $judges = $judge_sth->fetchall_hash();
+
+	$clear_sth = $dbh->prepare("
+		delete from person_setting
+			where person_setting.person = ?
+		and person_setting.tag IN ('nsda_paid', 'diamonds', 'nsda_points', 'nsda_membership');
+	");
+
+	$set_sth = $dbh->prepare("
+		insert into person_setting (person, tag, value) values (?, ?, ?);
+	");
+
+	$set_json_sth = $dbh->prepare("
+		insert into person_setting (person, tag, value, value_text) values (?, ?, 'json', ?);
+	");
+
+	foreach my $ref (@{$judges}) {
+
+		my $member = $nsda_members{$ref->{'nsda'}};
+
+		unless($member->{"points"} == $ref->{nsda_points}) {
+
+			my $membership = jsonify($member);
+
+			$clear_sth->execute($ref->{"id"});
+
+			if ($member->{'points'}) {
+				$set_sth->execute($ref->{"id"}, "nsda_paid", $member->{"paid"}) if $member->{'paid'};
+				$set_sth->execute($ref->{"id"}, "diamonds", $member->{"diamonds"}) if $member->{'diamonds'};
+				$set_sth->execute($ref->{"id"}, "nsda_points", $member->{"points"});
+				$set_json_sth->execute($ref->{"id"}, "nsda_membership", $membership);
+			}
+		}
+	}
+
+	return "Chapter has been synchronized";
+
+	sub jsonify {
+
+		my $ref = shift;
+
+		my @bad_tags = ("ethnicity", "addresses", "meta",
+			"degrees", "honors", "citations", "trp", "irp",
+			"pronouns", "email", "phone",
+			"alt_phone", "provider", "tz", "disabled",
+			"gender");
+
+		foreach my $tag (@bad_tags) {
+			delete $ref->{$tag};
+		}
+
+		my $json = JSON::encode_json($ref);
+		return Tab::Utils::compress($json);
+	}
+
+
+</%init>

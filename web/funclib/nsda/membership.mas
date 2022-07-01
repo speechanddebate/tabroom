@@ -1,0 +1,189 @@
+<%args>
+	$person  => undef
+	$student => undef
+</%args>
+<%init>
+
+	my $nsda;
+	my $membership;
+
+	unless ($person || $student) {
+		if ($ARGS{"person_id"}) {
+			$person = Tab::Person->retrieve($ARGS{"person_id"});
+		}
+		if ($ARGS{"student_id"}) {
+			$student = Tab::Student->retrieve($ARGS{"student_id"});
+		}
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	if ($person && $student) {
+
+		return;
+
+	} elsif ($person) {
+
+		return unless $person->nsda > 0;
+
+		unless ($ARGS{'force'}) {
+
+			my $sth =  $dbh->prepare("
+				select
+					ps.id, ps.value_text, ps.timestamp
+				from person_setting ps
+					where ps.person = ?
+					and ps.tag = 'nsda_membership'
+			");
+
+			$sth->execute($person->id);
+			my ($id, $json, $timestamp) = $sth->fetch();
+			$sth->finish();
+
+			if ($id && $json && $timestamp) {
+
+				my $dt = DateTime::Format::MySQL->parse_datetime($timestamp);
+				my $now = DateTime->now();
+				$now->subtract(days => "30");
+
+				if ($json && $dt && $now->epoch < $dt->epoch)  {
+
+					my $membership = eval {
+						return JSON::decode_json(Tab::Utils::decompress($json));
+					};
+					return $membership;
+				}
+
+				#Cache expired
+				$person->setting("nsda_membership", 0);
+			}
+		}
+
+		my $membership = fetch($person->nsda);
+
+		if ($membership) {
+
+			if ($membership->{"paid"}) {
+				$person->setting("nsda_paid", $membership->{"paid"});
+				$person->setting("diamonds", $membership->{"diamonds"});
+				$person->setting("nsda_points", $membership->{"points"});
+				$person->setting("nsda_membership", "json", $membership);
+
+				return $membership;
+			}
+
+		} else {
+
+			my $message = "NSDA ID ".$person->nsda." was not a valid NSDA ID number.  The account has been de-linked. <br />";
+			$message .= "Please re-link to your NSDA account to continue. <br /><br /> Contact help\@tabroom.com if you think this is in error";
+
+			my $sth = $dbh->prepare("update person set NSDA = NULL where id = ? ");
+			$sth->execute($person->id);
+
+			unless ($ARGS{"force"} || $ARGS{'silent'}) {
+				$m->comp("/funclib/abort.mas", message => $message);
+			} else {
+				return $message;
+			}
+		}
+
+		return;
+
+	} elsif ($student) {
+
+		return unless $student->nsda > 0;
+		my $graduate;
+
+		unless ($ARGS{'force'}) {
+
+			my $sth =  $dbh->prepare("
+				select
+					ss.id, ss.value_text, ss.timestamp, ss.value_date
+				from student_setting ss
+					where ss.student = ?
+					and ss.tag = 'nsda_membership'
+			");
+
+			$sth->execute($student->id);
+
+			my ($id, $json, $timestamp, $grad) = $sth->fetch();
+			$sth->finish();
+
+			if ($id && $json && $timestamp) {
+
+				my $dt = DateTime::Format::MySQL->parse_datetime($timestamp);
+				my $now = DateTime->now();
+				$now->subtract(days => "30");
+
+				if ($json && (($dt && $now->epoch < $dt->epoch) || $grad)) {
+					my $membership = eval {
+						return JSON::decode_json(Tab::Utils::decompress($json));
+					};
+					return $membership;
+				} elsif ($json) {
+					$graduate = $id;
+				}
+			}
+		}
+
+		my $membership = fetch($student->nsda);
+
+		if ($membership) {
+
+			$student->setting("districts_eligible", $membership->{"districts_eligible"});
+			$student->setting("nsda_points", $membership->{"points"});
+			$student->setting("nsda_membership", "json", $membership);
+
+			unless ($membership->{'active_student'}) {
+				if ($graduate) {
+					my $sth = $dbh->prepare("update student_setting set value_date = NOW() where id = ?");
+					$sth->execute($graduate);
+				}
+			}
+
+			return $membership;
+
+		} else {
+
+			my $message = "NSDA ID ".$student->nsda." was not a valid NSDA ID number.  The account has been de-linked. <br />";
+			$message .= "Please re-link to your NSDA account to continue. <br /><br /> Contact help\@tabroom.com if you think this is in error";
+			my $sth = $dbh->prepare("update student set NSDA = NULL where id = ? ");
+			$sth->execute($student->id);
+			$m->comp("/funclib/abort.mas", message => $message);
+		}
+
+		return;
+
+	}
+
+	return;
+
+	sub fetch {
+
+		my $nsda = shift;
+		return unless $nsda > 0;
+
+		my @bad_tags = ("ethnicity", "addresses", "meta",
+			"degrees", "honors", "citations", "trp", "irp",
+			"pronouns", "phone",
+			"alt_phone", "provider", "tz", "disabled",
+			"gender");
+
+		my ($ref, $json) = $m->comp(
+			"/funclib/nsda/api_client.mas",
+			path => "/members/".$nsda
+		);
+
+
+		if ($ref && $ref->{"person_id"} == $nsda) {
+			foreach my $tag (@bad_tags) {
+				delete $ref->{$tag};
+			}
+			return $ref;
+		}
+
+		return;
+	}
+
+
+</%init>
