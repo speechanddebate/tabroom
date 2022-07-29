@@ -19,7 +19,6 @@ Tab::Person->has_many(conflicts => 'Tab::Conflict', 'person');
 Tab::Person->has_many(conflicteds => 'Tab::Conflict', 'conflicted');
 
 Tab::Person->has_many(followers => 'Tab::Follower', 'person');
-Tab::Person->has_many(follow_persons => 'Tab::Follower', 'follower');
 
 Tab::Person->has_many(chapter_judges => 'Tab::ChapterJudge', 'person');
 Tab::Person->has_many(judges => 'Tab::Judge', 'person' => { order_by => 'id DESC'} );
