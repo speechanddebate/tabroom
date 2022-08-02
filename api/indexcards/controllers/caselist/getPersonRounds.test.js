@@ -27,6 +27,18 @@ describe('Person Rounds', () => {
 		assert.isArray(res.body, 'Response is an array');
 	});
 
+	it('Returns rounds for a slug', async () => {
+		const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
+		const res = await request(server)
+			.get(`/v1/caselist/rounds?slug=/ndtceda21/Test/JoJo&caselist_key=${hash}`)
+			.set('Accept', 'application/json')
+			.set('Cookie', [`${config.COOKIE_NAME}=${testAdminSession.userkey}`])
+			.expect('Content-Type', /json/)
+			.expect(200);
+
+		assert.isArray(res.body, 'Response is an array');
+	});
+
 	after('Remove Dummy Data', async () => {
 		await testAdminSession.destroy();
 		await testAdmin.destroy();
