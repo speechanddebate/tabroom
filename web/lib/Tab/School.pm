@@ -18,7 +18,7 @@ Tab::School->has_many(hires     => 'Tab::JudgeHire'          , 'school');
 Tab::School->has_many(files     => 'Tab::File'               , 'school');
 Tab::School->has_many(strikes   => 'Tab::Strike'             , 'school');
 
-Tab::School->has_many(followers => [Tab::Follower => 'follower']);
+Tab::School->has_many(followers => [Tab::Follower => 'person']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
