@@ -8,6 +8,7 @@ import Event from './Event.js';
 import Round from './Round.js';
 import Student from './Student.js';
 import CaselistLink from './CaselistLink.js';
+import Share from './Share.js';
 
 export default {
 	Err,
@@ -15,9 +16,10 @@ export default {
 	Login,
 	School,
 	SchoolSetting,
-    Chapter,
+	Chapter,
 	Event,
 	Round,
 	Student,
-    CaselistLink
+	CaselistLink,
+	Share,
 };
