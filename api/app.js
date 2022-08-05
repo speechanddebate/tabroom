@@ -17,6 +17,7 @@ import userPaths from './indexcards/routes/paths/user/index.js';
 import tournPaths from './indexcards/routes/paths/tourn/index.js';
 import invitePaths from './indexcards/routes/paths/invite/index.js';
 import caselistPaths from './indexcards/routes/paths/caselist/index.js';
+import sharePaths from './indexcards/routes/paths/share/index.js';
 
 import auth from './indexcards/helpers/auth.js';
 import tournAuth from './indexcards/helpers/tourn-auth.js';
@@ -34,7 +35,6 @@ app.use(helmet());
 
 // Enable getting forwarded client IP from proxy
 app.enable('trust proxy');
-
 
 // Rate limit all requests
 const limiter = rateLimiter({
@@ -81,8 +81,8 @@ app.use(bodyParser.text({ type: '*/*', limit: '10mb' }));
 
 if (process.env.NODE_ENV === 'development') {
 	// Pretty print JSON in the dev environment
-	app.use(bodyParser.json())
-	app.set('json spaces', 4)
+	app.use(bodyParser.json());
+	app.set('json spaces', 4);
 }
 
 // Parse cookies and add them to the session
@@ -124,7 +124,7 @@ app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 });
 
 // Combine the various paths into one
-const paths = [...tournPaths, ...userPaths, ...invitePaths, ...caselistPaths];
+const paths = [...tournPaths, ...userPaths, ...invitePaths, ...caselistPaths, ...sharePaths];
 
 // Initialize OpenAPI middleware
 const apiDocConfig = initialize({
