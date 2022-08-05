@@ -7,22 +7,22 @@
 	my %tourn_settings = $tourn->all_settings();
 	my $districts      = $tourn_settings{"nsda_district"};
 
-	my $novice_only;
-	my $multiply_entrysize;
-	my $multiplier;
-	my %skip_round;
-	my $exclude_breakouts;
-
 	return unless $sweep_set && $sweep_set->id;
-	my @rules = $sweep_set->rules;
 
-	foreach my $rule (@rules) {
-		$novice_only++ if $rule->tag eq "novice_only" && $rule->value == 1;
-		$multiply_entrysize++ if $rule->tag eq "multiply_entrysize" && $rule->value == 1;
-		$multiplier = $rule->value if $rule->tag eq "multiplier";
-		$skip_round{$rule->value}++ if $rule->tag eq "ignore_round";
-		$exclude_breakouts++ if $rule->tag eq "exclude_breakouts";
+	my $dbh = Tab::DBI->db_Main();
+
+	my %rules;
+	my @sweep_rules = $sweep_set->rules;
+
+	foreach my $rule (@sweep_rules) {
+		$rules{novice_only}++ if $rule->tag eq "novice_only" && $rule->value == 1;
+		$rules{multiply_entrysize}++ if $rule->tag eq "multiply_entrysize" && $rule->value == 1;
+		$rules{multiplier} = $rule->value if $rule->tag eq "multiplier";
+		$rules{skip_rounds}{$rule->value}++ if $rule->tag eq "ignore_round";
+		$rules{"exclude_breakouts"}++ if $rule->tag eq "exclude_breakouts";
 	}
+
+	Tab::debuglog("Novice only rule is ".$rules{"novice_only"}." for set ".$sweep_set->name);
 
 	my @events;
 	foreach my $event ($sweep_set->events()) {
@@ -74,9 +74,43 @@
 	return unless (keys %events);
 
 	my %entries;
-	my %event_count;
 
-	my $dbh = Tab::DBI->db_Main();
+	my $student_sth = $dbh->prepare("
+		select
+			student.id, student.nsda, student.novice, entry.id entry, entry.event
+		from student, entry_student, entry, event
+		where event.tourn = ?
+			and event.id = entry.event
+			and entry.unconfirmed = 0
+			and entry.id = entry_student.entry
+			and entry_student.student = student.id
+			order by student.novice
+	");
+
+	$student_sth->execute($tourn->id);
+
+	my $results = $student_sth->fetchall_hash();
+
+	$student_sth->finish();
+
+	foreach my $ref (@{$results}) {
+
+		next unless $events{$ref->{event}};
+
+		if ($ref->{"novice"}) {
+			$entries{$ref->{'entry'}}{"novice"}++;
+			$entries{$ref->{'entry'}}{"students"}{$ref->{"student"}}{"novice"}++;
+		} else {
+			$entries{$ref->{'entry'}}{"not_novice"}++;
+			$entries{$ref->{'entry'}}{"students"}{$ref->{"student"}}{"not_novice"}++;
+		}
+
+		if ($ref->{"nsda"}) {
+			$entries{$ref->{"entry"}}{"students"}{$ref->{"student"}}{"nsda"} = $ref->{"nsda"};
+		}
+	}
+
+	my %event_count;
 
 	my $entry_sth = $dbh->prepare("
 		select entry.id, entry.code, entry.name,
@@ -135,6 +169,8 @@
 
 		next unless $events{$event};
 
+		next if $rules{novice_only} && $entries{$entry_id}{"not_novice"};
+
 		unless ($entries{$entry_id}{"code"}) {
 
 			$entries{$entry_id}{"code"} = $code;
@@ -191,8 +227,7 @@
 		select score.id, entry.id, event.id,
 			round.type, round.id, round.name,
 			score.tag, score.value,
-			panel.id, student.novice,
-			breakout.value
+			panel.id, breakout.value
 
 		from (score, ballot, panel, round, event, entry)
 			left join student on student.id = score.student
@@ -229,7 +264,7 @@
 		my (
 			$score_id, $entry, $event,
 			$round_type, $round_id, $round_name,
-			$tag, $value, $panel, $novice,
+			$tag, $value, $panel,
 			$breakout
 		) = $sth->fetchrow_array()
 	) {
@@ -237,8 +272,8 @@
 		next if $round_type eq "runoff";
 		next unless $events{$event};
 
-		next if $skip_round{$round_id};
-		next if $breakout && $exclude_breakouts;
+		next if $rules{skip_rounds}{$round_id};
+		next if $breakout && $rules{"exclude_breakouts"};
 
 		$entries{$entry}{"rounds"}{$round_id}++;
 		$entries{$entry}{"scores"}{$score_id}++;
@@ -259,7 +294,6 @@
 		$scores{$score_id}{"value"}    = $value;
 		$scores{$score_id}{"panel_id"} = $panel;
 		$scores{$score_id}{"round_id"} = $round_id;
-		$scores{$score_id}{"novice"}   = $novice;
 
 		$entries{$entry}{"present_type"}{$round_type}++;
 		$entries{$entry}{"present_name"}{$round_name}++;
@@ -293,42 +327,12 @@
 			) = $sth->fetchrow_array()
 		) {
 
-			next if $skip_round{$round_id};
+			next if $rules{skip_rounds}{$round_id};
 			$entry_round{$entry_id}{$round_id}{"name"} = $round_name;
 			$entry_round{$entry_id}{$round_id}{"type"} = $round_type;
 			$entry_round{$entry_id}{$round_id}{"panel"} = $panel_id
 		}
 	}
-
-	my $student_sth = $dbh->prepare("
-		select student.id, student.nsda, student.novice, entry.id
-		from student, entry_student, entry, event
-		where event.tourn = ?
-			and event.id = entry.event
-			and entry.unconfirmed = 0
-			and entry.id = entry_student.entry
-			and entry_student.student = student.id
-			order by student.novice
-	");
-
-	$student_sth->execute($tourn->id);
-
-	while(
-		my (
-			$student, $nsda, $novice, $entry
-		) = $student_sth->fetchrow_array()
-	) {
-		$entries{$entry}{"novice"} = $novice;
-		next if $novice_only && $novice < 1;
-
-		if ($nsda) {
-			$entries{$entry}{"students"}{$student}{"nsda"} = $nsda;
-		}
-
-		$entries{$entry}{"students"}{$student}{"novice"} = $novice;
-	}
-
-	$student_sth->finish();
 
 	my $bye_sth = $dbh->prepare("
 		select entry.id, event.id,
@@ -370,11 +374,9 @@
 		) = $bye_sth->fetchrow_array()
 	) {
 
-		next if $skip_round{$round_id};
+		next if $rules{skip_rounds}{$round_id};
 		next unless $events{$event};
 		next unless $panel_bye || $ballot_bye;
-
-		next if $novice_only && $entries{$entry_id}{"novice"};
 
 		$entries{$entry_id}{"byes"}++;
 		$entries{$entry_id}{"round_bye"}{$round_id}++;
@@ -391,12 +393,11 @@
 
 	$bye_sth->finish();
 
-	my %rules;
 	my %seeding;
 	my %by_seed;
 	my $minimum;
 
-	foreach my $rule (@rules) {
+	foreach my $rule (@sweep_rules) {
 
 		my $rule_tag    = $rule->tag;
 		my $rule_id     = $rule->id;
@@ -418,18 +419,16 @@
 
 		foreach my $event_id (keys %events) {
 			my $event = $events{$event_id};
-			my @target_rounds = &target_rounds($event, $rule, \%skip_round);
+			my @target_rounds = &target_rounds($event, $rule, \%rules);
 			%{$target_rounds{$event_id}} = map {$_->id => $_} @target_rounds;
 
-			@target_rounds = &target_seeds($event, $rule, \%skip_round);
+			@target_rounds = &target_seeds($event, $rule, \%rules);
 			%{$target_seeds{$event_id}} = map {$_->id => $_} @target_rounds;
 		}
 
 		if ($rule_tag eq "points_per") {
 
 			foreach my $entry_id (keys %entries) {
-
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 
 				my %panels;
 				my $event_id = $entries{$entry_id}{"event"};
@@ -467,7 +466,6 @@
 
 			foreach my $entry_id (keys %entries) {
 
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				my $event_id = $entries{$entry_id}{"event"};
 
 				SCORE:
@@ -491,7 +489,6 @@
 
 			foreach my $entry_id (keys %entries) {
 
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				my $event_id = $entries{$entry_id}{"event"};
 
 				SCORE:
@@ -512,7 +509,6 @@
 
 			foreach my $entry_id (keys %entries) {
 
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				my $event_id = $entries{$entry_id}{"event"};
 				next unless $events{$event_id};
 				my $total;
@@ -560,8 +556,6 @@
 					foreach my $key (sort {$a <=> $b} keys %{$entries_ref}) {
 
 						foreach my $entry_id (@{${$entries_ref}{$key}}) {
-
-							next if $novice_only && (not defined $entries{$entry_id}{"novice"});
 
 							my $panel = $entries{$entry_id}{"round_panel"}{$round->id};
 							$panel_place{$panel}++;
@@ -844,7 +838,6 @@
 
 			foreach my $entry_id (keys %entries) {
 
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				my $event_id = $entries{$entry_id}{"event"};
 
 				my %entry_rounds;
@@ -890,7 +883,6 @@
 
 		if ($rule_tag eq "coachover_advance") {
 			foreach my $entry_id (keys %entries) {
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				my $event_id = $entries{$entry_id}{"event"};
 
 				foreach my $round_id (keys %{$entries{$entry_id}{"round_bye"}}) {
@@ -905,7 +897,6 @@
 
 			foreach my $entry_id (keys %entries) {
 
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				my $event_id = $entries{$entry_id}{"event"};
 
 				SCORE:
@@ -933,7 +924,6 @@
 
 			foreach my $entry_id (keys %entries) {
 
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				my $event_id = $entries{$entry_id}{"event"};
 				next unless $events{$event_id};
 
@@ -969,7 +959,6 @@
 		if ($rule_tag eq "round_bye") {
 
 			foreach my $entry_id (keys %entries) {
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				my $event_id = $entries{$entry_id}{"event"};
 
 				foreach my $round_id (keys %{$entries{$entry_id}{"round_bye"}}) {
@@ -982,8 +971,6 @@
 		if ($rule_tag eq "points_per_po_round") {
 
 			foreach my $entry_id (keys %entries) {
-
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 
 				my %was_po;
 				my $event_id = $entries{$entry_id}{"event"};
@@ -1003,7 +990,6 @@
 
 		if ($rule_tag eq "manual") {
 			foreach my $entry_id (keys %entries) {
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				$entries{$entry_id}{$rule_id} += $entries{$entry_id}{"manual"};
 			}
 		}
@@ -1011,7 +997,6 @@
 		if ($rule_tag eq "minimum")  {
 			$minimum = $rule_id;
 			foreach my $entry_id (keys %entries) {
-				next if ($novice_only && (not defined $entries{$entry_id}{"novice"}));
 				if (keys %{$entries{$entry_id}{"scoretag"}}) {
 					$entries{$entry_id}{"minimum"} = $points;
 				}
@@ -1070,12 +1055,12 @@
 			}
 		}
 
-		if ($multiply_entrysize > 0) {
+		if ($rules{multiply_entrysize} > 0) {
 			$entries{$entry_id}{"points"} = $entries{$entry_id}{"student_count"} * $entries{$entry_id}{"points"};
 		}
 
-		if ($multiplier > 0) {
-			$entries{$entry_id}{"points"} = $multiplier * $entries{$entry_id}{"points"};
+		if ($rules{multiplier} > 0) {
+			$entries{$entry_id}{"points"} = $rules{multiplier} * $entries{$entry_id}{"points"};
 		}
 
 		next if $ARGS{'all_entries'};
@@ -1088,19 +1073,19 @@
 	sub target_rounds {
 
 		my @targets;
-		my ($event, $rule, $skip_rounds,) = @_;
+		my ($event, $rule, $rules) = @_;
 
 		my $count = $rule->count;
 		my $count_round = $rule->count_round;
 
 		if ($count eq "all") {
 			foreach my $round ($event->rounds()) {
-				next if $skip_rounds->{$round};
+				next if $rules->{skip_rounds}{$round};
 				push @targets, $round;
 			}
 		} elsif ($count eq "specific") {
 			foreach my $round ($event->rounds(name => $count_round)) {
-				next if $skip_rounds->{$round};
+				next if $rules->{skip_rounds}{$round};
 				push @targets, $round;
 			}
 		} elsif ($count eq "last_prelims" && ($count_round > 0)) {
@@ -1118,7 +1103,7 @@
 			my @rounds = sort {$b->name <=> $a->name} $event->rounds();
 			my $target_round = shift @rounds;
 
-			while ($count_round > 0) { 
+			while ($count_round > 0) {
 
 				if (@rounds) {
 					$target_round = shift @rounds;
@@ -1146,7 +1131,7 @@
 					next unless $round->type eq $count;
 				}
 
-				next if $skip_rounds->{$round};
+				next if $rules->{skip_rounds}{$round};
 				push @targets, $round;
 			}
 		}
@@ -1156,7 +1141,7 @@
 
 	sub target_seeds {
 
-		my ($event, $rule, $skip_rounds,) = @_;
+		my ($event, $rule, $rules) = @_;
 		my $count = $rule->count;
 		my $count_round = $rule->count_round;
 
@@ -1169,7 +1154,7 @@
 				$event->rounds()
 			) {
 				next if $round->type eq "runoff";
-				next if $skip_rounds->{$round};
+				next if $rules->{skip_rounds}{$round};
 				push @targets, $round;
 			}
 
@@ -1179,7 +1164,7 @@
 				sort {$b->name <=> $a->name}
 				$event->rounds(name => $count_round)
 			) {
-				next if $skip_rounds->{$round};
+				next if $rules->{skip_rounds}{$round};
 				push @targets, $round;
 			}
 
@@ -1201,7 +1186,7 @@
 					next unless $round->type eq $count;
 				}
 
-				next if $skip_rounds->{$round};
+				next if $rules->{skip_rounds}{$round};
 				push @targets, $round;
 			}
 		}
