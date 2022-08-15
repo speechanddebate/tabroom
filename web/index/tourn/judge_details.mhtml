@@ -1,0 +1,418 @@
+<%args>
+	$person
+	$person_settings
+	$tourn_id	=> undef
+	$category_id => undef
+</%args>
+<%init>
+
+	my $tourn;
+	eval{ $tourn = Tab::Tourn->retrieve($tourn_id); };
+
+	unless ($tourn) {
+		$m->comp("/funclib/abort.mas", message => "Invalid tournament ID or URL");
+		$m->abort();
+	}
+
+	my $tz = $tourn->tz if $tourn;
+	$tz = "UTC" unless $tz;
+
+	my $now = DateTime->now( time_zone => $tz );
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my @alreadies = $m->comp(
+		"/funclib/tourn_person_judges.mas",
+		tourn  => $tourn,
+		person => $person
+	);
+
+	my $already = shift @alreadies;
+	my $category;
+	my %category_settings = ();
+
+	if ( (not defined $already) && $ARGS{"from_form"}) {
+
+		$category = Tab::Category->retrieve($ARGS{"category_id"});
+		%category_settings = $category->all_settings();
+
+		my $errs;
+
+		if ($category_settings{"signup_phone"}) {
+			unless ($person->phone && length($person->phone) > 9) {
+				$errs .= "<br />You must have a phone number in your Tabroom account";
+			}
+		}
+
+		if ($category_settings{"signup_paradigm"}) {
+			unless ($person_settings->{"paradigm"}) {
+				$errs .= "<br />You must have a paradigm on Tabroom";
+			}
+		}
+
+		if ($category_settings{"signup_url"}) {
+			unless ($ARGS{"url_complete"}) {
+				$errs .= "<br />You must verify you followed the instructions on the form: ".$category_settings{"signup_url_message"};
+			}
+		}
+
+		if ($category_settings{"signup_message"}) {
+			unless ($ARGS{"disclaimer"}) {
+				$errs .= "<br />You must verify you read the tournament disclaimer/instructions";
+			}
+		}
+
+		if ($category_settings{"signup_required_quizzes"}) {
+			foreach my $quiz_id (@{$category_settings{"signup_required_quizzes"}}) {
+				unless (Tab::PersonQuiz->search(person => $person->id, quiz => $quiz_id)->first) {
+					my $quiz = Tab::Quiz->retrieve($quiz_id);
+					$errs .= "<br /> You are required to complete the ".$quiz->label." certification/questionnaire.";
+				}
+			}
+		}
+
+		my @reqs;
+
+		if ($category_settings{"jpool_required"}) {
+			Tab::JPool->set_sql(regs => "
+				select jpool.*
+					from jpool, jpool_setting jps
+				where jpool.category = ?
+					and jpool.id = jps.jpool
+					and jps.tag = 'signups'
+			");
+
+			@reqs = Tab::JPool->search_regs($category->id);
+
+			my $count;
+
+			foreach my $req (@reqs) {
+				if ($ARGS{"jpool_".$req->id}) {
+					$count++;
+				}
+			}
+
+			if ($count < $category_settings{"jpool_required"}) {
+				$errs .= "<br />You must sign up for a minimum of ".$category_settings{"jpool_required"}." judging pools";
+			}
+		}
+
+		if ($category_settings{'rounds_per'} && $ARGS{'hired'} < 1) {
+			$errs .= "<br />You have signed up to judge zero rounds.  Please select at least one round.";
+		}
+
+		if ($errs) {
+			$m->comp("/funclib/abort.mas", message => $errs);
+		}
+
+		my $judge = Tab::Judge->create({
+			first    => $person->first,
+			middle   => $person->middle,
+			last     => $person->last,
+			category => $category->id,
+			hired    => $ARGS{"hired"},
+			person   => $person->id,
+			active   => 0
+		});
+
+        $judge->setting("notes", "text", $ARGS{"notes"});
+        $judge->setting("public_signup", 1);
+        $judge->setting("public_signup_pending", 1);
+        $judge->setting("public_signup_at", "date", $now);
+        $judge->setting("public_signup_by", $person->email);
+        $judge->setting("public_signup_id", $person->id);
+
+		foreach my $req (@reqs) {
+			if ($ARGS{"jpool_".$req->id}) {
+				Tab::JPoolJudge->create({ judge => $judge->id, jpool => $req->id});
+			}
+		}
+
+		$already = $judge;
+
+	} elsif (not defined $already) {
+		$m->redirect("judge_signup.mhtml?tourn_id=".$tourn->id);
+	} else {
+
+		$category = $already->category();
+		%category_settings = $category->all_settings();
+	}
+
+	my @shifts;
+
+	foreach my $shift ($category->shifts()) {
+		next if $shift->type eq "strike";
+		push @shifts, $shift;
+	}
+
+	my $tstart = $tourn->start;
+	$tstart->set_time_zone($tz);
+
+	my $tend = $tourn->end;
+	$tend->set_time_zone($tz);
+
+	# Refresh the standing conflicts
+	$m->comp("/funclib/person_conflict.mas", person => $person, tourn => $tourn);
+
+	Tab::JPool->set_sql( by_judge => "
+		select jpool.*
+			from jpool, jpool_judge, jpool_setting
+		where jpool_judge.judge = ?
+			and jpool_judge.jpool = jpool.id
+			and jpool.id = jpool_setting.jpool
+			and jpool_setting.tag = 'signups'
+	");
+
+	my @jpools = Tab::JPool->search_by_judge($already->id);
+
+</%init>
+
+	<div class="menu">
+		<div class="sidenote">
+			<h4>Tournament Info</h4>
+
+			<a
+				class="full blue"
+				href="/index/tourn/index.mhtml?tourn_id=<% $tourn->id %>"
+			>
+				Tournament Website
+			</a>
+
+			<div class="row padvertless">
+				<span class="quarterspacer"></span>
+				Registered on <& "/funclib/showdt.mas",  length => "murica", dt => $already->setting("public_signup_at"), tz => $tz, at => 1, tz_name => 1 &>
+			</div>
+
+			<div class="row padvertless">
+				<span class="quarterspacer"></span>
+				Registered by <% $already->setting("public_signup_by") %>
+			</div>
+
+			<div class="row padvertless">
+				<span class="quarterspacer"></span>
+				Judging category: <% $category->name %>
+			</div>
+
+
+%			if (@jpools) {
+
+				<h4>Judging Pools</h4>
+
+%				foreach my $jpool (@jpools) {
+					<div class="row padvertless">
+						<span class="halfspacer"></span>
+						<% $jpool->name %>
+					</div>
+%				}
+
+%			}
+
+
+		</div>
+	</div>
+
+	<div class="main">
+
+		<div class="full centeralign">
+			<span class="ninetenths">
+				<h4 class="martopmore centeralign ltborderbottom ninetenths">
+					Details for <% $category->{"name"} %>
+				</h4>
+
+				<p class="bigger semibold centeralign bluetext">
+					<% $tourn->name %> in <% $tourn->city %> <% $tourn->state ? $tourn->state : $tourn->country %>
+				</p>
+
+				<p class="bigger semibold centeralign bluetext">
+					<% $tstart->month_name %> <% $tstart->day %><% $tstart->day != $tend->day ? "-".$tend->day : "" %>, <% $tstart->year %>
+					<span class='halfspacer'></span>
+					(<% $tstart->day_abbr %><% $tstart->day != $tend->day ? "-".$tend->day_abbr : "" %>)
+				</p>
+
+%				if (@shifts) {
+
+					<h5>Available Times</h5>
+<%perl>
+					foreach my $shift (@shifts) {
+
+						my $start = $shift->start;
+						my $end = $shift->end;
+						my $duration = $end - $start;
+</%perl>
+						<div class="row leftalign">
+							<span class="twofifths semibold padvert">
+								<span class="spacer centeralign">
+								</span>
+								<% $shift->name %>
+							</span>
+
+							<span class="tenth">
+								<% $start->day_abbr %>
+							</span>
+
+							<span class="threetenths">
+%								if ($duration->hours > 8) {
+									All Day
+%								} else {
+									<& "/funclib/showtime.mas", format => "murica", day => 1, dt => $start, tz => $tz &>
+									to
+									<& "/funclib/showtime.mas", format => "murica", dt => $end, tz => $tz &>
+%								}
+							</span>
+
+							<span class="fifth centeralign">
+%								my $value = 0;
+%								$value = 1 if $shift->strike($already);
+								<& "/funclib/bool_switch.mas",
+									tag      => $shift->id,
+									judge_id => $already->id,
+									shift_id => $shift->id,
+									tourn_id => $tourn->id,
+									url      => "shift_switch.mhtml",
+									onred    => 1,
+									invert   => 1,
+									value    => $value
+								&>
+							</span>
+						</div>
+%					}
+%				}
+
+%				if ($category_settings{"signup_conflicts"}) {
+
+<%perl>
+
+					my @entry_conflicts = $already->strikes(
+						conflict   => 1,
+						registrant => 1,
+						type       => "entry"
+					);
+
+					my %entry_conflict = map {$_->entry->id => $_} @entry_conflicts;
+
+					my @school_conflicts = $already->strikes(
+						conflict   => 1,
+						registrant => 1,
+						type       => "school"
+					);
+
+					my %school_conflict = map {$_->school->id => $_} @school_conflicts;
+
+					my $category_entries = $m->comp("/funclib/category_entry.mas", category => $already->category);
+
+</%perl>
+					<h5>Conflicts</h5>
+
+					<p>
+						<% $category_settings{"conflict_message"}  %>
+					</p>
+
+					<p class="leftalign">
+						Any conflict information you enter onto Tabroom is viewable by
+						third parties, including the people you are conflicting.  If
+						you have a conflict (or for that matter, any other information)
+						you wish to keep confidential, you should contact the
+						tournament officials directly instead of entering it here.
+					</p>
+
+					<div class='row leftalign'>
+						<span class="twofifths semibold padvert">
+							<span class="spacer"></span>
+							Schools you should not judge
+						</span>
+
+						<span class="threefifths">
+							<div class="full nospace" id="school_append">
+%							foreach my $strike (sort {$a->id <=> $b->id} @school_conflicts) {
+								<div class="full padvertless ltborderbottom" id="<% $strike->id %>">
+									<span class="threequarters">
+										<% $strike->school->name %>
+									</span>
+									<span class="quarter centeralign">
+										<a
+											judge_id  = "<% $already->id %>"
+											strike_id = "<% $strike->id %>"
+											tourn_id  = "<% $tourn->id %>"
+											onClick   = "postSwitch(this, 'strike_rm.mhtml'); fixVisual();"
+											class     = "buttonwhite redtext fa fa-sm fa-trash"
+										></a>
+									</span>
+								</div>
+%							}
+							</div>
+
+							<div class="full martop">
+								<select
+									name      = "school_id"
+									school_id = "tag"
+									judge_id  = "<% $already->id %>"
+									tourn_id  = "<% $tourn->id %>"
+									onChange  = "postSwitch(this, 'strike_rm.mhtml'); fixVisual();"
+								>
+									<option value="">Add a conflict</option>
+%									foreach my $school (sort {$a->name cmp $b->name} $tourn->schools) {
+%										next if $school_conflict{$school->id};
+										<option
+											value="<% $school->id %>"
+										><% $school->name %></option>
+%									}
+								</select>
+							</div>
+						</span>
+
+					</div>
+
+					<div class='row leftalign'>
+						<span class="twofifths semibold padvert">
+							<span class="spacer"></span>
+							Competitors you should not judge
+						</span>
+
+						<span class="threefifths">
+							<div class="full nospace" id="entry_append">
+%								foreach my $strike (sort {$a->id <=> $b->id} @entry_conflicts) {
+									<div class="full padvertless ltborderbottom" id="<% $strike->id %>">
+										<span class="threequarters">
+											<% $strike->entry->school->name %>
+											<% $strike->entry->name %>
+										</span>
+										<span class="quarter centeralign">
+											<a
+												judge_id  = "<% $already->id %>"
+												strike_id = "<% $strike->id %>"
+												tourn_id  = "<% $tourn->id %>"
+												onClick   = "postSwitch(this, 'strike_rm.mhtml'); fixVisual();"
+												class     = "buttonwhite redtext fa fa-sm fa-trash"
+											></a>
+										</span>
+									</div>
+%								}
+							</div>
+
+							<div class="full martop">
+								<select
+									name     = "entry_id"
+									entry_id = "tag"
+									judge_id = "<% $already->id %>"
+									tourn_id = "<% $tourn->id %>"
+									onChange = "postSwitch(this, 'strike_rm.mhtml'); fixVisual();"
+								>
+									<option value="">Add a conflict</option>
+%									foreach my $entry (@{$category_entries}) {
+%										next if $entry_conflict{$entry->{id}};
+										<option
+											value="<% $entry->{"id"} %>"
+										>
+											<% $entry->{"school_name"} %>
+											<% $entry->{"name"} %>
+										</option>
+%									}
+								</select>
+							</div>
+						</span>
+					</div>
+%				}
+			</span>
+		</div>
+	</div>
+
