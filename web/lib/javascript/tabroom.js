@@ -215,6 +215,14 @@
 							$("#"+attributes.reply_append).append(data.reply);
 						}
 
+						if (data.reply_target) {
+							$("#"+data.reply_target).text(data.reply);
+						}
+
+						if (data.reply_append) {
+							$("#"+data.reply_append).append(data.reply);
+						}
+
 						$(".replybucket").text(data.reply);
 						$(".replyappend").append(data.reply);
 					}
@@ -324,7 +332,6 @@
 
 						if (data.reprop) {
 							data.reprop.forEach( function(item) {
-								console.log(item);
 								$("#"+item.id).attr(item.property, item.value);
 							});
 						}
