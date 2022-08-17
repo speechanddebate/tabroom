@@ -8,6 +8,25 @@
 		}
 	});
 
+	/* copy text */
+	/* this method of doing it, horking it in a hidden element, seems
+	 * needlessly baroque but apparently that's the JS way of doing this. How
+	 * stupid. */
+
+	function copyToClipboard(elementId, textLabel) {
+	    var $temp = $("<input>");
+		$("body").append($temp);
+
+		$temp.val($("#"+elementId).text()).select();
+		document.execCommand("copy");
+		$temp.remove();
+
+		if (!textLabel) {
+			textLabel = "Text ";
+		}
+		alertify.notify(textLabel+" copied to clipboard", "custom");
+	}
+
 	function confirmSubmit(message, submitButton) {
 
 	    event.preventDefault();
