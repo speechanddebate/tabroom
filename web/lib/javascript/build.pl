@@ -29,7 +29,7 @@ use JavaScript::Minifier qw(minify);
 	);
 
 	my $custom_file = "tabroom.js";
-	my $output_file = "tabroom.min.js";
+	my $output_file = "tabroom.v12.min.js";
 	my $sources_file = "sources.js";
 
 	# First, concatenate them together
