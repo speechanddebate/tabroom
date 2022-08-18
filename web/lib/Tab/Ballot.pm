@@ -13,8 +13,6 @@ Tab::Ballot->has_a(entry => 'Tab::Entry');
 Tab::Ballot->has_a(entered_by => 'Tab::Person');
 Tab::Ballot->has_a(audited_by => 'Tab::Person');
 
-Tab::Ballot->has_a(hangout_admin => 'Tab::Person');
-
 Tab::Ballot->has_many(values => 'Tab::Score');
 Tab::Ballot->has_many(scores => 'Tab::Score');
 
