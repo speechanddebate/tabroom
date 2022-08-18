@@ -9,7 +9,7 @@ Tab::Judge->columns(Others => qw /alt_category covers obligation hired person_re
 
 # Wow, that's a lot.
 Tab::Judge->columns(TEMP => qw/categoryid schoolid tier pref panelid chair
-				   hangout_admin tourn avg eventtype eventid
+				   tourn avg eventtype eventid
 				   diet ballotid personid tab_rating cjid schoolname
 				   schoolcode state regname regcode region standby
 				   site neutral diversity
