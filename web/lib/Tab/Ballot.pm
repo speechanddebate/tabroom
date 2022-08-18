@@ -3,8 +3,7 @@ use base 'Tab::DBI';
 Tab::Ballot->table('ballot');
 Tab::Ballot->columns(Primary => qw/id/);
 Tab::Ballot->columns(Essential => qw/judge panel entry speakerorder side audit bye forfeit tv/);
-Tab::Ballot->columns(Others => qw/chair seat entered_by audited_by judge_started started_by 
-								  hangout_admin timestamp/);
+Tab::Ballot->columns(Others => qw/chair seat entered_by audited_by judge_started started_by timestamp/);
 Tab::Ballot->columns(TEMP => qw/roundid entryid panelid judgename/);
 
 Tab::Ballot->has_a(judge => 'Tab::Judge');
@@ -21,7 +20,7 @@ Tab::Ballot->has_many(scores => 'Tab::Score');
 
 __PACKAGE__->_register_datetimes( qw/timestamp judge_started/);
 
-sub account { 
+sub account {
 	my $self = shift;
 	return $self->entered_by;
 }
@@ -30,26 +29,26 @@ sub value {
 
 	my ($self, $tag, $value, $student) = @_;
 
-	my @existing = Tab::Score->search(  
+	my @existing = Tab::Score->search(
 		ballot => $self->id,
 		tag    => $tag
 	);
 
-	@existing = Tab::Score->search(  
+	@existing = Tab::Score->search(
 		ballot  => $self->id,
 		student => $student->id,
 		tag     => $tag
 	) if $student;
 
-    if ($value) { 
+    if ($value) {
 
 		if (@existing) {
 
 			my $exists = shift @existing;
 			$exists->value($value);
 			$exists->update();
-		
-			foreach my $other (@existing) { 
+
+			foreach my $other (@existing) {
 				$other->delete();
 			}
 
