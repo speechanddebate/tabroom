@@ -1,0 +1,189 @@
+<%args>
+	$tourn
+	$person
+	$event_id => undef
+</%args>
+<%init>
+
+	use Text::CSV;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $event = Tab::Event->retrieve($event_id);
+
+	unless ($event) {
+		$m->comp("/funclib/abort.mas", message => "No valid event ID number sent: $event_id is not a valid ID");
+	}
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+	my $now = DateTime->now(time_zone => $tz);
+
+	# Get the upload and create the file handle.
+	my $req = Apache2::Request->new($r);
+	my @csv_handles = $r->upload;
+	my $csv_file = $req->upload($csv_handles[0]);
+	my $io = $csv_file->io;
+
+	my $csv = Text::CSV->new({ sep_char => ',' });
+
+	my %entries_by_code = map {$_->code => $_} $event->entries();
+	my %judges_by_name = ();
+
+	foreach my $judge ($event->category->judges()) {
+		$judges_by_name{$judge->last.', '.$judge->first} = $judge;
+	}
+
+	my $clear_sth = $dbh->prepare("delete panel.* from panel,round where round.event = ? and round.id = panel.round");
+	$clear_sth->execute($event->id);
+
+	my %rounds_by_num = map {$_->name => $_} $event->rounds();
+
+	my @rubric = ( "Open", "Dir1", "Wit1", "Dir2", "Wit2", "Dir3", "Wit3", "Cross1", "Cross2", "Cross3", "Close");
+
+	LINE:
+	foreach my $line (<$io>) {
+
+        next unless $csv->parse($line);
+
+        my (
+			$round_num, $section_num, $panel_num,
+			$aff, $aobs, $aada, $neg, $nobs, $nada,
+			$room, @judge
+		) = $csv->fields();
+
+		my $round = $rounds_by_num{$round_num};
+
+		my $aff_team = $entries_by_code{$aff};
+		my $neg_team = $entries_by_code{$neg};
+
+		next unless $aff_team && $neg_team;
+
+		my $flight = 1;
+
+		if ($panel_num != $section_num) {
+			$flight++;
+			$round->flighted(2);
+			$round->update();
+		}
+
+		my $panel = Tab::Panel->create({
+			round  => $round->id,
+			letter => $section_num,
+			flight => $flight
+		});
+
+		Tab::debuglog("<h4> Created panel $section_num in round $round_num.  Pro ".$aff_team->code." vs Def ".$neg_team->code."</h4>");
+
+		while (@judges) {
+
+			my @aff_rub = @rubric;
+			my @neg_rub = @rubric;
+
+			my $judge_name = shift @judges;
+			my $judge = $judges_by_name{$judge_name};
+
+			my %aff_rubric;
+			my $aff_total;
+			my $aff_count;
+
+			my %neg_rubric;
+			my $neg_total;
+			my $neg_count;
+
+			while (@aff_rub) {
+				my $label = shift @aff_rub;
+				my $points = shift @judges;
+				$aff_total += $points;
+				$aff_count++;
+				$aff_rubric{$aff_count}{"points"} = $points;
+				$aff_rubric{$aff_count}{"label"} = $label;
+			}
+
+			while (@neg_rub) {
+				my $label = shift @neg_rub;
+				my $points = shift @judges;
+				$neg_total += $points;
+				$neg_count++;
+				$neg_rubric{$neg_count}{"points"} = $points;
+				$neg_rubric{$neg_count}{"label"} = $label;
+			}
+
+			next unless $judge;
+
+			Tab::debuglog("<p> Judge $judge_name found with pro points $aff_total and def points $neg_total<p>");
+
+			my $aff_ballot = Tab::Ballot->create({
+				panel => $panel->id,
+				entry => $aff_team->id,
+				side  => 1,
+				judge => $judge->id
+			});
+
+			my $neg_ballot = Tab::Ballot->create({
+				panel => $panel->id,
+				entry => $neg_team->id,
+				side  => 2,
+				judge => $judge->id
+			});
+
+			if ($aff_points > $neg_points) {
+
+				Tab::Score->create({
+					ballot => $aff_ballot->id,
+					tag    => "winloss",
+					value => 1
+				});
+
+				Tab::Score->create({
+					ballot => $neg_ballot->id,
+					tag    => "winloss",
+					value => 0
+				});
+
+			} elsif ($neg_points > $aff_points) {
+
+				Tab::Score->create({
+					ballot => $aff_ballot->id,
+					tag    => "winloss",
+					value => 0
+				});
+
+				Tab::Score->create({
+					ballot => $neg_ballot->id,
+					tag    => "winloss",
+					value => 1
+				});
+			}
+
+			Tab::Score->create({
+				ballot => $aff_ballot->id,
+				tag    => "point",
+				value  => $aff_points
+			});
+
+			Tab::Score->create({
+				ballot => $neg_ballot->id,
+				tag    => "point",
+				value  => $neg_point
+			});
+
+			Tab::Score->create({
+				ballot => $aff_ballot->id,
+				tag    => "rubric",
+				content => JSON::encode_json(\%aff_rubric)
+			});
+
+			Tab::Score->create({
+				ballot => $neg_ballot->id,
+				tag    => "rubric",
+				content => JSON::encode_json(\%neg_rubric)
+			});
+		}
+	}
+
+	my $msg = "Imported rounds";
+
+	$m->redirect("import_csv.mhtml?msg=$msg");
+
+</%init>
