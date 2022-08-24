@@ -11,13 +11,13 @@ const postShare = {
 		if (req.body.share_key !== hash) {
 			return res.status(401).json({ message: 'Invalid share key' });
 		}
-		if (!req.body.panel && !req.body.round_id) {
-			return res.status(400).json({ message: 'Must provide either a panel or round_id' });
+		if (!req.body.panels || req.body.panels.length < 1) {
+			return res.status(400).json({ message: 'Must provide an array of panels' });
 		}
 
-		// If panel is provided, just forward the file to the panel
-		if (req.body.panel) {
-			const result = await selectPanelEmail(req.body.panel);
+		// If passphrase panel ID and a file are provided, just forward the file to the panel
+		if (req.body.panels.length === 1 && typeof req.body.panels[0] === 'string' && req.body.file) {
+			const result = await selectPanelEmail(req.body.panels[0]);
 
 			if (!result || result.length < 1) {
 				return res.status(400).json({
@@ -31,9 +31,9 @@ const postShare = {
 
 			try {
 				await sendMail(
-					`${req.body.panel}@share.tabroom.com`,
+					`${req.body.panels[0]}@share.tabroom.com`,
 					`${emails}`,
-					`Speech Documents - ${tournament} Round ${round} (${req.body.panel})`,
+					`Speech Documents - ${tournament} Round ${round} (${req.body.panels[0]})`,
 					'Speech Documents',
 					null,
 					{ filename: req.body.filename, file: req.body.file },
@@ -44,12 +44,10 @@ const postShare = {
 			}
 		}
 
-		// Otherwise initiate a chain to every panel in the round
-		const panels = await db.sequelize.query(`
-			SELECT DISTINCT panel.id FROM panel WHERE round = ?
-		`, { replacements: [req.body.round_id] });
-
+		// Otherwise generate a passphrase and initiate a chain to every panel
 		const emailPromises = [];
+		const panels = req.body.panels.filter(p => typeof p === 'number');
+
 		panels.forEach(async (p) => {
 			const phrase = randomPhrase();
 			await db.sequelize.query(`
@@ -57,7 +55,7 @@ const postShare = {
 				values (?, 'share', ?)
 				on duplicate key update
 				value = ?
-			`, { replacements: [p.id, phrase] });
+			`, { replacements: [p, phrase] });
 
 			const result = await selectPanelEmail(phrase);
 
@@ -78,7 +76,7 @@ const postShare = {
 };
 
 postShare.POST.apiDoc = {
-	summary: 'Creates a speech doc chain for each panel in a round or sends a file to an individual panel',
+	summary: 'Creates a speech doc chain for an array of panels, including sending a file to an individual panel',
 	operationId: 'postShare',
 	requestBody: {
 		description: 'Share request',
