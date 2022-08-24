@@ -10,11 +10,15 @@ const auth = async (req) => {
 		return req.session;
 	}
 
-	if (req.cookies[req.config.COOKIE_NAME]) {
+	console.log(req.cookies[req.config.COOKIE_NAME]);
+	console.log(req.headers['X-Tabroom-Cookie']);
+	const cookie = req.cookies[req.config.COOKIE_NAME] || req.headers['x-tabroom-cookie'];
+
+	if (cookie) {
 
 		let session = await db.session.findOne({
 			where: {
-				userkey: req.cookies[req.config.COOKIE_NAME],
+				userkey: cookie,
 			},
 			include : [
 				{ model: db.person, as: 'Person' },
