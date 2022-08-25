@@ -25,6 +25,7 @@ const getShare = {
 			WHERE
 				PN.id = ?
 				AND R.published = 1
+				AND B.audit = 0
 				AND E.type = 'debate'
 				AND T.start > '${startOfYear}-08-01 00:00:00'
 				AND T.start < CURRENT_TIMESTAMP
