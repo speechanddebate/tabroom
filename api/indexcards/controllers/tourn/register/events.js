@@ -5,7 +5,6 @@ export const listEvents = {
 		const op = db.Sequelize.Op;
 
 		// Filter out signup options for tournament admins
-
 		const events = await db.event.findAll({
 			where: { tourn: tournId },
 			include : [

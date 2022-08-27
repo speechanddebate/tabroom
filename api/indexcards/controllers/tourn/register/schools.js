@@ -8,7 +8,6 @@ export const listSchools = {
 		const op = db.Sequelize.Op;
 
 		// Filter out signup options for tournament admins, deliver the rest
-
 		const schools = await db.school.findAll({
 			where: { tourn: tournId },
 			include : [
