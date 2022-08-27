@@ -3,7 +3,7 @@ import { assert } from 'chai';
 import config from '../../../../config/config.js';
 import db from '../../../models/index.cjs';
 import server from '../../../../app.js';
-import userData from '../../../tests/users.js';
+import userData from '../../../../tests/users.js';
 
 describe('Status Board', () => {
 
@@ -11,7 +11,7 @@ describe('Status Board', () => {
 	let testCampusLog = {};
 	let testAdminSession = {};
 
-	before('Set Dummy Data', async () => {
+	beforeAll(async () => {
 		testAdmin = await db.person.create( userData.testAdmin);
 		testAdminSession = await db.session.create(userData.testAdminSession);
 		testCampusLog = await db.campusLog.create(userData.testCampusLog);
@@ -158,7 +158,7 @@ describe('Status Board', () => {
 
 	});
 
-	after('Remove Dummy Data', async () => {
+	afterAll('Remove Dummy Data', async () => {
 		await testCampusLog.destroy();
 		await testAdminSession.destroy();
 		await testAdmin.destroy();
@@ -202,7 +202,7 @@ describe('Event Dashboard', () => {
 
 	});
 
-	after('Remove Dummy Data', async () => {
+	afterAll(async () => {
 		await testAdminSession.destroy();
 		await testAdmin.destroy();
 	});

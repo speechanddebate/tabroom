@@ -4,13 +4,13 @@ import { assert } from 'chai';
 import config from '../../../config/config.js';
 import db from '../../models/index.cjs';
 import server from '../../../app.js';
-import userData from '../../tests/users.js';
+import userData from '../../../tests/users.js';
 
 describe('Person Rounds', () => {
 	let testAdmin = {};
 	let testAdminSession = {};
 
-	before('Set Dummy Data', async () => {
+	beforeAll(async () => {
 		testAdmin = await db.person.create(userData.testAdmin);
 		testAdminSession = await db.session.create(userData.testAdminSession);
 	});
@@ -42,7 +42,7 @@ describe('Person Rounds', () => {
 		assert.isArray(res.body, 'Response is an array');
 	});
 
-	after('Remove Dummy Data', async () => {
+	afterAll(async () => {
 		await db.sequelize.query(`
             DELETE FROM caselist WHERE person = 17145
         `);

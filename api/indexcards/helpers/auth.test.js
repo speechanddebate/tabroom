@@ -3,7 +3,7 @@ import config from '../../config/config.js';
 import db from '../models/index.cjs';
 import auth from './auth.js';
 import tournAuth from './tourn-auth.js';
-import userData from '../tests/users.js';
+import userData from '../../tests/users.js';
 
 describe('Authentication Functions', () => {
 
@@ -13,7 +13,7 @@ describe('Authentication Functions', () => {
 	let testAdmin = {};
 	let testAdminSession = {};
 
-	before('Set Dummy Data', async () => {
+	beforeAll(async () => {
 		testUser = await db.person.create(userData.testUser);
 		testAdmin = await db.person.create(userData.testAdmin);
 		testUserSession = await db.session.create(userData.testUserSession);
@@ -140,7 +140,7 @@ describe('Authentication Functions', () => {
 		assert.equal(req.session[testNotTourn].menu, 'all');
 	});
 
-	after('Remove Dummy Data', async () => {
+	afterAll(async () => {
 		await testUser.destroy();
 		await testAdmin.destroy();
 		await testUserSession.destroy();

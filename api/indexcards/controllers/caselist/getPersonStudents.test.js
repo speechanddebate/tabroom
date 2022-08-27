@@ -4,13 +4,13 @@ import { assert } from 'chai';
 import config from '../../../config/config.js';
 import db from '../../models/index.cjs';
 import server from '../../../app.js';
-import userData from '../../tests/users.js';
+import userData from '../../../tests/users.js';
 
 describe('Person Students', () => {
 	let testAdmin = {};
 	let testAdminSession = {};
 
-	before('Set Dummy Data', async () => {
+	beforeAll(async () => {
 		testAdmin = await db.person.create(userData.testAdmin);
 		testAdminSession = await db.session.create(userData.testAdminSession);
 	});
@@ -27,7 +27,7 @@ describe('Person Students', () => {
 		assert.isArray(res.body, 'Response is an array');
 	});
 
-	after('Remove Dummy Data', async () => {
+	afterAll(async () => {
 		await testAdminSession.destroy();
 		await testAdmin.destroy();
 	});

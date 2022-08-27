@@ -3,7 +3,7 @@ import pkg from 'uuid';
 import config from '../../config/config.cjs';
 import db from '../models/index.cjs';
 import login from './login.js';
-import userData from '../tests/users.js';
+import userData from '../../tests/users.js';
 
 const { v4 } = pkg;
 
@@ -12,7 +12,7 @@ describe('Login Password Validation', () => {
 	let testUser = {};
 	let testUserSession = {};
 
-	before('Set Dummy Data', async () => {
+	beforeAll(async () => {
 		testUser = await db.person.create(userData.testUser);
 		testUserSession = await db.session.create(userData.testUserSession);
 	});
@@ -50,7 +50,8 @@ describe('Login Password Validation', () => {
 		const session = await (login(req));
 		assert.equal(session, 'Password was incorrect!');
 	});
-	after('Remove Dummy Data', async () => {
+
+	afterAll(async () => {
 		await testUser.destroy();
 		await testUserSession.destroy();
 	});
