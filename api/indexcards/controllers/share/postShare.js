@@ -15,6 +15,14 @@ const postShare = {
 			return res.status(400).json({ message: 'Must provide an array of panels' });
 		}
 
+		const enabled = await db.sequelize.query(`
+			select value from tabroom_setting where tag = 'share_email_enabled'
+		`);
+
+		if (!enabled || !enabled[0] || !enabled[0].value) {
+			return res.status(200).json({ message: 'Tabroom share emails disabled' });
+		}
+
 		// If passphrase panel ID and a file are provided, just forward the file to the panel
 		if (req.body.panels.length === 1 && typeof req.body.panels[0] === 'string' && req.body.file) {
 			const result = await selectPanelEmail(req.body.panels[0]);
