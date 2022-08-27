@@ -1,7 +1,7 @@
 // import testFixtures from './testFixtures';
 
 const globalTestSetup = async () => {
-    // await testFixtures();
+	// await testFixtures();
 };
 
 export default globalTestSetup;
