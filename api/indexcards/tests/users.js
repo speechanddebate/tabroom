@@ -32,10 +32,21 @@ export const testAdmin = {
 	id         : '70',
 	email      : 'i.am.god@speechanddebate.org',
 	last       : 'God',
+	nsda       : '5678',
 	site_admin : true,
 };
 
+
+export const testCampusLog = {
+    tag         : 'present',
+    person      : 10,
+    tourn       : 1,
+    description : 'Test Ten marked as present by palmer@tabroom.com',
+    panel       : 37,
+};
+
 export const testUserSession = {
+	id         : '69',
 	userkey    : '$6$Pu38ZiKn$FzP6b0eMARklPxm9WicHlNQts7tPJNsogbGWLZSQayUZlFBJY29XRDXA1XznWi3/72kej6gp8W0epnpsJLMKP.',
 	person     : '69',
 	ip         : '127.0.0.1',
@@ -44,22 +55,15 @@ export const testUserSession = {
 
 export const testAdminSession = {
 	...testUserSession,
+	id      : '70',
 	userkey : '$6$Pu38ZiKn$FzP6b0eWARklPxm9WicHlNQts7tPJNsogbGWLZSQayUZlFBJY29XRDXA1XznWi3/72kej6gp8W0epnpsJLMKP.',
 	person  : '70',
 };
 
 export const testUserTournPerm = {
-	tourn  : 1518,
-	person : 69,
+	tourn  : '1518',
+	person : '69',
 	tag    : 'tabber',
-};
-
-export const testCampusLog = {
-	tag         : 'present',
-	person      : 10,
-	tourn       : 1,
-	description : 'Test Eleven marked as present by palmer@tabroom.com',
-	panel       : 37,
 };
 
 export default {

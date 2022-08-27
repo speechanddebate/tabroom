@@ -12,15 +12,15 @@ describe('Status Board', () => {
 	let testAdminSession = {};
 
 	before('Set Dummy Data', async () => {
-		testAdmin = await db.person.create(userData.testAdmin);
+		testAdmin = await db.person.create( userData.testAdmin);
 		testAdminSession = await db.session.create(userData.testAdminSession);
 		testCampusLog = await db.campusLog.create(userData.testCampusLog);
 
-		const result = await db.sequelize.query(`
+		await db.sequelize.query(`
 			update ballot
-			set judge_started = NOW(), started_by = 1
+				set judge_started = NOW(), started_by = 1
 			where ballot.judge = 355
-			and ballot.panel = 37
+				and ballot.panel = 37
 		`);
 
 		await db.sequelize.query(`update campus_log set timestamp = NOW() where person = 13 and tag = 'absent'`);
@@ -161,8 +161,8 @@ describe('Event Dashboard', () => {
 	let testAdminSession = {};
 
 	before('Set Dummy Data', async () => {
-		testAdmin = await db.person.create(userData.testAdmin);
-		testAdminSession = await db.session.create(userData.testAdminSession);
+		testAdmin = await db.person.create( userData.testAdmin);
+		testAdminSession = await db.session.create( userData.testAdminSession);
 	});
 
 	it('Return a correct JSON status object', async () => {
