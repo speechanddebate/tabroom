@@ -1,10 +1,10 @@
-import {Reader} from '@maxmind/geoip2-node';
-import config from '../../config/config.js'
+import { Reader } from '@maxmind/geoip2-node';
+import config from '../../config/config.js';
 
 export const findLocation = async (ipAddress) => {
 
 	if (
-		ipAddress == undefined
+		!ipAddress
 		|| ipAddress.startsWith('192.168')
 		|| ipAddress.startsWith('172.16')
 		|| ipAddress.startsWith('172.17')
@@ -21,7 +21,7 @@ export const findLocation = async (ipAddress) => {
 	const reader = await Reader.open(config.IPLOCATION, options);
 	const locationDB = await reader.city(ipAddress);
 
-	let ispLocation = {
+	const ispLocation = {
 		country       : locationDB.country?.names?.en,
 		countryCode   : locationDB.country.isoCode,
 		continent     : locationDB.continent?.names?.en,
@@ -31,7 +31,7 @@ export const findLocation = async (ipAddress) => {
 		latitude      : locationDB.location?.latitude,
 		longitude     : locationDB.location?.longitude,
 		timeZone      : locationDB.location?.timeZone,
-		postal        : locationDB.postal?.code
+		postal        : locationDB.postal?.code,
 	};
 
 	if (locationDB.subdivisions) {
@@ -44,7 +44,7 @@ export const findLocation = async (ipAddress) => {
 export const findISP = async (ipAddress) => {
 
 	if (
-		ipAddress == undefined
+		!ipAddress
 		|| ipAddress.startsWith('192.168')
 		|| ipAddress.startsWith('172.16')
 		|| ipAddress.startsWith('172.17')

@@ -36,13 +36,12 @@ export const testAdmin = {
 	site_admin : true,
 };
 
-
 export const testCampusLog = {
-    tag         : 'present',
-    person      : 10,
-    tourn       : 1,
-    description : 'Test Ten marked as present by palmer@tabroom.com',
-    panel       : 37,
+	tag         : 'present',
+	person      : 10,
+	tourn       : 1,
+	description : 'Test Ten marked as present by palmer@tabroom.com',
+	panel       : 37,
 };
 
 export const testUserSession = {

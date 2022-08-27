@@ -18,11 +18,7 @@ describe('Authentication Functions', () => {
 		testAdmin = await db.person.create(userData.testAdmin);
 		testUserSession = await db.session.create(userData.testUserSession);
 
-		try {
-			testAdminSession = await db.session.create(userData.testAdminSession);
-		} catch(err) {
-			console.log(err);
-		}
+		testAdminSession = await db.session.create(userData.testAdminSession);
 		testUserTournPerm = await db.permission.create(userData.testUserTournPerm);
 	});
 
