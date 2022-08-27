@@ -41,39 +41,48 @@ describe('Status Board', () => {
 
 		assert.equal(
 			res.body[10][37].started_by,
-			'Chris Palmer', 'Judge Person 10 marked started by an admin');
+			'Chris Palmer',
+			'Judge Person 10 marked started by an admin');
 
 		assert.equal(
 			res.body[10][37].tag,
-			'present', 'Judge Person 10 marked present by an admin');
+			'present',
+			'Judge Person 10 marked present by an admin');
 
 		assert.equal(
 			res.body[11][6].tag,
-			'present', 'Entry Person 11 present');
+			'present',
+			'Entry Person 11 present');
 
 		assert.equal(
 			res.body[12][6].tag,
-			'present', 'Entry Person 12 present');
+			'present',
+			'Entry Person 12 present');
 
 		assert.equal(
 			res.body[14][37].tag,
-			'present', 'Entry Person 14 present');
+			'present',
+			'Entry Person 14 present');
 
 		assert.equal(
 			res.body[15][37].tag,
-			'present', 'Entry Person 15 present');
+			'present',
+			'Entry Person 15 present');
 
 		assert.equal(
 			res.body[16][27].tag,
-			'absent', 'Entry Person 16 absent');
+			'absent',
+			'Entry Person 16 absent');
 
 		assert.equal(
 			res.body[17][27].tag,
-			'absent', 'Entry Person 17 absent');
+			'absent',
+			'Entry Person 17 absent');
 
 		assert.equal(
 			res.body[13][27].tag,
-			'absent', 'Judge Person 13 absent');
+			'absent',
+			'Judge Person 13 absent');
 
 		assert.notProperty(
 			res.body[10],
@@ -135,11 +144,13 @@ describe('Status Board', () => {
 
 		assert.equal(
 			newResponse.body[16][27].tag,
-			'present', 'After the change, Entry Person 16 present');
+			'present',
+			'After the change, Entry Person 16 present');
 
 		assert.equal(
 			newResponse.body[15][37].tag,
-			'absent', 'After the change, Entry Person 17 absent');
+			'absent',
+			'After the change, Entry Person 17 absent');
 
 		assert.isUndefined(
 			newResponse.body[10][37].started_by,
@@ -180,7 +191,6 @@ describe('Event Dashboard', () => {
 			res.body[7].abbr,
 			'LD',
 			'Event 7 is LD');
-			
 		assert.equal(
 			res.body[7].rounds[1][1].unstarted,
 			'25',

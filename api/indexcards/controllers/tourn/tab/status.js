@@ -186,7 +186,7 @@ export const attendance = {
 			);
 
 			status[start.person][start.panel].timestamp = start.timestamp;
-			status[start.person][start.panel].tag = "present";
+			status[start.person][start.panel].tag = 'present';
 
 			if (start.audited) {
 				status[start.person][start.panel].audited = true;
@@ -521,12 +521,7 @@ export const eventStatus = {
 			// I feel like if there's not a simple dynamic way to do this in JS
 			// that's a reason to take another look at Python.
 
-			if (statusCache.done_judges[`${event.round_id}-${event.judge}-${event.flight}`]) {
-
-				return;
-
-			} else {
-
+			if (!statusCache.done_judges[`${event.round_id}-${event.judge}-${event.flight}`]) {
 				statusCache.done_judges[`${event.round_id}-${event.judge}-${event.flight}`] = true;
 
 				if (typeof status[event.id] === 'undefined') {
@@ -623,47 +618,47 @@ export const eventStatus = {
 			}
 		});
 
-		Object.keys(status).forEach(event_id => {
+		Object.keys(status).forEach(eventId => {
 
 			const sortByRound = arr => {
 				arr.sort((b, a) => {
 					return parseInt(
-						status[event_id].rounds[a].number) - parseInt(status[event_id].rounds[b].number
+						status[eventId].rounds[a].number) - parseInt(status[eventId].rounds[b].number
 					);
 				});
 			};
 
-			const rounds = Object.keys(status[event_id].rounds);
+			const rounds = Object.keys(status[eventId].rounds);
 			sortByRound(rounds);
 
-			rounds.forEach( round_id => {
+			rounds.forEach( roundId => {
 
-				if (statusCache[event_id].pending) { 
+				if (statusCache[eventId].pending) {
 
-					if (!status[event_id].rounds[round_id].in_progress) {
-						delete status[event_id].rounds[round_id];
+					if (!status[eventId].rounds[roundId].in_progress) {
+						delete status[eventId].rounds[roundId];
 					}
-				} else { 
+				} else {
 
-					if (status[event_id].rounds[round_id].unstarted) { 
+					if (status[eventId].rounds[roundId].unstarted) {
 
-						if (statusCache[event_id].first_unstarted == 'undefined') {
-							statusCache[event_id].first_unstarted = round_id;
-						} else { 
-							delete status[event_id].rounds[round_id];
+						if (!statusCache[eventId].first_unstarted) {
+							statusCache[eventId].first_unstarted = roundId;
+						} else {
+							delete status[eventId].rounds[roundId];
 						}
 
-					} else { 
+					} else {
 
-						if (statusCache[event_id].first_unstarted) { 
-							delete status[event_id].rounds[round_id];
-						} else { 
+						if (statusCache[eventId].first_unstarted) {
+							delete status[eventId].rounds[roundId];
+						} else {
 
-							if (statusCache[event_id].last_done) { 
-								delete status[event_id].rounds[statusCache[event_id].last_done];
+							if (statusCache[eventId].last_done) {
+								delete status[eventId].rounds[statusCache[eventId].last_done];
 							}
 
-							statusCache[event_id].last_done = round_id
+							statusCache[eventId].last_done = roundId;
 						}
 					}
 				}
@@ -705,32 +700,32 @@ export const eventStatus = {
 			event.flighted = event.flighted || 1;
 			event.flight = event.flight || 1;
 
-			if (status[event.id] == undefined) {
+			if (!status[event.id]) {
 				status[event.id] = {
 					abbr   : event.abbr,
 					name   : event.name,
-					rounds : {}
+					rounds : {},
 				};
 			}
 
-			if (status[event.id].rounds[event.round_id] == undefined) {
+			if (!status[event.id].rounds[event.round_id]) {
 				status[event.id].rounds[event.round_id] = {
 					number   : event.round_name,
 					flighted : event.flighted,
 					type     : event.type,
 					label    : event.label,
-				}
+				};
 
-				if (status[event.id].rounds[event.round_id].label == '') {
-					status[event.id].rounds[event.round_id].label = `Rnd ${ event.round_name }`;
+				if (status[event.id].rounds[event.round_id].label === '') {
+					status[event.id].rounds[event.round_id].label = `Rnd ${event.round_name}`;
 				}
 			}
 
 			event.round_start = event.round_start || event.timeslot_start;
 
-			if (status[event.id].rounds[event.round_id][event.flight] == undefined) {
+			if (!status[event.id].rounds[event.round_id][event.flight]) {
 
-				if (status[event.id].rounds[event.round_id][event.flight] == undefined) {
+				if (!status[event.id].rounds[event.round_id][event.flight]) {
 					// this can't seriously be how this works.
 					status[event.id].rounds[event.round_id][event.flight] = {};
 				}
@@ -739,14 +734,14 @@ export const eventStatus = {
 					.rounds[event.round_id][event.flight]
 					.start_time
 					= new Date(event.round_start).toLocaleTimeString(
-						'en-us', {
-							hour         : 'numeric',
-							minute       : '2-digit',
-							timeZone     : event.tz
-						});
+							'en-us', {
+								hour         : 'numeric',
+								minute       : '2-digit',
+								timeZone     : event.tz,
+							});
 			}
 
-			if (statusCache[event.id] == undefined) {
+			if (!statusCache[event.id]) {
 				statusCache[event.id] = {};
 			}
 
@@ -758,7 +753,7 @@ export const eventStatus = {
 
 		return res.status(200).json(status);
 	},
-}
+};
 
 attendance.GET.apiDoc = {
 	summary: 'Room attedance and start status of a round or timeslot',
