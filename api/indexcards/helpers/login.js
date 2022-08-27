@@ -19,13 +19,10 @@ const login = async (req) => {
 		});
 
 		if (typeof person === 'object') {
-
 			const hash = await crypt(req.params.password, person.password);
 
 			if (hash !== person.password) {
-
 				return 'Password was incorrect!';
-
 			}
 
 			const now = new Date();
@@ -54,11 +51,8 @@ const login = async (req) => {
 			return session;
 
 		}
-
 		return `No user found for email ${req.params.email}`;
-
 	}
-
 };
 
 export default login;

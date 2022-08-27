@@ -157,8 +157,10 @@ app.use('/v1/apidoc', swaggerUI.serve, swaggerUI.setup(apiDocConfig.apiDoc));
 // Start server
 const port = process.env.PORT || config.PORT || 9876;
 
-app.listen(port, () => {
-	debugLogger.info(`Server started. Listening on port ${port}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+	app.listen(port, () => {
+		debugLogger.info(`Server started. Listening on port ${port}`);
+	});
+}
 
 export default app;
