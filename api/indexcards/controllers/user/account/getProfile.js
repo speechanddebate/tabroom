@@ -8,20 +8,24 @@ const getProfile = {
 		if (req.params.person_id && req.session.site_admin) {
 			result = await db.person.findByPk(
 				req.params.person_id,
-				{include: [{
-					model: db.personSetting,
-					as: 'Settings'
-				}]}	
+				{
+					include: [{
+						model: db.personSetting,
+						as: 'Settings',
+					}],
+				}
 			);
 
 		} else if (req.params.person_id ) {
 			return res.status(201).json({ message: 'Only admin staff may access another profile' });
 		} else {
 			result = await db.person.findByPk(req.session.person,
-				{include: [{
-					model: db.personSetting,
-					as: 'Settings'
-				}]}	
+				{
+					include: [{
+						model: db.personSetting,
+						as: 'Settings',
+					}],
+				},
 			);
 		}
 
@@ -29,7 +33,7 @@ const getProfile = {
 			return res.status(400).json({ message: 'User does not exist' });
 		}
 
-		let jsonOutput = result.toJSON();
+		const jsonOutput = result.toJSON();
 		delete jsonOutput.password;
 
 		return res.status(200).json(jsonOutput);

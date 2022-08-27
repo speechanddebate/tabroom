@@ -11,8 +11,8 @@ describe('User Profile Loader', () => {
 	let testAdminSession = {};
 
 	before('Set Dummy Data', async () => {
-		testAdmin = await db.person.create(userData.testAdmin);
-		testAdminSession = await db.session.create(userData.testAdminSession);
+		testAdmin = await db.person.create( userData.testAdmin);
+		testAdminSession = await db.session.create( userData.testAdminSession);
 	});
 
 	it('Returns correct JSON for a self profile request', async () => {
@@ -25,13 +25,13 @@ describe('User Profile Loader', () => {
 			.expect(200);
 
 		assert.isObject(res.body, 'Response is an object');
-		
+
 		assert.equal(
 			res.body.email,
 			'i.am.god@speechanddebate.org',
 			'Correct fake user profile is returned'
 		);
-		
+
 		assert.isTrue(res.body.site_admin, 'Site Admin powers are enabled');
 
 	});
@@ -49,7 +49,7 @@ describe('User Profile Loader', () => {
 
 		assert.equal(
 			res.body.email,
-			'palmer@tabroom.com', 
+			'palmer@tabroom.com',
 			'Chris Palmer is user number 1'
 		);
 	});

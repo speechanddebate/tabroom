@@ -375,7 +375,7 @@ export const changeEventAccess = {
 				existing.permObject.details = {};
 			}
 
-			if (events) { 
+			if (events) {
 				events.forEach( event => {
 
 					if (existing.permObject.details[event.id] !== accessLevel) {

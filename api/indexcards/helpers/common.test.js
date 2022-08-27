@@ -114,7 +114,7 @@ describe('DateTime Formatter', () => {
 
 		assert.equal(
 			dtString,
-			'Sat, November 7, 2020, 11:30 AM EST',
+			'Sat, November 7, 2020 at 11:30 AM EST',
 			'String format is correct'
 		);
 	});
