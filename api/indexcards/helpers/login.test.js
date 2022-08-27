@@ -1,10 +1,11 @@
 import { assert } from 'chai';
+import pkg from 'uuid';
 import config from '../../config/config.cjs';
 import db from '../models/index.cjs';
 import login from './login.js';
 import userData from '../tests/users.js';
-import pkg from 'uuid';
-const {v4} = pkg;
+
+const { v4 } = pkg;
 
 describe('Login Password Validation', () => {
 

@@ -20,7 +20,7 @@ describe('Caselist Link', () => {
 			.post(`/v1/caselist/link`)
 			.set('Accept', 'application/json')
 			.set('Cookie', [`${config.COOKIE_NAME}=${testAdminSession.userkey}`])
-			.send({ person_id: 17145, slug: '/test', eventcode: 'cx', caselist_key: hash })
+			.send({ person_id: 17145, slug: '/test', eventcode: 103, caselist_key: hash })
 			.expect('Content-Type', /json/)
 			.expect(201);
 	});

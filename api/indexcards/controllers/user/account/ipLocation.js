@@ -20,7 +20,6 @@ const ipLocation = {
 
 			locationData.isp = ispData.isp;
 
-
 			if (ispData.isp !== ispData.organization) {
 				locationData.organization = ispData.organization;
 			}

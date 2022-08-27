@@ -3,7 +3,6 @@ import config from '../../config/config.js';
 import db from '../models/index.cjs';
 import auth from './auth.js';
 import tournAuth from './tourn-auth.js';
-
 import userData from '../tests/users.js';
 
 describe('Authentication Functions', () => {
@@ -18,6 +17,7 @@ describe('Authentication Functions', () => {
 		testUser = await db.person.create(userData.testUser);
 		testAdmin = await db.person.create(userData.testAdmin);
 		testUserSession = await db.session.create(userData.testUserSession);
+
 		testAdminSession = await db.session.create(userData.testAdminSession);
 		testUserTournPerm = await db.permission.create(userData.testUserTournPerm);
 	});
