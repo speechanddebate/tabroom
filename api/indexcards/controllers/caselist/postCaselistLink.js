@@ -12,7 +12,7 @@ const postCaselistLink = {
 		await db.sequelize.query(`
             INSERT INTO caselist (slug, eventcode, person)
             VALUES (?, ?, ?)
-        `, { replacements: [req.body.slug.trim(), req.body.eventcode.trim(), req.body.person_id] });
+        `, { replacements: [req.body.slug.trim(), parseInt(req.body.eventcode) || 0, req.body.person_id] });
 
 		return res.status(201).json({ message: 'Successfully created caselist link' });
 	},
