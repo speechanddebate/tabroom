@@ -11,13 +11,8 @@ describe('Person Chapters', () => {
 	let testAdminSession = {};
 
 	before('Set Dummy Data', async () => {
-		try {
-			testAdmin = await db.person.create(userData.testAdmin);
-			testAdminSession = await db.session.create(userData.testAdminSession);
-		} catch(err) {
-			console.log("Failed on test admin create");
-			console.log(err);
-		}
+		testAdmin = await db.person.create(userData.testAdmin);
+		testAdminSession = await db.session.create(userData.testAdminSession);
 	});
 
 	it('Returns chapters for a person', async () => {
@@ -33,16 +28,7 @@ describe('Person Chapters', () => {
 	});
 
 	after('Remove Dummy Data', async () => {
-		try {
-			await testAdminSession.destroy();
-		} catch(err) {
-			console.log('testAdminSession failed with '+err);
-		}
-
-		try {
-			await testAdmin.destroy();
-		} catch(err) {
-			console.log('testAdmin failed with '+err);
-		}
+		await testAdminSession.destroy();
+		await testAdmin.destroy();
 	});
 });
