@@ -3,24 +3,9 @@ import config from '../../config/config.js';
 import db from '../models/index.cjs';
 import auth from './auth.js';
 import tournAuth from './tourn-auth.js';
-import userData from '../../tests/users.js';
+import userData from '../../tests/testFixtures.js';
 
 describe('Authentication Functions', () => {
-
-	let testUser = {};
-	let testUserSession = {};
-	let testUserTournPerm = {};
-	let testAdmin = {};
-	let testAdminSession = {};
-
-	beforeAll(async () => {
-		testUser = await db.person.create(userData.testUser);
-		testAdmin = await db.person.create(userData.testAdmin);
-		testUserSession = await db.session.create(userData.testUserSession);
-
-		testAdminSession = await db.session.create(userData.testAdminSession);
-		testUserTournPerm = await db.permission.create(userData.testUserTournPerm);
-	});
 
 	it('Ignores the database if there is already a session', async () => {
 
@@ -32,7 +17,7 @@ describe('Authentication Functions', () => {
 			},
 		};
 
-		const session = await (auth(req));
+		const session = await auth(req);
 		assert.typeOf(session, 'object');
 		assert.equal(session.id, '69');
 	});
@@ -47,7 +32,7 @@ describe('Authentication Functions', () => {
 			},
 		};
 
-		const session = await (auth(req));
+		const session = await auth(req);
 
 		assert.typeOf(session, 'object');
 		assert.equal(session.person, '69');
@@ -70,8 +55,8 @@ describe('Authentication Functions', () => {
 			},
 		};
 
-		req.session = await (auth(req));
-		req.session = await (tournAuth(req));
+		req.session = await auth(req);
+		req.session = await tournAuth(req);
 
 		assert.typeOf(req.session, 'object');
 		assert.equal(req.session[testTourn].level, 'tabber');
@@ -93,8 +78,8 @@ describe('Authentication Functions', () => {
 			},
 		};
 
-		req.session = await (auth(req));
-		req.session = await (tournAuth(req));
+		req.session = await auth(req);
+		req.session = await tournAuth(req);
 
 		assert.typeOf(req.session, 'object');
 		assert.isEmpty(req.session[testNotTourn]);
@@ -132,19 +117,12 @@ describe('Authentication Functions', () => {
 			},
 		};
 
-		req.session = await (auth(req));
-		req.session = await (tournAuth(req));
+		req.session = await auth(req);
+		req.session = await tournAuth(req);
 
 		assert.typeOf(req.session, 'object');
 		assert.equal(req.session[testNotTourn].level, 'owner');
 		assert.equal(req.session[testNotTourn].menu, 'all');
 	});
 
-	afterAll(async () => {
-		await testUser.destroy();
-		await testAdmin.destroy();
-		await testUserSession.destroy();
-		await testAdminSession.destroy();
-		await testUserTournPerm.destroy();
-	});
 });

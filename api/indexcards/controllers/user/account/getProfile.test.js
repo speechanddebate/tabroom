@@ -1,22 +1,11 @@
 import request from 'supertest';
 import { assert } from 'chai';
 import config from '../../../../config/config.js';
-import db from '../../../models/index.cjs';
 import server from '../../../../app.js';
-import userData from '../../../../tests/users.js';
+import { testAdminSession } from '../../../../tests/testFixtures.js';
 
 describe('User Profile Loader', () => {
-
-	let testAdmin = {};
-	let testAdminSession = {};
-
-	beforeAll(async () => {
-		testAdmin = await db.person.create( userData.testAdmin);
-		testAdminSession = await db.session.create( userData.testAdminSession);
-	});
-
 	it('Returns correct JSON for a self profile request', async () => {
-
 		const res = await request(server)
 			.get(`/v1/user/profile`)
 			.set('Accept', 'application/json')
@@ -33,11 +22,9 @@ describe('User Profile Loader', () => {
 		);
 
 		assert.isTrue(res.body.site_admin, 'Site Admin powers are enabled');
-
 	});
 
 	it('Returns correct JSON for another user profile request', async () => {
-
 		const res = await request(server)
 			.get(`/v1/user/profile/1`)
 			.set('Accept', 'application/json')
@@ -53,10 +40,4 @@ describe('User Profile Loader', () => {
 			'Chris Palmer is user number 1'
 		);
 	});
-
-	afterAll(async () => {
-		await testAdminSession.destroy();
-		await testAdmin.destroy();
-	});
-
 });
