@@ -1,6 +1,7 @@
 import React from 'react';
 import styles from './App.module.css';
 import DisplayUser from './DisplayUser';
+import TestTable from './TestTable';
 
 const App = () => {
 	return (
@@ -50,6 +51,7 @@ const App = () => {
 						/>
 					</span>
 				</span>
+				<TestTable />
 			</div>
 		</div>
 	);
