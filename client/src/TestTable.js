@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router';
 
 import {
 	createColumnHelper,
@@ -7,6 +8,13 @@ import {
 import Table from './Table';
 
 const TestTable = () => {
+
+	const navigate = useNavigate();
+
+	const handleNavigate = () => {
+		navigate('/route');
+	};
+
 	const data = [
 		{
 			firstName: 'tanner',
@@ -72,6 +80,7 @@ const TestTable = () => {
 				data={data}
 				columns={columns}
 			/>
+			<button onClick={handleNavigate} type="button">Go to /route</button>
 		</div>
 	);
 };
