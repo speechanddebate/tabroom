@@ -51,7 +51,9 @@ const App = () => {
 						/>
 					</span>
 				</span>
-				<TestTable />
+				<div id="main">
+					<TestTable />
+				</div>
 			</div>
 		</div>
 	);
