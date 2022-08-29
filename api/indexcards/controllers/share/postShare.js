@@ -17,7 +17,7 @@ const postShare = {
 			select value from tabroom_setting where tag = 'share_email_enabled'
 		`);
 
-		if (!enabled || !enabled[0] || !enabled[0].value) {
+		if (!enabled || !enabled[0] || !enabled[0][0].value) {
 			return res.status(200).json({ message: 'Tabroom share emails disabled' });
 		}
 
@@ -75,7 +75,7 @@ const postShare = {
 			}
 		});
 
-		await Promise.All(emailPromises);
+		await Promise.all(emailPromises);
 
 		return res.status(201).json({ message: 'Successfully sent speech doc emails' });
 	},
