@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { randomPhrase } from '@speechanddebate/nsda-js-utils';
 import selectPanelEmail from './selectPanelEmail';
 import sendMail from './mail';
@@ -7,8 +6,7 @@ import config from '../../../config/config';
 const postShare = {
 	POST: async (req, res) => {
 		const db = req.db;
-		const hash = crypto.createHash('sha256').update(config.SHARE_KEY).digest('hex');
-		if (req.body.share_key !== hash) {
+		if (req.body.share_key !== config.SHARE_KEY) {
 			return res.status(401).json({ message: 'Invalid share key' });
 		}
 		if (!req.body.panels || req.body.panels.length < 1) {
