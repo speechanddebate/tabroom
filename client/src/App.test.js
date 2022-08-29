@@ -1,8 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import React from 'react';
+import { assert } from 'chai';
+import { wrappedRender as render } from './setupTests';
+
 import App from './App';
 
-test('renders learn react link', () => {
-  render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+describe('App', () => {
+	it('Renders the app without crashing', () => {
+		const { container } = render(<App />);
+		assert.strictEqual(container.tagName.toLowerCase(), 'div', 'Renders the root div');
+	});
 });

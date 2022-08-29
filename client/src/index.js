@@ -1,12 +1,11 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { Provider } from 'react-redux';
+
 import './index.css';
+
 import App from './App';
 import reportWebVitals from './reportWebVitals';
-import store from './redux/store';
 import log, { onerror } from './helpers/logger';
-import ErrorBoundary from './ErrorBoundary';
 
 // Use custom logging
 window.onerror = onerror;
@@ -15,11 +14,7 @@ window.log = log;
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
 	<React.StrictMode>
-		<Provider store={store}>
-			<ErrorBoundary>
-				<App />
-			</ErrorBoundary>
-		</Provider>
+		<App />
 	</React.StrictMode>
 );
 

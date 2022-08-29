@@ -1,5 +1,5 @@
-import schemas from './definitions/schemas/index.js';
-import responses from './definitions/responses/index.js';
+import schemas from './definitions/schemas/index';
+import responses from './definitions/responses/index';
 
 const apiDoc = {
 	openapi: '3.0.2',

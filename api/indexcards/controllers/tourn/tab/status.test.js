@@ -1,28 +1,21 @@
 import request from 'supertest';
 import { assert } from 'chai';
-import config from '../../../../config/config.js';
-import db from '../../../models/index.cjs';
-import server from '../../../../app.js';
-import userData from '../../../tests/users.js';
+import config from '../../../../config/config';
+import db from '../../../helpers/db';
+import server from '../../../../app';
+import userData from '../../../../tests/testFixtures';
 
 describe('Status Board', () => {
-
-	let testAdmin = {};
-	let testCampusLog = {};
 	let testAdminSession = {};
 
-	before('Set Dummy Data', async () => {
-		testAdmin = await db.person.create( userData.testAdmin);
-		testAdminSession = await db.session.create(userData.testAdminSession);
-		testCampusLog = await db.campusLog.create(userData.testCampusLog);
-
+	beforeAll(async () => {
+		testAdminSession = await db.session.findByPk(userData.testAdminSession.id);
 		await db.sequelize.query(`
 			update ballot
 				set judge_started = NOW(), started_by = 1
 			where ballot.judge = 355
 				and ballot.panel = 37
 		`);
-
 		await db.sequelize.query(`update campus_log set timestamp = NOW() where person = 13 and tag = 'absent'`);
 		await db.sequelize.query(`delete from campus_log where person = 15 and tag = 'absent'`);
 		await db.sequelize.query(`delete from campus_log where person = 16 and tag = 'present'`);
@@ -41,39 +34,48 @@ describe('Status Board', () => {
 
 		assert.equal(
 			res.body[10][37].started_by,
-			'Chris Palmer', 'Judge Person 10 marked started by an admin');
+			'Chris Palmer',
+			'Judge Person 10 marked started by an admin');
 
 		assert.equal(
 			res.body[10][37].tag,
-			'present', 'Judge Person 10 marked present by an admin');
+			'present',
+			'Judge Person 10 marked present by an admin');
 
 		assert.equal(
 			res.body[11][6].tag,
-			'present', 'Entry Person 11 present');
+			'present',
+			'Entry Person 11 present');
 
 		assert.equal(
 			res.body[12][6].tag,
-			'present', 'Entry Person 12 present');
+			'present',
+			'Entry Person 12 present');
 
 		assert.equal(
 			res.body[14][37].tag,
-			'present', 'Entry Person 14 present');
+			'present',
+			'Entry Person 14 present');
 
 		assert.equal(
 			res.body[15][37].tag,
-			'present', 'Entry Person 15 present');
+			'present',
+			'Entry Person 15 present');
 
 		assert.equal(
 			res.body[16][27].tag,
-			'absent', 'Entry Person 16 absent');
+			'absent',
+			'Entry Person 16 absent');
 
 		assert.equal(
 			res.body[17][27].tag,
-			'absent', 'Entry Person 17 absent');
+			'absent',
+			'Entry Person 17 absent');
 
 		assert.equal(
 			res.body[13][27].tag,
-			'absent', 'Judge Person 13 absent');
+			'absent',
+			'Judge Person 13 absent');
 
 		assert.notProperty(
 			res.body[10],
@@ -135,42 +137,27 @@ describe('Status Board', () => {
 
 		assert.equal(
 			newResponse.body[16][27].tag,
-			'present', 'After the change, Entry Person 16 present');
+			'present',
+			'After the change, Entry Person 16 present');
 
 		assert.equal(
 			newResponse.body[15][37].tag,
-			'absent', 'After the change, Entry Person 17 absent');
+			'absent',
+			'After the change, Entry Person 17 absent');
 
 		assert.isUndefined(
 			newResponse.body[10][37].started_by,
 			'After the change, Judge Person 10 not marked started');
 
 	});
-
-	after('Remove Dummy Data', async () => {
-		await testCampusLog.destroy();
-		await testAdminSession.destroy();
-		await testAdmin.destroy();
-	});
-
 });
 
 describe('Event Dashboard', () => {
-
-	let testAdmin = {};
-	let testAdminSession = {};
-
-	before('Set Dummy Data', async () => {
-		testAdmin = await db.person.create( userData.testAdmin);
-		testAdminSession = await db.session.create( userData.testAdminSession);
-	});
-
 	it('Return a correct JSON status object', async () => {
-
 		const res = await request(server)
 			.get(`/v1/tourn/1/tab/dashboard`)
 			.set('Accept', 'application/json')
-			.set('Cookie', [`${config.COOKIE_NAME}=${testAdminSession.userkey}`])
+			.set('Cookie', [`${config.COOKIE_NAME}=${userData.testAdminSession.userkey}`])
 			.expect('Content-Type', /json/)
 			.expect(200);
 
@@ -180,7 +167,6 @@ describe('Event Dashboard', () => {
 			res.body[7].abbr,
 			'LD',
 			'Event 7 is LD');
-			
 		assert.equal(
 			res.body[7].rounds[1][1].unstarted,
 			'25',
@@ -189,12 +175,5 @@ describe('Event Dashboard', () => {
 		assert.isTrue(
 			res.body[7].rounds[1][2].undone,
 			'Flight 2 is not done');
-
 	});
-
-	after('Remove Dummy Data', async () => {
-		await testAdminSession.destroy();
-		await testAdmin.destroy();
-	});
-
 });
