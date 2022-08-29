@@ -1,18 +1,26 @@
 import crypto from 'crypto';
 import { randomPhrase } from '@speechanddebate/nsda-js-utils';
-import selectPanelEmail from './selectPanelEmail.js';
-import sendMail from './mail.js';
-import config from '../../../config/config.js';
-import db from '../../models/index.cjs';
+import selectPanelEmail from './selectPanelEmail';
+import sendMail from './mail';
+import config from '../../../config/config';
 
 const postShare = {
 	POST: async (req, res) => {
+		const db = req.db;
 		const hash = crypto.createHash('sha256').update(config.SHARE_KEY).digest('hex');
 		if (req.body.share_key !== hash) {
 			return res.status(401).json({ message: 'Invalid share key' });
 		}
 		if (!req.body.panels || req.body.panels.length < 1) {
 			return res.status(400).json({ message: 'Must provide an array of panels' });
+		}
+
+		const enabled = await db.sequelize.query(`
+			select value from tabroom_setting where tag = 'share_email_enabled'
+		`);
+
+		if (!enabled || !enabled[0] || !enabled[0].value) {
+			return res.status(200).json({ message: 'Tabroom share emails disabled' });
 		}
 
 		// If passphrase panel ID and a file are provided, just forward the file to the panel

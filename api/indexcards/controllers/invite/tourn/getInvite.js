@@ -1,29 +1,27 @@
-import db from '../../../models/index.cjs';
-
 export const getInvite = {
-
 	GET: async (req, res) => {
+		const db = req.db;
 
 		const invite = {};
 
-		if (parseInt(req.params.webname)) { 
+		if (parseInt(req.params.webname)) {
 
 			invite.tourn = await db.tourn.findByPk(
 				parseInt(req.params.tourn_id), {
-					include: [ 
+					include: [
 						{ model: db.tournSetting, as: 'Settings' },
 						{ model: db.webpage, as: 'Webpages' },
 						{ model: db.event, as: 'Events' },
 						{ model: db.file, as: 'Files' },
-					]
-			});
+					],
+				});
 
 		} else if (req.params.webname) {
 
 			invite.tourn = await db.tourn.findOne({
 				where : { webname: req.params.webname },
-				order:  [[ 'start', 'desc' ]],
-				include: [ 
+				order:  [['start', 'desc']],
+				include: [
 					{ model: db.tournSetting, as: 'Settings' },
 					{ model: db.webpage, as: 'Webpages' },
 					{ model: db.event, as: 'Events' },
@@ -31,36 +29,36 @@ export const getInvite = {
 				],
 			});
 		}
-		
+
 		return res.status(200).json(invite);
 	},
 };
 
 export const getRounds = {
-
 	GET: async (req, res) => {
+		const db = req.db;
 
 		let schemat = {};
-		
-		if (parseInt(req.params.round_id)) { 
+
+		if (parseInt(req.params.round_id)) {
 
 			schemat = await db.round.findByPk(
 				parseInt(req.params.round_id), {
-					include: [ 
+					include: [
 						{ model: db.roundSetting, as: 'Settings' },
 						{ model: db.panel, as: 'Panels' },
 					],
-			});
+				});
 
-			if (schemat && schemat.published == 0) {
-				schemat = {message: 'Round is not published'};
+			if (schemat && schemat.published === 0) {
+				schemat = { message: 'Round is not published' };
 			}
 
-			if (schemat == null) { 
-				schemat = {message: 'Round is not published'};
+			if (schemat == null) {
+				schemat = { message: 'Round is not published' };
 			}
-		};
-		
+		}
+
 		return res.status(200).json(schemat);
 	},
 };
@@ -93,4 +91,3 @@ getInvite.GET.apiDoc = {
 	},
 	tags: ['invite', 'public'],
 };
-

@@ -1,4 +1,4 @@
-const status = {
+export const systemStatus = {
 	GET: async (req, res) => {
 		return res.status(200).json({ message: 'OK' });
 	},
@@ -7,7 +7,7 @@ const status = {
 	},
 };
 
-status.GET.apiDoc = {
+systemStatus.GET.apiDoc = {
 	summary: 'Responds with a 200 if up',
 	operationId: 'getStatus',
 	responses: {
@@ -17,10 +17,10 @@ status.GET.apiDoc = {
 		},
 		default: { $ref: '#/components/responses/ErrorResponse' },
 	},
-	tags: ['status'],
+	tags: ['systemStatus'],
 };
 
-status.POST.apiDoc = {
+systemStatus.POST.apiDoc = {
 	summary: 'Responds with a 200 if up',
 	operationId: 'postStatus',
 	responses: {
@@ -30,7 +30,7 @@ status.POST.apiDoc = {
 		},
 		default: { $ref: '#/components/responses/ErrorResponse' },
 	},
-	tags: ['status'],
+	tags: ['systemStatus'],
 };
 
-export default status;
+export default systemStatus;

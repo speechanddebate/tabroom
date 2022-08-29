@@ -1,17 +1,12 @@
-//
 // Parse the Tabroom cookies and determine whether there's an active session
-//
 
 const auth = async (req) => {
-
 	const db = req.db;
 
 	if (req.session && req.session.id) {
 		return req.session;
 	}
 
-	console.log(req.cookies[req.config.COOKIE_NAME]);
-	console.log(req.headers['X-Tabroom-Cookie']);
 	const cookie = req.cookies[req.config.COOKIE_NAME] || req.headers['x-tabroom-cookie'];
 
 	if (cookie) {

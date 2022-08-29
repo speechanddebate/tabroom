@@ -1,14 +1,11 @@
 // Schools at the tournament
-
 export const listSchools = {
-
 	GET: async (req, res) => {
 		const db = req.db;
 		const tournId = req.params.tourn_id;
 		const op = db.Sequelize.Op;
 
 		// Filter out signup options for tournament admins, deliver the rest
-
 		const schools = await db.school.findAll({
 			where: { tourn: tournId },
 			include : [

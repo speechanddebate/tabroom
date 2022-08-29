@@ -1,5 +1,5 @@
 import { assert } from 'chai';
-import { academicYear, ordinalize, escapeCSV, emailValidator, condenseDateRange, showDateTime } from './common.js';
+import { academicYear, ordinalize, escapeCSV, emailValidator, condenseDateRange, showDateTime } from './common';
 
 describe('Academic Year helper', () => {
 	it('Returns the correct academic year given a Date object', async () => {
@@ -114,7 +114,7 @@ describe('DateTime Formatter', () => {
 
 		assert.equal(
 			dtString,
-			'Sat, November 7, 2020, 11:30 AM EST',
+			'Sat, November 7, 2020 at 11:30 AM EST',
 			'String format is correct'
 		);
 	});

@@ -1,9 +1,9 @@
 import crypto from 'crypto';
-import config from '../../../config/config.js';
-import db from '../../models/index.cjs';
+import config from '../../../config/config';
 
 const postCaselistLink = {
 	POST: async (req, res) => {
+		const db = req.db;
 		const hash = crypto.createHash('sha256').update(config.CASELIST_KEY).digest('hex');
 		if (req.body.caselist_key !== hash) {
 			return res.status(401).json({ message: 'Invalid caselist key' });
@@ -12,7 +12,7 @@ const postCaselistLink = {
 		await db.sequelize.query(`
             INSERT INTO caselist (slug, eventcode, person)
             VALUES (?, ?, ?)
-        `, { replacements: [req.body.slug.trim(), req.body.eventcode.trim(), req.body.person_id] });
+        `, { replacements: [req.body.slug.trim(), parseInt(req.body.eventcode) || 0, req.body.person_id] });
 
 		return res.status(201).json({ message: 'Successfully created caselist link' });
 	},
