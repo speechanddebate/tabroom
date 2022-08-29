@@ -1,14 +1,14 @@
-import Err from './Err.js';
-import Person from './Person.js';
-import Login from './Login.js';
-import School from './School.js';
-import SchoolSetting from './SchoolSetting.js';
-import Chapter from './Chapter.js';
-import Event from './Event.js';
-import Round from './Round.js';
-import Student from './Student.js';
-import CaselistLink from './CaselistLink.js';
-import Share from './Share.js';
+import Err from './Err';
+import Person from './Person';
+import Login from './Login';
+import School from './School';
+import SchoolSetting from './SchoolSetting';
+import Chapter from './Chapter';
+import Event from './Event';
+import Round from './Round';
+import Student from './Student';
+import CaselistLink from './CaselistLink';
+import Share from './Share';
 
 export default {
 	Err,

@@ -1,4 +1,4 @@
-import { mysqlDate } from '../formats.js';
+import { mysqlDate } from '../formats';
 
 const Student = {
 	type          : 'object',

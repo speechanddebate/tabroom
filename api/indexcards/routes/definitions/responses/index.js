@@ -1,4 +1,4 @@
-import ErrorResponse from './ErrorResponse.js';
+import ErrorResponse from './ErrorResponse';
 
 export default {
 	ErrorResponse,

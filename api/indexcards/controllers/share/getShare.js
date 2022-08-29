@@ -1,8 +1,8 @@
-import db from '../../models/index.cjs';
-import { startOfYear } from '../../helpers/common.js';
+import { startOfYear } from '../../helpers/common';
 
 const getShare = {
 	GET: async (req, res) => {
+		const db = req.db;
 		const panels = await db.sequelize.query(`
 			SELECT
 				DISTINCT P.id,

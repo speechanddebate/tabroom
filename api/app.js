@@ -7,23 +7,23 @@ import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
 import { initialize } from 'express-openapi';
 import swaggerUI from 'swagger-ui-express';
-import config from './config/config.js';
+import config from './config/config';
 
-import errorHandler from './indexcards/helpers/error.js';
+import errorHandler from './indexcards/helpers/error';
 
-import apiDoc from './indexcards/routes/api-doc.js';
+import apiDoc from './indexcards/routes/api-doc';
 
-import userPaths from './indexcards/routes/paths/user/index.js';
-import tournPaths from './indexcards/routes/paths/tourn/index.js';
-import invitePaths from './indexcards/routes/paths/invite/index.js';
-import caselistPaths from './indexcards/routes/paths/caselist/index.js';
-import sharePaths from './indexcards/routes/paths/share/index.js';
+import userPaths from './indexcards/routes/paths/user/index';
+import tournPaths from './indexcards/routes/paths/tourn/index';
+import invitePaths from './indexcards/routes/paths/invite/index';
+import caselistPaths from './indexcards/routes/paths/caselist/index';
+import sharePaths from './indexcards/routes/paths/share/index';
 
-import auth from './indexcards/helpers/auth.js';
-import tournAuth from './indexcards/helpers/tourn-auth.js';
-import db from './indexcards/models/index.cjs';
+import auth from './indexcards/helpers/auth';
+import tournAuth from './indexcards/helpers/tourn-auth';
+import db from './indexcards/helpers/db';
 
-import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger.js';
+import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';
 
 const app = express();
 
@@ -157,8 +157,10 @@ app.use('/v1/apidoc', swaggerUI.serve, swaggerUI.setup(apiDocConfig.apiDoc));
 // Start server
 const port = process.env.PORT || config.PORT || 9876;
 
-app.listen(port, () => {
-	debugLogger.info(`Server started. Listening on port ${port}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+	app.listen(port, () => {
+		debugLogger.info(`Server started. Listening on port ${port}`);
+	});
+}
 
 export default app;
