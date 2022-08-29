@@ -1,4 +1,4 @@
-import { mysqlDate } from '../formats.js';
+import { mysqlDate } from '../formats';
 
 const Chapter = {
 	type : 'object',

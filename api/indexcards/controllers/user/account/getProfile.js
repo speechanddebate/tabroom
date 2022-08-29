@@ -1,7 +1,6 @@
-import db from '../../../models/index.cjs';
-
 const getProfile = {
 	GET: async (req, res) => {
+		const db = req.db;
 
 		let result;
 

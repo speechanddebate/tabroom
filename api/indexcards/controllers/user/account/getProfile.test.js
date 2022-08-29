@@ -1,8 +1,8 @@
 import request from 'supertest';
 import { assert } from 'chai';
-import config from '../../../../config/config.js';
-import server from '../../../../app.js';
-import { testAdminSession } from '../../../../tests/testFixtures.js';
+import config from '../../../../config/config';
+import server from '../../../../app';
+import { testAdminSession } from '../../../../tests/testFixtures';
 
 describe('User Profile Loader', () => {
 	it('Returns correct JSON for a self profile request', async () => {
