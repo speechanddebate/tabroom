@@ -11,7 +11,7 @@ export const debugLogger = winston.createLogger({
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: './logs/debug.log',
+			filename: '/var/log/indexcards/debug.log',
 		}),
 	],
 });
@@ -27,7 +27,7 @@ export const requestLogger = winston.createLogger({
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: './logs/request.log',
+			filename: '/var/log/indexcards/request.log',
 		}),
 	],
 });
@@ -43,7 +43,7 @@ export const errorLogger = winston.createLogger({
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: './logs/error.log',
+			filename: '/var/log/indexcards/error.log',
 		}),
 	],
 });
@@ -59,7 +59,7 @@ export const clientLogger = winston.createLogger({
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: './logs/client.log',
+			filename: '/var/log/indexcards/client.log',
 		}),
 	],
 });
@@ -87,7 +87,7 @@ export const autoemailLogger = winston.createLogger({
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: './logs/autoemail.log',
+			filename: '/var/log/indexcards/autoemail.log',
 		}),
 	],
 });
