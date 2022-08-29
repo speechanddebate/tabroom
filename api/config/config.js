@@ -2,92 +2,102 @@ import { config as envconfig } from 'dotenv';
 
 envconfig();
 
-// Default (Dev config)
 export const config = {
 	PORT                  : 10010,
 	RATE_WINDOW           : 15 * 60 * 1000,
 	RATE_MAX              : 100000,
 	RATE_DELAY            : 0,
-	LOGIN_URL             : 'https://www.tabroom.com/user/login/login.mhtml',
+	LOGIN_URL             : 'http://www.tabroom.com/user/login/login.mhtml',
 	MAIL_FROM             : 'live@tabroom.com',
 	MAIL_SERVER           : 'localhost',
-	LOGIN_TOKEN			  : 'random-long-string',
-	JITSI_KEY             : 'campus-jitsi-key',
+	LOGIN_TOKEN	          : 'Quae&fohngah1Phi8H',
+	JITSI_KEY             : 'g2349df9023',
 	JITSI_URI             : 'https://campus.speechanddebate.org',
-	NSDA_API_USER		  : 'nsda-api-userId',
-	NSDA_API_KEY		  : 'nsda-api-password',
+	NSDA_API_USER	      : '10382636',
+	NSDA_API_KEY	      : 'AG4DHCeblnf3TAp7',
 	NSDA_API_ENDPOINT     : 'https://api.speechanddebate.org',
 	NSDA_API_PATH         : '/v2',
-	CASELIST_KEY          : 'caselist-key',
-	SHARE_KEY             : 'share-key',
-	SHARE_SMTP_HOST       : '192.168.37.28',
-	SHARE_SMTP_USER       : 'share@share.tabroom.com',
-	SHARE_SMTP_PASS       : 'sharepass',
-	LDAP_SERVER           : 'ldapserver.domain.com',
+	CASELIST_KEY          : 'DtRgkxvMZ5g3a9',
+	SHARE_KEY			  : 'HwX9fMpDjyG79R',
+	LDAP_SERVER           : 'baldur.tabroom.com',
 	LDAP_PORT		      : '389',
 	LDAP_DN               : 'dc=tabroom,dc=com',
 	LDAP_USER             : 'cn=admin,dc=tabroom,dc=com',
-	LDAP_PW               : 'ldapAdminPasswordHere',
-	IPLOCATION            : '/var/lib/GeoIP/GeoLite2-City.mmdb',
-	IPISP                 : '/var/lib/GeoIP/GeoIP2-ISP.mmdb',
+	LDAP_PW               : 'trMkodb8>W,+t*h8T',
 	S3_BUCKET			  : 's3://tabroom-files',
 	S3_URL				  : 'https://s3.amazonaws.com/tabroom-files/tourns',
-	NAUDL_USERNAME		  : 'somethingfrom@salesforce.com',
-	NAUDL_PW			  : 'askLukeHill',
-	NAUDL_TOURN_ENDPOINT  : 'tournamentServiceUrl',
-	NAUDL_STUDENT_ENDPOINT: 'studentServiceTabroomUrl',
-	NAUDL_STA_ENDPOINT    : 'staTabroomServiceUrl',
+	NAUDL_USERNAME		  : 'salesforce@tabroom.com',
+	NAUDL_PW			  : 'Ax5GDwi#NEgW#RrTnGvzvJciD6WuTeE',
+	NAUDL_TOKEN			  : 'JexH9GRxXycAvkxaf4f0f9Obr',
+	NAUDL_HOST			  : 'https://cs45.salesforce.com',
+	NAUDL_TOURN_ENDPOINT  : '/services/apexrest/v.1/TournamentService',
+	NAUDL_STUDENT_ENDPOINT: '/services/apexrest/v.1/StudentServiceTabroom',
+	NAUDL_STA_ENDPOINT    : '/services/apexrest/v.1/STATabroomService',
 	COOKIE_NAME           : 'TabroomToken',
-	DB_PORT               : '3306',
-	DB_DATABASE           : 'tabroom',
+ 	DB_DATABASE           : 'tabroom',
 	sequelizeOptions      : {
-		dialect         : 'mariadb',
-		define : {
-			freezeTableName : true,
-			modelName       : 'singularName',
-			underscored     : true,
-			timestamps      : false,
-		},
-	},
+		"dialect"         : "mariadb",
+		"define" : {
+			"freezeTableName" : true,
+			"modelName"       : "singularName",
+			"underscored"     : true,
+			"timestamps"      : false
+		}
+	}
 };
 
 const env = process.env.NODE_ENV || 'development';
 
 switch (env) {
-case 'test':
-	config.sequelizeOptions.logging = false;
-	config.DB_HOST = 'localhost';
-	config.DB_USER = 'root';
-	config.DB_PASS = '';
+    case 'test':
+		config.sequelizeOptions.logging = false;
+        config.DB_HOST = 'localhost';
+        config.DB_USER = 'tabroom';
+        config.DB_PASS = 'C3Eil-aiQuaiseigoo4hee2YooG';
 	break;
 
-case 'staging':
-	config.DB_HOST = 'localhost';
-	config.DB_USER = 'root';
-	config.DB_PASS = '';
+    case 'staging':
+        config.DB_HOST = 'localhost';
+        config.DB_USER = 'tabroom';
+        config.DB_PASS = 'C3Eil-aiQuaiseigoo4hee2YooG';
 	break;
 
-case 'production':
-	config.PORT       = 3000;
-	config.DB_HOST    = 'db.speechanddebate.org';
-	config.DB_USER    = 'tabroom';
-	config.DB_PASS    = '';
-	config.sequelizeOptions.pool = {
-		max     : 50,
-		min     : 5,
-		acquire : 30000,
-		idle    : 10000,
-	};
-	config.sequelizeOptions.logging = false;
+    case 'stagetest':
+		config.PORT       = 3000,
+		config.DB_HOST    = 'db.speechanddebate.org';
+		config.DB_USER    = 'tabroom';
+		config.DB_PASS    = 'wahf3eicaic[ooxi7YahXahJ';
+		config.sequelizeOptions.pool = {
+			"max"     : 1,
+			"min"     : 1,
+			"acquire" : 30000,
+			"idle"    : 10000
+		};
+		config.sequelizeOptions.logging = false;
 	break;
 
-case 'development':
-	config.DB_HOST = 'localhost';
-	config.DB_USER = 'tabroom';
-	config.DB_PASS = 'thisisadbpassword';
+    case 'production':
+		config.PORT       = 3000,
+        config.DB_HOST    = 'db.speechanddebate.org';
+        config.DB_USER    = 'tab';
+        config.DB_PASS    = "AiRuCoo7eiy9iu<d7";
+		config.sequelizeOptions.pool = {
+			"max"     : 50,
+			"min"     : 5,
+			"acquire" : 30000,
+			"idle"    : 10000
+		};
+		config.sequelizeOptions.logging = false;
 	break;
-default:
+
+    case 'development':
+        config.DB_HOST = 'localhost';
+        config.DB_USER = 'tabroom';
+        config.DB_PASS = 'C3Eil-aiQuaiseigoo4hee2YooG';
 	break;
+
+    default:
+        break;
 }
 
 config.sequelizeOptions.host = config.DB_HOST;
@@ -97,11 +107,11 @@ const configKeys = Object.keys(config);
 const envKeys = Object.keys(process.env);
 
 configKeys.forEach((key) => {
-	if (envKeys.includes(key)) {
-		config[key] = process.env[key];
-	}
-	if (config[key] === 'true') { config[key] = true; }
-	if (config[key] === 'false') { config[key] = false; }
+    if (envKeys.includes(key)) {
+        config[key] = process.env[key];
+    }
+    if (config[key] === 'true') { config[key] = true; }
+    if (config[key] === 'false') { config[key] = false; }
 });
 
 export default config;
