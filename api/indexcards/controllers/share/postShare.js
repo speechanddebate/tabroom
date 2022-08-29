@@ -70,7 +70,7 @@ const postShare = {
 				const tournament = result[0].tournament;
 				const round = result[0].round;
 				emailPromises.push(
-					sendMail(`${phrase}@tabroom.com`, `${emails}`, `Speech Documents - ${tournament} Round ${round} (${phrase})`, 'Speech Documents')
+					sendMail(`${phrase}@share.tabroom.com`, `${emails}`, `Speech Documents - ${tournament} Round ${round} (${phrase})`, 'Speech Documents')
 				);
 			}
 		});
