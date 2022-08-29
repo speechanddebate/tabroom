@@ -1,4 +1,4 @@
-import { showDateTime } from '../../../helpers/common.js';
+import { showDateTime } from '../../../helpers/common';
 
 export const attendance = {
 	GET: async (req, res) => {

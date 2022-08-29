@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import { initialize } from 'express-openapi';
 import swaggerUI from 'swagger-ui-express';
 import config from './config/config';
+import { systemStatus } from './indexcards/controllers/utility/status';
 
 import errorHandler from './indexcards/helpers/error';
 
@@ -124,8 +125,19 @@ app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 
 });
 
+const baselinePaths = [
+	{ path : '/status', module : systemStatus },
+];
+
 // Combine the various paths into one
-const paths = [...tournPaths, ...userPaths, ...invitePaths, ...caselistPaths, ...sharePaths];
+const paths = [
+	...baselinePaths,
+	...tournPaths,
+	...userPaths,
+	...invitePaths,
+	...caselistPaths,
+	...sharePaths,
+];
 
 // Initialize OpenAPI middleware
 const apiDocConfig = initialize({
