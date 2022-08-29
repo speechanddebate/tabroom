@@ -1,4 +1,4 @@
-import { randomPhrase } from '@speechanddebate/nsda-js-utils';
+import { randomPhrase, roundName } from '@speechanddebate/nsda-js-utils';
 import selectPanelEmail from './selectPanelEmail';
 import sendMail from './mail';
 import config from '../../../config/config';
@@ -39,7 +39,7 @@ const postShare = {
 				await sendMail(
 					`${req.body.panels[0]}@share.tabroom.com`,
 					`${emails}`,
-					`Speech Documents - ${tournament} Round ${round} (${req.body.panels[0]})`,
+					`Speech Documents - ${tournament} ${roundName(round)} (${req.body.panels[0]})`,
 					'Speech Documents',
 					null,
 					{ filename: req.body.filename, file: req.body.file },
@@ -70,7 +70,7 @@ const postShare = {
 				const tournament = result[0].tournament;
 				const round = result[0].round;
 				emailPromises.push(
-					sendMail(`${phrase}@share.tabroom.com`, `${emails}`, `Speech Documents - ${tournament} Round ${round} (${phrase})`, 'Speech Documents')
+					sendMail(`${phrase}@share.tabroom.com`, `${emails}`, `Speech Documents - ${tournament} ${roundName(round)} (${phrase})`, 'Speech Documents')
 				);
 			}
 		});
