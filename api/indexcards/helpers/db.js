@@ -1,5 +1,7 @@
 import { Sequelize, DataTypes } from 'sequelize';
-import models from '../models/index.cjs';
+import fs from 'fs';
+import { join } from 'path';
+import { debugLogger } from './logger';
 
 import config from '../../config/config';
 
@@ -17,7 +19,7 @@ const sequelize = new Sequelize(
 const errorsPlease = ['findAll', 'findOne', 'save', 'create', 'findByPk'];
 
 const dbError = (err) => {
-	console.log(err);
+	debugLogger.error(err);
 	process.exit(0);
 };
 
@@ -28,6 +30,26 @@ errorsPlease.forEach((dingbat) => {
 			dbError(err);
 		});
 	};
+});
+
+// Iterate the models directory and load all models dynamically
+const models = {};
+const files = await fs.promises.readdir('./indexcards/models');
+const promises = files
+	.filter((file) => {
+		return (
+			file.indexOf('.') !== 0
+			&& file !== 'index.js'
+			&& file.slice(-3) === '.js'
+		);
+	})
+	.map((file) => {
+		return import(join(process.cwd(), 'indexcards/models', file));
+	});
+
+const modules = await Promise.all(promises);
+modules.forEach((m) => {
+	models[m.default.name] = m.default;
 });
 
 const db = {};
