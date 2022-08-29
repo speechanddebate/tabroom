@@ -40,7 +40,7 @@ const postShare = {
 					`${req.body.panels[0]}@share.tabroom.com`,
 					`${emails}`,
 					`Speech Documents - ${tournament} ${roundName(round)} (${req.body.panels[0]})`,
-					'Speech Documents',
+					`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${req.body.panels[0]}`,
 					null,
 					{ filename: req.body.filename, file: req.body.file },
 				);
@@ -70,7 +70,12 @@ const postShare = {
 				const tournament = result[0].tournament;
 				const round = result[0].round;
 				emailPromises.push(
-					sendMail(`${phrase}@share.tabroom.com`, `${emails}`, `Speech Documents - ${tournament} ${roundName(round)} (${phrase})`, 'Speech Documents')
+					sendMail(
+						`${phrase}@share.tabroom.com`,
+						`${emails}`,
+						`Speech Documents - ${tournament} ${roundName(round)} (${phrase})`,
+						`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${phrase}`,
+					)
 				);
 			}
 		});
