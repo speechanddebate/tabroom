@@ -1,4 +1,4 @@
-import db from '../../models/index.cjs';
+import db from '../../helpers/db';
 
 const selectPanelEmail = async (panel) => {
 	const students = await db.sequelize.query(`

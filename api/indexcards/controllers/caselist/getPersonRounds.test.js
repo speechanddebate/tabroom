@@ -1,10 +1,10 @@
 import crypto from 'crypto';
 import request from 'supertest';
 import { assert } from 'chai';
-import config from '../../../config/config.js';
-import db from '../../models/index.cjs';
-import server from '../../../app.js';
-import { testAdminSession } from '../../../tests/testFixtures.js';
+import config from '../../../config/config';
+import db from '../../helpers/db';
+import server from '../../../app';
+import { testAdminSession } from '../../../tests/testFixtures';
 
 describe('Person Rounds', () => {
 	it('Returns rounds for a person', async () => {

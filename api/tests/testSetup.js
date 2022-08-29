@@ -1,4 +1,4 @@
-import db from '../indexcards/models/index.cjs';
+import db from '../indexcards/helpers/db';
 
 // eslint-disable-next-line no-undef
 afterAll(async () => {

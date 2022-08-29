@@ -1,8 +1,6 @@
-import db from '../../../models/index.cjs';
-
 export const getInvite = {
-
 	GET: async (req, res) => {
+		const db = req.db;
 
 		const invite = {};
 
@@ -37,8 +35,8 @@ export const getInvite = {
 };
 
 export const getRounds = {
-
 	GET: async (req, res) => {
+		const db = req.db;
 
 		let schemat = {};
 
