@@ -1,9 +1,7 @@
-import { showDateTime } from '../../../helpers/common.js';
+import { showDateTime } from '../../../helpers/common';
 
 export const attendance = {
-
 	GET: async (req, res) => {
-
 		const db = req.db;
 
 		let queryLimit = '';
@@ -436,9 +434,7 @@ export const attendance = {
 };
 
 export const eventStatus = {
-
 	GET: async (req, res) => {
-
 		const db = req.db;
 
 		const eventQuery = `

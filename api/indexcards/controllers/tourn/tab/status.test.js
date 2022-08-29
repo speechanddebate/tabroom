@@ -1,28 +1,21 @@
 import request from 'supertest';
 import { assert } from 'chai';
-import config from '../../../../config/config.js';
-import db from '../../../models/index.cjs';
-import server from '../../../../app.js';
-import userData from '../../../tests/users.js';
+import config from '../../../../config/config';
+import db from '../../../helpers/db';
+import server from '../../../../app';
+import userData from '../../../../tests/testFixtures';
 
 describe('Status Board', () => {
-
-	let testAdmin = {};
-	let testCampusLog = {};
 	let testAdminSession = {};
 
-	before('Set Dummy Data', async () => {
-		testAdmin = await db.person.create( userData.testAdmin);
-		testAdminSession = await db.session.create(userData.testAdminSession);
-		testCampusLog = await db.campusLog.create(userData.testCampusLog);
-
+	beforeAll(async () => {
+		testAdminSession = await db.session.findByPk(userData.testAdminSession.id);
 		await db.sequelize.query(`
 			update ballot
 				set judge_started = NOW(), started_by = 1
 			where ballot.judge = 355
 				and ballot.panel = 37
 		`);
-
 		await db.sequelize.query(`update campus_log set timestamp = NOW() where person = 13 and tag = 'absent'`);
 		await db.sequelize.query(`delete from campus_log where person = 15 and tag = 'absent'`);
 		await db.sequelize.query(`delete from campus_log where person = 16 and tag = 'present'`);
@@ -157,31 +150,14 @@ describe('Status Board', () => {
 			'After the change, Judge Person 10 not marked started');
 
 	});
-
-	after('Remove Dummy Data', async () => {
-		await testCampusLog.destroy();
-		await testAdminSession.destroy();
-		await testAdmin.destroy();
-	});
-
 });
 
 describe('Event Dashboard', () => {
-
-	let testAdmin = {};
-	let testAdminSession = {};
-
-	before('Set Dummy Data', async () => {
-		testAdmin = await db.person.create( userData.testAdmin);
-		testAdminSession = await db.session.create( userData.testAdminSession);
-	});
-
 	it('Return a correct JSON status object', async () => {
-
 		const res = await request(server)
 			.get(`/v1/tourn/1/tab/dashboard`)
 			.set('Accept', 'application/json')
-			.set('Cookie', [`${config.COOKIE_NAME}=${testAdminSession.userkey}`])
+			.set('Cookie', [`${config.COOKIE_NAME}=${userData.testAdminSession.userkey}`])
 			.expect('Content-Type', /json/)
 			.expect(200);
 
@@ -199,12 +175,5 @@ describe('Event Dashboard', () => {
 		assert.isTrue(
 			res.body[7].rounds[1][2].undone,
 			'Flight 2 is not done');
-
 	});
-
-	after('Remove Dummy Data', async () => {
-		await testAdminSession.destroy();
-		await testAdmin.destroy();
-	});
-
 });

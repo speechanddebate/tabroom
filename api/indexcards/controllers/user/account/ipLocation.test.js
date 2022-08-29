@@ -1,11 +1,9 @@
 import request from 'supertest';
 import { assert } from 'chai';
-import server from '../../../../app.js';
+import server from '../../../../app';
 
 describe('IP Location Results', () => {
-
 	it('Returns correct location data', async () => {
-
 		const res = await request(server)
 			.get(`/v1/user/iplocation/1.1.1.1`)
 			.set('Accept', 'application/json')
@@ -24,7 +22,5 @@ describe('IP Location Results', () => {
 			res.body.isEU,
 			'Australia may be in Eurovision but it is not in the EU.  But God if it joined? That would SERIOUSLY piss off the Brits.  For it'
 		);
-
 	});
-
 });
