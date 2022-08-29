@@ -1,5 +1,5 @@
-import db from '../indexcards/models/index.cjs';
-import userData from './testFixtures.js';
+import db from '../indexcards/helpers/db';
+import userData from './testFixtures';
 
 const globalTestTeardown = async () => {
 	const testUser = await db.person.findByPk(userData.testUser.id);

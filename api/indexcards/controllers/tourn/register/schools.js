@@ -1,7 +1,5 @@
 // Schools at the tournament
-
 export const listSchools = {
-
 	GET: async (req, res) => {
 		const db = req.db;
 		const tournId = req.params.tourn_id;

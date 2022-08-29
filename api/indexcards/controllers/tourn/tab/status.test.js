@@ -1,9 +1,9 @@
 import request from 'supertest';
 import { assert } from 'chai';
-import config from '../../../../config/config.js';
-import db from '../../../models/index.cjs';
-import server from '../../../../app.js';
-import userData from '../../../../tests/testFixtures.js';
+import config from '../../../../config/config';
+import db from '../../../helpers/db';
+import server from '../../../../app';
+import userData from '../../../../tests/testFixtures';
 
 describe('Status Board', () => {
 	let testAdminSession = {};

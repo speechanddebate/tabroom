@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import request from 'supertest';
-import config from '../../../config/config.js';
-import server from '../../../app.js';
-import { testAdminSession } from '../../../tests/testFixtures.js';
+import config from '../../../config/config';
+import server from '../../../app';
+import { testAdminSession } from '../../../tests/testFixtures';
 
 describe('Caselist Link', () => {
 	it('Creates a caselist link', async () => {
