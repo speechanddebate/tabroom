@@ -1,9 +1,9 @@
 import { assert } from 'chai';
 import pkg from 'uuid';
-import config from '../../config/config.cjs';
-import db from '../models/index.cjs';
-import login from './login.js';
-import userData from '../../tests/testFixtures.js';
+import config from '../../config/config';
+import db from './db';
+import login from './login';
+import userData from '../../tests/testFixtures';
 
 const { v4 } = pkg;
 

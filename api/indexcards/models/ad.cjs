@@ -1,6 +1,4 @@
-/* jshint indent: 4 */
-
-module.exports = function(sequelize, DataTypes) {
+module.exports = (sequelize, DataTypes) => {
 	return sequelize.define('ad', {
 		tag: {
 			type         : DataTypes.STRING(127),

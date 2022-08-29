@@ -8,6 +8,8 @@ import ErrorBoundary from './ErrorBoundary';
 import Layout from './Layout';
 import TestTable from './TestTable';
 
+import './normalize.css';
+
 const App = () => {
 	const history = createBrowserHistory({ window });
 

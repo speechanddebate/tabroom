@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { assert } from 'chai';
-import server from '../../../../app.js';
+import server from '../../../../app';
 
 describe('IP Location Results', () => {
 	it('Returns correct location data', async () => {

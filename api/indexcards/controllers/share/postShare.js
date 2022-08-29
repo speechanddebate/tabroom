@@ -1,12 +1,12 @@
 import crypto from 'crypto';
 import { randomPhrase } from '@speechanddebate/nsda-js-utils';
-import selectPanelEmail from './selectPanelEmail.js';
-import sendMail from './mail.js';
-import config from '../../../config/config.js';
-import db from '../../models/index.cjs';
+import selectPanelEmail from './selectPanelEmail';
+import sendMail from './mail';
+import config from '../../../config/config';
 
 const postShare = {
 	POST: async (req, res) => {
+		const db = req.db;
 		const hash = crypto.createHash('sha256').update(config.SHARE_KEY).digest('hex');
 		if (req.body.share_key !== hash) {
 			return res.status(401).json({ message: 'Invalid share key' });

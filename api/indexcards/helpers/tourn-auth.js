@@ -1,6 +1,4 @@
-//
 // Parse the Tabroom cookies and determine whether there's an active session
-//
 
 const tournAuth = async function(req) {
 
