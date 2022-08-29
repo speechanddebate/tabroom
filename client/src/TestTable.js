@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 
 import {
 	createColumnHelper,
@@ -8,8 +8,9 @@ import {
 import Table from './Table';
 
 const TestTable = () => {
+	const { name } = useParams();		// hook that delivers the parameter named param.
 
-	const navigate = useNavigate();
+	const navigate = useNavigate();		// hook for a navigate object to handle buttons that do navigation etc
 
 	const handleNavigate = () => {
 		navigate('/route');
@@ -81,6 +82,7 @@ const TestTable = () => {
 				columns={columns}
 			/>
 			<button onClick={handleNavigate} type="button">Go to /route</button>
+			<p>{name}</p>
 		</div>
 	);
 };
