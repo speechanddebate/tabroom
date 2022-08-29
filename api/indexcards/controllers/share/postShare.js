@@ -61,7 +61,7 @@ const postShare = {
 				values (?, 'share', ?)
 				on duplicate key update
 				value = ?
-			`, { replacements: [p, phrase] });
+			`, { replacements: [p, phrase, phrase] });
 
 			const result = await selectPanelEmail(phrase);
 
