@@ -18,13 +18,12 @@ export const TestForm = () => {
 	const watchedFields = useWatch({ control });
 
 	useEffect(() => {
-		console.log(watchedFields);
+		// console.log(watchedFields);
 	}, [watchedFields]);
 
 	const formHandler = async (data) => {
 		try {
-			const response = await fetch('http://local.tabroom.com:10010/v1/status', { method: 'POST', body: data });
-			console.log(response);
+			await fetch('http://local.tabroom.com:10010/v1/status', { method: 'POST', body: data });
 		} catch (err) {
 			console.log(err);
 		}
