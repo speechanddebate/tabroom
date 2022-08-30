@@ -2,6 +2,7 @@ import { randomPhrase, roundName } from '@speechanddebate/nsda-js-utils';
 import selectPanelEmail from './selectPanelEmail';
 import sendMail from './mail';
 import config from '../../../config/config';
+import { debugLogger } from '../../helpers/logger';
 
 const postShare = {
 	POST: async (req, res) => {
@@ -34,13 +35,15 @@ const postShare = {
 			const emails = result.map(r => r.email);
 			const tournament = result[0].tournament;
 			const round = result[0].round;
+			const room = result[0].room;
 
 			try {
+				debugLogger.info(`Sending single panel email for ${room} to ${emails} with ${req.body.filename}`);
 				await sendMail(
-					`${req.body.panels[0]}@share.tabroom.com`,
+					`${room}@share.tabroom.com`,
 					`${emails}`,
-					`Speech Documents - ${tournament} ${roundName(round)} (${req.body.panels[0]})`,
-					`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${req.body.panels[0]}`,
+					`Speech Documents - ${tournament} ${roundName(round)} (${room})`,
+					`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${room}`,
 					null,
 					{ filename: req.body.filename, file: req.body.file },
 				);
@@ -69,6 +72,8 @@ const postShare = {
 				const emails = result.map(r => r.email);
 				const tournament = result[0].tournament;
 				const round = result[0].round;
+
+				debugLogger.info(`Sending bulk panel email for panel ${p} (${phrase}) to ${emails}`);
 				emailPromises.push(
 					sendMail(
 						`${phrase}@share.tabroom.com`,
