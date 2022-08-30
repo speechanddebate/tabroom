@@ -167,7 +167,7 @@ app.use(errorHandler);
 app.use('/v1/apidoc', swaggerUI.serve, swaggerUI.setup(apiDocConfig.apiDoc));
 
 // Start server
-const port = process.env.PORT || config.PORT || 9876;
+const port = process.env.PORT || config.PORT || 3000;
 
 if (process.env.NODE_ENV !== 'test') {
 	app.listen(port, () => {
