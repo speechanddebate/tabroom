@@ -42,7 +42,7 @@ const postShare = {
 				await sendMail(
 					`${room}@share.tabroom.com`,
 					`${emails}`,
-					`Speech Documents - ${tournament} ${roundName(round)} (${room})`,
+					`${tournament} ${roundName(round)} (${room}) - Speech Documents`,
 					`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${room}`,
 					null,
 					{ filename: req.body.filename, file: req.body.file },
@@ -78,7 +78,7 @@ const postShare = {
 					sendMail(
 						`${phrase}@share.tabroom.com`,
 						`${emails}`,
-						`Speech Documents - ${tournament} ${roundName(round)} (${phrase})`,
+						`${tournament} ${roundName(round)} (${phrase}) - Speech Documents`,
 						`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${phrase}`,
 					)
 				);
