@@ -17,7 +17,7 @@ const sendMail = async (from = 'share@share.tabroom.com', to, subject, text, htm
 	// Configure email options
 	const mailOptions = {
 		from: `"Tabroom Share" <share@share.tabroom.com>`,
-		to: 'share@share.tabroom.com',
+		to: 'noreply@share.tabroom.com',
 		replyTo: from,
 		bcc: to,
 		subject,
