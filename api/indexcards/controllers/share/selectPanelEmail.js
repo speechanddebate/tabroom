@@ -3,6 +3,7 @@ import db from '../../helpers/db';
 const selectPanelEmail = async (panel) => {
 	const students = await db.sequelize.query(`
 		select
+			ps.value as 'room',
 			person.email as 'email',
 			tourn.name as 'tournament',
 			COALESCE(NULLIF(round.label, ''), NULLIF(round.name, ''), NULLIF(round.type, ''), 'X') as 'round'
@@ -25,6 +26,7 @@ const selectPanelEmail = async (panel) => {
 
 	const judges = await db.sequelize.query(`
 		select
+			ps.value as 'room',
 			person.email as 'email',
 			tourn.name as 'tournament',
 			COALESCE(NULLIF(round.label, ''), NULLIF(round.name, ''), NULLIF(round.type, ''), 'X') as 'round'
