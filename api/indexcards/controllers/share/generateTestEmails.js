@@ -12,8 +12,8 @@ const generateTestEmails = async (numberOfEmails = parseInt(process.argv[1]) || 
 			const phrase = randomPhrase();
 			// eslint-disable-next-line no-await-in-loop
 			await sendMail(
-				`noreply@share.tabroom.com`,
 				`${phrase}@share.tabroom.com`,
+				`noreply@share.tabroom.com`,
 				`Test email ${phrase}`,
 				`Test email ${phrase}`,
 				null,
