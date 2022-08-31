@@ -5,6 +5,7 @@ const Share = {
 		file        : { type : 'string' , nullable  : true },
 		filename    : { type : 'string' , nullable  : true },
 		share_key   : { type : 'string' , nullable  : true },
+		from        : { type : 'string' , nullable  : true },
 	},
 };
 

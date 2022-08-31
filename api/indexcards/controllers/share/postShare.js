@@ -32,7 +32,7 @@ const postShare = {
 				});
 			}
 
-			const emails = result.map(r => r.email);
+			const emails = result.map(r => r.email).filter(email => email !== req.body.from);
 			const tournament = result[0].tournament;
 			const round = result[0].round;
 			const room = result[0].room;
