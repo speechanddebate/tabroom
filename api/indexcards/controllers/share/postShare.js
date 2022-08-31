@@ -23,7 +23,7 @@ const postShare = {
 		}
 
 		// If passphrase panel ID and a file are provided, just forward the file to the panel
-		if (req.body.panels.length === 1 && typeof req.body.panels[0] === 'string' && req.body.file) {
+		if (req.body.panels.length === 1 && typeof req.body.panels[0] === 'string' && req.body.files && req.body.files.length > 0) {
 			const result = await selectPanelEmail(req.body.panels[0]);
 
 			if (!result || result.length < 1) {
@@ -38,14 +38,14 @@ const postShare = {
 			const room = result[0].room;
 
 			try {
-				debugLogger.info(`Sending single panel email for ${room} to ${emails} with ${req.body.filename}`);
+				debugLogger.info(`Sending single panel email for ${room} to ${emails} with ${req.body.files.length} attachments`);
 				await sendMail(
 					`${room}@share.tabroom.com`,
 					`${emails}`,
 					`${tournament} ${roundName(round)} (${room}) - Speech Documents`,
 					`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${room}`,
 					null,
-					{ filename: req.body.filename, file: req.body.file },
+					req.body.files || [],
 				);
 				return res.status(201).json({ message: 'Successfully sent speech doc email' });
 			} catch (err) {

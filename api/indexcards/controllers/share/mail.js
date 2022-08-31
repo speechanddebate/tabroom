@@ -13,7 +13,7 @@ export const transporter = nodemailer.createTransport({
 	},
 });
 
-const sendMail = async (from = 'share@share.tabroom.com', to, subject, text, html, attachment) => {
+const sendMail = async (from = 'share@share.tabroom.com', to, subject, text, html, attachments) => {
 	// Configure email options
 	const mailOptions = {
 		from: `"Tabroom Share" <share@share.tabroom.com>`,
@@ -24,8 +24,11 @@ const sendMail = async (from = 'share@share.tabroom.com', to, subject, text, htm
 		text,
 		html,
 	};
-	if (attachment) {
-		mailOptions.attachments = [{ filename: attachment.filename, content: attachment.file, encoding: 'base64' }];
+	if (attachments && attachments.length > 0) {
+		mailOptions.attachments = [];
+		attachments.forEach(a => {
+			mailOptions.attachments.push({ filename: a.filename, content: a.file, encoding: 'base64' });
+		});
 	}
 
 	// Send mail
