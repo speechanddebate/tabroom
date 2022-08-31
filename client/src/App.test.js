@@ -1,6 +1,6 @@
 import React from 'react';
 import { assert } from 'chai';
-import { wrappedRender as render } from './setupTests';
+import { render } from '@testing-library/react';
 
 import App from './App';
 
