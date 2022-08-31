@@ -28,7 +28,7 @@ const postShare = {
 
 			if (!result || result.length < 1) {
 				return res.status(400).json({
-					message: 'No round with that name found, no emails in round, or round is more than a day ago',
+					message: 'No current round with that name found',
 				});
 			}
 
@@ -36,6 +36,12 @@ const postShare = {
 			const tournament = result[0].tournament;
 			const round = result[0].round;
 			const room = result[0].room;
+
+			if (!emails || emails.length < 1) {
+				return res.status(400).json({
+					message: 'No emails found for the round, nothing to send',
+				});
+			}
 
 			try {
 				debugLogger.info(`Sending single panel email for ${room} to ${emails} with ${req.body.files.length} attachments`);
