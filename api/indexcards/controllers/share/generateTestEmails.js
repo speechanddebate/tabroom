@@ -1,7 +1,7 @@
 // node --experimental-specifier-resolution=node -e 'import("./indexcards/controllers/share/generateTestEmails").then(m => m.init())' 10
 import fs from 'fs';
 import { randomPhrase } from '@speechanddebate/nsda-js-utils';
-import sendMail from './mail';
+import sendMail, { transporter } from './mail';
 import { debugLogger } from '../../helpers/logger';
 
 const generateTestEmails = async (numberOfEmails = parseInt(process.argv[1]) || 10) => {
@@ -13,7 +13,7 @@ const generateTestEmails = async (numberOfEmails = parseInt(process.argv[1]) || 
 			// eslint-disable-next-line no-await-in-loop
 			await sendMail(
 				`${phrase}@share.tabroom.com`,
-				`noreply@share.tabroom.com`,
+				`${phrase}@share.tabroom.com`,
 				`Test email ${phrase}`,
 				`Test email ${phrase}`,
 				null,
@@ -23,6 +23,7 @@ const generateTestEmails = async (numberOfEmails = parseInt(process.argv[1]) || 
 	} catch (err) {
 		debugLogger.error(err);
 	}
+	transporter.close();
 	return true;
 };
 
