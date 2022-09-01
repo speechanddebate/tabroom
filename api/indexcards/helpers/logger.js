@@ -1,4 +1,7 @@
 import winston from 'winston';
+import config from '../../config/config';
+
+const logPath = config.LOG_PATH || '/tmp';
 
 export const debugLogger = winston.createLogger({
 	level: 'debug',
@@ -11,7 +14,7 @@ export const debugLogger = winston.createLogger({
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: '/var/log/indexcards/debug.log',
+			filename: `${logPath}/debug.log`,
 		}),
 	],
 });
@@ -23,11 +26,11 @@ export const requestLogger = winston.createLogger({
 		winston.format.json(),
 	),
 	exitOnError: false,
-	silent: process.env.NODE_ENV === 'test',
+	silent: process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'production',
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: '/var/log/indexcards/request.log',
+			filename: `${logPath}/request.log`,
 		}),
 	],
 });
@@ -43,7 +46,7 @@ export const errorLogger = winston.createLogger({
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: '/var/log/indexcards/error.log',
+			filename: `${logPath}/error.log`,
 		}),
 	],
 });
@@ -55,11 +58,11 @@ export const clientLogger = winston.createLogger({
 		winston.format.json(),
 	),
 	exitOnError: false,
-	silent: process.env.NODE_ENV === 'test',
+	silent: process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'production',
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: '/var/log/indexcards/client.log',
+			filename: `${logPath}/client.log`,
 		}),
 	],
 });
@@ -87,7 +90,7 @@ export const autoemailLogger = winston.createLogger({
 	transports: [
 		new winston.transports.Console(),
 		new winston.transports.File({
-			filename: '/var/log/indexcards/autoemail.log',
+			filename: `${logPath}/autoemail.log`,
 		}),
 	],
 });
