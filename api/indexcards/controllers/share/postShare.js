@@ -18,34 +18,40 @@ const postShare = {
 			select value from tabroom_setting where tag = 'share_email_enabled'
 		`);
 
-		if (!enabled || !enabled[0] || !enabled[0][0].value) {
+		if (!enabled || !enabled[0] || !enabled[0]?.[0]?.value) {
 			return res.status(200).json({ message: 'Tabroom share emails disabled' });
 		}
 
 		// If passphrase panel ID and a file are provided, just forward the file to the panel
-		if (req.body.panels.length === 1 && typeof req.body.panels[0] === 'string' && req.body.file) {
+		if (req.body.panels.length === 1 && typeof req.body.panels[0] === 'string' && req.body.files && req.body.files.length > 0) {
 			const result = await selectPanelEmail(req.body.panels[0]);
 
 			if (!result || result.length < 1) {
 				return res.status(400).json({
-					message: 'No round with that name found, no emails in round, or round is more than a day ago',
+					message: 'No current round with that name found',
 				});
 			}
 
-			const emails = result.map(r => r.email);
+			const emails = result.map(r => r.email).filter(email => email !== req.body.from);
 			const tournament = result[0].tournament;
 			const round = result[0].round;
 			const room = result[0].room;
 
+			if (!emails || emails.length < 1) {
+				return res.status(400).json({
+					message: 'No emails found for the round, nothing to send',
+				});
+			}
+
 			try {
-				debugLogger.info(`Sending single panel email for ${room} to ${emails} with ${req.body.filename}`);
+				debugLogger.info(`Sending single panel email for ${room} to ${emails} with ${req.body.files.length} attachments`);
 				await sendMail(
 					`${room}@share.tabroom.com`,
 					`${emails}`,
 					`${tournament} ${roundName(round)} (${room}) - Speech Documents`,
 					`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${room}`,
 					null,
-					{ filename: req.body.filename, file: req.body.file },
+					req.body.files || [],
 				);
 				return res.status(201).json({ message: 'Successfully sent speech doc email' });
 			} catch (err) {
