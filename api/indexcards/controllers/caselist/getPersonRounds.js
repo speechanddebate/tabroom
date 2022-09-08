@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import config from '../../../config/config';
-import { startOfYear } from '../../helpers/common';
+import { startOfYear } from '@speechanddebate/nsda-js-utils';
 
 const getPersonRounds = {
 	GET: async (req, res) => {
