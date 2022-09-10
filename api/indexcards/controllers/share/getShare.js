@@ -1,4 +1,4 @@
-import { startOfYear } from '../../helpers/common';
+import { startOfYear } from '@speechanddebate/nsda-js-utils';
 
 const getShare = {
 	GET: async (req, res) => {
