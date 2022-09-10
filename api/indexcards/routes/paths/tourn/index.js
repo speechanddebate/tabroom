@@ -3,9 +3,11 @@
 
 // Utility functions
 import tab from './tab';
+import data from './data';
 import register from './register';
 
 export default [
 	...tab,
+	...data,
 	...register,
 ];

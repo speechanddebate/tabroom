@@ -1,4 +1,4 @@
-import { showDateTime } from '../../../helpers/common';
+import { showDateTime } from '@speechanddebate/nsda-js-utils';
 
 export const attendance = {
 	GET: async (req, res) => {
