@@ -192,30 +192,48 @@ db.regionSetting.belongsTo(db.setting, { as: 'Setting', foreignKey: 'setting' })
 db.topic.belongsTo(db.person, { as: 'Creator', foreignKey: 'created_by' });
 
 // Tournament wide relations
-db.tourn.hasMany(db.changeLog,    { as: 'ChangeLogs',   foreignKey: 'tourn' });
-db.tourn.hasMany(db.category,     { as: 'Categories',   foreignKey: 'tourn' });
-db.tourn.hasMany(db.concession,   { as: 'Concession',   foreignKey: 'tourn' });
-db.tourn.hasMany(db.email,        { as: 'Email',        foreignKey: 'tourn' });
-db.tourn.hasMany(db.event,        { as: 'Events',       foreignKey: 'tourn' });
-db.tourn.hasMany(db.entry,        { as: 'Entry',        foreignKey: 'tourn' });
-db.tourn.hasMany(db.file,         { as: 'Files',        foreignKey: 'tourn' });
-db.tourn.hasMany(db.fine,         { as: 'Fines',        foreignKey: 'tourn' });
-db.tourn.hasMany(db.follower,     { as: 'Followers',    foreignKey: 'tourn' });
-db.tourn.hasMany(db.hotel,        { as: 'Hotels',       foreignKey: 'tourn' });
-db.tourn.hasMany(db.region,       { as: 'Regions',      foreignKey: 'tourn' });
-db.tourn.hasMany(db.resultSet,    { as: 'ResultSets',   foreignKey: 'tourn' });
-db.tourn.hasMany(db.school,       { as: 'Schools',      foreignKey: 'tourn' });
-db.tourn.hasMany(db.timeslot,     { as: 'Timeslots',    foreignKey: 'tourn' });
-db.tourn.hasMany(db.tournFee,     { as: 'TournFees',    foreignKey: 'tourn' });
-db.tourn.hasMany(db.protocol, 	  { as: 'Protocols', 	foreignKey: 'tourn' });
-db.tourn.hasMany(db.webpage,      { as: 'Webpages',     foreignKey: 'tourn' });
-db.tourn.hasMany(db.weekend,      { as: 'Weekends',     foreignKey: 'tourn' });
-db.tourn.hasMany(db.permission,   { as: 'Permissions',  foreignKey: 'tourn' });
+db.tourn.hasMany(db.changeLog  , { as: 'ChangeLogs'  , foreignKey: 'tourn' });
+db.tourn.hasMany(db.category   , { as: 'Categories'  , foreignKey: 'tourn' });
+db.tourn.hasMany(db.concession , { as: 'Concessions' , foreignKey: 'tourn' });
+db.tourn.hasMany(db.email      , { as: 'Emails'      , foreignKey: 'tourn' });
+db.tourn.hasMany(db.event      , { as: 'Events'      , foreignKey: 'tourn' });
+db.tourn.hasMany(db.entry      , { as: 'Entries'     , foreignKey: 'tourn' });
+db.tourn.hasMany(db.file       , { as: 'Files'       , foreignKey: 'tourn' });
+db.tourn.hasMany(db.fine       , { as: 'Fines'       , foreignKey: 'tourn' });
+db.tourn.hasMany(db.follower   , { as: 'Followers'   , foreignKey: 'tourn' });
+db.tourn.hasMany(db.hotel      , { as: 'Hotels'      , foreignKey: 'tourn' });
+db.tourn.hasMany(db.region     , { as: 'Regions'     , foreignKey: 'tourn' });
+db.tourn.hasMany(db.resultSet  , { as: 'ResultSets'  , foreignKey: 'tourn' });
+db.tourn.hasMany(db.school     , { as: 'Schools'     , foreignKey: 'tourn' });
+db.tourn.hasMany(db.timeslot   , { as: 'Timeslots'   , foreignKey: 'tourn' });
+db.tourn.hasMany(db.tournFee   , { as: 'TournFees'   , foreignKey: 'tourn' });
+db.tourn.hasMany(db.protocol   , { as: 'Protocols'   , foreignKey: 'tourn' });
+db.tourn.hasMany(db.webpage    , { as: 'Webpages'    , foreignKey: 'tourn' });
+db.tourn.hasMany(db.weekend    , { as: 'Weekends'    , foreignKey: 'tourn' });
+db.tourn.hasMany(db.permission , { as: 'Permissions' , foreignKey: 'tourn' });
+db.tourn.hasMany(db.rpool      , { as: 'RoomPools'   , foreignKey: 'tourn' });
 
-db.tourn.belongsToMany(db.site,    { uniqueKey: 'id', as: 'Sites',    foreignKey: 'tourn', through: 'tourn_site' });
+db.tournSite = sequelize.define('tournSite', {
+	id: {
+		type          : DataTypes.INTEGER,
+		primaryKey    : true,
+		autoIncrement : true,
+		allowNull     : false,
+	},
+}, {
+	tableName: 'tourn_site',
+});
+
+db.tourn.belongsToMany(db.site,  {
+	as         : 'Sites',
+	through    : db.tournSite,
+	foreignKey : 'tourn',
+	otherKey   : 'site',
+});
+
 db.tourn.belongsToMany(db.person,  {
 	uniqueKey  : 'id',
-	as         : 'Persons',
+	as         : 'Admins',
 	foreignKey : 'tourn',
 	otherKey   : 'person',
 	through    : 'permission',
@@ -421,13 +439,13 @@ db.shift.hasMany(db.strike,     { as: 'Strikes',  foreignKey: 'shift' });
 db.shift.belongsTo(db.category, { as: 'Category', foreignKey: 'category' });
 
 // Rounds & results
-db.round.belongsTo(db.event     , { as: 'Event'    , foreignKey: 'event' });
-db.round.belongsTo(db.timeslot  , { as: 'Timeslot' , foreignKey: 'timeslot' });
-db.round.belongsTo(db.site      , { as: 'Site'     , foreignKey: 'site' });
-db.round.belongsTo(db.protocol  , { as: 'Protocol' , foreignKey: 'tiebreak_set' });
-db.round.belongsTo(db.round     , { as: 'Runoff'   , foreignKey: 'runoff' });
-db.round.belongsToMany(db.rpool , { as: 'RPools'   , foreignKey: 'round', through: 'rpool_round' });
-db.round.hasMany(db.panel       , { as: 'Panels'   , foreignKey: 'round' });
+db.round.belongsTo(db.event     , { as: 'Event'     , foreignKey: 'event' });
+db.round.belongsTo(db.timeslot  , { as: 'Timeslot'  , foreignKey: 'timeslot' });
+db.round.belongsTo(db.site      , { as: 'Site'      , foreignKey: 'site' });
+db.round.belongsTo(db.protocol  , { as: 'Protocol'  , foreignKey: 'tiebreak_set' });
+db.round.belongsTo(db.round     , { as: 'Runoff'    , foreignKey: 'runoff' });
+db.round.belongsToMany(db.rpool , { as: 'RoomPools' , foreignKey: 'round', through: 'rpool_round' });
+db.round.hasMany(db.panel       , { as: 'Panels'    , foreignKey: 'round' });
 
 db.panel.hasMany(db.ballot      , { as: 'Ballots'      , foreignKey: 'panel' });
 db.panel.hasMany(db.changeLog   , { as: 'LogsOld'      , foreignKey: 'old_panel' });
@@ -585,7 +603,7 @@ db.entrySetting.belongsTo(db.entry       , { as: 'Entry'    , foreignKey : 'entr
 db.jpoolSetting.belongsTo(db.jpool       , { as: 'JPool'    , foreignKey : 'jpool' });
 db.judgeSetting.belongsTo(db.judge       , { as: 'Judge'    , foreignKey : 'judge' });
 db.personSetting.belongsTo(db.person     , { as: 'Person'   , foreignKey : 'person' });
-db.rpoolSetting.belongsTo(db.rpool       , { as: 'RPool'    , foreignKey : 'rpool' });
+db.rpoolSetting.belongsTo(db.rpool       , { as: 'RoomPool' , foreignKey : 'rpool' });
 db.studentSetting.belongsTo(db.student   , { as: 'Student'  , foreignKey : 'student' });
 
 db.setting.hasMany(db.protocolSetting , { as: 'protocols'  , foreignKey : 'setting' });
@@ -620,7 +638,123 @@ db.person.hasMany(db.personSetting     , { as: 'Settings' , foreignKey : 'person
 db.rpool.hasMany(db.rpoolSetting       , { as: 'Settings' , foreignKey : 'rpool' });
 db.student.hasMany(db.studentSetting   , { as: 'Settings' , foreignKey : 'student' });
 
-// db.Ballot.belongsTo(db.Person, { as: 'CollectedBy' });
+// a standard getter for Tabroom objects that have settings because Palmer is
+// teh lazy
+
+db.summon = async (dbTable, objectId) => {
+
+	const dbObject = await dbTable.findByPk(
+		objectId,
+		{ include : 'Settings' },
+	);
+
+	const dbData = dbObject.get({ plain: true });
+	dbData.table = dbTable.name;
+	dbData.settings = {};
+
+	dbData.Settings
+		.sort((a, b) => { return (a.tag > b.tag) ? 1 : -1; })
+		.forEach( (item) => {
+			if (item.value === 'date' && item.value_date) {
+				if (item.value_date !== null) {
+					dbData.settings[item.tag] = item.value_date;
+				}
+			} else if (item.value === 'json') {
+				if (item.value_text !== null) {
+					dbData.settings[item.tag] = JSON.parse(item.value_text);
+				}
+			} else if (item.value === 'text') {
+				if (item.value_text !== null) {
+					dbData.settings[item.tag] = item.value_text;
+				}
+			} else {
+				dbData.settings[item.tag] = item.value;
+			}
+		});
+
+	delete dbData.Settings;
+	return dbData;
+};
+
+// And hell, if we're going to be grabbing settings that way might as well build
+// a standard way to then change them.
+
+db.setting = async (origin, settingTag, settingValue) => {
+
+	const setKey = `${origin.table}Setting`;
+
+	if (typeof settingValue !== 'undefined') {
+
+		if (settingValue === 0 || settingValue === '' || settingValue === null) {
+			await db[setKey].destroy({
+				where: { [origin.table] : origin.id, tag: settingTag },
+			});
+			return;
+		}
+
+		await db[setKey].findOrCreate({
+			where: { [origin.table] : origin.id, tag: settingTag },
+		});
+
+		const updateTo = {};
+		let returnValue = '';
+
+		if (typeof (settingValue) === 'object') {
+			if (settingValue.text) {
+				updateTo.value = 'text';
+				updateTo.value_text = settingValue.text;
+				returnValue = settingValue.text;
+			} else if (settingValue.date) {
+				const newDate = new Date(settingValue.date);
+				updateTo.value = 'date';
+				updateTo.value_date = newDate;
+				returnValue = newDate;
+			} else if (settingValue.json) {
+				updateTo.value = 'json';
+				updateTo.value_text = JSON.stringify(settingValue.json);
+				returnValue = settingValue.json;
+			}
+		} else {
+			updateTo.value = settingValue;
+			returnValue = settingValue;
+		}
+
+		await db[setKey].update(
+			updateTo,
+			{ where: { [origin.table] : origin.id, tag: settingTag }, }
+		);
+
+		return returnValue;
+	}
+
+	const setValue = await db[setKey].findOne({
+		where: {
+			[origin.table]: origin.id,
+			tag: settingTag,
+		},
+	});
+
+	if (setValue) {
+
+		const settingResult = setValue.get({ plain: true });
+
+		if (settingResult.value === 'json') {
+			if (settingResult.value_text) {
+				return JSON.parse(settingResult.value_text);
+			}
+		} else if (settingResult.value === 'date') {
+			if (settingResult.value_date) {
+				return settingResult.value_date;
+			}
+		} else if (settingResult.value === 'text') {
+			if (settingResult.value_text) {
+				return settingResult.value_text;
+			}
+		} else if (settingResult.value) {
+			return settingResult.value;
+		}
+	}
+};
 
 // Initialize the data objects.
 db.sequelize = sequelize;

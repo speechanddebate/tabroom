@@ -58,6 +58,18 @@ export const testUserTournPerm = {
 	tag    : 'tabber',
 };
 
+export const testCampusUsers = [
+	{ id: 10, email: 'test10@tabroom.com', first: 'Test', last: 'Ten' },
+	{ id: 11, email: 'test11@tabroom.com', first: 'Test', last: 'Eleven' },
+	{ id: 12, email: 'test12@tabroom.com', first: 'Test', last: 'Twelve' },
+	{ id: 13, email: 'test13@tabroom.com', first: 'Test', last: 'Thirteen' },
+	{ id: 14, email: 'test14@tabroom.com', first: 'Test', last: 'Fourteen' },
+	{ id: 15, email: 'test15@tabroom.com', first: 'Test', last: 'Fifteen' },
+	{ id: 16, email: 'test16@tabroom.com', first: 'Test', last: 'Sixteen' },
+	{ id: 17, email: 'test17@tabroom.com', first: 'Test', last: 'Seventeen' },
+	{ id: 18, email: 'test18@tabroom.com', first: 'Test', last: 'Eighteen' },
+];
+
 export const testCampusLogs = [
 	{ id : 1       , tag : 'present' , description : 'Test Ten marked as present by palmer@tabroom.com'       , person : 10 , tourn : 1 , panel : 37 },
 	{ id : 2852264 , tag : 'present' , description : 'Test Eleven marked as present by palmer@tabroom.com'    , person : 11 , tourn : 1 , panel : 6  , entry : 359864  , timestamp : '2021-05-23 11:04:04' },
@@ -78,5 +90,6 @@ export default {
 	testAdminSession,
 	testUserSession,
 	testPassword,
+	testCampusUsers,
 	testCampusLogs,
 };
