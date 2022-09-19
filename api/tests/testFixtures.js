@@ -83,6 +83,23 @@ export const testCampusLogs = [
 	{ id : 2852269 , tag : 'absent'  , description : 'Test Seventeen marked as absent by palmer@tabroom.com'  , person : 17 , tourn : 1 , panel : 27 , entry : 3599781 , timestamp : '2021-05-23 11:04:21' },
 ];
 
+export const testStoreCartSetting = {
+	1: {
+		nc      : '20',
+		creator : '1',
+		tabroom : '10',
+		nco     : '30',
+		cart_id : '1234567890abcdef',
+	},
+	2:{
+		nc      : '12',
+		creator : '1',
+		tabroom : '11',
+		nco     : '13',
+		cart_id : 'abcdef1234567890',
+	},
+};
+
 export default {
 	testAdmin,
 	testUser,

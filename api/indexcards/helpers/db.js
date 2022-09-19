@@ -681,6 +681,10 @@ db.summon = async (dbTable, objectId) => {
 
 db.setting = async (origin, settingTag, settingValue) => {
 
+	if (origin.table === undefined) {
+		return;
+	}
+
 	const setKey = `${origin.table}Setting`;
 
 	if (typeof settingValue !== 'undefined') {

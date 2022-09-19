@@ -17,8 +17,7 @@ import apiDoc from './indexcards/routes/api-doc';
 import userPaths from './indexcards/routes/paths/user/index';
 import tournPaths from './indexcards/routes/paths/tourn/index';
 import invitePaths from './indexcards/routes/paths/invite/index';
-import caselistPaths from './indexcards/routes/paths/caselist/index';
-import sharePaths from './indexcards/routes/paths/share/index';
+import externalPaths from './indexcards/routes/paths/ext/index';
 
 import auth from './indexcards/helpers/auth';
 import tournAuth from './indexcards/helpers/tourn-auth';
@@ -135,8 +134,7 @@ const paths = [
 	...tournPaths,
 	...userPaths,
 	...invitePaths,
-	...caselistPaths,
-	...sharePaths,
+	...externalPaths,
 ];
 
 // Initialize OpenAPI middleware
