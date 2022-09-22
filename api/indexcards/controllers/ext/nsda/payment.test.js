@@ -15,7 +15,7 @@ describe('Payment Gateway', () => {
 	beforeAll(async () => {
 		adminSession = await db.session.findByPk(testAdminSession.id);
 		testTourn = await db.summon(db.tourn, 1);
-		await db.setting(testTourn, 'store_carts', {json: testStoreCartSetting});
+		await db.setting(testTourn, 'store_carts', { json: testStoreCartSetting });
 	});
 
 	it('Posts a payment into a tournament', async () => {

@@ -78,15 +78,15 @@ db.changeLog.belongsTo(db.event    , { as: 'Event'      , foreignKey: 'event' })
 db.changeLog.belongsTo(db.school   , { as: 'School'     , foreignKey: 'school' });
 db.changeLog.belongsTo(db.entry    , { as: 'Entry'      , foreignKey: 'entry' });
 db.changeLog.belongsTo(db.judge    , { as: 'Judge'      , foreignKey: 'judge' });
-db.changeLog.belongsTo(db.panel    , { as: 'oldSection' , foreignKey: 'old_panel' });
-db.changeLog.belongsTo(db.panel    , { as: 'newSection' , foreignKey: 'new_panel' });
+db.changeLog.belongsTo(db.panel    , { as: 'oldPanel' , foreignKey: 'old_panel' });
+db.changeLog.belongsTo(db.panel    , { as: 'newPanel' , foreignKey: 'new_panel' });
 db.changeLog.belongsTo(db.fine     , { as: 'Fine'       , foreignKey: 'fine' });
 db.changeLog.belongsTo(db.category , { as: 'Category'   , foreignKey: 'category' });
 db.changeLog.belongsTo(db.circuit  , { as: 'Circuit'    , foreignKey: 'circuit' });
 
 db.campusLog.belongsTo(db.person  , { as: 'Person'  , foreignKey: 'person' });
 db.campusLog.belongsTo(db.tourn   , { as: 'Tourn'   , foreignKey: 'tourn' });
-db.campusLog.belongsTo(db.panel   , { as: 'Section' , foreignKey: 'panel' });
+db.campusLog.belongsTo(db.panel   , { as: 'Panel'   , foreignKey: 'panel' });
 db.campusLog.belongsTo(db.school  , { as: 'School'  , foreignKey: 'school' });
 db.campusLog.belongsTo(db.student , { as: 'Student' , foreignKey: 'student' });
 db.campusLog.belongsTo(db.entry   , { as: 'Entry'   , foreignKey: 'entry' });
@@ -163,7 +163,7 @@ db.student.hasMany(db.follower,    { as: 'Followers', foreignKey: 'student' });
 
 db.student.belongsToMany(db.entry, { as: 'Entries',   foreignKey: 'student', through: 'entry_students' });
 
-db.studentVote.belongsTo(db.panel  , { as: 'Section' , foreignKey: 'panel' });
+db.studentVote.belongsTo(db.panel  , { as: 'Panel' , foreignKey: 'panel' });
 db.studentVote.belongsTo(db.entry  , { as: 'Entry'   , foreignKey: 'entry' });
 db.studentVote.belongsTo(db.person , { as: 'Voter'   , foreignKey: 'voter' });
 db.studentVote.belongsTo(db.person , { as: 'Entered' , foreignKey: 'entered_by' });
@@ -323,11 +323,11 @@ db.fine.belongsTo(db.invoice , { as: 'Invoice'   , foreignKey: 'invoice' });
 
 db.fine.hasMany(db.changeLog,      { as: 'ChangeLogs',   foreignKey: 'fine' });
 
-db.entry.hasMany(db.studentVote, { as: 'StudentVotes', foreignKey: 'entry' });
-db.entry.hasMany(db.ballot,    { as: 'Ballots',    foreignKey: 'entry' });
-db.entry.hasMany(db.rating,    { as: 'Ratings',    foreignKey: 'entry' });
-db.entry.hasMany(db.strike,    { as: 'Strikes',    foreignKey: 'entry' });
-db.entry.hasMany(db.changeLog,       { as: 'ChangeLogs',       foreignKey: 'entry' });
+db.entry.hasMany(db.studentVote , { as: 'StudentVotes' , foreignKey: 'entry' });
+db.entry.hasMany(db.ballot      , { as: 'Ballots'      , foreignKey: 'entry' });
+db.entry.hasMany(db.rating      , { as: 'Ratings'      , foreignKey: 'entry' });
+db.entry.hasMany(db.strike      , { as: 'Strikes'      , foreignKey: 'entry' });
+db.entry.hasMany(db.changeLog   , { as: 'ChangeLogs'   , foreignKey: 'entry' });
 
 db.entry.belongsTo(db.tourn,   { as: 'Tourn',        foreignKey: 'tourn' });
 db.entry.belongsTo(db.school,  { as: 'School',       foreignKey: 'school' });
@@ -335,13 +335,20 @@ db.entry.belongsTo(db.event,   { as: 'Event',        foreignKey: 'event' });
 db.entry.belongsTo(db.person,  { as: 'RegisteredBy', foreignKey: 'registered_by' });
 
 db.entry.belongsToMany(db.student , { as: 'Students' , foreignKey: 'entry' , through: 'entry_students' });
-db.entry.belongsToMany(db.panel   , { as: 'Sections' , foreignKey: 'entry' , through: 'ballot' });
 
-db.judge.hasMany(db.fine,          { as: 'Fines',    foreignKey: 'judge' });
-db.judge.hasMany(db.ballot,        { as: 'Ballots',  foreignKey: 'judge' });
-db.judge.hasMany(db.rating,        { as: 'Ratings',  foreignKey: 'judge' });
-db.judge.hasMany(db.strike,        { as: 'Strikes',  foreignKey: 'judge' });
-db.judge.hasMany(db.changeLog,           { as: 'ChangeLogs',     foreignKey: 'judge' });
+db.entry.belongsToMany(db.panel,   {
+	uniqueKey  : 'id',
+	as         : 'Panels',
+	foreignKey : 'entry',
+	otherKey   : 'panel',
+	through    : 'ballot',
+});
+
+db.judge.hasMany(db.fine      , { as: 'Fines'      , foreignKey: 'judge' });
+db.judge.hasMany(db.ballot    , { as: 'Ballots'    , foreignKey: 'judge' });
+db.judge.hasMany(db.rating    , { as: 'Ratings'    , foreignKey: 'judge' });
+db.judge.hasMany(db.strike    , { as: 'Strikes'    , foreignKey: 'judge' });
+db.judge.hasMany(db.changeLog , { as: 'ChangeLogs' , foreignKey: 'judge' });
 
 db.judge.belongsTo(db.school       , { as: 'School'        , foreignKey: 'school' });
 db.judge.belongsTo(db.category     , { as: 'Category'      , foreignKey: 'category' });
@@ -351,7 +358,14 @@ db.judge.belongsTo(db.chapterJudge , { as: 'ChapterJudge'  , foreignKey: 'chapte
 db.judge.belongsTo(db.person       , { as: 'Person'        , foreignKey: 'person' });
 db.judge.belongsTo(db.person       , { as: 'PersonRequest' , foreignKey: 'person_request' });
 
-db.judge.belongsToMany(db.panel , { as: 'Sections' , foreignKey: 'judge' , through: 'ballot' });
+db.judge.belongsToMany(db.panel,   {
+	uniqueKey  : 'id',
+	as         : 'Panels',
+	foreignKey : 'judge',
+	otherKey   : 'panel',
+	through    : 'ballot',
+});
+
 db.judge.belongsToMany(db.jpool , { as: 'JPools'   , foreignKey: 'judge' , through: 'jpool_judge' });
 
 db.judgeHire.belongsTo(db.person,   { as: 'Requestor', foreignKey: 'requestor' });
@@ -447,7 +461,9 @@ db.round.belongsTo(db.round     , { as: 'Runoff'    , foreignKey: 'runoff' });
 db.round.belongsToMany(db.rpool , { as: 'RoomPools' , foreignKey: 'round', through: 'rpool_round' });
 db.round.hasMany(db.panel       , { as: 'Panels'    , foreignKey: 'round' });
 
-db.panel.hasMany(db.ballot      , { as: 'Ballots'      , foreignKey: 'panel' });
+db.panel.hasMany(db.ballot,    {as: 'Ballots' , foreignKey: 'panel' });
+db.ballot.belongsTo(db.panel,  {as: 'Panel'   , foreignKey: 'panel' });
+
 db.panel.hasMany(db.changeLog   , { as: 'LogsOld'      , foreignKey: 'old_panel' });
 db.panel.hasMany(db.changeLog   , { as: 'LogsNew'      , foreignKey: 'new_panel' });
 db.panel.hasMany(db.studentVote , { as: 'StudentVotes' , foreignKey: 'panel' });
@@ -456,12 +472,10 @@ db.panel.belongsTo(db.round     , { as: 'Round'        , foreignKey: 'round' });
 
 db.ballot.belongsTo(db.entry  , { as: 'Entry'     , foreignKey: 'entry' });
 db.ballot.belongsTo(db.judge  , { as: 'Judge'     , foreignKey: 'judge' });
-db.ballot.belongsTo(db.panel  , { as: 'Section'   , foreignKey: 'panel' });
 db.ballot.belongsTo(db.person , { as: 'EnteredBy' , foreignKey: 'entered_by' });
 db.ballot.belongsTo(db.person , { as: 'StartedBy' , foreignKey: 'started_by' });
 db.ballot.belongsTo(db.person , { as: 'AuditedBy' , foreignKey: 'audited_by' });
-
-db.ballot.hasMany(db.score,    { as: 'Scores',  foreignKey: 'ballot' });
+db.ballot.hasMany(db.score    , { as: 'Scores'    , foreignKey: 'ballot' });
 
 db.score.belongsTo(db.ballot,  { as: 'Ballot',  foreignKey: 'ballot' });
 db.score.belongsTo(db.student, { as: 'Student', foreignKey: 'student' });
@@ -473,7 +487,7 @@ db.result.belongsTo(db.entry     , { as: 'Entry'        , foreignKey: 'entry' })
 db.result.belongsTo(db.student   , { as: 'Student'      , foreignKey: 'student' });
 db.result.belongsTo(db.school    , { as: 'School'       , foreignKey: 'school' });
 db.result.belongsTo(db.round     , { as: 'Round'        , foreignKey: 'round' });
-db.result.belongsTo(db.panel     , { as: 'Section'      , foreignKey: 'panel' });
+db.result.belongsTo(db.panel     , { as: 'Panel'        , foreignKey: 'panel' });
 db.result.hasMany(db.resultValue , { as: 'ResultValues' , foreignKey: 'result' });
 
 db.resultKey.belongsTo(db.resultSet , { as: 'ResultKey' , foreignKey: 'result_set' });
@@ -594,7 +608,7 @@ db.protocolSetting.belongsTo(db.protocol , { as: 'Protocol' , foreignKey : 'prot
 db.tournSetting.belongsTo(db.tourn       , { as: 'Tourn'    , foreignKey : 'tourn' });
 db.eventSetting.belongsTo(db.event       , { as: 'Event'    , foreignKey : 'event' });
 db.roundSetting.belongsTo(db.round       , { as: 'Round'    , foreignKey : 'round' });
-db.panelSetting.belongsTo(db.panel       , { as: 'Section'  , foreignKey : 'panel' });
+db.panelSetting.belongsTo(db.panel       , { as: 'Panel'    , foreignKey : 'panel' });
 db.schoolSetting.belongsTo(db.school     , { as: 'School'   , foreignKey : 'school' });
 db.chapterSetting.belongsTo(db.chapter   , { as: 'Chapter'  , foreignKey : 'chapter' });
 db.categorySetting.belongsTo(db.category , { as: 'Category' , foreignKey : 'category' });
@@ -725,7 +739,7 @@ db.setting = async (origin, settingTag, settingValue) => {
 
 		await db[setKey].update(
 			updateTo,
-			{ where: { [origin.table] : origin.id, tag: settingTag }, }
+			{ where: { [origin.table] : origin.id, tag: settingTag } }
 		);
 
 		return returnValue;

@@ -65,7 +65,6 @@ const auth = async (req) => {
 			}
 
 			return session;
-
 		}
 	}
 };

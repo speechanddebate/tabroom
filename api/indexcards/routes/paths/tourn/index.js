@@ -2,12 +2,14 @@
 // logged in user with access to the tournament in question.
 
 // Utility functions
-import tab from './tab';
 import data from './data';
 import register from './register';
+import section from './section';
+import tab from './tab';
 
 export default [
-	...tab,
 	...data,
 	...register,
+	...section,
+	...tab,
 ];
