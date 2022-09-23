@@ -2,6 +2,7 @@
 // round robins that have preset patterns in the global settings.
 
 // import { showDateTime } from '../../../helpers/common';
+import { writeRound } from './writeRound';
 
 export const sectionRobin = {
 	POST: async (req, res) => {
@@ -28,6 +29,7 @@ export const sectionRobin = {
 
 		const rounds = await db.round.findAll({
 			where: { event: division.id },
+			raw: true,
 		});
 
 		if (rounds.length !== rrPattern.rounds) {
@@ -56,67 +58,25 @@ export const sectionRobin = {
 
 		rounds.forEach( async (round) => {
 
-			// Clear the old sections if any
-			await db.panel.destroy({ where: { round: round.id } });
+			round.sections = [];
 
 			Object.keys(rrPattern[round.name]).forEach( async (letter) => {
 
-				const section = rrPattern[round.name][letter];
-				console.log(`Creating round ${round.name} section ${letter}`);
+				const template = rrPattern[round.name][letter];
+				const section = {};
 
-				if (section.b) {
-
-					const panel = await db.panel.create({
-						round   : round.id,
-						letter,
-						flight  : 1,
-						publish : 0,
-						room    : 0,
-						bye     : 1,
-					});
-
-					await db.ballot.create({
-						entry        : positions[section.b].entry,
-						judge        : 0,
-						panel        : panel.id,
-						side         : 1,
-						speakerorder : 0,
-						audit        : 1,
-					});
-
+				if (template.b) {
+					section.b = positions[template.b].entry;
 				} else {
-
-					if (!positions[section.j].judge) {
-						positions[section.j].judge = 0;
-					}
-
-					const panel = await db.panel.create({
-						round   : round.id,
-						letter,
-						flight  : 1,
-						publish : 0,
-						room    : 0,
-					});
-
-					await db.ballot.create({
-						entry        : positions[section.a].entry,
-						judge        : positions[section.j].judge,
-						side         : 1,
-						speakerorder : 0,
-						audit        : 0,
-						panel        : panel.id,
-					});
-
-					await db.ballot.create({
-						entry        : positions[section.n].entry,
-						judge        : positions[section.j].judge,
-						side         : 2,
-						speakerorder : 0,
-						audit        : 0,
-						panel        : panel.id,
-					});
+					section.j = positions[template.j].judge;
+					section.a = positions[template.a].entry;
+					section.n = positions[template.n].entry;
 				}
+				round.sections.push(section);
 			});
+
+			round.type = 'debate';
+			await writeRound(db, round);
 		});
 
 		res.status(200).json({ error: false, message: `${rounds.length} paired for the round robin`, refresh: true });
@@ -127,8 +87,6 @@ export const sectionPrelim = {
 	GET: async (req, res) => {
 		const db = req.db;
 		const round = await db.summon(db.round, req.params.round_id);
-
 		res.status(200).json(round);
-
 	},
 };

@@ -461,8 +461,8 @@ db.round.belongsTo(db.round     , { as: 'Runoff'    , foreignKey: 'runoff' });
 db.round.belongsToMany(db.rpool , { as: 'RoomPools' , foreignKey: 'round', through: 'rpool_round' });
 db.round.hasMany(db.panel       , { as: 'Panels'    , foreignKey: 'round' });
 
-db.panel.hasMany(db.ballot,    {as: 'Ballots' , foreignKey: 'panel' });
-db.ballot.belongsTo(db.panel,  {as: 'Panel'   , foreignKey: 'panel' });
+db.panel.hasMany(db.ballot   , { as: 'Ballots' , foreignKey: 'panel' });
+db.ballot.belongsTo(db.panel , { as: 'Panel'   , foreignKey: 'panel' });
 
 db.panel.hasMany(db.changeLog   , { as: 'LogsOld'      , foreignKey: 'old_panel' });
 db.panel.hasMany(db.changeLog   , { as: 'LogsNew'      , foreignKey: 'new_panel' });
@@ -471,7 +471,7 @@ db.panel.belongsTo(db.room      , { as: 'Room'         , foreignKey: 'room' });
 db.panel.belongsTo(db.round     , { as: 'Round'        , foreignKey: 'round' });
 
 db.ballot.belongsTo(db.entry  , { as: 'Entry'     , foreignKey: 'entry' });
-db.ballot.belongsTo(db.judge  , { as: 'Judge'     , foreignKey: 'judge' });
+db.ballot.belongsTo(db.judge  , { as: 'Judge'     , foreignKey: { name: 'judge', allowNull: false, defaultValue: 0 } } );
 db.ballot.belongsTo(db.person , { as: 'EnteredBy' , foreignKey: 'entered_by' });
 db.ballot.belongsTo(db.person , { as: 'StartedBy' , foreignKey: 'started_by' });
 db.ballot.belongsTo(db.person , { as: 'AuditedBy' , foreignKey: 'audited_by' });
