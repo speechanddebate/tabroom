@@ -7,13 +7,9 @@ export const writeRound = async (db, round) => {
 
 	if (round.type === 'debate') {
 
-		console.log('I am writing a debate');
-		console.log(round);
-
 		round.sections.forEach( async (section) => {
 
 			const judge = section.j || 0;
-
 			round.panels = [];
 
 			if (section.b) {
