@@ -13,7 +13,7 @@ describe('Data Access Helpers', () => {
 		test5: true,
 	};
 
-	let testDate =  new Date();
+	const testDate =  new Date();
 
 	beforeAll(async () => {
 		testTourn = await db.summon(db.tourn, 1);

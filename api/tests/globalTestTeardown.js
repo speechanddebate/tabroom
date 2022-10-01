@@ -13,7 +13,7 @@ const globalTestTeardown = async () => {
 
 	const testAdminSession = await db.session.findByPk(userData.testAdminSession.id);
 	await testAdminSession.destroy();
-	 await db.sequelize.query('delete from campus_log where person > 3 and person < 100');
+	await db.sequelize.query('delete from campus_log where person > 3 and person < 100');
 };
 
 export default globalTestTeardown;
