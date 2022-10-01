@@ -1,11 +1,11 @@
-// node --experimental-specifier-resolution=node -e 'import("./indexcards/controllers/share/generateTestEmails").then(m => m.init())' 10
+// node --experimental-specifier-resolution=node -e 'import("./indexcards/controllers/share/ext/generateTestEmails").then(m => m.init())' 10
 import fs from 'fs';
 import { randomPhrase } from '@speechanddebate/nsda-js-utils';
 import sendMail, { transporter } from './mail';
 import { debugLogger } from '../../../helpers/logger';
 
 const generateTestEmails = async (numberOfEmails = parseInt(process.argv[1]) || 10) => {
-	const buffer = fs.readFileSync('./indexcards/controllers/share/test.docx');
+	const buffer = fs.readFileSync('./indexcards/controllers/ext/share/test.docx');
 	const base64 = buffer.toString('base64');
 
 	const promises = [];
