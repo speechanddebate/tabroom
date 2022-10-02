@@ -3,7 +3,9 @@
 
 // Router controllers
 import { sectionRobin } from '../../../controllers/tourn/section/sectionRobin.js';
+import { panelCleanJudges } from '../../../controllers/tourn/section/cleanJudges';
 
 export default [
 	{ path : '/tourn/{tourn_id}/section/robin/{event_id}', module : sectionRobin },
+	{ path : '/tourn/{tourn_id}/section/judges/{panel_id}/clean', module : panelCleanJudges },
 ];

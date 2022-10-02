@@ -1,6 +1,5 @@
 const chapterCircuit = (sequelize, DataTypes) => {
 	return sequelize.define('chapterCircuit', {
-		table_name : 'chapter_circuit',
 		code: {
 			type: DataTypes.STRING(15),
 			allowNull: false,
@@ -11,6 +10,8 @@ const chapterCircuit = (sequelize, DataTypes) => {
 			allowNull: false,
 			defaultValue: '0',
 		},
+	},{
+		tableName : 'chapter_circuit',
 	});
 };
 

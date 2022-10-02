@@ -1,6 +1,5 @@
 const housingSlots = (sequelize, DataTypes) => {
 	return sequelize.define('housingSlots', {
-		table_name: 'housing_slots',
 		night: {
 			type: DataTypes.DATEONLY,
 			allowNull: false,
@@ -10,6 +9,8 @@ const housingSlots = (sequelize, DataTypes) => {
 			type: DataTypes.INTEGER(6),
 			allowNull: true,
 		},
+	},{
+		tableName: 'housing_slots',
 	});
 };
 

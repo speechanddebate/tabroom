@@ -1,6 +1,5 @@
 const resultValue = (sequelize, DataTypes) => {
 	return sequelize.define('resultValue', {
-		table_name: 'result_value',
 		value: {
 			type: DataTypes.TEXT('medium'),
 			allowNull: true,
@@ -9,6 +8,8 @@ const resultValue = (sequelize, DataTypes) => {
 			type: DataTypes.INTEGER(6),
 			allowNull: true,
 		},
+	},{
+		tableName: 'result_value',
 	});
 };
 

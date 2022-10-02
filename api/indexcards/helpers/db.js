@@ -1,7 +1,7 @@
 import { Sequelize, DataTypes } from 'sequelize';
 import fs from 'fs';
 import { join } from 'path';
-import { debugLogger } from './logger';
+import { errorLogger, debugLogger } from './logger';
 
 import config from '../../config/config';
 
@@ -334,7 +334,13 @@ db.entry.belongsTo(db.school,  { as: 'School',       foreignKey: 'school' });
 db.entry.belongsTo(db.event,   { as: 'Event',        foreignKey: 'event' });
 db.entry.belongsTo(db.person,  { as: 'RegisteredBy', foreignKey: 'registered_by' });
 
-db.entry.belongsToMany(db.student , { as: 'Students' , foreignKey: 'entry' , through: 'entry_students' });
+db.entry.belongsToMany(db.student,   {
+	uniqueKey  : 'id',
+	as         : 'Students',
+	foreignKey : 'entry',
+	otherKey   : 'student',
+	through    : 'entry_student',
+});
 
 db.entry.belongsToMany(db.panel,   {
 	uniqueKey  : 'id',
@@ -366,7 +372,13 @@ db.judge.belongsToMany(db.panel,   {
 	through    : 'ballot',
 });
 
-db.judge.belongsToMany(db.jpool , { as: 'JPools'   , foreignKey: 'judge' , through: 'jpool_judge' });
+db.judge.belongsToMany(db.jpool,   {
+	uniqueKey  : 'id',
+	as         : 'Pools',
+	foreignKey : 'judge',
+	otherKey   : 'jpool',
+	through    : 'jpool_judge',
+});
 
 db.judgeHire.belongsTo(db.person,   { as: 'Requestor', foreignKey: 'requestor' });
 db.judgeHire.belongsTo(db.judge,    { as: 'Judge',     foreignKey: 'judge' });
@@ -661,6 +673,11 @@ db.summon = async (dbTable, objectId) => {
 		objectId,
 		{ include : 'Settings' },
 	);
+
+	if (!dbObject) { 
+		errorLogger(`No ${dbTable} record found with key ${objectId}`);
+		return;
+	}
 
 	const dbData = dbObject.get({ plain: true });
 	dbData.table = dbTable.name;

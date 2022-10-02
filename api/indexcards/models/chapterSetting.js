@@ -1,6 +1,5 @@
 const chapterSetting = (sequelize, DataTypes) => {
 	return sequelize.define('chapterSetting', {
-		table_name : 'chapter_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
@@ -18,6 +17,8 @@ const chapterSetting = (sequelize, DataTypes) => {
 			type: DataTypes.DATE,
 			allowNull: true,
 		},
+	},{
+		tableName : 'chapter_setting',
 	});
 };
 

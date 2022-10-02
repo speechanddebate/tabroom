@@ -1,6 +1,5 @@
 const protocolSetting = (sequelize, DataTypes) => {
 	return sequelize.define('protocolSetting', {
-		table_name: 'tiebreak_set_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
@@ -18,6 +17,8 @@ const protocolSetting = (sequelize, DataTypes) => {
 			type: DataTypes.DATE,
 			allowNull: true,
 		},
+	},{
+		tableName: 'tiebreak_set_setting',
 	});
 };
 

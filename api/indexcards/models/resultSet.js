@@ -1,6 +1,5 @@
 const resultSet = (sequelize, DataTypes) => {
 	return sequelize.define('resultSet', {
-		table_name: 'result_set',
 		tag : {
 			type         : DataTypes.ENUM('entry', 'student', 'chapter'),
 			allowNull    : false,
@@ -29,6 +28,8 @@ const resultSet = (sequelize, DataTypes) => {
 			type: DataTypes.DATE,
 			allowNull: true,
 		},
+	},{
+		tableName: 'result_set',
 	});
 };
 

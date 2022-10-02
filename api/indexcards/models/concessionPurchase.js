@@ -1,6 +1,5 @@
 const concessionPurchase = (sequelize, DataTypes) => {
 	return sequelize.define('concessionPurchase', {
-		table_name : 'concession_purchase',
 		quantity: {
 			type: DataTypes.INTEGER(11),
 			allowNull: true,
@@ -13,6 +12,8 @@ const concessionPurchase = (sequelize, DataTypes) => {
 			type: DataTypes.BOOLEAN,
 			allowNull: true,
 		},
+	},{
+		tableName : 'concession_purchase',
 	});
 };
 

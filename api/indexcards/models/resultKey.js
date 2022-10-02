@@ -1,6 +1,5 @@
 const resultKey = (sequelize, DataTypes) => {
 	return sequelize.define('resultKey', {
-		table_name : 'result_key',
 		tag: {
 			type      : DataTypes.STRING(63),
 			allowNull : true,
@@ -19,6 +18,8 @@ const resultKey = (sequelize, DataTypes) => {
 			allowNull    : false,
 			defaultValue : '0',
 		},
+	},{
+		tableName : 'result_key',
 	});
 };
 
