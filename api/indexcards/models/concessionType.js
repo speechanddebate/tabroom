@@ -1,6 +1,5 @@
 const concessionType = (sequelize, DataTypes) => {
 	return sequelize.define('concessionType', {
-		table_name: 'concession_type',
 		name: {
 			type: DataTypes.STRING(31),
 			allowNull: true,
@@ -9,6 +8,8 @@ const concessionType = (sequelize, DataTypes) => {
 			type: DataTypes.TEXT,
 			allowNull: true,
 		},
+	},{
+		tableName: 'concession_type',
 	});
 };
 

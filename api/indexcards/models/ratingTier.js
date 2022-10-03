@@ -1,6 +1,5 @@
 const ratingTier = (sequelize, DataTypes) => {
 	return sequelize.define('ratingTier', {
-		table_name: 'rating_tier',
 		type : {
 			type: DataTypes.ENUM('mpj', 'coach'),
 			allowNull: true,
@@ -36,6 +35,8 @@ const ratingTier = (sequelize, DataTypes) => {
 			allowNull: false,
 			defaultValue: '0',
 		},
+	},{
+		table_name: 'ratingTier',
 	});
 };
 

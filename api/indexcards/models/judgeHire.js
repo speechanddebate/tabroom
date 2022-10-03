@@ -1,6 +1,5 @@
 const judgeHire = (sequelize, DataTypes) => {
 	return sequelize.define('judgeHire', {
-		table_name: 'judge_hire',
 		entries_requested: {
 			type: DataTypes.INTEGER(6),
 			allowNull: true,
@@ -21,6 +20,8 @@ const judgeHire = (sequelize, DataTypes) => {
 			type: DataTypes.DATE,
 			allowNull: true,
 		},
+	},{
+		tableName: 'judge_hire',
 	});
 };
 

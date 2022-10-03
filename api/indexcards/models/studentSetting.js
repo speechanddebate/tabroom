@@ -1,6 +1,5 @@
 const studentSetting = (sequelize, DataTypes) => {
 	return sequelize.define('studentSetting', {
-		table_name: 'student_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
@@ -17,6 +16,8 @@ const studentSetting = (sequelize, DataTypes) => {
 			type: DataTypes.DATE,
 			allowNull: true,
 		},
+	},{
+		tableName: 'student_setting',
 	});
 };
 

@@ -1,6 +1,5 @@
 const regionSetting = (sequelize, DataTypes) => {
 	return sequelize.define('regionSetting', {
-		table_name: 'region_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
@@ -17,6 +16,8 @@ const regionSetting = (sequelize, DataTypes) => {
 			type: DataTypes.DATE,
 			allowNull: true,
 		},
+	},{
+		tableName: 'region_setting',
 	});
 };
 

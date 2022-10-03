@@ -1,6 +1,5 @@
 const nsdaCategory = (sequelize, DataTypes) => {
 	return sequelize.define('nsdaCategory', {
-		table_name: 'nsda_category',
 		name: {
 			type: DataTypes.STRING(31),
 			allowNull: true,
@@ -18,6 +17,8 @@ const nsdaCategory = (sequelize, DataTypes) => {
 			allowNull: false,
 			defaultValue: '0',
 		},
+	},{
+		tableName: 'nsda_category',
 	});
 };
 

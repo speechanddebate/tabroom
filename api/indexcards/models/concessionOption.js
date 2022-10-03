@@ -1,6 +1,5 @@
 const concessionOption = (sequelize, DataTypes) => {
 	return sequelize.define('concessionOption', {
-		table_name : 'concession_option',
 		name: {
 			type: DataTypes.STRING(8),
 			allowNull: true,
@@ -13,6 +12,8 @@ const concessionOption = (sequelize, DataTypes) => {
 			type: DataTypes.BOOLEAN,
 			allowNull: true,
 		},
+	},{
+		tableName : 'concession_option',
 	});
 };
 

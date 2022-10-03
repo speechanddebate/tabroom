@@ -1,6 +1,5 @@
 const studentVote = (sequelize, DataTypes) => {
 	return sequelize.define('studentVote', {
-		table_name : 'student_vote',
 		tag: {
 			type         : DataTypes.ENUM('nominee', 'rank'),
 			allowNull    : false,
@@ -15,6 +14,8 @@ const studentVote = (sequelize, DataTypes) => {
 			type: DataTypes.DATE,
 			allowNull: false,
 		},
+	},{
+		tableName : 'student_vote',
 	});
 };
 

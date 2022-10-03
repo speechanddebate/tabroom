@@ -1,6 +1,5 @@
 const rpoolSetting = (sequelize, DataTypes) => {
 	return sequelize.define('rpoolSetting', {
-		table_name: 'rpool_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
@@ -17,6 +16,8 @@ const rpoolSetting = (sequelize, DataTypes) => {
 			type: DataTypes.DATE,
 			allowNull: true,
 		},
+	},{
+		tableName: 'rpoolSetting',
 	});
 };
 

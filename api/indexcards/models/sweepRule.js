@@ -1,6 +1,5 @@
 const sweepRule = (sequelize, DataTypes) => {
 	return sequelize.define('sweepRule', {
-		table_name: 'sweep_rule',
 		tag: {
 			type: DataTypes.STRING(31),
 			allowNull: false,
@@ -30,6 +29,8 @@ const sweepRule = (sequelize, DataTypes) => {
 			type: DataTypes.INTEGER(6),
 			allowNull: true,
 		},
+	},{
+		tableName: 'sweep_rule',
 	});
 };
 

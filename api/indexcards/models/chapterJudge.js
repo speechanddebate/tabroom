@@ -1,7 +1,5 @@
 const chapterJudge = (sequelize, DataTypes) => {
 	return sequelize.define('chapterJudge', {
-		table_name: 'chapter_judge',
-
 		first: {
 			type: DataTypes.STRING(127),
 			allowNull: false,
@@ -55,6 +53,8 @@ const chapterJudge = (sequelize, DataTypes) => {
 			type: DataTypes.INTEGER,
 			allowNull: true,
 		},
+	},{
+		tableName: 'chapter_judge',
 	});
 };
 

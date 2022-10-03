@@ -1,6 +1,5 @@
 const settingLabel = (sequelize, DataTypes) => {
 	return sequelize.define('settingLabel', {
-		table_name: 'setting_label',
 		lang: {
 			type: DataTypes.CHAR(2),
 			allowNull: false,
@@ -17,6 +16,8 @@ const settingLabel = (sequelize, DataTypes) => {
 			type: DataTypes.TEXT,
 			allowNull: true,
 		},
+	},{
+		tableName: 'setting_label',
 	});
 };
 

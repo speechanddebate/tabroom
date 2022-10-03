@@ -1,6 +1,5 @@
 const circuitSetting = (sequelize, DataTypes) => {
 	return sequelize.define('circuitSetting', {
-		table_name: 'circuit_setting',
 		tag: {
 			type: DataTypes.STRING(32),
 			allowNull: false,
