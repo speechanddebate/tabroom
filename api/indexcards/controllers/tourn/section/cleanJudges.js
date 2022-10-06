@@ -15,9 +15,11 @@ const getPanelData = async (db, panelId) => {
 			repeat_judges.value repeatJudges,
 			panel_judges.value panelJudges,
 			prefs.value prefs,
-			tab_ratings.value tabRatings
+			tab_ratings.value tabRatings,
+			timeslot.start start,
+			timeslot.end end
 
-		from (round, event, category)
+		from (round, event, category, timeslot)
 
 			left join category_setting tab_ratings 
 				on tab_ratings.category = category.id 
@@ -57,6 +59,7 @@ const getPanelData = async (db, panelId) => {
 		where round.id = :panel
 			and round.event = event.id
 			and event.category = category.id
+			and round.timeslot = timeslot.id
 	`, {
 		replacements: { panel: panelId },
 		type: db.sequelize.QueryTypes.SELECT,
@@ -73,7 +76,7 @@ const getPanelJudges = async (db, panel) => {
 	if (panel.jpool) {
 		judgeQuery = `
 			select
-				judge.id, judge.school school, region.id region, district.id district,
+				judge.id, judge.person, judge.school school, region.id region, district.id district,
 				tab_rating.value tab_rating, chapter.state state
 			from (judge, jpool_judge jpj)
 				left join school on judge.school = school.id
@@ -107,6 +110,39 @@ const getPanelJudges = async (db, panel) => {
 		replacements,
 		type: db.sequelize.QueryTypes.SELECT,
 	});
+};
+
+const filterBusy = async (db, panel, cleanJudges) => {
+	const busyJudges = await db.sequelize.query(`
+		select ballot.judge, judge.person
+		from ballot, panel, round, timeslot, judge
+		where timeslot.start < :end
+			and timeslot.end < :start
+			and timeslot.tourn = :tourn
+			and timeslot.id = round.timeslot
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and ballot.judge = judge.id
+		group by judge.id
+	`);
+
+	const iAmBusy = {};
+
+	busyJudges.forEach( (judge) => {
+		if (judge.person) { 
+			iAmBusy.people[judge.person] = true;
+		}
+		iAmBusy.judges[judge.judge] = true;
+	});
+
+	const stillCleanJudges = [];
+
+	cleanJudges.forEach( (judge) => {
+		if (!iAmBusy.judges[judge.id] && !(judge.person && iAmBusy.people[judge.person])) {
+			stillCleanJudges.push(judge);
+		}
+	});
+	return stillCleanJudges;
 };
 
 export const panelCleanJudges = {
