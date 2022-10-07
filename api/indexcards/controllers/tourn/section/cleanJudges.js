@@ -1,6 +1,28 @@
 // import { showDateTime } from '../../../helpers/common';
 
-const getPanelData = async (db, panelId) => {
+export const panelCleanJudges = {
+
+	GET: async (req, res) => {
+
+		const db = req.db;
+		const rawPanel = await db.summon(db.panel, req.params.panel_id);
+
+		// First get all the relevant information about the panel we are dealing with
+		rawPanel.Entries = await getPanelEntries(db, rawPanel);
+
+		// Trade out for an actually complete representation of the panel.
+		const panel = await getPanelData(db, rawPanel);
+
+		let cleanJudges = await getPanelJudges(db, panel);
+		cleanJudges = await filterBusy(db, panel, cleanJudges);
+		cleanJudges = await filterStrikes(db, panel, cleanJudges);
+		cleanJudges = await filterSchools(db, panel, cleanJudges);
+
+		res.status(200).json(cleanJudges);
+	},
+};
+
+const getPanelData = async (db, rawPanel) => {
 
 	const [[settings]] = await db.sequelize.query(`
 		select
@@ -61,11 +83,68 @@ const getPanelData = async (db, panelId) => {
 			and event.category = category.id
 			and round.timeslot = timeslot.id
 	`, {
-		replacements: { panel: panelId },
+		replacements: { panel: rawPanel.id },
 		type: db.sequelize.QueryTypes.SELECT,
 	});
 
-	return settings;
+	const panel = { ...rawPanel, ...settings };
+	panel.EntrySchools = {};
+	panel.EntryRegions = {};
+	panel.EntryDistricts = {};
+	panel.EntryStates = {};
+	panel.Entries = {};
+
+	rawPanel.Entries.forEach( (entry) => {
+
+		panel.Entries[entry.id] = entry;
+
+		if (entry.school) {
+			panel.EntrySchools[entry.school] = true;
+		}
+		if (entry.hybrid) {
+			panel.EntrySchools[entry.hybrid] = true;
+		}
+		if (entry.region) {
+			panel.EntryRegions[entry.region] = true;
+		}
+		if (entry.district) {
+			panel.EntryDistricts[entry.district] = true;
+		}
+		if (entry.state) {
+			panel.EntryStates[entry.state] = true;
+		}
+	});
+
+	return panel;
+};
+
+const getPanelEntries = async (db, panel) => {
+
+	const entryQuery = `
+		select
+			entry.id,
+			entry.school,
+			region.id region,
+			district.id district,
+			chapter.state state,
+			hybrid.school hybrid
+		from (ballot, entry)
+
+			left join school on entry.school = school.id
+			left join region on school.region = region.id
+			left join district on school.district = district.id
+			left join chapter on school.chapter = chapter.state
+			left join strike hybrid on hybrid.type = 'hybrid' and hybrid.entry = entry.id
+
+		where ballot.panel = :panelId
+			and ballot.entry = entry.id
+			and entry.active = 1
+	`;
+
+	return db.sequelize.query(entryQuery, {
+		replacements: { panelId: panel.id },
+		type: db.sequelize.QueryTypes.SELECT,
+	});
 };
 
 const getPanelJudges = async (db, panel) => {
@@ -77,13 +156,14 @@ const getPanelJudges = async (db, panel) => {
 		judgeQuery = `
 			select
 				judge.id, judge.person, judge.school school, region.id region, district.id district,
-				tab_rating.value tab_rating, chapter.state state
+				tab_rating.value tab_rating, chapter.state state, neutral.value value
 			from (judge, jpool_judge jpj)
 				left join school on judge.school = school.id
 				left join region on school.region = region.id
 				left join district on school.district = district.id
 				left join chapter on school.chapter = chapter.id
 				left join judge_setting tab_rating on tab_rating.tag = 'tab_rating' and tab_rating.judge = judge.id
+				left join judge_setting neutral on neutral.tag = 'neutral' and neutral.judge = judge.id
 			where judge.id = jpj.judge
 				and jpj.jpool = :jpool
 				and judge.active = 1
@@ -93,13 +173,14 @@ const getPanelJudges = async (db, panel) => {
 		judgeQuery = `
 			select
 				judge.id, judge.school school, region.id region, district.id district,
-				tab_rating.value tab_rating, chapter.state state
+				tab_rating.value tab_rating, chapter.state state, neutral.value value
 			from (judge)
 				left join school on judge.school = school.id
 				left join region on school.region = region.id
 				left join district on school.district = district.id
 				left join chapter on school.chapter = chapter.id
 				left join judge_setting tab_rating on tab_rating.tag = 'tab_rating' and tab_rating.judge = judge.id
+				left join judge_setting neutral on neutral.tag = 'neutral' and neutral.judge = judge.id
 			where judge.active = 1
 				AND (judge.category = :category OR judge.alt_category = :category)
 		`;
@@ -129,7 +210,7 @@ const filterBusy = async (db, panel, cleanJudges) => {
 	const iAmBusy = {};
 
 	busyJudges.forEach( (judge) => {
-		if (judge.person) { 
+		if (judge.person) {
 			iAmBusy.people[judge.person] = true;
 		}
 		iAmBusy.judges[judge.judge] = true;
@@ -145,25 +226,101 @@ const filterBusy = async (db, panel, cleanJudges) => {
 	return stillCleanJudges;
 };
 
-export const panelCleanJudges = {
+const filterStrikes = async (db, panel, cleanJudges) => {
 
-	GET: async (req, res) => {
+	const judgeStrikes = await db.sequelize.query(`
+		select strike.*
+		from strike, judge, category
+		where category.tourn = ?
+			and category.id = judge.category
+			and judge.active = 1
+			and judge.strike = strike.id
+	`);
 
-		const db = req.db;
-		const panel = await db.summon(db.panel, req.params.panel_id);
+	const struckJudges = {};
 
-		// First get all the relevant information about the panel we are dealing with
-		panel.Settings = await getPanelData(db, req.params.panel_id);
-		let cleanJudges = await getPanelJudges(db, panel);
+	judgeStrikes.forEach( (strike) => {
 
-		cleanJudges = await filterBusy(db, panel, cleanJudges);
-		cleanJudges = await filterStrikes(db, panel, cleanJudges);
-		cleanJudges = await filterSchools(db, panel, cleanJudges);
+		if (strike.type === 'time') {
 
-		res.status(200).json(cleanJudges);
-	},
+			// OK if the strike ends before I start, or starts after I end
+			if (panel.start > strike.end
+				|| panel.end < strike.start
+			) {
+				return;
+			}
+
+		} else if (strike.type === 'departure') {
+
+			// OK if the round is over before the departure time.
+			if (panel.end < strike.start) {
+				return;
+			}
+
+		} else if (strike.type === 'elim') {
+
+			// Elim-only reserved judge.  OK if we're in elims or not this event.
+			if ( panel.event != strike.event
+				|| panel.roundType === 'elim'
+				|| panel.roundType === 'final'
+				|| panel.roundType === 'runoff'
+			) {
+				return;
+			}
+		} else if (strike.type === 'event') {
+
+			// OK if it's not this event
+			if (panel.event != strike.event) {
+				return;
+			}
+
+		} else if (strike.type === 'school') {
+
+			// That school is not present in the section
+			if (!panel.EntrySchools[strike.school]) {
+				return;
+			}
+
+		} else if (strike.type === 'region') {
+
+			// That school is not present in the section
+			if (!panel.EntrySchools[strike.school]) {
+				return;
+			}
+
+		} else if (strike.type === 'state') {
+
+			if (!panel.EntryStates[strike.state]) {
+				return;
+			}
+
+		} else if (strike.type === 'district') {
+
+			if (!panel.EntryDistricts[strike.district]) {
+				return;
+			}
+
+		} else if (strike.type === 'entry') {
+
+			if (!panel.Entries[strike.entry]) {
+				return;
+			}
+		}
+		struckJudges[strike.judge] = true;
+	});
+
+	const stillCleanJudges = [];
+
+	cleanJudges.forEach( (judge) => {
+
+		if (struckJudges[judge.id]) {
+			return;
+		}
+		stillCleanJudges.push(judge);
+	});
+
+	return stillCleanJudges;
 };
-
 
 export const roundCleanJudges = {
 	GET: async (req, res) => {
@@ -171,23 +328,6 @@ export const roundCleanJudges = {
 		const db = req.db;
 
 		const panel = await db.summon(db.event, req.params.panel_id);
-
-		const settings = await db.query(`
-			select
-			round.id round, round.type roundType,
-			event.id event, event.type eventType,
-			category.id category,
-			jpool.id jpool
-
-			from (round, event, category)
-
-				left join jpool_round jpr on jpr.round = round.id
-				left join jpool on jpr.jpool = jpool.id
-				
-			where round.id = ${panel.round}
-				and round.event = event.id
-				and event.category = category.id
-		`);
 
 		res.status(200).json(settings);
 	},
