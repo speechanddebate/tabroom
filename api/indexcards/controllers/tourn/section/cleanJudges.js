@@ -5,37 +5,45 @@ export const panelCleanJudges = {
 	GET: async (req, res) => {
 
 		const db = req.db;
-		const rawPanel = await db.summon(db.panel, req.params.panel_id);
+		const panel = await db.summon(db.panel, req.params.panel_id);
 
-		// First get all the relevant information about the panel we are dealing with
-		rawPanel.Entries = await getPanelEntries(db, rawPanel);
+		// Pull settings and everything else we need about this round
+		panel.round = await getRoundData(db, panel.round);
 
-		// Trade out for an actually complete representation of the panel.
-		const panel = await getPanelData(db, rawPanel);
+		// Get the information and relevant data about the entries in my panel
+		panel.entries = await getPanelEntries(db, panel);
 
-		let cleanJudges = await getPanelJudges(db, panel);
-		cleanJudges = await filterBusy(db, panel, cleanJudges);
-		cleanJudges = await filterStrikes(db, panel, cleanJudges);
-		cleanJudges = await filterSchools(db, panel, cleanJudges);
+		// Pull the judges who are available to judge this round timewise
+		const judges = await roundAvailableJudges(db, round);
+
+		// Pull the entry constraints against juges
+		const entryConflicts = await roundEntryConflicts(db, panel.round);
 
 		res.status(200).json(cleanJudges);
 	},
 };
 
-const getPanelData = async (db, rawPanel) => {
+const getRoundData = async (db, roundId) => {
 
-	const [[settings]] = await db.sequelize.query(`
+	const [settings] = await db.sequelize.query(`
 		select
-			round.id round, round.type roundType,
+			round.id round, round.type type, round.timeslot timeslot,
 			event.id event, event.type eventType,
 			category.id category,
 			jpool.id jpool,
 			neutrals.value neutrals,
-			auto_conflict_hires.value autoConflictHires,
-			no_first_years.value noFirstYears,
-			conflict_judges.value conflictJudges,
-			repeat_judges.value repeatJudges,
-			panel_judges.value panelJudges,
+			auto_conflict_hires.value auto_conflict_hires,
+			no_first_years.value no_first_years,
+			allow_school_panels.value allow_school_panels,
+			allow_region_panels.value allow_region_panels,
+			region_judge_forbid.value region_judge_forbid,
+			conflict_dioregion_judges.value conflict_dioregion_judges,
+			allow_repeat_judging.value allow_repeat_judging,
+			allow_repeat_elims.value allow_repeat_elims,
+			allow_repeat_prelim_side.value allow_repeat_prelim_side,
+			disallow_repeat_drop.value disallow_repeat_drop,
+			online_mode.value online_mode,
+			dumb_half_async_thing.value dumb_async,
 			prefs.value prefs,
 			tab_ratings.value tabRatings,
 			timeslot.start start,
@@ -58,64 +66,72 @@ const getPanelData = async (db, rawPanel) => {
 			left join category_setting auto_conflict_hires 
 				on auto_conflict_hires.category = category.id 
 				and auto_conflict_hires.tag = "auto_conflict_hires"
+				
+			left join category_setting allow_school_panels 
+				on allow_school_panels.category = category.id 
+				and allow_school_panels.tag = "allow_school_panels"
+
+			left join category_setting allow_region_panels 
+				on allow_region_panels.category = category.id 
+				and allow_region_panels.tag = "allow_region_panels"
 
 			left join event_setting no_first_years
 				on no_first_years.event = event.id
 				and no_first_years.tag = "no_first_years"
-				
-			left join event_setting conflict_judges
-				on conflict_judges.event = event.id
-				and conflict_judges.tag = "conflict_judges"
-				
-			left join event_setting repeat_judges
-				on repeat_judges.event = event.id
-				and repeat_judges.tag = "repeat_judges"
-				
-			left join event_setting panel_judges
-				on panel_judges.event = event.id
-				and panel_judges.tag = "panel_judges"
+
+			left join event_setting region_judge_forbid
+				on region_judge_forbid.event = event.id
+				and region_judge_forbid.tag = "region_judge_forbid"
+
+			left join event_setting conflict_dioregion_judges
+				on conflict_dioregion_judges.event = event.id
+				and conflict_dioregion_judges.tag = "conflict_dioregion_judges"
+
+			left join event_setting allow_repeat_judging
+				on allow_repeat_judging.event = event.id
+				and allow_repeat_judging.tag = "allow_repeat_judging"
+
+			left join event_setting allow_repeat_elims
+				on allow_repeat_elims.event = event.id
+				and allow_repeat_elims.tag = "allow_repeat_elims"
+
+			left join event_setting allow_repeat_prelim_side
+				on allow_repeat_prelim_side.event = event.id
+				and allow_repeat_prelim_side.tag = "allow_repeat_prelim_side"
+
+			left join event_setting disallow_repeat_drop
+				on disallow_repeat_drop.event = event.id
+				and disallow_repeat_drop.tag = "disallow_repeat_drop"
+
+			left join event_setting online_mode
+				on online_mode.event = event.id
+				and online_mode.tag = "online_mode"
+
+			left join event_setting dumb_half_async_thing
+				on dumb_half_async_thing.event = event.id
+				and dumb_half_async_thing.tag = "dumb_half_async_thing"
 
 			left join jpool_round jpr on jpr.round = round.id
 			left join jpool on jpr.jpool = jpool.id
 			
-		where round.id = :panel
+		where round.id = :roundId
 			and round.event = event.id
 			and event.category = category.id
 			and round.timeslot = timeslot.id
 	`, {
-		replacements: { panel: rawPanel.id },
+		replacements: { roundId },
 		type: db.sequelize.QueryTypes.SELECT,
 	});
 
-	const panel = { ...rawPanel, ...settings };
-	panel.EntrySchools = {};
-	panel.EntryRegions = {};
-	panel.EntryDistricts = {};
-	panel.EntryStates = {};
-	panel.Entries = {};
+	const roundData = { id: roundId, ...settings };
 
-	rawPanel.Entries.forEach( (entry) => {
+	if (roundData.type === 'final' || roundData.type === 'runoff') {
+		roundData.type = 'elim';
+	} else {
+		roundData.type = 'prelim';
+	}
 
-		panel.Entries[entry.id] = entry;
-
-		if (entry.school) {
-			panel.EntrySchools[entry.school] = true;
-		}
-		if (entry.hybrid) {
-			panel.EntrySchools[entry.hybrid] = true;
-		}
-		if (entry.region) {
-			panel.EntryRegions[entry.region] = true;
-		}
-		if (entry.district) {
-			panel.EntryDistricts[entry.district] = true;
-		}
-		if (entry.state) {
-			panel.EntryStates[entry.state] = true;
-		}
-	});
-
-	return panel;
+	return roundData;
 };
 
 const getPanelEntries = async (db, panel) => {
@@ -127,7 +143,8 @@ const getPanelEntries = async (db, panel) => {
 			region.id region,
 			district.id district,
 			chapter.state state,
-			hybrid.school hybrid
+			hybrid.school hybrid,
+			ballot.side side
 		from (ballot, entry)
 
 			left join school on entry.school = school.id
@@ -141,40 +158,86 @@ const getPanelEntries = async (db, panel) => {
 			and entry.active = 1
 	`;
 
-	return db.sequelize.query(entryQuery, {
+	const [[rawEntries]] = await db.sequelize.query(entryQuery, {
 		replacements: { panelId: panel.id },
 		type: db.sequelize.QueryTypes.SELECT,
 	});
+
+	const entries = {};
+
+	rawEntries.forEach(  (entry) => {
+
+		entries.Entries[entry.id] = entry;
+
+		if (entry.school) {
+			entries.EntrySchools[entry.school] = true;
+		}
+		if (entry.hybrid) {
+			entries.EntrySchools[entry.hybrid] = true;
+		}
+		if (entry.region) {
+			entries.EntryRegions[entry.region] = true;
+		}
+		if (entry.district) {
+			entries.EntryDistricts[entry.district] = true;
+		}
+		if (entry.state) {
+			entries.EntryStates[entry.state] = true;
+		}
+	});
+
+	return entries;
 };
 
-const getPanelJudges = async (db, panel) => {
+export const getRoundJudges =  {
+	GET: async (req, res) => {
+		const round = await getRoundData(req.db, req.params.round_id);
+		const availableJudges = await roundAvailableJudges(req.db, round);
+		res.status(200).json(availableJudges);
+	},
+};
 
-	let judgeQuery = '';
-	const replacements = {};
+const roundAvailableJudges = async (db, round) => {
 
-	if (panel.jpool) {
-		judgeQuery = `
-			select
-				judge.id, judge.person, judge.school school, region.id region, district.id district,
-				tab_rating.value tab_rating, chapter.state state, neutral.value value
-			from (judge, jpool_judge jpj)
+	// Returns a list of judges who can judge this round, filtering out any
+	// judge currently judging a non-async round, with a time constraint, or
+	// those blocked against the event.
+
+	// This should be the only time I actually resort to the adaptive sql
+	// nonsense approach that the predecessor of this code did most foully, but
+	// in this case it truly is the most efficient way to do things, both in
+	// terms of code density and execution speed. I'm sorry.  I really am.
+	// -- CLP
+
+	let judgeQuery = `
+		select
+			judge.id, judge.first, judge.middle, judge.last, judge.code,
+			judge.person, judge.school school, region.id region, district.id district,
+			tab_rating.value tab_rating, chapter.state state, neutral.value neutral
+	`;
+
+	if (round.jpool) {
+		// Pull judges from the judge pools linked to this round
+		judgeQuery = ` ${judgeQuery}
+			from (judge, jpool_judge jpj, jpool_round jpr, round, timeslot)
 				left join school on judge.school = school.id
 				left join region on school.region = region.id
 				left join district on school.district = district.id
 				left join chapter on school.chapter = chapter.id
 				left join judge_setting tab_rating on tab_rating.tag = 'tab_rating' and tab_rating.judge = judge.id
 				left join judge_setting neutral on neutral.tag = 'neutral' and neutral.judge = judge.id
-			where judge.id = jpj.judge
-				and jpj.jpool = :jpool
+			where jpr.round = :roundId
+				and jpr.jpool = jpj.jpool
+				and jpj.judge = judge.id
 				and judge.active = 1
+				and jpr.round = round.id
+				and round.timeslot = timeslot.id
 		`;
-		replacements.jpool = panel.jpool;
 	} else {
-		judgeQuery = `
-			select
-				judge.id, judge.school school, region.id region, district.id district,
-				tab_rating.value tab_rating, chapter.state state, neutral.value value
-			from (judge)
+
+		// Pull judges from the judge category linked to this round
+		judgeQuery = ` ${judgeQuery}
+			from (judge, round, event, timeslot)
 				left join school on judge.school = school.id
 				left join region on school.region = region.id
 				left join district on school.district = district.id
@@ -182,153 +245,183 @@ const getPanelJudges = async (db, panel) => {
 				left join judge_setting tab_rating on tab_rating.tag = 'tab_rating' and tab_rating.judge = judge.id
 				left join judge_setting neutral on neutral.tag = 'neutral' and neutral.judge = judge.id
 			where judge.active = 1
-				AND (judge.category = :category OR judge.alt_category = :category)
+				AND (judge.category = event.category OR judge.alt_category = event.category)
+				and event.id = round.event
+				AND round.id = :roundId
+				and round.timeslot = timeslot.id
 		`;
-		replacements.category = panel.category;
 	}
 
-	return db.sequelize.query(judgeQuery, {
-		replacements,
+	// No event constraints please.
+	judgeQuery = ` ${judgeQuery}
+		and not exists (
+			select evs.id
+				from strike evs
+			where evs.event = round.event
+				and evs.judge = judge.id
+				and evs.type = 'event'
+		) `;
+
+	// No elim constrained judges if we're not an elim.
+	if (round.type == 'prelim') {
+		judgeQuery = ` ${judgeQuery}
+			and not exists (
+				select els.id
+					from strike els
+				where els.event = round.event
+					and els.type = 'elim'
+					and els.judge = judge.id
+			) `;
+	}
+
+	// No FYOs if we don't allow them
+	if (round.no_first_years) {
+		judgeQuery = ` ${judgeQuery}
+			and not exists (
+				select first_year.id
+				from judge_setting first_year 
+				where first_year.tag = 'first_year' 
+				and first_year.judge = judge.id
+			) `;
+	}
+
+	if (round.online_mode !== 'async') {
+		// No time constraints that cover the present
+		judgeQuery = ` ${judgeQuery}
+			and not exists (
+				select strike.id
+					from strike
+				where strike.type IN ('time', 'departure')
+					and strike.start < timeslot.end
+					and strike.end > timeslot.start
+					and strike.judge = judge.id
+			)
+		`;
+	}
+
+	const initialJudges = await db.sequelize.query(judgeQuery, {
+		replacements: { roundId: round.id },
 		type: db.sequelize.QueryTypes.SELECT,
 	});
-};
 
-const filterBusy = async (db, panel, cleanJudges) => {
-	const busyJudges = await db.sequelize.query(`
-		select ballot.judge, judge.person
-		from ballot, panel, round, timeslot, judge
-		where timeslot.start < :end
-			and timeslot.end < :start
-			and timeslot.tourn = :tourn
-			and timeslot.id = round.timeslot
-			and round.id = panel.round
-			and panel.id = ballot.panel
-			and ballot.judge = judge.id
-		group by judge.id
-	`);
+	let busyQuery = `
+		select
+			judge.id, judge.person
+		from judge, ballot, panel, round, timeslot, timeslot t2
 
-	const iAmBusy = {};
+			where judge.id = ballot.judge
+				and ballot.panel = panel.id
+				and panel.round = round.id
+				and round.timeslot = timeslot.id
+				and timeslot.tourn = t2.tourn
+				and t2.id = :timeslotId
+				and not exists (
+					select es.id
+					from event_setting es
+					where es.event = round.event
+					and es.tag = 'online_mode'
+					and es.value = 'async'
+				)
+	`;
 
-	busyJudges.forEach( (judge) => {
-		if (judge.person) {
-			iAmBusy.people[judge.person] = true;
-		}
-		iAmBusy.judges[judge.judge] = true;
+	if (round.no_back_to_back) {
+		busyQuery = ` ${busyQuery}
+			and t2.start <= timeslot.end
+			and t2.end >= timeslot.start
+		`;
+	} else {
+		busyQuery = ` ${busyQuery}
+			and t2.start < timeslot.end
+			and t2.end > timeslot.start
+		`;
+	}
+
+	const busyFolks = await db.sequelize.query(busyQuery, {
+		replacements: { timeslotId: round.timeslot },
+		type: db.sequelize.QueryTypes.SELECT,
 	});
 
-	const stillCleanJudges = [];
+	console.log(busyFolks);
 
-	cleanJudges.forEach( (judge) => {
-		if (!iAmBusy.judges[judge.id] && !(judge.person && iAmBusy.people[judge.person])) {
-			stillCleanJudges.push(judge);
+	const busyJudges = {};
+	const busyPeople = {};
+
+	busyFolks.forEach( (folk) => {
+		if (folk.judge) {
+			busyJudges[folk.judge] = true;
+		}
+		if (folk.person) {
+			busyPeople[folk.person] = true;
 		}
 	});
-	return stillCleanJudges;
-};
 
-const filterStrikes = async (db, panel, cleanJudges) => {
+	const judges = [];
 
-	const judgeStrikes = await db.sequelize.query(`
-		select strike.*
-		from strike, judge, category
-		where category.tourn = ?
-			and category.id = judge.category
-			and judge.active = 1
-			and judge.strike = strike.id
-	`);
-
-	const struckJudges = {};
-
-	judgeStrikes.forEach( (strike) => {
-
-		if (strike.type === 'time') {
-
-			// OK if the strike ends before I start, or starts after I end
-			if (panel.start > strike.end
-				|| panel.end < strike.start
-			) {
-				return;
-			}
-
-		} else if (strike.type === 'departure') {
-
-			// OK if the round is over before the departure time.
-			if (panel.end < strike.start) {
-				return;
-			}
-
-		} else if (strike.type === 'elim') {
-
-			// Elim-only reserved judge.  OK if we're in elims or not this event.
-			if ( panel.event != strike.event
-				|| panel.roundType === 'elim'
-				|| panel.roundType === 'final'
-				|| panel.roundType === 'runoff'
-			) {
-				return;
-			}
-		} else if (strike.type === 'event') {
-
-			// OK if it's not this event
-			if (panel.event != strike.event) {
-				return;
-			}
-
-		} else if (strike.type === 'school') {
-
-			// That school is not present in the section
-			if (!panel.EntrySchools[strike.school]) {
-				return;
-			}
-
-		} else if (strike.type === 'region') {
-
-			// That school is not present in the section
-			if (!panel.EntrySchools[strike.school]) {
-				return;
-			}
-
-		} else if (strike.type === 'state') {
-
-			if (!panel.EntryStates[strike.state]) {
-				return;
-			}
-
-		} else if (strike.type === 'district') {
-
-			if (!panel.EntryDistricts[strike.district]) {
-				return;
-			}
-
-		} else if (strike.type === 'entry') {
-
-			if (!panel.Entries[strike.entry]) {
-				return;
-			}
-		}
-		struckJudges[strike.judge] = true;
-	});
-
-	const stillCleanJudges = [];
-
-	cleanJudges.forEach( (judge) => {
-
-		if (struckJudges[judge.id]) {
+	initialJudges.forEach( (judge) => {
+		if (busyJudges[judge.id]) { 
 			return;
 		}
-		stillCleanJudges.push(judge);
+		if (judge.person && busyPeople[judge.person]) { 
+			return;
+		}
+		judges.push(judge);
 	});
 
-	return stillCleanJudges;
+	return judges;
 };
 
-export const roundCleanJudges = {
-	GET: async (req, res) => {
-		console.log(req.params);
-		const db = req.db;
+const roundEntryConflicts = async (db, round) => {
 
-		const panel = await db.summon(db.event, req.params.panel_id);
+	const entryConflicts = {};
 
-		res.status(200).json(settings);
-	},
+	if (!round.allow_repeat_judging) {
+
+		const ballotConflicts = await db.sequelize.query(`
+			select
+				entry.id, ballot.judge, ballot.side, winloss.id winloss, winloss.value winner
+			from (entry, ballot, panel, round)
+				left join score winloss on winloss.tag = 'winloss' and winloss.ballot = ballot.id
+			where exists (
+					select b1.id
+					from ballot b1, panel p1
+					where b1.entry = entry.id
+					and b1.panel = p1.id
+					and p1.round = :roundId
+				)
+				and entry.id = ballot.entry
+				and ballot.panel = panel.id
+				and panel.round != :roundId
+				and panel.round = round.id
+		`, {
+			replacements: { roundId: round.id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		ballotConflicts.forEach( (ballot) => {
+			if (round.type === 'elim') {
+				if (round.allow_repeat_elims) {
+					if (!round.disallow_repeat_drop
+						|| ballot.winner
+					) {
+						// No conflict because either I won or it doesn't matter
+					}
+				}
+				entryConflicts[ballot.entry].conflict[ballot.judge] = true;
+			} else {
+				if (round.allow_repeat_prelim_side) {
+					entryConflicts[ballot.entry].side_conflict[ballot.judge] = ballot.side;
+				} else {
+					entryConflicts[ballot.entry].conflict[ballot.judge] = true;
+				}
+			}
+		});
+	}
+
+	if (!round.allow_judge_own) {
+
+		// Find out judges from my school or who are struck against my school.
+
+	}
+
+	return entryConflicts;
 };
