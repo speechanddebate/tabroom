@@ -228,6 +228,7 @@ const roundAvailableJudges = async (db, round) => {
 	let judgeQuery = `
 		select
 			judge.id, judge.first, judge.middle, judge.last, judge.code,
+			judge.hired, judge.obligation,
 			judge.person, judge.school school, region.id region, district.id district,
 			tab_rating.value tab_rating, chapter.state state, neutral.value neutral
 	`;
