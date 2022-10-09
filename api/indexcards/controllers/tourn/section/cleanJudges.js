@@ -14,12 +14,23 @@ export const panelCleanJudges = {
 		panel.entries = await getPanelEntries(db, panel);
 
 		// Pull the judges who are available to judge this round timewise
-		const judges = await roundAvailableJudges(db, round);
+		panel.round.judges = await roundAvailableJudges(db, panel.round);
 
 		// Pull the entry constraints against juges
 		const entryConflicts = await roundEntryConflicts(db, panel.round);
 
-		res.status(200).json(cleanJudges);
+		panel.entries.Entries.forEach( (entry) => {
+			if (entryConflicts[entry.id]) {
+				panel.round.judges = panel.round.judges.filter( (judge) => {
+					if (!entryConflicts[entry.id][judge.id]) {
+						return true;
+					}
+					return false;
+				});
+			}
+		});
+
+		res.status(200).json(panel.round.judges);
 	},
 };
 
@@ -51,28 +62,28 @@ const getRoundData = async (db, roundId) => {
 
 		from (round, event, category, timeslot)
 
-			left join category_setting tab_ratings 
-				on tab_ratings.category = category.id 
+			left join category_setting tab_ratings
+				on tab_ratings.category = category.id
 				and tab_ratings.tag = "tab_ratings"
-				
-			left join category_setting prefs 
-				on prefs.category = category.id 
+
+			left join category_setting prefs
+				on prefs.category = category.id
 				and prefs.tag = "prefs"
-				
-			left join category_setting neutrals 
-				on neutrals.category = category.id 
+
+			left join category_setting neutrals
+				on neutrals.category = category.id
 				and neutrals.tag = "neutrals"
 
-			left join category_setting auto_conflict_hires 
-				on auto_conflict_hires.category = category.id 
+			left join category_setting auto_conflict_hires
+				on auto_conflict_hires.category = category.id
 				and auto_conflict_hires.tag = "auto_conflict_hires"
-				
-			left join category_setting allow_school_panels 
-				on allow_school_panels.category = category.id 
+
+			left join category_setting allow_school_panels
+				on allow_school_panels.category = category.id
 				and allow_school_panels.tag = "allow_school_panels"
 
-			left join category_setting allow_region_panels 
-				on allow_region_panels.category = category.id 
+			left join category_setting allow_region_panels
+				on allow_region_panels.category = category.id
 				and allow_region_panels.tag = "allow_region_panels"
 
 			left join event_setting no_first_years
@@ -113,7 +124,7 @@ const getRoundData = async (db, roundId) => {
 
 			left join jpool_round jpr on jpr.round = round.id
 			left join jpool on jpr.jpool = jpool.id
-			
+
 		where round.id = :roundId
 			and round.event = event.id
 			and event.category = category.id
@@ -158,16 +169,21 @@ const getPanelEntries = async (db, panel) => {
 			and entry.active = 1
 	`;
 
-	const [[rawEntries]] = await db.sequelize.query(entryQuery, {
+	const rawEntries = await db.sequelize.query(entryQuery, {
 		replacements: { panelId: panel.id },
 		type: db.sequelize.QueryTypes.SELECT,
 	});
 
 	const entries = {};
+	entries.Entries = [];
+	entries.EntrySchools = {};
+	entries.EntryRegions = {};
+	entries.EntryDistricts = {};
+	entries.EntryStates = {};
 
 	rawEntries.forEach(  (entry) => {
 
-		entries.Entries[entry.id] = entry;
+		entries.Entries.push(entry);
 
 		if (entry.school) {
 			entries.EntrySchools[entry.school] = true;
@@ -263,7 +279,7 @@ const roundAvailableJudges = async (db, round) => {
 		) `;
 
 	// No elim constrained judges if we're not an elim.
-	if (round.type == 'prelim') {
+	if (round.type === 'prelim') {
 		judgeQuery = ` ${judgeQuery}
 			and not exists (
 				select els.id
@@ -279,8 +295,8 @@ const roundAvailableJudges = async (db, round) => {
 		judgeQuery = ` ${judgeQuery}
 			and not exists (
 				select first_year.id
-				from judge_setting first_year 
-				where first_year.tag = 'first_year' 
+				from judge_setting first_year
+				where first_year.tag = 'first_year'
 				and first_year.judge = judge.id
 			) `;
 	}
@@ -341,8 +357,6 @@ const roundAvailableJudges = async (db, round) => {
 		type: db.sequelize.QueryTypes.SELECT,
 	});
 
-	console.log(busyFolks);
-
 	const busyJudges = {};
 	const busyPeople = {};
 
@@ -358,10 +372,10 @@ const roundAvailableJudges = async (db, round) => {
 	const judges = [];
 
 	initialJudges.forEach( (judge) => {
-		if (busyJudges[judge.id]) { 
+		if (busyJudges[judge.id]) {
 			return;
 		}
-		if (judge.person && busyPeople[judge.person]) { 
+		if (judge.person && busyPeople[judge.person]) {
 			return;
 		}
 		judges.push(judge);
@@ -374,11 +388,73 @@ const roundEntryConflicts = async (db, round) => {
 
 	const entryConflicts = {};
 
+	const roundEntries = await db.sequelize.query(`
+		select
+			entry.id, school.id school, region.id region, district.id district, hybrid.school hybrid, ballot.side side
+		from (entry, ballot, panel)
+			left join school on entry.school = school.id
+			left join region on school.region = region.id
+			left join district on school.district = district.id
+			left join strike hybrid on hybrid.type = 'hybrid' and hybrid.entry = entry.id
+		where entry.id = ballot.entry
+			and ballot.panel = panel.id
+			and panel.round = :roundId
+	`, {
+		replacements: { roundId: round.id },
+		type: db.sequelize.QueryTypes.SELECT,
+	});
+
+	const entriesBy    = {};
+
+	entriesBy.school   = {};
+	entriesBy.region   = {};
+	entriesBy.district = {};
+	entriesBy.side     = {};
+
+	roundEntries.forEach( (entry) => {
+
+		if (!entryConflicts[entry.id]) {
+			entryConflicts[entry.id] = {};
+		}
+
+		if (entry.school) {
+			if (!entriesBy.school[entry.school]) {
+				entriesBy.school[entry.school] = [];
+			}
+			entriesBy.school[entry.school].push(entry);
+		}
+
+		if (entry.hybrid) {
+			if (!entriesBy.school[entry.hybrid]) {
+				entriesBy.school[entry.hybrid] = [];
+			}
+			entriesBy.school[entry.hybrid].push(entry);
+		}
+
+		if (entry.region) {
+			if (!entriesBy.region[entry.region]) {
+				entriesBy.region[entry.region] = [];
+			}
+			entriesBy.region[entry.region].push(entry);
+		}
+
+		if (entry.district) {
+			if (!entriesBy.district[entry.district]) {
+				entriesBy.district[entry.district] = [];
+			}
+			entriesBy.district[entry.district].push(entry);
+		}
+
+		if (entry.side) {
+			entriesBy.side[entry.id] = entry.side;
+		}
+	});
+
 	if (!round.allow_repeat_judging) {
 
 		const ballotConflicts = await db.sequelize.query(`
 			select
-				entry.id, ballot.judge, ballot.side, winloss.id winloss, winloss.value winner
+				entry.id entry, ballot.judge, ballot.side, winloss.id winloss, winloss.value winner
 			from (entry, ballot, panel, round)
 				left join score winloss on winloss.tag = 'winloss' and winloss.ballot = ballot.id
 			where exists (
@@ -392,27 +468,134 @@ const roundEntryConflicts = async (db, round) => {
 				and ballot.panel = panel.id
 				and panel.round != :roundId
 				and panel.round = round.id
+				and ballot.judge > 0
 		`, {
 			replacements: { roundId: round.id },
 			type: db.sequelize.QueryTypes.SELECT,
 		});
 
 		ballotConflicts.forEach( (ballot) => {
+
+			if (!entryConflicts[ballot.entry]) {
+				entryConflicts[ballot.entry] = [];
+			}
+
 			if (round.type === 'elim') {
 				if (round.allow_repeat_elims) {
 					if (!round.disallow_repeat_drop
 						|| ballot.winner
 					) {
 						// No conflict because either I won or it doesn't matter
+						return;
 					}
 				}
-				entryConflicts[ballot.entry].conflict[ballot.judge] = true;
+				entryConflicts[ballot.entry][ballot.judge] = true;
 			} else {
-				if (round.allow_repeat_prelim_side) {
-					entryConflicts[ballot.entry].side_conflict[ballot.judge] = ballot.side;
-				} else {
-					entryConflicts[ballot.entry].conflict[ballot.judge] = true;
+				if (round.allow_repeat_prelim_side && entriesBy.side[ballot.entry] === ballot.side) {
+					entryConflicts[ballot.entry][ballot.judge] = true;
+				} else if (!round.allow_repeat_prelim_side) {
+					entryConflicts[ballot.entry][ballot.judge] = true;
+
+					if (ballot.judge === 1790922) {
+						console.log(`Judge Northrop here constrainted against ${ballot.entry}`);
+					}
 				}
+			}
+		});
+	}
+
+	// Process any entry, school, region or district strikes against the judges available
+	let judgeStrikesQuery = `
+		select
+			judge.id judge, strike.type, strike.entry, strike.school, strike.district, strike.region
+	`;
+
+	if (round.jpool) {
+		// Pull judges from the judge pools linked to this round
+		judgeStrikesQuery = ` ${judgeStrikesQuery}
+			from (judge, jpool_judge jpj, jpool_round jpr, strike)
+			where judge.id = strike.judge
+				and jpj.judge = judge.id
+				and jpr.round = :roundId
+				and jpr.jpool = jpj.jpool
+				and judge.active = 1
+		`;
+	} else {
+		// Pull judges from the judge category linked to this round
+		judgeStrikesQuery = ` ${judgeStrikesQuery}
+			from (judge, strike, round, event)
+			where judge.id = strike.judge
+				and round.id = :roundId
+				and round.event = event.id
+				and event.category = judge.category
+				and judge.active = 1
+		`;
+	}
+
+	const judgeStrikes = await db.sequelize.query(
+		judgeStrikesQuery,{
+			replacements: { roundId: round.id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+	judgeStrikes.forEach( (strike) => {
+
+		if (strike.type === 'school') {
+			if (entriesBy.school[strike.school]) {
+				entriesBy.school[strike.school].forEach( (entry) => {
+					if (entryConflicts[entry]) {
+						entryConflicts[entry][strike.judge] = true;
+					}
+				});
+			}
+		} else if (strike.type === 'region') {
+			if (entriesBy.region[strike.region]) {
+				entriesBy.region[strike.region].forEach( (entry) => {
+					if (entryConflicts[entry]) {
+						entryConflicts[entry][strike.judge] = true;
+					}
+				});
+			}
+		} else if (strike.type === 'district') {
+
+			if (entriesBy.district[strike.district]) {
+				entriesBy.district[strike.district].forEach( (entry) => {
+					if (entryConflicts[entry]) {
+						entryConflicts[entry][strike.judge] = true;
+					}
+				});
+			}
+		} else if (strike.type === 'entry') {
+
+			if (entryConflicts[strike.entry]) {
+				entryConflicts[strike.entry][strike.judge] = true;
+			}
+		}
+	});
+
+	if (round.auto_conflict_hires) {
+
+		const judgeHires = await db.sequelize.query(`
+			select judge_hire.judge, judge_hire.school
+				from (judge_hire, school, entry, ballot, panel)
+			where panel.round = :roundId
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+				and entry.school = school.id
+				and school.id = judge_hire.school
+			group by judge_hire.id
+		`, {
+			replacements: { roundId: round.id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		judgeHires.forEach( (hire) => {
+			if (hire.school && entriesBy.school[hire.school]) {
+				entriesBy.school[hire.school].forEach( (entry) => {
+					if (entryConflicts[entry.id]) {
+						entryConflicts[entry.id][hire.judge] = true;
+					}
+				});
 			}
 		});
 	}
@@ -421,6 +604,25 @@ const roundEntryConflicts = async (db, round) => {
 
 		// Find out judges from my school or who are struck against my school.
 
+		round.judges.forEach( (judge) => {
+			if (judge.school && entriesBy.school[judge.school]) {
+				entriesBy.school[judge.school].forEach( (entry) => {
+					if (entryConflicts[entry.id]) {
+						entryConflicts[entry.id][judge.id] = true;
+					}
+				});
+			}
+
+			if (round.region_judge_forbid) {
+				if (judge.region && entriesBy.region[judge.region]) {
+					entriesBy.region[judge.region].forEach( (entry) => {
+						if (entryConflicts[entry.id]) {
+							entryConflicts[entry.id][judge.id] = true;
+						}
+					});
+				}
+			}
+		});
 	}
 
 	return entryConflicts;
