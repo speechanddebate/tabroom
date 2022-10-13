@@ -422,38 +422,27 @@ const roundJudgeConflicts = async (db, round) => {
 	roundEntries.forEach( (entry) => {
 
 		if (entry.school) {
-			if (!entriesBy.school[entry.school]) {
-				entriesBy.school[entry.school] = [];
-			}
-			entriesBy.school[entry.school].push(entry.id);
+			entriesBy.school[entry.school] = [entry.id, ...entriesBy.school[entry.school] ?? []];
 		}
 
 		if (entry.hybrid) {
-			if (!entriesBy.school[entry.hybrid]) {
-				entriesBy.school[entry.hybrid] = [];
-			}
-			entriesBy.school[entry.hybrid].push(entry.id);
+			entriesBy.school[entry.hybrid] = [entry.id, ...entriesBy.school[entry.hybrid] ?? []];
 		}
 
 		if (round.conflict_dioregion_judges && round.dioregions[entry.region]) {
-			if (!entriesBy.dioregion[round.dioregions[entry.region]]) {
-				entriesBy.dioregion[round.dioregions[entry.region]] = [];
-			}
-			entriesBy.dioregion[round.dioregions[entry.region]].push(entry.id);
+			entry.dioregion = round.dioregions[entry.region];
+			entriesBy.dioregion[entry.dioregion] = [
+				entry.id,
+				...entriesBy.dioregion[entry.dioregion] ?? [],
+			];
 		}
 
 		if (entry.region) {
-			if (!entriesBy.region[entry.region]) {
-				entriesBy.region[entry.region] = [];
-			}
-			entriesBy.region[entry.region].push(entry.id);
+			entriesBy.region[entry.region] = [entry.id, ...entriesBy.region[entry.region] ?? []];
 		}
 
 		if (entry.district) {
-			if (!entriesBy.district[entry.district]) {
-				entriesBy.district[entry.district] = [];
-			}
-			entriesBy.district[entry.district].push(entry.id);
+			entriesBy.district[entry.district] = [entry.id, ...entriesBy.district[entry.district] ?? []];
 		}
 
 		if (entry.side) {
@@ -499,7 +488,7 @@ const roundJudgeConflicts = async (db, round) => {
 						return;
 					}
 				}
-				judgeConflicts[ballot.judge].push(ballot.entry);
+				judgeConflicts[ballot.judge] = [ballot.entry, ...judgeConflicts[ballot.judge] ?? []];
 			} else {
 				if (round.allow_repeat_prelim_side && entriesBy.side[ballot.entry] === ballot.side) {
 					judgeConflicts[ballot.judge].push(ballot.entry);
@@ -551,16 +540,27 @@ const roundJudgeConflicts = async (db, round) => {
 		}
 
 		if (strike.type === 'school' && entriesBy.school[strike.school]) {
-			judgeConflicts[strike.judge].push(...entriesBy.school[strike.school]);
+			judgeConflicts[strike.judge] = [
+				...entriesBy.school[strike.school],
+				...judgeConflicts[strike.judge] ?? [],
+			];
 
 		} else if (strike.type === 'region' && entriesBy.region[strike.region]) {
-			judgeConflicts[strike.judge].push(...entriesBy.region[strike.region]);
+			judgeConflicts[strike.judge] = [
+				...entriesBy.region[strike.region],
+				...judgeConflicts[strike.judge] ?? [],
+			];
 
 		} else if (strike.type === 'district' && entriesBy.district[strike.district]) {
-			judgeConflicts[strike.judge].push(...entriesBy.district[strike.district]);
-
+			judgeConflicts[strike.judge] = [
+				...entriesBy.district[strike.district],
+				...judgeConflicts[strike.judge] ?? [],
+			];
 		} else if (strike.type === 'entry') {
-			judgeConflicts[strike.judge].push(strike.entry);
+			judgeConflicts[strike.judge] = [
+				strike.entry,
+				...judgeConflicts[strike.judge] ?? [],
+			];
 		}
 	});
 
@@ -586,7 +586,10 @@ const roundJudgeConflicts = async (db, round) => {
 			}
 
 			if (hire.school && entriesBy.school[hire.school]) {
-				judgeConflicts[hire.judge].push(...entriesBy.school[hire.school]);
+				judgeConflicts[hire.judge] = [
+					...entriesBy.school[hire.school],
+					...judgeConflicts[hire.judge] ?? [],
+				];
 			}
 		});
 	}
@@ -597,20 +600,25 @@ const roundJudgeConflicts = async (db, round) => {
 
 		round.judges.forEach( (judge) => {
 
-			if (!judgeConflicts[judge.id]) {
-				judgeConflicts[judge.id] = [];
-			}
-
 			if (judge.school && entriesBy.school[judge.school]) {
-				judgeConflicts[judge.id].push(...entriesBy.school[judge.school]);
+				judgeConflicts[judge.id] = [
+					...entriesBy.school[judge.school],
+					...judgeConflicts[judge.id] ?? [],
+				];
 			}
 
 			if (round.region_judge_forbid && judge.school && entriesBy.school[judge.school]) {
-				judgeConflicts[judge.id].push(...entriesBy.region[judge.region]);
+				judgeConflicts[judge.id] = [
+					...entriesBy.region[judge.region],
+					...judgeConflicts[judge.id] ?? [],
+				];
 			}
 
 			if (round.conflict_dioregion_judges && round.dioregions[judge.region]) {
-				judgeConflicts[judge.id].push(...entriesBy.dioregion[judge.dioregion]);
+				judgeConflicts[judge.id] = [
+					...entriesBy.dioregion[judge.dioregion],
+					...judgeConflicts[judge.id] ?? [],
+				];
 			}
 		});
 	}
