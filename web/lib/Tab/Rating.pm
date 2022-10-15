@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Rating->table('rating');
 Tab::Rating->columns(Primary => qw/id/);
 Tab::Rating->columns(Essential => qw/tourn school entry type rating_tier judge rating_subset ordinal percentile /);
-Tab::Rating->columns(Others => qw/entered timestamp/);
+Tab::Rating->columns(Others => qw/side entered timestamp/);
 
 Tab::Rating->has_a(tourn => 'Tab::Tourn');
 Tab::Rating->has_a(school => 'Tab::School');
