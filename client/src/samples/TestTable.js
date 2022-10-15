@@ -5,7 +5,7 @@ import {
 	createColumnHelper,
 } from '@tanstack/react-table';
 
-import Table from './Table';
+import Table from '../common/Table';
 
 const TestTable = () => {
 	const { name } = useParams();		// hook that delivers the parameter named param.
@@ -18,12 +18,12 @@ const TestTable = () => {
 
 	const data = [
 		{
-			firstName: 'tanner',
-			lastName: 'linsley',
-			age: 24,
-			visits: 100,
-			status: 'In Relationship',
-			progress: 50,
+			firstName : 'tanner',
+			lastName  : 'linsley',
+			age       : 24,
+			visits    : 100,
+			status    : 'In Relationship',
+			progress  : 50,
 		},
 		{
 			firstName: 'tandy',

@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { loadProfile } from './redux/ducks/profile';
+import { loadProfile } from '../redux/ducks/profile';
 
 export const DisplayUser = () => {
 	const profile = useSelector((state) => state.profile);

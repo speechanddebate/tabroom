@@ -4,10 +4,11 @@ import { Provider } from 'react-redux';
 import { createBrowserHistory } from 'history';
 
 import store from './redux/store';
-import ErrorBoundary from './ErrorBoundary';
-import Layout from './Layout';
-import TestTable from './TestTable';
-import TestForm from './TestForm';
+import ErrorBoundary from './common/ErrorBoundary';
+import Error from './common/Error';
+import Layout from './common/Layout';
+import TestTable from './samples/TestTable';
+import TestForm from './samples/TestForm';
 
 import './normalize.css';
 
@@ -22,7 +23,7 @@ const App = () => {
 						<Route exact path="/" element={<Layout><TestTable /><TestForm /></Layout>} />
 						<Route exact path="/route/:name" element={<Layout><TestTable /></Layout>} />
 						<Route exact path="/route" element={<Layout><p>I&apos;m a component, hear me roar!</p></Layout>} />
-						<Route path="*" element={<Layout><p>I am 404.  Hear me roar.</p></Layout>} />
+						<Route path="*" element={<Layout><Error is404 /></Layout>} />
 					</Routes>
 				</ErrorBoundary>
 			</Provider>
