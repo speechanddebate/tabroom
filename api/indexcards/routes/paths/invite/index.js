@@ -4,8 +4,8 @@ import { getInvite, getRounds } from '../../../controllers/public/invite/tournIn
 import { futureTourns } from '../../../controllers/public/invite/tournList';
 
 export default [
-	{ path: '/invite/{webname}', module : getInvite },
-	{ path: '/invite/round/{round_id}', module : getRounds },
-	{ path: '/invite/upcoming', module : futureTourns },
-	{ path: '/invite/upcoming/:circuit', module : futureTourns },
+	{ path: '/invite/{webname}'         , module : getInvite }    ,
+	{ path: '/invite/round/{round_id}'  , module : getRounds }    ,
+	{ path: '/invite/upcoming'          , module : futureTourns } ,
+	{ path: '/invite/upcoming/:circuit' , module : futureTourns } ,
 ];
