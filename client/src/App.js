@@ -13,6 +13,7 @@ import TestForm from './samples/TestForm';
 import './normalize.css';
 
 const App = () => {
+
 	const history = createBrowserHistory({ window });
 
 	return (

@@ -22,7 +22,7 @@ const Header = () => {
 				<DisplayUser />
 				<span id={styles.search} title="Search for tournaments">
 					<input
-						id             = "searchtext"
+						id             = {styles.searchtext}
 						type           = "text"
 						maxLength      = "128"
 						name           = "search"
@@ -35,7 +35,7 @@ const Header = () => {
 						autoCapitalize = "off"
 						spellCheck     = "false"
 					/>
-					<button type="submit" className={styles.searchbox}>
+					<button type="submit" className={styles.searchbutton}>
 						<img alt="Search" src="/images/search.png" />
 					</button>
 				</span>

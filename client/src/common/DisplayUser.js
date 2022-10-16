@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { loadProfile } from '../redux/ducks/profile';
 
+import styles from './DisplayUser.module.css';
+
 export const DisplayUser = () => {
 	const profile = useSelector((state) => state.profile);
 	const dispatch = useDispatch();
@@ -14,7 +16,7 @@ export const DisplayUser = () => {
 	}, [dispatch]);
 
 	return (
-		<div id="userinfo">
+		<div id={styles.userinfo}>
 			{
 				profile.id ?
 					<>
@@ -41,7 +43,7 @@ export const DisplayUser = () => {
 
 						<a
 							tabIndex   = "-1"
-							className = "noborder padvert"
+							className = {styles.email}
 						>
 							{profile.email}
 						</a>
@@ -50,13 +52,13 @@ export const DisplayUser = () => {
 					<>
 						<a
 							tabIndex   = "-1"
-							className = "noborder padvert"
+							className = {styles.login}
 						>
 							Login
 						</a>
 						<a
 							tabIndex   = "-1"
-							className = "noborder padvert"
+							className = {styles.signup}
 						>
 							Sign Up
 						</a>
