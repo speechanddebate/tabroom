@@ -1,9 +1,11 @@
 import React from 'react';
-
-import styles from './Header.module.css';
+import styles from './header.module.css';
 import DisplayUser from './DisplayUser';
+import SearchBar from './SearchBar';
+import NavMenu from './NavMenu';
 
 const Header = () => {
+
 	return (
 		<div id={styles.header}>
 			<span id={styles.logo}>
@@ -20,26 +22,7 @@ const Header = () => {
 
 			<span id={styles.profile}>
 				<DisplayUser />
-				<span id={styles.search} title="Search for tournaments">
-					<input
-						id             = {styles.searchtext}
-						type           = "text"
-						maxLength      = "128"
-						name           = "search"
-						caller         = "home"
-						placeholder    = "SEARCH TOURNAMENTS"
-						className      = "notfirst"
-						tabIndex       = "-1"
-						autoComplete   = "off"
-						autoCorrect    = "off"
-						autoCapitalize = "off"
-						spellCheck     = "false"
-					/>
-					<button type="submit" className={styles.searchbutton}>
-						<img alt="Search" src="/images/search.png" />
-					</button>
-				</span>
-
+				<SearchBar />
 				<span id={styles.helpbutton} title="Tabroom Help">
 					<a
 						tabIndex  = "-1"
@@ -50,6 +33,8 @@ const Header = () => {
 					/>
 				</span>
 			</span>
+
+			<NavMenu />
 		</div>
 	);
 };

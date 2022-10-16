@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { loadProfile } from '../redux/ducks/profile';
 
-import styles from './DisplayUser.module.css';
+import styles from './header.module.css';
 
 export const DisplayUser = () => {
 	const profile = useSelector((state) => state.profile);
