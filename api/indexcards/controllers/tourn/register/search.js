@@ -1,4 +1,4 @@
-export const tournSearch = {
+export const searchAttendees = {
 
 	GET: async (req, res) => {
 
@@ -25,7 +25,8 @@ export const tournSearch = {
 				and entry.unconfirmed = 0
 				and entry.id = es.entry
 				and es.student = student.id
-				and (student.last LIKE :likeString OR entry.code = :searchString)
+				and (student.last LIKE :likeString OR entry.code LIKE :likeString)
+			group by entry.id
 		`, {
 			replacements,
 			type: db.sequelize.QueryTypes.SELECT,
@@ -73,8 +74,8 @@ export const tournSearch = {
 			}
 		});
 
-		res.status(200).json({ exactMatches, partialMatches});
+		res.status(200).json({ exactMatches, partialMatches });
 	},
 };
 
-export default tournSearch;
+export default searchAttendees;
