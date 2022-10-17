@@ -7,9 +7,11 @@ import Header from './Header';
 const Layout = ({ children }) => {
 	return (
 		<div className={styles.App}>
-			<Header />
-			<div id="main">
-				{children}
+			<div id={styles.container}>
+				<Header />
+				<div id={styles.main}>
+					{children}
+				</div>
 			</div>
 		</div>
 	);
