@@ -18,55 +18,57 @@ export const NavMenu = () => {
 	} else {
 
 		return (
-			<ul id={styles.nav}>
-				<li class={styles.top}>
-					<a class={styles.top_link} href="/">
-						<span class={styles.down}>
-							Home
-						</span>
-					</a>
-				</li>
+			<span id={styles.navmenu}>
+				<ul id={styles.nav}>
+					<li class={styles.top}>
+						<a class={styles.top_link} href="/">
+							<span class={styles.down}>
+								Home
+							</span>
+						</a>
+					</li>
 
-				<li class={styles.top}>
-					<a class={styles.top_link} href="/index/circuits.mhtml">
-						<span class={styles.down}>
-							Circuits
-						</span>
-					</a>
-				</li>
+					<li class={styles.top}>
+						<a class={styles.top_link} href="/index/circuits.mhtml">
+							<span class={styles.down}>
+								Circuits
+							</span>
+						</a>
+					</li>
 
-				<li class={styles.top}>
-					<a class={styles.top_link} href="/index/results/">
-						<span class={styles.down}>
-							Results
-						</span>
-					</a>
-				</li>
+					<li class={styles.top}>
+						<a class={styles.top_link} href="/index/results/">
+							<span class={styles.down}>
+								Results
+							</span>
+						</a>
+					</li>
 
-				<li class={styles.top}>
-					<a class={styles.top_link} href="/index/paradigm.mhtml">
-						<span class={styles.down}>
-							Paradigms
-						</span>
-					</a>
-				</li>
+					<li class={styles.top}>
+						<a class={styles.top_link} href="/index/paradigm.mhtml">
+							<span class={styles.down}>
+								Paradigms
+							</span>
+						</a>
+					</li>
 
-				<li class={styles.top}>
-					<a class={styles.top_link} href="/index/help.mhtml">
-						<span class={styles.down}>
-							Help
-						</span>
-					</a>
-				</li>
+					<li class={styles.top}>
+						<a class={styles.top_link} href="/index/help.mhtml">
+							<span class={styles.down}>
+								Help
+							</span>
+						</a>
+					</li>
 
-				<li class={styles.top}>
-					<a class={styles.top_link} href="/index/about.mhtml">
-						<span class={styles.down}>
-							About
-						</span>
-					</a>
-				</li>
-			</ul>
+					<li class={styles.top}>
+						<a class={styles.top_link} href="/index/about.mhtml">
+							<span class={styles.down}>
+								About
+							</span>
+						</a>
+					</li>
+				</ul>
+			</span>
 		);
 	}
 };
