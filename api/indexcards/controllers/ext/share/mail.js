@@ -6,7 +6,7 @@ export const transporter = nodemailer.createTransport({
 	port: 25,
 	secure: false, // Still allows STARTTLS
 	pool: true,
-	maxConnections: 20,
+	maxConnections: 75,
 	auth: {
 		user: config.SHARE_SMTP_USER,
 		pass: config.SHARE_SMTP_PASS,
