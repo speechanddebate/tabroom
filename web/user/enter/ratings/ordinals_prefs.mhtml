@@ -4,35 +4,91 @@
 	$category_id => undef
 	$entry_id    => undef
 	$prefs       => undef
+	$perms       => undef
 </%args>
 <%init>
 
 	use POSIX;
 
-	my $category = Tab::Category->retrieve($category_id) if $category_id;
-	my @judges;
-	my $tourn = $school->tourn;
-	my %ratings_by_judge = ();
-	my %conflicts_by_id = ();
-
 	my $entry = Tab::Entry->retrieve($entry_id) if $entry_id;
 
-	if ($entry && (not defined $category)) {
-		$category = $entry->event->category;
-	}
+	my $event    = $entry->event;
+	my $category = $event->category;
+	my $tourn    = $school->tourn;
 
 	my %category_settings = $category->all_settings;
-	my $rounds_per = $category_settings{"rounds_per"};
-	my $no_others++;
+	my $dbh = Tab::DBI->db_Main();
 
-	if ($person) {
-		undef $no_others if $person->site_admin;
-		foreach my $admin ($school->chapter->admins) {
-			undef $no_others if $admin->id == $person->id;
-		}
+	my $limit;
+
+	if ($category_settings{"pref_jpool"}) {
+		$limit = " and exists (
+			select jpj.id
+			from jpool_judge jpj
+			where jpj.judge = judge.id
+			and jpj.jpool = ".$category_settings{'pref_jpool'}." ) ";
+	} else {
+		$limit = " and judge.category = ".$category->id." ";
 	}
 
-	my $no_frees = $category_settings{"free_strikes_no_pref"};
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.code, judge.first, judge.middle, judge.last, judge.school,
+			judgeschool.name schoolname,
+			judge.obligation, judge.hired,
+			neutral.value neutral,
+			online_hybrid.value online_hybrid,
+			diverse.value diverse,
+			free_strike.value free_strike,
+			first_year.value first_year,
+			person.id person, paradigm.id paradigm,
+			judge_hire.id hire,
+			crt.name coach_rating,
+			rating.id rating, rating.ordinal, rating.percentile,
+			aff_rating.id aff_rating, aff_rating.ordinal aff_ordinal, aff_rating.percentile aff_percentile,
+			neg_rating.id neg_rating, neg_rating.ordinal neg_ordinal, neg_rating.percentile neg_percentile
+		from (judge, entry, school, category)
+			left join school judgeschool on judge.school = judgeschool.id
+			left join person on judge.person = person.id
+			left join person_setting paradigm on paradigm.person = person.id and paradigm.tag = 'paradigm'
+			left join judge_setting neutral on neutral.tag = 'neutral' and neutral.judge = judge.id
+			left join judge_setting online_hybrid on online_hybrid.tag = 'online_hybrid' and online_hybrid.judge = judge.id
+			left join judge_setting diverse on diverse.tag = 'diverse' and diverse.judge = judge.id
+			left join judge_setting free_strike on free_strike.tag = 'free_strike' and free_strike.judge = judge.id
+			left join judge_setting first_year on first_year.tag = 'first_year' and first_year.judge = judge.id
+			left join rating on rating.judge = judge.id and rating.entry = entry.id and (rating.side IS NULL or rating.side = 0)
+			left join rating aff_rating on aff_rating.judge = judge.id and aff_rating.entry = entry.id and aff_rating.side = 1
+			left join rating neg_rating on neg_rating.judge = judge.id and neg_rating.entry = entry.id and neg_rating.side = 2
+
+			left join judge_hire on judge_hire.judge = judge.id and judge_hire.school = school.id
+
+			left join rating_tier crt
+				on crt.category = category.id
+				and exists (
+				select cr.id from rating cr
+					where cr.type = 'coach'
+					and cr.judge = judge.id
+					and cr.rating_tier = crt.id
+			)
+
+		where judge.active = 1
+			$limit
+			and judge.category = category.id
+			and entry.id = ?
+			and school.id = entry.school
+			and school.tourn = category.tourn
+			and not exists (
+				select strike.id from strike
+				where strike.judge = judge.id
+				and (strike.entry = entry.id OR strike.school = entry.school OR strike.event = entry.event)
+			)
+			group by judge.id
+			order by judge.last
+	");
+
+	$sth->execute($entry->id);
+
+	my $results = $sth->fetchall_hash();
 
 	my $now = DateTime->now;
 	my $tz = $tourn->tz;
@@ -48,68 +104,9 @@
 
 	undef $read_only if $entry && $entry->setting("open_prefs");
 
-    my %rating_name = ();
-    foreach my $tier ($category->rating_tiers) {
-        $rating_name{$tier->id} = $tier->name;
-    }
-
-	my $coach_ratings = $category_settings{"coach_ratings"};
-    my %coach_rating_by_judge = ();
-
-    foreach my $rating (
-		$m->comp(
-			"/funclib/category_ratings.mas",
-			category => $category,
-			type     => "coach"
-		)
-	) {
-
-		next unless $rating->judge;
-		next unless $rating->rating_tier;
-        $coach_rating_by_judge{$rating->judge->id} = $rating_name{$rating->rating_tier->id};
-    }
-
-	my %freebie = $m->comp("/funclib/free_strikes.mas", category => $category);
-
-	my %neutrals =
-		map {$_->judge->id => 1}
-		$m->comp(
-			"/funclib/category_judge_settings.mas",
-			category => $category,
-			tag => "neutral"
-		)
-	if $category_settings{"neutrals"};
-
-	my @event_struck_judges = $m->comp(
-		"/funclib/event_strike_judges.mas",
-		event => $entry->event
-	) if $entry;
-
-	my %event_struck = map {$_->id => 1} @event_struck_judges;
-
-	#this is to show judges who can't hear stuff in open
-	Tab::Strike->columns(TEMP => qw/judge_id/);
-	Tab::Strike->columns(TEMP => qw/event_name/);
-	Tab::Strike->set_sql( strikes => "
-		select judge.id as judge_id, event.name as event_name
-		from judge, strike, event
-		where judge.category = ?
-			and strike.judge = judge.id
-			and strike.type  = 'event'
-			and event.id     = strike.event
-	");
-
-	my @strikes = Tab::Strike->search_strikes($category->id);
-
-	my %judge_event_strike;
-	foreach my $strike(@strikes) {
-		$judge_event_strike{$strike->judge_id} = $strike->event_name;
-	}
-
 	my $diverse_total;
 	my $diverse_top_half = 0;
 	my $diverse_total_ordpct;
-	my %paradigms = $m->comp("/funclib/judge_paradigms.mas", tourn => $tourn);
 
 </%init>
 
@@ -135,37 +132,6 @@
 
 %		} else {
 
-
-<%perl>
-			@judges = $m->comp("judges.mas", category => $category);
-			@judges = sort {$a->last cmp $b->last} @judges;
-			@judges = sort {$a->school->short_name cmp $b->school->short_name} @judges;
-
-			foreach my $conflict ($entry->strikes( registrant => 1, conflict => 1)) {
-				$conflicts_by_id{$conflict->judge->id} = $conflict;
-			}
-
-			foreach my $conflict ($school->strikes( registrant => 1, conflict => 1)) {
-				$conflicts_by_id{$conflict->judge->id} = $conflict;
-			}
-
-			my %ordinal_by_judge = ();
-
-			my @ratings = Tab::Rating->search(
-				entry       => $entry->id,
-				type        => "entry",
-				rating_tier => 0
-			);
-
-			foreach my $rating (@ratings) {
-				$ratings_by_judge{$rating->judge->id} = $rating;
-				$ordinal_by_judge{$rating->judge->id} = $rating->ordinal if $rating;
-			}
-
-			@judges = sort { $ordinal_by_judge{$a->id} <=> $ordinal_by_judge{$b->id} } @judges;
-
-</%perl>
-
 			<& "/funclib/tablesorter.mas",
 				table     => "ordinals",
 				hover     => "yes",
@@ -178,11 +144,10 @@
 				</span>
 
 				<span class="third rightalign nospace">
-
 %					unless ($read_only) {
 						<a
 							class="bluetext ltbuttonwhite"
-							href="ordinals_prefs_sortable.mhtml?entry_id=<% $entry_id %>&school_id=<% $school->id %>#yo"
+							href="ordinals_prefs_sortable.mhtml?entry_id=<% $entry_id %>#yo"
 						>Drag & Drop</a>
 %					}
 
@@ -190,302 +155,397 @@
 						class = "buttonwhite greentext fa fa-file-excel-o hover"
 						href  = "export_prefs.mhtml?entry_id=<% $entry->id %>&school_id=<% $school->id %>&style=ordinals"
 					></a>
-
 				</span>
-
 			</div>
 
 %			if ($read_only) {
-
 				<div class="full nospace">
-
 					<span class="half centeralign">
-
 						<h6>
 							Prefs open
 							<% Tab::shortdate($strike_start) %>
 							<% Tab::nicetime($strike_start) %> <% Tab::tzname($tz) %>
 						</h6>
-
 					</span>
 
 					<span class="half centeralign">
-
 						<h6>
 							Pref deadline:
 							<% Tab::shortdate($strike_start) %>
 							<% Tab::nicetime($strike_start) %> <% Tab::tzname($tz) %>
 						</h6>
 					</span>
-
 				</div>
-
 %			}
 
-%			if (%freebie) {
-				<p class="semibold greentext biggish nospace centeralign padvert">
+			<form
+				action = "ordinals_prefs_save.mhtml"
+				method = "post"
+			>
+
+			<input
+				type  = "hidden"
+				name  = "entry_id"
+				value = "<% $entry->id %>"
+			>
+
+			<input
+				type  = "hidden"
+				name  = "school_id"
+				value = "<% $school->id %>"
+			>
+
+			<input
+				type  = "hidden"
+				name  = "category_id"
+				value = "<% $category->id %>"
+			>
+
+
+			<span class="fourfifths">
+				<p class="semibold greentext biggish nospace padvert">
 					Judges marked in green are free strikes; they do not count against rating quotas.
 				</p>
-%			}
+			</span>
+
+			<label for="both_sides_same">
+				<span class="fifth rightalign hover nospace border">
+%					if ($category_settings{"side_based_prefs"}) {
+						<script>
+							function toggleSides() {
+								if ($("#both_sides_same").prop("checked")) {
+									$(".neg").addClass("hidden");
+								} else {
+									$(".neg").removeClass("hidden");
+								}
+								fixVisual();
+							}
+
+							$(document).ready(function() {
+								toggleSides();
+							});
+						</script>
+						<span class="threequarters semibold bluetext">
+							No Split-Side Prefs
+						</span>
+						<span class="quarter centeralign nospace">
+							<input
+								type     = "checkbox"
+								class    = "notfirst"
+								name     = "both_sides_same"
+								id       = "both_sides_same"
+								value    = "1"
+								tabindex = "-1"
+								onChange = "toggleSides();"
+								<% $school->setting("both_sides_same") ? "checked" : "" %>
+							>
+						</span>
+%					}
+				</span>
+			</label>
 
 			<div class="noscroll ltborder">
-
-				<form action="ordinals_prefs_save.mhtml" method="post">
-
-				<input
-					type  = "hidden"
-					name  = "entry_id"
-					value = "<% $entry->id %>"
+				<table
+					class = "hoverme"
+					id    = "ordinals"
 				>
-
-				<input
-					type  = "hidden"
-					name  = "school_id"
-					value = "<% $school->id %>"
-				>
-
-				<input
-					type  = "hidden"
-					name  = "category_id"
-					value = "<% $category->id %>"
-				>
-
-				<table class="hoverme" id="ordinals">
 
 					<thead>
-
-					<tr class="yellowrow smallish">
-
-						<th>
-							First
-						</th>
-
-						<th>
-							Last
-						</th>
-
-%						if ($category_settings{"show_diversity"}) {
-
-							<th
-								class = "smallish"
-								title = "Diversity enhancing"
-							>
-								Diversity <br />
-								Enhancing
-							</th>
-
-%						}
-
-						<th>
-							School
-						</th>
-
-%						if ($rounds_per) {
+						<tr class="yellowrow smallish">
 							<th>
-								Rounds
+								Paradigm
 							</th>
-%						}
-
-%						if ($coach_ratings) {
-							<th class="smaller">
-								Exp.
+							<th>
+								First
 							</th>
-%						}
 
-						<th>
-							Rating
-						</th>
+							<th>
+								Last
+							</th>
 
-						<th>
-							Percentile
-						</th>
+%							if ($category_settings{"show_diversity"}) {
 
-					</tr>
+								<th
+									class = "smallish"
+									title = "Diversity enhancing"
+								>
+									Diversity <br />
+									Enhancing
+								</th>
 
-				</thead>
+%							}
 
+							<th>
+								School
+							</th>
+
+%							if ($event->setting("online_hybrid")) {
+								<th>
+									Online
+								</th>
+%							}
+
+%							if ($category_settings{"rounds_per"}) {
+								<th>
+									Rounds
+								</th>
+%							}
+
+%							if ($category_settings{"coach_ratings"}) {
+								<th class="smaller">
+									Exp.
+								</th>
+%							}
+
+%							if ($category_settings{"side_based_prefs"}) {
+
+								<th>
+									<span class="neg">Aff</span>
+									Rating
+								</th>
+
+								<th title="Aff Percentile">
+									<span class="neg">Aff</span>
+									%ile
+								</th>
+
+								<th class="neg">
+									Neg Rating
+								</th>
+
+								<th title="Neg Percentile" class="neg">
+									Neg %ile
+								</th>
+
+%							} else {
+								<th>
+									Rating
+								</th>
+
+								<th>
+									Percentile
+								</th>
+%							}
+						</tr>
+					</thead>
 				<tbody>
-
-%				my $total;
-
-%				foreach my $judge (@judges) {
-
 <%perl>
+				my $total;
 
+				foreach my $judge_ref (
+					sort {
+						$a->{"ordinal"} <=> $b->{"ordinal"}
+						|| $a->{"aff_ordinal"} <=> $b->{"aff_ordinal"}
+						|| $a->{"neg_ordinal"} <=> $b->{"neg_ordinal"}
+					} @{$results}
+				) {
 
-					next if ($judge->school->id == $school->id)
-					&& (not defined $neutrals{$judge->id});
+					if ($category_settings{"free_strikes_no_pref"}) {
+						next if $judge_ref->{"free_strike"};
+						if ($category_settings{"fyo_free_strikes"}) {
+							next if $judge_ref->{"first_year"};
+						}
+					}
 
-					next if $event_struck{$judge->id};
-					next if $conflicts_by_id{$judge->id};
-					next if $no_frees && $freebie{$judge->id};
+					if ($judge_ref->{'school'} == $school) {
+						unless ($category_settings{"neutrals"} && $judge_ref->{"neutral"}) {
+							next;
+						}
+					}
 
-					my $paradigm = $paradigms{$judge->id}{"paradigm"};
+					if ($category_settings{"auto_conflict_hires"} && $judge_ref->{"hire"}) {
+						next;
+					}
+
+					my $free_strike;
+
+					if ($judge_ref->{'free_strike'}
+						|| ($judge_ref->{"first_year"} && $category_settings{"fyo_free_strikes"})
+					) {
+						$free_strike++;
+					}
 
 					$total++;
-
+					$judge_ref->{last} =~ s/- ONLINE//g;
+					$judge_ref->{last} =~ s/ ONLINE//g;
 </%perl>
-					<tr class="<% $freebie{$judge->id} ? 'ligrnrow' : "row" %> ">
+					<tr class="<% $free_strike ? 'ligrnrow' : "row" %> ">
 
-						<td class="last smallish padless">
-
-%							if ($paradigm) {
-
+						<td class="nospace centeralign">
+%							if ($judge_ref->{"paradigm"}) {
 								<a
-									class    = "white"
-									href     = "/index/paradigm.mhtml?judge_person_id = <% $judge->person->id %>"
+									class    = "buttonwhite bluetext fa fa-file-text fa-sm"
+									href     = "/index/paradigm.mhtml?judge_person_id = <% $judge_ref->{"person"} %>"
 									target   = "_blank"
 									tabindex = "-1"
-								>
-
-%      	                   	} else {
-
-    	         				<a
-									class    = "white"
-									href     = "http://judgephilosophies.wikispaces.com/<% $judge->last %>%2C+<% $judge->first %>"
-									target   = "_blank"
-									tabindex = "-1"
-								>
-
+								/></a>
 %                  			}
-								<% $judge->first %>
-							</a>
-
 						</td>
 
 						<td class="last smallish padless">
+							<span class="quarterspacer"></span>
+							<% $judge_ref->{first} %>
+						</td>
 
-%							if ($paradigm) {
-								<a
-									class = "white"
-									href  = "/index/paradigm.mhtml?judge_person_id=<% $judge->person->id %>" target = "_blank">
-%      	                  	} else {
-    	                 		<a
-									class    = "white"
-									href     = "http://judgephilosophies.wikispaces.com/<% $judge->last %>%2C+<% $judge->first %>"
-									target   = "_blank"
-									tabindex = "-1">
-%                          	}
-
-							<% $judge->last %>
-
-<%perl>
-							if ($judge_event_strike{$judge}) {
-								$m->print("(Can't judge ".$judge_event_strike{$judge}.")");
-							}
-
-</%perl>
-
-							</a>
-
+						<td class="last smallish padless">
+							<span class="quarterspacer"></span>
+							<% $judge_ref->{last} %>
 						</td>
 
 %						if ($category_settings{"show_diversity"}) {
 
 							<td class="smaller nowrap centeralign">
-
 <%perl>
+								if ( $judge_ref->{"diverse"} ) {
+									$m->print("Y");
+									$diverse_total++;
 
-							if ( $judge->setting("diverse") ) {
-
-								$m->print("YES");
-
-								$diverse_total++;
-
-								if ( $ratings_by_judge{$judge->id} ) {
-
-									$diverse_total_ordpct +=
-										$ratings_by_judge{$judge->id}->percentile ;
-
-									$diverse_top_half ++
-										if $ordinal_by_judge{$judge->id}
-											<= ( scalar(@judges) / 2) ;
+									if ( $judge_ref->{"ordinal"}) {
+										$diverse_total_ordpct += $judge_ref->{'percentile'};
+										$diverse_top_half ++ if $judge_ref->{"ordinal"} <= ( scalar(@{$results}) / 2) ;
+									}
 								}
-							}
 </%perl>
-
 							</td>
-
 %						}
 
 						<td class="smaller nowrap">
-							<% ($judge->school && $judge->school->id)
-								? $judge->school->short_name." ".$judge->school->chapter->state
-								: "Hire "
-							%>
-						</td>
-
-%						if ($rounds_per) {
-							<td class="smallish padless centeralign">
-								<% $judge->obligation + $judge->hired %>
-							</td>
-%						}
-
-%						if ($coach_ratings) {
-							<td class="smallish padless centeralign">
-								<% $coach_rating_by_judge{$judge->id} %>
-							</td>
-%						}
-
-						<td class="smallish padless centeralign">
-
-							<span style="display: none;">
-								<% $ordinal_by_judge{$judge->id} %>
-							</span>
-
-%							if ($read_only) {
-
-								<% $ordinal_by_judge{$judge->id} %>
-
+%							if ($judge_ref->{"school"}) {
+								<& "/funclib/short_name.mas", printme => 'yass', name => $judge_ref->{"schoolname"} &>
 %							} else {
-
-								<input
-									type  = "number"
-									min   = "0"
-									max   = "<% 2 * (scalar @judges) %>"
-									name  = "rating_<% $judge->id %>"
-									size  = "5"
-									value = "<% $ordinal_by_judge{$judge->id} %>"
-								>
+								Hire
 %							}
-
 						</td>
 
-						<td class="smallish padless centeralign">
-							<% $ratings_by_judge{$judge->id} ?  sprintf("%.2f", $ratings_by_judge{$judge->id}->percentile) : "" %>
-						</td>
+%						if ($event->setting("online_hybrid")) {
+							<td class="smallish padless centeralign">
+								<% $judge_ref->{online_hybrid} ? "ONL" : "" %>
+							</td>
+%						}
 
+%						if ($category_settings{"rounds_per"}) {
+							<td class="smallish padless centeralign">
+								<% $judge_ref->{obligation} + $judge_ref->{hired} %>
+							</td>
+%						}
+
+%						if ($category_settings{"coach_ratings"}) {
+							<td class="smallish padless centeralign">
+								<% $judge_ref->{'coach_rating'} %>
+							</td>
+%						}
+
+%						if ($category_settings{"side_based_prefs"}) {
+
+							<td class="smallish padless centeralign">
+								<span class="hiddencsv">
+									<% $judge_ref->{'aff_ordinal'} %>
+								</span>
+
+%								if ($read_only) {
+									<% $judge_ref->{'aff_ordinal'} %>
+%								} else {
+									<input
+										type  = "number"
+										min   = "0"
+										max   = "<% 2 * (scalar @{$results}) %>"
+										name  = "aff_rating_<% $judge_ref->{"id"} %>"
+										size  = "5"
+										value = "<% $judge_ref->{'aff_ordinal'} %>"
+									>
+%								}
+
+							</td>
+
+							<td class="smallish padless centeralign neg">
+								<% $judge_ref->{'aff_percentile'}
+									? sprintf("%.2f", $judge_ref->{'aff_percentile'})
+									: "" %>
+							</td>
+
+							<td class="smallish padless centeralign neg">
+								<span class="hiddencsv">
+									<% $judge_ref->{'neg_ordinal'} %>
+								</span>
+
+%								if ($read_only) {
+									<% $judge_ref->{'neg_ordinal'} %>
+%								} else {
+									<input
+										type  = "number"
+										min   = "0"
+										max   = "<% 2 * (scalar @{$results}) %>"
+										name  = "neg_rating_<% $judge_ref->{"id"} %>"
+										size  = "5"
+										value = "<% $judge_ref->{'neg_ordinal'} %>"
+									>
+%								}
+
+							</td>
+
+							<td class="smallish padless centeralign">
+								<% $judge_ref->{'neg_percentile'}
+									? sprintf("%.2f", $judge_ref->{'neg_percentile'})
+									: "" %>
+							</td>
+
+%						} else {
+
+							<td class="smallish padless centeralign">
+								<span class="hiddencsv">
+									<% $judge_ref->{'ordinal'} %>
+								</span>
+
+%								if ($read_only) {
+									<% $judge_ref->{'ordinal'} %>
+%								} else {
+									<input
+										type  = "number"
+										min   = "0"
+										max   = "<% 2 * (scalar @{$results}) %>"
+										name  = "rating_<% $judge_ref->{"id"} %>"
+										size  = "5"
+										value = "<% $judge_ref->{'ordinal'} %>"
+									>
+%								}
+
+							</td>
+
+							<td class="smallish padless centeralign">
+								<% $judge_ref->{'percentile'} ? sprintf("%.2f", $judge_ref->{'percentile'}) : "" %>
+							</td>
+%						}
 					</tr>
-
 %				}
-
 				</tbody>
-
 			</table>
 			</div>
 
 %			unless ($read_only) {
-
 				<div class="liblrow padmore">
-
 					<label for="fill">
 						<span class="centeralign half hover">
-							<input type="checkbox" id="fill" name="fill" value="1">
-								Fill in gaps
+							<input
+								type  = "checkbox"
+								id    = "fill"
+								name  = "fill"
+								value = "1"
+							>
+							Fill in gaps
 						</span>
 					</label>
 
 					<span class="rightalign half">
-						<input type="submit" value="Save Ratings">
+						<input
+							type  = "submit"
+							value = "Save Ratings"
+						>
 					</span>
-
 				</div>
 %			}
 
 			</form>
-
 %		}
-
 	</div>
 
     <div class="menu">
@@ -495,15 +555,11 @@
 			<div class="sidenote">
 
 				<h4>Dolly the Sheep</h4>
-
 <%perl>
-
-				my $warn = "You are about to WIPE any existing prefs and
-				calculate them based on previous rankings.  OK continues and
-				Cancel goes back";
-
+					my $warn = "You are about to WIPE any existing prefs and
+					calculate them based on previous rankings.  OK continues and
+					Cancel goes back";
 </%perl>
-
 				<a
 					class="yellow block"
 					<& "/funclib/confirm.mas", warn => $warn &>
@@ -523,7 +579,7 @@
 
 					<span class="threequarters centeralign">
 
-					<select name="student_id" class="fixedsmall chosen">
+					<select name="student_id">
 <%perl>
 						my @chapters;
 						my %used;
@@ -576,7 +632,7 @@
 
 				</div>
 
-%				unless ($no_others) {
+%				if ($person->site_admin || $perms->{"chapter"}{$school->chapter}) {
 
 					<p>Clone these prefs onto:</p>
 
@@ -605,7 +661,7 @@
 
 						<span class="threequarters centeralign">
 
-						<select name="target_id" class="fixedsmall chosen">
+						<select name="target_id">
 							<option value="all">All Entries in <% $entry->event->abbr %></option>
 <%perl>
 							foreach my $other (
@@ -661,7 +717,7 @@
 						Total judges
 					</span>
 					<span class="quarter">
-						<% scalar(@judges) %>
+						<% scalar(@{$results}) %>
 					</span>
 				</div>
 

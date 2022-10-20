@@ -2,10 +2,6 @@ export const searchTourns = {
 
 	GET: async (req, res) => {
 
-		if (typeof req.params.searchString !== 'string') {
-			res.status(201).json({ message: 'Nothing to search' });
-		}
-
 		const db = req.db;
 
 		const replacements = {
@@ -15,9 +11,9 @@ export const searchTourns = {
 
 		let timescale = ' and tourn.start > NOW() ';
 
-		if (req.params.time && req.params.time === 'past') {
+		if (req.params.time === 'past') {
 			timescale = ' and tourn.start < NOW() ';
-		} else if (req.params.time && req.params.time === 'all') {
+		} else if (req.params.time === 'all') {
 			timescale = '';
 		}
 
@@ -70,15 +66,6 @@ export const searchTourns = {
 export const searchCircuitTourns = {
 
 	GET: async (req, res) => {
-
-		// wait this is what swagger is for isn't it.
-
-		if (typeof req.params.searchString !== 'string') {
-			res.status(201).json({ message: 'Nothing to search' });
-		}
-		if (!parseInt(req.params.circuitId)) {
-			res.status(201).json({ message: `Circuit ID ${req.params.circuitId} is not valid` });
-		}
 
 		const db = req.db;
 		const replacements = {
@@ -133,3 +120,56 @@ export const searchCircuitTourns = {
 };
 
 export default searchTourns;
+
+searchTourns.GET.apiDoc = {
+	summary     : 'Function to search for non-hidden tournaments by name in the past, future, or both',
+	operationId : 'searchTourns',
+	tags        : ['public'],
+	parameters  : [
+		{
+			in          : 'path',
+			name        : 'time',
+			description : 'Time limiter',
+			required    : true,
+			schema      : {
+				type : 'string',
+				enum : ['all', 'past', 'future'],
+			},
+			default     : 'future',
+		},{
+			in          : 'path',
+			name        : 'searchString',
+			description : 'Search String',
+			required    : true,
+			schema      : {
+				type    : 'string',
+			},
+		},
+	],
+};
+
+searchCircuitTourns.GET.apiDoc = {
+	summary     : 'Function to search for non-hidden tournaments in a circuit by name',
+	operationId : 'searchCircuitTourns',
+	tags        : ['public'],
+	parameters: [
+		{
+			in          : 'path',
+			name        : 'circuitId',
+			description : 'ID of the circuit',
+			required    : true,
+			schema      : {
+				type    : 'integer',
+				minimum : 1,
+			},
+		},{
+			in          : 'path',
+			name        : 'searchString',
+			description : 'Search String',
+			required    : true,
+			schema      : {
+				type    : 'string',
+			},
+		},
+	],
+};
