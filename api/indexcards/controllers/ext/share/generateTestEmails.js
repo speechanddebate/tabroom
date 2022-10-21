@@ -1,4 +1,4 @@
-// node --experimental-specifier-resolution=node -e 'import("./indexcards/controllers/share/ext/generateTestEmails").then(m => m.init())' 10
+// node --experimental-specifier-resolution=node -e 'import("./indexcards/controllers/ext/share/generateTestEmails").then(m => m.init())' 10
 import fs from 'fs';
 import { randomPhrase } from '@speechanddebate/nsda-js-utils';
 import sendMail, { transporter } from './mail';

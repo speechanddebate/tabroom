@@ -54,7 +54,7 @@ getShare.GET.apiDoc = {
 		},
 		default: { $ref: '#/components/responses/ErrorResponse' },
 	},
-	tags: ['caselist'],
+	tags: ['share'],
 };
 
 export default getShare;
