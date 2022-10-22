@@ -1,5 +1,9 @@
 const getProfile = {
 	GET: async (req, res) => {
+
+		if (!req.session) {
+			return res.status(201).json({ message: 'You have no active user session' });
+		}
 		const db = req.db;
 
 		let result;
@@ -17,7 +21,7 @@ const getProfile = {
 
 		} else if (req.params.person_id ) {
 			return res.status(201).json({ message: 'Only admin staff may access another profile' });
-		} else {
+		} else if (req.session.person) {
 			result = await db.person.findByPk(req.session.person,
 				{
 					include: [{

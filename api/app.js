@@ -16,7 +16,7 @@ import apiDoc from './indexcards/routes/api-doc';
 
 import userPaths from './indexcards/routes/paths/user/index';
 import tournPaths from './indexcards/routes/paths/tourn/index';
-import invitePaths from './indexcards/routes/paths/invite/index';
+import publicPaths from './indexcards/routes/paths/public/index';
 import externalPaths from './indexcards/routes/paths/ext/index';
 
 import auth from './indexcards/helpers/auth';
@@ -133,7 +133,7 @@ const paths = [
 	...baselinePaths,
 	...tournPaths,
 	...userPaths,
-	...invitePaths,
+	...publicPaths,
 	...externalPaths,
 ];
 

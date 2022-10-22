@@ -19,22 +19,23 @@ const Header = () => {
 					/>
 				</a>
 			</span>
-
-			<span id={styles.profile}>
-				<DisplayUser />
-				<SearchBar />
-				<span id={styles.helpbutton} title="Tabroom Help">
-					<a
-						tabIndex  = "-1"
-						href      = "http://docs.tabroom.com"
-						target    = "_blank"
-						rel       = "noopener noreferrer"
-						className = "fa fa-question-circle"
-					/>
+			<span id={styles.rightstuff}>
+				<span id={styles.profile}>
+					<DisplayUser />
+					<SearchBar />
+					<span id={styles.helpbutton} title="Tabroom Help">
+						<a
+							tabIndex  = "-1"
+							href      = "http://docs.tabroom.com"
+							target    = "_blank"
+							rel       = "noopener noreferrer"
+							className = "fa fa-question-circle"
+						/>
+					</span>
 				</span>
-			</span>
 
-			<NavMenu />
+				<NavMenu />
+			</span>
 		</div>
 	);
 };

@@ -30,9 +30,9 @@ sub set_details {
 	my ($self, $hashref) = @_;
 	my $json = JSON::encode_json($hashref);
 
-	if ($json && $json ne "null") { 
+	if ($json && $json ne "null") {
 		$self->details($json);
-	} else { 
+	} else {
 		$self->details("");
 	}
 	$self->update();
