@@ -84,7 +84,7 @@ getInvite.GET.apiDoc = {
 	],
 	responses: {
 		200: {
-			description: 'Invitationl & General Tournament Info',
+			description: 'Invitational & General Tournament Info',
 			content: { '*/*': { schema: { $ref: '#/components/schemas/Invite' } } },
 		},
 		default: { $ref: '#/components/responses/ErrorResponse' },

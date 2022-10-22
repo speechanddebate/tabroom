@@ -9,10 +9,10 @@ export const futureTourns = {
 				select tourn_circuit.id from tourn_circuit
 				where tourn_circuit.tourn = tourn.id
 				and tourn_circuit.approved = 1
-				and tourn_circuit.circuit = ${ req.params.circuit } ) `;
+				and tourn_circuit.circuit = ${req.params.circuit} ) `;
 		}
 
-		const [futureTourns] = await db.sequelize.query(`
+		const [future] = await db.sequelize.query(`
 			select tourn.id, tourn.webname, tourn.name, tourn.tz, tourn.hidden,
 				tourn.state, tourn.country, tourn.city,
 				CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
@@ -88,7 +88,7 @@ export const futureTourns = {
 
 			where tourn.hidden = 0
 			and tourn.end > DATE(NOW() - INTERVAL 2 DAY)
-			${ limit }
+			${limit}
 			and not exists (
 				select weekend.id
 				from weekend
@@ -124,8 +124,8 @@ export const futureTourns = {
 			order by weekend.start
 		`);
 
-		futureTourns.push(...futureDistricts);
-		return res.status(200).json(futureTourns);
+		future.push(...futureDistricts);
+		return res.status(200).json(future);
 	},
 };
 
@@ -150,3 +150,5 @@ futureTourns.GET.apiDoc = {
 	},
 	tags: ['futureTourns', 'invite', 'public'],
 };
+
+export default futureTourns;

@@ -172,4 +172,11 @@ searchCircuitTourns.GET.apiDoc = {
 			},
 		},
 	],
+	responses: {
+		200: {
+			description: 'Search',
+			content: { '*/*': { schema: { $ref: '#/components/schemas/Search' } } },
+		},
+		default: { $ref: '#/components/responses/ErrorResponse' },
+	},
 };

@@ -9,6 +9,8 @@ import Round from './Round';
 import Student from './Student';
 import CaselistLink from './CaselistLink';
 import Share from './Share';
+import Search from './Search';
+import Invite from './Invite';
 
 export default {
 	Err,
@@ -22,4 +24,6 @@ export default {
 	Student,
 	CaselistLink,
 	Share,
+	Search,
+	Invite,
 };

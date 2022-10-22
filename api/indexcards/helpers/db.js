@@ -674,7 +674,7 @@ db.summon = async (dbTable, objectId) => {
 		{ include : 'Settings' },
 	);
 
-	if (!dbObject) { 
+	if (!dbObject) {
 		errorLogger(`No ${dbTable} record found with key ${objectId}`);
 		return;
 	}
