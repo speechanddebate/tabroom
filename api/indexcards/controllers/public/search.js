@@ -135,7 +135,6 @@ searchTourns.GET.apiDoc = {
 				type : 'string',
 				enum : ['all', 'past', 'future'],
 			},
-			default     : 'future',
 		},{
 			in          : 'path',
 			name        : 'searchString',
@@ -146,6 +145,13 @@ searchTourns.GET.apiDoc = {
 			},
 		},
 	],
+	responses: {
+		200: {
+			description: 'Search',
+			content: { '*/*': { schema: { $ref: '#/components/schemas/Search' } } },
+		},
+		default: { $ref: '#/components/responses/ErrorResponse' },
+	},
 };
 
 searchCircuitTourns.GET.apiDoc = {
