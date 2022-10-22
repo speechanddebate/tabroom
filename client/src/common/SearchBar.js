@@ -29,7 +29,6 @@ const SearchBar = () => {
 				type           = "text"
 				maxLength      = "128"
 				name           = "search"
-				caller         = "home"
 				placeholder    = {setupSearch.tag}
 				className      = "notfirst"
 				tabIndex       = "-1"
