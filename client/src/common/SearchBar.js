@@ -1,12 +1,14 @@
 import React from 'react';
-import { useSelector } from 'react-redux';
-import { useForm, useWatch } from 'react-hook-form';
+import { useSelector, useDispatch } from 'react-redux';
+import { useForm } from 'react-hook-form';
 import styles from './header.module.css';
+import { loadTournSearch } from '../redux/ducks/search';
 
 const SearchBar = () => {
 
 	const sector = useSelector((state) => state.sector);
 	const tourn = useSelector((state) => state.tourn);
+	const searchResults = useSelector((state) => state.searchResults);
 
 	const setupSearch = {};
 
@@ -20,50 +22,56 @@ const SearchBar = () => {
 
 	const {
 		register,
-		control,
 		formState: { errors, isValid },
-		handleSearch,
+		handleSubmit,
 	} = useForm({
 		mode: 'all',
 		defaultValues: {
-			name: '',
-			setting: false,
+			searchString: '',
 		},
 	});
 
-	// Ask Hardy what the hell this is supposed to do again
-	const watchedFields = useWatch({ control });
-	useEffect(() => { }, [watchedFields]);
-
+	const dispatch = useDispatch();
 	const searchHandler = async (data) => {
-		try {
-			await fetch('http://local.tabroom.com:10010/v1/status', { method: 'GET', body: data });
-		} catch (err) {
-			console.log(err);
-		}
+		dispatch(loadTournSearch(data.searchString));
 	};
 
 	return (
-		<form onSubmit={handleSearch(searchHandler)}>
-			<span id={styles.search} title={setupSearch.tag}>
-				<input
-					id             = {styles.searchtext}
-					type           = "text"
-					maxLength      = "128"
-					name           = "search"
-					placeholder    = {setupSearch.tag}
-					className      = "notfirst"
-					tabIndex       = "-1"
-					autoComplete   = "off"
-					autoCorrect    = "off"
-					autoCapitalize = "off"
-					spellCheck     = "false"
-				/>
-				<button type="submit" className={styles.searchbutton}>
-					<img alt="Search" src="/images/search.png" />
-				</button>
-			</span>
-		</form>
+		<span>
+			<form onSubmit={handleSubmit(searchHandler)}>
+				<span id={styles.search} title={setupSearch.tag}>
+					<input
+						id             = {styles.searchtext}
+						type           = "searchString"
+						maxLength      = "128"
+						name           = "search"
+						placeholder    = {setupSearch.tag}
+						className      = "notfirst"
+						tabIndex       = "-1"
+						autoComplete   = "off"
+						autoCorrect    = "off"
+						autoCapitalize = "off"
+						spellCheck     = "false"
+						{...register('searchString', { required: true })}
+					/>
+					<button
+						type      = "submit"
+						className = {styles.searchbutton}
+						disabled  = {!isValid}
+					>
+						<img alt = "Search" src = "/images/search.png" />
+					</button>
+				</span>
+			</form>
+
+			<div id={styles.searchError} className={errors.name ? '' : 'hidden'}>
+				{ errors.name?.type === 'required' && <p>Please input text to search for.</p>}
+			</div>
+
+			<div id={styles.searchResults} className={searchResults ? '' : 'hidden'}>
+				Oh shut it
+			</div>
+		</span>
 	);
 };
 
