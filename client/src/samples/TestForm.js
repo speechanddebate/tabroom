@@ -32,9 +32,9 @@ export const TestForm = () => {
 	return (
 		<form onSubmit={handleSubmit(formHandler)}>
 			<input
-				name="name"
-				type="text"
-				defaultValue="Hardy"
+				name         = "name"
+				type         = "text"
+				defaultValue = "Hardy"
 				{...register('name', { required: true, maxLength: 5 })}
 			/>
 			<input

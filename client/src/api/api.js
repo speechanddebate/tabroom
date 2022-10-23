@@ -42,3 +42,15 @@ export const getProfile = async () => {
 export const postProfile = async (personId, profile) => {
 	return fetchBase(`user/profile/${personId}`, { method: 'POST', body: profile });
 };
+
+export const tournSearch = async (searchString, mode) => {
+
+	if (mode === 'all') {
+		return fetchBase(`/public/search/all/${searchString}`);
+	}
+	if (mode === 'past') {
+		return fetchBase(`/public/search/past/${searchString}`);
+	}
+
+	return fetchBase(`/public/search/future/${searchString}`);
+};

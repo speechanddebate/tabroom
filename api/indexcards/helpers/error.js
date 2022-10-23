@@ -30,7 +30,7 @@ const errorHandler = (err, req, res, next) => {
 		message          : err.message || 'Internal server error',
 		logCorrelationId : req.uuid,
 		path             : req.path,
-		stack            : err.stack
+		stack            : err.stack,
 	});
 };
 

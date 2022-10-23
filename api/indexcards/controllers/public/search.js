@@ -19,7 +19,7 @@ export const searchTourns = {
 
 		const tourns = await db.sequelize.query(`
 			select 
-				tourn.id, tourn.webname as abbr, tourn.name, tourn.start, tourn.end, tourn.city, tourn.state, tourn.tz, 'tourn' as tag,
+				tourn.id, tourn.webname as abbr, tourn.webname, tourn.name, tourn.start, tourn.end, tourn.city, tourn.state, tourn.tz, 'tourn' as tag,
 				CONVERT_TZ(tourn.start, '+00:00', tourn.tz)
 			from tourn
 				where tourn.hidden = 0
@@ -49,12 +49,16 @@ export const searchTourns = {
 		const partialMatches = [];
 
 		[...tourns, ...circuits].forEach( (result) => {
-			if (
-				result.name === req.params.searchString
-				|| result.abbr === req.params.searchString
+
+			if (result
+				&& result.id
+				&& (
+					result.name === req.params.searchString
+					|| result.abbr === req.params.searchString
+				)
 			) {
 				exactMatches.push(result);
-			} else {
+			} else if (result && result.id) {
 				partialMatches.push(result);
 			}
 		});
@@ -83,7 +87,7 @@ export const searchCircuitTourns = {
 
 		const tourns = await db.sequelize.query(`
 			select 
-				tourn.id, tourn.name, tourn.start, tourn.end, tourn.city, tourn.state, tourn.tz,
+				tourn.id, tourn.webname, tourn.name, tourn.start, tourn.end, tourn.city, tourn.state, tourn.tz,
 				CONVERT_TZ(tourn.start, '+00:00', tourn.tz)
 			from tourn
 				where tourn.hidden = 0
@@ -147,8 +151,10 @@ searchTourns.GET.apiDoc = {
 	],
 	responses: {
 		200: {
-			description: 'Search Results',
+			description: 'Search',
+			content: { '*/*': { schema: { $ref: '#/components/schemas/Search' } } },
 		},
+		default: { $ref: '#/components/responses/ErrorResponse' },
 	},
 };
 
@@ -178,7 +184,9 @@ searchCircuitTourns.GET.apiDoc = {
 	],
 	responses: {
 		200: {
-			description: 'Search Results',
+			description: 'Search',
+			content: { '*/*': { schema: { $ref: '#/components/schemas/Search' } } },
 		},
+		default: { $ref: '#/components/responses/ErrorResponse' },
 	},
 };
