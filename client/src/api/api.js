@@ -51,6 +51,5 @@ export const tournSearch = async (searchString, mode) => {
 	if (mode === 'past') {
 		return fetchBase(`/public/search/past/${searchString}`);
 	}
-
 	return fetchBase(`/public/search/future/${searchString}`);
 };

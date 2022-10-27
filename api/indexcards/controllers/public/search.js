@@ -19,10 +19,15 @@ export const searchTourns = {
 
 		const tourns = await db.sequelize.query(`
 			select 
-				tourn.id, tourn.webname as abbr, tourn.webname, tourn.name, tourn.start, tourn.end, tourn.city, tourn.state, tourn.tz, 'tourn' as tag,
-				CONVERT_TZ(tourn.start, '+00:00', tourn.tz)
+				tourn.id, tourn.webname as abbr, tourn.webname, tourn.name, tourn.city, tourn.state, tourn.tz, 'tourn' as tag,
+				CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
+				CONVERT_TZ(tourn.end, '+00:00', tourn.tz) end,
+				tourn.start utc_start,
+				GROUP_CONCAT( distinct(circuit.abbr) SEPARATOR ', ') as circuits
 			from tourn
-				where tourn.hidden = 0
+				left join tourn_circuit tc on tc.tourn = tourn.id
+				left join circuit on tc.circuit = circuit.id
+			where tourn.hidden = 0
 				and (tourn.name LIKE :likeString OR tourn.name = :searchString OR tourn.webname = :searchString )
 				${timescale}
 			group by tourn.id
@@ -63,7 +68,7 @@ export const searchTourns = {
 			}
 		});
 
-		res.status(200).json({ exactMatches, partialMatches });
+		res.status(200).json({ exactMatches, partialMatches, searchString : req.params.searchString });
 	},
 };
 
