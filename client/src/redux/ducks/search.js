@@ -24,7 +24,7 @@ export const loadTournSearch = (string, mode) => {
 				LOAD_TOURNSEARCH_FAILURE,
 			],
 			callAPI: async () => tournSearch(string, mode),
-			payload: { string, slice: 'searchResults' },
+			payload: { slice: 'searchResults' },
 		});
 	};
 };
