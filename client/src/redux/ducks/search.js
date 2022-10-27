@@ -15,7 +15,7 @@ const reducer = (state = {}, action) => {
 
 export default reducer;
 
-export const loadTournSearch = () => {
+export const loadTournSearch = (string, mode) => {
 	return async (dispatch) => {
 		return dispatch({
 			types: [
@@ -23,8 +23,8 @@ export const loadTournSearch = () => {
 				LOAD_TOURNSEARCH_SUCCESS,
 				LOAD_TOURNSEARCH_FAILURE,
 			],
-			callAPI: async () => tournSearch(),
-			payload: { slice: 'searchResults' },
+			callAPI: async () => tournSearch(string, mode),
+			payload: { string, slice: 'searchResults' },
 		});
 	};
 };

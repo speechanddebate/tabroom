@@ -6,6 +6,7 @@ import { loadTournSearch } from '../redux/ducks/search';
 
 const SearchBar = () => {
 
+	const dispatch = useDispatch();
 	const sector = useSelector((state) => state.sector);
 	const tourn = useSelector((state) => state.tourn);
 	const searchResults = useSelector((state) => state.searchResults);
@@ -31,9 +32,8 @@ const SearchBar = () => {
 		},
 	});
 
-	const dispatch = useDispatch();
 	const searchHandler = async (data) => {
-		dispatch(loadTournSearch(data.searchString));
+		dispatch(loadTournSearch(data.searchString, 'future'));
 	};
 
 	return (
@@ -69,7 +69,7 @@ const SearchBar = () => {
 			</div>
 
 			<div id={styles.searchResults} className={searchResults ? '' : 'hidden'}>
-				Oh shut it
+				I HAVE SEARCH RESULTS
 			</div>
 		</span>
 	);

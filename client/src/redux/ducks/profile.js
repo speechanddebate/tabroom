@@ -8,7 +8,6 @@ const reducer = (state = {}, action) => {
 	switch (action.type) {
 	case LOAD_PROFILE_SUCCESS:
 		return action.response;
-
 	default:
 		return state;
 	}
