@@ -1,5 +1,5 @@
 // import { showDateTime } from '../../../helpers/common';
-import { objectify, objectStrip, objectifySettings, objectifyGroupSettings } from '../../../helpers/objectify'
+import { objectify, arrayify, objectStrip, objectifySettings, objectifyGroupSettings } from '../../../helpers/objectify';
 
 export const backupTourn = {
 	GET: async (req, res) => {
@@ -12,16 +12,31 @@ export const backupTourn = {
 		tourn.created_by     = req.session.email;
 		tourn.data_format    = '4.0';
 
-		// but her emails
+		// A bunch of little things that are all at the other end of a simple
+		// FK relationship:
+
 		tourn.emails        = objectify(await db.email.findAll({ where: { tourn: tourn.id } }));
-		tourn.permissions   = objectify(await db.permission.findAll({ where: { tourn: tourn.id } }));
 		tourn.webpages      = objectify(await db.webpage.findAll({ where: { tourn: tourn.id } }));
+
+		tourn.permissions   = objectify(await db.permission.findAll({ where: { tourn: tourn.id } }));
 		tourn.fines         = objectify(await db.fine.findAll({ where: { tourn: tourn.id } }));
 		tourn.patterns      = objectify(await db.pattern.findAll({ where: { tourn: tourn.id } }));
 		tourn.timeslots     = objectify(await db.timeslot.findAll({ where: { tourn: tourn.id } }));
 		tourn.settings      = objectifySettings(
 			await db.tournSetting.findAll({ where: { tourn: tourn.id } })
 		);
+
+		// Circuits have a many to many join table so that's harder
+		tourn.circuits = arrayify(await db.sequelize.query(`
+			select circuit.id
+				from circuit, tourn_circuit tc
+				where tc.tourn = :tournId
+				and tc.circuit = circuit.id
+			order by circuit.abbr
+		`, {
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		}), 'id');
 
 		// Protocols, formerly known as tiebreak sets.
 		const protocols = await db.sequelize.query(`
@@ -49,11 +64,11 @@ export const backupTourn = {
 				};
 			}
 
-			tourn.protocols[protocol.pid].tiebreaks[protocol.id] = { ...protocol };
+			tourn.protocols[protocol.pid].tiebreaks[protocol.id] = objectStrip(
+				protocol,
+				['pid', 'pname', 'timestamp', 'protocol', 'tiebreak_set', 'id']
+			);
 
-			['pid', 'pname', 'timestamp', 'protocol', 'tiebreak_set', 'id'].forEach( (tag) => {
-				delete tourn.protocols[protocol.pid].tiebreaks[protocol.id][tag];
-			});
 		});
 
 		const rawProtocolSettings = await db.sequelize.query(`
@@ -120,9 +135,11 @@ export const backupTourn = {
 			tourn.sites[room.sid].rooms[room.id] = objectStrip(room, ['id', 'sid', 'sname', 'timestamp', 'deleted', 'online']);
 		});
 
-		// tourn.sites = await db.tourn.findAll({ where: { tourn: tourn.id } });
-		// Circuits
-		// tourn.circuits = await db.tourn.findAll({ where: { tourn: tourn.id } });
+		// Tournament result sets.  These can be bulky.
+
+		// And now the fun parts.  Registration data, which includes schools, entries, etc.  NOT judges in the full tourn dump.
+
+		// And the real monster: Categories, judges, events, rounds, and results.
 
 		return res.status(200).json(tourn);
 	},

@@ -136,8 +136,20 @@ const SearchResults = (results) => {
 
 const SearchItem = (props) => {
 
-	const startDateString = 'Nov 14-15 2022';
 	const tournName = props.tourn.name;
+	const start = new Date(props.tourn.start);
+	const end = new Date(props.tourn.end);
+
+	let dateString = '';
+	const monthName = start.toLocaleString('default', { month: 'short' });
+
+	// need to replace the below with a way to generate an actual string
+
+	if (start.getDate() === end.getDate()) {
+		dateString = `${monthName} ${start.getDate()}, ${start.getFullYear()}`;
+	} else {
+		dateString = `${monthName} ${start.getDate()}-${end.getDate()}, ${start.getFullYear()}`;
+	}
 
 	return (
 		<div className={styles[props.scope]}>
@@ -159,7 +171,7 @@ const SearchItem = (props) => {
 						{props.tourn.circuits}
 					</span>
 					<span className={`${styles.dates}`}>
-						{ startDateString }
+						{ dateString }
 					</span>
 				</div>
 			</a>
