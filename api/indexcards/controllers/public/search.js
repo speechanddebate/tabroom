@@ -31,7 +31,7 @@ export const searchTourns = {
 				and (tourn.name LIKE :likeString OR tourn.name = :searchString OR tourn.webname = :searchString )
 				${timescale}
 			group by tourn.id
-			order by tourn.start DESC
+			order by tourn.start
 		`, {
 			replacements,
 			type: db.sequelize.QueryTypes.SELECT,

@@ -7,6 +7,14 @@ export const objectify = (array) => {
 	return dest;
 };
 
+export const arrayify = (destroyMe, key) => {
+	const dest = [];
+	destroyMe.forEach( (individual) => {
+		dest.push(individual[key]);
+	});
+	return dest;
+};
+
 export const objectifyGroupSettings = (array, targetKey) => {
 
 	const dest = {};
