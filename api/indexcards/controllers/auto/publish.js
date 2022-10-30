@@ -18,6 +18,9 @@ export const autoPublish = {
 				where ballot.panel = panel.id
 				and panel.round = round.id
 				and ballot.audit != 1
+				and ballot.bye != 1
+				and panel.bye != 1
+				
 			)
 			and exists (
 				select ballot.entry
@@ -40,10 +43,12 @@ export const autoPublish = {
 
 			and not exists (
 				select ballot.id
-				from ballot, panel
+					from ballot, panel
 				where ballot.panel = panel.id
-				and panel.round = round.id
-				and ballot.audit != 1
+					and panel.round = round.id
+					and ballot.audit != 1
+					and ballot.bye != 1
+					and panel.bye != 1
 			)
 			and exists (
 				select ballot.entry
@@ -66,10 +71,12 @@ export const autoPublish = {
 
 			and not exists (
 				select ballot.id
-				from ballot, panel
+					from ballot, panel
 				where ballot.panel = panel.id
-				and panel.round = round.id
-				and ballot.audit != 1
+					and panel.round = round.id
+					and ballot.audit != 1
+					and ballot.bye != 1
+					and panel.bye != 1
 			)
 			and exists (
 				select ballot.entry
