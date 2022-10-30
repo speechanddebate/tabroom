@@ -16,6 +16,7 @@ import apiDoc from './indexcards/routes/api-doc';
 
 import userPaths from './indexcards/routes/paths/user/index';
 import tournPaths from './indexcards/routes/paths/tourn/index';
+import autoPaths from './indexcards/routes/paths/auto/index';
 import publicPaths from './indexcards/routes/paths/public/index';
 import externalPaths from './indexcards/routes/paths/ext/index';
 
@@ -130,6 +131,7 @@ const baselinePaths = [
 
 // Combine the various paths into one
 const paths = [
+	...autoPaths,
 	...baselinePaths,
 	...tournPaths,
 	...userPaths,
