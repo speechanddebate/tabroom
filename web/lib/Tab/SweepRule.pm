@@ -6,10 +6,10 @@ Tab::SweepRule->columns(All => qw/
 		id sweep_set tag 
 		value place count count_round
 		rev_min truncate
-		tiebreak_set timestamp
+		protocol timestamp
 	/);
 
 Tab::SweepRule->has_a(sweep_set => 'Tab::SweepSet');
-Tab::SweepRule->has_a(tiebreak_set => 'Tab::TiebreakSet');
+Tab::SweepRule->has_a(protocol => 'Tab::Protocol');
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 

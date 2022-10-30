@@ -1,13 +1,13 @@
-package Tab::TiebreakSet;
+package Tab::Protocol;
 use base 'Tab::DBI';
-Tab::TiebreakSet->table('tiebreak_set');
-Tab::TiebreakSet->columns(All => qw/id name tourn timestamp/);
+Tab::Protocol->table('protocol');
+Tab::Protocol->columns(All => qw/id name tourn timestamp/);
 
-Tab::TiebreakSet->has_a(tourn => 'Tab::Tourn');
+Tab::Protocol->has_a(tourn => 'Tab::Tourn');
 
-Tab::TiebreakSet->has_many(tiebreaks => 'Tab::Tiebreak'           , 'tiebreak_set');
-Tab::TiebreakSet->has_many(rounds    => 'Tab::Round'              , 'tiebreak_set');
-Tab::TiebreakSet->has_many(settings  => 'Tab::TiebreakSetSetting' , 'tiebreak_set');
+Tab::Protocol->has_many(tiebreaks => 'Tab::Tiebreak'        , 'protocol');
+Tab::Protocol->has_many(rounds    => 'Tab::Round'           , 'protocol');
+Tab::Protocol->has_many(settings  => 'Tab::ProtocolSetting' , 'protocol');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
@@ -18,13 +18,13 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::TiebreakSetSetting->search(  
-		tiebreak_set => $self->id,
+	my $existing = Tab::ProtocolSetting->search(
+		protocol => $self->id,
 		tag          => $tag,
 	)->first;
 
-	if (defined $value) { 
-			
+	if (defined $value) {
+
 		if ($existing) {
 
 			$existing->value($value);
@@ -32,7 +32,7 @@ sub setting {
 			$existing->value_date($blob) if $value eq "date";
 			$existing->update;
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
 				$existing->delete;
 			}
 
@@ -40,17 +40,17 @@ sub setting {
 
 		} elsif ($value ne "delete" && $value && $value ne "0") {
 
-			my $existing = Tab::TiebreakSetSetting->create({
-				tiebreak_set => $self->id,
+			my $existing = Tab::ProtocolSetting->create({
+				protocol => $self->id,
 				tag          => $tag,
 				value        => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
 			}
 
-			if ($value eq "date") { 
+			if ($value eq "date") {
 				$existing->value_date($blob);
 			}
 
@@ -70,7 +70,7 @@ sub setting {
 }
 
 
-sub all_settings { 
+sub all_settings {
 
 	my $self = shift;
 
@@ -80,25 +80,25 @@ sub all_settings {
 
     my $sth = $dbh->prepare("
 		select setting.tag, setting.value, setting.value_date, setting.value_text
-		from tiebreak_set_setting setting
-		where setting.tiebreak_set = ? 
+		from protocol_setting setting
+		where setting.protocol = ?
         order by setting.tag
     ");
-    
+
     $sth->execute($self->id);
-    
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) { 
 
-		if ($value eq "date") { 
+    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
 
-			my $dt = Tab::DBI::dateparse($value_date); 
+		if ($value eq "date") {
+
+			my $dt = Tab::DBI::dateparse($value_date);
 			$all_settings{$tag} = $dt if $dt;
 
-		} elsif ($value eq "text") { 
+		} elsif ($value eq "text") {
 
 			$all_settings{$tag} = $value_text;
 
-		} else { 
+		} else {
 
 			$all_settings{$tag} = $value;
 

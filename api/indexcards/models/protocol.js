@@ -5,7 +5,7 @@ const protocol = (sequelize, DataTypes) => {
 			allowNull: true,
 		},
 	},{
-		tableName: 'tiebreak_set',
+		tableName: 'protocol',
 	});
 };
 

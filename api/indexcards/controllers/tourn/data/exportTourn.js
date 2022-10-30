@@ -136,6 +136,7 @@ export const backupTourn = {
 		});
 
 		// Tournament result sets.  These can be bulky.
+		tourn.result_sets = objectify(await db.resultSet.findAll({ where: { tourn: tourn.id } }));
 
 		// And now the fun parts.  Registration data, which includes schools, entries, etc.  NOT judges in the full tourn dump.
 

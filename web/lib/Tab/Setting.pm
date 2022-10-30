@@ -18,7 +18,7 @@ Tab::Setting->has_many( region_settings       => 'Tab::RegionSetting'      , 'se
 Tab::Setting->has_many( round_settings        => 'Tab::RoundSetting'       , 'setting');
 Tab::Setting->has_many( rpool_settings        => 'Tab::RPoolSetting'       , 'setting');
 Tab::Setting->has_many( school_settings       => 'Tab::SchoolSetting'      , 'setting');
-Tab::Setting->has_many( tiebreak_set_settings => 'Tab::TiebreakSetSetting' , 'setting');
+Tab::Setting->has_many( protocol_settings => 'Tab::ProtocolSetting' , 'setting');
 Tab::Setting->has_many( tourn_settings        => 'Tab::TournSetting'       , 'setting');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);

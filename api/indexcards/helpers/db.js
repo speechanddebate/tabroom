@@ -278,11 +278,11 @@ db.pattern.hasMany(db.category,  { as: 'Categories', foreignKey: 'pattern' });
 db.pattern.belongsTo(db.pattern, { as: 'Exclude',    foreignKey: 'exclude' });
 db.pattern.belongsTo(db.tourn,   { as: 'Tourn',      foreignKey: 'tourn' });
 
-db.tiebreak.belongsTo(db.protocol , { as: 'Protocol' , foreignKey : 'tiebreak_set' });
+db.tiebreak.belongsTo(db.protocol , { as: 'Protocol' , foreignKey : 'protocol' });
 db.tiebreak.belongsTo(db.protocol , { as: 'Child'    , foreignKey : 'child' });
 
 db.protocol.belongsTo(db.tourn  , { as: 'Tourn'     , foreignKey : 'tourn' });
-db.protocol.hasMany(db.tiebreak , { as: 'Tiebreaks' , foreignKey : 'tiebreak_set' });
+db.protocol.hasMany(db.tiebreak , { as: 'Tiebreaks' , foreignKey : 'protocol' });
 db.protocol.hasMany(db.tiebreak , { as: 'Parents'   , foreignKey : 'child' });
 
 db.webpage.belongsTo(db.person  , { as: 'Editor'    , foreignKey : 'last_editor' });
@@ -474,7 +474,7 @@ db.shift.belongsTo(db.category, { as: 'Category', foreignKey: 'category' });
 db.round.belongsTo(db.event     , { as: 'Event'     , foreignKey: 'event' });
 db.round.belongsTo(db.timeslot  , { as: 'Timeslot'  , foreignKey: 'timeslot' });
 db.round.belongsTo(db.site      , { as: 'Site'      , foreignKey: 'site' });
-db.round.belongsTo(db.protocol  , { as: 'Protocol'  , foreignKey: 'tiebreak_set' });
+db.round.belongsTo(db.protocol  , { as: 'Protocol'  , foreignKey: 'protocol' });
 db.round.belongsTo(db.round     , { as: 'Runoff'    , foreignKey: 'runoff' });
 db.round.belongsToMany(db.rpool , { as: 'RoomPools' , foreignKey: 'round', through: 'rpool_round' });
 db.round.hasMany(db.panel       , { as: 'Panels'    , foreignKey: 'round' });
@@ -518,7 +518,7 @@ db.resultSet.belongsTo(db.sweepAward    , { as: 'SweepAward'    , foreignKey: 's
 
 db.resultValue.belongsTo(db.result    , { as: 'Result'    , foreignKey: 'result' });
 db.resultValue.belongsTo(db.resultKey , { as: 'ResultKey' , foreignKey: 'result_key' });
-db.resultValue.belongsTo(db.protocol  , { as: 'Protocol'  , foreignKey: 'tiebreak_set' });
+db.resultValue.belongsTo(db.protocol  , { as: 'Protocol'  , foreignKey: 'protocol' });
 
 // Person & identities
 
@@ -604,7 +604,7 @@ db.sweepEvent.belongsTo(db.nsdaCategory  , { as: 'NSDACategory'  , foreignKey : 
 db.sweepAward.belongsTo(db.circuit, { as: 'Circuit', foreignKey: 'circuit' });
 
 db.sweepRule.belongsTo(db.sweepProtocol , { as: 'SweepProtocol' , foreignKey: 'sweep_set' });
-db.sweepRule.belongsTo(db.protocol      , { as: 'Protocol'      , foreignKey: 'tiebreak_set' });
+db.sweepRule.belongsTo(db.protocol      , { as: 'Protocol'      , foreignKey: 'protocol' });
 
 // Live Updates functions
 db.follower.belongsTo(db.person  , { as: 'Person'   , foreignKey: 'person' });
