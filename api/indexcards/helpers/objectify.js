@@ -1,9 +1,22 @@
 export const objectify = (array) => {
 	const dest = {};
 	array.forEach( (item) => {
-		dest[item.id] = item;
-		delete item.id;
+		if (item.dataValues) {
+			const output = item.get({ plain:true });
+			dest[output.id] = stripNull(output);
+			delete dest[output.id].id;
+		} else {
+			dest[item.id] = stripNull(item);
+			delete dest[item.id].id;
+		}
+
+		Object.keys(item).forEach( (tag) => {
+			if (item[tag] === null) {
+				delete item[tag];
+			}
+		});
 	});
+
 	return dest;
 };
 
@@ -15,24 +28,30 @@ export const arrayify = (destroyMe, key) => {
 	return dest;
 };
 
-export const objectifyGroupSettings = (array, targetKey) => {
-
-	const dest = {};
+export const objectifyGroupSettings = (array, targetKey, dest) => {
 
 	array.forEach( (setting) => {
 		const target = setting[targetKey];
-		if (!dest[target]) {
-			dest[target] = {};
+		if (!dest[target].settings) {
+			dest[target].settings = {};
 		}
 		if (setting.value === 'json') {
-			dest[target][setting.tag] = {};
-			dest[target][setting.tag].json = JSON.parse(setting.value_text);
+			if (setting.value_text) {
+				dest[target].settings[setting.tag] = {};
+				dest[target].settings[setting.tag].json = JSON.parse(setting.value_text);
+			}
 		} else if (setting.value === 'date') {
-			dest[target][setting.tag] = { date: setting.value_date };
+			if (setting.value_date) {
+				dest[target].settings[setting.tag] = { date: setting.value_date };
+			}
 		} else if (setting.value === 'text') {
-			dest[target][setting.tag] = { text: setting.value_text };
+			if (setting.value_text) {
+				dest[target].settings[setting.tag] = { text: setting.value_text };
+			}
 		} else {
-			dest[target][setting.tag] = { value: setting.value };
+			if (setting.value) {
+				dest[target].settings[setting.tag] = { value: setting.value };
+			}
 		}
 	});
 	return dest;
@@ -57,18 +76,37 @@ export const objectifySettings = (array) => {
 	return dest;
 };
 
-export const objectStrip = (target, stripme) => {
+export const objectStrip = (target, stripme, booleans) => {
 
 	stripme?.forEach( (strip) => {
 		delete target[strip];
 	});
 
-	Object.keys(target).forEach( (tag) => {
-		if (target[tag] === null) {
-			delete target[tag];
+	booleans?.forEach( (boolean) => {
+
+		if (
+			!target[boolean]
+			|| target[boolean] === 0
+			|| target[boolean] === false
+		) {
+			delete target[boolean];
+		} else {
+			target[boolean] = true;
 		}
 	});
 
+	return stripNull(target);
+};
+
+const stripNull = (target) => {
+	Object.keys(target).forEach( (tag) => {
+		if (
+			target[tag] === null
+			|| target[tag] === 0
+		) {
+			delete target[tag];
+		}
+	});
 	return target;
 };
 

@@ -18,7 +18,7 @@ const protocolSetting = (sequelize, DataTypes) => {
 			allowNull: true,
 		},
 	},{
-		tableName: 'protocol',
+		tableName: 'protocol_setting',
 	});
 };
 
