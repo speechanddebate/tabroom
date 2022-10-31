@@ -234,13 +234,78 @@ export const backupTourn = {
 		});
 
 		rawSchoolStudents.forEach( (student) => {
-			if (!tourn.schools[student.school].students) {
-				tourn.schools[student.school].students = {};
+			const school = tourn.schools[student.school];
+			if (!school.students) {
+				school.students = {};
 			}
-			tourn.schools[student.school].students[student.id] = student;
-			delete tourn.schools[student.school].students[student.id].school;
-			delete tourn.schools[student.school].students[student.id].chapter;
-			delete tourn.schools[student.school].students[student.id].id;
+			school.students[student.id] = student;
+			delete school.students[student.id].chapter;
+			delete school.students[student.id].school;
+			delete school.students[student.id].id;
+		});
+
+		const rawSchoolEntries = await db.sequelize.query(`
+			select
+				entry.id,
+				entry.code, entry.name,
+				entry.ada, entry.active, entry.tba, entry.dropped, entry.waitlist, entry.unconfirmed,
+				entry.dq,
+				entry.created_at, entry.registered_by,
+				entry.event, entry.school
+			from school, entry
+			where school.tourn = :tournId
+				and school.id = entry.school
+		`,{
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		rawSchoolEntries.forEach( (entry) => {
+
+			const school = tourn.schools[entry.school];
+
+			if (!school.entries) {
+				school.entries = {};
+			}
+			school.entries[entry.id] = entry;
+			delete school.entries[entry.id].school;
+			delete school.entries[entry.id].id;
+		});
+
+		const rawEntrySettings = await db.sequelize.query(`
+			select
+				entry.id entry, entry.school,
+				es.tag, es.value, es.value_date, es.value_text
+			from (entry, entry_setting es, school)
+			where school.tourn = :tournId
+				and school.id = entry.school
+				and entry.id = es.entry
+			group by entry.id
+		`,{
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		rawEntrySettings.forEach( (es) => {
+			const entry = tourn.schools[es.school].entries[es.entry];
+
+			if (!entry.value) {
+				return;
+			}
+
+			if (!entry.settings) {
+				entry.settings = {};
+			}
+
+			if (es.value === 'date') {
+				entry.settings[es.tag] = es.value_date;
+			} else if (es.value === 'text') {
+				entry.settings[es.tag] = es.value_text;
+			} else if (es.value === 'json') {
+				entry.settings[es.tag] = es.value_json;
+			} else if (es.value) {
+				entry.settings[es.tag] = es.value;
+			}
 		});
 
 		// And the real monster: Categories, judges, events, rounds, and results.
