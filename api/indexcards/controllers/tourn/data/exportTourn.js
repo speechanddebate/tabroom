@@ -214,6 +214,35 @@ export const backupTourn = {
 
 		tourn.schools = objectifyGroupSettings(rawSchoolSettings, 'school', tourn.schools);
 
+		const rawSchoolStudents = await db.sequelize.query(`
+			select
+				student.id,
+				student.first, student.middle, student.last, student.phonetic,
+				student.grad_year, student.nsda, student.novice, student.retired,
+				student.person, student.chapter,
+				school.id school
+			from event, entry, entry_student es, student, school
+			where event.tourn = :tournId
+				and event.id = entry.event
+				and entry.id = es.entry
+				and es.student = student.id
+				and student.chapter = school.chapter
+				and school.tourn = event.tourn
+		`,{
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		rawSchoolStudents.forEach( (student) => {
+			if (!tourn.schools[student.school].students) {
+				tourn.schools[student.school].students = {};
+			}
+			tourn.schools[student.school].students[student.id] = student;
+			delete tourn.schools[student.school].students[student.id].school;
+			delete tourn.schools[student.school].students[student.id].chapter;
+			delete tourn.schools[student.school].students[student.id].id;
+		});
+
 		// And the real monster: Categories, judges, events, rounds, and results.
 
 		return res.status(200).json(tourn);
