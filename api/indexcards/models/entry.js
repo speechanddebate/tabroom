@@ -18,11 +18,6 @@ const entry = (sequelize, DataTypes) => {
 			allowNull: false,
 			defaultValue: '0',
 		},
-		tba: {
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0',
-		},
 		dropped: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
@@ -34,11 +29,6 @@ const entry = (sequelize, DataTypes) => {
 			defaultValue: '0',
 		},
 		unconfirmed: {
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0',
-		},
-		dq: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
 			defaultValue: '0',
