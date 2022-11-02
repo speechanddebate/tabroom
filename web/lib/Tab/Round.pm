@@ -8,14 +8,14 @@ Tab::Round->columns(Essential => qw/type name label flighted published
 							site
 							event
 							runoff
-							tiebreak_set
+							protocol
 							timeslot
 							timestamp/);
 
 Tab::Round->has_a(site         => 'Tab::Site');
 Tab::Round->has_a(event        => 'Tab::Event');
 Tab::Round->has_a(runoff       => 'Tab::Round');
-Tab::Round->has_a(tiebreak_set => 'Tab::TiebreakSet');
+Tab::Round->has_a(protocol => 'Tab::Protocol');
 Tab::Round->has_a(timeslot     => 'Tab::Timeslot');
 
 Tab::Round->has_many(jpools     => [Tab::JPoolRound                => 'jpool']);

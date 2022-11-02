@@ -6,10 +6,10 @@ Tab::Tiebreak->columns(All => qw/id name
 									truncate truncate_smallest
 									multiplier violation result priority
 									highlow highlow_count highlow_threshold
-									highlow_target child tiebreak_set chair
+									highlow_target child protocol chair
 									timestamp/);
-Tab::Tiebreak->has_a(tiebreak_set => 'Tab::TiebreakSet');
-Tab::Tiebreak->has_a(child => 'Tab::TiebreakSet');
+Tab::Tiebreak->has_a(protocol => 'Tab::Protocol');
+Tab::Tiebreak->has_a(child => 'Tab::Protocol');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
