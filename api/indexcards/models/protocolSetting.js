@@ -18,7 +18,7 @@ const protocolSetting = (sequelize, DataTypes) => {
 			allowNull: true,
 		},
 	},{
-		tableName: 'tiebreak_set_setting',
+		tableName: 'protocol_setting',
 	});
 };
 

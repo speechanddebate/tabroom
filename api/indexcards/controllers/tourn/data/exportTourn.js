@@ -15,13 +15,13 @@ export const backupTourn = {
 		// A bunch of little things that are all at the other end of a simple
 		// FK relationship:
 
-		tourn.emails        = objectify(await db.email.findAll({ where: { tourn: tourn.id } }));
-		tourn.webpages      = objectify(await db.webpage.findAll({ where: { tourn: tourn.id } }));
+		tourn.emails      = objectify(await db.email.findAll({ where: { tourn: tourn.id } }));
+		tourn.webpages    = objectify(await db.webpage.findAll({ where: { tourn: tourn.id } }));
+		tourn.permissions = objectify(await db.permission.findAll({ where: { tourn: tourn.id } }));
+		tourn.fines       = objectify( await db.fine.findAll({ where: { tourn: tourn.id } }));
+		tourn.patterns    = objectify( await db.pattern.findAll({ where: { tourn: tourn.id } }));
+		tourn.timeslots   = objectify( await db.timeslot.findAll({ where: { tourn: tourn.id } }));
 
-		tourn.permissions   = objectify(await db.permission.findAll({ where: { tourn: tourn.id } }));
-		tourn.fines         = objectify(await db.fine.findAll({ where: { tourn: tourn.id } }));
-		tourn.patterns      = objectify(await db.pattern.findAll({ where: { tourn: tourn.id } }));
-		tourn.timeslots     = objectify(await db.timeslot.findAll({ where: { tourn: tourn.id } }));
 		tourn.settings      = objectifySettings(
 			await db.tournSetting.findAll({ where: { tourn: tourn.id } })
 		);
@@ -60,15 +60,13 @@ export const backupTourn = {
 					id        : protocol.pid,
 					name      : protocol.pname,
 					tiebreaks : {},
-					settings  : {},
 				};
 			}
 
 			tourn.protocols[protocol.pid].tiebreaks[protocol.id] = objectStrip(
 				protocol,
-				['pid', 'pname', 'timestamp', 'protocol', 'tiebreak_set', 'id']
+				['pid', 'pname', 'timestamp', 'protocol', 'id']
 			);
-
 		});
 
 		const rawProtocolSettings = await db.sequelize.query(`
@@ -81,12 +79,7 @@ export const backupTourn = {
 			type: db.sequelize.QueryTypes.SELECT,
 		});
 
-		const protocolSettings = objectifyGroupSettings(rawProtocolSettings, 'protocol');
-
-		Object.keys(protocolSettings).forEach( (protocolId) => {
-			console.log(protocolId);
-			tourn.protocols[protocolId].settings = protocolSettings[protocolId];
-		});
+		tourn.protocols = objectifyGroupSettings(rawProtocolSettings, 'protocol', tourn.protocols);
 
 		// Room Pools
 		tourn.rpools = await db.sequelize.query(`
@@ -132,12 +125,188 @@ export const backupTourn = {
 					rooms  : {},
 				};
 			}
-			tourn.sites[room.sid].rooms[room.id] = objectStrip(room, ['id', 'sid', 'sname', 'timestamp', 'deleted', 'online']);
+			tourn.sites[room.sid].rooms[room.id] = objectStrip(
+				room,
+				['id', 'sid', 'sname', 'timestamp', 'deleted', 'online', 'building'],
+				['ada', 'inactive'],
+			);
 		});
 
 		// Tournament result sets.  These can be bulky.
+		tourn.result_sets = objectify(await db.resultSet.findAll({ where: { tourn: tourn.id } }));
+
+		const resultKeys = await db.sequelize.query(`
+			select result_key.*
+				from result_set, result_key
+			where result_key.result_set = result_set.id
+				and result_set.tourn = :tournId
+		`, {
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		resultKeys.forEach( (rkey) => {
+			if (!tourn.result_sets[rkey.result_set].keys) {
+				tourn.result_sets[rkey.result_set].keys = {};
+			}
+			tourn.result_sets[rkey.result_set].keys[rkey.id] = objectStrip(
+				rkey,
+				['result_set', 'timestamp', 'id'],
+				['no_sort', 'sort_desc'],
+			);
+		});
+
+		const results = await db.sequelize.query(`
+			select result.*
+				from result_set, result
+			where result.result_set = result_set.id
+				and result_set.tourn = :tournId
+		`, {
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		results.forEach( (result) => {
+			if (!tourn.result_sets[result.result_set].results) {
+				tourn.result_sets[result.result_set].results = {};
+			}
+			tourn.result_sets[result.result_set].results[result.id] = objectStrip(
+				result,
+				['result_set', 'timestamp', 'id'],
+			);
+		});
+
+		const resultValues = await db.sequelize.query(`
+			select result_value.*, result_set.id result_set
+				from result_set, result, result_value
+			where result.result_set = result_set.id
+				and result_set.tourn = :tournId
+				and result.id = result_value.result
+		`, {
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		resultValues.forEach( (rValue) => {
+
+			if (!tourn.result_sets[rValue.result_set].results[rValue.result].details) {
+				tourn.result_sets[rValue.result_set].results[rValue.result].details = {};
+			}
+
+			tourn.result_sets[rValue.result_set].results[rValue.result].details[rValue.id] = objectStrip(
+				rValue,
+				['result_set', 'result', 'timestamp', 'id'],
+			);
+		});
 
 		// And now the fun parts.  Registration data, which includes schools, entries, etc.  NOT judges in the full tourn dump.
+		tourn.schools = objectify( await db.school.findAll({ where: { tourn: tourn.id } }));
+
+		const rawSchoolSettings = await db.sequelize.query(`
+			select ps.*
+			from school, school_setting ps
+			where school.tourn = :tournId
+				and ps.school = school.id
+		`,{
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		tourn.schools = objectifyGroupSettings(rawSchoolSettings, 'school', tourn.schools);
+
+		const rawSchoolStudents = await db.sequelize.query(`
+			select
+				student.id,
+				student.first, student.middle, student.last, student.phonetic,
+				student.grad_year, student.nsda, student.novice, student.retired,
+				student.person, student.chapter,
+				school.id school
+			from event, entry, entry_student es, student, school
+			where event.tourn = :tournId
+				and event.id = entry.event
+				and entry.id = es.entry
+				and es.student = student.id
+				and student.chapter = school.chapter
+				and school.tourn = event.tourn
+		`,{
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		rawSchoolStudents.forEach( (student) => {
+			const school = tourn.schools[student.school];
+			if (!school.students) {
+				school.students = {};
+			}
+			school.students[student.id] = student;
+			delete school.students[student.id].chapter;
+			delete school.students[student.id].school;
+			delete school.students[student.id].id;
+		});
+
+		const rawSchoolEntries = await db.sequelize.query(`
+			select
+				entry.id,
+				entry.code, entry.name,
+				entry.ada, entry.active, entry.tba, entry.dropped, entry.waitlist, entry.unconfirmed,
+				entry.dq,
+				entry.created_at, entry.registered_by,
+				entry.event, entry.school
+			from school, entry
+			where school.tourn = :tournId
+				and school.id = entry.school
+		`,{
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		rawSchoolEntries.forEach( (entry) => {
+
+			const school = tourn.schools[entry.school];
+
+			if (!school.entries) {
+				school.entries = {};
+			}
+			school.entries[entry.id] = entry;
+			delete school.entries[entry.id].school;
+			delete school.entries[entry.id].id;
+		});
+
+		const rawEntrySettings = await db.sequelize.query(`
+			select
+				entry.id entry, entry.school,
+				es.tag, es.value, es.value_date, es.value_text
+			from (entry, entry_setting es, school)
+			where school.tourn = :tournId
+				and school.id = entry.school
+				and entry.id = es.entry
+			group by entry.id
+		`,{
+			replacements: { tournId: req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		rawEntrySettings.forEach( (es) => {
+			const entry = tourn.schools[es.school].entries[es.entry];
+
+			if (!entry.value) {
+				return;
+			}
+
+			if (!entry.settings) {
+				entry.settings = {};
+			}
+
+			if (es.value === 'date') {
+				entry.settings[es.tag] = es.value_date;
+			} else if (es.value === 'text') {
+				entry.settings[es.tag] = es.value_text;
+			} else if (es.value === 'json') {
+				entry.settings[es.tag] = es.value_json;
+			} else if (es.value) {
+				entry.settings[es.tag] = es.value;
+			}
+		});
 
 		// And the real monster: Categories, judges, events, rounds, and results.
 
