@@ -5,7 +5,7 @@ Tab::Entry->columns(Primary => qw/id/);
 Tab::Entry->columns(Essential => qw/code name active dropped waitlist
 									unconfirmed tourn school event/);
 
-Tab::Entry->columns(Others => qw/registered_by ada tba created_at timestamp/);
+Tab::Entry->columns(Others => qw/registered_by ada created_at timestamp/);
 
 Tab::Entry->columns(TEMP => qw/panelid speaks side ballot othername schname regname
 								regcode region pullup won lost schoolid
