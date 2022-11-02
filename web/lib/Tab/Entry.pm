@@ -3,7 +3,7 @@ use base 'Tab::DBI';
 Tab::Entry->table('entry');
 Tab::Entry->columns(Primary => qw/id/);
 Tab::Entry->columns(Essential => qw/code name active dropped waitlist
-									unconfirmed dq tourn school event/);
+									unconfirmed tourn school event/);
 
 Tab::Entry->columns(Others => qw/registered_by ada tba created_at timestamp/);
 
