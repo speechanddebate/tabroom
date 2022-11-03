@@ -261,7 +261,6 @@ export const backupTourn = {
 		});
 
 		rawSchoolEntries.forEach( (entry) => {
-
 			const school = tourn.schools[entry.school];
 
 			if (!school.entries) {
