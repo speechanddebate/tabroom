@@ -2,13 +2,14 @@ import React from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useForm } from 'react-hook-form';
 import styles from './header.module.css';
-import { loadTournSearch } from '../redux/ducks/search';
+import { loadTournSearch, clearTournSearch } from '../redux/ducks/search';
 
 const SearchBar = () => {
 
 	const dispatch = useDispatch();
 	const sector = useSelector((state) => state.sector);
 	const tourn = useSelector((state) => state.tourn);
+	const tournSearch = useSelector((state) => state.tournSearch);
 
 	const setupSearch = {};
 
@@ -22,7 +23,7 @@ const SearchBar = () => {
 
 	const {
 		register,
-		formState: { errors, isValid },
+		formState: { isValid },
 		handleSubmit,
 	} = useForm({
 		mode: 'all',
@@ -36,6 +37,28 @@ const SearchBar = () => {
 			dispatch(loadTournSearch(data.searchString, 'future'));
 		}
 	};
+
+	const escHandler = (e) => {
+		e.preventDefault();
+		if (e.key === 'Escape') {
+			dispatch(clearTournSearch());
+		}
+	};
+
+	const clearSearchResults = () => {
+		dispatch(clearTournSearch());
+	};
+
+	const searchRef = React.useRef(null);
+
+	const goToSearch = (e) => {
+		e.preventDefault();
+		if (e.ctrlKey && e.key === 's') {
+			searchRef.current.focus();
+		}
+	};
+
+	document.addEventListener('keydown', goToSearch);
 
 	const dynamicSearchHandler = async (data) => {
 		if (data.searchString.length > 4) {
@@ -58,6 +81,7 @@ const SearchBar = () => {
 						id             = {styles.searchtext}
 						type           = "searchString"
 						maxLength      = "128"
+						ref            = {searchRef}
 						name           = "search"
 						placeholder    = {setupSearch.tag}
 						className      = "notfirst"
@@ -66,6 +90,7 @@ const SearchBar = () => {
 						autoCorrect    = "off"
 						autoCapitalize = "off"
 						spellCheck     = "false"
+						onKeyDown      = {escHandler}
 						{...register('searchString', { required: true })}
 					/>
 					<button
@@ -78,11 +103,22 @@ const SearchBar = () => {
 				</span>
 			</form>
 
-			<div id={styles.searchError} className={errors.name ? '' : 'hidden'}>
-				{ errors.name?.type === 'required' && <p>Please input text to search for.</p>}
-			</div>
-
-			<SearchResults />
+			{
+				(tournSearch.exactMatches?.length > 0
+					|| tournSearch.partialMatches?.length > 0
+				) &&
+				<div id={styles.searchOverlay} tabIndex="-1" onKeyDown={escHandler}>
+					<div id={styles.searchResults}>
+						<div
+							id      = {styles.searchResultsHeader}
+							onClick = {clearSearchResults}
+						> Clear Search Results
+							<span className="fa fa-sm fa-times" />
+						</div>
+						<SearchResults />
+					</div>
+				</div>
+			}
 		</span>
 	);
 };
@@ -108,28 +144,26 @@ const SearchResults = (results) => {
 
 	return (
 		<div>
-			<div id={styles.searchResults} className={tournSearch ? '' : 'hidden'}>
-				{
-					tournSearch.exactMatches?.map((match) => (
-						<SearchItem
-							key   = {match.id}
-							scope = "exact"
-							term  = {tournSearch.searchString}
-							tourn = {match}
-						/>
-					))
-				}
-				{
-					tournSearch.partialMatches?.map((match) => (
-						<SearchItem
-							key   = {match.id}
-							scope = "partial"
-							term  = {tournSearch.searchString}
-							tourn = {match}
-						/>
-					))
-				}
-			</div>
+			{
+				tournSearch.exactMatches?.map((match) => (
+					<SearchItem
+						key   = {match.id}
+						scope = "exact"
+						term  = {tournSearch.searchString}
+						tourn = {match}
+					/>
+				))
+			}
+			{
+				tournSearch.partialMatches?.map((match) => (
+					<SearchItem
+						key   = {match.id}
+						scope = "partial"
+						term  = {tournSearch.searchString}
+						tourn = {match}
+					/>
+				))
+			}
 		</div>
 	);
 };
