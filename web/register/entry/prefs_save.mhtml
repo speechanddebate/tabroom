@@ -1,184 +1,177 @@
 <%args>
-	$tourn
-	$entry_id => undef
-	$event_id => undef
-	$style    => undef
+	$entry_id
+	$person
+	$fill => undef
 </%args>
 <%init>
 
-	my $tz = $tourn->tz;
-	$tz = "UTC" unless $tz;
-	my $now = DateTime->now( time_zone => $tz );
+	my $now = DateTime->now();
+	my $err;
 
 	my $entry = Tab::Entry->retrieve($entry_id);
-	my $event = $entry->event;
-	my $category = $event->category;
+	$m->abort unless $entry;
 
-	my $prefs            = $category->setting("prefs");
-	my $rounds_per       = $category->setting("rounds_per");
-	my $ignore_conflicts = $category->setting("conflict_denominator");
-	my $side_based       = $category->setting("side_based_prefs");
+	my $school = $entry->school;
 
-	my %tier_by_name = ();
+	my $category = $entry->event->category;
+	my %category_settings = $category->all_settings();
 
-	if ($prefs eq "tiered"
-		|| $prefs eq "tiered_round"
-		|| $prefs eq "caps"
-	) {
-		foreach my $tier ($category->rating_tiers) {
-			$tier_by_name{$tier->name} = $tier->id;
-		}
-	}
+	my $dbh = Tab::DBI->db_Main();
 
-	if ($prefs eq "ordinals") {
-		Tab::Entry->set_sql(
-			wipe_prefs =>
-			"delete from rating where entry = ? and ordinal > 0"
-		);
-		Tab::Entry->sql_wipe_prefs->execute($entry->id);
+	my $limit;
+
+	if ($category_settings{"pref_jpool"}) {
+		$limit = " and exists (
+			select jpj.id
+			from jpool_judge jpj
+			where jpj.judge = judge.id
+			and jpj.jpool = ".$category_settings{'pref_jpool'}." ) ";
 	} else {
-		Tab::Entry->set_sql(wipe_prefs => "delete from rating where entry = ? and rating_tier > 0");
-		Tab::Entry->sql_wipe_prefs->execute($entry->id);
+		$limit = " and judge.category = ".$category->id." ";
 	}
 
-	my @conflicts = Tab::Strike->search(
-		entry => $entry->id,
-		type => "conflict"
-	);
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.code, judge.first, judge.middle, judge.last, judge.school,
+			judgeschool.name schoolname,
+			judge.obligation, judge.hired,
+			neutral.value neutral,
+			online_hybrid.value online_hybrid,
+			diverse.value diverse,
+			free_strike.value free_strike,
+			first_year.value first_year,
+			person.id person, paradigm.id paradigm,
+			judge_hire.id hire,
+			crt.name coach_rating,
+			rating.id rating, rating.ordinal, rating.percentile,
+			aff_rating.id aff_rating, aff_rating.ordinal aff_ordinal, aff_rating.percentile aff_percentile,
+			neg_rating.id neg_rating, neg_rating.ordinal neg_ordinal, neg_rating.percentile neg_percentile,
+			tier.id tier, tier.name tiername
+		from (judge, entry, school, category)
+			left join school judgeschool on judge.school = judgeschool.id
+			left join person on judge.person = person.id
+			left join person_setting paradigm on paradigm.person = person.id and paradigm.tag = 'paradigm'
+			left join judge_setting neutral on neutral.tag = 'neutral' and neutral.judge = judge.id
+			left join judge_setting online_hybrid on online_hybrid.tag = 'online_hybrid' and online_hybrid.judge = judge.id
+			left join judge_setting diverse on diverse.tag = 'diverse' and diverse.judge = judge.id
+			left join judge_setting free_strike on free_strike.tag = 'free_strike' and free_strike.judge = judge.id
+			left join judge_setting first_year on first_year.tag = 'first_year' and first_year.judge = judge.id
+			left join rating on rating.judge = judge.id and rating.entry = entry.id and (rating.side IS NULL or rating.side = 0)
+			left join rating aff_rating on aff_rating.judge = judge.id and aff_rating.entry = entry.id and aff_rating.side = 1
+			left join rating neg_rating on neg_rating.judge = judge.id and neg_rating.entry = entry.id and neg_rating.side = 2
 
-	push @conflicts, Tab::Strike->search(
-		school => $entry->school->id,
-		type   => "school"
-	);
+			left join judge_hire on judge_hire.judge = judge.id and judge_hire.school = school.id
 
-	my %event_struck =
-		map {$_->judge->id => 1}
-		Tab::Strike->search(type => "event", event => $entry->event->id);
+			left join rating_tier crt
+				on crt.category = category.id
+				and exists (
+				select cr.id from rating cr
+					where cr.type = 'coach'
+					and cr.judge = judge.id
+					and cr.rating_tier = crt.id
+			)
 
-	my %conflicts_by_id = map {$_->judge->id => $_} @conflicts;
-	my $school_id = $entry->school->id;
+			left join rating_tier tier on rating.rating_tier = tier.id
 
-	my @school_conflicts = $m->comp(
-		"/funclib/school_conflicts.mas",
-		school   => $entry->school,
-		category => $category
-	);
-	my %school_conflicts_by_id = map {$_->judge->id => $_} @school_conflicts;
+		where judge.active = 1
+			$limit
+			and judge.category = category.id
+			and entry.id = ?
+			and school.id = entry.school
+			and school.tourn = category.tourn
+			and not exists (
+				select strike.id from strike
+				where strike.judge = judge.id
+				and (strike.entry = entry.id OR strike.school = entry.school OR strike.event = entry.event)
+			)
+			and judge.school != entry.school
+			group by judge.id
+			order by judge.last
+	");
 
-	my @all_judges;
+	$sth->execute($entry->id);
 
-	if ($category->setting("pref_jpool")) {
-		my $jpool = Tab::JPool->retrieve($category->setting("pref_jpool"));
-		@all_judges = $m->comp("/funclib/jpool_judges.mas", jpool => $jpool);
+	my $update_sth = $dbh->prepare("update rating set ordinal = ?, percentile = ? where entry = ".$entry->id." and judge = ? and (side = ? OR side IS NULL)");
+
+	my $update_tier_sth = $dbh->prepare("update rating set rating_tier = ? where entry = ".$entry->id." and judge = ? and (side = ? OR side IS NULL)");
+
+	my $create_sth = $dbh->prepare("insert into rating (type, entered, ordinal, percentile, tourn, entry, judge, side) VALUES ('entry', NOW(), ?, ?, ".$school->tourn->id.", ".$entry->id.", ?, ?)");
+
+	my $create_tier_sth = $dbh->prepare("insert into rating (type, entered, rating_tier, tourn, entry, judge, side) VALUES ('entry', NOW(),  ?, ".$school->tourn->id.", ".$entry->id.", ?, ?)");
+	my $delete_sth = $dbh->prepare("delete from rating where entry = ".$entry->id." and judge = ?");
+
+	my $all_sth = $dbh->prepare("select distinct rating.judge from rating where rating.entry = ?");
+
+	my $results = $sth->fetchall_hash();
+	my $samesies;
+
+	if ($ARGS{"both_sides_same"}) {
+		$school->setting("both_sides_same", 1);
+		$samesies++;
 	} else {
-		@all_judges = $category->judges( active => 1 );
+		$school->setting("both_sides_same", 0);
 	}
 
-	my %rating_by_judge = ();
-	my %ordinal_by_judge = ();
-	my %judges_at_rating = ();
-	my $total_rounds;
+	if ($category_settings{'side_based_prefs'}) {
+		my $wipe_no_sides_sth = $dbh->prepare("delete from rating where entry = ? and side IS NULL");
+		$wipe_no_sides_sth->execute($entry->id);
+	}
 
-	JUDGE:
-	foreach my $judge (@all_judges) {
+	my $count = 1;
+	my %done_judges;
 
-		if ($ignore_conflicts) {
-			next JUDGE if $school_conflicts_by_id{$judge->id};
-			next JUDGE if $judge->school->id == $school_id;
-		}
+	if ($category_settings{'prefs'} eq "ordinals") {
 
-		next if $event_struck{$judge->id};
+		my $total_rounds;
+		my %ordinal_by_judge;
+		my %judges_at_rating;
 
-		if ($rounds_per) {
-			unless ($ARGS{$judge->id} == 999) {
-				$total_rounds += $judge->obligation;
-				$total_rounds += $judge->hired;
+		JUDGE:
+		foreach my $judge_ref (@{$results}) {
+
+			unless (
+				($category_settings{"free_strikes_no_pref"}  && $judge_ref->{"free_strike"})
+				|| ($category_settings{"fyo_free_strikes"} && $judge_ref->{"first_year"})
+			) {
+				if ($category_settings{'rounds_per'}) {
+					$total_rounds += $judge_ref->{obligation};
+					$total_rounds += $judge_ref->{hired};
+				} else {
+					$total_rounds++;
+				}
 			}
-		} else {
-			$total_rounds++;
-		}
 
-		next unless $ARGS{$judge->id};
+			if ($category_settings{'side_based_prefs'}) {
 
-		if ($prefs eq "ordinals") {
+				$ordinal_by_judge{1}{$judge_ref->{"id"}} = $ARGS{"aff_rating_".$judge_ref->{"id"}};
+				push (@{$judges_at_rating{1}{$ARGS{"aff_rating_".$judge_ref->{"id"}}}}, $judge_ref );
 
-			if ($side_based) {
-
-				my $rating = Tab::Rating->create({
-					type    => "entry",
-					tourn   => $tourn->id,
-					judge   => $judge->id,
-					entry   => $entry->id,
-					ordinal => $ARGS{$judge->id},
-					side    => 1,
-					entered => $now
-				});
-
-				$rating_by_judge{1}{$judge->id} = $rating;
-				$ordinal_by_judge{1}{$judge->id} = $ARGS{$judge->id};
-				push (@{$judges_at_rating{1}{$ARGS{$judge->id}}}, $judge );
-
-				my $neg = $ARGS{"neg_".$judge->id};
-				$neg = $ARGS{$judge->id} unless $neg;
-
-				my $neg_rating = Tab::Rating->create({
-					type    => "entry",
-					tourn   => $tourn->id,
-					judge   => $judge->id,
-					entry   => $entry->id,
-					ordinal => $neg,
-					side    => 2,
-					entered => $now
-				});
-
-				$rating_by_judge{2}{$judge->id} = $neg_rating;
-				$ordinal_by_judge{2}{$judge->id} = $ARGS{$judge->id};
-				push (@{$judges_at_rating{2}{$neg}}, $judge );
+				if ($samesies) {
+					$ordinal_by_judge{2}{$judge_ref->{"id"}} = $ARGS{"aff_rating_".$judge_ref->{"id"}};
+					push (@{$judges_at_rating{2}{$ARGS{"aff_rating_".$judge_ref->{"id"}}}}, $judge_ref );
+				} else {
+					next JUDGE unless $ARGS{"neg_rating_".$judge_ref->{"id"}};
+					$ordinal_by_judge{2}{$judge_ref->{"id"}} = $ARGS{"neg_rating_".$judge_ref->{"id"}};
+					push (@{$judges_at_rating{2}{$ARGS{"neg_rating_".$judge_ref->{"id"}}}}, $judge_ref );
+				}
 
 			} else {
 
-				my $rating = Tab::Rating->create({
-					type    => "entry",
-					tourn   => $tourn->id,
-					judge   => $judge->id,
-					entry   => $entry->id,
-					ordinal => $ARGS{$judge->id},
-					side    => 0,
-					entered => $now
-				});
+				next JUDGE unless $ARGS{$judge_ref->{"id"}};
+				$ordinal_by_judge{$judge_ref->{"id"}} = $ARGS{$judge_ref->{"id"}};
+				push (@{$judges_at_rating{$ARGS{$judge_ref->{"id"}}}}, $judge_ref );
 
-				$rating_by_judge{$judge->id} = $rating;
-				$ordinal_by_judge{$judge->id} = $ARGS{$judge->id};
-				push (@{$judges_at_rating{$ARGS{$judge->id}}}, $judge );
+
 			}
-
-		} else {
-
-			next JUDGE unless $tier_by_name{$ARGS{$judge->id}};
-
-			Tab::Rating->create({
-				type        => "entry",
-				tourn       => $tourn->id,
-				judge       => $judge->id,
-				entry       => $entry->id,
-				rating_tier => $tier_by_name{$ARGS{$judge->id}},
-				entered     => $now
-			});
 		}
-	}
 
-	my $rounds_before;
-
-	if ($prefs eq "ordinals") {
-
-		$total_rounds = scalar @all_judges unless $total_rounds;
-
-		if ($side_based) {
+		$total_rounds = scalar @{$results} unless $total_rounds;
+		if ($category_settings{'side_based_prefs'}) {
 
 			foreach my $side (1 .. 2) {
 
 				my $rounds_before = 1;
-				my $count;
+				my $counter;
 
 				foreach my $ordinal (sort {$a <=> $b} keys %{$judges_at_rating{$side}} ) {
 
@@ -186,34 +179,55 @@
 					my $rounds_add;
 					my $judge_count;
 
-					foreach my $judge (@{$judges_at_rating{$side}{$ordinal}}) {
-						$judge_count++;
-						$count++;
+					foreach my $judge_ref (@{$judges_at_rating{$side}{$ordinal}}) {
 
-						if ($rounds_per) {
-							$rounds_add += $judge->obligation;
-							$rounds_add += $judge->hired;
-						} else {
-							$rounds_add++;
+						unless (
+							( $category_settings{"free_strikes_no_pref"}  && $judge_ref->{"free_strike"})
+							|| ($category_settings{"fyo_free_strikes"} && $judge_ref->{"first_year"})
+						) {
+
+							$judge_count++;
+
+							if ($category_settings{'rounds_per'}) {
+								$rounds_add += $judge_ref->{obligation};
+								$rounds_add += $judge_ref->{hired};
+							} else {
+								$rounds_add++;
+							}
 						}
 					}
 
-					foreach my $judge (@{$judges_at_rating{$side}{$ordinal}}) {
-						my $percentile = ($rounds_before / $total_rounds) * 100;
-						my $rating = $rating_by_judge{$side}{$judge->id};
-						$rating->percentile($percentile);
-						$rating->update;
+					foreach my $judge_ref (@{$judges_at_rating{$side}{$ordinal}}) {
+
+						if ($fill) {
+							$counter++;
+							$ordinal = $counter;
+						}
+
+						my $percentile = 0;
+						$percentile = ( ($rounds_before) / $total_rounds) * 100 if $rounds_before;
+
+						my $tag = "aff_";
+						$tag = "neg_" if $side == 2;
+
+						unless ($judge_ref->{$tag."ordinal"}) {
+							$create_sth->execute($ordinal, $percentile, $judge_ref->{"id"}, $side);
+						} elsif ($judge_ref->{$tag."ordinal"} != $ordinal || $judge_ref->{$tag."percentile"} != $percentile) {
+							$update_sth->execute($ordinal, $percentile, $judge_ref->{"id"}, $side);
+						}
+
+						$done_judges{$judge_ref->{id}}++;
 					}
 
 					$rounds_before += $rounds_add;
-
+					$rounds_before += $judge_count if (not defined $rounds_add);
 				}
 			}
 
 		} else {
 
+			my $counter;
 			my $rounds_before = 1;
-			my $count;
 
 			foreach my $ordinal (sort {$a <=> $b} keys %judges_at_rating ) {
 
@@ -221,33 +235,80 @@
 				my $rounds_add;
 				my $judge_count;
 
-				foreach my $judge (@{$judges_at_rating{$ordinal}}) {
-					$judge_count++;
-					$count++;
+				foreach my $judge_ref (@{$judges_at_rating{$ordinal}}) {
 
-					if ($rounds_per) {
-						$rounds_add += $judge->obligation;
-						$rounds_add += $judge->hired;
-					} else {
-						$rounds_add++;
+					unless (
+						($category_settings{"free_strikes_no_pref"}  && $judge_ref->{"free_strike"})
+						|| ($category_settings{"fyo_free_strikes"} && $judge_ref->{"first_year"})
+					) {
+
+						$judge_count++;
+
+						if ($category_settings{'rounds_per'}) {
+							$rounds_add += $judge_ref->{obligation};
+							$rounds_add += $judge_ref->{hired};
+						} else {
+							$rounds_add++;
+						}
 					}
 				}
 
-				foreach my $judge (@{$judges_at_rating{$ordinal}}) {
-					my $percentile = ($rounds_before / $total_rounds) * 100;
-					my $rating = $rating_by_judge{$judge->id};
-					$rating->percentile($percentile);
-					$rating->update;
+				foreach my $judge_ref (@{$judges_at_rating{$ordinal}}) {
+
+					my $percentile = 0;
+					$percentile = ( ($rounds_before) / $total_rounds) * 100 if $rounds_before;
+
+					$counter++;
+
+					if ($fill) {
+						$ordinal = $counter;
+					}
+
+					unless ($judge_ref->{ordinal}) {
+						$create_sth->execute($ordinal, $percentile, $judge_ref->{"id"}, 0);
+					} elsif ($judge_ref->{ordinal} != $ordinal || $judge_ref->{"percentile"} != $percentile) {
+						$update_sth->execute($ordinal, $percentile, $judge_ref->{"id"}, 0);
+					}
+
+					Tab::debuglog("Judge ".$judge_ref->{last}." ordinal $ordinal");
+
+					$done_judges{$judge_ref->{id}}++;
 				}
 
 				$rounds_before += $rounds_add;
-
+				$rounds_before += $judge_count if (not defined $rounds_add);
 			}
+		}
+
+	} else {
+
+		my %tiers_by_id = map {$_->id => $_} $category->rating_tiers;
+
+		foreach my $judge_ref (@{$results}) {
+
+			my $tier = $tiers_by_id{$ARGS{$judge_ref->{id}}};
+			next unless $tier;
+
+			if (not defined $judge_ref->{tier}) {
+				$create_tier_sth->execute($tier, $judge_ref->{"id"}, 0);
+			} elsif ($judge_ref->{tier} != $ARGS{$judge_ref->{id}}) {
+				$update_tier_sth->execute($tier, $judge_ref->{"id"}, 0);
+			}
+
+			$done_judges{$judge_ref->{id}}++;
 		}
 	}
 
-	my $msg = $entry->code." prefs saved in ".$category->abbr." to $rounds_before rounds";
-	$m->redirect("prefs.mhtml?school_id=".$entry->school->id."&entry_id=".$entry_id."&category_id=".$category->id."&style=$style&msg=".$msg);
+	$all_sth->execute($entry->id);
+	my $all = $all_sth->fetchall_hash();
+
+	#Clean the unrated out
+    foreach my $judge_ref (@{$all}) {
+		next if $done_judges{$judge_ref->{judge}};
+		$delete_sth->execute($judge_ref->{judge});
+	}
+
+	my $msg = $entry->code." prefs saved in ".$category->abbr;
+	$m->redirect("prefs.mhtml?entry_id=".$entry_id."&style=entry_ratings&msg=".$msg."&err=".$err."#yo");
 
 </%init>
-
