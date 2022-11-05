@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useForm } from 'react-hook-form';
 import styles from './header.module.css';
@@ -39,8 +39,8 @@ const SearchBar = () => {
 	};
 
 	const escHandler = (e) => {
-		e.preventDefault();
 		if (e.key === 'Escape') {
+			e.preventDefault();
 			dispatch(clearTournSearch());
 		}
 	};
@@ -49,16 +49,23 @@ const SearchBar = () => {
 		dispatch(clearTournSearch());
 	};
 
-	const searchRef = React.useRef(null);
+	const searchInput = useRef();
 
-	const goToSearch = (e) => {
-		e.preventDefault();
-		if (e.ctrlKey && e.key === 's') {
-			searchRef.current.focus();
-		}
-	};
+	useEffect(() => {
+		const goToSearch = (e) => {
+			if (e.ctrlKey && e.key === 's') {
+				e.preventDefault();
+				console.log(searchInput.current);
+				console.log('this is the thing that is busto Hardy');
+			}
+		};
 
-	document.addEventListener('keydown', goToSearch);
+		document.addEventListener('keydown', goToSearch);
+
+		return () => {
+			document.removeEventListener('keydown', goToSearch);
+		};
+	}, []);
 
 	const dynamicSearchHandler = async (data) => {
 		if (data.searchString.length > 4) {
@@ -80,8 +87,8 @@ const SearchBar = () => {
 					<input
 						id             = {styles.searchtext}
 						type           = "searchString"
+						ref            = {searchInput}
 						maxLength      = "128"
-						ref            = {searchRef}
 						name           = "search"
 						placeholder    = {setupSearch.tag}
 						className      = "notfirst"
