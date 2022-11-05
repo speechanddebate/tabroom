@@ -99,7 +99,7 @@ export const attendance = {
 		const startsQuery = `
 			select
 				judge.person person, panel.id panel, panel.timestamp timestamp,
-				ballot.judge_started startTime,
+				CONVERT_TZ(ballot.judge_started, '+00:00', tourn.tz) startTime,
 				ballot.audit audited,
 				started_by.first startFirst, started_by.last startLast,
 				judge.first judgeFirst, judge.last judgeLast,
@@ -138,8 +138,7 @@ export const attendance = {
 			status[attend.person][attend.panel] = {
 				tag         : attend.tag,
 				timestamp   : attend.timestamp.toJSON,
-				description : attend.description,
-				started     : showDateTime(attend.timestamp, { tz: attend.tz, format: 'daytime' }),
+				description : attend.description
 			};
 		});
 
@@ -178,11 +177,9 @@ export const attendance = {
 				status[start.person][start.panel].started_by = `${start.startFirst} ${start.startLast}`;
 			}
 
-			status[start.person][start.panel].started = showDateTime(
-				start.startTime,
-				{ tz: start.tz, format: 'daytime' }
-			);
-
+			if (start.startTime) {
+				status[start.person][start.panel].started = showDateTime(start.startTime);
+			}
 			status[start.person][start.panel].timestamp = start.timestamp;
 			status[start.person][start.panel].tag = 'present';
 
