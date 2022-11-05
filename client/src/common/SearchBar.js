@@ -25,6 +25,7 @@ const SearchBar = () => {
 		register,
 		formState: { isValid },
 		handleSubmit,
+		setFocus,
 	} = useForm({
 		mode: 'all',
 		defaultValues: {
@@ -32,12 +33,26 @@ const SearchBar = () => {
 		},
 	});
 
+	// Searching and hitting return
 	const searchHandler = async (data) => {
 		if (data.searchString.length > 2) {
+			console.log('this is a string');
 			dispatch(loadTournSearch(data.searchString, 'future'));
 		}
 	};
 
+	// Dynamic search as people are typing
+	const dynamicSearchHandler = async (data) => {
+		if (data.searchString.length > 4) {
+			dispatch(loadTournSearch(data.searchString, 'future'));
+		}
+
+		if (data.searchString.length < 1) {
+			dispatch(clearTournSearch());
+		}
+	};
+
+	// Various ways of clearing the search results and eliminating the window
 	const escHandler = (e) => {
 		if (e.key === 'Escape') {
 			e.preventDefault();
@@ -51,12 +66,13 @@ const SearchBar = () => {
 
 	const searchInput = useRef();
 
+	// Control S to get to the search box
+
 	useEffect(() => {
 		const goToSearch = (e) => {
 			if (e.ctrlKey && e.key === 's') {
 				e.preventDefault();
-				console.log(searchInput.current);
-				console.log('this is the thing that is busto Hardy');
+				setFocus('searchString');
 			}
 		};
 
@@ -65,17 +81,7 @@ const SearchBar = () => {
 		return () => {
 			document.removeEventListener('keydown', goToSearch);
 		};
-	}, []);
-
-	const dynamicSearchHandler = async (data) => {
-		if (data.searchString.length > 4) {
-			dispatch(loadTournSearch(data.searchString, 'future'));
-		}
-		if (!data.searchString.length) {
-			// tell the state to wipe the results altogether here somehow.
-			// also trigger this with a button click
-		}
-	};
+	}, [setFocus]);
 
 	return (
 		<span>
@@ -89,7 +95,6 @@ const SearchBar = () => {
 						type           = "searchString"
 						ref            = {searchInput}
 						maxLength      = "128"
-						name           = "search"
 						placeholder    = {setupSearch.tag}
 						className      = "notfirst"
 						tabIndex       = "-1"
