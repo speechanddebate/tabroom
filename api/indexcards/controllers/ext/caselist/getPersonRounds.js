@@ -84,6 +84,15 @@ const getPersonRounds = {
 
 		let rounds = await db.sequelize.query(sql, { replacements: [ids.toString()] });
 		rounds = rounds[0].filter(r => r.id);
+		rounds.forEach(r => {
+			if (['Quad', 'Quadocta', 'Quadocto'].indexOf(r.round) > -1) { r.round = 'Quads'; }
+			if (['Triple', 'Triple Octo', 'Triple Octa'].indexOf(r.round) > -1) { r.round = 'Triples'; }
+			if (['Double', 'Double Octo', 'Double Octa'].indexOf(r.round) > -1) { r.round = 'Doubles'; }
+			if (['Octo', 'Octos', 'Octa', 'Octofinal', 'Octafinal'].indexOf(r.round) > -1) { r.round = 'Octas'; }
+			if (['Quarter', 'Quarterfinal', 'Quarterfinals'].indexOf(r.round) > -1) { r.round = 'Quarters'; }
+			if (['Semi', 'Semifinal', 'Semifinals'].indexOf(r.round) > -1) { r.round = 'Semis'; }
+			if (['Final'].indexOf(r.round) > -1) { r.round = 'Finals'; }
+		});
 
 		// Remove share link if looking up another person's rounds,
 		// share links should only be accessible by the person themselves
