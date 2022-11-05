@@ -36,12 +36,12 @@ const getPersonRounds = {
 			ids = persons[0].map(p => p.person);
 		}
 
-		let rounds = await db.sequelize.query(`
+		let sql = `
 			SELECT
 				DISTINCT P.id,
 				T.name AS 'tournament',
 				COALESCE(NULLIF(R.label, ''), NULLIF(R.name, ''), NULLIF(R.type, ''), 'X') AS 'round',
-				CASE WHEN B.side = 1 THEN 'Aff' ELSE 'Neg' END AS 'side',
+				CASE WHEN B.side = 1 THEN 'A' ELSE 'N' END AS 'side',
 				O.code AS 'opponent',
 				GROUP_CONCAT(DISTINCT J.last) AS 'judge',
 				R.start_time AS 'start',
@@ -66,14 +66,44 @@ const getPersonRounds = {
 				PN.id IN (?)
 				AND R.published = 1
 				AND E.type = 'debate'
-				AND T.start > '${startOfYear}-08-01 00:00:00'
-				AND T.start < CURRENT_TIMESTAMP
 				AND T.hidden <> 1
+				AND T.start > '${startOfYear}-08-01 00:00:00'
+				AND T.start < DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 HOUR)
+		`;
+
+		if (req.query.current) {
+			sql += `
+				AND R.start_time > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 6 HOUR)
+			`;
+		}
+
+		sql += `
 			GROUP BY P.id
 			ORDER BY R.start_time DESC
-			`, { replacements: [ids.toString()] });
+		`;
 
+		let rounds = await db.sequelize.query(sql, { replacements: [ids.toString()] });
 		rounds = rounds[0].filter(r => r.id);
+		rounds.forEach(r => {
+			const numeric = parseInt(r.round?.replace(/[^\d]/g, '')?.trim()) || 0;
+			if (numeric > 0 && numeric < 10) { r.round = numeric; }
+			if (r.round?.toLowerCase()?.includes('quad')) { r.round = 'Quads'; }
+			if (r.round?.toLowerCase()?.includes('qd')) { r.round = 'Quads'; }
+			if (r.round?.toLowerCase()?.includes('qd')) { r.round = 'Quads'; }
+			if (r.round?.toLowerCase()?.includes('128')) { r.round = 'Quads'; }
+			if (r.round?.toLowerCase()?.includes('tri')) { r.round = 'Triples'; }
+			if (r.round?.toLowerCase()?.includes('trp')) { r.round = 'Triples'; }
+			if (r.round?.toLowerCase()?.includes('64')) { r.round = 'Triples'; }
+			if (r.round?.toLowerCase()?.includes('dou')) { r.round = 'Doubles'; }
+			if (r.round?.toLowerCase()?.includes('dbl')) { r.round = 'Doubles'; }
+			if (r.round?.toLowerCase()?.includes('32')) { r.round = 'Doubles'; }
+			if (r.round?.toLowerCase()?.includes('oct')) { r.round = 'Octas'; }
+			if (r.round?.toLowerCase()?.includes('16')) { r.round = 'Octas'; }
+			if (r.round?.toLowerCase()?.includes('quar')) { r.round = 'Quarters'; }
+			if (r.round?.toLowerCase()?.includes('qrt')) { r.round = 'Quarters'; }
+			if (r.round?.toLowerCase()?.includes('sem')) { r.round = 'Semis'; }
+			if (r.round?.toLowerCase()?.includes('fin')) { r.round = 'Finals'; }
+		});
 
 		// Remove share link if looking up another person's rounds,
 		// share links should only be accessible by the person themselves
@@ -107,6 +137,15 @@ getPersonRounds.GET.apiDoc = {
 			required    : false,
 			schema      : {
 				type    : 'string',
+			},
+		},
+		{
+			in          : 'query',
+			name        : 'current',
+			description : 'Whether to return only current rounds',
+			required    : false,
+			schema      : {
+				type    : 'boolean',
 			},
 		},
 		{
