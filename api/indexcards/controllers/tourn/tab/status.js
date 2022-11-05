@@ -99,7 +99,7 @@ export const attendance = {
 		const startsQuery = `
 			select
 				judge.person person, panel.id panel, panel.timestamp timestamp,
-				ballot.judge_started startTime,
+				CONVERT_TZ(ballot.judge_started, '+00:00', tourn.tz) startTime,
 				ballot.audit audited,
 				started_by.first startFirst, started_by.last startLast,
 				judge.first judgeFirst, judge.last judgeLast,
