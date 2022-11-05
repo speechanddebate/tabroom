@@ -138,8 +138,7 @@ export const attendance = {
 			status[attend.person][attend.panel] = {
 				tag         : attend.tag,
 				timestamp   : attend.timestamp.toJSON,
-				description : attend.description,
-				started     : showDateTime(attend.timestamp, { tz: attend.tz, format: 'daytime' }),
+				description : attend.description
 			};
 		});
 
