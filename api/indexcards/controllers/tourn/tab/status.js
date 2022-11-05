@@ -178,11 +178,9 @@ export const attendance = {
 				status[start.person][start.panel].started_by = `${start.startFirst} ${start.startLast}`;
 			}
 
-			status[start.person][start.panel].started = showDateTime(
-				start.startTime,
-				{ tz: start.tz, format: 'daytime' }
-			);
-
+			if (start.startTime) {
+				status[start.person][start.panel].started = showDateTime(start.startTime);
+			}
 			status[start.person][start.panel].timestamp = start.timestamp;
 			status[start.person][start.panel].tag = 'present';
 
