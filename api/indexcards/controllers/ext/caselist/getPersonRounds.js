@@ -86,23 +86,26 @@ const getPersonRounds = {
 		rounds = rounds[0].filter(r => r.id);
 		rounds.forEach(r => {
 			const numeric = parseInt(r.round?.replace(/[^\d]/g, '')?.trim()) || 0;
-			if (numeric > 0 && numeric < 10) { r.round = numeric; }
-			if (r.round?.toLowerCase()?.includes('quad')) { r.round = 'Quads'; }
-			if (r.round?.toLowerCase()?.includes('qd')) { r.round = 'Quads'; }
-			if (r.round?.toLowerCase()?.includes('qd')) { r.round = 'Quads'; }
-			if (r.round?.toLowerCase()?.includes('128')) { r.round = 'Quads'; }
-			if (r.round?.toLowerCase()?.includes('tri')) { r.round = 'Triples'; }
-			if (r.round?.toLowerCase()?.includes('trp')) { r.round = 'Triples'; }
-			if (r.round?.toLowerCase()?.includes('64')) { r.round = 'Triples'; }
-			if (r.round?.toLowerCase()?.includes('dou')) { r.round = 'Doubles'; }
-			if (r.round?.toLowerCase()?.includes('dbl')) { r.round = 'Doubles'; }
-			if (r.round?.toLowerCase()?.includes('32')) { r.round = 'Doubles'; }
-			if (r.round?.toLowerCase()?.includes('oct')) { r.round = 'Octas'; }
-			if (r.round?.toLowerCase()?.includes('16')) { r.round = 'Octas'; }
-			if (r.round?.toLowerCase()?.includes('quar')) { r.round = 'Quarters'; }
-			if (r.round?.toLowerCase()?.includes('qrt')) { r.round = 'Quarters'; }
-			if (r.round?.toLowerCase()?.includes('sem')) { r.round = 'Semis'; }
-			if (r.round?.toLowerCase()?.includes('fin')) { r.round = 'Finals'; }
+			if (numeric > 0 && numeric < 10) {
+				r.round = numeric;
+			} else {
+				if (r.round?.toLowerCase()?.includes('quad')) { r.round = 'Quads'; }
+				if (r.round?.toLowerCase()?.includes('qd')) { r.round = 'Quads'; }
+				if (r.round?.toLowerCase()?.includes('qd')) { r.round = 'Quads'; }
+				if (r.round?.toLowerCase()?.includes('128')) { r.round = 'Quads'; }
+				if (r.round?.toLowerCase()?.includes('tri')) { r.round = 'Triples'; }
+				if (r.round?.toLowerCase()?.includes('trp')) { r.round = 'Triples'; }
+				if (r.round?.toLowerCase()?.includes('64')) { r.round = 'Triples'; }
+				if (r.round?.toLowerCase()?.includes('dou')) { r.round = 'Doubles'; }
+				if (r.round?.toLowerCase()?.includes('dbl')) { r.round = 'Doubles'; }
+				if (r.round?.toLowerCase()?.includes('32')) { r.round = 'Doubles'; }
+				if (r.round?.toLowerCase()?.includes('oct')) { r.round = 'Octas'; }
+				if (r.round?.toLowerCase()?.includes('16')) { r.round = 'Octas'; }
+				if (r.round?.toLowerCase()?.includes('quar')) { r.round = 'Quarters'; }
+				if (r.round?.toLowerCase()?.includes('qrt')) { r.round = 'Quarters'; }
+				if (r.round?.toLowerCase()?.includes('sem')) { r.round = 'Semis'; }
+				if (r.round?.toLowerCase()?.includes('fin')) { r.round = 'Finals'; }
+			}
 		});
 
 		// Remove share link if looking up another person's rounds,
