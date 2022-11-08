@@ -26,6 +26,7 @@ const SearchBar = () => {
 		formState: { isValid },
 		handleSubmit,
 		setFocus,
+		setValue,
 	} = useForm({
 		mode: 'all',
 		defaultValues: {
@@ -40,14 +41,10 @@ const SearchBar = () => {
 		}
 	};
 
-	// Dynamic search as people are typing
+	// Dynamic search as people are typing, if they type more than 4 characters anyway.
 	const dynamicSearchHandler = async (data) => {
 		if (data.searchString.length > 4) {
 			dispatch(loadTournSearch(data.searchString, 'future'));
-		}
-
-		if (data.searchString.length < 1) {
-			dispatch(clearTournSearch());
 		}
 	};
 
@@ -56,6 +53,10 @@ const SearchBar = () => {
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			dispatch(clearTournSearch());
+
+			// For the record, it took me a positively stupid amount of time to
+			// figure out how to do this operation.
+			setValue('searchString', '');
 		}
 
 		// Apparently the onChange handler with dynamicSearch does not fire if
@@ -136,6 +137,39 @@ const SearchBar = () => {
 					</div>
 				</div>
 			}
+
+			{
+				( tournSearch.searchString
+				&& tournSearch.searchString === 'I feel so dumb'
+				&& (
+					tournSearch.partialMatches?.length < 1
+					&& tournSearch.exactMatches?.length < 1
+				)) &&
+					<div>
+						<div id={styles.nada}>
+							<p>
+								Honey, trust us, we at Tabroom.com know that feeling REALLY WELL
+							</p>
+						</div>
+					</div>
+			}
+
+			{
+				( tournSearch.searchString
+					&& tournSearch.searchString !== 'I feel so dumb'
+					&& (
+						tournSearch.partialMatches?.length < 1
+						&& tournSearch.exactMatches?.length < 1
+					)
+				) &&
+					<div>
+						<div id={styles.nada}>
+							<p>
+									No search results found for <span class='semibold'>{tournSearch.searchString}</span>`
+							</p>
+						</div>
+					</div>
+			}
 		</span>
 	);
 };
@@ -145,18 +179,6 @@ const SearchResults = (results) => {
 
 	if (!tournSearch || !tournSearch.searchString?.length) {
 		return;
-	}
-
-	if (!tournSearch.partialMatches.length && !tournSearch.exactMatches.length) {
-		return (
-			<div>
-				<div id={styles.nada}>
-					<p>
-						No results found for {tournSearch.searchString}
-					</p>
-				</div>
-			</div>
-		);
 	}
 
 	return (
