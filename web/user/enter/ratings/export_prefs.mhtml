@@ -1,145 +1,157 @@
 <%args>
+	$school
 	$person
-	$entry
-	$style    => undef
+	$entry_id    => undef
+	$prefs       => undef
+	$perms       => undef
 </%args>
 <%init>
 
-	my $event = $entry->event;
+	use POSIX;
+
+	my $entry = Tab::Entry->retrieve($entry_id) if $entry_id;
+
+	my $event    = $entry->event;
 	my $category = $event->category;
-	my $tourn = $category->tourn;
+	my $tourn    = $school->tourn;
 
-	my %category_settings = $category->all_settings();
+	my %category_settings = $category->all_settings;
+	my $dbh = Tab::DBI->db_Main();
 
-	$style = $category_settings{"prefs"} unless $style;
+	my $limit;
 
-	my $rounds_per = $category_settings{"rounds_per"};
-
-	my %ratings_by_judge = ();
-	my %conflicts_by_id = ();
-
-	my $now = DateTime->now;
-	my $tz = $tourn->tz;
-	$tz = "UTC" unless $tz;
-
-    my %rating_name = map {$_->id => $_->name} $category->rating_tiers;
-
-	my $coach_ratings = $category_settings{"coach_ratings"};
-    my %coach_rating_by_judge = ();
-
-    foreach my $rating ($m->comp(
-		"/funclib/category_ratings.mas",
-			category => $category,
-			type     => "coach"
-		)
-	) {
-		next unless $rating->judge;
-		next unless $rating->rating_tier;
-        $coach_rating_by_judge{$rating->judge->id} = $rating_name{$rating->rating_tier->id};
-    }
-
-    my %rating_by_judge = ();
-	my %percentile_by_judge = ();
-
-	if ($style eq "ordinals") {
-
-		foreach my $rating ($m->comp("/funclib/category_ratings.mas",
-			category => $category,
-			type     => "entry",
-			entry    => $entry
-		)) {
-			next unless $rating->judge;
-			$rating_by_judge{$rating->judge->id} = $rating->ordinal;
-			$percentile_by_judge{$rating->judge->id} = $rating->percentile;
-		}
-
+	if ($category_settings{"pref_jpool"}) {
+		$limit = " and exists (
+			select jpj.id
+			from jpool_judge jpj
+			where jpj.judge = judge.id
+			and jpj.jpool = ".$category_settings{'pref_jpool'}." ) ";
 	} else {
+		$limit = " and judge.category = ".$category->id." ";
+	}
 
-		my @ratings = Tab::Rating->search(
-			entry   => $entry->id,
-			type    => "entry",
-			ordinal => 0
-		);
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.code, judge.first, judge.middle, judge.last, judge.school,
+			judgeschool.name schoolname,
+			judge.obligation, judge.hired,
+			neutral.value neutral,
+			online_hybrid.value online_hybrid,
+			diverse.value diverse,
+			free_strike.value free_strike,
+			first_year.value first_year,
+			person.id person, paradigm.id paradigm,
+			judge_hire.id hire,
+			crt.name coach_rating,
+			rating.id rating, rating.ordinal, rating.percentile,
+			aff_rating.id aff_rating, aff_rating.ordinal aff_ordinal, aff_rating.percentile aff_percentile,
+			neg_rating.id neg_rating, neg_rating.ordinal neg_ordinal, neg_rating.percentile neg_percentile,
+			rating_tier.name rating_tier
+		from (judge, entry, school, category)
+			left join school judgeschool on judge.school = judgeschool.id
+			left join person on judge.person = person.id
+			left join person_setting paradigm on paradigm.person = person.id and paradigm.tag = 'paradigm'
+			left join judge_setting neutral on neutral.tag = 'neutral' and neutral.judge = judge.id
+			left join judge_setting online_hybrid on online_hybrid.tag = 'online_hybrid' and online_hybrid.judge = judge.id
+			left join judge_setting diverse on diverse.tag = 'diverse' and diverse.judge = judge.id
+			left join judge_setting free_strike on free_strike.tag = 'free_strike' and free_strike.judge = judge.id
+			left join judge_setting first_year on first_year.tag = 'first_year' and first_year.judge = judge.id
+			left join rating on rating.judge = judge.id and rating.entry = entry.id and (rating.side IS NULL or rating.side = 0)
+			left join rating aff_rating on aff_rating.judge = judge.id and aff_rating.entry = entry.id and aff_rating.side = 1
+			left join rating neg_rating on neg_rating.judge = judge.id and neg_rating.entry = entry.id and neg_rating.side = 2
 
-		foreach my $rating (@ratings) {
-			next unless $rating->judge;
-			next unless $rating->rating_tier;
-			$rating_by_judge{$rating->judge->id} = $rating->rating_tier->name;
+			left join judge_hire on judge_hire.judge = judge.id and judge_hire.school = school.id
+			left join rating_tier on rating.rating_tier = rating_tier.id
+
+			left join rating_tier crt
+				on crt.category = category.id
+				and exists (
+				select cr.id from rating cr
+					where cr.type = 'coach'
+					and cr.judge = judge.id
+					and cr.rating_tier = crt.id
+			)
+
+		where judge.active = 1
+			$limit
+			and judge.category = category.id
+			and entry.id = ?
+			and school.id = entry.school
+			and school.tourn = category.tourn
+			and not exists (
+				select strike.id from strike
+				where strike.judge = judge.id
+				and (strike.entry = entry.id OR strike.school = entry.school OR strike.event = entry.event)
+			)
+			group by judge.id
+			order by judge.last
+	");
+
+	$sth->execute($entry->id);
+
+	my $results = $sth->fetchall_hash();
+
+	my $filename = "Prefs for ".$entry->code." at ".$tourn->name;
+	$filename =~ s/[\W_]//g;
+	$filename = $filename.".csv";
+
+	$m->clear_buffer;
+	$r->content_type('application/csv');
+	$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+
+	$m->print("First,Last,School,Online,Rounds,Rating");
+	if ($category_settings{"side_based_prefs"}) {
+		$m->print(" (Aff), Percentile (aff), Rating (neg), Percentile (neg)");
+	} elsif ($category_settings{"prefs"} eq "ordinal") {
+		$m->print(",Percentile");
+	};
+
+	$m->print("\n");
+
+	foreach my $judge (@{$results}) {
+
+		$m->print($judge->{"first"});
+		$m->print(",");
+		$m->print($judge->{"last"});
+		$m->print(",");
+
+		if ($judge->{"school"}) {
+			$m->print($judge->{"school_name"});
+		} else {
+			$m->print("Hire");
 		}
-	}
+		$m->print(",");
 
-	foreach my $conflict ($entry->strikes( registrant => 1, conflict => 1)) {
-		$conflicts_by_id{$conflict->judge->id} = $conflict;
-	}
+		$m->print("ONLINE") if $judge->{"online_hybrid"};
+		$m->print(",");
+		$m->print($judge->{"obligation"} + $judge->{"hired"});
+		$m->print(",");
 
-	foreach my $conflict ($entry->school->strikes( registrant => 1, conflict => 1)) {
-		$conflicts_by_id{$conflict->judge->id} = $conflict;
-	}
+		if ($category_settings{"prefs"} eq "ordinals") {
 
-	my @judges = $m->comp("judges.mas", category => $category);
-
-	@judges = sort {$a->last cmp $b->last} @judges;
-	@judges = sort {$a->school->short_name cmp $b->school->short_name} @judges;
-	@judges = sort { $rating_by_judge{$a->id} <=> $rating_by_judge{$b->id} } @judges;
-
-	my @event_struck_judges = $m->comp(
-		"/funclib/event_strike_judges.mas",
-		event => $entry->event
-	) if $entry;
-
-	my %event_struck = map {$_->id => 1} @event_struck_judges;
-
-	my $filename = "Prefs-".$entry->name."-".Tab::csvdt($now);
-	$filename =~ s/s+//;
-	my $filepath = $Tab::file_root."/tmp/$filename";
-	my $garbage = `rm -f $filepath.*`;
-
-	open (CSVOUT, ">$filepath.csv");
-
-	print CSVOUT "Pref sheet for ".$entry->name." \n";
-	print CSVOUT "Judge First,Judge Last,School,";
-	print CSVOUT "Round Committment," if $rounds_per;
-	print CSVOUT "Diverse," if $category_settings{"show_diversity"};
-	print CSVOUT "School Rating," if $coach_ratings;
-	print CSVOUT "Ordinal Pref,Percentile," if $style eq "ordinals";
-	print CSVOUT "Your Rating," if $style ne "ordinals";
-	print CSVOUT "\n";
-
-	foreach my $judge (@judges) {
-
-		next if $judge->school->id == $entry->school->id;
-		next if $event_struck{$judge->id};
-
-		print CSVOUT "\"".$judge->first."\",\"".$judge->last."\",\"";
-		print CSVOUT $judge->school->short_name."\"," if $judge->school;
-		print CSVOUT "\"Hired\"," unless $judge->school;
-		print CSVOUT ($judge->obligation + $judge->hired).",";
-
-		if ($category_settings{"show_diversity"}) {
-			print CSVOUT "Y" if $judge->setting("diverse");
-			print CSVOUT ",";
-		};
-
-		if ($conflicts_by_id{$judge->id}) {
-
-			print CSVOUT "\"Conflict\",";
+			if ($category_settings{"side_based_prefs"}) {
+				$m->print($judge->{"aff_ordinal"});
+				$m->print(",");
+				$m->print($judge->{"aff_percentile"});
+				$m->print(",");
+				$m->print($judge->{"neg_ordinal"});
+				$m->print(",");
+				$m->print($judge->{"neg_percentile"});
+			} else {
+				$m->print($judge->{"ordinal"});
+				$m->print(",");
+				$m->print($judge->{"percentile"});
+			}
 
 		} else {
-
-			print CSVOUT "\"".$coach_rating_by_judge{$judge->id}."\"," if $coach_ratings;
-			print CSVOUT "\"".$rating_by_judge{$judge->id}."\",\"".$percentile_by_judge{$judge->id}."\","
-				if $style eq "ordinals";
-
-			print CSVOUT "\"".$rating_by_judge{$judge->id}."\"," unless $style eq "ordinals";
+			$m->print($judge->{'rating_tier'});
 		}
 
-		print CSVOUT "\n";
-
+		$m->print("\n");
 	}
 
-	close CSVOUT;
-
-	$m->redirect("$Tab::url_prefix/tmp/$filename.csv");
+	$m->flush_buffer();
+	$m->abort();
 
 </%init>
 
