@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useForm } from 'react-hook-form';
 import styles from './header.module.css';
@@ -36,7 +36,6 @@ const SearchBar = () => {
 	// Searching and hitting return
 	const searchHandler = async (data) => {
 		if (data.searchString.length > 2) {
-			console.log('this is a string');
 			dispatch(loadTournSearch(data.searchString, 'future'));
 		}
 	};
@@ -58,13 +57,20 @@ const SearchBar = () => {
 			e.preventDefault();
 			dispatch(clearTournSearch());
 		}
+
+		// Apparently the onChange handler with dynamicSearch does not fire if
+		// the value is blank so handle it here.
+		if (
+			(e.key === 'Delete' || e.key === 'Backspace')
+			&& e.target?.value?.length === 1
+		) {
+			dispatch(clearTournSearch());
+		}
 	};
 
 	const clearSearchResults = () => {
 		dispatch(clearTournSearch());
 	};
-
-	const searchInput = useRef();
 
 	// Control S to get to the search box
 
@@ -93,7 +99,6 @@ const SearchBar = () => {
 					<input
 						id             = {styles.searchtext}
 						type           = "searchString"
-						ref            = {searchInput}
 						maxLength      = "128"
 						placeholder    = {setupSearch.tag}
 						className      = "notfirst"
