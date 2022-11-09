@@ -23,11 +23,60 @@ export const futureTourns = {
 				nats.value as nats,
 				closed.value as closed,
 				count(distinct school.id) as schoolcount,
-				count(distinct online.id) as online,
-				count(distinct inperson.id) as inperson,
 				YEAR(tourn.start) as year,
 				WEEK(tourn.start) as week,
-				GROUP_CONCAT(distinct(signup.abbr) SEPARATOR ', ') as signup
+				( select GROUP_CONCAT(signup.abbr SEPARATOR ', ')
+						from category signup
+					where signup.tourn = tourn.id
+						and signup.abbr IS NOT NULL
+						and signup.abbr != ''
+						and exists ( select cs.id
+							from category_setting cs
+							where cs.category = signup.id
+							and cs.tag = 'public_signups'
+						)
+						and exists (
+							select csd.id
+							from category_setting csd
+							where csd.category = signup.id
+							and csd.tag = 'public_signups_deadline'
+							and csd.value_date > NOW()
+						)
+						and not exists (
+							select csd.id
+							from category_setting csd
+							where csd.category = signup.id
+							and csd.tag = 'private_signup_link'
+						)
+				) as signup,
+
+				( SELECT
+					count(online.id)
+					from event online, event_setting eso
+					where online.tourn = tourn.id
+					and online.id = eso.event
+					and eso.tag = 'online_mode'
+				) as online,
+
+				( SELECT
+					count(inp.id)
+					from event inp
+					where inp.tourn = tourn.id
+					and not exists (
+						select esno.id
+						from event_setting esno
+						where esno.event = inp.id
+						and esno.tag = 'online_mode'
+					)
+				) as inp,
+
+				( SELECT
+					count(hybrid.id)
+					from event hybrid, event_setting esh
+					where hybrid.tourn = tourn.id
+					and hybrid.id = esh.event
+					and esh.tag = 'online_hybrid'
+				) as hybrid
 
 			from tourn
 
@@ -43,50 +92,8 @@ export const futureTourns = {
 				on nats.tourn = tourn.id
 				and nats.tag = 'nsda_nats'
 
-			left join event online
-				on online.tourn = tourn.id
-				and exists (
-					select eso.id
-					from event_setting eso
-					where eso.event = online.id
-					and eso.tag = 'online_mode'
-				)
-
-			left join event inperson
-				on inperson.tourn = tourn.id
-				and not exists (
-					select inpes.id
-					from event_setting inpes
-					where inpes.event = inperson.id
-					and inpes.tag = 'online_mode'
-				)
-
 			left join school on tourn.id = school.tourn
-
-			left join category signup
-				on signup.tourn = tourn.id
-				and signup.abbr IS NOT NULL
-				and signup.abbr != ''
-				and exists ( select cs.id
-					from category_setting cs
-					where cs.category = signup.id
-					and cs.tag = 'public_signups'
-				)
-				and exists (
-					select csd.id
-					from category_setting csd
-					where csd.category = signup.id
-					and csd.tag = 'public_signups_deadline'
-					and csd.value_date > NOW()
-				)
-				and not exists (
-					select csd.id
-					from category_setting csd
-					where csd.category = signup.id
-					and csd.tag = 'private_signup_link'
-				)
-
-			where tourn.hidden = 0
+		where tourn.hidden = 0
 			and tourn.end > DATE(NOW() - INTERVAL 2 DAY)
 			${limit}
 			and not exists (
@@ -109,7 +116,59 @@ export const futureTourns = {
 				CONVERT_TZ(weekend.reg_start, '+00:00', tourn.tz) reg_start,
 				count(distinct school.id) as schoolcount,
 				YEAR(weekend.start) as year,
-				WEEK(weekend.start) as week
+				WEEK(weekend.start) as week,
+				( select GROUP_CONCAT(signup.abbr SEPARATOR ', ')
+						from category signup
+					where signup.tourn = tourn.id
+						and signup.abbr IS NOT NULL
+						and signup.abbr != ''
+						and exists ( select cs.id
+							from category_setting cs
+							where cs.category = signup.id
+							and cs.tag = 'public_signups'
+						)
+						and exists (
+							select csd.id
+							from category_setting csd
+							where csd.category = signup.id
+							and csd.tag = 'public_signups_deadline'
+							and csd.value_date > NOW()
+						)
+						and not exists (
+							select csd.id
+							from category_setting csd
+							where csd.category = signup.id
+							and csd.tag = 'private_signup_link'
+						)
+				) as signup,
+
+				( SELECT
+					count(online.id)
+					from event online, event_setting eso
+					where online.tourn = tourn.id
+					and online.id = eso.event
+					and eso.tag = 'online_mode'
+				) as online,
+
+				( SELECT
+					count(inp.id)
+					from event inp
+					where inp.tourn = tourn.id
+					and not exists (
+						select esno.id
+						from event_setting esno
+						where esno.event = inp.id
+						and esno.tag = 'online_mode'
+					)
+				) as inp,
+
+				( SELECT
+					count(hybrid.id)
+					from event hybrid, event_setting esh
+					where hybrid.tourn = tourn.id
+					and hybrid.id = esh.event
+					and esh.tag = 'online_hybrid'
+				) as hybrid
 
 			from (tourn, weekend)
 
