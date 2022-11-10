@@ -7,6 +7,7 @@ import { searchTourns, searchCircuitTourns } from '../../../controllers/public/s
 
 export default [
 	{ path: '/invite/{webname}'                                     , module : getInvite }           ,
+	{ path: '/invite/tourn/{tourn_id}'                              , module : getInvite }           ,
 	{ path: '/invite/round/{round_id}'                              , module : getRounds }           ,
 	{ path: '/invite/upcoming'                                      , module : futureTourns }        ,
 	{ path: '/invite/upcoming/:circuit'                             , module : futureTourns }        ,
