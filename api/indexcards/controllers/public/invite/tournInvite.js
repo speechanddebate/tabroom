@@ -1,12 +1,17 @@
+import {objectifySettings} from '../../../helpers/objectify';
+
 export const getInvite = {
 	GET: async (req, res) => {
 		const db = req.db;
 
 		const invite = {};
 
-		if (parseInt(req.params.webname)) {
+		console.log('I am here with tourn ID');
+		console.log(req.params);
 
-			invite.tourn = await db.tourn.findByPk(
+		if (req.params.tourn_id) {
+			console.log('I am here with tourn ID');
+			const result = await db.tourn.findByPk(
 				parseInt(req.params.tourn_id), {
 					include: [
 						{ model: db.tournSetting, as: 'Settings' },
@@ -16,9 +21,13 @@ export const getInvite = {
 					],
 				});
 
+			invite.tourn = result.get({ plain: true });
+			invite.tourn.settings = objectifySettings(invite.tourn.Settings);
+			delete invite.tourn.Settings;
+
 		} else if (req.params.webname) {
 
-			invite.tourn = await db.tourn.findOne({
+			const result = await db.tourn.findOne({
 				where : { webname: req.params.webname },
 				order:  [['start', 'desc']],
 				include: [
@@ -28,6 +37,10 @@ export const getInvite = {
 					{ model: db.file, as: 'Files' },
 				],
 			});
+
+			invite.tourn = result.get({ plain: true });
+			invite.tourn.settings = objectifySettings(invite.tourn.Settings);
+			delete invite.tourn.Settings;
 		}
 
 		return res.status(200).json(invite);
