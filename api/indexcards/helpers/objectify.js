@@ -1,15 +1,3 @@
-const stripNull = (target) => {
-	Object.keys(target).forEach( (tag) => {
-		if (
-			target[tag] === null
-			|| target[tag] === 0
-		) {
-			delete target[tag];
-		}
-	});
-	return target;
-};
-
 export const objectify = (array) => {
 	const dest = {};
 	array.forEach( (item) => {
@@ -108,6 +96,18 @@ export const objectStrip = (target, stripme, booleans) => {
 	});
 
 	return stripNull(target);
+};
+
+const stripNull = (target) => {
+	Object.keys(target).forEach( (tag) => {
+		if (
+			target[tag] === null
+			|| target[tag] === 0
+		) {
+			delete target[tag];
+		}
+	});
+	return target;
 };
 
 export default objectify;

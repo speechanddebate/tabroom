@@ -1,5 +1,37 @@
 // import { showDateTime } from '../../../helpers/common';
 
+export const panelCleanJudges = {
+
+	GET: async (req, res) => {
+
+		const db = req.db;
+		const panel = await db.summon(db.panel, req.params.panel_id);
+
+		// Pull settings and everything else we need about this round
+		panel.round = await roundData(db, panel.round);
+
+		// Get the information and relevant data about the entries in my panel
+		panel.entries = await panelEntries(db, panel);
+
+		// Pull the judges who are available to judge this round timewise
+		panel.round.judges = await roundAvailableJudges(db, panel.round);
+
+		// Pull the entry constraints against juges
+		const judgeConflicts = await roundJudgeConflicts(db, panel.round);
+
+		const cleanJudges = panel.round.judges.filter( (judge) => {
+			if (judgeConflicts[judge.id]
+				&& panel.entries.Entries.some( entry => judgeConflicts[judge.id].indexOf(entry.id) !== -1)
+			) {
+				return false;
+			}
+			return judge;
+		});
+
+		res.status(200).json(cleanJudges);
+	},
+};
+
 const roundData = async (db, roundId) => {
 
 	const [round] = await db.sequelize.query(`
@@ -592,36 +624,4 @@ const roundJudgeConflicts = async (db, round) => {
 	}
 
 	return judgeConflicts;
-};
-
-export const panelCleanJudges = {
-
-	GET: async (req, res) => {
-
-		const db = req.db;
-		const panel = await db.summon(db.panel, req.params.panel_id);
-
-		// Pull settings and everything else we need about this round
-		panel.round = await roundData(db, panel.round);
-
-		// Get the information and relevant data about the entries in my panel
-		panel.entries = await panelEntries(db, panel);
-
-		// Pull the judges who are available to judge this round timewise
-		panel.round.judges = await roundAvailableJudges(db, panel.round);
-
-		// Pull the entry constraints against juges
-		const judgeConflicts = await roundJudgeConflicts(db, panel.round);
-
-		const cleanJudges = panel.round.judges.filter( (judge) => {
-			if (judgeConflicts[judge.id]
-				&& panel.entries.Entries.some( entry => judgeConflicts[judge.id].indexOf(entry.id) !== -1)
-			) {
-				return false;
-			}
-			return judge;
-		});
-
-		res.status(200).json(cleanJudges);
-	},
 };
