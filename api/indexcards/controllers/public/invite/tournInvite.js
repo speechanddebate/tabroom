@@ -1,4 +1,4 @@
-import {objectifySettings} from '../../../helpers/objectify';
+import { objectifySettings } from '../../../helpers/objectify';
 
 export const getInvite = {
 	GET: async (req, res) => {

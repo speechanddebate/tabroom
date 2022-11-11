@@ -138,7 +138,7 @@ export const attendance = {
 			status[attend.person][attend.panel] = {
 				tag         : attend.tag,
 				timestamp   : attend.timestamp.toJSON,
-				description : attend.description
+				description : attend.description,
 			};
 		});
 
