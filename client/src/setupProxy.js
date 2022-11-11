@@ -1,3 +1,4 @@
+// This file cannot be rewritten in ESM
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 module.exports = function(app) {
