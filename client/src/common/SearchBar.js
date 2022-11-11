@@ -165,7 +165,7 @@ const SearchBar = () => {
 					<div>
 						<div id={styles.nada}>
 							<p>
-									No search results found for <span class='semibold'>{tournSearch.searchString}</span>`
+									No search results found for <span className='semibold'>{tournSearch.searchString}</span>`
 							</p>
 						</div>
 					</div>
