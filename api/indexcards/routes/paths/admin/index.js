@@ -1,6 +1,6 @@
 // These paths are for tournament public data only
 
-import { getInvite, getRounds } from '../../../controllers/invite/tourn/getInvite';
+import { getInvite, getRounds } from '../../../controllers/public/invite/tournInvite';
 
 export default [
 	{ path: '/invite/{webname}', module : getInvite },

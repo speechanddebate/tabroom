@@ -1,4 +1,5 @@
 // Parse the Tabroom cookies and determine whether there's an active session
+// import { b64_sha512crypt as crypt } from 'sha512crypt-node';
 
 const auth = async (req) => {
 	const db = req.db;

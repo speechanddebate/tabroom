@@ -239,12 +239,12 @@ db.tourn.belongsToMany(db.person,  {
 	through    : 'permission',
 });
 
-db.tourn.belongsToMany(db.circuit, { 
+db.tourn.belongsToMany(db.circuit, {
 	uniqueKey  : 'id',
 	as         : 'Circuits',
 	foreignKey : 'tourn',
 	otherKey   : 'circuit',
-	through    : 'tourn_circuit'
+	through    : 'tourn_circuit',
 });
 
 db.tournFee.belongsTo(db.tourn , { as: 'Tourn'   , foreignKey: 'tourn' });
