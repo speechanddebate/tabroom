@@ -49,7 +49,7 @@ const postShare = {
 					`${room}@share.tabroom.com`,
 					`${emails}`,
 					`${tournament} ${roundName(round)} (${room}) - Speech Documents`,
-					`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${room}`,
+					`Share speech documents for this round (10mb limit, docs only) by replying to this email (must include an attachment), or going to https://share.tabroom.com/${room}`,
 					null,
 					req.body.files || [],
 				);
@@ -85,7 +85,7 @@ const postShare = {
 						`${phrase}@share.tabroom.com`,
 						`${emails}`,
 						`${tournament} ${roundName(round)} (${phrase}) - Speech Documents`,
-						`Share speech documents for this round (10mb limit, docs only) by replying to this email, or going to https://share.tabroom.com/${phrase}`,
+						`Share speech documents for this round (10mb limit, docs only) by replying to this email (must include an attachment), or going to https://share.tabroom.com/${phrase}`,
 					)
 				);
 			}
