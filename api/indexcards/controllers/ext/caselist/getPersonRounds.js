@@ -87,7 +87,7 @@ const getPersonRounds = {
 		rounds.forEach(r => {
 			const numeric = parseInt(r.round?.replace(/[^\d]/g, '')?.trim()) || 0;
 			if (numeric > 0 && numeric < 10) {
-				r.round = numeric;
+				r.round = numeric.toString();
 			} else {
 				if (r.round?.toLowerCase()?.includes('quad')) { r.round = 'Quads'; }
 				if (r.round?.toLowerCase()?.includes('qd')) { r.round = 'Quads'; }
