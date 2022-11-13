@@ -2,7 +2,7 @@ import React from 'react';
 import styles from './header.module.css';
 import DisplayUser from './DisplayUser';
 import SearchBar from './SearchBar';
-import NavMenu from './NavMenu';
+import PublicMenu from './PublicMenu';
 
 const Header = () => {
 
@@ -34,7 +34,7 @@ const Header = () => {
 					</span>
 				</span>
 
-				<NavMenu />
+				<PublicMenu />
 			</span>
 		</div>
 	);
