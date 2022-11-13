@@ -1,7 +1,8 @@
 /* istanbul disable file */
+/* eslint-disable */
 import React from 'react';
 import { Provider } from 'react-redux';
-import { MemoryRouter, Route } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import '@testing-library/jest-dom';
 import { render } from '@testing-library/react';
 import configureMockStore from 'redux-mock-store';
@@ -16,6 +17,13 @@ global.window.scrollTo = () => true;
 global.window.URL.createObjectURL = () => '';
 global.navigator.clipboard = {};
 global.navigator.clipboard.writeText = jest.fn();
+
+export const timeout = (fn, delay) => new Promise((resolve, reject) =>
+	setTimeout(() => resolve(fn()), delay)
+);
+
+export const querySelector = (wrapper, query) => wrapper.container.querySelector(query);
+export const querySelectorAll = (wrapper, query) => wrapper.container.querySelectorAll(query);
 
 export const customRender = (
 	ui,
@@ -33,11 +41,9 @@ export const customRender = (
 	const Wrapper = ({ children }) => (
 		<Provider store={store}>
 			<MemoryRouter initialEntries={options.initialEntries}>
-				<Route path={options.route}>
-					<div>
-						{children}
-					</div>
-				</Route>
+				<Routes>
+					<Route path={options.route} element={<div>{children}</div>} />
+				</Routes>
 			</MemoryRouter>
 		</Provider>
 	);

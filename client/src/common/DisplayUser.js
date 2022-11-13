@@ -15,6 +15,8 @@ export const DisplayUser = () => {
 		fetchData();
 	}, [dispatch]);
 
+	console.log(profile);
+
 	return (
 		<div id={styles.userinfo}>
 			{
