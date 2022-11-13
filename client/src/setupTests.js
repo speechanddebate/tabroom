@@ -1,38 +1,51 @@
 /* istanbul disable file */
 import React from 'react';
 import { Provider } from 'react-redux';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route } from 'react-router-dom';
 import '@testing-library/jest-dom';
 import { render } from '@testing-library/react';
-import store from './redux/store';
-// import { ToastContainer } from 'react-toastify';
+import configureMockStore from 'redux-mock-store';
+import thunk from 'redux-thunk';
+import api from './redux/apiMiddleware';
 
-// import { ProvideAuth } from './helpers/auth';
-// import { ProvideStore } from './helpers/store';
+const mockStore = configureMockStore([thunk, api]);
 
-// jest.mock('./helpers/auth');
-// jest.mock('./helpers/store');
-// jest.mock('./helpers/api');
-// jest.mock('./helpers/useScript');
+jest.mock('./api/api');
 
 global.window.scrollTo = () => true;
 global.window.URL.createObjectURL = () => '';
 global.navigator.clipboard = {};
 global.navigator.clipboard.writeText = jest.fn();
 
-export const wrappedRender = (component) => {
-	return render(
-		// <ProvideAuth>
-		<MemoryRouter initialEntries={['/?q=test']}>
-			<Provider store={store}>
-				{component}
-			</Provider>
-		</MemoryRouter>
-		// <ToastContainer />
-		// </ProvideAuth>
+export const customRender = (
+	ui,
+	options = {
+		route: '/',
+		initialEntries: ['/'],
+		store: {},
+	},
+) => {
+	const store = mockStore({
+		profile: {},
+		tournSearch: [],
+		...options.store,
+	});
+	const Wrapper = ({ children }) => (
+		<Provider store={store}>
+			<MemoryRouter initialEntries={options.initialEntries}>
+				<Route path={options.route}>
+					<div>
+						{children}
+					</div>
+				</Route>
+			</MemoryRouter>
+		</Provider>
 	);
+	return render(ui, { wrapper: Wrapper, ...options });
 };
 
 export * from '@testing-library/react';
+
+export { customRender as render };
 
 export default null;

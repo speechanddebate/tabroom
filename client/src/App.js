@@ -22,8 +22,7 @@ const App = () => {
 			<Provider store={store}>
 				<ErrorBoundary>
 					<Routes>
-						<Route exact path="/" element={<Layout><TestTable /></Layout>} />
-						<Route exact path="/tourns" element={<Layout><TournList /></Layout>} />
+						<Route exact path="/" element={<Layout><TournList /></Layout>} />
 						<Route exact path="/route/:name" element={<Layout><TestTable /><TestForm /></Layout>} />
 						<Route exact path="/route" element={<Layout><p>I&apos;m a component, hear me roar!</p></Layout>} />
 						<Route path="*" element={<Layout><Error is404 /></Layout>} />
