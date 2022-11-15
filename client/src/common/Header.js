@@ -1,8 +1,8 @@
 import React from 'react';
 import styles from './header.module.css';
 import DisplayUser from './DisplayUser';
-import SearchBar from './SearchBar';
-import NavMenu from './NavMenu';
+import PublicSearchBar from './PublicSearchBar';
+import PublicMenu from './PublicMenu';
 
 const Header = () => {
 
@@ -22,7 +22,7 @@ const Header = () => {
 			<span id={styles.rightstuff}>
 				<span id={styles.profile}>
 					<DisplayUser />
-					<SearchBar />
+					<PublicSearchBar />
 					<span id={styles.helpbutton} title="Tabroom Help">
 						<a
 							tabIndex  = "-1"
@@ -34,7 +34,7 @@ const Header = () => {
 					</span>
 				</span>
 
-				<NavMenu />
+				<PublicMenu />
 			</span>
 		</div>
 	);

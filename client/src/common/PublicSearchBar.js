@@ -7,19 +7,12 @@ import { loadTournSearch, clearTournSearch } from '../redux/ducks/search';
 const SearchBar = () => {
 
 	const dispatch = useDispatch();
-	const sector = useSelector((state) => state.sector);
-	const tourn = useSelector((state) => state.tourn);
 	const tournSearch = useSelector((state) => state.tournSearch);
 
-	const setupSearch = {};
-
-	if (sector === 'tab') {
-		setupSearch.api = `${process.env.REACT_APP_API_BASE}/tourn/${tourn}/register/search`;
-		setupSearch.tag = 'Search Attendees';
-	} else {
-		setupSearch.api = `${process.env.REACT_APP_API_BASE}/public/search/all`;
-		setupSearch.tag = 'Search Tournaments';
-	}
+	const setupSearch = {
+		api : `${process.env.REACT_APP_API_BASE}/public/search/future`,
+		tag : 'Search Tournaments',
+	};
 
 	const {
 		register,
@@ -65,7 +58,7 @@ const SearchBar = () => {
 			(e.key === 'Delete' || e.key === 'Backspace')
 			&& e.target?.value?.length === 1
 		) {
-			dispatch(clearTournSearch());
+			clearSearchResults();
 		}
 	};
 
@@ -140,7 +133,9 @@ const SearchBar = () => {
 
 			{
 				( tournSearch.searchString
-				&& tournSearch.searchString === 'I feel so dumb'
+				&& (tournSearch.searchString === 'I feel so dumb'
+					|| tournSearch.searchString === 'i feel so dumb'
+				)
 				&& (
 					tournSearch.partialMatches?.length < 1
 					&& tournSearch.exactMatches?.length < 1
