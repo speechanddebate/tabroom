@@ -16,12 +16,18 @@ echo "Welcome to the Tabroom.com system installer."
 echo
 
 echo
+echo "Installing the latest version of Node and related files..."
+echo
+
+cp /www/tabroom/doc/conf/nodesource.list /etc/apt/sources.list.d;
+
+echo
 echo "Installing the necessary software packages along with some ones I like having...."
 echo
 
-/usr/bin/apt-get update
+/usr/bin/apt update
 
-/usr/bin/apt-get -y -q install apache2 \
+/usr/bin/apt -y -q install apache2 \
 	apache2-utils \
 	bzip2 \
 	libapache-session-perl \
@@ -83,6 +89,8 @@ echo
 	ncurses-bin \
 	nmap \
 	neovim \
+	nodejs \
+	npm \
 	openprinting-ppds \
 	openssh-client \
 	openssh-server \
@@ -154,7 +162,6 @@ echo
 mv /usr/share/perl5/Class/DBI.pm /usr/share/perl5/Class/DBI.pm.orig
 cp /www/tabroom/doc/lib/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
 
-
 echo
 echo "Creating database from schema file.  Uncompressing database file (takes a little bit of time)..."
 echo
@@ -172,11 +179,6 @@ echo "Loading the database schematic"
 echo
 /usr/bin/mysql -u root tabroom < /www/tabroom/doc/sql/current-schema.sql
 
-/bin/mkdir -p /www/tabroom/web/tmp
-/bin/mkdir -p /www/tabroom/web/mason
-
-/bin/chmod 1777 /www/tabroom/web/tmp
-/bin/chmod 1777 /www/tabroom/web/mason
 
 echo
 echo "Utility Scripts"
@@ -218,12 +220,37 @@ echo
 
 /etc/init.d/apache2 restart
 
+echo
+echo "Installing some Node/NPM necessities"
+echo
+
 cd /www/tabroom/api; npm install
+cd /www/tabroom/api; npm install pm2 -g
+cd /www/tabroom/client; npm install
+
+echo
+echo "Adapting permissions"
+echo
+
+useradd tabroom;
+chown -R tabroom.tabroom /www/tabroom/
+/bin/mkdir -p /www/tabroom/web/tmp
+/bin/mkdir -p /www/tabroom/web/mason
+
+/bin/chmod 1777 /www/tabroom/web/tmp
+/bin/chmod 1777 /www/tabroom/web/mason
+
+echo
+echo "Staring the indexcards API"
+echo
+cp /www/tabroom/doc/conf/indexcards.service /etc/systemd/system/indexcards.service
+systemctl enable --now indexcards
 
 echo
 echo "Yippee.  All done!  Unless, of course, you just saw errors."
 echo
 
 echo "Your tabroom instance is now ready at http://local.tabroom.com."
+echo "You may wish to add your local user to the tabroom group if you need to edit files directly"
 echo "To connect with other computers will require more technical"
 echo "tweaking.  See the manual in doc/howtos."
