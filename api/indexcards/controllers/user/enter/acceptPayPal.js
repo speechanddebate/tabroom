@@ -4,9 +4,11 @@ export const acceptPayPalPayment = {
 
 		const db = req.db;
 		const orderData = req.body;
-
 		const payerName = `${orderData.payer.name.given_name} ${orderData.payer.name.surname}`;
 		const payerEmail = orderData.payer.email_address;
+
+		console.log('I have a request and it is');
+		console.log(orderData);
 
 		const paymentObject = {
 			reason    : `PayPal Payment from ${payerName} ${payerEmail}`,
@@ -25,8 +27,12 @@ export const acceptPayPalPayment = {
 			levied_at : Date(orderData.create_time),
 			levied_by : orderData.person_id,
 		};
-		await db.fine.create(paymentObject);
-		await db.fine.create(payPalObject);
+		const paymentFine = await db.fine.create(paymentObject);
+		const payPalCharge = await db.fine.create(payPalObject);
+
+		console.log('Results');
+		console.log(paymentFine);
+		console.log(payPalCharge);
 		res.status(200);
 	},
 };
