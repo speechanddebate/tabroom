@@ -1,3 +1,5 @@
+import { debugLogger } from '../../../helpers/logger';
+
 export const acceptPayPalPayment = {
 
 	POST: async (req, res) => {
@@ -7,8 +9,8 @@ export const acceptPayPalPayment = {
 		const payerName = `${orderData.payer.name.given_name} ${orderData.payer.name.surname}`;
 		const payerEmail = orderData.payer.email_address;
 
-		console.log('I have a request and it is');
-		console.log(orderData);
+		debugLogger.info('I have a request and it is');
+		debugLogger.info(orderData);
 
 		const paymentObject = {
 			reason    : `PayPal Payment from ${payerName} ${payerEmail}`,
@@ -27,8 +29,11 @@ export const acceptPayPalPayment = {
 			levied_at : Date(orderData.create_time),
 			levied_by : orderData.person_id,
 		};
-		await db.fine.create(paymentObject);
-		await db.fine.create(payPalObject);
+		const payment = await db.fine.create(paymentObject);
+		const paypal = await db.fine.create(payPalObject);
+
+		debugLogger.info(payment);
+		debugLogger.info(paypal);
 		res.status(200);
 	},
 };
