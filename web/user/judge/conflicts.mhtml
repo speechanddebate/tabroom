@@ -5,9 +5,13 @@
 	$search_email   => undef
 	$search_chapter => undef
 	$search_last    => undef
+	$search_first   => undef
 	$judge_id       => undef
 </%args>
 <%init>
+
+	my $dbh = Tab::DBI->db_Main();
+	my $sth;
 
 	if ($other_id) {
 
@@ -55,28 +59,54 @@
 		}
 	}
 
-	my @chapters;
-	my @persons;
+	my $limit;
+	my $chapters;
+	my $persons;
 
 	if ($search_email && $search_last) {
-		@persons = Tab::Person->search_where(
-			last  => { "like", $search_last."%" },
-			email => { "like", $search_email."%" }
-		);
+		$limit =  " where person.last LIKE '$search_last%' and person.email LIKE '$search_email%' ";
 	} elsif ($search_email) {
-		@persons = Tab::Person->search_where(
-			email => { "like", $search_email."%" }
-		);
+		$limit =  " where person.email LIKE '$search_email%' ";
 	} elsif ($search_last) {
-		@persons = Tab::Person->search_where(
-			last => { "like", $search_last."%" }
-		);
+		$limit =  " where person.last LIKE '$search_last%' ";
+	}
+
+	my $err;
+
+	if ($search_first ) {
+		if ($limit) {
+			$limit .=  " and person.first LIKE '$search_first%' ";
+		} else {
+			$err = "You must supply either a last name or an email; you cannot only search by first name. Too many results are returned and the system goes boom!";
+		}
 	}
 
 	if ($search_chapter) {
-		@chapters = Tab::Chapter->search_where(
-			name => { "like", $search_chapter."%" }
-		);
+
+		$sth = $dbh->prepare("
+		    select
+				chapter.id, chapter.name, chapter.state, chapter.country,
+				(
+					select GROUP_CONCAT(tourn.name SEPARATOR ',')
+						from tourn, school
+					where school.chapter = chapter.id
+						and school.tourn = tourn.id
+						and tourn.end > NOW()
+					order by tourn.start
+					limit 5
+				) as tourns,
+				GROUP_CONCAT(CONCAT(admin.first,' ',admin.last) SEPARATOR ',') admins
+
+			from chapter
+				left join permission on chapter.id = permission.chapter
+				left join person admin on admin.id = permission.person
+			where chapter.name like ?
+				group by chapter.id
+		");
+
+		$sth->execute($search_chapter.'%');
+		$chapters = $sth->fetchall_hash();
+		$sth->finish();
 	}
 
 	my @existings = Tab::Conflict->search(
@@ -96,6 +126,33 @@
 		}
 	}
 
+	if ($limit) {
+
+		$sth = $dbh->prepare("
+
+			select
+				person.id, person.email, person.first, person.last,
+				count(student.id) as students,
+				count(cj.id) as judges,
+				GROUP_CONCAT(distinct(chapter.name) SEPARATOR ',') as chapters,
+				GROUP_CONCAT(distinct(jchapter.name) SEPARATOR ',') as jchapters,
+				CONVERT_TZ(last_access.value_date, '+00:00', person.tz) last_access
+			from person
+				left join student on student.person = person.id
+				left join chapter_judge cj on cj.person = person.id
+				left join chapter on student.chapter = chapter.id
+				left join chapter jchapter on cj.chapter = jchapter.id
+				left join person_setting last_access on last_access.person = person.id and last_access.tag = 'last_access'
+
+			$limit
+			group by person.id
+			order by last_access.value_date DESC
+		");
+
+		$sth->execute();
+		$persons = $sth->fetchall_hash();
+	}
+
 	my @nowjudges = $m->comp(
 		"/funclib/person_judges.mas",
 		person       => $person,
@@ -108,6 +165,18 @@
 			$m->comp("/funclib/person_conflict.mas", person => $person, tourn => $judge->category->tourn);
 		}
 	}
+
+	Tab::Tourn->set_sql( next_five => "
+		select
+			tourn.id, tourn.name, tourn.start
+
+		from tourn, school
+			where school.chapter = ?
+			and school.tourn = tourn.id
+			and tourn.end > NOW()
+		order by tourn.start
+		limit 5
+	");
 
 </%init>
 
@@ -152,245 +221,9 @@
 			their entries for a standing conflict to work automatically.
 		</p>
 
-		<div class="half top">
-
-			<h5 class="button">Add Personal Conflict</h5>
-
-			<form action="conflicts.mhtml" method="post">
-
-			<div class="row padleftmore">
-				<span class="third">
-					Last Name:
-				</span>
-				<span class="twothird">
-					<input
-						type        = "text"
-						name        = "search_last"
-						size        = "25"
-						placeholder = "Search by last name"
-					>
-				</span>
-			</div>
-
-			<div class="row padleftmore">
-				<span class="third">
-					or Email:
-				</span>
-				<span class="twothird">
-					<input
-						type        = "text"
-						name        = "search_email"
-						size        = "25"
-						placeholder = "Search by email"
-					>
-				</span>
-			</div>
-
-			<div class="rightalign liblrow marno">
-				<input type="submit" value="Search">
-				</form>
-			</div>
-
-			<h5 class="button">Add School Conflict</h5>
-
-			<form action="conflicts.mhtml" method="post">
-
-			<div class="row padleftmore">
-				<span class="third">
-					Whole School:
-				</span>
-				<span class="twothird">
-					<input
-						type        = "text"
-						name        = "search_chapter"
-						size        = "25"
-						placeholder = "Search by school name"
-					>
-				</span>
-			</div>
-
-			<div class="rightalign liblrow marno">
-				<input type="submit" value="Search">
-				</form>
-			</div>
-
-		</div>
-
-		<div class="half top right">
-
-%			if (@persons || @chapters) {
-
-				<h5 class="button">Search Results:</h5>
-
-<%perl>
-
-				foreach my $other (@persons) {
-
-					next if $no_person{$other};
-
-					my @chapters;
-
-					my @students = Tab::Student->search( person => $other->id );
-
-					my @chapter_judges = Tab::ChapterJudge->search( person => $other->id );
-
-					foreach my $person (@chapter_judges, @students) {
-						push @chapters, $person->chapter if $person->chapter;
-					}
-
-</%perl>
-					<div class="row ">
-
-						<span class="quarter ">
-							<% $other->first %>
-						</span>
-
-						<span class="quarter ">
-							<% $other->last %>
-						</span>
-
-						<span class="quarter ">
-%							foreach my $chapter (@chapters) {
-								<div class="full nospace">
-									<% $chapter->name %>
-								</div>
-%							}
-						</span>
-
-						<span class="quarter">
-							<a class="buttonwhite bluetext invert thin"
-								href="conflicts.mhtml?other_id=<% $other->id %>"
-							> Conflict </a>
-						</span>
-
-					</div>
-
-%				}
-
-%				foreach my $chapter (@chapters) {
-
-%					next if $no_chapter{$chapter};
-
-					<div class="row ">
-
-						<span class="half">
-							<% $chapter->name %>
-						</span>
-
-						<span class="quarter">
-							<% $chapter->state %>
-						</span>
-
-						<span class="quarter">
-							<a class="buttonwhite bluetext invert thin"
-								href="conflicts.mhtml?chapter_id=<% $chapter->id %>"
-							> Conflict </a>
-						</span>
-
-					</div>
-
-%				}
-%			}
-
-			<h5 class="button">Standing Conflicts</h5>
-
-<%perl>
-
-			if (@existings) {
-
-				foreach my $existing (@existings) {
-
-					my $conflicted = $existing->conflicted
-						if $existing->conflicted > 0;
-
-					my $chapter = $existing->chapter
-						if $existing->chapter > 0;
-
-</%perl>
-
-					<div class="row">
-
-						<span class="fifth">
-							<% $conflicted > 0 ? "Person" : "" %>
-							<% $existing->chapter > 0 ? "Team" : "" %>
-						</span>
-
-%						if ($conflicted) {
-							<span
-								title="<% $conflicted->email %>"
-								class="threefifths semibold bluetext hover"
-							>
-								<% $conflicted->first." ".$conflicted->last %>
-							</span>
-%						} elsif ($chapter) {
-							<span class="threefifths semibold bluetext" >
-								<% $chapter->name %>
-							</span>
-%						}
-
-						<span class="fifth rightalign marno padvertless">
-							<a class="redtext buttonwhite fa fa-trash fa-sm"
-								href="conflict_rm.mhtml?conflict_id=<% $existing->id %>">
-							</a>
-						</span>
-
-%						if ($conflicted) {
-
-%							my @cjs = $conflicted->chapter_judges if $conflicted;
-
-							<span class="half top nospace">
-
-								<div class="full semibold redtext">
-									Judging for:
-								</div>
-
-%								foreach my $judge (@cjs) {
-%									next unless $judge->chapter;
-									<div class="full padless smallish marno marleftmore">
-										<% $judge->chapter->name %>
-									</div>
-%								}
-
-%								unless (@cjs) {
-									<div class="padmore semibold redtext marbottom">
-										No judge records linked. No conflict will apply.
-									</div>
-%								}
-
-							</span>
-
-							<span class="half top nospace">
-
-								<div class="full semibold redtext">
-									Competing for:
-								</div>
-
-%								my @students = $conflicted->students if $conflicted;
-
-%								foreach my $student (@students) {
-%									next unless $student && $student->chapter;
-									<div class="full padless smallish marno marleftmore">
-										<% $student->chapter->name %>
-										(<% $student->grad_year %>)
-									</div>
-%								}
-
-%								unless (@students) {
-									<div class="padmore semibold redtext marbottom">
-										No competitor records linked.  No conflict will apply
-									</div>
-%								}
-							</span>
-%						}
-					</div>
-%				}
-%			}
-		</div>
-
-
 %		if (@nowjudges) {
 			<h5 class="martopmore button">
-				Or, Enter Tournament Specific Conflicts
+				Tournament Specific Conflict Sheets
 			</h5>
 
 %			foreach my $judge (@nowjudges) {
@@ -411,12 +244,346 @@
 					<span class="fifth centeralign">
 						<a
 							href="judge_conflicts.mhtml?judge_id=<% $judge->id %>"
-							class="buttonwhite bluetext thinnish invert"
-						>Conflict Sheet</a>
+							class="buttonwhite bluetext thinnish fa fa-lg fa-list"
+						></a>
 					</span>
 				</div>
 
 %			}
 %		}
 
+
+%		if (@existings) {
+			<h5>Program Conflicts</h5>
+
+<%perl>
+			foreach my $existing (@existings) {
+
+				my $chapter = $existing->chapter;
+				next unless $chapter > 0;
+
+				my @next_five = Tab::Tourn->search_next_five($chapter->id);
+
+</%perl>
+				<div class="row bordertop">
+					<span
+						title="<% $chapter->id %>"
+						class="fifth semibold bluetext hover"
+					>
+						<% $chapter->name %>
+					</span>
+
+					<span class="fourtenths">
+%						if (@next_five) {
+							<div class="full semibold redtext smaller padvertless">
+								Next 5 tournaments
+							</div>
+%							foreach my $tourn (@next_five) {
+								<div class="full padless smallish marno marleftmore">
+									<span class="fourfifths nospace padtopless">
+										<% $tourn->name %>
+									</span>
+									<span class="fifth nospace padtopless">
+										(<% $tourn->start->year %>)
+									</span>
+								</div>
+%							}
+%						}
+					</span>
+
+					<span class="threetenths">
+						<div class="full semibold redtext smaller padvertless">
+							Admins
+						</div>
+%						foreach my $admin ($chapter->admins) {
+							<div class="full padless smallish marno marleftmore">
+								<% $admin->first %> <% $admin->last %>
+							</div>
+%						}
+					</span>
+
+					<span class="twenty rightalign">
+						<a class="redtext buttonwhite fa fa-trash fa-sm"
+							href="conflict_rm.mhtml?conflict_id=<% $existing->id %>">
+						</a>
+					</span>
+				</div>
+%			}
+
+			<h5>Individual Conflicts</h5>
+<%perl>
+				foreach my $existing (@existings) {
+
+					next if $existing->chapter > 0;
+					my $conflicted = $existing->conflicted;
+					next unless $conflicted;
+</%perl>
+					<div class="row padvertless bordertop">
+						<span
+							title="<% $conflicted->email %>"
+							class="fifth semibold bluetext hover"
+						>
+							<% $conflicted->first." ".$conflicted->last %>
+						</span>
+
+
+%						my @cjs = $conflicted->chapter_judges if $conflicted;
+
+						<span class="third nospace padvert top">
+%							if (@cjs) {
+								<div class="full semibold redtext smaller padvertless">
+									JUDGES FOR
+								</div>
+
+%								foreach my $judge (@cjs) {
+%									next unless $judge->chapter;
+									<div class="full padless smallish marno marleftmore">
+										<% $judge->chapter->name %>
+									</div>
+%								}
+%							}
+						</span>
+
+						<span class="fourtenths nospace padvert top">
+
+%							my @students = $conflicted->students if $conflicted;
+%							if (@students) {
+								<div class="full semibold redtext smaller padvertless">
+									COMPETES FOR
+								</div>
+
+%								foreach my $student (@students) {
+%									next unless $student && $student->chapter;
+									<div class="full padless smallish marno marleftmore">
+										<span class="fourfifths nospace padtopless">
+											<% $student->chapter->name %>
+										</span>
+										<span class="fifth nospace padtopless">
+											(<% $student->grad_year %>)
+										</span>
+									</div>
+%								}
+%							}
+						</span>
+
+						<span class="tenth centeralign">
+							<a class="redtext buttonwhite fa fa-trash fa-sm"
+								href="conflict_rm.mhtml?conflict_id=<% $existing->id %>">
+							</a>
+						</span>
+					</div>
+%				}
+%			}
+
+
+		<h5 class="bluebordertop padtopmore">Add Individual Conflict</h5>
+
+%			if ($err) {
+				<p class="centeralign explain redtext semibold"><% $err %></p>
+%			}
+
+			<form action="conflicts.mhtml" method="post">
+
+			<div class="row padleftmore">
+				<span class="third">
+					Name
+				</span>
+				<span class="third">
+					<input
+						type        = "text"
+						name        = "search_first"
+						size        = "25"
+						placeholder = "First name"
+						value       = "<% $ARGS{"search_first"} %>"
+					>
+				</span>
+				<span class="third">
+					<input
+						type        = "text"
+						name        = "search_last"
+						size        = "25"
+						placeholder = "Last name"
+						value       = "<% $ARGS{"search_last"} %>"
+					>
+				</span>
+			</div>
+
+			<div class="row padleftmore">
+				<span class="third">
+					or Email
+				</span>
+				<span class="twothirds">
+					<input
+						type        = "text"
+						name        = "search_email"
+						size        = "25"
+						placeholder = "Search by email"
+						value       = "<% $ARGS{"search_email"} %>"
+					>
+				</span>
+			</div>
+
+			<div class="rightalign liblrow marno">
+				<span class="third centeralign nospace">
+					<input type="submit" value="Search">
+				</span>
+			</div>
+		</form>
+
+		<h5 class="martop">Add Program Conflict</h5>
+
+			<form
+				action = "conflicts.mhtml"
+				method = "post"
+			>
+				<div class="row padleftmore">
+					<span class="third">
+						School/Institution
+					</span>
+					<span class="twothirds">
+						<input
+							type        = "text"
+							name        = "search_chapter"
+							size        = "25"
+							placeholder = "Search by school name"
+							value       = "<% $ARGS{"search_chapter"} %>"
+						>
+					</span>
+				</div>
+
+				<div class="rightalign liblrow marno">
+					<span class="third centeralign nospace">
+						<input type="submit" value="Search">
+					</span>
+				</div>
+			</form>
+
+%			if ($persons || $chapters) {
+
+				<h5 class="button martopmore">Search Results</h5>
+
+%				if ($persons) {
+
+					<div class="ltyellow row smallish semibold">
+
+						<span class="sixth semibold">
+							First
+						</span>
+
+						<span class="sixth semibold">
+							Last
+						</span>
+
+						<span class="smallish fifth" title="Last time they accessed Tabroom">
+							Last Tabroom Access
+						</span>
+
+						<span class="threetenths">
+							Affiliated With
+						</span>
+
+						<span class="sixth rightalign">
+						</span>
+					</div>
+
+<%perl>
+					foreach my $person_ref (@{$persons}) {
+
+						next if $no_person{$person_ref->{id}};
+
+						my %chapters;
+
+						foreach my $chapter ( (split(/\,/, $person_ref->{'chapters'})), (split(/\,/, $person_ref->{'jchapters'}))) {
+							$chapters{$chapter}++;
+						}
+</%perl>
+						<div class="row ">
+
+							<span class="sixth semibold">
+								<% $person_ref->{first} %>
+							</span>
+
+							<span class="sixth semibold">
+								<% $person_ref->{last} %>
+							</span>
+
+							<span class="smallish fifth" title="Last time they accessed Tabroom">
+								<& "/funclib/showdate.mas", string => $person_ref->{last_access}, format => "murica_short" &>
+							</span>
+
+							<span class="threetenths">
+%								foreach my $chapter (sort {$a cmp $b} keys %chapters) {
+									<div class="full nospace smallish padvertless">
+										<% $chapter %>
+									</div>
+%								}
+							</span>
+
+							<span class="sixth rightalign">
+								<a class="buttonwhite bluetext invert thin"
+									href="conflicts.mhtml?other_id=<% $person_ref->{id}%>"
+								> Conflict </a>
+							</span>
+						</div>
+%					}
+
+					<div class="ltyellow row smallish semibold">
+						<span class="quarter semibold">
+							Program Name
+						</span>
+
+						<span class="third">
+							Upcoming Tournaments
+						</span>
+
+						<span class="quarter">
+							Admins
+						</span>
+
+						<span class="sixth rightalign">
+						</span>
+					</div>
+%				}
+
+%				if ($chapters) {
+
+%					foreach my $chapter (@{$chapters})	{
+
+%						next if $no_chapter{$chapter->{id}};
+
+						<div class="row nospace padverless">
+							<span class="quarter semibold">
+								<% $chapter->{'name'} %>
+							</span>
+							<span class="twenty semibold">
+								<% $chapter->{'state'} ? $chapter->{'state'} : $chapter->{'country'} %>
+							</span>
+
+							<span class="fourtenths">
+%								my $counter;
+%								foreach my $tourn (split(/\,/, $chapter->{'tourns'})) {
+%									last if $counter++ > 4;
+									<div class='full nospace padvertless smallish'>
+										<% $tourn %>
+									</div>
+%								}
+							</span>
+
+							<span class="fifth">
+%								foreach my $admin (split(/\,/, $chapter->{'admins'})) {
+									<div class='full nospace padvertless smallish'>
+										<% $admin %>
+									</div>
+%								}
+							</span>
+
+							<span class="tenth rightalign">
+								<a class="buttonwhite bluetext invert thin"
+									href="conflicts.mhtml?chapter_id=<% $chapter->{id} %>"
+								> Conflict </a>
+							</span>
+						</div>
+%					}
+%				}
+%			}
 	</div>
