@@ -1,5 +1,3 @@
-import { debugLogger } from '../../../helpers/logger';
-
 export const acceptPayPalPayment = {
 
 	POST: async (req, res) => {
@@ -9,12 +7,9 @@ export const acceptPayPalPayment = {
 		const payerName = `${orderData.payer.name.given_name} ${orderData.payer.name.surname}`;
 		const payerEmail = orderData.payer.email_address;
 
-		debugLogger.info('I have a request and it is');
-		debugLogger.info(orderData);
-
 		const paymentObject = {
 			reason    : `PayPal Payment from ${payerName} ${payerEmail}`,
-			amount    : parseInt(orderData.purchase_units[0]?.amount.value) * -1,
+			amount    : parseFloat(orderData.purchase_units[0]?.amount.value) * -1,
 			school    : orderData.purchase_units[0]?.custom_id,
 			payment   : true,
 			levied_at : Date(orderData.create_time),
@@ -23,17 +18,15 @@ export const acceptPayPalPayment = {
 
 		const payPalObject = {
 			reason    : `Online Payment Processing Fee`,
-			amount    : parseInt(orderData.payment_fee),
+			amount    : parseFloat(orderData.payment_fee),
 			school    : orderData.purchase_units[0]?.custom_id,
 			payment   : false,
 			levied_at : Date(orderData.create_time),
 			levied_by : orderData.person_id,
 		};
-		const payment = await db.fine.create(paymentObject);
-		const paypal = await db.fine.create(payPalObject);
 
-		debugLogger.info(payment);
-		debugLogger.info(paypal);
+		await db.fine.create(paymentObject);
+		await db.fine.create(payPalObject);
 		res.status(200);
 	},
 };
