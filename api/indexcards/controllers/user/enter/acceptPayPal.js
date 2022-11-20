@@ -27,12 +27,8 @@ export const acceptPayPalPayment = {
 			levied_at : Date(orderData.create_time),
 			levied_by : orderData.person_id,
 		};
-		const paymentFine = await db.fine.create(paymentObject);
-		const payPalCharge = await db.fine.create(payPalObject);
-
-		console.log('Results');
-		console.log(paymentFine);
-		console.log(payPalCharge);
+		await db.fine.create(paymentObject);
+		await db.fine.create(payPalObject);
 		res.status(200);
 	},
 };
