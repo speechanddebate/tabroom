@@ -1,24 +1,26 @@
-FROM ubuntu:trusty
+FROM ubuntu:22.04
 LABEL maintainer "cecilgol"
 ENV DEBIAN_FRONTEND=noninteractive
 
+COPY doc/conf/nodesource.list /etc/apt/sources.list.d
+RUN apt update
 # This step takes forever so seperate it to make sure its cached
-RUN apt-get upgrade && apt-get update && apt-get install -y -q --no-install-recommends texlive-full
+RUN apt install -y -q texlive \
+    texlive-latex-extra \
+    texlive-luatex \
+    texlive-fonts-extra
 
-RUN apt-get install -y -q --no-install-recommends \
-    curl \
-    cvs \
-    git \
-    build-essential \
+RUN /usr/bin/apt -y -q install apache2 \
+    apache2-utils \
+    bzip2 \
     libapache-session-perl \
     libapache-session-wrapper-perl \
     libapache2-mod-apreq2 \
     libapache2-mod-perl2 \
     libapache2-mod-perl2-dev \
     libapache2-mod-perl2-doc \
-    libapache2-mod-php5 \
+    libapache2-mod-php \
     libapache2-request-perl \
-    libbytes-random-secure-perl \
     libcgi-untaint-perl \
     libclass-accessor-perl \
     libclass-container-perl \
@@ -35,12 +37,10 @@ RUN apt-get install -y -q --no-install-recommends \
     libclone-perl \
     libcompress-raw-zlib-perl \
     libcrypt-passwdmd5-perl \
-    libcrypt-rijndael-perl \
     libcrypt-ssleay-perl \
-    libcss-minifier-perl \
+    libcrypt-jwt-perl \
     libdate-manip-perl \
     libdatetime-format-builder-perl \
-    libdatetime-format-iso8601-perl \
     libdatetime-format-mail-perl \
     libdatetime-format-mysql-perl \
     libdatetime-format-strptime-perl \
@@ -54,50 +54,101 @@ RUN apt-get install -y -q --no-install-recommends \
     libhtml-fromtext-perl \
     libhtml-mason-perl \
     libhtml-parser-perl \
-    libhtml-scrubber-perl \
-    libhtml-strip-perl \
-    libhtml-tableextract-perl \
     libhtml-tagset-perl \
     libhtml-tree-perl \
-    libjavascript-minifier-perl \
-    libjson-perl \
-    liblingua-en-numbers-ordinate-perl \
     libmailtools-perl \
-    libmath-round-perl \
-    libmime-lite-perl \
     libmime-tools-perl \
-    libnet-ldap-perl \
-    libphp-serialization-perl \
-    libswitch-perl \
-    libuniversal-can-perl \
+    libmime-lite-perl \
     liburi-perl \
+    liburi-encode-perl \
     libwww-perl \
-    libxml-simple-perl \
-    make \
+    libtext-unidecode-perl \
+    build-essential \
+    mariadb-client \
+    mariadb-common \
+    mariadb-server \
+    nano \
+    ncurses-base \
+    ncurses-bin \
+    nmap \
+    neovim \
     openprinting-ppds \
-    openssl-blacklist \
+    openssh-client \
+    openssh-server \
+    openssl \
+    passwd \
+    perl \
+    perl-base \
     perl-doc \
+    perl-modules \
     perlmagick \
     pm-utils \
+    popularity-contest \
+    procps \
+    psmisc \
+    pwgen \
+    rdesktop \
+    rsync \
+    rsyslog \
+    screen \
+    ssh \
+    ssl-cert \
+    tcsh \
+    cvs \
+    liblingua-en-numbers-ordinate-perl \
+    libuniversal-can-perl \
+    libhtml-strip-perl \
+    libxml-simple-perl \
+    libnet-ldap-perl \
+    libdatetime-format-iso8601-perl \
+    libhtml-tableextract-perl \
+    libcrypt-rijndael-perl \
+    libphp-serialization-perl \
+    libmath-round-perl \
+    libhtml-scrubber-perl \
+    libbytes-random-secure-perl \
     s3cmd \
-    wget \
-    rsyslog 
-    #texlive-latex-extra \
-    #texlive-fonts-extra \
-    #texlive-base
-    #texlive-full
+    libswitch-perl \
+    libjson-perl \
+    libjson-webtoken-perl \
+    libjavascript-minifier-perl \
+    libcss-minifier-perl \
+    pv \
+    cpanminus \
+    librest-application-perl \
+    libtext-csv-encoded-perl \
+    libtext-csv-perl \
+    libgeoip2-perl \
+    libmaxmind-db-reader-perl
 
-RUN curl -L https://cpanmin.us | perl - App::cpanminus
-RUN cpanm install JSON::WebToken
-RUN cpanm install JSON::XS
-RUN cpanm install Text::Trim
-RUN cpanm install REST::Client 
-RUN cpanm Crypt::JWT
+RUN a2enmod proxy
 
-COPY doc/conf/local.tabroom.com.conf /etc/apache2/sites-available
+RUN cpanm Lingua::EN::Nums2Words
+RUN cpanm REST::Client
+RUN cpanm Text::Undiacritic
+RUN cpanm HTTP::UA::Parser
+
+# RUN cpanm Devel::NYTProf
+# RUN apt remove libcpanel-json-xs-perl
+
+# Load connect version of database interface
 RUN mv /usr/share/perl5/Class/DBI.pm /usr/share/perl5/Class/DBI.pm.orig
 COPY doc/lib/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
+
+RUN ln -s doc/utility/databse-sync /usr/local/bin
+
+# Setup logging
+RUN mkdir /var/log/tabroom
+RUN chmod 1777 /var/log/tabroom
+COPY doc/conf/local.rsyslog.conf /etc/rsyslog.d/90-tabroom.conf
+# Don't try to read kernel logs
+RUN sed -i '/imklog/d' /etc/rsyslog.conf 
+
+# Set up apache server
+COPY doc/conf/local.tabroom.com.conf /etc/apache2/sites-available
 RUN echo "ServerName  local.tabroom.com" >> /etc/apache2/apache2.conf
+# RUN echo "127.0.1.21 local local.tabroom.com" >> /etc/hosts
+RUN ln -s /etc/apache2/sites-available/local.tabroom.com.conf /etc/apache2/sites-enabled/0-local.tabroom.conf
 
 ENV APACHE_LOCK_DIR=/var/lock/apache2
 ENV APACHE_PID_FILE=/var/run/apache2/apache2.pid
@@ -105,11 +156,6 @@ ENV APACHE_RUN_USER=www-data
 ENV APACHE_RUN_GROUP=www-data
 ENV APACHE_LOG_DIR=/var/log/apache2
 ENV APACHE_ULIMIT_MAX_FILES='ulimit -n 65536'
-RUN a2enmod proxy_http
-
-RUN ln -s /etc/apache2/sites-available/local.tabroom.com.conf /etc/apache2/sites-enabled/0-local.tabroom.conf
-RUN mkdir -p /cache/mason
-RUN chown -R www-data:www-data /cache/mason
 
 
 COPY doc/docker/cmd.sh /root/cmd.sh
