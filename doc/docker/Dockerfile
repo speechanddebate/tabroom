@@ -1,10 +1,15 @@
 FROM ubuntu:trusty
 LABEL maintainer "cecilgol"
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get upgrade && apt-get update && apt-get install -y -q --no-install-recommends \
+
+# This step takes forever so seperate it to make sure its cached
+RUN apt-get upgrade && apt-get update && apt-get install -y -q --no-install-recommends texlive-full
+
+RUN apt-get install -y -q --no-install-recommends \
     curl \
     cvs \
     git \
+    build-essential \
     libapache-session-perl \
     libapache-session-wrapper-perl \
     libapache2-mod-apreq2 \
@@ -76,21 +81,22 @@ RUN apt-get upgrade && apt-get update && apt-get install -y -q --no-install-reco
     pm-utils \
     s3cmd \
     wget \
-    rsyslog \
+    rsyslog 
     #texlive-latex-extra \
     #texlive-fonts-extra \
     #texlive-base
-    texlive-full
+    #texlive-full
 
 RUN curl -L https://cpanmin.us | perl - App::cpanminus
 RUN cpanm install JSON::WebToken
+RUN cpanm install JSON::XS
 RUN cpanm install Text::Trim
 RUN cpanm install REST::Client 
+RUN cpanm Crypt::JWT
 
-COPY /www/tabroom/doc/local.tabroom.com.conf /etc/apache2/sites-available
-#COPY General.pm.default /root/General.pm.default
+COPY doc/conf/local.tabroom.com.conf /etc/apache2/sites-available
 RUN mv /usr/share/perl5/Class/DBI.pm /usr/share/perl5/Class/DBI.pm.orig
-COPY /www/tabroom/doc/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
+COPY doc/lib/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
 RUN echo "ServerName  local.tabroom.com" >> /etc/apache2/apache2.conf
 
 ENV APACHE_LOCK_DIR=/var/lock/apache2
@@ -99,9 +105,13 @@ ENV APACHE_RUN_USER=www-data
 ENV APACHE_RUN_GROUP=www-data
 ENV APACHE_LOG_DIR=/var/log/apache2
 ENV APACHE_ULIMIT_MAX_FILES='ulimit -n 65536'
+RUN a2enmod proxy_http
 
 RUN ln -s /etc/apache2/sites-available/local.tabroom.com.conf /etc/apache2/sites-enabled/0-local.tabroom.conf
+RUN mkdir -p /cache/mason
+RUN chown -R www-data:www-data /cache/mason
 
-COPY cmd.sh /root/cmd.sh
+
+COPY doc/docker/cmd.sh /root/cmd.sh
 RUN chmod +x /root/cmd.sh
 CMD ["/bin/sh","-c","/root/cmd.sh"]
