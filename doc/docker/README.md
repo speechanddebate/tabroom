@@ -63,3 +63,5 @@ pv tabroom.sql | docker exec -i $(docker ps -f=name=tabroom-docker_db -q) /usr/b
 6. Point your browser to `localhost:8000` to verify the webserver system has started up, and is reading from the database.
 
 7. To view the react version of the app, point your browser to `localhost:3000`
+
+The default admin account's email will be admin@tabroom.com, and the password will be admin.
