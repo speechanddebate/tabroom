@@ -211,14 +211,6 @@ const panelEntries = async (db, panel) => {
 	return entries;
 };
 
-export const roundJudges =  {
-	GET: async (req, res) => {
-		const round = await roundData(req.db, req.params.round_id);
-		const availableJudges = await roundAvailableJudges(req.db, round);
-		res.status(200).json(availableJudges);
-	},
-};
-
 const roundAvailableJudges = async (db, round) => {
 
 	// Returns a list of judges who can judge this round, filtering out any
@@ -389,6 +381,14 @@ const roundAvailableJudges = async (db, round) => {
 	});
 
 	return judges;
+};
+
+export const roundJudges =  {
+	GET: async (req, res) => {
+		const round = await roundData(req.db, req.params.round_id);
+		const availableJudges = await roundAvailableJudges(req.db, round);
+		res.status(200).json(availableJudges);
+	},
 };
 
 const roundJudgeConflicts = async (db, round) => {

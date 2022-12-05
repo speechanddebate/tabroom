@@ -1,4 +1,4 @@
-import {objectifySettings} from '../../../helpers/objectify';
+import { objectifySettings } from '../../../helpers/objectify';
 
 export const getInvite = {
 	GET: async (req, res) => {
@@ -6,11 +6,7 @@ export const getInvite = {
 
 		const invite = {};
 
-		console.log('I am here with tourn ID');
-		console.log(req.params);
-
 		if (req.params.tourn_id) {
-			console.log('I am here with tourn ID');
 			const result = await db.tourn.findByPk(
 				parseInt(req.params.tourn_id), {
 					include: [

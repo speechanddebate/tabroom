@@ -7,10 +7,15 @@ export const transporter = nodemailer.createTransport({
 	secure: false, // Still allows STARTTLS
 	pool: true,
 	maxConnections: 30,
-//	auth: {
-//		user: config.SHARE_SMTP_USER,
-//		pass: config.SHARE_SMTP_PASS,
-//	},
+	tls: {
+		secure: false,
+		ignoreTLS: true,
+		rejectUnauthorized: false,
+	},
+	auth: {
+		user: config.SHARE_SMTP_USER,
+		pass: config.SHARE_SMTP_PASS,
+	},
 });
 
 const sendMail = async (from = 'share@share.tabroom.com', to, subject, text, html, attachments) => {

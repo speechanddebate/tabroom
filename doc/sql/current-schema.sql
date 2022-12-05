@@ -1,8 +1,8 @@
--- MySQL dump 10.19  Distrib 10.3.31-MariaDB, for debian-linux-gnu (x86_64)
+-- MariaDB dump 10.19  Distrib 10.6.7-MariaDB, for debian-linux-gnu (x86_64)
 --
 -- Host: localhost    Database: tabroom
 -- ------------------------------------------------------
--- Server version	10.3.31-MariaDB-0ubuntu0.20.04.1-log
+-- Server version	10.6.7-MariaDB-2ubuntu1.1-log
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -38,7 +38,7 @@ CREATE TABLE `ad` (
   PRIMARY KEY (`id`),
   KEY `person` (`person`),
   KEY `approved_by` (`approved_by`)
-) ENGINE=InnoDB AUTO_INCREMENT=122 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=185 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -59,35 +59,7 @@ CREATE TABLE `autoqueue` (
   `created_at` datetime DEFAULT NULL,
   `created_by` int(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=500629 DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `badge`
---
-
-DROP TABLE IF EXISTS `badge`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `badge` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tag` varchar(63) DEFAULT NULL,
-  `label` varchar(255) DEFAULT NULL,
-  `self_reported` tinyint(1) NOT NULL DEFAULT 0,
-  `sitewide` tinyint(1) NOT NULL DEFAULT 0,
-  `description` text DEFAULT NULL,
-  `person` int(11) NOT NULL,
-  `quiz` int(11) DEFAULT NULL,
-  `circuit` int(11) DEFAULT NULL,
-  `created_at` datetime DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `person` (`person`),
-  KEY `fk_badge_quiz_id` (`quiz`),
-  KEY `fk_badge_circuit_id` (`circuit`),
-  CONSTRAINT `fk_badge_circuit_id` FOREIGN KEY (`circuit`) REFERENCES `circuit` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_badge_quiz_id` FOREIGN KEY (`quiz`) REFERENCES `quiz` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1133792 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -114,7 +86,6 @@ CREATE TABLE `ballot` (
   `judge` int(11) NOT NULL DEFAULT 0,
   `panel` int(11) NOT NULL DEFAULT 0,
   `entry` int(11) NOT NULL DEFAULT 0,
-  `hangout_admin` tinyint(4) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `ballot_ejp` (`entry`,`judge`,`panel`),
@@ -126,7 +97,7 @@ CREATE TABLE `ballot` (
   KEY `entered_by` (`entered_by`),
   KEY `entry` (`entry`),
   KEY `started_by` (`started_by`)
-) ENGINE=InnoDB AUTO_INCREMENT=27727389 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=33620535 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -157,7 +128,30 @@ CREATE TABLE `campus_log` (
   KEY `judge` (`judge`),
   KEY `person` (`person`),
   CONSTRAINT `fk_cl_tourn` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=3280893 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=4976780 DEFAULT CHARSET=utf8mb3;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `caselist`
+--
+
+DROP TABLE IF EXISTS `caselist`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `caselist` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `slug` varchar(255) NOT NULL,
+  `eventcode` int(6) NOT NULL DEFAULT 0,
+  `person` int(11) NOT NULL,
+  `partner` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `slug` (`slug`),
+  KEY `fk_clist_person` (`person`),
+  KEY `fk_clist_partner` (`partner`),
+  CONSTRAINT `fk_clist_partner` FOREIGN KEY (`partner`) REFERENCES `person` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_clist_person` FOREIGN KEY (`person`) REFERENCES `person` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=1390 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -177,7 +171,7 @@ CREATE TABLE `category` (
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`),
   CONSTRAINT `fk_category_tourn` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=55395 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=67281 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -198,8 +192,9 @@ CREATE TABLE `category_setting` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_judge_group_setting` (`category`,`tag`),
-  KEY `category` (`category`)
-) ENGINE=InnoDB AUTO_INCREMENT=779388 DEFAULT CHARSET=utf8;
+  KEY `category` (`category`),
+  KEY `category_tag` (`category`,`tag`)
+) ENGINE=InnoDB AUTO_INCREMENT=952336 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -238,7 +233,7 @@ CREATE TABLE `change_log` (
   KEY `type` (`tag`),
   KEY `created` (`created_at`),
   KEY `person` (`person`)
-) ENGINE=InnoDB AUTO_INCREMENT=9693396 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=12548301 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -270,7 +265,7 @@ CREATE TABLE `chapter` (
   PRIMARY KEY (`id`),
   KEY `nsda_index` (`nsda`),
   KEY `nsda` (`nsda`)
-) ENGINE=InnoDB AUTO_INCREMENT=79169 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=111501 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -293,7 +288,7 @@ CREATE TABLE `chapter_circuit` (
   UNIQUE KEY `uk_chapter_circuit` (`chapter`,`circuit`),
   KEY `chapter` (`chapter`),
   KEY `circuit` (`circuit`)
-) ENGINE=InnoDB AUTO_INCREMENT=57550 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=115412 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -324,7 +319,7 @@ CREATE TABLE `chapter_judge` (
   PRIMARY KEY (`id`),
   KEY `chapter` (`chapter`),
   KEY `person` (`person`)
-) ENGINE=InnoDB AUTO_INCREMENT=298668 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=346786 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -347,7 +342,7 @@ CREATE TABLE `chapter_setting` (
   PRIMARY KEY (`id`),
   KEY `chapter` (`chapter`),
   CONSTRAINT `fk_chaptersetting_tourn` FOREIGN KEY (`chapter`) REFERENCES `chapter` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=200092 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=290410 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -368,7 +363,7 @@ CREATE TABLE `circuit` (
   `webname` varchar(31) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=228 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=239 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -386,7 +381,7 @@ CREATE TABLE `circuit_membership` (
   `circuit` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -408,7 +403,7 @@ CREATE TABLE `circuit_setting` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_circuit_setting` (`circuit`,`tag`),
   KEY `circuit` (`circuit`)
-) ENGINE=InnoDB AUTO_INCREMENT=807 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=859 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -430,7 +425,7 @@ CREATE TABLE `concession` (
   `tourn` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=3553 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=4308 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -449,7 +444,7 @@ CREATE TABLE `concession_option` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `concession_type` (`concession_type`)
-) ENGINE=InnoDB AUTO_INCREMENT=236 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=298 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -470,7 +465,7 @@ CREATE TABLE `concession_purchase` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `school` (`school`)
-) ENGINE=InnoDB AUTO_INCREMENT=34193 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=38993 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -489,7 +484,7 @@ CREATE TABLE `concession_purchase_option` (
   UNIQUE KEY `uk_purchase_option` (`concession_purchase`,`concession_option`),
   KEY `concession_purchase` (`concession_purchase`),
   KEY `concession_option` (`concession_option`)
-) ENGINE=InnoDB AUTO_INCREMENT=11956 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=13961 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -507,7 +502,7 @@ CREATE TABLE `concession_type` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `concession` (`concession`)
-) ENGINE=InnoDB AUTO_INCREMENT=114 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=148 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -531,7 +526,7 @@ CREATE TABLE `conflict` (
   KEY `conflict` (`conflicted`),
   KEY `added_by` (`added_by`),
   KEY `person` (`person`)
-) ENGINE=InnoDB AUTO_INCREMENT=42097 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=51486 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -553,7 +548,7 @@ CREATE TABLE `diocese` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `codes` (`active`,`code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -574,7 +569,7 @@ CREATE TABLE `district` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `code` (`code`)
-) ENGINE=InnoDB AUTO_INCREMENT=1008 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1008 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -598,7 +593,7 @@ CREATE TABLE `email` (
   `circuit` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=64436 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=82038 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -614,11 +609,9 @@ CREATE TABLE `entry` (
   `name` varchar(127) DEFAULT NULL,
   `ada` tinyint(1) DEFAULT NULL,
   `active` tinyint(1) NOT NULL DEFAULT 0,
-  `tba` tinyint(1) NOT NULL DEFAULT 0,
   `dropped` tinyint(1) NOT NULL DEFAULT 0,
   `waitlist` tinyint(1) NOT NULL DEFAULT 0,
   `unconfirmed` tinyint(1) NOT NULL DEFAULT 0,
-  `dq` tinyint(1) NOT NULL DEFAULT 0,
   `created_at` datetime DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
@@ -633,14 +626,14 @@ CREATE TABLE `entry` (
   KEY `id` (`id`),
   KEY `event` (`event`),
   KEY `registered_by` (`registered_by`)
-) ENGINE=InnoDB AUTO_INCREMENT=3701408 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=4405888 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!50003 SET @saved_cs_client      = @@character_set_client */ ;
 /*!50003 SET @saved_cs_results     = @@character_set_results */ ;
 /*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8 */ ;
-/*!50003 SET character_set_results = utf8 */ ;
-/*!50003 SET collation_connection  = utf8_general_ci */ ;
+/*!50003 SET character_set_client  = utf8mb3 */ ;
+/*!50003 SET character_set_results = utf8mb3 */ ;
+/*!50003 SET collation_connection  = utf8mb3_general_ci */ ;
 /*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
 /*!50003 SET sql_mode              = '' */ ;
 DELIMITER ;;
@@ -671,9 +664,9 @@ DELIMITER ;
 /*!50003 SET @saved_cs_client      = @@character_set_client */ ;
 /*!50003 SET @saved_cs_results     = @@character_set_results */ ;
 /*!50003 SET @saved_col_connection = @@collation_connection */ ;
-/*!50003 SET character_set_client  = utf8 */ ;
-/*!50003 SET character_set_results = utf8 */ ;
-/*!50003 SET collation_connection  = utf8_general_ci */ ;
+/*!50003 SET character_set_client  = utf8mb3 */ ;
+/*!50003 SET character_set_results = utf8mb3 */ ;
+/*!50003 SET collation_connection  = utf8mb3_general_ci */ ;
 /*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
 /*!50003 SET sql_mode              = '' */ ;
 DELIMITER ;;
@@ -720,8 +713,10 @@ CREATE TABLE `entry_setting` (
   `setting` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
-  KEY `entry` (`entry`)
-) ENGINE=InnoDB AUTO_INCREMENT=4982594 DEFAULT CHARSET=utf8;
+  UNIQUE KEY `entry_tag` (`entry`,`tag`),
+  KEY `entry` (`entry`),
+  KEY `tag` (`tag`)
+) ENGINE=InnoDB AUTO_INCREMENT=6264704 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -741,7 +736,7 @@ CREATE TABLE `entry_student` (
   UNIQUE KEY `uk_entry_student` (`entry`,`student`),
   KEY `entry` (`entry`),
   KEY `student` (`student`)
-) ENGINE=InnoDB AUTO_INCREMENT=4784427 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=5649089 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -766,7 +761,7 @@ CREATE TABLE `event` (
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`),
   KEY `category` (`category`)
-) ENGINE=InnoDB AUTO_INCREMENT=187200 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=232012 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -788,8 +783,9 @@ CREATE TABLE `event_setting` (
   PRIMARY KEY (`id`),
   KEY `event` (`event`),
   KEY `tag_value` (`tag`,`value`),
-  KEY `tag` (`tag`)
-) ENGINE=InnoDB AUTO_INCREMENT=4533986 DEFAULT CHARSET=utf8;
+  KEY `tag` (`tag`),
+  KEY `event_tag` (`event`,`tag`)
+) ENGINE=InnoDB AUTO_INCREMENT=5883300 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -822,7 +818,7 @@ CREATE TABLE `file` (
   KEY `entry` (`entry`),
   KEY `school` (`school`),
   KEY `district` (`district`)
-) ENGINE=InnoDB AUTO_INCREMENT=27511 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=33744 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -853,7 +849,7 @@ CREATE TABLE `fine` (
   KEY `school` (`school`),
   KEY `tourn` (`tourn`),
   KEY `levied_by` (`levied_by`)
-) ENGINE=InnoDB AUTO_INCREMENT=5373299 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=5431478 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -866,16 +862,13 @@ DROP TABLE IF EXISTS `follower`;
 CREATE TABLE `follower` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `type` varchar(8) DEFAULT NULL,
-  `cell` bigint(20) DEFAULT NULL,
-  `domain` varchar(64) DEFAULT NULL,
-  `email` varchar(64) DEFAULT NULL,
+  `person` int(11) NOT NULL DEFAULT 0,
   `follower` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
   `judge` int(11) DEFAULT NULL,
   `entry` int(11) DEFAULT NULL,
   `school` int(11) DEFAULT NULL,
   `student` int(11) DEFAULT NULL,
-  `person` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `entry` (`entry`),
@@ -883,7 +876,7 @@ CREATE TABLE `follower` (
   KEY `school` (`school`),
   KEY `follower` (`follower`),
   KEY `type` (`type`)
-) ENGINE=InnoDB AUTO_INCREMENT=947243 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1107320 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -901,7 +894,7 @@ CREATE TABLE `hotel` (
   `tourn` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=291 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=341 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -925,7 +918,7 @@ CREATE TABLE `housing` (
   `school` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=33904 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=33957 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -942,7 +935,7 @@ CREATE TABLE `housing_slots` (
   `tourn` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=634 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=703 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -963,7 +956,7 @@ CREATE TABLE `invoice` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `school` (`school`)
-) ENGINE=InnoDB AUTO_INCREMENT=23640 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=26512 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -983,7 +976,7 @@ CREATE TABLE `jpool` (
   PRIMARY KEY (`id`),
   KEY `category` (`category`),
   KEY `parent` (`parent`)
-) ENGINE=InnoDB AUTO_INCREMENT=69331 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=83573 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1001,7 +994,7 @@ CREATE TABLE `jpool_judge` (
   PRIMARY KEY (`id`),
   KEY `pool` (`jpool`),
   KEY `judge` (`judge`)
-) ENGINE=InnoDB AUTO_INCREMENT=1069303 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1310397 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1019,7 +1012,7 @@ CREATE TABLE `jpool_round` (
   PRIMARY KEY (`id`),
   KEY `round` (`round`),
   KEY `jpool` (`jpool`)
-) ENGINE=InnoDB AUTO_INCREMENT=110261 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=141706 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1041,7 +1034,7 @@ CREATE TABLE `jpool_setting` (
   PRIMARY KEY (`id`),
   KEY `jpool` (`jpool`),
   CONSTRAINT `fk_jpoolsetting_tourn` FOREIGN KEY (`jpool`) REFERENCES `jpool` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=57419 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=80587 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1078,7 +1071,7 @@ CREATE TABLE `judge` (
   KEY `person` (`person`),
   KEY `category` (`category`),
   KEY `alt` (`alt_category`)
-) ENGINE=InnoDB AUTO_INCREMENT=1590766 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1847678 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1105,7 +1098,7 @@ CREATE TABLE `judge_hire` (
   PRIMARY KEY (`id`),
   KEY `judge` (`judge`),
   KEY `school` (`school`)
-) ENGINE=InnoDB AUTO_INCREMENT=7056015 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=7062894 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1129,7 +1122,7 @@ CREATE TABLE `judge_setting` (
   UNIQUE KEY `uk_judge_setting` (`judge`,`tag`,`conditional`),
   KEY `judge` (`judge`),
   KEY `tag` (`tag`)
-) ENGINE=InnoDB AUTO_INCREMENT=3501145 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=4147700 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1156,7 +1149,7 @@ CREATE TABLE `login` (
   UNIQUE KEY `login_username` (`username`),
   KEY `person` (`person`),
   CONSTRAINT `login_ibfk_1` FOREIGN KEY (`person`) REFERENCES `person` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=364529 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=364529 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1174,7 +1167,7 @@ CREATE TABLE `nsda_category` (
   `national` tinyint(1) NOT NULL DEFAULT 0,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=302 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=302 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1191,21 +1184,14 @@ CREATE TABLE `panel` (
   `bye` tinyint(1) NOT NULL DEFAULT 0,
   `started` datetime DEFAULT NULL,
   `bracket` smallint(6) DEFAULT NULL,
-  `flip` varchar(511) DEFAULT NULL,
-  `flip_at` datetime DEFAULT NULL,
-  `flip_status` enum('winner','loser','anyone','done') NOT NULL DEFAULT 'done',
   `publish` tinyint(1) DEFAULT NULL,
   `room` int(11) DEFAULT NULL,
   `round` int(11) DEFAULT NULL,
-  `g_event` varchar(63) DEFAULT NULL,
-  `room_ext_id` varchar(255) DEFAULT NULL,
-  `invites_sent` tinyint(1) NOT NULL DEFAULT 0,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `room` (`room`),
-  KEY `round` (`round`),
-  KEY `flip_at` (`flip_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=5353937 DEFAULT CHARSET=utf8;
+  KEY `round` (`round`)
+) ENGINE=InnoDB AUTO_INCREMENT=6101013 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1217,7 +1203,7 @@ DROP TABLE IF EXISTS `panel_setting`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `panel_setting` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `panel` int(11) DEFAULT NULL,
+  `panel` int(11) NOT NULL DEFAULT 0,
   `tag` varchar(31) NOT NULL DEFAULT '',
   `value` varchar(127) NOT NULL DEFAULT '',
   `value_text` mediumtext DEFAULT NULL,
@@ -1225,10 +1211,11 @@ CREATE TABLE `panel_setting` (
   `setting` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_judge_group_setting` (`panel`,`tag`),
+  UNIQUE KEY `panel_tag` (`panel`,`tag`),
+  UNIQUE KEY `uk_panel_tag` (`panel`,`tag`),
   KEY `panel` (`panel`),
   KEY `setting` (`setting`)
-) ENGINE=InnoDB AUTO_INCREMENT=618075 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1053944 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1248,7 +1235,7 @@ CREATE TABLE `pattern` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`)
-) ENGINE=InnoDB AUTO_INCREMENT=18037 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=22218 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1284,7 +1271,7 @@ CREATE TABLE `permission` (
   CONSTRAINT `fk_district_id` FOREIGN KEY (`district`) REFERENCES `district` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_person_id` FOREIGN KEY (`person`) REFERENCES `person` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_region_id` FOREIGN KEY (`region`) REFERENCES `region` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=28289943 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=28329947 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1310,7 +1297,7 @@ CREATE TABLE `person` (
   `postal` varchar(15) DEFAULT NULL,
   `country` char(4) DEFAULT NULL,
   `tz` varchar(63) DEFAULT NULL,
-  `phone` varchar(31) DEFAULT NULL,
+  `phone` bigint(20) DEFAULT NULL,
   `provider` varchar(63) DEFAULT NULL,
   `site_admin` tinyint(1) DEFAULT NULL,
   `diversity` tinyint(1) DEFAULT NULL,
@@ -1319,10 +1306,37 @@ CREATE TABLE `person` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `person_email` (`email`),
+  UNIQUE KEY `nsda_id` (`nsda`),
   KEY `email` (`email`),
   KEY `noemail` (`no_email`),
   KEY `nsda` (`nsda`)
-) ENGINE=InnoDB AUTO_INCREMENT=396261 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=514212 DEFAULT CHARSET=utf8mb3;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `person_quiz`
+--
+
+DROP TABLE IF EXISTS `person_quiz`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `person_quiz` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `hidden` tinyint(1) NOT NULL DEFAULT 0,
+  `pending` tinyint(1) NOT NULL DEFAULT 0,
+  `approved_by` int(11) DEFAULT NULL,
+  `completed` tinyint(1) NOT NULL DEFAULT 0,
+  `answers` text DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `person` int(11) NOT NULL,
+  `quiz` int(11) NOT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `fk_pq_person` (`person`),
+  KEY `fk_pq_quiz` (`quiz`),
+  CONSTRAINT `fk_pq_person` FOREIGN KEY (`person`) REFERENCES `person` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_pq_quiz` FOREIGN KEY (`quiz`) REFERENCES `quiz` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=13844 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1343,9 +1357,98 @@ CREATE TABLE `person_setting` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_account_setting` (`person`,`tag`),
+  UNIQUE KEY `person_tag` (`person`,`tag`),
   KEY `person` (`person`),
   KEY `tag` (`tag`,`person`)
-) ENGINE=InnoDB AUTO_INCREMENT=3552526 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=4930058 DEFAULT CHARSET=utf8mb3;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `practice`
+--
+
+DROP TABLE IF EXISTS `practice`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `practice` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `chapter` int(11) NOT NULL,
+  `name` varchar(127) DEFAULT NULL,
+  `start` datetime DEFAULT NULL,
+  `end` datetime DEFAULT NULL,
+  `reported` tinyint(1) NOT NULL DEFAULT 0,
+  `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `created_at` datetime DEFAULT NULL,
+  `created_by` int(11) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `chapter` (`chapter`),
+  KEY `created_by` (`created_by`),
+  CONSTRAINT `fk_practice_chapter` FOREIGN KEY (`chapter`) REFERENCES `chapter` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=1630 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `practice_student`
+--
+
+DROP TABLE IF EXISTS `practice_student`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `practice_student` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `practice` int(11) NOT NULL,
+  `student` int(11) NOT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `created_at` datetime DEFAULT NULL,
+  `created_by` int(11) NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `practice` (`practice`),
+  KEY `student` (`student`),
+  KEY `created_by` (`created_by`),
+  CONSTRAINT `fk_pracs_practice` FOREIGN KEY (`practice`) REFERENCES `practice` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_pracs_student` FOREIGN KEY (`student`) REFERENCES `student` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=2705 DEFAULT CHARSET=latin1;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `protocol`
+--
+
+DROP TABLE IF EXISTS `protocol`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `protocol` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(127) DEFAULT NULL,
+  `tourn` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `tiebreak_tourn` (`tourn`),
+  CONSTRAINT `fk_tiebreak_set_tourn` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=195138 DEFAULT CHARSET=utf8mb3;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `protocol_setting`
+--
+
+DROP TABLE IF EXISTS `protocol_setting`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `protocol_setting` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `tag` varchar(31) DEFAULT NULL,
+  `value` varchar(127) DEFAULT NULL,
+  `value_date` datetime DEFAULT NULL,
+  `protocol` int(11) DEFAULT NULL,
+  `value_text` mediumtext DEFAULT NULL,
+  `setting` int(11) DEFAULT NULL,
+  `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `tiebreak_set_tag` (`protocol`,`tag`),
+  KEY `tiebreak_set` (`protocol`),
+  CONSTRAINT `fk_tiebreak_setsetting_tourn` FOREIGN KEY (`protocol`) REFERENCES `protocol` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=215238 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1366,7 +1469,7 @@ CREATE TABLE `qualifier` (
   PRIMARY KEY (`id`),
   KEY `entry` (`entry`),
   KEY `tourn` (`tourn`)
-) ENGINE=InnoDB AUTO_INCREMENT=90505 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=90505 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1381,19 +1484,26 @@ CREATE TABLE `quiz` (
   `tag` varchar(63) DEFAULT NULL,
   `label` varchar(255) DEFAULT NULL,
   `questions` text DEFAULT NULL,
+  `description` varchar(511) DEFAULT NULL,
   `sitewide` tinyint(1) NOT NULL DEFAULT 0,
+  `hidden` tinyint(1) NOT NULL DEFAULT 0,
+  `approval` tinyint(1) NOT NULL DEFAULT 0,
+  `show_answers` tinyint(1) NOT NULL DEFAULT 0,
+  `admin_only` tinyint(1) NOT NULL DEFAULT 0,
+  `badge` varchar(511) DEFAULT NULL,
+  `badge_link` varchar(511) DEFAULT NULL,
+  `badge_description` varchar(511) DEFAULT NULL,
   `person` int(11) NOT NULL,
-  `circuit` int(11) DEFAULT NULL,
   `tourn` int(11) DEFAULT NULL,
+  `circuit` int(11) DEFAULT NULL,
   `created_at` datetime DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `person` (`person`),
-  KEY `fk_quiz_tourn_id` (`tourn`),
-  KEY `fk_quiz_circuit_id` (`circuit`),
-  CONSTRAINT `fk_quiz_circuit_id` FOREIGN KEY (`circuit`) REFERENCES `circuit` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_quiz_tourn_id` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+  KEY `fk_quiz_tourn` (`tourn`),
+  KEY `fk_quiz_circuit` (`circuit`),
+  CONSTRAINT `fk_quiz_tourn` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1416,6 +1526,7 @@ CREATE TABLE `rating` (
   `rating_tier` int(11) NOT NULL DEFAULT 0,
   `judge` int(11) DEFAULT NULL,
   `rating_subset` int(11) DEFAULT NULL,
+  `side` tinyint(4) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `sheet` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
@@ -1424,7 +1535,7 @@ CREATE TABLE `rating` (
   KEY `entry` (`entry`),
   KEY `judge` (`judge`),
   KEY `tourn` (`tourn`)
-) ENGINE=InnoDB AUTO_INCREMENT=62287572 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=68145123 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1440,7 +1551,7 @@ CREATE TABLE `rating_subset` (
   `category` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=657 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=761 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1464,7 +1575,7 @@ CREATE TABLE `rating_tier` (
   `rating_subset` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=21104 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=23470 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1487,7 +1598,7 @@ CREATE TABLE `region` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `created_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1888 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=2460 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1508,7 +1619,7 @@ CREATE TABLE `region_fine` (
   `school` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=383 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=383 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1530,10 +1641,11 @@ CREATE TABLE `region_setting` (
   `setting` int(11) DEFAULT NULL,
   `event` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `region_tag` (`region`,`tag`),
   KEY `event` (`event`),
   KEY `region` (`region`),
   CONSTRAINT `fk_regionsetting_tourn` FOREIGN KEY (`region`) REFERENCES `region` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=1278 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1416 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1562,7 +1674,7 @@ CREATE TABLE `result` (
   KEY `student` (`student`),
   KEY `result_set` (`result_set`),
   KEY `round` (`round`)
-) ENGINE=InnoDB AUTO_INCREMENT=4734166 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=5818174 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1583,7 +1695,7 @@ CREATE TABLE `result_key` (
   PRIMARY KEY (`id`),
   KEY `result_set` (`result_set`),
   CONSTRAINT `fk_result_key_result_set` FOREIGN KEY (`result_set`) REFERENCES `result_set` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=812069 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1060015 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1606,12 +1718,13 @@ CREATE TABLE `result_set` (
   `event` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `tag` enum('entry','student','chapter') NOT NULL DEFAULT 'entry',
+  `qualifier` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`),
   KEY `event` (`event`),
   KEY `result_labels` (`label`,`event`),
   CONSTRAINT `fk_result_set_tourn` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=189713 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=239580 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1627,13 +1740,13 @@ CREATE TABLE `result_value` (
   `priority` smallint(6) DEFAULT NULL,
   `result` int(11) DEFAULT NULL,
   `result_key` int(11) NOT NULL DEFAULT 0,
-  `tiebreak_set` int(11) NOT NULL DEFAULT 0,
+  `protocol` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `result` (`result`),
   KEY `result_key` (`result_key`),
   CONSTRAINT `fk_result_value_result` FOREIGN KEY (`result`) REFERENCES `result` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=24384332 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=29313586 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1667,7 +1780,7 @@ CREATE TABLE `room` (
   KEY `site` (`site`),
   KEY `api` (`api`),
   CONSTRAINT `fk_room_site` FOREIGN KEY (`site`) REFERENCES `site` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=305915 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=348313 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1690,7 +1803,7 @@ CREATE TABLE `room_strike` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `room` (`room`)
-) ENGINE=InnoDB AUTO_INCREMENT=30671 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=38058 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1715,15 +1828,15 @@ CREATE TABLE `round` (
   `event` int(11) DEFAULT NULL,
   `timeslot` int(11) DEFAULT NULL,
   `site` int(11) DEFAULT NULL,
-  `tiebreak_set` int(11) DEFAULT NULL,
+  `protocol` int(11) DEFAULT NULL,
   `runoff` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_round` (`name`,`event`),
   KEY `timeslot` (`timeslot`),
   KEY `event` (`event`),
-  KEY `tiebreak_set` (`tiebreak_set`)
-) ENGINE=InnoDB AUTO_INCREMENT=759942 DEFAULT CHARSET=utf8;
+  KEY `tiebreak_set` (`protocol`)
+) ENGINE=InnoDB AUTO_INCREMENT=937032 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1743,8 +1856,9 @@ CREATE TABLE `round_setting` (
   `setting` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
+  UNIQUE KEY `round_tag` (`round`,`tag`),
   KEY `round` (`round`)
-) ENGINE=InnoDB AUTO_INCREMENT=2349153 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=2988662 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1760,7 +1874,7 @@ CREATE TABLE `rpool` (
   `tourn` int(11) NOT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=23173309 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=23201469 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1778,7 +1892,7 @@ CREATE TABLE `rpool_room` (
   PRIMARY KEY (`id`),
   KEY `room` (`room`),
   KEY `room_group` (`rpool`)
-) ENGINE=InnoDB AUTO_INCREMENT=614611 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=706943 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1796,7 +1910,7 @@ CREATE TABLE `rpool_round` (
   PRIMARY KEY (`id`),
   KEY `round` (`round`),
   KEY `room_group` (`rpool`)
-) ENGINE=InnoDB AUTO_INCREMENT=498169 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=587505 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1819,7 +1933,7 @@ CREATE TABLE `rpool_setting` (
   PRIMARY KEY (`id`),
   KEY `rpool` (`rpool`),
   CONSTRAINT `fk_rpoolsetting_tourn` FOREIGN KEY (`rpool`) REFERENCES `rpool` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1845,7 +1959,7 @@ CREATE TABLE `school` (
   KEY `tourn` (`tourn`),
   KEY `region` (`region`),
   CONSTRAINT `fk_school_tourn` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=456131 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=563837 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1866,8 +1980,9 @@ CREATE TABLE `school_setting` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `chapter` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `school_tag` (`school`,`tag`),
   KEY `school` (`school`)
-) ENGINE=InnoDB AUTO_INCREMENT=2224767 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=2799584 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1895,7 +2010,7 @@ CREATE TABLE `score` (
   KEY `student` (`student`),
   KEY `ballot` (`ballot`),
   KEY `tags` (`ballot`,`tag`)
-) ENGINE=InnoDB AUTO_INCREMENT=31011732 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=37345562 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1918,11 +2033,13 @@ CREATE TABLE `session` (
   `weekend` int(11) DEFAULT NULL,
   `agent_data` text DEFAULT NULL,
   `geoip` text DEFAULT NULL,
+  `agent` varchar(255) DEFAULT NULL,
+  `location` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `userkey` (`userkey`)
-) ENGINE=InnoDB AUTO_INCREMENT=4658097 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=6078583 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1942,7 +2059,7 @@ CREATE TABLE `setting` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `tag` (`tag`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1963,7 +2080,7 @@ CREATE TABLE `setting_label` (
   PRIMARY KEY (`id`),
   KEY `fk_setting_label` (`setting`),
   CONSTRAINT `fk_setting_label` FOREIGN KEY (`setting`) REFERENCES `setting` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1984,7 +2101,7 @@ CREATE TABLE `shift` (
   `category` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=23778 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=31019 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2005,7 +2122,7 @@ CREATE TABLE `site` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `circuit` (`circuit`)
-) ENGINE=InnoDB AUTO_INCREMENT=8933 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=10103 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2024,7 +2141,7 @@ CREATE TABLE `stats` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `event` (`event`)
-) ENGINE=InnoDB AUTO_INCREMENT=2541896 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=2541896 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2060,7 +2177,7 @@ CREATE TABLE `strike` (
   KEY `school` (`school`),
   KEY `entry` (`entry`),
   KEY `tourn` (`tourn`)
-) ENGINE=InnoDB AUTO_INCREMENT=1376111 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1626608 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2080,10 +2197,6 @@ CREATE TABLE `student` (
   `novice` tinyint(1) NOT NULL DEFAULT 0,
   `retired` tinyint(1) NOT NULL DEFAULT 0,
   `gender` char(1) DEFAULT NULL,
-  `diet` varchar(31) DEFAULT NULL,
-  `birthdate` date DEFAULT NULL,
-  `school_sid` varchar(63) DEFAULT NULL,
-  `race` varchar(31) DEFAULT NULL,
   `nsda` int(11) DEFAULT NULL,
   `chapter` int(11) DEFAULT NULL,
   `person` int(11) DEFAULT NULL,
@@ -2095,7 +2208,7 @@ CREATE TABLE `student` (
   KEY `person` (`person`),
   KEY `nsda` (`nsda`),
   KEY `chapter` (`chapter`)
-) ENGINE=InnoDB AUTO_INCREMENT=1105940 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1269584 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2118,7 +2231,7 @@ CREATE TABLE `student_ballot` (
   KEY `panel` (`panel`),
   KEY `entry` (`entry`),
   KEY `voter` (`voter`)
-) ENGINE=InnoDB AUTO_INCREMENT=140 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=140 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2140,7 +2253,7 @@ CREATE TABLE `student_setting` (
   `setting` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `student` (`student`)
-) ENGINE=InnoDB AUTO_INCREMENT=2539381 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=3363894 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2164,7 +2277,7 @@ CREATE TABLE `student_vote` (
   UNIQUE KEY `sv_evp` (`panel`,`entry`,`voter`),
   KEY `entry` (`entry`),
   KEY `voter` (`voter`)
-) ENGINE=InnoDB AUTO_INCREMENT=81430 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=106474 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2186,7 +2299,7 @@ CREATE TABLE `sweep_award` (
   `circuit` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2205,7 +2318,7 @@ CREATE TABLE `sweep_award_event` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `sweep_set` (`sweep_set`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2228,7 +2341,7 @@ CREATE TABLE `sweep_event` (
   KEY `sweep_set` (`sweep_set`),
   KEY `event` (`event`),
   CONSTRAINT `fk_sweep_event_sweep_set` FOREIGN KEY (`sweep_set`) REFERENCES `sweep_set` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=158125 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=204240 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2244,7 +2357,7 @@ CREATE TABLE `sweep_include` (
   `child` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=8826 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=11572 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2264,12 +2377,12 @@ CREATE TABLE `sweep_rule` (
   `count_round` int(11) DEFAULT NULL,
   `truncate` smallint(6) DEFAULT NULL,
   `sweep_set` int(11) DEFAULT NULL,
-  `tiebreak_set` int(11) DEFAULT NULL,
+  `protocol` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `sweep_set` (`sweep_set`),
   CONSTRAINT `fk_sweep_rule_sweep_set` FOREIGN KEY (`sweep_set`) REFERENCES `sweep_set` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=115057 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=144786 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2288,7 +2401,7 @@ CREATE TABLE `sweep_set` (
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`),
   KEY `sweep_award` (`sweep_award`)
-) ENGINE=InnoDB AUTO_INCREMENT=24266 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=30964 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2309,7 +2422,7 @@ CREATE TABLE `tabroom_setting` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tabroom_setting` (`tag`),
   KEY `person` (`person`)
-) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=27 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2330,55 +2443,17 @@ CREATE TABLE `tiebreak` (
   `violation` smallint(6) DEFAULT NULL,
   `result` enum('win','loss','split') DEFAULT NULL,
   `priority` smallint(6) DEFAULT NULL,
+  `chair` enum('all','chair','nonchair') NOT NULL DEFAULT 'all',
   `highlow` tinyint(4) DEFAULT NULL,
   `highlow_count` tinyint(4) DEFAULT NULL,
   `highlow_threshold` tinyint(4) DEFAULT NULL,
   `child` int(11) DEFAULT NULL,
-  `tiebreak_set` int(11) DEFAULT NULL,
+  `protocol` int(11) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `highlow_target` tinyint(4) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `tiebreak_set` (`tiebreak_set`)
-) ENGINE=InnoDB AUTO_INCREMENT=759650 DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `tiebreak_set`
---
-
-DROP TABLE IF EXISTS `tiebreak_set`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `tiebreak_set` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `name` varchar(127) DEFAULT NULL,
-  `tourn` int(11) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `tiebreak_tourn` (`tourn`),
-  CONSTRAINT `fk_tiebreak_set_tourn` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=160640 DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Table structure for table `tiebreak_set_setting`
---
-
-DROP TABLE IF EXISTS `tiebreak_set_setting`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `tiebreak_set_setting` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `tag` varchar(31) DEFAULT NULL,
-  `value` varchar(127) DEFAULT NULL,
-  `value_date` datetime DEFAULT NULL,
-  `tiebreak_set` int(11) DEFAULT NULL,
-  `value_text` mediumtext DEFAULT NULL,
-  `setting` int(11) DEFAULT NULL,
-  `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `tiebreak_set` (`tiebreak_set`),
-  CONSTRAINT `fk_tiebreak_setsetting_tourn` FOREIGN KEY (`tiebreak_set`) REFERENCES `tiebreak_set` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=177860 DEFAULT CHARSET=utf8;
+  KEY `tiebreak_set` (`protocol`)
+) ENGINE=InnoDB AUTO_INCREMENT=929319 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2398,7 +2473,7 @@ CREATE TABLE `timeslot` (
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`),
   CONSTRAINT `fk_timeslot_tourn` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=223091 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=274342 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2420,7 +2495,7 @@ CREATE TABLE `topic` (
   `created_at` datetime DEFAULT NULL,
   `created_by` int(11) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=49 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=66 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2446,7 +2521,7 @@ CREATE TABLE `tourn` (
   `reg_end` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `start` (`start`)
-) ENGINE=InnoDB AUTO_INCREMENT=21573 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=25630 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2466,7 +2541,7 @@ CREATE TABLE `tourn_circuit` (
   UNIQUE KEY `uk_tourn_circuit` (`tourn`,`circuit`),
   KEY `tourn` (`tourn`),
   KEY `circuit` (`circuit`)
-) ENGINE=InnoDB AUTO_INCREMENT=28865 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=36167 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2486,7 +2561,7 @@ CREATE TABLE `tourn_fee` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`)
-) ENGINE=InnoDB AUTO_INCREMENT=10481 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=11283 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2504,7 +2579,7 @@ CREATE TABLE `tourn_ignore` (
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`),
   KEY `person` (`person`)
-) ENGINE=InnoDB AUTO_INCREMENT=94922 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=115805 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2525,10 +2600,11 @@ CREATE TABLE `tourn_setting` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tourn_setting` (`tourn`,`tag`),
+  UNIQUE KEY `tourn_tag` (`tourn`,`tag`),
   KEY `tourn` (`tourn`),
   KEY `tags` (`tag`,`tourn`),
   CONSTRAINT `fk_tournsetting_tourn` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=481742 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=637463 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2549,7 +2625,7 @@ CREATE TABLE `tourn_site` (
   KEY `tourn` (`tourn`),
   CONSTRAINT `fk_site_id` FOREIGN KEY (`site`) REFERENCES `site` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_tourn_id` FOREIGN KEY (`tourn`) REFERENCES `tourn` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=31582 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=36803 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2573,7 +2649,7 @@ CREATE TABLE `webpage` (
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`)
-) ENGINE=InnoDB AUTO_INCREMENT=15641 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=20903 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -2595,13 +2671,13 @@ CREATE TABLE `weekend` (
   `judge_deadline` datetime NOT NULL,
   `fine_deadline` datetime NOT NULL,
   `tourn` int(11) NOT NULL,
-  `site` int(11) NOT NULL,
+  `site` int(11) DEFAULT NULL,
   `city` varchar(127) DEFAULT NULL,
   `state` varchar(127) DEFAULT NULL,
   `timestamp` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `tourn` (`tourn`)
-) ENGINE=InnoDB AUTO_INCREMENT=1217 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=1611 DEFAULT CHARSET=utf8mb3;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
@@ -2613,4 +2689,4 @@ CREATE TABLE `weekend` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2021-10-16 14:42:28
+-- Dump completed on 2022-11-17 10:59:43

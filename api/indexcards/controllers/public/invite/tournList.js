@@ -1,3 +1,5 @@
+import moment from 'moment-timezone';
+
 export const futureTourns = {
 	GET: async (req, res) => {
 
@@ -12,9 +14,9 @@ export const futureTourns = {
 				and tourn_circuit.circuit = ${req.params.circuit} ) `;
 		}
 
-		const [future] = await db.sequelize.query(`
+		let [future] = await db.sequelize.query(`
 			select tourn.id, tourn.webname, tourn.name, tourn.tz, tourn.hidden,
-				tourn.state, tourn.country, tourn.city,
+				tourn.city as location, tourn.state, tourn.country, 
 				CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
 				CONVERT_TZ(tourn.end, '+00:00', tourn.tz) end,
 				CONVERT_TZ(tourn.reg_end, '+00:00', tourn.tz) reg_end,
@@ -108,7 +110,8 @@ export const futureTourns = {
 		const [futureDistricts] = await db.sequelize.query(`
 			select
 				tourn.id, tourn.webname, tourn.name, tourn.tz,
-				weekend.name weekendName, weekend.city, weekend.state,
+				weekend.id as districts,
+				weekend.name weekendName, weekend.city as location, weekend.state, tourn.country,
 				site.name site,
 				CONVERT_TZ(weekend.start, '+00:00', tourn.tz) start,
 				CONVERT_TZ(weekend.end, '+00:00', tourn.tz) end,
@@ -184,6 +187,21 @@ export const futureTourns = {
 		`);
 
 		future.push(...futureDistricts);
+
+		const thisWeek = moment().subtract(11, 'days').weeks();
+		console.log(`this week is ${thisWeek}`);
+
+		future.sort( (a, b) => {
+			return (thisWeek > a.week) - (thisWeek > b.week)
+				|| a.year - b.year
+				|| a.week - b.week
+				|| b.schoolcount - a.schoolcount;
+		});
+
+		if (future.length > 256) {
+			future.length = 256;
+		}
+
 		return res.status(200).json(future);
 	},
 };

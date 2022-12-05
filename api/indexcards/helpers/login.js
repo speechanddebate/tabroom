@@ -2,8 +2,7 @@
 // Accept a email and password and verify that they're correct, and create &
 // return a session object
 //
-
-import crypt from '@idango/crypt3';
+import { b64_sha512crypt as crypt } from 'sha512crypt-node';
 
 const login = async (req) => {
 
@@ -19,7 +18,8 @@ const login = async (req) => {
 		});
 
 		if (typeof person === 'object') {
-			const hash = await crypt(req.params.password, person.password);
+
+			const hash = crypt(req.params.password, person.password);
 
 			if (hash !== person.password) {
 				return 'Password was incorrect!';
@@ -27,7 +27,7 @@ const login = async (req) => {
 
 			const now = new Date();
 
-			const userkey = await crypt(req.uuid, person.password);
+			const userkey = crypt(req.uuid, person.password);
 
 			const sessionTemplate = {
 				person     : person.id,
