@@ -23,80 +23,65 @@ const TournList = () => {
 		fetchList();
 	}, []);
 
-	tourns.forEach( (tourn)  => {
+	const tournTable = tourns.map( (tourn) => {
 
-		const now = moment();
-
-		if (now < moment(tourn.reg_start)) {
-			tourn.registration = `Opens on ${moment(tourn.reg_start).tz(tourn.tz).format('M/D hh:mm A z')}`;
-		} else if (now < moment(tourn.reg_end)) {
-			tourn.registration = `Due by ${moment(tourn.reg_end).tz(tourn.tz).format('M/D hh:mm A z')}`;
-		} else {
-			tourn.registration = 'Closed';
-		}
-
-		if (moment(tourn.start).tz(tourn.tz).date() === moment(tourn.end).tz(tourn.tz).date()) {
-			tourn.dates = moment(tourn.start).tz(tourn.tz).format('M/D');
-		} else {
-			tourn.dates = `${moment(tourn.start).tz(tourn.tz).format('M/D')} - ${moment(tourn.end).tz(tourn.tz).format('M/D')}`;
-		}
-
-		if (tourn.webname) {
-			tourn.link = `https://${tourn.webname}.tabroom.com`;
-		} else if (!tourn.link) {
-			tourn.link = `https://www.tabroom.com/index/tourn/index.mhtml?tourn_id=${tourn.id}`;
-		}
+		const tournRow = {};
 
 		['districts', 'nats', 'msnats'].forEach( (key) => {
 			if (tourn[key]) {
-				tourn.style = 'semibold';
-				delete tourn[key];
+				tournRow.style = 'semibold';
 			}
 		});
 
-		if (tourn.country && tourn.country !== 'US') {
-			tourn.state = tourn.country;
+		const now = moment();
+
+		if (moment(tourn.start).tz(tourn.tz).date() === moment(tourn.end).tz(tourn.tz).date()) {
+			tournRow.dates = moment(tourn.start).tz(tourn.tz).format('M/D');
+		} else {
+			tournRow.dates = `${moment(tourn.start).tz(tourn.tz).format('M/D')} - ${moment(tourn.end).tz(tourn.tz).format('M/D')}`;
 		}
 
-		tourn.type = '';
+		if (tourn.webname) {
+			tournRow.link = `https://${tourn.webname}.tabroom.com`;
+		} else if (!tourn.link) {
+			tournRow.link = `https://www.tabroom.com/index/tourn/index.mhtml?tourn_id=${tourn.id}`;
+		}
+
+		tournRow.tournament = tourn.name;
+		tournRow.city = tourn.location;
+
+		if (tourn.country && tourn.country !== 'US') {
+			tournRow.state = tourn.country;
+		} else {
+			tournRow.state = tourn.state;
+		}
+
+		tournRow.type = '';
 		['inp', 'hybrid', 'online'].forEach( (key) => {
 			if (tourn[key] > 0) {
 				tourn.type += `${key.substring(0, 3)} `;
 			}
 		});
 
-		tourn.signups = tourn.signup;
+		if (now < moment(tourn.reg_start)) {
+			tournRow.registration = `Opens on ${moment(tourn.reg_start).tz(tourn.tz).format('M/D hh:mm A z')}`;
+		} else if (now < moment(tourn.reg_end)) {
+			tournRow.registration = `Due by ${moment(tourn.reg_end).tz(tourn.tz).format('M/D hh:mm A z')}`;
+		} else {
+			tournRow.registration = 'Closed';
+		}
+
+		tournRow.signup = tourn.signup;
+		return tournRow;
+
 	});
 
 	const transforms = [
-		{ accessor : 'name'    , header : 'Tournament' }   ,
-		{ accessor : 'signups' , header : 'Judge Signups' },
-		{ accessor : 'state'   , header : 'S/C' }          ,
-		{ accessor : 'link'        , hidden : true , excludeCSV: true },
-		{ accessor : 'signup'      , hidden : true } ,
-		{ accessor : 'tz'          , hidden : true } ,
-		{ accessor : 'id'          , hidden : true } ,
-		{ accessor : 'hidden'      , hidden : true, excludeCSV: true } ,
-		{ accessor : 'webname'     , hidden : true } ,
-		{ accessor : 'reg_end'     , hidden : true } ,
-		{ accessor : 'msnats'      , hidden : true } ,
-		{ accessor : 'closed'      , hidden : true } ,
-		{ accessor : 'nats'        , hidden : true } ,
-		{ accessor : 'week'        , hidden : true } ,
-		{ accessor : 'year'        , hidden : true } ,
-		{ accessor : 'start'       , hidden : true } ,
-		{ accessor : 'end'         , hidden : true } ,
-		{ accessor : 'schoolcount' , hidden : true } ,
-		{ accessor : 'inp'         , hidden : true } ,
-		{ accessor : 'hybrid'      , hidden : true } ,
-		{ accessor : 'online'      , hidden : true } ,
-		{ accessor : 'style'       , hidden : true } ,
-		{ accessor : 'country'     , hidden : true } ,
-		{ accessor : 'reg_start'   , hidden : true } ,
+		{ accessor : 'link' , hidden : true , excludeCSV: true } ,
 		{
 			accessor : 'tournament',
 			cell: (row) => {
-				return <a href='row.original.link'>{row.getValue()}</a>;
+				return <a href='{row.original.link}'>{row.getValue()}</a>;
 			},
 		},
 		{
@@ -118,8 +103,8 @@ const TournList = () => {
 		<div>
 			<h1>Upcoming Tournaments</h1>
 			<JSONTable
-				data={tourns}
-				options={{ transforms, customStyles, striped: true, exportFileName: 'UpcomingTournament'  }}
+				data    = {tournTable}
+				options = {{ transforms, customStyles, striped: true, exportFileName: 'UpcomingTournament'  }}
 			/>
 			<button onClick={handleNavigate} type="button">Go to /route</button>
 			<p>{name}</p>
