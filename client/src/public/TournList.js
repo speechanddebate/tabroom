@@ -27,7 +27,7 @@ const TournList = () => {
 
 		const tournRow = {};
 
-		['districts', 'nats', 'msnats'].forEach( (key) => {
+		['districts', 'nats', 'msnats', 'name'].forEach( (key) => {
 			if (tourn[key]) {
 				tournRow.style = 'semibold';
 			}
@@ -59,7 +59,7 @@ const TournList = () => {
 		tournRow.type = '';
 		['inp', 'hybrid', 'online'].forEach( (key) => {
 			if (tourn[key] > 0) {
-				tourn.type += `${key.substring(0, 3)} `;
+				tournRow.type += `${key.substring(0, 3)} `;
 			}
 		});
 
@@ -77,9 +77,16 @@ const TournList = () => {
 	});
 
 	const transforms = [
-		{ accessor : 'link' , hidden : true , excludeCSV: true } ,
+		{ accessor : 'link'  , hidden : true , excludeCSV: true },
+		{ accessor : 'style' , hidden : true , excludeCSV: true },
 		{
 			accessor : 'tournament',
+			cell: (row) => {
+				return <a href='{row.original.link}'>{row.getValue()}</a>;
+			},
+		},
+		{
+			accessor : 'type',
 			cell: (row) => {
 				return <a href='{row.original.link}'>{row.getValue()}</a>;
 			},
