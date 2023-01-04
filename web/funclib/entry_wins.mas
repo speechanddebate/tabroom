@@ -58,196 +58,131 @@
 		&& $round->type ne "runoff"
 		&& $round->type ne "final";
 
-	my %entry_wins = ();
-	my %entry_byes = ();
-
 	my $sth = $dbh->prepare("
-		select entry.id
-			from entry
-			where event =?
-			and active = 1
-	");
+	    select ballot.entry entry,
+			round.id round, round.name round_name,
+			panel.id panel, panel.bye panel_bye,
+			ballot.judge, ballot.id ballot, ballot.bye ballot_bye, ballot.forfeit,
+			score.id score, score.tag, score.value win,
+			rr.value rr
 
-	if ($event) {
-		$sth->execute($event->id);
-		while (
-			my ($entry_id) = $sth->fetchrow_array()
-		) {
-			$entry_wins{$entry_id} = 0;
-		}
-	}
+		from (round, panel, entry, ballot)
 
-	$sth->finish();
+			left join score on ballot.id = score.ballot
+				and score.tag = 'winloss'
 
-	if ($first_tb) {
+			left join event_setting rr on rr.event = round.event and rr.tag = 'round_robin'
 
-		my ($entries_ref, $tbs_ref, $desc_ref, @whatever) = $m->comp(
-			"/tabbing/results/order_entries.mas",
-			round => $round
-		);
-
-		my @keys = sort {$a <=> $b} keys %{$desc_ref};
-		my $key = shift @keys if @keys;
-
-		if ($key) {
-
-			foreach my $seed (sort {$a <=> $b} keys %{$entries_ref}) {
-				foreach my $entry_id (@{${$entries_ref}{$seed}}) {
-					$entry_wins{$entry_id} = ${$tbs_ref}{$entry_id}{$key};
-				}
-			}
-
-			return %entry_wins;
-		}
-	}
-
-	$sth = $dbh->prepare('
-
-	    select entry.id, count(distinct panel.id) as wins
-			from (round, panel, entry, ballot exist)
         where entry.event = ?
-			and entry.id = exist.entry
-			and panel.id = exist.panel
+			and entry.id = ballot.entry
+			and panel.id = ballot.panel
 			and panel.round = round.id
 
 			and not exists (
 				select round_setting.id from round_setting
-					where round_setting.tag = "ignore_results"
+					where round_setting.tag = 'ignore_results'
 					and round_setting.round = round.id
 			)
 
-		'.$limit .'
-		'.$bye_limit .'
+			".$limit ."
+			".$bye_limit ."
 
-        and (
-			select count(distinct winner.id) as winner
-            from ballot as winner, score
-            where winner.entry = entry.id
-				and winner.panel = panel.id
-				and winner.forfeit = 0
-				and winner.bye = 0
-				'.$winner_limit.'
-				and score.ballot = winner.id
-				and score.tag = "winloss"
-				and score.value = 1
-		)
-        > (
-		 	select count(distinct loser.id) as loser
-            from ballot as loser, score
-            where loser.entry = entry.id
-				and loser.panel = panel.id
-				and loser.forfeit = 0
-				and loser.bye = 0
-				'.$loser_limit.'
-				and score.ballot = loser.id
-				and score.tag = "winloss"
-				and (score.value = 0 or score.value is null)
-		)
-        group by entry.id
-        order by entry.code
-	');
+		order by entry.id, round.name
+	");
 
-	$sth->execute($event->id);
+	$sth->execute($event);
 
-	while( my ($entry_id, $wins) = $sth->fetchrow_array() ) {
-		$entry_wins{$entry_id} = 0 unless $entry_wins{$entry_id};
-		$entry_wins{$entry_id} += $wins;
-	}
+	my $results = $sth->fetchall_hash();
 
-	my $wsdc_byes = $event->setting("wsdc_bye_win_average");
+	my %entries;
+	my %bye_count;
+	my $rr;
 
-	my %wsdc_bye_add = ();
+	foreach my $result (@{$results}) {
 
-	if ($wsdc_byes) {
+		$rr = 1 if $result->{'rr'};
 
-		my $round_count;
-
-		foreach my $other ($event->rounds) {
-			next if $round && $round->name && $other->name > $round->name;
-			next if $other->type eq "elim";
-			next if $other->type eq "runoff";
-			next if $other->type eq "final";
-			$round_count++;
+		if (not defined $bye_count{$result->{entry}}) {
+			$bye_count{$result->{entry}} = 0;
 		}
 
-		foreach my $entry_id ( keys %entry_wins ) {
-			$wsdc_bye_add{$entry_id} = 0;
-			$wsdc_bye_add{$entry_id} = 1
-				if $entry_wins{$entry_id} >= ($round_count / 2);
-		}
+		if ($result->{"panel_bye"} || $result->{"ballot_bye"}) {
 
-	}
+			$entries{$result->{entry}}{rounds}{$result->{round}}{"bye"}++;
+			$bye_count{$result->{entry}}++;
 
-	my $bye_sth = $dbh->prepare('
+		} elsif ($result->{"forfeit"}) {
 
-		select entry.id, count(distinct panel.id) as byes
-
-        from round, panel, entry, ballot exist
-        where entry.event = ?
-			and entry.id = exist.entry
-			and panel.id = exist.panel
-			and panel.round = round.id
-
-			and not exists (
-				select round_setting.id
-				from round_setting
-				where round_setting.tag = "ignore_results"
-				and round_setting.round = round.id
-			)
-
-			and (panel.bye = 1 or exist.bye = 1)
-			and exist.forfeit != 1
-			'.$limit .'
-			and not exists (
-				select score.id
-					from score, ballot bany
-				where score.tag = "winloss"
-					and score.ballot = bany.id
-					and score.value = 1
-					and bany.panel = panel.id
-			)
-        group by entry.id
-        order by entry.code
-	');
-
-	$bye_sth->execute($event->id);
-
-	while( my ($entry_id, $byes) = $bye_sth->fetchrow_array() ) {
-
-		if ($wsdc_byes) {
-
-			$entry_wins{$entry_id} += $wsdc_bye_add{$entry_id} * $byes;
-			$entry_byes{$entry_id} += $byes;
+			$entries{$result->{entry}}{rounds}{$result->{round}}{"fft"}++;
 
 		} else {
-
-			$entry_wins{$entry_id} = 0 unless $entry_wins{$entry_id};
-			$entry_wins{$entry_id} += $byes;
-			$entry_byes{$entry_id} += $byes;
-
+			if ($result->{"win"}) {
+				$entries{$result->{entry}}{rounds}{$result->{round}}{"win"}++;
+			} else {
+				$entries{$result->{entry}}{rounds}{$result->{round}}{"loss"}++;
+			}
 		}
 	}
 
-	# If this is a round robin and EVERYONE has had a certain number of byes,
-	# just eliminate them.
+	my $min_byes;
+	my %rounds;
+	my %entry_wins = ();
 
-	my $bye_min;
-
-	if ($event->setting("round_robin")) {
-
-		foreach my $entry_key (keys %entry_wins) {
-
-			$bye_min = $entry_byes{$entry_key}
-				if $entry_byes{$entry_key} && not defined $bye_min;
-
-			$bye_min =  $entry_byes{$entry_key}
-				if  $entry_byes{$entry_key} < $bye_min;
-
+	if ($rr) {
+		foreach my $entry (keys %entries) {
+			if (not defined $min_byes || ($bye_count{$entry} < $min_byes)) {
+				$min_byes = $bye_count{$entry};
+			}
 		}
 	}
 
-	foreach my $entry_key (keys %entry_wins) {
-		$entry_wins{$entry_key} -= $bye_min;
+	my %done_byes;
+
+	foreach my $entry (keys %entries) {
+
+		foreach my $round (keys %{$entries{$entry}{rounds}}) {
+
+			next if $entries{$entry}{rounds}{$round}{"fft"};
+
+			if ($entries{$entry}{rounds}{$round}{"bye"} && $first_tb) {
+				next;
+			}
+
+			if ($entries{$entry}{rounds}{$round}{"bye"} && ($done_byes{$entry} < $min_byes)) {
+				$done_byes{$entry}++;
+				next;
+			}
+
+			if ($first_tb) {
+				$entry_wins{$entry} += $entries{$entry}{rounds}{$round}{"win"};
+			} elsif (
+				($entries{$entry}{rounds}{$round}{"win"} > $entries{$entry}{rounds}{$round}{"loss"})
+				|| $entries{$entry}{rounds}{$round}{"bye"}
+			) {
+				$entry_wins{$entry}++;
+			}
+
+			my $total = ($entries{$entry}{rounds}{$round}{"win"} + $entries{$entry}{rounds}{$round}{"loss"});
+
+			if ($entry == 4119107) {
+				Tab::debuglog("Round $round ballot total is $total with wins ".$entry_wins{$entry});
+				Tab::debuglog("Wins ".$entries{$entry}{rounds}{$round}{"win"}." and losses ".$entries{$entry}{rounds}{$round}{"loss"});
+			}
+
+			if ($total > $rounds{$round}) {
+				$rounds{$round} = $total;
+			}
+		}
+	}
+
+	if ($first_tb) {
+		foreach my $entry (keys %entries) {
+			foreach my $round (keys %{$entries{$entry}{rounds}}) {
+				if ($entries{$entry}{rounds}{$round}{"bye"}) {
+					$entry_wins{$entry} += $rounds{$round};
+				}
+			}
+		}
 	}
 
 	return %entry_wins;
