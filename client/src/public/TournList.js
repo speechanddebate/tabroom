@@ -108,10 +108,9 @@ const TournList = () => {
 
 	return (
 		<div>
-			<h1>Upcoming Tournaments</h1>
 			<JSONTable
 				data    = {tournTable}
-				options = {{ transforms, customStyles, striped: true, exportFileName: 'UpcomingTournament'  }}
+				options = {{ transforms, customStyles, striped: true, exportFileName: 'UpcomingTournament', title: 'Upcoming Tournaments'  }}
 			/>
 			<button onClick={handleNavigate} type="button">Go to /route</button>
 			<p>{name}</p>

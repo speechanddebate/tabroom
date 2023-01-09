@@ -61,15 +61,22 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 
 	return (
 		<div className={styles.container}>
-			<div className={styles['download-row']}>
-				{
-					options.csv &&
+			<div className={styles.tableHeaderRow}>
+				<span className={styles.headerTitle}>
+					<h1 class={styles.header}>
+						{options.title}
+					</h1>
+				</span>
+				<span className={styles.headerButtons}>
+					{
+						options.csv &&
 						<CSVDownload
 							rows={table.getRowModel().rows}
 							columns={tableColumns}
 							exportFileName={options.exportFileName}
 						/>
-				}
+					}
+				</span>
 			</div>
 			<table className={styles.table}>
 				<thead className={styles.thead}>
@@ -91,18 +98,22 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 																onClick: header.column.getToggleSortingHandler(),
 															}}
 														>
-															{
-																flexRender(
-																	header.column.columnDef.header,
-																	header.getContext()
-																)
-															}
-															{
+															<span className={styles.thText}>
 																{
-																	asc: ' 🔼',
-																	desc: ' 🔽',
-																}[header.column.getIsSorted()] ?? ' ⬍'
-															}
+																	flexRender(
+																		header.column.columnDef.header,
+																		header.getContext()
+																	)
+																}
+															</span>
+															<span className={styles.thArrows}>
+																{
+																	{
+																		asc: ' 🔼',
+																		desc: ' 🔽',
+																	}[header.column.getIsSorted()] ?? ' ⬍'
+																}
+															</span>
 														</div>
 													)
 											}
