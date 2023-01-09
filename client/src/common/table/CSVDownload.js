@@ -56,7 +56,7 @@ const CSVDownload = ({ columns, rows, exportFileName = 'default' }) => {
 		csvLink.click();
 	};
 
-	return <button type='button' onClick={(event) => downloadCSV(event, exportFileName)} className={`fa fa-file-excel-o ${styles.download}`}> CSV </button>;
+	return <button type='button' onClick={(event) => downloadCSV(event, exportFileName)} className={`fa fa-file-excel-o ${styles.download}`} />;
 };
 
 CSVDownload.propTypes = {
