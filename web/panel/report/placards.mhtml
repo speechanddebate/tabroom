@@ -1,25 +1,85 @@
 <%args>
 	$tourn
 	$tourn_settings
-	$round_id => undef
 	$session
+	$round_id => undef
+	$no_pronoun => undef
 </%args>
 <%init>
 
-	my $round = Tab::Round->retrieve($round_id) if $round_id;
+	my $dbh = Tab::DBI->db_Main();
 
-	unless ($round) {
-		$m->comp("/funclib/abort.mas", message => "No such session");
+	my $query;
+	my @params;
+
+	my $limit;
+	my $filename;
+
+	my $event;
+
+	if ($ARGS{"entry_id"}) {
+
+		my $entry = Tab::Entry->retrieve($ARGS{"entry_id"});
+		$limit = " where entry.id = ? and round.name = 1";
+		push @params, $entry->id;
+
+		$filename = "Entry-".$entry->code;
+		$event = $entry->event;
+
+	} elsif ($ARGS{"round_id"}) {
+
+		my $round = Tab::Round->retrieve($ARGS{"round_id"});
+		$limit = " where panel.round = ? ";
+		push @params, $ARGS{"round_id"};
+
+		if ($round->label) {
+			$filename = $round->label;
+		} else {
+			$filename = "Session-".$round->name;
+		}
+		$event = $round->event;
+
+	} elsif ($ARGS{"panel_id"}) {
+
+		my $panel = Tab::Panel->retrieve($ARGS{"panel_id"});
+		$limit = " where panel.id = ? ";
+		push @params, $ARGS{"panel_id"};
+		$filename = "Chamber-".$panel->letter;
+		$event = $panel->round->event;
+
+	} else {
+		$m->comp("/funclib/abort.mas", message => "No valid section or round ID sent");
 	}
 
-	my $event = $round->event;
 
-    my $name = $round->realname;
-    my $event_name = $event->abbr;
-    $name =~ s/[\W_]//g;
-    $event_name =~ s/[\W_]//g;
+	my $sth = $dbh->prepare("
+		select
+			student.first, student.last,
+			entry.name entry_name, entry.code,
+			school.name school_name, school.code school_code,
+			panel.letter, round.name, round.label,
+			room.name room,
+			person.pronoun
 
-    my $filename = "Placards-$event_name-$name-".$session->id;
+		from (entry, ballot, panel, round, entry_student es, student)
+
+			left join room on panel.room = room.id
+			left join school on entry.school = school.id
+			left join person on student.person = person.id
+
+		$limit
+			and entry.id = ballot.entry
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and es.entry = entry.id
+			and es.student = student.id
+		group by student.id
+		order by round.name, panel.letter, student.last
+	");
+
+	$sth->execute(@params);
+
+    $filename = "Placards-".$filename;
     my $filepath = $Tab::file_root."tmp/".$filename;
 
 	$m->comp("/funclib/printout.mas",
@@ -33,15 +93,14 @@
 		no_footer   => 1
 	);
 
+	my %event_settings = $event->all_settings();
 
-	my $no_schools = $event->setting("congress_placard_noschools");
-	my $designator = $event->setting("congress_placard_designator");
-	$designator = "lastnames" unless $designator;
+	$event_settings{"congress_placard_designator"} = "lastnames" unless $event_settings{"congress_placard_designator"};
 
 	my $nologo = $event->setting("congress_placard_nologo");
 	my $logo_file = $event->setting("congress_placard_logo");
 
-	undef $logo_file if $nologo;
+	undef $logo_file if $event_settings{"congress_placard_nologo"};
 
 	if ($logo_file) {
 		unless (-e "$Tab::file_root/tmp/".$logo_file) {
@@ -52,7 +111,7 @@
 	unless ($logo_file) {
 
 		$logo_file = $tourn_settings->{"logo"};
-		undef $logo_file if $nologo;
+		undef $logo_file if $event_settings{"congress_placard_nologo"};
 
 		if ($logo_file) {
 			unless (-e "$Tab::file_root/tmp/".$logo_file) {
@@ -61,174 +120,165 @@
 		}
 	}
 
-	my $title = $event->setting("congress_placard_title");
-
-	$title = "Representative"
+	$event_settings{"congress_placard_title"} = "Representative"
 		if (index($event->name, "House") != -1)
-		&& (not defined $title);
-	$title = "Senator" unless $title;
+		&& (not defined $event_settings{"congress_placard_title"});
+	$event_settings{"congress_placard_title"} = "Senator" unless $event_settings{"congress_placard_title"};
 
 	my $fontsize = "128";
 	my $smallfontsize = "96";
 	my $supersmallfontsize = "80";
+	my $smolestfontsize = "64";
 
     open (TEXOUT, ">>$filepath.tex");
 	binmode(TEXOUT, ":utf8");
 
-	foreach my $chamber ($round->panels() ) {
+	my $results = $sth->fetchall_hash();
+	my %taken;
 
-		my @entries = $m->comp(
-			"/funclib/panel_entries.mas",
-				panel    => $chamber,
-				sort_by  => 'lastname',
-				no_drops => 1
-		);
+	foreach my $ref (@{$results}) {
 
-		my %taken;
+		my $first;
 
-		foreach my $entry (@entries) {
+		if ($event_settings{"congress_placard_designator"} eq "codes") {
+			$taken{$ref->{letter}}{$ref->{code}}++;
+		} else {
+			$taken{$ref->{letter}}{$ref->{last}}++;
+		}
 
-			if ($designator eq "codes") {
-				$taken{$entry->code}++;
-			} else {
-				$taken{$entry->lastname}++;
+		Tab::debuglog("Chamber ".$ref->{"letter"}." person ".$ref->{"name"});
+
+		print TEXOUT "\\begin{turn}{180}\n";
+		print TEXOUT "\\fbox{\\begin{minipage}[b][3.15in][b]{9.35in}\n";
+
+		if ($ref->{label}) {
+			print TEXOUT "\\strut\\hfill\n";
+			print TEXOUT "\\textsb{\\LARGE ";
+			print TEXOUT Tab::texify($ref->{"label"});
+			print TEXOUT " } \n";
+			print TEXOUT "\\hfill\\strut\n";
+			print TEXOUT "\\smallskip\n";
+			print TEXOUT "\\newline\n";
+		}
+
+		print TEXOUT "\\large\n";
+		print TEXOUT Tab::texify($ref->{entry_name})."\n";
+		print TEXOUT "\\hfill\n";
+
+		print TEXOUT Tab::texify("Chamber ".$ref->{letter})."\n";
+		print TEXOUT "\\smallskip\n";
+		print TEXOUT "\\newline\n";
+
+		print TEXOUT Tab::texify($ref->{school_name})."\n";
+		print TEXOUT "\\hfill\n";
+
+		print TEXOUT Tab::texify("Room ".$ref->{room})."\n";
+		print TEXOUT "\\smallskip\n";
+		print TEXOUT "\\newline\n";
+
+		print TEXOUT "\\end{minipage}}\n";
+		print TEXOUT "\\end{turn}\n";
+		print TEXOUT "\\vspace{.25in}";
+		print TEXOUT "\\newline\n";
+
+		print TEXOUT "\\fbox{\n";
+		print TEXOUT "\\begin{minipage}[t][3.15in][t]{9.35in}\n";
+
+		print TEXOUT "\\begin{minipage}[t][1in][t]{9.35in}\n";
+
+		print TEXOUT "\\begin{minipage}[b][.8in][c]{2.5in}\n";
+		if ($logo_file && -e "$Tab::file_root/tmp/".$logo_file) {
+			print TEXOUT "{\\transparent{0.5}\\includegraphics[height=.75in]{".$logo_file."}}\n";
+			print TEXOUT "\\hspace{.2in}\n";
+		}
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\end{minipage} \n";
+
+		print TEXOUT "\\begin{varwidth}[b][.8in][c]{4in}\n";
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\fontsize{32pt}{32pt}\\selectfont\n";
+		print TEXOUT "\\color{black!48}\n";
+		print TEXOUT Tab::texify(uc($event_settings{"congress_placard_title"}))."\n";
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\end{varwidth}\n";
+
+		print TEXOUT "\\begin{minipage}[b][.8in][c]{2.5in}\n";
+		print TEXOUT "\\fontsize{28pt}{28pt}\\selectfont\n";
+		print TEXOUT "\\color{black!54}\n";
+		print TEXOUT "\\strut\n";
+		print TEXOUT "\\hfill\n";
+		unless ($ARGS{"no_pronoun"}) {
+			print TEXOUT Tab::texify($ref->{"pronoun"})."\n";
+		}
+		print TEXOUT "\\end{minipage}\n";
+		print TEXOUT "\\end{minipage}\n";
+		print TEXOUT "\\newline\n";
+
+		my $string;
+
+		if ($event_settings{"congress_placard_designator"} eq "lastnames") {
+
+			$string = $ref->{last};
+			if ($taken{$ref->{letter}}{$ref->{last}} > 1) {
+				$string = $ref->{entry_name};
+			}
+
+		} else {
+
+			$string = $ref->{code};
+
+			if ($taken{$ref->{letter}}{$ref->{code}} > 1) {
+				$string .= $ref->{first};
 			}
 		}
 
-		my $letter = $chamber->letter;
-		my $room = $chamber->room->name if $chamber->room;
+		print TEXOUT "\\begin{minipage}[t][1.25in][t]{9.30in}\n";
+		print TEXOUT "\\color{black!100}\n";
+		print TEXOUT "\\strut \\hfill\n";
+		if (length($string) > 15) {
+			print TEXOUT "\\fontsize{".$smolestfontsize."pt}{".$smolestfontsize."pt}\\selectfont ";
+			print TEXOUT Tab::texify(uc($string))."\n";
+		} elsif (length($string) > 11) {
+			print TEXOUT "\\fontsize{".$supersmallfontsize."pt}{".$supersmallfontsize."pt}\\selectfont ";
+			print TEXOUT Tab::texify(uc($string))."\n";
+		} elsif (length($string) > 8) {
+			print TEXOUT "\\fontsize{".$smallfontsize."pt}{".$smallfontsize."pt}\\selectfont ";
+			print TEXOUT Tab::texify(uc($string))."\n";
+		} else {
+			print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont ";
+			print TEXOUT Tab::texify(uc($string))."\n";
+		}
+		print TEXOUT "\\hfill\n";
+		print TEXOUT "\\smallskip\n";
+		print TEXOUT "\\newline\n";
 
-		foreach my $entry (@entries) {
+		print TEXOUT "\\end{minipage}\n";
+		print TEXOUT "\\bigskip\n";
+		print TEXOUT "\\newline\n";
 
-			print TEXOUT "\\begin{turn}{180}\n";
-			print TEXOUT "\\fbox{\\begin{minipage}[b][3.15in][b]{9.35in}\n";
+		print TEXOUT "\\begin{minipage}[t][1in][t]{9.35in}\n";
 
-			if ($round->type eq "elim" || $round->type eq "final") {
-
-				print TEXOUT "\\strut\\hfill\n";
-				print TEXOUT "\\textsb{\\LARGE ";
-				print TEXOUT Tab::texify($round->realname);
-				print TEXOUT " } \n";
-				print TEXOUT "\\hfill\\strut\n";
-				print TEXOUT "\\smallskip\n";
-				print TEXOUT "\\newline\n";
-
-			}
-
-			print TEXOUT "\\large\n";
-			print TEXOUT Tab::texify($entry->name)."\n";
-			print TEXOUT "\\hfill\n";
-
-			print TEXOUT Tab::texify("Chamber ".$letter)."\n";
-			print TEXOUT "\\smallskip\n";
-			print TEXOUT "\\newline\n";
-
-
-			print TEXOUT Tab::texify($entry->schoolname)."\n";
-			print TEXOUT "\\hfill\n";
-
-			print TEXOUT Tab::texify("Room ".$room)."\n";
-			print TEXOUT "\\smallskip\n";
-			print TEXOUT "\\newline\n";
-
-			print TEXOUT "\\end{minipage}}\n";
-			print TEXOUT "\\end{turn}\n";
-
-			print TEXOUT "\\vspace{.25in}";
-			print TEXOUT "\\newline\n";
-
-			print TEXOUT "\\fbox{\\begin{minipage}[t][3.15in][t]{9.35in}\n";
-
-			print TEXOUT "\\begin{minipage}[t][1in][t]{9.35in}\n";
-			print TEXOUT "\\strut\n";
-			print TEXOUT "\\hfill\n";
-
-			if ($logo_file && -e "$Tab::file_root/tmp/".$logo_file) {
-				print TEXOUT "{\\transparent{0.5}\\includegraphics[height=.75in]{".$logo_file."}}\n";
-				print TEXOUT "\\hspace{.2in}\n";
-			}
-
-			print TEXOUT "\\fontsize{32pt}{32pt}\\selectfont\n";
-			print TEXOUT "\\color{black!48}\n";
-
-			print TEXOUT "\\begin{varwidth}[b][.8in][c]{4in}\n";
-			print TEXOUT Tab::texify(uc($title))."\n";
-			print TEXOUT "\\end{varwidth} \n";
-
-			print TEXOUT "\\hfill\n";
-			print TEXOUT "\\strut\n";
-
-			print TEXOUT "\\end{minipage}\n";
-
-			print TEXOUT "\\newline\n";
-
-			print TEXOUT "\\color{black!100}\n";
-			print TEXOUT "\\hspace{.25in}\n";
-			print TEXOUT "\\hfill\n";
-
-			my $string;
-
-			if ($designator eq "lastnames") {
-
-				if ($taken{$entry->lastname} > 1) {
-					$string .= $entry->name;
-				} else {
-					$string .= $entry->lastname;
-				}
-
-			} else {
-
-				if ($taken{$entry->code} > 1) {
-					$string .= $entry->name;
-				} else {
-					$string .= $entry->code;
-				}
-			}
-
-			if (length($string) > 11) {
-
-				print TEXOUT "\\fontsize{".$supersmallfontsize."pt}{".$supersmallfontsize."pt}\\selectfont ";
-				print TEXOUT Tab::texify(uc($string))."\n";
-				print TEXOUT "\\hfill\n";
-				print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont ";
-
-			} elsif (length($string) > 9) {
-
-				print TEXOUT "\\fontsize{".$smallfontsize."pt}{".$smallfontsize."pt}\\selectfont ";
-				print TEXOUT Tab::texify(uc($string))."\n";
-				print TEXOUT "\\hfill\n";
-				print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont ";
-
-			} else {
-
-				print TEXOUT "\\fontsize{".$fontsize."pt}{".$fontsize."pt}\\selectfont ";
-				print TEXOUT Tab::texify(uc($string))."\n";
-				print TEXOUT "\\hfill\n";
-			}
-
-			unless ($no_schools) {
-
-				print TEXOUT "\\bigskip\n";
-				print TEXOUT "\\newline\n";
-
+			print TEXOUT "\\strut \\hfill\n";
+			unless ($event_settings{"congress_placard_noschools"}) {
 				print TEXOUT "\\fontsize{32pt}{32pt}\\selectfont\n";
 				print TEXOUT "\\color{black!48}\n";
-
-				print TEXOUT "\\strut \\hfill\n";
-				print TEXOUT Tab::texify($entry->schoolname)."\n";
+				print TEXOUT Tab::texify($ref->{school_name})."\n";
 				print TEXOUT "\\hfill\n";
+				print TEXOUT "\\strut\n";
 			}
 
-			print TEXOUT "\\smallskip\n";
-			print TEXOUT "\\newline\n";
+		print TEXOUT "\\end{minipage}\n";
 
-			print TEXOUT "\\end{minipage}}\n";
-
-			print TEXOUT "\\newpage\n";
-			print TEXOUT "\\color{black!100}\n";
-		}
-
+		print TEXOUT "\\smallskip\n";
+		print TEXOUT "\\newline\n";
+		print TEXOUT "\\end{minipage}}\n";
+		print TEXOUT "\\newpage\n";
+		print TEXOUT "\\color{black!100}\n";
 	}
+
+	$sth->finish();
 
 	close TEXOUT;
 
