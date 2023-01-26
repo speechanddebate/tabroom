@@ -3,28 +3,30 @@
 </%args>
 <%init>
 
+	use Net::LDAP;
+
 	my $now = DateTime->now();
 	$now->subtract(years => 2);
+
+	my $further = $now->clone();
+	$further->subtract(months => 1);
 
 	my $dbh = Tab::DBI->db_Main();
 
 	my $sth = $dbh->prepare("
-		select
-			person.id, person.email, person.first, person.last
-
-		from person
-			where not exists (
-				select ps.id
-				from person_setting ps
-				where ps.tag = 'last_access'
-				and ps.value_date > ?
-				and ps.person = person.id
-			)
-
-		limit 91000
+		select person.id, person.email, person.first, person.last
+			from person, person_setting ps
+		where person.id = ps.person
+			and ps.tag = 'last_access'
+			and ps.value_date > ?
+			and ps.value_date < ?
+			order by person.id DESC
 	");
 
-	$sth->execute(DateTime::Format::MySQL->parse_datetime($now));
+	$sth->execute(
+		DateTime::Format::MySQL->parse_datetime($further),
+		DateTime::Format::MySQL->parse_datetime($now)
+	);
 
 	my $results = $sth->fetchall_hash();
 
@@ -33,14 +35,32 @@
 	$m->clear_buffer();
 
 	$m->print("<h3>Yes, I have found ".(scalar @{$results})." results</h3>");
-		$m->flush_buffer();
+	$m->flush_buffer();
 
-	foreach my $ref (@{$results}) {
+	my $ldap;
 
-		$m->print("<p>".$ref->{id}." ".$ref->{email}." - ".$ref->{"last"}."</p>\n");
-		if ($count++ > 100) {
-			undef $count;
-			$m->flush_buffer();
+	if ($Tab::ldap_enable eq "yes") {
+
+		my $ldap = Net::LDAP->new( $Tab::ldap_server,
+			port    => $Tab::ldap_port,
+			version => 3,
+			verify  => 'none',
+			cafile  => $Tab::ldap_certs
+		) or die "$@";
+
+		my $mesg = $ldap->bind( $Tab::ldap_user, password => $Tab::ldap_pw);
+		my $basedn = $Tab::ldap_dn;
+
+		foreach my $ref (@{$results}) {
+			# Clear the old and the empties
+			my $dn = "uid=".$ref->{email}.",ou=users,".$basedn;
+			$mesg = $ldap->delete( $dn );
+
+			$m->print("<p>Deleted ".$ref->{id}." ".$ref->{email}." - ".$ref->{"last"}." from LDAP.  Result ".$mesg->code." ".$mesg->error."</p>\n");
+			if ($count++ > 100) {
+				undef $count;
+				$m->flush_buffer();
+			}
 		}
 	}
 
