@@ -14,7 +14,7 @@ export const futureTourns = {
 				and tourn_circuit.circuit = ${req.params.circuit} ) `;
 		}
 
-		let [future] = await db.sequelize.query(`
+		const [future] = await db.sequelize.query(`
 			select tourn.id, tourn.webname, tourn.name, tourn.tz, tourn.hidden,
 				tourn.city as location, tourn.state, tourn.country, 
 				CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
