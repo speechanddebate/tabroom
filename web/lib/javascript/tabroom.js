@@ -1169,12 +1169,7 @@ var waitForFinalEvent = (function () {
 function resizeAll() {
 
 	$('input[type=text], input[type=email], input[type=tel], input[type=date], input[type=time], input[type=url]').each(function(){
-		if (
-			$(this).parent().is("td")
-			|| $(this).parent().is("th")
-			|| $(this).parent().is("label")
-		) {
-		} else {
+		if ($(this).is(':visible') && !['TD','TH','LABEL'].includes($(this).parent()[0].tagName)) {
 			$(this).width($(this).parent().width()-10);
 		}
 	});
