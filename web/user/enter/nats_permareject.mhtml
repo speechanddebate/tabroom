@@ -1,0 +1,120 @@
+<%args>
+	$school
+	$person
+	$person_setting
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+	# 1 Step back and vacate any entries from that chapter in Districts this year
+
+	my $tourn = $school->tourn;
+	my $year = $tourn->end->year;
+
+	my $end_date = $year."-08-01 00:00:00";
+	my $start_date = ($year - 1)."-08-01 00:00:00";
+
+	my $district_entries_sth = $dbh->prepare("
+		select entry.id
+			from entry, school, tourn, tourn_setting ts
+		where school.chapter = ?
+			and school.id  = entry.school
+			and school.tourn = tourn.id
+			and tourn.id = ts.tourn
+			and tourn.start > ?
+			and tourn.start < ?
+			and ts.tag = 'nsda_district'
+			and not exists (
+				select es.id
+				from entry_setting es
+				where es.entry = entry.id
+				and es.tag = 'vacated'
+			)
+	");
+
+	$district_entries_sth->execute(
+		$school->chapter,
+		$start_date,
+		$end_date);
+
+	my $vacate_entry_sth = $dbh->prepare("insert into entry_setting ('entry', 'tag', 'value') values (?, 'nsda_vacate', 1)");
+
+	my $entries = $district_entries_sth->fetchall_hash();
+
+	my $count;
+
+	foreach my $entry (@{$entries}) {
+		$vacate_entry_sth->execute($entry->{"id"});
+		$count++;
+	}
+
+	$district_entries_sth->finish();
+	$vacate_entry_sth->finish();
+
+	# 2 Reject & auto-promote any entries already in Nationals.
+
+	my $nationals_entries_sth = $dbh->prepare("
+		select entry.id
+			from entry, school
+		where school.chapter = ?
+			and school.tourn = ?
+			and not exists (
+				select es.id
+				from entry_setting es
+				where es.entry = entry.id
+				and es.tag = 'rejected'
+			)
+	");
+
+	$nationals_entries_sth->execute($school->chapter, $tourn->id);
+
+	undef $entries;
+	$entries = $nationals_entries_sth->fetchall_hash();
+
+	foreach my $entry (@{$entries}) {
+		$count++;
+		$m->comp("reject.mhtml",
+			entry_id => $entry->{"id"},
+			school   => $school,
+			person   => $person,
+			return   => "yaskween",
+			certain  => "Yes"
+		);
+	}
+
+	# 3 Email confirmation to the coaches of this chapter & the district chair
+
+	my $subject = $school->name." has declined all entries to Nationals";
+
+	my $msg = "\n";
+	$msg .= $person->first." ".$person->last." has indicated ".$school->name." will not attend the ";
+	$msg .= $tourn->start->year." ".$tourn->name." and is rejecting all current ";
+	$msg .= " entries and future alternate spots.";
+	$msg .= "\n";
+
+	$msg .= "All of ".$school->name."'s entries at Nationals have been rejected.  In additon, ";
+	$msg .= "All of ".$school->name."'s entries at your district tournament have been marked ";
+	$msg .= "vacated and will be skipped if entries drops and slots auto-promote to nationals."
+	$msg .= "\n";
+	$msg .= "If any of the above is in error please contact the national offices at ";
+	$msg .= 'info@speechanddebate.org immediately '."\n";
+	$msg .= "\n";
+
+	my @admins = $m->comp("/funclib/chapter_admins.mas", chapter => $school->chapter);
+	my $chair = $m->comp("/funclib/nsda/chair.mas", district => $school->chapter->district);
+
+    $m->comp(
+        "/funclib/send_email.mas",
+        from    => $person,
+        body    => $msg,
+        subject => $subject,
+        array   => \@admins,
+		cc      => $chair
+    );
+
+	$school->setting("rejected", 1);
+	$msg = $school->name."'s $count current and future entries at Nationals have been rejected, and your district chair notified.";
+	$m->redirect("/user/home.mhtml?msg=$msg");
+
+</%init>
