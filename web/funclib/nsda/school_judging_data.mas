@@ -1,0 +1,125 @@
+<%args>
+	$school
+	$tourn_settings    => undef
+	$event_settings    => undef
+	$category_settings => undef
+</%args>
+<%init>
+
+	return unless $school && $school->id;
+
+	my %reasons;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $hire_sth = $dbh->prepare("
+		select
+			judge_hire.category, judge_hire.school, judge_hire.rounds_accepted
+		from judge_hire
+			where judge_hire.school = ?
+	");
+
+	$hire_sth->execute($school->id);
+
+	my %hires;
+
+	foreach  my $result ($hire_sth->fetchall_hash()) {
+		$hires{$result->{"category"}} += $result->{'rounds_accepted'};
+	}
+
+	foreach my $category (
+		$m->comp("/funclib/school_categories.mas",
+			school => $school
+		)
+	) {
+
+		my %owed;
+
+		if ($category->setting("nats_category")) {
+
+			my ($provided, $burden) = $m->comp(
+				"/funclib/judgemath/nats_judging.mas",
+				category => $category,
+				school   => $school
+			);
+
+			$reasons{$category->id}{"abbr"} = $category->{abbr};
+			$reasons{$category->id}{"name"} = $category->{name};
+
+			if ($provided->{'minimum_unmet'}) {
+				push @{$reasons{$category->id}{"problems"}}, $provided->{"minimum_unmet"}." days short of minimum required";
+			}
+
+			$owed{$category->id} = $burden->{"total"};
+			$owed{$category->id} -= $provided->{"total"};
+
+			$reasons{$category->id}{"obligation"} = $burden->{'total'};
+			$reasons{$category->id}{"provided"}   = $provided->{'total'};
+
+			$owed{$category->id} -= $hires{$category->id};
+			$reasons{$category->id}{"provided"} += $hires{$category->id};
+			$reasons{$category->id}{"provided"} += $provided->{"total"};
+			$reasons{$category->id}{"owed"} += $burden->{"total"};
+
+			if ($burden->{'amt'}) {
+				foreach my $jpool_id (keys %{$burden->{"amt"}}) {
+					my $badness = $burden->{"left"}{$jpool_id}." days owed in ".$burden->{"jpools"}{$jpool_id}{"name"};
+					push @{$reasons{$category->id}{"problems"}}, $badness;
+				}
+			}
+
+			if ($owed{$category->id} < 0) {
+				$owed{$category->id} = 0 ;
+			} elsif ($owed{$category->id} > 0) {
+				push @{$reasons{$category->id}{"problems"}}, $owed{$category->id}." total days still owed";
+			}
+
+			if ( $reasons{$category->id}{"problems"} && ( scalar @{$reasons{$category->id}{"problems"}} > 0)) {
+				$reasons{$category->id}{"unmet"} = 1;
+			} else {
+				delete $reasons{$category->id};
+			}
+
+		} else {
+
+			my ($uncovered, $overage, $response) = $m->comp(
+				"/funclib/judgemath/uncovered_burden_by_category.mas",
+				category          => $category,
+				school            => $school,
+				category_settings => $category_settings,
+				tourn_settings    => $tourn_settings,
+				event_settings    => $event_settings,
+			);
+
+			if ($response->{"burden"}) {
+
+				$reasons{$category->id}{'provided'} = $response->{"provided"};
+				$reasons{$category->id}{"burden"} = $response->{"burden"};
+
+				if ($uncovered) {
+					push @{$reasons{$category->id}{"problems"}}, $uncovered." uncovered entries";
+					$reasons{$category->id}{"unmet"} = 1;
+				}
+			}
+		}
+
+		my @incomplete_judges = $m->comp(
+			"/funclib/nsda/incomplete_judges.mas",
+			school   => $school,
+			category => $category
+		);
+
+		foreach my $judge (@incomplete_judges) {
+			my @reasons = split('<br />', $judge->{"reason"});
+			push @{$reasons{$category->id}{"judges"}{$judge->{'id'}}{'problems'}}, @reasons;
+			$reasons{$category->id}{"judges"}{$judge->{'id'}}{'name'} = $judge->{'first'}." ".$judge->{middle}.' '.$judge->{last};
+		}
+
+		unless ($reasons{$category->id}{"judges"} || $reasons{$category->id}{"unmet"} ) {
+			delete $reasons{$category->id};
+		}
+	}
+
+	return %reasons;
+
+</%init>

@@ -1,0 +1,192 @@
+<%args>
+	$school
+</%args>
+<%init>
+
+	return unless $school;
+	return unless $school->district;
+
+	my $tourn = $school->tourn;
+
+	my %incomplete;
+
+	my $sth;
+	my $vaccine = $tourn->setting('vaccines');
+	my $dbh = Tab::DBI->db_Main();
+
+	my $student_sth = $dbh->prepare("
+		select
+			student.id, student.first, student.middle, student.last,
+			student.nsda, person.id person,
+			entry.id entry_id,
+			districts_eligible.value eligible,
+			vaccine.value vaccine
+		from (student, entry_student es, entry, event)
+
+			left join person on person.id = student.person
+
+			left join person_setting vaccine
+				on vaccine.person = student.person
+				and vaccine.tag = ?
+
+			left join student_setting districts_eligible
+				on districts_eligible.student = student.id
+				and districts_eligible.tag = 'districts_eligible'
+
+		where student.chapter = ?
+			and student.id = es.student
+			and es.entry = entry.id
+			and entry.event = event.id
+			and event.tourn = ?
+
+			and NOT EXISTS (
+				select rb.id
+				from entry_setting rb
+				where rb.entry = entry.id
+				and rb.tag = 'rejected_by'
+			)
+		group by student.id
+	");
+
+	$student_sth->execute("vaccine_".$tourn->id, $school->chapter, $tourn->id);
+	my $student_refs = $student_sth->fetchall_hash();
+
+	my $bad_count;
+
+	foreach my $student (@{$student_refs}) {
+
+		unless ($student->{"person"}) {
+			push @{$incomplete{"students"}{$student->{id}}{"problems"}}, "Not linked to a Tabroom account";
+		}
+
+		if ($vaccine && $student->{"vaccine"} ne "confirmed") {
+			push @{$incomplete{"students"}{$student->{id}}{"problems"}}, "Vaccine check process is not complete";
+		}
+
+		if ($incomplete{"students"}{$student->{id}}{"problems"}) {
+			$incomplete{"students"}{$student->{id}}{"name"} = $student->{'first'}.' '.$student->{'middle'}.' '.$student->{'last'};
+			$incomplete{"students"}{$student->{id}}{"entry_id"} = $student->{'entry_id'};
+			$bad_count++;
+		} else {
+			delete $incomplete{"students"}{$student->{id}};
+		}
+	}
+
+	unless ($bad_count) {
+		delete $incomplete{"students"};
+	}
+
+	undef $bad_count;
+
+	my $entry_sth = $dbh->prepare("
+		select
+			entry.id, entry.name, entry.unconfirmed, entry.active,
+			event.id event_id, event.abbr event_abbr, event.name event_name,
+			GROUP_CONCAT(event_setting.tag SEPARATOR ',') event_settings,
+			GROUP_CONCAT(entry_setting.tag SEPARATOR ',') entry_settings,
+			GROUP_CONCAT(es.student SEPARATOR ',') students
+
+		from (entry, event, entry_student es)
+			left join event_setting on event_setting.event = event.id
+			left join entry_setting on entry_setting.entry = entry.id
+
+		where entry.school = ?
+			and entry.event = event.id
+			and es.entry = entry.id
+			and entry.dropped != 1
+
+			and NOT EXISTS (
+				select rb.id
+				from entry_setting rb
+				where rb.entry = entry.id
+				and rb.tag = 'rejected_by'
+			)
+		group by entry.id
+	");
+
+	$entry_sth->execute($school->id);
+	my $entry_refs = $entry_sth->fetchall_hash();
+
+	ENTRY:
+	foreach my $entry (@{$entry_refs}) {
+
+		my %entry_settings = map {$_ => 1} split(/\,/, $entry->{entry_settings});
+		my %event_settings = map {$_ => 1} split(/\,/, $entry->{event_settings});
+		my %students = map {$_ => 1} split(/\,/, $entry->{students});
+
+		next if $entry->{'dropped'};
+
+		if ($entry->{'unconfirmed'}) {
+
+			$incomplete{"entries"}{$entry->{id}}{"pending"}++;
+			push @{$incomplete{"entries"}{$entry->{id}}{"problems"}}, "Entry still pending acceptance or rejection";
+
+		} else {
+
+			unless ($entry_settings{"coach_points"}) {
+				push @{$incomplete{"entries"}{$entry->{id}}{"problems"}}, "No coach listed for posting NSDA points";
+			}
+
+			if ($event_settings{"ask_for_videos"}
+				&& (not defined $event_settings{"video_link_optional"})
+				&& (not defined $entry_settings{"video_link_tested"})
+			) {
+				push @{$incomplete{"entries"}{$entry->{id}}{"problems"}}, "No tested video link was provided";
+			}
+
+			my @piece_issues;
+
+			if ($event_settings{"ask_for_manuscript"}
+				&& (not defined $entry_settings{"script_file"})
+			) {
+				push @piece_issues, "manuscript or cutting";
+			}
+
+			if ($event_settings{"ask_for_publication"}) {
+				unless (
+					( $entry_settings{"publisher"}
+					  && $entry_settings{"publish_date"}
+					  && $entry_settings{"publish_isbn"}
+					) || (
+					  $entry_settings{"publish_url"}
+					  && $entry_settings{"publish_print_date"}
+					)
+				) {
+					push @piece_issues, "publication information";
+				}
+			}
+
+			foreach my $field ("title", "author", "topic", "bibliography") {
+
+				if (
+					($event_settings{"ask_for_".$field} || $event_settings{"ask_for_".$field."s"})   #I hate myself every day for things like this
+					&& (not defined $entry_settings{$field})
+				) {
+					push @piece_issues, $field;
+				}
+			}
+
+			if (@piece_issues) {
+				push @{$incomplete{"entries"}{$entry->{id}}{"problems"}}, "Piece information missing: ".join(', ', @piece_issues);
+			}
+		}
+
+		if ($incomplete{"entries"}{$entry->{id}}) {
+			$incomplete{"entries"}{$entry->{id}}{"name"} = $entry->{"name"};
+			$incomplete{"entries"}{$entry->{id}}{"event_id"} = $entry->{"event_id"};
+			$incomplete{"entries"}{$entry->{id}}{"event_abbr"} = $entry->{"event_abbr"};
+			$bad_count++;
+		} else {
+			delete $incomplete{"entries"}{$entry->{id}};
+		}
+
+	}
+
+	unless ($bad_count) {
+		delete $incomplete{"entries"};
+	}
+
+	undef $bad_count;
+	return %incomplete;
+
+</%init>
