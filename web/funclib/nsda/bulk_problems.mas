@@ -1,0 +1,320 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$school_id => undef
+</%args>
+<%init>
+
+	my %schools;
+    my $dbh = Tab::DBI->db_Main();
+
+	my $school;
+	$school = Tab::School->retrieve($school_id) if $school_id;
+
+	my $school_limit;
+	my @keys = ($tourn->id);
+
+	if ($school > 0) {
+		$school_limit = "and school.id = ? ";
+		push @keys, $school->id;
+	}
+
+	# Unclaimed entries
+	my $pending_sth = $dbh->prepare("
+
+		select school.id, school.name school_name,
+			chapter.nsda nsda_id, chapter.state,
+			entry.id entry_id, entry.name entry_name, event.abbr event_abbr
+
+		from (school, entry, event, chapter)
+
+		where school.tourn = ?
+			$school_limit
+			and school.id         = entry.school
+			and entry.event       = event.id
+			and entry.unconfirmed = 1
+			and entry.dropped     = !1
+			and school.chapter    = chapter.id
+	");
+
+	$pending_sth->execute(@keys);
+
+	my $pendings = $pending_sth->fetchall_hash();
+
+	foreach my $pend (@{$pendings}) {
+		$schools{$pend->{id}}{"name"}    = $pend->{"school_name"};
+		$schools{$pend->{id}}{"state"}   = $pend->{"state"};
+		$schools{$pend->{id}}{"nsda_id"} = $pend->{"nsda_id"};
+		$schools{$pend->{id}}{"bad"}{"entries"}{$pend->{entry_id}}{"name"}   = $pend->{"entry_name"};
+		$schools{$pend->{id}}{"bad"}{"entries"}{$pend->{entry_id}}{"event"}  = $pend->{"event_abbr"};
+		$schools{$pend->{id}}{"bad"}{"entries"}{$pend->{entry_id}}{"reason"} = "Entry pending acceptance or rejection";
+	}
+
+	# Missing scripts etc.
+	my $missing_releases = $dbh->prepare("
+		select school.id, school.name,
+			chapter.nsda, chapter.state,
+			entry.id, entry.name, event.abbr,
+			incomplete.value_text
+
+		from (school, entry, event, entry_setting status, entry_setting incomplete, chapter)
+
+		where school.tourn = ?
+			$school_limit
+			and school.id      = entry.school
+			and entry.event    = event.id
+			and entry.id       = status.entry
+			and entry.active   = 1
+			and status.tag     = 'status'
+			and status.value   = 'incomplete'
+			and school.chapter = chapter.id
+			and incomplete.entry = entry.id
+			and incomplete.tag = 'incomplete_reasons'
+	");
+
+	$missing_releases->execute(@keys);
+
+    while (
+        my ($school_id, $school_name,
+			$nsda_id, $state,
+			$entry_id, $entry_name, $event_abbr,
+			$incomplete_text
+		) = $missing_releases->fetchrow_array()
+    ) {
+
+		unless ($schools{$school_id}{"name"}) {
+			$schools{$school_id}{"name"} = $school_name;
+			$schools{$school_id}{"state"} = $state;
+			$schools{$school_id}{"nsda_id"} = $nsda_id;
+		}
+
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"name"} = $entry_name;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"event"} = $event_abbr;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"reason"} = $incomplete_text;
+	}
+
+	my $link_limit;
+
+	if ($school > 0) {
+		$link_limit = " and school.id = ".$school->id;
+	}
+
+    my $unlinked_sth = $dbh->prepare("
+        select
+			school.id,school.name, chapter.state, chapter.nsda,
+			entry.id, entry.name, entry.code,
+			event.abbr, student.id, student.first, student.last
+
+        from entry, entry_student es, student, event, chapter, school
+
+            left join school_setting contact_name
+                on contact_name.school = school.id
+                and contact_name.tag = 'contact_name'
+
+            left join school_setting contact_email
+                on contact_email.school = school.id
+                and contact_email.tag = 'contact_email'
+
+        where event.tourn = ?
+            and event.id = entry.event
+            and entry.active = 1
+            and entry.id = es.entry
+            and es.student = student.id
+            and student.chapter = chapter.id
+            and chapter.id = school.chapter
+            and school.tourn = event.tourn
+
+			$link_limit
+
+            and not exists (
+                select person.id
+                from person
+                where person.id = student.person
+            )
+
+            group by student.id
+    ");
+
+    $unlinked_sth->execute($tourn->id);
+
+    while (
+        my (
+			$school_id, $school_name, $state, $nsda_id,
+			$entry_id, $entry_name,
+            $entry_code, $event_abbr, $student_id, $student_first, $student_last,
+        ) = $unlinked_sth->fetchrow_array()
+    ) {
+
+		unless ($schools{$school_id}{"name"}) {
+			$schools{$school_id}{"name"}    = $school_name;
+			$schools{$school_id}{"state"}   = $state;
+			$schools{$school_id}{"nsda_id"} = $nsda_id;
+		}
+
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"name"}   = $entry_name;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"event"}  = $event_abbr;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"reason"} = $student_first." ".$student_last." not linked to Tabroom.com account";
+    }
+
+	# Missing coaches
+	my $missing_coaches = $dbh->prepare("
+
+		select school.id, school.name,
+			chapter.nsda, chapter.state,
+			entry.id, entry.name, event.abbr
+
+		from (school, entry, event, chapter)
+
+		where school.tourn = ?
+			$school_limit
+
+			and school.id      = entry.school
+			and entry.event    = event.id
+			and school.chapter = chapter.id
+			and entry.active   = 1
+
+			and not exists (
+				select coach.id
+				from entry_setting coach
+				where coach.entry = entry.id
+				and coach.tag = 'coach_points'
+			)
+	");
+
+	$missing_coaches->execute(@keys);
+
+    while (
+        my ($school_id, $school_name,
+			$nsda_id, $state,
+			$entry_id, $entry_name, $event_abbr
+		) = $missing_coaches->fetchrow_array()
+    ) {
+
+		unless ($schools{$school_id}{"name"}) {
+			$schools{$school_id}{"name"}    = $school_name;
+			$schools{$school_id}{"state"}   = $state;
+			$schools{$school_id}{"nsda_id"} = $nsda_id;
+		}
+
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"name"} = $entry_name;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"event"} = $event_abbr;
+		$schools{$school_id}{"bad"}{"entries"}{$entry_id}{"reason"} = "No coach listed for points credit";
+	}
+
+	if ($school) {
+
+        $m->comp("/funclib/judgemath/nats_check_judging.mas",
+            school         => $school,
+            tourn          => $tourn,
+            tourn_settings => $tourn_settings
+        );
+
+	} else {
+
+		$m->comp("/register/judge/nsda_judge_status.mhtml",
+			tourn          => $tourn,
+			return         => 1,
+			tourn_settings => $tourn_settings
+		);
+	}
+
+	my $judges_borked = $dbh->prepare("
+		select school.id, school.name,
+			chapter.nsda, chapter.state,
+			unmet.value_text
+
+		from (school, school_setting unmet, chapter)
+
+		where school.tourn = ?
+			$school_limit
+			and school.chapter = chapter.id
+			and unmet.tag      = 'judging_unmet'
+			and unmet.school   = school.id
+			group by school.id
+	");
+
+	$judges_borked->execute(@keys);
+
+    while (
+        my ($school_id, $school_name,
+			$nsda_id, $state,
+			$reasons
+		) = $judges_borked->fetchrow_array()
+    ) {
+
+		unless ($schools{$school_id}{"name"}) {
+			$schools{$school_id}{"name"}    = $school_name;
+			$schools{$school_id}{"state"}   = $state;
+			$schools{$school_id}{"nsda_id"} = $nsda_id;
+		}
+
+		$reasons =~ s/\n/\n\n/g;
+		$reasons =~ s/\n\n\n/\n\n/g;
+		$schools{$school_id}{"bad"}{"judging"}  = $reasons
+	}
+
+	# Owes money
+	my %balances = ();
+
+	if ($school) {
+
+		my @fees = $m->comp("/funclib/school_fees.mas",
+			school => $school,
+			all    => 1
+		);
+
+		my $money_due = shift @fees;
+
+		if ($money_due > 0) {
+			$balances{$school->id}{"balance"} = $money_due;
+			$schools{$school->id}{"bad"}{"balance"} = $money_due;
+		}
+
+	} else {
+
+		%balances = $m->comp(
+			"/funclib/balances.mas",
+			tourn          => $tourn,
+			tourn_settings => $tourn_settings
+		);
+
+		foreach my $school_id (keys %balances) {
+
+			next unless $balances{$school_id}{"balance"} > 0;
+
+			unless ($schools{$school_id}{"name"}) {
+				$schools{$school_id}{"name"}           = $balances{$school_id}{"name"};
+				$schools{$school_id}{"sort_name"}      = $balances{$school_id}{"name"};
+				$schools{$school_id}{"state"}          = $balances{$school_id}{"state"};
+				$schools{$school_id}{"nsda_id"}        = $balances{$school_id}{"nsda"};
+			}
+			$schools{$school_id}{"bad"}{"balance"} = $balances{$school_id}{"balance"};
+			$schools{$school_id}{"sort_name"} =~ s/^The //g;
+		}
+	}
+
+	if ($ARGS{"emails"}) {
+
+		foreach my $school_id (keys %schools) {
+			my $email_sth = $dbh->prepare("
+				select distinct(person.email)
+					from person, permission, school
+				where person.id = permission.person
+					and person.no_email = 0
+					and permission.tag = 'chapter'
+					and permission.chapter = school.chapter
+					and school.id = ?
+			");
+
+			$email_sth->execute($school_id);
+			my $emails = $email_sth->fetchall_hash();
+
+			foreach my $email (@{$emails}) {
+				push @{$schools{$school_id}{"emails"}}, $email->{email};
+			}
+		}
+	}
+
+	return %schools;
+
+</%init>
