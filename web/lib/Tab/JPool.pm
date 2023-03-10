@@ -73,7 +73,7 @@ sub setting {
 			$existing->update();
 		}
 
-	} else {
+	} elsif ($existing) {
 
 		if ($existing->value eq "text") {
 			return $existing->value_text
