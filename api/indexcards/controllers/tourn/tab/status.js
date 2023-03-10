@@ -101,6 +101,7 @@ export const attendance = {
 				judge.person person, panel.id panel, panel.timestamp timestamp,
 				CONVERT_TZ(ballot.judge_started, '+00:00', tourn.tz) startTime,
 				ballot.audit audited,
+				cl.tag,
 				started_by.first startFirst, started_by.last startLast,
 				judge.first judgeFirst, judge.last judgeLast,
 				tourn.tz tz
@@ -108,6 +109,7 @@ export const attendance = {
 			from (panel, tourn, round, ballot, event, judge, entry)
 
 				left join person started_by on ballot.started_by = started_by.id
+				left join campus_log cl on cl.panel = panel.id and cl.person = judge.person
 
 			${queryLimit}
 
@@ -181,7 +183,12 @@ export const attendance = {
 				status[start.person][start.panel].started = showDateTime(start.startTime);
 			}
 			status[start.person][start.panel].timestamp = start.timestamp;
-			status[start.person][start.panel].tag = 'present';
+
+			if (start.tag) {
+				status[start.person][start.panel].tag = start.tag;
+			} else {
+				status[start.person][start.panel].tag = 'absent';
+			}
 
 			if (start.audited) {
 				status[start.person][start.panel].audited = true;
@@ -281,7 +288,7 @@ export const attendance = {
 				}
 
 				await db.ballot.update({
-					started_by: req.session.person,
+					started_by    : req.session.person,
 					judge_started : now,
 				},{
 					where : {
