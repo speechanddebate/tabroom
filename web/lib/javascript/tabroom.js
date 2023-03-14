@@ -573,12 +573,24 @@
 	};
 
 /* Fix all the visual elements at once */
-
 	function fixVisual() {
 		zebraRows();
 		$('table').trigger('applyWidgets');
 		$('table').trigger('update', [true]);
 		resizeAll();
+
+		var base_url = window.location.origin.split('.').slice(-2).join('.');
+
+		if (base_url !== 'tabroom.com') {
+			pleaseStop();
+		}
+	}
+
+/* jerks */
+
+	function pleaseStop() {
+		$(".main").html('<h3 class="centeralign redtext">This site is not Tabroom. It is a phishing attempt</h3><h4 class="centeralign">Fortunately it was not a very good one, so Chris Palmer was able to mess with them a little and put this message up instead</h4><h4 class="centeralign bluetext">Real Tabroom will always say "https://www.tabroom.com" in the address bar.</h4><h5 class="centeralign">Also, it would not have worked anyway, for reasons I will not get into here</h5><p class="centeralign bluetext bigger martop">But seriously people, stop trying to make my life more stressful and stop doing things like this.  There are no fortunes to be made here, just a more tired Tabroom developer.</p>');
+		console.log('no seriously stop');
 	}
 
 /* Change the file uploader div to show the name of the uploaded file */
