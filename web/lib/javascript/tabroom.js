@@ -579,9 +579,10 @@
 		$('table').trigger('update', [true]);
 		resizeAll();
 
-		var base_url = window.location.origin.split('.').slice(-2).join('.');
+		var base_url = window.location.origin.split(':').slice(1);
+		var base_domain =  base_url[0].split('.').slice(-2).join('.');
 
-		if (base_url !== 'tabroom.com') {
+		if (base_domain !== 'tabroom.com') {
 			pleaseStop();
 		}
 	}
