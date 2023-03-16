@@ -1,0 +1,357 @@
+<%args>
+	$tourn
+	$type     => undef
+	$event_id => undef
+	$round_id => undef
+</%args>
+<%init>
+
+	use POSIX;
+
+	my $event = Tab::Event->retrieve($event_id) if $event_id;
+	my $round = Tab::Round->retrieve($round_id) if $round_id;
+
+	if ($round && ($round->type eq "elim" || $round->type eq "final")) {
+		undef $round;
+	}
+
+	unless ($event) {
+		if ($round) {
+			$event = $round->event;
+		} else {
+			$event = $tourn->events->first;
+		}
+	}
+
+	my %event_settings;
+	my @all_rounds;
+	my @rounds;
+
+	if ($event) {
+
+		%event_settings = $event->all_settings();
+
+		@all_rounds = $m->comp("/funclib/event_rounds.mas",
+			event => $event,
+			done  => "yes"
+		);
+
+		foreach my $round (@all_rounds) {
+			if ($round->type ne "elim" && $round->type ne "final") {
+				push @rounds, $round
+			}
+		}
+
+		if (not defined $round) {
+			$round = $rounds[0];
+		}
+	}
+
+	my $roles = $event_settings{"roles_rubric"};
+	my $dbh = Tab::DBI->db_Main();
+
+	if ($round) {
+
+		my $sth = $dbh->prepare("
+
+            select
+				student.id, student.first, student.middle, student.last,
+                entry.id entry, entry.code ecode,
+				school.id school, school.code scode, school.name sname,
+				round.name round, ballot.judge,
+				score.position, score.value,
+                panel.bye pbye, ballot.bye bbye, ballot.forfeit, ballot.chair
+
+            from (ballot, entry, entry_student, round, panel, score, student, school)
+
+            where entry.event = ?
+
+				and entry.id = entry_student.entry
+				and round.event = entry.event
+				and round.name <= ?
+				and round.id = panel.round
+				and panel.id = ballot.panel
+				and ballot.entry = entry_student.entry
+
+				and ballot.id = score.ballot
+				and score.tag = 'speaker'
+				and score.student = entry_student.student
+				and entry_student.student = student.id
+				and school.id = entry.school
+
+				and not exists (
+					select round_setting.id from round_setting where
+					round_setting.tag = 'ignore_results'
+					and round_setting.round = round.id
+				)
+
+            group by round.id, entry.id, student.id, ballot.judge
+            order by round.name, ballot.panel
+		");
+
+		$sth->execute($event->id, $round->name);
+
+		my $results = $sth->fetchall_hash();
+
+
+		foreach my $result (@{$results}) {
+
+			my $student = $roles->{$result->{position}}{"students"}{$result->{student}};
+
+			unless ($student->{"name"}) {
+
+				$student->{"name"} = $result->{"first"};
+
+				if ($result->{"middle"}) {
+					$student->{"name"} .= " ".$result->{"middle"};
+				}
+				$student->{"name"} .= " ".$result->{"last"};
+
+				$student->{"school_id"}   = $result->{"school"};
+				$student->{"school_name"} = $result->{"sname"};
+				$student->{"school_code"} = $result->{"scode"};
+
+				$student->{"entry_id"}   = $result->{"entry"};
+				$student->{"entry_code"} = $result->{"ecode"};
+			}
+
+			$student->{"raw_results"} .= "<br />" if $student->{"raw_results"};
+			$student->{"raw_results"} .= $result->{"round"}.": ".$result->{"value"};
+			$student->{"total"} += $result->{"value"};
+			$student->{"count"}++;
+
+			$roles->{$result->{position}}{"students"}{$result->{student}} = $student;
+		}
+	}
+
+</%init>
+
+	<div class="blankfull">
+
+		<& "/funclib/tablesorter.mas",
+			table     => "roles"
+		&>
+
+		<div class="full nospace">
+			<span class="fifth">
+				<h4 class="padno marless"> <% $event->abbr %> </h4>
+			</span>
+
+			<span class="third marno centeralign">
+				<h5 class="inline marright">
+					Event
+				</h5>
+
+				<form
+					action = "speakers.mhtml"
+					method = "post"
+				>
+					<input
+						type  = "hidden"
+						name  = "type"
+						value = "Speakers"
+					>
+
+					<select
+						name     = "event_id"
+						onchange = 'this.form.submit()'
+						class    = "fixedmed"
+					>
+<%perl>
+
+						my $events_sth = $dbh->prepare("
+							select
+								event.id, event.type, event.name, event.abbr
+							from event
+								where event.tourn = ?
+								and exists (
+									select es.id
+										from event_setting es
+									where es.tag = 'roles_rubric'
+								)
+							order by event.type, event.name
+						");
+
+						$events_sth->execute($tourn->id);
+						my $events = $events_sth->fetchall_hash();
+
+						foreach my $event_ref (@{$events}) {
+</%perl>
+							<option
+								value="<% $event_ref->{id} %>"
+								<% $event_ref->{id} == $event_id ? 'selected="selected"' : "" %>
+							> <% $event_ref->{name} %> </option>
+%						}
+					</select>
+				</form>
+			</span>
+
+			<span class="third marno centeralign">
+
+%				if (@rounds) {
+
+					<h5 class="inline marright">
+						As of
+					</h5>
+
+					<form
+						action = "roles.mhtml"
+						method = "post"
+					>
+
+					<input
+						type  = "hidden"
+						name  = "event_id"
+						value = "<% $event->id %>"
+					>
+
+					<input
+						type  = "hidden"
+						name  = "type"
+						value = "Speakers"
+					>
+						<select
+							name     = "round_id"
+							onchange = 'this.form.submit()'
+							class    = "fixedmed"
+						>
+
+							<option value="" <% $type ne "Speakers" ? "selected" : "" %>></option>
+<%perl>
+							foreach my $oround (sort {$b->name <=> $a->name} @rounds) {
+								next unless $oround && $oround->id;
+								next if $oround->type eq "elim";
+								next if $oround->type eq "final";
+
+</%perl>
+								<option value="<% $oround->id %>"
+									<% $round && $oround->id == $round_id ? "selected" : "" %>
+								> <% $oround->realname %> </option>
+%							}
+
+						</select>
+					</form>
+%				}
+			</span>
+		</div>
+
+%		if ($round) {
+
+			<div class="full">
+				<span class="threequarters nospace marleftmore">
+					<ul id="tabnav" class="marno padno">
+
+						<li>
+							<a
+								href="index.mhtml?event_id=<% $event->id %>&round_id=<% $round->id %>
+							">Entries in Order</a>
+						</li>
+
+%						if ($event_settings{"speaker_protocol"}) {
+							<li>
+								<a
+									href="speakers.mhtml?event_id=<% $event->id %>&round_id=<% $round->id %>"
+								>Speakers in Order</a>
+							</li>
+%						}
+
+						<li class="selected">
+							<a
+								href="speakers.mhtml?event_id=<% $event->id %>&round_id=<% $round->id %>"
+							>Individuals</a>
+						</li>
+
+					</ul>
+				</span>
+
+				<span
+					class='rightalign quarter'
+					id="roles_buttonarea"
+				></span>
+			</div>
+
+			<table id="roles">
+				<thead>
+					<tr class="yellowrow">
+
+						<th class="smallish">
+						</th>
+
+						<th class="smallish">
+							Name
+						</th>
+
+						<th class="smallish">
+							Entry
+						</th>
+
+						<th class="smallish">
+							School
+						</th>
+
+						<th class="smallish">
+							Role
+						</th>
+
+						<th class="smallish">
+							Nominations
+						</th>
+
+						<th class="smallish">
+							Total Points
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+<%perl>
+					foreach my $order (sort {$a <=> $b} keys %{$roles}) {
+
+						my $counter = 1;
+
+						foreach my $student_id (
+							sort {
+								$roles->{$order}{"students"}{$b}{"total"}
+									<=>
+								$roles->{$order}{"students"}{$a}{"total"}
+							} keys %{$roles->{$order}{"students"}}
+						) {
+
+							my $student = $roles->{$order}{"students"}{$student_id};
+</%perl>
+							<tr>
+								<td class="smallish centeralign">
+									<% $counter++ %>
+								</td>
+
+								<td class="smallish">
+									<% $student->{'name'} %>
+								</td>
+
+								<td class="smallish" title="<% $student->{raw_results} %>">
+									<% $student->{'entry_code'} %>
+								</td>
+
+								<td class="smallish" title="<% $student->{"school_code"} %>">
+									<% $student->{'school_name'} %>
+								</td>
+
+								<td class="smallish">
+									<% $roles->{$order}{"label"} %>
+								</td>
+
+								<td class="smallish centeralign">
+									<% $student->{'count'} %>
+								</td>
+
+								<td class="smallish centeralign">
+									<% $student->{'total'} %>
+								</td>
+							</tr>
+%						}
+%					}
+				</tbody>
+			</table>
+%		}
+	</div>
+
