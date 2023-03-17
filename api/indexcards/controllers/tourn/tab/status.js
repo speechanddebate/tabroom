@@ -96,6 +96,27 @@ export const attendance = {
 			order by cl.timestamp
 		`;
 
+		const entryAttendanceQuery = `
+			select
+				cl.panel panel, cl.tag tag, cl.description description,
+					CONVERT_TZ(cl.timestamp, '+00:00', tourn.tz) timestamp,
+				cl.entry entry, tourn.tz tz
+
+			from panel, campus_log cl, tourn, round, ballot, entry
+
+			${queryLimit}
+
+				and panel.round = round.id
+				and panel.id = cl.panel
+				and cl.tourn = tourn.id
+				and cl.entry = entry.id
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+				and entry.active = 1
+
+			order by cl.timestamp
+		`;
+
 		const startsQuery = `
 			select
 				judge.person person, panel.id panel, panel.timestamp timestamp,
@@ -127,6 +148,7 @@ export const attendance = {
 		// A raw query to go through the category filter
 		const [attendanceResults]         = await db.sequelize.query(attendanceQuery);
 		const [unlinkedAttendanceResults] = await db.sequelize.query(unlinkedAttendanceQuery);
+		const [entryAttendanceResults]    = await db.sequelize.query(entryAttendanceQuery);
 		const [startsResults]             = await db.sequelize.query(startsQuery);
 
 		const status = {};
@@ -162,6 +184,17 @@ export const attendance = {
 					},
 				};
 			}
+		});
+
+		entryAttendanceResults.forEach( attend => {
+			status[attend.entry] = {
+				[attend.panel]  : {
+					tag         : attend.tag,
+					timestamp   : attend.timestamp.toJSON,
+					description : attend.description,
+					started     : showDateTime(attend.timestamp, { tz: attend.tz, format: 'daytime' }),
+				},
+			};
 		});
 
 		startsResults.forEach( start => {
@@ -212,8 +245,15 @@ export const attendance = {
 			let [targetType, targetId] = req.body.target_id.toString().split('_');
 			let target;
 
+			if (req.body.setting_name === 'entry') {
+				targetType = 'entry';
+				targetId = req.body.target_id;
+			}
+
 			if (targetType === 'student') {
 				target = await db.student.findByPk(targetId);
+			} else if (targetType === 'entry') {
+				target = await db.entry.findByPk(targetId);
 			} else if (targetType === 'judge') {
 				target = await db.judge.findByPk(targetId);
 			} else {
@@ -225,7 +265,7 @@ export const attendance = {
 			if (!target) {
 				return res.status(201).json({
 					error   : true,
-					message : `No person to mark present for ID ${req.body.target_id}`,
+					message : `No person to mark present for ID ${target} ${targetType} ${req.body.target_id}`,
 				});
 			}
 
@@ -330,7 +370,13 @@ export const attendance = {
 				// The property already being 1 means that they're currently
 				// present, so mark them as absent.
 
-				const logMessage = `${target.first} ${target.last} marked as absent by ${req.session.email}`;
+				let logMessage;
+
+				if (target.first) {
+					logMessage = `${target.first} ${target.last} marked as absent by ${req.session.email}`;
+				} else if (target.code) {
+					logMessage = `${target.code} marked as absent by ${req.session.email}`;
+				}
 
 				const log = {
 					tag         : 'absent',
@@ -341,6 +387,8 @@ export const attendance = {
 
 				if (targetType === 'student') {
 					log.student = target.id;
+				} else if (targetType === 'entry') {
+					log.entry = target.id;
 				} else if (targetType === 'judge') {
 					log.judge = target.id;
 				} else {
@@ -385,7 +433,12 @@ export const attendance = {
 			// In this case they're currently marked absent, so we mark them
 			// present
 
-			const logMessage = `${target.first} ${target.last} marked as present by ${req.session.email}`;
+			let logMessage;
+			if (target.first) {
+				logMessage = `${target.first} ${target.last} marked as present by ${req.session.email}`;
+			} else if (target.code) {
+				logMessage = `${target.code} marked as present by ${req.session.email}`;
+			}
 
 			const log = {
 				tag         : 'present',
@@ -394,15 +447,23 @@ export const attendance = {
 				panel       : panel.id,
 			};
 
+			if (req.body.setting_name === 'offline_entry') {
+				targetType = 'entry';
+			}
+
 			if (targetType === 'student') {
 				log.student = target.id;
+			} else if (targetType === 'entry') {
+				log.entry = target.id;
 			} else if (targetType === 'judge') {
 				log.judge = target.id;
 			} else {
 				log.person = target.id;
 			}
 
-			if (req.body.setting_name === 'entry') {
+			if (targetType === 'entry') {
+				log.entry = target.id;
+			} else if (req.body.setting_name === 'entry') {
 				log.entry = req.body.another_thing;
 			} else if (req.body.setting_name === 'judge') {
 				log.judge = req.body.another_thing;
