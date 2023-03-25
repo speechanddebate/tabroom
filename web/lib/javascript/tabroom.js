@@ -581,7 +581,7 @@
 
 		var base_url = window.location.origin.split(':').slice(1);
 		var base_domain =  base_url[0].split('.').slice(-2).join('.');
-		base_domain.replace(/\//g);
+		base_domain = base_domain.replace(/\//g);
 
 		if (
 			(base_domain !== 'tabroom.com')
@@ -589,6 +589,7 @@
 		) {
 			console.log(base_url);
 			console.log(base_domain);
+			console.log("hopefully without slashes");
 			pleaseStop();
 		}
 	}
