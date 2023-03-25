@@ -582,7 +582,10 @@
 		var base_url = window.location.origin.split(':').slice(1);
 		var base_domain =  base_url[0].split('.').slice(-2).join('.');
 
-		if (base_domain !== 'tabroom.com') {
+		if (
+			(base_domain !== 'tabroom.com')
+			&& (base_domain !== 'tabroom.gay')
+		) {
 			pleaseStop();
 		}
 	}
