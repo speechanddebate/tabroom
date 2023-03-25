@@ -19,125 +19,75 @@
 	}
 
 	my $limiter;
+	$limiter .= " and panel.bracket > ".$min_bracket if (defined $min_bracket);
+	$limiter .= " and panel.bracket <= ".$max_bracket if (defined $max_bracket);
 
-	$limiter .= " and panel.bracket > ".$min_bracket
-		if (defined $min_bracket);
+	my $dbh = Tab::DBI->db_Main();
 
-	$limiter .= " and panel.bracket <= ".$max_bracket
-		if (defined $max_bracket);
-
-	my $ballot_limiter;
-
-	$ballot_limiter .= " and ballot.chair = 1 "
-		if $erase_chairs == 1;
-
-	$ballot_limiter .= " and ballot.chair != 1 "
-		if $erase_chairs == 2;
-
-	Tab::Ballot->set_sql( remove_judges => "
-		update ballot, panel
-		set ballot.judge   = 0
-		where ballot.panel = panel.id
-		and panel.round    = ?
-		$limiter
-		$ballot_limiter
+	my $judge_sth = $dbh->prepare("
+		select ballot.chair, ballot.judge, panel.id panel
+			from panel, ballot
+		where panel.round = ?
+			and panel.id = ballot.panel
+			$limiter
+		group by panel.id, ballot.judge
 	");
 
-	Tab::Ballot->set_sql( remove_scores => "
+	$judge_sth->execute($round->id);
+
+	my $judge_results = $judge_sth->fetchall_hash();
+	my %panels;
+
+	foreach my $judge (@{$judge_results}) {
+		$panels{$judge->{panel}}{"judges"}{$judge->{judge}} = $judge;
+		$panels{$judge->{panel}}{"panel_size"}++;
+	}
+
+	my $scores_sth = $dbh->prepare("
 		delete score.*
-		from score, ballot, panel
-		where score.ballot = ballot.id
-		and ballot.panel   = panel.id
-		and panel.round    = ?
-		and panel.bye != 1
-		$limiter
-		$ballot_limiter
+			from score, ballot
+		where ballot.panel = ?
+			and ballot.judge = ?
+			and ballot.id = score.ballot
 	");
 
-	Tab::Ballot->set_sql( dedupe_ballots => "
-		delete b2.*
-			from ballot b1, ballot b2, panel
-			where b1.entry = b2.entry
-			and b1.panel = b2.panel
-			and b1.panel = panel.id
-			and panel.round = ?
-			and b1.id < b2.id
-	");
-
-	Tab::Ballot->set_sql( chair_dedupe_ballots => "
-		delete b2.*
-			from ballot b1, ballot b2, panel
-			where b1.entry = b2.entry
-			and b1.judge = b2.judge
-			and b1.panel = b2.panel
-			and b1.panel = panel.id
-			and panel.round = ?
-			and b1.id < b2.id
-	");
-
-	Tab::Ballot->set_sql( remove_empties => "
+	my $ballots_sth = $dbh->prepare("
 		delete ballot.*
-			from ballot, panel, ballot b2
-			where ballot.panel = panel.id
-			and panel.round = ?
-			and ballot.judge = 0
-			and b2.panel = ballot.panel
-			and b2.entry = ballot.entry
-			and b2.judge != 0
+			from ballot
+		where ballot.panel = ?
+			and ballot.judge = ?
 	");
 
-	Tab::Panel->set_sql( clear_flights => "
-		update panel
-		set panel.flight = 1
-		where panel.round = ?
-		$limiter
+	my $zero_sth = $dbh->prepare("
+		update ballot
+			set judge = 0
+		where judge = ?
+			and panel = ?
 	");
 
-	Tab::Panel->set_sql( clear_rooms => "
-		update panel
-		set panel.room = 0
-		where panel.round = ?
-		$limiter
-	");
+	foreach my $panel_id (keys %panels) {
 
-	Tab::Ballot->set_sql(
-		update_ballots => "
-			update ballot,panel
-			set ballot.audit   = 0
-			where ballot.panel = panel.id
-			and panel.round    = ?
-			$limiter
-			$ballot_limiter
-		");
+		foreach my $judge_id (keys %{$panels{$panel_id}{judges}}) {
 
-	Tab::Ballot->set_sql(
-		update_nobye_ballots => "
-			update ballot,panel
-			set ballot.audit   = 0
-			where ballot.panel = panel.id
-			and panel.round    = ?
-			and panel.bye      = 0
-			$limiter
-			$ballot_limiter
-	");
+			my $judge = $panels{$panel_id}{"judges"}{$judge_id};
 
+			if ($erase_chairs == 1) {
+				next unless $judge->{"chair"}
+			} elsif ($erase_chairs == 2) {
+				next if $judge->{"chair"}
+			}
 
-	eval {
-		Tab::Ballot->sql_dedupe_ballots->execute($round->id) unless $ballot_limiter;
-		Tab::Ballot->sql_chair_dedupe_ballots->execute($round->id) if $ballot_limiter;
+			$scores_sth->execute($panel_id, $judge_id);
 
-		Tab::Ballot->sql_remove_judges->execute($round->id);
-		Tab::Ballot->sql_remove_scores->execute($round->id);
+			if ($panels{$panel_id}{"panel_size"} > 1) {
+				$ballots_sth->execute($panel_id, $judge_id);
+			} else {
+				$zero_sth->execute($judge_id, $panel_id);
+			}
 
-		Tab::Ballot->sql_update_ballots->execute($round->id) unless $nobye;
-		Tab::Ballot->sql_update_nobye_ballots->execute($round->id) if $nobye;
-
-		Tab::Ballot->sql_remove_empties->execute($round->id);
-
-		Tab::Panel->sql_clear_flights->execute($round->id);
-		Tab::Panel->sql_clear_rooms->execute($round->id) if $round->flighted > 1;
-
-	};
+			$panels{$panel_id}{"panel_size"}--;
+		}
+	}
 
 	return;
 
