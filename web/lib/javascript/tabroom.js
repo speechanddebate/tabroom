@@ -586,6 +586,8 @@
 			(base_domain !== 'tabroom.com')
 			&& (base_domain !== 'tabroom.gay')
 		) {
+			console.log(base_url);
+			console.log(base_domain);
 			pleaseStop();
 		}
 	}
