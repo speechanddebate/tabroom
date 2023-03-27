@@ -3,7 +3,7 @@ import convert from 'html-to-text';
 import config from '../../../config/config';
 import { debugLogger } from '../logger';
 
-async function mailBlast(mailData) {
+export const mailBlast = async (mailData) => {
 
 	const transporter = nodemailer.createTransport({
 		host   : config.MAIL_SERVER,
@@ -67,9 +67,9 @@ async function mailBlast(mailData) {
 	}
 
 	return `Email message sent to ${mailData.to.length + mailData.bcc.length} recipients`;
-}
+};
 
-async function textBlast(mailData) {
+export const textBlast = async (mailData) => {
 
 	const transporter = nodemailer.createTransport({
 		host   : config.MAIL_SERVER,
@@ -119,7 +119,6 @@ async function textBlast(mailData) {
 
 	return `Email message sent to ${mailData.to.length + mailData.bcc.length} recipients`;
 
-}
+};
 
 export default mailBlast;
-export textBlast;
