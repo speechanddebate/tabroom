@@ -10,7 +10,6 @@ import thunk from 'redux-thunk';
 import api from './redux/apiMiddleware';
 
 const mockStore = configureMockStore([thunk, api]);
-
 jest.mock('./api/api');
 
 global.window.scrollTo = () => true;
