@@ -44,10 +44,13 @@ sub setting {
 					return JSON::encode_json($blob);
 				};
 				$existing->value_text($json);
-			} elsif ($value eq "delete" || $value eq "" || $value eq "0") {
-				$existing->delete();
 			}
-			$existing->update();
+
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
+				$existing->delete();
+			} else {
+				$existing->update();
+			}
 
 			return;
 
