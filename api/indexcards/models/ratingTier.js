@@ -36,7 +36,7 @@ const ratingTier = (sequelize, DataTypes) => {
 			defaultValue: '0',
 		},
 	},{
-		table_name: 'ratingTier',
+		tableName: 'ratingTier',
 	});
 };
 

@@ -1,9 +1,9 @@
 import nodemailer from 'nodemailer';
-import convert from 'html-to-text';
-import config from '../../../config/config';
-import { debugLogger } from '../logger';
+import { convert } from 'html-to-text';
+import config from '../../config/config';
+import { debugLogger } from './logger';
 
-export const mailBlast = async (mailData) => {
+export const emailBlast = async (messageData) => {
 
 	const transporter = nodemailer.createTransport({
 		host   : config.MAIL_SERVER,
@@ -11,65 +11,68 @@ export const mailBlast = async (mailData) => {
 		secure : false,
 	});
 
-	if (!mailData.text && !mailData.html) {
-		return 'No message body; not sending';
+	if (!messageData.text && !messageData.html) {
+		return { error: true, message: 'No message body; not sending' };
 	}
 
-	if (mailData.html && !mailData.text) {
-		mailData.text = convert(mailData.html);
+	if (messageData.html && !messageData.text) {
+		messageData.text = convert(messageData.html);
 	}
 
-	if (!mailData.to) {
-		return 'No desination addresses provided, not sent';
+	if (!messageData.email) {
+		return { error: true, message: 'No desination addresses provided, not sent' };
 	}
 
-	// Only send BCC emails so folks do not reply all or see student contact etc.
-	// And then add the sender as the To as well so it will not deliver.
-	mailData.bcc = mailData.to;
-	mailData.to = config.MAIL_FROM;
+	// Only send BCC emails so folks do not reply all or see student contact
+	// etc. And then add the sender as the To as well so it will not deliver.
+	messageData.bcc = messageData.email;
+	messageData.to = config.MAIL_FROM;
 
-	if (!mailData.subject) {
-		mailData.subject = 'Tabroom.com Notification';
+	if (!messageData.subject) {
+		messageData.subject = 'Tabroom.com Notification';
 	}
 
-	if (!mailData.from) {
-		mailData.from = config.MAIL_FROM;
+	if (!messageData.from) {
+		messageData.from = config.MAIL_FROM;
 	}
 
-	if (mailData.text) {
-		mailData.text += '\n\n----------------------------\n\n';
-		mailData.text +=  'You signed up for this email by registering for an account on ';
-		mailData.text += 'https://www.tabroom.com ';
-		mailData.text += 'and following entry or judge records.\n';
-		mailData.text += 'If you do not want further emails from Tabroom, ';
-		mailData.text += 'login to your Tabroom account, and click the Profile icon on the top right of the screen.\n';
-		mailData.text += 'Once there, either check off "No Emails", and save your profile, ';
-		mailData.text += 'or you can also delete your Tabroom account entirely using the button on the right sidebar.';
+	if (messageData.text) {
+		messageData.text += '\n\n----------------------------\n\n';
+		messageData.text +=  'You received this email because you registered for an account on ';
+		messageData.text += 'https://www.tabroom.com ';
+		messageData.text += 'To stop them, login to your Tabroom account, click the Profile icon at top right,\n';
+		messageData.text += 'and check off "No Emails", and save your profile, ';
+		messageData.text += 'You can also delete your Tabroom account entirely on your profile.';
 	}
 
-	if (mailData.html) {
-		mailData.html += '<p>-----------------------------</p>';
-		mailData.html += '<p>You signed up for this email by registering for an account on ';
-		mailData.html += '<a href="https://www.tabroom.com">https://www.tabroom.com</a> ';
-		mailData.html += 'and following entry or judge records.</p>';
-		mailData.html += '<p>If you do not want further emails from Tabroom, access ';
-		mailData.html += '<a href="https://www.tabroom.com/user/login/profile.mhtml">Your Profile</a>, ';
-		mailData.html += ' or login to your Tabroom account, and click the Profile icon on the top right of the screen</p>';
-		mailData.html += '<p>Once there, either check off "No Emails", and save your profile, ';
-		mailData.html += 'or you can also delete your Tabroom account entirely using the button on the right sidebar.</p>';
+	if (messageData.html) {
+		messageData.html += '<p>-----------------------------</p>';
+		messageData.html += '<p>You received this email because you registered for an account on ';
+		messageData.html += '<a href="https://www.tabroom.com">https://www.tabroom.com</a></p>';
+		messageData.html += '<p>To stop them, visit ';
+		messageData.html += '<a href="https://www.tabroom.com/user/login/profile.mhtml">Your Profile</a>, ';
+		messageData.html += '<p>and check off "No Emails", and save your profile.';
+		messageData.html += 'You can also delete your Tabroom account entirely on your profile.</p>';
 	}
+
+	let info = {};
 
 	if (process.env.NODE_ENV === 'production') {
-		const info = await transporter.sendMail(mailData);
-		debugLogger.info(`Sent email id ${info.messageId} for ${mailData.from} to ${mailData.to} bcc ${mailData.bcc} textlength ${mailData.text.length} html ${mailData.html.length}`);
+		info = await transporter.sendMail(messageData);
+		debugLogger.info(`Sent email id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text.length} html ${messageData.html.length}`);
 	} else {
-		console.log(`Local: not sending email for ${mailData.from} to ${mailData.to} bcc ${mailData.bcc} text ${mailData.text} html ${mailData.html}`);
+		console.log(`Local: not sending email for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} text ${messageData.text} html ${messageData.html}`);
 	}
 
-	return `Email message sent to ${mailData.to.length + mailData.bcc.length} recipients`;
+	return {
+		error   : false,
+		count   : messageData.bcc.length,
+		message : `Email message sent to ${messageData.to.length + messageData.bcc.length} recipients`,
+		info,
+	};
 };
 
-export const textBlast = async (mailData) => {
+export const phoneBlast = async (messageData) => {
 
 	const transporter = nodemailer.createTransport({
 		host   : config.MAIL_SERVER,
@@ -77,48 +80,55 @@ export const textBlast = async (mailData) => {
 		secure : false,
 	});
 
-	if (!mailData.text && !mailData.html) {
-		return 'No message body; not sending';
+	if (!messageData.text && !messageData.html) {
+		return { error: true, message: 'No message body; not sending' };
 	}
 
-	if (!mailData.to) {
-		return 'No desination addresses provided, not sent';
+	if (!messageData.to) {
+		return { error: true, message: 'No desination addresses provided, not sent' };
 	}
 
-	if (mailData.html && !mailData.text) {
-		mailData.text = convert(mailData.html);
+	if (messageData.html && !messageData.text) {
+		messageData.text = convert(messageData.html);
 	} else {
 		// Let us just be sure
-		mailData.text = convert(mailData.text);
+		messageData.text = convert(messageData.text);
 	}
 
 	// Only send BCC emails so folks do not reply all or see student contact
 	// etc. And then add the sender as the To as well so it will not deliver.
 
-	mailData.bcc = mailData.to;
-	mailData.to = config.MAIL_FROM;
+	messageData.bcc = messageData.phone;
+	messageData.phone = config.MAIL_FROM;
 
-	if (!mailData.subject) {
-		mailData.subject = 'Tabroom Update';
+	if (!messageData.subject) {
+		messageData.subject = 'Tabroom Update';
 	}
 
-	if (!mailData.from) {
-		mailData.from = config.MAIL_FROM;
+	if (!messageData.from) {
+		messageData.from = config.MAIL_FROM;
 	}
 
-	mailData.text += '\n';
-	mailData.text += 'You signed up for this text on https://www.tabroom.com ';
-	mailData.text += 'To stop, log into Tabroom, click the Profile icon at top, select No Emails.\n';
+	messageData.text += '\n';
+	messageData.text += 'You registered for this text on https://www.tabroom.com ';
+	messageData.text += 'To stop, log into Tabroom, click the Profile icon at top, select No Emails.\n';
+
+	let info = {};
 
 	if (process.env.NODE_ENV === 'production') {
-		const info = await transporter.sendMail(mailData);
-		debugLogger.info(`Sent email id ${info.messageId} for ${mailData.from} to ${mailData.to} bcc ${mailData.bcc} textlength ${mailData.text.length} html ${mailData.html.length}`);
+		info = await transporter.sendMail(messageData);
+		debugLogger.info(`Sent email id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text.length} html ${messageData.html.length}`);
 	} else {
-		console.log(`Local: not sending email for ${mailData.from} to ${mailData.to} bcc ${mailData.bcc} text ${mailData.text} html ${mailData.html}`);
+		console.log(`Local: not sending email for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} text ${messageData.text} html ${messageData.html}`);
 	}
 
-	return `Email message sent to ${mailData.to.length + mailData.bcc.length} recipients`;
+	return {
+		error   : false,
+		count   : messageData.bcc.length,
+		message : `Email message sent to ${messageData.to.length + messageData.bcc.length} recipients`,
+		info,
+	};
 
 };
 
-export default mailBlast;
+export default emailBlast;

@@ -28,21 +28,21 @@ const auth = async (req) => {
 
 			if (session.Su)  {
 
-				let realname = session.Su.first;
+				let realname = session.Person.first;
 
-				if (session.Su.middle) {
-					realname += ` ${session.Su.middle}`;
+				if (session.Person.middle) {
+					realname += ` ${session.Person.middle}`;
 				}
-				realname += ` ${session.Su.last}`;
+				realname += ` ${session.Person.last}`;
 
 				session = {
 					id         : session.id,
-					person     : session.Su.id,
-					site_admin : session.Su.site_admin,
+					person     : session.Person.id,
+					site_admin : session.Person.site_admin,
 					defaults   : session.defaults,
-					email      : session.Su.email,
+					email      : session.Person.email,
 					name       : realname,
-					su         : session.Person.id,
+					su         : session.Su.id,
 				};
 
 			} else if (session.Person) {
