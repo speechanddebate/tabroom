@@ -1,0 +1,134 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$person_settings
+	$round_id
+</%args>
+<%init>
+
+	use Text::CSV;
+
+    # Get the upload and create the file handle.
+    my $req = Apache2::Request->new($r);
+    my @csv_handles = $r->upload;
+    my $csv_file = $req->upload($csv_handles[0]);
+    my $io = $csv_file->io;
+
+    my @lines = <$io>;
+	my %duplicated = ();
+
+	my $dbh = Tab::DBI->db_Main();
+	my $delete_sth = $dbh->prepare("
+		delete ballot.*, panel.*
+			from ballot, panel
+			where panel.id = ballot.panel
+			and panel.round = ?
+			and not exists (
+				select score.id from score where score.ballot = ballot.id
+			)
+	");
+
+	$delete_sth->execute($round_id);
+
+	my $room_sth = $dbh->prepare("
+		select room.id, room.name
+			from room, tourn_site
+		where tourn_site.tourn = ?
+			and tourn_site.site = room.site
+	");
+
+	$room_sth->execute($tourn->id);
+
+	my $results = $room_sth->fetchall_hash();
+	my %room_by_name = map {$_->{name} => $_->{id}} @{$results};
+	my $site = $tourn->sites->first;
+
+	my $entry_sth = $dbh->prepare("
+		select entry.id, entry.code
+			from entry, event
+		where event.tourn = ?
+			and event.id = entry.event
+	");
+
+	$entry_sth->execute($tourn->id);
+	$results = $entry_sth->fetchall_hash();
+	my %entry_by_code = map {$_->{code} => $_->{id}} @{$results};
+
+	my $judge_sth = $dbh->prepare("
+		select judge.id, judge.first, judge.last
+			from judge, category
+		where category.tourn = ?
+			and category.id = judge.category
+	");
+
+	$judge_sth->execute($tourn->id);
+	$results          = $judge_sth->fetchall_hash();
+	my %judge_by_code = map {$_->{first}.' '.$_->{last} => $_->{id}} @{$results};
+	my $letter        = 1;
+
+	my $csv = Text::CSV->new({ sep_char => ',' });
+
+	foreach my $line (@lines) {
+
+		next unless $csv->parse($line);
+		my ($room, $mode, $aff_code, $neg_code, @judges) = $csv->fields();
+
+		$aff_code =~ s/\"//;
+		$neg_code =~ s/\"//;
+
+		Tab::debuglog("Aff is $aff_code neg is $neg_code");
+
+		unless ($room_by_name{$room}) {
+			my $new = Tab::Room->create({
+				site => $site->id,
+				name => $room
+			});
+			$room_by_name{$room} = $new->id;
+		}
+
+		my $panel = Tab::Panel->create({
+			flight => 1,
+			letter => $letter++,
+			room   => $room_by_name{$room},
+			round  => $round_id,
+		});
+
+		my $done;
+
+		JUDGE:
+		foreach my $jname (@judges) {
+
+			my $judge = $judge_by_code{$jname};
+
+			unless ($judge) {
+				next JUDGE if $done;
+				$judge = 0;
+			}
+
+			if ($entry_by_code{$aff_code}) {
+				my $ballot = Tab::Ballot->create({
+					panel => $panel->id,
+					side  => 1,
+					judge => $judge,
+					entry => $entry_by_code{$aff_code}
+				});
+				$done++ if $ballot;
+			}
+
+			if ($entry_by_code{$neg_code}) {
+				my $ballot = Tab::Ballot->create({
+					panel => $panel->id,
+					side  => 2,
+					judge => $judge,
+					entry => $entry_by_code{$neg_code}
+				});
+				$done++ if $ballot;
+			}
+		}
+	}
+
+	my $msg = "imported pairing";
+	$m->redirect("/panel/schemat/show.mhtml?round_id=$round_id&msg=$msg");
+
+</%init>

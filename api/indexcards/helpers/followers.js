@@ -14,7 +14,7 @@ export const followers = async (replacements, options = { all: true }) => {
 	}
 
 	const blastMe = {
-		text  : [],
+		phone : [],
 		email : [],
 		error : false,
 	};
@@ -48,9 +48,8 @@ export const followers = async (replacements, options = { all: true }) => {
 		});
 
 		rawEntryPeople.forEach( (person) => {
-
 			if (person.provider && person.phone) {
-				blastMe.text.push(`${person.phone}@${person.provider}`);
+				blastMe.phone.push(`${person.phone}@${person.provider}`);
 			}
 
 			if (person.email) {
@@ -89,7 +88,7 @@ export const followers = async (replacements, options = { all: true }) => {
 
 		rawJudgePeople.forEach( (person) => {
 			if (person.provider && person.phone) {
-				blastMe.text.push(`${person.phone}@${person.provider}`);
+				blastMe.phone.push(`${person.phone}@${person.provider}`);
 			}
 			if (person.email) {
 				blastMe.email.push(`${person.email}`);
@@ -122,7 +121,7 @@ export const followers = async (replacements, options = { all: true }) => {
 			rawEntryFollowers.forEach( (person) => {
 
 				if (person.provider && person.phone) {
-					blastMe.text.push(`${person.phone}@${person.provider}`);
+					blastMe.phone.push(`${person.phone}@${person.provider}`);
 				}
 
 				if (person.email) {
@@ -151,7 +150,7 @@ export const followers = async (replacements, options = { all: true }) => {
 
 			rawJudgeFollowers.forEach( (person) => {
 				if (person.provider && person.phone) {
-					blastMe.text.push(`${person.phone}@${person.provider}`);
+					blastMe.phone.push(`${person.phone}@${person.provider}`);
 				}
 				if (person.email) {
 					blastMe.email.push(`${person.email}`);
@@ -161,7 +160,7 @@ export const followers = async (replacements, options = { all: true }) => {
 	}
 
 	// Deduplicate the emails
-	blastMe.text = Array.from(new Set(blastMe.text));
+	blastMe.phone = Array.from(new Set(blastMe.phone));
 	blastMe.email = Array.from(new Set(blastMe.email));
 
 	return blastMe;
