@@ -108,10 +108,10 @@ export const checkPerms = async (req, res, query, replacements) => {
 	console.log(req.params.tourn_id);
 	console.log(permsData.tourn);
 
-	if (permsData.tourn !== req.params.tourn_id) {
+	if (permsData.tourn !== parseInt(req.params.tourn_id)) {
 		res.status(200).json({
 			error     : false,
-			message   : `You have a mismatch between the tournament element and its parent tournament`,
+			message   : `You have a mismatch between the tournament element tourn ${permsData.tourn} and its parent tournament ${req.params.tourn_id}`,
 		});
 	}
 

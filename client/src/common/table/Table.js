@@ -63,7 +63,7 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 		<div className={styles.container}>
 			<div className={styles.tableHeaderRow}>
 				<span className={styles.headerTitle}>
-					<h1 class={styles.header}>
+					<h1 className={styles.header}>
 						{options.title}
 					</h1>
 				</span>
@@ -71,9 +71,9 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 					{
 						options.csv &&
 						<CSVDownload
-							rows={table.getRowModel().rows}
-							columns={tableColumns}
-							exportFileName={options.exportFileName}
+							rows           = {table.getRowModel().rows}
+							columns        = {tableColumns}
+							exportFileName = {options.exportFileName}
 						/>
 					}
 				</span>

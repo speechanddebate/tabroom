@@ -1,16 +1,25 @@
 import db from './db';
 
-export const followers = async (replacements, options = { all: true }) => {
+export const followers = async (replacements, options = { recipients: 'all' }) => {
 
 	let whereLimit = '';
+	let fields = '';
 
 	if (replacements.panelId) {
 		whereLimit = ` where panel.id = :panelId `;
 		delete replacements.roundId;
 	} else if (replacements.roundId) {
 		whereLimit = ` where panel.round = :roundId `;
+	} else if (replacements.timeslotId) {
+		whereLimit = ` where panel.round = round.id and round.timeslot = :timeslotId `;
+		fields = ',round';
 	} else {
 		return { error: true, message: `No round or section to blast sent` };
+	}
+
+	if (options.flight) {
+		whereLimit =  ` and panel.flight = :panelFlight `;
+		replacements.panelFlight = options.flight;
 	}
 
 	const blastMe = {
@@ -19,12 +28,11 @@ export const followers = async (replacements, options = { all: true }) => {
 		error : false,
 	};
 
-	if (options.all || options.entries || options.speakerorder) {
-
+	if (options.recipients !== 'judges') {
 		let entryPeopleQuery = `
 			select
 				person.id, person.email, person.phone, person.provider
-			from (panel, person, ballot, entry, entry_student es, student)
+			from (panel, person, ballot, entry, entry_student es, student ${fields})
 			${whereLimit}
 				and ballot.panel = panel.id
 				and ballot.entry = entry.id
@@ -40,6 +48,24 @@ export const followers = async (replacements, options = { all: true }) => {
 				and ballot.speakerorder = :speakerOrder
 			`;
 			replacements.speakerOrder = options.speakerOrder;
+		}
+
+		if (options.status === 'unstarted' ) {
+			entryPeopleQuery += `
+				and (ballot.judge_started IS NULL)
+				and (ballot.audit = 0 OR ballot.audit IS NULL)
+			`;
+		} else if (options.status === 'unentered' ) {
+			entryPeopleQuery += `
+				and NOT EXISTS (
+					select score.id from score where score.ballot = ballot.id
+				)
+				and (ballot.audit = 0 OR ballot.audit IS NULL)
+			`;
+		} else if (options.status === 'unconfirmed' ) {
+			entryPeopleQuery += `
+				and (ballot.audit = 0 OR ballot.audit IS NULL)
+			`;
 		}
 
 		const rawEntryPeople = await db.sequelize.query(entryPeopleQuery, {
@@ -58,12 +84,12 @@ export const followers = async (replacements, options = { all: true }) => {
 		});
 	}
 
-	if (options.all || options.judges || options.speakerorder) {
+	if (options.recipients !== 'entries') {
 
 		let judgePeopleQuery = `
 			select
 				person.id, person.email, person.phone, person.provider
-			from (person, ballot, judge, panel)
+			from (person, ballot, judge, panel ${fields})
 			${whereLimit}
 				and ballot.panel = panel.id
 				and ballot.judge = judge.id
@@ -71,13 +97,21 @@ export const followers = async (replacements, options = { all: true }) => {
 				and person.no_email = 0
 		`;
 
-		if (options.unconfirmed) {
-			judgePeopleQuery += `
-				and (ballot.audit = 1 OR ballot.audit IS NULL)
-			`;
-		} else if (options.unstarted) {
+		if (options.status === 'unstarted' ) {
 			judgePeopleQuery += `
 				and (ballot.judge_started IS NULL)
+				and (ballot.audit = 0 OR ballot.audit IS NULL)
+			`;
+		} else if (options.status === 'unentered' ) {
+			judgePeopleQuery += `
+				and NOT EXISTS (
+					select score.id from score where score.ballot = ballot.id
+				)
+				and (ballot.audit = 0 OR ballot.audit IS NULL)
+			`;
+		} else if (options.status === 'unconfirmed' ) {
+			judgePeopleQuery += `
+				and (ballot.audit = 0 OR ballot.audit IS NULL)
 			`;
 		}
 
@@ -96,14 +130,14 @@ export const followers = async (replacements, options = { all: true }) => {
 		});
 	}
 
-	if (!options.no_followers && !options.speakerorder) {
+	if (!options.no_followers) {
 
-		if (options.all || options.entries) {
+		if (options.recipients !== 'judges') {
 
 			const entryFollowersQuery = `
 				select
 					person.id, person.email, person.phone, person.provider
-				from (person, ballot, entry, follower, panel)
+				from (person, ballot, entry, follower, panel ${fields})
 				${whereLimit}
 					and ballot.panel = panel.id
 					and ballot.entry = entry.id
@@ -130,12 +164,12 @@ export const followers = async (replacements, options = { all: true }) => {
 			});
 		}
 
-		if (options.all || options.judges) {
+		if (options.recipients !== 'entries') {
 
 			const judgeFollowersQuery = `
 				select
 					person.id, person.email, person.phone, person.provider
-				from (person, ballot, follower, panel)
+				from (person, ballot, follower, panel ${fields})
 				${whereLimit}
 					and ballot.panel = panel.id
 					and ballot.judge = follower.judge

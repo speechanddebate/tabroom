@@ -5,11 +5,15 @@
 import data from './data';
 import register from './register';
 import section from './section';
+import round from './round';
 import tab from './tab';
+import timeslot from './timeslot';
 
 export default [
 	...data,
 	...register,
 	...section,
+	...round,
 	...tab,
+	...timeslot,
 ];

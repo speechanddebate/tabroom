@@ -14,21 +14,28 @@ export const autoPublish = {
 
 			and not exists (
 				select ballot.id
-				from ballot, panel
+					from ballot, panel
 				where ballot.panel = panel.id
-				and panel.round = round.id
-				and ballot.audit != 1
-				and ballot.bye != 1
-				and panel.bye != 1
-				
+					and panel.round = round.id
+					and ballot.audit != 1
+					and ballot.bye != 1
+					and panel.bye != 1
 			)
+
 			and exists (
-				select ballot.entry
-					from ballot, panel, round r2
+				select b2.id
+					from ballot b2, panel
+				where b2.panel = panel.id
+					and panel.round = round.id
+			)
+
+			and exists (
+				select b3.entry
+					from ballot b3, panel, round r2
 				where r2.event = round.event
 					and r2.name = (round.name + 1)
 					and r2.id = panel.round
-					and panel.id = ballot.panel
+					and panel.id = b3.panel
 			)
 		`);
 
