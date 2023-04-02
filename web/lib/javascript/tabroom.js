@@ -585,6 +585,7 @@
 
 		if (
 			(base_domain !== 'tabroom.com')
+			&& (base_domain !== 'debatefail.com')
 			&& (base_domain !== 'tabroom.gay')
 		) {
 			console.log(base_url);
