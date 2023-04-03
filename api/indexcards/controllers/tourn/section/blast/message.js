@@ -20,7 +20,6 @@ export const messageSection = {
 		);
 
 		messageData.text = req.body.message;
-
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
 
@@ -56,7 +55,7 @@ export const messageRound = {
 			}
 		);
 
-		messageData.text = req.body;
+		messageData.text = req.body.message;
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
 

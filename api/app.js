@@ -39,11 +39,21 @@ app.enable('trust proxy');
 
 // Rate limit all requests
 const limiter = rateLimiter({
-	windowMs : config.RATE_WINDOW || 15 * 60 * 1000, // 15 minutes
-	max      : config.RATE_MAX || 100000, // limit each IP to 100000 requests per windowMs
-	delayMs  : config.RATE_DELAY || 0, // disable delaying - full speed until the max limit is reached
+	windowMs : config.RATE_WINDOW || 15 * 60 * 1000 , // 15 minutes
+	max      : config.RATE_MAX || 10000             , // limit each IP to 100000 requests per windowMs
+	delayMs  : config.RATE_DELAY || 0               , // disable delaying - full speed until the max limit is reached
 });
 app.use(limiter);
+
+const messageLimiter = rateLimiter({
+	windowMs : config.MESSAGE_RATE_WINDOW || 60 * 1000 , // 1 minute
+	max      : config.MESSAGE_RATE_MAX || 5            , // limit each IP to 5 blasts requests per minute
+	delayMs  : config.MESSSAGE_RATE_DELAY || 0         , // disable delaying - full speed until the max limit is reached
+});
+
+app.all('/tourn/:tourn_id/round/:round_id/message', messageLimiter);
+app.all('/tourn/:tourn_id/round/:round_id/blast', messageLimiter);
+app.all('/tourn/:tourn_id/round/:round_id/poke', messageLimiter);
 
 // Enable CORS
 app.use((req, res, next) => {
@@ -114,7 +124,6 @@ app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 			&& req.session[req.params.tourn_id].level
 		) {
 			next();
-
 		} else {
 			return res.status(400).json({ message: 'You do not have admin access to that tournament' });
 		}
