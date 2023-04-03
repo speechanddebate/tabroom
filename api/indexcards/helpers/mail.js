@@ -29,7 +29,7 @@ export const emailBlast = async (messageData) => {
 	messageData.to = config.MAIL_FROM;
 
 	if (!messageData.subject) {
-		messageData.subject = 'Tabroom.com Notification';
+		messageData.subject = 'Tabroom.com Notice';
 	}
 
 	if (!messageData.from) {
@@ -102,7 +102,7 @@ export const phoneBlast = async (messageData) => {
 	messageData.phone = config.MAIL_FROM;
 
 	if (!messageData.subject) {
-		messageData.subject = 'Tabroom Update';
+		messageData.subject = 'TABROOM';
 	}
 
 	if (!messageData.from) {
