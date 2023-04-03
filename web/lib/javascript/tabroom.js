@@ -585,6 +585,7 @@
 
 		if (
 			(base_domain !== 'tabroom.com')
+			&& (base_domain !== 'debatefail.com')
 			&& (base_domain !== 'tabroom.gay')
 		) {
 			console.log(base_url);
@@ -771,7 +772,6 @@ function autoWin(input,e,aff,neg,affid,negid) {
 	}
 
     var keyCode = e.keyCode;
-
     var filter = [0,8,16,17,18,37,38,39,40,46];
 
 	if (pointStep === ".5"
