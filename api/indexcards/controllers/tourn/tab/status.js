@@ -246,8 +246,6 @@ export const attendance = {
 			const targetId = req.body.target_id;
 			let target = '';
 
-			console.log(` target type is ${targetType} and id is ${targetId} `);
-
 			if (targetType === 'student') {
 				target = await db.student.findByPk(targetId);
 			} else if (targetType === 'entry') {
@@ -396,8 +394,6 @@ export const attendance = {
 				// Oh for the days I have react going and don't need to do the
 				// following nonsense
 
-				console.log(`Reclassing ${panel.id}_${targetId}`);
-
 				return res.status(201).json({
 					error   : false,
 					message : logMessage,
@@ -452,8 +448,6 @@ export const attendance = {
 			}
 
 			await db.campusLog.create(log);
-
-			console.log(`Second Reclassing ${panel.id}_${targetId}`);
 
 			return res.status(201).json({
 				error   : false,

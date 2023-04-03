@@ -3,7 +3,9 @@ import { convert } from 'html-to-text';
 import config from '../../config/config';
 import { debugLogger } from './logger';
 
-export const emailBlast = async (messageData) => {
+export const emailBlast = async (inputData) => {
+
+	const messageData = { ...inputData };
 
 	const transporter = nodemailer.createTransport({
 		host   : config.MAIL_SERVER,
@@ -12,7 +14,7 @@ export const emailBlast = async (messageData) => {
 	});
 
 	if (!messageData.text && !messageData.html) {
-		return { error: true, message: 'No message body; not sending' };
+		return { error: true, count: 0, message: 'No message body; not sending' };
 	}
 
 	if (messageData.html && !messageData.text) {
@@ -20,7 +22,7 @@ export const emailBlast = async (messageData) => {
 	}
 
 	if (!messageData.email) {
-		return { error: true, message: 'No desination addresses provided, not sent' };
+		return { error: true, count: 0, message: 'No desination addresses provided, not sent' };
 	}
 
 	// Only send BCC emails so folks do not reply all or see student contact
@@ -37,12 +39,11 @@ export const emailBlast = async (messageData) => {
 	}
 
 	if (messageData.text) {
-		messageData.text += '\n\n----------------------------\n\n';
-		messageData.text +=  'You received this email because you registered for an account on ';
-		messageData.text += 'https://www.tabroom.com ';
-		messageData.text += 'To stop them, login to your Tabroom account, click the Profile icon at top right,\n';
-		messageData.text += 'and check off "No Emails", and save your profile, ';
-		messageData.text += 'You can also delete your Tabroom account entirely on your profile.';
+		messageData.text += '\n\n----------------------------\n';
+		messageData.text +=  'You received this email because you registered for an account on https://www.tabroom.com\n';
+		messageData.text += 'To stop them, login to your Tabroom account, click the Profile icon at top right, and ';
+		messageData.text += 'check off "No Emails", then save your profile. ';
+		messageData.text += 'You can also delete your Tabroom account entirely on that profile screen.';
 	}
 
 	if (messageData.html) {
@@ -59,20 +60,22 @@ export const emailBlast = async (messageData) => {
 
 	if (process.env.NODE_ENV === 'production') {
 		info = await transporter.sendMail(messageData);
-		debugLogger.info(`Sent email id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text.length} html ${messageData.html.length}`);
+		debugLogger.info(`Sent email id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length} html ${messageData.html?.length}`);
 	} else {
 		console.log(`Local: not sending email for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} text ${messageData.text} html ${messageData.html}`);
 	}
 
 	return {
 		error   : false,
-		count   : messageData.bcc.length,
-		message : `Email message sent to ${messageData.to.length + messageData.bcc.length} recipients`,
+		count   : messageData.bcc?.length,
+		message : `Email message sent to ${messageData.to?.length + messageData.bcc?.length} recipients`,
 		info,
 	};
 };
 
-export const phoneBlast = async (messageData) => {
+export const phoneBlast = async (inputData) => {
+
+	const messageData = { ...inputData };
 
 	const transporter = nodemailer.createTransport({
 		host   : config.MAIL_SERVER,
@@ -81,11 +84,11 @@ export const phoneBlast = async (messageData) => {
 	});
 
 	if (!messageData.text && !messageData.html) {
-		return { error: true, message: 'No message body; not sending' };
+		return { error: true, count: 0, message: 'No message body; not sending' };
 	}
 
-	if (!messageData.to) {
-		return { error: true, message: 'No desination addresses provided, not sent' };
+	if (!messageData.phone) {
+		return { error: true, count: 0, message: 'No desination addresses provided, not sent' };
 	}
 
 	if (messageData.html && !messageData.text) {
@@ -117,15 +120,15 @@ export const phoneBlast = async (messageData) => {
 
 	if (process.env.NODE_ENV === 'production') {
 		info = await transporter.sendMail(messageData);
-		debugLogger.info(`Sent email id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text.length} html ${messageData.html.length}`);
+		console.log(`Sent text blast id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length} html ${messageData.html?.length}`);
 	} else {
 		console.log(`Local: not sending email for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} text ${messageData.text} html ${messageData.html}`);
 	}
 
 	return {
 		error   : false,
-		count   : messageData.bcc.length,
-		message : `Email message sent to ${messageData.to.length + messageData.bcc.length} recipients`,
+		count   : messageData.bcc?.length,
+		message : `Email message sent to ${messageData.to?.length + messageData.bcc?.length} recipients`,
 		info,
 	};
 
