@@ -242,13 +242,11 @@ export const attendance = {
 			const now = Date();
 			const db = req.db;
 
-			let [targetType, targetId] = req.body.target_id.toString().split('_');
-			let target;
+			const targetType = req.body.target_type;
+			const targetId = req.body.target_id;
+			let target = '';
 
-			if (req.body.setting_name === 'entry') {
-				targetType = 'entry';
-				targetId = req.body.target_id;
-			}
+			console.log(` target type is ${targetType} and id is ${targetId} `);
 
 			if (targetType === 'student') {
 				target = await db.student.findByPk(targetId);
@@ -257,10 +255,8 @@ export const attendance = {
 			} else if (targetType === 'judge') {
 				target = await db.judge.findByPk(targetId);
 			} else {
-				target = await db.person.findByPk(req.body.target_id);
+				target = await db.person.findByPk(targetId);
 			}
-
-			targetId = req.body.target_id;
 
 			if (!target) {
 				return res.status(201).json({
@@ -269,12 +265,12 @@ export const attendance = {
 				});
 			}
 
-			const panel = await db.panel.findByPk(req.body.related_thing);
+			const panel = await db.panel.findByPk(req.body.panel);
 
 			if (!panel) {
 				return res.status(201).json({
 					error   : true,
-					message : `No section found for ID ${req.body.related_thing}`,
+					message : `No section found for ID ${req.body.panel}`,
 				});
 			}
 
@@ -285,7 +281,7 @@ export const attendance = {
 				if (targetType === 'judge') {
 					judge = target;
 				} else {
-					judge = await db.judge.findByPk(req.body.another_thing);
+					judge = await db.judge.findByPk(req.body.judge);
 				}
 
 				if (parseInt(req.body.property_name) > 0) {
@@ -395,18 +391,12 @@ export const attendance = {
 					log.person = target.id;
 				}
 
-				targetType = 'stfu_linter';
-
-				if (req.body.setting_name === 'entry') {
-					log.entry = req.body.another_thing;
-				} else if (req.body.setting_name === 'judge') {
-					log.judge = req.body.another_thing;
-				}
-
 				await db.campusLog.create(log);
 
 				// Oh for the days I have react going and don't need to do the
 				// following nonsense
+
+				console.log(`Reclassing ${panel.id}_${targetId}`);
 
 				return res.status(201).json({
 					error   : false,
@@ -461,31 +451,25 @@ export const attendance = {
 				log.person = target.id;
 			}
 
-			if (targetType === 'entry') {
-				log.entry = target.id;
-			} else if (req.body.setting_name === 'entry') {
-				log.entry = req.body.another_thing;
-			} else if (req.body.setting_name === 'judge') {
-				log.judge = req.body.another_thing;
-			}
-
 			await db.campusLog.create(log);
+
+			console.log(`Second Reclassing ${panel.id}_${targetId}`);
 
 			return res.status(201).json({
 				error   : false,
 				message : logMessage,
 				reclass : [
-					{	id		  : `${panel.id}_${req.body.target_id}`,
+					{	id		  : `${panel.id}_${targetId}`,
 						addClass	: 'greentext',
 						removeClass : 'brightredtext',
 					},
-					{	id		  : `${panel.id}_${req.body.target_id}`,
+					{	id		  : `${panel.id}_${targetId}`,
 						addClass	: 'fa-check',
 						removeClass : 'fa-circle',
 					},
 				],
 				reprop  : [
-					{	id	   : `container_${panel.id}_${req.body.target_id}`,
+					{	id	   : `container_${panel.id}_${targetId}`,
 						property : 'property_name',
 						value	: 1,
 					},
