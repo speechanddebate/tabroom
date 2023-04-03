@@ -105,9 +105,6 @@ export const checkPerms = async (req, res, query, replacements) => {
 		type: req.db.sequelize.QueryTypes.SELECT,
 	});
 
-	console.log(req.params.tourn_id);
-	console.log(permsData.tourn);
-
 	if (permsData.tourn !== parseInt(req.params.tourn_id)) {
 		res.status(200).json({
 			error     : false,

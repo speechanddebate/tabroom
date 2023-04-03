@@ -35,25 +35,32 @@ debugLogger.info('Initializing API...');
 app.use(helmet());
 
 // Enable getting forwarded client IP from proxy
-app.enable('trust proxy');
+app.enable('trust proxy', 1);
+app.get('/v1/ip', (request, response) => response.send(request.ip));
 
 // Rate limit all requests
 const limiter = rateLimiter({
 	windowMs : config.RATE_WINDOW || 15 * 60 * 1000 , // 15 minutes
 	max      : config.RATE_MAX || 10000             , // limit each IP to 100000 requests per windowMs
-	delayMs  : config.RATE_DELAY || 0               , // disable delaying - full speed until the max limit is reached
 });
 app.use(limiter);
 
 const messageLimiter = rateLimiter({
-	windowMs : config.MESSAGE_RATE_WINDOW || 60 * 1000 , // 1 minute
-	max      : config.MESSAGE_RATE_MAX || 5            , // limit each IP to 5 blasts requests per minute
-	delayMs  : config.MESSSAGE_RATE_DELAY || 0         , // disable delaying - full speed until the max limit is reached
+	windowMs : config.MESSAGE_RATE_WINDOW || 15 * 1000 , // 30 seconds
+	max      : config.MESSAGE_RATE_MAX || 1            , // limit each to 2 blasts requests per 30 seconds
+	message  : 'You have reached your rate limit on messages.  Please do not blast people that persistently.',
 });
 
-app.all('/tourn/:tourn_id/round/:round_id/message', messageLimiter);
-app.all('/tourn/:tourn_id/round/:round_id/blast', messageLimiter);
-app.all('/tourn/:tourn_id/round/:round_id/poke', messageLimiter);
+app.use('/v1/tourn/:tourn_id/round/:round_id/message', messageLimiter);
+app.use('/v1/tourn/:tourn_id/round/:round_id/blast', messageLimiter);
+app.use('/v1/tourn/:tourn_id/round/:round_id/poke', messageLimiter);
+
+const searchLimiter = rateLimiter({
+	windowMs : config.SEARCH_RATE_WINDOW || 30 * 1000 , // 30 seconds
+	max      : config.SEARCH_RATE_MAX || 5            , // limit each to 5 search requests per 30 seconds
+});
+
+app.use('/v1/public/search', searchLimiter);
 
 // Enable CORS
 app.use((req, res, next) => {
