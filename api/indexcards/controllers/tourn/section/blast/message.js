@@ -16,7 +16,7 @@ export const messageSection = {
 
 		const messageData = await followers(
 			{ sectionId : req.params.section_id },
-			{ entries: true, no_followers: true }
+			{ entries: true, no_followers: req.body.no_followers }
 		);
 
 		messageData.text = req.body.message;
@@ -51,7 +51,7 @@ export const messageRound = {
 				recipients   : req.body.recipients,
 				status       : req.body.status,
 				flight       : req.body.flight,
-				no_followers : true,
+				no_followers : req.body.no_followers,
 			}
 		);
 
@@ -87,7 +87,7 @@ export const messageTimeslot = {
 				recipients   : req.body.recipients,
 				status       : req.body.status,
 				flight       : req.body.flight,
-				no_followers : true,
+				no_followers : req.body.no_followers,
 			}
 		);
 
