@@ -83,7 +83,6 @@ export const objectStrip = (target, stripme, booleans) => {
 	});
 
 	booleans?.forEach( (boolean) => {
-
 		if (
 			!target[boolean]
 			|| target[boolean] === 0

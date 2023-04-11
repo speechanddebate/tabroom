@@ -4,8 +4,10 @@
 // Router controllers
 import { roundJudges } from '../../../controllers/tourn/section/cleanJudges';
 import { messageRound } from '../../../controllers/tourn/section/blast/message.js';
+import { blastRound } from '../../../controllers/tourn/section/blast/pairing.js';
 
 export default [
-	{ path : '/tourn/{tourn_id}/round/{round_id}/judges'  , module : roundJudges },
-	{ path : '/tourn/{tourn_id}/round/{round_id}/message' , module : messageRound },
+	{ path : '/tourn/{tourn_id}/round/{round_id}/judges'  , module : roundJudges }  ,
+	{ path : '/tourn/{tourn_id}/round/{round_id}/message' , module : messageRound } ,
+	{ path : '/tourn/{tourn_id}/round/{round_id}/blast'   , module : blastRound }   ,
 ];

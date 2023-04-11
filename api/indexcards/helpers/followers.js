@@ -1,6 +1,6 @@
 import db from './db';
 
-export const followers = async (replacements, options = { recipients: 'all' }) => {
+export const getFollowers = async (replacements, options = { recipients: 'all' }) => {
 
 	let whereLimit = '';
 	let fields = '';
@@ -28,10 +28,17 @@ export const followers = async (replacements, options = { recipients: 'all' }) =
 		error : false,
 	};
 
+	const blastOnly = {
+		entry  : {},
+		judge  : {},
+		school : {},
+	};
+
 	if (options.recipients !== 'judges') {
+
 		let entryPeopleQuery = `
 			select
-				person.id, person.email, person.phone, person.provider
+				person.id, person.email, person.phone, person.provider, entry.id entry, entry.school school
 			from (panel, person, ballot, entry, entry_student es, student ${fields})
 			${whereLimit}
 				and ballot.panel = panel.id
@@ -76,10 +83,30 @@ export const followers = async (replacements, options = { recipients: 'all' }) =
 		rawEntryPeople.forEach( (person) => {
 			if (person.provider && person.phone) {
 				blastMe.phone.push(`${person.phone}@${person.provider}`);
+
+				if (person.entry) {
+					if (!blastOnly.entry[person.entry]) {
+						blastOnly.entry[person.entry] = {
+							phone : [],
+							email : [],
+						};
+					}
+					blastOnly.entry[person.entry].phone.push(`${person.phone}@${person.provider}`);
+				}
 			}
 
 			if (person.email) {
-				blastMe.email.push(`${person.email}`);
+				blastMe.email.push(person.email);
+
+				if (person.entry) {
+					if (!blastOnly.entry[person.entry]) {
+						blastOnly.entry[person.entry] = {
+							phone : [],
+							email : [],
+						};
+					}
+					blastOnly.entry[person.entry].email.push(person.email);
+				}
 			}
 		});
 	}
@@ -88,7 +115,7 @@ export const followers = async (replacements, options = { recipients: 'all' }) =
 
 		let judgePeopleQuery = `
 			select
-				person.id, person.email, person.phone, person.provider
+				person.id, person.email, person.phone, person.provider, judge.id judge, judge.school school
 			from (person, ballot, judge, panel ${fields})
 			${whereLimit}
 				and ballot.panel = panel.id
@@ -121,22 +148,44 @@ export const followers = async (replacements, options = { recipients: 'all' }) =
 		});
 
 		rawJudgePeople.forEach( (person) => {
+
 			if (person.provider && person.phone) {
+
 				blastMe.phone.push(`${person.phone}@${person.provider}`);
+
+				if (person.judge) {
+					if (!blastOnly.judge[person.judge]) {
+						blastOnly.judge[person.judge] = {
+							phone : [],
+							email : [],
+						};
+					}
+					blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
+				}
 			}
+
 			if (person.email) {
-				blastMe.email.push(`${person.email}`);
+
+				blastMe.email.push(person.email);
+
+				if (person.judge) {
+					if (!blastOnly.judge[person.judge]) {
+						blastOnly.judge[person.judge] = {
+							email : [],
+						};
+					}
+					blastOnly.judge[person.judge].email.push(person.email);
+				}
 			}
 		});
 	}
 
 	if (!options.no_followers) {
-
 		if (options.recipients !== 'judges') {
 
 			const entryFollowersQuery = `
 				select
-					person.id, person.email, person.phone, person.provider
+					person.id, person.email, person.phone, person.provider, entry.id entry
 				from (person, ballot, entry, follower, panel ${fields})
 				${whereLimit}
 					and ballot.panel = panel.id
@@ -153,13 +202,41 @@ export const followers = async (replacements, options = { recipients: 'all' }) =
 			});
 
 			rawEntryFollowers.forEach( (person) => {
-
 				if (person.provider && person.phone) {
 					blastMe.phone.push(`${person.phone}@${person.provider}`);
 				}
 
 				if (person.email) {
-					blastMe.email.push(`${person.email}`);
+					blastMe.email.push(person.email);
+				}
+			});
+
+			const schoolFollowersQuery = `
+				select
+					person.id, person.email, person.phone, person.provider, follower.school school
+				from (person, ballot, entry, follower, panel ${fields})
+				${whereLimit}
+					and ballot.panel = panel.id
+					and ballot.entry = entry.id
+					and entry.active = 1
+					and entry.school = follower.school
+					and follower.person = person.id
+					and person.no_email = 0
+			`;
+
+			const rawSchoolFollowers = await db.sequelize.query(schoolFollowersQuery, {
+				replacements,
+				type: db.sequelize.QueryTypes.SELECT,
+			});
+
+			rawSchoolFollowers.forEach( (person) => {
+				if (person.email) {
+					if (!blastOnly.school[person.school]) {
+						blastOnly.school[person.school] = {
+							email : [],
+						};
+					}
+					blastOnly.school[person.school].email.push(person.email);
 				}
 			});
 		}
@@ -168,7 +245,7 @@ export const followers = async (replacements, options = { recipients: 'all' }) =
 
 			const judgeFollowersQuery = `
 				select
-					person.id, person.email, person.phone, person.provider
+					person.id, person.email, person.phone, person.provider, ballot.judge judge
 				from (person, ballot, follower, panel ${fields})
 				${whereLimit}
 					and ballot.panel = panel.id
@@ -187,7 +264,36 @@ export const followers = async (replacements, options = { recipients: 'all' }) =
 					blastMe.phone.push(`${person.phone}@${person.provider}`);
 				}
 				if (person.email) {
-					blastMe.email.push(`${person.email}`);
+					blastMe.email.push(person.email);
+				}
+			});
+
+			const schoolFollowersQuery = `
+				select
+					person.id, person.email, person.phone, person.provider, ballot.judge judge
+				from (person, judge, ballot, follower, panel ${fields})
+				${whereLimit}
+					and ballot.panel = panel.id
+					and ballot.judge = judge.id
+					and judge.school = follower.school
+					and judge.school > 0
+					and follower.person = person.id
+					and person.no_email = 0
+			`;
+
+			const rawSchoolFollowers = await db.sequelize.query(schoolFollowersQuery, {
+				replacements,
+				type: db.sequelize.QueryTypes.SELECT,
+			});
+
+			rawSchoolFollowers.forEach( (person) => {
+				if (person.email) {
+					if (!blastOnly.school[person.school]) {
+						blastOnly.school[person.school] = {
+							email : [],
+						};
+					}
+					blastOnly.school[person.school].email.push(person.email);
 				}
 			});
 		}
@@ -196,9 +302,10 @@ export const followers = async (replacements, options = { recipients: 'all' }) =
 	// Deduplicate the emails
 	blastMe.phone = Array.from(new Set(blastMe.phone));
 	blastMe.email = Array.from(new Set(blastMe.email));
+	blastMe.only  = blastOnly;
 
 	return blastMe;
 
 };
 
-export default followers;
+export default getFollowers;

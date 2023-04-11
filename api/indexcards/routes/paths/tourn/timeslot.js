@@ -3,7 +3,9 @@
 
 // Router controllers
 import { messageTimeslot } from '../../../controllers/tourn/section/blast/message.js';
+import { blastTimeslot } from '../../../controllers/tourn/section/blast/pairing.js';
 
 export default [
-	{ path : '/tourn/{tourn_id}/timeslot/{timeslot_id}/message'  , module : messageTimeslot },
+	{ path : '/tourn/{tourn_id}/timeslot/{timeslot_id}/message' , module : messageTimeslot } ,
+	{ path : '/tourn/{tourn_id}/timeslot/{timeslot_id}/blast'   , module : blastTimeslot }   ,
 ];

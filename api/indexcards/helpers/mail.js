@@ -27,7 +27,7 @@ export const emailBlast = async (inputData) => {
 
 	// Only send BCC emails so folks do not reply all or see student contact
 	// etc. And then add the sender as the To as well so it will not deliver.
-	messageData.bcc = messageData.email;
+	messageData.bcc = Array.from(new Set(messageData.email));
 	messageData.to = config.MAIL_FROM;
 
 	if (!messageData.subject) {
@@ -68,7 +68,7 @@ export const emailBlast = async (inputData) => {
 	return {
 		error   : false,
 		count   : messageData.bcc?.length,
-		message : `Email message sent to ${messageData.to?.length + messageData.bcc?.length} recipients`,
+		message : `Email message sent to ${(messageData.bcc ? messageData.bcc.length : 0)} recipients`,
 		info,
 	};
 };
@@ -98,11 +98,13 @@ export const phoneBlast = async (inputData) => {
 		messageData.text = convert(messageData.text);
 	}
 
+	delete messageData.html;
+
 	// Only send BCC emails so folks do not reply all or see student contact
 	// etc. And then add the sender as the To as well so it will not deliver.
 
-	messageData.bcc = messageData.phone;
-	messageData.phone = config.MAIL_FROM;
+	messageData.bcc = Array.from(new Set(messageData.phone));
+	messageData.to = config.MAIL_FROM;
 
 	if (!messageData.subject) {
 		messageData.subject = 'TABROOM';
@@ -113,22 +115,23 @@ export const phoneBlast = async (inputData) => {
 	}
 
 	messageData.text += '\n';
-	messageData.text += 'You registered for this text on https://www.tabroom.com ';
-	messageData.text += 'To stop, log into Tabroom, click the Profile icon at top, select No Emails.\n';
+	messageData.text += 'You registered for these texts on https://www.tabroom.com\n';
+	messageData.text += 'To stop texts, log into Tabroom, click the Profile icon at top, select No Emails.\n';
 
 	let info = {};
 
 	if (process.env.NODE_ENV === 'production') {
 		info = await transporter.sendMail(messageData);
-		console.log(`Sent text blast id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length} html ${messageData.html?.length}`);
+		console.log(`Sent text blast id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length}`);
 	} else {
-		console.log(`Local: not sending email for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} text ${messageData.text} html ${messageData.html}`);
+		console.log(`Local: not sending sms blast for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
+		console.log(`Text ${messageData.text}`);
 	}
 
 	return {
 		error   : false,
 		count   : messageData.bcc?.length,
-		message : `Email message sent to ${messageData.to?.length + messageData.bcc?.length} recipients`,
+		message : `Phone blasts sent to ${(messageData.bcc ? messageData.bcc.length : 0)} recipients`,
 		info,
 	};
 

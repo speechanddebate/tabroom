@@ -48,7 +48,7 @@ app.use(limiter);
 const messageLimiter = rateLimiter({
 	windowMs : config.MESSAGE_RATE_WINDOW || 15 * 1000 , // 30 seconds
 	max      : config.MESSAGE_RATE_MAX || 1            , // limit each to 2 blasts requests per 30 seconds
-	message  : 'You have reached your rate limit on messages.  Please do not blast people that persistently.',
+	message  : `You have reached your rate limit on messages which is ${config.MESSAGE_RATE_MAX} .  Please do not blast people that persistently.`,
 });
 
 app.use('/v1/tourn/:tourn_id/round/:round_id/message', messageLimiter);

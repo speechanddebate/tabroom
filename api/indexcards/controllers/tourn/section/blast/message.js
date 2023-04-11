@@ -1,4 +1,4 @@
-import followers from '../../../../helpers/followers';
+import getFollowers from '../../../../helpers/followers';
 import { emailBlast, phoneBlast } from '../../../../helpers/mail.js';
 import { sectionCheck, timeslotCheck, roundCheck } from '../../../../helpers/tourn-auth.js';
 
@@ -14,7 +14,7 @@ export const messageSection = {
 			return;
 		}
 
-		const messageData = await followers(
+		const messageData = await getFollowers(
 			{ sectionId : req.params.section_id },
 			{ entries: true, no_followers: req.body.no_followers }
 		);
@@ -45,7 +45,7 @@ export const messageRound = {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
 		}
 
-		const messageData = await followers(
+		const messageData = await getFollowers(
 			{ roundId : req.params.round_id },
 			{
 				recipients   : req.body.recipients,
@@ -81,7 +81,7 @@ export const messageTimeslot = {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
 		}
 
-		const messageData = await followers(
+		const messageData = await getFollowers(
 			{ roundId : req.params.round_id },
 			{
 				recipients   : req.body.recipients,
