@@ -39,7 +39,10 @@ export const emailBlast = async (inputData) => {
 	}
 
 	if (messageData.text) {
-		messageData.text += '\n\n----------------------------\n';
+		if (messageData.append) {
+			messageData.text += `\n${messageData.append}\n`;
+		}
+		messageData.text += '\n----------------------------\n';
 		messageData.text +=  'You received this email because you registered for an account on https://www.tabroom.com\n';
 		messageData.text += 'To stop them, login to your Tabroom account, click the Profile icon at top right, and ';
 		messageData.text += 'check off "No Emails", then save your profile. ';
@@ -47,6 +50,9 @@ export const emailBlast = async (inputData) => {
 	}
 
 	if (messageData.html) {
+		if (messageData.append) {
+			messageData.html += `<p>${messageData.append}</p>`;
+		}
 		messageData.html += '<p>-----------------------------</p>';
 		messageData.html += '<p>You received this email because you registered for an account on ';
 		messageData.html += '<a href="https://www.tabroom.com">https://www.tabroom.com</a></p>';
@@ -114,6 +120,9 @@ export const phoneBlast = async (inputData) => {
 		messageData.from = config.MAIL_FROM;
 	}
 
+	if (messageData.append) {
+		messageData.text += `\n${messageData.append}`;
+	}
 	messageData.text += '\n';
 	messageData.text += 'You registered for these texts on https://www.tabroom.com\n';
 	messageData.text += 'To stop texts, log into Tabroom, click the Profile icon at top, select No Emails.\n';

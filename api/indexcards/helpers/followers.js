@@ -18,7 +18,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 	}
 
 	if (options.flight) {
-		whereLimit =  ` and panel.flight = :panelFlight `;
+		whereLimit +=  ` and panel.flight = :panelFlight `;
 		replacements.panelFlight = options.flight;
 	}
 

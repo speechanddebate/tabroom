@@ -8,7 +8,7 @@ import wudcPosition from '../../../../helpers/textmunge';
 import { sidelocks } from '../../../../helpers/round';
 
 export const blastSection = {
-	GET: async (req, res) => {
+	POST: async (req, res) => {
 
 		// Permissions.  I feel like there should be a better way to do this
 		const permOK = await sectionCheck(req, res, req.params.section_id);
@@ -32,7 +32,7 @@ export const blastSection = {
 };
 
 export const blastRound = {
-	GET: async (req, res) => {
+	POST: async (req, res) => {
 
 		// Permissions.  I feel like there should be a better way to do this
 		const permOK = await roundCheck(req, res, req.params.round_id);
@@ -56,7 +56,7 @@ export const blastRound = {
 };
 
 export const blastTimeslot = {
-	GET: async (req, res) => {
+	POST: async (req, res) => {
 
 		// Permissions.  I feel like there should be a better way to do this
 		const permOK = await timeslotCheck(req, res, req.params.timeslot_id);
@@ -568,6 +568,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 		const email = await emailBlast({
 			...blastees.entries[entryId],
 			...followers.only.entry[entryId],
+			append: req.body.message,
 		});
 
 		emailResponse.count += email.count;
@@ -579,6 +580,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 		const phone = await phoneBlast({
 			...blastees.entries[entryId],
 			...followers.only.entry[entryId],
+			append: req.body.message,
 		});
 
 		phoneResponse.count += phone.count;
@@ -592,6 +594,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 		const email = await emailBlast({
 			...blastees.judges[judgeId],
 			...followers.only.judge[judgeId],
+			append: req.body.message,
 		});
 
 		emailResponse.count += email.count;
@@ -603,6 +606,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 		const phone = await phoneBlast({
 			...blastees.judges[judgeId],
 			...followers.only.judge[judgeId],
+			append: req.body.message,
 		});
 
 		phoneResponse.count += phone.count;
@@ -616,6 +620,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 		const email = await emailBlast({
 			...blastees.schools[schoolId],
 			...followers.only.school[schoolId],
+			append: req.body.message,
 		});
 
 		emailResponse.count += email.count;
