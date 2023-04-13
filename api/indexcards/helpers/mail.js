@@ -97,16 +97,16 @@ export const phoneBlast = async (inputData) => {
 		return { error: true, count: 0, message: 'No desination addresses provided, not sent' };
 	}
 
-	if (messageData.text) {
-		messageData.text.replace('\\n', '<br />');
-		messageData.text.replace('\n', '<br />');
-	}
-
 	if (messageData.html && !messageData.text) {
 		messageData.text = convert(messageData.html);
 	} else {
 		// Let us just be sure
 		messageData.text = convert(messageData.text);
+	}
+
+	if (messageData.text) {
+		messageData.text.replace('\\n', '<br />');
+		messageData.text.replace('\n', '<br />');
 	}
 
 	delete messageData.html;
