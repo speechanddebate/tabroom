@@ -8,7 +8,7 @@ import wudcPosition from '../../../../helpers/textmunge';
 import { sidelocks } from '../../../../helpers/round';
 
 export const blastSection = {
-	POST: async (req, res) => {
+	GET: async (req, res) => {
 
 		// Permissions.  I feel like there should be a better way to do this
 		const permOK = await sectionCheck(req, res, req.params.section_id);
@@ -691,6 +691,7 @@ const processRounds = async (rawRounds) => {
 				settings   : {},
 				sections   : {},
 				schools    : {},
+				sidelocks  : {},
 			};
 
 			['include_room_notes',
@@ -847,6 +848,7 @@ const positionString = (entry, round, section) => {
 		|| round.eventType === 'wsdc'
 		|| round.eventType === 'debate'
 	) {
+
 		if (!round.flip || round.sidelocks[section.id]) {
 			if (parseInt(entry.side) === 1) {
 				return round.settings.aff_label ? round.settings.aff_label.toUpperCase() : ' AFF';
