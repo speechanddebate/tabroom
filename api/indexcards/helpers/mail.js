@@ -58,7 +58,7 @@ export const emailBlast = async (inputData) => {
 		messageData.html += '<a href="https://www.tabroom.com">https://www.tabroom.com</a></p>';
 		messageData.html += '<p>To stop them, visit ';
 		messageData.html += '<a href="https://www.tabroom.com/user/login/profile.mhtml">Your Profile</a>, ';
-		messageData.html += '<p>and check off "No Emails", and save your profile.';
+		messageData.html += 'check off "No Emails", and save.';
 		messageData.html += 'You can also delete your Tabroom account entirely on your profile.</p>';
 	}
 

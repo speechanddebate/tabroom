@@ -508,7 +508,7 @@ const formatBlast = async (queryData, req) => {
 					judgeMessage.html += `<p>Your role: ${judge.role}</p>`;
 				}
 
-				judgeMessage.html += `<p><a style='font-size: 110%; color: brown;`;
+				judgeMessage.html += `<p><a style='font-size: 110%; color: brown;'`;
 				judgeMessage.html += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
 				judgeMessage.html += `START ROUND</a></p>`;
 
