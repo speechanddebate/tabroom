@@ -308,7 +308,7 @@ const formatBlast = async (queryData, req) => {
 			sectionMessage.single += `\n\tRoom ${section.room} `;
 
 			if (section.hybrid) {
-				sectionMessage.text += ` (OL/HYB) <br />\n`;
+				sectionMessage.text += ` (OL/HYB) \n`;
 				sectionMessage.html += ` (ONLINE HYBRID)</p>`;
 				sectionMessage.single += ` (HYB) `;
 			} else {
@@ -321,7 +321,7 @@ const formatBlast = async (queryData, req) => {
 				sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.map}" alt="Map Link">Map to ${section.room}</a></p>`;
 			}
 			if (section.url) {
-				sectionMessage.text += `Video Link on Tabroom <br />\n`;
+				sectionMessage.text += `Video Link on Tabroom \n`;
 				sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.url}" alt="Video Link">Video Link for ${section.room}</a></p>`;
 			}
 
