@@ -19,8 +19,8 @@ export const messageSection = {
 			{ entries: true, no_followers: req.body.no_followers }
 		);
 
-		messageData.text = `\n ${req.body.message}`;
-		messageData.html = `<p></p><p>${req.body.message}</p>`;
+		messageData.text = `\n\n${req.body.message}`;
+		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
@@ -57,8 +57,8 @@ export const messageRound = {
 			}
 		);
 
-		messageData.text = `\n ${req.body.message}`;
-		messageData.html = `<p></p><p>${req.body.message}</p>`;
+		messageData.text = `\n\n${req.body.message}`;
+		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
@@ -95,8 +95,8 @@ export const messageTimeslot = {
 			}
 		);
 
-		messageData.text = `\n ${req.body.message}`;
-		messageData.html = `<p></p><p>${req.body.message}</p>`;
+		messageData.text = `\n\n${req.body.message}`;
+		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
