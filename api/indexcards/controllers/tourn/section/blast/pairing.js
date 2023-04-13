@@ -509,7 +509,8 @@ const formatBlast = async (queryData, req) => {
 				}
 
 				judgeMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'>`;
-				judgeMessage.html += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 4px;'`;
+				// I apologize to literally everyone for this but I'm not creating an inline style sheet when I'm on the clock
+				judgeMessage.html += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;'`;
 				judgeMessage.html += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
 				judgeMessage.html += `START ROUND</a></p>`;
 
