@@ -304,7 +304,7 @@ const formatBlast = async (queryData, req) => {
 			sectionMessage.html += `<p style="width: 25%; display: inline-block;">Start ${round.start[section.flight]}</p>`;
 
 			sectionMessage.text += `Room: ${section.room} `;
-			sectionMessage.html += `<p>Room: ${section.room} `;
+			sectionMessage.html += `<p style="text-align: center;">Room: ${section.room} `;
 			sectionMessage.single += `\n\tRoom ${section.room} `;
 
 			if (section.hybrid) {
@@ -318,11 +318,11 @@ const formatBlast = async (queryData, req) => {
 			}
 			if (section.map) {
 				sectionMessage.text += `Map Link on Tabroom \n`;
-				sectionMessage.html += `<p><a href="${section.map}" alt="Map Link">Map to ${section.room}</a>`;
+				sectionMessage.html += `<p style='text-align: center;'><a style="font-size: 90%;" href="${section.map}" alt="Map Link">Map to ${section.room}</a>`;
 			}
 			if (section.url) {
-				sectionMessage.text += `Video Link on Tabroom \n`;
-				sectionMessage.html += `<p><a href="${section.url}" alt="Video Link">Video Link for ${section.room}</a>`;
+				sectionMessage.text += `Video Link on Tabroom \n`
+				sectionMessage.html += `<p style='text-align: center;'><a style="font-size: 90%;" href="${section.url}" alt="Video Link">Video Link for ${section.room}</a>`;
 			}
 
 			// Create standard texts for lists of entries & judges for the other to see
