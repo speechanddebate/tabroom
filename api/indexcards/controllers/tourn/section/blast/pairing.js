@@ -318,11 +318,11 @@ const formatBlast = async (queryData, req) => {
 			}
 			if (section.map) {
 				sectionMessage.text += `Map Link on Tabroom \n`;
-				sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.map}" alt="Map Link">Map to ${section.room}</a>`;
+				sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.map}" alt="Map Link">Map to ${section.room}</a></p>`;
 			}
 			if (section.url) {
 				sectionMessage.text += `Video Link on Tabroom \n`;
-				sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.url}" alt="Video Link">Video Link for ${section.room}</a>`;
+				sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.url}" alt="Video Link">Video Link for ${section.room}</a></p>`;
 			}
 
 			// Create standard texts for lists of entries & judges for the other to see
@@ -510,7 +510,8 @@ const formatBlast = async (queryData, req) => {
 
 				judgeMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'>`;
 				// I apologize to literally everyone for this but I'm not creating an inline style sheet when I'm on the clock
-				judgeMessage.html += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;'`;
+				judgeMessage.html += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;`;
+				judgeMessage.html += `text-underline: none; font-family: Arial; border-radius: 4px; border: 2px solid #016F94;`;
 				judgeMessage.html += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
 				judgeMessage.html += `START ROUND</a></p>`;
 
