@@ -8,7 +8,7 @@ import wudcPosition from '../../../../helpers/textmunge';
 import { sidelocks } from '../../../../helpers/round';
 
 export const blastSection = {
-	GET: async (req, res) => {
+	POST: async (req, res) => {
 
 		// Permissions.  I feel like there should be a better way to do this
 		const permOK = await sectionCheck(req, res, req.params.section_id);
