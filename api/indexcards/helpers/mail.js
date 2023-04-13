@@ -105,8 +105,7 @@ export const phoneBlast = async (inputData) => {
 	}
 
 	if (messageData.text) {
-		messageData.text.replace('\\n', '<br />');
-		messageData.text.replace('\n', '<br />');
+		messageData.text.replace('\n', ' BR ');
 	}
 
 	delete messageData.html;
