@@ -355,7 +355,7 @@ const formatBlast = async (queryData, req) => {
 					sectionMessage.judgeHTML += `<p> ${judge.role}${judge.first} ${judge.middle ? `${judge.middle} ` : ''}${judge.last} `;
 					if (judge.pronoun) {
 						sectionMessage.judgeText += `(${judge.pronoun})`;
-						sectionMessage.judgeHTML += `<span style='font-style: italic;'>${judge.pronoun}</span>`;
+						sectionMessage.judgeHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 4pt;'>${judge.pronoun}</p>`;
 					}
 				}
 				sectionMessage.judgeText += `\n`;
@@ -386,7 +386,7 @@ const formatBlast = async (queryData, req) => {
 
 				if (entry.pronoun && !round.settings.anonymous_public) {
 					sectionMessage.entryText += `(${entry.pronoun})`;
-					sectionMessage.entryHTML += `<span style='font-style: italic;'>${entry.pronoun}</span>`;
+					sectionMessage.entryHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 4pt;'>${entry.pronoun}</p>`;
 				}
 				sectionMessage.entryText += `\n`;
 				sectionMessage.entryHTML += `</p>`;
