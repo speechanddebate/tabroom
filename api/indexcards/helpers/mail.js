@@ -124,7 +124,7 @@ export const phoneBlast = async (inputData) => {
 		messageData.text += `\n${messageData.append}`;
 	}
 	messageData.text += '\n';
-	messageData.text += 'You registered for these texts on https://www.tabroom.com\n';
+	messageData.text += 'You registered for these texts on Tabroom.com\n';
 	messageData.text += 'To stop texts, log into Tabroom, click the Profile icon at top, select No Emails.\n';
 
 	let info = {};
