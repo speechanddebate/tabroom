@@ -281,7 +281,7 @@ const formatBlast = async (queryData, req) => {
 
 		const round = roundData[roundId];
 		const roundMessage = { };
-		roundMessage.text = `${round.name} of ${round.eventAbbr}\n\n`;
+		roundMessage.text = `${round.name} of ${round.eventAbbr}\n`;
 		roundMessage.html = `<p style='font-weight: 600; width: 50%; display: inline-block;'>${round.name} of ${round.eventName}</p>`;
 
 		Object.keys(round.sections).forEach( (sectionId) => {
@@ -308,7 +308,8 @@ const formatBlast = async (queryData, req) => {
 			sectionMessage.single += `\n\tRoom ${section.room} `;
 
 			if (section.hybrid) {
-				sectionMessage.text += ` (OL/HYB)\n\n`;
+				sectionMessage.text += ` (OL/HYB)\n
+				`;
 				sectionMessage.html += ` (ONLINE HYBRID)</p>`;
 				sectionMessage.single += ` (HYB) `;
 			} else {
@@ -388,7 +389,8 @@ const formatBlast = async (queryData, req) => {
 					sectionMessage.entryText += `(${entry.pronoun})`;
 					sectionMessage.entryHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${entry.pronoun}</p>`;
 				}
-				sectionMessage.entryText += `\n\n`;
+				sectionMessage.entryText += `\n
+				`;
 				sectionMessage.entryHTML += `</p>`;
 
 				if (round.eventType === 'congress') {
@@ -431,7 +433,7 @@ const formatBlast = async (queryData, req) => {
 					entryMessage.text += `Speak ${entry.position} \n`;
 					entryMessage.html += `<p>You will speak ${entry.position}</p>`;
 				} else if (entry.position) {
-					entryMessage.text += `Side ${entry.position} \n\n`;
+					entryMessage.text += `Side ${entry.position} \n`;
 					entryMessage.html += `<p>Side: ${entry.position}</p>`;
 				}
 
@@ -448,7 +450,7 @@ const formatBlast = async (queryData, req) => {
 					if (!blastees.schools[entry.school]) {
 						blastees.schools[entry.school] = {
 							subject : `${entry.schoolName} Round Assignments `,
-							text    : `Full assignments for ${entry.schoolName}\n\n`,
+							text    : `Full assignments for ${entry.schoolName}\n`,
 						};
 					}
 
