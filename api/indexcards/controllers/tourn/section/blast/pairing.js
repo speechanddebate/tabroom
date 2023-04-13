@@ -103,7 +103,7 @@ const formatBlast = async (queryData, req) => {
 			entry.id, entry.code, entry.name,
 			entry.school schoolid, school.name schoolname,
 			ballot.id ballot, ballot.side, ballot.speakerorder,
-			GROUP_CONCAT(CONCAT(student.first,' ',' pronouns: ',person.pronoun) SEPARATOR '\n') pronoun
+			GROUP_CONCAT(CONCAT(student.first,' ',': ',person.pronoun) SEPARATOR '\n') pronoun
 		from (panel section, ballot, entry, entry_student es, student ${queryData.fields})
 			left join person on student.person = person.id and person.pronoun IS NOT NULL and person.pronoun != ''
 			left join school on entry.school = school.id
@@ -355,7 +355,7 @@ const formatBlast = async (queryData, req) => {
 					sectionMessage.judgeHTML += `<p> ${judge.role}${judge.first} ${judge.middle ? `${judge.middle} ` : ''}${judge.last} `;
 					if (judge.pronoun) {
 						sectionMessage.judgeText += `(${judge.pronoun})`;
-						sectionMessage.judgeHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 4pt;'>${judge.pronoun}</p>`;
+						sectionMessage.judgeHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${judge.pronoun}</p>`;
 					}
 				}
 				sectionMessage.judgeText += `\n`;
@@ -386,7 +386,7 @@ const formatBlast = async (queryData, req) => {
 
 				if (entry.pronoun && !round.settings.anonymous_public) {
 					sectionMessage.entryText += `(${entry.pronoun})`;
-					sectionMessage.entryHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 4pt;'>${entry.pronoun}</p>`;
+					sectionMessage.entryHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${entry.pronoun}</p>`;
 				}
 				sectionMessage.entryText += `\n`;
 				sectionMessage.entryHTML += `</p>`;
