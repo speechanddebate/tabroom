@@ -388,8 +388,7 @@ const formatBlast = async (queryData, req) => {
 					sectionMessage.entryText += `(${entry.pronoun})`;
 					sectionMessage.entryHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${entry.pronoun}</p>`;
 				}
-				sectionMessage.entryText += `\n
-				`;
+				sectionMessage.entryText += `\n`;
 				sectionMessage.entryHTML += `</p>`;
 
 				if (round.eventType === 'congress') {
@@ -468,7 +467,7 @@ const formatBlast = async (queryData, req) => {
 					schoolMessage.text += `${entry.code} is `;
 
 					if (entry.opponent) {
-						schoolMessage.text += `${entry.position} vs ${entry.opponent} `;
+						schoolMessage.text += `\n\t ${entry.position} vs ${entry.opponent} `;
 					} else if (sectionMessage.entrySingle) {
 						schoolMessage.text += sectionMessage.entrySingle;
 					} else if (round.eventType === 'speech') {
@@ -482,7 +481,7 @@ const formatBlast = async (queryData, req) => {
 					}
 
 					schoolMessage.text +=  sectionMessage.single;
-					schoolMessage.text += '\n';
+					schoolMessage.text += '\n\n';
 				}
 			});
 
