@@ -302,7 +302,6 @@ const formatBlast = async (queryData, req) => {
 
 			sectionMessage.text += `Start ${round.shortstart[section.flight]} \n`;
 			sectionMessage.html += `<p>Start ${round.start[section.flight]}</p>`;
-			sectionMessage.text += `\t ${round.start[section.flight]} `;
 
 			sectionMessage.text += `Room: ${section.room} `;
 			sectionMessage.html += `<p>Room: ${section.room} `;
@@ -313,7 +312,7 @@ const formatBlast = async (queryData, req) => {
 				sectionMessage.html += ` (ONLINE HYBRID)</p>`;
 				sectionMessage.single += ` (HYB) `;
 			} else {
-				sectionMessage.text += `\n`;
+				sectionMessage.text += `!\n`;
 				sectionMessage.single += `\n`;
 				sectionMessage.html += ` </p>`;
 			}
@@ -429,11 +428,11 @@ const formatBlast = async (queryData, req) => {
 					entryMessage.text += 'Flip for Sides\n';
 					entryMessage.flip += '<p>Flip for Sides</p>';
 				} else if (entry.position && round.eventType === 'speech') {
-					entryMessage.text += `You speak ${entry.position} \n`;
+					entryMessage.text += `Speak ${entry.position} \n`;
 					entryMessage.html += `<p>You will speak ${entry.position}</p>`;
 				} else if (entry.position) {
-					entryMessage.text += `You are ${entry.position} \n`;
-					entryMessage.html += `<p>You are the ${entry.position}</p>`;
+					entryMessage.text += `Side ${entry.position} \n\n`;
+					entryMessage.html += `<p>Side: ${entry.position}</p>`;
 				}
 
 				if (round.eventType !== 'congress') {
