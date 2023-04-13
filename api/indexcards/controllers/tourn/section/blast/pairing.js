@@ -281,7 +281,7 @@ const formatBlast = async (queryData, req) => {
 
 		const round = roundData[roundId];
 		const roundMessage = { };
-		roundMessage.text = `${round.name} of ${round.eventAbbr}\n`;
+		roundMessage.text = `${round.name} of ${round.eventAbbr}\n\n`;
 		roundMessage.html = `<p style='font-weight: 600; width: 50%; display: inline-block;'>${round.name} of ${round.eventName}</p>`;
 
 		Object.keys(round.sections).forEach( (sectionId) => {
@@ -295,7 +295,7 @@ const formatBlast = async (queryData, req) => {
 			};
 
 			if (round.flighted > 1) {
-				sectionMessage.text += `Flight ${section.flight} `;
+				sectionMessage.text += `Flight ${section.flight} \n`;
 				sectionMessage.html += `<p style="width: 25%; display: inline-block;">Flight ${section.flight}</p>`;
 				sectionMessage.single += `Flt ${section.flight} `;
 			}
@@ -308,11 +308,11 @@ const formatBlast = async (queryData, req) => {
 			sectionMessage.single += `\n\tRoom ${section.room} `;
 
 			if (section.hybrid) {
-				sectionMessage.text += ` (OL/HYB)\n`;
+				sectionMessage.text += ` (OL/HYB)\n\n`;
 				sectionMessage.html += ` (ONLINE HYBRID)</p>`;
 				sectionMessage.single += ` (HYB) `;
 			} else {
-				sectionMessage.text += `!\n`;
+				sectionMessage.text += `\n`;
 				sectionMessage.single += `\n`;
 				sectionMessage.html += ` </p>`;
 			}
@@ -362,7 +362,7 @@ const formatBlast = async (queryData, req) => {
 				sectionMessage.judgeHTML += `</p>`;
 			});
 
-			sectionMessage.entryText = `Entries\n`;
+			sectionMessage.entryText = `Entries\n\n`;
 			sectionMessage.entryHTML = `<p style="font-weight: 600;">Competitors</p>`;
 
 			// I guess they don't necessarily want to have the recency out
@@ -388,7 +388,7 @@ const formatBlast = async (queryData, req) => {
 					sectionMessage.entryText += `(${entry.pronoun})`;
 					sectionMessage.entryHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${entry.pronoun}</p>`;
 				}
-				sectionMessage.entryText += `\n`;
+				sectionMessage.entryText += `\n\n`;
 				sectionMessage.entryHTML += `</p>`;
 
 				if (round.eventType === 'congress') {
@@ -511,7 +511,7 @@ const formatBlast = async (queryData, req) => {
 				judgeMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'>`;
 				// I apologize to literally everyone for this but I'm not creating an inline style sheet when I'm on the clock
 				judgeMessage.html += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;`;
-				judgeMessage.html += `text-underline: none; font-family: Arial; border-radius: 4px; border: 2px solid #016F94;`;
+				judgeMessage.html += `text-underline: none; font-family: Arial; border-radius: 4px; border: 2px solid #016F94;' `;
 				judgeMessage.html += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
 				judgeMessage.html += `START ROUND</a></p>`;
 
