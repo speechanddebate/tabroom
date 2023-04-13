@@ -46,6 +46,14 @@ export const blastRound = {
 		queryData.where = 'where section.round = :roundId';
 		queryData.fields = '';
 
+		if (req.body.publish) {
+			await req.db.sequelize.query(
+				`update round set published = 1 where round.id = :roundId `, {
+					replacements : queryData.replacements,
+					type         : req.db.sequelize.QueryTypes.UPDATE,
+				});
+		}
+
 		const blastees = await formatBlast(queryData, req);
 		const followers = await getFollowers(
 			queryData.replacements,
@@ -69,6 +77,14 @@ export const blastTimeslot = {
 		queryData.replacements = { timeslotId : req.params.timeslot_id };
 		queryData.fields = ', round';
 		queryData.where = 'where round.timeslot = :timeslotId and round.id = section.round ';
+
+		if (req.body.publish) {
+			await req.db.sequelize.query(
+				`update round set published = 1 where round.timeslot = :timeslotId `, {
+					replacements : queryData.replacements,
+					type         : req.db.sequelize.QueryTypes.UPDATE,
+				});
+		}
 
 		const blastees = await formatBlast(queryData, req);
 		const followers = await getFollowers(
