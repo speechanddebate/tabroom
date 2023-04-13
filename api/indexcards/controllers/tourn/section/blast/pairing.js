@@ -362,7 +362,7 @@ const formatBlast = async (queryData, req) => {
 				sectionMessage.judgeHTML += `</p>`;
 			});
 
-			sectionMessage.entryText = `Entries\n\n`;
+			sectionMessage.entryText = `\nEntries\n`;
 			sectionMessage.entryHTML = `<p style="font-weight: 600;">Competitors</p>`;
 
 			// I guess they don't necessarily want to have the recency out
@@ -396,7 +396,7 @@ const formatBlast = async (queryData, req) => {
 					sectionMessage.entryText += `(${entry.pronoun})`;
 					sectionMessage.entryHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${entry.pronoun}</p>`;
 				}
-				sectionMessage.entryText += `\n`;
+				sectionMessage.entryText += `\n\n`;
 				sectionMessage.entryHTML += `</p>`;
 
 				if (round.eventType === 'congress') {
