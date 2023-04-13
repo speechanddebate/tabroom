@@ -328,11 +328,11 @@ const formatBlast = async (queryData, req) => {
 			// Create standard texts for lists of entries & judges for the other to see
 
 			if (round.eventType === 'mock_trial') {
-				sectionMessage.judgeText = `Panel\n`;
+				sectionMessage.judgeText = `\nPanel\n`;
 				sectionMessage.judgeSingle = `\n\tPanel: `;
 				sectionMessage.judgeHTML = `<p style="font-weight: 600;">Panel:</p>`;
 			} else {
-				sectionMessage.judgeText = `Judging\n`;
+				sectionMessage.judgeText = `\nJudging\n`;
 				sectionMessage.judgeSingle = `\n\tJudges:`;
 				sectionMessage.judgeHTML = `<p style="font-weight: 600;">Judging</p>`;
 			}
@@ -379,10 +379,18 @@ const formatBlast = async (queryData, req) => {
 				});
 			}
 
+			let notFirstEntry = 0;
+
 			section.entries.forEach( (entry) => {
 				entry.position = positionString(entry, round, section);
-				sectionMessage.entryText += `${entry.position} ${entry.code}\n`;
-				sectionMessage.entryHTML += `<p>${entry.position} ${entry.code}`;
+
+				if (entry.position === 'FLIP' && notFirstEntry++ < 1) {
+					sectionMessage.entryHTML += `<p>FLIP FOR SIDES:</p>`;
+					sectionMessage.entryText += ` FLIP FOR SIDES: \n`;
+				}
+
+				sectionMessage.entryText += `${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
+				sectionMessage.entryHTML += `<p>${entry.position === 'FLIP' ? '' : entry.position} ${entry.code}`;
 
 				if (entry.pronoun && !round.settings.anonymous_public) {
 					sectionMessage.entryText += `(${entry.pronoun})`;

@@ -40,7 +40,7 @@ export const emailBlast = async (inputData) => {
 
 	if (messageData.text) {
 		if (messageData.append) {
-			messageData.text += `\n${messageData.append}\n`;
+			messageData.text += `\n${convert(messageData.append)}\n`;
 		}
 		messageData.text += '\n----------------------------\n';
 		messageData.text +=  'You received this email because you registered for an account on https://www.tabroom.com\n';
@@ -51,7 +51,7 @@ export const emailBlast = async (inputData) => {
 
 	if (messageData.html) {
 		if (messageData.append) {
-			messageData.html += `<p>${messageData.append}</p>`;
+			messageData.html += `<p>${convert(messageData.append)}</p>`;
 		}
 		messageData.html += '<p>-----------------------------</p>';
 		messageData.html += '<p>You received this email because you registered for an account on ';
@@ -99,15 +99,11 @@ export const phoneBlast = async (inputData) => {
 
 	if (messageData.html && !messageData.text) {
 		messageData.text = convert(messageData.html);
-	} else {
-		// Let us just be sure
-		messageData.text = convert(messageData.text);
 	}
 
 	if (messageData.text) {
-		messageData.text.replace('\n', ' BR ');
+		messageData.text.replace(/(?:\r\n|\r|\n)/g, '<br>');
 	}
-
 	delete messageData.html;
 
 	// Only send BCC emails so folks do not reply all or see student contact
@@ -125,7 +121,7 @@ export const phoneBlast = async (inputData) => {
 	}
 
 	if (messageData.append) {
-		messageData.text += `\n${messageData.append}`;
+		messageData.text += `\n${convert(messageData.append)}`;
 	}
 	messageData.text += '\n';
 	messageData.text += 'You registered for these texts on Tabroom.com\n';
