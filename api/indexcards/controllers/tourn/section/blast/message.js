@@ -20,7 +20,7 @@ export const messageSection = {
 		);
 
 		messageData.text = `\n ${req.body.message}`;
-		messageData.html = `<p>${req.body.message}</p>`;
+		messageData.html = `<p></p><p>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
@@ -58,7 +58,7 @@ export const messageRound = {
 		);
 
 		messageData.text = `\n ${req.body.message}`;
-		messageData.html = `<p>${req.body.message}</p>`;
+		messageData.html = `<p></p><p>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
@@ -96,7 +96,7 @@ export const messageTimeslot = {
 		);
 
 		messageData.text = `\n ${req.body.message}`;
-		messageData.html = `<p>${req.body.message}</p>`;
+		messageData.html = `<p></p><p>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);

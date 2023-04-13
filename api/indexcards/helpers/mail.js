@@ -119,9 +119,9 @@ export const phoneBlast = async (inputData) => {
 	if (messageData.append) {
 		messageData.text += `${convert(messageData.append)}`;
 	}
-	messageData.text += '<br><br>';
-	messageData.text += '<p>You registered for these texts on Tabroom.com\n';
-	messageData.text += 'To stop texts, log into Tabroom, click the Profile icon at top, select No Emails.</p>';
+	messageData.text += '\n\n';
+	messageData.text += 'You registered for these texts on Tabroom.com\n';
+	messageData.text += 'To stop texts, log into Tabroom, click the Profile icon at top, select No Emails.';
 
 	let info = {};
 
