@@ -112,18 +112,14 @@ export const phoneBlast = async (inputData) => {
 	messageData.bcc = Array.from(new Set(messageData.phone));
 	messageData.to = config.MAIL_FROM;
 
-	if (!messageData.subject) {
-		messageData.subject = 'TABROOM';
-	}
-
 	if (!messageData.from) {
 		messageData.from = config.MAIL_FROM;
 	}
 
 	if (messageData.append) {
-		messageData.text += `\n${convert(messageData.append)}`;
+		messageData.text += `${convert(messageData.append)}`;
 	}
-	messageData.text += '\n';
+	messageData.text += '<br/>-<br/>';
 	messageData.text += 'You registered for these texts on Tabroom.com\n';
 	messageData.text += 'To stop texts, log into Tabroom, click the Profile icon at top, select No Emails.\n';
 
