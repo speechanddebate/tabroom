@@ -282,7 +282,7 @@ const formatBlast = async (queryData, req) => {
 		const round = roundData[roundId];
 		const roundMessage = { };
 		roundMessage.text = `${round.name} of ${round.eventAbbr}\n`;
-		roundMessage.html = `<p style='font-weight: 600;'>${round.name} of ${round.eventName}</p>`;
+		roundMessage.html = `<p style='font-weight: 600; width: 50%;'>${round.name} of ${round.eventName}</p>`;
 
 		Object.keys(round.sections).forEach( (sectionId) => {
 
@@ -296,12 +296,12 @@ const formatBlast = async (queryData, req) => {
 
 			if (round.flighted > 1) {
 				sectionMessage.text += `Flight ${section.flight} `;
-				sectionMessage.html += `<p>Flight ${section.flight}</p>`;
+				sectionMessage.html += `<p style="width: 25%;">Flight ${section.flight}</p>`;
 				sectionMessage.single += `Flt ${section.flight} `;
 			}
 
 			sectionMessage.text += `Start ${round.shortstart[section.flight]} \n`;
-			sectionMessage.html += `<p>Start ${round.start[section.flight]}</p>`;
+			sectionMessage.html += `<p style="width: 25%;">Start ${round.start[section.flight]}</p>`;
 
 			sectionMessage.text += `Room: ${section.room} `;
 			sectionMessage.html += `<p>Room: ${section.room} `;
@@ -363,7 +363,7 @@ const formatBlast = async (queryData, req) => {
 			});
 
 			sectionMessage.entryText = `Entries\n`;
-			sectionMessage.entryHTML = `<p style="font-weight: 600;">Competitors:</p>`;
+			sectionMessage.entryHTML = `<p style="font-weight: 600;">Competitors</p>`;
 
 			// I guess they don't necessarily want to have the recency out
 			// there for some reason.
