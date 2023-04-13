@@ -20,6 +20,8 @@ export const messageSection = {
 		);
 
 		messageData.text = req.body.message;
+		messageData.subject = 'Message from Tab';
+		console.log(`subject is ${messageData.subject}`);
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
 
@@ -56,6 +58,7 @@ export const messageRound = {
 		);
 
 		messageData.text = req.body.message;
+		messageData.subject = 'Message from Tab';
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
 
@@ -92,6 +95,7 @@ export const messageTimeslot = {
 		);
 
 		messageData.text = req.body.message;
+		messageData.subject = 'Message from Tab';
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
 

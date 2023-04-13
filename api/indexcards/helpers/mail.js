@@ -31,7 +31,7 @@ export const emailBlast = async (inputData) => {
 	messageData.to = config.MAIL_FROM;
 
 	if (!messageData.subject) {
-		messageData.subject = 'Tabroom.com Notice';
+		messageData.subject = 'Message from Tab';
 	}
 
 	if (!messageData.from) {
@@ -119,7 +119,7 @@ export const phoneBlast = async (inputData) => {
 	if (messageData.append) {
 		messageData.text += `${convert(messageData.append)}`;
 	}
-	messageData.text += '<br/>-<br/>';
+	messageData.text += '\n\n--\n';
 	messageData.text += 'You registered for these texts on Tabroom.com\n';
 	messageData.text += 'To stop texts, log into Tabroom, click the Profile icon at top, select No Emails.\n';
 
@@ -130,6 +130,7 @@ export const phoneBlast = async (inputData) => {
 		console.log(`Sent text blast id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length}`);
 	} else {
 		console.log(`Local: not sending sms blast for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
+		console.log(`Subject ${messageData.subject}`);
 		console.log(`Text ${messageData.text}`);
 	}
 
