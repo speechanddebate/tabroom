@@ -22,6 +22,7 @@ export const blastSection = {
 		queryData.fields = '';
 
 		const blastees = await formatBlast(queryData, req);
+
 		const followers = await getFollowers(
 			queryData.replacements,
 			{ ...req.body },
@@ -288,7 +289,7 @@ const formatBlast = async (queryData, req) => {
 			sectionMessage.text += `\t ${round.start[section.flight]} `;
 
 			sectionMessage.text += `Room: ${section.room} `;
-			sectionMessage.html += `<p>Room ${section.room} `;
+			sectionMessage.html += `<p>Room: ${section.room} `;
 			sectionMessage.single += `\n\tRoom ${section.room} `;
 
 			if (section.hybrid) {
@@ -565,6 +566,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 	};
 
 	for await (const entryId of Object.keys(blastees.entries)) {
+
 		const email = await emailBlast({
 			...blastees.entries[entryId],
 			...followers.only.entry[entryId],

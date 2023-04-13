@@ -8,6 +8,9 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 	if (replacements.panelId) {
 		whereLimit = ` where panel.id = :panelId `;
 		delete replacements.roundId;
+	} else if (replacements.sectionId) {
+		whereLimit = ` where panel.id = :sectionId `;
+		delete replacements.roundId;
 	} else if (replacements.roundId) {
 		whereLimit = ` where panel.round = :roundId `;
 	} else if (replacements.timeslotId) {
@@ -181,6 +184,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 	}
 
 	if (!options.no_followers) {
+
 		if (options.recipients !== 'judges') {
 
 			const entryFollowersQuery = `
@@ -302,7 +306,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 	// Deduplicate the emails
 	blastMe.phone = Array.from(new Set(blastMe.phone));
 	blastMe.email = Array.from(new Set(blastMe.email));
-	blastMe.only  = blastOnly;
+	blastMe.only  = { ...blastOnly };
 
 	return blastMe;
 
