@@ -6,6 +6,7 @@ import { emailBlast, phoneBlast } from '../../../../helpers/mail.js';
 import { sectionCheck, timeslotCheck, roundCheck } from '../../../../helpers/tourn-auth.js';
 import wudcPosition from '../../../../helpers/textmunge';
 import { sidelocks } from '../../../../helpers/round';
+import scheduleAutoFlip from './autoFlip';
 
 export const blastSection = {
 	POST: async (req, res) => {
@@ -52,7 +53,21 @@ export const blastRound = {
 					replacements : queryData.replacements,
 					type         : req.db.sequelize.QueryTypes.UPDATE,
 				});
+
+			await scheduleAutoFlip(req.params.round_id, req, res);
 		}
+
+		await req.db.sequelize.query(
+			`delete from round_setting where round = :roundId and tag = 'blasted'`, {
+				replacements : queryData.replacements,
+				type         : req.db.sequelize.QueryTypes.UPDATE,
+			});
+
+		await req.db.sequelize.query(
+			`insert into round_setting (tag, round, value_date, value) values ('blasted', :roundId, now(), 'date')`, {
+				replacements : queryData.replacements,
+				type         : req.db.sequelize.QueryTypes.UPDATE,
+			});
 
 		const blastees = await formatBlast(queryData, req);
 		const followers = await getFollowers(
@@ -67,7 +82,6 @@ export const blastRound = {
 export const blastTimeslot = {
 	POST: async (req, res) => {
 
-		// Permissions.  I feel like there should be a better way to do this
 		const permOK = await timeslotCheck(req, res, req.params.timeslot_id);
 		if (!permOK) {
 			return;
@@ -78,15 +92,40 @@ export const blastTimeslot = {
 		queryData.fields = ', round';
 		queryData.where = 'where round.timeslot = :timeslotId and round.id = section.round ';
 
+		const tsRounds = await req.db.sequelize.query(
+			`select round.* from round where round.timeslot = :timeslotId`, {
+				replacements : queryData.replacements,
+				type         : req.db.sequelize.QueryTypes.INSERT,
+			});
+
+		await req.db.sequelize.query(
+			`delete rs.* from round_setting rs, round where round.timeslot = :timeslotId and round.id = rs.round and rs.tag = 'blasted'`, {
+				replacements : queryData.replacements,
+				type         : req.db.sequelize.QueryTypes.DELETE,
+			});
+
+		tsRounds.forEach( async (row) => {
+			await req.db.sequelize.query(
+				`insert into round_setting (tag, round, value_date, value) values ('blasted', :roundId, now(), 'date')`, {
+					replacements : { roundId: row.id },
+					type         : req.db.sequelize.QueryTypes.UPDATE,
+				});
+		});
+
 		if (req.body.publish) {
 			await req.db.sequelize.query(
 				`update round set published = 1 where round.timeslot = :timeslotId `, {
 					replacements : queryData.replacements,
 					type         : req.db.sequelize.QueryTypes.UPDATE,
 				});
+
+			tsRounds.forEach( async (row) => {
+				await scheduleAutoFlip(row.id, req, res);
+			});
 		}
 
 		const blastees = await formatBlast(queryData, req);
+
 		const followers = await getFollowers(
 			queryData.replacements,
 			{ ...req.body },
@@ -103,7 +142,7 @@ const formatBlast = async (queryData, req) => {
 			entry.id, entry.code, entry.name,
 			entry.school schoolid, school.name schoolname,
 			ballot.id ballot, ballot.side, ballot.speakerorder,
-			GROUP_CONCAT(CONCAT(student.first,' ',': ',person.pronoun) SEPARATOR '\n') pronoun
+			GROUP_CONCAT(CONCAT(student.first,' ',': ',person.pronoun) SEPARATOR ' ') pronoun
 		from (panel section, ballot, entry, entry_student es, student ${queryData.fields})
 			left join person on student.person = person.id and person.pronoun IS NOT NULL and person.pronoun != ''
 			left join school on entry.school = school.id
@@ -113,7 +152,7 @@ const formatBlast = async (queryData, req) => {
 			and entry.id = es.entry
 			and es.student = student.id
 		group by entry.id
-		order by section.id, ballot.side, ballot.speakerorder
+		order by section.flight, section.id, ballot.side, ballot.speakerorder
 	`;
 
 	const judgeQuery = `
@@ -128,8 +167,8 @@ const formatBlast = async (queryData, req) => {
 		${queryData.where}
 			and section.id = ballot.panel
 			and ballot.judge = judge.id
-		group by judge.id
-		order by section.id, ballot.chair DESC, judge.last
+		group by judge.id, section.id
+		order by section.flight, section.letter, ballot.chair DESC, judge.last
 	`;
 
 	const roundQuery = `
@@ -212,6 +251,7 @@ const formatBlast = async (queryData, req) => {
 			and round.event = event.id
 			and event.tourn = tourn.id
 		group by section.id
+			order by round.name, section.flight, section.letter
 	`;
 
 	const rawRoundData = await req.db.sequelize.query(roundQuery, {
@@ -284,288 +324,299 @@ const formatBlast = async (queryData, req) => {
 		roundMessage.text = `${round.name} of ${round.eventAbbr}\n`;
 		roundMessage.html = `<p style='font-weight: 600; width: 50%; display: inline-block;'>${round.name} of ${round.eventName}</p>`;
 
-		Object.keys(round.sections).forEach( (sectionId) => {
+		const sectionFlights = Object.keys(round.flightSections).sort( (a, b) => {
+			return a - b;
+		});
 
-			const section = round.sections[sectionId];
-			const sectionMessage = {
-				...roundMessage,
-				single: '',
-				judgeEntrySingle: '',
-				entrySingle: '',
-			};
+		let counter = 1;
 
-			if (round.flighted > 1) {
-				sectionMessage.text += `Flight ${section.flight} \n`;
-				sectionMessage.html += `<p style="width: 25%; display: inline-block;">Flight ${section.flight}</p>`;
-				sectionMessage.single += `Flt ${section.flight} `;
-			}
+		sectionFlights.forEach( (flight) => {
+			Object.keys(round.flightSections[flight]).forEach( (sectionId) => {
+				const section = round.sections[sectionId];
 
-			sectionMessage.text += `Start ${round.shortstart[section.flight]} \n`;
-			sectionMessage.html += `<p style="width: 25%; display: inline-block;">Start ${round.start[section.flight]}</p>`;
+				const sectionMessage = {
+					...roundMessage,
+					single: '',
+					judgeEntrySingle: '',
+					entrySingle: '',
+				};
 
-			sectionMessage.text += `Room: ${section.room} `;
-			sectionMessage.html += `<p style="width: 75%; display: inline-block; text-align: center;">Room: ${section.room} `;
-			sectionMessage.single += `\n\tRoom ${section.room} `;
+				if (round.flights > 1) {
+					sectionMessage.text += `\nFlight ${section.flight} \n`;
+					sectionMessage.html += `<p style="width: 25%; display: inline-block;">Flight ${section.flight}</p>`;
+					sectionMessage.single += `\n\tFlt ${section.flight} Start ${round.shortstart[section.flight]}\n`;
+				}
 
-			if (section.hybrid) {
-				sectionMessage.text += ` (OL/HYB) \n`;
-				sectionMessage.html += ` (ONLINE HYBRID)</p>`;
-				sectionMessage.single += ` (HYB) `;
-			} else {
-				sectionMessage.text += `\n`;
-				sectionMessage.single += `\n`;
-				sectionMessage.html += ` </p>`;
-			}
-			if (section.map) {
-				sectionMessage.text += `Map Link on Tabroom \n`;
-				sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.map}" alt="Map Link">Map to ${section.room}</a></p>`;
-			}
-			if (section.url) {
-				sectionMessage.text += `Video Link on Tabroom \n`;
-				sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.url}" alt="Video Link">Video Link for ${section.room}</a></p>`;
-			}
+				sectionMessage.text += `Start ${round.shortstart[section.flight]} \n`;
+				sectionMessage.html += `<p style="width: 25%; display: inline-block;">Start ${round.start[section.flight]}</p>`;
 
-			// Create standard texts for lists of entries & judges for the other to see
+				sectionMessage.text += `Room: ${section.room} `;
+				sectionMessage.html += `<p style="width: 75%; display: inline-block; text-align: center;">Room: ${section.room} `;
+				sectionMessage.single += `\tRoom ${section.room} Counter ${counter++} Letter ${section.letter}`;
 
-			if (round.eventType === 'mock_trial') {
-				sectionMessage.judgeText = `\nPanel\n`;
-				sectionMessage.judgeSingle = `\n\tPanel: `;
-				sectionMessage.judgeHTML = `<p style="font-weight: 600;">Panel:</p>`;
-			} else {
-				sectionMessage.judgeText = `\nJudging\n`;
-				sectionMessage.judgeSingle = `\n\tJudges:`;
-				sectionMessage.judgeHTML = `<p style="font-weight: 600;">Judging</p>`;
-			}
-
-			let firstJudge = 0;
-
-			section.judges.forEach( (judge) => {
-				judge.role = `${judgeRole(judge, round)} `;
-
-				if (round.settings.anonymous_public) {
-					sectionMessage.judgeText += `${judge.role}${judge.code} `;
-					sectionMessage.judgeSingle += `${judge.role}${judge.code} `;
-					sectionMessage.judgeHTML += `<p> ${judge.role}${judge.code} `;
+				if (section.hybrid) {
+					sectionMessage.text += ` (OL/HYB) \n`;
+					sectionMessage.html += ` (ONLINE HYBRID)</p>`;
+					sectionMessage.single += ` (HYB) `;
 				} else {
-					sectionMessage.judgeText += `${judge.role}${judge.first} ${judge.last} `;
-					if (firstJudge++ > 0) {
-						sectionMessage.judgeSingle += ',';
-					}
-					sectionMessage.judgeSingle += `${judge.role}${judge.first} ${judge.last} `;
-					sectionMessage.judgeHTML += `<p> ${judge.role}${judge.first} ${judge.middle ? `${judge.middle} ` : ''}${judge.last} `;
-					if (judge.pronoun) {
-						sectionMessage.judgeText += `(${judge.pronoun})`;
-						sectionMessage.judgeHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${judge.pronoun}</p>`;
-					}
+					sectionMessage.text += `\n`;
+					sectionMessage.single += `\n`;
+					sectionMessage.html += ` </p>`;
 				}
-				sectionMessage.judgeText += `\n`;
-				sectionMessage.judgeHTML += `</p>`;
-			});
+				if (section.map) {
+					sectionMessage.text += `Map Link on Tabroom \n`;
+					sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.map}" alt="Map Link">Map to ${section.room}</a></p>`;
+				}
+				if (section.url) {
+					sectionMessage.text += `Video Link on Tabroom \n`;
+					sectionMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'><a style="font-size: 90%;" href="${section.url}" alt="Video Link">Video Link for ${section.room}</a></p>`;
+				}
 
-			sectionMessage.entryText = `\nEntries\n`;
-			sectionMessage.entryHTML = `<p style="font-weight: 600;">Competitors</p>`;
+				// Create standard texts for lists of entries & judges for the other to see
 
-			// I guess they don't necessarily want to have the recency out
-			// there for some reason.
-			if (round.eventType === 'congress') {
-				section.entries.sort((a, b) => {
-					if (a.name < b.name) {
-						return -1;
+				if (round.eventType === 'mock_trial') {
+					sectionMessage.judgeText = `\nPanel\n`;
+					sectionMessage.judgeSingle = `\n\tPanel: `;
+					sectionMessage.judgeHTML = `<p style="font-weight: 600;">Panel:</p>`;
+				} else {
+					sectionMessage.judgeText = `\nJudging\n`;
+					sectionMessage.judgeSingle = `\n\tJudges:`;
+					sectionMessage.judgeHTML = `<p style="font-weight: 600;">Judging</p>`;
+				}
+
+				let firstJudge = 0;
+
+				section.judges.forEach( (judge) => {
+					judge.role = `${judgeRole(judge, round)} `;
+
+					if (round.settings.anonymous_public) {
+						sectionMessage.judgeText += `${judge.role}${judge.code} `;
+						sectionMessage.judgeSingle += `${judge.role}${judge.code} `;
+						sectionMessage.judgeHTML += `<p> ${judge.role}${judge.code} `;
+					} else {
+						sectionMessage.judgeText += `${judge.role}${judge.first} ${judge.last} `;
+						if (firstJudge++ > 0) {
+							sectionMessage.judgeSingle += ',';
+						}
+						sectionMessage.judgeSingle += `${judge.role}${judge.first} ${judge.last} `;
+						sectionMessage.judgeHTML += `<p> ${judge.role}${judge.first} ${judge.middle ? `${judge.middle} ` : ''}${judge.last} `;
+						if (judge.pronoun) {
+							sectionMessage.judgeText += `(${judge.pronoun})`;
+							sectionMessage.judgeHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${judge.pronoun}</p>`;
+						}
 					}
-					if (a.name > b.name) {
-						return 1;
-					}
-					return 0;
+					sectionMessage.judgeText += `\n`;
+					sectionMessage.judgeHTML += `</p>`;
 				});
-			}
 
-			let notFirstEntry = 0;
+				sectionMessage.entryText = `\nEntries\n`;
+				sectionMessage.entryHTML = `<p style="font-weight: 600;">Competitors</p>`;
 
-			section.entries.forEach( (entry) => {
-				entry.position = positionString(entry, round, section);
-
-				if (entry.position === 'FLIP' && notFirstEntry++ < 1) {
-					sectionMessage.entryHTML += `<p>FLIP FOR SIDES:</p>`;
-					sectionMessage.entryText += ` FLIP FOR SIDES: \n`;
-				}
-
-				sectionMessage.entryText += `${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
-				sectionMessage.entryHTML += `<p>${entry.position === 'FLIP' ? '' : entry.position} ${entry.code}`;
-
-				if (entry.pronoun && !round.settings.anonymous_public) {
-					sectionMessage.entryText += `(${entry.pronoun})`;
-					sectionMessage.entryHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${entry.pronoun}</p>`;
-				}
-				sectionMessage.entryText += `\n\n`;
-				sectionMessage.entryHTML += `</p>`;
+				// I guess they don't necessarily want to have the recency out
+				// there for some reason.
 
 				if (round.eventType === 'congress') {
-					delete sectionMessage.entryText;
-				} else if (round.eventType === 'debate' || round.eventType === 'wsdc') {
-					section.entries.forEach( (other) => {
-						if (entry.id !== other.id) {
-							entry.opponent = other.code;
+					section.entries.sort((a, b) => {
+						if (a.name < b.name) {
+							return -1;
 						}
+						if (a.name > b.name) {
+							return 1;
+						}
+						return 0;
 					});
-					if (sectionMessage.judgeEntrySingle) {
-						sectionMessage.judgeEntrySingle += ' vs. ';
+				}
+
+				let notFirstEntry = 0;
+
+				section.entries.forEach( (entry) => {
+					entry.position = positionString(entry, round, section);
+
+					if (entry.position === 'FLIP' && notFirstEntry++ < 1) {
+						sectionMessage.entryHTML += `<p>FLIP FOR SIDES:</p>`;
+						sectionMessage.entryText += `FLIP FOR SIDES: \n\n`;
 					}
-					sectionMessage.judgeEntrySingle += `${entry.position} ${entry.code} `;
-				} else if (round.eventType === 'wudc') {
-					sectionMessage.entrySingle += `${entry.position} ${entry.code} `;
-				}
-			});
 
-			// And now that we have the standard texts, we can assemble the
-			// notifications for the actual entries
+					sectionMessage.entryText += `${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
+					sectionMessage.entryHTML += `<p>${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
 
-			section.entries.forEach( (entry) => {
+					if (entry.pronoun && !round.settings.anonymous_public) {
+						sectionMessage.entryText += `(${entry.pronoun})`;
+						sectionMessage.entryHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${entry.pronoun}</p>`;
+					}
+					sectionMessage.entryText += `\n`;
+					sectionMessage.entryHTML += `</p>`;
 
-				// Myself
-				if (!blastees.entries[entry.id]) {
-					blastees.entries[entry.id] = {
-						subject: `${entry.code} ${round.name} ${round.eventAbbr}`,
-						text : sectionMessage.text,
-						html : sectionMessage.html,
-					};
-				}
+					if (round.eventType === 'congress') {
+						delete sectionMessage.entryText;
+					} else if (round.eventType === 'debate' || round.eventType === 'wsdc') {
+						section.entries.forEach( (other) => {
+							if (entry.id !== other.id) {
+								entry.opponent = other.code;
+							}
+						});
+						if (sectionMessage.judgeEntrySingle) {
+							sectionMessage.judgeEntrySingle += ' vs. ';
+							sectionMessage.judgeEntrySingle += `${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
+						} else {
+							sectionMessage.judgeEntrySingle += `${entry.position} ${entry.code} `;
+						}
+					} else if (round.eventType === 'wudc') {
+						sectionMessage.entrySingle += `${entry.position} ${entry.code} `;
+					}
+				});
 
-				const entryMessage = blastees.entries[entry.id];
+				// And now that we have the standard texts, we can assemble the
+				// notifications for the actual entries
 
-				if (entry.position === 'FLIP') {
-					entryMessage.text += 'Flip for Sides\n';
-					entryMessage.flip += '<p>Flip for Sides</p>';
-				} else if (entry.position && round.eventType === 'speech') {
-					entryMessage.text += `Speak ${entry.position} \n`;
-					entryMessage.html += `<p>You will speak ${entry.position}</p>`;
-				} else if (entry.position) {
-					entryMessage.text += `Side ${entry.position} \n`;
-					entryMessage.html += `<p>Side: ${entry.position}</p>`;
-				}
+				section.entries.forEach( (entry) => {
 
-				if (round.eventType !== 'congress') {
-					entryMessage.text += sectionMessage.entryText;
-				}
-
-				entryMessage.html += sectionMessage.entryHTML;
-				entryMessage.text += sectionMessage.judgeText;
-				entryMessage.html += sectionMessage.judgeHTML;
-
-				// My school
-				if (entry.school) {
-					if (!blastees.schools[entry.school]) {
-						blastees.schools[entry.school] = {
-							subject : `${entry.schoolName} Round Assignments `,
-							text    : `Full assignments for ${entry.schoolName}\n`,
+					// Myself
+					if (!blastees.entries[entry.id]) {
+						blastees.entries[entry.id] = {
+							subject: `${entry.code} ${round.name} ${round.eventAbbr}`,
+							text : sectionMessage.text,
+							html : sectionMessage.html,
 						};
 					}
 
-					if (!blastees.schoolEntries[entry.school]) {
-						blastees.schoolEntries[entry.school] = {
-							text : '',
-							done : {},
-						};
-					}
-					const schoolMessage = blastees.schoolEntries[entry.school];
+					const entryMessage = blastees.entries[entry.id];
 
-					if (!schoolMessage.done[round.id]) {
-						schoolMessage.done[round.id] = true;
-					}
-
-					schoolMessage.text += `${entry.code} is `;
-
-					if (entry.opponent) {
-						schoolMessage.text += `\n\t ${entry.position} vs ${entry.opponent} `;
-					} else if (sectionMessage.entrySingle) {
-						schoolMessage.text += sectionMessage.entrySingle;
-					} else if (round.eventType === 'speech') {
-						schoolMessage.text += ` Speaks ${entry.position} `;
+					if (entry.position === 'FLIP') {
+						entryMessage.text += 'Flip for Sides\n';
+						entryMessage.flip += '<p>Flip for Sides</p>';
+					} else if (entry.position && round.eventType === 'speech') {
+						entryMessage.text += `Speak ${entry.position} \n`;
+						entryMessage.html += `<p>You will speak ${entry.position}</p>`;
 					} else if (entry.position) {
-						schoolMessage.text += ` ${entry.position} `;
+						entryMessage.text += `Side ${entry.position} \n`;
+						entryMessage.html += `<p>Side: ${entry.position}</p>`;
 					}
 
-					if (round.eventType !== 'mock_trial') {
-						schoolMessage.text += sectionMessage.judgeSingle;
+					if (round.eventType !== 'congress') {
+						entryMessage.text += sectionMessage.entryText;
 					}
 
-					schoolMessage.text +=  sectionMessage.single;
-					schoolMessage.text += '\n\n';
-				}
-			});
+					entryMessage.html += sectionMessage.entryHTML;
+					entryMessage.text += sectionMessage.judgeText;
+					entryMessage.html += sectionMessage.judgeHTML;
 
-			section.judges.forEach( (judge) => {
-				// Myself
-				if (!blastees.judges[judge.id]) {
-					blastees.judges[judge.id] = {
-						subject: `${judge.first} ${judge.last} ${round.eventAbbr} ${round.name}`,
-					};
-				}
+					// My school
+					if (entry.school) {
+						if (!blastees.schools[entry.school]) {
+							blastees.schools[entry.school] = {
+								subject : `${entry.schoolName} Round Assignments `,
+								text    : `Full assignments for ${entry.schoolName}\n`,
+							};
+						}
 
-				const judgeMessage = blastees.judges[judge.id];
+						if (!blastees.schoolEntries[entry.school]) {
+							blastees.schoolEntries[entry.school] = {
+								text : '',
+								done : {},
+							};
+						}
+						const schoolMessage = blastees.schoolEntries[entry.school];
 
-				if (!judgeMessage.text) {
-					judgeMessage.text = '';
-					judgeMessage.html = '';
-				}
+						if (!schoolMessage.done[round.id]) {
+							schoolMessage.done[round.id] = true;
+						}
 
-				judgeMessage.text += sectionMessage.text;
-				judgeMessage.html += sectionMessage.html;
+						schoolMessage.text += `${entry.code} `;
 
-				if (!judge.role === '') {
-					judgeMessage.text += `Your role: ${judge.role}\n`;
-					judgeMessage.html += `<p>Your role: ${judge.role}</p>`;
-				}
+						if (entry.opponent) {
+							schoolMessage.text += `\n\t ${entry.position} vs ${entry.opponent} `;
+						} else if (sectionMessage.entrySingle) {
+							schoolMessage.text += sectionMessage.entrySingle;
+						} else if (round.eventType === 'speech') {
+							schoolMessage.text += ` Speaks ${entry.position} `;
+						} else if (entry.position) {
+							schoolMessage.text += ` ${entry.position} `;
+						}
 
-				judgeMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'>`;
-				// I apologize to literally everyone for this but I'm not creating an inline style sheet when I'm on the clock
-				judgeMessage.html += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;`;
-				judgeMessage.html += `text-decoration: none; font-family: Arial; border-radius: 4px; border: 2px solid #016F94;' `;
-				judgeMessage.html += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
-				judgeMessage.html += `START ROUND</a></p>`;
+						if (round.eventType !== 'mock_trial') {
+							schoolMessage.text += sectionMessage.judgeSingle;
+						}
 
-				judgeMessage.text += sectionMessage.entryText;
-				judgeMessage.html += sectionMessage.entryHTML;
-				judgeMessage.text += sectionMessage.judgeText;
-				judgeMessage.html += sectionMessage.judgeHTML;
+						schoolMessage.text +=  sectionMessage.single;
+						schoolMessage.text += '\n';
+					}
+				});
 
-				// My school
-				if (judge.school) {
-					if (!blastees.schools[judge.school]) {
-						blastees.schools[judge.school] = {
-							subject : `${judge.schoolName} Round Assignments `,
-							text    : `Full assignments for ${judge.schoolName}\n`,
+				section.judges.forEach( (judge) => {
+					// Myself
+					if (!blastees.judges[judge.id]) {
+						blastees.judges[judge.id] = {
+							subject: `${judge.first} ${judge.last} ${round.eventAbbr} ${round.name}`,
 						};
 					}
-					if (!blastees.schoolJudges[judge.school]) {
-						blastees.schoolJudges[judge.school] = {
-							text : '',
-							done : {},
-						};
+
+					const judgeMessage = blastees.judges[judge.id];
+
+					if (!judgeMessage.text) {
+						judgeMessage.text = '';
+						judgeMessage.html = '';
 					}
 
-					const schoolMessage = blastees.schoolJudges[judge.school];
+					judgeMessage.text += sectionMessage.text;
+					judgeMessage.html += sectionMessage.html;
 
-					if (!schoolMessage.done[round.id]) {
-						schoolMessage.done[round.id] = true;
+					if (!judge.role === '') {
+						judgeMessage.text += `Your role: ${judge.role}\n`;
+						judgeMessage.html += `<p>Your role: ${judge.role}</p>`;
 					}
 
-					schoolMessage.text += `${judge.code ? `${judge.code} ` : ''}${judge.first} ${judge.last} `;
-					schoolMessage.text += sectionMessage.judgeEntrySingle ? sectionMessage.judgeEntrySingle : '';
-					schoolMessage.text += sectionMessage.entrySingle ? sectionMessage.entrySingle : '';
-					schoolMessage.text += sectionMessage.judgeSingle ? sectionMessage.judgeSingle : '';
-					schoolMessage.text += `${sectionMessage.single} `;
-					schoolMessage.text += '\n';
-				}
+					judgeMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'>`;
+					// I apologize to literally everyone for this but I'm not creating an inline style sheet when I'm on the clock
+					judgeMessage.html += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;`;
+					judgeMessage.html += `text-decoration: none; font-family: Arial; border-radius: 4px; border: 2px solid #016F94;' `;
+					judgeMessage.html += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
+					judgeMessage.html += `START ROUND</a></p>`;
+
+					judgeMessage.text += sectionMessage.entryText;
+					judgeMessage.html += sectionMessage.entryHTML;
+					judgeMessage.text += sectionMessage.judgeText;
+					judgeMessage.html += sectionMessage.judgeHTML;
+
+					// My school
+					if (judge.school) {
+						if (!blastees.schools[judge.school]) {
+							blastees.schools[judge.school] = {
+								subject : `${judge.schoolName} Round Assignments `,
+								text    : `Full assignments for ${judge.schoolName}\n`,
+							};
+						}
+						if (!blastees.schoolJudges[judge.school]) {
+							blastees.schoolJudges[judge.school] = {
+								text : '',
+								done : {},
+							};
+						}
+
+						const schoolMessage = blastees.schoolJudges[judge.school];
+
+						if (!schoolMessage.done[round.id]) {
+							schoolMessage.done[round.id] = true;
+						}
+
+						schoolMessage.text += `${judge.code ? `${judge.code} ` : ''}${judge.first} ${judge.last} `;
+						schoolMessage.text += sectionMessage.judgeEntrySingle ? sectionMessage.judgeEntrySingle : '';
+						schoolMessage.text += sectionMessage.entrySingle ? sectionMessage.entrySingle : '';
+						schoolMessage.text += sectionMessage.judgeSingle ? sectionMessage.judgeSingle : '';
+						schoolMessage.text += `${sectionMessage.single} `;
+						schoolMessage.text += '\n';
+					}
+				});
 			});
 		});
 
 		Object.keys(blastees.schools).forEach( (schoolId) => {
-			blastees.schools[schoolId].text += `${round.eventAbbr} ${round.name} Start ${round.shortstart[1]}\n\n`;
+			blastees.schools[schoolId].text += `\n${round.eventAbbr} ${round.name} Start ${round.shortstart[1]}\n\n`;
 			if (blastees.schoolEntries[schoolId]) {
-				blastees.schools[schoolId].text += `ENTRIES\n${blastees.schoolEntries[schoolId].text}\n\n`;
+				blastees.schools[schoolId].text += `ENTRIES\n${blastees.schoolEntries[schoolId].text}`;
 			}
 			if (blastees.schoolJudges[schoolId]) {
-				blastees.schools[schoolId].text += `JUDGES\n${blastees.schoolJudges[schoolId].text}\n\n`;
+				blastees.schools[schoolId].text += `JUDGES\n${blastees.schoolJudges[schoolId].text}`;
 			}
 		});
 
@@ -619,6 +670,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 	}
 
 	for await (const judgeId of Object.keys(blastees.judges)) {
+
 		const email = await emailBlast({
 			...blastees.judges[judgeId],
 			...followers.only.judge[judgeId],
@@ -645,6 +697,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 	}
 
 	for await (const schoolId of Object.keys(blastees.schools)) {
+
 		const email = await emailBlast({
 			...blastees.schools[schoolId],
 			...followers.only.school[schoolId],
@@ -684,22 +737,24 @@ const processRounds = async (rawRounds) => {
 		if (!roundData[row.roundid]) {
 
 			const round = {
-				id         : row.roundid,
-				name       : row.roundlabel ? row.roundlabel : `Round ${row.roundname}`,
-				number     : row.roundname,
-				type       : row.roundtype,
-				eventId    : row.eventid,
-				eventName  : row.eventname,
-				eventAbbr  : row.eventabbr,
-				eventType  : row.eventtype,
-				flip       : false,
-				start      : {},
-				shortstart : {},
-				flipAt     : {},
-				settings   : {},
-				sections   : {},
-				schools    : {},
-				sidelocks  : {},
+				id             : row.roundid,
+				name           : row.roundlabel ? row.roundlabel : `Round ${row.roundname}`,
+				number         : row.roundname,
+				type           : row.roundtype,
+				flights        : row.roundflights,
+				eventId        : row.eventid,
+				eventName      : row.eventname,
+				eventAbbr      : row.eventabbr,
+				eventType      : row.eventtype,
+				flip           : false,
+				start          : {},
+				shortstart     : {},
+				flipAt         : {},
+				settings       : {},
+				sections       : {},
+				flightSections : {},
+				schools        : {},
+				sidelocks      : {},
 			};
 
 			['include_room_notes',
@@ -731,27 +786,27 @@ const processRounds = async (rawRounds) => {
 			// something like this monstrosity. 'Twas foreach (1 ... n) {}.
 			// Progress! Sigh.
 
-			[...Array(row.roundflights)].map((item, tick) => {
+			[...Array(round.flights).keys()].forEach( (tick) => {
 				const flight = tick + 1;
 				round.start[flight] = '';
 				round.shortstart[flight] = '';
 
 				round.start[flight] =
 					moment(row.roundstart)
-						.add(parseInt(flight * row.flight_offset), 'minutes')
+						.add(parseInt(tick * row.flight_offset), 'minutes')
 						.tz(row.tz)
 						.format('h:mm z');
 
 				round.shortstart[flight] =
 					moment(row.roundstart)
-						.add(parseInt(flight * row.flight_offset), 'minutes')
+						.add(parseInt(tick * row.flight_offset), 'minutes')
 						.tz(row.tz)
 						.format('h:mm');
 
 				if (round.flip && row.flip_split_flights && row.flip_at) {
 					round.flipAt[flight] =
 						moment(row.flip_at)
-							.add(parseInt(flight * row.flight_offset), 'minutes')
+							.add(parseInt(tick * row.flight_offset), 'minutes')
 							.tz(row.tz)
 							.format('h:mm');
 				} else if (round.flip && row.flip_at) {
@@ -819,6 +874,11 @@ const processRounds = async (rawRounds) => {
 			section.roomnotes = row.roomnotes;
 		}
 
+		if (!round.flightSections[row.flight]) {
+			round.flightSections[row.flight] = {};
+		}
+
+		round.flightSections[row.flight][row.sectionid] = section;
 		round.sections[row.sectionid] = section;
 
 	});
@@ -859,11 +919,10 @@ const positionString = (entry, round, section) => {
 
 		if (!round.flip || round.sidelocks[section.id]) {
 			if (parseInt(entry.side) === 1) {
-				return round.settings.aff_label ? round.settings.aff_label.toUpperCase() : ' AFF';
+				return `is ${round.settings.aff_label ? round.settings.aff_label.toUpperCase() : ' AFF'}`;
 			}
 
-			return round.settings.neg_label ? round.settings.neg_label.toUpperCase() : ' NEG';
-
+			return `is ${round.settings.neg_label ? round.settings.neg_label.toUpperCase() : ' NEG'}`;
 		}
 		return 'FLIP';
 	}

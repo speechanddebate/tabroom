@@ -40,7 +40,7 @@ export const emailBlast = async (inputData) => {
 
 	if (messageData.text) {
 		if (messageData.append) {
-			messageData.text += `\n${convert(messageData.append)}\n`;
+			messageData.text += `\n\n${convert(messageData.append)}\n`;
 		}
 		messageData.text += '\n----------------------------\n';
 		messageData.text +=  'You received this email because you registered for an account on https://www.tabroom.com\n';
@@ -51,7 +51,7 @@ export const emailBlast = async (inputData) => {
 
 	if (messageData.html) {
 		if (messageData.append) {
-			messageData.html += `<p>${convert(messageData.append)}</p>`;
+			messageData.html += `<br /><p>${convert(messageData.append)}</p>`;
 		}
 		messageData.html += '<p>-----------------------------</p>';
 		messageData.html += '<p>You received this email because you registered for an account on ';
@@ -117,7 +117,7 @@ export const phoneBlast = async (inputData) => {
 	}
 
 	if (messageData.append) {
-		messageData.text += `${convert(messageData.append)}`;
+		messageData.text += `\n${convert(messageData.append)}`;
 	}
 	messageData.text += '\n\n';
 	messageData.text += 'You registered for these texts on Tabroom.com\n';
