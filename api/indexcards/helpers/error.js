@@ -1,5 +1,6 @@
 // This piece of code blatantly stolen from Hardy & the NSDA API project.
 // --CLP
+import { debugLogger } from './logger';
 
 const errorHandler = (err, req, res, next) => {
 
@@ -26,6 +27,7 @@ const errorHandler = (err, req, res, next) => {
 	}
 
 	// Default to a 500 error
+	debugLogger.error(err);
 	return res.status(500).json({
 		message          : err.message || 'Internal server error',
 		logCorrelationId : req.uuid,
