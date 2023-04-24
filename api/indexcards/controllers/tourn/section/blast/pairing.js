@@ -54,6 +54,12 @@ export const blastRound = {
 					type         : req.db.sequelize.QueryTypes.UPDATE,
 				});
 
+			await req.db.changeLog.create({
+				tag         : 'publish',
+				description : `Round published`,
+				person      : req.session.person,
+				round       : req.params.round_id,
+			});
 			await scheduleAutoFlip(req.params.round_id, req, res);
 		}
 
@@ -93,9 +99,9 @@ export const blastTimeslot = {
 		queryData.where = 'where round.timeslot = :timeslotId and round.id = section.round ';
 
 		const tsRounds = await req.db.sequelize.query(
-			`select round.* from round where round.timeslot = :timeslotId`, {
+			`select round.id, round.name, round.type from round where round.timeslot = :timeslotId`, {
 				replacements : queryData.replacements,
-				type         : req.db.sequelize.QueryTypes.INSERT,
+				type         : req.db.sequelize.QueryTypes.SELECT,
 			});
 
 		await req.db.sequelize.query(
@@ -121,6 +127,12 @@ export const blastTimeslot = {
 
 			tsRounds.forEach( async (row) => {
 				await scheduleAutoFlip(row.id, req, res);
+				await req.db.changeLog.create({
+					tag         : 'publish',
+					description : `Round published`,
+					person      : req.session.person,
+					round       : row.id
+				});
 			});
 		}
 
@@ -348,9 +360,9 @@ const formatBlast = async (queryData, req) => {
 				}
 
 				sectionMessage.text += `Start ${round.shortstart[section.flight]} \n`;
-				sectionMessage.html += `<p style="width: 25%; display: inline-block;">Start ${round.start[section.flight]}</p>`;
-
 				sectionMessage.text += `Room: ${section.room} `;
+
+				sectionMessage.html += `<p style="width: 25%; display: inline-block;">Start ${round.start[section.flight]}</p>`;
 				sectionMessage.html += `<p style="width: 75%; display: inline-block; text-align: center;">Room: ${section.room} `;
 				sectionMessage.single += `\tRoom ${section.room} Counter ${counter++} Letter ${section.letter}`;
 
@@ -502,7 +514,7 @@ const formatBlast = async (queryData, req) => {
 					entryMessage.html += sectionMessage.judgeHTML;
 
 					// My school
-					if (entry.school) {
+					if (entry.school && blastees.schoolEntries ) {
 						if (!blastees.schools[entry.school]) {
 							blastees.schools[entry.school] = {
 								subject : `${entry.schoolName} Round Assignments `,
@@ -579,7 +591,7 @@ const formatBlast = async (queryData, req) => {
 					judgeMessage.html += sectionMessage.judgeHTML;
 
 					// My school
-					if (judge.school) {
+					if (judge.school && blastees.schoolJudges) {
 						if (!blastees.schools[judge.school]) {
 							blastees.schools[judge.school] = {
 								subject : `${judge.schoolName} Round Assignments `,
@@ -612,10 +624,10 @@ const formatBlast = async (queryData, req) => {
 
 		Object.keys(blastees.schools).forEach( (schoolId) => {
 			blastees.schools[schoolId].text += `\n${round.eventAbbr} ${round.name} Start ${round.shortstart[1]}\n\n`;
-			if (blastees.schoolEntries[schoolId]) {
+			if (blastees.schoolEntries?.[schoolId]) {
 				blastees.schools[schoolId].text += `ENTRIES\n${blastees.schoolEntries[schoolId].text}`;
 			}
-			if (blastees.schoolJudges[schoolId]) {
+			if (blastees.schoolJudges?.[schoolId]) {
 				blastees.schools[schoolId].text += `JUDGES\n${blastees.schoolJudges[schoolId].text}`;
 			}
 		});
@@ -663,6 +675,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 		});
 
 		phoneResponse.count += phone.count;
+
 		if (phoneResponse.error) {
 			phoneResponse.error = true;
 		}
@@ -721,6 +734,45 @@ const sendBlast = async (followers, blastees, req, res) => {
 			emailCount   : emailResponse.count,
 		});
 	} else {
+
+		if (req.params.section_id) {
+			await req.db.changeLog.create({
+				tag         : 'blast',
+				description : `Pairing sent to section. Message: ${req.body.message}`,
+				person      : req.session.person,
+				count       : phoneResponse.count,
+				panel       : req.params.section_id,
+			});
+
+			await req.db.changeLog.create({
+				tag         : 'emails',
+				description : `Pairing sent to section. Message: ${req.body.message}`,
+				person      : req.session.person,
+				count       : emailResponse.count,
+				panel       : req.params.section_id,
+			});
+		} else {
+
+			blastees.rounds.forEach( async (round) => {
+
+				await req.db.changeLog.create({
+					tag         : 'blast',
+					description : `Pairing sent. Message: ${req.body.message}`,
+					person      : req.session.person,
+					count       : phoneResponse.count,
+					round       : round.id,
+				});
+
+				await req.db.changeLog.create({
+					tag         : 'emails',
+					description : `Pairing sent. Message: ${req.body.message}`,
+					person      : req.session.person,
+					count       : emailResponse.count,
+					round       : round.id,
+				});
+			});
+		}
+
 		res.status(200).json({
 			error   : false,
 			message : `Pairings sent to ${emailResponse.count + phoneResponse.count} recipients`,

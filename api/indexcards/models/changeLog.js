@@ -8,15 +8,20 @@ const changeLog = (sequelize, DataTypes) => {
 			type: DataTypes.TEXT('medium'),
 			allowNull: false,
 		},
-		deleted          : {
+		count: {
+			type      : DataTypes.INTEGER,
+			allowNull : true,
+		},
+		deleted: {
 			type         : DataTypes.BOOLEAN,
 			allowNull    : false,
 			defaultValue : false,
 		},
-		createdAt : {
+		createdAt: {
 			type      : DataTypes.DATE,
 			allowNull : true,
 			field     : 'created_at',
+			defaultValue: new Date(),
 		},
 	}, {
 		tableName : 'change_log',

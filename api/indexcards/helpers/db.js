@@ -79,8 +79,11 @@ db.changeLog.belongsTo(db.school   , { as: 'School'     , foreignKey: 'school' }
 db.changeLog.belongsTo(db.entry    , { as: 'Entry'      , foreignKey: 'entry' });
 db.changeLog.belongsTo(db.judge    , { as: 'Judge'      , foreignKey: 'judge' });
 
-db.changeLog.belongsTo(db.panel    , { as: 'oldPanel' , foreignKey: 'old_panel' });
-db.changeLog.belongsTo(db.panel    , { as: 'newPanel' , foreignKey: 'new_panel' });
+db.changeLog.belongsTo(db.section , { as: 'Section'     , foreignKey: 'panel' });
+db.changeLog.belongsTo(db.panel   , { as: 'Panel'       , foreignKey: 'panel' });
+db.changeLog.belongsTo(db.round   , { as: 'Round'       , foreignKey: 'round' });
+db.changeLog.belongsTo(db.panel   , { as: 'oldPanel'    , foreignKey: 'old_panel' });
+db.changeLog.belongsTo(db.panel   , { as: 'newPanel'    , foreignKey: 'new_panel' });
 db.changeLog.belongsTo(db.section , { as : 'oldSection' , foreignKey : 'old_panel' });
 db.changeLog.belongsTo(db.section , { as : 'newSection' , foreignKey : 'new_panel' });
 

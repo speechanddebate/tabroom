@@ -307,6 +307,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 	blastMe.phone = Array.from(new Set(blastMe.phone));
 	blastMe.email = Array.from(new Set(blastMe.email));
 	blastMe.only  = { ...blastOnly };
+	blastMe.recipients = options.recipients;
 
 	return blastMe;
 

@@ -5,7 +5,10 @@ import { sectionCheck, timeslotCheck, roundCheck } from '../../../../helpers/tou
 export const messageSection = {
 	POST: async (req, res) => {
 		if (!req.body.message) {
-			res.status(200).json({ error: true, message: 'No message to blast sent' });
+			res.status(200).json({
+				error: true,
+				message: 'No message to blast sent',
+			});
 		}
 
 		// Permissions.  I feel like there should be a better way to do this
@@ -16,7 +19,12 @@ export const messageSection = {
 
 		const messageData = await getFollowers(
 			{ sectionId : req.params.section_id },
-			{ entries: true, no_followers: req.body.no_followers }
+			{
+				recipients   : req.body.recipients,
+				status       : req.body.status,
+				flight       : req.body.flight,
+				no_followers : req.body.no_followers,
+			}
 		);
 
 		messageData.text = `\n\n${req.body.message}`;
@@ -28,7 +36,27 @@ export const messageSection = {
 		if (emailResponse.error && phoneResponse.error) {
 			res.status(200).json({ error: true, message: emailResponse.message });
 		} else {
-			res.status(200).json({ error: false, message: `Message sent to ${emailResponse.count + phoneResponse.count} recipients` });
+
+			await req.db.changeLog.create({
+				tag         : 'blast',
+				description : `${req.body.message} sent to ${req.body.recipients}`,
+				person      : req.session.person,
+				count       : phoneResponse.count,
+				panel       : req.params.section_id,
+			});
+
+			await req.db.changeLog.create({
+				tag         : 'emails',
+				description : `${req.body.message} sent to ${req.body.recipients}`,
+				person      : req.session.person,
+				count       : emailResponse.count,
+				panel       : req.params.section_id,
+			});
+
+			res.status(200).json({
+				error   : false,
+				message : `Message sent to ${emailResponse.count + phoneResponse.count} recipients`,
+			});
 		}
 	},
 };
@@ -66,7 +94,27 @@ export const messageRound = {
 		if (emailResponse.error && phoneResponse.error) {
 			res.status(200).json({ error: true, message: emailResponse.message });
 		} else {
-			res.status(200).json({ error: false, message: `Message sent to ${emailResponse.count + phoneResponse.count} recipients` });
+
+			await req.db.changeLog.create({
+				tag         : 'blast',
+				description : `${req.body.message} sent to ${req.body.recipients} in ${req.body.status} sections`,
+				person      : req.session.person,
+				count       : phoneResponse.count,
+				round       : req.params.round_id,
+			});
+
+			await req.db.changeLog.create({
+				tag         : 'emails',
+				description : `${req.body.message} sent to ${req.body.recipients} in ${req.body.status} sections`,
+				person      : req.session.person,
+				count       : emailResponse.count,
+				round       : req.params.round_id,
+			});
+
+			res.status(200).json({
+				error: false,
+				message: `Message sent to ${emailResponse.count + phoneResponse.count} recipients`,
+			});
 		}
 	},
 };
@@ -86,7 +134,7 @@ export const messageTimeslot = {
 		}
 
 		const messageData = await getFollowers(
-			{ roundId : req.params.round_id },
+			{ timeslotId : req.params.timeslot_id },
 			{
 				recipients   : req.body.recipients,
 				status       : req.body.status,
@@ -98,12 +146,35 @@ export const messageTimeslot = {
 		messageData.text = `\n\n${req.body.message}`;
 		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
+
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
 
 		if (emailResponse.error && phoneResponse.error) {
 			res.status(200).json({ error: true, message: emailResponse.message });
 		} else {
+
+			const rounds = await req.db.round.findAll({
+				where: { timeslot: req.params.timeslot_id },
+			});
+
+			rounds.forEach( async (round) => {
+				await req.db.changeLog.create({
+					tag         : 'blast',
+					description : `${req.body.message} sent to ${req.body.recipients} in ${req.body.status} sections`,
+					person      : req.session.person,
+					count       : phoneResponse.count,
+					round       : round.id,
+				});
+
+				await req.db.changeLog.create({
+					tag         : 'emails',
+					description : `${req.body.message} sent to ${req.body.recipients} in ${req.body.status} sections`,
+					person      : req.session.person,
+					count       : emailResponse.count,
+					round       : round.id,
+				});
+			});
 			res.status(200).json({ error: false, message: `Message sent to ${emailResponse.count + phoneResponse.count} recipients` });
 		}
 	},
