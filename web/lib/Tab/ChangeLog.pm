@@ -8,7 +8,6 @@ Tab::ChangeLog->columns(Others => qw/judge entry event category round panel new_
 Tab::ChangeLog->has_a(person   => "Tab::Person");
 Tab::ChangeLog->has_a(tourn    => "Tab::Tourn");
 Tab::ChangeLog->has_a(event    => "Tab::Event");
-Tab::ChangeLog->has_a(circuit  => "Tab::Circuit");
 Tab::ChangeLog->has_a(category => "Tab::Category");
 Tab::ChangeLog->has_a(entry    => "Tab::Entry");
 Tab::ChangeLog->has_a(school   => "Tab::School");
