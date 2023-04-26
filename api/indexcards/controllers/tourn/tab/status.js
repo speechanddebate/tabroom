@@ -145,37 +145,87 @@ export const attendance = {
 			group by panel.id, judge.id
 		`;
 
+		const confirmedQuery = `
+			select
+				panel.id panel, panel.bye bye,
+				CONVERT_TZ(confirmed_started.timestamp, '+00:00', tourn.tz) confirmedAt,
+				CONCAT(confirmed_by.first,' ',confirmed_by.last) confirmedBy,
+				tourn.tz tz
+
+			from (panel, round, event, tourn)
+
+				left join panel_setting confirmed_started
+					on panel.id = confirmed_started.panel
+					and confirmed_started.tag = 'confirmed_started'
+
+				left join person confirmed_by
+					on confirmed_by.id = confirmed_started.value
+
+			${queryLimit}
+				and round.id = panel.round
+				and round.event = event.id
+				and event.tourn = tourn.id
+		`;
+
 		// A raw query to go through the category filter
 		const [attendanceResults]         = await db.sequelize.query(attendanceQuery);
 		const [unlinkedAttendanceResults] = await db.sequelize.query(unlinkedAttendanceQuery);
 		const [entryAttendanceResults]    = await db.sequelize.query(entryAttendanceQuery);
 		const [startsResults]             = await db.sequelize.query(startsQuery);
+		const [confirmedResults]          = await db.sequelize.query(confirmedQuery);
 
-		const status = {};
+		const status = {
+			panel   : {},
+			person  : {},
+			entry   : {},
+			judge   : {},
+			student : {},
+		};
 
 		attendanceResults.forEach( attend => {
 
-			if (status[attend.person] === undefined) {
-				status[attend.person] = {};
+			if (status.person[attend.person] === undefined) {
+				status.person[attend.person] = {};
 			}
 
-			status[attend.person][attend.panel] = {
+			status.person[attend.person][attend.panel] = {
 				tag         : attend.tag,
 				timestamp   : attend.timestamp.toJSON,
 				description : attend.description,
 			};
 		});
 
+		confirmedResults.forEach( confirmation => {
+			if (confirmation.bye) {
+				status.panel[confirmation.panel] = `Bye rounds don't need confirmation, silly`;
+			} else if (confirmation.confirmedBy) {
+				const timestamp = showDateTime(confirmation.confirmedAt, { tz: confirmation.tz, format: 'daytime' });
+				status.panel[confirmation.panel] = `Confirmed by ${confirmation.confirmedBy} at ${timestamp}`;
+			}
+		});
+
 		unlinkedAttendanceResults.forEach( attend => {
 
 			if (attend.student) {
-				attend.person = `student_${attend.student}`;
+				status.student[attend.student] = {
+					[attend.panel]  : {
+						tag         : attend.tag,
+						timestamp   : attend.timestamp.toJSON,
+						description : attend.description,
+						started     : showDateTime(attend.timestamp, { tz: attend.tz, format: 'daytime' }),
+					},
+				};
 			} else if (attend.judge) {
-				attend.person = `judge_${attend.judge}`;
-			}
-
-			if (attend.person) {
-				status[attend.person] = {
+				status.judge[attend.judge] = {
+					[attend.panel]  : {
+						tag         : attend.tag,
+						timestamp   : attend.timestamp.toJSON,
+						description : attend.description,
+						started     : showDateTime(attend.timestamp, { tz: attend.tz, format: 'daytime' }),
+					},
+				};
+			} else if (attend.person) {
+				status.person[attend.person] = {
 					[attend.panel]  : {
 						tag         : attend.tag,
 						timestamp   : attend.timestamp.toJSON,
@@ -187,7 +237,7 @@ export const attendance = {
 		});
 
 		entryAttendanceResults.forEach( attend => {
-			status[attend.entry] = {
+			status.entry[attend.entry] = {
 				[attend.panel]  : {
 					tag         : attend.tag,
 					timestamp   : attend.timestamp.toJSON,
@@ -198,33 +248,39 @@ export const attendance = {
 		});
 
 		startsResults.forEach( start => {
-			if (status[start.person] === undefined) {
-				status[start.person] = {};
+
+
+			if (status.person[start.person] === undefined) {
+				status.person[start.person] = {};
 			}
 
-			if (status[start.person][start.panel] === undefined) {
-				status[start.person][start.panel] = {};
+
+			if (status.person[start.person][start.panel] === undefined) {
+				status.person[start.person][start.panel] = {};
 			}
+
+			const myPanel = status.person[start.person][start.panel];
 
 			if (start.startFirst === undefined) {
-				status[start.person][start.panel].started_by = `${start.judgeFirst}  ${start.judgeLast}`;
+				myPanel.started_by = `${start.judgeFirst}  ${start.judgeLast}`;
 			} else {
-				status[start.person][start.panel].started_by = `${start.startFirst} ${start.startLast}`;
+				myPanel.started_by = `${start.startFirst} ${start.startLast}`;
 			}
 
 			if (start.startTime) {
-				status[start.person][start.panel].started = showDateTime(start.startTime);
+				myPanel.started = showDateTime(start.startTime, { tz: start.tz, format: 'daytime' });
 			}
-			status[start.person][start.panel].timestamp = start.timestamp;
+
+			myPanel.timestamp = start.timestamp;
 
 			if (start.tag) {
-				status[start.person][start.panel].tag = start.tag;
+				myPanel.tag = start.tag;
 			} else {
-				status[start.person][start.panel].tag = 'absent';
+				myPanel.tag = 'absent';
 			}
 
 			if (start.audited) {
-				status[start.person][start.panel].audited = true;
+				myPanel.audited = true;
 			}
 		});
 
