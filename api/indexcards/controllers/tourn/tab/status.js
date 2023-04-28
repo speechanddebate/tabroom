@@ -36,6 +36,7 @@ export const attendance = {
 				and panel.round = round.id
 				and panel.id = cl.panel
 				and cl.tourn = tourn.id
+				and cl.tag != 'observer'
 				and cl.person = person.id
 
 				and ( exists (
@@ -74,6 +75,7 @@ export const attendance = {
 				and panel.round = round.id
 				and panel.id = cl.panel
 				and cl.tourn = tourn.id
+				and cl.tag != 'observer'
 				and (cl.person is NULL OR cl.person = 0)
 
 				and ( exists (
@@ -110,6 +112,7 @@ export const attendance = {
 				and panel.id = cl.panel
 				and cl.tourn = tourn.id
 				and cl.entry = entry.id
+				and cl.tag != 'observer'
 				and panel.id = ballot.panel
 				and ballot.entry = entry.id
 				and entry.active = 1
@@ -130,7 +133,8 @@ export const attendance = {
 			from (panel, tourn, round, ballot, event, judge, entry)
 
 				left join person started_by on ballot.started_by = started_by.id
-				left join campus_log cl on cl.panel = panel.id and cl.person = judge.person
+				left join campus_log cl on cl.panel = panel.id and cl.person = judge.person 
+					and cl.tag != 'observer'
 
 			${queryLimit}
 
