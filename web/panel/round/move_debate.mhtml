@@ -1,19 +1,70 @@
 <%args>
 	$person
 	$tourn
-	$entry_id     => undef
-	$panel_marker => undef
+	$entry_id => undef
+	$side     => undef
+	$panel_id => undef
+	$round_id => undef
 </%args>
 <%init>
 
 	$m->clear_buffer;
 	$r->content_type('application/json');
 
+	unless ($entry_id) {
+		$m->print('{
+			"error"   : true,
+			"message" : "No valid entry ID sent"
+		}');
+		$m->abort();
+	}
+
+	unless ($panel_id) {
+		$m->print('{
+			"error"   : true,
+			"message" : "No valid section ID sent"
+		}');
+		$m->abort();
+	}
+
+	unless ($panel_id eq "notAssigned" || $side) {
+		$m->print('{
+			"error"   : true,
+			"message" : "No valid side sent"
+		}');
+		$m->abort();
+	}
+
+	my $dbh = Tab::DBI->db_Main();
 	my $origin_entry = Tab::Entry->retrieve($entry_id) if $entry_id;
-	my ($panel_id, $side) = split(/_/, $panel_marker) if $panel_marker;
+	my $round = Tab::Round->retrieve($round_id);
+
+	my $remove_sth = $dbh->prepare("
+		delete ballot.*
+			from ballot, panel
+		where panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.entry = ?
+	");
+
+	if ($panel_id eq "notAssigned") {
+
+		$remove_sth->execute($round->id, $origin_entry->id);
+		$remove_sth->finish();
+
+		my $description = $origin_entry->code." was removed from ".$round->realname;
+
+		my %response = (
+			error   => JSON::false,
+			message => $description
+		);
+
+		$m->print(JSON::encode_json(\%response));
+		$m->flush_buffer();
+		$m->abort();
+	}
 
 	my $target_panel = Tab::Panel->retrieve($panel_id) if $panel_id;
-	my $round = Tab::Round->retrieve($ARGS{'round_id'});
 
 	Tab::Panel->set_sql( origin => "
 		select panel.*
@@ -23,57 +74,24 @@
 			and ballot.entry = ?
 	");
 
-	if ($panel_id eq "notAssigned") {
-
-		Tab::Panel->set_sql( origin => "
-			select panel.*
-				from panel, ballot
-				where panel.round = ?
-				and panel.id = ballot.panel
-				and ballot.entry = ?
-		");
-
-		my $origin_panel = Tab::Panel->search_origin($round->id, $origin_entry->id)->first;
-
-		my $tb;
-
-		if ($origin_panel) {
-			$tb = $origin_panel->ballots( entry => $origin_entry )->first;
-			$tb->delete();
-		}
-
-		my $description = $origin_entry->code." was removed from ".$round->realname;
-
-		$m->print('{
-			"error"   : false,
-			"message" : "'.$description.'"
-		}');
-
-		$m->abort;
-	}
-
 	unless ($target_panel && $origin_entry) {
 
-		$m->print('{
-			"error": true,
-			"message": "No debate for '.$panel_id.' or entry for '.$entry_id.' found.  Please refresh this page and start again"}
-		');
-		$m->abort;
-	}
+		Tab::debuglog("We are so screwed");
 
-	unless ($side) {
+		my %response = (
+			error   => JSON::true,
+			message => "No debate for '.$panel_id.' or entry for '.$entry_id.' found.  Please refresh this page and start again"
+		);
 
-		$m->print('{
-			"error": true,
-			"message": "No debate side sent: '.$side.'"}
-		');
-		$m->abort;
+		$m->print(JSON::encode_json(\%response));
+		$m->flush_buffer();
+		$m->abort();
 	}
 
 	Tab::Entry->set_sql( target => "
 		select entry.*
 			from entry, ballot
-			where ballot.panel = ?
+		where ballot.panel = ?
 			and ballot.side = ?
 			and ballot.entry = entry.id
 	");
@@ -83,9 +101,9 @@
 
 	if ($origin_entry == $target_entry) {
 		$m->print('{
-			"error": true,
-			"message": "No move made"}
-		');
+			"error"   : true,
+			"message" : "No move made: origin and destination are the same, so that would be weird."
+		}');
 		$m->abort();
 	}
 
@@ -114,138 +132,88 @@
 	}
 
 	my $origin_side;
-
-	Tab::Score->set_sql( wipe_scores => "
-		delete score.*
-		from score, ballot
-		where score.ballot = ballot.id
-		and ballot.entry = ?
-		and ballot.panel = ?
-	");
-
-	Tab::Ballot->set_sql( swap => "
-		update ballot set entry = ?
-			where panel = ?
-			and entry = ?
-	");
-
 	my $description;
 
-	if ($origin_panel && $origin_entry && $target_entry) {
-		Tab::Score->sql_wipe_scores->execute($origin_entry, $origin_panel);
-		Tab::Ballot->sql_swap->execute($target_entry, $origin_panel, $origin_entry);
-		$description .= "Moved ".$target_entry->code." to ".$origin_panel->letter;
-
-		my $ob = $origin_panel->ballots( entry => $target_entry )->first;
-		$origin_side = $ob->side;
-
-	} elsif ($target_entry) {
-		$origin_panel = "notAssigned";
+	if ($origin_panel && $origin_entry) {
+		my $origin_ballot = Tab::Ballot->search( entry => $origin_entry, panel => $origin_panel)->first;
+		$origin_side = $origin_ballot->side;
+		$remove_sth->execute($round->id, $origin_entry->id);
 	}
 
-	if ($target_panel && $target_entry && $origin_entry) {
-		Tab::Score->sql_wipe_scores->execute($target_entry, $target_panel);
-		Tab::Ballot->sql_swap->execute($origin_entry, $target_panel, $target_entry);
-		$description .= ".  Moved ".$origin_entry->code." to ".$target_panel->letter;
+	if ($target_panel && $target_entry) {
+		$remove_sth->execute($round->id, $target_entry->id);
 	}
 
-	if ($target_panel && $origin_entry && (not defined $target_entry) && (not defined $origin_panel)) {
+	my $noflop;
+
+	if ($target_panel && $origin_entry) {
 
 		my @judges = $m->comp("/funclib/panel_judges.mas", panel => $target_panel);
-
-		my $already = Tab::Ballot->search(
-			panel => $target_panel->id,
-			side  => $side,
-			entry => $origin_entry
-		)->first;
-
-		if ($already) {
-			my $description = "That entry was already in that debate on that side";
-			$m->print('{
-				"error"        : false,
-				"message"      : "'.$description.'",
-				"origin_panel" : "'.$origin_panel.'",
-				"origin_side"  : "'.$origin_side.'",
-				"target_entry" : "'.$target_entry.'",
-				refresh        : true
-			}');
-		}
-
-		my $side_taken = Tab::Ballot->search(
-			panel => $target_panel->id,
-			side  => $side
-		)->first;
-
-		if ($side_taken) {
-
-			my $description = "A different entry was already in that debate on that side";
-
-			$m->print('{
-				"error"        : false,
-				"message"      : "'.$description.'",
-				"origin_panel" : "'.$origin_panel.'",
-				"origin_side"  : "'.$origin_side.'",
-				"target_entry" : "'.$target_entry.'",
-				refresh        : true
-			}');
-		}
 
 		if (@judges) {
 
 			foreach my $judge (@judges) {
-
-				if (
-					Tab::Ballot->search(
-						panel => $target_panel,
-						side  => $side,
-						judge => $judge
-					)
-				) {
-
-					my $description = "A different entry was already in that spot for that judge. ";
-					$description .= "You should do entry adjustments for sections without judging.";
-
-					$m->print('{
-						"error"        : false,
-						"message"      : "'.$description.'",
-						"origin_panel" : "'.$origin_panel.'",
-						"origin_side"  : "'.$origin_side.'",
-						"target_entry" : "'.$target_entry.'",
-						refresh        : true
-					}');
-
-				} else {
-
+				eval {
 					Tab::Ballot->create({
 						panel => $target_panel,
 						side  => $side,
 						judge => $judge->id,
 						entry => $origin_entry
 					});
-				}
+				};
 			}
-
 		} else {
-
-			unless (
-				Tab::Ballot->search(
-					panel => $target_panel->id,
-					side  => $side,
-					entry => $origin_entry
-				)
-			) {
+			eval {
 				Tab::Ballot->create({
 					panel => $target_panel->id,
 					side  => $side,
 					entry => $origin_entry
 				});
-			}
+			};
 		}
 
 		$description .= "Moved ".$origin_entry->code." into debate ".$target_panel->letter;
-		$origin_side = "2";
-		$origin_panel = "notAssigned";
+		$noflop++;
 	}
+
+	Tab::debuglog("Moving ".$target_entry->code." to section ".$origin_panel->letter." on side $origin_side");
+
+	if ($origin_panel && $target_entry) {
+
+		my @judges = $m->comp("/funclib/panel_judges.mas", panel => $origin_panel);
+
+		if (@judges) {
+
+			foreach my $judge (@judges) {
+				eval {
+					Tab::Ballot->create({
+						panel => $origin_panel,
+						side  => $origin_side,
+						judge => $judge->id,
+						entry => $target_entry
+					});
+				};
+			}
+		} else {
+
+			my $ballot = eval {
+				return Tab::Ballot->create({
+					panel => $origin_panel->id,
+					side  => $origin_side,
+					entry => $target_entry
+				});
+			};
+
+			Tab::debuglog("ballot created was $ballot");
+		}
+
+		$description .= "\n" if $description;
+		$description .= "Moved ".$target_entry->code." into debate ".$origin_panel->letter;
+		$noflop++;
+	}
+
+	$origin_panel = "notAssigned" if $noflop;
+	$origin_side = "2" if $noflop;
 
 	$m->comp("/funclib/log.mas",
 		type        => 'tabbing',
