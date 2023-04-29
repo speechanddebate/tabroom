@@ -34,7 +34,7 @@ export const blastSection = {
 };
 
 export const blastRound = {
-	POST: async (req, res) => {
+	GET: async (req, res) => {
 
 		// Permissions.  I feel like there should be a better way to do this
 		const permOK = await roundCheck(req, res, req.params.round_id);
@@ -284,7 +284,9 @@ const formatBlast = async (queryData, req) => {
 	const roundData = await processRounds(rawRoundData);
 
 	rawEntries.forEach( (row) => {
+
 		const section = roundData[row.roundid].sections[row.sectionid];
+
 		section.entries.push({
 			id         : row.id,
 			code       : row.code,
@@ -784,7 +786,7 @@ const processRounds = async (rawRounds) => {
 
 	const roundData  = { };
 
-	rawRounds.forEach( async (row) => {
+	rawRounds.forEach( (row) => {
 
 		if (!roundData[row.roundid]) {
 
@@ -828,7 +830,8 @@ const processRounds = async (rawRounds) => {
 				} else if (row.no_side_constraints) {
 					round.flip = true;
 				} else if (round.type === 'elim' || round.type === 'final' || round.type === 'runoff') {
-					round.sidelocks = await sidelocks(round.id);
+					const locks = sidelocks(round.id);
+					round.sidelocks = { ...locks};
 					round.flip = true;
 				}
 			}
@@ -867,7 +870,6 @@ const processRounds = async (rawRounds) => {
 							.tz(row.tz)
 							.format('h:mm');
 				}
-				return round;
 			});
 
 			roundData[row.roundid] = round;

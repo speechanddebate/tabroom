@@ -11,31 +11,36 @@ export const sidelocks = async (roundId) => {
 				neg_bo.side aff_ok,
 				aff_bo.side neg_ok
 
-		from section, ballot aff_b, ballot neg_b, entry aff_e, entry neg_e,
-			section other, ballot aff_bo, ballot neg_bo
+		from panel section, ballot aff_b, ballot neg_b, entry aff_e, entry neg_e,
+			panel other, ballot aff_bo, ballot neg_bo
 
 		where section.round = :roundId
-			and section.id = aff_b.section
+			and section.id = aff_b.panel
 			and aff_b.side = 1
 			and aff_b.entry = aff_e.id
 
-			and section.id = neg_b.section
+			and section.id = neg_b.panel
 			and neg_b.side = 2
 			and neg_b.entry = neg_e.id
 
 			and section.round != other.round
 
-			and other.id = aff_bo.section
+			and other.id = aff_bo.panel
 			and aff_bo.entry = aff_e.id
 
-			and other.id = neg_bo.section
+			and other.id = neg_bo.panel
 			and neg_bo.entry = neg_e.id
 	`;
 
-	return objectify(await db.sequelize.query(sidelockQuery, {
+
+	const sideLocks = await db.sequelize.query(sidelockQuery, {
 		replacements : { roundId },
 		type         : db.sequelize.QueryTypes.SELECT,
-	}));
+	});
+
+	if (sideLocks) {
+		return objectify(sideLocks);
+	}
 
 };
 
