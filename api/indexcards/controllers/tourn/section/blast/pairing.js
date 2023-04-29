@@ -34,7 +34,7 @@ export const blastSection = {
 };
 
 export const blastRound = {
-	GET: async (req, res) => {
+	POST: async (req, res) => {
 
 		// Permissions.  I feel like there should be a better way to do this
 		const permOK = await roundCheck(req, res, req.params.round_id);
