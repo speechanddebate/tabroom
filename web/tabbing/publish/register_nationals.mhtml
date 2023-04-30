@@ -17,6 +17,7 @@
 		max_year => $tourn->end->year
 	);
 
+	my $dbh = Tab::DBI->db_Main();
 	my $now = DateTime->now();
 
 	my %nationals_settings = $nationals->all_settings;
@@ -103,10 +104,11 @@
 		)
 	");
 
-	my @unposted_events =
-		Tab::Event->search_unposted_events($tourn->id);
+	my @unposted_events = Tab::Event->search_unposted_events($tourn->id);
 
 	my @district_entries;
+
+	Tab::Entry->columns(TEMP => "source_entry");
 
 	if ($district) {
 
@@ -118,8 +120,11 @@
 	} elsif ($person->site_admin) {
 
 		Tab::Entry->set_sql(lastchance => "
-			select entry.*
-				from entry, event, entry_setting es
+			select entry.*, source_entry.value as source_entry
+			from (entry, event, entry_setting es)
+				left join entry_setting source_entry
+					on entry.id = source_entry.entry
+					and source_entry.tag = 'source_entry'
 			where event.tourn = ?
 				and event.id = entry.event
 				and entry.id = es.entry
@@ -129,13 +134,8 @@
 		 @district_entries = Tab::Entry->search_lastchance($nationals);
 	}
 
-	my %nationals_events =
-		map {$_->abbr => $_}
-		$nationals->events();
-
-	my %existing_entries  =
-		map {$_->source_entry => $_}
-		@district_entries;
+	my %nationals_events = map {$_->abbr => $_} $nationals->events();
+	my %existing_entries  = map {$_->source_entry => $_} @district_entries;
 
 	my $full_msg;
 
@@ -258,26 +258,34 @@
 					my $subject = $school->name."'s registration to NSDA Nationals is ready!";
 					my $text = $nationals->setting("nats_open_message");
 
+					my $sender = $person;
+
+					if ($tourn_settings->{"nsda_district"} == 999) {
+						$subject = $school->name."'s Last Chance Qualifiers posted!";
+						$text = "<p>Your school qualified entries at the ".$tourn->name.".  Congratulations!<p>";
+						$text .= "<p>These qualifiers have been posted to Tabroom.com and may now be registerted to attend Nationals</p>";
+						$sender = 0;
+					}
+
 					my @emails = $m->comp(
 						"/funclib/school_contacts.mas",
 						school => $school
 					);
 
 					$m->comp( "/funclib/send_email.mas",
-						from          => $person,
+						from          => $sender,
 						from_string   => "nsda",
 						district      => $district,
 						array         => \@emails,
 						subject       => $subject,
 						no_footer     => 1,
+						is_html       => 1,
 						body          => $text,
-						nsda_reply_to => $person
+						nsda_reply_to => $sender
 					);
-
 				}
 
 				my $tabbing = uc($tourn_settings->{"nsda_district_questions"}{"nsda_tabbing_software"});
-
 				my $description;
 
 				if ($district) {
@@ -395,13 +403,11 @@
 				}
 			}
 
-			if ($tourn_settings->{"nsda_district"} > 150)) {
-
-				my $dbh = Tab::DBI->db_Main();
+			if ($tourn_settings->{"nsda_district"} == 999) {
 
 				my $sth = $dbh->prepare("
 					select
-						entry.id, entry.code, entry.name,
+						entry.id entry, entry.code, entry.name,
 						student.id, student, student.first, student.last, student.nsda,
 						chapter.id chapter
 					from (entry, event, entry_student es, student, chapter, entry_setting me)
@@ -423,16 +429,18 @@
 
 				foreach my $result (@{$results}) {
 
-					$bonuses{$result->id}{"code"}    = $result->{code};
-					$bonuses{$result->id}{"name"}    = $result->{name};
-					$bonuses{$result->id}{"chapter"} = $result->{chapter};
+					$bonuses{$result->{entry}}{"code"}    = $result->{code};
+					$bonuses{$result->{entry}}{"name"}    = $result->{name};
+					$bonuses{$result->{entry}}{"chapter"} = $result->{chapter};
 
-					$bonuses{$result->id}{"student"}{$result->{student}} = (
+					$bonuses{$result->{entry}}{"student"}{$result->{student}} = {(
 						first => $result->{first},
 						last  => $result->{last},
 						nsda  => $result->{nsda}
-					)
+					)};
 				}
+
+				my $posted;
 
 				BONUS:
 				foreach my $bonus_id (keys %bonuses) {
@@ -462,6 +470,7 @@
 						next BONUS;
 					}
 
+					my @students;
 					foreach my $student_id (keys %{$bonus->{student}}) {
 						push @students, Tab::Student->retrieve($student_id);
 					}
@@ -493,7 +502,10 @@
 							created_at    => $now
 						});
 
+						$new_entry->setting("lastchance", 1);
 						$new_entry->setting("source_entry", $existing_key);
+
+						$posted++;
 
 						foreach my $student (@students) {
 
@@ -512,12 +524,15 @@
 							}
 						}
 
-						$new_entry->name(
-							$m->comp("/funclib/entry_name.mas", entry => $new_entry)
-						);
-
+						$new_entry->name($m->comp("/funclib/entry_name.mas", entry => $new_entry));
 						$new_entry->update();
+
 					}
+				}
+
+				if ($posted > 0) {
+					$full_msg .= "<br />" if $full_msg;
+					$full_msg .= "$posted LCQ Bonus entries posted in ".$event->abbr;
 				}
 			}
 		}
@@ -801,7 +816,7 @@
 									my $tag = $qualifiers{$key}{"tag"}{$priority};
 									my $score = $qualifiers{$key}{"results"}{$priority};
 
-									next if $tag eq "Place";
+									next if $tag ne "Place";
 
 									if (
 										$tag =~ m/Win/
@@ -857,13 +872,11 @@
 <%perl>
 					}
 
-					if ($tourn_settings->{"nsda_district"} > 150)) {
-
-						my $dbh = Tab::DBI->db_Main();
+					if ($tourn_settings->{"nsda_district"} == 999) {
 
 						my $sth = $dbh->prepare("
 							select
-								entry.id, entry.code, entry.name,
+								entry.id entry, entry.code, entry.name,
 								student.id, student, student.first, student.last, student.nsda,
 								chapter.id chapter
 							from (entry, event, entry_student es, student, chapter, entry_setting me)
@@ -884,23 +897,31 @@
 
 						foreach my $result (@{$results}) {
 
-							$bonuses{$result->id}{"code"}    = $result->{code};
-							$bonuses{$result->id}{"name"}    = $result->{name};
-							$bonuses{$result->id}{"chapter"} = $result->{chapter};
+							$bonuses{$result->{entry}}{"code"}    = $result->{code};
+							$bonuses{$result->{entry}}{"name"}    = $result->{name};
+							$bonuses{$result->{entry}}{"chapter"} = $result->{chapter};
 
-							$bonuses{$result->id}{"student"}{$result->{student}} = (
+							$bonuses{$result->{entry}}{"student"}{$result->{student}} = {(
 								first => $result->{first},
 								last  => $result->{last},
 								nsda  => $result->{nsda}
-							)
+							)};
 						}
 
 						BONUS:
 						foreach my $bonus_id (keys %bonuses) {
 
-							foreach my $student_id (keys %{$bonus->{student}}) {
+							my $bonus = $bonuses{$bonus_id};
+							my @students;
+
+							my $existing_key = "bonus-";
+
+							foreach my $student_id (sort (keys %{$bonus->{student}})) {
 								push @students, Tab::Student->retrieve($student_id);
+								$existing_key .= $student_id."-";
 							}
+
+							my $existing = $existing_entries{$existing_key};
 </%perl>
 							<tr class="smallish">
 								<td class="centeralign">
@@ -937,12 +958,35 @@
 								</td>
 
 								<td>
+									<% $bonus_id %>
+								</td>
+								<td>
+									<% $bonus->{code} %>
 								</td>
 
 								<td>
-%									foreach my $student (@students) {
-										<% $student->first." ".$student->last %>
-%									}
+									<% $bonus->{name} %>
+								</td>
+
+								<td class="rightalign">
+<%perl>
+									my $result_sth = $dbh->prepare("
+										select
+											result.id, result.rank, result.place
+
+										from result, result_set
+											where result.entry = ?
+											and result.result_set = result_set.id
+											and result_set.label = 'District Qualifiers'
+									");
+
+									$result_sth->execute($bonus_id);
+									my $finish = $result_sth->fetchall_hash();
+									my $ref = shift @{$finish} if $finish;
+</%perl>
+										<span class="eighth centeralign ltborderright nospace"
+											title = "Place"
+										><% $ref ? $ref->{'rank'} : "" %></span>
 								</td>
 
 								<td colspan="3" class="centeralign semibold bluetext">
@@ -973,7 +1017,6 @@
 
 						my $existing = $existing_entries{$existing_key};
 </%perl>
-
 						<tr class="smallish">
 							<td class="centeralign">
 %								if ($existing) {
@@ -1021,7 +1064,6 @@
 							<td colspan="3" class="centeralign semibold bluetext">
 								Autoqualifier from previous Nationals
 							</td>
-
 						</tr>
 %					}
 %				}
@@ -1037,16 +1079,16 @@
 				method = "post"
 			>
 
-			<div class="odd">
+			<div class="odd" title = "Pinky swear?">
 
-				<span class="threequarters semibold redtext biggish italic rightalign">
-					I certify I have inspected and audited the above results
+				<span class = "fourfifths semibold redtext bigger italic rightalign">
+					I have inspected and audited the above results
 					and they are true to the best of my knowledge:
 					<span class="spacer"></span>
 				</span>
 
 				<label for="confirmation">
-					<span class="quarter centeralign hover padvertmore">
+					<span class="fifth centeralign hover padvertmore">
 						<input
 							type    = "checkbox"
 							class   = "bigger"
@@ -1061,13 +1103,14 @@
 			</div>
 
 			<div class="libl full rightalign marno padvertmore">
-
-				<input
-					id    = "submit_confirmed"
-					type  = "submit"
-					value = "Post Nationals Registration"
-					disabled
-				>
+				<span class="centeralign third">
+					<input
+						id    = "submit_confirmed"
+						type  = "submit"
+						value = "Post Nationals Registration"
+						disabled
+					>
+				</span>
 			</div>
 
 %		}
@@ -1157,7 +1200,7 @@
 
 				<div class="row borderredvert">
 					<span class="third redtext semibold bigger">
-						Unposted:
+						Unposted
 					</span>
 
 					<span class="twothirds semibold bigger centeralign">
@@ -1204,7 +1247,6 @@
 			<h4>If these results are wrong</h4>
 
 			<p class="bigger">
-
 				If you spot an ordering mistake or issue in these results,
 				check the Qualifiers list for the event/category in question
 				(Results &rarr; Qualifiers in the menu above).   If the
@@ -1213,9 +1255,7 @@
 				If the Qualifiers list is incorrect and you are unable to fix
 				it, please send the details to help@tabroom.com.
 			</p>
-
 		</div>
-
 	</div>
 
 %	}
