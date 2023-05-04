@@ -151,9 +151,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 		});
 
 		rawJudgePeople.forEach( (person) => {
-
 			if (person.provider && person.phone) {
-
 				blastMe.phone.push(`${person.phone}@${person.provider}`);
 
 				if (person.judge) {
@@ -161,6 +159,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 						blastOnly.judge[person.judge] = {
 							phone : [],
 							email : [],
+							self  : [],
 						};
 					}
 					blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
@@ -174,16 +173,22 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 				if (person.judge) {
 					if (!blastOnly.judge[person.judge]) {
 						blastOnly.judge[person.judge] = {
+							phone : [],
 							email : [],
+							self  : [],
 						};
 					}
-					blastOnly.judge[person.judge].email.push(person.email);
+					blastOnly.judge[person.judge].self.push(person.email);
 				}
 			}
 		});
 	}
 
+	console.log(`Options for no followers is ${options.no_followers}`);
+
 	if (!options.no_followers) {
+
+		console.log(`And now I am here`);
 
 		if (options.recipients !== 'judges') {
 
@@ -198,6 +203,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 					and entry.id = follower.entry
 					and follower.person = person.id
 					and person.no_email = 0
+				group by person.id
 			`;
 
 			const rawEntryFollowers = await db.sequelize.query(entryFollowersQuery, {
@@ -206,12 +212,26 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 			});
 
 			rawEntryFollowers.forEach( (person) => {
+
 				if (person.provider && person.phone) {
 					blastMe.phone.push(`${person.phone}@${person.provider}`);
 				}
 
 				if (person.email) {
 					blastMe.email.push(person.email);
+				}
+
+				if (person.entry) {
+					if (!blastOnly.entry[person.entry]) {
+						blastOnly.entry[person.entry] = {
+							phone : [],
+							email : [],
+						};
+					}
+					if (person.phone && person.provider) {
+						blastOnly.entry[person.entry].phone.push(`${person.phone}@${person.provider}`);
+					}
+					blastOnly.entry[person.entry].email.push(person.email);
 				}
 			});
 
@@ -247,6 +267,8 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 
 		if (options.recipients !== 'entries') {
 
+			console.log(`I definitely should be here!`);
+
 			const judgeFollowersQuery = `
 				select
 					person.id, person.email, person.phone, person.provider, ballot.judge judge
@@ -264,11 +286,30 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 			});
 
 			rawJudgeFollowers.forEach( (person) => {
+
+				console.log(`Follower record found`);
+				console.log(person);
+
 				if (person.provider && person.phone) {
 					blastMe.phone.push(`${person.phone}@${person.provider}`);
 				}
 				if (person.email) {
 					blastMe.email.push(person.email);
+				}
+
+				if (person.judge) {
+					if (!blastOnly.judge[person.judge]) {
+						blastOnly.judge[person.judge] = {
+							phone : [],
+							email : [],
+						};
+					}
+
+					if (person.phone && person.provider) {
+						blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
+					}
+					console.log(`pushing ${person.email} into array for judge ${person.judge} followers`);
+					blastOnly.judge[person.judge].email.push(`${person.email}`);
 				}
 			});
 

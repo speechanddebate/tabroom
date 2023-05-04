@@ -68,7 +68,10 @@ export const emailBlast = async (inputData) => {
 		info = await transporter.sendMail(messageData);
 		debugLogger.info(`Sent email id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length} html ${messageData.html?.length}`);
 	} else {
-		console.log(`Local: not sending email for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} text ${messageData.text} html ${messageData.html}`);
+		console.log(`Local: email not sending from ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
+		console.log(`Subject ${messageData.subject}`);
+		console.log(`Text ${messageData.text}`);
+		console.log(`HTML ${messageData.html}`);
 	}
 
 	return {
@@ -127,7 +130,7 @@ export const phoneBlast = async (inputData) => {
 
 	if (process.env.NODE_ENV === 'production') {
 		info = await transporter.sendMail(messageData);
-		console.log(`Sent text blast id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length}`);
+		debugLogger.info(`Sent text blast id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length}`);
 	} else {
 		console.log(`Local: not sending sms blast for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
 		console.log(`Subject ${messageData.subject}`);

@@ -154,7 +154,7 @@ const formatBlast = async (queryData, req) => {
 			entry.id, entry.code, entry.name,
 			entry.school schoolid, school.name schoolname,
 			ballot.id ballot, ballot.side, ballot.speakerorder,
-			GROUP_CONCAT(CONCAT(student.first,' ',': ',person.pronoun) SEPARATOR ' ') pronoun
+			GROUP_CONCAT(DISTINCT(CONCAT(student.first,' ',': ',person.pronoun)) SEPARATOR ' ') pronoun
 		from (panel section, ballot, entry, entry_student es, student ${queryData.fields})
 			left join person on student.person = person.id and person.pronoun IS NOT NULL and person.pronoun != ''
 			left join school on entry.school = school.id
@@ -570,27 +570,46 @@ const formatBlast = async (queryData, req) => {
 					if (!judgeMessage.text) {
 						judgeMessage.text = '';
 						judgeMessage.html = '';
+
+						// These are versions that only go to the linked
+						// account, not followers.  Includes Start Button.
+						judgeMessage.selftext = '';
+						judgeMessage.selfhtml = '';
 					}
 
 					judgeMessage.text += sectionMessage.text;
+					judgeMessage.selftext += sectionMessage.text;
 					judgeMessage.html += sectionMessage.html;
+					judgeMessage.selfhtml += sectionMessage.html;
 
 					if (!judge.role === '') {
-						judgeMessage.text += `Your role: ${judge.role}\n`;
-						judgeMessage.html += `<p>Your role: ${judge.role}</p>`;
+						judgeMessage.text += `Role: ${judge.role}\n`;
+						judgeMessage.html += `<p>Role: ${judge.role}</p>`;
+						judgeMessage.selftext += `Your role: ${judge.role}\n`;
+						judgeMessage.selfhtml += `<p>Your role: ${judge.role}</p>`;
 					}
 
-					judgeMessage.html += `<p style='width: 75%; display: inline-block; text-align: center;'>`;
-					// I apologize to literally everyone for this but I'm not creating an inline style sheet when I'm on the clock
-					judgeMessage.html += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;`;
-					judgeMessage.html += `text-decoration: none; font-family: Arial; border-radius: 4px; border: 2px solid #016F94;' `;
-					judgeMessage.html += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
-					judgeMessage.html += `START ROUND</a></p>`;
+					// I apologize to literally everyone for this but I'm not
+					// creating an inline style sheet when I'm on the clock and
+					// it doesn't always work in email clients anyway
+
+					judgeMessage.selfhtml += `<p style='width: 75%; display: inline-block; text-align: center;'>`;
+					judgeMessage.selfhtml += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;`;
+					judgeMessage.selfhtml += `text-decoration: none; font-family: Arial; border-radius: 4px; border: 2px solid #016F94;' `;
+					judgeMessage.selfhtml += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
+					judgeMessage.selfhtml += `START ROUND</a></p>`;
+
+					judgeMessage.selftext += `Start Round link: https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}\n`;
 
 					judgeMessage.text += sectionMessage.entryText;
 					judgeMessage.html += sectionMessage.entryHTML;
 					judgeMessage.text += sectionMessage.judgeText;
 					judgeMessage.html += sectionMessage.judgeHTML;
+
+					judgeMessage.selftext += sectionMessage.entryText;
+					judgeMessage.selfhtml += sectionMessage.entryHTML;
+					judgeMessage.selftext += sectionMessage.judgeText;
+					judgeMessage.selfhtml += sectionMessage.judgeHTML;
 
 					// My school
 					if (judge.school && blastees.schoolJudges) {
@@ -685,6 +704,34 @@ const sendBlast = async (followers, blastees, req, res) => {
 	}
 
 	for await (const judgeId of Object.keys(blastees.judges)) {
+
+		if (followers.only.judge[judgeId].self) {
+
+			const selfBlast = { ...blastees.judges[judgeId] };
+			const selfFollowers = { ...followers.only.judge[judgeId] };
+
+			selfFollowers.email = selfFollowers.self;
+			delete selfFollowers.phone;
+
+			if (selfBlast.selftext) {
+				selfBlast.text = selfBlast.selftext;
+			}
+			if (selfBlast.selfhtml) {
+				selfBlast.html = selfBlast.selfhtml;
+			}
+
+			const email = await emailBlast({
+				...selfBlast,
+				...selfFollowers,
+				append: req.body.message,
+			});
+
+			emailResponse.count += email.count;
+			if (emailResponse.error) {
+				emailResponse.error = true;
+			}
+			emailResponse.message = email.message ? email.message : emailResponse.message;
+		}
 
 		const email = await emailBlast({
 			...blastees.judges[judgeId],
