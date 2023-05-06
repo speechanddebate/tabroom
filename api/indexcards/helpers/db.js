@@ -713,41 +713,60 @@ db.student.hasMany(db.studentSetting   , { as: 'Settings' , foreignKey : 'studen
 
 db.summon = async (dbTable, objectId) => {
 
-	const dbObject = await dbTable.findByPk(
-		objectId,
-		{ include : 'Settings' },
-	);
+	const options = {};
+
+	// automatically include settings if the model has them.
+	if (dbTable.associations.Settings) {
+		options.include = 'Settings';
+	}
+
+	let dbObject = {};
+
+	try {
+		dbObject = await dbTable.findByPk(
+			objectId,
+			options
+		);
+	} catch (err) {
+		errorLogger.info(`SUMMON QUERY RETURNED ERROR: ${err} for model ${dbTable} PK ${objectId}`);
+		return;
+	}
 
 	if (!dbObject) {
-		errorLogger(`No ${dbTable} record found with key ${objectId}`);
+		errorLogger.info(`NOTHING FOUND: No ${dbTable} record found with key ${objectId}`);
 		return;
 	}
 
 	const dbData = dbObject.get({ plain: true });
 	dbData.table = dbTable.name;
-	dbData.settings = {};
 
-	dbData.Settings
-		.sort((a, b) => { return (a.tag > b.tag) ? 1 : -1; })
-		.forEach( (item) => {
-			if (item.value === 'date' && item.value_date) {
-				if (item.value_date !== null) {
-					dbData.settings[item.tag] = item.value_date;
-				}
-			} else if (item.value === 'json') {
-				if (item.value_text !== null) {
-					dbData.settings[item.tag] = JSON.parse(item.value_text);
-				}
-			} else if (item.value === 'text') {
-				if (item.value_text !== null) {
-					dbData.settings[item.tag] = item.value_text;
-				}
-			} else {
-				dbData.settings[item.tag] = item.value;
-			}
-		});
+	if (dbData.Settings) {
+		dbData.settings = {};
 
-	delete dbData.Settings;
+		dbData.Settings
+			.sort((a, b) => { return (a.tag > b.tag) ? 1 : -1; })
+			.forEach( (item) => {
+				if (item.value === 'date' && item.value_date) {
+					if (item.value_date !== null) {
+						dbData.settings[item.tag] = item.value_date;
+					}
+				} else if (item.value === 'json') {
+					if (item.value_text !== null) {
+						dbData.settings[item.tag] = JSON.parse(item.value_text);
+					}
+				} else if (item.value === 'text') {
+					if (item.value_text !== null) {
+						dbData.settings[item.tag] = item.value_text;
+					}
+				} else {
+					dbData.settings[item.tag] = item.value;
+				}
+			});
+
+		delete dbData.Settings;
+	}
+
+	console.log(dbData);
 	return dbData;
 };
 

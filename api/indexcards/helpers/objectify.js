@@ -20,6 +20,26 @@ export const objectify = (array) => {
 	return dest;
 };
 
+export const multiObjectify = (array) => {
+
+	const dest = {};
+	array.forEach( (item) => {
+		if (item.dataValues) {
+			const output = item.get({ plain:true });
+			if (!dest[output.id]) {
+				dest[output.id] = [];
+			}
+			dest[output.id].push(stripNull(output));
+		} else {
+			if (!dest[item.id]) {
+				dest[item.id] = [];
+			}
+			dest[item.id].push(stripNull(item));
+		}
+	});
+	return dest;
+};
+
 export const arrayify = (destroyMe, key) => {
 	const dest = [];
 	destroyMe.forEach( (individual) => {

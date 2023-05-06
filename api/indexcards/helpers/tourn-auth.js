@@ -98,6 +98,20 @@ const tournAuth = async function(req) {
 	return session;
 };
 
+export const checkJudgePerson = async (req, judgeId) => {
+	if (req.session.site_admin) {
+		return true;
+	}
+
+	const judge = req.db.summon(req.db.judge, judgeId);
+
+	if (judge.person === req.session.person) {
+		return true;
+	}
+
+	return false;
+};
+
 export const checkPerms = async (req, res, query, replacements) => {
 
 	const [permsData] = await req.db.sequelize.query(query, {

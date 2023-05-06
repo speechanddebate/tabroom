@@ -184,11 +184,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 		});
 	}
 
-	console.log(`Options for no followers is ${options.no_followers}`);
-
 	if (!options.no_followers) {
-
-		console.log(`And now I am here`);
 
 		if (options.recipients !== 'judges') {
 
@@ -267,8 +263,6 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 
 		if (options.recipients !== 'entries') {
 
-			console.log(`I definitely should be here!`);
-
 			const judgeFollowersQuery = `
 				select
 					person.id, person.email, person.phone, person.provider, ballot.judge judge
@@ -286,9 +280,6 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 			});
 
 			rawJudgeFollowers.forEach( (person) => {
-
-				console.log(`Follower record found`);
-				console.log(person);
 
 				if (person.provider && person.phone) {
 					blastMe.phone.push(`${person.phone}@${person.provider}`);
@@ -308,7 +299,6 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 					if (person.phone && person.provider) {
 						blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
 					}
-					console.log(`pushing ${person.email} into array for judge ${person.judge} followers`);
 					blastOnly.judge[person.judge].email.push(`${person.email}`);
 				}
 			});

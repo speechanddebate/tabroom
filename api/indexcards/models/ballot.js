@@ -1,5 +1,10 @@
 const ballot = (sequelize, DataTypes) => {
 	return sequelize.define('ballot', {
+		id : {
+			type          : DataTypes.INTEGER,
+			autoIncrement : true,
+			primaryKey    : true,
+		},
 		side: {
 			type: DataTypes.INTEGER(1),
 			allowNull: true,
@@ -13,9 +18,9 @@ const ballot = (sequelize, DataTypes) => {
 			allowNull: true,
 		},
 		bye: {
-			type: DataTypes.BOOLEAN,
-			allowNull: false,
-			defaultValue: '0',
+			type         : DataTypes.BOOLEAN,
+			allowNull    : false,
+			defaultValue : '0',
 		},
 		forfeit: {
 			type: DataTypes.BOOLEAN,
