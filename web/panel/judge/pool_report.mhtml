@@ -56,92 +56,8 @@
 
 	$children_sth->execute($parent->id);
 	my $target_refs = $children_sth->fetchall_hash();
-	$children_sth->finish();
-
 	my %targets = map {$_->{"id"} => $_} @{$target_refs};
-	my %judges;
-
-	my $judge_sth = $dbh->prepare("
-		select
-			judge.id, diamonds.value diamonds, diverse.value diverse,
-			judge.school school,
-			judge.obligation,
-			jpool.id jpool, chapter.state,
-			jps.id registrant,
-			rounds.value rounds
-
-		from (judge, jpool_judge ppj)
-
-			left join school on judge.school = school.id
-			left join chapter on school.chapter = chapter.id
-			left join person on judge.person = person.id
-
-			left join jpool_judge jpj
-				on jpj.judge = judge.id
-
-			left join jpool on jpool.id = jpj.jpool
-
-			left join jpool_setting jps
-				on jps.jpool = jpool.id
-				and jps.tag = 'registrant'
-
-			left join jpool_setting rounds
-				on rounds.jpool = jpj.jpool
-				and rounds.tag = 'rounds'
-
-			left join judge_setting diverse
-				on diverse.tag = 'diverse'
-				and diverse.judge = judge.id
-
-			left join person_setting diamonds
-				on diamonds.tag = 'diamonds'
-				and diamonds.person = person.id
-
-		where ppj.jpool = ?
-			and judge.id = ppj.judge
-			and judge.active = 1
-	");
-
-	my %done;
-
-	foreach my $jpool_id ($parent_id, keys %targets) {
-
-		$judge_sth->execute($jpool_id);
-
-		my $refs = $judge_sth->fetchall_hash();
-
-		$judge_sth->finish();
-
-		foreach my $result (@{$refs}) {
-
-			if ($result->{"diamonds"}) {
-				$targets{$result->{'jpool'}}{"diamond_count"}++;
-			}
-
-			if ($result->{"diverse"}) {
-				$targets{$result->{'jpool'}}{"diverse_count"}++;
-			}
-
-			unless ($judges{$result->{"id"}}) {
-				$judges{$result->{"id"}} = $result;
-				$judges{$result->{"id"}}{"left"} = $judges{$result->{"id"}}{"obligation"};
-			}
-
-			unless ($done{$result->{"jpool"}}{$result->{"id"}}++) {
-
-				if ($result->{'registrant'}) {
-					unless ($result->{"jpool"} eq $parent->id) {
-						$judges{$result->{"id"}}{"other_pools"}{$result->{"jpool"}}++;
-					}
-				} elsif ($result->{"jpool"} && $result->{"jpool"} ne $parent->id) {
-					$targets{$result->{'jpool'}}{"judge_count"}++;
-					$judges{$result->{"id"}}{"pools"}{$result->{"jpool"}}++;
-					$judges{$result->{"id"}}{"in_pools"}++;
-					$judges{$result->{"id"}}{"left"} -= $result->{"rounds"};
-				}
-			}
-		}
-	}
+	$children_sth->finish();
 
 	my $school_sth = $dbh->prepare("
 		select
@@ -155,12 +71,94 @@
 	");
 
 	my %school_counts;
-
 	foreach my $jpool (keys %targets) {
 		$school_sth->execute($jpool);
 		my $result_ref = $school_sth->fetchall_hash();
 		foreach my $result (@{$result_ref}) {
 			$school_counts{$result->{"jpool"}}{$result->{"school"}}++;
+		}
+	}
+
+	my $stat_sth = $dbh->prepare("
+		select
+			judge.id, diamonds.value diamonds, diverse.value diverse,
+			judge.school school,
+			(judge.hired + judge.obligation) obligation,
+			jpool.id jpool, jpool.name name,
+			region.code state,
+			registrant.value registrant
+
+		from (judge, jpool_judge jpj, jpool)
+
+			left join judge_setting diverse
+				on diverse.tag = 'diverse'
+				and diverse.judge = judge.id
+
+			left join person on person.id = judge.person
+
+			left join person_setting diamonds
+				on diamonds.tag = 'diamonds'
+				and diamonds.person = person.id
+
+			left join jpool_setting rounds
+				on rounds.jpool = jpj.jpool
+				and rounds.tag = 'rounds'
+
+			left join school on school.id = judge.school
+
+			left join region on region.id = school.region
+
+			left join jpool_setting registrant
+				on registrant.jpool = jpool.id
+				and registrant.tag = 'registrant'
+
+		where judge.id = jpj.judge
+			and jpj.jpool = jpool.id
+			and (jpool.parent = ? OR jpool.id = ?)
+	");
+
+	$stat_sth->execute($parent_id, $parent_id);
+
+	my $results = $stat_sth->fetchall_hash();
+	my %judges;
+
+	foreach my $result (@{$results}) {
+
+		my $jid = $result->{"id"};
+
+		if ($result->{"registrant"} && $result->{'jpool'} ne $parent_id) {
+			next;
+		}
+
+		unless ($judges{$jid}{"state"}) {
+			$judges{$jid}{"left"} = $result->{"obligation"};
+			$judges{$jid}{"state"} = $result->{"state"};
+			$judges{$jid}{"obligation"} = $result->{"obligation"};
+		}
+
+		if ($result->{"diamonds"}) {
+			$targets{$result->{'jpool'}}{"diamond_count"}++;
+			$judges{$jid}{"diamonds"} = $result->{"diamonds"};
+		}
+
+		if ($result->{"diverse"}) {
+			$judges{$jid}{"diverse"} = 1;
+			$targets{$result->{'jpool'}}{"diverse_count"}++;
+		}
+
+		if ($result->{"jpool"} eq $parent_id) {
+			$targets{$result->{'jpool'}}{"judge_count"}++;
+			$targets{$result->{'jpool'}}{"name"} = $result->{"name"};
+
+		} else {
+			$targets{$result->{'jpool'}}{"judge_count"}++;
+			$judges{$jid}{"pools"}{$result->{"jpool"}}++;
+			$judges{$jid}{"in_pools"}++;
+			$judges{$jid}{"left"} -= $result->{"rounds"};
+
+			unless ($result->{'school'} && $school_counts{$result->{jpool}}{$result->{"school"}}) {
+				$targets{$result->{'jpool'}}{"nokids_count"}++;
+			}
 		}
 	}
 
@@ -179,7 +177,6 @@
 
 		<table id="pool_results">
 			<thead>
-
 				<tr class="smallish yellowrow">
 					<th>
 						ID
@@ -209,6 +206,9 @@
 						Diamonds Count
 					</th>
 
+					<th>
+						No Kids Count
+					</th>
 				</tr>
 
 			</thead>
@@ -218,18 +218,19 @@
 
 			foreach my $jpool (
 				sort {
-					$targets{$a}{"priority"} <=> $targets{$b}{"priority"}
-					|| $targets{$a}{"name"} cmp $targets{$b}{"name"}
+					$targets{$a}{"name"} cmp $targets{$b}{"name"}
+					|| $targets{$a}{"priority"} <=> $targets{$b}{"priority"}
 					|| $a <=> $b
 				} keys %targets
 			) {
 
 				next unless $targets{$jpool}{"name"};
+
 </%perl>
 				<tr>
 
 					<td>
-						<% $targets{$jpool}{"id"} %>
+						<% $targets{$jpool}{"id"} ? $targets{$jpool}{"id"} : $jpool %>
 					</td>
 
 					<td>
@@ -256,6 +257,9 @@
 						<% $targets{$jpool}{"diamond_count"} %>
 					</td>
 
+					<td class="centeralign">
+						<% $targets{$jpool}{"nokids_count"} %>
+					</td>
 				</tr>
 %			}
 
@@ -265,11 +269,13 @@
 		<& "/funclib/tablesorter.mas", table => "judge_rounds" &>
 
 		<span class="fourfifths nospace martopmore">
-			<h5>Judge rounds</h5>
+			<h5>Judge Rounds</h5>
 		</span>
 
-		<span class="fifth rightalign" id="judge_rounds_buttonarea">
-		</span>
+		<span
+			class = "fifth rightalign"
+			id    = "judge_rounds_buttonarea"
+		></span>
 
 		<table id = "judge_rounds">
 
