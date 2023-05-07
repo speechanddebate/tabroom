@@ -6,6 +6,8 @@
 </%args>
 <%init>
 
+	use Text::CSV;
+
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
@@ -17,42 +19,33 @@
 	}
 
 	my $nats = $tourn->setting("nsda_nats");
-
 	my $now = DateTime->now( time_zone => $tz);
-
 	my $category = Tab::Category->retrieve($category_id);
 
 	# Get the upload and create the file handle.
 	my $req = Apache2::Request->new($r);
-	my @text_handles = $r->upload;
-	my $text_file = $req->upload($text_handles[0]);
-	my $io = $text_file->io;
+	my @csv_handles = $r->upload();
+	my $csv_file = $req->upload($csv_handles[0]);
+	my $io = $csv_file->io;
 
-	my @judges;
-
-	# Fix line breaks
-	my @lines = (<$io>);
-
-    foreach (@lines) {
-        $_ =~ s/[\r]+/\n/g;
-        $_ =~ s/[\r\n]+/\n/g;
-        $_ =~ s/[\n]+/\n/g;
-        push @judges, split (/\n/, $_);
-    }
+	my $csv = Text::CSV->new({ sep_char => ',' });
 
 	my $skipped;
-
 	my %jpools = map {$_->name => $_}  $category->jpools;
 	my %shifts = map {$_->name => $_}  $category->shifts;
 
-	GROUP:
-	foreach my $judge (@judges) {
+	my $counter;
+
+	LINE:
+	foreach my $line (<$io>) {
+
+		next unless $csv->parse($line);
 
 		my ($school_name, $school_code,
 			$first, $middle, $last, $tab_rating,
 			$obligation, $email, $phone, $notes, $pools,
 			$shift1, $shift2, $shift3, $shift4, $parli, $scorer
-		) = split(/,/,$judge);
+		) = $csv->fields();
 
 		foreach ($school_name, $school_code,
 			$first, $middle, $last,
@@ -92,9 +85,7 @@
 				if $school && not $tourn_settings->{"wsdc"};
 
 			unless ($school) {
-
 				foreach my $circuit ($tourn->circuits) {
-
 					my @chapters = $m->comp(
 						"/funclib/circuit_chapters.mas",
 						circuit => $circuit,
@@ -106,7 +97,6 @@
 				}
 
 				unless ($chapter) {
-
 					$chapter = Tab::Chapter->create({
 						name    => $school_name,
 						state   => $tourn->state,
@@ -137,7 +127,6 @@
 				});
 
 				$school->setting("entered_on", "date", $now);
-
 			}
 
 			unless ($nats) {
@@ -170,7 +159,15 @@
 
 		$obligation = "9" unless $obligation;
 
-		$judge = Tab::Judge->create({
+		if ($first eq lc($first) || $first eq uc($first)) {
+			$first = ucfirst(lc($first));
+		}
+
+		if ($last eq lc($last) || $last eq uc($last)) {
+			$last = ucfirst(lc($last));
+		}
+
+		my $judge = Tab::Judge->create({
 			first         => $first,
 			last          => $last,
 			school        => $school_id,
@@ -186,15 +183,15 @@
 		$tab_rating = "1" unless $tab_rating;
 		$judge->setting('notes', "text", $notes) if $notes;
 		$judge->setting('tab_rating', $tab_rating) if $tab_rating;
-
 		$judge->setting('parli', $parli) if $parli == 1;
 		$judge->setting('scorer', $scorer) if $scorer == 1;
+
+		$counter++;
 
 		my $person;
 
 		if ($email) {
 			$person = Tab::Person->search( email => $email )->first;
-
 			if ($person) {
 				$judge->person($person->id);
 				$judge->update;
@@ -246,9 +243,21 @@
 				});
 			};
 		}
+
+		if ($pools) {
+			my @pool_names = split(/\,/, $pools);
+			foreach my $pool (@pool_names) {
+				if ($jpools{$pool}) {
+					Tab::JPoolJudge->create({
+						jpool => $jpools{$pool},
+						judge => $judge
+					});
+				}
+			}
+		}
 	}
 
-	my $msg = scalar @judges ." judges imported into ".$category->name;
+	my $msg = "$counter judges imported into ".$category->name;
 
 	$m->redirect("import_csv.mhtml?msg=$msg");
 

@@ -23,38 +23,47 @@ export const syncNatsAppearances = {
 		const updateChapter = `update chapter_setting set value = :value where id = :csid`;
 		const createChapter = `insert into chapter_setting (tag, chapter, value) VALUES ('nats_appearances', :chapter, :value)`;
 
-		chapterNats?.data.forEach( async (chapter) => {
+		const counters = {
+			chapters : 0,
+			students : 0,
+		};
 
-			existingChapters[chapter.school_id]?.forEach( async (existing) => {
+		// Use the for/of structure so it returns before the report can be
+		// issued for success/failure.
 
-				if (existing.csid) {
-					if (parseInt(existing.value) !== parseInt(chapter.Appearances)) {
+		for await (const chapter of chapterNats.data) {
+			if (existingChapters[chapter.school_id]) {
+				for await (const existing of existingChapters[chapter.school_id]) {
+					if (existing.csid) {
+						if (parseInt(existing.value) !== parseInt(chapter.Appearances)) {
+							await req.db.sequelize.query(
+								updateChapter, {
+									replacements : {
+										value    : chapter.Appearances,
+										csid     : existing.csid,
+									},
+									type : req.db.sequelize.QueryTypes.UPDATE,
+								}
+							);
+							counters.chapters++;
+						}
+					} else {
 						await req.db.sequelize.query(
-							updateChapter, {
+							createChapter, {
 								replacements : {
 									value    : chapter.Appearances,
-									csid     : existing.csid,
+									chapter  : existing.chapter,
 								},
-								type : req.db.sequelize.QueryTypes.UPDATE,
+								type : req.db.sequelize.QueryTypes.INSERT,
 							}
 						);
+						counters.chapters++;
 					}
-				} else {
-					await req.db.sequelize.query(
-						createChapter, {
-							replacements : {
-								value    : chapter.Appearances,
-								chapter  : existing.chapter,
-							},
-							type : req.db.sequelize.QueryTypes.INSERT,
-						}
-					);
 				}
-			});
-		});
+			}
+		}
 
 		const studentNats = await getNSDA('/reports/member-nats-appearances');
-
 		const existingStudents = multiObjectify(await req.db.sequelize.query(`
 			select student.id student, student.nsda id, ss.id ssid, ss.value
 			from student
@@ -73,41 +82,43 @@ export const syncNatsAppearances = {
 		const updateStudent = `update student_setting set value = :value where id = :ssid`;
 		const createStudent = `insert into student_setting (tag, student, value) VALUES ('nats_appearances', :student, :value)`;
 
-		studentNats?.data.forEach( async (student) => {
+		for await (const student of studentNats.data) {
 
-			existingStudents[student.person_id]?.forEach( async (existing) => {
+			if (existingStudents[student.person_id]) {
+				for await (const existing of existingStudents[student.person_id]) {
+					if (existing.ssid) {
+						if (parseInt(existing.value) !== parseInt(student.appearances)) {
 
-				if (existing.ssid) {
-
-					if (parseInt(existing.value) !== parseInt(student.appearances)) {
-
+							await req.db.sequelize.query(
+								updateStudent, {
+									replacements : {
+										value    : student.appearances,
+										ssid     : existing.ssid,
+									},
+									type : req.db.sequelize.QueryTypes.UPDATE,
+								}
+							);
+							counters.students++;
+						}
+					} else {
 						await req.db.sequelize.query(
-							updateStudent, {
+							createStudent, {
 								replacements : {
 									value    : student.appearances,
-									ssid     : existing.ssid,
+									student  : existing.student,
 								},
-								type : req.db.sequelize.QueryTypes.UPDATE,
+								type : req.db.sequelize.QueryTypes.INSERT,
 							}
 						);
+						counters.students++;
 					}
-				} else {
-					await req.db.sequelize.query(
-						createStudent, {
-							replacements : {
-								value    : student.appearances,
-								student  : existing.student,
-							},
-							type : req.db.sequelize.QueryTypes.INSERT,
-						}
-					);
 				}
-			});
-		});
+			}
+		}
 
 		res.status(200).json({
 			error   : false,
-			message : `Chapters and students nats appearances updated`,
+			message : `${counters.chapters} chapters and ${counters.students} students nats appearances updated`,
 		});
 	},
 };
