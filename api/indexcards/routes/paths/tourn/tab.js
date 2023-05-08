@@ -2,9 +2,10 @@
 // logged in user with access to the tournament in question.
 
 // Router controllers
-import { attendance, eventStatus } from '../../../controllers/tourn/tab/status';
-import { changeAccess, changeEventAccess } from '../../../controllers/tourn/setup/access';
-import { eventWins, entryWins } from '../../../controllers/tourn/tab/wins';
+import { attendance, eventStatus } from '../../../controllers/tourn/tab/status.js';
+import { changeAccess, changeEventAccess } from '../../../controllers/tourn/setup/access.js';
+import { eventWins, entryWins } from '../../../controllers/tourn/tab/wins.js';
+//import { natsJudgePool } from '../../../controllers/tourn/tab/judgePools.js';
 
 export default [
 	{ path : '/tourn/{tourn_id}/tab/status/update', module : attendance },
@@ -15,4 +16,5 @@ export default [
 	{ path : '/tourn/{tourn_id}/tab/setup/eventaccess', module : changeEventAccess },
 	{ path : '/tourn/{tourn_id}/tab/entry/wins/:entryId', module: entryWins },
 	{ path : '/tourn/{tourn_id}/tab/event/wins/:eventId', module: eventWins },
+//	{ path : '/tourn/{tourn_id}/tab/jpool/createNatsPools', module: natsJudgePool },
 ];
