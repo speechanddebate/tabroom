@@ -10,83 +10,42 @@
 
 	my $now = DateTime->now();
 	my $dbh = Tab::DBI->db_Main();
-
 	my $parent = Tab::JPool->retrieve($parent_id);
 
-	my $names_sth = $dbh->prepare("
-		select
-			jpool.id, jpool.name
-			from jpool, category
-			where jpool.category = category.id
-			and category.tourn = ?
-	");
-
-	$names_sth->execute($tourn->id);
-	my $name_refs = $names_sth->fetchall_hash();
-	my %names = map {$_->{"id"} => $_->{"name"}} @{$name_refs};
-
-	my $children_sth = $dbh->prepare("
-		select jpool.id, jpool.name,
-			pool_target.value target, pool_priority.value priority,
-			rounds.value rounds
-
-		from jpool
-			left join jpool_setting pool_target
-				on pool_target.tag = 'pool_target'
-				and pool_target.jpool = jpool.id
-
-			left join jpool_setting pool_priority
-				on pool_priority.tag = 'pool_priority'
-				and pool_priority.jpool = jpool.id
-
-			left join jpool_setting rounds
-				on rounds.tag = 'rounds'
-				and rounds.jpool = jpool.id
-
-		where jpool.parent = ?
-
-		and not exists (
-			select pool_ignore.id
-			from jpool_setting pool_ignore
-				where pool_ignore.tag = 'pool_ignore'
-				and pool_ignore.jpool = jpool.id
-		)
-		group by jpool.id
-	");
-
-	$children_sth->execute($parent->id);
-	my $target_refs = $children_sth->fetchall_hash();
-	my %targets = map {$_->{"id"} => $_} @{$target_refs};
-	$children_sth->finish();
-
-	my $school_sth = $dbh->prepare("
-		select
-			distinct(entry.id), entry.school, jpr.jpool jpool
-		from school, jpool_round jpr, round, entry
-		where jpr.jpool = ?
-			and jpr.round = round.id
-			and round.event = entry.event
-			and entry.active = 1
+	my $count_sth = $dbh->prepare("
+		select jpool.id jpool, school.id school, count(distinct entry.id) entries
+			from jpool, jpool_round jpr, round, event, entry, school
+		where event.category = ?
+			and event.id = entry.event
 			and entry.school = school.id
+			and event.id = round.event
+			and round.id = jpr.round
+			and jpr.jpool = jpool.id
+		group by school.id, jpool.id
 	");
 
-	my %school_counts;
-	foreach my $jpool (keys %targets) {
-		$school_sth->execute($jpool);
-		my $result_ref = $school_sth->fetchall_hash();
-		foreach my $result (@{$result_ref}) {
-			$school_counts{$result->{"jpool"}}{$result->{"school"}}++;
-		}
+	$count_sth->execute($parent->category);
+	my $results = $count_sth->fetchall_hash();
+	my %school_counts = ();
+
+	foreach my $result (@{$results}) {
+		$school_counts{$result->{jpool}}{$result->{"school"}} = $result->{entries};
 	}
 
-	my $stat_sth = $dbh->prepare("
+	my $sth = $dbh->prepare("
 		select
 			judge.id, diamonds.value diamonds, diverse.value diverse,
 			judge.school school,
-			(judge.hired + judge.obligation) obligation,
+			judge.obligation obligation,
+			judge.hired hired,
 			jpool.id jpool, jpool.name name,
+			jpool.parent parent,
+			pool_priority.value priority,
+			pool_target.value target,
+			rounds.value rounds,
 			region.code state,
-			registrant.value registrant
+			registrant.value registrant,
+			pool_ignore.value pool_ignore
 
 		from (judge, jpool_judge jpj, jpool)
 
@@ -104,6 +63,14 @@
 				on rounds.jpool = jpj.jpool
 				and rounds.tag = 'rounds'
 
+			left join jpool_setting pool_target
+				on pool_target.tag = 'pool_target'
+				and pool_target.jpool = jpool.id
+
+			left join jpool_setting pool_priority
+				on pool_priority.tag = 'pool_priority'
+				and pool_priority.jpool = jpool.id
+
 			left join school on school.id = judge.school
 
 			left join region on region.id = school.region
@@ -112,52 +79,80 @@
 				on registrant.jpool = jpool.id
 				and registrant.tag = 'registrant'
 
+			left join jpool_setting pool_ignore
+				on pool_ignore.jpool = jpool.id
+				and pool_ignore.tag = 'pool_ignore'
+
 		where judge.id = jpj.judge
 			and jpj.jpool = jpool.id
-			and (jpool.parent = ? OR jpool.id = ?)
+			and jpool.category = ?
+			and judge.active = 1
 	");
 
-	$stat_sth->execute($parent_id, $parent_id);
+	$sth->execute($parent->category);
+	my $jresults = $sth->fetchall_hash();
 
-	my $results = $stat_sth->fetchall_hash();
+	my %jpools;
 	my %judges;
 
-	foreach my $result (@{$results}) {
+	foreach my $result (@{$jresults}) {
 
-		my $jid = $result->{"id"};
+		my $judge = $result->{"id"};
+		my $jpool = $result->{"jpool"};
 
-		if ($result->{"registrant"} && $result->{'jpool'} ne $parent_id) {
+		unless ($judges{$judge}{"obligation"}) {
+			$judges{$judge}{"left"} = $result->{"obligation"} + $result->{"hired"};
+			$judges{$judge}{"state"} = $result->{"state"};
+			$judges{$judge}{"obligation"} = $result->{"obligation"} + $result->{"hired"};
+		}
+
+		unless ($jpools{$jpool}{name}) {
+			$jpools{$jpool}{"name"} = $result->{'name'};
+		}
+
+		if ($result->{"registrant"} && $jpool ne $parent_id) {
+			$judges{$judge}{"other_pools"}{$jpool}++;
+			$jpools{$jpool}{"skip_list"} = 1;
+			next;
+
+		} elsif ($result->{"registrant"} && $jpool eq $parent_id) {
+
+		} elsif ($result->{"pool_ignore"}) {
+			$jpools{$jpool}{"skip_list"} = 1;
+			next;
+
+		} elsif ($result->{"parent"} ne $parent_id) {
+			$judges{$judge}{"in_pools"}++;
+			$judges{$judge}{"pools"}{$jpool}++;
+			$judges{$judge}{"left"} -= $result->{"rounds"};
+			$judges{$judge}{"school"} = $result->{"school"};
+			$jpools{$jpool}{"skip_list"} = 1;
 			next;
 		}
 
-		unless ($judges{$jid}{"state"}) {
-			$judges{$jid}{"left"} = $result->{"obligation"};
-			$judges{$jid}{"state"} = $result->{"state"};
-			$judges{$jid}{"obligation"} = $result->{"obligation"};
-		}
-
 		if ($result->{"diamonds"}) {
-			$targets{$result->{'jpool'}}{"diamond_count"}++;
-			$judges{$jid}{"diamonds"} = $result->{"diamonds"};
+			$jpools{$jpool}{"diamond_count"}++;
+			$judges{$judge}{"diamonds"} = $result->{"diamonds"};
 		}
 
 		if ($result->{"diverse"}) {
-			$judges{$jid}{"diverse"} = 1;
-			$targets{$result->{'jpool'}}{"diverse_count"}++;
+			$judges{$judge}{"diverse"} = 1;
+			$jpools{$jpool}{"diverse_count"}++;
 		}
 
-		if ($result->{"jpool"} eq $parent_id) {
-			$targets{$result->{'jpool'}}{"judge_count"}++;
-			$targets{$result->{'jpool'}}{"name"} = $result->{"name"};
+		if ($jpool eq $parent_id) {
+			$jpools{$jpool}{"judge_count"}++;
 
 		} else {
-			$targets{$result->{'jpool'}}{"judge_count"}++;
-			$judges{$jid}{"pools"}{$result->{"jpool"}}++;
-			$judges{$jid}{"in_pools"}++;
-			$judges{$jid}{"left"} -= $result->{"rounds"};
-
-			unless ($result->{'school'} && $school_counts{$result->{jpool}}{$result->{"school"}}) {
-				$targets{$result->{'jpool'}}{"nokids_count"}++;
+			$judges{$judge}{"school"} = $result->{"school"};
+			$jpools{$jpool}{"target"} = $result->{'target'};
+			$jpools{$jpool}{"priority"} = $result->{'priority'};
+			$jpools{$jpool}{"judge_count"}++;
+			$judges{$judge}{"pools"}{$jpool}++;
+			$judges{$judge}{"in_pools"}++;
+			$judges{$judge}{"left"} -= $result->{"rounds"};
+			unless ($result->{'school'} && $school_counts{$jpool}{$result->{"school"}} > 0) {
+				$jpools{$jpool}{"nokids_count"}++;
 			}
 		}
 	}
@@ -218,47 +213,47 @@
 
 			foreach my $jpool (
 				sort {
-					$targets{$a}{"name"} cmp $targets{$b}{"name"}
-					|| $targets{$a}{"priority"} <=> $targets{$b}{"priority"}
+					$jpools{$a}{"name"} cmp $jpools{$b}{"name"}
+					|| $jpools{$a}{"priority"} <=> $jpools{$b}{"priority"}
 					|| $a <=> $b
-				} keys %targets
+				} keys %jpools
 			) {
 
-				next unless $targets{$jpool}{"name"};
-
+				next if $jpools{$jpool}{"skip_list"};
 </%perl>
 				<tr>
 
 					<td>
-						<% $targets{$jpool}{"id"} ? $targets{$jpool}{"id"} : $jpool %>
+						<% $jpools{$jpool}{"id"} ? $jpools{$jpool}{"id"} : $jpool %>
 					</td>
 
 					<td>
-						<% $targets{$jpool}{"name"} %>
+						<% $jpools{$jpool}{"name"} %>
+						<% $jpools{$jpool}{"skip_list"} %>
 					</td>
 
 					<td class="centeralign">
-						<% $targets{$jpool}{"priority"} %>
+						<% $jpools{$jpool}{"priority"} %>
 					</td>
 
 					<td class="centeralign">
-						<% $targets{$jpool}{"target"} %>
+						<% $jpools{$jpool}{"target"} %>
 					</td>
 
 					<td class="centeralign">
-						<% $targets{$jpool}{"judge_count"} %>
+						<% $jpools{$jpool}{"judge_count"} %>
 					</td>
 
 					<td class="centeralign">
-						<% $targets{$jpool}{"diverse_count"} %>
+						<% $jpools{$jpool}{"diverse_count"} %>
 					</td>
 
 					<td class="centeralign">
-						<% $targets{$jpool}{"diamond_count"} %>
+						<% $jpools{$jpool}{"diamond_count"} %>
 					</td>
 
 					<td class="centeralign">
-						<% $targets{$jpool}{"nokids_count"} %>
+						<% $jpools{$jpool}{"nokids_count"} %>
 					</td>
 				</tr>
 %			}
@@ -286,27 +281,27 @@
 					</th>
 
 					<th>
-						State
+						ST
 					</th>
 
-					<th>
-						Div
+					<th title="Diversity">
+						D
 					</th>
 
 					<th class='centeralign' title="Diamonds" alt="Diamonds">
 						<span class="centeralign fa fa-diamond orangetext fa-sm"></span>
 					</th>
 
-					<th>
-						Obl
+					<th title="Obligation">
+						O
 					</th>
 
-					<th>
-						Used
+					<th title="Used">
+						U
 					</th>
 
-					<th>
-						Left
+					<th title="Left">
+						L
 					</th>
 
 					<th>
@@ -334,7 +329,7 @@
 
 				$total += $judges{$jid}{"obligation"};
 				$extra += $judges{$jid}{"left"};
-				$zero++ if  $judges{$jid}{"left"} == $judges{$jid}{"obligation"};
+				$zero++ if $judges{$jid}{"left"} == $judges{$jid}{"obligation"};
 </%perl>
 				<tr class="row">
 					<td class="nospace">
@@ -370,13 +365,13 @@
 					</td>
 
 					<td>
-%						foreach my $pid (sort {$names{$a} cmp $names{$b}} keys %{$judges{$jid}{"pools"}}) {
+%						foreach my $pid (sort {$jpools{$a}{"name"} cmp $jpools{$b}{"name"}} keys %{$judges{$jid}{"pools"}}) {
 							<span class="third nospace smallish">
 								<%
 									$school_counts{$pid}{$judges{$jid}{"school"}}
 									? $school_counts{$pid}{$judges{$jid}{"school"}}
 									: 0
-								%> - <% $names{$pid} %>
+								%> - <% $jpools{$pid}{"name"} %>
 							</span>
 %						}
 					</td>
@@ -384,7 +379,7 @@
 %						foreach my $pid (sort keys %{$judges{$jid}{"other_pools"}}) {
 							<div class="padvertless smallish">
 								<span class="quarterspacer"></span>
-								<% $names{$pid} %>
+								<% $jpools{$pid}{"name"} %>
 							</div>
 %						}
 					</td>
