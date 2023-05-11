@@ -612,16 +612,52 @@
 	}
 
 
-function uploaderName(uploader, filedisplay) {
+function uploaderName(uploader, filedisplay, sizeLimit) {
 
-	if (uploader == null) { uploader = 'upload'; }
-	if (filedisplay == null) { filedisplay = 'filename'; }
+	if (uploader == null) {
+		uploader = 'upload';
+	}
+
+	if (filedisplay == null) {
+		filedisplay = 'filename';
+	}
+
+	if (sizeLimit == null) {
+		sizeLimit = 15;
+	}
 
 	var filename = document.getElementById(uploader).value;
 	var lastIndex = filename.lastIndexOf("\\");
 	if (lastIndex >= 0) {
 		filename = filename.substring(lastIndex + 1);
 	}
+
+	if (sizeLimit > 0 && typeof FileReader !== "undefined") {
+		var size = document.getElementById(uploader).files[0].size;
+
+		if (size > (parseInt(sizeLimit) * 1024 * 1024)) {
+
+			document.getElementById(uploader).value = "";
+
+			var sizeString = (size / 1024 / 1024).toFixed(1);
+
+			var message = `File ${filename} size is ${sizeString} MB and the
+				upload limit is ${sizeLimit} MB. Please compress or reformat the file,
+				because otherwise upload and validation errors are very likely.`;
+
+			alertify.confirm(
+				"File size too large!",
+				message,
+				function(event) {
+					alertify.error("File upload cleared");
+				},
+				function() {
+					alertify.error("File upload cleared");
+				}
+			);
+		}
+	}
+
 	document.getElementById(filedisplay).innerHTML = filename;
 }
 
