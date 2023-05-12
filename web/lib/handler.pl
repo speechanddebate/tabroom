@@ -164,12 +164,13 @@ sub handler {
 		$ah = HTML::Mason::ApacheHandler->new(
 			args_method => 'mod_perl',
 			comp_root   => $Tab::file_root,
-			data_dir    => $Tab::data_dir
+			data_dir    => $Tab::data_dir,
+			error_mode  => 'fatal'
 		);
  	}
 
 	my $return = eval {
-		$ah->handle_request($r)
+		return $ah->handle_request($r);
 	};
 
 	if ( my $err = $@ ) {
