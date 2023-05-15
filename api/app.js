@@ -108,7 +108,8 @@ if (process.env.NODE_ENV === 'development') {
 app.use(cookieParser());
 
 // Database handle volleyball; don't have to call it in every last route.
-// For I am lazy, and unapologetic.
+// For I am lazy, and unapologetic about being so.
+
 app.use((req, res, next) => {
 	req.db = db;
 	return next();

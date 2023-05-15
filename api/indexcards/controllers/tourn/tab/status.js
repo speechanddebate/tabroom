@@ -133,7 +133,7 @@ export const attendance = {
 			from (panel, tourn, round, ballot, event, judge, entry)
 
 				left join person started_by on ballot.started_by = started_by.id
-				left join campus_log cl on cl.panel = panel.id and cl.person = judge.person 
+				left join campus_log cl on cl.panel = panel.id and cl.person = judge.person
 					and cl.tag != 'observer'
 
 			${queryLimit}
@@ -253,11 +253,9 @@ export const attendance = {
 
 		startsResults.forEach( start => {
 
-
 			if (status.person[start.person] === undefined) {
 				status.person[start.person] = {};
 			}
-
 
 			if (status.person[start.person][start.panel] === undefined) {
 				status.person[start.person][start.panel] = {};
@@ -493,13 +491,9 @@ export const attendance = {
 				panel       : panel.id,
 			};
 
-			if (req.body.setting_name === 'offline_entry') {
-				targetType = 'entry';
-			}
-
 			if (targetType === 'student') {
 				log.student = target.id;
-			} else if (targetType === 'entry') {
+			} else if (targetType === 'entry' || req.body.setting_name === 'offline_entry') {
 				log.entry = target.id;
 			} else if (targetType === 'judge') {
 				log.judge = target.id;
