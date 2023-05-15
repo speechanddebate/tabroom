@@ -2,20 +2,21 @@ import config from '../../../../config/config';
 
 export const natsJudgePool = {
 
-	GET: async (req, res) => {
+	POST: async (req, res) => {
 
 		const db = req.db;
 		const tourn = await db.summon(db.tourn, req.params.tourn_id);
 		const now = new Date();
 
 		const weights = {
-			strikes     : 1000000,
-			states      : 100000,
-			diversity   : 800,
-			diamonds    : 800,
-			other_pools : 50,
-			remaining   : 50,
-			already     : 10,
+			strikes    : 1000000,
+			states     : 100000,
+			diversity  : 1000,
+			diamonds   : 800,
+			otherPools : 500,
+			remaining  : 200,
+			schoolSize : 25,
+			already    : 10,
 		};
 
 		if (tourn.start < now) {
@@ -26,17 +27,17 @@ export const natsJudgePool = {
 			return;
 		}
 
-		const parentPool = await db.summon(db.jpool, req.params.parent_id);
+		const parentPool = await db.summon(db.jpool, req.body.parent_id);
 
-		if (!parentPool || !parentPool.settings.registrant ) {
+		if (!parentPool) {
 			res.status(201).json({
 				error   : true,
-				message : `No parent judge pool found for ID ${req.params.parent_id}`,
+				message : `No parent judge pool found for ID ${req.body.parent_id}`,
 			});
 			return;
 		}
 
-		if (!req.params.augment) {
+		if (!req.body.augment) {
 			deleteJPoolChildren(db, parentPool.id);
 		}
 
@@ -71,6 +72,7 @@ export const natsJudgePool = {
 			const jpools = jpoolsByPriority[priority];
 			const schoolPoolCount = {
 				total : {},
+				done  : {},
 			};
 
 			jpools.forEach( (jpool) => {
@@ -85,39 +87,54 @@ export const natsJudgePool = {
 				});
 			});
 
-			const schoolPercentages = {};
+			const schoolPercent = {};
 
-			Object.keys(judges).forEach( (judge)  => {
-				if (judge.school && schoolPoolCount.total[judge.school]) {
+			Object.keys(judges).forEach( (judgeId)  => {
+
+				if (!judges[judgeId]) { return; }
+				const judge = judges[judgeId];
+
+				if (judge.school
+					&& schoolPoolCount.total[judge.school]
+					&& !schoolPoolCount.done[judge.school]
+				) {
 					jpools.forEach( (jpool) => {
+
+						if (!schoolPercent[jpool.id]) {
+							schoolPercent[jpool.id] = {};
+						}
+
 						if (schoolPoolCount[jpool.id]?.[judge.school]) {
-							schoolPercentages[jpool.id] = (
+							schoolPercent[jpool.id][judge.school] = (
 								schoolPoolCount[jpool.id][judge.school]
 								/ schoolPoolCount.total[judge.school]);
 						} else {
-							schoolPercentages[jpool.id] = 0;
+							schoolPercent[jpool.id][judge.school] = 0;
 						}
 					});
+					schoolPoolCount.done[judge.school] = true;
 				}
 			});
 
-			while (jpools.length > 1 && Object.keys(judges).length > 1) {
+			while (jpools.length > 0 && Object.keys(judges).length > 1) {
 
 				const jpool = jpools.shift();
-
 				if (!jpoolJudges[jpool.id]) {
 					jpoolJudges[jpool.id] = [];
 				}
 
 				const judgeKeys = Object.keys(judges).sort( (a, b) => {
 
-					if (judges[a].priority !== judges[b].priority) {
+					if (priority < 4 && (judges[a].priority !== judges[b].priority)) {
 						return judges[b].priority - judges[a].priority;
 					}
-					if (schoolPercentages[judges[a].school] !== schoolPercentages[judges[b].school]) {
-						return schoolPercentages[judges[b].school] - schoolPercentages[judges[a].school];
+					if (schoolPercent[jpool.id][judges[a].school]
+						!== schoolPercent[jpool.id][judges[b].school]
+					) {
+						return (schoolPercent[jpool.id][judges[b].school]
+							- schoolPercent[jpool.id][judges[a].school]);
 					}
-					return a - b;
+					return judges[b].priority - judges[a].priority;
 				});
 
 				let chosenOne = 0;
@@ -126,19 +143,49 @@ export const natsJudgePool = {
 					if (!judges[judgeId]) {
 						return;
 					}
-
 					const judge = judges[judgeId];
 
-					if (judge.rounds >= jpool.rounds
+					// Keep Congress judges in the SAME event for the two
+					// prelims and DIFFERENT events for elims
+
+					if (jpool.eventType === 'congress') {
+
+						if (jpool.roundType === 'prelim') {
+							if (judge.alreadyPrelim && judge.alreadyPrelim !== jpool.eventAbbr) {
+								return;
+							}
+
+							if (judge.alreadyPrelim !== jpool.eventAbbr
+								&& judge.alreadyCongress[jpool.eventAbbr]
+							) {
+								return;
+							}
+
+						} else {
+							if (judge.alreadyCongress[jpool.eventAbbr]) {
+								return;
+							}
+						}
+					}
+
+					if (schoolPoolCount.total[judge.school]
+						&& !schoolPercent[jpool.id][judge.school]
+						&& !req.body.augment
+						&& jpool.eventType !== 'congress'
+					) {
+						return;
+					}
+
+					if (judge.rounds < jpool.rounds
 						|| judge.exclude?.[jpool.id]
 						|| chosenOne > 0
 					) {
 						return;
 					}
 
+					// Tag the search as successfull, and reduce the target
+					// count for this pool
 					chosenOne = judgeId;
-
-					// Reduce the target count for this pool
 					jpool.target--;
 
 					// Put them into this pool
@@ -151,7 +198,17 @@ export const natsJudgePool = {
 					// Adjust the round obligation downwards to match this guy
 					judge.rounds -= jpool.rounds;
 
-					// If the judge is out of obligation then remove them from the potentials pile
+					// prevent Congress from getting all screwed up
+					if (jpool.eventType === 'congress') {
+						judge.alreadyCongress[jpool.eventAbbr] = true;
+						if (jpool.roundType === 'prelim') {
+							judge.alreadyPrelim = jpool.eventAbbr;
+						}
+					}
+
+					// If the judge is out of obligation then remove them from
+					// the potentials pile
+
 					if (judge.rounds < 1) {
 						delete judges[judge.id];
 					} else {
@@ -166,22 +223,24 @@ export const natsJudgePool = {
 						// Nuke the coverage percentages to reflect that the kids here
 						// are already chaperoned
 
-						if (schoolPercentages[jpool.id]?.[judge.school]) {
+						if (schoolPercent[jpool.id]?.[judge.school]) {
 
 							// Dividing by 100 means that all kids will get at
 							// least 1 chaperone, but judges will still be
 							// preferred for sites where they have any kids at all.
 
-							schoolPercentages[jpool.id][judge.school] /= 100;
+							schoolPercent[jpool.id][judge.school] /= 100;
 						}
 					}
-
 				});
 
 				counter++;
 
-				// Unless I've hit quota I get another go around.
-				if (jpool.target > 0) {
+				// Unless I've hit quota I get another go around, unless I was
+				// not able to find any judges at all, in which case break the
+				// loop.
+
+				if (chosenOne && jpool.target > 0) {
 					jpools.push(jpool);
 				}
 			}
@@ -200,13 +259,12 @@ export const natsJudgePool = {
 			});
 		});
 
-		const msg = ` ${Object.keys(jpoolJudges).length} pools populated with ${counter} assignments`;
+		const message = `${Object.keys(jpoolJudges).length} pools populated with ${counter} assignments`;
 		res.status(200).json({
-			error   : false,
-			message : msg,
+			error: false,
+			message,
+			redirect: `/panel/judge/pool_report.mhtml?parent_id=${parentPool.id}msg=${message}`,
 		});
-
-//		res.status(200).redirect(`${config.BASE_URL}/panel/judge/pool_report.mhtml?parent_id=${parentPool.id}&msg=${msg}`);
 	},
 };
 
@@ -219,6 +277,7 @@ export const makeJudgePool = {
 export default makeJudgePool;
 
 const deleteJPoolChildren = async (db, parentId) => {
+
 	// Clear out the old
 	await db.sequelize.query(`
 		delete jpj.*
@@ -247,7 +306,11 @@ const getChildPools = async (db, parentId) => {
 			pool_target.value target, pool_priority.value priority,
 			rounds.value rounds,
 			min(timeslot.start) poolStart,
-			max(timeslot.end) poolEnd
+			max(timeslot.end) poolEnd,
+			event.type eventType,
+			event.abbr eventAbbr,
+			round.type roundType
+
 
 		from jpool
 			left join jpool_setting pool_target
@@ -264,6 +327,7 @@ const getChildPools = async (db, parentId) => {
 
 			left join jpool_round jpr on jpr.jpool = jpool.id
 			left join round on jpr.round = round.id
+			left join event on round.event = event.id
 			left join timeslot on round.timeslot = timeslot.id
 
 		where jpool.parent = :parentId
@@ -310,6 +374,7 @@ const getChildPools = async (db, parentId) => {
 					where pool_ignore.tag = 'pool_ignore'
 					and pool_ignore.jpool = jpool.id
 			)
+		group by entry.id, jpool.id
 	`, {
 		replacements : { parentId },
 		type         : db.sequelize.QueryTypes.SELECT,
@@ -317,7 +382,7 @@ const getChildPools = async (db, parentId) => {
 
 	for (const entry of entryData) {
 
-		if (!jpoolsById[entry.jpool].school) {
+		if (!jpoolsById[entry.jpool].schoolCount) {
 			jpoolsById[entry.jpool].schoolCount = {};
 		}
 		if (!jpoolsById[entry.jpool].schoolCount[entry.school]) {
@@ -338,10 +403,6 @@ const getChildPools = async (db, parentId) => {
 				jpoolsById[entry.jpool].state[entry.region] = 0;
 			}
 			jpoolsById[entry.jpool].state[entry.region]++;
-		}
-
-		if (entry.event === 'congress') {
-			jpoolsById.hasCongress = true;
 		}
 	}
 
@@ -368,19 +429,6 @@ const getChildPools = async (db, parentId) => {
 
 const getJPoolJudges = async (db, parentId, jpools, weights) => {
 
-	let limit = '';
-
-	if (!jpools.hasCongress) {
-		limit = `
-			and not exists (
-				select pref_congress.id
-				from judge_setting pref_congress
-				where pref_congress.judge = judge.id
-				and pref_congress.tag = 'prefers_congress'
-			)
-		`;
-	}
-
 	const rawJudges = await db.sequelize.query(`
 		select
 			judge.id, judge.first, judge.last, judge.school, school.region state,
@@ -388,11 +436,14 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 			diverse.value diverse,
 			diamonds.value diamonds,
 			nsda_points.value nsda_points,
-			count(distinct rpj.jpool) registrant
+			count(distinct rpj.jpool) registrant,
+			count(distinct entry.id) entries
 
 		from (judge, jpool_judge jpj, jpool, category, tourn)
 
 			left join school on judge.school = school.id
+			left join entry on school.id = entry.school and entry.unconfirmed = 0
+
 			left join person on judge.person = person.id
 
 			left join judge_setting diverse
@@ -422,8 +473,8 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 			and judge.active   = 1
 			and judge.category = category.id
 			and category.tourn = tourn.id
-			${limit}
 		group by judge.id
+		order by judge.id
 	`, {
 		replacements : { parentId },
 		type         : db.sequelize.QueryTypes.SELECT,
@@ -433,23 +484,26 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 		let priority = 0;
 
 		priority += parseInt(item.diamonds ? item.diamonds : 0) * weights.diamonds;
-		priority += parseInt(item.diverse ? item.diverse : 0) * weights.diversity;
+		priority += parseInt(item.diverse ? 1 : 0) * weights.diversity;
 		priority += parseInt(item.obligation ? item.obligation : 0) * weights.remaining;
 		priority += parseInt(item.hired ? item.hired : 0) * weights.remaining;
-		priority -= parseInt(item.registrant ? item.registrant : 0) * weights.other_pools;
+		priority += parseInt(item.registrant ? item.registrant : 0) * weights.otherPools;
+		// These things should make you less important (because you fit more places)
+		priority -= parseInt(item.entries ? item.entries : 0) * weights.schoolSize;
 		return priority;
 	};
 
 	const judges = rawJudges.reduce( (obj, item) => {
 		return Object.assign(obj, {
 			[item.id] : {
-				strikeCount  : 0,
-				timeStrikes  : [],
-				eventStrikes : {},
-				jpools       : {},
-				exclude      : {},
-				rounds       : parseInt(item.obligation) + parseInt(item.hired),
-				priority     : prioritize(item),
+				strikeCount     : 0,
+				timeStrikes     : [],
+				eventStrikes    : {},
+				jpools          : {},
+				exclude         : {},
+				alreadyCongress : {},
+				rounds          : parseInt(item.obligation || 0) + parseInt(item.hired || 0),
+				priority        : prioritize(item),
 				...item,
 			},
 		});
@@ -487,21 +541,34 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 		judges[strike.judge].strikeCount++;
 
 		if (strike.type === 'time') {
-			judges[strike.judge].timeStrikes.push({
-				start : new Date(strike.start).valueOf(),
-				end   : new Date(strike.end).valueOf(),
+
+			const start = new Date(strike.start).valueOf();
+			const end   = new Date(strike.end).valueOf();
+
+			Object.keys(jpools).forEach( (jpoolId) => {
+				const jpool = jpools[jpoolId];
+				if (jpool.start <= end && jpool.end >= start) {
+					judges[strike.judge].exclude[jpool.id] = true;
+					judges[strike.judge].priority += 10;
+				}
 			});
 		}
 
 		if (strike.type === 'departure') {
-			judges[strike.judge].timeStrikes.push({
-				start : new Date(strike.start).valueOf(),
-				end   : new Date(strike.tournEnd).valueOf(),
+			const start = new Date(strike.start).valueOf();
+
+			Object.keys(jpools).forEach( (jpoolId) => {
+				const jpool = jpools[jpoolId];
+				if (jpool.end >= start) {
+					judges[strike.judge].exclude[jpool.id] = true;
+					judges[strike.judge].priority += 10;
+				}
 			});
 		}
 
 		if (strike.type === 'event') {
 			judges[strike.judge].eventStrikes[strike.event] = true;
+			judges[strike.judge].priority += 10;
 		}
 	});
 
@@ -529,7 +596,13 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 			and jpj.jpool != rpj.jpool
 			and jpool.category = category.id
 			and category.tourn = tourn.id
-			${limit}
+
+			and not exists (
+				select pool_ignore.id
+				from jpool_setting pool_ignore
+					where pool_ignore.tag = 'pool_ignore'
+					and pool_ignore.jpool = jpj.jpool
+			)
 		group by jpj.id
 	`, {
 		replacements : { parentId },
@@ -545,14 +618,12 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 		if (!judges[jpj.judge].jpools[jpj.jpool]) {
 
 			if (jpj.rounds) {
-				judges[jpj.judge].rounds -= jpj.rounds;
-				judges[jpj.judge].priority -= jpj.rounds * weights.remaining;
+				judges[jpj.judge].rounds -= parseInt(jpj.rounds);
+				judges[jpj.judge].priority += (jpj.rounds * weights.remaining);
 			}
 
-			judges[jpj.judge].priority += jpj.rounds * weights.already;
-
 			jpj.start = new Date(jpj.minStart).valueOf();
-			jpj.end = new Date(jpj.minEnd).valueOf();
+			jpj.end = new Date(jpj.maxEnd).valueOf();
 
 			Object.keys(jpools).forEach( (jpoolId) => {
 				const jpool = jpools[jpoolId];
@@ -561,6 +632,7 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 				}
 			});
 		}
+
 	});
 
 	return judges;
