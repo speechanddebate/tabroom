@@ -1,4 +1,4 @@
-import { checkJudgePerson } from '../../../helpers/tourn-auth';
+import { checkJudgePerson } from '../../../helpers/auth';
 
 export const saveRubric = {
 

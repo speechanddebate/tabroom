@@ -1,5 +1,5 @@
 import moment from 'moment-timezone';
-import { roundCheck } from '../../../../helpers/tourn-auth.js';
+import { roundCheck } from '../../../../helpers/auth.js';
 
 export const scheduleAutoFlip = async (roundId, req, res) => {
 

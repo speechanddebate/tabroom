@@ -1,6 +1,6 @@
 import getFollowers from '../../../../helpers/followers';
 import { emailBlast, phoneBlast } from '../../../../helpers/mail.js';
-import { sectionCheck, timeslotCheck, roundCheck } from '../../../../helpers/tourn-auth.js';
+import { sectionCheck, timeslotCheck, roundCheck } from '../../../../helpers/auth.js';
 
 export const messageSection = {
 	POST: async (req, res) => {
@@ -30,6 +30,12 @@ export const messageSection = {
 		messageData.text = `\n\n${req.body.message}`;
 		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
+
+		const tourn = await req.db.summon(req.db.tourn, req.params.tourn_id);
+		if (tourn.webname) {
+			messageData.from = `${tourn.name} <${tourn.webname}@www.tabroom.com>`;
+		}
+
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
 
@@ -88,6 +94,12 @@ export const messageRound = {
 		messageData.text = `\n\n${req.body.message}`;
 		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
+
+		const tourn = await req.db.summon(req.db.tourn, req.params.tourn_id);
+		if (tourn.webname) {
+			messageData.from = `${tourn.name} <${tourn.webname}@www.tabroom.com>`;
+		}
+
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);
 
@@ -146,6 +158,11 @@ export const messageTimeslot = {
 		messageData.text = `\n\n${req.body.message}`;
 		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
 		messageData.subject = 'Message from Tab';
+
+		const tourn = await req.db.summon(req.db.tourn, req.params.tourn_id);
+		if (tourn.webname) {
+			messageData.from = `${tourn.name} <${tourn.webname}@www.tabroom.com>`;
+		}
 
 		const emailResponse = await emailBlast(messageData);
 		const phoneResponse = await phoneBlast(messageData);

@@ -1,8 +1,7 @@
 import { assert } from 'chai';
 import config from '../../config/config';
 import db from './db';
-import auth from './auth';
-import tournAuth from './tourn-auth';
+import { auth, tournAuth } from './auth';
 import userData from '../../tests/testFixtures';
 
 describe('Authentication Functions', () => {

@@ -20,8 +20,7 @@ import autoPaths from './indexcards/routes/paths/auto/index';
 import publicPaths from './indexcards/routes/paths/public/index';
 import externalPaths from './indexcards/routes/paths/ext/index';
 
-import auth from './indexcards/helpers/auth';
-import tournAuth from './indexcards/helpers/tourn-auth';
+import { auth, tournAuth } from './indexcards/helpers/auth';
 import db from './indexcards/helpers/db';
 
 import { debugLogger, requestLogger, errorLogger } from './indexcards/helpers/logger';

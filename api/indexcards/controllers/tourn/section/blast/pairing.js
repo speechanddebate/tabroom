@@ -3,7 +3,7 @@ import moment from 'moment-timezone';
 import { ordinalize } from '@speechanddebate/nsda-js-utils';
 import getFollowers from '../../../../helpers/followers';
 import { emailBlast, phoneBlast } from '../../../../helpers/mail.js';
-import { sectionCheck, timeslotCheck, roundCheck } from '../../../../helpers/tourn-auth.js';
+import { sectionCheck, timeslotCheck, roundCheck } from '../../../../helpers/auth.js';
 import wudcPosition from '../../../../helpers/textmunge';
 import { sidelocks } from '../../../../helpers/round';
 import scheduleAutoFlip from './autoFlip';
