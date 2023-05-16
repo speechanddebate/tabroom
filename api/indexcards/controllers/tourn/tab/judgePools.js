@@ -128,6 +128,20 @@ export const natsJudgePool = {
 					if (priority < 4 && (judges[a].priority !== judges[b].priority)) {
 						return judges[b].priority - judges[a].priority;
 					}
+
+					if (jpool.site_preference) {
+						if (judges[a].site_preference !== jpool.site_preference
+							&& judges[b].site_preference === jpool.site_preference
+						) {
+							return -100;
+						}
+
+						if (judges[b].site_preference !== jpool.site_preference
+							&& judges[a].site_preference === jpool.site_preference
+						) {
+							return 100;
+						}
+					}
 					if (schoolPercent[jpool.id][judges[a].school]
 						!== schoolPercent[jpool.id][judges[b].school]
 					) {
@@ -224,11 +238,9 @@ export const natsJudgePool = {
 						// are already chaperoned
 
 						if (schoolPercent[jpool.id]?.[judge.school]) {
-
 							// Dividing by 100 means that all kids will get at
 							// least 1 chaperone, but judges will still be
 							// preferred for sites where they have any kids at all.
-
 							schoolPercent[jpool.id][judge.school] /= 100;
 						}
 					}
@@ -434,6 +446,7 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 			judge.id, judge.first, judge.last, judge.school, school.region state,
 			judge.obligation, judge.hired,
 			diverse.value diverse,
+			site_preference.value site_preference,
 			diamonds.value diamonds,
 			nsda_points.value nsda_points,
 			count(distinct rpj.jpool) registrant,
@@ -445,6 +458,10 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 			left join entry on school.id = entry.school and entry.unconfirmed = 0
 
 			left join person on judge.person = person.id
+
+			left join judge_setting site_preference
+				on site_preference.tag = 'site_preference'
+				and site_preference.judge = judge.id
 
 			left join judge_setting diverse
 				on diverse.tag = 'diverse'
@@ -588,6 +605,11 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 			left join jpool_setting rounds
 				on rounds.tag = 'rounds'
 				and rounds.jpool = jpool.id
+
+			left join jpool_setting site_preference
+				on site_preference.tag = 'site_preference'
+				and site_preference.jpool = jpool.id
+
 
 		where rpj.jpool = :parentId
 			and rpj.judge = judge.id

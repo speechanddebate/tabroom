@@ -530,6 +530,146 @@ export const attendance = {
 	},
 };
 
+function addZero(i) {
+	if (i < 10) {
+		i = `0${i}`;
+	}
+	return i;
+}
+
+export const schematStatus = {
+
+	GET: async (req, res) => {
+		const db = req.db;
+
+		const labels = await db.sequelize.query(`
+			select
+				SUBSTRING(aff_label.value, 0, 1) aff,
+				SUBSTRING(neg_label.value, 0, 1) neg 
+			from event_setting aff_label, event_setting neg_label, round
+
+			where round.id = :roundId
+				and round.event = aff_label.event
+				and round.event = neg_label.event
+				and aff_label.tag = 'aff_label'
+				and neg_label.tag = 'neg_label'
+		`, {
+			replacements: { roundId: req.params.round_id },
+			type         : db.sequelize.QueryTypes.SELECT,
+		});
+
+		const tmplabel = labels.shift();
+
+		const label = {
+			1: tmplabel?.aff || 'A',
+			2: tmplabel?.neg || 'N',
+		};
+
+		const rawBallots = await db.sequelize.query(`
+			select
+				ballot.id ballot,
+				panel.id panel,
+				judge.id judge,
+				ballot.chair,
+				CONVERT_TZ(ballot.judge_started, '+00:00', tourn.tz) startTime,
+				ballot.audit,
+				ballot.side,
+				ballot.bye, ballot.forfeit, panel.bye pbye,
+				rank.id rank,
+				point.id point,
+				winloss.id winloss,
+				winloss.value winner,
+				panel.flight
+
+			from (judge, ballot, panel, round, event, tourn)
+				left join score rank on rank.ballot = ballot.id and rank.tag = 'rank'
+				left join score point on point.ballot = ballot.id and point.tag = 'point'
+				left join score winloss on winloss.ballot = ballot.id and winloss.tag = 'winloss'
+
+			where round.id = :roundId
+				and panel.round = round.id
+				and panel.id = ballot.panel
+				and ballot.judge = judge.id
+				and round.event = event.id
+				and event.tourn = tourn.id
+		`, {
+			replacements: { roundId: req.params.round_id },
+			type         : db.sequelize.QueryTypes.SELECT,
+		});
+
+		const round = {
+			judges : {},
+			out    : {},
+			panels : {},
+		};
+
+		rawBallots.forEach( (ballot) => {
+
+			if (!round.judges[ballot.judge]) {
+				round.judges[ballot.judge] = {};
+			}
+			if (!round.judges[ballot.judge][ballot.flight]) {
+				round.judges[ballot.judge][ballot.flight] = { panel: ballot.panel };
+			}
+
+			const judge = round.judges[ballot.judge][ballot.flight];
+
+			if (!round.out[ballot.flight]) {
+				round.out[ballot.flight] = {};
+			}
+
+			if (ballot.audit) {
+
+				if (!round.panels[ballot.panel]) {
+					round.panels[ballot.panel] = 10;
+				} else {
+					round.panels[ballot.panel] += 10;
+				}
+
+				if (ballot.winloss) {
+					if (ballot.winner) {
+						judge.text = label[ballot.side];
+						judge.class = 'greentext semibold';
+					}
+				} else if (ballot.pbye) {
+					judge.text = 'BYE';
+					judge.class = 'graytext semibold';
+				} else if (ballot.bye) {
+					judge.text += `${label[ballot.side]} BYE`;
+					judge.class = 'graytext semibold';
+				} else if (ballot.forfeit) {
+					judge.text += `${label[ballot.side]} FFT`;
+					judge.class = 'graytext semibold';
+				} else if (ballot.rank) {
+					judge.text = 'IN';
+					judge.class = 'greentext semibold';
+				} else if (ballot.chair) {
+					judge.class = 'fa fa-sm fa-star greentext';
+					judge.text = '';
+				}
+			} else if (ballot.pbye) {
+				round.panels[ballot.panel] = 100;
+				judge.text = 'BYE';
+			} else if (ballot.winloss || ballot.rank || ballot.point) {
+				round.out[ballot.flight][ballot.judge] = true;
+				round.panels[ballot.panel] = 100;
+				judge.text = '&frac12;';
+				judge.class = 'redtext';
+			} else if (ballot.startTime) {
+				round.out[ballot.flight][ballot.judge] = true;
+				round.panels[ballot.panel] = 100;
+				const started = new Date(ballot.startTime);
+				judge.text = `${started.getUTCHours()}:${addZero(started.getUTCMinutes())}`;
+			} else {
+				round.out[ballot.flight][ballot.judge] = true;
+				delete round.judges[ballot.judge][ballot.flight];
+			}
+		});
+
+		res.status(200).json(round);
+	},
+};
+
 export const eventStatus = {
 	GET: async (req, res) => {
 		const db = req.db;
