@@ -32,7 +32,6 @@ export const sidelocks = async (roundId) => {
 			and neg_bo.entry = neg_e.id
 	`;
 
-
 	const sideLocks = await db.sequelize.query(sidelockQuery, {
 		replacements : { roundId },
 		type         : db.sequelize.QueryTypes.SELECT,
@@ -41,7 +40,98 @@ export const sidelocks = async (roundId) => {
 	if (sideLocks) {
 		return objectify(sideLocks);
 	}
+};
 
+export const flightTimes = async (roundId) => {
+
+	const roundSettings = await db.sequelize.query(`
+		select
+			round.id, round.name, round.start_time, round.flighted, round.type,
+			tourn.tz,
+			flight_offset.value flight_offset,
+			prelim_decision_deadline.value prelim_deadline,
+			elim_decision_deadline.value elim_deadline
+
+		from (round, event, tourn)
+
+			left join event_setting flight_offset
+				on flight_offset.event = event.id
+				and flight_offset.tag = 'flight_offset'
+
+			left join event_setting prelim_decision_deadline
+				on prelim_decision_deadline.event = event.id
+				and prelim_decision_deadline.tag = 'prelim_decision_deadline'
+
+			left join event_setting elim_decision_deadline
+				on elim_decision_deadline.event = event.id
+				and elim_decision_deadline.tag = 'elim_decision_deadline'
+
+		where round.id = :roundId
+			and round.event = event.id
+			and event.tourn = tourn.id
+
+	`, { replacements: { roundId },
+		type: db.sequelize.QueryTypes.SELECT,
+	});
+
+	const round = roundSettings.shift();
+	const times = { tz: round.tz };
+	const roundStart = new Date(round.start_time);
+
+	for (let f = 1; f <= round.flighted; f++) {
+
+		times[f] = { };
+
+		if (round.flight_offset) {
+			times[f].start = new Date(roundStart.getTime()
+				+ ((f - 1) * round.flight_offset * 60000)
+			);
+
+		} else {
+			times[f].start = new Date(roundStart.getTime());
+		}
+
+		if (round.type === 'final' || round.type === 'elim' || round.type === 'runoff') {
+
+			if (round.elim_deadline) {
+				if (round.flight_offset) {
+
+					times[f].deadline = new Date(
+						roundStart.getTime()
+						+ ((f - 1) * round.flight_offset * 60000)
+						+ (round.elim_deadline * 60000)
+					);
+
+				} else {
+
+					times[f].deadline = new Date(
+						roundStart.getTime()
+						+ (round.elim_deadline * 60000)
+					);
+				}
+			}
+		} else {
+
+			if (round.prelim_deadline) {
+				if (round.flight_offset) {
+
+					times[f].deadline = new Date(
+						roundStart.getTime()
+						+ ((f - 1) * round.flight_offset * 60000)
+						+ (round.prelim_deadline * 60000)
+					);
+
+				} else {
+					times[f].deadline = new Date(
+						roundStart.getTime()
+						+ (round.prelim_deadline * 60000)
+					);
+				}
+			}
+		}
+	}
+
+	return times;
 };
 
 export default sidelocks;

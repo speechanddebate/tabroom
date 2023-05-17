@@ -1,4 +1,6 @@
+/* eslint-disable no-continue */
 import { showDateTime } from '@speechanddebate/nsda-js-utils';
+import { flightTimes } from '../../../helpers/round';
 
 export const attendance = {
 	GET: async (req, res) => {
@@ -545,7 +547,7 @@ export const schematStatus = {
 		const labels = await db.sequelize.query(`
 			select
 				SUBSTRING(aff_label.value, 0, 1) aff,
-				SUBSTRING(neg_label.value, 0, 1) neg 
+				SUBSTRING(neg_label.value, 0, 1) neg
 			from event_setting aff_label, event_setting neg_label, round
 
 			where round.id = :roundId
@@ -680,8 +682,8 @@ export const eventStatus = {
 				round.id round_id, round.name round_name, round.label, round.flighted, round.type,
 				round.start_time round_start,
 				timeslot.start timeslot_start,
-				panel.id panel_id, panel.bye, panel.flight,
-				ballot.id ballot_id, ballot.judge, ballot.bye bbye, ballot.forfeit bfft,
+				panel.id panel_id, panel.flight,
+				ballot.judge,
 					ballot.audit, ballot.judge_started,
 				score.id score_id, score.tag,
 				flight_offset.value flight_offset,
@@ -698,7 +700,7 @@ export const eventStatus = {
 
 			where round.event = event.id
 
-				and event.tourn = ${req.params.tourn_id}
+				and event.tourn = :tournId
 
 				and round.id = panel.round
 				and panel.id = ballot.panel
@@ -730,7 +732,10 @@ export const eventStatus = {
 			order by event.name, round.name
 		`;
 
-		const [eventResults] = await db.sequelize.query(eventQuery);
+		const eventResults = await db.sequelize.query(eventQuery, {
+			replacements: { tournId:  req.params.tourn_id },
+			type: db.sequelize.QueryTypes.SELECT,
+		});
 		const status         = {};
 		const statusCache    = { done_judges: {} };
 		const tournPerms     = req.session[req.params.tourn_id];
@@ -738,12 +743,10 @@ export const eventStatus = {
 		eventResults.forEach( event => {
 
 			if (
-				tournPerms.level === 'owner'
-				|| tournPerms.level === 'tabber'
-				|| tournPerms.events[event.id]
+				tournPerms.level !== 'owner'
+				&& tournPerms.level !== 'tabber'
+				&& !tournPerms.events[event.id]
 			) {
-				// I am just A-OK!
-			} else {
 				return;
 			}
 
@@ -984,6 +987,157 @@ export const eventStatus = {
 			return res.status(400).json({ message: 'No events found in that tournament' });
 		}
 
+		return res.status(200).json(status);
+	},
+};
+
+export const eventDashboard = {
+
+	GET: async (req, res) => {
+
+		const db = req.db;
+		const eventQuery = `
+			select
+				event.id event_id, event.name event_name, event.abbr event_abbr,
+				round.id round_id, round.name round_name, round.type round_type,
+				round.label, round.flighted, round.type,
+				round.start_time round_start,
+				timeslot.start timeslot_start,
+				panel.id panel, panel.flight,
+				ballot.id ballot, ballot.judge judge,
+					ballot.audit, ballot.judge_started,
+				score.id score_id, score.tag
+
+			from (round, panel, ballot, event, tourn, timeslot, entry)
+
+				left join score on score.ballot = ballot.id
+					and score.tag in ('winloss', 'point', 'rank')
+
+			where round.event = event.id
+
+				and event.tourn     = :tournId
+				and round.id        = panel.round
+				and panel.id        = ballot.panel
+				and round.event     = event.id
+				and event.tourn     = tourn.id
+				and round.timeslot  = timeslot.id
+				and ballot.entry    = entry.id
+				and entry.active    = 1
+				and round.published = 1
+				and panel.bye       = 0
+				and ballot.bye      = 0
+				and ballot.forfeit  = 0
+				and ballot.judge    > 0
+
+				and exists (
+					select b2.id
+						from ballot b2, panel p2, entry e2
+					where b2.panel     = p2.id
+						and p2.round   = round.id
+						and p2.bye     = 0
+						and b2.bye     = 0
+						and (b2.audit  = 0 OR round.type = 'final')
+						and b2.forfeit = 0
+						and b2.entry   = e2.id
+						and e2.active  = 1
+						and b2.judge   > 0
+				)
+			order by event.name, round.name, ballot.judge, ballot.audit
+		`;
+
+		const statusResults = await db.sequelize.query(eventQuery, {
+			replacements: { tournId: req.params.tourn_id },
+			type         : db.sequelize.QueryTypes.SELECT,
+		});
+
+		const status = { done: {} };
+		const tournPerms = req.session[req.params.tourn_id];
+
+		for await (const result of statusResults) {
+
+			// Check that I can see this event.
+			if (
+				tournPerms.level !== 'owner'
+				&& tournPerms.level !== 'tabber'
+				&& !tournPerms.events[result.event]
+			) {
+				continue;
+			}
+
+			// Judges have more than one ballot per section so stop if we've seen you before
+			if (status.done[result.panel]?.[result.judge]) {
+				continue;
+			}
+
+			// If the round isn't on the status board already, create an object
+			// for it
+
+			if (!status[result.round_id]) {
+
+				const times = await flightTimes(result.round_id);
+				const numFlights = result.flighted || 1;
+
+				status[result.round_id] = {
+					eventId   : result.event_id,
+					eventName : result.event_abbr,
+					number    : result.round_name,
+					name      : result.label ? result.label : `Round ${result.round_name}`,
+					type      : result.round_type,
+					undone    : false,
+					started   : false,
+					flights   : {},
+				};
+
+				for (let f = 1; f <= numFlights; f++) {
+					status[result.round_id].flights[f] = {
+						done      : 0,
+						half      : 0,
+						started   : 0,
+						nada      : 0,
+						...times[f],
+					};
+				}
+			}
+
+			// Prevent future duplicates.  This incidentally is why the sql
+			// query sorts by ballot.audit; unaudited ballots come first and
+			// won't slip through.
+
+			if (status.done[result.panel]) {
+				status.done[result.panel][result.judge] = true;
+			} else {
+				status.done[result.panel] = {
+					[result.judge] : true,
+				};
+			}
+
+			if (result.audit) {
+				// Is the ballot done?
+				status[result.round_id].flights[result.flight].done++;
+				status[result.round_id].started = true;
+			} else {
+
+				status[result.round_id].undone = true;
+				if (result.score_id) {
+					// Does the ballot have scores?
+					status[result.round_id].flights[result.flight].half++;
+					status[result.round_id].started = true;
+				} else if (result.judge_started) {
+					status[result.round_id].flights[result.flight].start++;
+					status[result.round_id].started = true;
+				} else {
+					status[result.round_id].flights[result.flight].nada++;
+				}
+			}
+		}
+
+		delete status.done;
+
+		for await (const roundId of Object.keys(status)) {
+			if (!status[roundId].started || !status[roundId].undone) {
+				delete status[roundId];
+			}
+		}
 		return res.status(200).json(status);
 	},
 };
