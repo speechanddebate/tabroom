@@ -364,8 +364,8 @@ const formatBlast = async (queryData, req) => {
 				sectionMessage.text += `Start ${round.shortstart[section.flight]} \n`;
 				sectionMessage.text += `Room: ${section.room} `;
 
-				sectionMessage.html += `<p style="width: 25%; display: inline-block;">Start ${round.start[section.flight]}</p>`;
-				sectionMessage.html += `<p style="width: 75%; display: inline-block; text-align: center;">Room: ${section.room} `;
+				sectionMessage.html += `<p>Start ${round.start[section.flight]}</p>`;
+				sectionMessage.html += `<p>">Room: ${section.room} `;
 				sectionMessage.single += `\tRoom ${section.room} Counter ${counter++} Letter ${section.letter}`;
 
 				if (section.hybrid) {
@@ -620,7 +620,7 @@ const formatBlast = async (queryData, req) => {
 					// creating an inline style sheet when I'm on the clock and
 					// it doesn't always work in email clients anyway
 
-					judgeMessage.selfhtml += `<p style='width: 75%; display: inline-block; text-align: center;'>`;
+					judgeMessage.selfhtml += `<p style='width: 50%; display: inline-block; text-align: center;'>`;
 					judgeMessage.selfhtml += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;`;
 					judgeMessage.selfhtml += `text-decoration: none; font-family: Arial; border-radius: 4px; border: 2px solid #016F94;' `;
 					judgeMessage.selfhtml += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
