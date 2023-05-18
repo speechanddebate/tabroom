@@ -1,4 +1,5 @@
 import { checkJudgePerson } from '../../../helpers/auth';
+import { errorLogger } from '../../../helpers/logger';
 
 export const saveRubric = {
 
@@ -38,10 +39,7 @@ export const saveRubric = {
 						score.content = JSON.stringify(autoSave);
 						await score.save();
 					} catch (err) {
-						res.status(200).json({
-							error: true,
-							message: `Error encounted in saving scores: ${err}`,
-						});
+						errorLogger(`Error encountered in savings scores ${err} ballot ${ballot.id} score ${score.id}`);
 					}
 
 				} else {
@@ -54,10 +52,7 @@ export const saveRubric = {
 							content : JSON.stringify(autoSave),
 						});
 					} catch (err) {
-						res.status(200).json({
-							error: true,
-							message: `Error encounted in creating saved scores: ${err}`,
-						});
+						errorLogger(`Error encountered in savings scores ${err} ballot ${ballot.id} score ${score.id}`);
 					}
 				}
 
