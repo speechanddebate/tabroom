@@ -12,7 +12,7 @@ use JavaScript::Minifier qw(minify);
 		'jquery.js',
 		'jquery-ui.js',
 		'metadata.js',
-		'jquery.fittext.js',
+		'bigtext.js',
 		'jquery-migrate.js',
 		'jquery.ui.touch-punch.min.js',
 		'chosen-selects.js',
@@ -30,7 +30,7 @@ use JavaScript::Minifier qw(minify);
 	);
 
 	my $custom_file = "tabroom.js";
-	my $output_file = "tabroom.v20.min.js";
+	my $output_file = "tabroom.v21.min.js";
 	my $sources_file = "sources.js";
 
 	# First, concatenate them together
