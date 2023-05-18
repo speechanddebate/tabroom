@@ -387,41 +387,36 @@ const formatBlast = async (queryData, req) => {
 				}
 
 				// Create standard texts for lists of entries & judges for the other to see
-
-				if (round.eventType === 'mock_trial') {
-					sectionMessage.judgeText = `\nPanel\n`;
-					sectionMessage.judgeSingle = `\n\tPanel: `;
-					sectionMessage.judgeHTML = `<p style="font-weight: 600;">Panel:</p>`;
-				} else {
+				if (!round.eventType === 'mock_trial') {
 					sectionMessage.judgeText = `\nJudging\n`;
 					sectionMessage.judgeSingle = `\n\tJudges:`;
 					sectionMessage.judgeHTML = `<p style="font-weight: 600;">Judging</p>`;
+
+					let firstJudge = 0;
+
+					section.judges.forEach( (judge) => {
+						judge.role = `${judgeRole(judge, round)} `;
+
+						if (round.settings.anonymous_public) {
+							sectionMessage.judgeText += `${judge.role}${judge.code} `;
+							sectionMessage.judgeSingle += `${judge.role}${judge.code} `;
+							sectionMessage.judgeHTML += `<p> ${judge.role}${judge.code} `;
+						} else {
+							sectionMessage.judgeText += `${judge.role}${judge.first} ${judge.last} `;
+							if (firstJudge++ > 0) {
+								sectionMessage.judgeSingle += ',';
+							}
+							sectionMessage.judgeSingle += `${judge.role}${judge.first} ${judge.last} `;
+							sectionMessage.judgeHTML += `<p> ${judge.role}${judge.first} ${judge.middle ? `${judge.middle} ` : ''}${judge.last} `;
+							if (judge.pronoun) {
+								sectionMessage.judgeText += `(${judge.pronoun})`;
+								sectionMessage.judgeHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${judge.pronoun}</p>`;
+							}
+						}
+						sectionMessage.judgeText += `\n`;
+						sectionMessage.judgeHTML += `</p>`;
+					});
 				}
-
-				let firstJudge = 0;
-
-				section.judges.forEach( (judge) => {
-					judge.role = `${judgeRole(judge, round)} `;
-
-					if (round.settings.anonymous_public) {
-						sectionMessage.judgeText += `${judge.role}${judge.code} `;
-						sectionMessage.judgeSingle += `${judge.role}${judge.code} `;
-						sectionMessage.judgeHTML += `<p> ${judge.role}${judge.code} `;
-					} else {
-						sectionMessage.judgeText += `${judge.role}${judge.first} ${judge.last} `;
-						if (firstJudge++ > 0) {
-							sectionMessage.judgeSingle += ',';
-						}
-						sectionMessage.judgeSingle += `${judge.role}${judge.first} ${judge.last} `;
-						sectionMessage.judgeHTML += `<p> ${judge.role}${judge.first} ${judge.middle ? `${judge.middle} ` : ''}${judge.last} `;
-						if (judge.pronoun) {
-							sectionMessage.judgeText += `(${judge.pronoun})`;
-							sectionMessage.judgeHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${judge.pronoun}</p>`;
-						}
-					}
-					sectionMessage.judgeText += `\n`;
-					sectionMessage.judgeHTML += `</p>`;
-				});
 
 				sectionMessage.entryText = `\nEntries\n`;
 				sectionMessage.entryHTML = `<p style="font-weight: 600;">Competitors</p>`;
@@ -450,6 +445,8 @@ const formatBlast = async (queryData, req) => {
 						sectionMessage.entryHTML += `<p>FLIP FOR SIDES:</p>`;
 						sectionMessage.entryText += `FLIP FOR SIDES: \n\n`;
 					}
+
+					console.log(`Adding ${entry.code} to the entryText`);
 
 					sectionMessage.entryText += `${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
 					sectionMessage.entryHTML += `<p>${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
@@ -512,8 +509,11 @@ const formatBlast = async (queryData, req) => {
 					}
 
 					entryMessage.html += sectionMessage.entryHTML;
-					entryMessage.text += sectionMessage.judgeText;
-					entryMessage.html += sectionMessage.judgeHTML;
+
+					if (round.eventType != 'mock_trial') {
+						entryMessage.text += sectionMessage.judgeText;
+						entryMessage.html += sectionMessage.judgeHTML;
+					}
 
 					// My school
 					if (entry.school && blastees.schoolEntries ) {
@@ -582,11 +582,38 @@ const formatBlast = async (queryData, req) => {
 					judgeMessage.html += sectionMessage.html;
 					judgeMessage.selfhtml += sectionMessage.html;
 
-					if (!judge.role === '') {
+					judge.role = `${judgeRole(judge, round)} `;
+					if (judge.role) {
 						judgeMessage.text += `Role: ${judge.role}\n`;
 						judgeMessage.html += `<p>Role: ${judge.role}</p>`;
 						judgeMessage.selftext += `Your role: ${judge.role}\n`;
 						judgeMessage.selfhtml += `<p>Your role: ${judge.role}</p>`;
+					}
+
+					if (round.eventType === 'mock_trial') {
+						judgeMessage.selftext += `\nPanel: `;
+						judgeMessage.selfhtml += `<p style="font-weight: 600;">Judging</p>`;
+
+						let firstJudge = 0;
+
+						section.judges.forEach( (other) => {
+
+							if (firstJudge++ > 0) {
+								judgeMessage.selftext += ', ';
+							}
+
+							other.role = `${judgeRole(other, round)} `;
+							judgeMessage.selftext += `${other.role}${other.first} ${other.last} `;
+							judgeMessage.selfhtml += `<p> ${other.role}${other.first} ${other.middle ? `${other.middle} ` : ''}${other.last} `;
+
+							if (other.pronoun && !round.settings.anonymous_public) {
+								judgeMessage.selftext += `(${judge.pronoun})`;
+								judgeMessage.selfhtml += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${judge.pronoun}</p>`;
+							}
+						});
+
+						judgeMessage.selftext += `\n`;
+						judgeMessage.selfhtml += `</p>`;
 					}
 
 					// I apologize to literally everyone for this but I'm not
@@ -603,13 +630,16 @@ const formatBlast = async (queryData, req) => {
 
 					judgeMessage.text += sectionMessage.entryText;
 					judgeMessage.html += sectionMessage.entryHTML;
-					judgeMessage.text += sectionMessage.judgeText;
-					judgeMessage.html += sectionMessage.judgeHTML;
+
+					if (sectionMessage.judgeText) {
+						judgeMessage.text += sectionMessage.judgeText;
+						judgeMessage.selftext += sectionMessage.judgeSingle;
+						judgeMessage.html += sectionMessage.judgeHTML;
+						judgeMessage.selfhtml += sectionMessage.judgeHTML;
+					}
 
 					judgeMessage.selftext += sectionMessage.entryText;
 					judgeMessage.selfhtml += sectionMessage.entryHTML;
-					judgeMessage.selftext += sectionMessage.judgeText;
-					judgeMessage.selfhtml += sectionMessage.judgeHTML;
 
 					// My school
 					if (judge.school && blastees.schoolJudges) {
@@ -723,7 +753,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 			const email = await emailBlast({
 				...selfBlast,
 				...selfFollowers,
-				append: req.body.message,
+				append: `${req.body.message}`,
 			});
 
 			emailResponse.count += email.count;
@@ -1020,10 +1050,10 @@ const positionString = (entry, round, section) => {
 
 		if (!round.flip || round.sidelocks[section.id]) {
 			if (parseInt(entry.side) === 1) {
-				return `is ${round.settings.aff_label ? round.settings.aff_label.toUpperCase() : ' AFF'}`;
+				return `${round.settings.aff_label ? round.settings.aff_label.toUpperCase() : ' AFF'}`;
 			}
 
-			return `is ${round.settings.neg_label ? round.settings.neg_label.toUpperCase() : ' NEG'}`;
+			return `${round.settings.neg_label ? round.settings.neg_label.toUpperCase() : ' NEG'}`;
 		}
 		return 'FLIP';
 	}
