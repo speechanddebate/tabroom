@@ -221,6 +221,8 @@
 			data    : attributes,
 			success : function(data, status, object, newCallback) {
 
+				console.log(data);
+
 				if (data) {
 
 					if (data.reply) {
