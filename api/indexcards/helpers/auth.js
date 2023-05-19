@@ -1,5 +1,5 @@
 // Parse the Tabroom cookies and determine whether there's an active session
-// import { b64_sha512crypt as crypt } from 'sha512crypt-node';
+// import { b64_sha512crypt as crypt } from 'sha512crypt-node';\
 
 export const auth = async (req) => {
 	const db = req.db;
@@ -64,7 +64,6 @@ export const auth = async (req) => {
 					name       : realname,
 				};
 			}
-
 			return session;
 		}
 	}
@@ -169,7 +168,7 @@ export const checkJudgePerson = async (req, judgeId) => {
 		return true;
 	}
 
-	const judge = req.db.summon(req.db.judge, judgeId);
+	const judge = await req.db.summon(req.db.judge, judgeId);
 
 	if (judge.person === req.session.person) {
 		return true;
