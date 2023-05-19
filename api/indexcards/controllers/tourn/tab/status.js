@@ -546,8 +546,8 @@ export const schematStatus = {
 
 		const labels = await db.sequelize.query(`
 			select
-				SUBSTRING(aff_label.value, 0, 1) aff,
-				SUBSTRING(neg_label.value, 0, 1) neg
+				SUBSTRING(aff_label.value, 1, 1) aff,
+				SUBSTRING(neg_label.value, 1, 1) neg
 			from event_setting aff_label, event_setting neg_label, round
 
 			where round.id = :roundId
