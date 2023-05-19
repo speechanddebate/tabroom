@@ -581,12 +581,14 @@ export const schematStatus = {
 				point.id point,
 				winloss.id winloss,
 				winloss.value winner,
+				rubric.id rubric,
 				panel.flight
 
 			from (judge, ballot, panel, round, event, tourn)
 				left join score rank on rank.ballot = ballot.id and rank.tag = 'rank'
 				left join score point on point.ballot = ballot.id and point.tag = 'point'
 				left join score winloss on winloss.ballot = ballot.id and winloss.tag = 'winloss'
+				left join score rubric on rubric.ballot = ballot.id and rubric.tag = 'rubric'
 
 			where round.id = :roundId
 				and panel.round = round.id
@@ -647,12 +649,12 @@ export const schematStatus = {
 					judge.class = 'greentext semibold';
 				} else if (ballot.chair) {
 					judge.class = 'fa fa-sm fa-star greentext';
-					judge.text = '';
+					judge.text = '-';
 				}
 			} else if (ballot.pbye) {
 				round.panels[ballot.panel] = 100;
 				judge.text = 'BYE';
-			} else if (ballot.winloss || ballot.rank || ballot.point) {
+			} else if (ballot.winloss || ballot.rank || ballot.point || ballot.rubric ) {
 				round.out[ballot.flight][ballot.judge] = true;
 				round.panels[ballot.panel] = 100;
 				judge.text = '&frac12;';
