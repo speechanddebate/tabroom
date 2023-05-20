@@ -735,7 +735,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 
 	for await (const judgeId of Object.keys(blastees.judges)) {
 
-		if (followers.only.judge[judgeId].self) {
+		if (followers.only.judge[judgeId]?.self) {
 
 			const selfBlast = { ...blastees.judges[judgeId] };
 			const selfFollowers = { ...followers.only.judge[judgeId] };
