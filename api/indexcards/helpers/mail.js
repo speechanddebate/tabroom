@@ -1,7 +1,6 @@
 import nodemailer from 'nodemailer';
 import { convert } from 'html-to-text';
 import config from '../../config/config';
-import { debugLogger } from './logger';
 
 export const emailBlast = async (inputData) => {
 
@@ -27,15 +26,13 @@ export const emailBlast = async (inputData) => {
 
 	// Only send BCC emails so folks do not reply all or see student contact
 	// etc. And then add the sender as the To as well so it will not deliver.
+
 	messageData.bcc = Array.from(new Set(messageData.email));
-	messageData.to = config.MAIL_FROM;
+	messageData.to = messageData.to ? messageData.to : config.MAIL_FROM;
+	messageData.from = messageData.from ? messageData.from : config.MAIL_FROM;
 
 	if (!messageData.subject) {
 		messageData.subject = 'Message from Tab';
-	}
-
-	if (!messageData.from) {
-		messageData.from = config.MAIL_FROM;
 	}
 
 	if (messageData.text) {
@@ -66,7 +63,6 @@ export const emailBlast = async (inputData) => {
 
 	if (process.env.NODE_ENV === 'production') {
 		info = await transporter.sendMail(messageData);
-		debugLogger.info(`Sent email id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length} html ${messageData.html?.length}`);
 	} else {
 		console.log(`Local: email not sending from ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
 		console.log(`Subject ${messageData.subject}`);
@@ -113,11 +109,8 @@ export const phoneBlast = async (inputData) => {
 	// etc. And then add the sender as the To as well so it will not deliver.
 
 	messageData.bcc = Array.from(new Set(messageData.phone));
-	messageData.to = config.MAIL_FROM;
-
-	if (!messageData.from) {
-		messageData.from = config.MAIL_FROM;
-	}
+	messageData.to = messageData.to ? messageData.to : config.MAIL_FROM;
+	messageData.from = messageData.from ? messageData.from : config.MAIL_FROM;
 
 	if (messageData.append) {
 		messageData.text += `\n${convert(messageData.append)}`;
@@ -130,7 +123,6 @@ export const phoneBlast = async (inputData) => {
 
 	if (process.env.NODE_ENV === 'production') {
 		info = await transporter.sendMail(messageData);
-		debugLogger.info(`Sent text blast id ${info.messageId} for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc} textlength ${messageData.text?.length}`);
 	} else {
 		console.log(`Local: not sending sms blast for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
 		console.log(`Subject ${messageData.subject}`);
@@ -146,4 +138,83 @@ export const phoneBlast = async (inputData) => {
 
 };
 
+export const adminBlast = async (inputData) => {
+
+	const messageData = { ...inputData };
+
+	const transporter = nodemailer.createTransport({
+		host   : config.ADMIN_MAIL_SERVER ? config.ADMIN_MAIL_SERVER : config.MAIL_SERVER,
+		port   : config.ADMIN_MAIL_PORT ? config.ADMIN_MAIL_PORT : config.MAIL_PORT,
+		secure : false,
+	});
+
+	if (!messageData.text && !messageData.html) {
+		return { error: true, count: 0, message: 'No message body; not sending' };
+	}
+
+	if (messageData.html && !messageData.text) {
+		messageData.text = convert(messageData.html);
+	}
+
+	if (!messageData.email && !messageData.phone) {
+		return { error: true, count: 0, message: 'No desination addresses provided, not sent' };
+	}
+
+	if (!messageData.subject) {
+		messageData.subject = 'Admin Blast';
+	}
+
+	if (messageData.text) {
+		if (messageData.append) {
+			messageData.text += `\n\n${convert(messageData.append)}\n`;
+		}
+		messageData.text += '\n----------------------------\n';
+		messageData.text += 'Admin blast from https://www.tabroom.com\n';
+		messageData.text += 'To stop them, click No Emails from your profile on Tabroom.\n';
+	}
+
+	if (messageData.html) {
+		if (messageData.append) {
+			messageData.html += `<br /><p>${convert(messageData.append)}</p>`;
+		}
+		messageData.html += '<p>-----------------------------</p>';
+		messageData.html += '<p>Admin blast from Tabroom.  To stop them, visit ';
+		messageData.html += '<a href="https://www.tabroom.com/user/login/profile.mhtml">Your Profile</a>, ';
+		messageData.html += 'check off "No Emails", and save</p>';
+	}
+
+	let info = {};
+	messageData.from = messageData.from ? messageData.from : config.MAIL_FROM;
+
+	if (messageData.email) {
+		messageData.to = messageData.email;
+		if (process.env.NODE_ENV === 'production') {
+			info = await transporter.sendMail(messageData);
+		} else {
+			console.log(`Local: Admin email not sending from ${messageData.from} to ${messageData.to}`);
+			console.log(`Subject ${messageData.subject}`);
+			console.log(`Text ${messageData.text}`);
+			console.log(`HTML ${messageData.html}`);
+		}
+	}
+
+	if (messageData.phone) {
+		messageData.to = messageData.phone;
+		if (process.env.NODE_ENV === 'production') {
+			info = await transporter.sendMail(messageData);
+		} else {
+			console.log(`Local: Admin SMS not sending from ${messageData.from} to ${messageData.to}`);
+			console.log(`Subject ${messageData.subject}`);
+			console.log(`Text ${messageData.text}`);
+			console.log(`HTML ${messageData.html}`);
+		}
+	}
+
+	return {
+		error   : false,
+		count   : messageData.to?.length,
+		message : `Administration blast message sent`,
+		info,
+	};
+};
 export default emailBlast;

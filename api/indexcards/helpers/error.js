@@ -1,6 +1,6 @@
-// This piece of code blatantly stolen from Hardy & the NSDA API project.
-// --CLP
 import { errorLogger } from './logger';
+import adminBlast  from './mail';
+import config from '../../config/config';
 
 const errorHandler = (err, req, res, next) => {
 
@@ -29,6 +29,37 @@ const errorHandler = (err, req, res, next) => {
 	// Default to a 500 error and give me a stack trace PLEASE ALWAYS GIVE ME A
 	// FRIGGIN STACK TRACE WHY IS THIS NOT THE DEFAULT DEV BEHAVIOR OMFG.
 	errorLogger.error(err, err.stack);
+
+	// Production bugs should find their way to Palmer
+	const env = process.env.NODE_ENV || 'development';
+	if (env === 'production') {
+
+		const messageData = {
+			from    : 'error-handler@tabroom.com',
+			email   : config.ERROR_DESTINATION,
+			subject : `JS Bug Tripped at ${new Date()}`,
+			text    : `
+Javascript has errors too, and here's one for you!  YAY!
+
+    Stack ${err.stack}
+
+    Full Error ${JSON.stringify(err, null, 4)}
+
+    Session ${JSON.stringify(req.session, null, 4)}
+
+    Parameters ${JSON.stringify(req.params, null, 4)}
+
+    Body ${JSON.stringify(req.body, null, 4)} `,
+		};
+
+		try {
+			const info = adminBlast(messageData);
+			console.log(info);
+		} catch (error) {
+			console.log(error);
+			err.message += ` Also, error response on sending email: ${err}`;
+		}
+	}
 
 	return res.status(500).json({
 		message          : err.message || 'Internal server error',

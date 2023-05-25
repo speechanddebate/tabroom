@@ -180,6 +180,8 @@ export const attendance = {
 		const [startsResults]             = await db.sequelize.query(startsQuery);
 		const [confirmedResults]          = await db.sequelize.query(confirmedQuery);
 
+		const makeAnError = await db.sequelize.query(`select nothing from nowhere`);
+
 		const status = {
 			panel   : {},
 			person  : {},
