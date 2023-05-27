@@ -78,6 +78,10 @@ export const flightTimes = async (roundId) => {
 	const times = { tz: round.tz };
 	const roundStart = new Date(round.start_time);
 
+	if (round.flighted < 1) {
+		round.flighted = 1;
+	}
+
 	for (let f = 1; f <= round.flighted; f++) {
 
 		times[f] = { };
