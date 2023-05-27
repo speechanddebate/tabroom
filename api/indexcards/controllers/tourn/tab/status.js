@@ -1114,6 +1114,8 @@ export const eventDashboard = {
 				};
 			}
 
+			console.log(result);
+
 			if (result.audit) {
 				// Is the ballot done?
 				status[result.round_id].flights[result.flight].done++;
@@ -1126,7 +1128,7 @@ export const eventDashboard = {
 					status[result.round_id].flights[result.flight].half++;
 					status[result.round_id].started = true;
 				} else if (result.judge_started) {
-					status[result.round_id].flights[result.flight].start++;
+					status[result.round_id].flights[result.flight].started++;
 					status[result.round_id].started = true;
 				} else {
 					status[result.round_id].flights[result.flight].nada++;
