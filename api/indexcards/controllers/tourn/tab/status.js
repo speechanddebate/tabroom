@@ -1095,7 +1095,7 @@ export const eventDashboard = {
 					eventName : result.event_abbr,
 					roundId   : result.round_id,
 					number    : result.round_name,
-					name      : result.label ? result.label : `Round ${result.round_name}`,
+					name      : result.label ? result.label : `Rd ${result.round_name}`,
 					type      : result.round_type,
 					undone    : false,
 					started   : false,
