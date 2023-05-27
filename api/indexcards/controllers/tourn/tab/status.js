@@ -624,6 +624,10 @@ export const schematStatus = {
 
 			if (ballot.audit) {
 
+				if (!judge.text) {
+					judge.text = '';
+				}
+
 				if (!round.panels[ballot.panel]) {
 					round.panels[ballot.panel] = 10;
 				} else {
@@ -639,13 +643,20 @@ export const schematStatus = {
 					judge.text = 'BYE';
 					judge.class = 'graytext semibold';
 				} else if (ballot.bye) {
-					judge.text += `${label[ballot.side]} BYE`;
+					if (judge.text) {
+						judge.text += `/`;
+					}
+					judge.text += `Bye`;
 					judge.class = 'graytext semibold';
+					console.log(judge);
 				} else if (ballot.forfeit) {
-					judge.text += `${label[ballot.side]} FFT`;
+					if (judge.text) {
+						judge.text += `/`;
+					}
+					judge.text += `Fft`;
 					judge.class = 'graytext semibold';
 				} else if (ballot.rank) {
-					judge.text = 'IN';
+					judge.text = 'in';
 					judge.class = 'greentext semibold';
 				} else if (ballot.chair) {
 					judge.class = 'fa fa-sm fa-star greentext';
@@ -1113,8 +1124,6 @@ export const eventDashboard = {
 					[result.judge] : true,
 				};
 			}
-
-			console.log(result);
 
 			if (result.audit) {
 				// Is the ballot done?
