@@ -52,6 +52,8 @@
 	$event = $round->event unless $event;
 
 	my $category    = $event->category;
+	my $category_id = $category->id;
+	my $event_id    = $event->id;
 	my $tourn       = $category->tourn;
 
 	my $round_start = eval {
@@ -76,11 +78,10 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $j_sth = $dbh->prepare("
-		select judge.id, judge.obligation, judge.hired
+		select judge.id, (judge.obligation + judge.hired) obligation
 		from judge, category, category cat2
 			where
 				judge.category = category.id
-				and category.tourn = ?
 				and cat2.tourn = category.tourn
 				and cat2.id = ?
 			and (
@@ -97,13 +98,13 @@
 		order by judge.id
 	");
 
-	$j_sth->execute($tourn->id, $category->id, $round->id);
+	$j_sth->execute($category_id, $round->id);
 
-	while (
-		my ($judge, $obligation, $hired)  = $j_sth->fetchrow_array()
-	) {
-		$judge_hash{$judge}{"oblig"} = $obligation + $hired;
-		$judge_hash{$judge}{"avail_current"} = 1;
+	my $results = $j_sth->fetchall_hash();
+
+	foreach my $result (@{$results}) {
+		$judge_hash{$result->{id}}{"oblig"} = $result->{obligation};
+		$judge_hash{$result->{id}}{"avail_current"} = 1;
 	}
 
 	my $limit;
@@ -140,15 +141,12 @@
 		group by panel.id, ballot.judge
 	");
 
-	$sth->execute($tourn->id, $category->id, $category->id, $round->id);
+	$sth->execute(int($tourn), $category_id, $category_id, $round->id);
 
 	my %used;
 	my $this_round_id = $round->id;
-
-	my $this_round_timeslot = eval {
-		return $round->timeslot->id;
-	};
-
+	my $this_round_timeslot = $round->timeslot;
+	my $this_round_ts_id = $this_round_timeslot->id;
 
 	while (
 		my ($judge,
@@ -174,6 +172,58 @@
 		$judge_hash{$judge}{"will_judge"}++ 	if $roundname > $current_name;
 	}
 
+	# Standby assignments count as rounds
+
+	my $standby_sth = $dbh->prepare("
+		select jpj.id jpool, jpj.judge, timeslot.start, timeslot.id timeslot
+			from jpool_judge jpj,
+				jpool_setting jps,
+				jpool_setting ts,
+				judge, category,
+				timeslot
+
+		where category.tourn = ?
+			and category.id  = judge.category
+			and judge.id     = jpj.judge
+			and jpj.jpool    = jps.jpool
+			and jps.tag      = 'standby'
+			and jpj.jpool    = ts.jpool
+			and ts.tag       = 'standby_timeslot'
+			and ts.value     = timeslot.id
+			and not exists (
+				select ballot.id
+					from (ballot, panel, round)
+				where round.timeslot = ts.value
+					and round.id = panel.round
+					and panel.id = ballot.panel
+					and ballot.judge = jpj.judge
+			)
+	");
+
+	$standby_sth->execute(int($tourn));
+	my $standbys = $standby_sth->fetchall_hash();
+
+	my $ts_start = $this_round_timeslot->start;
+	$ts_start =~ s/[\D_]//g;
+
+	foreach my $standby (@${standbys}) {
+
+		my $standby_start = $standby->{'start'};
+		$standby_start =~ s/[\D_]//g;
+
+		my $judge = $standby->{"judge"};
+
+		if ($standby->{start} == $ts_start) {
+			$judge_hash{$judge}{"judged_already"}++;
+			$judge_hash{$judge}{"in_timeslot"}++;
+		} elsif ($standby->{start} < $ts_start) {
+			$judge_hash{$judge}{"judged_already"}++;
+			$judge_hash{$judge}{"judged_all"}++;
+		} elsif ($standby->{start} > $ts_start) {
+			$judge_hash{$judge}{"will_judge"}++;
+		}
+	}
+
 	my $time_sth = $dbh->prepare("
 		select distinct(judge.id)
 			from judge, ballot, panel, round, timeslot
@@ -188,7 +238,7 @@
 
 	if ($round_start && $round_end) {
 		$time_sth->execute(
-			$tourn->id,
+			int($tourn),
 			DateTime::Format::MySQL->format_datetime($round_end),
 			DateTime::Format::MySQL->format_datetime($round_start)
 		);
@@ -204,16 +254,29 @@
 	my $count_elims;
 	$count_elims = $category->setting('count_elims');
 
-	foreach my $round ($event->rounds) {
+	my $per = $category->setting('rounds_per');
+	$per++ if $debates_per;
+
+	my $round_sth = $dbh->prepare("
+		select round.id, round.flighted, round.name, round.type, round.timeslot
+		from round
+		where round.event = ?
+		order by round.name
+	");
+
+	$round_sth->execute($event_id);
+	my $rounds = $round_sth->fetchall_hash();
+
+	foreach my $round (@{$rounds}) {
 
 		my $flights = 1;
-		$flights = $round->flighted if $debates_per;
+		$flights = $round->{flighted} if $debates_per;
 
-		next unless $round->name > $current_name;
+		next unless $round->{name} > $current_name;
 
 		unless ($count_elims) {
-			next if $round->type eq "elim";
-			next if $round->type eq "final";
+			next if $round->{type} eq "elim";
+			next if $round->{type} eq "final";
 		}
 
 		$future_count += $flights;
@@ -226,114 +289,120 @@
 
 	#future round availability
 
-	foreach my $round (@future) {
+	if ($per) {
 
-		my $flights = 1;
-		$flights = $round->flighted if $debates_per;
+		foreach my $future (@future) {
+
+			next unless $future->{timeslot};
+
+			my $flights = 1;
+			$flights = $future->{flighted} if $debates_per;
+
+			my $future_strikes_sth = $dbh->prepare("
+				select distinct strike.id, strike.judge
+					from strike, judge, timeslot, category
+				where category.tourn = ?
+					and judge.category = category.id
+					and timeslot.id = ?
+					and strike.judge = judge.id
+					and strike.start <= timeslot.end
+					and strike.end >= timeslot.start
+			");
+
+			$future_strikes_sth->execute(int($tourn), $future->{timeslot});
+
+			my $strikes = $future_strikes_sth->fetchall_hash();
+
+			foreach my $strike (@{$strikes}) {
+				if ($judge_hash{$strike->{judge}}{"future_possible"} > 1) {
+					$judge_hash{$strike->{judge}}{"future_possible"} -= $flights;
+				}
+			}
+		}
 
 		my $event_strikes_sth = $dbh->prepare("
 			select distinct strike.id, strike.judge
-				from strike, judge
-			where (judge.category = ?
-				or judge.alt_category = ? )
+				from strike, judge, category
+			where category.tourn = ?
+				and judge.category = category.id
 				and strike.judge = judge.id
 				and strike.event = ?
 			order by judge.id
 		");
 
-		my $future_strikes_sth = $dbh->prepare("
-			select distinct strike.id, strike.judge
-				from strike, judge, timeslot
-			where (judge.category = ?
-				or judge.alt_category = ? )
+		$event_strikes_sth->execute(int($tourn), $event_id);
+		my $strikes = $event_strikes_sth->fetchall_hash();
+
+		foreach my $strike (@{$strikes}) {
+			$judge_hash{$strike->{judge}}{"future_possible"} = 0;
+			$judge_hash{$strike->{judge}}{"avail_current"} = 0;
+		}
+
+		#current round availability
+		if ($this_round_timeslot) {
+
+			my $current_strikes_sth = $dbh->prepare("
+				select distinct strike.id, strike.judge
+					from strike, judge, timeslot, category
+				where category.tourn = ?
+					and judge.category = category.id
 				and timeslot.id = ?
-				and strike.judge = judge.id
-				and strike.start <= timeslot.end
-				and strike.end >= timeslot.start
-		");
+					and strike.judge = judge.id
+					and strike.start <= timeslot.end
+					and strike.end >= timeslot.start
+			");
 
-		my $timeslot = $round->timeslot;
+			$current_strikes_sth->execute(int($tourn), $this_round_timeslot);
 
-		if ($timeslot) {
-			$future_strikes_sth->execute($category->id, $category->id, $timeslot->id) ;
-
-			while (my ($strike, $judge)  = $future_strikes_sth->fetchrow_array() ) {
-				$judge_hash{$judge}{"future_possible"} -= $flights
-					if $judge_hash{$judge}{"future_possible"};
+			my $strikes = $current_strikes_sth->fetchall_hash();
+			foreach my $strike (@{$strikes}) {
+				$judge_hash{$strike->{judge}}{"avail_current"} = 0;
 			}
 		}
 
-		$event_strikes_sth->execute($category->id, $category->id, $event->id);
+		#calculate rounds lost
 
-		while (my ($strike, $judge)  = $event_strikes_sth->fetchrow_array() ) {
-			$judge_hash{$judge}{"future_possible"} = 0;
-			$judge_hash{$judge}{"avail_current"} = 0;
+		my $flights = 1;
+		$flights = $round->flighted if $debates_per;
+
+		foreach my $key (keys %judge_hash) {
+
+			$judge_hash{$key}{"lost"} =
+				$judge_hash{$key}{"oblig"}
+				- $judge_hash{$key}{"judged_already"}
+				- $judge_hash{$key}{"future_possible"};
+
+			$judge_hash{$key}{"left"} =
+				$judge_hash{$key}{"oblig"}
+				- $judge_hash{$key}{"judged_already"};
+
+			if ($judge_hash{$key}{"in_round"} == 0
+				and $judge_hash{$key}{"avail_current"} == 1
+				and (
+					$judge_hash{$key}{"left"} > $judge_hash{$key}{"future_possible"}
+					|| $judge_hash{$key}{"lost"} > 0
+				)
+			) {
+				$judge_hash{$key}{"lost_current"} = 1;
+				#print $key." will lose a round if not placed; left = $judge_hash{$key}{"left"}
+				#and future possible is $judge_hash{$key}{"future_possible"} <br>";
+			}
+
+			$judge_hash{$key}{"left"} = 0 if $judge_hash{$key}{"left"} < 1;
+			$judge_hash{$key}{"lost"} = 0 if $judge_hash{$key}{"lost"} < 1;
+
+			if ($judge_hash{$key}{"future_possible"} > 0) {
+				$judge_hash{$key}{"percentage"} =
+					int( (
+						($judge_hash{$key}{"left"} + $judge_hash{$key}{"in_round"}) /
+							($judge_hash{$key}{"future_possible"} + 1)
+						) * 100
+					);
+			} else {
+				$judge_hash{$key}{"percentage"} = 100;
+			}
+			$judge_hash{$key}{"percentage"} = 100 if $judge_hash{$key}{"percentage"} > 100;
 		}
-	}
-
-	#current round availability
-
-	my $current_strikes_sth = $dbh->prepare("
-		select distinct strike.id, strike.judge
-		from strike, judge, timeslot
-			where (judge.category = ?
-				or judge.alt_category = ? )
-		and timeslot.id = ?
-			and strike.judge = judge.id
-			and strike.start <= timeslot.end
-			and strike.end >= timeslot.start
-	");
-
-	if ($this_round_timeslot) {
-		$current_strikes_sth->execute($category->id, $category->id, $this_round_timeslot);
-
-		while (my ($strike, $judge)  = $current_strikes_sth->fetchrow_array() ) {
-			$judge_hash{$judge}{"avail_current"} = 0;
-		}
-	}
-
-	#calculate rounds lost
-
-	my $flights = 1;
-	$flights = $round->flighted if $debates_per;
-
-	foreach my $key (keys %judge_hash) {
-
-		$judge_hash{$key}{"lost"} =
-			$judge_hash{$key}{"oblig"}
-			- $judge_hash{$key}{"judged_already"}
-			- $judge_hash{$key}{"future_possible"};
-
-		$judge_hash{$key}{"left"} =
-			$judge_hash{$key}{"oblig"}
-			- $judge_hash{$key}{"judged_already"};
-
-		if ($judge_hash{$key}{"in_round"} == 0
-			and $judge_hash{$key}{"avail_current"} == 1
-			and (
-				$judge_hash{$key}{"left"} > $judge_hash{$key}{"future_possible"}
-				|| $judge_hash{$key}{"lost"} > 0
-			)
-		) {
-			$judge_hash{$key}{"lost_current"} = 1;
-			#print $key." will lose a round if not placed; left = $judge_hash{$key}{"left"}
-			#and future possible is $judge_hash{$key}{"future_possible"} <br>";
-		}
-
-		$judge_hash{$key}{"left"} = 0 if $judge_hash{$key}{"left"} < 1;
-		$judge_hash{$key}{"lost"} = 0 if $judge_hash{$key}{"lost"} < 1;
-
-		if ($judge_hash{$key}{"future_possible"} > 0) {
-			$judge_hash{$key}{"percentage"} =
-				int( (
-					($judge_hash{$key}{"left"} + $judge_hash{$key}{"in_round"}) /
-						($judge_hash{$key}{"future_possible"} + 1)
-					) * 100
-				);
-		} else {
-			$judge_hash{$key}{"percentage"} = 100;
-		}
-		$judge_hash{$key}{"percentage"} = 100 if $judge_hash{$key}{"percentage"} > 100;
 	}
 
 	if ($debug) {

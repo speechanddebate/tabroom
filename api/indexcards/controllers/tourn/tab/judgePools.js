@@ -9,8 +9,9 @@ export const natsJudgePool = {
 		const now = new Date();
 
 		const weights = {
-			strikes    : 1000000,
-			states     : 100000,
+			strikes    : 10000000,
+			states     : 1000000,
+			preference : 10000,
 			diversity  : 1000,
 			diamonds   : 800,
 			otherPools : 500,
@@ -77,6 +78,11 @@ export const natsJudgePool = {
 
 			jpools.forEach( (jpool) => {
 				schoolPoolCount[jpool.id] = {};
+
+				if (!jpool.schoolCount) {
+					return;
+				}
+
 				Object.keys(jpool.schoolCount).forEach( (schoolId) => {
 					schoolPoolCount[jpool.id][schoolId] = jpool.schoolCount[schoolId];
 					if (!schoolPoolCount.total[schoolId]) {
@@ -119,6 +125,7 @@ export const natsJudgePool = {
 			while (jpools.length > 0 && Object.keys(judges).length > 1) {
 
 				const jpool = jpools.shift();
+
 				if (!jpoolJudges[jpool.id]) {
 					jpoolJudges[jpool.id] = [];
 				}
@@ -133,13 +140,13 @@ export const natsJudgePool = {
 						if (judges[a].site_preference !== jpool.site_preference
 							&& judges[b].site_preference === jpool.site_preference
 						) {
-							return -100;
+							return 1000;
 						}
 
 						if (judges[b].site_preference !== jpool.site_preference
 							&& judges[a].site_preference === jpool.site_preference
 						) {
-							return 100;
+							return -1000;
 						}
 					}
 					if (schoolPercent[jpool.id][judges[a].school]
@@ -321,8 +328,8 @@ const getChildPools = async (db, parentId) => {
 			max(timeslot.end) poolEnd,
 			event.type eventType,
 			event.abbr eventAbbr,
-			round.type roundType
-
+			round.type roundType,
+			site_preference.value site_preference
 
 		from jpool
 			left join jpool_setting pool_target
@@ -336,6 +343,10 @@ const getChildPools = async (db, parentId) => {
 			left join jpool_setting rounds
 				on rounds.tag = 'rounds'
 				and rounds.jpool = jpool.id
+
+			left join jpool_setting site_preference
+				on site_preference.tag = 'site_preference'
+				and site_preference.jpool = jpool.id
 
 			left join jpool_round jpr on jpr.jpool = jpool.id
 			left join round on jpr.round = round.id
@@ -407,10 +418,11 @@ const getChildPools = async (db, parentId) => {
 		jpoolsById[entry.jpool].schoolCount[entry.school]++;
 		jpoolsById[entry.jpool].entries++;
 
+		if (!jpoolsById[entry.jpool].state) {
+			jpoolsById[entry.jpool].state = {};
+		}
+
 		if (entry.region) {
-			if (!jpoolsById[entry.jpool].state) {
-				jpoolsById[entry.jpool].state = {};
-			}
 			if (!jpoolsById[entry.jpool].state[entry.region]) {
 				jpoolsById[entry.jpool].state[entry.region] = 0;
 			}
@@ -605,11 +617,6 @@ const getJPoolJudges = async (db, parentId, jpools, weights) => {
 			left join jpool_setting rounds
 				on rounds.tag = 'rounds'
 				and rounds.jpool = jpool.id
-
-			left join jpool_setting site_preference
-				on site_preference.tag = 'site_preference'
-				and site_preference.jpool = jpool.id
-
 
 		where rpj.jpool = :parentId
 			and rpj.judge = judge.id

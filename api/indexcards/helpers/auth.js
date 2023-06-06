@@ -192,7 +192,6 @@ export const checkPerms = async (req, res, query, replacements) => {
 	}
 
 	if (req.session[permsData.tourn]) {
-
 		if (req.session[permsData.tourn].level === 'owner') {
 			return true;
 		}
@@ -312,6 +311,21 @@ export const timeslotCheck = async (req, res, timeslotId) => {
 	const replacements = { timeslotId };
 	return checkPerms(req, res, timeslotQuery, replacements);
 };
+
+export const jpoolCheck = async (req, res, jpoolId) => {
+	const jpoolQuery = `
+		select category.tourn, jpool.id jpool, round.event event
+			from (jpool, category)
+				left join jpool_round jpr on jpr.jpool = jpool.id
+				left join round on round.id = jpr.round
+		where jpool.id = :jpoolId
+			and jpool.category = category.id
+			group by jpool.id
+	`;
+	const replacements = { jpoolId };
+	return checkPerms(req, res, jpoolQuery, replacements);
+};
+
 
 export const judgeCheck = async (req, res, judgeId) => {
 	const judgeQuery = `

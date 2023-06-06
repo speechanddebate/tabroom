@@ -9,26 +9,23 @@
 </%args>
 <%init>
 
-	Tab::Event->columns(TEMP => "supp");
-	Tab::Event->columns(TEMP => "stefan");
-	Tab::Event->columns(TEMP => "round_robin");
-	Tab::Event->columns(TEMP => "weekend");
+	my $dbh = Tab::DBI->db_Main();
 
-	Tab::Event->set_sql(schedule => "
-		select event.*,
-			supp.value as supp,
-			stefan.value as stefan,
-			round_robin.value as round_robin,
-			weekend.value as weekend
+	my $event_sth = $dbh->prepare("
+
+		select
+			event.id, event.name, event.abbr, event.type,
+			supp.value supp,
+			round_robin.value robin,
+			weekend.value weekend,
+			online_mode.value online_mode,
+			online_hybrid.value online_hybrid,
+			COUNT(distinct round.id) rounds
 		from event
 
 			left join event_setting supp
 				on supp.tag = 'supp'
 				and supp.event = event.id
-
-			left join event_setting stefan
-				on stefan.tag = 'stefan'
-				and stefan.event = event.id
 
 			left join event_setting weekend
 				on weekend.tag = 'weekend'
@@ -38,69 +35,90 @@
 				on round_robin.tag = 'round_robin'
 				and round_robin.event = event.id
 
+			left join event_setting online_mode
+				on online_mode.tag = 'online_mode'
+				and online_mode.event = event.id
+
+			left join event_setting online_hybrid
+				on online_hybrid.tag = 'online_hybrid'
+				and online_hybrid.event = event.id
+
+			left join round on round.event = event.id
 
 		where event.tourn = ?
-
-		order by event.type, supp.value, stefan.value, event.name
+		group by event.id
+		order by event.type, supp.value, event.name
 	");
 
-	my @tourn_events = Tab::Event->search_schedule($tourn->id);
-	my $event;
+	$event_sth->execute(int($tourn));
 
-	@tourn_events = $m->comp(
+	my $results = $event_sth->fetchall_hash();
+	my %tourn_events = map {$_->{id} => $_} @{$results};
+
+	Tab::debuglog("Sending ".keys %tourn_events);
+
+	my $ok_events = $m->comp(
 		"/funclib/event_perms.mas",
-		perms  => $perms,
-		type   => "tabber",
-		events => \@tourn_events
+		perms      => $perms,
+		type       => "tabber",
+		event_hash => \%tourn_events
 	);
 
+	Tab::debuglog("Got back $ok_events");
+
+	%tourn_events = %{$ok_events};
+
+	my $event;
+
 	if ($event_id) {
-		foreach my $ev (@tourn_events) {
-			$event = $ev if $ev->id == $event_id;
-		}
+		$event = $tourn_events{$event_id};
 	}
 
 	unless ($event) {
-		$event = $tourn_events[0] if @tourn_events;
+		my @keys = sort {$a <=> $b} keys %tourn_events;
+		$event = $tourn_events{$keys[0]};
 	}
 
-	my %event_settings = $event->all_settings();
+	unless ($event) {
+		$m->comp("/funclib/abort.mas",
+			message => "No valid event found with id $event_id"
+		);
+	}
 
-	$m->abort unless $event;
-	$m->abort unless $event->category;
-
-	my $dbh = Tab::DBI->db_Main();
-	my $weekend_id = $event->weekend;
-	my $event_type = $event->type;
 	my $weekend;
 
-	if ($weekend_id eq "nope") {
+	if ($event->{weekend} eq "nope") {
 		$m->comp("/funclib/abort.mas",
 			message => "This event is marked as 'Not Held' under the Dates menu.  Assign it to a weekend to continue"
 		);
-	} elsif ($weekend_id == int($weekend_id)) {
-		$weekend = Tab::Weekend->retrieve($weekend_id);
+	} elsif ($event->{weekend} == int($event->{weekend})) {
+		$weekend = Tab::Weekend->retrieve($event->{weekend});
 	}
-
-	my $tz = $tourn->tz;
-	$tz = "UTC" unless $tz;
-	my $now = DateTime->now();
 
     my @days = $m->comp(
 		"/funclib/tourn_days.mas",
 		tourn   => $tourn,
 	);
 
-	my $type = $event->type;
-	$type = "debate"
-		if $type ne "speech"
-		&& $type ne "congress";
+	$event->{type} = "debate"
+		if $event->{type} ne "speech"
+		&& $event->{type} ne "congress";
 
 	my $empty;
 
-	my @protocols =
-		sort {$a->name cmp $b->name}
-		$tourn->protocols;
+	my $protocol_sth = $dbh->prepare('
+		select id, name
+			from protocol
+		where protocol.tourn = ?
+			order by protocol.name
+	');
+	$protocol_sth->execute(int($tourn));
+
+	my @protocols = eval {
+		return @{$protocol_sth->fetchall_hash()};
+	};
+
+	Tab::debuglog("I have ".scalar @protocols." protocols");
 
 	Tab::Round->columns(TEMP => "r2_name");
 
@@ -125,13 +143,13 @@
 	my $timeslot_sth = $dbh->prepare("
 		select
 			timeslot.id, timeslot.name,
-			timeslot.start,
-			timeslot.end
-		from timeslot, tourn
+			CONVERT_TZ(timeslot.start, '+00:00', tourn.tz) start,
+			CONVERT_TZ(timeslot.end, '+00:00', tourn.tz) end
+		from (timeslot, tourn)
 		where timeslot.tourn = ?
 			and tourn.id = timeslot.tourn
 		$timeslot_limit
-		order by timeslot.start
+		order by timeslot.name, timeslot.start
 	");
 
 	$timeslot_sth->execute($tourn->id);
@@ -148,16 +166,10 @@
 		$timeslots{$tid}{"raw_end"}   = $end;
 
 		$timeslots{$tid}{"start"} = eval {
-			my $dt = DateTime::Format::MySQL->parse_datetime($start);
-			$dt->set_time_zone("UTC");
-			$dt->set_time_zone($tz);
-			return $dt;
+			return DateTime::Format::MySQL->parse_datetime($start);
 		};
 		$timeslots{$tid}{"end"} = eval {
-			my $dt = DateTime::Format::MySQL->parse_datetime($end);
-			$dt->set_time_zone("UTC");
-			$dt->set_time_zone($tz);
-			return $dt;
+			return DateTime::Format::MySQL->parse_datetime($end);
 		};
 
 		$timeslots{$tid}{"start_epoch"} = $timeslots{$tid}{"start"}->epoch();
@@ -172,12 +184,12 @@
 
 	if (
 		(
-			$event_settings{"online_mode"} eq "public_jitsi"
-			|| $event_settings{"online_mode"} eq "public_jitsi_observers"
-			|| $event_settings{"online_mode"} eq "nsda_campus"
-			|| $event_settings{"online_mode"} eq "nsda_campus_observers"
+			$event->{"online_mode"} eq "public_jitsi"
+			|| $event->{"online_mode"} eq "public_jitsi_observers"
+			|| $event->{"online_mode"} eq "nsda_campus"
+			|| $event->{"online_mode"} eq "nsda_campus_observers"
 		) && (
-			not defined $event_settings{"online_hybrid"}
+			not defined $event->{"online_hybrid"}
 		)
 	) {
 
@@ -191,16 +203,16 @@
 		} else {
 			@sites = $m->comp(
 				"/funclib/tourn_sites.mas",
-				tourn => $tourn
+				tourn     => $tourn,
+				newschool => 1
 			);
 		}
 
 		if (@sites) {
-			%ok_sites = map {$_->id => 1} @sites;
-			$default_site = $sites[0] unless $default_site;
+			%ok_sites = map {$_->{id} => 1} @sites;
+			$default_site = $sites[0]->{id} unless $default_site;
 		}
 	}
-
 
 	my $sth = $dbh->prepare("
 		select
@@ -235,7 +247,7 @@
 		order by round.name
 	");
 
-	$sth->execute($event->id);
+	$sth->execute($event->{id});
 
 	my %round_by_timeslot;
 	my %round_by_day;
@@ -297,9 +309,9 @@
 			$warning .= "<br />" if $warning;
 
 			if ($default_site) {
-				$update_site_sth->execute($round_id, $default_site->id);
+				$update_site_sth->execute($round_id, $default_site);
 				$warning .= $round_by_timeslot{$timeslot_id}{$round_id}{"name"}." is assigned to a site not attached ";
-				$warning .= " to this tournament.  Updated to ".$default_site->name;
+				$warning .= " to this tournament.  Updated to ".$default_site;
 			} else {
 				$warning .= $round_by_timeslot{$timeslot_id}{$round_id}{"name"}." is assigned to a site not attached ";
 				$warning .= " to this tournament.  No valid site found for update";
@@ -307,39 +319,35 @@
 		}
 	}
 
-	unless ($event_settings{"online_mode"} eq "async") {
-
+	unless ($event->{"online_mode"} eq "async") {
 		Tab::Round->set_sql( overlaps => "
-
 			select r1.*, r2.name as r2_name
-			from round r1, timeslot t1,
-				round r2, timeslot t2
-
+				from round r1, timeslot t1, round r2, timeslot t2
 			where r1.event = ?
-			and r1.event = r2.event
-			and r1.timeslot = t1.id
-			and r2.timeslot = t2.id
-			and r2.id != r1.id
+				and r1.event = r2.event
+				and r1.timeslot = t1.id
+				and r2.timeslot = t2.id
+				and r2.id != r1.id
 
-			and t1.start < t2.end
-			and t2.start < t1.end
+				and t1.start < t2.end
+				and t2.start < t1.end
 
-			and not exists (
-				select breakout1.value
-				from round_setting breakout1
-				where breakout1.tag = 'use_for_breakout'
-				and breakout1.round = r1.id
-			)
+				and not exists (
+					select breakout1.value
+					from round_setting breakout1
+					where breakout1.tag = 'use_for_breakout'
+					and breakout1.round = r1.id
+				)
 
-			and not exists (
-				select breakout2.value
-				from round_setting breakout2
-				where breakout2.tag = 'use_for_breakout'
-				and breakout2.round = r2.id
-			)
+				and not exists (
+					select breakout2.value
+					from round_setting breakout2
+					where breakout2.tag = 'use_for_breakout'
+					and breakout2.round = r2.id
+				)
 		");
 
-		@overlaps = Tab::Round->search_overlaps( $event->id );
+		@overlaps = Tab::Round->search_overlaps( $event->{id} );
 
 	}
 
@@ -373,7 +381,7 @@
 
 	<& menu.mas,
 		tourn        => $tourn,
-		tourn_events => \@tourn_events,
+		tourn_events => \%tourn_events,
 		perms        => $perms,
 		event        => $event,
 		days         => \@days
@@ -382,7 +390,7 @@
 	<div class="main">
 
 		<span class="half">
-			<h4><% $event->abbr %> schedule</h4>
+			<h4><% $event->{abbr} %> schedule</h4>
 		</span>
 
 		<span class="threetenths semibold rightalign">
@@ -402,7 +410,7 @@
 
 		<span class="twenty marleft rightalign marno">
 			<a
-				href="print_event.mhtml?event_id=<% $event->id %>"
+				href="print_event.mhtml?event_id=<% $event->{id} %>"
 				class="fa fa-print buttonwhite redtext"
 			></a>
 		</span>
@@ -451,7 +459,7 @@
 			<input
 				type  = "hidden"
 				name  = "destination_event_id"
-				value = "<% $event->id %>"
+				value = "<% $event->{id} %>"
 			>
 
 			<div class="centeralign full even nospace">
@@ -462,10 +470,10 @@
 				<span class="twofifths centeralign">
 					<select name="source_event_id" class="fixedmost">
 						<option value=""></option>
-%						foreach my $other (@tourn_events) {
-%							next if $event->id == $other->id;
-%							next if $weekend && $other->weekend != $weekend;
-							<option value="<% $other->id %>"><% $other->name %></option>
+%						foreach my $other (keys %tourn_events) {
+%							next if $event->{id} == $other;
+%							next if $weekend && $tourn_events{$other}{weekend} != $weekend;
+							<option value="<% $other %>"><% $tourn_events{$other}{name} %></option>
 %						}
 					</select>
 				</span>
@@ -489,7 +497,7 @@
 		<input
 			type  = "hidden"
 			name  = "event_id"
-			value = "<% $event->id %>"
+			value = "<% $event->{id} %>"
 		>
 
 <%perl>
@@ -558,7 +566,7 @@
 									</th>
 %								}
 
-%								if ($event_type ne "congress") {
+%								if ($event->{type} ne "congress") {
 									<th class="smaller">
 										Flights
 									</th>
@@ -629,15 +637,12 @@
 									<span class="twofifths nospace">
 										<& "/funclib/showtime.mas",
 											dt => $timeslots{$timeslot_id}{"start"},
-											tz => $tz,
-											show_tz => 1
 										&>
 										&ndash;
 									</span>
 									<span class="threefifths nospace">
 										<& "/funclib/showtime.mas",
 											dt => $timeslots{$timeslot_id}{"end"},
-											tz => $tz,
 											length => "day"
 										&>
 									</span>
@@ -646,8 +651,6 @@
 								<div class="nospace martopless">
 									<& "/funclib/showtime.mas",
 										dt => $timeslots{$timeslot_id}{"start"},
-										tz => $tz,
-										show_tz => 1
 									&>
 								</div>
 %							}
@@ -684,12 +687,12 @@
 
 						<td class="smallish nospace padleft">
 							<span class="hidden">
-								<% ($round) ? $round->{number} : "" %>
+								<% ($round_id) ? $round->{number} : "" %>
 							</span>
 
 							<div class = "centeralign nospace <% $hidden %> <% $timeslot_id %>" >
 								<span class="twofifths leftalign smaller nowrap" title="<% $round_id %>">
-									<% ($round) ? $round->{name} : "" %>
+									<% ($round_id) ? $round->{name} : "" %>
 								</span>
 
 								<span class="threefifths smallish">
@@ -698,7 +701,7 @@
 										size        = "8"
 										name        = "<% $timeslot_id %><% $count ? "_".$count : ""%>_label"
 										placeholder = "Label"
-										value       = "<% $round ? $round->{label} : "" %>"
+										value       = "<% $round_id ? $round->{label} : "" %>"
 									>
 								</span>
 							</div>
@@ -712,66 +715,65 @@
 									class = "smallish plain"
 								>
 									<option value="prelim"
-										<% ($round && $round->{type} eq "prelim") ? "selected" : "" %>
+										<% ($round_id && $round->{type} eq "prelim") ? "selected" : "" %>
 									>Prelim/Preset </option>
 
-%									if ($event->round_robin) {
+%									if ($event->{robin}) {
 
-%									} elsif ($tourn_settings->{"nsda_district"} && $type eq "debate") {
+%									} elsif ($tourn_settings->{"nsda_district"} && $event->{type} eq "debate") {
 
 										<option value="highlow"
-											<% ($round && $round->{type} eq "highlow") ? "selected" : "" %>
+											<% ($round_id && $round->{type} eq "highlow") ? "selected" : "" %>
 										>Hi/Lo (Prelim after R2)</option>
 
-%									} elsif ($type eq "debate") {
+%									} elsif ($event->{type} eq "debate") {
 										<option value="highlow"
-											<% ($round && $round->{type} eq "highlow") ? "selected" : "" %>
+											<% ($round_id && $round->{type} eq "highlow") ? "selected" : "" %>
 										>Hi/Lo </option>
 
 										<option value="highhigh"
-											<% ($round && $round->{type} eq "highhigh") ? "selected" : "" %>
+											<% ($round_id && $round->{type} eq "highhigh") ? "selected" : "" %>
 										>Hi/Hi </option>
 
-%									} elsif ($type eq "speech" && (not defined $tourn_settings->{"nsda_district"})) {
+%									} elsif ($event->{type} eq "speech" && (not defined $tourn_settings->{"nsda_district"})) {
 										<option value="snaked_prelim"
-											<% ($round && $round->{type} eq "snaked_prelim") ? "selected" : "" %>
+											<% ($round_id && $round->{type} eq "snaked_prelim") ? "selected" : "" %>
 										>Snaked Prelim </option>
 %									}
 
 									<option value="elim"
-										<% ($round && $round->{type} eq "elim") ? "selected" : "" %>
+										<% ($round_id && $round->{type} eq "elim") ? "selected" : "" %>
 									>Elim </option>
 
 									<option value="final"
-										<% ($round && $round->{type} eq "final") ? "selected" : "" %>
+										<% ($round_id && $round->{type} eq "final") ? "selected" : "" %>
 									>Final </option>
 
 									<option value="runoff"
-										<% ($round && $round->{type} eq "runoff") ? "selected" : "" %>
+										<% ($round_id && $round->{type} eq "runoff") ? "selected" : "" %>
 									>Runoff </option>
 								</select>
 							</div>
 						</td>
 
 						<td class="centeralign nospace smallish">
-								<span class="hidden"><% $round->{protocol} %></span>
+							<span class="hidden"><% $round->{protocol} %></span>
 							<div class = "nospace full <% $hidden %> <% $timeslot_id %>
 								<% $round_id > 0 && (not defined $round->{protocol}) ? "dkred" : "" %>"
 							>
 								<select
-									name="<% $timeslot_id %><% $count ? "_".$count : ""%>_protocol"
-									class="fixedsmaller plain"
+									name  = "<% $timeslot_id %><% $count ? "_".$count : ""%>_protocol"
+									class = "fixedsmaller plain"
 								>
 									<option value=""></option>
 %									foreach my $protocol (@protocols) {
 										<option
-											value="<% $protocol->id %>"
-											<% 	$round
-												&& $round->{protocol} == $protocol->id
-													? "selected"
+											value="<% $protocol->{id} %>"
+											<% 	$round_id && $round->{protocol} == $protocol->{id}
+												? "selected"
 												: ""
 											%>
-										> <% ucfirst($protocol->name) %> </option>
+										><% $protocol->{name} %></option>
 %									}
 								</select>
 							</div>
@@ -787,13 +789,13 @@
 									>
 									<option value="">Select Site</option>
 										<option value="">No Site</option>
-%										foreach my $site (sort {$a->name cmp $b->name} @sites) {
+%										foreach my $site (sort {$a->{name} cmp $b->{name}} @sites) {
 											<option
-												value="<% $site->id %>"
-												<% ($round && $site->id == $round->{site})
+												value="<% $site->{id} %>"
+												<% ($round_id && $site->{id} == $round->{site})
 													? 'selected' : ""
 												%>
-											><% $site->name %></option>
+											><% $site->{name} %></option>
 %										}
 									</select>
 								</div>
@@ -806,7 +808,7 @@
 							>
 %						}
 
-%						if ($event_type ne "congress") {
+%						if ($event->{type} ne "congress") {
 							<td class="centeralign nospace smallish">
 								<span class="hidden"><% $round->{flighted} %></span>
 								<div class = "nospace <% $hidden %> <% $timeslot_id %>" >
@@ -817,7 +819,7 @@
 %										foreach my $value (1 ... 5) {
 											<option
 												value="<% $value %>"
-												<% $round && $round->{flighted} == $value ? "selected" : ""%>
+												<% $round_id && $round->{flighted} == $value ? "selected" : ""%>
 											><% $value %></option>
 %										}
 									</select>
@@ -826,20 +828,18 @@
 %						}
 
 						<td class="centeralign nospace smallish padvertless">
-%							if ($round) {
+%							if ($round_id > 0) {
 								<div class = "nospace <% $hidden %> <% $timeslot_id %>" >
 									<select
 										name  = "<% $timeslot_id %><% $count ? "_".$count : ""%>_move"
-										class="fixedsmaller plain"
+										class = "fixedsmaller plain"
 									>
 										<option value="">No Move</option>
 <%perl>
-										foreach my $other_id (
-											sort {
-												$timeslots{$a}{"start_epoch"} <=> $timeslots{$b}{"start_epoch"}
+										foreach my $other_id (sort {
+											$timeslots{$a}{"start_epoch"} <=> $timeslots{$b}{"start_epoch"}
 											} keys %timeslots
 										) {
-
 											next if $round_by_timeslot{$other_id};
 </%perl>
 											<option

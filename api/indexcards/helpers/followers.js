@@ -25,12 +25,17 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 		replacements.panelFlight = options.flight;
 	}
 
-	const blastMe = {
+	// blastAll goes to everyone in a single blast.  Appropriate mostly for
+	// messages and blast notifications from Tab.
+	const blastAll = {
 		phone : [],
 		email : [],
 		error : false,
 	};
 
+	// blastOnly is keyed to the individual entries and judges, not the round
+	// as a whole, so entry/judge/school specific pairings and listings can go
+	// out. This method is the only way school-wide emails are constructed.
 	const blastOnly = {
 		entry  : {},
 		judge  : {},
@@ -85,7 +90,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 
 		rawEntryPeople.forEach( (person) => {
 			if (person.provider && person.phone) {
-				blastMe.phone.push(`${person.phone}@${person.provider}`);
+				blastAll.phone.push(`${person.phone}@${person.provider}`);
 
 				if (person.entry) {
 					if (!blastOnly.entry[person.entry]) {
@@ -99,7 +104,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 			}
 
 			if (person.email) {
-				blastMe.email.push(person.email);
+				blastAll.email.push(person.email);
 
 				if (person.entry) {
 					if (!blastOnly.entry[person.entry]) {
@@ -152,7 +157,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 
 		rawJudgePeople.forEach( (person) => {
 			if (person.provider && person.phone) {
-				blastMe.phone.push(`${person.phone}@${person.provider}`);
+				blastAll.phone.push(`${person.phone}@${person.provider}`);
 
 				if (person.judge) {
 					if (!blastOnly.judge[person.judge]) {
@@ -168,7 +173,7 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 
 			if (person.email) {
 
-				blastMe.email.push(person.email);
+				blastAll.email.push(person.email);
 
 				if (person.judge) {
 					if (!blastOnly.judge[person.judge]) {
@@ -210,11 +215,11 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 			rawEntryFollowers.forEach( (person) => {
 
 				if (person.provider && person.phone) {
-					blastMe.phone.push(`${person.phone}@${person.provider}`);
+					blastAll.phone.push(`${person.phone}@${person.provider}`);
 				}
 
 				if (person.email) {
-					blastMe.email.push(person.email);
+					blastAll.email.push(person.email);
 				}
 
 				if (person.entry) {
@@ -282,10 +287,10 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 			rawJudgeFollowers.forEach( (person) => {
 
 				if (person.provider && person.phone) {
-					blastMe.phone.push(`${person.phone}@${person.provider}`);
+					blastAll.phone.push(`${person.phone}@${person.provider}`);
 				}
 				if (person.email) {
-					blastMe.email.push(person.email);
+					blastAll.email.push(person.email);
 				}
 
 				if (person.judge) {
@@ -335,12 +340,216 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 	}
 
 	// Deduplicate the emails
-	blastMe.phone = Array.from(new Set(blastMe.phone));
-	blastMe.email = Array.from(new Set(blastMe.email));
-	blastMe.only  = { ...blastOnly };
-	blastMe.recipients = options.recipients;
+	blastAll.phone = Array.from(new Set(blastAll.phone));
+	blastAll.email = Array.from(new Set(blastAll.email));
+	blastAll.only  = { ...blastOnly };
+	blastAll.recipients = options.recipients;
 
-	return blastMe;
+	return blastAll;
+
+};
+
+// Get the acccounts linked to judges in the follower pools.  This function
+// only works in judge-specific 'only' mode since releases etc must be tagged
+// to an individual judge name and not to the pool as a whole.
+
+export const getJPoolJudges = async (replacements, options = { recipients: 'all' }) => {
+
+	const blastOnly = {
+		entry  : {},
+		judge  : {},
+		school : {},
+	};
+
+	const judgePeopleQuery = `
+		select
+			judge.first, judge.last,
+			person.id, person.email, person.phone, person.provider, judge.id judge, judge.school school
+		from (person, judge, jpool_judge jpj, jpool)
+		where jpool.id = :jpoolId
+			and jpool.id = jpj.jpool
+			and jpj.judge = judge.id
+			and judge.person = person.id
+			and person.no_email = 0
+	`;
+
+	const rawJudgePeople = await db.sequelize.query(judgePeopleQuery, {
+		replacements,
+		type: db.sequelize.QueryTypes.SELECT,
+	});
+
+	rawJudgePeople.forEach( (person) => {
+		if (!person.judge) {
+			return;
+		}
+
+		if (!blastOnly.judge[person.judge]) {
+			blastOnly.judge[person.judge] = {
+				phone : [],
+				email : [],
+				name  : `${person.first} ${person.last}`,
+			};
+		}
+
+		if (person.provider && person.phone) {
+			blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
+		}
+
+		blastOnly.judge[person.judge].email.push(person.email);
+	});
+
+	if (!options.no_followers) {
+
+		const judgeFollowersQuery = `
+			select
+				judge.first, judge.last,
+				person.id, person.email, person.phone, person.provider, judge.id judge
+			from (person, judge, jpool_judge jpj, jpool, follower)
+			where jpool.id = :jpoolId
+				and jpool.id        = jpj.jpool
+				and jpj.judge       = judge.id
+				and judge.id        = follower.judge
+				and follower.person = person.id
+				and person.no_email = 0
+		`;
+
+		const rawJudgeFollowers = await db.sequelize.query(judgeFollowersQuery, {
+			replacements,
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		rawJudgeFollowers.forEach( (person) => {
+
+			if (!person.judge) {
+				return;
+			}
+			if (!blastOnly.judge[person.judge]) {
+				blastOnly.judge[person.judge] = {
+					phone : [],
+					email : [],
+					name  : `${person.first} ${person.last}`,
+				};
+			}
+
+			if (person.phone && person.provider) {
+				blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
+			}
+
+			blastOnly.judge[person.judge].email.push(`${person.email}`);
+		});
+	}
+
+	const blastAll = {
+		phone      : [],
+		email      : [],
+		only       : { ...blastOnly },
+		recipients : options.recipients,
+		error      : false,
+	};
+
+	return blastAll;
+
+};
+
+export const getTimeslotJudges = async (replacements, options = { recipients: 'all' }) => {
+
+	const blastOnly = {
+		entry  : {},
+		judge  : {},
+		school : {},
+	};
+
+	const judgePeopleQuery = `
+		select
+			person.id, person.email, person.phone, person.provider, judge.id judge, judge.school school
+		from (person, judge, jpool_judge jpj, jpool, jpool_round jpr, round)
+		where round.timeslot = :timeslotId
+			and round.site = :siteId
+			and round.id = jpr.round
+			and jpr.jpool = jpool.id
+			and jpool.id = jpj.jpool
+			and jpj.judge = judge.id
+			and judge.person = person.id
+			and judge.active = 1
+			and person.no_email = 0
+	`;
+
+	const rawJudgePeople = await db.sequelize.query(judgePeopleQuery, {
+		replacements,
+		type: db.sequelize.QueryTypes.SELECT,
+	});
+
+	rawJudgePeople.forEach( (person) => {
+		if (!person.judge) {
+			return;
+		}
+
+		if (!blastOnly.judge[person.judge]) {
+			blastOnly.judge[person.judge] = {
+				phone : [],
+				email : [],
+			};
+		}
+
+		if (person.provider && person.phone) {
+			blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
+		}
+
+		blastOnly.judge[person.judge].email.push(person.email);
+	});
+
+	if (!options.no_followers) {
+
+		const judgeFollowersQuery = `
+			select
+				person.id, person.email, person.phone, person.provider, jpj.judge judge
+			from (person, judge, jpool_judge jpj, jpool, jpool_round jpr, round, follower)
+			where round.timeslot = :timeslotId
+				and round.site = :siteId
+				and round.id = jpr.round
+				and jpr.jpool = jpool.id
+				and jpool.id = jpj.jpool
+				and jpj.judge = judge.id
+				and judge.id = follower.judge
+				and judge.active = 1
+				and follower.person = person.id
+				and person.no_email = 0
+		`;
+
+		const rawJudgeFollowers = await db.sequelize.query(judgeFollowersQuery, {
+			replacements,
+			type: db.sequelize.QueryTypes.SELECT,
+		});
+
+		rawJudgeFollowers.forEach( (person) => {
+
+			if (!person.judge) {
+				return;
+			}
+			if (!blastOnly.judge[person.judge]) {
+				blastOnly.judge[person.judge] = {
+					phone : [],
+					email : [],
+				};
+			}
+
+			if (person.phone && person.provider) {
+				blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
+			}
+
+			blastOnly.judge[person.judge].email.push(`${person.email}`);
+		});
+	}
+
+	const blastAll = {
+		phone      : [],
+		email      : [],
+		only       : { ...blastOnly },
+		recipients : options.recipients,
+		error      : false,
+	};
+
+	return blastAll;
 
 };
 

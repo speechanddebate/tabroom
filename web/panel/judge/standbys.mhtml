@@ -1,0 +1,589 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$session
+	$defaults
+	$category_id => undef
+	$day         => undef
+	$site_id     => undef
+</%args>
+<%init>
+
+	my $whoami = "standbys";
+
+	my ($ts_days, $all_days) = $m->comp(
+		"/funclib/tourn_days.mas",
+		tourn => $tourn,
+		both  => 1
+	);
+
+	unless ($ts_days && @{$ts_days}) {
+		$ts_days = $all_days;
+	}
+
+	my $now = DateTime->now();
+
+	if ($site_id && $defaults->{'site'} != $site_id) {
+		$defaults->{"site"} = $site_id;
+		$session->default($defaults);
+		$session->update();
+	} elsif ($defaults->{'site'} && (not defined $site_id)) {
+		$site_id = $defaults->{'site'};
+	}
+
+	if ($day && $defaults->{'day'} ne $day) {
+		$defaults->{"day"} = $day;
+		$session->default($defaults);
+		$session->update();
+	} elsif ($defaults->{'day'} && (not defined $day)) {
+		$day = $defaults->{'day'};
+	} elsif (not defined $day) {
+		foreach my $t_day (@{$ts_days}) {
+			next if $now->epoch > $t_day->epoch;
+			$day = $t_day->ymd();
+			last;
+		}
+	}
+
+	my ($year, $month, $dow) = split(/\-/, $day);
+	my $morn_dt = DateTime::Format::MySQL->parse_datetime("$year-$month-$dow 00:00:00");
+	$dow++;
+	my $even_dt = DateTime::Format::MySQL->parse_datetime("$year-$month-$dow 00:00:00");
+
+	$morn_dt->set_time_zone($tourn->tz);
+	$even_dt->set_time_zone($tourn->tz);
+
+	$morn_dt->set_time_zone("UTC");
+	$even_dt->set_time_zone("UTC");
+
+	my (
+		$category, $catref,
+		$jpool, $jpoolsref, $jpool_settings,
+		$parent, $parents_ref
+	) = $m->comp("pools.mas",
+		tourn       => $tourn,
+		perms       => $ARGS{"perms"},
+		defaults    => $ARGS{"defaults"},
+		session     => $ARGS{"session"},
+		nsda_nats   => $tourn_settings->{"nsda_nats"},
+		jpool_id    => $ARGS{"jpool_id"},
+		parent      => $ARGS{"parent"},
+		category_id => $category_id,
+	);
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $timeslots;
+	my $site;
+
+	if ($site_id && $day) {
+
+		$site = Tab::Site->retrieve($site_id);
+
+		my $sth = $dbh->prepare("
+			select
+				timeslot.id, timeslot.name ts_name,
+				GROUP_CONCAT( CONCAT(event.abbr,' ',round.name) SEPARATOR ', ') rounds,
+				jpr.jpool parent,
+				standby.id sb_id,
+				standby.name sb_name,
+				show_judges.value show_judges,
+				publish.value publish,
+				message.value_text message
+
+			from (timeslot, round, event)
+
+				left join jpool_round jpr
+					on jpr.round = round.id
+
+				left join jpool_setting jps
+					on jps.value = timeslot.id
+					and jps.tag = 'standby_timeslot'
+					and jps.jpool IN (
+						select jpool.id from jpool, category
+						where category.tourn = timeslot.tourn
+						and category.id = jpool.category
+					)
+
+				left join jpool standby on standby.id = jps.jpool
+
+				left join jpool_setting publish
+					on publish.jpool = jps.jpool
+					and publish.tag = 'publish'
+
+				left join jpool_setting message
+					on message.jpool = jps.jpool
+					and message.tag = 'message'
+
+				left join jpool_setting show_judges
+					on show_judges.jpool = jps.jpool
+					and show_judges.tag = 'show_judges'
+
+			where timeslot.tourn = ?
+				and timeslot.id = round.timeslot
+				and round.site = ?
+				and round.event = event.id
+				and timeslot.start > ?
+				and timeslot.end < ?
+			group by timeslot.id
+			order by timeslot.start, event.abbr, round.name
+		");
+
+		$sth->execute(
+			$tourn->id,
+			$site_id,
+			DateTime::Format::MySQL->format_datetime($morn_dt),
+			DateTime::Format::MySQL->format_datetime($even_dt)
+		);
+
+		$timeslots = $sth->fetchall_hash();
+	}
+
+</%init>
+
+	<div class="main">
+
+		<h2><% $category->name %></h2>
+
+		<& "tabbar.mas",
+			category => $category,
+			nsda     => $tourn_settings->{'nsda_nats'},
+			whoami   => $whoami
+		&>
+
+		<span class="threequarters">
+			<h4>Standby Manager</h4>
+		</span>
+		<span class="quarter rightalign semibold">
+			<& "/funclib/showdt.mas", dt => $morn_dt &>
+			to
+			<& "/funclib/showdate.mas", dt => $even_dt &>
+		</span>
+
+		<div class='yellowrow semibold smallish'>
+			<span class="eighth padvertless bluetext">
+				<span class="quarterspacer"></span>
+				Timeslot
+			</span>
+
+			<span class="threetenths">
+				Rounds
+			</span>
+
+			<span class="threetenths">
+				Standby Pool
+			</span>
+
+			<span class="sixth centeralign">
+				Blast Standbys
+			</span>
+
+			<span class="tenth centeralign">
+				Blast Free
+			</span>
+		</div>
+
+%		foreach my $timeslot (@{$timeslots}) {
+
+			<div class='row'>
+				<span class="eighth semibold padvert bluetext">
+					<span class="quarterspacer"></span>
+					<% $timeslot->{'ts_name'} %>
+				</span>
+
+				<span class="threetenths smallish">
+					<% $timeslot->{rounds} %>
+				</span>
+
+				<span class="threetenths smallish">
+					<span
+						class   = "marno greentext buttonwhite fa fa-sm fa-bars marright setting_standby_<% $timeslot->{id} %>"
+						onClick = "
+							$('#setting_standby_<% $timeslot->{id} %>').toggleClass('hidden');
+							$('.setting_standby_<% $timeslot->{id} %>').toggleClass('invert');
+							fixVisual();"
+					></span>
+					<%
+						$timeslot->{'sb_name'}
+						? "<a
+							  class  = 'plain bluetext link-underline inline'
+							  href   = '/panel/judge/jpool.mhtml?category_id=".$category->id."&jpool_id=".$timeslot->{sb_id}."&parent=".$timeslot->{parent}."'
+							  target = '_blank'
+							>".$timeslot->{'sb_name'}."</a>"
+						: "None"
+					%>
+				</span>
+
+%				if ($timeslot->{'sb_id'}) {
+					<span class="sixth centeralign">
+						<a
+							class       = "buttonwhite bluetext fa fa-paper-plane"
+							id 			= "button_standby_<% $timeslot->{id} %>"
+							timeslot_id = "<% $timeslot->{id} %>"
+							onClick     = "
+								$('#blast_standby_<% $timeslot->{id} %>').toggleClass('hidden');
+								$('#button_standby_<% $timeslot->{id} %>').toggleClass('invert');
+								fixVisual();
+							"
+						></a>
+					</span>
+
+					<span class="tenth centeralign">
+						<a
+							class       = "buttonwhite redtext fa fa-paper-plane-o"
+							id 			= "button_free_<% $timeslot->{id} %>"
+							timeslot_id = "<% $timeslot->{id} %>"
+							onClick     = "
+								$('#blast_free_<% $timeslot->{id} %>').toggleClass('hidden');
+								$('#button_free_<% $timeslot->{id} %>').toggleClass('invert');
+								fixVisual();
+							"
+						></a>
+					</span>
+%				}
+				<div
+					id    = "setting_standby_<% $timeslot->{id} %>"
+					class = "<% $ARGS{"default"} == $timeslot->{id} ? "" : "hidden" %> ltbordertop rightalign"
+				>
+					<span class="nineteenth leftalign">
+
+%					if ($timeslot->{'sb_name'}) {
+						<p class="biggish semibold blueborderbottom">
+							<% $timeslot->{'sb_name'} %>
+						</p>
+
+						<div class="full nospace">
+
+							<label for="publish_<% $timeslot->{sb_id} %>">
+								<span
+									class = "third hover nospace"
+									title = "Shows this judge pool on their online assignments"
+								>
+									<span class="fourfifths">
+										<span class="quarterspacer"></span>
+										On Public Website
+									</span>
+									<span
+										class = "fifth centeralign nospace padvertless"
+										title = "Publishes this judge pool and its members on the public web"
+									>
+										<& "/funclib/bool_switch.mas",
+											id      => "publish_".$timeslot->{sb_id},
+											class   => "publish nospace",
+											value   => $timeslot->{"publish"},
+											tag     => "publish",
+											target  => $timeslot->{sb_id},
+											url     => "jpool_switch.mhtml",
+											smaller => "makewee"
+										&>
+									</span>
+								</span>
+								<span
+									class = "twothirds marno"
+									id    = "show_judges_ts_<% $timeslot->{sb_id} %>"
+								>
+									<span class="fifth">
+										Rename
+									</span>
+
+									<span class="fourfifths nospace">
+										<input
+											type          = "text"
+											size          = "92"
+											property_name = "name"
+											target_id     = "<% $timeslot->{"sb_id"} %>"
+											value         = "<% $timeslot->{"sb_name"} %>"
+											onChange      = "postSwitch(this, 'jpool_switch.mhtml');"
+										>
+									</span>
+								</span>
+							</label>
+						</div>
+
+						<div class="full nospace ltbordertop">
+
+							<label for="show_judges_<% $timeslot->{sb_id} %>">
+								<span
+									class = "third hover nospace"
+									title = "Shows this judge pool on their online assignments"
+								>
+									<span class="fourfifths">
+										<span class="quarterspacer"></span>
+										Show On Judge Homepage
+									</span>
+									<span class="fifth centeralign nospace padvertless">
+										<& "/funclib/bool_switch.mas",
+											id       => "show_judges_".$timeslot->{sb_id},
+											class    => "showjudges nospace",
+											value    => $timeslot->{"show_judges"},
+											tag      => "show_judges",
+											target   => $timeslot->{sb_id},
+											url      => "jpool_switch.mhtml",
+											function => "checkSJ();",
+											smaller  => "makewee"
+										&>
+									</span>
+								</span>
+
+								<span
+									class = "twothirds marno"
+									id    = "show_judges_ts_<% $timeslot->{sb_id} %>"
+								>
+									<span class="fifth">
+										Message Text
+									</span>
+
+									<span class="fourfifths nospace">
+										<input
+											type         = "text"
+											size         = "92"
+											name         = "message_<% $timeslot->{sb_id} %>"
+											value        = "<% $timeslot->{"message"} %>"
+											setting_name = 'message'
+											target_id    = "<% $timeslot->{"sb_id"} %>"
+											onChange     = "postSwitch(this, 'jpool_switch.mhtml');"
+										>
+									</span>
+								</span>
+							</label>
+						</div>
+
+%					} else {
+
+						<p class="biggish semibold blueborderbottom">
+							Create Standby Pool
+						</p>
+
+						<form
+							action = "standby_create.mhtml"
+							method = "post"
+						>
+
+							<input type = "hidden"
+								name    = "timeslot_id"
+								value   = "<% $timeslot->{id} %>"
+							>
+
+							<input type = "hidden"
+								name    = "site_id"
+								value   = "<% $site->id %>"
+							>
+
+							<input type = "hidden"
+								name    = "category_id"
+								value   = "<% $category->id %>"
+							>
+
+							<div class="full padbottommore">
+								<span class="quarter">
+									Name of Pool
+								</span>
+
+								<span class="threefifths">
+									<input
+										type  = "text"
+										name  = "name"
+										value = "<% $site->name %> Standby <% $timeslot->{'ts_name'} %>"
+									>
+								</span>
+
+								<span class="eighth centeralign">
+									<input
+										type  = "submit"
+										class = "thin"
+										value = "Create"
+									>
+								</span>
+							</div>
+						</form>
+%					}
+					</span>
+				</div>
+
+				<div id="blast_standby_<% $timeslot->{id} %>" class="hidden ltbordertop">
+					<span class="tenth">
+						<span class="halfspacer"></span>
+						Text
+					</span>
+					<span class="fourfifths">
+						<textarea
+							type  = "text"
+							id    = "<% $timeslot->{sb_id} %>_standby_message"
+							rows     = "4"
+						>You are on standby this round in case we need a replacement judge. Please be available and reachable on site; otherwise you could forfeit your judging bond. We will release you by another message once we have confirmed all rounds are underway.</textarea>
+					</span>
+					<span class="tenth centeralign padvert">
+						<button
+							class    = "buttonwhite bluetext padvertless invert"
+							target   = "standby"
+							id       = "<% $timeslot->{sb_id} %>_standby"
+							jpool_id = <% $timeslot->{sb_id} %>
+							onClick  = "sendMessage(this);"
+						>Send</button>
+					</span>
+				</div>
+
+				<div id="blast_free_<% $timeslot->{id} %>" class="hidden ltbordertop">
+					<span class="tenth">
+						<span class="halfspacer"></span>
+						Text
+					</span>
+					<span class="fourfifths">
+						<textarea
+							type = "text"
+							id   = "<% $timeslot->{id} %>_free_message"
+							rows = "4"
+						>You are not needed to judge during <% $timeslot->{ts_name} %>. This message only applies to this one round, not the rest of the day! If you leave <% $site->name %>, be sure to return in time for the next round.</textarea>
+					</span>
+					<span class="tenth centeralign padvert">
+						<button
+							class       = "buttonwhite redtext padvertless invert"
+							target      = "free"
+							id          = "<% $timeslot->{id} %>_free"
+							timeslot_id = "<% $timeslot->{id} %>"
+							site_id     = "<% $site->id %>"
+							onClick     = "sendMessage(this);"
+						>Send</button>
+					</span>
+				</div>
+			</div>
+%		}
+	</div>
+
+	<div class="menu">
+%		if ((defined $catref) && (scalar (keys %{$catref})) > 1) {
+			<div class="sidenote">
+				<h4>Judge Category</h4>
+				<form
+					action = "<% $whoami %>.mhtml"
+					method = "post"
+				>
+
+				<div class="row centeralign full">
+					<select
+						name             = "category_id"
+						class            = "fixedmost"
+						onchange         = 'this.form.submit();'
+						data-placeholder = "Choose category..."
+					>
+						<option value=""></option>
+<%perl>
+						foreach my $other_category ( sort {
+							$catref->{$a}{name} cmp $catref->{$b}{name}
+							} keys %{$catref}
+						) {
+</%perl>
+							<option <%
+								$other_category == $category
+									? "selected"
+									: ""
+								%>
+								value="<% $other_category %>"
+							><% $catref->{$other_category}{name} %></option>
+%						}
+					</select>
+				</div>
+			</div>
+%		}
+
+		<div class="sidenote">
+			<h4>Tournament Site</h4>
+
+			<form
+				action="standbys.mhtml"
+				method="post"
+			>
+%			foreach my $key ('category_id', 'jpool_id', 'parent') {
+%				next unless $ARGS{$key};
+				<input type="hidden" name="<% $key %>" value="<% $ARGS{$key} %>">
+%			}
+
+			<div class="row centeralign">
+				<span class='ninetenths'>
+					<select
+						name     = "site_id"
+						class    = "fixedmost"
+						onChange = "this.form.submit();"
+					>
+						<option value="">Choose a Site</option>
+%						foreach my $tsite ($tourn->sites) {
+							<option
+								value="<% $tsite->id %>"
+								<% $tsite == $site_id ? 'selected' : "" %>
+							><% $tsite->name %></option>
+%						}
+					</select>
+				</span>
+			</div>
+
+			<h4>Tournament Day</h4>
+
+			<div class="row centeralign">
+				<span class='ninetenths'>
+					<select
+						name     = "day"
+						class    = "fixedmost"
+						onChange = "this.form.submit();"
+					>
+						<option value="">Choose a Day</option>
+%						foreach my $t_day (@{$ts_days}) {
+							<option
+								value="<% $t_day->ymd() %>"
+								<% $t_day->ymd() eq $day ? 'selected' : "" %>
+							><& "/funclib/showdate.mas",
+									dt     => $t_day,
+									format => "casual"
+							&></option>
+%						}
+					</select>
+				</span>
+			</div>
+		</div>
+	</div>
+
+	<script>
+
+		function sendMessage(sender) {
+
+			const jpoolId    = $(sender).attr('jpool_id');
+			const siteId     = $(sender).attr('site_id');
+			const timeslotId = $(sender).attr('timeslot_id');
+			const message    = $(`#${sender.id}_message`).val();
+
+			const data = {
+				jpoolId,
+				timeslotId,
+				siteId,
+				message
+			};
+
+			if (message && (timeslotId || jpoolId) ) {
+
+				let url = '';
+
+				if (jpoolId) {
+					 url = `/v1/tourn/<% $tourn->id %>/jpool/${jpoolId}/message`;
+				} else if (timeslotId) {
+					 url = `/v1/tourn/<% $tourn->id %>/timeslot/${timeslotId}/free/message`;
+				}
+
+				$.ajax({
+					type    : 'POST',
+					url     : url,
+					data    : data,
+					success : function(data) {
+						if (data.error) {
+							alertify.warning(data.message);
+						} else {
+							alertify.notify(data.message, "custom");
+						}
+					}
+				});
+
+			} else {
+				alertify.warning('No message to blast was entered');
+			}
+		}
+	</script>
+

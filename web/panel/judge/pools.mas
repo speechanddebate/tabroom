@@ -11,9 +11,10 @@
 
 	my ($eventref, $catref) = $m->comp(
 		"/funclib/allowed_events.mas",
-		tourn => $tourn,
-		perms => $perms,
-		type  => "admin"
+		tourn     => $tourn,
+		perms     => $perms,
+		type      => "admin",
+		newschool => 'yasskween'
 	);
 
 	unless ($catref) {
@@ -22,54 +23,82 @@
 		);
 	}
 
+	my $dbh = Tab::DBI->db_Main();
 	my $category;
 
-	foreach my $cat (@{$catref}) {
-		if ($cat->id == $category_id) {
+	foreach my $cat (sort {$a <=> $b} keys %{$catref}) {
+		if ($cat == $category_id) {
 			$category = $cat;
 		}
 	}
 
 	if (not defined $category) {
-		foreach my $cat (@{$catref}) {
-			if ($cat->id == $defaults->{category}) {
-				$category = $cat;
+		foreach my $cat_id (sort {$a <=> $b} keys %{$catref}) {
+			if ($cat_id == $defaults->{category}) {
+				$category = $cat_id;
 			}
 		}
 	}
 
-	if ($defaults && $category && $defaults->{category} ne $category) {
-		$defaults->{category} = $category->id;
+	if (
+		$defaults
+		&& $category
+		&& $defaults->{category} ne $category
+	) {
+		$defaults->{category} = $category;
 		$session->default($defaults);
 		$session->update();
 	}
 
 	if ($nats &&  (not defined $category)) {
-		foreach my $cat (@{$catref}) {
-			if ($cat->setting("nats_category")) {
+		foreach my $cat (sort {$a <=> $b} keys %{$catref}) {
+			if ($catref->{$cat}{"nats_category"}) {
 				$category = $cat;
 			}
 		}
 	}
 
 	if (not defined $category) {
-		$category = ${$catref}[0];
+		foreach my $cat (sort {$a <=> $b} keys %{$catref}) {
+			$category = $cat;
+			last;
+		}
 	}
 
-	my @jpools;
-	my @parents;
-	my $parent;
+	my $limit;
 
+	unless ($ARGS{'pull_standby'}) {
+		if ($ARGS{'standby'}) {
+			$limit = 'and EXISTS (
+				select jps.id
+					from jpool_setting jps
+				where jps.tag = "standby"
+					and jps.jpool = jpool.id
+			)';
+		} else {
+			$limit = 'and NOT EXISTS (
+				select jps.id
+					from jpool_setting jps
+				where jps.tag = "standby"
+					and jps.jpool = jpool.id
+			)';
+		}
+	}
+
+	my %jpools;
+	my %parents;
+	my $parent;
 	my $jpool;
 
 	if ($jpool_id) {
 		$jpool = Tab::JPool->retrieve($jpool_id);
 	}
 
-
-	Tab::JPool->columns(TEMP => "judgecount");
-
-	if ($ARGS{"nsda_nats"} && $category && $category->setting("nats_category")) {
+	if ($ARGS{"nsda_nats"}
+		&& $category
+		&& $catref->{$category}{"nats_category"}
+		&! $ARGS{"pull_standby"}
+	) {
 
 		if ($jpool) {
 
@@ -99,6 +128,7 @@
 			$session->update();
 
 		} else {
+
 			$parent = Tab::JPool->retrieve($defaults->{"parent"});
 		}
 
@@ -108,30 +138,28 @@
 			);
 		}
 
-		#I said to myself, that log had a child.
-		Tab::JPool->set_sql( parents => "
-			select jpool.*,
-				count(judge.id) as judgecount
+		my $sth = $dbh->prepare("
+			select jpool.id, jpool.name, jpool.site, jpool.parent,
+				count(distinct jpj.judge) as judgecount
 			from (jpool, jpool child)
 				left join jpool_judge jpj on jpj.jpool = jpool.id
-				left join judge on jpj.judge = judge.id
 
 			where jpool.category = ?
 				and child.parent = jpool.id
+				$limit
 			group by jpool.id
 			order by jpool.name
 		");
 
-		@parents = Tab::JPool->search_parents($category->id);
+		$sth->execute($category);
+		my $results = $sth->fetchall_hash();
 
 		# Neither parents nor children but registrants
-		Tab::JPool->set_sql( reggies => "
-			select jpool.*,
-				count(judge.id) as judgecount
+		$sth = $dbh->prepare("
+			select jpool.id, jpool.name, jpool.site, jpool.parent,
+				count(distinct jpj.judge) as judgecount
 			from (jpool, jpool_setting registrant)
 				left join jpool_judge jpj on jpj.jpool = jpool.id
-				left join judge on jpj.judge = judge.id
-
 			where jpool.category = ?
 	            and not exists (
 					select child.id from jpool child where child.parent = jpool.id
@@ -139,24 +167,27 @@
 				and (jpool.parent = 0 OR jpool.parent IS NULL)
 				and registrant.jpool = jpool.id
 				and registrant.tag = 'registrant'
+				$limit
 			group by jpool.id
 			order by jpool.name
 		");
 
-		push @parents, Tab::JPool->search_reggies($category->id);
+		$sth->execute($category);
 
-		# Apparently I am super inconsistent about plurals sometimes.
+		my $registered = $sth->fetchall_hash();
+		push @{$results}, @{$registered};
+
+		%parents = map {$_->{id} => $_} @{$results};
+
+		# Apparently I am super inconsistent about plurals.
 		if ($ARGS{"parent"} eq "orphan" || $ARGS{"parent"} eq "orphans") {
 
-			Tab::JPool->set_sql( orphans => "
-				select jpool.*,
-					count(judge.id) as judgecount
+			$sth = $dbh->prepare("
+				select jpool.id, jpool.name, jpool.site, jpool.parent,
+					count(distinct jpj.judge) as judgecount
 				from (jpool)
 					left join jpool_judge jpj on jpj.jpool = jpool.id
-					left join judge on jpj.judge = judge.id
-
 				where jpool.category = ?
-
 				and not exists (
 					select jps.id
 						from jpool_setting jps
@@ -165,21 +196,22 @@
 				)
 
 				and (jpool.parent = 0 or jpool.parent is NULL)
-
+				$limit
 				group by jpool.id
 				order by jpool.name
 			");
 
-			@jpools = Tab::JPool->search_orphans($category->id);
+			$sth->execute($category);
+			my $results = $sth->fetchall_hash();
+			%jpools = map {$_->{id} => $_} @{$results};
 
 		} elsif ($parent) {
 
-			Tab::JPool->set_sql( children => "
-				select jpool.*,
-					count(judge.id) as judgecount
+			$sth = $dbh->prepare("
+				select jpool.id, jpool.name, jpool.site, jpool.parent,
+					count(distinct jpj.judge) as judgecount
 				from (jpool)
 					left join jpool_judge jpj on jpj.jpool = jpool.id
-					left join judge on jpj.judge = judge.id
 
 				where jpool.category = ?
 				and jpool.parent = ?
@@ -190,36 +222,58 @@
 					where jps.jpool = jpool.id
 					and jps.tag = 'registrant'
 				)
+				$limit
 
 				group by jpool.id
 				order by jpool.name
 			");
 
-			foreach my $cand (@parents) {
-				if ($ARGS{"parent"} == $cand->id) {
+			foreach my $cand (keys %parents) {
+				if ($ARGS{"parent"} == $cand) {
 					$parent = $cand;
 				}
 			}
+			$sth->execute($category, $parent);
 
-			@jpools = Tab::JPool->search_children($category->id, $parent->id);
+			my $results = $sth->fetchall_hash();
+			%jpools = map {$_->{id} => $_} @{$results};
 
 		} else {
-			@jpools = @parents;
+			%jpools = %parents;
 		}
 
 	} elsif ($category) {
-		@jpools = sort {$a->name cmp $b->name} $category->jpools;
+
+		my $sth = $dbh->prepare("
+			select jpool.id, jpool.name, jpool.site, jpool.parent,
+				count(distinct jpj.judge) as judgecount
+			from (jpool)
+				left join jpool_judge jpj on jpj.jpool = jpool.id
+
+			where jpool.category = ?
+			$limit
+			group by jpool.id
+			order by jpool.name
+		");
+
+		$sth->execute($category);
+		my $results = $sth->fetchall_hash();
+		%jpools = map {$_->{id} => $_} @{$results};
+
+		Tab::debuglog("I have found ".scalar@{$results}." results");
 	}
 
-	my %jpool_settings = ();
+	my $jpool_settings = ();
 
 	if ($category) {
-		%jpool_settings = $m->comp(
+		$jpool_settings = $m->comp(
 			"/funclib/jpool_settings.mas",
 			category => $category
 		);
+
+		$category = Tab::Category->retrieve($category);
 	}
 
-	return ($category, $catref, $jpool, \@jpools, \%jpool_settings, $parent, \@parents);
+	return ($category, $catref, $jpool, \%jpools, $jpool_settings, $parent, \%parents);
 
 </%init>

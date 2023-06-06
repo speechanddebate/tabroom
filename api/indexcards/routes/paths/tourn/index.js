@@ -7,6 +7,7 @@ import register from './register';
 import section from './section';
 import round from './round';
 import tab from './tab';
+import jpool from './jpool';
 import timeslot from './timeslot';
 
 export default [
@@ -15,5 +16,6 @@ export default [
 	...section,
 	...round,
 	...tab,
+	...jpool,
 	...timeslot,
 ];

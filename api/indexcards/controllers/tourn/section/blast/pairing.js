@@ -8,6 +8,7 @@ import wudcPosition from '../../../../helpers/textmunge';
 import { sidelocks } from '../../../../helpers/round';
 import scheduleAutoFlip from './autoFlip';
 
+// Blast a single section with a pairing
 export const blastSection = {
 	POST: async (req, res) => {
 
@@ -22,17 +23,18 @@ export const blastSection = {
 		queryData.where = 'where section.id = :sectionId';
 		queryData.fields = '';
 
-		const blastees = await formatBlast(queryData, req);
+		const blastData = await formatBlast(queryData, req);
 
 		const followers = await getFollowers(
 			queryData.replacements,
 			{ ...req.body },
 		);
 
-		sendBlast(followers, blastees, req, res);
+		sendBlast(followers, blastData, req, res);
 	},
 };
 
+// Blast a single round with a pairing
 export const blastRound = {
 	POST: async (req, res) => {
 
@@ -75,16 +77,17 @@ export const blastRound = {
 				type         : req.db.sequelize.QueryTypes.UPDATE,
 			});
 
-		const blastees = await formatBlast(queryData, req);
+		const blastData = await formatBlast(queryData, req);
 		const followers = await getFollowers(
 			queryData.replacements,
 			{ ...req.body },
 		);
 
-		sendBlast(followers, blastees, req, res);
+		sendBlast(followers, blastData, req, res);
 	},
 };
 
+// Blast a whole timeslot's rounds with pairings
 export const blastTimeslot = {
 	POST: async (req, res) => {
 
@@ -136,15 +139,18 @@ export const blastTimeslot = {
 			});
 		}
 
-		const blastees = await formatBlast(queryData, req);
+		const blastData = await formatBlast(queryData, req);
 
 		const followers = await getFollowers(
 			queryData.replacements,
 			{ ...req.body },
 		);
-		sendBlast(followers, blastees, req, res);
+		sendBlast(followers, blastData, req, res);
 	},
 };
+
+// formatBlast pulls the sql paramters from the blastSection/Round/Timeslot
+// calling function and then
 
 const formatBlast = async (queryData, req) => {
 
@@ -284,9 +290,7 @@ const formatBlast = async (queryData, req) => {
 	const roundData = await processRounds(rawRoundData);
 
 	rawEntries.forEach( (row) => {
-
 		const section = roundData[row.roundid].sections[row.sectionid];
-
 		section.entries.push({
 			id         : row.id,
 			code       : row.code,
@@ -322,7 +326,7 @@ const formatBlast = async (queryData, req) => {
 	// harder to parse than a logical flow with bits spread around the file at
 	// random.
 
-	const blastees = {
+	const blastData = {
 		entries       : {},
 		judges        : {},
 		schools       : {},
@@ -483,15 +487,15 @@ const formatBlast = async (queryData, req) => {
 				section.entries.forEach( (entry) => {
 
 					// Myself
-					if (!blastees.entries[entry.id]) {
-						blastees.entries[entry.id] = {
+					if (!blastData.entries[entry.id]) {
+						blastData.entries[entry.id] = {
 							subject: `${entry.code} ${round.name} ${round.eventAbbr}`,
 							text : sectionMessage.text,
 							html : sectionMessage.html,
 						};
 					}
 
-					const entryMessage = blastees.entries[entry.id];
+					const entryMessage = blastData.entries[entry.id];
 
 					if (entry.position === 'FLIP') {
 						entryMessage.text += 'Flip for Sides\n';
@@ -516,21 +520,21 @@ const formatBlast = async (queryData, req) => {
 					}
 
 					// My school
-					if (entry.school && blastees.schoolEntries ) {
-						if (!blastees.schools[entry.school]) {
-							blastees.schools[entry.school] = {
+					if (entry.school && blastData.schoolEntries ) {
+						if (!blastData.schools[entry.school]) {
+							blastData.schools[entry.school] = {
 								subject : `${entry.schoolName} Round Assignments `,
 								text    : `Full assignments for ${entry.schoolName}\n`,
 							};
 						}
 
-						if (!blastees.schoolEntries[entry.school]) {
-							blastees.schoolEntries[entry.school] = {
+						if (!blastData.schoolEntries[entry.school]) {
+							blastData.schoolEntries[entry.school] = {
 								text : '',
 								done : {},
 							};
 						}
-						const schoolMessage = blastees.schoolEntries[entry.school];
+						const schoolMessage = blastData.schoolEntries[entry.school];
 
 						if (!schoolMessage.done[round.id]) {
 							schoolMessage.done[round.id] = true;
@@ -559,13 +563,13 @@ const formatBlast = async (queryData, req) => {
 
 				section.judges.forEach( (judge) => {
 					// Myself
-					if (!blastees.judges[judge.id]) {
-						blastees.judges[judge.id] = {
+					if (!blastData.judges[judge.id]) {
+						blastData.judges[judge.id] = {
 							subject: `${judge.first} ${judge.last} ${round.eventAbbr} ${round.name}`,
 						};
 					}
 
-					const judgeMessage = blastees.judges[judge.id];
+					const judgeMessage = blastData.judges[judge.id];
 
 					if (!judgeMessage.text) {
 						judgeMessage.text = '';
@@ -642,21 +646,21 @@ const formatBlast = async (queryData, req) => {
 					judgeMessage.selfhtml += sectionMessage.entryHTML;
 
 					// My school
-					if (judge.school && blastees.schoolJudges) {
-						if (!blastees.schools[judge.school]) {
-							blastees.schools[judge.school] = {
+					if (judge.school && blastData.schoolJudges) {
+						if (!blastData.schools[judge.school]) {
+							blastData.schools[judge.school] = {
 								subject : `${judge.schoolName} Round Assignments `,
 								text    : `Full assignments for ${judge.schoolName}\n`,
 							};
 						}
-						if (!blastees.schoolJudges[judge.school]) {
-							blastees.schoolJudges[judge.school] = {
+						if (!blastData.schoolJudges[judge.school]) {
+							blastData.schoolJudges[judge.school] = {
 								text : '',
 								done : {},
 							};
 						}
 
-						const schoolMessage = blastees.schoolJudges[judge.school];
+						const schoolMessage = blastData.schoolJudges[judge.school];
 
 						if (!schoolMessage.done[round.id]) {
 							schoolMessage.done[round.id] = true;
@@ -673,25 +677,30 @@ const formatBlast = async (queryData, req) => {
 			});
 		});
 
-		Object.keys(blastees.schools).forEach( (schoolId) => {
-			blastees.schools[schoolId].text += `\n${round.eventAbbr} ${round.name} Start ${round.shortstart[1]}\n\n`;
-			if (blastees.schoolEntries?.[schoolId]) {
-				blastees.schools[schoolId].text += `ENTRIES\n${blastees.schoolEntries[schoolId].text}`;
+		Object.keys(blastData.schools).forEach( (schoolId) => {
+			blastData.schools[schoolId].text += `\n${round.eventAbbr} ${round.name} Start ${round.shortstart[1]}\n\n`;
+			if (blastData.schoolEntries?.[schoolId]) {
+				blastData.schools[schoolId].text += `ENTRIES\n${blastData.schoolEntries[schoolId].text}`;
 			}
-			if (blastees.schoolJudges?.[schoolId]) {
-				blastees.schools[schoolId].text += `JUDGES\n${blastees.schoolJudges[schoolId].text}`;
+			if (blastData.schoolJudges?.[schoolId]) {
+				blastData.schools[schoolId].text += `JUDGES\n${blastData.schoolJudges[schoolId].text}`;
 			}
 		});
 
-		delete blastees.schoolJudges;
-		delete blastees.schoolEntries;
-		blastees.rounds.push(round);
+		delete blastData.schoolJudges;
+		delete blastData.schoolEntries;
+		blastData.rounds.push(round);
 	});
 
-	return blastees;
+	return blastData;
 };
 
-const sendBlast = async (followers, blastees, req, res) => {
+// Create the actual transporter maps for each blast email and text. Note that
+// this is keyed to the followers.only data structure because that tells us who
+// is following an individual entry or judge, not just a follower of someone in
+// the round as a whole
+
+const sendBlast = async (followers, blastData, req, res) => {
 
 	const emailResponse = {
 		error   : false,
@@ -705,10 +714,10 @@ const sendBlast = async (followers, blastees, req, res) => {
 		message : '',
 	};
 
-	for await (const entryId of Object.keys(blastees.entries)) {
+	for await (const entryId of Object.keys(blastData.entries)) {
 
 		const email = await emailBlast({
-			...blastees.entries[entryId],
+			...blastData.entries[entryId],
 			...followers.only.entry[entryId],
 			append: req.body.message,
 		});
@@ -720,7 +729,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 		emailResponse.message = email.message ? email.message : emailResponse.message;
 
 		const phone = await phoneBlast({
-			...blastees.entries[entryId],
+			...blastData.entries[entryId],
 			...followers.only.entry[entryId],
 			append: req.body.message,
 		});
@@ -733,11 +742,11 @@ const sendBlast = async (followers, blastees, req, res) => {
 		phoneResponse.message = phone.message ? phone.message : phoneResponse.message;
 	}
 
-	for await (const judgeId of Object.keys(blastees.judges)) {
+	for await (const judgeId of Object.keys(blastData.judges)) {
 
 		if (followers.only.judge[judgeId]?.self) {
 
-			const selfBlast = { ...blastees.judges[judgeId] };
+			const selfBlast = { ...blastData.judges[judgeId] };
 			const selfFollowers = { ...followers.only.judge[judgeId] };
 
 			selfFollowers.email = selfFollowers.self;
@@ -764,7 +773,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 		}
 
 		const email = await emailBlast({
-			...blastees.judges[judgeId],
+			...blastData.judges[judgeId],
 			...followers.only.judge[judgeId],
 			append: req.body.message,
 		});
@@ -776,7 +785,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 		emailResponse.message = email.message ? email.message : emailResponse.message;
 
 		const phone = await phoneBlast({
-			...blastees.judges[judgeId],
+			...blastData.judges[judgeId],
 			...followers.only.judge[judgeId],
 			append: req.body.message,
 		});
@@ -788,10 +797,10 @@ const sendBlast = async (followers, blastees, req, res) => {
 		phoneResponse.message = phone.message ? phone.message : phoneResponse.message;
 	}
 
-	for await (const schoolId of Object.keys(blastees.schools)) {
+	for await (const schoolId of Object.keys(blastData.schools)) {
 
 		const email = await emailBlast({
-			...blastees.schools[schoolId],
+			...blastData.schools[schoolId],
 			...followers.only.school[schoolId],
 			append: req.body.message,
 		});
@@ -832,7 +841,7 @@ const sendBlast = async (followers, blastees, req, res) => {
 			});
 		} else {
 
-			blastees.rounds.forEach( async (round) => {
+			blastData.rounds.forEach( async (round) => {
 
 				await req.db.changeLog.create({
 					tag         : 'blast',
