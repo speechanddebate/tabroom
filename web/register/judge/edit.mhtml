@@ -19,6 +19,7 @@
 	}
 
 	my $category = $judge->category;
+	my $jperson = $judge->person;
 
 	unless ($tourn == $category->tourn) {
 		$m->comp("/funclib/abort.mas", message => "That judge does not belong to your current tournament");
@@ -32,21 +33,6 @@
 
 	my %category_settings = $category->all_settings;
 
-	my $cap_repel;
-	my $usa_wsdc;
-
-	foreach my $event ($category->events) {
-		$cap_repel++ if $event->setting("wsdc_cap_repel");
-		$usa_wsdc++ if $event->setting("usa_wsdc");
-	}
-
-	my @districtschools;
-
-	if ($district) {
-		@districtschools =
-			sort {$a->name cmp $b->name}
-			$district->schools(tourn => $tourn->id);
-	}
 
 	my @dioschools;
 
@@ -73,13 +59,56 @@
 	my %jpools;
 	my @questionnaires;
 
-	if ($judge->person && $category_settings{"required_quizzes"}) {
+	if ($jperson && $category_settings{"required_quizzes"}) {
 		eval {
 			push @questionnaires, @{$category_settings{"required_quizzes"}};
 		};
 	}
 
 	my $dbh = Tab::DBI->db_Main();
+
+	my $cap_repel;
+	my $usa_wsdc;
+
+	my $sth = $dbh->prepare("
+		select
+			event.id, wsdc_cap_repel.value cap_repel, usa_wsdc.value wsdc
+		from event
+
+			left join event_setting wsdc_cap_repel
+				on wsdc_cap_repel.event = event.id
+				and wsdc_cap_repel.tag = 'wsdc_cap_repel'
+
+			left join event_setting usa_wsdc
+				on usa_wsdc.event = event.id
+				and usa_wsdc.tag = 'usa_wsdc'
+
+		where event.category = ?
+	");
+
+	$sth->execute($category->id);
+	my $events = $sth->fetchall_hash();
+
+	foreach my $ev (@{$events}) {
+		$cap_repel = 1 if $ev->{"cap_repel"};
+		$usa_wsdc  = 1 if $ev->{"wsdc"};
+	}
+
+	my %districtschools;
+
+	if ($district) {
+		my $sth = $dbh->prepare("
+			select school.id, school.name
+				from school
+			where school.district = ?
+				and school.tourn = ?
+		");
+
+		$sth->execute($district->id, $tourn->id);
+		my $schools = $sth->fetchall_hash();
+		%districtschools = map {$_->{id} => $_->{name}} @{$schools};
+	}
+
 
 	my $jpool_sth = $dbh->prepare("
 		select
@@ -117,7 +146,7 @@
 
 		left join jpool_setting parli
 			on parli.tag = 'parli'
-			and rounds.jpool = jpool.id
+			and parli.jpool = jpool.id
 
 		left join jpool_setting paradigm_quiz
 			on paradigm_quiz.tag = 'paradigm_quiz'
@@ -173,7 +202,7 @@
 		) = $jpool_sth->fetchrow_array()
 	) {
 
-		if ($paradigm_quiz && (not defined $jpools{$jpool_id}{"paradigm"})) {
+		if ($jpool_judge_id && $paradigm_quiz && (not defined $jpools{$jpool_id}{"paradigm"})) {
 			$jpools{$jpool_id}{"paradigm"} = $paradigm_quiz;
 			push @questionnaires, $paradigm_quiz;
 		}
@@ -224,7 +253,7 @@
 			$jpools{$jpool_id}{"end_epoch"} = $tslot_cache{$timeslot_end}->epoch;
 		}
 
-		if ($jpool_judge_id) {
+		if ($jpool_judge_id && $site_choice) {
 			$jpools{$jpool_id}{"in"} = 1;
 			push @site_choices, eval {
 				return @{JSON::decode_json($site_choice)};
@@ -240,7 +269,7 @@
 	push @tabs, "noms" if $tourn_settings->{"nsda_nats"};
 	push @tabs, "TabRoom" if $category_settings{"tab_room"};
 	push @tabs, "rounds" if @panels;
-	push @tabs, "paradigm" if ($category_settings{"ask_paradigm"} && $judge->person);
+	push @tabs, "paradigm" if ($category_settings{"ask_paradigm"} && $jperson);
 
 	my %links;
 	$links{"strikes"} = "judge_strikes.mhtml?judge_id=".$judge->id;
@@ -768,7 +797,7 @@
 		<span class="pagehalf padtop">
 
 %			if ($judge && $judge->person_request > 0) {
-%				unless ($judge->person > 0) {
+%				unless ($jperson > 0) {
 %					my $request = $judge->person_request;
 
 					<div class="row settings fixedheight">
@@ -804,7 +833,7 @@
 
 			<div
 				id="identityBox"
-				class="<% ($judge->person > 0) ? "row settings fixedheight" : "hidden" %>"
+				class="<% ($jperson > 0) ? "row settings fixedheight" : "hidden" %>"
 			>
 
 				<span class="fifth padsetting">
@@ -813,13 +842,13 @@
 				</span>
 
 				<span class="replybucket seventenths semibold smallish wrap">
-%					if ($judge->person > 0) {
+%					if ($jperson > 0) {
 						<a
-							href  = "mailto:<% $judge->person->email %>"
+							href  = "mailto:<% $jperson->email %>"
 							class = "white bluetext"
-							title = "<% $judge->person->email %>"
+							title = "<% $jperson->email %>"
 						>
-							<% $judge->person->email %>
+							<% $jperson->email %>
 						</a>
 %					}
 				</span>
@@ -837,7 +866,7 @@
 				</span>
 			</div>
 
-%			unless ($judge->person > 0) {
+%			unless ($jperson > 0) {
 				<div
 					id="linkBox"
 					class = "row settings fixedheight"
@@ -873,7 +902,6 @@
 %			}
 
 			<div class="row settings fixedheight">
-
 				<span class="twofifths">
 					<span class="halfspacer"></span>
 					School
@@ -889,14 +917,16 @@
 						my %school_already;
 
 						if ($district) {
-							foreach my $dschool (@districtschools) {
-								$school_already{$dschool->id}++;
+							foreach my $dschool_id (sort {
+								$districtschools{$a} cmp $districtschools{$b}
+								} keys %districtschools
+							) {
+								$school_already{$dschool_id}++;
 </%perl>
-									<option value="<% $dschool->id %>"
-										<% ($dschool->id eq $school->id) ? 'selected' : '' %>
-									> <% $dschool->short_name %> </option>
+								<option value="<% $dschool_id %>"
+									<% ($dschool_id eq $school->id) ? 'selected' : '' %>
+								> <% $districtschools{$dschool_id} %> </option>
 %							}
-
 							<option value="">
 								---Other Districts:---
 							</option>
@@ -918,7 +948,7 @@
 <%perl>
 						}
 
-						my $sth = $dbh->prepare("
+						$sth = $dbh->prepare("
 							select school.id, school.name
 							from school
 							where school.tourn = ?
@@ -935,7 +965,7 @@
 </%perl>
 							<option value="<% $oschool_id %>"
 								<% ($oschool_id eq $school_id) ? 'selected' : '' %>
-							> <% $oschool_name%> </option>
+							> <% $oschool_name %> </option>
 %						}
 					</select>
 				</span>
@@ -967,9 +997,9 @@
 				</span>
 
 				<span class="threefifths">
-%					if ($judge->person > 0) {
+%					if ($jperson > 0) {
 						<div class="padvert">
-							<% Tab::phoneme($judge->person->phone) %>
+							<% Tab::phoneme($jperson->phone) %>
 						</div>
 %					} else {
 						<input
@@ -989,9 +1019,9 @@
 				</span>
 
 				<span class="threefifths">
-%					if ($judge->person > 0) {
+%					if ($jperson > 0) {
 						<div class="padvert">
-							<% $judge->person->email %>
+							<% $jperson->email %>
 						</div>
 %					} else {
 						<input
@@ -1004,10 +1034,10 @@
 				</span>
 			</div>
 
-%			if ($tourn_settings->{"nsda_nats"} && $judge->person > 0) {
+%			if ($tourn_settings->{"nsda_nats"} && $jperson > 0) {
 
-%				my $membership = $m->comp("/funclib/nsda/membership.mas", person => $judge->person);
-%				my $diamonds = $judge->person->setting("diamonds");
+%				my $membership = $m->comp("/funclib/nsda/membership.mas", person => $jperson);
+%				my $diamonds = $jperson->setting("diamonds");
 
 				<div class="row settings fixedheight">
 					<span class="twofifths">
@@ -1021,7 +1051,7 @@
 							name  = "nsda"
 							size  = "16"
 							class = "larger"
-							value = "<% $judge->person->nsda %>"
+							value = "<% $jperson->nsda %>"
 						>
 					</span>
 
@@ -1100,9 +1130,9 @@
 		</form>
 <%perl>
 
-		if ($judge && $judge->person) {
+		if ($judge && $jperson) {
 
-			my @certs = $judge->person->answers(pending => 0);
+			my @certs = $jperson->answers(pending => 0);
 
 			my %required_certs;
 
@@ -1751,7 +1781,7 @@
 		</div>
 % 	}
 
-%	if ($category_settings{"ask_paradigm"} && $judge->person) {
+%	if ($category_settings{"ask_paradigm"} && $jperson) {
 
 		<div
 			id    = "paradigm"
@@ -1760,7 +1790,7 @@
 			<h4>Paradigm</h4>
 
 			<div class="even full">
-				<% $judge->person->setting("paradigm") %>
+				<% $jperson->setting("paradigm") %>
 			</div>
 
 		</div>
@@ -2388,26 +2418,25 @@
 
                 <h5>Vaccine Status</h5>
 
-%				if ($judge->person) {
+%				if ($jperson) {
 
-%					my $person = $judge->person;
-%                   my $status = $person->setting("vaccine_".$tourn->id);
-%                   my $exempt = $person->setting("exempt_".$tourn->id);
+%                   my $status = $jperson->setting("vaccine_".$tourn->id);
+%                   my $exempt = $jperson->setting("exempt_".$tourn->id);
 
                     <div class="row ltborderbottom">
 
                         <span class="twenty centeralign fa fa-tiny <% $status eq "confirmed" ? "fa-check greentext" : "fa-times redtext" %>"></span>
 
                         <span class="twofifths">
-                            <% $person->first." ".$person->last %>
+                            <% $jperson->first." ".$jperson->last %>
                         </span>
 
                         <span class="fourtenths nospace centeralign">
 							<select
-								name         = "<% $person->id %>"
+								name         = "<% $jperson->id %>"
 								class        = "fixedmost marno padno "
 								setting_name = "vaccine_<% $tourn->id %>"
-								person_id    = "<% $person->id %>"
+								person_id    = "<% $jperson->id %>"
 								onChange     = "postSwitch(this, '/register/reports/vaccine_switch.mhtml');"
 							>
 								<option value="none">Not Started</option>
@@ -2418,7 +2447,7 @@
 
 						<span class="tenth nospace centeralign" title="Exempt">
 							<& "/funclib/bool_switch.mas",
-								person_id    => $judge->person,
+								person_id    => $jperson,
 								tag          => "exempt",
 								url          => "/register/reports/vaccine_switch.mhtml",
 								value        => $exempt,
@@ -2503,13 +2532,13 @@
 			<div class="sidenote">
 
 				<h4>Questionnaires</h4>
+
 %					if ($category_settings{'nats_category'}) {
 						<a
 							class="full blue"
 							href="nom_edit.mhtml?judge_id=<% $judge->id %>"
 						>Late Elim Nomination</a>
 %					}
-
 <%perl>
 					foreach my $tag (@questionnaires) {
 
@@ -2519,7 +2548,11 @@
 						my $quiz = Tab::Quiz->retrieve($tag);
 						next unless $quiz;
 
-						my $answers = $person->answers(quiz => $quiz)->first;
+						my $answers = Tab::PersonQuiz->search(
+							person => $jperson->id,
+							quiz   => $quiz->id
+						)->first;
+
 </%perl>
 						<a
 							class="full blue"
