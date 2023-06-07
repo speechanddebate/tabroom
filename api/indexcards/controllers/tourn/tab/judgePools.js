@@ -149,8 +149,9 @@ export const natsJudgePool = {
 							return -1000;
 						}
 					}
-					if (schoolPercent[jpool.id][judges[a].school]
-						!== schoolPercent[jpool.id][judges[b].school]
+
+					if (schoolPercent[jpool.id]?.[judges[a]?.school]
+						!== schoolPercent[jpool.id]?.[judges[b]?.school]
 					) {
 						return (schoolPercent[jpool.id][judges[b].school]
 							- schoolPercent[jpool.id][judges[a].school]);
