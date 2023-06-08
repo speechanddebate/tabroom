@@ -319,8 +319,7 @@ export const changeAccess = {
 			return res.status(200).json(reply);
 
 		} catch (err) {
-
-			console.log(err);
+			//errorLogger.info(err);
 		}
 	},
 };

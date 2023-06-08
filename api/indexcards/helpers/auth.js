@@ -165,7 +165,6 @@ export const tournAuth = async function(req) {
 
 export const checkJudgePerson = async (req, judgeId) => {
 
-	console.log(`I am here`);
 	if (req.session.site_admin) {
 		return true;
 	}

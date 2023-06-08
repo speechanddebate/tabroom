@@ -32,6 +32,7 @@ const errorHandler = (err, req, res, next) => {
 
 	// Production bugs should find their way to Palmer
 	const env = process.env.NODE_ENV || 'development';
+
 	if (env === 'production') {
 
 		const messageData = {
@@ -54,9 +55,9 @@ Javascript has errors too, and here's one for you!  YAY!
 
 		try {
 			const info = adminBlast(messageData);
-			console.log(info);
+			errorLogger.info(info);
 		} catch (error) {
-			console.log(error);
+			errorLogger.info(error);
 			err.message += ` Also, error response on sending email: ${err}`;
 		}
 	}

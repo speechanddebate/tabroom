@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import { convert } from 'html-to-text';
 import config from '../../config/config';
+import { errorLogger } from './logger';
 
 export const emailBlast = async (inputData) => {
 
@@ -64,10 +65,10 @@ export const emailBlast = async (inputData) => {
 	if (process.env.NODE_ENV === 'production') {
 		info = await transporter.sendMail(messageData);
 	} else {
-		console.log(`Local: email not sending from ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
-		console.log(`Subject ${messageData.subject}`);
-		console.log(`Text ${messageData.text}`);
-		console.log(`HTML ${messageData.html}`);
+		errorLogger.info(`Local: email not sending from ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
+		errorLogger.info(`Subject ${messageData.subject}`);
+		errorLogger.info(`Text ${messageData.text}`);
+		errorLogger.info(`HTML ${messageData.html}`);
 	}
 
 	return {
@@ -124,9 +125,9 @@ export const phoneBlast = async (inputData) => {
 	if (process.env.NODE_ENV === 'production') {
 		info = await transporter.sendMail(messageData);
 	} else {
-		console.log(`Local: not sending sms blast for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
-		console.log(`Subject ${messageData.subject}`);
-		console.log(`Text ${messageData.text}`);
+		errorLogger.info(`Local: not sending sms blast for ${messageData.from} to ${messageData.to} bcc ${messageData.bcc}`);
+		errorLogger.info(`Subject ${messageData.subject}`);
+		errorLogger.info(`Text ${messageData.text}`);
 	}
 
 	return {
@@ -191,10 +192,10 @@ export const adminBlast = async (inputData) => {
 		if (process.env.NODE_ENV === 'production') {
 			info = await transporter.sendMail(messageData);
 		} else {
-			console.log(`Local: Admin email not sending from ${messageData.from} to ${messageData.to}`);
-			console.log(`Subject ${messageData.subject}`);
-			console.log(`Text ${messageData.text}`);
-			console.log(`HTML ${messageData.html}`);
+			errorLogger.info(`Local: Admin email not sending from ${messageData.from} to ${messageData.to}`);
+			errorLogger.info(`Subject ${messageData.subject}`);
+			errorLogger.info(`Text ${messageData.text}`);
+			errorLogger.info(`HTML ${messageData.html}`);
 		}
 	}
 
@@ -203,10 +204,10 @@ export const adminBlast = async (inputData) => {
 		if (process.env.NODE_ENV === 'production') {
 			info = await transporter.sendMail(messageData);
 		} else {
-			console.log(`Local: Admin SMS not sending from ${messageData.from} to ${messageData.to}`);
-			console.log(`Subject ${messageData.subject}`);
-			console.log(`Text ${messageData.text}`);
-			console.log(`HTML ${messageData.html}`);
+			errorLogger.info(`Local: Admin SMS not sending from ${messageData.from} to ${messageData.to}`);
+			errorLogger.info(`Subject ${messageData.subject}`);
+			errorLogger.info(`Text ${messageData.text}`);
+			errorLogger.info(`HTML ${messageData.html}`);
 		}
 	}
 

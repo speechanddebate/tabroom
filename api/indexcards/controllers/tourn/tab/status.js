@@ -527,7 +527,7 @@ export const attendance = {
 			});
 
 		} catch (err) {
-			console.log(err);
+			// errorLogger.info(err);
 		}
 	},
 };
@@ -648,7 +648,6 @@ export const schematStatus = {
 					}
 					judge.text += `Bye`;
 					judge.class = 'graytext semibold';
-					console.log(judge);
 				} else if (ballot.forfeit) {
 					if (judge.text) {
 						judge.text += `/`;

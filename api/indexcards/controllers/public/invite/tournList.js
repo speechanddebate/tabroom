@@ -189,7 +189,6 @@ export const futureTourns = {
 		future.push(...futureDistricts);
 
 		const thisWeek = moment().subtract(11, 'days').weeks();
-		console.log(`this week is ${thisWeek}`);
 
 		future.sort( (a, b) => {
 			return (thisWeek > a.week) - (thisWeek > b.week)

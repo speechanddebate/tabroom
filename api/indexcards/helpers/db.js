@@ -766,7 +766,6 @@ db.summon = async (dbTable, objectId) => {
 		delete dbData.Settings;
 	}
 
-	console.log(dbData);
 	return dbData;
 };
 

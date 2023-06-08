@@ -38,12 +38,10 @@ export const postPayment = {
 		const [invoiceId, cartKey] = postRequest.invoice_id.split('-');
 
 		if (!tourn.settings.store_carts) {
-			console.log('No cart found');
 			return res.status(400).json({ message: 'No shopping cart found for that tournament' });
 		}
 
 		if (!tourn.settings.store_carts[cartKey]) {
-			console.log('No cart found with that id');
 			return res.status(400).json({ message: `Invoice ${invoiceId} cart ${cartKey} not found` });
 		}
 

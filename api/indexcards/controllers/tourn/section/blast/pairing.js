@@ -450,8 +450,6 @@ const formatBlast = async (queryData, req) => {
 						sectionMessage.entryText += `FLIP FOR SIDES: \n\n`;
 					}
 
-					console.log(`Adding ${entry.code} to the entryText`);
-
 					sectionMessage.entryText += `${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
 					sectionMessage.entryHTML += `<p>${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
 
