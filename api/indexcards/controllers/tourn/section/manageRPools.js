@@ -65,7 +65,7 @@ export const addRoundToRPool = {
 						target_id="${roundInfo.rpr}"
 						on_success="destroy"
 						onClick="postSwitch(this, 'rpool_round_rm.mhtml'); fixVisual();"
-						class="full white nowrap hover marno msallish"
+						class="full white nowrap hover marno smallish"
 						title="Remove this round">${roundInfo.abbr} ${roundInfo.name}</a>
 				</span>`,
 			reply_append : `${req.params.rpool_id}_rounds`,
