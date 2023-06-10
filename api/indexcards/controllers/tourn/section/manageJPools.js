@@ -1,10 +1,26 @@
 // import { showDateTime } from '../../../helpers/common';
 
+export const eraseJPool = {
+
+	POST: async (req, res) => {
+		await req.db.sequelize.query(`
+			delete jpj.* from jpool_judge jpj where jpj.jpool = :jpoolId
+		`, {
+			replacements: { jpoolId: req.params.jpool_id },
+			type: req.db.sequelize.QueryTypes.DELETE,
+		});
+
+		res.status(200).json({
+			error   : false,
+			refresh : true,
+			message : 'All judges dumped',
+		});
+	},
+};
+
 export const populateStandby = {
 
 	POST: async (req, res) => {
-
-		console.log(req.body);
 
 		const standbyJudgeQuery = `
 			select
@@ -70,7 +86,6 @@ export const populateStandby = {
 
 		Object.keys(chosen).forEach( async (judgeId) => {
 
-			console.log(`Adding judge ${judgeId} to pool ${req.body.jpoolId}`);
 			await req.db.sequelize.query(addJudge, {
 				replacements: { judgeId, jpoolId: req.body.jpoolId },
 				type: req.db.sequelize.QueryTypes.INSERT,
