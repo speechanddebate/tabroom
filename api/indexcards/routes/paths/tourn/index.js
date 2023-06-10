@@ -8,6 +8,7 @@ import section from './section';
 import round from './round';
 import tab from './tab';
 import jpool from './jpool';
+import rpool from './rpool';
 import timeslot from './timeslot';
 
 export default [
@@ -17,5 +18,6 @@ export default [
 	...round,
 	...tab,
 	...jpool,
+	...rpool,
 	...timeslot,
 ];

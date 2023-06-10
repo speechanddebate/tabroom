@@ -174,7 +174,6 @@
 		}
 
 		// Really, when don't I?
-
 		if (attributes.option_one) {
 			var optionOneId = $(checkObject).attr("option_one");
 
@@ -224,7 +223,6 @@
 				if (data) {
 
 					if (data.reply) {
-
 						if (attributes.reply_target) {
 							$("#"+attributes.reply_target).text(data.reply);
 						}
