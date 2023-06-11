@@ -24,7 +24,11 @@ export const populateStandby = {
 
 		let rawJudges = [];
 
+		console.log(req.body);
+
 		if (req.body.parentId) {
+
+			console.log("Pulling from parent ");
 
 			const standbyJudgeQuery = `
 				select
@@ -61,6 +65,8 @@ export const populateStandby = {
 			});
 
 		} else if (req.body.categoryId) {
+
+			console.log("Pulling from category");
 
 			const standbyJudgeQuery = `
 				select
@@ -110,14 +116,17 @@ export const populateStandby = {
 			counter--;
 			rawJudges.sort( (a, b) => parseInt(a.score) - parseInt(b.score));
 			const picked = rawJudges.shift();
-			chosen[picked.id] = picked;
 
-			for (const judge of rawJudges) {
-				if (judge.school > 0 && judge.school === picked.school) {
-					judge.score += 5000;
-				}
-				if (judge.region > 0 && judge.region === picked.region) {
-					judge.score += 1000;
+			if (picked) {
+				chosen[picked.id] = picked;
+
+				for (const judge of rawJudges) {
+					if (judge.school > 0 && judge.school === picked.school) {
+						judge.score += 5000;
+					}
+					if (judge.region > 0 && judge.region === picked.region) {
+						judge.score += 1000;
+					}
 				}
 			}
 		}
