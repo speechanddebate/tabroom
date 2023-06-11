@@ -24,11 +24,7 @@ export const populateStandby = {
 
 		let rawJudges = [];
 
-		console.log(req.body);
-
-		if (req.body.parentId) {
-
-			console.log("Pulling from parent ");
+		if (req.body.parentId && req.body.parentId !== 'NaN') {
 
 			const standbyJudgeQuery = `
 				select
@@ -66,8 +62,6 @@ export const populateStandby = {
 
 		} else if (req.body.categoryId) {
 
-			console.log("Pulling from category");
-
 			const standbyJudgeQuery = `
 				select
 					judge.id, judge.school, region.id region,
@@ -97,7 +91,7 @@ export const populateStandby = {
 			`;
 
 			rawJudges = await req.db.sequelize.query(standbyJudgeQuery, {
-				replacements: { parentId: req.body.categoryId },
+				replacements: { categoryId: req.body.categoryId },
 				type: req.db.sequelize.QueryTypes.SELECT,
 			});
 		}
