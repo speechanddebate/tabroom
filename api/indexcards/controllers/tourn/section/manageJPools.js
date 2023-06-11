@@ -22,39 +22,79 @@ export const populateStandby = {
 
 	POST: async (req, res) => {
 
-		const standbyJudgeQuery = `
-			select
-				judge.id, judge.school, region.id region,
-					count(distinct panel.id) ballots,
-					count(distinct standby.jpool) standbys,
-					count(distinct entry.id) entries
-			from (judge, jpool_judge jpj)
+		let rawJudges = [];
 
-				left join jpool_judge standby
-					on standby.judge = judge.id
-					AND EXISTS (
-						select jps.id
-						from jpool_setting jps
-						where jps.jpool = standby.jpool
-						and jps.tag = 'standby')
+		if (req.body.parentId) {
 
-				left join ballot on ballot.judge = judge.id
-				left join panel on panel.id = ballot.panel
+			const standbyJudgeQuery = `
+				select
+					judge.id, judge.school, region.id region,
+						count(distinct panel.id) ballots,
+						count(distinct standby.jpool) standbys,
+						count(distinct entry.id) entries
+				from (judge, jpool_judge jpj)
 
-				left join school on judge.school = school.id
-				left join region on school.region = region.id
-				left join entry on entry.school = school.id and entry.active = 1
+					left join jpool_judge standby
+						on standby.judge = judge.id
+						AND EXISTS (
+							select jps.id
+							from jpool_setting jps
+							where jps.jpool = standby.jpool
+							and jps.tag = 'standby')
 
-			where jpj.jpool = :parentId
-				and jpj.judge = judge.id
-			group by judge.id
-			order by standbys desc, ballots desc
-		`;
+					left join ballot on ballot.judge = judge.id
+					left join panel on panel.id = ballot.panel
 
-		const rawJudges = await req.db.sequelize.query(standbyJudgeQuery, {
-			replacements: { parentId: req.body.parentId },
-			type: req.db.sequelize.QueryTypes.SELECT,
-		});
+					left join school on judge.school = school.id
+					left join region on school.region = region.id
+					left join entry on entry.school = school.id and entry.active = 1
+
+				where jpj.jpool = :parentId
+					and jpj.judge = judge.id
+				group by judge.id
+				order by standbys desc, ballots desc
+			`;
+
+			rawJudges = await req.db.sequelize.query(standbyJudgeQuery, {
+				replacements: { parentId: req.body.parentId },
+				type: req.db.sequelize.QueryTypes.SELECT,
+			});
+
+		} else if (req.body.categoryId) {
+
+			const standbyJudgeQuery = `
+				select
+					judge.id, judge.school, region.id region,
+						count(distinct panel.id) ballots,
+						count(distinct standby.jpool) standbys,
+						count(distinct entry.id) entries
+				from (judge)
+
+					left join jpool_judge standby
+						on standby.judge = judge.id
+						AND EXISTS (
+							select jps.id
+							from jpool_setting jps
+							where jps.jpool = standby.jpool
+							and jps.tag = 'standby')
+
+					left join ballot on ballot.judge = judge.id
+					left join panel on panel.id = ballot.panel
+
+					left join school on judge.school = school.id
+					left join region on school.region = region.id
+					left join entry on entry.school = school.id and entry.active = 1
+
+				where judge.category = :categoryId
+				group by judge.id
+				order by standbys desc, ballots desc
+			`;
+
+			rawJudges = await req.db.sequelize.query(standbyJudgeQuery, {
+				replacements: { parentId: req.body.categoryId },
+				type: req.db.sequelize.QueryTypes.SELECT,
+			});
+		}
 
 		const chosen = {};
 
