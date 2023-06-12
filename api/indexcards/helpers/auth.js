@@ -148,14 +148,16 @@ export const tournAuth = async function(req) {
 			) {
 				session[tournId].level  = 'by_event';
 				session[tournId].menu   = 'events';
-				session.events = perm.details;
 
 			} else if (
 				perm.tag === 'checker'
 			) {
 				session[tournId].level  = 'checker';
 				session[tournId].menu   = 'none';
-				session.events = perm.details;
+			}
+
+			if (perm.details && (perm.tag === 'checker' || perm.tag === 'by_event')) {
+				session.events = JSON.parse(perm.details);
 			}
 		});
 	}
@@ -184,6 +186,30 @@ export const checkPerms = async (req, res, query, replacements) => {
 		replacements,
 		type: req.db.sequelize.QueryTypes.SELECT,
 	});
+
+	if (permsData.site && permsData.timeslot) {
+
+		const okEvents = await req.db.sequelize.query(`
+			select
+				distinct round(event) id
+			from round
+				where round.timeslot = :timeslotId
+				and round.site = :siteId
+		`, {
+			replacements   : {
+				timeslotId : permsData.timeslot,
+				siteId     : permsData.site,
+			},
+			type: req.db.sequelize.QueryTypes.SELECT,
+		});
+
+		for await (const event of okEvents) {
+			if (!permsData.events) {
+				permsData.events = [];
+			}
+			permsData.events.push(event.id);
+		}
+	}
 
 	if (permsData.tourn !== parseInt(req.params.tourn_id)) {
 		res.status(200).json({
@@ -215,7 +241,7 @@ export const checkPerms = async (req, res, query, replacements) => {
 		if (req.session[permsData.tourn].level === 'by_event') {
 
 			if (
-				req.threshold === 'tabber'
+				(req.threshold === 'tabber' || req.threshold === 'admin')
 				&& req.session.events[permsData.event] === 'tabber'
 			) {
 				return true;
@@ -223,14 +249,50 @@ export const checkPerms = async (req, res, query, replacements) => {
 
 			if (
 				req.session.events
-				&& req.threshold !== 'owner'
-				&& req.threshold !== 'tabber'
-				&& (
-					req.session.events[permsData.event] === 'checker'
-					|| req.session.events[permsData.event] === 'tabber'
-				)
 			) {
-				return true;
+
+				if ( permsData.event
+					&& req.session.events[permsData.event] === 'checker'
+					&& req.threshold !== 'owner'
+					&& req.threshold !== 'tabber'
+				) {
+					return true;
+				}
+
+				if ( permsData.event
+					&& req.session.events[permsData.event] === 'tabber'
+					&& req.threshold !== 'owner'
+				) {
+					return true;
+				}
+
+				if (permsData.events) {
+
+					let OK = false;
+
+					permsData.events.forEach( eventId => {
+
+						if (req.session.events[eventId] === 'tabber'
+							&& req.threshold !== 'owner'
+						) {
+
+							OK = true;
+							return true;
+						}
+
+						if (req.session.events[eventId.toString()] === 'checker'
+							&& req.threshold !== 'owner'
+							&& req.threshold !== 'tabber'
+						) {
+							OK = true;
+							return true;
+						}
+					});
+
+					if (OK) {
+						return true;
+					}
+				}
 			}
 		}
 	}
@@ -315,10 +377,11 @@ export const timeslotCheck = async (req, res, timeslotId) => {
 
 export const jpoolCheck = async (req, res, jpoolId) => {
 	const jpoolQuery = `
-		select category.tourn, jpool.id jpool, round.event event
+		select category.tourn, jpool.id jpool, round.event event, st.value timeslot, jpool.site
 			from (jpool, category)
 				left join jpool_round jpr on jpr.jpool = jpool.id
 				left join round on round.id = jpr.round
+				left join jpool_setting st on st.tag = 'standby_timeslot' and st.jpool = jpool.id
 		where jpool.id = :jpoolId
 			and jpool.category = category.id
 			group by jpool.id

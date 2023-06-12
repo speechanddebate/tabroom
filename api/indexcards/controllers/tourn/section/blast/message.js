@@ -303,9 +303,16 @@ export const messageFree = {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
 		}
 
-		const permOK = await timeslotCheck(req, res, req.body.timeslotId);
+		let permOK = false;
+
+		if (req.body.jpoolId) {
+			permOK = await jpoolCheck(req, res, req.body.jpoolId);
+		} else if (req.params.timeslotId) {
+			permOK = await timeslotCheck(req, res, req.body.timeslotId);
+		}
+
 		if (!permOK) {
-			return;
+			return false;
 		}
 
 		// I'll take this in parts.  First pull all the judges in the relevant
@@ -391,7 +398,7 @@ export const messageFree = {
 		let recipients = 0;
 		let errors = '';
 
-		Object.keys(allJudges).forEach( async (judgeId) => {
+		for await (const judgeId of Object.keys(allJudges)) {
 
 			const judge = allJudges[judgeId];
 			const messageData = { ...judgeBlasts.only.judge[judgeId] };
@@ -410,7 +417,7 @@ export const messageFree = {
 			} catch (err) {
 				errors += ` ${err}`;
 			}
-		});
+		}
 
 		const rounds = await req.db.round.findAll({
 			where : {
@@ -437,7 +444,7 @@ export const messageFree = {
 		} else {
 			res.status(200).json({
 				error   : false,
-				message : `Message sent to ${recipients} recipients`,
+				message : `Message sent to ${recipients} free recipients`,
 			});
 		}
 	},
