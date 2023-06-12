@@ -1,6 +1,8 @@
 // Parse the Tabroom cookies and determine whether there's an active session
 // import { b64_sha512crypt as crypt } from 'sha512crypt-node';\
 
+import { errorLogger } from './logger.js';
+
 export const auth = async (req) => {
 	const db = req.db;
 
@@ -157,7 +159,15 @@ export const tournAuth = async function(req) {
 			}
 
 			if (perm.details && (perm.tag === 'checker' || perm.tag === 'by_event')) {
-				session.events = JSON.parse(perm.details);
+				errorLogger.info(perm.details);
+				try {
+					session.events = JSON.parse(perm.details);
+				} catch(err) {
+					errorLogger.info(`Permission parsing error from details`);
+					errorLogger.info(perm.details);
+					errorLogger.info(`ERROR CODE`);
+					errorLogger.info(err);
+				}
 			}
 		});
 	}
