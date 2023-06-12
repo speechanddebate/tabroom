@@ -1071,7 +1071,7 @@ export const eventDashboard = {
 			if (
 				tournPerms.level !== 'owner'
 				&& tournPerms.level !== 'tabber'
-				&& !tournPerms.events[result.event]
+				&& !tournPerms.events?.[result.event]
 			) {
 				continue;
 			}

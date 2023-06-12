@@ -158,15 +158,18 @@ export const tournAuth = async function(req) {
 				session[tournId].menu   = 'none';
 			}
 
+			session[tournId].events = {};
+
 			if (perm.details && (perm.tag === 'checker' || perm.tag === 'by_event')) {
-				errorLogger.info(perm.details);
-				try {
-					session.events = JSON.parse(perm.details);
-				} catch(err) {
-					errorLogger.info(`Permission parsing error from details`);
-					errorLogger.info(perm.details);
-					errorLogger.info(`ERROR CODE`);
-					errorLogger.info(err);
+
+				if (typeof perm.details === 'object') {
+					session[tournId].events = perm.details;
+				} else {
+					try {
+						session[tournId].events = JSON.parse(perm.details);
+					} catch(err) {
+						errorLogger.info(err);
+					}
 				}
 			}
 		});
@@ -252,17 +255,17 @@ export const checkPerms = async (req, res, query, replacements) => {
 
 			if (
 				(req.threshold === 'tabber' || req.threshold === 'admin')
-				&& req.session.events[permsData.event] === 'tabber'
+				&& req.session[permsData.tourn].events[permsData.event] === 'tabber'
 			) {
 				return true;
 			}
 
 			if (
-				req.session.events
+				req.session[permsData.tourn].events
 			) {
 
 				if ( permsData.event
-					&& req.session.events[permsData.event] === 'checker'
+					&& req.session[permsData.tourn].events[permsData.event] === 'checker'
 					&& req.threshold !== 'owner'
 					&& req.threshold !== 'tabber'
 				) {
@@ -270,7 +273,7 @@ export const checkPerms = async (req, res, query, replacements) => {
 				}
 
 				if ( permsData.event
-					&& req.session.events[permsData.event] === 'tabber'
+					&& req.session[permsData.tourn].events[permsData.event] === 'tabber'
 					&& req.threshold !== 'owner'
 				) {
 					return true;
@@ -282,7 +285,7 @@ export const checkPerms = async (req, res, query, replacements) => {
 
 					permsData.events.forEach( eventId => {
 
-						if (req.session.events[eventId] === 'tabber'
+						if (req.session[permsData.tourn].events[eventId] === 'tabber'
 							&& req.threshold !== 'owner'
 						) {
 
@@ -290,7 +293,7 @@ export const checkPerms = async (req, res, query, replacements) => {
 							return true;
 						}
 
-						if (req.session.events[eventId.toString()] === 'checker'
+						if (req.session[permsData.tourn].events[eventId.toString()] === 'checker'
 							&& req.threshold !== 'owner'
 							&& req.threshold !== 'tabber'
 						) {
@@ -408,10 +411,9 @@ export const judgeCheck = async (req, res, judgeId) => {
 		where judge.id = :judgeId
 			and judge.category = category.id
 			and category.id = event.category
-			and event.id IN :eventIds
 	`;
 
-	const replacements = { judgeId, eventIds: [Object.keys(req.session.events)] };
+	const replacements = { judgeId };
 	return checkPerms(req, res, judgeQuery, replacements);
 };
 
@@ -421,10 +423,9 @@ export const categoryCheck = async (req, res, categoryId) => {
 			from category, event
 		where category.id = :categoryId
 			and category.id = event.category
-			and event.id IN :eventIds
 	`;
 
-	const replacements = { categoryId, eventIds: [Object.keys(req.session.events)] };
+	const replacements = { categoryId };
 	return checkPerms(req, res, categoryQuery, replacements);
 };
 
