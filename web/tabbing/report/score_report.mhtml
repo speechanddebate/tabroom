@@ -7,24 +7,48 @@
 	$event_id   => undef
 	$round_name => undef
 	$portrait   => undef
+	$texout     => undef
 </%args>
 <%init>
 
 	my $dbh = Tab::DBI->db_Main();
 
-	my @events;
 	my $name;
+	my $where;
 
 	if ($event_id eq "all") {
-		@events = $tourn->events();
+		$where = " where event.tourn = ".$tourn->id);
 		$name = "AllEvents";
 	} elsif ($event_id eq int($event_id)) {
-		push @events, Tab::Event->retrieve($event_id);
-		$name = $events[0]->name if @events;
+		$where = " where event.id = ".int($event_id);
+		$name = "Event";
 	} else {
-		@events = $tourn->events(type => $event_id);
+		$event_id =~ s/[\W_]//g;
+		$where = " where event.type = '".$event_id."'";
 		$name = ucfirst($event_id)."Events";
 	}
+
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.name, event.type,
+			code_style.value code_style,
+			supp.value supp
+
+		from (event)
+			left join event_setting code_style
+				on code_style.event = event.id
+				and code_style.tag = 'code_style'
+
+			left join event_setting supp
+				on supp.event = event.id
+				and supp.tag = 'supp'
+		$where
+			and event.type != 'congress'
+		order by supp.value, event.type, event.name
+	");
+
+	$sth->execute();
+	my $events = $sth->fetchall_hash();
 
 	if ($tourn_settings->{nsda_nats}) {
 		@events = sort {$a->setting("supp") <=> $b->setting('supp')} @events;
@@ -37,43 +61,35 @@
 	my $landscape;
 	$landscape++ if $tourn_settings->{nsda_nats};
 
-	foreach my $event (@events) {
-		$landscape++ if $event->type eq "debate";
+	unless ($texout) {
+
+		foreach my $event (@events) {
+			$landscape++ if $event->type eq "debate";
+		}
+
+		$name =~ s/[\W_]//g;
+		my $filename = "FinalResults-$name-".$session->id;
+		my $filepath = $Tab::file_root."tmp/".$filename;
+
+		$m->comp("/funclib/printout.mas",
+			tourn       => $tourn,
+			filename    => $filename,
+			head        => 1,
+			superwide   => 1,
+			taller      => 1,
+			footer_text => $tourn->start->year." ".$tourn->name." -- Raw Results",
+			no_footer   => 1,
+			array       => "1.1",
+			landscape   => $landscape
+		);
+
+		open ($texout, ">>$filepath.tex");
+		binmode($texout, ":utf8");
 	}
-
-    $name =~ s/[\W_]//g;
-
-    my $filename = "FinalResults-$name-".$session->id;
-    my $filepath = $Tab::file_root."tmp/".$filename;
-
-    $m->comp("/funclib/printout.mas",
-        tourn       => $tourn,
-        filename    => $filename,
-        head        => 1,
-		superwide   => 1,
-		taller      => 1,
-		footer_text => $tourn->start->year." ".$tourn->name." -- Results",
-		no_footer   => 1,
-        array       => "1.1",
-		landscape   => $landscape
-    );
-
-    open (TEXOUT, ">>$filepath.tex");
-	binmode(TEXOUT, ":utf8");
 
 	foreach my $event (@events) {
 
 		next if $event->type eq "congress";
-
-		unless ($round_name) {
-			$round_name = scalar ($event->rounds);
-		}
-
-		my $exclude_round = $event->rounds(
-			name => $round_name
-		)->first;
-
-		my $exclude_number = $exclude_round->name if $exclude_round;
 
 		my $codes = $event->setting('code_style');
 
@@ -84,13 +100,6 @@
 
 		my $label;
 
-		unless ($exclude_number) {
-			$label          = "All Rounds";
-			$exclude_number = 314159;
-		} else {
-			$label = "Results up to round ".$exclude_number;
-		}
-
 		my $fontsize = $person_settings->{"fontsize"};
 		$fontsize = "scriptsize" if ($fontsize eq "default" || (not defined $fontsize));
 
@@ -100,6 +109,21 @@
 
 		if ($event->type eq "wsdc") {
 			$name_string = "distinct(CONCAT(student.last)) SEPARATOR ' , '";
+		}
+
+		my $limit;
+
+		if ($ARGS{"exclude"}) {
+
+			$limit = "
+				and not exists (
+					select advanced.id
+						from ballot advanced, panel advpanel, round advround
+					where advround.name = ".int($ARGS{"exclude"})."
+						and advround.id = advpanel.round
+						and advpanel.id = advanced.panel
+						and advanced.entry = entry.id
+				)";
 		}
 
 		my $sth = $dbh->prepare("
@@ -139,6 +163,7 @@
 				and ballot.panel  = panel.id
 				and panel.round   = round.id
 				and round.name 	  <= ?
+				and round.type    != 'final'
 
 				and entry.school = school.id
 				and entry_student.entry = entry.id
@@ -151,17 +176,12 @@
 						and rs.tag = 'ignore_results'
 				)
 
-				and not exists (
-					select advanced.id
-					from ballot advanced, panel advpanel
-					where advpanel.round = ?
-					and advpanel.id = advanced.panel
-					and advanced.entry = entry.id
-				)
+				$limit
+
 			group by ballot.id
 		");
 
-		$sth->execute($event->id, $round_name, $exclude_number);
+		$sth->execute($event->id, $round_name);
 
 		my %results;
 		my $max_round;
@@ -275,9 +295,9 @@
 			$school_length = length($school_name) if $school_length < length($school_name);
 		}
 
-		print TEXOUT "\\Large \\textsb{".$event->name."} \\hfill \\textsb{Scores} \n";
-		print TEXOUT "\\medskip\n";
-		print TEXOUT "\\newline\n";
+		print $texout "\\Large \\textsb{".$event->name."} \\hfill \\textsb{Scores} \n";
+		print $texout "\\medskip\n";
+		print $texout "\\newline\n";
 
 		Tab::debuglog("Longest school name is $school_length");
 		Tab::debuglog("Longest entry name is $name_length");
@@ -346,8 +366,8 @@
 
 		$tabular .= "}\n";
 
-		print TEXOUT "\\raggedright\n";
-		print TEXOUT "\\".$fontsize."\n";
+		print $texout "\\raggedright\n";
+		print $texout "\\".$fontsize."\n";
 
 		my $switch = 1;
 		my $twostep;
@@ -371,35 +391,35 @@
 
 		foreach my $entry (@entries) {
 
-			print TEXOUT $tabular;
-			print TEXOUT "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch % 2;
-			print TEXOUT "\\scriptsize ".Tab::texify($results{$entry}{"entry_code"})." & " if $show_codes;
-			print TEXOUT "\\scriptsize ".Tab::texify($results{$entry}{"entry_name"})." & ";
-			print TEXOUT "\\scriptsize ".Tab::texify($results{$entry}{"school_name"})." ";
+			print $texout $tabular;
+			print $texout "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch % 2;
+			print $texout "\\scriptsize ".Tab::texify($results{$entry}{"entry_code"})." & " if $show_codes;
+			print $texout "\\scriptsize ".Tab::texify($results{$entry}{"entry_name"})." & ";
+			print $texout "\\scriptsize ".Tab::texify($results{$entry}{"school_name"})." ";
 
 			if ($tourn_settings->{ncfl}) {
-				print TEXOUT " & \\truncate{.95in}{".Tab::texify($results{$entry}{"region_name"})."} ";
+				print $texout " & \\truncate{.95in}{".Tab::texify($results{$entry}{"region_name"})."} ";
 			} elsif ($tourn_settings->{nsda_nats}) {
-				print TEXOUT " & \\scriptsize ".Tab::texify($results{$entry}{"school_state"});
+				print $texout " & \\scriptsize ".Tab::texify($results{$entry}{"school_state"});
 			}
 
 			foreach my $round_name (1 ..$max_round) {
-				print TEXOUT " & \\tiny \\tt ".$results{$entry}{$round_name};
+				print $texout " & \\tiny \\tt ".$results{$entry}{$round_name};
 			}
-			print TEXOUT "\\end{tabular}\n";
+			print $texout "\\end{tabular}\n";
 
 			if ($take_steps) {
 				if ($twostep++ % 2) {
 					$switch++;
-					print TEXOUT "\\newline\n";
+					print $texout "\\newline\n";
 				}
 			} else {
 				$switch++;
-				print TEXOUT "\\newline\n";
+				print $texout "\\newline\n";
 			}
 		}
 
-		print TEXOUT "\\newpage\n";
+		print $texout "\\newpage\n";
 	}
 
 	;
