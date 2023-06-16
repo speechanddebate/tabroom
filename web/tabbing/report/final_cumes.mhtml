@@ -9,20 +9,74 @@
 </%args>
 <%init>
 
-	my $name;
-	my @events;
+    my $dbh = Tab::DBI->db_Main();
 
-	if ($event_id) {
-		push @events, Tab::Event->retrieve($event_id);
-		$name = $events[0]->name;
+    my $name;
+    my $where;
+	my $events;
+
+	if ($ARGS{event_ref}) {
+
+		push @{$events}, $ARGS{event_ref};
+
 	} else {
-		push @events, $tourn->events(type => "speech");
-		$name = $tourn->name;
+
+		if ($event_id eq "all" || not defined $event_id) {
+			$where = " where event.tourn = ".$tourn->id;
+			$name = "AllEvents";
+		} elsif ($event_id eq int($event_id)) {
+			$where = " where event.id = ".int($event_id);
+			$name = "Event";
+		} else {
+			$event_id =~ s/[\W_]//g;
+			$where = " where event.type = '".$event_id."'";
+			$name = ucfirst($event_id)."Events";
+		}
+
+		my $sth = $dbh->prepare("
+			select
+				event.id, event.name, event.type,
+				code_style.value code_style,
+				supp.value supp,
+				result_description.value_text result_description,
+				bowl_description.value_text bowl_description,
+				final_bowl_protocol.value final_bowl_protocol,
+				max_entry.value max_entry
+
+			from (event)
+
+				left join event_setting code_style
+					on code_style.event = event.id
+					and code_style.tag = 'code_style'
+
+				left join event_setting supp
+					on supp.event = event.id
+					and supp.tag = 'supp'
+
+				left join event_setting result_description
+					on result_description.event = event.id
+					and result_description.tag = 'result_description'
+
+				left join event_setting bowl_description
+					on bowl_description.event = event.id
+					and bowl_description.tag = 'bowl_description'
+
+				left join event_setting max_entry
+					on max_entry.event = event.id
+					and max_entry.tag = 'max_entry'
+
+				left join event_setting final_bowl_protocol
+					on final_bowl_protocol.event = event.id
+					and final_bowl_protocol.tag = 'final_bowl_protocol'
+			$where
+				and event.type != 'congress'
+			order by supp.value, event.type, event.name
+		");
+
+		$sth->execute();
+		$events = $sth->fetchall_hash();
+
 	}
-
-	$m->redirect("final_wins.mhtml?mode=$mode&event_id=$event_id") if $events[0]->type eq "debate";
-
-	$name =~ s/[\W_]//g;
 
     my $filename = "FinalResults-$name-".$session->id;
     my $filepath = $Tab::file_root."tmp/".$filename;
@@ -32,7 +86,9 @@
 		$m->clear_buffer;
 		$r->content_type('application/csv');
 		$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
+
 	} elsif ($texout) {
+
 	} else {
 		$m->comp("/funclib/printout.mas",
 			tourn     => $tourn,
@@ -46,7 +102,7 @@
 
 	my $notfirst;
 
-	foreach my $event (@events) {
+	foreach my $event (@{$events}) {
 
 		if ($mode ne "csv") {
 			if ($notfirst++) {
@@ -54,13 +110,17 @@
 			}
 		}
 
-		my $final = $event->rounds(
-			type => "final"
+		my $final = Tab::Round->search(
+			event => $event->{id},
+			type  => "final"
 		)->first;
 
-		my @elims = sort {$b->name <=> $a->name} $event->rounds(type => "elim");
-		my $last_elim = $elims[0] if @elims;
+		my @elims = sort {$b->name <=> $a->name} Tab::Round->search(
+			type => "elim",
+			event => $event->{id}
+		);
 
+		my $last_elim = $elims[0] if @elims;
 		my $min_round_name = $elims[-1]->name;
 		my $final_number   = $final->name;
 		my $max_round_name = $final_number - 1;
@@ -68,24 +128,31 @@
 		my $supp;
 		my $add_prelims;
 
-		if ($event->setting("supp")) {
+		if ($event->{"supp"}) {
 
 			$min_round_name = 5;
-			my @rounds;
+			my $round_sth = $dbh->prepare("
+				select
+					count(round.id)
+				from round
+				where round.event = ?
+				and exists (
+					select panel.id
+					from panel where panel.round = round.id
+				)
+			");
 
-			foreach my $round ($event->rounds) {
-				next unless $round->panels();
-				push @rounds, $round;
-			}
+			$round_sth->execute($event->{id});
+			my $final_numbers = $round_sth->fetch();
 
-			$final_number   = scalar @rounds;
+			my $final_number = @{$final_numbers}[0];
 			$max_round_name = $final_number - 1;
 			$supp++;
 			$add_prelims = "'prelim',";
 		}
 
 		my $bowl_protocol = eval {
-			return Tab::Protocol->retrieve($event->setting('final_bowl_protocol'));
+			return Tab::Protocol->retrieve($event->{final_bowl_protocol});
 		};
 
 		my $dbh = Tab::DBI->db_Main();
@@ -97,7 +164,7 @@
 						CONCAT(student.first,' ',student.last)
 						SEPARATOR ' & '
 					) as entryname,
-				school.name, school.state,
+				school.name, school.state, chapter.state,
 				round.id, round.name,
 				rank.tag, rank.value,
 				winloss.tag, winloss.value,
@@ -105,6 +172,8 @@
 				panel.bye, ballot.bye, ballot.forfeit
 
 			from (entry, round, panel, ballot, school, entry_student, student)
+
+			left join chapter on school.chapter = chapter.id
 
 			left join score rank on rank.tag = 'rank'
 				and rank.ballot = ballot.id
@@ -133,9 +202,8 @@
 			order by round.name, ballot.judge, ballot.speakerorder
 		");
 
-		my $duo++ if $event->setting("max_entry") > 1;
-
-		$sth->execute($event->id);
+		my $duo++ if $event->{"max_entry"} > 1;
+		$sth->execute($event->{id});
 
 		my %entries;
 		my %results;
@@ -144,7 +212,7 @@
 		while (
 			my (
 				$entry_id, $entry_code, $entry_name,
-				$school_name, $school_state,
+				$school_name, $school_state, $chapter_state,
 				$round_id, $round_name,
 				$rank_tag, $rank_value,
 				$winloss_tag, $winloss_value,
@@ -198,6 +266,9 @@
 			$entries{$entry_id}{"order"}  = $order;
 			$entries{$entry_id}{"name"}   = $entry_name;
 			$entries{$entry_id}{"state"}  = $school_state;
+			unless ($entries{$entry_id}{"state"}) {
+				$entries{$entry_id}{"state"}  = $chapter_state;
+			}
 			$entries{$entry_id}{"school"} = $school_name;
 		}
 
@@ -288,11 +359,11 @@
 		if ($mode eq "csv") {
 
 		} else {
-			print $texout "\\strut \\hfill \\huge \\textsb{".$event->name."} \\hfill \\strut";
+			print $texout "\\strut \\hfill \\huge \\textsb{".$event->{name}."} \\hfill \\strut";
 			print $texout "\\medskip\n";
 			print $texout "\\newline\n";
 
-			print $texout "\\strut \\hfill \\Large ".$event->setting("result_description")." \\hfill \\strut";
+			print $texout "\\strut \\hfill \\Large ".$event->{"result_description"}." \\hfill \\strut";
 			print $texout "\\medskip\n";
 			print $texout "\\newline\n";
 
@@ -510,7 +581,7 @@
 
 				print $texout "\\medskip\n";
 				print $texout "\\newline\n";
-				print $texout "\\strut \\hfill \\normalsize \\textsb{".$event->setting("bowl_description")." } ";
+				print $texout "\\strut \\hfill \\normalsize \\textsb{".$event->{"bowl_description"}." } ";
 
 				my $notfirst;
 

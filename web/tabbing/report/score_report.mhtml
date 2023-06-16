@@ -8,74 +8,84 @@
 	$round_name => undef
 	$portrait   => undef
 	$texout     => undef
+	$event_ref  => undef
 </%args>
 <%init>
 
 	my $dbh = Tab::DBI->db_Main();
 
 	my $name;
-	my $where;
+	my $events;
 
-	if ($event_id eq "all") {
-		$where = " where event.tourn = ".$tourn->id);
-		$name = "AllEvents";
-	} elsif ($event_id eq int($event_id)) {
-		$where = " where event.id = ".int($event_id);
-		$name = "Event";
+	if ($event_ref) {
+
+		push @{$events}, $event_ref;
+
 	} else {
-		$event_id =~ s/[\W_]//g;
-		$where = " where event.type = '".$event_id."'";
-		$name = ucfirst($event_id)."Events";
+
+		my $where;
+
+		if ($event_id eq "all") {
+			$where = " where event.tourn = ".$tourn->id;
+			$name = "AllEvents";
+		} elsif ($event_id eq int($event_id)) {
+			$where = " where event.id = ".int($event_id);
+			$name = "Event";
+		} else {
+			$event_id =~ s/[\W_]//g;
+			$where = " where event.type = '".$event_id."'";
+			$name = ucfirst($event_id)."Events";
+		}
+
+		my $sth = $dbh->prepare("
+			select
+				event.id, event.name, event.type,
+				code_style.value code_style,
+				supp.value supp
+
+			from (event)
+				left join event_setting code_style
+					on code_style.event = event.id
+					and code_style.tag = 'code_style'
+
+				left join event_setting supp
+					on supp.event = event.id
+					and supp.tag = 'supp'
+
+			$where
+				and event.type != 'congress'
+			order by supp.value, event.type, event.name
+		");
+
+		$sth->execute();
+		$events = $sth->fetchall_hash();
 	}
 
-	my $sth = $dbh->prepare("
-		select
-			event.id, event.name, event.type,
-			code_style.value code_style,
-			supp.value supp
-
-		from (event)
-			left join event_setting code_style
-				on code_style.event = event.id
-				and code_style.tag = 'code_style'
-
-			left join event_setting supp
-				on supp.event = event.id
-				and supp.tag = 'supp'
-		$where
-			and event.type != 'congress'
-		order by supp.value, event.type, event.name
-	");
-
-	$sth->execute();
-	my $events = $sth->fetchall_hash();
-
-	if ($tourn_settings->{nsda_nats}) {
-		@events = sort {$a->setting("supp") <=> $b->setting('supp')} @events;
-	}
-
-	unless (scalar @events) {
+	unless (scalar @{$events}) {
 		$m->comp("/funclib/abort.mas", message => "No event corresponse to ID $event_id");
 	}
 
 	my $landscape;
 	$landscape++ if $tourn_settings->{nsda_nats};
 
+	my $filename;
+	my $filepath;
+
 	unless ($texout) {
 
-		foreach my $event (@events) {
-			$landscape++ if $event->type eq "debate";
+		foreach my $event (@{$events}) {
+			$landscape++ if $event->{type} eq "debate";
 		}
 
 		$name =~ s/[\W_]//g;
-		my $filename = "FinalResults-$name-".$session->id;
-		my $filepath = $Tab::file_root."tmp/".$filename;
+		$filename = "FinalResults-$name-".$session->id;
+		$filepath = $Tab::file_root."tmp/".$filename;
 
 		$m->comp("/funclib/printout.mas",
 			tourn       => $tourn,
 			filename    => $filename,
 			head        => 1,
-			superwide   => 1,
+			wide        => 1,
 			taller      => 1,
 			footer_text => $tourn->start->year." ".$tourn->name." -- Raw Results",
 			no_footer   => 1,
@@ -85,13 +95,13 @@
 
 		open ($texout, ">>$filepath.tex");
 		binmode($texout, ":utf8");
+	} else {
+		print $texout "\\renewcommand{\\arraystretch}{1.1}\n";
 	}
 
-	foreach my $event (@events) {
+	foreach my $event (@{$events}) {
 
-		next if $event->type eq "congress";
-
-		my $codes = $event->setting('code_style');
+		my $codes = $event->{'code_style'};
 
 		my $show_codes++ unless ($codes eq "names"
 			|| $codes eq "last_names"
@@ -103,11 +113,9 @@
 		my $fontsize = $person_settings->{"fontsize"};
 		$fontsize = "scriptsize" if ($fontsize eq "default" || (not defined $fontsize));
 
-		my $code_length;
-
 		my $name_string = "distinct(CONCAT(student.first,' ',student.last)) SEPARATOR ' & '";
 
-		if ($event->type eq "wsdc") {
+		if ($event->{type} eq "wsdc") {
 			$name_string = "distinct(CONCAT(student.last)) SEPARATOR ' , '";
 		}
 
@@ -124,6 +132,10 @@
 						and advpanel.id = advanced.panel
 						and advanced.entry = entry.id
 				)";
+		}
+
+		if ($round_name) {
+			$limit .=  " and round.name <= ".int($round_name);
 		}
 
 		my $sth = $dbh->prepare("
@@ -162,7 +174,6 @@
 				and entry.active  = 1
 				and ballot.panel  = panel.id
 				and panel.round   = round.id
-				and round.name 	  <= ?
 				and round.type    != 'final'
 
 				and entry.school = school.id
@@ -181,13 +192,14 @@
 			group by ballot.id
 		");
 
-		$sth->execute($event->id, $round_name);
+		$sth->execute($event->{id});
 
 		my %results;
 		my $max_round;
 		my %round_type;
 
 		my $name_length;
+		my $code_length;
 		my $school_length;
 
 		while (
@@ -295,12 +307,9 @@
 			$school_length = length($school_name) if $school_length < length($school_name);
 		}
 
-		print $texout "\\Large \\textsb{".$event->name."} \\hfill \\textsb{Scores} \n";
+		print $texout "\\Large \\textsb{".$event->{name}."} \\hfill \\textsb{Scores} \n";
 		print $texout "\\medskip\n";
 		print $texout "\\newline\n";
-
-		Tab::debuglog("Longest school name is $school_length");
-		Tab::debuglog("Longest entry name is $name_length");
 
 		$name_length = $name_length * .7;
 		$school_length = $school_length * .75;
@@ -321,7 +330,7 @@
 
 			if ($tourn_settings->{nsda_nats}) {
 
-				if ($event->type eq "debate") {
+				if ($event->{type} eq "debate") {
 					if (
 						$round_type{"type"}{$round} eq "prelim"
 						|| $round_type{"type"}{$round} eq "highlow"
@@ -422,7 +431,9 @@
 		print $texout "\\newpage\n";
 	}
 
-	;
+	if ($ARGS{"texout"}) {
+		return;
+	}
 
     $m->comp("/funclib/printout.mas",
         tourn     => $tourn,
