@@ -2,52 +2,132 @@
 	$tourn
 	$session
 	$tourn_settings
-	$event_id => undef
-	$filename => undef
-	$mode     => "pdf"
+	$event_id  => undef
+	$filename  => undef
+	$mode      => "pdf"
+	$event_ref => undef
+	$texout    => undef
 </%args>
 <%init>
 
-	my $event = Tab::Event->retrieve($event_id);
+	my $dbh = Tab::DBI->db_Main();
 
-	my $final = $event->rounds(
-		type => "final"
-	)->first;
+	if ($ARGS{event_ref}) {
+
+	} else {
+
+		my $where;
+		my $name;
+
+		if ($event_id eq "all" || not defined $event_id) {
+			$where = " where event.tourn = ".$tourn->id;
+			$name = "AllEvents";
+		} elsif ($event_id eq int($event_id)) {
+			$where = " where event.id = ".int($event_id);
+			$name = "Event";
+		} else {
+			$event_id =~ s/[\W_]//g;
+			$where = " where event.type = '".$event_id."'";
+			$name = ucfirst($event_id)."Events";
+		}
+
+		my $sth = $dbh->prepare("
+			select
+				event.id, event.name, event.type,
+				code_style.value code_style,
+				supp.value supp,
+				result_description.value_text result_description,
+				bowl_description.value_text bowl_description,
+				final_bowl_protocol.value final_bowl_protocol,
+				max_entry.value max_entry
+
+			from (event)
+
+				left join event_setting code_style
+					on code_style.event = event.id
+					and code_style.tag = 'code_style'
+
+				left join event_setting supp
+					on supp.event = event.id
+					and supp.tag = 'supp'
+
+				left join event_setting result_description
+					on result_description.event = event.id
+					and result_description.tag = 'result_description'
+
+				left join event_setting bowl_description
+					on bowl_description.event = event.id
+					and bowl_description.tag = 'bowl_description'
+
+				left join event_setting max_entry
+					on max_entry.event = event.id
+					and max_entry.tag = 'max_entry'
+
+				left join event_setting final_bowl_protocol
+					on final_bowl_protocol.event = event.id
+					and final_bowl_protocol.tag = 'final_bowl_protocol'
+			$where
+				and event.type != 'congress'
+			order by supp.value, event.type, event.name
+		");
+
+		$sth->execute();
+		my $events = $sth->fetchall_hash();
+		$event_ref = shift @{$events};
+	}
+
+	my $sth = $dbh->prepare("
+		select
+			final.id final, final.label, final.name final_name, final.protocol,
+			max(elim.name) max_elim,
+			min(elim.name) min_elim
+
+		from event
+
+			left join round final on final.event = event.id and final.type = 'final'
+			left join round elim on elim.event = event.id and elim.type = 'elim'
+		where event.id = ?
+
+		group by event.id
+	");
+
+	$sth->execute($event_ref->{id});
+
+	my $results = $sth->fetchall_hash();
+	my $result = shift @{$results};
+
+	my $final = Tab::Round->retrieve($result->{final});
 
 	my @elims;
 
-	foreach my $round ($event->rounds(type => "elim")) {
+	foreach my $round (Tab::Round->search( event => $event_ref->{id}, type => "elim")) {
 		next unless $round->panels();
 		push @elims, $round;
 	}
 
    	@elims = sort {$b->name <=> $a->name} @elims;
-	my $supp++ if $event->setting("supp");
+	my $supp++ if $event_ref->{"supp"};
 
-    my $last_elim = $elims[0] if @elims;
-    my $first_elim = $elims[-1] if @elims;
+    my $min_round_name = $result->{min_elim};
+    my $max_round_name = $result->{max_elim};
+    my $final_number = $result->{final_name};
+	my $final_tbs = $result->{protocol};
 
-    my $min_round_name = $first_elim->name();
-    my $max_round_name = $min_round_name + scalar @elims;
-
-    my $final_number = $final->name;
-	my $final_tbs = $final->protocol if $final;
-
-	my $dbh = Tab::DBI->db_Main();
-
-	my $sth = $dbh->prepare("
+	$sth = $dbh->prepare("
 		select entry.id,
 			entry.code,
 				GROUP_CONCAT(
 					distinct(CONCAT(student.first,' ',student.last))
 					SEPARATOR ' & '
 				) as entryname,
-			school.name, school.state,
+			school.name, school.state, chapter.state,
 			round.id, round.name,
 			rank.tag, rank.value,
 			winloss.tag, winloss.value,
 			panel.bye, ballot.bye, ballot.forfeit
 		from (entry, round, panel, ballot, school, entry_student, student)
+
+		left join chapter on school.chapter = chapter.id
 
 		left join score rank on rank.tag = 'rank'
 			and rank.ballot = ballot.id
@@ -69,7 +149,7 @@
 
 	");
 
-	$sth->execute($event->id);
+	$sth->execute($event_ref->{id});
 
 	my %entries;
 	my %results;
@@ -77,13 +157,13 @@
 
 	while (
 		my ($entry_id, $entry_code, $entry_name, $school_name, $school_state,
+			$chapter_state,
 			$round_id, $round_name,
 			$rank_tag, $rank_value,
 			$winloss_tag, $winloss_value,
 			$pbye, $bbye, $fft
 		) = $sth->fetchrow_array()
 	) {
-
 
 		if ($pbye || $bbye) {
 			$results{$entry_id}{$round_name} .= "\\textsb{\\color{blue} BYE}";
@@ -99,7 +179,7 @@
 		}
 
 		if ($final
-			&& $round_id == $final->id
+			&& $round_id == $result->{final}
 			&& (not defined $results{$entry_id}{"finals"})
 		) {
 			push @{$results{"finals"}}, $entry_id;
@@ -114,6 +194,9 @@
 		$entries{$entry_id}{"code"}   = $entry_code;
 		$entries{$entry_id}{"name"}   = $entry_name;
 		$entries{$entry_id}{"state"}  = $school_state;
+		unless ($entries{$entry_id}{"state"}) {
+			$entries{$entry_id}{"state"}  = $chapter_state;
+		}
 		$entries{$entry_id}{"school"} = $school_name;
 
 	}
@@ -122,12 +205,14 @@
 	my $previous;
 	my $entry_count;
 
+	my $protocol = Tab::Protocol->retrieve($final_tbs);
+
 	foreach my $round ($final, @elims) {
 
 		my @results = $m->comp(
 			"/tabbing/results/order_entries.mas",
-			round        => $round,
-			protocol => $final_tbs
+			round    => $round,
+			protocol => $protocol
 		);
 
 		my $round_ref = pop @results if @results;
@@ -140,10 +225,10 @@
 
 					$entries{$entry_id}{"place"} = $key;
 					$round_count++;
-					$entries{$entry_id}{"final_count"}       = $round_ref->{"tiebreak"}{1}{$entry_id};
-					$entries{$entry_id}{"last_round"}        = $round_ref->{"tiebreak"}{2}{$entry_id};
+					$entries{$entry_id}{"final_count"}  = $round_ref->{"tiebreak"}{1}{$entry_id};
+					$entries{$entry_id}{"last_round"}   = $round_ref->{"tiebreak"}{2}{$entry_id};
+					$entries{$entry_id}{"elim_ballots"} = $round_ref->{"tiebreak"}{3}{$entry_id};
 
-					$entries{$entry_id}{"elim_ballots"}      = $round_ref->{"tiebreak"}{3}{$entry_id};
 					if ($supp) {
 						$entries{$entry_id}{"supp_elim_ballots"} = $round_ref->{"tiebreak"}{4}{$entry_id};
 						$entries{$entry_id}{"prelim_ballots"}    = $round_ref->{"tiebreak"}{5}{$entry_id};
@@ -160,11 +245,18 @@
 		last if $previous >= 14;
 	}
 
-	my $name = $event->name;
-	$name =~ s/[\W_]//g;
 
-	unless ($filename) {
-		$filename = "FinalResults-$name-".$session->id;
+	if ($texout) {
+
+		print $texout "\\renewcommand{\\arraystretch}{1.8}\n";
+
+	} else {
+
+		unless ($filename) {
+			my $name = $event_ref->{name};
+			$name =~ s/[\W_]//g;
+			$filename = "FinalResults-$name-".$session->id;
+		}
 
 		$m->comp("/funclib/printout.mas",
 			tourn     => $tourn,
@@ -173,88 +265,58 @@
 			array     => "1.8",
 			wider     => 1,
 			landscape => 1,
-		) unless ($mode eq "csv");
-	}
-
-    my $filepath = $Tab::file_root."tmp/".$filename;
-
-	my $texout;
-
-	if ($mode eq "csv") { 
-    	$filename = "FinalResults-$name.csv";
-		$m->clear_buffer;    
-		$r->content_type('application/csv');    
-		$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";    
-	} else {
-		$m->comp("/funclib/printout.mas",
-			tourn     => $tourn,
-			filename  => $filename,
-			head      => 1,
-			array     => "1.8",
-			landscape => 1,
 		);
+
+	    my $filepath = $Tab::file_root."tmp/".$filename;
     	open ($texout, ">>$filepath.tex");
 		binmode($texout, ":utf8");
-
-		print $texout "\\strut \\hfill \\huge \\textsb{".$event->name."} \\hfill \\strut";
-		print $texout "\\medskip\n";
-		print $texout "\\newline\n";
-
-		print $texout "\\strut \\hfill \\Large ".$event->setting("result_description")." \\hfill \\strut";
-		print $texout "\\medskip\n";
-		print $texout "\\newline\n";
-
-		print $texout "\\scriptsize\n";
-		print $texout "\\begin{tabular}{p{.30in}p{1.25in}p{1.5in}p{.25in}";
 	}
 
-	my $count_twice;
+	print $texout "\\strut \\hfill \\huge \\textsb{".$event_ref->{name}."} \\hfill \\strut";
+	print $texout "\\medskip\n";
+	print $texout "\\newline\n";
+
+	print $texout "\\strut \\hfill \\Large ".$event_ref->{result_description}." \\hfill \\strut";
+	print $texout "\\medskip\n";
+	print $texout "\\newline\n";
+
+	print $texout "\\scriptsize\n";
+	print $texout "\\begin{tabular}{p{.30in}p{1.25in}p{1.5in}p{.25in}";
+
+	my $count_twice = $max_round_name;
 
 	if ($supp) {
-		$count_twice = $max_round_name;
+		foreach my $round ($min_round_name .. $count_twice) {
+			if ($round > 12) {
+				print $texout "p{.35in}";
+			} elsif ($round > 11) {
+				print $texout "p{.25in}";
+			} else {
+				print $texout "p{.20in}";
+			}
+		}
 	} else {
-		$count_twice = $max_round_name - 2;
+		foreach my $round ($min_round_name .. $count_twice) {
+			print $texout "p{.30in}";
+		}
 	}
 
-	if ($mode eq "csv") { 
+	print $texout "p{.15in}p{.15in}p{.15in}p{.3in}}\n";
 
+	print $texout "\\rowcolor[rgb]{1,.96,.66}\[5.5pt\]\[5.5pt\]\n";
+	foreach my $header ("Code", "Name", "School", "State") {
+		print $texout "\\textsb{".$header."} & ";
+	}
+
+	foreach my $round ($min_round_name .. $max_round_name) {
+		next if $round == $final_number;
+		print $texout "\\textsb{R".$round."} & ";
+	}
+
+	if ($supp) {
+		print $texout "\\textsb{Rnd} & \\textsb{Bal} & \\textsb{Bal6+} & \\textsb{Place} \\\\ \n";
 	} else {
-		if ($supp) {
-			foreach my $round ($min_round_name .. $count_twice) {
-
-				if ($round > 11) {
-					print $texout "p{.25in}";
-				} else {
-					print $texout "p{.20in}";
-				}
-			}
-		} else {
-			foreach my $round ($min_round_name .. $count_twice) {
-				print $texout "p{.30in}";
-			}
-		}
-
-		unless ($supp) {
-			print $texout "p{.4in}";
-		}
-
-		print $texout "p{.15in}p{.15in}p{.15in}p{.3in}}\n";
-
-		print $texout "\\rowcolor[rgb]{1,.96,.66}\[5.5pt\]\[5.5pt\]\n";
-		foreach my $header ("Code", "Name", "School", "State") {
-			print $texout "\\textsb{".$header."} & ";
-		}
-
-		foreach my $round ($min_round_name .. $max_round_name) {
-			next if $round == $final_number;
-			print $texout "\\textsb{R".$round."} & ";
-		}
-
-		if ($supp) {
-			print $texout "\\textsb{Rnd} & \\textsb{Bal} & \\textsb{Bal6+} & \\textsb{Place} \\\\ \n";
-		} else {
-			print $texout "\\textsb{Rnd} & \\textsb{EB} & \\textsb{PB} & \\textsb{Place} \\\\ \n";
-		}
+		print $texout "\\textsb{Rnd} & \\textsb{EB} & \\textsb{PB} & \\textsb{Place} \\\\ \n";
 	}
 
 	my $switch;
@@ -268,146 +330,110 @@
 		next unless $entries{$entry_id}{"place"} > 0;
 		next if $entries{$entry_id}{"place"} > 14;
 
-		if ($mode eq "csv") { 
+		print $texout "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2;
 
-			$m->print('"'.$entries{$entry_id}{"code"}.'",');
-			$m->print('"'.$entries{$entry_id}{"name"}.'",');
-			$m->print('"'.$entries{$entry_id}{"school"}.'",');
-			$m->print('"'.$entries{$entry_id}{"state"}.'",');
-			$m->print('"'.$entries{$entry_id}{"place"}.'"');
-			$m->print("\n");
+		$entries{$entry_id}{"name"} =~ s/\&/\n\n/;
 
-		} else { 
+		print $texout Tab::texify($entries{$entry_id}{"code"});
+		print $texout " & \\raggedright ";
+		print $texout Tab::texify($entries{$entry_id}{"name"});
+		print $texout " & \\raggedright ";
+		print $texout Tab::texify($entries{$entry_id}{"school"});
+		print $texout " & ";
+		print $texout Tab::texify($entries{$entry_id}{"state"});
+		print $texout " & ";
 
-			print $texout "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2;
-
-			$entries{$entry_id}{"name"} =~ s/\&/\n\n/;
-
-			print $texout Tab::texify($entries{$entry_id}{"code"});
-			print $texout " & \\raggedright ";
-			print $texout Tab::texify($entries{$entry_id}{"name"});
-			print $texout " & \\raggedright ";
-			print $texout Tab::texify($entries{$entry_id}{"school"});
-			print $texout " & ";
-			print $texout Tab::texify($entries{$entry_id}{"state"});
-			print $texout " & ";
-
-			my $max = $max_round_name;
-			$max--;
-
-			foreach my $round ($min_round_name .. $max) {
-				print $texout $results{$entry_id}{$round}." & ";
-			}
-
-			print $texout "\\footnotesize\n";
-			print $texout $entries{$entry_id}{"last_round"}." & ";
-			print $texout "\\footnotesize\n";
-
-			if ($supp) {
-				print $texout "\\footnotesize\n";
-				print $texout $entries{$entry_id}{"elim_ballots"}." & ";
-				print $texout "\\footnotesize\n";
-				print $texout $entries{$entry_id}{"supp_elim_ballots"}." & ";
-			} else {
-				print $texout $entries{$entry_id}{"elim_ballots"}." & ";
-				print $texout "\\footnotesize\n";
-				print $texout $entries{$entry_id}{"prelim_ballots"}." & ";
-			}
-
-			print $texout "\\footnotesize\n";
-			unless ($results{$entry_id}{"finals"}) {
-				print $texout "\\textsb{".Tab::texify(Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"place"}))."} ";
-			}
-			print $texout "\\\\ \n";
+		foreach my $round ($min_round_name .. $max_round_name) {
+			print $texout $results{$entry_id}{$round}." & ";
 		}
-	}
-
-	unless ($mode eq "csv") { 
-		print $texout "\\end{tabular}\n";
-
-		print $texout "\\bigskip\n";
-		print $texout "\\newline\n";
-
-		print $texout "\\strut \\hfill \\Large Finalists \\hfill \\strut";
-		print $texout "\\medskip\n";
-		print $texout "\\newline\n";
 
 		print $texout "\\footnotesize\n";
-		print $texout "\\begin{tabular}{p{.25in}p{2in}p{1.75in}p{.3in}p{2.85in}p{.75in}p{.5in}}\n";
+		print $texout $entries{$entry_id}{"last_round"}." & ";
+		print $texout "\\footnotesize\n";
 
-		print $texout "\\rowcolor[rgb]{1,.96,.66}\[5.5pt\]\[5.5pt\]\n";
-
-		foreach my $header ("Code", "Name", "School", "State") {
-			print $texout "\\textsb{".$header."} & ";
+		if ($supp) {
+			print $texout "\\footnotesize\n";
+			print $texout $entries{$entry_id}{"elim_ballots"}." & ";
+			print $texout "\\footnotesize\n";
+			print $texout $entries{$entry_id}{"supp_elim_ballots"}." & ";
+		} else {
+			print $texout $entries{$entry_id}{"elim_ballots"}." & ";
+			print $texout "\\footnotesize\n";
+			print $texout $entries{$entry_id}{"prelim_ballots"}." & ";
 		}
 
-		print $texout "\\textsb{ Finals } & ";
-		print $texout "\\textsb{ Final Ballots } & \\textsb{Place} \\\\";
+		print $texout "\\footnotesize\n";
+		unless ($results{$entry_id}{"finals"}) {
+			print $texout "\\textsb{".Tab::texify(Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"place"}))."} ";
+		}
+		print $texout "\\\\ \n";
 	}
+
+	print $texout "\\end{tabular}\n";
+	print $texout "\\bigskip\n";
+	print $texout "\\newline\n";
+	print $texout "\\strut \\hfill \\Large Finalists \\hfill \\strut";
+	print $texout "\\medskip\n";
+	print $texout "\\newline\n";
+	print $texout "\\footnotesize\n";
+	print $texout "\\begin{tabular}{p{.25in}p{2in}p{1.75in}p{.3in}p{2.85in}p{.75in}p{.5in}}\n";
+	print $texout "\\rowcolor[rgb]{1,.96,.66}\[5.5pt\]\[5.5pt\]\n";
+
+	foreach my $header ("Code", "Name", "School", "State") {
+		print $texout "\\textsb{".$header."} & ";
+	}
+
+	print $texout "\\textsb{ Finals } & ";
+	print $texout "\\textsb{ Final Ballots } & \\textsb{Place} \\\\";
 
 	foreach my $entry_id (
 		sort {$entries{$b}{"place"} <=> $entries{$a}{"place"}}
 		@{$results{"finals"}}
 	) {
-		if ($mode eq "csv") { 
+		print $texout "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2;
 
-			$m->print('"'.$entries{$entry_id}{"code"}.'",');
-			$m->print('"'.$entries{$entry_id}{"name"}.'",');
-			$m->print('"'.$entries{$entry_id}{"school"}.'",');
-			$m->print('"'.$entries{$entry_id}{"state"}.'",');
-			$m->print('"'.$entries{$entry_id}{"place"}.'"');
-			$m->print("\n");
+		print $texout Tab::texify($entries{$entry_id}{"code"});
+		print $texout " & ";
+		print $texout Tab::texify($entries{$entry_id}{"name"});
+		print $texout " & ";
+		print $texout Tab::texify($entries{$entry_id}{"school"});
+		print $texout " & \\hfill ";
+		print $texout Tab::texify($entries{$entry_id}{"state"});
+		print $texout " \\hfill \\strut & ";
 
-		} else { 
+		print $texout "\\footnotesize\n";
+		print $texout $results{$entry_id}{$final_number}." & ";
+		print $texout "\\hfill \n";
+		print $texout "\\footnotesize\n";
+		print $texout $entries{$entry_id}{"final_count"}." \\hfill \\strut & ";
+		print $texout "\\footnotesize\n";
 
-			print $texout "\\rowcolor[rgb]{.92,.92,.92}\[5.5pt\]\[5.5pt\]\n" if $switch++ % 2;
-
-			print $texout Tab::texify($entries{$entry_id}{"code"});
-			print $texout " & ";
-			print $texout Tab::texify($entries{$entry_id}{"name"});
-			print $texout " & ";
-			print $texout Tab::texify($entries{$entry_id}{"school"});
-			print $texout " & \\hfill ";
-			print $texout Tab::texify($entries{$entry_id}{"state"});
-			print $texout " \\hfill \\strut & ";
-
-			print $texout "\\footnotesize\n";
-			print $texout $results{$entry_id}{$final_number}." & ";
-			print $texout "\\hfill \n";
-			print $texout "\\footnotesize\n";
-			print $texout $entries{$entry_id}{"final_count"}." \\hfill \\strut & ";
-			print $texout "\\footnotesize\n";
-
-			print $texout "\\hfill \\textsb{".Tab::texify(Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"place"}))."} \\hfill \\strut ";
-			print $texout "\\\\ \n";
-		}
+		print $texout "\\hfill \\textsb{".Tab::texify(Lingua::EN::Numbers::Ordinate::ordinate($entries{$entry_id}{"place"}))."} \\hfill \\strut ";
+		print $texout "\\\\ \n";
 	}
-		
-	if ($mode eq "csv") { 
 
-		$m->flush_buffer();
-		$m->abort();
+	Tab::debuglog("Here I am with event ".$event_ref->{'name'}." and supplied texout ".$ARGS{"texout"});
 
+	if ($ARGS{texout}) {
+		return;
 	} else {
 
 		print $texout "\\end{tabular}\n";
 		close $texout;
 
-		if ($ARGS{"filename"}) {
+		Tab::debuglog("Processing ".$event_ref->{'name'});
 
-			return;
-
-		} else {
-
-			$m->comp("/funclib/printout.mas",
-				tourn     => $tourn,
-				filename  => $filename,
-				landscape => 1,
-				wider     => 1,
-				tail      => 1
-			);
-		}
+		$m->comp("/funclib/printout.mas",
+			tourn     => $tourn,
+			filename  => $filename,
+			landscape => 1,
+			wider     => 1,
+			tail      => 1,
+			return    => $ARGS{"return"}
+		);
 	}
+
+	return;
 
 
 </%init>
