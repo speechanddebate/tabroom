@@ -19,86 +19,82 @@
 		$year = $this_year->year;
 	}
 
-	$this_year->set( month => 7, day => 1, hour => 00, minute => 00, second => 00 );
+	$this_year->set(
+		month  => 7,
+		day    => 1,
+		hour   => 00,
+		minute => 00,
+		second => 00
+	);
 
 	my $end_year = $this_year->clone();
 	$end_year->add( years => 1);
 
 	my $chapter = Tab::Chapter->retrieve($chapter_id);
+	my $dbh = Tab::DBI->db_Main();
 
-	my @published;
+	my $limit;
 
 	if ($name) {
-
-		Tab::Tourn->set_sql(name_by_chapter_published => "
-			select distinct tourn.*, school.id as schoolid
-			from tourn, school
-			where tourn.id = school.tourn
-			and school.chapter = ?
-			and tourn.name like  ?
-			and tourn.hidden != 1
-			and (
-				exists (
-					select round.id
-					from round, event
-					where event.tourn = tourn.id
-					and round.event = event.id
-					and round.post_primary > 0
-					and round.post_secondary > 0
-					and round.post_feedback > 0
-				) or exists (
-					select result_set.id
-					from result_set
-					where result_set.tourn = tourn.id
-					and (published = 1  or coach = 1)
-				)
-			)
-			order by tourn.start DESC
-		");
-
-		@published = Tab::Tourn->search_name_by_chapter_published($chapter_id, "%".$name."%");
-
+		$name =~ s/[\W_]//g;
+		$limit = "and tourn.name like '".$name."'";
 	} else {
+		$limit .= "and tourn.start > '".DateTime::Format::MySQL->format_datetime($this_year)."'";
+		$limit .= "and tourn.end < '".DateTime::Format::MySQL->format_datetime($end_year)."'";
+	}
 
-		Tab::Tourn->set_sql(by_chapter_published => "
-			select distinct tourn.*, school.id as schoolid
-			from tourn, school
-			where tourn.id = school.tourn
-			and school.chapter = ?
-			and tourn.start > ?
-			and tourn.end < ?
+	my $sth = $dbh->prepare("
+		select
+			school.id school,
+			tourn.id,
+			tourn.city, tourn.state, tourn.country,
+			tourn.name,
+			CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
+			CONVERT_TZ(tourn.end, '+00:00', tourn.tz) end,
+			GROUP_CONCAT(circuit.abbr SEPARATOR ',') circuits
+		from (tourn, school)
+
+			left join tourn_circuit tc on tc.tourn = tourn.id
+			left join circuit on circuit.id = tc.circuit
+
+		where school.chapter = ?
+			and school.tourn = tourn.id
+			and tourn.hidden != 1
 			and (
-				exists (
+				EXISTS (
 					select round.id
-					from round, event
+						from (round, event)
 					where event.tourn = tourn.id
 					and round.event = event.id
-					and round.post_primary > 0
-					and round.post_secondary > 0
-					and round.post_feedback > 0
-				) or exists (
+						and round.post_primary > 0
+						and round.post_secondary > 0
+						and round.post_feedback > 0
+				) OR EXISTS (
 					select result_set.id
-					from result_set
+						from result_set
 					where result_set.tourn = tourn.id
-					and (published = 1  or coach = 1)
+						and (
+							published = 1
+							or coach = 1
+						)
 				)
 			)
-			and tourn.hidden != 1
-			order by tourn.start DESC
-		");
+			$limit
+			and tourn.start < NOW()
+		group by tourn.id
+		order by tourn.start DESC
+	");
 
-		@published = Tab::Tourn->search_by_chapter_published(
-			$chapter_id,
-			DateTime::Format::MySQL->format_datetime($this_year),
-			DateTime::Format::MySQL->format_datetime($end_year)
-		);
-	}
+	$sth->execute(
+		$chapter->id,
+	);
+	my $results = $sth->fetchall_hash();
 
 </%init>
 
 	<div class="main">
 
-		<h2><% $chapter->name %>: Results</h2>
+		<h2><% $chapter->name %></h2>
 
 		<& "/user/chapter/tabbar.mas",
 			chapter => $chapter,
@@ -111,102 +107,81 @@
 			nobuttons => 1
 		&>
 
+		<span class="threequarters nospace">
+			<h5>Tournament Results</h5>
+		</span>
+
+		<span class="quarter rightalign nospace true">
+			<h5><% $name ? "Named ".$name : $year."&ndash;".($year + 1) %></h5>
+		</span>
+
 		<table id="results">
-
 			<thead>
-
-				<tr class="yellow smallish">
-
+				<tr class="yellowrow smallish">
 					<th>
 						Dates
 					</th>
 
 					<th>
-						Locale
+						Name
+					</th>
+
+					<th>
+						Location
 					</th>
 
 					<th>
 						Circuit(s)
 					</th>
-
-					<th>
-						Tournament
-					</th>
-
 					<th>
 					</th>
-
 				</tr>
-
 			</thead>
-
 			<tbody>
 
-<%perl>
-
-			my %nodupes;
-
-			foreach my $tourn (sort {$b->start->epoch <=> $a->start->epoch} @published) {
-
-				next if $nodupes{$tourn->schoolid}++;
-
-				next if $tourn->start > $now;
-
-				unless ($tourn->schoolid) {
-
-					my $school = Tab::School->search(
-						chapter => $chapter->id,
-						tourn   => $tourn->id
-					)->first;
-
-					next unless $school;
-
-					$tourn->schoolid($school->id);
-
-				}
-</%perl>
+%			foreach my $tourn (@{$results}) {
 
 				<tr class="smallish">
 
 					<td>
-						<% Tab::pickerdate($tourn->start) %>
-					</td>
-
-					<td class="centeralign">
-						<% $tourn->location %>
-					</td>
-
-					<td class="padmore">
-%						foreach my $circuit ($m->comp("/funclib/tourn_circuits.mas", tourn => $tourn)) {
-							<% $circuit->abbr %>
-%						}
+						<& "/funclib/showdate.mas",
+							string     => $tourn->{'start'},
+							format     => 'murica_shorter',
+							end_string => $tourn->{'end'}
+						&>
 					</td>
 
 					<td class="nowrap">
 						<a
-							class="white"
-							href="/index/tourn/results/index.mhtml?tourn_id=<% $tourn->id %>"
-						>
-							<% $tourn->name %>
-						</a>
+							class = "white full"
+							href  = "/index/tourn/results/index.mhtml?tourn_id=<% $tourn->{id} %>"
+						><% $tourn->{name} %></a>
 					</td>
+
+%					$tourn->{city} =~ s/$tourn->{state}+//g;
+%					$tourn->{city} =~ s/\,+//g;
+
+					<td>
+						<span class='quarterspacer'></span>
+						<% $tourn->{city} ? $tourn->{city}.", " : "" %><% $tourn->{state} ? $tourn->{state} : $tourn->{country} %>
+					</td>
+
+					<td class="padmore">
+						<span class='quarterspacer'></span>
+						<% $tourn->{circuits} %>
+					</td>
+
 
 					<td class="centeralign nospace">
 						<a
-							class="buttonwhite smallish bluetext invert"
-							href="tourn.mhtml?school_id=<% $tourn->schoolid %>"
-						>
-							Results
-						</a>
+							class="buttonwhite bluetext thinner invert"
+							href="tourn.mhtml?school_id=<% $tourn->{school} %>"
+						>Results</a>
 					</td>
-
 				</tr>
-
 %			}
 			</tbody>
-
 		</table>
-
 	</div>
 
 	<div class="menu">
