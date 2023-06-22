@@ -9,7 +9,8 @@
 	# Find the LCQ
 
 	my $lcq_sth = $dbh->prepare("
-		select tourn.id, tourn.name
+		select
+			tourn.id, tourn.name
 			from tourn, tourn_setting ts
 		where ts.tag = 'nsda_district'
 			and ts.value = '999'
@@ -19,47 +20,79 @@
 	");
 
 	$lcq_sth->execute(DateTime::Format::MySQL->format_datetime($tourn->start));
-	my ($lcq_id, $lcq_name) = $lcq_sth->fetchrow_hash();
+	my ($lcq_id, $lcq_name) = $lcq_sth->fetchrow_array();
 
 	$lcq_sth->finish;
 
 	my $sth = $dbh->prepare("
 		select
 			school.id, school.name, chapter.state,
-				district.code dcode, district.name district,
-			count(lcq.id) as lcq_count,
-			count(nats.id) as nats_count
+				district.code dcode, district.name district, district.id district_id,
+			COUNT(distinct lcq.id) as lcq_count,
+			COUNT(distinct qual.id) as qual_count,
+			COUNT(distinct active_qual.id) as active_qual_count,
+			COUNT(distinct active_lcq.id) as active_lcq_count
 
 		from (school, chapter, district)
 
-			left join entry nats on nats.school = school.id
-				where nats.school = school.id
+			left join entry active_qual
+				on active_qual.school = school.id
+				and active_qual.active = 1
 				and not exists (
 					select es.id from entry_setting es
-					where es.tag= 'lastchance'
-					and es.entry = nats.id
+						where es.tag = 'lastchance'
+					and es.entry = active_qual.id
 				)
 				and not exists (
 					select evs.id from event_setting evs
 					where evs.tag= 'supp'
-					and evs.event = nats.event
+					and evs.event = active_qual.event
+				)
+
+			left join entry qual
+				on qual.school = school.id
+				and not exists (
+					select es.id from entry_setting es
+						where es.tag = 'lastchance'
+					and es.entry = qual.id
+				)
+				and not exists (
+					select evs.id from event_setting evs
+					where evs.tag= 'supp'
+					and evs.event = qual.event
 				)
 
 			left join entry lcq
-				where lcq.school = school.id
+				on lcq.school = school.id
 				and exists (
-					select es.id from entry_setting es
-					where es.tag= 'lastchance'
-					and es.entry = nats.id
+					select lcs.id from entry_setting lcs
+						where lcs.tag = 'lastchance'
+						and lcs.entry = lcq.id
 				)
 				and not exists (
 					select evs.id from event_setting evs
 					where evs.tag= 'supp'
-					and evs.event = nats.event
+					and evs.event = lcq.event
 				)
+
+			left join entry active_lcq
+				on active_lcq.school = school.id
+				and active_lcq.active = 1
+				and exists (
+					select lcs.id from entry_setting lcs
+						where lcs.tag = 'lastchance'
+						and lcs.entry = active_lcq.id
+				)
+				and not exists (
+					select evs.id from event_setting evs
+					where evs.tag= 'supp'
+					and evs.event = active_lcq.event
+				)
+
 		where school.tourn = ?
 			and school.chapter = chapter.id
 			and school.district = district.id
+		group by school.id
 		order by chapter.state, school.name
 	");
 
@@ -70,11 +103,11 @@
 
 	<div class="main">
 
-		<h2>Burdt's Shit from <% $lcq_name %></h2>
+		<h2>LCQ Tracking</h2>
 
 		<span class="threequarters nospace">
 			<h5>
-				Schools With Other Qualifiers
+				LCQ Schools &amp; Other Qualifiers
 			</h5>
 		</span>
 
@@ -82,12 +115,12 @@
 
 		<span
 			class="quarter rightalign nospace"
-			id="buttonarea_other_quals"
+			id="other_quals_buttonarea"
 		></span>
 
 		<table id="other_quals">
 			<thead>
-				<tr class="yellowrow">
+				<tr class="yellowrow smallish padvertless">
 					<th>
 						School
 					</th>
@@ -98,17 +131,23 @@
 						District
 					</th>
 					<th>
-						Qualifiers
+						Qualified
 					</th>
 					<th>
-						LCQ Qualifiers
+						Active Quals
+					</th>
+					<th>
+						LCQ Qualled
+					</th>
+					<th>
+						Active LCQs
 					</th>
 				</tr>
 			</thead>
 
 			<tbody>
 %				foreach my $school (@{$already_quals}) {
-%					next unless $school->{"lcq_count"} || $school->{"nats_count"};
+%					next unless $school->{"lcq_count"} > 0;
 					<tr class="smallish">
 						<td>
 							<% $school->{'name'} %>
@@ -119,33 +158,308 @@
 						<td>
 							<% $school->{'district'} %>
 						</td>
-						<td>
-							<% $school->{'nats_count'} %>
+						<td class="centeralign">
+							<% $school->{'qual_count'} %>
 						</td>
-						<td>
+						<td class="centeralign">
+							<% $school->{'active_qual_count'} %>
+						</td>
+						<td class="centeralign">
 							<% $school->{'lcq_count'} %>
+						</td>
+						<td class="centeralign">
+							<% $school->{'active_lcq_count'} %>
 						</td>
 					</tr>
 %				}
 			</tbody>
 		</table>
 
+<%perl>
 
-		<& "/funclib/tablesorter.mas", table => "tablename" &>
+	my $lcq_district_sth = $dbh->prepare("
 
-		<span class="threequarters nospace">
+		select district.id, district.name,
+			count(distinct school.id) schools,
+			count(distinct entry.id) entries
+
+		from (school, district, chapter, entry)
+
+		where school.tourn = ?
+			and school.chapter   = chapter.id
+			and chapter.district = district.id
+			and school.id        = entry.school
+			and entry.active     = 1
+		group by district.id
+	");
+
+	$lcq_district_sth->execute($lcq_id);
+	my $districts = $lcq_district_sth->fetchall_hash();
+	$lcq_district_sth->finish();
+
+	my $lcq_qual_sth = $dbh->prepare("
+		select
+			district.id,
+			count(distinct entry.id) quals
+		from district, school, entry, chapter
+		where school.tourn = ?
+			and school.chapter = chapter.id
+			and chapter.district = district.id
+			and school.id = entry.school
+			and exists (
+				select es.id
+				from entry_setting es
+				where es.entry = entry.id
+				and es.tag = 'lastchance'
+			)
+			and not exists (
+				select supp.id
+				from event_setting supp
+				where supp.event = entry.event
+				and supp.tag = 'supp'
+			)
+		group by district.id
+	");
+
+	$lcq_qual_sth->execute($tourn->id);
+	my $qualresults = $lcq_qual_sth->fetchall_hash();
+	my %quals = map { $_->{id} => $_->{quals} } @{$qualresults};
+
+</%perl>
+
+	<& "/funclib/tablesorter.mas", table => "districts" &>
+
+		<span class="threequarters nospace martopmore">
 			<h5>
-				Schools With Other Qualifiers
+				Districts
+			</h5>
+		</span>
+		<span
+			class = "quarter rightalign nospace smallish semibold"
+			id    = "districts_buttonarea"
+		>
+			w/Active Entries
+			<span class="quarterspacer"></span>
+		</span>
+
+		<table id="districts">
+			<thead>
+				<tr class="yellowrow smallish padvertless">
+					<th>
+						District
+					</th>
+					<th>
+						ID
+					</th>
+					<th class="centeralign">
+						Schools
+					</th>
+					<th class="centeralign">
+						Entries
+					</th>
+					<th class="centeralign">
+						Qualled
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+%				foreach my $district (@{$districts}) {
+					<tr class="smallish">
+						<td>
+							<% $district->{name} %>
+						</td>
+
+						<td class='centeralign'>
+							<% $district->{id} %>
+						</td>
+
+						<td class='centeralign'>
+							<% $district->{schools} %>
+						</td>
+
+						<td class='centeralign'>
+							<% $district->{entries} %>
+						</td>
+
+						<td class='centeralign'>
+							<% $quals{$district->{id}} %>
+						</td>
+					</tr>
+%				}
+			</tbody>
+		</table>
+<%doc>
+	Did any student qualify from LCQ and then not attend Nats?
+</%doc>
+<%perl>
+
+	my $dropped_sth = $dbh->prepare("
+		select student.id, student.first, student.last,
+			school.name, chapter.state, lcq.code, event.abbr,
+			district.code dcode, district.name district, district.id district_id
+
+		from (entry lcq, school, chapter, entry_student es, student, event, district)
+
+		where  school.tourn      = ?
+			and school.id        = lcq.school
+			and school.chapter   = chapter.id
+			and chapter.district = district.id
+			and lcq.event        = event.id
+			and lcq.id           = es.entry
+			and es.student       = student.id
+
+			and exists (
+				select lc.id
+					from entry_setting lc
+				where lc.entry = lcq.id
+					and lc.tag = 'lastchance'
+			)
+			and not exists (
+				select active.id
+					from entry active, event aevent, entry_student aes
+				where aes.student     = student.id
+					and aes.entry     = active.id
+					and active.active = 1
+					and active.event  = aevent.id
+					and aevent.tourn  = school.tourn
+			)
+
+		group by student.id
+	");
+
+
+	$dropped_sth->execute($tourn->id);
+	my $drops = $dropped_sth->fetchall_hash();
+	$dropped_sth->finish();
+
+</%perl>
+<%doc>
+</%doc>
+
+		<& "/funclib/tablesorter.mas", table => "drops" &>
+
+		<span class="threequarters nospace martopmore">
+			<h5>
+				LCQ Students Not Active in Nationals
+			</h5>
+		</span>
+		<span
+			class = "quarter rightalign nospace"
+			id    = "drops_buttonarea"
+		></span>
+
+		<table id="drops">
+			<thead>
+				<tr class="yellowrow smallish padvertless">
+					<th>
+						First
+					</th>
+					<th>
+						Last
+					</th>
+					<th>
+						School
+					</th>
+					<th>
+						District
+					</th>
+					<th>
+						LCQ Event
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+
+%				foreach my $drop (@${drops}) {
+					<tr class="smallish">
+						<td>
+							<% $drop->{first} %>
+						</td>
+						<td>
+							<% $drop->{last} %>
+						</td>
+						<td>
+							<% $drop->{name} %>
+						</td>
+						<td>
+							<% $drop->{district} %>
+						</td>
+						<td class="centeralign">
+							<% $drop->{abbr} %>
+						</td>
+
+					</tr>
+%				}
+			</tbody>
+		</table>
+
+<%perl>
+
+		my $results_sth = $dbh->prepare("
+
+			select
+				entry.id, entry.code, entry.name,
+				event.abbr,
+				school.id school, school.name sname,
+				chapter.state,
+				district.id district, district.name dname,
+				result.rank,
+				result.place,
+				result.percentile
+
+			from (entry, school, chapter, district, result_set, result, event)
+
+			where school.tourn = ?
+				and school.id = entry.school
+				and entry.active = 1
+				and entry.event = event.id
+				and school.chapter = chapter.id
+				and chapter.district = district.id
+
+				and exists (
+					select es.id from entry_setting es
+						where es.tag = 'lastchance'
+					and es.entry = entry.id
+				)
+
+				and result.entry = entry.id
+				and result.result_set = result_set.id
+				and result_set.label = 'Final Places'
+			group by entry.id
+		");
+
+		$results_sth->execute($tourn->id);
+		my $results = $results_sth->fetchall_hash();
+		$results_sth->finish();
+
+</%perl>
+
+		<& "/funclib/tablesorter.mas", table => "placement" &>
+
+		<span class="threequarters nospace martopmore">
+			<h5>
+				Nats Placement of LCQ Qualifiers
 			</h5>
 		</span>
 		<span
 			class="quarter rightalign nospace"
-			id="buttonarea_tablename"
+			id="placement_buttonarea"
 		></span>
 
-		<table id="tablename">
+		<table id="placement">
 			<thead>
-				<tr class="yellowrow">
+				<tr class="yellowrow smallish padvertless">
+					<th>
+						Code
+					</th>
+					<th>
+						Event
+					</th>
+					<th>
+						Entry
+					</th>
 					<th>
 						School
 					</th>
@@ -156,19 +470,80 @@
 						District
 					</th>
 					<th>
+						Place
 					</th>
 					<th>
+						Rank
 					</th>
 					<th>
+						Percentile
 					</th>
 				</tr>
 			</thead>
 
 			<tbody>
-				<tr>
-				</tr>
+<%perl>
+				my $broke;
+				my $total;
+				my @percentiles;
+				foreach my $result (@{$results}) {
+
+					$total++;
+					$broke++ unless lc($result->{place}) eq "prelim";
+					push @percentiles, $result->{percentile} if $result->{percentile};
+</%perl>
+					<tr class="smallish">
+						<td>
+							<% $result->{code} %>
+						</td>
+						<td>
+							<% $result->{abbr} %>
+						</td>
+						<td>
+							<% $result->{name} %>
+						</td>
+						<td>
+							<% $result->{sname} %>
+						</td>
+						<td>
+							<% $result->{state} %>
+						</td>
+						<td>
+							<% $result->{dname} %>
+						</td>
+						<td class="centeralign">
+							<% $result->{place} ? $result->{place} : "Elims" %>
+						</td>
+						<td class="rightalign">
+							<% $result->{rank} %>
+						</td>
+						<td class="rightalign">
+							<% $result->{percentile} %>
+						</td>
+					</tr>
+%				}
 			</tbody>
 		</table>
+
+		<h6 class="martopmore ltborderbottom">
+			<span class="quarter">
+				Advanced to Elims
+			</span>
+			<span class="sixth">
+				<% $broke %>/<% $total %>
+			</span>
+			<span class="sixth">
+				<% Math::Round::nearest(.1, ($broke / $total * 100)) %>%
+			</span>
+
+%		my $total_percentile;
+%		foreach (@percentiles) { $total_percentile += $_; }
+
+			<span class="quarter">
+				Average percentile
+			</span>
+			<span class="sixth">
+				<% Math::Round::nearest(.1, ($total_percentile / scalar @percentiles)) %>
+			</span>
+		</h6>
 	</div>
-
-
