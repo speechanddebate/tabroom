@@ -80,8 +80,6 @@ use Tab::Fine;
 use Tab::Follower;
 use Tab::GoogleCalendar;
 use Tab::Hotel;
-use Tab::Housing;
-use Tab::HousingSlots;
 use Tab::Judge;
 use Tab::JudgeSetting;
 use Tab::JudgeHire;

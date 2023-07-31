@@ -1,0 +1,432 @@
+<%args>
+	$person
+	$year => undef
+</%args>
+<%init>
+
+	use Tab::NSDACategory;
+	my $now = DateTime->now();
+
+	unless ($year) {
+		$year = $now->year;
+		$year-- if $now->month < 8;
+	}
+
+	my $start = "$year-07-01 00:00:00";
+	$year++;
+	my $end = "$year-07-01 00:00:00";
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my %nsda_codes = map {$_->code => $_->name} Tab::NSDACategory->retrieve_all();
+
+	my $student_name;
+
+	my $results_sth = $dbh->prepare("
+		select
+			student.id, student.first, student.last, chapter.name,
+			entry.id, entry.code, entry.name,
+			event.abbr, event.type, nsda_event_category.value,
+			round.id, round.name, round.type, round.post_primary, round.post_secondary,
+			panel.bye,
+			ballot.id, ballot.side, ballot.speakerorder, ballot.chair, ballot.audit,
+			score.id, score.tag, score.value, score.student,
+			score.speech, score.position
+
+		from (student, entry_student es, entry,
+			event, tourn,
+			round, panel, ballot, score,
+			chapter
+		)
+
+			left join event_setting nsda_event_category
+				on nsda_event_category.event = event.id
+				and nsda_event_category.tag = 'nsda_event_category'
+
+		where student.person = ?
+
+			and student.id      = es.student
+			and student.chapter = chapter.id
+			and es.entry        = entry.id
+			and entry.event     = event.id
+			and event.tourn     = tourn.id
+			and event.id        = round.event
+			and round.id        = panel.round
+			and panel.id        = ballot.panel
+			and ballot.entry    = entry.id
+			and ballot.audit    = 1
+			and score.ballot    = ballot.id
+			and score.tag in ('rank', 'winloss', 'point', 'speech')
+
+			and tourn.start > ?
+			and tourn.end < ?
+
+		group by score.id
+
+		order by tourn.start, round.name
+	");
+
+	my %records;
+	my %cumulative;
+
+	$results_sth->execute($person->id, $start, $end);
+
+	while (
+		my (
+			$student_id, $student_first, $student_last, $chapter_name,
+			$entry_id, $entry_code, $entry_name,
+			$event_abbr, $event_type, $nsda_event_category,
+			$round_id,  $round_name, $round_type, $post_primary, $post_secondary,
+			$panel_bye,
+			$ballot_id, $side, $speakerorder, $ballot_chair, $ballot_audit,
+			$score_id, $score_tag, $score_value, $score_student, $score_speech, $score_side
+		) = $results_sth->fetchrow_array()
+	) {
+
+		if (
+			$score_tag eq "winloss"
+			|| $score_tag eq "rank" && ($event_type eq 'speech' || $event_type eq "congress")
+		) {
+			next unless $post_primary;
+		}
+
+		if (
+			$score_tag eq "point"
+			|| $score_tag eq "speech"
+			|| $score_tag eq "rank" && ($event_type ne 'speech' && $event_type ne "congress")
+		) {
+			next unless $post_secondary;
+		}
+
+		unless ($student_name) {
+			$student_name = $student_first." ".$student_last;
+		}
+
+		unless ($records{$entry_id}) {
+			$records{$entry_id}{"code"}        = $entry_code;
+			$records{$entry_id}{"name"}        = $entry_name;
+			$records{$entry_id}{"school_name"} = $chapter_name;
+			$records{$entry_id}{"event_abbr"}  = $event_abbr;
+			$records{$entry_id}{"event_type"}  = $event_type;
+		}
+
+		my $event_code;
+
+		if ($event_type eq "congress") {
+			$event_code = "301";
+		} elsif ($nsda_event_category) {
+			$event_code = $records{$entry_id}{"nsda_point_code"};
+		} else {
+			$event_code = $event_abbr;
+		}
+
+		$cumulative{$event_code}{"type"} = $event_type;
+
+		if ($nsda_event_category) {
+			$cumulative{$event_code}{"nsda_point_code"} = $nsda_event_category;
+			$cumulative{$event_code}{"name"} = $nsda_codes{$nsda_event_category};
+		}
+
+		$cumulative{$event_code}{"round_tick"}{$round_id}++;
+		$cumulative{$event_code}{"ballot_tick"}{$ballot_id}++;
+
+		if ($event_type eq "speech") {
+
+			$cumulative{$event_code}{$score_tag."_total"} += $score_value;
+			$cumulative{$event_code}{$score_tag."_count"}++;
+
+			if ($speakerorder) {
+				$cumulative{$event_code}{"by_order"}{$speakerorder}{$score_tag."_total"} += $score_value;
+				$cumulative{$event_code}{"by_order"}{$speakerorder}{$score_tag."_count"}++;
+			}
+
+		} elsif ($event_type eq "congress") {
+
+			$cumulative{$event_code}{$score_tag."_total"} += $score_value;
+			$cumulative{$event_code}{$score_tag."_count"}++;
+
+			if ($score_speech) {
+				$cumulative{$event_code}{"speech_points"} += $score_speech;
+				$cumulative{$event_code}{"speech_count"}++;
+			}
+
+		} else {
+
+			$cumulative{$event_code}{$score_tag."_total"} += $score_value;
+			$cumulative{$event_code}{$score_tag."_count"}++;
+
+			if ($score_tag eq "winloss") {
+				$cumulative{$event_code}{"win_count"}++;
+				$cumulative{$event_code}{"wins"} += $score_value;
+				$cumulative{$event_code}{"side_wins"}{$side} += $score_value;
+
+				if ($speakerorder) {
+					$cumulative{$event_code}{"side_wins"}{$side} += $score_value;
+				}
+			}
+
+			if ($side) {
+				$cumulative{$event_code}{"by_side"}{$side}{$score_tag."_total"} += $score_value;
+				$cumulative{$event_code}{"by_side"}{$side}{$score_tag."_count"}++;
+			}
+
+			if ($speakerorder) {
+				$cumulative{$event_code}{"by_order"}{$speakerorder}{$score_tag."_total"} += $score_value;
+				$cumulative{$event_code}{"by_order"}{$speakerorder}{$score_tag."_count"}++;
+			}
+		}
+	}
+
+</%init>
+
+
+	<span class="fourfifths nospace">
+		<h4>Cumulative Records</h4>
+	</span>
+
+	<span
+		class = "fifth rightalign bigger semibold redtext"
+	>
+		<% ($year - 1)."-".$year %>
+	</span>
+
+
+<%perl>
+
+	foreach my $event_code (
+		sort {
+			$cumulative{$a}{"name"} cmp $cumulative{$b}{"name"}
+			|| $a cmp $b
+		} keys %cumulative
+	) {
+
+		$cumulative{$event_code}{"ballot_count"} = scalar (keys %{$cumulative{$event_code}{"ballot_tick"}});
+		$cumulative{$event_code}{"round_count"} = scalar (keys %{$cumulative{$event_code}{"round_tick"}});
+
+		if ($cumulative{$event_code}{"type"} eq "speech") {
+</%perl>
+
+			<h5>
+				<% $cumulative{$event_code}{"name"}
+					? $cumulative{$event_code}{"name"}
+					: $event_code
+				%>
+			</h5>
+
+			<div class="ltbordertop ltborderbottom odd">
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Event Type
+					</span>
+
+					<span class="third semibold centeralign">
+						Speech
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Total Rounds
+					</span>
+
+					<span class="third semibold centeralign">
+						<% $cumulative{$event_code}{"round_count"} %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Total Ranks
+					</span>
+
+					<span class="third semibold centeralign">
+						<% $cumulative{$event_code}{"rank_total"} %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Total Points
+					</span>
+
+					<span class="third semibold centeralign">
+						<% Math::Round->nearest(1, $cumulative{$event_code}{"point_total"}) %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Average Ranks
+					</span>
+
+					<span class="third semibold centeralign">
+						<% Math::Round::nearest(
+								$cumulative{$event_code}{"rank_total"}/
+								$cumulative{$event_code}{"ballot_count"}
+						   )
+						%>
+					</span>
+				</span>
+			</div>
+
+%		} elsif ($cumulative{$event_code}{"type"} eq "congress") {
+
+			<h5>
+				Congress
+			</h5>
+
+			<div class="ltbordertop ltborderbottom odd">
+
+				<span class="full nospace">
+					<span class="twothirds semibold bluetext">
+						Total Sessions
+					</span>
+
+					<span class="third semibold centeralign">
+						<% $cumulative{$event_code}{"round_count"} %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Speeches Given
+					</span>
+
+					<span class="third semibold centeralign">
+						<% $cumulative{$event_code}{"speech_count"} %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Speeches per Session
+					</span>
+
+					<span class="third semibold centeralign">
+						<% Math::Round::nearest(.1,
+								($cumulative{$event_code}{"speech_count"}/
+								$cumulative{$event_code}{"ballot_count"})
+						   )
+						%>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Total Ranks
+					</span>
+
+					<span class="third semibold centeralign">
+						<% $cumulative{$event_code}{"rank_total"} %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Total Speech Points
+					</span>
+
+					<span class="third semibold centeralign">
+						<% $cumulative{$event_code}{"point_total"} %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Average Ranks
+					</span>
+
+					<span class="third semibold centeralign">
+						<% Math::Round::nearest(.1,
+								($cumulative{$event_code}{"rank_total"}/
+								$cumulative{$event_code}{"ballot_count"})
+						   )
+						%>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Average Points
+					</span>
+
+					<span class="third semibold centeralign">
+						<% Math::Round::nearest(.1,
+								($cumulative{$event_code}{"point_total"}/
+								$cumulative{$event_code}{"ballot_count"})
+						   )
+						%>
+					</span>
+				</span>
+
+			</div>
+
+%		} else {
+
+			<h5>
+				<% $cumulative{$event_code}{"name"}
+					? $cumulative{$event_code}{"name"}
+					: $event_code
+				%>
+			</h5>
+
+			<div class="ltbordertop ltborderbottom odd">
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Event Type
+					</span>
+
+					<span class="third semibold centeralign">
+						Debate
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Total Rounds
+					</span>
+
+					<span class="third semibold centeralign">
+						<% $cumulative{$event_code}{"round_count"} %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Total Wins
+					</span>
+
+					<span class="third semibold centeralign">
+						<% $cumulative{$event_code}{"winloss_total"} %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Total Points
+					</span>
+
+					<span class="third semibold centeralign">
+						<% $cumulative{$event_code}{"point_total"} %>
+					</span>
+				</span>
+
+				<span class="half nospace">
+					<span class="twothirds semibold bluetext">
+						Average Points
+					</span>
+
+					<span class="third semibold centeralign">
+						<% Math::Round::nearest(
+								$cumulative{$event_code}{"point_total"}/
+								$cumulative{$event_code}{"ballot_count"}
+						   )
+						%>
+					</span>
+				</span>
+			</div>
+%		}
+%	}
+

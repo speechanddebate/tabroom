@@ -18,6 +18,8 @@
 		$m->abort;
 	}
 
+	my $dbh = Tab::DBI->db_Main();
+
 	my $round = Tab::Round->retrieve($round_id);
 	my $event = $round->event;
 
@@ -33,6 +35,7 @@
 
 	my $flighted = $round->flighted;
 	undef $flighted if $flighted <= 1;
+	undef $flight if $flighted <= 1;
 
 	my $num_judges = $round->setting('num_judges');
 	$num_judges = 1 unless $num_judges;
@@ -65,15 +68,22 @@
 
 	if ($save eq "Save Debate" && $entry_id && ($bye_me || $opponent_id)) {
 
-		my $letter = $m->comp(
-			"/funclib/round_next_letter.mas",
-			round => $round
-		);
+		Tab::Panel->set_sql( highest_letter => "
+			select max(cast(panel.letter as signed))
+			from panel
+			where round = ?
+		");
+
+		my $letter = Tab::Panel->sql_highest_letter->select_val($round->id);
+		$letter++;
+
+		my $tmp_flight = $flight;
+		$tmp_flight = 1 unless $tmp_flight;
 
 		$panel = Tab::Panel->create({
 			round  => $round_id,
 			bye    => $bye_me,
-			flight => $flight,
+			flight => $tmp_flight,
 			letter => $letter,
 			room   => $room_id
 		});
@@ -258,23 +268,16 @@
 		);
 	}
 
+	my %timeslot_judges  = map {$_->id => 1} $m->comp(
+		"/funclib/timeslot_judges.mas",
+			timeslot => $round->timeslot,
+			flight   => $flight
+	);
+
 	my @clean_judges;
 	my @clean_rooms;
 
 	if ($entry && $opponent) {
-
-		my @busy = $m->comp(
-			"/funclib/round_judges.mas",
-				round => $round,
-				flight => $flight
-		) if $flighted;
-
-		@busy = $m->comp(
-			"/funclib/round_judges.mas",
-			round => $round
-		) unless $flighted;
-
-		my %busy_judges = map {$_->id => 1} @busy;
 
 		my @entry_judges = $m->comp(
 			"/funclib/clean_to_see.mas",
@@ -290,46 +293,40 @@
 			map {$_->id => 1}
 			@opponent_judges;
 
-		foreach my $judge (@entry_judges) {
+		my %in_pool;
+		my $no_pool;
 
+		if ($round->jpools) {
+
+			my $sth = $dbh->prepare("
+				select
+					distinct jpj.judge id
+				from jpool_judge jpj, jpool_round jpr
+					where jpr.round = ?
+					and jpr.jpool = jpj.jpool
+			");
+
+			$sth->execute($round->id);
+			my $results = $sth->fetchall_hash();
+			my %in_pool = map {$_->{id} => 1} @{$results};
+
+		} else {
+			$no_pool++;
+		}
+
+		foreach my $judge (@entry_judges) {
 			push @clean_judges, $judge
 				if $opponent_clean{$judge->id}
-				&& not defined $busy_judges{$judge->id};
-
+				&& not defined $timeslot_judges{$judge->id}
+				&& ($no_pool || $in_pool{$judge->id})
 		}
 
 		@clean_rooms = $m->comp(
 			"/funclib/clean_rooms.mas",
 				round  => $round,
 				flight => $flight
-		) if $flighted;
-
-		@clean_rooms = $m->comp(
-			"/funclib/clean_rooms.mas",
-			round => $round
-		) unless $flighted;
-
-	}
-
-	my %jpool_judges;
-
-	if ($round->jpools) {
-
-		my @judges = $m->comp(
-			"/funclib/round_jpool_judges.mas",
-			round => $round
 		);
-
-		%jpool_judges = map {$_->id => 1} @judges;
-
 	}
-
-	my %timeslot_judges  = map {$_->id => 1} $m->comp(
-		"/funclib/timeslot_judges.mas",
-			timeslot => $round->timeslot,
-			flight   => $flight
-	);
-
 
 </%init>
 
@@ -532,9 +529,7 @@
 						>Give Entry a Bye</option>
 
 					</select>
-
 				</span>
-
 			</div>
 %		}
 
@@ -597,11 +592,6 @@
 <%perl>
 							JUDGE:
 							foreach my $judge (@clean_judges) {
-
-								next JUDGE if $timeslot_judges{$judge->id};
-								if ($round->jpools) {
-									next JUDGE unless $jpool_judges{$judge->id};
-								}
 </%perl>
 								<option
 									value="<% $judge->id %>"
@@ -792,114 +782,6 @@
 
 		<div class="sidenote">
 
-			<h4>Activate Entry</h4>
-
-			<form action="activate_entry.mhtml" method="post">
-
-			<input
-				type  = "hidden"
-				name  = "round_id"
-				value = "<% $round_id %>"
-			>
-
-			<input
-				type  = "hidden"
-				name  = "entry_id"
-				value = "<% $entry_id %>"
-			>
-
-			<input
-				type  = "hidden"
-				name  = "opponent_id"
-				value = "<% $opponent_id %>"
-			>
-
-			<div class="even centeralign">
-
-				<select
-					name     = "activate_id"
-					class    = "fixedmed"
-					onchange = 'this.form.submit();'
-				>
-
-					<option value=""></option>
-
-%					foreach my $entry (
-%						sort {$a->code cmp $b->code}
-%						$event->entries(dropped => 1, unconfirmed => 0)
-%					) {
-
-						<option value="<% $entry->id %>"> <% $entry->code." ".$entry->name %> </option>
-
-%					}
-
-				</select>
-
-				<noscript>
-					<input type="submit" value="Go">
-				</noscript>
-
-			</div>
-
-			</form>
-
-			<h4>Activate Judge</h4>
-
-			<form action="activate_judge.mhtml" method="post">
-
-			<input
-				type  = "hidden"
-				name  = "round_id"
-				value = "<% $round_id %>"
-			>
-
-			<input
-				type  = "hidden"
-				name  = "entry_id"
-				value = "<% $entry_id %>"
-			>
-
-			<input
-				type  = "hidden"
-				name  = "opponent_id"
-				value = "<% $opponent_id %>"
-			>
-
-			<div class="even centeralign">
-
-				<select
-					name     = "judge_id"
-					class    = "fixedmed chosen"
-					onchange = 'this.form.submit();'
-				>
-
-					<option value=""></option>
-
-<%perl>
-					foreach my $judge (
-						sort {$a->last cmp $b->last}
-						$event->category->judges(active => 0)
-					) {
-</%perl>
-						<option value="<% $judge->id %>"
-						><% $judge->first." ".$judge->last %></option>
-%					}
-
-
-				</select>
-
-				<noscript>
-					<input type="submit" value="Go">
-				</noscript>
-
-			</div>
-
-			</form>
-
-		</div>
-
-		<div class="sidenote">
-
 			<h4>Reports</h4>
 
 			<a
@@ -916,64 +798,6 @@
 				href   = "/panel/report/schematic.mhtml?round_id=<% $round_id %>"
 			>
 				Print Pairing
-			</a>
-
-			<h4>Bulk Commands</h4>
-
-			<a
-				class  = "full blue"
-				href   = "/panel/judge/activate.mhtml"
-				target = "_blank"
-			>
-				Judge Checkin
-			</a>
-
-			<a
-				class  = "full blue"
-				href   = "entry_activate.mhtml"
-				target = "_blank"
-			>
-				Entry Checkin
-			</a>
-
-%			my $warn = "This will mark all judges as inactive for the purposes of taking attendance.  Continue?";
-
-			<a
-				href  = "deactivate_judges.mhtml?round_id=<% $round_id %>"
-				class = "martop yellow full"
-				<& "/funclib/confirm.mas", warn => $warn &>
-			>
-				Deactivate All Judges
-			</a>
-
-%			$warn = "This will mark all entries as dropped for the purposes of taking attendance.  Continue?";
-
-			<a
-				href  = "deactivate_entries.mhtml?round_id=<% $round_id %>"
-				class = "yellow full"
-				<& "/funclib/confirm.mas", warn => $warn &>
-			>
-				Deactivate All Entries
-			</a>
-
-%			$warn = "This will mark all judges as active for the purposes of taking attendance.  Continue?";
-
-			<a
-				href  = "activate_judges.mhtml?round_id=<% $round_id %>"
-				class = "martop yellow full"
-				<& "/funclib/confirm.mas", warn => $warn &>
-			>
-				Activate All Judges
-			</a>
-
-%			$warn = "This will mark all entries as not-dropped (including those dropped yesterday) for the purposes of taking attendance.  Continue?";
-
-			<a
-				href  = "activate_entries.mhtml?round_id=<% $round_id %>"
-				class = "yellow full"
-				<& "/funclib/confirm.mas", warn => $warn &>
-			>
-				Activate All Entries
 			</a>
 
 		</div>

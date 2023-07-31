@@ -19,14 +19,6 @@ Tab::Student->has_many(entry_students => 'Tab::EntryStudent', 'student');
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-sub housing {
-	my ($self, $tourn, $day) = @_;
-	my @housings = Tab::Housing->search( student => $self->id, tourn => $tourn->id, night => $day->ymd ) if $day;
-	@housings = Tab::Housing->search( student => $self->id, tourn => $tourn->id ) unless $day;
-	return shift @housings if $day;
-	return @housings;
-}
-
 sub fullname {
 	my $self = shift;
 	return $self->first." ".$self->middle." ".$self->last if $self->middle;

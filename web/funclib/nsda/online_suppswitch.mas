@@ -1,0 +1,119 @@
+<%args>
+	$student
+	$tourn
+</%args>
+<%init>
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select entry.id, entry.code,
+			entry.active, entry.unconfirmed, entry.dropped,
+			reject.value rejected,
+			supp.value supp,
+			event.abbr abbr,
+			online_hybrid.value online_hybrid
+
+		from (entry, entry_student es, event)
+
+			left join entry_setting reject
+				on reject.entry = entry.id
+				and reject.tag = 'rejected_by'
+
+			left join event_setting supp
+				on supp.event = event.id
+				and supp.tag = 'supp'
+
+			left join event_setting online_hybrid
+				on online_hybrid.event = event.id
+				and online_hybrid.tag = 'online_hybrid'
+
+		where es.student = ?
+			and es.entry = entry.id
+			and entry.event = event.id
+			and event.tourn = ?
+	");
+
+	$sth->execute($student->id, $tourn->id);
+
+	my %entries;
+
+	my $ref = $sth->fetchall_hash();
+
+	if ($ref) {
+		%entries = eval {
+			return map {$_->{"id"} => $_} @{$ref};
+		};
+	}
+
+	$sth->finish();
+
+	my $delete_sth = $dbh->prepare("
+		delete es.*
+			from entry_setting es, entry_student est, event, entry
+		where est.student = ?
+			and est.entry = entry.id
+			and entry.event = event.id
+			and event.tourn = ?
+			and es.entry = entry.id
+			and es.tag = 'online_hybrid'
+	");
+
+	my $insert_sth = $dbh->prepare("
+		insert into entry_setting (tag, entry, value) VALUES ('online_hybrid', ?, '1')
+	");
+
+	my %return;
+
+	foreach my $id (keys %entries) {
+
+		if ($entries{$id}{'active'} && (not defined $entries{$id}{"supp"})) {
+
+			# Active main entry!  Verboten.
+			$return{"message"} .= " Competitor $id is active in main event ".$entries{$id}{"abbr"}." and cannot be marked as re-registered";
+			$return{"error"} = JSON::true;
+
+		} elsif ($entries{$id}{"dropped"}) {
+			# We good
+
+		} elsif ($entries{$id}{"unconfirmed"} && (not exists $entries{$id}{"rejected"})) {
+
+			#Pending entry, no go
+			$return{"message"} .= " Competitor is still pending in  ".$entries{$id}{"abbr"}." and must be rejected/dropped first";
+			$return{"error"} = JSON::true;
+
+		} elsif ($entries{$id}{"supp"} && (not defined $entries{$id}{"online_hybrid"})) {
+
+			#Extemp Debate or something, no go
+			$return{"message"} .= " Competitor is active in  ".$entries{$id}{"abbr"}.", a live supp event. That event must be rejected first";
+			$return{"error"} = JSON::true;
+		}
+	}
+
+	unless ($return{"error"}) {
+
+		$delete_sth->execute($student->id, $tourn->id);
+
+		$return{"message"} = "All ".$student->first." ".$student->last."'s entries are re-registered";
+
+		if ($ARGS{"value"}) {
+
+			delete $return{"message"};
+
+			foreach my $id (keys %entries) {
+
+				if ($entries{$id}{"supp"}) {
+					$insert_sth->execute($id);
+					$return{"message"} .= $entries{$id}{"abbr"}." entry flipped to registered ";
+				}
+			}
+		}
+
+		$return{"error"} = JSON::false;
+	}
+
+	$return{"entries"} = \%entries;
+
+	return \%return;
+
+</%init>
