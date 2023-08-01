@@ -6,63 +6,37 @@
 	$session
 	$defaults    => undef
 	$category_id => undef
-	$jpool_id    => undef
 </%args>
 <%init>
 
-    my (
-        $category, $categoriesref,
-        $jpool, $jpoolsref, $jpool_settingsref,
-        $parent, $parents_ref
-    ) = $m->comp("pools.mas",
-        tourn       => $tourn,
-        perms       => $perms,
-        defaults    => $defaults,
-        session     => $session,
-        nsda_nats   => $tourn_settings->{"nsda_nats"},
-        jpool_id    => $jpool_id,
-        parent      => $ARGS{"parent"},
-        category_id => $category_id,
-    );
-
-	my $nats_category = $category->setting("nats_category") if $category;
-
 	my $judges;
 	my $nocodes;
+
+	my $category = Tab::Category->retrieve($category_id);
+
+	if ($perms->{'by_event'}) {
+
+		my $ok;
+
+		EVENT:
+		foreach my $event ($category->events) {
+			if ($perms->{"details"}{$event->id} eq "tabber") {
+				$ok++;
+				last EVENT;
+			}
+		}
+
+		unless ($ok) {
+			$m->comp("/funclib/abort.mas", message => "You do not have permission to perform that function.");
+		}
+
+	}
 
 	Tab::Judge->columns(TEMP => "regioncode");
 
 	my $dbh = Tab::DBI->db_Main();
 
-	if ($jpool) {
-
-		my $jpool_sth = $dbh->prepare("
-			 select
-			 	judge.id, judge.first, judge.last, judge.middle,
-				judge.code, judge.active,
-				school.name school_name,
-				region.code region_code,
-				tab_rating.value tab_rating,
-				rating_tier.name coach_rating,
-				notes.value_text notes,
-				special_job.value special_job
-			from (judge, jpool_judge jpj)
-				left join judge_setting tab_rating on tab_rating.tag = 'tab_rating' and tab_rating.judge = judge.id
-				left join rating on rating.judge = judge.id and rating.type = 'coach'
-				left join rating_tier on rating_tier.id = rating.rating_tier
-				left join judge_setting notes on notes.tag = 'notes' and notes.judge = judge.id
-				left join judge_setting special_job on special_job.tag = 'special_job' and special_job.judge = judge.id
-				left join school on judge.school = school.id
-				left join region on school.region = region.id
-			where jpj.jpool = ?
-				and jpj.judge = judge.id
-			order by judge.last
-		");
-
-		$jpool_sth->execute($jpool);
-		$judges = $jpool_sth->fetchall_hash();
-
-	} elsif ($category) {
+	if ($category) {
 
 		my $category_sth = $dbh->prepare("
 			 select
@@ -73,7 +47,8 @@
 				tab_rating.value tab_rating,
 				rating_tier.name coach_rating,
 				notes.value_text notes,
-				special_job.value special_job
+				special_job.value special_job,
+				GROUP_CONCAT(jpool.id SEPARATOR ', ') as jpools
 			from (judge)
 				left join judge_setting tab_rating on tab_rating.tag = 'tab_rating' and tab_rating.judge = judge.id
 				left join judge_setting notes on notes.tag = 'notes' and notes.judge = judge.id
@@ -82,7 +57,10 @@
 				left join judge_setting special_job on special_job.tag = 'special_job' and special_job.judge = judge.id
 				left join school on judge.school = school.id
 				left join region on school.region = region.id
+				left join jpool_judge jpj on jpj.judge = judge.id
+				LEFT JOIN jpool on jpj.jpool = jpool.id
 			where judge.category = ?
+			group by judge.id
 			order by judge.last
 		");
 
@@ -97,7 +75,7 @@
 
 	my $sth = $dbh->prepare("
 		select
-			jpool.id jpool, judge.id judge
+			jpool.id jpool, judge.id judge, jpool.name
 		from jpool, jpool_judge jpj, judge, category
 			where category.tourn = ?
 			and category.id = jpool.category
@@ -109,28 +87,15 @@
 	my $results = $sth->fetchall_hash();
 
 	my %jpjs;
+	my %jpools;
 
 	foreach my $res (@{$results}) {
+		my ($name, @junque) = split(':', $res->{name});
+		$jpools{$res->{jpool}} = $name;
 		$jpjs{$res->{judge}}{$res->{jpool}}++;
 	}
 
 </%init>
-
-	<& "menu.mas",
-		tourn             => $tourn,
-		jpool             => $jpool,
-		perms             => $perms,
-		category          => $category,
-		whoami            => "activate",
-		limited           => ${$perms}{"checker"},
-		tourn_settings    => $tourn_settings,
-		nats_category     => $nats_category,
-		categoriesref     => $categoriesref,
-		parent            => $parent,
-		parents_ref       => $parents_ref,
-		jpoolsref         => $jpoolsref,
-		jpool_settingsref => $jpool_settingsref,
-	&>
 
 	<div class="main">
 
@@ -141,17 +106,6 @@
 %			my $self_ratings = $category->setting("self_ratings");
 
 			<h2><% $category->name %></h2>
-
-%			unless ($perms->{'by_event'} || $perms->{"checker"}) {
-				<&
-					"tabbar.mas",
-					perms     => $perms,
-					category  => $category,
-					whoami    => "activate",
-					jpool     => $jpool,
-        			nsda_nats => $tourn_settings->{"nsda_nats"}
-				&>
-%			}
 
 			<& "/funclib/tablesorter.mas",
 				table => "category_judges"
@@ -206,10 +160,9 @@
 						</th>
 
 %						if ($tourn_settings->{mock_trial_registration}) {
-%							foreach my $jpool (@{$jpoolsref}) {
-%								my ($jpool_name, @shit) = split(/\:/, $jpool->name);
+%							foreach my $jpool (sort keys %jpools) {
 								<th class="smaller">
-									<% $jpool_name %>
+									<% $jpools{$jpool} %>
 								</th>
 %							}
 %						}
@@ -266,7 +219,7 @@
 						</td>
 
 %						if ($tourn_settings->{mock_trial_registration}) {
-%							foreach my $jpool (@{$jpoolsref}) {
+%							foreach my $jpool (sort keys %jpools) {
 								<td class="smaller centeralign">
 									<a href="/register/judge/edit.mhtml?judge_id=<% $judge->{id} %>&default=pools" class="plain full padvertless hover">
 										<% $jpjs{$judge->{id}}{$jpool} ? "Y" : "&nbsp;" %>
