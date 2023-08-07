@@ -167,11 +167,14 @@ echo
 
 rsync -av /www/tabroom/doc/tex/bera /usr/share/texlive/texmf-dist/tex/latex/
 mkdir -p /usr/share/texlive/texmf-dist/fonts/tfm/public/bera/
-mkdir -p /usr/share/texlive/texmf-dist/fonts/vf/public/bera/
 rsync -av /www/tabroom/doc/tex/bera/tfm/ /usr/share/texlive/texmf-dist/fonts/tfm/public/bera
+
+mkdir -p /usr/share/texlive/texmf-dist/fonts/vf/public/bera/
 rsync -av /www/tabroom/doc/tex/bera/vf/ /usr/share/texlive/texmf-dist/fonts/vf/public/bera
+
 mkdir -p /usr/share/texlive/texmf-dist/fonts/type1/public/bera
 rsync -av /www/tabroom/doc/tex/bera/type1/ /usr/share/texlive/texmf-dist/fonts/type1/public/bera
+
 mkdir -p /usr/share/texlive/texmf-dist/fonts/map/dvips/bera
 cp /www/tabroom/doc/tex/bera/bera.map /usr/share/texlive/texmf-dist/fonts/map/dvips/bera
 
