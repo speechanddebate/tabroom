@@ -129,7 +129,6 @@ echo
 	libhtml-scrubber-perl \
 	libbytes-random-secure-perl \
 	s3cmd \
-	texlive-fonts-extra \
 	libswitch-perl \
 	libjson-perl \
 	libjson-webtoken-perl \
@@ -161,6 +160,26 @@ echo
 
 mv /usr/share/perl5/Class/DBI.pm /usr/share/perl5/Class/DBI.pm.orig
 cp /www/tabroom/doc/lib/Class-DBI.pm.fixed /usr/share/perl5/Class/DBI.pm
+
+echo
+echo "Installing some fonts rather than download the 700MB TexLive repo with all its fonts in Sanskrit..."
+echo
+
+rsync -av /www/tabroom/doc/tex/bera /usr/share/texlive/texmf-dist/tex/latex/
+mkdir -p /usr/share/texlive/texmf-dist/fonts/tfm/public/bera/
+mkdir -p /usr/share/texlive/texmf-dist/fonts/vf/public/bera/
+rsync -av /www/tabroom/doc/tex/bera/tfm/ /usr/share/texlive/texmf-dist/fonts/tfm/public/bera
+rsync -av /www/tabroom/doc/tex/bera/vf/ /usr/share/texlive/texmf-dist/fonts/vf/public/bera
+mkdir -p /usr/share/texlive/texmf-dist/fonts/type1/public/bera
+rsync -av /www/tabroom/doc/tex/bera/type1/ /usr/share/texlive/texmf-dist/fonts/type1/public/bera
+mkdir -p /usr/share/texlive/texmf-dist/fonts/map/dvips/bera
+cp /www/tabroom/doc/tex/bera/bera.map /usr/share/texlive/texmf-dist/fonts/map/dvips/bera
+
+mktexlsr
+texhash
+
+updmap-sys --force --enable Map=bera.map
+
 
 echo
 echo "Creating database from schema file.  Uncompressing database file (takes a little bit of time)..."
