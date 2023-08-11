@@ -167,7 +167,7 @@ export const tournAuth = async function(req) {
 				} else {
 					try {
 						session[tournId].events = JSON.parse(perm.details);
-					} catch(err) {
+					} catch (err) {
 						errorLogger.info(err);
 					}
 				}
@@ -216,6 +216,7 @@ export const checkPerms = async (req, res, query, replacements) => {
 			type: req.db.sequelize.QueryTypes.SELECT,
 		});
 
+		// eslint-disable-next-line no-restricted-syntax
 		for await (const event of okEvents) {
 			if (!permsData.events) {
 				permsData.events = [];
@@ -402,7 +403,6 @@ export const jpoolCheck = async (req, res, jpoolId) => {
 	const replacements = { jpoolId };
 	return checkPerms(req, res, jpoolQuery, replacements);
 };
-
 
 export const judgeCheck = async (req, res, judgeId) => {
 	const judgeQuery = `
