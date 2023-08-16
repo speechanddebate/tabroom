@@ -29,7 +29,6 @@ echo
 	libapache2-mod-perl2 \
 	libapache2-mod-perl2-dev \
 	libapache2-mod-perl2-doc \
-	libapache2-mod-php \
 	libapache2-request-perl \
 	libcgi-untaint-perl \
 	libclass-accessor-perl \
