@@ -7,6 +7,13 @@ echo
 echo "Welcome to the Tabroom.com production system installer."
 echo
 
+
+echo
+echo "Configuring the system to actually act like a server."
+echo
+cat /www/tabroom/doc/conf/sysctl.conf >> /etc/sysctl.conf
+sysctl -p
+
 echo
 echo "Installing the latest version of Node and related files..."
 echo
@@ -171,6 +178,7 @@ echo
 
 /bin/mkdir /var/log/tabroom
 chown syslog.adm /var/log/tabroom
+/bin/mkdir /var/log/indexcards
 cp /www/tabroom/doc/conf/rsyslog.conf /etc/rsyslog.d/90-tabroom.conf
 systemctl restart rsyslog
 
@@ -179,7 +187,9 @@ echo "Configuring the local Apache webserver..."
 echo
 
 cp /www/tabroom/doc/conf/tabroom.com.conf /etc/apache2/sites-available
-cp /www/tabroom/doc/conf/General.pm.production /www/tabroom/web/lib/Tab/General.pm
+cp /www/tabroom/doc/conf/General.pm /www/tabroom/web/lib/Tab/General.pm
+cp /www/tabroom/doc/conf/mpm_prefork.conf /etc/apache2/mods-available
+
 
 echo "ServerName  www.tabroom.com" >> /etc/apache2/conf.d/hostname
 echo "127.0.1.21 www www.tabroom.com" >> /etc/hosts
@@ -213,11 +223,16 @@ echo
 
 useradd tabroom;
 chown -R tabroom.tabroom /www/tabroom/
+/bin/mkdir -p /home/tabroom
+chown -R tabroom.tabroom /home/tabroom/
+
 /bin/mkdir -p /www/tabroom/web/tmp
 /bin/mkdir -p /www/tabroom/web/mason
 
 /bin/chmod 1777 /www/tabroom/web/tmp
 /bin/chmod 1777 /www/tabroom/web/mason
+
+chown tabroom.tabroom /var/log/indexcards
 
 echo
 echo "Staring the indexcards API"

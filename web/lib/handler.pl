@@ -78,7 +78,6 @@ use Tab::Pattern;
 use Tab::File;
 use Tab::Fine;
 use Tab::Follower;
-use Tab::GoogleCalendar;
 use Tab::Hotel;
 use Tab::Judge;
 use Tab::JudgeSetting;
