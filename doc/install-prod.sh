@@ -12,6 +12,7 @@ echo "Installing the latest version of Node and related files..."
 echo
 
 cp /www/tabroom/doc/conf/nodesource.list /etc/apt/sources.list.d;
+cp /www/tabroom/donc/conf/nodesource.gpg /usr/share/keyrings/nodesource.gpg
 
 echo
 echo "Installing the necessary software packages along with some ones I like having...."
@@ -75,16 +76,11 @@ echo
 	make \
 	mariadb-client \
 	mariadb-common \
-	mariadb-server \
 	nmap \
 	neovim \
 	nodejs \
 	npm \
 	openprinting-ppds \
-	openssh-client \
-	openssh-server \
-	openssl \
-	passwd \
 	perl \
 	perl-base \
 	perl-doc \
@@ -95,7 +91,6 @@ echo
 	psmisc \
 	rsync \
 	screen \
-	ssh \
 	ssl-cert \
 	texlive \
 	liblingua-en-numbers-ordinate-perl \
