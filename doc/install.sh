@@ -84,9 +84,6 @@ echo
 	mariadb-client \
 	mariadb-common \
 	mariadb-server \
-	nano \
-	ncurses-base \
-	ncurses-bin \
 	nmap \
 	neovim \
 	nodejs \
@@ -102,18 +99,13 @@ echo
 	perl-modules \
 	perlmagick \
 	pm-utils \
-	popularity-contest \
 	procps \
 	psmisc \
-	pwgen \
-	rdesktop \
 	rsync \
 	screen \
 	ssh \
 	ssl-cert \
-	tcsh \
 	texlive \
-	cvs \
 	liblingua-en-numbers-ordinate-perl \
 	libuniversal-can-perl \
 	texlive-latex-extra \
@@ -179,9 +171,7 @@ cp /www/tabroom/doc/tex/bera/bera.map /usr/share/texlive/texmf-dist/fonts/map/dv
 
 mktexlsr
 texhash
-
 updmap-sys --force --enable Map=bera.map
-
 
 echo
 echo "Creating database from schema file.  Uncompressing database file (takes a little bit of time)..."
