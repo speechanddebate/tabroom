@@ -156,6 +156,8 @@ echo
 echo "Installing some fonts rather than download the 700MB TexLive repo with all its fonts in Sanskrit..."
 echo
 
+rsync -av /www/tabroom/doc/tex/electrum /usr/share/texlive/texmf-dist/tex/latex/
+
 rsync -av /www/tabroom/doc/tex/bera /usr/share/texlive/texmf-dist/tex/latex/
 mkdir -p /usr/share/texlive/texmf-dist/fonts/tfm/public/bera/
 rsync -av /www/tabroom/doc/tex/bera/tfm/ /usr/share/texlive/texmf-dist/fonts/tfm/public/bera
