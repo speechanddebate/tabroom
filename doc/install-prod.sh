@@ -187,18 +187,14 @@ echo "Configuring the local Apache webserver..."
 echo
 
 cp /www/tabroom/doc/conf/tabroom.com.conf /etc/apache2/sites-available
+a2ensite tabroom.com
+
 cp /www/tabroom/doc/conf/General.pm /www/tabroom/web/lib/Tab/General.pm
 cp /www/tabroom/doc/conf/mpm_prefork.conf /etc/apache2/mods-available
 
 
 echo "ServerName  www.tabroom.com" >> /etc/apache2/conf.d/hostname
 echo "127.0.1.21 www www.tabroom.com" >> /etc/hosts
-
-# Do it this way because the syntax for a virtual site that Ubuntu expects is a
-# moving target apparently.  Sometimes it wants you to include the .conf,
-# sometimes it just wants the domain....
-
-ln -s /etc/apache2/sites-available/www.tabroom.com.conf /etc/apache2/sites-enabled/0-www.tabroom.conf
 
 /usr/sbin/a2enmod apreq
 /usr/sbin/a2enmod proxy
