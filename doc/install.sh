@@ -131,7 +131,10 @@ echo
 	libtext-csv-encoded-perl \
 	libtext-csv-perl \
 	libgeoip2-perl \
-	libmaxmind-db-reader-perl
+	libmaxmind-db-reader-perl \
+	geoip-database \
+	geoipupdate \
+	libgeoip1:amd64
 
 cpanm Lingua::EN::Nums2Words
 cpanm REST::Client
@@ -240,6 +243,7 @@ echo
 cd /www/tabroom/api; npm install
 cd /www/tabroom/api; npm install pm2 -g
 cd /www/tabroom/client; npm install
+
 
 echo
 echo "Adapting permissions"

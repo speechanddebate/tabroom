@@ -43,8 +43,8 @@ $dbpass = "";
 $string	= "ReplaceMeWithSomethingElse";
 
 #GeoIP data
-$geoip = "/net/geoip/GeoLite2-City.mmdb";
-$geoisp = "/net/geoip/GeoIP2-ISP.mmdb";
+$geoip = "/var/lib/geoip/GeoLite2-City.mmdb";
+$geoisp = "/var/lib/geoip/GeoIP2-ISP.mmdb";
 
 #Share API endpoint
 $share_api_endpoint = "/v1/share";

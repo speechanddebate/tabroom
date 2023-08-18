@@ -124,7 +124,10 @@ echo
 	libtext-csv-encoded-perl \
 	libtext-csv-perl \
 	libgeoip2-perl \
-	libmaxmind-db-reader-perl
+	libmaxmind-db-reader-perl \
+	geoip-database \
+	geoipupdate \
+	libgeoip1:amd64
 
 cpanm Lingua::EN::Nums2Words
 cpanm REST::Client
@@ -168,6 +171,18 @@ mktexlsr
 texhash
 updmap-sys --force --enable Map=bera.map
 
+
+echo
+echo "Configuring and downloading the GeoIP Database"
+echo
+
+# GeoIP.conf will require ansible secrets
+cp /www/tabroom/doc/conf/GeoIP.conf /etc/GeoIP.conf
+
+mkdir -p /var/lib/GeoIP/
+/usr/bin/geoipupdate
+systemctl enable geoipupdate.timer
+
 echo
 echo "Utility Scripts"
 echo
@@ -191,7 +206,9 @@ echo
 cp /www/tabroom/doc/conf/tabroom.com.conf /etc/apache2/sites-available
 a2ensite tabroom.com
 
+# General.pm will require ansible secrets
 cp /www/tabroom/doc/conf/General.pm /www/tabroom/web/lib/Tab/General.pm
+
 cp /www/tabroom/doc/conf/mpm_prefork.conf /etc/apache2/mods-available
 
 
@@ -231,6 +248,10 @@ chown -R tabroom.tabroom /home/tabroom/
 /bin/chmod 1777 /www/tabroom/web/mason
 
 chown tabroom.tabroom /var/log/indexcards
+
+echo "Copying API configuration"
+# config.js will require Ansible secrets
+cp /www/tabroom/doc/conf/config.js /www/tabroom/api/config/
 
 echo
 echo "Staring the indexcards API"
