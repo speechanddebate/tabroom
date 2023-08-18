@@ -127,7 +127,7 @@ echo
 	libmaxmind-db-reader-perl \
 	geoip-database \
 	geoipupdate \
-	libgeoip1:amd64
+	libgeoip1
 
 cpanm Lingua::EN::Nums2Words
 cpanm REST::Client
@@ -177,6 +177,7 @@ echo "Configuring and downloading the GeoIP Database"
 echo
 
 # GeoIP.conf will require ansible secrets
+# GeoIP2-ISP.mmdb also needs to be pulled in ....somehow?
 cp /www/tabroom/doc/conf/GeoIP.conf /etc/GeoIP.conf
 
 mkdir -p /var/lib/GeoIP/
@@ -211,9 +212,8 @@ cp /www/tabroom/doc/conf/General.pm /www/tabroom/web/lib/Tab/General.pm
 
 cp /www/tabroom/doc/conf/mpm_prefork.conf /etc/apache2/mods-available
 
-
-echo "ServerName  www.tabroom.com" >> /etc/apache2/conf.d/hostname
-echo "127.0.1.21 www www.tabroom.com" >> /etc/hosts
+#echo "ServerName  www.tabroom.com" >> /etc/apache2/conf.d/hostname
+#echo "127.0.1.21 www www.tabroom.com" >> /etc/hosts
 
 /usr/sbin/a2enmod apreq
 /usr/sbin/a2enmod proxy
@@ -258,6 +258,11 @@ echo "Staring the indexcards API"
 echo
 cp /www/tabroom/doc/conf/indexcards.service /etc/systemd/system/indexcards.service
 systemctl enable --now indexcards
+
+echo
+echo "Enable local cron to clean out files regularly"
+echo
+crontab /www/tabroom/doc/conf/local-crontab
 
 echo
 echo "Yippee.  All done!  Unless, of course, you just saw errors."
