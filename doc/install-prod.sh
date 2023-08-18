@@ -19,7 +19,7 @@ echo "Installing the latest version of Node and related files..."
 echo
 
 cp /www/tabroom/doc/conf/nodesource.list /etc/apt/sources.list.d;
-cp /www/tabroom/donc/conf/nodesource.gpg /usr/share/keyrings/nodesource.gpg
+cp /www/tabroom/doc/conf/nodesource.gpg /usr/share/keyrings/nodesource.gpg
 
 echo
 echo "Installing the necessary software packages along with some ones I like having...."
