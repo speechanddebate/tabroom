@@ -23,7 +23,7 @@ use Data::Dumper;
 use DateTime;
 
 use JSON::XS;
-use JSON;
+use JSON -convert_blessed_universally;
 
 use Lingua::EN::Numbers::Ordinate;
 use MIME::Lite;
