@@ -38,6 +38,7 @@ echo
 	libapache2-mod-perl2-doc \
 	libapache2-mod-php \
 	libapache2-request-perl \
+	libhtml-restrict-perl \
 	libcgi-untaint-perl \
 	libclass-accessor-perl \
 	libclass-container-perl \
@@ -229,6 +230,7 @@ ln -s /etc/apache2/sites-available/local.tabroom.com.conf /etc/apache2/sites-ena
 
 /usr/sbin/a2enmod apreq
 /usr/sbin/a2enmod proxy
+/usr/sbin/a2enmod proxy_http
 
 echo
 echo "Starting Apache..."

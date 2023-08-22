@@ -37,6 +37,7 @@ echo
 	libapache2-mod-perl2-dev \
 	libapache2-mod-perl2-doc \
 	libapache2-request-perl \
+	libhtml-restrict-perl \
 	libcgi-untaint-perl \
 	libclass-accessor-perl \
 	libclass-container-perl \
@@ -217,6 +218,7 @@ cp /www/tabroom/doc/conf/mpm_prefork.conf /etc/apache2/mods-available
 
 /usr/sbin/a2enmod apreq
 /usr/sbin/a2enmod proxy
+/usr/sbin/a2enmod proxy_http
 
 echo
 echo "Starting Apache..."
