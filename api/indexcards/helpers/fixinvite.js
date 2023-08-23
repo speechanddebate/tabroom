@@ -1,5 +1,4 @@
 /* eslint-disable camelcase */
-import { debugLogger } from './logger.js';
 import db from './db.js';
 import s3Client from './aws.js';
 
@@ -37,12 +36,10 @@ export const fixInvite = {
 
 			const inviteFile = await db.file.create(invite);
 			invite.result = `I have created an invite file ${inviteFile.id} for tourn ${invite.tourn}`;
-			debugLogger.info(invite);
 			results.push(invite);
 
 			const newPath = `tourns/${invite.tourn}/postings/${inviteFile.id}/${inviteFile.filename}`;
-			const response = await s3Client.mv(filepath, newPath);
-			debugLogger.info(response);
+			await s3Client.mv(filepath, newPath);
 		});
 
 		res.json(results);
