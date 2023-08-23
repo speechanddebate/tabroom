@@ -23,6 +23,10 @@ const file = (sequelize, DataTypes) => {
 			allowNull: false,
 			defaultValue: 0,
 		},
+		page_order: {
+			type: DataTypes.SMALLINT,
+			allowNull: true,
+		},
 		coach: {
 			type: DataTypes.BOOLEAN,
 			allowNull: false,
