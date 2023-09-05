@@ -134,71 +134,79 @@
 		}
 
 		var attributes = {};
-		attributes = $(checkObject).attrs();
 
-		if (attributes.property_value === undefined) {
-			attributes.property_value = $(checkObject).attr("value");
-		}
+		if (checkObject.raw) {
 
-		if (attributes.property_value === undefined) {
-			attributes.property_value = $(checkObject).val();
-		}
+			attributes = checkObject;
 
-		if (checkObject.type === "checkbox") {
-			if ($(checkObject).prop("checked") === false) {
-				attributes.property_value = 0;
+		} else {
+
+			attributes = $(checkObject).attrs();
+
+			if (attributes.property_value === undefined) {
+				attributes.property_value = $(checkObject).attr("value");
 			}
-		}
 
-		if (attributes.parent_id === undefined) {
-			attributes.parent_id = $(checkObject).parent().attr('id');
-		}
+			if (attributes.property_value === undefined) {
+				attributes.property_value = $(checkObject).val();
+			}
 
-		// I hate myself a lot sometimes.
-
-		if ($(checkObject).attr("other_value")) {
-			var otherObjectId = $(checkObject).attr("other_value");
-			attributes.other_value = $("#"+otherObjectId).val();
-		}
-
-		// OK, most of the time.
-
-		if ($(checkObject).attr("other_other_value")) {
-			var otherObjectId = $(checkObject).attr("other_other_value");
-			attributes.other_other_value = $("#"+otherObjectId).val();
-		}
-
-		if ($(checkObject).attr("other_text")) {
-			var otherTextId = $(checkObject).attr("other_text");
-			attributes.other_text = $("#"+otherTextId).val();
-		}
-
-		// Really, when don't I?
-		if (attributes.option_one) {
-			var optionOneId = $(checkObject).attr("option_one");
-
-			if (optionOneId) {
-				if ($("#"+optionOneId).prop("checked")) {
-					attributes.option_one = true;
+			if (checkObject.type === "checkbox") {
+				if ($(checkObject).prop("checked") === false) {
+					attributes.property_value = 0;
 				}
 			}
 
-			if (attributes.option_one !== true) {
-				delete attributes.option_one;
+			if (attributes.parent_id === undefined) {
+				attributes.parent_id = $(checkObject).parent().attr('id');
 			}
-		}
 
-		if (attributes.option_two) {
-			var optionTwoId = $(checkObject).attr("option_two");
+			// I hate myself a lot sometimes.
 
-			if (optionTwoId) {
-				if ($("#"+optionTwoId).prop("checked")) {
-					attributes.option_two = true;
+			if ($(checkObject).attr("other_value")) {
+				var otherObjectId = $(checkObject).attr("other_value");
+				attributes.other_value = $("#"+otherObjectId).val();
+			}
+
+			// OK, most of the time.
+
+			if ($(checkObject).attr("other_other_value")) {
+				var otherObjectId = $(checkObject).attr("other_other_value");
+				attributes.other_other_value = $("#"+otherObjectId).val();
+			}
+
+			if ($(checkObject).attr("other_text")) {
+				var otherTextId = $(checkObject).attr("other_text");
+				attributes.other_text = $("#"+otherTextId).val();
+			}
+
+			// Really, when don't I?
+			if (attributes.option_one) {
+				var optionOneId = $(checkObject).attr("option_one");
+
+				if (optionOneId) {
+					if ($("#"+optionOneId).prop("checked")) {
+						attributes.option_one = true;
+					}
+				}
+
+				if (attributes.option_one !== true) {
+					delete attributes.option_one;
 				}
 			}
 
-			if (attributes.option_two !== true) {
-				delete attributes.option_two;
+			if (attributes.option_two) {
+				var optionTwoId = $(checkObject).attr("option_two");
+
+				if (optionTwoId) {
+					if ($("#"+optionTwoId).prop("checked")) {
+						attributes.option_two = true;
+					}
+				}
+
+				if (attributes.option_two !== true) {
+					delete attributes.option_two;
+				}
 			}
 		}
 
