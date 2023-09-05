@@ -27,6 +27,16 @@ echo
 
 /usr/bin/apt update
 
+/usr/bin/apt -y -q install cpanminus
+
+cpanm Lingua::EN::Nums2Words
+cpanm REST::Client
+cpanm Text::Undiacritic
+cpanm HTTP::UA::Parser
+cpanm JSON@4.02
+cpanm JSON::WebToken
+cpanm Crypt::JWT
+
 /usr/bin/apt -y -q install apache2 \
 	apache2-utils \
 	bzip2 \
@@ -56,7 +66,6 @@ echo
 	libcompress-raw-zlib-perl \
 	libcrypt-passwdmd5-perl \
 	libcrypt-ssleay-perl \
-	libcrypt-jwt-perl \
 	libdate-manip-perl \
 	libdatetime-format-builder-perl \
 	libdatetime-format-mail-perl \
@@ -122,12 +131,9 @@ echo
 	libbytes-random-secure-perl \
 	s3cmd \
 	libswitch-perl \
-	libjson-perl \
-	libjson-webtoken-perl \
 	libjavascript-minifier-perl \
 	libcss-minifier-perl \
 	pv \
-	cpanminus \
 	librest-application-perl \
 	libtext-csv-encoded-perl \
 	libtext-csv-perl \
@@ -136,11 +142,6 @@ echo
 	geoip-database \
 	geoipupdate \
 	libgeoip1:amd64
-
-cpanm Lingua::EN::Nums2Words
-cpanm REST::Client
-cpanm Text::Undiacritic
-cpanm HTTP::UA::Parser
 
 # This is for the NYT Profiler tools for development.  I'm mostly putting it
 # here to remove the XS dependency from cpanel that breaks it because I can

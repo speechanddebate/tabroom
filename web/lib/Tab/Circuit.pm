@@ -32,14 +32,18 @@ sub location {
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
+	$/ = ""; #Remove all trailing newlines
 
-	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::CircuitSetting->search(
+	my @existing = Tab::CircuitSetting->search(
 		circuit => $self->id,
-		tag    => $tag,
-	)->first;
+		tag   => $tag
+	);
+
+	my $existing = shift @existing if @existing;
+
+	foreach (@existing) { $_->delete(); }
 
 	if (defined $value) {
 
@@ -48,6 +52,13 @@ sub setting {
 			$existing->value($value);
 			$existing->value_text($blob) if $value eq "text";
 			$existing->value_date($blob) if $value eq "date";
+
+			if ($value eq "json") {
+				eval{
+					$existing->value_text(JSON::encode_json($blob));
+				};
+			}
+
 			$existing->update;
 
 			if ($value eq "delete" || $value eq "" || $value eq "0") {
@@ -60,39 +71,43 @@ sub setting {
 
 			my $existing = Tab::CircuitSetting->create({
 				circuit => $self->id,
-				tag    => $tag,
-				value  => $value,
+				tag   => $tag,
+				value => $value,
 			});
 
 			if ($value eq "text") {
 				$existing->value_text($blob);
-			}
-
-			if ($value eq "date") {
+			} elsif ($value eq "date") {
 				$existing->value_date($blob);
+			} elsif ($value eq "json") {
+				eval{
+					$existing->value_text(JSON::encode_json($blob));
+				};
 			}
-
-			$existing->update;
-
+			$existing->update();
 		}
 
 	} else {
 
 		return unless $existing;
-		return $existing->value_text if $existing->value eq "text";
-		return $existing->value_date if $existing->value eq "date";
+		if ($existing->value eq "text") {
+			return $existing->value_text
+		} elsif ($existing->value eq "date") {
+			return $existing->value_date
+		} elsif ($existing->value eq "json") {
+			return eval {
+				return JSON::decode_json($existing->value_text);
+			};
+		}
 		return $existing->value;
-
 	}
-
 }
+
 
 sub all_settings {
 
 	my $self = shift;
-
 	my %all_settings;
-
 	my $dbh = Tab::DBI->db_Main();
 
     my $sth = $dbh->prepare("
@@ -104,7 +119,11 @@ sub all_settings {
 
     $sth->execute($self->id);
 
-    while( my ($tag, $value, $value_date, $value_text)  = $sth->fetchrow_array() ) {
+    while(
+		my (
+			$tag, $value, $value_date, $value_text
+		)  = $sth->fetchrow_array()
+	) {
 
 		if ($value eq "date") {
 
@@ -115,15 +134,15 @@ sub all_settings {
 
 			$all_settings{$tag} = $value_text;
 
+		} elsif ($value eq "json") {
+
+			$all_settings{$tag} = eval {
+				return JSON::decode_json($value_text);
+			};
+
 		} else {
-
 			$all_settings{$tag} = $value;
-
 		}
-
 	}
-
 	return %all_settings;
-
 }
-
