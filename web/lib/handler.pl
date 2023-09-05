@@ -2,10 +2,6 @@
 package Tab::Mason;
 
 use lib "/www/tabroom/web/lib";
-#Alternative locations
-#use lib "/www/testing.tabroom.com/web/lib";
-#use lib "/www/backup.tabroom.com/web/lib";
-#use lib "/www/staging.tabroom.com/web/lib";
 
 use strict;
 no warnings "uninitialized";
