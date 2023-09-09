@@ -7,7 +7,7 @@ export const objectify = (array) => {
 			delete dest[output.id].id;
 		} else {
 			dest[item.id] = stripNull(item);
-			delete dest[item.id].id;
+			delete dest[item.id];
 		}
 
 		Object.keys(item).forEach( (tag) => {
