@@ -590,6 +590,8 @@
 		var base_domain =  base_url[0].split('.').slice(-2).join('.');
 		base_domain = base_domain.replace(/\//g,'');
 
+		$("select:not(.plain)").trigger("chosen:updated");
+
 		if (
 			(base_domain !== 'tabroom.com')
 			&& (base_domain !== 'debatefail.com')
