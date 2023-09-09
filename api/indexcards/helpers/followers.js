@@ -214,9 +214,9 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 
 			rawEntryFollowers.forEach( (person) => {
 
-				if (person.provider && person.phone) {
-					blastAll.phone.push(`${person.phone}@${person.provider}`);
-				}
+				// if (person.provider && person.phone) {
+				//	blastAll.phone.push(`${person.phone}@${person.provider}`);
+				// }
 
 				if (person.email) {
 					blastAll.email.push(person.email);
@@ -229,16 +229,16 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 							email : [],
 						};
 					}
-					if (person.phone && person.provider) {
-						blastOnly.entry[person.entry].phone.push(`${person.phone}@${person.provider}`);
-					}
+					// if (person.phone && person.provider) {
+					//	  blastOnly.entry[person.entry].phone.push(`${person.phone}@${person.provider}`);
+					// }
 					blastOnly.entry[person.entry].email.push(person.email);
 				}
 			});
 
 			const schoolFollowersQuery = `
 				select
-					person.id, person.email, person.phone, person.provider, follower.school school
+					person.id, person.email, follower.school school
 				from (person, ballot, entry, follower, panel ${fields})
 				${whereLimit}
 					and ballot.panel = panel.id
@@ -286,9 +286,9 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 
 			rawJudgeFollowers.forEach( (person) => {
 
-				if (person.provider && person.phone) {
-					blastAll.phone.push(`${person.phone}@${person.provider}`);
-				}
+				// if (person.provider && person.phone) {
+				//	blastAll.phone.push(`${person.phone}@${person.provider}`);
+				// }
 				if (person.email) {
 					blastAll.email.push(person.email);
 				}
@@ -301,16 +301,16 @@ export const getFollowers = async (replacements, options = { recipients: 'all' }
 						};
 					}
 
-					if (person.phone && person.provider) {
-						blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
-					}
+					// if (person.phone && person.provider) {
+					//	blastOnly.judge[person.judge].phone.push(`${person.phone}@${person.provider}`);
+					// }
 					blastOnly.judge[person.judge].email.push(`${person.email}`);
 				}
 			});
 
 			const schoolFollowersQuery = `
 				select
-					person.id, person.email, person.phone, person.provider, ballot.judge judge
+					person.id, person.email, ballot.judge judge
 				from (person, judge, ballot, follower, panel ${fields})
 				${whereLimit}
 					and ballot.panel = panel.id
