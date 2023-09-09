@@ -391,7 +391,7 @@ const formatBlast = async (queryData, req) => {
 				}
 
 				// Create standard texts for lists of entries & judges for the other to see
-				if (!round.eventType === 'mock_trial') {
+				if (!round.eventType !== 'mock_trial') {
 					sectionMessage.judgeText = `\nJudging\n`;
 					sectionMessage.judgeSingle = `\n\tJudges:`;
 					sectionMessage.judgeHTML = `<p style="font-weight: 600;">Judging</p>`;
@@ -512,7 +512,7 @@ const formatBlast = async (queryData, req) => {
 
 					entryMessage.html += sectionMessage.entryHTML;
 
-					if (round.eventType != 'mock_trial') {
+					if (round.eventType !== 'mock_trial') {
 						entryMessage.text += sectionMessage.judgeText;
 						entryMessage.html += sectionMessage.judgeHTML;
 					}
