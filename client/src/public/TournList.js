@@ -34,11 +34,17 @@ const TournList = () => {
 		});
 
 		const now = moment();
+		const start = moment(tourn.start, 'YYYY-MM-DDTHH:mm:ssZ');
+		const end = moment(tourn.end, 'YYYY-MM-DDTHH:mm:ssZ');
 
-		if (moment(tourn.start).tz(tourn.tz).date() === moment(tourn.end).tz(tourn.tz).date()) {
-			tournRow.dates = moment(tourn.start).tz(tourn.tz).format('M/D');
+		if (start.isValid() && end.isValid()) {
+			if (start.tz(tourn.tz).date() === end.tz(tourn.tz).date()) {
+				tournRow.dates = start.tz(tourn.tz).format('M/D');
+			} else {
+				tournRow.dates = `${start.tz(tourn.tz).format('M/D')} - ${end.tz(tourn.tz).format('M/D')}`;
+			}
 		} else {
-			tournRow.dates = `${moment(tourn.start).tz(tourn.tz).format('M/D')} - ${moment(tourn.end).tz(tourn.tz).format('M/D')}`;
+			tournRow.dates = '';
 		}
 
 		if (tourn.webname) {
