@@ -87,14 +87,14 @@ const TournList = () => {
 		{ accessor : 'style' , hidden : true , excludeCSV: true },
 		{
 			accessor : 'tournament',
-			cell: (row) => {
-				return <a href={`${row?.row?.original?.link}`}>{row.getValue()}</a>;
+			cell: (incoming) => {
+				return <a href={`${incoming?.row?.original?.link}`}>{incoming.getValue()}</a>;
 			},
 		},
 		{
 			accessor : 'type',
-			cell: (row) => {
-				return <a href={`${row?.row?.original?.link}`}>{row.getValue()}</a>;
+			cell: (incoming) => {
+				return <a href={`${incoming?.row?.original?.link}`}>{incoming.getValue()}</a>;
 			},
 		},
 		{
