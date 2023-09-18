@@ -88,13 +88,13 @@ const TournList = () => {
 		{
 			accessor : 'tournament',
 			cell: (row) => {
-				return <a href='{row.original.link}'>{row.getValue()}</a>;
+				return <a href={`${row?.row?.original?.link}`}>{row.getValue()}</a>;
 			},
 		},
 		{
 			accessor : 'type',
 			cell: (row) => {
-				return <a href='{row.original.link}'>{row.getValue()}</a>;
+				return <a href={`${row?.row?.original?.link}`}>{row.getValue()}</a>;
 			},
 		},
 		{
