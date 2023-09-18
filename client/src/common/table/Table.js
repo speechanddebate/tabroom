@@ -55,7 +55,7 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 		},
 	});
 
-	Object.keys(options.customStyles).forEach( (key) => {
+	Object.keys(options.customStyles || {}).forEach( (key) => {
 		styles[key] = styles[options.customStyles[key]];
 	});
 
