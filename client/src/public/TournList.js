@@ -23,6 +23,113 @@ const TournList = () => {
 		fetchList();
 	}, []);
 
+	const tournTableColumns = [
+		{
+			header   : 'Dates',
+			style    : 'nowrap',
+			sortKey  : 'week',
+			accessor : (tourn) => {
+				const start = moment(tourn.start, 'YYYY-MM-DDTHH:mm:ssZ');
+				const end = moment(tourn.end, 'YYYY-MM-DDTHH:mm:ssZ');
+				return `${start.tz(tourn.tz).format('YYYY-MM-DD')}-${end.tz(tourn.tz).format('YYYY-MM-DD')}`;
+			},
+			cell    : (tourn) => {
+				const start = moment(tourn.start, 'YYYY-MM-DDTHH:mm:ssZ');
+				const end = moment(tourn.end, 'YYYY-MM-DDTHH:mm:ssZ');
+
+				if (start.isValid() && end.isValid()) {
+					if (start.tz(tourn.tz).date() === end.tz(tourn.tz).date()) {
+						return start.tz(tourn.tz).format('M/D');
+					}
+					return `${start.tz(tourn.tz).format('M/D')} - ${end.tz(tourn.tz).format('M/D')}`;
+				}
+				return '';
+			},
+		},
+		{
+			header : 'Tournament',
+			key    : 'name',
+			cell   : (tourn) => {
+
+				let tournName = tourn.name;
+
+				if (tourn.district) {
+
+					tournName.replaceAll('District Tournament', ''); 
+
+					tournName = `
+						<span class='semibold half'>
+								NSDA: ${ $tourns{$tourn_id}{'name'} %>
+							</span>
+							<span class='half'>
+								<% $tourns{$tourn_id}{'weekend_name'} %>
+							</span>
+
+				}
+
+				if (tourn.webname) {
+					return `<a href='https://${tourn.webname}.tabroom.com'>${tourn.name}</a>`;
+				}
+				return `<a href='https://www.tabroom.com/index/tourn/index.mhtml?tourn_id=${tourn.id}'>${tourn.name}</a>`;
+				}
+				if (tourn.webname) {
+					return `<a href='https://${tourn.webname}.tabroom.com'>${tourn.name}</a>`;
+				}
+				return `<a href='https://www.tabroom.com/index/tourn/index.mhtml?tourn_id=${tourn.id}'>${tourn.name}</a>`;
+			},
+		},
+		{ key : 'city' },
+		{ key : 'state' },
+		{
+			header   : 'Format',
+			style    : 'nowrap centeralign',
+			accessor : (tourn) => {
+				return `${tourn.inp ? 'In Person ' : ''} ${tourn.online ? 'Online' : ''} ${tourn.hybrid ? 'Hybrid' : ''}`;
+			},
+			cell     : (tourn) => {
+				return (
+					<>
+						{
+							tourn.inp &&
+							<span className='third fa fa-sm fa-user bluetext hover' title='Tournament has in-person events' />
+						}
+						{
+							tourn.online &&
+							<span className='third fa fa-sm fa-laptop greentext hover' title='Tournament has online events' />
+						}
+						{
+							tourn.hybrid &&
+							<span className='third fa fa-sm fa-handshake-o orangetext hover' title='Tournament has hybrid events' />
+						}
+					</>
+				);
+			},
+		},
+		{
+			header: 'Registration',
+			accessor: (tourn) => {
+				const regStart = moment(tourn.start, 'YYYY-MM-DDTHH:mm:ssZ');
+				const regEnd = moment(tourn.end, 'YYYY-MM-DDTHH:mm:ssZ');
+				const now = moment();
+				if (regStart.isValid() && regEnd.isValid()) {
+					if (now < regStart) {
+						tourn.registration = `Opens on ${regStart.tz(tourn.tz).format('M/D hh:mm A z')}`;
+					} else if (now < regEnd) {
+						tourn.registration = `Due by ${regEnd.tz(tourn.tz).format('M/D hh:mm A z')}`;
+					} else {
+						tourn.registration = 'Closed';
+					}
+				} else {
+					tourn.registration = '';
+				}
+			},
+		},
+		{
+			header : 'Judging Signups In',
+			key    : 'signup',
+		},
+	];
+
 	const tournTable = tourns.map( (tourn) => {
 
 		const tournRow = {};
@@ -33,7 +140,6 @@ const TournList = () => {
 			}
 		});
 
-		const now = moment();
 		const start = moment(tourn.start, 'YYYY-MM-DDTHH:mm:ssZ');
 		const end = moment(tourn.end, 'YYYY-MM-DDTHH:mm:ssZ');
 
