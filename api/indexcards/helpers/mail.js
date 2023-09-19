@@ -144,8 +144,8 @@ export const adminBlast = async (inputData) => {
 	const messageData = { ...inputData };
 
 	const transporter = nodemailer.createTransport({
-		host   : config.ADMIN_MAIL_SERVER ? config.ADMIN_MAIL_SERVER : config.MAIL_SERVER,
-		port   : config.ADMIN_MAIL_PORT ? config.ADMIN_MAIL_PORT : config.MAIL_PORT,
+		host   : config.MAIL_SERVER ? config.MAIL_SERVER : config.MAIL_SERVER,
+		port   : config.MAIL_PORT ? config.MAIL_PORT : config.MAIL_PORT,
 		secure : false,
 	});
 

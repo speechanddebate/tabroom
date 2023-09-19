@@ -14,6 +14,10 @@ export const futureTourns = {
 				and tourn_circuit.circuit = ${req.params.circuit} ) `;
 		}
 
+		if (typeof req.query.state === 'string' && req.query.state.length === 2) {
+			limit = ` and tourn.state = '${req.query.state.toUpperCase()}'`;
+		}
+
 		const [future] = await db.sequelize.query(`
 			select tourn.id, tourn.webname, tourn.name, tourn.tz, tourn.hidden,
 				tourn.city as location, tourn.state, tourn.country, 

@@ -8,11 +8,13 @@ const Layout = ({ Main, Menu }) => {
 		<div className={styles.App}>
 			<div id={styles.container}>
 				<Header />
-				<div id={styles.main}>
-					<Main />
-				</div>
-				<div id={styles.menu}>
-					<Menu />
+				<div id={styles.wrapper}>
+					<div id={styles.main}>
+						<Main />
+					</div>
+					<div id={styles.menu}>
+						<Menu />
+					</div>
 				</div>
 			</div>
 		</div>

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { useSelector } from 'react-redux';
 import moment from 'moment-timezone';
 import Table from '../common/table/Table';
 
@@ -12,15 +13,7 @@ const TournList = () => {
 		navigate('/route');
 	};
 
-	const [tourns, setTourns] = useState([]);
-
-	useEffect(() => {
-		const fetchList = async () => {
-			const response = await fetch(`${process.env.REACT_APP_API_BASE}/invite/upcoming`, { method: 'GET' });
-			setTourns(await response.json());
-		};
-		fetchList();
-	}, []);
+	const tourns = useSelector((state) => state.tournList);
 
 	const tableColumns = [
 		{

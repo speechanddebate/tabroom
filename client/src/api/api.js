@@ -53,3 +53,7 @@ export const tournSearch = async (searchString, mode) => {
 	}
 	return fetchBase(`/public/search/future/${searchString}`);
 };
+
+export const getTournList = async (state) => {
+	return fetchBase(`/invite/upcoming?state=${state}`);
+};

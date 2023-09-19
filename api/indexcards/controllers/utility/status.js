@@ -7,6 +7,12 @@ export const systemStatus = {
 	},
 };
 
+export const barfPlease = {
+	GET: async (req, res) => {
+		throw new Error('OMG we are not happy');
+	},
+};
+
 systemStatus.GET.apiDoc = {
 	summary: 'Responds with a 200 if up',
 	operationId: 'getStatus',
