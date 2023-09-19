@@ -33,12 +33,13 @@ const errorHandler = (err, req, res, next) => {
 
 	// Production bugs should find their way to Palmer
 	const env = process.env.NODE_ENV || 'development';
+	let mailInfo = {};
 
 	if (env === 'production') {
 
 		const messageData = {
 			from    : 'error-handler@tabroom.com',
-			to      : config.ERROR_DESTINATION,
+			email   : config.ERROR_DESTINATION,
 			subject : `JS Bug Tripped at ${new Date()}`,
 			text    : `Javascript has errors too, and here's one for you!  YAY!
 	Stack ${err.stack}
@@ -53,8 +54,8 @@ const errorHandler = (err, req, res, next) => {
 		};
 
 		try {
-			const info = adminBlast(messageData);
-			errorLogger.info(info);
+			mailInfo = adminBlast(messageData);
+			errorLogger.info(mailInfo);
 			err.message += ` Also, this stack was emailed to the admins to ${config.ERROR_DESTINATION}`;
 		} catch (error) {
 			errorLogger.info(error);
@@ -67,6 +68,7 @@ const errorHandler = (err, req, res, next) => {
 		logCorrelationId : req.uuid,
 		path             : req.path,
 		stack            : err.stack,
+		mailInfo,
 		env,
 	});
 };
