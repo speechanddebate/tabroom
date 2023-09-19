@@ -38,7 +38,7 @@ const errorHandler = (err, req, res, next) => {
 
 		const messageData = {
 			from    : 'error-handler@tabroom.com',
-			email   : config.ERROR_DESTINATION,
+			to      : config.ERROR_DESTINATION,
 			subject : `JS Bug Tripped at ${new Date()}`,
 			text    : `Javascript has errors too, and here's one for you!  YAY!
 	Stack ${err.stack}
