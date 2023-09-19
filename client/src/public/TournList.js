@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import moment from 'moment-timezone';
 
-import JSONTable from '../common/table/JSONTable';
+import Table from '../common/table/Table';
 
 const TournList = () => {
 
@@ -150,7 +150,7 @@ const TournList = () => {
 
 	return (
 		<div>
-			<JSONTable
+			<Table
 				data    = {tourns}
 				options = {
 					{

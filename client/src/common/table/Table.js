@@ -7,6 +7,8 @@ import {
 	createColumnHelper,
 } from '@tanstack/react-table';
 
+import moment from 'moment-timezone';
+
 import CSVDownload from './CSVDownload';
 
 import styles from './Table.module.css';
@@ -16,26 +18,56 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 	const columnHelper = createColumnHelper();
 	const [sorting, setSorting] = useState([]);
 
-	const tableColumns = useMemo(() => {
-		return columns?.map(c => {
+	let tableColumns = useMemo(() => [...columns], [columns]);
+
+	// If no columns provided, generate definitions from JSON structure
+	if (tableColumns.length === 0) {
+		tableColumns = Object.keys(data[0] ?? [])?.map((k) => {
+			if (typeof data[1][k] === 'number') {
+				return {
+					accessor : k,
+					header   : k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
+					style    : `numeric`,
+				};
+			}
+			if (typeof data[1][k] === 'string' && moment(data[1][k]).isValid()) {
+				return {
+					accessor : k,
+					header   : k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
+					cell     : info => moment(info.getValue()).format('l'),
+				};
+			}
+			return {
+				accessor: k,
+				header: k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
+			};
+		}) || [];
+	}
+
+	const mergedColumns = useMemo(() => {
+		return tableColumns?.map(c => {
 			return columnHelper.accessor(c.accessor, {
-				id           : c.id || c.accessor || c.header,
+				id           : c.id || c.header || c.accessor,
+				header       : c.header
+					|| (typeof c.acessor === 'string' && c.accessor.length > 1)
+					? c.accessor[0].toUpperCase() + c.accessor.slice(1)
+					: c.accessor,
 				cell         : info => info.getValue(),
 				footer       : info => info.column.id,
 				enableHiding : true,
 				...c,
 			});
 		});
-	}, [columns, columnHelper]);
+	}, [tableColumns, columnHelper]);
 
 	const columnVisibility = {};
-	tableColumns.forEach(c => {
+	mergedColumns.forEach(c => {
 		columnVisibility[c.accessor] = !c.hidden;
 	});
 
 	const table = useReactTable({
 		data,
-		columns: tableColumns,
+		columns: mergedColumns,
 		enableHiding: true,
 		state: {
 			sorting,
