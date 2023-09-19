@@ -2,7 +2,7 @@ import { errorLogger } from './logger';
 import adminBlast  from './mail';
 import config from '../../config/config';
 
-const errorHandler = (err, req, res, next) => {
+const errorHandler = async (err, req, res, next) => {
 
 	// Delegate to default express error handler if headers are already sent
 	if (res.headersSent) {
@@ -54,7 +54,7 @@ const errorHandler = (err, req, res, next) => {
 		};
 
 		try {
-			mailInfo = adminBlast(messageData);
+			mailInfo = await adminBlast(messageData);
 			errorLogger.info(mailInfo);
 			err.message += ` Also, this stack was emailed to the admins to ${config.ERROR_DESTINATION}`;
 		} catch (error) {
