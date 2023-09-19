@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import moment from 'moment-timezone';
-
 import Table from '../common/table/Table';
 
 const TournList = () => {
@@ -125,10 +124,10 @@ const TournList = () => {
 				const now = moment();
 				if (regStart.isValid() && regEnd.isValid()) {
 					if (now < regStart) {
-						return `Opens on ${regStart.tz(tourn.tz).format('M/D hh:mm A z')}`;
+						return `Opens on ${regStart.tz(tourn.tz).format('M/D h:mm A z')}`;
 					}
 					if (now < regEnd) {
-						return `Due by ${regEnd.tz(tourn.tz).format('M/D hh:mm A z')}`;
+						return `Due by ${regEnd.tz(tourn.tz).format('M/D h:mm A z')}`;
 					}
 					return 'Closed';
 				}
