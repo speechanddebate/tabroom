@@ -39,9 +39,12 @@ const errorHandler = async (err, req, res, next) => {
 		const messageData = {
 			from    : 'error-handler@tabroom.com',
 			email   : config.ERROR_DESTINATION,
-			subject : `JS Bug Tripped at ${new Date()}`,
-			text    : `Javascript has errors too, and here's one for you!  YAY!
+			subject : `Indexcards Bug Tripped`,
+			text    : `
+		
 	Stack ${err.stack}
+
+    Raw Full Error ${err}
 
     Full Error ${JSON.stringify(err, null, 4)}
 
