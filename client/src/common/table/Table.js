@@ -46,12 +46,13 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 
 	const mergedColumns = useMemo(() => {
 		return tableColumns?.map(c => {
+			let defaultHeader = '';
+			if (typeof c.accessor === 'string' && c.accessor.length > 1) {
+				defaultHeader = `${c?.accessor[0]?.toUpperCase()}${c.accessor?.slice(1)}`;
+			}
 			return columnHelper.accessor(c.accessor, {
 				id           : c.id || c.header || c.accessor,
-				header       : c.header
-					|| (typeof c.accessor === 'string' && c.accessor.length > 1)
-					? `${c?.accessor[0]?.toUpperCase()}${c.accessor?.slice(1)}`
-					: c.accessor,
+				header       : c.header || defaultHeader,
 				cell         : info => info.getValue(),
 				footer       : info => info.column.id,
 				enableHiding : true,
