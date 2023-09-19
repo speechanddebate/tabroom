@@ -188,7 +188,7 @@ export const adminBlast = async (inputData) => {
 	messageData.from = messageData.from ? messageData.from : config.MAIL_FROM;
 
 	if (messageData.email) {
-		messageData.to = messageData.email;
+		messageData.to = [messageData.email];
 		if (process.env.NODE_ENV === 'production') {
 			info = await transporter.sendMail(messageData);
 		} else {
@@ -200,7 +200,7 @@ export const adminBlast = async (inputData) => {
 	}
 
 	if (messageData.phone) {
-		messageData.to = messageData.phone;
+		messageData.to = [messageData.phone];
 		if (process.env.NODE_ENV === 'production') {
 			info = await transporter.sendMail(messageData);
 		} else {
