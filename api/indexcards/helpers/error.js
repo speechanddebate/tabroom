@@ -17,6 +17,7 @@ const errorHandler = (err, req, res, next) => {
 				errors           : err.errors,
 				stack            : err.stack,
 				logCorrelationId : req.uuid,
+				env,
 			});
 		}
 		if (err.status === 401) {
@@ -39,10 +40,8 @@ const errorHandler = (err, req, res, next) => {
 			from    : 'error-handler@tabroom.com',
 			email   : config.ERROR_DESTINATION,
 			subject : `JS Bug Tripped at ${new Date()}`,
-			text    : `
-Javascript has errors too, and here's one for you!  YAY!
-
-    Stack ${err.stack}
+			text    : `Javascript has errors too, and here's one for you!  YAY!
+	Stack ${err.stack}
 
     Full Error ${JSON.stringify(err, null, 4)}
 
@@ -67,6 +66,7 @@ Javascript has errors too, and here's one for you!  YAY!
 		logCorrelationId : req.uuid,
 		path             : req.path,
 		stack            : err.stack,
+		env,
 	});
 };
 
