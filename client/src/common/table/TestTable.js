@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router';
 
-import JSONTable from './JSONTable';
+import Table from './Table';
 
 const TestTable = () => {
 	const { name } = useParams();
@@ -46,7 +46,7 @@ const TestTable = () => {
 
 	return (
 		<div>
-			<JSONTable
+			<Table
 				data={data}
 				meta={{ transforms }}
 			/>
