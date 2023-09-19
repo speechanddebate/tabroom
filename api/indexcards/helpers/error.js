@@ -41,18 +41,21 @@ const errorHandler = async (err, req, res, next) => {
 			email   : config.ERROR_DESTINATION,
 			subject : `Indexcards Bug Tripped`,
 			text    : `
-		
-	Stack ${err.stack}
+Stack
+${err.stack}
 
-    Raw Full Error ${err}
+Login Session 
+${JSON.stringify(req.session, null, 4)}
 
-    Full Error ${JSON.stringify(err, null, 4)}
+Request Parameters
+${JSON.stringify(req.params, null, 4)}
 
-    Session ${JSON.stringify(req.session, null, 4)}
+Request Body
+${JSON.stringify(req.body, null, 4)}
 
-    Parameters ${JSON.stringify(req.params, null, 4)}
+Raw Full Error Object
+${JSON.stringify(err, Object.getOwnPropertyNames(err))}`,
 
-    Body ${JSON.stringify(req.body, null, 4)} `,
 		};
 
 		try {
