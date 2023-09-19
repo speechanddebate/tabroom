@@ -188,19 +188,22 @@ export const adminBlast = async (inputData) => {
 	messageData.from = messageData.from ? messageData.from : config.MAIL_FROM;
 
 	if (messageData.email) {
-		messageData.to = [messageData.email];
+		messageData.to = messageData.email;
 		if (process.env.NODE_ENV === 'production') {
 			info = await transporter.sendMail(messageData);
 		} else {
-			debugLogger.info(`Local: Admin email not sending from ${messageData.from} to ${messageData.to}`);
+			debugLogger.info(`Local: Admin email not sending from ${messageData.from} to ${messageData.bcc}`);
 			debugLogger.info(`Subject ${messageData.subject}`);
 			debugLogger.info(`Text ${messageData.text}`);
 			debugLogger.info(`HTML ${messageData.html}`);
+			info = `Local: Admin SMS not sending from ${messageData.from} to ${messageData.to}`;
 		}
+
+		console.log(`Message Data recipient should be ${messageData.to}`);
 	}
 
 	if (messageData.phone) {
-		messageData.to = [messageData.phone];
+		messageData.to = messageData.phone;
 		if (process.env.NODE_ENV === 'production') {
 			info = await transporter.sendMail(messageData);
 		} else {
@@ -208,12 +211,14 @@ export const adminBlast = async (inputData) => {
 			debugLogger.info(`Subject ${messageData.subject}`);
 			debugLogger.info(`Text ${messageData.text}`);
 			debugLogger.info(`HTML ${messageData.html}`);
+			info = `Local: Admin SMS not sending from ${messageData.from} to ${messageData.to}`;
 		}
 	}
 
 	return {
 		error   : false,
 		count   : messageData.to?.length,
+		to      : messageData.to,
 		message : `Administration blast message sent`,
 		info,
 	};

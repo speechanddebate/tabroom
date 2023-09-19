@@ -1,8 +1,8 @@
 import { errorLogger } from './logger';
-import adminBlast  from './mail';
+import { adminBlast } from './mail';
 import config from '../../config/config';
 
-const errorHandler = async (err, req, res, next) => {
+const errorHandler = (err, req, res, next) => {
 
 	// Delegate to default express error handler if headers are already sent
 	if (res.headersSent) {
@@ -33,9 +33,8 @@ const errorHandler = async (err, req, res, next) => {
 
 	// Production bugs should find their way to Palmer
 	const env = process.env.NODE_ENV || 'development';
-	let mailInfo = {};
 
-	if (env === 'production') {
+	if (env !== 'production') {
 
 		const messageData = {
 			from    : 'error-handler@tabroom.com',
@@ -54,8 +53,7 @@ const errorHandler = async (err, req, res, next) => {
 		};
 
 		try {
-			mailInfo = await adminBlast(messageData);
-			errorLogger.info(mailInfo);
+			adminBlast(messageData);
 			err.message += ` Also, this stack was emailed to the admins to ${config.ERROR_DESTINATION}`;
 		} catch (error) {
 			errorLogger.info(error);
@@ -68,7 +66,6 @@ const errorHandler = async (err, req, res, next) => {
 		logCorrelationId : req.uuid,
 		path             : req.path,
 		stack            : err.stack,
-		mailInfo,
 		env,
 	});
 };
