@@ -3,16 +3,16 @@ import PropTypes from 'prop-types';
 import Header from './Header';
 import styles from './Layout.module.css';
 
-const Layout = ({ main, menu }) => {
+const Layout = ({ Main, Menu }) => {
 	return (
 		<div className={styles.App}>
 			<div id={styles.container}>
 				<Header />
 				<div id={styles.main}>
-					{main}
+					<Main />
 				</div>
 				<div id={styles.menu}>
-					{menu}
+					<Menu />
 				</div>
 			</div>
 		</div>
@@ -20,8 +20,8 @@ const Layout = ({ main, menu }) => {
 };
 
 Layout.propTypes = {
-	main: PropTypes.node,
-	menu: PropTypes.node,
+	Main: PropTypes.func,
+	Menu: PropTypes.func,
 };
 
 export default Layout;
