@@ -55,7 +55,7 @@ const errorHandler = (err, req, res, next) => {
 		try {
 			const info = adminBlast(messageData);
 			errorLogger.info(info);
-			err.message += ` Also, this stack was emailed to the admins`;
+			err.message += ` Also, this stack was emailed to the admins to ${config.ERROR_DESTINATION}`;
 		} catch (error) {
 			errorLogger.info(error);
 			err.message += ` Also, error response on sending email: ${err}`;
