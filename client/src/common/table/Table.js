@@ -50,7 +50,7 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 				id           : c.id || c.header || c.accessor,
 				header       : c.header
 					|| (typeof c.accessor === 'string' && c.accessor.length > 1)
-					? `${c?.accessor[0]?.toUpperCase()}${c.accessor?.slice(1)}`
+					? `${c?.accessor[0]?.toUpperCase()}${c?.accessor?.slice(1)}`
 					: c.accessor,
 				cell         : info => info.getValue(),
 				footer       : info => info.column.id,
