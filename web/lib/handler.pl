@@ -29,7 +29,6 @@ use HTML::Scrubber;
 use Email::Valid;
 use DateTime::Span;
 use DateTime::Format::MySQL;
-use Crypt::JWT;
 use Crypt::PasswdMD5;
 use Apache2::Cookie;
 use Apache2::Request;

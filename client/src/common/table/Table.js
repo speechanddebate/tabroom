@@ -19,10 +19,10 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 	const tableColumns = useMemo(() => {
 		return columns?.map(c => {
 			return columnHelper.accessor(c.accessor, {
-				id: c.id || c.accessor || c.header,
-				cell: info => info.getValue(),
-				footer: info => info.column.id,
-				enableHiding: true,
+				id           : c.id || c.accessor || c.header,
+				cell         : info => info.getValue(),
+				footer       : info => info.column.id,
+				enableHiding : true,
 				...c,
 			});
 		});
@@ -130,7 +130,7 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 							<tr key={row.id} className={`${table.options.options.getRowStyles(row, table)} ${styles.tr}`}>
 								{
 									row.getVisibleCells().map(cell => (
-										<td key={cell.id} className={`${styles[cell.column.columnDef?.style]} ${styles.td}`}>
+										<td key={cell.id} className={`${cell.column.columnDef?.style} ${styles.td}`}>
 											{ flexRender(cell.column.columnDef.cell, cell.getContext()) }
 										</td>
 									))

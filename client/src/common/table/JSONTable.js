@@ -10,16 +10,16 @@ const JSONTable = ({ data = [], options = {} }) => {
 		return Object.keys(data[0] ?? [])?.map((k) => {
 			if (typeof data[1][k] === 'number') {
 				return {
-					accessor: k,
-					header: k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
-					style: 'numeric',
+					accessor : k,
+					header   : k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
+					style    : `numeric`,
 				};
 			}
 			if (typeof data[1][k] === 'string' && moment(data[1][k]).isValid()) {
 				return {
-					accessor: k,
-					header: k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
-					cell: info => moment(info.getValue()).format('l'),
+					accessor : k,
+					header   : k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
+					cell     : info => moment(info.getValue()).format('l'),
 				};
 			}
 			return {

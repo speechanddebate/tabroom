@@ -62,24 +62,31 @@ const TournList = () => {
 			tournRow.state = tourn.state;
 		}
 
-		tournRow.type = '';
+		tournRow.type = {};
 		['inp', 'hybrid', 'online'].forEach( (key) => {
 			if (tourn[key] > 0) {
-				tournRow.type += `${key.substring(0, 3)} `;
+				tournRow.type[key] = true;
 			}
 		});
 
-		if (now < moment(tourn.reg_start)) {
-			tournRow.registration = `Opens on ${moment(tourn.reg_start).tz(tourn.tz).format('M/D hh:mm A z')}`;
-		} else if (now < moment(tourn.reg_end)) {
-			tournRow.registration = `Due by ${moment(tourn.reg_end).tz(tourn.tz).format('M/D hh:mm A z')}`;
+		const regStart = moment(tourn.start, 'YYYY-MM-DDTHH:mm:ssZ');
+		const regEnd = moment(tourn.end, 'YYYY-MM-DDTHH:mm:ssZ');
+		if (regStart.isValid() && regEnd.isValid()) {
+			if (now < regStart) {
+				tournRow.registration = `Opens on ${regStart.tz(tourn.tz).format('M/D hh:mm A z')}`;
+			} else if (now < regEnd) {
+				tournRow.registration = `Due by ${regEnd.tz(tourn.tz).format('M/D hh:mm A z')}`;
+			} else {
+				tournRow.registration = 'Closed';
+			}
 		} else {
-			tournRow.registration = 'Closed';
+			tournRow.registration = '';
 		}
 
+		tournRow.week = tourn.week;
 		tournRow.signup = tourn.signup;
-		return tournRow;
 
+		return tournRow;
 	});
 
 	const transforms = [
@@ -92,17 +99,38 @@ const TournList = () => {
 			},
 		},
 		{
-			accessor : 'type',
-			cell: (incoming) => {
-				return <a href={`${incoming?.row?.original?.link}`}>{incoming.getValue()}</a>;
-			},
+			accessor : 'state',
+			style    : 'centeralign',
 		},
 		{
+			accessor : 'type',
+			style    : 'centeralign',
+			cell: (incoming) => {
+				return (
+					<>
+						{
+							incoming?.getValue().inp &&
+							<span className='third fa fa-sm fa-user bluetext hover' title='Tournament has in-person events' />
+						}
+						{
+							incoming?.getValue().online &&
+							<span className='third fa fa-sm fa-laptop greentext hover' title='Tournament has online events' />
+						}
+						{
+							incoming?.getValue().hybrid &&
+							<span className='third fa fa-sm fa-handshake-o orangetext hover' title='Tournament has hybrid events' />
+						}
+					</>
+				);
+			},
+		},
+		{ accessor : 'week'  , hidden : true , excludeCSV: true },
+		{
 			accessor : 'dates',
-			sortingFn: (rowA, rowB) => {
-				if (rowA.original.week === rowB.original.week) { return 0; }
-				if (rowA.original.week > rowB.original.week) { return 1; }
-				if (rowA.original.week < rowB.original.week) { return -1; }
+			sortingFn: (a, b) => {
+				if (a?.original?.week === b?.original?.week) { return 0; }
+				if (a?.original?.week > b?.original?.week) { return 1; }
+				if (a?.original?.week < b?.original?.week) { return -1; }
 				return 0;
 			},
 		},
@@ -116,7 +144,15 @@ const TournList = () => {
 		<div>
 			<JSONTable
 				data    = {tournTable}
-				options = {{ transforms, customStyles, striped: true, exportFileName: 'UpcomingTournament', title: 'Upcoming Tournaments'  }}
+				options = {
+					{
+						transforms,
+						customStyles,
+						striped        : true,
+						exportFileName : 'UpcomingTournament',
+						title          : 'Upcoming Tournaments',
+					}
+				}
 			/>
 			<button onClick={handleNavigate} type="button">Go to /route</button>
 			<p>{name}</p>
