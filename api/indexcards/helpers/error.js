@@ -2,7 +2,7 @@ import { errorLogger } from './logger';
 import { adminBlast } from './mail';
 import config from '../../config/config';
 
-const errorHandler = (err, req, res, next) => {
+const errorHandler = async (err, req, res, next) => {
 
 	// Delegate to default express error handler if headers are already sent
 	if (res.headersSent) {
@@ -34,7 +34,7 @@ const errorHandler = (err, req, res, next) => {
 	// Production bugs should find their way to Palmer
 	const env = process.env.NODE_ENV || 'development';
 
-	if (env !== 'production') {
+	if (env === 'production') {
 
 		const messageData = {
 			from    : 'error-handler@tabroom.com',
