@@ -152,10 +152,9 @@ const TournList = () => {
 		<div>
 			<Table
 				data    = {tourns}
+				columns = {tableColumns}
 				options = {
 					{
-						tableRows : tourns,
-						tableColumns,
 						customStyles,
 						striped        : true,
 						exportFileName : 'UpcomingTournament',
