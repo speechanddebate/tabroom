@@ -49,7 +49,7 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 			return columnHelper.accessor(c.accessor, {
 				id           : c.id || c.header || c.accessor,
 				header       : c.header
-					|| (typeof c.acessor === 'string' && c.accessor.length > 1)
+					|| (typeof c.accessor === 'string' && c.accessor.length > 1)
 					? c.accessor[0].toUpperCase() + c.accessor.slice(1)
 					: c.accessor,
 				cell         : info => info.getValue(),
