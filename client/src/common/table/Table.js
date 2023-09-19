@@ -26,20 +26,20 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 			if (typeof data[1][k] === 'number') {
 				return {
 					accessor : k,
-					header   : k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
+					header   : k.length > 1 ? `${k[0]?.toUpperCase()}${k.slice(1)}` : k,
 					style    : `numeric`,
 				};
 			}
 			if (typeof data[1][k] === 'string' && moment(data[1][k]).isValid()) {
 				return {
 					accessor : k,
-					header   : k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
+					header   : k.length > 1 ? `${k[0]?.toUpperCase()}${k.slice(1)}` : k,
 					cell     : info => moment(info.getValue()).format('l'),
 				};
 			}
 			return {
 				accessor: k,
-				header: k.length > 1 ? k[0].toUpperCase() + k.slice(1) : k,
+				header: k.length > 1 ? `${k[0]?.toUpperCase()}${k.slice(1)}` : k,
 			};
 		}) || [];
 	}
@@ -50,7 +50,7 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 				id           : c.id || c.header || c.accessor,
 				header       : c.header
 					|| (typeof c.accessor === 'string' && c.accessor.length > 1)
-					? c.accessor[0].toUpperCase() + c.accessor.slice(1)
+					? `${c?.accessor[0]?.toUpperCase()}${c.accessor?.slice(1)}`
 					: c.accessor,
 				cell         : info => info.getValue(),
 				footer       : info => info.column.id,
