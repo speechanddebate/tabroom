@@ -125,15 +125,14 @@ const TournList = () => {
 				const now = moment();
 				if (regStart.isValid() && regEnd.isValid()) {
 					if (now < regStart) {
-						tourn.registration = `Opens on ${regStart.tz(tourn.tz).format('M/D hh:mm A z')}`;
-					} else if (now < regEnd) {
-						tourn.registration = `Due by ${regEnd.tz(tourn.tz).format('M/D hh:mm A z')}`;
-					} else {
-						tourn.registration = 'Closed';
+						return `Opens on ${regStart.tz(tourn.tz).format('M/D hh:mm A z')}`;
 					}
-				} else {
-					tourn.registration = '';
+					if (now < regEnd) {
+						return `Due by ${regEnd.tz(tourn.tz).format('M/D hh:mm A z')}`;
+					}
+					return 'Closed';
 				}
+				return '';
 			},
 		},
 		{
