@@ -257,6 +257,7 @@ const TournList = () => {
 						striped        : true,
 						exportFileName : 'UpcomingTournament',
 						title          : 'Upcoming Tournaments',
+						getRowStyles   : (row) => (row?.original?.tournament === 'Nats' ? 'bold' : ''),
 					}
 				}
 			/>

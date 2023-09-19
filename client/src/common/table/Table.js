@@ -127,7 +127,7 @@ const Table = ({ data = [], columns = [], options = {} }) => {
 				<tbody className={styles.tbody}>
 					{
 						table.getRowModel().rows.map(row => (
-							<tr key={row.id} className={`${table.options.options.getRowStyles(row, table)} ${styles.tr}`}>
+							<tr key={row.id} className={`${table.options.options.getRowStyles(row, table)} ${options.getRowStyles(row, table)} ${styles.tr}`}>
 								{
 									row.getVisibleCells().map(cell => (
 										<td key={cell.id} className={`${cell.column.columnDef?.style} ${styles.td}`}>
