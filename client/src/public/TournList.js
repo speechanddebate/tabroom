@@ -28,16 +28,12 @@ const TournList = () => {
 			header   : 'Dates',
 			style    : 'nowrap',
 			sortKey  : 'week',
-			accessor : (row) => {
-				const tourn = row?.original;
-				if (!tourn) {
-					return '';
-				}
+			accessor: (tourn) => {
 				const start = moment(tourn.start, 'YYYY-MM-DDTHH:mm:ssZ');
 				const end = moment(tourn.end, 'YYYY-MM-DDTHH:mm:ssZ');
 				return `${start.tz(tourn.tz).format('YYYY-MM-DD')}-${end.tz(tourn.tz).format('YYYY-MM-DD')}`;
 			},
-			cell    : (row) => {
+			cell     : ({ row }) => {
 				const tourn = row?.original;
 				if (!tourn) {
 					return '';
@@ -63,7 +59,7 @@ const TournList = () => {
 		{
 			header   : 'Tournament',
 			accessor : 'name',
-			cell     : (row) => {
+			cell     : ({ row }) => {
 				const tourn = row?.original;
 				if (!tourn) {
 					return '';
@@ -77,22 +73,28 @@ const TournList = () => {
 					`;
 				}
 				if (tourn.webname) {
-					return `<a href='https://${tourn.webname}.tabroom.com'>${tourn.name}</a>`;
+					return <a href={`https://${tourn.webname}.tabroom.com`}>{tourn.name}</a>;
 				}
-				return `<a href='https://www.tabroom.com/index/tourn/index.mhtml?tourn_id=${tourn.id}'>${tourn.name}</a>`;
+				return <a href={`https://www.tabroom.com/index/tourn/index.mhtml?tourn_id=${tourn.id}`}>{tourn.name}</a>;
 			},
 		},
-		{ accessor : 'city' },
-		{ accessor : 'state' },
+		{
+			header: 'City',
+			accessor : 'location',
+		},
+		{
+			accessor : 'state',
+			style: 'centeralign',
+		},
 		{
 			header   : 'Format',
 			style    : 'nowrap centeralign',
-			accessor : (row) => {
-				return `${row?.original?.inp ? 'In Person ' : ''} 
-					${row?.original?.online ? 'Online' : ''}
-					${row?.original?.hybrid ? 'Hybrid' : ''}`;
+			accessor: (tourn) => {
+				return `${tourn.inp ? 'In Person ' : ''}
+					${tourn.online ? 'Online' : ''}
+					${tourn.hybrid ? 'Hybrid' : ''}`;
 			},
-			cell     : (row) => {
+			cell     : ({ row }) => {
 				const tourn = row?.original;
 				if (!tourn) {
 					return '';
@@ -100,15 +102,15 @@ const TournList = () => {
 				return (
 					<>
 						{
-							tourn.inp &&
+							tourn.inp > 0 &&
 							<span className='third fa fa-sm fa-user bluetext hover' title='Tournament has in-person events' />
 						}
 						{
-							tourn.online &&
+							tourn.online > 0 &&
 							<span className='third fa fa-sm fa-laptop greentext hover' title='Tournament has online events' />
 						}
 						{
-							tourn.hybrid &&
+							tourn.hybrid > 0 &&
 							<span className='third fa fa-sm fa-handshake-o orangetext hover' title='Tournament has hybrid events' />
 						}
 					</>
@@ -117,11 +119,7 @@ const TournList = () => {
 		},
 		{
 			header: 'Registration',
-			accessor: (row) => {
-				const tourn = row?.original;
-				if (!tourn) {
-					return '';
-				}
+			accessor: (tourn) => {
 				const regStart = moment(tourn.start, 'YYYY-MM-DDTHH:mm:ssZ');
 				const regEnd = moment(tourn.end, 'YYYY-MM-DDTHH:mm:ssZ');
 				const now = moment();
