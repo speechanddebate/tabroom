@@ -12,7 +12,6 @@ const TournList = () => {
 	const handleNavigate = () => {
 		navigate('/route');
 	};
-
 	const tourns = useSelector((state) => state.tournList);
 
 	const tableColumns = [
