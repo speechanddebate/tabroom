@@ -7,19 +7,11 @@ echo
 echo "Welcome to the Tabroom.com production system installer."
 echo
 
-
-echo
-echo "Configuring the system to actually act like a server."
-echo
-cat /www/tabroom/doc/conf/sysctl.conf >> /etc/sysctl.conf
-sysctl -p
-
-echo
-echo "Installing the latest version of Node and related files..."
-echo
-
-cp /www/tabroom/doc/conf/nodesource.list /etc/apt/sources.list.d;
-cp /www/tabroom/doc/conf/nodesource.gpg /usr/share/keyrings/nodesource.gpg
+#echo
+#echo "Configuring the system to actually act like a server."
+#echo
+#cat /www/tabroom/doc/conf/sysctl.conf >> /etc/sysctl.conf
+#sysctl -p
 
 echo
 echo "Installing the necessary software packages along with some ones I like having...."
@@ -91,21 +83,12 @@ cpanm Crypt::JWT
 	make \
 	mariadb-client \
 	mariadb-common \
-	nmap \
-	neovim \
-	nodejs \
-	npm \
-	openprinting-ppds \
 	perl \
 	perl-base \
 	perl-doc \
 	perl-modules \
 	perlmagick \
-	pm-utils \
-	procps \
 	psmisc \
-	rsync \
-	screen \
 	ssl-cert \
 	texlive \
 	liblingua-en-numbers-ordinate-perl \
@@ -190,7 +173,6 @@ echo
 
 /bin/mkdir /var/log/tabroom
 chown syslog.adm /var/log/tabroom
-/bin/mkdir /var/log/indexcards
 cp /www/tabroom/doc/conf/rsyslog.conf /etc/rsyslog.d/90-tabroom.conf
 systemctl restart rsyslog
 
@@ -233,8 +215,6 @@ chown -R tabroom.tabroom /home/tabroom/
 
 /bin/chmod 1777 /www/tabroom/web/tmp
 /bin/chmod 1777 /www/tabroom/web/mason
-
-chown tabroom.tabroom /var/log/indexcards
 
 echo
 echo "Yippee.  All done!  Unless, of course, you just saw errors."
