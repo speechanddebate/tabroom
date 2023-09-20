@@ -5,4 +5,4 @@ RUN chmod +x /usr/local/bin/install-docker.sh
 RUN /usr/local/bin/install-docker.sh
 
 EXPOSE 80
-CMD [“apache2ctl”, “-D”, “FOREGROUND”]
+CMD ["/usr/sbin/apache2ctl", "-D", "FOREGROUND"]
