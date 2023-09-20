@@ -25,34 +25,37 @@ export const getPersonHistory = {
 				C.name AS 'chapter',
 				EV.name AS 'event'
 			FROM tourn T
-			INNER JOIN school S ON S.tourn = T.id
-			INNER JOIN entry E ON E.school = S.id
-			INNER JOIN event EV ON EV.id = E.event
-			INNER JOIN entry_student ES ON ES.entry = E.id
-			INNER JOIN student ST ON ST.id = ES.student
-			INNER JOIN chapter C ON C.id = ST.chapter
+				INNER JOIN school S ON S.tourn = T.id
+				INNER JOIN entry E ON E.school = S.id
+				INNER JOIN event EV ON EV.id = E.event
+				INNER JOIN entry_student ES ON ES.entry = E.id
+				INNER JOIN student ST ON ST.id = ES.student
+				INNER JOIN chapter C ON C.id = ST.chapter
 			WHERE ST.nsda = ?
 				AND T.hidden = 0
-			GROUP BY T.id
+			GROUP BY E.id
 		`, { replacements: [req.query.person_id] });
 
 		const judge = await db.sequelize.query(`
-			SELECT
-				T.name AS 'tournament',
-				T.state as 'state',
-				T.start AS 'start',
-				T.end AS 'end',
-				C.name AS 'chapter',
-				CAT.name AS 'category'
-			FROM tourn T
-			INNER JOIN school S ON S.tourn = T.id
-			INNER JOIN judge J ON J.school = S.id
-			INNER JOIN category CAT ON CAT.id = J.category
-			INNER JOIN chapter_judge CJ ON CJ.id = J.chapter_judge
-			INNER JOIN chapter C ON C.id = CJ.chapter
-			WHERE CJ.nsda = ?
-				AND T.hidden = 0
-			GROUP BY T.id
+			SELECT    
+				T.name AS 'tournament',    
+				T.state as 'state',    
+				T.start AS 'start',    
+				T.end AS 'end',    
+				S.name AS 'chapter',    
+				CAT.name AS 'category',    
+				COUNT(DISTINCT panel.id) as 'rounds_judged'    
+			FROM (tourn T, person P, judge J, category CAT)    
+				LEFT JOIN school S on J.school = S.id    
+				LEFT JOIN chapter C on C.id = S.chapter    
+				LEFT JOIN ballot on ballot.judge = J.id    
+				LEFT JOIN panel on panel.id = ballot.panel    
+			WHERE P.nsda = 1234643    
+				and P.id = J.person    
+				and J.category = CAT.id    
+				and CAT.tourn = T.id    
+				AND T.hidden = 0    
+			GROUP BY J.id    
 		`, { replacements: [req.query.person_id] });
 
 		const history = {
