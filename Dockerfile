@@ -1,6 +1,5 @@
 FROM ubuntu:23.04
-COPY ./doc /www/tabroom/doc
-COPY ./web /www/tabroom/web
+COPY ./docker /opt/docker
 
 # Do package install here so we can cache it
 RUN /usr/bin/apt update
