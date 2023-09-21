@@ -72,9 +72,8 @@ RUN cpanm JSON@4.02
 RUN cpanm JSON::WebToken
 RUN cpanm Crypt::JWT
 
-COPY ./doc/install-docker.sh /usr/local/bin/install-docker.sh
-RUN chmod +x /usr/local/bin/install-docker.sh
-RUN /usr/local/bin/install-docker.sh
+RUN chmod +x /opt/docker/install-docker.sh
+RUN /opt/docker/install-docker.sh
 
 EXPOSE 80
 CMD ["/usr/sbin/apache2ctl", "-D", "FOREGROUND"]
