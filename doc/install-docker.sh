@@ -18,19 +18,12 @@ echo "Installing the necessary software packages along with some ones I like hav
 echo
 
 /usr/bin/apt update
-/usr/bin/apt -y -q install cpanminus
-
-cpanm Lingua::EN::Nums2Words
-cpanm REST::Client
-cpanm Text::Undiacritic
-cpanm HTTP::UA::Parser
-cpanm JSON@4.02
-cpanm JSON::WebToken
-cpanm Crypt::JWT
 
 /usr/bin/apt -y -q install apache2 \
 	apache2-utils \
 	bzip2 \
+	rsync \
+	cpanminus \
 	libapache2-mod-apreq2 \
 	libapache2-mod-perl2 \
 	libapache2-mod-perl2-dev \
@@ -45,6 +38,7 @@ cpanm Crypt::JWT
 	libclass-dbi-perl \
 	libcompress-raw-zlib-perl \
 	libcrypt-passwdmd5-perl \
+	libcryptx-perl \
 	libdatetime-format-mysql-perl \
 	libdatetime-perl \
 	libdatetime-timezone-perl \
@@ -52,6 +46,7 @@ cpanm Crypt::JWT
 	libdbi-perl \
 	libhtml-fromtext-perl \
 	libhtml-mason-perl \
+	libio-socket-ssl-perl \
 	libmime-lite-perl \
 	liburi-perl \
 	libtext-unidecode-perl \
@@ -64,6 +59,7 @@ cpanm Crypt::JWT
 	libcss-minifier-perl \
 	librest-application-perl \
 	libtext-csv-perl \
+	libwww-perl \
 	libgeoip2-perl \
 	libmaxmind-db-reader-perl \
 	make \
@@ -83,6 +79,18 @@ cpanm Crypt::JWT
 	geoip-database \
 	geoipupdate \
 	libgeoip1
+
+echo
+echo "Installing Perl modules that do not play well with Ubuntu apt for some reason"
+echo
+
+cpanm REST::Client
+cpanm Text::Undiacritic
+cpanm HTTP::UA::Parser
+cpanm JSON@4.02
+cpanm JSON::WebToken
+cpanm Crypt::JWT
+
 
 echo
 echo "Fixing Class DBI to talk to modern MySQL/MariaDB..."
@@ -121,7 +129,7 @@ echo
 
 # GeoIP.conf will require ansible secrets
 # GeoIP2-ISP.mmdb also needs to be pulled in ....somehow?
-cp /www/tabroom/doc/conf/GeoIP.conf /etc/GeoIP.conf
+#cp /www/tabroom/doc/conf/GeoIP.conf /etc/GeoIP.conf
 
 mkdir -p /var/lib/GeoIP/
 /usr/bin/geoipupdate
@@ -146,7 +154,11 @@ echo
 echo "Configuring the local Apache webserver..."
 echo
 
-cp /www/tabroom/doc/conf/tabroom.com.conf /etc/apache2/sites-available
+/usr/sbin/a2enmod apreq
+/usr/sbin/a2enmod proxy
+/usr/sbin/a2enmod proxy_http
+
+cp /www/tabroom/doc/conf/tabroom.com.conf.docker /etc/apache2/sites-available/tabroom.com.conf
 a2ensite tabroom.com
 
 # General.pm will require ansible secrets
@@ -157,9 +169,6 @@ cp /www/tabroom/doc/conf/mpm_prefork.conf /etc/apache2/mods-available
 #echo "ServerName  www.tabroom.com" >> /etc/apache2/conf.d/hostname
 #echo "127.0.1.21 www www.tabroom.com" >> /etc/hosts
 
-/usr/sbin/a2enmod apreq
-/usr/sbin/a2enmod proxy
-/usr/sbin/a2enmod proxy_http
 
 echo
 echo "Starting Apache..."
@@ -172,9 +181,9 @@ echo "Adapting permissions"
 echo
 
 useradd tabroom;
-chown -R tabroom.tabroom /www/tabroom/
+chown -R tabroom:tabroom /www/tabroom/
 /bin/mkdir -p /home/tabroom
-chown -R tabroom.tabroom /home/tabroom/
+chown -R tabroom:tabroom /home/tabroom/
 
 /bin/mkdir -p /www/tabroom/web/tmp
 /bin/mkdir -p /www/tabroom/web/mason
