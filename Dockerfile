@@ -1,4 +1,5 @@
 FROM ubuntu:23.04
+
 # Do package install here so we can cache it
 RUN /usr/bin/apt update
 RUN /usr/bin/apt -y -q install apache2 \
@@ -71,11 +72,9 @@ RUN cpanm JSON@4.02
 RUN cpanm JSON::WebToken
 RUN cpanm Crypt::JWT
 
-COPY ./doc/install-docker.sh /usr/local/bin/install-docker.sh
-COPY ./doc /www/tabroom/doc
-COPY ./web /www/tabroom/web
-RUN chmod +x /usr/local/bin/install-docker.sh
-RUN /usr/local/bin/install-docker.sh
+COPY ./doc /opt/config-tabroom
+RUN chmod +x /opt/config-tabroom/docker/install-docker.sh
+RUN /opt/config-tabroom/docker/install-docker.sh
 
 EXPOSE 80
 CMD ["/usr/sbin/apache2ctl", "-D", "FOREGROUND"]
