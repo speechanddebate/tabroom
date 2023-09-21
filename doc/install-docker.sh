@@ -4,7 +4,7 @@
 # the NSDA cloud infrastructure.
 
 echo
-echo "Welcome to the Tabroom.com production system installer."
+echo "Welcome to the Tabroom.com Docker image builder"
 echo
 
 #echo
@@ -14,7 +14,9 @@ echo
 #sysctl -p
 
 echo
-echo "Fixing Class DBI to talk to modern MySQL/MariaDB..."
+echo "Fixing Class DBI bug so it will talk to modern MariaDB..."
+echo "Since I am the last person on earth who actually uses Class DBI I think."
+echo "I'm working on it, okay?"
 echo
 
 mv /usr/share/perl5/Class/DBI.pm /usr/share/perl5/Class/DBI.pm.orig
@@ -43,13 +45,12 @@ mktexlsr
 texhash
 updmap-sys --force --enable Map=bera.map
 
-
 echo
 echo "Configuring and downloading the GeoIP Database"
 echo
 
 # GeoIP.conf will require ansible secrets
-# GeoIP2-ISP.mmdb also needs to be pulled in ....somehow?
+# The GeoIP2-ISP.mmdb also needs to be downloaded separately.
 #cp /www/tabroom/doc/conf/GeoIP.conf /etc/GeoIP.conf
 
 mkdir -p /var/lib/GeoIP/

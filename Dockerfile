@@ -26,6 +26,7 @@ RUN /usr/bin/apt -y -q install apache2 \
 	libcryptx-perl \
 	libdatetime-format-mysql-perl \
 	libdatetime-perl \
+	libdatetime-set-perl \
 	libdatetime-timezone-perl \
 	libdbd-mysql-perl \
 	libdbi-perl \
