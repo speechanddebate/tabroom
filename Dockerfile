@@ -1,5 +1,5 @@
 FROM ubuntu:23.04
-COPY ./docker /opt/docker
+COPY ./doc /opt/config-tabroom
 
 # Do package install here so we can cache it
 RUN /usr/bin/apt update
