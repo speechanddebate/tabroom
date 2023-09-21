@@ -1,7 +1,4 @@
 FROM ubuntu:23.04
-COPY ./doc /www/tabroom/doc
-COPY ./web /www/tabroom/web
-
 # Do package install here so we can cache it
 RUN /usr/bin/apt update
 RUN /usr/bin/apt -y -q install apache2 \
@@ -34,6 +31,7 @@ RUN /usr/bin/apt -y -q install apache2 \
 	libhtml-mason-perl \
 	libio-socket-ssl-perl \
 	libmime-lite-perl \
+	libuniversal-can-perl \
 	liburi-perl \
 	libtext-unidecode-perl \
 	liblingua-en-numbers-ordinate-perl \
@@ -74,6 +72,8 @@ RUN cpanm JSON::WebToken
 RUN cpanm Crypt::JWT
 
 COPY ./doc/install-docker.sh /usr/local/bin/install-docker.sh
+COPY ./doc /www/tabroom/doc
+COPY ./web /www/tabroom/web
 RUN chmod +x /usr/local/bin/install-docker.sh
 RUN /usr/local/bin/install-docker.sh
 

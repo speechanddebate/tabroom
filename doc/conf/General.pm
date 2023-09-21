@@ -34,13 +34,13 @@ $admin_smtp_server = "localhost";
 #Database name
 $dbname = "tabroom";
 #Database host.  "localhost" will use the mysql local socket, not the network
-$dbhost = "db.speechanddebate.org";
+$dbhost = "host.docker.internal";
 #Database username
-$dbuser = "tab";
+$dbuser = "tabroom";
 #Database password
-$dbpass = "";
+$dbpass = "C3Eil-aiQuaiseigoo4hee2YooG";
 #Token login random string
-$string	= "ReplaceMeWithSomethingElse";
+$string	= "tohfi1aeph9LienaKae1aeY3jua+Lahy2iek";
 
 #GeoIP data
 $geoip = "/var/lib/geoip/GeoLite2-City.mmdb";
@@ -74,7 +74,7 @@ $hacky_api_key     = "";
 
 #Component root
 $file_root = '/www/tabroom/web/';
-$data_dir = '/cache/mason';
+$data_dir = '/www/tabroom/web/mason/cache';
 
 # S3 file storage
 $s3_config = $file_root."lib/s3.config";
