@@ -38,9 +38,9 @@ $dbhost = "host.docker.internal";
 #Database username
 $dbuser = "tabroom";
 #Database password
-$dbpass = "C3Eil-aiQuaiseigoo4hee2YooG";
+$dbpass = "localdbpass";
 #Token login random string
-$string	= "tohfi1aeph9LienaKae1aeY3jua+Lahy2iek";
+$string	= "localtokenstring"
 
 #GeoIP data
 $geoip = "/var/lib/geoip/GeoLite2-City.mmdb";
