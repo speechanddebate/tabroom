@@ -9,6 +9,7 @@ import round from './round';
 import tab from './tab';
 import jpool from './jpool';
 import rpool from './rpool';
+import result from './result';
 import timeslot from './timeslot';
 
 export default [
@@ -19,5 +20,6 @@ export default [
 	...tab,
 	...jpool,
 	...rpool,
+	...result,
 	...timeslot,
 ];

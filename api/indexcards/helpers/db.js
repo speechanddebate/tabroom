@@ -548,6 +548,7 @@ db.resultKey.belongsTo(db.resultSet , { as: 'ResultKey' , foreignKey: 'result_se
 db.resultSet.hasMany(db.result          , { as: 'Result'        , foreignKey: 'result_set' });
 db.resultSet.belongsTo(db.tourn         , { as: 'Tourn'         , foreignKey: 'tourn' });
 db.resultSet.belongsTo(db.event         , { as: 'Event'         , foreignKey: 'event' });
+db.resultSet.belongsTo(db.circuit       , { as: 'Circuit'       , foreignKey: 'circuit' });
 db.resultSet.belongsTo(db.sweepProtocol , { as: 'SweepProtocol' , foreignKey: 'sweep_set' });
 db.resultSet.belongsTo(db.sweepAward    , { as: 'SweepAward'    , foreignKey: 'sweep_award' });
 
