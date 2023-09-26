@@ -301,4 +301,5 @@
 	alter table campus_log ADD CONSTRAINT fk_cl_school FOREIGN KEY (school)
 		REFERENCES school(id) ON DELETE CASCADE ON UPDATE CASCADE;
 
-
+	delete from result where not exists ( select rs.id from result_set rs where result.result_set = rs.id)
+	alter table result ADD CONSTRAINT fk_result_rs FOREIGN KEY (result_set) REFERENCES result_set(id) ON UPDATE CASCADE ON DELETE SET DEFAULT;

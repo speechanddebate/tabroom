@@ -1,13 +1,18 @@
-export const objectify = (array) => {
+export const objectify = (array, key) => {
 	const dest = {};
+	if (!key) {
+		key = 'id';
+	}
 	array.forEach( (item) => {
 		if (item.dataValues) {
 			const output = item.get({ plain:true });
-			dest[output.id] = stripNull(output);
-			delete dest[output.id].id;
+			const tag = output[key];
+			dest[tag] = stripNull(output);
+			delete dest[tag][key];
 		} else {
-			dest[item.id] = stripNull(item);
-			delete dest[item.id];
+			const tag = item[key];
+			dest[tag] = stripNull(item);
+			delete dest[tag][key];
 		}
 
 		Object.keys(item).forEach( (tag) => {
