@@ -9,6 +9,10 @@ const resultSet = (sequelize, DataTypes) => {
 			type      : DataTypes.STRING(64),
 			allowNull : true,
 		},
+		code: {
+			type      : DataTypes.STRING(15),
+			allowNull : true,
+		},
 		bracket: {
 			type         : DataTypes.BOOLEAN,
 			allowNull    : false,

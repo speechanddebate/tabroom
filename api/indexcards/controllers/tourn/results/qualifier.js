@@ -2,7 +2,7 @@
 // others may find it useful someday.
 
 export const tournQualifierResult = {
-	GET: async (req, res) => {
+	POST: async (req, res) => {
 		const db = req.db;
 
 		const events = await db.event.findAll(
@@ -14,19 +14,26 @@ export const tournQualifierResult = {
 		});
 
 		res.status(200).json({
-			error: false,
-			message: `Tournament qualifying data posted.`,
+			error   : false,
+			message : `Tournament qualifying data posted.`,
+			refresh : true,
 		});
 	},
 };
 
 export const eventQualifierResult = {
-	GET: async (req, res) => {
-		const message = await saveEventResult(req.db, req.params.event_id);
+	POST: async (req, res) => {
+
+		if (!req.body.property_value) {
+			res.status(200);
+		}
+
+		const message = await saveEventResult(req.db, req.body.property_value);
 
 		res.status(200).json({
 			error: false,
 			message,
+			refresh : true,
 		});
 
 	},
@@ -36,44 +43,45 @@ const saveEventResult = async (db, eventId) => {
 	// Get event and qualifier event tags
 
 	const eventQuery = `
-	select
-		event.id, tc.circuit, circuit.abbr circuitAbbr,
-			ruleset.value rulesetId,
-			qual_event.value eventCode,
-			count(distinct entry.id) entryCount,
-			count(distinct entry.school) schoolCount,
-			cr.value_text circuitRules
+		select
+			tourn.id tournId,
+			event.id, tc.circuit, circuit.abbr circuitAbbr,
+				ruleset.value rulesetId,
+				qual_event.value eventCode,
+				count(distinct entry.id) entryCount,
+				count(distinct entry.school) schoolCount,
+				cr.value_text circuitRules
 
-	from (event, tourn, tourn_circuit tc, circuit_setting cr)
+		from (event, tourn, tourn_circuit tc, circuit_setting cr)
 
-		left join circuit on circuit.id = tc.circuit
+			left join circuit on circuit.id = tc.circuit
 
-		left join event_setting ruleset
-			on ruleset.event = event.id
-			and ruleset.tag = CONCAT('qualifier_', tc.circuit)
+			left join event_setting ruleset
+				on ruleset.event = event.id
+				and ruleset.tag = CONCAT('qualifier_', tc.circuit)
 
-		left join event_setting qual_event
-			on qual_event.event = event.id
-			and qual_event.tag = CONCAT('qualifier_event', tc.circuit)
+			left join event_setting qual_event
+				on qual_event.event = event.id
+				and qual_event.tag = CONCAT('qualifier_event_', tc.circuit)
 
-		left join entry
-			on entry.event = event.id
-			and exists (
-				select ballot.id
-					from ballot, panel
-				where ballot.entry = entry.id
-					and ballot.bye != 1
-					and ballot.forfeit != 1
-					and ballot.panel = panel.id
-					and panel.bye != 1
-			)
-	where event.id = :eventId
-		and event.tourn = tourn.id
-		and tourn.id = tc.tourn
-		and tc.circuit = cr.circuit
-		and cr.tag = 'qualifiers'
-		and cr.value = 'json'
-	group by event.id, tc.circuit
+			left join entry
+				on entry.event = event.id
+				and exists (
+					select ballot.id
+						from ballot, panel
+					where ballot.entry = entry.id
+						and ballot.bye != 1
+						and ballot.forfeit != 1
+						and ballot.panel = panel.id
+						and panel.bye != 1
+				)
+		where event.id = :eventId
+			and event.tourn = tourn.id
+			and tourn.id = tc.tourn
+			and tc.circuit = cr.circuit
+			and cr.tag = 'qualifiers'
+			and cr.value = 'json'
+		group by event.id, tc.circuit
 	`;
 
 	const eventsWithQualifiers = await db.sequelize.query(eventQuery, {
@@ -82,11 +90,16 @@ const saveEventResult = async (db, eventId) => {
 	});
 
 	let message = '';
+	if (eventsWithQualifiers) {
+		const event = eventsWithQualifiers[0];
+		message = `${event.circuitAbbr} qualifying results in ${event.eventCode} have been generated`;
+	}
 
 	eventsWithQualifiers.forEach( async (event) => {
 
 		const allRules = JSON.parse(event.circuitRules);
 		const eventRules = allRules[event.rulesetId];
+
 		if (!eventRules) {
 			return;
 		}
@@ -116,19 +129,27 @@ const saveEventResult = async (db, eventId) => {
 			}
 
 			// I'm over a different, higher threshold already
-			if (qualRuleSet) {
-				if ( (event.schoolCount - ruleset.schoolCount) > margins.school) {
+			if (qualRuleSet && Object.keys(qualRuleSet).length > 0) {
+				if ( ruleset.schools > 0 && (event.schoolCount - ruleset.schools) > margins.school) {
 					return;
 				}
-				if ( (event.entryCount - ruleset.entryCount) > margins.entry) {
+				if ( ruleset.entries > 0 && (event.entryCount - ruleset.entries) > margins.entry) {
 					return;
 				}
 			}
 
 			qualRuleSet = ruleset;
-			margins.school = event.schoolCount - ruleset.schoolCount;
-			margins.entry = event.entryCount - ruleset.entryCount;
+			if (ruleset.schools > 0) {
+				margins.school = event.schoolCount - ruleset.schools;
+			}
+			if (ruleset.entries > 0) {
+				margins.entry = event.entryCount - ruleset.enties;
+			}
 		});
+
+		if (!qualRuleSet || Object.keys(qualRuleSet).length < 1) {
+			return;
+		}
 
 		// Create results set, wiping out any existing ones, for this event & circuit.
 		await db.resultSet.destroy({
@@ -141,6 +162,7 @@ const saveEventResult = async (db, eventId) => {
 		const newResultSet = await db.resultSet.create({
 			circuit   : event.circuit,
 			event     : eventId,
+			tourn     : event.tournId,
 			tag       : 'entry',
 			label     : `${event.circuitAbbr} Qualification`,
 			code      : event.eventCode,
@@ -150,7 +172,7 @@ const saveEventResult = async (db, eventId) => {
 		// Get final results set for the rankings
 
 		const finalResultQuery = `
-				select
+			select
 				result.entry, result.rank
 			from result, result_set
 			where result_set.event = :eventId
@@ -163,6 +185,10 @@ const saveEventResult = async (db, eventId) => {
 			replacements: { eventId },
 			type: db.sequelize.QueryTypes.SELECT,
 		});
+
+		if (finalResults.length < 1) {
+			return 'This event does not have a final results sheet';
+		}
 
 		const entryByRank = {};
 		for (const result of finalResults) {
@@ -190,6 +216,10 @@ const saveEventResult = async (db, eventId) => {
 			type: db.sequelize.QueryTypes.SELECT,
 		});
 
+		if (lastRound.length < 1) {
+			return;
+		}
+
 		const entriesByLastRound = {};
 
 		for (const entryRound of lastRound) {
@@ -201,9 +231,9 @@ const saveEventResult = async (db, eventId) => {
 		}
 
 		const allElims = await db.sequelize.query(`
-			select round.name 
-				from round 
-			where round.event = :eventId 
+			select round.name, round.label
+				from round
+			where round.event = :eventId
 				and round.type IN ('elim', 'final')
 			ORDER BY round.name
 		`, {
@@ -212,6 +242,7 @@ const saveEventResult = async (db, eventId) => {
 		});
 
 		const entryPoints = {};
+		const entryPlace = {};
 
 		for (const key of Object.keys(qualRuleSet.rules)) {
 			const rule = qualRuleSet.rules[key];
@@ -220,6 +251,7 @@ const saveEventResult = async (db, eventId) => {
 			if (rule.placement > 0) {
 				for (const entry of entryByRank[rule.placement]) {
 					entryPoints[entry] = rule.points;
+					entryPlace[entry] = `Placed ${rule.placement}`;
 				}
 			}
 
@@ -230,9 +262,10 @@ const saveEventResult = async (db, eventId) => {
 				const targetRound = allElims[(rule.reverse_elim * -1)];
 
 				if (targetRound) {
-					for (const entry of entriesByLastRound[targetRound]) {
+					for (const entry of entriesByLastRound[targetRound.name]) {
 						if (!entryPoints[entry]) {
 							entryPoints[entry] = rule.points;
+							entryPlace[entry] = `In ${targetRound.label ? targetRound.label : `round ${targetRound.name}`} `;
 						}
 					}
 				}
@@ -243,12 +276,12 @@ const saveEventResult = async (db, eventId) => {
 		Object.keys(entryPoints).forEach( async (entry) => {
 			await db.result.create({
 				result_set : newResultSet.id,
-				rank      : entryPoints[entry],
+				rank       : entryPoints[entry],
+				place      : entryPlace[entry],
 				entry,
 			});
 		});
 
-		message = `${event.circuitAbbr} qualifying results in ${event.eventCode} have been generated`;
 	});
 
 	return message;

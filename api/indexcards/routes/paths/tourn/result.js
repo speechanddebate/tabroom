@@ -5,6 +5,6 @@
 import { tournQualifierResult, eventQualifierResult } from '../../../controllers/tourn/results/qualifier.js';
 
 export default [
-	{ path : '/tourn/{tourn_id}/result/event/{event_id}/qualifiers' , module : eventQualifierResult } ,
-	{ path : '/tourn/{tourn_id}/result/qualifiers'                  , module : tournQualifierResult } ,
+	{ path : '/tourn/{tourn_id}/result/event/qualifiers' , module : eventQualifierResult } ,
+	{ path : '/tourn/{tourn_id}/result/qualifiers'       , module : tournQualifierResult } ,
 ];
