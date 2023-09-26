@@ -241,15 +241,11 @@ const saveEventResult = async (db, eventId) => {
 
 		// Save the award points
 		Object.keys(entryPoints).forEach( async (entry) => {
-			console.log(`Saving points ${entryPoints[entry]} for entry ${entry} into result set ${newResultSet.id}`);
-
-			const result = await db.result.create({
+			await db.result.create({
 				result_set : newResultSet.id,
 				rank      : entryPoints[entry],
 				entry,
 			});
-
-			console.log(result);
 		});
 
 		message = `${event.circuitAbbr} qualifying results in ${event.eventCode} have been generated`;
