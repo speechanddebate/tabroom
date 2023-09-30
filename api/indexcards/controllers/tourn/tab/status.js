@@ -2,6 +2,68 @@
 import { showDateTime } from '@speechanddebate/nsda-js-utils';
 import { flightTimes } from '../../../helpers/round';
 
+export const sideCounts = {
+	GET: async (req, res) => {
+
+		const sideResults = await req.db.sequelize.query(`
+			select
+				ballot.judge, ballot.side,
+				aff_label.value aff,
+				neg_label.value neg
+
+			from (panel, ballot, round)
+
+				left join event_setting aff_label 
+					on aff_label.event = round.event
+					and aff_label.tag = 'aff_label'
+
+				left join event_setting neg_label 
+					on neg_label.event = round.event
+					and neg_label.tag = 'neg_label'
+
+			where round.id = :roundId
+				and round.id = panel.round
+				and panel.id = ballot.panel
+				and ballot.bye != 1
+				and ballot.forfeit != 1
+				and panel.bye != 1
+				and exists (
+					select score.id 
+					from score
+					where score.ballot = ballot.id
+					and score.tag = 'winloss'
+					and score.value = 1
+				)
+			group by ballot.judge
+			order by ballot.side
+		`, {
+			replacements : { roundId: req.params.round_id },
+			type         : req.db.sequelize.QueryTypes.SELECT,
+		});
+
+		const sideCounter = {};
+
+		for (const result of sideResults) {
+			if (result.side === 1) {
+				if (!sideCounter[result.aff]) {
+					sideCounter[result.aff] = 1;
+				} else {
+					sideCounter[result.aff]++;
+				}
+			} else if (result.side === 2) {
+				if (!sideCounter[result.neg]) {
+					sideCounter[result.neg] = 1;
+				} else {
+					sideCounter[result.neg]++;
+				}
+			}
+		}
+
+		res.status(200).json(sideCounter);
+
+	},
+};
+
 export const attendance = {
 	GET: async (req, res) => {
 		const db = req.db;
@@ -844,7 +906,6 @@ export const eventStatus = {
 							++status[event.id].rounds[event.round_id][event.flight].scored || 1;
 
 						status[event.id].rounds[event.round_id].in_progress = true;
-
 						statusCache[event.id].pending = ++statusCache[event.id].pending || 1;
 
 					} else if (event.judge_started) {
