@@ -5,9 +5,12 @@
 	$search_email   => undef
 	$search_chapter => undef
 	$search_last    => undef
+	$search_first   => undef
 	$judge_id       => undef
 </%args>
 <%init>
+
+	my $dbh = Tab::DBI->db_Main();
 
 	if ($other_id) {
 
@@ -58,26 +61,61 @@
 	my @chapters;
 	my @persons;
 
-	if ($search_email && $search_last) {
+	my $search_string;
+	my @params;
 
-		@persons = Tab::Person->search_where(
-			last => { "like", $search_last."%" },
-			email => { "like", $search_email."%" }
-		);
+	$search_email =~ s/[\W_@]//g;
+	$search_first =~ s/[\W_@]//g;
+	$search_last =~ s/[\W_@]//g;
 
-	} elsif ($search_email) {
+	Tab::debuglog($search_email);
+	Tab::debuglog($search_first);
+	Tab::debuglog($search_last);
 
-		@persons = Tab::Person->search_where(
-			email => { "like", $search_email."%" }
-		);
-
-	} elsif ($search_last) {
-
-		@persons = Tab::Person->search_where(
-			last => { "like", $search_last."%" }
-		);
-
+	if ($search_email) {
+		push @params, $search_email;
+		$search_string .= " and person.email = ? ";
 	}
+
+	if ($search_last) {
+		push @params, $search_last;
+		$search_string .= " and person.last = ? ";
+	}
+
+	if ($search_first) {
+		push @params, $search_first.'%';
+		$search_string .= " and person.first like ? ";
+	}
+
+	if ($search_string) {
+
+		my $person_sth = $dbh->prepare("
+			select
+				person.id, person.first, person.middle, person.last,
+				CONVERT_TZ(last_access.value_date, '+00:00', person.tz) as last_access,
+				GROUP_CONCAT(distinct(chapter.name) SEPARATOR'<br />') chapters
+			from person
+				left join judge on person.id = judge.person
+				left join school on judge.school = school.id
+				left join chapter on school.chapter = chapter.id
+				left join person_setting last_access
+					on last_access.person = person.id
+					and last_access.tag = 'last_access'
+			where person.id > 0
+				$search_string
+			group by person.id
+			order by last_access.value_date DESC, chapter.name, person.last
+		");
+
+		$person_sth->execute(@params);
+
+		my $ref = $person_sth->fetchall_hash();
+
+		@persons = eval {
+			return @{$ref};
+		};
+	}
+
 
 	if ($search_chapter) {
 		@chapters = Tab::Chapter->search_where(
@@ -85,9 +123,29 @@
 		);
 	}
 
-	my @existings = Tab::Conflict->search(
-		person => $person->id
-	);
+	my $sth = $dbh->prepare("
+		select
+			conflict.id,
+			person.id as person, person.email, person.first, person.last,
+			CONVERT_TZ(last_access.value_date, '+00:00', person.tz) as last_access,
+			count(judge.id) as judge_count
+		from (conflict, person)
+			left join person_setting last_access
+				on last_access.person = person.id
+				and last_access.tag = 'last_access'
+			left join judge on person.id = judge.person
+		where conflict.person = ?
+			and conflict.conflicted = person.id
+		group by person.id
+		order by last_access.value_date DESC, person.last
+	");
+
+	$sth->execute($person->id);
+
+	my @existings = eval {
+		my $ref = $sth->fetchall_hash();
+		return @{$ref};
+	};
 
 </%init>
 
@@ -104,9 +162,6 @@
 			These conflicts are meant to reflect a personal or professional
 			relationship which means it is unfair for you to be judged the
 			other person; such as a relative, or a former student/coach.
-		</p>
-
-		<p>
 			Do NOT use conflicts against judges you simply do not like, or try
 			to gain extra strikes; doing so is almost certainly in violation of
 			tab policies of tournaments you attend.
@@ -117,15 +172,15 @@
 			standing conflict to work automatically, so be sure to check.
 		</p>
 
-		<p class="semibold redtext">
-			Conflicts entered on Tabroom.com are not confidential.
-		</p>
+		<h6 class="redtext semibold padtop">
+			Conflicts entered on Tabroom.com are not confidential
+		</h6>
 
 		<p>
 			Any information you enter onto Tabroom is potentially viewable by
 			third parties, including the people you are conflicting.  If you
 			have a conflict (or for that matter, any other information) you
-			wish to keep confidential, you should contact the tournament
+			wish to keep confidential, you should contact tournament
 			officials directly instead of entering it here.
 		</p>
 
@@ -133,23 +188,35 @@
 
 		<form action="conflicts.mhtml" method="post">
 
-			<div class="full row padmore centeralign">
+			<div class="full row">
+				<span class="fourfifths">
+					<div class="full nospace padvertless">
+						<span class="half">
+							<input
+								type        = "text"
+								name        = "search_last"
+								size        = "32"
+								placeholder = "Last name"
+							>
+						</span>
+						<span class="half">
+							<input
+								type        = "text"
+								name        = "search_first"
+								size        = "32"
+								placeholder = "First name"
+							>
+						</span>
+					</div>
 
-				<span class="twofifths">
-					<input
-						type        = "text"
-						name        = "search_last"
-						size        = "32"
-						placeholder = "Search by last name"
-					>
-				</span>
-				<span class="twofifths">
-					<input
-						type        = "text"
-						name        = "search_email"
-						size        = "32"
-						placeholder = "Search by email"
-					>
+					<span class="ninetyfive padvertless padleftless">
+						<input
+							type        = "email"
+							name        = "search_email"
+							size        = "60"
+							placeholder = "Email Address"
+						>
+					</span>
 				</span>
 
 				<span class="fifth">
@@ -164,70 +231,75 @@
 
 %		if (@persons || @chapters) {
 
-			<h4>Search Results:</h4>
+			<h5 class="italic graytext">Search Results</h5>
 
-<%perl>
-			foreach my $other (@persons) {
+			<div class="full bluebordertop nospace"></div>
 
-				my @chapters;
-				my @students = Tab::Student->search( person => $other->id );
-				my @chapter_judges = Tab::ChapterJudge->search( person => $other->id );
-
-				foreach my $person (@chapter_judges, @students) {
-					push @chapters, $person->chapter if $person->chapter;
-				}
-
-</%perl>
+%			foreach my $other (@persons) {
 				<div class="row">
-
-					<span class="third">
-						<% $other->first %> <% $other->middle %> <% $other->last %>
+					<span class="fifth">
+						<% $other->{first} %> <% $other->{middle} %> <% $other->{last} %>
 					</span>
 
-					<span class="half padless">
-<%perl>
-						my $notfirst;
-						foreach my $chapter (@chapters) {
-							$m->print(", ") if $notfirst++;
-							$m->print($chapter->name);
-						}
-</%perl>
+					<span class="rightalign threetenths nospace padvert" style="line-height: 14pt;">
+						<div class="semibold leftalign graytext full nospace padvertless">
+							<% $other->{'chapters'} ? "Has judged for" : "" %>
+						</div>
+						<span class="ninetyfive leftalign">
+							<% $other->{'chapters'} %>
+						</span>
+					</span>
+
+					<span class="threetenths nowrap">
+						<span class="fourtenths">
+							Last login
+						</span>
+						<span class="sixtenths">
+							<& "/funclib/showdate.mas", string => $other->{last_access}, format => "shorter" &>
+						</span>
 					</span>
 
 					<span class="sixth nowrap centeralign">
-						<a class="buttonwhite invert bluetext thin"
-							href="conflicts.mhtml?other_id=<% $other->id %>">
-							Conflict
-						</a>
+						<a class="buttonwhite invert bluetext thinner"
+							href="conflicts.mhtml?other_id=<% $other->{id} %>"
+						>Mark Conflict</a>
 					</span>
-
 				</div>
-
 %			}
-
 %		}
 
 %		if (@existings) {
-			<h4>Existing Conflicts</h4>
+			<h4 class="martop">Existing Conflicts</h4>
 %		}
 
 %		foreach my $existing (@existings) {
-
 			<div class="row full marno">
-
-				<span class="twothirds nowrap">
-					<% $existing->conflicted
-						? $existing->conflicted->first." ".$existing->conflicted->last
-						: ""
-					%>
+				<span class="fifth nowrap" title="Tabroom ID #<% $existing->{person} %>">
+					<% $existing->{first}." ".$existing->{last} %>
 				</span>
 
-				<span class="third rightalign">
-					<a class="buttonwhite redtext invert fa fa-trash fa-lg"
-						href="conflict_rm.mhtml?conflict_id=<% $existing->id %>">
+				<span class="threetenths nowrap">
+					<% $existing->{judge_count}
+						? "Judged ".$existing->{judge_count}." times"
+						: "NOT REGISTERED TO JUDGE"
+					%>
+
+				</span>
+
+				<span class="threetenths nowrap">
+					<span class="fourtenths">
+						Last login
+					</span>
+					<span class="sixtenths">
+						<& "/funclib/showdate.mas", string => $existing->{last_access}, format => "shorter" &>
+					</span>
+				</span>
+
+				<span class="fifth rightalign nospace">
+					<a class="buttonwhite redtext invert fa fa-trash"
+						href="conflict_rm.mhtml?conflict_id=<% $existing->{id} %>">
 					</a>
 				</span>
-
 			</div>
 %		}
 	</div>
