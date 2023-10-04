@@ -139,6 +139,7 @@ const saveEventResult = async (db, eventId) => {
 			}
 
 			qualRuleSet = ruleset;
+
 			if (ruleset.schools > 0) {
 				margins.school = event.schoolCount - ruleset.schools;
 			}
@@ -201,7 +202,7 @@ const saveEventResult = async (db, eventId) => {
 		// Get last round participated data
 
 		const lastRoundQuery = `
-			select entry.id, max(round.name) round
+			select entry.id entry, max(round.name) roundname
 				from entry, ballot, panel, round
 			where entry.event = :eventId
 				and entry.id = ballot.entry
@@ -224,10 +225,11 @@ const saveEventResult = async (db, eventId) => {
 
 		for (const entryRound of lastRound) {
 
-			if (!entriesByLastRound[entryRound.round]) {
-				entriesByLastRound[entryRound.round] = [];
+			if (!entriesByLastRound[entryRound.roundname]) {
+				entriesByLastRound[entryRound.roundname] = [];
 			}
-			entriesByLastRound[entryRound.round].push(entryRound.entry);
+
+			entriesByLastRound[entryRound.roundname].push(entryRound.entry);
 		}
 
 		const allElims = await db.sequelize.query(`
@@ -235,7 +237,7 @@ const saveEventResult = async (db, eventId) => {
 				from round
 			where round.event = :eventId
 				and round.type IN ('elim', 'final')
-			ORDER BY round.name
+			ORDER BY round.name DESC
 		`, {
 			replacements: { eventId },
 			type: db.sequelize.QueryTypes.SELECT,
@@ -259,11 +261,10 @@ const saveEventResult = async (db, eventId) => {
 			// placement supercedes it
 
 			if (rule.reverse_elim > 0) {
-				const targetRound = allElims[(rule.reverse_elim * -1)];
-
+				const targetRound = allElims[(rule.reverse_elim - 1)];
 				if (targetRound) {
 					for (const entry of entriesByLastRound[targetRound.name]) {
-						if (!entryPoints[entry]) {
+						if (entry && !entryPoints[entry]) {
 							entryPoints[entry] = rule.points;
 							entryPlace[entry] = `In ${targetRound.label ? targetRound.label : `round ${targetRound.name}`} `;
 						}

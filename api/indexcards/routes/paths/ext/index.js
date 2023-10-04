@@ -5,9 +5,11 @@
 import caselist from './caselist';
 import share from './share';
 import nsda from './nsda';
+import naudl from './naudl';
 
 export default [
 	...caselist,
 	...share,
 	...nsda,
+	...naudl,
 ];
