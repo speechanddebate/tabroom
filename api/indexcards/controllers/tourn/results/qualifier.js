@@ -45,7 +45,7 @@ const saveEventResult = async (db, eventId) => {
 	const eventQuery = `
 		select
 			tourn.id tournId,
-			event.id, tc.circuit, circuit.abbr circuitAbbr,
+			event.id, event.abbr, tc.circuit, circuit.abbr circuitAbbr,
 				ruleset.value rulesetId,
 				qual_event.value eventCode,
 				count(distinct entry.id) entryCount,
@@ -108,8 +108,8 @@ const saveEventResult = async (db, eventId) => {
 		// field or school count
 
 		const margins = {
-			school : 0,
-			entry  : 0,
+			entries: 0,
+			schools: 0,
 		};
 
 		let qualRuleSet = {};
@@ -130,10 +130,11 @@ const saveEventResult = async (db, eventId) => {
 
 			// I'm over a different, higher threshold already
 			if (qualRuleSet && Object.keys(qualRuleSet).length > 0) {
-				if ( ruleset.schools > 0 && (event.schoolCount - ruleset.schools) > margins.school) {
+				if ( ruleset.schools > 0 && (event.schoolCount - ruleset.schools) > margins.schools) {
 					return;
 				}
-				if ( ruleset.entries > 0 && (event.entryCount - ruleset.entries) > margins.entry) {
+
+				if ( ruleset.entries > 0 && (event.entryCount - ruleset.entries) > margins.entries) {
 					return;
 				}
 			}
@@ -141,10 +142,11 @@ const saveEventResult = async (db, eventId) => {
 			qualRuleSet = ruleset;
 
 			if (ruleset.schools > 0) {
-				margins.school = event.schoolCount - ruleset.schools;
+				margins.schools = parseInt(event.schoolCount) - parseInt(ruleset.schools);
 			}
+
 			if (ruleset.entries > 0) {
-				margins.entry = event.entryCount - ruleset.enties;
+				margins.entries = event.entryCount - ruleset.entries;
 			}
 		});
 
@@ -262,6 +264,7 @@ const saveEventResult = async (db, eventId) => {
 
 			if (rule.reverse_elim > 0) {
 				const targetRound = allElims[(rule.reverse_elim - 1)];
+
 				if (targetRound) {
 					for (const entry of entriesByLastRound[targetRound.name]) {
 						if (entry && !entryPoints[entry]) {
