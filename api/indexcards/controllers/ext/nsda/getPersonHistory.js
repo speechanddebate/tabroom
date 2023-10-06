@@ -16,6 +16,10 @@ export const getPersonHistory = {
 			WHERE P.nsda = ? OR S.nsda = ? OR CJ.nsda = ?
 		`, { replacements: [req.query.person_id, req.query.person_id, req.query.person_id] });
 
+		if (!personId[0][0].id) {
+			return res.status(400).json({ message: 'Person not found' });
+		}
+
 		const student = await db.sequelize.query(`
 			SELECT
 				T.name AS 'tournament',
@@ -67,7 +71,7 @@ export const getPersonHistory = {
 			FROM person_quiz PQ
 			INNER JOIN quiz Q ON Q.id = PQ.quiz
 			WHERE PQ.person = ?    
-		`, { replacements: [personId] });
+		`, { replacements: [personId[0][0].id] });
 
 		const history = {
 			personId: personId[0][0].id,

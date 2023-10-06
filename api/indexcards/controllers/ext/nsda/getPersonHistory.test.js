@@ -21,4 +21,14 @@ describe('Person History', () => {
 		assert.property(res.body, 'judge', 'Response has judge property');
 		assert.property(res.body, 'quizzes', 'Response has quizzes property');
 	}, 30000);
+
+	it('Errors on a missing person id', async () => {
+		const hash = crypto.createHash('sha256').update(config.NSDA_KEY).digest('hex');
+		await request(server)
+			.get(`/v1/nsda/history?person_id=999999999&nsda_key=${hash}`)
+			.set('Accept', 'application/json')
+			.set('Cookie', [`${config.COOKIE_NAME}=${testAdminSession.userkey}`])
+			.expect('Content-Type', /json/)
+			.expect(400);
+	}, 30000);
 });
