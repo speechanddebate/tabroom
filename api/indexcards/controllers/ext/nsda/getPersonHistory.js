@@ -16,7 +16,7 @@ export const getPersonHistory = {
 			WHERE P.nsda = ? OR S.nsda = ? OR CJ.nsda = ?
 		`, { replacements: [req.query.person_id, req.query.person_id, req.query.person_id] });
 
-		if (!personId[0][0].id) {
+		if (!personId?.[0]?.[0]?.id) {
 			return res.status(400).json({ message: 'Person not found' });
 		}
 
