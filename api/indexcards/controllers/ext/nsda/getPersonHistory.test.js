@@ -19,5 +19,6 @@ describe('Person History', () => {
 		assert.property(res.body, 'personId', 'Response has personId property');
 		assert.property(res.body, 'student', 'Response has student property');
 		assert.property(res.body, 'judge', 'Response has judge property');
+		assert.property(res.body, 'quizzes', 'Response has quizzes property');
 	}, 30000);
 });
