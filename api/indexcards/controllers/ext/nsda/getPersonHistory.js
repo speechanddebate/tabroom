@@ -67,7 +67,7 @@ export const getPersonHistory = {
 			FROM person_quiz PQ
 			INNER JOIN quiz Q ON Q.id = PQ.quiz
 			WHERE PQ.person = ?    
-		`, { replacements: [req.query.person_id] });
+		`, { replacements: [personId] });
 
 		const history = {
 			personId: personId[0][0].id,
