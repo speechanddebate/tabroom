@@ -76,12 +76,14 @@ export const scheduleAutoFlip = async (roundId, req, res) => {
 		type         : req.db.sequelize.QueryTypes.SELECT,
 	});
 
-
 	if (roundData) {
 		roundData.forEach( async (round) => {
 
 			if (!round.no_side_constraints
-				&& (round.type !== 'elim' || round.type !== 'final')
+				&& ( round.type !== 'elim'
+					&& round.type !== 'final'
+					&& round.type !== 'runoff'
+				)
 			) {
 				return;
 			}
