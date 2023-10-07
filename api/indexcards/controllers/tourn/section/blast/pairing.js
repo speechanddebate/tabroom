@@ -700,6 +700,8 @@ const formatBlast = async (queryData, req) => {
 
 const sendBlast = async (followers, blastData, req, res) => {
 
+	console.log(`Sendblast was invoked!`);
+
 	const emailResponse = {
 		error   : false,
 		count   : 0,
@@ -822,6 +824,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 	} else {
 
 		if (req.params.section_id) {
+
 			await req.db.changeLog.create({
 				tag         : 'blast',
 				description : `Pairing sent to section. Message: ${req.body.message}`,
@@ -837,6 +840,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 				count       : emailResponse.count,
 				panel       : req.params.section_id,
 			});
+
 		} else {
 
 			blastData.rounds.forEach( async (round) => {
@@ -859,10 +863,14 @@ const sendBlast = async (followers, blastData, req, res) => {
 			});
 		}
 
-		res.status(200).json({
+		const browserResponse = {
 			error   : false,
 			message : `Pairings sent to ${emailResponse.count + phoneResponse.count} recipients`,
-		});
+		};
+
+		console.log(browserResponse);
+		res.status(200).json(browserResponse);
+
 	}
 };
 
