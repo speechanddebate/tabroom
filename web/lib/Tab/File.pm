@@ -1,7 +1,7 @@
 package Tab::File;
 use base 'Tab::DBI';
 Tab::File->table('file');
-Tab::File->columns(All => qw/id label filename tag type published coach uploaded
+Tab::File->columns(All => qw/id label filename tag published coach uploaded bill_category
 								tourn school entry event district circuit webpage parent person page_order
 								timestamp/);
 
