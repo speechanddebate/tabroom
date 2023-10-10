@@ -1,0 +1,127 @@
+<%args>
+	$person
+	$perms
+	$ballot_id      => undef
+	$school_id      => undef
+	$property_value => undef
+</%args>
+<%init>
+
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	unless ($ballot_id || $school_id) {
+		$m->print('{ "error": true, "message": "No ballot ID sent"}');
+		$m->abort();
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my %response = (
+		error => \0
+	);
+
+	if ($ballot_id) { 
+
+
+		my $sth = $dbh->prepare("
+			select
+				ballot.id, ballot.entry, school.chapter
+				from ballot, entry, school
+			where ballot.id  = ?
+				and ballot.entry = entry.id
+				and entry.school = school.id
+		");
+
+		$sth->execute($ballot_id);
+		my $results = $sth->fetchall_hash();
+		my $ballot = shift @{$results};
+
+		unless ($person->site_admin || $perms->{"chapter"}{$ballot->{chapter}}) {
+			$m->print('{ "error": true, "message": "You do not have admin permissions to that school."}');
+			$m->abort();
+		}
+
+		if ($property_value) {
+			$sth = $dbh->prepare("
+				insert into score (ballot, tag, value) values (?, 'approved', ?)
+			");
+			$sth->execute($ballot->{id}, $person->id);
+			$response{'message'} = "Ballot marked as viewable to contestants";
+
+		} else {
+			$sth = $dbh->prepare("delete from score where ballot = ? and tag = 'approved'");
+			$sth->execute($ballot->{id});
+			$response{'message'} = "Ballot marked as NOT viewable to contestants";
+		}
+
+	} else {
+
+		my $sth = $dbh->prepare("
+			select school.chapter
+				from school
+			where school.id  = ?
+		");
+
+		$sth->execute($school_id);
+		my $results = $sth->fetchall_hash();
+		my $res = shift @{$results};
+
+		unless ($person->site_admin || $perms->{"chapter"}{$res->{chapter}}) {
+			$m->print('{ "error": true, "message": "You do not have admin permissions to that school."}');
+			$m->abort();
+		}
+
+		if ($property_value) {
+
+			my $ballot_sth = $dbh->prepare("
+				select
+					ballot.id
+				from ballot, entry
+					where entry.school = ?
+					and entry.id = ballot.entry
+					and not exists (
+						select score.id
+						from score
+						where score.tag = 'approved'
+						and score.ballot = ballot.id
+					)
+			");
+
+			$ballot_sth->execute($school_id);
+			my $ballots = $ballot_sth->fetchall_hash();
+
+			my $approve_sth = $dbh->prepare("
+				insert into score (ballot, tag, value) values (?, 'approved', ?)
+			");
+
+			my $counter;
+
+			foreach my $ballot (@{$ballots}) {
+				$counter++;
+				$approve_sth->execute($ballot->{id}, $person->id);
+			}
+			$response{'message'} = "$counter ballots marked as viewable to contestants";
+			$response{"refresh"} = \1;
+
+		} else {
+
+			$sth = $dbh->prepare("
+				delete score.*
+				from score, ballot, entry
+				where entry.school = ?
+					and entry.id = ballot.entry
+					and ballot.id = score.ballot
+					and score.tag = 'approved'
+			");
+
+			$sth->execute($school_id);
+			$response{'message'} = "All ballots marked as NOT viewable to contestants";
+			$response{"refresh"} = \1;
+		}
+	}
+
+	$m->print(JSON::encode_json(\%response));
+	$m->abort();
+
+</%init>
