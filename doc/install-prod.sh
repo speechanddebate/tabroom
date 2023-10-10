@@ -217,6 +217,12 @@ echo
 crontab /www/tabroom/doc/conf/local-crontab
 
 echo
+echo "Postfix reconfig"
+echo 
+mkdir -p /lib/resolvconf/libc.d/
+ln -s /etc/resolvconf/update-libc.d/postfix /lib/resolvconf/libc.d/postfix
+
+echo
 echo "Yippee.  All done!  Unless, of course, you just saw errors."
 echo
 
