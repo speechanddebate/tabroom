@@ -1,3 +1,6 @@
+<script>
+	import Login from '$lib/Login.svelte';
+</script>
 
 	<div id="header">
 		<span id="logo">
@@ -11,12 +14,16 @@
 				>
 			</a>
 		</span>
+
+		<span id="toprow">
+			<Login />
+		</span>
 	</div>
 
 <style>
 
 	#header {
-		width     : 92%;
+		width     : 88%;
 		margin    : auto;
 		padding   : 0;
 		min-width : 970px;

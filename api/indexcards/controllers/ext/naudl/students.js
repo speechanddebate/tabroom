@@ -1,3 +1,6 @@
+import sendToSalesforce from "../../../helpers/naudl";
+import config from "../../../../config/config";
+
 export const getNAUDLStudents = {
 	GET: async (req, res) => {
 
@@ -64,8 +67,8 @@ export const getNAUDLStudents = {
 			return studentRecord;
 		});
 
-		res.status(200).json(naudlPost);
-
+		const response = sendToSalesforce(naudlPost, config.NAUDL.STUDENT_ENDPOINT);
+		res.status(200).json(response);
 	},
 };
 

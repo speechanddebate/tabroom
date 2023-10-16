@@ -35,14 +35,14 @@
 	];
 </script>
 
-<div class="centeralign auto">
-	<div id="main" style="border: 1px solid black; width: 70%; display: inline-block;">
+	<div id="main">
 		<h1 style='text-align: left;'>Upcoming Tournaments</h1>
 		<Table rows="{tournList}" columns="{columns}" />
 	</div>
 
-	<div id="menu" style="border: 1px solid black; width: 25%; display: inline-block; height: 100vh;">
-		<h1 style='text-align: left;'>Actions</h1>
-		<Sidebar />
+	<div id="menu">
+		<div class="sidenote">
+			<h4 style='text-align: left;'>Actions</h4>
+			<Sidebar />
+		</div>
 	</div>
-</div>
