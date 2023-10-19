@@ -1,36 +1,35 @@
-import jsforce from 'jsforce';
+import axios from 'axios';
 import config from '../../config/config';
 
-export const sendToSalesforce = (body, url) => {
+export const sendToSalesforce = async (body, url) => {
 
-	const conn = new jsforce.Connection();
+	const naudl = config.NAUDL;
 
-	const _request = {
-		url: config.NAUDL.URL + url,
-		body,
-		method: 'post',
-		headers : {
-			'Content-Type' : 'application/json',
-		},
-	};
-
-	const sendData = (err) => {
-		if (err) {
-			return console.error(err);
-		}
-
-		conn.request(_request, (err, response) => {
-			return response;
-		});
-	};
-
-	const response = conn.login(
-		config.NAUDL.USERNAME,
-		config.NAUDL.PW + config.NAUDL.TOKEN,
-		sendData
+	const authClient = `grant_type=password&client_id=${naudl.CLIENT_ID}&client_secret=${naudl.CLIENT_SECRET}`;
+	const authUser = `&username=${naudl.USERNAME}&password=${naudl.PW}`;
+	const authResponse = await axios.post(
+		`https://login.salesforce.com/services/oauth2/token?${authClient}${authUser}`,
 	);
 
-	return response;
+	console.log(authResponse.data);
+
+	if (authResponse?.data) {
+		const postResponse = await axios.post(
+			`${authResponse.data.instance_url}${url}`,
+			body,
+			{
+				headers : {
+					Authorization  : `OAuth ${authResponse.data.access_token}`,
+					'Content-Type' : 'application/json',
+					Accept         : 'application/json',
+				},
+			}
+		);
+		return postResponse;
+	}
+
+	return 'Authentication Failure';
+
 };
 
 export default sendToSalesforce;

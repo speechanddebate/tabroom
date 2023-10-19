@@ -1,13 +1,13 @@
-import sendToSalesforce from "../../../helpers/naudl";
-import config from "../../../../config/config";
+import sendToSalesforce from '../../../helpers/naudl';
+import config from '../../../../config/config';
 
-export const getNAUDLStudents = {
+export const postNAUDLStudents = {
 	GET: async (req, res) => {
 
 		const unpostedStudentsQuery = `
 			select
 				student.id, student.first, student.middle, student.last,
-				student.grad_year, 
+				student.grad_year,
 				race.value race,
 				school_sid.value schoolSid,
 				student.chapter chapterId
@@ -28,7 +28,8 @@ export const getNAUDLStudents = {
 				and nu.tag = 'naudl_updated'
 				and nu.value_date > student.timestamp
 			)
-			order by student.id
+			order by student.id DESC
+			limit 50
 		`;
 
 		const unpostedStudents = await req.db.sequelize.query(unpostedStudentsQuery, {
@@ -46,7 +47,7 @@ export const getNAUDLStudents = {
 			other      : 'Other',
 		};
 
-		const naudlPost = unpostedStudents.map( (student) => {
+		const naudlPostPromises = unpostedStudents.map( async (student) => {
 			const studentRecord = {
 				tabroomid                : `TR${student.id}`,
 				teamid                   : `TR${student.chapterId}`,
@@ -67,9 +68,26 @@ export const getNAUDLStudents = {
 			return studentRecord;
 		});
 
-		const response = sendToSalesforce(naudlPost, config.NAUDL.STUDENT_ENDPOINT);
-		res.status(200).json(response);
+		const naudlPost = await Promise.all(naudlPostPromises);
+		const response = await sendToSalesforce(
+			{ students_from_tabroom: naudlPost },
+			config.NAUDL.STUDENT_ENDPOINT
+		);
+
+		if (response.data?.success === 'true') {
+			unpostedStudents.map(async (student) => {
+				await req.db.studentSetting.create({
+					student    : student.id,
+					tag        : 'naudl_updated',
+					value      : 'date',
+					value_date : new Date(),
+				});
+				return student.id;
+			});
+		} else {
+			res.status(200).json(response.data);
+		}
 	},
 };
 
-export default getNAUDLStudents;
+export default postNAUDLStudents;
