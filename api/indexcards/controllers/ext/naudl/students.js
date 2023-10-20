@@ -1,4 +1,4 @@
-import sendToSalesforce from '../../../helpers/naudl';
+import { sendToSalesforce, getSalesforceTeams } from '../../../helpers/naudl';
 import config from '../../../../config/config';
 
 export const postNAUDLStudents = {
@@ -10,7 +10,8 @@ export const postNAUDLStudents = {
 				student.grad_year,
 				race.value race,
 				school_sid.value schoolSid,
-				student.chapter chapterId
+				student.chapter chapterId,
+				chapter.name chapterName
 			from (student, chapter_setting naudl, chapter)
 
 				left join student_setting race on race.student = student.id and race.tag = 'race'
@@ -47,32 +48,55 @@ export const postNAUDLStudents = {
 			other      : 'Other',
 		};
 
+		const teams = await getSalesforceTeams();
+		const postedChapters = {};
+
+		teams.records.forEach( (school) => {
+			postedChapters[school.Tabroom_teamid__c] = true;
+		});
+
+		const missedChapters = {};
+
 		const naudlPostPromises = unpostedStudents.map( async (student) => {
-			const studentRecord = {
-				tabroomid                : `TR${student.id}`,
-				teamid                   : `TR${student.chapterId}`,
-				First_Name               : student.first,
-				Middle_Name              : student.middle ? student.middle : ' ',
-				Last_Name                : student.last,
-				Expected_graduation_year : student.grad_year,
-			};
 
-			if (student.race && raceEncoding[student.race]) {
-				studentRecord[raceEncoding[student.race]] = true;
+			const chapterKey = `TR${student.chapterId}`;
+			console.log(`Chapter key ${chapterKey} value ${postedChapters[chapterKey]}`);
+
+			if (postedChapters[chapterKey]) {
+				const studentRecord = {
+					tabroomid                : `TR${student.id}`,
+					teamid                   : chapterKey,
+					First_Name               : student.first,
+					Middle_Name              : student.middle ? student.middle : ' ',
+					Last_Name                : student.last,
+					Expected_graduation_year : student.grad_year,
+				};
+
+				if (student.race && raceEncoding[student.race]) {
+					studentRecord[raceEncoding[student.race]] = true;
+				}
+
+				if (student.schoolSid) {
+					studentRecord.studentschoolid = student.schoolSid;
+				}
+
+				return studentRecord;
 			}
 
-			if (student.schoolSid) {
-				studentRecord.studentschoolid = student.schoolSid;
-			}
+			missedChapters[chapterKey] = student.chapterName;
 
-			return studentRecord;
 		});
 
 		const naudlPost = await Promise.all(naudlPostPromises);
+		res.status(200).json(naudlPost);
+		return;
+
 		const response = await sendToSalesforce(
 			{ students_from_tabroom: naudlPost },
 			config.NAUDL.STUDENT_ENDPOINT
 		);
+
+		res.status(200).json(response.data);
 
 		if (response.data?.success === 'true') {
 			unpostedStudents.map(async (student) => {
@@ -87,6 +111,14 @@ export const postNAUDLStudents = {
 		} else {
 			res.status(200).json(response.data);
 		}
+	},
+};
+
+export const getNAUDLChapters = {
+	GET: async (req, res) => {
+		const teams = await getSalesforceTeams();
+		console.log(teams);
+		res.status(200).json(teams);
 	},
 };
 

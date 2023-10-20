@@ -3,6 +3,50 @@ import config from '../../config/config';
 
 export const sendToSalesforce = async (body, url) => {
 
+	const authData = await authSalesforce();
+	console.log(authData);
+
+	if (authData) {
+		const postResponse = await axios.post(
+			`${authData.instance_url}${url}`,
+			body,
+			{
+				headers : {
+					Authorization  : `OAuth ${authData.access_token}`,
+					'Content-Type' : 'application/json',
+					Accept         : 'application/json',
+				},
+			}
+		);
+		return postResponse;
+	}
+
+	return 'Authentication Failure';
+};
+
+export const getSalesforceTeams = async () => {
+
+	const authData = await authSalesforce();
+
+	const queryBase = `${authData.instance_url}/services/data/v59.0/query`;
+	const queryText = `?q=SELECT+Tabroom_teamid__c+FROM+School__c+WHERE+Tabroom_teamid__c+!=+null`;
+
+	const getResponse = await axios.get(
+		`${queryBase}${queryText}`,
+		{
+			headers : {
+				Authorization  : `OAuth ${authData.access_token}`,
+				'Content-Type' : 'application/json',
+				Accept         : 'application/json',
+			},
+		}
+	);
+
+	return getResponse.data;
+};
+
+const authSalesforce = async () => {
+
 	const naudl = config.NAUDL;
 
 	const authClient = `grant_type=password&client_id=${naudl.CLIENT_ID}&client_secret=${naudl.CLIENT_SECRET}`;
@@ -13,23 +57,11 @@ export const sendToSalesforce = async (body, url) => {
 
 	console.log(authResponse.data);
 
-	if (authResponse?.data) {
-		const postResponse = await axios.post(
-			`${authResponse.data.instance_url}${url}`,
-			body,
-			{
-				headers : {
-					Authorization  : `OAuth ${authResponse.data.access_token}`,
-					'Content-Type' : 'application/json',
-					Accept         : 'application/json',
-				},
-			}
-		);
-		return postResponse;
+	if (authResponse && authResponse.data) {
+		return authResponse.data;
 	}
 
-	return 'Authentication Failure';
-
+	return false;
 };
 
 export default sendToSalesforce;
