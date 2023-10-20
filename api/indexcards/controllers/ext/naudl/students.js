@@ -88,8 +88,6 @@ export const postNAUDLStudents = {
 		});
 
 		const naudlPost = await Promise.all(naudlPostPromises);
-		res.status(200).json(naudlPost);
-		return;
 
 		const response = await sendToSalesforce(
 			{ students_from_tabroom: naudlPost },

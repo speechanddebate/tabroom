@@ -5,5 +5,5 @@
 import { saveRubric } from '../../../controllers/user/judge/ballot.js';
 
 export default [
-	{ path : '/user/judge/{judge_id}/ballot/rubric', module : saveRubric },
+	{ path : '/user/judge/{judge_id}/ballot/rubric' , module : saveRubric }              ,
 ];
