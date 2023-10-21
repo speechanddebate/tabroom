@@ -1,5 +1,3 @@
-import config from '../../../../config/config';
-
 export const natsJudgePool = {
 
 	POST: async (req, res) => {

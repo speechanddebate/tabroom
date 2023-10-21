@@ -18,7 +18,7 @@ export const searchTourns = {
 		}
 
 		const tourns = await db.sequelize.query(`
-			select 
+			select
 				tourn.id, tourn.webname as abbr, tourn.webname, tourn.name, tourn.city, tourn.state, tourn.tz, 'tourn' as tag,
 				CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
 				CONVERT_TZ(tourn.end, '+00:00', tourn.tz) end,
@@ -38,7 +38,7 @@ export const searchTourns = {
 		});
 
 		const circuits = await db.sequelize.query(`
-			select 
+			select
 				circuit.id, circuit.name, circuit.abbr, count(circuit.id) as circuits, 'circuit' as tag
 			from circuit
 				left join tourn on exists (select tc.id from tourn_circuit tc where tc.circuit = circuit.id and tc.tourn = tourn.id)
@@ -91,7 +91,7 @@ export const searchCircuitTourns = {
 		}
 
 		const tourns = await db.sequelize.query(`
-			select 
+			select
 				tourn.id, tourn.webname, tourn.name, tourn.start, tourn.end, tourn.city, tourn.state, tourn.tz,
 				CONVERT_TZ(tourn.start, '+00:00', tourn.tz)
 			from tourn

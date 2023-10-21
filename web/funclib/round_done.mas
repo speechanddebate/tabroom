@@ -5,126 +5,110 @@
 
 	return unless $round;
 	my $now = DateTime->now();
+	my $dbh = Tab::DBI->db_Main();
 
-	my @left = $m->comp(
-		"/funclib/round_judges.mas",
-			round  => $round,
-			not_in => "1"
+	my $judge_sth = $dbh->prepare("
+		select
+			ballot.audit, judge.id judge
+		from judge, ballot, panel
+		where panel.round = ?
+			and panel.bye != 1
+			and panel.id = ballot.panel
+			and ballot.judge = judge.id
+			and ballot.bye != 1
+			and ballot.forfeit != 1
+			and exists (
+				select entry.id
+				from entry
+				where ballot.entry = entry.id
+				and entry.active = 1
+			)
+		group by judge.id
+	");
+
+	$judge_sth->execute($round);
+	my $judges = $judge_sth->fetchall_hash();
+
+	my %counts = (
+		done  => 0,
+		undone => 0
 	);
 
-	my $judges_left = scalar @left;
+	foreach my $ballot (@{$judges}) {
+		if ($ballot->{audit}) {
+			$counts{"done"}++;
+		} else {
+			$counts{"undone"}++;
+		}
+	}
 
 	my $event = $round->event;
 	my %event_settings = $event->all_settings();
 	my $tourn = $event->tourn;
+	my $follower_ids = $event_settings{"followers"};
 
-	#First ballot in notification
-	my $first_notified = $event_settings{"first_round_notified"};
+	unless ($ARGS{"admin_zone"}) {
 
-	my $dbh = Tab::DBI->db_Main();
+		my $not_first = $round->setting("first_ballot");
 
-	my $sth = $dbh->prepare("
-		update round_setting
-			set value_date = NOW()
-		where round = ?
-			and tag = 'last_ballot'
-	");
-
-	unless ($ARGS{"admin_done"}) {
-		unless ($ARGS{"not_first"} || $round->setting("first_ballot")) {
+		unless ($not_first) {
 			$round->setting("first_ballot", "date", $now);
-			$round->setting("last_ballot", "date", $now);
-		} else {
-			$sth->execute($round->id);
 		}
-	}
 
-	if ( (not defined $ARGS{"not_first"}) && ($first_notified < $round->name)) {
+		unless ($not_first || (not defined $follower_ids)) {
 
-		my $follower_ids = $event_settings{"followers"};
-		my $subject = $event->name;
-
-		my $body = "\n\n".$round->realname." of ".$event->name." first ballot entered.  $judges_left left.\n\n";
-		$body .= "Tournament: ".$tourn->name."\n\n";
-
-		foreach my $id (split(/,/, $follower_ids)) {
-
-			my $to;
-			next unless $id;
-
-			my $person = Tab::Person->retrieve($id);
-			next unless $person;
-
-			if ($person->phone && $person->provider) {
-				my $phone = $person->phone;
-				$phone =~ s/[\D_]//g;
-				$to = $phone.'@'.$person->provider;
-			} else {
-				$to = $person->email;
-			}
-
-			# Being Palmer hath its privileges
-			if ($id == 1) {
-				$to = 'palmer-pager@azuen.net';
-			}
+			my $subject = "First Ballot ".$event->abbr;
+			my $body = "First ballot has been confirmed!\n".$round->realname." of ".$event->name."\n".$counts{"undone"}." left.\n\n";
+			$body .= "Tournament: ".$tourn->name."\n\n";
 
 			$m->comp( "/funclib/send_notify.mas",
 				from    => 'Tab Central <live@www.tabroom.com>',
-				to      => $to,
+				ids     => $follower_ids,
 				subject => $subject,
-				body    => $body,
-				admin   => 1
+				body    => $body
 			);
 		}
-
-		$event->setting("first_round_notified", $round->name);
 	}
 
-	return if $judges_left > 0;
+	return if $counts{"undone"} > 0;
+	my $last_ballot = $round->setting("last_ballot");
 
-	# Last ballot in notification
-	my $notified = $event_settings{"round_notified"};
+	if ($last_ballot) {
 
-	if ($notified < $round->name) {
+		$round->setting("last_ballot", "date", $now);
 
-		my $follower_ids = $event_settings{"followers"};
-		my $subject = $event->name;
-		my $body = "\n\n".$round->realname." of ".$event->name." last ballot entered.\n\n";
-		$body .= "Tournament: ".$tourn->name."\n\n";
-
-		foreach my $id (split(/,/, $follower_ids)) {
-
-			next unless $id;
-			my $person = Tab::Person->retrieve($id);
-			next unless $person;
-			my $to;
-
-			if ($person->phone && $person->provider) {
-				my $phone = $person->phone;
-				$phone =~ s/[\D_]//g;
-				$to = $phone.'@'.$person->provider;
-			} else {
-				$to = $person->email;
-			}
-
-			# Being Palmer hath its privileges
-			if ($id == 1) {
-				$to = 'palmer-pager@azuen.net';
-			}
+		if ($follower_ids) {
+			my $subject = $event->abbr." alert";
+			my $body = "BALLOT CHANGED AFTER ROUND COMPLETE\nIn ".$round->realname." of ".$event->name."\n\n";
+			$body .= $tourn->name."\n\n";
 
 			$m->comp( "/funclib/send_notify.mas",
 				from    => 'Tab Central <live@www.tabroom.com>',
-				to      => $to,
+				ids     => $follower_ids,
 				subject => $subject,
-				body    => $body,
-				admin   => 1
+				body    => $body
 			);
 		}
 
-		$event->setting("round_notified", $round->name);
+	} else {
 
-		$m->comp(
-			"/funclib/auto_backups.mas",
+		$round->setting("last_ballot", "date", $now);
+
+		# Last ballot in notification
+		if ($follower_ids) {
+			my $subject = $event->abbr." last ballot";
+			my $body = "Last Ballot entered!\n".$round->realname." of ".$event->name."\n\n";
+			$body .= "Tournament: ".$tourn->name."\n\n";
+
+			$m->comp( "/funclib/send_notify.mas",
+				from    => 'Tab Central <live@www.tabroom.com>',
+				ids     => $follower_ids,
+				subject => $subject,
+				body    => $body
+			);
+		}
+
+		$m->comp("/funclib/auto_backups.mas",
 			subject => "Last Ballot Entered",
 			round   => $round
 		);
@@ -136,7 +120,7 @@
 				select round_setting.id
 				from round_setting
 				where round_setting.tag = 'use_for_breakout'
-				and round_setting.value = ".$round->setting("use_for_breakout")."
+				and round_setting.value = ".int($round->setting("use_for_breakout"))."
 				and round_setting.round = round.id
 			) ";
 		} else {
@@ -155,8 +139,8 @@
 			from (round)
 				left join panel on panel.round = round.id
 			where round.name > ?
-			and round.event = ?
-			$breakout
+				and round.event = ?
+				$breakout
 			group by round.id
 			order by round.name
 		");
@@ -250,8 +234,6 @@
 					created_at => $now,
 				});
 			}
-
 		}
 	}
-
 </%init>
