@@ -106,16 +106,15 @@ export const postNAUDLStudents = {
 
 		if (Object.keys(missedChapters).length > 0) {
 
-			let messageBody = ' Response from posted data: \n';
+			let messageBody = 'Response from posted data:\n';
 			messageBody += JSON.stringify(response.data.message);
-			messageBody += ' Chapters marked as NAUDL not in Salesforce: \n';
+			messageBody += '\n\nChapters marked as NAUDL schools, but not in Salesforce: \n';
 
 			Object.keys(missedChapters).forEach( (chapterId) => {
 				messageBody += `Chapter ID ${chapterId}: ${missedChapters[chapterId]} \n`;
 			});
 
 			// replace this with an ID based sender later.
-
 			const emails = await req.db.sequelize.query(`
 				select
 					person.email
@@ -124,8 +123,8 @@ export const postNAUDLStudents = {
 					and person.no_email != 1
 					and ps.tag = :tag
 			`, {
-				replacements: { tag: 'naudl_admins' },
-				type: req.db.sequelize.SELECT,
+				replacements: { tag: 'naudl_admin' },
+				type: req.db.sequelize.QueryTypes.SELECT,
 			});
 
 			console.log(emails);
@@ -144,6 +143,8 @@ export const postNAUDLStudents = {
 			} else {
 				errorLogger.info(`No NAUDL email addresses found, message not sent`);
 			}
+
+			res.status(200).json(response.data);
 		}
 	},
 };
