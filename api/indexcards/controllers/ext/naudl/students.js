@@ -1,4 +1,6 @@
 import { sendToSalesforce, getSalesforceTeams } from '../../../helpers/naudl';
+import emailBlast from '../../../helpers/mail';
+import { errorLogger } from '../../../helpers/logger';
 import config from '../../../../config/config';
 
 export const postNAUDLStudents = {
@@ -11,7 +13,8 @@ export const postNAUDLStudents = {
 				race.value race,
 				school_sid.value schoolSid,
 				student.chapter chapterId,
-				chapter.name chapterName
+				chapter.name chapterName,
+				chapter.state chapterState
 			from (student, chapter_setting naudl, chapter)
 
 				left join student_setting race on race.student = student.id and race.tag = 'race'
@@ -57,10 +60,9 @@ export const postNAUDLStudents = {
 
 		const missedChapters = {};
 
-		const naudlPostPromises = unpostedStudents.map( async (student) => {
+		const naudlPost = unpostedStudents.flatMap( (student) => {
 
 			const chapterKey = `TR${student.chapterId}`;
-			console.log(`Chapter key ${chapterKey} value ${postedChapters[chapterKey]}`);
 
 			if (postedChapters[chapterKey]) {
 				const studentRecord = {
@@ -79,22 +81,16 @@ export const postNAUDLStudents = {
 				if (student.schoolSid) {
 					studentRecord.studentschoolid = student.schoolSid;
 				}
-
-				return studentRecord;
+				return [studentRecord];
 			}
-
-			missedChapters[chapterKey] = student.chapterName;
-
+			missedChapters[chapterKey] = `${student.chapterName} in ${student.chapterState}`;
+			return [];
 		});
-
-		const naudlPost = await Promise.all(naudlPostPromises);
 
 		const response = await sendToSalesforce(
 			{ students_from_tabroom: naudlPost },
 			config.NAUDL.STUDENT_ENDPOINT
 		);
-
-		res.status(200).json(response.data);
 
 		if (response.data?.success === 'true') {
 			unpostedStudents.map(async (student) => {
@@ -106,8 +102,48 @@ export const postNAUDLStudents = {
 				});
 				return student.id;
 			});
-		} else {
-			res.status(200).json(response.data);
+		}
+
+		if (Object.keys(missedChapters).length > 0) {
+
+			let messageBody = ' Response from posted data: \n';
+			messageBody += JSON.stringify(response.data.message);
+			messageBody += ' Chapters marked as NAUDL not in Salesforce: \n';
+
+			Object.keys(missedChapters).forEach( (chapterId) => {
+				messageBody += `Chapter ID ${chapterId}: ${missedChapters[chapterId]} \n`;
+			});
+
+			// replace this with an ID based sender later.
+
+			const emails = await req.db.sequelize.query(`
+				select
+					person.email
+				from person, person_setting ps
+				where person.id = ps.person
+					and person.no_email != 1
+					and ps.tag = :tag
+			`, {
+				replacements: { tag: 'naudl_admins' },
+				type: req.db.sequelize.SELECT,
+			});
+
+			console.log(emails);
+
+			if (emails) {
+				const emailResponse = await emailBlast({
+					email   : emails,
+					from    : 'naudldata@www.tabroom.com',
+					subject : `Tabroom Students Record Post: ${response.data.success ? 'SUCCESS' : 'ERRORS'}`,
+					text    : messageBody,
+				});
+
+				errorLogger.info(messageBody);
+				errorLogger.info(emailResponse);
+
+			} else {
+				errorLogger.info(`No NAUDL email addresses found, message not sent`);
+			}
 		}
 	},
 };
@@ -115,7 +151,6 @@ export const postNAUDLStudents = {
 export const getNAUDLChapters = {
 	GET: async (req, res) => {
 		const teams = await getSalesforceTeams();
-		console.log(teams);
 		res.status(200).json(teams);
 	},
 };

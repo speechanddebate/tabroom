@@ -4,8 +4,6 @@ import config from '../../config/config';
 export const sendToSalesforce = async (body, url) => {
 
 	const authData = await authSalesforce();
-	console.log(authData);
-
 	if (authData) {
 		const postResponse = await axios.post(
 			`${authData.instance_url}${url}`,
@@ -54,8 +52,6 @@ const authSalesforce = async () => {
 	const authResponse = await axios.post(
 		`https://login.salesforce.com/services/oauth2/token?${authClient}${authUser}`,
 	);
-
-	console.log(authResponse.data);
 
 	if (authResponse && authResponse.data) {
 		return authResponse.data;
