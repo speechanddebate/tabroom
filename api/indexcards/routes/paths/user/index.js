@@ -15,7 +15,7 @@ export default [
 	{ path : '/user/profile/{person_id}'     , module : getProfile }               ,
 	{ path : '/user/iplocation/{ip_address}' , module : ipLocation }               ,
 	{ path : '/user/enter/payment'           , module : acceptPayPal }             ,
-	{ path : '/user/push/enable/{onesignal}' , module : enablePushNotifications }  ,
+	{ path : '/user/push/enable'             , module : enablePushNotifications }  ,
 	{ path : '/user/push/disable'            , module : disablePushNotifications } ,
 	{ path : '/user/push/send'               , module : pushMessage }              ,
 	...judge                                 ,
