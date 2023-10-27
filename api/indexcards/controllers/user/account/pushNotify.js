@@ -1,3 +1,5 @@
+import { errorLogger } from '../../../helpers/logger';
+
 export const enablePushNotifications = {
 	POST: async (req, res) => {
 		const db = req.db;
@@ -40,12 +42,17 @@ export const enablePushNotifications = {
 				value: oneSignalData.identity.onesignal_id,
 			});
 		} else {
-			console.log(`Push Notify does not exist.  Creating`);
-			pushNotify = await db.personSetting.create({
-				person : req.session.person,
-				tag    : 'push_notify',
-				value  : oneSignalData.identity.onesignal_id,
-			});
+
+			try {
+				pushNotify = await db.personSetting.create({
+					person : req.session.person,
+					tag    : 'push_notify',
+					value  : oneSignalData.identity.onesignal_id,
+				});
+			} catch (err) {
+				errorLogger.info(`Push notify person setting was not created`);
+				errorLogger.info(err);
+			}
 		}
 
 		res.status(200).json({
