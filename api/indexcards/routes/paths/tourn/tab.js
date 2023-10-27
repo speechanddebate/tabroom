@@ -9,10 +9,10 @@ import { natsJudgePool } from '../../../controllers/tourn/tab/judgePools.js';
 
 export default [
 	{ path : '/tourn/{tourn_id}/tab/status/update', module : attendance },
-	{ path : '/tourn/{tourn_id}/tab/status/round/{round_id}', module : attendance },
-	{ path : '/tourn/{tourn_id}/tab/status/sidecounts/{round_id}', module : sideCounts },
-	{ path : '/tourn/{tourn_id}/tab/status/schematic/{round_id}', module : schematStatus },
-	{ path : '/tourn/{tourn_id}/tab/status/timeslot/{timeslot_id}', module : attendance },
+	{ path : '/tourn/{tourn_id}/tab/status/round/{roundId}', module : attendance },
+	{ path : '/tourn/{tourn_id}/tab/status/sidecounts/{roundId}', module : sideCounts },
+	{ path : '/tourn/{tourn_id}/tab/status/schematic/{roundId}', module : schematStatus },
+	{ path : '/tourn/{tourn_id}/tab/status/timeslot/{timeslotId}', module : attendance },
 	{ path : '/tourn/{tourn_id}/tab/dashboard', module : eventStatus },
 	{ path : '/tourn/{tourn_id}/tab/status/dashboard', module : eventDashboard },
 	{ path : '/tourn/{tourn_id}/tab/setup/access', module : changeAccess },
