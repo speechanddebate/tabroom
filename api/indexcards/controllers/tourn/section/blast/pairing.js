@@ -140,7 +140,7 @@ export const blastTimeslot = {
 					tag         : 'publish',
 					description : `Round published`,
 					person      : req.session.person,
-					round       : row.id
+					round       : row.id,
 				});
 			});
 		}
@@ -848,7 +848,7 @@ const processRounds = async (rawRounds) => {
 					round.flip = true;
 				} else if (round.type === 'elim' || round.type === 'final' || round.type === 'runoff') {
 					const locks = sidelocks(round.id);
-					round.sidelocks = { ...locks};
+					round.sidelocks = { ...locks };
 					round.flip = true;
 				}
 			}

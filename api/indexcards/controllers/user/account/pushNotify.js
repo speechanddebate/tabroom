@@ -5,6 +5,8 @@ export const enablePushNotifications = {
 		const db = req.db;
 		const oneSignalData = req.body;
 
+		console.log(oneSignalData);
+
 		if (!oneSignalData.currentSubscription) {
 			res.status(200).json({
 				error   : false,
