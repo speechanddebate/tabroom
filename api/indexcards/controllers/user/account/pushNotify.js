@@ -19,8 +19,8 @@ export const enablePushNotifications = {
 		// Update this session with the active push notification signal
 		console.log(currentSubscription);
 
-		if (!req.session.push_notify
-			|| req.session.push_notify?.id !== currentSubscription.id
+		if (!req.session?.push_notify
+			|| req.session?.push_notify?.id !== currentSubscription.id
 		) {
 			await db.session.update(
 				{ push_notify : currentSubscription },
