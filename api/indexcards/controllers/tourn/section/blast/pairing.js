@@ -108,20 +108,23 @@ export const blastTimeslot = {
 		queryData.where = 'where round.timeslot = :timeslotId and round.id = section.round ';
 
 		const tsRounds = await req.db.sequelize.query(
-			`select round.id, round.name, round.type from round where round.timeslot = :timeslotId`, {
+			`select round.id, round.name, round.type from round where round.timeslot = :timeslotId`,
+			{
 				replacements : queryData.replacements,
 				type         : req.db.sequelize.QueryTypes.SELECT,
 			});
 
 		await req.db.sequelize.query(
-			`delete rs.* from round_setting rs, round where round.timeslot = :timeslotId and round.id = rs.round and rs.tag = 'blasted'`, {
+			`delete rs.* from round_setting rs, round where round.timeslot = :timeslotId and round.id = rs.round and rs.tag = 'blasted'`,
+			{
 				replacements : queryData.replacements,
 				type         : req.db.sequelize.QueryTypes.DELETE,
 			});
 
 		tsRounds.forEach( async (row) => {
 			await req.db.sequelize.query(
-				`insert into round_setting (tag, round, value_date, value) values ('blasted', :roundId, now(), 'date')`, {
+				`insert into round_setting (tag, round, value_date, value) values ('blasted', :roundId, now(), 'date')`,
+				{
 					replacements : { roundId: row.id },
 					type         : req.db.sequelize.QueryTypes.UPDATE,
 				});
@@ -129,7 +132,8 @@ export const blastTimeslot = {
 
 		if (req.body.publish) {
 			await req.db.sequelize.query(
-				`update round set published = 1 where round.timeslot = :timeslotId `, {
+				`update round set published = 1 where round.timeslot = :timeslotId `, 
+				{
 					replacements : queryData.replacements,
 					type         : req.db.sequelize.QueryTypes.UPDATE,
 				});
@@ -375,7 +379,7 @@ const formatBlast = async (queryData, req) => {
 				sectionMessage.text += `Room: ${section.room} `;
 
 				sectionMessage.html += `<p>Start ${round.start[section.flight]}</p>`;
-				sectionMessage.html += `<p>">Room: ${section.room} `;
+				sectionMessage.html += `<p>Room: ${section.room} `;
 				sectionMessage.single += `\tRoom ${section.room} Counter ${counter++} Letter ${section.letter}`;
 
 				if (section.hybrid) {
@@ -385,7 +389,7 @@ const formatBlast = async (queryData, req) => {
 				} else {
 					sectionMessage.text += `\n`;
 					sectionMessage.single += `\n`;
-					sectionMessage.html += ` </p>`;
+					sectionMessage.html += `</p>`;
 				}
 				if (section.map) {
 					sectionMessage.text += `Map Link on Tabroom \n`;
