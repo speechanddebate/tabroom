@@ -73,7 +73,7 @@ export const messageRound = {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
 		}
 
-		const personIds = await getRoundFollowers(req.body);
+		const personIds = await getFollowers(req.body);
 
 		const notifyResponse = await notify({
 			ids  : personIds,
@@ -120,7 +120,7 @@ export const messageTimeslot = {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
 		}
 
-		const personIds = await getRoundFollowers(req.body);
+		const personIds = await getFollowers(req.body);
 
 		const notifyResponse = await notify({
 			ids  : personIds,
