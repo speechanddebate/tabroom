@@ -1,5 +1,5 @@
 export const enablePushNotifications = {
-	GET: async (req, res) => {
+	PUSH: async (req, res) => {
 		const db = req.db;
 		const oneSignalData = req.body;
 
