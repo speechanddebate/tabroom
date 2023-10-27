@@ -1,11 +1,7 @@
-import { debugLogger } from '../../../helpers/logger';
-
 export const enablePushNotifications = {
 	POST: async (req, res) => {
 		const db = req.db;
 		const oneSignalData = req.body;
-
-		console.log(oneSignalData);
 
 		if (!oneSignalData.currentSubscription) {
 			res.status(200).json({
@@ -17,21 +13,19 @@ export const enablePushNotifications = {
 
 		const currentSubscription = {
 			id      : oneSignalData.currentSubscription?.id,
-			enabled : oneSignalData.currentSubscription?.enabled,
+			enabled : oneSignalData.currentSubscription?.optIn,
 		};
 
 		// Update this session with the active push notification signal
-		debugLogger.debug(currentSubscription);
+		console.log(currentSubscription);
 
 		if (!req.session.push_notify
 			|| req.session.push_notify?.id !== currentSubscription.id
 		) {
-			const result = await db.session.update(
-				{ push_notify : JSON.stringify(currentSubscription) },
+			await db.session.update(
+				{ push_notify : currentSubscription },
 				{ where: { id : req.session.id } }
 			);
-
-			debugLogger.debug(result);
 		}
 
 		let pushNotify = await db.personSetting.findOne({
