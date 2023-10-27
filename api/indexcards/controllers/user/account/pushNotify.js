@@ -3,9 +3,16 @@ export const enablePushNotifications = {
 		const db = req.db;
 		const oneSignalData = req.body;
 
+		if (!oneSignalData.currentSubscription) {
+			res.status(200).json({
+				error   : false,
+				message : 'No current subscription was found or registered',
+			});
+		}
+
 		const currentSubscription = {
-			id      : oneSignalData.currentSubscription.id,
-			enabled : oneSignalData.currentSubscription.enabled,
+			id      : oneSignalData.currentSubscription?.id,
+			enabled : oneSignalData.currentSubscription?.enabled,
 		};
 
 		// Update this session with the active push notification signal
