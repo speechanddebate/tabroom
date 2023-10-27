@@ -24,6 +24,32 @@ export const getFollowers = async (replacements) => {
 		whereLimit +=  ` and panel.flight = :flight `;
 	}
 
+	let queryLimits = '';
+
+	if (replacements.speaker) {
+		queryLimits += `
+			and ballot.speakerorder = :speakerOrder
+		`;
+	}
+
+	if (replacements.status === 'unstarted' ) {
+		queryLimits += `
+			and (ballot.judge_started IS NULL)
+			and (ballot.audit = 0 OR ballot.audit IS NULL)
+		`;
+	} else if (replacements.status === 'unentered' ) {
+		queryLimits += `
+			and NOT EXISTS (
+				select score.id from score where score.ballot = ballot.id
+			)
+			and (ballot.audit = 0 OR ballot.audit IS NULL)
+		`;
+	} else if (replacements.status === 'unconfirmed' ) {
+		queryLimits += `
+			and (ballot.audit = 0 OR ballot.audit IS NULL)
+		`;
+	}
+
 	const persons = [];
 
 	if (replacements.recipients !== 'judges') {
@@ -37,6 +63,7 @@ export const getFollowers = async (replacements) => {
 				and entry.id = es.entry
 				and es.student = student.id
 				and student.person = person.id
+				${queryLimits}
 		`, {
 			replacements,
 			type: db.sequelize.QueryTypes.SELECT,
@@ -54,6 +81,7 @@ export const getFollowers = async (replacements) => {
 				and ballot.panel = panel.id
 				and ballot.judge = judge.id
 				and judge.person = person.id
+				${queryLimits}
 		`, {
 			replacements,
 			type: db.sequelize.QueryTypes.SELECT,
@@ -70,6 +98,7 @@ export const getFollowers = async (replacements) => {
 					and ballot.panel = panel.id
 					and ballot.judge = follower.judge
 					and follower.person = person.id
+					${queryLimits}
 			`, {
 				replacements,
 				type: db.sequelize.QueryTypes.SELECT,
@@ -88,6 +117,7 @@ export const getFollowers = async (replacements) => {
 					and entry.active = 1
 					and entry.id = follower.entry
 					and follower.person = person.id
+					${queryLimits}
 			`, {
 				replacements,
 				type: db.sequelize.QueryTypes.SELECT,
@@ -103,6 +133,7 @@ export const getFollowers = async (replacements) => {
 		personIds.push(person?.id);
 	}
 
+	console.log([...new Set(personIds)]);
 	return [...new Set(personIds)];
 };
 
