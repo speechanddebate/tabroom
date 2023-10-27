@@ -56,7 +56,7 @@ export const pushNotify = async (inputData) => {
 
 	let targetIds = await Promise.all(targetPromise);
 
-	if (process.env.NODE_ENV === 'production') {
+	if (process.env.NODE_ENV !== 'production') {
 		targetIds = ['100'];
 	}
 
