@@ -1,3 +1,5 @@
+import { debugLogger } from '../../../helpers/logger';
+
 export const enablePushNotifications = {
 	POST: async (req, res) => {
 		const db = req.db;
@@ -17,14 +19,17 @@ export const enablePushNotifications = {
 		};
 
 		// Update this session with the active push notification signal
+		debugLogger.debug(currentSubscription);
 
 		if (!req.session.push_notify
 			|| req.session.push_notify?.id !== currentSubscription.id
 		) {
-			await db.session.update(
+			const result = await db.session.update(
 				{ push_notify : JSON.stringify(currentSubscription) },
 				{ where: { id : req.session.id } }
 			);
+
+			debugLogger.debug(result);
 		}
 
 		let pushNotify = await db.personSetting.findOne({
