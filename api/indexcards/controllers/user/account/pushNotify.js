@@ -37,13 +37,14 @@ export const enablePushNotifications = {
 
 		if (pushNotify) {
 			pushNotify = await pushNotify.update({
-				value: req.params.onesignal,
+				value: oneSignalData.identity.onesignal_id,
 			});
 		} else {
+			console.log(`Push Notify does not exist.  Creating`);
 			pushNotify = await db.personSetting.create({
 				person : req.session.person,
 				tag    : 'push_notify',
-				value  : req.params.onesignal,
+				value  : oneSignalData.identity.onesignal_id,
 			});
 		}
 
