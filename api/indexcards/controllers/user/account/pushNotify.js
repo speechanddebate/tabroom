@@ -8,6 +8,7 @@ export const enablePushNotifications = {
 				error   : false,
 				message : 'No current subscription was found or registered',
 			});
+			return;
 		}
 
 		const currentSubscription = {
