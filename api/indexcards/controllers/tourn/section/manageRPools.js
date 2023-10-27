@@ -15,7 +15,7 @@ export const addRoundToRPool = {
 
 		const already = await db.sequelize.query(checkRoundQuery,
 			{ replacements : {
-				rpoolId    : req.params.rpool_id,
+				rpoolId    : req.params.rpoolId,
 				roundId    : parseInt(req.body.property_value),
 			},
 			type: req.db.sequelize.QueryTypes.SELECT,
@@ -33,7 +33,7 @@ export const addRoundToRPool = {
 
 		await db.sequelize.query(addRoundQuery,
 			{ replacements   : {
-				rpoolId  : req.params.rpool_id,
+				rpoolId  : req.params.rpoolId,
 				roundId    : parseInt(req.body.property_value),
 			},
 			type: req.db.sequelize.QueryTypes.INSERT,
@@ -49,7 +49,7 @@ export const addRoundToRPool = {
 				and rpr.rpool = :rpoolId
 		`, {
 			replacements : {
-				rpoolId  : req.params.rpool_id,
+				rpoolId  : req.params.rpoolId,
 				roundId  : parseInt(req.body.property_value),
 			},
 			type: req.db.sequelize.QueryTypes.SELECT,
@@ -68,7 +68,7 @@ export const addRoundToRPool = {
 						class="full white nowrap hover marno smallish"
 						title="Remove this round">${roundInfo.abbr} ${roundInfo.name}</a>
 				</span>`,
-			reply_append : `${req.params.rpool_id}_rounds`,
+			reply_append : `${req.params.rpoolId}_rounds`,
 			error        : false,
 			message      : `Round ${roundInfo.name} added to pool`,
 		});

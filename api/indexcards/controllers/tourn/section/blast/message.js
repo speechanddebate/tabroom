@@ -1,68 +1,59 @@
 import { getFollowers, getJPoolJudges, getTimeslotJudges } from '../../../../helpers/followers';
 import { emailBlast, phoneBlast } from '../../../../helpers/mail.js';
 import { sectionCheck, jpoolCheck, timeslotCheck, roundCheck } from '../../../../helpers/auth.js';
+import { errorLogger } from '../../../../helpers/logger';
+import notify from '../../../../helpers/pushNotify';
 import objectify from '../../../../helpers/objectify';
 
 export const messageSection = {
 	POST: async (req, res) => {
 		if (!req.body.message) {
 			res.status(200).json({
-				error: true,
-				message: 'No message to blast sent',
+				error   : true,
+				message : 'No message to blast sent',
 			});
 		}
 
 		// Permissions.  I feel like there should be a better way to do this
-		const permOK = await sectionCheck(req, res, req.params.section_id);
+		const permOK = await sectionCheck(req, res, req.params.sectionId);
 		if (!permOK) {
 			return;
 		}
 
-		const messageData = await getFollowers(
-			{ sectionId : req.params.section_id },
-			{
-				recipients   : req.body.recipients,
-				status       : req.body.status,
-				flight       : req.body.flight,
-				no_followers : req.body.no_followers,
-			}
+		const personIds = await getFollowers(
+			{ sectionId : req.params.sectionId },
+			req.body
 		);
 
-		messageData.text = `\n\n${req.body.message}`;
-		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
-		messageData.subject = 'Message from Tab';
+		const notifyResponse = await notify({
+			ids  : personIds,
+			text : req.body.message,
+		});
 
-		const tourn = await req.db.summon(req.db.tourn, req.params.tourn_id);
-		if (tourn.webname) {
-			messageData.from = `${tourn.name} <${tourn.webname}@www.tabroom.com>`;
-		}
-
-		const emailResponse = await emailBlast(messageData);
-		const phoneResponse = await phoneBlast(messageData);
-
-		if (emailResponse.error && phoneResponse.error) {
-			res.status(200).json({ error: true, message: emailResponse.message });
+		if (notifyResponse.error) {
+			errorLogger.error(notifyResponse.message);
+			res.status(200).json(notifyResponse);
 		} else {
 
 			await req.db.changeLog.create({
 				tag         : 'blast',
-				description : `${req.body.message} sent to ${req.body.recipients}`,
+				description : `${req.body.message} sent to ${notifyResponse.push?.count || 0} recipients`,
 				person      : req.session.person,
-				count       : phoneResponse.count,
-				panel       : req.params.section_id,
+				count       : notifyResponse.push?.count || 0,
+				panel       : req.params.sectionId,
 			});
 
 			await req.db.changeLog.create({
 				tag         : 'emails',
-				description : `${req.body.message} sent to ${req.body.recipients}`,
+				description : `${req.body.message} sent to ${notifyResponse.email?.count || 0}`,
 				person      : req.session.person,
-				count       : emailResponse.count,
-				panel       : req.params.section_id,
+				count       : notifyResponse.email?.count || 0,
+				panel       : req.params.sectionId,
 			});
 
 			res.status(200).json({
 				error   : false,
-				message : `Message sent to ${emailResponse.count + phoneResponse.count} recipients`,
+				message : notifyResponse.message,
 			});
 		}
 	},
@@ -72,7 +63,7 @@ export const messageRound = {
 
 	POST: async (req, res) => {
 
-		const permOK = await roundCheck(req, res, req.params.round_id);
+		const permOK = await roundCheck(req, res, req.params.roundId);
 
 		if (!permOK) {
 			return;
@@ -82,51 +73,37 @@ export const messageRound = {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
 		}
 
-		const messageData = await getFollowers(
-			{ roundId : req.params.round_id },
-			{
-				recipients   : req.body.recipients,
-				status       : req.body.status,
-				flight       : req.body.flight,
-				no_followers : req.body.no_followers,
-			}
-		);
+		const personIds = await getRoundFollowers(req.body);
 
-		messageData.text = `\n\n${req.body.message}`;
-		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
-		messageData.subject = 'Message from Tab';
+		const notifyResponse = await notify({
+			ids  : personIds,
+			text : req.body.message,
+		});
 
-		const tourn = await req.db.summon(req.db.tourn, req.params.tourn_id);
-		if (tourn.webname) {
-			messageData.from = `${tourn.name} <${tourn.webname}@www.tabroom.com>`;
-		}
-
-		const emailResponse = await emailBlast(messageData);
-		const phoneResponse = await phoneBlast(messageData);
-
-		if (emailResponse.error && phoneResponse.error) {
-			res.status(200).json({ error: true, message: emailResponse.message });
+		if (notifyResponse.error) {
+			errorLogger.error(notifyResponse.message);
+			res.status(200).json(notifyResponse);
 		} else {
 
 			await req.db.changeLog.create({
 				tag         : 'blast',
-				description : `${req.body.message} sent to ${req.body.recipients} in ${req.body.status} sections`,
+				description : `${req.body.message} sent to ${notifyResponse.push?.count || 0} recipients`,
 				person      : req.session.person,
-				count       : phoneResponse.count,
-				round       : req.params.round_id,
+				count       : notifyResponse.push?.count || 0,
+				panel       : req.params.roundId,
 			});
 
 			await req.db.changeLog.create({
 				tag         : 'emails',
-				description : `${req.body.message} sent to ${req.body.recipients} in ${req.body.status} sections`,
+				description : `${req.body.message} sent to ${notifyResponse.email?.count || 0}`,
 				person      : req.session.person,
-				count       : emailResponse.count,
-				round       : req.params.round_id,
+				count       : notifyResponse.email?.count || 0,
+				panel       : req.params.roundId,
 			});
 
 			res.status(200).json({
-				error: false,
-				message: `Message sent to ${emailResponse.count + phoneResponse.count} recipients`,
+				error   : false,
+				message : notifyResponse.message,
 			});
 		}
 	},
@@ -136,67 +113,65 @@ export const messageTimeslot = {
 
 	POST: async (req, res) => {
 
-		const permOK = await timeslotCheck(req, res, req.params.timeslot_id);
-
-		if (!permOK) {
-			return;
-		}
+		const permOK = await timeslotCheck(req, res, req.params.timeslotId);
+		if (!permOK) { return; }
 
 		if (!req.body.message) {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
 		}
 
-		const messageData = await getFollowers(
-			{ timeslotId : req.params.timeslot_id },
-			{
-				recipients   : req.body.recipients,
-				status       : req.body.status,
-				flight       : req.body.flight,
-				no_followers : req.body.no_followers,
-			}
-		);
+		const personIds = await getRoundFollowers(req.body);
 
-		messageData.text = `\n\n${req.body.message}`;
-		messageData.html = `<p style='padding-top: 8px;'>${req.body.message}</p>`;
-		messageData.subject = 'Message from Tab';
+		const notifyResponse = await notify({
+			ids  : personIds,
+			text : req.body.message,
+		});
 
-		const tourn = await req.db.summon(req.db.tourn, req.params.tourn_id);
-		if (tourn.webname) {
-			messageData.from = `${tourn.name} <${tourn.webname}@www.tabroom.com>`;
-		}
-
-		const emailResponse = await emailBlast(messageData);
-		const phoneResponse = await phoneBlast(messageData);
-
-		if (emailResponse.error && phoneResponse.error) {
-			res.status(200).json({ error: true, message: emailResponse.message });
+		if (notifyResponse.error) {
+			errorLogger.error(notifyResponse.message);
+			res.status(200).json(notifyResponse);
 		} else {
 
-			const rounds = await req.db.round.findAll({
-				where: { timeslot: req.params.timeslot_id },
+			res.status(200).json({
+				error   : false,
+				message : notifyResponse.message,
 			});
 
-			rounds.forEach( async (round) => {
-				await req.db.changeLog.create({
+			const rounds = await req.db.round.findAll({
+				where: { timeslot: req.params.timeslotId },
+			});
+
+			const results = rounds.map( async (round) => {
+
+				const blastLog = await req.db.changeLog.create({
 					tag         : 'blast',
-					description : `${req.body.message} sent to ${req.body.recipients} in ${req.body.status} sections`,
+					description : `${req.body.message} sent to whole timeslot. ${notifyResponse.push?.count || 0} recipients`,
 					person      : req.session.person,
-					count       : phoneResponse.count,
+					count       : notifyResponse.push?.count || 0,
 					round       : round.id,
 				});
 
 				await req.db.changeLog.create({
 					tag         : 'emails',
-					description : `${req.body.message} sent to ${req.body.recipients} in ${req.body.status} sections`,
+					description : `${req.body.message} sent to whole timeslot. ${notifyResponse.email?.count || 0}`,
 					person      : req.session.person,
-					count       : emailResponse.count,
+					count       : notifyResponse.email?.count || 0,
 					round       : round.id,
 				});
+
+				return blastLog;
 			});
-			res.status(200).json({ error: false, message: `Message sent to ${emailResponse.count + phoneResponse.count} recipients` });
+
+			res.status(200).json({
+				error   : false,
+				message : `Message sent to ${results.length} rounds. ${notifyResponse.push?.count || 0} push notifications
+				 		   and ${notifyResponse.email?.count || 0} emails sent`,
+			});
 		}
 	},
 };
+
+// These two still require conversion to the new interface with push notifications.
 
 export const messageJPool = {
 
@@ -206,18 +181,18 @@ export const messageJPool = {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
 		}
 
-		const permOK = await jpoolCheck(req, res, req.params.jpool_id);
+		const permOK = await jpoolCheck(req, res, req.params.jpoolId);
 
 		if (!permOK) {
 			return;
 		}
 
 		const poolJudges = await getJPoolJudges(
-			{ jpoolId : req.params.jpool_id }
+			{ jpoolId : req.params.jpoolId }
 		);
 
-		const jpool = await req.db.summon(req.db.jpool, req.params.jpool_id);
-		const tourn = await req.db.summon(req.db.tourn, req.params.tourn_id);
+		const jpool = await req.db.summon(req.db.jpool, req.params.jpoolId);
+		const tourn = await req.db.summon(req.db.tourn, req.params.tournId);
 		let recipients = 0;
 		let errors = '';
 
@@ -258,7 +233,7 @@ export const messageJPool = {
 		`;
 
 		const rawRounds = await req.db.sequelize.query(jpoolRoundQuery, {
-			replacements: { jpoolId: req.params.jpool_id },
+			replacements: { jpoolId: req.params.jpoolId },
 			type: req.db.sequelize.QueryTypes.SELECT,
 		});
 

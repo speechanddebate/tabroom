@@ -8,8 +8,8 @@ import { blastRound } from '../../../controllers/tourn/section/blast/pairing.js'
 import { getRoundLog } from '../../../controllers/tourn/schematic/changeLog.js';
 
 export default [
-	{ path : '/tourn/{tourn_id}/round/{round_id}/judges'  , module : roundJudges }  ,
-	{ path : '/tourn/{tourn_id}/round/{round_id}/message' , module : messageRound } ,
-	{ path : '/tourn/{tourn_id}/round/{round_id}/blast'   , module : blastRound }   ,
-	{ path : '/tourn/{tourn_id}/round/{round_id}/log'     , module : getRoundLog }  ,
+	{ path : '/tourn/{tourn_id}/round/{roundId}/judges'  , module : roundJudges }  ,
+	{ path : '/tourn/{tourn_id}/round/{roundId}/message' , module : messageRound } ,
+	{ path : '/tourn/{tourn_id}/round/{roundId}/blast'   , module : blastRound }   ,
+	{ path : '/tourn/{tourn_id}/round/{roundId}/log'     , module : getRoundLog }  ,
 ];

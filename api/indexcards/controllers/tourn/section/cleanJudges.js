@@ -5,7 +5,7 @@ export const panelCleanJudges = {
 	GET: async (req, res) => {
 
 		const db = req.db;
-		const panel = await db.summon(db.panel, req.params.panel_id);
+		const panel = await db.summon(db.panel, req.params.sectionId);
 
 		// Pull settings and everything else we need about this round
 		panel.round = await roundData(db, panel.round);
@@ -169,13 +169,13 @@ const panelEntries = async (db, panel) => {
 			left join chapter on school.chapter = chapter.state
 			left join strike hybrid on hybrid.type = 'hybrid' and hybrid.entry = entry.id
 
-		where ballot.panel = :panelId
+		where ballot.panel = :sectionId
 			and ballot.entry = entry.id
 			and entry.active = 1
 	`;
 
 	const rawEntries = await db.sequelize.query(entryQuery, {
-		replacements: { panelId: panel.id },
+		replacements: { sectionId: panel.id },
 		type: db.sequelize.QueryTypes.SELECT,
 	});
 
@@ -385,7 +385,7 @@ const roundAvailableJudges = async (db, round) => {
 
 export const roundJudges =  {
 	GET: async (req, res) => {
-		const round = await roundData(req.db, req.params.round_id);
+		const round = await roundData(req.db, req.params.roundId);
 		const availableJudges = await roundAvailableJudges(req.db, round);
 		res.status(200).json(availableJudges);
 	},

@@ -37,7 +37,7 @@ export const sideCounts = {
 			group by ballot.judge
 			order by ballot.side
 		`, {
-			replacements : { roundId: req.params.round_id },
+			replacements : { roundId: req.params.roundId },
 			type         : req.db.sequelize.QueryTypes.SELECT,
 		});
 
@@ -70,18 +70,18 @@ export const attendance = {
 
 		let queryLimit = '';
 
-		if (req.params.timeslot_id) {
-			req.params.timeslot_id = parseInt(req.params.timeslot_id);
+		if (req.params.timeslotId) {
+			req.params.timeslotId = parseInt(req.params.timeslotId);
 		}
 
-		if (req.params.round_id) {
-			req.params.round_id = parseInt(req.params.round_id);
+		if (req.params.roundId) {
+			req.params.roundId = parseInt(req.params.roundId);
 		}
 
-		if (req.params.timeslot_id) {
-			queryLimit = `where round.timeslot = ${req.params.timeslot_id}`;
-		} else if (req.params.round_id) {
-			queryLimit = `where round.id = ${req.params.round_id}`;
+		if (req.params.timeslotId) {
+			queryLimit = `where round.timeslot = ${req.params.timeslotId}`;
+		} else if (req.params.roundId) {
+			queryLimit = `where round.id = ${req.params.roundId}`;
 		} else {
 			return res.status(400).json({ message: 'No parameters sent for query' });
 		}
@@ -618,7 +618,7 @@ export const schematStatus = {
 				and aff_label.tag = 'aff_label'
 				and neg_label.tag = 'neg_label'
 		`, {
-			replacements: { roundId: req.params.round_id },
+			replacements: { roundId: req.params.roundId },
 			type         : db.sequelize.QueryTypes.SELECT,
 		});
 
@@ -659,7 +659,7 @@ export const schematStatus = {
 				and round.event = event.id
 				and event.tourn = tourn.id
 		`, {
-			replacements: { roundId: req.params.round_id },
+			replacements: { roundId: req.params.roundId },
 			type         : db.sequelize.QueryTypes.SELECT,
 		});
 
@@ -753,7 +753,7 @@ export const eventStatus = {
 		const eventQuery = `
 			select
 				event.id, event.name, event.abbr,
-				round.id round_id, round.name round_name, round.label, round.flighted, round.type,
+				round.id roundId, round.name round_name, round.label, round.flighted, round.type,
 				round.start_time round_start,
 				timeslot.start timeslot_start,
 				panel.id panel_id, panel.flight,
@@ -831,8 +831,8 @@ export const eventStatus = {
 			// I feel like if there's not a simple dynamic way to do this in JS
 			// that's a reason to take another look at Python.
 
-			if (!statusCache.done_judges[`${event.round_id}-${event.judge}-${event.flight}`]) {
-				statusCache.done_judges[`${event.round_id}-${event.judge}-${event.flight}`] = true;
+			if (!statusCache.done_judges[`${event.roundId}-${event.judge}-${event.flight}`]) {
+				statusCache.done_judges[`${event.roundId}-${event.judge}-${event.flight}`] = true;
 
 				if (typeof status[event.id] === 'undefined') {
 					status[event.id] = {
@@ -842,28 +842,28 @@ export const eventStatus = {
 					};
 				}
 
-				if (typeof status[event.id].rounds[event.round_id] === 'undefined') {
-					status[event.id].rounds[event.round_id] = {
+				if (typeof status[event.id].rounds[event.roundId] === 'undefined') {
+					status[event.id].rounds[event.roundId] = {
 						number   : event.round_name,
 						flighted : event.flighted,
 						type     : event.type,
 						label    : event.label,
 					};
 
-					if (status[event.id].rounds[event.round_id].label === '') {
-						status[event.id].rounds[event.round_id].label = `Rnd ${event.round_name}`;
+					if (status[event.id].rounds[event.roundId].label === '') {
+						status[event.id].rounds[event.roundId].label = `Rnd ${event.round_name}`;
 					}
 				}
 
-				if (typeof status[event.id].rounds[event.round_id][event.flight] === 'undefined') {
+				if (typeof status[event.id].rounds[event.roundId][event.flight] === 'undefined') {
 
-					if (typeof status[event.id].rounds[event.round_id][event.flight] === 'undefined') {
+					if (typeof status[event.id].rounds[event.roundId][event.flight] === 'undefined') {
 						// this can't seriously be how this works.
-						status[event.id].rounds[event.round_id][event.flight] = {};
+						status[event.id].rounds[event.roundId][event.flight] = {};
 					}
 
 					status[event.id]
-						.rounds[event.round_id][event.flight]
+						.rounds[event.roundId][event.flight]
 						.start_time
 						= new Date(event.round_start).toLocaleTimeString(
 								'en-us', {
@@ -884,10 +884,10 @@ export const eventStatus = {
 				) {
 
 					// THIS IS SUCH A HORRIFIC ANTIPATTERN I BETTER BE WRONG ABOUT THIS
-					if (status[event.id].rounds[event.round_id][event.flight].complete) {
-						status[event.id].rounds[event.round_id][event.flight].complete++;
+					if (status[event.id].rounds[event.roundId][event.flight].complete) {
+						status[event.id].rounds[event.roundId][event.flight].complete++;
 					} else {
-						status[event.id].rounds[event.round_id][event.flight].complete = 1;
+						status[event.id].rounds[event.roundId][event.flight].complete = 1;
 					}
 
 					if (statusCache[event.id].finished) {
@@ -898,29 +898,29 @@ export const eventStatus = {
 
 				} else {
 
-					status[event.id].rounds[event.round_id][event.flight].undone = true;
+					status[event.id].rounds[event.roundId][event.flight].undone = true;
 
 					if (event.score_id) {
 
-						status[event.id].rounds[event.round_id][event.flight].scored =
-							++status[event.id].rounds[event.round_id][event.flight].scored || 1;
+						status[event.id].rounds[event.roundId][event.flight].scored =
+							++status[event.id].rounds[event.roundId][event.flight].scored || 1;
 
-						status[event.id].rounds[event.round_id].in_progress = true;
+						status[event.id].rounds[event.roundId].in_progress = true;
 						statusCache[event.id].pending = ++statusCache[event.id].pending || 1;
 
 					} else if (event.judge_started) {
 
-						status[event.id].rounds[event.round_id][event.flight].started =
-							++status[event.id].rounds[event.round_id][event.flight].started || 1;
+						status[event.id].rounds[event.roundId][event.flight].started =
+							++status[event.id].rounds[event.roundId][event.flight].started || 1;
 
-						status[event.id].rounds[event.round_id].in_progress = true;
+						status[event.id].rounds[event.roundId].in_progress = true;
 
 						statusCache[event.id].pending = ++statusCache[event.id].pending || 1;
 
 					} else {
 
-						status[event.id].rounds[event.round_id][event.flight].unstarted =
-							++status[event.id].rounds[event.round_id][event.flight].unstarted
+						status[event.id].rounds[event.roundId][event.flight].unstarted =
+							++status[event.id].rounds[event.roundId][event.flight].unstarted
 							|| 1;
 					}
 				}
@@ -977,7 +977,7 @@ export const eventStatus = {
 		const lastQuery = `
 			select
 				event.id, event.name, event.abbr,
-				round.id round_id, round.name round_name, round.label, round.type,
+				round.id roundId, round.name round_name, round.label, round.type,
 				round.start_time round_start,
 				timeslot.start timeslot_start,
 				tourn.tz tz
@@ -1017,30 +1017,30 @@ export const eventStatus = {
 				};
 			}
 
-			if (!status[event.id].rounds[event.round_id]) {
-				status[event.id].rounds[event.round_id] = {
+			if (!status[event.id].rounds[event.roundId]) {
+				status[event.id].rounds[event.roundId] = {
 					number   : event.round_name,
 					flighted : event.flighted,
 					type     : event.type,
 					label    : event.label,
 				};
 
-				if (status[event.id].rounds[event.round_id].label === '') {
-					status[event.id].rounds[event.round_id].label = `Rnd ${event.round_name}`;
+				if (status[event.id].rounds[event.roundId].label === '') {
+					status[event.id].rounds[event.roundId].label = `Rnd ${event.round_name}`;
 				}
 			}
 
 			event.round_start = event.round_start || event.timeslot_start;
 
-			if (!status[event.id].rounds[event.round_id][event.flight]) {
+			if (!status[event.id].rounds[event.roundId][event.flight]) {
 
-				if (!status[event.id].rounds[event.round_id][event.flight]) {
+				if (!status[event.id].rounds[event.roundId][event.flight]) {
 					// this can't seriously be how this works.
-					status[event.id].rounds[event.round_id][event.flight] = {};
+					status[event.id].rounds[event.roundId][event.flight] = {};
 				}
 
 				status[event.id]
-					.rounds[event.round_id][event.flight]
+					.rounds[event.roundId][event.flight]
 					.start_time
 					= new Date(event.round_start).toLocaleTimeString(
 							'en-us', {
@@ -1072,7 +1072,7 @@ export const eventDashboard = {
 		const eventQuery = `
 			select
 				event.id event_id, event.name event_name, event.abbr event_abbr,
-				round.id round_id, round.name round_name, round.type round_type,
+				round.id roundId, round.name round_name, round.type round_type,
 				round.label, round.flighted, round.type,
 				round.start_time round_start,
 				timeslot.start timeslot_start,
@@ -1145,15 +1145,15 @@ export const eventDashboard = {
 			// If the round isn't on the status board already, create an object
 			// for it
 
-			if (!status[result.round_id]) {
+			if (!status[result.roundId]) {
 
-				const times = await flightTimes(result.round_id);
+				const times = await flightTimes(result.roundId);
 				const numFlights = result.flighted || 1;
 
-				status[result.round_id] = {
+				status[result.roundId] = {
 					eventId   : result.event_id,
 					eventName : result.event_abbr,
-					roundId   : result.round_id,
+					roundId   : result.roundId,
 					number    : result.round_name,
 					name      : result.label ? result.label : `Rd ${result.round_name}`,
 					type      : result.round_type,
@@ -1163,7 +1163,7 @@ export const eventDashboard = {
 				};
 
 				for (let f = 1; f <= numFlights; f++) {
-					status[result.round_id].flights[f] = {
+					status[result.roundId].flights[f] = {
 						done      : 0,
 						half      : 0,
 						started   : 0,
@@ -1187,20 +1187,20 @@ export const eventDashboard = {
 
 			if (result.audit) {
 				// Is the ballot done?
-				status[result.round_id].flights[result.flight].done++;
-				status[result.round_id].started = true;
+				status[result.roundId].flights[result.flight].done++;
+				status[result.roundId].started = true;
 			} else {
 
-				status[result.round_id].undone = true;
+				status[result.roundId].undone = true;
 				if (result.score_id) {
 					// Does the ballot have scores?
-					status[result.round_id].flights[result.flight].half++;
-					status[result.round_id].started = true;
+					status[result.roundId].flights[result.flight].half++;
+					status[result.roundId].started = true;
 				} else if (result.judge_started) {
-					status[result.round_id].flights[result.flight].started++;
-					status[result.round_id].started = true;
+					status[result.roundId].flights[result.flight].started++;
+					status[result.roundId].started = true;
 				} else {
-					status[result.round_id].flights[result.flight].nada++;
+					status[result.roundId].flights[result.flight].nada++;
 				}
 			}
 		}
@@ -1230,12 +1230,12 @@ attendance.GET.apiDoc = {
 				minimum : 1,
 			},
 		},{
-			in		  : 'path',
-			name		: 'round_id',
+			in          : 'path',
+			name        : 'roundId',
 			description : 'Round ID',
-			required	: false,
-			schema	  : {
-				type	: 'integer',
+			required    : false,
+			schema      : {
+				type    : 'integer',
 				minimum : 1,
 			},
 		},

@@ -12,6 +12,18 @@ const session = (sequelize, DataTypes) => {
 			type: DataTypes.JSON,
 			allowNull: true,
 		},
+		agent_data: {
+			type: DataTypes.JSON,
+			allowNull: true,
+		},
+		geoip: {
+			type: DataTypes.JSON,
+			allowNull: true,
+		},
+		push_notify: {
+			type: DataTypes.JSON,
+			allowNull: true,
+		},
 	});
 };
 

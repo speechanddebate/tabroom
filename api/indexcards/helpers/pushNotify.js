@@ -14,16 +14,23 @@ export const notify = async (inputData) => {
 	pushReply.email = await emailNotify(inputData);
 
 	const reply = {
-		error   : pushReply.web.error || pushReply.email.error,
+		error   : pushReply.web?.error || pushReply.email?.error,
 		message : `${pushReply.web.message} and ${pushReply.email.message}`,
+		email   : pushReply.email,
+		web     : pushReply.web,
 	};
 
 	return reply;
 };
 
 export const pushNotify = async (inputData) => {
-	if (!inputData.ids || !inputData.message) {
-		return;
+
+	if (!inputData.ids || !inputData.text) {
+		return {
+			error   : false,
+			message : `No receipients or message sent for push noitications`,
+			count   : inputData.ids.length,
+		};
 	}
 
 	const recipients = await db.sequelize.query(`
@@ -41,23 +48,29 @@ export const pushNotify = async (inputData) => {
 
 	const targetPromise = recipients.map( async (person) => {
 		if (person.id === 1) {
-			// it won't let you use 1 or 0 as user IDs which REALLY PISSED
-			// PALMER OFF.
+			// it won't let you use 1 or 0 as user IDs which REALLY PISSED PALMER OFF.
 			return '100';
 		}
-		return person.id;
+		return `${person.id}`;
 	});
 
-	const targetIds = await Promise.all(targetPromise);
+	let targetIds = await Promise.all(targetPromise);
+
+	if (process.env.NODE_ENV === 'production') {
+		targetIds = ['100'];
+	}
+
+	if (inputData.append) {
+		inputData.text += `\n${inputData.append}`;
+	}
 
 	if (targetIds && targetIds.length > 0) {
-
 
 		const notification = {
 			app_id          : config.ONE_SIGNAL.app_id,
 			name            : 'Test Blast for New Tabroom',
 			url 		    : inputData.url ? inputData.url : 'https://www.tabroom.com/user/home.mhtml',
-			contents        : { en: inputData.message },
+			contents        : { en: inputData.text },
 			headings        : { en: inputData.subject ? inputData.subject : 'Message from Tab' },
 			include_aliases: {
 				external_id: targetIds,
@@ -79,26 +92,33 @@ export const pushNotify = async (inputData) => {
 
 		if (reply.status === 200) {
 			return {
-				error: false,
-				message: `Push notification sent to ${targetIds ? targetIds.length : 0} recipients`,
+				error   : false,
+				message : `Push notification sent to ${targetIds ? targetIds.length : 0} recipients`,
+				count   : targetIds.length,
 			};
 		}
 
 		return {
-			error: true,
-			message: `Push notification failed with status ${reply.status} and message ${reply.statusText}`,
+			error   : true,
+			message : `Push notification failed with status ${reply.status} and text ${reply.statusText}`,
 		};
 	}
 
 	return {
-		error: true,
-		message: `No recipients found for the push notification`,
+		error   : false,
+		message : `No recipients found for the push notification`,
+		count   : 0,
 	};
 };
 
 export const emailNotify = async (inputData) => {
-	if (!inputData.ids || !inputData.message) {
-		return;
+
+	if (!inputData.ids || !inputData.text) {
+		return {
+			error   : false,
+			message : `No receipients or message sent for push noitications`,
+			count   : inputData.ids.length,
+		};
 	}
 
 	const recipients = await db.sequelize.query(`
@@ -107,30 +127,19 @@ export const emailNotify = async (inputData) => {
 		from person
 		where person.id IN (:personIds)
 			and person.no_email != 1
-			and NOT EXISTS (
-				select push_notify.id
-					from person_setting push_notify
-					where push_notify.person = person.id
-					and push_notify.tag = 'push_notify'
-			)
 	`, {
 		replacements: { personIds: inputData.ids },
 		type: db.sequelize.QueryTypes.SELECT,
 	});
 
-	const messageData = {
-		subject : inputData.subject,
-		text    : inputData.message,
-	};
-
 	const emailPromise = recipients.map( async (person) => {
 		return person.email;
 	});
 
-	messageData.email = await Promise.all(emailPromise);
+	inputData.email = await Promise.all(emailPromise);
 
-	if (messageData.email && messageData.email.length > 0) {
-		const emailResponse = await emailBlast(messageData);
+	if (inputData.email && inputData.email.length > 0) {
+		const emailResponse = await emailBlast(inputData);
 
 		if (emailResponse.error) {
 			return {
@@ -140,14 +149,15 @@ export const emailNotify = async (inputData) => {
 		}
 
 		return {
-			error: false,
-			message: `Message emailed to ${messageData.email.length} recipients `,
+			error   : false,
+			message : `Message emailed to ${inputData.email.length} recipients `,
+			count   : inputData.email.length,
 		};
 	}
 
 	return {
-		error: true,
-		message: `No recipients found for the email notification`,
+		error   : true,
+		message : `No recipients found for the email notification`,
 	};
 };
 

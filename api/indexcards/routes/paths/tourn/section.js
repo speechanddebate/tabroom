@@ -8,8 +8,8 @@ import { messageSection } from '../../../controllers/tourn/section/blast/message
 import { blastSection } from '../../../controllers/tourn/section/blast/pairing.js';
 
 export default [
-	{ path : '/tourn/{tourn_id}/section/robin/{event_id}'        , module : sectionRobin }     ,
-	{ path : '/tourn/{tourn_id}/section/judges/{panel_id}/clean' , module : panelCleanJudges } ,
-	{ path : '/tourn/{tourn_id}/section/{section_id}/message'    , module : messageSection }   ,
-	{ path : '/tourn/{tourn_id}/section/{section_id}/blast'      , module : blastSection }     ,
+	{ path : '/tourn/{tourn_id}/section/robin/{eventId}'          , module : sectionRobin }     ,
+	{ path : '/tourn/{tourn_id}/section/judges/{sectionId}/clean' , module : panelCleanJudges } ,
+	{ path : '/tourn/{tourn_id}/section/{sectionId}/message'      , module : messageSection }   ,
+	{ path : '/tourn/{tourn_id}/section/{sectionId}/blast'        , module : blastSection }     ,
 ];

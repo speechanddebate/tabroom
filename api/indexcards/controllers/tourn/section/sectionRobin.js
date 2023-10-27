@@ -7,7 +7,7 @@ import { writeRound } from './writeRound';
 export const sectionRobin = {
 	POST: async (req, res) => {
 		const db = req.db;
-		const division = await db.summon(db.event, req.params.event_id);
+		const division = await db.summon(db.event, req.params.eventId);
 
 		const entries = await db.entry.findAll({
 			where: { event: division.id, active: 1 },
@@ -86,7 +86,7 @@ export const sectionRobin = {
 export const sectionPrelim = {
 	GET: async (req, res) => {
 		const db = req.db;
-		const round = await db.summon(db.round, req.params.round_id);
+		const round = await db.summon(db.round, req.params.roundId);
 		res.status(200).json(round);
 	},
 };

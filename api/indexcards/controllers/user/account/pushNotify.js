@@ -1,6 +1,23 @@
 export const enablePushNotifications = {
 	GET: async (req, res) => {
 		const db = req.db;
+		const oneSignalData = req.body;
+
+		const currentSubscription = {
+			id      : oneSignalData.currentSubscription.id,
+			enabled : oneSignalData.currentSubscription.enabled,
+		};
+
+		// Update this session with the active push notification signal
+
+		if (!req.session.push_notify
+			|| req.session.push_notify?.id !== currentSubscription.id
+		) {
+			await db.session.update(
+				{ push_notify : JSON.stringify(currentSubscription) },
+				{ where: { id : req.session.id } }
+			);
+		}
 
 		let pushNotify = await db.personSetting.findOne({
 			where: {
@@ -8,9 +25,6 @@ export const enablePushNotifications = {
 				tag    : 'push_notify',
 			},
 		});
-
-		console.log(pushNotify);
-		console.log(req.params.onesignal);
 
 		if (pushNotify) {
 			pushNotify = await pushNotify.update({

@@ -1,8 +1,8 @@
 /* eslint-disable no-restricted-syntax */
 import moment from 'moment-timezone';
 import { ordinalize } from '@speechanddebate/nsda-js-utils';
-import getFollowers from '../../../../helpers/followers';
-import { emailBlast, phoneBlast } from '../../../../helpers/mail.js';
+import { getPairingFollowers } from '../../../../helpers/followers';
+import { notify } from '../../../../helpers/pushNotify';
 import { sectionCheck, timeslotCheck, roundCheck } from '../../../../helpers/auth.js';
 import wudcPosition from '../../../../helpers/textmunge';
 import { sidelocks } from '../../../../helpers/round';
@@ -13,22 +13,24 @@ export const blastSection = {
 	POST: async (req, res) => {
 
 		// Permissions.  I feel like there should be a better way to do this
-		const permOK = await sectionCheck(req, res, req.params.section_id);
-		if (!permOK) {
-			return;
-		}
+		const permOK = await sectionCheck(req, res, req.params.sectionId);
+		if (!permOK) { return; }
 
 		const queryData = {};
-		queryData.replacements = { sectionId : req.params.section_id };
+		queryData.replacements = { sectionId : req.params.sectionId };
 		queryData.where = 'where section.id = :sectionId';
 		queryData.fields = '';
 
 		const blastData = await formatBlast(queryData, req);
 
-		const followers = await getFollowers(
+		const followers = await getPairingFollowers(
 			queryData.replacements,
 			{ ...req.body },
 		);
+
+		if (req.body.append) {
+			blastData.append = req.body.append;
+		}
 
 		sendBlast(followers, blastData, req, res);
 	},
@@ -39,13 +41,13 @@ export const blastRound = {
 	POST: async (req, res) => {
 
 		// Permissions.  I feel like there should be a better way to do this
-		const permOK = await roundCheck(req, res, req.params.round_id);
+		const permOK = await roundCheck(req, res, req.params.roundId);
 		if (!permOK) {
 			return;
 		}
 
 		const queryData = {};
-		queryData.replacements = { roundId : req.params.round_id };
+		queryData.replacements = { roundId : req.params.roundId };
 		queryData.where = 'where section.round = :roundId';
 		queryData.fields = '';
 
@@ -60,9 +62,9 @@ export const blastRound = {
 				tag         : 'publish',
 				description : `Round published`,
 				person      : req.session.person,
-				round       : req.params.round_id,
+				round       : req.params.roundId,
 			});
-			await scheduleAutoFlip(req.params.round_id, req, res);
+			await scheduleAutoFlip(req.params.roundId, req, res);
 		}
 
 		await req.db.sequelize.query(
@@ -78,10 +80,14 @@ export const blastRound = {
 			});
 
 		const blastData = await formatBlast(queryData, req);
-		const followers = await getFollowers(
+		const followers = await getPairingFollowers(
 			queryData.replacements,
 			{ ...req.body },
 		);
+
+		if (req.body.message) {
+			blastData.append = req.body.message;
+		}
 
 		sendBlast(followers, blastData, req, res);
 	},
@@ -91,13 +97,13 @@ export const blastRound = {
 export const blastTimeslot = {
 	POST: async (req, res) => {
 
-		const permOK = await timeslotCheck(req, res, req.params.timeslot_id);
+		const permOK = await timeslotCheck(req, res, req.params.timeslotId);
 		if (!permOK) {
 			return;
 		}
 
 		const queryData = {};
-		queryData.replacements = { timeslotId : req.params.timeslot_id };
+		queryData.replacements = { timeslotId : req.params.timeslotId };
 		queryData.fields = ', round';
 		queryData.where = 'where round.timeslot = :timeslotId and round.id = section.round ';
 
@@ -141,7 +147,7 @@ export const blastTimeslot = {
 
 		const blastData = await formatBlast(queryData, req);
 
-		const followers = await getFollowers(
+		const followers = await getPairingFollowers(
 			queryData.replacements,
 			{ ...req.body },
 		);
@@ -399,7 +405,8 @@ const formatBlast = async (queryData, req) => {
 					let firstJudge = 0;
 
 					section.judges.forEach( (judge) => {
-						judge.role = `${judgeRole(judge, round)} `;
+
+						judge.role = judgeRole(judge, round) || '';
 
 						if (round.settings.anonymous_public) {
 							sectionMessage.judgeText += `${judge.role}${judge.code} `;
@@ -447,7 +454,7 @@ const formatBlast = async (queryData, req) => {
 
 					if (entry.position === 'FLIP' && notFirstEntry++ < 1) {
 						sectionMessage.entryHTML += `<p>FLIP FOR SIDES:</p>`;
-						sectionMessage.entryText += `FLIP FOR SIDES: \n\n`;
+						sectionMessage.entryText += `FLIP FOR SIDES:\n`;
 					}
 
 					sectionMessage.entryText += `${entry.position === 'FLIP' ? '' : entry.position} ${entry.code} `;
@@ -572,76 +579,46 @@ const formatBlast = async (queryData, req) => {
 					if (!judgeMessage.text) {
 						judgeMessage.text = '';
 						judgeMessage.html = '';
-
-						// These are versions that only go to the linked
-						// account, not followers.  Includes Start Button.
-						judgeMessage.selftext = '';
-						judgeMessage.selfhtml = '';
 					}
 
 					judgeMessage.text += sectionMessage.text;
-					judgeMessage.selftext += sectionMessage.text;
 					judgeMessage.html += sectionMessage.html;
-					judgeMessage.selfhtml += sectionMessage.html;
 
-					judge.role = `${judgeRole(judge, round)} `;
+					judge.role = judgeRole(judge, round);
 					if (judge.role) {
 						judgeMessage.text += `Role: ${judge.role}\n`;
 						judgeMessage.html += `<p>Role: ${judge.role}</p>`;
-						judgeMessage.selftext += `Your role: ${judge.role}\n`;
-						judgeMessage.selfhtml += `<p>Your role: ${judge.role}</p>`;
 					}
 
 					if (round.eventType === 'mock_trial') {
-						judgeMessage.selftext += `\nPanel: `;
-						judgeMessage.selfhtml += `<p style="font-weight: 600;">Judging</p>`;
-
 						let firstJudge = 0;
-
 						section.judges.forEach( (other) => {
 
 							if (firstJudge++ > 0) {
-								judgeMessage.selftext += ', ';
+								judgeMessage.text += ', ';
 							}
 
 							other.role = `${judgeRole(other, round)} `;
-							judgeMessage.selftext += `${other.role}${other.first} ${other.last} `;
-							judgeMessage.selfhtml += `<p> ${other.role}${other.first} ${other.middle ? `${other.middle} ` : ''}${other.last} `;
+							judgeMessage.text += `${other.role}${other.first} ${other.last} `;
+							judgeMessage.html += `<p> ${other.role}${other.first} ${other.middle ? `${other.middle} ` : ''}${other.last} `;
 
 							if (other.pronoun && !round.settings.anonymous_public) {
-								judgeMessage.selftext += `(${judge.pronoun})`;
-								judgeMessage.selfhtml += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${judge.pronoun}</p>`;
+								judgeMessage.text += `(${judge.pronoun})`;
+								judgeMessage.html += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${judge.pronoun}</p>`;
 							}
 						});
 
-						judgeMessage.selftext += `\n`;
-						judgeMessage.selfhtml += `</p>`;
+						judgeMessage.text += `\n`;
+						judgeMessage.html += `</p>`;
 					}
-
-					// I apologize to literally everyone for this but I'm not
-					// creating an inline style sheet when I'm on the clock and
-					// it doesn't always work in email clients anyway
-
-					judgeMessage.selfhtml += `<p style='width: 50%; display: inline-block; text-align: center;'>`;
-					judgeMessage.selfhtml += `<a style='font-size: 110%; background-color: #016F94; font-weight: bold; font-size: 128%; padding: 8px; color: #fcfcfc;`;
-					judgeMessage.selfhtml += `text-decoration: none; font-family: Arial; border-radius: 4px; border: 2px solid #016F94;' `;
-					judgeMessage.selfhtml += `href='https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}'>`;
-					judgeMessage.selfhtml += `START ROUND</a></p>`;
-
-					judgeMessage.selftext += `Start Round link: https://www.tabroom.com/user/judge/ballot.mhtml?judge_id=${judge.id}&panel_id=${section.id}\n`;
 
 					judgeMessage.text += sectionMessage.entryText;
 					judgeMessage.html += sectionMessage.entryHTML;
 
 					if (sectionMessage.judgeText) {
 						judgeMessage.text += sectionMessage.judgeText;
-						judgeMessage.selftext += sectionMessage.judgeSingle;
 						judgeMessage.html += sectionMessage.judgeHTML;
-						judgeMessage.selfhtml += sectionMessage.judgeHTML;
 					}
-
-					judgeMessage.selftext += sectionMessage.entryText;
-					judgeMessage.selfhtml += sectionMessage.entryHTML;
 
 					// My school
 					if (judge.school && blastData.schoolJudges) {
@@ -700,145 +677,95 @@ const formatBlast = async (queryData, req) => {
 
 const sendBlast = async (followers, blastData, req, res) => {
 
-	console.log(`Sendblast was invoked!`);
-
-	const emailResponse = {
+	const blastResponse = {
 		error   : false,
-		count   : 0,
-		message : '',
-	};
-
-	const phoneResponse = {
-		error   : false,
-		count   : 0,
+		email   : 0,
+		web     : 0,
 		message : '',
 	};
 
 	for await (const entryId of Object.keys(blastData.entries)) {
+		if (followers.entries[entryId]) {
+			const notifyResponse = await notify({
+				ids : followers.entries[entryId],
+				append : blastData.append,
+				...blastData.entries[entryId],
+			});
 
-		const email = await emailBlast({
-			...blastData.entries[entryId],
-			...followers.only.entry[entryId],
-			append: req.body.message,
-		});
+			blastResponse.email += notifyResponse.email.count;
+			blastResponse.web += notifyResponse.web.count;
 
-		emailResponse.count += email.count;
-		if (emailResponse.error) {
-			emailResponse.error = true;
+			if (notifyResponse.error) {
+				blastResponse.error = true;
+				blastResponse.message += notifyResponse.message;
+			}
 		}
-		emailResponse.message = email.message ? email.message : emailResponse.message;
-
-		const phone = await phoneBlast({
-			...blastData.entries[entryId],
-			...followers.only.entry[entryId],
-			append: req.body.message,
-		});
-
-		phoneResponse.count += phone.count;
-
-		if (phoneResponse.error) {
-			phoneResponse.error = true;
-		}
-		phoneResponse.message = phone.message ? phone.message : phoneResponse.message;
 	}
 
 	for await (const judgeId of Object.keys(blastData.judges)) {
-
-		if (followers.only.judge[judgeId]?.self) {
-
-			const selfBlast = { ...blastData.judges[judgeId] };
-			const selfFollowers = { ...followers.only.judge[judgeId] };
-
-			selfFollowers.email = selfFollowers.self;
-			delete selfFollowers.phone;
-
-			if (selfBlast.selftext) {
-				selfBlast.text = selfBlast.selftext;
-			}
-			if (selfBlast.selfhtml) {
-				selfBlast.html = selfBlast.selfhtml;
-			}
-
-			const email = await emailBlast({
-				...selfBlast,
-				...selfFollowers,
-				append: `${req.body.message}`,
+		if (followers.judges[judgeId]) {
+			const notifyResponse = await notify({
+				ids    : followers.judges[judgeId],
+				append : blastData.append,
+				...blastData.judges[judgeId],
 			});
 
-			emailResponse.count += email.count;
-			if (emailResponse.error) {
-				emailResponse.error = true;
+			blastResponse.email += notifyResponse.email.count;
+			blastResponse.web += notifyResponse.web.count;
+
+			if (notifyResponse.error) {
+				blastResponse.error = true;
+				blastResponse.message += notifyResponse.message;
 			}
-			emailResponse.message = email.message ? email.message : emailResponse.message;
 		}
-
-		const email = await emailBlast({
-			...blastData.judges[judgeId],
-			...followers.only.judge[judgeId],
-			append: req.body.message,
-		});
-
-		emailResponse.count += email.count;
-		if (emailResponse.error) {
-			emailResponse.error = true;
-		}
-		emailResponse.message = email.message ? email.message : emailResponse.message;
-
-		const phone = await phoneBlast({
-			...blastData.judges[judgeId],
-			...followers.only.judge[judgeId],
-			append: req.body.message,
-		});
-
-		phoneResponse.count += phone.count;
-		if (phoneResponse.error) {
-			phoneResponse.error = true;
-		}
-		phoneResponse.message = phone.message ? phone.message : phoneResponse.message;
 	}
 
 	for await (const schoolId of Object.keys(blastData.schools)) {
 
-		const email = await emailBlast({
-			...blastData.schools[schoolId],
-			...followers.only.school[schoolId],
-			append: req.body.message,
-		});
+		if (followers.schools[schoolId]) {
+			const notifyResponse = await notify({
+				ids    : followers.schools[schoolId],
+				append : blastData.append,
+				...blastData.schools[schoolId],
+			});
 
-		emailResponse.count += email.count;
-		if (emailResponse.error) {
-			emailResponse.error = true;
+			blastResponse.email += notifyResponse.email.count;
+			blastResponse.web += notifyResponse.web.count;
+
+			if (notifyResponse.error) {
+				blastResponse.error = true;
+				blastResponse.message += notifyResponse.message;
+			}
 		}
-		emailResponse.message = email.message ? email.message : emailResponse.message;
 	}
 
-	if (emailResponse.error && phoneResponse.error) {
+	if (blastResponse.error) {
+
 		res.status(200).json({
-			emailError   : emailResponse.error,
-			phoneError   : phoneResponse.error,
-			emailMessage : emailResponse.message,
-			phoneMessage : phoneResponse.message,
-			phoneCount   : phoneResponse.count,
-			emailCount   : emailResponse.count,
+			blastError   : blastResponse.error,
+			blastMessage : blastResponse.message,
+			emailCount   : blastResponse.email,
+			webCount    : blastResponse.web,
 		});
+
 	} else {
 
-		if (req.params.section_id) {
+		if (req.params.sectionId) {
 
 			await req.db.changeLog.create({
 				tag         : 'blast',
 				description : `Pairing sent to section. Message: ${req.body.message}`,
 				person      : req.session.person,
-				count       : phoneResponse.count,
-				panel       : req.params.section_id,
+				count       : blastResponse.web,
+				panel       : req.params.sectionId,
 			});
 
 			await req.db.changeLog.create({
 				tag         : 'emails',
 				description : `Pairing sent to section. Message: ${req.body.message}`,
 				person      : req.session.person,
-				count       : emailResponse.count,
-				panel       : req.params.section_id,
+				count       : blastResponse.email,
+				panel       : req.params.sectionId,
 			});
 
 		} else {
@@ -849,7 +776,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 					tag         : 'blast',
 					description : `Pairing sent. Message: ${req.body.message}`,
 					person      : req.session.person,
-					count       : phoneResponse.count,
+					count       : blastResponse.web,
 					round       : round.id,
 				});
 
@@ -857,7 +784,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 					tag         : 'emails',
 					description : `Pairing sent. Message: ${req.body.message}`,
 					person      : req.session.person,
-					count       : emailResponse.count,
+					count       : blastResponse.email,
 					round       : round.id,
 				});
 			});
@@ -865,12 +792,10 @@ const sendBlast = async (followers, blastData, req, res) => {
 
 		const browserResponse = {
 			error   : false,
-			message : `Pairings sent to ${emailResponse.count + phoneResponse.count} recipients`,
+			message : `Pairings sent to ${blastResponse.web} web and ${blastResponse.email} email recipients`,
 		};
 
-		console.log(browserResponse);
 		res.status(200).json(browserResponse);
-
 	}
 };
 
@@ -1051,8 +976,6 @@ const judgeRole = (judge, round) => {
 	if (round.eventType === 'wudc') {
 		return 'Wing';
 	}
-
-	return '';
 };
 
 const positionString = (entry, round, section) => {

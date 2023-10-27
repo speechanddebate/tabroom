@@ -21,7 +21,7 @@ export const getRoundLog = {
 		`;
 
 		const rawRoundLogs = await req.db.sequelize.query(roundQuery, {
-			replacements: { roundId: req.params.round_id },
+			replacements: { roundId: req.params.roundId },
 			type: req.db.sequelize.QueryTypes.SELECT,
 		});
 
@@ -45,7 +45,7 @@ export const getRoundLog = {
 		`;
 
 		const rawPanelLogs = await req.db.sequelize.query(panelQuery, {
-			replacements: { roundId: req.params.round_id },
+			replacements: { roundId: req.params.roundId },
 			type: req.db.sequelize.QueryTypes.SELECT,
 		});
 

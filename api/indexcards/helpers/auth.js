@@ -2,6 +2,7 @@
 // import { b64_sha512crypt as crypt } from 'sha512crypt-node';\
 
 import { errorLogger } from './logger.js';
+import getSettings from './settings.js';
 
 export const auth = async (req) => {
 	const db = req.db;
@@ -31,21 +32,26 @@ export const auth = async (req) => {
 			if (session.Su)  {
 
 				let realname = session.Person.first;
-
 				if (session.Person.middle) {
-					realname += ` ${session.Person.middle}`;
+					realname += session.Person.middle;
 				}
-				realname += ` ${session.Person.last}`;
+				realname +=  session.Person.last;
+				realname = `${session.Su.first} ${session.Su.last} as ${realname}`;
 
 				session = {
-					id         : session.id,
-					person     : session.Person.id,
-					site_admin : session.Person.site_admin,
-					defaults   : session.defaults,
-					email      : session.Person.email,
-					name       : realname,
-					su         : session.Su.id,
+					id          : session.id,
+					person      : session.Person.id,
+					site_admin  : session.Person.site_admin,
+					email       : session.Person.email,
+					name        : realname,
+					su          : session.Su.id,
+					defaults    : session.defaults,
+					geoip       : session.geoip,
+					agent       : session.agent_data,
+					push_notify : session.push_notify,
 				};
+
+				session.settings = await getSettings('person', session.person);
 
 			} else if (session.Person) {
 
@@ -54,18 +60,22 @@ export const auth = async (req) => {
 				if (session.Person.middle) {
 					realname += ` ${session.Person.middle}`;
 				}
-
 				realname += ` ${session.Person.last}`;
-
 				session = {
-					id         : session.id,
-					person     : session.Person.id,
-					site_admin : session.Person.site_admin,
-					defaults   : session.defaults,
-					email      : session.Person.email,
-					name       : realname,
+					id          : session.id,
+					person      : session.Person.id,
+					site_admin  : session.Person.site_admin,
+					email       : session.Person.email,
+					name        : realname,
+					defaults    : session.defaults,
+					geoip       : session.geoip,
+					agent       : session.agent_data,
+					push_notify : session.push_notify,
 				};
+
+				session.settings = await getSettings('person', session.person);
 			}
+
 			return session;
 		}
 	}

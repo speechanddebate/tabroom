@@ -6,7 +6,7 @@ export const eraseJPool = {
 		await req.db.sequelize.query(`
 			delete jpj.* from jpool_judge jpj where jpj.jpool = :jpoolId
 		`, {
-			replacements: { jpoolId: req.params.jpool_id },
+			replacements: { jpoolId: req.params.jpoolId },
 			type: req.db.sequelize.QueryTypes.DELETE,
 		});
 
