@@ -65,9 +65,7 @@ export const messageRound = {
 
 		const permOK = await roundCheck(req, res, req.params.roundId);
 
-		if (!permOK) {
-			return;
-		}
+		if (!permOK) { return; }
 
 		if (!req.body.message) {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
@@ -120,8 +118,10 @@ export const messageTimeslot = {
 			res.status(200).json({ error: true, message: 'No message to blast sent' });
 		}
 
-		const personIds = await getFollowers(req.body);
+		req.body.timeslotId = req.params.timeslotId;
+		delete req.body.roundId;
 
+		const personIds = await getFollowers(req.body);
 		const notifyResponse = await notify({
 			ids  : personIds,
 			text : req.body.message,

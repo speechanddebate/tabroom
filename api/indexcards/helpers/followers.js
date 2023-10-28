@@ -27,9 +27,7 @@ export const getFollowers = async (replacements) => {
 	let queryLimits = '';
 
 	if (replacements.speaker) {
-		queryLimits += `
-			and ballot.speakerorder = :speakerOrder
-		`;
+		queryLimits += ` and ballot.speakerorder = :speakerOrder `;
 	}
 
 	if (replacements.status === 'unstarted' ) {
@@ -133,6 +131,7 @@ export const getFollowers = async (replacements) => {
 		personIds.push(person?.id);
 	}
 
+	console.log('Guess what it is!');
 	console.log([...new Set(personIds)]);
 	return [...new Set(personIds)];
 };
