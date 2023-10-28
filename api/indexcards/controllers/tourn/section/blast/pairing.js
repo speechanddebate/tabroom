@@ -135,7 +135,7 @@ export const blastTimeslot = {
 
 		if (req.body.publish) {
 			await req.db.sequelize.query(
-				`update round set published = 1 where round.timeslot = :timeslotId `, 
+				`update round set published = 1 where round.timeslot = :timeslotId `,
 				{
 					replacements : queryData.replacements,
 					type         : req.db.sequelize.QueryTypes.UPDATE,
