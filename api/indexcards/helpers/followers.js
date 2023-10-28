@@ -88,7 +88,10 @@ export const getFollowers = async (replacements) => {
 	}
 
 	if (!replacements.no_followers) {
-		if (replacements.recipients !== 'judges') {
+
+		if (replacements.recipients !== 'entries') {
+
+			console.log('maybe thats the thing about yelling');
 			const judgeFollowers = await db.sequelize.query(`
 				select person.id
 					from (person, follower, ballot, panel ${fields})
@@ -105,7 +108,8 @@ export const getFollowers = async (replacements) => {
 			persons.push(...judgeFollowers);
 		}
 
-		if (replacements.recipients !== 'entries') {
+		if (replacements.recipients !== 'judges') {
+
 			const entryFollowers = await db.sequelize.query(`
 				select person.id
 					from (person, follower, entry, ballot, panel ${fields})
@@ -131,8 +135,6 @@ export const getFollowers = async (replacements) => {
 		personIds.push(person?.id);
 	}
 
-	console.log('Guess what it is!');
-	console.log([...new Set(personIds)]);
 	return [...new Set(personIds)];
 };
 

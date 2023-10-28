@@ -136,7 +136,7 @@ export const messageTimeslot = {
 				where: { timeslot: req.params.timeslotId },
 			});
 
-			const results = rounds.map( async (round) => {
+			rounds.map( async (round) => {
 
 				const blastLog = await req.db.changeLog.create({
 					tag         : 'blast',
@@ -158,9 +158,7 @@ export const messageTimeslot = {
 			});
 
 			res.status(200).json({
-				error   : false,
-				message : `Message sent to ${results.length} rounds. ${notifyResponse.push?.count || 0} push notifications
-				 		   and ${notifyResponse.email?.count || 0} emails sent`,
+				...notifyResponse,
 			});
 		}
 	},
