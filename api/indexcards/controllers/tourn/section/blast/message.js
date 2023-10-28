@@ -132,11 +132,6 @@ export const messageTimeslot = {
 			res.status(200).json(notifyResponse);
 		} else {
 
-			res.status(200).json({
-				error   : false,
-				message : notifyResponse.message,
-			});
-
 			const rounds = await req.db.round.findAll({
 				where: { timeslot: req.params.timeslotId },
 			});
