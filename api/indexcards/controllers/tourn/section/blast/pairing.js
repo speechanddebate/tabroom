@@ -88,6 +88,9 @@ export const blastRound = {
 		if (req.body.message) {
 			blastData.append = req.body.message;
 		}
+		if (req.body.append) {
+			blastData.append = req.body.append;
+		}
 
 		sendBlast(followers, blastData, req, res);
 	},
