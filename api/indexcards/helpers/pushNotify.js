@@ -117,7 +117,11 @@ export const pushNotify = async (inputData) => {
 
 export const emailNotify = async (inputData) => {
 
-	if (!inputData.ids || !inputData.text) {
+	if (
+		!inputData.ids
+		|| inputData.ids.length < 1
+		|| !inputData.text
+	) {
 		return {
 			error   : false,
 			message : `No receipients or message sent for push noitications`,
