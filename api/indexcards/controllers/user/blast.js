@@ -6,11 +6,11 @@ export const pushMessage = {
 
 	POST: async (req, res) => {
 
-		debugLogger.info(req.body);
+		debugLogger(req.body);
 		console.log(req.body);
 
 		if (req.body.share_key !== config.SHARE_KEY) {
-			debugLogger.info('Invalid internal key, blast not sent');
+			debugLogger('Invalid internal key, blast not sent');
 			console.log('does this get caught');
 			return res.status(401).json({ message: 'Invalid internal key' });
 		}
