@@ -37,7 +37,9 @@ export const autoPublish = {
 					and r2.id = panel.round
 					and panel.id = b3.panel
 			)
-		`);
+		`, {
+			type : db.sequelize.QueryTypes.UPDATE,
+		});
 
 		await db.sequelize.query(`
 		 	update round, event_setting autopublish
@@ -65,7 +67,9 @@ export const autoPublish = {
 					and r2.id = panel.round
 					and panel.id = ballot.panel
 			)
-		`);
+		`, {
+			type : db.sequelize.QueryTypes.UPDATE,
+		});
 
 		await db.sequelize.query(`
 		 	update round, event_setting autopublish
@@ -93,9 +97,14 @@ export const autoPublish = {
 					and r2.id = panel.round
 					and panel.id = ballot.panel
 			)
-		`);
+		`, {
+			type : db.sequelize.QueryTypes.UPDATE,
+		});
 
-		res.status(200).json({ message: 'All autopublish rounds updated' });
+		res.status(200).json({
+			error   : false,
+			message : 'All autopublish rounds updated',
+		});
 	},
 };
 
