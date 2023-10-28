@@ -25,7 +25,11 @@ export const notify = async (inputData) => {
 
 export const pushNotify = async (inputData) => {
 
-	if (!inputData.ids || !inputData.text) {
+	if (
+		!inputData.ids
+		|| inputData.ids.length < 1
+		|| !inputData.text
+	) {
 		return {
 			error   : false,
 			message : `No recipients or message sent for push notifications`,
