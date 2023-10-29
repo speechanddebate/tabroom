@@ -82,7 +82,7 @@ export const pushNotify = async (inputData) => {
 			target_channel  : 'push',
 		};
 
-		const reply = await axios.post(
+		axios.post(
 			'https://onesignal.com/api/v1/notifications',
 			notification,
 			{
@@ -94,17 +94,10 @@ export const pushNotify = async (inputData) => {
 			},
 		);
 
-		if (reply.status === 200) {
-			return {
-				error   : false,
-				message : `Push notification sent to ${targetIds ? targetIds.length : 0} recipients`,
-				count   : targetIds.length,
-			};
-		}
-
 		return {
-			error   : true,
-			message : `Push notification failed with status ${reply.status} and text ${reply.statusText}`,
+			error   : false,
+			message : `Push notification sent to ${targetIds ? targetIds.length : 0} recipients`,
+			count   : targetIds.length,
 		};
 	}
 
@@ -147,14 +140,7 @@ export const emailNotify = async (inputData) => {
 	inputData.email = await Promise.all(emailPromise);
 
 	if (inputData.email && inputData.email.length > 0) {
-		const emailResponse = await emailBlast(inputData);
-
-		if (emailResponse.error) {
-			return {
-				error   : true,
-				message : emailResponse.message,
-			};
-		}
+		emailBlast(inputData);
 
 		return {
 			error   : false,
