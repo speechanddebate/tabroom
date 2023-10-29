@@ -5,7 +5,7 @@ import login from '../../../controllers/user/account/login'; // Except this one 
 import getProfile from '../../../controllers/user/account/getProfile';
 import ipLocation from '../../../controllers/user/account/ipLocation';
 import acceptPayPal from '../../../controllers/user/enter/acceptPayPal';
-import { enablePushNotifications, disablePushNotifications } from '../../../controllers/user/account/pushNotify.js';
+import { enablePushNotifications, disablePushNotifications } from '../../../controllers/user/account/setNotifications.js';
 import pushMessage from '../../../controllers/user/blast.js';
 import judge from './judge';
 

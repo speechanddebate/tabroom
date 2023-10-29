@@ -1,4 +1,4 @@
-// Functions to establish access parameters
+import { errorLogger } from '../../../helpers/logger';
 
 const parsePerms = async (permsArray) => {
 
@@ -13,7 +13,6 @@ const parsePerms = async (permsArray) => {
 			permsOutput.contact = true;
 			permsOutput.contactObject = perm;
 		} else if (permsOutput.level) {
-			// duplicates are the bane of all
 			await perm.destroy();
 		} else {
 			permsOutput.level = perm.tag;
@@ -319,7 +318,7 @@ export const changeAccess = {
 			return res.status(200).json(reply);
 
 		} catch (err) {
-			//errorLogger.info(err);
+			errorLogger.info(err);
 		}
 	},
 };

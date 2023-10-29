@@ -7,8 +7,16 @@ export const enablePushNotifications = {
 
 		if (!oneSignalData.currentSubscription) {
 			res.status(200).json({
-				error   : false,
+				error   : true,
 				message : 'No current subscription was found or registered',
+			});
+			return;
+		}
+
+		if (!req.session?.id) {
+			res.status(200).json({
+				error   : true,
+				message : 'You are not logged into Tabroom',
 			});
 			return;
 		}

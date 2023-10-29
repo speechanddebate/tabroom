@@ -29,6 +29,26 @@ export const auth = async (req) => {
 
 			session.Su = await session.getSu();
 
+			if (session.defaults) {
+				try {
+					session.defaults = JSON.parse(session.defaults);
+				} catch (err) {
+					errorLogger.info(`JSON parsing of defaults failed: ${err}`);
+				}
+			} else {
+				session.defaults = {};
+			}
+
+			if (session.agent) {
+				try {
+					session.agent = JSON.parse(session.agent);
+				} catch (err) {
+					errorLogger.info(`JSON parsing of agent failed: ${err}`);
+				}
+			} else {
+				session.agent = {};
+			}
+
 			if (session.Su)  {
 
 				let realname = session.Person.first;
@@ -51,7 +71,11 @@ export const auth = async (req) => {
 					push_notify : session.push_notify,
 				};
 
-				session.settings = await getSettings('person', session.person);
+				session.settings = await getSettings(
+					'person',
+					session.person,
+					{ skip: ['paradigm', 'paradigm_timestamp', 'nsda_membership'] },
+				);
 
 			} else if (session.Person) {
 
@@ -73,7 +97,11 @@ export const auth = async (req) => {
 					push_notify : session.push_notify,
 				};
 
-				session.settings = await getSettings('person', session.person);
+				session.settings = await getSettings(
+					'person',
+					session.person,
+					{ skip: ['paradigm', 'paradigm_timestamp', 'nsda_membership'] },
+				);
 			}
 
 			return session;
