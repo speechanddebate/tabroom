@@ -36,7 +36,7 @@ export const syncNAUDLStudents = {
 				and nu.timestamp > student.timestamp
 			)
 			order by chapter.id, student.id DESC
-			limit 100
+			limit 200
 		`;
 
 		const unpostedStudents = await req.db.sequelize.query(unpostedStudentsQuery, {
