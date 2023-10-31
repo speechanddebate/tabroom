@@ -10,8 +10,13 @@ export const notify = async (inputData) => {
 		email : {},
 	};
 
-	pushReply.web = await pushNotify(inputData);
-	pushReply.email = await emailNotify(inputData);
+	if (!inputData.noWeb) {
+		pushReply.web = await pushNotify(inputData);
+	}
+
+	if (!inputData.noEmail) {
+		pushReply.email = await emailNotify(inputData);
+	}
 
 	const reply = {
 		error   : pushReply.web?.error || pushReply.email?.error,

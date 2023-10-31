@@ -1,9 +1,8 @@
-import { sendToSalesforce, getSalesforceTeams } from '../../../helpers/naudl';
-import emailBlast from '../../../helpers/mail';
+import { getOneSalesforceStudent, getSalesforceChapters, getSalesforceStudents, postSalesforceStudents } from '../../../helpers/naudl';
 import { errorLogger } from '../../../helpers/logger';
-import config from '../../../../config/config';
+import notify from '../../../helpers/pushNotify';
 
-export const postNAUDLStudents = {
+export const syncNAUDLStudents = {
 	GET: async (req, res) => {
 
 		const unpostedStudentsQuery = `
@@ -14,11 +13,15 @@ export const postNAUDLStudents = {
 				school_sid.value schoolSid,
 				student.chapter chapterId,
 				chapter.name chapterName,
-				chapter.state chapterState
+				chapter.state chapterState,
+				chapterNaudlId.value chapterNaudlId,
+				studentNaudlId.value studentNaudlId
 			from (student, chapter_setting naudl, chapter)
 
 				left join student_setting race on race.student = student.id and race.tag = 'race'
 				left join student_setting school_sid on school_sid.student = student.id and school_sid.tag = 'school_sid'
+				left join student_setting studentNaudlId on studentNaudlId.student = student.id and studentNaudlId.tag = 'naudl_id'
+				left join chapter_setting chapterNaudlId on chapterNaudlId.tag = 'naudl_id' and chapterNaudlId.chapter = chapter.id
 
 			where naudl.tag = 'naudl'
 				and naudl.chapter = student.chapter
@@ -29,16 +32,17 @@ export const postNAUDLStudents = {
 				select nu.id
 				from student_setting nu
 				where nu.student = student.id
-				and nu.tag = 'naudl_updated'
-				and nu.value_date > student.timestamp
+				and nu.tag = 'naudl_id'
+				and nu.timestamp > student.timestamp
 			)
-			order by student.id DESC
-			limit 50
+			order by chapter.id, student.id DESC
+			limit 100
 		`;
 
 		const unpostedStudents = await req.db.sequelize.query(unpostedStudentsQuery, {
 			type: req.db.sequelize.QueryTypes.SELECT,
 		});
+
 
 		const raceEncoding = {
 			asian      : 'Asian',
@@ -51,23 +55,22 @@ export const postNAUDLStudents = {
 			other      : 'Other',
 		};
 
-		const teams = await getSalesforceTeams();
-		const postedChapters = {};
+		const postings = {
+			unpostedChapters : [],
+			updateChapters   : [],
+			unpostedStudents : [],
+			newPostedStudents : [],
+			postedStudents   : {},
+			alteredStudents  : [],
+		};
 
-		teams.records.forEach( (school) => {
-			postedChapters[school.Tabroom_teamid__c] = true;
-		});
+		for await (const student of unpostedStudents) {
 
-		const missedChapters = {};
+			if (student.chapterNaudlId) {
 
-		const naudlPost = unpostedStudents.flatMap( (student) => {
-
-			const chapterKey = `TR${student.chapterId}`;
-
-			if (postedChapters[chapterKey]) {
 				const studentRecord = {
 					tabroomid                : `TR${student.id}`,
-					teamid                   : chapterKey,
+					teamid                   : `TR${student.chapterId}`,
 					First_Name               : student.first,
 					Middle_Name              : student.middle ? student.middle : ' ',
 					Last_Name                : student.last,
@@ -81,60 +84,107 @@ export const postNAUDLStudents = {
 				if (student.schoolSid) {
 					studentRecord.studentschoolid = student.schoolSid;
 				}
-				return [studentRecord];
+
+				if (student.studentNaudlId) {
+					studentRecord.id = student.studentNaudlId;
+					postings.alteredStudents.push(studentRecord);
+				} else {
+					postings.updateChapters.push({
+						id      : student.chapterId,
+						naudlId : student.chapterNaudlId,
+					});
+					postings.unpostedStudents.push(studentRecord);
+				}
+
+			} else {
+				postings.unpostedChapters.push(`Chapter ID TR${student.chapterId} ${student.chapterName} in ${student.chapterState}`);
 			}
-			missedChapters[chapterKey] = `${student.chapterName} in ${student.chapterState}`;
-			return [];
+		}
+
+		for await (const chapter of postings.updateChapters) {
+			postings.newPostedStudents[chapter.id] =
+				await syncNAUDLChapterRoster(chapter.id, chapter.naudlId, req.db);
+		}
+
+		postings.postTheseStudents = postings.unpostedStudents.flatMap( (student) => {
+			if (postings.postedStudents[student.chapterId]?.[student.id]) {
+				postings.alteredStudents.push(student);
+				return [];
+			}
+			return student;
 		});
 
-		const response = await sendToSalesforce(
-			{ students_from_tabroom: naudlPost },
-			config.NAUDL.STUDENT_ENDPOINT
-		);
+		let response = await postSalesforceStudents({
+			students_from_tabroom: postings.unpostedStudents,
+		});
 
-		if (response.data?.success === 'true') {
-			unpostedStudents.map(async (student) => {
-				await req.db.studentSetting.create({
-					student    : student.id,
-					tag        : 'naudl_updated',
-					value      : 'date',
-					value_date : new Date(),
-				});
-				return student.id;
+		if (response.data?.success === 'false') {
+
+			postings.secondChanceStudents = [];
+
+			for await (const student of postings.unpostedStudents) {
+
+				const naudlStudent = await getOneSalesforceStudent(student.tabroomid);
+
+				if (naudlStudent?.Id) {
+
+					try {
+						await req.db.studentSetting.create({
+							student : student.tabroomid.slice(2),
+							tag     : 'naudl_id',
+							value   : naudlStudent.Id,
+						});
+					} catch (err) {
+						errorLogger.info(err);
+					}
+
+				} else {
+					postings.secondChanceStudents.push(student);
+				}
+			}
+
+			response = await postSalesforceStudents({
+				students_from_tabroom: postings.secondChanceStudents,
 			});
 		}
 
-		if (Object.keys(missedChapters).length > 0) {
+		if (response.data?.success === 'true') {
+			for await (const chapter of postings.updateChapters) {
+				postings.newPostedStudents[chapter.id] =
+					await syncNAUDLChapterRoster(chapter.id, chapter.naudlId, req.db);
+			}
+		}
+
+		if (postings.unpostedChapters.length > 0) {
 
 			let messageBody = 'Response from posted data:\n';
-			messageBody += JSON.stringify(response.data.message);
+			messageBody += JSON.stringify(response.data);
 			messageBody += '\n\nChapters marked as NAUDL schools, but not in Salesforce: \n';
 
-			Object.keys(missedChapters).forEach( (chapterId) => {
-				messageBody += `Chapter ID ${chapterId}: ${missedChapters[chapterId]} \n`;
-			});
+			for await (const chapter of postings.unpostedChapters) {
+				messageBody += `${chapter} \n`;
+			}
 
 			// replace this with an ID based sender later.
-			const emails = await req.db.sequelize.query(`
-				select
-					person.email
+			const naudlAdmins = await req.db.sequelize.query(`
+				select person.id
 				from person, person_setting ps
 				where person.id = ps.person
-					and person.no_email != 1
 					and ps.tag = :tag
 			`, {
 				replacements: { tag: 'naudl_admin' },
 				type: req.db.sequelize.QueryTypes.SELECT,
 			});
 
-			console.log(emails);
+			const naudlIds = naudlAdmins.map( (admin) => admin.id );
 
-			if (emails) {
-				const emailResponse = await emailBlast({
-					email   : emails,
+			if (naudlAdmins) {
+				const emailResponse = await notify({
+					ids     : naudlIds,
 					from    : 'naudldata@www.tabroom.com',
-					subject : `Tabroom Students Record Post: ${response.data.success ? 'SUCCESS' : 'ERRORS'}`,
+					subject : `Tabroom Students Record Post : ${response.data.success ? 'SUCCESS' : 'ERRORS'}`,
 					text    : messageBody,
+					noWeb   : true,
 				});
 
 				errorLogger.info(messageBody);
@@ -145,15 +195,132 @@ export const postNAUDLStudents = {
 			}
 
 			res.status(200).json(response.data);
+		} else {
+			res.status(200).json(response.data);
 		}
 	},
 };
 
-export const getNAUDLChapters = {
+const syncNAUDLChapterRoster = async (chapterId, naudlId, db) => {
+
+	const salesforceStudents = await getSalesforceStudents(naudlId);
+	const studentsById = {};
+
+	for await (const student of salesforceStudents) {
+		if (student.Tabroom_ID__c) {
+			studentsById[student.Tabroom_ID__c?.slice(2)] = student.Id;
+		}
+	}
+
+	const tabroomStudents = await db.sequelize.query(`
+		select
+			student.id, naudlId.value studentNaudlId
+		from (student)
+			left join student_setting naudlId
+				on naudlId.student = student.id
+				and naudlId.tag = 'naudl_id'
+		where student.chapter = :chapterId
+			and student.retired = 0
+	`, {
+		replacements: { chapterId },
+		type : db.sequelize.QueryTypes.SELECT,
+	});
+
+	tabroomStudents.forEach( async (student) => {
+
+		if (studentsById[student.id]) {
+			if (!student.studentNaudlId) {
+				await db.studentSetting.create({
+					student    : student.id,
+					tag        : 'naudl_id',
+					value      : studentsById[student.id],
+				});
+			} else if (student.studentNaudlId !== studentsById[student.id]) {
+				await db.studentSetting.update({
+					value: studentsById[student.id],
+				}, {
+					where: {
+						tag     : 'naudl_id',
+						student : student.id,
+					},
+				});
+			}
+		}
+	});
+
+	return studentsById;
+};
+
+export const syncNAUDLChapters = {
+
 	GET: async (req, res) => {
-		const teams = await getSalesforceTeams();
-		res.status(200).json(teams);
+
+		const naudlChapters = await getSalesforceChapters();
+
+		const tabroomChapters = await req.db.sequelize.query(`
+			select
+				chapter.id,
+					naudl.id settingId, naudl.value naudlId
+			from (chapter, chapter_setting cs)
+				left join chapter_setting naudl
+					on naudl.chapter = chapter.id
+					and naudl.tag = 'naudl_id'
+			where chapter.id = cs.chapter
+				and cs.tag = 'naudl'
+		`, {
+			type: req.db.sequelize.QueryTypes.SELECT,
+		});
+
+		const naudlById = {};
+
+		for await (const chapter of naudlChapters) {
+			chapter.TRID = parseInt(chapter.Tabroom_teamid__c?.slice(2));
+			naudlById[chapter.TRID] = chapter.Id;
+		}
+
+		const missing = [];
+		const matches = [];
+		const mismatches = [];
+		const chaptersToPost = [];
+
+		for await (const chapter of tabroomChapters) {
+
+			if (!naudlById[chapter.id]) {
+				chaptersToPost.push(chapter.id);
+			} else if (!chapter.naudlId) {
+
+				const setting = await req.db.chapterSetting.create({
+					chapter : chapter.id,
+					tag     : 'naudl_id',
+					value   : naudlById[chapter.id],
+				});
+
+				missing.push(`Setting ID ${setting.id} saved for chapter ${chapter.id} with NAUDL ID ${naudlById[chapter.id]}`);
+
+			} else if (chapter.naudlId !== naudlById[chapter.id] ) {
+
+				const setting = await req.db.chapterSetting.update({
+					value   : naudlById[chapter.id],
+				}, {
+					where : {
+						chapter : chapter.id,
+						tag     : 'naudl_id',
+					},
+				});
+
+				mismatches.push(`Setting ID ${setting.id} mismatch: chapter ${chapter.id} set to new NAUDL ID ${naudlById[chapter.id]}`);
+			}
+		}
+
+		const response = {
+			mismatches,
+			matches,
+			missing,
+			chaptersToPost,
+		};
+
+		res.status(200).json(response);
 	},
 };
 
-export default postNAUDLStudents;
+export default syncNAUDLStudents;

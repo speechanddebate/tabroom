@@ -1,12 +1,52 @@
 import axios from 'axios';
 import config from '../../config/config';
 
-export const sendToSalesforce = async (body, url) => {
+export const getSalesforceStudents = async (naudlChapter) => {
+	const authData = await authSalesforce();
+	const queryBase = `${authData.instance_url}/services/data/v59.0/query`;
+	const queryText = `?q=SELECT+Id,Tabroom_ID__c,School__c+FROM+Student__c+WHERE+School__c=+'${naudlChapter}'`;
+
+	const getResponse = await axios.get(
+		`${queryBase}${queryText}`,
+		{
+			headers : {
+				Authorization  : `OAuth ${authData.access_token}`,
+				'Content-Type' : 'application/json',
+				Accept         : 'application/json',
+			},
+		}
+	);
+
+	return getResponse.data?.records;
+};
+
+export const getOneSalesforceStudent = async (studentId) => {
+	const authData = await authSalesforce();
+	const queryBase = `${authData.instance_url}/services/data/v59.0/query`;
+	const queryText = `?q=SELECT+Id,Tabroom_ID__c,School__c+FROM+Student__c+WHERE+Tabroom_ID__c=+'${studentId}'`;
+
+	const getResponse = await axios.get(
+		`${queryBase}${queryText}`,
+		{
+			headers : {
+				Authorization  : `OAuth ${authData.access_token}`,
+				'Content-Type' : 'application/json',
+				Accept         : 'application/json',
+			},
+		}
+	);
+
+	console.log(`Returning records found for ${studentId}`);
+	console.log(getResponse.data.records);
+	return getResponse.data?.records[0];
+};
+
+export const postSalesforceStudents = async (body) => {
 
 	const authData = await authSalesforce();
 	if (authData) {
 		const postResponse = await axios.post(
-			`${authData.instance_url}${url}`,
+			`${authData.instance_url}${config.NAUDL.STUDENT_ENDPOINT}`,
 			body,
 			{
 				headers : {
@@ -22,12 +62,11 @@ export const sendToSalesforce = async (body, url) => {
 	return 'Authentication Failure';
 };
 
-export const getSalesforceTeams = async () => {
+export const getSalesforceChapters = async () => {
 
 	const authData = await authSalesforce();
-
 	const queryBase = `${authData.instance_url}/services/data/v59.0/query`;
-	const queryText = `?q=SELECT+Tabroom_teamid__c+FROM+School__c+WHERE+Tabroom_teamid__c+!=+null`;
+	const queryText = `?q=SELECT+Id,Tabroom_teamid__c,IsDeleted+FROM+School__c+WHERE+Tabroom_teamid__c!=null`;
 
 	const getResponse = await axios.get(
 		`${queryBase}${queryText}`,
@@ -40,7 +79,7 @@ export const getSalesforceTeams = async () => {
 		}
 	);
 
-	return getResponse.data;
+	return getResponse.data?.records;
 };
 
 const authSalesforce = async () => {
@@ -60,4 +99,4 @@ const authSalesforce = async () => {
 	return false;
 };
 
-export default sendToSalesforce;
+export default authSalesforce;
