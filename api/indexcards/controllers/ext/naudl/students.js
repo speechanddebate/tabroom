@@ -56,12 +56,12 @@ export const syncNAUDLStudents = {
 		};
 
 		const postings = {
-			unpostedChapters : [],
-			updateChapters   : [],
-			unpostedStudents : [],
+			unpostedChapters  : [],
+			updateChapters    : [],
+			unpostedStudents  : [],
 			newPostedStudents : [],
-			postedStudents   : {},
-			alteredStudents  : [],
+			postedStudents    : {},
+			alteredStudents   : [],
 		};
 
 		for await (const student of unpostedStudents) {
@@ -155,49 +155,44 @@ export const syncNAUDLStudents = {
 			}
 		}
 
-		if (postings.unpostedChapters.length > 0) {
+		let messageBody = 'Response from posted data:\n';
+		messageBody += JSON.stringify(response.data);
+		messageBody += '\n\nChapters marked as NAUDL schools, but not in Salesforce: \n';
 
-			let messageBody = 'Response from posted data:\n';
-			messageBody += JSON.stringify(response.data);
-			messageBody += '\n\nChapters marked as NAUDL schools, but not in Salesforce: \n';
+		for await (const chapter of postings.unpostedChapters) {
+			messageBody += `${chapter} \n`;
+		}
 
-			for await (const chapter of postings.unpostedChapters) {
-				messageBody += `${chapter} \n`;
-			}
+		// replace this with an ID based sender later.
+		const naudlAdmins = await req.db.sequelize.query(`
+			select person.id
+			from person, person_setting ps
+			where person.id = ps.person
+				and ps.tag = :tag
+		`, {
+			replacements: { tag: 'naudl_admin' },
+			type: req.db.sequelize.QueryTypes.SELECT,
+		});
 
-			// replace this with an ID based sender later.
-			const naudlAdmins = await req.db.sequelize.query(`
-				select person.id
-				from person, person_setting ps
-				where person.id = ps.person
-					and ps.tag = :tag
-			`, {
-				replacements: { tag: 'naudl_admin' },
-				type: req.db.sequelize.QueryTypes.SELECT,
+		const naudlIds = naudlAdmins.map( (admin) => admin.id );
+
+		if (naudlAdmins) {
+			const emailResponse = await notify({
+				ids     : naudlIds,
+				from    : 'naudldata@www.tabroom.com',
+				subject : `Tabroom Students Record Post : ${response.data.success ? 'SUCCESS' : 'ERRORS'}`,
+				text    : messageBody,
+				noWeb   : true,
 			});
 
-			const naudlIds = naudlAdmins.map( (admin) => admin.id );
+			errorLogger.info(messageBody);
+			errorLogger.info(emailResponse);
 
-			if (naudlAdmins) {
-				const emailResponse = await notify({
-					ids     : naudlIds,
-					from    : 'naudldata@www.tabroom.com',
-					subject : `Tabroom Students Record Post : ${response.data.success ? 'SUCCESS' : 'ERRORS'}`,
-					text    : messageBody,
-					noWeb   : true,
-				});
-
-				errorLogger.info(messageBody);
-				errorLogger.info(emailResponse);
-
-			} else {
-				errorLogger.info(`No NAUDL email addresses found, message not sent`);
-			}
-
-			res.status(200).json(response.data);
 		} else {
-			res.status(200).json(response.data);
+			errorLogger.info(`No NAUDL email addresses found, message not sent`);
 		}
+
+		res.status(200).json(response.data);
 	},
 };
 

@@ -36,8 +36,6 @@ export const getOneSalesforceStudent = async (studentId) => {
 		}
 	);
 
-	console.log(`Returning records found for ${studentId}`);
-	console.log(getResponse.data.records);
 	return getResponse.data?.records[0];
 };
 
