@@ -56,12 +56,13 @@ export const syncNAUDLStudents = {
 		};
 
 		const postings = {
-			unpostedChapters  : [],
-			updateChapters    : [],
-			unpostedStudents  : [],
-			newPostedStudents : [],
-			postedStudents    : {},
-			alteredStudents   : [],
+			unpostedChapterIds : {},
+			unpostedChapters   : [],
+			updateChapters     : [],
+			unpostedStudents   : [],
+			newPostedStudents  : [],
+			postedStudents     : {},
+			alteredStudents    : [],
 		};
 
 		for await (const student of unpostedStudents) {
@@ -97,7 +98,10 @@ export const syncNAUDLStudents = {
 				}
 
 			} else {
-				postings.unpostedChapters.push(`Chapter ID TR${student.chapterId} ${student.chapterName} in ${student.chapterState}`);
+				if (!postings.unpostedChapterIds[student.chapterId]) {
+					postings.unpostedChapterIds[student.chapterId] = true;
+					postings.unpostedChapters.push(`Chapter ID TR${student.chapterId} ${student.chapterName} in ${student.chapterState}`);
+				}
 			}
 		}
 
