@@ -366,6 +366,7 @@ export const syncExistingNAUDLStudents = {
 					tag     : 'naudl_id',
 					student : student.TRID,
 					value   : student.Id,
+					current : done[student.TRID],
 				});
 			}
 		}
