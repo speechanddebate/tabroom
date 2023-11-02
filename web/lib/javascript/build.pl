@@ -25,12 +25,11 @@ use JavaScript::Minifier qw(minify);
 		'alertify.js',
 		'mousetrap.js',
 		'timepicker.js',
-		'stopwatch.js',
-		'slick.js'
+		'stopwatch.js'
 	);
 
 	my $custom_file = "tabroom.js";
-	my $output_file = "tabroom.v22.min.js";
+	my $output_file = "tabroom.v23.min.js";
 	my $sources_file = "sources.js";
 
 	# First, concatenate them together
