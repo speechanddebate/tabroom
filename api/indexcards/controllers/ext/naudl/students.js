@@ -57,7 +57,7 @@ export const syncNAUDLStudents = {
 		const postings = {
 			unpostedChapterIds : {},
 			unpostedChapters   : [],
-			updateChapters     : [],
+			updateChapters     : {},
 			unpostedStudents   : [],
 			newPostedStudents  : [],
 			postedStudents     : {},
@@ -89,10 +89,7 @@ export const syncNAUDLStudents = {
 					studentRecord.id = student.studentNaudlId;
 					postings.alteredStudents.push(studentRecord);
 				} else {
-					postings.updateChapters.push({
-						id      : student.chapterId,
-						naudlId : student.chapterNaudlId,
-					});
+					postings.updateChapters[student.chapterId] = student.chapterNaudlId;
 					postings.unpostedStudents.push(studentRecord);
 				}
 
@@ -104,9 +101,9 @@ export const syncNAUDLStudents = {
 			}
 		}
 
-		for await (const chapter of postings.updateChapters) {
-			postings.newPostedStudents[chapter.id] =
-				await syncNAUDLChapterRoster(chapter.id, chapter.naudlId, req.db);
+		for await (const chapterId of Object.keys(postings.updateChapters)) {
+			postings.newPostedStudents[chapterId] =
+				await syncNAUDLChapterRoster(chapterId, postings.updateChapters[chapterId], req.db);
 		}
 
 		postings.postTheseStudents = postings.unpostedStudents.flatMap( (student) => {
@@ -120,6 +117,10 @@ export const syncNAUDLStudents = {
 		let response = await postSalesforceStudents({
 			students_from_tabroom: postings.unpostedStudents,
 		});
+
+		// If a group post fails, try looking them up and posting them
+		// individually because it probably means someone has messed with the
+		// data.
 
 		if (response.data?.success === 'false') {
 
@@ -152,9 +153,9 @@ export const syncNAUDLStudents = {
 		}
 
 		if (response.data?.success === 'true') {
-			for await (const chapter of postings.updateChapters) {
-				postings.newPostedStudents[chapter.id] =
-					await syncNAUDLChapterRoster(chapter.id, chapter.naudlId, req.db);
+			for await (const chapterId of Object.keys(postings.updateChapters)) {
+				postings.newPostedStudents[chapterId] =
+					await syncNAUDLChapterRoster(chapterId, postings.updateChapters[chapterId], req.db);
 			}
 		}
 
@@ -224,17 +225,19 @@ const syncNAUDLChapterRoster = async (chapterId, naudlId, db) => {
 		type : db.sequelize.QueryTypes.SELECT,
 	});
 
-	tabroomStudents.forEach( async (student) => {
+	const createSettings = await tabroomStudents.flatMap( (student) => {
 
 		if (studentsById[student.id]) {
 			if (!student.studentNaudlId) {
-				await db.studentSetting.create({
+				return {
 					student    : student.id,
 					tag        : 'naudl_id',
 					value      : studentsById[student.id],
-				});
-			} else if (student.studentNaudlId !== studentsById[student.id]) {
-				await db.studentSetting.update({
+				};
+			}
+
+			if (student.studentNaudlId !== studentsById[student.id]) {
+				db.studentSetting.update({
 					value: studentsById[student.id],
 				}, {
 					where: {
@@ -244,7 +247,16 @@ const syncNAUDLChapterRoster = async (chapterId, naudlId, db) => {
 				});
 			}
 		}
+		return [];
 	});
+
+	if (createSettings.length > 0) {
+		console.log(`I have created ${createSettings.length} settings`);
+		const reply = await db.studentSetting.bulkCreate(createSettings);
+		console.log(`with reply ${JSON.stringify(reply)} `);
+	}
+
+	console.log(`Chapter ${chapterId} synced`);
 
 	return studentsById;
 };
