@@ -361,7 +361,7 @@ export const syncExistingNAUDLStudents = {
 					student : student.TRID,
 					value   : student.Id,
 				});
-			} else if (done[student.TRID] !== student.naudlId) {
+			} else if (done[student.TRID] !== student.Id) {
 				settings.mismatches.push({
 					tag     : 'naudl_id',
 					student : student.TRID,
