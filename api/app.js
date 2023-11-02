@@ -135,6 +135,8 @@ app.all('/v1/tourn/:tourn_id/*', async (req, res, next) => {
 			return res.status(400).json({ message: 'You do not have admin access to that tournament' });
 		}
 
+	} else if (req.body?.share_key) {
+		next();
 	} else {
 		return res.status(400).json({ message: 'You are not logged into Tabroom' });
 	}

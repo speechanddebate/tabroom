@@ -7,6 +7,7 @@ import { sectionCheck, timeslotCheck, roundCheck } from '../../../../helpers/aut
 import wudcPosition from '../../../../helpers/textmunge';
 import { sidelocks } from '../../../../helpers/round';
 import scheduleAutoFlip from './autoFlip';
+import config from '../../../../../config/config';
 
 // Blast a single section with a pairing
 export const blastSection = {
@@ -40,10 +41,19 @@ export const blastSection = {
 export const blastRound = {
 	POST: async (req, res) => {
 
-		// Permissions.  I feel like there should be a better way to do this
-		const permOK = await roundCheck(req, res, req.params.roundId);
-		if (!permOK) {
-			return;
+		let sender = 0;
+
+		if (req.body.share_key === config.SHARE_KEY) {
+
+			sender = req.body.sender;
+
+		} else {
+			const permOK = await roundCheck(req, res, req.params.roundId);
+			if (!permOK) {
+				return;
+			}
+
+			sender = req.session.person;
 		}
 
 		const queryData = {};
@@ -61,7 +71,7 @@ export const blastRound = {
 			await req.db.changeLog.create({
 				tag         : 'publish',
 				description : `Round published`,
-				person      : req.session.person,
+				person      : sender,
 				round       : req.params.roundId,
 			});
 			await scheduleAutoFlip(req.params.roundId, req, res);
@@ -416,18 +426,18 @@ const formatBlast = async (queryData, req) => {
 						judge.role = judgeRole(judge, round) || '';
 
 						if (round.settings.anonymous_public) {
-							sectionMessage.judgeText += `${judge.role}${judge.code} `;
-							sectionMessage.judgeSingle += `${judge.role}${judge.code} `;
-							sectionMessage.judgeHTML += `<p> ${judge.role}${judge.code} `;
+							sectionMessage.judgeText += `${judge.role} ${judge.code} `;
+							sectionMessage.judgeSingle += `${judge.role} ${judge.code} `;
+							sectionMessage.judgeHTML += `<p> ${judge.role} ${judge.code} `;
 						} else {
-							sectionMessage.judgeText += `${judge.role}${judge.first} ${judge.last} `;
+							sectionMessage.judgeText += `${judge.role} ${judge.first} ${judge.last}`;
 							if (firstJudge++ > 0) {
-								sectionMessage.judgeSingle += ',';
+								sectionMessage.judgeSingle += ', ';
 							}
-							sectionMessage.judgeSingle += `${judge.role}${judge.first} ${judge.last} `;
-							sectionMessage.judgeHTML += `<p> ${judge.role}${judge.first} ${judge.middle ? `${judge.middle} ` : ''}${judge.last} `;
+							sectionMessage.judgeSingle += `${judge.role} ${judge.first} ${judge.last}`;
+							sectionMessage.judgeHTML += `<p> ${judge.role} ${judge.first} ${judge.middle ? `${judge.middle} ` : ''}${judge.last}`;
 							if (judge.pronoun) {
-								sectionMessage.judgeText += `(${judge.pronoun})`;
+								sectionMessage.judgeText += ` (${judge.pronoun})`;
 								sectionMessage.judgeHTML += `<p style='font-style: italic; font-size: 90%; padding-left: 8pt;'>${judge.pronoun}</p>`;
 							}
 						}
@@ -694,7 +704,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 	for await (const entryId of Object.keys(blastData.entries)) {
 		if (followers.entries[entryId]) {
 			const notifyResponse = await notify({
-				ids : followers.entries[entryId],
+				ids    : followers.entries[entryId],
 				append : blastData.append,
 				...blastData.entries[entryId],
 			});
@@ -752,7 +762,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 			blastError   : blastResponse.error,
 			blastMessage : blastResponse.message,
 			emailCount   : blastResponse.email,
-			webCount    : blastResponse.web,
+			webCount     : blastResponse.web,
 		});
 
 	} else {
@@ -762,7 +772,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 			await req.db.changeLog.create({
 				tag         : 'blast',
 				description : `Pairing sent to section. Message: ${req.body.message}`,
-				person      : req.session.person,
+				person      : blastData.sender || req.session?.person,
 				count       : blastResponse.web,
 				panel       : req.params.sectionId,
 			});
@@ -770,7 +780,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 			await req.db.changeLog.create({
 				tag         : 'emails',
 				description : `Pairing sent to section. Message: ${req.body.message}`,
-				person      : req.session.person,
+				person      : blastData.sender || req.session?.person,
 				count       : blastResponse.email,
 				panel       : req.params.sectionId,
 			});
@@ -782,7 +792,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 				await req.db.changeLog.create({
 					tag         : 'blast',
 					description : `Pairing sent. Message: ${req.body.message}`,
-					person      : req.session.person,
+					person      : blastData.sender || req.session?.person,
 					count       : blastResponse.web,
 					round       : round.id,
 				});
@@ -790,7 +800,7 @@ const sendBlast = async (followers, blastData, req, res) => {
 				await req.db.changeLog.create({
 					tag         : 'emails',
 					description : `Pairing sent. Message: ${req.body.message}`,
-					person      : req.session.person,
+					person      : blastData.sender || req.session?.person,
 					count       : blastResponse.email,
 					round       : round.id,
 				});
