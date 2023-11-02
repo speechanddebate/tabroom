@@ -39,6 +39,25 @@ export const getOneSalesforceStudent = async (studentId) => {
 	return getResponse.data?.records[0];
 };
 
+export const getAllSalesforceStudents = async () => {
+	const authData = await authSalesforce();
+	const queryBase = `${authData.instance_url}/services/data/v59.0/query`;
+	const queryText = `?q=SELECT+Id,Tabroom_ID__c,School__c+FROM+Student__c+WHERE+Tabroom_ID__c!=null`;
+
+	const getResponse = await axios.get(
+		`${queryBase}${queryText}`,
+		{
+			headers : {
+				Authorization  : `OAuth ${authData.access_token}`,
+				'Content-Type' : 'application/json',
+				Accept         : 'application/json',
+			},
+		}
+	);
+
+	return getResponse.data?.records;
+};
+
 export const postSalesforceStudents = async (body) => {
 
 	const authData = await authSalesforce();

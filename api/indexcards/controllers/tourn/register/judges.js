@@ -1,3 +1,5 @@
+import { categoryCheck } from '../../../helpers/auth.js';
+
 export const listJudges = {
 	GET: async (req, res) => {
 		const db      = req.db;
@@ -61,6 +63,34 @@ export const listJudges = {
 		});
 
 		return res.status(200).json(judges);
+	},
+};
+
+export const getActiveJudges = {
+	GET: async (req, res) => {
+		const db      = req.db;
+		const categoryId = req.params.category_id;
+
+		const permsOK = await categoryCheck(req, res, categoryId);
+
+		if (!permsOK) {
+			res.status(201).json({
+				error: true,
+				message: `You do not have permission to access that judge category`,
+			});
+			return;
+		}
+
+		const judges = await db.sequelize.query(`
+			select judge.id, judge.active
+			from judge
+			where judge.category = :categoryId
+		`, {
+			replacements: { categoryId },
+			type : db.sequelize.QueryTypes.SELECT,
+		});
+
+		res.status(200).json(judges);
 	},
 };
 
