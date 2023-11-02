@@ -1,4 +1,4 @@
-import { getOneSalesforceStudent, getSalesforceChapters, getSalesforceStudents, postSalesforceStudents } from '../../../helpers/naudl';
+import { getAllSalesforceStudents, getOneSalesforceStudent, getSalesforceChapters, getSalesforceStudents, postSalesforceStudents } from '../../../helpers/naudl';
 import { errorLogger } from '../../../helpers/logger';
 import notify from '../../../helpers/pushNotify';
 
@@ -42,7 +42,6 @@ export const syncNAUDLStudents = {
 		const unpostedStudents = await req.db.sequelize.query(unpostedStudentsQuery, {
 			type: req.db.sequelize.QueryTypes.SELECT,
 		});
-
 
 		const raceEncoding = {
 			asian      : 'Asian',
@@ -319,6 +318,85 @@ export const syncNAUDLChapters = {
 		};
 
 		res.status(200).json(response);
+	},
+};
+
+export const syncExistingNAUDLStudents = {
+
+	GET: async (req, res) => {
+
+		const naudlStudents = await getAllSalesforceStudents();
+
+		const tabroomStudents = await req.db.sequelize.query(`
+			select
+				student.id,
+					naudl.id settingId, naudl.value naudlId
+			from (student, student_setting ns)
+				left join student_setting naudl
+					on naudl.student = student.id
+					and naudl.tag = 'naudl_id'
+			where student.id = ns.student
+				and ns.tag = 'naudl_id'
+		`, {
+			type: req.db.sequelize.QueryTypes.SELECT,
+		});
+
+		const done = {};
+
+		for await (const student of tabroomStudents) {
+			done[student.id] = student.naudlId;
+		}
+
+		console.log(`Done students array is ${Object.keys(done).length} long`);
+		const settings = {
+			create     : [],
+			mismatches : [],
+		};
+
+		for await (const student of naudlStudents) {
+			student.TRID = student.Tabroom_ID__c?.slice(2);
+			if (!done[student.TRID]) {
+				settings.create.push({
+					tag     : 'naudl_id',
+					student : student.TRID,
+					value   : student.Id,
+				});
+			} else if (done[student.TRID] !== student.Id) {
+				settings.mismatches.push({
+					tag     : 'naudl_id',
+					student : student.TRID,
+					value   : student.Id,
+					current : done[student.TRID],
+				});
+			}
+		}
+
+		await req.db.sequelize.query(`SET FOREIGN_KEY_CHECKS=0`);
+		let response = {};
+
+		try {
+			response = await req.db.studentSetting.bulkCreate(settings.create);
+		} catch (err) {
+			console.log(err);
+		}
+
+		await req.db.sequelize.query(`
+			DELETE student_setting.* from student_setting
+			WHERE NOT EXISTS (
+				select student.id
+				from student
+				where student.id = student_setting.student
+			)
+		`);
+
+		await req.db.sequelize.query(`SET FOREIGN_KEY_CHECKS=1`);
+
+		res.status(200).json({
+			error   : false,
+			message : `Created ${settings.create.length} student records from Salesforce`,
+			response,
+			mismatches : settings.mismatches,
+		});
 	},
 };
 

@@ -233,6 +233,10 @@ export const checkJudgePerson = async (req, judgeId) => {
 
 export const checkPerms = async (req, res, query, replacements) => {
 
+	if (req.session.site_admin) {
+		return true;
+	}
+
 	const [permsData] = await req.db.sequelize.query(query, {
 		replacements,
 		type: req.db.sequelize.QueryTypes.SELECT,
