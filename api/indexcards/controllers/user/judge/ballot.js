@@ -52,7 +52,7 @@ export const saveRubric = {
 							content : JSON.stringify(autoSave),
 						});
 					} catch (err) {
-						errorLogger(`Error encountered in savings scores ${err} ballot ${ballot.id} score ${score.id}`);
+						errorLogger(`Error encountered in savings scores ${err} ballot ${ballot?.id} score ${score?.id}`);
 					}
 				}
 
