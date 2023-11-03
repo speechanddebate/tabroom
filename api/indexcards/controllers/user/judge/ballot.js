@@ -39,7 +39,7 @@ export const saveRubric = {
 						score.content = JSON.stringify(autoSave);
 						await score.save();
 					} catch (err) {
-						errorLogger(`Error encountered in savings scores ${err} ballot ${ballot.id} score ${score.id}`);
+						errorLogger.info(`Error encountered in savings scores ${err} ballot ${ballot.id} score ${score.id}`);
 					}
 
 				} else {
@@ -52,7 +52,8 @@ export const saveRubric = {
 							content : JSON.stringify(autoSave),
 						});
 					} catch (err) {
-						errorLogger(`Error encountered in savings scores ${err} ballot ${ballot?.id} score ${score?.id}`);
+						errorLogger.info(`Error encountered in savings scores ${err} ballot ${ballot?.id} score ${score?.id}`);
+						errorLogger.info(req.params);
 					}
 				}
 
