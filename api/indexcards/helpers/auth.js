@@ -242,6 +242,10 @@ export const checkPerms = async (req, res, query, replacements) => {
 		type: req.db.sequelize.QueryTypes.SELECT,
 	});
 
+	if (!permsData) {
+		return false;
+	}
+
 	if (permsData.site && permsData.timeslot) {
 
 		const okEvents = await req.db.sequelize.query(`
@@ -268,10 +272,11 @@ export const checkPerms = async (req, res, query, replacements) => {
 	}
 
 	if (permsData.tourn !== parseInt(req.params.tourn_id)) {
-		res.status(200).json({
-			error     : false,
+		errorLogger.info({
+			error     : true,
 			message   : `You have a mismatch between the tournament element tourn ${permsData.tourn} and its parent tournament ${req.params.tourn_id}`,
 		});
+		return false;
 	}
 
 	if (req.session[permsData.tourn]) {
@@ -353,10 +358,12 @@ export const checkPerms = async (req, res, query, replacements) => {
 		}
 	}
 
-	res.status(200).json({
-		error     : false,
+	errorLogger.info({
+		error     : true,
 		message   : `You do not have permission to access that part of that tournament`,
 	});
+
+	return false;
 };
 
 export const sectionCheck = async (req, res, sectionId) => {

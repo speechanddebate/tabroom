@@ -71,6 +71,13 @@ export const getActiveJudges = {
 		const db      = req.db;
 		const categoryId = req.params.category_id;
 
+		if (!categoryId) {
+			res.status(200).json({
+				error: true,
+				message : `No valid category ID sent`,
+			});
+		}
+
 		const permsOK = await categoryCheck(req, res, categoryId);
 
 		if (!permsOK) {
