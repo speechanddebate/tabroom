@@ -1198,6 +1198,17 @@ export const eventDashboard = {
 			} else {
 
 				status[result.roundId].undone = true;
+
+				if (!status[result.roundId].flights[result.flight]) {
+					status[result.roundId].flights[result.flight] = {
+						done      : 0,
+						half      : 0,
+						started   : 0,
+						nada      : 0,
+						...times[f],
+					};
+				}
+
 				if (result.score_id) {
 					// Does the ballot have scores?
 					status[result.roundId].flights[result.flight].half++;
