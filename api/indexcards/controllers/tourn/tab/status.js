@@ -13,11 +13,11 @@ export const sideCounts = {
 
 			from (panel, ballot, round)
 
-				left join event_setting aff_label 
+				left join event_setting aff_label
 					on aff_label.event = round.event
 					and aff_label.tag = 'aff_label'
 
-				left join event_setting neg_label 
+				left join event_setting neg_label
 					on neg_label.event = round.event
 					and neg_label.tag = 'neg_label'
 
@@ -28,7 +28,7 @@ export const sideCounts = {
 				and ballot.forfeit != 1
 				and panel.bye != 1
 				and exists (
-					select score.id 
+					select score.id
 					from score
 					where score.ballot = ballot.id
 					and score.tag = 'winloss'
@@ -1137,7 +1137,9 @@ export const eventDashboard = {
 				continue;
 			}
 
-			// Judges have more than one ballot per section so stop if we've seen you before
+			// Judges have more than one ballot per section so stop if we've
+			// seen you before
+
 			if (status.done[result.panel]?.[result.judge]) {
 				continue;
 			}
@@ -1149,6 +1151,10 @@ export const eventDashboard = {
 
 				const times = await flightTimes(result.roundId);
 				const numFlights = result.flighted || 1;
+
+				if (result.flight > numFlights) {
+					result.flight = numFlights;
+				}
 
 				status[result.roundId] = {
 					eventId   : result.event_id,
