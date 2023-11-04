@@ -20,7 +20,6 @@ use JavaScript::Minifier qw(minify);
 		'widget-columnSelector.js',
 		'widget-print.js',
 		'widget-output.js',
-		'uniform.min.js',
 		'cycle.js',
 		'alertify.js',
 		'mousetrap.js',
