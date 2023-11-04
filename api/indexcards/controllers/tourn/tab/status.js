@@ -1200,6 +1200,7 @@ export const eventDashboard = {
 				status[result.roundId].undone = true;
 
 				if (!status[result.roundId].flights[result.flight]) {
+					const times = await flightTimes(result.roundId);
 					status[result.roundId].flights[result.flight] = {
 						done      : 0,
 						half      : 0,
