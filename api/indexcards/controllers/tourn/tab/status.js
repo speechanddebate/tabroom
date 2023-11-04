@@ -1192,23 +1192,14 @@ export const eventDashboard = {
 			}
 
 			if (result.audit) {
+
 				// Is the ballot done?
 				status[result.roundId].flights[result.flight].done++;
 				status[result.roundId].started = true;
-			} else {
+
+			} else if (status[result.roundId]?.flights?.[result.flight]) {
 
 				status[result.roundId].undone = true;
-
-				if (!status[result.roundId].flights[result.flight]) {
-					const times = await flightTimes(result.roundId);
-					status[result.roundId].flights[result.flight] = {
-						done      : 0,
-						half      : 0,
-						started   : 0,
-						nada      : 0,
-						...times[f],
-					};
-				}
 
 				if (result.score_id) {
 					// Does the ballot have scores?
