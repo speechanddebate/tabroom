@@ -20,15 +20,17 @@ use JavaScript::Minifier qw(minify);
 		'widget-columnSelector.js',
 		'widget-print.js',
 		'widget-output.js',
+		'uniform.min.js',
 		'cycle.js',
 		'alertify.js',
 		'mousetrap.js',
 		'timepicker.js',
-		'stopwatch.js'
+		'stopwatch.js',
+		'slick.js'
 	);
 
 	my $custom_file = "tabroom.js";
-	my $output_file = "tabroom.v23.min.js";
+	my $output_file = "tabroom.v24.min.js";
 	my $sources_file = "sources.js";
 
 	# First, concatenate them together
