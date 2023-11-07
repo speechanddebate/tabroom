@@ -1,7 +1,8 @@
-<script>
-    import { tourns } from './stores.js';
-    const getTourns = async (e) => {
-        const response = await fetch(`http://local.tabroom.com/v1/invite/upcoming?state=${e.target.value}`);
+<script lang="ts">
+    import { tourns } from './stores';
+    const getTourns = async (e: Event) => {
+        const target = e.target as HTMLSelectElement;
+        const response = await fetch(`http://local.tabroom.com/v1/invite/upcoming?state=${target.value}`);
         const data = await response.json();
         tourns.update( () => data );
     }

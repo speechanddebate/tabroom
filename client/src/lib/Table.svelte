@@ -1,6 +1,13 @@
-<script>
-    export let rows;
-    export let columns;
+<script lang="ts">
+    interface Row {
+        [key: string]: any;
+    }
+    interface Column {
+        header: string;
+        key: string;
+    }
+    export let rows: Array<Row>;
+    export let columns: Array<Column>;
 </script>
 
 <table id="table">

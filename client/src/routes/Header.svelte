@@ -1,24 +1,24 @@
-<script>
+<script lang="ts">
 	import Login from '$lib/Login.svelte';
 </script>
 
-	<div id="header">
-		<span id="logo">
-			<a
-				tabindex = "-1"
-				href     = "/"
+<div id="header">
+	<span id="logo">
+		<a
+			tabindex = "-1"
+			href     = "/"
+		>
+			<img
+				src = "/images/tabroom-logo.png"
+				alt = "Tabroom.com by the National Speech and Debate Association"
 			>
-				<img
-					src = "/images/tabroom-logo.png"
-					alt = "Tabroom.com by the National Speech and Debate Association"
-				>
-			</a>
-		</span>
+		</a>
+	</span>
 
-		<span id="toprow">
-			<Login />
-		</span>
-	</div>
+	<span id="toprow">
+		<Login />
+	</span>
+</div>
 
 <style>
 

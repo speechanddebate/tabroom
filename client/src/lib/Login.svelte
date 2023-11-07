@@ -10,7 +10,7 @@
 					Login to Tabroom
 				</h6>
 
-				<a href="#" class="sixth close fa fa-times-circle fa-lg bluetext">
+				<a href="#top" class="sixth close fa fa-times-circle fa-lg bluetext">
 				</a>
 			</div>
 

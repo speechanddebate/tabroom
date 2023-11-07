@@ -1,4 +1,4 @@
-import { tourns } from './stores.js';
+import { tourns } from './stores';
 
 /** @type {import('./$types').PageLoad} */
 export const load = async () => {

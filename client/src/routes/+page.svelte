@@ -1,13 +1,13 @@
-<script>
+<script lang="ts">
 	import Table from '$lib/Table.svelte';
 	import Sidebar from './Sidebar.svelte';
 
-    import { tourns } from './stores.js';
+    import { tourns } from './stores';
     // export let data;
     // const tourns = data.tourns;
 
-    let tournList;
-    tourns.subscribe((value) => {
+    let tournList: Array<Object> = [];
+    tourns.subscribe((value: any) => {
 		tournList = value;
 	});
 
