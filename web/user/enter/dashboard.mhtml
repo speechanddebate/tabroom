@@ -1,0 +1,2526 @@
+<%args>
+	$school
+	$person
+	$person_settings
+	$session
+</%args>
+<%init>
+
+	my $tourn = $school->tourn;
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	my $school_id = $school->id;
+	my %tourn_settings = $tourn->all_settings;
+
+	my $school_name = $m->comp("/funclib/short_name.mas", name => $school->name);
+
+	# Time Frame begins 15 minutes ago and shows the future
+	my $now = DateTime->now();
+
+	my $then = $now->clone();
+	$then->subtract(minutes => 15);
+
+	my $now_string = DateTime::Format::MySQL->format_datetime($then);
+	my $after++ if $then > $tourn->end;
+
+    my %observers;
+    my $obshash = $school->setting("campus_observers");
+
+    if ($obshash) {
+        %observers = %{$obshash};
+    }
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $now_sth = $dbh->prepare("
+		select
+			entry.id, entry.code, entry.name, entry.dropped,
+			room.name,
+			panel.letter, panel.id, panel.flight, panel.publish, panel.bye,
+			share_room.value,
+			ballot.id, ballot.side, ballot.speakerorder, ballot.audit,
+				CONVERT_TZ(ballot.judge_started, '+00:00', '".$tz."'),
+			ballot.bye, ballot.forfeit, ballot.chair, ballot.tv,
+			opponent.code,
+			score.id, score.tag, score.value, score.speech, score.content, score.topic, score.position,
+			score_student.id, score_student.first, score_student.last,
+			round.id, round.type, round.name, round.label,
+				CONVERT_TZ(round.start_time, '+00:00', '".$tz."'),
+			round.flighted,
+			round.published, round.post_primary, round.post_secondary, round.post_feedback,
+			timeslot.start, timeslot.end,
+			event.id, event.abbr, event.type,
+			judge.id, judge.code, judge.first, judge.last, judgeschool.name,
+			use_normal_rooms.value
+
+		from (entry, ballot, panel, round, timeslot, event)
+
+			left join room on panel.room = room.id
+			left join judge on ballot.judge = judge.id
+
+			left join school judgeschool on judgeschool.id = judge.school
+
+			left join ballot otherballot
+				on otherballot.panel = panel.id
+				and otherballot.side != ballot.side
+
+			left join entry opponent
+				on otherballot.entry = opponent.id
+
+			left join round_setting use_normal_rooms
+				on use_normal_rooms.round = round.id
+				and use_normal_rooms.tag = 'use_normal_rooms'
+
+			left join score on ballot.id = score.ballot
+
+			left join student score_student
+				on score_student.id = score.student
+
+			left join panel_setting share_room
+				on share_room.tag = 'share'
+				and share_room.panel = panel.id
+
+		where entry.school = ?
+			and entry.id = ballot.entry
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and round.timeslot = timeslot.id
+			and round.event = event.id
+
+		order by event.abbr, entry.code, round.name, ballot.audit
+	");
+
+	$now_sth->execute($school_id);
+	my %now;
+	my %events;
+	my %cache;
+
+	my $events_sth = $dbh->prepare("
+		select
+			event.id, event.abbr, event.name, event.type,
+			judge_publish_results.value,
+			aff_label.value,
+			neg_label.value,
+			no_opponent_results.value,
+			flight_offset.value,
+			online_mode.value
+
+		from event
+
+			left join event_setting judge_publish_results
+				on judge_publish_results.event = event.id
+				and judge_publish_results.tag = 'judge_publish_results'
+
+			left join event_setting aff_label
+				on aff_label.event = event.id
+				and aff_label.tag = 'aff_label'
+
+			left join event_setting neg_label
+				on neg_label.event = event.id
+				and neg_label.tag = 'neg_label'
+
+			left join event_setting no_opponent_results
+				on no_opponent_results.event = event.id
+				and no_opponent_results.tag = 'no_opponent_results'
+
+			left join event_setting flight_offset
+				on flight_offset.event = event.id
+				and flight_offset.tag = 'flight_offset'
+
+			left join event_setting online_mode
+				on online_mode.event = event.id
+				and online_mode.tag = 'online_mode'
+
+		where event.tourn = ?
+	");
+
+	$events_sth->execute($tourn->id);
+
+	while (
+		my (
+			$event_id, $event_abbr, $event_name, $event_type,
+			$judge_publish_results,
+			$aff_label,
+			$neg_label,
+			$no_opponent_results,
+			$flight_offset,
+			$online_mode
+		) = $events_sth->fetchrow_array()
+	) {
+
+		if ($event_type eq "mock_trial") {
+			$event_type = "debate";
+			$events{$event_id}{"mock_trial"} = 1;
+		}
+
+		$events{$event_id}{"name"}                = $event_name;
+		$events{$event_id}{"type"}                = $event_type;
+		$events{$event_id}{"abbr"}                = $event_abbr;
+		$events{$event_id}{"judge_publish"}       = $judge_publish_results;
+		$events{$event_id}{"aff_label"}           = $aff_label;
+		$events{$event_id}{"neg_label"}           = $neg_label;
+		$events{$event_id}{"no_opponent_results"} = $no_opponent_results;
+		$events{$event_id}{"online_mode"}         = $online_mode;
+		$events{$event_id}{"flight_offset"}       = $flight_offset;
+	}
+
+	my $current_count;
+	my $shares;
+
+	while (
+		my (
+			$entry_id, $entry_code, $entry_name, $entry_dropped,
+			$room_name,
+			$panel_letter, $panel_id, $panel_flight, $panel_publish, $panel_bye,
+			$share_room,
+			$ballot_id, $ballot_side, $ballot_speakerorder, $ballot_audit, $ballot_started,
+			$ballot_bye, $ballot_forfeit, $ballot_chair, $ballot_tv,
+			$opponent_code,
+
+			$score_id, $score_tag, $score_value, $score_speech, $score_content, $score_topic, $score_position,
+			$score_student_id, $score_student_first, $score_student_last,
+
+			$round_id, $round_type, $round_name, $round_label, $round_start_time, $round_flighted,
+			$round_published, $post_primary, $post_secondary, $post_feedback,
+			$timeslot_start, $timeslot_end,
+			$event_id, $event_abbr, $event_type,
+			$judge_id, $judge_code, $judge_first, $judge_last, $judgeschool_name,
+			$use_normal_rooms
+		) = $now_sth->fetchrow_array()
+
+	) {
+
+		if (
+			$events{$event_id}{"online_mode"} eq "nsda_campus_observers"
+			|| $events{$event_id}{"online_mode"} eq "public_jitsi_observers"
+		) {
+
+			if ($tourn_settings{"nco_purchased"} > 0) {
+				$events{$event_id}{"observers"} = 1;
+				$tourn_settings{"ask_observers"}++
+			}
+		}
+
+		if ($events{$event_id}{"online_mode"}) {
+			$tourn_settings{"online_tournament"}++;
+		}
+
+		next unless (
+			$round_published > 0
+			|| $post_primary > 0
+			|| $post_secondary > 0
+			|| $post_feedback > 0
+		);
+
+		if (
+			($now{"nein_publish"}{$panel_id} > 0)
+			|| ($ballot_audit < 1)
+		) {
+			undef $post_primary;
+			undef $post_secondary;
+			undef $post_feedback;
+			undef $panel_publish;
+			$now{"nein_publish"}{$panel_id}++;
+		}
+
+		if ($event_type eq "congress") {
+			next if ($ballot_chair && (not defined $score_tag));
+		}
+
+		if ($event_type eq "mock_trial") {
+			next if $ballot_chair;
+			$event_type = "debate";
+			$events{$event_id}{"mock_trial"} = 1;
+		}
+
+		$events{$event_id}{"abbr"} = $event_abbr;
+		$events{$event_id}{"type"} = $event_type;
+		$events{$event_id}{"use_normal_rooms"} = $use_normal_rooms;
+
+		$school_name =~ s/\*//g;
+		$entry_code =~ s/$school_name//g;
+
+		unless ($now{"entries"}{$entry_id}) {
+
+			$now{"entries"}{$entry_id}{entry_code}          = $entry_code;
+			$now{"entries"}{$entry_id}{entry_name}          = $entry_name;
+			$now{"entries"}{$entry_id}{event_abbr}          = $event_abbr;
+			$now{"entries"}{$entry_id}{event_id}            = $event_id;
+			$now{"entries"}{$entry_id}{event_type}          = $event_type;
+			$now{"entries"}{$entry_id}{mock_trial}          = $events{$event_id}{"mock_trial"};
+			$now{"entries"}{$entry_id}{online_mode}         = $events{$event_id}{"online_mode"};
+			$now{"entries"}{$entry_id}{dropped}             = $entry_dropped;
+		}
+
+		unless ($now{"entries"}{$entry_id}{"section"}{$panel_id}) {
+
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{use_normal_rooms}    = $use_normal_rooms;
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{room_name}           = $room_name;
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{round_num}           = $round_name;
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{round_type}          = $round_type;
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{round_id}            = $round_id;
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{mock_trial}          = $events{$event_id}{"mock_trial"};
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{no_opponent_results} = $events{$event_id}{"no_opponent_results"};
+
+			if ($share_room) {
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{share_room} = $share_room;
+				$shares++;
+			}
+
+			if ($round_label) {
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{round_name} = $round_label;
+			} else {
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{round_name} = $round_name;
+			}
+
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{round_flighted} = $round_flighted;
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{panel_flight}   = $panel_flight;
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{side_id}        = $ballot_side;
+
+			if ($event_type eq "debate" || $event_type eq "wsdc" || $event_type eq "mock_trial") {
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{opponent_code} = $opponent_code;
+			}
+
+			if ($event_type eq "congress") {
+
+			} elsif ($event_type eq "wudc") {
+
+				if ($ballot_speakerorder == 1) {
+					$now{"entries"}{$entry_id}{"section"}{$panel_id}{order} = "1G";
+				} elsif ($ballot_speakerorder == 2) {
+					$now{"entries"}{$entry_id}{"section"}{$panel_id}{order} = "1O";
+				} elsif ($ballot_speakerorder == 3) {
+					$now{"entries"}{$entry_id}{"section"}{$panel_id}{order} = "2G";
+				} elsif ($ballot_speakerorder == 4) {
+					$now{"entries"}{$entry_id}{"section"}{$panel_id}{order} = "2O";
+				}
+
+			} elsif ($ballot_speakerorder && $ballot_side == 1) {
+
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{order} = $ballot_speakerorder;
+				$events{$event_id}{"aff_label"} = "Aff" unless $events{$event_id}{"aff_label"};
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{side_init} = substr($events{$event_id}{"aff_label"},0,1);
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{side} = $events{$event_id}{"aff_label"};
+
+			} elsif ($ballot_speakerorder && $ballot_side == 2) {
+
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{order} = $ballot_speakerorder;
+				$events{$event_id}{"neg_label"} = "Neg" unless $events{$event_id}{"neg_label"};
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{side} = $events{$event_id}{"neg_label"};
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{side_init} = substr($events{$event_id}{"neg_label"},0,1);
+
+			} elsif ($ballot_speakerorder) {
+
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{order} = $ballot_speakerorder;
+
+			} elsif ($panel_bye) {
+
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{side} = "Bye";
+
+			} elsif ($ballot_side == 1) {
+
+				$events{$event_id}{"aff_label"} = "Aff" unless $events{$event_id}{"aff_label"};
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{side_init} = substr($events{$event_id}{"aff_label"},0,1);
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{side} = $events{$event_id}{"aff_label"};
+
+			} elsif ($ballot_side == 2) {
+
+				$events{$event_id}{"neg_label"} = "Neg" unless $events{$event_id}{"neg_label"};
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{side} = $events{$event_id}{"neg_label"};
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{side_init} = substr($events{$event_id}{"neg_label"},0,1);
+			}
+
+			$round_start_time = $timeslot_start unless $round_start_time;
+
+			if ($round_start_time) {
+				unless ($now{"entries"}{$entry_id}{"section"}{$panel_id}{"start_time"}) {
+
+					my $hour;
+					my $minute;
+					my $am = "AM";
+
+					if ($round_flighted > 1 && $events{$event_id}{"flight_offset"}) {
+
+						my $dt = $cache{$round_start_time};
+
+						unless ($dt) {
+							$dt = eval {
+								return DateTime::Format::MySQL->parse_datetime($round_start_time);
+							};
+
+						}
+
+						if ($dt) {
+							$dt->set_time_zone($tourn->tz);
+							$cache{$round_start_time} = $dt;
+							my $clone = $dt->clone();
+							$clone->add( minutes => $events{$event_id}{"flight_offset"} * ($panel_flight - 1) );
+							$hour = $clone->hour_12;
+							$minute = $clone->strftime('%M');
+							$am = uc($clone->strftime('%p'));
+						}
+
+					} else {
+
+						$hour = int(substr($round_start_time, 11, 2));
+						$minute = substr($round_start_time, 14, 2);
+
+						if ($hour > 12) {
+							$am = "PM";
+							$hour -= 12;
+						} elsif ($hour == 0) {
+							$hour = 12;
+						}
+					}
+
+					$minute = "00" unless $minute > 0;
+					$now{"entries"}{$entry_id}{"section"}{$panel_id}{"start_time"} = $hour.":".$minute." ".$am;
+
+				}
+			}
+
+			if (
+				 $ballot_audit < 1
+				&& (not defined $now{"entries"}{$entry_id}{"now"})
+			) {
+				$current_count++;
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{"status"} = "now";
+				$now{"entries"}{$entry_id}{"now"} = $panel_id;
+			} elsif ($now{"entries"}{$entry_id}{"now"} == $panel_id) {
+
+			} elsif ($ballot_audit < 1) {
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{"status"} = "future";
+			} else {
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{"status"} = "past";
+			}
+		}
+
+		if (
+			$round_published == 1
+			|| $post_primary > 0
+			|| $post_secondary > 0
+			|| $post_feedback > 0
+		) {
+
+			my $judge;
+
+			$now{"entries"}{$entry_id}{"section"}{$panel_id}{post_secondary} = $post_secondary;
+
+			unless ($now{"entries"}{$entry_id}{"section"}{$panel_id}{judges}{$judge_id}) {
+
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{judges}{$judge_id}{"code"}  = $judge_code;
+				$judge = $now{"entries"}{$entry_id}{"section"}{$panel_id}{judges}{$judge_id};
+				$judge->{"first"}  = $judge_first;
+				$judge->{"last"}   = $judge_last;
+				$judge->{"school"} = $judgeschool_name;
+			} else {
+				$judge = $now{"entries"}{$entry_id}{"section"}{$panel_id}{judges}{$judge_id};
+			}
+
+			if ($ballot_started) {
+				unless ($judge->{"started"}) {
+
+					my $hour = int(substr($ballot_started, 11, 2));
+					my $minute = int(substr($ballot_started, 14, 2));
+
+					my $am = "AM";
+
+					if ($hour > 12) {
+						$am = "PM";
+						$hour -= 12;
+					} elsif ($hour == 0) {
+						$hour = 12;
+					}
+					$judge->{"started"} = $hour.":".$minute." ".$am;
+				}
+			}
+
+			if ($event_type eq "congress") {
+				$judge->{chair} = $ballot_chair;
+			}
+
+			if ($ballot_audit) {
+
+				$judge->{"audited"}++;
+
+				if ($ballot_bye) {
+
+					$now{"entries"}{$entry_id}{"section"}{$panel_id}{bye} = "Bye";
+
+				} elsif ($ballot_forfeit) {
+
+					$now{"entries"}{$entry_id}{"section"}{$panel_id}{bye} = "Forfeit";
+
+				} elsif ($panel_publish && $events{$event_id}{"judge_publish"} eq "all") {
+
+					$post_primary   = 3;
+					$post_secondary = 3;
+					$post_feedback  = 3;
+
+				} elsif ($panel_publish && $events{$event_id}{"judge_publish"} eq "winloss") {
+					$post_primary   = 3;
+				}
+
+				if ($ballot_tv) {
+					$judge->{'violation'}++;
+				}
+
+				if ($event_type eq "speech" || $event_type eq "wudc" || $event_type eq "congress") {
+
+					if ($post_primary > 0 && $score_tag eq "rank")  {
+						$judge->{$score_tag}  = $score_value;
+					}
+
+					if ($post_secondary > 0 && $score_tag eq "point") {
+						$judge->{$score_tag}  = $score_value;
+					}
+
+					if ($post_primary > 0 && $ballot_forfeit) {
+						$judge->{"rank"} = "No Show";
+					}
+
+				} elsif ($event_type eq "wsdc" || $event_type eq "debate" || $event_type eq "mock_trial") {
+
+					if ($post_primary > 0 && $score_tag eq "winloss") {
+
+						if ($panel_bye || $ballot_bye) {
+							$judge->{$score_tag}  = "Bye";
+						} elsif ($ballot_forfeit) {
+							$judge->{$score_tag}  = "Fft";
+						} elsif ($score_value == 1) {
+							$judge->{$score_tag}  = "W";
+						} elsif ($score_value == 0) {
+							$judge->{$score_tag}  = "L";
+						}
+					}
+
+					if ($post_secondary > 0 && (
+						$score_tag eq "point"
+						|| $score_tag eq "rank"
+						|| $score_tag eq "speaker")
+					) {
+
+						if ($score_student_id) {
+
+							$judge->{by_student}{$score_tag}++;
+
+							$judge->{students}{$score_student_id}{"name"}
+								= $score_student_first." ".substr($score_student_last, 0, 1);
+
+							$judge->{students}{$score_student_id}{"initials"}
+								= substr($score_student_first,0,1).substr($score_student_last,0,1);
+
+							$judge->{$score_tag}{$score_student_id}  = $score_value;
+
+						} else {
+
+							$judge->{by_entry}{$score_tag}++;
+							$judge->{$score_tag}  = $score_value;
+						}
+					}
+				}
+
+				if ($post_feedback > 0) {
+
+					if ($score_content && (
+							$score_tag eq "rfd"
+							|| $score_tag eq "comments"
+							|| $score_tag eq "rubric"
+						)
+					) {
+						$judge->{$score_tag} = $score_content;
+						$judge->{"topic"} = $score_topic;
+						$now{"entries"}{$entry_id}{"section"}{$panel_id}{"rfd"}++;
+					}
+
+					if ($score_content && ($score_tag eq "rubric")) {
+						$judge->{$score_tag}++;
+					}
+
+					if ($score_tag eq 'speech') {
+						$now{"entries"}{$entry_id}{"section"}{$panel_id}{"rfd"}++;
+						$judge->{"speeches"}{$score_speech}{"point"}    = $score_value;
+						$judge->{"speeches"}{$score_speech}{"position"} = $score_position;
+						$judge->{"speeches"}{$score_speech}{"topic"}    = $score_topic;
+						$judge->{"speeches"}{$score_speech}{"content"}  = $score_content;
+					}
+				}
+
+			} elsif ($panel_bye) {
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{"panel_bye"} = 1;
+			} else {
+				$now{"entries"}{$entry_id}{"section"}{$panel_id}{"unfinished"} = 1;
+			}
+		}
+	}
+
+	if ($tourn_settings{"ask_observers"}) {
+
+		#ACAB
+
+		my $cop_sth = $dbh->prepare("
+			select entry.id, entry.code, event.type, count(distinct campus_log.person), campus_log.panel
+			from entry, event, campus_log
+			where entry.school = ?
+				and entry.event = event.id
+				and entry.id = campus_log.entry
+				and campus_log.tag = 'observer'
+			group by campus_log.panel
+		");
+
+		$cop_sth->execute($school->id);
+
+		my %totals;
+
+		while (
+			my (
+				$entry_id, $code, $type, $count, $panel
+			) = $cop_sth->fetchrow_array()
+		) {
+			$totals{$entry_id}{"type"} = $type;
+			$totals{$entry_id}{"code"} = $code;
+			$totals{$entry_id}{"count"}{$panel} = $count;
+		}
+
+		foreach my $entry_id (keys %totals) {
+
+			my $code = $totals{$entry_id}{"code"};
+
+			if ($totals{$entry_id}{"type"} eq "congress") {
+				$tourn_settings{"observer_violation"} .= "Congress observers not permitted; used for ".$code;
+			} elsif ($totals{$entry_id}{"type"} eq "speech") {
+				foreach my $panel (keys %{$totals{$entry_id}{"count"}}) {
+					if ($totals{$entry_id}{"count"}{$panel} > 1) {
+						$tourn_settings{"observer_violation"} .= " Speech observers over quota for ".$code;
+					}
+				}
+			} else {
+				foreach my $panel (keys %{$totals{$entry_id}{"count"}}) {
+					if ($totals{$entry_id}{"count"}{$panel} > 2) {
+						$tourn_settings{"observer_violation"} .= " Debate observers over quota for ".$code." in section ".$panel;
+					}
+				}
+			}
+
+		}
+
+		$cop_sth->finish();
+
+		unless ($tourn_settings{"observer_violation"}) {
+
+			$cop_sth = $dbh->prepare("
+				select entry.id, entry.code, event.type, count(distinct campus_log.person), campus_log.panel
+				from entry, event, campus_log
+				where entry.school = ?
+					and entry.event = event.id
+					and entry.id = campus_log.entry
+					and campus_log.tag = 'observer'
+					and campus_log.person != ?
+				group by campus_log.panel
+			");
+
+			$cop_sth->execute($school->id, $person->id);
+
+			my %totals;
+
+			while (
+				my (
+					$entry_id, $code, $type, $count, $panel
+				) = $cop_sth->fetchrow_array()
+			) {
+
+				next unless $observers{$entry_id}{$person->id};
+
+				$totals{$entry_id}{"type"} = $type;
+				$totals{$entry_id}{"code"} = $code;
+				$totals{$entry_id}{"count"}{$panel} = $count;
+			}
+
+			foreach my $entry_id (keys %totals) {
+
+				next unless $observers{$entry_id}{$person->id};
+
+				if ($totals{$entry_id}{"type"} eq "congress") {
+					$observers{$entry_id}{$person->id} = "quota";
+				} elsif ($totals{$entry_id}{"type"} eq "speech") {
+					foreach my $panel (keys %{$totals{$entry_id}{"count"}}) {
+						if ($totals{$entry_id}{"count"}{$panel} > 1) {
+							$observers{$entry_id}{$person->id} = "quota";
+						}
+					}
+
+				} else {
+					foreach my $panel (keys %{$totals{$entry_id}{"count"}}) {
+						if ($totals{$entry_id}{"count"}{$panel} > 2) {
+							$observers{$entry_id}{$person->id} = "quota";
+						}
+					}
+				}
+			}
+		}
+	}
+
+	my $judge_now_sth = $dbh->prepare("
+
+		select
+			judge.id, judge.code, judge.first, judge.last,
+			category.abbr,
+			room.name,
+			panel.letter, panel.id, panel.flight, panel.publish, panel.bye,
+			ballot.id, ballot.side, ballot.speakerorder,
+				CONVERT_TZ(ballot.judge_started, '+00:00', '".$tz."'),
+			ballot.audit, ballot.chair,
+			ballot.forfeit, ballot.bye,
+
+			score.id, score.tag, score.value, score.speech, score.content, score.topic, score.position,
+			score_student.id, score_student.first, score_student.last,
+
+			round.type, round.name, round.label,
+				CONVERT_TZ(round.start_time, '+00:00', '".$tz."'),
+			round.published, round.post_primary, round.post_secondary, round.post_feedback,
+			timeslot.start, timeslot.end,
+			event.id, event.abbr, event.type,
+			entry.id, entry.code, entry.name, entryschool.name, entry.active, entry.dropped
+
+		from (judge, ballot, panel, round, timeslot, event, category, entry)
+
+			left join score on score.ballot = ballot.id
+
+			left join school entryschool on entryschool.id = entry.school
+
+			left join student score_student
+				on score_student.id = score.student
+
+			left join room on panel.room = room.id
+
+		where judge.school = ?
+			and judge.id = ballot.judge
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and round.timeslot = timeslot.id
+			and round.event = event.id
+			and judge.category = category.id
+			and ballot.entry = entry.id
+
+		order by category.abbr, judge.last, timeslot.start
+	");
+
+	$judge_now_sth->execute($school_id);
+
+	while (
+		my (
+			$judge_id, $judge_code, $judge_first, $judge_last,
+			$category_abbr,
+			$room_name,
+			$panel_letter, $panel_id, $panel_flight, $panel_publish, $panel_bye,
+			$ballot_id, $ballot_side, $ballot_speakerorder, $ballot_started, $ballot_audit, $ballot_chair,
+			$ballot_forfeit, $ballot_bye,
+
+			$score_id, $score_tag, $score_value, $score_speech, $score_content, $score_topic, $score_position,
+			$score_student_id, $score_student_first, $score_student_last,
+
+			$round_type, $round_name, $round_label, $round_start_time,
+			$round_published, $post_primary, $post_secondary, $post_feedback,
+			$timeslot_start, $timeslot_end,
+			$event_id, $event_abbr, $event_type,
+			$entry_id, $entry_code, $entry_name, $entryschool_name, $entry_active, $entry_dropped,
+		) = $judge_now_sth->fetchrow_array()
+	) {
+
+		next unless (
+			$round_published > 0
+			|| $post_primary > 0
+			|| $post_secondary > 0
+			|| $post_feedback > 0
+			|| $panel_publish
+		);
+
+		next if $round_published > 1;
+
+		$events{$event_id}{"abbr"} = $event_abbr;
+		$events{$event_id}{"type"} = $event_type;
+
+		unless ($now{"judges"}{$judge_id}) {
+
+			$now{"judges"}{$judge_id}{judge_code}    = $judge_code;
+			$now{"judges"}{$judge_id}{judge_first}   = $judge_first;
+			$now{"judges"}{$judge_id}{judge_last}    = $judge_last;
+			$now{"judges"}{$judge_id}{category_abbr} = $category_abbr;
+		}
+
+		unless ($now{"judges"}{$judge_id}{"section"}{$panel_id}) {
+
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{room_name}  = $room_name;
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{round_num}  = $round_name;
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{round_name} = $round_name;
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{round_type} = $round_type;
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{round_name} = $round_label
+				if $round_label;
+
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{panel_bye}    = $panel_bye;
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{panel_flight} = $panel_flight;
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{event_abbr}   = $event_abbr;
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{event_id}     = $event_id;
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{event_type}   = $event_type;
+			$now{"judges"}{$judge_id}{"section"}{$panel_id}{audited}      = $ballot_audit;
+
+			$round_start_time = $timeslot_start unless $round_start_time;
+
+			if ($round_start_time) {
+				unless ($now{"judges"}{$judge_id}{"section"}{$panel_id}{"start_time"}) {
+
+					my $hour = int(substr($round_start_time, 11, 2));
+					my $minute = int(substr($round_start_time, 14, 2));
+
+					my $am = "AM";
+
+					if ($hour > 12) {
+						$am = "PM";
+						$hour -= 12;
+					} elsif ($hour == 0) {
+						$hour = 12;
+					}
+
+					$minute = "00" unless $minute > 0;
+					$now{"judges"}{$judge_id}{"section"}{$panel_id}{"start_time"} = $hour.":".$minute." ".$am;
+				}
+			}
+
+			if (
+				 $ballot_audit < 1
+				&& (not defined $now{"judges"}{$entry_id}{"now"})
+			) {
+				$current_count++;
+				$now{"judges"}{$judge_id}{"section"}{$panel_id}{"status"} = "now";
+				$now{"judges"}{$judge_id}{"now"} = $panel_id;
+
+			} elsif ($now{"judges"}{$judge_id}{"now"} == $panel_id) {
+
+			} elsif ($ballot_audit < 1) {
+				$now{"judges"}{$judge_id}{"section"}{$panel_id}{"status"} = "future";
+			} else {
+				$now{"judges"}{$judge_id}{"section"}{$panel_id}{"status"} = "past";
+			}
+		}
+
+		my $section = $now{"judges"}{$judge_id}{"section"}{$panel_id};
+
+		$section->{entries}{$entry_id}{"code"}   = $entry_code;
+		$section->{entries}{$entry_id}{"name"}   = $entry_name;
+		$section->{entries}{$entry_id}{"school"} = $entryschool_name;
+
+		if ($ballot_started) {
+			unless ($section->{"started"}) {
+
+				my $hour = int(substr($ballot_started, 11, 2));
+				my $minute = int(substr($ballot_started, 14, 2));
+				my $am = "AM";
+
+				if ($hour > 12) {
+					$am = "PM";
+					$hour -= 12;
+				} elsif ($hour == 0) {
+					$hour = 12;
+				}
+
+				unless ($minute > 0) {
+					$minute = "00";
+				}
+
+				$section->{"started"} = $hour.":".$minute." ".$am;
+			}
+		}
+
+		if ($event_type eq "congress") {
+
+		} elsif ($event_type eq "wudc") {
+
+			if ($ballot_speakerorder == 1) {
+				$section->{entries}{$entry_id}{"order"} = "1G";
+			} elsif ($ballot_speakerorder == 2) {
+				$section->{entries}{$entry_id}{"order"} = "1O";
+			} elsif ($ballot_speakerorder == 3) {
+				$section->{entries}{$entry_id}{"order"} = "2G";
+			} elsif ($ballot_speakerorder == 4) {
+				$section->{entries}{$entry_id}{"order"} = "2O";
+			}
+
+		} elsif ($ballot_speakerorder) {
+			$section->{entries}{$entry_id}{"order"} = $ballot_speakerorder;
+
+			if ($ballot_side == 1) {
+				$section->{entries}{$entry_id}{"side"} = $events{$event_id}{"aff_label"};
+				$section->{entries}{$entry_id}{"side_init"} = substr($events{$event_id}{"aff_label"},0,1);
+			} elsif ($ballot_side == 2) {
+				$events{$event_id}{"neg_label"} = "Neg" unless $events{$event_id}{"neg_label"};
+				$section->{entries}{$entry_id}{"side"} = $events{$event_id}{"neg_label"};
+				$section->{entries}{$entry_id}{"side_init"} = substr($events{$event_id}{"neg_label"},0,1);
+			}
+
+		} elsif ($ballot_side == 1) {
+
+			$events{$event_id}{"aff_label"} = "Aff" unless $events{$event_id}{"aff_label"};
+			$section->{entries}{$entry_id}{"side"} = $events{$event_id}{"aff_label"};
+			$section->{entries}{$entry_id}{"side_init"} = substr($events{$event_id}{"aff_label"},0,1);
+
+		} elsif ($ballot_side == 2) {
+
+			$events{$event_id}{"neg_label"} = "Neg" unless $events{$event_id}{"neg_label"};
+			$section->{entries}{$entry_id}{"side"} = $events{$event_id}{"neg_label"};
+			$section->{entries}{$entry_id}{"side_init"} = substr($events{$event_id}{"neg_label"},0,1);
+		}
+
+		my $entry = $section->{entries}{$entry_id};
+
+		if ($ballot_audit) {
+
+			$section->{"audited"}++;
+
+			if ($panel_publish) {
+
+				if ($events{$event_id}{"judge_publish"} eq "all") {
+					$post_primary   = 3;
+					$post_secondary = 3;
+					$post_feedback  = 3;
+
+				} elsif ($events{$event_id}{"judge_publish"} eq "winloss") {
+					$post_primary   = 3;
+				}
+			}
+
+			if ($event_type eq "speech" || $event_type eq "wudc" || $event_type eq 'congress') {
+
+				if ($post_primary > 0 && $score_tag eq "rank") {
+					$entry->{$score_tag} = $score_value;
+				}
+
+				if ($post_secondary > 0 && $score_tag eq "point") {
+					$entry->{$score_tag} = $score_value;
+				}
+
+				if ($entry_active < 1) {
+					$entry->{"inactive"} = 1;
+				}
+
+				if ($post_primary > 0 && $ballot_forfeit) {
+					$entry->{"rank"} = "No Show";
+				}
+
+				if ($post_primary > 0 && $ballot_bye) {
+					$entry->{"rank"} = "Bye";
+				}
+
+			} elsif ($event_type eq "wsdc" || $event_type eq "debate") {
+
+				if ($post_primary > 0 && $score_tag eq "winloss") {
+
+					if ($score_value == 1) {
+						$entry->{$score_tag}  = "W";
+					} elsif ($score_value == 0) {
+						$entry->{$score_tag}  = "L";
+					}
+				}
+
+				if ($post_secondary > 0 && ($score_tag eq "rank" || $score_tag eq "point" || $score_tag eq "speaker")) {
+
+					if ($score_student_id) {
+
+						$entry->{students}{$score_student_id}{"name"}
+							= $score_student_first." ".substr($score_student_last,0,1);
+
+						$entry->{students}{$score_student_id}{"initials"}
+							= substr($score_student_first,0,1).substr($score_student_last,0,1);
+
+						$entry->{$score_tag}{$score_student_id}  = $score_value;
+
+					} else {
+						$entry->{$score_tag} = $score_value;
+					}
+				}
+
+				if ($post_primary > 0 && $ballot_forfeit) {
+					$entry->{"winloss"} = "Forfeit";
+				}
+
+				if ($post_primary > 0 && $ballot_bye) {
+					$entry->{"winloss"} = "Bye";
+				}
+			}
+
+			if ($post_feedback > 0) {
+
+				if ($score_content && (
+						$score_tag eq "rfd"
+						|| $score_tag eq "comments"
+						|| $score_tag eq "rubric"
+					)
+				) {
+
+					$entry->{$score_tag} = $score_content;
+					$entry->{"topic"} = $score_topic;
+					$section->{"has_rfd"}++;
+
+					if ($score_tag eq "rfd") {
+						$section->{rfd} = $score_content;
+					}
+				}
+
+				if ($score_tag eq 'speech') {
+					$section->{"has_rfd"}++;
+					$entry->{"speeches"}{$score_speech}{"point"}    = $score_value;
+					$entry->{"speeches"}{$score_speech}{"position"} = $score_position;
+					$entry->{"speeches"}{$score_speech}{"topic"}    = $score_topic;
+					$entry->{"speeches"}{$score_speech}{"content"}  = $score_content;
+				}
+			}
+
+		} else {
+
+		}
+	}
+
+	my $jpool_sth = $dbh->prepare("
+		select judge.id, judge.first, judge.last, judge.code,
+			jpool.id,
+			jpool.name, message.value_text, publish.value
+
+		from (jpool, jpool_judge jpj, judge, jpool_setting publish)
+
+			left join jpool_setting message
+				on message.jpool = jpool.id
+				and message.tag = 'message'
+
+		where judge.school = ?
+			and judge.id = jpj.judge
+			and jpj.jpool = jpool.id
+			and jpool.id = publish.jpool
+
+			and not exists (
+				select registrant.id
+				from jpool_setting registrant
+				where registrant.jpool = jpool.id
+				and registrant.tag = 'registrant'
+			)
+
+			and exists (
+				select show_judges.id
+				from jpool_setting show_judges
+				where show_judges.jpool = jpool.id
+				and show_judges.tag = 'show_judges'
+			)
+
+	");
+
+	my %jpools;
+
+	$jpool_sth->execute($school_id);
+
+	while (
+		my (
+		 	$judge_id, $judge_first, $judge_last, $judge_code,
+			$jpool_id, $jpool_name, $message, $publish
+		) = $jpool_sth->fetchrow_array()
+	) {
+		next unless $publish;
+		$jpools{$judge_id}{$jpool_id}{"judge_name"} = $judge_first." ".$judge_last;
+		$jpools{$judge_id}{$jpool_id}{"judge_code"} = $judge_code;
+		$jpools{$judge_id}{$jpool_id}{"name"} = $jpool_name;
+		$jpools{$judge_id}{$jpool_id}{"message"} = $message;
+	}
+
+	$jpool_sth->finish();
+
+	Tab::Round->columns(TEMP => "strikeschool");
+
+	Tab::Round->set_sql( school_strikes => "
+		select round.*, entry.school as strikeschool
+		from round, round_setting, panel, ballot, entry, school
+		where entry.school = school.id
+		and school.id = ?
+		and entry.id = ballot.entry
+		and ballot.panel = panel.id
+		and panel.bye != 1
+		and panel.round = round.id
+		and round.id = round_setting.round
+		and round_setting.tag = 'strikes_published'
+		and round_setting.value = 1
+		order by round.start_time
+	");
+
+	my @cards = Tab::Round->search_school_strikes($school_id);
+
+	my %strike_cards = map {$_->strikeschool => 1} @cards;
+
+    Tab::Round->columns(TEMP => "setting");
+    Tab::Round->columns(TEMP => "panelid");
+
+    Tab::Round->set_sql( entry_flips => "
+        select distinct round.*, panel.id as panelid, panel_setting.value as setting
+        from round, round_setting, panel, ballot, entry, panel_setting
+		where entry.school = ?
+			and ballot.entry = entry.id
+			and ballot.panel = panel.id
+			and ballot.audit != 1
+			and panel.bye != 1
+			and panel.round = round.id
+			and round.id = round_setting.round
+			and round_setting.tag = 'flip_published'
+			and panel_setting.panel = panel.id
+			and panel_setting.tag = 'flip_status'
+			and panel_setting.value != 'done'
+        order by round.start_time
+    ");
+
+	my @flip_cards = Tab::Round->search_entry_flips($school_id);
+
+</%init>
+
+%	if ($ARGS{"results"}) {
+
+		 <& "/user/results/menu.mas",
+			 whoami => "dashboard",
+			 person => $person,
+			 school => $school
+		 &>
+
+%	} else {
+		 <& "/user/menu.mas",
+			 whoami  => "dashboard",
+			 person  => $person,
+			 chapter => $school->chapter,
+		 &>
+%	}
+
+	<script>
+
+		function showRFD(sectionID) {
+			$("#"+sectionID+"_button").toggleClass("invert");
+			$("#"+sectionID+"_rfd").toggleClass("hidden");
+			fixVisual();
+		}
+
+		function showEvent() {
+
+			var eventID = $("#event_selector").val();
+
+			if (eventID === "all") {
+				$(".events").removeClass("eventHide");
+			} else {
+				$(".events").addClass("eventHide");
+				$("."+eventID).removeClass("eventHide");
+			}
+
+			doHide();
+			return;
+		}
+
+		function showTime(classID) {
+
+			$(".timebutton").removeClass('invert');
+			$(".timebutton").removeClass('bluetext');
+			$(".timebutton").addClass('graytext');
+
+			$("#"+classID).addClass("invert");
+			$("#"+classID).addClass("bluetext");
+			$("#"+classID).removeClass("graytext");
+
+			$(".names").addClass("hidden");
+			$(".timerows").addClass('timeHide');
+			$(".timerows").removeClass('ltbordertop');
+
+			if (classID === "all") {
+				$(".timerows").removeClass('timeHide');
+			} else {
+				$("."+classID+"_row").removeClass("timeHide");
+			}
+
+			$("."+classID+"_name").removeClass("hidden");
+			$("."+classID+"_row_first").addClass("ltbordertop");
+
+			doHide();
+			return;
+		}
+
+		function doHide() {
+			$(".timerows").removeClass("hidden");
+			$(".timeHide").addClass("hidden");
+			$(".eventHide").addClass("hidden");
+			fixVisual();
+			return;
+		}
+
+		$(document).ready(function() {
+%			if ($ARGS{"results"} || $after || (not defined $current_count)) {
+				showTime("all");
+%			} else {
+				showTime("now");
+%			}
+			showEvent();
+			fixVisual();
+		});
+
+	</script>
+
+	<div class="main">
+
+		<span class="seventenths nowrap nospace">
+			<h5 class="wrap"><% $school_name %>'s Dashboard</h5>
+			<p class="bigger semibold redtext"><% $tourn->name %></p>
+		</span>
+
+		<span class="fifth rightalign nowrap nospace semibold bluetext bigger">
+			<% $now->day_abbr %> / <& "/funclib/showtime.mas", dt => $now, tz => $tourn->tz &>
+		</span>
+
+		<span class="tenth rightalign nospace">
+%			if ($school->chapter > 0) {
+				<a
+					href  = "/user/chapter/tournaments.mhtml?chapter_id=<% $school->chapter->id %>"
+					title = "Return to <% $school_name %> Home"
+					class = "fa fa-lg fa-home buttonwhite greentext"
+				></a>
+%			}
+		</span>
+
+		<div class="ltbordervert odd leftalign">
+<%perl>
+			my %rooms;
+
+			if (
+				$tourn_settings{"online_rooms"}
+				|| $tourn_settings{"online_tournament"}
+			) {
+
+				my @arr = eval {
+					return @{$tourn_settings{"online_rooms"}};
+				};
+
+				foreach my $room (@arr) {
+					if ($room->{access} eq "coach") {
+						$rooms{"coach"}{$room->{id}}{name} = $room->{"name"};
+						$rooms{"coach"}{$room->{id}}{thing} = $room;
+					}
+				}
+</%perl>
+				<span class="third leftalign">
+					<span class="threequarters semibold bluetext">
+						<% $school_name %>
+						<br />Squad Room
+					</span>
+
+					<span class="quarter centeralign padvert nospace">
+						<& "/funclib/online_room.mas",
+							school => $school->id,
+							person => $person,
+							show   => 1,
+							class  => "fa"
+						&>
+					</span>
+				</span>
+<%perl>
+			}
+
+			if (
+				$tourn_settings{"ask_observers"}
+				&& (not defined $tourn_settings{'observer_violation'})
+			) {
+</%perl>
+				<span class="third leftalign">
+					<span class="threequarters semibold bluetext">
+						Observer Permissions
+					</span>
+
+					<span class="quarter centeralign padvert nospace">
+						<a
+							class = "fa fa-lg invert buttonwhite bluetext fa-eye"
+							href  = "campus_observers.mhtml?school_id=<% $school->id %>"
+							title = "Assign Coach Observers"
+						></a>
+					</span>
+				</span>
+<%perl>
+			}
+			if ($tourn_settings{"allow_dashboard_drops"} ) {
+</%perl>
+				<span class="third leftalign">
+					<span class="threequarters semibold bluetext">
+						Drop/Withdraw Entries
+					</span>
+
+					<span class="quarter centeralign padvert nospace">
+						<a
+							class = "fa fa-lg invert buttonwhite redtext fa-edit"
+							href  = "dashboard_drop.mhtml?school_id=<% $school->id %>"
+							title = "Drop Entries"
+						></a>
+					</span>
+				</span>
+
+%			}
+
+%			foreach my $room_id (keys %{$rooms{"coach"}}) {
+
+				<span class="third leftalign">
+					<span class="threequarters semibold bluetext">
+						<span class="halfspace"></span>
+						<% $rooms{"coach"}{$room_id}{"name"} %>
+					</span>
+
+					<span class="quarter centeralign padvert nospace">
+						<& "/funclib/online_room.mas",
+							util   => $rooms{"coach"}{$room_id}{"thing"},
+							person => $person,
+							show   => 1,
+							class  => "fa"
+						&>
+					</span>
+				</span>
+%			}
+		</div>
+
+%		if (@flip_cards) {
+			<div class="full padvertmore centeralign ltbordertop redborderbottom">
+				<a
+					href  = "/user/enter/flip.mhtml"
+					class = "buttonwhite orangetext hover invert"
+				>Coinflip Choices Available</a>
+			</div>
+			<br />
+%		}
+
+%		if ($strike_cards{$school_id}) {
+
+			<div class="full padvertmore centeralign ltbordertop redborderbottom">
+				<a
+					href  = "/user/enter/strike_cards.mhtml"
+					class = "buttonwhite orangetext hover invert"
+				>Strike Cards Available</a>
+			</div>
+			<br />
+%		}
+
+		<& /funclib/tablesorter.mas, table => $school_id."_entries" &>
+
+		<div class="full martop nospace">
+			<span class="sixth nospace">
+				<h5>Entries</h5>
+			</span>
+
+			<span class="third centeralign true nospace">
+				<a
+					id      = "past"
+					class   = "buttonwhite greytext timebutton fa fa-fast-backward"
+					onClick = "showTime('past');"
+					title   = "Show completed rounds only"
+				></a>
+				<a
+					id      = "now"
+					class   = "buttonwhite bluetext timebutton fa fa-arrow-down"
+					onClick = "showTime('now');"
+					title   = "Show current rounds only"
+				></a>
+				<a
+					id      = "future"
+					class   = "buttonwhite greytext timebutton fa fa-fast-forward"
+					onClick = "showTime('future');"
+					title   = "Show future rounds only"
+				></a>
+				<a
+					id      = "all"
+					class   = "buttonwhite greytext timebutton marleft fa fa-asterisk"
+					onClick = "showTime('all');"
+					title   = "Show all rounds"
+				></a>
+			</span>
+
+			<span class="third centeralign true nospace">
+				<select
+					id       = "event_selector"
+					class    = "fixedmed"
+					onChange = "showEvent();"
+				>
+					<option value="all">All Events</option>
+
+<%perl>
+					my $last_type;
+
+					foreach my $event_id (
+						sort {
+							$events{$a}{"type"} cmp $events{$b}{"type"}
+							|| $events{$a}{"abbr"} cmp $events{$b}{"abbr"}
+						} keys %events
+					) {
+
+						if ($last_type ne $events{$event_id}{"type"}) {
+							$m->print('<optgroup label="'.ucfirst($events{$event_id}{"type"}).'">');
+							$last_type = $events{$event_id}{"type"};
+						}
+</%perl>
+						<option
+							value="<% $event_id %>"
+						><% $events{$event_id}{"abbr"} %></option>
+%					}
+
+				</select>
+			</span>
+
+			<span
+				id="<% $school_id %>_entries_buttonarea"
+				class="sixth rightalign">
+			</span>
+		</div>
+
+%		if ($tourn_settings{'observer_violation'}) {
+			<p class='centeralign bigger redtext semibold borderred martop marbottom padtop padbottom'>
+				Your NSDA Campus observer use has been disabled due to a terms
+				of service violation: <br />
+				<% $tourn_settings{"observer_violation"} %>
+			</p>
+%		}
+
+		<table
+			id    = "<% $school_id %>_entries"
+			class = "smallish"
+		>
+			<thead>
+				<tr class="yellowrow smaller">
+
+					<th>
+						Code
+					</th>
+
+					<th>
+						Name/vs
+					</th>
+
+					<th>
+						Rnd
+					</th>
+
+					<th>
+						Start
+					</th>
+
+					<th>
+						Room
+					</th>
+
+%					if ($shares) {
+						<th>
+							Doc Share
+						</th>
+%					}
+
+					<th title="Side &amp; Speaker Orders">
+						S
+					</th>
+
+%					unless ($tourn_settings{'mock_trial_registration'}) {
+						<th>
+							Judging
+						</th>
+%					}
+
+					<th>
+						Result
+					</th>
+
+%					if ($tourn_settings{'mock_trial_registration'}) {
+						<th title="Feedback">
+							Scores
+						</th>
+%					} else {
+						<th title="Feedback">
+							Fdbk
+						</th>
+%					}
+				</tr>
+			</thead>
+
+			<tbody>
+<%perl>
+				my $last_entry;
+				my $firstnot;
+
+				foreach my $entry_id (
+					sort {
+						$now{"entries"}{$a}{"event_abbr"} cmp $now{"entries"}{$b}{"event_abbr"}
+						|| $now{"entries"}{$a}{"entry_code"} <=> $now{"entries"}{$b}{"entry_code"}
+						|| $now{"entries"}{$a}{"entry_code"} cmp $now{"entries"}{$b}{"entry_code"}
+					} keys %{$now{"entries"}}
+				) {
+
+					my $entry = $now{"entries"}{$entry_id};
+
+					foreach my $section_id (
+						sort {
+							$entry->{"section"}{$b}{round_num} <=> $entry->{"section"}{$a}{round_num}
+						} keys %{$entry->{"section"}}
+					) {
+
+						my $name_class;
+						my $row_class;
+						my $section = $entry->{'section'}{$section_id};
+						my $status = $section->{"status"};
+
+						unless ($entry->{"all_named"}++) {
+							$name_class .= "all_name ";
+							$row_class  .= "all_row_first ";
+						}
+
+						unless ($entry->{$status."_named"}++) {
+							$name_class .= $status."_name ";
+							$row_class .= $status."_row_first";
+						}
+</%perl>
+						<tr class="timerows <% $row_class ? $row_class  : '' %>
+							<% $section->{status} %>_row
+							<% $entry->{event_id} %> events <% $firstnot %>"
+						>
+							<td title="<% $entry->{entry_name} %>">
+								<span class="full nospace semibold bluetext <% $name_class %> names">
+%									if ($entry->{"entry_code"} eq $entry->{"entry_name"}) {
+										<% $entry->{"event_abbr"} %>
+%									} else {
+										<% $entry->{"event_abbr"} %>: <% $entry->{"entry_code"} %>
+%									}
+%									if ($entry->{'dropped'}) {
+										<div class="leftalign redtext semibold">
+											DROP
+										</div>
+%									}
+								</span>
+							</td>
+
+							<td class="semibold bluetext">
+%								if ($section->{"panel_bye"}) {
+									BYE
+%								} elsif ($entry->{'event_type'} eq "debate" || $entry->{'event_type'} eq "wsdc") {
+									vs <% $section->{"opponent_code"} %>
+%								} else {
+									<span class="full nospace semibold bluetext <% $name_class %> names">
+										<% $entry->{"entry_name"} %>
+									</span>
+%								}
+							</td>
+<%perl>
+							if ($entry_id ne $last_entry) {
+								$last_entry = $entry_id;
+								if ($section->{status} ne "past") {
+									$firstnot++;
+								}
+
+							} else {
+								undef $firstnot;
+							}
+</%perl>
+							<td class="centeralign">
+								<% $section->{round_name} %>
+								<% $section->{round_flighted} && $section->{round_type} eq "elim"
+									? "<br />"
+									: "-"
+								%>
+								<%
+									$section->{round_flighted} > 1
+									? "Ft ".$section->{panel_flight}
+									: ""
+								%>
+							</td>
+
+							<td class="centeralign nowrap">
+								<% $section->{start_time} %>
+							</td>
+
+							<td class="nospace padvertless">
+<%perl>
+								if ($events{$entry->{event_id}}{"observers"}
+									&& $observers{$entry_id}{$person->id}
+									&& (not defined $person_settings->{"observer_ban"})
+									&& ($section->{unfinished})
+								) {
+
+									if ($tourn_settings{'observer_violation'}) {
+</%perl>
+										<div class="full nospace centeralign">
+											<span class="fa fa-lg buttonwhite redtext invert fa-ban">
+											</span>
+										</div>
+
+%									} elsif ($observers{$entry_id}{$person->id} eq "quota") {
+										<div class="full nospace centeralign">
+											<span
+												class = "fa fa-lg buttonwhite orangetext invert fa-ban"
+												title = "Quota of observers already entered room"
+											>
+											</span>
+											<span
+												title = "Quota of observers already entered room"
+												class="full nospace smaller"
+											>
+												Obs. Quota <br />Reached
+											</span>
+										</div>
+
+%									} elsif ($entry->{event_type} eq "congress") {
+
+%									} else {
+										<div class="full nospace centeralign">
+											<% $entry->{event_type} %>
+											<& "/funclib/online_room.mas",
+												panel    => $section_id,
+												observer => $entry_id,
+												session  => $session,
+												person   => $person,
+												show     => 1,
+												class    => "fa-sm"
+											&>
+										</div>
+<%perl>
+									}
+								} elsif (
+									( $events{$entry->{"event_id"}}{"online_mode"} eq "nsda_campus_observers"
+									|| $events{$entry->{"event_id"}}{"online_mode"} eq "public_jitsi_observers"
+									|| $events{$entry->{"event_id"}}{"online_mode"} eq "sync"
+									) && (not defined $section->{panel_bye})
+								) {
+									if ($tourn_settings{'observer_violation'}) {
+</%perl>
+										<div class="full nospace centeralign">
+											<span class="fa fa-lg buttonwhite redtext invert fa-ban">
+											</span>
+										</div>
+
+%									} elsif ($entry->{event_type} eq "congress") {
+
+%									} else {
+
+										<div class="full nospace centeralign">
+											<& "/funclib/online_room.mas",
+												panel    => $section_id,
+												observer => $entry_id,
+												session  => $session,
+												person   => $person,
+												show     => 1,
+												class    => "fa-sm"
+											&>
+										</div>
+										<div class="full nospace centeralign padvertless">
+											<% $section->{room_name} %>
+										</div>
+%									}
+%								} elsif ($section->{room_name})  {
+									<a class   = "plain full padvertless yellowhover"
+										href   = "/index/tourn/postings/round.mhtml?round_id=<% $section->{round_id} %>&tourn_id=<% $tourn->id %>"
+										target = "_blank"
+									><% $section->{room_name} %></a>
+%								}
+							</td>
+
+%							if ($shares) {
+								<td class="centeralign nowrap nospace">
+%									if ($section->{share_room}) {
+										<a
+											href   = "https://share.tabroom.com/<% $section->{share_room} %>"
+											class  = "bluetext link-underline semibold"
+											target = "_blank"
+										><% $section->{"share_room"} %></a>
+%									}
+								</td>
+%							}
+
+							<td class="centeralign nowrap nospace">
+%								if ($section->{side_init} && $section->{order}) {
+									<%
+										$section->{side_init}
+									%>/<%
+										Lingua::EN::Numbers::Ordinate::ordinate($section->{order})
+									%>
+%								} elsif ($section->{side_init}) {
+									<% $section->{side_init} %>
+%								} elsif ($section->{order}) {
+									<% Lingua::EN::Numbers::Ordinate::ordinate($section->{order}) %>
+%								}
+							</td>
+
+%							unless ($tourn_settings{'mock_trial_registration'}) {
+							<td class="nospace">
+<%perl>
+								foreach my $judge_id (
+									sort {
+										$section->{judges}{$b}{"chair"} <=> $section->{judges}{$a}{"chair"}
+										|| $section->{judges}{$b}{"last"} cmp $section->{judges}{$a}{"last"}
+									} keys %{$section->{judges}}
+								) {
+
+									my $judge = $section->{judges}{$judge_id};
+</%perl>
+									<div
+										title="<% $judge->{school} %>"
+										class="full nospace padvertless padleftless smallish nowrap"
+									>
+
+%										if ($entry->{event_type} eq "congress" && $judge->{chair}) {
+											<span class="tenth nospace padleftless semibold redtext" title="Parliamentarian">
+												P
+											</span>
+
+											<span class="ninetenths nospace nowrap">
+%										}
+
+%										if ($tourn_settings{"ncfl"}) {
+											<% $judge->{code} %>
+
+%										} elsif ($judge->{last}) {
+
+											<% $judge->{last} %>, <% $judge->{first} %>
+%										}
+
+%										if ($entry->{event_type} eq "congress" && $judge->{chair}) {
+											</span>
+%										}
+									</div>
+%								}
+							</td>
+%							}
+
+							<td class="nospace">
+
+%								if ($section->{panel_bye}) {
+
+									<div class="full centeralign redtext semibold">
+										BYE
+									</div>
+
+%								} elsif ($now{"entries"}{$entry_id}{"section"}{$section_id}{bye}) {
+
+									<div class="full centeralign redtext semibold padless">
+										<% $now{"entries"}{$entry_id}{"section"}{$section_id}{bye} %>
+									</div>
+<%perl>
+								} else {
+
+								my $point_total;
+								if ($entry->{mock_trial}) {
+									$m->print('<span class="third nospace">');
+								}
+
+								foreach my $judge_id (
+									sort {
+										$section->{judges}{$b}{"chair"} <=> $section->{judges}{$a}{"chair"}
+										|| $section->{judges}{$b}{"last"} cmp $section->{judges}{$a}{"last"}
+									} keys %{$section->{judges}}
+								) {
+
+									my $judge = $section->{judges}{$judge_id};
+
+									if ($judge->{point} || $judge->{rank} || $judge->{winloss}) {
+
+										if ($entry->{event_type} eq "debate"
+											|| $entry->{event_type} eq "wsdc"
+											|| $entry->{event_type} eq "mock_trial"
+										) {
+
+											if ($judge->{point} || $judge->{rank} || $judge->{point}) {
+
+												my @students = eval {
+													return sort {$a <=> $b} keys %{$judge->{students}};
+												};
+</%perl>
+												<div class="full nospace padvertless smallish leftalign">
+
+													<span class="fifth semibold nospace centeralign <%
+														$judge->{winloss} eq "W"
+														? "greentext"
+														: $judge->{winloss} eq "L"
+															? "redtext"
+															: "bluetext"
+													%>">
+														<% $judge->{winloss} %>
+													</span>
+
+%													unless ($entry->{mock_trial}) {
+														<span class="fourfifths nospace rightalign">
+%													}
+<%perl>
+														my $notfirst;
+														foreach my $score_tag ("point", "rank", "refute") {
+															next unless $judge->{by_entry}{$score_tag};
+															if ($score_tag eq "point" && $entry->{mock_trial}) {
+																$point_total += $judge->{$score_tag};
+																next;
+															}
+</%perl>
+															<span class="half smallish rightalign">
+																<% $judge->{$score_tag} %>
+															</span>
+%														}
+
+														<% $notfirst ? "</span>" : "" %>
+<%perl>
+														foreach my $student_id (@students) {
+															my $notfirst;
+															next if $entry->{mock_trial};
+															foreach my $score_tag ("point", "speaker", "rank", "refute") {
+
+																next unless $judge->{by_student}{$score_tag};
+</%perl>
+%																unless ($notfirst || (scalar @students == 1)) {
+																	<div
+																		title="<% $judge->{students}{$student_id}{"name"} %>"
+																		class="full nospace smaller hover limit "
+																	>
+																		<span class="half nowrap nospace padvertless leftalign">
+																			<% $judge->{students}{$student_id}{"name"} %>
+																		</span>
+
+																		<span class="half nowrap nospace padvertless rightalign">
+%																}
+
+%																	if ($judge->{speaker}{$student_id}) {
+																		<span class="half nospace rightalign">
+																			<% $judge->{speaker}{$student_id} %>
+																		</span>
+%																	} elsif ($judge->{point}{$student_id}) {
+																		<span class="half nospace rightalign">
+																			<% $judge->{point}{$student_id} %>
+																		</span>
+%																	}
+
+%																	if ($judge->{rank}{$student_id}) {
+																		<span class="half nospace rightalign">
+																			<% $judge->{rank}{$student_id} %>
+																		</span>
+%																	}
+
+%																unless ($notfirst++) {
+																	</div>
+%																}
+%															}
+%														}
+
+													</span>
+												</div>
+%											} else {
+
+												<div class="full nospace padvertless semibold leftalign
+													<% $judge->{winloss} eq "W"
+														? "greentext"
+														: $judge->{winloss} eq "L"
+															? "redtext"
+															: "bluetext"
+													%>"
+												>
+													<span class="halfspacer"></span>
+													<% $judge->{winloss} %>
+												</div>
+%											}
+
+%										} elsif ($entry->{event_type} eq "speech"
+%											|| $entry->{event_type} eq "congress"
+%										) {
+
+											<div class="full nospace smallish">
+												<span
+													class="third centeralign"
+													title="<% $judge->{"violation"}
+														? "Judge marked a rule/overtime violation"
+														: ""
+													%>">
+													<% $judge->{rank} %>
+													<% $judge->{violation} ? "V*" : "" %>
+												</span>
+
+												<span title="points" class="half rightalign">
+%													if ($judge->{point}) {
+														<% $judge->{point} %>
+%													}
+<%perl>
+													if ($judge->{"speeches"}) {
+														my $notfirst;
+														foreach my $speech (sort {$a <=> $b} keys %{$judge->{"speeches"}}) {
+															$m->print(", ") if $notfirst++;
+															$m->print($judge->{"speeches"}{$speech}{"point"});
+														}
+													}
+</%perl>
+												</span>
+											</div>
+
+%										} elsif ($entry->{event_type} eq "wudc") {
+
+%											my @students = keys %{$judge->{students}};
+
+											<div class="full nospace smallish">
+												<span class="third">
+													<% 4 - $judge->{rank} %> pts
+												</span>
+
+%												if (scalar @students > 1) {
+													<span class="twothirds">
+%													foreach my $student_id (@students) {
+														<div class="full nospace padvertless">
+															<span class="twothirds">
+																<% $judge->{students}{$student_id}{"name"} %>
+															</span>
+
+															<span class="third">
+																<% $judge->{point}{$student_id} %>
+															</span>
+														</div>
+%													}
+													</span>
+%												}
+											</div>
+%										}
+
+%									} elsif ($entry->{event_type} eq "congress" && $judge->{chair}) {
+
+										<div class="full nospace padvertless semibold greytext centeralign">
+											&nbsp;
+										</div>
+
+%									} elsif ($judge->{audited} && $entry->{"inactive"}) {
+
+										<div class="full nospace padvertless semibold greytext centeralign">
+											No Show
+										</div>
+
+<%perl>
+									} elsif ($judge->{audited}
+										&! ($entry->{event_type} eq "congress" && $judge->{chair})
+										&! ($entry->{mock_trial})
+									) {
+</%perl>
+										<div class="full nospace padvertless semibold redtext centeralign">
+											VOTED
+										</div>
+
+%									} elsif ($entry->{mock_trial}) {
+%									} elsif ($judge->{started}
+%										&& (not defined $tourn_settings{"mock_trial_registration"})
+%									) {
+
+										<div class="full nospace padvertless semibold greentext leftalign nowrap">
+											<span class="twofifths nospace">
+												Start
+											</span>
+											<span class="threefifths nospace">
+												<% $judge->{started} %>
+											</span>
+										</div>
+
+%									} else {
+
+										<div class="full nospace padvertless semibold bluetext">
+										</div>
+%									}
+%								}
+%								if ($entry->{mock_trial}) {
+									</span>
+									<span class="threefifths nospace centeralign">
+										<% $point_total %>
+									</span>
+%								}
+%								}
+
+							</td>
+
+							<td class="centeralign nospace">
+%								if ($section->{rfd} || ($section->{mock_trial} && $section->{post_secondary}) {
+									<a
+										class   = "fa fa-sm buttonwhite bluetext fa-file-text marno"
+										id      = "<% $section_id %>_button"
+										onClick = "showRFD(<% $section_id %>);"
+									></a>
+%								}
+							</td>
+						</tr>
+
+%						if ($section->{mock_trial} && $section->{post_secondary}) {
+							<tr
+								id="<% $section_id %>_rfd"
+								class="hidden odd bordertop borderbottom"
+							>
+								<td colspan="23" class="evenrow">
+									No Opp: <% $section->{'no_opponent_results'} %> <% $school_id %>
+									<br />
+									<& "/funclib/show_rubric.mas",
+										panel_id  => $section_id,
+										school_id => $school_id,
+										aggregate => 1,
+										no_opp    => $section->{'no_opponent_results'},
+									&>
+								</td>
+							</tr>
+<%perl>
+						} elsif ($section->{rfd}) {
+
+							my $notfirst;
+							my $counter = 1;
+
+							foreach my $judge_id (
+								sort {
+									$section->{judges}{$b}{"chair"} <=> $section->{judges}{$a}{"chair"}
+									|| $section->{judges}{$b}{"last"} cmp $section->{judges}{$a}{"last"}
+								} keys %{$section->{judges}}
+							) {
+
+								my $judge = $section->{judges}{$judge_id};
+
+								next unless (
+									$judge->{rfd}
+									|| $judge->{comments}
+									|| $judge->{'rubric'}
+									|| $judge->{speeches}
+								);
+
+								unless ($notfirst++) {
+									$m->print('<tr id="'.$section_id.'_rfd" class="hidden odd bordertop borderbottom">');
+									$m->print('<td colspan="23" class="evenrow">');
+								}
+</%perl>
+								<h6 class="centeralign padtop">
+%									if ($tourn_settings{'mock_trial_registration'}) {
+										Scorer <% $counter++ %>
+%									} else {
+										Feedback from <% $judge->{code}." ".$judge->{first}." ".$judge->{last} %>
+%									}
+								</h6>
+
+%								if ($judge->{rfd}) {
+									<p><div class="semibold bluetext full nospace padverless">RFD</div>
+										<% Tab::Utils::uncompress($judge->{rfd}) %>
+									</p>
+%								}
+
+%								if ($judge->{comments}) {
+									<p><div class="semibold bluetext full nospace padverless">Comments</div>
+										<% Tab::Utils::uncompress($judge->{comments}) %>
+									</p>
+%								}
+
+%								if ($judge->{rubric}) {
+									<& "/funclib/show_rubric.mas",
+										panel_id  => $section_id,
+										judge_id  => $judge_id,
+									&>
+%								}
+
+%								if ($judge->{"speeches"}) {
+
+									<div class="semibold bluetext full nospace padverless">
+										Speeches
+									</div>
+
+%									foreach my $speech (sort {$a <=> $b} keys %{$judge->{"speeches"}}) {
+
+										<div class="full ltborderbottom">
+											<span class="sixth semibold bluetext biggish">
+												Speech <% $speech %>
+											</span>
+											<span class="sixth semibold bluetext biggish">
+												<% $judge->{"speeches"}{$speech}{"point"} %> Points
+											</span>
+											<span class="sixth semibold orangetext biggish rightalign">
+												<% $judge->{"speeches"}{$speech}{"position"} == 1
+													? "FOR" : "AGAINST"
+												%>
+											</span>
+											<span class="half biggish">
+												<% $judge->{"speeches"}{$speech}{"topic"} %>
+											</span>
+										</div>
+
+										<div class="full ltborderbottom">
+											<% Tab::Utils::uncompress($judge->{speeches}{$speech}{"content"}) %>
+										</div>
+<%perl>
+									}
+								}
+							}
+
+							if ($notfirst) {
+								$m->print('</td></tr>');
+							}
+						}
+					}
+				}
+</%perl>
+			</tbody>
+		</table>
+
+%		unless ($tourn_settings{'mock_trial_registration'}) {
+
+			<& /funclib/tablesorter.mas,
+				table => $school_id."_judges"
+			&>
+
+			<span class="threequarters nospace martop">
+				<h5>Judges</h5>
+			</span>
+
+			<span
+				id    = "<% $school_id %>_judges_buttonarea"
+				class = "quarter rightalign"
+			></span>
+
+			<table
+				id    = "<% $school_id %>_judges"
+				class = "smallish"
+			>
+
+				<thead>
+					<tr class="yellowrow">
+
+						<th>
+							Judge
+						</th>
+
+						<th>
+							Event
+						</th>
+
+						<th>
+							Rnd
+						</th>
+
+						<th>
+							Start
+						</th>
+
+						<th>
+							Room
+						</th>
+
+						<th>
+							Entries
+						</th>
+
+						<th>
+							Results
+						</th>
+
+						<th>
+							Feedback
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+<%perl>
+				foreach my $judge_id (
+					sort {
+						$now{"judges"}{$a}{"judge_last"} cmp $now{"judges"}{$b}{"judge_last"}
+					} keys %{$now{"judges"}}
+				) {
+
+					my $judge = $now{"judges"}{$judge_id};
+
+					foreach my $section_id (
+						sort {
+							$judge->{"section"}{$a}{round_num}
+								<=>
+							$judge->{"section"}{$b}{round_num}
+						} keys %{$judge->{"section"}}
+					) {
+
+						my $section = $judge->{"section"}{$section_id};
+						my $status = $section->{status};
+
+						my $name_class;
+						my $row_class;
+
+						unless ($judge->{"all_named"}++) {
+							$name_class .= "all_name ";
+							$row_class  .= "all_row_first ";
+						}
+
+						unless ($judge->{$status."_named"}++) {
+							$name_class .= $status."_name ";
+							$row_class .= $status."_row_first";
+						}
+</%perl>
+						<tr class="timerows <% $row_class ? $row_class  : '' %>
+							<% $status %>_row <% $firstnot %>"
+						>
+
+							<td class="semibold bluetext">
+								<span class="full nospace semibold bluetext <% $name_class %> names">
+									<span class="hidden">
+										<% $judge->{"judge_first"} %> <% $judge->{"judge_last"} %>
+									</span>
+									<% $judge->{"judge_first"} %> <% $judge->{"judge_last"} %>
+								</span>
+							</td>
+
+							<td class="centeralign">
+								<% $section->{"event_abbr"} %>
+							</td>
+
+							<td class="centeralign">
+								<% $section->{round_name} %>
+								<% $section->{round_type} eq "elim" ? "<br />" : "" %>
+								<%
+									$section->{round_flighted} > 1
+									? "- Ft ".$section->{panel_flight}
+									: ""
+								%>
+							</td>
+
+							<td class="centeralign nowrap">
+								<% $section->{start_time} %>
+							</td>
+
+							<td>
+								<% $section->{room_name} %>
+							</td>
+
+							<td class="nospace">
+<%perl>
+								foreach my $entry_id (
+									sort {
+										$section->{entries}{$a}{side_id} <=> $section->{entries}{$b}{side_id}
+										|| $section->{entries}{$a}{order} <=> $section->{entries}{$b}{order}
+									} keys %{$section->{entries}}
+								) {
+
+									my $entry = $section->{entries}{$entry_id};
+
+									if ($section->{event_type} eq "debate" || $section->{event_type} eq "wsdc") {
+</%perl>
+										<div class="full nospace padvertless nowrap">
+											<span class="quarter nospace padleft">
+												<% $entry->{side_init} %>
+												<% $entry->{order}
+													? Lingua::EN::Numbers::Ordinate::ordinate($entry->{order})
+													: ""
+												%>
+											</span>
+											<span
+												class="seventenths nospace nowrap"
+												title="<% $entry->{name}." ".$entry->{school} %>"
+											><% $entry->{code} %></span>
+										</div>
+
+%									} elsif ($section->{event_type} eq "speech") {
+
+										<div class="full nospace padvertless">
+											<span class="quarter nospace padleft">
+												<% $entry->{order}
+													? Lingua::EN::Numbers::Ordinate::ordinate($entry->{order})
+													: ""
+												%>
+											</span>
+											<span class="seventenths nospace nowrap"
+												title="<% $entry->{name}." ".$entry->{school} %>"
+											>
+												<% $entry->{code} %>
+											</span>
+										</div>
+%									}
+%								}
+							</td>
+
+							<td class="nospace limithalf smallish">
+<%perl>
+								my $start_printed;
+								foreach my $entry_id (
+									sort {
+										$section->{entries}{$a}{side_id} <=> $section->{entries}{$b}{side_id}
+										|| $section->{entries}{$a}{order} <=> $section->{entries}{$b}{order}
+									} keys %{$section->{entries}}
+								) {
+
+									my $entry = $section->{entries}{$entry_id};
+
+									if ($entry->{point} || $entry->{rank} || $entry->{winloss}) {
+
+										if ($section->{event_type} eq "debate"
+											|| $section->{event_type} eq "wsdc"
+										) {
+
+											if ($entry->{point} || $entry->{rank} || $entry->{reply}) {
+
+												my @students = keys %{$entry->{students}};
+</%perl>
+												<div class="full nospace padvertmuchless
+													<% scalar @students > 1 ? "ltborderbottom" : "padvertless" %>"
+												>
+
+													<span class="fifth semibold nospace centeralign
+														<% $entry->{winloss} eq "W" ? "greentext" : "redtext" %>"
+													>
+														<% $entry->{winloss} %>
+													</span>
+
+													<span class="fourfifths nospace">
+%														if (scalar @students > 1) {
+%															foreach my $student_id (sort @students) {
+
+																<div
+																	title="<% $entry->{students}{$student_id}{"name"} %>"
+																	class="full nospace hover"
+																>
+
+																	<span class="half nowrap nospace padvertless">
+																		<% $entry->{students}{$student_id}{"name"} %>
+																	</span>
+
+																	<span class="threeeighths nospace rightalign">
+																		<% $entry->{point} ? $entry->{point}{$student_id} : "" %>
+																	</span>
+
+																	<span class="eighth nospace">
+																		<% $entry->{rank}{$student_id} %>
+																		<% $entry->{reply}{$student_id} %>
+																	</span>
+																</div>
+%															}
+%														} elsif (@students) {
+															<span class="half nospace">
+																<% $entry->{point}{$students[0]} %>
+															</span>
+
+															<span class="fourtenths nospace">
+																<% $entry->{rank}{$students[0]} %>
+															</span>
+%														}
+													</span>
+												</div>
+
+%											} else {
+
+												<div class="full nospace padvertless semibold leftalign padleft
+													<% $entry->{winloss} eq "W" ? "greentext" : "redtext" %>"
+												>
+													<% $entry->{winloss} %>
+												</div>
+%											}
+
+%										} elsif ($section->{event_type} eq "speech") {
+
+											<div class="full nospace padvertless">
+												<span class="sixth centeralign nospace">
+													<% $entry->{rank} %>
+												</span>
+
+												<span class="third rightalign nospace">
+													<% $entry->{point} %>
+												</span>
+											</div>
+
+%										} elsif ($section->{event_type} eq "wudc") {
+
+%											my @students = keys %{$entry->{students}};
+
+											<span class="third">
+												<% 4 - $entry->{rank} %>
+											</span>
+
+%											if (scalar @students > 1) {
+												<span class="twothirds">
+%												foreach my $student_id (@students) {
+													<div class="full nospace padvertless">
+														<span class="twothirds">
+															<% $entry->{students}{$student_id}{"name"} %>
+														</span>
+
+														<span class="third">
+															<% $entry->{point}{$student_id} %>
+														</span>
+													</div>
+%												}
+												</span>
+%											}
+%										}
+
+%									} elsif ($section->{audited} && $entry->{"inactive"}) {
+
+										<div class="full nospace padleft padvertless">
+											No Show
+										</div>
+
+%									} elsif ($section->{audited}) {
+
+										<div class="full nospace padvertless semibold redtext centeralign">
+											VOTED
+										</div>
+
+%									} elsif ($section->{started}) {
+										<div class="full nospace padvertless semibold greentext leftalign nowrap">
+											<span class="twofifths nospace">
+												Started
+											</span>
+											<span class="threefifths nospace">
+												<% $section->{started} %>
+											</span>
+										</div>
+%										last;
+%									} else {
+										<div class="full nospace padvertless semibold bluetext">
+										</div>
+%									}
+%								}
+
+								<% $start_printed %>
+
+							</td>
+
+							<td class="centeralign nospace">
+%								if ($section->{has_rfd}) {
+									<a
+										class   = "fa fa-sm buttonwhite bluetext fa-file-text marno"
+										id      = "<% $section_id %>_button"
+										onClick = "showRFD(<% $section_id %>);"
+									></a>
+%								}
+							</td>
+						</tr>
+
+%						if ($section->{has_rfd}) {
+
+							<tr id="<% $section_id %>_rfd" class="hidden odd bordertop borderbottom">
+
+								<td colspan="23">
+
+%									if ($section->{rfd}) {
+										<h6 class="centeralign">
+											RFD
+										</h6>
+
+										<p>
+											<% Tab::Utils::uncompress($section->{rfd}) %>
+										</p>
+%									}
+<%perl>
+									foreach my $entry_id (
+										sort {
+											$section->{entries}{$a}{side_id} <=> $section->{entries}{$b}{side_id}
+											|| $section->{entries}{$a}{order} <=> $section->{entries}{$b}{order}
+										} keys %{$section->{entries}}
+									) {
+
+										my $entry = $section->{entries}{$entry_id};
+										next unless $entry->{comments} || $entry->{speeches};
+</%perl>
+%										if ($entry->{comments}) {
+
+											<h6 class="centeralign">
+												Feedback for <% $entry->{code}." ".$entry->{first}." ".$entry->{last} %>
+											</h6>
+
+											<p><div class="semibold bluetext full nospace padverless">Comments</div>
+												<% Tab::Utils::uncompress($entry->{comments}) %>
+											</p>
+%										}
+
+%										if ($entry->{speeches}) {
+
+											<div class="semibold bluetext full nospace padverless">
+												Speeches for <% $entry->{code} %>
+												<% $entry->{code} ne $entry->{name} ? $entry->{name} : "" %>
+											</div>
+
+%											foreach my $speech (sort {$a <=> $b} keys %{$entry->{"speeches"}}) {
+
+												<div class="full ltborderbottom">
+													<span class="sixth semibold bluetext biggish">
+														Speech <% $speech %>
+													</span>
+													<span class="sixth semibold bluetext biggish">
+														<% $entry->{"speeches"}{$speech}{"point"} %> Points
+													</span>
+													<span class="sixth semibold orangetext biggish rightalign">
+														<% $entry->{"speeches"}{$speech}{"position"} == 1 ? "FOR" : "AGAINST" %>
+													</span>
+													<span class="half biggish">
+														<% $entry->{"speeches"}{$speech}{"topic"} %>
+													</span>
+												</div>
+
+												<div class="full ltborderbottom">
+													<% Tab::Utils::uncompress($entry->{speeches}{$speech}{"content"}) %>
+												</div>
+%											}
+%										}
+%									}
+
+								</td>
+							</tr>
+<%perl>
+						}
+					}
+				}
+</%perl>
+			</tbody>
+		</table>
+
+%		}
+
+%		if (keys %jpools) {
+
+			<& /funclib/tablesorter.mas,
+				table => $school_id."_jpools"
+			&>
+
+			<span class="threequarters nospace">
+				<h5>Judge Pools</h5>
+			</span>
+
+			<span
+				id    = "<% $school_id %>_jpools_buttonarea"
+				class = "quarter rightalign">
+			</span>
+
+			<table id="<% $school_id %>_jpools">
+
+				<thead>
+					<tr class="yellowrow">
+						<th>
+							Judge Name
+						</th>
+
+						<th>
+							Judge Code
+						</th>
+
+						<th>
+							Pool Name
+						</th>
+
+						<th>
+						</th>
+					</tr>
+				</thead>
+
+				<tbody>
+%					foreach my $judge_id (sort keys %jpools) {
+%						foreach my $jpool_id (sort keys %{$jpools{$judge_id}}) {
+							<tr>
+								<td>
+									<% $jpools{$judge_id}{$jpool_id}{"judge_name"} %>
+								</td>
+
+								<td>
+									<% $jpools{$judge_id}{$jpool_id}{"judge_code"} %>
+								</td>
+
+								<td>
+									<span class="padvertless full marno">
+									<% $jpools{$judge_id}{$jpool_id}{"name"} %>
+									</span>
+								</td>
+
+								<td>
+									<% $jpools{$judge_id}{$jpool_id}{"message"} %>
+								</td>
+							</tr>
+%						}
+%					}
+				</tbody>
+			</table>
+%		}
+
+	</div>
+
