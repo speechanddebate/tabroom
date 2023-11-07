@@ -110,6 +110,7 @@ RUN a2ensite tabroom.com
 
 COPY ./doc/docker/mpm_prefork.conf /etc/apache2/mods-available
 RUN /usr/sbin/a2dismod mpm_prefork
+RUN /usr/sbin/a2dismod mpm_event
 RUN /usr/sbin/a2enmod mpm_prefork
 
 EXPOSE 80
