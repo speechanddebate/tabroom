@@ -1,4 +1,4 @@
-FROM ubuntu:23.04
+FROM ubuntu:22.04
 
 RUN /usr/bin/apt update
 RUN /usr/bin/apt -y -q install apache2 \
@@ -104,6 +104,7 @@ RUN updmap-sys --force --enable Map=bera.map
 RUN /usr/sbin/a2enmod apreq2
 RUN /usr/sbin/a2enmod proxy
 RUN /usr/sbin/a2enmod proxy_http
+RUN /usr/sbin/a2enmod lbmethod_byrequests
 
 COPY ./doc/docker/tabroom.com.conf /etc/apache2/sites-available/tabroom.com.conf
 RUN a2ensite tabroom.com
