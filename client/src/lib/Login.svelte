@@ -1,78 +1,74 @@
+<span class="login">
+	<a href="#login-box" class="login-window">Login</a>
+	<div id="login-box" class="login-popup">
 
+		<div class="padbottomless marbottomless">
+			<h6 class="fivesixths semibold leftalign">
+				<span class="quarterspacer"></span>
+				Login to Tabroom
+			</h6>
 
-	<span class="login">
-		<a href="#login-box" class="login-window">Login</a>
-		<div id="login-box" class="login-popup">
-
-			<div class="padbottomless marbottomless">
-				<h6 class="fivesixths semibold leftalign">
-					<span class="quarterspacer"></span>
-					Login to Tabroom
-				</h6>
-
-				<a href="#top" class="sixth close fa fa-times-circle fa-lg bluetext">
-				</a>
-			</div>
-
-			<form
-				name   = "login"
-				action = "/user/login/login_save.mhtml"
-				method = "post"
-				class  = "signin"
-			>
-					<div class="full centeralign">
-						<span class="ninetenths nospace">
-							<input
-								type         = "text"
-								id           = "username"
-								name         = "username"
-								value        = ""
-								autocomplete = "on"
-								placeholder  = "Email address"
-							>
-						</span>
-					</div>
-
-					<div class="full centeralign">
-						<span class="ninetenths nospace">
-							<input
-								id          = "password"
-								name        = "password"
-								type        = "password"
-								value       = ""
-								placeholder = "Password"
-							>
-						</span>
-					</div>
-
-					<div class="full centeralign">
-						<span class="ninetenths nospace">
-							<input
-								type  = "submit"
-								value = "Login"
-								class = "full"
-							>
-						</span>
-					</div>
-			</form>
-
-			<a
-				class = "redtext italic martopmore rightalign full martopmore link-underline biggish"
-				href  = "/user/login/forgot.mhtml"
-
-			>Forgot your Password?</a>
+			<a href="#top" class="sixth close fa fa-times-circle fa-lg bluetext">
+			</a>
 		</div>
-	</span>
 
-	<span class="signup">
-		<a tabindex="-1" href="/user/login/new_user.mhtml">
-			Sign Up
-		</a>
-	</span>
+		<form
+			name   = "login"
+			action = "/user/login/login_save.mhtml"
+			method = "post"
+			class  = "signin"
+		>
+				<div class="full centeralign">
+					<span class="ninetenths nospace">
+						<input
+							type         = "text"
+							id           = "username"
+							name         = "username"
+							value        = ""
+							autocomplete = "on"
+							placeholder  = "Email address"
+						>
+					</span>
+				</div>
 
+				<div class="full centeralign">
+					<span class="ninetenths nospace">
+						<input
+							id          = "password"
+							name        = "password"
+							type        = "password"
+							value       = ""
+							placeholder = "Password"
+						>
+					</span>
+				</div>
+
+				<div class="full centeralign">
+					<span class="ninetenths nospace">
+						<input
+							type  = "submit"
+							value = "Login"
+							class = "full"
+						>
+					</span>
+				</div>
+		</form>
+
+		<a
+			class = "redtext italic martopmore rightalign full martopmore link-underline biggish"
+			href  = "/user/login/forgot.mhtml"
+
+		>Forgot your Password?</a>
+	</div>
+</span>
+
+<span class="signup">
+	<a tabindex="-1" href="/user/login/new_user.mhtml">
+		Sign Up
+	</a>
+</span>
 
 <style>
-	
 	.login-popup {
 		display                   : none;
 		position                  : absolute;
@@ -136,6 +132,4 @@
 		margin-top       : 8px;
 		text-align       : right;
 	}
-
-
 </style>

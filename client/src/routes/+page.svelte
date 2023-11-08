@@ -6,7 +6,15 @@
     // export let data;
     // const tourns = data.tourns;
 
-    let tournList: Array<Object> = [];
+	interface Tourn {
+		start: string,
+		name: string,
+		location: string,
+		state: string,
+		webname: string
+	};
+
+    let tournList: Tourn[];
     tourns.subscribe((value: any) => {
 		tournList = value;
 	});
@@ -35,14 +43,14 @@
 	];
 </script>
 
-	<div id="main">
-		<h1 style='text-align: left;'>Upcoming Tournaments</h1>
-		<Table rows="{tournList}" columns="{columns}" />
-	</div>
+<div id="main">
+	<h1 style='text-align: left;'>Upcoming Tournaments</h1>
+	<Table rows="{tournList}" columns="{columns}" />
+</div>
 
-	<div id="menu">
-		<div class="sidenote">
-			<h4 style='text-align: left;'>Actions</h4>
-			<Sidebar />
-		</div>
+<div id="menu">
+	<div class="sidenote">
+		<h4 style='text-align: left;'>Actions</h4>
+		<Sidebar />
 	</div>
+</div>

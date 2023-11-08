@@ -6,8 +6,8 @@
         header: string;
         key: string;
     }
-    export let rows: Array<Row>;
-    export let columns: Array<Column>;
+    export let rows: Row[];
+    export let columns: Column[];
 </script>
 
 <table id="table">
