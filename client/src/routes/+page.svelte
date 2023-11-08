@@ -7,11 +7,12 @@
     // const tourns = data.tourns;
 
 	interface Tourn {
-		start: string,
-		name: string,
-		location: string,
-		state: string,
-		webname: string
+		start    : string,
+		end      : string,
+		name     : string,
+		location : string,
+		state    : string,
+		webname  : string
 	};
 
     let tournList: Tourn[];
@@ -19,26 +20,35 @@
 		tournList = value;
 	});
 
-	let columns = [
+	interface Columns {
+		header : string,
+		key    : string,
+		hover? : string,
+		class? : string,
+		url?   : string,
+	};
+
+	let columns: Columns[] = [
 		{ 
-			header : 'Start Date',
-			key    : 'start',
+			header : 'Dates',
+			key    : 'dates',
+			class  : 'semibold',
 		},
 		{
 			header : 'Name',
-			key    : 'name'
+			key    : 'name',
+			url    : 'url'
 		},
 		{
-			header : 'City',
-			key    : 'location'
+			header : 'Location',
+			key    : 'location',
+			hover  : 'City or Platform',
 		},
 		{
-			header : 'State',
-			key    : 'state'
-		},
-		{
-			header : 'Webname',
-			key    : 'webname'
+			header : 'ST/TZ',
+			key    : 'state',
+			class  : 'center',
+			hover  : 'State/Country for in-person, home timezone for online',
 		}
 	];
 </script>

@@ -2,10 +2,10 @@
     import { tourns } from './stores';
     import config from '../config';
     const getTourns = async (e: Event) => {
-        const target = e.target as HTMLSelectElement;
-        const response = await fetch(`${config.API_URL}/invite/upcoming?state=${target.value}`);
-        const data = await response.json();
-        tourns.update( () => data );
+    	const target = e.target as HTMLSelectElement;
+    	const response = await fetch(`${config.API_URL}/invite/upcoming?state=${target.value}`);
+		const data = await response.json();
+		tourns.update( () => data );
     }
 </script>
 
