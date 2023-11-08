@@ -1,10 +1,9 @@
 import { tourns } from './stores';
-import config from '../config';
 
 /** @type {import('./$types').PageLoad} */
 export const load = async () => {
 
-    const response = await fetch(`${config.API_URL}/invite/upcoming`);
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/invite/upcoming`);
     const rawData = await response.json();
 
 	interface Tourn {

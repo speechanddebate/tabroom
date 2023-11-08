@@ -1,4 +1,5 @@
 <script lang="ts">
+    import AdCarousel from '$lib/AdCarousel.svelte';
 	import Table from '$lib/Table.svelte';
 	import Sidebar from './Sidebar.svelte';
 
@@ -51,9 +52,11 @@
 			hover  : 'State/Country for in-person, home timezone for online',
 		}
 	];
+
 </script>
 
 <div id="main">
+	<AdCarousel />
 	<h1 style='text-align: left;'>Upcoming Tournaments</h1>
 	<Table rows="{tournList}" columns="{columns}" />
 </div>
