@@ -117,7 +117,7 @@ RUN /usr/sbin/a2enmod mpm_prefork
 RUN mkdir -p /var/log/tabroom
 RUN chown syslog:adm /var/log/tabroom
 COPY ./doc/docker/rsyslog.conf /etc/rsyslog.d/90-tabroom.conf
-RUN systemctl restart rsyslog
+RUN killall -HUP /usr/sbin/rsyslogd
 
 EXPOSE 80
 CMD ["/usr/sbin/apache2ctl", "-D", "FOREGROUND"]
