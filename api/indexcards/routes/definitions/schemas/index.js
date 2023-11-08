@@ -13,6 +13,7 @@ import CaselistLink from './CaselistLink';
 import Share from './Share';
 import Search from './Search';
 import Invite from './Invite';
+import Ad from './Ad';
 
 export default {
 	Err,
@@ -30,4 +31,5 @@ export default {
 	Share,
 	Search,
 	Invite,
+	Ad,
 };

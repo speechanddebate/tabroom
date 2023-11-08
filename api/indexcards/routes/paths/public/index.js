@@ -4,6 +4,7 @@
 import { getInvite, getRounds } from '../../../controllers/public/invite/tournInvite';
 import { futureTourns } from '../../../controllers/public/invite/tournList';
 import { searchTourns, searchCircuitTourns } from '../../../controllers/public/search';
+import { getAds } from '../../../controllers/public/ads';
 
 export default [
 	{ path: '/invite/{webname}'                                     , module : getInvite }           ,
@@ -13,4 +14,5 @@ export default [
 	{ path: '/invite/upcoming/:circuit'                             , module : futureTourns }        ,
 	{ path: '/public/search/:time/:searchString/circuit/:circuitId' , module : searchCircuitTourns } ,
 	{ path: '/public/search/:time/:searchString'                    , module : searchTourns }        ,
+	{ path: '/public/ads'                                           , module : getAds }              ,
 ];
