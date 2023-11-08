@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Login from '$lib/Login.svelte';
+	import SearchBar from '$lib/SearchBar.svelte';
 </script>
 
 <div id="header">
@@ -17,6 +18,7 @@
 
 	<span id="toprow">
 		<Login />
+		<SearchBar />
 	</span>
 </div>
 
