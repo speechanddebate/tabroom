@@ -5,7 +5,6 @@ RUN /usr/bin/apt -y -q install apache2 \
 	apache2-utils \
 	bzip2 \
 	rsync \
-	rsyslog \
 	cpanminus \
 	libapreq2-3 \
 	libapache2-mod-apreq2 \
@@ -114,10 +113,10 @@ RUN /usr/sbin/a2dismod mpm_prefork
 RUN /usr/sbin/a2dismod mpm_event
 RUN /usr/sbin/a2enmod mpm_prefork
 
-RUN mkdir -p /var/log/tabroom
-RUN chown syslog:adm /var/log/tabroom
-COPY ./doc/docker/rsyslog.conf /etc/rsyslog.d/90-tabroom.conf
-RUN /usr/sbin/rsyslogd -n -iNONE
+#RUN mkdir -p /var/log/tabroom
+#RUN chown syslog:adm /var/log/tabroom
+#COPY ./doc/docker/rsyslog.conf /etc/rsyslog.d/90-tabroom.conf
+#RUN /usr/sbin/rsyslogd -n -iNONE
 
 EXPOSE 80
 CMD ["/usr/sbin/apache2ctl", "-D", "FOREGROUND"]
