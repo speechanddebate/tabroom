@@ -1,7 +1,8 @@
 FROM ubuntu:22.04
 
 RUN /usr/bin/apt update
-RUN /usr/bin/apt -y -q install apache2 \
+RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC /usr/bin/apt -y -q install tzdata
+RUN DEBIAN_FRONTEND=noninteractive /usr/bin/apt -y -q install apache2 \
 	apache2-utils \
 	bzip2 \
 	rsync \
