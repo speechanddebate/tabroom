@@ -3,7 +3,7 @@
 // }
 
 const config = {
-    API_URL: process.env.API_URL || 'http://localhost:10010/v1',
+    API_URL: process.env.API_URL || 'http://local.tabroom.com/v1',
 };
 
 const env = process.env.NODE_ENV || 'development';
