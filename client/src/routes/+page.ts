@@ -15,6 +15,7 @@ export const load = async () => {
 		regStatus : string,
 		location  : string,
 		tz        : string,
+		tzHover   : string,
 		start     : Date,
 		end       : Date,
 		reg_start : Date,
@@ -24,9 +25,9 @@ export const load = async () => {
 	const data = rawData.flatMap( (tourn: Tourn) => {
 
 		if (tourn.webname) {
-			tourn.url = `https://www.tabroom.com/t/${tourn.webname}`;
+			tourn.url = `${import.meta.env.VITE_WEB_URL}/t/${tourn.webname}`;
 		} else {
-			tourn.url = `https://www.tabroom.com/tid/${tourn.id}`;
+			tourn.url = `${import.meta.env.VITE_WEB_URL}/tid/${tourn.id}`;
 		}
 
 		tourn.start = new Date(tourn.start);
@@ -42,6 +43,8 @@ export const load = async () => {
 			tourn.location.toLowerCase() === 'online'
 			|| tourn.location.toLowerCase() === 'nsda campus'
 		) {
+
+			tourn.tzHover = tourn.tz;
 
 			const tz = new Date().toLocaleDateString('en-US', {
 				timeZoneName: 'short',

@@ -4,8 +4,6 @@
 	import Sidebar from './Sidebar.svelte';
 
     import { tourns } from './stores';
-    // export let data;
-    // const tourns = data.tourns;
 
 	interface Tourn {
 		start    : string,
@@ -22,18 +20,18 @@
 	});
 
 	interface Columns {
-		header : string,
-		key    : string,
-		hover? : string,
-		class? : string,
-		url?   : string,
+		header    : string,
+		key       : string,
+		hover?    : string,
+		hoverkey? : string,
+		class?    : string,
+		url?      : string,
 	};
 
 	let columns: Columns[] = [
 		{ 
 			header : 'Dates',
-			key    : 'dates',
-			class  : 'semibold',
+			key    : 'dates'
 		},
 		{
 			header : 'Name',
@@ -41,16 +39,21 @@
 			url    : 'url'
 		},
 		{
-			header : 'Location',
+			header : 'City/Platform',
 			key    : 'location',
-			hover  : 'City or Platform',
+			hover  : 'City or Online Platform',
 		},
 		{
-			header : 'ST/TZ',
-			key    : 'state',
-			class  : 'center',
-			hover  : 'State/Country for in-person, home timezone for online',
-		}
+			header   : 'ST/TZ',
+			key      : 'state',
+			class    : 'center',
+			hover    : 'State/Country for in-person, home timezone for online',
+			hoverkey : 'tzHover',
+		},
+		{ 
+			header : 'Judge Signup',
+			key    : 'signup'
+		},
 	];
 
 </script>

@@ -1,14 +1,16 @@
 <script lang="ts">
     interface Row {
-        [key: string]: any;
-    }
+        [key: string]: any,
+    };
     interface Column {
-        header : string;
-		hover  : string;
-        key    : string;
-		url?   : string;
-		class? : string;
-    }
+        header   : string,
+		hover    : string,
+		hoverkey : string,
+        key      : string,
+		url?     : string,
+		class?   : string,
+    };
+
     export let rows: Row[];
     export let columns: Column[];
 </script>
@@ -28,13 +30,16 @@
             <tr class='table-data-row'>
                 {#each columns as c}
 					{#if c.url}
-						<td class={c.class}>
-							<a href={r[c.url]}>
+						<td class="{c.class || ""} nospace">
+							<a href={r[c.url]} class="full">
 								{r[c.key]}
 							</a>
 						</td>
 					{:else}
-						<td class={c.class}>
+						<td 
+							class="{c.class || ""} {r[c.hoverkey] ? 'hover' : ''}"
+							title={r[c.hoverkey] || "" }
+						>
 							{r[c.key] || ''}
 						</td>
 					{/if}
@@ -60,12 +65,13 @@
 	}
 
 	.table-header-row th {
-		padding-left   : 4px;
-		padding-right  : 4px;
-		padding-top    : 4px;
-		padding-bottom : 4px;
+    	padding        : 4px;
+    	padding-left   : 8px;
 		margin         : 0;
-		font-size      : 80%;
+    	font-size      : 11px;
+		line-height    : 14px;
+		vertical-align : middle;
+		font-weight     : 600;
 	}
 
 	.semibold {
