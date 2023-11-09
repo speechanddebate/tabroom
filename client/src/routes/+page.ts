@@ -19,7 +19,7 @@ export const load = async () => {
 		end       : Date,
 		reg_start : Date,
 		reg_end   : Date,
-	};
+	}
 
 	const data = rawData.flatMap( (tourn: Tourn) => {
 

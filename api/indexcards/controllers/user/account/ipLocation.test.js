@@ -1,6 +1,27 @@
 import request from 'supertest';
 import { assert } from 'chai';
+import { vi } from 'vitest';
 import server from '../../../../app';
+
+vi.mock('@maxmind/geoip2-node', () => ({
+	Reader: {
+		open: vi.fn().mockResolvedValue({
+			city: vi.fn().mockResolvedValue({
+				country: { names: { en: 'Mock Country' }, isoCode: 'MC' },
+				continent: { names: { en: 'Mock Continent' }, isoCode: 'MC' },
+				city: { names: { en: 'Mock City' } },
+				registeredCountry: { isInEuropeanUnion: false },
+				location: { latitude: 0, longitude: 0, timeZone: 'Mock/TimeZone' },
+				postal: { code: 'M0C K0D' },
+				subdivisions: [{ isoCode: 'MC' }],
+			}),
+			isp: vi.fn().mockResolvedValue({
+				isp: 'Mock ISP',
+				organization: 'Mock Organization',
+			}),
+		}),
+	},
+}));
 
 describe('IP Location Results', () => {
 	it('Returns correct location data', async () => {
@@ -14,13 +35,13 @@ describe('IP Location Results', () => {
 
 		assert.equal(
 			res.body.country,
-			'Australia',
-			'Location is in Oz as it should be'
+			'Mock Country',
+			'Correct location'
 		);
 
 		assert.isFalse(
 			res.body.isEU,
-			'Australia may be in Eurovision but it is not in the EU.  But God if it joined? That would SERIOUSLY piss off the Brits.  For it'
+			'Correct EU status'
 		);
 	});
 });
