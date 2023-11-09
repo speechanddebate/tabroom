@@ -28,7 +28,7 @@ export const load = async ({ fetch} ) => {
 		in_person    : string,
 		hybrid       : string,
 		registration : string,
-	};
+	}
 
 	const data = rawData.flatMap( (tourn: Tourn) => {
 
