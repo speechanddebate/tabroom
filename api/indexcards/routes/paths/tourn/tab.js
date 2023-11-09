@@ -4,7 +4,7 @@
 // Router controllers
 import { attendance, schematStatus, eventDashboard, eventStatus, sideCounts } from '../../../controllers/tourn/tab/status.js';
 import { changeAccess, changeEventAccess } from '../../../controllers/tourn/setup/access.js';
-//import { eventWins, entryWins } from '../../../controllers/tourn/tab/wins.js';
+// import { eventWins, entryWins } from '../../../controllers/tourn/tab/wins.js';
 import { natsJudgePool } from '../../../controllers/tourn/tab/judgePools.js';
 
 export default [
