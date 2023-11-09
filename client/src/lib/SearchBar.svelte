@@ -10,7 +10,7 @@
 		location: string,
 		state: string,
 		webname: string
-	};
+	}
 
     let searchResults: Results;
     let resultsVisible = false;

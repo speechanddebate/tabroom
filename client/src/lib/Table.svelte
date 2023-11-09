@@ -1,5 +1,6 @@
 <script lang="ts">
     interface Row {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         [key: string]: any;
     }
     interface Column {

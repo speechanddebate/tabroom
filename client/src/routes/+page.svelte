@@ -4,8 +4,6 @@
 	import Sidebar from './Sidebar.svelte';
 
     import { tourns } from './stores';
-    // export let data;
-    // const tourns = data.tourns;
 
 	interface Tourn {
 		start: string,
@@ -13,9 +11,10 @@
 		location: string,
 		state: string,
 		webname: string
-	};
+	}
 
     let tournList: Tourn[];
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
     tourns.subscribe((value: any) => {
 		tournList = value;
 	});
