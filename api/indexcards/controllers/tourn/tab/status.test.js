@@ -33,52 +33,52 @@ describe('Status Board', () => {
 		assert.isObject(res.body, 'Response is an object');
 
 		assert.equal(
-			res.body[10][37].started_by,
+			res.body.person[10][37].started_by,
 			'Chris Palmer',
 			'Judge Person 10 marked started by an admin');
 
 		assert.equal(
-			res.body[10][37].tag,
+			res.body.person[10][37].tag,
 			'present',
 			'Judge Person 10 marked present by an admin');
 
 		assert.equal(
-			res.body[11][6].tag,
+			res.body.person[11][6].tag,
 			'present',
 			'Entry Person 11 present');
 
 		assert.equal(
-			res.body[12][6].tag,
+			res.body.person[12][6].tag,
 			'present',
 			'Entry Person 12 present');
 
 		assert.equal(
-			res.body[14][37].tag,
+			res.body.person[14][37].tag,
 			'present',
 			'Entry Person 14 present');
 
 		assert.equal(
-			res.body[15][37].tag,
+			res.body.person[15][37].tag,
 			'present',
 			'Entry Person 15 present');
 
 		assert.equal(
-			res.body[16][27].tag,
+			res.body.person[16][27].tag,
 			'absent',
 			'Entry Person 16 absent');
 
 		assert.equal(
-			res.body[17][27].tag,
+			res.body.person[17][27].tag,
 			'absent',
 			'Entry Person 17 absent');
 
 		assert.equal(
-			res.body[13][27].tag,
+			res.body.person[13][27].tag,
 			'absent',
 			'Judge Person 13 absent');
 
 		assert.notProperty(
-			res.body[10],
+			res.body.person[10],
 			'6',
 			'Judge 10 not present in section 6');
 	});
@@ -136,24 +136,24 @@ describe('Status Board', () => {
 		assert.isObject(newResponse.body, 'Response is indeed an object');
 
 		assert.equal(
-			newResponse.body[16][27].tag,
+			newResponse.body.person[16][27].tag,
 			'present',
 			'After the change, Entry Person 16 present');
 
 		assert.equal(
-			newResponse.body[15][37].tag,
+			newResponse.body.person[15][37].tag,
 			'absent',
 			'After the change, Entry Person 17 absent');
 
 		assert.isUndefined(
-			newResponse.body[10][37].started_by,
+			newResponse.body.person[10][37].started_by,
 			'After the change, Judge Person 10 not marked started');
 
 	});
 });
 
 describe('Event Dashboard', () => {
-	it('Return a correct JSON status object', async () => {
+	it('Return a correct JSON status object for the event dashboard', async () => {
 		const res = await request(server)
 			.get(`/v1/tourn/1/tab/dashboard`)
 			.set('Accept', 'application/json')
