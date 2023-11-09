@@ -6,7 +6,6 @@ export const natsJudgePool = {
 		const tourn = await db.summon(db.tourn, req.params.tourn_id);
 		const now = new Date();
 
-
 		const weights = {
 			strikes    : 10000000,
 			states     : 1000000,
