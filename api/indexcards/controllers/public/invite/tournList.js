@@ -65,16 +65,16 @@ export const futureTourns = {
 				) as online,
 
 				( SELECT
-					count(inp.id)
-					from event inp
-					where inp.tourn = tourn.id
+					count(in_person.id)
+					from event in_person
+					where in_person.tourn = tourn.id
 					and not exists (
 						select esno.id
 						from event_setting esno
-						where esno.event = inp.id
+						where esno.event = in_person.id
 						and esno.tag = 'online_mode'
 					)
-				) as inp,
+				) as in_person,
 
 				( SELECT
 					count(hybrid.id)
@@ -158,16 +158,16 @@ export const futureTourns = {
 				) as online,
 
 				( SELECT
-					count(inp.id)
-					from event inp
-					where inp.tourn = tourn.id
+					count(in_person.id)
+					from event in_person
+					where in_person.tourn = tourn.id
 					and not exists (
 						select esno.id
 						from event_setting esno
-						where esno.event = inp.id
+						where esno.event = in_person.id
 						and esno.tag = 'online_mode'
 					)
-				) as inp,
+				) as in_person,
 
 				( SELECT
 					count(hybrid.id)

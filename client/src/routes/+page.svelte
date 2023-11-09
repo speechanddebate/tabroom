@@ -1,11 +1,12 @@
 <script lang="ts">
     import AdCarousel from '$lib/AdCarousel.svelte';
-	import Table from '$lib/Table.svelte';
+	import DataTable from '$lib/DataTable.svelte';
 	import Sidebar from './Sidebar.svelte';
+	import type { PageData } from './$types';
 
     import { tourns } from './stores';
 
-	import type { Column } from '../types/Column';
+	export let data:PageData;
 
 	interface Tourn {
 		start    : string,
@@ -17,45 +18,19 @@
 	}
 
     let tournList: Tourn[];
+
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
     tourns.subscribe((value: any) => {
 		tournList = value;
 	});
 
-	let columns: Column[] = [
-		{
-			header : 'Dates',
-			key    : 'dates'
-		},
-		{
-			header : 'Name',
-			key    : 'name',
-			url    : 'url'
-		},
-		{
-			header : 'City/Platform',
-			key    : 'location',
-			hover  : 'City or Online Platform',
-		},
-		{
-			header   : 'ST/TZ',
-			key      : 'state',
-			class    : 'center',
-			hover    : 'State/Country for in-person, home timezone for online',
-			hoverkey : 'tzHover',
-		},
-		{
-			header : 'Judge Signup',
-			key    : 'signup'
-		},
-	];
 
 </script>
 
 <div id="main">
 	<AdCarousel />
 	<h1 style='text-align: left;'>Upcoming Tournaments</h1>
-	<Table rows="{tournList}" columns="{columns}" />
+	<DataTable data="{tournList}" columns="{data.columns}" />
 </div>
 
 <div id="menu">
