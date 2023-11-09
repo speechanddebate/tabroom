@@ -5,6 +5,8 @@
 
     import { tourns } from './stores';
 
+	import type { Column } from '../types/Column';
+
 	interface Tourn {
 		start    : string,
 		end      : string,
@@ -12,7 +14,7 @@
 		location : string,
 		state    : string,
 		webname  : string
-	};
+	}
 
     let tournList: Tourn[];
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,16 +22,7 @@
 		tournList = value;
 	});
 
-	interface Columns {
-		header    : string,
-		key       : string,
-		hover?    : string,
-		hoverkey? : string,
-		class?    : string,
-		url?      : string,
-	};
-
-	let columns: Columns[] = [
+	let columns: Column[] = [
 		{
 			header : 'Dates',
 			key    : 'dates'

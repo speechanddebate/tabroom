@@ -1,21 +1,9 @@
 <script lang="ts">
+	import type { Column } from '../types/Column';
     interface Row {
-<<<<<<< HEAD
-        [key: string]: any,
-    };
-=======
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         [key: string]: any;
     }
->>>>>>> f6df0c24f4700ba10e92e6d8cc58502c8cce495e
-    interface Column {
-        header   : string,
-		hover    : string,
-		hoverkey : string,
-        key      : string,
-		url?     : string,
-		class?   : string,
-    };
 
     export let rows: Row[];
     export let columns: Column[];
@@ -43,8 +31,8 @@
 						</td>
 					{:else}
 						<td 
-							class="{c.class || ""} {r[c.hoverkey] ? 'hover' : ''}"
-							title={r[c.hoverkey] || "" }
+							class="{c.class || ''} {c.hoverkey ? r[c.hoverkey] : 'hover'}"
+							title={c.hoverkey ? r[c.hoverkey] : '' }
 						>
 							{r[c.key] || ''}
 						</td>
@@ -71,10 +59,10 @@
 	}
 
 	.table-header-row th {
-    	padding        : 4px;
-    	padding-left   : 8px;
+		padding        : 4px;
+		padding-left   : 8px;
 		margin         : 0;
-    	font-size      : 11px;
+		font-size      : 11px;
 		line-height    : 14px;
 		vertical-align : middle;
 		font-weight     : 600;
