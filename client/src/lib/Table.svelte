@@ -1,7 +1,13 @@
 <script lang="ts">
     interface Row {
+<<<<<<< HEAD
         [key: string]: any,
     };
+=======
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        [key: string]: any;
+    }
+>>>>>>> f6df0c24f4700ba10e92e6d8cc58502c8cce495e
     interface Column {
         header   : string,
 		hover    : string,

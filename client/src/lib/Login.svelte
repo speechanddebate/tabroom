@@ -97,15 +97,6 @@
 		font-size    : 1.4em;
 	}
 
-	span.pokemon {
-		min-width           : 150px;
-		min-height          : 25px;
-		text-align          : center;
-		background          : url("/lib/images/pokemon.png") no-repeat top/contain;
-		background-size     : 100%;
-		background-position : 0 -10px;
-	}
-
 	input[type="text"],
 	input[type="password"] {
 		border-bottom : 1px solid var(--dark-gray);

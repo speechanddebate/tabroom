@@ -15,6 +15,7 @@
 	};
 
     let tournList: Tourn[];
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
     tourns.subscribe((value: any) => {
 		tournList = value;
 	});
@@ -29,7 +30,7 @@
 	};
 
 	let columns: Columns[] = [
-		{ 
+		{
 			header : 'Dates',
 			key    : 'dates'
 		},
@@ -50,7 +51,7 @@
 			hover    : 'State/Country for in-person, home timezone for online',
 			hoverkey : 'tzHover',
 		},
-		{ 
+		{
 			header : 'Judge Signup',
 			key    : 'signup'
 		},
