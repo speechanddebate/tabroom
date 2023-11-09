@@ -1,6 +1,5 @@
 import { tourns } from './stores';
 
-/** @type {import('./$types').PageLoad} */
 export const load = async () => {
 
     const response = await fetch(`${import.meta.env.VITE_API_URL}/invite/upcoming`);
