@@ -25,11 +25,11 @@
 	<div bind:this={tableComponent}></div>
   
 	<svelte:head>
-		<script 
+<!--	<script 
 			type="text/javascript" 
 			src="https://oss.sheetjs.com/sheetjs/xlsx.full.min.js"
 		></script>
-
+-->
 		<link
 			href="https://unpkg.com/tabulator-tables@4.9.1/dist/css/tabulator.min.css" 
 			rel="stylesheet"
