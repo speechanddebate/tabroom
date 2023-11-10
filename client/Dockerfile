@@ -3,7 +3,7 @@ WORKDIR /app
 COPY ./ ./
 
 ENV NODE_ENV=production
-RUN npm i
+RUN npm ci
 RUN npm run build
 
 CMD node -r dotenv/config build/index.js
