@@ -31,8 +31,8 @@
 		></script>
 -->
 		<link
-			href="https://unpkg.com/tabulator-tables@4.9.1/dist/css/tabulator.min.css" 
+			href="/css/tabulator.min.css" 
 			rel="stylesheet"
 		>
-		<link href="./css/tabulator.css" rel="stylesheet">
+		<link href="/css/tabulator.css" rel="stylesheet">
 	</svelte:head>
