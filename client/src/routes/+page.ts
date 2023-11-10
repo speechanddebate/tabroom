@@ -45,15 +45,15 @@ export const load = async ({ fetch} ) => {
 		tourn.start = new Date(tourn.start);
 		tourn.end = new Date(tourn.end);
 
-		tourn.dates = `${tourn.start.toLocaleDateString('en-us', {month: "numeric", day:"numeric"})}`;
+		tourn.dates = `${tourn.start?.toLocaleDateString('en-us', {month: "numeric", day:"numeric"})}`;
 
-		if (tourn.start.getDay() !== tourn.end.getDay()) {
-			tourn.dates += `-${tourn.end.toLocaleDateString('en-us', {month: "numeric", day:"numeric"})}`;
+		if (tourn.start?.getDay() !== tourn.end?.getDay()) {
+			tourn.dates += `-${tourn.end?.toLocaleDateString('en-us', {month: "numeric", day:"numeric"})}`;
 		}
 
 		if (
-			tourn.location.toLowerCase() === 'online'
-			|| tourn.location.toLowerCase() === 'nsda campus'
+			tourn.location?.toLowerCase() === 'online'
+			|| tourn.location?.toLowerCase() === 'nsda campus'
 		) {
 
 			tourn.tzHover = tourn.tz;
