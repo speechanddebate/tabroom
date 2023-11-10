@@ -36,6 +36,6 @@
 <div id="menu">
 	<div class="sidenote">
 		<h4 style='text-align: left;'>Actions</h4>
-		<Sidebar />
+		<!-- <Sidebar /> -->
 	</div>
 </div>

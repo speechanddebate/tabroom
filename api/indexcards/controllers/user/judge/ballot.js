@@ -23,10 +23,10 @@ export const saveRubric = {
 
 			const ballot = await db.summon(db.ballot, autoSave.ballot);
 
-			if (ballot.judge !== judgeId) {
+			if (ballot?.judge !== judgeId) {
 				res.status(200).json({
 					error   : true,
-					message : `You are not the listed judge for that ballot.  ${ballot.judge} vs ${judgeId}`,
+					message : `You are not the listed judge for that ballot.  ${ballot?.judge} vs ${judgeId}`,
 				});
 			} else {
 
