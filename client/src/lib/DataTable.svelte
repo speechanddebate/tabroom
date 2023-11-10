@@ -2,41 +2,38 @@
 	import {TabulatorFull as Tabulator} from 'tabulator-tables';
 	import {onMount} from 'svelte';
   
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	export let data: any[];
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	export let columns: any[] = [];
 	let tableComponent:HTMLDivElement;
 
 	onMount(() => {
-		new Tabulator(tableComponent, {
-			data,
-			columns,
-			layout            : 'fitColumns',
-			reactiveData      : true,
-			headerSortElement : '<i class="fas fas-sm fa-arrow-up"></i>',
-			autoColumns       : columns.length > 0 ? false : true,
-			pagination        : true,
-			paginationSize    : 50,
-			resizable         : true,
-		});
+	  new Tabulator(tableComponent, {
+		data,
+		columns,
+ 		layout            : 'fitColumns',
+		reactiveData      : true,
+		headerSortElement : '<i class="fas fas-sm fa-arrow-up"></i>',
+		autoColumns       : columns.length > 0 ? false : true,
+		pagination        : true,
+		paginationSize    : 50,
+	  });
 	});
 	
-</script>
+  </script>
   
-<div bind:this={tableComponent}></div>
+  <div bind:this={tableComponent}></div>
   
-<svelte:head>
+  <svelte:head>
 
-	<script 
+  	<script 
 		type="text/javascript" 
 		src="https://oss.sheetjs.com/sheetjs/xlsx.full.min.js"
 	></script>
 
 	<link href="https://unpkg.com/tabulator-tables@4.9.1/dist/css/tabulator.min.css" 
-		rel="stylesheet"
+		  rel="stylesheet"
 	>
 	<link href="./css/tabulator.css"
-		rel="stylesheet"
+		  rel="stylesheet"
 	>
-</svelte:head>
+  </svelte:head>

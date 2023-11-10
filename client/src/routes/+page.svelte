@@ -1,7 +1,7 @@
 <script lang="ts">
     import AdCarousel from '$lib/AdCarousel.svelte';
 	import DataTable from '$lib/DataTable.svelte';
-	import Sidebar from './Sidebar.svelte';
+	// import Sidebar from './Sidebar.svelte';
 	import type { PageData } from './$types';
 
     import { tourns } from './stores';
@@ -23,8 +23,6 @@
     tourns.subscribe((value: any) => {
 		tournList = value;
 	});
-
-
 </script>
 
 <div id="main">
