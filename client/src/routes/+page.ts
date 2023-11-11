@@ -4,6 +4,8 @@ import type { ColumnDefinition } from 'tabulator-tables';
 /** @type {import('./$types').PageLoad} */
 export const load = async ({ fetch} ) => {
 
+	console.log(import.meta.env.VITE_API_URL);
+
     const response = await fetch(`${import.meta.env.VITE_API_URL}/invite/upcoming`);
     const rawData = await response.json();
 
