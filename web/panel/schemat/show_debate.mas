@@ -76,19 +76,37 @@
 	}
 
 	my %round_merge;
-	my %round_event;
-	my @all_rounds;
+	my %all_rounds;
 
 	if ($round_settings->{"timeslot_merge"}) {
 
-		my $merge_ref = JSON::decode_json($round_settings->{"timeslot_merge"});
-		@all_rounds = $round->timeslot->rounds();
-		my %round_name_by_id = map {$_->id => $_->name} @all_rounds;
-		my %round_event_by_id = map {$_->id => $_->event->abbr} @all_rounds;
+		my $sth = $dbh->prepare("
+			select
+				panel.id panel,
+				round.id round, round.name, round.label,
+				event.abbr, event.id event
 
-		foreach my $panel ( keys %{$merge_ref}) {
-			$round_merge{$panel}{"round"} = $round_name_by_id{$merge_ref->{$panel}};
-			$round_merge{$panel}{"event"} = $round_event_by_id{$merge_ref->{$panel}};
+			from (panel, round, event, entry, ballot, round r2)
+			where r2.id = ?
+				and panel.round = r2.id
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+				and entry.event = event.id
+				and event.id = round.event
+				and round.timeslot = r2.timeslot
+			group by panel.id
+		");
+
+		$sth->execute($round->id);
+		my $results = $sth->fetchall_hash();
+
+		foreach my $res (@{$results}) {
+			$round_merge{$res->{panel}}{"round"} = substr($res->{label},0,3) || "R".$res->{name};
+			$round_merge{$res->{panel}}{"event"} = $res->{abbr};
+
+			if ($res->{event} != $event->id) {
+				$all_rounds{$res->{event}} = $res->{name};
+			}
 		}
 	}
 
@@ -147,16 +165,15 @@
 			round => $last_round
 	) unless $bracket_by_ballots;
 
-	foreach my $ar (@all_rounds) {
+	foreach my $ar_event (keys %all_rounds) {
 
-		next if $ar == $round;
+		next if $ar_event == $event->id;
 
-		my $last_round_name = $ar->name - 1;
-		my $ar_event = $ar->event;
+		my $last_round_name = $all_rounds{$ar_event} - 1;
 
 		my $last_round = Tab::Round->search(
-			event => $ar_event->id,
-			name => $last_round_name
+			event => $ar_event,
+			name  => $last_round_name
 		)->first;
 
 		my %alt_byes = $m->comp(
@@ -167,7 +184,7 @@
 
 		my %alt_wins = $m->comp(
 			"/funclib/entry_wins.mas",
-				event    => $ar_event,
+				event_id => $ar_event,
 				round    => $last_round,
 				all      => $all,
 				type     => $winloss_type,
@@ -176,10 +193,10 @@
 
 		my %alt_losses = $m->comp(
 			"/funclib/entry_losses.mas",
-				event => $ar_event,
-				type  => $winloss_type,
-				all   => $all,
-				round => $last_round
+				event_id => $ar_event,
+				type     => $winloss_type,
+				all      => $all,
+				round    => $last_round
 		) unless $bracket_by_ballots;
 
 		%entry_wins   = (%entry_wins, %alt_wins);
@@ -226,13 +243,10 @@
 				ballot.judge_started,
 			winner.value, panel.flight, diverse.value, cap.value,
 			panel.publish, online_hybrid.value,
-			region.id, region.code, region.name,
 			person.id, noprefs.value,
-			district.code, district.name, chapter.state,
-			entry_region.id, entry_region.code, entry_region.name,
-			entry_district.code, entry_district.name, entry_chapter.state, state.value,
 			entry_hybrid.value,
-			strike.id
+			strike.id, state.value setting_stage,
+			noprefs.value noprefs
 
         from (panel, ballot)
 
@@ -286,13 +300,6 @@
 			and judge_hybrid.tag = 'online_hybrid'
 
         left join school judge_school on judge.school = judge_school.id
-        left join region on judge_school.region = region.id
-        left join district on judge_school.district = district.id
-        left join chapter on judge_school.chapter = chapter.id
-
-		left join region entry_region on school.region = entry_region.id
-		left join district entry_district on school.district = entry_district.id
-		left join chapter entry_chapter on school.chapter = entry_chapter.id
 
 		left join person on judge.person = person.id
 		left join school_setting noprefs on noprefs.school = school.id and noprefs.tag = 'noprefs'
@@ -323,12 +330,8 @@
 			$done, $bbye, $fft, $chair, $judge_start,
 			$winner, $flight, $diverse, $cap,
 			$publish, $panel_hybrid,
-			$region_id, $region, $region_name, $person, $noprefs,
-			$district, $district_name, $state,
-			$entry_region_id, $entry_region, $entry_region_name,
-			$entry_district, $entry_district_name, $entry_state, $setting_state,
 			$entry_hybrid,
-			$strike_id
+			$strike_id, $setting_state, $noprefs
 		) = $sth->fetchrow_array()
 	) {
 
@@ -398,18 +401,12 @@
 
 		} else {
 
-			$entries{$entry_id}{"code"}          = $entry_code;
-			$entries{$entry_id}{"dropped"}       = $dropped;
-			$entries{$entry_id}{"name"}          = $entry_name;
-			$entries{$entry_id}{"school"}        = $school_name;
-			$entries{$entry_id}{"school_code"}   = $school_code;
-			$entries{$entry_id}{"state"}         = $setting_state;
-			$entries{$entry_id}{"state"}         = $entry_state if $entry_state;
-			$entries{$entry_id}{"district"}      = $entry_district;
-			$entries{$entry_id}{"district_name"} = $entry_district_name;
-			$entries{$entry_id}{"region"}        = $entry_region;
-			$entries{$entry_id}{"region_name"}   = $entry_region_name;
-			$entries{$entry_id}{"dio_region"}    = $dio_regions->{$entry_region_id};
+			$entries{$entry_id}{"code"}        = $entry_code;
+			$entries{$entry_id}{"dropped"}     = $dropped;
+			$entries{$entry_id}{"name"}        = $entry_name;
+			$entries{$entry_id}{"school"}      = $school_name;
+			$entries{$entry_id}{"school_code"} = $school_code;
+			$entries{$entry_id}{"state"}       = $setting_state;
 		}
 
 		$entries{$entry_id}{"online"} = $entry_hybrid;
@@ -464,15 +461,108 @@
 		$judges{$judge_id}{"online"}        = $judge_hybrid;
 		$judges{$judge_id}{"tab"}           = $tab_rating;
 		$judges{$judge_id}{"person"}        = $person;
-		$judges{$judge_id}{"state"}         = $state;
-		$judges{$judge_id}{"district"}      = $district;
-		$judges{$judge_id}{"district_name"} = $district_name;
-		$judges{$judge_id}{"region"}        = $region;
-		$judges{$judge_id}{"region_name"}   = $region_name;
-		$judges{$judge_id}{"dioregion"}     = $dio_regions->{$region_id};
 		$judges{$judge_id}{"diverse"}       = $diverse;
 		$judges{$judge_id}{"cap"}           = $cap;
 		$judges{$judge_id}{"chair"}         = $chair;
+	}
+
+	if ($tourn_settings->{nsda_nats}) {
+
+		my $entry_sth = $dbh->prepare("
+			select
+				entry.id, district.id district, district.code, district.name, chapter.state
+			from entry, school, chapter, district
+			where entry.event = ?
+				and entry.school = school.id
+				and school.chapter = chapter.id
+				and school.district = district.id
+		");
+
+		$entry_sth->execute($event->id);
+		my $entries = $entry_sth->fetchall_hash();
+		foreach my $entry (@{$entries}) {
+			unless ($entries{$entry->{id}}{"state"}) {
+				$entries{$entry->{id}}{"state"} = $entry->{state};
+			}
+
+			$entries{$entry->{id}}{"district"}      = $entry->{district};
+			$entries{$entry->{id}}{"district_name"} = $entry->{name};
+		}
+
+		my $judge_sth = $dbh->prepare("
+			select
+				judge.id, district.id district, district.code, district.name, chapter.state
+			from ballot, panel, judge, school, chapter, district
+			where panel.round = ?
+				and ballot.panel = panel.id
+				and ballot.judge = judge.id
+				and judge.school = school.id
+				and school.chapter = chapter.id
+				and school.district = district.id
+		");
+
+		$judge_sth->execute($round->id);
+		my $judges = $judge_sth->fetchall_hash();
+		foreach my $judge (@{$judges}) {
+			unless ($judges{$judge->{id}}{"state"}) {
+				$judges{$judge->{id}}{"state"} = $judge->{state};
+			}
+
+			$judges{$judge->{id}}{"district"}      = $judge->{district};
+			$judges{$judge->{id}}{"district_name"} = $judge->{name};
+		}
+
+
+	} elsif (
+		$tourn_settings->{ncfl}
+		|| $tourn_settings->{regions}
+	)  {
+
+		my $entry_sth = $dbh->prepare("
+			select
+				entry.id, region.id region, region.code, region.name, chapter.state
+			from entry, school, chapter, region
+			where entry.event = ?
+				and entry.school = school.id
+				and school.chapter = chapter.id
+				and school.region = region.id
+		");
+
+		$entry_sth->execute($event->id);
+		my $entries = $entry_sth->fetchall_hash();
+		foreach my $entry (@{$entries}) {
+			unless ($entries{$entry->{id}}{"state"}) {
+				$entries{$entry->{id}}{"state"} = $entry->{state};
+			}
+
+			$entries{$entry->{id}}{"region"}        = $entry->{region};
+			$entries{$entry->{id}}{"region_name"}   = $entry->{name};
+			$entries{$entry->{id}}{"dio_region"}    = $dio_regions->{$entry->{region}};
+		}
+
+		my $judge_sth = $dbh->prepare("
+			select
+				judge.id, region.id region, region.code, region.name, chapter.state
+			from ballot, panel, judge, school, chapter, region
+			where panel.round = ?
+				and ballot.panel = panel.id
+				and ballot.judge = judge.id
+				and judge.school = school.id
+				and school.chapter = chapter.id
+				and school.region = region.id
+		");
+
+		$judge_sth->execute($round->id);
+		my $judges = $judge_sth->fetchall_hash();
+		foreach my $judge (@{$judges}) {
+			unless ($judges{$judge->{id}}{"state"}) {
+				$judges{$judge->{id}}{"state"} = $judge->{state};
+			}
+
+			$judges{$judge->{id}}{"region"}      = $judge->{region};
+			$judges{$judge->{id}}{"region_name"} = $judge->{name};
+			$judges{$judge->{id}}{"dio_region"}  = $dio_regions->{$judge->{region}};
+		}
 	}
 
 	if ($round_settings->{"showrooms_from"}) {
@@ -834,7 +924,7 @@
 								? '<p class="marless padno">'.$round_merge{$key}{"event"}.'</p>'
 								: ""
 							%><% $round_merge{$key} && $round_merge{$key}{"round"}
-								? '<p class="marless padno">R'.$round_merge{$key}{"round"}.'</p>'
+								? '<p class="marless padno">'.$round_merge{$key}{"round"}.'</p>'
 								: ""
 							%>
 							<% $panels{$key}{"bracket"} %>
@@ -845,7 +935,7 @@
 								? "<br />".$round_merge{$key}{"event"}
 								: ""
 							%><% $round_merge{$key} && $round_merge{$key}{"round"}
-								? "<br /> R".$round_merge{$key}{"round"}
+								? "<br />".$round_merge{$key}{"round"}
 								: ""
 							%>
 %						}
@@ -1396,7 +1486,7 @@
 								</span>
 
 								<span class="dioregions hidden eighth nospace ">
-									<% $judges{$judge}{"dioregion"} %>
+									<% $judges{$judge}{"dio_region"} %>
 								</span>
 %							}
 

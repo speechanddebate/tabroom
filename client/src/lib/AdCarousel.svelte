@@ -36,10 +36,10 @@
 
 <style>
     .carousel {
-        width: 100%;
-        display: inline-block;
-        text-align: center;
-        background-color: var(--dark-gray);
-        min-height: 100px;
+        width            : 100%;
+        display          : inline-block;
+        text-align       : center;
+        background-color : var(--dark-gray);
+        min-height       : 100px;
     }
 </style>

@@ -72,6 +72,7 @@ RUN cpanm HTTP::UA::Parser
 RUN cpanm JSON@4.02
 RUN cpanm JSON::WebToken
 RUN cpanm Crypt::JWT
+RUN cpanm Devel::NYTProf::Apache
 
 COPY ./doc /opt/config-tabroom
 
