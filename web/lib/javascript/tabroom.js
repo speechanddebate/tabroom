@@ -234,9 +234,11 @@
 			options.body = JSON.stringify(attributes);
 		}
 
-		fetch( url, options ).then( async (response) => {
-
-			const data = await response.json();
+		$.ajax({
+			type: options.method,
+			url,
+			data: attributes
+        }).then(function(data) {
 
 			if (data.reply) {
 				if (attributes.reply_target) {
@@ -262,7 +264,6 @@
 			if (data.error) {
 
 				alertify.error(data.message);
-				console.log(data);
 
 				if (data.destroy) {
 					$("#"+data.destroy).remove();
