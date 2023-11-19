@@ -234,10 +234,16 @@
 			options.body = JSON.stringify(attributes);
 		}
 
+		console.log(options.method);
+
 		$.ajax({
-			type: options.method,
-			url,
-			data: attributes
+			type        : options.method,
+			data        : attributes,
+		    crossDomain : true,
+			xhrFields: {
+				withCredentials: true
+			},
+			url
         }).then(function(data) {
 
 			if (data.reply) {
