@@ -234,8 +234,6 @@
 			options.body = JSON.stringify(attributes);
 		}
 
-		console.log(options.method);
-
 		$.ajax({
 			type        : options.method,
 			data        : attributes,
