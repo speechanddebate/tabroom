@@ -39,14 +39,18 @@ __PACKAGE__->_register_datetimes( qw/timestamp /);
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
+	$/ = ""; #Remove all trailing newlines
 
-	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::JudgeSetting->search(
+	my @existing = Tab::JudgeSetting->search(
 		judge => $self->id,
-		tag         => $tag,
-	)->first;
+		tag   => $tag
+	);
+
+	my $existing = shift @existing if @existing;
+
+	foreach (@existing) { $_->delete(); }
 
 	if (defined $value) {
 
@@ -55,6 +59,14 @@ sub setting {
 			$existing->value($value);
 			$existing->value_text($blob) if $value eq "text";
 			$existing->value_date($blob) if $value eq "date";
+
+			if ($value eq "json") {
+				my $json = eval{
+					return JSON::encode_json($blob);
+				};
+				$existing->value_text($json);
+			}
+
 			$existing->update;
 
 			if ($value eq "delete" || $value eq "" || $value eq "0") {
@@ -73,31 +85,39 @@ sub setting {
 
 			if ($value eq "text") {
 				$existing->value_text($blob);
-			}
-
-			if ($value eq "date") {
+			} elsif ($value eq "date") {
 				$existing->value_date($blob);
+			} elsif ($value eq "json") {
+				my $json = eval{
+					return JSON::encode_json($blob);
+				};
+				$existing->value_text($json);
 			}
 
-			$existing->update;
-
+			$existing->update();
 		}
 
 	} else {
 
 		return unless $existing;
-		return $existing->value_text if $existing->value eq "text";
-		return $existing->value_date if $existing->value eq "date";
+		if ($existing->value eq "text") {
+			return $existing->value_text
+		} elsif ($existing->value eq "date") {
+			return $existing->value_date
+		} elsif ($existing->value eq "json") {
+			return eval {
+				return JSON::decode_json($existing->value_text);
+			};
+		}
 		return $existing->value;
-
 	}
 }
+
 
 sub all_settings {
 
 	my $self = shift;
 	my %all_settings;
-
 	my $dbh = Tab::DBI->db_Main();
 
     my $sth = $dbh->prepare("
@@ -120,12 +140,16 @@ sub all_settings {
 
 			$all_settings{$tag} = $value_text;
 
-		} else {
+		} elsif ($value eq "json") {
 
+			$all_settings{$tag} = eval {
+				return JSON::decode_json($value_text);
+			};
+
+		} else {
 			$all_settings{$tag} = $value;
 		}
 	}
-
 	return %all_settings;
-
 }
+

@@ -122,7 +122,7 @@
 	  };
 	})($.fn.attrs);
 
-	function postSwitch(checkObject, replyUrl, callback, confirmMessage) {
+	function postSwitch(checkObject, url, callback, confirmMessage) {
 
 		if (confirmMessage != undefined && confirmMessage != "") {
 			alertify.confirm("Please confirm", confirmMessage, function(e) {
@@ -210,178 +210,187 @@
 			}
 		}
 
-		var accessType = "";
+		const options = {
+			mode        : 'cors',
+			credentials : 'include',
+			headers     : {
+			  'Content-Type' : 'application/json',
+			  'Accept'       : 'application/json',
+			},
+			redirect       : 'follow',
+			referrerPolicy : 'no-referrer',
+		};
 
 		if (attributes.post_method === "get") {
-			accessType = "GET";
+			options.method = 'GET';
 		} else if (attributes.post_method === "delete") {
-			accessType = "DELETE";
+			options.method = 'DELETE';
+			options.body = JSON.stringify(attributes);
 		} else if (attributes.post_method === "put") {
-			accessType = "PUT";
+			options.method = 'PUT';
+			options.body = JSON.stringify(attributes);
 		} else {
-			accessType = "POST";
+			options.method = 'POST';
+			options.body = JSON.stringify(attributes);
 		}
 
 		$.ajax({
-			type    : accessType,
-			url     : replyUrl,
-			data    : attributes,
-			success : function(data, status, object, newCallback) {
+			type        : options.method,
+			data        : attributes,
+		    crossDomain : true,
+			xhrFields: {
+				withCredentials: true
+			},
+			url
+        }).then(function(data) {
 
-				if (data) {
-
-					if (data.reply) {
-						if (attributes.reply_target) {
-							$("#"+attributes.reply_target).text(data.reply);
-						}
-
-						if (attributes.reply_append) {
-							$("#"+attributes.reply_append).append(data.reply);
-						}
-
-						if (data.reply_target) {
-							$("#"+data.reply_target).text(data.reply);
-						}
-
-						if (data.reply_append) {
-							$("#"+data.reply_append).append(data.reply);
-						}
-
-						$(".replybucket").text(data.reply);
-						$(".replyappend").append(data.reply);
-					}
-
-					if (data.error) {
-
-						alertify.error(data.message);
-						console.log(data);
-
-						if (data.destroy) {
-							$("#"+data.destroy).remove();
-							$("."+data.destroy).remove();
-						}
-
-						if (data.errSetValue) {
-							data.errSetValue.forEach( function(item) {
-								$("#"+item.id).val(item.content);
-							});
-						}
-
-						if (data.errReplace) {
-							data.errReplace.forEach( function(item) {
-								if (item.destroy) {
-									$("#"+item.id).remove();
-								} else if (item.content) {
-									$("#"+item.id).html(item.content);
-								}
-							});
-						}
-
-						if (data.refresh) {
-							window.location.reload();
-						}
-
-					} else if (data.message) {
-
-						alertify.dismissAll();
-						alertify.notify(data.message, "custom");
-
-						if (data.destroy) {
-							$("#"+data.destroy).remove();
-							$("."+data.destroy).remove();
-						}
-
-						if (data.showAll) {
-							$("."+data.showAll).removeClass("hidden");
-						}
-
-						if (data.hideAll) {
-							$("."+data.hideAll).addClass("hidden");
-						}
-
-						if (data.reveal) {
-							$("#"+data.reveal).removeClass("hidden");
-						}
-
-						if (data.hide) {
-							$("#"+data.hide).addClass("hidden");
-						}
-
-						if (attributes.on_success === "destroy") {
-							$("#"+attributes.target_id).remove();
-						} else if (attributes.on_success === "hide") {
-							$("#"+attributes.target_id).addClass("hidden");
-						} else if (
-							attributes.on_success === "refresh"
-							|| attributes.on_success === "reload"
-							|| data.refresh
-						) {
-							window.location.reload();
-						}
-
-						if (attributes.new_parent) {
-							$("#"+attributes.target_id).prependTo("#"+attributes.new_parent);
-						}
-
-						if (data.newParent) {
-							$("#"+attributes.target_id).prependTo("#"+data.newParent);
-						}
-
-						if (data.setvalue) {
-							data.setvalue.forEach( function(item) {
-								$("#"+item.id).val(item.content);
-							});
-						}
-
-						if (data.replace) {
-							data.replace.forEach( function(item) {
-								if (item.destroy) {
-									$("#"+item.id).remove();
-								} else if (item.content) {
-									$("#"+item.id).html(item.content);
-								}
-							});
-						}
-
-						if (data.reclass) {
-							data.reclass.forEach( function(item) {
-								if (item.removeClass) {
-									$("#"+item.id).removeClass(item.removeClass);
-								}
-								if (item.addClass) {
-									$("#"+item.id).addClass(item.addClass);
-								}
-							});
-						}
-
-						if (data.reprop) {
-							data.reprop.forEach( function(item) {
-								$("#"+item.id).attr(item.property, item.value);
-							});
-						}
-
-						if (data.norefresh) {
-
-						} else {
-							$('table').trigger('applyWidgets');
-							$('table').trigger('update', [true]);
-							fixVisual();
-						}
-
-					} else {
-						console.log(data);
-						alertify.warning("An error condition was tripped.");
-					}
-
-					if (callback && callback != 'false') {
-						callback(data);
-					}
-					if (newCallback && newCallback != 'false') {
-						newCallback(data);
-					}
-					return;
+			if (data.reply) {
+				if (attributes.reply_target) {
+					$("#"+attributes.reply_target).text(data.reply);
 				}
+
+				if (attributes.reply_append) {
+					$("#"+attributes.reply_append).append(data.reply);
+				}
+
+				if (data.reply_target) {
+					$("#"+data.reply_target).text(data.reply);
+				}
+
+				if (data.reply_append) {
+					$("#"+data.reply_append).append(data.reply);
+				}
+
+				$(".replybucket").text(data.reply);
+				$(".replyappend").append(data.reply);
 			}
+
+			if (data.error) {
+
+				alertify.error(data.message);
+
+				if (data.destroy) {
+					$("#"+data.destroy).remove();
+					$("."+data.destroy).remove();
+				}
+
+				if (data.errSetValue) {
+					data.errSetValue.forEach( function(item) {
+						$("#"+item.id).val(item.content);
+					});
+				}
+
+				if (data.errReplace) {
+					data.errReplace.forEach( function(item) {
+						if (item.destroy) {
+							$("#"+item.id).remove();
+						} else if (item.content) {
+							$("#"+item.id).html(item.content);
+						}
+					});
+				}
+
+				if (data.refresh) {
+					window.location.reload();
+				}
+
+			} else if (data.message) {
+
+				alertify.dismissAll();
+				alertify.notify(data.message, "custom");
+
+				if (data.destroy) {
+					$("#"+data.destroy).remove();
+					$("."+data.destroy).remove();
+				}
+
+				if (data.showAll) {
+					$("."+data.showAll).removeClass("hidden");
+				}
+
+				if (data.hideAll) {
+					$("."+data.hideAll).addClass("hidden");
+				}
+
+				if (data.reveal) {
+					$("#"+data.reveal).removeClass("hidden");
+				}
+
+				if (data.hide) {
+					$("#"+data.hide).addClass("hidden");
+				}
+
+				if (attributes.on_success === "destroy") {
+					$("#"+attributes.target_id).remove();
+				} else if (attributes.on_success === "hide") {
+					$("#"+attributes.target_id).addClass("hidden");
+				} else if (
+					attributes.on_success === "refresh"
+					|| attributes.on_success === "reload"
+					|| data.refresh
+				) {
+					window.location.reload();
+				}
+
+				if (attributes.new_parent) {
+					$("#"+attributes.target_id).prependTo("#"+attributes.new_parent);
+				}
+
+				if (data.newParent) {
+					$("#"+attributes.target_id).prependTo("#"+data.newParent);
+				}
+
+				if (data.setvalue) {
+					data.setvalue.forEach( function(item) {
+						$("#"+item.id).val(item.content);
+					});
+				}
+
+				if (data.replace) {
+					data.replace.forEach( function(item) {
+						if (item.destroy) {
+							$("#"+item.id).remove();
+						} else if (item.content) {
+							$("#"+item.id).html(item.content);
+						}
+					});
+				}
+
+				if (data.reclass) {
+					data.reclass.forEach( function(item) {
+						if (item.removeClass) {
+							$("#"+item.id).removeClass(item.removeClass);
+						}
+						if (item.addClass) {
+							$("#"+item.id).addClass(item.addClass);
+						}
+					});
+				}
+
+				if (data.reprop) {
+					data.reprop.forEach( function(item) {
+						$("#"+item.id).attr(item.property, item.value);
+					});
+				}
+
+				if (data.norefresh) {
+
+				} else {
+					$('table').trigger('applyWidgets');
+					$('table').trigger('update', [true]);
+					fixVisual();
+				}
+
+			} else {
+				console.log(data);
+				alertify.warning("An error condition was tripped.");
+			}
+
+			if (callback && callback != 'false') {
+				callback(data);
+			}
+
+			return;
 		});
 
 		fixVisual();

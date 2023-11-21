@@ -19,14 +19,27 @@
 
     my $key = $judge_person_id."-".$search_first."-".$search_last."-".$ARGS{"quiz_id"};
 
-	return if $m->cache_self(
-		key        => $key,
-		expires_in => '1h',
-		expire_if  => sub { return 1 if defined $ARGS{"invalidate"} }
-	);
+	if ($r->hostname eq "www.tabroom.com") {
+		return if $m->cache_self(
+			key        => $key,
+			expires_in => '1h',
+			expire_if  => sub { return 1 if defined $ARGS{"invalidate"} }
+		);
+	}
 
 	my %results;
 	my $dbh = Tab::DBI->db_Main();
+
+	my $now = DateTime->now();
+
+	my $review_cutoff = Tab::TabroomSetting->search(
+		tag   => "paradigm_review_cutoff"
+	)->first;
+
+	my $review_start = Tab::TabroomSetting->search(
+		tag   => "paradigm_review_start"
+	)->first;
+
 
 	unless ($judge_person_id) {
 
@@ -43,22 +56,44 @@
 			$limit .= " and person.last like '".$search_last."%'";
 		}
 
+		my $review_limit;
+
+		if ($review_cutoff && $review_cutoff->value_date > $now && $review_start) {
+			$review_limit = DateTime::Format::MySQL->format_datetime($review_start->value_date);
+		}
+
 		if ($limit) {
 
 			my $sth = $dbh->prepare("
 				select
 					person.id, person.first, person.last,
-					GROUP_CONCAT(chapter.name SEPARATOR ', ')
-				from (person)
-					left join chapter_judge on chapter_judge.person = person.id
-					left join chapter on chapter.id = chapter_judge.chapter
-					left join person_setting paradigm on paradigm.tag = 'paradigm' and paradigm.person = person.id
+					GROUP_CONCAT(chapter.name SEPARATOR ', '),
+					paradigm_timestamp.value_date timestamp
+				from (person, person_setting paradigm)
+
+					left join chapter_judge
+						on chapter_judge.person = person.id
+
+					left join chapter
+						on chapter.id = chapter_judge.chapter
+
+					left join person_setting paradigm_timestamp
+						on paradigm_timestamp.tag = 'paradigm_timestamp'
+						and paradigm_timestamp.person = person.id
 
 				where person.id > 0
 					$limit
+					and paradigm.person = person.id
+					and paradigm.tag = 'paradigm'
 
 				and exists (
-					select judge.id from judge where judge.person = person.id
+					select judge.id
+						from judge, ballot, panel, round
+					where judge.person = person.id
+						and judge.id = ballot.judge
+						and ballot.panel = panel.id
+						and panel.round = round.id
+						and round.post_primary > 0
 				)
 				group by person.id
 				limit 75
@@ -71,14 +106,17 @@
 
 			while (
 				my (
-					$id, $first, $last, $chapters
+					$id, $first, $last, $chapters, $timestamp
 				) = $sth->fetchrow_array()
 			) {
-				$results{$id}{"first"}    = $first;
-				$results{$id}{"last"}     = $last;
-				$results{$id}{"chapters"} = $chapters;
-				$last_id = $id;
-				$count++;
+
+				if ($review_limit < $timestamp || (not defined $review_limit)) {
+					$results{$id}{"first"}    = $first;
+					$results{$id}{"last"}     = $last;
+					$results{$id}{"chapters"} = $chapters;
+					$last_id = $id;
+					$count++;
+				}
 			}
 
 			if ($count == 1) {
@@ -87,14 +125,36 @@
 		}
 	}
 
-	my $count_sth = $dbh->prepare('
-		select count(distinct ps.person)
-			from person_setting ps
-		where ps.tag = "paradigm"
-	');
+	my $para_count;
 
-	$count_sth->execute();
-	my ($para_count) = $count_sth->fetch();
+	if ($review_cutoff && $review_cutoff->value_date > $now) {
+
+		my $count_sth = $dbh->prepare('
+			select count(distinct ps.person)
+				from person_setting ps, person_setting ts
+			where ps.tag = "paradigm"
+				and ps.person = ts.person
+				and ts.tag = "paradigm_timestamp"
+				and ts.value_date > ?
+		');
+
+		$count_sth->execute(
+			DateTime::Format::MySQL->format_datetime($review_start->value_date)
+		);
+
+		($para_count) = $count_sth->fetch();
+
+	} else {
+
+		my $count_sth = $dbh->prepare('
+			select count(distinct ps.person)
+				from person_setting ps
+			where ps.tag = "paradigm"
+		');
+
+		$count_sth->execute();
+		($para_count) = $count_sth->fetch();
+	}
 
 	my $jperson;
 
@@ -235,7 +295,6 @@
 				</div>
 %			}
 
-
 %			if (@answers) {
 %				foreach my $answer (@answers) {
 					<div class="screens <% $answer->quiz->tag %>">
@@ -254,7 +313,10 @@
 				<h4>Paradigm search results <% $search_first %> <% $search_last %></h4>
 			</span>
 
-			<span id="paradigm_search_buttonarea" class="fifth rightalign nospace">
+			<span
+				id    = "paradigm_search_buttonarea"
+				class = "fifth rightalign nospace"
+			>
 			</span>
 
 			<& "/funclib/tablesorter.mas", table => "paradigm_search" &>
@@ -264,7 +326,6 @@
 				<thead>
 
 					<tr class="yellowrow">
-
 						<th>
 							First
 						</th>
@@ -281,39 +342,33 @@
 							Paradigm
 						</th>
 					</tr>
-
 				</thead>
 				<tbody>
+%					foreach my $id (sort keys %results) {
 
-%				foreach my $id (sort keys %results) {
+%						$results{$id}{"chapters"} =~ s/, /<br \/>/g;
 
-%					$results{$id}{"chapters"} =~ s/, /<br \/>/g;
+						<tr>
+							<td>
+								<% $results{$id}{"first"} %>
+							</td>
 
-					<tr>
+							<td>
+								<% $results{$id}{"last"} %>
+							</td>
 
-						<td>
-							<% $results{$id}{"first"} %>
-						</td>
+							<td class="smallish" style="line-height: 16px;">
+								<% $results{$id}{"chapters"} %>
+							</td>
 
-						<td>
-							<% $results{$id}{"last"} %>
-						</td>
-
-						<td class="smallish" style="line-height: 16px;">
-							<% $results{$id}{"chapters"} %>
-						</td>
-
-						<td class="centeralign nospace padvert">
-							<a
-								href="paradigm.mhtml?judge_person_id=<% $id %>"
-								class="fa fa-sm fa-file-text-o bluetext buttonwhite"
-							></a>
-						</td>
-
-					</tr>
-
-%				}
-
+							<td class="centeralign nospace padvert">
+								<a
+									href="paradigm.mhtml?judge_person_id=<% $id %>"
+									class="fa fa-sm fa-file-text-o bluetext buttonwhite"
+								></a>
+							</td>
+						</tr>
+%					}
 				</tbody>
 
 			</table>
@@ -391,7 +446,14 @@
 			</form>
 
 			<p class="explain martopmore smaller graytext centeralign">
-				There are <% commify($para_count) %> paradigms on Tabroom.
+				There are <% commify($para_count) %> paradigms on Tabroom
+%				if ($review_start) {
+					<br />reviewed since <& "/funclib/showdate.mas",
+						tz => "UTC",
+						dt => $review_start->value_date,
+						format => "murica_short"
+					&>
+%				}
 			</p>
 		</div>
 	</div>

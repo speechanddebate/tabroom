@@ -37,11 +37,15 @@
 			person.last,
 			person.id, person.email, person.phone, person.provider,
 			round.name, round.label, round.flighted,
-			event.abbr, panel.letter, room.name
+			event.abbr, panel.letter, room.name,
+			dont_poke.value
 
 		from (ballot, entry, entry_student es, student, person, round, event, panel)
 
 			left join room on room.id = panel.room
+			left join event_setting dont_poke
+				on dont_poke.event = event.id
+				and dont_poke.tag = 'dont_poke_entries'
 
 		where ballot.panel = ?
 			and ballot.entry = entry.id
@@ -53,60 +57,48 @@
 			and entry.event = event.id
 			and panel.id = ballot.panel
 			and round.id = panel.round
-			and not exists (
-				select dont_poke_entries.id
-				from event_setting dont_poke_entries
-					where dont_poke_entries.event = event.id
-				and dont_poke_entries.tag = 'dont_poke_entries'
-			)
 		group by person.id
 	");
 
-	my %addresses;
+	my %ids;
 
 	$entries_sth->execute($panel->id);
 
 	while (
 		my (
 			$last,
-			$id, $email, $phone, $provider,
+			$person_id, $email, $phone, $provider,
 			$round_num, $round_label, $flighted,
 			$event,
-			$letter, $room
+			$letter, $room,
+			$dont_poke
 		) = $entries_sth->fetchrow_array()
 	) {
 
-		if ($event) {
-			$event_abbr = $event;
+		unless($event_abbr) {
+			if ($event) {
+				$event_abbr = $event;
+			}
+
+			if ($flighted > 1) {
+				$round_flighted++;
+			}
+
+			if ($round_label) {
+				$round_name = $round_label;
+			} elsif ($round_num) {
+				$round_name = "Round ".$round_num;
+			}
+
+			if ($room) {
+				$room_name = $room;
+			} elsif ($letter) {
+				$room_name = "Section ".$letter;
+			}
 		}
 
-		if ($flighted > 1) {
-			$round_flighted++;
-		}
-
-		if ($round_label) {
-			$round_name = $round_label;
-		} elsif ($round_num) {
-			$round_name = "Round ".$round_num;
-		}
-
-		if ($room) {
-			$room_name = $room;
-		} elsif ($letter) {
-			$room_name = "Section ".$letter;
-		}
-
-		if ($email) {
-			$addresses{$id}{"email"} = $email;
-		}
-
-		if ($last) {
-			$addresses{$id}{"last"} = $last;
-		}
-
-		if ($phone && $provider) {
-			$phone =~ s/[\D_]//g;
-			$addresses{$id}{"sms"} = $phone.'@'.$provider;
+		unless ($dont_poke) {
+			$ids{$person_id}++;
 		}
 	}
 
@@ -132,18 +124,7 @@
 			$id, $email, $phone, $provider
 		) = $judges_sth->fetchrow_array()
 	) {
-		if ($email) {
-			$addresses{$id}{"email"} = $email;
-		}
-
-		if ($phone && $provider) {
-			$phone =~ s/[\D_]//g;
-			$addresses{$id}{"sms"} = $phone.'@'.$provider;
-		}
-
-		if ($last) {
-			$addresses{$id}{"last"} = $last;
-		}
+		$ids{$id}++;
 	}
 
 	my $log_sth = $dbh->prepare("
@@ -198,35 +179,19 @@
 	}
 
 	foreach my $okey (keys %ok) {
-		delete $addresses{$okey};
+		delete $ids{$okey};
 	}
 
-	my @emails;
 	my $counter;
-
-	my %response;
 	my @reclass;
 
-	my $went_to;
-
-	foreach my $id (keys %addresses) {
-
+	foreach my $id (keys %ids) {
 		$counter++;
-		if ($addresses{$id}{"email"}) {
-			push @emails, $addresses{$id}{"email"};
-		}
-
-		if ($addresses{$id}{"sms"}) {
-			push @emails, $addresses{$id}{"sms"};
-		}
 
 		my %limit = ();
 		$limit{"id"} = "blast_".$target_id;
 		$limit{"addClass"} = "hidden";
 		push @reclass, \%limit;
-
-		$went_to .= ", " if $went_to;
-		$went_to .= $addresses{$id}{"last"};
 	}
 
 	my $message = "You are currently marked as not present in $round_name of $event_abbr in $room_name.";
@@ -237,22 +202,30 @@
 
 	$message .= " Please go to $room_name now so the round may proceed.";
 
+	my $from = $tourn->webname;
+	unless ($from) {
+		$from = "tourn".$tourn->id
+	}
+
+	my @ids = keys %ids;
+
 	$m->comp(
 		"/funclib/send_notify.mas",
-		from    => 'Tabroom.com <live@www.tabroom.com>',
-		array   => \@emails,
+		from    => 'Tabroom.com <'.$from.'@www.tabroom.com>',
+		ids     => \@ids,
 		subject => "Missing from $room_name",
 		body    => $message
 	);
 
 	$log_sth->finish;
 
-	$response{"error"} = "false";
-	$response{"message"} = $counter." missing people blasted in ".$room_name.": $went_to";
-	$response{"reclass"} = \@reclass;
+	my $response = {
+		error   => \0,
+		message => $counter." missing people blasted in ".$room_name,
+		reclass => \@reclass
+	};
 
-	$m->print(JSON::encode_json(\%response));
-
+	$m->print(JSON::encode_json($response));
 	$m->abort();
 
 </%init>
