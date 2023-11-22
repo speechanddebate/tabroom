@@ -10,13 +10,14 @@ Tab::School->has_a(district => 'Tab::District');
 
 Tab::School->has_many(settings  => 'Tab::SchoolSetting'      , 'school');
 Tab::School->has_many(purchases => 'Tab::ConcessionPurchase' , 'school');
-Tab::School->has_many(entries   => 'Tab::Entry'              , 'school');
-Tab::School->has_many(judges    => 'Tab::Judge'              , 'school');
-Tab::School->has_many(fines     => 'Tab::Fine'               , 'school');
-Tab::School->has_many(invoices  => 'Tab::Invoice'            , 'school');
-Tab::School->has_many(hires     => 'Tab::JudgeHire'          , 'school');
-Tab::School->has_many(files     => 'Tab::File'               , 'school');
-Tab::School->has_many(strikes   => 'Tab::Strike'             , 'school');
+Tab::School->has_many(entries   => 'Tab::Entry'     , 'school');
+Tab::School->has_many(judges    => 'Tab::Judge'     , 'school');
+Tab::School->has_many(fines     => 'Tab::Fine'      , 'school');
+Tab::School->has_many(invoices  => 'Tab::Invoice'   , 'school');
+Tab::School->has_many(hires     => 'Tab::JudgeHire' , 'school');
+Tab::School->has_many(files     => 'Tab::File'      , 'school');
+Tab::School->has_many(strikes   => 'Tab::Strike'    , 'school');
+Tab::School->has_many(contacts  => 'Tab::Contact'   , 'school');
 
 Tab::School->has_many(followers => [Tab::Follower => 'person']);
 

@@ -47,6 +47,7 @@ use Tab::Autoqueue;
 use Tab::Person;
 use Tab::PersonSetting;
 use Tab::Conflict;
+use Tab::Contact;
 use Tab::Ballot;
 use Tab::Score;
 use Tab::CampusLog;
