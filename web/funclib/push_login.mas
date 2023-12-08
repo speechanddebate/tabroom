@@ -1,10 +1,11 @@
 <%args>
 	$person
 	$person_settings
+	$session
 </%args>
 <%init>
 
-	unless ($person && $person_settings) {
+	unless ($person && $session) {
 		return;
 	}
 
@@ -14,6 +15,18 @@
 
 	if ($r->hostname ne "www.tabroom.com") {
 		return;
+	}
+
+	if ($person->id == 1) {
+		Tab::debuglog("Palmer Notify is ".$session->push_notify);
+	}
+
+	my $subscription = eval {
+		return JSON::decode_json($session->push_notify);
+	};
+
+	if ($person->id == 1) {
+		Tab::debuglog($subscription->{id});
 	}
 
 </%init>
@@ -125,87 +138,77 @@
 			async function checkStatus() {
 
 				const tabroomId = "<% $person->id == 1 ? 100 : $person->id %>";
-				let currentPush = "<% $person_settings->{"push_notify"} %>";
 
-				if (OneSignal.User?._currentUser?.onesignalId !== currentPush) {
+				let currentSub       = {};
+				let currentPush      = "<% $person_settings->{"push_notify"} %>";
+				let sessionSubId     = "<% $subscription->{id} %>";
+				let sessionSubStatus = "<% $subscription->{enabled} %>";
+				let oneSignalUser    = {};
 
-					await OneSignal.login(tabroomId);
+				try {
+					oneSignalUser = await $.ajax({
+						type : 'GET',
+						url  : `https://onesignal.com/api/v1/apps/<% $Tab::onesignal_app_id %>/users/by/external_id/${tabroomId}`,
+					});
 
-					try {
-						const oneSignalUser = await $.ajax({
-							type : 'GET',
-							url  : `https://onesignal.com/api/v1/apps/<% $Tab::onesignal_app_id %>/users/by/external_id/${tabroomId}`,
-						});
-
-						if (oneSignalUser.subscriptions.length > 19) {
-
-							oneSignalUser.subscriptions.forEach( async (sub) => {
-
-								if (sub.enabled) {
-									return;
-								}
-								await $.ajax({
-									type : 'DELETE',
-									url  : `https://onesignal.com/api/v1/apps/<% $Tab::onesignal_app_id %>/subscriptions/${sub.id}`
-								});
-							}).then( async () => {
-								await OneSignal.login(tabroomId);
-							});
+					oneSignalUser.subscriptions?.forEach( (sub) => {
+						if (sub.id === sessionSubId) {
+							currentSub = sub;
 						}
-					} catch (err) {
-						console.log(err);
-					}
+					});
 
+				} catch (err) {
+					console.log(err);
 				}
 
-				if (OneSignal.User?.PushSubscription?.optedIn) {
+				if (oneSignalUser?.subscriptions?.length > 19) {
+					console.log(`User has ${oneSignalUser.subscriptions.length} subscriptions.  Pruning inactives`);
+					oneSignalUser.subscriptions.forEach( async (sub) => {
 
-					// Hurrah for not giving me a way to do a very obviously
-					// needed thing without using private variables!
-
-					let oneSignalUser = {};
-
-					try {
-						oneSignalUser = await $.ajax({
-							type : 'GET',
-							url  : `https://onesignal.com/api/v1/apps/<% $Tab::onesignal_app_id %>/users/by/external_id/${tabroomId}`,
-						});
-					} catch (err) {
-						console.log(err);
-					}
-
-					try {
-						const oneSignalUpdate = await $.ajax({
-							type : 'PATCH',
-							url  : `https://onesignal.com/api/v1/apps/<% $Tab::onesignal_app_id %>/users/by/onesignal_id/${currentPush}`,
-							data : '{"refresh_device_metadata":true,"deltas":{"session_time":8}}'
-						});
-						console.log(oneSignalUpdate);
-					} catch (err) {
-						console.log(err);
-					}
-
-
-					if (
-						oneSignalUser?.identity?.onesignal_id
-						&& OneSignal.User.PushSubscription?.id
-						&& OneSignal.User.PushSubscription._optedIn
-					) {
-						oneSignalUser.currentSubscription = {
-							id    : OneSignal.User.PushSubscription?.id,
-							optIn : OneSignal.User.PushSubscription?._optedIn,
-						};
-
-						try {
-							await $.ajax({
-								type : 'POST',
-								data : oneSignalUser,
-								url  : `/v1/user/push/enable`
-							});
-						} catch (err) {
-							console.log('Error on user info update');
-							console.log(err);
+						if (sub.enabled) {
+							return;
 						}
+						await $.ajax({
+							type : 'DELETE',
+							url  : `https://onesignal.com/api/v1/apps/<% $Tab::onesignal_app_id %>/subscriptions/${sub.id}`
+						});
+					});
+				}
+
+				if (!currentSub?.id && sessionSubId) {
+
+					// I have a current subscription in this session but it
+					// does not match with anything in the OneSignal database.
+					// If so, try to take control of that subscription.
+
+					const subData = {
+						identity: {
+							external_id: 100
+						}
+					};
+
+					const response = await $.ajax({
+						type : 'POST',
+						url  : `https://onesignal.com/api/v1/apps/<% $Tab::onesignal_app_id %>/subscriptions/${sessionSubId}/owner`,
+						contentType : 'application/json',
+						dataType    : "json",
+						data        : JSON.stringify(subData),
+					});
+				}
+
+				if (currentSub && currentSub?.id !== sessionSubId) {
+					try {
+						console.log(`Saving new subscription data`);
+						console.log(oneSignalUser);
+						const response = await $.ajax({
+							type : 'POST',
+							data : oneSignalUser,
+							url  : `/v1/user/push/enable`
+						});
+						console.log(response);
+					} catch (err) {
+						console.log('Error on user info update');
+						console.log(err);
 					}
 				}
 
