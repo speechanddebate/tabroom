@@ -1,8 +1,8 @@
 <%args>
 	$person
-	$chapter
 	$circuit_id
-	$year => undef
+	$event_code => undef
+	$year       => undef
 </%args>
 <%init>
 
@@ -16,6 +16,13 @@
 
 	my $limit = $year + 1;
 
+	my $sql_limit;
+
+	if ($event_code) {
+		$event_code =~ s/[\W_]//g;
+		$sql_limit = "and result_set.code = '".$event_code."'";
+	}
+
 	my $dbh = Tab::DBI->db_Main();
 
 	my $sth = $dbh->prepare("
@@ -25,9 +32,10 @@
 			result_set.code code,
 			entry.id entry, tourn.name tourn,
 			CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
-			result.rank, result.place
+			result.rank, result.place,
+			chapter.name chapter
 
-		from (student, entry_student es, entry, event, tourn, result_set, result)
+		from (student, entry_student es, entry, event, tourn, result_set, result, chapter, chapter_circuit cc)
 
 			left join entry_student pes
 				on pes.entry = entry.id
@@ -44,15 +52,19 @@
 			and result.entry = entry.id
 			and entry.id = es.entry
 			and es.student = student.id
+			and student.chapter = chapter.id
+			and chapter.id = cc.chapter
+			and cc.circuit = ?
 			and event.type != 'wsdc'
-			and student.chapter = ?
 			and tourn.start > ?
 			and tourn.end < ?
+			$sql_limit
 		group by entry.id
+		order by result_set.code
 	");
 
 	$sth->execute(
-		$chapter->id,
+		$circuit->id,
 		$year."-07-01 00:00:00",
 		$limit."-07-01 00:00:00"
 	);
@@ -79,17 +91,16 @@
 			and student.chapter = chapter.id
 			and chapter.id = cc.chapter
 			and cc.circuit = ?
-			and student.chapter = ?
 			and event.type = 'wsdc'
 			and tourn.start > ?
 			and tourn.end < ?
+			$sql_limit
 		group by student.id
 		order by result_set.code
 	");
 
 	$sth->execute(
 		$circuit->id,
-		$chapter->id,
 		$year."-07-01 00:00:00",
 		$limit."-07-01 00:00:00"
 	);
@@ -97,7 +108,6 @@
 	my $worlds = $sth->fetchall_hash();
 
 	push @{$results}, @{$worlds};
-
 
 	my %quals;
 
@@ -115,6 +125,8 @@
 
 		unless ($quals{$key}) {
 
+			$quals{$key}{"event"} = $result->{"code"};
+			$quals{$key}{"school"} = $result->{"chapter"};
 			$quals{$key}{"name"} = $result->{"first"};
 			$quals{$key}{"name"} .= " ".$result->{"middle"} if $result->{"middle"};
 			$quals{$key}{"name"} .= " ".$result->{"last"};
@@ -127,6 +139,7 @@
 			}
 		}
 
+		$quals{$key}{"total"} += $result->{"rank"};
 		$quals{$key}{"results"}{$result->{code}}{"total"} += $result->{rank};
 		$quals{$key}{"results"}{$result->{code}}{"tourncount"}++;
 
@@ -145,22 +158,15 @@
 
 	<div class="main">
 
-		<h2><% $chapter->name %></h2>
+		<span class="seventenths nospace">
+			<h4><% $circuit->name %> Qualifiers</h4>
+		</span>
 
-		<& "/user/chapter/tabbar.mas",
-			chapter => $chapter,
-			person  => $person,
-			whoami => "results"
-		&>
-
-		<span class="fourfifths nospace">
-			<h4>
+		<span class="bigger fifth semibold">
 				<% $year %>&ndash;<% $limit %>
-				<% $circuit->abbr %> Qualifiers
-			</h4>
 		</span>
 		<span
-			class = "fifth nospace rightalign"
+			class = "tenth nospace rightalign"
 			id    = "<% $circuit->abbr %>_buttonarea"
 		>
 		</span>
@@ -171,33 +177,56 @@
 
 			<thead>
 				<tr class="yellowrow smallish padvert">
+
 					<th>
 						Event
 					</th>
+
+					<th>
+						School
+					</th>
+
 					<th>
 						Entry Name
 					</th>
+
 					<th>
-						# Tournaments
+						# Tourns
 					</th>
+
 					<th>
-						Total Pts
+						Points
 					</th>
+
 					<th>
-						Show Details
+						Details
 					</th>
 				</tr>
 			</thead>
 
 			<tbody>
 
-%				foreach my $key (sort {$a <=> $b} keys %quals) {
+<%perl>
+				foreach my $key (sort {
+						$quals{$a}{"school"} cmp $quals{$b}{"school"}
+						|| $quals{$b}{"total"} <=> $quals{$a}{"total"}
+					} keys %quals
+				) {
 
-%					foreach my $event (sort {$a cmp $b} keys %{$quals{$key}{"results"}})  {
+					foreach my $event (
+						sort {
+							$quals{$key}{"results"}{$b}{"total"} <=> $quals{$key}{"results"}{$a}{"total"}
+						} keys %{$quals{$key}{"results"}}
+					)  {
+</%perl>
 
 						<tr>
 							<td>
 								<% $event %>
+							</td>
+
+							<td>
+								<% $quals{$key}{"school"} %>
 							</td>
 
 							<td>
@@ -229,12 +258,84 @@
 
 	<div class="menu">
 
-		<div class="sidenote">
-			<a
-				class="full blue"
-				href="/user/results/index.mhtml?chapter_id=<% $chapter->id %>"
-			>Return to All School Results</a>
-		</div>
+<%perl>
+
+		$sth = $dbh->prepare("
+			select
+				circuit.id, circuit.abbr, circuit.name,
+				qualifier.value_text quals
+			from circuit, circuit_setting qualifier
+			where circuit.id = ?
+				and circuit.id = qualifier.circuit
+				and qualifier.tag = 'qualifiers'
+			order by circuit.abbr
+		");
+
+		$sth->execute($circuit->id);
+
+		my $quals = $sth->fetchall_hash();
+		my %qual_options;
+
+		my $rules = $circuit->setting("qualifiers");
+		delete $rules->{"lastkey"};
+
+</%perl>
+
+		<div class="full">
+
+			<div class='sidenote'>
+
+				<a
+					href="/user/circuit/index.mhtml?circuit_id=<% $circuit->id %>"
+					class="blue full"
+				>Return to <% $circuit->abbr %></a>
+
+				<form action="qualifier_report.mhtml" method="post">
+
+				<div class="row">
+					<input
+						type  = "hidden"
+						name  = "circuit_id"
+						value = "<% $circuit->id %>"
+					>
+
+					<span class="third semibold">
+						Event:
+					</span>
+
+					<span class="twothirds nospace">
+						<select
+							name     = "event_code"
+							onChange = "this.form.submit();"
+						>
+							<option value="">All Events</option>
+
+<%perl>
+							foreach my $ruleset_id (sort {
+									$rules->{$a}{"event"} cmp $rules->{$b}{"event"}
+								} keys %{$rules}
+							) {
+
+								if ($rules->{$ruleset_id}{"events"}) {
+
+									foreach my $event (sort {$a cmp $b} keys %{$rules->{$ruleset_id}{"events"}}) {
+</%perl>
+										<option
+											value = "<% $event %>"
+											<% $event eq $event_code ? "selected" : "" %>
+										><% $event %></option>
+<%perl>
+									}
+								}
+							}
+</%perl>
+
+						</select>
+					</span>
+				</div>
+				</form>
+
+			</div>
 
 %		foreach my $key (sort {$a <=> $b} keys %quals) {
 
