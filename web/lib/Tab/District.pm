@@ -3,7 +3,8 @@ use base 'Tab::DBI';
 Tab::District->table('district');
 Tab::District->columns(Primary => qw/id/);
 Tab::District->columns(Essential => qw/name code location timestamp/);
-Tab::District->columns(Others => qw/level realm/);
+Tab::District->columns(Others => qw/level realm region/);
+Tab::District->has_a(region => 'Tab::Region');
 
 Tab::District->has_many(chapters => 'Tab::Chapter', 'district');
 Tab::District->has_many(schools => 'Tab::School', 'district');
