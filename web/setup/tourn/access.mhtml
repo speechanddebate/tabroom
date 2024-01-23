@@ -8,65 +8,112 @@
 
 	$m->abort if $perms->{"by_event"} || $perms->{"checker"};
 
-	use Scalar::Util qw/reftype/;
 	my $dbh = Tab::DBI->db_Main();
 	my $sth = $dbh->prepare("
 		select
 			permission.id, permission.tag, permission.details,
-			person.id, person.email, person.first, person.last
-		from permission, person
+			person.id person, person.email, person.first, person.last, person.middle,
+			event.id event, event.abbr event_abbr, event.name event_name,
+			category.id category, category.abbr category_abbr, category.name category_name
+		from (permission, person)
+			left join event on event.id = permission.event
+			left join category on category.id = permission.category
 		where permission.tourn = ?
 			and permission.person = person.id
+		group by permission.id
 	");
 
 	my %admins = ();
 	$sth->execute($tourn->id);
+	my $results = $sth->fetchall_hash();
 
 	my $wipe_sth = $dbh->prepare("
 		update permission set details = NULL where id = ?
 	");
 
-	my $warning;
+	foreach my $result (@{$results}) {
 
-	while (
-		my (
-			$id, $tag, $details, $person_id, $email, $first, $last
-		) = $sth->fetchrow_array
-	) {
-
-		$admins{$person_id}{"name"} = $first." ".$last;
-		$admins{$person_id}{"email"} = $email;
-		$admins{$person_id}{"id"} = $id;
-
-		if ($tag eq "contact") {
-			$admins{$person_id}{"contact"}++;
-		} else {
-
-			$admins{$person_id}{"tag"} = $tag;
-
-			if ($tag eq "owner") {
-				$admins{$person_id}{"sort"} = 1;
-			} elsif ($tag eq "tabber") {
-				$admins{$person_id}{"sort"} = 2;
-			} elsif ($tag eq "by_event") {
-				$admins{$person_id}{"sort"} = 3;
-			} elsif ($tag eq "checker") {
-				$admins{$person_id}{"sort"} = 4;
-			}
+		unless ($admins{$result->{person}}{"first"}) {
+			$admins{$result->{person}}{"first"}  = $result->{first};
+			$admins{$result->{person}}{"middle"} = $result->{middle};
+			$admins{$result->{person}}{"last"}   = $result->{last};
+			$admins{$result->{person}}{"email"}  = $result->{email};
 		}
 
-		if ($details) {
-			$admins{$person_id}{"details"}  = eval {
-				return JSON::decode_json($details);
+		if ($result->{"tag"} eq "contact") {
+			$admins{$result->{person}}{"contact"} = 1;
+		}
+
+		if ($result->{"event"}) {
+			$admins{$result->{person}}{"event"}{$result->{event}} = $result->{tag};
+		} elsif ($result->{'category'}) {
+			$admins{$result->{person}}{"category"}{$result->{category}} = $result->{tag};
+		} elsif ($result->{'details'}) {
+			my $details = eval {
+				return JSON::decode_json($result->{'details'});
 			};
 
-			unless ($admins{$person_id}{"details"}) {
-				$wipe_sth->execute($id);
-				$warning .= " <br />" if $warning;
-				$warning .= " Permission details for ".$admins{$person_id}{"name"}." were corrupted and removed.  Please add again.";
+			if ($details) {
+				foreach my $event (keys %{$details}) {
+					$admins{$result->{person}}{"event"}{$event} = $details->{$event};
+
+					my $event = Tab::Event->retrieve($event);
+
+					Tab::Permission->create({
+						person => $result->{person},
+						tourn  => $tourn,
+						event  => $event,
+						tag    => $details->{$event}
+					});
+
+					Tab::Permission->create({
+						person   => $result->{person},
+						tourn    => $tourn,
+						category => $event->category,
+						tag      => $details->{$event}
+					});
+				}
 			}
+
+			$wipe_sth->execute($result->{'id'});
+
+		} else {
+			$admins{$result->{person}}{"tag"} = $result->{'tag'};
 		}
 	}
+
+	foreach my $id (keys %admins) {
+		if ($admins{$id}{'contact'}) {
+			$admins{$id}{'sort'} = 1;
+		} elsif ($admins{$id}{'tag'} eq "owner") {
+			$admins{$id}{'sort'} = 2;
+		} elsif ($admins{$id}{'tag'} eq "tabber") {
+			$admins{$id}{'sort'} = 3;
+		} elsif ($admins{$id}{'tag'} eq "checker") {
+			$admins{$id}{'sort'} = 4;
+		} elsif ($admins{$id}{'category'}) {
+			my @keys = sort keys %{$admins{$id}{"category"}};
+			$admins{$id}{'sort'} = $keys[0];
+		} elsif ($admins{$id}{'event'}) {
+			my @keys = sort keys %{$admins{$id}{"event"}};
+			$admins{$id}{'sort'} = $keys[0];
+		} else {
+			delete $admins{$id};
+		}
+	}
+
+	# These will check against permissions to limit what I can grant
+	my @categories = $m->comp('/funclib/tourn_categories.mas',
+		tourn => $tourn,
+		perms => $perms
+	);
+
+	my @events = $m->comp('/funclib/tourn_events.mas',
+		tourn => $tourn,
+		perms => $perms
+	);
+
+	my $warning;
 
 	my %events;
 	my %categories;
@@ -93,27 +140,54 @@
 		$events{$id}{"abbr"} = $abbr;
 		$events{$id}{"type"} = $type;
 		$types{$type}++;
-		$categories{$cat_id} = $cat_abbr;
+		$categories{$cat_id}{"abbr"} = $cat_abbr;
 	}
 
 </%init>
 
 	<script type="text/javascript">
 
-		function checkAdmin() {
+		function checkPermLimits() {
 
-			$('.admins').each(function(index, admin) {
-				var adminId = admin.id;
-				if ($("#level_"+adminId).val() === "by_event") {
-					$(".by_events_"+adminId).removeClass('hidden');
-				} else {
-					$(".by_events_"+adminId).addClass('hidden');
-				}
-			});
+			$("#categoryPicker").removeClass('hidden');
+			$("#eventPicker").removeClass('hidden');
+			$("#catEvents").addClass('hidden');
+
+			$("#category_id").prop("disabled", false);
+			$("#event_id").prop("disabled", false);
+
+			if ($('#permLevel').val() === 'owner') {
+				$("#categoryPicker").addClass('hidden');
+				$("#eventPicker").addClass('hidden');
+				$("#category_id").prop("disabled", true);
+				$("#event_id").prop("disabled", true);
+			}
+
+			if ($('#category_id').val()) {
+
+				const catName = $('#category_id').find('option:selected').text();
+				$('#catEventName').text(catName);
+
+				$("#eventPicker").addClass('hidden');
+				$("#catEvents").removeClass('hidden');
+				$("#event_id").prop("disabled", true);
+				$("#owner").prop("disabled", true);
+				fixVisual();
+				return;
+			}
+
+			if ($('#event_id').val()) {
+				$("#categoryPicker").addClass('hidden');
+				$("#catEvents").addClass('hidden');
+				$("#category_id").prop("disabled", true);
+				$("#owner").prop("disabled", true);
+			}
+
+			fixVisual();
 		}
 
 		$(document).ready(function() {
-			checkAdmin();
+			checkPermLimits();
 		});
 
     </script>
@@ -134,7 +208,7 @@
 			</p>
 %		}
 
-		<span class="fourfifths">
+		<span class="fourfifths nospace">
 			<h4>Access</h4>
 		</span>
 
@@ -153,25 +227,25 @@
 %			if (keys %admins) {
 				<thead>
 					<tr class="yellowrow">
-						<th class="smallish">
+						<th class="smallish limithalf">
 							Person
 						</th>
 
 						<th
 							title = "Accounts marked as contact will have their email on the tourn website"
-							class = "smallish"
+							class = "smaller"
 						>Contact</th>
 
 						<th class="smallish">
-							Access Level
+							Tournwide
 						</th>
 
-						<th class="smaller">
-							Events w/Tabber Access
+						<th class="smallish">
+							Judge Category Access
 						</th>
 
-						<th class="smaller">
-							Events w/Checker Access
+						<th class="smallish">
+							Event Level Access
 						</th>
 
 						<th class="smaller">
@@ -193,9 +267,11 @@
 								title = "<% $admins{$id}{"email"} %>"
 								class = "limit smallish"
 							>
-								<% $admins{$id}{"name"} %>
+								<% $admins{$id}{"first"} %>
+								<% $admins{$id}{"middle"} %>
+								<% $admins{$id}{"last"} %>
 
-								<span class="full padtopless nospace">
+								<span class="full padtopless nospace smaller">
 									<% $admins{$id}{"email"} %>
 								</span>
 							</td>
@@ -214,17 +290,16 @@
 										<label for="<% $id %>_contact">
 											<span class="padvertless full marno hover">
 												<input
-													type          = "checkbox"
-													id            = "<% $id %>_contact"
-													target_id     = "<% $id %>"
-													property_name = "contact"
-													post_method   = "put"
-													value         = "1"
-													onChange      = "postSwitch(this, '<% $Tab::indexcards_url %>/tourn/<% $tourn->id %>/tab/setup/access');"
-													<% $admins{$id}{"contact"}
-														? 'checked="checked"'
-														: ""
-													%>
+													type         = "checkbox"
+													id           = "<% $id %>_contact"
+													access_level = "contact"
+													post_method  = "put"
+													value        = "1"
+													onChange     = "postSwitch(
+														this,
+														'<% $Tab::indexcards_url %>/tab/<% $tourn->id %>/access/<% $id %>'
+													);"
+													<% $admins{$id}{"contact"} ? 'checked="checked"' : "" %>
 												>
 											</span>
 										</label>
@@ -257,14 +332,19 @@
 %								} else {
 
 									<select
-										name          = "level"
-										class         = "fixedsmall"
-										id            = "level_<% $id %>"
-										target_id     = "<% $id %>"
-										property_name = "level"
-										post_method   = "put"
-										onChange      = "postSwitch(this, '<% $Tab::indexcards_url %>/tourn/<% $tourn->id %>/tab/setup/access'); checkAdmin();"
+										name         = "level"
+										id           = "level_<% $id %>"
+										access_level = "choose"
+										post_method  = "put"
+										onChange     = "postSwitch(
+											this,
+											'<% $Tab::indexcards_url %>/tab/<% $tourn->id %>/access/<% $id %>'
+										);"
 									>
+										<option
+											value="none"
+											<% $admins{$id}{"tag"} eq "by_event" ? "selected" : "" %>
+										>None</option>
 
 %										if ($perms->{owner} || $person->site_admin) {
 											<option
@@ -276,191 +356,106 @@
 										<option
 											value="tabber"
 											<% $admins{$id}{"tag"} eq "tabber" ? "selected" : "" %>
-										>Tabber (All events)</option>
+										>Tabber</option>
 
 										<option
 											value="checker"
 											<% $admins{$id}{"tag"} eq "checker" ? "selected" : "" %>
-										>Checker (All events)</option>
-
-										<option
-											value="by_event"
-											<% $admins{$id}{"tag"} eq "by_event" ? "selected" : "" %>
-										>By Event</option>
+										>Checker</option>
 									</select>
 %								}
 							</td>
 
 							<td class="leftalign nospace smallish">
-								<span
-									class = "twothirds events nospace by_events_<% $id %>"
-									id    = "tabber_<% $id %>"
-								>
 <%perl>
-								EVENT:
-								foreach my $event_id (
-									sort {
-										$events{$a}{"type"} cmp $events{$b}{"type"}
-										|| $events{$a}{"abbr"} cmp $events{$b}{"abbr"}
-										|| $events{$a}{"name"} cmp $events{$b}{"name"}
-									} keys %events
+								my $notfirst;
+
+								foreach my $category_id (
+									sort { $categories{$a}{"abbr"} cmp $categories{$b}{"abbr"} }
+									keys %{$admins{$id}{"category"}}
 								) {
-
-									next unless $admins{$id}{"details"};
-
-									unless (reftype $admins{$id}{"details"} eq reftype {}) {
-										delete $admins{$id}{"details"};
-										my $sth = $dbh->prepare("delete from permission where person = ? and tourn = ?");
-										$sth->execute($id, $tourn);
-										next EVENT;
-									}
-									next unless $admins{$id}{"details"}{$event_id};
-									next unless $admins{$id}{"details"}{$event_id} eq "tabber";
 </%perl>
 									<div
-										class        = "lilbutton threetenths bluetext <% $event_id %>_<% $id %>"
-										id           = "<% $event_id %>_<% $id %>"
-										target_id    = "<% $id %>"
-										title        = "Click event to remove access"
-										post_method  = "delete"
-										setting_name = "<% $event_id %>"
-										onClick      = "postSwitch(this, '<% $Tab::indexcards_url %>/tourn/<% $tourn->id %>/tab/setup/eventaccess');"
+										class = "full marno <% $notfirst++ ? "ltbordertop" : "" %>"
+										id    = "category_<% $category_id %>_<% $id %>"
 									>
-										<% $events{$event_id}{"abbr"} %>
+										<span class="twofifths nospace leftalign">
+											<span class="quarterspacer"></span>
+											<% $categories{$category_id}{"abbr"} %>
+										</span>
+										<span
+											id          = "category_<% $category_id %>_<% $id %>_role"
+											class       = "twofifths nospace padvertless centeralign hover ucfirst"
+											title       = "Click to change access level"
+											post_method = "put"
+											onClick     = "postSwitch(
+												this,
+												'<% $Tab::indexcards_url %>/tab/<% $tourn->id %>/category/<% $category_id %>/access/<% $id %>'
+											);"
+										>
+											<% ucfirst($admins{$id}{'category'}{$category_id}) %>
+										</span>
+										<span class="sixth centeralign yellowhover">
+											<span
+												class       = "full nospace smaller fa fa-trash redtext"
+												title       = "Click to remove access to this category"
+												post_method = "delete"
+												onClick     = "postSwitch(
+													this,
+													'<% $Tab::indexcards_url %>/tab/<% $tourn->id %>/category/<% $category_id %>/access/<% $id %>'
+												);"
+											>
+											</span>
+										</span>
 									</div>
 %								}
-								</span>
-
-								<span class="threetenths centeralign nospace by_events_<% $id %>">
-
-									<select
-										target_id    = "<% $id %>"
-										setting_name = "tabber"
-										class        = "fixedtinier plain"
-										reply_append = "tabber_<% $id %>"
-										onChange      = "postSwitch(this, '<% $Tab::indexcards_url %>/tourn/<% $tourn->id %>/tab/setup/eventaccess');"
-									>
-										<option value="">Add:</option>
-										<optgroup label="Event Types">
-<%perl>
-										foreach my $type (
-											sort {
-												$types{$a} cmp $types{$b}
-											} keys %types
-										) {
-</%perl>
-											<option
-												value="type_<% $type %>"
-											><% ucfirst($type) %> events</option>
-%										}
-										<optgroup label="Judge Categories">
-<%perl>
-										foreach my $category (
-											sort {
-												$categories{$a} cmp $categories{$b}
-											} keys %categories
-										) {
-</%perl>
-											<option
-												value="category_<% $category %>"
-											><% $categories{$category} %> events</option>
-%										}
-										<optgroup label="Events">
-<%perl>
-										foreach my $event (
-											sort {
-												$events{$a}{"type"} cmp $events{$b}{"type"}
-												|| $events{$a}{"abbr"} cmp $events{$b}{"abbr"}
-											} keys %events
-										) {
-</%perl>
-											<option
-												value="event_<% $event %>"
-											><% $events{$event}{"abbr"} %></option>
-%										}
-									</select>
-								</span>
 							</td>
 
-							<td class="leftalign nospace smallish">
-								<span
-									class = "twothirds events nospace by_events_<% $id %>"
-									id    = "checker_<% $id %>"
-								>
+							<td class="leftalign nospace smallish" id="events_<% $id %>">
 <%perl>
-								foreach my $event_id (
-									sort {
-										$events{$a}{"type"} cmp $events{$b}{"type"}
-										|| $events{$a}{"abbr"} cmp $events{$b}{"abbr"}
-										|| $events{$a}{"name"} cmp $events{$b}{"name"}
-									} keys %events
-								) {
+								undef $notfirst;
 
-									next unless $admins{$id}{"details"};
-									next unless $admins{$id}{"details"}{$event_id} eq "checker";
+								foreach my $event_id (
+									sort {$events{$a}{"abbr"} cmp $events{$b}{"abbr"}}
+									keys %{$admins{$id}{"event"}}
+								) {
 </%perl>
 									<div
-										class        = "lilbutton threetenths bluetext <% $event_id %>_<% $id %>"
-										id           = "<% $event_id %>_<% $id %>"
-										target_id    = "<% $id %>"
-										title        = "Click event to remove access"
-										post_method  = "delete"
-										setting_name = "<% $event_id %>"
-										onChange     = "postSwitch(this, '<% $Tab::indexcards_url %>/tourn/<% $tourn->id %>/tab/setup/eventaccess');"
+										class = "full marno <% $notfirst++ ? "ltbordertop" : "" %>"
+										id    = "event_<% $event_id %>_<% $id %>"
 									>
-										<% $events{$event_id}{"abbr"} %>
+										<span class="twofifths nospace leftalign">
+											<span class="quarterspacer"></span>
+											<% $events{$event_id}{"abbr"} %>
+										</span>
+
+										<span
+											id          = "event_<% $event_id %>_<% $id %>_role"
+											class       = "twofifths nospace padvertless leftalign hover centeralign ucfirst"
+											title       = "Click to toggle event access level"
+											post_method = "put"
+											onClick     = "postSwitch(
+												this,
+												'<% $Tab::indexcards_url %>/tab/<% $tourn->id %>/event/<% $event_id %>/access/<% $id %>'
+											);"
+										>
+											<% ucfirst($admins{$id}{'event'}{$event_id}) %>
+										</span>
+
+										<span class="sixth centeralign yellowhover">
+											<span
+												class       = "full nospace smaller fa fa-trash redtext centeralign"
+												title       = "Click to remove access to this event"
+												post_method = "delete"
+												onClick     = "postSwitch(
+													this,
+													'<% $Tab::indexcards_url %>/tab/<% $tourn->id %>/event/<% $event_id %>/access/<% $id %>'
+												);"
+											>
+											</span>
+										</span>
 									</div>
 %								}
-								</span>
-
-								<span class="threetenths centeralign nospace by_events_<% $id %>">
-									<select
-										target_id    = "<% $id %>"
-										setting_name = "checker"
-										class        = "fixedtinier plain"
-										reply_append = "checker_<% $id %>"
-										onClick      = "postSwitch(this, '<% $Tab::indexcards_url %>/tourn/<% $tourn->id %>/tab/setup/eventaccess');"
-									>
-										<option value="">Add:</option>
-										<optgroup label="Event Types">
-<%perl>
-										foreach my $type (
-											sort {
-												$types{$a} cmp $types{$b}
-											} keys %types
-										) {
-</%perl>
-											<option
-												value="type_<% $type %>"
-											><% ucfirst($type) %> events</option>
-%										}
-										<optgroup label="Judge Categories">
-<%perl>
-										foreach my $category (
-											sort {
-												$categories{$a} cmp $categories{$b}
-											} keys %categories
-										) {
-</%perl>
-											<option
-												value="category_<% $category %>"
-											><% $categories{$category} %> events</option>
-%										}
-										<optgroup label="Events">
-<%perl>
-										foreach my $event (
-											sort {
-												$events{$a}{"type"} cmp $events{$b}{"type"}
-												|| $events{$a}{"abbr"} cmp $events{$b}{"abbr"}
-											} keys %events
-										) {
-</%perl>
-											<option
-												value="event_<% $event %>"
-											><% $events{$event}{"abbr"} %></option>
-%										}
-									</select>
-								</span>
 							</td>
 
 							<td class="centeralign nospace smallish">
@@ -472,10 +467,14 @@
 								) {
 </%perl>
 									<a
-										target_id     = "<% $id %>"
-										post_method   = "delete"
-										class         = "redtext button buttonwhite fa fa-trash"
-										onClick       = "postSwitch(this, '<% $Tab::indexcards_url %>/tourn/<% $tourn->id %>/tab/setup/access');"
+										target_id   = "<% $id %>"
+										personId    = "<% $id %>"
+										post_method = "delete"
+										class       = "redtext buttonwhite fa fa-trash"
+										onClick     = "postSwitch(
+											this,
+											'<% $Tab::indexcards_url %>/tab/<% $tourn->id %>/access/<% $id %>'
+										);"
 									></a>
 %								}
 							</td>
@@ -484,14 +483,13 @@
 				</tbody>
 %			}
 		</table>
-
 	</div>
 
 <%perl>
 
 	$sth = $dbh->prepare("
 		select
-			person.id, person.email, person.first, person.last,
+			person.id, person.email, person.first, person.last, person.middle,
 			count(distinct permission.tourn)
 		from person, permission, permission mine
 		where person.id = permission.person
@@ -507,20 +505,21 @@
 
 	while (
 		my (
-			$person_id, $email, $first, $last, $count
+			$person_id, $email, $first, $last, $middle, $count
 		) = $sth->fetchrow_array()
 	) {
-		$peeps{$person_id}{"first"} = $first;
-		$peeps{$person_id}{"last"}  = $last;
-		$peeps{$person_id}{"email"} = $email;
-		$peeps{$person_id}{"count"} = $count;
+		$peeps{$person_id}{"first"}  = $first;
+		$peeps{$person_id}{"middle"} = $middle;
+		$peeps{$person_id}{"last"}   = $last;
+		$peeps{$person_id}{"email"}  = $email;
+		$peeps{$person_id}{"count"}  = $count;
 	}
 
 </%perl>
 
 	<div class="menu">
 		<div class="sidenote">
-			<h4>Add New Staff</h4>
+			<h4>Add Access</h4>
 
 			<form
 				action = "access_add.mhtml"
@@ -533,7 +532,9 @@
 				>
 
 				<div class="row centeralign padmuchmore">
+					<span class="nineteen nospace">
 					<select
+						id    = "new_person"
 						name  = "person_id"
 						class = "fixedmost"
 					>
@@ -546,87 +547,161 @@
 						} keys %peeps
 					) {
 
-						next if $peep_id == $person;
+						next if $admins{$peep_id}{"tag"} eq "owner";
+						next if $admins{$peep_id}{"tag"} eq "tabber";
 </%perl>
 						<option
 							value="<% $peep_id %>"
-						><% $peeps{$peep_id}{"first"}." ".$peeps{$peep_id}{"last"}." ".$peeps{$peep_id}{"email"} %></option>
+						><% $peeps{$peep_id}{"first"}." ".$peeps{$peep_id}{"last"}.": ".$peeps{$peep_id}{"email"} %></option>
 %					}
 					</select>
-				</div>
-
-				<div class="row centeralign padmuchmore">
-					<input
-						type        = "text"
-						name        = "email"
-						size        = "32"
-						placeholder = "Or, search by email address"
-					>
-				</div>
-
-				<div class="row centeralign padmuchmore">
-					<span class="quarter semibold bluetext">
-						Role:
 					</span>
+				</div>
 
-					<span class="threequarters nospace">
-						<select
-							class = "fixedmost"
-							name  = "tag"
+				<div class="row centeralign padmuchmore">
+					<span class="ninetenths nospace">
+						<input
+							type        = "text"
+							name        = "email"
+							placeholder = "Or, search by email address"
 						>
-							<option value="checker">Checker (All events)</option>
-							<option value="tabber">Tabber (All events)</option>
-							<option value="by_event">By Event Access</option>
-%							if ($perms->{owner} || $person->site_admin) {
-								<option value="owner">Tournament Owner</option>
-% 							}
-						</select>
 					</span>
 				</div>
 
-				<div class="libl marno padmore rightalign">
-					<span class="half centeralign nospace">
+				<div class="row centeralign nospace padvertless">
+					<span class="ninetenths nospace">
+						<span class="quarter semibold bluetext leftalign">
+							Level
+						</span>
+
+						<span class="threequarters nospace leftalign">
+							<select
+								id       = "permLevel"
+								name     = "tag"
+								class    = "fixedmost"
+								onChange = "checkPermLimits();"
+							>
+								<option value="checker">Checker</option>
+								<option value="tabber">Tabber</option>
+%								if ($perms->{owner} || $person->site_admin) {
+									<option id="owner" value="owner">Owner</option>
+%								}
+							</select>
+						</span>
+					</span>
+				</div>
+
+				<div id="categoryPicker" class="row centeralign nospace padvertless">
+					<span class="ninetenths nospace">
+						<span class="quarter semibold bluetext leftalign">
+							Judges
+						</span>
+
+						<span class="threequarters nospace leftalign">
+							<select
+								class    = "fixedmost"
+								id       = "category_id"
+								name     = "category_id"
+								onChange = "checkPermLimits();"
+							>
+								<option value="">All Categories</option>
+%								foreach my $category (@categories) {
+									<option
+										value="<% $category->id %>"
+									><% $category->abbr %></option>
+%								}
+							</select>
+						</span>
+					</span>
+				</div>
+
+				<div id="catEvents" class="row centeralign nospace">
+					<label for="with_events">
+						<span class='ninetenths nospace hover'>
+							<span class="fourfifths leftalign">
+								Include all events in <span id='catEventName' class="inline nospace">CAT?</span>
+							</span>
+
+							<span class="fifth nospace centeralign">
+								<input
+									type  = "checkbox"
+									id    = "with_events"
+									name  = "with_events"
+									value = "1"
+								>
+							</span>
+						</span>
+					</label>
+				</div>
+
+				<div id="eventPicker" class="row centeralign nospace padvertless">
+					<span class="ninetenths nospace">
+						<span class="quarter semibold bluetext leftalign">
+							Events
+						</span>
+
+						<span class="threequarters nospace leftalign">
+							<select
+								class    = "fixedmost"
+								id       = "event_id"
+								name     = "event_id"
+								onChange = "checkPermLimits();"
+							>
+								<option value="">All Events</option>
+%								foreach my $event (@events) {
+									<option
+										value="<% $event->id %>"
+									><% $event->abbr %></option>
+%								}
+							</select>
+						</span>
+					</span>
+				</div>
+
+				<div class="libl rightalign padvertless">
+					<span class="half centeralign nospace true">
 						<input
 							type  = "submit"
-							value = "Give Access"
+							class = "thin"
+							value = "Grant Access"
 						>
 					</span>
 				</div>
 			</form>
 		</div>
-		<div class="sidenote">
-			<h4>Auto backups</h4>
 
+		<div class="sidenote">
+			<h4 title="These users will get data backups sent to them from all events and divisions">
+				Auto backups
+			</h4>
 <%perl>
 				my $follower_ids = $tourn_settings->{"backup_followers"};
 				my @followers;
 
-				foreach my $id (split(/,/, $follower_ids)) {
-					next unless $id;
-					my $follower = Tab::Person->retrieve($id);
-					push @followers, $follower;
-				}
-</%perl>
-				<p>
-					The following users will get auto backup emails from all
-					events and divisions.
-				</p>
+				eval {
+					foreach my $id (@{$follower_ids}) {
+						next unless $id;
+						my $follower = Tab::Person->retrieve($id);
+						push @followers, $follower;
+					}
+				};
 
-%				foreach my $follower (@followers) {
-%					next unless $follower;
+				foreach my $follower (@followers) {
+					next unless $follower;
+</%perl>
 					<div class="row" id="backups_<% $follower->id %>">
 						<span class="fourfifths">
 							<span class="halfspacer"></span>
 							<% $follower->email %>
 						</span>
 
-						<span class="fifth centeralign nospace">
+						<span class="fifth centeralign padvertless">
 							<a
-								class        = "redtext buttonwhite fa fa-trash"
-								target_id    = "<% $follower->id %>"
-								setting_name = "backup"
-								post_method  = "delete"
-								onClick     = "postSwitch(this, '<% $Tab::indexcards_url %>/tourn/<% $tourn->id %>/tab/setup/access');"
+								class       = "redtext buttonwhite fa fa-trash smallish"
+								post_method = "delete"
+								onClick     = "postSwitch(this,
+									'<% $Tab::indexcards_url %>/tourn/<% $tourn->id %>/tab/backups/<% $follower->id %>'
+								);"
 							>
 							</a>
 						</span>
@@ -638,24 +713,76 @@
 					method = "post"
 				>
 					<div class="liblrow">
-						<span class="fourfifths">
-							<input
-								type        = "text"
-								name        = "username"
-								size        = "32"
-								placeholder = "Add backup account's email"
-							>
+						<span class="fourfifths centeralign nospace">
+							<span class="ninetenths nospace">
+								<input
+									type        = "text"
+									name        = "username"
+									size        = "32"
+									placeholder = "Add backup account's email"
+								>
+							</span>
 						</span>
-						<span class="fifth centeralign">
+						<span class="fifth centeralign padvertno">
 							<input
 								type  = "submit"
+								class = "thin"
 								value = "Add"
 							>
 						</span>
 					</div>
 				</form>
 			</div>
+
+			<div class="sidenote">
+				<h4>Permissions</h4>
+
+				<p class="smaller">
+					A tournament owner can access anything in a tournament.
+					Reserve this level for the tournament director(s).
+				</p>
+
+				<p class="smaller">
+					The contact email and name will be displayed on the public
+					site. They cannot access tab without additional
+					permissions.
+				</p>
+
+				<p class="smaller">
+					A tabber has access to everything except changing ownership
+					of the tournament webname, removing an owner's permissions,
+					changing the official contact, or deleting change logs.
+				</p>
+
+				<p class="smaller">
+					A checker has access to activation &amp; deactivation
+					screens for judges and entries; the manual ballot entry
+					screens; and the round start/check attendance screens &amp;
+					dashboards.
+				</p>
+
+				<p class="smaller">
+					Tabber access to a judge category only grants access the
+					judges, judge pools, and standby pools in that judge category.
+					It does not include tab access to the category's events.
+
+					Checker-level judge category permissions give access that
+					category's judge activation screen.
+				</p>
+
+				<p class="smaller">
+					Tabber permissions for an event grants access to settings,
+					entries, registrations, pairings, and results in those
+					event(s).  Event-only tabbers cannot alter judges or judge
+					pools not tied to their own event without access to the
+					parent judge category.
+
+					Checker-level event permissions grants access to the entry
+					activation screens, the manual ballot entry and the
+					attendance dashboards only for those event(s);
+
+				</p>
+			</div>
 		</div>
 	</div>
 
-%	;

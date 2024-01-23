@@ -5,90 +5,105 @@
 	$timeslot_id => undef
 	$round_type  => undef
 	$weekend_id  => undef
+	$event_id    => undef
+	$site_id     => undef
 </%args>
 <%init>
 
-
 	my $count;
-
 	my $err;
 
-	my ($eventref, $catref) = $m->comp(
-		"/funclib/allowed_events.mas", 
-		tourn => $tourn,
-		perms => $perms,
-		type  => "admin"
+	my %events = $m->comp("/funclib/perms/events.mas",
+		tourn   => $tourn,
+		perms   => $perms,
+		limited => 1
 	);
 
-	my @events = @{$eventref};
-	my @categories = @{$catref};
+	my $limiter;
 
-	my $timeslot = Tab::Timeslot->retrieve($timeslot_id) if $timeslot_id;
-	my $weekend = Tab::Weekend->retrieve($weekend_id) if $weekend_id;
+	if ($event_id && $events{$event_id}) {
+		$limiter .= " and round.event = $event_id ";
+	} elsif (keys %events) {
+		$limiter .= " and round.event IN (".join(',', keys %events).") ";
+	} else {
+		$m->comp("/funclib/abort.mas",
+			message => "No events found you can access"
+		);
+	}
 
-	foreach my $event (@events) { 
+	if ($timeslot_id) {
+		$limiter .= " and round.timeslot = ".int($timeslot_id);
+	}
 
-		next if $event->type ne "speech" && $event->type ne "congress";
+	if ($site_id) {
+		$limiter .= " and round.site = ".int($site_id);
+	}
 
-		my @rounds = $event->rounds;
-		my @clear_rounds;
+	if ($weekend_id) {
+		$limiter .= "
+			and exists (
+				select es.id
+					from event_setting
+				where es.event = event.id
+					and es.tag = 'weekend'
+					and es.value = ".int($weekend_id)."
+			)";
+	}
 
-		if ($timeslot) { 
-			foreach my $round (@rounds) { 
-				next unless $round->timeslot->id == $timeslot->id;
-				push @clear_rounds, $round;
-			}
-			@rounds = @clear_rounds;
-			undef @clear_rounds;
+	if ($round_type) {
+		if ($round_type eq "final"
+			|| $round_type eq "elim"
+			|| $round_type eq "runoff"
+		) {
+			$limiter .= " and round.type = $round_type ";
 		}
 
-		if ($round_type) { 
-			foreach my $round (@rounds) { 
-				next unless $round->type eq $round_type;
-				push @clear_rounds, $round;
-			}
-			@rounds = @clear_rounds;
-			undef @clear_rounds;
+		if ($round_type eq "prelim"
+			|| $round_type eq "highlow"
+			|| $round_type eq "highhigh"
+		) {
+			$limiter .= " and round.type = prelim ";
+		}
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			round.id, round.name, round.label, event.abbr
+		from round, event
+		where event.tourn = ?
+			and round.event = event.id
+		$limiter
+	");
+
+	$sth->execute($tourn);
+
+	my $rounds = $sth->fetchall_hash();
+
+	foreach my $round (@{$rounds}) {
+
+		if ($clear) {
+			$m->comp('/funclib/round_clear_rooms.mas', round => $round->{id});
 		}
 
-		next unless @rounds;
+		next if $ARGS{"clear_only"};
 
-		ROUND:
-		foreach my $round (@rounds) { 
+		$m->comp('/panel/round/rooms.mhtml',
+			round_id       => $round->{id},
+			tourn          => $ARGS{'tourn'},
+			tourn_settings => $ARGS{'tourn_settings'},
+			person         => $ARGS{'person'},
+			perms          => $ARGS{'perms'},
+			return         => 1
+		);
 
-			$m->comp('/funclib/round_clear_rooms.mas', round => $round) 
-				if $clear eq "yup" 
-				&& ($event->type eq "speech" || $event->type eq "congress");
-
-			next if $ARGS{"clear_only"};
-
-			my @panels = $m->comp('/funclib/round_panels_ada.mas', round => $round);
-
-			foreach my $panel (@panels) { 
-
-				next if $panel->room > 0;
-
-				my @rooms = $m->comp("/funclib/clean_rooms.mas", panel => $panel);
-
-				my $chosen;
-				if ($panel->ada) { 
-					foreach my $room (@rooms) { 
-						next unless $room->ada;
-						$chosen = $room;
-						last if $chosen;
-					}
-				}
-				$chosen = shift @rooms unless $chosen;
-				$panel->room($chosen->id) if $chosen;
-				$panel->update();
-				$count++;
-			}
-		}
+		$count++;
 	}
 
 	my $msg = "Rooms have been assigned to $count rounds";
 
-	$m->redirect("index.mhtml?timeslot_id=$timeslot_id&weekend_id=$weekend_id&round_type=$round_type&msg=$msg&err=$err");
+	$m->redirect("index.mhtml?timeslot_id=$timeslot_id&weekend_id=$weekend_id&round_type=$round_type&site_id=$site_id&msg=$msg");
 
 </%init>
 

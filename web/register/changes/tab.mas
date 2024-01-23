@@ -3,114 +3,84 @@
 	$tourn_settings
 	$start
 	$end
+	$perms
 	$what              => "tabbing"
-	$only_category     => undef
 	$delete_permission => undef
 </%args>
 <%init>
+
+	use Data::Dumper;
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
 	my @tabs;
 
-	Tab::ChangeLog->columns(TEMP => "personname");
-	Tab::ChangeLog->columns(TEMP => "personemail");
-	Tab::ChangeLog->columns(TEMP => "eventname");
-	Tab::ChangeLog->columns(TEMP => "eventabbr");
-	Tab::ChangeLog->columns(TEMP => "categoryname");
-	Tab::ChangeLog->columns(TEMP => "categoryabbr");
-
-	undef $delete_permission if $what eq "access";
-
-	if ($only_category) {
-
-		Tab::ChangeLog->set_sql( event_category_moves_by_date => "
-			select distinct change_log.*,
-				concat_ws(' ', person.first, person.last) as personname,
-				person.email as personemail,
-				event.name as eventname,
-				event.abbr as eventabbr,
-				category.name as categoryname,
-				category.abbr as categoryabbr
-			from (change_log, event, category)
-				left join person on change_log.person = person.id
-
-			where change_log.tourn = ?
-				and event.id = change_log.event
-				and event.category = category.id
-				and category.id = ?
-				and change_log.tag = ?
-				and change_log.created_at > ?
-				and change_log.created_at < ?
-			order by created_at DESC"
-		);
-
-		@tabs = Tab::ChangeLog->search_event_category_moves_by_date(
-			$tourn->id,
-			$only_category->id,
-			$what,
-			$start->{"string"},
-			$end->{"string"}
-		);
-
-		Tab::ChangeLog->set_sql( category_moves_by_date => "
-			select distinct change_log.*,
-				concat_ws(' ', person.first, person.last) as personname,
-				person.email as personemail,
-				category.name as categoryname,
-				category.abbr as categoryabbr
-			from (change_log, category)
-				left join person on person.id = change_log.person
-			where change_log.tourn = ?
-				and category.id = change_log.category
-				and category.id = ?
-				and change_log.tag = ?
-				and change_log.created_at > ?
-				and change_log.created_at < ?
-			order by created_at DESC"
-		);
-
-		push @tabs, Tab::ChangeLog->search_category_moves_by_date(
-			$tourn->id,
-			$only_category->id,
-			$what,
-			$start->{"string"},
-			$end->{"string"}
-		);
-
-		my %seen;
-		@tabs = grep { ! $seen{$_->id} ++ } @tabs;
-
-	} else {
-
-		Tab::ChangeLog->set_sql( moves_by_date => "
-			select distinct change_log.*,
-				concat_ws(' ', person.first, person.last) as personname,
-				person.email as personemail,
-				event.name as eventname,
-				event.abbr as eventabbr,
-				category.name as categoryname,
-				category.abbr as categoryabbr
-			from change_log
-				left join event on event.id = change_log.event
-				left join category on category.id = change_log.category
-				left join person on change_log.person = person.id
-
-			where change_log.tourn = ?
-				and change_log.tag = ?
-				and change_log.created_at > ?
-				and change_log.created_at < ?
-			order by change_log.created_at DESC"
-		);
-
-		@tabs = Tab::ChangeLog->search_moves_by_date(
-			$tourn->id,
-			$what,
-			$start->{"string"},
-			$end->{"string"}
-		);
+	if ($what eq "access") {
+		undef $delete_permission;
+		unless ($perms->{'owner'}) {
+			$m->comp("/funclib/abort.mas", message => "Only a tournament owner may access that function");
+		}
 	}
+
+	my $query_limit;
+	unless (
+		$perms->{'tourn'}{$tourn} eq "owner"
+		|| $perms->{'tourn'}{$tourn} eq "tabber"
+	) {
+		my $ids = join(",", keys %{$perms->{event}});
+		$query_limit = " and event.id in ($ids) ";
+	}
+
+	if ($what eq "conflicts") {
+		unless (
+			$perms->{'tourn'}{$tourn} eq "owner"
+			|| $perms->{'tourn'}{$tourn} eq "tabber"
+		) {
+			my $ids = join(",", keys %{$perms->{category}});
+			$query_limit = " and category.id in ($ids) ";
+		}
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select distinct cl.id,
+			CONVERT_TZ(cl.created_at, '+00:00', tourn.tz) as created,
+			cl.tag tag,
+			cl.description description,
+			cl.count count,
+			concat_ws(' ', person.first, person.last) as person_name,
+			person.email as person_email,
+			event.id as event_id,
+			event.name as event_name,
+			event.abbr as event_abbr,
+			category.id as category_id,
+			category.name as category_name,
+			category.abbr as category_abbr
+		from (tourn, change_log cl)
+			left join event on event.id = cl.event
+			left join judge on judge.id = cl.judge
+			left join category on category.id = cl.category
+			left join person on cl.person = person.id
+
+		where tourn.id = ?
+			and cl.tourn = tourn.id
+			and cl.tag = ?
+			and cl.created_at > ?
+			and cl.created_at < ?
+			$query_limit
+		order by cl.created_at DESC
+	");
+
+	$sth->execute(
+		$tourn->id,
+		$what,
+		$start->{"string"},
+		$end->{"string"}
+	);
+
+	my $results = $sth->fetchall_hash();
 
 </%init>
 
@@ -163,43 +133,44 @@
 
 <%perl>
 
- 		foreach my $tab (@tabs) {
+ 		foreach my $log (@{$results}) {
 
-			my $happened = $tab->created_at->set_time_zone($tz);
-			my $description = $tab->description;
-			$description =~ s/,/, /g;
+			$log->{description} =~ s/,/, /g;
+
+			if ($what eq "strikecards") {
+				delete $log->{description};
+			}
 </%perl>
+			<tr id="<% $log->{id} %>">
 
-			<tr id="<% $tab->id %>">
-
-				<td class="smallish" title="<% $tab->personemail %>">
-					<% $tab->personname %>
+				<td class="smallish" title="<% $log->{person_email} %>">
+					<% $log->{person_name} %>
 				</td>
 
 				<td class="smallish centeralign nowrap">
-					<% $tab->eventabbr
-						? $tab->eventabbr
-						: $tab->categoryabbr
-							? $tab->categoryabbr
+					<% $log->{event_abbr}
+						? $log->{event_abbr}
+						: $log->{category_abbr}
+							? $log->{category_abbr}
 							: "Tourn"
 					%>
 				</th>
 
 				<td class="smallish centeralign nowrap">
-					<span class="hidden"><% $happened->epoch %></span>
-					<& "/funclib/showdt.mas", dt => $happened, format => "murica_short" &>
+					<span class="hidden"><% $log->{created_at} %></span>
+					<& "/funclib/showdt.mas", string => $log->{created_at}, format => "murica_short" &>
 				</td>
 
 				<td class="smallish">
-					<% $description %>
+					<% $log->{description} %>
 				</td>
 
 %				if ($delete_permission) {
 					<td class="smaller centeralign padless">
 						<a
 							value         = "1"
-							id            = "<% $tab->id %>"
-							target_id     = "<% $tab->id %>"
+							id            = "<% $log->{id} %>"
+							target_id     = "<% $log->{id} %>"
 							on_success    = "destroy"
 							onClick       = "postSwitch( this, 'rm_log.mhtml')"
 							class         = "buttonwhite fa fa-sm fa-trash redtext hover"
@@ -208,9 +179,7 @@
 						</a>
 					</td>
 %				}
-
 			</tr>
-
 %		}
 
 		</tbody>
