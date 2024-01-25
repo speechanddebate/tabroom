@@ -251,8 +251,6 @@
 			url,
 		};
 
-		BREAKME
-
 		if (attributes.postmethod && !attributes.post_method) {
 			attributes.post_method = attributes.postmethod;
 			delete attributes.postmethod;

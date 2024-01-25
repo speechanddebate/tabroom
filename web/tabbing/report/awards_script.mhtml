@@ -2,6 +2,7 @@
 	$tourn
 	$tourn_settings
 	$session
+	$perms
 	$event_id => undef
 	$by_round => undef
 	$cutoff   => undef
@@ -15,40 +16,43 @@
 		$m->redirect("reading.mhtml?event_id=$event_id");
 	}
 
-	my $event = Tab::Event->retrieve($event_id)
-		if $event_id
-		&& $event_id ne "all";
-
-	my %school_name =
-		map {$_->id => Tab::short_name($_->schoolname)}
-		$m->comp("/funclib/tourn_entries.mas", tourn => $tourn);
-
-	my %school_by_id =
-		map {$_->id => Tab::short_name($_->name)}
-		$tourn->schools;
-
-	#eh whatever
-	our %student_phonetic;
-	my $switch = 1;
     my $now = DateTime->now;
     $now->set_time_zone($tourn->tz);
 
 	our $state_hash = $m->comp("/funclib/state_hash.mas");
 
-	my $name = $tourn->name
-		if $event_id eq "all";
+	my $ncfl++ if $tourn_settings->{"ncfl"};
 
-    $name = $event->name
-		if $event
-		&& not defined $name;
+	my $limit;
+	my @events;
+	my $event;
+
+	if ($event_id eq "all") {
+
+		@events = $m->comp("/funclib/perms/events.mas",
+			tourn => $tourn,
+			perms => $perms
+		);
+
+		my $ids = join(',', @events);
+		$limit = "and event.id IN ($ids) ";
+
+	} else {
+
+		$limit = "and event.id = ".int($event_id);
+		$event = Tab::Event->retrieve($event_id);
+		push @events, $event;
+	}
+
+	my $name;
+
+	if ($event_id eq "all") {
+		$name = $tourn->name
+	} else {
+		$name = $event->name;
+	}
 
     $name =~ s/[\W_]//g;
-
-	my $ncfl++ if $tourn_settings->{"ncfl"};
-	my @events;
-	push @events, $event if $event;
-	@events = sort {$a->name cmp $b->name} $tourn->events
-		if $event_id eq "all";
 
     my $filename = "Awards-$name-".$session->id;
     my $filepath = $Tab::file_root."tmp/".$filename;
@@ -67,6 +71,24 @@
 	Tab::Entry->columns(TEMP => "key");
 	Tab::Entry->columns(TEMP => "tie");
 
+	my $dbh = Tab::DBI->db_Main();
+	my $ids = join(',', @events);
+	my $sth = $dbh->prepare("
+		select
+			student.id, student.first, student.last, student.phonetic
+		from student, entry_student es, entry
+		where entry.event IN ($ids)
+			and entry.id = es.entry
+			and es.student = student.id
+			and student.phonetic IS NOT NULL
+	");
+
+	$sth->execute();
+	my $results = $sth->fetchall_hash();
+	my %phonetics = map {$_->{id} => $_->{phonetic}} @{$results};
+
+	$tourn_settings->{student_phonetic} = \%phonetics;
+
 	EVENT:
 	foreach my $event (@events) {
 
@@ -79,8 +101,8 @@
 
 		} else {
 
-			my $novice++ if $event->setting("top_novice") ne "none";
-			my $honmen++ if $event->setting("honorable_mentions");
+			my $novice = $event->setting("top_novice");
+			my $honmen = $event->setting("honorable_mentions");
 
 			my @rounds =
 				sort {$b->name <=> $a->name}
@@ -88,16 +110,14 @@
 					event => $event
 				);
 
-			my $top_novice = $m->comp(
-				"/tabbing/results/top_novice.mas",
-				event => $event)
-			if $novice;
+			my $top_novice;
 
-			%{$student_phonetic{$event->id}} =
-				map {$_->id => $_->phonetic}
-				$m->comp("/funclib/event_students.mas",
-					event => $event
-			);
+			if ($novice) {
+				Tab::debuglog("Novice is $novice");
+				$top_novice = $m->comp(
+					"/tabbing/results/top_novice.mas",
+					event => $event);
+			};
 
 			my $final;
 			my @elims;
@@ -261,7 +281,7 @@
 				if ($names && $round->type ne "final") {
 
 					@round_entries =
-						sort {$school_name{$a} cmp $school_name{$b}}
+						sort {$entries_ref->{$a}{"school_name"} cmp $entries_ref->{$b}{"school_name"}}
 						@round_entries;
 				}
 
@@ -383,7 +403,6 @@
 	}
 
 	close TEXOUT;
-	undef %student_phonetic;
 
     $m->comp("/funclib/printout.mas",
 		tourn    => $tourn,
@@ -451,7 +470,7 @@
 
 		foreach my $student (@students) {
 
-			next unless $student_phonetic{$event_id}{$student->id};
+			next unless $tourn_settings->{"student_phonetic"}{$student->id};
 
 			if ( $notfirst && (($notfirst + 1) == $count)) {
 				print TEXOUT " \\& ";
@@ -461,7 +480,7 @@
 				print TEXOUT "[ ";
 			}
 
-			print TEXOUT Tab::texify($student_phonetic{$event_id}{$student->id}." ");
+			print TEXOUT Tab::texify($tourn_settings->{"student_phonetic"}{$student->id});
 			$notfirst++;
 		}
 

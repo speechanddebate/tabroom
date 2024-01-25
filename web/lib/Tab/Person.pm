@@ -84,7 +84,6 @@ sub all_permissions {
 					delete $perms{'category'};
 				}
 			}
-
 			next if $perms{"tourn"}{$tourn->id} eq "owner";
 			next if $perms{"tourn"}{$tourn->id} eq "tabber";
 
@@ -135,7 +134,6 @@ sub all_permissions {
 		}
 	}
 
-	$perms{"owner"}++ if $self->site_admin;
 	return %perms;
 }
 

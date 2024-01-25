@@ -1,6 +1,7 @@
 <%args>
 	$tourn
 	$session
+	$perms
 </%args>
 <%init>
 
@@ -12,70 +13,91 @@
 	my $name = $tourn->name;
     $name =~ s/[\W_]//g;
 
-	my @categories = sort {$a->name cmp $b->name} $tourn->categories;
+	my @categories = $m->comp(
+		"/funclib/perms/categories.mas",
+			tourn => $tourn,
+			perms => $perms
+		);
+
+	my $ids = join(',', @categories);
 
     my $filename = "RoundsJudged-$name-".$session->id.".csv";
-    my $filepath = $Tab::file_root."tmp/".$filename;
-    `rm -f $filepath.*`;
 
-    open (CSVOUT, ">$filepath");
+	$m->clear_buffer();
+	$r->content_type('application/csv');
+	$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
 
-	print CSVOUT "First Name,Last Name,School,School Obligation,Hire Obligation,Prelim Rounds,Elim Rounds,Total Rounds,Prelim Debates,Elim Debates,Total Debates\n";
+	my $dbh = Tab::DBI->db_Main();
 
-	foreach my $category (@categories) {
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.first, judge.middle, judge.last, judge.obligation, judge.hired,
+			school.id school_id, school.name school_name,
+			category.abbr,
+			person.email,
+			COUNT(DISTINCT(panel.id)) panels,
+			COUNT(DISTINCT(panel.round)) rounds,
+			COUNT(DISTINCT(elim_panel.id)) elim_panels,
+			COUNT(DISTINCT(elim_panel.round)) elims
+		from (judge, category)
+			left join person on judge.person = person.id
+			left join school on judge.school = school.id
+			left join ballot on ballot.judge = judge.id
 
-		foreach my $judge (sort {$a->last cmp $b->last} $category->judges) {
+			left join panel on panel.id = ballot.panel
 
-			my @ballots = $m->comp("/funclib/judge_ballots.mas", judge => $judge);
+			left join panel elim_panel on elim_panel.id = ballot.panel
+				and exists (
+					select round.id from round where round.id = elim_panel.round
+					and round.type in ('elim', 'final', 'runoff')
+				)
+		where category.id IN ($ids)
+			and judge.category = category.id
 
-			my %debates = ();
-			my %rounds = ();
+		group by judge.id
+		order by category.abbr, school.name, judge.last, judge.first
+	");
 
-			my %elim_rounds;
-			my %elim_debates;
+	$sth->execute();
+	my $results = $sth->fetchall_hash();
 
-			my %prelim_rounds;
-			my %prelim_debates;
+	$m->print('"First Name","Last Name","Category", "School","School Obligation","Hire Obligation",');
+	$m->print('"Prelim Rounds","Elim Rounds","Total Rounds","Prelim Debates","Elim Debates","Total Debates","Email"'."\n");
 
-			foreach my $ballot (@ballots) {
+	foreach my $judge (@{$results}) {
 
-				$debates{$ballot->panel->id}++;
-				$rounds{$ballot->roundid}++;
+		$m->print('"');
+		$m->print($judge->{first});
+		$m->print('","');
+		$m->print($judge->{last});
+		$m->print('","');
+		$m->print($judge->{category_abbr});
+		$m->print('","');
+		$m->print($judge->{school_name} || "Hired");
+		$m->print('","');
+		$m->print($judge->{obligation});
+		$m->print('","');
+		$m->print($judge->{hired});
 
-				if ($ballot->judgename eq "elim" || $ballot->judgename eq "final" || $ballot->judgename eq "runoff") {
-					$elim_debates{$ballot->panel->id}++;
-					$elim_rounds{$ballot->roundid}++;
-				} else {
-					$prelim_debates{$ballot->panel->id}++;
-					$prelim_rounds{$ballot->roundid}++;
-				}
+		$m->print('","');
+		$m->print($judge->{rounds} - $judge->{elims});
+		$m->print('","');
+		$m->print($judge->{elims});
+		$m->print('","');
+		$m->print($judge->{rounds});
 
-			}
-
-			print CSVOUT '"'.$judge->first.'","'.$judge->last.'"';
-
-			if ($judge->school && $judge->school->id) {
-				print CSVOUT ',"'.$judge->school->name.'"';
-			} else {
-				print CSVOUT ',"Hired"';
-			}
-
-			print CSVOUT ',"'.$judge->obligation.'","'.$judge->hired.'"';
-			print CSVOUT ',"'.scalar keys(%prelim_rounds).'"';
-			print CSVOUT ',"'.scalar keys(%elim_rounds).'"';
-			print CSVOUT ',"'.scalar keys(%rounds).'"';
-			print CSVOUT ',"'.scalar keys(%prelim_debates).'"';
-			print CSVOUT ',"'.scalar keys(%elim_debates).'"';
-			print CSVOUT ',"'.scalar keys(%debates).'"';
-			print CSVOUT "\n";
-
-		}
-
+		$m->print('","');
+		$m->print($judge->{panels} - $judge->{elim_panels});
+		$m->print('","');
+		$m->print($judge->{elim_panels});
+		$m->print('","');
+		$m->print($judge->{panels});
+		$m->print('","');
+		$m->print($judge->{email});
+		$m->print('"'."\n");
 	}
 
-	close CSVOUT;
-
-	$m->redirect("/tmp/$filename");
+	$m->flush_buffer();
+	$m->abort();
 
 </%init>
-
