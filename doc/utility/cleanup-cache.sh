@@ -21,5 +21,5 @@ sudo /usr/bin/rm -r /www/tabroom/web/mason/c2
 sudo /usr/bin/rm -r /www/tabroom/web/mason/o2
 sudo /usr/bin/rm -r /www/tabroom/web/tmp2
 
-echo "Complete\n";
+echo "Complete";
 
