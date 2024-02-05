@@ -12,6 +12,7 @@
 /usr/bin/mv /www/tabroom/web/mason/obj /www/tabroom/web/mason/o2
 /usr/bin/mv /www/tabroom/web/tmp /www/tabroom/web/tmp2
 /usr/bin/mkdir /www/tabroom/web/tmp
+/usr/bin/chgrp www-data /www/tabroom/web/tmp
 /usr/bin/chmod 1777 /www/tabroom/web/tmp
 
 # The Tabroom user should have sudo permissions to run these through the
