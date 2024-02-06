@@ -21,9 +21,10 @@
 	my $sth = $dbh->prepare("
 		select
 			event.id, event.abbr, event.name, event.type, event.level,
-			field_waitlist.value,
-			nsda_event_category.value,
-			anonymous_public.value
+			field_waitlist.value field_waitlist,
+			nsda_event_category.value nsda_event_category,
+			anonymous_public.value anonymous_public,
+			online_hybrid.value online_hybrid
 		from (event, event_setting)
 
 			left join event_setting nsda_event_category
@@ -38,6 +39,10 @@
 				on anonymous_public.event = event.id
 				and anonymous_public.tag = 'anonymous_public'
 
+			left join event_setting online_hybrid
+				on online_hybrid.event = event.id
+				and online_hybrid.tag = 'online_hybrid'
+
 		where event.tourn = ?
 			and event.id = event_setting.event
 			and event_setting.tag = 'field_report'
@@ -45,52 +50,10 @@
 		order by event.name
 	");
 
-	my %events;
 	$sth->execute($tourn->id);
 
-	while (
-		my (
-			$event_id, $event_abbr, $event_name, $event_type, $event_level,
-			$waitlist,
-			$nsda_code,
-			$anonymous
-		) = $sth->fetchrow_array()
-	) {
-		$events{$event_id}{"name"} = $event_name;
-		$events{$event_id}{"abbr"} = $event_abbr;
-		$events{$event_id}{"type"} = $event_type;
-		$events{$event_id}{"code"} = $nsda_code;
-
-		if ($event_level eq "champ") {
-			$events{$event_id}{"level"} = "A"
-		}
-		if ($event_level eq "es-open") {
-			$events{$event_id}{"level"} = "B";
-		}
-		if ($event_level eq "open") {
-			$events{$event_id}{"level"} = "BB";
-		}
-		if ($event_level eq "jv") {
-			$events{$event_id}{"level"} = "C";
-		}
-		if ($event_level eq "es-novice") {
-			$events{$event_id}{"level"} = "D";
-		}
-		if ($event_level eq "novice") {
-			$events{$event_id}{"level"} = "DD";
-		}
-		if ($event_level eq "middle") {
-			$events{$event_id}{"level"} = "F";
-		}
-
-		if ($waitlist) {
-			$events{$event_id}{"waitlist"} = 1;
-		}
-
-		if ($anonymous) {
-			$events{$event_id}{"anonymous"} = 1;
-		}
-	}
+	my $event_refs = $sth->fetchall_hash();
+	my %events = map {$_->{id} => $_} @{$event_refs};
 
 	if ($event_id && (not defined $events{$event_id})) {
 		$m->comp("/funclib/abort.mas",
@@ -120,7 +83,7 @@
 
 			my $limit;
 
-			if ($events{$event_id}{"waitlist"}) {
+			if ($events{$event_id}{"field_waitlist"}) {
 				$limit = " and entry.dropped = 0 and entry.unconfirmed = 0 ";
 			} else {
 				$limit = " and entry.active = 1 ";
@@ -129,42 +92,29 @@
 			my $entries_sth = $dbh->prepare("
 				select
 					entry.id, entry.name, entry.code, entry.waitlist,
-					school.name, chapter.state, chapter.country,
-					es.student
+					school.name school, chapter.state, chapter.country,
+					GROUP_CONCAT(es.student) students,
+					online_hybrid.value online_hybrid
 
 				from entry
 					left join school on school.id = entry.school
 					left join chapter on school.chapter = chapter.id
 					left join entry_student es on es.entry = entry.id
 
+					left join entry_setting online_hybrid
+						on online_hybrid.entry = entry.id
+						and online_hybrid.tag = 'online_hybrid'
+
 				where entry.event = ?
-				$limit
+					$limit
+				group by entry.id
 				order by entry.code, school.name
 			");
 
 			my %entries;
 
 			$entries_sth->execute($event_id);
-
-			while (
-				my (
-					$id, $name, $code, $waitlist, $school, $state, $country, $student
-				) = $entries_sth->fetchrow_array()
-			) {
-
-				if ($student) {
-					$entries{$id}{"students"}{$student}++;
-				}
-
-				unless ($entries{$id}{"name"}) {
-					$entries{$id}{"name"}     = $name;
-					$entries{$id}{"code"}     = $code;
-					$entries{$id}{"school"}   = $school;
-					$entries{$id}{"state"}    = $state;
-					$entries{$id}{"country"}  = $country;
-					$entries{$id}{"waitlist"} = $waitlist;
-				}
-			}
+			my $results = $entries_sth->fetchall_hash();
 </%perl>
 
 			<span class="threefifths nospace">
@@ -175,7 +125,7 @@
 
 			<span class="fifth nospace bluetext semibold">
 				<h5 class="nospace">
-					<% scalar (keys %entries) %> entries
+					<% scalar (keys @{$results}) %> entries
 				</h5>
 			</span>
 
@@ -193,14 +143,14 @@
 					<tr class="yellowrow">
 
 						<th class="smallish">
-							School
+							Institution
 						</th>
 
 						<th class="smallish">
 							Location
 						</th>
 
-%						unless ($events{$event_id}{"anonymous"}) {
+%						unless ($events{$event_id}{"anonymous_public"}) {
 							<th class="smallish">
 								Entry
 							</th>
@@ -210,7 +160,13 @@
 							Code
 						</th>
 
-%						if ($events{$event_id}{"waitlist"}) {
+%						if ($events{$event_id}{"online_hybrid"}) {
+							<th class="smallish">
+								Mode
+							</th>
+%						}
+
+%						if ($events{$event_id}{"field_waitlist"}) {
 							<th class="smallish">
 								Status
 							</th>
@@ -227,23 +183,16 @@
 <%perl>
 					my %short_names;
 
-					foreach my $entry_id (
-						sort {
-							$entries{$a}{"school"} cmp $entries{$b}{"school"}
-							|| length($entries{$a}{"code"}) <=> length($entries{$b}{"code"})
-							|| $entries{$a}{"code"} cmp $entries{$b}{"code"}
-						} keys %entries
-					) {
+					foreach my $entry (@{$results}) {
 
-						unless ($short_names{$entries{$entry_id}{"school"}}) {
-							$short_names{$entries{$entry_id}{"school"}} =
-								$m->comp("/funclib/short_name.mas", name => $entries{$entry_id}{"school"});
+						unless ($short_names{$entry->{"school"}}) {
+							$short_names{$entry->{"school"}} =
+								$m->comp("/funclib/short_name.mas", name => $entry->{"school"});
 						}
 
-						my $school = $short_names{$entries{$entry_id}{"school"}};
-						my @ids = keys %{$entries{$entry_id}{"students"}};
+						my $school = $short_names{$entry->{"school"}};
+						my @ids = split (/\,/, $entry->{"students"});
 </%perl>
-
 						<tr>
 
 							<td>
@@ -252,26 +201,39 @@
 
 							<td class="centeralign">
 								<%
-									$entries{$entry_id}{"state"}
+									$entry->{"state"}
 								%><%
-									$entries{$entry_id}{"state"} && $entries{$entry_id}{"country"}
+									$entry->{"state"} && $entry->{"country"}
 									? "/" : ""
-								%><% $entries{$entry_id}{"country"} %>
+								%><% $entry->{"country"} %>
 							</td>
 
-%							unless ($events{$event_id}{"anonymous"}) {
+%							unless ($events{$event_id}{"anonymous_public"}) {
 								<td>
-									<% $entries{$entry_id}{"name"} %>
+									<% $entry->{"name"} %>
 								</td>
 %							}
 
 							<td>
-								<% $entries{$entry_id}{"code"} %>
+								<% $entry->{"code"} %>
 							</td>
 
-%							if ($events{$event_id}{"waitlist"}) {
+%							if ($events{$event_id}{"online_hybrid"}) {
 								<td class="centeralign">
-									<% $entries{$entry_id}{"waitlist"} ? "WL" : "" %>
+									<% $entry->{"online_hybrid"}
+										? '<span class="hiddencsv">1</span>'
+										: '<span class="hiddencsv">0</span>'
+									%>
+									<% $entry->{"online_hybrid"}
+										? '<i class="fa fa-lg semibold fa-laptop bluetext" />'
+										: ""
+									%>
+								</td>
+%							}
+
+%							if ($events{$event_id}{"field_waitlist"}) {
+								<td class="centeralign">
+									<% $entry->{"waitlist"} ? "WL" : "" %>
 								</td>
 %							}
 
