@@ -2,7 +2,7 @@ package Tab::ChangeLog;
 use base 'Tab::DBI';
 Tab::ChangeLog->table('change_log');
 Tab::ChangeLog->columns(Primary => qw/id/);
-Tab::ChangeLog->columns(Essential => qw/tag tourn school person description/);
+Tab::ChangeLog->columns(Essential => qw/tag tourn school person count description/);
 Tab::ChangeLog->columns(Others => qw/judge entry event category chapter circuit round panel new_panel old_panel fine deleted created_at timestamp/);
 
 Tab::ChangeLog->has_a(person   => "Tab::Person");

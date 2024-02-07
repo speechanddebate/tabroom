@@ -11,7 +11,6 @@ use JavaScript::Minifier qw(minify);
 	my @source_files = (
 		'jquery.js',
 		'jquery-passive.js',
-		'jquery-migrate.js',
 		'jquery-ui.js',
 		'jquery.ui.touch-punch.min.js',
 		'jquery.tablesorter.combined.js',
