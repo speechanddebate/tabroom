@@ -161,14 +161,14 @@
 			attributes = $(checkObject).attrs();
 
 			if (
-				attributes.property_value === undefined
+				attributes?.property_value === undefined
 				&& $(checkObject).attr("value")
 			) {
 				attributes.property_value = $(checkObject).attr("value");
 			}
 
 			if (
-				attributes.property_value === undefined
+				attributes?.property_value === undefined
 				&& $(checkObject).val()
 			) {
 				attributes.property_value = $(checkObject).val();
@@ -181,7 +181,7 @@
 			}
 
 			if (
-				attributes.parent_id === undefined
+				attributes?.parent_id === undefined
 				&& ($(checkObject).parent())
 				&& ($(checkObject).parent().attr('id'))
 			) {
@@ -206,7 +206,7 @@
 			}
 
 			// Really, when don't I?
-			if (attributes.option_one) {
+			if (attributes?.option_one) {
 				var optionOneId = $(checkObject).attr("option_one");
 
 				if (optionOneId) {
@@ -220,7 +220,7 @@
 				}
 			}
 
-			if (attributes.option_two) {
+			if (attributes?.option_two) {
 				var optionTwoId = $(checkObject).attr("option_two");
 
 				if (optionTwoId) {
@@ -251,23 +251,24 @@
 			url,
 		};
 
-		if (attributes.postmethod && !attributes.post_method) {
+
+		if (attributes?.postmethod && !attributes.post_method) {
 			attributes.post_method = attributes.postmethod;
 			delete attributes.postmethod;
 		}
 
-		if (attributes.post_method === "get") {
+		if (attributes?.post_method === "get") {
 			options.type = 'GET';
-		} else if (attributes.post_method === "delete") {
+		} else if (attributes?.post_method === "delete") {
 			options.type = 'DELETE';
 			options.headers['Content-Type'] = "application/json";
-		} else if (attributes.post_method === "put") {
+		} else if (attributes?.post_method === "put") {
 			options.type = 'PUT';
 			options.data = JSON.stringify(attributes);
 			options.headers['Content-Type'] = "application/json";
 		} else {
 			options.data = attributes;
-			if (attributes.to_api) {
+			if (attributes?.to_api) {
 				options.headers['Content-Type'] = "application/json";
 				delete attributes.to_api;
 			}
