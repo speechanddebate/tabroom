@@ -2,6 +2,7 @@
 	$tourn
 	$session
 	$person_settings
+	$perms       => undef
 	$timeslot_id => undef
 	$site_id     => undef
 	$sort_by     => "jcode"
@@ -19,50 +20,74 @@
 		$m->abort;
 	}
 
-	my $site = Tab::Site->retrieve($site_id) if $site_id;
+	my $query_limit;
 
-	my @judges_this_round =
-		sort {$a->code <=> $b->code}
-		$m->comp('/funclib/timeslot_judges.mas',
-			timeslot => $timeslot,
-			site     => $site
-		);
+	unless (
+		$perms->{'tourn'}{$tourn} eq "owner"
+		|| $perms->{'tourn'}{$tourn} eq "tabber"
+	) {
 
-	@judges_this_round =
-		sort {$a->last cmp $b->last} @judges_this_round
-		if $sort_by eq "jname";
+		if ($perms->{event}) {
+			my $ids = join(",", keys %{$perms->{event}});
+			$query_limit = " and event.id in ($ids) ";
+		}
 
-	my %panels_by_judge = ();
+		if ($perms->{category}) {
+			my $ids = join(",", keys %{$perms->{category}});
+			$query_limit = " and category.id in ($ids) ";
+		}
 
-	my %rooms_by_judge = ();
-
-	my @panels;
-
-	foreach my $judge (@judges_this_round) {
-
-		my @judge_panels = $m->comp("/funclib/judge_panels.mas", judge => $judge, timeslot => $timeslot);
-		next unless @judge_panels;
-		$panels_by_judge{$judge->id} = $judge_panels[0];
-		push (@panels, $judge_panels[0]);
-		$rooms_by_judge{$judge->id} = $judge_panels[0]->room->name if $judge_panels[0]->room;
-
+		unless ($query_limit) {
+			$m->comp("/funclib/abort.mas", message => "You do not have sufficient access to any events or categories");
+		}
 	}
 
-	@judges_this_round =
-		sort {$rooms_by_judge{$a->id} cmp $rooms_by_judge{$b->id}} @judges_this_round
-		if $sort_by eq "room";
+	if ($site_id) {
+		$query_limit .= "and room.site = ".int($site_id);
+	}
 
-	@judges_this_round =
-		sort {$rooms_by_judge{$a->id} <=> $rooms_by_judge{$b->id}} @judges_this_round
-		if $sort_by eq "room";
+	my $dbh = Tab::DBI->db_Main();
 
-	@judges_this_round =
-		sort {$panels_by_judge{$a->id}->letter cmp $panels_by_judge{$b->id}->letter} @judges_this_round
-		if $sort_by eq "event";
+	my $order_by;
 
-	@judges_this_round =
-		sort {$panels_by_judge{$a->id}->round->event->name cmp $panels_by_judge{$b->id}->round->event->name} @judges_this_round
-		if $sort_by eq "event";
+	if ($ARGS{"sort_by"} eq "room") {
+		$order_by = " order by panel.flight, room.name, judge.code, judge.last ";
+	} elsif ($ARGS{"sort_by"} eq "event") {
+		$order_by = " order by panel.flight, event.abbr, judge.code, judge.last ";
+	} else {
+		$order_by = " order by panel.flight, judge.code, judge.last ";
+	}
+
+	my $sth = $dbh->prepare("
+
+		select
+			judge.code, judge.first, judge.last, judge.middle,
+			person.phone,
+			school.code school_code, school.name school_name,
+			event.abbr,
+			panel.letter, panel.flight,
+			room.name room,
+			ballot.audit
+
+		from (judge, ballot, panel, round, room, event, category)
+
+			left join person on person.id = judge.person
+			left join school on school.id = judge.school
+
+		where round.timeslot = ?
+			and round.event = event.id
+			and event.category = category.id
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and ballot.judge = judge.id
+			and panel.room = room.id
+			$query_limit
+		group by judge.id, panel.flight
+		$order_by
+	");
+
+	$sth->execute($timeslot->id);
+	my $results = $sth->fetchall_hash();
 
 	my $name = $timeslot->name;
 	$name =~ s/[\W_]//g;
@@ -80,55 +105,67 @@
 	open (TEXOUT, ">>$filepath"."$filename.tex");
 
 	print TEXOUT "\\Large \\hfill \\textbf{ Ballot Check In (". Tab::texify($timeslot->name);
-	print TEXOUT " at ".Tab::texify($site->name) if $site;
+
+	if ($site_id) {
+		my $site = Tab::Site->retrieve($site_id);
+		print TEXOUT " at ".Tab::texify($site->name);
+	}
+
 	print TEXOUT ") } \\\\ \n";
 
 	print TEXOUT "\\medskip\n";
 	print TEXOUT "\\newline\n";
 	print TEXOUT "\\".$fontsize."\n";
 
-	my $tabular = "\\begin{tabular}{p{.3in}p{.3in}p{1.75in}p{.5in}p{.3in}p{1.5in}p{.75in}}\n";
+	my $tabular = "\\begin{tabular}{p{1.75in}p{1.25in}p{.5in}p{.3in}p{1.5in}p{.75in}}\n";
 
 	print TEXOUT $tabular;
 	print TEXOUT "\\rowcolor[rgb]{1,.95,.66}\[5.5pt\]\[5.5pt\]\n";
 
-	print TEXOUT " Code & ";
-	print TEXOUT " Sch " unless $tourn->setting("ncfl");
-	print TEXOUT " Dio " if $tourn->setting("ncfl");
-	print TEXOUT "& Judge & Event & Sec & Room & Returned \\\\ \n \\hline \n";
+	print TEXOUT " Judge & School & Event & Sec & Room & Returned \\\\ \n \\hline \n";
 	print TEXOUT "\\end{tabular}\n";
 	print TEXOUT "\\newline\n";
 
 	my $switch;
+	my $flight = 1;
 
 	JUDGE:
-	foreach my $judge (@judges_this_round) {
+	foreach my $judge (@{$results}) {
 
-		my $panel = $panels_by_judge{$judge->id};
-
-		next JUDGE unless $panel;
-		next JUDGE if $event_id && $event_id != $panel->round->event->id;
+		if ($judge->{flight} != $flight) {
+			$flight = $judge->{flight};
+			print TEXOUT "\\smallskip\n";
+			print TEXOUT "\\newline\n";
+			print TEXOUT "{\\Large Flight ".$judge->{flight}." } \n";
+			print TEXOUT "\\newline\n";
+		}
 
 		print TEXOUT $tabular;
 		print TEXOUT "\\rowcolor[rgb]{.84,.89,.94}\[5.5pt\]\[5.5pt\]\n" if ($switch++ % 2);
 		print TEXOUT "\\".$fontsize."\n";
-		print TEXOUT $judge->code ." &  ";
+		print TEXOUT Tab::texify($judge->{code})." ";
+		print TEXOUT Tab::texify($judge->{last})." ";
+		print TEXOUT Tab::texify($judge->{first})." ";
+		print TEXOUT Tab::texify($judge->{middle})." & ";
 
-		if ($tourn->setting("ncfl")) {
-			print TEXOUT $judge->school->region->code;
+		if ($judge->{school_name}) {
+			print TEXOUT "\\truncate{1.22in}{\n";
+			print TEXOUT Tab::texify($judge->{school_code})." ";
+			print TEXOUT Tab::texify($judge->{school_name})." ";
+			print TEXOUT " } \n";
 		} else {
-			print TEXOUT $judge->school->code if $judge->school;
-			print TEXOUT "HIRE " unless $judge->school;
+			print TEXOUT "Hired";
 		}
 
-		print TEXOUT " & ".&Tab::texify($judge->last.", ".$judge->first);
-
 		print TEXOUT " & ";
-		print TEXOUT Tab::texify($panel->round->event->abbr)." & ". $panel->letter;
+		print TEXOUT Tab::texify($judge->{abbr})." & ". $judge->{letter};
 		print TEXOUT " & ";
-		print TEXOUT Tab::texify($panel->room->name) if $panel->room;
+		print TEXOUT Tab::texify($judge->{room});
 		print TEXOUT " & ";
 
+		if ($judge->{audit}) {
+			print TEXOUT "\\hfill IN \\hfill \\strut";
+		}
 		print TEXOUT " \\\\ \n";
 		print TEXOUT "\\end{tabular}\n";
 		print TEXOUT "\\newline\n";
@@ -137,6 +174,10 @@
 
 	close TEXOUT;
 
-	$m->comp("/funclib/printout.mas", tourn => $tourn, filename => $filename, tail => 1 );
+	$m->comp("/funclib/printout.mas",
+		tourn    => $tourn,
+		filename => $filename,
+		tail     => 1
+	);
 
 </%init>

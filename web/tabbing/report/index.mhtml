@@ -4,7 +4,6 @@
 	$person
 	$person_settings
 	$perms         => undef
-	$only_category => undef
 </%args>
 <%init>
 
@@ -13,18 +12,17 @@
 	my $checker++ if ${$perms}{"checker"};
 	$checker++ if ${$perms}{"limited"} &! ${$perms}{"registration"};
 
-	my @all_timeslots = $tourn->timeslots;
-
-	my ($eventref, $catref) = $m->comp(
-		"/funclib/allowed_events.mas",
+	my %timeslots = $m->comp("/funclib/perms/timeslots.mas",
 		tourn => $tourn,
-		perms => $perms,
-		type  => "admin"
+		perms => $perms
 	);
 
-	my @events = @{$eventref};
+	my @events = $m->comp("/funclib/perms/events.mas",
+		tourn => $tourn,
+		perms => $perms
+	);
+
 	my $event = $events[0] if scalar @events == 1;
-	my @categories = @{$catref};
 
 	my %types;
 
@@ -39,43 +37,51 @@
 	}
 
 	my @debate;
+	my @debate_speakers;
 	my @speech;
 	my @congress;
 
 	@events = sort {$a->name cmp $b->name} @events;
 
+	my $ids = join(',', @events);
+
 	foreach my $event (@events) {
+
 		push @debate, $event if $event->type ne"speech" && $event->type ne"congress";
 		push @speech, $event if $event->type eq "speech";
 		push @congress, $event if $event->type eq "congress";
+
+		if ($event->type ne "speech"
+			&& $event->type ne "debate"
+			&& $event->setting('speaker_protocol')
+		) {
+			push @debate_speakers, $event;
+		}
 	}
 
 	my %ok_events = map {$_->id => $_} @events;
-
-	my $sth = $dbh->prepare("
-		select event.id, round.id, round.name, round.label
-			from event, round
-		where event.tourn = ?
-			and event.id = round.event
-		order by event.id, round.name
-	");
-
-	$sth->execute($tourn->id);
-
 	my %rounds;
 
-	while (
-		my ($event_id, $round_id, $round_name, $round_label) = $sth->fetchrow_array()
-	) {
+	if ($ids) {
 
-		next unless $ok_events{$event_id};
+		my $sth = $dbh->prepare("
+			select event.id,
+				round.id round_id, round.name round_name, round.label round_label
+				from event, round
+			where event.tourn = ?
+				and event.id = round.event
+				and event.id IN ($ids)
+			order by event.id, round.name
+		");
 
-		$rounds{$event_id}{$round_id}{"number"} = $round_name;
+		$sth->execute($tourn->id);
+		my $results = $sth->fetchall_hash();
 
-		if ($round_label) {
-			$rounds{$event_id}{$round_id}{"name"} = $round_label;
-		} else {
-			$rounds{$event_id}{$round_id}{"name"} = "Round ".$round_name;
+		foreach my $result (@{$results}) {
+			$rounds{$result->{id}}{$result->{round_id}} = ({
+				name   => $result->{round_label} || "Round ".$result->{round_name},
+				number => $result->{round_name},
+			});
 		}
 	}
 
@@ -85,7 +91,6 @@
 		perms          => $perms,
 		tourn          => $tourn,
 		tourn_settings => $tourn_settings,
-		only_category  => $only_category
 	&>
 
 	<div class="main">
@@ -121,6 +126,7 @@
 				if (eventID) {
 					$("."+eventID+"_"+targetClass).removeClass("hidden");
 					$(".select_"+eventID+"_"+targetClass).removeAttr("disabled");
+					$(".select_rounds_"+targetClass).removeAttr("disabled", true);
 				} else {
 					$(".event_timeslots_"+targetClass).removeClass("hidden");
 					$(".select_timeslots_"+targetClass).removeAttr("disabled");
@@ -167,10 +173,10 @@
 						name     = "timeslot_id"
 						class    = "fixedmost select_timeslots_seeding"
 					>
-%					foreach my $timeslot (@all_timeslots) {
+%					foreach my $timeslot_id (sort {$timeslots{$a}{start}{epoch} <=> $timeslots{$b}{start}{epoch}} keys %timeslots) {
 						<option
-							value="<% $timeslot->id %>"
-						>Timeslot: <% $timeslot->name %></option>
+							value="<% $timeslot_id %>"
+						>Timeslot: <% $timeslots{$timeslot_id}->{name} %></option>
 %					}
 					</select>
 				</div>
@@ -258,10 +264,10 @@
 						class    = "fixedmost select_timeslots_scores"
 					>
 
-%					foreach my $timeslot (@all_timeslots) {
+%					foreach my $timeslot_id (sort {$timeslots{$a}{start}{epoch} <=> $timeslots{$b}{start}{epoch}} keys %timeslots) {
 						<option
-							value="<% $timeslot->id %>"
-						>Timeslot: <% $timeslot->name %></option>
+							value="<% $timeslot_id %>"
+						>Timeslot: <% $timeslots{$timeslot_id}->{name} %></option>
 %					}
 
 					</select>
@@ -574,15 +580,11 @@
 						value = "Print"
 					>
 				</span>
-
 				</form>
-
 			</div>
-
 %		}
 
-
-%		if (@debate) {
+%		if (@debate_speakers) {
 
 			<div class="row full marverno padmore">
 
@@ -601,6 +603,7 @@
 
 						<option value="all">All Debate Events</option>
 %						foreach my $oevent (@debate) {
+%							next unless $oevent->setting('speaker_protocol');
 							<option value="<% $oevent->id %>"> <% $oevent->name %> </option>
 %						}
 					</select>
@@ -640,7 +643,9 @@
 				</span>
 
 			</div>
+%		}
 
+%		if (@debate) {
 
 			<div class="whitenohover row full marverno padmore">
 
@@ -690,7 +695,7 @@
 
 				<span class="third">
 					<select name="event_id" class="fixedmost">
-						<option value="">All Events</option>
+						<option value="all">All Events</option>
 %						foreach my $oevent (@debate) {
 							<option value="<% $oevent->id %>"> <% $oevent->name %> </option>
 %						}
@@ -700,8 +705,10 @@
 				<span class="fourtenths nospace">
 					<select name="timeslot_id" class="fixedmost">
 						<option value="">All Timeslots</option>
-%						foreach my $timeslot (sort {$a->start->epoch <=> $b->start->epoch} @all_timeslots) {
-							<option value="<% $timeslot->id %>"> <% $timeslot->name %> </option>
+%						foreach my $timeslot_id (sort {$timeslots{$a}{start}{epoch} <=> $timeslots{$b}{start}{epoch}} keys %timeslots) {
+							<option
+								value="<% $timeslot_id %>"
+							><% $timeslots{$timeslot_id}->{name} %></option>
 %						}
 					</select>
 				</span>
@@ -728,7 +735,7 @@
 
 				<span class="third">
 					<select name="event_id" class="fixedmost">
-						<option value="">All Events</option>
+						<option value="all">All Events</option>
 %						foreach my $oevent (@debate) {
 							<option value="<% $oevent->id %>"> <% $oevent->name %> </option>
 %						}
@@ -828,7 +835,7 @@
 <%perl>
 		}
 
-		unless ($perms->{'details'}) {
+		if ($perms->{tourn}{$tourn} eq "owner" || $perms->{tourn}{$tourn} eq "tabber") {
 			my $sth = $dbh->prepare("
 				select school.id, school.code, school.name
 					from school, entry
@@ -918,9 +925,12 @@
 			</span>
 			</form>
 		</div>
-
-%		unless ($tourn_settings->{"ncfl"} &! (${$perms}{"tabber"} || ${$perms}{"owner"}) ) {
-
+<%perl>
+		if (
+			($perms->{tourn}{$tourn} eq "tabber" && (not defined $tourn_settings->{"ncfl"}))
+			|| $perms->{tourn}{$tourn} eq "owner"
+		) {
+</%perl>
 			<h5>
 				Sweepstakes, Bids &amp; Quals
 			</h5>

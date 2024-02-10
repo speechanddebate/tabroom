@@ -8,14 +8,23 @@
 </%args>
 <%init>
 
+	my $dbh = Tab::DBI->db_Main();
+
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my $site = Tab::Site->retrieve($site_id);
+	my %sites = $m->comp("/funclib/perms/sites.mas",
+		tourn => $tourn,
+		perms => $perms
+	);
 
-	unless ($site) {
-		$site = $tourn->sites->first;
+	my @keys = sort keys %sites;
+
+	unless ($site_id) {
+		$site_id = shift @keys;
 	}
+
+	my $site = Tab::Site->retrieve($site_id);
 
 	unless ($site) {
 		my $msg = "You have no sites for your tournament; please add or create one to continue";
@@ -30,52 +39,78 @@
 	my %day_panels = ();
 	my %day_rpools = ();
 	my %room_panels = ();
+
+	my $rpool_sth = $dbh->prepare('
+		select room.id room_id, room.name room_name, rpool.name rpool_name, rpool.id rpool_id
+
+		from room, rpool, rpool_room rpr
+		where rpool.tourn = ?
+			and rpool.id = rpr.rpool
+			and rpr.room = room.id
+		order by rpool.name, room.name
+	');
+
+	$rpool_sth->execute($tourn->id);
+	my $rpools = $rpool_sth->fetchall_hash();
 	my %room_pools = ();
 
-	Tab::Panel->columns(TEMP => "roomid");
-
-	foreach my $rpool ($tourn->rpools) {
-		foreach my $room ($rpool->rooms) {
-			push @{$room_pools{$room->id}}, $rpool;
-		}
+	foreach my $rpool (@{$rpools}) {
+		push @{$room_pools{$rpool->{room_id}}}, $rpool;
 	}
 
 	if ($timeslot) {
 
-		Tab::Panel->set_sql( during => "
-			select panel.* from panel, round, timeslot
-			where panel.round = round.id
+		my $sth = $dbh->prepare("
+			select panel.id, panel.letter, panel.flight,
+				round.id as round_id, round.label as round_label,
+					round.name as round_name, round.flighted as round_flight,
+				room.id room_id, room.name room_name,
+					room.ada room_ada, room.quality room_quality,
+					room.capacity room_capacity,
+				timeslot.id timeslot_id, timeslot.name timeslot_name,
+				CONVERT_TZ(timeslot.start, '+00:00', tourn.tz) start,
+				CONVERT_TZ(timeslot.end, '+00:00', tourn.tz) end,
+				event.id event_id, event.name event_name, event.abbr event_abbr
+			from panel, round, timeslot, event, tourn
+			where tourn.id = ?
+				and event.tourn = tourn.id
+				and event.id = round.event
+				panel.round = round.id
 				and round.timeslot = timeslot.id
 				and timeslot.start < ?
 				and timeslot.end > ?
 			order by round.event, round.name
 		");
 
-		@panels = Tab::Panel->search_during( $timeslot->end, $timeslot->start);
+		$sth->execute(
+			$tourn->id,
+			DateTime::Format::MySQL->format_datetime($timeslot->end),
+			DateTime::Format::MySQL->format_datetime($timeslot->start)
+		);
 
-		foreach my $panel (@panels) {
-			next unless $panel->room;
-			next unless $panel->room->id;
-			push @{$room_panels{$panel->room->id}}, $panel;
+		my $panels = $sth->fetchall_hash();
+
+		foreach my $panel (@{$panels}) {
+			next unless $panel->{room_id};
+			push @{$room_panels{$panel->{room_id}}}, $panel;
 		}
 
 	} else {
 
-		Tab::Panel->columns(TEMP => "roundid");
-		Tab::Panel->columns(TEMP => "roundname");
-		Tab::Panel->columns(TEMP => "roundlabel");
-		Tab::Panel->columns(TEMP => "roundflight");
-
-		Tab::Panel->columns(TEMP => "roomname");
-		Tab::Panel->columns(TEMP => "roomid");
-		Tab::Panel->columns(TEMP => "eventabbr");
-
-		Tab::Panel->set_sql( by_tourn => "
-			select distinct panel.*, room.id as roomid, room.name as roomname, event.abbr as eventabbr,
-				round.id as roundid, round.label as roundlabel, round.name as roundname, round.flighted as roundflight
-
-			from panel, round, event, room, timeslot
-			where event.tourn = ?
+		my $sth = $dbh->prepare("
+			select panel.id, panel.letter, panel.flight,
+				round.id as round_id, round.label as round_label,
+					round.name as round_name, round.flighted as round_flight,
+				room.id room_id, room.name room_name,
+					room.ada room_ada, room.quality room_quality,
+					room.capacity room_capacity,
+				timeslot.id timeslot_id, timeslot.name timeslot_name,
+				CONVERT_TZ(timeslot.start, '+00:00', tourn.tz) start,
+				CONVERT_TZ(timeslot.end, '+00:00', tourn.tz) end,
+				event.id event_id, event.name event_name, event.abbr event_abbr
+			from panel, round, event, room, timeslot, tourn
+			where tourn.id = ?
+				and event.tourn    = tourn.id
 				and round.event    = event.id
 				and panel.round    = round.id
 				and panel.room     = room.id
@@ -94,8 +129,15 @@
 			$day_start->set_time_zone("UTC");
 			$day_end->set_time_zone("UTC");
 
-			foreach my $panel (Tab::Panel->search_by_tourn($tourn->id, $day_end, $day_start)) {
-				push @{$day_panels{$day->epoch}{$panel->roomid}}, $panel;
+			$sth->execute($tourn->id,
+				DateTime::Format::MySQL->format_datetime($day_end),
+				DateTime::Format::MySQL->format_datetime($day_start)
+			);
+
+			my $panels = $sth->fetchall_hash();
+
+			foreach my $panel (@{$panels}) {
+				push @{$day_panels{$day->epoch}{$panel->{room_id}}}, $panel;
 			}
 		}
 	}
@@ -168,52 +210,81 @@
 			</thead>
 
 			<tbody>
+<%perl>
 
-%			my %round_end;
-%			my %round_start;
-%			foreach my $room ($site->rooms(deleted => 0)) {
+			my $room_sth = $dbh->prepare('
+				select
+					room.id, room.name, room.quality, room.capacity, room.ada
+				from room
+					where room.site = ?
+					and room.deleted = 0
+				order by room.name
+			');
 
+			$room_sth->execute($site->id);
+			my $rooms = $room_sth->fetchall_hash();
+
+			my %dt_cache;
+			my %round_end;
+			my %round_start;
+
+			foreach my $room (@{$rooms}) {
+</%perl>
 				<tr>
-
 					<td class="nospace">
 						<a  class='plain padvertless smaller'
-							href="report.mhtml?room_id=<% $room->id %>"
-						><% $room->name %></a>
+							href="report.mhtml?room_id=<% $room->{id} %>"
+						><% $room->{name} %></a>
 					</td>
 
 					<td class="centeralign smallish">
-						<% $room->quality %>
+						<% $room->{quality} %>
 					</td>
 
 					<td class="centeralign smallish">
-						<% $room->capacity %>
+						<% $room->{capacity} %>
 					</td>
 
 					<td class="centeralign smallish">
-						<% $room->ada ? "Y" : "N" %>
+						<% $room->{ada} ? "Y" : "N" %>
 					</td>
 
 %					if ($timeslot) {
 
 						<td class="leftalign smallish top nospace">
-%						if ($room_panels{$room->id}) {
-%						   foreach my $panel (@{$room_panels{$room->id}}) {
-%							   my $start = $panel->round->timeslot->start->set_time_zone($tz);
-%							   my $end = $panel->round->timeslot->end->set_time_zone($tz);
+<%perl>
+						if ($room_panels{$room->{id}}) {
+
+							foreach my $panel (@{$room_panels{$room->{id}}}) {
+
+								unless ($dt_cache{$panel->{start}}) {
+									$dt_cache{$panel->{start}} = $m->comp("/funclib/dtme.mas", string => $panel->{start});
+								}
+								unless ($dt_cache{$panel->{end}}) {
+									$dt_cache{$panel->{end}} = $m->comp("/funclib/dtme.mas", string => $panel->{end});
+								}
+
+							   my $start = $dt_cache{$panel->{start}}{dt};
+							   my $end = $dt_cache{$panel->{end}}{dt};
+</%perl>
 								<span class="full marno padvertless">
 									<a
 										class  = "plain full padno"
 										target = "_blank"
-										href   = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel->id %>"
+										href   = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel->{id} %>"
 									>
-										<span class="half smaller nospace border">
-											<% $panel->round->event->abbr %>
-											<% $panel->round->realname %>
-											<% $panel->round->flighted > 1 ? "Flt ".$panel->flight : "" %>
+										<span class="half smaller nospace">
+											<% $panel->{event_abbr} %>
+											<% $panel->{round_label} || "Rd ".$panel->{round_name} %>
+											<% $panel->{round_flight} > 1 ? "Flt ".$panel->{flight} : "" %>
 										</span>
-										<span class="half smaller nospace border">
+										<span class="half smaller nospace">
 											<% $start->day_abbr %>
-											<% Tab::shorttime($start) %> - <% Tab::shorttime($end) %>
+											<&
+												"/funclib/showtime.mas", format => "murica_short", dt => $start
+											&> &ndash; <&
+												"/funclib/showtime.mas", format => "murica_short", dt => $end
+											&>
 										</span>
 									</a>
 								</span>
@@ -225,38 +296,33 @@
 %							next unless $day_panels{$day->epoch};
 							<td class="leftalign smallish top nospace">
 <%perl>
-							foreach my $panel (@{$day_panels{$day->epoch}{$room->id}}) {
+							foreach my $panel (@{$day_panels{$day->epoch}{$room->{id}}}) {
 
-								my $start = $round_start{$panel->roundid};
-								my $end = $round_end{$panel->roundid};
-
-								unless ($start) {
-									$start = $panel->round->timeslot->start;
-									$start->set_time_zone($tz);
-									$round_start{$panel->roundid} = $start;
+								unless ($dt_cache{$panel->{start}}) {
+									$dt_cache{$panel->{start}} = $m->comp("/funclib/dtme.mas", string => $panel->{start});
+								}
+								unless ($dt_cache{$panel->{end}}) {
+									$dt_cache{$panel->{end}} = $m->comp("/funclib/dtme.mas", string => $panel->{end});
 								}
 
-								unless ($end) {
-									$end = $panel->round->timeslot->end;
-									$end->set_time_zone($tz);
-									$round_end{$panel->roundid} = $end;
-								}
+							   my $start = $dt_cache{$panel->{start}}{dt};
+							   my $end = $dt_cache{$panel->{end}}{dt};
 </%perl>
 								<a
-									href   = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel->id %>"
+									href   = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel->{id} %>"
 									target = "_blank"
 									class  = "full marless padvertless white hover"
 								>
 									<span class="half nospace">
-										<% $panel->eventabbr %>
-										<% $panel->roundlabel ? $panel->roundlabel : "R".$panel->roundname %>
-										<% $panel->roundflight > 1 ? "Flt ".$panel->flight : "" %>
+										<% $panel->{event_abbr} %>
+										<% $panel->{round_label} || "Rd ".$panel->{round_name} %>
+										<% $panel->{round_flight} > 1 ? "Flt ".$panel->{flight} : "" %>
 									</span>
 									<span class="half nospace">
 										<&
-											"/funclib/showtime.mas", dt => $start, length => 'shorter'
-											&>-<&
-											"/funclib/showtime.mas", dt => $end, length => 'shorter'
+											"/funclib/showtime.mas", format => "short", dt => $start
+										&> &ndash; <&
+											"/funclib/showtime.mas", format => "short", dt => $end
 										&>
 									</span>
 								</a>
@@ -266,14 +332,14 @@
 %					}
 
 					<td class="smallish nospace">
-%						if ($room_pools{$room->id}) {
-%							foreach my $pool (@{$room_pools{$room->id}}) {
+%						if ($room_pools{$room->{id}}) {
+%							foreach my $pool (@{$room_pools{$room->{id}}}) {
 								<a
-									href="/panel/room/rpool.mhtml?rpool_id=<% $pool->id %>"
+									href="/panel/room/rpool.mhtml?rpool_id=<% $pool %>"
 									target = "_blank"
 									class  = "full marless padvertless white hover"
 								>
-									<% $pool->name %>
+									<% $room_pools{$pool}{name} %>
 								</a>
 %							}
 %						}

@@ -5,11 +5,8 @@ Tab::Person->table('person');
 Tab::Person->columns(Primary   => qw/id/);
 
 Tab::Person->columns(Essential => qw/email first middle last phone provider site_admin /);
-
-Tab::Person->columns(Others    => qw/street city state zip country postal
-                                   	pronoun no_email tz nsda password timestamp/);
-
-Tab::Person->columns(TEMP => qw/prefs student_id judge_id/);
+Tab::Person->columns(Others    => qw/street city state zip country postal pronoun no_email tz nsda password timestamp/);
+Tab::Person->columns(TEMP      => qw/prefs student_id judge_id/);
 
 Tab::Person->has_many(settings => 'Tab::PersonSetting', 'person');
 Tab::Person->has_many(sessions => 'Tab::Session', 'person');
@@ -44,57 +41,58 @@ sub all_permissions {
 	my $tourn = shift;
 	my %perms;
 
-	if ($tourn) {
+	my $dbh = Tab::DBI->db_Main();
 
-		Tab::Permission->set_sql( tourn_perms => "
-			select permission.*
+	if ($tourn && $self && $self->site_admin) {
+
+		$perms{"owner"}++;
+		$perms{"tourn"}{$tourn->id} = "owner";
+
+	} elsif ($tourn) {
+
+		my $sth = $dbh->prepare("
+			select id, tag, tourn, event, category, details
 				from permission
 			where permission.person = ?
 				and permission.tourn = ?
 		");
 
-		my @tourn_perms =  Tab::Permission->search_tourn_perms(
-			$self->id,
-			$tourn->id
-		);
+		$sth->execute($self->id, $tourn->id);
+		my $perms = $sth->fetchall_hash();
 
 		PERM:
-		foreach my $perm (@tourn_perms) {
+		foreach my $perm (@{$perms}) {
 
-			my $tag = $perm->tag;
+			my $tag = $perm->{tag};
 
 			if ($tag eq "contact") {
-				$perms{$tag} = $perm;
+				$perms{$tag} = $perm->{id};
 				next PERM;
 			}
 
-			if ($tag eq "by_event") {
+			if (
+				(not defined $perm->{event})
+				&& (not defined $perm->{category})
+			) {
 				$perms{$tag} = $perm;
 				$perms{"tourn"}{$tourn->id} = $tag;
-				$perms{"details"} = $perm->get_details();
-			} else {
-				$perms{"tourn"}{$tourn->id} = $tag;
-				$perms{"undetailed"}{$tourn->id}++;
-				$perms{$tag} = $perm;
+				if ($tag ne "checker") {
+					delete $perms{'event'};
+					delete $perms{'category'};
+				}
+			}
+			next if $perms{"tourn"}{$tourn->id} eq "owner";
+			next if $perms{"tourn"}{$tourn->id} eq "tabber";
+
+			if ($perm->{'event'}) {
+				$perms{"tourn"}{$tourn->id} = "limited";
+				$perms{"event"}{$perm->{"event"}} = $perm->{tag};
+			} elsif ($perm->{'category'}) {
+				$perms{"tourn"}{$tourn->id} = "limited";
+				$perms{"category"}{$perm->{"category"}} = $perm->{tag};
 			}
 		}
-
-		if ($self && $self->site_admin) {
-			$perms{"owner"}++;
-			$perms{"tourn"}{$tourn->id} = "owner";
-			$perms{"undetailed"}{$tourn->id}++;
-			delete $perms{"checker"};
-			delete $perms{"details"};
-		}
-
-		if ($perms{"undetailed"}{$tourn->id}) {
-			# Universal perms override specific ones
-			delete $perms{"details"};
-			delete $perms{"by_event"};
-		}
 	}
-
-	my $dbh = Tab::DBI->db_Main();
 
     my $sth = $dbh->prepare("
 		select permission.tag, permission.region, permission.circuit,
@@ -133,7 +131,6 @@ sub all_permissions {
 		}
 	}
 
-	$perms{"owner"}++ if $self->site_admin;
 	return %perms;
 }
 

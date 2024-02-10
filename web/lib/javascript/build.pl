@@ -10,13 +10,13 @@ use JavaScript::Minifier qw(minify);
 
 	my @source_files = (
 		'jquery.js',
+		'jquery-passive.js',
 		'jquery-ui.js',
+		'jquery.ui.touch-punch.min.js',
+		'jquery.tablesorter.combined.js',
 		'metadata.js',
 		'bigtext.js',
-		'jquery-migrate.js',
-		'jquery.ui.touch-punch.min.js',
-		'chosen-selects.js',
-		'jquery.tablesorter.combined.js',
+		'select2.min.js',
 		'widget-columnSelector.js',
 		'widget-print.js',
 		'widget-output.js',
@@ -29,7 +29,7 @@ use JavaScript::Minifier qw(minify);
 	);
 
 	my $custom_file = "tabroom.js";
-	my $output_file = "tabroom.v27.min.js";
+	my $output_file = "tabroom.v29.min.js";
 	my $sources_file = "sources.js";
 
 	# First, concatenate them together

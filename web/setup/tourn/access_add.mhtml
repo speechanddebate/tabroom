@@ -1,13 +1,16 @@
 <%args>
 	$person
 	$tourn
-	$email     => undef
-	$person_id => undef
-	$tag       => "checker"
+	$perms       => undef
+	$email       => undef
+	$person_id   => undef
+	$category_id => undef
+	$event_id    => undef
+	$tag         => "checker"
 </%args>
 <%init>
 
-	my $msg;
+	my $dbh = Tab::DBI->db_Main();
 	my $now = DateTime->now();
 
 	my $staff;
@@ -26,33 +29,234 @@
 		$m->redirect("access.mhtml?err=$err");
 	}
 
-	my $already = Tab::Permission->search(
-		person => $staff->id,
-		tourn  => $tourn->id
-	)->first;
+	# If the target account is already an owner then reject attempts to add
+	# additional permissions
 
-	unless ($already) {
+	my $find_sth = $dbh->prepare("
+		select id, tag
+			from permission
+		where person = ?
+			and tourn = ?
+			and tag = 'owner'
+	");
 
-		my $access = Tab::Permission->create({
-			person => $staff->id,
-			tourn  => $tourn->id,
-			tag    => $tag
-		});
+	$find_sth->execute($staff->id, $tourn->id);
+	my $results = $find_sth->fetchall_hash();
 
-		$m->comp("/funclib/log.mas",
-			person      => $staff->id,
-			tourn       => $tourn->id,
-			type        => "access",
-			description => "Granted checker access by ".$person->email
-		);
+	if (scalar @{$results} > 0) {
+		my $err = $staff->email." already has access to this tournament and cannot be given additional access.";
+		$m->redirect("access.mhtml?err=$err");
+	}
 
-		$msg = $staff->first." ".$staff->last." has been added to your tournament staff as a checker";
+
+	my $access_create = {
+		person     => $staff->id,
+		tourn      => $tourn->id,
+		tag        => $tag,
+		created_by => $person->id,
+	};
+
+	my $log_create = {
+		tag        => "access",
+		tourn      => $tourn->id,
+		person     => $person->id,
+		created_at => $now,
+	};
+
+	if ($tag eq "owner") {
+
+		# If we are granting ownership permissions, delete everything else, and
+		# make sure that the granter is also a tourn owner.  Site admins will
+		# all automatically be tagged as "owners" so a separate check is not
+		# needed.
+
+		unless ($perms->{"tourn"}{$tourn->id} eq "owner") {
+			my $err = "Only an owner may give out owner level access to another user.";
+			$m->redirect("access.mhtml?err=$err");
+		}
+
+		my $wipe_all = $dbh->prepare("
+			delete from permission
+			where person = ?
+				and tourn = ?
+				and tag NOT IN ('owner', 'contact')
+		");
+
+		$wipe_all->execute($staff->id, $tourn->id);
+		$wipe_all->finish();
+
+		$log_create->{description} = "Granted $tag level access to ".$staff->id." ".$staff->email;
 
 	} else {
 
-		$msg = $staff->first." ".$staff->last." is already in your tournament access list";
+		my $event;
+		my $category;
+
+		if ($event_id) {
+
+			$event = Tab::Event->retrieve($event_id);
+
+			unless ($event && $event->id && $event->tourn == $tourn->id) {
+				my $err = "That event is not in your tournament.  Please try again.";
+				$m->redirect("access.mhtml?err=$err");
+			}
+
+			$log_create->{description} = "Granted $tag level access in ".$event->abbr." to ".$staff->email;
+			$access_create->{event} = $event->id;
+			$log_create->{event} = $event->id;
+
+		} elsif ($category_id) {
+
+			$category = Tab::Category->retrieve($category_id);
+
+			unless ($category && $category->id && $category->tourn == $tourn->id) {
+				my $err = "Category $category_id ".$category->abbr." is not in your tournament.  Please try again.";
+				$m->redirect("access.mhtml?err=$err");
+			}
+
+			$log_create->{description} = "Granted $tag level access in ".$category->abbr." to ".$staff->email;
+			$access_create->{category} = $category->id;
+			$log_create->{category}    = $category->id;
+
+			if ($ARGS{"with_events"}) {
+
+				my $event_sth = $dbh->prepare("
+					select event.id
+						from event
+					where event.category = ?
+						and NOT EXISTS (
+							select permission.id
+							from permission
+							where permission.person = ?
+							and permission.event = event.id
+						)
+				");
+
+				$event_sth->execute($category->id, $person->id);
+				my $events = $event_sth->fetchall_hash();
+
+				foreach my $event (@{$events}) {
+					$log_create->{description} .= " and all events";
+
+					my %event_create = %{$access_create};
+					delete $event_create{'category'};
+					$event_create{'event'} = $event->{id};
+
+					my %event_log = %{$log_create};
+					delete $event_log{'category'};
+					$event_log{'event'} = $event->{id};
+
+					eval {
+						Tab::Permission->create(\%event_create);
+						Tab::ChangeLog->create(\%event_log);
+					}
+				}
+			}
+		}
+
+		if ($tag eq "tabber") {
+
+			# If the user is being granted tourn-wide tabber access then clear
+			# out any finer grained access they might have had.
+
+			# If the user is being granted category or event wide access the
+			# eliminate any checker level access they might have to them
+
+			my $query_limit;
+
+			if ($event) {
+				$query_limit = " and event = ".$event->id." and tag = 'checker' ";
+			} elsif ($category) {
+				$query_limit = " and category = ".$category->id." and tag = 'checker' ";
+			} else {
+				$query_limit = ' and (event IS NOT NULL OR category IS NOT NULL OR details IS NOT NULL OR tag = "checker") ';
+			}
+
+			my $wipe_all = $dbh->prepare("
+				delete from permission
+				where person = ?
+					and tourn = ?
+					$query_limit
+			");
+
+
+			Tab::debuglog("I should be here to wipe existing tabber access");
+			Tab::debuglog("Query limit is $query_limit");
+
+			$wipe_all->execute($staff->id, $tourn->id);
+			$wipe_all->finish();
+
+		} elsif ($tag eq "checker") {
+
+			if ($event || $category) {
+
+				# If they already have tabber level access reject attempts to
+				# downgrade them here.
+
+				my $query_limit;
+
+				if ($event) {
+					$query_limit = " and event = ".$event->id;
+				} elsif ($category) {
+					$query_limit = " and category = ".$category->id;
+				}
+
+				my $find_sth = $dbh->prepare("
+					select id, tag
+						from permission
+					where person = ?
+						and tourn = ?
+						and tag = 'tabber'
+						$query_limit
+				");
+
+				$find_sth->execute($staff->id, $tourn->id);
+				my $results = $find_sth->fetchall_hash();
+
+				if (scalar @{$results} > 0) {
+					my $err = $staff->email." already has tabber access to ".$event ? $event->abbr : $category->abbr;
+					$m->redirect("access.mhtml?err=$err");
+				}
+
+			} else {
+
+				# If the user is being granted tourn-wide checker access then
+				# clear out any finer grained checker access they might have
+				# had.
+
+				my $wipe_all = $dbh->prepare("
+					delete from permission
+					where person = ?
+						and tourn = ?
+						and (event IS NOT NULL OR category IS NOT NULL or details IS NOT NULL)
+						and tag = 'checker'
+				");
+
+				$wipe_all->execute($staff->id, $tourn->id);
+				$wipe_all->finish();
+			}
+		}
 	}
 
+	# Check that this permission does not already exist
+
+	my @already = Tab::Permission->search($access_create);
+
+	Tab::debuglog("Here creating access ");
+
+	foreach my $key (keys %{$access_create}) {
+		Tab::debuglog("Key $key value ".$access_create->{$key});
+	}
+
+	if (scalar @already > 0) {
+		my $err = $staff->email." already has $tag access";
+		$m->redirect("access.mhtml?err=$err");
+	}
+
+	Tab::Permission->create($access_create);
+	Tab::ChangeLog->create($log_create);
+
+	my $msg = $log_create->{description};
 	$m->redirect("access.mhtml?msg=$msg");
 
 </%init>
