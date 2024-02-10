@@ -7,6 +7,10 @@
 </%args>
 <%init>
 
+	if ($perms->{"details"}) {
+		$m->redirect("event.mhtml");
+	}
+
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
@@ -47,10 +51,7 @@
 	my ($async) = $sth->fetch();
 	$sth->finish();
 
-	my %timeslots = $m->comp("/funclib/perms/timeslots.mas",
-		tourn   => $tourn,
-		perms   => $perms
-	);
+	my @timeslots;
 
 	if ($all_days) {
 		$today = ${$all_days}[0] unless $today;
@@ -78,8 +79,8 @@
 
 	if (scalar @{$all_days} > 1) {
 
-		my $filter_sth = $dbh->prepare("
-			select timeslot.id
+		Tab::Timeslot->set_sql( today => "
+			select timeslot.*
 				from timeslot
 			where tourn = ?
 				and start >= ?
@@ -87,20 +88,19 @@
 			order by start, name
 		");
 
-		$filter_sth->execute(
+		@timeslots = Tab::Timeslot->search_today(
 			$tourn->id,
 			DateTime::Format::MySQL->format_datetime($today_start),
 			DateTime::Format::MySQL->format_datetime($today_end)
 		);
 
-		my $results = $filter_sth->fetchall_hash();
-		my %today = map {$_->{id} => 1} @{$results};
+	} else  {
 
-		foreach my $ts (keys %timeslots) {
-			unless ($today{$ts}) {
-				delete $timeslots{$ts};
-			}
-		}
+		@timeslots = sort {$a->start <=> $b->start}
+			Tab::Timeslot->search(
+				tourn => $tourn->id,
+				{order_by => 'start'}
+			);
 	}
 
 	my $today_limit;
@@ -125,11 +125,10 @@
 </%init>
 
 	<& "menu.mas",
-		tourn  => $tourn,
-		perms  => $perms,
-		days   => $ts_days,
-		today  => $today,
-		whoami => 'edit'
+		tourn => $tourn,
+		perms => $perms,
+		days  => $ts_days,
+		today => $today
 	&>
 
 	<div class="main">
@@ -183,14 +182,12 @@
 			id    = "sortsked_buttonarea"
 			class = "sixth rightalign"
 		>
-%		if ($perms->{tourn}{$tourn} eq "owner" || $perms->{tourn}{$tourn} eq "tabber") {
 			<button
 				class     = "orangetext notfirst printbutton fa fa-sm fa-trash-o buttonwhite marno"
 				alt       = "Show Delete"
 				title     = "Show Delete"
 				onClick   = "showDelete();"
 			></button>
-%		}
 		</span>
 
 		<script>
@@ -214,7 +211,7 @@
 			table => "sortsked"
 		&>
 
-%		if (%timeslots) {
+%		if (@timeslots) {
 
 			<form
 				action = "save.mhtml"
@@ -288,27 +285,27 @@
 					and round.timeslot = ?
 			");
 
-			foreach my $timeslot_id (
-				sort {
-					$timeslots{$a}{"start"}{"epoch"} <=> $timeslots{$b}{"start"}{"epoch"}
-					|| $timeslots{$a}{"name"} <=> $timeslots{$b}{"name"}
-				} keys %timeslots
-			) {
+			foreach my $timeslot (@timeslots) {
 
-				my $timeslot = $timeslots{$timeslot_id};
+				my $roundstart = $timeslot->start->set_time_zone("UTC");
+				$roundstart->set_time_zone($tz);
 
-				if ($timeslot->{"start"}{epoch} == $timeslot->{"end"}{epoch}) {
-					$warning{$timeslot_id}{"color"} = "red";
-					$warning{$timeslot_id}{"text"} .= $timeslot->{name}." starts and ends at the same time. A round that exists in one instant of time will lead to double-booked rooms and judges. Please change to be in line with Einstein's laws of space and time.";
+				my $roundend   = $timeslot->end->set_time_zone($tz);
+				$roundend->set_time_zone($tz);
+
+				my @rounds = $timeslot->rounds();
+
+				if ($roundstart eq $roundend) {
+					$warning{$timeslot->id}{"color"} = "red";
+					$warning{$timeslot->id}{"text"} .= $timeslot->name." starts and ends at the same time. A round that exists in one instant of time will lead to double-booked rooms and judges. Please change to be in line with Einstein's laws of space and time.";
 				}
 
 				unless ($async) {
 
-					my $duration = $timeslot->{start}{dt} - $timeslot->{end}{dt};
-
+					my $duration = $roundend - $roundstart;
 					if ($duration->in_units('hours') > 4) {
 
-						$sth->execute($timeslot_id);
+						$sth->execute($timeslot->id);
 						my $ok;
 
 						while (
@@ -330,52 +327,55 @@
 						$sth->finish();
 
 						unless ($ok) {
-							$warning{$timeslot_id}{"color"} = "red";
-							$warning{$timeslot_id}{"text"} .= $timeslot->{name}." (in red) is scheduled for longer than 4 hours.  Dear God, what are you doing to those poor judges?  Chances are there's an am/pm problem here.";
+							$warning{$timeslot->id}{"color"} = "red";
+							$warning{$timeslot->id}{"text"} .= $timeslot->name." (in red) is scheduled for longer than 4 hours.  Dear God, what are you doing to those poor judges?  Chances are there's an am/pm problem here.";
 						}
 					}
 				}
 
-				if ($timeslot->{start}{dt} > $timeslot->{end}{dt}) {
-					$warning{$timeslot_id}{"color"} = "blue";
-					$warning{$timeslot_id}{"text"} = $timeslot->{name}." (in blue) ends before it is scheduled to begin.  While that sure would save a lot of time, we do not we control the fabric of space and time.  Chances are there's an am/pm problem here to fix.";
+				if ($roundstart > $roundend) {
+					$warning{$timeslot->id}{"color"} = "blue";
+					$warning{$timeslot->id}{"text"} = $timeslot->name." (in blue) ends before it is scheduled to begin.  While that sure would save a lot of time, we do not we control the fabric of space and time.  Chances are there's an am/pm problem here to fix.";
 				}
 
 				if ($today_limit && $tourn_settings->{'nsda_district'}) {
 
-					if ($timeslot->{start}{dt} > $today_limit) {
-						$warning{$timeslot_id}{"color"} = "orange";
-						$warning{$timeslot_id}{"text"} = "One or more rounds (in orange) start after 9:30 PM. By NSDA rule, no round may start after 9:30 PM except on the last day of the weekend.  Extemp rounds may start no later than 9:45 PM.";
+					if ($roundstart > $today_limit) {
+
+						$warning{$timeslot->id}{"color"} = "orange";
+
+						$warning{$timeslot->id}{"text"} = "One or more rounds (in orange) start after 9:30 PM. By NSDA rule, no round may start after 9:30 PM except on the last day of the weekend.  Extemp rounds may start no later than 9:45 PM.";
 
 					}
 				}
 
 </%perl>
-				<tr id="<% $timeslot_id %>" class="<% $warning{$timeslot_id}{"color"} %>row">
+				<tr id="<% $timeslot->id %>" class="<% $warning{$timeslot->id}{"color"} %>row">
 
 					<td class="centeralign">
 
-						<span class="hidden"><% $timeslot->{name} %></span>
+						<span class="hidden"><% $timeslot->name %></span>
 
 						<input
 							type  = "text"
-							name  = "<% $timeslot_id %>_name"
-							value = "<% $timeslot->{name} %>"
+							name  = "<% $timeslot->id %>_name"
+							value = "<% $timeslot->name %>"
 							size  = "24"
 						>
+
 					</td>
 
 %					if (scalar @{$all_days} > 1) {
 						<td class="centeralign">
-							<span class="hidden"><% $timeslot->{start}{dt}->day %></span>
+							<span class="hidden"><% $roundstart->day %></span>
 							<select
-								name  = "<% $timeslot_id %>_start_day"
+								name  = "<% $timeslot->id %>_start_day"
 								class = "fixedsmallest"
 							>
 %								foreach my $day (@{$all_days}) {
 									<option
 										value = "<% $day->mdy('/') %>"
-										<% $day->mdy eq $timeslot->{start}{dt}->mdy ? 'selected' : "" %>
+										<% $day->mdy eq $roundstart->mdy ? 'selected' : "" %>
 									> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
 %								}
 							</select>
@@ -383,24 +383,24 @@
 %					}
 
 					<td class="centeralign">
-						<span class="hidden"><% $timeslot->{start}{dt}->epoch %></span>
+						<span class="hidden"><% $roundstart->epoch %></span>
 						<& /funclib/timepicker.mas,
-							name => $timeslot_id."_start",
-							time => $timeslot->{start}{dt}->set_time_zone($tz)
+							name => $timeslot->id."_start",
+							time => $roundstart->set_time_zone($tz)
 						&>
 					</td>
 
 %					if ((scalar @{$all_days} > 1) && $async) {
 						<td class="centeralign">
-							<span class="hidden"><% $timeslot->{end}{dt}->day %></span>
+							<span class="hidden"><% $roundend->day %></span>
 							<select
-								name  = "<% $timeslot_id %>_end_day"
+								name  = "<% $timeslot->id %>_end_day"
 								class = "fixedsmallest"
 							>
 %								foreach my $day (@{$all_days}) {
 									<option
 										value = "<% $day->mdy('/') %>"
-										<% $day->mdy eq $timeslot->{end}{dt}->mdy ? 'selected' : "" %>
+										<% $day->mdy eq $roundend->mdy ? 'selected' : "" %>
 									> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
 %								}
 							</select>
@@ -408,22 +408,22 @@
 %					}
 
 					<td class="centeralign">
-						<span class="hidden"><% $timeslot->{end}{dt}->epoch %></span>
+						<span class="hidden"><% $roundend->epoch %></span>
 						<& /funclib/timepicker.mas,
-							name => $timeslot_id."_end",
-							time => $timeslot->{end}{dt}->set_time_zone($tz)
+							name => $timeslot->id."_end",
+							time => $roundend->set_time_zone($tz)
 						&>
 					</td>
 
 					<td class="centeralign nospace smallish">
-						<% $timeslot->{rounds} %>
+						<% scalar @rounds %>
 					</td>
 
 					<td class="centeralign nospace deleteswitch hidden">
 						<a
 							class     = "dkred button fa fa-trash padless buttonwhite redtext"
 							alt       = "Delete"
-							target_id = "<% $timeslot_id %>"
+							target_id = "<% $timeslot->id %>"
 							onClick   = "postSwitch(this, 'delete.mhtml');"
 							>
 						</a>
@@ -435,28 +435,24 @@
 			</tbody>
 
 <%perl>
+
 			my %done;
 
-			foreach my $timeslot_id (
-				sort {
-					$timeslots{$a}{"start"}{"epoch"} <=> $timeslots{$b}{"start"}{"epoch"}
-					|| $timeslots{$a}{"name"} <=> $timeslots{$b}{"name"}
-				} keys %timeslots
-			) {
+ 			foreach my $timeslot (@timeslots) {
 
-				next unless $warning{$timeslot_id};
-				next if $done{$warning{$timeslot_id}{"color"}}++;
-				next unless $warning{$timeslot_id}{"color"};
+				next unless $warning{$timeslot->id};
+				next if $done{$warning{$timeslot->id}{"color"}}++;
+				next unless $warning{$timeslot->id}{"color"};
 
 </%perl>
 				<div class="warn redtext centeralign padmuchmore marbottom">
 					<h5>Warning:</h5>
-					<% $warning{$timeslot_id}{"text"} %>
+					<% $warning{$timeslot->id}{"text"} %>
 				</div>
 %			}
 		</table>
 
-%		if (keys %timeslots) {
+%		if (@timeslots) {
 			<div class="liblrow rightalign">
 				<span class="third centeralign">
 					<input
@@ -468,115 +464,108 @@
 %		}
 		</form>
 
-%		if ($perms->{tourn}{$tourn} eq "owner" || $perms->{tourn}{$tourn} eq "tabber") {
+		<h5 class="martopmore">
+			Add a new timeslot:
+		</h5>
 
-			<h5 class="martopmore">
-				Add a new timeslot
+		<form
+			action="create.mhtml"
+			method="post"
+		>
+
+		<div class="ltyellow full">
+
+			<span class="quarter">
+				<input
+					type        = "text"
+					name        = "name"
+					size        = "20"
+					placeholder = "Add new..."
+				>
+			</span>
+
+%			if (scalar @{$all_days} > 1) {
+				<span class="sixth centeralign">
+					<select
+						name  = "new_start_day"
+						class = "fixedsmallest"
+					>
+%						foreach my $day (@{$all_days}) {
+							<option
+								value = "<% $day->mdy('/') %>"
+								<% $today->epoch == $day->epoch ? "selected" : "" %>
+							> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
+%						}
+					</select>
+				</span>
+%			} else {
+
+				<input type="hidden" name="new_start_day" value="<% $today->mdy('/') %>">
+%			}
+
+			<span class="sixth">
+				<&
+					"/funclib/timepicker.mas",
+					name => "new_start"
+				&>
+			</span>
+
+%			if ((scalar @{$all_days} > 1) && $async) {
+				<span class="sixth centeralign">
+					<select
+						name  = "new_end_day"
+						class = "fixedsmallest"
+					>
+%						foreach my $day (@{$all_days}) {
+							<option
+								value = "<% $day->mdy('/') %>"
+								<% $today->epoch == $day->epoch ? "selected" : "" %>
+							> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
+%						}
+					</select>
+				</span>
+%			}
+
+			<span class="sixth">
+				<&
+					"/funclib/timepicker.mas",
+					name => "new_end"
+				&>
+			</span>
+
+			<span class="tenth rightalign nospace">
+				<input
+					type  = "submit"
+					value = "Add"
+				>
+				</form>
+			</span>
+		</div>
+
+
+		<div class="martopmore">
+
+			<h5 title="This is your fault Katy Cecil">
+				How do I delete timeslots?
 			</h5>
 
-			<form
-				action="create.mhtml"
-				method="post"
-			>
+			<p>
+				To make the process of deleting timeslots faster, we've made a
+				quick button to do it with a single confirmation.  Click the
+				orange trashcan icon on the top right of the schedule table for
+				a day to show the timeslot delete buttons.
+			</p>
 
-			<div class="ltyellow full">
-
-				<span class="quarter">
-					<input
-						type        = "text"
-						name        = "name"
-						size        = "20"
-						placeholder = "Add new..."
-					>
-				</span>
-
-%				if (scalar @{$all_days} > 1) {
-					<span class="sixth centeralign">
-						<select
-							name  = "new_start_day"
-							class = "fixedsmallest"
-						>
-%							foreach my $day (@{$all_days}) {
-								<option
-									value = "<% $day->mdy('/') %>"
-									<% $today->epoch == $day->epoch ? "selected" : "" %>
-								> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
-%							}
-						</select>
-					</span>
-%				} else {
-
-					<input type="hidden" name="new_start_day" value="<% $today->mdy('/') %>">
-%				}
-
-				<span class="sixth">
-					<&
-						"/funclib/timepicker.mas",
-						name => "new_start"
-					&>
-				</span>
-
-%				if ((scalar @{$all_days} > 1) && $async) {
-					<span class="sixth centeralign">
-						<select
-							name  = "new_end_day"
-							class = "fixedsmallest"
-						>
-%							foreach my $day (@{$all_days}) {
-								<option
-									value = "<% $day->mdy('/') %>"
-									<% $today->epoch == $day->epoch ? "selected" : "" %>
-								> <% $day->day_abbr %> <% $day->month."/".$day->day %> </option>
-%							}
-						</select>
-					</span>
-%				}
-
-				<span class="sixth">
-					<&
-						"/funclib/timepicker.mas",
-						name => "new_end"
-					&>
-				</span>
-
-				<span class="tenth rightalign nospace">
-					<input
-						type  = "submit"
-						value = "Add"
-					>
-					</form>
-				</span>
-			</div>
+			<p>
+				And please, consider <a href="/register/data/export_data.mhtml"
+					class="inline semibold orangetext link-underline"
+				>taking a data backup</a> before doing any such thing. Because
+				I am taking a risk making such a damaging process easier and
+				I don't want anyone stung by it.
+			</p>
 
 
-			<div class="martopmore">
-
-				<h5 title="This is your fault, Katy Cecil">
-					How do I delete timeslots?
-				</h5>
-
-				<div class="centeralign">
-					<p class="ninetenths leftalign">
-						To make the process of deleting timeslots faster, we've made a
-						quick button to do it with a single confirmation.  Click the
-						orange trashcan icon on the top right of the schedule table for
-						a day to show the timeslot delete buttons.
-					</p>
-
-					<p class="ninetenths leftalign">
-						And please, consider <a href="/register/data/export_data.mhtml"
-							class="inline semibold orangetext link-underline"
-						>taking a data backup</a> before doing any such thing. Because
-						I am taking a risk making such a damaging process easier and
-						I don't want anyone stung by it, especially you!  You're my favorite
-						user, after all.
-					</p>
-				</div>
-
-
-			</div>
-
-%		}
+		</div>
 
 	</div>
 

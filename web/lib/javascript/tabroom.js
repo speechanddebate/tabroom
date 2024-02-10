@@ -23,7 +23,6 @@
 		if (!textLabel) {
 			textLabel = "Text ";
 		}
-
 		alertify.notify(textLabel+" copied to clipboard", "custom");
 	}
 
@@ -81,7 +80,8 @@
 		return false;
 	}
 
-	/* Respond to switch calls */
+/* Respond to switch calls */
+
 	function postEnter(e, checkObject, replyUrl) {
 		if (e.keyCode == 13) {
 			postSwitch(checkObject, replyUrl);
@@ -102,41 +102,24 @@
 		return;
 	}
 
-	// This will automatically pull all the attribute/value pairs of the this
-	// element into an object for posting
-
 	(function(old) {
+	  $.fn.attrs = function() {
+		if(arguments.length === 0) {
+		  if(this.length === 0) {
+			return null;
+		  }
 
-		const skipMe = [
-			'href',
-			'class',
-			'onClick',
-			'onclick',
-			'onChange',
-			'onchange',
-			'onBlur',
-			'onblur',
-		];
-
-		$.fn.attrs = function() {
-			if(arguments.length === 0) {
-				if(this.length === 0) {
-					return null;
-				}
-
-				const attributes = {};
-				Object.keys(this[0].attributes).forEach( itemId => {
-					const item = this[0].attributes[itemId];
-					if (skipMe.includes(item.name)) {
-						return;
-					}
-					attributes[item.name] = item.value;
-				});
-				return attributes;
+		  var obj = {};
+		  $.each(this[0].attributes, function() {
+			if(this.specified) {
+			  obj[this.name] = this.value;
 			}
-
-			return old.apply(this, arguments);
+		  });
+		  return obj;
 		}
+
+		return old.apply(this, arguments);
+	  };
 	})($.fn.attrs);
 
 	function postSwitch(checkObject, url, callback, confirmMessage) {
@@ -160,17 +143,11 @@
 
 			attributes = $(checkObject).attrs();
 
-			if (
-				attributes.property_value === undefined
-				&& $(checkObject).attr("value")
-			) {
+			if (attributes.property_value === undefined) {
 				attributes.property_value = $(checkObject).attr("value");
 			}
 
-			if (
-				attributes.property_value === undefined
-				&& $(checkObject).val()
-			) {
+			if (attributes.property_value === undefined) {
 				attributes.property_value = $(checkObject).val();
 			}
 
@@ -180,21 +157,19 @@
 				}
 			}
 
-			if (
-				attributes.parent_id === undefined
-				&& ($(checkObject).parent())
-				&& ($(checkObject).parent().attr('id'))
-			) {
+			if (attributes.parent_id === undefined) {
 				attributes.parent_id = $(checkObject).parent().attr('id');
 			}
 
 			// I hate myself a lot sometimes.
+
 			if ($(checkObject).attr("other_value")) {
 				var otherObjectId = $(checkObject).attr("other_value");
 				attributes.other_value = $("#"+otherObjectId).val();
 			}
 
 			// OK, most of the time.
+
 			if ($(checkObject).attr("other_other_value")) {
 				var otherObjectId = $(checkObject).attr("other_other_value");
 				attributes.other_other_value = $("#"+otherObjectId).val();
@@ -236,227 +211,190 @@
 		}
 
 		const options = {
-			type           : 'POST',
-			credentials    : 'include',
-		    crossDomain    : true,
-			dataType       : 'json',
+			mode        : 'cors',
+			credentials : 'include',
+			headers     : {
+			  'Content-Type' : 'application/json',
+			  'Accept'       : 'application/json',
+			},
 			redirect       : 'follow',
 			referrerPolicy : 'no-referrer',
+		};
+
+		if (attributes.post_method === "get") {
+			options.method = 'GET';
+		} else if (attributes.post_method === "delete") {
+			options.method = 'DELETE';
+			options.body = JSON.stringify(attributes);
+		} else if (attributes.post_method === "put") {
+			options.method = 'PUT';
+			options.body = JSON.stringify(attributes);
+		} else {
+			options.method = 'POST';
+			options.body = JSON.stringify(attributes);
+		}
+
+		$.ajax({
+			type        : options.method,
+			data        : attributes,
+		    crossDomain : true,
 			xhrFields: {
 				withCredentials: true
 			},
-			headers    : {
-			  'Accept' : 'application/json',
-			},
-			url,
-		};
+			url
+        }).then(function(data) {
 
-		if (attributes.postmethod && !attributes.post_method) {
-			attributes.post_method = attributes.postmethod;
-			delete attributes.postmethod;
-		}
+			if (data.reply) {
+				if (attributes.reply_target) {
+					$("#"+attributes.reply_target).text(data.reply);
+				}
 
-		if (attributes.post_method === "get") {
-			options.type = 'GET';
-		} else if (attributes.post_method === "delete") {
-			options.type = 'DELETE';
-			options.headers['Content-Type'] = "application/json";
-		} else if (attributes.post_method === "put") {
-			options.type = 'PUT';
-			options.data = JSON.stringify(attributes);
-			options.headers['Content-Type'] = "application/json";
-		} else {
-			options.data = attributes;
-			if (attributes.to_api) {
-				options.headers['Content-Type'] = "application/json";
-				delete attributes.to_api;
+				if (attributes.reply_append) {
+					$("#"+attributes.reply_append).append(data.reply);
+				}
+
+				if (data.reply_target) {
+					$("#"+data.reply_target).text(data.reply);
+				}
+
+				if (data.reply_append) {
+					$("#"+data.reply_append).append(data.reply);
+				}
+
+				$(".replybucket").text(data.reply);
+				$(".replyappend").append(data.reply);
 			}
-		}
 
-		delete options.data?.post_method;
+			if (data.error) {
 
-		$.ajax({
-			...options,
-			error: function(data, status, metadata) {
+				alertify.error(data.message);
 
-				const reply = data.responseJSON;
-
-				if (reply?.message) {
-					if (reply.destroy) {
-						$("#"+reply.destroy).remove();
-						$("."+reply.destroy).remove();
-					}
-					alertify.warning(reply.message);
-				} else if (data.status === 0 && data.statusText === 'error') {
-					alertify.warning('Tabroom API could not be reached');
-				} else {
-					alertify.warning(data.responseText);
+				if (data.destroy) {
+					$("#"+data.destroy).remove();
+					$("."+data.destroy).remove();
 				}
 
-				fixVisual;
-				return;
-			},
-			success: function(data, status, metadata) {
-
-				if (data.reply) {
-					if (attributes.reply_target) {
-						$("#"+attributes.reply_target).text(data.reply);
-					}
-
-					if (attributes.reply_append) {
-						$("#"+attributes.reply_append).append(data.reply);
-					}
-
-					if (data.reply_target) {
-						$("#"+data.reply_target).text(data.reply);
-					}
-
-					if (data.reply_append) {
-						$("#"+data.reply_append).append(data.reply);
-					}
-
-					$(".replybucket").text(data.reply);
-					$(".replyappend").append(data.reply);
+				if (data.errSetValue) {
+					data.errSetValue.forEach( function(item) {
+						$("#"+item.id).val(item.content);
+					});
 				}
 
-				// The New School of error posting.  Use the thing that's actually
-				// meant to do that. WILD I KNOW.
+				if (data.errReplace) {
+					data.errReplace.forEach( function(item) {
+						if (item.destroy) {
+							$("#"+item.id).remove();
+						} else if (item.content) {
+							$("#"+item.id).html(item.content);
+						}
+					});
+				}
 
-				if (metadata.status === 200 && (typeof data === 'string')) {
+				if (data.refresh) {
+					window.location.reload();
+				}
 
-					alertify.notify(data, "custom");
+			} else if (data.message) {
 
-				} else if (data.error) {
+				alertify.dismissAll();
+				alertify.notify(data.message, "custom");
 
-					alertify.error(data.message);
+				if (data.destroy) {
+					$("#"+data.destroy).remove();
+					$("."+data.destroy).remove();
+				}
 
-					if (data.destroy) {
-						$("#"+data.destroy).remove();
-						$("."+data.destroy).remove();
-					}
+				if (data.showAll) {
+					$("."+data.showAll).removeClass("hidden");
+				}
 
-					if (data.errSetValue) {
-						data.errSetValue.forEach( function(item) {
-							$("#"+item.id).val(item.content);
-						});
-					}
+				if (data.hideAll) {
+					$("."+data.hideAll).addClass("hidden");
+				}
 
-					if (data.errReplace) {
-						data.errReplace.forEach( function(item) {
-							if (item.destroy) {
-								$("#"+item.id).remove();
-							} else if (item.content) {
-								$("#"+item.id).html(item.content);
-							}
-						});
-					}
+				if (data.reveal) {
+					$("#"+data.reveal).removeClass("hidden");
+				}
 
-					if (data.refresh) {
-						window.location.reload();
-					}
+				if (data.hide) {
+					$("#"+data.hide).addClass("hidden");
+				}
 
-				} else if (data.message) {
+				if (attributes.on_success === "destroy") {
+					$("#"+attributes.target_id).remove();
+				} else if (attributes.on_success === "hide") {
+					$("#"+attributes.target_id).addClass("hidden");
+				} else if (
+					attributes.on_success === "refresh"
+					|| attributes.on_success === "reload"
+					|| data.refresh
+				) {
+					window.location.reload();
+				}
 
-					alertify.dismissAll();
-					alertify.notify(data.message, "custom");
+				if (attributes.new_parent) {
+					$("#"+attributes.target_id).prependTo("#"+attributes.new_parent);
+				}
 
-					if (data.destroy) {
-						$("#"+data.destroy).remove();
-						$("."+data.destroy).remove();
-					}
+				if (data.newParent) {
+					$("#"+attributes.target_id).prependTo("#"+data.newParent);
+				}
 
-					if (data.showAll) {
-						$("."+data.showAll).removeClass("hidden");
-					}
+				if (data.setvalue) {
+					data.setvalue.forEach( function(item) {
+						$("#"+item.id).val(item.content);
+					});
+				}
 
-					if (data.hideAll) {
-						$("."+data.hideAll).addClass("hidden");
-					}
+				if (data.replace) {
+					data.replace.forEach( function(item) {
+						if (item.destroy) {
+							$("#"+item.id).remove();
+						} else if (item.content) {
+							$("#"+item.id).html(item.content);
+						}
+					});
+				}
 
-					if (data.reveal) {
-						$("#"+data.reveal).removeClass("hidden");
-					}
+				if (data.reclass) {
+					data.reclass.forEach( function(item) {
+						if (item.removeClass) {
+							$("#"+item.id).removeClass(item.removeClass);
+						}
+						if (item.addClass) {
+							$("#"+item.id).addClass(item.addClass);
+						}
+					});
+				}
 
-					if (data.hide) {
-						$("#"+data.hide).addClass("hidden");
-					}
+				if (data.reprop) {
+					data.reprop.forEach( function(item) {
+						$("#"+item.id).attr(item.property, item.value);
+					});
+				}
 
-					if (attributes.on_success === "destroy") {
-						$("#"+attributes.target_id).remove();
-					} else if (attributes.on_success === "hide") {
-						$("#"+attributes.target_id).addClass("hidden");
-					} else if (
-						attributes.on_success === "refresh"
-						|| attributes.on_success === "reload"
-						|| data.refresh
-					) {
-						window.location.reload();
-					}
-
-					if (attributes.new_parent) {
-						$("#"+attributes.target_id).prependTo("#"+attributes.new_parent);
-					}
-
-					if (data.newParent) {
-						$("#"+attributes.target_id).prependTo("#"+data.newParent);
-					}
-
-					if (data.setvalue) {
-						data.setvalue.forEach( function(item) {
-							$("#"+item.id).val(item.content);
-						});
-					}
-
-					if (data.replace) {
-						data.replace.forEach( function(item) {
-							if (item.destroy) {
-								$("#"+item.id).remove();
-							} else if (item.content) {
-								$("#"+item.id).html(item.content);
-							}
-						});
-					}
-
-					if (data.reclass) {
-						data.reclass.forEach( function(item) {
-							if (item.removeClass) {
-								$("#"+item.id).removeClass(item.removeClass);
-							}
-							if (item.addClass) {
-								$("#"+item.id).addClass(item.addClass);
-							}
-						});
-					}
-
-					if (data.reprop) {
-						data.reprop.forEach( function(item) {
-							$("#"+item.id).attr(item.property, item.value);
-						});
-					}
-
-					if (data.norefresh) {
-
-					} else {
-						$('table').trigger('applyWidgets');
-						$('table').trigger('update', [true]);
-						fixVisual();
-					}
+				if (data.norefresh) {
 
 				} else {
-					console.log(data);
-					console.log(metadata);
-					alertify.warning("An error condition was tripped.");
+					$('table').trigger('applyWidgets');
+					$('table').trigger('update', [true]);
+					fixVisual();
 				}
 
-				if (callback && callback != 'false') {
-					callback(data);
-				}
-
-				fixVisual();
-				return;
+			} else {
+				console.log(data);
+				alertify.warning("An error condition was tripped.");
 			}
+
+			if (callback && callback != 'false') {
+				callback(data);
+			}
+
+			return;
 		});
 
+		fixVisual();
+		return;
 	}
 
 	function valueConfirm(alertMessage, value, url, callback) {
@@ -611,6 +549,8 @@
 		});
 	}
 
+
+
 	function pullUrl(targetUrl) {
 		$.ajax({
 			type    : 'GET',
@@ -655,45 +595,27 @@
 		resizeAll();
 		zebraRows();
 
-		$("select:not(.plain)").select2({
-			minimumResultsForSearch : 5,
-			width                   : '100%',
-			dropdownCssClass        : 'selection_text',
-		});
-	}
-/* jerks
-*
-		var base_url = window.location.origin.split(':').slice(1);
-		var base_domain =  base_url[0].split('.').slice(-2).join('.');
-		base_domain = base_domain.replace(/\//g,'');
+		$("select:not(.plain)").trigger("chosen:updated");
 
-		if (
-			(base_domain !== 'tabroom.com')
-			&& (base_domain !== 'debatefail.com')
-			&& (base_domain !== 'tabroom.gay')
-		) {
-			pleaseStop();
-		}
+//		var base_url = window.location.origin.split(':').slice(1);
+//		var base_domain =  base_url[0].split('.').slice(-2).join('.');
+//		base_domain = base_domain.replace(/\//g,'');
+
+//		if (
+//			(base_domain !== 'tabroom.com')
+//			&& (base_domain !== 'debatefail.com')
+//			&& (base_domain !== 'tabroom.gay')
+//		) {
+//			pleaseStop();
+//		}
 	}
+
+	/* jerks */
 
 	function pleaseStop() {
-		$(".main").html(`
-			<h3 class="centeralign redtext">This site is not Tabroom. It is a phishing attempt</h3>
-
-			<h4 class="centeralign">Fortunately it was not a very good one, so Chris Palmer was able to mess
-			with them a little and put this message up instead</h4>
-
-			<h4 class="centeralign bluetext">Real Tabroom will always say "https://www.tabroom.com" in the address bar.</h4>
-
-			<h5 class="centeralign">Also, it would not have worked anyway, for reasons I will not get into here</h5>
-
-			<p class="centeralign bluetext bigger martop">But seriously people, stop trying to make my life more
-			stressful and stop doing things like this.  There are no fortunes to be made here, just a more tired
-			Tabroom developer.</p>
-		`);
+		$(".main").html('<h3 class="centeralign redtext">This site is not Tabroom. It is a phishing attempt</h3><h4 class="centeralign">Fortunately it was not a very good one, so Chris Palmer was able to mess with them a little and put this message up instead</h4><h4 class="centeralign bluetext">Real Tabroom will always say "https://www.tabroom.com" in the address bar.</h4><h5 class="centeralign">Also, it would not have worked anyway, for reasons I will not get into here</h5><p class="centeralign bluetext bigger martop">But seriously people, stop trying to make my life more stressful and stop doing things like this.  There are no fortunes to be made here, just a more tired Tabroom developer.</p>');
 		console.log('no seriously stop');
 	}
-*/
 
 /* Change the file uploader div to show the name of the uploaded file */
 
@@ -704,54 +626,55 @@
 		$("."+fileTag).html(fileName);
 	}
 
-	function uploaderName(uploader, filedisplay, sizeLimit) {
 
-		if (uploader == null) {
-			uploader = 'upload';
-		}
+function uploaderName(uploader, filedisplay, sizeLimit) {
 
-		if (filedisplay == null) {
-			filedisplay = 'filename';
-		}
-
-		if (sizeLimit == null) {
-			sizeLimit = 15;
-		}
-
-		var filename = document.getElementById(uploader).value;
-		var lastIndex = filename.lastIndexOf("\\");
-		if (lastIndex >= 0) {
-			filename = filename.substring(lastIndex + 1);
-		}
-
-		if (sizeLimit > 0 && typeof FileReader !== "undefined") {
-			var size = document.getElementById(uploader).files[0].size;
-
-			if (size > (parseInt(sizeLimit) * 1024 * 1024)) {
-
-				document.getElementById(uploader).value = "";
-
-				var sizeString = (size / 1024 / 1024).toFixed(1);
-
-				var message = `File ${filename} size is ${sizeString} MB and the
-					upload limit is ${sizeLimit} MB. Please compress or reformat the file,
-					because otherwise upload and validation errors are very likely.`;
-
-				alertify.confirm(
-					"File size too large!",
-					message,
-					function(event) {
-						alertify.error("File upload cleared");
-					},
-					function() {
-						alertify.error("File upload cleared");
-					}
-				);
-			}
-		}
-
-		document.getElementById(filedisplay).innerHTML = filename;
+	if (uploader == null) {
+		uploader = 'upload';
 	}
+
+	if (filedisplay == null) {
+		filedisplay = 'filename';
+	}
+
+	if (sizeLimit == null) {
+		sizeLimit = 15;
+	}
+
+	var filename = document.getElementById(uploader).value;
+	var lastIndex = filename.lastIndexOf("\\");
+	if (lastIndex >= 0) {
+		filename = filename.substring(lastIndex + 1);
+	}
+
+	if (sizeLimit > 0 && typeof FileReader !== "undefined") {
+		var size = document.getElementById(uploader).files[0].size;
+
+		if (size > (parseInt(sizeLimit) * 1024 * 1024)) {
+
+			document.getElementById(uploader).value = "";
+
+			var sizeString = (size / 1024 / 1024).toFixed(1);
+
+			var message = `File ${filename} size is ${sizeString} MB and the
+				upload limit is ${sizeLimit} MB. Please compress or reformat the file,
+				because otherwise upload and validation errors are very likely.`;
+
+			alertify.confirm(
+				"File size too large!",
+				message,
+				function(event) {
+					alertify.error("File upload cleared");
+				},
+				function() {
+					alertify.error("File upload cleared");
+				}
+			);
+		}
+	}
+
+	document.getElementById(filedisplay).innerHTML = filename;
+}
 
 /* Registers the ballot entry shortcuts for win/loss */
 
@@ -1258,22 +1181,44 @@ function autoTab(input,len,e) {
 
 /* Login Box and other initializations */
 
-function showLoginBox() {
-	$("#login-box").slideDown(500);
-	var popMargTop = ($("#login-box").height() + 24) / 2;
-	var popMargLeft = ($("#login-box").width() + 24) / 2;
-	$("#login-box").css({ 'margin-top' : -popMargTop, 'margin-left' : -popMargLeft });
-	$('body').append('<div id="mask" onClick="hideLoginBox();"></div>');
-	$('#mask').fadeIn(300);
-	$('#username').focus();
-	return false;
-};
 
-function hideLoginBox() {
-	$('#mask').fadeOut(300 , function() { $('#mask').remove();  });
-	$('.login-popup').slideUp(300);
-	return false;
-}
+$(document).ready(function() {
+
+	$('a.login-window').click(function() {
+		var loginBox = $(this).attr('href');
+		$(loginBox).slideDown(300);
+		var popMargTop = ($(loginBox).height() + 24) / 2;
+		var popMargLeft = ($(loginBox).width() + 24) / 2;
+		$(loginBox).css({ 'margin-top' : -popMargTop, 'margin-left' : -popMargLeft });
+		$('body').append('<div id="mask"></div>');
+		$('#mask').fadeIn(300);
+		$('#username').focus();
+		return false;
+	});
+
+	$('a.close, #mask').live('click', function() {
+		$('#mask').fadeOut(300 , function() { $('#mask').remove();  });
+		$('.login-popup').slideUp(300);
+		return false;
+	});
+
+	$('.hide-menu').click(function() {
+		$('.menu').slideUp(300);
+		$('.content').addClass('nomenu');
+		$('.hide-menu').addClass('hidden');
+		$('.show-menu').removeClass('hidden');
+	});
+
+	$('.show-menu').click(function() {
+		$('.menu').slideDown(300);
+		$('.content').removeClass('nomenu');
+		$('.show-menu').addClass('hidden');
+		$('.hide-menu').removeClass('hidden');
+	});
+
+	resizeAll();
+
+});
 
 // Resize the inputs and be done with the eighty seven years of choosing I've
 // been doing.
@@ -1303,12 +1248,11 @@ function resizeAll() {
 		$(this).width($(this).parent().width()-10);
 	});
 
-	$('.selection').each(function(){
+	$('.chosen-container').each(function(){
 		if (
 			$(this).parent().is("td")
 			|| $(this).parent().is("th")
 		) {
-			$(this).width($(this).parent().width()-5);
 		} else {
 			$(this).width($(this).parent().width()-10);
 		}

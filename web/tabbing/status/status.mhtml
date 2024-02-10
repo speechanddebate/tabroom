@@ -15,43 +15,18 @@
 	$tz = "UTC" unless $tz;
 
 	my $round = Tab::Round->retrieve($round_id) if $round_id;
+	my $timeslot = Tab::Timeslot->retrieve($timeslot_id) if $timeslot_id;
 
 	if ($round) {
 		$ARGS{"event_id"} = $round->event->id;
 	}
 
-	my %events = $m->comp("/funclib/perms/events.mas",
-		tourn   => $tourn,
-		perms   => $perms,
-		checker => 1,
-		limited => 1,
-		by_both => 1
+	my ($eventref, $catref) = $m->comp(
+		"/funclib/allowed_events.mas",
+			tourn     => $tourn,
+			perms     => $perms,
+			newschool => 1
 	);
-
-	my @categories = $m->comp("/funclib/perms/categories.mas",
-		tourn   => $tourn,
-		perms   => $perms,
-		checker => 1
-	);
-
-	my %categories = map {$_->id => $_} @categories;
-
-	my %timeslots = $m->comp("/funclib/perms/timeslots.mas",
-		tourn => $tourn,
-		perms => $perms,
-		by_both => 1
-	);
-
-	my @timeslot_ids = sort {
-		$timeslots{$a}{"start"}{'epoch'} <=> $timeslots{$b}{"start"}{'epoch'}
-		|| $timeslots{$a}{"end"}{'epoch'} <=> $timeslots{$b}{"end"}{'epoch'}
-		|| $timeslots{$a}{"name"} cmp $timeslots{$b}{'name'}
-	} keys %timeslots;
-
-	my $timeslot;
-	if ($timeslot_id) {
-		$timeslot = Tab::Timeslot->retrieve($timeslot_id);
-	}
 
 	my $dbh = Tab::DBI->db_Main();
 	my $longest_code;
@@ -78,33 +53,42 @@
 		$ok{$event_id}++;
 	}
 
-	foreach my $key (keys %events) {
+	foreach my $key (keys %{$eventref}) {
 		next if $ok{$key};
-		delete $events{$key};
+		delete $eventref->{$key};
 	}
 
 	my $event;
+	my @keys = keys %{$eventref};
 
 	if ($ARGS{timeslot_id}) {
 
-	} elsif ($ARGS{event_id} && $events{$ARGS{"event_id"}}) {
-		$event = $events{$ARGS{"event_id"}};
-	} elsif ($defaults->{event} && $events{$defaults->{event}}) {
-		$event = $events{$defaults->{event}};
-	} elsif (scalar (keys %events) == 1) {
-		my @events = keys %events;
-		$event = $events{$events[0]};
-		Tab::debuglog("ID is ".$events[0]);
-		Tab::debuglog("Event is ".$event->{id});
-		foreach my $key (keys %{$event}) {
-			Tab::debuglog("I have key $key value ".$event->{$key});
-		}
+	} elsif ($ARGS{event_id} && $eventref->{$ARGS{"event_id"}}) {
+		$event = $eventref->{$ARGS{"event_id"}};
+	} elsif ($defaults->{event} && $eventref->{$defaults->{event}}) {
+		$event = $eventref->{$defaults->{event}};
+	} elsif (scalar (@keys) == 1) {
+		$event = $eventref->{$keys[0]};
 	}
 
 	if ($event) {
 		$defaults->{event} = $event->{id};
 		$session->default($defaults);
 	}
+
+    my $eventlimit;
+
+    if ($eventref && (scalar @keys) > 0) {
+        $eventlimit = " and event.id in (";
+        my $notfirst;
+        foreach my $eid (@keys) {
+            if ($notfirst++) {
+                $eventlimit .= ",";
+			}
+            $eventlimit .= $eid;
+		}
+        $eventlimit .= ")";
+    }
 
 	my %rounds;
 	my %judges;
@@ -117,6 +101,23 @@
 		$limit = "where round.event = ".$event->{id};
 	}
 
+	my $timeslot_sth = $dbh->prepare("
+		select
+			timeslot.id, timeslot.name
+		from (event, round, timeslot)
+		where timeslot.id = round.timeslot
+			and round.event = event.id
+			$eventlimit
+		group by timeslot.id
+		order by timeslot.start
+	");
+
+	my $timeslots;
+
+	if ($eventlimit) {
+		$timeslot_sth->execute();
+		$timeslots = $timeslot_sth->fetchall_hash();
+	}
 
 	my $round_sth = $dbh->prepare("
 		select
@@ -437,15 +438,15 @@
 		$longest_code = 7;
 	}
 
-	my $get_url = $Tab::indexcards_url."/tab/".$tourn->id;
+	my $get_url = $Tab::indexcards_url."/tourn/".$tourn->id."/tab/status/";
 
 	if ($round_id) {
-		$get_url .= "/round/$round_id/attendance";
+		$get_url .= "round/$round_id";
 	} elsif ($timeslot_id) {
-		$get_url .= "/timeslot/$timeslot_id/attendance";
+		$get_url .= "timeslot/$timeslot_id";
 	}
 
-	my $post_url = $Tab::indexcards_url."/tab/".$tourn->id."/all/attendance";
+	my $post_url = $Tab::indexcards_url."/tourn/".$tourn->id."/tab/status/update";
 
 </%init>
 
@@ -455,7 +456,7 @@
 
 			fetch('<% $get_url %>',
 				{ credentials: 'include' }
-			).then( async (response) => {
+			).then( async function(response) {
 
 				const status = await response.json();
 
@@ -493,98 +494,91 @@
 				$(".done_bye")
 					.addClass("fa-certificate");
 
-				if (status.person) {
-					Object.keys(status?.person).forEach( personId => {
+				Object.keys(status?.person).forEach( personId => {
 
-						const person = status.person[personId];
-						Object.keys(person).forEach(panelId => {
+					const person = status.person[personId];
+					Object.keys(person).forEach(function (panelId) {
 
-							var panel = person[panelId];
+						var panel = person[panelId];
 
-							if (panel.tag == 'panel' || panel.tag == 'present') {
-								$("#container_"+panelId+"_"+personId).attr("property_name", 1);
-								$("#"+panelId+"_"+personId)
-									.removeClass("brightredtext")
-									.removeClass("fa-circle")
-									.addClass("fa-check")
-									.addClass("greentext")
-									.attr("title", panel.description+" at "+panel.started);
-							}
+						if (panel.tag == 'panel' || panel.tag == 'present') {
+							$("#container_"+panelId+"_"+personId).attr("property_name", 1);
+							$("#"+panelId+"_"+personId)
+								.removeClass("brightredtext")
+								.removeClass("fa-circle")
+								.addClass("fa-check")
+								.addClass("greentext")
+								.attr("title", panel.description+" at "+panel.started);
+						}
 
-							if (panel.started) {
-								$("#"+panelId+"_"+personId+"_start")
-									.removeClass("yellowtext")
-									.removeClass("fa-stop")
-									.addClass("fa-star")
-									.addClass("greentext");
+						if (panel.started) {
+							$("#"+panelId+"_"+personId+"_start")
+								.removeClass("yellowtext")
+								.removeClass("fa-stop")
+								.addClass("fa-star")
+								.addClass("greentext");
 
-								$("#start_"+panelId+"_"+personId)
-									.attr("title", "Marked started by "+panel.started_by+" at "+panel.started)
-									.attr("property_name", 1);
-							}
+							$("#start_"+panelId+"_"+personId)
+								.attr("title", "Marked started by "+panel.started_by+" at "+panel.started)
+								.attr("property_name", 1);
+						}
 
-							if (panel.audited) {
-								$("#"+panelId+"_"+personId+"_done")
-									.addClass("fa-certificate");
+						if (panel.audited) {
+							$("#"+panelId+"_"+personId+"_done")
+								.addClass("fa-certificate");
 
-								$("#done_"+panelId+"_"+personId)
-									.attr("property_name", 1);
-							}
-						});
+							$("#done_"+panelId+"_"+personId)
+								.attr("property_name", 1);
+						}
 					});
-				}
+				});
 
-				if (status.student) {
-					Object.keys(status?.student).forEach( studentId => {
-						Object.keys(status.student[studentId]).forEach(panelId => {
+				Object.keys(status?.student).forEach( function (studentId) {
 
-							const panel = status.student[studentId]?.[panelId];
+					Object.keys(status.student[studentId]).forEach(function (panelId) {
 
-							if (panel.tag == 'panel' || panel.tag == 'present') {
-								$("#container_"+panelId+"_student_"+studentId).attr("property_name", 1);
-								$("#"+panelId+"_student_"+studentId)
-									.removeClass("brightredtext")
-									.removeClass("fa-circle")
-									.addClass("fa-check")
-									.addClass("greentext")
-									.attr("title", panel.description+" at "+panel.started);
-							}
-						});
+						const panel = status.student[studentId]?.[panelId];
+
+						if (panel.tag == 'panel' || panel.tag == 'present') {
+							$("#container_"+panelId+"_student_"+studentId).attr("property_name", 1);
+							$("#"+panelId+"_student_"+studentId)
+								.removeClass("brightredtext")
+								.removeClass("fa-circle")
+								.addClass("fa-check")
+								.addClass("greentext")
+								.attr("title", panel.description+" at "+panel.started);
+						}
 					});
-				}
+				});
 
-				if (status.entry) {
-					Object.keys(status.entry).forEach( entryId => {
-						Object.keys(status.entry[entryId]).forEach( panelId => {
-							const panel = status.entry[entryId]?.[panelId];
+				Object.keys(status.entry).forEach( entryId => {
+					Object.keys(status.entry[entryId]).forEach(function (panelId) {
+						const panel = status.entry[entryId]?.[panelId];
 
-							if (panel.tag == 'panel' || panel.tag == 'present') {
-								$("#container_"+panelId+"_entry_"+entryId).attr("property_name", 1);
-								$("#"+panelId+"_entry_"+entryId)
-									.removeClass("brightredtext")
-									.removeClass("fa-circle")
-									.addClass("fa-check")
-									.addClass("greentext")
-									.attr("title", panel.description+" at "+panel.started);
-							}
-						});
+						if (panel.tag == 'panel' || panel.tag == 'present') {
+							$("#container_"+panelId+"_entry_"+entryId).attr("property_name", 1);
+							$("#"+panelId+"_entry_"+entryId)
+								.removeClass("brightredtext")
+								.removeClass("fa-circle")
+								.addClass("fa-check")
+								.addClass("greentext")
+								.attr("title", panel.description+" at "+panel.started);
+						}
 					});
-				}
+				});
 
 				$(`.confirmation`).text(0);
 				$(`.confirmation_yes`).addClass('hidden');
 				$(`.confirmation_no`).removeClass('hidden');
 
-				if (status.panel) {
-					Object.keys(status.panel).forEach( panelId => {
-						$(`#${panelId}_confirmed`).text(1);
-						$(`#${panelId}_confirmed_yes`).removeClass('hidden');
-						$(`#${panelId}_confirmed_no`).addClass('hidden');
-						$(`#${panelId}_confirmed_yes`).attr("title", status.panel[panelId]);
-					});
-				}
+				Object.keys(status.panel).forEach( function (panelId) {
+					$(`#${panelId}_confirmed`).text(1);
+					$(`#${panelId}_confirmed_yes`).removeClass('hidden');
+					$(`#${panelId}_confirmed_no`).addClass('hidden');
+					$(`#${panelId}_confirmed_yes`).attr("title", status.panel[panelId]);
+				});
 
-			}).then( () => {
+			}).then(function() {
 				countNoses();
 				countStarts();
 				countDone();
@@ -600,7 +594,7 @@
 			var panelCounts = {};
 			var startCounts = {};
 
-			$(".start").each( index => {
+			$(".start").each( function(index) {
 				var panelId = $(this).attr('panel');
 
 				if (panelCounts[panelId]) {
@@ -618,7 +612,7 @@
 
 			var total = 0;
 
-			Object.keys(panelCounts).forEach( panelId => {
+			Object.keys(panelCounts).forEach(function (panelId) {
 				$("#"+panelId+"_startcount").text(panelCounts[panelId]);
 				total += panelCounts[panelId];
 			});
@@ -634,7 +628,7 @@
 			var panelRatio = {};
 			var panelBye = {};
 
-			$(".container").each( index => {
+			$(".container").each( function(index) {
 
 				var panelId = $(this).attr('panel');
 				panelRatio[panelId] = $("#"+panelId+"_bodies").attr('total');
@@ -655,7 +649,7 @@
 				}
 			});
 
-			Object.keys(panelCounts).forEach( panelId => {
+			Object.keys(panelCounts).forEach(function (panelId) {
 				var ratio;
 
 				if (panelRatio[panelId] > 0) {
@@ -680,7 +674,7 @@
 			var judgeStarts = {};
 			var judgeRatio = {};
 
-			$(".start").each( index => {
+			$(".start").each( function(index) {
 				var panelId = $(this).attr('panel');
 				judgeRatio[panelId] = $("#"+panelId+"_bodies").attr('judges');
 
@@ -694,7 +688,7 @@
 				}
 			});
 
-			Object.keys(judgeStarts).forEach(panelId => {
+			Object.keys(judgeStarts).forEach(function (panelId) {
 				var ratio;
 
 				if (judgeRatio[panelId] > 0) {
@@ -714,7 +708,7 @@
 		function countDone() {
 			var panelCounts = {};
 
-			$(".done").each( index => {
+			$(".done").each( function(index) {
 
 				var panelId = $(this).attr('panel');
 
@@ -734,7 +728,7 @@
 
 			var total = 0;
 
-			Object.keys(panelCounts).forEach(panelId => {
+			Object.keys(panelCounts).forEach(function (panelId) {
 				$("#"+panelId+"_donecount").html(panelCounts[panelId]);
 				total += panelCounts[panelId];
 			});
@@ -762,7 +756,7 @@
 				}
 			}
 
-			$(".flightbutton").each(index => {
+			$(".flightbutton").each(function(index) {
 				var flight = $(this).attr("flight");
 				if ($("#flight_"+flight).attr("state") == 0) {
 					$(".flight_"+flight).addClass("hidden");
@@ -794,7 +788,7 @@
 			updateView();
 		}
 
-		$(document).ready( () => {
+		$(document).ready(function() {
 			refreshLogs();
 			setInterval(refreshLogs, 15000);
 		});
@@ -819,13 +813,13 @@
 						class    = "fixedmed notfirst"
 					>
 						<option value="">Choose timeslot:</option>
-%						foreach my $timeslot_id (@timeslot_ids) {
+%						foreach my $timeslot (@{$timeslots}) {
 							<option
-								value="<% $timeslot_id %>"
-								<% ($timeslot_id == $ARGS{"timeslot_id"})
+								value="<% $timeslot->{id} %>"
+								<% ($timeslot_id == $timeslot->{id})
 									? "selected"
 									: "" %>
-							><% $timeslots{$timeslot_id}{name} %></option>
+							><% $timeslot->{name} %></option>
 %						}
 					</select>
 				</span>
@@ -848,17 +842,17 @@
 						<option value="">Choose event:</option>
 <%perl>
 						foreach my $other_id (sort {
-							$events{$a}{supp} cmp $events{$b}{supp}
-							|| $events{$a}{type} cmp $events{$b}{type}
-							|| $events{$a}{abbr} cmp $events{$b}{abbr}
-						} keys %events) {
+							$eventref->{$a}->{supp} cmp $eventref->{$b}->{supp}
+							|| $eventref->{$a}->{type} cmp $eventref->{$b}->{type}
+							|| $eventref->{$a}->{abbr} cmp $eventref->{$b}->{abbr}
+						} keys %{$eventref}) {
 </%perl>
 							<option
 								value="<% $other_id %>"
 								<% ($event && $other_id == $event->{id})
 									? "selected"
 									: "" %>
-							><% $events{$other_id}{abbr} %></option>
+							><% $eventref->{$other_id}->{abbr} %></option>
 %						}
 					</select>
 				</span>

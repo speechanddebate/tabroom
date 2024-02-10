@@ -7,31 +7,45 @@
 </%args>
 <%init>
 
-	my @events = $m->comp(
-		"/funclib/perms/events.mas",
-			tourn => $tourn,
-			perms => $perms
+	unless ($person->site_admin
+		|| $perms->{"tabber"}
+		|| $perms->{"owner"}
+	) {
+
+		$m->comp("/funclib/log.mas",
+            tourn       => $tourn->id,
+            type        => "tabbing",
+            person      => $person->id,
+            description => "Attempted to Access Last Round Report"
+        );
+
+		$m->comp("/funclib/abort.mas",
+			message => "You should not be accessing that report.  This access attempt has been recorded."
 		);
+	}
 
-	my $ids = join(',', @events);
+	Tab::Entry->columns(TEMP => "eventid");
+	Tab::Entry->columns(TEMP => "fullname");
+	Tab::Entry->columns(TEMP => "schcode");
+	Tab::Entry->columns(TEMP => "catcode");
+	Tab::Entry->columns(TEMP => "addr");
+	Tab::Entry->columns(TEMP => "contact");
+	Tab::Entry->columns(TEMP => "nsda");
+	Tab::Entry->columns(TEMP => "roundtype");
+	Tab::Entry->columns(TEMP => "place");
 
-	my $dbh = Tab::DBI->db_Main();
-
-	my $sth = $dbh->prepare("
-		select
-			entry.id, entry.name, entry.code,
-			event.id event_id, event.name event_name, event.abbr event_abbr, event.type event_type,
-			school.id as school_id, school.code as schcode, school.name as schname, region.code as regname,
-			chapter.id as chapter_id, chapter.name as chapter_name, chapter.state as chapter_state, chapter.nsda as nsda,
-			round.name as round_name, round.id as round_id, round.label as round_label,
+	Tab::Entry->set_sql( last_rounds => "
+		select entry.*, school.code as schcode, school.name as schname, region.code as regname,
+			max(round.name) as panelid,
 			category.abbr as catcode, event.abbr as regcode, event.id as eventid,
 			address.value_text as addr,
 			contact_name.value as contact,
-			round.type as round_type,
+			chapter.nsda as nsda,
+			max(round.type) as roundtype,
 			result.place as place,
 		GROUP_CONCAT(distinct CONCAT(student.first,' ',student.last) SEPARATOR ' and ') as fullname
 
-		from (entry, school, round, event, category)
+		from (entry, school, round, panel, ballot, event, category)
 			left join school_setting contact_name on contact_name.tag = 'contact_name' and contact_name.school = school.id
 			left join school_setting address on address.tag = 'mail_address' and address.school = school.id
 			left join chapter on school.chapter = chapter.id
@@ -45,193 +59,114 @@
 		where entry.school = school.id
 			and school.tourn = ?
 			and entry.active = 1
+			and entry.id = ballot.entry
 			and entry.event = event.id
-            and event.id IN ($ids)
-            and event.category = category.id
-            and event.id = round.event
-            and event.type != 'wsdc'
-
-            and round.id IN (
-                select max(r2.id)
-                from round r2, ballot, panel
-                    where r2.event = event.id
-                    and panel.round = r2.id
-                    and ballot.panel = panel.id
-                    and ballot.entry = entry.id
-                    and ( r2.type    = 'elim'
-                        or r2.type = 'final'
-                        or r2.type = 'runoff'
-                    )
-            )
+			and event.category = category.id
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and (
+				round.type    = 'elim'
+				or round.type = 'final'
+				or round.type = 'runoff'
+			)
 		group by entry.id
-		order by chapter.name, event.abbr, entry.id, round.name DESC
+		order by school.name, round.name DESC
 	");
 
-	$sth->execute($tourn->id);
-	my $results = $sth->fetchall_hash();
+	my @all_entries = Tab::Entry->search_last_rounds($tourn->id);
+
+	my @rounds = $m->comp("/funclib/tourn_rounds.mas", tourn => $tourn);
+
+	my %round_label = map {
+		$_->name."-".$_->event->id => $_->label
+	} @rounds;
+
+	my $usa_wsdc;
+	foreach my $event ($tourn->events(type => "wsdc")) {
+		$usa_wsdc = $event if $event->setting("usa_wsdc");
+	}
+
 	my $name = $tourn->name;
 	$name =~ s/[\W_]//g;
 
 	my $filename = "LastRoundActive-".$name.".csv";
 
-	if ($tourn_settings->{nsda_nats}) {
-
-		# Tempted to make this obnoxiously slow so we can end this horrible
-		# event structure.
-
-		my $oh_no_its_worlds;
-
-		foreach my $event (@events) {
-			next unless $event->type eq "wsdc";
-			$oh_no_its_worlds++;
-		}
-
-		if ($oh_no_its_worlds) {
-			my $world_sth = $dbh->prepare("
-				select
-					student.id student_id, student.first student_first, student.last student_last,
-					entry.id, entry.name, entry.code,
-					event.id event_id, event.name event_name, event.abbr event_abbr, event.type event_type,
-					school.id as school_id, school.code as schcode, school.name as schname, region.code as regname,
-					chapter.id as chapter_id, chapter.name as chapter_name, chapter.state as chapter_state, chapter.nsda as nsda,
-					round.name as round_name, round.id as round_id, round.label as round_label,
-					category.abbr as catcode, event.abbr as regcode, event.id as eventid,
-					address.value_text as addr,
-					contact_name.value as contact,
-					round.type as round_type,
-					result.place as place,
-				GROUP_CONCAT(distinct CONCAT(student.first,' ',student.last) SEPARATOR ' and ') as fullname
-
-				from (entry, round, event, category, entry_student es, student)
-
-					left join chapter on student.chapter = chapter.id
-					left join school on school.chapter = chapter.id and school.tourn = event.tourn
-					left join school_setting contact_name on contact_name.tag = 'contact_name' and contact_name.school = school.id
-					left join school_setting address on address.tag = 'mail_address' and address.school = school.id
-					left join region on school.region = region.id
-
-					left join result_set final_set on final_set.event = event.id and final_set.label = 'Final Places'
-					left join result on result.result_set = final_set.id and result.entry = entry.id
-
-				where entry.event = event.id
-					and event.tourn = ?
-					and entry.active = 1
-					and entry.id = es.entry
-					and es.student = student.id
-					and event.id IN ($ids)
-					and event.category = category.id
-					and event.id = round.event
-					and event.type = 'wsdc'
-
-					and round.id IN (
-						select max(r2.id)
-						from round r2, ballot, panel
-							where r2.event = event.id
-							and panel.round = r2.id
-							and ballot.panel = panel.id
-							and ballot.entry = entry.id
-							and ( r2.type    = 'elim'
-								or r2.type = 'final'
-								or r2.type = 'runoff'
-							)
-					)
-				group by student.id
-				order by chapter.name, event.abbr, entry.id, round.name DESC
-			");
-
-			$world_sth->execute($tourn->id);
-			my $world_kids = $world_sth->fetchall_hash();
-
-			push @{$results}, @{$world_kids};
-
-			@{$results} = sort {
-				$a->{chapter_state} cmp $b->{chapter_state}
-				|| $a->{chapter_name} cmp $b->{chapter_name}
-				|| $a->{entry_name} cmp $b->{entry_name}
-			} @{$results};
-		}
-	}
-
     $m->clear_buffer;
+
 	$r->content_type('application/csv');
+
 	$r->headers_out->{'Content-Disposition'} = "attachment; filename=$filename";
 
 	if ($tourn_settings->{"nsda_nats"}) {
-		$m->print("School,SchCode,Code,Name,Full Names,Entry Code,Event,Category,Place,Last,Round,Contact,Address\n");
+		$m->print("School,SchCode,Code,Name,Full Names,Entry Code,Event,Category,Round Label,Round Number,Place,Contact,Address\n");
 	} else {
-		$m->print("School,SchCode,Code,Name,Full Names,Entry Code,Event,Category,Place,Last,Round\n");
+		$m->print("School,SchCode,Code,Name,Full Names,Entry Code,Event,Category,Round Label, Round Number,Place\n");
 	}
 
 	my $counter;
 	my %cache;
 
-	foreach my $entry (@{$results}) {
+	foreach my $entry (@all_entries) {
 
-		$m->print('"'.$entry->{chapter_name});
+		next if $usa_wsdc && $entry->event->id == $usa_wsdc->id;
+
+		$m->print('"'.$entry->schname);
 		$m->print('","');
-		$m->print($entry->{schcode});
+		$m->print($entry->schcode);
 		$m->print('","');
-		$m->print($entry->{regname});
+		$m->print($entry->regname);
 		$m->print('","');
-		$m->print($entry->{name});
+		$m->print($entry->name);
 		$m->print('","');
-		$m->print($entry->{fullname});
+		$m->print($entry->fullname);
 		$m->print('","');
-		$m->print($entry->{code});
+		$m->print($entry->code);
 		$m->print('","');
-		$m->print($entry->{regcode});
+		$m->print($entry->regcode);
 		$m->print('","');
-		$m->print($entry->{catcode});
+		$m->print($entry->catcode);
 		$m->print('","');
-		if ($m->print($entry->{place})) {
-			$m->print($entry->{place});
+		$m->print($round_label{$entry->panelid."-".$entry->eventid});
+		$m->print('","');
+		$m->print("Round ".$entry->panelid);
+		$m->print('","');
+
+		if ($entry->roundtype eq "final") {
+			$m->print($entry->place);
 		}
-		$m->print('","');
-		$m->print($entry->{round_label});
-		$m->print('","');
-		$m->print($entry->{round_name});
 
 		if ($tourn_settings->{"nsda_nats"}) {
 
-			unless ($cache{$entry->{nsda}}) {
+			unless ($cache{$entry->nsda}) {
 
-				if ($entry->{addr}) {
+				if ($entry->addr) {
 
-					$cache{$entry->{nsda}} = eval {
-						return JSON::decode_json($entry->{addr});
+					my $address = eval {
+						return JSON::decode_json($entry->addr);
 					};
+
+					$cache{$entry->nsda} = $address;
 
 				} else {
 
 					my ($nsda_school, $junk) = $m->comp("/funclib/nsda/api_client.mas",
-						path => "/schools/".$entry->{nsda});
+						path => "/schools/".$entry->nsda);
 
 					my $mailing = $nsda_school->{"mailing"};
 
 					foreach my $address (@{$nsda_school->{addresses}}) {
 						next unless $address->{"shipping"};
-						$cache{$entry->{nsda}} = $address;
+						$cache{$entry->nsda} = $address;
 					}
-
-					Tab::SchoolSetting->create({
-						school     => $entry->{school_id},
-						tag        => "mail_address",
-						value      => "json",
-						value_text => JSON::encode_json($cache{$entry->{nsda}}),
-					});
 				}
 			}
 
-			if ($cache{$entry->{nsda}}) {
+			if ($cache{$entry->nsda}) {
 
-				my $addr = $cache{$entry->{nsda}};
+				my $addr = $cache{$entry->nsda};
 
 				$m->print('","');
-				if ($addr->{"contact_name"}) {
-					$m->print($addr->{"contact_name"});
-				} else {
-					$m->print($entry->{"contact"});
-				}
+				$m->print($addr->{"contact_name"});
 				$m->print('","');
 				$m->print($addr->{"street"});
 				$m->print('","');
@@ -250,11 +185,93 @@
 		$m->print('"'."\n");
 	}
 
-	# WORLDS FRIGGIN SHIT GOES HERE
-
-	if (1 == 2) {
+	if ($usa_wsdc) {
 
 		my %school_cache;
+
+		foreach my $entry (@all_entries) {
+
+			next unless $entry->event->id == $usa_wsdc->id;
+
+			my $cat = $usa_wsdc->category;
+
+			foreach my $student (sort {$a->last cmp $b->last} $entry->students) {
+
+				my $chapter = $student->chapter;
+
+				unless ($school_cache{$chapter->id}) {
+					$school_cache{$chapter->id} = Tab::School->search(
+						chapter => $chapter->id,
+						tourn => $tourn->id
+					)->first;
+				}
+
+				my $school = $school_cache{$chapter->id};
+
+				$m->print('"'.$school->name);
+				$m->print('","');
+				$m->print('","');
+				$m->print($school->region->code);
+				$m->print('","');
+				$m->print($student->first." ".$student->middle." ".$student->last);
+				$m->print('","');
+				$m->print($entry->code);
+				$m->print('","');
+				$m->print($usa_wsdc->abbr);
+				$m->print('","');
+				$m->print($cat->abbr);
+				$m->print('","');
+				$m->print($round_label{$entry->panelid."-".$entry->eventid});
+				$m->print('","');
+				$m->print("Round ".$entry->panelid);
+				$m->print('","');
+				$m->print('","');
+				$m->print($school->setting("contact_name"));
+				$m->print('","');
+
+				unless ($cache{$chapter->nsda}) {
+
+					if ($school->setting('mail_address')) {
+
+						$cache{$chapter->nsda} = $school->setting('mailing_address');
+
+					} else {
+
+						my ($nsda_school, $junk) = $m->comp("/funclib/nsda/api_client.mas",
+							path => "/schools/".$chapter->nsda);
+
+
+						foreach my $address (@{$nsda_school->{addresses}}) {
+							next unless $address->{"shipping"};
+							$cache{$chapter->nsda} = $address;
+						}
+
+					}
+				}
+
+				if ($cache{$entry->nsda}) {
+
+					my $addr = $cache{$chapter->nsda};
+
+					$m->print('","');
+					$m->print($addr->{"contact_name"});
+					$m->print('","');
+					$m->print($addr->{"street"});
+					$m->print('","');
+					$m->print($addr->{"secondary"});
+					$m->print('","');
+					$m->print($addr->{"city"});
+					$m->print('","');
+					$m->print($addr->{"state"});
+					$m->print('","');
+					$m->print($addr->{"zip"});
+					$m->print('","');
+					$m->print($addr->{"country"});
+				}
+
+				$m->print('"'."\n");
+			}
+		}
 	}
 
 	$m->flush_buffer();

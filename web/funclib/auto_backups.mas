@@ -1,94 +1,59 @@
 <%args>
-	$person
 	$round
 </%args>
 <%init>
 
 	return unless $round;
 
-	my $dbh = Tab::DBI->db_Main();
+	my $event = $round->event;
+	my $tourn = $event->tourn;
+	my $follower_ids = $event->setting("backup_people");
+	my $tourn_followers = $tourn->setting("backup_followers");
 
-	my $sth = $dbh->prepare('
-		select
-			round.id, round.name, round.label,
-			event.tourn tourn_id, tourn.tz tz,
-			event.id event_id, event.name event_name, event.abbr event_abbr,
-			event_followers.value_text event_followers,
-			tourn_followers.value_text tourn_followers
-		from (round, event, tourn)
+	return unless ($follower_ids || $tourn_followers);
 
-			left join event_setting event_followers
-				on event_followers.event = event.id
-				and event_followers.tag = "backup_followers"
+	my $owner = $tourn->permissions(tag => "owner")->first;
+    return unless $owner;
 
-			left join tourn_setting tourn_followers
-				on tourn_followers.tourn = event.tourn
-				and tourn_followers.tag = "backup_followers"
-
-		where round.id = ?
-			and round.event = event.id
-			and event.tourn = tourn.id
-	');
-
-	$sth->execute($round->id);
-
-	my $results = $sth->fetchall_hash();
-
-	my $result = eval {
-		return shift @{$results};
-	};
-
-	return unless ($result->{event_followers} || $result->{tourn_followers});
+	$follower_ids =~ s/^,//;
 
 	my @followers;
 
-	eval {
-		push @followers, @{JSON::decode_json($result->{event_followers})};
-	};
+	if ($follower_ids) {
+		@followers = split(/,/, $follower_ids);
+	}
 
-	eval {
-		push @followers, @{JSON::decode_json{$result->{tourn_followers}}};
-	};
+	if ($tourn_followers) {
+		push @followers, split(/,/, $tourn_followers);
+	}
 
 	return unless @followers;
 
-	my $ids = split(',', @followers);
-	my $emails_sth = $dbh->prepare("
-		select distinct person.email
-		from person
-		where person.id IN ($ids)
-	");
-
-	$emails_sth->execute();
-	my $contacts = $emails_sth->fetchall_hash();
-	my @emails;
-
-	foreach my $person (@{$contacts}) {
-		push @emails, $person->{email};
-	}
+	my %seen;
+	@followers = grep { ! $seen{$_} ++ } @followers;
 
 	my $results_ref = $m->comp("/api/download_data.mhtml",
-		round_id => $round->id,
-		tourn_id => $result->{tourn_id},
-		person   => $person,
-		file     => 1
+		round_id  => $round->id,
+		person_id => $owner->person->id,
+		tourn_id  => $round->event->tourn->id,
+		file      => 1
 	);
 
 	my ($filepath, $filename) = @{$results_ref};
 
-	my $now = DateTime->now( time_zone => $result->{tz});
+	my $now = DateTime->now(
+		time_zone => $event->tourn->tz
+	);
 
-	my $realname = $result->{label} || "Round ".$result->{name};
-
-	my $body = "\n\nBackup of ".$realname." taken at ".Tab::nicedt($now)."\n\n";
+	my $body = "\n\nBackup of ".$round->realname." taken at ".Tab::nicedt($now)."\n\n";
 
 	$body .= "To restore, upload this file on the Schematics screen for the round, ";
 	$body .= "under the blue Settings button on top center\n";
-	$body .= "Event ".$result->{event_name}."\n";
-	$body .= "Tournament ".$result->{tourn_name}."\n";
+	$body .= "Event ".$event->name."\n";
+	$body .= "Tournament ".$event->tourn->name."\n";
 
-	my $round_name = $realname;
-	my $event_name = $result->{event_abbr};
+	my $round_name = $round->realname;
+	my $event_name = $event->abbr;
 	my $subject = $ARGS{"subject"};
 
 	$round_name =~ s/[\W_]//g;
@@ -96,16 +61,23 @@
 
 	my $subject_line = "$event_name $round_name Backup $subject";
 
-	$m->comp( "/funclib/send_email.mas",
-		from_string     => 'Tabroom Backups <backups@www.tabroom.com>',
-		array           => \@emails,
-		subject         => $subject_line,
-		body            => $body,
-		attachment_type => 'application/json',
-		attachment_name => $filename,
-		attachment_path => $filepath,
-		admin           => 1
-	);
+	foreach my $id (@followers) {
+
+		next unless $id;
+		my $person = Tab::Person->retrieve($id);
+		next unless $person;
+		my $to = $person;
+
+		$m->comp( "/funclib/send_email.mas",
+			from_string     => 'Tabroom Backups <backups@www.tabroom.com>',
+			to              => $to,
+			subject         => $subject_line,
+			body            => $body,
+			attachment_name => $filename,
+			attachment_path => $filepath,
+			admin           => 1
+		);
+	}
 
 	return;
 
