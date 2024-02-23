@@ -30,62 +30,95 @@
 		$m->comp("/funclib/abort.mas", message => "No tournament found for ID $tourn_id");
 	}
 
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.name, invert.value invert
+		from event
+			left join event_setting invert
+				on invert.event = event.id
+				and invert.tag = 'invert_postings'
+		where event.tourn = ?
+			and (
+				exists (
+					select round.id
+					from round
+					where round.event = event.id
+					and round.published > 0
+				) OR EXISTS (
+					select rs.id
+						from round_setting rs, round
+					where rs.round = round.id
+					and round.event = event.id
+					and rs.tag = 'publish_entry_list'
+					and rs.value = 1
+				)
+			)
+	");
+
+	$sth->execute($tourn->id);
+	my $events = $sth->fetchall_hash();
+	my %events_by_id = map {$_->{id} => $_} @{$events};
+
+	my $event;
+
+	if ($event_id && $events_by_id{$event_id}) {
+		$event = $events_by_id{$event_id};
+	} else {
+		$event = shift @{$events};
+	}
+
 	my $tz = "UTC";
 	$tz = $tourn->tz;
 	$tz =  $person->tz if $person;
 
-	my @rounds = $m->comp(
-		'/funclib/published_rounds.mas',
-		tourn => $tourn
-	);
+	my $rounds_sth = $dbh->prepare('
+        select round.id, round.name, round.label, round.published, round.event, round.type
+        	from round, timeslot
+		where round.event = ?
+			and round.timeslot = timeslot.id
 
-	push (@rounds, $m->comp(
-		'/funclib/listed_rounds.mas',
-		tourn => $tourn)
-	);
+		and (round.published > 0 OR EXISTS
+			(
+				select rs.id
+					from round_setting rs
+				where rs.round = round.id
+				and rs.tag = "publish_entry_list"
+				and rs.value = 1
+			)
+		)
+        order by timeslot DESC, round.name
+	');
 
-	my @events = sort {$a->name cmp $b->name} $tourn->events;
-	my $event = shift @events if scalar @events == 1;
-	$event_id = $event->id if $event;
+	$rounds_sth->execute($event->{id});
+	my $rounds = $rounds_sth->fetchall_hash();
+	my %rounds_by_id = map {$_->{id} => $_} @{$rounds};
 
-	if ($event_id && (not defined $event)) {
-		$event = Tab::Event->retrieve($event_id);
-	}
-
-    #uniq
-	my %seen = ();
-    @rounds = grep { ! $seen{$_->id} ++ } @rounds;
-
-	my %events_with_rounds = ();
-
-	my $current;
-
+	my $current = 0;
 	my %min_by_type;
 	my %minround_by_type;
 
-	foreach my $round (@rounds) {
+	foreach my $round (@{$rounds}) {
 
-		next unless $round->published;
+		next unless $round->{published};
+		next if ($round_id);
 
-		push (@{$events_with_rounds{$round->event->id}}, $round);
-
-		next unless $event_id == $round->event->id;
-
-		if ($current < $round->name) {
-			$round_id = $round->id;
-			$current = $round->name;
+		if ($current < $round->{name}) {
+			$round_id = $round->{id};
+			$current = $round->{name};
 		}
 
 		if (
-			$min_by_type{$round->type} > $round->name
-			|| (not defined $min_by_type{$round->type})
+			$min_by_type{$round->{type}} > $round->{name}
+			|| (not defined $min_by_type{$round->{type}})
 		) {
-			$min_by_type{$round->type} = $round->name;
-			$minround_by_type{$round->type} = $round->id;
+			$min_by_type{$round->{type}} = $round->{name};
+			$minround_by_type{$round->{type}} = $round->{id};
 		}
 	}
 
-	if ($event && $event->setting("invert_postings")) {
+	if ($event && $event->{invert}) {
 
 		my $biggest_type;
 		my $current;
@@ -106,6 +139,8 @@
 
 	my $switch;
 
+	my $round = $rounds_by_id{$round_id};
+
 </%init>
 
 	<div class="main">
@@ -119,11 +154,9 @@
 			person => $person
 		&>
 
-%		my $round = Tab::Round->retrieve($round_id) if $round_id;
+%		if ($round->{published}) {
 
-%		if ($round) {
-
-%			$m->redirect("/index/tourn/postings/round.mhtml?tourn_id=".$tourn->id."&round_id=".$round->id);
+%			$m->redirect("/index/tourn/postings/round.mhtml?tourn_id=".$tourn->id."&round_id=".$round_id);
 
 %		} elsif ($webpage) {
 
@@ -137,7 +170,7 @@
 
 	<& "menu.mas",
 		tourn_id => $tourn_id,
-		event_id => $event_id,
-		round_id => $round_id
+		event_id => $event->{id},
+		round_id => $round->{id}
 	&>
 
