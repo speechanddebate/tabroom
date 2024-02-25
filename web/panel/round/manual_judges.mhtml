@@ -6,6 +6,8 @@
 </%args>
 <%init>
 
+	my $dbh = Tab::DBI->db_Main();
+
 	my $round          = Tab::Round->retrieve($round_id);
 	my $event          = $round->event;
 	my $category       = $event->category;
@@ -40,12 +42,14 @@
 
 	my %entry_wins = $m->comp("/funclib/entry_wins.mas",
 		event => $event,
-		round => $round
+		round => $round,
+		notme => 1,
 	);
 
 	my %entry_losses = $m->comp("/funclib/entry_losses.mas",
 		event => $event,
-		round => $round
+		round => $round,
+		notme => 1,
 	);
 
 	Tab::Judge->columns(TEMP => "tab_rating");
@@ -91,7 +95,6 @@
 		left join rating generic_rating
 			on generic_rating.type = 'coach'
 			and generic_rating.judge = judge.id
-			and generic_rating.rating_subset = event.rating_subset
 			and (generic_rating.rating_subset = event.rating_subset OR generic_rating.rating_subset IS NULL)
 
 		left join rating_tier generic_rating_tier
@@ -154,11 +157,20 @@
 		round_id => $round->id
 	);
 
-	my @panels = Tab::Panel->search_like(
-		flight    => $flight,
-		round     => $round->id,
-		{order_by => 'bracket'}
-	);
+	my $panel_sth = $dbh->prepare("
+		select
+			panel.id, panel.bye, panel.letter, panel.bracket,
+			room.name room_name
+		from panel
+			left join room on room.id = panel.room
+		where panel.round = ?
+			and panel.flight = ?
+		order by panel.bye DESC, panel.bracket DESC
+	");
+
+	$panel_sth->execute($round->id, $flight);
+	my $panels = $panel_sth->fetchall_hash();
+
 
 	Tab::Entry->columns(TEMP => "regioncode");
 	Tab::Entry->set_sql(all => "
@@ -172,8 +184,6 @@
 
 	my %entry_by_id = map {$_->id => $_} Tab::Entry->search_all($event->id);
 
-
-	my $dbh = Tab::DBI->db_Main();
 
 	my $this_round_sth = $dbh->prepare("
 		select distinct panel.id, ballot.chair, ballot.judge,
@@ -426,16 +436,18 @@
 
 			my $switch;
 
-			foreach my $panel (@panels) {
+			my %bracket;
 
-				my $id = $panel->id;
+			foreach my $panel (@{$panels}) {
+
+				my $id = $panel->{id};
 
 				my %used;
 
 				my @entries =
 					sort {$entry_side{$a} <=> $entry_side{$b}}
 					@{$panel_entry{$id}}
-					if $panel_entry{$panel->id};
+					if $panel_entry{$id};
 
 				@entries = sort {$entry_order{$a} <=> $entry_order{$b}} @entries;
 
@@ -445,31 +457,33 @@
 
 				my @judges = @{$panel_judge{$id}} if $panel_judge{$id};
 				my @chairs = @{$panel_chair{$id}} if $panel_chair{$id};
+
+				my $total_wins;
+				foreach my $entry (@entries) {
+					$total_wins += $entry_wins{$entry};
+					if ($entry_wins{$entry} > $bracket{$id}) {
+						$bracket{$id} = $entry_wins{$entry};
+					}
+				}
 </%perl>
-				<tr class="
-%					foreach my $entry (@entries) { $m->print($entry." "); }
-				">
+				<tr class="<% join(' ', @entries) %>">
 
 %					if ($event->type ne "speech" && $event->type ne "congress") {
 						<td class="centeralign smallish">
-							<span class="hidden"><% $panel->bye ? "99999999" : "" %></span>
-							<% $panel->bye ? "BYE" : $panel->bracket %>
+							<span class="hidden"><% $panel->{bye} ? "99999999" : "" %></span>
+							<% $panel->{bye} ? "BYE" : $bracket{$id} %>
 						</td>
 %					}
 
-					<td class="smallish limit">
-						<% $panel->room ? $panel->room->name : "" %>
+					<td class="smallish halflimit nowrap">
+						<% $panel->{room_name} || $panel->{letter} %>
 					</td>
 
-					<td class="limit2 padno" style="white-space: normal; overflow-x: visible;">
+					<td
+						class = "limit2 padno"
+						style = "white-space: normal; overflow-x: visible;"
+					>
 <%perl>
-
-						my $total_wins;
-
-						foreach my $entry (@entries) {
-							$total_wins += $entry_wins{$entry};
-						}
-
 						foreach my $entry (@entries) {
 
 							next if $used{$entry}++;
@@ -495,8 +509,10 @@
 							if ($event->type eq "wudc") {
 </%perl>
 								<div
-									title="<% $entry_name %>"
-									class="nospsace">
+									title = "<% $entry_name %>"
+									class = "nospsace"
+								>
+									<span class='quarterspacer'></span>
 
 									<span class="quarter">
 										<% $entry_order{$entry} == 1 ? "1G" : "" %>
@@ -547,6 +563,7 @@
 									title="<% $entry_name %>"
 									class="nospsace"
 								>
+									<span class='quarterspacer'></span>
 
 									<span class="sixth marno">
 										<% $entry_wins{$entry}."-".$entry_losses{$entry} %>
@@ -698,10 +715,22 @@
 %							}
 						</td>
 %					}
-
 				</tr>
-
 %			}
+<%perl>
+			# I know, this is dumb, but it does come up and usually here for
+			# some reason, because manual adjusters gonna manually adjust.
+
+			my $bracket_fix = $dbh->prepare('update panel set bracket = ? where id = ? ');
+
+			foreach my $panel (@{$panels}) {
+
+				if ($panel->{bracket} != $bracket{$panel->{id}}) {
+					$bracket_fix->execute($bracket{$panel->{id}}, $panel->{id});
+				}
+			}
+</%perl>
+
 			</tbody>
 		</table>
 		</div>
@@ -727,13 +756,13 @@
 <%perl>
 				if ($rounds_per) {
 
-					@all_judges = sort { 
-						${$use_ref}{$b}{"left"} <=> ${$use_ref}{$a}{"left"} 
+					@all_judges = sort {
+						${$use_ref}{$b}{"left"} <=> ${$use_ref}{$a}{"left"}
 					} @all_judges;
 
-				} elsif ($category->setting("tab_ratings") ){ 
+				} elsif ($category->setting("tab_ratings") ){
 
-					@all_judges = sort { 
+					@all_judges = sort {
 						$a->tab_rating <=> $b->tab_rating
 					} @all_judges;
 				}
