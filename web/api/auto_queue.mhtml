@@ -53,11 +53,15 @@
 
 			$m->print("OLD LOCK FOUND: Timestamp $lock_stamp vs limit $now_stamp <br />");
 
+			my $aq_count_sth = $dbh->prepare("select count(id) from autoqueue where active_at < NOW()");
+			$aq_count_sth->execute();
+			my ($aq_count) = $aq_count_sth->fetchrow_array();
+
 	        $m->comp("/funclib/send_email.mas",
 				from_string => "problems\@tabroom.com",
 				raw         => "9785031225\@msg.fi.google.com",
 				subject     => "LOCK ALERT ON AQ",
-				body        => "The lock id $lock_id has been alive now since $lock_stamp"
+				body        => "The lock id $lock_id has been alive now since $lock_stamp.  $aq_count jobs in the queue."
 			);
 
 			$m->print("Lock found so aborting autoqueue");
@@ -74,50 +78,109 @@
 	$lock_sth->execute();
 	$lock_sth->finish();
 
-	Tab::Autoqueue->set_sql(pending => "
-		select autoqueue.*
-			from autoqueue
-		where (autoqueue.active_at < NOW() OR autoqueue.active_at IS NULL)
-			and autoqueue.tag != 'queue_lock'
+	my $aq_sth = $dbh->prepare("
+		select aq.id, aq.tag, aq.message, aq.created_by sender,
+			CONVERT_TZ(aq.active_at, '+00:00', 'America/New_York') as active_at,
+			round.id round_id,
+			event.id event_id, event.name event_name, event.id event_id, event.type event_type, event.abbr event_abbr,
+			tourn.id tourn_id,
+			prefs.value prefs,
+			num_judges.value num_judges
+		from (autoqueue aq)
+			left join round on round.id = aq.round
+			left join round_setting num_judges on num_judges.round = round.id and num_judges.tag = 'num_judges'
+			left join event on round.event = event.id
+			left join tourn on event.tourn = tourn.id
+			left join category_setting prefs on prefs.category = event.category and prefs.tag = 'prefs'
+
+		where (aq.active_at < NOW() OR aq.active_at IS NULL)
+			and aq.tag != 'queue_lock'
+			and NOT EXISTS (
+				select ts.id
+				from tabroom_setting ts
+				where ts.tag = aq.id
+			)
 		order
-			by FIELD(tag, 'flip', 'blast','publish','blast_publish','pair_prelim', 'pair_elim', 'prelim_results', 'final_results'),
-			created_at
+			by FIELD(aq.tag, 'flip', 'blast','publish','blast_publish','pair_prelim', 'pair_elim', 'prelim_results', 'final_results'),
+			aq.created_at
 	");
 
-	my $aq_delete = $dbh->prepare('
-		delete from aq where id = ?
+	$aq_sth->execute();
+	my $aqs = $aq_sth->fetchall_hash();
+
+	my $aq_delete = $dbh->prepare('delete from autoqueue where id = ?');
+	my $aq_lock = $dbh->prepare('insert into tabroom_setting (tag, value) values (?, "autoqueue")');
+
+	my $previous_sth = $dbh->prepare('
+		select
+			round.id, count(distinct panel.id) panels, count(distinct ballot.entry) entries
+		from round
+			left join panel on panel.round = round.id
+			left join ballot on panel.id = ballot.panel and ballot.forfeit != 1
+		where round.name = ?
+			and round.event = ?
+		group by round.id
 	');
 
+	my %events;
+	my %rounds;
+	my %tourns;
+	my %ts;
+
 	AQ:
-	foreach my $aq (Tab::Autoqueue->search_pending) {
+	foreach my $aq (@{$aqs}) {
 
 		# Wrap the whole bloody thing into an eval because I cannot have a bug
 		# in one gumming up the works for the rest.  This does unfortunately
 		# mean not much in the way of error reporting but so be it
 
-		$m->print("Doing job $aq tag ".$aq->tag." active tag ".$aq->active_at." at $now <br />");
+		$m->print("Doing job ".$aq->{id}." tag ".$aq->{tag}." active tag ".$aq->{active_at}." at $now <br />");
+		eval {
+			$aq_lock->execute($aq->{id});
+		};
+		$aq_delete->execute($aq->{id});
 
 		eval {
 
 			$counter++;
 			$aq_delete->execute($aq_id);
 
-			my $aq_id   = $aq->id;
-			my $aq_tag  = $aq->tag;
-			my $message = $aq->message;
-			my $round   = $aq->round;
-			my $event   = $aq->event;
-			my $sender  = $aq->created_by;
+			my $aq_id   = $aq->{id};
+			my $aq_tag  = $aq->{tag};
+			my $message = $aq->{message};
+			my $sender  = $aq->{sender};
 
-			if ($round && (not defined $event)) {
-				$event = $round->event;
+			if ($aq->{round_id} && (not defined $rounds{$aq->{round_id}})) {
+				$rounds{$aq->{round_id}} = Tab::Round->retrieve($aq->{round_id});
 			}
 
-			next AQ unless $event;
-			my $tourn = $event->tourn;
+			my $round = $rounds{$aq->{round_id}};
 
-			next unless $tourn && $tourn > 0;
-			my %tourn_settings = $tourn->all_settings();
+			if ($aq->{event_id} && (not defined $events{$aq->{event_id}})) {
+				my $event = Tab::Event->retrieve($aq->{event_id});
+				$m->print("<p>Event ".$event." is here</p>");
+				$events{$aq->{event_id}} = $event;
+			}
+
+			my $event = $events{$aq->{event_id}};
+
+			unless ($event) {
+				$m->print("<p>No event found for event ID ".$aq->{event_id}."</p>");
+				next AQ ;
+			}
+
+			if ($aq->{tourn_id} && (not defined $tourns{$aq->{tourn_id}})) {
+				$tourns{$aq->{tourn_id}} = Tab::Tourn->retrieve($aq->{tourn_id});
+			}
+
+			my $tourn = $tourns{$aq->{tourn_id}};
+
+			unless ($ts{$tourn->id}) {
+				my %tourn_settings = $tourn->all_settings();
+				$ts{$tourn->id} = \%tourn_settings;
+			}
+
+			my %tourn_settings = %{$ts{$tourn->id}};
 
 			if (
 				$aq_tag eq "blast"
@@ -127,12 +190,10 @@
 
 				my $text;
 
-				Tab::debuglog("Autoblast ID $aq_id tag $aq_tag from machine $Tab::localhost for round $round event $event tourn $tourn from client ".$ENV{"REMOTE_ADDR"}." AGENT ".$ENV{HTTP_USER_AGENT});
-
 				unless ($aq_tag eq "blast" || $round->published  == 1 ) {
 
 					eval {
-						$m->print("Publishing ".$round->realname." of ".$event->name."<br />");
+						$m->print("Publishing ".$round->realname." of ".$aq->{event_name}."<br />");
 						$m->flush_buffer();
 						$round->published(1);
 						$round->update();
@@ -167,18 +228,18 @@
 
 				unless ($aq_tag eq "publish") {
 
-					$m->print("Blasting ".$round->realname." of ".$event->name." <br />");
+					$m->print("Blasting ".$round->realname." of ".$aq->{event_name}." <br />");
 					$m->flush_buffer();
 
 					my $perms = ({});
 					$perms->{tourn}{$tourn} = "tabber";
 
 					my $reply = eval {
-						return $m->comp("/panel/schemat/blast.mhtml",
+						return $reply = $m->comp("/panel/schemat/blast.mhtml",
 							scheduled => 1,
 							tourn     => $tourn,
 							perms     => $perms,
-							round_id  => $round->id,
+							round_id  => $aq->{round_id},
 							confirm   => "yup",
 							sender    => $sender,
 							message   => $message,
@@ -189,10 +250,10 @@
 					if ($@) {
 						$m->print("Error: $@");
 						$m->flush_buffer();
+					} else {
+						$m->print("Reply: $reply");
+						$m->flush_buffer();
 					}
-
-					$m->print("Reply: $reply");
-					$m->flush_buffer();
 
 					$text .= "and " if $text;
 					$text .= "blasted ";
@@ -204,7 +265,7 @@
 					return => 1
 				);
 
-				$text = $event->abbr." ".$round->realname." auto ".$text." at ".$time." ID ".$aq_id;
+				$text = $aq->{event_abbr}." ".$round->realname." auto ".$text." at ".$time." ID ".$aq_id;
 
 				if ($message) {
 					$text .= "\n\n";
@@ -222,7 +283,7 @@
 
 			} elsif ($aq_tag eq "pair_prelim") {
 
-				$m->print("Pairing ".$round->realname." of ".$event->name." <br/>");
+				$m->print("Pairing ".$round->realname." of ".$aq->{event_name}." <br/>");
 				$m->flush_buffer();
 
 				if ( (not defined $round) || $round->panels) {
@@ -233,26 +294,23 @@
 					next AQ;
 				}
 
-				my $description = "Auto-sectioned round ".$round->realname." of ".$event->abbr;
+				my $description = "Auto-sectioned round ".$round->realname." of ".$aq->{event_abbr};
 
 				$m->comp("/funclib/log.mas",
 					type        => 'tabbing',
-					event       => $event->id,
+					event       => $aq->{event_id},
 					tourn       => $tourn->id,
 					person      => 0,
 					description => $description
 				);
 
-				if ($event->type eq "speech") {
+				$previous_sth->execute( ($round->name - 1),  $aq->{event_id});
+				my $results = $previous_sth->fetchall_hash();
+				my $ref = ${$results}[0];
 
-					my @panels;
-					my $previous_round = $event->rounds(name => ($round->name - 1))->first;
+				if ($aq->{event_type} eq "speech") {
 
-					if ($previous_round) {
-						 @panels = $previous_round->panels;
-					}
-
-					my $num_panels = scalar @panels;
+					my $num_panels = $ref->{panels};
 
 					if ($round->type eq "snaked_prelim") {
 
@@ -290,16 +348,15 @@
 					);
 
 				} elsif (
-					$event->type eq "debate"
-					|| $event->type eq "wsdc"
-					|| $event->type eq "mock_trial"
+					$aq->{event_type} eq "debate"
+					|| $aq->{event_type} eq "wsdc"
+					|| $aq->{event_type} eq "mock_trial"
 				) {
 
-					my $category = $event->category;
-					my $prefs = $category->setting("prefs");
-					my $num_judges = $category->setting("num_judges");
-
+					my $prefs = $aq->{prefs};
 					undef $prefs if $prefs eq "none";
+
+					my $num_judges = $aq->{num_judges} || 1;
 					$num_judges = 1 unless $num_judges;
 
 					if ($round->type eq "prelim") {
@@ -360,7 +417,7 @@
 						tourn_settings => \%tourn_settings,
 					);
 
-				} elsif ($event->type eq "wudc") {
+				} elsif ($aq->{event_type} eq "wudc") {
 
 					$m->comp("/panel/round/pair_wudc.mas",
 						round          => $round,
@@ -393,7 +450,7 @@
 
 			} elsif ($aq_tag eq "pair_elim") {
 
-				$m->print("Pairing ".$round->realname." of ".$event->name."<br />");
+				$m->print("Pairing ".$round->realname." of ".$aq->{event_name}."<br />");
 				$m->flush_buffer();
 
 				if ( (not defined $round) || $round->panels) {
@@ -404,19 +461,21 @@
 					next AQ;
 				}
 
-				my $description = "Auto-sectioned elim round ".$round->realname." of ".$event->abbr;
+				my $description = "Auto-sectioned elim round ".$round->realname." of ".$aq->{event_abbr};
 
 				$m->comp("/funclib/log.mas",
 					type        => 'tabbing',
-					event       => $event->id,
+					event       => $aq->{event_id},
 					tourn       => $tourn->id,
 					person      => 0,
 					description => $description
 				);
 
-				my $previous_round = $event->rounds( name => ($round->name - 1))->first;
+				$previous_sth->execute( ($round->name - 1),  $aq->{event_id});
+				my $results = $previous_sth->fetchall_hash();
+				my $ref = ${$results}[0];
 
-				if ($event->type eq "congress") {
+				if ($aq->{event_type} eq "congress") {
 
 					# Congress usually clears 6 per chamber from the previous so
 					# we'll take that as a default.
@@ -426,49 +485,47 @@
 					if ($round->type eq "final") {
 						$num_panels = 1;
 					} else {
-						my @panels     = $previous_round->panels();
-						$num_panels = POSIX::ceil((scalar @panels) / 3);
+						$num_panels = POSIX::ceil(($ref->{panels}) / 3);
 					}
 
 					$m->comp("/tabbing/break/break_congress.mhtml",
 						tourn          => $tourn,
 						tourn_settings => \%tourn_settings,
-						from_id        => $previous_round->id,
-						into_id        => $round->id,
+						from_id        => $ref->{id},
+						into_id        => $aq->{round_id},
 						end            => 6,
 						return         => 1,
 						panels         => $num_panels
 					);
 
-				} elsif ($event->type eq "wudc") {
+				} elsif ($aq->{event_type} eq "wudc") {
 
-					my @panels  = $previous_round->panels();
-					my $num_entries = (scalar @panels) * 2;
+					my $num_entries = ($ref->{panels}) * 2;
 
 					$m->comp("/tabbing/break/break_wudc.mhtml",
 						tourn          => $tourn,
 						tourn_settings => \%tourn_settings,
-						from_id        => $previous_round->id,
-						into_id        => $round->id,
+						from_id        => $ref->{id},
+						into_id        => $aq->{round_id},
 						start          => 1,
 						return         => 1,
 						end            => $num_entries
 					);
 
-				} elsif ($event->type eq "speech") {
+				} elsif ($aq->{event_type} eq "speech") {
 
-					if ($previous_round) {
-						my @panels = $previous_round->panels();
-						my @entries = $m->comp("/funclib/round_entries.mas", round => $previous_round);
+					my $num_entries = ($ref->{panels}) * 2;
 
-						my $num_entries = POSIX::ceil(  (scalar @entries) / 2);
-						my $num_panels  = POSIX::ceil(  (scalar @panels) / 2);
+					if ($ref->{id}){
+
+						my $num_entries = POSIX::ceil(  ($ref->{entries}) / 2);
+						my $num_panels  = POSIX::ceil(  ($ref->{panels}) / 2);
 
 						$m->comp("/tabbing/break/break_speech.mhtml",
 							tourn          => $tourn,
 							tourn_settings => \%tourn_settings,
-							from_id        => $previous_round->id,
-							into_id        => $round->id,
+							from_id        => $ref->{id},
+							into_id        => $aq->{round_id},
 							panels         => $num_panels,
 							start          => 1,
 							return         => 1,
@@ -486,18 +543,19 @@
 
 				} else {
 
-					my $category = $event->category;
-					my $prefs = $category->setting("prefs");
-					my $num_judges = $category->setting("num_judges");
+					my $prefs = $aq->{prefs};
+					undef $prefs if $prefs eq "none";
+
+					my $num_judges = $aq->{num_judges} || 1;
 					$num_judges = 1 unless $num_judges;
 
-					if ($previous_round && $round) {
+					if ($ref->{id} && $round) {
 
 						$m->comp("/tabbing/break/break_debate.mhtml",
 							tourn          => $tourn,
-							from_id        => $previous_round->id,
+							from_id        => $ref->{id},
 							tourn_settings => \%tourn_settings,
-							into_id        => $round->id,
+							into_id        => $aq->{round_id},
 							return         => 1,
 							person         => 0
 						);
@@ -536,14 +594,14 @@
 				&& (not defined $tourn_settings{'nsda_district'})
 			) {
 
-				$m->print("Pairing ".$round->realname." of ".$event->name." <br />");
+				$m->print("Pairing ".$round->realname." of ".$aq->{event_name}." <br />");
 				$m->flush_buffer();
 
-				my $description = "Auto-created prelim results sheets for ".$event->abbr;
+				my $description = "Auto-created prelim results sheets for ".$aq->{event_abbr};
 
 				$m->comp("/funclib/log.mas",
 					type        => 'tabbing',
-					event       => $event->id,
+					event       => $aq->{event_id},
 					tourn       => $tourn->id,
 					person      => 0,
 					description => $description
@@ -576,18 +634,18 @@
 				&& $tourn_settings{'nsda_district'}
 			) {
 
-				my $description = "Auto-created District Qualifiers sheets for ".$event->abbr;
+				my $description = "Auto-created District Qualifiers sheets for ".$aq->{event_abbr};
 
 				$m->comp("/funclib/log.mas",
 					type        => 'tabbing',
-					event       => $event->id,
+					event       => $aq->{event_id},
 					tourn       => $tourn->id,
 					person      => 0,
 					description => $description
 				);
 
 				$m->comp("/tabbing/results/nsda_qualifiers.mhtml",
-					event_id       => $event->id,
+					event_id       => $aq->{event_id},
 					tourn          => $tourn,
 					format         => "post",
 					return         => 1,
@@ -597,11 +655,11 @@
 
 			} elsif ($aq_tag eq "final_results" && (not defined $tourn_settings{'nsda_nats'})) {
 
-				my $description = "Auto-created final results sheets for ".$event->abbr;
+				my $description = "Auto-created final results sheets for ".$aq->{event_abbr};
 
 				$m->comp("/funclib/log.mas",
 					type        => 'tabbing',
-					event       => $event->id,
+					event       => $aq->{event_id},
 					tourn       => $tourn->id,
 					person      => 0,
 					description => $description
@@ -625,11 +683,11 @@
 
 			} elsif ($aq_tag eq "toc_bids") {
 
-				my $description = "Auto-created TOC bid sheets for ".$event->abbr;
+				my $description = "Auto-created TOC bid sheets for ".$aq->{event_abbr};
 
 				$m->comp("/funclib/log.mas",
 					type        => 'tabbing',
-					event       => $event->id,
+					event       => $aq->{event_id},
 					tourn       => $tourn->id,
 					person      => 0,
 					description => $description
@@ -645,7 +703,7 @@
 
 			} elsif ($aq_tag eq "flip") {
 
-				$m->print("Flipping ".$round->realname." of ".$event->name."<br />");
+				$m->print("Flipping ".$round->realname." of ".$aq->{event_name}."<br />");
 				$m->flush_buffer();
 
 				my $result = $m->comp('/panel/schemat/flips.mhtml',
@@ -658,11 +716,11 @@
 
 			} elsif ($aq_tag eq "flip_1") {
 
-				$m->print("Flipping ".$round->realname." Flight 1 of ".$event->name."<br />");
+				$m->print("Flipping ".$round->realname." Flight 1 of ".$aq->{event_name}."<br />");
 				$m->flush_buffer();
 
 				my $result = $m->comp('/panel/schemat/flips.mhtml',
-					target_id     => $round->id,
+					target_id     => $aq->{round_id},
 					property_name => "round",
 					setting_name  => "doall",
 					tourn         => $tourn,
@@ -672,11 +730,11 @@
 
 			} elsif ($aq_tag eq "flip_2") {
 
-				$m->print("Flipping ".$round->realname." Flight 2 of ".$event->name."<br />");
+				$m->print("Flipping ".$round->realname." Flight 2 of ".$aq->{event_name}."<br />");
 				$m->flush_buffer();
 
 				my $result = $m->comp('/panel/schemat/flips.mhtml',
-					target_id     => $round->id,
+					target_id     => $aq->{round_id},
 					property_name => "round",
 					setting_name  => "doall",
 					tourn         => $tourn,
@@ -687,20 +745,16 @@
 
 		};
 
-		#Errors in an eval should still be reported
-
+		# Errors in an eval should still be reported
 		if ($@) {
-
 			my $mail = MIME::Lite->new(
 				From    => 'error-handler@tabroom.com',
 				To      => 'errors@tabroom.com',
 				Subject => 'Autoqueue error',
 				Data    => $@,
 			);
-
-            eval { $mail->send if $mail; };
-
-            undef $@;
+			eval { $mail->send if $mail; };
+		 	undef $@;
 		}
 	}
 

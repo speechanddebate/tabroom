@@ -42,10 +42,6 @@
 			$diocese->schools(tourn => $tourn->id);
 	}
 
- 	my @panels = $m->comp(
-		'/funclib/judge_panels.mas',
-		judge => $judge
-	);
 
 	my $hired++ unless $school && $school->id;
 	my $num_sites = scalar($tourn->sites);
@@ -259,13 +255,64 @@
 
 	$jpool_sth->finish();
 
+	my $panel_sth = $dbh->prepare('
+		select
+			panel.id panel_id, panel.letter, panel.flight,
+			round.id round_id, round.name round_name, round.label round_label,
+			round.flighted,
+			CONVERT_TZ(round.start_time, "+00:00", tourn.tz) start_time,
+			CONVERT_TZ(timeslot.start, "+00:00", tourn.tz) start,
+			event.id event_id, event.abbr event_abbr, event.name event_name, event.type event_type,
+			room.id room_id, room.name room_name,
+			ballot.id ballot_id, ballot.side, ballot.speakerorder, ballot.bye, ballot.forfeit, ballot.audit,
+			entry.id entry_id, entry.code entry_code, entry.name entry_name,
+			flight_offset.value flight_offset
+
+		from (panel, round, event, tourn, ballot, entry, timeslot)
+
+			left join room on panel.room = room.id
+			left join event_setting flight_offset
+				on flight_offset.event = event.id
+				and flight_offset.tag = "flight_offset"
+
+		where ballot.judge = ?
+			and ballot.entry = entry.id
+			and ballot.panel =  panel.id
+			and panel.round = round.id
+			and round.event = event.id
+			and event.tourn = tourn.id
+			and round.timeslot = timeslot.id
+		order by round.name, panel.flight
+	');
+
+	$panel_sth->execute($judge->id);
+	my $panels = $panel_sth->fetchall_hash();
+
+	my %panel_entries;
+	my $length;
+
+	foreach my $panel (@{$panels}) {
+		$panel_entries{$panel->{panel_id}}{$panel->{entry_id}} = ({
+			code         => $panel->{entry_code}   ,
+			side         => $panel->{side}         ,
+			speakerorder => $panel->{speakerorder} ,
+			bye          => $panel->{bye}          ,
+			audit        => $panel->{audit}        ,
+			forfeit      => $panel->{forfeit}      ,
+			name         => $panel->{entry_name}   ,
+		});
+
+		$length = length($panel->{entry_code}) if length($panel->{entry_code}) > $length;
+	}
+
+
 	my @tabs;
 	push @tabs, "edit";
 	push @tabs, "pools" if (keys %jpools);
 	push @tabs, "noms" if $tourn_settings->{"nsda_nats"};
 	push @tabs, "TabRoom" if $category_settings{"tab_room"};
 	push @tabs, "questions" if $category_settings{"reg_questions"};
-	push @tabs, "rounds" if @panels;
+	push @tabs, "rounds" if scalar @{$panels};
 	push @tabs, "paradigm" if ($category_settings{"ask_paradigm"} && $jperson);
 
 	my %links;
@@ -1036,6 +1083,52 @@
 						</span>
 %					}
 				</div>
+
+				<div class="row settings fixedheight">
+					<span class="threefifths">
+						<span class="halfspacer"></span>
+						Badge Diamonds
+					</span>
+
+					<span class="twofifths">
+						<input
+							type  = "number"
+							name  = "diamonds_override"
+							value = "<% $judge_settings{'diamonds_override'} %>"
+						>
+					</span>
+				</div>
+
+				<div class="row settings fixedheight">
+					<span class="twofifths">
+						<span class="halfspacer"></span>
+						Badge School
+					</span>
+
+					<span class="threefifths">
+						<input
+							type  = "text"
+							name  = "school_name_override"
+							size  = "36"
+							value = "<% $judge_settings{'school_name_override'} %>"
+						>
+					</span>
+				</div>
+				<div class="row settings fixedheight">
+					<span class="twofifths">
+						<span class="halfspacer"></span>
+						Badge State
+					</span>
+
+					<span class="threefifths">
+						<input
+							type  = "text"
+							name  = "state_override"
+							size  = "36"
+							value = "<% $judge_settings{'state_override'} %>"
+						>
+					</span>
+				</div>
 %			}
 
 			<div class="row settings fixedheight">
@@ -1193,7 +1286,7 @@
 		</div>
 %	}
 
-%	if (@panels) {
+%	if (@{$panels}) {
 
 		<div
 			id    = "rounds"
@@ -1258,41 +1351,67 @@
 				</thead>
 
 				<tbody>
+
 <%perl>
-					foreach my $panel (
-						$m->comp("/funclib/judge_panels.mas", judge => $judge, sort_by => "time")
-					) {
+					my %done;
+					foreach my $panel (@{$panels}) {
 
-						my $round = $panel->round;
-						my $start_time = $round->start_time;
-						$start_time = $round->timeslot->start unless $start_time;
-						$start_time->set_time_zone($tz);
+						next if $done{$panel->{panel_id}}++;
+
+						my $start = $m->comp("/funclib/dtme.mas",
+							string => $panel->{start_time},
+						);
+
 </%perl>
-						<tr>
-							<td>
-								<% $panel->eventname %>
+						<tr class="smallish">
+							<td class='centeralign'>
+								<% $panel->{event_abbr} %>
+							</td>
+
+							<td class="nowrap <% $panel->{flighted} > 1 ? 'smallish' : "" %>">
+								<span class="hidden"><% $panel->{round_name} %>-<% $panel->{flight} %></span>
+								<% $panel->{round_label} || "Rnd ".$panel->{round_name} %>
+								<% $panel->{flighted} > 1 ? "Fl ".$panel->{flight} : "" %>
+							</td>
+
+							<td class='nowrap'>
+								<span class="hidden"><% $start->{epoch} %></span>
+%								if ($panel->{flighted} > 1 && $panel->{flight_offset}) {
+%									my $dt = $start->{dt}->clone();
+%									$dt->add(minutes => ($panel->{flight_offset} * ($panel->{flight} -1)));
+									<& "/funclib/showtime.mas", dt => $dt &>
+%								} else {
+									<& "/funclib/showtime.mas", dt => $start->{dt} &>
+%								}
 							</td>
 
 							<td>
-								<span class="hidden"><% $round->name %>-<% $panel->flight %></span>
-								<% $round->realname %>
-								<% $panel->flight > 1 ? "Flt ".$panel->flight : "" %>
+								<% $panel->{room_name} %>
 							</td>
 
 							<td>
-								<span class="hidden"><% $start_time->epoch %></span>
-								<% Tab::niceshortdayt($start_time) %>
-							</td>
+<%perl>
+								if ($panel->{event_type} ne "congress") {
+									foreach my $entry_id (sort {
+											$panel_entries{$a}{"side"} <=> $panel_entries{$b}{"side"}
+											|| $panel_entries{$a}{"speakerorder"} <=> $panel_entries{$b}{"speakerorder"}
+										} keys %{$panel_entries{$panel->{panel_id}}}
+									) {
 
-							<td>
-								<% $panel->roomname %>
-							</td>
-
-							<td>
-%								foreach my $entry ($m->comp("/funclib/panel_entries.mas", panel => $panel)) {
-									<span class="padless third">
-										<% $entry->code %>
-									</span>
+										my $entry = $panel_entries{$panel->{panel_id}}{$entry_id};
+</%perl>
+										<span
+											class="padvertless marno hover <%
+												$entry->{bye} || $entry->{forfeit} ? "italic" : ""
+											%>"
+											style="width: <% $length + 5 %>ex;"
+											title="<% $entry->{name} %>"
+										>
+											<% $entry->{code} %>
+											<% $entry->{bye} ? "(BYE)" : "" %>
+											<% $entry->{forfeit} ? "(FFT)" : "" %>
+										</span>
+%									}
 %								}
 							</td>
 
@@ -1300,7 +1419,7 @@
 								<a
 									class = "buttonwhite bluetext fa fa-lg fa-eye"
 									target= "_blank"
-									href  = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel->id %>"
+									href  = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel->{panel_id} %>"
 								>
 								</a>
 							</td>

@@ -1,0 +1,258 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$category_id
+	$perms
+</%args>
+<%init>
+
+	my $category = Tab::Category->retrieve($category_id);
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $kid_out_sth = $dbh->prepare('
+		select
+			entry.id entry_id, entry.code entry_code, entry.name, event.id event_id, event.abbr event_abbr,
+			round.id round_id, round.name round_name, round.label round_label
+		from (event, round, panel, entry)
+		where event.category = ?
+			and event.id = round.event
+			and round.id = panel.round
+			and round.type IN ("prelim", "highlow", "highhigh", "snaked_prelim")
+			and event.id = entry.event
+			and entry.active = 1
+			and NOT EXISTS (
+				select b2.id
+				from ballot b2, panel p2
+				where p2.round = round.id
+				and p2.id = b2.panel
+				and b2.entry = entry.id
+			)
+		group by round.id
+		order by event.abbr, entry.code
+	');
+
+	$kid_out_sth->execute($category->id);
+	my $kids_out = $kid_out_sth->fetchall_hash();
+
+	my $short_judge_sth = $dbh->prepare('
+		select
+			panel.id panel_id, panel.letter panel_letter,
+			round.id round_id, round.name round_name, round.label round_label,
+			event.id event_id, event.abbr event_abbr,
+			count(distinct(judge.id)) as judge_count,
+			num_judges.value num_judges,
+			room.name room_name
+
+		from (event, round, panel, ballot)
+
+			left join round_setting num_judges
+				on num_judges.round = round.id
+				and num_judges.tag = "num_judges"
+
+			left join room on panel.room = room.id
+			left join judge on ballot.judge = judge.id
+
+		where event.category = ?
+			and event.id = round.event
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and panel.bye != 1
+			and ballot.audit != 1
+			and ballot.bye != 1
+			and ballot.forfeit != 1
+		group by panel.id
+	');
+
+	$short_judge_sth->execute($category->id);
+	my $short_judges = $short_judge_sth->fetchall_hash();
+
+	my @short_judges;
+
+	foreach my $short (@{$short_judges}) {
+
+		if ($short->{num_judges} > 0) {
+			if ($short->{judge_count} < $short->{num_judges}) {
+				push @short_judges, $short;
+			}
+
+		} else {
+			if ($short->{judge_count} < 1) {
+				push @short_judges, $short;
+			}
+		}
+	}
+
+	my $no_room_sth = $dbh->prepare('
+		select
+			panel.id panel_id, panel.letter panel_letter,
+			round.id round_id, round.name round_name, round.label round_label,
+			event.id event_id, event.abbr event_abbr
+		from (event, round, panel, ballot)
+		where event.category = ?
+			and event.id = round.event
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and panel.bye != 1
+			and ballot.audit != 1
+			and ballot.bye != 1
+			and ballot.forfeit != 1
+			and not exists (
+				select room.id
+				from room
+				where panel.room = room.id
+			)
+			and not exists (
+				select es.id
+					from event_setting es
+				where es.event = event.id
+					and es.tag = "online_mode"
+					and es.value IN ("nsda_campus", "nsda_campus_observers", "async")
+			)
+		group by panel.id
+	');
+
+	$no_room_sth->execute($category->id);
+	my $no_rooms = $no_room_sth->fetchall_hash();
+
+</%init>
+
+	<& "menu.mas",
+		tourn          => $tourn,
+		tourn_settings => $tourn_settings,
+		whoami         => "category_check",
+		perms          => $perms,
+		category       => $category
+	&>
+
+	<div class="main">
+
+		<span class="half">
+			<h4>Mass Panel Doublecheck</h4>
+		</span>
+		<span class="rightalign half">
+			<h5><% $category->name %></h5>
+		</span>
+
+		<h6>Entries left off:</h6>
+
+%		if (scalar @{$kids_out} < 1) {
+			<div class="row">
+				<span class="quarterspacer"></span>
+				<span class="quarter centeralign">
+					<icon class="fa fa-large greentext fa-check" />
+				</span>
+				<span class="threequarters semibold greentext padvert">
+					None found!
+				</span>
+			</div>
+
+%		} else {
+%			foreach my $left (@{$kids_out}) {
+				<div class="row">
+					<span class="quarterspacer"></span>
+					<span class="quarter nospace">
+						<a
+							class = "white hover full marno semibold link-underline redtext"
+							href  = "/register/entry/edit.mhtml?entry_id=<% $left->{entry_id} %>"
+						><% $left->{entry_code} %></a>
+					</span>
+					<span class="fifth">
+						<% $left->{event_abbr} %>
+					</span>
+
+					<span class="quarter">
+						<a
+							class = "white hover full marno link-underline"
+							href  = "/panel/schemat/show.mhtml?round_id=<% $left->{round_id} %>"
+						>Round <% $left->{round_name} %></a>
+					</span>
+				</div>
+%			}
+%		}
+
+		<h6>Judgeless Panels</h6>
+
+%		if (scalar @short_judges < 1) {
+			<div class="row">
+				<span class="quarterspacer"></span>
+				<span class="quarter centeralign">
+					<icon class="fa fa-large greentext fa-check" />
+				</span>
+				<span class="threequarters semibold greentext padvert">
+					None found!
+				</span>
+			</div>
+
+%		} else {
+%			foreach my $short (@short_judges) {
+				<div class="row">
+					<span class="quarterspacer"></span>
+					<span class="quarter nospace">
+						<a
+							class = "white hover full marno semibold redtext link-underline"
+							href  = "/panel/schemat/panel_view.mhtml?panel_id=<% $short->{panel_id} %>"
+						>
+							<% $short->{room_name} ? "Room ".$short->{room_name} : "Section ".$short->{panel_letter} %>
+						</a>
+					</span>
+
+					<span class="fifth">
+						<% $short->{event_abbr} %>
+					</span>
+
+					<span class="quarter">
+						<a
+							class = "white hover full marno link-underline"
+							href  = "/panel/schemat/show.mhtml?round_id=<% $short->{round_id} %>"
+						>Round <% $short->{round_name} %></a>
+					</span>
+
+					<span class="quarter">
+						Needs <% $short->{num_judges} || 1 %>, has <% $short->{judge_count} || 0 %>
+				</div>
+%			}
+%		}
+
+		<h6>Missing Rooms</h6>
+
+%		if (scalar @{$no_rooms} < 1) {
+			<div class="row">
+				<span class="quarterspacer"></span>
+				<span class="quarter centeralign">
+					<icon class="fa fa-large greentext fa-check" />
+				</span>
+				<span class="threequarters semibold greentext padvert">
+					None found!
+				</span>
+			</div>
+
+%		} else {
+%			foreach my $short (@{$no_rooms}) {
+				<div class="row">
+					<span class="quarterspacer"></span>
+					<span class="quarter nospace">
+						<a
+							class = "white hover full marno semibold redtext link-underline"
+							href  = "/panel/schemat/panel_view.mhtml?panel_id=<% $short->{panel_id} %>"
+						>
+							Section <% $short->{panel_letter} %>
+						</a>
+
+					</span>
+
+					<span class="fifth">
+						<% $short->{event_abbr} %>
+					</span>
+
+					<span class="quarter">
+						<a
+							class = "white hover full marno link-underline"
+							href  = "/panel/schemat/show.mhtml?round_id=<% $short->{round_id} %>"
+						>Round <% $short->{round_name} %></a>
+					</span>
+				</div>
+%			}
+%		}
+
+	</div>
