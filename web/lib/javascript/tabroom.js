@@ -160,6 +160,8 @@
 
 			attributes = $(checkObject).attrs();
 
+			console.log(attributes);
+
 			if (
 				attributes.property_value === undefined
 				&& $(checkObject).attr("value")
