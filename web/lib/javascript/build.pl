@@ -12,6 +12,7 @@ use JavaScript::Minifier qw(minify);
 		'jquery.js',
 		'jquery-passive.js',
 		'jquery-ui.js',
+		'jquery-migrate.js',
 		'jquery.ui.touch-punch.min.js',
 		'jquery.tablesorter.combined.js',
 		'metadata.js',
