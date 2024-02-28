@@ -7,3 +7,4 @@ Tab::Contact->has_a(school     => 'Tab::School');
 Tab::Contact->has_a(person     => 'Tab::Person');
 Tab::Contact->has_a(created_by => 'Tab::Person');
 
+__PACKAGE__->_register_datetimes( qw/timestamp created_at/);
