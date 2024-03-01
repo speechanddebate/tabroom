@@ -162,9 +162,9 @@
 
 			if (
 				attributes.property_value === undefined
-				&& $(checkObject).attr("value")
+				&& $(checkObject).prop("value")
 			) {
-				attributes.property_value = $(checkObject).attr("value");
+				attributes.property_value = $(checkObject).prop("value");
 			}
 
 			if (
