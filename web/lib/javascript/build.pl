@@ -58,6 +58,12 @@ use JavaScript::Minifier qw(minify);
 
 	`/bin/rm $temp_file`;
 
+	# Add to git if it doesn't exist already because you constantly forget that
+	# and then break the world and then cannot take a shower in peace without
+	# people calling your direct line and then wanting to set them all on fire.
+
+	`/usr/bin/git add $output_file`;
+
 	print "Minification complete.\n";
 
 
