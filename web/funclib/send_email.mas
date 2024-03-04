@@ -18,10 +18,10 @@
 <%init>
 
 	use Data::Dumper;
+	use Email::Stuffer;
+	use Email::Sender::Transport::SMTP qw();
 
 	return unless ($from || $from_string);
-
-	my $reply_to_string;
 
 	if ($from_string eq "nsda") {
 
@@ -30,7 +30,7 @@
 			$from_string = "NSDA ".$ARGS{"district"}->name." <districts\@www.tabroom.com>";
 
 			if ($ARGS{"nsda_reply_to"}) {
-				$reply_to_string = $ARGS{"nsda_reply_to"}->first." ".$ARGS{"nsda_reply_to"}->last." <".$ARGS{"nsda_reply_to"}->email.">";
+				$ARGS{"reply_to"} = $ARGS{"nsda_reply_to"}->first." ".$ARGS{"nsda_reply_to"}->last." <".$ARGS{"nsda_reply_to"}->email.">";
 			}
 
 		} elsif ($from) {
@@ -38,7 +38,7 @@
 			$from_string = $from->first." ".$from->last." <info\@speechanddebate.org>";
 
 			if ($ARGS{"nsda_reply_to"}) {
-				$reply_to_string = $ARGS{"nsda_reply_to"}->first." ".$ARGS{"nsda_reply_to"}->last." <".$ARGS{"nsda_reply_to"}->email.">";
+				$ARGS{"reply_to"} = $ARGS{"nsda_reply_to"}->first." ".$ARGS{"nsda_reply_to"}->last." <".$ARGS{"nsda_reply_to"}->email.">";
 			}
 
 		} else {
@@ -52,21 +52,26 @@
 		my $now = DateTime->now;
 
 		$from_string = $from->first." ".$from->last." <".$now->epoch."\@www.tabroom.com>";
-		$reply_to_string = $from->first." ".$from->last." <".$from->email.">";
+		$ARGS{"reply_to"} = $from->first." ".$from->last." <".$from->email.">";
 	}
 
 	if ($ARGS{"reply_to"}) {
-		$reply_to_string = $ARGS{"reply_to"};
+		$ARGS{"reply_to"} = $ARGS{"reply_to"};
 	}
 
-	my @send_array = @{$array} if $array;
+	my @send_array;
+
+	if ($array) {
+		push (@send_array, @{$array});
+	}
 
 	if ($to) {
-		push @send_array, $to->email
 		unless (
 			$to->no_email == 1
 			&& (not defined $override)
-		);
+		) {
+			push @send_array, $to->email
+		}
 	}
 
 	if ($raw) {
@@ -87,26 +92,6 @@
 
 	my $hostname = $Tab::hostname;
 
-	unless ($no_footer) {
-
-		if ($ARGS{"is_html"}) {
-			$body .= "<p>-----------------------------</p>";
-			$body .= "<p>You signed up for this email by registering on https://www.tabroom.com.</p>";
-			$body .= "<p>If you don't want to get emails from Tabroom.com, login ";
-			$body .= "to your account, click Profile on the top right, and check off \"No Emails\".";
-
-		} else {
-
-			$body .= "\n\n-----------------------------\n\n<br />";
-
-			$body .= "You signed up for this email by registering on
-			https://www.tabroom.com.\n\n <br />";
-
-			$body .= "If you don't want to get emails from Tabroom.com, login
-			to your account, click Profile on the top right, and check off \"No Emails\".";
-		}
-	}
-
 #	Tab::log("send_email.mas: Sending tabroom email from ".$from_string." to @send_array");
 	my $html;
 
@@ -119,6 +104,20 @@
 		);
 	} else {
 		$html = $body;
+		$body = html2text($html);
+	}
+
+	unless ($no_footer) {
+		$html .= "<p>-----------------------------</p>";
+		$html .= "<p>You signed up for this email by registering on <a href='https://www.tabroom.com'>https://www.tabroom.com.</a></p>";
+		$html .= "<p>If you don't want to get emails from Tabroom.com, login ";
+		$html .= "to your account, click Profile on the top right, and check off \"No Emails\".";
+		$html .= "<p>Your Profile: <a href='https://www.tabroom.com/user/login/profile.mhtml'>https://www.tabroom.com/user/login/profile.mhtml</a>";
+
+		$body .= "\n\n-----------------------------\n\n";
+		$body .= "You signed up for this email by registering on https://www.tabroom.com.\n\n";
+		$body .= "If you don't want to get emails from Tabroom.com, login to your account, click Profile on the top right, and make \"No Emails\" is checked.";
+		$body .= "Profile: https://www.tabroom.com/user/login/profile.mhtml";
 	}
 
 	my $type = "text/html";
@@ -130,28 +129,17 @@
 	while (@send_array) {
 
 		my $counter;
-		my $to_string;
+		my @tos;
 
-		while ($counter < 6 && @send_array) {
+		while ($counter < 10 && @send_array) {
 			my $to = shift @send_array;
 			next unless $to;
 			next if $done{$to}++;
-
-			$to_string .= "," if $to_string;
-			$to_string .= $to;
+			push @tos, $to;
 			$counter++;
 		}
 
-		# creating new "base"-object for an email
-		my $msg = MIME::Lite->new(
-			From       => $from_string,
-			To         => $from_string,
-			Bcc        => $to_string,
-			Subject    => $subject,
-			"Reply-To" => $reply_to_string,
-			Type       => $type,
-			Data       => $html."\n\n"
-		);
+		my @ccs;
 
 		unless ($notfirst) {
 
@@ -165,34 +153,55 @@
 					$cc_field .= $cc->first." ".$cc->last." <".$cc->email.">"
 				}
 
-				$msg->add(CC => $cc_field);
+				push @ccs, $cc_field;
 
 			} elsif (($raw && $cc) || ( $cc && $cc ne int($cc)) ) {
 
-				$msg->add(CC => $cc);
+				push @ccs, $cc;
 
-			} elsif ($cc) {
-
-				$msg->add(
-					CC => $cc->first." ".$cc->last." <".$cc->email.">"
-				) if ($cc->email
-					&& $cc->no_email != 1
-					&& (not defined $override)
-				);
-
+			} elsif ($cc
+				&& $cc->no_email != 1
+				&& (not defined $override)
+			) {
+				push @ccs, $cc->first." ".$cc->last." <".$cc->email.">";
 			}
-
-			$msg->add(CC => $from_string);
 		}
 
-		# Only works for pdfs. Should probably add a parameter so we can change attachment type.
+		my %mail = (
+			from      => $from_string,
+			to        => $ARGS{"to_string"} || $from_string,
+			bcc       => \@tos,
+			subject   => $subject || "Message from Tabroom.com",
+			transport => Email::Sender::Transport::SMTP->new({
+				host  => $Tab::smtp_server,
+				port  => $Tab::smtp_port || 25,
+			}),
+		);
+
+		if (scalar @ccs) {
+			$mail{cc} = \@ccs;
+		}
+
+		if ($html) {
+			$mail{html_body} = $html;
+		} elsif ($body) {
+			$mail{text_body} = $body;
+		}
+
+		if ($ARGS{"reply_to"}) {
+			$mail{reply_to} = $ARGS{"reply_to"};
+		}
+
+		my $msg = Email::Stuffer->new(\%mail);
 
 		if ($attachment_name && $attachment_path) {
-			$msg->attach (
-				Type        => $attachment_type || 'application/pdf',
-				Path        => $attachment_path,
-				Filename    => $attachment_name,
-				Disposition => 'attachment'
+			$msg->attach_file (
+				$attachment_path, {
+					filename     => $attachment_name,
+					content_type => $attachment_type  || "application/json",
+					encoding     => "quoted-printable",
+					name         => $attachment_name,
+				},
 			);
 		}
 
@@ -200,16 +209,15 @@
 			|| $hostname eq "profiler.tabroom.com"
 		) {
 
-			eval {
-				$msg->send("smtp", $Tab::smtp_server);
-			};
+			# This opinionated bullshit is why I'm glad to leave Perl but I suspect JS will be worse.
+			my $result = $msg->send({ to => \@tos });
 
 			if ($@) {
-				Tab::debuglog("Error on sending email from $from_string to $to_string: ".$@);
+				Tab::debuglog("Error on sending email from $from_string to ".join(',', @tos).". ".$@);
 			}
 
 		} else {
-			Tab::debuglog("Tab hostname is $hostname.  Not sending email from $from_string to $to_string.  Reply $reply_to_string");
+			Tab::debuglog("Tab hostname is $hostname.  Not sending email from $from_string to ".join(',', @tos).". Reply ".$ARGS{"reply_to"});
 			Tab::debuglog("$body");
 		}
 
