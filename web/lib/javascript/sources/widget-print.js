@@ -107,10 +107,13 @@
 			// use timeout to allow browser to build DOM before printing
 			// Print preview in Chrome doesn't work without this code
 			if ( wo.print_now ) {
-				setTimeout( function() {
+				setTimeout(function() {
 					generator.print();
+				}, 10);
+				// Add delay to close, or the document may be gone before print happens
+				setTimeout( function() {
 					generator.close();
-				}, 10 );
+				}, 2000 );
 			}
 			return true;
 		},
