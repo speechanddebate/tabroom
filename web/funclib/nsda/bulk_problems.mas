@@ -112,14 +112,6 @@
 
         from entry, entry_student es, student, event, chapter, school
 
-            left join school_setting contact_name
-                on contact_name.school = school.id
-                and contact_name.tag = 'contact_name'
-
-            left join school_setting contact_email
-                on contact_email.school = school.id
-                and contact_email.tag = 'contact_email'
-
         where event.tourn = ?
             and event.id = entry.event
             and entry.active = 1
@@ -258,35 +250,6 @@
 		$schools{$school_id}{"bad"}{"judging"}  = $reasons
 	}
 
-	# Has an onsite contact
-	my $contact_sth = $dbh->prepare("
-		select
-			person.id, person.first, person.phone
-
-		from (person, contact contact, contact onsite)
-
-		where person.id = contact.person
-			and contact.school = ?
-			and contact.tag = 'contact'
-
-			and onsite.tag = 'onsite'
-			and onsite.school = contact.school
-			and onsite.person = contact.person
-			and person.phone > 0
-			and person.no_email != 1
-	");
-
-	$sth->execute($school->id);
-	my $contacts = $sth->fetchall_hash();
-
-	my $has_contacts;
-
-	if (scalar @{$contacts} > 0) {
-		$has_contacts++
-	} else {
-		$schools{$school_id}{"bad"}{"contacts"}  = "No on-site contact with a phone number is listed";
-	}
-
 	# Owes money
 	my %balances = ();
 
@@ -327,29 +290,92 @@
 		}
 	}
 
+	my %hotels = map {$_->id => $_} $tourn->hotels;
+	my $num_hotels = scalar (keys %hotels);
 
+	my $hotel_sth = $dbh->prepare('
+		select
+			school.id school_id, hs.value hotel, confirmation.value confirmation
+		from (school, school_setting hs)
+			left join school_setting confirmation
+				on confirmation.school = school.id
+				and confirmation.tag = "hotel_confirmation"
+		where school.tourn = ?
+			and school.id = hs.school
+			and hs.tag = "hotel"
+			group by school.id
+	');
 
+	$hotel_sth->execute($tourn->id);
+	my $results = $hotel_sth->fetchall_hash();
 
+	my %hotel_status;
+
+	foreach my $href (@{$results}) {
+
+		my $hotel = $hotels{$href->{hotel}};
+
+		unless ($hotel) {
+			$hotel_status{$href->{school_id}}{none} = 1;
+		}
+
+		if ($hotel->no_confirm) {
+			$hotel_status{$href->{school_id}}{ok} = 1;
+		} elsif ($href->{confirmation}) {
+			$hotel_status{$href->{school_id}}{ok} = 1;
+		} elsif ($tourn_settings->{require_hotel_confirmation}) {
+			$hotel_status{$href->{school_id}}{confirm} = 1;
+		} else {
+			$hotel_status{$href->{school_id}}{ok} = 1;
+		}
+	}
+
+	foreach my $school_id (keys %schools) {
+
+		# Has an onsite contact
+
+		my $contact = $m->comp('/funclib/contacts.mas',
+			school         => $school_id,
+			tourn          => $tourn,
+			check          => 'hitme',
+			print          => 1,
+			tourn_settings => $tourn_settings,
+		);
+
+		if ($contact) {
+			$schools{$school_id}{"bad"}{"contact"} = $contact;
+		}
+
+		if ($num_hotels) {
+			if ($hotel_status{$school_id}{ok}) {
+				next;
+			}
+			if ($hotel_status{$school_id}{confirm}) {
+				$schools{$school_id}{"bad"}{"hotel"} = "A hotel confirmation number for your hotel is missing.";
+			} else {
+				$schools{$school_id}{"bad"}{"hotel"} = "You have not selected your hotel on your school registration.";
+			}
+		}
+	}
 
 	if ($ARGS{"emails"}) {
 
-		foreach my $school_id (keys %schools) {
-			my $email_sth = $dbh->prepare("
-				select distinct(person.email)
-					from person, permission, school
-				where person.id = permission.person
-					and person.no_email = 0
-					and permission.tag = 'chapter'
-					and permission.chapter = school.chapter
-					and school.id = ?
-			");
+		my $email_sth = $dbh->prepare("
+			select
+				school.id school_id, person.id person_id
+			from school, contact, person
+			where school.tourn = ?
+				and school.id = contact.school
+				and contact.email = 1
+				and contact.person = person.id
+				and person.no_email != 1
+		");
 
-			$email_sth->execute($school_id);
-			my $emails = $email_sth->fetchall_hash();
+		$email_sth->execute($tourn->id);
+		my $emails = $email_sth->fetchall_hash();
 
-			foreach my $email (@{$emails}) {
-				push @{$schools{$school_id}{"emails"}}, $email->{email};
-			}
+		foreach my $email (@{$emails}) {
+			push @{$schools{$email->{school_id}}{"ids"}}, $email->{person_id};
 		}
 	}
 
