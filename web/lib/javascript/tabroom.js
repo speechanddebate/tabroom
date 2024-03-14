@@ -326,6 +326,24 @@
 
 					alertify.notify(data, "custom");
 
+					if (attributes.on_success === "destroy") {
+						$("#"+attributes.target_id).remove();
+						$("#"+attributes.target).remove();
+					} else if (attributes.on_success === "hide") {
+						$("#"+attributes.target_id).addClass("hidden");
+						$("#"+attributes.target).addClass("hidden");
+					} else if (
+						attributes.on_success === "refresh"
+						|| attributes.on_success === "reload"
+						|| data.refresh
+					) {
+						window.location.reload();
+					}
+
+					if (attributes.new_parent) {
+						$("#"+attributes.target_id).prependTo("#"+attributes.new_parent);
+					}
+
 				} else if (data.error) {
 
 					alertify.error(data.message);

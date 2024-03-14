@@ -157,7 +157,6 @@ sub setting {
 	}
 }
 
-
 sub all_settings {
 
 	my $self = shift;
@@ -165,37 +164,36 @@ sub all_settings {
 	my $dbh = Tab::DBI->db_Main();
 
     my $sth = $dbh->prepare("
-		select setting.tag, setting.value, setting.value_date, setting.value_text
+		select
+			setting.id, setting.tag, setting.value, setting.value_date, setting.value_text vt
 		from tourn_setting setting
-		where setting.tourn = ?
+			where setting.tourn = ?
         order by setting.tag
     ");
 
     $sth->execute($self->id);
 
-    while(
-		my (
-			$tag, $value, $value_date, $value_text
-		)  = $sth->fetchrow_array()
-	) {
+	my $settings = $sth->fetchall_hash();
 
-		if ($value eq "date") {
+	foreach my $setting (@{$settings}) {
 
-			my $dt = Tab::DBI::dateparse($value_date);
-			$all_settings{$tag} = $dt if $dt;
+		if ($setting->{value} eq "date") {
 
-		} elsif ($value eq "text") {
+			my $dt = Tab::DBI::dateparse($setting->{value_date});
+			$all_settings{$setting->{tag}} = $dt if $dt;
 
-			$all_settings{$tag} = $value_text;
+		} elsif ($setting->{value} eq "text") {
 
-		} elsif ($value eq "json") {
+			$all_settings{$setting->{tag}} = $setting->{vt};
 
-			$all_settings{$tag} = eval {
-				return JSON::decode_json($value_text);
+		} elsif ($setting->{value} eq "json") {
+
+			$all_settings{$setting->{tag}} = eval {
+				return JSON::decode_json($setting->{vt});
 			};
 
 		} else {
-			$all_settings{$tag} = $value;
+			$all_settings{$setting->{tag}} = $setting->{value};
 		}
 	}
 	return %all_settings;
