@@ -16,15 +16,14 @@
 	    var $temp = $("<input>");
 		$("body").append($temp);
 
+		console.log(elementId);
+
+		const copied = $("#"+elementId).text();
 		$temp.val($("#"+elementId).text()).select();
 		document.execCommand("copy");
 		$temp.remove();
 
-		if (!textLabel) {
-			textLabel = "Text ";
-		}
-
-		alertify.notify(textLabel+" copied to clipboard", "custom");
+		alertify.notify(`Copied ${copied} to clipboard`, `custom`);
 	}
 
 	function confirmSubmit(message, submitButton) {
