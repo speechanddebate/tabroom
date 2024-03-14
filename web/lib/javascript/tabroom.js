@@ -16,8 +16,6 @@
 	    var $temp = $("<input>");
 		$("body").append($temp);
 
-		console.log(elementId);
-
 		const copied = $("#"+elementId).text();
 		$temp.val($("#"+elementId).text()).select();
 		document.execCommand("copy");
