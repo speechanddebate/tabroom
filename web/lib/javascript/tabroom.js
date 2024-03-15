@@ -16,15 +16,12 @@
 	    var $temp = $("<input>");
 		$("body").append($temp);
 
+		const copied = $("#"+elementId).text();
 		$temp.val($("#"+elementId).text()).select();
 		document.execCommand("copy");
 		$temp.remove();
 
-		if (!textLabel) {
-			textLabel = "Text ";
-		}
-
-		alertify.notify(textLabel+" copied to clipboard", "custom");
+		alertify.notify(`Copied ${copied} to clipboard`, `custom`);
 	}
 
 	function confirmSubmit(message, submitButton) {
@@ -325,6 +322,24 @@
 				if (metadata.status === 200 && (typeof data === 'string')) {
 
 					alertify.notify(data, "custom");
+
+					if (attributes.on_success === "destroy") {
+						$("#"+attributes.target_id).remove();
+						$("#"+attributes.target).remove();
+					} else if (attributes.on_success === "hide") {
+						$("#"+attributes.target_id).addClass("hidden");
+						$("#"+attributes.target).addClass("hidden");
+					} else if (
+						attributes.on_success === "refresh"
+						|| attributes.on_success === "reload"
+						|| data.refresh
+					) {
+						window.location.reload();
+					}
+
+					if (attributes.new_parent) {
+						$("#"+attributes.target_id).prependTo("#"+attributes.new_parent);
+					}
 
 				} else if (data.error) {
 

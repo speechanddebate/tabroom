@@ -70,6 +70,8 @@
 	my $contents;
 	$upload->slurp($contents);
 
+	&outlog("<h5>Data uploaded and parsed</h5>");
+
 	my $json = JSON->new->allow_nonref->convert_blessed;
 	my %filter;
 
@@ -244,7 +246,6 @@
 		|| $jdata->{category_only}
 	) {
 
-
 		#TOURN DATA
 
 		my $start_dt = parse_date($jdata->{start});
@@ -296,6 +297,8 @@
 			);
 		}
 	}
+
+	undef $jdata->{whole};
 
 	if ($jdata->{whole}) {
 		unless ($perms->{"owner"} || $perms->{"tabber"}) {
@@ -473,7 +476,8 @@
 			$ocategory = $category_by_name{$category->{name}}
 				unless $ocategory || (not defined $category->{name});
 
-			&outlog("<p class='specific'> Searched for category ".$category->{name}." and found ID ".$ocategory."</p>");
+			&outlog("<p class='action'> Searched for category ".$category->{name}." and found ID ".$ocategory."</p>");
+			$m->flush_buffer() unless $no_return;
 
 			unless (
 				$jdata->{event_only}
@@ -516,6 +520,7 @@
 				$translator{category}{$category->{id}} = $ocategory;
 			}
 
+			$m->flush_buffer() unless $no_return;
 			if ($perms->{"owner"} || $perms->{"tabber"} || $perms->{category}{$ocategory} eq "tabber") {
 
 				unless ($jdata->{round_only}) {
@@ -628,7 +633,7 @@
 			# EVENTS
 			if ($ocategory && $category->{events} && (not defined $jdata->{round_only})) {
 
-				&outlog("<p class='action'> Importing ".scalar @{$category->{events}}." events </p>");
+				&outlog("<p class='action'><span class='halfspacer'></span>Importing ".scalar @{$category->{events}}." events </p>");
 
 				my @events = $ocategory->events();
 
@@ -766,13 +771,13 @@
 
 				if ($jdata->{whole}) {
 
-					&outlog("<p class='action'> Pruning unused events </p>");
-
-					prune_unused(
+					my $count = prune_unused(
 						\%event_by_id,
 						$translator{event},
 						$category->{events}
-					)
+					);
+
+					&outlog("<p class='action'> Pruned $count unused events </p>");
 
 				}
 			} elsif ($ocategory) {
@@ -788,7 +793,6 @@
 		}
 
 		if ($jdata->{whole}) {
-
 
 			&outlog("<p class='action'> Pruning unused categories </p>");
 
@@ -2522,10 +2526,26 @@
 	if ($jdata->{categories} && (not defined $jdata->{school_only})) {
 
 		unless ($jdata->{event_only} || $jdata->{round_only}) {
-			&outlog("<h4 class='martop action'>ROUNDS AND RESULTS</h4>");
+			&outlog("<h4 class='martop action'>JUDGES</h4>");
 		}
 
 		my %cjs;
+
+		my %judge_by_id = ();
+		my %judge_by_person = ();
+		my %judge_by_name = ();
+		my %judge_by_nsda = ();
+
+		my $cat_judge_sth = $dbh->prepare('
+			select
+				judge.id, judge.first, judge.last,
+				person.id person_id, person.nsda nsda
+			from judge
+				left join person on person.id = judge.person
+			where judge.category = ?
+		');
+
+		my $category_judges;
 
 		CATEGORY:
 		foreach my $category (@{$jdata->{categories}}) {
@@ -2541,18 +2561,25 @@
 			# unless this is a single school import, to account for
 			# neutral/hires.
 
-			my @judges = $ocategory->judges();
+			$cat_judge_sth->execute($ocategory);
+			my $results = $cat_judge_sth->fetchall_hash();
 
-			my %judge_by_id = map {$_->id => $_} @judges;
-			my %judge_by_person = map {$_->person => $_} @judges;
-			my %judge_by_name = map {$_->first."-".$_->last => $_} @judges;
-			my %judge_by_nsda;
+			foreach my $judge (@{$results}) {
 
-			foreach my $judge (@judges) {
-				next unless $judge->chapter_judge > 0;
-				next unless $judge->chapter_judge->nsda > 0;
-				$judge_by_nsda{$judge->chapter_judge->nsda} = $judge;
+				my $judge_obj = Tab::Judge->retrieve($judge->{id});
+				$judge_by_id{$judge->{id}} = $judge_obj;
+				$judge_by_name{$judge->{first}.' '.$judge->{last}} = $judge_obj;
+
+				if ($judge->{person_id}) {
+					$judge_by_person{$judge->{person_id}} = $judge_obj;
+				}
+
+				if ($judge->{person_nsda}) {
+					$judge_by_nsda{$judge->{person_nsda}} = $judge_obj;
+				}
 			}
+
+			&outlog("<p class='specific'> I have ".scalar @{$results}." judges already in category ".$ocategory->abbr."</p>");
 
 			if ($category->{judges}
 				&& (not defined $jdata->{event_only})
@@ -2697,11 +2724,25 @@
 					$counter++;
 				}
 
-				#If there are judges in scope here I must prune.
-				prune_unused( \%judge_by_id, $translator{judge}, $category->{judges});
-
 			} else {
-				$translator{judge} = \%judge_by_id;
+				foreach my $jid (keys %judge_by_id) {
+					$translator{judge}{$jid} = $judge_by_id{$jid};
+				}
+			}
+		}
+
+		unless ($jdata->{event_only} || $jdata->{round_only}) {
+			&outlog("<h4 class='martop action'>EVENT ROUNDS AND RESULTS</h4>");
+		}
+
+		CATEGORY:
+		foreach my $category (@{$jdata->{categories}}) {
+
+			my $ocategory = $translator{category}{$category->{id}};
+
+			unless ($ocategory) {
+				&outlog("<p class='error'> No category found for ID ".$category->{id}."?  Error in data, skipping</p>");
+				next CATEGORY;
 			}
 
 			EVENT:
@@ -2720,7 +2761,7 @@
 				}
 
 				unless ($oevent) {
-					&outlog("<p class='error'> No event found for ID ".$event->{id}."?  Error in data, skipping</p>");
+					&outlog("<p class='error'> No event found for ID ".$event->{id}." ".$event->{name}."?  Error in data, skipping</p>");
 					next EVENT;
 				}
 
@@ -3707,306 +3748,6 @@
 				$m->flush_buffer() unless $no_return;
 			}
 
-
-			if ($category->{judges}
-				&& (not defined $jdata->{event_only})
-				&& (not defined $jdata->{round_only})
-				&& ($perms->{"owner"} || $perms->{"tabber"} || $perms->{category}{$ocategory} eq "tabber")
-			) {
-
-				my %ratings;
-				my $ratings_done;
-				my $counter;
-
-				&outlog("<p class='action'> Importing ".scalar @{$category->{judges}}." strikes and prefs into ".$ocategory->abbr."</p>");
-
-				my %no_change;
-
-				foreach my $judge (@{$category->{judges}}) {
-
-					my $ojudge = $translator{judge}{$judge->{id}};
-					next unless $ojudge;
-
-					if ($ojudge && $category->{nochange}) {
-						$no_change{$ojudge}++;
-						next;
-					}
-
-					#JUDGE STRIKES
-					if ($judge->{strikes}) {
-
-						my @strikes = $ojudge->strikes();
-						my %strike_by_id = map {$_->id => $_} @strikes;
-						my %strike_by_school = map {$_->school => $_} @strikes;
-						my %strike_by_entry = map {$_->entry => $_} @strikes;
-
-						STRIKE:
-						foreach my $strike (@{$judge->{strikes}}) {
-
-							my $ostrike;
-							$ostrike = $strike_by_id{$strike->{id}};
-
-							unless ($ostrike) {
-								$ostrike = $strike_by_school{$strike->{school}} if $strike->{school};
-							}
-
-							unless ($ostrike) {
-								$ostrike = $strike_by_entry{$strike->{entry}} if $strike->{entry};
-							}
-
-							my $oschool = $translator{school}{$strike->{school}} if $strike->{school};
-							my $oentry = $translator{entry}{$strike->{entry}} if $strike->{entry};
-							my $oevent = $translator{event}{$strike->{event}} if $strike->{event};
-							my $oregion = $translator{region}{$strike->{region}} if $strike->{region};
-							my $otimeslot = $translator{timeslot}{$strike->{timeslot}} if $strike->{timeslot};
-
-							next STRIKE if $strike->{tag} eq "entry" && (not defined $oentry);
-							next STRIKE if $strike->{tag} eq "event" && (not defined $oevent);
-							next STRIKE if $strike->{tag} eq "school" && (not defined $oschool);
-							next STRIKE if $strike->{tag} eq "region" && (not defined $oregion);
-							next STRIKE if $strike->{tag} eq "timeslot" && (not defined $otimeslot);
-
-							my $start_dt = parse_date($strike->{start});
-							my $end_dt = parse_date($strike->{end});
-
-							if ($ostrike) {
-
-								$ostrike->judge($ojudge->id) if $ojudge;
-								$ostrike->type($strike->{tag});
-								$ostrike->conflict($strike->{conflict});
-								$ostrike->conflictee($strike->{conflictee});
-								$ostrike->registrant($strike->{registrant});
-
-							} else {
-
-								$ostrike = Tab::Strike->create({
-									judge      => $ojudge->id,
-									type       => $strike->{tag},
-									conflict   => $strike->{conflict},
-									conflictee => $strike->{conflictee},
-									registrant => $strike->{registrant}
-								});
-							}
-
-							$ostrike->school($oschool->id) if $oschool;
-							$ostrike->entry($oentry) if $oentry;
-							$ostrike->event($oevent->id) if $oevent;
-							$ostrike->region($oregion->id) if $oregion;
-							$ostrike->timeslot($otimeslot->id) if $otimeslot;
-							$ostrike->start($start_dt) if $start_dt;
-							$ostrike->end($end_dt) if $end_dt;
-
-							$ostrike->district($strike->{district}) if $strike->{district};
-							$ostrike->shift($strike->{shift}) if $strike->{shift};
-
-							$ostrike->update();
-
-							$translator{strike}{$strike->{id}} = $ostrike;
-						}
-
-						prune_unused( \%strike_by_id, $translator{strike}, $judge->{strikes});
-					}
-
-					# RATINGS PREFS
-					if ($judge->{ratings} && (not defined $category->{nochange})) {
-
-						unless ($ratings_done++) {
-							$category_ratings_sth->execute($ocategory);
-							foreach my $result (@{$category_ratings_sth->fetchall_hash}) {
-								$result->{"side"} = 0 unless $result->{"side"};
-								$ratings{$result->{"entry"}}{$result->{"judge"}}{$result->{"side"}} = $result;
-							}
-							$category_ratings_sth->finish();
-						}
-
-						RATING:
-						foreach my $rating (@{$judge->{ratings}}) {
-
-							$rating->{judge} = $judge->{id};
-							$rating = clean_rating($rating, $nowstring, \%translator, $ocategory);
-
-							next RATING unless $rating->{entry};
-							next RATING unless $rating->{judge};
-							next RATING unless ($rating->{rating_tier} > 0 || $rating->{ordinal} > 0);
-							next RATING if $filter{$rating->{entry}}{$rating->{judge}}{$rating->{side}}++;
-
-							if (
-								$ratings{$rating->{entry}}{$rating->{judge}}{$rating->{side}}{ordinal} == $rating->{ordinal}
-								&& $ratings{$rating->{entry}}{$rating->{judge}}{$rating->{side}}{percentile} == $rating->{percentile}
-								&& $ratings{$rating->{entry}}{$rating->{judge}}{$rating->{side}}{rating_tier} == $rating->{rating_tier}
-							) {
-								delete $ratings{$rating->{entry}}{$rating->{judge}}{$rating->{side}};
-								next RATING;
-							}
-
-							$rating->{ordinal} = 0 unless $rating->{ordinal};
-							$rating->{percentile} = 0 unless $rating->{percentile};
-
-							if ($ratings{$rating->{entry}}{$rating->{judge}}{$rating->{side}}{id}) {
-
-								$update_rating_sth->execute(
-									$rating->{ordinal},
-									$rating->{percentile},
-									$rating->{rating_tier},
-									$rating->{subset},
-									$rating->{side},
-									$rating->{entry},
-									$rating->{judge},
-								);
-
-								delete $ratings{$rating->{entry}}{$rating->{judge}}{$rating->{side}};
-
-							} else {
-
-								$insert_rating_sth->execute(
-									$rating->{ordinal},
-									$rating->{percentile},
-									$rating->{rating_tier},
-									$rating->{subset},
-									$rating->{side},
-									$rating->{entry},
-									$rating->{judge},
-								);
-								delete $ratings{$rating->{entry}}{$rating->{judge}}{$rating->{side}};
-							}
-						}
-					}
-
-					unless ($counter < 5 || $counter % 10) {
-						&outlog("<p class='action'> Import ".$counter." judge pref sheets so far.  Just did ".$judge->{"last"}."</p>");
-						$m->flush_buffer() unless $no_return;
-					}
-
-					$counter++;
-				}
-
-				foreach my $entry (keys %ratings) {
-					if ($ratings{$entry}) {
-						foreach my $judge (keys %{$ratings{$entry}}) {
-							next if $no_change{$judge};
-							if (keys %{$ratings{$entry}{$judge}}) {
-								$delete_rating_sth->execute($entry, $judge);
-							}
-						}
-					}
-				}
-
-				#If there are judges in scope here I must prune.
-				prune_unused( \%judge_by_id, $translator{judge}, $category->{judges});
-
-			} else {
-				$translator{judge} = \%judge_by_id;
-			}
-
-
-			unless (
-				$jdata->{round_only}
-				&& ($perms->{"owner"} || $perms->{"tabber"} || $perms->{category}{$ocategory} eq "tabber")
-			) {
-
-				&outlog("<p class='action'> Importing judge pools </p>");
-
-				#JPOOLS JUDGE POOLS
-				my @jpools = $ocategory->jpools;
-				my %jpool_by_id = map { $_->id => $_ } @jpools;
-				my %jpool_by_name = map { $_->name => $_ } @jpools;
-
-				if ($category->{judge_pools}) {
-
-					foreach my $jpool (@{$category->{judge_pools}}) {
-
-						my $ojpool = $jpool_by_id{$jpool->{id}};
-
-						unless ($ojpool) {
-							$ojpool = $jpool_by_name{$jpool->{name}};
-						}
-
-						my $site = $translator{site}{$jpool->{site}};
-						$site = 0 unless $site;
-
-						unless ($ojpool) {
-
-							$ojpool = Tab::JPool->create({
-								category => $ocategory->id,
-								name     => $jpool->{name},
-								site     => $site
-							});
-
-						} else {
-							$ojpool->category($ocategory->id);
-							$ojpool->name($jpool->{name});
-							$ojpool->site($site);
-							$ojpool->update();
-							delete $jpool_by_id{$ojpool->id};
-						}
-
-						$translator{jpool}{$jpool->{id}} = $ojpool;
-
-						#JPOOL SETTINGS
-						Tab::JPoolSetting->sql_rm_all->execute($ojpool->id);
-
-						if ($jpool->{settings})  {
-							foreach my $jsetting (@{$jpool->{settings}}) {
-								my @reply = parse_setting($jsetting);
-								eval{$ojpool->setting(@reply)};
-							}
-						}
-
-						#JPOOL ROUNDS
-						my %jpool_rounds =
-							map { $_->round->id => $_ }
-							Tab::JPoolRound->search(jpool => $ojpool->id);
-
-						if ($jpool->{rounds}) {
-
-							foreach my $round (@{$jpool->{rounds}}) {
-								my $oround = $translator{round}{$round};
-
-								if ($jpool_rounds{$oround}) {
-									delete ($jpool_rounds{$oround});
-								} else {
-									Tab::JPoolRound->create({
-										round => $oround->id,
-										jpool => $ojpool->id
-									});
-								}
-							}
-						}
-
-						foreach my $key (keys %jpool_rounds) {
-							$jpool_rounds{$key}->delete();
-						}
-
-						#JPOOL JUDGES
-						my %jpool_judges =
-							map { $_->judge->id => $_ }
-							Tab::JPoolJudge->search(jpool => $ojpool->id);
-
-						if ($jpool->{judges}) {
-
-							foreach my $judge (@{$jpool->{judges}}) {
-
-								my $ojudge = $translator{judge}{$judge};
-								next unless $ojudge;
-
-								if ($jpool_judges{$ojudge}) {
-									delete $jpool_judges{$ojudge};
-								} else {
-									Tab::JPoolJudge->create({
-										judge => $ojudge->id,
-										jpool => $ojpool->id
-									});
-								}
-							}
-						}
-
-						foreach my $key (keys %jpool_judges) {
-							$jpool_judges{$key}->delete();
-						}
-					}
-					prune_unused( \%jpool_by_id, $translator{jpool}, $category->{judge_pools});
-				}
-			}
 		}
 
 		unless ($jdata->{round_only}) {
@@ -4233,15 +3974,18 @@
 			}
 		}
 
+		my $count;
+
 		if (reftype($objects) eq "HASH") {
 			foreach my $key (keys %{$objects}) {
 				next if $taken{$key};
 				$objects->{$key}->delete;
+				$count++;
 				delete $objects->{$key};
 			}
 		}
 
-		return;
+		return $count;
 	}
 
 	sub errorlog {
