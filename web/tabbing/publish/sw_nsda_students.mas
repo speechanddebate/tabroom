@@ -5,6 +5,8 @@
 </%args>
 <%init>
 
+	my $now = DateTime->now();
+
 	my $school_year = Tab::school_year - 1;
 
 	my $district = Tab::District->retrieve(
@@ -24,6 +26,7 @@
 			and entry.active = 1
 			and school.chapter = chapter.id
 			and (student.nsda = 0 or student.nsda is null)
+		group by student.id
 	");
 
 	my @unmarked_students = Tab::Student->search_non_nsda($tourn->id);
@@ -41,47 +44,65 @@
 	my %student_name;
 	my %student_by_nsda;
 
-	foreach my $school ($tourn->schools() ) {
+	my $dbh = Tab::DBI->db_Main();
 
-		$nsda_students{$school->id} =
-			$m->comp("/funclib/nsda/school_roster.mas", chapter => $school->chapter);
+	my $missing_sth = $dbh->prepare('
+		select
+			student.id, student.first, student.middle, student.last,
+			chapter.id chapter_id, chapter.name chapter_name, chapter.nsda chapter_nsda,
+			school.id school_id
+
+		from school, entry, entry_student es, student, chapter
+		where school.tourn = ?
+
+			and school.id = entry.school
+			and school.chapter = chapter.id
+			and entry.id = es.entry
+			and es.student = student.id
+			and (student.nsda = 0 OR student.nsda IS NULL)
+			and entry.active = 1
+		group by student.id
+		order by chapter.name, student.last
+	');
+
+	$missing_sth->execute($tourn->id);
+	my $missing_students = $missing_sth->fetchall_hash();
+
+	foreach my $missing (@{$missing_students}) {
+
+		next unless $missing->{chapter_nsda} > 0;
+		next if ($nsda_students{$missing->{chapter_nsda}});
+
+		$nsda_students{$missing->{chapter_nsda}} =
+			$m->comp("/funclib/nsda/school_roster.mas",
+				chapter => Tab::Chapter->retrieve($missing->{chapter_id})
+			);
 
 		my @students = eval {
-			return @{$nsda_students{$school->id}};
+			return @{$nsda_students{$missing->{chapter_nsda}}};
 		};
 
 		if (@students) {
-
-			%{$student_mid{$school->id}} =
+			%{$student_mid{$missing->{chapter_nsda}}} =
 				map {$_->{first}." ".$_->{middle}." ".$_->{last} => $_->{person_id}}
 				@students;
 
-			%{$student_name{$school->id}} =
+			%{$student_name{$missing->{chapter_nsda}}} =
 				map {$_->{first}." ".$_->{last} => $_->{person_id}}
 				@students;
 
-			%{$student_by_nsda{$school->id}} =
+			%{$student_by_nsda{$missing->{chapter_nsda}}} =
 				map {$_->{person_id} => $_}
 				@students;
-
-		} else {
-			$school_error{$school->id} = $nsda_students{$school->id};
 		}
 	}
 
 </%init>
 
-%		if ($from eq "jot" || $from eq "sw") {
-			<br />
-			<br />
-%		}
-
-		<span class="fourfifths nospace">
-%			if ($from eq "jot" || $from eq "sw") {
-				<h6 class="bluetext semibold nospace">Competitors Missing NSDA Memberships</h6>
-%			} else {
-				<h4>Competitors Missing NSDA Memberships</h4>
-%			}
+		<span class="fourfifths nospace martopmore">
+			<h6 class="bluetext semibold nospace">
+				Competitors Missing NSDA Memberships
+			</h6>
 		</span>
 
 		<span
@@ -107,20 +128,20 @@
 			<thead>
 				<tr class="yellowrow semibold">
 
-					<th class="padvert">
+					<th class="padvertless">
 						Student
 					</th>
 
-					<th class="padvert">
+					<th class="padvertless">
 						School
 					</th>
 
-					<th class="padvert">
-						School NSDA ID
+					<th class="padvertless">
+						School ID
 					</th>
 
-					<th>
-						NSDA Member
+					<th class="limit34">
+						Student NSDA Membership ID
 					</th>
 
 				</tr>
@@ -128,83 +149,81 @@
 
 			<tbody>
 
-%			foreach my $student (@unmarked_students) {
+%			foreach my $missing (@{$missing_students}) {
 
 				<tr>
 
 					<td>
-						<% $student->first %> <% $student->last %>
+						<% $missing->{first} %> <% $missing->{middle} %> <% $missing->{last} %>
 					</td>
 
 					<td>
-						<% $student->schoolname %>
+						<% $missing->{chapter_name} %>
 					</td>
 
 					<td class="centeralign">
-						<% $student->school_nsda %>
+						<% $missing->{chapter_nsda} %>
 					</td>
 
 					<td>
-%						if ($school_error{$student->schoolid}) {
-							<span class="centeralign redtext nospace full">
-								<% $school_error{$student->schoolid} %>
-							</span>
-%						} else {
-
-							<select name="<% $student->id %>" class="fixedbig">
-								<option value="">None</option>
+						<select name="<% $missing->{id} %>">
+							<option value="">None</option>
 <%perl>
-								my $name = $student->first;
-								$name .= " ".$student->middle if $student->middle;
-								$name .= " ".$student->last;
+							my $name = $missing->{first};
+							$name .= " ".$missing->{middle} if $missing->{middle};
+							$name .= " ".$missing->{last};
 
-								foreach my $nsda_student (
-									@{$nsda_students{$student->schoolid}}
-								) {
+							my %used;
 
-									my $nsda_name = $nsda_student->{first};
-									if ($nsda_student->{middle}) {
-										$nsda_name .= " ".$nsda_student->{middle};
-									}
-									$nsda_name .= " ".$nsda_student->{last};
+							foreach my $nsda_student (
+								sort {
+									$a->{grad_year} <=> $b->{grad_year}
+									|| $a->{last} cmp $b->{last} 
+								} @{$nsda_students{$missing->{chapter_nsda}}}
+							) {
 
-									my $selected;
+								next if $nsda_student->{grad_year} < ($now->year - 1);
+								next if $used{$nsda_student->{person_id}}++;
 
-									$selected++
-										if $student_name{$student->schoolid}{$name}
-											eq $nsda_student->{person_id};
+								my $nsda_name = $nsda_student->{first};
+								if ($nsda_student->{middle}) {
+									$nsda_name .= " ".$nsda_student->{middle};
+								}
+								$nsda_name .= " ".$nsda_student->{last};
 
-									$selected++
-										if $student_mid{$student->schoolid}{$name}
-											eq $nsda_student->{person_id};
+								my $selected;
+
+								$selected++
+									if $student_name{$missing->{chapter_nsda}}{$name}
+										eq $nsda_student->{person_id};
+
+								$selected++
+									if $student_mid{$missing->{chapter_nsda}}{$name}
+										eq $nsda_student->{person_id};
 
 </%perl>
-									<option
-										value="<% $nsda_student->{person_id} %>"
-										<% $selected ? 'selected="selected"' : "" %>
-									>#<% $nsda_student->{person_id} %> <% $nsda_name %>
-										<% $nsda_student->{grad_year} %>
-									</option>
-%								}
-							</select>
-%						}
+								<option
+									value="<% $nsda_student->{person_id} %>"
+									<% $selected ? 'selected="selected"' : "" %>
+								>#<% $nsda_student->{person_id} %> <% $nsda_name %>
+									&apos;<% substr($nsda_student->{grad_year}, 2, 4)%>
+								</option>
+%							}
+						</select>
 					</td>
 				</tr>
 %			}
 
 			</tbody>
-
-			<tr class="liblrow rightalign">
-
-				<td colspan="4">
-					<input
-						type  = "submit"
-						value = "Save Affiliations"
-					>
-					</form>
-				</td>
-
-			</tr>
-
 		</table>
 
+		<div class="libl rightalign">
+			<span class="third centeralign padvertless">
+				<input
+					type  = "submit"
+					value = "Save Memberships"
+				>
+			</span>
+		</div>
+
+		</form>
