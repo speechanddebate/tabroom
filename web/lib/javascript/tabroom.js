@@ -423,6 +423,8 @@
 					}
 
 					if (data.replace) {
+
+						console.log(data.replace);
 						data.replace.forEach( function(item) {
 							if (item.destroy) {
 								$("#"+item.id).remove();
