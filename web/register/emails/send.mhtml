@@ -16,6 +16,25 @@
 </%args>
 <%init>
 
+	unless ($content) {
+		my $err = "The email had no message body.  Try again,";
+		$m->redirect("/register/emails/compose.mhtml&err=$err");
+	} else {
+		$content = $m->comp("/funclib/save_editor.mas", text => $content);
+	}
+
+	my %events = $m->comp("/funclib/perms/events.mas",
+		tourn   => $tourn,
+		perms   => $perms,
+		limited => 1,
+	);
+
+	my %categories = $m->comp("/funclib/perms/categories.mas",
+		tourn   => $tourn,
+		perms   => $perms,
+		limited => 1
+	);
+
 	if ($ARGS{"problems"}) {
 		$m->comp("problem_emails.mas", args => \%ARGS);
 		$m->abort();
@@ -26,13 +45,11 @@
 
 	my $now = DateTime->now(time_zone => $tz);
 
-	my %categories = map {$_->id => $_->abbr} $tourn->categories();
-	my %events = map {$_->id => $_->abbr} $tourn->events();
-
-	my $sent_to;
-	my @recipients;
-	my @emails;
 	my @schools;
+	my %ids;
+	my %empties;
+	my $sent_to;
+	my $msg;
 
 	my $dbh = Tab::DBI->db_Main();
 
@@ -40,8 +57,8 @@
 
 		if ($ARGS{"unclaimed_entries"}) {
 
-			Tab::School->set_sql( unclaimed => "
-				select school.*
+			my $unclaimed_sth = $dbh->prepare("
+				select school.id, school.chapter, school.name
 				from school, entry
 				where school.id = entry.school
 					and school.tourn = ?
@@ -57,20 +74,21 @@
 					select evs.id
 					from event_setting evs
 					where evs.event = entry.event
-					and (evs.tag = 'supp' OR evs.tag = 'conn')
+					and (evs.tag = 'supp')
 				)
 			");
 
-			push @schools, Tab::School->search_unclaimed($tourn->id);
+			$unclaimed_sth->execute($tourn->id);
+			my $unclaimed = $unclaimed_sth->fetchall_hash();
+			push @schools, @{$unclaimed};
 			$sent_to .= "\n" if $sent_to;
-			$sent_to .= "Schools with unclaimed entries ";
-
+			$sent_to .= scalar @{$unclaimed}." schools with unclaimed entries";
 		}
 
 		if ($ARGS{"noncomplete_entries"}) {
 
-			Tab::School->set_sql( incomplete => "
-				select school.*
+			my $incomplete_sth = $dbh->prepare("
+				select school.id, school.chapter, school.name
 				from school, entry, entry_student es
 				where school.id = entry.school
 					and school.tourn = ?
@@ -92,61 +110,17 @@
 					)
 			");
 
-			push @schools, Tab::School->search_incomplete($tourn->id);
-
-
-			my $sth = $dbh->prepare("
-				select school.id, rf.value_text, student.id
-				from (school, entry, entry_student es, student, chapter, event, event_setting usa)
-					left join school_setting rf
-						on rf.school = school.id
-						and rf.tag = 'release_forms'
-				where event.tourn = ?
-					and event.id = entry.event
-					and entry.active = 1
-					and entry.id = es.entry
-					and es.student = student.id
-					and student.chapter = chapter.id
-					and chapter.id = school.chapter
-					and school.tourn = event.tourn
-					and event.id = usa.event
-					and usa.tag = 'usa_wsdc'
-			");
-
-			$sth->execute($tourn->id);
-			my %school_forms;
-			my %out = map {$_->id => 1} @schools;
-			my %dinged;
-
-			while (
-				my ($school_id, $rf_json, $student_id) = $sth->fetchrow_array()
-			) {
-				next if $out{$school_id};
-				next if $dinged{$school_id};
-
-				unless ($school_forms{$school_id}) {
-					$school_forms{$school_id} = eval {
-						return JSON::decode_json($rf_json);
-					};
-				}
-
-				unless ($school_forms{$school_id}{$student_id}) {
-					$dinged{$school_id}++;
-				}
-			}
-
-			foreach my $school_id (keys %dinged) {
-				push @schools, Tab::School->retrieve($school_id);
-			}
-
+			$incomplete_sth->execute($tourn->id);
+			my $incomplete = $incomplete_sth->fetchall_hash();
+			push @schools, @{$incomplete};
 			$sent_to .= "\n" if $sent_to;
-			$sent_to .= "Schools with incomplete entries ";
+			$sent_to .= scalar @{$incomplete}." schools with incomplete entries";
 		}
 
 		if ($ARGS{"noncomplete_judges"}) {
 
-		    Tab::School->set_sql( incomplete => "
-				select school.id, count(judge.id)
+			my $incomplete_sth = $dbh->prepare("
+				select school.id, school.chapter, school.name
 				from school, judge
 				where school.id = judge.school
 					and school.tourn = ?
@@ -160,22 +134,21 @@
 				group by school.id
 			");
 
-			push @schools, Tab::School->search_incomplete($tourn->id);
+			$incomplete_sth->execute($tourn->id);
+			my $incomplete = $incomplete_sth->fetchall_hash();
+			push @schools, @{$incomplete};
 			$sent_to .= "\n" if $sent_to;
-			$sent_to .= "Schools with incomplete judges";
+			$sent_to .= scalar @{$incomplete}." schools with incomplete judges";
 		}
 	}
-
-
-	my @empts;
-	my %empties;
 
 	unless (
 		$ARGS{'waitlist_only'}
 		|| $ARGS{"everybody_plus"}
 	) {
-		Tab::School->set_sql(empties => "
-			select school.*
+
+		my $empty_sth = $dbh->prepare("
+			select school.id, school.chapter, school.name
 				from school
 				where tourn = ?
 				and not exists (
@@ -192,8 +165,9 @@
 				)
 		");
 
-		@empts = Tab::School->search_empties($tourn->id);
-		%empties = map {$_->id => $_} @empts;
+		$empty_sth->execute($tourn->id);
+		my $empties = $empty_sth->fetchall_hash();
+		%empties = map {$_->{id} => $_} @{$empties};
 	}
 
 	if ($ARGS{"timeslot_id"}) {
@@ -209,10 +183,10 @@
 			}
 		}
 
-		Tab::School->set_sql(in_timeslot => "
-			select school.*
+		my $timeslot_sth = $dbh->prepare('
+			select school.id, school.name, school.chapter
 				from school
-				where tourn = ?
+			where tourn = ?
 				and exists (
 					select entry.id
 						from entry, ballot, panel, round
@@ -221,44 +195,92 @@
 						and entry.id = ballot.entry
 						and ballot.panel = panel.id
 						and panel.round = round.id
-						and round.timeslot IN ($string)
+						and round.timeslot IN ('.$string.')
 				)
-		");
+		');
 
-		push @schools, Tab::School->search_in_timeslot($tourn->id);
+		$timeslot_sth->execute($tourn->id);
+		my $ts = $timeslot_sth->fetchall_hash();
+		push @schools, @{$ts};
+		$sent_to .= "\n" if $sent_to;
+		$sent_to .= scalar @{$ts}." schools with entires active in selected timeslots";
 	}
 
-
 	if ($diodirs) {
+
 		$sent_to .= "Diocesan Moderators ";
-   		foreach my $region (
-			$m->comp("/funclib/tourn_regions.mas", tourn => $tourn)
-		) {
-      	   	push @recipients, $region->admins;
+
+		my $dio_sth = $dbh->prepare('
+			select
+				perimission.person
+			from permission, school
+			where school.tourn = ?
+				and school.region = permission.region
+			group by permission.person
+		');
+
+		$dio_sth->execute($tourn->id);
+		my $dio_dirs = $dio_sth->fetchall_hash();
+
+		foreach my $dir (@{$dio_dirs}) {
+			$ids{$dir->{person}} = 1;
 		}
+
+		$sent_to .= "\n" if $sent_to;
+		$sent_to .= scalar @{$dio_dirs}." Diocesan Moderators ";
 	}
 
 	if ($everybody_plus) {
-		$sent_to .= "All Registered Schools ";
-		push @schools, $tourn->schools;
+
+		my $all_sth = $dbh->prepare('
+			select
+				school.id, school.name, school.chapter
+			from school
+				where school.tourn = ?
+		');
+
+		$all_sth->execute($tourn->id);
+		my $all = $all_sth->fetchall_hash();
+		push @schools, @{$all};
+		$sent_to .= "\n" if $sent_to;
+		$sent_to .= "All ".scalar @{$all}." schools";
 	}
 
-	Tab::School->set_sql( active => "
-		select school.*
-		from school, entry
-		where school.tourn = ?
-			and school.id = entry.school
-			and entry.active = 1
-	");
-
 	if ($everybody) {
-		$sent_to .= "All Registered Schools With Entries ";
-		push @schools, Tab::School->search_active($tourn->id);
+
+		my $all_active_sth = $dbh->prepare('
+			select
+				school.id, school.name, school.chapter
+			from school, entry
+				where school.tourn = ?
+				and entry.school = school.id
+				and entry.active = 1
+		');
+
+		$all_active_sth->execute($tourn->id);
+		my $all = $all_active_sth->fetchall_hash();
+		push @schools, @{$all};
+		$sent_to .= "\n" if $sent_to;
+		$sent_to .= "All ".scalar @{$all}." schools with active entries";
 	}
 
 	if ($ARGS{"not_checked_in"}) {
-		push @schools, $tourn->schools(onsite => 0);
-		$sent_to .= "Schools not checked in ";
+
+		my $all_nonsite_sth = $dbh->prepare('
+			select
+				school.id, school.name, school.chapter
+			from school, entry
+				where school.tourn = ?
+				and entry.school = school.id
+				and entry.active = 1
+				and school.onsite = 1
+		');
+
+		$all_nonsite_sth->execute($tourn->id);
+		my $all = $all_nonsite_sth->fetchall_hash();
+		push @schools, @{$all};
+		$sent_to .= "\n" if $sent_to;
+		$sent_to .= "All ".scalar @{$all}." schools with active entries not checked in";
 	}
 
 	if ($judge_short) {
@@ -273,13 +295,13 @@
 				return         => 1
 			);
 
-			Tab::School->set_sql(short_judging => "
-
-				select distinct school.*
+			my $short_judging_sth = $dbh->prepare('
+				select
+					school.id, school.name, school.chapter
 				from school, school_setting
 					where school.tourn = ?
 					and school_setting.school = school.id
-					and school_setting.tag = 'judging_unmet'
+					and school_setting.tag = "judging_unmet"
 
 					and exists (
 						select entry.id
@@ -287,13 +309,24 @@
 						where entry.school = school.id
 						and entry.active = 1
 					)
-			");
+			');
 
-			push @schools, Tab::School->search_short_judging($tourn->id);
+			$short_judging_sth->execute($tourn->id);
+			my $short = $short_judging_sth->fetchall_hash();
+			push @schools, @{$short};
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= "All ".scalar @{$short}." schools with unmet judging obligations";
 
 		} else {
 
 			my @categories = $tourn->categories;
+			my %settings;
+
+			foreach my $category (@categories) {
+				$settings{$category->id} = {$category->all_settings()};
+			}
+
+			my $counter;
 
 			foreach my $school ($tourn->schools) {
 
@@ -303,8 +336,11 @@
 
 					my ($uncovered, $overage) = $m->comp(
 						"/funclib/judgemath/uncovered_burden_by_category.mas",
-						category => $category,
-						school   => $school
+						category          => $category,
+						category_settings => $settings{$category->id},
+						school            => $school,
+						tourn             => $tourn,
+						tourn_settings    => $tourn_settings,
 					);
 
 					$short++ if $uncovered;
@@ -312,8 +348,19 @@
 				}
 
 				next unless $short;
-				push @schools, $school;
+
+				my $school_frame = ({
+					id => $school->id,
+					name => $school->name,
+					chapter => $school->chapter->id
+				});
+
+				push @schools, $school_frame;
+				$counter++;
 			}
+
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= $counter." schools with unmet judging obligations";
 		}
 	}
 
@@ -340,7 +387,7 @@
 		if ($ARGS{"moneyshort_nopo"} || $ARGS{"moneyshort_po"}) {
 
 			my $money_sth = $dbh->prepare("
-				select school.id
+				select school.id, school.name, school.chapter
 				from school, school_setting po
 				where school.tourn = ?
 					and school.id = po.school
@@ -355,6 +402,8 @@
 			%po = map {$_->{id} => 1} @{$ref} if $ref;
 		}
 
+		my $counter;
+
 		foreach my $school_id (keys %school_balances) {
 
 			my $yup;
@@ -365,6 +414,7 @@
 			) {
 				$yup++;
 			}
+
 			if ($ARGS{"uninvoice_short"} && $school_balances{$school_id}{"uninvoiced"} > 0) {
 				$yup++;
 			}
@@ -382,21 +432,23 @@
 				}
 			}
 
+			$school_balances{$school_id}{"id"} = $school_id;
+
 			if ($yup && $school_id) {
-				my $school = Tab::School->retrieve($school_id);
-				if ($school > 0) {
-					push @schools, $school;
-				}
+				push @schools, $school_balances{$school_id};
+				$counter++;
 			}
 		}
 
+		$sent_to .= "\n" if $sent_to;
+		$sent_to .= $counter." schools with pending financial balances";
 	}
 
 	if ($tba) {
 		$sent_to .= "Schools with TBA entries at ";
 
-		Tab::School->set_sql( has_tba => "
-			select distinct school.*
+		my $tba_sth = $dbh->prepare('
+			select school.id, school.name, school.chapter
 				from school, entry
 			where entry.school = school.id
 				and school.tourn = ?
@@ -404,10 +456,15 @@
 					select tba.id
 					from entry_setting tba
 					where tba.entry = entry.id
-					and tba.tag = 'tba'
+					and tba.tag = "tba"
 				)
-		");
-		push @schools, Tab::School->search_has_tba($tourn->id);
+		');
+
+		$tba_sth->fetchall_hash();
+		my $tbas = $tba_sth->fetchall_hash();
+		push @schools, @{$tbas};
+		$sent_to .= "\n" if $sent_to;
+		$sent_to .= scalar @{$tbas}." schools with TBA entries";
 	}
 
 	if ($ARGS{"event_id"}) {
@@ -415,37 +472,53 @@
 		my $string;
 
 		if ($ARGS{"event_id"} eq int($ARGS{"event_id"})) {
-			$string .= $ARGS{'event_id'};
+			if ($events{$ARGS{event_id}}) {
+				$string .= $ARGS{'event_id'};
+			}
 		} else {
 			foreach my $ev (@{$ARGS{"event_id"}}) {
-				$string .= ", " if $string;
-				$string .= int($ev);
+				if ($events{$ev}) {
+					$string .= ", " if $string;
+					$string .= int($ev);
+				}
 			}
 		}
 
-		Tab::School->set_sql(events => "
-			select school.*
-				from school, entry
-			where school.id      = entry.school
-				and entry.active = 1
-				and entry.event in ($string)
-		");
+		if ($string) {
 
-		push @schools, Tab::School->search_events();
+			my $event_sth = $dbh->prepare('
+				select school.id, school.name, school.chapter
+					from school, entry
+				where school.id = entry.school
+					and school.tourn = ?
+					and entry.active = 1
+					and entry.event in ('.$string.')
+			');
 
-		Tab::School->set_sql(hybrids => "
-			select school.*
-				from school,
-					entry, entry_student es, student
-			where entry.active = 1
-				and entry.event in ($string)
-				and entry.id = es.entry
-				and es.student = student.id
-				and student.chapter = school.chapter
-				and school.tourn = ?
-		");
+			$event_sth->execute($tourn->id);
+			my $events = $event_sth->fetchall_hash();
 
-		push @schools, Tab::School->search_hybrids($tourn->id);
+			my $hybrid_sth = $dbh->prepare('
+				select school.id, school.name, school.chapter
+					from school, entry, entry_student es, student
+				where entry.active = 1
+					and entry.event in ('.$string.')
+					and entry.id = es.entry
+					and es.student = student.id
+					and student.chapter = school.chapter
+					and school.tourn = ?
+			');
+
+			$hybrid_sth->execute($tourn->id);
+			my $hybrids = $hybrid_sth->fetchall_hash();
+
+			my @event_schools;
+			push @event_schools, @{$events};
+			push @event_schools, @{$hybrids};
+
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= scalar @event_schools." schools with entries in selected events";
+		}
 	}
 
 	if ($ARGS{"waitlist_id"}) {
@@ -453,39 +526,37 @@
 		my $string;
 
 		if ($ARGS{"waitlist_id"} eq int($ARGS{"waitlist_id"})) {
-			$string .= $ARGS{'waitlist_id'};
+			if ($events{$ARGS{waitlist_id}}) {
+				$string .= $ARGS{'waitlist_id'};
+			}
 		} else {
 			foreach my $ev (@{$ARGS{"waitlist_id"}}) {
-				$string .= ", " if $string;
-				$string .= int($ev);
+				if ($events{$ev}) {
+					$string .= ", " if $string;
+					$string .= int($ev);
+				}
 			}
 		}
 
-		Tab::School->set_sql(waitlists => "
-			select school.*
-				from school, entry
-			where school.id = entry.school
-				and entry.unconfirmed = 0
-				and entry.waitlist = 1
-				and entry.event in ($string)
-		");
+		if ($string) {
 
-		push @schools, Tab::School->search_waitlists();
+			my $waitlist_sth = $dbh->prepare("
+				select school.id, school.name, school.chapter
+					from school, entry
+				where school.id = entry.school
+					and school.tourn = ?
+					and entry.unconfirmed = 0
+					and entry.waitlist = 1
+					and entry.event IN (".$string.")
+			");
 
-		Tab::School->set_sql(wl_hybrids => "
-			select school.*
-				from school,
-					entry, entry_student es, student
-			where  entry.unconfirmed = 0
-				and entry.waitlist = 1
-				and entry.event in ($string)
-				and entry.id = es.entry
-				and es.student = student.id
-				and student.chapter = school.chapter
-				and school.tourn = ?
-		");
+			$waitlist_sth->execute($tourn->id);
+			my $waitlisted = $waitlist_sth->fetchall_hash();
+			push @schools, @{$waitlisted};
 
-		push @schools, Tab::School->search_wl_hybrids($tourn->id);
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= scalar @{$waitlisted}." schools with entries from selected events on waitlists";
+		}
 	}
 
 	if ($ARGS{"video_id"}) {
@@ -493,50 +564,42 @@
 		my $string;
 
 		if ($ARGS{"video_id"} eq int($ARGS{"video_id"})) {
-			$string .= $ARGS{'video_id'};
+			if ($events{$ARGS{video_id}}) {
+				$string .= $ARGS{'video_id'};
+			}
 		} else {
 			foreach my $ev (@{$ARGS{"video_id"}}) {
-				$string .= ", " if $string;
-				$string .= int($ev);
+				if ($events{$ev}) {
+					$string .= ", " if $string;
+					$string .= int($ev);
+				}
 			}
 		}
 
-		Tab::School->set_sql(videos => "
-			select school.*
-				from school, entry
+		if ($string) {
 
-			where school.id = entry.school
-				and entry.active = 1
-				and entry.event in ($string)
-				and not exists (
-					select video_link.id
-						from entry_setting video_link
-					where video_link.entry = entry.id
-						and video_link.tag = 'video_link'
-				)
-		");
+			my $video_sth = $dbh->prepare("
+				select school.id, school.name, school.chapter
+					from school, entry
+				where school.id = entry.school
+					and school.tourn = ?
+					and entry.active = 1
+					and entry.event in (".$string.")
+					and not exists (
+						select video_link.id
+							from entry_setting video_link
+						where video_link.entry = entry.id
+							and video_link.tag = 'video_link'
+					)
+			");
 
-		push @schools, Tab::School->search_videos();
+			$video_sth->execute($tourn->id);
+			my $videos = $video_sth->fetchall_hash();
+			push @schools, @{$videos};
 
-		Tab::School->set_sql(vid_hybrids => "
-			select school.*
-				from school,
-					entry, entry_student es, student
-			where entry.active = 1
-				and entry.event in ($string)
-				and entry.id = es.entry
-				and es.student = student.id
-				and student.chapter = school.chapter
-				and school.tourn = ?
-				and not exists (
-					select video_link.id
-						from entry_setting video_link
-					where video_link.entry = entry.id
-						and video_link.tag = 'video_link'
-				)
-		");
-
-		push @schools, Tab::School->search_vid_hybrids($tourn->id);
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= scalar @{$videos}." schools with entries from selected events missing video links";
+		}
 	}
 
 	foreach my $tag ("category_id", "demographic_category_id", "selfnom_category_id") {
@@ -546,39 +609,37 @@
 
 		if ($ARGS{$tag} eq int($ARGS{$tag})) {
 
-			my $category = Tab::Category->retrieve($ARGS{$tag});
+			next unless $categories{$ARGS{$tag}};
 
-			if ($category) {
-				$sent_to .= " Judges in ".$category->abbr;
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= " Judges in ".$categories{$ARGS{$tag}}{name};
 
-				if ($tag eq "demographic_category_id") {
-					$sent_to .= " without demographic information";
-				}
-				if ($tag eq "selfnom_category_id") {
-					$sent_to .= " without self nomination";
-				}
-
-				$string .= $ARGS{$tag};
+			if ($tag eq "demographic_category_id") {
+				$sent_to .= " without demographic information";
 			}
+
+			if ($tag eq "selfnom_category_id") {
+				$sent_to .= " without self nomination";
+			}
+
+			$string .= $ARGS{$tag};
 
 		} else {
 
-			foreach my $ev (@{$ARGS{$tag}}) {
+			foreach my $cat (@{$ARGS{$tag}}) {
 
-				my $category = Tab::Category->retrieve($ev);
+				next unless $categories{$cat};
+				$sent_to .= "\n" if $sent_to;
+				$sent_to .= " Judges in ".$categories{$cat}{name};
 
-				if ($category) {
-					$sent_to .= " Judges in ".$category->abbr;
-
-					if ($tag eq "demographic_category_id") {
-						$sent_to .= " without demographic information";
-					} elsif ($tag eq "selfnom_category_id") {
-						$sent_to .= " without self nomination";
-					}
-
-					$string .= ", " if $string;
-					$string .= int($ev);
+				if ($tag eq "demographic_category_id") {
+					$sent_to .= " without demographic information";
+				} elsif ($tag eq "selfnom_category_id") {
+					$sent_to .= " without self nomination";
 				}
+
+				$string .= ", " if $string;
+				$string .= int($cat);
 			}
 		}
 
@@ -605,90 +666,177 @@
 				)";
 			}
 
-			Tab::Person->set_sql(categories => "
-				select person.*
-				from person, judge
+			my $judge_sth = $dbh->prepare("
+				select person.id
+				from person, judge, category
 				where person.id = judge.person
 					and judge.category in ($string)
+					and judge.category = category.id
+					and category.tourn = ?
 					$limit
 			");
 
-			push @recipients, Tab::Person->search_categories();
+			$judge_sth->execute($tourn->id);
+			my $judges = $judge_sth->fetchall_hash();
+
+			foreach my $judge (@{$judges}) {
+				$ids{$judge->{id}} = 1;
+			}
+
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= scalar @{$judges}." such judges found";
 		}
 	}
 
 	if ($ARGS{"jpool_id"}) {
 
+		my %jpools = $m->comp("/funclib/perms/jpools.mas",
+			tourn => $tourn,
+			perms => $perms
+		);
+
 		my $string;
 
 		if ($ARGS{"jpool_id"} eq int($ARGS{"jpool_id"})) {
-			$string .= $ARGS{'jpool_id'};
-			$sent_to .= " Judges in pool ".$ARGS{"jpool_id"};
+			if ($jpools{$ARGS{'jpool_id'}}) {
+				$string .= $ARGS{'jpool_id'};
+				$sent_to .= "\n" if $sent_to;
+				$sent_to .= " Judges in pool ".$jpools{$ARGS{"jpool_id"}}{'name'};
+			}
 		} else {
-			foreach my $ev (@{$ARGS{"jpool_id"}}) {
-				$string .= ", " if $string;
-				$string .= int($ev);
-				$sent_to .= " Judges in pool ".$ev;
+			foreach my $jpool (@{$ARGS{"jpool_id"}}) {
+				if ($jpools{$jpool}) {
+					$string .= ", " if $string;
+					$string .= int($jpool);
+					$sent_to .= "\n" if $sent_to;
+					$sent_to .= " Judges in pool ".$jpools{$jpool}{'name'};
+				}
 			}
 		}
 
 		if ($string) {
 
-			Tab::Person->set_sql(jpools => "
-				select
-					person.*
+			my $jpool_sth = $dbh->prepare("
+				select person.id
 				from person, judge, jpool_judge
 				where person.id = judge.person
 					and judge.id = jpool_judge.judge
 					and jpool_judge.jpool in ($string)
 			");
 
-			push @recipients, Tab::Person->search_jpools();
+			$jpool_sth->execute();
+			my $jpools = $jpool_sth->fetchall_hash();
+
+			foreach my $judge (@{$jpools}) {
+				$ids{$judge->{id}} = 1;
+			}
+
+			$sent_to .= "\n" if $sent_to;
+			$sent_to .= scalar @{$jpools}." such judges found";
 		}
 	}
 
 	if ($ARGS{"paradigm_jpool_id"}) {
 
-		my @pools;
+		my %jpools = $m->comp("/funclib/perms/jpools.mas",
+			tourn => $tourn,
+			perms => $perms
+		);
 
-		if ($ARGS{"paradigm_jpool_id"} eq int($ARGS{"paradigm_jpool_id"})) {
-			push @pools, $ARGS{'paradigm_jpool_id'};
+		my @pools;
+		my $tag = "paradigm_jpool_id";
+
+		if ($ARGS{$tag} eq int($ARGS{$tag})) {
+			if ($jpools{$ARGS{$tag}}) {
+				push @pools, $ARGS{$tag};
+				$sent_to .= "\n" if $sent_to;
+				$sent_to .= " Judges in pool ".$jpools{$ARGS{$tag}}{'name'}." without required forms or paradigms";
+			}
 		} else {
-			@pools = @{$ARGS{"paradigm_jpool_id"}};
+			foreach my $jpool (@{$ARGS{$tag}}) {
+				if ($jpools{$jpool}) {
+					push @pools, int($jpool);
+					$sent_to .= "\n" if $sent_to;
+					$sent_to .= " Judges in pool ".$jpools{$jpool}{'name'}." without required forms or paradigms";
+				}
+			}
 		}
 
 		foreach my $pool (@pools) {
 
-			my $jpool = Tab::JPool->retrieve($pool);
+			my $forms_sth = $dbh->prepare('
+				select
+					paradigm_quiz.value paradigm,
+					required_trainings.value_text quizzes
 
-			my $tag = $jpool->setting('paradigm_form');
-			next unless $tag;
+				from jpool
+					left join jpool_setting paradigm_quiz
+					on paradigm_quiz.jpool = jpool.id
+					and paradigm_quiz.tag = "paradigm_quiz"
 
-			$sent_to .= " Judges without paradigms in pool ".$jpool->name;
+					left join jpool_setting required_quizzes
+					on required_quizzes.jpool = jpool.id
+					and required_quizzes.tag = "required_quizzes"
+				where jpool.id  = ?
+				group by jpool.id
+			');
 
-			Tab::Person->set_sql( no_paradigm => "
-				select person.*
-					from judge, jpool_judge, person
-				where judge.id = jpool_judge.judge
-					and judge.active = 1
-					and jpool_judge.jpool = ?
-					and not exists (
-						select js.id
-						from judge_setting js
-						where js.judge = judge.id
-						and js.tag = 'form_complete_$tag'
-					)
-					and judge.person = person.id
-			");
+			$forms_sth->execute($pool);
 
-			push @recipients, Tab::Person->search_no_paradigm($pool);
+			my $results = $forms_sth->fetchall_hash();
+			my @tags;
+
+			if ($results && @{$results} > 0) {
+				my $result = shift @{$results};
+
+				if ($result->{paradigm}) {
+					push @tags, $result->{paradigm};
+				}
+
+				if ($result->{quizzes}) {
+					push @tags, $result->{quizzes};
+				}
+			}
+
+			if (@tags) {
+
+				my $counter;
+
+				foreach my $tag (@tags) {
+
+					my $missing_sth = $dbh->prepare("
+						select person.id
+							from judge, jpool_judge, person
+						where judge.id = jpool_judge.judge
+							and judge.active = 1
+							and jpool_judge.jpool = ?
+							and not exists (
+								select pq.id
+									from person_quiz pq
+								where pq.person = person.id
+									and pq.completed = 1
+									and pq.quiz = ?
+							)
+					");
+
+					$missing_sth->execute($pool, $tag);
+					my $judges = $missing_sth->fetchall_hash();
+					foreach my $judge (@{$judges}) {
+						$ids{$judge->{id}} = 1;
+						$counter++;
+					}
+				}
+
+				$sent_to .= "\n" if $sent_to;
+				$sent_to .= $counter." judges missing required paradigms or trainings in pool ".$jpools{$pool};
+			}
 		}
 	}
 
 	if ($ARGS{'waitlist_only'}) {
 
-		Tab::School->set_sql( waitlist_only => "
-			select school.*
+		my $waitlist_only = $dbh->prepare("
+			select school.id, school.name, school.chapter
 				from (school, entry)
 			where school.tourn = ?
 			and school.id = entry.school
@@ -705,58 +853,41 @@
 			)
 		");
 
-		$sent_to .= " Schools with only waitlisted entries ";
-		push @schools, Tab::School->search_waitlist_only($tourn->id);
+		$waitlist_only->execute($tourn->id);
+		my $wl = $waitlist_only->fetchall_hash();
+
+		$sent_to .= "\n" if $sent_to;
+		$sent_to .= scalar @{$wl}." schools with only waitlisted entries ";
+
+		push @schools, @{$wl};
 	}
 
-	my $balance_log;
-	my %done;
-	my %tourn_contacts = $m->comp("/funclib/tourn_contacts.mas", tourn => $tourn);
-
-	foreach my $school (sort {$a->name cmp $b->name} @schools) {
-
-		next if $done{$school->id}++;
-		next if $empties{$school->id};
-
-		if (%school_balances) {
-			$balance_log .= "\n" if $balance_log;
-			$balance_log .= "Sending emails to ".$school->name." with balance ".$school_balances{$school->id}{"balance"};
-		} else {
-			$balance_log .= "\n" if $balance_log;
-			$balance_log .= "Sending emails to ".$school->name;
-		}
-
-		if ($tourn_settings->{nsda_nats}) {
-			$balance_log .= " in ".$school->state;
-		}
-
-		push @emails, keys %{$tourn_contacts{$school->id}};
-	}
-
-	unless ($ARGS{"nosend"} || @recipients || @emails) {
-
+	# If we do not have recipients at this point we're done.
+	unless (scalar @schools > 0 || scalar (keys %ids) > 0) {
 		my $err = "The categories or checkboxes you have selected did not have any recipients.";
-		$err .= "It's possible you didn't check boxes, or that the categories you chose ";
-		$err .= "have no active entries.";
+		$err .= "It is possible you didn't select recipients categories, or that the categories you chose ";
+		$err .= "have no matching schools or judges.";
 
 		$m->comp("/funclib/abort.mas", message => $err);
-
-	} elsif (@recipients || @emails) {
-
-		$balance_log .= "\n" if $balance_log;
-		$balance_log .= "Message going to ".(scalar @recipients + scalar @emails)." individual recipients.";
 	}
 
-	my $email;
+	# Now determine who the email should go out as
+
+	my $from_string;
+	my $reply_to;
 	my $sender;
-	my $sender_raw;
 
 	if ($ARGS{"reply_to"} && (not defined $ARGS{"nosend"})) {
+
+		my $epoch = $now->epoch;
+		my $key = substr($epoch, -7);
+		$from_string = $tourn->name." <".$tourn->webname.'_'.$key.'@www.tabroom.com>';
 
 		if ($ARGS{"reply_to"} eq int($ARGS{"reply_to"})) {
 
 			$sender = Tab::Person->retrieve($ARGS{"reply_to"});
-			$sender_raw = $sender->first." ".$sender->last." <".$sender->email.">";
+			$reply_to = $sender->first." ".$sender->last." <".$sender->email.">";
+
 			my $description = "Email subject $subject sent as ".$sender->email." to $sent_to";
 
 			$m->comp("/funclib/log.mas",
@@ -770,10 +901,10 @@
 
 			if ($tourn_settings->{"senders"} && $tourn_settings->{"senders"}{$ARGS{"reply_to"}}) {
 
-				my $sender = $tourn_settings->{"senders"}{$ARGS{"reply_to"}};
+				$reply_to = $ARGS{"reply_to"};
 
 				if ($sender->{"verified"}) {
-					my $description = "Email subject $subject sent as ".$ARGS{"reply_to"}." to $sent_to";
+					my $description = "Email subject $subject sent as ".$reply_to." to $sent_to";
 					$m->comp("/funclib/log.mas",
 						type        => 'tabbing',
 						tourn       => $tourn->id,
@@ -781,33 +912,19 @@
 						description => $description
 					);
 				}
-
-				$sender_raw = $sender->{"name"}." <".$ARGS{"reply_to"}.">";
 			}
 		}
 	}
 
-	unless ($sender) {
-		$sender = $person;
-	}
-
-	unless ($content) {
-		my $err = "The email had no message body.  Try again,";
-		$m->redirect("/register/emails/compose.mhtml&err=$err");
-	} else {
-		$content = $m->comp("/funclib/save_editor.mas", text => $content);
-	}
-
-	$hidden = 0 unless $hidden;
+	# Create or update the database record
+	my $email;
 
 	if ($email_id) {
 
 		$email = Tab::Email->retrieve($email_id);
-
 		#If the mail has been sent already we clone instead of overwriting
 
 		if ($email->sent_to && (not defined $ARGS{'nosend'}) ) {
-
 			$email = $email->copy({
 				sent_at => $now
 			});
@@ -816,16 +933,16 @@
 				$email->sender($sender);
 			}
 
-			if ($sender_raw) {
-				$email->sender_raw($sender_raw);
+			if ($reply_to) {
+				$email->sender_raw($reply_to);
 			}
 		}
 
 		$email->subject($subject);
-		$email->metadata($balance_log);
-		$email->hidden($hidden);
+		$email->hidden($hidden || 0);
 		$email->content($content);
-
+		$email->sender_raw($reply_to);
+		$email->sender($sender || $person || 0);
 		$email->update();
 
 	} else {
@@ -835,56 +952,204 @@
 			content    => $content,
 			sent_at    => $now,
 			tourn      => $tourn->id,
-			sender     => $sender,
-			sender_raw => $sender_raw,
-			hidden     => $hidden,
-			metadata   => $balance_log
+			sender     => $sender || $person || 0,
+			sender_raw => $reply_to,
+			hidden     => $hidden || 0,
 		});
 	}
 
-	my $msg;
+	my $balance_log;
+	my %done;
+	my @emails;
 
-	unless ($ARGS{"nosend"}) {
+	# Add in the admins
 
-		if ($ARGS{"all_admins"}) {
-			push @recipients, $m->comp("/funclib/tourn_admins.mas", tourn => $tourn);
+	my $admin_limit = "and permission.tag = 'owner'";
+
+	if ($ARGS{"all_admins"}) {
+		undef $admin_limit;
+	}
+
+	my $admin_sth = $dbh->prepare('
+		select
+			permission.person
+		from permission
+		where permission.tourn = ?
+		'.$admin_limit.'
+	');
+
+	$admin_sth->execute($tourn);
+	my $admins = $admin_sth->fetchall_hash();
+
+	foreach my $admin (@{$admins}) {
+		$ids{$admin->{person}} = 1;
+	}
+
+	$ids{$person->id} = 1;
+
+	if ($tourn_settings->{"account_contacts"}) {
+
+		if (@schools) {
+
+			foreach my $school (sort {$a->{name} cmp $b->{name}} @schools) {
+
+				next if $done{"school"}{$school->{id}}++;
+				next if $empties{$school->{id}};
+
+				my $school_message = "<p>School: ".$school->{name}."</p>".$content;
+
+				if (%school_balances) {
+					$balance_log .= "\n" if $balance_log;
+					if ($ARGS{"uninvoice_short"} && $school_balances{$school->{id}}{"uninvoiced"} > 0) {
+						$school_message .= "<p>Uninvoiced Balance: ";
+						$school_message .= $tourn_settings->{currency} || '$';
+						$school_message .= sprintf("%.2f", $school_balances{$school->{id}}{"uninvoiced"})."</p>";
+						$balance_log .= "Sending emails to ".$school->{name}." with uninvoiced balance ".$school_balances{$school->{id}}{"balance"};
+					} else {
+						$school_message .= "<p>Unpaid Balance: ";
+						$school_message .= $tourn_settings->{currency} || '$';
+						$school_message .= sprintf("%.2f", $school_balances{$school->{id}}{"balance"})."</p>";
+						$balance_log .= "Sending emails to ".$school->{name}." with balance ".$school_balances{$school->{id}}{"balance"};
+					}
+
+					Tab::debuglog("SC content is now ".$school_message);
+				} else {
+					$balance_log .= "\n" if $balance_log;
+					$balance_log .= "Sending emails to ".$school->{name};
+				}
+
+				my $contacts = $m->comp("/funclib/contacts.mas",
+					school         => $school->{id},
+					return         => 'yaskween',
+					email_contacts => 1,
+				);
+
+				next unless ($contacts && scalar @{$contacts} > 0);
+				my @school_ids;
+
+				foreach my $contact (@{$contacts}) {
+					if ($ARGS{'no_dupes'}) {
+						next if ($done{person}{$contact->{person_id}}++);
+					}
+					push @school_ids, $contact->{person_id};
+				}
+
+				unless ($ARGS{"nosend"}) {
+
+					my $answer = $m->comp( "/funclib/send_notify.mas",
+						from_string => $from_string,
+						reply_to    => $reply_to,
+						subject     => $subject,
+						ids         => \@school_ids,
+						no_web      => 1,
+						html        => $school_message,
+					);
+
+					Tab::debuglog($answer);
+				}
+			}
+
+			$email->metadata($balance_log);
+			$email->update();
+		}
+
+		if (scalar (keys %ids)) {
+
+			foreach my $key (keys %{$done{person}}) {
+				delete $ids{$key};
+			}
+
+			my @ids = keys %ids;
+			unless ($ARGS{"nosend"}) {
+				$m->comp( "/funclib/send_notify.mas",
+					from_string => $from_string,
+					reply_to    => $reply_to,
+					subject     => $subject,
+					ids         => \@ids,
+					no_web      => 1,
+					body        => $content,
+				);
+			}
+		}
+
+		unless ($ARGS{"nosend"}) {
+			$msg = "This message has been sent.";
 		} else {
-			push @recipients, $m->comp("/funclib/tourn_admins.mas", tourn => $tourn, "owner" => "true");
+			$msg = "This message has been saved but NOT sent.";
 		}
 
-		my %seen;
-		foreach my $recipient (@recipients) {
-			next if $seen{$recipient->email}++;
-			push @emails, $recipient->email unless $recipient->no_email;
-		}
-
-		$content .="\n-----------------------------<br />\n";
-		$content .=" Tournament : ".$tourn->name." <br />\n";
-		$content .=" Email sent to:\n";
-		$content .=" $sent_to\n\n ";
-
-		if ($email) {
+		if ($sent_to) {
 			$email->sent_to($sent_to);
 			$email->update();
 		}
 
-		my $epoch = $now->epoch;
-		my $key = substr($epoch, -7);
-
-		my $from_string = $tourn->name." <".$tourn->webname.'_'.$key.'@www.tabroom.com>';
-
-		$m->comp( "/funclib/send_email.mas",
-			from_string => $from_string,
-			from        => $sender,
-			array       => \@emails,
-			subject     => $subject,
-			reply_to    => $sender_raw,
-			body        => $content
-		);
-
-		$msg = "This message has been sent.";
 	} else {
-		$msg = "This message has been saved but NOT sent.";
+
+		my %tourn_contacts = $m->comp("/funclib/tourn_contacts.mas", tourn => $tourn);
+
+		foreach my $school (sort {$a->name cmp $b->name} @schools) {
+
+			next if $done{$school->id}++;
+			next if $empties{$school->id};
+
+			if (%school_balances) {
+				$balance_log .= "\n" if $balance_log;
+				$balance_log .= "Sending emails to ".$school->name." with balance ".$school_balances{$school->id}{"balance"};
+			} else {
+				$balance_log .= "\n" if $balance_log;
+				$balance_log .= "Sending emails to ".$school->name;
+			}
+
+			if ($tourn_settings->{nsda_nats}) {
+				$balance_log .= " in ".$school->state;
+			}
+
+			push @emails, keys %{$tourn_contacts{$school->id}};
+		}
+
+		$hidden = 0 unless $hidden;
+
+		my $msg;
+
+		unless ($ARGS{"nosend"}) {
+
+			my @recipients;
+
+			if ($ARGS{"all_admins"}) {
+				push @recipients, $m->comp("/funclib/tourn_admins.mas", tourn => $tourn);
+			} else {
+				push @recipients, $m->comp("/funclib/tourn_admins.mas", tourn => $tourn, "owner" => "true");
+			}
+
+			my %seen;
+			foreach my $recipient (@recipients) {
+				next if $seen{$recipient->email}++;
+				push @emails, $recipient->email unless $recipient->no_email;
+			}
+
+			$content .="\n-----------------------------<br />\n";
+			$content .=" Tournament : ".$tourn->name." <br />\n";
+			$content .=" Email sent to:\n";
+			$content .=" $sent_to\n\n ";
+
+			if ($email) {
+				$email->sent_to($sent_to);
+				$email->update();
+			}
+
+			$m->comp( "/funclib/send_email.mas",
+				from_string => $from_string,
+				from        => $sender,
+				array       => \@emails,
+				subject     => $subject,
+				reply_to    => $reply_to,
+				body        => $content
+			);
+
+			$msg = "This message has been sent.";
+		} else {
+			$msg = "This message has been saved but NOT sent.";
+		}
 	}
 
 	$m->redirect("/register/emails/index.mhtml?email_id=".$email->id."&msg=$msg");
