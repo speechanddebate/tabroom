@@ -60,56 +60,118 @@
 		$reasons .= "Judge has no day obligation" unless $judge->obligation;
 	}
 
-	my $quizref = $category->setting("required_quizzes");
-
 	my $ok;
+	my $dbh = Tab::DBI->db_Main();
+	my %quiz_answers;
 
 	if ($jperson > 0) {
-		if ($quizref) {
-			foreach my $quiz_id (@{$quizref}) {
-				$ok++ if Tab::PersonQuiz->search(
-					person   => $jperson->id,
-					quiz     => $quiz_id,
-					completed => 1
-				)->first;
 
-				unless ($ok) {
-					my $quiz = Tab::Quiz->retrieve($quiz_id);
-					$reasons .= "<br />" if $reasons;
-					$reasons .= $quiz->label." not completed";
-				}
+		my $sth = $dbh->prepare('
+			select
+				pq.id, pq.quiz, pq.completed, pq.approved_by,
+				quiz.approval
+
+			from person_quiz pq, quiz, person
+			where person.id = ?
+				and person.id = pq.person
+				and pq.quiz = quiz.id
+		');
+
+		$sth->execute($jperson->id);
+		my $answers = $sth->fetchall_hash();
+
+		%quiz_answers = map {$_->{quiz} => $_} @{$answers};
+	}
+
+	my @all_quizzes = Tab::Quiz->search(hidden => 0);
+	my %circuits = map {$_->id => $_} $tourn->circuits;
+	my @quizzes;
+
+	foreach my $quiz (@all_quizzes) {
+		if ($quiz->circuit > 0 && (not defined $circuits{$quiz->circuit})) {
+			next;
+		}
+		push @quizzes, $quiz;
+	}
+
+	my %quiz_by_id = map {$_->id => $_} @quizzes;
+
+	my $quizref = $category->setting("required_quizzes");
+
+	if ($quizref) {
+		foreach my $quiz_id (@{$quizref}) {
+
+			next unless $quiz_by_id{$quiz_id};
+			my $answers = $quiz_answers{$quiz_id};
+
+			my $bad = &check_answers($answers);
+			if ($bad) {
+				my $quiz = $quiz_by_id{$quiz_id};
+				$reasons .= "<br />" if $reasons;
+				$reasons .= $quiz->label." ".$bad;
 			}
 		}
 	}
 
-	my @jpools = $m->comp(
-		"/funclib/judge_jpools.mas",
-		judge => $judge,
-		limit => "registrant"
-	);
+	my $sth = $dbh->prepare('
+		select
+			jpool.id, jpool.name,
+			required_quizzes.value_text quizzes,
+			paradigm_quiz.value paradigm
+		from (jpool, jpool_judge jpj, jpool_setting registrant)
+
+			left join jpool_setting required_quizzes
+				on jpool.id = required_quizzes.jpool
+				and required_quizzes.tag = "required_quizzes"
+
+			left join jpool_setting paradigm_quiz
+				on jpool.id = paradigm_quiz.jpool
+				and paradigm_quiz.tag = "paradigm_quiz"
+
+		where jpj.judge = ?
+			and jpj.jpool = jpool.id
+			and jpool.id = registrant.jpool
+			and registrant.tag = "registrant"
+	');
+
+	$sth->execute($judge->id);
+	my $jpools = $sth->fetchall_hash();
 
 	my $main;
 
-	foreach my $jpool (@jpools) {
+	foreach my $jpool (@{$jpools}) {
 
-		$main++ unless $jpool->setting('supp');
-		my $quiz_id = $jpool->setting("paradigm_quiz");
+		$main++;
 
-		if ($quiz_id) {
+		if ($jpool->{paradigm}) {
 
-			my $ok;
+			my $quiz_id = $jpool->{paradigm};
+			next unless $quiz_by_id{$quiz_id};
+			my $answers = $quiz_answers{$quiz_id};
 
-			if ($jperson) {
-				$ok++ if Tab::PersonQuiz->search(
-					person    => $jperson->id,
-					quiz      => $quiz_id,
-					completed => 1
-				)->first;
-			}
-
-			unless ($ok) {
+			my $bad = &check_answers($answers);
+			if ($bad) {
+				my $quiz = $quiz_by_id{$quiz_id};
 				$reasons .= "<br />" if $reasons;
-				$reasons .= $jpool->name." paradigm card not completed";
+				$reasons .= $quiz->label." ".$bad;
+			}
+		}
+
+		if ($jpool->{quizzes}) {
+
+			my @quizzes = eval {
+				return @{JSON::decode_json($jpool->{quizzes})};
+			};
+
+			foreach my $quiz_id (@quizzes) {
+				next unless $quiz_by_id{$quiz_id};
+				my $answers = $quiz_answers{$quiz_id};
+				my $bad = &check_answers($answers);
+				if ($bad) {
+					my $quiz = $quiz_by_id{$quiz_id};
+					$reasons .= "<br />" if $reasons;
+					$reasons .= $quiz->label." ".$bad;
+				}
 			}
 		}
 	}
@@ -132,7 +194,7 @@
 			$reasons .= "Ineligible first year out: ".$fyo;
 		}
 
-		unless ($jperson->phone) {
+		unless ($jperson->phone > 0) {
 			$reasons .= "<br />" if $reasons;
 			$reasons .= "Cell phone number required";
 		}
@@ -150,5 +212,33 @@
 	}
 
 	return $reasons;
+
+	sub check_answers {
+
+		my $answers = shift;
+		my $bad;
+
+		if ($answers->{approval}) {
+
+			if ($answers->{approved_by}) {
+				return;
+			}
+
+			if ($answers->{completed}) {
+				$bad = "not approved";
+			} elsif ($answers->{id}) {
+				$bad = "not completed";
+			}
+
+		} else {
+			if ($answers->{completed}) {
+				return;
+			} elsif ($answers->{id}) {
+				$bad = "not completed";
+			}
+		}
+
+		return $bad || "not begun";
+	}
 
 </%init>

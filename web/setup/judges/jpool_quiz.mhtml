@@ -1,0 +1,174 @@
+<%args>
+	$tourn
+	$person
+	$jpool_id       => undef
+	$quiz_id        => undef
+	$property_value => undef
+</%args>
+<%init>
+
+	$m->clear_buffer();
+	$r->content_type('application/json');
+
+	unless ($jpool_id) {
+		$m->print('{ "error": true, "message": "No judge pool ID sent"}');
+		$m->abort();
+	}
+
+	my $now = DateTime->now();
+	my $jpool = Tab::JPool->retrieve($jpool_id);
+
+	unless ($jpool) {
+		$m->print('{ "error": true, "message": "No judge pool found for ID '.$jpool_id.'"}');
+		$m->abort();
+	}
+
+	my @all_quizzes = Tab::Quiz->search(hidden => 0);
+	my %circuits = map {$_->id => $_} $tourn->circuits;
+	my @quizzes;
+
+	foreach my $quiz (@all_quizzes) {
+		if ($quiz->circuit > 0 && (not defined $circuits{$quiz->circuit})) {
+			next;
+		}
+		push @quizzes, $quiz;
+	}
+
+	my %quiz_by_id = map {$_->id => $_} @quizzes;
+
+	my @already = eval {
+		return @{$jpool->setting("required_quizzes")};
+	};
+
+	my %by_id = map {$_ => 1} @already;
+
+	my @clean;
+	my $msg;
+	my $destroy;
+	my $reply;
+	my $reply_append;
+
+	if ($quiz_id) {
+
+		# Deletion request
+
+		unless ($by_id{$quiz_id}) {
+			my %response = (
+				error   => \1,
+				message => "That quiz is already not required for ".$jpool->name,
+				refresh => 1
+			);
+
+			$m->print(JSON::encode_json(\%response));
+			$m->abort();
+		}
+
+		my @clean;
+
+		foreach my $quiz (@already) {
+			next if $quiz == $quiz_id;
+			next unless $quiz_by_id{$quiz_id};
+			push @clean, $quiz;
+		}
+
+		@clean = sort {$quiz_by_id{$a}->label <=> $quiz_by_id{$b}->label} @clean;
+		@already = sort {$quiz_by_id{$a}->label <=> $quiz_by_id{$b}->label} @already;
+
+		$msg = "Deleted ".$quiz_by_id{$quiz_id}->label." from requirements for ".$jpool->name,
+		$destroy = $jpool->id."-".$quiz_id;
+
+	} elsif ($property_value) {
+
+		# Add request
+
+		$quiz_id = $property_value;
+		my $quiz = $quiz_by_id{$quiz_id};
+
+		unless ($quiz) {
+			my %response = (
+				error   => \1,
+				message => "Your tournament does not have access to that quiz/cert",
+				refresh => 1
+			);
+
+			$m->print(JSON::encode_json(\%response));
+			$m->abort();
+		}
+
+		if ($by_id{$quiz_id}) {
+			my %response = (
+				error   => \1,
+				message => "That quiz is already required for ".$jpool->name,
+				refresh => 1
+			);
+
+			$m->print(JSON::encode_json(\%response));
+			$m->abort();
+		}
+
+		push @clean, @already;
+		push @clean, $quiz_id;
+		@clean = sort {$quiz_by_id{$a}->label <=> $quiz_by_id{$b}->label} @clean;
+		$msg = "Added ".$quiz->label." to requirements for ".$jpool->name,
+
+		$reply_append = $jpool->id."_quiz_list";
+		my $label = $quiz->label;
+		$label =~ s/NSDA Accreditation Level//g;
+
+		my $border;
+		if (scalar @already > 0) {
+			$border = 'ltbordertop';
+		}
+
+		$reply = '
+			<div
+				id    = "'.$jpool->id."-".$quiz->id.'"
+				class = "smallish nospace '.$border.'"
+			>
+				<span class="fivesixths">
+					<span class="quarterspacer"></span>
+					'.$label.'
+				</span>
+				<span class="sixth centeralign nospace">
+					<a
+						jpool_id   = "'.$jpool->id.'"
+						quiz_id    = "'.$quiz->id.'"
+						on_success = "destroy"
+						class      = "fa fa-trash fa-sm orangetext hover full padvertless marno"
+						onClick    = "postSwitch(this, \'jpool_quiz.mhtml\');"
+					></a>
+				</span>
+			</div>
+		';
+	}
+
+	if (scalar @clean < 1) {
+		$jpool->setting('required_quizzes', 0);
+	} else {
+		$jpool->setting('required_quizzes', 'json', \@clean);
+	}
+
+	if (join('-', @clean) ne join('-', @already)) {
+		Tab::ChangeLog->create({
+			tag         => "tabbing",
+			person      => $person,
+			tourn       => $tourn,
+			category    => $jpool->category,
+			created_at  => $now,
+			description => $msg,
+		});
+	}
+
+	my %response = (
+		error        => \0,
+		message      => $msg,
+		destroy      => $destroy,
+		reply_append => $reply_append,
+		reply        => $reply,
+	);
+
+	$m->print(JSON::encode_json(\%response));
+	$m->abort();
+
+</%init>
+
