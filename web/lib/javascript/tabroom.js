@@ -678,6 +678,34 @@
 			dropdownCssClass        : 'selection_text',
 		});
 	}
+
+	function resizeToChildren(className) {
+
+		let max = 0;
+
+		$(`.${className}`).each( (index, item) => {
+
+			let width = 0;
+
+			$(`#${item.id}`).children(':visible').each( (idx2, moi) => {
+				const elementWidth = parseInt($(moi).outerWidth(true));
+				width += elementWidth;
+			});
+
+			if (width > max) {
+				max = width;
+			}
+		});
+
+		max += 5;
+
+		$(`.${className}`).each( (index, item) => {
+			$(`#${item.id}`).width(max);
+		});
+
+		fixVisual();
+    }
+
 /* jerks
 *
 		var base_url = window.location.origin.split(':').slice(1);
