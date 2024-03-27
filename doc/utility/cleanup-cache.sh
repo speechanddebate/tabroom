@@ -8,12 +8,15 @@
 # window that kicks errors due to the cache directory's absence.
 
 /usr/bin/chmod 1777 /www/tabroom/web/mason
-/usr/bin/chgrp www-data /www/tabroom/web/mason
+/usr/bin/chown www-data:www-data /www/tabroom/web/mason/cache
+/usr/bin/chmod 1777 /www/tabroom/web/mason/cache
+
+/usr/bin/chown www-data:www-data /www/tabroom/web/mason/obj
 /usr/bin/mv /www/tabroom/web/mason/obj /www/tabroom/web/mason/o2
 
 /usr/bin/mv /www/tabroom/web/tmp /www/tabroom/web/tmp2
 /usr/bin/mkdir /www/tabroom/web/tmp
-/usr/bin/chmod 1777 /www/tabroom/web/tmp
+/usr/bin/chmod -R 1777 /www/tabroom/web/tmp
 /usr/bin/chgrp www-data /www/tabroom/web/tmp
 
 
