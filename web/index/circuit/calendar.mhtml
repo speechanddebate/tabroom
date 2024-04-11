@@ -5,11 +5,12 @@
 </%args>
 <%init>
 
-	my $key = $circuit_id."-".$year;
+	my $key = $year."-".$circuit_id;
 
 	return if $m->cache_self(
-		key        => $key,
-		expires_in => '5m'
+		key     => $key,
+		expire_if  => sub { return 1 if defined $ARGS{"invalidate"} },
+		expire  => $key
 	);
 
 	my $circuit = Tab::Circuit->retrieve(int($circuit_id)) if $circuit_id;
@@ -33,25 +34,47 @@
 		$end_year   = $year + 1;
 	}
 
-	my $begin = DateTime->new(
-		year => $start_year,
-		month => 7,
-		day  => 01 );
+	my $dbh = Tab::DBI->db_Main();
 
-	my $stop = DateTime->new(
-		year => $end_year,
-		month => 6,
-		day => 30 );
+	my $sth = $dbh->prepare("
+		select
+			tourn.id, tourn.webname, tourn.name,
+			tourn.city, tourn.state, tourn.country,
+			tourn.tz,
+			CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
+			CONVERT_TZ(tourn.end, '+00:00', tourn.tz) end,
+			CONVERT_TZ(tourn.reg_start, '+00:00', tourn.tz) reg_start,
+			CONVERT_TZ(tourn.reg_end, '+00:00', tourn.tz) reg_end,
+			GROUP_CONCAT(event.abbr SEPARATOR ', ') events
 
-	my @all_tourns = $circuit->tourns;
+		from (tourn, tourn_circuit tc)
 
-	my @tourns;
+			left join event on tourn.id = event.tourn
+				and event.type != 'attendee'
+				and event.abbr IS NOT NULL
+				and event.abbr != ''
 
-	foreach my $at (@all_tourns) {
-		push (@tourns, $at) if ($at->start > $begin && $at->end < $stop) && ($at->hidden < 1 );
-	}
+		where tc.circuit = ?
+			and tc.approved = 1
+			and tc.tourn = tourn.id
+			and tourn.start > ?
+			and tourn.start < ?
+			and tourn.hidden != 1
+			and exists (
+				select event.id
+				from event
+				where event.tourn = tourn.id
+				and event.type != 'attendee'
+				and event.abbr IS NOT NULL
+				and event.abbr != ''
+			)
 
-	@tourns = sort {$a->start <=> $b->start } @tourns;
+		group by tourn.id
+		order by tourn.start
+	");
+
+	$sth->execute($circuit->id, "$start_year-07-01 00:00:00", "$end_year-06-30 23:59:59");
+	my $tourns = $sth->fetchall_hash();
 
 </%init>
 
@@ -59,71 +82,126 @@
 
 	<div class="main">
 
-		<h1 class="centeralign"><% $circuit->name %></h1>
+		<& "/funclib/tablesorter.mas", table => 'calendar' &>
 
-		<div class="top nospace">
-			<span class="half ">
-				<h4><% $start_year."-".$end_year %> Calendar</h4>
+		<div class='flexrow full'>
+			<span class='threequarters'>
+				<h4 class="nospace"><% $circuit->name %></h4>
 			</span>
-
-			<span class="half rightalign">
-				<h5>Timezone: <% Tab::tzname($tz) %></h5>
-			</span>
-
+			<span
+				class = 'quarter rightalign'
+				id    = 'calendar_buttonarea'
+			></span>
 		</div>
 
-		<table cellpadding="5" cellspacing="1" width="100%" style="font-size: 90%">
+		<div class="full centeralign">
+			<h3><% $start_year."-".$end_year %> Calendar</h3>
+		</div>
 
-			<tr class="yellowrow">
+		<table id="calendar">
 
-				<th>
-					Name
-				</th>
+			<thead>
+				<tr class="yellowrow smallish padvert">
+					<th>
+						Name
+					</th>
 
-				<th>
-					Date(s)
-				</td>
+					<th>
+						Location
+					</td>
+					<th>
+						Date(s)
+					</td>
 
-				<th class="smaller">
-					Reg Opens
-				</th>
+					<th>
+						Events
+					</td>
 
-			</tr>
+					<th class="smaller">
+						Reg Opens
+					</th>
 
-%			my $switch;
+					<th class="smaller">
+						Reg Ends
+					</th>
 
-% 			foreach my $tourn (@tourns) {
+					<th class="smaller" title="Timezone of tournament">
+						TZ
+					</th>
+				</tr>
+			</thead>
 
-%				my $tz = $tourn->tz;
-%				$tz = "UTC" unless $tz;
-%				my $start = $tourn->start->set_time_zone($tz);
-%				my $end = $tourn->end->set_time_zone($tz);
+			<tbody>
 
-				<tr class="<% ($switch++ % 2) ? "oddrow" : "evenrow"%>" >
+% 			foreach my $tourn (@{$tourns}) {
 
-					<td>
-						<a class="white" href="/index/tourn/index.mhtml?tourn_id=<%$tourn->id%>">
-							<% $tourn->name %>
+				<tr>
+					<td class="nospace">
+						<a
+							class="full plain hover padvert padleft link-underline"
+%							if ($tourn->{webname}) {
+								title="http://<% $tourn->{webname} %>.tabroom.com"
+%							}
+							href="/index/tourn/index.mhtml?tourn_id=<%$tourn->{id} %>"
+						>
+							<% $tourn->{name} %>
 						</a>
 					</td>
 
-					<td>
-						<% Tab::niceshortdate($start) %>
-						<% ($start->mdy ne $end->mdy) ? " - ". Tab::niceshortdate($end) : "" %>
-					</td>
-
-
-					<td>
-%						if ($tourn->reg_start) {
-							<% Tab::niceshortdate($tourn->reg_start->set_time_zone($tz)) %> at
-							<% Tab::nicetime($tourn->reg_start->set_time_zone($tz)) %>
+					<td class="limithalf smaller">
+<%perl>
+						if (
+							$tourn->{city} eq "NSDA Campus"
+							|| $tourn->{city} eq "NSDACampus"
+							|| $tourn->{city} eq "Online"
+							|| $tourn->{city} eq "Asynchronous"
+							|| $tourn->{city} eq "Asynch"
+						) {
+</%perl>
+							<% $tourn->{city} %>
+%						} else {
+							<% $tourn->{city} %><% $tourn->{city} ? "," : "" %>
+							<%
+								$tourn->{country} eq "US"
+								? $tourn->{state}
+								: $tourn->{state}." ".$tourn->{country}
+							%>
 %						}
 					</td>
 
-				</tr>
+					<td class="smallish" data-text="<% $tourn->{start} %>">
+						<& "/funclib/showrange.mas",
+							start_string => $tourn->{start},
+							end_string   => $tourn->{end},
+							day_name     => 1
+						&>
+					</td>
 
+					<td class="limithalf smaller">
+						<% $tourn->{events} %>
+					</td>
+
+					<td class="smallish" data-text="<% $tourn->{reg_start} %>">
+						<& "/funclib/showdate.mas",
+							string => $tourn->{reg_start},
+							format => "murica_shorter"
+						&>
+					</td>
+
+					<td class="smallish" data-text="<% $tourn->{reg_end} %>">
+						<& "/funclib/showdate.mas",
+							string => $tourn->{reg_end},
+							format => "murica_shorter"
+						&>
+					</td>
+
+					<td class="smallish centeralign">
+						<& "/funclib/tzname.mas", tz => $tourn->{tz} &>
+					</td>
+				</tr>
 % 			}
 
+			</tbody>
 		</table>
 
 	</div>

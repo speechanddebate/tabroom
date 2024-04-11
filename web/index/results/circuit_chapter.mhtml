@@ -6,10 +6,13 @@
 </%args>
 <%init>
 
-	use Time::HiRes qw( time );
-	my $code_start = time();
+	my $key = $year."-".$circuit_id;
 
-	use Data::Dumper;
+	return if $m->cache_self(
+		key       => $key,
+		expire_if => sub { return 1 if defined $ARGS{"invalidate"} },
+		expire    => $key
+	);
 
 	my $circuit = Tab::Circuit->retrieve($circuit_id) if $circuit_id;
 	$circuit = Tab::Circuit->retrieve( 43 ) unless $circuit;
@@ -30,15 +33,13 @@
 
 	#Load chapter characteristics
 
-	Tab::Chapter->columns(TEMP => qw/nstudents/);
-	Tab::Chapter->columns(TEMP => qw/njudges/);
-	Tab::Chapter->columns(TEMP => qw/retired_students/);
+	my $dbh = Tab::DBI->db_Main();
 
-	Tab::Chapter->set_sql(pull_competitors => "
+	my $entries_sth = $dbh->prepare("
 		select chapter.*, count(distinct student.id) as nstudents
 		from chapter
-		left join student on chapter.id=student.chapter
-		left join chapter_circuit on chapter.id=chapter_circuit.chapter
+			left join student on chapter.id=student.chapter
+			left join chapter_circuit on chapter.id=chapter_circuit.chapter
 		where chapter_circuit.circuit = ?
 		and chapter.level = ?
 		group by chapter.id
@@ -47,7 +48,7 @@
 	# Doing these queries as one runs in 2 minutes.  Doing them separately runs
 	# in 2 seconds.  Thus my damage  -CLP
 
-	Tab::Chapter->set_sql(pull_judges => "
+	my $judges_sth = $dbh->prepare("
 		select chapter.*, count(distinct chapter_judge.id) as njudges
 		from chapter
 		left join chapter_judge on chapter.id = chapter_judge.chapter
@@ -57,119 +58,116 @@
 		group by chapter.id
 	");
 
-	my @chapters = Tab::Chapter->search_pull_competitors($circuit->id, $level);
-	my $code_end = time();
-	@chapters = sort { $b->nstudents <=> $a->nstudents } @chapters;
+	$entries_sth->execute($circuit->id, $level);
+	$judges_sth->execute($circuit->id, $level);
+
+	my $entries = $entries_sth->fetchall_hash();
+	my $judges = $judges_sth->fetchall_hash();
+
 	my %chapters;
 
-	foreach my $chapter (@chapters) {
-		$chapters{$chapter->id}{'name'}          = $chapter->name;
-		$chapters{$chapter->id}{'nstudents'}     = $chapter->nstudents;
-		$chapters{$chapter->id}{'nonretirees'}   = 0;
-		$chapters{$chapter->id}{'active_judges'} = 0;
-		$chapters{$chapter->id}{'tourneys'}      = 0;
-		$chapters{$chapter->id}{'entries'}       = 0;
-		$chapters{$chapter->id}{'AL1'}           = 0;
-		$chapters{$chapter->id}{'LT1'}           = 0;
-		$chapters{$chapter->id}{'LT4'}           = 0;
-		$chapters{$chapter->id}{'LT9'}           = 0;
-		$chapters{$chapter->id}{'GT9'}           = 0;
-		undef $chapter;  #Otherwise the later object from the judge pull will be blank
+	foreach my $chapter (@{$entries}) {
+		$chapters{$chapter->{id}} = $chapter;
 	}
 
-	my @chapter_judges = Tab::Chapter->search_pull_judges($circuit->id, $level);
-
-	foreach my $chapter (@chapter_judges) {
-		$chapters{$chapter->id}{'njudges'} = $chapter->njudges;
+	foreach my $chapter (@{$judges}) {
+		unless ($chapters{$chapter->{id}}) {
+			$chapters{$chapter->{id}} = $chapter;
+		} else {
+			$chapters{$chapter->{id}}{"njudges"} = $chapter->{njudges};
+		}
 	}
-
-	$code_end = time();
 
 	# student and judge active counts
 
-	Tab::Student->columns(TEMP => qw/tourney_entries/);
-
-	Tab::Student->set_sql(pull_student => "
-		select student.chapter, count(entry_student.id) as tourney_entries
-		from chapter, student, chapter_circuit, entry_student, entry, event, tourn
+	my $student_sth = $dbh->prepare("
+		select student.chapter, count(entry_student.id) as tourn_entries
+			from chapter, student, chapter_circuit, entry_student, entry, event, tourn, tourn_circuit tc
 		where student.retired = 0
-		and student.chapter = chapter.id
-		and chapter.id = chapter_circuit.chapter
-		and entry_student.student = student.id
-		and chapter_circuit.circuit = ?
-		and chapter.level = ?
-		and entry.id = entry_student.entry
-		and event.id = entry.event
-		and tourn.id = event.tourn
-		and tourn.start >= '$start_dt'
-		and tourn.end <= '$end_dt'
+			and student.chapter = chapter.id
+			and chapter.id = chapter_circuit.chapter
+			and entry_student.student = student.id
+			and chapter_circuit.circuit = ?
+			and chapter.level = ?
+			and entry.id = entry_student.entry
+			and event.id = entry.event
+			and tourn.id = event.tourn
+			and tourn.start >= ?
+			and tourn.end <= ?
+			and tc.tourn = tourn.id
+			and tc.circuit = chapter_circuit.circuit
 		group by student.id
 	");
 
-	my @student = Tab::Student->search_pull_student($circuit->id, $level);
+	$student_sth->execute($circuit->id, $level, $start_dt, $end_dt);
 
-	$code_end = time();
+	my $students = $student_sth->fetchall_hash();
 
-	foreach my $stu (@student) {
+	foreach my $stu (@{$students}) {
 
-		$chapters{$stu->chapter}{'nonretirees'} ++;
+		$chapters{$stu->{chapter}}{'nonretirees'} ++;
 
-		if ( $stu->tourney_entries >0 ) { $chapters{$stu->chapter}{'AL1'} ++; }
-		elsif ( $stu->tourney_entries <=1 ) { $chapters{$stu->chapter}{'LT1'} ++; }
-		elsif ( $stu->tourney_entries <=4 ) { $chapters{$stu->chapter}{'LT4'} ++; }
+		if ( $stu->{tourn_entries} >0 ) {
+			$chapters{$stu->{chapter}}{'AL1'} ++;
+		} elsif ( $stu->{tourn_entries} <=1 ) {
+			$chapters{$stu->{chapter}}{'LT1'} ++;
+		} elsif ( $stu->{tourn_entries} <=4 ) {
+			$chapters{$stu->{chapter}}{'LT4'} ++;
+		}
 
-		if ( $stu->tourney_entries >=5 and $stu->tourney_entries <=9 ) { $chapters{$stu->chapter}{'LT9'} ++; }
+		if ( $stu->{tourn_entries} >=5 and $stu->{tourn_entries} <=9 ) {
+			$chapters{$stu->{chapter}}{'LT9'}++;
+		}
 
-		if ( $stu->tourney_entries >=10 ) { $chapters{$stu->chapter}{'GT9'} ++; }
+		if ( $stu->{tourn_entries} >=10 ) {
+			$chapters{$stu->{chapter}}{'GT9'}++;
+		}
 	}
-	$code_end = time(); 
 
-	Tab::ChapterJudge->columns(TEMP => qw/active_judges/);
-	Tab::ChapterJudge->set_sql(pull_judge => "
+	my $cj_sth = $dbh->prepare("
 		select chapter_judge.chapter, count(chapter_judge.id) as active_judges
-		from chapter_judge, chapter_circuit, chapter
+			from chapter_judge, chapter_circuit, chapter
 		where chapter_judge.retired = 0
-		and chapter_judge.chapter = chapter.id
-		and chapter.id = chapter_circuit.chapter
-		and chapter_circuit.circuit = ?
-		and chapter.level = ?
+			and chapter_judge.chapter = chapter.id
+			and chapter.id = chapter_circuit.chapter
+			and chapter_circuit.circuit = ?
+			and chapter.level = ?
 		group by chapter_circuit.chapter
 	");
-	my @judge = Tab::ChapterJudge->search_pull_judge($circuit->id, $level);
-	$code_end = time();
 
-	foreach my $judges (@judge) {
-		$chapters{$judges->chapter}{'active_judges'} = $judges->active_judges;
+	$cj_sth->execute($circuit->id, $level);
+	my $cjs =  $cj_sth->fetchall_hash();
+
+	foreach my $judges (@{$cjs}) {
+		$chapters{$judges->{chapter}}{'active_judges'} = $judges->{active_judges};
 	}
-	$code_end = time();
 
 	#entries by tourn
 
-	Tab::Tourn->columns(TEMP => qw/chapter_entries/);
-	Tab::Tourn->columns(TEMP => qw/tourneys/);
-	Tab::Tourn->set_sql(pull_entries => "
-		select chapter.id, count(entry.id) as chapter_entries, count(distinct entry.tourn) as tourneys
-		from entry, chapter, chapter_circuit, school, tourn, event
+	my $tourn_sth = $dbh->prepare("
+		select chapter.id, count(entry.id) as chapter_entries, count(distinct entry.tourn) as tourns
+			from entry, chapter, chapter_circuit, school, tourn, event, tourn_circuit tc
 		where entry.school = school.id
-		and school.chapter = chapter.id
-		and chapter.id = chapter_circuit.chapter
-		and chapter_circuit.circuit = ?
-		and chapter.level = ?
-		and event.id = entry.event
-		and tourn.id = event.tourn
-		and tourn.start >= '$start_dt'
-		and tourn.end <= '$end_dt'
+			and school.chapter = chapter.id
+			and chapter.id = chapter_circuit.chapter
+			and chapter_circuit.circuit = ?
+			and chapter.level = ?
+			and event.id = entry.event
+			and tourn.id = event.tourn
+			and tourn.start >= ?
+			and tourn.end <= ?
+			and tc.tourn = tourn.id
+			and tc.circuit = chapter_circuit.circuit
 		group by chapter.id
 	");
 
-	my @entries = Tab::Tourn->search_pull_entries($circuit->id, $level);
-	$code_end = time();
+	$tourn_sth->execute($circuit->id, $level, $start_dt, $end_dt);
+	my $chapter_entries = $tourn_sth->fetchall_hash();
 
-	foreach my $entries (@entries) {
-		$chapters{$entries->id}{'entries'} += $entries->chapter_entries ;
-		$chapters{$entries->id}{'tourneys'} += $entries->tourneys ;
+	foreach my $entries (@{$chapter_entries}) {
+		$chapters{$entries->{id}}{'entries'} += $entries->{chapter_entries};
+		$chapters{$entries->{id}}{'tourns'} += $entries->{tourns};
 	}
-	$code_end = time();
 
 	sub commify {
 		local($_)=shift;
@@ -177,28 +175,26 @@
 		return $_;
 	}
 
-	$code_end = time();
-
 </%init>
 
-	<& menu.mas, circuit_id => $circuit->id, whoami => "chapters", year => $year &>
+	<& menu.mas,
+		circuit_id => $circuit->id,
+		whoami     => "chapter",
+		send_to    => "circuit_chapter",
+		year       => $year
+	&>
 
 	<div class="main">
 
-	<div class="full nospace">
+	<div class="full nospace flexrow">
 
 		<span class="twothirds nospace">
-			<h2 class="marno">
-				<% $circuit->name %> activity stats
-			</h2>
 			<h4 class="nospace">
-				<% $year %>-<% ($year + 1) %>
+				<% $circuit->name %> Activity Stats
 			</h4>
 		</span>
 
 		<span class="third rightalign top">
-
-
 			<form
 				action = "circuit_chapter.mhtml"
 				method = "post"
@@ -237,13 +233,26 @@
 		</span>
 	</div>
 
-	<p class="explain rightalign">
-		Hover mouse over column for more information
-	</p>
+	<div class="flexrow full martopmore padvert">
+		<span class="third nospace">
+			<h4 class="nospace">
+				<% $year %>-<% ($year + 1) %>
+			</h4>
+		</span>
+		<span class="third nospace centeralign italic">
+			Hover mouse over column for more information
+		</span>
 
-	<& /funclib/tablesorter.mas, table => "sortme" &>
+		<span
+			class = "rightalign third"
+			id    = "cchapter_buttonarea"
+		>
+		</span>
+	</div>
 
-	<table id="sortme">
+	<& /funclib/tablesorter.mas, table => "cchapter" &>
+
+	<table id="cchapter">
 
 		<thead>
 
@@ -306,7 +315,7 @@
 
 				<th class="smaller">
 					<span title="Total tournaments attended">
-						Tourneys
+						Tourns
 					</span>
 				</th>
 
@@ -322,8 +331,16 @@
 
 		<tbody>
 
-%		foreach my $key (sort {$chapters{$b}->{'entries'} <=> $chapters{$a}->{'entries'}} keys(%chapters)) {
+<%perl>
+		foreach my $key (
+			sort {
+				$chapters{$b}->{'entries'} <=> $chapters{$a}->{'entries'}
+				|| $chapters{$b}->{'AL1'} <=> $chapters{$a}->{'AL1'}
+			} keys(%chapters)
+		) {
 
+			next unless $chapters{$key}{"entries"} > 0;
+</%perl>
 			<tr>
 
 				<td class="smallish">
@@ -351,7 +368,7 @@
 
 				<td class="smallish rightalign"> <% $chapters{$key}{'active_judges'} %> </td>
 
-				<td class="smallish rightalign"> <% $chapters{$key}{'tourneys'} %> </td>
+				<td class="smallish rightalign"> <% $chapters{$key}{'tourns'} %> </td>
 
 				<td class="smallish rightalign"> <% $chapters{$key}{'entries'} %> </td>
 

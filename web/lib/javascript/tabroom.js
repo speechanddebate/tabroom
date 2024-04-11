@@ -343,6 +343,7 @@
 
 				} else if (data.error) {
 
+					console.log(data);
 					alertify.error(data.message);
 
 					if (data.destroy) {
@@ -424,7 +425,6 @@
 
 					if (data.replace) {
 
-						console.log(data.replace);
 						data.replace.forEach( function(item) {
 							if (item.destroy) {
 								$("#"+item.id).remove();
@@ -638,8 +638,7 @@
 		});
 	}
 
-/* zebra stripe the rows */
-
+	/* zebra stripe the rows */
 	function zebraRows() {
 
 		var tags = ['.row', '.lightrow'];
@@ -648,7 +647,6 @@
 		tags.forEach(function(Tag) {
 
 			parents.forEach(function(Parent) {
-
 				$(document).find(Tag).parent().closest(Parent)
 						.find(".row:visible:even").removeClass("odd");
 
@@ -664,7 +662,7 @@
 		});
 	};
 
-/* Fix all the visual elements at once */
+	/* Fix all the visual elements at once */
 	function fixVisual() {
 		$('table').trigger('applyWidgets');
 		$('table').trigger('update', [true]);
@@ -687,7 +685,7 @@
 
 			let width = 0;
 
-			$(`#${item.id}`).children(':visible').each( (idx2, moi) => {
+			$(`#${item.id}`).children().not('.hidden').each( (idx2, moi) => {
 				const elementWidth = parseInt($(moi).outerWidth(true));
 				width += elementWidth;
 			});
