@@ -10,39 +10,117 @@
 	my $tourn =  $school->tourn;
 	my $tz = $tourn->tz;
 
-	my @rounds = $m->comp('/funclib/tourn_round_results.mas', tourn => $tourn, post_level => 1);
+	my $event = Tab::Event->retrieve($event_id) if $event_id;
+	my $dbh = Tab::DBI->db_Main();
 
-	my %results = $m->comp('/funclib/tourn_result_sets.mas', tourn => $tourn);
+	my $rounds_sth = $dbh->prepare("
+        select round.id, round.name, round.label, round.type, round.event
+        from round,event,timeslot
+        where round.post_primary >= 1
+			and round.event = event.id
+			and event.tourn = ?
+			and round.timeslot = timeslot.id
+        order by timeslot DESC
+	");
 
-    #uniq
-	my %seen = ();
-    @rounds = grep { ! $seen{$_->id} ++ } @rounds;
-
+	$rounds_sth->execute($tourn->id);
+	my $rounds = $rounds_sth->fetchall_hash();
 	my %event_rounds;
-	my %event_results;
 
-	foreach my $round (@rounds) {
-		push @{$event_rounds{$round->event->id}}, $round;
+	foreach my $round (@{$rounds}) {
+		push @{$event_rounds{$round->{event}}}, $round;
 	}
 
-	my $event = Tab::Event->retrieve($event_id) if $event_id;
+	my $sth = $dbh->prepare("
+		select
+			event.id, event.name, event.abbr
+		from event, entry
+		where entry.school = ?
+			and entry.event = event.id
+			and (
+				EXISTS (
+					select rs.id
+					from result_set rs
+					where rs.event = event.id
+					and (rs.published = 1 or rs.coach = 1)
+				) OR EXISTS (
+					select file.id
+					from file
+					where file.tag = 'result'
+					and file.event = event.id
+					and (file.coach = 1 OR file.published = 1)
+				)
+			)
+		group by event.id
+	");
 
-	my @events;
+	$sth->execute($school->id);
+	my $events = $sth->fetchall_hash();
 
-	foreach my $event ($tourn->events) {
-		if ($event->rounds) {
-			push @events, $event;
+	unless ($event) {
+		my $event = ${$events}[0];
+		$event_id = $event->{id} if $event;
+		$event = Tab::Event->retrieve($event_id) if $event_id;
+	}
+
+	my $file_sth = $dbh->prepare('
+		select
+			file.id, file.label, file.filename, file.event
+		from file
+			where file.tag = "result"
+			and file.tourn = ?
+			and (file.coach = 1 OR file.published = 1)
+	');
+
+	$file_sth->execute($tourn->id);
+	my $files = $file_sth->fetchall_hash();
+	my %files_by_event;
+	my @tourn_files;
+
+	foreach my $file (@{$files}) {
+
+		if ($file->{event}) {
+			push @{$files_by_event{$file->{event}}}, $file;
+		} else {
+			push @tourn_files, $file;
 		}
 	}
 
-	@events = sort {$a->type cmp $b->type} @events;
+	my $rs_sth = $dbh->prepare('
+		select
+			rs.id, rs.tag, rs.event, rs.label, rs.bracket
+		from result_set rs
+			where rs.tourn = ?
+			and (rs.coach = 1 OR rs.published = 1)
+	');
 
-	unless ($event) {
-		$event = $events[0] if @events;
-		$event_id = $event->id if $event;
+	$rs_sth->execute($tourn->id);
+	my $rss = $rs_sth->fetchall_hash();
+	my %rss_by_event;
+	my @tourn_rss;
+
+	foreach my $rs (@{$rss}) {
+		if ($rs->{event}) {
+			push @{$rss_by_event{$rs->{event}}}, $rs;
+		} else {
+			push @tourn_rss, $rs;
+		}
 	}
 
 </%init>
+
+	<script>
+		function showEvent() {
+			const eventId = $(`#event_id`).val();
+			$('.results').addClass('hidden');
+			$(`#results_${eventId}`).removeClass('hidden');
+		}
+
+		$(document).ready(function() {
+			showEvent();
+		});
+
+	</script>
 
 	<div class="menu">
 
@@ -72,7 +150,8 @@
 			</a>
 
 %			if ($tourn->setting("mock_trial_registration")) {
-%			} elsif ($tourn->setting("smock_trial_registration")) {
+
+%			} elsif ($tourn->setting("mock_trial_registration")) {
 				<a href="/user/results/scores.mhtml?school_id=<% $school->id %>"
 					class="<% $whoami eq "scores" ? "dk" : "" %>blue full">
 					Show Scores
@@ -108,174 +187,147 @@
 
 		</div>
 
-		<div class="sidenote">
+%		if ($events && scalar @{$events} > 0) {
 
-			<h4>Full Results</h4>
+			<div class="sidenote">
 
-			<form action="tourn.mhtml" method="post">
+				<h4>Full Results</h4>
 
-			<input
-				type  = "hidden"
-				name  = "tourn_id"
-				value = "<% $tourn->id %>"
-			>
-			<input
-				type  = "hidden"
-				name  = "school_id"
-				value = "<% $school->id %>"
-			>
+%				if (scalar @{$events} > 1) {
 
-			<div class="row centeralign">
-
-				<select
-					name     = "event_id"
-					class    = "fixedmed"
-					onchange = 'this.form.submit();'
-				>
-					<option value=""></option>
-
-%					foreach my $event (@events) {
-						<option
-							value="<% $event->id %>"
-							<% $event->id == $event_id ? 'selected="selected"' : "" %>
-						> <% $event->name %> </option>
-%					}
-				</select>
-
-			</div>
-
-			</form>
-
-%			if ($event) {
-
-				<h4><% $event->abbr %></h4>
-<%perl>
-				foreach my $key (
-					sort {
-						$results{$a}{"generated_sort"} <=> $results{$b}{"generated_sort"}
-						|| $results{$a}{"label"} cmp $results{$b}{"label"}
-					} keys %results
-				) {
-
-					next unless ($results{$key}{"published"} || $results{$key}{"coach"});
-
-					next unless $results{$key}{"event_id"} == $event->id;
-
-					if ($results{$key}{"label"} eq "Cume Sheet" ) {
-
-					} elsif ($results{$key}{"bracket"}) {
-</%perl>
-						<a class="<% ($whoami ne "records" && $result_id == $key)
-							? "dk"
-							: ""
-						%>blue full nowrap"
-							href="/user/results/bracket.mhtml?tourn_id=<% $tourn->id %>&school_id=<% $school->id %>&result_id=<% $key %>">
-							<% $results{$key}{"label"} %>
-						</a>
-
-%					} else {
-
-						<a class="<% ($whoami ne "records" && $result_id == $key)
-							? "dk"
-							: ""
-						%>blue full nowrap"
-							href="/user/results/event_results.mhtml?tourn_id=<% $tourn->id %>&school_id=<% $school->id %>&result_id=<% $key %>">
-							<% $results{$key}{"label"} %>
-						</a>
-<%perl>
-					}
-				}
-
-				foreach my $file ($event->files( tag => "result" )) {
-
-					next unless $file->coach || $file->published;
-</%perl>
-
-					<a
-						class = "blue full nowrap"
-						href  = "<% $Tab::s3_url %>/<% $tourn->id %>/results/<% $file->id %>/<% $file->filename %>"
+					<input
+						type  = "hidden"
+						name  = "tourn_id"
+						value = "<% $tourn->id %>"
 					>
-                        <span class="eighth fa fa-sm fa-download centeralign marno"></span>
-						<% $file->label %>
-					</a>
+					<input
+						type  = "hidden"
+						name  = "school_id"
+						value = "<% $school->id %>"
+					>
+
+					<div class="row centeralign">
+						<select
+							name     = "event_id"
+							id       = "event_id"
+							class    = "fixedmed"
+							onchange = 'showEvent();'
+						>
+							<option value=""></option>
+%							foreach my $event (@{$events}) {
+								<option
+									value="<% $event->{id} %>"
+									<% $event->{id} == $event_id ? 'selected' : "" %>
+								> <% $event->{name} %> </option>
+%							}
+						</select>
+					</div>
+
+%				} elsif ($event_id) {
+					<input
+						type  = "hidden"
+						name  = "event_id"
+						id    = "event_id"
+						value = "<% $event_id %>"
+					>
+%				}
+
+%				foreach my $event (@{$events}) {
+
+					<div class="nospace full hidden results" id="results_<% $event->{id} %>">
+
+%						if (scalar @{$events} > 1) {
+							<h5><% $event->{name} %></h5>
+%						}
 <%perl>
 
-				}
+						foreach my $result (@{$rss_by_event{$event->{id}}}) {
 
-				foreach my $round (@{$event_rounds{$event->id}}) {
+							if ($result->{label} eq "Cume Sheet" ) {
+
+							} elsif ($result->{bracket}) {
 </%perl>
-					<a class="<% ($whoami ne "records" && $round_id == $round->id)
-						? "dk" : ""
-						%>yellow full nowrap"
-						href="/user/results/round_results.mhtml?tourn_id=<% $tourn->id %>&school_id=<% $school->id %>&round_id=<% $round->id %>">
+								<a class="<% ($whoami ne "records" && $result_id == $result->{id})
+									? "dk"
+									: ""
+								%>blue full nowrap"
+									href="/user/results/bracket.mhtml?tourn_id=<% $tourn->id %>&school_id=<% $school->id %>&result_id=<% $result->{id} %>">
+									<% $result->{label} %>
+								</a>
 
-						<span class="threefifths padno marno">
-							<% $round->realname %>
-						</span>
-						<span class="twofifths nowrap padno marno">
-							Round results
-						</span>
-					</a>
+%							} else {
+
+								<a class="<% ($whoami ne "records" && $result_id == $result->{id})
+									? "dk"
+									: ""
+								%>blue full nowrap"
+									href="/user/results/event_results.mhtml?tourn_id=<% $tourn->id %>&school_id=<% $school->id %>&result_id=<% $result->{id} %>">
+									<% $result->{label} %>
+								</a>
+<%perl>
+							}
+						}
+
+						foreach my $file (@{$files_by_event{$event->{id}}}) {
+</%perl>
+							<a
+								class = "blue full flexrow"
+								href  = "<% $Tab::s3_url %>/<% $tourn->id %>/results/<% $file->{id} %>/<% $file->{filename} %>"
+							>
+								<span class="eighth fa fa-sm fa-download centeralign marno"></span>
+								<span class="seveneighths">
+								<% $file->{label} %>
+								</span>
+							</a>
+<%perl>
+						}
+
+						foreach my $round (@{$event_rounds{$event->{id}}}) {
+</%perl>
+							<a class="<% ($whoami ne "records" && $round_id == $round->{id})
+								? "dk" : ""
+								%>yellow full nowrap flexrow"
+								href="/user/results/round_results.mhtml?tourn_id=<% $tourn->id %>&school_id=<% $school->id %>&round_id=<% $round->{id} %>">
+
+								<span class="threefifths padno marno">
+									<% $round->{label} || "Round ".$round->{name} %>
+								</span>
+								<span class="twofifths nowrap padno marno">
+									Round results
+								</span>
+							</a>
+%						}
+					</div>
 %				}
 %			}
 
 		</div>
 
-		<div class="sidenote">
+%		if (@tourn_files  || @tourn_rss) {
 
-<%perl>
-			my $notfirst;
+			<div class="sidenote">
+				<h4>Tournament Wide</h4>
 
-			foreach my $posting ( sort {$b->id <=> $a->id}
-				Tab::File->search(tourn => $tourn->id, tag => "result")
-			) {
+%				foreach my $file (@tourn_files) {
+					<a
+						class = "blue full nowrap"
+						href="<% $Tab::s3_url %>/<% $tourn->id %>/results/<% $file->{id} %>/<% $file->{filename} %>">
+						<span class="eighth fa fa-sm fa-download centeralign marno"></span>
+						<% $file->{label} || $file->{filename} %>
+					</a>
+%				}
 
-				next unless $posting->coach || $posting->published;
-
-				next if $posting->event && $posting->event->id;
-
-				unless ($notfirst++) {
-					$m->print("<h4>Tournament Wide</h4>");
-				}
-</%perl>
-
-				<a
-					class = "blue full nowrap"
-					href="<% $Tab::s3_url %>/<% $tourn->id %>/results/<% $posting->id %>/<% $posting->filename %>">
-					<span class="eighth fa fa-sm fa-download centeralign marno"></span>
-					<% ($posting->label) ? $posting->label : $posting->filename %>
-				</a>
-
-%			}
-
-<%perl>
-
-			undef $notfirst;
-
-			foreach my $key (
-				sort {
-					$results{$a}{"generated_sort"} <=> $results{$b}{"generated_sort"}
-					|| $results{$a}{"label"} cmp $results{$b}{"label"}
-				} keys %results
-			) {
-
-				next unless ($results{$key}{"published"} || $results{$key}{"coach"});
-				next if $results{$key}{"event_id"};
-
-				unless ($notfirst++) {
-					$m->print('<h4>Tournament wide results</h4>');
-				}
-</%perl>
-				<a class="<% ($whoami ne "records" && $result_id == $key)
-					? "dk"
-					: ""
-				%>blue full nowrap"
-					href="/user/results/event_results.mhtml?tourn_id=<% $tourn->id %>&school_id=<% $school->id %>&result_id=<% $key %>">
-					<% $results{$key}{"label"} %>
-				</a>
-%			}
-
-		</div>
+%				foreach my $result (@tourn_rss) {
+					<a class="<% ($whoami ne "records" && $result_id == $result->{id})
+						? "dk"
+						: ""
+					%>blue full nowrap"
+						href="/user/results/event_results.mhtml?tourn_id=<% $tourn->id %>&school_id=<% $school->id %>&result_id=<% $result->{id} %>">
+						<% $result->{label} %>
+					</a>
+%				}
+			</div>
+%		}
 
 <%perl>
 
