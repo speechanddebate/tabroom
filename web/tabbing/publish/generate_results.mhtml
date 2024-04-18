@@ -21,6 +21,7 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
+	my $dbh = Tab::DBI->db_Main();
 	my $now = DateTime->now( time_zone => $tz);
 
 	if ($event_id eq "all") {
@@ -397,7 +398,7 @@
 		my $label = "Prelim Seeds" if ($result_type eq "prelim_seed");
 		$label = "Final Places" if ($result_type eq "final");
 		$label = "Speaker Awards" if ($result_type eq "speakers");
-		$label = "Cume Sheet" if ($result_type eq "cumesheet");
+		$label = "Prelims Table" if ($result_type eq "prelim_table");
 
 		$label .= $breakout_label if $breakout;
 
@@ -455,7 +456,206 @@
 
 			my %prelim_seed;
 
-			if ($result_type eq "speakers") {
+			if ($result_type eq "prelim_table") {
+
+				my %data;
+
+				my $result_sth = $dbh->prepare('
+					select
+						panel.id panel_id,
+						ballot.id ballot_id, ballot.entry entry_id, ballot.judge judge_id,
+						score.id, score.tag, score.value score_value, score.student,
+						round.id round_id, round.name round_name, round.label round_label, round.type round_type
+
+					from (round, panel, ballot, score)
+
+					where round.event = ?
+						and round.id = panel.round
+						and panel.id = ballot.panel
+						and ballot.id = score.ballot
+						and score.tag IN ("winloss", "point", "rank")
+				');
+
+				$result_sth->execute($event->id);
+
+				my $results = $result_sth->fetchall_hash();
+
+				foreach my $ref (@{$results}) {
+
+					next if $ref->{round_type} eq "final";
+					next if $ref->{round_type} eq "elim";
+					next if $ref->{round_type} eq "runoff";
+
+					my $total_result = $data{results}{$ref->{panel_id}}{$ref->{entry_id}}{'total'};
+					my $judge_result = $data{results}{$ref->{panel_id}}{$ref->{entry_id}}{$ref->{'judge_id'}};
+
+					$judge_result->{$ref->{tag}} += $ref->{score_value};
+					$total_result->{$ref->{tag}} += $ref->{score_value};
+
+					if ($ref->{tag} eq "winloss" && $ref->{score_value} == 0) {
+						$judge_result->{loss}++;
+						$total_result->{loss}++;
+					}
+
+					if ($ref->{student}) {
+						$judge_result->{speakers}{$ref->{student}}{$ref->{tag}} += $ref->{score_value};
+						$total_result->{speakers}{$ref->{student}}{$ref->{tag}} += $ref->{score_value};
+					}
+
+					$data{results}{$ref->{panel_id}}{$ref->{entry_id}}{'total'} = $total_result;
+					$data{results}{$ref->{panel_id}}{$ref->{entry_id}}{$ref->{'judge_id'}} = $judge_result;
+
+					unless ($data{"rounds"}{$ref->{round_id}}) {
+						$data{rounds}{$ref->{'round_id'}} = ({
+							name     => $ref->{round_name},
+							type     => $ref->{round_type},
+							label    => $ref->{round_label},
+							realname => $ref->{round_label} || "Round ".$ref->{round_name},
+						});
+					}
+				}
+
+				my $sth = $dbh->prepare('
+					select
+						event.id event_id, event.abbr event_abbr, event.name event_name, event.type event_type,
+						entry.id entry_id, entry.code entry_code, entry.name entry_name,
+						school.id school_id, school.code school_code, school.name school_name,
+						region.id region_id, region.code region_code, region.name region_name,
+						school.state state, chapter.state cstate,
+						round.id round_id, round.name round_name, round.label round_label, round.type round_type,
+						panel.id panel_id, panel.letter, panel.bye pbye,
+						ballot.id ballot_id, ballot.side, ballot.speakerorder, ballot.bye, ballot.forfeit,
+						judge.id judge_id, judge.first judge_first, judge.last judge_last, judge.code judge_code,
+						jschool.id jschool_id, jschool.name jschool_name, jschool.code jschool_code, jschool.state jschool_state,
+						GROUP_CONCAT(CONCAT(student.last, ", ", student.first) ORDER BY student.last SEPARATOR "<br />") students,
+						show_totals.value show_totals
+
+					from (entry, school, round, panel, ballot, event)
+						left join region on school.region = region.id
+						left join chapter on chapter.id = school.chapter
+						left join judge on ballot.judge = judge.id
+						left join school jschool on jschool.id = judge.school
+						left join entry_student es on es.entry = entry.id
+						left join student on es.student = student.id
+						left join event_setting show_totals on show_totals.tag = "show_totals" and show_totals.event = event.id
+
+					where event.id = ?
+						and entry.event = event.id
+						and entry.school = school.id
+						and entry.id = ballot.entry
+						and ballot.panel = panel.id
+						and panel.round = round.id
+						and round.event = event.id
+					group by ballot.id
+				');
+
+				$sth->execute($event->id);
+
+				my $rounds = $sth->fetchall_hash();
+
+				foreach my $ref (@{$rounds}) {
+
+					next unless $data{rounds}{$ref->{'round_id'}};
+
+					unless ($data{"event"}) {
+						$data{event} = ({
+							id          => $ref->{event_id},
+							name        => $ref->{event_name},
+							type        => $ref->{event_type},
+							abbr        => $ref->{event_abbr},
+							show_totals => $ref->{show_totals}
+						});
+					}
+
+					unless ($data{"rounds"}{$ref->{round_id}}) {
+						$data{rounds}{$ref->{'round_id'}} = ({
+							name     => $ref->{round_name},
+							type     => $ref->{round_type},
+							label    => $ref->{round_label},
+							realname => $ref->{round_label} || "Round ".$ref->{round_name},
+						});
+					}
+
+					unless ($data{"judges"}{$ref->{judge_id}}) {
+						$data{judges}{$ref->{'judge_id'}} = ({
+							name         => $ref->{judge_last}.", ".$ref->{judge_first}." ".$ref->{judge_middle},
+							first        => $ref->{judge_first},
+							last         => $ref->{judge_last},
+							school       => $ref->{jschool_id},
+							school_name  => $ref->{jschool_name},
+							school_code  => $ref->{jschool_code},
+							school_state => $ref->{jschool_state},
+						});
+					}
+
+					unless ($data{"entries"}{$ref->{entry_id}}) {
+						$data{entries}{$ref->{'entry_id'}} = ({
+							code         => $ref->{entry_code},
+							name         => $ref->{entry_name},
+							school       => $ref->{school_id},
+							school_name  => $ref->{school_name},
+							school_code  => $ref->{school_code},
+							school_state => $ref->{school_state},
+						});
+
+						unless ($event->{type} eq "mock_trial") {
+							$data{entries}{$ref->{'entry_id'}}{students} = $ref->{students};
+						}
+					}
+
+					$data{entries}{$ref->{'entry_id'}}{$ref->{round_id}} = ({
+						panel   => $ref->{panel_id},
+						letter  => $ref->{panel_letter},
+						bye     => $ref->{pbye}  || $ref->{bye},
+						forfeit => $ref->{forfeit},
+						side    => $ref->{side},
+						order   => $ref->{speakerorder},
+					});
+
+					$data{panels}{$ref->{panel_id}}{entries}{$ref->{entry_id}}++;
+					$data{panels}{$ref->{panel_id}}{judges}{$ref->{judge_id}}++;
+				}
+
+
+				my @round_ids = sort {$data{rounds}{$b}{"name"} <=> $data{rounds}{$a}{"name"}} keys %{$data{rounds}};
+
+				my @results = $m->comp(
+					"/tabbing/results/order_entries.mas",
+					round  => Tab::Round->retrieve($round_ids[0]),
+					return => 1,
+				);
+
+				my $results_ref = pop @results if @results;
+				$data{tiebreak_keys} = $results_ref->{tier_description};
+				$data{tiebreak_desc} = $results_ref->{tier_long_description};
+
+				foreach my $key (sort {$a <=> $b} keys %{$results_ref->{"by_place"}}) {
+
+					my $tie++ if scalar @{${$results_ref}{"by_place"}{$key}} > 1;
+
+					foreach my $entry_id (@{${$results_ref}{"by_place"}{$key}}) {
+
+						$data{entries}{$entry_id}{"seed"} = $key;
+						$data{entries}{$entry_id}{"seed_string"} = Lingua::EN::Numbers::Ordinate::ordinate($key);
+
+						if ($tie) {
+							$data{entries}{$entry_id}{"seed_string"} = "T-".$data{entries}{$entry_id}{"seed_string"};
+						}
+
+						foreach my $tb_key (keys %{$data{tiebreak_keys}}) {
+							$data{entries}{$entry_id}{tiebreaks}{$tb_key} = $results_ref->{tiebreak}{$tb_key}{$entry_id};
+						}
+					}
+				}
+
+				my $json = eval {
+					return JSON::encode_json(\%data);
+				};
+
+				$set->cache($json);
+				$set->update();
+
+			} elsif ($result_type eq "speakers") {
 
 				my %student_ballots = ();
 
@@ -484,8 +684,6 @@
 					);
 
 					my $type = $event->type;
-
-					my $dbh = Tab::DBI->db_Main();
 
 					my $sth = $dbh->prepare("
 
