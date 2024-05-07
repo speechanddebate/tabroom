@@ -672,7 +672,7 @@
 
 		$("select:not(.plain)").select2({
 			minimumResultsForSearch : 5,
-			width                   : '100%',
+			width                   : '104%',
 			dropdownCssClass        : 'selection_text',
 		});
 	}
