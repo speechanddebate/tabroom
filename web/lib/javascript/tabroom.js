@@ -276,24 +276,31 @@
 			...options,
 			error: function(data, status, metadata) {
 
-				const reply = data.responseJSON;
+				console.log(data);
+
+				const reply = data.responseJSON || data.responseText;
+				console.log(reply);
+
+				alertify.set('notifier','delay', 15);
 
 				if (reply?.message) {
 					if (reply.destroy) {
 						$("#"+reply.destroy).remove();
 						$("."+reply.destroy).remove();
 					}
-					alertify.warning(reply.message);
+					alertify.alert(reply.message);
 				} else if (data.status === 0 && data.statusText === 'error') {
-					alertify.warning('Tabroom API could not be reached');
+					alertify.alert('Tabroom API could not be reached');
 				} else {
-					alertify.warning(data.responseText);
+					alertify.alert(data.responseText);
 				}
 
 				fixVisual;
 				return;
 			},
 			success: function(data, status, metadata) {
+
+				console.log(data);
 
 				if (data.reply) {
 					if (attributes.reply_target) {

@@ -13,6 +13,7 @@ Tab::RPool->has_many(rooms => [Tab::RPoolRoom => 'room']);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
+
 sub setting {
 
 	my ($self, $tag, $value, $blob) = @_;
@@ -20,22 +21,32 @@ sub setting {
 	$/ = "";			#Remove all trailing newlines
 	chomp $blob;
 
-	my $existing = Tab::RPoolSetting->search(  
+	my $existing = Tab::RPoolSetting->search(
 		rpool => $self->id,
 		tag   => $tag,
 	)->first;
 
-	if (defined $value) { 
-			
+	if (defined $value) {
+
 		if ($existing) {
 
 			$existing->value($value);
-			$existing->value_text($blob) if $value eq "text";
-			$existing->value_date($blob) if $value eq "date";
-			$existing->update;
 
-			if ($value eq "delete" || $value eq "" || $value eq "0") { 
-				$existing->delete;
+			if ($value eq "text") {
+				$existing->value_text($blob)
+			} elsif ($value eq "date") {
+				$existing->value_date($blob);
+			} elsif ($value eq "json") {
+				my $json = eval{
+					return JSON::encode_json($blob);
+				};
+				$existing->value_text($json);
+			}
+
+			if ($value eq "delete" || $value eq "" || $value eq "0") {
+				$existing->delete();
+			} else {
+				$existing->update();
 			}
 
 			return;
@@ -48,26 +59,71 @@ sub setting {
 				value => $value,
 			});
 
-			if ($value eq "text") { 
+			if ($value eq "text") {
 				$existing->value_text($blob);
-			}
-
-			if ($value eq "date") { 
+			} elsif ($value eq "date") {
 				$existing->value_date($blob);
+			} elsif ($value eq "json") {
+				my $json = eval{
+					return JSON::encode_json($blob);
+				};
+				$existing->value_text($json);
 			}
 
-			$existing->update;
-
+			$existing->update();
 		}
 
-	} else {
+	} elsif ($existing) {
 
-		return unless $existing;
-		return $existing->value_text if $existing->value eq "text";
-		return $existing->value_date if $existing->value eq "date";
+		if ($existing->value eq "text") {
+			return $existing->value_text
+		} elsif ($existing->value eq "date") {
+			return $existing->value_date
+		} elsif ($existing->value eq "json") {
+			return eval {
+				return JSON::decode_json($existing->value_text);
+			};
+		}
+
 		return $existing->value;
-
 	}
-
 }
 
+sub all_settings {
+
+	my $self = shift;
+	my %all_settings;
+
+	my $dbh = Tab::DBI->db_Main();
+
+    my $sth = $dbh->prepare("
+		select setting.tag, setting.value, setting.value_date, setting.value_text
+			from rpool_setting setting
+		where setting.rpool = ?
+			order by setting.tag
+    ");
+
+    $sth->execute($self->id);
+
+	my $results = $sth->fetchall_hash();
+
+	foreach my $result (@{$results}) {
+
+		if ($result->{value} eq "date") {
+			$all_settings{$tag} = eval {
+				return Tab::DBI::dateparse($result->{value_date});
+			};
+		} elsif ($result->{value} eq "text") {
+			$all_settings{$tag} = $result->{value_text};
+		} elsif ($result->{value} eq "json") {
+			$all_settings{$tag} = eval {
+				return JSON::decode_json($value_text);
+			};
+		} else {
+			$all_settings{$tag} = $value;
+		}
+	}
+
+	return %all_settings;
+
+}
