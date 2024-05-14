@@ -1,0 +1,228 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$perms
+</%args>
+<%init>
+
+	#$r->content_type('application/json');
+	#$m->clear_buffer();
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare('
+		select
+			district.id, district.name, district.location,
+			school.id school,
+			event.type, event.abbr
+
+		from district, school, entry, event
+
+		where school.tourn = ?
+
+			and school.district = district.id
+			and school.id = entry.school
+			and entry.event = event.id
+			and exists (
+				select es.id
+				from event_setting es
+				where es.tag = "supp"
+				and es.event = event.id
+			)
+		group by entry.id
+		order by district.region, district.id
+	');
+
+	$sth->execute($tourn);
+	my $raw_districts = $sth->fetchall_hash();
+	my %districts;
+
+	my %abbrs;
+	my %types;
+
+	foreach my $ref (@{$raw_districts}) {
+		unless ($districts{$ref->{id}}) {
+			$districts{$ref->{id}} = ({
+				name     => $ref->{name},
+				location => $ref->{location},
+			});
+		}
+
+		$types{$ref->{type}}++;
+		$abbrs{$ref->{abbr}}++;
+
+		$districts{$ref->{id}}{count}++;
+		$districts{$ref->{id}}{$ref->{type}}++;
+		$districts{$ref->{id}}{events}{$ref->{abbr}}++;
+		$districts{$ref->{id}}{schools}{$ref->{school}}++;
+	}
+
+	my $switch;
+
+	my $supp_teams = $tourn_settings->{supp_teams};
+	my @teams = sort {$supp_teams->{$a}{"code"} cmp $supp_teams->{$b}{"code"}} keys %{$supp_teams};
+	my %team_by_id = map {$_ => $supp_teams->{$_} } @teams;
+
+	my @bank;
+
+	my $wipe_sth = $dbh->prepare('
+		delete ss.*
+			from school, school_setting ss
+		where ss.tag = "supp_team"
+			and ss.school = school.id
+			and school.district = ?
+	');
+
+	my $district_schools_sth = $dbh->prepare("
+		select
+			school.id
+			from school
+		where tourn  = ?
+		and district = ?
+
+	");
+
+	my $assign_sth = $dbh->prepare('
+		insert into school_setting (tag, school, value) values ("supp_team", ?, ?)
+	');
+
+	foreach my $district_id (sort {
+		$districts{$b}{count} <=> $districts{$a}{count}
+		|| $districts{$b}{region} <=> $districts{$a}{region}
+		|| $a <=> $b
+	} keys %districts) {
+		unless (@bank) {
+			@bank = @teams;
+		}
+
+		my $team = shift @bank;
+		$districts{$district_id}{team} = $team;
+
+		if ($ARGS{commit}) {
+
+			$wipe_sth->execute($district_id);
+			$district_schools_sth->execute($tourn->id, $district_id);
+			my $schools = $district_schools_sth->fetchall_hash();
+
+			foreach my $school (@{$schools}) {
+				$assign_sth->execute($school->{id}, $team);
+			}
+		}
+	}
+
+</%init>
+
+	<div class="blankfull">
+
+		<div class="full flexrow">
+			<span class="threequarters padleft">
+				<h5 class="nospace">Breakdown between Supp Events Teams</h5>
+			</span>
+			<span class="eighth rightalign">
+				<a
+					class = "buttonwhite bluetext invert"
+					href  = "supp_sites.mhtml"
+				>Retournez</a>
+			</span>
+			<span class="eighth rightalign">
+				<a
+					class = "buttonwhite greentext invert"
+					href  = "supp_sites_assign.mhtml?commit=1"
+				>Commit Split</a>
+			</span>
+		</div>
+
+<%perl>
+
+		foreach my $district_id (sort {
+			$districts{$b}{count} <=> $districts{$a}{count}
+			|| $districts{$b}{region} <=> $districts{$a}{region}
+			|| $a <=> $b
+		} keys %districts) {
+
+			my $district = $districts{$district_id};
+			my $team = $districts{$district_id}{team};
+
+			$team_by_id{$team}{count} += $district->{count};
+			$team_by_id{$team}{speechcount} += $district->{speech};
+			$team_by_id{$team}{debatecount} += $district->{debate};
+
+			foreach my $abbr (keys %{$district->{events}}) {
+				$team_by_id{$team}{events}{$abbr} += $district->{events}{$abbr};
+			}
+</%perl>
+			<div class="row flexrow">
+				<span class="half">
+					<% $district->{name} %>
+				</span>
+				<span class="sixth">
+					<% $district->{location} %>
+				</span>
+				<span class="sixth rightalign padright">
+					<% $district->{count} %>
+				</span>
+				<span class="sixth rightalign padright">
+					<% $team_by_id{$district->{team}}->{label} %>
+				</span>
+			</div>
+%		}
+
+%		my $notfirst;
+%		foreach my $team (@teams) {
+
+%			unless ($notfirst++) {
+
+				<h5 class="martopmore">Totals</h5>
+
+				<div class="yellowrow padvertless semibold smallish flexrow">
+					<span class="sixth leftalign semibold">
+						Team
+					</span>
+
+%					foreach my $abbr (sort {$a cmp $b} keys %{$team_by_id{$team}{events}}) {
+						<span class="tenth centeralign">
+							<% $abbr %>
+						</span>
+%					}
+
+					<span class="tenth centeralign">
+						Speech
+					</span>
+
+					<span class="tenth centeralign">
+						Debate
+					</span>
+					<span class="tenth centeralign">
+						Total
+					</span>
+				</div>
+%			}
+
+			<div class="full padvert flexrow row grow">
+				<span class="sixth leftalign semibold padleft">
+					<% $team_by_id{$team}->{label} %>
+				</span>
+
+%				foreach my $abbr (sort {$a cmp $b} keys %{$team_by_id{$team}{events}}) {
+					<span class="tenth centeralign">
+						<% $team_by_id{$team}{events}{$abbr} %>
+					</span>
+%				}
+
+				<span class="tenth centeralign">
+					<% $team_by_id{$team}{speechcount} %>
+				</span>
+
+				<span class="tenth centeralign">
+					<% $team_by_id{$team}{debatecount} %>
+				</span>
+
+				<span class="tenth centeralign">
+					<% $team_by_id{$team}{count} %>
+				</span>
+			</div>
+%		}
+
+	</div>
+

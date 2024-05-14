@@ -11,7 +11,8 @@
 	$tz = "UTC" unless $tz;
 
 	my $school_id = $school->id;
-	my %tourn_settings = $tourn->all_settings;
+	my %ts = $tourn->all_settings;
+	my $tourn_settings = \%ts;
 
 	my $school_name = $m->comp("/funclib/short_name.mas", name => $school->name);
 
@@ -35,7 +36,7 @@
 
 	my $now_sth = $dbh->prepare("
 		select
-			entry.id, entry.code, entry.name, entry.dropped,
+			entry.id, entry.code, entry.name, entry.dropped, entry.active,
 			room.name,
 			panel.letter, panel.id, panel.flight, panel.publish, panel.bye,
 			share_room.value,
@@ -52,8 +53,8 @@
 			timeslot.start, timeslot.end,
 			event.id, event.abbr, event.type,
 			judge.id, judge.code, judge.first, judge.last, judgeschool.name,
-			use_normal_rooms.value,
-			show_chair.value
+			use_normal_rooms.value use_normal_rooms,
+			show_chair.value show_chair
 
 		from (entry, ballot, panel, round, timeslot, event)
 
@@ -109,9 +110,11 @@
 			neg_label.value,
 			no_opponent_results.value,
 			flight_offset.value,
-			online_mode.value
+			online_mode.value,
+			supp.value supp,
+			entry.active entry_active
 
-		from event
+		from (event, entry, school)
 
 			left join event_setting judge_publish_results
 				on judge_publish_results.event = event.id
@@ -137,10 +140,19 @@
 				on online_mode.event = event.id
 				and online_mode.tag = 'online_mode'
 
-		where event.tourn = ?
+			left join event_setting supp
+				on supp.event = event.id
+				and supp.tag = 'supp'
+
+		where school.id = ?
+			and event.id = entry.event
+			and entry.school = school.id
 	");
 
-	$events_sth->execute($tourn->id);
+	$events_sth->execute($school->id);
+
+	my $online_events;
+	my %supp_status;
 
 	while (
 		my (
@@ -150,13 +162,19 @@
 			$neg_label,
 			$no_opponent_results,
 			$flight_offset,
-			$online_mode
+			$online_mode,
+			$entry_active,
+			$supp
 		) = $events_sth->fetchrow_array()
 	) {
 
 		if ($event_type eq "mock_trial") {
 			$event_type = "debate";
 			$events{$event_id}{"mock_trial"} = 1;
+		}
+
+		if ($supp && $entry_active) {
+			$supp_status{$event_type}++;
 		}
 
 		$events{$event_id}{"name"}                = $event_name;
@@ -167,6 +185,10 @@
 		$events{$event_id}{"neg_label"}           = $neg_label;
 		$events{$event_id}{"no_opponent_results"} = $no_opponent_results;
 		$events{$event_id}{"online_mode"}         = $online_mode;
+
+		if ($online_mode && $online_mode ne "none") {
+			$online_events++;
+		}
 		$events{$event_id}{"flight_offset"}       = $flight_offset;
 	}
 
@@ -175,7 +197,7 @@
 
 	while (
 		my (
-			$entry_id, $entry_code, $entry_name, $entry_dropped,
+			$entry_id, $entry_code, $entry_name, $entry_dropped, $entry_active,
 			$room_name,
 			$panel_letter, $panel_id, $panel_flight, $panel_publish, $panel_bye,
 			$share_room,
@@ -202,14 +224,14 @@
 			|| $events{$event_id}{"online_mode"} eq "public_jitsi_observers"
 		) {
 
-			if ($tourn_settings{"nco_purchased"} > 0) {
+			if ($tourn_settings->{"nco_purchased"} > 0) {
 				$events{$event_id}{"observers"} = 1;
-				$tourn_settings{"ask_observers"}++
+				$tourn_settings->{"ask_observers"}++
 			}
 		}
 
 		if ($events{$event_id}{"online_mode"}) {
-			$tourn_settings{"online_tournament"}++;
+			$tourn_settings->{"online_tournament"}++;
 		}
 
 		next unless (
@@ -563,7 +585,7 @@
 		}
 	}
 
-	if ($tourn_settings{"ask_observers"}) {
+	if ($tourn_settings->{"ask_observers"}) {
 
 		#ACAB
 
@@ -596,17 +618,17 @@
 			my $code = $totals{$entry_id}{"code"};
 
 			if ($totals{$entry_id}{"type"} eq "congress") {
-				$tourn_settings{"observer_violation"} .= "Congress observers not permitted; used for ".$code;
+				$tourn_settings->{"observer_violation"} .= "Congress observers not permitted; used for ".$code;
 			} elsif ($totals{$entry_id}{"type"} eq "speech") {
 				foreach my $panel (keys %{$totals{$entry_id}{"count"}}) {
 					if ($totals{$entry_id}{"count"}{$panel} > 1) {
-						$tourn_settings{"observer_violation"} .= " Speech observers over quota for ".$code;
+						$tourn_settings->{"observer_violation"} .= " Speech observers over quota for ".$code;
 					}
 				}
 			} else {
 				foreach my $panel (keys %{$totals{$entry_id}{"count"}}) {
 					if ($totals{$entry_id}{"count"}{$panel} > 2) {
-						$tourn_settings{"observer_violation"} .= " Debate observers over quota for ".$code." in section ".$panel;
+						$tourn_settings->{"observer_violation"} .= " Debate observers over quota for ".$code." in section ".$panel;
 					}
 				}
 			}
@@ -615,7 +637,7 @@
 
 		$cop_sth->finish();
 
-		unless ($tourn_settings{"observer_violation"}) {
+		unless ($tourn_settings->{"observer_violation"}) {
 
 			$cop_sth = $dbh->prepare("
 				select entry.id, entry.code, event.type, count(distinct campus_log.person), campus_log.panel
@@ -1082,6 +1104,20 @@
 
 	my @flip_cards = Tab::Round->search_entry_flips($school_id);
 
+	my $supp_team;
+	my %sites_by_id;
+
+	if (
+		$tourn_settings->{nsda_nats}
+		&& $tourn_settings->{supp_teams}
+		&& $tourn_settings->{"supp_team_show_coaches"}
+		&& (keys %supp_status)
+	) {
+		my $supp_teams = $tourn_settings->{supp_teams};
+		$supp_team = $supp_teams->{$school->setting("supp_team")};
+		%sites_by_id = map {$_->id => $_} $tourn->sites;
+	}
+
 </%init>
 
 %	if ($ARGS{"results"}) {
@@ -1111,7 +1147,6 @@
 		function showEvent() {
 
 			var eventID = $("#event_selector").val();
-
 			if (eventID === "all") {
 				$(".events").removeClass("eventHide");
 			} else {
@@ -1172,36 +1207,108 @@
 
 	<div class="main">
 
-		<span class="seventenths nowrap nospace">
-			<h5 class="wrap"><% $school_name %>'s Dashboard</h5>
-			<p class="bigger semibold redtext"><% $tourn->name %></p>
-		</span>
+		<div class="full flexrow">
+			<span class="half">
+				<h5 class="wrap"><% $school->name %>'s Dashboard</h5>
+				<p class="bigger semibold redtext"><% $tourn->name %></p>
+			</span>
 
-		<span class="fifth rightalign nowrap nospace semibold bluetext bigger">
-			<% $now->day_abbr %> / <& "/funclib/showtime.mas", dt => $now, tz => $tourn->tz &>
-		</span>
+			<span class="half wrap">
+				<div class="full nospace flexrow">
+					<span class="twothirds rightalign semibold bluetext bigger">
+						<% $now->day_abbr %> / <& "/funclib/showtime.mas",
+							dt      => $now,
+							tz      => $tourn->tz,
+							show_tz => 1
+						&>
+					</span>
 
-		<span class="tenth rightalign nospace">
-%			if ($school->chapter > 0) {
-				<a
-					href  = "/user/chapter/tournaments.mhtml?chapter_id=<% $school->chapter->id %>"
-					title = "Return to <% $school_name %> Home"
-					class = "fa fa-lg fa-home buttonwhite greentext"
-				></a>
-%			}
-		</span>
+					<span class="third rightalign padright">
+%						if ($school->chapter > 0) {
+							<a
+								href  = "/user/chapter/tournaments.mhtml?chapter_id=<% $school->chapter->id %>"
+								title = "Return to <% $school_name %> Home"
+								class = "fa fa-lg fa-home buttonwhite greentext"
+							></a>
+%						}
+					</span>
+				</div>
+			</span>
+
+		</div>
+
+%		if ($supp_team) {
+			<div class="full flexrow ltborderbottom bluebordertop padvert">
+				<span class="fifth semibold padleft">
+					SUPP TEAM: <% $supp_team->{label} %>
+				</span>
+
+				<span class="twofifths nospace flexrow">
+					<span class="third semibold bluetext">
+						WEDNESDAY
+					</span>
+					<span class="twothirds nospace semibold smallish">
+%						if ($supp_status{"speech"}) {
+							<div class="full flexrow nospace">
+								<span class="third">
+									Speech
+								</span>
+								<span class="twothirds bluetext">
+									<% $sites_by_id{$supp_team->{wed_speech}}->name %>
+								</span>
+							</div>
+%						}
+%						if ($supp_status{"debate"}) {
+							<div class="full flexrow nospace">
+								<span class="third">
+									Debate
+								</span>
+								<span class="twothirds bluetext">
+									<% $sites_by_id{$supp_team->{wed_debate}}->name %>
+								</span>
+							</div>
+%						}
+					</span>
+				</span>
+
+				<span class="twofifths nospace flexrow">
+					<span class="third semibold bluetext">
+						THURSDAY
+					</span>
+					<span class="twothirds nospace semibold smallish">
+%						if ($supp_status{"speech"}) {
+							<div class="full flexrow nospace">
+								<span class="third">
+									Speech
+								</span>
+								<span class="twothirds orangetext">
+									<% $sites_by_id{$supp_team->{thu_speech}}->name %>
+								</span>
+							</div>
+%						}
+%						if ($supp_status{"debate"}) {
+							<div class="full flexrow nospace">
+								<span class="third">
+									Debate
+								</span>
+								<span class="twothirds orangetext">
+									<% $sites_by_id{$supp_team->{thu_debate}}->name %>
+								</span>
+							</div>
+%						}
+					</span>
+				</span>
+			</div>
+%		}
 
 		<div class="ltbordervert odd leftalign">
 <%perl>
 			my %rooms;
 
-			if (
-				$tourn_settings{"online_rooms"}
-				|| $tourn_settings{"online_tournament"}
-			) {
+			if ($online_events) {
 
 				my @arr = eval {
-					return @{$tourn_settings{"online_rooms"}};
+					return @{$tourn_settings->{"online_rooms"}};
 				};
 
 				foreach my $room (@arr) {
@@ -1230,8 +1337,8 @@
 			}
 
 			if (
-				$tourn_settings{"ask_observers"}
-				&& (not defined $tourn_settings{'observer_violation'})
+				$tourn_settings->{"ask_observers"}
+				&& (not defined $tourn_settings->{'observer_violation'})
 			) {
 </%perl>
 				<span class="third leftalign">
@@ -1249,7 +1356,7 @@
 				</span>
 <%perl>
 			}
-			if ($tourn_settings{"allow_dashboard_drops"} ) {
+			if ($tourn_settings->{"allow_dashboard_drops"} ) {
 </%perl>
 				<span class="third leftalign">
 					<span class="threequarters semibold bluetext">
@@ -1310,12 +1417,12 @@
 
 		<& /funclib/tablesorter.mas, table => $school_id."_entries" &>
 
-		<div class="full martop nospace">
-			<span class="sixth nospace">
+		<div class="full martop flexrow">
+			<span class="sixth padleft">
 				<h5>Entries</h5>
 			</span>
 
-			<span class="third centeralign true nospace">
+			<span class="third centeralign">
 				<a
 					id      = "past"
 					class   = "buttonwhite greytext timebutton fa fa-fast-backward"
@@ -1349,7 +1456,6 @@
 					onChange = "showEvent();"
 				>
 					<option value="all">All Events</option>
-
 <%perl>
 					my $last_type;
 
@@ -1367,7 +1473,7 @@
 </%perl>
 						<option
 							value="<% $event_id %>"
-						><% $events{$event_id}{"abbr"} %></option>
+						><% $events{$event_id}{"abbr"} %> <% $events{$event_id}{"name"} %></option>
 %					}
 
 				</select>
@@ -1379,11 +1485,11 @@
 			</span>
 		</div>
 
-%		if ($tourn_settings{'observer_violation'}) {
+%		if ($tourn_settings->{'observer_violation'}) {
 			<p class='centeralign bigger redtext semibold borderred martop marbottom padtop padbottom'>
 				Your NSDA Campus observer use has been disabled due to a terms
 				of service violation: <br />
-				<% $tourn_settings{"observer_violation"} %>
+				<% $tourn_settings->{"observer_violation"} %>
 			</p>
 %		}
 
@@ -1424,7 +1530,7 @@
 						S
 					</th>
 
-%					unless ($tourn_settings{'mock_trial_registration'}) {
+%					unless ($tourn_settings->{'mock_trial_registration'}) {
 						<th>
 							Judging
 						</th>
@@ -1434,7 +1540,7 @@
 						Result
 					</th>
 
-%					if ($tourn_settings{'mock_trial_registration'}) {
+%					if ($tourn_settings->{'mock_trial_registration'}) {
 						<th title="Feedback">
 							Scores
 						</th>
@@ -1548,7 +1654,7 @@
 									&& ($section->{unfinished})
 								) {
 
-									if ($tourn_settings{'observer_violation'}) {
+									if ($tourn_settings->{'observer_violation'}) {
 </%perl>
 										<div class="full nospace centeralign">
 											<span class="fa fa-lg buttonwhite redtext invert fa-ban">
@@ -1592,7 +1698,7 @@
 									|| $events{$entry->{"event_id"}}{"online_mode"} eq "sync"
 									) && (not defined $section->{panel_bye})
 								) {
-									if ($tourn_settings{'observer_violation'}) {
+									if ($tourn_settings->{'observer_violation'}) {
 </%perl>
 										<div class="full nospace centeralign">
 											<span class="fa fa-lg buttonwhite redtext invert fa-ban">
@@ -1651,7 +1757,7 @@
 %								}
 							</td>
 
-%							unless ($tourn_settings{'mock_trial_registration'}) {
+%							unless ($tourn_settings->{'mock_trial_registration'}) {
 
 							<td class="nospace">
 <%perl>
@@ -1677,7 +1783,7 @@
 											<span class="ninetenths nospace nowrap">
 %										}
 
-%										if ($tourn_settings{"ncfl"}) {
+%										if ($tourn_settings->{"ncfl"}) {
 											<% $judge->{code} %>
 
 %										} elsif ($judge->{last}) {
@@ -1907,7 +2013,7 @@
 
 %									} elsif ($entry->{mock_trial}) {
 %									} elsif ($judge->{started}
-%										&& (not defined $tourn_settings{"mock_trial_registration"})
+%										&& (not defined $tourn_settings->{"mock_trial_registration"})
 %									) {
 
 										<div class="full nospace padvertless semibold greentext leftalign nowrap">
@@ -1988,7 +2094,7 @@
 								}
 </%perl>
 								<h6 class="centeralign padtop">
-%									if ($tourn_settings{'mock_trial_registration'}) {
+%									if ($tourn_settings->{'mock_trial_registration'}) {
 										Scorer <% $counter++ %>
 %									} else {
 										Feedback from <% $judge->{code}." ".$judge->{first}." ".$judge->{last} %>
@@ -2057,20 +2163,22 @@
 			</tbody>
 		</table>
 
-%		unless ($tourn_settings{'mock_trial_registration'}) {
+%		unless ($tourn_settings->{'mock_trial_registration'}) {
 
 			<& /funclib/tablesorter.mas,
 				table => $school_id."_judges"
 			&>
 
-			<span class="threequarters nospace martop">
-				<h5>Judges</h5>
-			</span>
+			<div class="full flexrow">
+				<span class="threequarters padleft">
+					<h5>Judges</h5>
+				</span>
 
-			<span
-				id    = "<% $school_id %>_judges_buttonarea"
-				class = "quarter rightalign"
-			></span>
+				<span
+					id    = "<% $school_id %>_judges_buttonarea"
+					class = "quarter rightalign"
+				></span>
+			</div>
 
 			<table
 				id    = "<% $school_id %>_judges"

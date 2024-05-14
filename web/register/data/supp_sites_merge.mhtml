@@ -1,0 +1,170 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$perms
+</%args>
+<%init>
+
+	$r->content_type('application/json');
+	$m->clear_buffer();
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $events_sth = $dbh->prepare('
+		select
+			event.id, event.name, event.abbr, event.type, presplit.value presplit
+		from event, event_setting presplit, event original
+		where event.tourn = ?
+			and presplit.event = event.id
+			and presplit.tag = "presplit"
+			and presplit.value = original.id
+			and original.tourn = event.tourn
+	');
+
+	$events_sth->execute($tourn);
+	my $events = $sth->fetchall_hash();
+
+	my $rounds_sth = $dbh->prepare('
+		select
+			round.id, round.name, round.label, round.type, presplit.value presplit
+		from round, event, round_setting presplit, round original, event oe
+		where event.tourn = ?
+			and event.id = round.event
+			and presplit.round = round.id
+			and presplit.tag = "presplit"
+			and presplit.value = original.id
+			and original.event = oe.id
+			and oe.tourn = event.tourn
+	');
+
+	$rounds_sth->execute($tourn);
+	my $rounds = $sth->fetchall_hash();
+
+	my %rounds;
+
+	my $round_transfer = $dbh->prepare("
+		update panel set round = ? where round = ?
+	");
+
+	my $round_log_transfer = $dbh->prepare("
+		update change_log set round = ? where round = ?
+	");
+
+	my $rpr_transfer = $dbh->prepare("
+		update rpool_round rpr set rpr.round = ? where rpr.round = ?
+	");
+
+	my $jpr_transfer = $dbh->prepare("
+		update jpool_round jpr set jpr.round = ? where jpr.round = ?
+	");
+
+	foreach my $round (@{$rounds}) {
+		$round{$round->{id}} = $round->{presplit};
+		$round_transfer->execute($round->{presplit}, $round->{id});
+		$rpr_transfer->execute($round->{presplit}, $round->{id});
+		$jpr_transfer->execute($round->{presplit}, $round->{id});
+		$round_log_transfer->execute($round->{presplit}, $round->{id});
+	}
+
+	my $entry_transfer = $dbh->prepare("
+		update entry, ballot, panel, round, event
+			set entry.event  = event.id
+		where event.id = ?
+			and entry.event  = ?
+			and entry.event  = ballot.entry
+			and ballot.panel = panel.id
+			and panel.round  = round.id
+			and round.event  = event.id
+	");
+
+	my $event_log_transfer = $dbh->prepare("
+		update change_log set event = ? where event = ?
+	");
+
+	# Remove the evidence
+	my $supp_teams = $tourn_settings->{supp_teams};
+
+	my @teams = sort {$supp_teams->{$a}{"code"} cmp $supp_teams->{$b}{"code"}} keys %{$supp_teams};
+	my $first_id = shift @teams;
+	my $first = $supp_teams->{$first_id};
+
+	foreach my $event (@{$events}) {
+		$entry_transfer->execute($event->{presplit}, $event->{id});
+		$entry_log_transfer->execute($event->{presplit}, $event->{id});
+	}
+
+	my $original_events_sth = $dbh->prepare('
+		select
+			event.id, event.name, event.abbr, event.type
+		from event
+		where event.tourn = ?
+			and exists (
+				select es.id
+				from event_setting es
+				where es.tag = "supp"
+				and es.event = event.id
+			)
+			and not exists (
+				select presplit.id
+				from event_setting presplit
+				where presplit.tag = "presplit"
+				and presplit.event = event.id
+			)
+	');
+
+	$original_events_sth->execute($tourn);
+	my $oes = $original_events_sth->fetchall_hash();
+
+	my $event_update = $dbh->prepare("update event set name = ?, abbr = ? where id = ?");
+
+	foreach my $event (@{$oes}) {
+		my $name = $event->{name};
+		my $abbr = $event->{name};
+
+		my $i = rindex($name,' ');
+		$name = substr($name,0,$i) if $i>0;
+
+		$abbr =~ s/\ ([$first->{code}]+)$/'' x length($1)/e;
+		$name =~ s/\ ([$first->{label}]+)$/'' x length($1)/e;
+
+		$event_update->execute($name, $abbr, $event->{id});
+	}
+
+	my $prune_rounds_sth = $dbh->prepare('
+		delete
+			round.*
+		from round, event, round_setting presplit, round original, event oe
+		where event.tourn = ?
+			and event.id = round.event
+			and presplit.round = round.id
+			and presplit.tag = "presplit"
+			and presplit.value = original.id
+			and original.event = oe.id
+			and oe.tourn = event.tourn
+	');
+
+	$prune_rounds_sth->execute($tourn);
+
+	my $prune_events_sth = $dbh->prepare('
+		delete
+			event.*
+		from event, event_setting presplit, event original
+		where event.tourn = ?
+			and presplit.event = event.id
+			and presplit.tag = "presplit"
+			and presplit.value = original.id
+			and original.tourn = event.tourn
+	');
+
+	$prune_rounds_sth->execute($tourn);
+
+	my $response = ({
+		message => "I have re-merged everything into ".scalar @{$oes}." I might even have done it correctly!",
+		error   => \0,
+	});
+
+	$m->print(JSON::encode_json($response));
+	$m->abort();
+
+</%init>

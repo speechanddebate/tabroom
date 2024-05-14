@@ -1,8 +1,13 @@
 <%args>
 	$person
 	$person_settings
+	$override => undef
 </%args>
 <%init>
+
+	if ($person->site_admin && $override) {
+		$person = Tab::Person->retrieve($override);
+	}
 
 	my $dbh = Tab::DBI->db_Main();
 	my $now = DateTime->now();
@@ -17,15 +22,24 @@
 	);
 
 	Tab::Entry->columns( TEMP => "studentid");
+	Tab::Entry->columns( TEMP => "tournid");
+	Tab::Entry->columns( TEMP => "supp");
 
 	Tab::Entry->set_sql( present_by_person => "
 		select entry.*,
 			student.id as studentid,
 			chapter.name as chaptername,
-			chapter.state as chapterstate
+			chapter.state as chapterstate,
+			tourn.id as tournid,
+			supp.value as supp
 		from (entry, entry_student, student, event, tourn)
 			left join school on school.id = entry.school
 			left join chapter on school.chapter = chapter.id
+
+			left join event_setting supp
+				on supp.event = event.id
+				and supp.tag = 'supp'
+
 		where student.person = ?
 			and student.id = entry_student.student
 			and entry_student.entry = entry.id
@@ -49,7 +63,7 @@
 				)
 			)
 		group by entry.id
-		order by tourn.start
+		order by tourn.start, supp.value, event.abbr
 	");
 
 	my @current_entries = Tab::Entry->search_present_by_person($person->id);
@@ -76,13 +90,19 @@
 			memo.filename,
 			my_ballot.value_text,
 			person.tz,
-			vaccines.value, vax.value
+			vaccines.value, vax.value,
+			supp.value supp,
+			nsda_nats.value
 
 		from (student, entry_student es, entry, event, school, tourn, category, person)
 
 			left join tourn_setting vaccines
 				on vaccines.tag = 'vaccines'
 				and vaccines.tourn = tourn.id
+
+			left join tourn_setting nsda_nats
+				on nsda_nats.tag = 'nsda_nats'
+				and nsda_nats.tourn = tourn.id
 
 			left join person_setting vax
 				on vax.person = student.person
@@ -136,6 +156,10 @@
 				on memo.type = 'signup'
 				and memo.school = school.id
 
+			left join event_setting supp
+				on supp.event = event.id
+				and supp.tag = 'supp'
+
 		where person.id = ?
 			and student.person = person.id
 			and student.id     = es.student
@@ -162,6 +186,7 @@
 					where weekend.tourn = tourn.id
 				)
 			)
+		order by tourn.start, supp.value DESC, event.abbr
 	");
 
 	$upcoming_sth->execute($person->id);
@@ -184,7 +209,9 @@
 			$memo_filename,
 			$my_ballot,
 			$person_tz,
-			$vaccines, $status
+			$vaccines, $status,
+			$supp,
+			$nsda_nats
 		) = $upcoming_sth->fetchrow_array()
 	) {
 
@@ -214,6 +241,8 @@
 		$upcoming{$student_id}{$entry_id}{"category_id"}       = $category_id;
 		$upcoming{$student_id}{$entry_id}{"person_tz"}         = $person_tz;
 		$upcoming{$student_id}{$entry_id}{"status"}            = $status;
+		$upcoming{$student_id}{$entry_id}{"supp"}              = $supp;
+		$upcoming{$student_id}{$entry_id}{"nsda_nats"}         = $nsda_nats;
 		$upcoming{$student_id}{$entry_id}{"vaccines"}          = $vaccines;
 
 		if ($self_prefs && $prefs_value) {
@@ -416,12 +445,16 @@
 			</h4>
 
 %			if (@current_entries) {
+%				my %already;
 %				foreach my $entry (@current_entries) {
+
 					<& "show_entry.mas",
 						entry      => $entry,
+						already    => \%already,
 						student_id => $entry->studentid,
 						person     => $person
 					&>
+%					$already{$entry->tournid}++;
 %				}
 %			}
 		</div>
@@ -483,57 +516,54 @@
 
 						foreach my $entry_id (
 							sort {
-								$upcoming{$student_id}{$a}{"startsort"} <=>  $upcoming{$student_id}{$b}{"startsort"}
+								$upcoming{$student_id}{$b}{"startsort"} <=>  $upcoming{$student_id}{$b}{"startsort"}
+								|| $upcoming{$student_id}{$a}{"supp"} cmp  $upcoming{$student_id}{$b}{"supp"}
 								|| $upcoming{$student_id}{$a}{"event_abbr"} cmp  $upcoming{$student_id}{$b}{"event_abbr"}
 							} keys %{$upcoming{$student_id}}
 						) {
 
-							my $prefs = $upcoming{$student_id}{$entry_id}{"prefs"};
+							my $entry = $upcoming{$student_id}{$entry_id};
 
-							my $tourn_id = $upcoming{$student_id}{$entry_id}{"tourn_id"};
-							my $school_id = $upcoming{$student_id}{$entry_id}{"school_id"};
+							my $prefs = $entry->{"prefs"};
+
+							my $tourn_id = $entry->{"tourn_id"};
+							my $school_id = $entry->{"school_id"};
+
 </%perl>
 							<tr class="smallish" id="<% $entry_id %>">
 
 								<td class="nospace">
 									<div class="nowrap full marvertno semibold padvertless">
 										<span class='halfspacer'></span>
-										<% $upcoming{$student_id}{$entry_id}{"tourn_name"}  %>
+										<% $entry->{"tourn_name"}  %>
 									</div>
 									<div class="nowrap full nospace padbottom">
 										<span class='halfspacer'></span>
-										<% $upcoming{$student_id}{$entry_id}{"tourn_city"}  %>
-										<% $upcoming{$student_id}{$entry_id}{"tourn_state"}
-											? $upcoming{$student_id}{$entry_id}{"tourn_state"}
-											: $upcoming{$student_id}{$entry_id}{"tourn_country"}
+										<% $entry->{"tourn_city"}  %>
+										<% $entry->{"tourn_state"}
+											? $entry->{"tourn_state"}
+											: $entry->{"tourn_country"}
 										%>
 									</div>
 								</td>
 
-								<td class="nowrap">
-
-									<& "/funclib/showdate.mas",
-										string => $upcoming{$student_id}{$entry_id}{"tourn_start"},
-										length => "medium"
+								<td
+									data-text = "<% $entry->{tourn_start} %>"
+									class     = "padleft"
+								>
+									<& "/funclib/showrange.mas",
+										start_string => $entry->{"tourn_start"},
+										end_string   => $entry->{"tourn_end"},
+										year         => 1
 									&>
-
-%									if (substr($upcoming{$student_id}{$entry_id}{"tourn_start"}, 6, 2)
-%										ne substr($upcoming{$student_id}{$entry_id}{"tourn_end"}, 6, 2)
-%									) {
-										<&
-											"/funclib/showdate.mas",
-											string => $upcoming{$student_id}{$entry_id}{"tourn_end"},
-											length => "medium"
-										&>
-%									}
 								</td>
 
 								<td class="nospace centeralign">
 									<a
 										class  = "plain full marno padmore hover"
 										target = "_blank"
-										href   = "/index/tourn/events.mhtml?event_id=<% $upcoming{$student_id}{$entry_id}{"event_id"} %>"
-									><%  $upcoming{$student_id}{$entry_id}{"event_abbr"} %></a>
+										href   = "/index/tourn/events.mhtml?event_id=<% $entry->{"event_id"} %>"
+									><%  $entry->{"event_abbr"} %></a>
 								</td>
 
 								<td class="centeralign">
@@ -542,35 +572,41 @@
 											href="<% $Tab::s3_url."/".$tourn_id."/signups/".$school_id."/".$signups{$student_id}{$tourn_id}{"memo"} %>"
 										></a>
 %									}
+
+%									if ($entry->{supp}) {
+										SUPP
+%									}
 								</td>
 
 								<td class="nospace">
-%									if ($upcoming{$student_id}{$entry_id}{"entry_unconfirmed"}) {
-										<span class="full marno redtext semibold">
-											<span class="halfspacer"></span>
+%									if ($entry->{"entry_unconfirmed"}) {
+										<span class="full marno redtext semibold padleft">
 											No Coach Approval
 										</span>
-%									} elsif ($upcoming{$student_id}{$entry_id}{"entry_waitlist"}) {
-										<span class="full marno orangetext semibold">
-											<span class="halfspacer"></span>
+%									} elsif ($entry->{"entry_waitlist"}) {
+										<span class="full marno orangetext semibold padleft">
 											Waitlisted
 										</span>
-%									} elsif ($upcoming{$student_id}{$entry_id}{"entry_dropped"}) {
-										<span class="full marno orangetext semibold">
-											<span class="halfspacer"></span>
+%									} elsif ($entry->{"entry_dropped"} && $entry->{supp}) {
+										<span class="full marno orangetext semibold padleft">
+											Not Re-Registered
+										</span>
+%									} elsif ($entry->{"entry_dropped"}) {
+										<span class="full marno orangetext semibold padleft">
 											Dropped
 										</span>
-%									} elsif ($upcoming{$student_id}{$entry_id}{"entry_active"}) {
-										<span class="full marno greentext semibold">
-											<span class="halfspacer"></span>
+%									} elsif ($entry->{"entry_active"} && $entry->{supp}) {
+										<span class="full marno greentext semibold padleft">
+											Re-Registered
+										</span>
+%									} elsif ($entry->{"entry_active"}) {
+										<span class="full marno greentext semibold padleft">
 											Confirmed
-
-%										if ($upcoming{$student_id}{$entry_id}{"vaccines"}) {
-											<div class="full padvertless <% $upcoming{$student_id}{$entry_id}{"status"} eq "confirmed" ? "" : "redtext" %>">
-												<span class="spacer"></span>
+%										if ($entry->{"vaccines"}) {
+											<div class="full padleft padvertless <% $entry->{"status"} eq "confirmed" ? "" : "redtext" %>">
 												VaccineCheck:
-%											if ($upcoming{$student_id}{$entry_id}{"status"}) {
-												<% ucfirst($upcoming{$student_id}{$entry_id}{"status"}) %>
+%											if ($entry->{"status"}) {
+												<% ucfirst($entry->{"status"}) %>
 %											} else {
 												Not Started
 %											}
@@ -581,53 +617,65 @@
 %									}
 								</td>
 
-								<td class="nospace centeralign">
+								<td>
+									<div class="full flexrow wrap">
+%									if ($entry->{supp} && $entry->{nsda_nats}) {
+										<div class="full graytext italic">
+%										if ($entry->{entry_dropped}) {
+											This entry will not be scheduled unless <br />
+											re-registered Tuesday at Nationals
+%										} else {
+											This entry is re-registered
+											&amp; will be assigned rounds
+%										}
+										</div>
+%									}
 <%perl>
 									if ($prefs) {
 										if (
-											($upcoming{$student_id}{$entry_id}{"strike_start"} < $now)
-											&& ($upcoming{$student_id}{$entry_id}{"strike_end"} > $now)
+											($entry->{"strike_start"} < $now)
+											&& ($entry->{"strike_end"} > $now)
 										) {
 </%perl>
 											<span class="fourfifths marno semibold orangetext">
 												Prefs Due
 												<& "/funclib/showdt.mas",
-													dt => $upcoming{$student_id}{$entry_id}{"strike_end"}
+													dt => $entry->{"strike_end"}
 												&>
 											</span>
-											<span class="fifth centeralign marno">
+											<span class="fifth marno">
 												<a class="buttonwhite bluetext fa fa-lg fa-file-text"
 													title="Pref Sheet"
 													href="/user/enter/ratings/<% $prefs %>.mhtml?entry_id=<% $entry_id %>&school_id=<% $school_id %>"
 												></a>
 											</span>
 
-%										} elsif ($upcoming{$student_id}{$entry_id}{"strike_start"} > $now) {
+%										} elsif ($entry->{"strike_start"} > $now) {
 
 											<span class="full nospace centeralign bluetext">
 												Prefs Open
 												<& "/funclib/showdt.mas",
-													dt => $upcoming{$student_id}{$entry_id}{"strike_end"}
+													dt => $entry->{"strike_end"}
 												&>
 											</span>
 
-%										} elsif ($upcoming{$student_id}{$entry_id}{"strike_end"} < $now) {
+%										} elsif ($entry->{"strike_end"} < $now) {
 
 											<span class="full nospace centeralign bluetext">
 												Prefs Closed
 											</span>
 %										} else {
 											<span class="full nospace centeralign bluetext">
-												<% $upcoming{$student_id}{$entry_id}{"strike_end"} %>
-												<% $upcoming{$student_id}{$entry_id}{"strike_start"} %>
+												<% $entry->{"strike_end"} %>
+												<% $entry->{"strike_start"} %>
 												No Deadlines Set
 											</span>
 %										}
 %									}
 <%perl>
 									if (
-										($upcoming{$student_id}{$entry_id}{"student_ballot_opens"} < $now)
-										&& ($upcoming{$student_id}{$entry_id}{"student_ballot_closes"} > $now)
+										($entry->{"student_ballot_opens"} < $now)
+										&& ($entry->{"student_ballot_closes"} > $now)
 									) {
 </%perl>
 										<span class="fourfifths marno semibold" style="line-height: 14px;">
@@ -636,23 +684,23 @@
 												class = "full nospace centeralign bluetext"
 												title = "You're the best.  No, really, you are."
 											>
-												<% $upcoming{$student_id}{$entry_id}{"my_ballot"}
+												<% $entry->{"my_ballot"}
 													? "Your ballot has been recorded.  Thank you!"
 													: ""
 												%>
 											</span>
 
 											<a  class  = "orangetext plain full marno padvertnow"
-												title = "<% $upcoming{$student_id}{$entry_id}{"student_ballot_label"} %> Ballot"
+												title = "<% $entry->{"student_ballot_label"} %> Ballot"
 												href  = "/user/student/entry_ballot.mhtml?entry_id=<% $entry_id %>&mode=event"
 											>
-												<% $upcoming{$student_id}{$entry_id}{"student_ballot_label"} %> Voting Open!
+												<% $entry->{"student_ballot_label"} %> Voting Open!
 													<span class="inline fa fa-sm fa-arrow-right"></span>
 
 												<br />Due
 												<& "/funclib/showdt.mas",
-													dt     => $upcoming{$student_id}{$entry_id}{"student_ballot_closes"},
-													tz     => $upcoming{$student_id}{$entry_id}{"person_tz"},
+													dt     => $entry->{"student_ballot_closes"},
+													tz     => $entry->{"person_tz"},
 													tzname => 1
 												&>
 											</a>
@@ -661,28 +709,26 @@
 
 										<span class="fifth centeralign marno">
 											<a  class  = "buttonwhite bluetext fa fa-lg fa-file-text"
-												title = "<% $upcoming{$student_id}{$entry_id}{"student_ballot_label"} %> Ballot"
+												title = "<% $entry->{"student_ballot_label"} %> Ballot"
 												href  = "/user/student/entry_ballot.mhtml?entry_id=<% $entry_id %>&mode=event"
 											></a>
 										</span>
 
-%									} elsif ($upcoming{$student_id}{$entry_id}{"student_ballot_opens"} > $now) {
+%									} elsif ($entry->{"student_ballot_opens"} > $now) {
 
-										<span class="full nospace centeralign bluetext">
-										</span>
-
-%									} elsif ($upcoming{$student_id}{$entry_id}{"student_ballot_closes"} < $now) {
-										<span class="full nospace centeralign bluetext">
-											<% $upcoming{$student_id}{$entry_id}{"student_ballot_label"} %> Vote Closed
+%									} elsif ($entry->{"student_ballot_closes"} < $now) {
+										<span class="full nospace bluetext">
+											<% $entry->{"student_ballot_label"} %> Vote Closed
 										</span>
 %									}
+									</div>
 								</td>
 
 								<td class="centeralign padsetting">
 <%perl>
-									if ($upcoming{$student_id}{$entry_id}{"signup_active"}
-										&& $upcoming{$student_id}{$entry_id}{"entry_unconfirmed"}
-										&& $upcoming{$student_id}{$entry_id}{"signup_deadline"} > $now
+									if ($entry->{"signup_active"}
+										&& $entry->{"entry_unconfirmed"}
+										&& $entry->{"signup_deadline"} > $now
 									) {
 
 										my $warn = "This will drop your signup for this tournament.  Your partner(s)";
@@ -692,7 +738,7 @@
 											id            = "<% $entry_id %>"
 											target_id     = "<% $entry_id %>"
 											on_success    = "destroy"
-											property_name = "<% $upcoming{$student_id}{$entry_id}{"student_id"} %>"
+											property_name = "<% $entry->{"student_id"} %>"
 											onClick       = "postConfirm('<% $warn %>', this, 'drop_entry.mhtml');"
 											class         = "buttonwhite fa-sm fa fa-arrow-down redtext hover"
 											title         = "Drop This Entry"
@@ -995,18 +1041,13 @@
 										</a>
 									</td>
 
-									<td class="rightalign">
-										<span class="hidden">
-											<& "/funclib/showdate.mas",
-												string => $students{$student_id}{"entries"}{$entry_id}{"tourn_start"},
-												length => "sortable"
-											&>
-										</span>
+									<td
+										data-text="<% $students{$student_id}{"entries"}{$entry_id}{"tourn_start"} %>"
+									>
 										<& "/funclib/showdate.mas",
 											string => $students{$student_id}{"entries"}{$entry_id}{"tourn_start"},
 											length => "medium"
 										&>
-										<span class="halfspacer"></span>
 									</td>
 
 									<td class=" nowrap">
