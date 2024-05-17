@@ -110,7 +110,7 @@
 
 	Tab::EntryStudent->set_sql (by_school => "
 		select entry_student.*, entry_student.entry entryid, entry_student.student studentid
-		from entry_student, entry
+			from entry_student, entry
 		where entry_student.entry = entry.id
 		and entry.school = ?
 	");
@@ -149,10 +149,6 @@
 
 	Tab::EntrySetting->set_sql(rm_all => "
 		delete from entry_setting where entry = ?
-	");
-
-	Tab::JudgeSetting->set_sql(rm_all => "
-		delete from judge_setting where judge = ?
 	");
 
 	Tab::StudentVote->set_sql(rm_all => "
@@ -293,8 +289,6 @@
 		}
 	}
 
-	undef $jdata->{whole};
-
 	if ($jdata->{whole}) {
 
 		unless ($perms->{"owner"} || $perms->{"tabber"}) {
@@ -302,7 +296,6 @@
 				message => "Only users with tournament wide tabber access may upload tournament wide data backups."
 			);
 		}
-
 		&outlog("<p class='action'>Whole tournament mode active</p>");
 	}
 
@@ -642,7 +635,10 @@
 
 			# EVENTS
 
-			if ($ocategory && $category->{events} && (not defined $jdata->{round_only})) {
+			if ($ocategory
+				&& $category->{events}
+				&& (not defined $jdata->{round_only})
+			) {
 
 				&outlog("<p class='action'><span class='halfspacer'></span>Importing ".scalar @{$category->{events}}." events </p>");
 
@@ -744,6 +740,7 @@
 						$oevent->update();
 
 						# Prevent a double pump
+						delete $event_by_id{$oevent->id};
 
 					} else {
 
@@ -777,13 +774,16 @@
 
 				if ($jdata->{whole}) {
 
-					my $count = prune_unused(
-						\%event_by_id,
-						$translator{event},
-						$category->{events}
-					);
+					Tab::debuglog("Whole tournament mode activated");
 
-					&outlog("<p class='action'> Pruned $count unused events </p>");
+					my $delete_event = $dbh->prepare("
+						delete from event where id = ?
+					");
+
+					foreach my $id (keys %event_by_id) {
+						&outlog("<p class='action'> Pruned unused event ID $id </p>");
+						$delete_event->execute($id);
+					}
 
 				}
 
@@ -895,11 +895,6 @@
 			}
 
 			$translator{timeslot}{$timeslot->{id}} = $otimeslot;
-		}
-
-		if ($jdata->{whole}) {
-			&outlog("<p class='action'> Pruning unused events </p>");
-			prune_unused( \%timeslot_by_id, $translator{timeslot}, $jdata->{timeslots});
 		}
 
 	} else {
@@ -1425,8 +1420,8 @@
 
 				foreach my $ent_ref (@entries) {
 					$entry_by_id{$ent_ref->{event}}{$ent_ref->{id}} = $ent_ref;
-					$entry_by_name{$ent_ref->{event}}{$ent_ref->{name}} = $ent_ref;
-					$entry_by_code{$ent_ref->{event}}{$ent_ref->{code}} = $ent_ref;
+					$entry_by_name{$ent_ref->{event}}{$ent_ref->{name}} = $ent_ref if $ent_ref->{name};
+					$entry_by_code{$ent_ref->{event}}{$ent_ref->{code}} = $ent_ref if $ent_ref->{code};
 				}
 
 				my $entry_student_sth = $dbh->prepare("
@@ -1481,23 +1476,9 @@
 						$oschool = $school_by_name{$school->{name}};
 					}
 
-					if ($oschool && $school->{nochange}) {
-
-						$translator{school}{$school->{id}} = $oschool;
-
-						$school_entries_sth->execute($oschool);
-						my $results = $school_entries_sth->fetchall_hash();
-
-						foreach my $entref (@{$results}) {
-							$translator{entry}{$entref->{id}} = $entref->{id};
-						}
-
-						delete $school_by_id{$oschool};
-
-						&outlog("<p class='specific'>".$school->{name}." was marked no change.  Skipped</p>");
-						$m->flush_buffer() unless $no_return;
-						next SCHOOL;
-					}
+					# REMOVE ME
+					$translator{school}{$school->{id}} = $oschool;
+					next;
 
 					my $region = $translator{region}{$school->{region}};
 
@@ -1588,6 +1569,8 @@
 
 					$translator{school}{$school->{id}} = $oschool;
 
+					next;
+
 					if ($oschool) {
 
 						# SCHOOL SETTINGS
@@ -1606,6 +1589,7 @@
 							if ($student->{nsda}) {
 								$ostudent = $students{$student->{chapter}}{by_nsda}{$student->{nsda}} unless $ostudent;
 							}
+
 							$ostudent = $students{$student->{chapter}}{by_name}{$student->{first}."-".$student->{last}} unless $ostudent;
 
 							my $old_id = $student->{id};
@@ -1652,6 +1636,7 @@
 
 									$ostudent = $student;
 								}
+								delete $students{$oschool}{by_id}{$ostudent->{id}};
 							}
 
 							$translator{student}{$old_id} = $ostudent;
@@ -1661,7 +1646,8 @@
 						my $found;
 						my $created;
 
-						my $total_entries = 0;
+						my $total_update = 0;
+						my $total_import = 0;
 						my $total_prefs = 0;
 
 						my %ratings;
@@ -1684,10 +1670,15 @@
 
 									next unless $entry->{event} == $event_id;
 
-									my $oentry;
-									$oentry = $entry_by_id{$oevent->{id}}{$entry->{id}};
-									$oentry = $entry_by_name{$oevent->{id}}{$entry->{name}} unless $oentry;
-									$oentry = $entry_by_code{$oevent->{id}}{$entry->{code}} unless $oentry;
+									my $oentry = $entry_by_id{$oevent->{id}}{$entry->{id}};
+
+									if ($entry->{name}) {
+										$oentry = $entry_by_name{$oevent->{id}}{$entry->{name}} unless $oentry;
+									}
+
+									if ($entry->{code}) {
+										$oentry = $entry_by_code{$oevent->{id}}{$entry->{code}} unless $oentry;
+									}
 
 									my $created_at = parse_date($entry->{created_at});
 
@@ -1698,6 +1689,8 @@
 									my $old_id = $entry->{id};
 
 									unless ($oentry) {
+
+										$total_import++;
 
 										my $oentry_obj = Tab::Entry->create({
 											school        => $oschool->id,
@@ -1727,6 +1720,7 @@
 										}
 
 										if ($delta) {
+											$total_update++;
 											$update_entry->execute(
 												$entry->{name},
 												$entry->{code},
@@ -1742,6 +1736,7 @@
 
 										$entry->{id} = $oentry->{id};
 										$oentry = $entry;
+										delete $entry_by_id{$oentry->{id}};
 									}
 
 									delete $entry_by_id{$old_id};
@@ -1749,7 +1744,6 @@
 
 									# ENTRY SETTINGS
 									if ($oentry->{id}) {
-										$total_entries++;
 										&align_settings(
 											$oentry->{id},
 											"entry",
@@ -1801,10 +1795,11 @@
 										if ($entry_students{$oentry->{id}}{$ostudent->{id}}) {
 											delete $entry_students{$oentry->{id}}{$ostudent->{id}};
 										} else {
-											Tab::EntryStudent->create({
+											my $es = Tab::EntryStudent->create({
 												entry   => $oentry->{id},
 												student => $ostudent->{id}
 											});
+
 										}
 									}
 
@@ -1871,7 +1866,7 @@
 													$ostrike->conflict($strike->{conflict});
 													$ostrike->conflictee($strike->{conflictee});
 													$ostrike->registrant($strike->{registrant});
-													$ostrike->judge($ojudge->id);
+													$ostrike->judge($ojudge->{id});
 													$ostrike->entry($oentry->{id});
 													$ostrike->update();
 
@@ -1883,7 +1878,7 @@
 														conflict   => $strike->{conflict},
 														conflictee => $strike->{conflictee},
 														registrant => $strike->{registrant},
-														judge      => $ojudge->id
+														judge      => $ojudge->{id}
 													});
 												}
 											}
@@ -1985,7 +1980,7 @@
 									$ostrike->conflict($strike->{conflict});
 									$ostrike->conflictee($strike->{conflictee});
 									$ostrike->registrant($strike->{registrant});
-									$ostrike->judge($ojudge->id);
+									$ostrike->judge($ojudge->{id});
 									$ostrike->school($oschool->id);
 									$ostrike->update();
 
@@ -1997,7 +1992,7 @@
 										conflict   => $strike->{conflict},
 										conflictee => $strike->{conflictee},
 										registrant => $strike->{registrant},
-										judge      => $ojudge->id
+										judge      => $ojudge->{id}
 									});
 								}
 
@@ -2007,7 +2002,7 @@
 							prune_unused( \%strike_by_id, $translator{strike}, $school->{strikes});
 						}
 
-						&outlog(" Imported $total_entries entries</p>");
+						&outlog(" Imported $total_import and updated $total_update entries</p>");
 						if ($total_prefs) {
 							&outlog(" Imported $total_prefs pref sheets</p>");
 						}
@@ -2020,17 +2015,13 @@
 
 						if ($school->{judges}) {
 
-							my @chapter_judges;
-
-							if ($oschool->chapter) {
-								@chapter_judges = $oschool->chapter->chapter_judges();
-							}
-
-							my %cjs_by_id = map {$_->id => $_} @chapter_judges;
-							my %cjs_by_person = map {$_->person => $_} @chapter_judges;
-							my %cjs_by_nsda = map {$_->nsda => $_} @chapter_judges;
-							my %cjs_by_name = map {$_->first."-".$_->last => $_} @chapter_judges;
-
+							my %judge_settings = &find_settings(
+								"judge",
+								$oschool->id,
+								" from judge_setting setting, school",
+								" where judge.school = ? and judge.id = setting.judge ",
+								$dbh,
+							);
 							&outlog("<p class='specific'> Loading ".scalar @{$school->{judges}}." judges. | ");
 
 							my $judge_count;
@@ -2040,24 +2031,45 @@
 							foreach my $category_id (keys %{$translator{category}}) {
 
 								my $ocategory = $translator{category}{$category_id};
-								my @judges = $oschool->judges( category => $ocategory->id);
 
-								my %judge_by_id = map {$_->id => $_} @judges;
-								my %judge_by_person = map {$_->person => $_} @judges;
-								my %judge_by_name = map {$_->first."-".$_->last => $_} @judges;
-								my %judge_by_nsda;
+								my $judge_sth = $dbh->prepare('
+									select
+										judge.id, judge.first, judge.middle, judge.last,
+										judge.active, judge.ada, judge.obligation, judge.hired,
+										judge.category, judge.alt_category, judge.covers, judge.person,
+										person.id person_id, person.nsda nsda
+									from judge
+										left join person on person.id = judge.person
+									where judge.category = ?
+								');
 
-								foreach my $judge (@judges) {
-									next unless $judge->chapter_judge > 0;
-									next unless $judge->chapter_judge->nsda > 0;
-									$judge_by_nsda{$judge->chapter_judge->nsda} = $judge;
-								}
+								my $update_judge = $dbh->prepare("
+									update judge
+									set code = ?,
+										first = ?,
+										middle = ?,
+										last = ?,
+										active = ?,
+										ada = ?,
+										obligation = ?,
+										hired = ?,
+										category = ?,
+										alt_category = ?,
+										covers = ?,
+										person = ?
+									where judge.id = ?
+								");
+
+								$judge_sth->execute($ocategory->id);
+								my $judgerefs = $judge_sth->fetchall_hash();
+
+								my %judge_by_id = map {$_->{id} => $_ } @{$judgerefs};
+								my %judge_by_person = map {$_->{person_id} => $_ } @{$judgerefs};
+								my %judge_by_nsda = map {$_->{nsda} => $_ } @{$judgerefs};
 
 								foreach my $judge (@{$school->{judges}}) {
 
 									next if $translator{judge}{$judge->{id}};
-									next unless $judge->{category} == $category_id;
-
 									my $ojudge = $judge_by_id{$judge->{id}};
 
 									unless ($ojudge) {
@@ -2068,88 +2080,69 @@
 										$ojudge = $judge_by_nsda{$judge->{nsda}} if $judge->{nsda} > 0;
 									}
 
-									unless ($ojudge) {
-										$ojudge = $judge_by_name{$judge->{name}};
-									}
-
-									# Chapter Judge link if possible
-									my $ocj;
-									$ocj = $ojudge->chapter_judge if $ojudge && $ojudge->chapter_judge > 0;
-
-									unless ($ocj) {
-										$ocj = $cjs_by_id{$judge->{chapter_judge}};
-										$ocj = $cjs_by_person{$judge->{person}} unless $ocj;
-										$ocj = $cjs_by_nsda{$judge->{nsda}} unless $ocj;
-										$ocj = $cjs_by_name{$judge->{first}."-".$judge->{last}} unless $ocj;
-									}
-
 									#nulls, whiny nulls.
 									foreach my $flag ("active", "ada", "school", "person") {
 										$judge->{$flag} = 0 unless $judge->{$flag} > 0;
 									}
 
-									my $alt_category = $translator{category}{$judge->{alt_category}};
-									my $covers = $translator{category}{$judge->{covers}};
+									$judge->{alt_category} = $translator{category}{$judge->{alt_category}} || 0;
+									$judge->{covers} = $translator{category}{$judge->{covers}} || 0;
 
 									my $old_id = $judge->{id};
 
 									unless ($ojudge) {
 
-										$ojudge = Tab::Judge->create({
+										my $obj = Tab::Judge->create({
 											code          => $judge->{code},
 											middle        => $judge->{middle},
 											first         => $judge->{first},
 											last          => $judge->{last},
-											category      => $ocategory->id,
-											alt_category  => $alt_category,
-											covers        => $covers,
 											active        => $judge->{active},
 											ada           => $judge->{ada},
-											person        => $judge->{person},
 											obligation    => $judge->{obligation},
 											hired         => $judge->{hired},
-											school        => $oschool->id,
-											chapter_judge => $ocj
+											person        => $judge->{person},
+											school        => $oschool->{id},
+											category      => $ocategory,
+											alt_category  => $judge->{alt_category},
+											covers        => $judge->{covers},
 										});
+
+										$judge->{id} = $obj->id;
+										$ojudge = $judge;
 
 									} else {
 
-										$ojudge->code($judge->{code});
-										$ojudge->middle($judge->{middle});
-										$ojudge->first($judge->{first});
-										$ojudge->last($judge->{last});
-										$ojudge->category($ocategory);
-										$ojudge->alt_category($alt_category);
-										$ojudge->covers($covers);
-										$ojudge->active($judge->{active});
-										$ojudge->ada($judge->{ada});
-										$ojudge->person($judge->{person});
-										$ojudge->obligation($judge->{obligation});
-										$ojudge->hired($judge->{hired});
-										$ojudge->school($oschool);
-										$ojudge->chapter_judge($ocj);
+										my $delta;
+										my @updates;
 
-										$ojudge->update();
+										foreach my $tag (
+											"code", "first", "middle", "last",
+											"active", "ada", "obligation", "hired",
+											"category", "alt_category", "covers", "person",
+										) {
+											if ($judge->{$tag} ne $ojudge->{$tag}) {
+												$delta++;
+											}
+											push @updates, $judge->{$tag};
+										}
+
+										if ($delta) {
+											push @updates, $ojudge->{id};
+											$update_judge->execute(@updates);
+										}
 									}
 
 									$translator{judge}{$old_id} = $ojudge;
 									delete $judge_by_id{$old_id};
-									$judge_count++ if $ojudge;
 
-									#SCHOOL JUDGE SETTINGS
-									Tab::JudgeSetting->sql_rm_all->execute($ojudge->id);
-
-									if ($judge->{settings})  {
-										foreach my $jsetting (@{$judge->{settings}}) {
-											if ($jsetting->{tag} eq "tab_rating") {
-												my $value = $translator{entry}{$jsetting->{value}};
-												$ojudge->setting("tab_rating", $value) if $value;
-											} else {
-												my @reply = parse_setting($jsetting);
-												eval{$ojudge->setting(@reply);};
-											}
-										}
-									}
+									&align_settings(
+										$ojudge->{id},
+										"judge",
+										$judge_settings{$ojudge->{id}},
+										$judge->{settings},
+										$dbh
+									);
 
 									#JUDGE STRIKES
 									if ($judge->{strikes}) {
@@ -2279,7 +2272,13 @@
 									}
 								}
 
-								prune_unused( \%judge_by_id, $translator{judge}, $school->{judges});
+								my $delete_judge = $dbh->prepare('
+									delete from judge where id = ?
+								');
+
+								foreach my $jid (keys %judge_by_id) {
+									$delete_judge->execute($jid);
+								}
 							}
 
 							foreach my $entry (keys %ratings) {
@@ -2542,8 +2541,6 @@
 
 					foreach my $email (@{$jdata->{emails}}) {
 
-						next;
-
 						my $oemail = $email_by_id{$email->{id}};
 
 						unless ($oemail) {
@@ -2577,8 +2574,7 @@
 					}
 				}
 
-				prune_unused( \%email_by_id, $translator{email}, $jdata->{emails})
-					if $jdata->{whole};
+				prune_unused( \%email_by_id, $translator{email}, $jdata->{emails}) if $jdata->{whole};
 
 				my @webpages = $tourn->webpages;
 				my %webpage_by_id = map {$_->id => $_} @webpages;
@@ -2651,21 +2647,13 @@
 
 		my %cjs;
 
-		my %judge_by_id = ();
-		my %judge_by_person = ();
-		my %judge_by_name = ();
-		my %judge_by_nsda = ();
-
-		my $cat_judge_sth = $dbh->prepare('
-			select
-				judge.id, judge.first, judge.last,
-				person.id person_id, person.nsda nsda
-			from judge
-				left join person on person.id = judge.person
-			where judge.category = ?
-		');
-
-		my $category_judges;
+		my %judge_settings = &find_settings(
+			"judge",
+			$tourn->id,
+			" from judge_setting setting, judge, category",
+			" where judge.category = category.id and category.tourn = ? and judge.id = setting.judge ",
+			$dbh,
+		);
 
 		CATEGORY:
 		foreach my $category (@{$jdata->{categories}}) {
@@ -2677,35 +2665,52 @@
 				next CATEGORY;
 			}
 
-			# CATEGORY JUDGES.  This is the ordinary way judges are imported
-			# unless this is a single school import, to account for
-			# neutral/hires.
+			my $judge_sth = $dbh->prepare('
+				select
+					judge.id, judge.first, judge.middle, judge.last,
+					judge.active, judge.ada, judge.obligation, judge.hired,
+					judge.category, judge.alt_category, judge.covers, judge.person,
+					person.id person_id, person.nsda nsda
+				from judge
+					left join person on person.id = judge.person
+				where judge.category = ?
+			');
 
-			$cat_judge_sth->execute($ocategory);
-			my $results = $cat_judge_sth->fetchall_hash();
+			$judge_sth->execute($ocategory->id);
+			my $judgerefs = $judge_sth->fetchall_hash();
 
-			foreach my $judge (@{$results}) {
+			&outlog("<p class='specific'> I have ".scalar @{$judgerefs}." judges already in category ".$ocategory->abbr."</p>");
 
-				my $judge_obj = Tab::Judge->retrieve($judge->{id});
-				$judge_by_id{$judge->{id}} = $judge_obj;
-				$judge_by_name{$judge->{first}.' '.$judge->{last}} = $judge_obj;
-
-				if ($judge->{person_id}) {
-					$judge_by_person{$judge->{person_id}} = $judge_obj;
-				}
-
-				if ($judge->{person_nsda}) {
-					$judge_by_nsda{$judge->{person_nsda}} = $judge_obj;
-				}
-			}
-
-			&outlog("<p class='specific'> I have ".scalar @{$results}." judges already in category ".$ocategory->abbr."</p>");
+			my %judge_by_id = map {$_->{id} => $_ } @{$judgerefs};
+			my %judge_by_person = map {$_->{person_id} => $_ } @{$judgerefs};
+			my %judge_by_nsda = map {$_->{nsda} => $_ } @{$judgerefs};
 
 			if ($category->{judges}
 				&& (not defined $jdata->{event_only})
 				&& (not defined $jdata->{round_only})
 				&& ($perms->{"owner"} || $perms->{"tabber"} || $perms->{category}{$ocategory} eq "tabber")
 			) {
+
+				# CATEGORY JUDGES.  This is the ordinary way judges are imported
+				# unless this is a single school import, to account for
+				# neutral/hires.
+
+				my $update_judge = $dbh->prepare("
+					update judge
+					set code = ?,
+						first = ?,
+						middle = ?,
+						last = ?,
+						active = ?,
+						ada = ?,
+						obligation = ?,
+						hired = ?,
+						category = ?,
+						alt_category = ?,
+						covers = ?,
+						person = ?
+					where judge.id = ?
+				");
 
 				my %ratings;
 				my $ratings_done;
@@ -2726,70 +2731,22 @@
 						$ojudge = $judge_by_nsda{$judge->{nsda}} if $judge->{nsda} > 0;
 					}
 
-					unless ($ojudge) {
-						$ojudge = $judge_by_name{$judge->{name}};
-					}
 
-					if ($category->{nochange} && $ojudge) {
-						$translator{judge}{$judge->{id}} = $ojudge;
-						delete $judge_by_id{$ojudge};
-						next;
-					}
-
-					# Chapter Judge link if possible
-
-					my $ocj;
-					$ocj = $ojudge->chapter_judge if $ojudge && $ojudge->chapter_judge > 0;
-
-					unless ($ocj) {
-
-						my $school_id = $judge->{school};
-
-						if ($school_id && $cjs{$school_id}) {
-
-							$ocj = $cjs{$school_id}{id}{$judge->{chapter_judge}};
-							$ocj = $cjs{$school_id}{person}{$judge->{person}} unless $ocj;
-							$ocj = $cjs{$school_id}{nsda}{$judge->{nsda}} unless $ocj;
-							$ocj = $cjs{$school_id}{name}{$judge->{first}."-".$judge->{last}} unless $ocj;
-
-						} elsif ($school_id) {
-
-							my $oschool = $translator{school}{$school_id};
-
-							if ($oschool && $oschool->chapter) {
-
-								my @chapter_judges = $oschool->chapter->chapter_judges();
-
-								%{$cjs{$school_id}{id}} = map {$_->id => $_} @chapter_judges;
-								%{$cjs{$school_id}{person}} = map {$_->person => $_} @chapter_judges;
-								%{$cjs{$school_id}{nsda}} = map {$_->nsda => $_} @chapter_judges;
-								%{$cjs{$school_id}{name}} = map {$_->first."-".$_->last => $_} @chapter_judges;
-							}
-
-						} else {
-							$ocj = 0;
-						}
-					}
-
-					#nulls, whiny nulls.
+					# Nulls, whiny nulls.
 					foreach my $flag ("active", "ada", "school", "person") {
 						$judge->{$flag} = 0 unless $judge->{$flag} > 0;
 					}
 
-					my $oschool = $translator{school}{$judge->{school}};
-					$oschool = 0 unless $oschool > 0;
-
-					my $alt_category = $translator{category}{$judge->{alt_category}};
-					$alt_category = 0 unless $alt_category > 0;
-
-					my $covers = $translator{category}{$judge->{covers}};
-					$covers = 0 unless $covers > 0;
+					$judge->{school}       = $translator{school}{$judge->{school}} || 0;
+					$judge->{alt_category} = $translator{category}{$judge->{alt_category}} || 0;
+					$judge->{category}     = $translator{category}{$judge->{category}} || 0;
+					$judge->{covers}       = $translator{category}{$judge->{covers}} || 0;
 
 					my $old_id = $judge->{id};
 
 					unless ($ojudge) {
 
-						$ojudge = Tab::Judge->create({
+						my $obj = Tab::Judge->create({
 							code          => $judge->{code},
 							middle        => $judge->{middle},
 							first         => $judge->{first},
@@ -2799,46 +2756,74 @@
 							obligation    => $judge->{obligation},
 							hired         => $judge->{hired},
 							person        => $judge->{person},
-							school        => $oschool,
-							category      => $ocategory,
-							alt_category  => $alt_category,
-							covers        => $covers,
-							chapter_judge => $ocj
+							school        => $judge->{school},
+							category      => $category->{id},
+							alt_category  => $judge->{alt_category},
+							covers        => $judge->{covers},
 						});
+
+						$judge->{id} = $obj->id;
+						$ojudge = $judge;
+
+						if ($judge->{school} == 686671) {
+							Tab::debuglog("Created judge record for $old_id.  New ID is ".$ojudge->{id});
+						}
 
 					} else {
 
-						$ojudge->code($judge->{code});
-						$ojudge->middle($judge->{middle});
-						$ojudge->first($judge->{first});
-						$ojudge->last($judge->{last});
-						$ojudge->active($judge->{active});
-						$ojudge->ada($judge->{ada});
-						$ojudge->person($judge->{person});
-						$ojudge->obligation($judge->{obligation});
-						$ojudge->hired($judge->{hired});
+						my $delta;
+						my @updates;
 
-						$ojudge->school($oschool);
-						$ojudge->category($ocategory);
-						$ojudge->alt_category($alt_category);
-						$ojudge->covers($covers);
-						$ojudge->chapter_judge($ocj);
+						foreach my $tag (
+							"code", "first", "middle", "last",
+							"active", "ada", "obligation", "hired",
+							"category", "alt_category", "covers", "person",
+						) {
+							if ($judge->{$tag} ne $ojudge->{$tag}) {
+								$delta++;
+							}
+							push @updates, $judge->{$tag};
+						}
 
-						$ojudge->update();
+						if ($delta) {
+							push @updates, $ojudge->{id};
+							$update_judge->execute(@updates);
+
+							if ($judge->{school} == 686671) {
+								Tab::debuglog("Updated judge ".$ojudge->{id});
+							}
+						}
+
+						delete $judge_by_id{$ojudge->{id}};
 					}
 
-					$translator{judge}{$old_id} = $ojudge;
-					delete $judge_by_id{$old_id};
+					if ($old_id) {
+						$translator{judge}{$old_id} = $ojudge;
+						delete $judge_by_id{$old_id};
 
-					# JUDGE SETTINGS
-					Tab::JudgeSetting->sql_rm_all->execute($ojudge->id);
-
-					if ($judge->{settings})  {
-						foreach my $jsetting (@{$judge->{settings}}) {
-							my @reply = parse_setting($jsetting);
-							eval{$ojudge->setting(@reply)};
+						if ($judge->{school} == 686671) {
+							Tab::debuglog("Removed judge $old_id from the deletion section");
+							if ($ojudge) {
+								Tab::debuglog("Judge in DB is ".$ojudge->{id}." ".$ojudge->{last});
+							}
+							Tab::debuglog("Delete on old ID: ".$judge_by_id{$old_id});
+							Tab::debuglog("Delete on new ID: ".$judge_by_id{$ojudge->{id}});
+							Tab::debuglog("");
 						}
 					}
+
+					if ($judge->{school} == 686671) {
+						Tab::debuglog("Judge ".$judge->{id}." last ".$judge->{last}." now exists NSDA Test with ojudge $ojudge");
+						Tab::debuglog("");
+					}
+
+					&align_settings(
+						$ojudge->{id},
+						"judge",
+						$judge_settings{$ojudge->{id}},
+						$judge->{settings},
+						$dbh
+					);
 
 					unless ($counter < 5 || $counter % 10) {
 						&outlog("<p class='action'> Imported ".$counter." judges so far.  Just did ".$judge->{"last"}."</p>");
@@ -2852,6 +2837,22 @@
 				foreach my $jid (keys %judge_by_id) {
 					$translator{judge}{$jid} = $judge_by_id{$jid};
 				}
+				undef %judge_by_id;
+			}
+
+			my $delete_judge = $dbh->prepare('
+				delete from judge where id = ?
+			');
+
+			foreach my $jid (keys %judge_by_id) {
+
+				my $judge = $judge_by_id{$jid};
+
+				if ($judge->{school} == 686671) {
+					Tab::debuglog("Judge id $jid ".$judge->{id}." last ".$judge->{last}." now being deleted out of existings");
+				}
+
+				$delete_judge->execute($jid);
 			}
 		}
 
@@ -2892,7 +2893,8 @@
 				# EVENT ENTRIES:
 				# If this is an event or category only file and therefore contains entries
 
-				my $total_entries = 0;
+				my $imported_entries = 0;
+				my $updated_entries = 0;
 				my $pref_count = 0;
 
 				if ($event->{entries}) {
@@ -2928,7 +2930,9 @@
 
 					foreach my $student (@{$students}) {
 						$students{$student->{school}}{by_id}{$student->{id}} = $student;
-						$students{$student->{school}}{by_nsda}{$student->{nsda}} = $student;
+						if ($student->{nsda}) {
+							$students{$student->{school}}{by_nsda}{$student->{nsda}} = $student;
+						}
 						$students{$student->{school}}{by_name}{$student->{first}."-".$student->{last}} = $student;
 						$sc{$student->{chapter}} = $student->{chapter};
 					}
@@ -2952,8 +2956,10 @@
 
 					foreach my $ent_ref (@entries) {
 						$entry_by_id{$ent_ref->{event}}{$ent_ref->{id}} = $ent_ref;
+						if ($ent_ref->{code}) {
+							$entry_by_code{$ent_ref->{event}}{$ent_ref->{code}} = $ent_ref;
+						}
 						$entry_by_name{$ent_ref->{event}}{$ent_ref->{name}} = $ent_ref;
-						$entry_by_code{$ent_ref->{event}}{$ent_ref->{code}} = $ent_ref;
 					}
 
 					my $entry_student_sth = $dbh->prepare("
@@ -3023,12 +3029,16 @@
 
 						my $oentry;
 						$oentry = $entry_by_id{$oevent->{id}}{$entry->{id}};
+						if ($entry->{code}) {
+							$oentry = $entry_by_code{$oevent->{id}}{$entry->{code}} unless $oentry;
+						}
 						$oentry = $entry_by_name{$oevent->{id}}{$entry->{name}} unless $oentry;
-						$oentry = $entry_by_code{$oevent->{id}}{$entry->{code}} unless $oentry;
 
 						my $old_id = $entry->{id};
 
 						unless ($oentry) {
+
+							$imported_entries++;
 
 							my $oentry_obj = Tab::Entry->create({
 								school      => $oschool->id,
@@ -3061,6 +3071,7 @@
 							}
 
 							if ($delta) {
+								$updated_entries++;
 
 								$update_entry->execute(
 									$entry->{name},
@@ -3077,15 +3088,14 @@
 								$entry->{id} = $oentry->{id};
 								$oentry = $entry;
 							}
+							delete $entry_by_id{$oentry->{id}};
 						}
 
-						delete $entry_by_id{$oentry->{id}};
-
+						delete $entry_by_id{$old_id};
 						$translator{entry}{$old_id} = $oentry;
 
 						# ENTRY SETTINGS
 						if ($oentry->{id}) {
-							$total_entries++;
 							&align_settings(
 								$oentry->{id},
 								"entry",
@@ -3125,10 +3135,18 @@
 						STUDENT:
 						foreach my $student (@{$entry->{students}}) {
 
+							if ($entry->{name} eq "Citlali Clarke") {
+								Tab::debuglog("I have student ".$student->{id}." ".$student->{first}." ".$student->{last});
+							}
+
 							next if $done{$student->{id}}++;
 
 							my $ostudent = $students{$entry->{school}{by_id}}{$student->{id}};
-							$ostudent = $students{$entry->{school}{by_nsda}}{$student->{nsda}} unless $ostudent;
+
+							if ($student->{nsda}) {
+								$ostudent = $students{$entry->{school}{by_nsda}}{$student->{nsda}} unless $ostudent;
+							}
+
 							$ostudent = $students{$entry->{school}{by_name}}{$student->{first}."-".$student->{last}} unless $ostudent;
 
 							unless ($ostudent) {
@@ -3345,9 +3363,9 @@
 					&outlog("<h5 class='martop action'>ROUNDS AND RESULTS</h5>");
 
 					if ($pref_count > 0) {
-						&outlog(" Imported $total_entries entries with $pref_count pref sheets</p>");
+						&outlog(" Imported $imported_entries and updated $updated_entries entries with $pref_count pref sheets</p>");
 					} else {
-						&outlog(" Imported $total_entries entries</p>");
+						&outlog(" Imported $imported_entries and updated $updated_entries entries</p>");
 					}
 
 				} elsif ($jdata->{round_only} || $jdata->{event_only}) {
@@ -3505,8 +3523,6 @@
 							if ($delta) {
 								push @update, $oround->{id};
 								$round->{id} = $oround->{id};
-								Tab::debuglog("Updating round ".$round->{id}." created at ".$round->{created_at});
-								Tab::debuglog(@update);
 								$update_round->execute(@update);
 								$oround = $round;
 							}
@@ -4050,6 +4066,8 @@
 				my $delete_jpj = $dbh->prepare("delete jpj.* from jpool_judge jpj where jpj.jpool = ? and jpj.judge = ?");
 				my $delete_jpr = $dbh->prepare("delete jpr.* from jpool_judge jpr where jpr.jpool = ? and jpr.judge = ?");
 
+				my @need_parent;
+
 				foreach my $jpool (@{$category->{jpools}}) {
 
 					&outlog("<p class='action'> Importing ".$jpool->{name}." with ".scalar @{$jpool->{judges}}." judges  </p>");
@@ -4069,6 +4087,7 @@
 						}
 						$jpool->{id} = $ojpool->{id};
 						$ojpool = $jpool;
+						delete $jpool_by_id{$ojpool->{id}};
 					} else {
 						my $obj = Tab::JPool->create({
 							name     => $jpool->{name},
@@ -4081,6 +4100,10 @@
 
 					$translator{jpool}{$old_id} = $ojpool->{id};
 					delete $jpool_by_id{$old_id};
+
+					if ($jpool->{parent}) {
+						push @need_parent, $jpool;
+					}
 
 					&align_settings($ojpool->{id}, "jpool", $jpool_settings{$ojpool->{id}}, $jpool->{settings}, $dbh);
 
@@ -4103,14 +4126,13 @@
 						foreach my $judge (@{$jpool->{judges}}) {
 							my $ojudge = $translator{judge}{$judge};
 							next unless $ojudge;
-							unless ($jpjs{$old_id}{$ojudge}) {
-								Tab::debuglog("adding judge ".$ojudge." original $judge to pool ".$ojpool->{id});
+							unless ($jpjs{$old_id}{$ojudge->{id}}) {
 								Tab::JPoolJudge->create({
-									judge => $ojudge,
+									judge => $ojudge->{id},
 									jpool => $ojpool->{id}
 								});
 							}
-							delete $jpjs{$old_id}{$ojudge};
+							delete $jpjs{$old_id}{$ojudge->{id}};
 							delete $jpjs{$old_id}{$judge};
 						}
 					}
@@ -4134,16 +4156,10 @@
 					update jpool set parent = ? where id = ?
 				");
 
-				foreach my $jpool (@{$category->{jpools}}) {
-					if ($jpool->{parent}) {
-
-						my $ojpool = $translator{jpool}{$jpool->{id}};
-						my $parent = $translator{jpool}{$jpool->{parent}};
-
-						if ($ojpool && $parent) {
-							$update_parent->execute($ojpool, $parent);
-						}
-					}
+				foreach my $jpool (@need_parent) {
+					my $new_id = $translator{jpool}{$jpool->{id}};
+					my $parent_id = $translator{jpool}{$jpool->{parent}};
+					$update_parent->execute($parent_id, $new_id);
 				}
 			}
 		}
@@ -4347,11 +4363,10 @@
 			return unless $dt;
 			return ($json_ref->{tag}, $json_ref->{meta}, $dt);
 		} elsif ($json_ref->{meta} eq "text" || $json_ref->{meta} eq "json") {
-
+			chomp $json_ref->{value};
 			my $value = Tab::Utils::uncompress($json_ref->{value}) if $json_ref->{value};
 			my $json = eval { return JSON::decode_json($value); };
 			return ($json_ref->{tag}, $json_ref->{meta}, $json);
-
 		} else {
 			return ($json_ref->{tag}, $json_ref->{value});
 		}
@@ -4514,10 +4529,12 @@
 						$jsetting->{value_date} =~ s/T/\ /g;
 						$jsetting->{value}      = $jsetting->{meta};
 					} elsif ($jsetting->{meta} eq "json") {
-						$jsetting->{value_text} = Tab::Utils::decompress($jsetting->{value});
+						chomp $jsetting->{value};
+						$jsetting->{value_text} = Tab::Utils::uncompress($jsetting->{value});
 						$jsetting->{value}      = $jsetting->{meta};
 					} elsif ($jsetting->{meta} eq "text") {
-						$jsetting->{value_text} = $jsetting->{value};
+						chomp $jsetting->{value};
+						$jsetting->{value_text} = Tab::Utils::uncompress($jsetting->{value});
 						$jsetting->{value}      = $jsetting->{meta};
 					} else {
 					}
