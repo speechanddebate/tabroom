@@ -774,7 +774,7 @@
 
 				if ($jdata->{whole}) {
 
-					Tab::debuglog("Whole tournament mode activated");
+					&outlog("<h4>Data file was for whole tournament; restoration will prune unknown elements</h4>");
 
 					my $delete_event = $dbh->prepare("
 						delete from event where id = ?
@@ -2037,6 +2037,7 @@
 										judge.id, judge.first, judge.middle, judge.last,
 										judge.active, judge.ada, judge.obligation, judge.hired,
 										judge.category, judge.alt_category, judge.covers, judge.person,
+										judge.chapter_judge,
 										person.id person_id, person.nsda nsda
 									from judge
 										left join person on person.id = judge.person
@@ -2045,18 +2046,24 @@
 
 								my $update_judge = $dbh->prepare("
 									update judge
-									set code = ?,
-										first = ?,
-										middle = ?,
-										last = ?,
-										active = ?,
-										ada = ?,
-										obligation = ?,
-										hired = ?,
-										category = ?,
+									set code         = ?,
+										first        = ?,
+										middle       = ?,
+										last         = ?,
+										active       = ?,
+										ada          = ?,
+										obligation   = ?,
+										hired        = ?,
+										category     = ?,
 										alt_category = ?,
-										covers = ?,
-										person = ?
+										covers       = ?,
+										person       = ?
+									where judge.id   = ?
+								");
+
+								my $update_judge_cj= $dbh->prepare("
+									update judge
+									set chapter_judge = ?
 									where judge.id = ?
 								");
 
@@ -2131,6 +2138,7 @@
 											push @updates, $ojudge->{id};
 											$update_judge->execute(@updates);
 										}
+
 									}
 
 									$translator{judge}{$old_id} = $ojudge;
@@ -2645,8 +2653,6 @@
 			&outlog("<h4 class='martop action'>JUDGES</h4>");
 		}
 
-		my %cjs;
-
 		my %judge_settings = &find_settings(
 			"judge",
 			$tourn->id,
@@ -2654,6 +2660,25 @@
 			" where judge.category = category.id and category.tourn = ? and judge.id = setting.judge ",
 			$dbh,
 		);
+
+		my $cj_sth = $dbh->prepare('
+			select
+				cj.id, cj.first, cj.middle, cj.last,
+				cj.chapter,
+				cj.person, person.nsda nsda
+			from (chapter_judge cj, school)
+				left join person on person.id = cj.person
+			where school.tourn = ?
+				and school.chapter = cj.chapter
+		');
+
+		$cj_sth->execute($tourn->id);
+		my $cjrefs = $cj_sth->fetchall_hash();
+
+		my %cj_by_id = map {$_->{id} => $_ } @{$cjrefs};
+		my %cj_by_person = map {$_->{chapter}."-".$_->{person} => $_ } @{$cjrefs};
+		my %cj_by_nsda = map {$_->{chapter}."-".$_->{nsda} => $_ } @{$cjrefs};
+		my %cj_by_name = map {$_->{chapter}."-".$_->{first}."-".$_->{last} => $_ } @{$cjrefs};
 
 		CATEGORY:
 		foreach my $category (@{$jdata->{categories}}) {
@@ -2697,18 +2722,24 @@
 
 				my $update_judge = $dbh->prepare("
 					update judge
-					set code = ?,
-						first = ?,
-						middle = ?,
-						last = ?,
-						active = ?,
-						ada = ?,
-						obligation = ?,
-						hired = ?,
-						category = ?,
+					set code         = ?,
+						first        = ?,
+						middle       = ?,
+						last         = ?,
+						active       = ?,
+						ada          = ?,
+						obligation   = ?,
+						hired        = ?,
+						category     = ?,
 						alt_category = ?,
-						covers = ?,
-						person = ?
+						covers       = ?,
+						person       = ?
+					where judge.id   = ?
+				");
+
+				my $update_judge_cj= $dbh->prepare("
+					update judge
+					set chapter_judge = ?
 					where judge.id = ?
 				");
 
@@ -2738,11 +2769,44 @@
 					}
 
 					$judge->{school}       = $translator{school}{$judge->{school}} || 0;
+					my $oschool            = $translator{school}{$judge->{school}} || 0;
 					$judge->{alt_category} = $translator{category}{$judge->{alt_category}} || 0;
-					$judge->{category}     = $translator{category}{$judge->{category}} || 0;
 					$judge->{covers}       = $translator{category}{$judge->{covers}} || 0;
 
 					my $old_id = $judge->{id};
+					my $chapter;
+
+					if ($oschool > 0) {
+						$chapter = $oschool->chapter->id;
+					}
+
+					my $cj;
+
+					if ($oschool && $chapter) {
+						$cj = $cj_by_id{$judge->{chapter_judge}};
+					}
+
+					if ((not defined $cj) && $oschool && $chapter && $judge->{person}) {
+						$cj = $cj_by_person{$chapter."-".$judge->{person}};
+					}
+
+					if ((not defined $cj) && $oschool && $chapter && $judge->{nsda}) {
+						$cj = $cj_by_nsda{$oschool->{chapter}."-".$judge->{nsda}};
+					}
+
+					if ((not defined $cj) && $oschool && $chapter && $judge->{first}) {
+						$cj = $cj_by_name{$chapter."-".$judge->{first}."-".$judge->{last}};
+					}
+
+					my $cj_id = 0;
+
+					if ($cj && $cj->{id}) {
+						$cj_id = $cj->{id};
+
+						if ($cj->{person} && ( (not defined $judge->{person}) || $judge->{person} < 1)) {
+							$judge->{person} = $cj->{person};
+						}
+					}
 
 					unless ($ojudge) {
 
@@ -2757,22 +2821,21 @@
 							hired         => $judge->{hired},
 							person        => $judge->{person},
 							school        => $judge->{school},
-							category      => $category->{id},
+							category      => $ocategory->id,
 							alt_category  => $judge->{alt_category},
 							covers        => $judge->{covers},
+							chapter_judge => $cj_id
 						});
 
 						$judge->{id} = $obj->id;
 						$ojudge = $judge;
 
-						if ($judge->{school} == 686671) {
-							Tab::debuglog("Created judge record for $old_id.  New ID is ".$ojudge->{id});
-						}
-
 					} else {
 
 						my $delta;
 						my @updates;
+
+						$judge->{category} = $ocategory->id;
 
 						foreach my $tag (
 							"code", "first", "middle", "last",
@@ -2788,10 +2851,10 @@
 						if ($delta) {
 							push @updates, $ojudge->{id};
 							$update_judge->execute(@updates);
+						}
 
-							if ($judge->{school} == 686671) {
-								Tab::debuglog("Updated judge ".$ojudge->{id});
-							}
+						if ($cj_id && $cj_id ne $ojudge->{chapter_judge}) {
+							$update_judge_cj->execute($cj_id, $ojudge->{id});
 						}
 
 						delete $judge_by_id{$ojudge->{id}};
@@ -2800,21 +2863,6 @@
 					if ($old_id) {
 						$translator{judge}{$old_id} = $ojudge;
 						delete $judge_by_id{$old_id};
-
-						if ($judge->{school} == 686671) {
-							Tab::debuglog("Removed judge $old_id from the deletion section");
-							if ($ojudge) {
-								Tab::debuglog("Judge in DB is ".$ojudge->{id}." ".$ojudge->{last});
-							}
-							Tab::debuglog("Delete on old ID: ".$judge_by_id{$old_id});
-							Tab::debuglog("Delete on new ID: ".$judge_by_id{$ojudge->{id}});
-							Tab::debuglog("");
-						}
-					}
-
-					if ($judge->{school} == 686671) {
-						Tab::debuglog("Judge ".$judge->{id}." last ".$judge->{last}." now exists NSDA Test with ojudge $ojudge");
-						Tab::debuglog("");
 					}
 
 					&align_settings(
@@ -2845,13 +2893,7 @@
 			');
 
 			foreach my $jid (keys %judge_by_id) {
-
 				my $judge = $judge_by_id{$jid};
-
-				if ($judge->{school} == 686671) {
-					Tab::debuglog("Judge id $jid ".$judge->{id}." last ".$judge->{last}." now being deleted out of existings");
-				}
-
 				$delete_judge->execute($jid);
 			}
 		}
@@ -3134,10 +3176,6 @@
 
 						STUDENT:
 						foreach my $student (@{$entry->{students}}) {
-
-							if ($entry->{name} eq "Citlali Clarke") {
-								Tab::debuglog("I have student ".$student->{id}." ".$student->{first}." ".$student->{last});
-							}
 
 							next if $done{$student->{id}}++;
 
