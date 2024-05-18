@@ -47,8 +47,8 @@ sub texify {
 	$string =~ s/_/\\_/g;
 	$string =~ s/\^//g;
 	$string =~ s/\%/\\\%/g;
-	$string =~ s/<br>/\\break/g;
-
+	$string =~ s/<br>/ \\break /g;
+	$string =~ s/<br \/>/ \\break /g;
 	return $string;
 }
 
