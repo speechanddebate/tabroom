@@ -87,18 +87,15 @@
 		push @entries, $entry_id;
 
 		if ($event_settings{"nsda_nats"}) {
-
 			$entry_info{$entry_id}{"school"} = $school;
 			$entry_info{$entry_id}{"region"} = $region;
 			$school_info{"size"}{$region}++;
-
 		} elsif ($event_settings{"ncfl"}) {
 			$entry_info{$entry_id}{"school"} = $region;
 			if ($event_settings{'diocese_regions'}) {
 				$entry_info{$entry_id}{"region"} = $event_settings{"diocese_regions"}{$region};
 			}
 			$school_info{"size"}{$region}++;
-
 		} elsif ($pair_school) {
 
 			$entry_info{$entry_id}{"school"} = $pair_school;
@@ -248,7 +245,7 @@
 
 	my $ballot_sth = $dbh->prepare('
 		select distinct
-			entry.id,
+			entry.id, entry.code, entry.school, entry_school.region,
 			opponent.id, opp_school.id, opp_school.region,
 			ballot.side
 
@@ -257,6 +254,7 @@
 			ballot as opp_ballot, school as opp_school)
 
 		left join chapter on opp_school.chapter = chapter.id
+			left join school entry_school on entry_school.id = entry.school
 
 		where entry.event = ?
 			and entry.id = ballot.entry
@@ -274,24 +272,42 @@
 
 	$ballot_sth->execute($event->id, $round->id);
 
-	my %dio_region = $event->setting("diocese_regions");
-	my $dio_regions = $event->setting("conflict_dioregion_judges");
+	my %dio_region = $event_settings{"diocese_regions"};
+	my $dio_regions = $event_settings{"conflict_dioregion_judges"};
 
 	while(
-		my ($entry_id, $opp_id, $opp_school, $opp_region, $side)
-		= $ballot_sth->fetchrow_array()
+		my (
+			$entry_id, $entry_code, $entry_school, $entry_region,
+			$opp_id, $opp_school, $opp_region, $side
+		) = $ballot_sth->fetchrow_array()
 	) {
 
 		$entry_info{$entry_id}{"hits-".$opp_id}++;
 
-		$entry_info{$entry_id}{"oppside-".$opp_id."-".$side}++
-			unless $no_side_constraints;
+		unless ($no_side_constraints) {
+			$entry_info{$entry_id}{"oppside-".$opp_id."-".$side}++;
+		}
 
-		$entry_info{$entry_id}{"school_hit-".$opp_school}++;
-		$entry_info{$entry_id}{"region_hit-".$opp_region}++;
+		#Translate the school to do the diocese and the dioregion to the region
+		if ($event_settings{"ncfl"}) {
+			my $dio_region_id = $dio_region{$entry_region};
+			$entry_school = $entry_region;
+			$entry_region = $dio_region_id;
+
+			my $opp_dio_region_id = $dio_region{$opp_region};
+			$opp_school = $opp_region;
+			$opp_region = $opp_dio_region_id;
+		} else {
+			$entry_info{$entry_id}{"region_hit"}{$opp_region}++;
+		}
+
+		$entry_info{$entry_id}{"school_hit"}{$opp_school}++;
+
+		$entry_info{"school_hit"}{$entry_school}{$opp_school}++;
+		$entry_info{"region_hit"}{$entry_region}{$opp_region}++;
 
 		if ($dio_regions) {
-			$entry_info{$entry_id}{"dioregion_hit-".$dio_region{$opp_region}}++;
+			$entry_info{$entry_id}{"dioregion_hit"}{$dio_region{$opp_region}}++;
 		}
 
 		push @{$entry_info{$entry_id}{"opponents"}}, $opp_id;
@@ -683,7 +699,7 @@
 				push @{$final_panels{$panel}}, $panel_entries{$panel}{"neg"};
 			}
 
-			write_round($round, \%final_panels, 0, \@byes, \%event_settings);
+			write_round($round, \%final_panels, 0, \@byes, \%event_settings, \%entry_info);
 
 		}
 
@@ -693,7 +709,7 @@
 		my %score_cache = ();
 
 		PASS:
-		foreach my $pass (1 .. 4) {
+		foreach my $pass (1 .. 6) {
 
 			my %panels;
 
@@ -1010,8 +1026,9 @@
 				# multiple byes at this point, they're almost certainly
 				# screwups who don't deserve that kind of consideration.
 
-				@due_whatever = shuffle @due_whatever
-					unless $event_settings{"seed_presets"} eq "balance";
+				unless ($event_settings{"seed_presets"} eq "balance") {
+					@due_whatever = shuffle @due_whatever;
+				}
 
 				my $pull = shift @due_whatever;
 				next if $used{$pull}++;
@@ -1162,7 +1179,6 @@
 					unless ($neg) {
 
 						foreach my $debate_me_maybe (@due_neg) {
-
 							next unless $entry_info{$neg}{"need_seed"}{$entry_info{$aff}{"seed"}};
 							$neg = $debate_me_maybe;
 							$done{"maybe_".$debate_me_maybe}++;
@@ -1196,36 +1212,36 @@
 
 						my $clash = 0;
 
-						$clash++ if $entry_info{$aff}{"school"}
-									== $entry_info{$maybe_neg}{"school"};
+						if ($entry_info{$aff}{"school"} == $entry_info{$maybe_neg}{"school"}) {
+							$clash++;
+						}
 
-						$clash++
-							if $entry_info{$aff}{"school"}
-								== $entry_info{$partner{$maybe_neg}}{"school"};
+						if ($entry_info{$aff}{"school"} == $entry_info{$partner{$maybe_neg}}{"school"}) {
+							$clash++;
+						}
 
-						$clash++
-							if $entry_info{$maybe_neg}{"school"}
-								== $entry_info{$partner{$aff}}{"school"};
+						if ($entry_info{$maybe_neg}{"school"} == $entry_info{$partner{$aff}}{"school"}) {
+							$clash++;
+						}
 
-						if ($event_settings{"region_avoid"}
-							|| $event_settings{"region_constrain"}
-						) {
 
-							$clash++
-								if $entry_info{$aff}{"region"}
-									== $entry_info{$maybe_neg}{"region"};
+						if ($event_settings{"region_avoid"} || $event_settings{"region_constrain"}) {
 
-							$clash++
-								if $entry_info{$aff}{"region"}
-									== $entry_info{$partner{$maybe_neg}}{"region"};
+							if ($entry_info{$aff}{"region"} == $entry_info{$maybe_neg}{"region"}) {
+								$clash++;
+							}
 
-							$clash++
-								if $entry_info{$maybe_neg}{"region"}
-									== $entry_info{$partner{$aff}}{"region"};
+							if ($entry_info{$aff}{"region"} == $entry_info{$partner{$maybe_neg}}{"region"}) {
+								$clash++;
+							}
 
-							$clash++
-								if $entry_info{$aff}{"area"}
-								 	&& ($entry_info{$aff}{"area"} == $entry_info{$maybe_neg}{"area"});
+							if ($entry_info{$maybe_neg}{"region"} == $entry_info{$partner{$aff}}{"region"}) {
+								$clash++;
+							}
+
+							if ($entry_info{$aff}{"area"} && ($entry_info{$aff}{"area"} == $entry_info{$maybe_neg}{"area"})) {
+								$clash++;
+							}
 						}
 
 						my $diff;
@@ -1271,11 +1287,11 @@
 				push @{$panels{$counter}}, $aff;
 				push @{$panels{$counter}}, $neg;
 
-				increase_school_hit(\%entry_info, \@{$panels{$counter}}, "initial");
+				#increase_school_hit(\%entry_info, \@{$panels{$counter}}, "initial");
 
-				if ($event_settings{"region_constrain"}) {
-					increase_region_hit(\%entry_info, \@{$panels{$counter}}, "initial");
-				}
+				#if ($event_settings{"region_constrain"}) {
+				#	increase_region_hit(\%entry_info, \@{$panels{$counter}}, "initial");
+				#}
 
 				$counter++;
 
@@ -1285,32 +1301,26 @@
 					&! $done{$partner{$neg}}
 				) {
 
-					if ($is_due_aff{$partner{$aff}}
-						&& $is_due_neg{$partner{$neg}}
-					) {
+					if ($is_due_aff{$partner{$aff}} && $is_due_neg{$partner{$neg}}) {
 
-						if ($entry_info{$partner{$aff}}{"school"}
-							!= $entry_info{$partner{$neg}}{"school"}
-						) {
+						if ($entry_info{$partner{$aff}}{"school"} != $entry_info{$partner{$neg}}{"school"}) {
 
 							if (
 								(not defined $event_settings{"region_constrain"})
 								|| (
-									$entry_info{$partner{$aff}}{"region"}
-									!= $entry_info{$partner{$neg}}{"region"}
+									$entry_info{$partner{$aff}}{"region"} != $entry_info{$partner{$neg}}{"region"}
 								)
 							) {
 
 								push @{$panels{$counter}}, $partner{$aff};
 								push @{$panels{$counter}}, $partner{$neg};
 
-								increase_school_hit(\%entry_info, \@{$panels{$counter}}, "initial 2");
-								if ($event_settings{"region_constrain"}) {
-									increase_region_hit(\%entry_info, \@{$panels{$counter}}, "initial 2");
-								}
+								#increase_school_hit(\%entry_info, \@{$panels{$counter}}, "initial 2");
+								#if ($event_settings{"region_constrain"}) {
+								#	increase_region_hit(\%entry_info, \@{$panels{$counter}}, "initial 2");
+								#}
 
 								$counter++;
-
 								$done{$partner{$aff}}++;
 								$done{$partner{$neg}}++;
 								$negs++;
@@ -1346,7 +1356,7 @@
 			}
 
 			COUNTER:
-			foreach my $counter (1 .. 5) {
+			foreach my $counter (1 .. 7) {
 
 				my $swaps_made;
 
@@ -1560,19 +1570,19 @@
 						}
 
 
-						reduce_school_hit(\%entry_info, \@{$panels{$panel_key}});
-						reduce_school_hit(\%entry_info, \@{$panels{$swap_key}});
+						#reduce_school_hit(\%entry_info, \@{$panels{$panel_key}});
+						#reduce_school_hit(\%entry_info, \@{$panels{$swap_key}});
 
-						increase_school_hit(\%entry_info, \@new_1, "double swap");
-						increase_school_hit(\%entry_info, \@new_2, "double swap");
+						#increase_school_hit(\%entry_info, \@new_1, "double swap");
+						#increase_school_hit(\%entry_info, \@new_2, "double swap");
 
-						if ($event_settings{"region_constrain"}) {
-							reduce_region_hit(\%entry_info, \@{$panels{$panel_key}});
-							reduce_region_hit(\%entry_info, \@{$panels{$swap_key}});
+						#if ($event_settings{"region_constrain"}) {
+						#	reduce_region_hit(\%entry_info, \@{$panels{$panel_key}});
+						#	reduce_region_hit(\%entry_info, \@{$panels{$swap_key}});
 
-							increase_region_hit(\%entry_info, \@new_1, "double swap");
-							increase_region_hit(\%entry_info, \@new_2, "double swap");
-						}
+						#	increase_region_hit(\%entry_info, \@new_1, "double swap");
+						#	increase_region_hit(\%entry_info, \@new_2, "double swap");
+						#}
 
 						@{$panels{$panel_key}} = @new_1;
 						@{$panels{$swap_key}} = @new_2;
@@ -1706,23 +1716,23 @@
 						my @new_2 = ($aff1, $neg2);
 						my @new_3 = ($aff2, $neg3);
 
-						reduce_school_hit(\%entry_info, \@{$panels{$panel_key}});
-						reduce_school_hit(\%entry_info, \@{$panels{$swap_key_2}});
-						reduce_school_hit(\%entry_info, \@{$panels{$swap_key_3}});
+						#reduce_school_hit(\%entry_info, \@{$panels{$panel_key}});
+						#reduce_school_hit(\%entry_info, \@{$panels{$swap_key_2}});
+						#reduce_school_hit(\%entry_info, \@{$panels{$swap_key_3}});
 
-						increase_school_hit(\%entry_info, \@new_1, "triple swap");
-						increase_school_hit(\%entry_info, \@new_2, "triple swap");
-						increase_school_hit(\%entry_info, \@new_3, "triple swap");
+						#increase_school_hit(\%entry_info, \@new_1, "triple swap");
+						#increase_school_hit(\%entry_info, \@new_2, "triple swap");
+						#increase_school_hit(\%entry_info, \@new_3, "triple swap");
 
-						if ($event_settings{"region_constrain"}) {
-							reduce_school_hit(\%entry_info, \@{$panels{$panel_key}});
-							reduce_school_hit(\%entry_info, \@{$panels{$swap_key_2}});
-							reduce_school_hit(\%entry_info, \@{$panels{$swap_key_3}});
+						#if ($event_settings{"region_constrain"}) {
+						#	reduce_school_hit(\%entry_info, \@{$panels{$panel_key}});
+						#	reduce_school_hit(\%entry_info, \@{$panels{$swap_key_2}});
+						#	reduce_school_hit(\%entry_info, \@{$panels{$swap_key_3}});
 
-							increase_school_hit(\%entry_info, \@new_1, "triple swap");
-							increase_school_hit(\%entry_info, \@new_2, "triple swap");
-							increase_school_hit(\%entry_info, \@new_3, "triple swap");
-						}
+						#	increase_school_hit(\%entry_info, \@new_1, "triple swap");
+						#	increase_school_hit(\%entry_info, \@new_2, "triple swap");
+						#	increase_school_hit(\%entry_info, \@new_3, "triple swap");
+						#}
 
 						@{$panels{$panel_key}} = @new_1;
 						@{$panels{$swap_key_2}} = @new_2;
@@ -1773,15 +1783,14 @@
 		}
 
 		push @byes, $bye;
-		write_round($round, \%final_panels, \@byes, \%event_settings);
+		write_round($round, \%final_panels, \@byes, \%event_settings, \%entry_info);
 	}
 
 	return;
 
 	sub write_round {
 
-		my ($round, $final_panref, $byeref, $event_settings) = @_;
-
+		my ($round, $final_panref, $byeref, $event_settings, $entry_info) = @_;
 		my @byes = @{$byeref};
 
 		#Out with the old.
@@ -1811,7 +1820,6 @@
 		$letter = "A" if $event_settings->{"panel_labels"} eq "letters";
 
 		my %used;
-
 		my @keys = sort {$a <=> $b} keys %{$final_panref};
 
 		foreach my $key (@keys) {
@@ -1820,8 +1828,10 @@
 			my $neg = shift @{${$final_panref}{$key}};
 
 			next if $used{$aff} && $used{$neg};
-
 			next unless $aff || $neg;
+
+			my $aff_ref = $entry_info->{$aff};
+			my $neg_ref = $entry_info->{$neg};
 
 			my $panel = Tab::Panel->create({
 				round  => $round->id,
@@ -1909,7 +1919,6 @@
 
         my $score = 0;
 
-
 		if (
 			($neg->{"school"} && $neg->{"school"} == $aff->{"school"})
 			|| ($aff->{"hybrid"} && $neg->{"school"} == $aff->{"hybrid"})
@@ -1918,7 +1927,6 @@
 
 			# We are from the same school.  Highest penalty.
 			$score += 10000;
-
 		}
 
 		# We have debated against each other previously
@@ -1944,14 +1952,12 @@
 				}
 
 				# If are from the same area.  Moderate penalty to avoid.
-				if ( $neg->{"area"}
-					&& $neg->{"area"} == $aff->{"area"}
-				) {
+				if ( $neg->{"area"} && $neg->{"area"} == $aff->{"area"}) {
 					$score += 20;
 				}
 
-				$score += $aff->{"region_hit-".$neg->{"region"}} * 2;
-				$score += $neg->{"region_hit-".$aff->{"region"}} * 2;
+				$score += $aff->{"region_hit"}{$neg->{"region"}} * 2;
+				$score += $neg->{"region_hit"}{$aff->{"region"}} * 2;
 			}
 		}
 
@@ -1960,17 +1966,26 @@
 			# If we are from the same region, treat penalty the same as schools
 
 			if (
-				$neg->{"region"}
-				&& $neg->{"region"} == $aff->{"region"}
+				$neg->{"region"} && $neg->{"region"} == $aff->{"region"}
 			) {
 				$score += 10000;
 			}
 
 			if ($neg->{"region"}) {
-				$score += $aff->{"region_hit-".$neg->{"region"}} * 5;
+				$score += $aff->{"region_hit"}{$neg->{"region"}} * 10;
 			}
 			if ($aff->{"region"}) {
-				$score += $neg->{"region_hit-".$aff->{"region"}} * 5;
+				$score += $neg->{"region_hit"}{$aff->{"region"}} * 10;
+			}
+
+			if ($aff->{"region"} && $neg->{"region"}) {
+				if ($entry_info->{"region_hit"}{$aff->{"region"}}{$neg->{"region"}} > 0) {
+					$score += $entry_info->{"region_hit"}{$aff->{"region"}}{$neg->{"region"}};
+				}
+
+				if ($entry_info->{"region_hit"}{$neg->{"region"}}{$aff->{"region"}} > 0) {
+					$score += $entry_info->{"region_hit"}{$neg->{"region"}}{$aff->{"region"}};
+				}
 			}
 		}
 
@@ -2030,24 +2045,23 @@
 			$score+= $position_score;
 		}
 
-		# We have debated against someone else from that same school.  Lowest
-		# penalty.
+		# We have debated against someone else from that same school.  Lowest penalty.
 
 		if ($neg->{"school"}) {
-			$score += $aff->{"school_hit-".$neg->{"school"}} * 10;
+			$score += $aff->{"school_hit"}{$neg->{"school"}} * 10;
 		}
 
 		if ($aff->{"school"}) {
-			$score += $neg->{"school_hit-".$aff->{"school"}} * 10;
+			$score += $neg->{"school_hit"}{$aff->{"school"}} * 10;
 		}
 
 		if ($aff->{"school"} && $neg->{"school"}) {
-			if (($entry_info->{"school_hit"}{$aff->{"school"}}{$neg->{"school"}} - 2) > 0) {
-				$score += ($entry_info->{"school_hit"}{$aff->{"school"}}{$neg->{"school"}} - 2) * 2;
+			if ($entry_info->{"school_hit"}{$aff->{"school"}}{$neg->{"school"}} > 0) {
+				$score += $entry_info->{"school_hit"}{$aff->{"school"}}{$neg->{"school"}};
 			}
 
-			if (($entry_info->{"school_hit"}{$neg->{"school"}}{$aff->{"school"}} - 2) > 0) {
-				$score += ($entry_info->{"school_hit"}{$neg->{"school"}}{$aff->{"school"}} - 2) * 2;
+			if ($entry_info->{"school_hit"}{$neg->{"school"}}{$aff->{"school"}} > 0) {
+				$score += $entry_info->{"school_hit"}{$neg->{"school"}}{$aff->{"school"}};
 			}
 		}
 
@@ -2091,7 +2105,6 @@
 	sub increase_school_hit {
 
         my ($entry_info, $panref, $reason) = @_;
-
 		my ($aff, $neg) = @{$panref} if $panref && @{$panref};
 
 		return unless $aff > 0 && $neg > 0;
