@@ -16,7 +16,9 @@ sub text {
 	my ($self, $input) = @_;
 
 	if ($input) {
-		$self->content(Tab::Utils::compress($input));
+		my $text = Tab::Utils::compress($input);
+		chomp $text;
+		$self->content($text);
 		$self->update();
 	} else {
 		return Tab::Utils::uncompress($self->content);
