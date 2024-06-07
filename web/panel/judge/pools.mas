@@ -1,309 +1,143 @@
 <%args>
 	$tourn
 	$perms
-	$defaults    => undef
-	$session     => undef
-	$category_id => undef
-	$jpool_id    => undef
-	$nats        => undef
-	$pull_jpool  => undef
+	$session
+	$defaults
+	$jpool_id  => undef
+	$parent_id => undef
 </%args>
 <%init>
 
-	my ($events, $categories) = $m->comp(
-		"/funclib/allowed_events.mas",
-		tourn     => $tourn,
-		perms     => $perms,
-		newschool => 'yasskween'
+	my %cats = $m->comp("/funclib/perms/categories.mas",
+		tourn   => $tourn,
+		perms   => $perms,
+		limited => 1
 	);
 
-	unless ($categories) {
-		$m->comp("/funclib/abort.mas",
-			message => "The system found no categories that you have full access to"
-		);
-	}
+	my $categories = \%cats;
 
 	my $dbh = Tab::DBI->db_Main();
 	my $category;
 
-	foreach my $cat (sort {$a <=> $b} keys %{$categories}) {
-		if ($cat == $category_id) {
-			$category = $cat;
+	unless ($parent_id || $ARGS{"no_default"} eq "jpool") {
+		$parent_id = $defaults->{tourns}{$tourn}{parent};
+	}
+
+	if ($ARGS{"category_id"} && $categories->{$ARGS{"category_id"}}) {
+
+		$category = $categories->{$ARGS{"category_id"}};
+
+		unless ($defaults->{tourns}{$tourn}{category} == $ARGS{"category_id"}) {
+			$defaults->{tourns}{$tourn}{category} = $ARGS{"category_id"};
+			$session->default($defaults);
+			$session->update();
 		}
-	}
 
-	if (
-		(not defined $category)
-		&& $categories->{$defaults->{tourns}{$tourn}{category}}
-	) {
-		$category = int($defaults->{tourns}{$tourn}{category});
-	}
+	} elsif ($jpool_id || $parent_id ) {
 
-	if ($nats &&  (not defined $category)) {
-		foreach my $cat (sort {$a <=> $b} keys %{$categories}) {
-			if ($categories->{$cat}{"nats_category"}) {
-				$category = $cat;
+		my $sth = $dbh->prepare("select jpool.id, jpool.category from jpool where jpool.id = ? ");
+		$sth->execute($jpool_id || $parent_id);
+		my $results = $sth->fetchall_hash();
+		my $ref = eval { return shift @{$results}; };
+
+		if ($ref && $categories->{$ref->{category}}) {
+
+			unless ($defaults->{tourns}{$tourn}{category} == $ref->{category}) {
+				$defaults->{tourns}{$tourn}{category} = $ref->{category};
+				$session->default($defaults);
+				$session->update();
 			}
+
+			$category = $categories->{$ref->{category}};
 		}
+
+	} elsif ($categories->{$defaults->{tourns}{$tourn}{category}}) {
+		$category = $categories->{$defaults->{tourns}{$tourn}{category}};
+	} else {
+
+		my @keys = sort keys %cats;
+		my $id;
+		if (@keys) {
+			$id = shift @keys;
+		}
+		$category = $categories->{$id};
 	}
 
-	if (not defined $category) {
-		foreach my $cat (sort {$a <=> $b} keys %{$categories}) {
-			$category = $cat;
-			last;
-		}
+	unless ($category) {
+		$m->comp("/funclib/abort.mas",
+			message => "You do not have sufficient tournament access to view this section of Tabroom."
+		);
 	}
 
-	my $limit;
+	my $sth = $dbh->prepare("
+		select
+			jpool.id, jpool.name name,
+			parent.id parent_id, parent.name parent_name,
+			site.id site_id, site.name site_name,
+			registrant.value registrant,
+			standby.value standby,
+			standby_timeslot.value timeslot,
+			MIN(timeslot.start) as start
+		from jpool
+			left join jpool parent on parent.id = jpool.parent
+			left join site on jpool.site = site.id
+			left join jpool_round jpr on jpr.jpool = jpool.id
+			left join round on jpr.round = round.id
+			left join timeslot on round.timeslot = timeslot.id
 
-	unless ($ARGS{'pull_standby'}) {
-		if ($ARGS{'standby'}) {
-			$limit = 'and EXISTS (
-				select jps.id
-					from jpool_setting jps
-				where jps.tag = "standby"
-					and jps.jpool = jpool.id
-			)';
-		} else {
-			$limit = 'and NOT EXISTS (
-				select jps.id
-					from jpool_setting jps
-				where jps.tag = "standby"
-					and jps.jpool = jpool.id
-			)';
-		}
-	}
+			left join jpool_setting registrant
+				on registrant.jpool = jpool.id
+				and registrant.tag = 'registrant'
 
-	my %jpools;
-	my %parents;
-	my $parent;
+			left join jpool_setting standby
+				on standby.jpool = jpool.id
+				and standby.tag = 'standby'
+
+			left join jpool_setting standby_timeslot
+				on standby_timeslot.jpool = jpool.id
+				and standby_timeslot.tag = 'standby_timeslot'
+
+		where jpool.category = ?
+		group by jpool.id
+	");
+
+	$sth->execute($category->{id});
+	my $results = $sth->fetchall_hash();
+	my %jpools = map {$_->{id} => $_} @{$results};
+
 	my $jpool;
+	my $parent;
+
+	unless ($jpool_id || $ARGS{"no_default"} eq "jpool") {
+		$jpool_id = $defaults->{tourns}{$tourn}{jpool};
+	}
 
 	if ($jpool_id) {
-		$jpool = Tab::JPool->retrieve($jpool_id);
-	}
+		$jpool = $jpools{$jpool_id};
 
-	my $pull;
-
-	if ($pull_jpool) {
-		$pull = Tab::JPool->retrieve($pull_jpool);;
-	}
-
-	if ($ARGS{"nsda_nats"}
-		&& $category
-		&& $categories->{$category}{"nats_category"}
-		&! $ARGS{"pull_standby"}
-	) {
-
-		if ($jpool) {
-
-			if ($pull && $pull->parent) {
-				$parent = $pull->parent;
-				$ARGS{"parent"} = $parent;
-				$defaults->{"parent"} = int($parent);
-			} elsif ($jpool->parent) {
-				$parent = $jpool->parent;
-				$ARGS{"parent"} = $parent;
-				$defaults->{"parent"} = int($parent);
-			} else {
-				delete $defaults->{"parent"};
-				delete $ARGS{"parent"};
-			}
-
+		unless ($jpool->{id} == $defaults->{tourns}{$tourn}{jpool}) {
+			$defaults->{tourns}{$tourn}{jpool} = $jpool->{id};
 			$session->default($defaults);
 			$session->update();
-
-		} elsif ($ARGS{"parent"} eq "0") {
-
-			delete $defaults->{"parent"};
-			$session->default($defaults);
-			$session->update();
-
-		} elsif ($ARGS{"parent"} eq int($ARGS{"parent"})) {
-
-			$defaults->{"parent"} = $ARGS{'parent'};
-			$parent = Tab::JPool->retrieve($defaults->{"parent"});
-			$session->default($defaults);
-			$session->update();
-
-		} else {
-			$parent = Tab::JPool->retrieve($defaults->{"parent"});
 		}
+	}
 
+	if ($parent_id) {
+		$parent = $jpools{$parent_id};
 
-		my $sth = $dbh->prepare("
-			select jpool.id, jpool.name, jpool.site, jpool.parent,
-				count(distinct jpj.judge) as judgecount,
-				site.name as site_name
-			from (jpool, jpool child)
-				left join jpool_judge jpj on jpj.jpool = jpool.id
-				left join site on jpool.site = site.id
-
-			where jpool.category = ?
-				and child.parent = jpool.id
-				$limit
-			group by jpool.id
-			order by jpool.name
-		");
-
-		$sth->execute($category);
-		my $results = $sth->fetchall_hash();
-
-		# Neither parents nor children but registrants
-		$sth = $dbh->prepare("
-			select jpool.id, jpool.name, jpool.site, jpool.parent,
-				count(distinct jpj.judge) as judgecount,
-				site.name as site_name
-			from (jpool, jpool_setting registrant)
-				left join jpool_judge jpj on jpj.jpool = jpool.id
-				left join site on jpool.site = site.id
-			where jpool.category = ?
-	            and not exists (
-					select child.id from jpool child where child.parent = jpool.id
-				)
-				and (jpool.parent = 0 OR jpool.parent IS NULL)
-				and registrant.jpool = jpool.id
-				and registrant.tag = 'registrant'
-				$limit
-			group by jpool.id
-			order by jpool.name
-		");
-
-		$sth->execute($category);
-
-		my $registered = $sth->fetchall_hash();
-		push @{$results}, @{$registered};
-
-		%parents = map {$_->{id} => $_} @{$results};
-
-		# Apparently I am super inconsistent about plurals.
-		if ($ARGS{"parent"} eq "orphan" || $ARGS{"parent"} eq "orphans") {
-
-			$sth = $dbh->prepare("
-				select jpool.id, jpool.name, jpool.site, jpool.parent,
-					count(distinct jpj.judge) as judgecount,
-					site.name as site_name
-				from (jpool)
-					left join jpool_judge jpj on jpj.jpool = jpool.id
-					left join site on jpool.site = site.id
-				where jpool.category = ?
-				and not exists (
-					select jps.id
-						from jpool_setting jps
-					where jps.jpool = jpool.id
-						and jps.tag = 'registrant'
-				)
-
-				and (jpool.parent = 0 or jpool.parent is NULL)
-				$limit
-				group by jpool.id
-				order by jpool.name
-			");
-
-			$sth->execute($category);
-			my $results = $sth->fetchall_hash();
-			%jpools = map {$_->{id} => $_} @{$results};
-
-		} elsif ($parent) {
-
-			$sth = $dbh->prepare("
-				select jpool.id, jpool.name, jpool.site, jpool.parent,
-					count(distinct jpj.judge) as judgecount,
-					site.name as site_name
-				from (jpool)
-					left join site on jpool.site = site.id
-					left join jpool_judge jpj on jpj.jpool = jpool.id
-
-				where jpool.category = ?
-				and jpool.parent = ?
-
-				and not exists (
-					select jps.id
-					from jpool_setting jps
-					where jps.jpool = jpool.id
-					and jps.tag = 'registrant'
-				)
-				$limit
-
-				group by jpool.id
-				order by jpool.name
-			");
-
-			foreach my $cand (keys %parents) {
-				if ($ARGS{"parent"} == $cand) {
-					$parent = $cand;
-				}
-			}
-			$sth->execute($category, $parent);
-
-			my $results = $sth->fetchall_hash();
-			%jpools = map {$_->{id} => $_} @{$results};
-
-		} else {
-			%jpools = %parents;
+		unless ($parent->{id} == $defaults->{tourns}{$tourn}{parent}) {
+			$defaults->{tourns}{$tourn}{parent} = $parent->{id};
+			$session->default($defaults);
+			$session->update();
 		}
-
-	} elsif ($category) {
-
-		my $sth = $dbh->prepare("
-			select jpool.id, jpool.name, jpool.site, jpool.parent,
-				count(distinct jpj.judge) as judgecount,
-				site.name as site_name
-			from (jpool)
-				left join jpool_judge jpj on jpj.jpool = jpool.id
-				left join site on jpool.site = site.id
-
-			where jpool.category = ?
-			$limit
-			group by jpool.id
-			order by jpool.name
-		");
-
-		$sth->execute($category);
-		my $results = $sth->fetchall_hash();
-		%jpools = map {$_->{id} => $_} @{$results};
 	}
-
-	if ($jpool && $jpool->category != $category) {
-		$category = $jpool->category;
-	}
-
-	my $new = $m->comp("/funclib/settings.mas",
-		source => \%jpools,
-		model  => "jpool"
-	);
-
-	%jpools = %{$new};
-
-	$new = $m->comp("/funclib/settings.mas",
-		source => \%parents,
-		model  => "jpool"
-	);
-	%parents = %{$new};
-
-	if (
-		$defaults
-		&& $category > 0
-		&& $defaults->{tourns}{$tourn}{category} ne $category
-	) {
-		$defaults->{tourns}{$tourn}{category} = $category;
-	}
-
-	my $category_obj = Tab::Category->retrieve($category);
-
-	$session->default($defaults);
-	$session->update();
 
 	return {
-		category   => $category_obj,
+		category   => $category,
 		categories => $categories,
 		jpool      => $jpool,
-		jpools     => \%jpools,
 		parent     => $parent,
-		parents    => \%parents,
-		defaults   => $defaults,
-		events     => $events,
+		jpools     => \%jpools
 	};
-
 
 </%init>

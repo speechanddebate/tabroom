@@ -4,17 +4,36 @@
 	$perms
 	$person
 	$session
-	$defaults => undef
-	$jpool_id      => undef
-	$event_id      => undef
-	$category_id   => undef
+	$defaults    => undef
+	$jpool_id    => undef
+	$event_id    => undef
+	$category_id => undef
 </%args>
 <%init>
+
+	my %events = $m->comp("/funclib/perms/events.mas",
+		tourn   => $tourn,
+		perms   => $perms,
+		limited => 1
+	);
 
 	my $event;
 
 	if ($event_id) {
-		$event = Tab::Event->retrieve($event_id);
+		$event = $events{$event_id};
+	} elsif ($defaults->{tourns}{$tourn}{event}) {
+		$event_id = $defaults->{tourns}{$tourn}{event};
+		$event = $events{$event_id};
+	} else {
+		my @keys = sort keys %events;
+		$event_id = $keys[0];
+		$event = $events{$event_id};
+	}
+
+	if ($event_id && $defaults->{tourns}{$tourn}{event} != $event_id) {
+		$defaults->{tourns}{$tourn}{event} = $event_id;
+		$session->default($defaults);
+		$session->update();
 	}
 
     my $data = $m->comp("pools.mas",
@@ -22,78 +41,88 @@
         perms       => $perms,
         defaults    => $defaults,
         session     => $session,
-        nsda_nats   => $tourn_settings->{"nsda_nats"},
-        jpool_id    => $jpool_id,
-        parent      => $ARGS{"parent"},
-        category_id => $category_id,
+        category_id => $event->{category} || $category_id
     );
 
-	my $category = $data->{category};
-	my $nats_category = $category->{nats_category};
+	my $category   = $data->{category};
+	my $categories = $data->{categories};
+	my $jpool      = $data->{jpool};
+	my $parent     = $data->{parent};
+	my $jpools     = $data->{jpools};
 
-	unless ($category) {
-		$m->comp("/funclib/abort.mas",
-			message => "No valid judge category found for ID $category_id"
-		);
-	}
-
-	if ($data->{events} && (not defined $event)) {
-		my @keys = keys %{$data->{events}};
-		if (scalar (@keys) == 1) {
-			$event_id = $keys[0];
-			$event = Tab::Event->retrieve($event_id);
-		}
-	}
+	my $dbh = Tab::DBI->db_Main();
 
 	if ($event) {
-		$ARGS{"parent"} = $event->setting("nats_jpool");
-		$ARGS{"min_panel_size"} = $event->setting("min_panel_size");
-		$ARGS{"max_panel_size"} = $event->setting("max_panel_size");
-		unless ($ARGS{"min_panel_size"}) {
-			$ARGS{"min_panel_size"} = 5;
+
+		my $sth = $dbh->prepare("
+			select
+				nats_jpool.value parent,
+				min_panel_size.value min_panel_size,
+				max_panel_size.value max_panel_size,
+				COUNT(entry.id) as entries
+			from event
+
+				left join entry
+					on entry.event = event.id
+					and entry.active = 1
+
+				left join event_setting nats_jpool
+					on nats_jpool.event = event.id
+					and nats_jpool.tag = 'nats_jpool'
+
+				left join event_setting min_panel_size
+					on min_panel_size.event = event.id
+					and min_panel_size.tag = 'min_panel_size'
+
+				left join event_setting max_panel_size
+					on max_panel_size.event = event.id
+					and max_panel_size.tag = 'max_panel_size'
+
+			where event.id = ?
+			group by event.id
+		");
+
+		$sth->execute($event->{id});
+
+		my $results = $sth->fetchall_hash();
+		my $ref = shift @{$results};
+
+		foreach my $key (keys %{$ref}) {
+			$event->{$key} = $ref->{$key};
 		}
-		unless ($ARGS{"max_panel_size"}) {
-			$ARGS{"max_panel_size"} = 7;
-		}
-	}
 
-
-	my $num_entries;
-	my $min_panels;
-	my $max_panels;
-
-	if ($event) {
-		$num_entries = scalar $event->entries( active => 1);
-		$min_panels = POSIX::ceil($num_entries / $ARGS{"max_panel_size"});
-		$max_panels = POSIX::ceil($num_entries / $ARGS{"min_panel_size"});
+		$event->{"min_panel_size"} = $event->{"min_panel_size"} || 5;
+		$event->{"max_panel_size"} = $event->{"max_panel_size"} || 7;
+		$event->{min_panels} = POSIX::ceil($event->{entries} / $event->{"max_panel_size"});
+		$event->{max_panels} = POSIX::ceil($event->{entries} / $event->{"min_panel_size"});
 	}
 
 </%init>
 
 %	unless (defined $event) {
 
-
 		<& "menu.mas",
 			tourn          => $tourn,
-			perms          => $perms,
-			category       => $category,
-			whoami         => "event",
 			tourn_settings => $tourn_settings,
-			nats_category  => $nats_category,
-			categories     => $data->{categories},
-			jpools         => $data->{jpools},
-			events         => $data->{events},
+			perms          => $perms,
+			whoami         => "event",
+			category       => $category,
+			categories     => $categories,
+			jpool          => $jpool,
+			jpools         => $jpools,
+			event          => $event,
+			events         => \%events,
 		&>
 
 		<div class="main">
 
-			<h2><% $category->name %></h2>
+			<h2><% $category->{name} %></h2>
 
 			<& "tabbar.mas",
 				perms    => $perms,
 				tourn    => $tourn,
 				category => $category,
-				jpool    => $data->{jpool},
+				jpool    => $jpool,
 				nsda     => $tourn_settings->{'nsda_nats'},
 				whoami   => "event"
 			&>
@@ -106,47 +135,49 @@
 			category       => $category,
 			whoami         => "event",
 			tourn_settings => $tourn_settings,
-			nats_category  => $nats_category,
-			categories     => $data->{categories},
-			jpools         => $data->{jpools},
-			events         => $data->{events},
+			categories     => $categories,
 			event          => $event,
+			events         => \%events,
 		&>
 
 		<& "/funclib/tablesorter.mas", table => "event" &>
 
 		<div class="main">
 
-			<h2><% $category->name %></h2>
+			<h2><% $category->{name} %></h2>
 
 			<& "tabbar.mas",
 				perms    => $perms,
 				tourn    => $tourn,
-				category => $category,
 				event    => $event,
-				jpool    => $data->{jpool},
+				category => $category,
 				nsda     => $tourn_settings->{'nsda_nats'},
 				whoami   => "event"
 			&>
 
-			<span class="twofifths nospace">
-				<h5><% $event->abbr %> Pools</h5>
-			</span>
+			<div class="full flexrow">
+				<span class="twofifths nospace">
+					<h5><% $event->{abbr} %> Pools</h5>
+				</span>
 
-			<span class="half semibold centeralign bluetext padvert">
-			</span>
+				<span class="twofifths semibold centeralign bluetext padvert">
+				</span>
 
-			<span
-				id    = "event_buttonarea"
-				class = "tenth nospace rightalign"
-			></span>
+				<span
+					id    = "event_buttonarea"
+					class = "fifth rightalign"
+				></span>
+			</div>
 
-			<form action="event_save.mhtml" method="post">
+			<form
+				action = "event_save.mhtml"
+				method = "post"
+			>
 
 			<input
 				type  = "hidden"
 				name  = "event_id"
-				value = "<% $event->id %>"
+				value = "<% $event->{id} %>"
 			>
 
 			<input
@@ -197,11 +228,12 @@
 
 					my $sth = $dbh->prepare("
 						select
-							round.id, round.name, round.label, round.flighted,
-							round.type,
-							CONVERT_TZ(timeslot.start, '+00:00', tourn.tz),
-							num_judges.value, pool_target.value,
-							jpool.id, jpool.name
+							round.id, round.name, round.label, round.flighted, round.type,
+							CONVERT_TZ(timeslot.start, '+00:00', tourn.tz) timeslot_start,
+							num_judges.value num_judges,
+							pool_target.value pool_target,
+							jpool.id jpool_id,
+							jpool.name jpool_name
 
 						from (round, timeslot, tourn)
 
@@ -222,64 +254,20 @@
 						order by round.id
 					");
 
-					$sth->execute($event->id);
+					$sth->execute($event->{id});
+					my $results = $sth->fetchall_hash();
+					my %rounds = map {$_->{id} => $_} @{$results};
 
-					my %rounds;
-
-					while (
-						my (
-							$round_id, $round_name, $round_label, $round_flighted,
-							$round_type,
-							$timeslot_start,
-							$num_judges,
-							$pool_target,
-							$jpool_id, $jpool_name
-						) = $sth->fetchrow_array()
-					) {
-
-						unless ($rounds{$round_id}{"number"}) {
-
-							$rounds{$round_id}{"number"} = $round_name;
-							$rounds{$round_id}{"flighted"} = $round_flighted;
-							$rounds{$round_id}{"type"} = $round_type;
-
-							$num_judges = 1 unless $num_judges;
-							$rounds{$round_id}{"num_judges"} = $num_judges;
-							$rounds{$round_id}{"pool_target"} = $pool_target;
-
-							$rounds{$round_id}{"start"} = $timeslot_start;
-
-							if ($round_label) {
-								$rounds{$round_id}{"name"} = $round_label;
-							} else {
-								$rounds{$round_id}{"name"} = "Round ".$round_name;
-							}
-						}
-
-						$rounds{$round_id}{"jpools"}{$jpool_id} = $jpool_name;
-					}
-
-					my @jpools;
-
-					if ($data->{parent}) {
-						@jpools = Tab::JPool->search( parent => $data->{parent} );
-					} else {
-						@jpools = Tab::JPool->search( category => $category );
-					}
-
-					if ($event->type eq "congress") {
-						foreach my $jpool (@jpools) {
-							push @jpools, Tab::JPool->search( parent => $jpool );
-						}
+					foreach my $ref (@{$results}) {
+						$rounds{$ref->{id}}{"jpools"}{$ref->{jpool_id}} = $ref->{jpool_name};
 					}
 
 					my $elim_counter;
-
 					my $round_count = scalar (keys %rounds);
 
 					foreach my $round_id (
 						sort {
-							$rounds{$a}{"number"} <=> $rounds{$b}{"number"}
+							$rounds{$a}{"name"} <=> $rounds{$b}{"name"}
 						} keys %rounds
 					) {
 
@@ -302,21 +290,20 @@
 							$elim_counter++;
 
 						} else {
-							$default_target = $min_panels;
+							$default_target = $event->{min_panels};
 						}
 
-						$default_target = $default_target * $rounds{$round_id}{"num_judges"};
+						$default_target = $default_target * ($rounds{$round_id}{"num_judges"} || 1);
 </%perl>
 						<tr>
 							<td class="smallish nospace">
-								<div class="full marvertno padvertless padleftless">
-									<% $rounds{$round_id}{"name"} %>
+								<div class="full marvertno padvertless padleft">
+									<% $rounds{$round_id}{"label"} || "Round ".$rounds{$round_id}{"name"} %>
 								</div>
-								<div class="full smaller nospace padleftless">
+								<div class="full smaller flexrow padleft padtopless">
 									<& "/funclib/showtime.mas",
-										string => $rounds{$round_id}{"start"},
+										string => $rounds{$round_id}{"timeslot_start"},
 										length => "day",
-										spans  => "half"
 									&>
 								</div>
 							</td>
@@ -345,10 +332,8 @@
 									min   = "1"
 									max   = "99"
 									size  = "3"
-									value = "<% $rounds{$round_id}{"num_judges"}
-										? $rounds{$round_id}{"num_judges"}
-										: 1
-									%>">
+									value = "<% $rounds{$round_id}{"num_judges"} || 1 %>"
+								>
 							</td>
 
 							<td class="nospace">
@@ -374,7 +359,7 @@
 										</span>
 										<span class="fifth rightalign nospace">
 											<a
-												class     = "buttonwhite redtext fa fa-tiny fa-trash"
+												class     = "buttonwhite redtext fa fa-sm fa-trash"
 												target_id = "<% $jpool_id %>_<% $round_id %>"
 												jpool_id  = "<% $jpool_id %>"
 												round_id  = "<% $round_id %>"
@@ -388,15 +373,23 @@
 
 							<td class="nospace centeralign">
 								<select
-									name     = "jpool_<% $round_id %>"
-									class    = "fixedmed"
+									name             = "jpool_<% $round_id %>"
+									data-placeholder = "Add judge pool"
 								>
-									<option value="">Add judge pool</option>
-%									foreach my $jpool (@jpools) {
-%										next if $used{$jpool->id}++;
+									<option value=""></option>
+<%perl>
+									foreach my $jpid (
+										sort {
+											$jpools->{$b}{"registrant"} <=> $jpools->{$b}{"registrant"}
+											|| $jpools->{$a}{"timeslot_start"} cmp $jpools->{$b}{"timeslot_start"}
+											|| $jpools->{$a}{"name"} cmp $jpools->{$b}{"name"}
+										} keys %{$jpools}
+									) {
+										next if $used{$jpid}++;
+</%perl>
 										<option
-											value="<% $jpool->id %>"
-										><% $jpool->name %></option>
+											value="<% $jpid %>"
+										><% $jpools->{$jpid}{name} %></option>
 %									}
 								</select>
 							</td>
@@ -421,12 +414,9 @@
 									property_name = "remove"
 								></a>
 							</td>
-
-
 						</tr>
 %					}
 				</tbody>
-
 			</table>
 
 			<div class="libl rightalign">

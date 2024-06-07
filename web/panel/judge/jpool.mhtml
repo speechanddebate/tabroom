@@ -7,8 +7,8 @@
 	$defaults         => undef
 	$jpool_id         => undef
 	$category_id      => undef
-	$pull_category_id => undef
-	$parent           => undef
+	$parent_id        => undef
+	$pull_category    => undef
 	$pull_jpool       => undef
 </%args>
 <%init>
@@ -17,20 +17,55 @@
         tourn       => $tourn,
         perms       => $perms,
         defaults    => $defaults,
+		parent_id   => $parent_id,
         session     => $session,
-        nsda_nats   => $tourn_settings->{"nsda_nats"},
         jpool_id    => $jpool_id,
-		parent      => $parent,
-		pull_jpool  => $pull_jpool,
         category_id => $category_id
     );
 
-	my $category = $data->{category};
-	my $jpool = $data->{jpool};
+	my $category   = $data->{category};
+	my $categories = $data->{categories};
+	my $jpool      = $data->{jpool};
+	my $parent     = $data->{parent};
+	my $jpools     = $data->{jpools};
+
+	my %events = $m->comp("/funclib/perms/events.mas",
+		tourn   => $tourn,
+		perms   => $perms,
+		limited => 1
+	);
+
+	my %timeslots = $m->comp("/funclib/perms/timeslots.mas",
+		tourn    => $tourn,
+		perms    => $perms,
+		category => $category->{id}
+	);
+
+	my $obj = Tab::Category->retrieve($category->{id});
+
+	my %category_settings = $obj->all_settings();
+	if ($category_settings{"prefs"} eq "none") {
+		undef $category_settings{"prefs"};
+	}
 
 	my $dbh = Tab::DBI->db_Main();
 
-	if ($jpool && $data->{jpools}{$jpool}{'standby'} && (not defined $pull_jpool)) {
+	my $pull;
+
+	if ($pull_jpool) {
+		$pull = $jpools->{$pull_jpool};
+		unless ($pull) {
+			undef $pull_jpool;
+		}
+	} elsif ($parent->{id}) {
+		$pull = $parent;
+		$pull_jpool = $parent->{id};
+	}
+
+	if ($jpool
+		&& $jpool->{standby}
+		&& (not defined $pull_jpool)
+	) {
 
 		my $sth = $dbh->prepare("
 			select
@@ -44,21 +79,21 @@
 		");
 
 		$sth->execute(
-			$data->{jpools}{$jpool}{"standby_timeslot"},
-			$jpool->site,
+			$jpools->{$jpool}{"timeslot"},
+			$jpool->{site_id},
 			$category_id
 		);
 
-		my $jpools = $sth->fetchall_hash();
+		my $round_jpools = $sth->fetchall_hash();
 
-		$pull_jpool = eval {
-			return ${$jpools}[0]->{id};
-		};
+		foreach my $rpj (@{$round_jpools}) {
+			if ($jpools->{$rpj->{id}}) {
+				$pull = $jpools->{$rpj->{id}};
+				$pull_jpool = $rpj->{id};
+				last;
+			}
+		}
 	}
-
-	my %category_settings = eval {
-		return $category->all_settings() if $category;
-	};
 
 	my %tiers = eval {
 		return map {$_->id => $_->name} $category->rating_tiers;
@@ -67,69 +102,191 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my %rating = ();
-
 	my $sth = $dbh->prepare("
-		select judge.id, jpool.id, jpool.name,
-			registrant.value registrant
+		select
+			judge.id, judge.first, judge.middle, judge.last, judge.code,
+			judge.active,
+			(coalesce(judge.obligation, 0) + coalesce(judge.hired, 0)) as obligation,
+			parli.value parli, diverse.value diverse, diamond.value diamonds,
+			school.name school_name, school.code school_code,
+			region.code region_code,
+			coach_rating.rating_tier coach_rating,
+			tab_rating.value tab_rating,
+			avg(rating.percentile) avg_percentile,
+			avg(rating.ordinal) avg_ordinal
+
+		from (judge, jpool_judge)
+
+			left join school on school.id = judge.school
+			left join region on region.id = school.region
+			left join judge_setting parli on parli.judge = judge.id and parli.tag = 'parli'
+			left join rating coach_rating on coach_rating.judge = judge.id and coach_rating.type = 'coach'
+			left join judge_setting diverse on diverse.judge = judge.id and diverse.tag = 'diverse'
+			left join judge_setting tab_rating on tab_rating.judge = judge.id and tab_rating.tag = 'tab_rating'
+			left join rating on rating.judge = judge.id
+			left join person_setting diamond on diamond.person = judge.person and diamond.tag = 'diamonds'
+
+		where judge.id = jpool_judge.judge
+			and jpool_judge.jpool = ?
+		group by judge.id
+	");
+
+	$sth->execute($jpool->{id});
+
+	my $results = $sth->fetchall_hash();
+
+	my %jpool_judges = map {$_->{id} => $_} @{$results};
+
+	my $source_sth;
+
+	if ($pull_jpool) {
+
+		$source_sth = $dbh->prepare("
+			select
+				judge.id, judge.first, judge.middle, judge.last, judge.code,
+				judge.active,
+				(coalesce(judge.obligation, 0) + coalesce(judge.hired, 0)) as obligation,
+				parli.value parli, diverse.value diverse, diamond.value diamonds,
+				school.name school_name, school.code school_code,
+				region.code region_code,
+				coach_rating.rating_tier coach_rating,
+				tab_rating.value tab_rating,
+				avg(rating.percentile) avg_percentile,
+				avg(rating.ordinal) avg_ordinal
+
+			from (judge, jpool_judge jpj)
+				left join school on school.id = judge.school
+				left join region on region.id = school.region
+				left join judge_setting parli on parli.judge = judge.id and parli.tag = 'parli'
+				left join rating coach_rating on coach_rating.judge = judge.id and coach_rating.type = 'coach'
+				left join judge_setting diverse on diverse.judge = judge.id and diverse.tag = 'diverse'
+				left join judge_setting tab_rating on tab_rating.judge = judge.id and tab_rating.tag = 'tab_rating'
+				left join rating on rating.judge = judge.id
+				left join person_setting diamond on diamond.person = judge.person and diamond.tag = 'diamonds'
+
+			where judge.id = jpj.judge
+				and jpj.jpool = ?
+			group by judge.id
+		");
+
+		$source_sth->execute($pull->{id});
+
+	} else {
+
+		$source_sth = $dbh->prepare("
+			select
+				judge.id, judge.first, judge.middle, judge.last, judge.code,
+				judge.active,
+				(coalesce(judge.obligation, 0) + coalesce(judge.hired, 0)) as obligation,
+				parli.value parli, diverse.value diverse, diamond.value diamonds,
+				school.name school_name, school.code school_code,
+				region.code region_code,
+				coach_rating.rating_tier coach_rating,
+				tab_rating.value tab_rating,
+				avg(rating.percentile) avg_percentile,
+				avg(rating.ordinal) avg_ordinal
+
+			from (judge)
+				left join school on school.id = judge.school
+				left join region on region.id = school.region
+				left join judge_setting parli on parli.judge = judge.id and parli.tag = 'parli'
+				left join rating coach_rating on coach_rating.judge = judge.id and coach_rating.type = 'coach'
+				left join judge_setting diverse on diverse.judge = judge.id and diverse.tag = 'diverse'
+				left join judge_setting tab_rating on tab_rating.judge = judge.id and tab_rating.tag = 'tab_rating'
+				left join rating on rating.judge = judge.id
+				left join person_setting diamond on diamond.person = judge.person and diamond.tag = 'diamonds'
+
+			where judge.category = ?
+			group by judge.id
+		");
+
+		if ($pull_category) {
+			$source_sth->execute($pull_category);
+		} else {
+			$source_sth->execute($category->{id});
+		}
+	}
+
+	$results = $source_sth->fetchall_hash();
+	my %source_judges = map {$_->{id} => $_} @{$results};
+
+	$sth = $dbh->prepare("
+		select judge.id,
+			jpool.id jpool_id,
+			jpool.name jpool_name,
+			registrant.value registrant,
+			standby.value standby
 		from (judge, jpool_judge, jpool, category)
 			left join jpool_setting registrant
 				on registrant.jpool = jpool.id
 				and registrant.tag = 'registrant'
+			left join jpool_setting standby
+				on standby.jpool = jpool.id
+				and standby.tag = 'standby'
 		where category.tourn = ?
 			and category.id = jpool.category
 			and jpool.id = jpool_judge.jpool
 			and judge.id = jpool_judge.judge
+			and jpool.id != ?
 		group by jpool_judge.id
+		order by jpool.name
 	");
 
-	$sth->execute($tourn->id);
+	$sth->execute($tourn->id, $jpool->{id});
+	$results = $sth->fetchall_hash();
 
 	my %already;
 
-	while (
-		my ($judge_id, $jpool_id, $jpool_name, $registrant) = $sth->fetchrow_array()
-	) {
+	foreach my $ref (@{$results}) {
 
-		if ($registrant) {
-			if ($already{$judge_id}{"registrant"}) {
-				$already{$judge_id}{"registrant"} .= ', ';
-			}
+		my $bold;
 
-			$jpool_name =~ s/Lincoln Douglas/LD/g;
-			$jpool_name =~ s/Policy/CX/g;
-			$jpool_name =~ s/Congress/Con/g;
-			$jpool_name =~ s/Speech/IE/g;
-			$jpool_name =~ s/Public Forum/PF/g;
-
-			$already{$judge_id}{"registrant"} .= $jpool_name;
-		} else {
-			push @{$already{$judge_id}{"pools"}}, $jpool_id;
+		if ($ref->{standby} && (not defined $jpool->{standby})) {
+			next;
+		} elsif ($ref->{standby}) {
+			$bold++;
 		}
 
-		$already{"name"}{$jpool_id} = $jpool_name;
+		my $name = $ref->{jpool_name};
+		$name =~ s/Lincoln Douglas/LD/g;
+		$name =~ s/Lincoln-Douglas/LD/g;
+		$name =~ s/Policy/CX/g;
+		$name =~ s/Congress/Con/g;
+		$name =~ s/Speech/IE/g;
+		$name =~ s/Public Forum/PF/g;
+		$name =~ s/ExtDebate/XDB/g;
+
+		if ($ref->{registrant}) {
+			if ($already{$ref->{id}}{"registrant"}) {
+				$already{$ref->{id}}{"registrant"} .= ', ';
+			}
+
+
+			$already{$ref->{id}}{"registrant"} .= $name;
+
+		} else {
+			if ($bold) {
+				$name = '<span class="inline orangetext semibold">'.$name.'</span>';
+			}
+			push @{$already{$ref->{id}}{"pools"}}, $name;
+		}
 	}
 
-	my $pull_category = Tab::Category->retrieve($pull_category_id)
-		if $pull_category_id;
+	$sth = $dbh->prepare("
+		select
+			round.id, round.name, round.label, round.type,
+			event.name event_name, event.abbr event_abbr
+		from round, event
+			where event.category = ?
+			and round.event = event.id
+			order by event.abbr, round.name
+	");
+
+	$sth->execute($category->{id});
+	my $rounds = $sth->fetchall_hash();
+	my %rounds = map {$_->{id} => $_} @{$rounds};
 
 </%init>
-
-	<& "menu.mas",
-		tourn          => $tourn,
-		perms          => $perms,
-		tourn_settings => $tourn_settings,
-		category       => $category,
-		categories     => $data->{categories},
-		jpool          => $data->{jpool},
-		jpools         => $data->{jpools},
-		parent         => $data->{parent},
-		parents        => $data->{parents},
-		nats_category  => $category_settings{"nats_category"},
-		pull_category  => $pull_category,
-		whoami         => "jpool",
-		pull_jpool     => $pull_jpool,
-	&>
 
 	<div class="main">
 
@@ -137,31 +294,27 @@
 
 			<h2>Choose a judge category at right</h2>
 
-%		} elsif (not defined $data->{jpool})  {
+%		} elsif (not defined $jpool->{id})  {
 
-			<h2><% $category->name %></h2>
+			<h2><% $category->{name} %></h2>
 
 			<& "tabbar.mas",
 				tourn    => $tourn,
 				perms    => $perms,
-				category => $category,
 				whoami   => "jpools",
-				jpool    => $data->{jpool},
 				nsda     => $tourn_settings->{'nsda_nats'}
 			&>
 
-			<h4>Choose a judge pool at right</h4>
+			<h5>Choose a judge pool at right</h5>
 
-%		} else {
+%		} elsif ($jpool && $jpool->{id}) {
 
-			<h2><% $category->name %></h2>
+			<h2><% $category->{name} %></h2>
 
 			<& "tabbar.mas",
 				tourn    => $tourn,
 				perms    => $perms,
-				category => $category,
 				whoami   => "jpools",
-				jpool    => $jpool,
 				nsda     => $tourn_settings->{'nsda_nats'}
 			&>
 
@@ -173,49 +326,53 @@
 			<input
 				type  = "hidden"
 				name  = "jpool_id"
-				value = "<% $jpool_id %>"
+				value = "<% $jpool->{id} %>"
 			>
 
 			<input
 				type  = "hidden"
 				name  = "category_id"
-				value = "<% $category->id %>"
+				value = "<% $category->{id} %>"
 			>
 
-			<div class="full nospace padbottomless martopmore flexrow">
-				<span class="half nospace nowrap">
-					<h4><% $jpool->name %></h4>
+			<div class="full padbottomless martopmore flexrow">
+
+				<span class="twofifths nowrap">
+					<h5><% $jpool->{name} %></h5>
 				</span>
 
-%				if ($data->{jpools}{$jpool->id}{'standby'}) {
-					<span class="twofifths centeralign nospace">
-						<span class="third nospace semibold bluetext">
+%				if ($jpool->{'standby'} || $category_settings{"nats_category"}) {
+					<span class="twofifths centeralign flexrow">
+						<span class="third semibold bluetext">
 							Source Pool
 						</span>
 
-						<span class="twothirds nospace">
+						<span class="twothirds">
 							<select
 								name     = "pull_jpool"
 								onchange = 'this.form.submit()'
 								class    = "fixedmost"
 							>
-								<option value=""><option>
+								<option value="">All <% $category->{abbr} %> judges<option>
 <%perl>
 								foreach my $jpool (
 									sort {
-										$data->{jpools}{$a}{"name"} cmp $data->{jpools}{$b}{"name"}
-									} keys %{$data->{jpools}}
+										$jpools->{$b}{"registrant"} <=> $jpools->{$a}{"registrant"}
+										|| $jpools->{$a}{"start"} cmp $jpools->{$b}{"start"}
+										|| $jpools->{$a}{"name"} cmp $jpools->{$b}{"name"}
+									} keys %{$jpools}
 								) {
+									next if $jpools->{$jpool}{"standby"};
 </%perl>
 									<option
 										value="<% $jpool %>"
-										<% $jpool == $pull_jpool ? "selected" : "" %>
-									><% $data->{jpools}{$jpool}{"name"} %></option>
+										<% $jpool == ($pull_jpool || $parent->{id}) ? "selected" : "" %>
+									><% $jpools->{$jpool}{"name"} %></option>
 %								}
 							</select>
 						</span>
 					</span>
-%				} elsif (scalar (keys %{$data->{categories}}) > 1) {
+%				} elsif (scalar (keys %{$categories}) > 1) {
 					<span class="twofifths centeralign flexrow">
 						<span class="third nospace semibold bluetext">
 							Pull from
@@ -231,14 +388,14 @@
 <%perl>
 								foreach my $category (
 									sort {
-										$data->{categories}->{$a}{"name"} cmp $data->{categories}->{$b}{"name"}
-									} keys %{$data->{categories}}
+										$categories->{$a}{"name"} cmp $categories->{$b}{"name"}
+									} keys %{$categories}
 								) {
 </%perl>
 									<option
 										value="<% $category %>"
 										<% $category == $pull_category ? "selected" : "" %>
-									><% $data->{categories}->{$category}{"name"} %></option>
+									><% $categories->{$category}{"name"} %></option>
 %								}
 							</select>
 						</span>
@@ -250,116 +407,61 @@
 %				}
 				</form>
 
-				<span class="flexrow tenth rightalign padleft padright">
-					<a
-						href  = "jpool_add_judges.mhtml?jpool_id=<% $jpool_id %>&category_id=<% $pull_category %>"
-						class = "fa-sm fa fa-plus-circle buttonwhite bluetext"
-						title = "Add all judges to pool"
-					></a>
+				<span class="flexrow fifth padleft padright">
+					<span class="quarter centeralign">
+						<a
+							href  = "jpool_add_judges.mhtml?jpool_id=<% $jpool_id %>&category_id=<% $pull_category %>"
+							class = "fa-sm fa fa-plus-circle buttonwhite bluetext marrightless"
+							title = "Add all judges to pool"
+						></a>
+					</span>
 
 %					my $warn = "This will dump all judges from this jpool.  Are you sure?";
 %					my $erase_url = $Tab::indexcards_url."/tab/".$tourn->id."/jpool/".$jpool_id."/judges";
-					<a
-						class       = "fa-sm fa fa-eraser buttonwhite redtext"
-						title       = "Dump all judges from pool"
-						post_method = "delete"
-						onClick     = "postSwitch(this, '<% $erase_url %>');"
-						<& "/funclib/confirm.mas", warn => $warn &>
-					></a>
+					<span class="quarter centeralign">
+						<a
+							class       = "fa-sm fa fa-eraser buttonwhite redtext"
+							title       = "Dump all judges from pool"
+							post_method = "delete"
+							onClick     = "postSwitch(this, '<% $erase_url %>', clearJudges);"
+							<& "/funclib/confirm.mas", warn => $warn &>
+						></a>
+					</span>
+
+					<span class="quarter centeralign">
+						<a
+							id			= "inactivebutton"
+							class       = "fa-sm fa fa-eye buttonwhite greentext"
+							title       = "Show/Hide Inactive Judges"
+							onClick     = "toggleInactives()";
+						></a>
+					</span>
+
+					<span class="quarter centeralign">
+						<a
+							class = "fa-sm fa fa-send buttonwhite purpletext"
+							title = "Message Judges in Pool"
+							href  = "jpool_blast.mhtml?jpool_id=<% $jpool_id %>"
+						></a>
+					</span>
 				</span>
 			</div>
 <%perl>
 
-			my %jpool_judges;
-
-			my $avg_pref;
-
-			# Without this nonsense this query takes forty three years to
-			# complete when there are no tiered prefs
-
-			if (
-				$category_settings{"prefs"} eq "tiered"
-				|| $category_settings{"prefs"} eq "tiered_rounds"
-			) {
-				$avg_pref = ', avg(rating.ordinal) ';
-			}
-
-			my $sth = $dbh->prepare("
-				select
-					judge.id, judge.first, judge.middle, judge.last, judge.code,
-					judge.active, judge.obligation, judge.hired,
-					diverse.value, diamond.value,
-					school.name, school.code, region.code,
-					coach_rating.rating_tier, tab_rating.value, parli.value,
-					avg(rating.percentile)".$avg_pref."
-
-				from (judge, jpool_judge)
-
-					left join school on school.id = judge.school
-					left join region on region.id = school.region
-					left join judge_setting parli on parli.judge = judge.id and parli.tag = 'parli'
-					left join rating coach_rating on coach_rating.judge = judge.id and coach_rating.type = 'coach'
-					left join judge_setting diverse on diverse.judge = judge.id and diverse.tag = 'diverse'
-					left join judge_setting tab_rating on tab_rating.judge = judge.id and tab_rating.tag = 'tab_rating'
-					left join rating on rating.judge = judge.id
-					left join person_setting diamond on diamond.person = judge.person and diamond.tag = 'diamonds'
-
-				where judge.id = jpool_judge.judge
-					and jpool_judge.jpool = ?
-					and judge.active = 1
-				group by judge.id
-			");
-
-			$sth->execute($jpool_id);
-
-			while (
-				my (
-					$id, $judge_first, $judge_middle, $judge_last, $judge_code,
-					$judge_active, $judge_obligation, $judge_hired,
-					$diverse, $diamonds,
-					$school_name, $school_code, $region_code,
-					$coach_rating, $tab_rating, $parli,
-					$avg_percentile,
-					$avg_rating
-				) = $sth->fetchrow_array()
-			) {
-
-				$jpool_judges{$id}{"first"}          = $judge_first;
-				$jpool_judges{$id}{"middle"}         = $judge_middle;
-				$jpool_judges{$id}{"last"}           = $judge_last;
-				$jpool_judges{$id}{"code"}           = $judge_code;
-				$jpool_judges{$id}{"active"}         = $judge_active;
-				$jpool_judges{$id}{"obligation"}     = ($judge_obligation + $judge_hired);
-				$jpool_judges{$id}{"school_name"}    = $school_name;
-				$jpool_judges{$id}{"school_code"}    = $school_code;
-				$jpool_judges{$id}{"region_code"}    = $region_code;
-				$jpool_judges{$id}{"coach_rating"}   = $tiers{$coach_rating};
-
-				$jpool_judges{$id}{"diverse"}        = $diverse;
-				$jpool_judges{$id}{"diamonds"}        = $diamonds;
-				$jpool_judges{$id}{"tab_rating"}     = $tab_rating;
-				$jpool_judges{$id}{"parli"}          = $parli;
-				$jpool_judges{$id}{"avg_percentile"} = $avg_percentile;
-				$jpool_judges{$id}{"avg_rating"}     = $avg_rating;
-			}
-
 			my $jpoolcount = scalar(keys %jpool_judges);
 
 			my %used = ();
-
 </%perl>
-			<div class="full nospace lightbordertop padtopless top">
+			<div class="splitpage lightbordertop padtopless top flexrow">
 
 			<span class="half top nowrap">
 				<span class="twothirds nospace">
-					<h5>
+					<h6 class="semibold">
 						<span
-							class="inline"
-							id="incount"
-						>
-							<% $jpoolcount %>
-						</span> in pool
-					</h5>
+							class = "inline"
+							id    = "incount"
+						></span> in pool
+					</h6>
 				</span>
 
 				<span
@@ -372,7 +474,7 @@
 					></a>
 
 					<a class="fa fa-print buttonwhite redtext fa-sm marleft hidden"
-						href="print_jpool_public.mhtml?category_id=<% $category->id %>"
+						href="print_jpool_public.mhtml?category_id=<% $category->{id} %>"
 						title="Pool list with Public Posting"
 					></a>
 				</span>
@@ -451,44 +553,44 @@
 							} keys %jpool_judges
 						) {
 
-							my $hidden = "lirdrow" unless $jpool_judges{$judge_id}{active};
+							my $judge = $jpool_judges{$judge_id};
+							my $hidden = "lirdrow" unless $judge->{active};
 							$used{$judge_id}++;
 </%perl>
-
 							<tr
-								class   = "judge <% $hidden %> smallish hover"
+								class   = "judge <% $hidden %> smallish hover <% $judge->{active} ? "" : "hidden inactive" %>"
 								id      = "<% $judge_id %>"
 								onClick = "togglePool(this);"
 							>
 
 %								if ($category_settings{"ask_parli"}) {
 									<td>
-										<% $jpool_judges{$judge_id}{parli} ? "P" : "" %>
+										<% $judge->{parli} ? "P" : "" %>
 									</td>
 %								}
 
 								<td
 									class     = "cellmax nowrap"
-									title     = "<% $jpool_judges{$judge_id}{first} %> <% $jpool_judges{$judge_id}{last} %>"
-									data-text = "<% $jpool_judges{$judge_id}{last} %>"
+									title     = "<% $judge->{first} %> <% $judge->{last} %>"
+									data-text = "<% $judge->{last} %>"
 								>
-									<% $jpool_judges{$judge_id}{first} %>
-									<% $jpool_judges{$judge_id}{last} %>
+									<% $judge->{first} %>
+									<% $judge->{last} %>
 									<div class="italic tiny full nospace padtopless"
-										title="<% $jpool_judges{$judge_id}{school_name} %>"
+										title="<% $judge->{school_name} %>"
 									>
-										<% Tab::short_name($jpool_judges{$judge_id}{school_name}) %>
+										<% Tab::short_name($judge->{school_name}) %>
 									</div>
 								</td>
 
 %								if ($category_settings{"prefs"}) {
 									<td class="rightalign">
-										<% $jpool_judges{$judge_id}{avg_percentile}
-											? sprintf("%.1f", $jpool_judges{$judge_id}{avg_percentile})
+										<% $judge->{avg_percentile}
+											? sprintf("%.1f", $judge->{avg_percentile})
 											: ""
 										%> <%
-											$jpool_judges{$judge_id}{avg_rating}
-											? sprintf("%.1f", $jpool_judges{$judge_id}{avg_rating})
+											$judge->{avg_rating}
+											? sprintf("%.1f", $judge->{avg_rating})
 											: ""
 										%>
 									</td>
@@ -496,40 +598,40 @@
 
 %								if ($category_settings{"coach_ratings"}) {
 									<td>
-										<% $jpool_judges{$judge_id}{coach_rating} %>
+										<% $judge->{coach_rating} %>
 									</td>
 %								}
 
 %								if ($category_settings{"tab_ratings"}) {
 									<td>
-										<% $jpool_judges{$judge_id}{tab_rating} %>
+										<% $judge->{tab_rating} %>
 									</td>
 %								}
 
 %								if ($tourn_settings->{"nsda_nats"}) {
 
 									<td class="centeralign">
-										<% $jpool_judges{$judge_id}{region_code} %>
+										<% $judge->{region_code} %>
 									</td>
 
 									<td class="centeralign">
-										<% ($jpool_judges{$judge_id}{obligation} + $jpool_judges{$judge_id}{hired}) %>
+										<% $judge->{obligation} %>
 									</td>
 
 									<td class="centeralign">
-										<% $jpool_judges{$judge_id}{diverse} ? "D" : "" %>
+										<% $judge->{diverse} ? "D" : "" %>
 									</td>
 
 									<td class="centeralign">
-										<% $jpool_judges{$judge_id}{diamonds} %>
+										<% $judge->{diamonds} %>
 									</td>
 %								} elsif ($tourn_settings->{"ncfl"}) {
 									<td title="Diocese Code">
-										<% $jpool_judges{$judge_id}{region_code} %>
+										<% $judge->{region_code} %>
 									</td>
 %								} elsif ($tourn_settings->{"regions"}) {
 									<td title="Region Code">
-										<% $jpool_judges{$judge_id}{region_code} %>
+										<% $judge->{region_code} %>
 									</td>
 %								}
 
@@ -539,10 +641,9 @@
 											<% $already{$judge_id}{"registrant"} %>
 										</div>
 %									}
-%									foreach my $ojpool_id (@{$already{$judge_id}{"pools"}}) {
-%										next if $jpool_id == $ojpool_id;
+%									foreach my $ojpool (@{$already{$judge_id}{"pools"}}) {
 										<div class="full nowrap padless marno smaller">
-											<% $already{"name"}{$ojpool_id} %>
+											<% $ojpool %>
 										</div>
 %									}
 								</td>
@@ -553,97 +654,14 @@
 			</span>
 
 			<span class="half top nowrap">
-<%perl>
-			undef $category_settings{"prefs"} if $category_settings{"prefs"} eq "none";
 
-			my %judges;
-			my $fields = "judge";
-			my $where = "where judge.category = ?";
-			my @flags;
-
-			if ($pull_jpool) {
-				$fields = "judge, jpool_judge";
-				$where  = "where judge.id = jpool_judge.judge and jpool_judge.jpool = ? ";
-				@flags = ($pull_jpool);
-			} elsif ($parent) {
-				$fields = "judge, jpool_judge";
-				$where  = "where judge.id = jpool_judge.judge and jpool_judge.jpool = ? ";
-				@flags = ($parent);
-			} elsif ($pull_category) {
-				@flags = ($pull_category->id);
-			} elsif ($jpool->parent > 0) {
-				$fields = "judge, jpool_judge";
-				$where  = "where judge.id = jpool_judge.judge and jpool_judge.jpool = ? ";
-				@flags = ($jpool->parent->id);
-			} elsif ($category) {
-				@flags = ($category->id);
-			}
-
-			$sth = $dbh->prepare("
-				select
-					judge.id, judge.first, judge.middle, judge.last, judge.code,
-					judge.active, judge.obligation, judge.hired,
-					diverse.value, diamond.value,
-					school.name, school.code, region.code,
-					coach_rating.rating_tier, tab_rating.value, parli.value,
-					avg(rating.percentile)".$avg_pref."
-
-				from ($fields)
-					left join school on school.id = judge.school
-					left join region on region.id = school.region
-					left join judge_setting parli on parli.judge = judge.id and parli.tag = 'parli'
-					left join rating coach_rating on coach_rating.judge = judge.id and coach_rating.type = 'coach'
-					left join judge_setting diverse on diverse.judge = judge.id and diverse.tag = 'diverse'
-					left join judge_setting tab_rating on tab_rating.judge = judge.id and tab_rating.tag = 'tab_rating'
-					left join rating on rating.judge = judge.id
-					left join person_setting diamond on diamond.person = judge.person and diamond.tag = 'diamonds'
-				$where
-					and judge.active = 1
-				group by judge.id
-			");
-
-			$sth->execute(@flags);
-
-			while (
-				my (
-					$id, $judge_first, $judge_middle, $judge_last, $judge_code,
-					$judge_active, $judge_obligation, $judge_hired,
-					$judge_diverse, $judge_diamonds,
-					$school_name, $school_code, $region_code,
-					$coach_rating, $tab_rating, $parli,
-					$avg_percentile, $avg_rating
-				) = $sth->fetchrow_array()
-			) {
-
-				$judges{$id}{"first"}          = $judge_first;
-				$judges{$id}{"middle"}         = $judge_middle;
-				$judges{$id}{"last"}           = $judge_last;
-				$judges{$id}{"code"}           = $judge_code;
-				$judges{$id}{"active"}         = $judge_active;
-				$judges{$id}{"obligation"}     = ($judge_obligation + $judge_hired);
-				$judges{$id}{"school_name"}    = $school_name;
-				$judges{$id}{"school_code"}    = $school_code;
-				$judges{$id}{"region_code"}    = $region_code;
-				$judges{$id}{"coach_rating"}   = $tiers{$coach_rating};
-				$judges{$id}{"diverse"}        = $judge_diverse;
-				$judges{$id}{"diamonds"}       = $judge_diamonds;
-				$judges{$id}{"tab_rating"}     = $tab_rating;
-				$judges{$id}{"parli"}          = $parli;
-				$judges{$id}{"avg_percentile"} = $avg_percentile;
-				$judges{$id}{"avg_rating"}     = $avg_rating;
-			}
-
-			my $judgecount = scalar(keys %judges);
-
-</%perl>
 				<span class="threequarters nospace">
-					<h5>
+					<h6 class="semibold">
 						<span
 							class = "inline"
 							id    = "outcount"
-						> <% $judgecount %> </span>
-						available
-					</h5>
+						></span> available
+					</h6>
 				</span>
 
 				<span
@@ -724,51 +742,53 @@
 <%perl>
 					foreach my $judge_id (
 						sort {
-							$judges{$a}{"last"} cmp $judges{$b}{last}
-						} keys %judges
+							$source_judges{$a}{"last"} cmp $source_judges{$b}{last}
+						} keys %source_judges
 					) {
 
 						next if $used{$judge_id};
-						my $hidden = "lirdrow" unless $judges{$judge_id}{'active'};
+						my $hidden = "lirdrow" unless $source_judges{$judge_id}{'active'};
+						my $judge = $source_judges{$judge_id};
+
 </%perl>
 						<tr
-							class   = "judge <% $hidden %> smallish hover"
+							class   = "judge <% $hidden %> smallish hover <% $judge->{active} ? "" : "hidden inactive" %>"
 							id      = "<% $judge_id %>"
 							onClick = "togglePool(this);"
 						>
 
 %							if ($category_settings{"ask_parli"}) {
 								<td>
-									<% $judges{$judge_id}{parli} ? "P" : "" %>
+									<% $judge->{parli} ? "P" : "" %>
 								</td>
 %							}
 
 							<td
 								class="cellmax nowrap"
-								title="<% $judges{$judge_id}{first} %> <% $judges{$judge_id}{last} %>"
+								title="<% $judge->{first} %> <% $judge->{last} %>"
 							>
 								<span class='hidden'>
-									<% $judges{$judge_id}{last} %>
+									<% $judge->{last} %>
 								</span>
-								<% $judges{$judge_id}{first} %>
-								<% $judges{$judge_id}{last} %>
+								<% $judge->{first} %>
+								<% $judge->{last} %>
 								<div class="italic tiny full nospace padtopless"
-									title="<% $judges{$judge_id}{school_name} %>"
+									title="<% $judge->{school_name} %>"
 								>
-									<% Tab::short_name($judges{$judge_id}{school_name}) %>
+									<% Tab::short_name($judge->{school_name}) %>
 								</div>
 
 							</td>
 
 %							if ($category_settings{"prefs"}) {
 								<td class="rightalign">
-									<% $judges{$judge_id}{avg_percentile}
-										? sprintf("%.1f", $judges{$judge_id}{avg_percentile})
+									<% $judge->{avg_percentile}
+										? sprintf("%.1f", $judge->{avg_percentile})
 										: ""
 									%>
 									<%
-										$judges{$judge_id}{avg_rating}
-										? sprintf("%.1f", $judges{$judge_id}{avg_rating})
+										$judge->{avg_rating}
+										? sprintf("%.1f", $judge->{avg_rating})
 										: ""
 									%>
 								</td>
@@ -776,41 +796,41 @@
 
 %							if ($category_settings{"coach_ratings"}) {
 								<td>
-									<% $judges{$judge_id}{coach_rating} %>
+									<% $judge->{coach_rating} %>
 								</td>
 %							}
 
 %							if ($category_settings{"tab_ratings"}) {
 								<td>
-									<% $judges{$judge_id}{tab_rating} %>
+									<% $judge->{tab_rating} %>
 								</td>
 %							}
 
 %							if ($tourn_settings->{"nsda_nats"}) {
 
 								<td class="centeralign">
-									<% $judges{$judge_id}{region_code} %>
+									<% $judge->{region_code} %>
 								</td>
 
 								<td class="centeralign">
-									<% ($judges{$judge_id}{obligation} + $judges{$judge_id}{hired})  %>
+									<% $judge->{obligation} %>
 								</td>
 
 								<td class="centeralign">
-									<% $judges{$judge_id}{diverse} ? "D" : "" %>
+									<% $judge->{diverse} ? "D" : "" %>
 								</td>
 
 								<td class="centeralign">
-									<% $judges{$judge_id}{diamonds} %>
+									<% $judge->{diamonds} %>
 								</td>
 
 %								} elsif ($tourn_settings->{"ncfl"}) {
 									<td title="Diocese Code">
-										<% $jpool_judges{$judge_id}{region_code} %>
+										<% $judge->{region_code} %>
 									</td>
 %								} elsif ($tourn_settings->{"regions"}) {
 									<td title="Region Code">
-										<% $jpool_judges{$judge_id}{region_code} %>
+										<% $judge->{region_code} %>
 									</td>
 %								}
 
@@ -820,10 +840,9 @@
 											<% $already{$judge_id}{"registrant"} %>
 										</div>
 %									}
-%									foreach my $ojpool_id (@{$already{$judge_id}{"pools"}}) {
-%										next if $jpool_id == $ojpool_id;
+%									foreach my $ojpool_name (@{$already{$judge_id}{"pools"}}) {
 										<div class="full nowrap padless marno smaller">
-											<% $already{"name"}{$ojpool_id} %>
+											<% $ojpool_name %>
 										</div>
 %									}
 								</td>
@@ -832,9 +851,569 @@
 					</tbody>
 				</table>
 			</span>
+			</div>
 %		}
-
 	</div>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<form
+				action = "jpool.mhtml"
+				method = "post"
+			>
+
+%			if (scalar (keys %{$categories}) > 0) {
+%				if (scalar (keys %{$categories}) == 1) {
+					<div class="row flexrow">
+						<span class="third padleft semibold">
+							Category
+						</span>
+						<span class='twothirds nospace grow biggish bluetext semibold'>
+							<% $category->{name} %>
+						</span>
+					</div>
+%				} else {
+					<div class="row flexrow">
+						<span class="third padleft semibold">
+							Category
+						</span>
+						<span class='twothirds nospace grow'>
+							<select
+								name             = "category_id"
+								onchange         = 'this.form.submit();'
+								data-placeholder = "Choose category..."
+							>
+								<option value=""></option>
+<%perl>
+								foreach my $other_category ( sort {
+									$categories->{$a}{name} cmp $categories->{$b}{name}
+									} keys %{$categories}
+								) {
+</%perl>
+									<option <% $other_category == $category->{id}
+										? "selected"
+										: "" %>
+										value="<% $other_category %>"
+									><% $categories->{$other_category}{name} %></option>
+%								}
+							</select>
+						</span>
+					</div>
+%				}
+<%perl>
+				if ($category_settings{nats_category} && (not defined $jpool->{standby})) {
+					foreach my $jpid (keys %{$jpools}) {
+						if ($jpools->{$jpid}{"parent"}) {
+							push @{$parent->{children}}, $jpid;
+						}
+					}
+</%perl>
+					<div class="row flexrow">
+						<span class="third padleft semibold">
+							Parent
+						</span>
+						<span class='twothirds nospace grow'>
+							<select
+								name     = "parent_id"
+								onchange = 'this.form.submit()'
+							>
+								<option value="0">Registrant Pools</option>
+<%perl>
+									foreach my $jpid (
+										sort {
+											$jpools->{$b}{"registrant"} <=> $jpools->{$b}{"registrant"}
+											|| $jpools->{$a}{"start"} cmp $jpools->{$b}{"start"}
+											|| $jpools->{$a}{"name"} cmp $jpools->{$b}{"name"}
+										} keys %{$jpools}
+									) {
+</%perl>
+										<option <% $parent->{id} && $jpid == $parent->{id}
+											? "selected"
+											: "" %>
+											value="<% $jpid %>"
+										><% $jpools->{$jpid}{name} %></option>
+%									}
+								<option value="orphan">Orphan Pools</option>
+							</select>
+						</span>
+					</div>
+%				}
+
+				<div class="row flexrow bluebordertop">
+					<span class="third padleft semibold">
+						Pool
+					</span>
+					<span class='twothirds nospace grow'>
+						<select
+							name             = "jpool_id"
+							onChange         = 'this.form.submit()'
+							data-placeholder = "Choose Pool.."
+						>
+							<option value=""></option>
+<%perl>
+							foreach my $ojpool_id (
+								sort {
+									$jpools->{$a}{"standby"} <=> $jpools->{$b}{"standby"}
+									|| $jpools->{$a}{"start"} cmp $jpools->{$b}{"start"}
+									|| $jpools->{$a}{"name"} cmp $jpools->{$b}{"name"}
+								} keys %{$jpools}
+							) {
+
+								if ($parent->{id}
+									&& $jpools->{$ojpool_id}{"parent_id"} != $parent->{id}
+								) {
+									next;
+								}
+</%perl>
+								<option
+									value="<% $ojpool_id %>"
+									<% $jpool->{id} == $ojpool_id ? "selected" : "" %>
+								><%
+									$jpools->{$ojpool_id}{"standby"} ? "STANDBY: ": ""
+								%><%
+									$jpools->{$ojpool_id}{"name"}
+								%></option>
+%							}
+						</select>
+					</span>
+				</div>
+			</form>
+
+%			if ($jpool) {
+
+%				if ($jpool->{standby}) {
+					<p class="semibold bluetext nospace padtopmore padbottomless padleft blueborderbottom">
+						<% $jpool->{name} %>
+					</p>
+
+%				} else {
+
+					<div class="full flexrow nospace padtopmore padbottom blueborderbottom">
+						<span class="half semibold bluetext">
+							<% $jpool->{name} %>
+						</span>
+
+						<span class="half nospace smaller">
+							<form
+								action = "jpool_round_add.mhtml"
+								method = "post"
+							>
+
+							<input
+								type  = "hidden"
+								name  = "category_id"
+								value = "<% $category->{id} %>"
+							>
+
+							<input
+								type  = "hidden"
+								name  = "jpool_id"
+								value = "<% $jpool_id %>"
+							>
+
+								<select
+									name             = "round_id"
+									onchange         = 'this.form.submit()'
+									data-placeholder = "Add a round"
+								>
+									<option value=""></option>
+
+<%perl>
+									foreach my $round_id (
+										sort {
+											$rounds{$a}{'event_abbr'} cmp $rounds{$b}{event_abbr}
+											|| $rounds{$a}{'name'} <=> $rounds{$b}{name}
+										} keys %rounds
+									) {
+</%perl>
+										<option
+											value="<% $round_id %>"
+										><%
+											$rounds{$round_id}{event_abbr}
+										%> <%
+											$rounds{$round_id}{label} || $rounds{$round_id}{name}
+										%></option>
+%									}
+<%perl>
+									foreach my $tag ("all", "prelims", "elims") {
+										foreach my $event_id (
+											sort {
+												$events{$a}{type} cmp $events{$b}{type}
+												|| $events{$a}{abbr} cmp $events{$b}{abbr}
+											} keys %events
+										) {
+</%perl>
+											<option
+												value="<% $tag %>_<% $event_id %>"
+											><% ucfirst($tag) %> of <% $events{$event_id}{abbr} %></a>
+%										}
+%									}
+								</select>
+							</form>
+						</span>
+					</div>
+%				}
+<%perl>
+				my $rounds_sth = $dbh->prepare("
+					select round.id, round.name, round.label, event.abbr
+						from round, jpool_round jpr, event
+					where jpr.jpool = ?
+						and jpr.round = round.id
+						and round.event = event.id
+					group by round.id
+					order by event.abbr, round.name
+				");
+
+				$rounds_sth->execute($jpool->{id});
+				my $jprs = $rounds_sth->fetchall_hash();
+				my %used_round;
+
+				if ($jprs && @{$jprs}) {
+</%perl>
+					<div class='full nospace flexrow wrap leftalign'>
+%						foreach my $round (@{$jprs}) {
+							<a
+								class    = "third flexrow odd nospace padvertless plain yellowhover"
+								id       = "<% $jpool_id %>_<% $round->{id} %>"
+								jpool_id = "<% $jpool_id %>"
+								round_id = "<% $round->{id} %>"
+								onClick  = "postSwitch(this, 'jpool_round_rm.mhtml');"
+							>
+								<span class="third semibold padleftless">
+									<% $round->{abbr} %>
+								</span>
+								<span class="twothird nowrap">
+									<% $round->{label} || "Round ".$round->{name} %>
+								</span>
+							</a>
+%						}
+					</div>
+%				}
+
+%				if ($jpool->{"standby"}) {
+
+					<div class="full flexrow smaller padtop padbottomless marno">
+						<span class="quarter semibold padleft marno">
+							Standby
+						</span>
+						<span class="threequarters marno padleft" title="<% $timeslots{$jpool->{timeslot}}{"name"} %>">
+							<% $timeslots{$jpool->{timeslot}}{"name"} %>:
+							<% $timeslots{$jpool->{timeslot}}{"start"}{day} %>
+							<% $timeslots{$jpool->{timeslot}}{"start"}{murica} %>
+						</span>
+					</div>
+
+					<div
+						class="full flexrow smaller padtopless marno"
+						title="<% $timeslots{$jpool->{timeslot}}{"name"} %>"
+					>
+						<span class="full padleft marno">
+							<% $jpool->{site_name} %>
+						</span>
+					</div>
+
+<%perl>
+					my $timeslot = $timeslots{$jpool->{timeslot}};
+
+					my $rounds_sth = $dbh->prepare("
+						select
+							round.id, round.name, round.label,
+							event.abbr event_abbr, event.name event_name
+						from round, event
+						where round.timeslot = ?
+							and round.site = ?
+							and round.event = event.id
+					");
+
+					$rounds_sth->execute($timeslot->{id}, $jpool->{site_id});
+					my $rounds = $rounds_sth->fetchall_hash();
+
+					my @others;
+
+					foreach my $jpool_id (keys %{$jpools}) {
+						if (
+							$jpools->{$jpool_id}{"standby_timeslot"}
+							&& $jpools->{$jpool_id}{'site'} == $jpool->{site_id}
+							&& $jpools->{$jpool_id}{'category'} == $category->{id}
+						) {
+							push @others, $jpools->{$jpool_id};
+						}
+					}
+
+					if (@others) {
+
+						my $site_name = $jpool->{site_name};
+						$site_name =~ s/High School//g;
+						$site_name =~ s/^\s+//;  # Leading spaces
+						$site_name =~ s/\s+$//;  # Trailing too
+</%perl>
+						<h5>Other Pools at <% $site_name %></h5>
+
+						<form
+							action = "jpool.mhtml"
+							method = "post"
+						>
+							<input
+								type  = "hidden"
+								name  = "category_id"
+								value = "<% $category->{id} %>"
+							>
+
+							<div class="full row">
+								<select
+									name     = "jpool_id"
+									onChange = "this.form.submit();"
+								>
+%									foreach my $other (@others) {
+										<option
+											value="<% $other->{id} %>"
+											<% $other->{id} == $jpool->{id} ? "selected" : "" %>
+										><% $other->{name} %></option>
+%									}
+								</select>
+							</div>
+						</form>
+%					}
+
+					<div class="row">
+						<span class="twofifths semibold padleft">
+							Rounds
+						</span>
+						<span class="threefifths smaller padleft leftalign">
+%							foreach my $round (@{$rounds}) {
+								<span class="half padvertless martopless">
+									<% $round->{event_abbr} %>
+									<% $round->{label} || "Rnd ".$round->{name} %>
+								</span>
+%							}
+						</span>
+					</div>
+
+					<div class="ltbordertop ltborderbottom row flexrow">
+						<span class="twofifths semibold padleft">
+							Autoselect
+						</span>
+						<span class="twofifths">
+							<input
+								id          = "targetCount"
+								name        = "targetCount"
+								type        = "number"
+								value       = ""
+								placeholder = "# Judges"
+							>
+						</span>
+						<span class="fifth rightalign padright">
+							<button
+								class       = "fa fa-sm buttonwhite bluetext invert fa-arrows-alt"
+								parent_id   = "<% $pull_jpool %>"
+								category_id = "<% $category->{id} %>"
+								jpool_id    = "<% $jpool_id %>"
+								onClick     = "poolJudges(this);"
+							>
+						</span>
+					</div>
+
+%				} else {
+
+					<h5>Auto-populate</h5>
+
+					<form
+						action = "jpool_autopopulate.mhtml"
+						method = "post"
+					>
+
+					<input
+						type  = "hidden"
+						name  = "jpool_id"
+						value = "<% $jpool_id %>"
+					>
+
+					<p class="smaller italic semibold bluetext nospace padtopless">
+						Judges with debaters in
+					</p>
+
+					<div class="row padleft padright flexrow nospace">
+						<select
+							name     = "round_id"
+							onchange = 'this.form.submit()'
+						>
+							<option value="">Choose a Round</option>
+<%perl>
+							foreach my $round_id (
+								sort {
+									$rounds{$a}{'event_abbr'} cmp $rounds{$b}{event_abbr}
+									|| $rounds{$a}{'name'} <=> $rounds{$b}{name}
+								} keys %rounds
+							) {
+</%perl>
+								<option
+									value="<% $round_id %>"
+								><%
+									$rounds{$round_id}{event_abbr}
+								%> <%
+									$rounds{$round_id}{label} || $rounds{$round_id}{"name"}
+								%></option>
+%							}
+						</select>
+					</div>
+
+					<div class="row padleft padright flexrow nospace">
+						<select
+							name     = "timeslot_id"
+							onchange = 'this.form.submit()'
+						>
+							<option value="">Or, Select a Timeslot</option>
+
+%							foreach my $timeslot_id (sort {$timeslots{$a}{name} cmp $timeslots{$b}{"name"}} keys %timeslots) {
+								<option value="<% $timeslot_id %>"><%
+									$timeslots{$timeslot_id}{name}
+								%></option>
+%							}
+						</select>
+					</div>
+
+					</form>
+
+					<form
+						action = "jpool_autopopulate.mhtml"
+						method = "post"
+					>
+
+					<input
+						type  = "hidden"
+						name  = "jpool_id"
+						value = "<% $jpool_id %>"
+					>
+
+					<input
+						type  = "hidden"
+						name  = "active"
+						value = "yes"
+					>
+
+					<p class="smaller italic semibold bluetext nospace padtop">
+						Judges who are judging in
+					</p>
+
+					<div class="row padleft padright flexrow nospace">
+						<select
+							name     = "round_id"
+							onchange = 'this.form.submit()'
+						>
+							<option value="">Choose a Round</option>
+%							foreach my $round_id (@{$rounds}) {
+								<option
+									value="<% $round_id %>"
+								><%
+									$rounds{$round_id}{event_abbr}
+								%> <%
+									$rounds{$round_id}{label} || $rounds{$round_id}{name}
+								%></option>
+%							}
+						</select>
+					</div>
+
+					<div class="row padleft padright flexrow nospace">
+						<select
+							name     = "timeslot_id"
+							class    = "fixedmost"
+							onchange = 'this.form.submit()'
+						>
+							<option value="">Or, Select a Timeslot</option>
+
+%							foreach my $timeslot_id (sort keys %timeslots) {
+								<option
+									value="<% $timeslot_id %>"
+								><%
+									$timeslots{$timeslot_id}{name}
+								%></option>
+%							}
+						</select>
+					</div>
+					</form>
+
+					<form
+						action="jpool_autopopulate.mhtml"
+						method="post"
+					>
+
+						<input
+							type  = "hidden"
+							name  = "jpool_id"
+							value = "<% $jpool_id %>"
+						>
+
+						<p class="smaller italic semibold bluetext nospace padtop">
+							Clone another judge pool's judges
+						</p>
+
+						<div class="row padleft padright flexrow nospace">
+							<select
+								name             = "include_id"
+								onchange         = 'this.form.submit();'
+								data-placeholder = "Clone another judge pool"
+							>
+
+								<option value=""></option>
+<%perl>
+								foreach my $pjpool_id (
+									sort {
+										$jpools->{$a}{"start"} cmp $jpools->{$b}{"start"}
+										|| $jpools->{$a}{"name"} cmp $jpools->{$b}{"name"}
+									} keys %{$jpools}
+								) {
+</%perl>
+									<option
+										value="<% $pjpool_id %>"
+									><% $jpools->{$pjpool_id}{name} %></option>
+%								}
+							</select>
+						</div>
+					</form>
+
+					<form
+						action = "jpool_autopopulate.mhtml"
+						method = "post"
+					>
+
+						<input
+							type  = "hidden"
+							name  = "jpool_id"
+							value = "<% $jpool_id %>"
+						>
+
+						<p class="smaller italic semibold bluetext nospace padtop">
+							Exclude any judges also in
+						</p>
+
+						<div class="row padleft padright flexrow nospace">
+							<select
+								name             = "exclude_id"
+								onchange         = 'this.form.submit();'
+								data-placeholder = "Judge pool to exclude"
+							>
+								<option value=""></option>
+<%perl>
+								foreach my $pjpool_id (
+									sort {
+										$jpools->{$a}{"start"} cmp $jpools->{$b}{"start"}
+										|| $jpools->{$a}{"name"} cmp $jpools->{$b}{"name"}
+									} keys %{$jpools}
+								) {
+</%perl>
+									<option value="<% $pjpool_id %>"><% $jpools->{$pjpool_id}{name} %></option>
+%								}
+							</select>
+						</div>
+%						}
+					</div>
+%				}
+%			}
+			</form>
+		</div>
+
 
 %	if ($jpool) {
 
@@ -844,20 +1423,30 @@
 				countPools();
 			});
 
+			function toggleInactives() {
+				$(`.inactive`).toggleClass('hidden');
+				countPools();
+			}
+
 			function countPools() {
 				var countIn = $("#in .judge:visible").length;
 				var countOut = $("#out .judge:visible").length;
 
 				$("#outcount").text(countOut);
 				$("#incount").text(countIn);
+			}
 
-				$("#insort").trigger("applyWidgets");
-				$("#insort").trigger("update");
-				$("#insort").trigger('resort');
+			function clearJudges() {
 
-				$("#outsort").trigger("applyWidgets");
-				$("#outsort").trigger("update");
-				$("#outsort").trigger('resort');
+				console.log(`Hello, sweetheart`);
+
+				$(`#in`).children().each( (index, child) =>  {
+					$(child).prependTo(`#out`);
+					$(child).removeClass('ligrnrow');
+				});
+
+				fixVisual();
+				countPools();
 			}
 
 			function togglePool(judgeSpan) {
@@ -886,17 +1475,15 @@
 					data: {
 						judge_id : judgeID,
 						value    : postValue,
-						jpool_id : <% $jpool_id %>,
+						jpool_id : <% $jpool_id || 0 %>,
 					},
 					success  : function(data) {
-						console.log(data);
 						if (data.error) {
 							alertify.error(data.message);
 						} else {
-							alertify.set('notifier','delay', 2);
-							alertify.notify(data.message, "custom");
-							alertify.set('notifier','delay', 5);
-							$("#"+judgeID).prependTo("#"+newParent)
+							$("#"+judgeID).prependTo("#"+newParent);
+							$("#"+judgeID).addClass("ligrnrow");
+							alertify.notify(data.message, 'custom');
 						}
 					},
 					complete : function(metadata, textStatus) {
@@ -909,5 +1496,48 @@
 					}
 				});
 			}
+
+			function poolJudges(selector) {
+
+				const postUrl = '<% "$Tab::indexcards_url/tab/".$tourn->id."/jpool/".$jpool->{id}."/placeJudges/standby" %>';
+
+				const request = {
+					parentId    : parseInt($(selector).attr("parent_id")),
+					categoryId  : parseInt($(selector).attr("category_id")),
+					jpoolId     : parseInt($(selector).attr("jpool_id")),
+					targetCount : $('#targetCount').val()
+				};
+
+				$.ajax({
+					type : 'POST',
+					url  : postUrl,
+					data : request,
+					xhrFields: {
+						withCredentials: true
+					},
+					headers    : {
+					  'Accept' : 'application/json',
+					},
+					success : function(data, status, object, newCallback) {
+
+						console.log(data);
+
+						if (data.error) {
+							alertify.error(data.message);
+							return;
+						}
+
+						if (data.message) {
+							alertify.notify(data.message, "custom");
+						}
+						if (data.refresh) {
+							window.location.reload();
+						}
+					}
+				});
+			};
+
+
 		</script>
 %	}
+
