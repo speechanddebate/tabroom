@@ -1,0 +1,389 @@
+<%args>
+	$tourn
+	$perms
+	$defaults
+	$session
+	$site_id => undef
+	$day     => undef
+	$time    => undef
+</%args>
+<%init>
+
+	unless (
+		$perms->{tourn}{$tourn} eq "owner"
+		|| $perms->{tourn}{$tourn} eq "tabber"
+	) {
+		$m->comp("/funclib/abort.mas",
+			message => "You must be a full tournament tabber or owner to access that report"
+		);
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $contacts;
+	my $students;
+	my $judges;
+
+	my $now = DateTime->now();
+	my @sites = $tourn->sites;
+	my %site_by_id = map {$_->id => $_} @sites;
+
+	unless ($site_id) {
+		$site_id = $defaults->{tourns}{$tourn}{site};
+	}
+
+	if (scalar @sites == 1) {
+		$site_id = $sites[0]->id;
+	}
+
+	my $site = $site_by_id{$site_id};
+	my $dt;
+
+	Tab::debuglog("Day is $day and time is $time");
+
+	if ($site) {
+
+		if ($site_id != $defaults->{tourns}{$tourn}{site}) {
+			$defaults->{tourns}{$tourn}{site} = $site_id;
+			$session->default($defaults);
+			$session->update();
+		}
+
+		if ($day && $time) {
+			$dt = $m->comp("/funclib/showdt.mas",
+				date   => $day,
+				time   => $time,
+				object => 1
+			);
+
+			Tab::debuglog("DT is ".$dt);
+			$dt->set_time_zone($tourn->tz);
+			$dt->set_time_zone("UTC");
+		}
+
+		unless ($dt) {
+			$dt = $now->clone();
+		}
+
+		my $contact_sth = $dbh->prepare('
+			select
+				person.id, person.first, person.middle, person.last,
+				person.email, person.phone,
+				school.id school_id, school.name school_name,
+				contact.onsite
+			from school
+				left join contact on contact.school = school.id and contact.official = 1
+				left join person on contact.person = person.id
+
+			where school.tourn = ?
+			group by contact.id
+			order by school.id, contact.official DESC, contact.onsite DESC
+		');
+
+		$contact_sth->execute($tourn->id);
+		my $results = $contact_sth->fetchall_hash();
+
+		foreach my $ref (@{$results}) {
+			push @{$contacts->{$ref->{school_id}}},  $ref;
+		}
+
+		Tab::debuglog("I have ".scalar @{$results}." contacts");
+
+		my $students_sth = $dbh->prepare('
+			select
+				student.id, student.first, student.middle, student.last,
+				entry.id entry_id, entry.code, entry.name,
+				event.id event_id, event.abbr event_abbr, event.name event_name,
+				school.id school_id, school.name school_name,
+				chapter.id chapter_id, chapter.nsda, chapter.state,
+				panel.letter, panel.flight, room.name room_name
+
+			from (ballot, panel, round, timeslot, entry, event, entry_student es, student, school, chapter)
+				left join room on room.id = panel.room
+
+			where event.tourn = ?
+				and event.id       = round.event
+				and round.site     = ?
+				and round.timeslot = timeslot.id
+				and timeslot.start < ?
+				and timeslot.end   > ?
+
+				and round.id        = panel.round
+				and panel.id        = ballot.panel
+				and ballot.entry    = entry.id
+				and entry.id        = es.entry
+				and es.student      = student.id
+				and student.chapter = chapter.id
+				and chapter.id      = school.chapter
+				and school.tourn    = event.tourn
+			group by student.id
+			order by school.id, event.abbr, student.last
+		');
+
+		$students_sth->execute(
+			$tourn->id,
+			$site->id,
+			DateTime::Format::MySQL->format_datetime($dt),
+			DateTime::Format::MySQL->format_datetime($dt)
+		);
+
+		my $student_results = $students_sth->fetchall_hash();
+
+		foreach my $ref (@{$student_results}) {
+			push @{$students->{$ref->{school_id}}},  $ref;
+		}
+
+		my $judges_sth = $dbh->prepare('
+			select
+				judge.id, judge.first, judge.middle, judge.last,
+				person.email, person.phone,
+				school.id school_id, school.name school_name,
+				chapter.id chapter_id, chapter.nsda, chapter.state,
+				event.id event_id, event.abbr event_abbr, event.name event_name,
+				panel.letter, panel.flight, room.name room_name
+
+			from (ballot, panel, round, timeslot, judge, school, event)
+				left join chapter on school.chapter = chapter.id
+				left join person on judge.person = person.id
+				left join room on panel.room = room.id
+
+			where event.tourn = ?
+				and event.id       = round.event
+				and round.site     = ?
+				and round.timeslot = timeslot.id
+				and timeslot.start < ?
+				and timeslot.end   > ?
+
+				and round.id     = panel.round
+				and panel.id     = ballot.panel
+				and ballot.judge = judge.id
+				and judge.school = school.id
+			group by judge.id
+		');
+
+		$judges_sth->execute(
+			$tourn->id,
+			$site->id,
+			DateTime::Format::MySQL->format_datetime($dt),
+			DateTime::Format::MySQL->format_datetime($dt)
+		);
+
+		my $judge_results = $judges_sth->fetchall_hash();
+
+		foreach my $ref (@{$judge_results}) {
+			push @{$judges->{$ref->{school_id}}},  $ref;
+		}
+
+	} else {
+		$dt = $now->clone();
+	}
+
+	my @days = $m->comp("/funclib/tourn_days.mas", tourn => $tourn);
+
+	if ($dt && $dt < $tourn->start) {
+		push @days, $dt;
+	}
+
+</%init>
+
+	<div class="blankfull">
+
+		<form
+			action = "site_attendance.mhtml"
+			method = "post"
+		>
+
+		<div class="full flexrow">
+
+			<span class="quarter">
+				<h5>Site Contact Sheet</h5>
+			</span>
+
+			<span class="quarter">
+				<select
+					name             = "site_id"
+					data-placeholder = "Choose Site"
+				>
+					<option value=""></option>
+%				foreach my $site (@sites) {
+					<option
+						value="<% $site->id %>"
+						<% $site->id == $site_id ? "selected" : "" %>
+					><% $site->name %></option>
+%				}
+				</select>
+			</span>
+
+%			$dt->set_time_zone($tourn->tz);
+
+			<span class="eighth">
+				<select name="day">
+%					foreach my $day (@days) {
+						<option
+							value="<% $day->mdy('/') %>"
+							<% $dt && $day->ymd eq $dt->ymd ? "selected" : "" %>
+						><& "/funclib/showdate.mas",
+							dt     => $day,
+							format => 'casual'
+						&></option>
+%					}
+				</select>
+			</span>
+
+			<span class="eighth">
+				<& "/funclib/timepicker.mas",
+					name => "time",
+					size => 6,
+					time => $dt
+				&>
+			</span>
+
+			<span
+				class="eighth centeralign"
+			>
+				<input
+					type  = "submit"
+					value = "Show People"
+				>
+			</span>
+
+			<span
+				class = "eighth rightalign"
+				id    = "contacts_buttonarea"
+			></span>
+		</div>
+
+		</form>
+
+		<& "/funclib/tablesorter.mas", table => 'contacts' &>
+
+		<table id="contacts">
+			<thead>
+				<tr class="yellowrow smallish">
+					<th>
+						Role
+					</th>
+					<th>
+						First
+					</th>
+					<th>
+						Last
+					</th>
+					<th>
+						School
+					</th>
+					<th>
+						Location
+					</th>
+					<th>
+						Email/Event
+					</th>
+					<th>
+						Contact
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+
+<%perl>
+				foreach my $school_id (keys %{$contacts}) {
+					if ($students->{$school_id} || $judges->{$school_id}) {
+
+						my $notfirst;
+
+						foreach my $contact (@{$contacts->{$school_id}}) {
+</%perl>
+							<tr class="<% $notfirst++ ? "" : "bluebordertop" %>">
+								<td>
+									CONTACT
+								</td>
+								<td>
+									<% $contact->{first} %>
+								</td>
+								<td>
+									<% $contact->{last} %>
+								</td>
+								<td>
+									<% $contact->{school_name} %>
+								</td>
+								<td>
+									<% $contact->{onsite} ? "IN TOWN" : "NOT ONSITE" %>
+								</td>
+								<td>
+									<% $contact->{email} %>
+								</td>
+								<td>
+									<% Tab::phoneme($contact->{phone}) %>
+								</td>
+							</tr>
+%						}
+
+%						undef $notfirst;
+
+%						foreach my $student (@{$students->{$school_id}}) {
+							<tr class="<% $notfirst++ ? "" : "ltbordertop" %>">
+								<td>
+									STUDENT
+								</td>
+								<td>
+									<% $student->{first} %>
+								</td>
+								<td>
+									<% $student->{last} %>
+								</td>
+								<td>
+									<% $student->{school_name} %>
+								</td>
+								<td>
+									Section <% $student->{letter} %>
+									<% $student->{flight} > 1 ? "Flight 2" : "" %>
+								</td>
+								<td>
+									<% $student->{event_abbr} %>
+								</td>
+								<td>
+									Room <% $student->{room_name} %>
+								</td>
+							</tr>
+%						}
+
+%						foreach my $judge (@{$judges->{$school_id}}) {
+							<tr class="<% $notfirst++ ? "" : "ltbordertop" %>">
+								<td>
+									JUDGE
+								</td>
+								<td>
+									<% $judge->{first} %>
+								</td>
+								<td>
+									<% $judge->{last} %>
+								</td>
+								<td>
+									<% $judge->{school_name} %>
+								</td>
+								<td>
+									<% $judge->{event_abbr} %>
+									Section <% $judge->{letter} %>
+									<% $judge->{flight} > 1 ? "Flight 2" : "" %>
+									<% $judge->{event_abbr} %>
+									Room <% $judge->{room_name} %>
+								</td>
+								<td>
+									<% $judge->{email} %>
+								</td>
+								<td>
+									<% Tab::phoneme($judge->{phone}) %>
+								</td>
+							</tr>
+%						}
+
+						<tr class="ltborderbottom">
+							<td colspan="7"></td>
+						</tr>
+%					}
+%				}
+			</tbody>
+		</table>
+	</div>
+
