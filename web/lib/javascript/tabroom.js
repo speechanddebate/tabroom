@@ -279,8 +279,6 @@
 				console.log(data);
 
 				const reply = data.responseJSON || data.responseText;
-				console.log(reply);
-
 				alertify.set('notifier','delay', 15);
 
 				if (reply?.message) {
@@ -299,8 +297,6 @@
 				return;
 			},
 			success: function(data, status, metadata) {
-
-				console.log(data);
 
 				if (data.reply) {
 					if (attributes.reply_target) {
@@ -350,7 +346,6 @@
 
 				} else if (data.error) {
 
-					console.log(data);
 					alertify.error(data.message);
 
 					if (data.destroy) {
