@@ -1,0 +1,337 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$school_id
+	$perms
+</%args>
+<%init>
+
+	my $school = Tab::School->retrieve($school_id);
+	my $dbh = Tab::DBI->db_Main();
+
+	my $school_sth = $dbh->prepare('
+		select
+			school.id, school.name,
+			CONVERT_TZ(picked_up.timestamp, "+00:00", tourn.tz) picked_up_at,
+			picked_up_by.value picked_up_by,
+			person.id, person.first, person.last, person.email
+
+		from (school, tourn)
+
+			left join school_setting picked_up
+			on picked_up.school = school.id
+			and picked_up.tag = "picked_up"
+
+			left join school_setting picked_up_by
+			on picked_up_by.school = school.id
+			and picked_up_by.tag = "picked_up_by"
+
+			left join school_setting picked_marked
+			on picked_marked.school = school.id
+			and picked_marked.tag = "picked_marked"
+
+			left join person on person.id = picked_marked.value
+
+		where school.id = ?
+			and school.tourn = tourn.id
+		group by school.id
+	');
+
+	$school_sth->execute($school->id);
+	my $school_data = $school_sth->fetchall_hash();
+
+	my $sdata = shift @{$school_data};
+
+	my $sth = $dbh->prepare('
+		select
+			entry.id, entry.code, entry.name,
+			round.name round_name, round.label,
+			event.abbr, event.id event_id
+
+		from entry, ballot, panel, round, event
+			where entry.school = ?
+				and entry.event = event.id
+				and entry.id = ballot.entry
+				and ballot.panel = panel.id
+				and panel.round = round.id
+				and round.type IN ("elim", "final")
+		group by entry.id
+		order by round.name DESC, event.abbr, entry.code
+	');
+
+	$sth->execute($school->id);
+	my $elims = $sth->fetchall_hash();
+
+	my $world_sth = $dbh->prepare('
+		select
+			student.id, student.first, student.last,
+			entry.code,
+			round.name, round.label,
+			event.abbr, event.id event_id
+
+		from school, student, entry_student es, entry, ballot, panel, round, event
+			where school.id = ?
+				and school.chapter = student.chapter
+				and student.id = es.student
+				and es.entry = entry.id
+				and entry.school != school.id
+				and entry.event = event.id
+				and event.tourn = school.tourn
+				and entry.id = ballot.entry
+				and ballot.panel = panel.id
+				and panel.round = round.id
+				and round.type IN ("elim", "final")
+		group by student.id
+	');
+
+	$world_sth->execute($school->id);
+	my $worlds = $world_sth->fetchall_hash();
+
+	my $speaker_count = 21;
+
+	if ($tourn_settings->{nsda_nats}) {
+		$speaker_count = 15;
+	}
+
+	my $speaker_sth = $dbh->prepare('
+		select
+			student.id, student.first, student.last,
+			entry.code,
+			event.abbr,
+			result.rank
+
+		from result, result_set, student, chapter, school, event, entry
+
+		where school.id = ?
+			and school.chapter    = student.chapter
+			and student.id        = result.student
+			and result.result_set = result_set.id
+			and result_set.tourn  = school.tourn
+			and result_set.label  = "Speaker Awards"
+			and result.entry      = entry.id
+			and entry.event       = event.id
+			and result.rank       < '.$speaker_count.'
+		group by student.id
+	');
+
+	$speaker_sth->execute($school->id);
+	my $speakers = $speaker_sth->fetchall_hash();
+
+	my $placement_sth = $dbh->prepare('
+		select
+			entry.id, result.rank
+
+		from result, result_set, entry
+		where entry.school = ?
+			and entry.id = result.entry
+			and result.rank < '.$speaker_count.'
+			and result.result_set = result_set.id
+			and result_set.label = "Final Places"
+		group by entry.id
+	');
+
+	$placement_sth->execute($school->id);
+	my $placement_result = $placement_sth->fetchall_hash();
+	my %placements = map {$_->{id} => $_->{rank}} @{$placement_result};
+
+</%init>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<h4>Picked Up</h4>
+
+%			if ($sdata->{picked_up_at}) {
+				<div class="row odd">
+					<span class="third semibold">
+						Picked Up At
+					</span>
+					<span class="twothirds">
+						<& "/funclib/showdt.mas", string => $sdata->{picked_up_at}, format => "murica_short" &>
+					</span>
+				</div>
+
+				<div class="row odd">
+					<span class="third semibold">
+						Marked by
+					</span>
+					<span class="twothirds">
+						<% $sdata->{email} %>
+					</span>
+				</div>
+
+				<div class="row odd">
+					<span class="third semibold">
+						Pickup By
+					</span>
+					<span class="twothirds">
+						<% $sdata->{picked_up_by} %>
+					</span>
+				</div>
+%			}
+
+			<form
+				action="pickup.mhtml"
+				method="post"
+			>
+				<input
+					type  = "hidden"
+					name  = "school_id"
+					value = "<% $school->id %>"
+				>
+
+				<div class="row padvert padleft padright">
+					<input
+						type             = "text"
+						name             = "picked_up_by"
+						data-placeholder = "Person Picking Up"
+					>
+				</div>
+
+				<div class="libl row rightalign">
+					<span class="half centeralign nospace">
+						<input
+							type  = "submit"
+							value = "Mark"
+						>
+					</span>
+				</div>
+			</form>
+		</div>
+
+	</div>
+
+	<div class="main">
+
+		<div class="full flexrow">
+			<span class="threequarters">
+				<h4><% $school->name %> Awards</h4>
+			</span>
+
+			<span
+				class = "quarter rightalign"
+				id    = "<% $school->id %>_buttonarea"
+			></span>
+		</div>
+
+		<& "/funclib/tablesorter.mas", table => $school->id &>
+
+		<table id="<% $school->id %>">
+
+			<thead>
+				<tr class="yellowrow smallish padvertless">
+					<th>
+						Code
+					</th>
+
+					<th>
+						Name
+					</th>
+
+					<th>
+						Event
+					</th>
+
+					<th>
+						Type
+					</th>
+
+					<th>
+						Last Round
+					</th>
+
+					<th>
+						Place
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+%				foreach my $elim (@{$elims}) {
+					<tr>
+						<td>
+							<% $elim->{code} %>
+						</td>
+
+						<td>
+							<% $elim->{name} %>
+						</td>
+
+						<td>
+							<% $elim->{abbr} %>
+						</td>
+
+						<td>
+							Elim Round
+						</td>
+
+						<td class="leftalign padleft">
+							<% $elim->{label} || "Round ".$elim->{round_name} %>
+						</td>
+
+						<td class="centeralign">
+							<% $placements{$elim->{id}} %>
+						</td>
+					</tr>
+%				}
+
+%				foreach my $world (@{$worlds}) {
+					<tr>
+						<td>
+							<% $world->{code} %>
+						</td>
+
+						<td>
+							<% $world->{first} %>
+							<% $world->{last} %>
+						</td>
+
+						<td>
+							<% $world->{abbr} %>
+						</td>
+
+						<td>
+							Worlds Elim
+						</td>
+
+						<td class="leftalign padleft">
+							<% $world->{label} || $world->{round_name} %>
+						</td>
+
+						<td class="centeralign">
+						</td>
+					</tr>
+%				}
+
+%				foreach my $speaker (@{$speakers}) {
+					<tr>
+						<td>
+							<% $speaker->{code} %>
+						</td>
+
+						<td>
+							<% $speaker->{first} %>
+							<% $speaker->{last} %>
+						</td>
+
+						<td>
+							<% $speaker->{abbr} %>
+						</td>
+
+						<td>
+							Speaker Award
+						</td>
+
+						<td class="centeralign">
+						</td>
+
+						<td class="centeralign">
+							<% $speaker->{rank} %>
+						</td>
+					</tr>
+%				}
+			</tbody>
+		</table>
+	</div>
+
