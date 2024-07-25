@@ -16,7 +16,7 @@
 /usr/bin/mkdir /www/tabroom/web/mason/obj
 /usr/bin/chown www-data:www-data /www/tabroom/web/mason/obj
 
-/usr/bin/mv /www/tabroom/web/tmp /www/tabroom/web/mason/tmp.oldt
+/usr/bin/mv /www/tabroom/web/tmp /www/tabroom/web/mason/tmp.old
 /usr/bin/mkdir /www/tabroom/web/tmp
 /usr/bin/chown www-data:www-data /www/tabroom/web/tmp
 
