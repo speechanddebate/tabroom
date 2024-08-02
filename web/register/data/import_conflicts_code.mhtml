@@ -1,0 +1,123 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$category_id => undef
+</%args>
+<%init>
+
+	use Text::CSV;
+
+	my $tz = $tourn->tz;
+	$tz = "UTC" unless $tz;
+
+	$m->print("<div id=\"wrapper\">");
+	$m->print("<div id=\"content\">");
+
+	$m->print("<div class=\"main\">");
+	&outlog("<h2>Uploading data</h2>");
+
+	$m->print("<span class='nospace upload_scroll'>");
+	$m->flush_buffer();
+
+	unless ($category_id) {
+		$m->print('<div class="blankfull"><p class="warning">');
+		$m->print("You must select an existing judge category to import judges");
+		$m->print('</p><p>Hit the Back button and try again</p>');
+		$m->abort;
+	}
+
+	my $nats = $tourn->setting("nsda_nats");
+	my $now = DateTime->now( time_zone => $tz);
+	my $category = Tab::Category->retrieve($category_id);
+
+	# Get the upload and create the file handle.
+	my $req = Apache2::Request->new($r);
+	my @csv_handles = $r->upload();
+	my $csv_file = $req->upload($csv_handles[0]);
+	my $io = $csv_file->io;
+
+	my $csv = Text::CSV->new({ sep_char => ',' });
+
+	my $skipped;
+	my $counter;
+
+	my $dbh = Tab::DBI->db_Main();
+	my $sth = $dbh->prepare("
+		select id from judge where email = ? and category = ?
+	");
+
+	my $entry_sth = $dbh->prepare("
+		select id from entry, event
+			where entry.code = ?
+			and entry.event = event.id
+			and event.category = ?
+	");
+
+	LINE:
+	foreach my $line (<$io>) {
+
+		unless ($csv->parse($line)) {
+			Tab::debuglog("Line $line failed to parse");
+			next LINE;
+		}
+
+		my ($judge_email, @entry_codes) = $csv->fields();
+
+		$judge_email =~ s/^"//;
+		$judge_email =~ s/"$//g;
+		$judge_email =~ s/^'//;
+		$judge_email =~ s/'$//g;
+
+		$sth->execute(lc($judge_email), $category_id);
+		my $results = $sth->fetchall_hash();
+
+		if ($results && @{$results}) {
+
+			my $judge = shift @{$results};
+
+			$m->print("<p>Conflicts for $judge_email:</p>");
+
+			foreach my $code ($entry_codes) {
+				$code =~ s/^"//;
+				$code =~ s/"$//g;
+				$code =~ s/^'//;
+				$code =~ s/'$//g;
+
+				$entry_sth->execute($code, $category_id);
+				my $entries = $entry_sth->fetchall_hash();
+
+				if ($entries && @{$entries}) {
+
+					my $entry = shift @{$entries};
+
+					Tab::Strike->create({
+						registrant => 1,
+						type       => "entry",
+						conflict   => 1,
+						judge      => $judge->{id}
+						entry      => $entry->{id},
+					});
+
+				} else {
+					$m->print("<p class='padleft'>No entry found for $code</p>");
+				}
+			}
+
+		} else {
+			$m->print("<p>No judge record for $judge_email:</p>");
+		}
+
+		$m->flush_buffer();
+	}
+
+	$m->print("</span>");
+
+	&outlog("<h5 class='centeralign redtext'>Data Upload Complete!</h5>");
+	$m->print("</div>");
+	$m->print("</div>");
+	$m->print("</div>");
+	$m->flush_buffer() unless $no_return;
+	$m->abort();
+
+</%init>
