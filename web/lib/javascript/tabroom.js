@@ -270,7 +270,9 @@
 			}
 		}
 
-		delete options.data?.post_method;
+		if (options.data && options.data.post_method) {
+			delete options.data.post_method;
+		}
 
 		$.ajax({
 			...options,
@@ -281,7 +283,7 @@
 				const reply = data.responseJSON || data.responseText;
 				alertify.set('notifier','delay', 15);
 
-				if (reply?.message) {
+				if (reply && reply.message) {
 					if (reply.destroy) {
 						$("#"+reply.destroy).remove();
 						$("."+reply.destroy).remove();

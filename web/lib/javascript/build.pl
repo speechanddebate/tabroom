@@ -30,8 +30,11 @@ use JavaScript::Minifier qw(minify);
 	);
 
 	my $custom_file = "tabroom.js";
-	my $output_file = "tabroom.v38.min.js";
+	my $output_file = "tabroom.min.js";
 	my $sources_file = "sources.js";
+
+	my $slick_file = "slick.js";
+	my $slick_output_file = "slick.min.js";
 
 	# First, concatenate them together
 
@@ -52,6 +55,12 @@ use JavaScript::Minifier qw(minify);
 
 	open(INFILE, $temp_file) or die;
 	open(OUTFILE, "> $output_file") or die;
+  	minify(input => *INFILE, outfile => *OUTFILE);
+  	close(INFILE);
+  	close(OUTFILE);
+
+	open(INFILE, $slick_file) or die;
+	open(OUTFILE, "> $slick_output_file") or die;
   	minify(input => *INFILE, outfile => *OUTFILE);
   	close(INFILE);
   	close(OUTFILE);
