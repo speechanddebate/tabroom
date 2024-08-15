@@ -1,7 +1,7 @@
 package Tab::Session;
 use base 'Tab::DBI';
 Tab::Session->table('session');
-Tab::Session->columns(All    => qw/id person userkey timestamp ip su defaults created_at agent_data geoip push_notify/);
+Tab::Session->columns(All    => qw/id person userkey timestamp ip su defaults created_at agent_data geoip push_notify last_access/);
 Tab::Session->has_a(person   => 'Tab::Person');
 Tab::Session->has_a(su       => 'Tab::Person');
 
@@ -10,7 +10,7 @@ sub account {
 	return $self->person;
 }
 
-__PACKAGE__->_register_datetimes( qw/timestamp created_at/);
+__PACKAGE__->_register_datetimes( qw/timestamp created_at last_access/);
 
 sub default {
 	my ($self, $input) = @_;
