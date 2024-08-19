@@ -30,14 +30,14 @@ sub short_name {
 
 sub setting {
 
-	my ($self, $tag, $value, $blob) = @_;
+	my ($self, $tag, $value, $blob, $changed) = @_;
 	$/ = ""; #Remove all trailing newlines
 
 	chomp $blob;
 
 	my @existing = Tab::SchoolSetting->search(
 		school => $self->id,
-		tag   => $tag
+		tag    => $tag
 	);
 
 	my $existing = shift @existing if @existing;
@@ -48,20 +48,32 @@ sub setting {
 
 		if ($existing) {
 
-			$existing->value($value);
-			$existing->value_text($blob) if $value eq "text";
-			$existing->value_date($blob) if $value eq "date";
-
-			if ($value eq "json") {
-				eval{
-					$existing->value_text(JSON::encode_json($blob));
-				};
-			}
-
-			$existing->update;
-
 			if ($value eq "delete" || $value eq "" || $value eq "0") {
-				$existing->delete;
+
+				$existing->delete();
+
+			} else {
+
+				$existing->value($value);
+
+				if ($value eq "text") {
+					$existing->value_text($blob);
+					$existing->last_changed($changed);
+				} elsif ($value eq "date") {
+					$existing->value_date($blob);
+					$existing->last_changed($changed);
+				} elsif ($value eq "json") {
+					my $json = eval {
+						return JSON::encode_json($blob);
+					};
+					$existing->value_text($json);
+					$existing->last_changed($changed);
+				} elsif ($blob && $blob == int($blob)) {
+					Tab::debuglog("Last changed blob found for $blob");
+					$existing->last_changed($blob);
+				}
+
+				$existing->update();
 			}
 
 			return;
@@ -70,19 +82,26 @@ sub setting {
 
 			my $existing = Tab::SchoolSetting->create({
 				school => $self->id,
-				tag   => $tag,
-				value => $value,
+				tag    => $tag,
+				value  => $value,
 			});
 
 			if ($value eq "text") {
 				$existing->value_text($blob);
+				$existing->last_changed($changed);
 			} elsif ($value eq "date") {
 				$existing->value_date($blob);
+				$existing->last_changed($changed);
 			} elsif ($value eq "json") {
-				eval{
-					$existing->value_text(JSON::encode_json($blob));
+				my $json = eval{
+					return JSON::encode_json($blob);
 				};
+				$existing->value_text($json);
+				$existing->last_changed($changed);
+			} elsif ($blob && $blob eq int($blob)) {
+				$existing->last_changed($blob);
 			}
+
 			$existing->update();
 		}
 
@@ -94,9 +113,11 @@ sub setting {
 		} elsif ($existing->value eq "date") {
 			return $existing->value_date
 		} elsif ($existing->value eq "json") {
-			return eval {
+			my $json = eval {
 				return JSON::decode_json($existing->value_text);
 			};
+
+			return $json;
 		}
 		return $existing->value;
 	}
