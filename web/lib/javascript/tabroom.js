@@ -1322,45 +1322,45 @@ function hideLoginBox() {
 	return false;
 }
 
-// Resize the inputs and be done with the eighty seven years of choosing I've
-// been doing.
+	// Resize the inputs and be done with the eighty seven years of choosing
+	// I've been doing.
 
-var waitForFinalEvent = (function () {
-  var timers = {};
-  return function (callback, ms, uniqueId) {
-    if (!uniqueId) {
-      uniqueId = "Don't call this twice without a uniqueId";
-    }
-    if (timers[uniqueId]) {
-      clearTimeout (timers[uniqueId]);
-    }
-    timers[uniqueId] = setTimeout(callback, ms);
-  };
-})();
-
-function resizeAll() {
-
-	$('input[type=text], input[type=number].sizeme, input[type=email], input[type=tel], input[type=date], input[type=time], input[type=url]').each(function(){
-		if ($(this).is(':visible') && !['TD','TH','LABEL'].includes($(this).parent()[0].tagName)) {
-			$(this).width($(this).parent().width()-10);
+	var waitForFinalEvent = (function () {
+	  var timers = {};
+	  return function (callback, ms, uniqueId) {
+		if (!uniqueId) {
+		  uniqueId = "Don't call this twice without a uniqueId";
 		}
-	});
-
-	$('textarea').each(function(){
-		$(this).width($(this).parent().width()-10);
-	});
-
-	$('.selection').each(function(){
-		if (
-			$(this).parent().is("td")
-			|| $(this).parent().is("th")
-		) {
-			$(this).width($(this).parent().width()-5);
-		} else {
-			$(this).width($(this).parent().width()-10);
+		if (timers[uniqueId]) {
+		  clearTimeout (timers[uniqueId]);
 		}
-	});
-}
+		timers[uniqueId] = setTimeout(callback, ms);
+	  };
+	})();
+
+	function resizeAll() {
+
+		$('input[type=text], input[type=password], input[type=number].sizeme, input[type=email], input[type=tel], input[type=date], input[type=time], input[type=url]').each(function(){
+			if ($(this).is(':visible') && !['TD','TH','LABEL'].includes($(this).parent()[0].tagName)) {
+				$(this).width($(this).parent().width()-10);
+			}
+		});
+
+		$('textarea').each(function(){
+			$(this).width($(this).parent().width()-10);
+		});
+
+		$('.selection').each(function(){
+			if (
+				$(this).parent().is("td")
+				|| $(this).parent().is("th")
+			) {
+				$(this).width($(this).parent().width()-5);
+			} else {
+				$(this).width($(this).parent().width()-10);
+			}
+		});
+	}
 
 function toggleView(elementId, elementClass) {
 	$("."+elementClass).addClass('hidden');
