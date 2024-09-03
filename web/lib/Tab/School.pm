@@ -69,7 +69,6 @@ sub setting {
 					$existing->value_text($json);
 					$existing->last_changed($changed);
 				} elsif ($blob && $blob == int($blob)) {
-					Tab::debuglog("Last changed blob found for $blob");
 					$existing->last_changed($blob);
 				}
 
