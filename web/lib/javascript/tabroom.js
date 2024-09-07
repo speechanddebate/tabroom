@@ -138,7 +138,7 @@
 
 	function postSwitch(checkObject, url, callback, confirmMessage) {
 
-		if (confirmMessage != undefined && confirmMessage != "") {
+		if (confirmMessage && confirmMessage !== '') {
 			alertify.confirm("Please confirm", confirmMessage, function(e) {
 				if (e) {
 				} else {
@@ -291,7 +291,7 @@
 					alertify.alert(reply.message);
 				} else if (data.status === 0 && data.statusText === 'error') {
 					alertify.alert('Tabroom API could not be reached');
-				} else {
+				} else if (data.responseText) {
 					alertify.alert(data.responseText);
 				}
 
