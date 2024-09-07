@@ -1,0 +1,352 @@
+<%args>
+	$person
+	$person_settings
+	$circuit_id => undef
+	$quiz_id    => undef
+	$all        => undef
+</%args>
+<%init>
+
+	my $quiz = Tab::Quiz->retrieve($quiz_id);
+
+	unless ($quiz) {
+		$m->comp("/funclib/abort.mas", message => "No valid certification ID sent");
+	}
+
+	my $permission = Tab::Permission->search(
+		circuit => $quiz->circuit->id,
+		person  => $person->id
+	)->first;
+
+	unless ($permission) {
+		$m->comp("/funclib/abort.mas", message => "You are not an administrator of that circuit");
+	}
+
+	my $dbh = Tab::DBI->db_Main();
+	my $limit;
+
+	unless ($ARGS{"all"}) {
+		$limit = " and (pq.approved_by IS NULL  OR pq.approved_by = 0) ";
+	}
+
+	my $sth = $dbh->prepare("
+		select
+			person.id person_id, person.first, person.last, person.email,
+			pq.id id, pq.hidden, pq.pending, pq.approved_by, pq.completed completed, pq.updated_at,
+			approved_by.first approved_first, approved_by.last approved_last, approved_by.email approved_email
+
+		from (person, person_quiz pq)
+			left join person approved_by on approved_by.id = pq.approved_by
+
+		where person.id = pq.person
+			and pq.quiz = ?
+			$limit
+		order by pq.updated_at
+	");
+
+	$sth->execute($quiz_id);
+
+	my $approve_sth = $dbh->prepare("
+		update person_quiz set approved_by = ? where id = ?
+	");
+
+	my $complete_sth = $dbh->prepare("
+		update person_quiz set completed = ? where id = ?
+	");
+
+	my $resync_sth = $dbh->prepare("
+		update person_quiz set pending = 0 where approved_by > 0
+	");
+
+	my $results = $sth->fetchall_hash();
+
+	if ($ARGS{"save_me"}) {
+
+		foreach my $result (@{$results}) {
+
+			my $id = $result->{"id"};
+
+			$ARGS{$id."_approved"} = 0 unless $ARGS{$id."_approved"};
+			$ARGS{$id."_completed"} = 0 unless $ARGS{$id."_completed"};
+
+			if ($ARGS{$id."_approved"}) {
+				unless ($result->{"approved_by"}) {
+					$approve_sth->execute($person->id, $id);
+					$result->{"approved_by"} = $person->id;
+					$result->{"approved_email"} = $person->email;
+					$result->{"approved_first"} = $person->first;
+					$result->{"approved_last"} = $person->last;
+				}
+			} elsif ($result->{"approved_by"} > 0) {
+				$approve_sth->execute(0, $id);
+				$result->{"approved_by"} = 0;
+				$result->{"approved_email"} = "";
+				$result->{"approved_first"} = "";
+				$result->{"approved_last"} = "";
+			}
+
+			$ARGS{$id."_completed"} = 0 unless $ARGS{$id."_completed"};
+
+			if ($ARGS{$id."_completed"} ne $result->{"completed"}) {
+				$complete_sth->execute($ARGS{$id."_completed"}, $id);
+				$result->{"completed"} = $ARGS{$id."_completed"};
+			}
+		}
+
+		$resync_sth->execute();
+	}
+
+</%init>
+
+	<script>
+
+		function approveAll() {
+			$('.approvals').prop('checked', true);
+		}
+
+	</script>
+
+	<& ../menu.mas,
+        person          => $person,
+        person_settings => $person_settings,
+        whoami          => "questionnaires"
+    &>
+
+	<div class="main">
+
+		<& "/funclib/tablesorter.mas", table => "quiz" &>
+
+		<div class="flexrow full">
+			<span class="twothirds">
+				<h5><% $quiz->label %></h5>
+			</span>
+
+			<span class="third">
+				<div class="full flexrow">
+					<span class="half centeralign padtop">
+						<a
+							class = "buttonwhite bluetext invert smallish"
+							href  = "quiz_takers.mhtml?quiz_id=<% $quiz_id %>&all=<% $all ? 0 : 1 %>"
+						><% $all ? "Hide Approved" : "Show Approved" %></a>
+					</span>
+
+					<span
+						class = "half rightalign padright"
+						id    = "quiz_buttonarea"
+					>
+						<button
+							class   = "fa fa-sm fa-check buttonwhite bluetext"
+							title   = "Approve All"
+							onClick = "approveAll();"
+						></button>
+					</span>
+				</div>
+			</span>
+		</div>
+
+		<form
+			action   = "quiz_takers_save.mhtml"
+			method   = "post"
+			onsubmit = "return uploadThis();"
+			enctype  = "multipart/form-data"
+		>
+
+		<input
+			type  = "hidden"
+			name  = "quiz_id"
+			value = "<% $quiz_id %>"
+		>
+
+
+		<div class="full centeralign flexrow ltbordertop">
+			<span class="quarter"></span>
+			<span class="half flexrow">
+				<span class="fifth semibold smallish padleft">
+					Upload
+				</span>
+
+				<span class="threefifths">
+					<div class="uploader dynamic">
+						<input
+							type     = "file"
+							name     = "quiz"
+							style    = "opacity: 0;"
+							onchange = "uploaderName()"
+							id       = "upload"
+						>
+						<span
+							id    = "filename"
+							class = "filename"
+							style = "-webkit-user-select: none;"
+						>No file selected</span>
+
+						<span
+							class = "action"
+							style = "-webkit-user-select: none;"
+						>Choose File</span>
+					</div>
+				</span>
+
+				<span class="fifth rightalign padright">
+					<input
+						type  = "submit"
+						class = "thin"
+						value = "Save"
+					>
+				</span>
+			</span>
+			<span class="quarter"></span>
+		</div>
+		</form>
+
+		<form
+			action = "quiz_takers.mhtml"
+			method = "post"
+		>
+
+		<input
+			type  = "hidden"
+			name  = "quiz_id"
+			value = "<% $quiz->id %>"
+		>
+
+		<input
+			type  = "hidden"
+			name  = "all"
+			value = "<% $all %>"
+		>
+
+		<input
+			type  = "hidden"
+			name  = "save_me"
+			value = "1"
+		>
+
+		<table id="quiz">
+
+			<thead>
+				<tr class="yellowrow smallish">
+					<th class="marvertless">
+						First
+					</th>
+
+					<th>
+						Last
+					</th>
+
+					<th>
+						Email
+					</th>
+
+					<th title="Finished">
+						Finish
+					</th>
+
+					<th>
+						Updated
+					</th>
+
+					<th
+						class = "smaller"
+						title = "Hidden from appearing on their paradigm"
+					>
+						Hide
+					</th>
+
+%					if ($quiz->approval) {
+						<th class="smallish">
+							Approved
+						</th>
+
+						<th>
+							<a class="fa fa-check graytext"></a>
+						</th>
+%					}
+				</tr>
+			</thead>
+
+			<tbody>
+
+%				foreach my $result (@{$results}) {
+
+					<tr class="smallish nospace">
+						<td>
+							<% $result->{"first"} %>
+						</td>
+
+						<td>
+							<% $result->{"last"} %>
+						</td>
+
+						<td>
+							<% $result->{"email"} %>
+						</td>
+
+						<td class="centeralign nospace">
+							<span class="hiddencsv">
+								<% $result->{"completed"} ? "Y" : "N" %>
+							</span>
+							<label for="<% $result->{"id"} %>_completed">
+								<div class="full padvertno hover nospace">
+									<input
+										type  = "checkbox"
+										class = "marvertless"
+										name  = "<% $result->{"id"} %>_completed"
+										id    = "<% $result->{"id"} %>_completed"
+										value = "1"
+										<% $result->{"completed"} ? "checked" : "" %>
+									>
+								</div>
+							</label>
+						</td>
+
+						<td>
+							<& "/funclib/showdt.mas",
+								string => $result->{"updated_at"},
+								tz     => "America/Chicago",
+								length => "sortable"
+							&>
+						</td>
+
+						<td class="centeralign">
+							<% $result->{"hidden"} ? "Y" : "N" %>
+						</td>
+
+%						if ($quiz->approval) {
+							<td class="nospace padleft">
+								<% $result->{"approved_by"}
+									? $result->{"approved_first"}." ".$result->{"approved_last"}
+									:""
+								%>
+							</td>
+
+							<td class="centeralign">
+								<label for="<% $result->{"id"} %>_approved">
+									<div class="full padvertno hover nospace">
+										<input
+											type  = "checkbox"
+											class = "approvals"
+											name  = "<% $result->{"id"} %>_approved"
+											id    = "<% $result->{"id"} %>_approved"
+											value = "1"
+											<% $result->{"approved_by"} ? "checked" : "" %>
+										>
+									</div>
+								</label>
+							</td>
+%						}
+					</tr>
+%				}
+			</tbody>
+
+		</table>
+
+		<div class="full liblrow rightalign">
+			<span class="quarter centeralign">
+				<input type="submit" value="Save">
+			</span>
+		</div>
+
+		</form>
+
+	</div>

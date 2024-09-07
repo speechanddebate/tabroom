@@ -1,0 +1,261 @@
+<%args>
+	$person
+	$quiz_id
+</%args>
+<%init>
+
+	use Text::CSV;
+
+	my $req = Apache2::Request->new($r);
+	my @csv_handles = $r->upload();
+	my $csv_file = $req->upload($csv_handles[0]);
+
+	my $quiz = Tab::Quiz->retrieve($quiz_id);
+
+	unless ($quiz) {
+		$m->comp("/funclib/abort.mas", message => "No valid certification ID sent");
+	}
+
+	my $permission = Tab::Permission->search(
+		circuit => $quiz->circuit->id,
+		person  => $person->id
+	)->first;
+
+	unless ($permission) {
+		$m->comp("/funclib/abort.mas", message => "You are not an administrator of that circuit");
+	}
+
+	my %quizzes;
+	my $dbh = Tab::DBI->db_Main();
+	my @keepers;
+	my $success;
+	my $already;
+
+	if ($csv_file) {
+
+		my $update_sth = $dbh->prepare('
+			update person_quiz pq, person
+				set pq.approved_by = ?, updated_at = NOW()
+			where person.email = ?
+				and pq.person = person.id
+		');
+
+		my $find_sth = $dbh->prepare('
+			select
+				person.id person, pq.id pq, pq.approved_by approved, person.email
+			from person
+				left join person_quiz pq on pq.person = person.id and pq.quiz = ?
+			where person.email = ?
+		');
+
+		my $find_name_sth = $dbh->prepare('
+			select
+				person.id person, pq.id pq, pq.approved_by approved, person.email
+			from person
+				left join person_quiz pq on pq.person = person.id and pq.quiz = ?
+			where person.first = ?
+				and person.last = ?
+		');
+
+		my $insert_sth = $dbh->prepare('
+			insert
+				into person_quiz (person, quiz, completed, approved_by, updated_at)
+				values (?, ?, 1, ?, NOW() )
+		');
+
+		my $counter;
+		my $io = $csv_file->io;
+		my $csv = Text::CSV->new({ sep_char => ','});
+
+		my @lines = <$io>;
+
+		if ( scalar @lines == 1 ) {
+			my $raw = shift @lines;
+			$raw =~ s/\R/\n/g;
+			@lines = split(/\n/, $raw);
+		}
+
+        LINE:
+        foreach my $line (@lines) {
+
+            next unless $csv->parse($line);
+
+			$counter++;
+
+			(
+				$quizzes{$counter}{user_id},
+				$quizzes{$counter}{name},
+				$quizzes{$counter}{email},
+				$quizzes{$counter}{quiz_id},
+				$quizzes{$counter}{quiz_title},
+				$quizzes{$counter}{score},
+				$quizzes{$counter}{total},
+				$quizzes{$counter}{date},
+				$quizzes{$counter}{points},
+				$quizzes{$counter}{points_total},
+				$quizzes{$counter}{percentage},
+				$quizzes{$counter}{time_spent},
+				$quizzes{$counter}{passed},
+				$quizzes{$counter}{course_id},
+				$quizzes{$counter}{course_title}
+			) = $csv->fields();
+
+		}
+
+		KEY:
+		foreach my $key (keys %quizzes) {
+
+			next unless $quizzes{$key}{passed} eq "YES";
+
+			$find_sth->execute($quiz_id, $quizzes{$key}{email});
+
+			my $results = $find_sth->fetchall_hash();
+
+			unless ($results && @{$results}) {
+				my ($first, $last) = split(/\ /, $quizzes{$key}{"name"});
+				$find_name_sth->execute($quiz_id, $first, $last);
+				$results = $find_name_sth->fetchall_hash();
+			}
+
+			if ($results && @{$results}) {
+
+				my $ref = shift @{$results};
+
+				if ($ref->{approved}) {
+					$already++;
+				} elsif ($ref->{pq}) {
+					$update_sth->execute($person->id, $quizzes{$key}{email});
+					$success++;
+				} elsif ($ref->{person}) {
+					$insert_sth->execute($ref->{person}, $quiz_id, $person->id);
+					$success++;
+				} else {
+					push @keepers, $key;
+				}
+			} else {
+				push @keepers, $key;
+			}
+		}
+	}
+
+</%init>
+
+	<div class="main">
+
+		<div class="flexrow nospace full">
+			<span class="threefifths">
+				<h5><% $quiz->label %></h5>
+			</span>
+			<span
+				class = "threetenths rightalign"
+			>
+				<% $already || 0 %> records already approved <br />
+				<% $success || 0 %> records updated
+			</span>
+			<span
+				class = "tenth rightalign"
+				id    = "quiz_<% $quiz->tag %>_buttonarea"
+			>
+			</span>
+		</div>
+
+		<p class="centeralign semibold biggish redtext">
+			No matches found for the following <% scalar @keepers %> records
+		</p>
+
+		<& "/funclib/tablesorter.mas", table => "quiz_".$quiz->tag &>
+
+		<table id="quiz_<% $quiz->tag %>">
+
+			<thead>
+				<tr class="yellowrow smallish">
+					<th>
+						user_id
+					</th><th>
+						name
+					</th><th>
+						email
+					</th><th class="hiddencsv">
+						quiz_id
+					</th><th>
+						quiz_title
+					</th><th class="hiddencsv">
+						score
+					</th><th class="hiddencsv">
+						total
+					</th><th>
+						date
+					</th><th class="hiddencsv">
+						points
+					</th><th class="hiddencsv">
+						points_total
+					</th><th class="hiddencsv">
+						percentage
+					</th><th class="hiddencsv">
+						time_spent
+					</th><th class="hiddencsv">
+						passed
+					</th><th class="hiddencsv">
+						course_id
+					</th><th class="hiddencsv">
+						course_title
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+%				foreach my $key (sort {$a <=> $b} @keepers) {
+
+					<tr class="smallish">
+						<td>
+							<% $quizzes{$key}{user_id} %>
+						</td><td>
+							<% $quizzes{$key}{name} %>
+						</td><td>
+							<% $quizzes{$key}{email} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{quiz_id} %>
+						</td><td>
+							<% $quizzes{$key}{quiz_title} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{score} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{total} %>
+						</td><td>
+							<% $quizzes{$key}{date} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{points} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{points_total} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{percentage} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{time_spent} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{passed} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{course_id} %>
+						</td><td class="hiddencsv">
+							<% $quizzes{$key}{course_title} %>
+						</td>
+					</tr>
+%				}
+			</tbody>
+		</table>
+
+	</div>
+
+	<div class="menu">
+
+		<div class="sidenote">
+
+			<h4>Return</h4>
+
+			<a
+				class = "full blue"
+				href  = "quiz_takers.mhtml?quiz_id=<% $quiz_id %>"
+			>Return to <% $quiz->tag %></a>
+
+		</div>
+
+	</div>
