@@ -876,8 +876,48 @@
 		</div>
 
 <%perl>
-		my @rounds = sort { $a->name <=> $b->name } $event->rounds;
-		if (@rounds) {
+
+		my $round_sth = $dbh->prepare("
+			select
+				round.id, round.name, round.label,
+				CONVERT_TZ(round.start_time, '+00:00', tourn.tz) start_time,
+				CONVERT_TZ(timeslot.start, '+00:00', tourn.tz) ts_start
+			from round, event, tourn, timeslot
+				where event.id = ?
+				and event.tourn = tourn.id
+				and event.id = round.event
+				and round.timeslot = timeslot.id
+			order by round.name
+		");
+
+		$round_sth->execute($event->id);
+		my $rounds = $round_sth->fetchall_hash();
+
+		my $panel_sth = $dbh->prepare("
+			select
+				panel.id, panel.letter, panel.bye,
+				room.id room_id, room.name room_name,
+				ballot.id ballot_id, ballot.bye bbye, ballot.forfeit
+			from (panel, ballot)
+				left join room on room.id = panel.room
+			where panel.round = ?
+				and panel.id = ballot.panel
+				and ballot.entry = ?
+			group by ballot.entry
+		");
+
+		my $judges_sth = $dbh->prepare("
+			select
+				judge.id, judge.code, judge.first, judge.last,
+				ballot.chair
+			from (ballot, judge)
+			where ballot.panel = ?
+				and ballot.judge = judge.id
+			group by judge.id
+			order by ballot.id
+		");
+
+		if ($rounds && @{$rounds}) {
 </%perl>
 
 		<div class="full flexrow padtop">
@@ -889,11 +929,6 @@
 				class = "half rightalign padright"
 				id    = "rounds_buttonarea"
 			>
-				<button
-					class = "buttonwhite bluetext fa fa-sm fa-edit"
-					title = "Change Results"
-					href  = "/tabbing/entry/card.mhtml?entry_id=<% $entry->id %>"
-				></button>
 			</span>
 
 		</div>
@@ -932,7 +967,7 @@
 						</th>
 %					}
 
-%					unless ($event_settings{'online'} && $event_settings{"online_mode"} eq "async") {
+%					unless ($event_settings{"online_mode"} eq "async") {
 						<th class="smaller">
 							Room
 						</th>
@@ -969,17 +1004,16 @@
 			<tbody>
 <%perl>
 
-			foreach my $round (@rounds) {
+			foreach my $round (@{$rounds}) {
 
-				my @panels = $m->comp(
-					"/funclib/entry_panels.mas",
-						round => $round,
-						entry => $entry
-				);
+				$panel_sth->execute($round->{id}, $entry->id);
+				my $panels = $panel_sth->fetchall_hash();
 
-				foreach my $panel (@panels) {
+				next unless $panels && @{$panels};
 
-					my @all_ballots = Tab::Ballot->search( panel => $panel->id );
+				foreach my $panel (@{$panels}) {
+
+					my @all_ballots = Tab::Ballot->search( panel => $panel->{id} );
 					my @ballots;
 
 					my $opp;
@@ -999,14 +1033,14 @@
 </%perl>
 					<tr class="row flexrow">
 
-						<td class="smaller centeralign">
-							<span class="hidden"><% $round->name %></span>
-							<% $round->realname %>
+						<td class="smaller centeralign" data-text="<% $round->{name} %>">
+							<% $round->{label} || "Round ".$round->{name} %>
 						</td>
 
-						<td class="smaller nowrap">
-							<span class="hidden"><% $round->timeslot->start->epoch %></span>
-							<% &Tab::nicetime($round->timeslot->start->set_time_zone($tz)) %>
+						<td class="smaller nowrap" data-text="<% $round->{start_time} || $round->{ts_start} %>">
+							<& "/funclib/showtime.mas",
+								string => $round->{start_time} || $round->{ts_start}
+							&>
 						</td>
 
 %						if ($event_type eq "wudc" || $event_type eq "speech") {
@@ -1016,8 +1050,7 @@
 %						}
 
 %						if ($event_type eq "debate") {
-
-%							if ($panel->bye) {
+%							if ($panel->{bye}) {
 								<td class="smaller" colspan="4">
 									<div class="full">
 										BYE
@@ -1042,7 +1075,7 @@
 								</td>
 
 								<td class="smaller centeralign">
-%									if ($panel->bye) {
+%									if ($panel->{bye}) {
 										B
 %									} else {
 										<% $side == 1 ? $aff_string : $neg_string %>
@@ -1071,45 +1104,41 @@
 
 %								} else {
 									<td class="smaller leftalign padleft">
-										<% $event_type eq "congress" ? "Ch ".$panel->letter : "" %>
-										<% ($panel->room > 0) ? $panel->room->name : "No Room" %>
+										<% $event_type eq "congress" ? "Ch ".$panel->{letter} : "" %>
+										<% $panel->{room_name} || "No Room" %>
 									</td>
 %								}
 
 								<td class="smaller nospace">
 
-%				 					if ($panel->bye) {
-
+%				 					if ($panel->{bye}) {
 										<span class="semibold redtext">
 											BYE
 										</span>
-
-%									} else {
-
 <%perl>
-					 					foreach my $judge (
-											sort {$a->ballotid <=> $b->ballotid}
-												$m->comp(
-													"/funclib/panel_judges.mas",
-													panel => $panel
-												)
-										) {
+									} else {
+
+										$judges_sth->execute($panel->{id});
+										my $judges = $judges_sth->fetchall_hash();
+
+					 					foreach my $judge (@{$judges}) {
 </%perl>
-											<div class="full nospace nowrap padleftless hover flexrow">
+											<div class="full hover flexrow grow">
+
 												<span class="third padleft nowrap padvertless">
 													<% $category_settings{'no_codes'}
-														? $judge->last.", ".$judge->first
-														: $judge->code." ".$judge->last.", ".$judge->first
+														? $judge->{last}.", ".$judge->{first}
+														: $judge->{code}." ".$judge->{last}.", ".$judge->{first}
 													%><%
-														$judge->chair ? "*" : ""
+														$judge->{chair} ? "*" : ""
 													%>
 												</span>
 
-												<span class="twothirds nospace nowrap">
+												<span class="twothirds nowrap">
 <%perl>
 						 							foreach my $ballot (@ballots) {
 
-														next if $ballot->judge->id ne $judge->id;
+														next if $ballot->judge->id ne $judge->{id};
 														my %values = ();
 
 														foreach my $score ($ballot->values) {
@@ -1160,7 +1189,7 @@
 
 %															} else {
 
-																<span class="<% $event_type eq "wsdc" ? "fifth" : "sixth" %> padmuchless marno">
+																<span class="<% $event_type eq "wsdc" ? "fifth" : "sixth" %> nospace">
 																	<div class="padmuchless marless centeralign semibold
 																		<% $values{"winloss"} eq "W" ? "greentext" : "redtext" %>">
 																		<% $values{"winloss"}  %>
@@ -1258,9 +1287,9 @@
 </%perl>
 								<td class="smaller nospace centeralign">
 									<& "/funclib/online_room.mas",
-										panel => $panel,
+										panel  => $panel->{id},
 										person => $person,
-										class => "fa-sm"
+										class  => "fa-sm"
 									&>
 								</td>
 
@@ -1269,32 +1298,33 @@
 
 %							} else {
 								<td class="smaller leftalign padleft">
-									<% $event_type eq "congress" ? "Ch ".$panel->letter : "" %>
-									<% ($panel->room > 0) ? $panel->room->name : "No Room" %>
+									<% $event_type eq "congress" ? "Ch ".$panel->{letter} : "" %>
+									<% $panel->{room_name} || "No Room" %>
 								</td>
 %							}
 
 							<td class="smaller nospace">
 <%perl>
-								foreach my $judge (
-									sort {$a->ballotid <=> $b->ballotid}
-									$m->comp("/funclib/panel_judges.mas", panel => $panel)
-								) {
+
+								$judges_sth->execute($panel->{id});
+								my $judges = $judges_sth->fetchall_hash();
+
+								foreach my $judge (@{$judges}) {
 </%perl>
 									<div class="full flexrow padleft">
 
 										<span class="half smaller">
 											<% $category_settings{'no_codes'}
-												? $judge->last
-												: $judge->code." ".$judge->last.", ".$judge->first
-											%><% $judge->chair ? "*" : "" %>
+												? $judge->{last}
+												: $judge->{code}." ".$judge->{last}.", ".$judge->{first}
+											%><% $judge->{chair} ? "*" : "" %>
 										</span>
 
-										<span class="half smaller flexrow">
+										<span class="half smaller flexrow nowrap">
 
 %				 							foreach my $ballot (@ballots) {
 
-%												next unless $ballot->judge->id == $judge->id;
+%												next unless $ballot->judge->id == $judge->{id};
 
 												<span class="third padleft">
 													<% $ballot->forfeit ? "NoShow" : "" %>
@@ -1331,7 +1361,7 @@
 							<span class="third">
 								<a
 									class="bluetext buttonwhite fa fa-sm fa-eye smallish"
-									href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel->id %>"
+									href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel->{id} %>"
 									title="View Section"
 								></a>
 							</span>
@@ -1340,7 +1370,7 @@
 								<a
 									class = "redtext buttonwhite fa fa-sm fa-retweet smallish"
 									title = "Move manually into a different section"
-									href  = "/panel/manipulate/entry_edit.mhtml?entry_id=<% $entry->id %>&round_id=<% $round->id %>"
+									href  = "/panel/manipulate/entry_edit.mhtml?entry_id=<% $entry->id %>&round_id=<% $round->{id} %>"
 								></a>
 							</span>
 
@@ -1349,7 +1379,7 @@
 									<a
 										class = "greentext buttonwhite fa fa-sm fa-plus smallish"
 										title = "Move manually into a second section"
-										href  = "/panel/manipulate/entry_edit.mhtml?entry_id=<% $entry->id %>&round_id=<% $round->id %>&add=1"
+										href  = "/panel/manipulate/entry_edit.mhtml?entry_id=<% $entry->id %>&round_id=<% $round->{id} %>&add=1"
 									></a>
 								</span>
 %							}
@@ -1357,35 +1387,27 @@
 					</tr>
 % 				}
 
-%				unless (@panels) {
+%				unless (@{$panels}) {
 
 					<tr class="row flexrow">
 						<td
 							class="smaller centeralign"
-							data-text="<% $round->name %>"
+							data-text="<% $round->{name} %>"
 						>
-							<% $round->realname %>
+							<% $round->{label} || "Round ".$round->{name} %>
 						</td>
 
-						<td class="smaller"
-							data-text="<% $round && $round->timeslot && $round->timeslot->start
-									? $round->timeslot->start->epoch
-									: "" %>"
-						>
-							<% $round && $round->timeslot && $round->timeslot->start
-								? &Tab::nicetime($round->timeslot->start->set_time_zone($tz))
-								: ""
-							%>
+						<td class="smaller" data-text="<% $round->{start_time} || $round->{ts_start} %>">
+							<& "/funclib/showtime.mas",
+								string => $round->{start_time} || $round->{ts_start}
+							&>
 						</td>
 
 						<td colspan="8" class="nospace">
 							<div class="full flexrow">
 								<span class="half semibold redtext padleft">
 									Not scheduled in
-									<% ($round->label)
-										? $round->label
-										: "Round ".$round->name
-									%>
+									<% $round->{label} || "Round ".$round->{name} %>
 								</span>
 
 								<span class="twofifths semibold bluetext rightalign">
@@ -1395,8 +1417,8 @@
 								<span class="tenth padvertless centeralign">
 									<a
 										class = "greentext buttonwhite fa fa-plus fa-sm smaller"
-										href  = "/panel/manipulate/entry_edit.mhtml?entry_id=<% $entry->id %>&round_id=<% $round->id %>"
-										title = "Add Manually to <% $round->realname %>"
+										href  = "/panel/manipulate/entry_edit.mhtml?entry_id=<% $entry->id %>&round_id=<% $round->{id} %>"
+										title = "Add Manually to <% $round->{label} || "Round ".$round->{name} %>"
 									></a>
 								</span>
 							</span>
