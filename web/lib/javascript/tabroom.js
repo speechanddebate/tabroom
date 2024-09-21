@@ -300,6 +300,7 @@
 			},
 			success: function(data, status, metadata) {
 
+
 				if (data.reply) {
 					if (attributes.reply_target) {
 						$("#"+attributes.reply_target).text(data.reply);
@@ -377,8 +378,8 @@
 
 				} else if (data.message) {
 
-					alertify.dismissAll();
-					alertify.notify(data.message, "custom");
+					alertify.set('notifier','delay', 10);
+					const response = alertify.warning(`${data.message}`, "custom");
 
 					if (data.destroy) {
 						$("#"+data.destroy).remove();
@@ -428,7 +429,6 @@
 					}
 
 					if (data.replace) {
-
 						data.replace.forEach( function(item) {
 							if (item.destroy) {
 								$("#"+item.id).remove();
@@ -519,6 +519,7 @@
 
 					if (data.error) {
 
+						alertify.set('notifier','delay', 20);
 						alertify.error(data.message);
 						console.log(data);
 
@@ -550,6 +551,7 @@
 					} else if (data.message) {
 
 						alertify.dismissAll();
+						alertify.set('notifier','delay', 10);
 						alertify.notify(data.message, "custom");
 
 						if (data.destroy) {
