@@ -64,6 +64,7 @@
 	};
 
 	Runner = (function() {
+
 		function Runner(items, options, start) {
 			var id;
 			if (!(this instanceof Runner)) {
@@ -85,23 +86,15 @@
 			}
 		}
 
-		Runner.prototype.running = false;
-
-		Runner.prototype.updating = false;
-
-		Runner.prototype.finished = false;
-
-		Runner.prototype.interval = null;
-
-		Runner.prototype.total = 0;
-
-		Runner.prototype.lastTime = 0;
-
+		Runner.prototype.running   = false;
+		Runner.prototype.updating  = false;
+		Runner.prototype.finished  = false;
+		Runner.prototype.interval  = null;
+		Runner.prototype.total     = 0;
+		Runner.prototype.lastTime  = 0;
 		Runner.prototype.startTime = 0;
-
-		Runner.prototype.lastLap = 0;
-
-		Runner.prototype.lapTime = 0;
+		Runner.prototype.lastLap   = 0;
+		Runner.prototype.lapTime   = 0;
 
 		Runner.prototype.settings = {
 			autostart    : false,
