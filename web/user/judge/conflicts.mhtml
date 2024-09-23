@@ -18,20 +18,16 @@
 		my $other = Tab::Person->retrieve($other_id);
 
 		if ($other) {
-
 			my @already = Tab::Conflict->search(
 				person     => $person->id,
 				conflicted => $other_id
 			);
-
 			unless (@already) {
-
 				Tab::Conflict->create({
 					person     => $person->id,
 					conflicted => $other_id,
 					added_by   => $person->id,
 				});
-
 			}
 		}
 	}
@@ -58,6 +54,52 @@
 			}
 		}
 	}
+
+	my $upcoming_judges;
+
+	if ($other_id || $chapter_id) {
+
+		my $upcoming_judge_sth = $dbh->prepare("
+			select
+				judge.id, category.abbr,
+				school.name school_name,
+				tourn.id tourn, tourn.name tourn_name,
+				CONVERT_TZ(tourn.start, '+00:00', tourn.tz) tourn_start
+			from (judge, category, tourn)
+				left join school on judge.school = school.id
+			where tourn.end > NOW()
+				and tourn.id = category.tourn
+				and category.id = judge.category
+				and judge.person = ?
+		");
+
+		$upcoming_judge_sth->execute($person->id);
+		$upcoming_judges = $upcoming_judge_sth->fetchall_hash();
+
+		my $upcoming_entry_sth = $dbh->prepare("
+			select
+				entry.id, tourn.id tourn
+				from entry, entry_student es, event, tourn, student
+			where tourn.end > NOW()
+				and tourn.id = event.tourn
+				and event.id = entry.event
+				and entry.id = es.entry
+				and es.student = student.id
+				and student.person = ?
+		");
+
+		$upcoming_entry_sth->execute($person->id);
+		my $upcoming_entries = $upcoming_entry_sth->fetchall_hash();
+
+		foreach my $ref (@{$upcoming_judges}, @{$upcoming_entries}) {
+			$m->comp("/funclib/person_conflict.mas",
+				person  => $person,
+				entered => $person,
+				tourn   => $ref->{tourn}
+			);
+		}
+	}
+
 
 	my $limit;
 	my $chapters;
@@ -159,30 +201,26 @@
 		$persons = $sth->fetchall_hash();
 	}
 
-	my @nowjudges = $m->comp(
-		"/funclib/person_judges.mas",
-		person       => $person,
-		future       => 1,
-		conflictable => 1
-	);
-
-	if ($chapter_id || $other_id) {
-		foreach my $judge (@nowjudges) {
-			$m->comp("/funclib/person_conflict.mas", person => $person, tourn => $judge->category->tourn);
-		}
-	}
-
-	Tab::Tourn->set_sql( next_five => "
+	my $next_tourn_sth = $dbh->prepare('
 		select
-			tourn.id, tourn.name, tourn.start
-
-		from tourn, school
-			where school.chapter = ?
+			tourn.id, tourn.name,
+			CONVERT_TZ(tourn.start, "+00:00", tourn.tz) tourn_start,
+			category.abbr,
+			strike.id strike
+		from (tourn, school, category, judge)
+			left join strike on strike.judge = judge.id and strike.school = school.id
+				and conflict = 1
+				and registrant = 1
+		where school.chapter = ?
 			and school.tourn = tourn.id
 			and tourn.end > NOW()
+			and tourn.id = category.tourn
+			and judge.category = category.id
+			and judge.person = ?
+		group by school.id
 		order by tourn.start
-		limit 5
-	");
+	');
+
 
 </%init>
 
@@ -198,8 +236,9 @@
 		<p>
 			These conflicts are meant to reflect a personal or professional
 			relationship which means it is unfair for you to judge the other
-			person; such as a relative, or a former student.  Do not use
-			conflicts against debaters you simply do not like as judges.
+			person; such as a relative, classmate, or a former student.  Do not
+			use conflicts against judges or competitors you simply do not like;
+			that's what strikes are for.
 		</p>
 
 		<p>
@@ -209,11 +248,11 @@
 			tournament's officials if the latter situation arises.
 		</p>
 
-		<p class="bluetext semibold padvertmore bigger centeralign">
-			Conflicts entered on Tabroom.com are <span class="inline redtext italic">not confidential.</span>
+		<p class="bluetext semibold padvertmore bigger">
+			Conflicts entered on Tabroom.com are <span class="inline semibold redtext italic">not confidential.</span>
 		</p>
 
-		<p>
+		<p class="padbottom">
 			Any information you enter onto Tabroom is viewable by third
 			parties, including the people you are conflicting.  If you have a
 			conflict (or for that matter, any other information) you wish to
@@ -221,35 +260,36 @@
 			directly instead of entering it here.
 		</p>
 
-		<p class="centeralign bigger semibold redtext">
-
-			The judge &amp; entry both must have a Tabroom.com person linked to
-			their entries <br />for a standing conflict to work automatically.
+		<p class="bigger semibold redtext">
+			The judge &amp; entry both must have a Tabroom.com account linked
+			to their tournament registrations for a standing conflict to work
+			automatically. This system is not perfect; it is still your
+			responsibility to ensure tournaments are aware of your conflicts!
 		</p>
 
-%		if (@nowjudges) {
+%		if ($upcoming_judges && scalar @{$upcoming_judges} > 0) {
 			<h5 class="martopmore button">
 				Tournament Specific Conflict Sheets
 			</h5>
 
-%			foreach my $judge (@nowjudges) {
+%			foreach my $judge (@{$upcoming_judges}) {
 
 				<div class="row">
 					<span class="twofifths semibold">
-						<% $judge->category->tourn->name %>
+						<% $judge->{tourn_name} %>
 					</span>
 
 					<span class="tenth">
-						<% $judge->category->abbr %>
+						<% $judge->{abbr} %>
 					</span>
 
 					<span class="third">
-						<% $judge->school ? $judge->school->name : "Hired" %>
+						<% $judge->{school_name} || "Tournament Judge" %>
 					</span>
 
 					<span class="fifth centeralign">
 						<a
-							href="judge_conflicts.mhtml?judge_id=<% $judge->id %>"
+							href="judge_conflicts.mhtml?judge_id=<% $judge->{id} %>"
 							class="buttonwhite bluetext thinnish fa fa-lg fa-list"
 						></a>
 					</span>
@@ -260,7 +300,7 @@
 
 %		if (@existings) {
 
-			<h5>Program Conflicts</h5>
+			<h5 class="padtopmore">Program Conflicts</h5>
 
 <%perl>
 			foreach my $existing (@existings) {
@@ -268,53 +308,77 @@
 				my $chapter = $existing->chapter;
 				next unless $chapter > 0;
 
-				my @next_five = Tab::Tourn->search_next_five($chapter->id);
-
+				$next_tourn_sth->execute($chapter->id, $person);
+				my $next_tourns = $next_tourn_sth->fetchall_hash();
 </%perl>
-				<div class="row bordertop">
-					<span
-						title="<% $chapter->id %>"
-						class="fifth semibold bluetext hover"
-					>
-						<% $chapter->name %>
-					</span>
+				<div class="row bluebordertop marbottommore">
 
-					<span class="half">
-%						if (@next_five) {
-							<div class="full semibold redtext smaller padvertless">
-								Next 5 tournaments
-							</div>
+					<div class='full padvertless flexrow'>
+						<span
+							title = "<% $chapter->id %>"
+							class = "seveneighths semibold bigger bluetext padleft"
+						>
+							<% $chapter->name %>
+						</span>
+						<span class="eighth centeralign padright nospace padtopless">
+							<a class="redtext buttonwhite fa fa-trash fa-sm nospace"
+								href="conflict_rm.mhtml?conflict_id=<% $existing->id %>">
+							</a>
+						</span>
+					</div>
 
-%							foreach my $tourn (@next_five) {
-								<div class="full padless smallish marno marleftmore">
-									<span class="fourfifths nospace padtopless">
-										<% $tourn->name %>
+					<div class="full smallish flexrow ltborderbottom">
+						<span class="fifth semibold italic padleftmore">
+							Chapter Admins:
+						</span>
+
+						<span class='fourfifths italic'>
+%							my $notfirst;
+%							foreach my $admin ($chapter->admins) {
+%								next unless $admin > 0;
+%								$m->print(', ') if $notfirst++;
+%								$m->print($admin->first." ".$admin->last);
+%							}
+						</span>
+					</div>
+
+%					if ($next_tourns && scalar @{$next_tourns} > 0) {
+						<div class="full flexrow wrap top grow">
+							<span class="threequarters">
+								<div class="full semibold redtext smaller flexrow">
+									<span class="seveneighths">
+										Future Overlapping Tournaments
 									</span>
-									<span class="fifth nospace padtopless">
-										(<% $tourn->start->year %>)
+									<span
+										class = "eighth smaller centeralign"
+										title = "A green check means this conflict is registered at this tournament"
+									>
+										Conflict
 									</span>
 								</div>
-%							}
-%						}
-					</span>
 
-					<span class="quarter top">
-						<div class="full semibold redtext smaller padvertless">
-							Admins
+%								foreach my $tourn (@{$next_tourns}) {
+									<div class="full padleft flexrow smallish">
+										<span class="threequarters">
+											<% $tourn->{name} %>
+										</span>
+										<span class="eighth">
+											(<% substr($tourn->{tourn_start}, 0, 4) %>)
+										</span>
+										<span class="eighth centeralign">
+											<i
+												class="fa fa-sm <% $tourn->{strike}
+													? "greentext fa-check"
+													: "redtext fa-times"
+												%>"
+											></i>
+										</span>
+									</div>
+%								}
+							</span>
 						</div>
-%						foreach my $admin ($chapter->admins) {
-%							next unless $admin > 0;
-							<div class="full padless smallish marno marleftmore">
-								<% $admin->first %> <% $admin->last %>
-							</div>
-%						}
-					</span>
+%					}
 
-					<span class="twenty rightalign">
-						<a class="redtext buttonwhite fa fa-trash fa-sm"
-							href="conflict_rm.mhtml?conflict_id=<% $existing->id %>">
-						</a>
-					</span>
 				</div>
 %			}
 
@@ -330,172 +394,129 @@
 					unless ($notfirst++) {
 						$m->print('<h5>Individual Conflicts</h5>');
 					}
+
+					my $next_sth = $dbh->prepare('
+						select
+							tourn.id, tourn.name tourn_name,
+							CONVERT_TZ(tourn.start, "+00:00", tourn.tz) tourn_start,
+							category.abbr,
+							strike.id strike
+						from (tourn, category, judge, event, entry, entry_student es, student)
+							left join strike on strike.judge = judge.id and strike.entry = entry.id
+								and conflict = 1
+								and registrant = 1
+						where judge.person     = ?
+							and judge.category = category.id
+							and category.tourn = tourn.id
+							and tourn.end > NOW()
+							and event.tourn    = tourn.id
+							and event.id       = entry.event
+							and entry.id       = es.entry
+							and es.student     = student.id
+							and student.person = ?
+						group by tourn.id
+						order by tourn.start
+					');
+
+					$next_sth->execute($person, $conflicted);
+					my $ejs = $next_sth->fetchall_hash();
+					$next_sth->finish();
+
+					$next_sth->execute($conflicted, $person);
+					my $jes = $next_sth->fetchall_hash();
+					$next_sth->finish();
+
 </%perl>
-					<div class="row padvertless bordertop">
-						<span
-							title="<% $conflicted->email %>"
-							class="fifth semibold bluetext hover"
-						>
-							<% $conflicted->first." ".$conflicted->last %>
-						</span>
+					<div class="row bluebordertop">
 
+						<div class='full padvertless flexrow ltborderbottom'>
+							<span class="seveneighths semibold bigger bluetext padleft padvert">
+								<% $conflicted->first." ".$conflicted->last %>
+							</span>
 
-%						my @cjs = $conflicted->chapter_judges if $conflicted;
+							<span class="eighth rightalign padright">
+								<a class="redtext buttonwhite fa fa-trash fa-sm"
+									href="conflict_rm.mhtml?conflict_id=<% $existing->id %>">
+								</a>
+							</span>
+						</div>
 
-						<span class="third nospace padvert top">
-%							if (@cjs) {
-								<div class="full semibold redtext smaller padvertless">
-									JUDGES FOR
-								</div>
-
-%								foreach my $judge (@cjs) {
-%									next unless $judge->chapter;
-									<div class="full padless smallish marno marleftmore">
-										<% $judge->chapter->name %>
-									</div>
-%								}
-%							}
-						</span>
-
-						<span class="twofifths nospace padvert top">
-
-%							my @students = $conflicted->students if $conflicted;
-%							if (@students) {
-								<div class="full semibold redtext smaller padvertless">
-									COMPETES FOR
-								</div>
-
-%								foreach my $student (@students) {
-%									next unless $student && $student->chapter;
-									<div class="full padless smallish marno marleftmore">
-										<span class="fourfifths nospace padtopless">
-											<% $student->chapter->name %>
+						<div class="full flexrow top grow">
+%							if ($ejs && @{$ejs}) {
+								<span class="half top">
+									<div class="full semibold redtext flexrow smallish">
+										<span class="fivesixths padleft">
+											Future Overlapping Judging
 										</span>
-										<span class="fifth nospace padtopless">
-											(<% $student->grad_year %>)
+										<span
+											class = "sixth smaller centeralign"
+											title = "A green check means this conflict is registered at this tournament"
+										>
+											Conflict
 										</span>
 									</div>
-%								}
-%							}
-						</span>
 
-						<span class="tenth centeralign">
-							<a class="redtext buttonwhite fa fa-trash fa-sm"
-								href="conflict_rm.mhtml?conflict_id=<% $existing->id %>">
-							</a>
-						</span>
+%									foreach my $ej (@{$ejs}) {
+										<div class="full smallish flexrow">
+											<span class="fivesixths padleft">
+												You judging <% $ej->{abbr} %> at <% $ej->{tourn_name} %>
+											</span>
+											<span class="sixth centeralign">
+												<i class='fa fa-sm
+													<% $ej->{strike} ? "greentext fa-check" : "redtext fa-times" %>
+												'></i>
+											</span>
+										</div>
+%									}
+								</span>
+%							}
+
+%							if ($jes && @{$jes}) {
+								<span class="half top">
+									<div class="full semibold redtext flexrow smallish">
+										<span class="fivesixths padleft">
+											Future Overlapping Competing
+										</span>
+										<span
+											class = "sixth smaller centeralign"
+											title = "A green check means this conflict is registered at this tournament"
+										>
+											Conflict
+										</span>
+									</div>
+
+%									foreach my $je (@{$jes}) {
+										<div class="full smallish flexrow">
+											<span class="fivesixths padleft">
+												Them judging <% $je->{abbr} %> at <% $je->{tourn_name} %>
+											</span>
+											<span class="sixth centeralign">
+												<i class='fa fa-sm
+													<% $je->{strike} ? "greentext fa-check" : "redtext fa-times" %>
+												'></i>
+											</span>
+										</div>
+%									}
+								</span>
+%							}
+						</div>
 					</div>
 %				}
 %			}
 
-			<h6 class="bluebordertop padtopmore martopmore">Add Individual Conflict</h6>
-
-%			if ($err) {
-				<p class="centeralign explain redtext semibold"><% $err %></p>
-%			}
-
-			<form
-				action = "conflicts.mhtml"
-				method = "post"
-			>
-
-			<div class="row marno">
-				<span class="sixsevenths">
-					<div class="full nospace">
-						<span class="fifth">
-							Search Name
-						</span>
-						<span class="twofifths">
-							<input
-								type        = "text"
-								name        = "search_first"
-								size        = "25"
-								placeholder = "First name"
-								value       = "<% $ARGS{"search_first"} %>"
-							>
-						</span>
-						<span class="spacer"></span>
-						<span class="halfspacer"></span>
-						<span class="twofifths">
-							<input
-								type        = "text"
-								name        = "search_last"
-								size        = "25"
-								placeholder = "Last name"
-								value       = "<% $ARGS{"search_last"} %>"
-							>
-						</span>
-					</div>
-
-					<div class="full nospace ltbordertop">
-						<span class="fifth">
-							or Email
-						</span>
-						<span class="fourfifths">
-							<input
-								type        = "text"
-								name        = "search_email"
-								size        = "32"
-								placeholder = "Search by email"
-								value       = "<% $ARGS{"search_email"} %>"
-							>
-						</span>
-					</div>
-				</span>
-
-				<span class="seventh centeralign nospace">
-					<input
-						type  = "submit"
-						value = "Search"
-					>
-				</span>
-			</div>
-		</form>
-
-		<h6 class="martop">Add School/Program Conflict</h6>
-
-			<form
-				action = "conflicts.mhtml"
-				method = "post"
-			>
-				<div class="row">
-					<span class="sixth">
-						<span class="spacer"></span>
-						School/Institution
-					</span>
-					<span class="halfspacer"></span>
-					<span class="threefifths">
-						<input
-							type        = "text"
-							name        = "search_chapter"
-							size        = "25"
-							placeholder = "Search by school name"
-							value       = "<% $ARGS{"search_chapter"} %>"
-						>
-					</span>
-
-					<span class="spacer"></span>
-					<span class="spacer"></span>
-					<span class="halfspacer"></span>
-
-					<span class="fifth centeralign nospace">
-						<input
-							type  = "submit"
-							value = "Search"
-						>
-					</span>
-				</div>
-			</form>
+			<h5 class="bluebordertop padtopmore martopmore semibold">Add Individual Conflict</h5>
 
 %			if ($persons || $chapters) {
 
-				<h5 class="button martopmore">Search Results</h5>
+				<h6 class="centeralign martop nospace semibold padvertless">
+					Search Results: <% $ARGS{"search_first"} %> <% $ARGS{'search_last'} %>
+				</h6>
 
 %				if ($persons) {
 
-					<div class="ltyellow row smallish semibold martopmore">
+					<div class="ltyellow row smallish semibold flexrow">
 
-						<span class="sixth semibold">
+						<span class="sixth semibold padleft">
 							First
 						</span>
 
@@ -526,9 +547,9 @@
 							$chapters{$chapter}++;
 						}
 </%perl>
-						<div class="row ">
+						<div class="row flexrow">
 
-							<span class="sixth semibold">
+							<span class="sixth semibold padleft">
 								<% $person_ref->{first} %>
 							</span>
 
@@ -548,20 +569,19 @@
 %								}
 							</span>
 
-							<span class="sixth rightalign">
-								<a class="buttonwhite bluetext invert thin"
+							<span class="sixth rightalign padright">
+								<a class="buttonwhite bluetext invert thin starthere"
 									href="conflicts.mhtml?other_id=<% $person_ref->{id}%>"
 								> Conflict </a>
 							</span>
 						</div>
 %					}
-
 %				}
 
 %				if ($chapters) {
 
-					<div class="ltyellow row smallish semibold martopmore">
-						<span class="quarter semibold">
+					<div class="ltyellow row smallish semibold martopmore flexrow">
+						<span class="quarter semibold padleft">
 							Program Name
 						</span>
 
@@ -581,7 +601,7 @@
 
 %						next if $no_chapter{$chapter->{id}};
 
-						<div class="row nospace padverless">
+						<div class="row bluebordertop">
 							<span class="quarter semibold">
 								<% $chapter->{'name'} %>
 							</span>
@@ -615,5 +635,101 @@
 						</div>
 %					}
 %				}
+
+				<div class='full padvert'>
+				</div>
 %			}
+
+
+%			if ($err) {
+				<p class="centeralign explain redtext semibold"><% $err %></p>
+%			}
+
+			<form
+				action = "conflicts.mhtml"
+				method = "post"
+			>
+
+			<div class="row flexrow wrap">
+				<span class="fourfifths">
+					<div class="full flexrow">
+						<span class="quarter padleft">
+							Search By Name
+						</span>
+
+						<span class="threeeighths">
+							<input
+								type        = "text"
+								name        = "search_first"
+								placeholder = "First name"
+								class       = "notfirst"
+								value       = "<% $ARGS{"search_first"} %>"
+							>
+						</span>
+						<span class="threeeighths padleft">
+							<input
+								type        = "text"
+								name        = "search_last"
+								placeholder = "Last name"
+								class       = "notfirst"
+								value       = "<% $ARGS{"search_last"} %>"
+							>
+						</span>
+					</div>
+
+					<div class="full flexrow ltbordertop">
+						<span class="quarter padleft">
+							or Email
+						</span>
+						<span class="threequarters">
+							<input
+								type        = "email"
+								name        = "search_email"
+								placeholder = "Search by email"
+								class       = "notfirst"
+								value       = "<% $ARGS{"search_email"} %>"
+							>
+						</span>
+					</div>
+				</span>
+
+				<span class="fifth rightalign padrightmore">
+					<input
+						type  = "submit"
+						value = "Search"
+					>
+				</span>
+			</div>
+		</form>
+
+		<h6 class="martop">Add School/Institutional Conflict</h6>
+
+			<form
+				action = "conflicts.mhtml"
+				method = "post"
+			>
+				<div class="row flexrow">
+
+					<span class="fifth padleft semibold">
+						Institution Name
+					</span>
+					<span class="threefifths">
+						<input
+							type        = "text"
+							name        = "search_chapter"
+							class       = "notfirst"
+							placeholder = "Search by name"
+							value       = "<% $ARGS{"search_chapter"} %>"
+						>
+					</span>
+
+					<span class="fifth rightalign padrightmore">
+						<input
+							type  = "submit"
+							value = "Search"
+						>
+					</span>
+				</div>
+			</form>
+
 	</div>

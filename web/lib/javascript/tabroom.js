@@ -278,9 +278,10 @@
 			...options,
 			error: function(data, status, metadata) {
 
-				console.log(data);
-
+				console.log(`FAILBOAT SINKS LIKE ONLY IT CAN`);
 				const reply = data.responseJSON || data.responseText;
+				console.log(reply);
+
 				alertify.set('notifier','delay', 15);
 
 				if (reply && reply.message) {
@@ -299,7 +300,6 @@
 				return;
 			},
 			success: function(data, status, metadata) {
-
 
 				if (data.reply) {
 					if (attributes.reply_target) {
@@ -326,8 +326,6 @@
 				// meant to do that. WILD I KNOW.
 
 				if (metadata.status === 200 && (typeof data === 'string')) {
-
-					alertify.notify(data, "custom");
 
 					if (attributes.on_success === "destroy") {
 						$("#"+attributes.target_id).remove();
@@ -378,8 +376,7 @@
 
 				} else if (data.message) {
 
-					alertify.set('notifier','delay', 10);
-					const response = alertify.warning(`${data.message}`, "custom");
+					alertify.notify(data.message, "custom");
 
 					if (data.destroy) {
 						$("#"+data.destroy).remove();

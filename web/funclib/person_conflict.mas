@@ -1,230 +1,163 @@
 <%args>
 	$tourn
 	$person
+	$entered   => undef
 	$test_mode => undef
 </%args>
 <%init>
 
 	return unless $person > 0;
 
-	Tab::Entry->columns(TEMP  => "added");
-	Tab::School->columns(TEMP => "added");
-	Tab::Judge->columns(TEMP  => "added");
+	my $now = DateTime->now();
+	my $dbh = Tab::DBI->db_Main();
 
-	Tab::Entry->set_sql( for_moi => "
-		select distinct entry.*
-		from event, entry, entry_student, student
-		where event.tourn = ?
-			and entry.event = event.id
-			and entry_student.entry = entry.id
-			and entry_student.student = student.id
-			and student.person = ?
-	");
+	my %done;
 
-	Tab::Judge->set_sql( for_moi => "
-		select distinct judge.*
-		from category, judge
-		where category.tourn = ?
-			and category.id = judge.category
-			and judge.person = ?
-	");
-
-	my @entries =  Tab::Entry->search_for_moi( $tourn->id, $person->id );
-	my @judges = Tab::Judge->search_for_moi( $tourn->id, $person->id );
-
-	return unless @entries || @judges;
-
-	Tab::School->set_sql( conflicteds => "
-		select distinct school.*, conflict.added_by as added
-		from school, conflict
+	my $sth = $dbh->prepare("
+		select
+			school.id school, judge.id judge
+		from (school, conflict, tourn, judge, category)
 		where school.tourn = ?
 			and school.chapter = conflict.chapter
-			and conflict.person > 0
-			and conflict.person = ?
-	");
-
-	my $now = DateTime->now();
-
-	foreach my $school (Tab::School->search_conflicteds($tourn->id, $person->id)) {
-
-		foreach my $judge (@judges) {
-
-			unless (
-				Tab::Strike->search(
-					tourn      => $tourn->id,
-					judge      => $judge->id,
-					type       => "school",
-					school     => $school->id,
-					registrant => 1,
-					conflict   => 1
-				)
-			) {
-				Tab::Strike->create({
-					tourn      => $tourn->id,
-					judge      => $judge->id,
-					type       => "school",
-					school     => $school->id,
-					created_at => $now,
-					entered_by => $school->added,
-					conflictee => 1,
-					registrant => 1,
-					conflict   => 1
-				});
-			}
-		}
-	}
-
-
-	# Where I conflicted the entry!
-	Tab::Entry->set_sql( conflicteds => "
-		select distinct entry.id, conflict.added_by as added
-		from event, entry, entry_student, student, conflict
-		where event.tourn = ?
-			and event.id = entry.event
-			and entry.id = entry_student.entry
-			and entry_student.student = student.id
-			and student.person = conflict.conflicted
-			and conflict.conflicted > 0
-			and conflict.person = ?
-	");
-
-	# Where the entry conflicted me!
-	Tab::Entry->set_sql( conflictees => "
-		select distinct entry.id, conflict.added_by as added
-		from event, entry, entry_student, student, conflict
-		where event.tourn = ?
-			and event.id = entry.event
-			and entry.id = entry_student.entry
-			and entry_student.student = student.id
-			and student.person > 0
-			and student.person = conflict.person
-			and conflict.conflicted = ?
-	");
-
-	foreach my $judge (@judges) {
-
-		foreach my $entry (Tab::Entry->search_conflicteds( $tourn->id, $person->id )) {
-			unless (Tab::Strike->search(
-					tourn      => $tourn->id,
-					type       => "entry",
-					entry      => $entry->id,
-					judge      => $judge->id,
-					conflict   => 1,
-					registrant => 1
-				)
-			) {
-				Tab::Strike->create({
-					tourn      => $tourn->id,
-					type       => "entry",
-					entry      => $entry->id,
-					judge      => $judge->id,
-					created_at => $now,
-					entered_by => $entry->added,
-					conflict   => 1,
-					conflictee => 1,
-					registrant => 1
-				});
-			}
-		}
-
-		foreach my $entry (Tab::Entry->search_conflictees( $tourn->id, $person->id )) {
-
-			unless (Tab::Strike->search(
-					tourn      => $tourn->id,
-					type       => "entry",
-					entry      => $entry->id,
-					judge      => $judge->id,
-					conflict   => 1,
-					registrant => 1
-				)
-			) {
-				Tab::Strike->create({
-					tourn      => $tourn->id,
-					type       => "entry",
-					entry      => $entry->id,
-					judge      => $judge->id,
-					entered_by => $entry->added,
-					created_at => $now,
-					conflict   => 1,
-					registrant => 1
-				});
-			}
-		}
-	}
-
-	# Where the judge conflicted me!
-	Tab::Judge->set_sql( conflicteds => "
-		select distinct judge.id, conflict.added_by as added
-		from category, judge, conflict
-		where category.tourn = ?
-			and category.id  = judge.category
-			and judge.person = conflict.conflicted
-			and judge.person > 0
-			and conflict.conflicted > 0
-			and conflict.person = ?
-	");
-
-	# Where I conflicted the judge!
-	Tab::Judge->set_sql( conflictees => "
-		select distinct judge.id, conflict.added_by as added
-		from category, judge, conflict
-		where category.tourn = ?
+			and school.tourn = tourn.id
+			and tourn.end > NOW()
+			and tourn.id = category.tourn
 			and category.id = judge.category
-			and judge.person = conflict.person
-			and judge.person > 0
-			and conflict.person > 0
-			and conflict.conflicted = ?
+			and judge.person = ?
+			and judge.person IN (conflict.person, conflict.conflicted)
+			and not exists (
+				select strike.id
+					from strike, judge
+				where strike.school = school.id
+					and strike.judge = judge.id
+					and registrant = 1
+					and conflict = 1
+			)
 	");
 
-	foreach my $entry (@entries) {
+	$sth->execute($tourn, $person);
+	my $schools = $sth->fetchall_hash();
 
-		foreach my $judge (Tab::Judge->search_conflicteds( $tourn->id, $person->id)) {
+	foreach my $strike (@{$schools}) {
 
-			unless (Tab::Strike->search(
-					tourn      => $tourn->id,
-					type       => "entry",
-					entry      => $entry->id,
-					judge      => $judge->id,
-					conflict   => 1,
-					registrant => 1
+		next if $done{$strike->{judge}}{$strike->{school}}++;
+
+		Tab::Strike->create({
+			tourn      => int($tourn),
+			judge      => $strike->{judge},
+			type       => "school",
+			school     => $strike->{school},
+			created_at => $now,
+			entered_by => $entered || $person,
+			conflictee => 1,
+			registrant => 1,
+			conflict   => 1
+		});
+	}
+
+	my $entry_sth = $dbh->prepare("
+		select
+			entry.id entry, entry.code, judge.id judge, judge.last
+		from (entry, event, entry_student es, student, conflict, tourn, judge, category, person)
+		where event.tourn = ?
+			and event.id = entry.event
+			and entry.id = es.entry
+			and es.student = student.id
+			and event.tourn = tourn.id
+			and person.id = ?
+			and student.person = person.id
+			and (conflict.person = person.id OR conflict.conflicted = person.id)
+			and tourn.end > NOW()
+			and tourn.id = category.tourn
+			and category.id = judge.category
+			and (conflict.conflicted = judge.person OR conflict.person = judge.person)
+			and not exists (
+				select strike.id
+				from strike
+					where strike.tourn = tourn.id
+					and strike.judge = judge.id
+					and strike.entry = entry.id
+					and registrant = 1
+					and conflict = 1
+			)
+	");
+
+	$entry_sth->execute($tourn, $person);
+	my $entries = $entry_sth->fetchall_hash();
+
+	foreach my $strike (@{$entries}) {
+		next if $done{$strike->{judge}}{$strike->{entry}}++;
+		Tab::Strike->create({
+			tourn      => int($tourn),
+			judge      => $strike->{judge},
+			type       => "entry",
+			entry      => $strike->{entry},
+			created_at => $now,
+			entered_by => $entered || $person,
+			conflictee => 1,
+			registrant => 1,
+			conflict   => 1
+		});
+	}
+
+	my $judge_sth = $dbh->prepare("
+		select
+			entry.id entry, entry.code, student.last, student.person, judge.id judge, judge.last
+		from (entry, event, entry_student es, student, tourn, judge, category, person)
+		where tourn.id = ?
+			and tourn.end > NOW()
+			and tourn.id = category.tourn
+			and category.id = judge.category
+			and judge.person = person.id
+			and person.id = ?
+
+			and event.tourn = tourn.id
+			and event.id    = entry.event
+			and entry.id    = es.entry
+			and es.student  = student.id
+
+			and (
+				EXISTS  (
+					select conflict.id
+					from conflict
+					where conflict.person = judge.person
+					and conflict.conflicted = student.person
+				) OR EXISTS (
+					select conflict.id
+					from conflict
+					where conflict.conflicted = judge.person
+					and conflict.person = student.person
 				)
-			) {
-				Tab::Strike->create({
-					tourn      => $tourn->id,
-					type       => "entry",
-					entry      => $entry->id,
-					judge      => $judge->id,
-					entered_by => $judge->added,
-					conflictee => 1,
-					conflict   => 1,
-					created_at => $now,
-					registrant => 1
-				});
-			}
-		}
+			)
 
-		foreach my $judge (Tab::Judge->search_conflictees( $tourn->id, $person->id)) {
-			unless (Tab::Strike->search(
-					tourn      => $tourn->id,
-					type       => "entry",
-					entry      => $entry->id,
-					judge      => $judge->id,
-					conflict   => 1,
-					registrant => 1
-				)
-			) {
-				Tab::Strike->create({
-					tourn      => $tourn->id,
-					type       => "entry",
-					entry      => $entry->id,
-					judge      => $judge->id,
-					entered_by => $judge->added,
-					created_at => $now,
-					conflict   => 1,
-					registrant => 1
-				});
-			}
-		}
+			and not exists (
+				select strike.id
+				from strike
+					where strike.tourn = tourn.id
+					and strike.judge = judge.id
+					and strike.entry = entry.id
+					and strike.tourn = tourn.id
+					and registrant = 1
+					and conflict = 1
+			)
+	");
+
+	$judge_sth->execute($tourn, $person);
+	my $judges = $judge_sth->fetchall_hash();
+
+	foreach my $strike (@{$judges}) {
+		next if $done{$strike->{judge}}{$strike->{entry}}++;
+		Tab::Strike->create({
+			tourn      => int($tourn),
+			judge      => $strike->{judge},
+			type       => "entry",
+			entry      => $strike->{entry},
+			created_at => $now,
+			entered_by => $entered || $person,
+			conflictee => 1,
+			registrant => 1,
+			conflict   => 1
+		});
 	}
 
 	return;
