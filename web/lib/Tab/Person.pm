@@ -4,8 +4,8 @@ use base 'Tab::DBI';
 Tab::Person->table('person');
 Tab::Person->columns(Primary   => qw/id/);
 
-Tab::Person->columns(Essential => qw/email first middle last phone provider site_admin /);
-Tab::Person->columns(Others    => qw/street city state zip country postal pronoun no_email tz nsda password timestamp/);
+Tab::Person->columns(Essential => qw/email first middle last phone site_admin /);
+Tab::Person->columns(Others    => qw/street city state zip country postal pronoun no_email tz nsda password accesses last_access pass_timestamp timestamp/);
 Tab::Person->columns(TEMP      => qw/prefs student_id judge_id/);
 
 Tab::Person->has_many(settings => 'Tab::PersonSetting', 'person');
@@ -31,7 +31,7 @@ Tab::Person->has_many(regions  => [ Tab::Permission => 'region']);
 Tab::Person->has_many(quizzes  => [Tab::PersonQuiz  => 'quiz']);
 Tab::Person->has_many(answers  => 'Tab::PersonQuiz', 'person');
 
-__PACKAGE__->_register_datetimes( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/timestamp pass_timestamp last_access/);
 
 sub all_permissions {
 
