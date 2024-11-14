@@ -278,7 +278,7 @@
 			...options,
 			error: function(data, status, metadata) {
 
-				console.log(`FAILBOAT SINKS LIKE ONLY IT CAN`);
+				console.log(`FAILBOAT SINKS LIKE ONLY IT CAN, ALAS`);
 				const reply = data.responseJSON || data.responseText;
 				console.log(reply);
 
@@ -299,6 +299,7 @@
 				fixVisual;
 				return;
 			},
+
 			success: function(data, status, metadata) {
 
 				if (data.reply) {
@@ -344,6 +345,8 @@
 					if (attributes.new_parent) {
 						$("#"+attributes.target_id).prependTo("#"+attributes.new_parent);
 					}
+
+					alertify.notify(data, "custom");
 
 				} else if (data.error) {
 
