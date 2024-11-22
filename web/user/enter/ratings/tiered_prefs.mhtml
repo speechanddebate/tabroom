@@ -1,4 +1,5 @@
 <%args>
+	$dbh
 	$person
 	$school
 	$category_id => undef
@@ -12,8 +13,11 @@
 	my $entry = Tab::Entry->retrieve($entry_id) if $entry_id;
 	my $category = Tab::Category->retrieve($category_id) if $category_id;
 
+	my $event;
+
 	if ($entry && (not defined $category)) {
-		$category = $entry->event->category;
+		$event = $entry->event;
+		$category = $event->category;
 	}
 
 	$m->abort unless $category;
@@ -58,54 +62,110 @@
 	my $show_diverse if $category_settings{"show_diversity"};
 	undef $read_only if $entry && $entry->setting("open_prefs");
 
-    my %rating_name = ();
-
-    foreach my $tier ($category->rating_tiers) {
-        $rating_name{$tier->id} = $tier->name;
-    }
-
-    my %coach_rating_by_judge = ();
-
-    foreach my $rating (
-		$m->comp(
-			"/funclib/category_ratings.mas",
-			category => $category,
-			type     => "coach"
-		)
-	) {
-
-        $coach_rating_by_judge{$rating->judge->id}
-			= $rating_name{$rating->rating_tier->id}
-			if $rating->judge && $rating->rating_tier;
-    }
-
-
 	my $has_max;
 	my $has_min;
 
 	my %freebie = $m->comp("/funclib/free_strikes.mas", category => $category);
-
-	my %neutrals = map {$_->judge->id => 1}
-		$m->comp(
-			"/funclib/category_judge_settings.mas",
-			category => $category,
-			tag      => "neutral"
-		) if $category_settings{"neutrals"};
-
 	my $no_frees = $category_settings{"free_strikes_no_pref"};
 
-	my @event_struck_judges = $m->comp("/funclib/event_strike_judges.mas",
-		event => $entry->event
-	) if $entry;
 
-	my %event_struck = map {$_->id => 1} @event_struck_judges;
+	my $rounds_per;
+	$rounds_per++ if $category_settings{"prefs"} eq "tiered_round";
+	$rounds_per++ if $category_settings{"rounds_per"};
 
-	my $rounds_per++
-		if $category_settings{"prefs"}
-		eq "tiered_round";
+	my $judges_sth;
+	my $jpool;
 
-	my @judges = $m->comp("judges.mas", category => $category);
-	my %paradigms = $m->comp("/funclib/judge_paradigms.mas", tourn => $tourn);
+	if ($category_settings{"pref_jpool"}) {
+		$jpool = Tab::JPool->retrieve($category_settings{"pref_jpool"});
+	}
+
+	if ($jpool && $jpool->category->tourn == $tourn->id) {
+
+		$judges_sth = $dbh->prepare("
+			select
+				judge.id, judge.first, judge.middle, judge.last, judge.code, judge.hired, judge.obligation,
+				school.id school_id, school.name school_name,
+				rating_tier.id rating_id, rating_tier.name rating_name,
+				paradigm.id paradigm,
+				diverse.value diverse,
+				neutral.value neutral,
+				no_elims.value no_elims,
+				judge.person person_id,
+				cr_tier.name coach_rating
+
+			from (judge, jpool_judge jpj)
+				left join school on judge.school = school.id
+			left join person_setting paradigm on paradigm.tag = 'paradigm' and paradigm.person = judge.person
+				left join judge_setting diverse on diverse.tag = 'diverse' and diverse.judge = judge.id
+				left join judge_setting neutral on neutral.tag = 'neutral' and neutral.judge = judge.id
+				left join judge_setting no_elims on no_elims.tag = 'no_elims' and no_elims.judge = judge.id
+				left join rating coach on judge.id = coach.judge and coach.type = 'coach'
+				left join rating_tier cr_tier on cr_tier.id = coach.rating_tier
+				left join rating on judge.id = rating.judge and rating.entry = ?
+				left join rating_tier on rating_tier.id = rating.rating_tier
+
+			where 1=1
+				and jpj.jpool = ?
+				and jpj.judge = judge.id
+				and judge.active = 1
+			order by school.name, judge.last, judge.first, judge.middle
+		");
+
+		$judges_sth->execute($entry->id, $jpool->id);
+
+	} else {
+
+		$judges_sth = $dbh->prepare("
+			select
+				judge.id, judge.first, judge.middle, judge.last, judge.code, judge.hired, judge.obligation,
+				school.id school_id, school.name school_name,
+				rating_tier.id rating_id, rating_tier.name rating_name,
+				paradigm.id paradigm,
+				diverse.value diverse,
+				neutral.value neutral,
+				no_elims.value no_elims,
+				judge.person person_id,
+				cr_tier.name coach_rating
+
+			from (judge)
+				left join school on judge.school = school.id
+			left join person_setting paradigm on paradigm.tag = 'paradigm' and paradigm.person = judge.person
+				left join judge_setting diverse on diverse.tag = 'diverse' and diverse.judge = judge.id
+				left join judge_setting neutral on neutral.tag = 'neutral' and neutral.judge = judge.id
+				left join judge_setting no_elims on no_elims.tag = 'no_elims' and no_elims.judge = judge.id
+				left join rating coach on judge.id = coach.judge and coach.type = 'coach'
+				left join rating_tier cr_tier on cr_tier.id = coach.rating_tier
+				left join rating on judge.id = rating.judge and rating.entry = ?
+				left join rating_tier on rating_tier.id = rating.rating_tier
+
+			where 1=1
+				and judge.category = ?
+				and judge.active = 1
+			order by school.name, judge.last, judge.first, judge.middle
+		");
+
+		$judges_sth->execute($entry->id, $category->id);
+
+	}
+
+	my $judges = $judges_sth->fetchall_hash();
+	my @judges = @{$judges};
+
+	my $tier_sth = $dbh->prepare("
+		select
+			rating_tier.id, rating_tier.name, rating_tier.max, rating_tier.min,
+			rating_tier.start, rating_tier.strike, rating_tier.conflict
+		from rating_tier
+		where rating_tier.category = ?
+		order by rating_tier.name
+	");
+
+	$tier_sth->execute($category->id);
+	my $tier_refs = $tier_sth->fetchall_hash();
+	my %tiers = map {$_->{id} => $_} @{$tier_refs};
+
+	my $event_struck;
 
 </%init>
 
@@ -185,23 +245,12 @@
 %		} else {
 
 <%perl>
-			my @tiers = Tab::RatingTier->search(
-				category => $category->id,
-				type     => "mpj"
-			);
+			$event_struck = $m->comp("/funclib/event_strike_judges.mas", event => $event->id, dbh => $dbh);
 
-			@tiers = sort {$a->name cmp $b->name} @tiers;
-
-			my %tiername_by_id = ();
-
-			foreach (@tiers) {
-				$tiername_by_id{$_->id} = $_->name;
-				$has_max++ if $_->max > 0;
-				$has_min++ if $_->min > 0;
+			foreach my $id (keys %tiers) {
+				$has_max++ if $tiers{$id}{max} > 0;
+				$has_min++ if $tiers{$id}{min} > 0;
 			}
-
-			@judges = sort {$a->last cmp $b->last} @judges;
-			@judges = sort {$a->school->short_name cmp $b->school->short_name} @judges;
 
 			my @conflicts = $m->comp(
 				"/funclib/entry_conflicts.mas",
@@ -217,33 +266,6 @@
 				$conflicts_by_id{$_->judge->id}++;
 			}
 
-			my @ratings = Tab::Rating->search(
-				entry   => $entry->id,
-				type    => "entry"
-			);
-
-			foreach my $rating (@ratings) {
-				$ratings_by_judge{$rating->judge->id} = $rating->rating_tier->id;
-			}
-
-			my %ordinal_by_judge = ();
-            my @ordinals = Tab::Rating->search(
-				entry       => $entry->id,
-				type        => "entry",
-				rating_tier => 0
-			);
-
-            foreach my $ordinal (@ordinals) {
-                $ordinal_by_judge{$ordinal->judge->id} = $ordinal->ordinal if $ordinal;
-            }
-
-            @judges = sort { $ordinal_by_judge{$a->id} <=> $ordinal_by_judge{$b->id} } @judges;
-
-			@judges = sort {
-				$tiername_by_id{$ratings_by_judge{$a}}
-				cmp $tiername_by_id{$ratings_by_judge{$b}}
-			} @judges;
-
 </%perl>
 			<&
 				"/funclib/tablesorter.mas",
@@ -252,13 +274,12 @@
 				nobuttons => 1
 			&>
 
-			<div class="full nospace">
-
+			<div class="full flexrow">
 				<span class="twothirds nospace">
-					<h4>Rate <% $category->abbr %> Judges for <% $entry->name %></h4>
+					<h5>Rate <% $category->abbr %> Judges for <% $entry->name %></h5>
 				</span>
 
-				<span class="threetenths rightalign marno">
+				<span class="third rightalign padright">
 					<a
 						class="buttonwhite greentext hover fa fa-lg fa-file-excel-o"
 						href="export_prefs.mhtml?entry_id=<% $entry_id %>&school_id=<% $school->id %>"
@@ -377,48 +398,51 @@
 					my $total;
 					my $ratings;
 
-					foreach my $judge (@judges) {
+					foreach my $judge (sort {$a->{rating_name} cmp $b->{rating_name}} @judges) {
 
-						next if ($judge->school->id == $entry->school->id)
-							&& (not defined $neutrals{$judge->id});
+						next if ($judge->{school_id} == $entry->school->id)
+							&& (not defined $judge->{neutral});
 
-						next if $conflicts_by_id{$judge->id};
-						next if $event_struck{$judge->id};
-						next if $no_frees && $freebie{$judge->id};
-						next if $pref_style eq "ndt" && $judge->setting("no_elims");
+						next if $conflicts_by_id{$judge->{id}};
+						next if $event_struck && $event_struck->{$judge->{id}};
+						next if $no_frees && $freebie{$judge->{id}};
+						next if $pref_style eq "ndt" && $judge->{"no_elims"};
 
-						my $paradigm = $paradigms{$judge->id}{"paradigm"};
+						# I'll have none of that Kinkaid School bullshit here thanks.
+						my $last_name = ucfirst($judge->{last});
+						my $first_name = ucfirst($judge->{first});
+						my $middle_name = ucfirst($judge->{middle});
 
-						my $last_name = ucfirst($judge->last);
-						my $first_name = ucfirst($judge->first);
+						my $rounds = $judge->{obligation} + $judge->{hired};
+						if (
+							($category_settings{"max_rounds"} > 0)
+							&& ($category_settings{"max_rounds"} < $rounds)
+						) {
+							$rounds = $category_settings{"max_rounds"};
+						}
 
-						my $rounds = $judge->obligation + $judge->hired;
 						$rounds = 1 unless $rounds_per;
-
 						$total++;
 </%perl>
 
-						<tr class="<% $freebie{$judge->id} ? 'ligrnrow' : "row" %>">
+						<tr class="<% $freebie{$judge->{id}} ? 'ligrnrow' : "row" %>">
 
 							<td
-								class="smallish limit nospace nowrap"
-								title="<% $first_name." ".$last_name %>"
+								class     = "smallish limit nospace nowrap"
+								title     = "<% $first_name." ".$middle_name." ".$last_name %>"
+								data-text = "<% $last_name %>"
 							>
-								<span class="hidden">
-									<% $last_name %>
-								</span>
-
-%								if ($paradigm) {
+%								if ($judge->{paradigm}) {
 									<a
 										class  = "button leftalign white marno bluetext"
-										href   = "/index/paradigm.mhtml?judge_person_id=<% $judge->person->id %>"
+										href   = "/index/paradigm.mhtml?judge_person_id=<% $judge->{person_id} %>"
 										target = "_blank"
 									>
-										<% $last_name.", ".$first_name %>
+										<% $last_name.", ".$first_name %> <% $middle_name %>
 									</a>
 %								} else {
 									<span class="full padleft marleft redtext">
-										<% $last_name.", ".$first_name %>
+										<% $last_name.", ".$first_name %> <% $middle_name %>
 									</span>
 %								}
 							</td>
@@ -431,68 +455,67 @@
 
 %							if ($category_settings{"show_diversity"}) {
 								<td class="smaller padno centeralign">
-									<% $judge->setting("diverse") %>
+									<% $judge->{"diverse"} %>
 								</td>
 %							}
 
 							<td class="smaller limit">
-								<% ($judge->school && $judge->school->id) ? $judge->school->short_name : "Hire" %>
+								<% $judge->{school_name} ? $judge->{school_name} : "Hire" %>
+								<% $category_settings{neutrals} && $judge->{neutral} ? "(Neutral)" : "" %>
 							</td>
 
 %							if ($category_settings{'coach_ratings'}) {
 								<td class="smallish padno centeralign">
-									<% $coach_rating_by_judge{$judge->id} %>
+									<% $judge->{coach_rating} %>
 								</td>
 %							}
 
-							<td class="smallish padno">
-
-								<span class="hidden">
-									<% $rating_name{$ratings_by_judge{$judge->id}} %>
-								</span>
+							<td
+								class="smallish padno"
+								data-text="<% $judge->{rating_name} %>"
+							>
+								<div class="full nospace flexrow">
 
 %								if ($read_only) {
 
-									<span class="quarter centeralign biggish">
-										<% $rating_name{$ratings_by_judge{$judge->id}} %>
+									<span class="quarter centeralign biggish grow">
+										<% $judge->{rating_name} %>
 									</span>
 <%perl>
 								}  else {
 
-									my $tier_val = "sixth" if scalar @tiers < 7;
-									$tier_val = "tenth" if scalar @tiers > 7;
-
-									foreach my $tier (@tiers) {
+									foreach my $tier_id (sort {$tiers{$a}{"name"} cmp $tiers{$b}{"name"}} keys %tiers) {
 </%perl>
-										<label for="<% $tier->id."_".$judge->id %>">
-											<span class="<% $tier_val %> hover padmore marno">
-												<div class="parent nospace">
-													<span class="third rightalign">
+										<span class="tenth hover padmore marno grow">
+											<label for="<% $tier_id."_".$judge->{id} %>">
+												<div class="parent flexrow full">
+													<span class="twofifths rightalign">
 														<input
 															type    = "radio"
-															name    = "<% $judge->id %>"
-															class   = "<% $tier->id %> <% $freebie{$judge->id} ? "free" : "" %>"
+															name    = "<% $judge->{id} %>"
+															class   = "<% $tier_id %> <% $freebie{$judge->{id}} ? "free" : "" %>"
 															style   = "margin: 1px;"
-															value   = "<% $tier->id %>"
-															id      = "<% $tier->id."_".$judge->id %>"
+															value   = "<% $tier_id %>"
+															id      = "<% $tier_id."_".$judge->{id} %>"
 															rounds  = "<% $rounds %>"
 															onClick = "totalTiers(this);"
 
-%															if ($ratings_by_judge{$judge->id}) {
-																<% $tier->id == $ratings_by_judge{$judge->id} ? "checked" : "" %>
+%															if ($judge->{rating_id}) {
+																<% $tier_id == $judge->{rating_id} ? "checked" : "" %>
 %															} else {
-																<% $tier->start ? "checked" : "" %>
+																<% $tiers{$tier_id}{start} ? "checked" : "" %>
 %															}
 														>
 													</span>
-													<span class="threefifth">
-														<% $tier->strike ? "S" : $tier->conflict ? "C" : $tier->name %>
+													<span class="threefifths padleftless">
+														<% $tiers{$tier_id}{strike} ? "S" : $tiers{$tier_id}{conflict} ? "C" : $tiers{$tier_id}{name} %>
 													</span>
 												</div>
-											</span>
-										</label>
+											</label>
+										</span>
 %									}
 %								}
+								</div>
 							</td>
 						</tr>
 %					}
@@ -527,33 +550,34 @@
 
     	    foreach my $judge (@judges) {
 
-    	        next if $judge->school->id == $school->id;
-    	        next if $conflicts_by_id{$judge->id};
-				next if $event_struck{$judge->id};
-				next if $freebie{$judge->id};
-				$ratable_judges++ unless $rounds_per;
+    	        next if $judge->{school_id} == $school->id && (not defined $judge->{neutral});
+    	        next if $conflicts_by_id{$judge->{id}};
+				next if $event_struck->{$judge->{id}};
+				next if $freebie{$judge->{id}};
 
-				if ($rounds_per) {
-					$ratable_judges += $judge->obligation;
-					$ratable_judges += $judge->hired;
+				if ($category_settings{"prefs"} eq "tiered_round") {
+					$ratable_judges += $judge->{obligation};
+					$ratable_judges += $judge->{hired};
+				} else {
+					$ratable_judges++;
 				}
 
     	    }
-
 </%perl>
-
-			<span class="quarter nospace bluetext">
-				<h6>
-					Totals
-				</h6>
-			</span>
-			<span class="threequarters rightalign smallish semibold">
-%				if ($rounds_per) {
-					<% $ratable_judges %> rounds of judging to rate
-%				} else {
-					<% $ratable_judges %> total judges (besides yours)
-%				}
-			</span>
+			<div class="full flexrow">
+				<span class="quarter bluetext">
+					<h6>
+						Totals
+					</h6>
+				</span>
+				<span class="threequarters rightalign smallish semibold">
+%					if ($category_settings{"prefs"} eq "tiered_round") {
+						<% $ratable_judges %> rounds of judging to rate
+%					} else {
+						<% $ratable_judges %> total judges (besides yours)
+%					}
+				</span>
+			</div>
 
 			<table>
 
@@ -580,33 +604,27 @@
 					</th>
 
 				</tr>
-<%perl>
-				foreach my $tier (
-					sort {$a->name cmp $b->name}
-					Tab::RatingTier->search(
-						category => $category->id,
-						type => "mpj"
-					)
-				) {
 
-</%perl>
+%				foreach my $id (sort {$tiers{$a}{name} cmp $tiers{$b}{name}} keys %tiers) {
+%					my $tier = $tiers{$id};
+
 					<tr class="row">
 
 						<th class="smallish">
-							<% ($tier->strike) ? "Strike" : $tier->name %>
+							<% $tier->{strike} ? "Strike" : $tier->{conflict} ? "Conflict" : $tier->{name} %>
 						</td>
 
 %						if ($has_max) {
 							<td
-								id = "max_<% $tier->id %>"
+								id = "max_<% $id %>"
 								class="smaller centeralign padno"
 							>
 								<%
 									($pref_style eq "caps" || $pref_style eq "ndt")
-										&& $tier->max > 0
-											? $tier->max
-											: $tier->max > 0
-												? ceil( $tier->max * $ratable_judges / 100)
+										&& $tier->{max} > 0
+											? $tier->{max}
+											: $tier->{max} > 0
+												? ceil( $tier->{max} * $ratable_judges / 100)
 												: ""
 								%>
 							</td>
@@ -615,22 +633,22 @@
 %						if ($has_min) {
 
 							<td
-								id = "min_<% $tier->id %>"
+								id = "min_<% $id %>"
 								class="smaller centeralign padno"
 							>
 								<%
 									($pref_style eq "caps" || $pref_style eq "ndt")
-									&& $tier->min > 0
-									? $tier->min
-									: $tier->min > 0
-										? floor( $tier->min * $ratable_judges / 100)
+									&& $tier->{min} > 0
+									? $tier->{min}
+									: $tier->{min} > 0
+										? floor( $tier->{min} * $ratable_judges / 100)
 										: ""
 								%>
 							</td>
 %						}
 
 						<td
-							id    = "<% $tier->id %>"
+							id    = "<% $id %>"
 							class = "smaller centeralign padno tiers semibold"
 						>
 						</td>
@@ -673,7 +691,7 @@
 					<span class="threequarter centeralign">
 
 					<select name="target_id" class="fixedsmall notfirst">
-						<option value="all">All Entries in <% $entry->event->abbr %></option>
+						<option value="all">All Entries in <% $event->abbr %></option>
 <%perl>
 						foreach my $other (sort {$a->name cmp $b->name} @others) {
 							next if $entry->id == $other->id;

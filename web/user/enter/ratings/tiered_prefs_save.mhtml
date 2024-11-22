@@ -1,6 +1,7 @@
 <%args>
 	$entry_id
 	$category_id
+	$dbh
 </%args>
 <%init>
 
@@ -11,10 +12,18 @@
 
 	my $entry = Tab::Entry->retrieve($entry_id);
 	my $category = Tab::Category->retrieve($category_id);
-	my $prefs_style = $category->setting("prefs");
+	my %category_settings = $category->all_settings();
 
-	Tab::Entry->set_sql(wipe_prefs => " delete from rating where entry = ? and ordinal = 0");
-	Tab::Entry->sql_wipe_prefs->execute($entry->id);
+
+	unless ($entry) {
+		$m->comp("/funclib/abort.mas", message => "No valid entry found for ID $entry_id");
+	}
+
+	my $find_sth = $dbh->prepare("select rating.id, rating.judge, rating.rating_tier from rating where entry = ?");
+	$find_sth->execute($entry_id);
+
+	my $results = $find_sth->fetchall_hash();
+	my %existing_rating = map {$_->{judge} => $_} @{$results};
 
     my @rating_tiers = Tab::RatingTier->search(
 		category => $category->id,
@@ -33,14 +42,10 @@
 		$conflicts_by_id{$conflict->judge->id} = $conflict;
 	}
 
-	my @event_struck_judges = $m->comp(
-		"/funclib/event_strike_judges.mas",
-		event => $entry->event
-	) if $entry;
-
-	my %event_struck =
-		map {$_->id => 1}
-		@event_struck_judges;
+	my $event_struck;
+	if ($entry) {
+		$event_struck = $m->comp("/funclib/event_strike_judges.mas", event => $entry->event->id, dbh => $dbh);
+	}
 
     my @all_judges = $m->comp("judges.mas", category => $category);
 
@@ -48,26 +53,34 @@
 	my %judges_at_tier = ();
 	my $num_judges;
 
-	my $no_frees = $category->setting("free_strikes_no_pref");
 	my %freebie = $m->comp("/funclib/free_strikes.mas", category => $category);
-	my $rounds_per++ if $category->setting("prefs") eq "tiered_round";
+	my $rounds_per++ if $category_settings{"prefs"} eq "tiered_round";
 
     foreach my $judge (@all_judges) {
 
         next if $judge->school->id == $entry->school->id;
         next if $conflicts_by_id{$judge->id};
 		next if $event_struck{$judge->id};
-		next if $no_frees && $freebie{$judge->id};
+		next if $category_settings{free_strikes_no_pref} && $freebie{$judge->id};
 
         push (@judges, $judge);
 
 		next if $freebie{$judge->id};
 
 		if ($rounds_per) {
-			$judges_at_tier{$ARGS{$judge->id}} += $judge->obligation;
-			$judges_at_tier{$ARGS{$judge->id}} += $judge->hired;
-			$num_judges += $judge->obligation;
-			$num_judges += $judge->hired;
+
+			my $rounds = $judge->obligation + $judge->hired;
+
+			if (
+				($category_settings{"max_rounds"} > 0)
+				&& ($category_settings{"max_rounds"} < $rounds)
+			) {
+				$rounds = $category_settings{"max_rounds"};
+			}
+
+			$judges_at_tier{$ARGS{$judge->id}} += $rounds;
+			$num_judges += $rounds;
+
 		} else {
 			$judges_at_tier{$ARGS{$judge->id}}++;
 			$num_judges++;
@@ -80,7 +93,7 @@
 
 	foreach my $tier (@rating_tiers) {
 
-		if ($prefs_style eq "caps" || $prefs_style eq "ndt") {
+		if ($category_settings{prefs} eq "caps" || $category_settings{prefs} eq "ndt") {
 	        $tier_limit{$tier->id} = $tier->max;
 	        $tier_min{$tier->id} = $tier->min;
 		} else {
@@ -91,7 +104,7 @@
 		$tier_name{$tier->id} = $tier->name;
     }
 
-    my $cumulate++ if $category->setting("cumulate_mjp");
+    my $cumulate++ if $category_settings{"cumulate_mjp"};
     my %spares_at_tier;
 
     if ($cumulate) {
@@ -131,7 +144,6 @@
 					$tier_count++;
 				}
 
-
 				if (
 					$tier_limit{$ARGS{$judge->id}}
 					&& ($tier_count > $tier_limit{$ARGS{$judge->id}})
@@ -159,19 +171,54 @@
 				}
 			}
 
-			Tab::Rating->create({
-				type        => "entry",
-				judge       => $judge->id,
-				entry       => $entry->id,
-				rating_tier => $ARGS{$judge->id},
-				ordinal     => int($tier->name),
-				entered     => $now
-			});
+			my $ref = $existing_rating{$judge->id};
+
+			if ($ref && $ref->{rating_tier} == $ARGS{$judge->id}) {
+
+				delete $existing_rating{$judge->id};
+
+			} elsif ($ref && $ref->{id}) {
+
+				my $change_sth = $dbh->prepare("update rating set rating_tier = ?, ordinal = ?, side = 0 where id = ? ");
+				$change_sth->execute($ARGS{$judge->id}, int($tier->name), $ref->{id});
+				delete $existing_rating{$judge->id};
+
+			} else {
+
+				Tab::Rating->create({
+					type        => "entry",
+					judge       => $judge->id,
+					entry       => $entry->id,
+					rating_tier => $ARGS{$judge->id},
+					ordinal     => int($tier->name),
+					side        => 0,
+					entered     => $now
+				});
+			}
 
 		}
 
 		$tier_count{$tier->id} = $tier_count;
 
+	}
+
+	my $id_string;
+	my $id_count;
+
+	foreach my $key (keys %existing_rating) {
+		$id_string .= "," if $id_string;
+		$id_string .= $key;
+		if ($id_count++ > 4) {
+			my $del_sth = $dbh->prepare("delete from rating where id IN ($id_string)");
+			$del_sth->execute();
+			undef $id_string;
+			undef $id_count;
+		}
+	}
+
+	if ($id_string) {
+		my $del_sth = $dbh->prepare("delete from rating where id IN ($id_string)");
+		$del_sth->execute();
 	}
 
     @rating_tiers = sort {$a->name <=> $b->name} @rating_tiers;
@@ -183,7 +230,6 @@
 		my $diff = $tier_min{$tier->id} - $tier_count{$tier->id};
 
 		unless ($diff <= $min_spares_available || $diff < 1) {
-
 			$err .= "You are $diff under on tier ".$tier->name." <br />";
 			$err .= "You have ".$tier_count{$tier->id}." and need ".$tier_min{$tier->id}." <br />";
 		}
@@ -191,23 +237,9 @@
 		$min_spares_available -= $diff;
 	}
 
-	my $dbh = Tab::DBI->db_Main();
-
-    #Deduplication
-    my $dedupe_sth = $dbh->prepare("
-        delete rating.*
-            from rating, rating r2
-        where rating.entry = ?
-            and rating.entry = r2.entry
-            and rating.judge = r2.judge
-            and rating.id < r2.id
-    ");
-
-    $dedupe_sth->execute($entry->id);
-
 	my $msg = $entry->name."'s prefs saved in ".$category->abbr;
 	$msg =~ s/\&/and/g;
 
-	$m->redirect("tiered_prefs.mhtml?school_id=".$entry->school->id."&entry_id=".$entry_id."&category_id=".$category->id."&style=entry_ratings&msg=".$msg."&err=".$err."#yo");
+	$m->redirect("tiered_prefs.mhtml?entry_id=".$entry_id."&style=entry_ratings&msg=".$msg."&err=".$err."#yo");
 
 </%init>
