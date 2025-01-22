@@ -654,16 +654,16 @@
 
 			parents.forEach(function(Parent) {
 				$(document).find(Tag).parent().closest(Parent)
-						.find(".row:visible:even").removeClass("odd");
+					.find(".row:visible:even").removeClass("odd");
 
 				$(document).find(Tag).parent().closest(Parent)
-						.find(".row:visible:even").addClass("even");
+					.find(".row:visible:even").addClass("even");
 
 				$(document).find(Tag).parent().closest(Parent)
-						.find(".row:visible:odd").removeClass("even");
+					.find(".row:visible:odd").removeClass("even");
 
 				$(document).find(Tag).parent().closest(Parent)
-						.find(".row:visible:odd").addClass("odd");
+					.find(".row:visible:odd").addClass("odd");
 			});
 		});
 	};
@@ -1342,15 +1342,18 @@ function hideLoginBox() {
 
 	function resizeAll() {
 
-		$(`input[type=text],
+		$(`input[type=text]:not(.noresize),
 			input[type=password],
 			input[type=number].sizeme,
-			input[type=email],
+			input[type=email]:not(.noresize),
 			input[type=tel],
 			input[type=date],
 			input[type=time],
 			input[type=url]`).each( function() {
-			if ($(this).is(':visible') && !['TD','TH','LABEL'].includes($(this).parent()[0].tagName)) {
+			if (
+				$(this).is(':visible')
+				&& !['TD','TH','LABEL'].includes($(this).parent()[0].tagName)
+			) {
 				$(this).width($(this).parent().width()-10);
 			}
 		});
