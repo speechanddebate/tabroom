@@ -1375,9 +1375,35 @@ function hideLoginBox() {
 		});
 	}
 
-$(window).resize(function () {
-	waitForFinalEvent(function(){
-		resizeAll();
-	}, 150, "ThisIsSupposedToBeUniqueTheySay");
-});
+
+	function toggleView(elementId, elementClass) {
+
+		if ($(`#${elementId}`).attr("hidden")) {
+			if (elementClass) {
+				$(`.${elementClass}`).addClass('hidden');
+			}
+
+			$(`#${elementId}`).removeClass('hidden');
+			$(`#${elementId}`).removeAttr("hidden");
+		} else {
+
+			if (elementClass) {
+				$(`#${elementId}`).each( (index, thing) => {
+					$(`#${thing.id}`).removeAttr("hidden");
+					$(`.${thing.id}`).addClass('hidden');
+				})
+
+			} else {
+				$(`#${elementId}`).attr("hidden", true);
+				$(`#${elementId}`).addClass('hidden');
+			}
+		}
+		fixVisual();
+	}
+
+	$(window).resize(function () {
+		waitForFinalEvent(function(){
+			resizeAll();
+		}, 150, "ThisIsSupposedToBeUniqueTheySay");
+	});
 
