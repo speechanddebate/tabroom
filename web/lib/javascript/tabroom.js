@@ -670,6 +670,7 @@
 
 	/* Fix all the visual elements at once */
 	function fixVisual() {
+
 		$('table').trigger('applyWidgets');
 		$('table').trigger('update', [true]);
 
@@ -1373,12 +1374,6 @@ function hideLoginBox() {
 			}
 		});
 	}
-
-function toggleView(elementId, elementClass) {
-	$("."+elementClass).addClass('hidden');
-	$("."+elementId).removeClass('hidden');
-	fixVisual();
-}
 
 $(window).resize(function () {
 	waitForFinalEvent(function(){
