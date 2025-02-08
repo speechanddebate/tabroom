@@ -707,7 +707,7 @@
 		$limit = ", ballot.judge" if $event_settings{"show_panel_averages"};
 
 		my $round_max = $dbh->prepare("
-			select distinct(round.id), score.tag, ballot.entry, count(score.id)
+			select distinct(round.id) round, score.tag, ballot.entry, count(score.id) count
 				from round, panel, ballot, score
 
 				where round.event = ?
@@ -722,25 +722,18 @@
 		");
 
 		$round_max->execute($event->id);
+		my $results = $round_max->fetchall_hash();
 
-		while (
-			my ($round_id, $tag, $entry, $count) = $round_max->fetchrow_array()
-		) {
-
-			if ($event_settings{"show_panel_averages"} && $tag eq "point") {
+		foreach my $ref (@{$results}) {
+			if ($event_settings{"show_panel_averages"} && $ref->{tag} eq "point") {
 				next;
 			}
 
-			if ($count > $max_score_count{$tag}{$round_id}) {
-				$max_score_count{$tag}{$round_id}  = $count;
+			if ($event_settings{"team_points"}) {
+				$max_score_count{$ref->{tag}}{$ref->{round}} = 1;
+			} elsif ($ref->{count} > $max_score_count{$ref->{tag}}{$ref->{round}}) {
+				$max_score_count{$ref->{tag}}{$ref->{round}} = $ref->{count};
 			}
-		}
-
-	} elsif ($event_settings{"team_points"}) {
-
-		foreach my $round (@all_rounds) {
-			$max_score_count{"rank"}{$rounds{$round}{"name"}} = 1;
-			$max_score_count{"point"}{$rounds{$round}{"name"}} = 1;
 		}
 	}
 
@@ -1673,28 +1666,21 @@
 					my $bye;
 					my $max_score;
 
+					ROUND:
 					foreach my $this_round (@rounds) {
 
 						$max_score = $max_score_count{"rank"}{$this_round};
 
-						$bye += $max_score_count{"rank"}{$this_round}
-							if $entries{"round_panel_bye"}{$this_round}{$entry};
-
-						$bye += $max_score_count{"rank"}{$this_round}
-							if $entries{"round_bye"}{$this_round}{$entry}
-							&& not defined $entries{"round_scores"}{$entry}{$this_round};
-
-						$bye += $max_score_count{"rank"}{$this_round}
-							if $entries{"round_forfeit"}{$this_round}{$entry}
-							&& not defined $entries{"round_scores"}{$entry}{$this_round};
-
-						next if $entries{"round_panel_bye"}{$this_round}{$entry};
-
-						next if $entries{"round_bye"}{$this_round}{$entry}
-							&& not defined $entries{"round_scores"}{$entry}{$this_round};
-
-						next if $entries{"round_forfeit"}{$this_round}{$entry}
-							&& not defined $entries{"round_scores"}{$entry}{$this_round};
+						if (
+							($entries{"round_panel_bye"}{$this_round}{$entry})
+							|| (
+								($entries{"round_bye"}{$this_round}{$entry} || $entries{"round_forfeit"}{$this_round}{$entry})
+								&& (not defined $entries{"round_scores"}{$entry}{$this_round})
+							)
+						) {
+							$bye += $max_score_count{"rank"}{$this_round};
+							next ROUND;
+						}
 
 						my %used_scores;
 						my $round_count;
@@ -2189,11 +2175,13 @@
 
 					my $max_score;
 					my %student_points = ();
+					my %round_average = ();
 					my $rounds_with_scores;
 
 					foreach my $this_round (@rounds) {
 
 						my $got_one;
+						my %judge_totals;
 
 						SCORE:
 						foreach my $score (@{$entries{"round_scores"}{$entry}{$this_round}}) {
@@ -2208,10 +2196,22 @@
 								my $points = Math::Round::nearest(1, 100 * $scores{"value"}{$score});
 								push @{$student_points{$scores{'student'}{$score}}{"scores"}}, $points;
 								$got_one++;
+
+								my $judge = $scores{"judge"}{$score};
+								$judge_totals{$judge}{total} += $points;
+								$judge_totals{$judge}{count}++;
+							}
+						}
+
+						foreach my $judge (keys %judge_totals) {
+							if ($judge_totals{$judge}{"count"} > 0) {
+								my $average = Math::Round::nearest(1, ($judge_totals{$judge}{total} / $judge_totals{$judge}{count}));
+								$round_average{$entry}{$this_round} += $average;
 							}
 						}
 
 						$rounds_with_scores++ if $got_one;
+
 					}
 
 					next ENTRY unless $rounds_with_scores;
@@ -2222,10 +2222,8 @@
 
 						if ($student_points{$student_id}{"scores"}) {
 							foreach my $value (@{$student_points{$student_id}{"scores"}}) {
-
 								$tourn_total += $value;
 								$tourn_count++;
-
 								$student_points{$student_id}{"total"} += $value;
 								$student_points{$student_id}{"count"}++;
 							}
@@ -2234,6 +2232,7 @@
 						push @student_ids, $student_id;
 
 						if ($student_points{$student_id}{"count"}) {
+
 							$student_points{$student_id}{"average"} =
 								Math::Round::nearest(
 									.01,
@@ -2247,11 +2246,10 @@
 						$num_rounds++;
 						$max_score = $max_score_count{"point"}{$this_round};
 
-						if ($byes_on_team_basis) {
-							$bye++ if $entries{"round_panel_bye"}{$this_round}{$entry};
-						} else {
-							$bye += $max_score_count{"point"}{$this_round}
-								if $entries{"round_panel_bye"}{$this_round}{$entry};
+						if ($byes_on_team_basis && $entries{"round_panel_bye"}{$this_round}{$entry}) {
+							$bye++;
+						} elsif ($entries{"round_panel_bye"}{$this_round}{$entry}) {
+							$bye += $max_score_count{"point"}{$this_round};
 						}
 
 						if ($entries{"round_panel_bye"}{$this_round}{$entry}
@@ -2265,38 +2263,69 @@
 						my %judge_points = ();
 						my %done_students = ();
 
-						foreach my $score (@{$entries{"round_scores"}{$entry}{$this_round}}) {
+						if ($event_settings{"team_points"}) {
 
-							if ($tb_info{$tb_id}{"chair"} eq "chair") {
-								next if $scores{"chair"}{$score} < 1;
-							} elsif ($tb_info{$tb_id}{"chair"} eq "nonchair") {
-								next if $scores{"chair"}{$score} > 0;
+							if ($round_average{$entry}{$this_round}) {
+								$round_score += $round_average{$entry}{$this_round};
+								$round_count++;
+								$count++ unless $byes_on_team_basis;
 							}
 
-							if (
-								$scores{"tag"}{$score} eq "point"
-								|| $scores{"tag"}{$score} eq "refute"
-							) {
+							foreach my $score (@{$entries{"round_scores"}{$entry}{$this_round}}) {
 
-								my $points = Math::Round::nearest(1, 100 * $scores{"value"}{$score});
+								if ($tb_info{$tb_id}{"chair"} eq "chair") {
+									next if $scores{"chair"}{$score} < 1;
+								} elsif ($tb_info{$tb_id}{"chair"} eq "nonchair") {
+									next if $scores{"chair"}{$score} > 0;
+								}
 
-								$count++ unless $byes_on_team_basis;
-								$round_count++;
+								if (
+									$scores{"tag"}{$score} eq "point"
+									|| $scores{"tag"}{$score} eq "refute"
+								) {
 
-								$judge_points{$this_round}{$scores{"judge"}{$score}}
-									+= Math::Round::nearest(1, 100 *$scores{"value"}{$score});
+									my $points = Math::Round::nearest(1, 100 * $scores{"value"}{$score});
+									$judge_points{$this_round}{$scores{"judge"}{$score}} += $points;
+									$done_students{$scores{"student"}{$score}}++;
+								}
+							}
 
-								$round_score += $points;
-								$done_students{$scores{"student"}{$score}}++;
+						} else {
 
+							foreach my $score (@{$entries{"round_scores"}{$entry}{$this_round}}) {
+
+								if ($tb_info{$tb_id}{"chair"} eq "chair") {
+									next if $scores{"chair"}{$score} < 1;
+								} elsif ($tb_info{$tb_id}{"chair"} eq "nonchair") {
+									next if $scores{"chair"}{$score} > 0;
+								}
+
+								if (
+									$scores{"tag"}{$score} eq "point"
+									|| $scores{"tag"}{$score} eq "refute"
+								) {
+
+									my $points = Math::Round::nearest(1, 100 * $scores{"value"}{$score});
+
+									$count++ unless $byes_on_team_basis;
+									$round_count++;
+
+									$judge_points{$this_round}{$scores{"judge"}{$score}} += $points;
+									$round_score += $points;
+
+									$done_students{$scores{"student"}{$score}}++;
+
+								}
 							}
 						}
 
 						$count++ if $round_score && $byes_on_team_basis;
-
 						my $average_round_count;
 
-						unless ($event_settings{"team_points"} || $event_settings{"max_entry"} < 2) {
+						if ($event_settings{"team_points"}) {
+
+
+						} elsif ($event_settings{"max_entry"} > 1) {
 
 							if ($round_count && $round_count < $max_score_count{"point"}{$this_round}) {
 
@@ -2305,17 +2334,21 @@
 
 								if ($event_settings{"mavericks"} eq "double" || $event_settings{"mavericks"} eq "double_rank") {
 
-									my $missing = $max_scount - $round_count;
+									if ($round_count > 0) {
 
-									foreach (1 .. $missing) {
-										$count++;
-										$round_count++;
+										my $factor = ($round_score / $round_count);
+										my $missing = $max_scount - $round_count;
 
-										foreach my $judgekey (keys %{$judge_points{$this_round}}) {
-											$judge_points{$this_round}{$judgekey} += $round_score;
+										foreach (1 .. $missing) {
+											$count++;
+											$round_count++;
+
+											foreach my $judgekey (keys %{$judge_points{$this_round}}) {
+												$judge_points{$this_round}{$judgekey} += $factor;
+											}
+
+											$round_score += $factor;
 										}
-
-										$round_score += $round_score;
 									}
 
 								} elsif ($event_settings{"mavericks"} eq "own_average") {
@@ -2566,13 +2599,6 @@
 						}
 					}
 
-					if ($event_settings{"team_points"}) {
-						my %seen = ();
-						@student_ids = grep { ! $seen{$_} ++ } @student_ids;
-						$how_many = scalar @student_ids;
-						$total = Math::Round::nearest(1, $total / $how_many)
-							if $how_many;
-					}
 
 					if ($count) {
 						#Used for opp wins, opp points

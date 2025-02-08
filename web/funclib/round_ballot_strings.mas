@@ -16,6 +16,7 @@
 	my $type = $event->type;
 
 	my $points = $event->setting("point_increments");
+	my $team_points = $event->setting('team_points');
 	my $sprintf;
 
 	if ($points eq "fourths") {
@@ -36,13 +37,15 @@
 	my $dbh = Tab::DBI->db_Main();
 
 	my $sth = $dbh->prepare("
-		select score.id, score.tag, score.value, score.student,
-			ballot.entry, ballot.judge, ballot.tv,
-			panel.bye, ballot.bye, ballot.forfeit, ballot.chair,
-			round.id, round.name
+		select
+			score.id, score.tag, score.value, score.student,
+			ballot.id ballot_id,
+			ballot.entry entry_id, ballot.judge judge_id, ballot.tv,
+			panel.bye pbye, ballot.bye, ballot.forfeit, ballot.chair,
+			round.id round_id, round.name round_name
 		from (ballot, panel, round)
-		left join score on score.ballot = ballot.id
-			and score.tag in ('winloss', 'rank', 'point', 'refute')
+			left join score on score.ballot = ballot.id
+				and score.tag in ('winloss', 'rank', 'point', 'refute')
 		where ballot.panel = panel.id
 		and panel.round = round.id
 		and round.name <= ?
@@ -63,67 +66,85 @@
 	my %entries;
 	my %done;
 
-	while (
-		my (
-			$id, $tag, $value, $student,
-			$entry_id, $judge_id, $tv,
-			$pbye, $bye, $fft, $chair,
-			$round_id, $roundname
-		) = $sth->fetchrow_array()
-	) {
+	$sth->execute($round_name, $event->id);
 
-		next if $done{$id}++;
+	my $results = $sth->fetchall_hash();
 
-		unless ($tag) {
+	foreach my $ref (@{$results}) {
 
-			if ($pbye || $bye) {
-				$entries{$entry_id}{$round_id}{"full"} = "BYE ";
-			} elsif ($fft) {
-				$entries{$entry_id}{$round_id}{"full"} = "FORFEIT ";
+		next if $done{$ref->{ballot_id}."-".$ref->{id}}++;
+
+		my $entry_ref;
+
+		if ($entries{$ref->{entry_id}}{$ref->{round_id}}) {
+			$entry_ref = $entries{$ref->{entry_id}}{$ref->{round_id}};
+		} else {
+			$entries{$ref->{entry_id}}{$ref->{round_id}} = $entry_ref;
+		}
+
+		unless ($ref->{tag}) {
+
+			if ($ref->{pbye} || $ref->{bye}) {
+				$entry_ref->{"full"} = "BYE ";
+			} elsif ($ref->{fft}) {
+				$entry_ref->{"full"} = "FORFEIT ";
 			}
 
+			$entries{$ref->{entry_id}}{$ref->{round_id}} = $entry_ref;
 			next;
 		}
 
-		if ($tag eq "point") {
-			$value = sprintf($sprintf, $value);
+		if ($ref->{tag} eq "point") {
+			$ref->{value} = sprintf($sprintf, $ref->{value});
 		}
 
-		$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{"chair"} = $chair;
+		$entry_ref->{"judges"}{$ref->{judge_id}}{"chair"} = $ref->{chair};
 
-		$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= ","
-			if $entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag};
+		if ($entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}}) {
+			$entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}} .= ",";
+		}
 
-		$rounds{$round_id} = $roundname;
+		$rounds{$ref->{round_id}} = $ref->{round_name};
 
-		if ($tag eq "winloss") {
-			if ($chair) {
-				$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= " *";
+		if ($ref->{tag} eq "winloss") {
+			if ($ref->{chair}) {
+				$entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}} .= " *";
 			} else {
-				$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= " ";
+				$entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}} .= " ";
 			}
-			$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= "W" if $value;
-			$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= "L" unless $value;
+			if ($ref->{value} > 0) {
+				$entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}} .= "W";
+			} else {
+				$entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}} .= "L";
+			}
+		} elsif ($ref->{tag} eq "point" && $team_points) {
+
+			if ($entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}}) {
+				undef $ref->{value};
+				next;
+			} else {
+				$entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}} = $ref->{value};
+			}
+
 		} else {
-			$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= " "
-				if $entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag};
-			$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= $value;
+			$entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}} .= " "
+				if $entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}};
+			$entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}} .= $ref->{value};
 
-			if ($tv && $tag eq "rank") {
-				$entries{$entry_id}{$round_id}{"judges"}{$judge_id}{$tag} .= '/VIOL'
+			if ($ref->{tv} && $ref->{tag} eq "rank") {
+				$entry_ref->{"judges"}{$ref->{judge_id}}{$ref->{tag}} .= '/VIOL'
 			}
-
 		}
 
-		$entries{$entry_id}{$round_id}{"total"}{$tag} = 0
-			unless $entries{$entry_id}{$round_id}{"total"}{$tag};
+		unless ($entry_ref->{"total"}{$ref->{tag}}) {
+			$entry_ref->{"total"}{$ref->{tag}} = 0;
+		}
 
-		$entries{$entry_id}{$round_id}{"total"}{$tag} += $value;
-		$entries{$entry_id}{$round_id}{"total"}{"point"} += $value if $tag eq "refute";
-
-		$entries{$entry_id}{$round_id}{"chair"} += $value if $chair;
-		$entries{$entry_id}{$round_id}{"students"}{$student}++ if $student;
-
+		$entry_ref->{"total"}{$ref->{tag}} += int($ref->{value});
+		$entry_ref->{"total"}{"point"} += int($ref->{value}) if $ref->{tag} eq "refute";
+		$entry_ref->{"chair"} += $ref->{value} if $ref->{chair};
+		$entry_ref->{"students"}{$ref->{student}}++ if $ref->{student};
+		$entries{$ref->{entry_id}}{$ref->{round_id}} = $entry_ref;
 	}
 
 	if ($entries_ref) {
@@ -155,6 +176,7 @@
 			sort {$rounds{$a} <=> $rounds{$b}}
 			keys %{$entries{$entry_id}}
 		) {
+
 
 			$entry_ballots{$entry_id} .= "\n";
 			$entry_ballots{$entry_id} .= "R".$rounds{$round_id};
