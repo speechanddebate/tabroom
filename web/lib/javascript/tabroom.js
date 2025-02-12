@@ -702,10 +702,10 @@
 			}
 		});
 
-		max += 5;
+		max = max*1.5;
 
 		$(`.${className}`).each( (index, item) => {
-			$(`#${item.id}`).width(max);
+			$(`#${item.id}`).attr("style", `max-width: ${max}px;`);
 		});
 
 		fixVisual();
