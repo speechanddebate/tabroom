@@ -27,84 +27,112 @@
 
 	my $dbh = Tab::DBI->db_Main();
 
-	if ($mode eq "fix" || $ARGS{"fix_also"}) {
+	my $update_sth = $dbh->prepare("
+		update ballot
+			set ballot.speakerorder = ?
+		where ballot.entry = ?
+			and ballot.panel = ?
+	");
 
-		my $sth = $dbh->prepare("
-			select
-				ballot.id, ballot.speakerorder sporder,
-				ballot.entry, panel.id panel, entry.active
-			from ballot, panel, entry
-			where ballot.panel = panel.id
-				and ballot.entry = entry.id
-				and (ballot.audit != 1 OR ballot.chair = 1)
-				and panel.round = ?
-				$limit
-		");
+	my $round_sth = $dbh->prepare("
+		select
+			ballot.id, ballot.entry, panel.id panel, entry.active,
+			round.id round, round.name roundname, round.type,
+			ignore_results.value iverson, ballot.speakerorder sporder,
+			ballot.judge
+		from (ballot, panel, entry, round)
+			left join round_setting ignore_results on ignore_results.round = panel.round and ignore_results.tag = 'ignore_results'
+		where ballot.panel = panel.id
+			and ballot.entry = entry.id
+			and panel.round =  round.id
+			and round.id = ?
+			$limit
+		order by panel.id, entry.id, ballot.judge
+	");
 
-		my $update_sth = $dbh->prepare("
-			update ballot
-				set ballot.speakerorder = ?
-			where ballot.entry = ?
-				and ballot.panel = ?
-				and (ballot.audit != 1 OR ballot.chair = 1)
-		");
+	my $event_sth = $dbh->prepare("
+		select entry.id entry,
+			ballot.id ballot, ballot.speakerorder sporder,
+			panel.id panel,
+			round.id round, round.name roundname, round.type,
+			ignore_results.value iverson
 
-		$sth->execute($round->id);
-		my $result_ref = $sth->fetchall_hash();
-		my %panels;
-		my %inactive;
+		from (entry, ballot, panel, round)
+			left join round_setting ignore_results
+				on ignore_results.round = round.id
+				and ignore_results.tag  = 'ignore_results'
 
-		foreach my $result (@{$result_ref}) {
-			$panels{$result->{"panel"}}{$result->{"sporder"}} = $result->{"entry"};
-			unless ($result->{active}) {
-				$inactive{$result->{"entry"}}++;
-			}
+		where round.event = ?
+			and round.id     = panel.round
+			and panel.id     = ballot.panel
+			and ballot.entry = entry.id
+			and entry.active = 1
+			$limit
+		order by panel.id, entry.id, ballot.judge
+	");
+
+	$round_sth->execute($round->id);
+	my $result_ref = $round_sth->fetchall_hash();
+	my %panels;
+	my %inactive;
+
+	foreach my $result (@{$result_ref}) {
+
+		$panels{$result->{panel}}{entries}{$result->{entry}} = $result->{sporder};
+		$panels{$result->{panel}}{orders}{$result->{sporder}}++;
+
+		if ($panels{$result->{panel}}{max_order} < $result->{sporder}) {
+			$panels{$result->{panel}}{max_order} = $result->{sporder};
 		}
 
-		my $max_order;
-
-		foreach my $panel_id (sort {$a <=> $b} keys %panels) {
-			foreach my $order (sort {$a <=> $b} keys %{$panels{$panel_id}} ) {
-				$max_order = $order if $order > $max_order;
-			}
+		unless ($result->{active}) {
+			$inactive{$result->{"entry"}}++;
 		}
+	}
 
-		foreach my $panel_id (sort {$a <=> $b} keys %panels) {
+	foreach my $panel_id (sort {$a <=> $b} keys %panels) {
 
-			my $count = $max_order + 1;
+		my $panel = $panels{$panel_id};
+		my $park  = $panel->{max_order} + 1;
 
-			#Park it with some other random number to get out of range
-			foreach my $order (sort {$a <=> $b} keys %{$panels{$panel_id}} ) {
-				my $entry = $panels{$panel_id}{$order};
-				$update_sth->execute($count++, $entry, $panel_id);
+		foreach my $entry_id (
+			sort {
+				$panel->{entries}{$a} <=> $panel->{entries}{$b}
+			} keys %{$panel->{entries}}
+		) {
+			while ($panel->{new_orders}{$park} || $panel->{orders}{$park}) {
+				$park++;
 			}
+			$update_sth->execute($park, $entry_id, $panel_id);
 
-			$count = 1;
-
-			# And now reset it to the actual order
-			foreach my $order (sort {$a <=> $b} keys %{$panels{$panel_id}} ) {
-				my $entry = $panels{$panel_id}{$order};
-				next if $inactive{$entry};
-				$update_sth->execute($count++, $entry, $panel_id);
-			}
-
-			# Drops to the end
-			foreach my $order (sort {$a <=> $b} keys %{$panels{$panel_id}} ) {
-				my $entry = $panels{$panel_id}{$order};
-				next unless $inactive{$entry};
-				$update_sth->execute($count++, $entry, $panel_id);
-			}
+			$panel->{new_orders}{$park}++;
+			$panel->{entries}{$entry_id} = $park;
 
 		}
 
-		if ($ARGS{"redirect"}) {
-			my $msg = "Recency gaps filled for round ".$round->realname;
-			$m->redirect("show.mhtml?round_id=".$round->id."&msg=$msg");
-		}
+		my $order = 1;
 
-		unless ($ARGS{'fix_also'}) {
-			return "Recency reshuffled for ".$round->realname;
+		foreach my $entry_id (
+			sort {
+				$panel->{entries}{$a} <=> $panel->{entries}{$b}
+			} keys %{$panel->{entries}}
+		) {
+
+			while ($panel->{new_orders}{$order}) {
+				$order++;
+			}
+			$update_sth->execute($order, $entry_id, $panel_id);
+			$panel->{new_orders}{$order}++;
+			delete $panel->{new_orders}{$panel->{entries}{$entry_id}};
+			$panel->{entries}{$entry_id} = $order;
 		}
+	}
+
+	if ($ARGS{"fix"} && $ARGS{"redirect"}) {
+		my $msg = "Recency gaps filled for round ".$round->realname;
+		$m->redirect("show.mhtml?round_id=".$round->id."&msg=$msg");
+	} elsif ($ARGS{'fix'}) {
+		return "Recency reshuffled for ".$round->realname;
 	}
 
 	my %already;
@@ -113,29 +141,9 @@
 
 		my $event = $round->event();
 
-		my $sth = $dbh->prepare("
-			select entry.id entry,
-				ballot.id ballot, ballot.speakerorder sporder,
-				panel.id panel,
-				round.id round, round.name roundname, round.type,
-				ignore_results.value iverson
-
-			from (entry, ballot, panel, round)
-				left join round_setting ignore_results
-					on ignore_results.round = round.id
-					and ignore_results.tag  = 'ignore_results'
-
-			where round.event = ?
-				and round.id     = panel.round
-				and panel.id     = ballot.panel
-				and ballot.entry = entry.id
-				and entry.active = 1
-				$limit
-		");
-
-		$sth->execute($event->id);
-		my $result_ref = $sth->fetchall_hash();
-		$sth->finish();
+		$event_sth->execute($event->id);
+		my $result_ref = $event_sth->fetchall_hash();
+		$event_sth->finish();
 
 		my %panels;
 
@@ -165,37 +173,15 @@
 	}
 
 	my $message;
-
 	foreach my $round (sort {$a->name <=> $b->name} @rounds) {
 
 		my @ties = $m->comp("/funclib/congress_ties.mas", round => $round);
 		my $parts = scalar @ties;
 
-		my $sth = $dbh->prepare("
-			select
-				ballot.id, ballot.entry, panel.id panel, entry.active,
-				ignore_results.value iverson, ballot.speakerorder sporder
-			from (ballot, panel, entry)
-				left join round_setting ignore_results on ignore_results.round = panel.round and ignore_results.tag = 'ignore_results'
-			where ballot.panel = panel.id
-				and ballot.entry = entry.id
-				and (ballot.audit != 1 OR ballot.chair = 1)
-				and panel.round = ?
-				$limit
-		");
 
-
-		my $update_sth = $dbh->prepare("
-			update ballot
-				set ballot.speakerorder = ?
-			where ballot.entry = ?
-				and ballot.panel = ?
-				and (ballot.audit != 1 OR ballot.chair = 1)
-		");
-
-		$sth->execute($round->id);
-		my $result_ref = $sth->fetchall_hash();
-		$sth->finish();
+		$round_sth->execute($round->id);
+		my $result_ref = $round_sth->fetchall_hash();
+		$round_sth->finish();
 
 		my %panels;
 
@@ -231,16 +217,17 @@
 
 			my %panel_sort;
 			my %cohorts;
-			my $count = $number_of_entries + 1;
-
-			while ($used{$count}) {
-				$count++;
-			}
+			my $count = $number_of_entries + 100;
 
 			foreach my $entry (shuffle (keys %{$panels{$panel_id}}) ) {
 
+				while ($panels{$panel_id}{new_orders}{$count} || $used{$count}) {
+					$count++;
+				}
+
 				# Park it with some other random number to get out of range
-				$update_sth->execute($count++, $entry, $panel_id);
+				$update_sth->execute($count, $entry, $panel_id);
+				$count++;
 
 				if ($inactive{$entry}) {
 
@@ -271,6 +258,7 @@
 			}
 
 			$count = 1;
+			undef %used;
 
 			if ($round->name % 2) {
 
