@@ -6,6 +6,7 @@
 	$defaults    => undef
 	$jpool_id    => undef
 	$category_id => undef
+	$timeslot_id => undef
 </%args>
 <%init>
 
@@ -27,10 +28,15 @@
 	my $parent     = $data->{parent};
 	my $jpools     = $data->{jpools};
 
+	my $timeslot = Tab::Timeslot->retrieve($timeslot_id);
+
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
 	my %judges;
+	my %jpools;
+	my %blocks;
+
 	my $dbh = Tab::DBI->db_Main();
 
 	if ($category) {
@@ -56,7 +62,6 @@
 		}
 
 		my $limit;
-
 		if ($jpool_id) {
 			$limit = " and exists (select jpj.id from jpool_judge jpj where jpj.judge = judge.id and jpj.jpool = ".int($jpool_id)." ) ";
 		}
@@ -119,20 +124,23 @@
 			$judges{$judge_id}{"active"} = $judge_active;
 			$judges{$judge_id}{"obligation"} = $judge_obligation + $judge_hired;
 
-			$judges{$judge_id}{"school_name"} = $school_name;
-			$judges{$judge_id}{"school_code"} = $school_code;
-			$judges{$judge_id}{"region_name"} = $region_name;
-			$judges{$judge_id}{"region_code"} = $region_code;
+			$judges{$judge_id}{"school_name"}   = $school_name;
+			$judges{$judge_id}{"school_code"}   = $school_code;
+			$judges{$judge_id}{"region_name"}   = $region_name;
+			$judges{$judge_id}{"region_code"}   = $region_code;
 			$judges{$judge_id}{"district_name"} = $district_name;
 			$judges{$judge_id}{"district_code"} = $district_code;
 
 			next unless $panel_id;
+			if ($ARGS{"timeslot_id"}) {
+				next unless $ARGS{"timeslot_id"} == $timeslot_id;
+			}
 
 			$judges{$judge_id}{"panels"}{$panel_id}{"letter"} = $panel_letter;
 			$judges{$judge_id}{"panels"}{$panel_id}{"flight"} = $panel_flight if $flighted > 1;
-			$judges{$judge_id}{"panels"}{$panel_id}{"round"} = $round_name;
-			$judges{$judge_id}{"panels"}{$panel_id}{"room"} = $room_name;
-			$judges{$judge_id}{"panels"}{$panel_id}{"event"} = $event_abbr;
+			$judges{$judge_id}{"panels"}{$panel_id}{"round"}  = $round_name;
+			$judges{$judge_id}{"panels"}{$panel_id}{"room"}   = $room_name;
+			$judges{$judge_id}{"panels"}{$panel_id}{"event"}  = $event_abbr;
 
 			if ($started) {
 				$judges{$judge_id}{"panels"}{$panel_id}{"started"} = $started;
@@ -141,7 +149,6 @@
 			if ($done) {
 				$judges{$judge_id}{"panels"}{$panel_id}{"done"}++;
 			}
-
 
 			unless ($round_start_time) {
 				$round_start_time = $timeslot_start;
@@ -170,6 +177,119 @@
 				$judges{$judge_id}{"panels"}{$panel_id}{"round_name"} = "R".$round_name;
 			}
 		}
+
+		my $ts_limit;
+
+		if ($timeslot) {
+			$ts_limit = " and timeslot.id = ".int($timeslot->id);
+		}
+
+		my $standby_sth = $dbh->prepare("
+			select
+				judge.id, judge.first, judge.last,
+				school.code,
+				jpool.id jpool_id, jpool.name,
+				timeslot.start, timeslot.end
+			from (jpool, jpool_setting standby, timeslot, judge, jpool_judge jpj)
+				left join school on school.id = judge.school
+			where 1=1
+				and standby.value  = timeslot.id
+				and standby.tag    = 'standby_timeslot'
+				and standby.jpool  = jpool.id
+				and jpj.jpool      = jpool.id
+				and jpj.judge      = judge.id
+				and judge.category = ?
+				$ts_limit
+		");
+
+		my %cache_dt;
+		$standby_sth->execute($category->{id});
+		my $standby_sths = $standby_sth->fetchall_hash();
+
+		foreach my $jpool (@{$standby_sths}) {
+
+			unless ($cache_dt{$jpool->{start}}) {
+				$cache_dt{$jpool->{start}} = $m->comp("/funclib/showtime.mas",
+					string => $jpool->{start},
+					tz     => $tourn->tz,
+					length => 'shortday',
+					return => 1
+				);
+			}
+
+			unless ($cache_dt{$jpool->{end}}) {
+				$cache_dt{$jpool->{end}} = $m->comp("/funclib/showtime.mas",
+					string => $jpool->{end},
+					tz     => $tourn->tz,
+					length => 'shortday',
+					return => 1
+				);
+			}
+
+			$jpools{$jpool->{id}}{"jpools"}{$jpool->{jpool_id}}{start} = $cache_dt{$jpool->{start}};
+			$jpools{$jpool->{id}}{"jpools"}{$jpool->{jpool_id}}{end} = $cache_dt{$jpool->{end}};
+			$jpools{$jpool->{id}}{"jpools"}{$jpool->{jpool_id}}{name} = $jpool->{name};
+
+			$jpools{$jpool->{id}}{"school"} = $jpool->{code};
+			$jpools{$jpool->{id}}{"first"}  = $jpool->{first};
+			$jpools{$jpool->{id}}{"last"}   = $jpool->{last};
+		}
+
+		my $timeblock_sth = $dbh->prepare("
+			select judge.id,
+				judge.first, judge.last,
+				strike.start, strike.end
+			from judge, strike
+			where judge.category = ?
+				and judge.id = strike.judge
+				and strike.start < ?
+				and strike.end > ?
+		");
+
+		my $range_start;
+		my $range_end;
+
+		if ($timeslot) {
+			$range_start = DateTime::Format::MySQL->format_datetime($timeslot->end);
+			$range_end = DateTime::Format::MySQL->format_datetime($timeslot->start);
+		} else {
+			$range_start = DateTime::Format::MySQL->format_datetime($tourn->end);
+			$range_end = DateTime::Format::MySQL->format_datetime($tourn->start);
+		}
+
+		$timeblock_sth->execute(
+			$category->{id},
+			$range_start,
+			$range_end
+		);
+
+		my $blockrefs = $timeblock_sth->fetchall_hash();
+
+		foreach my $block (@{$blockrefs}) {
+
+			unless ($cache_dt{$block->{start}}) {
+				$cache_dt{$block->{start}} = $m->comp("/funclib/showtime.mas",
+					string => $block->{start},
+					tz     => $tourn->tz,
+					length => 'shortday',
+					return => 1
+				);
+			}
+
+			unless ($cache_dt{$block->{end}}) {
+				$cache_dt{$block->{end}} = $m->comp("/funclib/showtime.mas",
+					string => $block->{end},
+					tz     => $tourn->tz,
+					length => 'shortday',
+					return => 1
+				);
+			}
+
+			$blocks{$block->{id}}{first} = $block->{first};
+			$blocks{$block->{id}}{last}  = $block->{last};
+			$blocks{$block->{id}}{start} = $cache_dt{$block->{start}};
+			$blocks{$block->{id}}{end}   = $cache_dt{$block->{end}};
+		}
 	}
 
 </%init>
@@ -184,7 +304,8 @@
 		jpools         => $data->{jpools},
 		parent         => $data->{parent},
 		parents        => $data->{parents},
-		whoami            => "chart",
+		timeslot       => $timeslot,
+		whoami         => "chart",
 	&>
 
 	<div class="main">
@@ -207,8 +328,12 @@
 			&>
 
 			<div class="full flexrow">
-				<span class="threequarters">
+				<span class="half">
 					<h5>Judge Chart:  <% $jpool->{name} || $category->{abbr} %> </h5>
+				</span>
+
+				<span class="centearlign quarter bigger semibold">
+					<% $timeslot ? $timeslot->name." Only " : "" %>
 				</span>
 
 				<span class="rightalign quarter" id="judges_buttonarea">
@@ -216,8 +341,11 @@
 			</div>
 
 			<table id="judges">
+
 				<thead>
+
 					<tr class="yellowrow">
+
 						<th class="smaller">
 							Name
 						</th>
@@ -259,15 +387,17 @@
 						|| $judges{$a}{"last"} cmp $judges{$b}{"last"}
 					} keys %judges
 				) {
+
 </%perl>
 					<tr>
-						<td class="smallish nospace">
-							<span class="hidden"><% $judges{$judge_id}{"last"} %></span>
-							<a  class="white full padvertless marno"
+						<td
+							class     = "smallish nospace"
+							data-text = "<% $judges{$judge_id}{"last"} %>"
+						>
+							<a  class="white full padvertless marno padleft"
 								href="/register/judge/edit.mhtml?judge_id=<% $judge_id %>"
 							><% $judges{$judge_id}{"first"} %> <% $judges{$judge_id}{"last"} %></a>
 						</td>
-
 
 %						if ($tourn_settings->{"nsda_nats"}) {
 							<td class="smaller nowrap">
@@ -277,8 +407,9 @@
 							<td class="smaller nowrap">
 								<% $judges{$judge_id}{"region_code"} %>
 							</td>
+
 %						} else {
-							<td class="smaller nowrap limithalf">
+							<td class="smaller nowrap limithalf centeralign">
 								<% $judges{$judge_id}{"school_code"}
 									? $judges{$judge_id}{"school_code"}
 									: $m->comp("/funclib/short_name.mas", name => $judges{$judge_id}{"school_name"})
@@ -287,14 +418,59 @@
 %						}
 
 						<td class="nospace top">
+
+							<div class="flexrow wrap">
+
 %							unless ($judges{$judge_id}{"active"}) {
 								<span class="redtext semibold third padleft padvert">
 									Inactive
 								</span>
 %							}
+
 %							if ($judges{$judge_id}{"special"}) {
 								<span class="bluetext semibold third padleft padvert">
 									<% $judges{$judge_id}{"special"} %>
+								</span>
+%							}
+
+%							if ($jpools{$judge_id}{"jpools"}) {
+%								foreach my $jpool_id (sort {$a <=> $b} keys %{$jpools{$judge_id}{"jpools"}}) {
+									<span class="third smallish padtopless ltborder centeralign top">
+
+										<span class="full flexrow padtopless">
+											<span class="half leftalign padleft">
+												<% $jpools{$judge_id}{"jpools"}{$jpool_id}{"start"} %>
+											</span>
+											<span class="half rightalign padrightless">
+												<% $jpools{$judge_id}{"jpools"}{$jpool_id}{"end"} %>
+											</span>
+										</span>
+
+										<span class="greentext semibold full padvertless">
+											In Standby Pool
+										</span>
+										<span class="full flexrow centeralign padvertless">
+											<% $jpools{$judge_id}{"jpools"}{$jpool_id}{"name"} %>
+										</span>
+									</span>
+%								}
+%							}
+
+%							if ($blocks{$judge_id}) {
+								<span class="third smallish padtopless ltborder centeralign top">
+									<span class="full flexrow">
+										<span class="half">
+											<% $blocks{$judge_id}{"start"} %>
+										</span>
+										<span class="half padrightless">
+											<% $blocks{$judge_id}{"end"} %>
+										</span>
+									</span>
+									<span class="orangetext semibold full padleft padvert">
+										Time blocked
+									</span>
+									<span class="full padleft padvert">
+									</span>
 								</span>
 %							}
 
@@ -316,17 +492,17 @@
 
 %							foreach my $panel_id (@panel_ids) {
 
-								<span class="third smallish padless ltborder centeralign top">
+								<span class="third smallish padtopless ltborder centeralign top">
 
 									<a
-										class="white nospace hover centeralign"
-										href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel_id %>"
+										class = "white nospace hover centeralign"
+										href  = "/panel/schemat/panel_view.mhtml?panel_id=<% $panel_id %>"
 									>
-										<div class="full nospace padvertless marno">
-											<span class="third nospace">
+										<div class="full flexrow padtopless marno nowrap">
+											<span class="third">
 												<% $judges{$judge_id}{"panels"}{$panel_id}{"start_time"} %>
 											</span>
-											<span class="twothirds rightalign nowrap nospace">
+											<span class="twothirds rightalign nowrap">
 												<% $judges{$judge_id}{"panels"}{$panel_id}{"event"} %>
 												&ndash;
 												<% $judges{$judge_id}{"panels"}{$panel_id}{"round_name"} %>
@@ -337,16 +513,18 @@
 											</span>
 										</div>
 
-										<div 
-											class="full marno padvertless smaller nowrap"
-											title="<% $judges{$judge_id}{"panels"}{$panel_id}{"room"} %>"
-										>
-											S<% $judges{$judge_id}{"panels"}{$panel_id}{"letter"} %>
-											&ndash;
-											<% $judges{$judge_id}{"panels"}{$panel_id}{"room"}
-												? "In" : "" %>
-											<% $judges{$judge_id}{"panels"}{$panel_id}{"room"} %>
-										</div>
+%										if ($judges{$judge_id}{"panels"}{$panel_id}{"room"}) {
+											<div
+												class="full marno padvertless smaller nowrap"
+												title="<% $judges{$judge_id}{"panels"}{$panel_id}{"room"} %>"
+											>
+												S<% $judges{$judge_id}{"panels"}{$panel_id}{"letter"} %>
+												&ndash;
+												<% $judges{$judge_id}{"panels"}{$panel_id}{"room"}
+													? "In" : "" %>
+												<% $judges{$judge_id}{"panels"}{$panel_id}{"room"} %>
+											</div>
+%										}
 
 %										if ($judges{$judge_id}{"panels"}{$panel_id}{"done"}) {
 											<div class="full marno greentext italic padvertless centeralign" title="Start time">
@@ -366,6 +544,7 @@
 									</a>
 								</span>
 %							}
+							</div>
 						</td>
 
 						<td class="smallish centeralign" title="judged/obligated">
