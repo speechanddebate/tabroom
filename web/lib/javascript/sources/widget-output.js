@@ -11,9 +11,7 @@
 	'use strict';
 
 	var ts = $.tablesorter,
-
 	output = ts.output = {
-
 		event      : 'outputTable',
 		// Double click time is about 500ms; this value ignores double clicks
 		// and prevents multiple windows from opening - issue in Firefox
