@@ -1,1 +1,1 @@
-onesignal/OneSignalSDKWorker.js
+importScripts("/lib/javascript/onesignal/OneSignalSDK.sw.js");
