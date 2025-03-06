@@ -677,11 +677,6 @@
 		resizeAll();
 		zebraRows();
 
-		$("select:not(.plain)").select2({
-			minimumResultsForSearch : 5,
-			width                   : '100%',
-			dropdownCssClass        : 'selection_text',
-		});
 	}
 
 	function resizeToChildren(className) {
@@ -1344,13 +1339,14 @@ function hideLoginBox() {
 	function resizeAll() {
 
 		$(`input[type=text]:not(.noresize),
-			input[type=password],
+			input[type=password]:not(.noresize),
 			input[type=number].sizeme,
 			input[type=email]:not(.noresize),
-			input[type=tel],
-			input[type=date],
-			input[type=time],
-			input[type=url]`).each( function() {
+			input[type=tel]:not(.noresize),
+			input[type=date]:not(.noresize),
+			input[type=time]:not(.noresize),
+			input[type=url]:not(.noresize)`
+		).each( function() {
 			if (
 				$(this).is(':visible')
 				&& !['TD','TH','LABEL'].includes($(this).parent()[0].tagName)
@@ -1372,6 +1368,12 @@ function hideLoginBox() {
 			} else {
 				$(this).width($(this).parent().width()-10);
 			}
+		});
+
+		$("select:not(.plain)").select2({
+			minimumResultsForSearch : 5,
+			width                   : '100%',
+			dropdownCssClass        : 'selection_text',
 		});
 	}
 
