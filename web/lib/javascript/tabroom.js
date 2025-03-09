@@ -12,7 +12,16 @@
 	 * needlessly baroque but apparently that's the JS way of doing this. How
 	 * stupid. */
 
-	function copyToClipboard(elementId, textLabel) {
+	function copyTextToClipboard(copyText) {
+	    var $temp = $("<input>");
+		$("body").append($temp);
+		$temp.val(copyText).select();
+		document.execCommand("copy");
+		$temp.remove();
+		alertify.notify(`Copied ${copyText} to clipboard`, `custom`);
+	}
+
+	function copyToClipboard(elementId) {
 	    var $temp = $("<input>");
 		$("body").append($temp);
 
