@@ -686,6 +686,9 @@
 		resizeAll();
 		zebraRows();
 
+		// Do not be tempted to move this under resizeAll() because for some
+		// reason putting it there causes mobile browsers to explode.
+
 		$("select:not(.plain)").select2({
 			minimumResultsForSearch : 5,
 			width                   : '100%',

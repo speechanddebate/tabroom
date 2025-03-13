@@ -17,7 +17,7 @@ use JavaScript::Minifier qw(minify);
 		'jquery.tablesorter.combined.js',
 		'metadata.js',
 		'bigtext.js',
-		'select2.min.js',
+		'select2.js',
 		'widget-columnSelector.js',
 		'widget-print.js',
 		'widget-output.js',
