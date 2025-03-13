@@ -686,6 +686,11 @@
 		resizeAll();
 		zebraRows();
 
+		$("select:not(.plain)").select2({
+			minimumResultsForSearch : 5,
+			width                   : '100%',
+			dropdownCssClass        : 'selection_text',
+		});
 	}
 
 	function resizeToChildren(className) {
@@ -1368,24 +1373,7 @@ function hideLoginBox() {
 			$(this).width($(this).parent().width()-10);
 		});
 
-		$('.selection').each(function(){
-			if (
-				$(this).parent().is("td")
-				|| $(this).parent().is("th")
-			) {
-				$(this).width($(this).parent().width()-5);
-			} else {
-				$(this).width($(this).parent().width()-10);
-			}
-		});
-
-		$("select:not(.plain)").select2({
-			minimumResultsForSearch : 5,
-			width                   : '100%',
-			dropdownCssClass        : 'selection_text',
-		});
 	}
-
 
 	function toggleView(elementId, elementClass) {
 
