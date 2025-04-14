@@ -6,7 +6,7 @@
 	my $db_name = 'tabroom';
 	my $db_host = 'tabroom-db.in.speechanddebate.org';
 	my $db_user = 'ansiblebot';
-	my $db_pass = 'choa0re3eoMooleiCae#Waej8';
+	my $db_pass = 'readOnlyPassword';
 
 	my $dbh = DBI->connect(
 	"DBI:mysql:database=$db_name;host=$db_host",
