@@ -795,9 +795,7 @@
 
 				var sizeString = (size / 1024 / 1024).toFixed(1);
 
-				var message = `File ${filename} size is ${sizeString} MB and the
-					upload limit is ${sizeLimit} MB. Please compress or reformat the file,
-					because otherwise upload and validation errors are very likely.`;
+				var message = `File ${filename} size is ${sizeString} MB and the upload limit is ${sizeLimit} MB. Please compress or reformat the file, because otherwise upload and validation errors are very likely.`;
 
 				alertify.confirm(
 					"File size too large!",
