@@ -4,6 +4,7 @@
 	$judge_id => undef
 	$errs     => undef
 	$entry_id => undef
+	$dbh
 </%args>
 <%init>
 
@@ -75,6 +76,45 @@
 
 	my %category_settings = $category->all_settings();
 
+	my $ballots_sth = $dbh->prepare("
+		select
+			ballot.id ballot_id, ballot.audit, ballot.judge,
+			panel.id panel_id, panel.letter, panel.flight,
+			round.flighted,
+			event.abbr, round.name round_name, round.label round_label
+		from (judge, ballot, panel, round, event, tourn, entry)
+		where judge.person = ?
+
+			and judge.id        = ballot.judge
+			and ballot.panel    = panel.id
+			and panel.round     = round.id
+			and round.published = 1
+			and round.event     = event.id
+			and event.tourn     = tourn.id
+			and ballot.entry    = entry.id
+			and entry.active    = 1
+			and tourn.end > now();
+	");
+
+	$ballots_sth->execute($person->id);
+	my $ballot_ref = $ballots_sth->fetchall_hash();
+	my %panels;
+
+	foreach my $ref (@{$ballot_ref}) {
+
+		$panels{$ref->{panel_id}}{letter}     = $ref->{letter};
+		$panels{$ref->{panel_id}}{abbr}       = $ref->{abbr};
+		$panels{$ref->{panel_id}}{judge}      = $ref->{judge};
+		$panels{$ref->{panel_id}}{round}      = $ref->{round_label} || "Round ".$ref->{round_name};
+		$panels{$ref->{panel_id}}{round_name} = $ref->{round_name};
+		$panels{$ref->{panel_id}}{flighted}   = $ref->{flighted};
+		$panels{$ref->{panel_id}}{flight}     = $ref->{flight};
+
+		unless ($ref->{audit}) {
+			$panels{$ref->{panel_id}}{undone}++;
+		}
+	}
+
 </%init>
 
 	<& /funclib/editor.mas, height => 256 &>
@@ -135,8 +175,6 @@
 				cols = "60"
 			><% $rfd ? $rfd->text : "" %></textarea>
 		</p>
-
-
 <%perl>
 
 		foreach my $ballot (@ballots) {
@@ -148,15 +186,20 @@
 			$code .= " &ndash; ".$entry->school->code if $category_settings{"ballot_school_codes"};
 			$code .= " &ndash; ".$entry->school->name if $category_settings{"ballot_school_names"};
 
-			unless ($code eq $entry->name) {
-				$code .= " &ndash; ".$entry->name if $category_settings{"ballot_entry_names"};
+			if ($category_settings{"ballot_entry_first_names"}) {
+
+				my $notfirst;
+				foreach my $student ($entry->students) {
+					if ($notfirst++) {
+						$code .= " &";
+					}
+					$code .= " ".$student->first;
+				}
+			} elsif ($code ne $entry->name) {
+				$code .= " &ndash; Name: ".$entry->name if $category_settings{"ballot_entry_names"};
 			}
 
-			if ($category_settings{"ballot_entry_first_names"}) {
-				foreach my $student ($entry->students) {
-					$code .= " &ndash; ".$student->first;
-				}
-			}
+			my $title_text;
 
  			if ($category_settings{"ballot_entry_titles"}) {
 				my $title = $ballot->scores(
@@ -164,8 +207,7 @@
 				)->first;
 
 				if ($title) {
-					my $title_text = $title->text;
-					$code .= " &ndash; \"".$title_text."\"";
+					$title_text = $title->text;
 				}
 			}
 
@@ -182,19 +224,28 @@
 			my $online_mode = $event->setting("online_mode");
 
 </%perl>
-			<span class="nospace fivesixths">
-				<h5 class="martopmore">Comments for <% $code %></h5>
-			</span>
+			<div class="full flexrow martopmore padtop bordertop">
+				<span class="twofifths grow padleft">
+					<h5 class="nospace">Comments for <% $code %></h5>
+				</span>
 
-			<span class="sixth">
 %				if ($online_mode eq "async") {
-					<a
-						class  = "fa fa-lg invert bluetext buttonwhite fa-video-camera"
-						target = "_blank"
-						href   = "<% $event->setting("video_link") %>"
-					></a>
+					<span class="sixth">
+						<a
+							class  = "fa fa-lg invert bluetext buttonwhite fa-video-camera"
+							target = "_blank"
+							href   = "<% $event->setting("video_link") %>"
+						></a>
+					</span>
 %				}
-			</span>
+
+%			if ($title_text) {
+				<span class='bigger padbottom padtop twofifths rightalign grow italic padrightmore'>
+					"<% $title_text %>"
+				</span>
+
+%			}
+			</div>
 
 			<p class='centeralign marleftmuchmore'>
 				<textarea
@@ -221,7 +272,6 @@
 	<div class="menu">
 
 		<div class="sidenote">
-
 			<h4>Navigate</h4>
 
 			<a href="panels.mhtml" class="blue full" >
@@ -233,54 +283,42 @@
 			>
 				<% $round->realname %> Schematic
 			</a>
-
 		</div>
 
 		<div class="sidenote">
 
 			<h4>Your Ballots</h4>
 <%perl>
-			foreach my $opanel (
-				$m->comp("/funclib/person_panels.mas", person => $person)
+
+			foreach my $panel_id (
+				sort {$panels{$a}{"round_name"} <=> $panels{$b}{"round_name"}}
+				keys %panels
 			) {
 
-				my $round = $opanel->round;
-
-				next unless $round->published;
-				next if $opanel->id == $panel->id;
+				my $opanel = $panels{$panel_id};
 </%perl>
-
 				<a
-					class="yellow full"
-					href="ballot.mhtml?panel_id=<% $opanel->id %>&judge_id=<% $opanel->judge %>"
+					class="<% $panel->id == $panel_id ? "dk" : "" %><% $opanel->{undone} ? "yellow" : "blue" %> full flexrow"
+%					if ($opanel->{undone}) {
+						href="ballot.mhtml?panel_id=<% $panel_id %>&judge_id=<% $opanel->{judge} %>"
+%					} else {
+						href="rfd_only.mhtml?panel_id=<% $panel_id %>&judge_id=<% $opanel->{judge} %>"
+%					}
 				>
-					<% $round->event->abbr %>
-					<% $round->realname %>
-					<% $round->flighted > 1 ? "Flt ".$opanel->flight : "" %> Pending
-				</a>
-<%perl>
-			}
-
-			foreach my $opanel (
-				$m->comp("/funclib/person_panels.mas",
-					person => $person,
-					done => 1
-				)
-			) {
-
-				next if $opanel->id == $panel->id;
-</%perl>
-
-				<a
-					class="blue full"
-					href="rfd_only.mhtml?panel_id=<% $opanel->id %>&judge_id=<% $opanel->judge %>"
-				>
-					<% $round->event->abbr %>
-					<% $round->realname %>
-					<% $round->flighted > 1 ? "Flt ".$opanel->flight : "" %> Done
+					<span class="quarter padleftless">
+						<% $opanel->{abbr} %>
+					</span>
+					<span class="half">
+						<% $opanel->{round} %>
+					</span>
+					<span class="sixth">
+						<% $opanel->{flighted} > 1 ? "Flight ".$opanel->{flight} : "" %>
+					</span>
+					<span class="quarter padright">
+						<% $opanel->{undone} ? "Pending" : "Done" %>
+					</span>
 				</a>
 %			}
 
 		</div>
-
 	</div>
