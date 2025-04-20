@@ -4,7 +4,7 @@ Tab::Round->table('round');
 Tab::Round->columns(Primary => qw/id/);
 Tab::Round->columns(Essential => qw/type name label flighted published
 							post_primary post_secondary post_feedback
-							created_at start_time
+							paired_at start_time
 							site
 							event
 							runoff
@@ -25,7 +25,7 @@ Tab::Round->has_many(settings   => 'Tab::RoundSetting' , 'round');
 Tab::Round->has_many(panels     => 'Tab::Panel'        , 'round'   => { order_by => 'letter'} );
 Tab::Round->has_many(results    => 'Tab::Result'       , 'round');
 
-__PACKAGE__->_register_datetimes( qw/created_at start_time timestamp/);
+__PACKAGE__->_register_datetimes( qw/paired_at start_time timestamp/);
 
 sub parents {
 	my $self = shift;
