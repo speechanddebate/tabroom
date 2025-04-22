@@ -147,6 +147,8 @@
 
 	function postSwitch(checkObject, url, callback, confirmMessage) {
 
+		console.log(`I am here`);
+
 		if (confirmMessage && confirmMessage !== '') {
 			alertify.confirm("Please confirm", confirmMessage, function(e) {
 				if (e) {
