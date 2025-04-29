@@ -462,7 +462,7 @@
 
 					if (data.reprop) {
 						data.reprop.forEach( function(item) {
-							$("#"+item.id).attr(item.property, item.value);
+							$("#"+item.id).attr(item.property, item.value || '');
 						});
 					}
 

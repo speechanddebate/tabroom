@@ -17,24 +17,35 @@
 
 	my $sth = $dbh->prepare("
 		select
-			score.id, score.tag, score.content,  score.speech,
+			score.id, score.tag, score.content, score.speech,
+			CONVERT_TZ(score.timestamp, '+00:00', tourn.tz) score_ts,
 			ballot.id,
 			judge.id, judge.first, judge.last,
-			entry.id, entry.code, entry.name,
-			panel.id, panel.letter
+			entry.id, entry.code, entry.name, entry.active,
+			panel.id, panel.letter,
+			reviewed.value,
+			CONVERT_TZ(reviewed.timestamp, '+00:00', tourn.tz) reviewed_at,
+			reviewed_by.email
 
-		from score, ballot, panel, judge, entry
+		from (ballot, panel, judge, entry, event, tourn)
+
+			left join score on score.ballot = ballot.id
+				and score.tag IN('rfd', 'comments', 'title', 'speech', 'time')
+
+			left join panel_setting reviewed
+				on reviewed.panel = panel.id
+				and reviewed.tag = 'comments_reviewed'
+
+			left join person reviewed_by
+				on reviewed_by.id = reviewed.value
+
 		where panel.round = ?
-		and panel.id = ballot.panel
-		and ballot.id = score.ballot
-		and (score.tag = 'rfd'
-			or score.tag = 'comments'
-			or score.tag = 'title'
-			or score.tag = 'speech'
-			or score.tag = 'time'
-		)
-		and ballot.entry = entry.id
-		and ballot.judge = judge.id
+			and panel.id = ballot.panel
+			and ballot.entry = entry.id
+			and ballot.judge = judge.id
+			and ballot.entry = entry.id
+			and entry.event = event.id
+			and event.tourn = tourn.id
 	");
 
 	my %ballots;
@@ -46,20 +57,28 @@
 	while(
 		my (
 			$score_id, $score_tag, $score_content, $score_speech,
+			$score_ts,
 			$ballot_id,
 			$judge_id, $judge_first, $judge_last,
-			$entry_id, $entry_code, $entry_name,
-			$panel_id, $panel_letter
+			$entry_id, $entry_code, $entry_name, $entry_active,
+			$panel_id, $panel_letter,
+			$reviewed,
+			$reviewed_at,
+			$reviewed_by
 		) = $sth->fetchrow_array()
 	){
 
-		next unless $score_content;
+		$panels{$panel_id}{"letter"} = $panel_letter;
 
-		$panels{$panel_id}{"letter"} =  $panel_letter;
+		if ($reviewed && not defined $panels{$panel_id}{"reviewed"}) {
+			$panels{$panel_id}{"reviewed"} = $reviewed;
+			$panels{$panel_id}{"reviewed_by"} = $reviewed_by;
+			$panels{$panel_id}{"reviewed_at"} = $reviewed_at;
+		}
 
-		push @{$panels{$panel_id}{"entries"}}, $entry_id;
-		push @{$panels{$panel_id}{"judges"}}, $judge_id;
-		push @{$panels{$panel_id}{"ballots"}}, $ballot_id;
+		push @{$panels{$panel_id}{"entries"}} , $entry_id;
+		push @{$panels{$panel_id}{"judges"}}  , $judge_id;
+		push @{$panels{$panel_id}{"ballots"}} , $ballot_id;
 
 		unless ($event->type eq "congress" || $event->type eq "speech") {
 			unless ($done{"marker"}{$entry_id}++) {
@@ -67,7 +86,7 @@
 				$panels{$panel_id}{"entry_marker"} .= $entry_code;
 			}
 		} else {
-			$panels{$panel_id}{"entry_marker"} = "Session $panel_letter";
+			$panels{$panel_id}{"entry_marker"} = "Section $panel_letter";
 		}
 
 		unless ($done{"marker_judge"}{$judge_id}++) {
@@ -76,18 +95,27 @@
 			$panels{$panel_id}{"judge_marker"} .= $judge_last;
 		}
 
-		$ballots{$ballot_id}{"entry_id"} = $entry_id;
-		$ballots{$ballot_id}{"entry_name"} = $entry_name;
-		$ballots{$ballot_id}{"judge_name"} = $judge_last.", ".$judge_first;
-		$ballots{$ballot_id}{"judge_id"} = $judge_id;
-		$ballots{$ballot_id}{"entry_code"} = $entry_code;
+		unless ($ballots{$ballot_id}) {
+			$panels{$panel_id}{$judge_id}{"counter"}{entries}++;
+		}
+
+		$ballots{$ballot_id}{"entry_id"}     = $entry_id;
+		$ballots{$ballot_id}{"entry_name"}   = $entry_name;
+		$ballots{$ballot_id}{"entry_active"} = $entry_active;
+		$ballots{$ballot_id}{"judge_name"}   = $judge_last.", ".$judge_first;
+		$ballots{$ballot_id}{"judge_id"}     = $judge_id;
+		$ballots{$ballot_id}{"entry_code"}   = $entry_code;
 
 		$score_content = Tab::Utils::uncompress($score_content);
 
 		if ($score_tag eq "speech") {
 			$ballots{$ballot_id}{$score_tag}{$score_speech} = $score_content;
+			$panels{$panel_id}{$judge_id}{"counter"}{$score_tag}++;
+			$ballots{$ballot_id}{ts}{$score_tag} = $score_ts;
 		} else {
 			$ballots{$ballot_id}{$score_tag} = $score_content;
+			$panels{$panel_id}{$judge_id}{"counter"}{$score_tag}++;
+			$ballots{$ballot_id}{ts}{$score_tag} = $score_ts;
 		}
 	}
 
@@ -131,83 +159,143 @@
 
 %			%done = ();
 
-			<div class="full row borderbottom flexrow wrap">
+			<div class="even flexrow wrap martop">
 
-				<div class="full flexrow border">
-					<span class="threequarters">
-						<h5><% $panels{$panel_id}{"entry_marker"} %></h5>
+				<div class="full flexrow bordertop borderleft nospace padvertless">
+
+					<span class="threequarters padleft grow">
+						<h5 class="nospace"><% $panels{$panel_id}{"entry_marker"} %></h5>
 					</span>
 
-					<span class="quarter rightalign">
+					<span class="twenty rightalign">
 						<a
-							class = "fa fa-lg buttonwhite bluetext fa-edit"
+							id       = "reviewed_<% $panel_id %>"
+							class    = "fa fa-sm buttonwhite <% $panels{$panel_id}{"reviewed"} ? "greentext fa-thumbs-up" : "orangetext fa-thumbs-down" %>"
+							panel_id = "<% $panel_id %>"
+							status   = "<% $panels{$panel_id}{'reviewed'} ? 1 : 0 %>"
+							onClick  = "postSwitch(this, 'panel_reviewed.mhtml');"
+%							if ($panels{$panel_id}{'reviewed_by'}) {
+								title="Reviewed by <% $panels{$panel_id}{"reviewed_by"} %> at <& "/funclib/showdt.mas", string => $panels{$panel_id}{'reviewed_at'} &>"
+%							}
+						></a>
+					</span>
+
+					<span class="twenty rightalign">
+						<a
+							class   = "fa buttonwhite redtext fa-eye fa-sm"
+							onClick = '$(`#comments_<% $panel_id %>`).toggleClass(`hidden`);'
+						></a>
+					</span>
+
+					<span class="twenty rightalign marrightmore">
+						<a
+							class = "fa buttonwhite bluetext fa-edit fa-sm"
 							href  = "/tabbing/entry/panel.mhtml?panel_id=<% $panel_id %>"
 						></a>
 					</span>
 				</div>
 
+				<div class='full nospace padleftmore <% $panels{$panel_id}{"reviewed"} ? "hidden" : "" %>' id="comments_<% $panel_id %>">
 <%perl>
+				my $notfirst;
+
 				foreach my $ballot_id (
-					sort {$ballots{$a}{"judge_name"} cmp $ballots{$a}{"judge_name"}}
-					 @{$panels{$panel_id}{"ballots"}}
+					sort {
+						$ballots{$a}{"judge_name"} cmp $ballots{$a}{"judge_name"}
+					} @{$panels{$panel_id}{"ballots"}}
 				) {
 
 					next if $done{"ballot"}{$ballot_id}++;
 					my $judge_id = $ballots{$ballot_id}{"judge_id"};
+					unless ($done{"judge"}{$panel_id}{$judge_id}++) {
+
+						if ($notfirst++) {
+							$m->print("</div>");
+						}
 </%perl>
+						<div class="full odd bluebordertop padleft martopless">
 
-					<div class="full marleft marright padtop
-						<% $done{$panel_id}{$judge_id}{"border"}++ ? "" : "bluebordertop" %>
-					">
-
-%						unless ($done{"judge"}{$panel_id}{$judge_id}++) {
-							<h6 class="centeralign semibold bluetext marno">
-								JUDGE: <% $ballots{$ballot_id}{"judge_name"} %>
-							</h6>
-%						}
-
-%						if ($ballots{$ballot_id}{"rfd"}) {
-%							unless ($done{$panel_id}{$judge_id}{"rfd"}++) {
-								<h6>RFD</h6>
-								<p class="borderbottom">
-									<% $ballots{$ballot_id}{"rfd"}  %>
-								</p>
-%							}
-%						}
-
-%						if ($ballots{$ballot_id}{"comments"}) {
-							<h6 class="padtop ltbordertop">
-								Comments for <% $ballots{$ballot_id}{"entry_name"} %>
-							</h6>
-%							if ($ballots{$ballot_id}{"title"}) {
-								<p class="semibold bluetext half">TITLE: <% $ballots{$ballot_id}{"title"} %></p>
-%							}
-%							if ($ballots{$ballot_id}{"time"}) {
-								<p class="semibold bluetext half">TIME: <% $ballots{$ballot_id}{"time"} %></p>
-%							}
-							<span class="padleftmore full">
-								<% $ballots{$ballot_id}{"comments"}  %>
+						<div class="flexrow full wrap">
+							<span class="twofifths grow">
+								<h6 class="semibold bluetext marno">
+									JUDGE: <% $ballots{$ballot_id}{"judge_name"} %>
+								</h6>
 							</span>
-%						}
 
-%						if ($ballots{$ballot_id}{"speech"}) {
-
-							<h6 class="underline"><% $ballots{$ballot_id}{"entry_name"} %></h6>
-
-%							foreach my $tag (sort keys %{$ballots{$ballot_id}{"speech"}}) {
-
-								<p class="semibold bluetext">
-									Speech <% $tag %>
-								</p>
-
-								<p>
-									<% $ballots{$ballot_id}{"speech"}{$tag} %>
-								</p>
-
+%							foreach my $tag (sort {$a cmp $b} keys %{$panels{$panel_id}{$judge_id}{"counter"}}) {
+								<span class="tenth nowrap smallish">
+									<% ucfirst($tag) %>: <% $panels{$panel_id}{$judge_id}{counter}{$tag} %>
+								</span>
 %							}
+						</div>
+
+%					}
+<%perl>
+					if (
+						(not defined $ballots{$ballot_id}{"rfd"})
+						&& (not defined $ballots{$ballot_id}{"comments"})
+						&& (not defined $ballots{$ballot_id}{"speech"})
+					) {
+
+						next unless $ballots{$ballot_id}{'entry_active'};
+</%perl>
+						<p class='semibold redtext bigger padvertless'>
+							Judge left no feedback for <% $ballots{$ballot_id}{"entry_code"} %>
+						</p>
+%					}
+
+%					if ($ballots{$ballot_id}{"rfd"}) {
+%						unless ($done{$panel_id}{$judge_id}{"rfd"}++) {
+							<h6>RFD</h6>
+							<p class="borderbottom">
+								<% $ballots{$ballot_id}{"rfd"}  %>
+							</p>
 %						}
-					</div>
+%					}
+
+%					if ($ballots{$ballot_id}{"comments"}) {
+
+						<div class='flexrow full ltbordertop martop'>
+							<p class="semibold bigger padleftmore twothirds">
+								Comments for <% $ballots{$ballot_id}{"entry_name"} %>
+							</p>
+
+							<span class='third rightalign padright explain'>
+								Last Edit
+								<& "/funclib/showdt.mas", string => $ballots{$ballot_id}{ts}{"comments"} &>
+							</span>
+						</div>
+%						if ($ballots{$ballot_id}{"title"}) {
+							<p class="semibold bluetext half">TITLE: <% $ballots{$ballot_id}{"title"} %></p>
+%						}
+%						if ($ballots{$ballot_id}{"time"}) {
+							<p class="semibold bluetext half">TIME: <% $ballots{$ballot_id}{"time"} %></p>
+%						}
+
+						<span class="padleftmore full">
+							<% $ballots{$ballot_id}{"comments"}  %>
+						</span>
+%					}
+
+%					if ($ballots{$ballot_id}{"speech"}) {
+
+						<h6 class="underline"><% $ballots{$ballot_id}{"entry_name"} %></h6>
+
+%						foreach my $tag (sort keys %{$ballots{$ballot_id}{"speech"}}) {
+							<p class="semibold bluetext">
+								Speech <% $tag %>
+							</p>
+
+							<p>
+								<% $ballots{$ballot_id}{"speech"}{$tag} %>
+							</p>
+%						}
+%					}
+
 %				}
+
+				</div>
+				</div>
 			</div>
 %		}
 	</div>
