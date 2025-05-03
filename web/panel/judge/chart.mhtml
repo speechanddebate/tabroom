@@ -3,6 +3,7 @@
 	$tourn_settings
 	$perms
 	$session
+	$dbh
 	$defaults    => undef
 	$jpool_id    => undef
 	$category_id => undef
@@ -37,37 +38,31 @@
 	my %jpools;
 	my %blocks;
 
-	my $dbh = Tab::DBI->db_Main();
+	my %category_settings;
 
 	if ($category) {
 
-		my $rps = Tab::CategorySetting->search(
-			category => $category->{id},
-			tag      => "rounds_per"
-		)->first;
+		my $cat_obj = Tab::Category->retrieve($category->{id});
+		%category_settings = $cat_obj->all_settings();
 
-		if ($rps) {
-			$category->{rounds_per} = $rps->value;
+		if ($category_settings{rounds_per}) {
+			$category->{rounds_per} = $category_settings{rounds_per};
 		}
 
 		if ($tourn_settings->{nsda_nats}) {
-			my $ncs = Tab::CategorySetting->search(
-				category => $category->{id},
-				tag      => "nats_category"
-			)->first;
-
-			if ($ncs) {
-				$category->{nats} = $ncs->value;
-			}
+			$category->{nats} = $category_settings{nats_category};
 		}
 
 		my $limit;
+
 		if ($jpool_id) {
-			$limit = " and exists (select jpj.id from jpool_judge jpj where jpj.judge = judge.id and jpj.jpool = ".int($jpool_id)." ) ";
+			$limit = " and exists (select jpj.id
+				from jpool_judge jpj
+				where jpj.judge = judge.id
+				and jpj.jpool = ".int($jpool_id)." ) ";
 		}
 
 		my $sth = $dbh->prepare("
-
 			select
 				judge.id, judge.code, judge.first, judge.last,
 					judge.obligation, judge.hired, judge.active,
@@ -77,7 +72,9 @@
 				district.name, district.code, district.id,
 				panel.id, panel.letter, panel.flight, ballot.judge_started, ballot.audit,
 				room.name, room.id,
-				round.name, round.label, round.start_time, round.timeslot, timeslot.start, round.flighted
+				round.name, round.label, round.start_time, round.timeslot, timeslot.start, round.flighted,
+				rating_tier.name rating,
+				tab_rating_tier.name tab_rating
 
 			from (judge)
 
@@ -91,6 +88,20 @@
 			left join timeslot on round.timeslot   = timeslot.id
 			left join event on round.event   = event.id
 			left join room on room.id        = panel.room
+
+			left join rating
+				on rating.judge = judge.id
+				and rating.type = 'coach'
+
+			left join rating_tier
+				on rating_tier.id = rating.rating_tier
+
+			left join rating tab_rating
+				on tab_rating.judge = judge.id
+				and tab_rating.type = 'coach'
+
+			left join rating_tier tab_rating_tier
+				on tab_rating_tier.id = tab_rating.rating_tier
 
 			where judge.category = ?
 			$limit
@@ -112,17 +123,21 @@
 				$panel_id, $panel_letter, $panel_flight, $started, $done,
 				$room_name,
 				$room_id,
-				$round_name, $round_label, $round_start_time, $timeslot_id, $timeslot_start, $flighted
+				$round_name, $round_label, $round_start_time, $timeslot_id, $timeslot_start, $flighted,
+				$rating,
+				$tab_rating
 			) = $sth->fetchrow_array()
 		) {
 
 			next if ($event_tourn && $event_tourn != $tourn);
 
-			$judges{$judge_id}{"first"} = $judge_first;
-			$judges{$judge_id}{"last"} = $judge_last;
-			$judges{$judge_id}{"code"} = $judge_code;
-			$judges{$judge_id}{"active"} = $judge_active;
-			$judges{$judge_id}{"obligation"} = $judge_obligation + $judge_hired;
+			$judges{$judge_id}{"first"}        = $judge_first;
+			$judges{$judge_id}{"last"}         = $judge_last;
+			$judges{$judge_id}{"code"}         = $judge_code;
+			$judges{$judge_id}{"coach_rating"} = $rating;
+			$judges{$judge_id}{"tab_rating"}   = $tab_rating;
+			$judges{$judge_id}{"active"}       = $judge_active;
+			$judges{$judge_id}{"obligation"}   = $judge_obligation + $judge_hired;
 
 			$judges{$judge_id}{"school_name"}   = $school_name;
 			$judges{$judge_id}{"school_code"}   = $school_code;
@@ -168,7 +183,8 @@
 
 			if ($dt) {
 				$judges{$judge_id}{"panels"}{$panel_id}{"start"} = $dt->epoch;
-				$judges{$judge_id}{"panels"}{$panel_id}{"start_time"} = Tab::shorttime($dt);
+				$judges{$judge_id}{"panels"}{$panel_id}{"start_time"} =
+					$m->comp("/funclib/showtime.mas", dt => $dt, format => 'shortday', return => 1);
 			}
 
 			if ($round_label) {
@@ -227,8 +243,8 @@
 			}
 
 			$jpools{$jpool->{id}}{"jpools"}{$jpool->{jpool_id}}{start} = $cache_dt{$jpool->{start}};
-			$jpools{$jpool->{id}}{"jpools"}{$jpool->{jpool_id}}{end} = $cache_dt{$jpool->{end}};
-			$jpools{$jpool->{id}}{"jpools"}{$jpool->{jpool_id}}{name} = $jpool->{name};
+			$jpools{$jpool->{id}}{"jpools"}{$jpool->{jpool_id}}{end}   = $cache_dt{$jpool->{end}};
+			$jpools{$jpool->{id}}{"jpools"}{$jpool->{jpool_id}}{name}  = $jpool->{name};
 
 			$jpools{$jpool->{id}}{"school"} = $jpool->{code};
 			$jpools{$jpool->{id}}{"first"}  = $jpool->{first};
@@ -251,10 +267,10 @@
 
 		if ($timeslot) {
 			$range_start = DateTime::Format::MySQL->format_datetime($timeslot->end);
-			$range_end = DateTime::Format::MySQL->format_datetime($timeslot->start);
+			$range_end   = DateTime::Format::MySQL->format_datetime($timeslot->start);
 		} else {
 			$range_start = DateTime::Format::MySQL->format_datetime($tourn->end);
-			$range_end = DateTime::Format::MySQL->format_datetime($tourn->start);
+			$range_end   = DateTime::Format::MySQL->format_datetime($tourn->start);
 		}
 
 		$timeblock_sth->execute(
@@ -313,7 +329,7 @@
 %		if ($category) {
 
 			<& "/funclib/tablesorter.mas",
-				table => "judges"
+				table => "judges",
 			&>
 
 			<h2><% $category->{name} %></h2>
@@ -350,6 +366,18 @@
 							Name
 						</th>
 
+%						if ($category_settings{"tab_ratings"}) {
+							<th class="smaller">
+								Tab Rating
+							</th>
+%						}
+
+%						if ($category_settings{"coach_ratings"}) {
+							<th class="smaller">
+								Coach Rating
+							</th>
+%						}
+
 %						if ($tourn_settings->{"nsda_nats"}) {
 							<th class="smaller">
 								STID
@@ -359,7 +387,7 @@
 							</th>
 %						} else {
 							<th class="smaller">
-								<% $nocodes ? "Code" : "Sch" %>
+								<% $nocodes ? "Code" : "School" %>
 							</th>
 %						}
 
@@ -387,7 +415,6 @@
 						|| $judges{$a}{"last"} cmp $judges{$b}{"last"}
 					} keys %judges
 				) {
-
 </%perl>
 					<tr>
 						<td
@@ -398,6 +425,18 @@
 								href="/register/judge/edit.mhtml?judge_id=<% $judge_id %>"
 							><% $judges{$judge_id}{"first"} %> <% $judges{$judge_id}{"last"} %></a>
 						</td>
+
+%						if ($category_settings{"tab_ratings"}) {
+							<td class='centeralign'>
+								<% $judges{$judge_id}{'rating'} %>
+							</td>
+%						}
+
+%						if ($category_settings{"coach_ratings"}) {
+							<td class="centeralign">
+								<% $judges{$judge_id}{'coach_rating'} %>
+							</td>
+%						}
 
 %						if ($tourn_settings->{"nsda_nats"}) {
 							<td class="smaller nowrap">
@@ -436,7 +475,6 @@
 %							if ($jpools{$judge_id}{"jpools"}) {
 %								foreach my $jpool_id (sort {$a <=> $b} keys %{$jpools{$judge_id}{"jpools"}}) {
 									<span class="third smallish padtopless ltborder centeralign top">
-
 										<span class="full flexrow padtopless">
 											<span class="half leftalign padleft">
 												<% $jpools{$judge_id}{"jpools"}{$jpool_id}{"start"} %>
@@ -469,23 +507,21 @@
 									<span class="orangetext semibold full padleft padvert">
 										Time blocked
 									</span>
-									<span class="full padleft padvert">
-									</span>
 								</span>
 %							}
 
 <%perl>
 							my @panel_ids = keys %{$judges{$judge_id}{"panels"}};
 
-							@panel_ids =
-								sort {$judges{$judge_id}{"panels"}{$a}{"start"} cmp
-									$judges{$judge_id}{"panels"}{$b}{"start"} }
-									@panel_ids;
+							@panel_ids = sort {
+								$judges{$judge_id}{"panels"}{$a}{"start"}
+									cmp $judges{$judge_id}{"panels"}{$b}{"start"}
+								} @panel_ids;
 
-							@panel_ids =
-								sort {$judges{$judge_id}{"panels"}{$a}{"flight"} <=>
-									$judges{$judge_id}{"panels"}{$b}{"flight"} }
-									@panel_ids;
+							@panel_ids = sort {
+								$judges{$judge_id}{"panels"}{$a}{"flight"}
+									<=> $judges{$judge_id}{"panels"}{$b}{"flight"}
+								} @panel_ids;
 
 							my $panel_count = scalar @panel_ids;
 </%perl>
@@ -502,7 +538,7 @@
 											<span class="third">
 												<% $judges{$judge_id}{"panels"}{$panel_id}{"start_time"} %>
 											</span>
-											<span class="twothirds rightalign nowrap">
+											<span class="twothirds rightalign nowrap semibold">
 												<% $judges{$judge_id}{"panels"}{$panel_id}{"event"} %>
 												&ndash;
 												<% $judges{$judge_id}{"panels"}{$panel_id}{"round_name"} %>
@@ -515,7 +551,7 @@
 
 %										if ($judges{$judge_id}{"panels"}{$panel_id}{"room"}) {
 											<div
-												class="full marno padvertless smaller nowrap"
+												class="full marno padvertless padbottom smaller nowrap"
 												title="<% $judges{$judge_id}{"panels"}{$panel_id}{"room"} %>"
 											>
 												S<% $judges{$judge_id}{"panels"}{$panel_id}{"letter"} %>
