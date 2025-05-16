@@ -1,42 +1,103 @@
 <%args>
-	$judge => undef
+	$judge      => undef
+	$judge_id   => undef
+	$dbh        => undef
+	$quiz_by_id => undef
 </%args>
 <%init>
 
+	unless ($dbh) {
+		$dbh = Tab::DBI->db_Main();
+	}
+
+	if ($judge_id && (not defined $judge)) {
+
+		my $sth = $dbh->prepare("
+			select
+				judge.id, judge.first, judge.last, judge.active,
+				judge.hired, judge.obligation,
+				person.id person_id, person.phone person_phone, person.nsda nsda,
+				incomplete.value_text incomplete,
+				category.id category_id, category.abbr category_abbr,
+				nats_category.value nats_category,
+				required_quizzes.value_text required_quizzes,
+				tourn.id tourn_id, tourn.start
+
+			from (judge, category, tourn)
+
+				left join person on judge.person = person.id
+
+				left join judge_setting incomplete
+					on incomplete.judge = judge.id
+					and incomplete.tag = 'incomplete'
+
+				left join category_setting observers
+					on observers.category = category.id
+					and observers.tag = 'observers'
+
+				left join category_setting nats_category
+					on nats_category.category = category.id
+					and nats_category.tag = 'nats_category'
+
+				left join category_setting required_quizzes
+					on required_quizzes.category = category.id
+					and required_quizzes.tag = 'required_quizzes'
+
+			where 1=1
+
+				and judge.id = ?
+				and tourn.id = category.tourn
+				and category.id = judge.category
+
+			group by judge.id
+			order by judge.category, judge.last
+		");
+
+		$sth->execute($judge_id);
+		my $judges = $sth->fetchall_hash();
+		return unless $judges && @{$judges};
+		$judge = $judges->[0];
+	}
+
 	return unless $judge;
 
-	my $category = $judge->category;
-	my $tourn = $category->tourn;
+	my $usth = $dbh->prepare("
+		update judge_setting set value_text = ? where judge = ? and tag = 'incomplete'
+	");
+
+	my $isth = $dbh->prepare("
+		insert into judge_setting (tag, value, judge, value_text) values ('incomplete', 'text', ?, ?)
+	");
+
+	my $dsth = $dbh->prepare("
+		delete from judge_setting where judge = ? and tag = 'incomplete'
+	");
 
 	my $reasons;
 
-	unless ($judge->person) {
-		$reasons = "Judge ".$judge->first." ".$judge->last." is not linked to a Tabroom account";
-		$judge->setting("incomplete", "text", $reasons);
+	unless ($judge->{person_id} > 0) {
+		$reasons = "Judge ".$judge->{first}." ".$judge->{last}." is not linked to a Tabroom account: ".$judge->{first};
+		save_reasons($judge, $reasons, $usth, $isth, $dsth);
 		return;
 	}
-
-	my $jperson = $judge->person;
 
 #	if ($tourn && $tourn->setting('vaccines')) {
 #		my $vax = $jperson->setting('vaccine_'.$tourn->id);
 #		unless ($vax eq "confirmed") {
-#			$reasons .= "Vaccine check pending for ".$judge->first." ".$judge->last;
+#			$reasons .= "Vaccine check pending for ".$judge->{first}." ".$judge->{last};
 #		}
 #	}
 
-	my $nats_category = $category->setting("nats_category");
-
 	my $ok;
-	my $dbh = Tab::DBI->db_Main();
 	my %quiz_answers;
 
-	if ($jperson > 0) {
+	if ($judge->{person_id} > 0) {
 
 		my $sth = $dbh->prepare('
 			select
 				pq.id, pq.quiz, pq.completed, pq.approved_by,
-				quiz.approval
+				quiz.approval,
+				quiz.label
 
 			from person_quiz pq, quiz, person
 			where person.id = ?
@@ -44,123 +105,99 @@
 				and pq.quiz = quiz.id
 		');
 
-		$sth->execute($jperson->id);
+		$sth->execute($judge->{person_id});
 		my $answers = $sth->fetchall_hash();
-
 		%quiz_answers = map {$_->{quiz} => $_} @{$answers};
 	}
 
-	my @all_quizzes = Tab::Quiz->search(hidden => 0);
-	my %circuits = map {$_->id => $_} $tourn->circuits;
-	my @quizzes;
+	my $quizref = eval {
+		return JSON::decode_json($judge->{"required_quizzes"});
+	};
 
-	foreach my $quiz (@all_quizzes) {
-		if ($quiz->circuit > 0 && (not defined $circuits{$quiz->circuit})) {
-			next;
+	if ($quizref && $judge->{active}) {
+
+		unless ($quiz_by_id) {
+
+			my $sth = $dbh->prepare('
+				select quiz.id, quiz.label, quiz.approval
+					from quiz
+				where 1=1
+					and quiz.hidden != 1
+			');
+
+			$sth->execute();
+			my $quizzes = $sth->fetchall_hash();
+			%{$quiz_by_id} = map {$_->{id} => $_ } @{$quizzes};
 		}
-		push @quizzes, $quiz;
-	}
 
-	my %quiz_by_id = map {$_->id => $_} @quizzes;
-
-	my $quizref = $category->setting("required_quizzes");
-
-	if ($quizref && $judge->active) {
 		foreach my $quiz_id (@{$quizref}) {
 
-			next unless $quiz_by_id{$quiz_id};
+			next unless $quiz_by_id->{$quiz_id};
 			my $answers = $quiz_answers{$quiz_id};
-
-
 			my $bad = &check_answers($answers);
 
-			Tab::debuglog("Judge $judge quiz $quiz_id answers $answers.  Result $bad");
-
 			if ($bad) {
-				my $quiz = $quiz_by_id{$quiz_id};
+				my $quiz = $quiz_by_id->{$quiz_id};
 				$reasons .= "<br />" if $reasons;
-				$reasons .= $quiz->label." ".$bad;
+				$reasons .= $quiz->{label}." ".$bad;
 			}
 		}
 	}
 
+	if (
+		not defined $judge->{nats_category}
+		|| $judge->{'tab_room'}
+		|| $judge->{'exempt_warnings'}
+	) {
 
-	unless ($nats_category) {
-
-		if ($reasons) {
-			$judge->setting("incomplete", "text", $reasons);
-		} else {
-			$judge->setting("incomplete", 0);
-		}
+		save_reasons($judge, $reasons, $usth, $isth, $dsth);
 		return;
 	}
-
-	if ($judge->setting('tab_room')) {
-		if ($reasons) {
-			$judge->setting("incomplete", "text", $reasons);
-		} else {
-			$judge->setting("incomplete", 0);
-		}
-		return;
-	}
-
-	if ($judge->setting('exempt_warnings')) {
-
-		if ($reasons) {
-			$judge->setting("incomplete", "text", $reasons);
-		} else {
-			$judge->setting("incomplete", 0);
-		}
-		return;
-	}
-
-	if ($judge->active) {
-		$reasons .= "Judge has no day obligation" unless $judge->obligation;
-	}
-
-
-	my $sth = $dbh->prepare('
-		select
-			jpool.id, jpool.name,
-			required_quizzes.value_text quizzes,
-			paradigm_quiz.value paradigm
-		from (jpool, jpool_judge jpj, jpool_setting registrant)
-
-			left join jpool_setting required_quizzes
-				on jpool.id = required_quizzes.jpool
-				and required_quizzes.tag = "required_quizzes"
-
-			left join jpool_setting paradigm_quiz
-				on jpool.id = paradigm_quiz.jpool
-				and paradigm_quiz.tag = "paradigm_quiz"
-
-		where jpj.judge = ?
-			and jpj.jpool = jpool.id
-			and jpool.id = registrant.jpool
-			and registrant.tag = "registrant"
-	');
-
-	$sth->execute($judge->id);
-	my $jpools = $sth->fetchall_hash();
 
 	my $main;
 
-	if ($judge->active) {
+	if ($judge->{active}) {
+
+		$reasons .= "Judge has no day obligation" unless $judge->{obligation} > 0;
+
+		my $sth = $dbh->prepare('
+			select
+				jpool.id, jpool.name,
+				required_quizzes.value_text quizzes,
+				paradigm_quiz.value paradigm
+			from (jpool, jpool_judge jpj, jpool_setting registrant)
+
+				left join jpool_setting required_quizzes
+					on jpool.id = required_quizzes.jpool
+					and required_quizzes.tag = "required_quizzes"
+
+				left join jpool_setting paradigm_quiz
+					on jpool.id = paradigm_quiz.jpool
+					and paradigm_quiz.tag = "paradigm_quiz"
+
+			where jpj.judge = ?
+				and jpj.jpool = jpool.id
+				and jpool.id = registrant.jpool
+				and registrant.tag = "registrant"
+		');
+
+		$sth->execute($judge->{id});
+		my $jpools = $sth->fetchall_hash();
+
 		foreach my $jpool (@{$jpools}) {
 
 			$main++;
 
 			if ($jpool->{paradigm}) {
-
 				my $quiz_id = $jpool->{paradigm};
-				next unless $quiz_by_id{$quiz_id};
+				next unless $quiz_by_id->{$quiz_id};
 				my $answers = $quiz_answers{$quiz_id};
 
 				my $bad = &check_answers($answers);
 				if ($bad) {
-					my $quiz = $quiz_by_id{$quiz_id};
+					my $quiz = $quiz_by_id->{$quiz_id};
 					$reasons .= "<br />" if $reasons;
-					$reasons .= uc($jpool->{name}).": ".$quiz->label." ".$bad;
+					$reasons .= uc($jpool->{name}).": ".$quiz->{label}." ".$bad;
 				}
 			}
 
@@ -171,15 +208,15 @@
 				};
 
 				foreach my $quiz_id (@quizzes) {
-					next unless $quiz_by_id{$quiz_id};
+					next unless $quiz_by_id->{$quiz_id};
 					my $answers = $quiz_answers{$quiz_id};
 					my $bad = &check_answers($answers);
 					if ($bad) {
-						my $quiz = $quiz_by_id{$quiz_id};
+						my $quiz = $quiz_by_id->{$quiz_id};
 						$reasons .= "<br />" if $reasons;
 
-						my $label = $quiz->label;
-						$reasons .= uc($jpool->{name}).": ".$quiz->label." ".$bad;
+						my $label = $quiz->{label};
+						$reasons .= uc($jpool->{name}).": ".$quiz->{label}." ".$bad;
 					}
 				}
 			}
@@ -191,12 +228,13 @@
 		$reasons .= "No main events pool selected";
 	}
 
-	if ($jperson > 0) {
+	if ($judge->{person_id} > 0) {
 
 		my $fyo = $m->comp("/funclib/nsda/check_fyo.mas",
-			person => $jperson->id,
-			nsda   => $jperson->nsda,
-			tourn  => $category->tourn
+			person => $judge->{person_id},
+			nsda   => $judge->{nsda},
+			tourn  => $judge->{tourn_id},
+			year   => substr($judge->{start}, 0, 4)
 		);
 
 		if ($fyo) {
@@ -204,23 +242,17 @@
 			$reasons .= "Ineligible first year out: ".$fyo;
 		}
 
-		unless ($jperson->phone > 0) {
+		unless ($judge->{person_phone} > 2000000000) {
 			$reasons .= "<br />" if $reasons;
 			$reasons .= "Cell phone number required";
 		}
 
 	} else {
-
 		$reasons .= "<br />" if $reasons;
 		$reasons .= "No Tabroom account linked";
 	}
 
-	if ($reasons) {
-		$judge->setting("incomplete", "text", $reasons);
-	} else {
-		$judge->setting("incomplete", 0);
-	}
-
+	save_reasons($judge, $reasons, $usth, $isth, $dsth);
 	return $reasons;
 
 	sub check_answers {
@@ -244,6 +276,25 @@
 			}
 		}
 		return $bad || "not begun";
+	}
+
+	sub save_reasons {
+
+		my ($judge, $reasons, $update_sth, $insert_sth, $delete_sth) = @_;
+
+		if ($reasons) {
+			if ($judge->{incomplete} eq "reasons") {
+				return;
+			} elsif ($judge->{incomplete}) {
+				$update_sth->execute($judge->{id}, $reasons);
+			} else {
+				$insert_sth->execute($judge->{id}, $reasons);
+			}
+		} elsif ($judge->{incomplete}) {
+			$delete_sth->execute($judge->{id});
+		}
+
+		return;
 	}
 
 </%init>
