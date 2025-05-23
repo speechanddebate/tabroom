@@ -1,0 +1,282 @@
+<%args>
+	$entry => undef
+	$tourn => undef
+	$dbh   => undef
+</%args>
+<%init>
+
+	unless ($dbh) {
+		$dbh = Tab::DBI->db_Main();
+	}
+
+	my $limiter;
+
+	if ($tourn) {
+		$limiter = " and event.tourn = ? "
+	} else {
+		$limiter = " and entry.id = ? "
+	}
+
+	my $sth = $dbh->prepare("
+
+		select
+			entry.id, entry.code, entry.name,
+			student.id student_id, student.first student_first, student.last student_last,
+			student.nsda,
+			person.id person_id, person.nsda person_nsda,
+			school.id school_id, school.name school_name,
+			usa_wsdc.value usa_wsdc,
+			ask_for_videos.value ask_for_videos,
+			video_link_tested.value video_link_tested,
+			coach_points.value coach_points,
+			ask_for_titles.value ask_for_titles,
+			title.value title,
+			ask_for_manuscripts.value ask_for_manuscripts,
+			manuscript.value manuscript,
+			ask_for_topics.value ask_for_topics,
+			topic.value topic,
+			ask_for_bibliography.value ask_for_bibliographys,
+			bibliography.value_text bibliography,
+			ask_for_authors.value ask_for_authors,
+			author.value author,
+			publisher.value publisher,
+			publish_date.value publish_date,
+			publish_isbn.value publish_isbn,
+			publish_url.value publish_url,
+			publish_print_date.value_date publish_print_date,
+			status.value status,
+			incomplete_reasons.value_text incomplete_reasons
+
+		from (entry, school, event, entry_student es, student)
+
+			left join person on person.id = student.person
+
+			left join event_setting usa_wsdc
+				on usa_wsdc.event = event.id
+				and usa_wsdc.tag = 'usa_wsdc'
+
+			left join entry_setting coach_points
+				on coach_points.entry = entry.id
+				and coach_points.tag = 'coach_points'
+
+			left join entry_setting video_link_tested
+				on video_link_tested.entry = entry.id
+				and video_link_tested.tag = 'video_link_tested'
+
+			left join event_setting ask_for_videos
+				on ask_for_videos.event = event.id
+				and ask_for_videos.tag = 'ask_for_videos'
+
+			left join event_setting ask_for_titles
+				on ask_for_titles.event = event.id
+				and ask_for_titles.tag = 'ask_for_titles'
+
+			left join entry_setting title
+				on title.entry = entry.id
+				and title.tag = 'title'
+
+			left join event_setting ask_for_manuscripts
+				on ask_for_manuscripts.event = event.id
+				and ask_for_manuscripts.tag = 'ask_for_manuscript'
+
+			left join entry_setting manuscript
+				on manuscript.entry = entry.id
+				and manuscript.tag = 'script_file'
+
+			left join event_setting ask_for_topics
+				on ask_for_topics.event = event.id
+				and ask_for_topics.tag = 'ask_for_topic'
+
+			left join entry_setting topic
+				on topic.entry = entry.id
+				and topic.tag = 'topic'
+
+			left join event_setting ask_for_bibliography
+				on ask_for_bibliography.event = event.id
+				and ask_for_bibliography.tag = 'ask_for_bibliography'
+
+			left join entry_setting bibliography
+				on bibliography.entry = entry.id
+				and bibliography.tag = 'bibliography'
+
+			left join event_setting ask_for_authors
+				on ask_for_authors.event = event.id
+				and ask_for_authors.tag = 'ask_for_authors'
+
+			left join entry_setting author
+				on author.entry = entry.id
+				and author.tag = 'author'
+
+			left join entry_setting publisher
+				on publisher.entry = entry.id
+				and publisher.tag = 'publisher'
+
+			left join entry_setting publish_date
+				on publish_date.entry = entry.id
+				and publish_date.tag = 'publish_date'
+
+			left join entry_setting publish_isbn
+				on publish_isbn.entry = entry.id
+				and publish_isbn.tag = 'publish_isbn'
+
+			left join entry_setting publish_url
+				on publish_url.entry = entry.id
+				and publish_url.tag = 'publish_url'
+
+			left join entry_setting publish_print_date
+				on publish_print_date.entry = entry.id
+				and publish_print_date.tag = 'publish_print_date'
+
+			left join entry_setting incomplete
+				on incomplete.entry = entry.id
+				and incomplete.tag = 'incomplete'
+
+			left join entry_setting status
+				on status.entry = entry.id
+				and status.tag = 'status'
+
+			left join entry_setting incomplete_reasons
+				on incomplete_reasons.entry = entry.id
+				and incomplete_reasons.tag = 'incomplete_reasons'
+
+		where 1=1
+			$limiter
+			and event.id     = entry.event
+			and entry.id     = es.entry
+			and entry.school = school.id
+			and es.student   = student.id
+
+			and not exists (
+				select rj.id
+				from entry_setting rj
+				where rj.entry = entry.id
+				and rj.tag = 'rejected_by'
+			)
+
+		group by student.id
+
+
+	");
+
+	$sth->execute($tourn || $entry);
+
+	my $students = $sth->fetchall_hash();
+	my %entry_reasons;
+	my %notfirst;
+
+	my $clear_sth = $dbh->prepare("
+		delete from entry_setting where entry = ? and tag IN ('incomplete_reasons', 'status')
+	");
+
+	my $insert_sth = $dbh->prepare("
+		insert into entry_setting (tag, entry, value, value_text) values (?, ?, ?, ?)
+	");
+
+	my $update_sth = $dbh->prepare("
+		update entry_setting set value = ? where entry = ? and tag = ?
+	");
+
+	my $count = 1;
+
+	foreach my $student (@{$students}) {
+
+		unless ($count++ % 100) {
+			$m->print("<p>Did $count students</p>");
+			Tab::debuglog("Did $count students");
+			$m->flush_buffer();
+		}
+
+		my $reasons;
+
+		if ($entry_reasons{$student->{id}}) {
+			$reasons = $entry_reasons{$student->{id}}{new};
+		} else {
+			$entry_reasons{$student->{id}}{current} = $student->{incomplete_reasons};
+		}
+
+		unless ($student->{person_id}) {
+			push @{$reasons}, "No linked Tabroom account for ".$student->{student_first}.' '.$student->{student_last};
+		}
+
+		next if ($notfirst{$student->{id}}++);
+
+		unless ($student->{coach_points} || $student->{usa_wsdc}) {
+			push @{$reasons}, "No coach listed for points ";
+		}
+
+		my @piece;
+
+		foreach my $tag ("title", "manuscript", "bibliography", "topic") {
+			if ($student->{"ask_for_".$tag."s"} && (not defined $student->{tag})) {
+				push @piece, $tag;
+			}
+		}
+
+		if ($student->{ask_for_authors}) {
+
+			unless ($student->{"author"}) {
+				push @piece, "author";
+			}
+
+			unless (
+				( $student->{"publisher"}
+				  && $student->{"publish_date"}
+				  && $student->{"publish_isbn"}
+				) || (
+				  $student->{"publish_url"}
+				  && $student->{"publish_print_date"}
+				)
+			) {
+				push @piece, "complete publication data";
+			}
+		}
+
+		if (scalar @piece > 1) {
+			push @{$reasons}, "Still require ".join(', ', @piece);
+		}
+
+		if ($reasons && scalar @{$reasons} > 1) {
+			$entry_reasons{$student->{id}}{new} = $reasons;
+		}
+	}
+
+	foreach my $entry_id (keys %entry_reasons) {
+
+		my $reasons = $entry_reasons{$entry_id}{new};
+		my $current = $entry_reasons{$entry_id}{current};
+
+		if ($reasons && @{$reasons}) {
+			my $string = join(' - ', sort {$a cmp $b} @{$reasons});
+
+			if ($string ne $current) {
+
+				$clear_sth->execute($entry_id);
+				$insert_sth->execute('status', $entry_id, 'incomplete', '');
+				$insert_sth->execute('incomplete_reasons', $entry_id, 'text', $string);
+			}
+		} else {
+			delete $entry_reasons{$entry_id};
+		}
+	}
+
+	my $counter = 1;
+
+	foreach my $student (@{$students}) {
+
+		next if $entry_reasons{$student->{id}};
+		next if $student->{status} eq "complete";
+
+		if ($student->{status}) {
+			$update_sth->execute("complete", $student->{id}, "status");
+		} else {
+			eval {
+				$insert_sth->execute("status", $student->{id}, "compete", "");
+			};
+
+			if ($@) {
+				$update_sth->execute("complete", $student->{id}, "status");
+			}
+		}
+	}
+
+</%init>
