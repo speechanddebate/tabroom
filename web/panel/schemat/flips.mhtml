@@ -1,11 +1,16 @@
 <%args>
+	$dbh
+	$now
 	$tourn
-	$person         => undef
 	$setting_name   => undef
 	$property_name  => undef
 	$property_value => undef
-	$target_id      => undef
-	$related_thing  => 1
+	$flight         => 1
+	$round          => undef
+	$panel_id       => undef
+	$round_id       => undef
+	$person         => undef
+	$perms          => undef
 </%args>
 <%init>
 
@@ -14,37 +19,65 @@
     $m->clear_buffer();
     $r->content_type('application/json');
 
-	my $dbh = Tab::DBI->db_Main();
-	my $now = DateTime->now();
-
-    unless ($target_id) {
-		if ($ARGS{"auto"}) {
-			return "No ID sent for flip target round";
-		}
-
-        $m->print('{ "error": true, "message": "No ID sent for flip target"}');
-        $m->abort();
-    }
-
-	$target_id = int($target_id);
-
-	my $tz = $tourn->tz;
-	$tz = "UTC" unless $tz;
-
 	my $limit;
 	my @panels;
 	my $event;
 	my %event_settings;
 	my $only;
 	my $panel;
-	my $round;
 
 	my %response = ();
 
+	if ($person && $tourn) {
+
+		if ($panel_id) {
+			$panel = Tab::Panel->retrieve($panel_id);
+			$round = $panel->round;
+		} elsif ($round_id) {
+			$round = Tab::Round->retrieve($round_id);
+		}
+
+		$event = $round->event;
+		$tourn = $event->tourn;
+
+		my $ok = $m->comp("/funclib/perms/check.mas",
+			dbh      => $dbh,
+			tourn    => $tourn,
+			person   => $person,
+			perms    => $perms,
+			round_id => $round->id
+		);
+
+		unless ($ok) {
+			$m->comp("/funclib/abort.mas",
+				message => "You do not have access to that function of this tournament"
+			);
+		}
+
+	} elsif ($round && $tourn) {
+
+		$event = $round->event;
+
+		# Autoqueue engage; ordinary POSTS cannot send a viable round object on this path.
+		unless ($event->tourn == $tourn) {
+			return;
+		}
+
+	} else {
+
+		$m->comp("/funclib/abort.mas",
+			message => "You do not have access to that function of this tournament"
+		);
+	}
+
+	my $tz = $tourn->tz;
 
 	if ($property_name eq "reset_flips") {
 
-		$round = Tab::Round->retrieve($target_id);
+		unless ($round) {
+			$round = Tab::Round->retrieve($round_id);
+		}
+
 		$event = $round->event;
 
 		my $delete_sth = $dbh->prepare("
@@ -55,7 +88,7 @@
 				and panel.round = ?
 		");
 
-		$delete_sth->execute(int($target_id));
+		$delete_sth->execute(int($round_id));
 		$delete_sth->finish();
 
 		$delete_sth = $dbh->prepare("
@@ -66,7 +99,7 @@
 				and round.id = ?
 		");
 
-		$delete_sth->execute(int($target_id));
+		$delete_sth->execute(int($round_id));
 		$delete_sth->finish();
 
 		$response{"error"}   = "false";
@@ -74,7 +107,7 @@
 
 	} elsif (index($property_name, "cancel_aq") != -1) {
 
-		$round = Tab::Round->retrieve($target_id);
+		$round = Tab::Round->retrieve($round_id);
 		$event = $round->event;
 		my @setvalues;
 
@@ -84,7 +117,7 @@
 				delete from autoqueue where tag like 'flip%' and round = ?
 			");
 
-			$sth->execute($target_id);
+			$sth->execute($round_id);
 			$sth->finish();
 			$response{"message"} = "All ";
 
@@ -96,14 +129,14 @@
 
 		} else {
 
-			my $round = Tab::Round->retrieve($target_id);
+			my $round = Tab::Round->retrieve($round_id);
 
 			foreach my $flight (1 .. $round->flighted) {
 
 				if ($property_name eq "cancel_aq_".$flight) {
 
 					foreach my $aq (Tab::Autoqueue->search(
-						round => $target_id,
+						round => $round->id,
 						tag   => "flip_".$flight
 					)) {
 						$aq->delete();
@@ -124,7 +157,7 @@
 
 	} elsif (index($property_name, "autoqueue") != -1) {
 
-		$round = Tab::Round->retrieve($target_id);
+		$round = Tab::Round->retrieve($round_id);
 		$event = $round->event;
 
 		my $start_dt;
@@ -176,11 +209,11 @@
 					delete from autoqueue where tag like 'flip%' and round = ?
 				");
 
-				$sth->execute($target_id);
+				$sth->execute($round_id);
 				$sth->finish();
 
 				Tab::Autoqueue->create({
-					round     => $target_id,
+					round     => $round_id,
 					tag       => "flip",
 					active_at => $dt
 				});
@@ -209,16 +242,16 @@
 							delete from autoqueue where tag = 'flip_".$flight."' and round = ?
 						");
 
-						$sth->execute($target_id);
+						$sth->execute($round_id);
 						$sth = $dbh->prepare("
 							delete from autoqueue where tag = 'flip' and round = ?
 						");
 
-						$sth->execute($target_id);
+						$sth->execute($round_id);
 						$sth->finish();
 
 						Tab::Autoqueue->create({
-							round     => $target_id,
+							round     => $round_id,
 							tag       => "flip_".$flight,
 							active_at => $dt
 						});
@@ -257,23 +290,23 @@
 
 	} elsif ($property_name eq "panel") {
 
-		$panel = Tab::Panel->retrieve($target_id);
+		$panel = Tab::Panel->retrieve($panel_id);
 
 		unless ($panel) {
 
 			if ($ARGS{"auto"}) {
-				return "No section found for ID $target_id";
+				return "No section found for ID $panel_id";
 			}
 
 			$response{"error"}   = "true";
-			$response{"message"} = "No section found for ID '.$target_id.'";
+			$response{"message"} = "No section found for ID '.$panel_id.'";
 
 		} else {
 
 			if ($panel->bye) {
 
 				if ($ARGS{"auto"}) {
-					return "Section $target_id is a bye round. No flip done";
+					return "Section $panel_id is a bye round. No flip done";
 				}
 
 				$response{"error"}   = "true";
@@ -292,16 +325,16 @@
 
 	} elsif ($property_name eq "round") {
 
-		$round = Tab::Round->retrieve(int($target_id));
+		$round = Tab::Round->retrieve(int($round_id));
 
 		unless ($round) {
 
 			if ($ARGS{"auto"}) {
-				return "No round found for ID $target_id";
+				return "No round found for ID $round_id";
 			}
 
 			$response{"error"}   = "true";
-			$response{"message"} = "No round found for ID '.$target_id.'";
+			$response{"message"} = "No round found for ID '.$round_id.'";
 
 		} else {
 
@@ -309,9 +342,9 @@
 			%event_settings = $event->all_settings();
 			$limit = " and panel.round = ".$round->id;
 
-			if ($event_settings{"flip_split_flights"} && int($related_thing) > 0) {
-				push @panels, $round->panels(bye => 0, flight => int($related_thing));
-				$limit .= " and panel.flight = ".int($related_thing);
+			if ($event_settings{"flip_split_flights"} && int($flight) > 0) {
+				push @panels, $round->panels(bye => 0, flight => int($flight));
+				$limit .= " and panel.flight = ".int($flight);
 			} else {
 				push @panels, $round->panels(bye => 0);
 			}
@@ -623,7 +656,7 @@
 			$response{"message"} .= "Flips performed for ".$round->realname." of ".$event->abbr;
 
 			if ($setting_name eq "doall"
-				&& (not defined $related_thing)
+				&& (not defined $flight)
 				&& (not defined $ARGS{"auto"})
 			) {
 
@@ -643,7 +676,7 @@
 
 						Tab::ChangeLog->create({
 							tag         => "autoqueue",
-							round       => $target_id,
+							round       => $round_id,
 							tourn       => $tourn,
 							event       => $round->event,
 							description => "Autoqueue set flip to kick off at $now",
@@ -678,7 +711,7 @@
 
 				$m->comp("/funclib/blast_flips.mas",
 					round  => $round,
-					flight => $related_thing,
+					flight => $flight,
 					person => $person
 				);
 
@@ -694,8 +727,8 @@
 		}
 	}
 
-	if ($related_thing) {
-		$response{"message"} .= " flight $related_thing";
+	if ($flight) {
+		$response{"message"} .= " flight $flight";
 	}
 
 	if ($ARGS{"auto"}) {
