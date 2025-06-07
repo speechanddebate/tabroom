@@ -5,10 +5,13 @@
 	$judge_id => undef
 	$chair    => 0
 	$done     => 0
+	$dbh      => undef
 </%args>
 <%init>
 
-	my $dbh = Tab::DBI->db_Main();
+	unless ($dbh) {
+		$dbh = Tab::DBI->db_Main();
+	}
 
 	return unless ($judge || $judge_id) && ($panel || $panel_id);
 
@@ -21,7 +24,7 @@
 	$chair = 1 if $chair > 0;
 	$chair = 0 if $chair < 1;
 
-	Tab::Ballot->set_sql(by_section => "
+	my $sth = $dbh->prepare("
 		select ballot.*
 			from ballot
 		where 1=1
@@ -30,84 +33,93 @@
 		order by ballot.judge DESC
 	");
 
-	my @ballots = Tab::Ballot->search_by_section($panel_id);
+	$sth->execute($panel_id);
+	my $ballots = $sth->fetchall_hash();
+
 	my %taken;
 
-	if (scalar @ballots < 1) {
-
+	if ($judge && scalar @{$ballots} < 1) {
 		Tab::Ballot->create({
 			panel => $panel_id,
 			judge => $judge,
 		});
-
 		return \1;
 	}
 
-	foreach my $ballot (@ballots) {
+	my $ballot_sth = $dbh->prepare("
+		delete ballot.* from ballot where id = ?
+	");
 
-		if ($ballot->judge == $judge_id) {
+	foreach my $ballot (@{$ballots}) {
+
+		if ($ballot->{judge} == $judge_id) {
 			return;
 		}
 
-		if ($ballot->judge > 0) {
-			unless ($taken{$ballot->entry->id}) {
-				$taken{$ballot->entry->id} = $ballot;
+		if ($ballot->{judge} > 0) {
+			unless ($taken{$ballot->{entry}}) {
+				$taken{$ballot->{entry}} = $ballot;
 			}
 		} else {
-			if ($taken{$ballot->entry->id}) {
-				$ballot->delete();
+			if ($taken{$ballot->{entry}}) {
+				$ballot_sth->execute($ballot->{id});
 			} else {
-				$taken{$ballot->entry->id} = $ballot;
+				$taken{$ballot->{entry}} = $ballot;
 			}
 		}
 	}
 
 	my $score_sth = $dbh->prepare("
-		delete score.*
-			from score
-		where ballot = ?
+		delete score.* from score where ballot = ?
 	");
 
-	my $start_sth = $dbh->prepare("
-		update ballot set judge_started = NULL where id = ?
+	my $copy_sth = $dbh->prepare("
+		update ballot
+			set judge_started = NULL, judge = ?, audit = ?, chair = ?
+			where id = ?
+	");
+
+	my $new_ballot = $dbh->prepare("
+		insert into ballot (side, speakerorder, seat, tv, audit, judge, panel, entry, chair)
+			values (?, ?, ?, 0, ?, ?, ?, ?, ?)
 	");
 
 	foreach my $entry (keys %taken) {
 
 		my $ballot = $taken{$entry};
 
-		if ($ballot->judge > 0) {
+		if ($ballot->{judge} > 0) {
 
-			my $new = eval {
-				return $ballot->copy({
-					judge         => $judge_id,
-					chair         => $chair,
-					tv            => 0,
-					audit         => $done
-				});
+			eval {
+				$new_ballot->execute(
+					$ballot->{side},
+					$ballot->{speakerorder},
+					$ballot->{seat},
+					$done,
+					$judge_id,
+					$ballot->{panel},
+					$ballot->{entry},
+					$chair
+				);
 			};
 
 			if ($@) {
 				Tab::debuglog("Error on ballot copy for panel_judgeadd.mas: ".$@);
-				return;
+				return $@;
 			}
-
-			$score_sth->execute($new->id);
-			$start_sth->execute($new->id);
 
 		} else {
 
-			$ballot->judge($judge_id);
-			$ballot->audit($done);
-			$ballot->chair($chair);
-
 			eval {
-				$ballot->update();
+				$copy_sth->execute($judge_id, $done, $chair, $ballot->{id});
 			};
 
-			$score_sth->execute($ballot->id);
-			$start_sth->execute($ballot->id);
+			if ($@) {
+				Tab::debuglog("Error on ballot copy for panel_judgeadd.mas: ".$@);
+				return $@;
+			}
 
+			$score_sth->execute($ballot->{id});
 		}
 	}
 

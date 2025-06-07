@@ -1,0 +1,989 @@
+<%args>
+	$tourn
+	$tourn_settings
+	$person
+	$round_id   => undef
+	$round      => undef
+	$parlis     => undef
+	$num_judges => undef
+	$dbh
+</%args>
+<%init>
+
+	use List::Util qw(shuffle);
+
+	unless ($round) {
+		$round = Tab::Round->retrieve($round_id);
+	}
+
+	unless ($round) {
+		$m->comp(
+			"/funclib/abort.mas",
+			err => "No round found for ID ".$round_id
+		);
+	}
+
+	my $event    = $round->event;
+	my $event_id = $event->id;
+	my $category = $event->category;
+
+	my %round_settings    = $round->all_settings;
+	my %event_settings    = $event->all_settings();
+	my %category_settings = $category->all_settings();
+
+	my $panel_sth = $dbh->prepare("
+		select
+			panel.id, entry.id entry, panel.flight, panel.letter, panel.bracket
+
+		from (panel, ballot, entry)
+
+		where 1=1
+			and panel.round = ?
+			and panel.bye != 1
+			and panel.id = ballot.panel
+			and ballot.bye != 1
+			and ballot.forfeit != 1
+			and ballot.entry = entry.id
+			and entry.active = 1
+		order by panel.bracket DESC, panel.letter
+	");
+
+	$panel_sth->execute($round->id);
+	my $raw_panels = $panel_sth->fetchall_hash();
+	my %panels;
+	my @panel_keys;
+
+	foreach my $rp (@{$raw_panels}) {
+		unless ($panels{$rp->{id}}) {
+		 	$panels{$rp->{id}} = $rp;
+			push @panel_keys, $rp->{id};
+		}
+		$panels{$rp->{id}}{entries}{$rp->{entry}}++;
+	}
+
+	unless ($num_judges) {
+		$num_judges = $round_settings{"num_judges"} || 1;
+		$num_judges = 1 if $parlis == 1;
+		$num_judges++ if $parlis == 3;
+	}
+
+	my $num_flights = $round->flighted || 1;
+
+	unless (
+		$event_settings{'online_mode'} eq "nsda_campus"
+		|| $event_settings{'online_mode'} eq "nsda_campus_observers"
+	) {
+		$num_flights = 1 if $event_settings{"flight_rooms_only"};
+	}
+
+	$m->comp(
+		"/funclib/round_clear_judges.mas",
+		round        => $round,
+		person       => $person,
+		erase_chairs => $parlis,
+	);
+
+	$m->comp("/funclib/round_clean.mas",
+		round  => $round,
+		dbh    => $dbh,
+		person => $person
+	);
+
+	my %panels_by_letter = ();
+	my $last_round;
+
+	if ( ( $parlis == 1 || $parlis == 3 )&& $event->type eq "congress" ) {
+
+		foreach my $oround ($m->comp("/funclib/congress_ties.mas", round => $round)) {
+
+			my $didit;
+
+			foreach my $panel ($oround->panels) {
+				push @{$panels_by_letter{$panel->letter}}, $panel;
+				$didit++;
+			}
+
+			if ($didit) {
+				$m->comp(
+					"/funclib/round_clear_judges.mas",
+					round        => $oround,
+					person       => $person,
+					erase_chairs => $parlis,
+				);
+			}
+
+			$last_round = $oround unless $last_round;
+			$last_round = $oround if $oround->name > $last_round->name;
+		}
+	}
+
+	my $description = "Reassigned the judges in round ".$round->realname." of ".$event->abbr." using judges.mhtml";
+
+	$m->comp("/funclib/log.mas",
+		type        => 'tabbing',
+		event       => $event_id,
+		tourn       => $event->tourn->id,
+		person      => $person,
+		description => $description
+	);
+
+	my %judge_constraints = $m->comp(
+		"/funclib/judge_cannotsee.mas",
+		category => $category,
+		round    => $round
+	);
+
+	my $judge_use = $m->comp("/funclib/judge_use.mas", round_id => $round->id);
+
+	my @jpools = $round->jpools;
+
+	my $jpool_limit = "
+		and jpool_judge.judge = judge.id
+		and jpool_judge.jpool = jpool_round.jpool
+		and jpool_round.round = round.id"
+	if @jpools;
+
+	my $jpool_table = "jpool_judge, jpool_round, " if @jpools;
+
+	my $sth = $dbh->prepare("
+		select
+			judge.id, judge.code, judge.first, judge.last, judge.obligation, judge.hired,
+			school.id school_id,
+			region.id region_id,
+			area.value area,
+			tab_rating.value as tab_rating,
+			diverse.value as diverse,
+			parli.value as parli
+		from (judge, event, round, $jpool_table timeslot)
+
+		left join judge_setting as tab_rating
+			on tab_rating.judge = judge.id
+			and tab_rating.tag = 'tab_rating'
+
+		left join judge_setting as diverse
+			on diverse.judge = judge.id
+			and diverse.tag = 'diverse'
+
+		left join judge_setting as parli
+			on parli.judge = judge.id
+			and parli.tag = 'parli'
+
+		left join school on school.id = judge.school
+		left join region on region.id = school.region
+
+		left join region_setting area
+			on area.region = region.id
+			and area.tag = 'area'
+
+		where judge.category = event.category
+		and judge.active = 1
+		and event.id = round.event
+		and round.timeslot = timeslot.id
+		".$jpool_limit."
+		and round.id = ?
+
+		and not exists (
+			select strike.id from strike
+			where strike.type = 'event'
+			and strike.event = event.id
+			and strike.judge = judge.id
+		)
+
+		and not exists (
+			select strike.id from strike
+			where strike.type = 'time'
+			and strike.judge = judge.id
+			and strike.start < timeslot.end
+			and strike.end > timeslot.start
+		)
+
+		and not exists (
+			select panel.id
+			from panel, ballot, timeslot othertimeslot, round
+			where ballot.judge = judge.id
+			and ballot.panel = panel.id
+			and panel.round = round.id
+			and round.timeslot = othertimeslot.id
+			and othertimeslot.start < timeslot.end
+			and othertimeslot.end > timeslot.start
+		)
+
+		order by tab_rating.value, judge.last
+	");
+
+	$sth->execute($round->id);
+	my $judges = $sth->fetchall_hash();
+	my %judges = map {$_->{id} => $_} @{$judges};
+
+	if ($event->type eq "wudc") {
+
+		my %panel_judges;
+		my %panel_already_judges;
+		my %used_judges;
+
+		foreach my $panel (@panel_keys) {
+
+			%{$panel_judges{$panel->id}} = $m->comp(
+				"/funclib/clean_judges.mas",
+					panel             => $panel,
+					wudc              => "true",
+					autopanel         => 1,
+					event_settings    => \%event_settings,
+					category_settings => \%category_settings,
+			);
+
+			@{$panel_already_judges{$panel->id}} = $m->comp(
+				"/funclib/panel_judges.mas",
+				panel => $panel
+			);
+		}
+
+		my $order_string = $round_settings{"tab_rating_priority"};
+		my @orders = split(/\,/, $order_string);
+
+		unless (
+			$category_settings{"coach_ratings"}
+			|| $category_settings{"tab_ratings"}
+		) {
+			undef @orders;
+		}
+
+		my %used;
+
+		if (@orders) {
+			foreach my $order (@orders) {
+				foreach my $panel (@panel_keys) {
+
+					next unless $panel->bracket == $order;
+					my $judge;
+
+					JUDGE:
+					foreach my $can (keys %{$panel_judges{$panel->id}}) {
+
+						next if $used_judges{$judge};
+
+						unless ($category_settings{"allow_school_panels"}) {
+							if ( $panel_judges{$panel->id}{$can}{"school"}
+								&& $used{"schools"}{$panel->id}{$panel_judges{$panel->id}{$can}{"school"}}
+							) {
+								next;
+							}
+						}
+
+						if ($tourn_settings->{use_regions}
+							&& (not defined $category_settings{"allow_region_panels"})
+						) {
+							if ( $panel_judges{$panel->id}{$can}{"region"}
+								&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+							) {
+								next;
+							}
+						}
+
+						if ($event_settings{"region_judge_forbid"}) {
+							if ( $panel_judges{$panel->id}{$can}{"region"}
+								&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+							) {
+								next;
+							}
+						}
+
+						if ($event_settings{"region_avoid"}) {
+							if ( $panel_judges{$panel->id}{$can}{"region"}
+								&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+							) {
+								next;
+							}
+
+							if ( $panel_judges{$panel->id}{$can}{"area"}
+								&& $used{"areas"}{$panel->id}{$panel_judges{$panel->id}{$can}{"area"}}
+							) {
+								next;
+							}
+						}
+
+						if ($can) {
+							$judge = $can;
+							last JUDGE;
+						}
+					}
+
+					unless ($judge) {
+
+						foreach my $can (keys %{$panel_judges{$panel->id}}) {
+
+							next if $used_judges{$judge};
+
+							unless ($category_settings{"allow_school_panels"}) {
+								if ( $panel_judges{$panel->id}{$can}{"school"}
+									&& $used{"schools"}{$panel->id}{$panel_judges{$panel->id}{$can}{"school"}}
+								) {
+									next;
+								}
+							}
+
+							if ($tourn_settings->{use_regions}
+								&& (not defined $category_settings{"allow_region_panels"})
+							) {
+								if ( $panel_judges{$panel->id}{$can}{"region"}
+									&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+								) {
+									next;
+								}
+							}
+
+							if ($event_settings{"region_judge_forbid"}) {
+								if ( $panel_judges{$panel->id}{$can}{"region"}
+									&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+								) {
+									next;
+								}
+							}
+							if ($can) {
+								$judge = $can;
+								last JUDGE;
+							}
+						}
+					}
+
+					if ($judge) {
+
+						$m->comp("/funclib/panel_judgeadd.mas",
+							dbh      => $dbh,
+							panel_id => $panel->id,
+							judge_id => $judge
+						);
+
+						$used_judges{$judge}++;
+
+						if ($judge && $panel_judges{$panel->id}{$judge}{"school"}) {
+							$used{"schools"}{$panel->id}{$panel_judges{$panel->id}{$judge}{"school"}}++;
+						}
+
+						if ($judge && $panel_judges{$panel->id}{$judge}{"area"}) {
+							$used{"areas"}{$panel->id}{$panel_judges{$panel->id}{$judge}{"area"}}++;
+						}
+
+						if ($judge && $panel_judges{$panel->id}{$judge}{"region"}) {
+							$used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$judge}{"region"}}++;
+						}
+					}
+				}
+
+				@panel_keys = reverse(@panel_keys);
+			}
+
+		} else {
+
+			$num_judges = 3 unless $num_judges;
+			my %chair_done;
+
+			foreach (1 .. $num_judges ) {
+				foreach my $panel (@panel_keys) {
+
+					my $judge;
+
+					JUDGE:
+					foreach my $can (keys %{$panel_judges{$panel->id}}) {
+
+						next if $used_judges{$judge};
+
+						unless ($category_settings{"allow_school_panels"}) {
+							if ( $panel_judges{$panel->id}{$can}{"school"}
+								&& $used{"schools"}{$panel->id}{$panel_judges{$panel->id}{$can}{"school"}}
+							) {
+								next;
+							}
+						}
+
+						if ($tourn_settings->{use_regions}
+							&& (not defined $category_settings{"allow_region_panels"})
+						) {
+							if ( $panel_judges{$panel->id}{$can}{"region"}
+								&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+							) {
+								next;
+							}
+						}
+
+
+						if ($event_settings{"region_judge_forbid"}) {
+							if ( $panel_judges{$panel->id}{$can}{"region"}
+								&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+							) {
+								next;
+							}
+						}
+
+						if ($event_settings{"region_avoid"}) {
+							if ( $panel_judges{$panel->id}{$can}{"region"}
+								&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+							) {
+								next;
+							}
+
+							if ( $panel_judges{$panel->id}{$can}{"area"}
+								&& $used{"areas"}{$panel->id}{$panel_judges{$panel->id}{$can}{"area"}}
+							) {
+								next;
+							}
+						}
+
+						if ($can) {
+							$judge = $can;
+							last JUDGE;
+						}
+					}
+
+					unless ($judge) {
+
+						foreach my $can (keys %{$panel_judges{$panel->id}}) {
+
+							next if $used_judges{$judge};
+
+							unless ($category_settings{"allow_school_panels"}) {
+								if ( $panel_judges{$panel->id}{$can}{"school"}
+									&& $used{"schools"}{$panel->id}{$panel_judges{$panel->id}{$can}{"school"}}
+								) {
+									next;
+								}
+							}
+
+							if ($tourn_settings->{use_regions}
+								&& (not defined $category_settings{"allow_region_panels"})
+							) {
+								if ( $panel_judges{$panel->id}{$can}{"region"}
+									&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+								) {
+									next;
+								}
+							}
+
+							if ($event_settings{"region_judge_forbid"}) {
+								if ( $panel_judges{$panel->id}{$can}{"region"}
+									&& $used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$can}{"region"}}
+								) {
+									next;
+								}
+							}
+							if ($can) {
+								$judge = $can;
+								last JUDGE;
+							}
+						}
+					}
+
+					if ($judge) {
+
+						my $chair = 0;
+
+						if ($event_settings{"auto_chairs"}) {
+							unless ($chair_done{$panel}++) {
+								$chair = 1;
+							}
+						}
+
+						$m->comp("/funclib/panel_judgeadd.mas",
+							dbh      => $dbh,
+							panel_id => $panel->id,
+							judge_id => $judge,
+							chair    => $chair
+						);
+
+						$used_judges{$judge}++;
+
+						if ($judge && $panel_judges{$panel->id}{$judge}{"school"}) {
+							$used{"schools"}{$panel->id}{$panel_judges{$panel->id}{$judge}{"school"}}++;
+						}
+
+						if ($judge && $panel_judges{$panel->id}{$judge}{"area"}) {
+							$used{"areas"}{$panel->id}{$panel_judges{$panel->id}{$judge}{"area"}}++;
+						}
+
+						if ($judge && $panel_judges{$panel->id}{$judge}{"region"}) {
+							$used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$judge}{"region"}}++;
+						}
+					}
+				}
+
+				@panel_keys = reverse(@panel_keys);
+			}
+		}
+
+	} else {
+
+		if (
+			($category_settings{"coach_ratings"} || $category_settings{"tab_ratings"})
+			&& (
+				(not defined $category_settings{"elim_only_ratings"})
+				|| ($round->type ne "prelim")
+			)
+		) {
+
+			my $rating_sth = $dbh->prepare("
+				select
+					judge.id, rating_tier.name, subrt.name, tab_rating.value
+
+				from (judge, round, event)
+
+					left join rating on rating.judge = judge.id and rating.type = 'coach'
+					left join rating_tier on rating_tier.id = rating.rating_tier
+
+					left join rating_subset on rating_subset.id = event.rating_subset
+					left join rating subrating on subrating.rating_subset = rating_subset.id
+						and subrating.judge = judge.id
+						and subrating.type = 'coach'
+
+					left join rating_tier subrt on subrt.id = subrating.rating_tier
+
+					left join judge_setting tab_rating
+						on tab_rating.judge = judge.id
+						and tab_rating.tag = 'tab_rating'
+
+				where round.id = ?
+					and round.event = event.id
+
+			        and exists (
+						select category.id
+						from category
+						where category.id = judge.category
+						and category.tourn = event.tourn
+					)
+
+					and (
+						judge.category = event.category
+						or judge.alt_category = event.category
+						or exists (
+							select jpj.id
+							from jpool_judge jpj, jpool_round jpr
+							where jpj.judge = judge.id
+							and jpj.jpool = jpr.jpool
+							and jpr.round = round.id
+						)
+					)
+			");
+
+			$rating_sth->execute($round->id);
+
+			while (
+				my ( $judge_id, $rating_tier, $better_rating_tier, $tab_rating) = $rating_sth->fetchrow_array()
+			) {
+				$judges{$judge_id}{"rating"} = $tab_rating || $better_rating_tier || $rating_tier;
+			}
+		}
+
+		my %panel_judges = ();
+
+		if ($ARGS{return}) {
+			$m->print("<br />Finding judges for ".scalar @panel_keys." panels");
+			$m->flush_buffer();
+		}
+
+        my %priorities = $m->comp("/funclib/judge_priority.mas",
+			event => $event,
+			nsda  => $tourn_settings->{"nsda_nats"},
+			ncfl  => $tourn_settings->{"ncfl"}
+		);
+
+		my %standby = $m->comp("/funclib/judge_standby.mas", round => $round->id);
+
+		foreach my $priority_id (keys %priorities) {
+			if ($judges{$priority_id}) {
+				$judges{$priority_id}{priority} = $priorities{$priority_id}{"own"} + $priorities{$priority_id}{"strikes"};
+			}
+		}
+
+		foreach my $standby (keys %standby) {
+			delete $judges{$standby};
+		}
+
+		foreach my $panel (@panel_keys) {
+
+			my $panelref = $panels{$panel};
+
+			JUDGE:
+			foreach my $judge_id (keys %judges) {
+
+				foreach my $entry (keys %{$panelref->{entries}}) {
+					next JUDGE if $judge_constraints{$judge_id}{$entry};
+				}
+				$panel_judges{$panel}{$judge_id}++;
+			}
+		}
+
+		my %buddies;
+		my %lf;
+		my %notfirst;
+
+		my $order_string = $round_settings{"tab_rating_priority"};
+		my @orders = split(/\,/, $order_string);
+
+		unless (
+			$category_settings{"coach_ratings"}
+			|| $category_settings{"tab_ratings"}
+		) {
+			undef @orders;
+		}
+
+		my $last_prelim;
+
+		if ($num_flights > 1) {
+
+			if ($round->type eq "highlow") {
+				$sth = $dbh->prepare("
+					select
+						round.id
+					from round
+					where round.event = ?
+						and round.type = 'highlow'
+					order by round.name DESC
+					limit 1
+				");
+				$sth->execute($event->id);
+				($last_prelim) = $sth->fetch();
+			}
+
+			if ($round == $last_prelim) {
+				if (@orders) {
+					my %ranks;
+					my $next = 1;
+
+					foreach my $order (@orders) {
+						next if $ranks{$order};
+						$ranks{$order} = $next++;
+					}
+
+					@panel_keys = sort {
+						$ranks{$a->{bracket}} <=> $ranks{$b->{bracket}}
+					} @panel_keys;
+				}
+			}
+
+			my %flights;
+			my @others = shuffle @panel_keys;
+
+			foreach my $panel_id (@panel_keys) {
+				my $panel = $panels{$panel_id};
+				next if $lf{$panel_id}++;
+				my $count = 1;
+
+				while ( (scalar @others > 0) && ($count < $num_flights)) {
+
+					my $candidate_id = shift @others;
+					my $candidate = $panels{$candidate_id};
+
+					unless ($lf{$candidate_id}) {
+						$count++;
+						$candidate->{flight} = $count;
+						$flights{$count}{$candidate_id}++;
+						push @{$buddies{$panel_id}}, $candidate_id;
+						$lf{$candidate_id}++;
+						$notfirst{$candidate_id}++;
+					}
+				}
+			}
+
+			my $sth = $dbh->prepare('update panel set flight = 1 where round = ?');
+			$sth->execute($round->id);
+
+			foreach my $flight (sort {$a <=> $b} keys %flights) {
+				my $ids;
+				foreach my $id (keys %{$flights{$flight}}) {
+					$ids .= ',' if $ids;
+					$ids .= $id;
+				}
+
+				my $sth = $dbh->prepare('update panel set flight = ? where round = ? and id IN ('.$ids.')');
+				$sth->execute($flight, $round->id);
+			}
+		}
+
+		my %done = ();
+		my %all_judged = ();
+		my %chaired;
+		my %already = ();
+
+		foreach my $tick (1 .. $num_judges) {
+
+			@panel_keys = reverse(@panel_keys);
+
+			if (@orders) {
+
+				my %ranks;
+				my $next = 1;
+
+				foreach my $order (@orders) {
+					next if $ranks{$order};
+					$ranks{$order} = $next++;
+				}
+
+				if ($round == $last_prelim) {
+					@panel_keys = sort { $ranks{$a->{bracket}} <=> $ranks{$b->{bracket}} } @panel_keys;
+				}
+			}
+
+			foreach my $panel (@panel_keys) {
+
+				my $panelref = $panels{$panel};
+				next if $notfirst{$panelref->{id}};
+				my @judges;
+
+				if ($panel_judges{$panelref->{id}}) {
+
+					@judges = sort {
+						$judge_use->{$b}{"left"} <=> $judge_use->{$a}{"left"}
+						|| $judges{$b}{'priority'} <=> $judges{$a}{"priority"}
+						|| $judge_use->{$a}{"judged_already"} <=> $judge_use->{$b}{"judged_already"}
+						|| $judge_use->{$a}{"everything"} <=> $judge_use->{$b}{"everything"}
+					} shuffle(keys %{$panel_judges{$panelref->{id}}});
+
+					my $tick = 1;
+
+					foreach my $flight ($panel, @{$buddies{$panelref->{id}}}) {
+
+						my @cand = @judges;
+						undef @judges;
+
+						foreach my $judge (@cand) {
+							next unless $panel_judges{$flight}{$judge};
+							push @judges, $judge;
+						}
+					}
+
+					unless (
+						$category_settings{"elim_only_ratings"}
+						&& ($round->type eq "prelim"
+							|| $round->type eq "snaked_prelim"
+							|| $round->type eq "highlow"
+						)
+					) {
+						if ($event_settings{"invert_ratings"}) {
+							@judges = sort {
+								length($judges{$b}{rating}) <=> length($judges{$a}{rating})
+								|| $judges{$b}{rating} cmp $judges{$a}{rating}
+							} @judges;
+
+						} else {
+							@judges = sort {
+								length($judges{$a}{rating}) <=> length($judges{$b}{rating})
+								|| $judges{$a}{rating} cmp $judges{$b}{rating}
+							} @judges;
+						}
+					}
+				}
+
+				next if $done{"P-".$panelref->{id}} && $parlis == 1;
+				my $chosen;
+
+				# This sorts the parlis to the bottom; the steps that require
+				# them will go and get them, but then scorers will be drawn
+				# first from non-parlis so as not to absorb them all where not
+				# needed.
+
+				my $counter;
+
+				JUDGE:
+				foreach my $judge (@judges) {
+
+					next if $done{"J-".$judge};
+
+					my $judgeref = $judges{$judge};
+					my $region   = $judgeref->{"region"};
+					my $area     = $judgeref->{"area"};
+					my $school   = $judgeref->{"school"};
+
+					if (not defined $category_settings{"allow_school_panels"}) {
+						if ($school > 0 && $already{'school'}{$panel}{$school}) {
+							next JUDGE;
+						}
+					}
+
+					if ( ($tourn_settings->{use_regions} || $tourn_settings->{"ncfl"})
+						&& (not defined $category_settings{"allow_region_panels"})
+					) {
+						if ($region > 0 && $already{'region'}{$panel}{$region}) {
+							next JUDGE;
+						}
+					}
+
+					if ( ($tourn_settings->{region_areas} || $tourn_settings->{ncfl})
+						&& (not defined $category_settings{"allow_region_panels"})
+						&& ($event_settings{region_avoid})
+					) {
+						if ($area > 0 && $already{'area'}{$panel}{$area}) {
+							next JUDGE;
+						}
+					}
+
+					if ($parlis == 1) {
+
+						if (not defined $judgeref->{"parli"}) {
+							next JUDGE
+						}
+
+						$done{$panelref->{id}}{"parli"}++;
+
+					} elsif ($parlis == 3) {
+						if (
+							(not defined $judgeref->{"parli"})
+							&& (not defined $done{$panelref->{id}}{"parli_done"})
+						) {
+							next JUDGE;
+						}
+					}
+
+					$already{"school"}{$panel}{$school}++ if $school;
+					$already{"region"}{$panel}{$region}++ if $region;
+					$already{"area"}{$panel}{$area}++ if $area;
+
+					$chosen = $judge;
+					last JUDGE;
+				}
+
+				# Loosen some of the regional restrictions if there are no clean judges
+
+				unless ($chosen) {
+					JUDGE:
+					foreach my $judge (@judges) {
+
+						next if $done{"J-".$judge};
+
+						my $judgeref = $judges{$judge};
+						my $region   = $judgeref->{"region"};
+						my $area     = $judgeref->{"area"};
+						my $school   = $judgeref->{"school"};
+
+						if (not defined $category_settings{"allow_school_panels"}) {
+							if ($school > 0 && $already{'school'}{$panel}{$school}) {
+								next JUDGE;
+							}
+						}
+
+						if ( ($tourn_settings->{"ncfl"} || $tourn_settings->{use_regions})
+							&& (not defined $category_settings{"allow_region_panels"})
+						) {
+							if ($region > 0 && $already{'region'}{$panel}{$region}) {
+								next JUDGE;
+							}
+						}
+
+						if ($parlis == 1) {
+
+							if (not defined $judgeref->{"parli"}) {
+								next JUDGE
+							}
+							$done{$panelref->{id}}{"parli"}++;
+
+						} elsif ($parlis == 3) {
+							if (
+								(not defined $judgeref->{"parli"})
+								&& (not defined $done{$panelref->{id}}{"parli_done"})
+							) {
+								next JUDGE;
+							}
+						}
+
+						$already{"school"}{$panel}{$school}++ if $school;
+						$already{"region"}{$panel}{$region}++ if $region;
+						$already{"area"}{$panel}{$area}++ if $area;
+
+						$chosen = $judge;
+						last JUDGE;
+					}
+				}
+
+				my $chair;
+
+				if (
+					($parlis || $event_settings{"auto_chairs"})
+					&& (not defined $chaired{$panel})
+					&& $parlis != 2
+				) {
+
+					if ($event_settings{"auto_chairs"}) {
+						unless ($done{$panelref->{id}}{"chair"}++) {
+							$chair++;
+						}
+					}
+
+					if ($parlis == 1) {
+						$chair++;
+					}
+
+					if ($parlis == 3) {
+						$chair++ if $judges{$chosen}{"parli"}
+							&& (not defined $done{$panelref->{id}}{"parli_done"});
+					}
+
+					$done{$panelref->{id}}{"parli_done"}++;
+				}
+
+				foreach my $flight ($panel, @{$buddies{$panel}}) {
+
+					if ($parlis && $chair) {
+
+						if ($event->type eq "congress") {
+
+							foreach my $ochamber (@{$panels_by_letter{$panels{$flight}{letter}}}) {
+
+								if ($chosen) {
+									my $audited++ if $ochamber->round->id != $last_round->id;
+
+									$m->comp("/funclib/panel_judgeadd.mas",
+										dbh      => $dbh,
+										panel_id => $ochamber->id,
+										judge_id => $chosen,
+										chair    => $chair,
+										done     => $audited
+									);
+								}
+							}
+
+							$done{"P-".$flight->id}++;
+
+						} elsif ($event->type eq "mock_trial") {
+
+							if ($chosen) {
+								$m->comp("/funclib/panel_judgeadd.mas",
+									dbh      => $dbh,
+									panel_id => $flight,
+									judge_id => $chosen,
+									chair    => $chair
+								);
+							}
+						}
+
+					} else {
+
+						$m->comp("/funclib/panel_judgeadd.mas",
+							dbh      => $dbh,
+							panel_id => $flight,
+							judge_id => $chosen,
+							chair    => $chair
+						) if $chosen;
+					}
+
+					$done{"J-".$chosen}++;
+				}
+			}
+		}
+	}
+
+	my $msg = "Judges have been assigned";
+
+	if ($parlis == 1) {
+		if ($tourn_settings->{"mock_trial_registrations"}) {
+			$msg = "Judges have been assigned in all rounds";
+		} else {
+			$msg = "Parliamentarians have been assigned in all rounds";
+		}
+	}
+
+	if ($ARGS{return}) {
+		return $msg;
+		$m->abort();
+	}
+
+	$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&disp=1&msg=$msg");
+
+</%init>

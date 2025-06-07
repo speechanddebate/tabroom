@@ -1,4 +1,5 @@
 <%args>
+	$person
 	$tourn
 	$tourn_settings
 	$perms
@@ -14,15 +15,81 @@
 		perms   => $perms,
 	);
 
-	my @events =  $m->comp("/funclib/perms/events.mas",
+	my %perm_events =  $m->comp("/funclib/perms/events.mas",
 		tourn   => $tourn,
 		perms   => $perms,
+		limited => 1,
 	);
+
+	my $sth = $dbh->prepare("
+
+		select
+			event.id, event.name, event.abbr, event.type,
+			count(distinct round.id) as rounds,
+			count(distinct entry.id) as entries,
+			count(score.id) as scores,
+			min_panel_size.value as min_panel_size,
+			max_panel_size.value as max_panel_size,
+			default_panel_size.value as default_panel_size,
+			online_mode.value as online_mode,
+			supp.value as supp
+
+		from (event)
+
+			left join entry
+				on entry.event = event.id
+				and entry.active = 1
+
+			left join round
+				on round.event = event.id
+				and round.type = 'prelim'
+
+			left join panel
+				on round.id = panel.round
+
+			left join ballot
+				on ballot.panel = panel.id
+
+			left join score
+				on score.ballot = ballot.id
+
+			left join event_setting min_panel_size
+				on min_panel_size.event = event.id
+				and min_panel_size.tag = 'min_panel_size'
+
+			left join event_setting max_panel_size
+				on max_panel_size.event = event.id
+				and max_panel_size.tag = 'max_panel_size'
+
+			left join event_setting default_panel_size
+				on default_panel_size.event = event.id
+				and default_panel_size.tag = 'default_panel_size'
+
+			left join event_setting online_mode
+				on online_mode.event = event.id
+				and online_mode.tag = 'online_mode'
+
+			left join event_setting supp
+				on supp.event = event.id
+				and supp.tag = 'supp'
+
+		where 1=1
+			and event.tourn = ?
+			and event.type != 'attendee'
+
+		group by event.id
+
+		order by event.type desc, supp.id, event.abbr
+	");
+
+	$sth->execute($tourn->id);
+	my $events = $sth->fetchall_hash();
 
 </%init>
 
 	<& "/funclib/tablesorter.mas",
-		table => "panels"
+		table     => "panels",
+		nobuttons => 1,
 	&>
 
 	<& "menu.mas",
@@ -40,35 +107,82 @@
 			} else {
 				$(`.${target}`).prop('checked', 1);
 			}
+
+			checkAll();
 		};
+
+		const showOption = (panelchoice) => {
+			const panelCount = $(panelchoice).val();
+			const eventId = $(panelchoice).attr('event_id');
+
+			$(`.num_panels_${ eventId }`).addClass('hidden');
+			$(`#num_panels_${ eventId }_${panelCount}`).removeClass('hidden');
+			$(`#num_panels_${ eventId }_value`).text(panelCount);
+		};
+
+		const ableCheck = (doBox) => {
+			const enabled = $(doBox).prop('checked');
+			const eventId = $(doBox).attr('event_id');
+
+			if (enabled) {
+				$(`.element_${ eventId } `).attr('disabled', false);
+				$(`.element_${ eventId } `).val(1);
+				$(`#row_${ eventId } `).removeClass('italic');
+				$(`#row_${ eventId } `).removeClass('graytext');
+			} else {
+				$(`.element_${ eventId } `).attr('disabled', true);
+				$(`.element_${ eventId } `).val(0);
+				$(`#row_${ eventId } `).addClass('graytext');
+				$(`#row_${ eventId } `).addClass('italic');
+			}
+		}
+
+		const checkAll = () => {
+			$(`.dobox`).each( (i, item) => {
+				ableCheck(item);
+			});
+
+			$(`.ranges`).each( (i, item) => {
+				showOption(item);
+			});
+		}
+
+		$(document).ready( () => {
+			checkAll();
+		});
 
 	</script>
 
 	<div class="main">
 
 		<div class='flexrow full'>
-			<span class="twofifths">
-				<h4>Panel All Prelims/Presets</h4>
+			<span class="twofifths grow">
+				<h4>Mass Section</h4>
 			</span>
 
-			<span class="fifth smallish">
+			<span class="fifth smallish rightalign">
 				Toggle All Do
 				<a
 					class   = "buttonwhite bluetext fa fa-lg fa-cog"
 					onClick = "toggleBoxes('dobox');"
 				></a>
 			</span>
-			<span class="fifth smallish">
+%			if ($person->site_admin) {
+				<span class="fifth smallish rightalign">
+					Toggle All Judges
+					<a
+						class   = "buttonwhite greentext fa fa-lg fa-gavel"
+						onClick = "toggleBoxes('judgebox');"
+					></a>
+				</span>
+%			}
+			<span class="fifth smallish rightalign">
 				Toggle All Rooms
 				<a
 					class   = "buttonwhite orangetext fa fa-lg fa-caret-square-o-up"
 					onClick = "toggleBoxes('roombox');"
 				></a>
 			</span>
-			<span
-				class = "fifth rightalign"
-				id    = "panels_buttonarea"
-			></span>
 		</div>
 
 		<form
@@ -105,7 +219,11 @@
 					</th>
 
 					<th class="smaller">
-						Number of Sections/Chambers
+						Number of Sections
+					</th>
+
+					<th class="smaller">
+						Chosen
 					</th>
 
 %					unless ($tourn_settings->{"nsda_district"}) {
@@ -121,6 +239,12 @@
 						Do?
 					</th>
 
+%					if ($person->site_admin) {
+						<th class="smaller">
+							Judge
+						</th>
+%					}
+
 					<th class="smaller">
 						Room
 					</th>
@@ -131,32 +255,24 @@
 			<tbody>
 <%perl>
 
-			Tab::Round->set_sql(has_scores => "
-				select round.*
-					from round, panel, ballot, score
-				where round.event = ?
-					and round.id = panel.round
-					and panel.id = ballot.panel
-					and score.ballot = ballot.id
-			");
-
 			my $last_type;
 
 			EVENT:
-			foreach my $event (@events) {
+			foreach my $event (@{$events}) {
 
-				next if $event->type eq "attendee";
+				next unless $perm_events{$event->{id}};
+				next unless $event->{entries};
 
-				if (Tab::Round->search_has_scores($event->id)) {
+				if ($event->{scores}) {
 </%perl>
 					<tr>
 						<td class="smaller">
-							<% $event->abbr %>
+							<% $event->{abbr} %>
 						</td>
 
 						<td
-							class="centeralign semibold graytext smaller padsetting"
-							colspan="7"
+							class   = "centeralign semibold graytext smaller padsetting"
+							colspan = "8"
 						>
 							This event has rounds with results entered and may not be mass re-sectioned.
 						</td>
@@ -165,136 +281,141 @@
 					next EVENT;
 				}
 
-				my $minpanelsize = $event->setting("min_panel_size");
-				$minpanelsize = 5 unless $minpanelsize;
+				my $minpanelsize = $event->{"min_panel_size"} || 5;
+				my $maxpanelsize = $event->{"max_panel_size"} || 8;
+				my $defaultpanelsize = $event->{"default_panel_size"} || 6;
 
-				my $maxpanelsize = $event->setting("max_panel_size");
-				$maxpanelsize = 8 unless $maxpanelsize;
-
-				my $defaultpanelsize = $event->setting("default_panel_size");
-				$defaultpanelsize = 6 unless $defaultpanelsize;
-
-
-				next unless $event->entries;
-				$last_type = $event->type unless $last_type;
-
-				my $campus = $event->setting("online_mode");
 				my $online;
 
-				if ($campus eq "nsda_campus" || $campus eq "nsda_campus_observers") {
+				if ($event->{online_mode} eq "nsda_campus"
+					|| $event->{online_mode} eq "nsda_campus_observers"
+				) {
 					$online++;
 				}
 
-				if ($event->type eq "speech") {
+				$last_type = $event->{type} unless $last_type;
 
-			   		my $num_competitors = scalar $event->entries( active => 1 );
+				if ($event->{type} eq "speech" || $event->{type} eq "congress") {
 
-					my $max_panel_number = ceil($num_competitors / $minpanelsize);
-    				my $min_panel_number = ceil($num_competitors / $maxpanelsize);
+					my $max_panel_number = ceil($event->{entries} / $minpanelsize);
+    				my $min_panel_number = ceil($event->{entries} / $maxpanelsize);
 
-					$defaultpanelsize = ceil($num_competitors / $min_panel_number)
-							if ($num_competitors / $minpanelsize) < $min_panel_number;
+					if (($event->{entries} / $minpanelsize) < $min_panel_number) {
+						$defaultpanelsize = ceil($event->{entries} / $min_panel_number);
+					}
 
-					$defaultpanelsize = ceil($num_competitors / $min_panel_number)
-						if $min_panel_number &&
-							(($num_competitors / $min_panel_number) < $min_panel_number);
+					if ($min_panel_number &&
+							(($event->{entries} / $min_panel_number) < $min_panel_number)) {
+						$defaultpanelsize = ceil($event->{entries} / $min_panel_number);
+					}
 
 					$defaultpanelsize = $minpanelsize if $defaultpanelsize < $minpanelsize;
 					$defaultpanelsize = $minpanelsize unless $defaultpanelsize;
-					$defaultpanelsize = $num_competitors if $defaultpanelsize > $num_competitors;
+					$defaultpanelsize = $event->{entries} if $defaultpanelsize > $event->{entries};
 
 					$min_panel_number = 1 if $min_panel_number < 1;
 					$max_panel_number = 1 if $max_panel_number < 1;
+
+					my $default_panel_count = ceil($event->{entries}/$defaultpanelsize);
 </%perl>
 
-%					if ($last_type && $last_type ne $event->type) {
-						<tr class="bluebordertop smaller">
-%						$last_type = $event->type;
+%					if ($last_type && $last_type ne $event->{type}) {
+						<tr class="bluebordertop smaller" id="row_<% $event->{id} %>">
+%						$last_type = $event->{type};
 %					} else {
-						<tr class="smaller">
+						<tr class="smaller" id="row_<% $event->{id} %>">
 %					}
 
 						<td>
-							<% $event->abbr %>
+							<% $event->{abbr} %>
 						</td>
 
 						<td class="centeralign">
-							<% $num_competitors %>
+							<% $event->{entries} %>
 						</td>
-
 
 						<td class="centeralign">
-							<% scalar $event->rounds( type => "prelim" )%>
+							<% $event->{rounds} %>
 						</td>
 
-						<td class="nospace">
-							<div class="full flexrow wrap marno">
-<%perl>
-								my $last_panel_size;
+						<td class="nospace" style="width: 444px;">
+							<div class="full nospace flexrow">
+								<span class="twenty centeralign">
+									<% $min_panel_number %>
+								</span>
 
-								foreach my $num_panels ($min_panel_number .. $max_panel_number) {
+								<span class="fourfifths nospace">
+									<input
+										type     = "range"
+										class    = "full ranges range_<% $event->{id} %> element_<% $event->{id} %>"
+										event_id = "<% $event->{id} %>"
+										name     = "num_panels_<% $event->{id} %>"
+										id       = "num_panels_<% $event->{id} %>"
+										min      = "<% $min_panel_number %>"
+										max      = "<% $max_panel_number %>"
+										value    = "<% $default_panel_count %>"
+										step     = "1"
+										onInput = "showOption(this);"
+									/>
+								</span>
 
-									next unless $num_panels > 0;
-
-									my $panel_size = ceil($num_competitors/$num_panels);
-									my $min_panel_size = floor($num_competitors/$num_panels);
-
-									my $competitors_if_panels_full = $num_panels * $panel_size;
-									my $num_short_panels = $competitors_if_panels_full - $num_competitors;
-									my $num_full_panels = $num_panels - $num_short_panels;
-									next if $num_short_panels < 0 or $num_full_panels <= 0;
-
-									$defaultpanelsize = $panel_size
-										if ($last_panel_size != $defaultpanelsize
-											&& $panel_size <= $defaultpanelsize
-										);
-
-									$last_panel_size = $panel_size;
-</%perl>
-									<span class="sixth hover marno centeralign nospace">
-										<label for="num_panels_<% $event->id %>_<% $num_panels %>">
-											<span class='quarter rightalign nospace'>
-												<input
-													type  = "radio"
-													name  = "num_panels_<% $event->id %>"
-													id    = "num_panels_<% $event->id %>_<% $num_panels %>"
-													value = "<% $num_panels %>"
-													<% ($panel_size == $defaultpanelsize) ? 'checked' : '' %>
-												>
-											</span>
-											<span class="threequarters leftalign padleft nowrap nospace">
-												<div class='full flexrow nospace'>
-													<span class='third nospace'>
-														<% $num_full_panels %>
-													</span>
-													<span class="twothirds nospace">
-														of <% $panel_size %>
-													</span>
-												</div>
-
-%												if ($num_short_panels) {
-												<div class='full flexrow nospace'>
-													<span class='third nospace'>
-														<% $num_short_panels %>
-													</span>
-													<span class="twothirds nospace">
-														of <% $min_panel_size %>
-													</span>
-												</div>
-%												}
-											</span>
-										</label>
-									</span>
-%								}
+								<span class="twenty centeralign">
+									<% $max_panel_number %>
+								</span>
+								<span
+									class = "tenth centeralign semibold bluetext "
+									id    = "num_panels_<% $event->{id} %>_value"
+								><% $default_panel_count %></span>
 							</div>
+						</td>
+
+						<td class="nospace options">
+<%perl>
+							foreach my $num_panels ($min_panel_number .. $max_panel_number) {
+
+								next unless $num_panels > 0;
+
+								my $panel_size = ceil($event->{entries}/$num_panels);
+								my $min_panel_size = floor($event->{entries}/$num_panels);
+
+								my $competitors_if_panels_full = $num_panels * $panel_size;
+								my $num_short_panels = $competitors_if_panels_full - $event->{entries};
+								my $num_full_panels = $num_panels - $num_short_panels;
+								next if $num_short_panels < 0 or $num_full_panels <= 0;
+</%perl>
+								<div
+									class = 'centeralign num_panels_<% $event->{id} %> <% $default_panel_count == $num_panels ? "" : "hidden" %>'
+									id    = "num_panels_<% $event->{id} %>_<% $num_panels %>"
+								>
+									<div class='full flexrow nospace padvertless'>
+										<span class="twofifths rightalign padright nospace">
+											<% $num_full_panels %>
+										</span>
+										<span class="threefifths nospace padleft leftalign">
+											of <% $panel_size %>
+										</span>
+									</div>
+
+%									if ($num_short_panels) {
+										<div class='full nospace flexrow marbottomless'>
+											<span class="twofifths rightalign padright nospace">
+												<% $num_short_panels %>
+											</span>
+											<span class="threefifths nospace padleft leftalign">
+												of <% $min_panel_size %>
+											</span>
+										</div>
+%									}
+								</div>
+%							}
 						</td>
 
 %						unless ($tourn_settings->{"nsda_district"}) {
 							<td class="centeralign nospace">
 								<input
 									type = "number"
-									name = "num_panels_override_<% $event->id %>"
-									id   = "num_panels_override_<% $event->id %>"
+									name = "num_panels_override_<% $event->{id} %>"
+									id   = "num_panels_override_<% $event->{id} %>"
 									min  = "0"
 									max  = "999"
 								>
@@ -302,33 +423,51 @@
 %						}
 
 						<td class="centeralign nospace">
-							<label for="do_<% $event->id %>">
+							<label for="do_<% $event->{id} %>">
 								<span class="button hover padmuchmore">
 									<input
-										type  = "checkbox"
-										class = "dobox"
-										id    = "do_<% $event->id %>"
-										name  = "do_<% $event->id %>"
-										value = "1"
+										type     = "checkbox"
+										class    = "dobox"
+										event_id = "<% $event->{id} %>"
+										id       = "do_<% $event->{id} %>"
+										name     = "do_<% $event->{id} %>"
+										value    = "1"
+										onChange = "ableCheck(this);"
 										checked
 									>
 								</span>
 							</label>
 						</td>
 
-						<td class="centeralign nospace">
-%							if ($online) {
-								<div class="full smallish">
-									Online
-								</div>
-%							} else {
-								<label for="room_<% $event->id %>">
+%						if ($person->site_admin) {
+							<td class="centeralign nospace">
+								<label for="judge_<% $event->{id} %>">
 									<span class="button hover padmuchmore">
 										<input
 											type  = "checkbox"
-											class = "roombox"
-											id    = "room_<% $event->id %>"
-											name  = "room_<% $event->id %>"
+											class = "judgebox element_<% $event->{id} %>"
+											id    = "judge_<% $event->{id} %>"
+											name  = "judge_<% $event->{id} %>"
+											value = "1"
+										>
+									</span>
+								</label>
+							</td>
+%						}
+
+						<td class="centeralign nospace">
+%							if ($online) {
+								<div class="full smallish">
+									<% $event->{online_mode} %>
+								</div>
+%							} else {
+								<label for="room_<% $event->{id} %>">
+									<span class="button hover padmuchmore">
+										<input
+											type  = "checkbox"
+											class = "roombox element_<% $event->{id} %>"
+											id    = "room_<% $event->{id} %>"
+											name  = "room_<% $event->{id} %>"
 											value = "1"
 											checked
 										>
@@ -336,160 +475,70 @@
 								</label>
 %							}
 						</td>
-
-					</tr>
-<%perl>
-
-				} elsif ($event->type eq "congress") {
-
-			   		my $num_competitors = scalar $event->entries( active => 1 );
-
-    				my $max_panel_number = ceil($num_competitors / $minpanelsize);
-	    			my $min_panel_number = ceil($num_competitors / $maxpanelsize);
-
-					$defaultpanelsize = ceil($num_competitors / $min_panel_number)
-						if ($num_competitors / $minpanelsize) < $min_panel_number;
-
-					if ($last_type ne $event->type) {
-</%perl>
-						<tr class="bluebordertop">
-%						$last_type = $event->type;
-%					} else {
-						<tr>
-%					}
-						<td class="smaller">
-							<% $event->abbr %>
-						</td>
-
-						<td class="smaller centeralign">
-							<% $num_competitors %>
-						</td>
-
-						<td class="centeralign smaller">
-							<% scalar $event->rounds( type => "prelim" )%>
-						</td>
-
-						<td class="smaller nospace">
-<%perl>
-							foreach my $num_panels ($min_panel_number .. $max_panel_number) {
-
-								next unless $num_panels > 0;
-								my $panel_size = ceil($num_competitors/$num_panels);
-								my $competitors_if_panels_full = $num_panels * $panel_size;
-								my $num_short_panels = $competitors_if_panels_full - $num_competitors;
-								my $num_full_panels = $num_panels - $num_short_panels;
-								next if $num_short_panels < 0 or $num_full_panels <= 0;
-</%perl>
-								<label for="num_panels_<% $event->id %>_<% $num_panels %>">
-									<span class="hover centeralign marvertno padvertless" style="min-width: 5em;">
-										<input
-											class = "marvertno padvertno"
-											type  = "radio"
-											name  = "num_panels_<% $event->id %>"
-											id    = "num_panels_<% $event->id %>_<% $num_panels %>"
-											value = " <% $num_panels %> "
-											<% ($panel_size == $defaultpanelsize) ? 'checked' : '' %>
-										><% $num_panels %>
-									</span>
-								</label>
-%							}
-						</td>
-
-						<td class="centeralign nospace padleft padright">
-							<input
-								type = "number"
-								name = "num_panels_override_<% $event->id %>"
-								id   = "num_panels_override_<% $event->id %>"
-								min  = "0"
-								max  = "999"
-							>
-						</td>
-
-						<td align="center">
-							<input
-								type  = "checkbox"
-								class = "dobox"
-								name  = "do_<% $event->id %>"
-								value = "1"
-								checked
-							>
-						</td>
-
-						<td align="center">
-							<input
-								type  = "checkbox"
-								class = "roombox"
-								name  = "room_<% $event->id %>"
-								value = "1"
-								checked
-							>
-						</td>
-
 					</tr>
 <%perl>
 				} else {
 
 					next EVENT;
-			   		my $num_competitors = scalar $event->entries( active => 1 );
 
-					if ($last_type ne $event->type) {
+					if ($last_type ne $event->{type}) {
 </%perl>
 						<tr class="bluebordertop">
-%						$last_type = $event->type;
+%						$last_type = $event->{type};
 %					} else {
 						<tr>
 %					}
 
 						<td class="smaller">
-							<% $event->abbr %>
+							<% $event->{abbr} %>
 						</td>
 
 						<td class="centeralign smaller">
-							<% $num_competitors %>
+							<% $event->{entries} %>
 						</td>
 
 						<td class="centeralign smaller">
-							<% scalar $event->rounds( type => "prelim" )%>
+							<% $event->{rounds} %>
 						</td>
 
 						<td class="smaller">
 							<input
 								type  = "radio"
-								name  = "num_panels_<% $event->id %>"
+								name  = "num_panels_<% $event->{id} %>"
 								value = "1"
-								id    = "<% $event->id %>_1"
+								id    = "<% $event->{id} %>_1"
 							>
-								<label for="<% $event->id %>_1">1 Flt</label>
+								<label for="<% $event->{id} %>_1">1 Flt</label>
 
 							<input
 								type  = "radio"
-								name  = "num_panels_<% $event->id %>"
+								name  = "num_panels_<% $event->{id} %>"
 								value = "2"
-								id    = "<% $event->id %>_2"
+								id    = "<% $event->{id} %>_2"
 							>
-								<label for="<% $event->id %>_2">2 Flt</label>
+								<label for="<% $event->{id} %>_2">2 Flt</label>
 
 							<input
 								type  = "radio"
-								name  = "num_panels_<% $event->id %>"
+								name  = "num_panels_<% $event->{id} %>"
 								value = "3"
-								id    = "<% $event->id %>_3"
+								id    = "<% $event->{id} %>_3"
 							>
-								<label for="<% $event->id %>_3">Fill Rooms</label>
+								<label for="<% $event->{id} %>_3">Fill Rooms</label>
 
 							<input
 								type  = "radio"
-								name  = "num_panels_<% $event->id %>"
+								name  = "num_panels_<% $event->{id} %>"
 								value = "4"
-								id    = "<% $event->id %>_4"
+								id    = "<% $event->{id} %>_4"
 							>
-								<label for="<% $event->id %>_4">Best Prefs</label>
+								<label for="<% $event->{id} %>_4">Best Prefs</label>
 						</td>
 
 						<td align="center">
 							<input
 								type  = "checkbox"
-								name  = "do_<% $event->id %>"
+								name  = "do_<% $event->{id} %>"
 								value = "1"
 								checked
 							>
@@ -498,7 +547,7 @@
 						<td align="center">
 							<input
 								type  = "checkbox"
-								name  = "room_<% $event->id %>"
+								name  = "room_<% $event->{id} %>"
 								value = "1"
 								checked
 							>
