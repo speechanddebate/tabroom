@@ -1,0 +1,142 @@
+<%args>
+	$dbh
+	$tourn
+	$jpool_id
+</%args>
+<%init>
+
+	my $limit;
+	my $msg;
+
+	foreach my $event ($tourn->events) {
+
+		my $round_sth = $dbh->prepare("
+			select
+				round.name, round.site, round.timeslot, event.category, event.abbr
+			from (round, event)
+			where 1=1
+				and round.event = ?
+				and round.event = event.id
+		");
+
+		$round_sth->execute($event->id);
+		my $rounds = $round_sth->fetchall_hash();
+
+		my $misplaced_sth = $dbh->prepare("
+			select jpool.*,
+				timeslot.id timeslot_id, timeslot.name timeslot_name,
+				category.id category_id, category.abbr
+
+			from (jpool, jpool_setting standby_timeslot, category)
+				left join timeslot on timeslot.id = standby_timeslot.value
+			where 1=1
+				and jpool.site = ?
+				and jpool.category != ?
+				and jpool.category = category.id
+				and jpool.id = standby_timeslot.jpool
+				and standby_timeslot.tag = 'standby_timeslot'
+				and standby_timeslot.value = ?
+		");
+
+		my $real_timeslot_sth = $dbh->prepare("
+			select timeslot.id, timeslot.name, timeslot.tourn
+			from (timeslot, category)
+			where 1=1
+				and timeslot.name = ?
+				and timeslot.tourn = category.tourn
+				and category.id = ?
+		");
+
+		my $update_sth = $dbh->prepare("
+			update jpool_setting standby_timeslot
+				set standby_timeslot.value = ?
+				where standby_timeslot.jpool = ?
+				and standby_timeslot.tag = 'standby_timeslot'
+		");
+
+		my $remove_sth = $dbh->prepare("
+			delete * from jpool_setting
+				where standby_timeslot.jpool = ?
+				and standby_timeslot.tag = 'standby_timeslot'
+		");
+
+		my $create_sth = $dbh->prepare("
+			insert into jpool (name, category, site) values (?, ?, ?)
+		");
+
+		my $settings_sth = $dbh->prepare("
+			select * from jpool_setting where jpool = ?
+		");
+
+		my $make_setting_sth = $dbh->prepare("
+			insert into jpool_setting (jpool, tag, value, value_text)
+				values (?, ?, ?, ?)
+		");
+
+		ROUND:
+		foreach my $round (@{$rounds}) {
+
+			$misplaced_sth->execute($round->{site}, $round->{category}, $round->{timeslot});
+			my $misplaced = $misplaced_sth->fetch_hash();
+			Tab::debuglog("Round is ".$round->{id}." ".$round->{name}." event ".$round->{abbr}." site ".$round->{site});
+			Tab::debuglog("Misplaced found is ".$misplaced->{id}." ".$misplaced->{name}." ".$misplaced->{category});
+
+			if ($misplaced && $misplaced->{id}) {
+
+				$real_timeslot_sth->execute($misplaced->{timeslot_name}, $misplaced->{category});
+				my $real_timeslot = $real_timeslot_sth->fetch_hash();
+
+				if ($real_timeslot && $real_timeslot->{id}) {
+
+					Tab::debuglog("Round actually belongs to ".$real_timeslot->{id}." ".$real_timeslot->{name}." tourn ".$real_timeslot->{tourn});
+					$update_sth->execute($real_timeslot->{id}, $misplaced->{id});
+
+					my $clone = Tab::JPool->create({
+						name     => $misplaced->{name},
+						category => $round->{category},
+						site     => $round->{site},
+					});
+
+					Tab::debuglog("Clone ".$clone->id." ".$clone->name." now created ");
+
+					$settings_sth->execute($misplaced->{id});
+					my $settings = $settings_sth->fetchall_hash();
+
+					foreach my $setting (@{$settings}) {
+
+						Tab::debuglog("Transferring setting ".$setting->{tag}." ".$setting->{value}." ".$setting->{value_text}." to clone ");
+
+						if ($setting->{tag} eq "standby_timeslot") {
+
+							$make_setting_sth->execute(
+								$clone->id,
+								$setting->{tag},
+								$round->{timeslot},
+								$setting->{value_text},
+							);
+
+						} else {
+
+							$make_setting_sth->execute(
+								$clone->id,
+								$setting->{tag},
+								$setting->{value},
+								$setting->{value_text},
+							);
+						}
+					}
+					$msg .= "Translated displaced pool ".$misplaced->{id}." ".$misplaced->{name}." to actual ".$clone->id;
+				} else {
+					$remove_sth->execute($misplaced->{id});
+					$msg .= "Misplaced timeslot removed, but no destination timeslot was found so no copy was done.";
+				}
+			}
+
+			$msg .= "Finished ".($round->{label} || "Round ".$round->{name});
+		}
+	}
+
+	return $msg;
+	$m->abort();
+
+</%init>
