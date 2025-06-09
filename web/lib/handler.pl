@@ -162,6 +162,14 @@ sub handler {
 		);
  	}
 
+    my $origin = $r->headers_in->{'Origin'};
+
+    if ($origin && $origin =~ m{^https?://[a-zA-Z0-9.-]+(:\d+)?$}) {
+        $r->headers_out->set('Access-Control-Allow-Origin' => $origin);
+        $r->headers_out->set('Access-Control-Allow-Credentials' => 'true');
+        $r->headers_out->set('Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS');
+    }
+    
 	my $return = eval {
 		return $ah->handle_request($r);
 	};
