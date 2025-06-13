@@ -305,7 +305,7 @@
 					alertify.alert(data.responseText);
 				}
 
-				fixVisual;
+				fixVisual();
 				return;
 			},
 
