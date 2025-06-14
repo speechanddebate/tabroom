@@ -782,9 +782,76 @@
 				. $entry->code. " is scheduled twice in the same round ". $round_realname ."</p>";
 		}
 
-
 		#MEETING OWN DISTRICT
 		if ($tourn_settings->{"nsda_nats"}) {
+
+			my $district_sth = $dbh->prepare("
+				select entry.id, entry.code, entry.name,
+					panel.letter, panel.id panel_id,
+					district.id as district_id, district.name as district_name, district.code as district_code
+
+				from (entry, ballot, panel, round)
+
+					left join school on entry.school = school.id
+					left join district on district.id = school.district
+
+				where 1=1
+					and entry.id = ballot.entry
+					and ballot.panel = panel.id
+					and panel.round = round.id
+					and round.id = ?
+					and round.type != 'final'
+				group by entry.id
+				order by panel.id, district.id
+			");
+
+			my %edone = ();
+			$district_sth->execute($round->id);
+
+			my $entries = $district_sth->fetchall_hash();
+
+			my %districts;
+			my %sections;
+			my %district_totals;
+
+			foreach my $entry (@{$entries}) {
+
+				unless ($districts{$entry->{district_id}}) {
+					$districts{$entry->{district_id}} = ({
+						name => $entry->{district_name},
+						code => $entry->{district_code},
+					});
+				}
+
+				if ($entry->{district_id}) {
+					$district_totals{$entry->{district_id}}{$entry->{letter}}++;
+					$districts{$entry->{district_id}}{"total"}++;
+					$sections{$entry->{letter}}++;
+				}
+			}
+
+			my $num_sections = scalar(keys %sections);
+
+			foreach my $district_id (keys %districts) {
+
+				my $district = $districts{$district_id};
+				my $num_entries = $districts{$district_id}{total};
+
+				if ($num_sections > $num_entries) {
+
+					foreach my $letter (keys %{$district_totals{$district_id}}) {
+
+						if ($district_totals{$district_id}{$letter} > 1) {
+							$problems{"same_district_sections"} .= '<p class="warning padless marno">';
+							$problems{"same_district_sections"} .= "$round_realname Section $letter has ";
+							$problems{"same_district_sections"} .= $district_totals{$district_id}{$letter}." ";
+							$problems{"same_district_sections"} .= "entries from district ".$district->{code}."</p>";
+						}
+					}
+				}
+			}
+
+
 
 			$tags{"same_district_sections"} = "Entry: same district hits";
 			Tab::Entry->columns("TEMP", "distname");
@@ -819,6 +886,7 @@
 			}
 
 			if ($event_type eq "congress") {
+
                 if ($tourn_settings->{'district_regions'} ) {
 
 					$tags{"same_district_regions"} = "Entry: same metro regional hits";
@@ -849,19 +917,26 @@
 					my %counter;
 					my $result_refs = $dr_sth->fetchall_hash();
 
+					my %done;
 					my %tourn_regions = map {$_->id => $_->code} $tourn->regions;
 
 					foreach my $result (@{$result_refs}) {
 
 						my $region = $district_region{$result->{"district"}};
+						my $code = $counter{$result->{"id"}}{$region};
 
 						if ($region) {
-							if ($counter{$result->{"id"}}{$region}) {
-
+							if (
+								$code
+								&& $code ne $result->{code}
+								&& (not defined $done{$code}{$result->{code}})
+							) {
 								$problems{"same_district_regions"} .= '<p class="warning padless marno">';
-								$problems{"same_district_regions"} .= $counter{$result->{"id"}}{$region}." and ".$result->{"code"};
-								$problems{"same_district_regions"} .= " are both from the ".$tourn_regions{$region}." region ". $round_realname ."</p>";
-
+								$problems{"same_district_regions"} .= 'Section '.$result->{letter}.': ';
+								$problems{"same_district_regions"} .= $code." and ".$result->{"code"};
+								$problems{"same_district_regions"} .= " are both from the ".$tourn_regions{$region}." metro region ". $round_realname ."</p>";
+								$done{$code}{$result->{code}}++;
+								$done{$result->{code}}{$code}++;
 							} else {
 								$counter{$result->{"id"}}{$region} = $result->{"code"};
 							}
@@ -1012,7 +1087,6 @@
 		}
 
 		if ($event_settings{"region_avoid"}
-			|| $tourn_settings->{"ncfl"}
 			|| $event_settings{"region_constrain"}
 		) {
 
@@ -1024,44 +1098,69 @@
 				$tags{"same_region_sections"} = "Entries hits within diocese";
 			}
 
-			Tab::Entry->set_sql( same_region_sections => "
-				select entry.*, opp.code as othername, region.name as regname, region.code as regcode
-				from (entry, ballot, panel, school, region, round,
-				entry opp, ballot oballot, school oschool)
+			my $region_sth = $dbh->prepare("
+				select entry.id, entry.code, entry.name,
+					panel.letter, panel.id panel_id,
+					region.id as region_id, region.name as region_name, region.code as region_code
 
-					where entry.id = ballot.entry
-					and ballot.panel = oballot.panel
-					and oballot.entry = opp.id
+				from (entry, ballot, panel, round)
+
+					left join school on entry.school = school.id
+					left join region on region.id = school.region
+
+				where 1=1
+					and entry.id = ballot.entry
 					and ballot.panel = panel.id
 					and panel.round = round.id
 					and round.id = ?
 					and round.type != 'final'
-					and opp.school = oschool.id
-					and entry.school = school.id
-					and oschool.region = school.region
-					and oschool.region = region.id
-					and oschool.region > 0
-					and opp.id < entry.id
-
-					group by entry.id, opp.id
+				group by entry.id
+				order by panel.id, region.id
 			");
 
 			my %edone = ();
+			$region_sth->execute($round->id);
 
-			foreach my $entry (Tab::Entry->search_same_region_sections($round->id )) {
+			my $entries = $region_sth->fetchall_hash();
 
-				next if $edone{$entry->id}{$entry->othername}++;
+			my %regions;
+			my %sections;
+			my %region_totals;
 
-				if ($tourn_settings->{"ncfl"}) {
+			foreach my $entry (@{$entries}) {
 
-					$problems{"same_region_sections"}
-						.= '<p class="warning padless marno">'
-						.  $entry->code." and ".$entry->othername." are from the ".$entry->regcode." diocese! ". $round_realname ."</p>";
+				unless ($regions{$entry->{region_id}}) {
+					$regions{$entry->{region_id}} = ({
+						name => $entry->{region_name},
+						code => $entry->{region_code},
+					});
+				}
 
-				} else {
-					$problems{"same_region_sections"}
-						.= '<p class="warning padless marno">'
-						.  $entry->code." and ".$entry->othername." are from the ".$entry->regname." region! ". $round_realname ."</p>";
+				if ($entry->{region_id}) {
+					$region_totals{$entry->{region_id}}{$entry->{letter}}++;
+					$regions{$entry->{region_id}}{"total"}++;
+					$sections{$entry->{letter}}++;
+				}
+			}
+
+			my $num_sections = scalar(keys %sections);
+
+			foreach my $region_id (keys %regions) {
+
+				my $region = $regions{$region_id};
+				my $num_entries = $regions{$region_id}{total};
+
+				if ($num_sections > $num_entries) {
+
+					foreach my $letter (keys %{$region_totals{$region_id}}) {
+
+						if ($region_totals{$region_id}{$letter} > 1) {
+							$problems{"same_region_sections"} .= '<p class="warning padless marno">';
+							$problems{"same_region_sections"} .= "$round_realname Section $letter has ";
+							$problems{"same_region_sections"} .= $region_totals{$region_id}{$letter}." ";
+							$problems{"same_region_sections"} .= "entries from region ".$region->{code}." </p>";
+						}
+					}
 				}
 			}
 		}
@@ -1406,9 +1505,9 @@
 			= $strikes_sth->fetchrow_array()
 		) {
 			$type = ucfirst($type);
-			$problems{"judge_preclusion"}.= '<p class="warning padless marno">'
-				."$judge_first $judge_last is judging $entry from $school in section $panel_letter,
-					but has a preclusion of type $type  ". $round_realname ."</p>";
+			$problems{"judge_preclusion"}.= '<p class="warning padless marno"> Section '.$panel_letter.": ";
+			$problems{"judge_preclusion"}.= "$judge_first $judge_last judging $entry from $school, preclusion $type $round_realname";
+			$problems{"judge_preclusion"}.= "</p>";
 		}
 
 		$strikes_sth = $dbh->prepare("
@@ -1431,9 +1530,9 @@
 			= $strikes_sth->fetchrow_array()
 		) {
 			$type = ucfirst($type);
-			$problems{"judge_preclusion"}.= '<p class="warning padless marno">'
-				."$judge_first $judge_last is judging $entry from $region in section $panel_letter,
-					but has a preclusion of type $type  ". $round_realname ."</p>";
+			$problems{"judge_preclusion"}.= '<p class="warning padless marno"> Section '.$panel_letter.": ";
+			$problems{"judge_preclusion"}.= "$judge_first $judge_last judging $entry from $region, preclusion $type $round_realname";
+			$problems{"judge_preclusion"}.= "</p>";
 		}
 
 		#JUDGES NOT AVAILABLE THIS ROUND
@@ -1792,45 +1891,12 @@
 			)
 		) {
 
-			# MEETING SAME STATE
-
-			$tags{"same_region_sections"} = "Entries hits within state group";
-
-			Tab::Entry->set_sql( same_region_sections => "
-				select entry.*, opp.code as othername, region.name as regname
-
-				from entry, ballot, panel, school, region,
-					entry opp, ballot oballot, school oppschool, round
-
-				where entry.id = ballot.entry
-					and ballot.panel = oballot.panel
-					and oballot.entry = opp.id
-					and ballot.panel = panel.id
-					and panel.round = round.id
-					and round.id = ?
-					and round.type != 'final'
-
-					and entry.school = school.id
-					and school.region = region.id
-
-					and opp.school = oppschool.id
-					and oppschool.region = region.id
-
-					and opp.id < entry.id
-			");
-
-			foreach my $entry (Tab::Entry->search_same_region_sections($round->id)) {
-				$problems{"same_region_sections"}
-					.= '<p class="warning padless marno">'. $entry->code."
-						and ".$entry->othername." are both from region ".$entry->regname." ". $round_realname ."</p>";
-			}
-
 			$tags{"judged_state"} = "Judges judging their own state";
 
 			my $state_judged_sth;
 
 			$state_judged_sth = $dbh->prepare("
-				select distinct entry.code, judge.first, judge.last, entryregion.code
+				select distinct entry.code, judge.first, judge.last, entryregion.code, panel.letter
 					from entry, judge, panel, ballot,
 						school entryschool, region entryregion,
 						school judgeschool, region judgeregion
@@ -1850,10 +1916,10 @@
 
 			$state_judged_sth->execute($round->id);
 
-			while (my ($entry, $first, $last, $state)  = $state_judged_sth->fetchrow_array() ) {
+			while (my ($entry, $first, $last, $state, $letter)  = $state_judged_sth->fetchrow_array() ) {
 
 				$problems{"judged_state"} .=
-					'<p class="warning padless marno">'. "$first $last judging $entry ($state)";
+					'<p class="warning padless marno"> Section'." $letter: $first $last judging $entry ($state)";
 			}
 
 
