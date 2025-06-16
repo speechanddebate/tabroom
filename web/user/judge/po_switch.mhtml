@@ -1,24 +1,21 @@
 <%args>
+	$dbh
 	$person
 	$perms
 	$entry_id       => undef
-	$property_name  => undef
+	$judge_id       => undef
 	$panel_id       => undef
 	$property_value => 0
 	$flag           => undef
 </%args>
 <%init>
 
+
 	$m->clear_buffer();
 	$r->content_type('application/json');
 
 	unless ($entry_id) {
 		$m->print('{ "error": true, "message": "No entry ID sent"}');
-		$m->abort();
-	}
-
-	unless ($property_name || $panel_id) {
-		$m->print('{ "error": true, "message": "No property to change sent"}');
 		$m->abort();
 	}
 
@@ -29,39 +26,70 @@
 		$m->abort();
 	}
 
-	my $message;
-
-	my $panel = Tab::Panel->retrieve($panel_id);
-	return unless $panel;
-
-	my @ballots = $panel->ballots(entry => $entry->id);
-
-	my $ok;
-
-	BALLOT:
-	foreach my $ballot (@ballots) {
-		if ($ballot->judge && $ballot->judge->person == $person) {
-			$ok++;
-			last BALLOT;
-		}
-	}
-
-	unless ($ok) {
-		$m->print('{ "error": true, "message": "You are not listed as a judge in this chamber '.$panel_id.'"}');
+	unless ($panel_id) {
+		$m->print('{ "error": true, "message": "No chamber ID to change sent"}');
 		$m->abort();
 	}
 
+	my $panel = Tab::Panel->retrieve($panel_id);
+
+	unless ($panel) {
+		$m->print('{ "error": true, "message": "No chamber found for ID '.$panel_id.'"}');
+		$m->abort();
+	}
+
+	my $judge = Tab::Judge->retrieve($judge_id);
+
+	unless ($judge) {
+		$m->print('{ "error": true, "message": "No judge found for ID '.$judge_id.'"}');
+		$m->abort();
+	}
+
+	unless ($judge->person == $person || $person->site_admin) {
+		$m->print('{ "error": true, "message": "You are not on that panel and may not change that judge ballot"}');
+		$m->abort();
+	}
+
+	my $message;
+
 	if ($property_value == 1) {
 
-		foreach my $ballot (@ballots) {
+		my $sth = $dbh->prepare("
+			delete score.*
+				from score, ballot
+			where 1=1
+				and ballot.judge = ?
+				and ballot.panel = ?
+				and ballot.id = score.ballot
+				and score.tag = 'po'
+		");
 
-			my $already = Tab::Score->search(
-				ballot => $ballot->id,
-				tag    => "po"
-			)->first;
+		$sth->execute($judge->id, $panel->id);
+		$message = "PO designation unmarked for ".$entry->code;
 
-			unless ($already) {
-				$already = Tab::Score->create({
+	} else {
+
+		my $sth = $dbh->prepare("
+			delete score.*
+				from score, ballot
+			where 1=1
+				and ballot.judge = ?
+				and ballot.panel = ?
+				and ballot.id = score.ballot
+				and score.tag = 'po'
+				and ballot.entry != ?
+		");
+
+		$sth->execute($judge->id, $panel->id, $entry->id);
+
+		my $ballot = Tab::Ballot->search( entry => $entry->id, panel => $panel->id, judge => $judge->id)->first;
+
+		if ($ballot) {
+
+			my $score = $ballot->scores(tag => "po")->first;
+
+			unless ($score > 0) {
+				Tab::Score->create({
 					ballot => $ballot->id,
 					tag    => "po",
 					value  => 1
@@ -69,28 +97,15 @@
 			}
 		}
 
-		$entry->setting("po", 1);
-
-	} else {
-
-		foreach my $ballot (@ballots) {
-
-			foreach my $already (
-				Tab::Score->search(
-					ballot => $ballot->id,
-					tag    => "po"
-				)
-			) {
-				$already->delete();
-			}
-		}
-		$entry->setting("po", 0);
+		$message = "PO designation marked for ".$entry->code;
 	}
 
-	$message = " NOT " unless $property_value == 1;
-	$message .= " being a presiding officer for chamber ".$panel->letter." session ".$panel->round->name;
+	my $response = ({
+		error   => \0,
+		message => $message,
+	});
 
-	$m->print('{ "error": false, "message": "'.$entry->code.' marked as '.$message.'"}');
+	$m->print(JSON::encode_json($response));
 	$m->abort();
 
 </%init>
