@@ -119,6 +119,7 @@
 	$count_elims = $category->setting('count_elims');
 
 	my $jpool;
+	my $jpool_ts_limit;
 
 	if ($round->setting('usage_by_jpool')) {
 
@@ -127,16 +128,22 @@
 		};
 
 		if ( (not defined $jpool) || $jpool->category != $category) {
-			$round->setting('usage_by_spool', 0);
+			$round->setting('usage_by_jpool', 0);
 			undef $jpool;
 		}
 
 		if ($jpool) {
-
 			$limit .= "and exists (
 				select jpr.id
 					from jpool_round jpr
 				where jpr.jpool = ".$jpool->id." and jpr.round = round.id) ";
+
+			$jpool_ts_limit .= "and exists (
+				select round.id
+				from round, jpool_round jpr
+				where round.timeslot = timeslot.id
+				and round.id = jpr.round
+				and jpr.jpool = ".$jpool->id.") ";
 		}
 	}
 
@@ -195,12 +202,13 @@
 			next if $used{$judge}{$round_id}++;
 		}
 
-		if ($judge eq "2562094") {
-			Tab::debuglog("Judge is judging $roundname which compares to $current_name");
-		}
 
 		$judge_hash{$judge}{"everything"}++;
 		$judge_hash{$judge}{"judged_all"}++ 	if $roundname < $current_name;
+
+		if ($judge == 2551664) {
+			Tab::debuglog("Judge $judge is in round $roundname with panel $panel_id.  Judged all is ".$judge_hash{$judge}{judged_all});
+		}
 
 		$judge_hash{$judge}{"in_round"}++ 		if $round_id == $this_round_id;
 		$judge_hash{$judge}{"in_timeslot"}++ 	if $timeslot == $this_round_ts_id;
@@ -209,15 +217,79 @@
 		$judge_hash{$judge}{"will_judge"}++ 	if $roundname > $current_name;
 	}
 
+	# 2nd Tiebreaker if usage
+
+	if ($limit) {
+
+		my $sth = $dbh->prepare("
+			select judge.id,
+				round.id round_id, round.name round_name,
+				panel.id panel_id, panel.flight panel_flight,
+				round.type round_type, round.timeslot timeslot_id
+			from (ballot, panel, round, judge, timeslot)
+				where round.timeslot   = timeslot.id
+					and round.id       = panel.round
+					and panel.id       = ballot.panel
+					and ballot.judge   = judge.id
+					and timeslot.tourn = ?
+
+			and (
+				judge.category = ?
+				or judge.alt_category = ?
+				or exists (
+					select jpool_judge.id
+					from jpool_judge, jpool_round
+					where jpool_judge.judge = judge.id
+						and jpool_judge.jpool = jpool_round.jpool
+						and jpool_round.round = ?
+				)
+			)
+
+			group by panel.id, ballot.judge
+		");
+
+		$sth->execute(int($tourn), $category_id, $category_id, $round->id);
+
+		my %used;
+
+		while (
+			my ($judge,
+				$round_id, $roundname,
+				$panel_id, $flight,
+				$type, $timeslot
+			)  = $sth->fetchrow_array()
+		) {
+
+			unless ($ARGS{"count_elims"} || $count_elims) {
+				next if $type eq "elim";
+				next if $type eq "final";
+				next if $type eq "runoff";
+			}
+
+			if ($debates_per) {
+				next if $used{$judge}{$panel_id}++;
+			} else {
+				next if $used{$judge}{$round_id}++;
+			}
+
+			$judge_hash{$judge}{"judged_secondary"}++ 	if $roundname < $current_name;
+
+			if ($judge == 2560973) {
+				Tab::debuglog("Judge is here round $roundname secondary score is ".$judge_hash{$judge}{"judged_secondary"});
+			}
+		}
+	}
+
 	# Standby assignments count as rounds
 
 	my $standby_sth = $dbh->prepare("
-		select jpj.id jpool, jpj.judge, timeslot.start, timeslot.id timeslot
+		select jpj.id jpool, jpj.judge, timeslot.start, timeslot.id timeslot, jpool.name
 			from jpool_judge jpj,
 				jpool_setting jps,
 				jpool_setting ts,
 				judge, category,
-				timeslot
+				timeslot,
+				jpool
 
 		where category.tourn = ?
 			and category.id  = judge.category
@@ -225,8 +297,10 @@
 			and jpj.jpool    = jps.jpool
 			and jps.tag      = 'standby'
 			and jpj.jpool    = ts.jpool
+			and jpj.jpool    = jpool.id
 			and ts.tag       = 'standby_timeslot'
 			and ts.value     = timeslot.id
+			and timeslot.tourn = category.tourn
 			and not exists (
 				select ballot.id
 					from (ballot, panel, round)
@@ -235,6 +309,8 @@
 					and panel.id = ballot.panel
 					and ballot.judge = jpj.judge
 			)
+
+			$jpool_ts_limit
 	");
 
 	$standby_sth->execute(int($tourn));
@@ -259,10 +335,16 @@
 			if ($standby->{start} == $ts_start) {
 				$judge_hash{$judge}{"judged_already"}++;
 				$judge_hash{$judge}{"in_timeslot"}++;
-			} elsif ($standby->{start} < $ts_start) {
+			} elsif ($standby_start < $ts_start) {
 				$judge_hash{$judge}{"judged_already"}++;
 				$judge_hash{$judge}{"judged_all"}++;
-			} elsif ($standby->{start} > $ts_start) {
+
+				if ($judge == 2551664) {
+					Tab::debuglog("Judge $judge is in standby starting $standby_start.  Judged all is ".$judge_hash{$judge}{judged_all});
+					Tab::debuglog("Judge pool is ".$standby->{name});
+				}
+
+			} elsif ($standby_start > $ts_start) {
 				$judge_hash{$judge}{"will_judge"}++;
 			}
 		}
