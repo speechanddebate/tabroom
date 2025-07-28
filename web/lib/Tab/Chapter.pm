@@ -2,7 +2,7 @@ package Tab::Chapter;
 use base 'Tab::DBI';
 Tab::Chapter->table('chapter');
 Tab::Chapter->columns(Primary => qw/id/);
-Tab::Chapter->columns(Essential => qw/name street city state zip postal country/);
+Tab::Chapter->columns(Essential => qw/name formal street city state zip postal country/);
 Tab::Chapter->columns(Others => qw/level naudl nsda district timestamp/);
 Tab::Chapter->columns(TEMP => qw/count prefs code member schoolid/);
 
