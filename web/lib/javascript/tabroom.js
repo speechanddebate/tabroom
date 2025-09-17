@@ -311,6 +311,27 @@
 
 			success: function(data, status, metadata) {
 
+				if (data.json) {
+
+					const fileName = "tabroom-data.json";
+                    var blob = new Blob([JSON.stringify(data.json)], { type: "application/json" });
+
+                    //Check the Browser type and download the File.
+                    var isIE = false || !!document.documentMode;
+                    if (isIE) {
+                        window.navigator.msSaveBlob(blob, fileName);
+                    } else {
+                        var url = window.URL || window.webkitURL;
+                        link = url.createObjectURL(blob);
+                        var a = $("<a />");
+                        a.attr("download", fileName);
+                        a.attr("href", link);
+                        $("body").append(a);
+                        a[0].click();
+                        $("body").remove(a);
+                    }
+				}
+
 				if (data.reply) {
 					if (attributes.reply_target) {
 						$("#"+attributes.reply_target).text(data.reply);
