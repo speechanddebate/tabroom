@@ -314,16 +314,16 @@
 				if (data.json) {
 
 					const fileName = "tabroom-data.json";
-                    var blob = new Blob([JSON.stringify(data.json)], { type: "application/json" });
+                    const blob = new Blob([JSON.stringify(data.json)], { type: "application/json" });
 
                     //Check the Browser type and download the File.
-                    var isIE = false || !!document.documentMode;
+                    const isIE = false || !!document.documentMode;
                     if (isIE) {
                         window.navigator.msSaveBlob(blob, fileName);
                     } else {
-                        var url = window.URL || window.webkitURL;
+                        const url = window.URL || window.webkitURL;
                         link = url.createObjectURL(blob);
-                        var a = $("<a />");
+                        const a = $("<a />");
                         a.attr("download", fileName);
                         a.attr("href", link);
                         $("body").append(a);
@@ -524,7 +524,7 @@
 
 	function postValue(value, url, callback) {
 
-		var data = { 'value': value };
+		const data = { 'value': value };
 
 		$.ajax({
 			type    : 'POST',
@@ -677,11 +677,10 @@
 	/* zebra stripe the rows */
 	function zebraRows() {
 
-		var tags = ['.row', '.lightrow'];
-		var parents = ['div', 'span', 'table'];
+		const tags = ['.row', '.lightrow'];
+		const parents = ['div', 'span', 'table'];
 
 		tags.forEach(function(Tag) {
-
 			parents.forEach(function(Parent) {
 				$(document).find(Tag).parent().closest(Parent)
 					.find(".row:visible:even").removeClass("odd");
