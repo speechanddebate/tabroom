@@ -208,7 +208,19 @@
 
     push @tabs, "settings";
 
-	if ($round->panels) {
+	my $panel_sth = $dbh->prepare("
+		select panel.* from panel where round = ?
+	");
+	$panel_sth->execute($round->id);
+
+	my @panels = eval {
+		my $pan_ref = $panel_sth->fetchall_hash();
+		if ($pan_ref) {
+			return @{$pan_ref};
+		}
+	};
+
+	if (scalar @panels > 0) {
 		$default = "schematic" unless $default;
 	} else {
 		$default = "settings" unless $default;
@@ -301,8 +313,9 @@
     }
 
 	my $round_url = $Tab::indexcards_url."/tab/".$tourn->id."/round/".$round->id;
-	my $stat_url = $round_url."/status";
-	my $side_url = $round_url."/sidecount";
+	my $stat_url  = $round_url."/status";
+	my $blast_url = $round_url."/blastStatus";
+	my $side_url  = $round_url."/sidecount";
 
 </%init>
 
@@ -612,6 +625,7 @@
 			showProperty();
 			refreshResult(true);
 			checkIgnoreResults();
+			checkBlastStatus();
 
 			$("#hide").click(function(){
 				$("#eraser").hide();
@@ -628,8 +642,12 @@
 			resizeToChildren('entry_resizer');
 			resizeToChildren('judge_resizer');
 
-%			unless ($ARGS{"norefresh"}) {
+%			if (not defined $ARGS{"norefresh"}) {
 				setInterval(refreshResult, 15000);
+%			}
+
+%			if ($round->published != 1) {
+				setInterval(checkBlastStatus, 15000);
 %			}
 		});
 
@@ -2534,64 +2552,90 @@
 			event          => $event,
 		&>
 
-<%perl>
+		<script>
 
-		my $blast_sth = $dbh->prepare("
-			select
-				aq.id,
-				aq.tag,
-				aq.active_at,
-				aq.message,
-				person.email,
-				aq.created_at
-			from (autoqueue aq, event, tourn)
-				left join person on aq.created_by = person.id
-			where aq.round = ?
-				and aq.tag in ('blast', 'publish', 'blast_publish')
-				and aq.event = event.id
-				and event.tourn = tourn.id
-		");
+			const hideStatus = async () => {
+				$(`#blastStatus`).addClass('hidden');
+			};
 
-		$blast_sth->execute($round->id);
+			const checkBlastStatus = async () => {
 
-		while (
-			my ($id, $tag, $active, $message, $creator, $created) = $blast_sth->fetchrow_array()
-		) {
-</%perl>
-			<div class="dkred row marbottom">
+				$.ajax({
+					type        : 'GET',
+					url         : '<% $blast_url %>',
+					crossDomain : true,
+					xhrFields   : {
+						withCredentials: true
+					},
 
-				<span class="twothirds martop">
-					Round will be
-						<% $tag eq "blast_publish" ? "both blasted &amp; published" : "" %>
-						<% $tag eq "blast" ? "blasted only" : "" %>
-						<% $tag eq "publish" ? "published only" : "" %>
-					on
-						<& "/funclib/showdt.mas",
-							string => $active,
-							tz     => $tz,
-							tzname => 1,
-							length => "longcasual"
-						&>
+				}).then( (rawStatus) => {
 
-					<% $message
-						? '<div class="padno full explain marbottom"> Message: '.$message.'</div>'
-						: "" %>
-					<div class="padno full explain marbottom">
-						Set by: <% $creator %>
-						at <& "/funclib/showdt.mas", string => $created, tz => $tz &>
-					</div>
-				</span>
+					if (rawStatus.length > 0) {
 
-				<span class="third centeralign">
-					<a
-						class="buttonwhite orangetext hover invert"
-						href="blast_delete.mhtml?aq_id=<% $id %>"
-					>
-						Cancel Scheduled Blast
-					</a>
-				</span>
-			</div>
-%		}
+						const status = rawStatus.shift();
+
+						let blastMessage = 'Round will be';
+
+						if (status.tag === 'blast_publish') {
+							blastMessage += ' both blasted &amp; published';
+						} else if (status.tag === 'blast') {
+							blastMessage += ' blasted only';
+						} else if (status.tag === 'publish') {
+							blastMessage += ' published only';
+						}
+
+						const activeAt = new Date(status.activeAt);
+						const createdAt = new Date(status.createdAt);
+
+						let dateOptions = { weekday: 'short', month: 'short', day: 'numeric' };
+						let timeOptions = { hour: 'numeric', minute: 'numeric', timeZoneName: 'short' };
+
+						blastMessage += ` on ${ activeAt.toLocaleDateString(false, dateOptions) }`;
+						blastMessage += ` at ${ activeAt.toLocaleTimeString(false, timeOptions) }`;
+
+						function htmlEntities(str) {
+						    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+						};
+
+						if (status.message) {
+							blastMessage += ` <div class="padno padtopless full explain marbottom"> Message: ${htmlEntities(status.message)} </div>`;
+						}
+
+						if (status.last) {
+							blastMessage += `<div class="padno full explain marbottom padtopless">
+									Set by: ${status.first} ${status.last} <${status.email}>
+									on ${ createdAt.toLocaleDateString(false, dateOptions) }
+									at ${ createdAt.toLocaleTimeString(false, timeOptions) }
+								</div>`;
+						}
+
+						$(`#blastMetaData`).html(blastMessage);
+						$(`#blastCancelButton`).attr('aq_id', status.id);
+						$(`#blastStatus`).removeClass('hidden');
+					} else {
+						$(`#blastStatus`).addClass('hidden');
+					}
+				});
+			};
+		</script>
+
+		<div class="dkred row marbottom hidden rounded flexrow" id="blastStatus">
+
+			<span class="twothirds martop padleftmore padtop" id="blastMetaData">
+			</span>
+
+			<span class="third rightalign padrightmore" id="blastCancel">
+				<a
+					class   = "buttonwhite orangetext hover invert semibold"
+					id      = "blastCancelButton"
+					aq_id   = ""
+					destroy = "blastStatus"
+					onClick = "postSwitch(this, 'blast_delete.mhtml', hideStatus);"
+				>
+					Cancel Scheduled Blast
+				</a>
+			</span>
+		</div>
 
 %		if ($round) {
 
