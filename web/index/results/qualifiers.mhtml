@@ -1,0 +1,308 @@
+<%args>
+	$now
+	$dbh
+	$person
+	$circuit_id
+	$year       => undef
+	$event_code => undef
+</%args>
+<%init>
+
+	my $circuit = Tab::Circuit->retrieve($circuit_id);
+	my $circuit_abbr = $circuit->abbr;
+
+	unless ($year) {
+		my $start = Tab::school_year;
+		$year = $start->year;
+	}
+
+	my $qualifiers = $circuit->setting('qualifiers');
+	my %events;
+
+	foreach my $rule (keys %{$qualifiers}) {
+
+		my %hash = eval {
+			return %{$qualifiers->{$rule}};
+		};
+
+		if (%hash && $hash{events}) {
+			foreach my $event_code (keys %{$hash{"events"}}) {
+				$events{$event_code}++;
+			}
+		}
+	}
+
+	my $limit = $year + 1;
+
+	my $sth = $dbh->prepare("
+		select
+			student.id student_id, student.first, student.middle, student.last,
+			partner.id partner_id, partner.first pfirst, partner.middle pmiddle, partner.last plast,
+			result_set.code code,
+			entry.id entry, tourn.name tourn,
+			CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
+			result.rank, result.place,
+			event.type event_type, event.id eventId
+
+		from (student, entry_student es, entry, event, tourn, result_set, result)
+
+			left join entry_student pes
+				on pes.entry = entry.id
+				and pes.student != student.id
+
+			left join student partner
+				on partner.id = pes.student
+
+		where 1=1
+
+			and result_set.label = '$circuit_abbr Qualification'
+			and result_set.id = result.result_set
+			and (result_set.published = 1 OR result_set.coach = 1)
+			and result_set.event = event.id
+			and event.tourn = tourn.id
+			and result.entry = entry.id
+			and entry.id = es.entry
+			and es.student = student.id
+			and event.type != 'wsdc'
+			and tourn.start > ?
+			and tourn.end < ?
+			and result_set.code = ?
+		group by entry.id
+	");
+
+	$sth->execute(
+		$year."-07-01 00:00:00",
+		$limit."-07-01 00:00:00",
+		$event_code
+	);
+
+	my $results = $sth->fetchall_hash();
+
+	$sth = $dbh->prepare("
+		select
+			student.id student_id, student.first, student.middle, student.last,
+			result_set.code code,
+			tourn.name tourn,
+			CONVERT_TZ(tourn.start, '+00:00', tourn.tz) start,
+			result.rank, result.place,
+			chapter.name chapter,
+			event.type event_type, event.id eventId
+
+		from (student, event, tourn, result_set, result, chapter, chapter_circuit cc)
+
+		where result_set.label = '$circuit_abbr Qualification'
+			and result_set.id = result.result_set
+			and (result_set.published = 1 OR result_set.coach = 1)
+			and result_set.event = event.id
+			and event.tourn = tourn.id
+			and result.student = student.id
+			and student.chapter = chapter.id
+			and chapter.id = cc.chapter
+			and cc.circuit = ?
+			and event.type = 'wsdc'
+			and tourn.start > ?
+			and tourn.end < ?
+			and result_set.code = ?
+		group by result.entry, student.id
+		order by result_set.code
+	");
+
+	$sth->execute(
+		$circuit->id,
+		$year."-07-01 00:00:00",
+		$limit."-07-01 00:00:00",
+		$event_code
+	);
+
+	my $worlds = $sth->fetchall_hash();
+	push @{$results}, @{$worlds};
+
+	my %codes;
+	my %quals;
+
+	foreach my $result (@{$results}) {
+
+		my $key;
+
+		if ($result->{partner_id} && $result->{partner_id} < $result->{student_id} ) {
+			next;
+		} elsif ($result->{partner_id}) {
+			$key = $result->{student_id}."-".$result->{'partner_id'};
+		} else {
+			$key = $result->{student_id};
+		}
+
+		unless ($quals{$key}) {
+
+			$quals{$key}{"name"} = $result->{"first"};
+			$quals{$key}{"name"} .= " ".$result->{"middle"} if $result->{"middle"};
+			$quals{$key}{"name"} .= " ".$result->{"last"};
+			$quals{$key}{"last"} = $result->{"last"};
+
+			if ($result->{'partner_id'}) {
+				$quals{$key}{"name"} .= " and ";
+				$quals{$key}{"name"} .= $result->{"pfirst"};
+				$quals{$key}{"name"} .= " ".$result->{"pmiddle"} if $result->{"pmiddle"};
+				$quals{$key}{"name"} .= " ".$result->{"plast"};
+			}
+		}
+
+		$quals{$key}{"results"}{$result->{code}}{"total"} += $result->{rank};
+		$quals{$key}{"results"}{$result->{code}}{"tourncount"}++;
+		$quals{$key}{"results"}{$result->{code}}{"event_type"} = ucfirst($result->{event_type});
+
+		my %tourn = (
+			name       => $result->{tourn},
+			start      => $result->{start},
+			event      => $result->{code},
+			points     => $result->{rank},
+			place      => $result->{place},
+		);
+
+		push @{$quals{$key}{"results"}{$result->{code}}{"details"}}, \%tourn;
+	}
+
+</%init>
+
+	<div class="main">
+
+		<form
+			action = "qualifiers.mhtml"
+			method = "post"
+		>
+
+		<div class="flexrow full">
+			<span class="fiveeighths">
+				<h5>
+					<% $year %>&ndash;<% $limit %>
+					<% $circuit->abbr %> Qualifiers
+				</h5>
+			</span>
+			<span class = "eighth">
+				<input
+					type  = "hidden"
+					name  = "circuit_id"
+					value = "<% $circuit->id %>"
+				>
+
+				<select
+					name     = "year"
+					onChange = "this.form.submit();"
+				>
+%					foreach my $oyear (2023 .. $now->year) {
+						<option
+							value    = "<% $oyear %>"
+							<% $year eq $oyear ? "selected" : "" %>
+						><% $oyear %></option>
+%					}
+				</select>
+			</span>
+			<span class = "eighth">
+				<select
+					name     = "event_code"
+					onChange = "this.form.submit();"
+				>
+					<option value=""></option>
+%					foreach my $event (sort {$a cmp $b} keys %events) {
+						<option
+							value="<% $event %>"
+							<% $event eq $event_code ? "selected" : "" %>
+						><% $event %></option>
+%					}
+				</select>
+			</span>
+			<span
+				class = "eighth rightalign padrightless"
+				id    = "<% $circuit->abbr %>_buttonarea"
+			>
+			</span>
+		</div>
+
+		</form>
+
+		<& "/funclib/tablesorter.mas", table => $circuit->abbr &>
+
+		<table id=<% $circuit->abbr %>>
+
+			<thead>
+				<tr class="yellowrow smallish padvert">
+					<th>
+						Event
+					</th>
+					<th>
+						Type
+					</th>
+					<th>
+						Entry Name
+					</th>
+					<th>
+						# Tournaments
+					</th>
+					<th>
+						Total Pts
+					</th>
+					<th>
+						Show Details
+					</th>
+				</tr>
+			</thead>
+
+			<tbody>
+
+%				foreach my $key (sort {$quals{$a}{"last"} cmp $quals{$b}{"last"}} keys %quals) {
+
+%					foreach my $event (sort {$a cmp $b} keys %{$quals{$key}{"results"}})  {
+
+						<tr>
+							<td>
+								<% $event %>
+							</td>
+
+							<td>
+								<% $quals{$key}{"results"}{$event}{"event_type"} %>
+							</td>
+
+							<td>
+								<% $quals{$key}{"name"} %>
+							</td>
+
+							<td class="rightalign padright">
+								<% $quals{$key}{"results"}{$event}{"tourncount"} %>
+							</td>
+
+							<td class="rightalign padright">
+								<% $quals{$key}{"results"}{$event}{"total"} %>
+							</td>
+
+							<td class="nospace padvertless centeralign">
+								<button
+									class    = "buttonwhite bluetext fa fa-eye fa-sm showbuttons <% $key %>_button"
+									onClick  = "showDetails('<% $key %>');"
+								/>
+							</td>
+						</tr>
+%					}
+%				}
+			</tbody>
+		</table>
+	</div>
+
+	<& menu.mas,
+		circuit_id => $circuit_id,
+		year       => $year,
+		whoami     => "qualifiers"
+	&>
+
+	<script>
+		function showDetails(entryId) {
+			console.log(`Unveiling ${entryId}`);
+			$(`#${entryId}`).toggleClass('hidden');
+			$(`.${entryId}_button`).toggleClass('invert');
+			fixVisual();
+		}
+
+		function hideDetails() {
+			$('.results').addClass('hidden');
+			$('.showbuttons').removeClass('invert');
+		}
+	</script>
