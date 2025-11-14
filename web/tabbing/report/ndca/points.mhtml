@@ -9,6 +9,7 @@
 	use POSIX;
 
 	my $event = Tab::Event->retrieve($event_id);
+	my $dbh = Tab::DBI->db_Main();
 
 	$m->abort unless $event;
 	$m->abort unless $event->tourn->id == $tourn->id;
@@ -54,41 +55,58 @@
 		push @prelims, $round if $round->type ne "final" && $round->type ne "elim";
 	}
 
-	my @scores = $m->comp("/funclib/event_scores.mas", event => $event);
+	my $round_sth = $dbh->prepare("
+		select
+			entry.id entry_id,
+			ballot.bye, ballot.forfeit, ballot.judge,
+			score.value win,
+			round.id round_id, round.name round_name, round.type round_type
+		from (ballot, entry, round, panel)
+			left join score on score.ballot = ballot.id and score.tag = 'winloss'
+		where 1=1
+			and round.event = ?
+			and round.id = panel.round
+			and panel.id = ballot.panel
+			and ballot.entry = entry.id
+			and ballot.audit = 1
+		group by ballot.id
+		order by round.name DESC
+	");
 
+	$round_sth->execute($event->id);
+	my $rounds = $round_sth->fetchall_hash();
+
+	my %used;
 	my %in_round = ();
 	my %final_ballots = ();
-	my %prelim_wins = $m->comp("/funclib/entry_wins.mas", event => $event);
 
-	foreach my $score (@scores) {
-		next unless $score->tag eq "winloss";
-		push @{$in_round{$score->roundid}}, $score->entryid;
-		$final_ballots{$score->entryid}++
-			if $score->roundid == $final->id
-			&& $score->value == 1;
+	foreach my $round (@{$rounds}) {
+
+		next if $used{$round->{entry_id}}++;
+
+		if ($final && $round->{round_id} == $final->id) {
+			if ($round->{bye} || $round->{win}) {
+				$final_ballots{$round->{entry_id}}++;
+				$final_ballots{total}++;
+			}
+		}
+
+		push @{$in_round{$round->{round_id}}}, $round->{entry_id};
 	}
 
+	my %prelim_wins = $m->comp("/funclib/entry_wins.mas", event => $event);
+
 	my %round_multiplier = ();
-	my %used = ();
+	undef %used;
 
 	if ($final) {
 
-		my $what_it_takes;
-
 		foreach my $entry_id (@{$in_round{$final->id}}) {
-			next if $used{$entry_id};
-			$what_it_takes = $final_ballots{$entry_id}
-				if $what_it_takes < $final_ballots{$entry_id};
-		}
 
-		foreach my $entry_id (@{$in_round{$final->id}}) {
-			next if $used{$entry_id};
-
-			if ($final->type ne "elim" && $final->type ne "final") { 
-				$round_multiplier{$entry_id} = 1;
-			} else { 
-				$round_multiplier{$entry_id} = 2.3 if $what_it_takes == $final_ballots{$entry_id};
-				$round_multiplier{$entry_id} = 1.8 if $what_it_takes != $final_ballots{$entry_id};
+			if ($final_ballots{$entry_id} > ($final_ballots{total} / 2)) {
+				$round_multiplier{$entry_id} = 2.3;
+			} else {
+				$round_multiplier{$entry_id} = 1.8;
 			}
 			$used{$entry_id}++;
 		}
@@ -113,7 +131,6 @@
 		$mult = 1.1 if $mult == 1.2;
 		$mult = 1.2 if $mult == 1.4;
 		$mult = 1.4 if $mult == 1.6;
-
 	}
 
 	my %entry_points = ();
