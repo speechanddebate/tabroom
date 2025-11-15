@@ -286,11 +286,7 @@
 		$.ajax({
 			...options,
 			error: function(data, status, metadata) {
-
-				console.log(`FAILBOAT SINKS LIKE ONLY IT CAN, ALAS`);
 				const reply = data.responseJSON || data.responseText;
-				console.log(reply);
-
 				alertify.set('notifier','delay', 15);
 
 				if (reply && reply.message) {
@@ -743,41 +739,7 @@
 		fixVisual();
     }
 
-/* jerks
-*
-		var base_url = window.location.origin.split(':').slice(1);
-		var base_domain =  base_url[0].split('.').slice(-2).join('.');
-		base_domain = base_domain.replace(/\//g,'');
-
-		if (
-			(base_domain !== 'tabroom.com')
-			&& (base_domain !== 'debatefail.com')
-			&& (base_domain !== 'tabroom.gay')
-		) {
-			pleaseStop();
-		}
-	}
-
-	function pleaseStop() {
-		$(".main").html(`
-			<h3 class="centeralign redtext">This site is not Tabroom. It is a phishing attempt</h3>
-
-			<h4 class="centeralign">Fortunately it was not a very good one, so Chris Palmer was able to mess
-			with them a little and put this message up instead</h4>
-
-			<h4 class="centeralign bluetext">Real Tabroom will always say "https://www.tabroom.com" in the address bar.</h4>
-
-			<h5 class="centeralign">Also, it would not have worked anyway, for reasons I will not get into here</h5>
-
-			<p class="centeralign bluetext bigger martop">But seriously people, stop trying to make my life more
-			stressful and stop doing things like this.  There are no fortunes to be made here, just a more tired
-			Tabroom developer.</p>
-		`);
-		console.log('no seriously stop');
-	}
-*/
-
-/* Change the file uploader div to show the name of the uploaded file */
+	/* Change the file uploader div to show the name of the uploaded file */
 
 	function uploadName(inputBox) {
 		var fileTag = $(inputBox).attr("id");
@@ -963,7 +925,7 @@ function autoWin(input,e,aff,neg,affid,negid) {
 /* Does the various shortcuts to register speaker point entry, like 285 = 28.5,
  * etc */
 
- function autoPoints(input,len,e,side,ratio,nototal,step) {
+ function autoPoints(input,len,e,side,ratio,nototal) {
 
 	if ($("#toggleKeyboardShortcuts").prop("checked") === false) {
 		return;
@@ -980,18 +942,16 @@ function autoWin(input,e,aff,neg,affid,negid) {
 	}
 
     var keyCode = e.keyCode;
-    var filter = [0,8,16,17,18,37,38,39,40,46];
+	var filter = [0,8,16,17,18,37,38,39,40,46];
 
 	if (pointStep === ".5"
 		&& minPoints > -5
 		&& maxPoints < 5
 		&& input.value == 5
 	) {
-
 		input.value = .5;
 		changeFocus(input);
 		totalPoints(side,ratio);
-
 	} else if (pointStep === ".1"
 		&& minPoints >= 20
 		&& maxPoints == 30
@@ -1102,12 +1062,11 @@ function autoWin(input,e,aff,neg,affid,negid) {
 			} else {
 				input.value = input.value.slice(0,2);
 			}
-
 		}
 
 		if (len == 2) {
 
-			if (step == 1) {
+			if (pointStep == 1) {
 
 			} else {
 
@@ -1126,20 +1085,13 @@ function autoWin(input,e,aff,neg,affid,negid) {
 				} else if (input.value < 0) {
 
 				} else if (input.value === -5) {
-
 					input.value = -0.5;
-
 				} else if (input.value === "-.") {
-
 					input.value = -0.5;
-
 				} else {
-
 					// input.value = input.value.slice(0,1);
-
 				}
 			}
-
 		}
 
 		totalPoints(side,ratio);
