@@ -1,0 +1,272 @@
+<%args>
+
+</%args>
+<%init>
+
+	my $now = DateTime->now();
+	my $counter;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	# Locking sql statements
+
+	my $check_lock_sth = $dbh->prepare("select autoqueue.id, autoqueue.timestamp from autoqueue where tag = 'flip_lock'");
+	my $unlock_sth = $dbh->prepare("delete from autoqueue where tag = 'flip_lock'");
+	my $lock_sth = $dbh->prepare("insert into autoqueue (tag) values ('flip_lock')");
+
+	$check_lock_sth->execute();
+	my ($lock_id, $lock_stamp) = $check_lock_sth->fetchrow_array();
+	$check_lock_sth->finish();
+
+	$m->print("<p>Lock ID $lock_id</p>") if $lock_id;
+
+	if ($lock_id) {
+
+		# Check the age of the timestamp.  If it's very old then clear the lock
+		# and notify the admins
+
+		my $now_limit = $now->clone();
+		$now_limit->subtract(minutes => 5);
+		my $now_stamp = DateTime::Format::MySQL->format_datetime($now_limit);
+
+		$now_stamp =~ s/[\D_]//g;
+		$lock_stamp =~ s/[\D_]//g;
+
+		my $hard_limit = $now->clone();
+		$hard_limit->subtract(minutes => 10);
+		my $hard_stamp = DateTime::Format::MySQL->format_datetime($hard_limit);
+		$hard_stamp =~ s/[\D_]//g;
+
+		my @ids = [1];
+
+		if ($lock_stamp < $hard_stamp) {
+
+			$m->print("VERY OLD LOCK FOUND: Timestamp $lock_stamp vs limit $now_stamp.  Removing lock.<br />");
+			$unlock_sth->execute();
+
+	        $m->comp("/funclib/send_notify.mas",
+				from_string => "problems\@www.tabroom.com",
+				ids         => \@ids,
+				subject     => "10 MINUTE LOCK",
+				body        => "The lock id $lock_id has been deleted since it's more than 10 minutes old: $lock_stamp"
+			);
+
+		} elsif ($lock_stamp < $now_stamp) {
+
+			$m->print("OLD LOCK FOUND: Timestamp $lock_stamp vs limit $now_stamp <br />");
+
+			my $aq_count_sth = $dbh->prepare("select count(id) from autoqueue where active_at < NOW()");
+			$aq_count_sth->execute();
+			my ($aq_count) = $aq_count_sth->fetchrow_array();
+
+	        $m->comp("/funclib/send_notify.mas",
+				from_string => "problems\@tabroom.com",
+				ids         => \@ids,
+				subject     => "LOCK ALERT ON AQ",
+				body        => "The lock id $lock_id has been alive now since $lock_stamp.  $aq_count jobs in the queue."
+			);
+
+			$m->print("Lock found so aborting autoqueue");
+			$m->abort();
+
+		} else {
+
+			$m->print("Lock found so aborting autoqueue");
+			$m->abort();
+
+		}
+	}
+
+	$lock_sth->execute();
+	$lock_sth->finish();
+
+	my $aq_sth = $dbh->prepare("
+		select aq.id, aq.tag, aq.message, aq.created_by sender,
+			CONVERT_TZ(aq.active_at, '+00:00', 'America/New_York') as active_at,
+			round.id round_id,
+			event.id event_id, event.name event_name, event.id event_id, event.type event_type, event.abbr event_abbr,
+			tourn.id tourn_id,
+			prefs.value prefs,
+			num_judges.value num_judges
+		from (autoqueue aq)
+			left join round on round.id = aq.round
+			left join round_setting num_judges on num_judges.round = round.id and num_judges.tag = 'num_judges'
+			left join event on round.event = event.id
+			left join tourn on event.tourn = tourn.id
+			left join category_setting prefs on prefs.category = event.category and prefs.tag = 'prefs'
+
+		where (aq.active_at < NOW() OR aq.active_at IS NULL)
+			and aq.tag NOT IN (
+				'flip_lock', 'queue_lock', 'blast', 'publish', 'blast_publish',
+				'pair_prelim', 'pair_elim', 'prelim_results', 'final_results'
+			)
+			and NOT EXISTS (
+				select ts.id
+				from tabroom_setting ts
+				where ts.tag = 'autoqueue'
+				and ts.value = aq.id
+			)
+		order
+			by FIELD(aq.tag, 'flip', 'flip_1', 'flip_2'),
+			aq.created_at
+	");
+
+	$aq_sth->execute();
+	my $aqs = $aq_sth->fetchall_hash();
+
+	my $aq_delete = $dbh->prepare('delete from autoqueue where id = ?');
+	my $aq_lock = $dbh->prepare('insert into tabroom_setting (value, tag) values (?, "autoqueue")');
+
+	my $previous_sth = $dbh->prepare('
+		select
+			round.id, count(distinct panel.id) panels, count(distinct ballot.entry) entries
+		from round
+			left join panel on panel.round = round.id
+			left join ballot on panel.id = ballot.panel and ballot.forfeit != 1
+		where round.name = ?
+			and round.event = ?
+		group by round.id
+	');
+
+	my %events;
+	my %rounds;
+	my %tourns;
+	my %ts;
+
+	AQ:
+	foreach my $aq (@{$aqs}) {
+
+		# Wrap the whole bloody thing into an eval because I cannot have a bug
+		# in one gumming up the works for the rest.  This does unfortunately
+		# mean not much in the way of error reporting but so be it
+
+		$m->print("Doing job ".$aq->{id}." tag ".$aq->{tag}." active tag ".$aq->{active_at}." at $now <br />");
+
+		eval {
+			$aq_lock->execute($aq->{id});
+		};
+
+		eval {
+			$aq_delete->execute($aq->{id});
+		};
+
+		$counter++;
+
+		if ($aq->{round_id} && (not defined $rounds{$aq->{round_id}})) {
+			$rounds{$aq->{round_id}} = Tab::Round->retrieve($aq->{round_id});
+		}
+
+		my $round = $rounds{$aq->{round_id}};
+
+		if ($aq->{event_id} && (not defined $events{$aq->{event_id}})) {
+			$events{$aq->{event_id}} = Tab::Event->retrieve($aq->{event_id});
+		}
+
+		my $event = $events{$aq->{event_id}};
+
+		unless ($event) {
+			$m->print("<p>No event found for event ID ".$aq->{event_id}."</p>");
+			next AQ ;
+		}
+
+		if ($aq->{tourn_id} && (not defined $tourns{$aq->{tourn_id}})) {
+			$tourns{$aq->{tourn_id}} = Tab::Tourn->retrieve($aq->{tourn_id});
+		}
+
+		my $tourn = $tourns{$aq->{tourn_id}};
+
+		unless ($ts{$tourn->id}) {
+			my %tourn_settings = $tourn->all_settings();
+			$ts{$tourn->id} = \%tourn_settings;
+		}
+
+		my %tourn_settings = %{$ts{$tourn->id}};
+
+		if ($aq->{tag} eq "flip") {
+
+			$m->print("Flipping ".$round->realname." of ".$aq->{event_name}."<br />");
+			$m->flush_buffer();
+
+			eval {
+				my $result = $m->comp('/panel/schemat/flips.mhtml',
+					dbh           => $dbh,
+					now           => $now,
+					round         => $round,
+					property_name => "round",
+					setting_name  => "doall",
+					tourn         => $tourn,
+					auto          => 1
+				);
+			};
+
+		} elsif ($aq->{tag} eq "flip_1") {
+
+			$m->print("Flipping ".$round->realname." Flight 1 of ".$aq->{event_name}."<br />");
+			$m->flush_buffer();
+
+			my $result = eval {
+				return $m->comp('/panel/schemat/flips.mhtml',
+					now           => $now,
+					dbh           => $dbh,
+					round         => $round,
+					property_name => "round",
+					setting_name  => "doall",
+					tourn         => $tourn,
+					auto          => 1,
+					flight        => 1
+				);
+			};
+
+			$m->print("Result is $result <br />");
+			$m->flush_buffer();
+
+		} elsif ($aq->{tag} eq "flip_2") {
+
+			$m->print("Flipping ".$round->realname." Flight 2 of ".$aq->{event_name}."<br />");
+			$m->flush_buffer();
+
+			my $result = eval {
+				return $m->comp('/panel/schemat/flips.mhtml',
+					now           => $now,
+					dbh           => $dbh,
+					round         => $round,
+					property_name => "round",
+					setting_name  => "doall",
+					tourn         => $tourn,
+					auto          => 1,
+					flight        => 2
+				);
+			};
+
+			$m->print("Result is $result <br />");
+			$m->flush_buffer();
+		}
+
+		# Errors in an eval should still be reported
+		if ($@) {
+			my $mail = MIME::Lite->new(
+				From    => 'error-handler@tabroom.com',
+				To      => 'errors@tabroom.com',
+				Subject => 'Autoqueue error',
+				Data    => $@,
+			);
+			eval { $mail->send if $mail; };
+		 	undef $@;
+		}
+	}
+
+	$unlock_sth->execute();
+	$unlock_sth->finish();
+
+	my $aq_unlock = $dbh->prepare('
+		delete ts.* from tabroom_setting ts
+		where ts.tag = "autoqueue"
+		and not exists ( select aq.id from autoqueue aq where aq.id = ts.value)
+	');
+
+	$aq_unlock->execute();
+
+	$m->print("\n\nProcessed $counter autoqueue jobs\n");
+	$m->abort();
+
+</%init>
