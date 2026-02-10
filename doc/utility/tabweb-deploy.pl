@@ -38,8 +38,8 @@
 
 			print "Deploying images to ".$row->{hostname}."\n";
 			system "logger -t tabweb.info Deploying images to ".$row->{hostname};
-			my $command = 'cd /opt/deathstar; /home/ansible/.local/bin/ansible-playbook ansible/tabroom.yml --limit='.$row->{hostname}.' ';
-			my $other = '/home/ansible/.local/bin/ansible-playbook ansible/tabroom.yml --limit='.$row->{hostname}.' ';
+			my $command = 'cd /opt/deathstar; /home/ansible/.local/bin/ansible-playbook ansible/tabweb.yml --limit='.$row->{hostname}.' ';
+			my $other = '/home/ansible/.local/bin/ansible-playbook ansible/tabweb.yml --limit='.$row->{hostname}.' ';
 			my $output = `$command`;
 
 			print "Deploy of ".$row->{hostname}." finished with output: \n";

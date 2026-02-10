@@ -416,7 +416,7 @@
 				if ($side_lock_against) {
 
 					my $sides_sth = $dbh->prepare("
-						select entry.code, b1.side, b2.side
+						select entry.code, b1.side, b2.side, p1.bracket, p1.letter
 						from entry,
 							ballot b1, panel p1,
 							ballot b2, panel p2
@@ -429,19 +429,46 @@
 							and b2.panel = p2.id
 							and p2.bye != 1
 
-							and p1.round = ".$round->id."
-							and p2.round = ".$side_lock_against."
+							and p1.round = ?
+							and p2.round = ?
+						order by p1.bracket DESC
 					");
 
-					$sides_sth->execute();
+					$sides_sth->execute($round->id, $side_lock_against);
 
 					my %side_done;
+					my $brackets;
 
-					while (my ($entry, $side1, $side2)  = $sides_sth->fetchrow_array() ) {
+					while (my ($entry, $side1, $side2, $bracket, $letter)  = $sides_sth->fetchrow_array() ) {
+
 						next if $side_done{$entry}++;
+
 						if ($side1 == $side2) {
-							$problems{"sides_uneven"} .= '<p class="warning padless marno">'. $entry." should ";
-							$problems{"sides_uneven"} .= "be on the opposite side this round! ".$round_realname ." </p>";
+
+							if ($bracket > 1) {
+								$brackets++;
+							}
+
+							$problems{"sides_uneven"} .= '<p class="warning nospace flexrow">';
+							$problems{"sides_uneven"} .= '<span class="third">';
+							$problems{"sides_uneven"} .= $entry;
+							$problems{"sides_uneven"} .= '</span><span class="third">Due ';
+
+							if ($side1 == 1) {
+								$problems{"sides_uneven"} .= $aff_string." is ".$neg_string;
+							} else {
+								$problems{"sides_uneven"} .= $neg_string." is ".$aff_string;
+							}
+
+							$problems{"sides_uneven"} .= '</span><span class="sixth grow">';
+							$problems{"sides_uneven"} .= "Sect $letter";
+
+							if ($brackets) {
+								$problems{"sides_uneven"} .= '</span><span class="sixth">';
+								$problems{"sides_uneven"} .= "Bkt $bracket";
+							}
+
+							$problems{"sides_uneven"} .= " $round_realname </span></p>";
 						}
 					}
 				}
@@ -555,23 +582,30 @@
 						ballot.side,
 						ballot.panel,
 						round.id round, round.name, round.label,
-						ballot.bye, ballot.forfeit, panel.bye pbye
+						ballot.bye, ballot.forfeit, panel.bye pbye,
+						thispanel.letter, thispanel.bracket
 
-					from (entry, ballot, panel, round)
+					from (entry, ballot, panel, round, panel thispanel, ballot myballot)
 
 					where round.event = ?
 						and round.name <= ?
 						and round.id = panel.round
 						and panel.id = ballot.panel
 						and ballot.entry = entry.id
+						and myballot.entry = entry.id
+						and myballot.panel = thispanel.id
+						and thispanel.round = ?
 				");
 
-				$sth->execute($event->id, $round->name);
+				$sth->execute($event->id, $round->name, $round->id);
 				my $results = $sth->fetchall_hash();
 				my %side_count;
 				$tags{"side_way_bad"} = "Entries with excessive side imbalances";
 
 				foreach my $result (@{$results}) {
+
+					$side_count{$result->{id}}{"bracket"} = $result->{bracket};
+					$side_count{$result->{id}}{"letter"}  = $result->{letter};
 
 					if (
 						$result->{bye}
@@ -586,7 +620,10 @@
 					}
 				}
 
-				foreach my $entry (keys %side_count) {
+				foreach my $entry (sort {
+					$side_count{$b}{bracket} <=> $side_count{$a}{bracket}
+					|| $side_count{$b}{letter} cmp $side_count{$a}{letter}
+				} keys %side_count) {
 
 					my $diff = abs($side_count{$entry}{"sides"}{1} - $side_count{$entry}{"sides"}{2});
 					$side_count{$entry}{"sides"}{1} = 0 unless $side_count{$entry}{"sides"}{1};
@@ -596,12 +633,18 @@
 
 					if ($diff > (1 + $bye_count)) {
 						$problems{"side_way_bad"}
-							.= '<p class="warning padless marno">'
-							. $side_count{$entry}{"code"}." has a side imbalance: "
-							. $side_count{$entry}{"sides"}{1}." on $aff_string, "
-							. $side_count{$entry}{"sides"}{2}." on $neg_string "
-							. $bye_count." byes or forfeits "
-							. '</p>';
+							.= '<p class="warning nospace flexrow">'
+							. '<span class="half padvertno">'
+							. $side_count{$entry}{"code"}." side imbalance: "
+							. '</span><span class="eighth padvertno">'
+							. $side_count{$entry}{"bracket"}."/".$side_count{$entry}{"letter"}
+							. '</span><span class="eighth padvertno">'
+							. $side_count{$entry}{"sides"}{1}." $aff_string, "
+							. '</span><span class="eighth padvertno">'
+							. $side_count{$entry}{"sides"}{2}." $neg_string, "
+							. '</span><span class="eighth padvertno">'
+							. $bye_count." bye/ffts "
+							. '</span></p>';
 					}
 				}
 			}
@@ -1236,7 +1279,7 @@
 
 		unless ($has_judges > 0) {
 			$problems{"judge_short_sections_$round"}
-				= '<p class="warning padless marno"> No judges have been assigned to '. $round_realname .'</p>';
+				= '<p class="warning padless marno"> No judges have been assigned.'. $round_realname .'</p>';
 		}
 
 		undef %panel_judgecount;
@@ -1353,16 +1396,17 @@
 
 			my $second_hit_sth = $dbh->prepare("
 				select distinct me.code,
-					opp.code othername, otherround.name roundname,
+					opp.code othername, r2.name roundname,
 					me_b1.side side1, me_b2.side side2,
 					otherround.type
 
 				from entry me, entry opp, round otherround,
 
-					ballot me_b1, ballot opp_b1, panel p1,
-					ballot me_b2, ballot opp_b2, panel p2
+					ballot me_b1, ballot opp_b1, panel p1, round r1,
+					ballot me_b2, ballot opp_b2, panel p2, round r2
 
-					where me_b1.entry = me.id
+				where 1=1
+					and me_b1.entry = me.id
 					and opp_b1.entry  = opp.id
 					and me_b1.panel   = opp_b1.panel
 					and me_b1.panel   = p1.id
@@ -1373,8 +1417,9 @@
 					and opp_b2.entry = opp.id
 					and me_b2.panel  = opp_b2.panel
 					and me_b2.panel  = p2.id
-					and p2.round 	!= p1.round
-					and p2.round     = otherround.id
+					and p2.round 	 = r2.id
+					and p1.round     = r1.id
+					and r1.name      > r2.name
 					$limit
 
 					and me.id > opp.id

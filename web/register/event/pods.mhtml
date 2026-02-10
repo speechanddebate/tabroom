@@ -2,12 +2,14 @@
 	$event_id
 	$tourn
 	$tourn_settings
+	$dbh
 </%args>
 <%init>
 
 	my $event = Tab::Event->retrieve($event_id);
+	my %event_settings = $event->all_settings();
 
-	unless ($event->setting("round_robin")) {
+	unless ($event_settings{"round_robin"}) {
 		$m->print("Pods only make sense for round robins.");
 		$m->abort;
 	}
@@ -17,11 +19,51 @@
 		active => 1
 	);
 
-	my $no_codes++ if $event->setting("code_style") eq "names";
+	my $pods = $event_settings{"pods"};
 
-	@entries = sort {$a->name <=> $b->name} @entries;
+	unless ($pods && scalar (keys %{$pods}) ) {
 
-	@entries = sort {$a->code <=> $b->code} @entries unless $no_codes;
+		my $legacy_sth = $dbh->prepare('
+			select
+				tag, value
+			from event_setting
+			where 1=1
+				and event = ?
+				and tag like "pod%"
+		');
+
+		$legacy_sth->execute($event_id);
+
+		my $legacies = $legacy_sth->fetchall_hash();
+
+		foreach my $leg (@{$legacies}) {
+			my $id = $leg->{tag};
+			$id =~ s/[\D_]//g;
+			$pods->{$id} = $leg->{value};
+		}
+	}
+
+	my $entry_sth = $dbh->prepare('
+		select
+			entry.id, entry.name, entry.code,
+			school.id school_id, school.name school_name, pod.value pod
+		from entry
+			left join entry_setting pod on pod.entry = entry.id and pod.tag = "pod"
+			left join school on entry.school = school.id
+		where 1=1
+			and entry.active = 1
+			and entry.event = ?
+		order by entry.code, entry.name
+	');
+
+	$entry_sth->execute($event->id);
+	my $entries = $entry_sth->fetchall_hash();
+
+	foreach my $entry (@{$entries}) {
+		unless ($pods->{$entry->{pod}}) {
+			$pods->{$entry->{pod}} = "IAMAPOD";
+		}
+	}
 
 </%init>
 
@@ -33,7 +75,6 @@
 	&>
 
 	<div class="main">
-
 
 		<span class="seveneighths nospace">
 			<h4>Round robin pods</h4>
@@ -51,7 +92,10 @@
 
 		<& "/funclib/tablesorter.mas", table => "pods" &>
 
-		<form action="pods_save.mhtml" method="post">
+		<form
+			action = "pods_save.mhtml"
+			method = "post"
+		>
 
 		<input
 			type  = "hidden"
@@ -65,11 +109,9 @@
 
 				<tr class="yellowrow">
 
-%					unless ($no_codes) {
-						<th class="smaller">
-							Code
-						</th>
-%					}
+					<th class="smaller">
+						Code
+					</th>
 
 					<th class="smaller">
 						Entry Name
@@ -88,64 +130,51 @@
 
 			<tbody>
 
-<%perl>
-				my $count;
-				my %pods;
-
-				foreach my $entry (@entries) {
-
-					$pods{$entry->setting("pod")}++ if $entry->setting("pod");
-
-</%perl>
-
+%				foreach my $entry (@{$entries}) {
 					<tr>
 
-%						unless ($no_codes) {
-							<td class="smallish">
-								<a
-									class="white"
-									href="/register/entry/edit.mhtml?entry_id=<% $entry->id %>"
-									tabindex=-1
-								>
-									<% $entry->code %>
-								</a>
-							</td>
-%						}
-
 						<td class="smallish">
-							<a class="white"
-								href="/register/entry/edit.mhtml?entry_id=<% $entry->id %>"
+							<a
+								class="white"
+								href="/register/entry/edit.mhtml?entry_id=<% $entry->{id} %>"
 								tabindex=-1
 							>
-								<% $entry->name %>
+								<% $entry->{code} %>
+							</a>
+						</td>
+
+						<td class="smallish">
+							<a class     = "white"
+								href     = "/register/entry/edit.mhtml?entry_id=<% $entry->{id} %>"
+								tabindex = -1
+							>
+								<% $entry->{name} %>
 							</a>
 						</td>
 
 						<td class="smallish">
 							<a
-								class="white"
-								href="/register/school/entries.mhtml?event_id=<% $entry->event->id %>&school_id=<% $entry->school->id %>"
-								tabindex=-1
+								class    = "white"
+								href     = "/register/school/entries.mhtml?event_id=<% $event->id %>&school_id=<% $entry->{school_id} %>"
+								tabindex = -1
 							>
-								<% $entry->school->short_name %>
+								<% $entry->{school_name} %>
 							</a>
 						</td>
 					</td>
 
-					<td class="smallish">
-
-						<span class="hidden"> <% $entry->setting("pod") %> </span>
-
+					<td
+						class     = "smallish"
+						data-text = "<% $entry->{pod} %>"
+					>
 						<input
 							type  = "number"
 							min   = "0"
 							max   = "99"
-							size  = "5"
-							name  = "<% $entry->id %>"
-							value = "<% $entry->setting("pod") %>"
+							name  = "<% $entry->{id} %>"
+							value = "<% $entry->{pod} %>"
 						>
 					</td>
-
 				</tr>
 %			}
 
@@ -153,18 +182,22 @@
 		</table>
 
 		<div class="libl pagefull rightalign">
-			<input
-				type  = "submit"
-				value = "Save Pod Assignments"
-				class = "thin"
-			>
+			<span class="centeralign third">
+				<input
+					type  = "submit"
+					value = "Save Pod Assignments"
+				>
+			</span>
 		</div>
 
 		</form>
 
 		<h4>Pod labels</h4>
 
-		<form action="pods_names.mhtml" method="post">
+		<form
+			action = "pods_names.mhtml"
+			method = "post"
+		>
 
 		<input
 			type  = "hidden"
@@ -172,43 +205,35 @@
 			value = "<% $event->id %>"
 		>
 
-		<table>
+%		foreach my $pod (sort keys %{$pods}) {
 
-%			foreach my $pod (sort keys %pods) {
+%			undef $pods->{$pod} if $pods->{$pod} eq "IAMAPOD";
 
-				<tr class="row">
+			<div class="row flexrow">
+				<span class="third padleftmuchmore semibold">
+					Pod <% $pod %>
+				</span>
 
-					<td>
-						<% $pod %>
-					</td>
-
-					<td>
-						<input
-							type  = "text"
-							name  = "<% $pod %>"
-							size  = "32"
-							value = "<% $event->setting("pod_".$pod) %>"
-						>
-					</td>
-
-				</tr>
-
-%			}
-
-			<tr class="liblrow">
-
-				<td colspan="5" class="rightalign">
+				<span class='twothirds padleftmore padrightmuchmore'>
 					<input
-						type  = "submit"
-						class = "thin"
-						value = "Save Pod Labels"
+						type  = "text"
+						name  = "<% $pod %>"
+						value = "<% $pods->{$pod} %>"
 					>
-					</form>
-				</td>
+				</span>
+			</div>
+%		}
 
-			</tr>
+		<div class="liblrow rightalign">
+			<span class="third centeralign">
+				<input
+					type  = "submit"
+					value = "Save Pod Labels"
+				>
+			</span>
+		</div>
 
-		</table>
+		</form>
 
 	</div>
 
