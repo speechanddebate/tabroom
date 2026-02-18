@@ -5,14 +5,15 @@ Tab::Event->columns(Primary => qw/id/);
 Tab::Event->columns(Essential => qw/tourn name abbr category
 									type level fee
 									rating_subset pattern timestamp
+									nsda_category
 								/);
 Tab::Event->columns(TEMP => qw/panelid supp conn/);
 
 __PACKAGE__->_register_datetimes( qw/timestamp/);
 
-Tab::Event->has_a(tourn => 'Tab::Tourn');
-Tab::Event->has_a(category => 'Tab::Category');
-Tab::Event->has_a(pattern => 'Tab::Pattern');
+Tab::Event->has_a(tourn         => 'Tab::Tourn');
+Tab::Event->has_a(category      => 'Tab::Category');
+Tab::Event->has_a(pattern       => 'Tab::Pattern');
 Tab::Event->has_a(rating_subset => 'Tab::RatingSubset');
 
 Tab::Event->has_many(files => 'Tab::File', 'event');
@@ -20,7 +21,6 @@ Tab::Event->has_many(settings => "Tab::EventSetting", "event");
 Tab::Event->has_many(result_sets => "Tab::ResultSet", "event");
 Tab::Event->has_many(entries => 'Tab::Entry', 'event' => { order_by => 'code'} );
 Tab::Event->has_many(rounds => 'Tab::Round', 'event' => { order_by => 'name'}  );
-
 
 Tab::Round->set_sql(prelims_by_event => "
 	select round.*
