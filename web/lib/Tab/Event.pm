@@ -4,7 +4,7 @@ Tab::Event->table('event');
 Tab::Event->columns(Primary => qw/id/);
 Tab::Event->columns(Essential => qw/tourn name abbr category
 									type level fee
-									rating_subset pattern timestamp
+									rating_subset pattern timestamp code_style
 									nsda_category
 								/);
 Tab::Event->columns(TEMP => qw/panelid supp conn/);
