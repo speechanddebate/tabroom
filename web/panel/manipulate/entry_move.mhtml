@@ -8,159 +8,156 @@
 </%args>
 <%init>
 
+	use List::Util 'shuffle';
+
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
 	my $entry = Tab::Entry->retrieve($entry_id);
-	my $panel = Tab::Panel->retrieve($panel_id);
+	my $new_panel = Tab::Panel->retrieve($panel_id);
+	my $event = $entry->event;
 
-	$m->abort unless $entry && $panel;
+	unless ($entry && $new_panel) {
+		$m->comp("/funclib/abort.mas",
+			message => "No valid entry or section found (Entry ID $entry_id, Section ID $panel_id)"
+		);
+	}
 
-	my $now = DateTime->now();
-	my $round = $panel->round;
-	my $event = $round->event;
-
-	my @panels;
+	my @new_panels;
+	my @rounds;
 
 	if ($event->type eq "congress") {
-		foreach my $round ($m->comp("/funclib/congress_ties.mas", round => $round)) {
-			push @panels, $round->panels(letter => $panel->letter);
+		foreach my $round ($m->comp("/funclib/congress_ties.mas", round => $new_panel->round)) {
+			push @rounds, $round;
+			push @new_panels, $round->panels(letter => $new_panel->letter);
 		}
 	} else {
-		@panels = ($panel);
+		push @new_panels, $new_panel;
+		push @rounds, $new_panel->round;
 	}
 
 	my $update_order_sth = $dbh->prepare("
 		update ballot set speakerorder = ? where entry = ? and panel = ?
 	");
 
+	my $get_order_sth = $dbh->prepare("
+		select panel.id, panel.letter, ballot.speakerorder
+			from ballot, panel
+		where ballot.entry = ?
+			and ballot.panel = panel.id
+			and panel.round = ?
+	");
+
+	my $wipe_current_sth = $dbh->prepare("
+		delete ballot.* from panel,ballot
+		where 1=1
+			and ballot.entry = ?
+			and ballot.panel = panel.id
+			and panel.round = ?
+	");
+
+	my %old_refs;
+
 	PANEL:
-	foreach my $panel (@panels) {
+	foreach my $round (@rounds) {
+		$get_order_sth->execute($entry_id, $round->id);
+		$old_refs{$round->id} = $get_order_sth->fetch_hash();
+		$wipe_current_sth->execute($entry_id, $round->id);
 
-		my @ballots = $panel->ballots();
-		my $round   = $panel->round();
-		my $sample;
-		my %taken;
-
-		foreach my $ballot (@ballots) {
-			$taken{$ballot->speakerorder}++;
-			if ($ballot->entry > 0) {
-				$sample = $ballot->entry();
-			}
-		}
-
-		my $order = 1;
-		while ($taken{$order}) {
-			$order++;
-		}
-
-		my $old_panel;
-
-		Tab::Panel->set_sql( current => "
-			select panel.*
-				from panel, ballot
-			where panel.round = ?
-				and panel.id = ballot.panel
-				and ballot.entry = ?
-		");
-
-		my @old_panels = Tab::Panel->search_current(
-			$round->id,
-			$entry->id
-		);
-
-		my %here_already;
-		my $old_order;
-
-		PANEL:
-		foreach my $old_panel (@old_panels) {
-
-			if ($old_panel && $old_panel->id == $panel->id) {
-				$here_already{$old_panel->id}++;
-				next PANEL;
-			}
-
-			unless ($ARGS{"add"}) {
-				if ($old_panel) {
-					foreach my $ballot ($entry->ballots(panel => $old_panel->id)) {
-						my $old_order = $ballot->speakerorder;
-						$ballot->delete();
-					}
-					$m->comp("/panel/round/congress_recency.mhtml",
-						dbh   => $dbh,
-						round => $round,
-						panel => $panel->id,
-						fix   => 'plz'
-					);
-				}
-			}
-		}
-
-		unless ($here_already{$panel->id}) {
-
-			my %orders;
-
-			foreach my $ballot ($panel->ballots) {
-				if ($ballot->speakerorder >= $old_order) {
-					my $other = $ballot->entry;
-					$orders{$other->id} = ($ballot->speakerorder + 1);
-				}
-			}
-
-			foreach my $other (sort { $orders{$b} <=> $orders{$a} } keys %orders) {
-				Tab::debuglog("Park ".$other->code." to speak ".$orders{$other});
-				$update_order_sth->execute($orders{$other}, $other, $panel->id);
-			}
-
-			foreach my $ballot (@ballots) {
-				if ($sample) {
-					next unless $ballot->entry == $sample;
-				}
-
-				my $new_ballot = $ballot->copy({
-					entry         => $entry->id,
-					speakerorder  => $old_order;
-				});
-			}
-
-		}
-
-		my $oldline;
-		my $newline;
-
-		if ($old_panel) {
-			$oldline = "Entry ".$entry->code." moved from ".$old_panel->letter." of ".$round->realname." of ".$event->abbr;
-		}
-
-		$newline = "Entry ".$entry->code." moved to ".$panel->letter." of ".$round->realname." of ".$event->abbr;
-
-		$m->comp("/funclib/log.mas",
-			type        => "move",
-			event       => $entry->id,
-			tourn       => $tourn->id,
-			entry       => $entry->id,
-			panel       => $old_panel,
-			description => $oldline,
-			person      => $person->id
-		);
-
-		$m->comp("/funclib/log.mas",
-			type        => "move",
-			event       => $entry->id,
-			tourn       => $tourn->id,
-			entry       => $entry->id,
-			panel       => $panel,
-			description => $newline,
-			person      => $person->id
+		$m->comp("/panel/round/congress_recency.mhtml",
+			dbh   => $dbh,
+			round => $round,
+			panel => $old_refs{$round->id}{id},
+			fix   => 'plz'
 		);
 	}
 
-	my $msg = "Competitor ".$entry->code." was moved into ".$panel->letter;
+	my $current_entry_sth  = $dbh->prepare("
+		select ballot.id, ballot.entry, ballot.speakerorder
+			from ballot
+		where 1=1
+			and ballot.panel = ?
+		group by ballot.entry
+		order by ballot.speakerorder DESC
+	");
+
+	foreach my $new_panel (@new_panels) {
+
+		my $new_round = $new_panel->round;
+		my $entry_order = $old_refs{$new_round->id}{speakerorder};
+
+		$current_entry_sth->execute($new_panel->id);
+		my $currents = $current_entry_sth->fetchall_hash();
+
+		unless ($entry_order) {
+			# If I do not come with a speaker order, just give me one at
+			# random so the moved entries are not always last.
+			my @entries = shuffle @{$currents};
+			$entry_order = $entries[0]->{speakerorder};
+		}
+
+		# Stick the ordered newbie where they came from and bump everyone else
+		# up to make room.
+
+		foreach my $current (@{$currents}) {
+			if ($current->{speakerorder} >= $entry_order) {
+				$update_order_sth->execute(
+					($current->{speakerorder} + 1),
+					$current->{entry},
+					$new_panel->id
+				);
+			}
+		}
+
+		my @samples = shuffle @{$currents};
+		my $sample_entry_id = $samples[0]->{entry};
+
+		my @sample_ballots = Tab::Ballot->search(
+			entry => $sample_entry_id,
+			panel => $new_panel
+		);
+
+		foreach my $ballot (@sample_ballots) {
+			$ballot->copy({
+				entry        => $entry->id,
+				speakerorder => $entry_order
+			});
+		}
+
+		$m->comp("/panel/round/congress_recency.mhtml",
+			dbh   => $dbh,
+			round => $new_round,
+			panel => $new_panel->id,
+			fix   => 'plz'
+		);
+
+		my $description = "Manually moved ".$entry->code;
+
+		if ($old_refs{$new_round->id}{id}) {
+			$description .= " from section ".$old_refs{$new_round->id}{letter};
+		}
+
+		$description .= " to ".$new_panel->letter." in ".$new_round->realname;
+
+		foreach my $panel_id ($new_panel->id, $old_refs{$new_round->id}{id}) {
+			$m->comp("/funclib/log.mas",
+				type        => "move",
+				event       => $entry->id,
+				tourn       => $tourn->id,
+				entry       => $entry->id,
+				panel       => $panel_id,
+				description => $description,
+				person      => $person->id
+			);
+		}
+	}
+
+	my $msg = $entry->code." manually moved.";
 
 	if ($manual) {
-		$m->redirect("manual_rebalance.mhtml?round_id=".$round->id."&entry_id=$entry_id&new_panel_id=".$panel->id."&msg=$msg")
+		$m->redirect("manual_rebalance.mhtml?round_id=".$new_panel->round->id."&entry_id=$entry_id&new_panel_id=".$new_panel->id."&msg=$msg")
 	} else {
-		$m->redirect("entry_edit.mhtml?round_id=".$round->id."&entry_id=$entry_id&msg=$msg");
+		$m->redirect("entry_edit.mhtml?round_id=".$new_panel->round->id."&entry_id=$entry_id&msg=$msg");
 	}
 
 </%init>
