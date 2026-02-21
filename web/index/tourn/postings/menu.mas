@@ -67,46 +67,118 @@
 
 	my $tz = $tourn->tz;
 
-	my @published = $m->comp('/funclib/published_rounds.mas', tourn => $tourn);
-	my @listed = $m->comp('/funclib/listed_rounds.mas', tourn => $tourn);
+	my $published_sth = $dbh->prepare('
+        select round.*,
+			event.name event_name, event.abbr event_abbr, event.type event_type
+		from round, event
+        where round.published > 0
+			and round.event = event.id
+			and event.tourn = ?
+        order by round.name DESC, event.name
+	');
 
-	my %published_rounds = map {$_->id => 1} @published;
-	my %listed_rounds = map {$_->id => 1} @listed;
+	$published_sth->execute($tourn->id);
+	my $published_rounds = $published_sth->fetchall_hash();
+
+	my $listed_sth = $dbh->prepare("
+        select round.*, round_setting.value as cleared,
+			event.name event_name, event.abbr event_abbr, event.type event_type
+		from round, event, round_setting
+		where round.event = event.id
+			and event.tourn = ?
+			and round_setting.round = round.id
+			and round_setting.tag = 'publish_entry_list'
+			and round_setting.value = 1
+			and round.published < 0
+        order by round.name DESC, event.name
+	");
+
+	$listed_sth->execute($tourn->id);
+	my $listed_rounds = $listed_sth->fetchall_hash();
+
+	my $bracket_sth = $dbh->prepare("
+		select
+			result_set.bracket,
+			result_set.id, result_set.label, result_set.event,
+			event.name event_name, event.abbr event_abbr, event.type event_type
+
+		from (result_set, event)
+		where 1=1
+			and event.tourn = ?
+			and event.id = result_set.event
+			and result_set.bracket =1
+			and result_set.published = 1
+	");
+
+	$bracket_sth->execute($tourn->id);
+	my $brackets = $bracket_sth->fetchall_hash();
 
 	my @rounds;
-	push @rounds, @published;
-	push @rounds, @listed;
 
-    #uniq
-	my %seen = ();
-    @rounds = grep { ! $seen{$_->id} ++ } @rounds;
+	push @rounds, @{$published_rounds};
+	push @rounds, @{$listed_rounds};
 
-	my %event_rounds;
+	my %events;
 
-	foreach my $round (@rounds) {
-		push @{$event_rounds{$round->event->id}}, $round;
-	}
+	my $postings_sth = $dbh->prepare("
+		select
+			posting.id, posting.label, posting.event, posting.filename,
+			event.name, event.abbr, event.type
+		from file posting
+			left join event on posting.event = event.id
+		where 1=1
+			and posting.published = 1
+			and posting.tourn = ?
+			and posting.tag = 'posting'
+	");
 
-	my @events = sort {$a->name cmp $b->name} $tourn->events;
+	$postings_sth->execute($tourn->id);
+	my $postings = $postings_sth->fetchall_hash();
 
-	my @postings =
-		sort {$b->id <=> $a->id}
-		$tourn->files( tag => "posting", published => 1);
-
-	my @event_postings;
 	my @other_postings;
 
-	foreach my $posting (@postings) {
-		if ($event && $posting->event && $posting->event == $event) {
-			push @event_postings, $posting;
-		} elsif ($posting->event) {
+	foreach my $round (@rounds, @{$brackets}, @{$postings}) {
 
+		if ($round->{event}) {
+			unless ($events{$round->{event}}) {
+				$events{$round->{event}} = {
+					id   => $round->{event},
+					name => $round->{event_name},
+					type => $round->{event_type},
+					abbr => $round->{event_abbr},
+				};
+			}
+		}
+
+		if ($round->{filename}) {
+			if ($round->{event}) {
+				push @{$events{$round->{event}}{postings}}, $round;
+			} else {
+				push @other_postings, $round;
+			}
+		} elsif ($round->{bracket}) {
+			$events{$round->{event}}{bracket} = $round;
 		} else {
-			push @other_postings, $posting;
+			push @{$events{$round->{event}}{rounds}}, $round;
 		}
 	}
 
 </%init>
+
+	<script>
+
+		function showEvent() {
+			const eventId = $(`#eventSelector`).val();
+			$(`.eventListing`).addClass('hidden');
+			if (eventId) {
+				$(`#${eventId}`).removeClass('hidden');
+			}
+		}
+
+		$(document).ready( () => {
+			showEvent();
+		});
+	</script>
 
 	<div class="menu">
 
@@ -114,210 +186,93 @@
 
 			<h4>Schematics</h4>
 
-			<form action="index.mhtml" method="post">
-
-			<input
-				type  = "hidden"
-				name  = "tourn_id"
-				value = "<% $tourn->id %>"
-			>
-
 			<div class="even full centeralign">
-
 				<select
-					name     = "event_id"
-					class    = "fixedmed"
-					onchange = 'this.form.submit()'
+					name     = "eventSelector"
+					id       = "eventSelector"
+					onchange = 'showEvent();'
 				>
+					<option value=""></option>
+<%perl>
+					foreach my $event_id (
+						sort {
+							$events{$a}{type} cmp $events{$b}{type}
+							|| $events{$a}{name} cmp $events{$b}{name}
+						} keys %events
+					) {
 
-				<option value=""></option>
-
-%				my $notfirst;
-%				foreach my $oevent (@events) {
-%					next unless $event_rounds{$oevent->id};
-
-					<option value="<% $oevent->id %>"
-						<% $oevent == $event
-							? 'selected="selected"'
-							: ""
-						%>
-					><% $oevent->name %></option>
-%				}
-
+						my $oevent = $events{$event_id};
+</%perl>
+						<option value="<% $event_id %>"
+							<% $oevent->{id} == $event
+								? 'selected="selected"'
+								: ""
+							%>
+						><% $oevent->{name} %></option>
+%					}
 				</select>
 			</div>
 
-			</form>
-
 <%perl>
-
-			if ($event) {
-
-				my @brackets = Tab::ResultSet->search(
-					bracket => 1,
-					event   => $event->id,
-					published => 1
-				);
-
-				foreach my $bracket (@brackets) {
-
-</%perl>
-					<a
-						class = "blue full nowrap"
-						href  = "/index/tourn/results/bracket.mhtml?tourn_id=<% $tourn->id %>&result_id=<% $bracket->id %>">
-						<% $bracket->label %>
-					</a>
-<%perl>
-
-				}
-
-				if ($event_rounds{$event->id}) {
-
-					my @rounds =
-						sort {$b->name <=> $a->name}
-						@{$event_rounds{$event->id}};
-
-					@rounds =
-						sort {$a->name <=> $b->name} @rounds
-						if $event->type eq "speech"
-						|| $event->type eq "congress";
-
-					foreach my $published (@rounds) {
-
-						if ($published_rounds{$published->id}) {
-</%perl>
-							<a
-								class="<%
-									($round == $published->id && not defined $ARGS{"results"})
-									? "dk"
-									: "" %>blue full nowrap"
-								href="/index/tourn/postings/round.mhtml?tourn_id=<% $tourn->id %>&round_id=<% $published->id %>">
-								<% $event->abbr %>
-								<% $published->realname %>
-							</a>
-
-%						} elsif ($listed_rounds{$published->id}) {
-
-							<a
-								class="<% ($round == $published->id)
-									? "dk"
-									: "" %>blue full"
-								href="/index/tourn/postings/cleared.mhtml?tourn_id=<% $tourn->id %>&round_id=<% $published->id %>">
-								<% ($published->label) ? $published->label : "Round ".$published->name %>
-								Advancing Entries
-							</a>
-<%perl>
-
-						}
-					}
-				}
-
-				if (@event_postings) {
-
-</%perl>
-					<hr />
-
-					<h4><% $event->abbr %> Postings</h4>
-
-%					foreach my $posting (@event_postings) {
-
-						<a
-							class="blue full"
-							href="<% $Tab::s3_url %>/<% $tourn->id %>/postings/<% $posting->id %>/<% $posting->filename %>">
-
-							<span class="threequarters">
-								<% ($posting->label) ? $posting->label : $posting->filename %>
-							</span>
-
-							<span class="quarter centeralign fa fa-download">
-							</span>
-
-						</a>
-<%perl>
-
-					}
-				}
-
-				if ($tourn->setting("nsda_nats") || $tourn->setting("nsda_district")) {
-
-					my $out_yes;
-					my $color;
-
-					if ($ARGS{"outs"}) {
-
-						$out_yes++;
-						$color = "dkblue";
-
-					} else {
-
-						my %outs = $m->comp(
-							"/funclib/event_entry_settings.mas",
-							event => $event,
-							value => 1,
-							tag   => "down"
-						);
-
-						if (keys %outs) {
-							$out_yes++;
-							$color = "blue";
-						}
-					}
-
-					if ($out_yes) {
-						$m->print('
-							<a href="downs.mhtml?event_id='.$event->id.'"
-							   class="'.$color.' full"
-							>Down &amp; Outs</a>');
-					}
-				}
-
-			}
-
-			undef $notfirst;
-
-			my $sth = $dbh->prepare("
-				select category.id, category.name
-					from category
-				where category.tourn = ?
-
-				and exists (
-					select cs.id
-						from category_setting cs
-					where cs.category = category.id
-						and cs.tag = 'field_report'
-				)
-
-				order by category.name
-			");
-
-			$sth->execute($tourn->id);
-
-			while (
-				my (
-					$ocategory_id, $ocategory_name
-				) = $sth->fetchrow_array()
+			foreach my $event_id (
+				sort {
+					$events{$a}{type} cmp $events{$b}{type}
+					|| $events{$a}{name} cmp $events{$b}{name}
+				} keys %events
 			) {
 
-				unless ($notfirst++) {
+				my $event = $events{$event_id};
 </%perl>
-					<h4>Judges</h4>
-%				}
+				<div class="padleft blueborderleft eventListing hidden" id="<% $event->{id} %>">
 
-				<a
-					class="<% $ARGS{"whoami"} eq "jlist" && $category->id == $ocategory_id ? "dk" : "" %>blue full"
-					href="judge_list.mhtml?category_id=<% $ocategory_id %>&tourn_id=<% $tourn->id %>"
-				>
-					<% $ocategory_name %>
-				</a>
+%					if ($event->{bracket}) {
+						<a
+							class = "blue full nowrap padleft"
+							href  = "/index/tourn/results/bracket.mhtml?tourn_id=<% $tourn->id %>&result_id=<% $event->{bracket}{id} %>">
+							<% $event->{abbr} %>
+							<% $event->{bracket}{label} %>
+						</a>
+%					}
+
+%					foreach my $posted (sort {$a->{name} <=> $b->{name}} @{$event->{rounds}}) {
+%						if ($posted->{cleared}) {
+							<a
+								class="<% $round == $posted->{id} ? "dk" : "" %>blue full nowrap padleft"
+								href="/index/tourn/postings/cleared.mhtml?tourn_id=<% $tourn->id %>&round_id=<% $posted->{id} %>"
+							>
+								<% $event->{abbr} %>
+								<% $posted->{label} || "Round ".$posted->{name} %>
+								Advancing Entries
+							</a>
+%						} else {
+							<a
+								class="<% $round == $posted->{id} ? "dk" : "" %>blue full nowrap padleft"
+								href="/index/tourn/postings/round.mhtml?tourn_id=<% $tourn->id %>&round_id=<% $posted->{id} %>"
+							>
+								<% $event->{abbr} %>
+								<% $posted->{label} || "Round ".$posted->{name} %>
+							</a>
+%						}
+%					}
+
+%					foreach my $posting (sort {$a->{name} <=> $b->{name}} @{$event->{postings}}) {
+						<a
+							class="blue flexrow"
+							href="<% $Tab::s3_url %>/<% $tourn->id %>/postings/<% $posting->{id} %>/<% $posting->{filename} %>"
+						>
+							<span class="threequarters padleft">
+								<% $posting->{label} || $posting->{filename} %>
+							</span>
+							<span class="quarter centeralign fa fa-download">
+							</span>
+						</a>
+%					}
+
+				</div>
 %			}
-
 <%perl>
 
-			undef $notfirst;
-
-			$sth->finish();
-
-			$sth = $dbh->prepare("
+			my $jpool_sth = $dbh->prepare("
 				select distinct jpool.id, jpool.name
 
 				from jpool, category
@@ -334,51 +289,40 @@
 				order by category.name, jpool.name
 			");
 
-			$sth->execute($tourn->id);
+			$jpool_sth->execute($tourn->id);
+			my $jpools = $jpool_sth->fetchall_hash();
 
-			while (
-				my (
-					$jpool_id, $jpool_name
-				) = $sth->fetchrow_array()
-			) {
-
-				unless ($notfirst++) {
 </%perl>
-					<h5>Judge Pools</h5>
-%				}
-
-				<a
-					class="<% ($jpool_id == $jpool) ? "dk" : "" %>blue full"
-					href="jpool.mhtml?tourn_id=<% $tourn->id %>&jpool_id=<% $jpool_id %>"
-				>
-					<% $jpool_name %>
-				</a>
+%			if (@{$jpools}) {
+				<h5>Published Judge Pools</h5>
+				<div class="padleft blueborderleft">
+%					foreach my $jpool_ref (@{$jpools}) {
+						<a
+							class="<% ($jpool_ref->{id} == $jpool) ? "dk" : "" %>blue full"
+							href="jpool.mhtml?tourn_id=<% $tourn->id %>&jpool_id=<% $jpool->{id} %>"
+						>
+							<% $jpool_ref->{name} %>
+						</a>
+%					}
+				</div>
 %			}
 
 %			if (@other_postings) {
-
 				<h4>Other Postings</h4>
-
 %				foreach my $posting (@other_postings) {
-
 					<a
-						class = "blue full"
-						href  = "<% $Tab::s3_url %>/<% $tourn->id %>/postings/<% $posting->id %>/<% $posting->filename %>"
+						class = "blue flexrow"
+						href  = "<% $Tab::s3_url %>/<% $tourn->id %>/postings/<% $posting->{id} %>/<% $posting->{filename} %>"
 					>
-
 						<span class="threequarters">
-							<% ($posting->label) ? $posting->label : $posting->filename %>
+							<% $posting->{label} || $posting->{filename} %>
 						</span>
-
 						<span class="quarter centeralign fa fa-download">
 						</span>
-
 					</a>
 %				}
 %			}
-
 		</div>
 	</div>
 
-%	;
 

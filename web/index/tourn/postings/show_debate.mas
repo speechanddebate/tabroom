@@ -2,6 +2,7 @@
 	$round
 	$debug   => undef
 	$sort_by => "letter"
+	$person  => undef
 </%args>
 <%init>
 
@@ -15,18 +16,13 @@
 		);
 	}
 
+	unless ($round->published > 0) {
+		$m->comp("/funclib/abort.mas",
+			message => "This round is not yet published"
+		);
+	}
+
 	my $dbh = Tab::DBI->db_Main();
-
-	my $sth = $dbh->prepare("
-		select
-			count(round.id)
-		from round
-		where round.event =?
-			and round.post_primary = 3
-	");
-
-	$sth->execute($event->id);
-	my ($published) = $sth->fetch();
 
 	my $no_codes = $event->category->setting("no_codes");
 	my %event_settings = $event->all_settings();
@@ -34,75 +30,103 @@
 	my $pods = $event_settings{pods};
 	my $anonymous_public = $event_settings{"anonymous_public"};
 
-	Tab::Panel->columns(TEMP => "roomurl");
-	Tab::Panel->columns(TEMP => "roomname");
-	Tab::Panel->columns(TEMP => "roomnotes");
-	Tab::Panel->columns(TEMP => "hybrid");
-
-	Tab::Panel->set_sql( schemat => "
+	my $panel_sth = $dbh->prepare("
 		select panel.*,
-			room.name as roomname, room.notes as roomnotes, room.url as roomurl, ps.value as hybrid
+			room.name as room_name, room.notes as room_notes, room.url as room_url, ps.value as hybrid
 		from panel
 			left join panel_setting ps on ps.panel = panel.id and ps.tag = 'online_hybrid'
 			left join room on panel.room = room.id
 		where panel.round = ?
-			order by panel.bye, roomname, panel.flight
+			order by panel.bye, room_name, panel.flight
+	");
+	$panel_sth->execute($round->id);
+	my $panels = $panel_sth->fetchall_hash();
+	my %panels = map {$_->{id} => $_} @{$panels};
+
+	my $ballot_sth = $dbh->prepare("
+		select
+			panel.id panel_id,
+			ballot.side, ballot.speakerorder, ballot.chair,
+			entry.id entry_id, entry.code entry_code,
+			judge.id judge_id, judge.first judge_first, judge.last judge_last,
+			judge.code judge_code,
+			judge.person,
+			(
+				SELECT GROUP_CONCAT(student.person SEPARATOR ',')
+					from entry_student es, student
+				where es.entry = ballot.entry
+					and es.student = student.id
+			) as student_persons
+
+		from (ballot, panel, entry)
+			left join judge on judge.id = ballot.judge
+			left join entry_setting pod on pod.entry = ballot.entry and pod.tag = 'pod'
+
+		where 1=1
+			and panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.entry = entry.id
+
+		order by ballot.chair, ballot.judge, ballot.side
 	");
 
-	my @panels  = Tab::Panel->search_schemat($round->id);
-	my @entries = $m->comp("/funclib/round_entries.mas" , round => $round);
-	my @judges  = $m->comp("/funclib/round_judges.mas"  , round => $round);
-	my @ballots = $m->comp("/funclib/round_ballots.mas" , round => $round);
+	$ballot_sth->execute($round->id);
+	my $ballots = $ballot_sth->fetchall_hash();
+
+	foreach my $ballot (@{$ballots}) {
+
+		unless ($panels{$ballot->{panel_id}}{$ballot->{side}}) {
+
+			$panels{$ballot->{panel_id}}{$ballot->{side}} = {
+				id           => $ballot->{entry_id},
+				code         => $ballot->{entry_code},
+				speakerorder => $ballot->{speakerorder},
+			};
+
+			if ($person > 0 && $ballot->{student_persons}) {
+				my @persons = split(',', $ballot->{student_persons});
+				my $person_id = $person->id;
+				if ( grep( /^$person_id$/, @persons ) ) {
+					$panels{$ballot->{panel_id}}{me}++;
+					$panels{$ballot->{panel_id}}{$ballot->{side}}{person} = $person_id;
+				}
+			}
+		}
+
+		unless ($panels{$ballot->{panel_id}}{judges}{$ballot->{judge_id}}) {
+			my $me;
+
+			if ($person && $ballot->{person} == $person) {
+				$panels{$ballot->{panel_id}}{me}++;
+				$me++;
+			}
+
+			$panels{$ballot->{panel_id}}{judges}{$ballot->{judge_id}} = {
+				id     => $ballot->{id},
+				first  => $ballot->{judge_first},
+				last   => $ballot->{judge_last},
+				chair  => $ballot->{chair},
+				person => $ballot->{person},
+				me     => $me,
+			};
+		}
+	}
+
+	my $powered;
+	$powered++
+		if $round->type eq "highlow"
+		|| $round->type eq "highhigh";
 
 	my %entry_wins;
-	my $round_type = $round->type;
+	my $last_round = $event->rounds( name => ($round->name - 1))->first;
 
-	$round_type = "powered"
-		if $round_type eq "highhigh"
-		|| $round_type eq "highlow";
-
-	$round_type = "elim" if $round_type eq "final";
-
-	if ($published > 0 && $round_type eq "powered") {
-
+	if ($powered && $last_round && $last_round->post_primary == 3) {
 		%entry_wins = $m->comp(
 			"/funclib/entry_wins.mas",
-			round  => $round,
+			round  => $last_round,
 			event  => $event,
 			public => 3
 		);
-	}
-
-    my %judge_by_id = ();
-
-    foreach my $judge (@judges) {
-        $judge_by_id{$judge->id} = $judge;
-    }
-
-	my %entries_by_panel = ();
-
-	foreach my $entry (@entries) {
-		push (@{$entries_by_panel{$entry->panelid}}, $entry);
-	}
-
-	my %used;
-	my %ballots_by_entry = ();
-    my %judges_by_panel = ();
-
-	foreach my $ballot (@ballots) {
-
-		if ($ballot->entry) {
-			push (@{$ballots_by_entry{$ballot->entry->id}}, $ballot);
-		}
-
-		if ($ballot->judge) {
-
-			next if $used{$ballot->judge->id}{$ballot->panel->id}++;
-
-			push (@{$judges_by_panel{$ballot->panel->id}}, $judge_by_id{$ballot->judge->id})
-				if $judge_by_id{$ballot->judge->id}
-				&& $round->published != 2;
-		}
 	}
 
 	my $tz = $tourn->tz;
@@ -114,14 +138,21 @@
     my $no_side_constraints++
 		if $event_settings{'no_side_constraints'};
 
-    my $sidelocks++
-		if $round_type eq "elim"
+    my $sidelocks;
+
+	$sidelocks++
+		if $round->type eq "elim"
 		&& (not defined $no_side_constraints);
+
 
 	undef $sidelocks if $tourn->setting("nsda_nats") && (not defined $event_settings{"not_nats"});
 
 	my $include_room_notes = $round->setting("include_room_notes");
 	my $use_normal_rooms = $round->setting("use_normal_rooms");
+
+	my $decision_time;
+	my %flight_start;
+	my %flight_decision;
 
 	my $decision_deadline;
 	if ($round->type eq "elim" || $round->type eq "final") {
@@ -130,78 +161,100 @@
 		$decision_deadline = $event_settings{"prelim_decision_deadline"};
 	}
 
-	my $decision_time;
-	my $flight_start;
-	my $flight_decision;
-
-	my $time_class = "threefifths";
-	my $print_class = "tenth";
-
-	if ($decision_deadline) {
+	if ($decision_deadline > 0) {
 		$decision_time = $start->clone;
 		$decision_time->add("minutes", $decision_deadline);
 	}
 
-	if ($round->flighted > 1) {
-		if ($event_settings{"flight_offset"}) {
-			$flight_start = $start->clone;
-			$flight_start->add('minutes', $event_settings{"flight_offset"});
+	if ($event_settings{"flight_offset"}) {
+		foreach my $flight (1 ... $round->flighted) {
+			$flight_start{$flight} = $start->clone;
+			$flight_start{$flight}->add('minutes', $event_settings{"flight_offset"} * ($flight - 1));
 
 			if ($decision_deadline) {
-				$flight_decision = $flight_start->clone;
-				$flight_decision->add("minutes", $decision_deadline);
-
-				$time_class="seventenths";
-				$print_class="twenty reallynospace";
+				$flight_decision{$flight} = $decision_time->clone;
+				$flight_decision{$flight}->add("minutes", $event_settings{"flight_offset"} * ($flight - 1));
 			}
 		}
 	}
 
+	my $gotcha;
+
+	my $maps = "fa-map-o";
+
+	if (
+		($event_settings{"online_mode"} eq "sync" || $use_normal_rooms)
+		&& $event_settings{"online_public"}
+	) {
+		$maps = "fa-video-camera";
+	}
+
+
 </%init>
 
-	<div class="nospace flexrow">
+	<div class="flexrow">
 
-		<span class="half">
+		<span class="grow third">
 			<h4><% $event->abbr %> <% $round->realname %></h4>
 		</span>
 
-		<span class="twofifths semibold rightalign">
-			<p
-				class = "bluetext bigger semibold flexrow nospace"
+		<span class="semibold half">
+			<div
+				class = "nospace flexrow"
 				style = "justify-content: center;"
 			>
-				<span class="padright">
-					Start:
+				<span class='start half grow'>
+					<div class="full centeralign smallish ltborderbottom nospace padbottomless orangetext">
+						Rounds Start
+					</div>
+
+%					foreach my $flight (1 .. $round->flighted) {
+						<div class="flexrow nospace bluetext centeralign smallish">
+%							if ($round->flighted > 1) {
+								<span class="third padleft padtopless padbottomless">
+									Flight <% $flight %>
+								</span>
+%							}
+							<span class="grow twothirds padleft padright">
+								<& "/funclib/showtime.mas",
+									dt     => $flight_start{$flight},
+									format => 'day',
+									tzname => 1
+								&>
+							</span>
+						</div>
+%					}
 				</span>
 
-				<span class="padright">
-					<%
-						$round->flighted > 1 && $flight_start ? "F1: " : ""
-					%> <%
-						Tab::nicetime($start)
-					%> <% $round->flighted > 1 && $flight_start ? "/ F2: ".Tab::nicetime($flight_start) : "" %>
-					<% Tab::tzname($tz) %>
-				</span>
-			</p>
+%				if ($decision_time) {
+					<span class='start half'>
+						<div
+							class = "full centeralign smallish ltborderbottom nospace padbottomless"
+							title = "Decisions must be submitted within <% $decision_deadline %> Mins after scheduled start of the round"
+						>
+							Decision Deadline
+						</div>
 
-%			if ($decision_time) {
-				<p
-					class="orangetext bigger semibold flexrow nospace"
-					style = "justify-content: center;"
-				>
-					<span class="padright">
-						Decisions Due:
+%						foreach my $flight (1 .. $round->flighted) {
+							<div class="flexrow nospace graytext centeralign smallish">
+%								if ($round->flighted > 1) {
+									<span class="third padleft padtopless padbottomless">
+										Flight <% $flight %>
+									</span>
+%								}
+								<span class="grow twothirds padleft padright">
+									<& "/funclib/showtime.mas",
+										dt     => $flight_decision{$flight},
+										format => 'day',
+										tzname => 1
+									&>
+								</span>
+							</div>
+%						}
 					</span>
-					<span class="padright">
-						<%
-							$round->flighted > 1 && $flight_decision ? "F1: " : ""
-						%> <%
-							Tab::nicetime($decision_time)
-						%> <% $round->flighted > 1 && $flight_decision ? "/ F2: ".Tab::nicetime($flight_decision) : "" %>
-						<% Tab::tzname($tz) %>
-					</span>
-				</p>
-%			}
+%				}
+			</div>
+
 		</span>
 
 		<span
@@ -216,49 +269,6 @@
 
 	<& "/funclib/tablesorter.mas", table => $round->id &>
 
-<%perl>
-
-	my $num_judges;
-
-	foreach my $panel (@panels) {
-		if ($judges_by_panel{$panel->id}) {
-			my $judge_count = scalar @{$judges_by_panel{$panel->id}};
-			$num_judges = $judge_count if $judge_count > $num_judges;
-		}
-	}
-
-	my $some_locked;
-	my %sidelock_panel;
-	my $maps;
-
-	if ($sidelocks) {
- 		foreach my $panel (@panels) {
-			$sidelock_panel{$panel->id}++
-				if $m->comp("/funclib/round_elim_dueaff.mas",
-					panel => $panel
-				);
-			$maps = "fa-map-o" if $panel->roomurl;
-		}
-	} else {
- 		foreach my $panel (@panels) {
-			$maps = "fa-map-o" if $panel->roomurl;
-			last if $maps;
-		}
-	}
-
-	if ($event_settings{"online_mode"}) {
-		if (
-			($event_settings{"online_mode"} eq "sync" || $use_normal_rooms)
-			&& $event_settings{"online_public"}
-		) {
-			$maps = "fa-video-camera";
-		} else {
-			undef $maps;
-		}
-	}
-
-</%perl>
-
 	<table id="<% $round->id %>">
 
 		<thead>
@@ -272,7 +282,7 @@
 
 %			if ($round->flighted > 1) {
 				<th class="centeralign ">
-					Flt
+					Flight
 				</th>
 %			}
 
@@ -295,6 +305,7 @@
 				</th>
 
 %			} else {
+
 				<th class="centeralign ">
 					<% $event_settings{"aff_label"} || "Aff" %>
 				</th>
@@ -305,18 +316,18 @@
 %			}
 
 %			unless ($ARGS{"no_judges"} || $round->published == 2) {
-%				foreach my $tick (1 .. $num_judges) {
-					<th class="centeralign smallish">
-						Judge <% $num_judges == 1 ? "" : $tick %>
-					</th>
-%				}
+				<th class="centeralign smallish">
+					Judging
+				</th>
 %			}
 
-%			if (scalar (keys %{$pods})) {
+%			if ($pods && scalar (keys %{$pods})) {
 				<th class="centeralign smallcell">
 					Pod
 				</th>
-%			} elsif ($published > 0 && $round_type eq "powered") {
+%			}
+
+%			if ($last_round && $last_round->post_primary == 3 && $powered) {
 				<th class="centeralign">
 					Bracket
 				</th>
@@ -326,217 +337,204 @@
 		</thead>
 
 		<tbody>
-
 <%perl>
+			foreach my $panel_id (
+				sort {
+					$panels{$b}{'me'} <=> $panels{$a}{'me'}
+					|| $panels{$a}{'bye'} <=> $panels{$b}{'bye'}
+					|| $panels{$a}{'room_name'} cmp $panels{$b}{'room_name'}
+					|| $panels{$a}{'letter'} cmp $panels{$b}{'letter'}
+				} keys %panels
+			) {
 
- 		foreach my $panel (@panels) {
+				my $panel = $panels{$panel_id};
+				my $sidelock_panel;
+				my $aff;
+				my $bracket;
 
-			my $aff;
-			my $neg;
-			my $bye;
-
-			foreach my $pc (@{$entries_by_panel{$panel->id}}) {
-
-				if ($ballots_by_entry{$pc->id}) {
-
-					$aff = $pc
-						if ${$ballots_by_entry{$pc->id}}[0]->side == "1";
-
-					$neg = $pc
-						if ${$ballots_by_entry{$pc->id}}[0]->side == "2";
+				if ($sidelocks) {
+					$sidelock_panel++ if $m->comp("/funclib/round_elim_dueaff.mas", panel => $panel);
+					$gotcha++;
 				}
-			}
-
-			foreach my $pc (@{$entries_by_panel{$panel->id}}) {
-				if ($ballots_by_entry{$pc->id}) {
-					unless ($aff) {
-						$aff = $pc unless ($neg && $pc->id == $neg->id);
-					} else {
-						$neg = $pc unless ($aff && $pc->id == $aff->id);
-					}
-				}
-			}
-
-			my $bracket = $entry_wins{$neg}
-				if $round_type eq "powered";
-
-			$bracket = $entry_wins{$aff}
-				if $round_type eq "powered"
-				&& $entry_wins{$aff} > $entry_wins{$neg};
-
 </%perl>
-			<tr class="smallish">
+				<tr class="smallish">
 
-%				if ($event_settings{"show_panel_letters"}) {
-					<td class="centeralign">
-						<% $panel->letter %>
-					</td>
-%				}
-
-%				if ($round->flighted > 1) {
-					<td class="centeralign">
-						<% $panel->flight %>
-					</td>
-%				}
-
-				<td class="nospace">
-
-%					if ($panel->bye) {
-						<span class="quarterspacer"></span>
-						BYE
-
-%					}  else {
-
-%						if ($maps && $panel->roomurl) {
-							<span class="threequarters nospace">
-								<a
-									class  = "full marno hover white bluetext semibold"
-									href   = "<% $panel->roomurl %>"
-									target = "_blank"
-								>
-%						} else {
-							<span class="marno full">
-%						}
-
-								<span class="quarterspacer"></span>
-
-							<% $panel->roomname ? $panel->roomname : "None" %>
-							<% $include_room_notes && $panel->roomnotes
-								? '<div class="marno italic padless padleft">'.$panel->roomnotes."</div>"
-								: ""
-							%>
-
-%						if ($maps && $panel->roomurl) {
-								</a>
-							</span>
-							<span class="fifth rightalign nospace">
-								<a class = "buttonwhite bluetext fa fa-tiny <% $maps %>"
-									href  = "<% $panel->roomurl %>"
-								></a>
-%						}
-						</span>
-%					}
-				</td>
-
-%				if ($event_settings{'online_hybrid'}) {
-					<td class="centeralign">
-						<span class="hiddencsv"><% $panel->hybrid ? "Y" : "" %></span>
-						<% $panel->hybrid ? '<span class="fa greentext fa-sm fa-laptop"></span>' : "" %>
-					</td>
-%				}
-
-				<td class="padvertless padleft">
-%					if ($aff) {
-%						unless ($anonymous_public) {
-							<a
-								class = "white smallish padtop padbottom padleft"
-								href  = "/index/tourn/postings/entry_record.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $aff->id %>"
-							>
-								<% $aff->code %>
-							</a>
-%						}  else {
-							<span class="padvert">
-							<% $aff->code %>
-							</span>
-%						}
+%					if ($event_settings{"show_panel_letters"}) {
+						<td class="centeralign">
+							<% $panel->{letter} %>
+						</td>
 %					}
 
-%					if ($sidelocks && $sidelock_panel{$panel->id}) {
-						<div class="smaller flexrow padbottomless italic semibold padleft">
-							Locked <% $event_settings{"aff_label"} || "Aff" %>
-						</div>
+%					if ($round->flighted > 1) {
+						<td class="centeralign">
+							<% $panel->{flight} %>
+						</td>
 %					}
-				</td>
 
-				<td class="nospace padleft">
-%					if ($neg) {
-%						unless ($anonymous_public) {
-							<a
-								class = "white smallish padtop padbottom padleft"
-								href  = "/index/tourn/postings/entry_record.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $neg->id %>"
-						>
-								<% $neg->code %>
-							</a>
-%						}  else {
-							<% $neg->code %>
-%						}
-
-%						if ($sidelocks && $sidelock_panel{$panel->id}) {
-							<div class="smaller flexrow padbottomless italic semibold padleft">
-								Locked <% $event_settings{"neg_label"} || "Neg" %>
+					<td class="nospace">
+%						if ($panel->{bye}) {
+							<div class="centeralign smallish greentext semibold padvertmore">
+								BYE
 							</div>
-%						}
+%						} else {
 
-%					}
-				</td>
-<%perl>
-				unless ($round->published == 2 || $ARGS{"no_judges"}) {
-
-					if ($judges_by_panel{$panel->id}) {
-
-						my $notfirst;
-						my %used;
-
-						foreach my $judge (
-							sort {$b->last cmp $a->last}
-							@{$judges_by_panel{$panel->id}}
-						) {
-
-							my $last = $judge->last;
-							$last =~ s/ \- ONLINE//g;
-							$last =~ s/ \- Online//g;
-</%perl>
-							<td class="smallish nospace padleft">
-
-%								unless ($anonymous_public) {
+							<div class='flexrow flexwrap padleftless padrightless hover'>
+%								if ($maps && $panel->{room_url}) {
 									<a
-										class = "white smallish padtop padbottom padleft"
-										href  = "judge.mhtml?judge_id=<% $judge->id %>&tourn_id=<% $tourn->id %>"
+										class  = "full marno white bluetext semibold padvertless"
+										href   = "<% $panel->{room_url} %>"
+										target = "_blank"
 									>
+										<icon class="greentext fa fa-xs invert marno <% $maps %>"></icon>
 %								}
 
-								<% ($judge->chair) ? "*" : "" %>
-								<% $no_codes ? "" : '<span class="sixth">'.$judge->code."</span>" %>
+								<% $panel->{room_name} ? $panel->{room_name} : "None" %>
 
-%								unless ($anonymous_public) {
-									<% $judge->first %> <% $last %>
+								<% $include_room_notes && $panel->{room_notes}
+									? '<div class="marno italic padless padleft">'.$panel->{room_notes}."</div>"
+									: ""
+								%>
+
+%								if ($maps && $panel->{room_url}) {
 									</a>
-%				 				}
-							</td>
-%		 				}
-%					}
-% 				}
+%								}
 
-%				if (scalar (keys %{$pods})) {
-%					my $pod_id;
-					<td class="centeralign smallcell">
-%						if ($aff) {
-%							$pod_id = $aff->setting('pod');
-%						} elsif ($bye) {
-%							$pod_id = $bye->setting('pod');
+							</div>
 %						}
-						<% $pods->{$pod_id} || "Pod $pod_id" %>
 					</td>
 
-%				} elsif ($published > 0 && $round_type eq "powered") {
-					<td class="centeralign">
-						<% $bracket %>
+%					if ($event_settings{'online_hybrid'}) {
+						<td class="centeralign" data-text="<% $panel->{hybrid} || 0 %>">
+							<% $panel->{hybrid} ? '<span class="fa greentext fa-sm fa-laptop"></span>' : "" %>
+						</td>
+%					}
+
+					<td class="nospace">
+
+%						$aff = $panel->{1};
+%						$bracket = $entry_wins{$aff->{id}} if $bracket < $entry_wins{$aff->{id}};
+
+%						if ($aff) {
+%							unless ($anonymous_public) {
+								<a
+									class = "white smallish nospace padleft padright
+										<% $person && $aff->{person} == $person ? 'semibold greentext underline' : "" %>
+									"
+									href  = "/index/tourn/postings/entry_record.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $aff->{id} %>"
+								>
+									<% $aff->{code} %>
+								</a>
+%							}  else {
+								<span class="padvertless
+									<% $person && $aff->{person} == $person ? 'semibold greentext underline' : "" %>
+								">
+									Anon <% $aff->{code} %>
+								</span>
+%							}
+
+%							if ($sidelocks && $sidelock_panel) {
+								<div class="smaller flexrow padbottomless italic semibold padleft">
+									Locked <% $event_settings{"aff_label"} || "Aff" %>
+								</div>
+%							}
+%						}
 					</td>
-%				}
-			</tr>
-%		}
+
+					<td class="nospace">
+%						my $neg = $panel->{2};
+%						$bracket = $entry_wins{$neg->{id}} if $bracket < $entry_wins{$neg->{id}};
+
+%						if ($neg) {
+
+%							unless ($anonymous_public) {
+								<a
+									class = "white smallish nospace padleft padright
+										<% $person && $neg->{person} == $person ? 'semibold greentext underline' : "" %>
+									"
+									href  = "/index/tourn/postings/entry_record.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $neg->{id} %>"
+								>
+									<% $neg->{code} %>
+								</a>
+%							}  else {
+								<span class="padvertless
+									<% $person && $neg->{person} == $person ? 'semibold greentext underline' : "" %>
+								">
+									Anon <% $neg->{code} %>
+								</span>
+%							}
+
+%							if ($sidelocks && $sidelock_panel) {
+								<div class="smaller flexrow padbottomless italic semibold padleft">
+									Locked <% $event_settings{"aff_label"} || "Aff" %>
+								</div>
+%							}
+%						}
+					</td>
+<%perl>
+					unless ($round->published == 2 || $ARGS{"no_judges"}) {
+
+						$m->print("<td>");
+
+						foreach my $judge_id (sort {
+								$panel->{judges}{$a}{chair} <=> $panel->{judges}{$b}{chair}
+								|| $panel->{judges}{$b}{me} <=> $panel->{judges}{$a}{me}
+								|| $panel->{judges}{$a}{last} cmp $panel->{judges}{$b}{last}
+							} keys %{$panel->{judges}}
+						) {
+
+							my $judge = $panel->{judges}{$judge_id};
+</%perl>
+%							if ($anonymous_public) {
+								<div
+									class = "full white smallish padtopless padbottomless padleft
+										<% $judge->{me} ? 'semibold greentext underline' : "" %>
+									"
+								>
+									<% $judge->{chair} ? '<icon class="fa fa-tiny fa-gavel"></icon>' : "" %>
+									<% $judge->{code} || "No Code" %>
+								</div>
+%							} elsif ($judge->{last}) {
+								<a
+									class = "full white smallish padtopless padbottomless padleft
+										<% $judge->{me} ? 'semibold greentext underline' : "" %>
+									"
+									href  = "judge.mhtml?judge_id=<% $judge_id %>&tourn_id=<% $tourn->id %>"
+								>
+									<% $judge->{chair} ? '<icon class="fa fa-tiny fa-gavel"></icon>' : "" %>
+									<% $judge->{last} %>, <% $judge->{first} %> <% $judge->{middle} %>
+								</a>
+%							}
+%						}
+						</td>
+%					}
+
+%					if ($pods && scalar (keys %{$pods})) {
+						<td class="centeralign smallcell">
+%							if ($aff) {
+								<% $pods->{$aff->{pod}} %>
+%							}
+						</td>
+%					}
+
+%					if ($last_round && $last_round->post_primary == 3 && $powered) {
+						<td class="centeralign">
+							<% $bracket || 0 %>
+						</td>
+%					}
+				</tr>
+%			}
 		</tbody>
 	</table>
 
-	<div class="full flexrow wrap martopmore padtop italic smallish marbottom semibold">
+	<div class="full flexrow wrap martopless padtop italic smallish marbottom semibold">
 
 %		if ($maps eq "fa-map-o") {
-			<span class="full rightalign bluetext marbottom">
-				Rooms with <span class="inline marno fa fa-tiny buttonwhite bluetext <% $maps %>"></span>
+			<span class="full centeralign bluetext marbottom">
+				Rooms with <span class="inline marno fa fa-tiny buttonwhite greentext invert <% $maps %>"></span>
 				icons are linked to maps
 			</span>
 %		} elsif ($maps eq "fa-video-camera") {
-			<span class="full rightalign bluetext marbottom">
+			<span class="full centeralign bluetext marbottom">
 				<span class="inline marno fa fa-tiny buttonwhite bluetext <% $maps %>"></span>
 				icons are links to the online meetings
 			</span>
@@ -544,7 +542,7 @@
 
 <%perl>
 		if ($no_side_constraints
-			|| ($sidelocks && scalar keys %sidelock_panel < 1)
+			|| ($sidelocks && $gotcha < 1)
 		) {
 
 			undef $sidelocks;
