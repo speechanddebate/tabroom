@@ -4,11 +4,6 @@
 </%args>
 <%init>
 
-	if (index($ENV{REMOTE_ADDR}, "173.239.211") ne -1) {
-		$m->print("Rate limited due to excessive traffic.");
-		$m->abort();
-	}
-
 	unless ($person) {
 		$m->redirect('/user/login/login.mhtml?msg="Please login to view results data"');
 	}
@@ -18,403 +13,539 @@
 	}
 
 	my $key = $entry_id;
-
 	return if $m->cache_self(
 		key        => $key,
-		expires_in => '15m'
+		expires_in => '4h'
 	);
 
-	my $entry = Tab::Entry->retrieve($entry_id);
+	my $dbh = Tab::DBI->db_Main();
+	my $sth = $dbh->prepare("
+		select
+			entry.id, entry.code, entry.name,
 
-	unless ($entry  > 0) {
-		$m->comp("/funclib/abort.mas", message => "Invalid or multiple event IDs sent");
+			student.id student_id, student.first student_first, student.last student_last, student.middle student_middle,
+			hybrid.id hybrid_id, hybrid.name hybrid_name,
+
+			school.id school_id, school.name school_name, school.code school_code,
+			school.chapter chapter_id,
+
+			event.id event_id, event.name event_name, event.abbr event_abbr, event.type event_type,
+			event.tourn tourn_id, tourn.name tourn_name,
+			tourn.start tourn_start, tourn.city tourn_city,
+			tourn.state tourn_state,
+			tourn.country tourn_country,
+			anonymous_public.value anonymous_public,
+			live_updates.value live_updates,
+			aff_label.value aff_label,
+			neg_label.value neg_label,
+			tc.id ndt
+
+		from (entry, entry_student es, student, event, tourn)
+
+			left join tourn_circuit tc
+				on tc.circuit = 43
+				and tc.tourn = event.tourn
+
+			left join school on entry.school = school.id
+
+			left join chapter hybrid
+				on hybrid.id = student.chapter
+				and hybrid.id != school.chapter
+
+			left join event_setting anonymous_public
+				on anonymous_public.event = event.id
+				and anonymous_public.tag ='anonymous_public'
+
+			left join event_setting live_updates
+				on live_updates.event = event.id
+				and live_updates.tag ='live_updates'
+
+			left join event_setting aff_label
+				on aff_label.event = event.id
+				and aff_label.tag ='aff_label'
+
+			left join event_setting neg_label
+				on neg_label.event = event.id
+				and neg_label.tag ='neg_label'
+
+		where 1=1
+			and entry.id = ?
+			and entry.id = es.entry
+			and es.student = student.id
+			and entry.event = event.id
+			and event.tourn = tourn.id
+		group by entry.id
+	");
+
+	$sth->execute($entry_id);
+
+	my $entries = $sth->fetchall_hash();
+	my $entry;
+	my @students;
+
+	foreach my $ref (@{$entries}) {
+
+		if ($ref->{anonymous_public}) {
+			$m->comp("/funclib/abort.mas",
+				message => "This tournament is set for anonymized public postings.  Hit back to continue"
+			);
+		}
+
+		unless ($entry) {
+			$ref->{spaceless} = $ref->{code};
+			$ref->{spaceless} =~ s/\s+//g;
+			$entry = $ref;
+		}
+
+		unless ($entry->{students}{$ref->{student_id}}) {
+			$entry->{students}{$ref->{student_id}} = {
+				id     => $ref->{student_id},
+				first  => $ref->{student_first},
+				last   => $ref->{student_last},
+				middle => $ref->{student_middle},
+			};
+
+			push @students, $entry->{students}{$ref->{student_id}};
+		}
 	}
 
-	my $event = $entry->event;
-
-	my $anonymous_public = $event->setting("anonymous_public");
-
-	if ($anonymous_public) {
-		$m->comp("/funclib/abort.mas",
-			message => "This tournament is set for anonymized public postings.  Hit back to continue"
-		);
-	}
-
-	my $tourn = $event->tourn;
-	my @circuits = $tourn->circuits;
-	my $ndt;
-
-	foreach my $circuit (@circuits) {
-		$ndt++ if $circuit->id == 43;
-	}
-
-	my $aff_string = $event->setting("aff_label");
-	my $neg_string = $event->setting("neg_label");
-
-	$aff_string = "Aff" unless $aff_string;
-	$neg_string = "Neg" unless $neg_string;
-
-	my $event_type = $event->type;
-	$event_type = "debate"
-		if $event_type ne "speech"
-		&& $event_type ne "congress"
-		&& $event_type ne "wudc";
-
-	my @students = $entry->students;
-
-	my $school = $entry->school;
-
-	my $school_name = eval {
-		return $m->comp("/funclib/short_name.mas", name => $school->name, return => 1);
-	};
+	$entry->{short_name} = $m->comp("/funclib/short_name.mas", name => $entry->{school_name});
 
 </%init>
 
 	<& "menu.mas",
-		tourn_id => $tourn->id,
-		event_id => $event->id
+		tourn_id => $entry->{tourn_id},
+		event_id => $entry->{event_id}
 	&>
 
 	<div class="main">
 
-		 <& /index/tourn/title.mas, tourn => $tourn &>
+		<h2 class="centeralign marno">
+			<% $entry->{tourn_name} %>
+		</h2>
+
+		<h5 class="full centeralign marno">
+			<% substr($entry->{tourn_start}, 0, 4) %>
+			&mdash;
+			<% $entry->{tourn_city} %>
+			<% $entry->{tourn_state} || $entry->{tourn_country}  %>
+		</h5>
 
         <& ../tabbar.mas,
-			tourn  => $tourn,
-			person => $person
+			tourn_id => $entry->{tourn_id},
+			person   => $person
 		&>
 
-		<div class="full martopmore nospace borderbottom padbottom">
+		<div class="full martopmore flexrow borderbottom padbottom">
 
-			<span class="twothirds nospace">
-%				unless ($anonymous_public) {
-					<h4 class="nospace semibold">
-%						my $notfirst;
-%						foreach my $student (@students) {
-%							$m->print("&amp;") if $notfirst++;
-							<% $student->first %> <% $student->last %>
-%						}
-					</h4>
+			<span class="twothirds padvertless">
+				<h4 class="nospace semibold">
+%					my $notfirst;
+%					foreach my $student_id (sort keys %{$entry->{students}}) {
+%						my $student = $entry->{students}{$student_id};
+%						$m->print("&amp;") if $notfirst++;
+						<% $student->{first} %>
+						<% $student->{middle} %>
+						<% $student->{last} %>
+%					}
+				</h4>
 
-					<h6 class="full nospace martop semibold bluetext">
-%						if (index($entry->code, $school_name) == -1) {
-							<% $school_name %>:
-%						}
-						<% $entry->code %>
-					</h6>
-%				}
+				<h6 class="full martop semibold bluetext padleft">
+%					if (index($entry->{code}, $entry->{short_name}) == -1) {
+						<% $entry->{school_name} %>
+%					}
+					<% $entry->{code} %>
+%					if ($entry->{hybrid_id}) {
+						(Hybrid with <% $entry->{hybrid_name} %>
+%					}
+				</h6>
 			</span>
-
 
 			<span class="third rightalign marno">
 
-%				if ($event->setting("live_updates")) {
+				<h6 class="nospace padbottommore semibold">
+					<% $entry->{event_name} %>
+				</h6>
+
+%				if ($entry->{live_updates}) {
 					<a
-						class="buttonwhite thin bluetext"
-						href="/index/tourn/updates/entry_follow.mhtml?entry_id=<% $entry->id %>&tourn_id=<% $tourn->id %>"
-					>
-						Blasts
-					</a>
+						class="buttonwhite thin bluetext invert"
+						href="/index/tourn/updates/entry_follow.mhtml?entry_id=<% $entry->{id} %>&tourn_id=<% $entry->{tourn_id} %>"
+					>Live Updates</a>
 %				}
 
-%				unless ($anonymous_public) {
-%					if ($ndt) {
-
-%						if (scalar @students == 2 ) {
-							<a
-								class="buttonwhite thin greentext"
-								href="/index/results/team_results.mhtml?id1=<% $students[0]->id %>&id2=<% $students[1]->id %>"
-							>
-								Team Results
-							</a>
-%						}
-
-%						if ($entry->school && $entry->school->chapter) {
-							<a
-								class="buttonwhite redtext thin"
-								href="http://opencaselist.paperlessdebate.com/Caselist/Redirect?<% $entry->school->chapter->id %>"
-							>
-								Casewiki
-							</a>
-%						}
+%				if ($entry->{ndt}) {
+%					if (scalar @students == 2 ) {
+						<a
+							class="buttonwhite thin greentext"
+							href="/index/results/team_results.mhtml?id1=<% $students[0]->id %>&id2=<% $students[1]->id %>"
+						>Team Results</a>
+%					}
+%					if ($entry->{chapter_id}) {
+						<a
+							class="buttonwhite redtext thin"
+							href="http://opencaselist.paperlessdebate.com/Caselist/Redirect?<% $entry->{chapter_id} %>"
+						>Casewiki</a>
 %					}
 %				}
 
 			</span>
 		</div>
-<%perl>
 
-		my @panels = $m->comp(
-			'/funclib/entry_panels.mas',
-			entry     => $entry,
-			published => 3
-		);
-
-		if (@panels) {
-
-</%perl>
-			<h5>Pairings</h5>
-
-			<table>
-%		}
+		<& "/funclib/tablesorter.mas", table => $entry->{spaceless} &>
 
 <%perl>
 
-		my %seen = ();
+		my $results_sth = $dbh->prepare("
 
-		@panels = grep { ! $seen{$_->id} ++ } @panels;
+			select
+				round.id, round.name, round.label, round.type,
 
-		if ($event_type eq "debate") {
-			@panels = sort {$b->round->name <=> $a->round->name} @panels;
-		} else {
-			@panels = sort {$a->round->name <=> $b->round->name} @panels;
+				round.published,
+					round.post_primary,
+					round.post_secondary,
+
+				panel.id panel_id, panel.letter panel_letter, panel.bye panel_bye,
+				ballot.id ballot_id, ballot.side side, ballot.speakerorder speakerorder,
+				ballot.bye bye, ballot.forfeit forfeit,
+
+				judge.id judge_id, judge.first judge_first, judge.last judge_last,
+
+				winloss.value winloss,
+				rank.value rank, rank.student rank_student,
+				point.value point, point.value point_student,
+
+				opp_entry.id opp_id,
+				opp_entry.code opp_code
+
+			from (round, panel, ballot)
+
+				left join judge on ballot.judge = judge.id
+
+				left join ballot opp_ballot
+					on opp_ballot.panel = panel.id
+					and opp_ballot.judge = judge.id
+					and opp_ballot.entry != ballot.entry
+
+				left join entry opp_entry
+					on opp_entry.id = opp_ballot.entry
+
+				left join score winloss
+					on winloss.ballot = ballot.id
+					and winloss.tag   = 'winloss'
+
+				left join score rank
+					on rank.ballot = ballot.id
+					and rank.tag   = 'rank'
+
+				left join score point
+					on point.ballot = ballot.id
+					and point.tag   = 'point'
+
+			where 1=1
+
+				and ballot.entry    = ?
+				and ballot.panel    = panel.id
+				and panel.round     = round.id
+				and round.published = 1
+
+			group by ballot.id
+			order by round.name DESC
+
+		");
+
+		$results_sth->execute($entry->{id});
+		my $results = $results_sth->fetchall_hash();
+
+		my %panels;
+
+		foreach my $ref (@{$results}) {
+
+			my $panel;
+			my $ballot;
+
+			if ($panels{$ref->{panel_id}}) {
+				$panel = $panels{$ref->{panel_id}}
+			} else {
+				$panel = $ref;
+				$panels{$ref->{panel_id}} = $ref;
+			}
+
+			if ($panel->{ballots}{$ref->{judge_id}}) {
+				$ballot = $panel->{ballots}{$ref->{judge_id}};
+			} else {
+				$ballot = $ref;
+			}
+
+			if (
+				$entry->{event_type} eq "speech" || $entry->{event_type} eq "congress"
+			) {
+				if ($ref->{post_primary} == 3) {
+					$panel->{winloss}++;
+				} else {
+					delete($ref->{rank});
+				}
+				delete($ref->{point}) if ($ref->{post_secondary} != 3);
+			} else {
+				if ($ref->{post_primary} == 3) {
+					$panel->{winloss}++;
+				} else {
+					delete($ballot->{winloss});
+				}
+				delete($ref->{rank}) if ($ref->{post_secondary} != 3);
+				delete($ref->{point}) if ($ref->{post_secondary} != 3);
+
+				if ($ref->{rank} && $ref->{rank_student}) {
+					$panel->{scores}++;
+					$ballot->{student_ranks}{$ref->{rank_student}} = $ref->{rank};
+					$ballot->{total_ranks} += $ref->{rank};
+					$ballot->{rank_count}++;
+				}
+
+				if ($ref->{point} && $ref->{point_student}) {
+					$panel->{scores}++;
+					$ballot->{student_points}{$ref->{point_student}} = $ref->{point};
+					$ballot->{total_points} += $ref->{point};
+					$ballot->{point_count}++;
+				}
+			}
+
+			$panel->{ballots}{$ref->{judge_id}} = $ballot;
 		}
 
-		foreach my $panel (@panels) {
+		if ($entry->{event_type} eq "speech" || $entry->{event_type} eq "congress") {
 
-			my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
-
-			my $opp;
-			my $side;
-
-			if ($event_type eq "debate") {
-
-				$opp = Tab::Entry->retrieve($panel->opp) if $panel->opp;
-				$side = $aff_string if $panel->side == 1;
-
-				$side = $neg_string if $panel->side == 2;
-				$side = "Bye" if $panel->bye;
-				$side = "Bye" unless @judges;
-
-			}
-
-			my $speaks;
-
-			if ($event_type eq "speech") {
-				$speaks = Lingua::EN::Numbers::Ordinate::ordinate($panel->speakerorder);
-			}
-
-			next unless $panel->round;
-
+			if (scalar (keys %panels)) {
 </%perl>
+				<div class='full flexrow'>
+					<span class='threequarters'>
+						<h5>Round Results</h5>
+					</span>
+					<span class='quarter rightalign' id="<% $entry->{spaceless} %>_buttonarea">
+					</span>
+				</div>
 
-			<tr class="row">
+				<table id="<% $entry->{spaceless} %>">
 
-				<td class="smallish">
-					<% $panel->round ? $panel->round->realname : "" %>
-				</td>
+					<thead>
+						<tr>
+							<th>
+								Round
+							</th>
 
-%				if ($panel->round->flighted > 1) {
-					<td class="smallish">
-						Flight <% $panel->flight %>
+							<th>
+								Spoke
+							</th>
+
+							<th>
+								Judging
+							</th>
+
+							<th>
+								Result
+							</th>
+
+							<th>
+								Scores
+							</th>
+						</tr>
+					</thead>
+					<tbody>
+%			}
+
+<%perl>
+			foreach my $panel_id (
+				sort {
+					$panels{$b}{name} <=> $panels{$a}{name}
+				} keys %panels
+			) {
+
+				my $panel = $panels{$panel_id};
+
+				my @ballots = sort {$a <=> $b} keys %{$panels{$panel_id}{ballots}};
+</%perl>
+				<tr id="<% $panel_id %>">
+					<td class="smallish" data-text="<% $panel->{name} %>">
+						<% $panel->{label} || 'Round '.$panel->{name}  %>
 					</td>
-%				}
 
-				<td class="smallish">
-					Room <% ($panel->room) ? $panel->room->name : "" %>
-				</td>
+					<td class="centeralign smallish" data-text="<% $panel->{side} %>">
+						<% $panel->{speakerorder} %>
+					</td>
 
-				<td class="smallish">
-					<% $side %>
-				</td>
+					<td class="smallish nospace">
+%						foreach my $judge_id (@ballots) {
+%							my $judge = $panels{$panel_id}{ballots}{$judge_id};
+							<div class='judgeheight full padleft'>
+								<% $judge->{judge_last} %>, <% $judge->{judge_first} %>
+							</div>
+%						}
+					</td>
 
-				<td class="smallish">
-
-%					if ($event_type eq "debate") {
-
-%						if ($opp) {
-
-%							unless ($anonymous_public) {
-								<a
-									class="white padtop padbottom"
-									href="entry_record.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $opp->id %>"
-								>
-%							}
-								vs <% $opp->code %>
-
-%							unless ($anonymous_public) {
-
-								</a>
+					<td class="smallish centeralign nospace">
+%						if ($panel->{rank}) {
+%							foreach my $judge_id (@ballots) {
+%								my $judge = $panels{$panel_id}{ballots}{$judge_id};
+								<div class='judgeheight full padleft'>
+									<% $judge->{rank} %>
+								</div>
 %							}
 %						}
-%					} elsif ($event_type eq "speech") {
-						Speak <% $speaks %>
-%					}
+					</td>
 
-				</td>
+					<td class="smallish centeralign nospace">
+%						if ($panel->{scores}) {
+%							foreach my $judge_id (@ballots) {
+%								my $judge = $panels{$panel_id}{ballots}{$judge_id};
+%								next unless $judge->{total_points};
 
-				<td class="smallish padleft">
+								<div class='judgeheight full padleft'>
+									<% $judge->{total_points} %>
+								</div>
+%							}
+%						}
+					</td>
 
-%					foreach my $judge (@judges) {
+				</tr>
+%			}
+%			if (keys %panels) {
+				</table>
+%			}
+
+%		} else {
+%			if (scalar (keys %panels)) {
+				<div class='full flexrow'>
+					<span class='threequarters'>
+						<h5>Round Results</h5>
+					</span>
+					<span class='quarter rightalign' id="<% $entry->{spaceless} %>_buttonarea">
+					</span>
+				</div>
+
+				<table id="<% $entry->{spaceless} %>">
+
+					<thead>
+						<tr>
+							<th>
+								Round
+							</th>
+
+							<th>
+								Side/Order
+							</th>
+
+							<th>
+								Opp
+							</th>
+
+							<th>
+								Judging
+							</th>
+
+							<th>
+								Result
+							</th>
+
+							<th>
+								Scores
+							</th>
+						</tr>
+					</thead>
+					<tbody>
+%			}
+
+<%perl>
+			foreach my $panel_id (
+				sort {
+					$panels{$b}{name} <=> $panels{$a}{name}
+				} keys %panels
+			) {
+
+				my $panel = $panels{$panel_id};
+				my $skip;
+
+				my @ballots = sort {$a <=> $b} keys %{$panels{$panel_id}{ballots}};
+</%perl>
+				<tr id="<% $panel_id %>">
+
+					<td class="smallish" data-text="<% $panel->{name} %>">
+						<% $panel->{label} || 'Round '.$panel->{name}  %>
+					</td>
+
+					<td class="smallish" data-text="<% $panel->{side} %>">
+%						if ($panel->{panel_bye} || $panel->{bye}) {
+%							$skip++;
+							BYE
+%						} elsif ($panel->{forfeit}) {
+%							$skip++;
+							FORFEIT
+%						} else {
+							<% $panel->{side} == 1 ? $entry->{aff_label} || "Aff" : "" %>
+							<% $panel->{side} == 2 ? $entry->{neg_label} || "Neg" : "" %>
+%						}
+					</td>
+
+					<td class="smallish nospace padleft">
 						<a
-							class="white padtop padbottom"
-							href="judge.mhtml?tourn_id=<% $tourn->id %>&judge_id=<% $judge->id %>"
-						>
-							<% ucfirst $judge->first." ". ucfirst $judge->last %>
-						</a>
-%					}
-				</td>
+							class = "plain padvertless hover padleft"
+							href  = "/index/tourn/postings/entry_record.mhtml?entry_id=<% $panel->{opp_id} %>&tourn_id=<% $entry->{tourn_id} %>"
+						>vs <% $panel->{opp_code} %></a>
+					</td>
 
-			</tr>
-
-%		}
-
-%		if (@panels) {
-			</table>
-%		}
-
-<%perl>
-
-		my @results = $m->comp(
-			'/funclib/entry_panels.mas',
-			entry        => $entry,
-			post_primary => 3
-		);
-
-		my %rseen = ();
-
-		@results = grep { ! $rseen{$_->id} ++ } @results;
-
-		if ($event_type eq "debate") {
-			@results = sort {$b->round->name <=> $a->round->name} @results;
-		} else {
-			@results = sort {$a->round->name <=> $b->round->name} @results;
-		}
-
-		my $notfirst;
-
-		foreach my $panel (@results) {
-
-			my @judges = $m->comp("/funclib/panel_judges.mas", panel => $panel);
-
-			@judges = sort {$b->chair <=> $a->chair} @judges;
-
-			my $opp = Tab::Entry->retrieve($panel->opp) if $panel->opp;
-
-			my $side = $aff_string if $panel->side == 1;
-			$side = $neg_string if $panel->side == 2;
-
-			$side = "Bye" if $panel->bye;
-
-			next unless $panel->round;
-
-</%perl>
-			<div class="<% $notfirst++ ? "" : "bluebordertop" %> row">
-
-				<span class="tenth semibold">
-					<% $panel->round ? $panel->round->realname : ""%>
-				</span>
-
-				<span class="twenty padvert">
-					<% $side %>
-				</span>
-
-				<span class="quarter padno">
-%					if ($opp) {
-%						unless ($anonymous_public) {
-							<a
-								class = "white padtop padbottom"
-								href  = "entry_record.mhtml?tourn_id=<% $tourn->id %>&entry_id=<% $opp->id %>"
-							>
+					<td class="smallish nospace">
+%						foreach my $judge_id (@ballots) {
+%							my $judge = $panels{$panel_id}{ballots}{$judge_id};
+							<div class='judgeheight full padleft'>
+								<% $judge->{judge_last} %>, <% $judge->{judge_first} %>
+							</div>
 %						}
-							vs <% $opp->code %>
+					</td>
 
-%						unless ($anonymous_public) {
-							</a>
-%						}
-%					}
-
-				</span>
-
-				<span class="threefifths nospace">
-<%perl>
-
-					my $notfirst;
-
-					foreach my $judge (@judges) {
-
-						my @scores = $m->comp(
-							'/funclib/panel_scores.mas',
-							panel => $panel,
-							judge => $judge,
-							entry => $entry
-						);
-
-						my %scores_by_recipient = ();
-
-						my $points;
-						my $rank;
-
-						foreach my $score (@scores) {
-
-							$points++ if $score->tag eq "point";
-							$rank++ if $score->tag eq "rank";
-
-							push @{$scores_by_recipient{$score->student->id}}, $score
-								if $score->student
-								&& $score->student->id;
-						}
-
-						my $last = $judge->last;
-						$last =~ s/ - ONLINE//g;
-						$last =~ s/ - Online//g;
-						$last =~ s/- ONLINE//g;
-						$last =~ s/- Online//g;
-</%perl>
-
-						<div class="padless full marno <% $notfirst++ ? "ltbordertop" : "" %>">
-							<span class="twofifths nospace">
-								<a
-									class = "white padtop padbottom"
-									href  = "judge.mhtml?tourn_id=<% $tourn->id %>&judge_id=<% $judge->id %>"
-								> <% ucfirst $last %>, <% ucfirst $judge->first %> </a>
-							</span>
-
-							<span class="tenth centeralign semibold">
-%								foreach my $score (@scores) {
-									<% $score->tag eq "winloss"
-										? $score->value > 0
-										? "W"
-											: "L"
-											: ""
-									%>
-%								}
-							</span>
-
-%							if ($points || $rank) {
-%								my @students = $entry->students();
-
-								<span class="half">
-
-%								if ($panel->round->post_secondary) {
-%									my $counter = 1 ;
-%									foreach my $student (@students) {
-										<div class="full nospace smallish">
-
-%											if (scalar @students > 1) {
-												<span class="threefifths nowrap marvertno">
-%													if ($anonymous_public) {
-														Debater <% $counter++ %>
-%													} else {
-														<% $student->last." ".$student->first %>
-%													}
-												</span>
-%											}
-
-%											foreach my $score (@{$scores_by_recipient{$student->id}}) {
-												<span class="fifth marno">
-													<% $score->value %>
-												</span>
-%											}
-										</div>
-%									}
-%								}
-								</span>
+					<td class="smallish centeralign nospace">
+%						if ($panel->{winloss}) {
+%							foreach my $judge_id (@ballots) {
+%								my $judge = $panels{$panel_id}{ballots}{$judge_id};
+								<div class='judgeheight full padleft'>
+									<% $judge->{winloss} == 1 ? "W" : "L" %>
+								</div>
 %							}
-						</div>
-%					}
-				</span>
-			</div>
+%						}
+					</td>
+
+					<td class="smallish centeralign nospace">
+%						if ($panel->{scores}) {
+%							foreach my $judge_id (@ballots) {
+%								my $judge = $panels{$panel_id}{ballots}{$judge_id};
+%								next unless $judge->{total_points} || $judge->{total_ranks};
+
+								<div class='judgeheight full padleft'>
+%									if ($judge->{point_count} < 2) {
+										<% $judge->{total_points} %>
+%									} else {
+%										foreach my $student_id (sort {$a <=> $b} keys %{$judge->{student_points}}) {
+											<% $entry->{students}{$student_id}{last}.", ".substr($entry->{students}{$student_id}{first}, 0, 1) %>
+											<% $judge->{student_points}{$student_id} %>
+%										}
+%									}
+%									if ($judge->{rank_count} < 2) {
+										<% $judge->{total_ranks} %>
+%									} else {
+%										foreach my $student_id (sort {$a <=> $b} keys %{$judge->{student_ranks}}) {
+											<% $entry->{students}{$student_id}{last}.", ".substr($entry->{students}{$student_id}{first}, 0, 1) %>
+											<% $judge->{student_ranks}{$student_id} %>
+%										}
+%									}
+								</div>
+%							}
+%						}
+					</td>
+
+				</tr>
+%			}
+%			if (keys %panels) {
+				</table>
+%			}
 %		}
+
 	</div>
 
