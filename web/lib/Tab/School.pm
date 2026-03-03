@@ -1,7 +1,7 @@
 package Tab::School;
 use base 'Tab::DBI';
 Tab::School->table('school');
-Tab::School->columns(Essential => qw/ id name code onsite tourn chapter state region district timestamp /);
+Tab::School->columns(Essential => qw/ id name code onsite tourn chapter state region district created_at registered_by timestamp /);
 
 Tab::School->has_a(tourn => 'Tab::Tourn');
 Tab::School->has_a(chapter => 'Tab::Chapter');
@@ -21,7 +21,7 @@ Tab::School->has_many(contacts  => 'Tab::Contact'   , 'school');
 
 Tab::School->has_many(followers => [Tab::Follower => 'person']);
 
-__PACKAGE__->_register_datetimes( qw/timestamp/);
+__PACKAGE__->_register_datetimes( qw/timestamp created_at/);
 
 sub short_name {
 	my ($self, $limit) = @_;

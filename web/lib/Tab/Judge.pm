@@ -5,7 +5,7 @@ Tab::Judge->columns(Primary => qw/id/);
 Tab::Judge->columns(Essential => qw/school first middle last code active
 								ada category person chapter_judge/);
 
-Tab::Judge->columns(Others => qw /alt_category covers obligation hired person_request timestamp /);
+Tab::Judge->columns(Others => qw /alt_category covers obligation hired person_request registered_by created_at timestamp/);
 
 # Wow, that's a lot.
 Tab::Judge->columns(TEMP => qw/categoryid schoolid tier pref panelid chair
@@ -34,7 +34,7 @@ Tab::Judge->has_many(jpools => [Tab::JPoolJudge => 'jpool']);
 Tab::Judge->set_sql(highest_code => "select MAX(code) from judge where category = ?");
 Tab::Judge->set_sql(lowest_code  => "select MIN(code) from judge where category = ?");
 
-__PACKAGE__->_register_datetimes( qw/timestamp /);
+__PACKAGE__->_register_datetimes( qw/timestamp created_at/);
 
 sub setting {
 
