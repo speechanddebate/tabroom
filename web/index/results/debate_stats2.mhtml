@@ -3,8 +3,8 @@
 	$circuit_id => undef
 	$year       => undef
 	$level      => undef
-	$min_rds    => undef
-	$show_top   => undef
+	$min_rds    => 5
+	$show_top   => 100
 	$event_id   => undef
 	$seed_me    => undef
 </%args>
@@ -36,32 +36,39 @@
 	}
 
 	# load team points
-	$circuit_id = 43 unless $circuit_id;
-	my $circuit = Tab::Circuit->retrieve( $circuit_id ) if $circuit_id;
+	my $circuit = Tab::Circuit->retrieve( $circuit_id || 43);
 
 	my %team_points = $m->comp(
 		"/funclib/team_ratings.mas",
 			type    => "debate",
 			circuit => $circuit
-		) if $circuit;
-
-	unless ($show_top) { $show_top = 78; }
-	unless ($min_rds) { $min_rds = 5; }
-
-	if ($circuit) {
-
-	my $event = Tab::Event->retrieve( $event_id ) if $event_id;
-	my $event_str;
-	$event_str = " and showing only entries in ".$event->name." for ".$event->tourn->name if $event_id;
-
-	$show_top = 300 if $event_id;
-	$min_rds = 1 if $event_id;
+	) if $circuit;
 
 	my $start_string = "07/01/$year";
 	my $end_string = "06/30/".($year + 1);
 
 	my $start_dt = Tab::dtme($start_string);
 	my $end_dt = Tab::dtme($end_string);
+
+	my $event_str;
+	my $event_limiter;
+	my $event_fields;
+	my @params = ($circuit->id, $start_dt, $end_dt);
+
+	if (int($event_id) > 0) {
+		my $event = Tab::Event->retrieve( $event_id ) if $event_id;
+		$event_str = " and showing only entries in ".$event->name." for ".$event->tourn->name if $event_id;
+		$min_rds = 1;
+
+		$event_fields = ", entry e2, entry_student es2";
+		$event_limiter = "
+			and e2.event    = ?
+			and e2.id       = es2.entry
+			and es2.student = student.id
+		";
+
+		push @params, $event->id;
+	}
 
 	my $level_display = ucfirst($level);
 	unless ($level_display) {
@@ -74,28 +81,32 @@
 	Tab::Entry->columns(TEMP => qw/school_name/);
 	Tab::Entry->columns(TEMP => qw/student_names/);
 	Tab::Entry->set_sql(pull_entries => "
-		select entry.id,
-			GROUP_CONCAT(DISTINCT entry_student.student order by entry_student.student) as IDstr,
+		select
+			entry.id,
+			GROUP_CONCAT(DISTINCT student.id order by student.id) as IDstr,
 			GROUP_CONCAT( CONCAT_WS(' ',student.first,student.last) separator ' & ') as student_names,
 			school.name as school_name
-		from (entry, event, tourn, tourn_circuit, entry_student, student)
+		from (entry, event, tourn, tourn_circuit, entry_student, student $event_fields)
 			left join school on entry.school = school.id
-		where tourn_circuit.circuit= ?
-		and tourn.id = tourn_circuit.tourn
-		and event.tourn = tourn.id
-		and entry.event = event.id
-		and tourn.start >= ?
-		and tourn.end <= ?
-		and entry_student.entry = entry.id
-		and student.id = entry_student.student
-		and entry.dropped = 0
-		and event.type = 'debate'
-		$level_limit
+		where 1=1
+			and tourn_circuit.circuit= ?
+			and tourn.id = tourn_circuit.tourn
+			and event.tourn = tourn.id
+			and entry.event = event.id
+			and tourn.start >= ?
+			and tourn.end <= ?
+			and entry_student.entry = entry.id
+			and student.id = entry_student.student
+			and entry.active = 1
+			and event.type = 'debate'
+			$level_limit
+			$event_limiter
 		group by entry.id
 		order by IDstr
 	");
 
-	my @entries = Tab::Entry->search_pull_entries($circuit->id, $start_dt, $end_dt);
+
+	my @entries = Tab::Entry->search_pull_entries(@params);
 
 	my %entry_hash;
 	my %index_hash; #key is entry_id, value is IDstr
@@ -104,11 +115,7 @@
 
 		$entry_hash{$entry->IDstr}{'name'} = $entry->school_name." <br />". $entry->student_names;
 		$index_hash{$entry->id}{'master_id'} = $entry->IDstr;
-
-		if ($event_id && $entry->event == $event_id) {
-			$entry_hash{$entry->IDstr}{'in_event'} = 1;
-			$entry_hash{$entry->IDstr}{'object'} = $entry;
-		}
+		$entry_hash{$entry->IDstr}{'object'} = $entry;
 
 		my ($speaker1, $speaker2) = get_speakers( $entry->IDstr );
 		$entry_hash{$entry->IDstr}{'speaker1'} = $speaker1;
@@ -223,38 +230,12 @@
 	if ($seed_me && $person && $person->site_admin) {
 		my %done;
 		foreach my $key (sort { $entry_hash{$b}{'all_percent'} <=> $entry_hash{$a}{'all_percent'} } keys %entry_hash) {
-			next unless $entry_hash{$key}{'in_event'};
 			my $entry = $entry_hash{$key}{'object'};
 			next unless $entry;
 			next if $done{$entry->id}++;
 			$counter++;
 			$entry->setting("pairing_seed", $counter);
 		}
-	}
-
-	sub get_speakers {
-
-		my ($dummy) = @_;
-		my $x; my $st=0;
-		my $speaker1=""; my $speaker2="";
-
-		for ($x=0; $x <= length($dummy); $x++) {
-
-			if ( substr($dummy, $x, 1) eq "," ) {
-				if ( $speaker1 eq "" ) {
-					$speaker1=substr($dummy, $st, $x-$st);
-					$st=$x+1;
-				} else {
-					$speaker2=substr($dummy, $st, $x-$st-1);
-				}
-				if ( $speaker2 ne "" ) { last; }
-			}
-		}
-
-		if ($speaker2 eq "" ) { $speaker2=substr($dummy, $st, length($dummy)-$st); }
-
-		return $speaker1, $speaker2;
-
 	}
 
 	my $ctr;
@@ -272,13 +253,15 @@
 
 	<div class="main">
 
-		<div class="full padless">
+		<div class="full padless flexrow">
 
-			<span class="seveneighths nospace">
-				<h3>
+			<span class="seveneighths">
+				<h4>
 					<% $year %>-<% $year + 1 %> <% $circuit->name %> entry standings
-				</h3>
-				Any discrepancies with bid sheets are due to byes, and rankers should defer to bid sheets and double-check any close rankings.
+				</h4>
+				<h6 class="nospace">
+					<% $event_str %>
+				</h6>
 			</span>
 
 			<span
@@ -311,13 +294,13 @@
 
 <%perl>
  			foreach my $key (sort {$team_points{$b}{'rpi_total'} <=> $team_points{$a}{'rpi_total'}} keys(%team_points)) {
-				next unless ( 	$entry_hash{$key}{'p_wins'} > 0 and
-					$entry_hash{$key}{'p_losses'} > 0 and
-					$entry_hash{$key}{'name'} ne '' and
-					$entry_hash{$key}{'rounds'} > $min_rds and
-					( $entry_hash{$key}{'in_event'} == 1 || $event_id == 0 ) );
+				next unless (
+					$entry_hash{$key}{'p_wins'} > 0
+					and $entry_hash{$key}{'p_losses'} > 0
+					and $entry_hash{$key}{'name'} ne ''
+					and $entry_hash{$key}{'rounds'} > $min_rds
+				);
 
-				last if $ctr++ >= $show_top;
 </%perl>
 
 				<tr class="smallish centeralign">
@@ -374,16 +357,31 @@
 
 	</div>
 
-%	} else {
 
-	<&
-		"menu.mas",
-		circuit_id => $circuit,
-		whoami     => "team_success",
-		year       => $year,
-		level      => $level,
-		min_rds    => $min_rds
-	&>
+<%perl>
 
+	sub get_speakers {
 
-%	}
+		my ($dummy) = @_;
+		my $x; my $st=0;
+		my $speaker1=""; my $speaker2="";
+
+		for ($x=0; $x <= length($dummy); $x++) {
+
+			if ( substr($dummy, $x, 1) eq "," ) {
+				if ( $speaker1 eq "" ) {
+					$speaker1=substr($dummy, $st, $x-$st);
+					$st=$x+1;
+				} else {
+					$speaker2=substr($dummy, $st, $x-$st-1);
+				}
+				if ( $speaker2 ne "" ) { last; }
+			}
+		}
+
+		if ($speaker2 eq "" ) { $speaker2=substr($dummy, $st, length($dummy)-$st); }
+
+		return $speaker1, $speaker2;
+
+	}
+</%perl>
