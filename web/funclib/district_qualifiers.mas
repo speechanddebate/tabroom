@@ -24,81 +24,136 @@
 
 	return unless $result_set;
 
-	my $counter;
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			entry.id, entry.code code, entry.name name,
+			school.id school_id, school.name school_name,
+			student.id student_id, student.first student_first, student.last student_last, student.nsda nsda,
+			(
+				select vacated.value
+				from entry_setting vacated
+				where vacated.entry = entry.id
+				and vacated.tag = 'nsda_vacate'
+			) as vacated
+		from (result, entry, entry_student es, student)
+			left join school on entry.school = school.id
+		where 1=1
+			and result.result_set = ?
+			and result.entry = entry.id
+			and entry.id = es.entry
+			and es.student = student.id
+	");
+
+	$sth->execute($result_set->id);
+	my $entries = $sth->fetchall_hash();
+	my %entry_by_id;
+
+	foreach my $ref (@{$entries}) {
+
+		unless ($entry_by_id{$ref->{id}}) {
+			$entry_by_id{$ref->{id}} = {
+				id          => $ref->{id},
+				code        => $ref->{code},
+				name        => $ref->{name},
+				vacated     => $ref->{vacated},
+				ineligible  => ($ref->{nsda} ? 0 : 1),
+				school_code => $ref->{school_code},
+				school_name => $ref->{school_name}
+			};
+		}
+
+		unless ($entry_by_id{$ref->{id}}{student_by_id}{$ref->{student_id}}) {
+
+			if ($entry_by_id{$ref->{id}}{nsda}) { $entry_by_id{$ref->{id}}{nsda} .= "<br /> "; }
+			$entry_by_id{$ref->{id}}{nsda} .= $ref->{nsda};
+
+			my $sref = {
+				id    => $ref->{student_id},
+				first => $ref->{student_first},
+				last  => $ref->{student_last},
+				nsda  => $ref->{nsda},
+			};
+
+			$entry_by_id{$ref->{id}}{student_by_id}{$ref->{student_id}} = $sref;
+			push @{$entry_by_id{$ref->{id}}{students}}, $sref;
+		}
+	}
+
+	my $rank_sth = $dbh->prepare("
+		select
+			result.id, result.rank, result.entry entry_id,
+			value.id value_id, value.value value, value.priority priority,
+			rk.tag tag, rk.description description
+
+		from result, result_value value, result_key rk
+		where 1=1
+			and result.result_set = ?
+			and result.id = value.result
+			and rk.id = value.result_key
+			and value.priority > 0
+		order by result.rank
+	");
+
+	$rank_sth->execute($result_set->id);
+	my $results = $rank_sth->fetchall_hash();
+
+	my $counter  = 1;
 	my $quantity = 1;
 	my $last_rank;
 	my $last_entry;
+	my $last_tick;
 
 	RESULT:
-	foreach my $result (
-		sort {$a->rank <=> $b->rank}
-		$result_set->results
-	) {
+	foreach my $ref (@{$results}) {
 
-		$counter++;
-		my @values;
-		my $place;
+		my $entry = $entry_by_id{$ref->{entry_id}};
 
-		foreach my $value ($result->values) {
-			next if $value->priority < 1;
-			push @values, $value;
-		}
-
-		my $rank = $result->rank;
-		my $entry = $result->entry();
-		my $vacate = $entry->setting('nsda_vacate');
-
-		if ($vacate) {
-
+		if ($entry->{vacated}) {
 			next RESULT if $quantity > $num_qualifiers;
-
 		} elsif ($quantity == $num_qualifiers) {
-
-			$last_rank = $rank;
-			$last_entry = $entry;
-
+			$last_rank = $ref->{rank};
+			$last_entry = $ref->{entry_id};
 		} elsif ($quantity > $num_qualifiers) {
 
-			if ($last_rank == $rank) {
-				push @{$qualifiers{"ties"}{$rank}}, $entry;
-				push @{$qualifiers{"ties"}{$rank}}, $last_entry;
+			if (
+				$last_rank == $ref->{rank}
+				&& $last_tick != $ref->{entry_id}
+			) {
+				push @{$qualifiers{"ties"}{$ref->{rank}}}, $entry;
+				push @{$qualifiers{"ties"}{$ref->{rank}}}, $last_entry;
 			} else {
 				next RESULT;
 			}
 		}
 
-		$qualifiers{$counter}{"rank"}  = $rank;
-		$qualifiers{$counter}{"entry"} = $entry;
-		$qualifiers{$counter}{"vacated"}++ if $vacate;
+		unless ($last_tick == $entry->{id}) {
 
-		my $tiebreaks;
+			$counter++;
+			Tab::debuglog("Counter $counter rank ".$ref->{rank}." for entry ".$entry->{code}." Last entry $last_tick this ".$entry->{id});
 
-		foreach my $value (
-			sort {$a->priority <=> $b->priority}
-			@values
-		) {
-			$qualifiers{$counter}{"tag"}{$value->priority}     = $value->result_key->tag;
-			$qualifiers{$counter}{"descs"}{$value->priority}   = $value->result_key->description;
-			$qualifiers{$counter}{"results"}{$value->priority} = $value->value;
+			$qualifiers{$counter}{"rank"}       = $ref->{rank};
+			$qualifiers{$counter}{"entry"}      = $entry;
+			$qualifiers{$counter}{"vacated"}    = $entry->{vacated};
+			$qualifiers{$counter}{"ineligible"} = $entry->{ineligible};
+			$qualifiers{$counter}{"students"}   = $entry->{students};
+
+			$last_tick = $entry->{id};
+			$last_rank = $ref->{rank};
+
+			unless (
+				$qualifiers{$counter}{"vacated"}
+				|| $qualifiers{$counter}{"ineligible"}
+				|| $all
+			) {
+				$quantity++;
+			}
 		}
 
-		foreach my $student ($entry->students) {
-			push @{$qualifiers{$counter}{"students"}}, $student;
-
-			$qualifiers{$counter}{$student->id}{"ineligible"}++
-				unless $student->nsda;
-
-			$qualifiers{$counter}{"ineligible"}++
-				unless $student->nsda;
-		}
-
-		unless (
-			$qualifiers{$counter}{"vacated"}
-			|| $qualifiers{$counter}{"ineligible"}
-			|| $all
-		) {
-			$quantity++;
-		}
+		$qualifiers{$counter}{"tag"}{$ref->{priority}}     = $ref->{tag};
+		$qualifiers{$counter}{"descs"}{$ref->{priority}}   = $ref->{description};
+		$qualifiers{$counter}{"results"}{$ref->{priority}} = $ref->{value};
 
 	}
 
