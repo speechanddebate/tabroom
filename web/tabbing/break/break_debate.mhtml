@@ -394,7 +394,6 @@
 				}
 				# I have no such opponent which means this is a partial
 				$byes{$debate_seed} = $entry_id;
-
 			}
 		}
 	}
@@ -574,6 +573,8 @@
 		}
 	}
 
+	my %paired;
+
 	foreach my $seed (sort {$a <=> $b} keys %debates) {
 
 		my $aff = $debates{$seed}{0};
@@ -605,12 +606,13 @@
 			});
 		};
 
+		$paired{$aff}++;
+		$paired{$neg}++;
 
 		if (
 			(not defined $ignore_schools)
 			&& ($entries->{"school_id"}{$aff} == $entries->{"school_id"}{$neg})
 		) {
-
 
 			$seed{$aff} = $m->comp("/funclib/entry_seed.mas", entry => $aff);
 			$seed{$neg} = $m->comp("/funclib/entry_seed.mas", entry => $neg);
@@ -659,15 +661,11 @@
 			if ($due_aff != $aff) {
 				$m->comp("/funclib/swap_sides.mas", panel => $panel);
 			}
-
 		}
-
 		$letter++;
-
 	}
 
 	foreach my $seed (sort keys %byes) {
-
 		my $panel = Tab::Panel->create({
 			letter  => $letter,
 			round   => $into->id,
@@ -683,13 +681,112 @@
 		});
 
 		$letter++;
+		$paired{$byes{$seed}}++;
 	}
 
 	$into->paired_at($now);
 	$into->post_primary(0);  # People always do this
 	$into->post_secondary(0);  # People always do this
-	$into->post_feedback(0);  # People always do this
+	$into->post_feedback(0);  # People always do this, too
 	$into->update();
+
+	if ($ARGS{"bronze_medal_game"}) {
+
+		my $existing_sth = $dbh->prepare("
+			select round.id from round
+			where 1=1
+			and round.type = 'runoff'
+			and round.event = ?
+			and NOT EXISTS (
+				select panel.id
+				from panel
+				where panel.round = round.id
+			)
+		");
+
+		$existing_sth->execute($event->id);
+		my $ref = $existing_sth->fetchall_hash();
+
+		my $round_ref = eval {
+			shift @{$ref};
+		};
+
+		my $runoff;
+		if ($round_ref) {
+
+			$runoff = Tab::Round->retrieve($round_ref->{id});
+		} else {
+
+			my $ts = $into->timeslot;
+			my $runoff_timeslot = $ts->copy({
+				name => $event->abbr." Consolation Final",
+			});
+
+			$ts->start($ts->start->add( seconds => 1));
+			$ts->update();
+
+			$runoff = Tab::Round->create({
+				event      => $event->id,
+				timeslot   => $runoff_timeslot->id,
+				start_time => $runoff_timeslot->start,
+				protocol   => $protocol->id,
+				site       => $site->id,
+				label      => "Consolation",
+				type       => "runoff",
+				paired_at  => $now
+			});
+
+		}
+
+		my $entries_sth = $dbh->prepare("
+			select distinct entry.id
+				from entry, ballot, panel
+			where 1=1
+				and panel.round = ?
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+				and NOT EXISTS (
+					select b2.id
+					from ballot b2, panel p2
+					where b2.entry = entry.id
+					and b2.panel = p2.id
+					and p2.round = ?
+				)
+		");
+
+		$m->comp("/funclib/renumber_rounds.mas", event => $event);
+
+		$entries_sth->execute($from->id, $into->id);
+		my $eref = $entries_sth->fetchall_hash();
+
+		my $panel = Tab::Panel->create({
+			letter  => 1,
+			round   => $runoff->id,
+			flight  => 1,
+			bracket => 1
+		});
+
+		my $side = 1;
+		my $aff;
+
+		foreach my $entry (@{$eref}) {
+			$aff = $entry->{id} unless $aff;
+			Tab::Ballot->create({
+				panel => $panel->id,
+				entry => $entry->{id},
+				side  => $side++
+			});
+		}
+
+		my $due_aff = $m->comp("/funclib/round_elim_dueaff.mas", panel => $panel);
+
+		if ($due_aff != $aff) {
+			$m->comp("/funclib/swap_sides.mas", panel => $panel);
+		}
+
+		$from->runoff($runoff->id);
+		$from->update();
+	}
 
 	my $msg = ucfirst($type)." round sectioned";
 	return $msg if $ARGS{'return'};
