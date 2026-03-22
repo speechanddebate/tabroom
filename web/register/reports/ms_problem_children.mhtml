@@ -1,4 +1,5 @@
 <%args>
+	$dbh
 	$tourn
 	$tourn_settings
 	$school_id => undef
@@ -6,8 +7,6 @@
 <%init>
 
 	my %schools;
-    my $dbh = Tab::DBI->db_Main();
-
 	my $limit;
 
 	if ($school_id) {
@@ -175,8 +174,6 @@
 
 		if ($settings{$category->id}{"paradigm_quiz"}) {
 
-			my $dbh = Tab::DBI->db_Main();
-
 			# Missing school release forms
 			my $missing_paradigms = $dbh->prepare("
 				select school.id, school.name,
@@ -226,6 +223,215 @@
 		}
 	}
 
+	# Missing contacts
+	my $contact_status = $dbh->prepare("
+		select school.id, school.name, chapter.nsda, chapter.state, count(contact.id) as count
+			from chapter, school
+			left join contact on contact.school = school.id
+				and contact.email = 1
+				and contact.official = 1
+		where 1=1
+			and school.tourn = ?
+			and school.chapter = chapter.id
+			group by school.id
+	");
+
+	$contact_status->execute($tourn->id);
+	my $contacts = $contact_status->fetchall_hash();
+
+	foreach my $contact (@{$contacts}) {
+		next if $contact->{count} > 1;
+
+		unless ($schools{$contact->{id}}{"name"}) {
+			$schools{$contact->{id}}{"name"}    = $contact->{name} || $contact->{id};
+			$schools{$contact->{id}}{"state"}   = $contact->{region_code} || $contact->{state};
+			$schools{$contact->{id}}{"nsda_id"} = $contact->{nsda};
+		}
+
+		$schools{$contact->{id}}{"bad"}{"contacts"} = $contact->{count} || 0;
+	}
+
+	# Scripts
+
+	foreach my $tag ('topic', 'title', 'author', 'bibliography') {
+
+		my $piece_sth = $dbh->prepare("
+			select school.id, school.name, chapter.nsda, chapter.state,
+				entry.id entry_id, entry.name entry_name,
+				event.id event_id, event.abbr event_abbr
+
+			from chapter, school, event, entry
+			where 1=1
+
+				and school.tourn = ?
+				and school.chapter = chapter.id
+				and school.id = entry.school
+				and entry.event = event.id
+
+				and exists (
+					select es.id from event_setting es
+					where es.event = event.id
+					and es.tag = ?
+				)
+
+				and not exists (
+					select ns.id from entry_setting ns
+					where ns.entry = entry.id
+					and ns.tag = ?
+				)
+			group by entry.id
+		");
+
+		my $ask = "ask_for_".$tag;
+
+		if ($tag eq "title" || $tag eq "author") {
+			$ask .= "s";
+		}
+
+		$piece_sth->execute(
+			$tourn->id,
+			$ask,
+			$tag
+		);
+
+		my $missings = $piece_sth->fetchall_hash();
+
+		foreach my $missing (@{$missings}) {
+			unless ($schools{$missing->{id}}{"name"}) {
+				$schools{$missing->{id}}{"name"}    = $missing->{name} || $missing->{id};
+				$schools{$missing->{id}}{"state"}   = $missing->{state};
+				$schools{$missing->{id}}{"nsda_id"} = $missing->{nsda};
+			}
+
+			if ($schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"reason"}) {
+				$schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"reason"} .= "\n\n";
+			}
+			$schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"reason"} .= "No $tag listed";
+			$schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"event"} = $missing->{event_abbr};
+			$schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"name"} = $missing->{entry_name};
+		}
+	}
+
+	my $publication_sth = $dbh->prepare("
+		select school.id, school.name, chapter.nsda, chapter.state,
+			entry.id entry_id, entry.name entry_name,
+			event.id event_id, event.abbr event_abbr
+
+		from chapter, school, event, entry
+		where 1=1
+
+			and school.tourn = ?
+			and school.chapter = chapter.id
+			and school.id = entry.school
+			and entry.event = event.id
+
+			and exists (
+				select es.id from event_setting es
+				where es.event = event.id
+				and es.tag = 'ask_for_publication'
+			)
+
+			and not exists (
+				select ns.id from entry_setting ns
+				where ns.entry = entry.id
+				and ns.tag IN ('publish_url', 'publish_isbn')
+			)
+		group by entry.id
+	");
+
+	$publication_sth->execute($tourn->id);
+
+	my $missings = $publication_sth->fetchall_hash();
+
+	foreach my $missing (@{$missings}) {
+		unless ($schools{$missing->{id}}{"name"}) {
+			$schools{$missing->{id}}{"name"}    = $missing->{name} || $missing->{id};
+			$schools{$missing->{id}}{"state"}   = $missing->{state};
+			$schools{$missing->{id}}{"nsda_id"} = $missing->{nsda};
+		}
+
+		if ($schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"reason"}) {
+			$schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"reason"} .= "\n\n";
+		}
+		$schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"reason"} .= "Insufficient publication details listed";
+		$schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"event"} = $missing->{event_abbr};
+		$schools{$missing->{id}}{"bad"}{"pieces"}{$missing->{entry_id}}{"name"} = $missing->{entry_name};
+	}
+
+	my $cat_quizzes_sth = $dbh->prepare("
+		select
+			category.id, category.abbr, rq.value_text quizzes
+		from category, category_setting rq
+		where 1=1
+			and category.tourn = ?
+			and category.id = rq.category
+			and rq.tag = 'required_quizzes'
+	");
+
+	$cat_quizzes_sth->execute($tourn->id);
+	my $cats = $cat_quizzes_sth->fetchall_hash();
+
+	my $missing_quiz_sth = $dbh->prepare("
+		select
+			judge.id, judge.first, judge.last, judge.code,
+			school.id school_id, school.name school_name,
+			chapter.state, chapter.nsda,
+			quiz.label, quiz.approval
+		from (judge, quiz)
+			left join school on judge.school = school.id
+			left join chapter on school.chapter = chapter.id
+		where 1=1
+			and judge.category = ?
+			and quiz.id = ?
+			and quiz.approval = 1
+			and NOT EXISTS (
+				select pq.id
+				from person_quiz pq
+				where pq.person = judge.person
+				and pq.quiz = quiz.id
+				and pq.approved_by > 0
+			)
+	");
+
+	foreach my $cat (@{$cats}) {
+		my $quizzes = JSON::decode_json($cat->{quizzes});
+
+		foreach my $quiz_id (@{$quizzes}) {
+
+			$missing_quiz_sth->execute($cat->{id}, $quiz_id);
+			my $missing_quizzes = $missing_quiz_sth->fetchall_hash();
+
+			foreach my $judge (@{$missing_quizzes}) {
+
+				my $school_id = $judge->{school_id};
+				my $judge_id = $judge->{id};
+
+				unless ($schools{$school_id}{"name"}) {
+					$schools{$school_id}{"name"}    = $judge->{school_name};
+					$schools{$school_id}{"state"}   = $judge->{state};
+					$schools{$school_id}{"nsda_id"} = $judge->{nsda};
+				}
+
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"event"} = $cat->{abbr};
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"name"}  = $judge->{code}." ".$judge->{first}." ".$judge->{last};
+
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"} .= "\n\n"
+					if $schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"};
+
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"} .= $judge->{label}." missing or incomplete";
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"} =~ s/\&/and/g;
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"} =~ s/\-/ /g;
+
+				# Why are we so friggin verbose.
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"} =~ s/Dramatic/Drama/g;
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"} =~ s/Humorous/Humor/g;
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"} =~ s/Original Oratory/Oratory/g;
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"} =~ s/Interpretation/Interp/g;
+				$schools{$school_id}{"bad"}{"judges"}{$judge_id}{"reason"} =~ s/Speaking //g;
+			}
+		}
+	}
+
 	my $filename = "ProblemReports-Nationals";
     my $filepath = $Tab::file_root."tmp/".$filename;
 
@@ -262,19 +468,13 @@
 		print TEXOUT "\\newline\n";
 		print TEXOUT "\\strut\n";
 
-		print TEXOUT "\\hfill \\textbf{\\Huge PLEASE SEE THE PROBLEM TABLE} \\hfill";
+		print TEXOUT "\\hfill \\textbf{\\Huge Nationals Registration Action Needed} \\hfill";
 
 		print TEXOUT "\\bigskip\n";
 		print TEXOUT "\\newline\n";
 		print TEXOUT "\\large\n";
 
-		print TEXOUT "Your registration was incomplete as listed below. You can
-		still fix a lot of these issues online without waiting in line.  Upload
-		script information and release forms online on http://www.tabroom.com.
-		Fees are still payable online on http://www.speechanddebate.org/account.
-		If you fix or have fixed the issues below, the SELF SERVICE table can
-		clear you for registration.";
-
+		print TEXOUT "Your registration is incomplete as listed below. Please log in to Tabroom.com to resolve these issues.\n";
 		print TEXOUT "\\bigskip\n";
 		print TEXOUT "\\newline\n";
 		print TEXOUT "\\strut\n";
@@ -332,7 +532,7 @@
 				print TEXOUT "\\hspace{.25in}\n";
 				print TEXOUT "\\parbox{3.5in}{\n";
 				print TEXOUT "\\vspace{4mm}\n";
-				print TEXOUT "\\textsb{\\large Missing: } \n";
+				print TEXOUT "\\textsb{\\large Missing Releases: } \n";
 				print TEXOUT "\\vspace{4mm}\n";
 				print TEXOUT "}\n";
 
@@ -340,6 +540,22 @@
 				print TEXOUT "\\textsb{";
 				print TEXOUT Tab::texify($schools{$school_id}{"bad"}{$reason});
 				print TEXOUT "}}\n";
+				print TEXOUT "\\end{minipage}\n";
+				print TEXOUT "}\n";
+
+			} elsif ($reason eq "contacts") {
+
+				print TEXOUT "\\fbox{\\begin{minipage}{7in}\n";
+				print TEXOUT "\\hspace{.25in}\n";
+				print TEXOUT "\\parbox{2.5in}{\n";
+				print TEXOUT "\\vspace{4mm}\n";
+				print TEXOUT "\\textsb{\\large Missing Contacts: } \n";
+				print TEXOUT "\\vspace{4mm}\n";
+				print TEXOUT "}\n";
+
+				print TEXOUT "\\parbox{3.5in}{\n";
+				print TEXOUT "Contact info for 2 adults required; ".$schools{$school_id}{"bad"}{$reason}." listed ";
+				print TEXOUT "}\n";
 				print TEXOUT "\\end{minipage}\n";
 				print TEXOUT "}\n";
 
@@ -374,10 +590,11 @@
 					print TEXOUT "}\n";
 
 					print TEXOUT "\\parbox{1.5in}{\n";
+					print TEXOUT "\\normalsize\n";
 					print TEXOUT Tab::texify($schools{$school_id}{"bad"}{$reason}{$entry_id}{"name"});
 					print TEXOUT "}\n";
 
-					print TEXOUT "\\parbox{4.5in}{\n";
+					print TEXOUT "\\parbox{5in}{\n";
 
 					my $notfirst;
 					foreach my $reason (@reasons) {
