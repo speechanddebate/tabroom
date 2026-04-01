@@ -1,4 +1,6 @@
 <%args>
+	$now
+	$dbh
 	$tourn
 	$tourn_settings
 	$perms
@@ -12,9 +14,11 @@
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my $now = DateTime->now();
-
-	my $dbh = Tab::DBI->db_Main();
+	my %ok_events = $m->comp('/funclib/perms/events.mas',
+		tourn   => $tourn,
+		perms   => $perms,
+		limited => 1,
+	);
 
 	my $sth = $dbh->prepare("
 		select
@@ -204,11 +208,7 @@
 					</th>
 
 					<th class="smallish">
-						Generated On
-					</th>
-
-					<th class="smallish">
-						Time
+						Generated
 					</th>
 
 					<th class="smallish">
@@ -226,190 +226,252 @@
 			<tbody>
 
 <%perl>
-				my @events = sort {
-					$a->type cmp $b->type
-					|| $a->name cmp $b->name
-				} $tourn->events;
+				my $event_sth = $dbh->prepare("
+					select
+						event.id, event.abbr, event.name, event.type,
+						(select baker.value from event_setting baker where baker.event = event.id and baker.tag ='baker') as baker,
+						(select dukesandbailey.value from event_setting dukesandbailey
+							where dukesandbailey.event = event.id
+							and dukesandbailey.tag ='dukesandbailey') as dukesandbailey,
+						(select averill.value from event_setting averill where averill.event = event.id and averill.tag ='averill') as averill,
+						(select bid_round.value from event_setting bid_round where bid_round.event = event.id and bid_round.tag ='bid_round') as bid_round,
+						(select breakouts.value from event_setting breakouts where breakouts.event = event.id and breakouts.tag ='breakouts') as breakouts
+					from event
+					where 1=1
+						and event.tourn = ?
+						and event.type != 'attendee'
+					order by event.type, event.abbr
+				");
+
+				$event_sth->execute($tourn->id);
+				my $events = $event_sth->fetchall_hash();
 
 				my $ndca;
 				my $toc;
 				my @breakouts;
 
-				foreach my $event (@events) {
+				# Sure wish I'd known JSON could get stuffed into a MySQL
+				# database when I did this data pattern in 2005.
 
-					$ndca++ if $event->setting("baker");
-					$ndca++ if $event->setting("dukesandbailey");
-					$ndca++ if $event->setting("ndca_public_forum");
-					$toc++ if $event->setting("bid_round");
+				my @events;
 
-					foreach my $key (1 .. $event->setting("breakouts")) {
+				foreach my $event_ref (@{$events}) {
 
-						next if $event->setting("breakout_".$key."_delete");
+					next unless $ok_events{$event_ref->{id}};
+					push @events, $event_ref;
 
-						my %breakout = ();
+					$ndca++ if $event_ref->{"baker"};
+					$ndca++ if $event_ref->{"dukesandbailey"};
+					$ndca++ if $event_ref->{"ndca_public_forum"};
+					$toc++ if $event_ref->{"bid_round"};
 
-						$breakout{"event"} = $event->id;
-						$breakout{"type"} = $event->type;
-						$breakout{"label"} = $event->setting("breakout_".$key."_label");
-						$breakout{"key"} = $key;
+					BREAKOUT:
+					foreach my $key (1 .. $event_ref->{"breakouts"}) {
 
-						push @breakouts, \%breakout;
+						my $breakout_sth = $dbh->prepare("
+							select label.value label, deleted.value deleted
+								from event
+							left join event_setting label on label.event = event.id and label.tag = 'breakout_".$key."_label'
+							left join event_setting deleted on deleted.event = event.id and deleted.tag = 'breakout_".$key."_deleted'
+							where 1=1
+								and event.id = ?
+						");
+
+						$breakout_sth->execute($event_ref->{id});
+						my $refs = $breakout_sth->fetchall_hashref();
+
+						if (@{$refs}) {
+							my $ref = shift @{$refs};
+							next BREAKOUT if $ref->{"deleted"};
+
+							my %breakout = ();
+
+							$breakout{"event"} = $event_ref->{id};
+							$breakout{"type"}  = $event_ref->{type};
+							$breakout{"label"} = $ref->{label};
+							$breakout{"key"}   = $key;
+
+							push @breakouts, \%breakout;
+						}
 					}
 
-					push @types, $event->type;
- 					my $published = $event->setting("results_published");
-					foreach my $result_set ($event->result_sets) {
+					push @types, $event_ref->{type};
 
+					my $rs_sth = $dbh->prepare("
+						select rs.* from result_set rs where rs.event = ? order by rs.label
+					");
+
+					$rs_sth->execute($event_ref->{id});
+
+					my $rsen = $rs_sth->fetchall_hash();
+
+					foreach my $result_set (@{$rsen}) {
 </%perl>
-						<tr id="<% $result_set->id %>" >
+						<tr id="<% $result_set->{id}%>" >
 %							unless ($nodelete) {
 							<td class="nospace centeralign">
-%								my $warn = "This will delete the result set ".$event->abbr;
-%								$warn .= $result_set->label." from all public postings.";
+%								my $warn = "This will delete the result set ".$event_ref->{abbr};
+%								$warn .= $result_set->{label}." from all public postings.";
 %								$warn .= "Continue?";
 								<a
 									class         = "buttonwhite redtext fa fa-sm fa-trash"
-									result_set_id = "<% $result_set->id %>"
+									result_set_id = "<% $result_set->{id} %>"
 									onClick       = "postSwitch(this, 'set_delete.mhtml');"
 								></a>
 							</td>
 %							}
 
 							<td>
-								<% $event->abbr %>
+								<% $event_ref->{abbr} %>
 							</td>
 
 							<td class="nospace">
-								<a 	href="display.mhtml?result_set_id=<% $result_set->id %>"
+								<a 	href="display.mhtml?result_set_id=<% $result_set->{id}%>"
 									class="white button leftalign">
-									<% $result_set->label %>
+									<% $result_set->{label} %>
 								</a>
 							</td>
 
-							<td>
-%								my $generated = $result_set->generated;
-%								$generated->set_time_zone($tz) if $generated;
-								<% $generated ? Tab::pickerdate($generated) : "" %>
-							</td>
-
-							<td>
-								<% $generated ? Tab::pickertime($generated->set_time_zone($tz)) : "" %>
+							<td data-text="<& "/funclib/showdt.mas",
+								tz => $tz,
+								string => $result_set->{generated},
+								format => "rawsort"
+							&>">
+								<& "/funclib/showdt.mas",
+									tz     => $tz,
+									format => "shorter",
+									string => $result_set->{generated}
+								&>
 							</td>
 
 							<td
 								class     = "padless centeralign smallish"
-								data-text = "<% $result_set->coach %>"
+								data-text = "<% $result_set->{coach} %>"
 							>
-								<label class="switch <% $result_set->id %>_coachslider">
+								<label class="switch <% $result_set->{id}%>_coachslider">
 									<input
 										type          = "checkbox"
 										value         = "1"
-										id            = "<% $result_set->id %>_coach"
+										id            = "<% $result_set->{id}%>_coach"
 										property_name = "coach"
-										result_set_id = "<% $result_set->id %>"
+										result_set_id = "<% $result_set->{id}%>"
 										onChange      = "postSwitch( this, 'result_set_switch.mhtml');"
-										<% $result_set->coach  ? 'checked="checked"' : "" %>
+										<% $result_set->{coach}  ? 'checked="checked"' : "" %>
 									>
-									<div class="slider <% $result_set->id %>_coachslider"
+									<div class="slider <% $result_set->{id}%>_coachslider"
 									></div>
 								</label>
 								<span
 									title="when it's published to the world, it's also published to the coaches, natch"
-									class="<% $result_set->id %>_coachna smaller explain"
+									class="<% $result_set->{id}%>_coachna smaller explain"
 								>n/a</span>
 							</td>
 
 							<td class="padless centeralign smallish">
-								<span class="hidden"><% $result_set->published %></span>
+								<span class="hidden"><% $result_set->{published} %></span>
 								<label class="switch">
 									<input
 										type          = "checkbox"
 										value         = "1"
-										id            = "<% $result_set->id %>_published"
+										id            = "<% $result_set->{id}%>_published"
 										property_name = "published"
 										class         = "publish"
-										result_set_id = "<% $result_set->id %>"
+										result_set_id = "<% $result_set->{id}%>"
 										onChange      = "postSwitch( this, 'result_set_switch.mhtml', noDupes);"
-										<% $result_set->published ? 'checked="checked"' : "" %>
+										<% $result_set->{published} ? 'checked="checked"' : "" %>
 									>
 									<div class="slider"></div>
 								</label>
 							</td>
 						</tr>
 %					}
+<%perl>
+					my $file_sth = $dbh->prepare("
+						select file.*
+						from file
+						where file.event = ?
+						and file.tag = 'result'
+						order by file.label
+					");
 
-%					foreach my $file ($event->files(tag => "result")) 	{
+					$file_sth->execute($event_ref->{id});
+					my $files = $file_sth->fetchall_hash();
+</%perl>
+
+%					foreach my $file (@{$files}) {
 
 						<tr>
 							<td class="nospace centeralign">
 
 %								my $warn = "This will delete the file from ";
-%								$warn .= $event->abbr." ".$file->label." from public postings.";
+%								$warn .= $event_ref->{abbr}." ".$file->{label}." from public postings.";
 %								$warn .= "Continue?";
 
 								<a class="buttonwhite redtext fa fa-lg fa-trash"
-									href="file_delete.mhtml?file_id=<% $file->id %>"
+									href="file_delete.mhtml?file_id=<% $file->{id} %>"
 									<& "/funclib/confirm.mas", warn => $warn &>  >
 								</a>
 							</td>
 
 							<td>
-								<% $event->abbr %>
+								<% $event_ref->{abbr} %>
 							</td>
 
 							<td class="nospace">
 								<a
-									href="<% $Tab::s3_url %>/<% $tourn->id %>/results/<% $file->id %>/<% $file->filename %>"
+									href="<% $Tab::s3_url %>/<% $tourn->id %>/results/<% $file->{id} %>/<% $file->{filename} %>"
 									class="white button leftalign"
 								>
-									File: <% $file->label %>
+									File: <% $file->{label} %>
 								</a>
 							</td>
 
-							<td>
-%								my $uploaded = $file->uploaded;
-%								$uploaded->set_time_zone($tz);
-								<% Tab::pickerdate($uploaded) %>
-							</td>
-
-							<td>
-								<% Tab::pickertime($uploaded) %>
+							<td data-text="<& "/funclib/showdt.mas",
+								tz     => $tz,
+								string => $file->{uploaded},
+								format => "rawsort"
+							&>">
+								<& "/funclib/showdt.mas",
+									tz     => $tz,
+									format => "shorter",
+									string => $file->{uploaded}
+								&>
 							</td>
 
 							<td
 								class="padless centeralign smallish"
-								data-text="<% $file->coach || 0 %>"
+								data-text="<% $file->{coach} || 0 %>"
 							>
 								<label class="switch coachslider">
 									<input
 										type          = "checkbox"
 										value         = "1"
-										id            = "<% $file->id %>_coach"
+										id            = "<% $file->{id} %>_coach"
 										property_name = "coach"
-										file_id       = "<% $file->id %>"
+										file_id       = "<% $file->{id} %>"
 										onChange      = "postSwitch( this, 'file_switch.mhtml');"
-										<% $file->coach ? 'checked="checked"' : "" %>
+										<% $file->{coach} ? 'checked="checked"' : "" %>
 									>
 									<div class="slider"
-										id = "<% $file->id %>_coachslider"
+										id = "<% $file->{id} %>_coachslider"
 									></div>
 								</label>
 
 							</td>
 
 							<td class="padless centeralign smallish"
-								data-text="<% $file->published || 0 %>"
+								data-text="<% $file->{published} || 0 %>"
 							>
 								<label class="switch">
 									<input
 										type          = "checkbox"
 										value         = "1"
-										id            = "<% $file->id %>_published"
+										id            = "<% $file->{id} %>_published"
 										property_name = "published"
 										class         = "publish"
-										file_id       = "<% $file->id %>"
+										file_id       = "<% $file->{id} %>"
 										onChange      = "postSwitch( this, 'file_switch.mhtml', noDupes);"
-										<% $file->published ? 'checked="checked"' : "" %>
+										<% $file->{published} ? 'checked="checked"' : "" %>
 									>
 									<div class="slider"></div>
 								</label>
@@ -449,14 +511,16 @@
 							</a>
 						</td>
 
-						<td>
-%							my $generated = $result_set->generated;
-%							$generated->set_time_zone($tz) if $generated;
-							<% $generated ? Tab::pickerdate($generated) : "" %>
-						</td>
-
-						<td>
-							<% $generated ? Tab::pickertime($generated) : "" %>
+						<td data-text="<& "/funclib/showdt.mas",
+							tz     => $tz,
+							dt     => $result_set->generated,
+							format => "rawsort"
+						&>">
+							<& "/funclib/showdt.mas",
+								tz     => $tz,
+								format => "shorter",
+								dt     => $result_set->generated
+							&>
 						</td>
 
 						<td
@@ -499,9 +563,7 @@
 							</label>
 
 						</td>
-
 					</tr>
-
 %				}
 
 %				foreach my $file ($tourn->files(tag => "result")) {
@@ -511,10 +573,7 @@
 					<tr>
 
 						<td class="centeralign nospace">
-
-%							my $warn = "This will delete the file ".$file->label;
-%							$warn .= " from public postings.  Continue?";
-
+%							my $warn = "This will delete the file ".$file->label." from public postings.  Continue?";
 							<a class="buttonwhite redtext fa fa-lg fa-trash"
 								<& "/funclib/confirm.mas", warn => $warn &>
 								href="file_delete.mhtml?file_id=<% $file->id %>">
@@ -532,17 +591,20 @@
 							</a>
 						</td>
 
-						<td>
-%							my $uploaded = eval { return $file->uploaded->set_time_zone($tz); };
-							<% Tab::pickerdate($uploaded) %>
-						</td>
-
-						<td>
-							<% Tab::pickertime($uploaded) %>
+						<td data-text="<& "/funclib/showdt.mas",
+							tz     => $tz,
+							dt     => $file->uploaded,
+							format => "rawsort"
+						&>">
+							<& "/funclib/showdt.mas",
+								tz     => $tz,
+								format => "shorter",
+								dt     => $file->uploaded
+							&>
 						</td>
 
 						<td
-							class="padless centeralign smallish"
+							class     = "padless centeralign smallish"
 							data-text = "<% $file->coach %>"
 						>
 							<label class="switch <% $file->id %>_coachslider">
@@ -556,8 +618,7 @@
 
 									<% $file->coach ? 'checked="checked"' : "" %>
 								>
-								<div class="slider <% $file->id %>_coachslider"
-								></div>
+								<div class="slider <% $file->id %>_coachslider"></div>
 							</label>
 						</td>
 
@@ -584,6 +645,7 @@
 
 			</tbody>
 		</table>
+
 %	unless ($ARGS{"includeme"}) {
 	</div>
 
@@ -642,13 +704,10 @@
 							>
 								<option value=""></option>
 								<option value="all">All</option>
-<%perl>
-								foreach my $event (
-									sort {$a->type cmp $b->type || $a->abbr cmp $b->abbr} $tourn->events
-								) {
-</%perl>
-%									next if $event->type eq "congress";
-									<option value="<% $event->id %>"> <% $event->abbr %> </option>
+%								foreach my $event (@events) {
+%									next if $event->{type} eq "congress";
+									<option value="<% $event->{id} %>"
+										><% $event->{abbr} %> <% $event->{name} %></option>
 %								}
 							</select>
 						</span>
@@ -694,16 +753,12 @@
 								>
 									<option value=""></option>
 									<option value="all">All</option>
-<%perl>
-										foreach my $event (
-											sort {$a->type cmp $b->type || $a->abbr cmp $b->abbr} $tourn->events
-										) {
-</%perl>
-											<option
-												value="<% $event->id %>"
-											><% $event->abbr %></option>
-%										}
-									</select>
+%									foreach my $event (@events) {
+%										next if $event->{type} eq "congress";
+										<option value="<% $event->{id} %>"
+											><% $event->{abbr} %> <% $event->{name} %></option>
+%									}
+								</select>
 							</span>
 							<span class="tenth padright">
 								<button
@@ -739,14 +794,9 @@
 									data-placeholder = "Choose an event"
 								>
 									<option value=""></option>
-<%perl>
-									foreach my $event (
-										sort {$a->type cmp $b->type || $a->abbr cmp $b->abbr}
-										$tourn->events
-									) {
-</%perl>
-										<option value="<% $event->id %>"
-											><% $event->abbr %> <% $event->name %></option>
+%									foreach my $event (@events) {
+										<option value="<% $event->{id} %>"
+											><% $event->{abbr} %> <% $event->{name} %></option>
 %									}
 								</select>
 							</span>
@@ -848,7 +898,6 @@
 
 							<select
 								name     = "event_id"
-								class    = "fixedmost"
 								id       = "eventSelector"
 								onchange = 'breakoutToggle()'
 							>
@@ -856,7 +905,7 @@
 								my %used;
 								foreach my $type (@types) {
 									next if $used{$type}++;
-
+									next if $type eq "attendee";
 									my $type_key = ucfirst($type);
 									$type_key = "Mock Trial" if $type_key eq "Mock_trial";
 									$type_key = "Worlds Schools" if $type_key eq "Wsdc";
@@ -866,7 +915,7 @@
 									> All <% $type_key %> events </option>
 %								}
 %								foreach my $event (@events) {
-									<option value="<% $event->id %>"><% $event->abbr %></option>
+									<option value="<% $event->{id} %>"><% $event->{abbr} %></option>
 %								}
 							</select>
 						</span>
@@ -1210,7 +1259,7 @@
 									General
 								</option>
 %								foreach my $event (@events) {
-									<option value="<% $event->id %>"> <% $event->abbr %> </option>
+									<option value="<% $event->{id} %>"> <% $event->{abbr} %> </option>
 %								}
 							</select>
 						</span>

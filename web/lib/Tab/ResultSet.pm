@@ -2,8 +2,8 @@ package Tab::ResultSet;
 use base 'Tab::DBI';
 Tab::ResultSet->table('result_set');
 Tab::ResultSet->columns(Primary => qw/id/);
-Tab::ResultSet->columns(Essential => qw/id tag label tourn event circuit qualifier sweep_set sweep_award
-										bracket published coach code generated timestamp cache/);
+Tab::ResultSet->columns(Essential => qw/id tag label tourn event circuit sweep_set sweep_award
+										bracket published coach nsda_category code generated timestamp cache/);
 
 Tab::ResultSet->has_a(tourn       => 'Tab::Tourn');
 Tab::ResultSet->has_a(event       => 'Tab::Event');
