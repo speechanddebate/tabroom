@@ -1,0 +1,130 @@
+<%args>
+	$school
+</%args>
+<%init>
+
+	return unless $school > 0;
+
+	my $dbh = Tab::DBI->db_Main();
+
+	my $sth = $dbh->prepare("
+		select
+			jpool.*,
+
+			(select burden.value
+				from jpool_setting burden
+				where burden.jpool = jpool.id
+				and burden.tag = 'burden'
+			) as burden,
+
+			(select judge_per.value
+				from category_setting judge_per
+				where judge_per.category = jpool.category
+				and judge_per.tag = 'judge_per'
+			) as judge_per,
+
+
+			(select rounds_per.value
+				from category_setting rounds_per
+				where rounds_per.category = jpool.category
+				and rounds_per.tag = 'rounds_per'
+			) as rounds_per
+
+		from (jpool, jpool_setting, event, entry)
+
+		where 1=1
+			and entry.school = ?
+			and entry.event = event.id
+			and event.category = jpool.category
+			and jpool.id = jpool_setting.jpool
+			and jpool_setting.tag = 'registrant'
+
+		group by jpool.id
+	");
+
+	$sth->execute(int($school));
+	my $jpools = $sth->fetchall_hash();
+
+	if (not defined $jpools || scalar @{$jpools} < 1) {
+		return;
+	}
+
+	my $judge_sth = $dbh->prepare("
+		select judge.id, jpool_judge.jpool
+			from judge, jpool_judge
+		where 1=1
+			and judge.school = ?
+			and judge.id = jpool_judge.judge
+	");
+
+	$judge_sth->execute(int($school));
+	my $judges = $judge_sth->fetchall_hash();
+	my %count_jpools;
+
+	my %in_jpools;
+
+	foreach my $judge (@{$judges}) {
+		$count_jpools{$judge->{jpool}}++;
+		$in_jpools{$judge->{id}}{$judge->{jpool}}++;
+	}
+
+	my %categories;
+
+	foreach my $jpool (@{$jpools}) {
+		unless ($categories{$jpool->{category}}) {
+			@{$categories{$jpool->{category}}} = Tab::JudgeHire->search(
+				school   => int($school),
+				category => $jpool->{category}
+			);
+		}
+	}
+
+	my %shorts;
+
+	foreach my $jpool (@{$jpools}) {
+
+		my %burdens = $m->comp("/funclib/jpool_burden.mas",
+			jpool  => $jpool->{id},
+			school => $school
+		);
+
+		my $jpool_burden;
+		my $round_burden;
+		my $correction = ($jpool->{"burden"}/100) || 1;
+
+		my $hires;
+		my @requests = @{$categories{$jpool->{category}}};
+
+		foreach my $request (@requests) {
+			$burdens{"all"} -= $request->entries_accepted;
+			$hires += $request->entries_accepted;
+			$round_burden -= $request->rounds_accepted;
+		}
+
+		if ($jpool->{"judge_per"}) {
+			$jpool_burden = POSIX::ceil( ($burdens{"all"} / $jpool->{"judge_per"}) * $correction);
+		}
+
+		my $num_judges = $in_jpools{$jpool->{id}};
+		my $under = $jpool_burden - $num_judges;
+
+		$under = 0 if $under < 0;
+		Tab::debuglog("Jpool burden for ".$jpool->{name}." is $jpool_burden with $num_judges provided.  Under is $under");
+
+		$shorts{$jpool->{id}} = {
+			category => $jpool->{category},
+			name     => $jpool->{name},
+			burden   => $jpool_burden,
+			supplied => $num_judges,
+			under    => $under,
+		};
+	}
+
+	$shorts{in_jpool} = \%in_jpools,
+	%{$shorts{jpools}} = map {$_->{id} => $_} @{$jpools};
+
+	return \%shorts;
+
+</%init>
+
+
