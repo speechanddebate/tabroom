@@ -1,4 +1,5 @@
 <%args>
+	$dbh
 	$tourn
 	$round_id => undef
 	$event_id => undef
@@ -10,33 +11,73 @@
 
 	$event = Tab::Event->retrieve($event_id) unless $event;
 
-	my @panels = $round->panels if $round;
+	my $panels_sth = $dbh->prepare("
+		select
+			panel.id, panel.letter, room.name room
+		from panel
+			left join room on room.id = panel.room
+		where panel.round = ?
+		order by panel.letter
+	");
 
-	@panels = map  { $_->[0] }
-		sort { $a->[1] <=> $b->[1] }
-		map  { [$_, $_->letter=~/(\d+)/] } @panels;
+	$panels_sth->execute($round->id);
+	my $panels = $panels_sth->fetchall_hash();
 
-	@panels = map  { $_->[0] }
-		sort { $a->[1] cmp $b->[1] }
-		map  { [$_, $_->letter=~/(\D+)/] } @panels;
+	my %done;
+	my %redo;
+	my $max;
 
-	my @round_entries = $m->comp("/funclib/round_entries.mas", round => $round);
-
-	my $counter = 1;
-	my %panel_numbers;
-
-	foreach my $panel (@panels) {
-		$panel_numbers{$panel->id} = $counter++;
+	foreach my $panel (@{$panels}) {
+		if ($done{$panel->{letter}}++) {
+			$redo{$panel->{id}}++;
+		}
+		$max = $panel->{letter} if $max lt $panel->{letter};
 	}
 
-	$counter--;
-	my $autotab = length($counter);
+	my $redo_letter = $dbh->prepare("
+		update panel set letter = ? where id = ?
+	");
+
+	if (keys %redo) {
+
+		foreach my $redo_id (sort {$a <=> $b} keys %redo) {
+			++$max;
+			$redo_letter->execute($max, $redo_id);
+		}
+
+		$panels_sth->execute($round->id);
+		$panels = $panels_sth->fetchall_hash();
+	}
+
+	my $entries_sth = $dbh->prepare("
+		select
+			entry.id, entry.code, entry.name,
+			school.id school_id, school.name school_name, school.code school_code,
+			(
+				select distinct(panel.letter)
+				from panel, ballot
+				where ballot.entry = entry.id
+				and ballot.panel = panel.id
+				and panel.round = round.id
+				group by panel.id
+			) as letter
+		from (entry, round)
+			left join school on school.id = entry.school
+		where 1=1
+			and entry.active = 1
+			and entry.event = round.event
+			and round.id = ?
+		order by letter, entry.code
+	");
+
+	$entries_sth->execute($round->id);
+	my $entries = $entries_sth->fetchall_hash();
 
 </%init>
 
 	<div class="main">
 
-%		if ($round && @panels) {
+%		if ($round && $panels && scalar @{$panels}) {
 
 			<span class="threequarters nospace">
 				<h4>Manually assign <% $round->realname %> of <% $event->name %></h4>
@@ -75,7 +116,7 @@
 						</th>
 
 						<th class="smallish">
-							Section/Panel (1-<% scalar @panels %>)
+							Section/Panel
 						</th>
 
 					</tr>
@@ -83,45 +124,52 @@
 
 				<tbody>
 
-%					foreach my $entry ($event->entries(active => 1)) {
+%					foreach my $entry (@{$entries}) {
 
 						<tr>
-							<td>
-								<% $entry->code %>
+							<td class="smallish">
+								<% $entry->{code} %>
 							</td>
 
-							<td>
-								<% $entry->name %>
+							<td class="smallish">
+								<% $entry->{name} %>
 							</td>
 
-							<td>
-								<% $entry->school > 0 ? $entry->school->name : 'NO SCHOOL' %>
+							<td class="smallish">
+								<% $entry->{school_name} %>
 							</td>
 
-							<td class="centeralign">
-								<input
-									type    = "text"
-									size    = "5"
-									min     = "1"
-									max     = "<% scalar @panels %>"
-									name    = "<% $entry->id %>"
-									value   = "<% $panel_numbers{$entry->panelid} %>"
-									onKeyUp = "return autoTab(this, <% $autotab %>, event);"
-								>
+							<td class="limit5" data-text="<% $entry->{letter} %> || 0">
+								<div class="nospace flexrow">
+%								foreach my $panel (@{$panels}) {
+									<span class="sixth grow">
+										<label
+											for="<% $entry->{id} %>_<% $panel->{id} %>"
+											class="padleft"
+										>
+										<% $panel->{letter} %>
+										<input type = "radio"
+											id      = "<% $entry->{id} %>_<% $panel->{id} %>"
+											name    = "<% $entry->{id} %>"
+											value   = "<% $panel->{id} %>"
+											<% $panel->{letter} eq $entry->{letter} ? "checked" : "" %>
+										>
+									</span>
+%								}
+								</div>
 							</td>
 						</tr>
 %					}
-
 				</tbody>
-
-				<tr class="liblrow">
-					<td colspan="5" class="rightalign">
-						<input type="submit" value="Save Sections">
-						</form>
-					</td>
-				</tr>
-
 			</table>
+
+			<div class="libl row rightalign">
+				<span class="third centeralign">
+					<input type="submit" value="Save Sections">
+				</span>
+			</div>
+
+			</form>
 %		}
 
 	</div>
@@ -141,7 +189,6 @@
 					class    = "fixedmost"
 				>
 					<option value="">NONE</option>
-
 %					foreach my $oevent ($tourn->events) {
 %						next unless $oevent->type eq "congress" || $oevent->type eq "speech";
 						<option
@@ -149,7 +196,6 @@
 							<% $event &&  $oevent->id == $event->id ? "selected" : "" %>
 						><% $oevent->name %></option>
 %					}
-
 				</select>
 			</div>
 
@@ -160,7 +206,6 @@
 				<h4>Round</h4>
 
 				<form action="manual_speech.mhtml" method="post">
-
 					<input
 						type  = "hidden"
 						name  = "event_id"
@@ -188,9 +233,9 @@
 
 %			if ($round) {
 
-				<h4><% scalar @panels %> Sections</h4>
+				<h4><% scalar @{$panels} %> Sections</h4>
 
-				<form 
+				<form
 					action = "create_panels.mhtml"
 					method = "post"
 				>
