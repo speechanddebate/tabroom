@@ -1,4 +1,5 @@
 <%args>
+	$dbh
 	$tourn
 	$tourn_settings
 	$person
@@ -15,12 +16,10 @@
 	}
 
 	my $school = Tab::School->retrieve($school_id);
-	my $category = Tab::Category->retrieve($category_id);
-
-	Tab::Category->columns(TEMP => "nats");
-	my %category_settings;
-
 	$m->abort unless $school;
+
+	my $category = Tab::Category->retrieve($category_id);
+	my %cat_settings;
 
 	my @categories;
 	if ($category) {
@@ -29,27 +28,39 @@
 		@categories = $tourn->categories;
 	}
 
+	my %obligations;
+
+	foreach my $cat (@categories) {
+
+		%{$cat_settings{$cat->id}} = $cat->all_settings;
+
+		$obligations{$cat->id} = $m->comp(
+			"/funclib/judgemath/judges_needed_by_category.mas",
+			school            => $school,
+			category          => $cat,
+			category_settings => $cat_settings{$cat->id},
+			tourn_settings    => $tourn_settings,
+		);
+	}
+
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
-
 	my %judge_problems;
 
 	if ($tourn_settings->{"nsda_nats"}) {
-
 		%judge_problems = $m->comp(
 			"/funclib/judgemath/nats_check_judging.mas",
 			school => $school
 		);
-
-		foreach my $category (@categories) {
-
-			if ($category->setting("nats_category")) {
-				$category->nats(1);
-			} else {
-				$category->nats(0);
-			}
-		}
 	}
+
+	my $jpools = $m->comp("/funclib/judgemath/jpool_burden.mas",
+		school      => $school,
+		obligations => \%obligations
+	);
+
+	my $in_jpool = $jpools->{in_jpool};
+	my $registrant_jpools = $jpools->{jpools};
 
 </%init>
 
@@ -71,8 +82,6 @@
 				var valueMean = parseInt($(this).text()) || 0;
 				provided += valueMean;
 			});
-
-			console.log(`I have obligation ${obligation} and have provided ${provided}`);
 
 			$("#"+categoryID+"_status").removeClass("greentext");
 			$("#"+categoryID+"_status").removeClass("redtext");
@@ -110,11 +119,11 @@
 <%perl>
 
 		foreach my $category (sort {
-			$b->nats <=> $a->nats
+			$cat_settings{$b}{nats_category}  <=> $cat_settings{$a}{nats_category}
 			|| $a->abbr cmp $b->abbr
 		} @categories) {
 
-			%category_settings = $category->all_settings();
+			my %category_settings = %{$cat_settings{$category->id}};
 
 			if ($category_settings{"nats_category"}) {
 </%perl>
@@ -140,19 +149,12 @@
 				$rounds_per++ if $category_settings{"nats_category"};
 				my $exchange   = $category_settings{"exchange"};
 
-				my $obligation = 0;
+				my $obligation = $obligations{$category->id};
 				my $unc = 0;
 				my $over = 0;
+				my %stimes_under;
 
 				unless ($tourn_settings->{"ncfl"}) {
-
-					$obligation = $m->comp(
-						"/funclib/judgemath/judges_needed_by_category.mas",
-						school            => $school,
-						category_settings => \%category_settings,
-						tourn_settings    => $tourn_settings,
-						category          => $category
-					);
 
 					($unc, $over) = $m->comp(
 						"/funclib/judgemath/uncovered_burden_by_category.mas",
@@ -160,6 +162,14 @@
 						category          => $category,
 						category_settings => \%category_settings,
 						tourn_settings    => $tourn_settings
+					);
+
+					%stimes_under = $m->comp(
+						"/funclib/judgemath/judge_partials_short.mas",
+							category          => $category,
+							school            => $school,
+							category_settings => \%category_settings,
+							tourn_settings    => $tourn_settings
 					);
 				}
 
@@ -185,11 +195,8 @@
 				if ($obligation ne int($obligation)) {
 					$obligation = POSIX::ceil($obligation);
 				}
-
 </%perl>
-
 %				if ($rounds_per) {
-
 					<script>
 						$(document).ready(function() {
 							roundCount('<% $category->id %>');
@@ -200,9 +207,9 @@
 				<div class="martopmore borderbottom flexrow">
 
 					<span class="half">
-						<h6 class='semibold nospace padvert'><% $name %></h6>
+						<h6 class='semibold nospace padtop'><% $name %></h6>
 
-						<div class="full padvertless smallish graytext">
+						<div class="full padbottomless smallish graytext">
 %							unless ($tourn_settings->{"ncfl"}) {
 								OWES
 								<span class="inline" id="<% $category->id %>_obligation">
@@ -219,7 +226,7 @@
 						</div>
 					</span>
 
-					<span class="smallish half flexrow rightalign grow">
+					<span class="smallish half flexrow rightalign grow wrap">
 <%perl>
 						# The following Somewhat Hideous Code replaced Even More
 						# Hideous Code in a previous iteration so I apologize
@@ -227,6 +234,14 @@
 
 						my $message_string;
 						my $message_class;
+
+						my $stime_violation;
+						foreach my $key (keys %stimes_under) {
+							if ($stimes_under{$key}{object}->no_hires) {
+								$stime_violation = "<br />" if $stime_violation;
+								$stime_violation = "Short ".$stimes_under{$key}{count}." on time shift &ldquo;".$stimes_under{$key}{object}->name."&rdquo;";
+							}
+						}
 
 						if ($judge_per) {
 
@@ -242,6 +257,15 @@
 									$message_string .= "s" if (ceil($unc / $judge_per) > 1);
 									$message_string .= " under";
 								}
+
+								if ($stime_violation) {
+									$message_string .= '<br />'.$stime_violation;
+								}
+
+							} elsif ($stime_violation) {
+
+								$message_class  = "redtext";
+								$message_string = $stime_violation;
 
 							} elsif ($over && @requests) {
 
@@ -274,7 +298,25 @@
 								$message_string = "Obligations Met";
 							}
 						}
+
+
+						if ($registrant_jpools) {
+							foreach my $jpool_id (sort keys %{$registrant_jpools}) {
+								if ($registrant_jpools->{$jpool_id}{'category'} == $category->id) {
+									if ($jpools->{$jpool_id}{'under'}) {
 </%perl>
+										<p class="semibold <% $jpools->{$jpool_id}{under} > 0 ? "redtext" : "greentext" %> full nospace ">
+											<% $registrant_jpools->{$jpool_id}{"name"} %>:
+											<% $jpools->{$jpool_id}{"supplied"} %> given,
+											<% $jpools->{$jpool_id}{"burden"} %>
+											owed.
+											NEED <% $jpools->{$jpool_id}{"under"} %> MORE.
+										</p>
+%										undef $message_string if $message_string eq "Obligations Met!";
+%									}
+%								}
+%							}
+%						}
 						<span
 							id    = "<% $category->id %>_status"
 							class = "semibold rightalign <% $message_class %>"
@@ -293,7 +335,7 @@
 
 %				if (@registered_judges) {
 
-					<div class="ltyellow full semibold padleft padvertless flexrow smallish grow">
+					<div class="ltyellow semibold padleft padvertless flexrow smallish grow">
 
 						<span class="quarter padleft">
 							Judge
@@ -308,13 +350,19 @@
 
 %							if ($exchange) {
 								<span class="fifth">
-									Hired on Exchange
+									Exchange Hires
 								</span>
 %							}
 
 %							if ($category->shifts) {
 								<span class="twofifths">
 									Availability
+								</span>
+%							}
+
+%							if ($registrant_jpools) {
+								<span class="twofifths">
+									Pools
 								</span>
 %							}
 
@@ -332,11 +380,16 @@
 					foreach my $judge (@registered_judges) {
 
 						my $dont_count;
+						my $max_rounds;
+
+						if ($rounds_per) {
+							$max_rounds = $m->comp("/funclib/judge_max_prelims.mas", judge => $judge);
+						}
+
+						my $judging = $judge->obligation + $judge->hired;
 
 						if ($category_settings{"free_strikes_dont_count"}) {
-
 							$dont_count++ if $judge->setting("free_strike");
-
 							if ($category_settings{"fyo_free_strikes"}) {
 								$dont_count++ if $judge->setting("first_year");
 							}
@@ -360,6 +413,13 @@
 										Covering <% $category->abbr %>, but judging in <% $judge->category->abbr %>
 									</div>
 %								}
+%								if ($max_rounds && $max_rounds != $category_settings{max_rounds}) {
+									<div
+										class="smaller <% $max_rounds < $judging ? "redtext" : "graytext" %> italic semibold padbottomless padleft"
+										title="This figure accounts for time strikes">
+										Time constraints allow a max of <% $max_rounds %> debates
+									</div>
+%								}
 							</span>
 
 							<span class="smallish quarter flexrow grow">
@@ -379,7 +439,7 @@
 												property_name = "obligation"
 												size          = "5"
 												min           = "0"
-												max           = "<% $category_settings{"max_rounds"} %>"
+												max           = "<% $max_rounds || $category_settings{"max_rounds"} %>"
 												value         = "<% $judge->obligation %>"
 												onChange      = "postSwitch(this, '/register/judge/judge_switch.mhtml');roundCount('<% $category->id %>');"
 											>
@@ -426,6 +486,16 @@
 												All rounds
 %											}
 										</a>
+									</span>
+%								}
+
+%								if ($registrant_jpools) {
+									<span class="twofifths padleft">
+%										foreach my $jpool_id (sort keys %{$in_jpool->{$judge->id}}) {
+											<p class='nospace bluetext semibold padbottomless'>
+												<% $registrant_jpools->{$jpool_id}{name} %>
+											</p>
+%										}
 									</span>
 %								}
 
@@ -961,6 +1031,7 @@
 		school            => $school,
 		whoami            => "judges",
 		category          => $category,
-		category_settings => \%category_settings,
+		jpools            => $jpools,
+		category_settings => $cat_settings{$category}
 	&>
 
