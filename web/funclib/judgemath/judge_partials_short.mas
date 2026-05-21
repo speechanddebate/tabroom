@@ -1,4 +1,5 @@
 <%args>
+	$dbh => undef
 	$school
 	$category
 	$category_settings
@@ -15,6 +16,10 @@
 
 	use POSIX;
 
+	unless ($dbh) {
+		$dbh = Tab::DBI->db_Main();
+	}
+
 	# Find out how many judges we're obligated for.
 	%{$tourn_settings} = $school->tourn->all_settings() unless $tourn_settings;
 
@@ -24,7 +29,7 @@
 
 	@shifts = $category->shifts() unless @shifts;
 
-    my $judge_burden = $m->comp(
+    my $total_burden = $m->comp(
 		"/funclib/judgemath/judges_needed_by_category.mas",
 		category          => $category,
 		category_settings => $category_settings,
@@ -73,43 +78,36 @@
 	$accepted = ceil($accepted / $category->setting("judge_per"))
 		if $category->setting("judge_per") > 0;
 
-	my $totals = scalar @useful_judges;
-	$totals += $accepted;
-
 	# Excess establishes how many judges over obligation we are, so if someone
 	# has covered all their judging with extra judges, it won't penalize them
 
-	my $excess = $totals - $judge_burden;
-	my %shifts_under = ();
+	my $judge_burden = $total_burden - $accepted;
+	my $num_judges = scalar @useful_judges;
 
-	foreach my $shift (@shifts) {
+	my $sth = $dbh->prepare("
+		select
+			shift.*, count(judge.id) strikes
+		from judge, strike, shift
+		where judge.school = ?
+			and judge.category = ?
+			and judge.id = strike.judge
+			and strike.shift = shift.id
+		group by shift.id
+	");
 
-		Tab::Judge->set_sql( stimes => "
-			select distinct judge.* from judge
-			where judge.school = ?
-			and category = ?
-			and exists (
-				select strike.id
-					from (strike, shift)
-				where strike.judge = judge.id
-					and strike.shift = ?
-					and strike.shift = shift.id
-					and shift.fine > 0
-			)
-		");
+	$sth->execute( $school->id, $category->id);
 
-		my @struck_judges = Tab::Judge->search_stimes( $school->id, $category->id, $shift->id );
+	my $deets = $sth->fetchall_hash();
+	my %shifts_under = map {$_->{id} => $_} @{$deets};
 
-		my $shift_strikes = scalar @struck_judges;
-		next unless $shift_strikes;
+	foreach my $id (keys %shifts_under) {
+		my $under = $judge_burden - ($num_judges - $shifts_under{$id}{strikes});
 
-		if ($shift_strikes > ($excess + $uncovered) ) {
-			$shifts_under{$shift->id} = {
-				object => $shift,
-				count  => $shift_strikes - $excess - $uncovered,
-			};
+		if ($under > 0) {
+			$shifts_under{$id}{under} = $under;
+		} else {
+			delete $shifts_under{$id};
 		}
-
 	} #end of foreach stime
 
 	return %shifts_under;
