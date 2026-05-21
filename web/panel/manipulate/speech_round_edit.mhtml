@@ -1,5 +1,7 @@
 <%args>
+	$dbh
 	$tourn
+	$tourn_settings
 	$entry_id => undef
 	$round_id => undef
 </%args>
@@ -11,176 +13,158 @@
 	$m->abort unless $round;
 
 	my $event = $round->event;
-
-	my $school_id = $entry->school->id
-		if $entry && $entry->school;
-
+	my $school_id = $entry->school->id if $entry && $entry->school;
 	my $region_id = $entry->school->region->id
 		if $entry
 		&& $entry->school
-		&& $entry->school->region
-		&& $event->setting("region_judge_forbid");
+		&& $entry->school->region;
 
-	my @panels = $round->panels;
+	my $rjf = $event->setting("region_judge_forbid");
 
 	my $tz = $tourn->tz;
 	$tz = "UTC" unless $tz;
 
-	my %panel_size;
-	my %panel_same_hits;
-	my %panel_school_hits;
-	my %panel_region_hits;
-	my %panel_judge_hits;
-	my %panel_score;
-
+	my %panels;
 	my %dirty_judges;
 
-	my $ncfl ++ if $tourn->setting("ncfl");
-
-	Tab::Panel->set_sql( size => "
-		select count(distinct entry.id)
-		from entry, ballot
-		where entry.id = ballot.entry
-		and entry.active = 1
-
-		and ballot.panel = ?
-	");
-
-	Tab::Ballot->set_sql( hits => "
-		select ballot.*
-		from ballot, entry, panel, ballot mine
-		where panel.round != ?
-		and panel.id = mine.panel
-		and mine.entry = ?
-		and panel.id = ballot.panel
-		and ballot.entry = entry.id
-		group by ballot.id, entry.id
-	");
-
-	Tab::Panel->set_sql( same_hits => "
-		select count(distinct p2e2.id)
-			from ballot p2e1, ballot p2e2, entry
-			where p2e1.entry = ?
-			and p2e2.entry != p2e1.entry
-			and p2e2.panel = p2e1.panel
-			and p2e2.entry = entry.id
-			and entry.dropped != 1
-			and p2e2.entry in
-			 	(select ballot.entry
-					from ballot where ballot.panel = ?)
-	");
-
-	if ($ncfl) {
-
-		Tab::Panel->set_sql( same_school_hits => "
-			select count(entry.id)
-				from entry, ballot, school
+	my $sth = $dbh->prepare('
+		select
+			panel.id panel_id, panel.letter,
+			(select room.name from room
+			where room.id = panel.room) room_name,
+			ballot.speakerorder,
+			CONVERT_TZ(ballot.judge_started, "+00:00", tourn.tz) started,
+			entry.id entry_id, entry.code entry_code, entry.name entry_name,
+			school.id school_id, school.code school_code,
+			region.id region_id, region.code region_code,
+			(select count(distinct ballot.panel)
+				from ballot, ballot b2
 				where ballot.entry = entry.id
-				and entry.school = school.id
-				and entry.active = 1
+				and ballot.panel = b2.panel
+				and ballot.panel != panel.id
+				and b2.entry = ?
+			) as hits
+		from (entry, ballot, panel, school, tourn)
+			left join region on school.region = region.id
 
-				and school.region = ?
-				and ballot.panel = ?
-			");  #my head hurts.
-
-		$school_id = $entry->school->region->id
-			if $entry
-			&& $entry->school
-			&& $entry->school->region;
-
-	} else {
-
-		Tab::Panel->set_sql( same_school_hits => "
-			select count(distinct entry.id)
-				from entry, ballot
-				where ballot.entry = entry.id
-				and entry.school = ?
-				and entry.active = 1
-
-				and ballot.panel = ?
-		");  #my head hurts.
-
-	}
-
-	Tab::Panel->set_sql( same_region_hits => "
-		select count(entry.id)
-			from entry, ballot, school
-			where ballot.entry = entry.id
+		where 1=1
+			and panel.round = ?
+			and panel.id = ballot.panel
+			and ballot.entry = entry.id
 			and entry.school = school.id
-			and entry.active = 1
+			and school.tourn = tourn.id
+		group by entry.id
+		order by panel.letter, ballot.speakerorder, entry.code
+	');
 
-			and school.region = ?
-			and ballot.panel = ?
-	");
+	$sth->execute($entry->id, $round->id);
+	my $entries = $sth->fetchall_hash();
 
-	my @hit_ballots = Tab::Ballot->search_hits( $round_id, $entry_id);
+	foreach my $entry (@{$entries}) {
 
-	my %hits;
+		my $panel = $panels{$entry->{panel_id}};
 
-	foreach my $hb (@hit_ballots) {
-		$hits{$hb->entry->id}++;
-	}
-
-	foreach my $panel (@panels) {
-
-		$panel_size{$panel->id} =
-			Tab::Panel->sql_size->select_val($panel->id);
-
-		$panel_same_hits{$panel->id} =
-			Tab::Panel->sql_same_hits->select_val($entry_id, $panel->id);
-
-		$panel_school_hits{$panel->id} =
-			Tab::Panel->sql_same_school_hits->select_val($school_id, $panel->id);
-
-		$panel_region_hits{$panel->id} =
-			Tab::Panel->sql_same_region_hits->select_val($region_id, $panel->id) if $region_id;
-
-		foreach my $judge ($m->comp("/funclib/panel_judges.mas", panel => $panel)) {
-
-			if ($panel->round->type ne "elim"
-				&& $panel->round->type ne "final"
-				&& $panel->round->type ne "runoff"
-			) {
-
-				$dirty_judges{$judge->id}++;
-
-				$panel_judge_hits{$panel->id}++
-					unless $m->comp(
-						"/funclib/clean_to_judge.mas",
-						judge => $judge,
-						entry => $entry,
-						not   => $round
-					);
-
-			} else {
-
-				my $type = $m->comp(
-					"/funclib/clean_to_judge.mas",
-					judge => $judge,
-					not   => $round,
-					entry => $entry
-				);
-
-				unless ($type eq "prelim" || $type eq "1") {
-					$panel_judge_hits{$panel->id}++;
-					$dirty_judges{$judge->id}++;
-				}
+		unless ($panel) {
+			$panel = {
+				letter => $entry->{letter},
+				room   => $entry->{room_name},
+				start  => substr($entry->{started}, 11, 5),
+				score  => 0,
 			}
 		}
 
-		$panel_score{$panel->id} =
-			(10000 * $panel_judge_hits{$panel->id})
-			+ (100 * $panel_school_hits{$panel->id})
-			+ (10 * $panel_region_hits{$panel->id})
-			+ ($panel_same_hits{$panel->id});
+		push @{$panel->{entries}}, $entry;
+		$panel->{size}++;
 
+		if ($entry->{entry_id} == $entry_id) {
+			$entry->{me}++;
+			$panel->{mine}++;
+		} else {
+
+			if ($entry->{school_id} == $school_id) {
+				$entry->{school_hit}++;
+				$panel->{school_hits}++;
+				$panel->{score} += 10000;
+			}
+
+			if ($region_id && $entry->{region_id} == $region_id) {
+				$entry->{region_hit}++;
+				$panel->{region_hits}++;
+				$panel->{score} += 10;
+				$panel->{score} += 9990 if $tourn_settings->{ncfl};
+			}
+
+			if ($entry->{hits} > 0) {
+				$panel->{same_hits}++;
+				$panel->{score} += 100 * $entry->{hits};
+			}
+		}
+
+		$panels{$entry->{panel_id}} = $panel;
 	}
 
-	@panels = sort {$panel_size{$a->id} <=> $panel_size{$b->id}} @panels;
-	@panels = sort {$panel_score{$a->id} <=> $panel_score{$b->id}} @panels;
+	my $judge_sth = $dbh->prepare("
+		select
+			judge.id, judge.code, judge.first, judge.last,
+			panel.id panel_id,
+			judge.school school_id, school.name school_name,
+			( select region.id from region, school where school.id = judge.school and region.id = school.region) region,
+			( select count(ballot.id) from ballot where ballot.judge = judge.id and ballot.entry = entry.id ) ballots,
+			( select strike.id from strike where strike.judge = judge.id and strike.entry = entry.id ) estrikes,
+			( select strike.id from strike where strike.judge = judge.id and strike.school = ? ) sstrikes,
+			( select strike.id from strike where strike.judge = judge.id and strike.region = ? ) rstrikes
+		from (judge, entry, ballot, panel)
+			left join school on school.id = judge.school
+		where 1=1
+			and entry.id    = ?
+			and panel.round = ?
+			and panel.id    = ballot.panel
+			and ballot.judge = judge.id
+		group by judge.id
+	");
+
+	$judge_sth->execute($school_id, $region_id, $entry->id, $round->id);
+	my $judges = $judge_sth->fetchall_hash();
+
+	foreach my $judge (@{$judges}) {
+
+		my $panel = $panels{$judge->{panel_id}};
+		push @{$panel->{judges}}, $judge;
+
+		my $bad;
+
+		if ($judge->{school_id} == $school_id) {
+			$judge->{school_hit}++;
+			$panel->{score} += 1000000;
+			$bad++;
+		}
+
+		if ($judge->{estrikes}
+			|| $judge->{sstrikes}
+			|| $judge->{rstrikes}
+		) {
+			$judge->{strikes}++;
+			$panel->{score} += 1000000;
+			$bad++;
+		}
+
+		if ($judge->{region_id} == $region_id) {
+			$judge->{region_hit}++;
+			$panel->{score} += 10000;
+			$panel->{score} += 990000 if $rjf;
+			$bad++;
+		}
+
+		if ($judge->{ballots}) {
+			$panel->{score} += 1000000 * $judge->{ballots};
+			$bad++;
+		}
+
+		$panel->{bad_judges}++ if $bad;
+		$panels{$judge->{panel_id}} = $panel;
+	}
 
 	my $code_style = $event->code_style;
-
 	my $spansize = "seventh";
 
 	$spansize = "fifth"
@@ -193,7 +177,6 @@
 		|| $code_style eq "school_first_names"
 		|| $code_style eq "school_last_names"
 		|| $code_style eq "code_name";
-
 
 </%init>
 
@@ -260,7 +243,7 @@
 						</span>
 					</div>
 
-%					if ($ncfl) {
+%					if ($tourn_settings->{ncfl}) {
 						<div class="row ">
 							<span class="quarter">
 								Diocese
@@ -372,7 +355,7 @@
 
 		<& /funclib/tablesorter.mas, table => "speechmove", nobuttons => 1 &>
 
-		<div class="full nospace">
+		<div class="full nospace flexrow">
 %			if ($entry) {
 				<span class="half nospace">
 					<h4><% $ARGS{"add"} ? "Add" : "Move" %> entry <% $entry->code %> </h4>
@@ -389,7 +372,7 @@
 
 		</div>
 
-		<div class="full nospace padbottommore">
+		<div class="flexrow">
 
 %		if ($ARGS{"add"}) {
 
@@ -436,21 +419,25 @@
 						#
 					</th>
 
-					<th class="smallish limittiny">
-						Hit
+					<th class="smallish limittiny" title="Number of Judging Issues">
+						J
 					</th>
 
-					<th class="smallish limittiny">
-						<% $ncfl ? "Dio" : "Sch" %>
+					<th class="smallish limittiny" title="Number of Repeat Entry Hits">
+						H
+					</th>
+
+					<th class="smallish limittiny" title="Number of School Hits">
+						S
 					</th>
 
 %					if ($region_id) {
-						<th class="smallish limittiny">
-							Reg
+						<th class="smallish limittiny" title="Number of Region Hits">
+							<% $tourn_settings->{ncfl} ? "D" : "R" %>
 						</th>
 %					}
 
-					<th class="smallish">
+					<th class="smallish" title="Did the judges hit start?">
 						Start
 					</th>
 
@@ -464,110 +451,117 @@
 
 			<tbody>
 
-%				foreach my $panel (@panels) {
+<%perl>
+				foreach my $panel_id (sort {
+					$panels{$a}{score} <=> $panels{$b}{score}
+					|| $panels{$a}{size} <=> $panels{$b}{size}
+				} keys %panels) {
 
-%					my $mine;
-%					my $ballot_sample = $panel->ballots->first;
-
+					my $panel = $panels{$panel_id};
+</%perl>
 					<tr>
 
 						<td class="smallish">
-
 							<a
 								class="white"
-								href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel->id %>"
+								href="/panel/schemat/panel_view.mhtml?panel_id=<% $panel_id %>"
 							>
-							<% $panel->room && $panel->room->name ? $panel->room->name : " None" %>
+								<% $panel->{room} || "None" %>
 							</a>
 						</td>
 
 						<td class="smallish nospace">
-%							foreach my $judge ($m->comp("/funclib/panel_judges.mas", panel => $panel)) {
-								<a class="full marno nowrap padvert padleft
-									<% $entry && $dirty_judges{$judge->id} ? "redtext semibold" : "bluetext" %>"
-									href="/register/judge/edit.mhtml?judge_id=<% $judge->id %>"
+%							foreach my $judge (@{$panel->{judges}}) {
+								<a class="full marno nowrap padvertless padleft padright white hover
+<%perl>
+									my $title;
+									if ($judge->{school_hit}) {
+										$m->print("redtext semibold");
+										$title = "Same School";
+									} elsif ($judge->{strikes}) {
+										$m->print("redtext semibold");
+										$title = "Strike/Constraint";
+									} elsif ($judge->{ballots}) {
+										$m->print("orangetext semibold");
+										$title = "Judged Before ".$judge->{ballots}."x ";
+									} elsif ($judge->{region_hit}) {
+										$m->print("yellowtext semibold");
+										$title = "Same Region";
+									}
+</%perl>
+"
+									href="/register/judge/edit.mhtml?judge_id=<% $judge->{id} %>"
+									title="<% $title %>  <% $judge->{school_name} || "Unaffiliated" %>"
 								>
-									<% $judge->first." ".$judge->last %><br />
-									<% $judge->school ? $judge->school->code : "HIRE" %>
+									<% $judge->{code} %> <% $judge->{first}." ".$judge->{last} %>
 								</a>
 %							}
-
 						</td>
 
 						<td class="smallish padless">
-<%perl>
 
-							my $panel_size;
-
-							foreach my $entry (
-								$m->comp("/funclib/panel_entries.mas",
-									panel    => $panel,
-									no_drops => 1)
-							) {
-
-								$panel_size++;
-
-								my $mine++ if $entry->id == $entry_id;
-
-</%perl>
+%							foreach my $entry (@{$panel->{entries}}) {
 								<a
-									title = "<%
-										$entry->school->id == $school_id
-											? " Both from School ".$entry->school->code
-											: ""
-										%><% $hits{$entry->id}
-											? $hits{$entry->id}." hits in other rounds"
-											: ""
-										%>"
-									class="nowrap <% $spansize %> marno padvert odd hover centeralign
-										<% 	$entry->id == $entry_id
-											? "dkblue"
-											: $entry->school->id == $school_id
-												? "dkred"
-												: $hits{$entry->id}
-													? "dkorange whitetext"
-													: "blacktext"
-										%>"
-									href="/panel/manipulate/entry_edit.mhtml?entry_id=<% $entry->id %>&round_id=<% $round->id %>&add=<% $ARGS{"add"} %>"
+									class="nowrap border blacktext <% $spansize %> marno padvert odd hover centeralign
+<%perl>
+									my $title;
+									if ($entry->{me}) {
+										$m->print("dkblue whitetext");
+										$title = "ENTRY YOU ARE MOVING!"
+									} elsif ($entry->{school_hit}) {
+										$m->print("dkred whitetext");
+										$title = "Same School"
+									} elsif ($entry->{hits}) {
+										$m->print("dkgrey whitetext");
+										$title = "Hit before ".$entry->{hits}."x";
+									} elsif ($entry->{region_hit}) {
+										$m->print("dkorange whitetext");
+										$title = "Same Region/Dio"
+									}
+</%perl>
+"
+									title = "<% $title %>"
+									href="/panel/manipulate/entry_edit.mhtml?entry_id=<% $entry->{id} %>&round_id=<% $round->id %>&add=<% $ARGS{"add"} %>"
 								>
-									<% $entry->code %>
+									<% $entry->{entry_code} %>
 								</a>
 %							}
-
 						</td>
 
 						<td class="smallish centeralign">
-							<% $panel_size %>
+							<% $panel->{size} %>
 						</td>
 
 						<td class="smallish centeralign">
-							<% $panel_same_hits{$panel->id} %>
+							<% $panel->{bad_judges} %>
 						</td>
 
 						<td class="smallish centeralign">
-							<% $panel_school_hits{$panel->id} %>
+							<% $panel->{same_hits} %>
+						</td>
+
+						<td class="smallish centeralign">
+							<% $panel->{school_hits} %>
 						</td>
 
 %						if ($region_id) {
 							<td class="smallish centeralign">
-								<% $panel_region_hits{$panel->id} %>
+								<% $panel->{region_hits} %>
 							</td>
 %						}
 
-%						my $started = eval{ return Tab::shorttime($ballot_sample->judge_started->set_time_zone($tz)); };
-
 						<td class="smallish centeralign nospace">
-							<% $started ? $started : "No" %>
+							<% $panel->{start} || "No" %>
 						</td>
 
 						<td class="smallish centeralign nospace">
 
-%							unless ($panel_judge_hits{$panel->id} || $mine || (not defined $entry)) {
+%							unless ($panel->{bad_judges} || $panel->{mine} || (not defined $entry)) {
 								<a
 									class="buttonwhite greentext smallish half fa fa-lg fa-plus invert"
-									href="entry_move.mhtml?entry_id=<% $entry->id %>&panel_id=<% $panel->id %>&add=<% $ARGS{'add'} %>"></a>
+									href="entry_move.mhtml?entry_id=<% $entry->id %>&panel_id=<% $panel_id %>&add=<% $ARGS{'add'} %>"></a>
 %							} else {
-								X
+								Judge Block
 %							}
 
 						</td>
