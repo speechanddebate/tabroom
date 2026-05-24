@@ -1,127 +1,194 @@
 <%args>
 	$dbh
 	$tourn
+	$perms
 	$person
 	$round_id => undef
+	$checker
 </%args>
 <%init>
 
-	my $round = Tab::Round->retrieve($round_id);
-	my $event = $round->event;
+	my %events = $m->comp("/funclib/perms/events.mas",
+		tourn   => $tourn,
+		perms   => $perms,
+		checker => $checker,
+		by_both => 1,
+		limited => 1
+	);
 
-	unless ($round) {
-		$m->comp("/funclib/abort.mas",
-			warning => "No valid round found for ID $round_id.  Hit Back and try again");
+	my $round = Tab::Round->retrieve($round_id);
+	my $event;
+	$event = $round->event if $round;
+
+	unless ($event) {
+		if (scalar (keys %events) == 1) {
+			my @eids = keys %events;
+			my $event_id = $eids[0];
+			$event = Tab::Event->retrieve($event_id);
+		} elsif ($ARGS{event_id}) {
+			$event = Tab::Event->retrieve($events{$ARGS{event_id}});
+		}
 	}
 
-	my $sth = $dbh->prepare("
-		select
-			score.id, score.tag, score.content, score.speech,
-			CONVERT_TZ(score.timestamp, '+00:00', tourn.tz) score_ts,
-			ballot.id,
-			judge.id, judge.first, judge.last,
-			entry.id, entry.code, entry.name, entry.active,
-			panel.id, panel.letter,
-			reviewed.value,
-			CONVERT_TZ(reviewed.timestamp, '+00:00', tourn.tz) reviewed_at,
-			reviewed_by.email,
-			(
-				select room.name
-				from room where room.id = panel.room
-			) as room
+	if ($event && not defined $events{$event->id}) {
+		$m->comp("/funclib/abort.mas", message => "You do not have access to that screen.  Event $event access ".$events{$event->id});
+	}
 
-		from (ballot, panel, judge, entry, event, tourn)
+	my $limit;
 
-			left join score on score.ballot = ballot.id
-				and score.tag IN('rfd', 'comments', 'title', 'speech', 'time')
+	if ($checker) {
+		$limit = "
+			AND EXISTS (
+				select rs.id
+				from round_setting rs
+				where rs.round = round.id
+				and rs.tag = 'checker_review'
+			)
+		";
+	}
 
-			left join panel_setting reviewed
-				on reviewed.panel = panel.id
-				and reviewed.tag = 'comments_reviewed'
-
-			left join person reviewed_by
-				on reviewed_by.id = reviewed.value
-
-		where panel.round = ?
-			and panel.id = ballot.panel
-			and ballot.entry = entry.id
-			and ballot.judge = judge.id
-			and ballot.entry = entry.id
-			and entry.event = event.id
-			and event.tourn = tourn.id
-	");
-
-	my %ballots;
 	my %panels;
+	my %ballots;
 	my %done;
 
-	$sth->execute($round->id);
+	if ($round) {
 
-	while(
-		my (
-			$score_id, $score_tag, $score_content, $score_speech,
-			$score_ts,
-			$ballot_id,
-			$judge_id, $judge_first, $judge_last,
-			$entry_id, $entry_code, $entry_name, $entry_active,
-			$panel_id, $panel_letter,
-			$reviewed,
-			$reviewed_at,
-			$reviewed_by,
-			$room
-		) = $sth->fetchrow_array()
-	){
+		my $sth = $dbh->prepare("
+			select
+				score.id, score.tag, score.content, score.speech,
+				CONVERT_TZ(score.timestamp, '+00:00', tourn.tz) score_ts,
+				ballot.id,
+				judge.id, judge.first, judge.last,
+				entry.id, entry.code, entry.name, entry.active,
+				panel.id, panel.letter,
+				reviewed.value,
+				CONVERT_TZ(reviewed.timestamp, '+00:00', tourn.tz) reviewed_at,
+				reviewed_by.email,
+				(
+					select room.name
+					from room where room.id = panel.room
+				) as room
 
-		$panels{$panel_id}{"letter"} = $panel_letter;
-		$panels{$panel_id}{"room"} = $room;
+			from (ballot, panel, judge, entry, event, tourn, round)
 
-		if ($reviewed && not defined $panels{$panel_id}{"reviewed"}) {
-			$panels{$panel_id}{"reviewed"} = $reviewed;
-			$panels{$panel_id}{"reviewed_by"} = $reviewed_by;
-			$panels{$panel_id}{"reviewed_at"} = $reviewed_at;
-		}
+				left join score on score.ballot = ballot.id
+					and score.tag IN('rfd', 'comments', 'title', 'speech', 'time')
 
-		push @{$panels{$panel_id}{"entries"}} , $entry_id;
-		push @{$panels{$panel_id}{"judges"}}  , $judge_id;
-		push @{$panels{$panel_id}{"ballots"}} , $ballot_id;
+				left join panel_setting reviewed
+					on reviewed.panel = panel.id
+					and reviewed.tag = 'comments_reviewed'
 
-		unless ($event->type eq "congress" || $event->type eq "speech") {
-			unless ($done{"marker"}{$entry_id}++) {
-				$panels{$panel_id}{"entry_marker"} .= " vs " if $panels{$panel_id}{"entry_marker"};
-				$panels{$panel_id}{"entry_marker"} .= $entry_code;
+				left join person reviewed_by
+					on reviewed_by.id = reviewed.value
+
+			where round.id = ?
+				and panel.round = round.id
+				and panel.id = ballot.panel
+				and ballot.entry = entry.id
+				and ballot.judge = judge.id
+				and ballot.entry = entry.id
+				and entry.event = event.id
+				and event.tourn = tourn.id
+				$limit
+		");
+
+		$sth->execute($round->id);
+
+		while(
+			my (
+				$score_id, $score_tag, $score_content, $score_speech,
+				$score_ts,
+				$ballot_id,
+				$judge_id, $judge_first, $judge_last,
+				$entry_id, $entry_code, $entry_name, $entry_active,
+				$panel_id, $panel_letter,
+				$reviewed,
+				$reviewed_at,
+				$reviewed_by,
+				$room
+			) = $sth->fetchrow_array()
+		){
+
+			$panels{$panel_id}{"letter"} = $panel_letter;
+			$panels{$panel_id}{"room"} = $room;
+
+			if ($reviewed && not defined $panels{$panel_id}{"reviewed"}) {
+				$panels{$panel_id}{"reviewed"} = $reviewed;
+				$panels{$panel_id}{"reviewed_by"} = $reviewed_by;
+				$panels{$panel_id}{"reviewed_at"} = $reviewed_at;
 			}
-		} else {
-			$panels{$panel_id}{"entry_marker"} = "Section $panel_letter";
+
+			push @{$panels{$panel_id}{"entries"}} , $entry_id;
+			push @{$panels{$panel_id}{"judges"}}  , $judge_id;
+			push @{$panels{$panel_id}{"ballots"}} , $ballot_id;
+
+			unless ($event->type eq "congress" || $event->type eq "speech") {
+				unless ($done{"marker"}{$entry_id}++) {
+					$panels{$panel_id}{"entry_marker"} .= " vs " if $panels{$panel_id}{"entry_marker"};
+					$panels{$panel_id}{"entry_marker"} .= $entry_code;
+				}
+			} else {
+				$panels{$panel_id}{"entry_marker"} = "Section $panel_letter";
+			}
+
+			unless ($done{"marker_judge"}{$judge_id}++) {
+				$panels{$panel_id}{"judge_count"}++ if $panels{$panel_id}{"judge_marker"};
+				$panels{$panel_id}{"judge_marker"} .= ", " if $panels{$panel_id}{"judge_marker"};
+				$panels{$panel_id}{"judge_marker"} .= $judge_last;
+			}
+
+			unless ($ballots{$ballot_id}) {
+				$panels{$panel_id}{$judge_id}{"counter"}{entries}++;
+			}
+
+			$ballots{$ballot_id}{"entry_id"}     = $entry_id;
+			$ballots{$ballot_id}{"entry_name"}   = $entry_name;
+			$ballots{$ballot_id}{"entry_active"} = $entry_active;
+			$ballots{$ballot_id}{"judge_name"}   = $judge_last.", ".$judge_first;
+			$ballots{$ballot_id}{"judge_id"}     = $judge_id;
+			$ballots{$ballot_id}{"entry_code"}   = $entry_code;
+
+			$score_content = Tab::Utils::uncompress($score_content);
+
+			if ($score_tag eq "speech") {
+				$ballots{$ballot_id}{$score_tag}{$score_speech} = $score_content;
+				$panels{$panel_id}{$judge_id}{"counter"}{$score_tag}++;
+				$ballots{$ballot_id}{ts}{$score_tag} = $score_ts;
+			} else {
+				$ballots{$ballot_id}{$score_tag} = $score_content;
+				$panels{$panel_id}{$judge_id}{"counter"}{$score_tag}++;
+				$ballots{$ballot_id}{ts}{$score_tag} = $score_ts;
+			}
 		}
+	}
 
-		unless ($done{"marker_judge"}{$judge_id}++) {
-			$panels{$panel_id}{"judge_count"}++ if $panels{$panel_id}{"judge_marker"};
-			$panels{$panel_id}{"judge_marker"} .= ", " if $panels{$panel_id}{"judge_marker"};
-			$panels{$panel_id}{"judge_marker"} .= $judge_last;
-		}
+	my $rounds;
 
-		unless ($ballots{$ballot_id}) {
-			$panels{$panel_id}{$judge_id}{"counter"}{entries}++;
-		}
+	if ($event) {
 
-		$ballots{$ballot_id}{"entry_id"}     = $entry_id;
-		$ballots{$ballot_id}{"entry_name"}   = $entry_name;
-		$ballots{$ballot_id}{"entry_active"} = $entry_active;
-		$ballots{$ballot_id}{"judge_name"}   = $judge_last.", ".$judge_first;
-		$ballots{$ballot_id}{"judge_id"}     = $judge_id;
-		$ballots{$ballot_id}{"entry_code"}   = $entry_code;
+		my $round_sth = $dbh->prepare("
+			select
+				round.id, round.name, round.label,
+				(select count(distinct panel.id)
+					from panel
+					where 1=1
+					and panel.round = round.id
+					and NOT EXISTS (
+						select ps.id
+						from panel_setting ps
+						where ps.panel = panel.id
+						and ps.tag = 'comments_reviewed'
+					)
+				) as undone
+			from round
+				where round.event = ?
+				$limit
+			group by round.id
+			order by round.name
+		");
 
-		$score_content = Tab::Utils::uncompress($score_content);
-
-		if ($score_tag eq "speech") {
-			$ballots{$ballot_id}{$score_tag}{$score_speech} = $score_content;
-			$panels{$panel_id}{$judge_id}{"counter"}{$score_tag}++;
-			$ballots{$ballot_id}{ts}{$score_tag} = $score_ts;
-		} else {
-			$ballots{$ballot_id}{$score_tag} = $score_content;
-			$panels{$panel_id}{$judge_id}{"counter"}{$score_tag}++;
-			$ballots{$ballot_id}{ts}{$score_tag} = $score_ts;
-		}
+		$round_sth->execute($event->id);
+		$rounds = $round_sth->fetchall_hash();
 	}
 
 </%init>
@@ -130,18 +197,73 @@
 
 		<div class="sidenote">
 
-			<h4><% $round->realname %></h4>
+			<h4>Choose Event</h4>
 
-			<a
-				class="full blue"
-				href="/panel/schemat/show.mhtml?round_id=<% $round->id %>"
-			>Return to Schematic</a>
+			<form
+				action = "status.mhtml"
+				method = "post"
+			>
 
-			<a
-				class="full blue"
-				href="/panel/schemat/show.mhtml?round_id=<% $round->id %>&default=results"
-			>Return to Round Results</a>
+				<span class="row full marbottom centeralign">
+					<select
+						name     = "event_id"
+						onchange = 'this.form.submit()'
+						class    = "notfirst"
+					>
+						<option value="">Choose event:</option>
+<%perl>
+						foreach my $other_id (sort {
+							$events{$a}{supp} cmp $events{$b}{supp}
+							|| $events{$a}{type} cmp $events{$b}{type}
+							|| $events{$a}{abbr} cmp $events{$b}{abbr}
+						} keys %events) {
+</%perl>
+							<option
+								value="<% $other_id %>"
+								<% ($event && $other_id == $event->{id})
+									? "selected"
+									: "" %>
+							><% $events{$other_id}{abbr} %></option>
+%						}
+					</select>
+				</span>
+			</form>
 
+			<h4>Choose Round</h4>
+				<span class="row full marbottom centeralign">
+%					if ($rounds) {
+%					foreach my $round_ref (@{$rounds}) {
+						<a href="online_ballots.mhtml?round_id=<% $round_ref->{id} %>"
+							class="flexrow <% $round_ref->{id} == $round_id ? "dk" : "" %><% $round_ref->{undone} ? "yellow" : "green" %>"
+						>
+							<span class="half grow padleft">
+								<% $round_ref->{label} || "Round ".$round_ref->{name} %>
+							</span>
+
+%							if ($round_ref->{undone} > 0) {
+								<span class="half grow">
+									<% $round_ref->{undone} %> Not Done
+								</span>
+%							}
+						</a>
+%					}
+%					}
+				</span>
+			</form>
+
+%			unless ($checker) {
+				<h4><% $round->realname %></h4>
+
+				<a
+					class="full blue"
+					href="/panel/schemat/show.mhtml?round_id=<% $round->id %>"
+				>Return to Schematic</a>
+
+				<a
+					class="full blue"
+					href="/panel/schemat/show.mhtml?round_id=<% $round->id %>&default=results"
+				>Return to Round Results</a>
+%			}
 		</div>
 
 	</div>
@@ -149,9 +271,12 @@
 	<div class="main">
 
 		<div class="full nospace">
-
 			<span class="threefifths">
-				<h3><% $round->event->abbr %> <% $round->realname %></h3>
+%				if ($round) {
+					<h3><% $round->event->abbr %> <% $round->realname %></h3>
+%				} else {
+					<h3>Choose an Event</h3>
+%				}
 			</span>
 
 			<span class="twofifths rightalign">
@@ -160,6 +285,7 @@
 
 		</div>
 
+%		if (%panels) {
 %		foreach my $panel_id (sort keys %panels) {
 
 %			%done = ();
@@ -190,19 +316,21 @@
 						></a>
 					</span>
 
-					<span class="twenty rightalign">
+					<span class="twenty rightalign padright">
 						<a
 							class   = "fa buttonwhite redtext fa-eye fa-sm"
 							onClick = '$(`#comments_<% $panel_id %>`).toggleClass(`hidden`);'
 						></a>
 					</span>
 
-					<span class="twenty rightalign marrightmore">
-						<a
-							class = "fa buttonwhite bluetext fa-edit fa-sm"
-							href  = "/tabbing/entry/panel.mhtml?panel_id=<% $panel_id %>"
-						></a>
-					</span>
+%					unless ($checker) {
+						<span class="twenty rightalign marrightmore">
+							<a
+								class = "fa buttonwhite bluetext fa-edit fa-sm"
+								href  = "/tabbing/entry/panel.mhtml?panel_id=<% $panel_id %>"
+							></a>
+						</span>
+%					}
 				</div>
 
 				<div class='full nospace padleftmore <% $panels{$panel_id}{"reviewed"} ? "hidden" : "" %>' id="comments_<% $panel_id %>">
@@ -310,5 +438,6 @@
 				</div>
 				</div>
 			</div>
+%		}
 %		}
 	</div>
