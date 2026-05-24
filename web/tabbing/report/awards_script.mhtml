@@ -1,4 +1,5 @@
 <%args>
+	$dbh
 	$tourn
 	$tourn_settings
 	$session
@@ -23,7 +24,6 @@
 
 	my $ncfl++ if $tourn_settings->{"ncfl"};
 
-	my $limit;
 	my @events;
 	my $event;
 
@@ -35,11 +35,9 @@
 		);
 
 		my $ids = join(',', @events);
-		$limit = "and event.id IN ($ids) ";
 
 	} else {
 
-		$limit = "and event.id = ".int($event_id);
 		$event = Tab::Event->retrieve($event_id);
 		push @events, $event;
 	}
@@ -70,24 +68,6 @@
 
 	Tab::Entry->columns(TEMP => "key");
 	Tab::Entry->columns(TEMP => "tie");
-
-	my $dbh = Tab::DBI->db_Main();
-	my $ids = join(',', @events);
-	my $sth = $dbh->prepare("
-		select
-			student.id, student.first, student.last, student.phonetic
-		from student, entry_student es, entry
-		where entry.event IN ($ids)
-			and entry.id = es.entry
-			and es.student = student.id
-			and student.phonetic IS NOT NULL
-	");
-
-	$sth->execute();
-	my $results = $sth->fetchall_hash();
-	my %phonetics = map {$_->{id} => $_->{phonetic}} @{$results};
-
-	$tourn_settings->{student_phonetic} = \%phonetics;
 
 	EVENT:
 	foreach my $event (@events) {
@@ -140,16 +120,17 @@
 
 			Tab::Panel->set_sql( empties => "
 				select distinct panel.id
-				from ballot, panel, round, entry
-				where round.event = ?
-				and panel.round = round.id
-				and ballot.panel = panel.id
-				and ballot.entry = entry.id
-				and ballot.bye != 1
-				and ballot.forfeit != 1
-				and panel.bye != 1
-				and entry.active = 1
-				and ballot.audit != 1
+					from ballot, panel, round, entry
+				where 1=1
+					and round.event = ?
+					and panel.round = round.id
+					and ballot.panel = panel.id
+					and ballot.entry = entry.id
+					and ballot.bye != 1
+					and ballot.forfeit != 1
+					and panel.bye != 1
+					and entry.active = 1
+					and ballot.audit != 1
 			");
 
 			my @empties = Tab::Panel->search_empties($event->id);
@@ -189,7 +170,6 @@
 			foreach my $round (@outs) {
 
 				next unless $round;
-
 				my @entries;
 
 				my ($entries_ref, $tbs_ref, $desc_ref, $forfeit_ref)
@@ -209,7 +189,6 @@
 
 					my %entry_by_id = map {$_->id => $_} @entries;
 					my @show;
-
 					my @keys = sort {$a <=> $b} keys %{$entries_ref};
 
 					foreach my $key (@keys) {
@@ -238,7 +217,6 @@
 				}
 
 				$round_entries{$round->id}{"ref"} = $entries_ref;
-
 			}
 
 			@outs = reverse @outs;
@@ -249,7 +227,6 @@
 				next unless $round_entries{$round->id}{"array"};
 
 				my @entries = @{$round_entries{$round->id}{"array"}};
-
 				my $entries_ref = $round_entries{$round->id}{"ref"};
 
 				$last = $round->id;
@@ -296,28 +273,22 @@
 					my $tag;
 					$tag = $label if $round->type eq "elim";
 
-					print_entry($entry, $round->type, $tag, $tourn_settings);
+					print_entry($dbh, $entry, $round->type, $tag, $tourn_settings);
 
 				}
 
 				foreach my $entry (@entries) {
-
 					next if $used{$entry->id}++;
-
 					$did = $round->id;
-
 					$entry->tie($entry_tie{$entry->id});
 					$entry->key($entry_key{$entry->id});
-					print_entry($entry, $round->type, $label, $tourn_settings);
-
+					print_entry($dbh, $entry, $round->type, $label, $tourn_settings);
 				}
-
 			}
 
 			unless ($final || @elims) {
 
 				my @rounds = sort {$b->name <=> $a->name} $event->rounds;
-
 				my $round;
 
 				while ( (not defined $round) && @rounds) {
@@ -342,11 +313,10 @@
 						next unless $entry;
 
 						$entry->tie($tie);
-						print_entry($entry, '', '', $tourn_settings);
+						print_entry($dbh, $entry, '', '', $tourn_settings);
 
 					}
 				}
-
 			}
 
 			if ($honmen && $last_prelim) {
@@ -385,14 +355,14 @@
 				foreach my $entry_id (@honmens) {
 					next if $used{$entry_id}++;
 					my $entry = $id_entry{$entry_id};
-					print_entry($entry, "", "HM", $tourn_settings);
+					print_entry($dbh, $entry, "", "HM", $tourn_settings);
 				}
 			}
 
 			if ($top_novice) {
 				next if $used{$top_novice}++;
 				my $tn = $id_entry{$top_novice};
-				print_entry($tn, "", "TN", $tourn_settings);
+				print_entry($dbh, $tn, "", "TN", $tourn_settings);
 			}
 
 		}
@@ -411,12 +381,64 @@
 
 	sub print_entry {
 
-		my ($entry, $type, $tag, $tourn_settings) = @_;
+		my ($dbh, $entry, $type, $tag, $tourn_settings) = @_;
 
 		return unless $entry && $entry->id;
 
-		my @students = $entry->students;
-		my $event_id = $entry->event->id;
+		my $entry_sth = $dbh->prepare("
+			select
+				entry.id, entry.name, entry.code,
+				(select coach_script.value
+				from entry_setting coach_script
+				where coach_script.entry = entry.id
+				and coach_script.tag = 'coach_script'
+				) as coach_script,
+
+				student.first, student.last, student.phonetic,
+				school.name school_name, chapter.formal, chapter.state,
+				(select coaches.value_text
+					from chapter_setting coaches
+					where coaches.chapter = chapter.id
+					and coaches.tag = 'coaches'
+				) as coaches,
+
+				region.name region_name,
+				(select arch.value
+					from region_setting arch
+					where arch.region = region.id
+					and arch.tag = 'arch'
+				) as arch
+
+			from (entry, school, entry_student es, student, chapter)
+				left join region on region.id = school.region
+
+			where 1=1
+				and entry.id = ?
+				and entry.school = school.id
+				and entry.id     = es.entry
+				and es.student   = student.id
+				and school.chapter = chapter.id
+		");
+
+		$entry_sth->execute($entry->id);
+		my $entries = $entry_sth->fetchall_hash();
+
+		my @students;
+		my $entry_record;
+		my $phonetics;
+
+		foreach my $entry_ref (@{$entries}) {
+			$entry_record = $entry_ref;
+			push @students, {
+				first    => $entry_ref->{first},
+				last     => $entry_ref->{last},
+				phonetic => $entry_ref->{phonetic},
+			};
+
+			if ($entry_ref->{phonetic}) {
+				$phonetics++;
+			}
+		}
 
 		print TEXOUT "{\\bf ";
 
@@ -446,26 +468,21 @@
 			print TEXOUT Tab::texify($type);
 		}
 
-
 		print TEXOUT " } \n";
 
 		print TEXOUT "\\nopagebreak\n";
 		print TEXOUT "\\newline\n";
 
 		my $notfirst;
-
 		my $count = scalar @students;
 
 		foreach my $student (@students) {
-
 			if ( $notfirst && (($notfirst + 1) == $count)) {
 				print TEXOUT " \\& ";
 			} elsif ($notfirst) {
 				print TEXOUT ", ";
 			}
-
-			print TEXOUT Tab::texify($student->first." ".$student->last." ") ;
-
+			print TEXOUT Tab::texify($student->{first}." ".$student->{last}." ") ;
 			$notfirst++;
 		}
 
@@ -473,38 +490,52 @@
 		print TEXOUT "\\newline\n";
 		undef $notfirst;
 
-		foreach my $student (@students) {
+		if ($phonetics) {
+			foreach my $student (@students) {
 
-			next unless $tourn_settings->{"student_phonetic"}{$student->id};
+				if ( $notfirst && (($notfirst + 1) == $count)) {
+					print TEXOUT " \\& ";
+				} elsif ($notfirst) {
+					print TEXOUT ", ";
+				} else {
+					print TEXOUT "[ ";
+				}
 
-			if ( $notfirst && (($notfirst + 1) == $count)) {
-				print TEXOUT " \\& ";
-			} elsif ($notfirst) {
-				print TEXOUT ", ";
-			} else {
-				print TEXOUT "[ ";
+				print TEXOUT Tab::texify($student->{phonetic});
+				$notfirst++;
 			}
 
-			print TEXOUT Tab::texify($tourn_settings->{"student_phonetic"}{$student->id});
-			$notfirst++;
+			if ($notfirst) {
+				print TEXOUT "] ";
+				print TEXOUT "\\nopagebreak\n";
+				print TEXOUT "\\newline\n";
+			}
 		}
 
-		if ($notfirst) {
-			print TEXOUT "] ";
+		print TEXOUT "from ".Tab::texify($entry_record->{formal} || $entry_record->{school_name});
+
+		if ($tourn_settings->{ncfl}) {
 			print TEXOUT "\\nopagebreak\n";
 			print TEXOUT "\\newline\n";
-		}
 
-		print TEXOUT "from ".Tab::texify($entry->school->name);
-		print TEXOUT " in ".$state_hash->{$entry->school->chapter->state}."\n";
+			print TEXOUT "in the ";
+			if ($entry_record->{arch}) {
+				print TEXOUT "Archdiocese of ";
+			} else {
+				print TEXOUT "Diocese of ";
+			}
+			print TEXOUT Tab::texify($entry_record->{region_name});
+		} else {
+			print TEXOUT " in ".$state_hash->{$entry_record->{state}}."\n";
+		}
 
 		print TEXOUT "\\nopagebreak\n";
 		print TEXOUT "\\newline\n";
 
-		if ($entry->setting("coach_script")) {
-			print TEXOUT "Coached by ".Tab::texify($entry->setting("coach_script"))." \n";
-		} else {
-			print TEXOUT "Coached by ".Tab::texify($entry->school->chapter->setting("coaches"))." \n";
+		if ($entry_record->{"coach_script"}) {
+			print TEXOUT "Coached by ".Tab::texify($entry_record->{"coach_script"})." \n";
+		} elsif ($entry_record->{"coaches"}) {
+			print TEXOUT "Coaches ".Tab::texify($entry_record->{"coaches"})." \n";
 		}
 
 		print TEXOUT "\\medskip\n";
