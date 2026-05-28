@@ -2,8 +2,8 @@
 package Tab::Mason;
 
 use lib "/www/tabroom/web/lib";
-
 use strict;
+
 no warnings "uninitialized";
 no warnings "redefine";
 
