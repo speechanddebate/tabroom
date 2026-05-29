@@ -44,6 +44,8 @@
 		$codes{"fines"}   = 2102;
 	};
 
+	my %rev_codes = map {$codes{$_} => $_} keys %codes;
+
 	if ($tourn_settings{"nsda_billing_entries"}) {
 		$codes{"entries"} = int($tourn_settings{"nsda_billing_entries"});
 	}
@@ -81,24 +83,60 @@
 	my %invoiced = ();
 	my %still_owed = ();
 
-	unless ($debug) {
+	my @messages;
+
 		foreach my $invoice (@invoices) {
 
-			my %invoice = eval {
-				my $tmp = JSON::decode_json($invoice->details);
+			my $tmp = JSON::decode_json($invoice->details);
+			my %validate_owed;
 
-				if ($tmp->{"owed"}) {
-					return %{$tmp->{"owed"}};
-				} else {
-					return %{$tmp};
+			if ($tmp->{request}{items}) {
+				foreach my $item (@{$tmp->{request}{items}}) {
+					$validate_owed{$rev_codes{$item->{product_id}}} += $item->{price};
 				}
-			};
+			}
+
+			my $discrepancy;
+
+			foreach my $key (keys %validate_owed) {
+				if ($tmp->{owed}{$key} != $validate_owed{$key}) {
+					$discrepancy .= " Discrepancy between invoice owed total amount for $key (".$tmp->{owed}{$key}.") and calculated amount $validate_owed{$key}.  Tabroom invoice corrected.  This usually happens because of a changed or canceled part of an order.";
+					$tmp->{owed}{$key} = $validate_owed{$key};
+				}
+			}
+
+			my %invoice_hash;
+
+			if ($discrepancy) {
+
+				%invoice_hash = %validate_owed;
+
+				Tab::ChangeLog->create({
+					person      => $person,
+					tag         => "invoices",
+					description => $discrepancy,
+					school      => $school->id,
+					tourn       => $tourn->id,
+				});
+
+				$invoice->details(JSON::encode_json($tmp));
+				$invoice->update();
+
+			} else {
+
+				%invoice_hash = eval {
+					if ($tmp->{"owed"}) {
+						return %{$tmp->{"owed"}};
+					} else {
+						return %{$tmp};
+					}
+				};
+			}
 
 			foreach my $key (keys %codes, keys %concession_codes) {
-				$invoiced{$key} += $invoice{$key};
+				$invoiced{$key} += $invoice_hash{$key};
 			}
 		}
-	}
 
 	my $total_owed;
 	my $total_billed;
@@ -121,14 +159,12 @@
 			$total_owed += $still_owed{$key};
 
 		} elsif ($invoiced{$key}) {
-
 			$total_billed += $invoiced{$key};
 		}
 
 		if ($still_owed{$key} > 0 && $codes{$key}) {
 
 			$total_billed += $still_owed{$key};
-
 			my $name = $tourn->name." ".ucfirst($key);
 
 			if ($concession_names{$key}) {
@@ -142,7 +178,6 @@
 			);
 
 			push @items, \%item;
-
 		}
 	}
 
@@ -170,6 +205,7 @@
 	if ($total_owed > 0 || (@items && $total_billed > $total_owed) || $debug) {
 
 		my %new_invoice;
+
 		if (
 			$tourn_settings{'nsda_ms_nats'}
 			|| $tourn_settings{'nsda_nats'}
