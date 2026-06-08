@@ -8,7 +8,6 @@
 <%init>
 
 	my @events;
-
 	if ($event_id && $event_id eq int($event_id)) {
 		push @events, Tab::Event->retrieve($event_id);
 	} else {
@@ -22,18 +21,48 @@
 
 		next if $event->type eq "congress";
 
+		if ($ARGS{round_id}) {
+
+			my $round = Tab::Round->retrieve($ARGS{round_id});
+			$round_name = $round->name;
+
+			Tab::debuglog("I am limited to round ".$ARGS{round_id}." which is round $round_name");
+
+			my $exist_sth = $dbh->prepare("
+				select rs.id, rs.code
+					from result_set rs
+				where 1=1
+					and rs.event = ?
+					and rs.tag = 'scores'
+					and rs.code > ".int($round_name)."
+			");
+
+			$exist_sth->execute($round->event->id);
+			my $results = $exist_sth->fetchall_hash();
+
+			Tab::debuglog("I have found ".scalar @{$results}." results that might conflict");
+
+			foreach my $ref (@{$results}) {
+				Tab::debuglog("$ref has id ".$ref->{id}." and code ".$ref->{code}." which is bigger than $round_name");
+				if ($ref->{id}) {
+					Tab::debuglog("returning");
+					return "Later result set already exists.  Not generating";
+				}
+			}
+		}
+
+		Tab::debuglog("I should not be here right?");
+
 		my $exclude_number;
 		my $label;
 		my $limit;
 
 		# Clear out the old
-		my $delete_sth = $dbh->prepare("delete from result_set where event = ? and label like 'Results up to round%' ");
-		$delete_sth->execute($event->id);
-
-		$delete_sth = $dbh->prepare("delete from result_set where event = ? and label like 'All Rounds%' ");
+		my $delete_sth = $dbh->prepare("delete from result_set where event = ? and tag = 'scores'");
 		$delete_sth->execute($event->id);
 
 		if ($round_name) {
+
 			my $exclude_round = $event->rounds(
 				name => $round_name
 			)->first;
@@ -49,7 +78,8 @@
 				and not exists (
 					select advanced.id
 						from ballot advanced, panel advpanel, round advround
-					where advround.name = ".int($exclude_number)."
+					where 1=1
+						and advround.name = ".int($exclude_number)."
 						and advround.id = advpanel.round
 						and advpanel.id = advanced.panel
 						and advanced.entry = entry.id
@@ -57,12 +87,13 @@
 			";
 
 		} else {
+			#it may be an ugly hack but at least it's nerdy?
 			$exclude_number = 314159;
 			$label = "All Rounds";
 		}
 
 		my $sth = $dbh->prepare("
-			select entry.id, round.name,
+			select entry.id, round.name, round.id,
 				rank.tag, rank.value,
 				winloss.tag, winloss.value
 			from (entry, round, panel, ballot)
@@ -73,21 +104,22 @@
 				left join score winloss on winloss.tag = 'winloss'
 					and winloss.ballot = ballot.id
 
-			where entry.event = ?
-			and entry.id      = ballot.entry
-			and entry.active  = 1
-			and ballot.panel  = panel.id
-			and panel.round   = round.id
-			and round.name    < ?
+			where 1=1
+				and entry.event = ?
+				and entry.id      = ballot.entry
+				and entry.active  = 1
+				and ballot.panel  = panel.id
+				and panel.round   = round.id
+				and round.name    < ?
 
-			and not exists (
-				select rs.id
-				from round_setting rs
-				where rs.round = round.id
-				and rs.tag = 'ignore_results'
-			)
+				and not exists (
+					select rs.id
+					from round_setting rs
+					where rs.round = round.id
+					and rs.tag = 'ignore_results'
+				)
 
-			$limit
+				$limit
 
 			group by ballot.id
 		");
@@ -97,16 +129,16 @@
 		my %results;
 		my %rounds;
 		my $max_round;
+		my $max_round_id;
 
 		while (
-			my ($entry_id, $round_name,
+			my ($entry_id, $round_name, $round_id,
 				$rank_tag, $rank_value,
 				$winloss_tag, $winloss_value
 			) = $sth->fetchrow_array()
 		) {
 
 			$rounds{$round_name}++;
-
 			$results{$entry_id}{$round_name} .= " " if $results{$entry_id}{$round_name};
 
 			if ($winloss_tag) {
@@ -116,7 +148,10 @@
 
 			$results{$entry_id}{$round_name} .= $rank_value if $rank_tag;
 
-			$max_round = $round_name if $max_round < $round_name;
+			if ($max_round < $round_name) {
+				$max_round    = $round_name;
+				$max_round_id = $round_id;
+			}
 		}
 
 		my $result_set = Tab::ResultSet->create({
@@ -125,6 +160,7 @@
 			tourn     => $tourn,
 			event     => $event,
 			label     => $label,
+			code      => $max_round || 14,
 			generated => $now
 		});
 
@@ -150,13 +186,19 @@
 						result_set  => $result_set->id,
 						tag         => $tag,
 						no_sort     => 1,
-						description => "Round $round_name results"
+						description => "Round $round_name Scores"
 					});
 				}
 
-				$rv_create->execute($result, $results{$entry}{$round_name}, $round_name, $keys{$tag});
+				if ($results{$entry}{$round_name}) {
+					$rv_create->execute($result, $results{$entry}{$round_name}, $round_name, $keys{$tag});
+				}
 			}
 		}
+	}
+
+	if ($ARGS{return}) {
+		return "Results sheet generated";
 	}
 
 	my $msg = "Results sheet generated";

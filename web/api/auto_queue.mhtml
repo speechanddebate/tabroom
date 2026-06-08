@@ -81,19 +81,29 @@
 	$lock_sth->finish();
 
 	my $aq_sth = $dbh->prepare("
-		select aq.id, aq.tag, aq.message, aq.created_by sender,
+		select aq.id, aq.tag, aq.message, aq.created_by sender, aq.event,
 			CONVERT_TZ(aq.active_at, '+00:00', 'America/New_York') as active_at,
 			round.id round_id,
-			event.id event_id, event.name event_name, event.id event_id, event.type event_type, event.abbr event_abbr,
+			event.id event_id, event.name event_name, event.type event_type, event.abbr event_abbr,
 			tourn.id tourn_id,
-			prefs.value prefs,
-			num_judges.value num_judges
+			(
+				select num_judges.value
+				from round_setting num_judges
+				where  num_judges.round = round.id
+				and num_judges.tag = 'num_judges'
+			) num_judges,
+			(
+				select prefs.value
+				from category_setting prefs
+				where prefs.category = event.category
+				and prefs.tag = 'prefs'
+			) prefs
+
 		from (autoqueue aq)
+
 			left join round on round.id = aq.round
-			left join round_setting num_judges on num_judges.round = round.id and num_judges.tag = 'num_judges'
-			left join event on round.event = event.id
+			left join event on event.id = round.event
 			left join tourn on event.tourn = tourn.id
-			left join category_setting prefs on prefs.category = event.category and prefs.tag = 'prefs'
 
 		where (aq.active_at < NOW() OR aq.active_at IS NULL)
 			and aq.tag NOT IN (
@@ -140,7 +150,7 @@
 		# in one gumming up the works for the rest.  This does unfortunately
 		# mean not much in the way of error reporting but so be it
 
-		$m->print("Doing job ".$aq->{id}." tag ".$aq->{tag}." active tag ".$aq->{active_at}." at $now <br />");
+		$m->print("Doing job ".$aq->{id}." tag ".$aq->{tag}." active tag ".$aq->{active_at}." event ".$aq->{event_id}." at $now <br />");
 
 		eval {
 			$aq_lock->execute($aq->{id});
@@ -152,24 +162,28 @@
 
 		$counter++;
 
-		my $aq->{sender}  = $aq->{sender};
-
 		if ($aq->{round_id} && (not defined $rounds{$aq->{round_id}})) {
 			$rounds{$aq->{round_id}} = Tab::Round->retrieve($aq->{round_id});
 		}
 
 		my $round = $rounds{$aq->{round_id}};
 
-		if ($aq->{event_id} && (not defined $events{$aq->{event_id}})) {
+		if ($aq->{event} && (not defined $events{$aq->{event}})) {
+			$events{$aq->{event}} = Tab::Event->retrieve($aq->{event});
+			Tab::debuglog("Searching for event ".$aq->{event}." first stanza gave ".$events{$aq->{event}});
+		} elsif ($aq->{event_id} && (not defined $events{$aq->{event_id}})) {
 			$events{$aq->{event_id}} = Tab::Event->retrieve($aq->{event_id});
+			Tab::debuglog("Searching for event ".$aq->{event_id}." first stanza gave ".$events{$aq->{event_id}});
 		}
 
-		my $event = $events{$aq->{event_id}};
+		my $event = $events{$aq->{event_id} || $aq->{event}};
 
-		unless ($event) {
-			$m->print("<p>No event found for event ID ".$aq->{event_id}."</p>");
+		unless ( $event > 0 ) {
+			$m->print("<p>No event found for event ID ".($aq->{event_id} || $aq->{event})."</p>");
 			next AQ;
 		}
+
+		$m->print("Made it");
 
 		if ($aq->{tourn_id} && (not defined $tourns{$aq->{tourn_id}})) {
 			$tourns{$aq->{tourn_id}} = Tab::Tourn->retrieve($aq->{tourn_id});
@@ -710,6 +724,31 @@
 					result_type    => "toc"
 				);
 			};
+
+		} elsif ($aq->{tag} eq "scores") {
+
+			my $description = "Auto-generated non advancing score sheets for ".$aq->{event_abbr};
+
+			$m->comp("/funclib/log.mas",
+				type        => 'tabbing',
+				event       => $aq->{event_id},
+				round       => $aq->{round_id},
+				tourn       => $tourn->id,
+				person      => 0,
+				description => $description
+			);
+
+			my $reply = $m->comp("/tabbing/publish/nationals_ranks.mhtml",
+				now            => $now,
+				dbh            => $dbh,
+				tourn          => $tourn,
+				event_id       => $aq->{event_id},
+				round_id       => $aq->{round_id},
+				return         => 1,
+				tourn_settings => \%tourn_settings,
+			);
+
+			$m->print('<p>'.$reply.'</p>');
 		}
 
 		# Errors in an eval should still be reported
