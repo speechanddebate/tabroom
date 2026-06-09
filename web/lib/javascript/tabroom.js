@@ -25,7 +25,7 @@
 	    var $temp = $("<input>");
 		$("body").append($temp);
 
-		const copied = $("#"+elementId).text();
+		const copied = $("#"+elementId).text().trim();
 		$temp.val($("#"+elementId).text()).select();
 		document.execCommand("copy");
 		$temp.remove();
