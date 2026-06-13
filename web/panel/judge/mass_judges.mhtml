@@ -1,0 +1,224 @@
+<%args>
+	$dbh
+	$tourn
+	$tourn_settings
+	$person
+	$perms
+	$session
+	$supps       => undef
+	$defaults    => undef
+	$category_id => undef
+	$clear       => undef
+	$panelsize   => undef
+	$round_type  => undef
+	$num_judges  => 1
+	$timeslot_id => undef
+</%args>
+<%init>
+
+	unless ($category_id) {
+		$m->print("No judge category sent.  Hit back and try again");
+		$m->abort();
+	}
+
+	my @events = $m->comp("/funclib/perms/events.mas",
+		tourn => $tourn,
+		perms => $perms
+	);
+
+	my %events_by_id = map {$_->id => $_} @events;
+
+	my ($cat_id, @categories) = $m->comp("/funclib/perms/categories.mas",
+		tourn => $tourn,
+		perms => $perms
+	);
+
+	my %cats_by_id = map {$_->id => $_} @categories;
+
+	unless ($cats_by_id{$category_id}) {
+		$m->comp("/funclib/abort.mas",
+			message => "No valid judge category found with ID $category_id.  Do you have permissions to view that category?"
+		);
+	}
+
+	my $category = $cats_by_id{$category_id};
+
+	$m->print('<div class="main">');
+	$m->print("<h4>We begin!</h4>");
+
+	my $limit;
+
+	if ($ARGS{event} && $events_by_id{$ARGS{event}}) {
+		$limit .= "\n and event.id = ".int($ARGS{event});
+	} else {
+		$limit .= "\n and event.id IN (".join(',', (keys %events_by_id)).') ';
+	}
+
+	if ($ARGS{timeslot_id}) {
+		$limit .= "\n and round.timeslot = ".int($ARGS{timeslot_id});
+	}
+
+	if ($ARGS{round_type}) {
+		my $round_type = $ARGS{round_type};
+		$round_type =~ s/[\W_]//g;
+		$limit .= "\n and round.type = '$round_type' ";
+	}
+
+	if ($ARGS{event_type}) {
+		my $event_type = $ARGS{event_type};
+		$event_type =~ s/[\W_]//g;
+		$limit .= "\n and event.type = '$event_type' ";
+	}
+
+	if ($ARGS{supps}) {
+		$limit .= "\n and exists (select es.id from event_setting es where es.tag = 'supp' and es.event = event.id) ";
+	}
+
+	$m->print("<p class='semibold'>Fetching all the rounds</p>");
+	$m->flush_buffer();
+
+	my $round_sth = $dbh->prepare("
+		select round.id, round.name, event.abbr
+			from round, event
+		where 1=1
+			and	event.category = ?
+			and event.id = round.event
+			$limit
+		group by round.id
+		order by round.name
+	");
+
+	$round_sth->execute($category_id);
+	my $rounds = $round_sth->fetchall_hash();
+
+	$m->print("<p class='padleft'>".(scalar @{$rounds})." rounds found</p>");
+
+	if ($clear) {
+
+		$m->print("<p class='semibold'>Clearing duplicated ballots</p>");
+		$m->flush_buffer();
+
+		my $clear_sth = $dbh->prepare("
+			delete b2.*
+				from ballot, ballot b2, panel, round, event
+			where 1=1
+				and event.category = ?
+				and event.id = round.event
+				and round.id = panel.round
+				and panel.id = ballot.panel
+				and panel.id = b2.panel
+				and b2.entry = ballot.entry
+				and (b2.judge = ballot.judge OR b2.judge IS NULL)
+				and b2.id > ballot.id
+			$limit
+		");
+
+		$clear_sth->execute($category_id);
+
+		$m->print("<p class='semibold'>Clearing judge ballots</p>");
+		$m->flush_buffer();
+
+		$clear_sth = $dbh->prepare("
+			update ballot, panel, round, event
+				set ballot.judge = NULL
+			where 1=1
+				and event.category = ?
+				and event.id = round.event
+				and round.id = panel.round
+				and panel.id = ballot.panel
+			$limit
+		");
+
+		$clear_sth->execute($category_id);
+		$m->print("<p>Cleared</p>");
+		$m->flush_buffer();
+	}
+
+	my @rounds = @{$rounds};
+
+	my %judge_settings = $m->comp(
+		"/funclib/category_judge_settings.mas",
+		category => $category,
+		value    => 1,
+		all      => 1
+	);
+
+	foreach my $judge (1 .. $num_judges) {
+
+		@rounds = reverse @rounds;
+
+		$m->print("<p class='semibold'>Adding judge number $judge to each section of ".scalar @{$rounds}." rounds</p>");
+		$m->flush_buffer();
+
+		$m->print('<div class="flexrow full wrap padleft padright">');
+
+		foreach my $round (@rounds) {
+
+			$m->print("<span class='third'>".($round->{label} || 'Round '.$round->{name})." of ".$round->{abbr}." ID ".$round->{id}."</span>");
+			$m->flush_buffer();
+
+			$m->comp("/panel/round/judges.mhtml",
+				tourn          => $tourn,
+				tourn_settings => $tourn_settings,
+				judge_settings => \%judge_settings,
+				person         => $person,
+				round_id       => $round->{id},
+				return         => 1,
+				add_judges     => 1,
+				limit_judges   => $num_judges,
+				dbh            => $dbh
+			);
+		}
+
+		$m->print('</div>');
+	}
+
+    my $description = $person->first." ".$person->last." (".$person->email.")";
+	$description .= " has repaneled the judges in category ".$category->abbr;
+
+	$m->comp("/funclib/log.mas",
+        type        => 'tabbing',
+        tourn       => $category->tourn->id,
+        person      => $person->id,
+        description => $description
+    );
+
+	$m->print('<p>'.$description.'</p>');
+
+</%init>
+
+		<h4>Judge paneling done</h4>
+
+		<div class="centeralign full">
+			<span class="third centeralign">
+				<a
+					target = "blank"
+					class  = "fourfifths buttonwhite bluetext hover invert padvert"
+					href   = "/panel/round/category_check.mhtml?category_id=<% $category->id %>"
+				>
+					Check for Disasters
+				</a>
+			</span>
+
+			<span class="third centeralign">
+				<a
+					target = "blank"
+					class = "fourfifths buttonwhite bluetext hover invert padvert"
+					href  = "/panel/judge/chart.mhtml?category_id=<% $category->id %>"
+				>
+					See Judge Chart
+				</a>
+			</span>
+		</div>
+
+	</div>
+
+	<& menu.mas,
+		tourn          => $tourn,
+		category       => $category,
+		categories     => \%cats_by_id,
+		whoami         => "index",
+		perms          => $perms,
+		tourn_settings => $tourn_settings,
+	&>
+

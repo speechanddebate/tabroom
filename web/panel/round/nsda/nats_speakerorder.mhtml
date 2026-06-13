@@ -3,6 +3,7 @@
 	$tourn
 	$tourn_settings
 	$event_id => undef
+	$feedback => undef
 </%args>
 <%init>
 
@@ -25,8 +26,10 @@
 
 	$sth->execute($event->id);
 
-	my %entries = ();
-	my %rounds = ();
+	my $entries = ();
+	my %rounds  = ();
+	my $panels  = ();
+
 	my $goodcount;
 	my $badcount;
 
@@ -36,43 +39,51 @@
 		) = $sth->fetchrow_array()
 	) {
 
-		next if $entries{$entry_id}{"order"}{$round_name};
+		next if $entries->{$entry_id}{"order"}{$round_name};
 
 		$rounds{$round_name}{$panel_id}{$entry_id}++;
 		$rounds{$round_name}{"id"} = $round_id;
 
-		$entries{$entry_id}{"code"} = $entry_code;
-		$entries{$entry_id}{"order"}{$round_name} = $order;
-		$entries{$entry_id}{"taken"}{$order}++;
+		$entries->{$entry_id}{"code"} = $entry_code;
+		$entries->{$entry_id}{"order"}{$round_name} = $order;
+		$entries->{$entry_id}{"taken"}{$order}++;
 
-		$entries{$entry_id}{$round_name}{"order"}      = $order;
-		$entries{$entry_id}{$round_name}{panel_id}     = $panel_id;
-		$entries{$entry_id}{$round_name}{panel_letter} = $panel_letter;
+		$entries->{$entry_id}{$round_name}{"order"}      = $order;
+		$entries->{$entry_id}{$round_name}{panel_id}     = $panel_id;
+		$entries->{$entry_id}{$round_name}{panel_letter} = $panel_letter;
 
+		if ($order > $panels->{$panel_id}{max_order}) {
+			$panels->{$panel_id}{max_order} = $order;
+		}
 	}
+
+	my $update_sth = $dbh->prepare("update ballot set speakerorder = ? where entry = ? and panel = ?");
 
 	if ($ARGS{"improve_me"}) {
 
 		foreach (1 .. 7) {
 
-			foreach my $entry_id (keys %entries) {
+			if ($feedback) {
+				$m->print("Pass $_ on the speaker order");
+				$m->flush_buffer();
+			}
+
+			foreach my $entry_id (keys %{$entries}) {
 
 				foreach my $round (sort keys %rounds) {
 
-					my $order = $entries{$entry_id}{"order"}{$round};
-
-					my $panel_id = $entries{$entry_id}{$round}{"panel_id"};
-
+					my $order = $entries->{$entry_id}{"order"}{$round};
+					my $panel_id = $entries->{$entry_id}{$round}{"panel_id"};
 					my $swap_with;
 					my $swap_order;
 
 					foreach my $other_id (keys %{$rounds{$round}{$panel_id}}) {
 
 						#Don't create another problem
-						next if $entries{$other_id}{"taken"}{$order} > 0;
+						next if $entries->{$other_id}{"taken"}{$order} > 0;
 
-						my $other_order = $entries{$other_id}{"order"}{$round};
-						next if $entries{$entry_id}{"taken"}{$other_order} > 0;
+						my $other_order = $entries->{$other_id}{"order"}{$round};
+						next if $entries->{$entry_id}{"taken"}{$other_order} > 0;
 
 						$swap_with = $other_id;
 						$swap_order = $other_order;
@@ -81,25 +92,25 @@
 
 					if ($swap_with) {
 
-						&swap_sides($panel_id, $entry_id, $swap_with);
+						&swap_sides($panel_id, $entry_id, $swap_with, $panels, $entries, $update_sth, $round);
 
-						$entries{$entry_id}{"order"}{$round} = $swap_order;
-						$entries{$entry_id}{"taken"}{$order}--;
-						$entries{$entry_id}{"taken"}{$swap_order}++;
+						$entries->{$entry_id}{"order"}{$round} = $swap_order;
+						$entries->{$entry_id}{"taken"}{$order}--;
+						$entries->{$entry_id}{"taken"}{$swap_order}++;
 
-						$entries{$swap_with}{"order"}{$round} = $order;
-						$entries{$swap_with}{"taken"}{$swap_order}--;
-						$entries{$swap_with}{"taken"}{$order}++;
+						$entries->{$swap_with}{"order"}{$round} = $order;
+						$entries->{$swap_with}{"taken"}{$swap_order}--;
+						$entries->{$swap_with}{"taken"}{$order}++;
 					}
 				}
 			}
 		}
 	}
 
-	foreach my $entry_id (keys %entries) {
+	foreach my $entry_id (keys %{$entries}) {
 		my $bad;
-		foreach my $order (keys %{$entries{$entry_id}{"taken"}}) {
-			$bad++ if $entries{$entry_id}{"taken"}{$order} > 1;
+		foreach my $order (keys %{$entries->{$entry_id}{"taken"}}) {
+			$bad++ if $entries->{$entry_id}{"taken"}{$order} > 1;
 			$badcount++;
 		}
 		$goodcount++ unless $bad;
@@ -107,22 +118,16 @@
 
 	sub swap_sides {
 
-		my ($panel, $entry, $other) = @_;
+		my ($panel, $entry, $other, $panels, $entries, $update_sth, $round) = @_;
 
-		Tab::Ballot->set_sql(max_order => "select max(ballot.speakerorder) from ballot where panel = ? ");
-		Tab::Ballot->set_sql(entry_order => "select ballot.speakerorder from ballot where panel = ? and entry = ? limit 1");
+		my $max_order = $panels->{$panel}{max_order} + 1;
+		my $entry_order = $entries->{$entry}{"order"}{$round};
+		my $other_order = $entries->{$other}{'order'}{$round};
 
-		my $max_order = Tab::Ballot->sql_max_order->select_val($panel);
-		$max_order++;
+		$update_sth->execute($max_order, $entry, $panel);
+		$update_sth->execute($entry_order, $other, $panel);
+		$update_sth->execute($other_order, $entry, $panel);
 
-		my $entry_order = Tab::Ballot->sql_entry_order->select_val($panel, $entry);
-		my $other_order = Tab::Ballot->sql_entry_order->select_val($panel, $other);
-
-		Tab::Ballot->set_sql(reverse_orders => "update ballot set speakerorder = ? where entry = ? and panel = ?");
-
-		Tab::Ballot->sql_reverse_orders->execute($max_order, $entry, $panel);
-		Tab::Ballot->sql_reverse_orders->execute($entry_order, $other, $panel);
-		Tab::Ballot->sql_reverse_orders->execute($other_order, $entry, $panel);
 		return;
 	}
 
@@ -164,7 +169,7 @@
 			</span>
 
 			<span class="threeeighths nospace centeralign bluetext semibold">
-				<% $goodcount %>/<% scalar(keys %entries) %> OK
+				<% $goodcount %>/<% scalar(keys %{$entries}) %> OK
 			</span>
 
 			<span
@@ -206,8 +211,8 @@
 			my $count = 1;
 
 			foreach my $entry_id (
-				sort {$entries{$a}{"code"} cmp $entries{$b}{"code"}}
-				keys %entries
+				sort {$entries->{$a}{"code"} cmp $entries->{$b}{"code"}}
+				keys %{$entries}
 			) {
 
 			my %bads = ();
@@ -223,7 +228,7 @@
 							href   = "/register/entry/edit.mhtml?entry_id=<% $entry_id %>"
 							class  = "padvertless full white marno padleft hover"
 							target = "_blank"
-						><% $entries{$entry_id}{'code'} %></a>
+						><% $entries->{$entry_id}{'code'} %></a>
 					</td>
 
 <%perl>
@@ -234,20 +239,20 @@
 						# then kept growing. THEY JUST KEPT GROWING.  SEND
 						# HELP -- CLP
 
-						if ($entries{$entry_id}{taken}{  $entries{$entry_id}{"order"}{$round}  } > 1 ) {
+						if ($entries->{$entry_id}{taken}{ $entries->{$entry_id}{"order"}{$round} } > 1 ) {
 
-							if ($bads{ $entries{$entry_id}{"order"}{$round} }) {
-								$bads{ $entries{$entry_id}{"order"}{$round} } .= ", ";
+							if ($bads{ $entries->{$entry_id}{"order"}{$round} }) {
+								$bads{ $entries->{$entry_id}{"order"}{$round} } .= ", ";
 							}
 
-							$bads{ $entries{$entry_id}{"order"}{$round} } .= $round;
+							$bads{ $entries->{$entry_id}{"order"}{$round} } .= $round;
 						}
 </%perl>
 						<td
 							class     = 'centeralign <% $bad ? "semibold redtext" : "" %>'
-							data-text = "<% $entries{$entry_id}{$round}{"panel_letter"} || 0 %>"
+							data-text = "<% $entries->{$entry_id}{$round}{"panel_letter"} || 0 %>"
 						>
-							<% $entries{$entry_id}{"order"}{$round} %>
+							<% $entries->{$entry_id}{"order"}{$round} %>
 						</td>
 %					}
 

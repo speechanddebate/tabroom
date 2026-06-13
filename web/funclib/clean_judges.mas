@@ -181,7 +181,13 @@
 			judge.person, judge.obligation, judge.hired,
 			school.id, school.name, school.code,
 			region.id, region.name, region.code,
-			area.value area,
+
+			( select area.value
+				from region_setting area
+				where area.region = region.id
+				and area.tag = 'area'
+			) area,
+
 			district.id, district.name, district.code,
 
             ( select
@@ -206,6 +212,13 @@
             ) as diverse,
 
             ( select
+                diamonds.value
+                from person_setting as diamonds
+                where diamonds.person = judge.person
+                and diamonds.tag = 'diamonds'
+            ) as diamonds,
+
+            ( select
                 online_hybrid.value
                 from judge_setting as online_hybrid
                 where online_hybrid.judge = judge.id
@@ -214,27 +227,10 @@
 
 		from (judge, panel, event, round, timeslot, tourn $jpool_select)
 
-		left join judge_setting as online_hybrid
-			on online_hybrid.judge = judge.id
-			and online_hybrid.tag = 'online_hybrid'
-
-		left join judge_setting as tab_rating
-			on tab_rating.judge = judge.id
-			and tab_rating.tag = 'tab_rating'
-
-		left join judge_setting as diverse
-			on diverse.judge = judge.id
-			and diverse.tag = 'diverse'
-
-		left join judge_setting parli
-			on parli.judge = judge.id
-			and parli.tag = 'parli'
-
-		left join school on school.id                = judge.school
-		left join chapter on chapter.id              = school.chapter
-		left join region on region.id                = school.region
-		left join region_setting area on area.region = region.id and area.tag = 'area'
-		left join district on school.district        = district.id
+			left join school on school.id                = judge.school
+			left join chapter on chapter.id              = school.chapter
+			left join region on region.id                = school.region
+			left join district on school.district        = district.id
 
 		where panel.id = ?
 			and round.id = panel.round
@@ -248,7 +244,6 @@
 		and not exists (
 			select strike.id from strike, ballot
 			where strike.judge = judge.id
-			and strike.entry > 0
 			and strike.entry = ballot.entry
 			and ballot.panel = panel.id
 		)
@@ -268,7 +263,6 @@
 			where hybrid.judge = judge.id
 			and hybrid.school = schstrike.school
 			and schstrike.type = 'hybrid'
-			and schstrike.entry > 0
 			and schstrike.entry = ballot.entry
 			and ballot.panel = panel.id
 		)
@@ -276,7 +270,6 @@
 		and not exists(
 			select strike.id from strike, ballot, entry
 			where strike.judge = judge.id
-			and strike.school > 0
 			and strike.school = entry.school
 			and entry.id = ballot.entry
 			and ballot.panel = panel.id
@@ -307,7 +300,8 @@
 		)
 
 		and not exists (
-			select strike.id from strike, school, entry, ballot
+			select strike.id
+			from (strike, school, entry, ballot)
 			where strike.judge = judge.id
 			and strike.type    = 'region'
 			and strike.region  = school.region
@@ -490,10 +484,7 @@
 
 				if ($tourn_settings->{"nsda_nats"}) {
 
-					# At NCFLs check against the region (diocese) of kids still alive
-
 					$sql_from_hell = $sql_from_hell ."
-
 					and (judge.school IS NULL OR judge.school NOT IN (
 						select school.id from entry,school,district,
 						school as entryschool,
@@ -814,7 +805,6 @@
 			and bpreset.panel = ppreset.id
 			and ppreset.round = rpreset.id
 			and rpreset.event = event.id
-			and bpreset.entry > 0
 		)";
 
 		# Next if this is a preset round, and there are other elims with kids
@@ -910,7 +900,6 @@
 					and pt.id     = bt.panel
 					$flight_limit
 					and bt.judge  = judge.id
-					and bt.judge  > 0
 			)
 
 			and not exists (
@@ -929,7 +918,6 @@
 					)
 				where persa.id = judge.person
 					and persa.id  = ja.person
-					and ja.person > 0
 					and ja.category = ca.id
 					and ca.tourn = tourn.id
 					and ba.judge  = ja.id
@@ -1003,29 +991,21 @@
 					and sr2.id = judge.school
 					and sr2.district = sr1.district
 				)
-
-				and not exists(
-					select bjr.id from ballot as bjr,judge as j2,school as sr1, school as sr2
-					where bjr.panel = panel.id
-					and bjr.judge = j2.id
-					and j2.school = sr1.id
-					and sr2.id = judge.school
-					and sr2.region = sr1.region
-				)
 			";
 		}
 	}
 
-	if ($ARGS{"wudc"}) {
-		$sql_from_hell .= " order by tab_rating.value DESC, rand () ";
+	if ($ARGS{"nsda_elims"} || $tourn_settings->{"nsda_nats"}) {
+		$sql_from_hell .= " order by diamonds DESC, diverse DESC, rand ()";
+	} elsif ($ARGS{"wudc"}) {
+		$sql_from_hell .= " order by tab_rating DESC, rand () ";
 	} elsif ($ARGS{"parlis"}) {
-		$sql_from_hell .= " order by parli.value DESC ";
+		$sql_from_hell .= " order by parli DESC ";
 	} elsif ($category_settings->{"tab_ratings"}) {
-		$sql_from_hell .= " order by tab_rating.value DESC ";
+		$sql_from_hell .= " order by tab_rating DESC ";
 	}
 
 	my $sth = $dbh->prepare($sql_from_hell);
-
 	$sth->execute($panel_id);
 
 	foreach my $jid (keys %judges) {
@@ -1041,7 +1021,7 @@
 			$region_id, $region_name, $region_code,
 			$area,
 			$district_id, $district_name, $district_code,
-			$tab_rating_value, $parli_value, $diverse_value, $online_hybrid
+			$tab_rating_value, $parli_value, $diverse_value, $diamonds, $online_hybrid
 		) = $sth->fetchrow_array()
 	) {
 
@@ -1068,14 +1048,14 @@
 		$judges{$judge_id}{"district_name"} = $district_name;
 		$judges{$judge_id}{"district_code"} = $district_code;
 
-		$judges{$judge_id}{"tab_rating"} = $tab_rating_value;
-		$judges{$judge_id}{"parli"} = $parli_value;
-		$judges{$judge_id}{"diverse"} = $diverse_value;
+		$judges{$judge_id}{"tab_rating"}    = $tab_rating_value;
+		$judges{$judge_id}{"parli"}         = $parli_value;
+		$judges{$judge_id}{"diverse"}       = $diverse_value;
+		$judges{$judge_id}{"diamonds"}      = $diamonds;
 		$judges{$judge_id}{"online_hybrid"} = $online_hybrid;
 
 		$judges{$judge_id}{"clean"}++;
 		$judges{$judge_id}{"busy"}++ if $ARGS{"stealable"};
-
 	}
 
 	foreach my $jid (keys %judges) {

@@ -1,4 +1,5 @@
 <%args>
+	$dbh
 	$tourn
 	$tourn_settings
 	$person
@@ -196,11 +197,10 @@
 	$m->print("<P>Scoring panels by difficulty of finding a judge...");
 	$m->flush_buffer;
 
-	my $dbh = Tab::DBI->db_Main();
-
 	my $sth = $dbh->prepare("
 		select panel.id, judge.id, ballot.id,
 			round.type, round.name, timeslot.id, event.id, round.id,
+			round.flighted,
 			event.type,
 			round_setting.value,
 			count(distinct schooljudge.id), count(distinct entry.id),
@@ -239,6 +239,7 @@
 	while (
 		my ($panel_id, $judge_id, $ballot_id,
 			$local_type, $round_name, $local_timeslot_id, $event_id, $round_id,
+			$flighted,
 			$event_type,
 			$num_judges,
 			$judgecount, $entrycount,
@@ -262,7 +263,7 @@
 		$panels{$panel_id}{"round_type"} = $local_type;
 		$panels{$panel_id}{"round_name"} = $round_name;
 		$panels{$panel_id}{"jpool"}      = $jpool;
-
+		$panels{$panel_id}{"flights"} = $flighted || 1;
 		$rounds{$round_id}{"yo"}++;
 	}
 
@@ -278,6 +279,7 @@
 
 	my $empty_panels = 0;
 	my $count;
+	my %used_judges = ();
 
 	PANEL:
 	foreach my $panel_id (keys %panels) {
@@ -301,6 +303,12 @@
 		next PANEL if $already >= $num_judges;
 		$already++;
 
+		my $flight;
+		unless ($panels{$panel_id}{"flight"}) {
+			$panels{$panel_id}{"flight"} = $panels{$panel_id}{'flights'};
+			$flight = $panels{$panel_id}{'flights'};
+		}
+
 		my %round_data = (
 			id   => $panels{$panel_id}{"round"},
 			name => $panels{$panel_id}{"round_name"},
@@ -314,7 +322,6 @@
 
 		my %judges = $m->comp("/funclib/clean_judges.mas",
 			panel_id          => $panel_id,
-			round_id          => $round_id,
 			round_data        => \%round_data,
 			event_data        => \%event_data,
 			jpool             => $panels{$panel_id}{"jpool"},
@@ -337,25 +344,34 @@
 			sort {$judges{$a}{"ballots"} <=> $judges{$b}{"ballots"}}
 			@clean_judges;
 
+		# If they're in this round to the top
+		@clean_judges =
+			sort {$used_judges{$a}{"ballots"} <=> $judges{$b}{"ballots"}}
+			@clean_judges;
+
 		#Best rated to the top if that's what we're doing
 
 		unless (
 			$panels{$panel_id}{"round_type"} eq "prelim"
 			&& $category_settings{"elim_only_ratings"}
 		) {
-			@clean_judges =
-				sort {$judge_rating{$a}{$event_id} cmp $judge_rating{$b}{$event_id}}
-				@clean_judges;
+			@clean_judges = sort {
+				$judge_rating{$a}{$event_id} cmp $judge_rating{$b}{$event_id}
+			} @clean_judges;
 		}
 
 		#Standbys to the bottom
-		@clean_judges =
-			sort {$judges{$a}{"standby"} <=> $judges{$b}{"standby"}}
-			@clean_judges;
+		@clean_judges = sort {
+			$judges{$a}{"standby"} <=> $judges{$b}{"standby"}
+		} @clean_judges;
+
+		#In this round for one flight to the top
+		@clean_judges = sort {
+			($used_judges{$b}{2} == $round_id ? 1 : -1) <=> ($used_judges{$a}{2} == $round_id ? 1 : -1)
+		} @clean_judges;
 
 		# Ths will become the region (diocese) if we're running NCFLs.
 		my %schools_used = ();
-		my %judges_used = ();
 
 		NEED:
 		foreach ($already .. $num_judges) {
@@ -370,7 +386,14 @@
 			JUDGE:
 			foreach my $clean_judge (@clean_judges) {
 
-				next if $judges_used{$clean_judge};
+				if (
+					$used_judges{$clean_judge}{$flight} && $flight == 1
+					|| $used_judges{$clean_judge}{$flight} && ($used_judges{$clean_judge}{$flight} != $round_id)
+				) {
+					next;
+				} elsif ($used_judges{$clean_judge}{$flight}) {
+					$flight--;
+				}
 
 				# If that school or region is on this panel already, move to
 				# the next candidate.
@@ -404,7 +427,7 @@
 				last JUDGE;
 			}
 
-			$judges_used{$chosen_judge}++;
+			$used_judges{$chosen_judge}{$flight} = $round_id;
 
 			unless ($chosen_judge) {
 				$empty_panels++;
@@ -414,9 +437,9 @@
 			$m->comp(
 				"/funclib/panel_judgeadd.mas",
 				judge_id => $chosen_judge,
-				panel_id => $panel_id
+				panel_id => $panel_id,
+				flight   => $flight
 			);
-
 		}
 	}
 

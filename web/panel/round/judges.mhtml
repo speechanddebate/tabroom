@@ -1,12 +1,15 @@
 <%args>
 	$tourn
 	$tourn_settings
+	$judge_settings => undef
 	$person
-	$round_id   => undef
-	$round      => undef
-	$parlis     => undef
-	$return     => undef
-	$num_judges => undef
+	$round_id     => undef
+	$round        => undef
+	$parlis       => undef
+	$return       => undef
+	$num_judges   => undef
+	$add_judges   => undef
+	$limit_judges => undef
 	$dbh
 </%args>
 <%init>
@@ -44,6 +47,10 @@
 		$num_judges++ if $parlis == 3;
 	}
 
+	if ($add_judges) {
+		$num_judges = $add_judges;
+	}
+
 	my $num_flights = $round->flighted;
 	$num_flights = 1 unless $num_flights;
 
@@ -54,18 +61,20 @@
 		$num_flights = 1 if $event_settings{"flight_rooms_only"};
 	}
 
-	$m->comp(
-		"/funclib/round_clear_judges.mas",
-		round        => $round,
-		person       => $person,
-		erase_chairs => $parlis,
-	);
+	unless ($add_judges) {
+		$m->comp(
+			"/funclib/round_clear_judges.mas",
+			round        => $round,
+			person       => $person,
+			erase_chairs => $parlis,
+		);
 
-	$m->comp("/funclib/round_clean.mas",
-		round  => $round,
-		dbh    => $dbh,
-		person => $person
-	);
+		$m->comp("/funclib/round_clean.mas",
+			round  => $round,
+			dbh    => $dbh,
+			person => $person
+		);
+	}
 
 	my %panels_by_letter = ();
 	my $last_round;
@@ -105,12 +114,18 @@
 		description => $description
 	);
 
-	my %judge_settings = $m->comp(
-		"/funclib/category_judge_settings.mas",
-		category => $category,
-		value    => 1,
-		all      => 1
-	);
+	my %judge_settings;
+
+	if ($judge_settings) {
+		%judge_settings = %{$judge_settings};
+	} else {
+		%judge_settings = $m->comp(
+			"/funclib/category_judge_settings.mas",
+			category => $category,
+			value    => 1,
+			all      => 1
+		);
+	}
 
 	if ($event->type eq "wudc") {
 
@@ -126,6 +141,7 @@
 					wudc              => "true",
 					autopanel         => 1,
 					event_settings    => \%event_settings,
+					tourn_settings    => $tourn_settings,
 					category_settings => \%category_settings,
 			);
 
@@ -256,6 +272,7 @@
 			my %chair_done;
 
 			foreach (1 .. $num_judges ) {
+
 				foreach my $panel (@panels) {
 
 					my $judge;
@@ -359,7 +376,6 @@
 							$used{"regions"}{$panel->id}{$panel_judges{$panel->id}{$judge}{"region"}}++;
 						}
 					}
-
 				}
 				@panels = reverse(@panels);
 			}
@@ -371,16 +387,28 @@
 		my $ratings_exist;
 
 		if (
-			($category_settings{"coach_ratings"} || $category_settings{"tab_ratings"})
+			($category_settings{"coach_ratings"}
+				|| $category_settings{"tab_ratings"}
+				|| $tourn_settings->{nsda_nats}
+			)
 			&& (
-				(not defined $category_settings{"elim_only_ratings"})
-				|| ($round->type ne "prelim")
+				(not defined $category_settings{"elim_only_ratings"}) || ($round->type ne "prelim")
 			)
 		) {
 
 			my $rating_sth = $dbh->prepare("
 				select
-					judge.id, rating_tier.name, subrt.name, tab_rating.value
+					judge.id, rating_tier.name, subrt.name, tab_rating.value,
+					(select diverse.value
+						from judge_setting diverse
+						where diverse.judge = judge.id
+						and diverse.tag = 'diverse'
+					) diverse,
+					(select diamonds.value
+						from person_setting diamonds
+						where diamonds.person = judge.person
+						and diamonds.tag = 'diamonds'
+					) diamonds
 
 				from (judge, round, event)
 
@@ -388,6 +416,7 @@
 					left join rating_tier on rating_tier.id = rating.rating_tier
 
 					left join rating_subset on rating_subset.id = event.rating_subset
+
 					left join rating subrating on subrating.rating_subset = rating_subset.id
 						and subrating.judge = judge.id
 						and subrating.type = 'coach'
@@ -398,7 +427,8 @@
 						on tab_rating.judge = judge.id
 						and tab_rating.tag = 'tab_rating'
 
-				where round.id = ?
+				where 1=1
+					and round.id = ?
 					and round.event = event.id
 
 			        and exists (
@@ -424,29 +454,70 @@
 			$rating_sth->execute($round->id);
 
 			while (
-				my ( $judge_id, $rating_tier, $better_rating_tier, $tab_rating) = $rating_sth->fetchrow_array()
+				my ( $judge_id, $rating_tier, $better_rating_tier, $tab_rating, $diverse, $diamonds) = $rating_sth->fetchrow_array()
 			) {
-
 				$ratings_exist = 1;
 				$rating_by_judge{$judge_id} = $rating_tier;
 				$rating_by_judge{$judge_id} = $better_rating_tier if $better_rating_tier;
 				$rating_by_judge{$judge_id} = $tab_rating if $tab_rating;
+
+				if ($tourn_settings->{nsda_nats}) {
+					$rating_by_judge{$judge_id} = 20 - $diamonds - $diverse;
+				}
 			}
 		}
 
-		my $judge_use = $m->comp("/funclib/judge_use.mas", round => $round);
+		my %existing_count;
 
+		if ($limit_judges) {
+			my $existing_sth = $dbh->prepare("
+				select panel.id, count(distinct ballot.judge) judges
+				from panel, ballot
+
+				where 1=1
+					and panel.round = ?
+					and panel.id = ballot.panel
+					and ballot.judge iS NOT NULL
+					and ballot.judge != 0
+				group by panel.id
+			");
+
+			$existing_sth->execute($round->id);
+			my $existings = $existing_sth->fetchall_hash();
+			%existing_count = map {$_->{id} => $_->{count}} @{$existings};
+		}
+
+		#Pull all this data here, because that substantially speeds up the below process.
+
+		my $judge_use = $m->comp("/funclib/judge_use.mas", round => $round);
 		my %panel_judges = ();
+		my $last_entryful_round = $m->comp("/funclib/last_round_entries.mas", event => $event);
+		my %standby = $m->comp("/funclib/judge_standby.mas", round => $round->id);
+		my @jpools = $round->jpools;
+
+		my %raw_judges = $m->comp("/funclib/judge_priority.mas",
+			event => $event,
+			nsda  => $tourn_settings->{nsda_nats},
+			ncfl  => $tourn_settings->{ncfl}
+		);
 
 		foreach my $panel (@panels) {
-			%{$panel_judges{$panel->id}} = $m->comp(
-				"/funclib/clean_judges.mas",
-					panel             => $panel,
-					event_settings    => \%event_settings,
-					category_settings => \%category_settings,
-					autopanel         => 1,
-					parlis            => $parlis
-			);
+
+			if ($existing_count{$panel->id} < $limit_judges) {
+				%{$panel_judges{$panel->id}} = $m->comp(
+					"/funclib/clean_judges.mas",
+						panel               => $panel,
+						event_settings      => \%event_settings,
+						tourn_settings      => $tourn_settings,
+						raw_judges          => \%raw_judges,
+						standby             => \%standby,
+						jpools              => \@jpools,
+						last_entryful_round => $last_entryful_round,
+						category_settings   => \%category_settings,
+						autopanel           => 1,
+						parlis              => $parlis
+				);
+			}
 		}
 
 		my %buddies;
@@ -520,7 +591,6 @@
 			foreach my $panel (@panels) {
 
 				next if $notfirst{$panel};
-
 				my @judges;
 
 				if ($panel_judges{$panel->id}) {
