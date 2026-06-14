@@ -7,6 +7,7 @@
 	$limit_to    => undef
 	$seed_basis  => undef
 	$autoqueue   => undef
+	$mass        => undef
 </%args>
 <%perl>
 
@@ -54,18 +55,13 @@
 		# "Region ID" is actually state
 
 		# ETX can hit WTX and vice versa.  Just no same state crossover
-		# $hits{scores}{state}    = 1000000;
-
 		$hits{scores}{school}   = 100000;
-		$hits{scores}{district} = 100000;
 		$hits{scores}{region}   = 100000;
-		$hits{scores}{repeat}   = 100000;
-		$hits{scores}{order}    = 100;
+		$hits{scores}{repeat}   = 10000;
 
-		#$hits{scores}{repeat_school} = 50;
-
-		#This one almost certainly cannot be achieved due to the size of some states
-		#$hits{scores}{repeat_region} = 1;
+		unless ($mass) {
+			$hits{scores}{order} = 10;
+		}
 
 	} else {
 
@@ -90,7 +86,7 @@
 
 	my $sth = $dbh->prepare("
 		select
-			entry.id, entry.code, entry.name, school.id, school.region, school.state
+			entry.id, entry.code, entry.name, school.id, school.region
 		from entry, school
 		where entry.event = ?
 			and entry.active = 1
@@ -98,12 +94,11 @@
 	");
 
 	$sth->execute($event->id);
-
 	my @all_entries;
 
 	while (
 		my (
-			$entry_id, $entry_code, $entry_name, $school_id, $region_id, $state
+			$entry_id, $entry_code, $entry_name, $school_id, $region_id
 		) = $sth->fetchrow_array()
 	) {
 
@@ -117,7 +112,9 @@
 			|| $event_settings{"region_constrain"}
 			|| $tourn_settings->{"nsda_nats"}
 		) {
-			$entries{$entry_id}{'region'} = $region_id if $region_id;
+
+			$entries{$entry_id}{'region'} = $region_id;
+			$size_of_school{$region_id}++;
 
 		} else {
 
@@ -130,11 +127,6 @@
 			) {
 				$entries{$entry_id}{"region"} = $region_id;
 			}
-
-		}
-
-		if ($tourn_settings->{"nsda_nats"}) {
-			$entries{$entry_id}{'state'} = $state;
 		}
 	}
 
@@ -165,7 +157,6 @@
 	");
 
 	$sth->execute($event->id, $round->id);
-
 	my %orders = map {$_ => 1} (1 .. $max_size);
 
 	while (
@@ -195,7 +186,6 @@
 	}
 
 	my $speaker_priority_first = $event_settings{"speaker_priority_first"};
-	my @schools;
 
 	$sth->finish();
 
@@ -214,7 +204,6 @@
 				next unless $other_school;
 
 				$hits{$entry_id}{"entry"}{$other_id}++;
-
 				$hits{$entry_id}{"school"}{$other_school}++;
 				$hits{$entry_id}{"region"}{$other_region}++ if $other_region;
 
@@ -230,25 +219,10 @@
 		}
 	}
 
-	if ($hits{scores}{title} && $event_settings{"ask_for_titles"}) {
-
-		my @titles = $m->comp(
-			"/funclib/event_entry_settings.mas",
-			event => $event,
-			tag   => "title"
-		);
-
-		foreach my $title (@titles) {
-			my $value = $title->value;
-			$value =~ s/[\W_]//g;
-			$entries{$title->entry->id}{"title"} = $value;
-		}
-	}
-
 	if ($limit_to > 0 && $limit_to != (scalar @all_entries)) {
 
-		# Removes anyone who hasn't made it to this round; mostly for the
-		# NSDA double-drop system.
+		# Removes anyone who hasn't made it to this round; mostly for the NSDA
+		# double-drop system.
 
 		my @results = $m->comp(
 			"/tabbing/results/order_entries.mas",
@@ -266,7 +240,6 @@
 			foreach my $key (sort {$a <=> $b} keys %{${$entries_ref}{"by_place"}}) {
 
 				foreach my $entry_id (@{${${$entries_ref}{"by_place"}}{$key}}) {
-
 					unless ($counter++ >= $limit_to) {
 						$cleared{$entry_id}++;
 					}
@@ -289,7 +262,6 @@
 		my %pairing_seeds = ();
 
 		if ($seed_basis eq "prelims") {
-
 			%pairing_seeds =
 				map {$_->entry->id => $_->value}
 
@@ -301,24 +273,20 @@
 		} elsif ($previous_round) {
 
 			my $seeding_protocol = Tab::Protocol->retrieve($seed_basis);
-
 			my $entries_ref;
 
 			if ($seeding_protocol) {
-
 				my @seed_results = $m->comp(
 					"/tabbing/results/order_entries.mas",
 					round        => $previous_round,
 					protocol => $seeding_protocol
 				);
-
 				$entries_ref = pop @seed_results if @seed_results;
 			}
 
 			foreach my $entry_id (keys %entries) {
 				$entries{$entry_id}{"seed"} = ${$entries_ref}{"tiebreak"}{1}{$entry_id};
 			}
-
 		}
 
 		my $total_seeds;
@@ -333,15 +301,16 @@
 		$hits{"seed_average"} = $total_seeds / $seed_count if $seed_count;
 	}
 
-	my $second_round_id = $round_settings{"flight_b_round"};
+	my $second_round;
 
-	my $second_round =
-		Tab::Round->retrieve($second_round_id)
-		if $second_round_id;
+	if ($round_settings{"flight_b_round"}) {
+		my $second_round_id = $round_settings{"flight_b_round"};
+		my $second_round    = Tab::Round->retrieve($second_round_id) if $second_round_id;
 
-	undef $second_round
-		unless $second_round
-		&& $second_round->event->id == $round->event->id;
+		unless ($second_round && $second_round->event->id == $round->event->id) {
+			undef $second_round;
+		}
+	}
 
     my $double_entry_sth = $dbh->prepare("
 
@@ -373,31 +342,24 @@
 	while ( my ($this_entry, $that_entry, $that_order, $speaklate)
 		= $double_entry_sth->fetchrow_array()
 	) {
-
 		$entries{$this_entry}{$round}{"order"} = $that_order;
-		$entries{$this_entry}{$round}{"late"} = $speaklate;
+		$entries{$this_entry}{$round}{"late"}  = $speaklate;
 	}
 
 	if ($second_round) {
-
 		$double_entry_sth->execute($second_round);
-
 		while ( my ($this_entry, $that_entry, $that_order, $speaklate)
 			= $double_entry_sth->fetchrow_array()
 		) {
 			$entries{$this_entry}{$round}{"order"} = $that_order;
 			$entries{$this_entry}{$round}{"late"} = $speaklate;
 		}
-
 	}
 
-	my %sseen = ();
-	@schools = grep { ! $sseen{$_} ++ } @schools;
-	@schools = sort {$size_of_school{$b} <=> $size_of_school{$a}} @schools;
+	my $ranker = 1;
 	my %school_rank = ();
 
-	my $ranker = 1;
-	foreach (@schools) {
+	foreach (sort {$size_of_school{$b} <=> $size_of_school{$a}} keys %size_of_school) {
 		$school_rank{$_} = $ranker++;
 	}
 
@@ -412,10 +374,8 @@
 
 		if ($limit_count > 0) {
 
-			foreach my $school (@schools) {
-
+			foreach my $school (sort {$size_of_school{$b} <=> $size_of_school{$a}} keys %size_of_school) {
 				next if $size_of_school{$school} < $limit_count;
-
 				my $counter;
 				my $limited;
 
@@ -424,29 +384,32 @@
 					$forbidden_sections{$school}{$key}++;
 					$limited++;
 				}
-
 			}
 
-			@all_entries =
-				sort { $size_of_school{$entries{$b}{"school"}}
-					<=> $size_of_school{$entries{$a}{"school"}} }
-				@all_entries;
+			@all_entries = sort {
+				$size_of_school{$entries{$b}{"school"}} <=> $size_of_school{$entries{$a}{"school"}}
+			} @all_entries;
 		}
+	}
+
+	my %score_cache;
+
+	if ($mass) {
+		$m->print("<br />Creating initial snake and sections<br />");
+		$m->flush_buffer();
 	}
 
 	foreach my $entry_id (@all_entries) {
 
-		my $score = "-1";   #Shut up.
+		my $min_score = "99999999999999";   #Shut up.
 		my $picked_key;
 
 		KEY:
 		foreach my $key (@keys) {
 
-			next if $score == 0;
 			next if $forbidden_sections{$entries{$entry_id}{"school"}}{$key};
 
 			my @section = @{$sections{$key}} if $sections{$key};
-
 			next KEY if (scalar @section) >= $max_size;
 
 			if ((scalar @section) == $min_size) {
@@ -454,55 +417,90 @@
 			}
 
 			if (@section) {
-				push (@section, $entry_id);
 
-				my $new_score = score_section(
+				my $score = score_section(
 					\@section,
 					\%hits,
-					\%entries
+					\%entries,
+					$entry_id
 				);
 
-				if ($score == -1 || ($new_score < $score)) {
+				if ($score == -1) {
 					$picked_key = $key;
-					$score = $new_score;
-					last KEY if $score == 0;
+					last KEY if $score == -1;
+				}
+
+				if ($score < $min_score) {
+					$min_score = $score;
+					$picked_key = $key;
 				}
 
 			} else {
-
 				$picked_key = $key;
-				$score = 0;
 				last KEY;
 			}
 		}
 
-		$remainder-- if $sections{$picked_key}
-			&& scalar @{$sections{$picked_key}} == $min_size;
+		if ($sections{$picked_key} && scalar @{$sections{$picked_key}} == $min_size) {
+			$remainder--;
+		}
 
 		push (@{$sections{$picked_key}}, $entry_id);
-
+		@{$sections{$picked_key}} = sort {$a <=> $b} @{$sections{$picked_key}};
 		my $k = shift @keys;
 		push (@keys, $k);
-
 	}
 
 	my @section_keys = sort {$a <=> $b} keys %sections;
 
-	foreach my $section_key (@section_keys) {
+	my $total_score = 0;
 
-		@{$sections{$section_key}} =
-			sort {$school_rank{$entries{$a}{"school"}}
-				<=> $school_rank{$entries{$b}{"school"}} }
-				@{$sections{$section_key}};
+	foreach my $section_key (@section_keys) {
+		@{$sections{$section_key}} = sort {
+			$school_rank{$entries{$a}{"school"}} <=> $school_rank{$entries{$b}{"school"}}
+		} @{$sections{$section_key}};
+
+		my $string = &stringify($sections{$section_key});
+
+		unless ($score_cache{$string}) {
+			$score_cache{$string} = score_section(
+				$sections{$section_key},
+				\%hits,
+				\%entries
+			);
+		}
+
+		if ($score_cache{$string} > 0) {
+			$total_score += $score_cache{$string};
+		}
 	}
 
-	my %score_cache;
 	my $no_improvement;
 
-	unless ($num_panels == 1) {
+	if ($mass) {
+		$m->print("Total score is $total_score<br />");
+		$m->flush_buffer();
+	}
 
+	if ($num_panels != 1 && $total_score > 0) {
+
+		if ($mass) {
+			$m->print("Doing improvement passes<br />");
+			$m->flush_buffer();
+		}
+
+		my $last_total;
+
+		COUNTER:
 		foreach my $counter (1 .. 7) {
 
+			if ($mass) {
+				$m->print("Pass $counter<br />");
+				$m->flush_buffer();
+			}
+			$no_improvement = 1;
+
+			SECTION:
 			foreach my $section_key (@section_keys) {
 
 				my $string = &stringify($sections{$section_key});
@@ -514,22 +512,15 @@
 						\%entries
 					);
 				}
-			}
 
-			my $total;
-			$no_improvement++;
-
-			SECTION:
-			foreach my $section_key (@section_keys) {
-
-				my $string = &stringify($sections{$section_key});
-
-				if ($score_cache{$string} < 1) {
+				if ($score_cache{$string} < 0) {
 					next SECTION;
 				}
 
 				ENTRY:
 				foreach my $entry_id (@{$sections{$section_key}}) {
+
+					next if ($score_cache{$string} < 0);
 
 					# Remove the candidate for a test array of original section
 					my @section1 = @{$sections{$section_key}};
@@ -552,10 +543,9 @@
 						# Can't switch to the same section
 						next if $other_key == $section_key;
 
-						my $other_string = &stringify($sections{$other_key});
-
 						# Find the other section for scoring
 						my @section2 = @{$sections{$other_key}};
+						my $other_string = &stringify($sections{$other_key});
 
 						unless ($score_cache{$other_string}) {
 							$score_cache{$other_string} = score_section(
@@ -577,6 +567,11 @@
 							push (@section1, $other_entry_id);
 							my $new_string = &stringify(\@section1);
 
+							# Remove them from the destination section to test that with entry_id there
+							$index = 0;
+							$index++ until $section2[$index] == $other_entry_id;
+							splice(@section2, $index, 1);
+
 							unless ($score_cache{$new_string}) {
 								$score_cache{$new_string} = score_section(
 									\@section1,
@@ -585,18 +580,7 @@
 								);
 							}
 
-							# Take them back out now that the score is done
-							my $index = 0;
-							$index++ until $section1[$index] == $other_entry_id;
-							splice(@section1, $index, 1);
-
-							# Remove them from the destination section to test that with entry_id there
-							$index = 0;
-							$index++ until $section2[$index] == $other_entry_id;
-							splice(@section2, $index, 1);
-
 							my $new_other_string = &stringify(\@section2);
-
 							unless ($score_cache{$new_other_string}) {
 								$score_cache{$new_other_string} = score_section(
 									\@section2,
@@ -605,21 +589,31 @@
 								);
 							}
 
-							# Put them back for now
-							push @section2, $other_entry_id;
-
 							my $squo_score = $score_cache{$string} + $score_cache{$other_string};
 							my $swap_score = $score_cache{$new_string} + $score_cache{$new_other_string};
 							my $diff = $squo_score - $swap_score;
 
-							if ( $diff > 0 && $diff > $current_diff) {
+							if ($swap_score < 0) {
+								$string = $new_string;
+								@{$sections{$other_key}} = @section2;
+								@{$sections{$section_key}} = @section1;
+								undef $no_improvement;
+								last ENTRY;
+							} elsif ( $diff > 0 && $diff > $current_diff) {
 								$current_diff = $diff;
 								$current_squo = $squo_score;
 								$current_swap = $swap_score;
 								$swap_entry = $other_entry_id;
 								$swap_section = $other_key;
-								last OTHERENTRY if $swap_score < 0;
 							}
+
+							# If the score is not perfect, shuffle them back out to try another.
+							my $index = 0;
+							$index++ until $section1[$index] == $other_entry_id;
+							splice(@section1, $index, 1);
+
+							# Put them back where they came from for now
+							push @section2, $other_entry_id;
 						}
 					}
 
@@ -638,19 +632,23 @@
 						push (@{$sections{$swap_section}}, $entry_id);
 
 						$string = &stringify($sections{$section_key});
-						$score_cache{$string} = score_section(
-							$sections{$section_key},
-							\%hits,
-							\%entries
-						);
+
+						unless ($score_cache{$string}) {
+							$score_cache{$string} = score_section(
+								$sections{$section_key},
+								\%hits,
+								\%entries
+							);
+						}
 
 						my $other_string = &stringify($sections{$swap_section});
-						$score_cache{$other_string} = score_section(
-							$sections{$swap_section},
-							\%hits,
-							\%entries,
-							"verbose"
-						);
+						unless ($score_cache{$other_string}) {
+							$score_cache{$string} = score_section(
+								$sections{$swap_section},
+								\%hits,
+								\%entries
+							);
+						}
 
 						if ($score_cache{$string} < 1) {
 							next SECTION;
@@ -659,10 +657,24 @@
 				}
 			}
 
-			last if $no_improvement;
+			my $perfect = 1;
+
+			foreach my $section_key (@section_keys) {
+				my $string = &stringify($sections{$section_key});
+				if ($score_cache{$string} > 1) {
+					undef $perfect;
+				}
+			}
+
+			if ($no_improvement || $perfect) {
+				if ($mass) {
+					$m->print("Pass $counter made no swaps or produced perfect sections. We're done.<br />");
+					$m->flush_buffer();
+				}
+				last COUNTER;
+			}
 		}
 	}
-
 
 	my @judges = $m->comp(
 		"/funclib/round_judges.mas",
@@ -714,13 +726,10 @@
 	foreach my $section_key (@section_keys) {
 
 		my @entries = @{$sections{$section_key}};
-
 		@entries = shuffle(@entries);
-
 		@entries = sort { $entries{$b}{"order_total"} <=> $entries{$a}{"order_total"} } @entries;
 
 		my $size_of_section = scalar @entries;
-
 		my $moved = 1;
 
 		my $this_round = $round;
@@ -771,11 +780,9 @@
 				if ($entries{$entry_id}{"last_order"} == $position) {
 
 					#Remove from place in line
-
 					my $place;
 
 					#Find a new home
-
 					$place = $position;
 
 					while ($place == $position) {
@@ -801,9 +808,7 @@
 
 					my $speakdex = 0;
 					$speakdex++ until $entries[$speakdex] == $entry_id;
-
 					splice(@entries, $speakdex, 1);
-
 					my $place;
 
 					if ($speaker_priority_first) {
@@ -817,9 +822,7 @@
 					}
 
 					$place = 1 if $place < 0;
-
 					splice(@entries,($place - 1),0,$entry_id);
-
 				}
 			}
 		}
@@ -896,19 +899,20 @@
 
 	sub score_section {
 
-		my ($panref, $hitsref, $entref, $verbose) = @_;
+		my ($panref, $hitsref, $entref, $add) = @_;
 
 		my $score = 0;
 		my $panel_total;
 		my $reasons;
 
-		foreach my $entry_id (@{$panref}) {
+		foreach my $entry_id (@{$panref}, $add) {
+
+			next unless $entry_id  > 0;
 
 			$panel_total += $entref->{$entry_id}{"seed"};
-
 			my $clash_count;
 
-			foreach my $other (@{$panref}) {
+			foreach my $other (@{$panref}, $add) {
 
 				next if $other <= $entry_id;
 
@@ -920,10 +924,6 @@
 					$local_score += $hitsref->{scores}{school};
 					#Double penalty if I've already had to hit my own school so someone else does
 					$local_score += $hitsref->{scores}{school} if $hitsref->{$entry_id}{"ownschool"};
-
-					if ($verbose) {
-						$reasons .= "$other and $entry_id same school ";
-					}
 				} elsif (
 					$hitsref->{scores}{region}
 					&& $entref->{$entry_id}{"region"}
@@ -932,34 +932,11 @@
 					$local_score += $hitsref->{scores}{region};
 					#Double penalty if I've already had to hit my own region so someone else does
 					$local_score += $hitsref->{scores}{region} if $hitsref->{$entry_id}{"ownregion"};
-					if ($verbose) {
-						$reasons .= "$other and $entry_id same state ";
-					}
-				} elsif (
-					$hitsref->{scores}{state}
-					&& $entref->{$entry_id}{"state"}
-					&& $entref->{$other}{"state"} eq $entref->{$entry_id}{"state"}
-				) {
-
-					$local_score += $hitsref->{scores}{state};
-					if ($verbose) {
-						$reasons .= "$other and $entry_id same actual state ";
-					}
 				}
-
-				# Try not to hit the same piece title as mine
-				#if ($hitsref->{scores}{title} && $entref->{$entry_id}{"title"}) {
-				#	if ($entref->{$other}{"title"} eq $entref->{$entry_id}{"title"}) {
-				#		$local_score += $hitsref->{scores}{title};
-				#	}
-				#}
 
 				# Try not to hit the same entry twice
 				if ($hitsref->{scores}{repeat} && $hitsref->{$entry_id}{"entry"}{$other}) {
 					$local_score += $hitsref->{scores}{repeat};
-					if ($verbose) {
-						$reasons .= "$other and $entry_id hit ".$hitsref->{$entry_id}{entry}{$other};
-					}
 				}
 
 				# Try not to hit 2 different entries from the same school that often.
@@ -989,10 +966,6 @@
 				}
 				$score += $local_score;
 			}
-
-			if ($verbose) {
-				$reasons.= " Entry $entry_id Speaker order clash count is $clash_count";
-			}
 		}
 
 		if ($hitsref->{seed_average} && $panel_total) {
@@ -1000,7 +973,11 @@
 			$score += abs($average - $hitsref->{"seed_average"})  * $hitsref->{scores}{average};
 		}
 
-		return $score;
+		if ($score > 0) {
+			return $score;
+		} else {
+			return -1;
+		}
 	}
 
 	sub stringify {
