@@ -9,71 +9,192 @@
 	$m->clear_buffer();
 	$r->content_type('application/json');
 
-	my $sth = $dbh->prepare("
-		select
-			panel.id,
-			flip_status.value status,
-			( select
-					CONVERT_TZ(flip_at.value_date, '+00:00', tourn.tz)
-				from panel_setting flip_at
-				where flip_at.panel = panel.id
-				and flip_at.tag = 'flip_at'
-			) deadline
-		from panel, panel_setting flip_status, round, event, tourn
-		where panel.round = ?
-			and panel.id = flip_status.panel
-			and flip_status.tag = 'flip_status'
-			and panel.round = round.id
-			and round.event = event.id
-			and event.tourn = tourn.id
-	");
-
 	unless ($round_id) {
 		$m->print('{ "error": true, "message": "No round ID sent"}');
 		$m->abort();
 	}
 
-	$sth->execute($round_id);
-	my $flip_refs = $sth->fetchall_hash();
+	if ($ARGS{whole}) {
 
-	my $flips;
-	my %cache;
+		my $sth = $dbh->prepare("
+			select
+				round.name,
+				(select
+					CONVERT_TZ(flipped_at.value_date, '+00:00', tourn.tz)
+					from round_setting flipped_at
+					where flipped_at.tag = 'flipped_at'
+					and flipped_at.round = round.id
+				) flipped_at,
+				(select
+					CONVERT_TZ(flip_blasted.value_date, '+00:00', tourn.tz)
+					from round_setting flip_blasted
+					where flip_blasted.tag = 'flip_blasted'
+					and flip_blasted.round = round.id
+				) flip_blasted,
+				(select
+					CONVERT_TZ(flip_published.timestamp, '+00:00', tourn.tz)
+					from round_setting flip_published
+					where flip_published.tag = 'flip_published'
+					and flip_published.round = round.id
+				) flip_published,
+				(select
+					CONVERT_TZ(flip_round_deadline.value_date, '+00:00', tourn.tz)
+					from round_setting flip_round_deadline
+					where flip_round_deadline.tag = 'flip_round_deadline'
+					and flip_round_deadline.round = round.id
+				) flip_round_deadline
+			from round, event, tourn
+				where 1=1
+					and round.id = ?
+					and round.event = event.id
+					and event.tourn = tourn.id
+		");
 
-	foreach my $flipref (@{$flip_refs}) {
+		$sth->execute($round_id);
+		my $rsettings = $sth->fetchall_hash();
 
-		my $id = $flipref->{id};
-		my $status = $flipref->{status};
+		my $reply;
 
-		unless ($cache{$flipref->{deadline}}) {
-			$cache{$flipref->{deadline}} = $m->comp('/funclib/showtime.mas',
-				string => $flipref->{deadline},
-				format => 'short',
-				return => 'yippee'
-			);
+		if ($rsettings && scalar @{$rsettings}) {
+
+			$reply = shift @{$rsettings};
+
+			foreach my $key (keys %{$reply}) {
+
+				my $time = $m->comp("/funclib/showtime.mas",
+					string => $reply->{$key},
+					format => 'day',
+					return => 1
+				);
+				$reply->{$key} = $time;
+			}
+
+			my $aq_sth = $dbh->prepare("
+				select
+					aq.id, aq.tag,
+					CONVERT_TZ(aq.active_at, '+00:00', tourn.tz) active_at
+
+				from autoqueue aq, round, event, tourn
+					where 1=1
+					and aq.round = ?
+					and aq.tag like 'flip%'
+					and aq.round    = round.id
+					and round.event = event.id
+					and event.tourn = tourn.id
+			");
+
+			$aq_sth->execute($round_id);
+			my $aq_refs = $aq_sth->fetchall_hash();
+
+			foreach my $ref (@{$aq_refs}) {
+
+				my $time = $m->comp("/funclib/showtime.mas",
+					string => $ref->{active_at},
+					format => 'day',
+					return => 1
+				);
+				$reply->{$ref->{tag}} = $time;
+			}
+
+			my $counter_sth = $dbh->prepare("
+				select
+					panel.round, count(panel.id) panels
+				from panel
+				where panel.round = ?
+					and panel.bye != 1
+					and EXISTS (
+						select ballot.id
+						from ballot
+						where ballot.panel = panel.id
+						and ballot.audit != 1
+					)
+					and NOT EXISTS (
+						select flip_status.id
+						from panel_setting flip_status
+						where 1=1
+						and panel.id          = flip_status.panel
+						and flip_status.tag   = 'flip_status'
+						and flip_status.value = 'done'
+					)
+				group by panel.round
+			");
+
+			$counter_sth->execute($round_id);
+			my $count_ref = $counter_sth->fetch_hash();
+			my $count = $count_ref->{panels};
+
+			if ($count < 1) {
+				$reply->{done} = \1;
+			} else {
+				$reply->{count} = $count;
+			}
+
+			$m->print(JSON::encode_json($reply));
 		}
 
-		if ($status) {
-			if ($status eq "winner") {
-				$flips->{$id}{status} = "W";
-				$flips->{$id}{title} = "Winner is choosing";
-				$flips->{$id}{deadline} = $cache{$flipref->{deadline}};
+	} else {
 
-			} elsif ($status eq "loser") {
-				$flips->{$id}{status} = "2";
-				$flips->{$id}{title} = "2nd Choice Pending";
-				$flips->{$id}{deadline} = $cache{$flipref->{deadline}};
-			} elsif ($status eq "anyone") {
-				$flips->{$id}{status} = "Any";
-				$flips->{$id}{title} = "Anyone can choose";
-				$flips->{$id}{deadline} = $cache{$flipref->{deadline}};
-			} elsif ($status eq "done") {
-				$flips->{$id}{status} = '&#x2713';
-				$flips->{$id}{title} = "Flip process complete";
+		my $sth = $dbh->prepare("
+			select
+				panel.id,
+				flip_status.value status,
+				( select
+						CONVERT_TZ(flip_at.value_date, '+00:00', tourn.tz)
+					from panel_setting flip_at
+					where flip_at.panel = panel.id
+					and flip_at.tag = 'flip_at'
+				) deadline
+			from panel, panel_setting flip_status, round, event, tourn
+			where panel.round = ?
+				and panel.id = flip_status.panel
+				and flip_status.tag = 'flip_status'
+				and panel.round = round.id
+				and round.event = event.id
+				and event.tourn = tourn.id
+		");
+
+		$sth->execute($round_id);
+		my $flip_refs = $sth->fetchall_hash();
+
+		my $flips;
+		my %cache;
+
+		foreach my $flipref (@{$flip_refs}) {
+
+			my $id = $flipref->{id};
+			my $status = $flipref->{status};
+
+			unless ($cache{$flipref->{deadline}}) {
+				$cache{$flipref->{deadline}} = $m->comp('/funclib/showtime.mas',
+					string => $flipref->{deadline},
+					format => 'short',
+					return => 'yippee'
+				);
+			}
+
+			if ($status) {
+				if ($status eq "winner") {
+					$flips->{$id}{status} = "W";
+					$flips->{$id}{title} = "Winner is choosing";
+					$flips->{$id}{deadline} = $cache{$flipref->{deadline}};
+
+				} elsif ($status eq "loser") {
+					$flips->{$id}{status} = "2";
+					$flips->{$id}{title} = "2nd Choice Pending";
+					$flips->{$id}{deadline} = $cache{$flipref->{deadline}};
+				} elsif ($status eq "anyone") {
+					$flips->{$id}{status} = "Any";
+					$flips->{$id}{title} = "Anyone can choose";
+					$flips->{$id}{deadline} = $cache{$flipref->{deadline}};
+				} elsif ($status eq "done") {
+					$flips->{$id}{status} = '&#x2713';
+					$flips->{$id}{title} = "Flip process complete";
+				}
 			}
 		}
+
+		$m->print(JSON::encode_json($flips));
 	}
 
-    $m->print(JSON::encode_json($flips));
 	$m->abort();
-
 </%init>
