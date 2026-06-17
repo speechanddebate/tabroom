@@ -144,21 +144,33 @@
 	}
 
 	my $ballot_sth = $dbh->prepare('
-		select distinct
+		select
 			entry.id, entry.code,
 			opponent.id, opponent.code, opponent.school,
 			round.name, round.type,
-			ballot.bye, panel.bye, ballot.side
+			ballot.bye, panel.bye, ballot.side,
+			count(distinct(mywin.id)) as my_wins,
+			count(distinct(oppwin.id)) as opp_wins
 
 		from (entry, ballot, panel, round)
 
-		left join ballot opp_ballot on
-			opp_ballot.panel = panel.id
-			and opp_ballot.entry != entry.id
+			left join score mywin
+				on mywin.ballot = ballot.id
+				and mywin.tag   = "winloss"
+				and mywin.value = 1
 
-		left join entry opponent on
-			opponent.id = opp_ballot.entry
-			and opponent.id != entry.id
+			left join ballot opp_ballot on
+				opp_ballot.panel = panel.id
+				and opp_ballot.entry != entry.id
+
+			left join entry opponent on
+				opponent.id = opp_ballot.entry
+				and opponent.id != entry.id
+
+			left join score oppwin
+				on oppwin.ballot = opp_ballot.id
+				and oppwin.tag = "winloss"
+				and oppwin.value = 1
 
 		where entry.event = ?
 			and entry.active = 1
@@ -166,6 +178,8 @@
 			and ballot.panel = panel.id
 			and panel.round = round.id
 			and round.name < ?
+
+		group by panel.id, entry.id, opponent.id
 
 		and not exists (
 			select rs.id
@@ -185,7 +199,8 @@
 			$opp_id, $opp_code, $opp_school,
 			$round_name, $round_type,
 			$ballot_bye, $panel_bye,
-			$ballot_side
+			$ballot_side,
+			$my_wins, $opp_wins
 		)
 		= $ballot_sth->fetchrow_array()
 	) {
@@ -206,10 +221,18 @@
 
 		if ($tourn_settings->{nsda_nats} && $round->type eq "elim") {
 			next if $round_type eq "prelim";
+			next if $round_type eq "highlow";
+			next if $round_type eq "highhigh";
 		}
 
 		push @{$entries{$entry_id}{"elim_opponents"}}, $opp_id;
 		$entries{$entry_id}{"side_count"}{$ballot_side}++;
+
+		if ($my_wins > $opp_wins) {
+			$entries{$entry_id}{"result"}{$opp_id} = "W";
+		} elsif ($my_wins < $opp_wins) {
+			$entries{$entry_id}{"result"}{$opp_id} = "L";
+		}
 	}
 
 	our $round_log;
@@ -222,10 +245,8 @@
 
 	# CHECK FOR CONDITIONS INDICATING DONE-NESS
 	my $num_entries = scalar (keys %{$entries{"unpaired"}});
-
 	my $bye_to_undefeated;
 	my $draw_two_byes;
-
 	my $done_pairing;
 
 	if ($total_quals < 3 && $num_entries == 3) {
@@ -452,12 +473,17 @@
 				foreach my $entry_id (@{$entries{"brackets"}{1}}) {
 
 					next if $entries{$entry_id}{"byes"} > 0;
-
 					my $undefeated_loss;
 
 					foreach my $opponent (@{$entries{$entry_id}{"elim_opponents"}}) {
-						$undefeated_loss++ unless $entry_losses{$opponent} > 0;
-						last if $undefeated_loss;
+
+						if (
+							$entries{$entry_id}{"result"}{$opponent} eq "L"
+							&& $entry_losses{$opponent} < 1
+						) {
+							$undefeated_loss++;
+							last if $undefeated_loss;
+						}
 					}
 
 					next unless $undefeated_loss;
@@ -487,7 +513,7 @@
 
 				my $eligibles;
 
-				foreach my $entry_id (@bye_eligible) {
+				foreach my $entry_id (sort {$entries{code}{$a} cmp $entries{code}{$b}} @bye_eligible) {
 					$eligibles .= ", " if $eligibles;
 					$eligibles .= $entries{"code"}{$entry_id};
 				}
