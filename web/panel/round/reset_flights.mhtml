@@ -24,22 +24,107 @@
 		$m->comp("/funclib/abort.mas", message => "You are not authorized to change that event");
 	}
 
-	my $limiter = " and p2.letter > panel.letter and p2.id != panel.id ";
+	my $sth = $dbh->prepare("
+		select
+			panel.id, panel.letter, panel.bracket, panel.flight,
 
-	if ($ARGS{"bracket"}) {
-		$limiter = " and p2.bracket <= panel.bracket and p2.id != panel.id ";
+			(select
+				rs.value
+				from round_setting rs
+				where rs.round = panel.round
+				and rs.tag = 'no_bracketed_flights'
+			) no_brackets,
+
+			(select judge.id
+				from judge, ballot
+				where ballot.panel = panel.id
+				and ballot.judge = judge.id
+				group by judge.id
+				order by ballot.chair DESC, judge.id
+				limit 1
+			) as judge,
+
+			(select count(pref1.id)
+				from entry_setting pref1, ballot
+				where pref1.tag = 'preferred_flight'
+				and pref1.value = 1
+				and pref1.entry = ballot.entry
+				and ballot.panel = panel.id
+			) as pref1,
+
+			(select count(pref2.id)
+				from entry_setting pref2, ballot
+				where pref2.tag = 'preferred_flight'
+				and pref2.value = 2
+				and pref2.entry = ballot.entry
+				and ballot.panel = panel.id
+			) as pref2,
+
+			(
+				select SUM(
+					(	select count(entry.id)
+							from entry, ballot
+						where ballot.entry = entry.id
+							and entry.ada = 1
+							and entry.id = ballot.entry
+							and ballot.panel = panel.id
+					) + (
+						select count(judge.id)
+							from judge, ballot
+						where ballot.judge = judge.id
+							and judge.ada = 1
+							and judge.id = ballot.judge
+							and ballot.panel = panel.id
+					)
+				)
+			) as ada_count
+
+		from panel
+			where 1=1
+			and panel.round = ?
+			and panel.bye = 0
+		group by panel.id
+	");
+
+	$sth->execute($round->id);
+
+	my $panels = $sth->fetchall_hash();
+	my %judge_panels;
+
+	foreach my $panel (@{$panels}) {
+		push @{$judge_panels{$panel->{judge}}}, $panel;
 	}
 
-	my $sth = $dbh->prepare("
-		 update panel, panel p2, ballot, ballot b2
-			 set panel.flight = 1, p2.flight = 2
-		 where panel.round = ?
-			 and p2.round = panel.round
-			 and p2.letter > panel.letter
-			 and p2.id = b2.panel
-			 and panel.id = ballot.panel
-			 and ballot.judge = b2.judge
-	");
+	my $update_sth = $dbh->prepare(" update panel set flight = ? where id = ? ");
+
+	foreach my $judge (sort keys %judge_panels) {
+
+		my @panels = sort {
+			$b->{ada_count} <=> $a->{ada_count}
+			|| $b->{pref2} <=> $a->{pref2}
+			|| $a->{pref1} <=> $a->{pref1}
+			|| $b->{bracket} <=> $a->{bracket}
+			|| $a->{letter} <=> $b->{letter}
+		} @{$judge_panels{$judge}};
+
+		if ($panels[0] && $panels[0]->{no_brackets}) {
+			@panels = sort {
+				$b->{ada_count} <=> $a->{ada_count}
+				|| $b->{pref2} <=> $a->{pref2}
+				|| $a->{pref1} <=> $a->{pref1}
+				|| $a->{letter} <=> $b->{letter}
+			} @panels;
+		}
+
+		my $counter = 1;
+
+		foreach my $panel (@panels) {
+			unless ($panel->{flight} == $counter) {
+				$update_sth->execute($counter, $panel->{id});
+			}
+			$counter++;
+		}
+	}
 
 	$sth->execute($round->id);
 
@@ -55,6 +140,7 @@
 	if ($ARGS{return}) {
 		return $msg;
 	}
+
 	$m->redirect("/panel/schemat/show.mhtml?round_id=".$round->id."&msg=$msg");
 
 </%init>
