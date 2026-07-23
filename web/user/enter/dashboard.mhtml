@@ -57,7 +57,7 @@
 			round.flighted,
 			round.published, round.post_primary, round.post_secondary, round.post_feedback,
 				CONVERT_TZ(timeslot.start, '+00:00', tourn.tz),
-				CONVERT_TZ(timeslot.end, '+00:00', tourn.tz),
+			timeslot.end ts_end,
 			event.id, event.abbr, event.type,
 			judge.id, judge.code, judge.first, judge.last, judgeschool.name,
 			paradigm.person,
@@ -78,7 +78,6 @@
 
 			left join entry opponent
 				on otherballot.entry = opponent.id
-
 
 			left join round_setting use_normal_rooms
 				on use_normal_rooms.round = round.id
@@ -114,7 +113,6 @@
 			and round.timeslot = timeslot.id
 			and round.event = event.id
 			and event.tourn = tourn.id
-
 
 		order by event.abbr, entry.code, round.name, ballot.audit DESC
 	");
@@ -246,6 +244,9 @@
 
 	my $current_count;
 	my $shares;
+
+	my $deadline = $now->clone();
+	$deadline->add(minutes => 30);
 
 	while (
 
@@ -415,7 +416,6 @@
 					$current{"entries"}{$entry_id}{"section"}{$panel_id}{side} = $events{$event_id}{"neg_label"};
 					$current{"entries"}{$entry_id}{"section"}{$panel_id}{side_init} = substr($events{$event_id}{"neg_label"},0,3);
 				}
-
 			}
 
 			$round_start_time = $timeslot_start unless $round_start_time;
@@ -458,33 +458,42 @@
 							$hour = 12;
 						}
 					}
-
 					$minute = "00" unless $minute > 0;
 					$current{"entries"}{$entry_id}{"section"}{$panel_id}{"start_time"} = $hour.":".$minute." ".$am;
 				}
 			}
 
 			unless ($dt_cache{$timeslot_end}) {
-				my $data = $m->comp("/funclib/dtme.mas", string => $timeslot_end, return => 1);
+				my $data = $m->comp("/funclib/dtme.mas",
+					string => $timeslot_end,
+					return => 1
+				);
+
 				$dt_cache{$timeslot_end} = $data->{dt};
-				$dt_cache{$timeslot_end}->set_time_zone($tourn->tz);
+			}
+
+			if ($panel_bye
+				&& ($ballot_audit < 1)
+				&& ($dt_cache{$timeslot_end}->epoch < $deadline->epoch)
+			) {
+				$ballot_audit = 1;
 			}
 
 			if (
-				 $ballot_audit < 1
-				&& (not defined $current{"entries"}{$entry_id}{"now"})
+				($ballot_audit < 1)
+				&& ($panel_bye > 0 || $current{"entries"}{$entry_id}{"now"} < 1)
 			) {
 				$current_count++;
 				$current{"entries"}{$entry_id}{"section"}{$panel_id}{"status"} = "now";
-				$current{"entries"}{$entry_id}{"now"} = $panel_id;
+				unless ($panel_bye) {
+					$current{"entries"}{$entry_id}{"now"} = $panel_id;
+				}
 			} elsif (
 				$panel_bye
-				&& ($dt_cache{$timeslot_end} > $now)
+				&& ($dt_cache{$timeslot_end}->epoch > $deadline->epoch)
 			) {
-
 				$current_count++;
 				$current{"entries"}{$entry_id}{"section"}{$panel_id}{"status"} = "now";
-				$current{"entries"}{$entry_id}{"now"} = $panel_id;
 
 			} elsif ($current{"entries"}{$entry_id}{"now"} == $panel_id) {
 
@@ -811,7 +820,7 @@
 				CONVERT_TZ(round.start_time, '+00:00', tourn.tz),
 			round.published, round.post_primary, round.post_secondary, round.post_feedback,
 				CONVERT_TZ(timeslot.start, '+00:00', tourn.tz) ts_start,
-				CONVERT_TZ(timeslot.end, '+00:00', tourn.tz) ts_end,
+			timeslot.end ts_end,
 			event.id, event.abbr, event.type,
 			entry.id, entry.code, entry.name, entryschool.name, entry.active, entry.dropped
 
@@ -929,7 +938,6 @@
 				$current_count++;
 				$current{"judges"}{$judge_id}{"section"}{$panel_id}{"status"} = "now";
 				$current{"judges"}{$judge_id}{"now"} = $panel_id;
-
 			} elsif ($current{"judges"}{$judge_id}{"now"} == $panel_id) {
 
 			} elsif ($ballot_audit < 1) {
@@ -1116,20 +1124,27 @@
 	}
 
 	my $jpool_sth = $dbh->prepare("
-		select judge.id, judge.first, judge.last, judge.code,
-			jpool.id,
-			jpool.name, message.value_text, publish.value
-
-		from (jpool, jpool_judge jpj, judge, jpool_setting publish)
-
-			left join jpool_setting message
-				on message.jpool = jpool.id
+		select
+			judge.id judge_id, judge.first, judge.last, judge.code,
+			jpool.id, jpool.name,
+			(select
+				message.value_text
+				from jpool_setting message
+				where message.jpool = jpool.id
 				and message.tag = 'message'
+			) as message,
+			GROUP_CONCAT(CONCAT(event.abbr, ' ', round.name) SEPARATOR ', ') as rounds
 
-		where judge.school = ?
-			and judge.id = jpj.judge
-			and jpj.jpool = jpool.id
-			and jpool.id = publish.jpool
+		from (jpool, jpool_judge jpj, judge, jpool_round jpr, round, timeslot, event)
+
+		where judge.school    = ?
+			and judge.id      = jpj.judge
+			and jpj.jpool     = jpool.id
+
+			and jpool.id       = jpr.jpool
+			and jpr.round      = round.id
+			and round.timeslot = timeslot.id
+			and round.event    = event.id
 
 			and not exists (
 				select registrant.id
@@ -1138,31 +1153,28 @@
 				and registrant.tag = 'registrant'
 			)
 
-			and exists (
-				select show_judges.id
-				from jpool_setting show_judges
-				where show_judges.jpool = jpool.id
-				and show_judges.tag = 'show_judges'
-			)
+			and (
+				EXISTS (
+					select show_judges.id
+					from jpool_setting show_judges
+					where show_judges.jpool = jpool.id
+					and show_judges.tag = 'show_judges'
+					and show_judges.value = 1
+				) OR EXISTS (
+					select publish.id
+					from jpool_setting publish
+					where publish.jpool = jpool.id
+					and publish.tag = 'publish'
+					and publish.value = 1
 
+				)
+			)
+		group by jpj.id
+		order by judge.last, judge.first, timeslot.start
 	");
 
-	my %jpools;
-
 	$jpool_sth->execute($school_id);
-
-	while (
-		my (
-		 	$judge_id, $judge_first, $judge_last, $judge_code,
-			$jpool_id, $jpool_name, $message, $publish
-		) = $jpool_sth->fetchrow_array()
-	) {
-		next unless $publish;
-		$jpools{$judge_id}{$jpool_id}{"judge_name"} = $judge_first." ".$judge_last;
-		$jpools{$judge_id}{$jpool_id}{"judge_code"} = $judge_code;
-		$jpools{$judge_id}{$jpool_id}{"name"} = $jpool_name;
-		$jpools{$judge_id}{$jpool_id}{"message"} = $message;
-	}
+	my $jpools = $jpool_sth->fetchall_hash();
 
 	$jpool_sth->finish();
 
@@ -1558,7 +1570,7 @@
 		<& /funclib/tablesorter.mas, table => $school_id."_entries" &>
 
 		<div class="full martop flexrow">
-			<span class="sixth padleft">
+			<span class="sixth">
 				<h5>Entries</h5>
 			</span>
 
@@ -1717,7 +1729,7 @@
 						my $name_class;
 						my $row_class;
 						my $section = $entry->{'section'}{$section_id};
-						my $status = $section->{"status"};
+						my $status  = $section->{"status"};
 
 						unless ($entry->{"all_named"}++) {
 							$name_class .= "all_name ";
@@ -1880,9 +1892,10 @@
 %									if ($section->{share_room}) {
 										<a
 											href   = "https://share.tabroom.com/<% $section->{share_room} %>"
-											class  = "bluetext link-underline semibold"
+											class  = "bluetext link-underline semibold buttonwhite bluetext fa fa-sm fa-file-word-o"
 											target = "_blank"
-										><% $section->{"share_room"} %></a>
+											title="<% $section->{"share_room"} %>"
+										></a>
 %									}
 								</td>
 %							}
@@ -1943,7 +1956,9 @@
 
 %											if ($event->{no_anon_dashboard}) {
 												<% $judge->{code} %>
-												<% $judge->{last} %>, <% $judge->{first} %>
+%												if ($judge->{last}) {
+													<% $judge->{last} %>, <% $judge->{first} %>
+%												}
 %											} elsif ($tourn_settings->{"ncfl"}) {
 												<% $judge->{code} %>
 %											} elsif ($judge->{last}) {
@@ -2331,7 +2346,7 @@
 			&>
 
 			<div class="full flexrow">
-				<span class="threequarters padleft">
+				<span class="threequarters">
 					<h5>Judges</h5>
 				</span>
 
@@ -2728,7 +2743,6 @@
 %											}
 %										}
 %									}
-
 								</td>
 							</tr>
 <%perl>
@@ -2741,18 +2755,7 @@
 
 %		}
 
-<%perl>
-		if (keys %jpools) {
-
-			my $codes;
-			foreach my $judge_id (sort keys %jpools) {
-				foreach my $jpool_id (sort keys %{$jpools{$judge_id}}) {
-					if ($jpools{$judge_id}{$jpool_id}{"judge_code"}) {
-						$codes++;
-					}
-				}
-			}
-</%perl>
+%		if ($jpools && scalar @{$jpools}) {
 
 			<& /funclib/tablesorter.mas,
 				table => $school_id."_jpools"
@@ -2769,21 +2772,19 @@
 				></span>
 			</div>
 
-			<table id="<% $school_id %>_jpools">
+			<table id="<% $school_id %>_jpools" class="smallish">
 				<thead>
 					<tr class="yellowrow">
 						<th>
-							Judge Name
+							Judge
 						</th>
-
-%						if ($codes) {
-							<th>
-								Judge Code
-							</th>
-%						}
 
 						<th>
 							Pool Name
+						</th>
+
+						<th>
+							Rounds
 						</th>
 
 						<th>
@@ -2793,28 +2794,26 @@
 				</thead>
 
 				<tbody>
-%					foreach my $judge_id (sort keys %jpools) {
-%						foreach my $jpool_id (sort keys %{$jpools{$judge_id}}) {
-							<tr>
-								<td>
-									<% $jpools{$judge_id}{$jpool_id}{"judge_name"} %>
-								</td>
+%					foreach my $jpool_ref (@{$jpools}) {
+						<tr>
+							<td>
+								<% $jpool_ref->{code} %>
+								<% $jpool_ref->{last} %>
+								<% $jpool_ref->{first} %>
+							</td>
 
-%								if ($codes) {
-									<td>
-										<% $jpools{$judge_id}{$jpool_id}{"judge_code"} %>
-									</td>
-%								}
+							<td>
+								<% $jpool_ref->{name} %>
+							</td>
 
-								<td class="padvertless">
-									<% $jpools{$judge_id}{$jpool_id}{"name"} %>
-								</td>
+							<td>
+								<% $jpool_ref->{rounds} %>
+							</td>
 
-								<td>
-									<% $jpools{$judge_id}{$jpool_id}{"message"} %>
-								</td>
-							</tr>
-%						}
+							<td class="smallish italic">
+								<% $jpool_ref->{"message"} %>
+							</td>
+						</tr>
 %					}
 				</tbody>
 			</table>
