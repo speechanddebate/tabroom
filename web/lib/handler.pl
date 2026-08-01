@@ -161,6 +161,11 @@ sub handler {
 		);
  	}
 
+    if (-e "/www/tabroom/web/lib/nodb") {
+		$r->filename( $r->document_root . '/index/dbload.mhtml' );
+		return $ah->handle_request($r);
+    }
+
 	my $return = eval {
 		return $ah->handle_request($r);
 	};
